@@ -1,0 +1,260 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error",
+        "useExhaustiveDependencies": "warn"
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noConsole": "warn"
+      },
+      "style": {
+        "noNonNullAssertion": "warn",
+        "useImportType": "error",
+        "useExportType": "error"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "warn",
+          "options": { "maxAllowedComplexity": 15 }
+        }
+      }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "asNeeded",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "files": {
+    "includes": ["**", "!node_modules", "!dist", "!**/*.d.ts"]
+  },
+  "overrides": [
+    {
+      "includes": ["src/llm/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/memory": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/storage": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/stream": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/permission": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/runtime": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/lsp": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/observability": "Slice isolation (RFC 3.1): only @/agent may cross slices"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/tool/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/memory": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/memory/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/llm": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/storage/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/storage depends on @/shared only"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/stream/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/stream depends on @/shared only"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/permission/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/permission depends on @/shared only"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/runtime/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/lsp/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/observability/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/tool": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/observability depends on @/shared only"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

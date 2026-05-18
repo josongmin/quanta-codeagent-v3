@@ -1,0 +1,52 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["bun-types"],
+    "lib": ["ESNext"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+
+    "skipLibCheck": true,
+    "allowJs": false,
+
+    "baseUrl": ".",
+    "paths": {
+      "@/shared": ["./src/shared/index.ts"],
+      "@/shared/*": ["./src/shared/*"],
+      "@/llm": ["./src/llm/index.ts"],
+      "@/llm/*": ["./src/llm/*"],
+      "@/tool": ["./src/tool/index.ts"],
+      "@/tool/*": ["./src/tool/*"],
+      "@/memory": ["./src/memory/index.ts"],
+      "@/memory/*": ["./src/memory/*"],
+      "@/storage": ["./src/storage/index.ts"],
+      "@/storage/*": ["./src/storage/*"],
+      "@/stream": ["./src/stream/index.ts"],
+      "@/stream/*": ["./src/stream/*"],
+      "@/permission": ["./src/permission/index.ts"],
+      "@/permission/*": ["./src/permission/*"],
+      "@/runtime": ["./src/runtime/index.ts"],
+      "@/runtime/*": ["./src/runtime/*"],
+      "@/lsp": ["./src/lsp/index.ts"],
+      "@/lsp/*": ["./src/lsp/*"],
+      "@/observability": ["./src/observability/index.ts"],
+      "@/observability/*": ["./src/observability/*"],
+      "@/agent": ["./src/agent/index.ts"],
+      "@/agent/*": ["./src/agent/*"]
+    }
+  },
+  "include": ["src", "tests"],
+  "exclude": ["node_modules", "dist"]
+}

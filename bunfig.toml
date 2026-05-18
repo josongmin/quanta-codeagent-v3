@@ -1,0 +1,13 @@
+[install]
+exact = true
+production = false
+
+[install.cache]
+disable = false
+
+[test]
+preload = ["./tests/setup.ts"]
+coverage = false
+
+[run]
+hot = true

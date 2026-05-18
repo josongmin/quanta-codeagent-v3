@@ -1,0 +1,26 @@
+{
+  "name": "quanta-codeagent",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot run src/apps/cli/index.ts",
+    "start": "bun run src/apps/cli/index.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src tests",
+    "lint:fix": "biome check --write src tests",
+    "format": "biome format --write src tests",
+    "build": "bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent",
+    "bench": "bun run src/apps/bench/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "bun-types": "^1.1.0",
+    "@biomejs/biome": "^2.4.0"
+  }
+}
