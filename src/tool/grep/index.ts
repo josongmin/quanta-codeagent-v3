@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
-import type { Tool, ToolContext, ToolResult } from "../types"
+import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   pattern: z.string().describe("Regex pattern (ripgrep syntax)"),
@@ -19,8 +19,12 @@ export const grepTool: Tool<Input> = {
   description: "Search file contents with ripgrep. Returns `path:line:match` rows.",
   inputSchema: schema,
   isReadOnly: () => true,
+  // Read-only content search (rg has no side effects); safe to parallelize.
+  isConcurrencySafe: () => true,
 
-  async execute(input: Input, ctx: ToolContext): Promise<ToolResult> {
+  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    yield { type: "progress", message: `searching for ${input.pattern}…` }
+
     const parts = ["rg", "--line-number", "--no-heading", "--color=never"]
     if (input.glob) parts.push("-g", sq(input.glob))
     parts.push("-e", sq(input.pattern))
@@ -28,13 +32,20 @@ export const grepTool: Tool<Input> = {
 
     const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
 
-    if (r.exitCode === 1 && !r.stdout) return { ok: true, output: "(no matches)" }
+    if (r.exitCode === 1 && !r.stdout) {
+      yield { type: "result", result: { ok: true, output: "(no matches)" } }
+      return
+    }
     if (r.exitCode > 1 || r.timedOut) {
-      return { ok: false, output: r.stderr.trim() || `ripgrep failed (exit ${r.exitCode})` }
+      yield {
+        type: "result",
+        result: { ok: false, output: r.stderr.trim() || `ripgrep failed (exit ${r.exitCode})` },
+      }
+      return
     }
     const lines = r.stdout.trimEnd().split("\n")
     const shown = lines.slice(0, MAX_LINES).join("\n")
     const more = lines.length > MAX_LINES ? `\n… (${lines.length - MAX_LINES} more matches)` : ""
-    return { ok: true, output: shown + more }
+    yield { type: "result", result: { ok: true, output: shown + more } }
   },
 }

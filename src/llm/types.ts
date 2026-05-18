@@ -36,6 +36,20 @@ export interface ToolSchema {
   input_schema: Record<string, unknown>
 }
 
+/** One static span of the system prompt. `cache: true` marks the prefix
+ *  breakpoint: everything up to and including this block is byte-stable
+ *  across turns and is the provider cache boundary. */
+export interface SystemBlock {
+  type: "text"
+  text: string
+  cache?: boolean
+}
+
+/** System prompt as either a plain string (legacy, still accepted) or an
+ *  ordered list of static blocks. Adapters must treat the block order as
+ *  significant and stable so the cached prefix never shifts. */
+export type SystemPromptInput = string | SystemBlock[]
+
 export type StreamEvent =
   | { type: "text_delta"; delta: string }
   | { type: "tool_use_start"; id: string; name: string }
@@ -45,7 +59,7 @@ export type StreamEvent =
 
 export interface StreamInput {
   messages: Message[]
-  system?: string
+  system?: SystemPromptInput
   tools: ToolSchema[]
   thinking?: { type: "enabled"; budget_tokens: number }
 }

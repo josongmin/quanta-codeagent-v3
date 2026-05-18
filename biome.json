@@ -55,6 +55,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): only @/agent may cross slices",
                   "@/memory": "Slice isolation (RFC 3.1): only @/agent may cross slices",
                   "@/storage": "Slice isolation (RFC 3.1): only @/agent may cross slices",
@@ -79,6 +80,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/memory": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
                   "@/stream": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
                   "@/permission": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
@@ -100,6 +102,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
                   "@/stream": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
                   "@/permission": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
@@ -122,6 +125,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
                   "@/memory": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
                   "@/stream": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
@@ -146,6 +150,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
                   "@/memory": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
                   "@/storage": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
@@ -170,6 +175,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
                   "@/memory": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
                   "@/storage": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
@@ -194,6 +200,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
                   "@/memory": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
                   "@/stream": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
@@ -217,6 +224,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
                   "@/memory": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
                   "@/storage": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
@@ -233,6 +241,32 @@
       }
     },
     {
+      "includes": ["src/mcp/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["src/observability/**"],
       "linter": {
         "rules": {
@@ -241,6 +275,7 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
                   "@/tool": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
                   "@/memory": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
                   "@/storage": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",

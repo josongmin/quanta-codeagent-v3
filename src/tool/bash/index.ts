@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
-import type { Tool, ToolContext, ToolResult } from "../types"
+import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   command: z.string().describe("Shell command to run via bash -lc"),
@@ -10,6 +10,7 @@ const schema = z.object({
 type Input = z.infer<typeof schema>
 
 const MAX_OUTPUT = 30_000
+const CMD_PREVIEW = 80
 
 export const bashTool: Tool<Input> = {
   name: "bash",
@@ -18,9 +19,15 @@ export const bashTool: Tool<Input> = {
     "Non-zero exit is reported, not thrown.",
   inputSchema: schema,
   isReadOnly: () => false,
+  // Arbitrary shell side effects are unknowable; never run concurrently.
+  isConcurrencySafe: () => false,
 
-  async execute(input: Input, ctx: ToolContext): Promise<ToolResult> {
-    const r = await runShell(input.command, {
+  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const cmd = input.command
+    const shown = cmd.length > CMD_PREVIEW ? `${cmd.slice(0, CMD_PREVIEW)}…` : cmd
+    yield { type: "progress", message: `running: ${shown}` }
+
+    const r = await runShell(cmd, {
       cwd: ctx.cwd,
       signal: ctx.signal,
       ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}),
@@ -31,9 +38,12 @@ export const bashTool: Tool<Input> = {
       body = `${body.slice(0, MAX_OUTPUT)}\n… (truncated, ${body.length - MAX_OUTPUT} more chars)`
     }
     const status = r.timedOut ? "timed out" : r.exitCode === 0 ? "exit 0" : `exit ${r.exitCode}`
-    return {
-      ok: r.exitCode === 0 && !r.timedOut,
-      output: `[${status}]\n${body || "(no output)"}`,
+    yield {
+      type: "result",
+      result: {
+        ok: r.exitCode === 0 && !r.timedOut,
+        output: `[${status}]\n${body || "(no output)"}`,
+      },
     }
   },
 }

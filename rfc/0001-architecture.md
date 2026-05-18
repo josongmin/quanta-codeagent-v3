@@ -578,24 +578,31 @@ v2 (406k) 대비 **31배 가벼움**.
 
 ## 10. 테스트 전략
 
+분리 축은 "실 어댑터 여부"가 아니라 **결정론성·환경의존성**. 상세·트레이드오프: `docs/decisions/0003-test-pyramid.md`(ADR-0003).
+
 ### 10.1 단위 (`tests/unit/`)
-- `core/`의 순수 로직 (loop, dispatch, compaction)
-- Mock adapter 주입
-- 빠르게 (전체 <5초)
+- 순수 슬라이스 로직 (loop, dispatch, compaction). Mock adapter 주입.
+- 완전 결정론. 전체 <5초(CI 예산 8초). 매 push/PR 차단.
 
 ### 10.2 통합 (`tests/integration/`)
-- 슬라이스 단위 (실제 adapter 사용)
-- LLM은 fixture 또는 cassette
-- 셸/파일은 임시 디렉토리
+- 슬라이스 결선 — 실 **in-process** adapter + FakeLLM + 임시 디렉토리.
+- 완전 결정론(예: SQLite·spawn한 mock MCP 서버). 매 push/PR 차단.
+- `bun test`(기본) = 10.1+10.2만. 이것이 머지 게이트.
 
-### 10.3 E2E (`tests/e2e/`, P2)
-- SWE-bench fixture 작은 서브셋
-- 실제 LLM 호출 (CI 옵셔널)
+### 10.3 컨트랙트 (`tests/contract/`)
+- 실 외부 프로세스: Docker 데몬, pyright/typescript 언어서버.
+- 환경게이트. 로컬은 부재 시 공손히 스킵, CI는 `REQUIRE_CONTRACT=1`로
+  부재를 하드 실패화(`_guard.ts`) — 스킵 뒤 회귀 은폐 방지. main 차단.
 
-### 10.4 커버리지 정책
-- 목표 없음 (퍼센트 강박 X)
-- core/ 슬라이스는 모든 분기 테스트
-- adapter는 happy path + 주요 error path
+### 10.4 평가 (`src/apps/bench`, P2)
+- 실 LLM · SWE-bench(synthetic→실 서브셋) · Best-of-N 점수.
+- 비결정. nightly/`eval` 라벨, **비차단**(`continue-on-error`). 게이트 아님,
+  점수 트렌드로만 관측 (retry-until-green 금지 — 회귀 은폐).
+
+### 10.5 커버리지 정책
+- 목표 % 없음 (퍼센트 강박 X). 측정만(`test:cov`, CI 아티팩트), 게이트 X.
+- core 슬라이스는 모든 분기, adapter는 happy + 주요 error path.
+- 강제 장치는 CI(`.github/workflows/ci.yml`): pyramid/contract/eval 잡.
 
 ---
 
@@ -644,6 +651,7 @@ v2 (406k) 대비 **31배 가벼움**.
 - **agent state 영속화** → 미구현 (CLI는 인메모리 멀티턴만).
 - **슬라이스 격리 강제** → Biome 2.x `overrides[]` 채택 (ADR-0001).
 - **Tool 인터페이스** → `isConcurrencySafe`/`AsyncIterable<ToolEvent>`는 Phase 2로 연기 (Phase 1은 `execute(): Promise<ToolResult>`).
+- **LLM provider** → §8에서 Phase 3였던 OpenAI 어댑터를 Phase 1에 선반영 (실 검증 키가 OpenAI, 포트 기존재). Anthropic/OpenAI 런타임 스위치. 상세 ADR-0002.
 
 ---
 
@@ -692,3 +700,4 @@ export type StreamEvent =
 |-----|-----|------|
 | 0.1 | 2026-05-19 | 최초 작성 |
 | 0.2 | 2026-05-19 | Phase 1 구현 반영: 빌드설정 현행화, Biome 2.x 슬라이스 격리(ADR-0001), §13.1 결정 기록 |
+| 0.3 | 2026-05-19 | OpenAI provider 선반영(ADR-0002), 의존성 `openai` 추가, §13.1 LLM provider 항목 |

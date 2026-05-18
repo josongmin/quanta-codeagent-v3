@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { Tool, ToolContext, ToolResult } from "../types"
+import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   pattern: z.string().describe("Glob pattern, e.g. 'src/**/*.ts'"),
@@ -15,8 +15,11 @@ export const globTool: Tool<Input> = {
   description: "List files matching a glob pattern, relative to the base directory.",
   inputSchema: schema,
   isReadOnly: () => true,
+  // Read-only directory scan; no side effects, safe to parallelize.
+  isConcurrencySafe: () => true,
 
-  async execute(input: Input, ctx: ToolContext): Promise<ToolResult> {
+  // A bounded directory scan is fast; no progress event needed.
+  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const base = input.path ?? ctx.cwd
     const glob = new Bun.Glob(input.pattern)
     const hits: string[] = []
@@ -24,9 +27,12 @@ export const globTool: Tool<Input> = {
       hits.push(file)
       if (hits.length >= MAX + 1) break
     }
-    if (hits.length === 0) return { ok: true, output: "(no files matched)" }
+    if (hits.length === 0) {
+      yield { type: "result", result: { ok: true, output: "(no files matched)" } }
+      return
+    }
     hits.sort()
     const more = hits.length > MAX ? `\n… (truncated at ${MAX})` : ""
-    return { ok: true, output: hits.slice(0, MAX).join("\n") + more }
+    yield { type: "result", result: { ok: true, output: hits.slice(0, MAX).join("\n") + more } }
   },
 }

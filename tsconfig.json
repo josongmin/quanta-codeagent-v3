@@ -41,6 +41,8 @@
       "@/runtime/*": ["./src/runtime/*"],
       "@/lsp": ["./src/lsp/index.ts"],
       "@/lsp/*": ["./src/lsp/*"],
+      "@/mcp": ["./src/mcp/index.ts"],
+      "@/mcp/*": ["./src/mcp/*"],
       "@/observability": ["./src/observability/index.ts"],
       "@/observability/*": ["./src/observability/*"],
       "@/agent": ["./src/agent/index.ts"],

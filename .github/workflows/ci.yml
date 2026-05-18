@@ -1,0 +1,94 @@
+# Test-pyramid CI (ADR-0003, RFC §10).
+#
+#   pyramid   unit + integration — deterministic, fast, BLOCKING on every push/PR
+#   contract  real Docker + language servers — REQUIRE_CONTRACT, BLOCKING on PR/main
+#   eval      real LLM on a synthetic SWE-bench corpus — NON-BLOCKING, trend only
+#
+# The pyramid job is the merge gate. contract gates main. eval never gates.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *" # nightly eval (06:00 UTC)
+
+permissions:
+  contents: read
+
+jobs:
+  pyramid:
+    name: pyramid (unit + integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: typecheck
+        run: ./node_modules/.bin/tsc --noEmit
+      - name: lint + slice isolation (biome overrides enforce boundaries)
+        run: ./node_modules/.bin/biome check src tests
+      - name: unit (speed budget ≤ 8s — RFC §10.1 says <5s, headroom)
+        run: |
+          start=$(date +%s%3N)
+          bun test tests/unit
+          end=$(date +%s%3N)
+          ms=$((end - start))
+          echo "unit wall-time: ${ms}ms"
+          if [ "$ms" -gt 8000 ]; then
+            echo "::error::unit suite took ${ms}ms (>8000ms budget). Move slow cases to integration."
+            exit 1
+          fi
+      - name: integration
+        run: bun test tests/integration
+
+  contract:
+    name: contract (docker + language servers)
+    runs-on: ubuntu-latest
+    # Blocking on PRs and main; skipped on the nightly schedule trigger.
+    if: github.event_name != 'schedule'
+    env:
+      REQUIRE_CONTRACT: "1" # absent dependency = hard fail, never a silent skip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: provision language servers
+        run: bun add -g pyright typescript typescript-language-server
+      - name: docker sanity (ubuntu runners ship the daemon)
+        run: docker version
+      - name: contract suite
+        run: bun test tests/contract
+
+  eval:
+    name: eval (real LLM — non-blocking)
+    runs-on: ubuntu-latest
+    # Nightly, or on a PR labelled "eval". Never blocks a merge.
+    if: github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'eval')
+    continue-on-error: true
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      QUANTA_PROVIDER: openai
+      QUANTA_MODEL: gpt-4o
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: write synthetic SWE-bench corpus
+        run: |
+          mkdir -p .eval-corpus
+          bun -e 'import { writeSyntheticCorpus } from "./src/apps/bench/swebench"; await writeSyntheticCorpus(".eval-corpus")'
+      - name: run eval (bench exits 0 even with no key — keeps job green)
+        run: bun run src/apps/bench/index.ts --corpus .eval-corpus --n 1 | tee eval-report.txt
+      - name: publish eval report
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval-report.txt

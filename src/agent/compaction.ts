@@ -1,0 +1,248 @@
+import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
+import { assembleFromEvents } from "@/llm"
+
+/**
+ * Single-tier conversation compaction (RFC §8 Phase 2 / §1.2: one tier, no
+ * over-engineering). When the running transcript exceeds a token budget we
+ * summarize everything older than the last `keepRecentTurns` turns into ONE
+ * synthetic user message and keep the recent suffix verbatim.
+ *
+ * Token estimate: chars/4 heuristic, implemented locally (the memory slice has
+ * the same idea but importing @/memory just for arithmetic is not worth the
+ * coupling — RFC §3.1).
+ *
+ * Turn / boundary algorithm (see {@link findBoundary}): we keep the message
+ * suffix that covers the last `keepRecentTurns` assistant messages plus their
+ * trailing tool_result user messages and any leading user text. The retained
+ * suffix MUST be self-consistent: a tool_result block in the suffix whose
+ * matching tool_use was summarized away would be orphaned (Anthropic rejects
+ * unpaired tool_result). We therefore expand the boundary *backwards* until no
+ * retained tool_result references a tool_use that lives in the summarized
+ * prefix.
+ */
+
+const DEFAULT_THRESHOLD = 120_000
+const DEFAULT_KEEP_TURNS = 6
+
+/** chars/4 token heuristic over a message list. */
+export const estimateTokens = (messages: Message[]): number => {
+  let chars = 0
+  for (const m of messages) {
+    for (const b of m.content) {
+      chars += blockChars(b)
+    }
+  }
+  return Math.ceil(chars / 4)
+}
+
+const blockChars = (b: ContentBlock): number => {
+  switch (b.type) {
+    case "text":
+      return b.text.length
+    case "thinking":
+      return b.thinking.length
+    case "tool_use":
+      return b.name.length + JSON.stringify(b.input ?? {}).length
+    case "tool_result":
+      return b.content.length
+  }
+}
+
+const resolveThreshold = (explicit?: number): number => {
+  if (explicit !== undefined) return explicit
+  const env = Number(process.env.QUANTA_COMPACT_TOKENS)
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_THRESHOLD
+}
+
+/** tool_use ids referenced by tool_result blocks in `m` (if any). */
+const toolResultRefs = (m: Message): string[] =>
+  m.content.filter((b) => b.type === "tool_result").map((b) => b.tool_use_id)
+
+/** tool_use ids produced by `m` (if any). */
+const toolUseIds = (m: Message): string[] =>
+  m.content.filter((b) => b.type === "tool_use").map((b) => b.id)
+
+/**
+ * Choose the index where the retained suffix begins. Start from the cut that
+ * keeps `keepTurns` assistant messages, then walk the boundary earlier while
+ * the suffix's first message is a tool_result whose tool_use is NOT in the
+ * suffix (would orphan). Never returns < 0; clamps to keep ≥ recent suffix.
+ */
+export const findBoundary = (messages: Message[], keepTurns: number): number => {
+  let assistantSeen = 0
+  let idx = messages.length
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i] as Message
+    if (m.role === "assistant") {
+      assistantSeen++
+      if (assistantSeen > keepTurns) break
+    }
+    idx = i
+  }
+  // Expand backwards until no retained tool_result is orphaned.
+  while (idx > 0) {
+    const suffixIds = new Set<string>()
+    for (let i = idx; i < messages.length; i++) {
+      for (const id of toolUseIds(messages[i] as Message)) suffixIds.add(id)
+    }
+    const head = messages[idx] as Message
+    const orphaned = toolResultRefs(head).some((ref) => !suffixIds.has(ref))
+    if (!orphaned) break
+    idx--
+  }
+  return idx
+}
+
+const SUMMARY_SYSTEM =
+  "You are a transcript compactor. Summarize the conversation so far into a " +
+  "terse, information-dense brief: the task, key decisions, files touched, " +
+  "tool outcomes, and any open threads. Plain prose, no preamble. Be concise."
+
+const renderBlock = (b: ContentBlock): string => {
+  switch (b.type) {
+    case "text":
+      return b.text
+    case "thinking":
+      return `(thinking) ${b.thinking}`
+    case "tool_use":
+      return `(tool_use ${b.name}) ${JSON.stringify(b.input ?? {})}`
+    case "tool_result":
+      return `(tool_result) ${b.content}`
+  }
+}
+
+const renderForSummary = (messages: Message[]): string =>
+  messages.map((m) => `[${m.role}] ${m.content.map(renderBlock).join("\n")}`).join("\n\n")
+
+export interface CompactInput {
+  messages: Message[]
+  llm: LLMPort
+  /** Original system prompt — passed to the summarizer, never dropped.
+   *  Accepts the widened {@link SystemPromptInput} (string or cache blocks). */
+  system: SystemPromptInput
+  thresholdTokens?: number
+  keepRecentTurns?: number
+}
+
+export type CompactResult =
+  | { compacted: false; messages: Message[] }
+  | { compacted: true; messages: Message[]; summaryTokens: number }
+
+/** Stream one summary turn with an explicit system prompt and return its
+ *  joined text. Shared by proactive ({@link summarize}) and reactive paths. */
+const summarizeWith = async (llm: LLMPort, system: string, prefix: Message[]): Promise<string> => {
+  const events = []
+  for await (const ev of llm.stream({
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "text", text: renderForSummary(prefix) }],
+      },
+    ],
+    system,
+    tools: [],
+  })) {
+    events.push(ev)
+  }
+  const { message } = assembleFromEvents(events)
+  return message.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("")
+    .trim()
+}
+
+const summarize = (llm: LLMPort, prefix: Message[]): Promise<string> =>
+  summarizeWith(llm, SUMMARY_SYSTEM, prefix)
+
+/**
+ * Reactive compaction: a *harder* squeeze than {@link compactIfNeeded}, run
+ * only when the loop has already hit a "prompt is too long" API error. The
+ * proactive path keeps `DEFAULT_KEEP_TURNS` (6) recent turns; here we keep a
+ * much smaller tail (default 2) and use a continuation-summary prompt so the
+ * model can *resume the task* from a fresh context rather than just recall
+ * history. Reuses {@link findBoundary} (orphan-aware: never splits a
+ * tool_use / tool_result pair).
+ */
+
+const REACTIVE_KEEP_TURNS = 2
+
+const CONTINUATION_SYSTEM =
+  "You have been working on a coding task but have not completed it. Write a " +
+  "structured, concise, actionable continuation summary so you can resume in " +
+  "a fresh context: (1) the task/goal, (2) what you've done and learned, " +
+  "(3) key files/paths and their state, (4) the exact next step. Wrap it in " +
+  "<summary></summary>."
+
+export interface ReactiveCompactInput {
+  messages: Message[]
+  llm: LLMPort
+  /** Original system prompt (kept for parity with {@link CompactInput};
+   *  the continuation summary uses its own system prompt). */
+  system: SystemPromptInput
+  /** Recent turns to keep verbatim. Defaults to {@link REACTIVE_KEEP_TURNS}. */
+  keepRecentTurns?: number
+}
+
+export type ReactiveCompactResult =
+  | { ok: true; messages: Message[]; summaryTokens: number }
+  | { ok: false; reason: string }
+
+/**
+ * Aggressively compact `messages` for PTL recovery. Returns the new array on
+ * success. `{ ok:false, reason }` when nothing can be safely summarized away
+ * (one indivisible giant turn): the caller must surface a clear failure rather
+ * than spin retrying an un-shrinkable prompt.
+ */
+export const reactiveCompact = async (
+  input: ReactiveCompactInput,
+): Promise<ReactiveCompactResult> => {
+  const keepTurns = input.keepRecentTurns ?? REACTIVE_KEEP_TURNS
+  const boundary = findBoundary(input.messages, keepTurns)
+  if (boundary <= 0) {
+    return {
+      ok: false,
+      reason:
+        "prompt still too long after max compaction: no summarizable prefix " +
+        "(a single turn exceeds the context window)",
+    }
+  }
+  const prefix = input.messages.slice(0, boundary)
+  const suffix = input.messages.slice(boundary)
+  const summary = await summarizeWith(input.llm, CONTINUATION_SYSTEM, prefix)
+  if (summary.trim() === "") {
+    return { ok: false, reason: "continuation summary came back empty" }
+  }
+  const synthetic: Message = {
+    role: "user",
+    content: [{ type: "text", text: `<continuation summary>\n${summary}` }],
+  }
+  const messages = [synthetic, ...suffix]
+  return { ok: true, messages, summaryTokens: estimateTokens([synthetic]) }
+}
+
+/**
+ * Compact `messages` if over the token threshold. Behavior-preserving when
+ * under: returns the same array with `compacted:false`.
+ */
+export const compactIfNeeded = async (input: CompactInput): Promise<CompactResult> => {
+  const threshold = resolveThreshold(input.thresholdTokens)
+  const keepTurns = input.keepRecentTurns ?? DEFAULT_KEEP_TURNS
+  if (estimateTokens(input.messages) <= threshold) {
+    return { compacted: false, messages: input.messages }
+  }
+  const boundary = findBoundary(input.messages, keepTurns)
+  if (boundary <= 0) {
+    // Nothing safely summarizable (one giant turn) — leave untouched.
+    return { compacted: false, messages: input.messages }
+  }
+  const prefix = input.messages.slice(0, boundary)
+  const suffix = input.messages.slice(boundary)
+  const summary = await summarize(input.llm, prefix)
+  const synthetic: Message = {
+    role: "user",
+    content: [{ type: "text", text: `<conversation summary>\n${summary}` }],
+  }
+  const messages = [synthetic, ...suffix]
+  return { compacted: true, messages, summaryTokens: estimateTokens([synthetic]) }
+}

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { readFile, statFile } from "@/storage"
-import type { Tool, ToolContext, ToolResult } from "../types"
+import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
@@ -19,10 +19,16 @@ export const readTool: Tool<Input> = {
     "Use offset/limit for large files.",
   inputSchema: schema,
   isReadOnly: () => true,
+  // Pure read of a single file: no side effects, safe to run concurrently.
+  isConcurrencySafe: () => true,
 
-  async execute(input: Input, _ctx: ToolContext): Promise<ToolResult> {
+  // A single file read is fast; no progress event needed.
+  async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
     const info = await statFile(input.path)
-    if (info.isDirectory) return { ok: false, output: `${input.path} is a directory` }
+    if (info.isDirectory) {
+      yield { type: "result", result: { ok: false, output: `${input.path} is a directory` } }
+      return
+    }
 
     const text = await readFile(input.path)
     const lines = text.split("\n")
@@ -34,6 +40,9 @@ export const readTool: Tool<Input> = {
       .join("\n")
 
     const note = end < lines.length ? `\n… (${lines.length - end} more lines, use offset)` : ""
-    return { ok: true, output: numbered === "" ? "(empty file)" : numbered + note }
+    yield {
+      type: "result",
+      result: { ok: true, output: numbered === "" ? "(empty file)" : numbered + note },
+    }
   },
 }

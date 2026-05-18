@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
 import type { LLMPort } from "../ports"
-import type { ContentBlock, Message, StreamEvent, StreamInput } from "../types"
+import type { ContentBlock, Message, StreamEvent, StreamInput, SystemPromptInput } from "../types"
 
 interface AnthropicConfig {
   apiKey: string
@@ -11,7 +11,7 @@ interface AnthropicConfig {
 
 /** Minimal structural views of the raw SSE events we consume. The SDK's own
  *  union types churn between versions; narrowing on `type` is stable. */
-type RawEvent =
+export type RawEvent =
   | { type: "content_block_start"; index: number; content_block: RawBlock }
   | { type: "content_block_delta"; index: number; delta: RawDelta }
   | { type: "content_block_stop"; index: number }
@@ -20,12 +20,12 @@ type RawEvent =
   | { type: "message_start" }
   | { type: "ping" }
 
-type RawBlock =
+export type RawBlock =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string }
   | { type: "thinking" }
 
-type RawDelta =
+export type RawDelta =
   | { type: "text_delta"; text: string }
   | { type: "input_json_delta"; partial_json: string }
   | { type: "thinking_delta"; thinking: string }
@@ -48,6 +48,38 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
       // rather than fail on the missing signature the API requires on input.
       return null
   }
+}
+
+/** Map our system input to Anthropic's `system` param. A plain string passes
+ *  through verbatim (legacy behavior). Block form becomes structured text
+ *  params; the block flagged `cache:true` gets an ephemeral `cache_control`
+ *  breakpoint so the static prefix is cached across turns. */
+const toAnthropicSystem = (system: SystemPromptInput): string | Anthropic.TextBlockParam[] => {
+  if (typeof system === "string") return system
+  return system.map((b) => ({
+    type: "text",
+    text: b.text,
+    ...(b.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+  }))
+}
+
+/** Mark the final content block of the last message with an ephemeral
+ *  `cache_control` breakpoint, caching the whole conversation prefix (static
+ *  system + prior turns) up to the per-turn tail. Mutates a shallow copy. */
+const cacheConversationPrefix = (messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] => {
+  if (messages.length === 0) return messages
+  const lastIdx = messages.length - 1
+  const last = messages[lastIdx] as Anthropic.MessageParam
+  if (typeof last.content === "string" || last.content.length === 0) return messages
+  const blocks = [...last.content]
+  const tailIdx = blocks.length - 1
+  blocks[tailIdx] = {
+    ...(blocks[tailIdx] as Anthropic.ContentBlockParam),
+    cache_control: { type: "ephemeral" },
+  } as Anthropic.ContentBlockParam
+  const out = [...messages]
+  out[lastIdx] = { ...last, content: blocks }
+  return out
 }
 
 const toAnthropicMessages = (messages: Message[]): Anthropic.MessageParam[] =>
@@ -75,9 +107,9 @@ export class AnthropicAdapter implements LLMPort {
         model: this.model,
         max_tokens: this.maxTokens,
         stream: true,
-        ...(input.system ? { system: input.system } : {}),
+        ...(input.system ? { system: toAnthropicSystem(input.system) } : {}),
         ...(input.thinking ? { thinking: input.thinking } : {}),
-        messages: toAnthropicMessages(input.messages),
+        messages: cacheConversationPrefix(toAnthropicMessages(input.messages)),
         tools: input.tools.map((t) => ({
           name: t.name,
           description: t.description,
@@ -109,9 +141,12 @@ export class AnthropicAdapter implements LLMPort {
   }
 }
 
-type OpenSlots = Map<number, { kind: "tool_use" | "text" | "thinking"; id: string; json: string }>
+export type OpenSlots = Map<
+  number,
+  { kind: "tool_use" | "text" | "thinking"; id: string; json: string }
+>
 
-function* mapRawEvent(ev: RawEvent, open: OpenSlots): Generator<StreamEvent> {
+export function* mapRawEvent(ev: RawEvent, open: OpenSlots): Generator<StreamEvent> {
   switch (ev.type) {
     case "content_block_start": {
       const b = ev.content_block
@@ -152,7 +187,7 @@ function* mapRawEvent(ev: RawEvent, open: OpenSlots): Generator<StreamEvent> {
   }
 }
 
-const finalizeToolInput = (json: string, id: string): unknown => {
+export const finalizeToolInput = (json: string, id: string): unknown => {
   if (!json.trim()) return {}
   try {
     return JSON.parse(json)

@@ -31,6 +31,9 @@ export class StdoutStream implements StreamPort {
           `${CYAN}⚙ ${event.name}${RESET} ${DIM}${compact(event.input)}${RESET}\n`,
         )
         break
+      case "tool_progress":
+        process.stdout.write(`${DIM}  ↳ ${event.name}: ${oneLine(event.message)}${RESET}\n`)
+        break
       case "tool_result": {
         const mark = event.ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`
         process.stdout.write(`${mark} ${DIM}${event.name}: ${oneLine(event.preview)}${RESET}\n`)

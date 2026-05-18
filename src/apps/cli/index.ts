@@ -1,35 +1,195 @@
 import * as readline from "node:readline/promises"
-import { type AgentConfig, type AgentOutcome, buildSystemPrompt, runAgent } from "@/agent"
-import { AnthropicAdapter, type Message } from "@/llm"
+import {
+  type AgentConfig,
+  type AgentOutcome,
+  buildSystemPrompt,
+  loadMcpTools,
+  loadSession,
+  RetryingLLM,
+  runAgent,
+  saveSession,
+} from "@/agent"
+import { AnthropicAdapter, type LLMPort, type Message, OpenAIAdapter } from "@/llm"
+import type { McpClient, McpServerConfig } from "@/mcp"
+import { InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
+import { Metrics, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger } from "@/shared"
 import { StdoutStream } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { defaultTools, type Tool, ToolRegistry } from "@/tool"
+import { loadEnvFiles } from "./dotenv"
+
+loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 const env = (k: string, fallback: string): string => process.env[k] ?? fallback
 
-const main = async (): Promise<void> => {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    logger.error("ANTHROPIC_API_KEY is not set")
-    process.exit(1)
-  }
+type Provider = "anthropic" | "openai"
 
-  const model = env("QUANTA_MODEL", "claude-sonnet-4-6")
+const pickProvider = (): Provider => {
+  const explicit = process.env.QUANTA_PROVIDER as Provider | undefined
+  if (explicit === "anthropic" || explicit === "openai") return explicit
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic"
+  if (process.env.OPENAI_API_KEY) return "openai"
+  return "anthropic"
+}
+
+const buildLLM = (provider: Provider, model: string): LLMPort => {
+  if (provider === "openai") {
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) throw new Error("OPENAI_API_KEY is not set")
+    return new OpenAIAdapter({
+      apiKey,
+      model,
+      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+    })
+  }
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set")
+  return new AnthropicAdapter({ apiKey, model })
+}
+
+const DEFAULT_MODEL: Record<Provider, string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-4o",
+}
+
+/**
+ * Build the long-term memory store from env. Default OFF so plain runs are
+ * unchanged: `QUANTA_MEMORY=sqlite` → on-disk SqliteStore (path from
+ * `QUANTA_MEMORY_PATH`, default `.quanta/memory.sqlite`); `=memory` →
+ * volatile InMemoryStore; unset / `off` → no store.
+ */
+const buildStore = (): PersistentStorePort | undefined => {
+  const kind = process.env.QUANTA_MEMORY
+  if (kind === "sqlite") {
+    return new SqliteStore(process.env.QUANTA_MEMORY_PATH ?? ".quanta/memory.sqlite")
+  }
+  if (kind === "memory") return new InMemoryStore()
+  return undefined
+}
+
+const hasArg = (flag: string): boolean => process.argv.slice(2).includes(flag)
+
+/** Resolve the state-file path: `--state <p>` / `QUANTA_STATE_PATH`. Default OFF. */
+const statePath = (): string | undefined => {
+  const idx = process.argv.indexOf("--state")
+  if (idx >= 0) return process.argv[idx + 1]
+  return process.env.QUANTA_STATE_PATH
+}
+
+/** Resolve the resume path: `--resume <p>` / `QUANTA_RESUME`. Default OFF. */
+const resumePath = (): string | undefined => {
+  const idx = process.argv.indexOf("--resume")
+  if (idx >= 0) return process.argv[idx + 1]
+  return process.env.QUANTA_RESUME
+}
+
+/** Plan mode is on when `QUANTA_PLAN=1` or `--plan` is present. */
+const planEnabled = (): boolean => process.env.QUANTA_PLAN === "1" || hasArg("--plan")
+
+/** Read MCP server configs from `QUANTA_MCP_CONFIG` (a JSON file). OFF if unset. */
+const readMcpConfig = async (slog: StructuredLogger): Promise<McpServerConfig[]> => {
+  const path = process.env.QUANTA_MCP_CONFIG
+  if (!path) return []
+  try {
+    const raw = await Bun.file(path).text()
+    const parsed = JSON.parse(raw) as { servers?: McpServerConfig[] }
+    return Array.isArray(parsed.servers) ? parsed.servers : []
+  } catch (e) {
+    slog.warn("mcp.config.error", { path, error: (e as Error).message })
+    return []
+  }
+}
+
+const argvPrompt = (): string =>
+  process.argv
+    .slice(2)
+    .filter((a) => a !== "--plan")
+    .filter((a, i, arr) => {
+      const flagged = arr[i - 1]
+      return a !== "--state" && a !== "--resume" && flagged !== "--state" && flagged !== "--resume"
+    })
+    .join(" ")
+    .trim()
+
+interface Features {
+  planMode: boolean
+  metrics: Metrics | undefined
+  state: string | undefined
+  resume: string | undefined
+  mcpTools: Tool[]
+  mcpClients: McpClient[]
+}
+
+/** Resolve all default-OFF feature flags from env/argv and start MCP servers.
+ *  Logs each enabled feature via the structured logger (minimal). */
+const loadFeatures = async (slog: StructuredLogger): Promise<Features> => {
+  const planMode = planEnabled()
+  const metrics = process.env.QUANTA_METRICS === "1" ? new Metrics() : undefined
+  const state = statePath()
+  const resume = resumePath()
+  const mcpConfigs = await readMcpConfig(slog)
+  const { tools: mcpTools, clients: mcpClients } =
+    mcpConfigs.length > 0 ? await loadMcpTools(mcpConfigs) : { tools: [], clients: [] }
+
+  if (planMode) slog.info("plan.mode.on")
+  if (metrics) slog.info("metrics.on")
+  if (state) slog.info("state.persist.on", { path: state })
+  if (mcpTools.length > 0) slog.info("mcp.tools.loaded", { count: mcpTools.length })
+  return { planMode, metrics, state, resume, mcpTools, mcpClients }
+}
+
+/** Interactive REPL loop: each line continues the same conversation. */
+const runRepl = async (
+  rl: readline.Interface,
+  signal: AbortSignal,
+  turn: (text: string) => Promise<void>,
+): Promise<void> => {
+  while (!signal.aborted) {
+    const input = (await rl.question("\nquanta› ")).trim()
+    if (input === "") continue
+    if (input === "/exit" || input === "/quit") break
+    await turn(input)
+  }
+}
+
+const main = async (): Promise<void> => {
+  const provider = pickProvider()
+  const model = env("QUANTA_MODEL", DEFAULT_MODEL[provider])
   const maxTurns = Number(env("QUANTA_MAX_TURNS", "40"))
   const mode = env("QUANTA_PERMISSION", "acceptEdits") as PermissionMode
   const cwd = process.cwd()
+  const slog = new StructuredLogger()
 
-  const llm = new AnthropicAdapter({ apiKey, model })
-  const registry = new ToolRegistry(defaultTools)
+  let llm: LLMPort
+  try {
+    llm = buildLLM(provider, model)
+  } catch (e) {
+    logger.error((e as Error).message)
+    process.exit(1)
+  }
+  const store = buildStore()
+  let sessionId: string = crypto.randomUUID()
+  if (store) logger.info(`memory on (kind=${process.env.QUANTA_MEMORY}, session=${sessionId})`)
+
+  // All features default OFF → behavior unchanged when no QUANTA_* flag set.
+  const { planMode, metrics, state, resume, mcpTools, mcpClients } = await loadFeatures(slog)
+
+  const registry = new ToolRegistry([...defaultTools, ...mcpTools])
   const stream = new StdoutStream()
   const permission: PermissionContext = { mode }
 
   const abort = new AbortController()
+  const shutdownMcp = async (): Promise<void> => {
+    for (const c of mcpClients) await c.stop().catch(() => undefined)
+  }
   process.on("SIGINT", () => {
     process.stderr.write("\n(interrupt — finishing current step)\n")
     abort.abort()
   })
+
+  // Bounded retry around transient LLM failures (pre-stream only).
+  const retryingLLM = new RetryingLLM({ inner: llm, signal: abort.signal })
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
   const onConfirm = async (action: ToolAction): Promise<boolean> => {
@@ -39,7 +199,7 @@ const main = async (): Promise<void> => {
 
   const session = (messages: Message[]): Promise<AgentOutcome> => {
     const config: AgentConfig = {
-      llm,
+      llm: retryingLLM,
       registry,
       stream,
       permission,
@@ -49,35 +209,53 @@ const main = async (): Promise<void> => {
       maxTurns,
       signal: abort.signal,
       onConfirm,
+      // Memory + compaction are co-gated: only active when a store is set, so
+      // default (no QUANTA_MEMORY) runs are byte-for-byte unchanged.
+      ...(store ? { store, sessionId, compaction: {} } : {}),
+      ...(planMode ? { planMode: true } : {}),
+      ...(metrics ? { metrics } : {}),
     }
     return runAgent(config)
   }
 
-  const argPrompt = process.argv.slice(2).join(" ").trim()
-  logger.info(`quanta ready (model=${model}, mode=${mode}, cwd=${cwd})`)
+  const argPrompt = argvPrompt()
+  logger.info(`quanta ready (provider=${provider}, model=${model}, mode=${mode}, cwd=${cwd})`)
 
   let history: Message[] = []
+  if (resume) {
+    const prior = await loadSession(resume)
+    if (prior) {
+      history = prior.messages
+      sessionId = prior.sessionId
+      slog.info("state.resumed", { path: resume, messages: history.length })
+    }
+  }
 
   const turn = async (text: string): Promise<void> => {
     history.push({ role: "user", content: [{ type: "text", text }] })
     const outcome = await session(history)
     history = outcome.messages
+    if (state) {
+      await saveSession(state, {
+        sessionId,
+        messages: history,
+        reason: outcome.reason,
+        turns: outcome.turns,
+      })
+    }
+    if (metrics) slog.info("metrics.snapshot", { snapshot: metrics.snapshot() })
   }
 
-  if (argPrompt) {
-    await turn(argPrompt)
+  try {
+    if (argPrompt) {
+      await turn(argPrompt)
+    } else {
+      await runRepl(rl, abort.signal, turn)
+    }
     rl.close()
-    return
+  } finally {
+    await shutdownMcp()
   }
-
-  // Interactive REPL: each line continues the same conversation.
-  while (!abort.signal.aborted) {
-    const input = (await rl.question("\nquanta› ")).trim()
-    if (input === "") continue
-    if (input === "/exit" || input === "/quit") break
-    await turn(input)
-  }
-  rl.close()
 }
 
 main().catch((e) => {
