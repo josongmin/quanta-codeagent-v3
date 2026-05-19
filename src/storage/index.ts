@@ -1,4 +1,5 @@
 export {
+  FsJailError,
   fileExists,
   parentDir,
   readFile,

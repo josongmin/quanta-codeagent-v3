@@ -61,6 +61,9 @@ export class StdoutStream implements StreamPort {
       case "error":
         process.stdout.write(`${RED}error: ${redactStr(event.message)}${RESET}\n`)
         break
+      case "llm_request":
+        process.stdout.write(`${DIM}— llm request (${event.model}) —${RESET}\n`)
+        break
       case "usage":
         process.stdout.write(
           `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,

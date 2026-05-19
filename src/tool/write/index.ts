@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { fileExists, writeFile } from "@/storage"
+import { FsJailError, fileExists, writeFile } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -19,15 +19,25 @@ export const writeTool: Tool<Input> = {
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     // Resolve relative paths against the session cwd, not process.cwd().
-    const existed = await fileExists(input.path, ctx.cwd)
-    await writeFile(input.path, input.content, ctx.cwd)
-    const bytes = Buffer.byteLength(input.content, "utf8")
-    yield {
-      type: "result",
-      result: {
-        ok: true,
-        output: `${existed ? "Overwrote" : "Created"} ${input.path} (${bytes} bytes)`,
-      },
+    // The jail check fires inside fileExists()/writeFile() BEFORE any bytes
+    // are written, so a denied path is NEVER a partial write.
+    try {
+      const existed = await fileExists(input.path, ctx.cwd)
+      await writeFile(input.path, input.content, ctx.cwd)
+      const bytes = Buffer.byteLength(input.content, "utf8")
+      yield {
+        type: "result",
+        result: {
+          ok: true,
+          output: `${existed ? "Overwrote" : "Created"} ${input.path} (${bytes} bytes)`,
+        },
+      }
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
     }
   },
 }

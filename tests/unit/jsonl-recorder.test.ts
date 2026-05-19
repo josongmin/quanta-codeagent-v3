@@ -135,6 +135,52 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
     expect(withDetail?.data.detail).toBe("ctx 92% full")
   })
 
+  test("llm_request maps to kind:llm_request with data {model}", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "llm_request", model: "claude-x" })
+    rec.close()
+
+    const [line] = readLines(path)
+    expect(line?.kind).toBe("llm_request")
+    expect(line?.data).toEqual({ model: "claude-x" })
+  })
+
+  test("§11 span pair: llm_request and the turn's llm_usage share ONE span", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "turn_start", turn: 1 })
+    rec.emit({ type: "llm_request", model: "m" })
+    rec.emit({ type: "usage", inputTokens: 3, outputTokens: 4, model: "m" })
+    rec.close()
+
+    const [ts, req, usage] = readLines(path)
+    const turnSpan = ts?.spanId
+    expect(turnSpan).toBeDefined()
+    expect(req?.kind).toBe("llm_request")
+    expect(usage?.kind).toBe("llm_usage")
+    // The point of RFC-0002 §5.2/§9/§11: request↔usage are paired by ONE span.
+    expect(req?.spanId).toBe(`llm:${turnSpan}`)
+    expect(usage?.spanId).toBe(`llm:${turnSpan}`)
+    expect(req?.spanId).toBe(usage?.spanId)
+    expect(req?.parentSpanId).toBe(turnSpan)
+    expect(usage?.parentSpanId).toBe(turnSpan)
+  })
+
+  test("a secret in the llm_request model field is still ***REDACTED***", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "llm_request", model: "sk-abcdef1234567890" })
+    rec.close()
+
+    const raw = readFileSync(path, "utf8")
+    expect(raw).not.toContain("sk-abcdef1234567890")
+    expect(raw).toContain("REDACTED")
+    const [line] = readLines(path)
+    expect(line?.data.model).toBe("***REDACTED***")
+    expect(line?.redaction.applied).toBe(true)
+  })
+
   test("enriched tool_result carries §5.2 ToolResultData evidence", () => {
     const path = join(dir, "i1.0.jsonl")
     const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })

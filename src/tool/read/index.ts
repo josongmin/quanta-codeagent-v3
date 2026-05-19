@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { readFile, statFile } from "@/storage"
+import { FsJailError, readFile, statFile } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -25,7 +25,19 @@ export const readTool: Tool<Input> = {
   // A single file read is fast; no progress event needed.
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     // Resolve relative paths against the session cwd, not process.cwd().
-    const info = await statFile(input.path, ctx.cwd)
+    // read is read-only but STILL jailed: an unguarded absolute
+    // `/etc/passwd` or `../../.ssh/id_rsa` is denied by default. Catch the
+    // jail escape and surface ok:false — never an uncaught throw.
+    let info: Awaited<ReturnType<typeof statFile>>
+    try {
+      info = await statFile(input.path, ctx.cwd)
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
+    }
     if (info.isDirectory) {
       yield { type: "result", result: { ok: false, output: `${input.path} is a directory` } }
       return

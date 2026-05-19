@@ -316,34 +316,126 @@ const runRepl = async (
   }
 }
 
-const main = async (): Promise<void> => {
-  const provider = pickProvider()
-  const model = env("QUANTA_MODEL", DEFAULT_MODEL[provider])
-  const maxTurns = Number(env("QUANTA_MAX_TURNS", "40"))
-  const mode = env("QUANTA_PERMISSION", "acceptEdits") as PermissionMode
-  const cwd = process.cwd()
-  const slog = new StructuredLogger()
+/** Observability wiring (RFC-0002 §5.4/§8). Default OFF → byte-identical to
+ *  today (plain StdoutStream, no RunContext). When `observe` is set: a runId
+ *  tags a RunContext and the stdout stream is fanned out to a JsonlRecorder.
+ *  Pure extraction of the inline block — same effects, same logging. */
+const buildStreaming = (
+  observe: string | undefined,
+  slog: StructuredLogger,
+): { stream: StreamPort; run: RunContext | undefined } => {
+  const stream: StreamPort = new StdoutStream()
+  if (!observe) return { stream, run: undefined }
+  const runId = crypto.randomUUID()
+  const run: RunContext = { runId }
+  const recorder = new JsonlRecorder(join(observe, runId, "session.jsonl"), { ctx: run })
+  slog.info("observe.on", { dir: observe, runId })
+  return { stream: new TeeStream([stream, recorder]), run }
+}
 
-  let llm: LLMPort
-  try {
-    llm = buildLLM(provider, model)
-  } catch (e) {
-    logger.error((e as Error).message)
-    process.exit(1)
+/** Compose the LLM stack: bounded retry (inner-most), optional same-turn
+ *  provider fallback (outer), and — only in `auto` mode — attach the
+ *  LLM-backed permission classifier to `permission`. Default OFF for both
+ *  fallback and classifier ⇒ `finalLLM === retryingLLM` and `permission`
+ *  untouched, byte-identical to today. Pure extraction of the inline block. */
+const composeLLM = (
+  retryingLLM: LLMPort,
+  provider: Provider,
+  signal: AbortSignal,
+  mode: PermissionMode,
+  permission: PermissionContext,
+  slog: StructuredLogger,
+): LLMPort => {
+  const fbModels = fallbackModels()
+  let finalLLM: LLMPort = retryingLLM
+  if (fbModels.length > 0) {
+    const fallbackStacks = fbModels.map(
+      (m) => new RetryingLLM({ inner: buildLLM(provider, m), signal }),
+    )
+    finalLLM = new FallbackLLM({ providers: [retryingLLM, ...fallbackStacks], signal })
+    slog.info("llm.fallback.on", { models: fbModels })
   }
+  if (mode === "auto") {
+    permission.classify = createAutoClassifierPort({ llm: finalLLM })
+    slog.info("permission.auto.on")
+  }
+  return finalLLM
+}
+
+/** Inputs the per-turn `AgentConfig` is assembled from. Grouping the optional
+ *  default-OFF knobs keeps `assembleConfig` a single cohesive site and lifts
+ *  the conditional-spread chain out of `main`. */
+interface SessionDeps {
+  llm: LLMPort
+  registry: ToolRegistry
+  stream: StreamPort
+  permission: PermissionContext
+  cwd: string
+  maxTurns: number
+  signal: AbortSignal
+  onConfirm: (action: ToolAction) => Promise<boolean>
+  store: PersistentStorePort | undefined
+  sessionId: string
+  embedder: EmbedderPort | undefined
+  memoryConfig: AgentConfig["memory"] | undefined
+  planMode: boolean
+  metrics: Metrics | undefined
+  run: RunContext | undefined
+  subagentConfig: AgentConfig["subagent"] | undefined
+  skillsConfig: AgentConfig["skills"] | undefined
+  compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
+}
+
+/** Assemble the per-turn `AgentConfig`. Every conditional spread is preserved
+ *  verbatim (same keys, same gating) — this is a pure relocation so the wired
+ *  knobs are byte-identical; it only moves the chain off `main`/`session`. */
+const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => ({
+  llm: d.llm,
+  registry: d.registry,
+  stream: d.stream,
+  permission: d.permission,
+  messages,
+  system: buildSystemPrompt(d.cwd),
+  cwd: d.cwd,
+  maxTurns: d.maxTurns,
+  signal: d.signal,
+  onConfirm: d.onConfirm,
+  // Memory + compaction are co-gated: only active when a store is set, so
+  // default (no QUANTA_MEMORY) runs are byte-for-byte unchanged.
+  ...(d.store ? { store: d.store, sessionId: d.sessionId, compaction: {} } : {}),
+  ...(d.embedder ? { embedder: d.embedder } : {}),
+  ...(d.memoryConfig ? { memory: d.memoryConfig } : {}),
+  ...(d.planMode ? { planMode: true } : {}),
+  ...(d.metrics ? { metrics: d.metrics } : {}),
+  ...(d.run ? { run: d.run } : {}),
+  ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
+  ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
+  ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
+})
+
+/** The memory store + tool registry + per-run config knobs, resolved once.
+ *  Pure relocation of the inline store/memory/registry block — same env
+ *  gating, same logging, same conditional `memoryTools` registration. */
+interface Tooling {
+  store: PersistentStorePort | undefined
+  embedder: EmbedderPort | undefined
+  sessionId: string
+  registry: ToolRegistry
+  memoryConfig: AgentConfig["memory"] | undefined
+  subagentConfig: AgentConfig["subagent"] | undefined
+  skillsConfig: AgentConfig["skills"] | undefined
+  compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
+}
+
+const buildTooling = (mcpTools: Tool[], lspTools: Tool[], slog: StructuredLogger): Tooling => {
   const store = buildStore()
   const embedder = buildEmbedder(store)
-  let sessionId: string = crypto.randomUUID()
+  const sessionId = crypto.randomUUID()
   if (store) {
     logger.info(
       `memory on (kind=${process.env.QUANTA_MEMORY}, embed=${embedder ? "on" : "off"}, session=${sessionId})`,
     )
   }
-
-  // All features default OFF → behavior unchanged when no QUANTA_* flag set.
-  const { planMode, metrics, state, resume, mcpTools, mcpClients, lspTools } =
-    await loadFeatures(slog)
-
   const memoryConfig = buildMemoryConfig(store)
   // SOTA++ Tier 0/1 absorption knobs — all default OFF, each omitted from the
   // AgentConfig entirely when its env knob is unset (exactOptionalPropertyTypes
@@ -362,20 +454,56 @@ const main = async (): Promise<void> => {
       ? memoryTools({ store, ...(embedder ? { embedder } : {}) })
       : []
   const registry = new ToolRegistry([...defaultTools, ...mcpTools, ...memTools, ...lspTools])
+  return {
+    store,
+    embedder,
+    sessionId,
+    registry,
+    memoryConfig,
+    subagentConfig,
+    skillsConfig,
+    compactionBreakerConfig,
+  }
+}
+
+const main = async (): Promise<void> => {
+  const provider = pickProvider()
+  const model = env("QUANTA_MODEL", DEFAULT_MODEL[provider])
+  const maxTurns = Number(env("QUANTA_MAX_TURNS", "40"))
+  // Secure-by-default (S7): unattended auto-allow of every mutating tool
+  // gated only by a regex denylist is not secure-by-default. Default is now
+  // `default` (ask on mutation; read-only still auto-allows). An explicit
+  // QUANTA_PERMISSION=acceptEdits|bypass|auto is still honored.
+  const mode = env("QUANTA_PERMISSION", "default") as PermissionMode
+  const cwd = process.cwd()
+  const slog = new StructuredLogger()
+
+  let llm: LLMPort
+  try {
+    llm = buildLLM(provider, model)
+  } catch (e) {
+    logger.error((e as Error).message)
+    process.exit(1)
+  }
+  // All features default OFF → behavior unchanged when no QUANTA_* flag set.
+  const { planMode, metrics, state, resume, mcpTools, mcpClients, lspTools } =
+    await loadFeatures(slog)
+
+  const {
+    store,
+    embedder,
+    sessionId: initialSessionId,
+    registry,
+    memoryConfig,
+    subagentConfig,
+    skillsConfig,
+    compactionBreakerConfig,
+  } = buildTooling(mcpTools, lspTools, slog)
+  // `let` because a resumed session reassigns it before any turn (preserved).
+  let sessionId = initialSessionId
 
   // Observability (RFC-0002 §5.4/§8). Default OFF → byte-identical to today.
-  // When set: a runId tags a RunContext, and the stdout stream is fanned out
-  // to a JsonlRecorder writing the canonical trajectory.
-  const observe = observeDir()
-  let run: RunContext | undefined
-  let stream: StreamPort = new StdoutStream()
-  if (observe) {
-    const runId = crypto.randomUUID()
-    run = { runId }
-    const recorder = new JsonlRecorder(join(observe, runId, "session.jsonl"), { ctx: run })
-    stream = new TeeStream([stream, recorder])
-    slog.info("observe.on", { dir: observe, runId })
-  }
+  const { stream, run } = buildStreaming(observeDir(), slog)
   const permission: PermissionContext = { mode }
 
   const abort = new AbortController()
@@ -387,69 +515,16 @@ const main = async (): Promise<void> => {
     abort.abort()
   })
 
-  // Bounded retry around transient LLM failures (pre-stream only).
+  // Bounded retry around transient LLM failures (pre-stream only), then the
+  // optional same-turn fallback + auto classifier (both default OFF ⇒
+  // finalLLM === retryingLLM, byte-identical to today).
   const retryingLLM = new RetryingLLM({ inner: llm, signal: abort.signal })
-
-  // Same-turn provider fallback (SOTA++, default OFF). When
-  // `QUANTA_MODEL_FALLBACK` lists fallback model ids, build one retry-wrapped
-  // provider stack per id (same adapter factory, different model) and compose
-  // them under a `FallbackLLM` AFTER retry: retry is inner-most per provider,
-  // fallback is the outer decorator. Unset ⇒ `finalLLM === retryingLLM`, so
-  // the llm stack is byte-identical to today (no wrap).
-  const fbModels = fallbackModels()
-  let finalLLM: LLMPort = retryingLLM
-  if (fbModels.length > 0) {
-    const fallbackStacks = fbModels.map(
-      (m) => new RetryingLLM({ inner: buildLLM(provider, m), signal: abort.signal }),
-    )
-    finalLLM = new FallbackLLM({
-      providers: [retryingLLM, ...fallbackStacks],
-      signal: abort.signal,
-    })
-    slog.info("llm.fallback.on", { models: fbModels })
-  }
-
-  // Permission auto-mode (SOTA++, default OFF). Only when `QUANTA_PERMISSION
-  // =auto`: build the LLM-backed classifier on the FINAL composed llm (so it
-  // benefits from retry + any fallback) and attach it to the
-  // PermissionContext. Absent ⇒ `classify` is omitted and "auto" degrades to
-  // "ask"; `default|acceptEdits|bypass` are unchanged.
-  if (mode === "auto") {
-    permission.classify = createAutoClassifierPort({ llm: finalLLM })
-    slog.info("permission.auto.on")
-  }
+  const finalLLM = composeLLM(retryingLLM, provider, abort.signal, mode, permission, slog)
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
   const onConfirm = async (action: ToolAction): Promise<boolean> => {
     const ans = await rl.question(`Allow ${action.tool}? [y/N] `)
     return ans.trim().toLowerCase() === "y"
-  }
-
-  const session = (messages: Message[]): Promise<AgentOutcome> => {
-    const config: AgentConfig = {
-      llm: finalLLM,
-      registry,
-      stream,
-      permission,
-      messages,
-      system: buildSystemPrompt(cwd),
-      cwd,
-      maxTurns,
-      signal: abort.signal,
-      onConfirm,
-      // Memory + compaction are co-gated: only active when a store is set, so
-      // default (no QUANTA_MEMORY) runs are byte-for-byte unchanged.
-      ...(store ? { store, sessionId, compaction: {} } : {}),
-      ...(embedder ? { embedder } : {}),
-      ...(memoryConfig ? { memory: memoryConfig } : {}),
-      ...(planMode ? { planMode: true } : {}),
-      ...(metrics ? { metrics } : {}),
-      ...(run ? { run } : {}),
-      ...(subagentConfig ? { subagent: subagentConfig } : {}),
-      ...(skillsConfig ? { skills: skillsConfig } : {}),
-      ...(compactionBreakerConfig ? { compactionBreaker: compactionBreakerConfig } : {}),
-    }
-    return runAgent(config)
   }
 
   const argPrompt = argvPrompt()
@@ -464,6 +539,32 @@ const main = async (): Promise<void> => {
       slog.info("state.resumed", { path: resume, messages: history.length })
     }
   }
+
+  // Built AFTER the resume block so a resumed `sessionId` is captured (the
+  // store-gated branch in assembleConfig must see the post-resume id, exactly
+  // as the prior call-time closure did).
+  const sessionDeps: SessionDeps = {
+    llm: finalLLM,
+    registry,
+    stream,
+    permission,
+    cwd,
+    maxTurns,
+    signal: abort.signal,
+    onConfirm,
+    store,
+    sessionId,
+    embedder,
+    memoryConfig,
+    planMode,
+    metrics,
+    run,
+    subagentConfig,
+    skillsConfig,
+    compactionBreakerConfig,
+  }
+  const session = (messages: Message[]): Promise<AgentOutcome> =>
+    runAgent(assembleConfig(messages, sessionDeps))
 
   const turn = async (text: string): Promise<void> => {
     history.push({ role: "user", content: [{ type: "text", text }] })

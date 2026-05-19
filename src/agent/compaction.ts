@@ -96,7 +96,8 @@ export const findBoundary = (messages: Message[], keepTurns: number): number => 
 const SUMMARY_SYSTEM =
   "You are a transcript compactor. Summarize the conversation so far into a " +
   "terse, information-dense brief: the task, key decisions, files touched, " +
-  "tool outcomes, and any open threads. Plain prose, no preamble. Be concise."
+  "tool outcomes (note what was confirmed by running/reading vs. assumed), " +
+  "and any open threads. Plain prose, no preamble. Be concise."
 
 const renderBlock = (b: ContentBlock): string => {
   switch (b.type) {
@@ -190,9 +191,10 @@ const REACTIVE_MIN_DROP_RATIO = 0.15
 const CONTINUATION_SYSTEM =
   "You have been working on a coding task but have not completed it. Write a " +
   "structured, concise, actionable continuation summary so you can resume in " +
-  "a fresh context: (1) the task/goal, (2) what you've done and learned, " +
-  "(3) key files/paths and their state, (4) the exact next step. Wrap it in " +
-  "<summary></summary>."
+  "a fresh context: (1) the task/goal, (2) what you've done and learned " +
+  "(mark which claims you verified vs. assumed), (3) key files/paths and " +
+  "their state, (4) the exact next command/edit to run, not a vague " +
+  "direction. Wrap it in <summary></summary>."
 
 export interface ReactiveCompactInput {
   messages: Message[]

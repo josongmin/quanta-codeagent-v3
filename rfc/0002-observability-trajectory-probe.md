@@ -33,14 +33,19 @@
 - ❌ probe가 **권위적 진단(authoritative verdict)** 을 내림 (inspector — 가설·신뢰도만)
 - ❌ 모든 슬라이스 계측 (에이전트 실행경로 + bench만; 라이브러리 내부는 메트릭만)
 
-> **Phase-1 보안 자세 (S6/S7, 명시적 합의)**: read/write/edit 도구는
-> **FS-jail되지 않으며**(임의 경로 R/W 가능), 기본 권한 모드는
-> `acceptEdits`(무인 — 편집 자동 승인)이다. 이는 RFC §1.2 로컬-개발
-> 범위에 한해 **수용된 Phase-1 자세**로 명시 한정한다. 완화책은
-> 레닥션(S1/S4/S2: trajectory 스크럽·시크릿 마스킹)과
-> **HARD_DENY(S3: 경로 독립 바이패스 차단)**이며, **FS-jail/샌드박스
-> 기본화는 의도적으로 유예**(후속 단계). 무인 자동승인+무-jail은
-> 신뢰 로컬 워크스페이스 가정 하에서만 안전하다.
+> **보안 자세 (S6/S7 — secure-by-default, 강제됨)**: 이전의
+> "수용/유예된 S6/S7 자세"(무-jail·무인 `acceptEdits`)는 더 이상
+> 유효하지 않다. read/write/edit는 단일 초크포인트
+> `storage.resolvePath`(lexical + realpath, symlink-탈출 불가)에서
+> 강제되는 `ctx.cwd` jail에 갇힌다 — 절대-경로-바깥 / `..`-상승 /
+> symlink 탈출은 거부(`ok:false`, throw 없음, 부분 쓰기 없음). 도구가
+> baseDir를 넘길 때만 적용되며, 옵트아웃은 `QUANTA_FS_JAIL=off`. CLI
+> 기본 권한 모드는 묵시적 `acceptEdits` → `default`로 변경(변경 시
+> 확인; 읽기 전용은 그대로 자동 허용; 명시적 `QUANTA_PERMISSION`은
+> 계속 존중). HARD_DENY는 보수적 심층방어를 추가(크리덴셜 유출,
+> decode-후-실행, 다운로드-파이프-인터프리터, 원시 블록디바이스 쓰기).
+> RFC §1.2대로 denylist는 여전히 best-effort이며 샌드박스가 아니다 —
+> jail/권한이 1차 경계, 레닥션(S1/S4/S2)·HARD_DENY(S3)는 심층방어.
 
 ---
 
@@ -159,12 +164,18 @@ append-only JSONL, 1 이벤트 1 라인. `AgentEvent`(stream) + 훅 lifecycle + 
 
 > **§5.2 개정 (Phase-1 현실 정합, 2026-05-19)**: Group C/E 구현은
 > `session_start`·`recovery`를 실제 방출하고 `tool_result`를
-> `durationMs`/`stderrTail`/`exitCode`로 보강한다. `llm_request`는
-> **선택/유예**(deferred) — 프리-스트림 훅 시밍이 없어 Phase-1에서
-> 방출하지 않는다. 따라서 `kind` 유니온의 `llm_request`는 스키마상
-> 예약(reserved)이며, span-짝 골든은 당분간 **`llm_usage` 단독**으로
-> 고정한다(`llm_request↔llm_usage` 짝 검증은 프리-스트림 훅 랜딩 후
-> 활성). `tool_call↔tool_result` 짝은 그대로 유효.
+> `durationMs`/`stderrTail`/`exitCode`로 보강한다. **`llm_request` 유예
+> 해제(개정 2)**: 이제 매 turn의 모델 스트림 소비 **직전**에
+> `{kind:"llm_request", data:{model}}`을 실제 방출한다(`LLMPort`는
+> 프리-스트림 모델 접근자가 없어 어댑터가 전송하는 설정 모델을 좁은
+> 런타임 프로브로 읽고, 없으면 `"unknown"`). 레코더는 `llm_request`와
+> 그 turn의 `llm_usage`에 **동일 llm 스팬**(`llm:${turnSpan}`,
+> parent=turnSpan)을 부여 — turn당 request 1 / usage 1 이므로
+> `request.spanId === usage.spanId`가 결정적으로 성립한다. 따라서 §11
+> `llm_request↔llm_usage` span-짝 골든은 **유예가 아니라 실제 활성**
+> (`llm_usage` 단독 고정이 아님). `tool_call↔tool_result` 짝은 그대로
+> 유효. 방출은 순수 부수효과(NullStream이 삼킴) — 미설정 시 동작
+> 바이트 동일·제어흐름 불변.
 
 ### 5.3 토큰/비용 — `llm` + `@/observability`
 

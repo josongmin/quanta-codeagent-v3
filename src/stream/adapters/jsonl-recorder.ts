@@ -32,8 +32,10 @@ const EMPTY_CTX: RunContext = { runId: "unknown" }
  *    `parentSpanId = turnSpanId`.
  *  - `tool_call` / `tool_progress` / `tool_result` sharing a tool-use `id`
  *    all get `spanId = "tool:" + id` with `parentSpanId = turnSpanId`.
- *  - `usage` (llm) gets `spanId = "llm:" + turnSpanId`, `parentSpanId =
- *    turnSpanId`.
+ *  - `llm_request` AND `usage` (llm) BOTH get `spanId = "llm:" + turnSpanId`,
+ *    `parentSpanId = turnSpanId` — one request→one usage per turn, so the
+ *    `llm_request↔llm_usage` span pair (RFC-0002 §5.2/§9/§11) is exact and
+ *    deterministic (`request.spanId === usage.spanId`).
  *  - `turn_start` itself is the span root: `spanId = turnSpanId`, no parent.
  *
  * Given an identical event sequence the scheme reproduces byte-identical
@@ -185,6 +187,7 @@ export class JsonlRecorder implements StreamPort {
 const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   session_start: "session_start",
   turn_start: "turn_start",
+  llm_request: "llm_request",
   assistant_text: "assistant_text",
   tool_call: "tool_call",
   tool_progress: "tool_progress",
@@ -206,6 +209,10 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
       return {}
     case "turn_start":
       return { turn: e.turn }
+    case "llm_request":
+      // RFC-0002 §5.2 llm_request contract: just the model id (scrubbed via
+      // the single makeEvent/redactValue source like every other payload).
+      return { model: e.model }
     case "assistant_text":
       return { delta: e.delta }
     case "tool_call":
@@ -252,6 +259,11 @@ const spanOf = (e: AgentEvent, turnSpanId: string): { spanId?: string; parentSpa
     case "tool_progress":
     case "tool_result":
       return { spanId: `tool:${e.id}`, parentSpanId: turnSpanId }
+    // RFC-0002 §5.2/§9/§11 span pair: `llm_request` (pre-stream) and `usage`
+    // (post-stream `llm_usage`) of the SAME turn share ONE llm span, so
+    // request.spanId === usage.spanId === `llm:${turnSpanId}`, parented at the
+    // turn span. One request → one usage per turn keeps the pair unambiguous.
+    case "llm_request":
     case "usage":
       return { spanId: `llm:${turnSpanId}`, parentSpanId: turnSpanId }
     default:

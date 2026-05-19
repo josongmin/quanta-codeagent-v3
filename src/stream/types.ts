@@ -3,6 +3,10 @@ export type AgentEvent =
   // has a head marker (recorder maps it to kind:"session_start").
   | { type: "session_start" }
   | { type: "turn_start"; turn: number }
+  // RFC-0002 §5.2/§9 `llm_request` — emitted immediately BEFORE the model
+  // stream so the recorder can pair it (same span) with the trailing
+  // `llm_usage`, completing the §11 llm_request↔llm_usage span-pair golden.
+  | { type: "llm_request"; model: string }
   | { type: "assistant_text"; delta: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "tool_progress"; id: string; name: string; message: string }

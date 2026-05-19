@@ -147,6 +147,42 @@ describe("RFC-0002 §5.2 new kinds — isTrajectoryEvent + data contract", () =>
     expect(toolResult.kind).toBe("tool_result")
   })
 
+  test("llm_request passes isTrajectoryEvent; §5.2 data contract is {model}", () => {
+    const ev = makeEvent(0, "llm_request", CTX, { model: "claude-x" })
+    expect(isTrajectoryEvent(ev)).toBe(true)
+    expect(ev.kind).toBe("llm_request")
+    expect(ev.data).toEqual({ model: "claude-x" })
+  })
+
+  test("§11 span-pair golden: llm_request.spanId === llm_usage.spanId", () => {
+    // The recorder derives both from the SAME turn span; mirror that here so
+    // the request↔usage pair (RFC-0002 §5.2/§9/§11) is asserted at the schema
+    // boundary too: identical spanId, parented at the turn span.
+    const turnSpan = "t1"
+    const req = makeEvent(
+      0,
+      "llm_request",
+      CTX,
+      { model: "m" },
+      {
+        spanId: `llm:${turnSpan}`,
+        parentSpanId: turnSpan,
+      },
+    )
+    const usage = makeEvent(
+      1,
+      "llm_usage",
+      CTX,
+      { model: "m", inputTokens: 1, outputTokens: 2, costUsd: null } satisfies LlmUsageData,
+      { spanId: `llm:${turnSpan}`, parentSpanId: turnSpan },
+    )
+    expect(isTrajectoryEvent(req)).toBe(true)
+    expect(isTrajectoryEvent(usage)).toBe(true)
+    expect(req.spanId).toBe(usage.spanId)
+    expect(req.parentSpanId).toBe(turnSpan)
+    expect(usage.parentSpanId).toBe(turnSpan)
+  })
+
   test("ToolResultData: durationMs required; exitCode/fullLogPath optional-but-typed", () => {
     // Minimal: only the always-present fields (no exitCode/fullLogPath).
     const minimal = {

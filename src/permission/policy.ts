@@ -52,6 +52,27 @@ const HARD_DENY = [
   // a path, filename, or commit message (`git commit -m "fix shutdown race"`
   // must still pass; `sudo shutdown -h now` / `x && reboot` must not).
   /(?:^|[;&|]|\bsudo\s+)\s*(?:shutdown|reboot|halt)\b/,
+  // S7b — credential exfiltration: reading a well-known local secret store
+  // and piping it into a network sender (`curl`/`wget`/`nc`/`ncat`/
+  // `socat`/`telnet`). Targets only the documented secret paths so normal
+  // `cat README | grep x` / `cat file | curl -d @-` of a project file stay
+  // ALLOWED — the secret token (`~/.ssh`, `~/.aws/credentials`, `.env`,
+  // `id_rsa`, `.netrc`, `.pgpass`, `~/.gnupg`) must appear on the LEFT of a
+  // pipe whose RIGHT side is a network egress tool.
+  /(?:~\/\.ssh\b|\$HOME\/\.ssh\b|\.aws\/credentials\b|\bid_rsa\b|\.netrc\b|\.pgpass\b|~\/\.gnupg\b|(?:^|[\s/'"=])\.env(?:\.\w+)?\b)[\s\S]*?\|\s*(?:sudo\s+)?(?:curl|wget|nc|ncat|socat|telnet)\b/,
+  // S7b — `base64 … | sh|bash|zsh|dash` (decode-then-execute RCE bypass).
+  // `base64 file.png` with no pipe-to-shell stays ALLOWED.
+  /\bbase64\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b/,
+  // S7b — pipe a network download straight into a script interpreter
+  // (`curl … | python`, `wget … | perl|node|ruby|php`) — the interpreter
+  // analogue of the existing `curl … | sh` rule. `curl … -o f.json` (no
+  // pipe) and `cat f | python script.py` (no curl/wget) stay ALLOWED.
+  /\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:python[0-9.]*|perl|node|ruby|php)\b/,
+  // S7b — raw write to a block device by redirection or `dd`/`tee` (disk
+  // wipe / partition-table clobber). Broadens the existing `dd of=/dev/`
+  // entry to common device prefixes and the `>`/`tee` forms. `dd if=in
+  // of=./out` and `echo x > ./file` stay ALLOWED (no /dev/ block target).
+  /(?:>\s*|of=|tee\s+(?:-\S+\s+)*)\/dev\/(?:sd|hd|nvme|vd|xvd|mmcblk|loop|dm-|disk\d|rdisk\d)/,
 ]
 
 const bashCommand = (input: unknown): string => {

@@ -2,7 +2,15 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
-import { fileExists, parentDir, readFile, resolvePath, statFile, writeFile } from "@/storage"
+import {
+  FsJailError,
+  fileExists,
+  parentDir,
+  readFile,
+  resolvePath,
+  statFile,
+  writeFile,
+} from "@/storage"
 
 const dir = mkdtempSync(join(tmpdir(), "storage-test-"))
 
@@ -25,9 +33,29 @@ describe("resolvePath", () => {
     expect(resolvePath("a/b.txt", dir)).toBe(resolve(dir, "a/b.txt"))
   })
 
-  test("an absolute path wins over baseDir (no-op)", () => {
+  // S6 posture change (secure-by-default): with an explicit baseDir, an
+  // absolute path is no longer a blind no-op — if it lands OUTSIDE the jail
+  // root it is now DENIED (the whole point of the chokepoint: an unguarded
+  // absolute `/etc/passwd` must not escape). The pre-jail "absolute wins"
+  // no-op only holds for no-baseDir callers or with QUANTA_FS_JAIL=off.
+  test("an absolute path outside an explicit baseDir is jailed (S6)", () => {
     const abs = join(dir, "abs.txt")
-    expect(resolvePath(abs, "/some/other/base")).toBe(abs)
+    expect(() => resolvePath(abs, "/some/other/base")).toThrow(FsJailError)
+  })
+
+  test("an absolute path INSIDE the baseDir jail is returned unchanged", () => {
+    const abs = join(dir, "abs.txt")
+    expect(resolvePath(abs, dir)).toBe(abs)
+  })
+
+  test("absolute-over-baseDir no-op is restored with QUANTA_FS_JAIL=off", () => {
+    process.env.QUANTA_FS_JAIL = "off"
+    try {
+      const abs = join(dir, "abs.txt")
+      expect(resolvePath(abs, "/some/other/base")).toBe(abs)
+    } finally {
+      delete process.env.QUANTA_FS_JAIL
+    }
   })
 
   test("empty baseDir falls back to process.cwd()", () => {
@@ -87,6 +115,37 @@ describe("fileExists", () => {
     await writeFile(path, "x")
     expect(await fileExists(path)).toBe(true)
     expect(await fileExists(join(dir, "absent.txt"))).toBe(false)
+  })
+})
+
+describe("FS jail (S6) — only when an explicit baseDir is passed", () => {
+  test("with baseDir: `..` climb above the jail root throws FsJailError", () => {
+    expect(() => resolvePath("../../etc/hosts", dir)).toThrow(FsJailError)
+  })
+
+  test("with baseDir: an absolute path outside the jail throws FsJailError", () => {
+    expect(() => resolvePath("/etc/hosts", dir)).toThrow(FsJailError)
+  })
+
+  test("with baseDir: in-jail relative paths still resolve normally", () => {
+    expect(resolvePath("a/b.txt", dir)).toBe(resolve(dir, "a/b.txt"))
+  })
+
+  test("WITHOUT baseDir (state.ts pattern): jail is NOT enforced", () => {
+    // Legacy callers must be byte-identical: absolute path returned as-is,
+    // a `..`-laden relative path simply resolves against process.cwd().
+    expect(resolvePath("/etc/hosts")).toBe("/etc/hosts")
+    expect(resolvePath("../up.txt")).toBe(resolve(process.cwd(), "../up.txt"))
+  })
+
+  test("QUANTA_FS_JAIL=off disables the jail even with a baseDir", () => {
+    process.env.QUANTA_FS_JAIL = "off"
+    try {
+      expect(resolvePath("/etc/hosts", dir)).toBe("/etc/hosts")
+      expect(() => resolvePath("../../etc/hosts", dir)).not.toThrow()
+    } finally {
+      delete process.env.QUANTA_FS_JAIL
+    }
   })
 })
 

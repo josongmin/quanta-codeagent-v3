@@ -85,6 +85,29 @@ const emitRecovery = (config: AgentConfig, reason: RecoveryReason, detail?: stri
   })
 }
 
+/** Best-available configured model id for the pre-stream `llm_request`
+ *  marker (RFC-0002 §5.2/§9). `LLMPort` deliberately exposes no pre-stream
+ *  model accessor — the resolved model only materializes on the trailing
+ *  provider `usage` event (the source `llm_usage` uses). Both shipped adapters
+ *  (Anthropic/OpenAI) and `FallbackLLM` hold the configured model on a
+ *  `model` field; read it via a narrow runtime probe (no interface change, no
+ *  `any`) so the request marker carries the SAME model the adapter sends, and
+ *  fall back to `"unknown"` when an adapter exposes none. Pure read. */
+const configuredModel = (llm: AgentConfig["llm"]): string => {
+  const m = (llm as { model?: unknown }).model
+  return typeof m === "string" && m !== "" ? m : "unknown"
+}
+
+/** Pure side-effect emit of a `{type:"llm_request"}` AgentEvent IMMEDIATELY
+ *  before the turn's model stream is consumed (RFC-0002 §5.2/§9/§11). The
+ *  recorder pairs it with the turn's trailing `llm_usage` via the SAME llm
+ *  span. Like `emitRecovery`/`emitUsage` this is observation-only: NullStream
+ *  swallows it, control flow / emit ordering / the default-OFF byte-identical
+ *  contract are untouched. */
+const emitLlmRequest = (config: AgentConfig): void => {
+  config.stream.emit({ type: "llm_request", model: configuredModel(config.llm) })
+}
+
 /** Pass-through wrapper over the model stream that tees `usage` events to the
  *  W-C `emitUsage` bridge (RFC-0002) WITHOUT consuming any other event —
  *  `streamingTurn` has no `onUsage` collaborator, so the bridge lives here so
@@ -131,6 +154,13 @@ const streamConsume = async (
   recorder: AgentRecorder | undefined,
   classifier: AutoModeClassifier | undefined,
 ): Promise<StreamConsumeResult> => {
+  // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
+  // this turn's model stream is opened/consumed (the same point `llm_usage`
+  // is later teed from the provider `usage` event). The recorder gives both
+  // the SAME per-turn llm span so probe/§9 can pair request↔usage. Pure
+  // observation: NullStream swallows it; the stream open + recovery control
+  // flow below is byte-identical to the pre-emit path.
+  emitLlmRequest(config)
   const stop = recorder?.llmStream()
   try {
     const outcome = await streamingTurn({
