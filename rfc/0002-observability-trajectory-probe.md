@@ -5,27 +5,32 @@
 - **대상**: 실행 과정을 디버그 가능하게 만드는 관측 플랫폼 (특히 SWE-bench 다인스턴스 실행)
 - **선행**: RFC-0001(아키텍처), ADR-0003(test-pyramid), ADR-0006(sandbox env-scrub)
 - **원칙 상속**: anti-bloat(<20k LoC), 의존성 <5(신규 0), 슬라이스 격리(Biome 강제), `@/agent`/`apps`만 조립자
+- **리뷰 반영(v0.2)**: "100% 재구성" 표현 정정 · eval 모드 관측실패 hard-fail · pricingVersion · assistant_text 보존 · stream↛observability 경계 수정 · span/seq/schema-registry/patch·sandbox·verifier 증거 · redaction 게이트화 · probe 비권위
 
 ---
 
 ## 1. 목표
 
-에이전트 1회 실행(특히 SWE-bench 인스턴스)의 **무슨 일이 왜 일어났는지를 사후 100% 재구성**할 수 있게 한다.
+에이전트 1회 실행(특히 SWE-bench 인스턴스)의 **관측 가능한 의사결정·도구호출·검증 결과를 로그 추가 재실행 없이 재구성**할 수 있게 한다.
+
+> "완전(100%) 재현"은 명시적 비목표다(§1.2). 모델 내부 상태·비결정성·외부 시스템 전체 상태는 캡처 대상이 아니며, 우리가 보장하는 건 *관측 가능한 증거*의 무손실 보존이다.
 
 ### 1.1 성공 기준 (측정 가능)
 
-- 실패한 SWE-bench 인스턴스 1건을 **로그 추가 재실행 없이** 단일 아티팩트로 원인 진단 가능
-- run_id → instance → attempt(Best-of-N) → turn → tool_use 까지 **상관키로 슬라이스 조회** 가능
-- 유료 실행의 **인스턴스별 토큰·비용·지연**이 집계로 남음
-- `bun run probe <run-dir>` 한 줄로 타임라인·실패분류·최슬로우·비용 렌더
-- 신규 런타임 의존성 **0**, 전체 LoC 증분 **< 1.2k**, 슬라이스 경계 위반 0
+- 실패한 SWE-bench 인스턴스 1건을, **로그 추가 재실행 없이** 단일 아티팩트로 원인을 *진단*(단정 아님)할 수 있다 — 다음 증거가 모두 그 안에 있다: 의사결정 turn열, tool 호출/결과(+stdout/stderr tail·exit·소요), LLM usage, 생성 patch diff, sandbox 스냅샷, verifier 입력/출력.
+- run_id → instance → attempt(Best-of-N) → turn → span(tool/llm) → tool_use 까지 **상관키로 슬라이스 조회** 가능.
+- 유료 실행의 **인스턴스별 토큰·비용·지연**이 집계로 남고, 비용은 **pricingVersion이 박혀 사후 재계산 가능**.
+- `bun run probe <run-dir>` 한 줄로 timeline·triage(가설, 권위 아님)·hotspots·cost 렌더.
+- 신규 런타임 의존성 **0**, LoC 증분 **< 1.4k**, 슬라이스 경계 위반 0, redaction 골든 테스트 통과.
 
 ### 1.2 Non-Goals
 
+- ❌ **완전 재현/replay** (LLM 비결정성·외부 상태 전체는 대상 아님 — 관측 가능 증거만)
 - ❌ OpenTelemetry/Jaeger/Prometheus **SDK 의존** (의미모델은 차용, 코드 의존 금지 — §9)
-- ❌ 원격 수집기·DB·대시보드 서버 (로컬 파일이 1급, 외부는 후속 어댑터)
+- ❌ 원격 수집기·DB·대시보드 서버 (로컬 파일이 1급, 외부는 후속 OTLP 어댑터)
 - ❌ 실시간 분산 트레이싱 (단일 프로세스, append-only 파일이면 충분)
-- ❌ 관측이 에이전트 동작/결정에 영향 (관측은 순수 부수효과, 실패는 삼킴)
+- ❌ 관측이 에이전트 **동작/결정**에 영향 (관측은 순수 부수효과)
+- ❌ probe가 **권위적 진단(authoritative verdict)** 을 내림 (inspector — 가설·신뢰도만)
 - ❌ 모든 슬라이스 계측 (에이전트 실행경로 + bench만; 라이브러리 내부는 메트릭만)
 
 ---
@@ -39,46 +44,48 @@
 | bench 관측 불능 | `apps/bench/runner.ts` → `NullStream`(AgentEvent 전폐기), `metrics` 미주입. 산출=`[FAIL] id (turns=N)` 한 줄 |
 | 상관 ID 부재 | run_id↔instance↔attempt↔turn↔tool_use 연결 없음 |
 | 토큰/비용 미계측 | LLM 어댑터가 provider `usage`를 폐기 |
-| 재현 아티팩트 부재 | 인스턴스별 replayable trajectory 없음 (`state.ts`는 최종 messages만) |
+| 재현 아티팩트 부재 | 인스턴스별 trajectory 없음 (`state.ts`는 최종 messages만) |
 | 메트릭 비영속 | `Metrics.snapshot()` 존재하나 bench가 덤프 안 함 |
 | 로거 이원화 | `@/shared`(휴먼) vs `@/observability`(구조화) 혼용, bench는 휴먼만 |
 
-자산: `StructuredLogger`, `Metrics`(percentile), `AgentRecorder`(이름 정리됨), `AgentEvent` 스트림, `hooks` 버스, `state.ts` — 재사용 가능.
+자산: `StructuredLogger`, `Metrics`(percentile), `AgentRecorder`, `AgentEvent` 스트림, `hooks` 버스, `state.ts` — 재사용.
 
 ---
 
 ## 3. 설계 원칙
 
 1. **이벤트가 진실의 단일원천.** trajectory(append-only JSONL) = 정본. 메트릭/요약/probe 출력은 전부 그로부터 파생.
-2. **관측은 부수효과.** 레코더 실패는 삼키고 에이전트는 계속 (Non-Goal). 동작 보존: 미설정 시 바이트 동일.
-3. **기존 슬라이스 확장 > 신규 슬라이스.** RFC-0001 §3.1 "구현 1개면 약식". 새 슬라이스 0, 새 app 1(`probe`).
-4. **SOTA 의미모델 차용, SDK 비의존.** OTel GenAI 시맨틱 컨벤션의 *네이밍/스팬 트리 모양*만 채택, 코드 의존 금지(§9).
-5. **상관키는 컨텍스트로 전파.** `RunContext` 옵셔널 — 있으면 모든 이벤트에 스탬프, 없으면 무영향.
-6. **비밀 누출 0.** 레코더는 tool input/env를 기록 전 스크럽(ADR-0006 allowlist 재사용, 중복 금지).
-7. **스키마 버전드.** trajectory 라인에 `v` 필드. 후방호환은 probe의 책임.
+2. **관측은 부수효과 — 단, 실패 처리는 모드 의존.**
+   - *product/세션 모드*: 레코더 실패는 에이전트를 막지 않음. 그러나 **삼키지 않고 `observability_degraded` 이벤트 + 카운터로 흔적을 남김** (droppedEvents 포함).
+   - *eval/benchmark 모드*(`QUANTA_OBSERVE_STRICT=1`, bench 기본 ON): 레코더 실패 = **hard-fail 또는 해당 인스턴스 verdict를 `degraded`로 마킹**. 관측 불능인 결과를 정상 점수로 집계하지 않는다.
+   - 공통: 미설정 시 현 동작 바이트 동일.
+3. **기존 슬라이스 확장 > 신규 슬라이스.** 새 슬라이스 0, 새 app 1(`probe`). 크로스커팅 타입은 `@/shared`(누구나 import — 격리 합법).
+4. **SOTA 의미모델 차용, SDK 비의존.** OTel GenAI 컨벤션의 *스팬 트리·네이밍*만 채택(§9).
+5. **상관키는 컨텍스트로 전파.** `RunContext` 옵셔널. **span 모델 명시**: `spanId`/`parentSpanId`로 `llm_request→llm_usage`, `tool_call→tool_result`를 짝지음.
+6. **비밀 누출 0 — 선언이 아니라 게이트.** 기록 전 스크럽(ADR-0006 allowlist 단일원천) + **redaction 골든 테스트가 머지 게이트**(§11).
+7. **스키마는 레지스트리.** 라인에 `schema:"quanta.trajectory.v1"` + `producer{name,version,gitSha}` + `seq`(시계 스큐 무관 순서) + `pricingVersion`. 후방호환은 probe 책임.
+8. **probe는 inspector.** 원인은 `triage_hint`/`likely_failure_class`/`confidence`로만 — 단정 금지.
 
 ---
 
 ## 4. 아키텍처 — 컴포넌트 & 흐름
 
 ```
-                 RunContext{runId,instanceId?,attempt?,turn,toolUseId}
-                          │ (옵셔널, AgentConfig 경유 전파)
-   llm 어댑터 ──usage──▶ │
-                          ▼
-[agent loop] ──AgentEvent──▶ StreamPort
-                              ├── StdoutStream      (기존, 사람용)
-                              ├── SseStream         (기존, HTTP)
-                              └── TeeStream ─┬─▶ (위 둘 중 택)
-                                             └─▶ JsonlRecorder ──▶ <run>/<instance>.<attempt>.jsonl
-                                                       │                   ▲
-   hooks 버스 ──lifecycle──────────────────────────────┤                   │ (정본 trajectory)
-   AgentRecorder ──counter/timer──▶ Metrics ──snapshot──┴──▶ <run>/metrics.json
-                                                                           │
-                                                            bun run probe ◀┘  (read-only inspector)
+   RunContext{runId,instanceId?,attempt?,turn?,toolUseId?}  (옵셔널, AgentConfig 경유)
+   llm 어댑터 ──usage(in/out/cache,model)──┐
+                                            ▼
+[agent loop] ──AgentEvent(+span)──▶ StreamPort
+                                     ├── StdoutStream / SseStream      (기존, 사람/HTTP)
+                                     └── TeeStream ─┬─▶ (위 중 택, 없으면 NullStream)
+                                                    └─▶ JsonlRecorder ─▶ <run>/<instance>.<attempt>.jsonl
+   hooks ──lifecycle─────────────────────────────────┤   (정본 trajectory: 1 line/event)
+   bench ──patch_*/sandbox/verify────────────────────┤
+   AgentRecorder ──counter/timer/usage/cost─▶ Metrics ─┴─▶ <run>/metrics.json
+   레코더 실패 ──observability_degraded──────────────┘                 │
+                                                       bun run probe ◀─┘  (read-only, 비권위)
 ```
 
-데이터 흐름: 에이전트/어댑터/훅이 내는 모든 신호 → `TeeStream`이 사람용 출력과 `JsonlRecorder`로 분기 → 인스턴스별 JSONL = 정본 → `probe`가 읽어 타임라인/진단/비용 렌더. bench는 `NullStream` 대신 `Tee(silent, JsonlRecorder)` 주입.
+bench는 `NullStream` 대신 `Tee(humanOrNull, JsonlRecorder)` 주입. eval 모드는 recorder 실패를 verdict에 반영.
 
 ---
 
@@ -88,97 +95,129 @@
 
 ```typescript
 export interface RunContext {
-  runId: string                 // 1 회 bench/세션
-  instanceId?: string           // SWE-bench instance
-  attempt?: number              // Best-of-N (0-base)
-  turn?: number                 // ReAct turn (loop가 갱신)
-  toolUseId?: string            // 디스패치 중 도구 호출
+  runId: string            // 1 회 bench/세션
+  instanceId?: string      // SWE-bench instance
+  attempt?: number         // Best-of-N (0-base)
+  turn?: number            // ReAct turn (loop가 갱신)
+  toolUseId?: string       // 디스패치 중 도구 호출
 }
 ```
 `AgentConfig.run?: RunContext` (옵셔널, 미설정 시 무영향 — 프로젝트 표준 패턴).
 
-### 5.2 Trajectory 스키마 v1 — `@/observability`
+### 5.2 Trajectory 스키마 v1 — `@/shared` (경계상 stream이 import해야 하므로 shared에 둠, §6)
 
 ```typescript
 export interface TrajectoryEvent {
-  v: 1
-  ts: number                    // epoch ms
-  ctx: RunContext               // 상관키 스냅샷
+  schema: "quanta.trajectory.v1"        // 스키마 레지스트리 키
+  v: 1                                   // 메이저 (probe 후방호환 분기)
+  seq: number                            // 프로세스-단조 증가 (시계 스큐 무관 정렬)
+  ts: number                             // epoch ms (벽시계, 표시용)
+  monotonicNs?: number                   // performance 시계 (지연 계산용)
+  ctx: RunContext
+  spanId?: string                        // 이 이벤트가 속한 스팬
+  parentSpanId?: string                  // 스팬 트리
+  producer: { name: string; version: string; gitSha?: string }
+  pricingVersion?: string                // cost 파생에 쓰인 가격표 버전
+  redaction: { policy: string; applied: boolean }   // 스크럽 정책·적용 여부
   kind:
     | "session_start" | "session_end"
     | "turn_start"
-    | "llm_request" | "llm_usage"        // usage: in/out/cache tokens, model
-    | "assistant_text"                   // 델타는 합쳐 1건
+    | "llm_request" | "llm_usage"
+    | "assistant_text"                   // 델타 보존(합치지 않음) — §14
     | "tool_call" | "tool_progress" | "tool_result"
-    | "recovery"                          // backoff/compact/nudge/empty/malformed
-    | "error" | "verify"                  // verify: bench 채점 결과
-  data: Record<string, unknown> // kind별 페이로드 (스크럽 후)
+    | "recovery"                         // backoff/compact/nudge/empty/malformed
+    | "patch_generated" | "patch_applied" | "patch_rejected"
+    | "sandbox"                          // 1회 스냅샷 (인스턴스 시작 시)
+    | "verify"                           // bench 채점 증거
+    | "error"
+    | "observability_degraded"           // 레코더가 무언가 흘렸다는 흔적
+  data: Record<string, unknown>          // kind별 페이로드 (스크럽 후, 아래)
 }
 ```
-append-only JSONL, 1 이벤트 1 라인. `AgentEvent`(stream) + 훅 lifecycle + `llm_usage` + bench `verify`를 한 스트림으로 정규화.
+
+kind별 `data` 최소 계약 (probe·골든테스트가 의존):
+
+| kind | data |
+|---|---|
+| `llm_usage` | `model, inputTokens, outputTokens, cacheReadTokens?, costUsd|null` |
+| `tool_result` | `name, ok, exitCode?, durationMs, stdoutTail, stderrTail, fullLogPath?` |
+| `patch_generated`/`_applied`/`_rejected` | `diffPath, filesChanged, hunks, applyStatus` |
+| `sandbox` | `repoCommit, baseCommit, worktreeDirty, runtime{bun?,node?,python?}, envPolicyVersion` |
+| `verify` | `command, exitCode, passed, failedTests, logTail, reportPath` |
+| `observability_degraded` | `component, reason, droppedEvents` |
+
+append-only JSONL, 1 이벤트 1 라인. `AgentEvent`(stream) + 훅 lifecycle + `llm_usage` + bench `patch_*`/`sandbox`/`verify`를 한 스트림으로 정규화.
 
 ### 5.3 토큰/비용 — `llm` + `@/observability`
 
-`StreamEvent`에 `{ type:"usage"; inputTokens; outputTokens; cacheReadTokens?; model }` 추가 → 어댑터가 provider 응답의 usage를 흘려보냄(현재 폐기 중). `AgentEvent`에 동형 `usage` 추가. 비용은 `@/observability`의 **정적 가격표**(모델→$/1M, 네트워크 0)로 파생; 미상 모델은 `cost:null`(에러 아님).
+`StreamEvent`에 `{ type:"usage"; inputTokens; outputTokens; cacheReadTokens?; model }` 추가 → 어댑터가 provider 응답 usage를 흘려보냄(현재 폐기 중). `AgentEvent`에 동형 추가. 비용은 `@/observability`의 **버전드 정적 가격표**(`pricing.v<N>`, 모델→$/1M, 네트워크 0)로 파생; 결과 이벤트에 `pricingVersion` 박음(사후 재계산 가능). 미상 모델 → `costUsd:null`(에러 아님).
 
 ### 5.4 StreamPort 합성 — `@/stream`
 
-기존 `StreamPort{emit}` 불변. 신규 어댑터 2개 (stream 슬라이스 어댑터 패턴 그대로):
-- `TeeStream(...ports: StreamPort[])` — 팬아웃, 한 포트 throw해도 나머지 진행.
-- `JsonlRecorder(dirOrPath, opts)` — `emit`을 `TrajectoryEvent`로 정규화·스크럽·append. 버퍼링/플러시, 파일 상한, 실패 삼킴. `RunContext`는 생성 시 주입 또는 이벤트별.
+기존 `StreamPort{emit}` 불변. 신규 어댑터 2개:
+- `TeeStream(...ports)` — 팬아웃. 한 포트 throw 시: product=격리 후 진행 + `observability_degraded`; strict(eval)=에러 전파(호출측이 verdict degraded 처리).
+- `JsonlRecorder(dirOrPath, opts)` — `AgentEvent`→`TrajectoryEvent` 정규화·스크럽·`seq`/`span` 부여·append. 버퍼링/플러시/파일 라인 상한. 실패 처리는 `opts.strict`로 모드 분기. `@/shared`의 스키마만 import(경계 합법).
 
 ### 5.5 메트릭 (기존 확장, 무신설)
 
-`AgentRecorder`에 `usage(in,out,model)` / `cost(usd)` 추가. bench 종료 시 `metrics.snapshot()`을 `<run>/metrics.json`으로 덤프.
+`AgentRecorder`에 `usage(in,out,model)`/`cost(usd,pricingVersion)`/`degraded(component)` 추가. bench 종료 시 `metrics.snapshot()`→`<run>/metrics.json`.
 
 ---
 
-## 6. 슬라이스 매핑 (격리 준수)
+## 6. 슬라이스 매핑 (격리 준수 — v0.2 수정)
 
-| 슬라이스 | 추가 | 비고 |
+`src/stream/**`는 Biome상 `@/observability` import **금지**(@/shared만 허용). 따라서 **`TrajectoryEvent`·`RunContext`는 `@/shared`** 에 둔다(크로스커팅 타입, 누구나 import — memory↛llm 때와 동일 패턴). 가격표/`cost()`는 `@/observability`(조립자·probe만 사용).
+
+| 슬라이스 | 추가 | 경계 |
 |---|---|---|
-| `shared` | `RunContext` 타입 | 누구나 import 가능 (격리 OK) |
-| `llm` | `StreamEvent.usage`; 어댑터가 usage emit | provider usage 흘리기 |
-| `stream` | `TeeStream`, `JsonlRecorder` 어댑터 + `AgentEvent.usage` | stream만 import (격리 OK), 직렬화는 자체 |
-| `observability` | `TrajectoryEvent` 스키마, 정적 가격표, `cost()` | `@/shared`만 의존 |
-| `agent` | `AgentConfig.run?`; loop가 `ctx.turn` 갱신·usage/lifecycle를 stream으로 emit | 조립자, 모두 import 가능 |
-| `apps/bench` | `NullStream`→`Tee`, 인스턴스/attempt 키, metrics.json, verify 이벤트 | apps |
-| `apps/probe` | **신규 app** — read-only inspector CLI | apps (격리 무관) |
+| `shared` | `RunContext`, `TrajectoryEvent v1` 스키마 | 누구나 import (OK) |
+| `llm` | `StreamEvent.usage`; 어댑터 usage emit | @/shared만 |
+| `stream` | `TeeStream`, `JsonlRecorder`(+`AgentEvent.usage`) | **@/shared만** import (스키마 거기 있음 → 합법) |
+| `observability` | 버전드 가격표, `cost()` | @/shared만 |
+| `agent` | `AgentConfig.run?`; loop가 `turn`/span 갱신·usage/lifecycle emit | 조립자 |
+| `apps/bench` | `NullStream`→`Tee`, patch_*/sandbox/verify emit, strict=ON, metrics/summary | apps |
+| `apps/probe` | **신규 app** — read-only, 비권위 inspector | apps |
 
-신규 슬라이스 0. `apps/probe` 신설은 RFC-0001 §9.2 ADR 트리거(앱 추가) → ADR 작성.
+신규 슬라이스 0. `apps/probe` 신설 = RFC-0001 §9.2 ADR 트리거.
 
 디렉토리 델타:
 ```
 src/shared/run-context.ts                 # RunContext
-src/observability/trajectory.ts           # TrajectoryEvent v1 + 가격표 + cost()
+src/shared/trajectory.ts                  # TrajectoryEvent v1 (스키마 레지스트리)
+src/observability/pricing.ts              # 버전드 가격표 + cost()
 src/stream/adapters/tee.ts                # TeeStream
-src/stream/adapters/jsonl-recorder.ts     # JsonlRecorder
+src/stream/adapters/jsonl-recorder.ts     # JsonlRecorder (seq/span/redaction)
 src/apps/probe/{index,parse,render,triage}.ts
-tests/unit/{trajectory,tee,jsonl-recorder,cost,probe}.test.ts
+tests/unit/{trajectory,tee,jsonl-recorder,pricing,redaction,probe}.test.ts
 tests/integration/bench-observability.test.ts
-docs/decisions/0009-observability-trajectory.md
+docs/decisions/0010-observability-trajectory.md
 ```
 
 ---
 
-## 7. `probe` 툴 (CLI 사양)
+## 7. `probe` 툴 (read-only, **비권위**)
 
 `bun run probe <run-dir | trajectory.jsonl> [--instance ID] [--failed] [--slow] [--cost] [--json]`
 
-읽기 전용. 출력:
-- **timeline**: turn별 assistant 요약 + tool_call→result(ok/err, ms) 들여쓰기 트리
-- **triage**(`--failed`): 실패 인스턴스만, 종료사유·마지막 에러·최종 패치 유무·verify 로그 tail
-- **hotspots**(`--slow`): 최슬로우 tool/llm 스팬 Top-N (Metrics percentile)
-- **cost**(`--cost`): 인스턴스별 in/out 토큰·$ 합계·resolved 상관
-- **`--json`**: 머신 출력(상위 도구가 파싱)
+- **timeline**: turn별 assistant 요약 + span 트리(tool_call→result: ok/err, exit, ms)
+- **triage**(`--failed`): 실패 인스턴스만 — `triage_hint`, `likely_failure_class`, `confidence`(0–1). **단정 아님**; 종료사유·마지막 에러·patch 유무·verify logTail·reportPath 원증거를 함께 제시해 사람이 판단.
+- **hotspots**(`--slow`): 최슬로우 span Top-N (monotonicNs 기반)
+- **cost**(`--cost`): 인스턴스별 in/out 토큰·$ (pricingVersion 명시)·resolved 상관
+- **`--json`**: 머신 출력. probe는 어떤 필드도 "확정 원인"으로 라벨하지 않는다.
 
-SOTA 대응: AISI Inspect `inspect view`, LangSmith run viewer, SWE-agent `*.traj`의 인하우스·무의존판.
+SOTA 대응: AISI Inspect viewer / LangSmith run viewer / SWE-agent `*.traj` 의 인하우스·무의존·비권위판.
 
 ---
 
 ## 8. SWE-bench 배선
 
-`runInstance`(runner.ts): `NullStream` → `TeeStream(new NullStream(), new JsonlRecorder(<run>/<instanceId>.<attempt>.jsonl, {ctx}))`. Best-of-N attempt마다 별 파일. `verify()` 결과를 `kind:"verify"`로 emit. run 종료 시 `<run>/metrics.json` + `<run>/summary.json`(predictions·resolved 조인). `--observe-dir` / `QUANTA_OBSERVE_DIR` (기본 OFF → 현 동작 불변).
+`runInstance`(runner.ts): `NullStream` → `TeeStream(NullStream, JsonlRecorder(<run>/<instanceId>.<attempt>.jsonl, {ctx, strict:true}))`. attempt마다 별 파일. 추가로:
+- 인스턴스 시작 시 `kind:"sandbox"` 1건(repoCommit/baseCommit/worktreeDirty/runtime/envPolicyVersion).
+- 패치 라이프사이클 `patch_generated|applied|rejected`(diffPath/filesChanged/hunks/applyStatus).
+- `verify()` → `kind:"verify"`(command/exitCode/passed/failedTests/logTail/reportPath).
+- recorder 실패 → 해당 인스턴스 `verdict:"degraded"`(resolved 집계에서 제외, summary에 별도 표기).
+- run 종료: `<run>/metrics.json` + `<run>/summary.json`(predictions·resolved·degraded 조인).
+- `--observe-dir`/`QUANTA_OBSERVE_DIR`(기본 OFF → 현 동작 불변), bench는 strict 기본 ON.
 
 ---
 
@@ -186,32 +225,33 @@ SOTA 대응: AISI Inspect `inspect view`, LangSmith run viewer, SWE-agent `*.tra
 
 | SOTA | 차용 | 우리 구현 |
 |---|---|---|
-| OTel GenAI 시맨틱 컨벤션 | 스팬 트리 모양·속성 네이밍(`gen_ai.usage.*` → `llm_usage`) | JSONL kind/ctx로 등가 표현 |
-| AISI Inspect `.eval`/viewer | 인스턴스별 replayable 로그 + inspector | `<instance>.jsonl` + `probe` |
-| LangSmith/Langfuse run tree | run→child span 상관 | `RunContext` 전파 |
-| SWE-agent `*.traj` | 인스턴스 trajectory 파일 | 동형 JSONL(스키마 버전드) |
+| OTel GenAI 시맨틱 컨벤션 | 스팬 트리·`gen_ai.usage.*` 네이밍 | `spanId/parentSpanId` + `llm_usage` JSONL |
+| AISI Inspect viewer | 인스턴스별 replayable 로그 + inspector | `<instance>.jsonl` + `probe` |
+| LangSmith/Langfuse run tree | run→span 상관 | `RunContext` + span |
+| SWE-agent `*.traj` | 인스턴스 trajectory + patch | 동형 JSONL(스키마 레지스트리) + `patch_*` |
 
-**SDK 비의존 근거**: RFC-0001 §12 의존성 폭증이 1순위 위험. OTel SDK = 트랜시티브 다수 + 런타임 무게. 단일 바이너리·로컬 우선 제품에 수집기 불필요. 의미모델만 차용하면 후속에 OTLP 익스포터를 *어댑터*로 추가 가능(아키텍처가 이미 포트/어댑터). → 지금 SDK 박는 건 YAGNI.
+**SDK 비의존 근거**: RFC-0001 §12 의존성 폭증=1순위 위험. OTel SDK=트랜시티브 다수+런타임 무게. 포트/어댑터라 후속 OTLP exporter를 *어댑터*로 추가 가능 → 지금 박는 건 YAGNI.
 
 ---
 
 ## 10. Phase 계획 (웨이브, 파일 소유 disjoint 병렬)
 
-- **W-A (기반, 선행)**: `shared/RunContext`, `observability/trajectory`(스키마+가격표+cost), `StreamEvent.usage` + 양 어댑터 usage emit. (`shared`,`observability`,`llm`)
-- **W-B (스트림, A 의존)**: `stream/TeeStream`+`JsonlRecorder` + `AgentEvent.usage`. (`stream`)
-- **W-C (배선, B 의존)**: loop가 `RunContext.turn` 갱신·usage/lifecycle emit; CLI `--observe-dir`. (`agent`,`apps/cli`)
-- **W-D (bench, B 의존, C와 파일 disjoint)**: runner Tee 주입·verify 이벤트·metrics/summary 덤프. (`apps/bench`)
-- **W-E (probe, JSONL 스키마만 의존)**: `apps/probe` CLI + 렌더/triage. (`apps/probe`)
+- **W-A (기반, 선행)**: `shared/{run-context,trajectory}`, `observability/pricing`, `StreamEvent.usage` + 어댑터 usage emit. (`shared`,`observability`,`llm`)
+- **W-B (스트림, A 의존)**: `stream/{tee,jsonl-recorder}`(seq/span/redaction/strict) + `AgentEvent.usage`. (`stream`)
+- **W-C (배선, B 의존)**: loop가 `turn`/span 갱신·usage/lifecycle emit; CLI `--observe-dir`. (`agent`,`apps/cli`)
+- **W-D (bench, B 의존, C와 파일 disjoint)**: runner Tee·sandbox/patch_*/verify emit·strict·metrics/summary. (`apps/bench`)
+- **W-E (probe, JSONL 스키마만 의존)**: `apps/probe` 비권위 inspector. (`apps/probe`)
 
-W-A→(B)→(C‖D), E는 스키마 확정 후 독립. 각 웨이브: tsc 0 / biome exit0·복잡도 0 / 전 테스트 green / 경계 probe.
+W-A→(B)→(C‖D), E는 스키마 확정 후 독립. 각 웨이브: tsc 0 / biome exit0·복잡도 0 / 전 테스트 green / 경계 probe / **redaction 골든 통과**.
 
 ---
 
 ## 11. 테스트 전략 (ADR-0003 피라미드)
 
-- **unit**: 스키마 직렬화·스크럽(비밀 미기록), 가격표/cost(미상 모델 null), TeeStream 팬아웃·격리(throw 격리), JsonlRecorder append/플러시/상한, probe 파서·렌더 골든.
-- **integration**: FakeLLM로 `runAgent` 구동 → JsonlRecorder가 정합 trajectory 생성 → `probe`가 파싱·triage 정확. bench: 합성 코퍼스 1건 → `<run>/{*.jsonl,metrics.json,summary.json}` 생성·일관.
-- **결정성**: 시계/ts 주입, 무네트워크. contract/eval 티어 무관.
+- **redaction 골든 = 머지 게이트(blocking)**: env secret / tool input secret / prompt 내 secret / stacktrace 내 token 4종이 trajectory에 절대 안 박힘을 골든으로 고정. 실패 시 머지 불가.
+- **unit**: 스키마(schema/v/seq/producer/pricingVersion 필수), span 짝(llm_request↔llm_usage, tool_call↔tool_result parentSpanId), 가격표/cost(미상→null, pricingVersion 박힘), TeeStream 격리 vs strict 전파, JsonlRecorder append/플러시/상한/degraded 이벤트, probe 파서·triage(confidence 범위, 단정 라벨 부재) 골든.
+- **integration**: FakeLLM `runAgent` → JsonlRecorder 정합 trajectory → `probe` 파싱·triage 정확. bench: 합성 코퍼스 1건 → `<run>/{*.jsonl,metrics.json,summary.json}` + sandbox/patch_*/verify 이벤트 존재·일관, recorder 강제 실패 시 verdict=degraded.
+- **결정성**: 시계/seq/ts 주입, 무네트워크.
 
 ---
 
@@ -219,28 +259,32 @@ W-A→(B)→(C‖D), E는 스키마 확정 후 독립. 각 웨이브: tsc 0 / bi
 
 | 위험 | 가능성 | 영향 | 완화 |
 |---|---|---|---|
-| 관측이 에이전트 동작 변경 | 중 | 큼 | 부수효과·실패삼킴·미설정 시 바이트동일, 회귀테스트 |
-| 비밀 누출(tool input/env) | 중 | 큼 | 기록 전 스크럽(ADR-0006 allowlist 재사용, 단일원천) |
-| JSONL 비대(500-instance) | 높 | 중 | 인스턴스별 파일·라인 상한·요약은 metrics.json |
-| 스키마 드리프트 | 중 | 중 | `v` 필드 + probe 후방호환 + 골든테스트 |
-| anti-bloat 침범 | 중 | 큼 | 신규 슬라이스 0·dep 0·LoC<1.2k 게이트, 신규 app만 ADR |
-| OTel 미채택 후회 | 낮 | 중 | 포트/어댑터라 OTLP exporter 후속 추가 가능 |
+| 관측이 에이전트 동작 변경 | 중 | 큼 | 부수효과·미설정 바이트동일·회귀테스트 |
+| **관측 실패가 eval 점수 오염** | 중 | 큼 | eval=strict: hard-fail/`verdict:degraded`, resolved 집계 제외 |
+| 비밀 누출 | 중 | 큼 | 스크럽 단일원천 + **redaction 골든 머지게이트** |
+| **비용 재현 불가(가격표 드리프트)** | 중 | 중 | 이벤트에 `pricingVersion` 박음, 가격표 버전드 |
+| span 짝 오류(상관 깨짐) | 중 | 중 | span 짝 골든테스트, loop가 단일지점서 발급 |
+| JSONL 비대(500-instance) | 높 | 중 | 인스턴스별 파일·라인상한·tail+path(전체 저장 금지)·요약은 metrics.json |
+| 스키마 드리프트 | 중 | 중 | `schema`+`v`+골든, probe 후방호환 |
+| probe 오진을 단정으로 오용 | 중 | 중 | 비권위 설계(hint/confidence), 원증거 동시 제시 |
+| anti-bloat 침범 | 중 | 큼 | 신규 슬라이스 0·dep 0·LoC<1.4k 게이트, 신규 app만 ADR |
 
 ---
 
 ## 13. ADR 트리거 (RFC-0001 §9.2)
 
-- **ADR-0009**: 관측 플랫폼 + trajectory 스키마 v1 + SDK 비의존 결정 (앱 추가 `apps/probe` + 스키마 = 트리거). 코드 동작 후 1페이지.
+- **ADR-0010**: 관측 플랫폼 — trajectory 스키마 레지스트리 v1, eval 모드 관측실패 정책(strict→degraded), SDK 비의존, `apps/probe` 신설. 코드 동작 후 1페이지. (0009는 lsp-diagnostics-tool로 선점됨 → 0010)
 
 ---
 
 ## 14. 미해결 질문 (구현 중 결정)
 
 1. trajectory 파일 회전/압축 — 라인 상한 vs gzip? (막힐 때)
-2. `assistant_text` 델타 — 합쳐 1건 vs 토큰 스트림 보존? (probe 요구로 결정)
-3. probe 출력 컬러/TUI 깊이 — Phase 1은 플레인, TUI는 수요 시
-4. OTLP exporter 어댑터 — 별도 RFC 대상인가? (외부 통합 = ADR)
-5. `RunContext`를 hooks 페이로드에도 넣을지 (관찰자 일관성 vs 표면 확대)
+2. `assistant_text` — **델타 보존이 기본**(streaming/tool-interleave 디버깅). 축약은 probe 렌더 책임. 남은 질문: 초장문 응답의 라인 상한 정책.
+3. probe TUI 깊이 — Phase 1 플레인, TUI는 수요 시.
+4. OTLP exporter 어댑터 — 별도 RFC + 외부 통합 ADR 대상.
+5. `RunContext`를 hooks 페이로드에도 넣을지 (관찰자 일관성 vs 표면 확대).
+6. `sandbox`/`patch_*` 증거의 보존 상한(diff 전체 vs hunk 메타+path).
 
 **원칙**: 막힐 때 결정. 미리 결정하지 않음. (RFC-0001 §13 상속)
 
@@ -251,3 +295,4 @@ W-A→(B)→(C‖D), E는 스키마 확정 후 독립. 각 웨이브: tsc 0 / bi
 | 버전 | 날짜 | 변경 |
 |-----|-----|-----|
 | 0.1 | 2026-05-19 | 최초 작성 — 관측/trajectory/probe 플랫폼 구조 제안 (구현 전 RFC) |
+| 0.2 | 2026-05-19 | 리뷰 반영: "100%재구성"→관측증거 재구성 / eval 관측실패 strict→degraded / pricingVersion·버전드 가격표 / assistant_text 델타 보존 / **stream↛observability 경계 위반 수정**(스키마 @/shared 이동) / span(spanId·parentSpanId)·seq·schema 레지스트리·producer / patch_*·sandbox·verify 증거 / observability_degraded / redaction 골든 머지게이트 / probe 비권위(hint·confidence) |
