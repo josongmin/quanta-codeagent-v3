@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-05-19T14:44:11.253Z",
+  "model": "gpt-4o",
+  "provider": "openai",
+  "n": 1,
+  "totals": {
+    "total": 5,
+    "resolved": 3,
+    "resolvedPct": 60
+  },
+  "perInstance": [
+    {
+      "id": "django__django-10097",
+      "passed": false,
+      "turns": 24,
+      "patchBytes": 25400242,
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10097-UgjUuC/predictions.jsonl --run_id quanta-django__django-10097-1779201036073 --instance_ids django__django-10097 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
+    },
+    {
+      "id": "django__django-10880",
+      "passed": true,
+      "turns": 17,
+      "patchBytes": 639
+    },
+    {
+      "id": "django__django-10914",
+      "passed": true,
+      "turns": 8,
+      "patchBytes": 625
+    },
+    {
+      "id": "django__django-10999",
+      "passed": false,
+      "turns": 10,
+      "patchBytes": 497,
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10999-oMXUBI/predictions.jsonl --run_id quanta-django__django-10999-1779201669425 --instance_ids django__django-10999 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
+    },
+    {
+      "id": "django__django-11066",
+      "passed": true,
+      "turns": 10,
+      "patchBytes": 767
+    }
+  ]
+}

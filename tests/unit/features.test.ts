@@ -208,4 +208,80 @@ describe("buildSessionFeatures", () => {
     await buildSessionFeatures(c)
     expect(c.registry.specs().map((s) => s.name)).toEqual(before)
   })
+
+  // --- SOTA++ skill tool-scoping ENFORCEMENT data (ADR-0011) --------------
+
+  test("skillAllowlists: ONLY scoped skill present, no-tools skill absent", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "feat-allow-"))
+    tmpDirs.push(dir)
+    // Scoped skill: declares an inline `tools:` allowlist.
+    await mkdir(join(dir, "scoped"), { recursive: true })
+    await writeFile(
+      join(dir, "scoped", "SKILL.md"),
+      '---\nname: scoped\ndescription: scoped skill\ntools: ["Read"]\n---\nScoped body.\n',
+    )
+    // Unscoped skill: NO `tools:` key at all.
+    await mkdir(join(dir, "open"), { recursive: true })
+    await writeFile(
+      join(dir, "open", "SKILL.md"),
+      "---\nname: open\ndescription: open skill\n---\nOpen body.\n",
+    )
+
+    const f = await buildSessionFeatures(cfg({ skills: { dir } }))
+    const al = must(f.skillAllowlists, "skillAllowlists")
+    expect(al).toBeInstanceOf(Map)
+    // Only the scoped skill is a key; its value is exactly its declared list.
+    expect([...al.keys()]).toEqual(["scoped"])
+    expect(al.get("scoped")).toEqual(["Read"])
+    // The no-tools skill must NOT appear.
+    expect(al.has("open")).toBe(false)
+    // Tools themselves are still registered regardless of scoping.
+    expect(names(f.extraTools)).toEqual(["Skill", "ToolSearch"])
+  })
+
+  test("skillAllowlists: multi-tool inline list preserved verbatim & in order", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "feat-allow-multi-"))
+    tmpDirs.push(dir)
+    await mkdir(join(dir, "multi"), { recursive: true })
+    await writeFile(
+      join(dir, "multi", "SKILL.md"),
+      '---\nname: multi\ndescription: d\ntools: ["Read", "Grep", "Glob"]\n---\nbody\n',
+    )
+    const f = await buildSessionFeatures(cfg({ skills: { dir } }))
+    const al = must(f.skillAllowlists, "skillAllowlists")
+    expect(al.get("multi")).toEqual(["Read", "Grep", "Glob"])
+  })
+
+  test("skillAllowlists: ABSENT entirely when no skill declares tools", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "feat-noallow-"))
+    tmpDirs.push(dir)
+    await mkdir(join(dir, "a"), { recursive: true })
+    await writeFile(join(dir, "a", "SKILL.md"), "---\nname: a\ndescription: d\n---\nbody\n")
+    await mkdir(join(dir, "b"), { recursive: true })
+    await writeFile(join(dir, "b", "SKILL.md"), "---\nname: b\ndescription: d\n---\nbody\n")
+    const f = await buildSessionFeatures(cfg({ skills: { dir } }))
+    // No skill declared `tools:` ⇒ no gate data at all (byte-identical loop).
+    expect(f.skillAllowlists).toBeUndefined()
+    // Tools still registered (gate is gated on config.skills, not contents).
+    expect(names(f.extraTools)).toEqual(["Skill", "ToolSearch"])
+  })
+
+  test("skillAllowlists: absent when skills not configured at all", async () => {
+    const f = await buildSessionFeatures(cfg())
+    expect(f.skillAllowlists).toBeUndefined()
+  })
+
+  test("skillAllowlists: empty `tools: []` is treated as no allowlist", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "feat-emptylist-"))
+    tmpDirs.push(dir)
+    await mkdir(join(dir, "e"), { recursive: true })
+    await writeFile(
+      join(dir, "e", "SKILL.md"),
+      "---\nname: e\ndescription: d\ntools: []\n---\nbody\n",
+    )
+    const f = await buildSessionFeatures(cfg({ skills: { dir } }))
+    // skillToolAllowlist returns undefined for an empty list ⇒ not a key, and
+    // since it is the only skill the whole map is absent.
+    expect(f.skillAllowlists).toBeUndefined()
+  })
 })

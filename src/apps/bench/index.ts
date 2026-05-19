@@ -223,6 +223,12 @@ const runDatasetMode = async (
     `bench(swebench): ${selected.length} task(s), provider=${meta.provider}, model=${meta.model}, n=${cfg.n}`,
   )
 
+  // Official-dataset path MUST wire the Python harness too (the custom-corpus
+  // path does at :396). Without this, `deps.pythonSwebench` is always
+  // undefined here and runner.verify() silently falls back to the no-op local
+  // `testCmd:"true"` — i.e. `--swebench` could never reach real grading.
+  const pythonSwebench = await buildPythonSwebench()
+
   const results: InstanceResult[] = []
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL
   for (const task of selected) {
@@ -240,7 +246,12 @@ const runDatasetMode = async (
       results.push(
         await resolveInstance(
           instance,
-          { llm, maxTurns: cfg.maxTurns, timeoutMs: cfg.timeoutMs },
+          {
+            llm,
+            maxTurns: cfg.maxTurns,
+            timeoutMs: cfg.timeoutMs,
+            ...(pythonSwebench !== undefined ? { pythonSwebench } : {}),
+          },
           cfg.n,
           obs,
         ),

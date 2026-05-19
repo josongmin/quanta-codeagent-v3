@@ -196,6 +196,20 @@ const buildCompactionBreakerConfig = (): AgentConfig["compactionBreaker"] | unde
 }
 
 /**
+ * SOTA++ (ADR-0011): dedicated compaction summarizer model. `QUANTA_COMPACT_MODEL`
+ * (+ optional `QUANTA_COMPACT_PROVIDER`, default = the main provider) builds a
+ * cheaper/faster `LLMPort` (retry-wrapped, same as the main stack) used ONLY
+ * for the compaction summary turn. Unset ⇒ `undefined` ⇒ `config.llm` is used
+ * (byte-identical). Tradeoff documented on `AgentConfig.compaction.summarizerLlm`.
+ */
+const buildSummarizerLlm = (mainProvider: Provider, signal: AbortSignal): LLMPort | undefined => {
+  const model = process.env.QUANTA_COMPACT_MODEL
+  if (model === undefined || model.trim() === "") return undefined
+  const provider = (process.env.QUANTA_COMPACT_PROVIDER ?? mainProvider) as Provider
+  return new RetryingLLM({ inner: buildLLM(provider, model.trim()), signal })
+}
+
+/**
  * Resolve the fallback-provider model ids from `QUANTA_MODEL_FALLBACK`.
  * Default OFF: unset ⇒ `[]` so the llm stack is left byte-identical to
  * today (no `FallbackLLM` wrap). Comma-separated model ids; a bare flag
@@ -384,34 +398,49 @@ interface SessionDeps {
   subagentConfig: AgentConfig["subagent"] | undefined
   skillsConfig: AgentConfig["skills"] | undefined
   compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
+  summarizerLlm: LLMPort | undefined
+}
+
+/** Compaction config dependency. Present when memory/store is on (preserving
+ *  the prior `compaction: {}` default) OR a dedicated summarizer model is set;
+ *  carries `summarizerLlm` when configured. Absent when neither ⇒ omitted
+ *  entirely (byte-identical to the pre-knob default path). */
+const compactionDep = (d: SessionDeps): AgentConfig["compaction"] | undefined => {
+  if (!d.store && !d.summarizerLlm) return undefined
+  return d.summarizerLlm ? { summarizerLlm: d.summarizerLlm } : {}
 }
 
 /** Assemble the per-turn `AgentConfig`. Every conditional spread is preserved
  *  verbatim (same keys, same gating) — this is a pure relocation so the wired
  *  knobs are byte-identical; it only moves the chain off `main`/`session`. */
-const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => ({
-  llm: d.llm,
-  registry: d.registry,
-  stream: d.stream,
-  permission: d.permission,
-  messages,
-  system: buildSystemPrompt(d.cwd),
-  cwd: d.cwd,
-  maxTurns: d.maxTurns,
-  signal: d.signal,
-  onConfirm: d.onConfirm,
-  // Memory + compaction are co-gated: only active when a store is set, so
-  // default (no QUANTA_MEMORY) runs are byte-for-byte unchanged.
-  ...(d.store ? { store: d.store, sessionId: d.sessionId, compaction: {} } : {}),
-  ...(d.embedder ? { embedder: d.embedder } : {}),
-  ...(d.memoryConfig ? { memory: d.memoryConfig } : {}),
-  ...(d.planMode ? { planMode: true } : {}),
-  ...(d.metrics ? { metrics: d.metrics } : {}),
-  ...(d.run ? { run: d.run } : {}),
-  ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
-  ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
-  ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
-})
+const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {
+  const compaction = compactionDep(d)
+  return {
+    llm: d.llm,
+    registry: d.registry,
+    stream: d.stream,
+    permission: d.permission,
+    messages,
+    system: buildSystemPrompt(d.cwd),
+    cwd: d.cwd,
+    maxTurns: d.maxTurns,
+    signal: d.signal,
+    onConfirm: d.onConfirm,
+    // Store/sessionId gated on memory; compaction is now decoupled so a
+    // dedicated summarizer model works without a store. Store-only ⇒
+    // `compaction: {}` exactly as before (byte-identical).
+    ...(d.store ? { store: d.store, sessionId: d.sessionId } : {}),
+    ...(compaction ? { compaction } : {}),
+    ...(d.embedder ? { embedder: d.embedder } : {}),
+    ...(d.memoryConfig ? { memory: d.memoryConfig } : {}),
+    ...(d.planMode ? { planMode: true } : {}),
+    ...(d.metrics ? { metrics: d.metrics } : {}),
+    ...(d.run ? { run: d.run } : {}),
+    ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
+    ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
+    ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
+  }
+}
 
 /** The memory store + tool registry + per-run config knobs, resolved once.
  *  Pure relocation of the inline store/memory/registry block — same env
@@ -562,6 +591,7 @@ const main = async (): Promise<void> => {
     subagentConfig,
     skillsConfig,
     compactionBreakerConfig,
+    summarizerLlm: buildSummarizerLlm(provider, abort.signal),
   }
   const session = (messages: Message[]): Promise<AgentOutcome> =>
     runAgent(assembleConfig(messages, sessionDeps))

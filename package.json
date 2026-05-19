@@ -19,7 +19,8 @@
     "format": "biome format --write src tests",
     "build": "bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent",
     "bench": "bun run src/apps/bench/index.ts",
-    "probe": "bun run src/apps/probe/index.ts"
+    "probe": "bun run src/apps/probe/index.ts",
+    "bench:verified": "bun run src/apps/bench/index.ts --swebench /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",

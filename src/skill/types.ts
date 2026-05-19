@@ -10,8 +10,9 @@ export type SkillEffort = "low" | "medium" | "high" | "max" | number
 /**
  * A discovered skill. `body` is the markdown instructions injected into the
  * model context when the skill is invoked. The scoping fields (`tools`,
- * `model`, `effort`) are surfaced here for the main thread to enforce later —
- * this slice only *declares* them, it does not wire permission/model seams.
+ * `model`, `effort`) are ADVISORY author-declared metadata only: this slice
+ * neither enforces them nor wires any permission/model seam. A host that wants
+ * enforcement must read them (see `skillToolAllowlist`) and apply them itself.
  */
 export interface Skill {
   /** Stable id — directory name (or file basename for `<dir>/*.md`). */

@@ -134,7 +134,30 @@ const withGitSnapshot = async (
   await body()
   if (init.code !== 0) return ""
   const diff = await exec(`${G} add -A && ${G} diff --cached --no-color`, sandbox, timeoutMs)
-  return diff.code === 0 ? diff.stdout : ""
+  return diff.code === 0 ? sourceOnlyDiff(diff.stdout) : ""
+}
+
+/** SWE-bench predictions must be SOURCE-only: the official harness applies its
+ *  own gold `test_patch`, so any test-file hunk a model emits is at best
+ *  discarded and at worst conflicts with / skews grading (observed: agents
+ *  editing `tests/` produced large diffs that failed PASS_TO_PASS). Drop the
+ *  per-file sections of a unified `git diff` whose path is a test file/dir.
+ *  Pure, order-preserving; non-test (source) hunks pass through verbatim. */
+const TEST_PATH_RE = /(^|\/)tests?\//i
+const TEST_FILE_RE = /(^|\/)(test_[^/]+|[^/]+_test|conftest)\.(py|js|ts|tsx)$/i
+export const sourceOnlyDiff = (diff: string): string => {
+  if (diff.trim() === "") return diff
+  const out: string[] = []
+  let skip = false
+  for (const line of diff.split("\n")) {
+    const m = line.match(/^diff --git a\/\S+ b\/(\S+)/)
+    if (m) {
+      const p = m[1] ?? ""
+      skip = TEST_PATH_RE.test(p) || TEST_FILE_RE.test(p)
+    }
+    if (!skip) out.push(line)
+  }
+  return out.join("\n")
 }
 
 /**
@@ -186,6 +209,28 @@ const gatherSandbox = async (
   }
 }
 
+/** Solve directive for real SWE-bench tasks, grounded in observed 0/5 failure
+ *  modes: full-file rewrites → 180KB diffs that break PASS_TO_PASS; agents
+ *  editing tests/ (discarded by the source-only grader); plausible-but-wrong
+ *  fixes with no verification loop. Appended to the task message only when
+ *  `instance.swebench` is set (custom-corpus runs unaffected). */
+const SWEBENCH_DIRECTIVE = [
+  "",
+  "",
+  "You are fixing a real defect in this repository; an automated grader runs",
+  "hidden tests against ONLY your source changes. Hard rules:",
+  "- Change library/source code ONLY. NEVER create, edit, or delete any test",
+  "  file or anything under a tests/ or test/ dir — the grader supplies its own",
+  "  tests; your test edits are discarded and only waste turns.",
+  "- Make the SMALLEST correct change. Use `edit` for targeted hunks. Do NOT",
+  "  rewrite or reformat whole files; do NOT `write` over an existing file.",
+  "- Infer the EXACT required behavior (signatures, error messages, return",
+  "  values, edge cases) from the issue text and match it precisely.",
+  "- Before stopping: find and run the existing test(s) most specific to the",
+  "  code you changed; if they fail or you broke nearby behavior, iterate.",
+  "- Keep the final diff minimal and isolated to the fix.",
+].join("\n")
+
 const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -195,14 +240,12 @@ const buildConfig = (
 ) => {
   const registry = new ToolRegistry(defaultTools)
   const permission: PermissionContext = { mode: "acceptEdits" }
+  const base = `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
   const messages: Message[] = [
     {
       role: "user",
       content: [
-        {
-          type: "text",
-          text: `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`,
-        },
+        { type: "text", text: instance.swebench ? `${base}${SWEBENCH_DIRECTIVE}` : base },
       ],
     },
   ]

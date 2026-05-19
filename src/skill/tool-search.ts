@@ -5,8 +5,9 @@ const schema = z.object({
   query: z
     .string()
     .describe(
-      'Query to find deferred tools. Use "select:<tool_name>[,<tool_name>...]" ' +
-        "for direct selection, or keywords to search.",
+      "Query to find tools in this agent's tool catalog. Use " +
+        '"select:<tool_name>[,<tool_name>...]" for direct lookup by name, or ' +
+        "keywords for a ranked search.",
     ),
   max_results: z.number().optional().describe("Maximum number of results (default 5)"),
 })
@@ -22,8 +23,7 @@ const tokenize = (name: string): string[] =>
     .filter(Boolean)
 
 /**
- * Lexical relevance score of one tool spec against the query terms. Mirrors the
- * shape of CC's `yn7` scoring (analysis §2.3) at a faithful-minimal level:
+ * Lexical relevance score of one tool spec against the query terms:
  * exact-name short-circuit, token hits, substring hits, description hits.
  */
 const score = (spec: ToolSpec, terms: string[], rawQuery: string): number => {
@@ -57,8 +57,7 @@ const runSelect = (all: ToolSpec[], rawSelection: string): { ok: boolean; output
     if (hit) found.push(hit)
     else missing.push(w)
   }
-  const head =
-    found.length === 0 ? "No matching deferred tools found." : found.map(formatSpec).join("\n\n")
+  const head = found.length === 0 ? "No matching tools found." : found.map(formatSpec).join("\n\n")
   const tail = missing.length > 0 ? `\n\nUnknown: ${missing.join(", ")}` : ""
   return { ok: found.length > 0, output: head + tail }
 }
@@ -81,30 +80,34 @@ const runKeyword = (
     .slice(0, max)
 
   if (ranked.length === 0) {
-    return { ok: false, output: `No matching deferred tools found for: ${query}` }
+    return { ok: false, output: `No matching tools found for: ${query}` }
   }
   return { ok: true, output: ranked.map((r) => formatSpec(r.spec)).join("\n\n") }
 }
 
 /**
- * The `ToolSearch` tool (analysis §2.3). Input `{ query, max_results? }`. Two
- * modes, matching CC:
+ * The `ToolSearch` tool. Input `{ query, max_results? }`. Two modes:
  *   - `select:A,B,C` — return those tools' schemas by exact name.
  *   - keyword        — lexical ranking over name + description.
  * Returns the best-matching tool schemas (name + description + input_schema) as
- * formatted text.
+ * formatted text so the model can discover which of many available tools to use.
  *
- * NOTE (main-thread seam): this is the *minimal faithful* form of CC's
- * deferred-tool expansion. We deliberately do NOT inject real deferred-tool
- * defs into the live API `tools` array / emit `tool_reference` blocks — that is
- * turn-loop surgery owned by the agent slice. Surfacing the schemas as text is
- * the contract here; real deferred-tool injection is a documented follow-up.
+ * Scope/honesty: this is purely a lexical *catalog discovery aid*. It searches
+ * the tool catalog passed in and returns matching schemas as text — nothing
+ * more. It does NOT defer tools, does NOT inject tool definitions into the live
+ * API `tools` array, and does NOT emit `tool_reference` blocks. Our
+ * provider-neutral LLMPort has no server-side tool deferral, so there is no
+ * deferred-tool mechanism here to expand; every tool in the catalog is already
+ * callable. ToolSearch only helps the model *find* the right one by name/topic.
  */
 export const createToolSearchTool = (catalog: () => ToolSpec[]): Tool<Input> => ({
   name: "ToolSearch",
   description:
-    "Search the catalog of deferred tools and return matching tool schemas. " +
-    'Use "select:Name1,Name2" for exact lookup or keywords for a ranked search.',
+    "Search this agent's tool catalog and return matching tool schemas as text " +
+    "(name, description, input_schema) so you can find the right tool among many. " +
+    'Use "select:Name1,Name2" for exact lookup by name, or keywords for a ranked ' +
+    "search. This is a discovery aid only: every returned tool is already " +
+    "available to call directly. It does not unlock or load anything.",
   inputSchema: schema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

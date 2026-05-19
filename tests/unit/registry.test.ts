@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
@@ -117,6 +117,72 @@ describe("ToolRegistry", () => {
     const result = await reg.run("progressive", { x: "y" }, ctx(tmpdir()), (m) => seen.push(m))
     expect(seen).toEqual(["step 1", "step 2"])
     expect(result).toEqual({ ok: true, output: "final" })
+  })
+
+  test("run() WIRED seam: over-cap output is spilled to disk + marker substituted", async () => {
+    const big = "B".repeat(5_000)
+    const tool: Tool<Record<string, never>> = {
+      name: "bigout",
+      description: "test",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      async *execute(): AsyncIterable<ToolEvent> {
+        yield { type: "result", result: { ok: true, output: big } }
+      },
+    }
+    const reg = new ToolRegistry([tool as Tool])
+    const dir = mkdtempSync(join(tmpdir(), "registry-spill-"))
+    const prev = process.env.QUANTA_TOOL_OUTPUT_MAX
+    process.env.QUANTA_TOOL_OUTPUT_MAX = "100"
+    try {
+      const result = await reg.run("bigout", {}, ctx(dir))
+      // Marker substituted, original is NOT handed back verbatim.
+      expect(result.ok).toBe(true)
+      expect(result.output.startsWith("<persisted-output>\n")).toBe(true)
+      expect(result.output.endsWith("</persisted-output>")).toBe(true)
+      expect(result.output).not.toBe(big)
+
+      // A real spill file exists on disk holding the FULL untruncated output.
+      const spillDir = join(dir, ".quanta", "tool-output")
+      const spilled = readdirSync(spillDir).filter((f) => f.endsWith(".txt"))
+      expect(spilled).toHaveLength(1)
+      const spillPath = join(spillDir, spilled[0] as string)
+      expect(existsSync(spillPath)).toBe(true)
+      expect(readFileSync(spillPath, "utf8")).toBe(big)
+      // Marker advertises that exact path.
+      expect(result.output).toContain(spillPath)
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_TOOL_OUTPUT_MAX
+      else process.env.QUANTA_TOOL_OUTPUT_MAX = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("run() WIRED seam: sub-cap output is byte-identical (object identity preserved)", async () => {
+    const small = { ok: true as const, output: "small enough" }
+    const tool: Tool<Record<string, never>> = {
+      name: "smallout",
+      description: "test",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      async *execute(): AsyncIterable<ToolEvent> {
+        yield { type: "result", result: small }
+      },
+    }
+    const reg = new ToolRegistry([tool as Tool])
+    const dir = mkdtempSync(join(tmpdir(), "registry-spill-"))
+    try {
+      const result = await reg.run("smallout", {}, ctx(dir))
+      // Short-circuit: same string AND same ToolResult object reference.
+      expect(result.output).toBe("small enough")
+      expect(result).toBe(small)
+      // No spill dir created for sub-cap output.
+      expect(existsSync(join(dir, ".quanta", "tool-output"))).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("run() throws ToolExecutionError when the tool yields no result", async () => {

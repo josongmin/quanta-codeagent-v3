@@ -5,22 +5,36 @@
  *   - {@link Skill} / {@link ParsedFrontmatter} / {@link SkillEffort}  (types)
  *   - {@link parseFrontmatter}      dependency-free YAML-ish parser
  *   - {@link discoverSkills}        scan <dir>/&#42;/SKILL.md (+ <dir>/&#42;.md)
- *   - {@link createSkillTool}       the `Skill` tool (body + scoping note)
- *   - {@link createToolSearchTool}  the `ToolSearch` tool (lexical match)
- *   - {@link skillsActivatedFor}    pure conditional-`paths:` activation helper
+ *   - {@link createSkillTool}       the `Skill` tool (body + advisory note)
+ *   - {@link createToolSearchTool}  the `ToolSearch` tool (lexical catalog search)
+ *   - {@link skillToolAllowlist}    enforcement seam: a skill's declared tool allowlist
+ *   - {@link skillsActivatedFor}    host-callable conditional-`paths:` helper
  *
- * Recommended AgentConfig wiring (owned by the agent slice, not done here):
+ * What this slice does and does NOT do (honest seam, not a silent no-op):
  *
- *   skills?: { dir: string }
+ *   - It DISCOVERS skills and exposes the `Skill` / `ToolSearch` tools. That
+ *     part fully works once a host registers the tools.
+ *   - It does NOT enforce a skill's `tools`/`model`/`effort` scope, and it does
+ *     NOT auto-activate `paths:` skills. Those are turn-loop concerns this
+ *     slice intentionally does not own.
  *
- * The agent slice would, at session start, call
- * `discoverSkills(config.skills.dir)`, register `createSkillTool(skills)` +
- * `createToolSearchTool(() => registry.specs())`, and on file-touch call
- * `skillsActivatedFor(skills, changedPaths)` to surface conditional skills.
+ * To make scoping/activation real, a host must do this itself (this slice does
+ * none of it automatically):
+ *
+ *   1. At session start: `const skills = await discoverSkills(dir)`, then
+ *      register `createSkillTool(skills)` and
+ *      `createToolSearchTool(() => registry.specs())`.
+ *   2. To enforce a skill's tool sandbox when it is activated: read
+ *      `skillToolAllowlist(skill)` and intersect it with the turn's permitted
+ *      tools (and apply `skill.model` / `skill.effort` if desired). Nothing
+ *      here applies these for you.
+ *   3. For conditional `paths:` skills: after file changes, call
+ *      `skillsActivatedFor(skills, changedPaths)` and act on the result.
+ *      Declaring `paths:` has no runtime effect until a host does this.
  */
 export { matchesAnyGlob, skillsActivatedFor } from "./activation"
 export { discoverSkills } from "./discover"
 export { parseFrontmatter } from "./frontmatter"
-export { createSkillTool, scopingNote } from "./skill-tool"
+export { createSkillTool, scopingNote, skillToolAllowlist } from "./skill-tool"
 export { createToolSearchTool } from "./tool-search"
 export type { ParsedFrontmatter, Skill, SkillEffort } from "./types"

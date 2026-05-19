@@ -1,4 +1,10 @@
-import type { assembleFromEvents, Message, StreamEvent, SystemPromptInput } from "@/llm"
+import type {
+  assembleFromEvents,
+  Message,
+  StreamEvent,
+  SystemPromptInput,
+  ToolResultBlock,
+} from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import type { AutoModeClassifier } from "@/permission"
 import { LLMError, type RunContext } from "@/shared"
@@ -131,6 +137,51 @@ type StreamSuccess = {
 }
 type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } | { aborted: true }
 
+/** Skill tool-scoping ENFORCEMENT (SOTA++ ADR-0011). Once a skill that
+ *  declared a `tools:` allowlist is invoked, subsequent tool calls are
+ *  restricted to that allowlist (+ the skill meta-tools) until another skill
+ *  resets it. Built only when ≥1 discovered skill declared an allowlist;
+ *  absent ⇒ no scoping (loop byte-identical). */
+const SKILL_META_TOOLS = new Set(["Skill", "ToolSearch"])
+interface SkillGate {
+  /** False ⇒ the call must be denied (not in the active skill's allowlist). */
+  allow(name: string): boolean
+  /** Observe a completed dispatch; a successful `Skill` invocation with a
+   *  declared allowlist arms/replaces the active scope. */
+  observe(name: string, input: unknown, ok: boolean): void
+}
+const buildSkillGate = (allowlists: Map<string, string[]> | undefined): SkillGate | undefined => {
+  if (!allowlists || allowlists.size === 0) return undefined
+  let active: Set<string> | undefined
+  return {
+    allow: (name) => active === undefined || SKILL_META_TOOLS.has(name) || active.has(name),
+    observe: (name, input, ok) => {
+      if (name !== "Skill" || !ok) return
+      const raw =
+        typeof input === "object" && input !== null && "name" in input
+          ? (input as { name: unknown }).name
+          : undefined
+      const skill = typeof raw === "string" ? raw.trim().replace(/^\//, "") : ""
+      const allow = allowlists.get(skill)
+      if (allow) active = new Set(allow)
+    },
+  }
+}
+/** Recoverable deny when a tool is outside the active skill's allowlist. */
+const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut => ({
+  block: {
+    type: "tool_result",
+    tool_use_id: call.id,
+    content:
+      `Tool "${call.name}" is not in the active skill's permitted tool set. ` +
+      "Use only the tools the skill allows, or invoke a different skill.",
+    is_error: true,
+  } satisfies ToolResultBlock,
+  ok: false,
+  preview: "skill-scoped",
+})
+type StreamDispatchOut = { block: ToolResultBlock; ok: boolean; preview: string }
+
 /**
  * Consume one LLM stream WITH interleaved tool execution (SOTA++ streaming
  * tool exec, ADR-0011). Delegates the stream/dispatch interleaving + ordering
@@ -152,6 +203,7 @@ const streamConsume = async (
   system: SystemPromptInput,
   recorder: AgentRecorder | undefined,
   classifier: AutoModeClassifier | undefined,
+  skillGate: SkillGate | undefined,
 ): Promise<StreamConsumeResult> => {
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
@@ -168,19 +220,27 @@ const streamConsume = async (
       dispatch: async (call) => {
         const s = recorder?.toolExec()
         try {
-          const out = await dispatchTool(
-            { type: "tool_use", id: call.id, name: call.name, input: call.input },
-            config,
-            config.permission,
-            (message) =>
-              config.stream.emit({
-                type: "tool_progress",
-                id: call.id,
-                name: call.name,
-                message,
-              }),
-            classifier,
-          )
+          // SOTA++ (ADR-0011): enforce the active skill's tool allowlist —
+          // an out-of-scope tool is denied as a recoverable tool_result
+          // WITHOUT dispatching it. No gate / no active skill ⇒ unchanged.
+          const out =
+            skillGate && !skillGate.allow(call.name)
+              ? skillScopeDeny(call)
+              : await dispatchTool(
+                  { type: "tool_use", id: call.id, name: call.name, input: call.input },
+                  config,
+                  config.permission,
+                  (message) =>
+                    config.stream.emit({
+                      type: "tool_progress",
+                      id: call.id,
+                      name: call.name,
+                      message,
+                    }),
+                  classifier,
+                )
+          // A successful `Skill` invocation (re)arms the scope for next calls.
+          skillGate?.observe(call.name, call.input, out.ok)
           // RFC-0002 §5.2 enriched tool_result. CONTRACT with Group E: the
           // dispatch result exposes these EXACT optional field names
           // (`durationMs:number`, `stderrTail:string`, `exitCode:number`,
@@ -287,7 +347,10 @@ const maybeCompact = async (
   const before = estimateTokens(snapshot)
   const result = await compactIfNeeded({
     messages: snapshot,
-    llm: config.llm,
+    // SOTA++ (ADR-0011): optional dedicated summarizer model; absent ⇒ main
+    // llm (byte-identical). Summarization is low-stakes; a cheaper/faster
+    // model spares the main model on every compaction.
+    llm: config.compaction.summarizerLlm ?? config.llm,
     system,
     ...(config.compaction.thresholdTokens !== undefined
       ? { thresholdTokens: config.compaction.thresholdTokens }
@@ -525,7 +588,9 @@ const applyAction = async (
     const before = estimateTokens(snapshot)
     const compacted = await reactiveCompact({
       messages: snapshot,
-      llm: config.llm,
+      // SOTA++ (ADR-0011): dedicated summarizer model when configured;
+      // absent (or no compaction block) ⇒ main llm (byte-identical).
+      llm: config.compaction?.summarizerLlm ?? config.llm,
       system: ctxSystem,
     })
     if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
@@ -568,6 +633,7 @@ const runTurn = async (
   rec: RecoveryState,
   breaker: CompactionBreaker | undefined,
   classifier: AutoModeClassifier | undefined,
+  skillGate: SkillGate | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -584,6 +650,7 @@ const runTurn = async (
       ctx.system,
       recorder,
       classifier,
+      skillGate,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -630,6 +697,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const features = await buildSessionFeatures(config)
   const cfg = buildEffectiveConfig(config, features.extraTools)
   const classifier = features.classifier
+  const skillGate = buildSkillGate(features.skillAllowlists)
   const { stream } = cfg
   // Canonical in-session message buffer (RFC §6.3). Seeded from the public
   // `config.messages`; every history mutation below goes through this slice.
@@ -683,7 +751,16 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     // Recovery counters are per-turn: SAME-TURN retries share & exhaust these,
     // a fresh turn starts clean. runTurn owns the SEAM (buildTurnContext) and
     // mutates `messages` (canonical history) in place.
-    const result = await runTurn(cfg, wm, specs, recorder, freshRecovery(), breaker, classifier)
+    const result = await runTurn(
+      cfg,
+      wm,
+      specs,
+      recorder,
+      freshRecovery(),
+      breaker,
+      classifier,
+      skillGate,
+    )
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
     // at turn-top, so a turn that immediately aborted/errored BEFORE producing

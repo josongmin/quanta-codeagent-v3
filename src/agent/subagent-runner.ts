@@ -16,42 +16,35 @@
  * and threads it (plus `maxDepth`) onto the parent config so the `agent` tool
  * can spawn children.
  *
- * --- DEPTH SEAM (the part the main thread MUST satisfy in dispatch.ts) ---
+ * --- DEPTH SEAM + the recursion bound (accurate as of today) ---
  *
- * The `agent` tool reads the caller's recursion depth by DUCK-TYPING a numeric
- * `depth` off its {@link ToolContext} (see `src/subagent/agent-tool.ts`
- * `ctxDepth`). But `src/agent/dispatch.ts` currently builds the context as
- * `{ cwd, signal }` — there is no `depth` field on {@link ToolContext} and
- * none is ever set. So today the tool always sees depth 0 and every spawned
- * child also computes `childDepth = 1`, which makes the depth ceiling
- * un-enforceable beyond one level.
+ * Recursion is bounded MULTI-LEVEL by `maxDepth` (the depth guard is real and
+ * load-bearing) — read both parts:
  *
- * This runner does its OWN authoritative depth check (`req.depth >
- * maxDepth ⇒ deny, never throw`) so recursion is bounded regardless. To make
- * the *tool-advertised* `maxDepth` and multi-level depth accounting correct,
- * the main thread must surface the child's depth into the ToolContext that the
- * child's dispatch builds. The exact seam (NOT implemented here — out of
- * scope) is:
- *
- *   1. Add an optional `depth?: number` to `AgentConfig` (types.ts) — the
- *      child's "I am running at depth N" marker. This runner sets it on the
- *      child config to `req.depth` (see override table below).
- *   2. In `dispatch.ts`, when building `ctx`, spread it through:
+ *   1. `AgentConfig` carries an optional `depth?: number`
+ *      (`src/agent/types.ts`); this runner sets it on the child to `req.depth`
+ *      (see {@link buildChildConfig}), and `src/agent/dispatch.ts` surfaces it
+ *      onto the ToolContext:
  *        const ctx: ToolContext =
  *          { cwd: config.cwd, signal: config.signal,
  *            ...(config.depth !== undefined ? { depth: config.depth } : {}) }
- *      (`ToolContext` would also gain an optional `depth?: number`, or keep
- *      the existing duck-typed read — the slice already tolerates its
- *      absence.)
+ *      Absent ⇒ omitted, slice duck-reads it as 0, root path byte-identical.
+ *      The `agent` tool reads it via `ctxDepth` (`src/subagent/agent-tool.ts`).
  *
- * With (1)+(2) in place, a child spawned at `req.depth = N` runs `runAgent`
- * with `config.depth = N`; its dispatch puts `depth: N` on the ToolContext;
- * the `agent` tool inside it reads `N`, computes `childDepth = N+1`, and the
- * grandchild request carries `depth: N+1` — so this runner's own `req.depth >
- * maxDepth` guard and the tool's `childDepth > maxDepth` guard agree at every
- * level. Until the seam lands, only this runner's guard is authoritative
- * (still safe: recursion is bounded, just not surfaced to the tool's deny
- * message at intermediate levels).
+ *   2. {@link buildChildConfig} propagates `parent.subagent` into the child
+ *      (but NOT `skills` — a subagent gets a clean tool surface). So a forked
+ *      child's `runAgent` → `buildSessionFeatures` DOES register an `agent`
+ *      tool: a child can spawn sub-subagents. Each level's `req.depth` is
+ *      `parentDepth + 1` (via (1)), so this runner's `req.depth > maxDepth ⇒
+ *      deny` guard (and the tool's mirror guard) terminate the recursion at
+ *      `maxDepth` (default 3) with a recoverable deny tool_result — never an
+ *      unbounded spawn.
+ *
+ * Consequence: depth is plumbed (1) AND exercised (2). The `req.depth >
+ * maxDepth ⇒ deny, never throw` guard is the REAL, load-bearing recursion
+ * bound (not belt-and-braces). Beyond maxDepth the nested `agent` call returns
+ * a recoverable "max subagent depth exceeded" tool_result and the parent
+ * continues. Verified end-to-end by tests/integration/subagent-fork-e2e.test.ts.
  */
 
 import type { Message } from "@/llm"
@@ -155,15 +148,24 @@ const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string
     cwd,
     maxTurns: req.budget?.maxTurns ?? parent.maxTurns,
     signal: chainedSignal(parent.signal),
-    // Depth marker the host's dispatch seam surfaces onto ToolContext so the
-    // child's own `agent` tool computes the right grandchild depth. Carried
-    // duck-typed (the field is not yet on AgentConfig — see DEPTH SEAM note).
+    // Depth marker; dispatch.ts surfaces it onto ToolContext. NOTE: this
+    // child gets no `subagent` config below, so it registers no `agent` tool
+    // Recursion-depth marker; dispatch.ts surfaces it onto ToolContext so the
+    // child's `agent` tool computes `childDepth = depth+1`. With `subagent`
+    // propagated below, this is now LOAD-BEARING: the maxDepth guard actually
+    // bounds real multi-level recursion. Duck-typed cast sets it
+    // unconditionally without tripping exactOptionalPropertyTypes.
     ...({ depth: req.depth } as { depth: number }),
     // Kept (safe to share, no parent-state mutation):
     ...(parent.onConfirm ? { onConfirm: parent.onConfirm } : {}),
     ...(parent.embedder ? { embedder: parent.embedder } : {}),
     ...(parent.compaction ? { compaction: parent.compaction } : {}),
     ...(parent.planMode !== undefined ? { planMode: parent.planMode } : {}),
+    // Propagated so a child can itself spawn sub-subagents — recursion is
+    // bounded by the depth marker above + this runner's `req.depth > maxDepth`
+    // deny guard (now the real, exercised bound, not belt-and-braces). Skills
+    // are intentionally NOT propagated (a subagent gets a clean tool surface).
+    ...(parent.subagent ? { subagent: parent.subagent } : {}),
     // DROPPED on purpose: store, sessionId, memory, hooks, metrics, run.
     // A subagent must not write into the parent's durable memory, emit into
     // the parent's hook bus / metrics, or share its correlation context.

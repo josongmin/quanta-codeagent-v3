@@ -38,19 +38,26 @@ const globToRegExp = (glob: string): RegExp => {
   return new RegExp(anchored)
 }
 
-/** True if `path` matches any of the gitignore-style `patterns`. */
+/**
+ * True if `path` matches any of the gitignore-style `patterns`. Pure helper:
+ * it is exported for a host to call; nothing in this slice calls it.
+ */
 export const matchesAnyGlob = (path: string, patterns: string[]): boolean => {
   const norm = path.replace(/\\/g, "/").replace(/^\.?\//, "")
   return patterns.some((p) => globToRegExp(p.trim()).test(norm))
 }
 
 /**
- * Pure helper for the main thread (analysis §2.5): given the full skill set and
- * the paths the model/user just touched, return the subset of skills whose
- * `paths:` globs match — i.e. the conditional skills that should now activate.
- * Skills without `paths:` are never returned here (they are always-on and
- * surfaced through the normal listing instead). This slice only computes the
- * set; wiring it into the turn loop is a documented main-thread seam.
+ * Pure, host-callable helper: given the full skill set and the paths the
+ * model/user just touched, return the subset of skills whose `paths:` globs
+ * match — i.e. the conditional skills a host *could* choose to activate.
+ * Skills without `paths:` are never returned here.
+ *
+ * Honesty note: this DOES NOTHING on its own. `paths:` is NOT auto-activated
+ * during a normal run — no code in this slice or the agent calls this function.
+ * Conditional `paths:` activation only happens if a host explicitly calls
+ * `skillsActivatedFor(skills, changedPaths)` after file changes and then acts
+ * on the result. Until then, declaring `paths:` has no runtime effect.
  */
 export const skillsActivatedFor = (skills: Skill[], changedPaths: string[]): Skill[] =>
   skills.filter(

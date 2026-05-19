@@ -151,8 +151,10 @@ describe("createSubagentRunner — child config overrides", () => {
     expect(at(seen, 1).maxTurns).toBe(17)
   })
 
-  test("store / hooks / metrics / run / sessionId / memory are dropped", async () => {
+  test("store / hooks / metrics / run / sessionId / memory are dropped; subagent is PROPAGATED", async () => {
     const { run, seen } = capturing()
+    // biome-ignore lint/suspicious/noExplicitAny: opaque runner stub, identity is what matters
+    const subagentBlock = { runner: (async () => ({})) as any, maxDepth: 2 }
     const parent = parentConfig({
       // biome-ignore lint/suspicious/noExplicitAny: opaque stubs, presence is what matters
       store: { v: 1 } as any,
@@ -164,6 +166,10 @@ describe("createSubagentRunner — child config overrides", () => {
       run: { traceId: "t" } as any,
       sessionId: "parent-session",
       memory: { recallLimit: 9 },
+      // biome-ignore lint/suspicious/noExplicitAny: structural subagent block
+      subagent: subagentBlock as any,
+      // biome-ignore lint/suspicious/noExplicitAny: skills must NOT propagate
+      skills: { dir: "/skills" } as any,
     })
     const runner = createSubagentRunner(parent, { run })
     await runner(req())
@@ -174,11 +180,29 @@ describe("createSubagentRunner — child config overrides", () => {
     expect(child.run).toBeUndefined()
     expect(child.sessionId).toBeUndefined()
     expect(child.memory).toBeUndefined()
+    // SOTA++ ADR-0011: `subagent` is now PROPAGATED into the child (same
+    // object/value as the parent) so a forked child can itself spawn
+    // sub-subagents; recursion stays bounded by the depth marker + maxDepth
+    // deny guard. `skills` is still NOT propagated (clean tool surface).
+    expect(child.subagent).toBe(parent.subagent)
+    expect(child.subagent).toEqual(subagentBlock)
+    expect(child.skills).toBeUndefined()
     // Kept ports survive.
     expect(child.llm).toBe(parent.llm)
     expect(child.stream).toBe(parent.stream)
     expect(child.permission).toBe(parent.permission)
     expect(child.system).toBe(parent.system)
+  })
+
+  test("subagent is omitted (not undefined) when the parent has none", async () => {
+    const { run, seen } = capturing()
+    const parent = parentConfig()
+    expect(parent.subagent).toBeUndefined()
+    const runner = createSubagentRunner(parent, { run })
+    await runner(req())
+    const child = at(seen, 0)
+    expect(child.subagent).toBeUndefined()
+    expect("subagent" in child).toBe(false) // omitted, never assigned undefined
   })
 
   test("surfaces req.depth on the child config (the dispatch depth seam)", async () => {

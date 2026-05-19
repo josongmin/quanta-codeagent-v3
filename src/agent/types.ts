@@ -70,6 +70,15 @@ export interface AgentConfig {
   compaction?: {
     thresholdTokens?: number
     keepRecentTurns?: number
+    /**
+     * Dedicated LLM for the compaction SUMMARY turn (SOTA++ cost/latency,
+     * ADR-0011). Summarization is a bounded, low-stakes task — a cheaper/
+     * faster model is usually sufficient and avoids spending the main model
+     * on every 120k-token compaction. Absent ⇒ uses `config.llm` (the main
+     * model), so behavior is byte-identical when unset. Tradeoff: a weaker
+     * summarizer can degrade resumed-context fidelity — opt in deliberately.
+     */
+    summarizerLlm?: LLMPort
   }
   /**
    * In-process hook bus (RFC §13 Q1). Absent ⇒ no events emitted, zero

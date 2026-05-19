@@ -171,7 +171,20 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => ({
   id: task.instanceId,
   repoPath,
   problemStatement: task.problemStatement,
+  // `true` is the no-op LOCAL fallback (real grading is upstream-only). The
+  // `swebench` block makes the produced patch officially gradeable: when
+  // `QUANTA_SWEBENCH_PYTHON=1` and the harness is importable, runner.verify()
+  // routes to the official `swebench.harness.run_evaluation` Docker grader
+  // instead of this no-op (RFC §11 / runner.ts:252).
   testCmd: "true",
+  swebench: {
+    instanceId: task.instanceId,
+    repo: task.repo,
+    baseCommit: task.baseCommit,
+    ...(task.environmentSetupCommit !== undefined
+      ? { environmentSetupCommit: task.environmentSetupCommit }
+      : {}),
+  },
 })
 
 /** One official SWE-bench prediction row (exact shape consumed by

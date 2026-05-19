@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { ToolExecutionError, ToolInputError } from "@/shared"
-import { capToolOutput, envMaxChars } from "./output-spill"
+import { capToolOutput, envMaxChars, envSpillKeep } from "./output-spill"
 import { zodToJsonSchema } from "./schema"
 import type { Tool, ToolContext, ToolResult, ToolSpec } from "./types"
 
@@ -79,6 +79,7 @@ export class ToolRegistry {
     const { output } = capToolOutput(result.output, {
       maxChars: envMaxChars(process.env),
       spillDir: join(ctx.cwd, ".quanta", "tool-output"),
+      spillKeep: envSpillKeep(process.env),
     })
     return output === result.output ? result : { ...result, output }
   }

@@ -9,6 +9,7 @@ import {
   discoverSkills,
   parseFrontmatter,
   skillsActivatedFor,
+  skillToolAllowlist,
 } from "../../src/skill"
 import type { ToolContext, ToolResult, ToolSpec } from "../../src/tool"
 
@@ -142,7 +143,7 @@ describe("createSkillTool", () => {
     { name: "plain", description: "no scope", body: "just do it", sourcePath: "/x/plain.md" },
   ]
 
-  test("returns body plus a scoping note", async () => {
+  test("returns body plus an advisory (not enforced) scoping note", async () => {
     const tool = createSkillTool(skills)
     const r = await run(tool, { name: "deploy" })
     expect(r.ok).toBe(true)
@@ -150,12 +151,27 @@ describe("createSkillTool", () => {
     expect(r.output).toContain("model: claude-fast")
     expect(r.output).toContain("effort: high")
     expect(r.output).toContain("Step 1. Do the deploy.")
+    // Honesty: the note must flag the scope as advisory and must NOT claim it
+    // is enforced anywhere.
+    expect(r.output.toLowerCase()).toContain("advisory")
+    expect(r.output.toLowerCase()).toContain("not enforced")
+    expect(r.output).not.toContain("enforced by the main thread")
   })
 
   test("no scope declared ⇒ 'none declared' note", async () => {
     const r = await run(createSkillTool(skills), { name: "plain" })
     expect(r.output).toContain("none declared")
     expect(r.output).toContain("just do it")
+  })
+
+  test("skillToolAllowlist exposes the host enforcement seam", () => {
+    // Declared allowlist is returned verbatim for a host to apply.
+    expect(skillToolAllowlist(skills[0] as Skill)).toEqual(["Bash"])
+    // No declared tools ⇒ undefined (nothing to enforce).
+    expect(skillToolAllowlist(skills[1] as Skill)).toBeUndefined()
+    expect(
+      skillToolAllowlist({ name: "x", description: "", body: "", tools: [], sourcePath: "p" }),
+    ).toBeUndefined()
   })
 
   test("tolerates a leading slash and reports unknown skills", async () => {
@@ -197,6 +213,22 @@ describe("createToolSearchTool", () => {
     const r = await run(createToolSearchTool(catalog), { query: "kubernetes" })
     expect(r.ok).toBe(false)
     expect(r.output).toContain("No matching")
+    // Honesty: failure copy must not imply a deferred-tool mechanism exists.
+    expect(r.output.toLowerCase()).not.toContain("defer")
+  })
+
+  test("model-facing description is honest: no defer/expand over-claim", () => {
+    const tool = createToolSearchTool(catalog)
+    const desc = tool.description.toLowerCase()
+    // It is a catalog discovery aid, not server-side deferral/expansion.
+    expect(desc).not.toContain("defer")
+    expect(desc).not.toContain("expand")
+    expect(desc).not.toContain("tool_reference")
+    expect(desc).toContain("catalog")
+    // The query-field description (also model-facing) must not say "defer".
+    const shape = (tool.inputSchema as unknown as { shape: { query: { description?: string } } })
+      .shape
+    expect((shape.query.description ?? "").toLowerCase()).not.toContain("defer")
   })
 
   test("select: mode returns exact tools and flags unknowns", async () => {

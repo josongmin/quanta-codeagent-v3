@@ -50,7 +50,7 @@
 
 import { AutoModeClassifier } from "@/permission"
 import type { Tool } from "@/tool"
-import { createSkillTool, createToolSearchTool, discoverSkills } from "../skill"
+import { createSkillTool, createToolSearchTool, discoverSkills, skillToolAllowlist } from "../skill"
 import {
   createAgentTool,
   createTaskOutputTool,
@@ -78,6 +78,12 @@ export interface SessionFeatures {
    *  `config.subagent` is configured. The loop should retain this if it needs
    *  to observe/inspect background tasks. */
   taskRegistry?: TaskRegistry
+  /** SOTA++ skill tool-scoping ENFORCEMENT data (ADR-0011): skill name →
+   *  author-declared `tools:` allowlist, for skills that declared a non-empty
+   *  one. The loop enforces this (a tool not in the active skill's allowlist
+   *  is denied as a recoverable tool_result). Present only when ≥1 discovered
+   *  skill declares `tools:`; absent ⇒ no scoping (byte-identical). */
+  skillAllowlists?: Map<string, string[]>
 }
 
 /**
@@ -102,10 +108,32 @@ export interface SessionFeatures {
  *   mode ⇒ no classifier.
  * - none of the above ⇒ `{ extraTools: [] }`.
  */
+/** Discover skills + build the `Skill`/`ToolSearch` tools and the declared
+ *  tool-allowlist map (SOTA++ ADR-0011). Extracted from
+ *  {@link buildSessionFeatures} so that function stays under the cognitive-
+ *  complexity budget; pure except `discoverSkills`'s directory IO. */
+const buildSkillFeatures = async (
+  config: AgentConfig,
+  dir: string,
+): Promise<{ tools: Tool[]; allowlists: Map<string, string[]> | undefined }> => {
+  const skills = await discoverSkills(dir)
+  const tools: Tool[] = [
+    createSkillTool(skills),
+    createToolSearchTool(() => config.registry.specs()),
+  ]
+  const al = new Map<string, string[]>()
+  for (const s of skills) {
+    const allow = skillToolAllowlist(s)
+    if (allow) al.set(s.name, allow)
+  }
+  return { tools, allowlists: al.size > 0 ? al : undefined }
+}
+
 export const buildSessionFeatures = async (config: AgentConfig): Promise<SessionFeatures> => {
   const extraTools: Tool[] = []
   let taskRegistry: TaskRegistry | undefined
   let classifier: AutoModeClassifier | undefined
+  let skillAllowlists: Map<string, string[]> | undefined
 
   // --- Subagent block -----------------------------------------------------
   if (config.subagent) {
@@ -128,11 +156,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // --- Skill block --------------------------------------------------------
   if (config.skills) {
-    const skills = await discoverSkills(config.skills.dir)
-    extraTools.push(
-      createSkillTool(skills),
-      createToolSearchTool(() => config.registry.specs()),
-    )
+    const sf = await buildSkillFeatures(config, config.skills.dir)
+    extraTools.push(...sf.tools)
+    skillAllowlists = sf.allowlists
   }
 
   // --- Auto-mode classifier ----------------------------------------------
@@ -144,5 +170,6 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
     extraTools,
     ...(classifier ? { classifier } : {}),
     ...(taskRegistry ? { taskRegistry } : {}),
+    ...(skillAllowlists ? { skillAllowlists } : {}),
   }
 }
