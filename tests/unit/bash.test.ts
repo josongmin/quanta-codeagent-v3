@@ -100,4 +100,27 @@ describe("bashTool", () => {
   test("schema rejects missing command", () => {
     expect(bashTool.inputSchema.safeParse({}).success).toBe(false)
   })
+
+  test("does NOT leak provider API keys into the shell child", async () => {
+    process.env.OPENAI_API_KEY = "sk-fake-openai"
+    process.env.ANTHROPIC_API_KEY = "sk-fake-anthropic"
+    try {
+      const { result } = await collect(
+        { command: 'echo "K=[$OPENAI_API_KEY][$ANTHROPIC_API_KEY]"' },
+        ctx(dir),
+      )
+      expect(result.ok).toBe(true)
+      expect(result.output).toContain("K=[][]")
+      expect(result.output).not.toContain("sk-fake")
+    } finally {
+      delete process.env.OPENAI_API_KEY
+      delete process.env.ANTHROPIC_API_KEY
+    }
+  })
+
+  test("PATH/HOME still present so ordinary commands work", async () => {
+    const { result } = await collect({ command: 'echo "$HOME"' }, ctx(dir))
+    expect(result.ok).toBe(true)
+    expect(result.output.replace("[exit 0]\n", "").trim().length).toBeGreaterThan(1)
+  })
 })

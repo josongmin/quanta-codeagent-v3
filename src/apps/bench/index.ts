@@ -19,6 +19,11 @@
  *   QUANTA_PROVIDER / ANTHROPIC_API_KEY / OPENAI_API_KEY  provider pick
  *   QUANTA_SWEBENCH_PYTHON=1                        grade via official Python
  *                                                  harness when available
+ *   --dataset-name <id|jsonl> |                    grading dataset for the
+ *     QUANTA_SWEBENCH_DATASET_NAME                  Python harness. Default:
+ *                                                   princeton-nlp/SWE-bench_Verified
+ *                                                   (decoupled from --swebench,
+ *                                                   which is the tasks input)
  * Never crashes when keys are absent — prints guidance and exits 0.
  */
 import { existsSync, readFileSync } from "node:fs"
@@ -291,8 +296,12 @@ const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
     )
     return undefined
   }
-  logger.info("using official Python swebench harness for grading")
-  return {}
+  const datasetName =
+    argValue("--dataset-name") ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? undefined
+  logger.info(
+    `using official Python swebench harness for grading (dataset=${datasetName ?? "princeton-nlp/SWE-bench_Verified (default)"})`,
+  )
+  return datasetName !== undefined ? { opts: { datasetName } } : {}
 }
 
 /** Custom-corpus entrypoint (the path when no --swebench dataset is given).

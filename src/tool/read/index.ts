@@ -23,14 +23,15 @@ export const readTool: Tool<Input> = {
   isConcurrencySafe: () => true,
 
   // A single file read is fast; no progress event needed.
-  async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const info = await statFile(input.path)
+  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    // Resolve relative paths against the session cwd, not process.cwd().
+    const info = await statFile(input.path, ctx.cwd)
     if (info.isDirectory) {
       yield { type: "result", result: { ok: false, output: `${input.path} is a directory` } }
       return
     }
 
-    const text = await readFile(input.path)
+    const text = await readFile(input.path, ctx.cwd)
     const lines = text.split("\n")
     const start = Math.max(0, (input.offset ?? 1) - 1)
     const end = Math.min(lines.length, start + (input.limit ?? DEFAULT_LIMIT))

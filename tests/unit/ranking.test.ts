@@ -74,6 +74,12 @@ describe("rankEntries — hard filters", () => {
     expect(ids(rankEntries(cand, { tiers: ["episodic"] }, NOW))).toEqual(["ep"])
   })
 
+  test("query.tiers still hard-filters (tier weight does not leak past it)", () => {
+    const cand = [entry({ id: "sem", tier: "semantic" }), entry({ id: "epi", tier: "episodic" })]
+    expect(ids(rankEntries(cand, { tiers: ["episodic"] }, NOW))).toEqual(["epi"])
+    expect(ids(rankEntries(cand, { tiers: ["semantic"] }, NOW))).toEqual(["sem"])
+  })
+
   test("freshness filter via bucketOf(now-createdAt)", () => {
     const cand = [
       entry({ id: "fresh", createdAt: NOW }),
@@ -119,6 +125,15 @@ describe("rankEntries — scoring components", () => {
     ]
     // cap = 3; importance contributes 0.5*4=2 vs 1*4=4 plus log cap 3 → hot wins
     expect(ids(rankEntries(cand, {}, NOW))[0]).toBe("hot")
+  })
+
+  test("semantic outranks episodic when all other signals tie", () => {
+    const cand = [
+      entry({ id: "epi", tier: "episodic", createdAt: NOW }),
+      entry({ id: "sem", tier: "semantic", createdAt: NOW }),
+    ]
+    // identical text/tags/vec/freshness/importance/access → tier term decides
+    expect(ids(rankEntries(cand, {}, NOW))).toEqual(["sem", "epi"])
   })
 
   test("freshness contributes (fresher ranks higher, all else equal)", () => {

@@ -27,8 +27,9 @@ export const editTool: Tool<Input> = {
   // Mutates the filesystem; conservatively never run concurrently.
   isConcurrencySafe: () => false,
 
-  async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const source = await readFile(input.path)
+  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    // Resolve relative paths against the session cwd, not process.cwd().
+    const source = await readFile(input.path, ctx.cwd)
     const replaceAll = input.replace_all ?? false
     let result = applyExactEdit(source, input.old_string, input.new_string, replaceAll)
     if ((!result.ok || result.next === undefined) && input.fuzzy) {
@@ -38,7 +39,7 @@ export const editTool: Tool<Input> = {
       yield { type: "result", result: { ok: false, output: result.message } }
       return
     }
-    await writeFile(input.path, result.next)
+    await writeFile(input.path, result.next, ctx.cwd)
     yield { type: "result", result: { ok: true, output: `${input.path}: ${result.message}` } }
   },
 }

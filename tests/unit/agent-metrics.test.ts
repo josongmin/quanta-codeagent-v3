@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { AgentRecorder, METRIC } from "@/agent"
+import { emptyPersistStats, type PersistStats } from "@/agent/memory-stats"
 import { Metrics } from "@/observability"
 
 describe("METRIC name table", () => {
@@ -10,6 +11,18 @@ describe("METRIC name table", () => {
       llmStream: "agent.llm_stream",
       toolExec: "agent.tool_exec",
       stopReason: "agent.stop_reason",
+      recallCalls: "memory.recall.calls",
+      recallEntries: "memory.recall.entries",
+      recallSemantic: "memory.recall.semantic",
+      recallFallback: "memory.recall.fallback",
+      persistCalls: "memory.persist.calls",
+      distilled: "memory.distilled",
+      consolidateInserted: "memory.consolidate.inserted",
+      consolidateMerged: "memory.consolidate.merged",
+      consolidateSuperseded: "memory.consolidate.superseded",
+      consolidateSkipped: "memory.consolidate.skipped",
+      evictDecayed: "memory.evict.decayed",
+      evictDeleted: "memory.evict.deleted",
     })
   })
 })
@@ -107,5 +120,108 @@ describe("AgentRecorder timers", () => {
     expect(snap.counters[METRIC.turns]).toBe(1)
     expect(snap.counters[`${METRIC.toolCalls}.grep`]).toBe(1)
     expect(snap.counters[`${METRIC.stopReason}.error`]).toBe(1)
+  })
+})
+
+describe("AgentRecorder memory observability", () => {
+  test("memoryRecall: semantic hit adds entries/calls/semantic, no fallback", () => {
+    const m = new Metrics()
+    const rec = new AgentRecorder(m)
+    rec.memoryRecall({ recalled: 3, embedded: true, fellBack: false })
+    const c = m.snapshot().counters
+    expect(c[METRIC.recallEntries]).toBe(3)
+    expect(c[METRIC.recallCalls]).toBe(1)
+    expect(c[METRIC.recallSemantic]).toBe(1)
+    expect(c[METRIC.recallFallback] ?? 0).toBe(0)
+  })
+
+  test("memoryRecall: empty fallback bumps calls/fallback only", () => {
+    const m = new Metrics()
+    const rec = new AgentRecorder(m)
+    rec.memoryRecall({ recalled: 0, embedded: false, fellBack: true })
+    const c = m.snapshot().counters
+    expect(c[METRIC.recallCalls]).toBe(1)
+    expect(c[METRIC.recallFallback]).toBe(1)
+    expect(c[METRIC.recallSemantic] ?? 0).toBe(0)
+    expect(c[METRIC.recallEntries] ?? 0).toBe(0)
+  })
+
+  test("memoryRecall: zero recalled still registers the entries counter at 0", () => {
+    const m = new Metrics()
+    const rec = new AgentRecorder(m)
+    rec.memoryRecall({ recalled: 0, embedded: true, fellBack: false })
+    const c = m.snapshot().counters
+    expect(c[METRIC.recallEntries]).toBe(0)
+    expect(c[METRIC.recallCalls]).toBe(1)
+    expect(c[METRIC.recallSemantic]).toBe(1)
+  })
+
+  test("memoryPersist: fully-populated stats forward each field exactly", () => {
+    const m = new Metrics()
+    const rec = new AgentRecorder(m)
+    const s: PersistStats = {
+      distilled: 7,
+      inserted: 5,
+      merged: 3,
+      superseded: 2,
+      skipped: 4,
+      decayed: 6,
+      deleted: 1,
+    }
+    rec.memoryPersist(s)
+    const c = m.snapshot().counters
+    expect(c[METRIC.persistCalls]).toBe(1)
+    expect(c[METRIC.distilled]).toBe(7)
+    expect(c[METRIC.consolidateInserted]).toBe(5)
+    expect(c[METRIC.consolidateMerged]).toBe(3)
+    expect(c[METRIC.consolidateSuperseded]).toBe(2)
+    expect(c[METRIC.consolidateSkipped]).toBe(4)
+    expect(c[METRIC.evictDecayed]).toBe(6)
+    expect(c[METRIC.evictDeleted]).toBe(1)
+  })
+
+  test("memoryPersist(emptyPersistStats()) bumps only persist.calls", () => {
+    const m = new Metrics()
+    const rec = new AgentRecorder(m)
+    rec.memoryPersist(emptyPersistStats())
+    const c = m.snapshot().counters
+    expect(c[METRIC.persistCalls]).toBe(1)
+    expect(c[METRIC.distilled]).toBe(0)
+    expect(c[METRIC.consolidateInserted]).toBe(0)
+    expect(c[METRIC.consolidateMerged]).toBe(0)
+    expect(c[METRIC.consolidateSuperseded]).toBe(0)
+    expect(c[METRIC.consolidateSkipped]).toBe(0)
+    expect(c[METRIC.evictDecayed]).toBe(0)
+    expect(c[METRIC.evictDeleted]).toBe(0)
+    // No spurious recall-side increments.
+    expect(c[METRIC.recallCalls] ?? 0).toBe(0)
+    expect(c[METRIC.recallEntries] ?? 0).toBe(0)
+  })
+
+  test("memory recorders accumulate across repeated calls without throwing", () => {
+    const m = new Metrics()
+    const rec = new AgentRecorder(m)
+    expect(() => {
+      rec.memoryRecall({ recalled: 2, embedded: true, fellBack: false })
+      rec.memoryRecall({ recalled: 1, embedded: false, fellBack: true })
+      rec.memoryPersist({
+        distilled: 1,
+        inserted: 1,
+        merged: 0,
+        superseded: 0,
+        skipped: 0,
+        decayed: 0,
+        deleted: 0,
+      })
+      rec.memoryPersist(emptyPersistStats())
+    }).not.toThrow()
+    const c = m.snapshot().counters
+    expect(c[METRIC.recallCalls]).toBe(2)
+    expect(c[METRIC.recallEntries]).toBe(3)
+    expect(c[METRIC.recallSemantic]).toBe(1)
+    expect(c[METRIC.recallFallback]).toBe(1)
+    expect(c[METRIC.persistCalls]).toBe(2)
+    expect(c[METRIC.distilled]).toBe(1)
+    expect(c[METRIC.consolidateInserted]).toBe(1)
   })
 })

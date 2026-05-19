@@ -12,6 +12,7 @@ import {
   type FreshnessBucket,
   type MemoryEntry,
   type MemoryQuery,
+  type MemoryTier,
   type NormalizedEntry,
   normalizeEntry,
 } from "./types"
@@ -29,6 +30,18 @@ const W_TAG = 4
 const W_IMPORTANCE = 4
 /** Cap on the access-reinforcement bonus (log1p(accessCount) clamped here). */
 const ACCESS_CAP = 3
+/** Tier-weight multiplier (durable semantic knowledge outranks raw episodic recap). */
+const W_TIER = 2
+
+/**
+ * Tier contribution to score, by tier. Semantic (distilled, durable knowledge)
+ * ranks above episodic (raw per-session recap) when all else ties — final
+ * points = `TIER_WEIGHT[tier] * W_TIER`.
+ */
+const TIER_WEIGHT: Record<MemoryTier, number> = {
+  semantic: 1,
+  episodic: 0.5,
+}
 
 /** Freshness contribution to score, by bucket. Fresher ranks higher. */
 const FRESHNESS_WEIGHT: Record<FreshnessBucket, number> = {
@@ -113,7 +126,8 @@ const scoreOf = (e: NormalizedEntry, query: MemoryQuery, now: number): number =>
   tagScore(e, query) +
   FRESHNESS_WEIGHT[bucketOf(now - e.createdAt)] +
   e.importance * W_IMPORTANCE +
-  Math.min(Math.log1p(e.accessCount), ACCESS_CAP)
+  Math.min(Math.log1p(e.accessCount), ACCESS_CAP) +
+  TIER_WEIGHT[e.tier] * W_TIER
 
 /**
  * Filter + rank a candidate list. Pure and deterministic. Operates on

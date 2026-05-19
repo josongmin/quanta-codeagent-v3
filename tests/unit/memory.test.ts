@@ -119,6 +119,83 @@ describe("recallContext", () => {
     expect(out).toContain("- (fact) t")
   })
 
+  test("onStats: fires once with recalled count + lexical (embedded=false)", async () => {
+    const store = new InMemoryStore([
+      { id: "a", kind: "fact", text: "uses Postgres 16", tags: [], createdAt: 1 },
+    ])
+    const seen: import("@/agent/memory-stats").RecallStats[] = []
+    const out = await recallContext({ store, onStats: (s) => seen.push(s) }, "database")
+    expect(out).toBe("## Relevant memory\n- (fact) uses Postgres 16")
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toEqual({ recalled: 1, embedded: false, fellBack: false })
+  })
+
+  test("onStats: embedded=true when an embedder produced the query vector", async () => {
+    const store = new InMemoryStore([
+      { id: "a", kind: "fact", text: "uses Postgres 16", tags: [], createdAt: 1 },
+    ])
+    const seen: import("@/agent/memory-stats").RecallStats[] = []
+    await recallContext({ store, embedder: fakeEmbedder(), onStats: (s) => seen.push(s) }, "db")
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.embedded).toBe(true)
+  })
+
+  test("onStats: embedder throwing → embedded=false (lexical degrade)", async () => {
+    const store = new InMemoryStore([{ id: "a", kind: "fact", text: "x", tags: [], createdAt: 1 }])
+    const seen: import("@/agent/memory-stats").RecallStats[] = []
+    await recallContext(
+      { store, embedder: fakeEmbedder({ throws: true }), onStats: (s) => seen.push(s) },
+      "q",
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.embedded).toBe(false)
+  })
+
+  test("onStats: fellBack=true when SESSION_TAG fallback path is taken", async () => {
+    const store = new InMemoryStore([
+      {
+        id: "s1",
+        kind: "decision",
+        tier: "episodic",
+        text: "decided on Bun",
+        tags: [SESSION_TAG],
+        createdAt: 1,
+      },
+    ])
+    const seen: import("@/agent/memory-stats").RecallStats[] = []
+    const out = await recallContext({ store, onStats: (s) => seen.push(s) }, "anything", {
+      tiers: ["semantic"],
+    })
+    expect(out).toBe("## Relevant memory\n- (decision) decided on Bun")
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toEqual({ recalled: 1, embedded: false, fellBack: true })
+  })
+
+  test("onStats: empty store → recalled 0, fires once, returns null", async () => {
+    const seen: import("@/agent/memory-stats").RecallStats[] = []
+    const out = await recallContext(
+      { store: new InMemoryStore(), onStats: (s) => seen.push(s) },
+      "q",
+    )
+    expect(out).toBeNull()
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toEqual({ recalled: 0, embedded: false, fellBack: true })
+  })
+
+  test("onStats: an observer throw never escapes recallContext", async () => {
+    const store = new InMemoryStore([{ id: "a", kind: "fact", text: "t", tags: [], createdAt: 1 }])
+    const out = await recallContext(
+      {
+        store,
+        onStats: () => {
+          throw new Error("observer boom")
+        },
+      },
+      "t",
+    )
+    expect(out).toContain("- (fact) t")
+  })
+
   test("text truncated to 600 chars + ellipsis", async () => {
     const long = "x".repeat(700)
     const store = new InMemoryStore([{ id: "a", kind: "fact", text: long, tags: [], createdAt: 1 }])
@@ -279,6 +356,181 @@ describe("persistSession", () => {
     )
     const e = await store.get("arch")
     expect(e?.importance).toBeCloseTo(0.4, 5) // 0.8 * EVICTION_DECAY(0.5)
+  })
+
+  test("onStats: heuristic path reports distilled+inserted exactly once", async () => {
+    const store = new InMemoryStore()
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, onStats: (s) => seen.push(s) },
+      { sessionId: "ps1", finalMessages: [user("hi"), assistant("a distinct heuristic line")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({
+      distilled: 1,
+      inserted: 1,
+      merged: 0,
+      superseded: 0,
+      skipped: 0,
+    })
+  })
+
+  test("onStats: no-records path still fires once (all zero)", async () => {
+    const store = new InMemoryStore()
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, onStats: (s) => seen.push(s) },
+      { sessionId: "ps2", finalMessages: [user("hi")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.distilled).toBe(0)
+    expect(seen[0]?.inserted).toBe(0)
+  })
+
+  test("onStats: distill path reports distilled+inserted", async () => {
+    const store = new InMemoryStore()
+    const json = JSON.stringify([
+      {
+        kind: "fact",
+        tier: "semantic",
+        text: "uses Bun runtime",
+        tags: ["stack"],
+        importance: 0.9,
+      },
+    ])
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, llm: fakeLLM(json), onStats: (s) => seen.push(s) },
+      { sessionId: "ps3", finalMessages: [user("q"), assistant("done")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ distilled: 1, inserted: 1 })
+  })
+
+  test("onStats: skip op increments skipped", async () => {
+    const store = new InMemoryStore([
+      { id: "old", kind: "fact", text: "uses postgres database thing", tags: [], createdAt: 1 },
+    ])
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, llm: fakeLLM('{"action":"skip"}'), distill: false, onStats: (s) => seen.push(s) },
+      { sessionId: "ps4", finalMessages: [assistant("uses postgres database stuff")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ inserted: 0, skipped: 1 })
+  })
+
+  test("onStats: merge op increments merged", async () => {
+    const store = new InMemoryStore([
+      { id: "old", kind: "fact", text: "alpha beta gamma delta", tags: [], createdAt: Date.now() },
+    ])
+    const op = JSON.stringify({
+      action: "merge",
+      intoId: "old",
+      text: "alpha beta gamma delta merged",
+      tags: ["db"],
+      importance: 0.8,
+    })
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, llm: fakeLLM(op), distill: false, onStats: (s) => seen.push(s) },
+      { sessionId: "ps5", finalMessages: [assistant("alpha beta gamma delta epsilon")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ merged: 1, inserted: 0 })
+  })
+
+  test("onStats: supersede op increments superseded", async () => {
+    const store = new InMemoryStore([
+      { id: "old", kind: "fact", text: "one two three four five", tags: [], createdAt: Date.now() },
+    ])
+    const op = JSON.stringify({ action: "supersede", oldId: "old" })
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, llm: fakeLLM(op), distill: false, onStats: (s) => seen.push(s) },
+      { sessionId: "ps6", finalMessages: [assistant("one two three four six")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ superseded: 1, inserted: 0 })
+  })
+
+  test("onStats: eviction sweep reports deleted", async () => {
+    const seed: MemoryEntry[] = []
+    for (let i = 0; i < 6; i++) {
+      seed.push({
+        id: `e${i}`,
+        kind: "fact",
+        tier: "episodic",
+        text: `entry ${i}`,
+        tags: [],
+        createdAt: 1000 + i,
+        importance: 0.1,
+      })
+    }
+    const store = new InMemoryStore(seed)
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, evictionCaps: { episodicMax: 2 }, onStats: (s) => seen.push(s) },
+      { sessionId: "ps7", finalMessages: [assistant("a fresh distinct summary line")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.deleted).toBeGreaterThan(0)
+  })
+
+  test("onStats: eviction sweep reports decayed", async () => {
+    const old = Date.now() - 40 * 24 * 60 * 60 * 1000
+    const store = new InMemoryStore([
+      {
+        id: "arch",
+        kind: "fact",
+        tier: "semantic",
+        text: "old archived knowledge",
+        tags: [],
+        createdAt: old,
+        importance: 0.8,
+      },
+    ])
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store, onStats: (s) => seen.push(s) },
+      { sessionId: "ps8", finalMessages: [assistant("an unrelated brand new summary")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.decayed).toBeGreaterThan(0)
+  })
+
+  test("onStats: fires once (best-effort) even when store blows up", async () => {
+    const boomStore: PersistentStorePort = {
+      save: () => Promise.reject(new Error("save boom")),
+      update: () => Promise.reject(new Error("update boom")),
+      delete: () => Promise.reject(new Error("delete boom")),
+      get: () => Promise.reject(new Error("get boom")),
+      all: () => Promise.reject(new Error("all boom")),
+      recall: () => Promise.reject(new Error("recall boom")),
+    }
+    const seen: import("@/agent/memory-stats").PersistStats[] = []
+    await persistSession(
+      { store: boomStore, onStats: (s) => seen.push(s) },
+      { sessionId: "ps9", finalMessages: [assistant("text")] },
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.distilled).toBe(1)
+    expect(seen[0]?.inserted).toBe(0)
+  })
+
+  test("onStats: an observer throw never escapes persistSession", async () => {
+    const store = new InMemoryStore()
+    await expect(
+      persistSession(
+        {
+          store,
+          onStats: () => {
+            throw new Error("observer boom")
+          },
+        },
+        { sessionId: "ps10", finalMessages: [assistant("a line")] },
+      ),
+    ).resolves.toBeUndefined()
   })
 
   test("never throws when distill/store blow up", async () => {

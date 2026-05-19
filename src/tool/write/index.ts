@@ -17,9 +17,10 @@ export const writeTool: Tool<Input> = {
   // Mutates the filesystem; conservatively never run concurrently.
   isConcurrencySafe: () => false,
 
-  async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const existed = await fileExists(input.path)
-    await writeFile(input.path, input.content)
+  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    // Resolve relative paths against the session cwd, not process.cwd().
+    const existed = await fileExists(input.path, ctx.cwd)
+    await writeFile(input.path, input.content, ctx.cwd)
     const bytes = Buffer.byteLength(input.content, "utf8")
     yield {
       type: "result",

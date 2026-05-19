@@ -13,6 +13,7 @@ import {
 import { EVICTION_DECAY } from "@/memory/eviction"
 import { arbitrateConsolidation, type ConsolidationOp } from "./memory-consolidate"
 import { distillSession, finalAssistantText } from "./memory-distill"
+import { emptyPersistStats, type PersistStats, type RecallStats } from "./memory-stats"
 
 /**
  * Agent ↔ long-term memory orchestration (RFC §6.3, SOTA++ memory). Two
@@ -66,9 +67,24 @@ const formatBlock = (entries: readonly MemoryEntry[]): string => {
   return `## Relevant memory\n${lines.join("\n")}`
 }
 
+/** Invoke an optional stats observer; an observer throw must never escape. */
+const emitStats = <S>(cb: ((s: S) => void) | undefined, stats: S): void => {
+  if (!cb) return
+  try {
+    cb(stats)
+  } catch {
+    // Observability is advisory; never let it break recall/persist.
+  }
+}
+
 export interface RecallDeps {
   store: PersistentStorePort
   embedder?: EmbedderPort
+  /**
+   * Optional observability hook (locked seam, see memory-stats.ts). Invoked
+   * exactly once per {@link recallContext} call with the recall outcome.
+   */
+  onStats?: (s: RecallStats) => void
 }
 
 /**
@@ -111,12 +127,22 @@ export const recallContext = async (
   if (opts?.tiers) query.tiers = opts.tiers
 
   let entries = await deps.store.recall(query)
+  let fellBack = false
   if (entries.length === 0) {
     entries = await deps.store.recall({ tags: [SESSION_TAG], limit })
+    fellBack = true
   }
-  if (entries.length === 0) return null
+  if (entries.length === 0) {
+    emitStats(deps.onStats, { recalled: 0, embedded: Boolean(embedding), fellBack })
+    return null
+  }
 
   await reinforce(deps.store, entries)
+  emitStats(deps.onStats, {
+    recalled: entries.length,
+    embedded: Boolean(embedding),
+    fellBack,
+  })
   return formatBlock(entries)
 }
 
@@ -130,6 +156,12 @@ export interface PersistDeps {
   consolidate?: boolean
   evictionCaps?: Partial<EvictionCaps>
   signal?: AbortSignal
+  /**
+   * Optional observability hook (locked seam, see memory-stats.ts). Invoked
+   * exactly once per {@link persistSession} call with the persist outcome
+   * (best-effort with whatever was counted even when the pipeline errors).
+   */
+  onStats?: (s: PersistStats) => void
 }
 
 export interface PersistInput {
@@ -207,25 +239,30 @@ const decideOp = async (
   return heuristicOp(candidate, dupes)
 }
 
-/** Apply a consolidation op against the store. */
+/** Apply a consolidation op against the store, recording the outcome. */
 const applyOp = async (
   store: PersistentStorePort,
   candidate: MemoryEntry,
   op: ConsolidationOp,
+  stats: PersistStats,
 ): Promise<void> => {
   if (op.action === "insert") {
     await store.save(candidate)
+    stats.inserted++
   } else if (op.action === "merge") {
     await store.update(op.intoId, { text: op.text, tags: op.tags, importance: op.importance })
+    stats.merged++
   } else if (op.action === "supersede") {
     await store.save(candidate)
     await store.update(op.oldId, { supersededBy: candidate.id })
+    stats.superseded++
+  } else {
+    stats.skipped++
   }
-  // skip → nothing.
 }
 
 /** Whole-store eviction sweep (decay then delete). Best-effort per entry. */
-const sweepEviction = async (deps: PersistDeps): Promise<void> => {
+const sweepEviction = async (deps: PersistDeps, stats: PersistStats): Promise<void> => {
   const all = await deps.store.all()
   const plan = planEviction(all, deps.evictionCaps)
   const byId = new Map(all.map((e) => [e.id, e]))
@@ -236,6 +273,7 @@ const sweepEviction = async (deps: PersistDeps): Promise<void> => {
       await deps.store.update(id, {
         importance: clamp((e.importance ?? 0.5) * EVICTION_DECAY, 0, 1),
       })
+      stats.decayed++
     } catch {
       // Best-effort.
     }
@@ -243,6 +281,7 @@ const sweepEviction = async (deps: PersistDeps): Promise<void> => {
   for (const id of plan.delete) {
     try {
       await deps.store.delete(id)
+      stats.deleted++
     } catch {
       // Best-effort.
     }
@@ -255,20 +294,28 @@ const sweepEviction = async (deps: PersistDeps): Promise<void> => {
  * whole pipeline is swallowed — a session must never fail because memory did.
  */
 export const persistSession = async (deps: PersistDeps, input: PersistInput): Promise<void> => {
+  const stats = emptyPersistStats()
   try {
     const records = await distillRecords(deps, input.finalMessages)
-    if (records.length === 0) return
+    stats.distilled = records.length
+    if (records.length === 0) {
+      emitStats(deps.onStats, stats)
+      return
+    }
 
     const now = Date.now()
     for (const record of records) {
       const candidate = await buildCandidate(deps, input.sessionId, record, now)
       const dupes = findNearDuplicates(candidate, await deps.store.all())
       const op = await decideOp(deps, candidate, dupes)
-      await applyOp(deps.store, candidate, op)
+      await applyOp(deps.store, candidate, op, stats)
     }
 
-    await sweepEviction(deps)
+    await sweepEviction(deps, stats)
+    emitStats(deps.onStats, stats)
   } catch {
-    // Persistence is advisory; never propagate.
+    // Persistence is advisory; never propagate. Still emit whatever was
+    // counted before the failure (best-effort; emitStats never throws).
+    emitStats(deps.onStats, stats)
   }
 }

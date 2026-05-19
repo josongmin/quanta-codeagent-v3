@@ -54,13 +54,19 @@ const DEFAULT_TIMEOUT_MS = 120_000
 const TRUNCATION_MARKER = "\n…[output truncated by sandbox maxOutputBytes]"
 
 /** Minimal, non-sensitive variables a child generally needs to function.
- *  Deliberately excludes anything that could carry credentials. */
-const DEFAULT_ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TERM"]
+ *  Deliberately excludes anything that could carry credentials. This is the
+ *  SINGLE source of truth for the env allowlist — `runShell`'s scrubbed mode
+ *  (src/runtime/shell.ts) imports {@link scrubEnv}, it does NOT keep its own
+ *  copy of this list (ADR-0006: one Local-honored guarantee, one definition). */
+export const DEFAULT_ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TERM"]
 
 /** Build the scrubbed environment: ONLY allowlisted names, copied from the
  *  parent if present. The parent's full env (API keys, tokens, …) never
- *  leaks — absent names are simply omitted. */
-const scrubEnv = (allowlist: readonly string[]): Record<string, string> => {
+ *  leaks — absent names are simply omitted. Exported so every shell-spawning
+ *  path (LocalSandbox AND runShell's scrubbed mode) shares one implementation. */
+export const scrubEnv = (
+  allowlist: readonly string[] = DEFAULT_ENV_ALLOWLIST,
+): Record<string, string> => {
   const out: Record<string, string> = {}
   for (const name of allowlist) {
     const value = process.env[name]
@@ -115,7 +121,10 @@ const capOutput = (text: string, maxBytes: number | undefined): string => {
  *
  * What it DOES honestly guarantee:
  *  - env scrubbing: the child sees ONLY allowlisted variables (parent env,
- *    including API keys, is never inherited);
+ *    including API keys, is never inherited). Note this same {@link scrubEnv}
+ *    guarantee now also applies to the shell-spawning TOOLS (bash/grep/
+ *    localize/test-runner) which route through `runShell`'s scrubbed mode —
+ *    not just commands that go through this class;
  *  - cwd: the process starts in `cwdJail`, and a requested jail escape throws;
  *  - output cap: captured bytes are truncated to `maxOutputBytes`;
  *  - timeout: the process is killed past `timeoutMs` (`timedOut` set).

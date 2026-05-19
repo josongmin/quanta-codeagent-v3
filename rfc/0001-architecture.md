@@ -18,6 +18,14 @@ LLM이 사용자와 티키타카하며 코딩 태스크(읽기/검색/편집/테
 - Phase 3 (3개월): SWE-bench Verified 70%+ (Best-of-N 포함)
 - 전체 코드베이스 **20k LoC 미만 유지**
 
+> **측정 기준의 정직성 (50%/70%)**: 하니스(`apps/bench`)·Best-of-N
+> 샘플러·Python 채점 seam(`python-swebench.ts`)은 **구현되어 결정론 단위/
+> 통합 테스트로 검증**된다 — 메커니즘은 실재한다. 그러나 *resolution
+> 퍼센트* 자체는 비차단 실-LLM eval 티어(§10.4)와 외부 Docker/Python
+> 채점에서만 산출되며, 본 레포는 그 퍼센트를 스스로 증명하지 않는다.
+> 50%/70%는 목표치이지 레포가 보장하는 측정값이 아니다(머신은 진짜,
+> 점수는 외부 검증 대상).
+
 ### 1.2 명시적 Non-Goals
 
 - ❌ 결정론적 replay (LLM은 본질적으로 비결정적)
@@ -74,7 +82,9 @@ shared/ (공통 타입만)
 - `agent/`만 다른 슬라이스 import 가능
 - 다른 슬라이스끼리 import 금지
 - `shared/`는 누구나 import 가능
-- 예외: `tool/` → `runtime/`, `memory/` → `storage/` (자연스러운 의존)
+- 예외: `tool/` → `runtime/`·`storage/`, `memory/` → `storage/` (자연스러운
+  의존; `tool/ → storage/`는 read/write/edit/test-runner가 사용, biome.json
+  override 목록에서 제외돼 강제 매트릭스에 반영됨)
 - `memory/`는 `@/llm` import 불가 유지 — 시맨틱 회상에 필요한 임베딩은
   memory가 소유한 주입식 `EmbedderPort`로 받고, 구현은 `@/agent`에 둠 (§6.3, ADR-0008)
 
@@ -90,7 +100,7 @@ shared/ (공통 타입만)
 | **stream** | 출력/이벤트 | 풀 |
 | **permission** | 정책 평가 | 약식 |
 | **runtime** | 셸/샌드박스 실행 | 약식 → 풀 (sandbox 시) |
-| **lsp** | 언어 서버 | 풀 (pyright + typescript 어댑터, 구현됨) |
+| **lsp** | 언어 서버 | 풀 (pyright + typescript 어댑터; `agent/lsp-bridge.ts`가 `diagnostics` 도구로 노출, ADR-0009) |
 | **observability** | 로그/메트릭 | 약식 (logger + metrics, 구현됨) |
 | **mcp** | MCP 클라이언트 + 브리지 | 약식 (client/jsonrpc, agent가 브리지) |
 | **agent** | ReAct 루프 조립 | 약식 (자체 구현) |
@@ -199,12 +209,15 @@ quanta-codeagent-v3/
 │   │   ├── plan.ts              # plan mode
 │   │   ├── state.ts             # state 영속/resume
 │   │   ├── metrics.ts
-│   │   ├── memory.ts            # WorkingMemory 배선
+│   │   ├── memory.ts            # WorkingMemory + recall/persist 배선
 │   │   ├── memory-consolidate.ts
 │   │   ├── memory-distill.ts
-│   │   ├── memory-embedder.ts
+│   │   ├── memory-embedder.ts   # EmbedderPort 구현 (OpenAI/null/캐싱)
+│   │   ├── memory-stats.ts      # recall/persist 통계 (onStats 시임)
+│   │   ├── memory-tools.ts      # memory_search/write/update self-edit 도구
 │   │   ├── mcp-bridge.ts        # MCP 도구 브리지
-│   │   ├── prompt.ts            # 시스템 프롬프트
+│   │   ├── lsp-bridge.ts        # LSP → diagnostics 도구 어댑터 (§3.2)
+│   │   ├── prompt.ts            # 시스템 프롬프트 (정적 프리픽스 + 턴 컨텍스트)
 │   │   └── index.ts
 │   │
 │   └── apps/
@@ -336,8 +349,10 @@ interface EmbedderPort {                        // memory가 소유, @/agent가 
   BLOB(sqlite)로 저장, 코사인 유사도. 하이브리드 랭킹(`ranking.ts`, 가중 합)
   = 벡터(W=10, 지배항) + 텍스트 부분일치(5, 완전일치 +1) + 태그(4/태그) +
   freshness(fresh3/recent2/stale1/archived0) + importance(×4) +
+  tier(semantic1/episodic0.5, ×W_TIER=2 — 내구 지식이 raw 회상보다 우선) +
   접근 강화(`min(log1p(accessCount),3)`). **텍스트는 더 이상 하드 필터가
-  아니라 점수 항** — paraphrase 누락 버그 제거. 태그는 여전히 하드 필터.
+  아니라 점수 항** — paraphrase 누락 버그 제거. 태그·`tiers`·`kinds`·
+  `minImportance`는 하드 필터(`tiers` 미지정 시 전 tier 회상 — 동작 보존).
 - **distill**: 세션 종료 시 `distillSession`(@/agent)이 트랜스크립트를 LLM으로
   구조화 레코드로 추출 → raw 최종-텍스트 덤프 대체. LLM/임베더 부재 시
   휴리스틱 단일 요약으로 graceful degrade.
@@ -347,7 +362,14 @@ interface EmbedderPort {                        // memory가 소유, @/agent가 
   하드삭제, 정원 초과 저가치 삭제, archived 저가치 importance 감쇠를 계획
   (순수 함수, 호출자가 적용).
 - **self-edit 도구**: store 존재 시 `memory_search`/`memory_write`/
-  `memory_update`를 에이전트에 등록(세션 중 자기 메모리 수정).
+  `memory_update`를 에이전트에 등록(세션 중 자기 메모리 수정). `memory_search`는
+  `tier`/`kind`/`minImportance` 선택 필터 노출. 루프 회상은
+  `memory.recallTiers`(env `QUANTA_MEMORY_RECALL_TIERS`)로 tier 제한 가능.
+- **관측성**: `AgentRecorder`가 `memory.recall.*`(calls/entries/semantic/
+  fallback) · `memory.persist.calls` · `memory.distilled` ·
+  `memory.consolidate.*`(insert/merge/supersede/skip) · `memory.evict.*`
+  (decay/delete) 카운터를 기록. `recallContext`/`persistSession`은 반환형
+  불변, 옵셔널 `onStats` 옵저버로 통계 방출(루프가 recorder에 배선).
 - **슬라이스 격리 유지**: `src/memory/**`는 여전히 `@/llm`을 import 불가
   (Biome 강제). memory는 주입식 `EmbedderPort` 인터페이스만 소유; OpenAI
   구현 + 모든 LLM 주도 지능(임베딩/distill/consolidate)은 `@/agent`에 거주
@@ -788,3 +810,5 @@ export type StreamEvent =
 | 0.4 | 2026-05-19 | 루프 견고화 선반영: in-loop 실패 복구(transient backoff / PTL→reactive compact / max_output_tokens / malformed tool_use / empty turn, same-turn 재시도는 maxTurns 불소모) + proactive·reactive compaction을 Phase 1 루프에 편입(§8에선 Phase 2였음). 프롬프트 캐시 프리픽스 고정 + 시스템 프롬프트 강화(ADR-0004). e2e 복구·OpenAI 어댑터 테스트 추가. §13.1 항목 |
 | 0.5 | 2026-05-19 | Phase 1.5/2/3 구현 일괄 반영(문서 현행화): memory(working+sqlite+in-memory, recall/persist 배선)·lsp(pyright+typescript)·observability(logger+metrics)·mcp 슬라이스, Tool 인터페이스 v2(동시성 배칭), retry/compaction/hooks/plan/state/metrics + mcp-bridge, SWE-bench 하니스 + Best-of-N 샘플러 + python seam, WorkingMemory 루프 배선. §2·§3.2·§4 트리·§13 Q1–Q5 해소 표기 동기화 |
 | 0.6 | 2026-05-19 | SOTA++ 계층형 시맨틱 메모리 반영(ADR-0008): §6.3 재작성(tier/하이브리드 회상/distill/consolidate/evict/self-edit/EmbedderPort 주입), §3.1 memory↛@/llm 예외 명문화, §12 anti-bloat 의도적 override 위험 항목 추가. 신규 dep 0 |
+| 0.7 | 2026-05-19 | SOTA++ 메모리 심화(ADR-0008 연장): tier가 회상 랭킹에 실제 작용(W_TIER=2, semantic>episodic — "계층형 회상" 빵꾸 해소), `memory_search` tier/kind/minImportance 필터, `memory.recallTiers`+`QUANTA_MEMORY_RECALL_TIERS`, 메모리 관측성(`AgentRecorder` memory.recall/persist/distilled/consolidate/evict 카운터, `onStats` 옵저버). 반환형 불변·동작 보존, 신규 dep 0. 523 테스트 통과 |
+| 0.8 | 2026-05-19 | 문서 정직성 정정: §1.1 SWE-bench 50%/70% 측정 정직성 주석(메커니즘 구현·결정론 검증 / 퍼센트는 외부 eval 대상), §3.1 `tool/→storage/` 예외 명문화(biome 강제 매트릭스 정합), §3.2/§4 LSP가 `agent/lsp-bridge.ts`로 `diagnostics` 도구 노출(ADR-0009), §4 트리에 memory-stats/memory-tools/lsp-bridge 추가. 사문화 export `planSystemAugmentation`/`PLAN_AUGMENTATION` 제거(in-loop 카피는 prompt.ts `PLAN_NOTICE`로 일원화). ADR-0005 결번 placeholder |

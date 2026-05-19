@@ -18,9 +18,23 @@ const MAX_MALFORMED_RETRIES = 1
 const MAX_CONSECUTIVE_EMPTIES = 2
 
 /**
- * Minimal ReAct loop. One `while` over turns; each turn = one LLM stream then
- * (if any) tool dispatch. No transition state machine, no compaction, no
- * hooks — those are the v2 weight this project exists to avoid (RFC §1.2).
+ * ReAct loop. One `while` over turns; each turn = one LLM stream then (if any)
+ * tool dispatch. There is no transition state machine — the FSM/workflow weight
+ * is what RFC §1.2 rejects, not the surface below. This slice's ACTUAL surface:
+ *
+ * - same-turn recovery (RFC §13.1 "루프 견고화"): transient stream errors
+ *   retry with bounded backoff, max_output_tokens injects a continue meta,
+ *   malformed tool_use is corrected once, empty turns are capped. Same-turn
+ *   retries do NOT consume the `maxTurns` counter.
+ * - compaction (RFC §13.1, ADR-0004 신호): proactive at turn-top under token
+ *   pressure (`compactIfNeeded`) + reactive on a PTL trigger (`reactiveCompact`)
+ *   that resumes the same turn after compacting.
+ * - hooks + memory/metrics wiring: `HookBus` events, working-memory + long-term
+ *   recall/persist (`recallContext`/`persistSession`), `AgentRecorder` counters.
+ * - ADR-0004 cached prompt: the loop consumes `buildTurnContext`'s
+ *   `{ system, messages }` (static cache-prefix system + a single trailing
+ *   `<system-reminder>` for the per-turn dynamic context); it does NOT
+ *   re-assemble the system prompt per turn.
  *
  * Tool dispatch uses per-input concurrency batching (RFC §6.2): the tool_use
  * list is walked in order and split into maximal runs of consecutive calls
@@ -161,6 +175,7 @@ const dispatchTurnTools = async (
 const resolveMemoryContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
+  recorder: AgentRecorder | undefined,
 ): Promise<string | undefined> => {
   if (!config.store) return undefined
   const lastUser = [...wm.snapshot()].reverse().find((m) => m.role === "user")
@@ -170,9 +185,16 @@ const resolveMemoryContext = async (
     .join(" ")
     .trim()
   const block = await recallContext(
-    { store: config.store, ...(config.embedder ? { embedder: config.embedder } : {}) },
+    {
+      store: config.store,
+      ...(config.embedder ? { embedder: config.embedder } : {}),
+      ...(recorder ? { onStats: (s) => recorder.memoryRecall(s) } : {}),
+    },
     queryText || undefined,
-    { limit: config.memory?.recallLimit ?? 5 },
+    {
+      limit: config.memory?.recallLimit ?? 5,
+      ...(config.memory?.recallTiers ? { tiers: config.memory.recallTiers } : {}),
+    },
   )
   return block ?? undefined
 }
@@ -213,7 +235,10 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
  *  the conditional-spread semantics required by `exactOptionalPropertyTypes`
  *  (omit keys entirely, never assign `undefined`). Caller guards `config.store`
  *  presence before invoking `persistSession`. */
-const buildPersistDeps = (config: AgentConfig): PersistDeps => ({
+const buildPersistDeps = (
+  config: AgentConfig,
+  recorder: AgentRecorder | undefined,
+): PersistDeps => ({
   // biome-ignore lint/style/noNonNullAssertion: call site guards `config.store`
   store: config.store!,
   llm: config.llm,
@@ -221,6 +246,7 @@ const buildPersistDeps = (config: AgentConfig): PersistDeps => ({
   ...(config.memory?.distill !== undefined ? { distill: config.memory.distill } : {}),
   ...(config.memory?.consolidate !== undefined ? { consolidate: config.memory.consolidate } : {}),
   ...(config.memory?.evictionCaps ? { evictionCaps: config.memory.evictionCaps } : {}),
+  ...(recorder ? { onStats: (s) => recorder.memoryPersist(s) } : {}),
   signal: config.signal,
 })
 
@@ -363,8 +389,9 @@ export const decideOnAssembled = (
 const prepareTurnContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
+  recorder: AgentRecorder | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
-  const memoryContext = await resolveMemoryContext(config, wm)
+  const memoryContext = await resolveMemoryContext(config, wm, recorder)
   await maybeCompact(config, staticSystemFor(config), wm)
   return buildTurnContext({
     baseMessages: [...wm.snapshot()],
@@ -436,7 +463,7 @@ const runTurn = async (
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
-    const ctx = await prepareTurnContext(config, wm)
+    const ctx = await prepareTurnContext(config, wm, recorder)
     const result = await consumeTurnStream(config, ctx.messages, specs, ctx.system, recorder)
 
     const action =
@@ -461,7 +488,10 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
     const messages = [...wm.snapshot()]
     if (config.store) {
-      await persistSession(buildPersistDeps(config), { sessionId, finalMessages: messages })
+      await persistSession(buildPersistDeps(config, recorder), {
+        sessionId,
+        finalMessages: messages,
+      })
     }
     recorder?.stopReason(reason)
     if (config.hooks) await config.hooks.emit({ type: "session_end", reason, turns })

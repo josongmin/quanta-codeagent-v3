@@ -76,4 +76,12 @@ describe("writeTool", () => {
   test("schema rejects missing content", () => {
     expect(writeTool.inputSchema.safeParse({ path: "p" }).success).toBe(false)
   })
+
+  test("a relative path resolves against ctx.cwd, not process.cwd()", async () => {
+    const r = await run({ path: "relative-write.txt", content: "based" })
+    expect(r.ok).toBe(true)
+    // Written under the session cwd (dir), not the process cwd.
+    expect(readFileSync(join(dir, "relative-write.txt"), "utf8")).toBe("based")
+    expect(existsSync(join(process.cwd(), "relative-write.txt"))).toBe(false)
+  })
 })

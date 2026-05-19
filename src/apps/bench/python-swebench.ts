@@ -69,13 +69,24 @@ export const defaultSpawn: Spawn = async (argv, cwd, timeoutMs) => {
   }
 }
 
+/**
+ * Canonical SWE-bench **Verified** dataset id. This tool's identity is a
+ * Verified harness, so this is the default `--dataset_name` when the caller
+ * does not override it. NOTE: the upstream `run_evaluation` default is the
+ * FULL `princeton-nlp/SWE-bench` split — NOT Verified — so omitting
+ * `--dataset_name` would silently grade the wrong dataset. We therefore always
+ * pass an explicit dataset (this constant unless overridden).
+ */
+export const SWEBENCH_VERIFIED_DATASET = "princeton-nlp/SWE-bench_Verified"
+
 export interface PySwebenchOpts {
   /** Override the process boundary (tests inject a fake). */
   spawn?: Spawn
   /** Override the availability probe (tests force true/false). */
   probe?: () => Promise<boolean>
-  /** `--dataset_name` passed to the harness (HF id or local JSONL). When
-   *  unset the harness uses its default SWE-bench Verified dataset. */
+  /** `--dataset_name` for the harness (HF id or local JSONL). When unset we
+   *  default to {@link SWEBENCH_VERIFIED_DATASET} — NOT the harness's own
+   *  default (which is the full SWE-bench split, not Verified). */
   datasetName?: string
   /** model_name_or_path written into the predictions row (and the report
    *  filename the harness emits). Default "quanta". */
@@ -233,7 +244,8 @@ export const evaluateWithPythonSwebench = async (
         model_patch: prediction,
       })}\n`,
     )
-    const argv = buildArgv(python, predictionsPath, runId, meta.instanceId, opts.datasetName)
+    const datasetName = opts.datasetName ?? SWEBENCH_VERIFIED_DATASET
+    const argv = buildArgv(python, predictionsPath, runId, meta.instanceId, datasetName)
     const run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
     const resolvedIds = await collectResolvedIds(work)
     const resolved = resolvedIds.includes(meta.instanceId)

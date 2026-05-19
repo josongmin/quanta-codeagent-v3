@@ -45,6 +45,13 @@ ADR-0008). store가 켜지면 종료된 세션을 LLM으로 distill해 구조화
 | `QUANTA_MEMORY_DISTILL` | `off` (기본 ON) | `off`면 세션 종료 LLM distill 끔(휴리스틱 요약으로 degrade) |
 | `QUANTA_MEMORY_CONSOLIDATE` | `off` (기본 ON) | `off`면 LLM 중재 중복 통합 끔 |
 | `QUANTA_MEMORY_SELF_EDIT` | `off` (기본 ON) | `off`면 `memory.selfEditTools=false` → `memory_search/write/update` self-edit 도구 미등록 |
+| `QUANTA_MEMORY_RECALL_TIERS` | `episodic,semantic` 부분집합 (미설정 시 전 tier) | 루프 회상을 해당 tier로 제한 |
+
+회상 랭킹은 tier 가중(durable `semantic` > raw `episodic`)을 포함하며,
+`memory_search` 도구는 `tier`/`kind`/`minImportance` 필터를 받는다.
+`QUANTA_METRICS=1`이면 메모리 파이프라인 카운터(`memory.recall.*`,
+`memory.persist.*`, `memory.distilled`, `memory.consolidate.*`,
+`memory.evict.*`)가 기록된다.
 
 ## 스크립트
 

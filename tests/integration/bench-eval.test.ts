@@ -16,6 +16,7 @@ import {
   evaluateWithPythonSwebench,
   isPythonSwebenchAvailable,
   type Spawn,
+  SWEBENCH_VERIFIED_DATASET,
 } from "../../src/apps/bench/python-swebench"
 import { loadCorpus, writeSyntheticRealCorpus } from "../../src/apps/bench/swebench"
 import type { Instance } from "../../src/apps/bench/types"
@@ -153,6 +154,37 @@ describe("bench-eval: python swebench seam (hermetic)", () => {
     }
     const r = await evaluateWithPythonSwebench(mkInstance(), "diff --git a b", { spawn })
     expect(r.resolved).toBe(false)
+  })
+
+  test("defaults --dataset_name to SWE-bench Verified when opts.datasetName unset", async () => {
+    expect(SWEBENCH_VERIFIED_DATASET).toBe("princeton-nlp/SWE-bench_Verified")
+    let harnessArgv: string[] = []
+    const spawn: Spawn = async (argv, cwd) => {
+      if (argv.includes("import swebench")) return { code: 0, stdout: "", stderr: "" }
+      harnessArgv = argv
+      await Bun.write(join(cwd, "quanta.run.json"), JSON.stringify({ resolved_ids: [] }))
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await evaluateWithPythonSwebench(mkInstance(), "diff --git a b", { spawn })
+    const i = harnessArgv.indexOf("--dataset_name")
+    expect(i).toBeGreaterThan(-1)
+    expect(harnessArgv[i + 1]).toBe("princeton-nlp/SWE-bench_Verified")
+  })
+
+  test("explicit opts.datasetName overrides the Verified default", async () => {
+    let harnessArgv: string[] = []
+    const spawn: Spawn = async (argv, cwd) => {
+      if (argv.includes("import swebench")) return { code: 0, stdout: "", stderr: "" }
+      harnessArgv = argv
+      await Bun.write(join(cwd, "quanta.run.json"), JSON.stringify({ resolved_ids: [] }))
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await evaluateWithPythonSwebench(mkInstance(), "diff --git a b", {
+      spawn,
+      datasetName: "princeton-nlp/SWE-bench_Lite",
+    })
+    const i = harnessArgv.indexOf("--dataset_name")
+    expect(harnessArgv[i + 1]).toBe("princeton-nlp/SWE-bench_Lite")
   })
 
   test("runner falls back to local testCmd when harness unavailable (no throw)", async () => {

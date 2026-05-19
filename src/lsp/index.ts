@@ -1,6 +1,7 @@
+export { LspClient, type LspClientOptions, type LspClientSpec } from "./adapters/base"
 export type { PyrightAdapterOptions } from "./adapters/pyright"
 export { PyrightAdapter } from "./adapters/pyright"
 export type { TypescriptAdapterOptions } from "./adapters/typescript"
-export { TypescriptAdapter } from "./adapters/typescript"
+export { languageIdFor, TypescriptAdapter } from "./adapters/typescript"
 export type { LspPort } from "./ports"
 export type { Diagnostic, DiagnosticSeverity, LspServerInfo, Pos } from "./types"

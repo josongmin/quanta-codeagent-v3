@@ -54,6 +54,12 @@ export interface AgentConfig {
     evictionCaps?: { semanticMax?: number; episodicMax?: number }
     /** Register the self-edit memory tools (memory_search/write/update). Default `true` when `store` is present. */
     selfEditTools?: boolean
+    /**
+     * Restrict per-turn recall to these tiers (SOTA++ memory, RFC §6.3).
+     * Absent ⇒ recall spans all tiers (behavior-preserving). e.g.
+     * `["semantic"]` recalls only durable distilled knowledge.
+     */
+    recallTiers?: ("episodic" | "semantic")[]
   }
   /**
    * Compaction tuning. Absent ⇒ compaction is skipped entirely (existing

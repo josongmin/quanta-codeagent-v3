@@ -35,9 +35,14 @@ export {
   OpenAIEmbedder,
   type OpenAIEmbedderOptions,
 } from "./memory-embedder"
+export {
+  emptyPersistStats,
+  type PersistStats,
+  type RecallStats,
+} from "./memory-stats"
 export { memoryTools } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
-export { isMutatingToolBlockedInPlan, planSystemAugmentation } from "./plan"
+export { isMutatingToolBlockedInPlan } from "./plan"
 export type { TurnContext, TurnContextInput } from "./prompt"
 export { buildSystemPrompt, buildTurnContext } from "./prompt"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"

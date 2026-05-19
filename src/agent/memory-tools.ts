@@ -40,6 +40,20 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 const searchSchema = z.object({
   query: z.string().describe("Free-text query; semantic when an embedder is configured."),
   limit: z.number().int().min(1).max(20).optional().describe("Max results (default 5)."),
+  tier: z
+    .enum(["episodic", "semantic"])
+    .optional()
+    .describe("Restrict to this memory tier (default: both)."),
+  kind: z
+    .enum(["fact", "decision", "observation", "preference"])
+    .optional()
+    .describe("Restrict to this memory kind (default: all)."),
+  minImportance: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe("Drop entries with importance below this 0..1 threshold."),
 })
 type SearchInput = z.infer<typeof searchSchema>
 
@@ -67,7 +81,10 @@ type UpdateInput = z.infer<typeof updateSchema>
 export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
   const memorySearch: Tool<SearchInput> = {
     name: "memory_search",
-    description: "Search durable long-term memory for entries relevant to a query. Read-only.",
+    description:
+      "Search durable long-term memory for entries relevant to a query. Read-only. " +
+      "Optional filters: `tier` (episodic|semantic), `kind` " +
+      "(fact|decision|observation|preference), `minImportance` (0..1).",
     inputSchema: searchSchema,
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
@@ -77,6 +94,9 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
         const embedding = await tryEmbed(deps.embedder, input.query)
         const query: MemoryQuery = { text: input.query, limit }
         if (embedding) query.embedding = embedding
+        if (input.tier) query.tiers = [input.tier]
+        if (input.kind) query.kinds = [input.kind]
+        if (input.minImportance !== undefined) query.minImportance = input.minImportance
         const entries = await deps.store.recall(query)
         if (entries.length === 0) {
           yield { type: "result", result: { ok: true, output: "No matching memories." } }

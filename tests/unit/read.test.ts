@@ -93,4 +93,12 @@ describe("readTool", () => {
   test("schema rejects a non-string path", () => {
     expect(readTool.inputSchema.safeParse({ path: 123 }).success).toBe(false)
   })
+
+  test("a relative path resolves against ctx.cwd, not process.cwd()", async () => {
+    // The file lives only under the session cwd (dir); a bare name must hit it.
+    writeFileSync(join(dir, "relative-read.txt"), "from-ctx-cwd")
+    const r = await run({ path: "relative-read.txt" })
+    expect(r.ok).toBe(true)
+    expect(r.output).toBe("1\tfrom-ctx-cwd")
+  })
 })

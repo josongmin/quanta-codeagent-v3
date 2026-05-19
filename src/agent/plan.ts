@@ -15,22 +15,12 @@ import type { ToolAction } from "@/permission"
  * mirrors the permission-deny tool_result shape, adding zero new surface area.
  *
  * Behavior-preserving: `planMode` is optional on {@link AgentConfig}; absent ⇒
- * neither the augmentation nor the gate is reached, default path unchanged.
+ * neither the prompt notice nor the gate is reached, default path unchanged.
+ *
+ * Post ADR-0004 the in-loop plan prompt copy lives in `PLAN_NOTICE`
+ * (src/agent/prompt.ts) — folded into the per-turn `<system-reminder>` tail of
+ * `buildTurnContext`. This file now owns only the dispatch-side gate.
  */
-
-const PLAN_AUGMENTATION = [
-  "## Plan mode",
-  "You are operating in PLAN MODE. Do NOT modify anything.",
-  "- Explore using read-only tools only (read, grep, glob, localize).",
-  "- Do NOT write, edit, run shell commands, or otherwise change the system.",
-  "- Investigate the request thoroughly, then produce a concrete,",
-  "  step-by-step implementation plan as your final answer.",
-  "- The plan should be specific: which files, what changes, in what order.",
-  "- Stop calling tools once you have enough context to write the plan.",
-].join("\n")
-
-/** System-prompt augmentation appended (to a fresh copy) when plan mode is on. */
-export const planSystemAugmentation = (): string => PLAN_AUGMENTATION
 
 /**
  * True when `action` mutates and must be blocked in plan mode. Read-only

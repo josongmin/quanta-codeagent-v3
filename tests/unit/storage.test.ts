@@ -20,6 +20,19 @@ describe("resolvePath", () => {
   test("resolves a relative path against process.cwd()", () => {
     expect(resolvePath("a/b.txt")).toBe(resolve(process.cwd(), "a/b.txt"))
   })
+
+  test("resolves a relative path against an explicit baseDir", () => {
+    expect(resolvePath("a/b.txt", dir)).toBe(resolve(dir, "a/b.txt"))
+  })
+
+  test("an absolute path wins over baseDir (no-op)", () => {
+    const abs = join(dir, "abs.txt")
+    expect(resolvePath(abs, "/some/other/base")).toBe(abs)
+  })
+
+  test("empty baseDir falls back to process.cwd()", () => {
+    expect(resolvePath("a/b.txt", "")).toBe(resolve(process.cwd(), "a/b.txt"))
+  })
 })
 
 describe("parentDir", () => {
@@ -55,6 +68,16 @@ describe("writeFile / readFile round-trip", () => {
   test("readFile rejects with a 'File not found' error for a missing file", async () => {
     const missing = join(dir, "nope.txt")
     await expect(readFile(missing)).rejects.toThrow(`File not found: ${missing}`)
+  })
+
+  test("a relative path is resolved against baseDir, not process.cwd()", async () => {
+    await writeFile("rel.txt", "based", dir)
+    expect(await fileExists("rel.txt", dir)).toBe(true)
+    expect(await readFile("rel.txt", dir)).toBe("based")
+    expect((await statFile("rel.txt", dir)).path).toBe(join(dir, "rel.txt"))
+    expect(parentDir("sub/rel.txt", dir)).toBe(join(dir, "sub"))
+    // The same relative name must NOT exist under process.cwd().
+    expect(await fileExists("rel.txt")).toBe(false)
   })
 })
 

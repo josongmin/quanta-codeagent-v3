@@ -46,7 +46,12 @@ paraphrase된 회상이 통째로 누락, (2) 세션 종료 시 최종 어시스
 ## 트레이드오프
 
 - **얻은 것**: paraphrase-robust 회상, 잡음 제거된 구조화 지식, 중복 억제,
-  tier별 수명 관리, 에이전트 self-edit. 격리·동작 보존 무손상.
+  tier별 수명 관리, 에이전트 self-edit. 격리·동작 보존 무손상. 후속 심화:
+  tier가 회상 랭킹에 실제 작용(W_TIER=2, semantic>episodic — 초기 구현의
+  "계층형 회상이 저장/eviction 한정"이던 빵꾸 해소), `memory_search`
+  tier/kind/minImportance 필터, `memory.recallTiers` 제한, 그리고 메모리
+  파이프라인 전구간 관측성(`AgentRecorder` memory.* 카운터, 반환형을 깨지
+  않는 `onStats` 옵저버 시임).
 - **잃은 것 / 비용**: 본 슬라이스는 RFC §12 anti-bloat 에토스("v2 마인드셋
   재발")를 **사용자의 명시적 지시로 의도적 override** — ROI 무관 SOTA++.
   LoC·이동 부품 증가, 임베딩의 네트워크·과금 의존, 세션 종료 시 distill/
@@ -65,7 +70,8 @@ paraphrase된 회상이 통째로 누락, (2) 세션 종료 시 최종 어시스
 
 ## 검증
 
-- 코드 동작 후 작성(RFC §9.1): `tsc` 0, Biome 게이트 0(슬라이스 격리 포함),
-  493 테스트 통과. 회상/eviction/dedup/벡터 수학은 결정론 단위 테스트,
-  distill/consolidate/embedder는 fake 주입 통합 테스트로 검증.
+- 코드 동작 후 작성(RFC §9.1): `tsc` 0, Biome 게이트 0·경고 0(슬라이스 격리
+  포함), **523 테스트 통과**. 회상/eviction/dedup/벡터 수학·tier 가중은 결정론
+  단위 테스트, distill/consolidate/embedder·`onStats`·메트릭은 fake 주입
+  통합 테스트로 검증.
 - 상세 아키텍처: RFC §6.3. 캐시 프리픽스 상호작용: ADR-0004.

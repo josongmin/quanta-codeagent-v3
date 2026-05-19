@@ -65,6 +65,86 @@ describe("memoryTools", () => {
     })
   })
 
+  test("memory_search tier filter restricts results", async () => {
+    const store = new InMemoryStore([
+      {
+        id: "sem",
+        kind: "fact",
+        tier: "semantic",
+        text: "durable knowledge",
+        tags: [],
+        createdAt: 1,
+      },
+      { id: "epi", kind: "fact", tier: "episodic", text: "session recap", tags: [], createdAt: 1 },
+    ])
+    const tools = memoryTools({ store })
+    const ev = await run(byName(tools, "memory_search"), { query: "x", tier: "episodic" })
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      expect(ev.result.ok).toBe(true)
+      expect(ev.result.output).toContain("#epi")
+      expect(ev.result.output).not.toContain("#sem")
+    }
+  })
+
+  test("memory_search kind filter restricts results", async () => {
+    const store = new InMemoryStore([
+      { id: "f1", kind: "fact", text: "a fact", tags: [], createdAt: 1 },
+      { id: "d1", kind: "decision", text: "a decision", tags: [], createdAt: 1 },
+    ])
+    const tools = memoryTools({ store })
+    const ev = await run(byName(tools, "memory_search"), { query: "a", kind: "decision" })
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      expect(ev.result.output).toContain("#d1")
+      expect(ev.result.output).not.toContain("#f1")
+    }
+  })
+
+  test("memory_search minImportance drops low-value entries", async () => {
+    const store = new InMemoryStore([
+      { id: "lo", kind: "fact", text: "weak", tags: [], createdAt: 1, importance: 0.2 },
+      { id: "hi", kind: "fact", text: "strong", tags: [], createdAt: 1, importance: 0.9 },
+    ])
+    const tools = memoryTools({ store })
+    const ev = await run(byName(tools, "memory_search"), { query: "x", minImportance: 0.5 })
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      expect(ev.result.output).toContain("#hi")
+      expect(ev.result.output).not.toContain("#lo")
+    }
+  })
+
+  test("memory_search without new filters preserves current behavior", async () => {
+    const store = new InMemoryStore([
+      {
+        id: "sem",
+        kind: "fact",
+        tier: "semantic",
+        text: "x1",
+        tags: [],
+        createdAt: 1,
+        importance: 0.2,
+      },
+      {
+        id: "epi",
+        kind: "decision",
+        tier: "episodic",
+        text: "x2",
+        tags: [],
+        createdAt: 1,
+        importance: 0.1,
+      },
+    ])
+    const tools = memoryTools({ store })
+    const ev = await run(byName(tools, "memory_search"), { query: "x" })
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      expect(ev.result.output).toContain("#sem")
+      expect(ev.result.output).toContain("#epi")
+    }
+  })
+
   test("memory_search no matches", async () => {
     const tools = memoryTools({ store: new InMemoryStore() })
     const ev = await run(byName(tools, "memory_search"), { query: "x" })
@@ -158,6 +238,17 @@ describe("memoryTools", () => {
     expect(search.inputSchema.safeParse({}).success).toBe(false)
     expect(search.inputSchema.safeParse({ query: "q", limit: 99 }).success).toBe(false)
     expect(search.inputSchema.safeParse({ query: "q" }).success).toBe(true)
+    expect(search.inputSchema.safeParse({ query: "q", tier: "bogus" }).success).toBe(false)
+    expect(search.inputSchema.safeParse({ query: "q", kind: "bogus" }).success).toBe(false)
+    expect(search.inputSchema.safeParse({ query: "q", minImportance: 2 }).success).toBe(false)
+    expect(
+      search.inputSchema.safeParse({
+        query: "q",
+        tier: "semantic",
+        kind: "fact",
+        minImportance: 0.5,
+      }).success,
+    ).toBe(true)
 
     const write = byName(tools, "memory_write")
     expect(write.inputSchema.safeParse({ text: "" }).success).toBe(false)

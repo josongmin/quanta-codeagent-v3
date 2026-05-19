@@ -1,4 +1,5 @@
 import { bashTool } from "./bash"
+import { diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 import { editTool } from "./edit"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
@@ -8,10 +9,23 @@ import { testRunnerTool } from "./test-runner"
 import type { Tool } from "./types"
 import { writeTool } from "./write"
 
+export {
+  type DiagnosticItem,
+  type DiagnosticsProvider,
+  type DiagnosticsSession,
+  diagnosticsTool,
+  formatDiagnostics,
+  nullDiagnosticsProvider,
+} from "./diagnostics"
 export { ToolRegistry } from "./registry"
 export type { Tool, ToolContext, ToolEvent, ToolResult, ToolSpec } from "./types"
 
-/** Built-in tool set: Phase 1 six + Phase 2 localize / test_runner. */
+/**
+ * Built-in tool set: Phase 1 six + Phase 2 localize / test_runner + the
+ * Phase-3 `diagnostics` tool. `diagnostics` ships with the null provider so it
+ * is a clean no-op until the CLI injects a real LSP-backed provider — registry
+ * shape and default behavior are otherwise unchanged.
+ */
 export const defaultTools: Tool[] = [
   readTool as Tool,
   writeTool as Tool,
@@ -21,4 +35,5 @@ export const defaultTools: Tool[] = [
   globTool as Tool,
   localizeTool as Tool,
   testRunnerTool as Tool,
+  diagnosticsTool(nullDiagnosticsProvider) as Tool,
 ]
