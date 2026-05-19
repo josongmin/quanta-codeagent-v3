@@ -55,6 +55,7 @@ export type StreamEvent =
   | { type: "tool_use_start"; id: string; name: string }
   | { type: "tool_use_delta"; id: string; delta: string }
   | { type: "tool_use_end"; id: string; input: unknown }
+  | { type: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens?: number; model: string }
   | { type: "message_stop"; stop_reason: string }
 
 export interface StreamInput {

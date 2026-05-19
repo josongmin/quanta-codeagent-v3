@@ -15,10 +15,37 @@ export type RawEvent =
   | { type: "content_block_start"; index: number; content_block: RawBlock }
   | { type: "content_block_delta"; index: number; delta: RawDelta }
   | { type: "content_block_stop"; index: number }
-  | { type: "message_delta"; delta: { stop_reason: string | null } }
+  | { type: "message_delta"; delta: { stop_reason: string | null }; usage?: RawDeltaUsage }
   | { type: "message_stop" }
-  | { type: "message_start" }
+  | { type: "message_start"; message?: RawMessageStart }
   | { type: "ping" }
+
+/** `message_start` carries the prompt-side token counts and the resolved model.
+ *  `cache_read_input_tokens` is present only when prompt caching hit. */
+export interface RawStartUsage {
+  input_tokens: number
+  cache_read_input_tokens?: number
+}
+
+export interface RawMessageStart {
+  model?: string
+  usage?: RawStartUsage
+}
+
+/** `message_delta` carries the (cumulative) completion-side token count. */
+export interface RawDeltaUsage {
+  output_tokens: number
+}
+
+/** Token usage accumulated across the Messages stream. Threaded through
+ *  `mapRawEvent` like the open-slots map so a single `usage` StreamEvent can be
+ *  emitted at the terminal `message_stop`. */
+export interface UsageAccumulator {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  model?: string
+}
 
 export type RawBlock =
   | { type: "text"; text: string }
@@ -128,11 +155,13 @@ export class AnthropicAdapter implements LLMPort {
       { kind: "tool_use" | "text" | "thinking"; id: string; json: string }
     >()
 
+    const usage: UsageAccumulator = { model: this.model }
+
     const raw = await this.openRawStream(input)
 
     try {
       for await (const ev of raw) {
-        yield* mapRawEvent(ev, open)
+        yield* mapRawEvent(ev, open, usage)
       }
     } catch (e) {
       if (e instanceof LLMError) throw e
@@ -146,8 +175,38 @@ export type OpenSlots = Map<
   { kind: "tool_use" | "text" | "thinking"; id: string; json: string }
 >
 
-export function* mapRawEvent(ev: RawEvent, open: OpenSlots): Generator<StreamEvent> {
+/** Build the additive usage StreamEvent from the accumulated counts. Returns
+ *  `null` when neither side reported tokens (absent usage is valid — never
+ *  emit zeros). `cacheReadTokens` is included only when the provider reported
+ *  a cache hit (exactOptionalPropertyTypes: conditional spread, not undefined). */
+const buildUsageEvent = (usage: UsageAccumulator): StreamEvent | null => {
+  if (usage.inputTokens === undefined && usage.outputTokens === undefined) return null
+  return {
+    type: "usage",
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+    model: usage.model ?? "",
+    ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+  }
+}
+
+export function* mapRawEvent(
+  ev: RawEvent,
+  open: OpenSlots,
+  usage: UsageAccumulator = {},
+): Generator<StreamEvent> {
   switch (ev.type) {
+    case "message_start": {
+      const m = ev.message
+      if (m?.model) usage.model = m.model
+      if (m?.usage) {
+        usage.inputTokens = m.usage.input_tokens
+        if (m.usage.cache_read_input_tokens !== undefined) {
+          usage.cacheReadTokens = m.usage.cache_read_input_tokens
+        }
+      }
+      break
+    }
     case "content_block_start": {
       const b = ev.content_block
       if (b.type === "tool_use") {
@@ -179,11 +238,15 @@ export function* mapRawEvent(ev: RawEvent, open: OpenSlots): Generator<StreamEve
       open.delete(ev.index)
       break
     }
-    case "message_delta":
+    case "message_delta": {
+      if (ev.usage) usage.outputTokens = ev.usage.output_tokens
       if (ev.delta.stop_reason) {
+        const usageEvent = buildUsageEvent(usage)
+        if (usageEvent) yield usageEvent
         yield { type: "message_stop", stop_reason: ev.delta.stop_reason }
       }
       break
+    }
   }
 }
 

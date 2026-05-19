@@ -22,6 +22,15 @@ export type ChatParam =
       tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[]
     }
 
+/** Token usage on the final chunk, present only when the request set
+ *  `stream_options:{include_usage:true}`. `cached_tokens` is reported only by
+ *  models/endpoints that support prompt caching. */
+export interface RawUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  prompt_tokens_details?: { cached_tokens?: number }
+}
+
 export type RawChunk = {
   choices: {
     delta: {
@@ -34,6 +43,8 @@ export type RawChunk = {
     }
     finish_reason: string | null
   }[]
+  model?: string
+  usage?: RawUsage | null
 }
 
 export const STOP_REASON: Record<string, string> = {
@@ -180,6 +191,9 @@ export class OpenAIAdapter implements LLMPort {
         model: this.model,
         max_tokens: this.maxTokens,
         stream: true,
+        // Opt into the trailing usage chunk (RFC-0002 §5.3). Older models that
+        // don't support it simply omit the chunk — we then emit no usage.
+        stream_options: { include_usage: true },
         messages: toChatMessages(input.system, input.messages),
         tools: input.tools.map((t) => ({
           type: "function" as const,
