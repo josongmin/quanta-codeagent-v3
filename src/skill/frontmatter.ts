@@ -62,6 +62,59 @@ const parseInlineList = (raw: string): string[] => {
   return out.map((s) => unquote(s)).filter((s) => s !== "")
 }
 
+/** Index of the closing fence among `lines` (search starts at 1), or -1. */
+const findClosingFence = (lines: string[]): number => {
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i]?.trim() === FENCE) return i
+  }
+  return -1
+}
+
+type FrontmatterData = Record<string, string | string[]>
+
+/**
+ * Apply a single frontmatter line to `data`. Returns the list key that a
+ * subsequent block-list `- item` should append to (or null), given the
+ * `pendingListKey` carried from the previous line.
+ */
+const applyFrontmatterLine = (
+  line: string,
+  data: FrontmatterData,
+  pendingListKey: string | null,
+): string | null => {
+  if (line.trim() === "" || line.trim().startsWith("#")) return pendingListKey
+
+  // Block-list item: `  - value` belonging to the previous key.
+  const itemMatch = line.match(/^\s*-\s+(.*)$/)
+  if (itemMatch && pendingListKey) {
+    const cur = data[pendingListKey]
+    const val = unquote(itemMatch[1] ?? "")
+    if (Array.isArray(cur)) cur.push(val)
+    else data[pendingListKey] = [val]
+    return pendingListKey
+  }
+
+  const kv = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/)
+  if (!kv) return pendingListKey
+  const key = kv[1] ?? ""
+  const rawValue = (kv[2] ?? "").trim()
+
+  if (rawValue === "") {
+    // Either an empty scalar or the header of a block list — assume list,
+    // seed an empty array; it stays [] if no `-` items follow.
+    data[key] = []
+    return key
+  }
+
+  if (rawValue.startsWith("[") && rawValue.endsWith("]")) {
+    data[key] = parseInlineList(rawValue)
+    return null
+  }
+
+  data[key] = unquote(rawValue)
+  return null
+}
+
 /**
  * Split frontmatter (between leading `---` fences) from the markdown body.
  * If there is no leading fence, the whole input is treated as body.
@@ -74,55 +127,16 @@ export const parseFrontmatter = (text: string): ParsedFrontmatter => {
     return { data: {}, body: normalized.replace(/^\n+/, "") }
   }
 
-  let end = -1
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i]?.trim() === FENCE) {
-      end = i
-      break
-    }
-  }
+  const end = findClosingFence(lines)
   if (end === -1) {
     // Unterminated frontmatter: treat everything after the first fence as body.
     return { data: {}, body: lines.slice(1).join("\n").replace(/^\n+/, "") }
   }
 
-  const data: Record<string, string | string[]> = {}
+  const data: FrontmatterData = {}
   let pendingListKey: string | null = null
-
   for (let i = 1; i < end; i++) {
-    const line = lines[i] ?? ""
-    if (line.trim() === "" || line.trim().startsWith("#")) continue
-
-    // Block-list item: `  - value` belonging to the previous key.
-    const itemMatch = line.match(/^\s*-\s+(.*)$/)
-    if (itemMatch && pendingListKey) {
-      const cur = data[pendingListKey]
-      const val = unquote(itemMatch[1] ?? "")
-      if (Array.isArray(cur)) cur.push(val)
-      else data[pendingListKey] = [val]
-      continue
-    }
-
-    const kv = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/)
-    if (!kv) continue
-    const key = kv[1] ?? ""
-    const rawValue = (kv[2] ?? "").trim()
-
-    if (rawValue === "") {
-      // Either an empty scalar or the header of a block list — assume list,
-      // seed an empty array; it stays [] if no `-` items follow.
-      data[key] = []
-      pendingListKey = key
-      continue
-    }
-    pendingListKey = null
-
-    if (rawValue.startsWith("[") && rawValue.endsWith("]")) {
-      data[key] = parseInlineList(rawValue)
-      continue
-    }
-
-    data[key] = unquote(rawValue)
+    pendingListKey = applyFrontmatterLine(lines[i] ?? "", data, pendingListKey)
   }
 
   const body = lines

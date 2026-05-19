@@ -5,6 +5,7 @@ import {
   type AgentOutcome,
   buildSystemPrompt,
   CachingEmbedder,
+  createAutoClassifierPort,
   loadMcpTools,
   loadSession,
   memoryTools,
@@ -14,7 +15,7 @@ import {
   saveSession,
 } from "@/agent"
 import { lspDiagnosticsTool } from "@/agent/lsp-bridge"
-import { AnthropicAdapter, type LLMPort, type Message, OpenAIAdapter } from "@/llm"
+import { AnthropicAdapter, FallbackLLM, type LLMPort, type Message, OpenAIAdapter } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
 import { Metrics, StructuredLogger } from "@/observability"
@@ -138,6 +139,75 @@ const buildMemoryConfig = (
   }
   if (!store && Object.keys(block).length === 0) return undefined
   return block
+}
+
+/**
+ * Resolve the `subagent` config block from env (SOTA++ Tier 1, ADR-0011).
+ * Default OFF: `QUANTA_SUBAGENT` unset ⇒ `undefined` so the key is omitted
+ * entirely and the `Agent`/`Task`/`TaskOutput`/`TaskStop` tools are NOT
+ * registered (loop byte-identical). When set, an optional integer
+ * `QUANTA_SUBAGENT_MAX_DEPTH` caps recursion (else the runner's default).
+ */
+const buildSubagentConfig = (): AgentConfig["subagent"] | undefined => {
+  if (process.env.QUANTA_SUBAGENT === undefined) return undefined
+  const rawDepth = process.env.QUANTA_SUBAGENT_MAX_DEPTH
+  const depth = rawDepth !== undefined ? Number.parseInt(rawDepth, 10) : Number.NaN
+  return Number.isFinite(depth) ? { maxDepth: depth } : {}
+}
+
+/**
+ * Resolve the `skills` config block from env (SOTA++ Tier 1, ADR-0011).
+ * Default OFF: `QUANTA_SKILLS_DIR` unset ⇒ `undefined` so the key is omitted
+ * and no skill discovery happens / the `Skill`/`ToolSearch` tools are NOT
+ * registered (loop byte-identical). When set ⇒ skills are discovered from it.
+ */
+const buildSkillsConfig = (): AgentConfig["skills"] | undefined => {
+  const dir = process.env.QUANTA_SKILLS_DIR
+  return dir ? { dir } : undefined
+}
+
+/**
+ * Resolve the compaction circuit-breaker control from env (SOTA++ Tier 0
+ * safety, ADR-0011). The breaker is ON by default with safe caps and only
+ * trips on pathological compaction thrash, so omitting the key is the
+ * behavior-preserving default. `QUANTA_COMPACT_BREAKER=off` ⇒
+ * `{ disabled: true }`. Optional integer caps overrides (only applied when
+ * a valid integer): `QUANTA_COMPACT_BREAKER_REACTIVE_MAX` →
+ * `maxConsecutiveReactive`, `QUANTA_COMPACT_BREAKER_PROACTIVE_MAX` →
+ * `maxNoProgressProactive`.
+ */
+const buildCompactionBreakerConfig = (): AgentConfig["compactionBreaker"] | undefined => {
+  const disabled = process.env.QUANTA_COMPACT_BREAKER === "off"
+  const intEnv = (k: string): number => {
+    const raw = process.env[k]
+    return raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN
+  }
+  const reactiveMax = intEnv("QUANTA_COMPACT_BREAKER_REACTIVE_MAX")
+  const proactiveMax = intEnv("QUANTA_COMPACT_BREAKER_PROACTIVE_MAX")
+  const caps = {
+    ...(Number.isFinite(reactiveMax) ? { maxConsecutiveReactive: reactiveMax } : {}),
+    ...(Number.isFinite(proactiveMax) ? { maxNoProgressProactive: proactiveMax } : {}),
+  }
+  const block = {
+    ...(disabled ? { disabled: true } : {}),
+    ...(Object.keys(caps).length > 0 ? { caps } : {}),
+  }
+  return Object.keys(block).length > 0 ? block : undefined
+}
+
+/**
+ * Resolve the fallback-provider model ids from `QUANTA_MODEL_FALLBACK`.
+ * Default OFF: unset ⇒ `[]` so the llm stack is left byte-identical to
+ * today (no `FallbackLLM` wrap). Comma-separated model ids; a bare flag
+ * value with no usable id (e.g. `1`) yields `[]` ⇒ no wrap.
+ */
+const fallbackModels = (): string[] => {
+  const raw = process.env.QUANTA_MODEL_FALLBACK
+  if (raw === undefined) return []
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s !== "1")
 }
 
 const hasArg = (flag: string): boolean => process.argv.slice(2).includes(flag)
@@ -275,6 +345,15 @@ const main = async (): Promise<void> => {
     await loadFeatures(slog)
 
   const memoryConfig = buildMemoryConfig(store)
+  // SOTA++ Tier 0/1 absorption knobs — all default OFF, each omitted from the
+  // AgentConfig entirely when its env knob is unset (exactOptionalPropertyTypes
+  // friendly), so unset-all ⇒ AgentConfig byte-identical to before.
+  const subagentConfig = buildSubagentConfig()
+  const skillsConfig = buildSkillsConfig()
+  const compactionBreakerConfig = buildCompactionBreakerConfig()
+  if (subagentConfig) slog.info("subagent.on", subagentConfig)
+  if (skillsConfig) slog.info("skills.on", skillsConfig)
+  if (compactionBreakerConfig) slog.info("compaction.breaker.config", compactionBreakerConfig)
   // Self-edit memory tools: only when a store exists and `memory.selfEditTools`
   // is not opted out (single knob: QUANTA_MEMORY_SELF_EDIT). With no store the
   // registry is byte-identical to before (nothing appended).
@@ -311,6 +390,35 @@ const main = async (): Promise<void> => {
   // Bounded retry around transient LLM failures (pre-stream only).
   const retryingLLM = new RetryingLLM({ inner: llm, signal: abort.signal })
 
+  // Same-turn provider fallback (SOTA++, default OFF). When
+  // `QUANTA_MODEL_FALLBACK` lists fallback model ids, build one retry-wrapped
+  // provider stack per id (same adapter factory, different model) and compose
+  // them under a `FallbackLLM` AFTER retry: retry is inner-most per provider,
+  // fallback is the outer decorator. Unset ⇒ `finalLLM === retryingLLM`, so
+  // the llm stack is byte-identical to today (no wrap).
+  const fbModels = fallbackModels()
+  let finalLLM: LLMPort = retryingLLM
+  if (fbModels.length > 0) {
+    const fallbackStacks = fbModels.map(
+      (m) => new RetryingLLM({ inner: buildLLM(provider, m), signal: abort.signal }),
+    )
+    finalLLM = new FallbackLLM({
+      providers: [retryingLLM, ...fallbackStacks],
+      signal: abort.signal,
+    })
+    slog.info("llm.fallback.on", { models: fbModels })
+  }
+
+  // Permission auto-mode (SOTA++, default OFF). Only when `QUANTA_PERMISSION
+  // =auto`: build the LLM-backed classifier on the FINAL composed llm (so it
+  // benefits from retry + any fallback) and attach it to the
+  // PermissionContext. Absent ⇒ `classify` is omitted and "auto" degrades to
+  // "ask"; `default|acceptEdits|bypass` are unchanged.
+  if (mode === "auto") {
+    permission.classify = createAutoClassifierPort({ llm: finalLLM })
+    slog.info("permission.auto.on")
+  }
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
   const onConfirm = async (action: ToolAction): Promise<boolean> => {
     const ans = await rl.question(`Allow ${action.tool}? [y/N] `)
@@ -319,7 +427,7 @@ const main = async (): Promise<void> => {
 
   const session = (messages: Message[]): Promise<AgentOutcome> => {
     const config: AgentConfig = {
-      llm: retryingLLM,
+      llm: finalLLM,
       registry,
       stream,
       permission,
@@ -337,6 +445,9 @@ const main = async (): Promise<void> => {
       ...(planMode ? { planMode: true } : {}),
       ...(metrics ? { metrics } : {}),
       ...(run ? { run } : {}),
+      ...(subagentConfig ? { subagent: subagentConfig } : {}),
+      ...(skillsConfig ? { skills: skillsConfig } : {}),
+      ...(compactionBreakerConfig ? { compactionBreaker: compactionBreakerConfig } : {}),
     }
     return runAgent(config)
   }

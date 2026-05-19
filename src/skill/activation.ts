@@ -26,6 +26,7 @@ const globToRegExp = (glob: string): RegExp => {
       re += "[^/]"
       continue
     }
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal set of regex metacharacters to escape, not a template placeholder
     if (".+^${}()|[]\\".includes(c)) {
       re += `\\${c}`
       continue

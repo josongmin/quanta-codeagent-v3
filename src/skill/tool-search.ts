@@ -43,6 +43,49 @@ const score = (spec: ToolSpec, terms: string[], rawQuery: string): number => {
 const formatSpec = (spec: ToolSpec): string =>
   `### ${spec.name}\n${spec.description}\ninput_schema: ${JSON.stringify(spec.input_schema)}`
 
+/** `select:A,B` mode — resolve tool specs by exact (case-insensitive) name. */
+const runSelect = (all: ToolSpec[], rawSelection: string): { ok: boolean; output: string } => {
+  const wanted = rawSelection
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const byName = new Map(all.map((t) => [t.name.toLowerCase(), t]))
+  const found: ToolSpec[] = []
+  const missing: string[] = []
+  for (const w of wanted) {
+    const hit = byName.get(w.toLowerCase())
+    if (hit) found.push(hit)
+    else missing.push(w)
+  }
+  const head =
+    found.length === 0 ? "No matching deferred tools found." : found.map(formatSpec).join("\n\n")
+  const tail = missing.length > 0 ? `\n\nUnknown: ${missing.join(", ")}` : ""
+  return { ok: found.length > 0, output: head + tail }
+}
+
+/** Keyword mode — lexical ranking over name + description. */
+const runKeyword = (
+  all: ToolSpec[],
+  query: string,
+  max: number,
+): { ok: boolean; output: string } => {
+  const terms = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.replace(/^\+/, "")) // tolerate CC's "+required" prefix
+    .filter(Boolean)
+  const ranked = all
+    .map((spec) => ({ spec, s: score(spec, terms, query) }))
+    .filter((r) => r.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, max)
+
+  if (ranked.length === 0) {
+    return { ok: false, output: `No matching deferred tools found for: ${query}` }
+  }
+  return { ok: true, output: ranked.map((r) => formatSpec(r.spec)).join("\n\n") }
+}
+
 /**
  * The `ToolSearch` tool (analysis §2.3). Input `{ query, max_results? }`. Two
  * modes, matching CC:
@@ -72,49 +115,7 @@ export const createToolSearchTool = (catalog: () => ToolSpec[]): Tool<Input> => 
     const query = input.query.trim()
 
     const sel = query.match(/^select:(.+)$/i)
-    if (sel) {
-      const wanted = (sel[1] ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-      const byName = new Map(all.map((t) => [t.name.toLowerCase(), t]))
-      const found: ToolSpec[] = []
-      const missing: string[] = []
-      for (const w of wanted) {
-        const hit = byName.get(w.toLowerCase())
-        if (hit) found.push(hit)
-        else missing.push(w)
-      }
-      const head =
-        found.length === 0
-          ? "No matching deferred tools found."
-          : found.map(formatSpec).join("\n\n")
-      const tail = missing.length > 0 ? `\n\nUnknown: ${missing.join(", ")}` : ""
-      yield { type: "result", result: { ok: found.length > 0, output: head + tail } }
-      return
-    }
-
-    const terms = query
-      .toLowerCase()
-      .split(/\s+/)
-      .map((t) => t.replace(/^\+/, "")) // tolerate CC's "+required" prefix
-      .filter(Boolean)
-    const ranked = all
-      .map((spec) => ({ spec, s: score(spec, terms, query) }))
-      .filter((r) => r.s > 0)
-      .sort((a, b) => b.s - a.s)
-      .slice(0, max)
-
-    if (ranked.length === 0) {
-      yield {
-        type: "result",
-        result: { ok: false, output: `No matching deferred tools found for: ${query}` },
-      }
-      return
-    }
-    yield {
-      type: "result",
-      result: { ok: true, output: ranked.map((r) => formatSpec(r.spec)).join("\n\n") },
-    }
+    const result = sel ? runSelect(all, sel[1] ?? "") : runKeyword(all, query, max)
+    yield { type: "result", result }
   },
 })

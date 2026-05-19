@@ -1,13 +1,22 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
+import type { runAgent } from "../../src/agent/loop"
 import { createSubagentRunner } from "../../src/agent/subagent-runner"
 import type { AgentConfig, AgentOutcome } from "../../src/agent/types"
 import type { Message } from "../../src/llm"
 import type { isGitRepo, withWorktree } from "../../src/runtime/worktree"
-import type { runAgent } from "../../src/agent/loop"
-import { ToolRegistry } from "../../src/tool"
-import type { Tool, ToolContext, ToolEvent } from "../../src/tool"
 import type { SubagentRequest } from "../../src/subagent/types"
+import type { Tool, ToolEvent } from "../../src/tool"
+import { ToolRegistry } from "../../src/tool"
+
+/** Index into a captured array, throwing if the slot is absent. Same
+ *  fail-on-missing contract the previous `arr[i]!` non-null assertions had,
+ *  but with an explicit runtime guard instead of a compile-only assertion. */
+const at = <T>(arr: readonly T[], i: number): T => {
+  const v = arr[i]
+  if (v === undefined) throw new Error(`expected element at index ${i}`)
+  return v
+}
 
 /** A trivial named tool so registry filtering can be asserted by name. */
 const fakeTool = (name: string): Tool => ({
@@ -98,7 +107,7 @@ describe("createSubagentRunner — child config overrides", () => {
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig(), { run })
     await runner(req({ prompt: "investigate X" }))
-    const msgs = seen[0]!.messages as Message[]
+    const msgs = at(seen, 0).messages as Message[]
     expect(msgs).toEqual([{ role: "user", content: [{ type: "text", text: "investigate X" }] }])
   })
 
@@ -108,32 +117,38 @@ describe("createSubagentRunner — child config overrides", () => {
     const runner = createSubagentRunner(parent, { run })
 
     await runner(req({ toolFilter: ["read", "missing"] }))
-    expect(seen[0]!.registry.specs().map((s) => s.name).sort()).toEqual(["read"])
+    expect(
+      at(seen, 0)
+        .registry.specs()
+        .map((s) => s.name)
+        .sort(),
+    ).toEqual(["read"])
 
     await runner(req())
     // No filter ⇒ the parent's own registry instance is inherited as-is.
-    expect(seen[1]!.registry).toBe(parent.registry)
-    expect(seen[1]!.registry.specs().map((s) => s.name).sort()).toEqual([
-      "bash",
-      "read",
-      "write",
-    ])
+    expect(at(seen, 1).registry).toBe(parent.registry)
+    expect(
+      at(seen, 1)
+        .registry.specs()
+        .map((s) => s.name)
+        .sort(),
+    ).toEqual(["bash", "read", "write"])
   })
 
   test("empty toolFilter ⇒ empty child registry (no throw)", async () => {
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig(), { run })
     await runner(req({ toolFilter: [] }))
-    expect(seen[0]!.registry.specs()).toEqual([])
+    expect(at(seen, 0).registry.specs()).toEqual([])
   })
 
   test("maxTurns = budget.maxTurns ?? parent.maxTurns", async () => {
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig({ maxTurns: 17 }), { run })
     await runner(req({ budget: { maxTurns: 5 } }))
-    expect(seen[0]!.maxTurns).toBe(5)
+    expect(at(seen, 0).maxTurns).toBe(5)
     await runner(req())
-    expect(seen[1]!.maxTurns).toBe(17)
+    expect(at(seen, 1).maxTurns).toBe(17)
   })
 
   test("store / hooks / metrics / run / sessionId / memory are dropped", async () => {
@@ -152,7 +167,7 @@ describe("createSubagentRunner — child config overrides", () => {
     })
     const runner = createSubagentRunner(parent, { run })
     await runner(req())
-    const child = seen[0]!
+    const child = at(seen, 0)
     expect(child.store).toBeUndefined()
     expect(child.hooks).toBeUndefined()
     expect(child.metrics).toBeUndefined()
@@ -180,7 +195,7 @@ describe("createSubagentRunner — abort propagation", () => {
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig({ signal: ac.signal }), { run })
     await runner(req())
-    const childSignal = seen[0]!.signal
+    const childSignal = at(seen, 0).signal
     expect(childSignal.aborted).toBe(false)
     ac.abort()
     expect(childSignal.aborted).toBe(true)
@@ -192,7 +207,7 @@ describe("createSubagentRunner — abort propagation", () => {
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig({ signal: ac.signal }), { run })
     await runner(req())
-    expect(seen[0]!.signal.aborted).toBe(true)
+    expect(at(seen, 0).signal.aborted).toBe(true)
   })
 
   test("child finishing does NOT abort the parent", async () => {
@@ -251,10 +266,13 @@ describe("createSubagentRunner — worktree isolation", () => {
   test("git repo + isolation:worktree ⇒ child cwd is the worktree path", async () => {
     const { run, seen } = capturing()
     const isGitRepoFake: typeof isGitRepo = async () => true
-    const withWorktreeFake: typeof withWorktree = async (id, repoRoot, fn) => {
+    const withWorktreeFake: typeof withWorktree = async (_id, repoRoot, fn) => {
       expect(repoRoot).toBe("/repo")
       const value = await fn("/repo/.claude/worktrees/agent-x")
-      return { value, info: { worktreePath: "/repo/.claude/worktrees/agent-x", branch: "b", removed: true } }
+      return {
+        value,
+        info: { worktreePath: "/repo/.claude/worktrees/agent-x", branch: "b", removed: true },
+      }
     }
     const runner = createSubagentRunner(parentConfig(), {
       run,
@@ -263,7 +281,7 @@ describe("createSubagentRunner — worktree isolation", () => {
     })
     const r = await runner(req({ isolation: "worktree" }))
     expect(r.ok).toBe(true)
-    expect(seen[0]!.cwd).toBe("/repo/.claude/worktrees/agent-x")
+    expect(at(seen, 0).cwd).toBe("/repo/.claude/worktrees/agent-x")
   })
 
   test("not a git repo ⇒ falls back to no isolation (no throw, parent cwd)", async () => {
@@ -280,15 +298,15 @@ describe("createSubagentRunner — worktree isolation", () => {
     const r = await runner(req({ isolation: "worktree" }))
     expect(r.ok).toBe(true)
     expect(wtCalled).toBe(false)
-    expect(seen[0]!.cwd).toBe("/plain")
+    expect(at(seen, 0).cwd).toBe("/plain")
   })
 
   test("isolation:none ⇒ uses req.cwd when provided, else parent cwd", async () => {
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig({ cwd: "/repo" }), { run })
     await runner(req({ isolation: "none", cwd: "/custom" }))
-    expect(seen[0]!.cwd).toBe("/custom")
+    expect(at(seen, 0).cwd).toBe("/custom")
     await runner(req({ isolation: "none" }))
-    expect(seen[1]!.cwd).toBe("/repo")
+    expect(at(seen, 1).cwd).toBe("/repo")
   })
 })

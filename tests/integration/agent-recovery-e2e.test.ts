@@ -241,4 +241,78 @@ describe("recovery e2e — integrated runAgent", () => {
     expect(toolUses).toBe(6)
     expect(toolResults).toBe(6)
   })
+
+  // ── C5 regression: final assistant turn must NOT be dropped on a
+  // completed-via-exhaustion. Pre-fix the `applyAction` `completed` branch
+  // returned WITHOUT appending the final assistant `message` to working
+  // memory (the proceed/no-tools path DID), so `AgentOutcome.messages` lost
+  // the last turn and a state.ts resume lost it too. These two tests FAIL
+  // pre-fix (last entry would be the injected meta `user` nudge, not the
+  // final assistant turn) and PASS post-fix.
+  test("8. C5: malformed-exhausted completion keeps the final assistant turn last", async () => {
+    // stop_reason "tool_use" with ZERO tool_use blocks twice. MAX_MALFORMED
+    // RETRIES=1 → first nudge, second occurrence → completed-via-exhaustion.
+    const llm = new ScriptedLLM([
+      ev([
+        { type: "text_delta", delta: "oops no tool" },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ]),
+      ev([
+        { type: "text_delta", delta: "final words after malformed exhaustion" },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ]),
+    ])
+    const out = await withTimeout(
+      runAgent(cfg({ llm, maxTurns: 2 })),
+      15_000,
+      "c5-malformed-exhausted",
+    )
+    expect(out.reason).toBe("completed")
+    const last = out.messages.at(-1)
+    expect(last?.role).toBe("assistant")
+    expect(
+      last?.content.some(
+        (b) => b.type === "text" && b.text === "final words after malformed exhaustion",
+      ),
+    ).toBe(true)
+  })
+
+  test("9. C5: empty-exhausted completion keeps the final assistant turn last", async () => {
+    // MAX_CONSECUTIVE_EMPTIES=2 → 2 empty nudges then the 3rd empty turn is
+    // completed-via-exhaustion. The (empty) final assistant turn must still be
+    // appended — last entry is the assistant turn, NOT the empty-nudge `user`.
+    const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+    const llm = new ScriptedLLM([ev(empty), ev(empty), ev(empty), ev(empty)])
+    const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 3 })), 15_000, "c5-empty-exhausted")
+    expect(out.reason).toBe("completed")
+    const last = out.messages.at(-1)
+    expect(last?.role).toBe("assistant")
+  })
+
+  // ── C7: session_start head marker + recovery traces are emitted (pure
+  // observation; control flow unchanged). RFC-0002 §5.2.
+  test("10. C7: session_start emitted once + recovery traces at recovery points", async () => {
+    const stream = new RecordingStream()
+    // A transient throw (→ backoff recovery) then an empty turn (→ empty
+    // recovery nudge) then a real answer.
+    const llm = new ScriptedLLM([
+      thr(new LLMError("503 transient")),
+      ev([{ type: "message_stop", stop_reason: "end_turn" }]),
+      ev(text("done")),
+    ])
+    const out = await withTimeout(
+      runAgent(cfg({ llm, stream, maxTurns: 2 })),
+      15_000,
+      "c7-session-start-recovery",
+    )
+    expect(out.reason).toBe("completed")
+    const starts = stream.events.filter((e) => e.type === "session_start")
+    expect(starts).toHaveLength(1)
+    // session_start is the head marker — it precedes every turn_start.
+    expect(stream.events[0]?.type).toBe("session_start")
+    const recoveries = stream.events.filter((e) => e.type === "recovery")
+    const reasons = recoveries.map((e) => (e.type === "recovery" ? e.reason : ""))
+    expect(reasons).toContain("backoff")
+    expect(reasons).toContain("empty")
+  })
 })

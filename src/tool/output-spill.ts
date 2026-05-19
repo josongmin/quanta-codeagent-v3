@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { randomUUID } from "node:crypto"
 
 /**
  * Oversized tool-output spill — Phase 1 absorption of Claude Code v2's
@@ -80,10 +80,7 @@ export function envMaxChars(env: Record<string, string | undefined>): number {
  *
  * Pure except for the single `write` call (injectable for tests).
  */
-export function capToolOutput(
-  output: string,
-  opts: CapToolOutputOptions,
-): CapToolOutputResult {
+export function capToolOutput(output: string, opts: CapToolOutputOptions): CapToolOutputResult {
   const maxChars = resolveMaxChars(opts.maxChars)
   if (output.length <= maxChars) {
     return { output }

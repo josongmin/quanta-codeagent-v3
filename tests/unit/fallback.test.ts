@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { assembleFromEvents, FallbackLLM, isFallbackTrigger } from "@/llm"
 import type { LLMPort, StreamEvent } from "@/llm"
+import { assembleFromEvents, FallbackLLM, isFallbackTrigger } from "@/llm"
 import { LLMError } from "@/shared"
 
 /** Inner LLMPort whose stream() behavior is scripted. A step is either a list
@@ -147,16 +147,9 @@ describe("FallbackLLM", () => {
     const llm = new FallbackLLM({ providers: [p1, p2, p3] })
 
     const events = await collect(llm.stream({ messages: [], tools: [] }))
-    expect(events).toEqual([
-      text("dead1"),
-      { type: "stream_reset" },
-      text("final"),
-      stop(),
-    ])
+    expect(events).toEqual([text("dead1"), { type: "stream_reset" }, text("final"), stop()])
     expect(events.filter((e) => e.type === "stream_reset")).toHaveLength(1)
-    expect(assembleFromEvents(events).message.content).toEqual([
-      { type: "text", text: "final" },
-    ])
+    expect(assembleFromEvents(events).message.content).toEqual([{ type: "text", text: "final" }])
   })
 
   test("all providers fail with trigger → rethrows the LAST error", async () => {

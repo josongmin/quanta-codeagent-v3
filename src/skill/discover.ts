@@ -27,7 +27,10 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
   const { data, body } = parseFrontmatter(raw)
   const description =
     asScalar(data.description) ??
-    body.split("\n").find((l) => l.trim() !== "")?.trim() ??
+    body
+      .split("\n")
+      .find((l) => l.trim() !== "")
+      ?.trim() ??
     ""
 
   const skill: Skill = {
@@ -56,6 +59,48 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
  * Skills are returned sorted by name for deterministic output; on a name
  * collision the directory-form (SKILL.md) wins over the flat *.md form.
  */
+/** Read the directory-form skill (`<dir>/<name>/SKILL.md`), or null if absent. */
+const readNestedSkill = async (dir: string, name: string): Promise<Skill | null> => {
+  const skillFile = join(dir, name, "SKILL.md")
+  try {
+    const raw = await readFile(skillFile, "utf8")
+    return toSkill(name, skillFile, raw)
+  } catch {
+    // No SKILL.md in this dir — not a skill dir, skip.
+    return null
+  }
+}
+
+/** Read a flat command file (`<dir>/<name>.md`), or null if not a skill / unreadable. */
+const readFlatSkill = async (dir: string, fileName: string): Promise<Skill | null> => {
+  const id = basename(fileName, ".md")
+  if (id.toLowerCase() === "skill") return null // SKILL.md handled via dir form
+  const file = join(dir, fileName)
+  try {
+    const raw = await readFile(file, "utf8")
+    return toSkill(id, file, raw)
+  } catch {
+    // Unreadable file — skip.
+    return null
+  }
+}
+
+/** Classify one directory entry, reading its skill if applicable. */
+const readEntrySkill = async (
+  dir: string,
+  ent: import("node:fs").Dirent,
+): Promise<{ form: "nested" | "flat"; skill: Skill } | null> => {
+  if (ent.isDirectory() || ent.isSymbolicLink()) {
+    const skill = await readNestedSkill(dir, ent.name)
+    return skill ? { form: "nested", skill } : null
+  }
+  if (ent.isFile() && ent.name.toLowerCase().endsWith(".md")) {
+    const skill = await readFlatSkill(dir, ent.name)
+    return skill ? { form: "flat", skill } : null
+  }
+  return null
+}
+
 export const discoverSkills = async (dir: string): Promise<Skill[]> => {
   let entries: import("node:fs").Dirent[]
   try {
@@ -64,35 +109,17 @@ export const discoverSkills = async (dir: string): Promise<Skill[]> => {
     return []
   }
 
-  const byName = new Map<string, Skill>()
   // Two passes so SKILL.md (directory form) deterministically wins collisions.
   const flat: Skill[] = []
   const nested: Skill[] = []
-
   for (const ent of entries) {
-    if (ent.isDirectory() || ent.isSymbolicLink()) {
-      const skillFile = join(dir, ent.name, "SKILL.md")
-      try {
-        const raw = await readFile(skillFile, "utf8")
-        nested.push(toSkill(ent.name, skillFile, raw))
-      } catch {
-        // No SKILL.md in this dir — not a skill dir, skip.
-      }
-      continue
-    }
-    if (ent.isFile() && ent.name.toLowerCase().endsWith(".md")) {
-      const id = basename(ent.name, ".md")
-      if (id.toLowerCase() === "skill") continue // SKILL.md handled via dir form
-      const file = join(dir, ent.name)
-      try {
-        const raw = await readFile(file, "utf8")
-        flat.push(toSkill(id, file, raw))
-      } catch {
-        // Unreadable file — skip.
-      }
-    }
+    const got = await readEntrySkill(dir, ent)
+    if (!got) continue
+    if (got.form === "nested") nested.push(got.skill)
+    else flat.push(got.skill)
   }
 
+  const byName = new Map<string, Skill>()
   for (const s of flat) byName.set(s.name, s)
   for (const s of nested) byName.set(s.name, s) // nested overrides flat
 

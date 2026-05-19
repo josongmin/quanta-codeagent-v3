@@ -142,6 +142,8 @@ quanta-codeagent-v3/
 │   ├── shared/
 │   │   ├── types.ts             # Result, Id, base types
 │   │   ├── errors.ts
+│   │   ├── run-context.ts       # RunContext 상관키 (RFC-0002 §5.1)
+│   │   ├── trajectory.ts        # trajectory 스키마 레지스트리 v1 + redaction (RFC-0002 §5.2)
 │   │   └── logger.ts
 │   │
 │   ├── llm/
@@ -192,7 +194,9 @@ quanta-codeagent-v3/
 │   │   ├── types.ts             # Event types
 │   │   ├── ports.ts             # StreamPort
 │   │   ├── adapters/
-│   │   │   └── stdout.ts
+│   │   │   ├── stdout.ts
+│   │   │   ├── tee.ts          # 팬아웃 StreamPort (RFC-0002)
+│   │   │   └── jsonl-recorder.ts  # trajectory 정본 작성자 (RFC-0002)
 │   │   └── index.ts
 │   │
 │   ├── permission/
@@ -218,6 +222,7 @@ quanta-codeagent-v3/
 │   │   ├── types.ts
 │   │   ├── logger.ts            # 구조화 로거
 │   │   ├── metrics.ts           # 메트릭 수집
+│   │   ├── pricing.ts           # 버전드 정적 가격표 (RFC-0002 §5.3)
 │   │   └── index.ts
 │   │
 │   ├── mcp/
@@ -251,16 +256,22 @@ quanta-codeagent-v3/
 │       ├── cli/
 │       │   ├── dotenv.ts        # .env.dev 자동 로드
 │       │   └── index.ts
-│       └── bench/               # SWE-bench 하니스
-│           ├── runner.ts
-│           ├── sampler.ts       # Best-of-N
-│           ├── swebench.ts
-│           ├── swebench-dataset.ts
-│           ├── python-swebench.ts  # python seam
-│           ├── dry-run.ts
-│           ├── report.ts
-│           ├── types.ts
-│           └── index.ts
+│       ├── bench/               # SWE-bench 하니스
+│       │   ├── runner.ts
+│       │   ├── sampler.ts       # Best-of-N
+│       │   ├── swebench.ts
+│       │   ├── swebench-dataset.ts
+│       │   ├── python-swebench.ts  # python seam
+│       │   ├── observe.ts       # 비-에이전트 증거 + strict→degraded (RFC-0002 §8)
+│       │   ├── dry-run.ts
+│       │   ├── report.ts
+│       │   ├── types.ts
+│       │   └── index.ts
+│       └── probe/               # 비권위 trajectory inspector (RFC-0002 §7)
+│           ├── index.ts
+│           ├── parse.ts
+│           ├── render.ts
+│           └── triage.ts
 │
 ├── tests/
 │   ├── unit/                    # core 단위 (mock adapter)
@@ -438,7 +449,8 @@ function evaluate(action: ToolAction, ctx: PermissionContext): PermissionDecisio
     "lint:fix": "biome check --write src tests",
     "format": "biome format --write src tests",
     "build": "bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent",
-    "bench": "bun run src/apps/bench/index.ts"
+    "bench": "bun run src/apps/bench/index.ts",
+    "probe": "bun run src/apps/probe/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",
@@ -830,8 +842,9 @@ export type StreamEvent =
 ## 16. SOTA++ 흡수 — Claude Code v2 메커니즘 (Tier 0+1)
 
 > 2026-05-19. §1.2 SOTA++ 스탠스의 구체화. 본 세션에 빌드·전부 그린(전체
-> 레포 `tsc` exit 0, 708 단위 통과/0 실패). 결정 근거·트레이드오프·역공학
-> 문서 간접화 주의는 ADR-0010.
+> 레포 `tsc` exit 0, 단위+통합 피라미드 그린 — 하드 카운트는 드리프트
+> 방지 위해 비고정). 결정 근거·트레이드오프·역공학
+> 문서 간접화 주의는 ADR-0011.
 
 ### 16.1 통합 계약 (모든 항목 공통)
 
@@ -871,13 +884,13 @@ export type StreamEvent =
 GrowthBook 원격 게이트+kill-switch, Datadog+코호트 텔레메트리, 전체
 speculative 실행(CC가 데드코드로 출하). 사유: 제품/운영/실험 인프라이거나
 레퍼런스 팀이 죽인 코드 — 에이전트 능력이 아니고 네트워크/프라이버시/벤더
-표면을 추가한다. 근거 상술: ADR-0010.
+표면을 추가한다. 근거 상술: ADR-0011.
 
 ### 16.5 역공학 문서 간접화 주의
 
 CC v2 메커니즘은 직접 복사하지 않는다 — 동작을 **재유도(re-derive)하고
 행위 테스트로 고정**한다. 식별자·내부 상수는 행위 동치성의 근거가 아니며,
-검증 기준은 전체 테스트 피라미드의 결정론 통과다(ADR-0010 "검증").
+검증 기준은 전체 테스트 피라미드의 결정론 통과다(ADR-0011 "검증").
 
 ---
 
@@ -893,4 +906,4 @@ CC v2 메커니즘은 직접 복사하지 않는다 — 동작을 **재유도(re
 | 0.6 | 2026-05-19 | SOTA++ 계층형 시맨틱 메모리 반영(ADR-0008): §6.3 재작성(tier/하이브리드 회상/distill/consolidate/evict/self-edit/EmbedderPort 주입), §3.1 memory↛@/llm 예외 명문화, §12 anti-bloat 의도적 override 위험 항목 추가. 신규 dep 0 |
 | 0.7 | 2026-05-19 | SOTA++ 메모리 심화(ADR-0008 연장): tier가 회상 랭킹에 실제 작용(W_TIER=2, semantic>episodic — "계층형 회상" 빵꾸 해소), `memory_search` tier/kind/minImportance 필터, `memory.recallTiers`+`QUANTA_MEMORY_RECALL_TIERS`, 메모리 관측성(`AgentRecorder` memory.recall/persist/distilled/consolidate/evict 카운터, `onStats` 옵저버). 반환형 불변·동작 보존, 신규 dep 0. 523 테스트 통과 |
 | 0.8 | 2026-05-19 | 문서 정직성 정정: §1.1 SWE-bench 50%/70% 측정 정직성 주석(메커니즘 구현·결정론 검증 / 퍼센트는 외부 eval 대상), §3.1 `tool/→storage/` 예외 명문화(biome 강제 매트릭스 정합), §3.2/§4 LSP가 `agent/lsp-bridge.ts`로 `diagnostics` 도구 노출(ADR-0009), §4 트리에 memory-stats/memory-tools/lsp-bridge 추가. 사문화 export `planSystemAugmentation`/`PLAN_AUGMENTATION` 제거(in-loop 카피는 prompt.ts `PLAN_NOTICE`로 일원화). ADR-0005 결번 placeholder |
-| 0.9 | 2026-05-19 | **Claude Code v2 SOTA++ 흡수 (Tier 0+1, ADR-0010)**: §1.2를 minimal-surface 거부 → SOTA++ 스탠스로 재작성(20k LoC·"31배 가벼움"·"subagent 범위 외" 잔존 minimal 서술을 상위 스탠스로 갈음, 불변식 2개=슬라이스 격리·RFC/ADR 동기, 의도적 미흡수 4종 근거). §3.2 슬라이스표에 `@/subagent`·`@/skill` 추가. 신규 §16(통합 계약=AgentConfig optional·동작 보존, Tier 0 하드닝, Tier 1 슬라이스/스트리밍, 미흡수, 역공학 doc 간접화 주의). src/tests 무변경(문서 전용). 전체 레포 `tsc` 0, 708 단위 통과/0 실패 |
+| 0.9 | 2026-05-19 | **Claude Code v2 SOTA++ 흡수 (Tier 0+1, ADR-0011)**: §1.2를 minimal-surface 거부 → SOTA++ 스탠스로 재작성(20k LoC·"31배 가벼움"·"subagent 범위 외" 잔존 minimal 서술을 상위 스탠스로 갈음, 불변식 2개=슬라이스 격리·RFC/ADR 동기, 의도적 미흡수 4종 근거). §3.2 슬라이스표에 `@/subagent`·`@/skill` 추가. 신규 §16(통합 계약=AgentConfig optional·동작 보존, Tier 0 하드닝, Tier 1 슬라이스/스트리밍, 미흡수, 역공학 doc 간접화 주의). Tier 0+1 src/슬라이스+테스트 동반 랜딩(문서 전용 아님). 전체 레포 `tsc` 0, 단위+통합 피라미드 그린(하드 카운트 비고정) |

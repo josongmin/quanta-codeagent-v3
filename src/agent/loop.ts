@@ -1,12 +1,17 @@
-import { assembleFromEvents, type Message, type StreamEvent, type SystemPromptInput } from "@/llm"
+import type { assembleFromEvents, Message, StreamEvent, SystemPromptInput } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
+import type { AutoModeClassifier } from "@/permission"
 import { LLMError, type RunContext } from "@/shared"
-import { compactIfNeeded, reactiveCompact } from "./compaction"
+import { type Tool, ToolRegistry } from "@/tool"
+import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
+import { CompactionBreaker } from "./compaction-breaker"
 import { dispatchTool } from "./dispatch"
+import { buildSessionFeatures } from "./features"
 import { type PersistDeps, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
+import { streamingTurn } from "./streaming-dispatch"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
 
 /** Bounded per-turn recovery budgets. These cap SAME-TURN retries so a
@@ -18,9 +23,10 @@ const MAX_MALFORMED_RETRIES = 1
 const MAX_CONSECUTIVE_EMPTIES = 2
 
 /**
- * ReAct loop. One `while` over turns; each turn = one LLM stream then (if any)
- * tool dispatch. There is no transition state machine — the FSM/workflow weight
- * is what RFC §1.2 rejects, not the surface below. This slice's ACTUAL surface:
+ * ReAct loop. One `while` over turns; each turn = one LLM stream with tool
+ * calls dispatched AS THEY STREAM IN. There is no transition state machine —
+ * the FSM/workflow weight is what RFC §1.2 rejects, not the surface below.
+ * This slice's ACTUAL surface:
  *
  * - same-turn recovery (RFC §13.1 "루프 견고화"): transient stream errors
  *   retry with bounded backoff, max_output_tokens injects a continue meta,
@@ -28,81 +34,25 @@ const MAX_CONSECUTIVE_EMPTIES = 2
  *   retries do NOT consume the `maxTurns` counter.
  * - compaction (RFC §13.1, ADR-0004 신호): proactive at turn-top under token
  *   pressure (`compactIfNeeded`) + reactive on a PTL trigger (`reactiveCompact`)
- *   that resumes the same turn after compacting.
+ *   that resumes the same turn after compacting. A session `CompactionBreaker`
+ *   (SOTA++ Tier 0, ADR-0011) aborts a compact↔PTL thrash spin.
  * - hooks + memory/metrics wiring: `HookBus` events, working-memory + long-term
  *   recall/persist (`recallContext`/`persistSession`), `AgentRecorder` counters.
  * - ADR-0004 cached prompt: the loop consumes `buildTurnContext`'s
  *   `{ system, messages }` (static cache-prefix system + a single trailing
  *   `<system-reminder>` for the per-turn dynamic context); it does NOT
  *   re-assemble the system prompt per turn.
+ * - SOTA++ (ADR-0011): streaming tool execution — a concurrency-safe tool is
+ *   dispatched the instant its `tool_use` block finishes streaming (overlapping
+ *   the rest of the model stream); a non-safe call is a head-of-line barrier
+ *   run after the stream completes. `tool_result` blocks stay in the model's
+ *   original call order. Optional subagent/skill tools + an "auto"-mode LLM
+ *   permission classifier are materialized once via `buildSessionFeatures`.
  *
- * Tool dispatch uses per-input concurrency batching (RFC §6.2): the tool_use
- * list is walked in order and split into maximal runs of consecutive calls
- * that are all `isConcurrencySafe` (pure reads), which run together via
- * `Promise.all`. Any non-safe call (write/edit/bash, or anything that fails
- * validation) breaks the run and executes alone. This parallelizes safe
- * reads while never overlapping side-effecting work, and the appended
- * tool_result blocks stay in the model's original call order.
+ * With NO Tier-1 config and a turn that yields 0 or only non-safe tool calls,
+ * behaviour is byte-for-byte identical to the pre-SOTA++ batched path.
  */
 type AssembledMessage = ReturnType<typeof assembleFromEvents>["message"]
-type ToolCall = Extract<AssembledMessage["content"][number], { type: "tool_use" }>
-
-/** Split calls into ordered batches: a batch is either one non-concurrency-
- *  safe call, or a maximal run of consecutive concurrency-safe calls. */
-const planBatches = (config: AgentConfig, calls: ToolCall[]): ToolCall[][] => {
-  const batches: ToolCall[][] = []
-  let safeRun: ToolCall[] = []
-  const flush = (): void => {
-    if (safeRun.length > 0) {
-      batches.push(safeRun)
-      safeRun = []
-    }
-  }
-  for (const call of calls) {
-    if (config.registry.isConcurrencySafe(call.name, call.input)) {
-      safeRun.push(call)
-    } else {
-      flush()
-      batches.push([call])
-    }
-  }
-  flush()
-  return batches
-}
-
-/** Run one batch. Emits every `tool_call` first (deterministic), runs the
- *  calls (concurrently when >1), streams progress as it arrives, then emits
- *  `tool_result` and returns the result blocks in original call order. */
-const runBatch = async (
-  config: AgentConfig,
-  batch: ToolCall[],
-  recorder: AgentRecorder | undefined,
-): Promise<AssembledMessage["content"]> => {
-  for (const call of batch) {
-    config.stream.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input })
-    recorder?.toolCall(call.name)
-  }
-  const dispatched = await Promise.all(
-    batch.map(async (call) => {
-      const stop = recorder?.toolExec()
-      try {
-        return await dispatchTool(call, config, config.permission, (message) =>
-          config.stream.emit({ type: "tool_progress", id: call.id, name: call.name, message }),
-        )
-      } finally {
-        stop?.()
-      }
-    }),
-  )
-  const blocks: AssembledMessage["content"] = []
-  for (let i = 0; i < batch.length; i++) {
-    const call = batch[i] as ToolCall
-    const { block, ok, preview } = dispatched[i] as Awaited<ReturnType<typeof dispatchTool>>
-    config.stream.emit({ type: "tool_result", id: call.id, name: call.name, ok, preview })
-    blocks.push(block)
-  }
-  return blocks
-}
 
 /** Bridge a `{type:"usage"}` StreamEvent (W-A2, currently dropped by
  *  `assembleFromEvents`) to the homomorphic `AgentEvent` so recorders capture
@@ -118,32 +68,131 @@ const emitUsage = (config: AgentConfig, ev: Extract<StreamEvent, { type: "usage"
   })
 }
 
-/** Consume one LLM stream, emitting assistant_text deltas. Returns the
- *  assembled message + normalized stop reason, or `{ error }` (carrying the
- *  raw thrown value so the loop can classify it) if the stream threw. */
-const consumeTurnStream = async (
+/** Stable, small set of `recovery` reasons (RFC-0002 §5.2). Group E maps these
+ *  → trajectory kinds; keep the set closed so probe/triage can rely on it. */
+type RecoveryReason = "backoff" | "compact" | "nudge" | "empty" | "malformed"
+
+/** Pure side-effect emit of a `{type:"recovery"}` AgentEvent at a recovery
+ *  point the loop ALREADY reaches (backoff/compact/nudge/empty/malformed). It
+ *  MUST NOT influence loop control flow or the default-OFF byte-identical
+ *  contract: it is an AgentEvent, only observed when a stream/recorder is
+ *  attached (NullStream swallows it). */
+const emitRecovery = (config: AgentConfig, reason: RecoveryReason, detail?: string): void => {
+  config.stream.emit({
+    type: "recovery",
+    reason,
+    ...(detail !== undefined ? { detail } : {}),
+  })
+}
+
+/** Pass-through wrapper over the model stream that tees `usage` events to the
+ *  W-C `emitUsage` bridge (RFC-0002) WITHOUT consuming any other event —
+ *  `streamingTurn` has no `onUsage` collaborator, so the bridge lives here so
+ *  token/usage recording is preserved verbatim under streaming tool exec. */
+async function* teeUsage(
+  config: AgentConfig,
+  src: AsyncIterable<StreamEvent>,
+): AsyncIterable<StreamEvent> {
+  for await (const ev of src) {
+    if (ev.type === "usage") emitUsage(config, ev)
+    yield ev
+  }
+}
+
+/** A successfully streamed turn: the assembled message + normalized stop
+ *  reason + the tool_result blocks (already dispatched by `streamingTurn`, in
+ *  original model-call order). */
+type StreamSuccess = {
+  message: AssembledMessage
+  stopReason: string
+  resultBlocks: AssembledMessage["content"]
+}
+type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } | { aborted: true }
+
+/**
+ * Consume one LLM stream WITH interleaved tool execution (SOTA++ streaming
+ * tool exec, ADR-0011). Delegates the stream/dispatch interleaving + ordering
+ * + head-of-line barrier + abort/tombstone handling to the pure
+ * `streamingTurn` engine; this seam only binds the loop's collaborators
+ * (registry, dispatch, stream emits, metrics, the session auto-classifier) and
+ * preserves the exact recovery contract: a thrown stream error returns
+ * `{ error }` so `decideOnStreamError` + bounded backoff still drive same-turn
+ * retry without consuming a `maxTurns` slot. The early dispatches are pure
+ * latency win — when the recovery decision is `nudge`/`completed`/`compact`
+ * the (read-only, since only concurrency-safe calls start early) results are
+ * simply discarded, exactly as the pre-SOTA++ path discarded un-dispatched
+ * calls.
+ */
+const streamConsume = async (
   config: AgentConfig,
   messages: Message[],
   specs: ReturnType<AgentConfig["registry"]["specs"]>,
   system: SystemPromptInput,
   recorder: AgentRecorder | undefined,
-): Promise<
-  { message: AssembledMessage; stopReason: string } | { error: unknown; message: string }
-> => {
-  const events: Parameters<typeof assembleFromEvents>[0] = []
+  classifier: AutoModeClassifier | undefined,
+): Promise<StreamConsumeResult> => {
   const stop = recorder?.llmStream()
   try {
-    for await (const ev of config.llm.stream({
-      messages,
-      system,
-      tools: specs,
-    })) {
-      events.push(ev)
-      if (ev.type === "text_delta") {
-        config.stream.emit({ type: "assistant_text", delta: ev.delta })
-      } else if (ev.type === "usage") {
-        emitUsage(config, ev)
-      }
+    const outcome = await streamingTurn({
+      events: teeUsage(config, config.llm.stream({ messages, system, tools: specs })),
+      isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
+      dispatch: async (call) => {
+        const s = recorder?.toolExec()
+        try {
+          const out = await dispatchTool(
+            { type: "tool_use", id: call.id, name: call.name, input: call.input },
+            config,
+            config.permission,
+            (message) =>
+              config.stream.emit({
+                type: "tool_progress",
+                id: call.id,
+                name: call.name,
+                message,
+              }),
+            classifier,
+          )
+          // RFC-0002 §5.2 enriched tool_result. CONTRACT with Group E: the
+          // dispatch result exposes these EXACT optional field names
+          // (`durationMs:number`, `stderrTail:string`, `exitCode:number`,
+          // `fullLogPath:string`). Spread whichever are present so this works
+          // the instant E lands and never throws while E is still in flight
+          // (pre-E the fields are simply absent → byte-identical emit). Pure
+          // observation: NullStream swallows it, control flow is untouched.
+          const enriched = out as typeof out & {
+            durationMs?: number
+            stderrTail?: string
+            exitCode?: number
+            fullLogPath?: string
+          }
+          config.stream.emit({
+            type: "tool_result",
+            id: call.id,
+            name: call.name,
+            ok: out.ok,
+            preview: out.preview,
+            ...(enriched.durationMs !== undefined ? { durationMs: enriched.durationMs } : {}),
+            ...(enriched.stderrTail !== undefined ? { stderrTail: enriched.stderrTail } : {}),
+            ...(enriched.exitCode !== undefined ? { exitCode: enriched.exitCode } : {}),
+            ...(enriched.fullLogPath !== undefined ? { fullLogPath: enriched.fullLogPath } : {}),
+          })
+          return out
+        } finally {
+          s?.()
+        }
+      },
+      onTextDelta: (delta) => config.stream.emit({ type: "assistant_text", delta }),
+      onToolStart: (call) => {
+        config.stream.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input })
+        recorder?.toolCall(call.name)
+      },
+      signal: config.signal,
+    })
+    if (outcome.kind === "aborted") return { aborted: true }
+    return {
+      message: outcome.message as AssembledMessage,
+      stopReason: outcome.stopReason,
+      resultBlocks: outcome.resultBlocks as AssembledMessage["content"],
     }
   } catch (e) {
     const message = e instanceof LLMError ? e.message : (e as Error).message
@@ -151,8 +200,6 @@ const consumeTurnStream = async (
   } finally {
     stop?.()
   }
-  const { message, stopReason } = assembleFromEvents(events)
-  return { message, stopReason }
 }
 
 /** True when the assembled turn produced nothing usable: no text, no tool_use
@@ -166,23 +213,6 @@ const metaUser = (text: string): Message => ({
   role: "user",
   content: [{ type: "text", text }],
 })
-
-/** Dispatch the turn's tool calls in concurrency batches. Result blocks stay
- *  in original call order. Returns `{ aborted: true }` if the signal tripped
- *  between batches. */
-const dispatchTurnTools = async (
-  config: AgentConfig,
-  toolCalls: ToolCall[],
-  recorder: AgentRecorder | undefined,
-): Promise<{ resultBlocks: AssembledMessage["content"] } | { aborted: true }> => {
-  const resultBlocks: AssembledMessage["content"] = []
-  for (const batch of planBatches(config, toolCalls)) {
-    if (config.signal.aborted) return { aborted: true }
-    const blocks = await runBatch(config, batch, recorder)
-    resultBlocks.push(...blocks)
-  }
-  return { resultBlocks }
-}
 
 /** Recalled long-term memory text for this session, or `undefined` when no
  *  store is configured or nothing relevant is found. The user's last text
@@ -221,10 +251,13 @@ const maybeCompact = async (
   config: AgentConfig,
   system: SystemPromptInput,
   wm: WorkingMemory<Message>,
+  breaker: CompactionBreaker | undefined,
 ): Promise<void> => {
   if (!config.compaction) return
+  const snapshot = [...wm.snapshot()]
+  const before = estimateTokens(snapshot)
   const result = await compactIfNeeded({
-    messages: [...wm.snapshot()],
+    messages: snapshot,
     llm: config.llm,
     system,
     ...(config.compaction.thresholdTokens !== undefined
@@ -234,7 +267,12 @@ const maybeCompact = async (
       ? { keepRecentTurns: config.compaction.keepRecentTurns }
       : {}),
   })
-  if (result.compacted) wm.replace(result.messages)
+  if (result.compacted) {
+    // SOTA++ Tier 0 (ADR-0011): feed the thrash counter. A proactive compact
+    // that fails to meaningfully shrink is a no-progress strike.
+    breaker?.recordProactive(before, estimateTokens(result.messages))
+    wm.replace(result.messages)
+  }
 }
 
 /** The STATIC system blocks for this session (no per-turn dynamic context);
@@ -313,7 +351,7 @@ export const freshRecovery = (): RecoveryState => ({
 type RecoveryAction =
   | { do: "backoff"; attempt: number }
   | { do: "compact" }
-  | { do: "nudge"; keepMessage: boolean; text: string }
+  | { do: "nudge"; keepMessage: boolean; text: string; reason: RecoveryReason }
   | { do: "proceed" }
   | { do: "completed" }
   | { do: "error"; reason: string }
@@ -353,6 +391,7 @@ export const decideOnAssembled = (
       do: "nudge",
       keepMessage: true,
       text: "Output limit hit — continue exactly where you left off, do not repeat.",
+      reason: "nudge",
     }
   }
   const hasTools = message.content.some((b) => b.type === "tool_use")
@@ -365,6 +404,7 @@ export const decideOnAssembled = (
         text:
           "Your previous tool call was malformed/incomplete. Re-issue it as a " +
           "single valid tool call.",
+        reason: "malformed",
       }
     }
     return { do: "completed" }
@@ -376,6 +416,7 @@ export const decideOnAssembled = (
       do: "nudge",
       keepMessage: true,
       text: "You returned an empty response. Continue the task or give your final answer.",
+      reason: "empty",
     }
   }
   rec.consecutiveEmpties = 0
@@ -406,9 +447,10 @@ const prepareTurnContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
   recorder: AgentRecorder | undefined,
+  breaker: CompactionBreaker | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder)
-  await maybeCompact(config, staticSystemFor(config), wm)
+  await maybeCompact(config, staticSystemFor(config), wm, breaker)
   return buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
@@ -423,35 +465,61 @@ const CONTINUE: Step = { done: false }
 
 /** Apply one decided {@link RecoveryAction}. Returns `{done:false}` to
  *  re-enter the SAME turn (after mutating `messages`/sleeping/compacting) or
- *  `{done:true}` with the terminal {@link TurnResult}. Behaviour is identical
- *  to the previous inline branch chain — extracted only to bound complexity. */
+ *  `{done:true}` with the terminal {@link TurnResult}. The `proceed` branch
+ *  uses the tool_result blocks `streamingTurn` already produced (dispatch
+ *  happened DURING the stream) instead of dispatching here. */
 const applyAction = async (
   config: AgentConfig,
   action: RecoveryAction,
-  result: Awaited<ReturnType<typeof consumeTurnStream>>,
+  result: StreamSuccess | { error: unknown; message: string },
   wm: WorkingMemory<Message>,
   ctxSystem: SystemPromptInput,
-  recorder: AgentRecorder | undefined,
+  breaker: CompactionBreaker | undefined,
 ): Promise<Step> => {
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
   if (action.do === "backoff") {
+    // RFC-0002 §5.2 recovery trace. Pure observation (NullStream swallows it):
+    // emitted at the recovery point the loop already reached; the sleep + retry
+    // control flow below is byte-identical to the pre-emit path.
+    emitRecovery(config, "backoff", `attempt ${action.attempt}`)
     await sleep(backoffDelayMs(action.attempt), config.signal)
     return CONTINUE
   }
   if (action.do === "compact") {
+    emitRecovery(config, "compact")
+    // SOTA++ Tier 0 (ADR-0011): trip the breaker BEFORE another reactive
+    // squeeze so a compact↔PTL thrash spin aborts with a clear reason
+    // instead of looping until maxTurns / a provider 400.
+    const verdict = breaker?.check()
+    if (verdict?.abort) return { done: true, result: { kind: "error", reason: verdict.reason } }
+    const snapshot = [...wm.snapshot()]
+    const before = estimateTokens(snapshot)
     const compacted = await reactiveCompact({
-      messages: [...wm.snapshot()],
+      messages: snapshot,
       llm: config.llm,
       system: ctxSystem,
     })
     if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
+    breaker?.recordReactive(before, estimateTokens(compacted.messages))
     wm.replace(compacted.messages)
     return CONTINUE
   }
-  // From here the stream succeeded: `result` carries the assembled message.
-  const message = (result as { message: AssembledMessage }).message
-  if (action.do === "completed") return { done: true, result: { kind: "completed", message } }
+  // From here the stream succeeded: `result` carries the assembled message
+  // and the (already dispatched) tool_result blocks.
+  const success = result as StreamSuccess
+  const message = success.message
+  if (action.do === "completed") {
+    // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
+    // empty-turn-exhausted) previously returned WITHOUT appending the final
+    // assistant `message` to working memory, while the normal proceed/no-tools
+    // completion DOES append it. That dropped the final assistant turn from
+    // `AgentOutcome.messages`, so a state.ts resume lost it. Mirror the proceed
+    // path: append the final assistant turn before returning completed.
+    wm.append(message)
+    return { done: true, result: { kind: "completed", message } }
+  }
   if (action.do === "nudge") {
+    emitRecovery(config, action.reason)
     if (action.keepMessage) wm.append(message)
     wm.append(metaUser(action.text))
     return CONTINUE
@@ -460,9 +528,7 @@ const applyAction = async (
   wm.append(message)
   const toolCalls = message.content.filter((b) => b.type === "tool_use")
   if (toolCalls.length === 0) return { done: true, result: { kind: "completed", message } }
-  const dispatched = await dispatchTurnTools(config, toolCalls, recorder)
-  if ("aborted" in dispatched) return { done: true, result: { kind: "aborted" } }
-  return { done: true, result: { kind: "tools", message, resultBlocks: dispatched.resultBlocks } }
+  return { done: true, result: { kind: "tools", message, resultBlocks: success.resultBlocks } }
 }
 
 const runTurn = async (
@@ -471,6 +537,8 @@ const runTurn = async (
   specs: ReturnType<AgentConfig["registry"]["specs"]>,
   recorder: AgentRecorder | undefined,
   rec: RecoveryState,
+  breaker: CompactionBreaker | undefined,
+  classifier: AutoModeClassifier | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -479,15 +547,23 @@ const runTurn = async (
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
-    const ctx = await prepareTurnContext(config, wm, recorder)
-    const result = await consumeTurnStream(config, ctx.messages, specs, ctx.system, recorder)
+    const ctx = await prepareTurnContext(config, wm, recorder, breaker)
+    const result = await streamConsume(
+      config,
+      ctx.messages,
+      specs,
+      ctx.system,
+      recorder,
+      classifier,
+    )
+    if ("aborted" in result) return { kind: "aborted" }
 
     const action =
       "error" in result
         ? decideOnStreamError(result.error, result.message, rec)
         : decideOnAssembled(result.stopReason, result.message, rec)
 
-    const step = await applyAction(config, action, result, wm, ctx.system, recorder)
+    const step = await applyAction(config, action, result, wm, ctx.system, breaker)
     if (step.done) return step.result
   }
 }
@@ -499,33 +575,70 @@ const runTurn = async (
 const stampTurn = (run: RunContext | undefined, turn: number): RunContext | undefined =>
   run ? { ...run, turn } : undefined
 
+/** Reconstruct the `Tool[]` backing a registry (it is construct-only — no
+ *  enumerator) so SOTA++ extra tools can be merged into a fresh registry. */
+const registryTools = (r: AgentConfig["registry"]): Tool[] =>
+  r
+    .specs()
+    .map((s) => r.get(s.name))
+    .filter((t): t is Tool => t !== undefined)
+
+/** Fold SOTA++ extra tools (subagent/skill) into a fresh registry. With none
+ *  (`extraTools` empty) returns the SAME config by identity, so the loop stays
+ *  byte-for-byte identical to the pre-SOTA++ path. */
+const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentConfig =>
+  extraTools.length > 0
+    ? {
+        ...config,
+        registry: new ToolRegistry([...registryTools(config.registry), ...extraTools]),
+      }
+    : config
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
-  const { stream, registry } = config
+  // SOTA++ Tier 1 (ADR-0011): materialize optional subsystems ONCE. With no
+  // Tier-1 config `features.extraTools` is empty and `cfg === config` by
+  // identity, so the loop is byte-for-byte identical to the pre-SOTA++ path.
+  const features = await buildSessionFeatures(config)
+  const cfg = buildEffectiveConfig(config, features.extraTools)
+  const classifier = features.classifier
+  const { stream } = cfg
   // Canonical in-session message buffer (RFC §6.3). Seeded from the public
   // `config.messages`; every history mutation below goes through this slice.
-  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(config.messages)
-  const specs = registry.specs()
-  const recorder = config.metrics ? new AgentRecorder(config.metrics) : undefined
-  const sessionId = config.sessionId ?? "default"
+  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(cfg.messages)
+  const specs = cfg.registry.specs()
+  const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
+  const sessionId = cfg.sessionId ?? "default"
+  // SOTA++ Tier 0 (ADR-0011): one breaker per session. ON by default with
+  // DEFAULT_COMPACTION_BREAKER_CAPS — only trips on pathological compaction
+  // thrash, so configured-but-normal and unconfigured sessions are unaffected.
+  const breaker = cfg.compactionBreaker?.disabled
+    ? undefined
+    : new CompactionBreaker(cfg.compactionBreaker?.caps)
 
   const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
     const messages = [...wm.snapshot()]
-    if (config.store) {
-      await persistSession(buildPersistDeps(config, recorder), {
+    if (cfg.store) {
+      await persistSession(buildPersistDeps(cfg, recorder), {
         sessionId,
         finalMessages: messages,
       })
     }
     recorder?.stopReason(reason)
-    if (config.hooks) await config.hooks.emit({ type: "session_end", reason, turns })
+    if (cfg.hooks) await cfg.hooks.emit({ type: "session_end", reason, turns })
     stream.emit({ type: "done", reason, turns })
     return { reason, turns, messages }
   }
 
-  if (config.hooks) await config.hooks.emit({ type: "session_start", sessionId })
+  // RFC-0002 §5.2 `session_start` — emitted ONCE at run start so the trajectory
+  // has a head marker (Group E maps it → kind:"session_start"). Pure
+  // observation: an AgentEvent only seen when a stream/recorder is attached
+  // (NullStream swallows it); it precedes nothing in the control flow.
+  stream.emit({ type: "session_start" })
 
-  for (let turn = 1; turn <= config.maxTurns; turn++) {
-    if (config.signal.aborted) return finish("aborted", turn - 1)
+  if (cfg.hooks) await cfg.hooks.emit({ type: "session_start", sessionId })
+
+  for (let turn = 1; turn <= cfg.maxTurns; turn++) {
+    if (cfg.signal.aborted) return finish("aborted", turn - 1)
     // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Computed every
     // turn from a fresh shallow copy so the caller's `config.run` is NEVER
     // mutated. It deliberately feeds no control flow / emit ordering /
@@ -534,25 +647,41 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     // without any behavioural coupling. No downstream consumer in W-C (the
     // explicit discard documents that intent; W-D/probe read `turn` off the
     // trajectory, not via this binding).
-    void stampTurn(config.run, turn)
+    void stampTurn(cfg.run, turn)
     stream.emit({ type: "turn_start", turn })
-    recorder?.turn()
-    if (config.hooks) await config.hooks.emit({ type: "turn_start", turn })
+    if (cfg.hooks) await cfg.hooks.emit({ type: "turn_start", turn })
 
     // Recovery counters are per-turn: SAME-TURN retries share & exhaust these,
     // a fresh turn starts clean. runTurn owns the SEAM (buildTurnContext) and
     // mutates `messages` (canonical history) in place.
-    const result = await runTurn(config, wm, specs, recorder, freshRecovery())
+    const result = await runTurn(cfg, wm, specs, recorder, freshRecovery(), breaker, classifier)
 
+    // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
+    // at turn-top, so a turn that immediately aborted/errored BEFORE producing
+    // any model output still inflated `agent.turns` — yet the aborted branch
+    // already reported `turn - 1` to `AgentOutcome.turns`, an error-vs-abort
+    // off-by-one. We now count a turn (metric AND outcome) only when it did
+    // real work: `tools` advanced the loop or `completed` produced a final
+    // model turn. A no-work `aborted`/`error` reports `turn - 1` and does NOT
+    // bump the recorder — so `AgentOutcome.turns` and `agent.turns` always
+    // agree. Normal-path counts are unperturbed (every productive turn still
+    // counts exactly once; `max_turns` is reached only via productive tool
+    // turns, so it still reports `cfg.maxTurns`).
     if (result.kind === "aborted") return finish("aborted", turn - 1)
     if (result.kind === "error") {
+      // Mirror the abort semantics: a turn that errored without producing a
+      // productive model turn did no work, so it must not inflate the count.
       stream.emit({ type: "error", message: result.reason })
-      return finish("error", turn)
+      return finish("error", turn - 1)
     }
+    recorder?.turn()
     if (result.kind === "completed") return finish("completed", turn)
 
+    // A real tool turn landed (not stuck thrashing compaction) — clear the
+    // consecutive no-progress strikes (SOTA++ Tier 0, ADR-0011).
+    breaker?.noteProgress()
     wm.append({ role: "user", content: result.resultBlocks })
   }
 
-  return finish("max_turns", config.maxTurns)
+  return finish("max_turns", cfg.maxTurns)
 }

@@ -3,6 +3,11 @@ import type { z } from "zod"
 export interface ToolContext {
   cwd: string
   signal: AbortSignal
+  /** Subagent recursion depth of the agent that owns this call (0 = root).
+   *  Optional + duck-typed: the subagent slice reads it to enforce maxDepth;
+   *  absent ⇒ treated as 0. Propagated by the dispatch seam from
+   *  `AgentConfig.depth` (SOTA++ subagent absorption, ADR-0011). */
+  depth?: number
 }
 
 export interface ToolResult {

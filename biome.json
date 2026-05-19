@@ -290,6 +290,58 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/subagent/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/memory": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/storage": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/llm": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/skill/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/memory": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/storage": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/llm": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

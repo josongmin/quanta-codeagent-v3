@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
-  DEFAULT_TOOL_OUTPUT_MAX,
-  HEAD_CHARS,
-  TAIL_CHARS,
   capToolOutput,
+  DEFAULT_TOOL_OUTPUT_MAX,
   envMaxChars,
+  HEAD_CHARS,
   resolveMaxChars,
+  TAIL_CHARS,
 } from "../../src/tool/output-spill"
 
 function collectingWrite() {
@@ -63,16 +63,14 @@ describe("capToolOutput — under cap", () => {
 describe("capToolOutput — over cap", () => {
   test("persists full content and returns excerpt + marker", () => {
     const { write, calls } = collectingWrite()
-    const big = "A".repeat(20_000) + "MIDDLE" + "Z".repeat(20_000)
+    const big = `${"A".repeat(20_000)}MIDDLE${"Z".repeat(20_000)}`
     const r = capToolOutput(big, { maxChars: 100, spillDir: "/tmp/spill", write })
 
     // full content written exactly once, untruncated
     expect(calls).toHaveLength(1)
     expect(calls[0]?.data).toBe(big)
     expect(calls[0]?.path).toBe(r.spillPath)
-    expect(r.spillPath).toMatch(
-      /^\/tmp\/spill\/[0-9a-f-]{36}\.txt$/,
-    )
+    expect(r.spillPath).toMatch(/^\/tmp\/spill\/[0-9a-f-]{36}\.txt$/)
 
     // marker faithfully echoes CC's <persisted-output> wrapper
     expect(r.output.startsWith("<persisted-output>\n")).toBe(true)

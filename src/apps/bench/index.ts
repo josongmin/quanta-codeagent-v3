@@ -34,6 +34,7 @@ import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import type { AttemptObservation } from "./observe"
+import { resolvedTotals } from "./observe"
 import { isPythonSwebenchAvailable } from "./python-swebench"
 import { buildReport, writeReport } from "./report"
 import { finalizeRun, runInstance } from "./runner"
@@ -117,12 +118,17 @@ const buildLLM = (provider: Provider, model: string): LLMPort | null => {
 
 const printSummary = (summary: BenchSummary): void => {
   for (const r of summary.results) {
+    const verdict = (r.verdict ?? "ok") === "degraded" ? " DEGRADED" : ""
     const mark = r.passed ? "PASS" : "FAIL"
     const extra = r.error ? ` (${r.error})` : ""
-    logger.info(`  [${mark}] ${r.id} (turns=${r.turns})${extra}`)
+    logger.info(`  [${mark}${verdict}] ${r.id} (turns=${r.turns})${extra}`)
   }
-  const pct = summary.total === 0 ? 0 : Math.round((summary.resolved / summary.total) * 100)
-  logger.info(`resolved ${summary.resolved}/${summary.total} (${pct}%)`)
+  // C8: the operator-visible headline uses the SAME degraded-excluding
+  // denominator as observe.summarize / summary.json — never results.length.
+  const { resolved, total, degraded } = resolvedTotals(summary.results)
+  const pct = total === 0 ? 0 : Math.round((resolved / total) * 100)
+  const deg = degraded > 0 ? ` (${degraded} degraded)` : ""
+  logger.info(`resolved ${resolved}/${total} (${pct}%)${deg}`)
 }
 
 /** Per-run config common to single & Best-of-N. `pythonSwebench` is present
@@ -265,11 +271,7 @@ const runDatasetMode = async (
     buildReport({ provider: meta.provider, model: meta.model, n: cfg.n }, results),
   )
   logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
-  printSummary({
-    total: results.length,
-    resolved: results.filter((r) => r.passed).length,
-    results,
-  })
+  printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
 }
 
@@ -406,11 +408,7 @@ const runCustomCorpusMode = async (
   for (const instance of instances) {
     results.push(await resolveInstance(instance, base, cfg.n, obs))
   }
-  printSummary({
-    total: results.length,
-    resolved: results.filter((r) => r.passed).length,
-    results,
-  })
+  printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
 }
 

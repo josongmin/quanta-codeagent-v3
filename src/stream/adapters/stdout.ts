@@ -1,3 +1,4 @@
+import { redactValue } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 
@@ -19,11 +20,15 @@ export class StdoutStream implements StreamPort {
     }
 
     switch (event.type) {
+      case "session_start":
+        process.stdout.write(`${DIM}— session start —${RESET}\n`)
+        break
       case "turn_start":
         process.stdout.write(`${DIM}— turn ${event.turn} —${RESET}\n`)
         break
       case "assistant_text":
-        process.stdout.write(event.delta)
+        // S4: a secret pasted into model output must not hit the terminal.
+        process.stdout.write(redactStr(event.delta))
         this.inText = true
         break
       case "tool_call":
@@ -36,20 +41,53 @@ export class StdoutStream implements StreamPort {
         break
       case "tool_result": {
         const mark = event.ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`
-        process.stdout.write(`${mark} ${DIM}${event.name}: ${oneLine(event.preview)}${RESET}\n`)
+        const tail =
+          event.stderrTail !== undefined && event.stderrTail !== ""
+            ? ` ${DIM}stderr: ${oneLine(redactStr(event.stderrTail))}${RESET}`
+            : ""
+        process.stdout.write(
+          `${mark} ${DIM}${event.name}: ${oneLine(redactStr(event.preview))}${RESET}${tail}\n`,
+        )
+        break
+      }
+      case "recovery": {
+        const detail =
+          event.detail !== undefined && event.detail !== ""
+            ? `: ${oneLine(redactStr(event.detail))}`
+            : ""
+        process.stdout.write(`${DIM}↺ recovery (${event.reason})${detail}${RESET}\n`)
         break
       }
       case "error":
-        process.stdout.write(`${RED}error: ${event.message}${RESET}\n`)
+        process.stdout.write(`${RED}error: ${redactStr(event.message)}${RESET}\n`)
+        break
+      case "usage":
+        process.stdout.write(
+          `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,
+        )
         break
       case "done":
         process.stdout.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
         break
+      default: {
+        // Exhaustiveness guard: a new AgentEvent variant must be handled
+        // explicitly rather than silently rendered (or crashing) here.
+        const _exhaustive: never = event
+        void _exhaustive
+        break
+      }
     }
   }
 }
 
-const compact = (input: unknown): string => oneLine(JSON.stringify(input) ?? "")
+/** Mask secrets in a free-text string via the single-source @/shared scrub.
+ *  redactValue returns the input unchanged for benign strings. */
+const redactStr = (s: string): string => {
+  const r = redactValue(s)
+  return typeof r === "string" ? r : s
+}
+
+const compact = (input: unknown): string => oneLine(JSON.stringify(redactValue(input)) ?? "")
 
 const oneLine = (s: string, max = 160): string => {
   const flat = s.replace(/\s+/g, " ").trim()

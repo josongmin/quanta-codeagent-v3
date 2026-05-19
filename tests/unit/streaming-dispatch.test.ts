@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { type DispatchOutcome, type StreamingCall, streamingTurn } from "@/agent/streaming-dispatch"
 import { assembleFromEvents, type StreamEvent } from "@/llm"
-import {
-  type DispatchOutcome,
-  type StreamingCall,
-  streamingTurn,
-} from "@/agent/streaming-dispatch"
 
 /** Async generator over a fixed event list. `onEmit` fires AFTER each event is
  *  yielded so a test can record interleaving (e.g. assert a dispatch started
@@ -196,8 +192,7 @@ describe("streamingTurn", () => {
   test("abort between phases yields {kind:'aborted'}", async () => {
     const ctrl = new AbortController()
     const isConcurrencySafe = (): boolean => false
-    const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> =>
-      block(call.id, "x")
+    const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => block(call.id, "x")
     const events: StreamEvent[] = [
       ...toolUse("w1", "write", { p: "a" }),
       { type: "message_stop", stop_reason: "tool_use" },

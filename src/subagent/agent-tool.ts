@@ -51,6 +51,56 @@ const summarize = (r: SubagentResult): string => {
   return `${head} ${turns}\n\n${r.finalText}`.trim()
 }
 
+/** Build the {@link SubagentRequest} from validated tool input, omitting
+ *  optional fields that were not supplied (preserves prior spread semantics). */
+const buildRequest = (input: AgentInput, childDepth: number): SubagentRequest => {
+  const hasBudget = input.max_turns !== undefined || input.max_tokens !== undefined
+  return {
+    prompt: input.prompt,
+    depth: childDepth,
+    ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
+    ...(input.tools !== undefined ? { toolFilter: input.tools } : {}),
+    ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
+    ...(hasBudget
+      ? {
+          budget: {
+            ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
+            ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+/** Register a background task and fire the runner; returns the launch result. */
+const launchBackground = (
+  opts: AgentToolOptions,
+  registry: TaskRegistry,
+  input: AgentInput,
+  req: SubagentRequest,
+): ToolEvent => {
+  const id = registry.newId()
+  registry.register({
+    id,
+    description: input.prompt.slice(0, 120),
+    ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
+  })
+  // Fire and forget; the registry record settles when the runner returns.
+  void opts
+    .runner(req)
+    .then((r) => registry.complete(id, r))
+    .catch((e: unknown) => registry.fail(id, e instanceof Error ? e.message : String(e)))
+  return {
+    type: "result",
+    result: {
+      ok: true,
+      output:
+        `Subagent launched in background. task_id: ${id}\n` +
+        `Poll with task_output({ task_id: "${id}" }) or cancel with task_stop.`,
+    },
+  }
+}
+
 /**
  * The `Agent` tool (alias `Task`). Foreground ⇒ await the injected runner and
  * return its summary as the tool result. Background ⇒ register the task in the
@@ -94,45 +144,10 @@ export const createAgentTool = (
         return
       }
 
-      const req: SubagentRequest = {
-        prompt: input.prompt,
-        depth: childDepth,
-        ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
-        ...(input.tools !== undefined ? { toolFilter: input.tools } : {}),
-        ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
-        ...(input.max_turns !== undefined || input.max_tokens !== undefined
-          ? {
-              budget: {
-                ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
-                ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
-              },
-            }
-          : {}),
-      }
+      const req = buildRequest(input, childDepth)
 
       if (input.background === true) {
-        const id = registry.newId()
-        registry.register({
-          id,
-          description: input.prompt.slice(0, 120),
-          ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
-        })
-        // Fire and forget; the registry record settles when the runner returns.
-        void opts
-          .runner(req)
-          .then((r) => registry.complete(id, r))
-          .catch((e: unknown) =>
-            registry.fail(id, e instanceof Error ? e.message : String(e)),
-          )
-        yield {
-          type: "result",
-          result: {
-            ok: true,
-            output:
-              `Subagent launched in background. task_id: ${id}\n` +
-              `Poll with task_output({ task_id: "${id}" }) or cancel with task_stop.`,
-          },
-        }
+        yield launchBackground(opts, registry, input, req)
         return
       }
 

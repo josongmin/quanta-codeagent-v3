@@ -10,7 +10,16 @@ import type { RunContext } from "./run-context"
  */
 export const TRAJECTORY_SCHEMA = "quanta.trajectory.v1" as const
 
-/** Redaction policy id stamped onto every event (single scrub source). */
+/**
+ * Redaction policy id stamped onto every event (single scrub source).
+ *
+ * Kept at `secrets.v1` despite the S1 value/key-set expansion: this id is
+ * consumed only SYMBOLICALLY (no version-branch reads it — `trajectory.test`
+ * only asserts it is a stable non-empty string; nothing dispatches on its
+ * value). Per the prior W2 decision the id is a stable label, not a scrub
+ * version number, so widening the regex sets is NOT a breaking schema change
+ * and must not churn the id. Bump only if a consumer ever branches on it.
+ */
 export const REDACTION_POLICY = "secrets.v1" as const
 
 /** Exhaustive event taxonomy (RFC-0002 §5.2). */
@@ -147,16 +156,86 @@ export interface DegradedData {
 
 const REDACTED = "***REDACTED***"
 
-/** Object keys whose value is always a secret regardless of content. */
-const SECRET_KEY_RE = /(_KEY|_TOKEN|_SECRET|PASSWORD|AUTHORIZATION|SECRET)/i
+/**
+ * Object keys whose value is always a secret regardless of content.
+ *
+ * Two complementary patterns (RFC-0002 §3 원칙6 — "비밀 누출 0, 게이트"):
+ *
+ *  1. {@link SECRET_KEY_SUFFIX_RE} — separator-anchored *suffixes*
+ *     (`*_KEY` / `*_TOKEN` / `*_SECRET` / …). Catches `OPENAI_API_KEY`,
+ *     `GITHUB_TOKEN`, etc. Kept verbatim so existing matches never regress.
+ *
+ *  2. {@link SECRET_KEY_EXACT_RE} — closes the *bare-key* gap: a key that
+ *     IS a secret name (e.g. `{ token: "plainish" }`) whose value does not
+ *     itself look secret. Whole-key anchored (`^…$`) and separator-tolerant
+ *     so `api_key`/`api-key`/`apiKey` all match — but `inputTokens`,
+ *     `outputTokens`, `cacheReadTokens`, `tokenCount`, `tokensUsed`,
+ *     `tokenizer`, `refreshedAt` do NOT (RFC §5.3 cost re-derivation).
+ */
+const SECRET_KEY_SUFFIX_RE = /(_KEY|_TOKEN|_SECRET|PASSWORD|AUTHORIZATION|SECRET)/i
+
+/** Separator between words in a compound secret key: `_`, `-`, or none. */
+const SEP = "[_-]?"
+
+/** Whole-key (boundary-anchored) names that are always secrets when bare. */
+const SECRET_KEY_EXACT_RE = new RegExp(
+  `^(?:${[
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    `cred${SEP}ential`,
+    `cred${SEP}entials`,
+    `api${SEP}key`,
+    `access${SEP}token`,
+    `refresh${SEP}token`,
+    `auth${SEP}token`,
+    `client${SEP}secret`,
+    `private${SEP}key`,
+    `secret${SEP}key`,
+    "authorization",
+    // Bare-key gap closures (S1): exact names that ARE secrets but whose value
+    // need not look secret. Still whole-key anchored so `inputTokens` etc. are
+    // unaffected. `x-api-key` reduces to `api${SEP}key` only with a leading
+    // `x`, so it is listed explicitly; the rest are header/DSN/conn names.
+    `x${SEP}api${SEP}key`,
+    "cookie",
+    `set${SEP}cookie`,
+    `database${SEP}url`,
+    `connection${SEP}string`,
+    `session${SEP}key`,
+    `private${SEP}key${SEP}pem`,
+    "dsn",
+  ].join("|")})$`,
+  "i",
+)
+
+const isSecretKey = (key: string): boolean =>
+  SECRET_KEY_SUFFIX_RE.test(key) || SECRET_KEY_EXACT_RE.test(key)
 
 /** Substring patterns that mark a string value as secret. */
 const SECRET_VALUE_RES: readonly RegExp[] = [
   /\bBearer\s+\S+/i,
-  /\bsk-[A-Za-z0-9]{8,}/,
+  // OpenAI legacy `sk-…`, Anthropic `sk-ant-api03-…`, OpenAI project/service
+  // `sk-proj-…`/`sk-svcacct-…` — all start `sk-` so the broadened `sk-[\w-]`
+  // class (now allowing `-`) subsumes every variant.
+  /\bsk-[A-Za-z0-9_-]{8,}/,
   /\bghp_[A-Za-z0-9]{8,}/,
+  // Fine-grained GitHub PAT + the OAuth/app/server/user token families.
+  /\bgithub_pat_[A-Za-z0-9_]{8,}/,
+  /\bgh[opsu]_[A-Za-z0-9]{8,}/,
+  // Slack bot/user tokens.
+  /\bxox[bpars]-[A-Za-z0-9-]{8,}/,
+  // GitLab personal access token.
+  /\bglpat-[A-Za-z0-9_-]{8,}/,
+  // Google API key.
+  /\bAIza[A-Za-z0-9_-]{20,}/,
   /\bAKIA[0-9A-Z]{16}\b/,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  // JWT: three base64url segments separated by dots.
+  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/,
+  // URL-embedded credentials: `scheme://user:password@host`.
+  /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i,
   /(API[_-]?KEY|ACCESS[_-]?TOKEN|CLIENT[_-]?SECRET)/i,
 ]
 
@@ -165,13 +244,14 @@ const isSecretString = (s: string): boolean => SECRET_VALUE_RES.some((re) => re.
 const redactString = (s: string): string => (isSecretString(s) ? REDACTED : s)
 
 const redactEntry = (key: string, value: unknown): unknown =>
-  SECRET_KEY_RE.test(key) ? REDACTED : redactValue(value)
+  isSecretKey(key) ? REDACTED : redactValue(value)
 
 /**
  * Deep-walk a value, masking secrets to `"***REDACTED***"`. Single source of
  * truth for redaction (RFC §3.6) — the recorder reuses this verbatim. Masks:
  * raw API keys, Bearer tokens, GitHub/AWS keys, PEM blocks, and any object
- * key matching {@link SECRET_KEY_RE}. Ordinary fields pass through unchanged.
+ * key flagged by {@link isSecretKey} (suffix OR bare-name). Ordinary fields
+ * — including `inputTokens`/`outputTokens`/`cacheReadTokens` — pass through.
  */
 export const redactValue = (v: unknown): unknown => {
   if (typeof v === "string") return redactString(v)

@@ -99,113 +99,162 @@ interface Slot {
 
 const isAborted = (signal: AbortSignal | undefined): boolean => signal?.aborted ?? false
 
-/**
- * Drive one logical model turn with interleaved tool execution. See the file
- * header for the full ordering/barrier contract.
- */
-export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingTurnResult> => {
-  const { events, isConcurrencySafe, dispatch, onTextDelta, onToolStart, signal } = args
+/** Mutable accumulation state for one (possibly tombstone-reset) turn. Held in
+ *  one object so the per-event handler can reset it in place on `stream_reset`
+ *  exactly as the inline version did (reassign `rawEvents`, truncate `slots`). */
+interface TurnState {
+  /** Raw event log handed verbatim to `assembleFromEvents` — message shape is
+   *  therefore identical to the non-streaming path. `stream_reset` truncates it
+   *  (the tombstone) so only the post-reset turn is assembled. */
+  rawEvents: StreamEvent[]
+  /** Scheduled slots in model-call order. Index === model call order. */
+  slots: Slot[]
+  /** True once a concurrency-unsafe call has been seen this turn: it is a
+   *  head-of-line barrier, so nothing AFTER it may start early either. */
+  barrierEngaged: boolean
+}
 
-  // Raw event log handed verbatim to `assembleFromEvents` — the message shape
-  // is therefore identical to the non-streaming path. `stream_reset` truncates
-  // it (the tombstone) so only the post-reset turn is assembled.
-  let rawEvents: StreamEvent[] = []
+/** Abandon every in-flight dispatch + reset accumulation (stream_reset). The
+ *  promises are intentionally left unawaited (fire-and-forget tombstone): their
+ *  results are discarded because their slots are dropped. */
+const resetForTombstone = (state: TurnState): void => {
+  state.rawEvents = []
+  state.slots.length = 0
+  state.barrierEngaged = false
+}
 
-  // Scheduled slots in model-call order. Index === model call order.
-  const slots: Slot[] = []
-  // True once a concurrency-unsafe call has been seen this turn: it is a
-  // head-of-line barrier, so nothing AFTER it may start early either.
-  let barrierEngaged = false
+/** Resolve a finished `tool_use` block off the partially-assembled message so
+ *  the call object is exactly what the loop would have dispatched. */
+const resolveToolCall = (rawEvents: StreamEvent[], id: string): StreamingCall | undefined => {
+  const partial = assembleFromEvents(rawEvents).message
+  const block = partial.content.find((b) => b.type === "tool_use" && b.id === id)
+  if (!block || block.type !== "tool_use") return undefined
+  return { id: block.id, name: block.name, input: block.input }
+}
 
-  /** Abandon every in-flight dispatch + reset accumulation (stream_reset). The
-   *  promises are intentionally left unawaited (fire-and-forget tombstone):
-   *  their results are discarded because their slots are dropped. */
-  const resetForTombstone = (): void => {
-    rawEvents = []
-    slots.length = 0
-    barrierEngaged = false
+/** Append a freshly-resolved call as the next model-order slot and, when it is
+ *  concurrency-safe and no head-of-line barrier is engaged, start its dispatch
+ *  in flight (NOT awaited) so it overlaps the remaining stream. The first
+ *  unsafe call engages the barrier; thereafter every call (safe or not) is
+ *  deferred to the post-stream serial phase. */
+const scheduleResolvedCall = (
+  state: TurnState,
+  call: StreamingCall,
+  isConcurrencySafe: StreamingTurnArgs["isConcurrencySafe"],
+  dispatch: StreamingDispatch,
+  onToolStart: StreamingTurnArgs["onToolStart"],
+): void => {
+  const slot: Slot = { order: state.slots.length, call }
+  state.slots.push(slot)
+
+  const safe = isConcurrencySafe(call.name, call.input)
+  if (!safe) {
+    // First unsafe call ⇒ engage the head-of-line barrier. It (and every
+    // later call) is deferred to the post-stream serial phase.
+    state.barrierEngaged = true
+    return
+  }
+  if (state.barrierEngaged) {
+    // Safe, but it sits behind an already-engaged barrier: must NOT start
+    // (would overlap the pending side-effecting call). Defer it.
+    return
   }
 
-  for await (const ev of events) {
-    if (isAborted(signal)) return { kind: "aborted" }
+  // Concurrency-safe AND no barrier yet ⇒ start it now, in flight, so it
+  // overlaps the remaining stream. NOT awaited here.
+  onToolStart?.(call)
+  slot.promise = dispatch(call)
+}
 
-    if (ev.type === "stream_reset") {
-      // Tombstone: discard the dead partial AND any speculative work it
-      // started, then re-accumulate from the replacement stream only.
-      resetForTombstone()
-      rawEvents.push(ev)
-      continue
-    }
-
-    rawEvents.push(ev)
-
-    if (ev.type === "text_delta") {
-      onTextDelta?.(ev.delta)
-      continue
-    }
-
-    if (ev.type === "tool_use_end") {
-      // Resolve {id,name,input} off the partially-assembled message so the
-      // call object is exactly what the loop would have dispatched.
-      const partial = assembleFromEvents(rawEvents).message
-      const block = partial.content.find((b) => b.type === "tool_use" && b.id === ev.id)
-      if (!block || block.type !== "tool_use") continue
-
-      const call: StreamingCall = { id: block.id, name: block.name, input: block.input }
-      const order = slots.length
-      const slot: Slot = { order, call }
-      slots.push(slot)
-
-      const safe = isConcurrencySafe(call.name, call.input)
-      if (!safe) {
-        // First unsafe call ⇒ engage the head-of-line barrier. It (and every
-        // later call) is deferred to the post-stream serial phase.
-        barrierEngaged = true
-        continue
-      }
-      if (barrierEngaged) {
-        // Safe, but it sits behind an already-engaged barrier: must NOT start
-        // (would overlap the pending side-effecting call). Defer it.
-        continue
-      }
-
-      // Concurrency-safe AND no barrier yet ⇒ start it now, in flight, so it
-      // overlaps the remaining stream. NOT awaited here.
-      onToolStart?.(call)
-      slot.promise = dispatch(call)
-    }
+/** Process one stream event, mutating `state` in place. A tombstone resets
+ *  accumulation; a text delta is mirrored out; a finished `tool_use` is
+ *  resolved and scheduled. Each branch is the exact body of the original
+ *  inline `continue`-guarded blocks, in the same order. */
+const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTurnArgs): void => {
+  if (ev.type === "stream_reset") {
+    // Tombstone: discard the dead partial AND any speculative work it
+    // started, then re-accumulate from the replacement stream only.
+    resetForTombstone(state)
+    state.rawEvents.push(ev)
+    return
   }
 
-  if (isAborted(signal)) return { kind: "aborted" }
+  state.rawEvents.push(ev)
 
-  const { message, stopReason } = assembleFromEvents(rawEvents)
+  if (ev.type === "text_delta") {
+    args.onTextDelta?.(ev.delta)
+    return
+  }
 
-  // Phase 2: settle every early-started (in-flight) dispatch. These were the
-  // concurrency-safe overlap calls; awaiting them now is the join point.
-  await Promise.all(slots.filter((s) => s.promise).map((s) => s.promise as Promise<unknown>))
+  if (ev.type === "tool_use_end") {
+    const call = resolveToolCall(state.rawEvents, ev.id)
+    if (call === undefined) return
+    scheduleResolvedCall(state, call, args.isConcurrencySafe, args.dispatch, args.onToolStart)
+  }
+}
 
-  if (isAborted(signal)) return { kind: "aborted" }
-
-  // Phase 3: run the deferred slots (the barrier call + everything after it,
-  // plus any safe calls that were stuck behind the barrier) STRICTLY SERIALLY
-  // in model-call order — never overlapping side-effecting work.
+/** Phase 3: run the deferred slots (the barrier call + everything after it,
+ *  plus any safe calls stuck behind the barrier) STRICTLY SERIALLY in
+ *  model-call order — never overlapping side-effecting work. Returns false iff
+ *  cancelled mid-drain. */
+const drainDeferredSlots = async (
+  slots: Slot[],
+  dispatch: StreamingDispatch,
+  onToolStart: StreamingTurnArgs["onToolStart"],
+  signal: AbortSignal | undefined,
+): Promise<boolean> => {
   for (const slot of slots) {
     if (slot.promise) continue
-    if (isAborted(signal)) return { kind: "aborted" }
+    if (isAborted(signal)) return false
     onToolStart?.(slot.call)
     slot.promise = dispatch(slot.call)
     await slot.promise
   }
+  return true
+}
 
-  if (isAborted(signal)) return { kind: "aborted" }
-
-  // Phase 4: collect results STRICTLY in original model call order. `slots` is
-  // already model-call ordered; awaiting settled promises is just unwrapping.
+/** Phase 4: collect results STRICTLY in original model call order. `slots` is
+ *  already model-call ordered; awaiting settled promises is just unwrapping. */
+const collectResultBlocks = async (slots: Slot[]): Promise<ResultBlocks> => {
   const resultBlocks: ResultBlocks = []
   for (const slot of slots) {
     const outcome = await (slot.promise as Promise<DispatchOutcome>)
     resultBlocks.push(outcome.block)
   }
+  return resultBlocks
+}
+
+/**
+ * Drive one logical model turn with interleaved tool execution. See the file
+ * header for the full ordering/barrier contract.
+ */
+export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingTurnResult> => {
+  const { events, dispatch, onToolStart, signal } = args
+
+  const state: TurnState = { rawEvents: [], slots: [], barrierEngaged: false }
+
+  for await (const ev of events) {
+    if (isAborted(signal)) return { kind: "aborted" }
+    handleStreamEvent(state, ev, args)
+  }
+
+  if (isAborted(signal)) return { kind: "aborted" }
+
+  const { message, stopReason } = assembleFromEvents(state.rawEvents)
+
+  // Phase 2: settle every early-started (in-flight) dispatch. These were the
+  // concurrency-safe overlap calls; awaiting them now is the join point.
+  await Promise.all(state.slots.filter((s) => s.promise).map((s) => s.promise as Promise<unknown>))
+
+  if (isAborted(signal)) return { kind: "aborted" }
+
+  if (!(await drainDeferredSlots(state.slots, dispatch, onToolStart, signal))) {
+    return { kind: "aborted" }
+  }
+
+  if (isAborted(signal)) return { kind: "aborted" }
+
+  const resultBlocks = await collectResultBlocks(state.slots)
 
   return { kind: "assembled", message: message as Message, stopReason, resultBlocks }
 }

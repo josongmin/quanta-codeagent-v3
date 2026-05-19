@@ -8,9 +8,21 @@ import type { PermissionContext, PermissionDecision, ToolAction } from "./types"
  *  Each pattern is tuned to avoid false-positives on legitimate dev commands
  *  (e.g. `rm -rf ./build`, `find . -name x`, `chmod -R 755 ./dist`). */
 const HARD_DENY = [
-  // rm -rf targeting a root-ish path: `/`, `~`, `$HOME`, or `/*`-style globs
-  // (the trailing-glob case covers the `rm -rf /*` path trick).
-  /\brm\s+-[a-zA-Z]*[rfRF][a-zA-Z]*\s+(-[a-zA-Z]+\s+)*(\/|~|\$HOME|\/\*)(\s|$)/,
+  // Recursive+force `rm` aimed at a root-ish target. The prior pattern only
+  // fired when the root token was the WHOLE final arg, so `rm -rf ~/.ssh`,
+  // `rm -rf /etc`, `rm -rf $HOME/.ssh`, `rm --recursive --force /` all slipped
+  // through. We now require BOTH a recursive flag (`-r`/`-R`/`--recursive`, or
+  // a combined short cluster containing r/R) AND a force flag (`-f`/`-F`/
+  // `--force`, or a combined cluster containing f/F), in ANY order, possibly
+  // split across separate args — then a dangerous target with an optional
+  // path SUFFIX: `/`, `~`, `~/…`, `$HOME`, `$HOME/…`, `${HOME}`, `${HOME}/…`,
+  // a bare `/*` glob, OR an absolute system root (`/etc`,`/usr`,`/var`,`/bin`,
+  // `/sbin`,`/lib`,`/lib64`,`/opt`,`/root`,`/boot`,`/dev`,`/sys`,`/proc`,
+  // `/home`,`/srv`,`/run`,`/mnt`,`/media`). Still a best-effort denylist
+  // (RFC §1.2): project-relative / `/tmp` targets stay ALLOWED — `rm -rf
+  // ./build`, `rm -rf node_modules`, `rm -rf dist/`, `rm -rf /tmp/x` do NOT
+  // match (no system-root prefix; `/tmp` is deliberately excluded).
+  /\brm\b(?=(?:\s+-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive\b))(?:\s|$)|[\s\S]*?\s-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\b)(?=(?:\s|[\s\S])*?\s-(?:[a-zA-Z]*[fF][a-zA-Z]*|-force)\b)[\s\S]*?\s(?:\$\{?HOME\}?|~|\/(?:\*|etc|usr|var|bin|sbin|lib64|lib|opt|root|boot|dev|sys|proc|home|srv|run|mnt|media)?)(?:\/\S*)?(?=\s|$|;|&|\|)/,
   // `find <root> ... -delete` / `-exec rm` sweeping an absolute/home root.
   /\bfind\s+(\/|~|\$HOME)\S*.*-(delete|exec\s+rm)\b/,
   // PATH-INDEPENDENT: dangerous `find` action-flags fire regardless of where
@@ -120,7 +132,6 @@ export const evaluateAuto = async (
 
   if (decision.fallback) return { kind: "ask", reason: decision.reason }
   if (decision.verdict === "allow") return { kind: "allow" }
-  if (decision.verdict === "deny")
-    return { kind: "deny", reason: decision.reason }
+  if (decision.verdict === "deny") return { kind: "deny", reason: decision.reason }
   return { kind: "ask", reason: decision.reason }
 }

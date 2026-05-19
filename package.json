@@ -18,7 +18,8 @@
     "lint:fix": "biome check --write src tests",
     "format": "biome format --write src tests",
     "build": "bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent",
-    "bench": "bun run src/apps/bench/index.ts"
+    "bench": "bun run src/apps/bench/index.ts",
+    "probe": "bun run src/apps/probe/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",

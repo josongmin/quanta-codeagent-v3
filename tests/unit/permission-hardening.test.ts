@@ -40,6 +40,39 @@ describe("T0.2 path-independent HARD_DENY — find action-flag set", () => {
   })
 })
 
+describe("S3 HARD_DENY — recursive+force rm root/system/home bypasses", () => {
+  test.each([
+    ["rm -rf ~/.ssh", "home-relative ~ suffix"],
+    ["rm -rf /etc", "absolute system root /etc"],
+    ["rm -rf $HOME/.ssh", "$HOME suffix"],
+    ["rm -rf /var/www", "absolute system path /var/www"],
+    ["rm --recursive --force /", "long options, root /"],
+    ["rm -rf /", "short combined, bare root"],
+    ["rm -rf ~", "bare home ~"],
+    ["rm -rf $HOME", "bare $HOME"],
+    ["rm -rf /*", "root glob /*"],
+    ["rm -r -f /usr/local", "split short flags, /usr"],
+    [`rm -fr $\{HOME}/data`, "brace HOME form"],
+    ["rm --force --recursive /bin", "long options reversed, /bin"],
+    ["rm -f -r ~/Documents", "force-then-recursive split, ~ suffix"],
+  ])("denies %s (%s)", (command) => {
+    expect(decide(command)).toBe("deny")
+  })
+})
+
+describe("S3 conservative discipline — project/tmp rm still allowed", () => {
+  test.each([
+    ["rm -rf ./build", "project-relative ./build"],
+    ["rm -rf node_modules", "bare node_modules"],
+    ["rm -rf /tmp/x", "/tmp path"],
+    ["rm -rf dist/", "relative dist/"],
+    ["rm -r ./src", "recursive-only (no force) relative"],
+    ["rm -f config.json", "force-only single file"],
+  ])("allows %s (%s)", (command) => {
+    expect(decide(command)).not.toBe("deny")
+  })
+})
+
 describe("T0.2 false-positive discipline — legit commands still pass", () => {
   test.each([
     // capital -C is `git -C <dir>` (change dir), NOT config injection.

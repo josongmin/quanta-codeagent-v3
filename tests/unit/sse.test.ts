@@ -121,4 +121,60 @@ describe("SseStream", () => {
     const stream = new SseStream(sink, { now: () => 42 })
     expect(stream.timestamp()).toBe(42)
   })
+
+  test("S4: secret values are redacted before serialization, benign untouched", () => {
+    const secret = "sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"
+    const bearer = "Bearer abcdef0123456789ghijklmnop"
+    const sink = makeSink()
+    const stream = new SseStream(sink)
+    stream.emit({
+      type: "tool_call",
+      id: "t1",
+      name: "bash",
+      input: { cmd: `curl -H 'Authorization: ${bearer}'`, apiKey: secret },
+    })
+    stream.emit({ type: "tool_result", id: "t1", name: "bash", ok: true, preview: secret })
+    stream.emit({ type: "assistant_text", delta: `here is the key ${secret} ok` })
+    stream.emit({ type: "error", message: `failed with ${bearer}` })
+
+    const all = sink.frames.join("")
+    expect(all).not.toContain(secret)
+    expect(all).not.toContain(bearer)
+    expect(all).toContain("***REDACTED***")
+
+    // Benign event round-trips unchanged.
+    const benign = makeSink()
+    const s2 = new SseStream(benign)
+    const ev: AgentEvent = { type: "tool_call", id: "t9", name: "read", input: { path: "/x" } }
+    s2.emit(ev)
+    expect(JSON.parse(parseFrame(benign.frames[0] ?? "").data)).toEqual(ev)
+  })
+
+  test("new session_start / recovery variants serialize without throwing", () => {
+    const sink = makeSink()
+    const stream = new SseStream(sink)
+    expect(() => {
+      stream.emit({ type: "session_start" })
+      stream.emit({ type: "recovery", reason: "backoff", detail: "rate limited" })
+    }).not.toThrow()
+    expect(parseFrame(sink.frames[0] ?? "").event).toBe("session_start")
+    expect(parseFrame(sink.frames[1] ?? "").event).toBe("recovery")
+  })
+
+  test("S4: secret in tool_result.stderrTail is redacted", () => {
+    const secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    const sink = makeSink()
+    const stream = new SseStream(sink)
+    stream.emit({
+      type: "tool_result",
+      id: "t1",
+      name: "bash",
+      ok: false,
+      preview: "boom",
+      stderrTail: `auth: ${secret}`,
+    })
+    const all = sink.frames.join("")
+    expect(all).not.toContain(secret)
+    expect(all).toContain("***REDACTED***")
+  })
 })

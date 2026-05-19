@@ -32,9 +32,7 @@ describe("CLASSIFIER_SYSTEM_PROMPT fidelity", () => {
       "You are a security monitor for autonomous AI coding agents.",
     )
     expect(CLASSIFIER_SYSTEM_PROMPT).toContain("**Questions are not consent**")
-    expect(CLASSIFIER_SYSTEM_PROMPT).toContain(
-      "**Scope escalation = autonomous behavior**",
-    )
+    expect(CLASSIFIER_SYSTEM_PROMPT).toContain("**Scope escalation = autonomous behavior**")
     expect(CLASSIFIER_SYSTEM_PROMPT).toContain("HARD BLOCK")
     expect(CLASSIFIER_SYSTEM_PROMPT).toContain("SOFT BLOCK")
     expect(CLASSIFIER_SYSTEM_PROMPT).toContain("ENCODED COMMANDS")
@@ -135,11 +133,7 @@ describe("evaluateAuto wiring", () => {
 
   test("HARD_DENY beats the classifier in auto mode", async () => {
     const c = new AutoModeClassifier(constPort({ verdict: "allow", reason: "trust me" }))
-    const d = await evaluateAuto(
-      action({ input: { command: "rm -rf /" } }),
-      ctx(),
-      c,
-    )
+    const d = await evaluateAuto(action({ input: { command: "rm -rf /" } }), ctx(), c)
     expect(d.kind).toBe("deny")
   })
 
@@ -175,9 +169,7 @@ describe("evaluateAuto wiring", () => {
 describe("sync evaluate degrades auto safely", () => {
   test("auto mode without async path -> ask, HARD_DENY still wins", () => {
     expect(evaluate(action(), { mode: "auto" }).kind).toBe("ask")
-    expect(
-      evaluate(action({ input: { command: "rm -rf /" } }), { mode: "auto" }).kind,
-    ).toBe("deny")
+    expect(evaluate(action({ input: { command: "rm -rf /" } }), { mode: "auto" }).kind).toBe("deny")
     expect(evaluate(action({ isReadOnly: true }), { mode: "auto" }).kind).toBe("allow")
   })
 })

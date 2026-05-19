@@ -1,5 +1,10 @@
 import type { ToolResultBlock, ToolUseBlock } from "@/llm"
-import { evaluate, type PermissionContext } from "@/permission"
+import {
+  type AutoModeClassifier,
+  evaluate,
+  evaluateAuto,
+  type PermissionContext,
+} from "@/permission"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext } from "@/tool"
 import { isMutatingToolBlockedInPlan } from "./plan"
@@ -9,6 +14,38 @@ export interface DispatchResult {
   block: ToolResultBlock
   ok: boolean
   preview: string
+  /** Wall time of the tool execution in ms (RFC-0002 §5.2 evidence). Set for
+   *  every executed tool; absent only on pre-execute deny short-circuits. */
+  durationMs?: number
+  /** Bounded tail of the tool's stderr, when the ToolResult exposes one
+   *  (shell-class tools). Omitted — never null — for tools without stderr. */
+  stderrTail?: string
+  /** Process exit code for shell-class tools, when the ToolResult exposes it. */
+  exitCode?: number
+  /** Path to a persisted full log, only when the tool actually wrote one. */
+  fullLogPath?: string
+}
+
+/** Max chars of stderr retained on the dispatch result (RFC-0002 §5.2). */
+const STDERR_TAIL_CAP = 2000
+
+/** Duck-read RFC-0002 §5.2 tool evidence a tool may attach to its ToolResult.
+ *  `ToolResult` only declares `ok`/`output`; shell-class tools may carry
+ *  `stderr`/`exitCode`/`fullLogPath` as extra props. Read defensively and
+ *  conditional-set so `exactOptionalPropertyTypes` never sees `undefined`. */
+const evidenceOf = (
+  result: unknown,
+): Pick<DispatchResult, "stderrTail" | "exitCode" | "fullLogPath"> => {
+  const r = result as Record<string, unknown>
+  const out: Pick<DispatchResult, "stderrTail" | "exitCode" | "fullLogPath"> = {}
+  if (typeof r.stderr === "string" && r.stderr.length > 0) {
+    out.stderrTail = r.stderr.slice(-STDERR_TAIL_CAP)
+  }
+  if (typeof r.exitCode === "number") out.exitCode = r.exitCode
+  if (typeof r.fullLogPath === "string" && r.fullLogPath.length > 0) {
+    out.fullLogPath = r.fullLogPath
+  }
+  return out
 }
 
 const resultBlock = (id: string, content: string, isError: boolean): ToolResultBlock => ({
@@ -39,12 +76,19 @@ const runGates = async (
   config: AgentConfig,
   permission: PermissionContext,
   action: { tool: string; input: unknown; isReadOnly: boolean },
+  autoClassifier?: AutoModeClassifier,
 ): Promise<DispatchResult | null> => {
   if (config.planMode && isMutatingToolBlockedInPlan(action)) {
     return deny(call.id, `blocked in plan mode: ${call.name}`, "plan-blocked")
   }
 
-  const decision = evaluate(action, permission)
+  // SOTA++ Tier 1 (ADR-0011): "auto" mode routes to the session-scoped
+  // LLM classifier (denial-limit + AFK circuit-break state accumulates in
+  // `autoClassifier`). All other modes use the synchronous policy verbatim.
+  const decision =
+    permission.mode === "auto" && autoClassifier
+      ? await evaluateAuto(action, permission, autoClassifier)
+      : evaluate(action, permission)
   if (decision.kind === "deny") {
     return deny(call.id, `Permission denied: ${decision.reason}`, "denied")
   }
@@ -72,6 +116,7 @@ export const dispatchTool = async (
   config: AgentConfig,
   permission: PermissionContext,
   onProgress?: (message: string) => void,
+  autoClassifier?: AutoModeClassifier,
 ): Promise<DispatchResult> => {
   const { registry } = config
 
@@ -85,10 +130,17 @@ export const dispatchTool = async (
     isReadOnly: registry.isReadOnly(call.name),
   }
 
-  const gated = await runGates(call, config, permission, action)
+  const gated = await runGates(call, config, permission, action, autoClassifier)
   if (gated) return gated
 
-  const ctx: ToolContext = { cwd: config.cwd, signal: config.signal }
+  // SOTA++ subagent absorption (ADR-0011): propagate this agent's recursion
+  // depth so the `Agent` tool can enforce `maxDepth`. Absent ⇒ omitted (the
+  // tool duck-reads it as 0), so the default path is byte-identical.
+  const ctx: ToolContext = {
+    cwd: config.cwd,
+    signal: config.signal,
+    ...(config.depth !== undefined ? { depth: config.depth } : {}),
+  }
   const out = await execute(call, config, ctx, onProgress)
   if (config.hooks) {
     await config.hooks.emit({
@@ -108,15 +160,20 @@ const execute = async (
   ctx: ToolContext,
   onProgress?: (message: string) => void,
 ): Promise<DispatchResult> => {
+  const startedAt = performance.now()
   try {
     const result = await config.registry.run(call.name, call.input, ctx, onProgress)
+    const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
     return {
       block: resultBlock(call.id, result.output, !result.ok),
       ok: result.ok,
       preview: result.output,
+      durationMs,
+      ...evidenceOf(result),
     }
   } catch (e) {
+    const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
     const message = e instanceof QuantaError ? e.message : toError(e).message
-    return { block: resultBlock(call.id, message, true), ok: false, preview: message }
+    return { block: resultBlock(call.id, message, true), ok: false, preview: message, durationMs }
   }
 }

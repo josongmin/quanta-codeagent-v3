@@ -126,6 +126,57 @@ describe("isTrajectoryEvent", () => {
   })
 })
 
+describe("RFC-0002 §5.2 new kinds — isTrajectoryEvent + data contract", () => {
+  test("session_start, recovery, enriched tool_result pass isTrajectoryEvent", () => {
+    const sessionStart = makeEvent(0, "session_start", CTX, {})
+    const recovery = makeEvent(1, "recovery", CTX, { reason: "backoff", detail: "429" })
+    const toolResult = makeEvent(2, "tool_result", CTX, {
+      name: "bash",
+      ok: false,
+      exitCode: 1,
+      durationMs: 12,
+      stdoutTail: "out",
+      stderrTail: "err",
+      fullLogPath: "/tmp/x.log",
+    } satisfies ToolResultData)
+    expect(isTrajectoryEvent(sessionStart)).toBe(true)
+    expect(isTrajectoryEvent(recovery)).toBe(true)
+    expect(isTrajectoryEvent(toolResult)).toBe(true)
+    expect(sessionStart.kind).toBe("session_start")
+    expect(recovery.kind).toBe("recovery")
+    expect(toolResult.kind).toBe("tool_result")
+  })
+
+  test("ToolResultData: durationMs required; exitCode/fullLogPath optional-but-typed", () => {
+    // Minimal: only the always-present fields (no exitCode/fullLogPath).
+    const minimal = {
+      name: "read",
+      ok: true,
+      durationMs: 0,
+      stdoutTail: "body",
+      stderrTail: "",
+    } satisfies ToolResultData
+    expect(minimal.durationMs).toBe(0)
+    expect("exitCode" in minimal).toBe(false)
+    expect("fullLogPath" in minimal).toBe(false)
+
+    const full = {
+      name: "bash",
+      ok: false,
+      exitCode: 2,
+      durationMs: 99,
+      stdoutTail: "o",
+      stderrTail: "e",
+      fullLogPath: "/tmp/r.log",
+    } satisfies ToolResultData
+    expect(full.exitCode).toBe(2)
+    expect(full.fullLogPath).toBe("/tmp/r.log")
+
+    const ev: TrajectoryEvent = makeEvent(0, "tool_result", CTX, full)
+    expect(ev.kind).toBe("tool_result")
+  })
+})
+
 describe("redactValue", () => {
   test("masks a raw API key string", () => {
     expect(redactValue("sk-abcdefgh12345678")).toBe("***REDACTED***")

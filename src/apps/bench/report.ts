@@ -8,6 +8,7 @@
  * report exists to track baseline runs over time alongside the official
  * `predictions.jsonl`.
  */
+import { resolvedTotals } from "./observe"
 import type { InstanceResult } from "./types"
 
 export interface BenchReportMeta {
@@ -42,8 +43,9 @@ export const buildReport = (
   meta: BenchReportMeta & { n: number; timestamp?: string },
   results: InstanceResult[],
 ): BenchReport => {
-  const total = results.length
-  const resolved = results.filter((r) => r.passed).length
+  // C8: degraded-excluding denominator — the SAME source as observe.summarize
+  // / summary.json. Never count a strict-degraded instance here.
+  const { resolved, total } = resolvedTotals(results)
   return {
     timestamp: meta.timestamp ?? new Date().toISOString(),
     model: meta.model,

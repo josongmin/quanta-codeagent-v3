@@ -10,10 +10,7 @@ const outputSchema = z.object({
     .boolean()
     .optional()
     .describe("Wait until the task settles (or timeout) instead of a snapshot"),
-  timeout_ms: z
-    .number()
-    .optional()
-    .describe("Max ms to block when block:true (default 30000)"),
+  timeout_ms: z.number().optional().describe("Max ms to block when block:true (default 30000)"),
 })
 
 type OutputInput = z.infer<typeof outputSchema>
@@ -41,6 +38,32 @@ const render = (t: TaskRecord): string => {
   return lines.join("\n")
 }
 
+const settled = (t: TaskRecord) => t.status !== "running"
+
+const notFound = (taskId: string): ToolEvent => ({
+  type: "result",
+  result: { ok: false, output: `No task found with id: ${taskId}` },
+})
+
+/** Poll the registry until the task settles, the deadline passes, or the
+ *  context is aborted. Returns the latest record (or undefined if removed). */
+const waitForSettle = async (
+  registry: TaskRegistry,
+  taskId: string,
+  ctx: ToolContext,
+  timeoutMs: number,
+): Promise<TaskRecord | undefined> => {
+  const deadline = Date.now() + timeoutMs
+  let rec = registry.get(taskId)
+  while (Date.now() < deadline) {
+    if (ctx.signal.aborted) break
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+    rec = registry.get(taskId)
+    if (!rec || settled(rec)) break
+  }
+  return rec
+}
+
 /** `task_output` — poll (or block on) a background subagent task by id. */
 export const createTaskOutputTool = (registry: TaskRegistry): Tool<OutputInput> => ({
   name: "task_output",
@@ -52,26 +75,15 @@ export const createTaskOutputTool = (registry: TaskRegistry): Tool<OutputInput> 
   isConcurrencySafe: () => true,
 
   async *execute(input: OutputInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const settled = (t: TaskRecord) => t.status !== "running"
-
     let rec = registry.get(input.task_id)
     if (!rec) {
-      yield {
-        type: "result",
-        result: { ok: false, output: `No task found with id: ${input.task_id}` },
-      }
+      yield notFound(input.task_id)
       return
     }
 
     if (input.block === true && !settled(rec)) {
-      const deadline = Date.now() + (input.timeout_ms ?? 30_000)
       yield { type: "progress", message: `Waiting for ${input.task_id}…` }
-      while (Date.now() < deadline) {
-        if (ctx.signal.aborted) break
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
-        rec = registry.get(input.task_id)
-        if (!rec || settled(rec)) break
-      }
+      rec = await waitForSettle(registry, input.task_id, ctx, input.timeout_ms ?? 30_000)
       if (rec && !settled(rec)) {
         yield {
           type: "result",
@@ -83,10 +95,7 @@ export const createTaskOutputTool = (registry: TaskRegistry): Tool<OutputInput> 
 
     rec = registry.get(input.task_id)
     if (!rec) {
-      yield {
-        type: "result",
-        result: { ok: false, output: `No task found with id: ${input.task_id}` },
-      }
+      yield notFound(input.task_id)
       return
     }
     yield {

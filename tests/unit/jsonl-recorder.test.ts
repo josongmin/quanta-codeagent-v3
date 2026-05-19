@@ -108,6 +108,95 @@ describe("JsonlRecorder — normalization", () => {
   })
 })
 
+describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
+  test("session_start maps to kind:session_start with minimal data", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "session_start" })
+    rec.close()
+
+    const [line] = readLines(path)
+    expect(line?.kind).toBe("session_start")
+    expect(line?.data).toEqual({})
+  })
+
+  test("recovery maps to kind:recovery with reason and optional detail", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "recovery", reason: "backoff" })
+    rec.emit({ type: "recovery", reason: "compact", detail: "ctx 92% full" })
+    rec.close()
+
+    const [bare, withDetail] = readLines(path)
+    expect(bare?.kind).toBe("recovery")
+    expect(bare?.data.reason).toBe("backoff")
+    expect(bare?.data.detail).toBeUndefined()
+    expect(withDetail?.data.reason).toBe("compact")
+    expect(withDetail?.data.detail).toBe("ctx 92% full")
+  })
+
+  test("enriched tool_result carries §5.2 ToolResultData evidence", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({
+      type: "tool_result",
+      id: "tu1",
+      name: "bash",
+      ok: false,
+      preview: "stdout tail",
+      durationMs: 37,
+      stderrTail: "boom on line 3",
+      exitCode: 1,
+      fullLogPath: "/tmp/run/tu1.log",
+    })
+    rec.close()
+
+    const [line] = readLines(path)
+    expect(line?.kind).toBe("tool_result")
+    expect(line?.data.name).toBe("bash")
+    expect(line?.data.ok).toBe(false)
+    expect(line?.data.stdoutTail).toBe("stdout tail")
+    expect(line?.data.durationMs).toBe(37)
+    expect(line?.data.stderrTail).toBe("boom on line 3")
+    expect(line?.data.exitCode).toBe(1)
+    expect(line?.data.fullLogPath).toBe("/tmp/run/tu1.log")
+  })
+
+  test("tool_result without evidence omits optional fields (no nulls)", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "tool_result", id: "t", name: "read", ok: true, preview: "file body" })
+    rec.close()
+
+    const [line] = readLines(path)
+    expect(line?.data).toEqual({ name: "read", ok: true, stdoutTail: "file body" })
+    expect("durationMs" in (line?.data ?? {})).toBe(false)
+    expect("stderrTail" in (line?.data ?? {})).toBe(false)
+  })
+
+  test("a secret in stderrTail/preview is still ***REDACTED*** on disk", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({
+      type: "tool_result",
+      id: "t",
+      name: "bash",
+      ok: false,
+      preview: "leaked OPENAI key sk-abcdef1234567890 here",
+      stderrTail: "auth failed: Bearer abc.def.ghi",
+      durationMs: 5,
+    })
+    rec.close()
+
+    const raw = readFileSync(path, "utf8")
+    expect(raw).not.toContain("sk-abcdef1234567890")
+    expect(raw).not.toContain("Bearer abc.def.ghi")
+    expect(raw).toContain("REDACTED")
+    const [line] = readLines(path)
+    expect(line?.redaction.applied).toBe(true)
+  })
+})
+
 describe("JsonlRecorder — seq & span", () => {
   test("seq is strictly increasing from 0", () => {
     const path = join(dir, "i1.0.jsonl")

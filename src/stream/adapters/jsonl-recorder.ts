@@ -183,11 +183,13 @@ export class JsonlRecorder implements StreamPort {
 }
 
 const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
+  session_start: "session_start",
   turn_start: "turn_start",
   assistant_text: "assistant_text",
   tool_call: "tool_call",
   tool_progress: "tool_progress",
   tool_result: "tool_result",
+  recovery: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -199,6 +201,9 @@ const kindOf = (e: AgentEvent): TrajectoryKind => KIND_MAP[e.type]
 /** Project an AgentEvent onto its kind-specific `data` payload. */
 const dataOf = (e: AgentEvent): Record<string, unknown> => {
   switch (e.type) {
+    case "session_start":
+      // RFC-0002 §5.2 head marker — minimal payload (no fields mandated).
+      return {}
     case "turn_start":
       return { turn: e.turn }
     case "assistant_text":
@@ -208,7 +213,21 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
     case "tool_progress":
       return { id: e.id, name: e.name, message: e.message }
     case "tool_result":
-      return { name: e.name, ok: e.ok, stdoutTail: e.preview }
+      // RFC-0002 §5.2 ToolResultData: keep name/ok/stdoutTail, add the
+      // optional evidence only when the AgentEvent carried it (conditional-set
+      // so redaction still flows through the single makeEvent source).
+      return {
+        name: e.name,
+        ok: e.ok,
+        stdoutTail: e.preview,
+        ...(e.durationMs !== undefined ? { durationMs: e.durationMs } : {}),
+        ...(e.stderrTail !== undefined ? { stderrTail: e.stderrTail } : {}),
+        ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}),
+        ...(e.fullLogPath !== undefined ? { fullLogPath: e.fullLogPath } : {}),
+      }
+    case "recovery":
+      // RFC-0002 §5.2 recovery contract: reason required, detail optional.
+      return { reason: e.reason, ...(e.detail !== undefined ? { detail: e.detail } : {}) }
     case "error":
       return { message: e.message }
     case "usage":

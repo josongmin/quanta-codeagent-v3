@@ -45,6 +45,10 @@
       "@/mcp/*": ["./src/mcp/*"],
       "@/observability": ["./src/observability/index.ts"],
       "@/observability/*": ["./src/observability/*"],
+      "@/subagent": ["./src/subagent/index.ts"],
+      "@/subagent/*": ["./src/subagent/*"],
+      "@/skill": ["./src/skill/index.ts"],
+      "@/skill/*": ["./src/skill/*"],
       "@/agent": ["./src/agent/index.ts"],
       "@/agent/*": ["./src/agent/*"]
     }

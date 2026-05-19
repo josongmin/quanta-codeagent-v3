@@ -5,6 +5,7 @@ import type { PermissionContext, ToolAction } from "@/permission"
 import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
+import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { HookBus } from "./hooks"
 
 export interface AgentConfig {
@@ -86,6 +87,35 @@ export interface AgentConfig {
    * behavior identical.
    */
   metrics?: Metrics
+  /**
+   * Subagent recursion depth of THIS agent (0 = root user session). Set by
+   * the subagent runner for forked children; propagated onto `ToolContext`
+   * by the dispatch seam so the `Agent` tool can enforce `maxDepth`. Absent ⇒
+   * 0 (root). SOTA++ subagent absorption (ADR-0011).
+   */
+  depth?: number
+  /**
+   * Enable the subagent system (SOTA++ Tier 1, ADR-0011). Absent ⇒ the
+   * `Agent`/`Task`/`TaskOutput`/`TaskStop` tools are NOT registered and the
+   * loop is byte-identical. When present the loop builds a `SubagentRunner`
+   * (forked `runAgent`, depth+1, filtered registry) and registers the tools.
+   */
+  subagent?: { maxDepth?: number }
+  /**
+   * Enable the skill system (SOTA++ Tier 1, ADR-0011). Absent ⇒ no skill
+   * discovery and the `Skill`/`ToolSearch` tools are NOT registered (loop
+   * byte-identical). When present, skills are discovered from `dir` at
+   * session start and the tools are registered.
+   */
+  skills?: { dir: string }
+  /**
+   * Compaction circuit-breaker control (SOTA++ Tier 0 safety, ADR-0011). The
+   * breaker is ON by default with `DEFAULT_COMPACTION_BREAKER_CAPS` — it only
+   * trips on pathological compaction thrash (≥N consecutive no-progress
+   * compactions), so normal flows are unaffected. `disabled:true` opts out;
+   * `caps` overrides individual thresholds.
+   */
+  compactionBreaker?: { disabled?: boolean; caps?: Partial<CompactionBreakerCaps> }
   /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like

@@ -105,6 +105,30 @@ export class FallbackLLM implements LLMPort {
     this.isFallbackTrigger = opts.isFallbackTrigger ?? isFallbackTrigger
   }
 
+  /**
+   * Stream from one provider. If `priorPartial` is set, the first real event
+   * is preceded by a single `{ type: "stream_reset" }` tombstone (lazy: only
+   * when output actually follows, exactly once). `yielded.value` is set true
+   * once this provider has emitted ≥1 of its OWN events, so a caller can
+   * decide whether a subsequent failure must tombstone this partial.
+   */
+  private async *streamProvider(
+    provider: LLMPort,
+    input: StreamInput,
+    priorPartial: boolean,
+    yielded: { value: boolean },
+  ): AsyncIterable<StreamEvent> {
+    let resetEmitted = false
+    for await (const ev of provider.stream(input)) {
+      if (priorPartial && !resetEmitted) {
+        resetEmitted = true
+        yield { type: "stream_reset" }
+      }
+      yielded.value = true
+      yield ev
+    }
+  }
+
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     // True once a PRIOR provider yielded ≥1 event before failing this turn.
     // When true, the next provider's output is preceded by a `stream_reset`
@@ -117,29 +141,16 @@ export class FallbackLLM implements LLMPort {
       const provider = this.providers[i]
       if (!provider) continue
       const isLast = i === this.providers.length - 1
-      // Did THIS provider yield its leading tombstone yet? (at most once)
-      let resetEmitted = false
       // Did THIS provider yield ≥1 event?
-      let yieldedThisProvider = false
+      const yielded = { value: false }
       try {
-        for await (const ev of provider.stream(input)) {
-          if (priorPartial && !resetEmitted) {
-            // A prior provider already streamed a (now dead) partial. Lead
-            // this provider's output with the tombstone so the consumer
-            // discards it. Emitted lazily — only when real output follows,
-            // and exactly once regardless of how many providers were skipped.
-            resetEmitted = true
-            yield { type: "stream_reset" }
-          }
-          yieldedThisProvider = true
-          yield ev
-        }
+        yield* this.streamProvider(provider, input, priorPartial, yielded)
         return
       } catch (e) {
         if (isLast || !this.isFallbackTrigger(e)) throw e
         // If this provider streamed anything before failing, the next
         // provider must tombstone it. (Pre-yield failures stay transparent.)
-        if (yieldedThisProvider) priorPartial = true
+        if (yielded.value) priorPartial = true
         throwIfAborted(this.signal)
       }
     }

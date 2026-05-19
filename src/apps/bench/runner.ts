@@ -6,9 +6,11 @@
  * statement, then runs the instance's testCmd to decide pass/fail and captures
  * a unified diff of the sandbox as the produced patch.
  *
- * Bench stays self-contained: shell exec is a tiny local Bun.spawn helper, not
- * an import of @/runtime (apps may import slices, but keeping bench dependency-
- * light per the task brief and RFC §3.1 minimalism).
+ * Shell exec is a tiny local Bun.spawn helper, but it spawns children with the
+ * single-source `@/runtime` `scrubEnv()` allowlist (NOT raw `process.env`) so a
+ * bench child can never inherit `OPENAI_API_KEY`/tokens — that is what makes
+ * the trajectory's `envPolicyVersion` stamp truthful (C9). Apps may import
+ * slices (RFC §3.1); reusing scrubEnv keeps ONE env policy, not a fork.
  */
 import { writeFileSync } from "node:fs"
 import { cp, mkdtemp, rm } from "node:fs/promises"
@@ -17,7 +19,8 @@ import { join } from "node:path"
 import { buildSystemPrompt, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import type { SandboxData } from "@/shared"
+import { scrubEnv } from "@/runtime"
+import { redactValue, type SandboxData } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -77,14 +80,19 @@ interface ExecResult {
   stderr: string
 }
 
-/** Minimal `bash -c` exec via Bun.spawn with a hard timeout. Local to bench so
- *  the harness does not depend on @/runtime. */
+/**
+ * Minimal `bash -c` exec via Bun.spawn with a hard timeout. C9: children are
+ * spawned with the single-source `scrubEnv()` allowlist (PATH/HOME/proxy/
+ * locale/TMPDIR preserved so git/bun/node still work) — the parent's secrets
+ * (`OPENAI_API_KEY`/tokens) are NEVER inherited. This makes the `sandbox`
+ * trajectory event's `envPolicyVersion` claim true.
+ */
 const exec = async (cmd: string, cwd: string, timeoutMs: number): Promise<ExecResult> => {
   const proc = Bun.spawn(["bash", "-c", cmd], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: process.env,
+    env: scrubEnv(),
   })
   const timer = setTimeout(() => proc.kill(), timeoutMs)
   try {
@@ -130,11 +138,13 @@ const withGitSnapshot = async (
 }
 
 /**
- * Env-scrub policy version tied to ADR-0006's sandbox allowlist. Bumped only
- * when the scrub allowlist changes; stamped into every `sandbox` event so a
- * trajectory records which policy governed the run.
+ * Env-scrub policy version tied to the sandbox allowlist. Bumped only when the
+ * scrub allowlist changes; stamped into every `sandbox` event so a trajectory
+ * records which policy governed the run. `sandbox.v2` (Group A coordinated):
+ * the allowlist no longer carries NODE_OPTIONS/NODE_EXTRA_CA_CERTS, and bench
+ * `exec()` now spawns children with `scrubEnv()` — so the stamp is truthful.
  */
-const ENV_POLICY_VERSION = "sandbox.v1"
+const ENV_POLICY_VERSION = "sandbox.v2"
 
 const trimOut = (r: ExecResult): string => (r.code === 0 ? r.stdout.trim() : "")
 
@@ -327,9 +337,13 @@ const emitPatch = (
 ): string => {
   const attempt = observe.attempt ?? 0
   const diffPath = join(observe.dir, observe.runId, `${instance.id}.${attempt}.patch`)
-  const { filesChanged, hunks } = countDiff(patch)
+  // S2: a committed `.env`/fixture token captured in the diff must NOT land
+  // raw on disk. Scrub via the single-source @/shared redactor; countDiff runs
+  // on the scrubbed text so filesChanged/hunks still reflect what we wrote.
+  const safePatch = redactValue(patch) as string
+  const { filesChanged, hunks } = countDiff(safePatch)
   try {
-    writeFileSync(diffPath, patch)
+    writeFileSync(diffPath, safePatch)
     observer.patchGenerated({ diffPath, filesChanged, hunks, applyStatus: "generated" })
   } catch (e) {
     throw new ObservationError(e)

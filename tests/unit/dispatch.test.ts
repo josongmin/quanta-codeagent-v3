@@ -232,6 +232,56 @@ describe("dispatchTool gates", () => {
   })
 })
 
+describe("dispatchTool tool evidence (RFC-0002 §5.2 / C2)", () => {
+  test("bash-class tool: durationMs set; stderrTail/exitCode surfaced when present", async () => {
+    const bashish = makeTool("bash", {
+      readOnly: false,
+      schema: z.object({ command: z.string() }),
+      run: async function* () {
+        yield {
+          type: "result",
+          // Shell-class tools may duck-attach §5.2 evidence beyond {ok,output}.
+          result: {
+            ok: false,
+            output: "[exit 1]\nboom",
+            stderr: "boom on stderr",
+            exitCode: 1,
+          } as { ok: boolean; output: string },
+        }
+      },
+    })
+    const res = await dispatchTool(
+      call("bash", { command: "false" }),
+      config({ registry: new ToolRegistry([bashish]), permission: { mode: "bypass" } }),
+      { mode: "bypass" },
+    )
+    expect(res.ok).toBe(false)
+    expect(typeof res.durationMs).toBe("number")
+    expect(res.durationMs as number).toBeGreaterThanOrEqual(0)
+    expect(res.stderrTail).toBe("boom on stderr")
+    expect(res.exitCode).toBe(1)
+  })
+
+  test("read-only tool: durationMs set; stderr/exitCode absent (not null)", async () => {
+    const res = await dispatchTool(call("ok", { value: "hi" }), config(), perm)
+    expect(res.ok).toBe(true)
+    expect(typeof res.durationMs).toBe("number")
+    expect(res.durationMs as number).toBeGreaterThanOrEqual(0)
+    expect(res.stderrTail).toBeUndefined()
+    expect(res.exitCode).toBeUndefined()
+    expect(res.fullLogPath).toBeUndefined()
+    expect("stderrTail" in res).toBe(false)
+    expect("exitCode" in res).toBe(false)
+  })
+
+  test("tool throwing mid-execution still reports durationMs", async () => {
+    const res = await dispatchTool(call("boom", {}), config(), perm)
+    expect(res.ok).toBe(false)
+    expect(typeof res.durationMs).toBe("number")
+    expect(res.durationMs as number).toBeGreaterThanOrEqual(0)
+  })
+})
+
 describe("dispatchTool execution context", () => {
   test("passes cwd and signal through to the tool", async () => {
     let captured: ToolContext | undefined

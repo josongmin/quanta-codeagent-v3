@@ -77,10 +77,7 @@ export const withWorktree = async <T>(
   const branch = `worktree-${slug}`
   const worktreePath = `${repoRoot}/.claude/worktrees/${name}`
 
-  const add = await git(
-    repoRoot,
-    `worktree add --no-track -B ${branch} "${worktreePath}" HEAD`,
-  )
+  const add = await git(repoRoot, `worktree add --no-track -B ${branch} "${worktreePath}" HEAD`)
   if (add.exitCode !== 0) {
     throw new WorktreeError(
       `git worktree add failed for ${name}`,

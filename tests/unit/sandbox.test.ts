@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { LocalSandbox, SandboxPolicyError } from "@/runtime"
+import { DEFAULT_ENV_ALLOWLIST, LocalSandbox, SandboxPolicyError, scrubEnv } from "@/runtime"
 
 let jail: string
 
@@ -12,6 +12,46 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(jail, { recursive: true, force: true })
+})
+
+describe("S5 — code-exec env vars dropped from DEFAULT_ENV_ALLOWLIST", () => {
+  test("NODE_OPTIONS and NODE_EXTRA_CA_CERTS are NOT allowlisted", () => {
+    expect(DEFAULT_ENV_ALLOWLIST).not.toContain("NODE_OPTIONS")
+    expect(DEFAULT_ENV_ALLOWLIST).not.toContain("NODE_EXTRA_CA_CERTS")
+  })
+
+  test("SSL_CERT_FILE/DIR, proxy, locale, PATH/HOME are retained", () => {
+    for (const name of [
+      "SSL_CERT_FILE",
+      "SSL_CERT_DIR",
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "NO_PROXY",
+      "http_proxy",
+      "https_proxy",
+      "no_proxy",
+      "LANG",
+      "LC_ALL",
+      "TZ",
+      "PATH",
+      "HOME",
+    ]) {
+      expect(DEFAULT_ENV_ALLOWLIST).toContain(name)
+    }
+  })
+
+  test("scrubEnv() never forwards NODE_OPTIONS even when set in the parent", () => {
+    process.env.NODE_OPTIONS = "--require=/tmp/evil.js"
+    process.env.NODE_EXTRA_CA_CERTS = "/tmp/evil-ca.pem"
+    try {
+      const env = scrubEnv()
+      expect(env.NODE_OPTIONS).toBeUndefined()
+      expect(env.NODE_EXTRA_CA_CERTS).toBeUndefined()
+    } finally {
+      delete process.env.NODE_OPTIONS
+      delete process.env.NODE_EXTRA_CA_CERTS
+    }
+  })
 })
 
 describe("LocalSandbox env scrub", () => {

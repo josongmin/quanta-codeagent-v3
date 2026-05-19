@@ -120,6 +120,56 @@ describe("StdoutStream", () => {
     expect(rendered).not.toContain("x".repeat(161))
   })
 
+  test("S4: a secret in assistant_text is redacted, benign text untouched", () => {
+    const secret = "sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"
+    const s = new StdoutStream()
+    s.emit({ type: "assistant_text", delta: `the token is ${secret} done` })
+    const rendered = out()
+    expect(rendered).not.toContain(secret)
+    expect(rendered).toContain("***REDACTED***")
+
+    captured = []
+    new StdoutStream().emit({ type: "assistant_text", delta: "plain text here" })
+    expect(out()).toBe("plain text here")
+  })
+
+  test("S4: secrets in tool_call input and tool_result preview/stderrTail redacted", () => {
+    const secret = "Bearer abcdef0123456789ghijklmnop"
+    const s = new StdoutStream()
+    s.emit({ type: "tool_call", id: "t1", name: "bash", input: { auth: secret } })
+    s.emit({
+      type: "tool_result",
+      id: "t1",
+      name: "bash",
+      ok: false,
+      preview: `out ${secret}`,
+      stderrTail: `err ${secret}`,
+    })
+    const rendered = out()
+    expect(rendered).not.toContain(secret)
+    expect(rendered).toContain("***REDACTED***")
+    expect(rendered).toContain("stderr:")
+  })
+
+  test("S4: secret in error message is redacted", () => {
+    const secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    new StdoutStream().emit({ type: "error", message: `boom ${secret}` })
+    const rendered = out()
+    expect(rendered).not.toContain(secret)
+    expect(rendered).toContain("***REDACTED***")
+  })
+
+  test("new session_start / recovery variants render without throwing", () => {
+    const s = new StdoutStream()
+    expect(() => {
+      s.emit({ type: "session_start" })
+      s.emit({ type: "recovery", reason: "compact", detail: "context trimmed" })
+    }).not.toThrow()
+    const rendered = out()
+    expect(rendered).toContain("session start")
+    expect(rendered).toContain("recovery (compact)")
+  })
+
   test("implements StreamPort.emit and renders all variants once each", () => {
     const events: AgentEvent[] = [
       { type: "turn_start", turn: 1 },

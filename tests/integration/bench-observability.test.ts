@@ -13,6 +13,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { isTrajectoryEvent } from "@/shared"
+import { buildReport } from "../../src/apps/bench/report"
 import { finalizeRun, type RunObservation, runInstance } from "../../src/apps/bench/runner"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/swebench"
 import type { Instance, InstanceResult } from "../../src/apps/bench/types"
@@ -195,6 +196,136 @@ describe("bench observability (RFC-0002 W-D)", () => {
       } finally {
         rmSync(summaryDir, { recursive: true, force: true })
       }
+    })
+  })
+
+  // LLM that writes a file containing a planted secret (one write turn, then
+  // a final text turn). Used to prove patch/summary/metrics are scrubbed.
+  class SecretPlantingLLM implements LLMPort {
+    calls = 0
+    constructor(
+      private readonly file: string,
+      private readonly secret: string,
+    ) {}
+    async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+      this.calls += 1
+      const text = input.messages
+        .flatMap((m) => m.content)
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .join(" ")
+      const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+      if (this.calls === 1) {
+        yield { type: "tool_use_start", id: "w1", name: "write" }
+        yield {
+          type: "tool_use_end",
+          id: "w1",
+          input: {
+            path: join(sandbox, this.file),
+            content: `module.exports.token = "${this.secret}"\n`,
+          },
+        }
+        yield { type: "message_stop", stop_reason: "tool_use" }
+        return
+      }
+      yield { type: "text_delta", delta: "done" }
+      yield { type: "message_stop", stop_reason: "end_turn" }
+    }
+  }
+
+  test("S2: planted secret never lands raw in .patch / summary.json / metrics.json", async () => {
+    await withTmp(async (dir) => {
+      const corpus = join(dir, "corpus")
+      const obs = join(dir, "obs")
+      await writeSyntheticCorpus(corpus)
+      const add = (await loadCorpus(corpus)).find((i) => i.id === "inst-add") as Instance
+      const secret = "sk-ant-api03-PLANTEDSECRET0000111122223333AAAA"
+      const runId = "run-s2"
+      let ts = 1
+      const r = await runInstance(add, {
+        ...DEPS,
+        llm: new SecretPlantingLLM("leak.js", secret),
+        observe: { dir: obs, runId, now: () => ts++ },
+      })
+      // The patch must reference the new file but carry NO raw secret.
+      const patchFile = r.patchPath as string
+      expect(existsSync(patchFile)).toBe(true)
+      const patchText = readFileSync(patchFile, "utf8")
+      expect(patchText).not.toContain(secret)
+
+      await finalizeRun({ dir: obs, runId, now: () => ts++ }, [r])
+      const summaryText = readFileSync(join(obs, runId, "summary.json"), "utf8")
+      const metricsText = readFileSync(join(obs, runId, "metrics.json"), "utf8")
+      expect(summaryText).not.toContain(secret)
+      expect(metricsText).not.toContain(secret)
+      // The trajectory jsonl (recorder + bench lines) is also clean.
+      const traj = readFileSync(join(obs, runId, `${add.id}.0.jsonl`), "utf8")
+      expect(traj).not.toContain(secret)
+    })
+  })
+
+  test("C9: bench exec child does NOT inherit process.env.OPENAI_API_KEY", async () => {
+    await withTmp(async (dir) => {
+      const corpus = join(dir, "corpus")
+      await writeSyntheticCorpus(corpus)
+      const add = (await loadCorpus(corpus)).find((i) => i.id === "inst-add") as Instance
+      // testCmd exits 0 ONLY if the child cannot see the parent's secret.
+      const leakProbe: Instance = {
+        ...add,
+        id: "inst-envscrub",
+        testCmd: 'test -z "$OPENAI_API_KEY"',
+      }
+      const prev = process.env.OPENAI_API_KEY
+      process.env.OPENAI_API_KEY = "sk-ant-api03-SHOULDNOTLEAK0000111122223333BBBB"
+      try {
+        const r = await runInstance(leakProbe, {
+          ...DEPS,
+          llm: new FixingLLM("math.js", "return a - b", "return a + b"),
+        })
+        // passed:true ⇒ the spawned child saw an EMPTY OPENAI_API_KEY.
+        expect(r.passed).toBe(true)
+      } finally {
+        if (prev === undefined) delete process.env.OPENAI_API_KEY
+        else process.env.OPENAI_API_KEY = prev
+      }
+    })
+  })
+
+  test("C8: 1 degraded of 2 ⇒ printSummary/report resolved/total equals summary.json", async () => {
+    await withTmp(async (dir) => {
+      // One OK+passed instance, one strict-degraded instance.
+      const okR: InstanceResult = { id: "a", passed: true, patch: "", turns: 1, verdict: "ok" }
+      const degR: InstanceResult = {
+        id: "b",
+        passed: false,
+        patch: "",
+        turns: 0,
+        verdict: "degraded",
+      }
+      const results = [okR, degR]
+
+      const summaryDir = join(dir, "sum")
+      const summary = await finalizeRun({ dir: summaryDir, runId: "c8", now: () => 1 }, results)
+      // observe.summarize: degraded excluded ⇒ 1/1, 1 degraded.
+      expect(summary.total).toBe(1)
+      expect(summary.resolved).toBe(1)
+      expect(summary.degraded).toBe(1)
+
+      // report.ts MUST match summary.json (same degraded-excluding denominator).
+      const report = buildReport({ provider: "fake", model: "fake", n: 1 }, results)
+      expect(report.totals.total).toBe(summary.total)
+      expect(report.totals.resolved).toBe(summary.resolved)
+      expect(report.totals.resolvedPct).toBe(100)
+
+      // printSummary's headline uses resolvedTotals(summary.results) — assert
+      // that same helper (the single source) yields the summary.json numbers.
+      const onDisk = JSON.parse(readFileSync(join(summaryDir, "c8", "summary.json"), "utf8")) as {
+        resolved: number
+        total: number
+        degraded: number
+      }
+      expect(onDisk.total).toBe(1)
+      expect(onDisk.resolved).toBe(1)
+      expect(onDisk.degraded).toBe(1)
     })
   })
 

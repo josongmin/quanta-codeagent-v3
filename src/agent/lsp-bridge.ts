@@ -1,5 +1,5 @@
 import { extname } from "node:path"
-import { LspClient } from "@/lsp"
+import { type LspClient, PyrightAdapter, TypescriptAdapter } from "@/lsp"
 import { logger } from "@/shared"
 import {
   type DiagnosticsProvider,
@@ -23,38 +23,27 @@ import {
  * timeout in `LspClient` bounds every wait).
  */
 
+/**
+ * Per-language wiring. The launcher argv and `languageId` mapping are NOT
+ * duplicated here — they are owned by `@/lsp`'s {@link PyrightAdapter} /
+ * {@link TypescriptAdapter}. The only bridge-local datum is `bin`: the probe
+ * needs to run the resolver with `--version` (not the adapter's `--stdio`
+ * launch), and `unavailableReason` reports it.
+ */
 interface ServerSpec {
   /** Argv[0] probed with `--version` to decide availability. */
   bin: string
-  command: string[]
-  languageIdFor(filePath: string): string
-}
-
-/** typescript-language-server needs JSX/TSX variants distinguished. */
-const tsLanguageId = (filePath: string): string => {
-  switch (extname(filePath).toLowerCase()) {
-    case ".tsx":
-      return "typescriptreact"
-    case ".jsx":
-      return "javascriptreact"
-    case ".js":
-    case ".mjs":
-    case ".cjs":
-      return "javascript"
-    default:
-      return "typescript"
-  }
+  /** Construct the real `@/lsp` client for this language, rooted at `cwd`. */
+  create(cwd: string): LspClient
 }
 
 const PYRIGHT: ServerSpec = {
   bin: "pyright-langserver",
-  command: ["pyright-langserver", "--stdio"],
-  languageIdFor: () => "python",
+  create: (cwd) => new PyrightAdapter({ cwd }),
 }
 const TYPESCRIPT: ServerSpec = {
   bin: "typescript-language-server",
-  command: ["typescript-language-server", "--stdio"],
-  languageIdFor: tsLanguageId,
+  create: (cwd) => new TypescriptAdapter({ cwd }),
 }
 
 /** Pick the server for a file by extension, or `null` if unsupported. */
@@ -83,6 +72,9 @@ const isAvailable = async (bin: string): Promise<boolean> => {
     } catch {
       // already exited
     }
+    // Reap the child after kill so no process handle is left dangling. The
+    // await is post-kill so it resolves promptly; `.catch` keeps it defensive.
+    await proc.exited.catch(() => undefined)
     // Non-zero `--version` still proves the binary resolves; -1 = our timeout.
     ok = exit !== -1
   } catch {
@@ -104,10 +96,7 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
     const spec = specFor(filePath)
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
-    const client = new LspClient(
-      { defaultCommand: spec.command, languageIdFor: spec.languageIdFor },
-      { cwd },
-    )
+    const client = spec.create(cwd)
     try {
       await client.start()
     } catch (e) {

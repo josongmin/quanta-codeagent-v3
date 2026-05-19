@@ -60,10 +60,23 @@ const TRUNCATION_MARKER = "\n…[output truncated by sandbox maxOutputBytes]"
  *  copy of this list (ADR-0006: one Local-honored guarantee, one definition). */
 // Locale/identity, plus the infra vars a real edit→build→test loop needs:
 // corp proxy + custom-CA (npm/bun/git/pip fail behind a MITM proxy without
-// them), TMPDIR (pytest/tsc/bun temp), NODE_OPTIONS, and an active venv.
-// NONE of these can carry a provider credential, so the default-deny posture
-// (no `*_API_KEY`/`*_TOKEN`/`*_SECRET`) is preserved. Case-sensitive: tools
+// them), TMPDIR (pytest/tsc/bun temp), and an active venv.
+//
+// S5 [HIGH] env-policy → `sandbox.v2`: `NODE_OPTIONS` and
+// `NODE_EXTRA_CA_CERTS` were REMOVED. `NODE_OPTIONS=--require=/evil.js`
+// (or `--import`) is arbitrary code-exec injected into EVERY scrubbed
+// node/bun child, and `NODE_EXTRA_CA_CERTS` lets an attacker-controlled CA
+// silently MITM https from those children — both defeat the scrub. So the
+// allowlist no longer claims "NONE can carry code/credentials": it now
+// carries ONLY non-credential, non-code-exec vars. `SSL_CERT_FILE`/
+// `SSL_CERT_DIR` are RETAINED on purpose — they add CA trust via a file
+// path (needed behind a corp MITM proxy) but, unlike `NODE_OPTIONS`, cannot
+// inject code into the runtime. The default-deny posture (no
+// `*_API_KEY`/`*_TOKEN`/`*_SECRET`) is unchanged. Case-sensitive: tools
 // read both `HTTP_PROXY` and lowercase `http_proxy`, so both are listed.
+// NOTE for the bench agent: the env-policy version literal lives in
+// `src/apps/bench/runner.ts` (ENV_POLICY_VERSION) — bump it to `sandbox.v2`
+// to record that this allowlist change governs the run.
 export const DEFAULT_ENV_ALLOWLIST = [
   "PATH",
   "HOME",
@@ -80,8 +93,6 @@ export const DEFAULT_ENV_ALLOWLIST = [
   "no_proxy",
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
-  "NODE_EXTRA_CA_CERTS",
-  "NODE_OPTIONS",
   "VIRTUAL_ENV",
 ]
 

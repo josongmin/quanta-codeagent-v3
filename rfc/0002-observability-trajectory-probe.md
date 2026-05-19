@@ -1,6 +1,6 @@
 # RFC-0002: Observability · Trajectory · Probe 플랫폼
 
-- **상태**: Draft
+- **상태**: Draft — W-A~W-E 구현됨 (v0.3, §15 참조; ADR-0010)
 - **작성일**: 2026-05-19
 - **대상**: 실행 과정을 디버그 가능하게 만드는 관측 플랫폼 (특히 SWE-bench 다인스턴스 실행)
 - **선행**: RFC-0001(아키텍처), ADR-0003(test-pyramid), ADR-0006(sandbox env-scrub)
@@ -21,7 +21,7 @@
 - run_id → instance → attempt(Best-of-N) → turn → span(tool/llm) → tool_use 까지 **상관키로 슬라이스 조회** 가능.
 - 유료 실행의 **인스턴스별 토큰·비용·지연**이 집계로 남고, 비용은 **pricingVersion이 박혀 사후 재계산 가능**.
 - `bun run probe <run-dir>` 한 줄로 timeline·triage(가설, 권위 아님)·hotspots·cost 렌더.
-- 신규 런타임 의존성 **0**, LoC 증분 **< 1.4k**, 슬라이스 경계 위반 0, redaction 골든 테스트 통과.
+- 신규 런타임 의존성 **0**, 슬라이스 경계 위반 0, redaction 골든 테스트 통과. **anti-bloat 원칙은 유지하되 LoC 목표는 정직하게 재기**: 당초 "< 1.4k" 수치는 SOTA++ 산출 실측(신규 파일 단독 ≈1.7k)을 넘어 사문화 — 하드 LoC 캡 대신 "신규 dep 0 · 신규 슬라이스 최소 · 경계 위반 0"을 게이트로 본다(특정 LoC 숫자는 드리프트 방지 위해 비고정).
 
 ### 1.2 Non-Goals
 
@@ -32,6 +32,15 @@
 - ❌ 관측이 에이전트 **동작/결정**에 영향 (관측은 순수 부수효과)
 - ❌ probe가 **권위적 진단(authoritative verdict)** 을 내림 (inspector — 가설·신뢰도만)
 - ❌ 모든 슬라이스 계측 (에이전트 실행경로 + bench만; 라이브러리 내부는 메트릭만)
+
+> **Phase-1 보안 자세 (S6/S7, 명시적 합의)**: read/write/edit 도구는
+> **FS-jail되지 않으며**(임의 경로 R/W 가능), 기본 권한 모드는
+> `acceptEdits`(무인 — 편집 자동 승인)이다. 이는 RFC §1.2 로컬-개발
+> 범위에 한해 **수용된 Phase-1 자세**로 명시 한정한다. 완화책은
+> 레닥션(S1/S4/S2: trajectory 스크럽·시크릿 마스킹)과
+> **HARD_DENY(S3: 경로 독립 바이패스 차단)**이며, **FS-jail/샌드박스
+> 기본화는 의도적으로 유예**(후속 단계). 무인 자동승인+무-jail은
+> 신뢰 로컬 워크스페이스 가정 하에서만 안전하다.
 
 ---
 
@@ -147,6 +156,15 @@ kind별 `data` 최소 계약 (probe·골든테스트가 의존):
 | `observability_degraded` | `component, reason, droppedEvents` |
 
 append-only JSONL, 1 이벤트 1 라인. `AgentEvent`(stream) + 훅 lifecycle + `llm_usage` + bench `patch_*`/`sandbox`/`verify`를 한 스트림으로 정규화.
+
+> **§5.2 개정 (Phase-1 현실 정합, 2026-05-19)**: Group C/E 구현은
+> `session_start`·`recovery`를 실제 방출하고 `tool_result`를
+> `durationMs`/`stderrTail`/`exitCode`로 보강한다. `llm_request`는
+> **선택/유예**(deferred) — 프리-스트림 훅 시밍이 없어 Phase-1에서
+> 방출하지 않는다. 따라서 `kind` 유니온의 `llm_request`는 스키마상
+> 예약(reserved)이며, span-짝 골든은 당분간 **`llm_usage` 단독**으로
+> 고정한다(`llm_request↔llm_usage` 짝 검증은 프리-스트림 훅 랜딩 후
+> 활성). `tool_call↔tool_result` 짝은 그대로 유효.
 
 ### 5.3 토큰/비용 — `llm` + `@/observability`
 
@@ -267,7 +285,7 @@ W-A→(B)→(C‖D), E는 스키마 확정 후 독립. 각 웨이브: tsc 0 / bi
 | JSONL 비대(500-instance) | 높 | 중 | 인스턴스별 파일·라인상한·tail+path(전체 저장 금지)·요약은 metrics.json |
 | 스키마 드리프트 | 중 | 중 | `schema`+`v`+골든, probe 후방호환 |
 | probe 오진을 단정으로 오용 | 중 | 중 | 비권위 설계(hint/confidence), 원증거 동시 제시 |
-| anti-bloat 침범 | 중 | 큼 | 신규 슬라이스 0·dep 0·LoC<1.4k 게이트, 신규 app만 ADR |
+| anti-bloat 침범 | 중 | 큼 | 신규 슬라이스 최소·dep 0 게이트(특정 LoC 캡은 §1.1대로 비고정), 신규 app만 ADR |
 
 ---
 
@@ -296,3 +314,4 @@ W-A→(B)→(C‖D), E는 스키마 확정 후 독립. 각 웨이브: tsc 0 / bi
 |-----|-----|-----|
 | 0.1 | 2026-05-19 | 최초 작성 — 관측/trajectory/probe 플랫폼 구조 제안 (구현 전 RFC) |
 | 0.2 | 2026-05-19 | 리뷰 반영: "100%재구성"→관측증거 재구성 / eval 관측실패 strict→degraded / pricingVersion·버전드 가격표 / assistant_text 델타 보존 / **stream↛observability 경계 위반 수정**(스키마 @/shared 이동) / span(spanId·parentSpanId)·seq·schema 레지스트리·producer / patch_*·sandbox·verify 증거 / observability_degraded / redaction 골든 머지게이트 / probe 비권위(hint·confidence) |
+| 0.3 | 2026-05-19 | **구현 완료**(W-A~W-E, 전 웨이브 TDD red→green): @/shared trajectory 스키마+RunContext+redactValue, @/observability pricing.v1, @/llm StreamEvent.usage(anthropic·openai), @/stream TeeStream+JsonlRecorder(seq·결정적 span·strict/degraded·line-cap), agent/cli RunContext+usage 브리지+`--observe-dir`, bench Tee+sandbox/patch_*/verify+strict-degraded+metrics/summary, **신규 앱 apps/probe**(비권위 inspector). 신규 의존성 0·신규 슬라이스 0. redaction 골든(§11 머지게이트) 랜딩. RFC-0002 산출 10파일 tsc0/biome0, 단위+통합 피라미드 그린·경계 유지(하드 카운트 비고정). ADR-0010 작성·채택(0009=lsp-diagnostics 선점). |

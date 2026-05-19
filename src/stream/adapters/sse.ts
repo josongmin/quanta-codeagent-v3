@@ -1,3 +1,4 @@
+import { redactValue } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 
@@ -44,7 +45,11 @@ export class SseStream implements StreamPort {
     if (this.closed) return
     const id = this.nextId
     this.nextId += 1
-    const json = JSON.stringify(event)
+    // S4: route the event through the single-source @/shared scrub BEFORE
+    // serialize so secret values (tool_call.input, tool_result.preview/
+    // stderrTail, assistant_text.delta, error.message, …) never reach the
+    // wire. redactValue preserves shape — only string/keyed values are masked.
+    const json = JSON.stringify(redactValue(event))
     const frame = `id: ${id}\nevent: ${event.type}\n${dataLines(json)}\n`
     this.sink.write(frame)
   }

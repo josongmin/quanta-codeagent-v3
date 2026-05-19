@@ -239,31 +239,58 @@ const decideOp = async (
   return heuristicOp(candidate, dupes)
 }
 
-/** Apply a consolidation op against the store, recording the outcome. */
+/**
+ * Apply a consolidation op against the store, recording the outcome.
+ *
+ * C10: also mirrors the exact same mutation into the caller's single
+ * `snapshot` array (push on save; in-place field update on merge/supersede)
+ * so the next record's dedup + the final eviction sweep observe prior ops
+ * WITHOUT a fresh `store.all()` scan. The snapshot tracks the store in
+ * lock-step, so dedup/eviction OUTCOMES stay byte-for-byte identical to the
+ * old per-record-rescan version — only the query count drops (O(records) → 1).
+ */
 const applyOp = async (
   store: PersistentStorePort,
   candidate: MemoryEntry,
   op: ConsolidationOp,
   stats: PersistStats,
+  snapshot: MemoryEntry[],
 ): Promise<void> => {
   if (op.action === "insert") {
     await store.save(candidate)
+    snapshot.push(candidate)
     stats.inserted++
   } else if (op.action === "merge") {
     await store.update(op.intoId, { text: op.text, tags: op.tags, importance: op.importance })
+    const into = snapshot.find((e) => e.id === op.intoId)
+    if (into) {
+      into.text = op.text
+      into.tags = op.tags
+      into.importance = op.importance
+    }
     stats.merged++
   } else if (op.action === "supersede") {
     await store.save(candidate)
+    snapshot.push(candidate)
     await store.update(op.oldId, { supersededBy: candidate.id })
+    const old = snapshot.find((e) => e.id === op.oldId)
+    if (old) old.supersededBy = candidate.id
     stats.superseded++
   } else {
     stats.skipped++
   }
 }
 
-/** Whole-store eviction sweep (decay then delete). Best-effort per entry. */
-const sweepEviction = async (deps: PersistDeps, stats: PersistStats): Promise<void> => {
-  const all = await deps.store.all()
+/**
+ * Whole-store eviction sweep (decay then delete). Best-effort per entry.
+ * `all` is the caller's single store snapshot (C10: no extra `store.all()`
+ * scan here) — it already includes records inserted earlier this persist.
+ */
+const sweepEviction = async (
+  deps: PersistDeps,
+  stats: PersistStats,
+  all: readonly MemoryEntry[],
+): Promise<void> => {
   const plan = planEviction(all, deps.evictionCaps)
   const byId = new Map(all.map((e) => [e.id, e]))
   for (const id of plan.decay) {
@@ -303,15 +330,22 @@ export const persistSession = async (deps: PersistDeps, input: PersistInput): Pr
       return
     }
 
+    // C10: ONE store.all() snapshot for the whole persist. applyOp mirrors
+    // every save/merge/supersede into it, so per-record dedup + the eviction
+    // sweep below read the live in-memory mirror instead of re-scanning the
+    // whole store O(records+1) times. Outcomes are unchanged (the mirror is
+    // kept in lock-step with the store); only the scan count drops to 1.
+    const snapshot: MemoryEntry[] = [...(await deps.store.all())]
+
     const now = Date.now()
     for (const record of records) {
       const candidate = await buildCandidate(deps, input.sessionId, record, now)
-      const dupes = findNearDuplicates(candidate, await deps.store.all())
+      const dupes = findNearDuplicates(candidate, snapshot)
       const op = await decideOp(deps, candidate, dupes)
-      await applyOp(deps.store, candidate, op, stats)
+      await applyOp(deps.store, candidate, op, stats, snapshot)
     }
 
-    await sweepEviction(deps, stats)
+    await sweepEviction(deps, stats, snapshot)
     emitStats(deps.onStats, stats)
   } catch {
     // Persistence is advisory; never propagate. Still emit whatever was

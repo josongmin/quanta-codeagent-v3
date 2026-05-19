@@ -26,6 +26,15 @@ class ThrowingLLM implements LLMPort {
   }
 }
 
+/** Index into a captured array, throwing if the slot is absent — same
+ *  fail-on-missing contract the previous `arr[i]!` assertions had, with an
+ *  explicit runtime guard instead of a compile-only assertion. */
+const at = <T>(arr: readonly T[], i: number): T => {
+  const v = arr[i]
+  if (v === undefined) throw new Error(`expected element at index ${i}`)
+  return v
+}
+
 const req = (over: Partial<ClassifyRequest> = {}): ClassifyRequest => ({
   tool: "Bash",
   input: { command: "ls -la" },
@@ -77,7 +86,7 @@ describe("createAutoClassifierPort", () => {
     const llm = new MockLLM("<block>no</block>")
     const port = createAutoClassifierPort({ llm })
     await port(req({ systemPrompt: "THREAT-TAXONOMY" }))
-    const sys = llm.calls[0]!.system
+    const sys = at(llm.calls, 0).system
     expect(Array.isArray(sys)).toBe(true)
     expect(sys).toEqual([{ type: "text", text: "THREAT-TAXONOMY", cache: true }])
   })
@@ -86,9 +95,10 @@ describe("createAutoClassifierPort", () => {
     const llm = new MockLLM("<block>no</block>")
     const port = createAutoClassifierPort({ llm })
     await port(req({ recentContext: "User: clean up the repo" }))
-    const msg = llm.calls[0]!.messages[0]!
+    const msg = at(at(llm.calls, 0).messages, 0)
     expect(msg.role).toBe("user")
-    const text = msg.content[0]!.type === "text" ? msg.content[0]!.text : ""
+    const block = at(msg.content, 0)
+    const text = block.type === "text" ? block.text : ""
     expect(text).toContain("<transcript>")
     expect(text).toContain("User: clean up the repo")
     expect(text).toContain("Bash")

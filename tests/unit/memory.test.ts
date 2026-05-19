@@ -533,6 +533,190 @@ describe("persistSession", () => {
     ).resolves.toBeUndefined()
   })
 
+  // C10: persistSession used to call store.all() once PER distilled record
+  // (in findNearDuplicates) PLUS once in the eviction sweep — O(records+1)
+  // full-store scans. It now hoists ONE snapshot and mirrors ops into it.
+  describe("C10: store.all() is O(1) per persistSession (not O(records))", () => {
+    /** Wrap a store, counting all() calls; everything else passes through. */
+    const countingAll = (
+      inner: PersistentStorePort,
+    ): { store: PersistentStorePort; count: () => number } => {
+      let n = 0
+      return {
+        count: () => n,
+        store: {
+          save: (e) => inner.save(e),
+          update: (id, p) => inner.update(id, p),
+          delete: (id) => inner.delete(id),
+          get: (id) => inner.get(id),
+          all: () => {
+            n++
+            return inner.all()
+          },
+          recall: (q) => inner.recall(q),
+        },
+      }
+    }
+
+    test("multi-record distill: exactly ONE store.all() regardless of record count", async () => {
+      const json = JSON.stringify([
+        { kind: "fact", tier: "semantic", text: "alpha one fact line", tags: [], importance: 0.6 },
+        { kind: "fact", tier: "semantic", text: "beta two fact line", tags: [], importance: 0.6 },
+        {
+          kind: "fact",
+          tier: "semantic",
+          text: "gamma three fact line",
+          tags: [],
+          importance: 0.6,
+        },
+        {
+          kind: "decision",
+          tier: "episodic",
+          text: "delta four decision",
+          tags: [],
+          importance: 0.6,
+        },
+      ])
+      const { store, count } = countingAll(new InMemoryStore())
+      await persistSession(
+        { store, llm: fakeLLM(json) },
+        { sessionId: "c10a", finalMessages: [user("q"), assistant("done")] },
+      )
+      // 4 records: old code = 4 (dedup) + 1 (sweep) = 5 scans. New code = 1.
+      expect(count()).toBe(1)
+    })
+
+    test("single-record path: still exactly ONE store.all()", async () => {
+      const { store, count } = countingAll(new InMemoryStore())
+      await persistSession(
+        { store },
+        { sessionId: "c10b", finalMessages: [assistant("a single distinct summary")] },
+      )
+      expect(count()).toBe(1)
+    })
+
+    // Outcome-equivalence: the hoisted-snapshot impl must produce the SAME
+    // observable store state the old per-record-rescan impl did. The decisive
+    // correctness case is intra-run dedup: a record inserted mid-loop must be
+    // visible to a LATER record's findNearDuplicates (old code saw it via the
+    // fresh store.all(); new code must see it via the mirrored snapshot push).
+    // If the mirror were dropped, the 2nd identical record would wrongly
+    // insert → 2 entries instead of 1. That divergence is what we pin.
+    const normalized = async (s: PersistentStorePort) =>
+      (await s.all())
+        .map(
+          (e) =>
+            `${e.id}|${e.text}|${[...(e.tags ?? [])].sort().join(",")}|${e.importance ?? ""}|${e.supersededBy ?? ""}`,
+        )
+        .sort()
+
+    test("outcome-equivalence: intra-run dedup — 2nd identical record skips the mid-loop insert", async () => {
+      const json = JSON.stringify([
+        {
+          kind: "fact",
+          tier: "semantic",
+          text: "one identical durable line",
+          tags: ["x"],
+          importance: 0.7,
+        },
+        {
+          kind: "fact",
+          tier: "semantic",
+          text: "one identical durable line",
+          tags: ["x"],
+          importance: 0.7,
+        },
+        {
+          kind: "fact",
+          tier: "semantic",
+          text: "a clearly different second line",
+          tags: ["y"],
+          importance: 0.7,
+        },
+      ])
+      const store = new InMemoryStore()
+      await persistSession(
+        { store, llm: fakeLLM(json) },
+        { sessionId: "c10c", finalMessages: [user("q"), assistant("done")] },
+      )
+      const all = await store.all()
+      // 1st identical inserted; 2nd identical skipped (saw the 1st via the
+      // mirrored snapshot); the distinct 3rd inserted → exactly 2 entries.
+      expect(all).toHaveLength(2)
+      expect(all.filter((e) => e.text === "one identical durable line")).toHaveLength(1)
+      expect(all.some((e) => e.text === "a clearly different second line")).toBe(true)
+    })
+
+    test("outcome-equivalence: re-run is idempotent (deterministic-id skip) — final state byte-identical", async () => {
+      const input = {
+        sessionId: "c10d",
+        finalMessages: [user("q"), assistant("stable persisted body line")],
+      }
+      const once = new InMemoryStore()
+      await persistSession({ store: once }, input)
+      const afterFirst = await normalized(once)
+      await persistSession({ store: once }, input) // re-run: exact-text dupe → skip
+      const afterSecond = await normalized(once)
+      expect(afterSecond).toEqual(afterFirst) // no duplication, no drift
+      expect(afterSecond).toHaveLength(1)
+    })
+
+    test("outcome-equivalence: merge/supersede outcomes unchanged vs pre-C10 expectations", async () => {
+      // Mirrors the existing merge + supersede single-record tests; pins that
+      // the snapshot mirroring did not perturb the consolidation outcome.
+      const mStore = new InMemoryStore([
+        {
+          id: "old",
+          kind: "fact",
+          text: "alpha beta gamma delta",
+          tags: [],
+          createdAt: Date.now(),
+        },
+      ])
+      await persistSession(
+        {
+          store: mStore,
+          llm: fakeLLM(
+            JSON.stringify({
+              action: "merge",
+              intoId: "old",
+              text: "alpha beta gamma delta merged",
+              tags: ["db"],
+              importance: 0.8,
+            }),
+          ),
+          distill: false,
+        },
+        { sessionId: "c10e", finalMessages: [assistant("alpha beta gamma delta epsilon")] },
+      )
+      const m = await mStore.all()
+      expect(m).toHaveLength(1)
+      expect(m[0]?.text).toBe("alpha beta gamma delta merged")
+      expect(m[0]?.importance).toBeCloseTo(0.8, 5)
+
+      const sStore = new InMemoryStore([
+        {
+          id: "old",
+          kind: "fact",
+          text: "one two three four five",
+          tags: [],
+          createdAt: Date.now(),
+        },
+      ])
+      await persistSession(
+        {
+          store: sStore,
+          llm: fakeLLM(JSON.stringify({ action: "supersede", oldId: "old" })),
+          distill: false,
+        },
+        { sessionId: "c10f", finalMessages: [assistant("one two three four six")] },
+      )
+      const s = await sStore.all()
+      expect(s).toHaveLength(2)
+      expect(s.find((e) => e.id === "old")?.supersededBy).toBeDefined()
+    })
+  })
+
   test("never throws when distill/store blow up", async () => {
     const boomStore: PersistentStorePort = {
       save: () => Promise.reject(new Error("save boom")),

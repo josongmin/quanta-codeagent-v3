@@ -27,7 +27,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { costUsd, Metrics, PRICING_VERSION } from "@/observability"
 import type { PatchData, RunContext, SandboxData, VerifyData } from "@/shared"
-import { makeEvent } from "@/shared"
+import { makeEvent, redactValue } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder } from "@/stream"
 import type { InstanceResult, InstanceUsage } from "./types"
@@ -188,6 +188,24 @@ export interface MetricsArtifact {
 
 const verdictOf = (r: InstanceResult): "ok" | "degraded" => r.verdict ?? "ok"
 
+/**
+ * C8 — THE single operator-visible denominator (ADR-0010 strict→degraded).
+ * `verdict:"degraded"` instances are EXCLUDED from both numerator and
+ * denominator. `index.ts printSummary` and `report.ts` MUST consume this so
+ * the headline `resolved/total` can never contradict `summary.json`. Do not
+ * add a third source of truth.
+ */
+export const resolvedTotals = (
+  results: readonly InstanceResult[],
+): { resolved: number; total: number; degraded: number } => {
+  const ok = results.filter((r) => verdictOf(r) === "ok")
+  return {
+    resolved: ok.filter((r) => r.passed).length,
+    total: ok.length,
+    degraded: results.length - ok.length,
+  }
+}
+
 const summarize = (runId: string, results: readonly InstanceResult[]): RunSummary => {
   const instances: SummaryInstance[] = results.map((r) => ({
     id: r.id,
@@ -196,12 +214,12 @@ const summarize = (runId: string, results: readonly InstanceResult[]): RunSummar
     turns: r.turns,
     ...(r.patchPath !== undefined ? { patchPath: r.patchPath } : {}),
   }))
-  const ok = results.filter((r) => verdictOf(r) === "ok")
+  const t = resolvedTotals(results)
   return {
     runId,
-    resolved: ok.filter((r) => r.passed).length,
-    total: ok.length,
-    degraded: results.length - ok.length,
+    resolved: t.resolved,
+    total: t.total,
+    degraded: t.degraded,
     instances,
   }
 }
@@ -231,9 +249,13 @@ const buildMetrics = (results: readonly InstanceResult[]): Metrics => {
   return m
 }
 
+/** Persist a JSON artifact. S2: the payload is run through the single-source
+ *  @/shared redactor first — a secret that reached a path/id/log field (e.g. a
+ *  token in a patchPath or verify logTail) must not land raw in
+ *  metrics.json/summary.json. Shape is preserved; only secret values mask. */
 const writeJson = (file: string, value: unknown): void => {
   mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
+  writeFileSync(file, `${JSON.stringify(redactValue(value), null, 2)}\n`)
 }
 
 /**

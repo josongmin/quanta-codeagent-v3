@@ -57,11 +57,7 @@
 import type { Message } from "@/llm"
 import { isGitRepo, withWorktree } from "@/runtime/worktree"
 import { ToolRegistry } from "@/tool"
-import type {
-  SubagentRequest,
-  SubagentResult,
-  SubagentRunner,
-} from "../subagent/types"
+import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
 import { runAgent } from "./loop"
 import type { AgentConfig, AgentOutcome } from "./types"
 
@@ -116,10 +112,7 @@ const toResult = (outcome: AgentOutcome): SubagentResult => ({
  *  {@link ToolRegistry} from the intersection. Absent filter ⇒ inherit the
  *  parent registry as-is. An empty/all-miss filter yields an empty registry
  *  (the child simply has no tools — it can still answer from the prompt). */
-const filterRegistry = (
-  parent: ToolRegistry,
-  toolFilter: string[] | undefined,
-): ToolRegistry => {
+const filterRegistry = (parent: ToolRegistry, toolFilter: string[] | undefined): ToolRegistry => {
   if (!toolFilter) return parent
   const allow = new Set(toolFilter)
   const kept = parent
@@ -147,11 +140,7 @@ const chainedSignal = (parent: AbortSignal): AbortSignal => {
  *  `store`/`hooks`/`metrics`/`run`/`sessionId`/`memory` are DROPPED so a child
  *  never persists into the parent's long-term memory or pollutes its
  *  correlation/observability; `llm`/`stream`/`permission`/`system` are kept. */
-const buildChildConfig = (
-  parent: AgentConfig,
-  req: SubagentRequest,
-  cwd: string,
-): AgentConfig => {
+const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string): AgentConfig => {
   const seed: Message[] = [{ role: "user", content: [{ type: "text", text: req.prompt }] }]
   // Shallow clone, then strip the inheritance-unsafe keys. We rebuild the
   // object explicitly (rather than `delete`) to satisfy

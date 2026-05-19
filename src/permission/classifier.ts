@@ -245,71 +245,23 @@ export class AutoModeClassifier {
    */
   async evaluate(base: Omit<ClassifyRequest, "stage">): Promise<AutoDecision> {
     if (this.circuitBroken || !this.port) {
-      return {
-        verdict: "ask",
-        reason: this.circuitBroken
-          ? "Auto mode circuit-broken for this session — falling back to prompt"
-          : "No classifier available — auto mode degrades to ask",
-        fallback: true,
-        stage: "none",
-      }
+      return this.unavailableDecision()
     }
 
     // Stage 1: fast pass, biased toward block, no user-intent/ALLOW.
-    let stage1: ClassifyDecision | undefined
-    try {
-      stage1 = await this.port({ ...base, stage: "fast" })
-    } catch {
-      stage1 = undefined // unavailable → escalate (fail toward stage 2)
-    }
-
+    const stage1 = await this.runStage(base, "fast")
     if (stage1 && stage1.verdict === "allow") {
-      this.noteAllow()
-      return {
-        verdict: "allow",
-        reason: stage1.reason || "Allowed by fast classifier",
-        classification: stage1.classification,
-        fallback: false,
-        stage: "fast",
-      }
+      return this.allowDecision(stage1, "fast", "Allowed by fast classifier")
     }
 
     // Stage 2: thinking pass — full user-intent + ALLOW reasoning.
-    let stage2: ClassifyDecision | undefined
-    try {
-      stage2 = await this.port({ ...base, stage: "thinking" })
-    } catch {
-      stage2 = undefined
-    }
-
+    const stage2 = await this.runStage(base, "thinking")
     if (!stage2) {
-      // Stage 2 unavailable: adopt stage 1's conservative block if present,
-      // else hard-ask (classifier unavailable, fail-open to prompt).
-      if (stage1 && stage1.verdict === "block") {
-        return this.applyDenial(
-          stage1.reason ||
-            "Stage 2 classifier error - blocking based on stage 1 assessment",
-          stage1.classification,
-          "fast",
-        )
-      }
-      return {
-        verdict: "ask",
-        reason: "Classifier unavailable — falling back to prompt",
-        fallback: true,
-        stage: "none",
-      }
+      return this.stage2UnavailableDecision(stage1)
     }
 
     if (stage2.verdict === "allow") {
-      this.noteAllow()
-      return {
-        verdict: "allow",
-        reason: stage2.reason || "Allowed by classifier",
-        classification: stage2.classification,
-        fallback: false,
-        stage: "thinking",
-      }
+      return this.allowDecision(stage2, "thinking", "Allowed by classifier")
     }
 
     return this.applyDenial(
@@ -317,6 +269,65 @@ export class AutoModeClassifier {
       stage2.classification,
       "thinking",
     )
+  }
+
+  /** Circuit-broken / no-port short-circuit (auto-mode-classifier.md §3.4). */
+  private unavailableDecision(): AutoDecision {
+    return {
+      verdict: "ask",
+      reason: this.circuitBroken
+        ? "Auto mode circuit-broken for this session — falling back to prompt"
+        : "No classifier available — auto mode degrades to ask",
+      fallback: true,
+      stage: "none",
+    }
+  }
+
+  /** Invoke the injected port for a stage; an unavailable port (throw) maps
+   *  to `undefined` so the caller fails toward the next stage / prompt. */
+  private async runStage(
+    base: Omit<ClassifyRequest, "stage">,
+    stage: "fast" | "thinking",
+  ): Promise<ClassifyDecision | undefined> {
+    try {
+      return await this.port?.({ ...base, stage })
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Build an allow decision and reset the consecutive counter. */
+  private allowDecision(
+    decision: ClassifyDecision,
+    stage: "fast" | "thinking",
+    fallbackReason: string,
+  ): AutoDecision {
+    this.noteAllow()
+    return {
+      verdict: "allow",
+      reason: decision.reason || fallbackReason,
+      classification: decision.classification,
+      fallback: false,
+      stage,
+    }
+  }
+
+  /** Stage 2 unavailable: adopt stage 1's conservative block if present,
+   *  else hard-ask (classifier unavailable, fail-open to prompt). */
+  private stage2UnavailableDecision(stage1: ClassifyDecision | undefined): AutoDecision {
+    if (stage1 && stage1.verdict === "block") {
+      return this.applyDenial(
+        stage1.reason || "Stage 2 classifier error - blocking based on stage 1 assessment",
+        stage1.classification,
+        "fast",
+      )
+    }
+    return {
+      verdict: "ask",
+      reason: "Classifier unavailable — falling back to prompt",
+      fallback: true,
+      stage: "none",
+    }
   }
 
   /** Record a denial and decide whether the denial-limit fallback fires

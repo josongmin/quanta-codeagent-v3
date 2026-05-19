@@ -15,10 +15,11 @@
  *   subagent?: { runner: SubagentRunner; maxDepth?: number }
  * The host constructs the runner from its own loop and threads maxDepth here.
  */
-export { createAgentTool } from "./agent-tool"
+
 export type { AgentToolOptions } from "./agent-tool"
-export { TaskRegistry } from "./registry"
+export { createAgentTool } from "./agent-tool"
 export type { TaskRecord, TaskStatus } from "./registry"
+export { TaskRegistry } from "./registry"
 export { createTaskOutputTool, createTaskStopTool } from "./task-tools"
 export type {
   SubagentRequest,

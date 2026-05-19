@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { Skill } from "../../src/skill"
 import {
   createSkillTool,
   createToolSearchTool,
@@ -9,7 +10,6 @@ import {
   parseFrontmatter,
   skillsActivatedFor,
 } from "../../src/skill"
-import type { Skill } from "../../src/skill"
 import type { ToolContext, ToolResult, ToolSpec } from "../../src/tool"
 
 const CTX: ToolContext = { cwd: "/", signal: new AbortController().signal }
@@ -98,10 +98,7 @@ describe("discoverSkills", () => {
     )
 
     // flat command file
-    await writeFile(
-      join(dir, "zeta.md"),
-      "---\ndescription: zeta cmd\n---\nzeta body",
-    )
+    await writeFile(join(dir, "zeta.md"), "---\ndescription: zeta cmd\n---\nzeta body")
 
     // collision: directory form must win over flat form of same id
     await writeFile(join(dir, "alpha.md"), "---\ndescription: FLAT alpha\n---\nflat")
@@ -172,7 +169,11 @@ describe("createSkillTool", () => {
 
 describe("createToolSearchTool", () => {
   const catalog = (): ToolSpec[] => [
-    { name: "readFile", description: "Read a text file from disk", input_schema: { type: "object" } },
+    {
+      name: "readFile",
+      description: "Read a text file from disk",
+      input_schema: { type: "object" },
+    },
     {
       name: "writeFile",
       description: "Write content to a file on disk",
