@@ -16,7 +16,6 @@ LLM이 사용자와 티키타카하며 코딩 태스크(읽기/검색/편집/테
 - Phase 1 (2주): 단일 파일 편집 + 테스트 실행 사이클 작동
 - Phase 2 (1개월): SWE-bench Verified 50%+ 단일 trajectory
 - Phase 3 (3개월): SWE-bench Verified 70%+ (Best-of-N 포함)
-- 전체 코드베이스 **20k LoC 미만 유지**
 
 > **측정 기준의 정직성 (50%/70%)**: 하니스(`apps/bench`)·Best-of-N
 > 샘플러·Python 채점 seam(`python-swebench.ts`)은 **구현되어 결정론 단위/
@@ -24,17 +23,17 @@ LLM이 사용자와 티키타카하며 코딩 태스크(읽기/검색/편집/테
 > 퍼센트* 자체는 비차단 실-LLM eval 티어(§10.4)와 외부 Docker/Python
 > 채점에서만 산출되며, 본 레포는 그 퍼센트를 스스로 증명하지 않는다.
 > 50%/70%는 목표치이지 레포가 보장하는 측정값이 아니다(머신은 진짜,
-> 점수는 외부 검증 대상).
+> 점수는 외부 검증 대상). verify-before-finish 가드(§16·ADR-0013)는
+> "오답서 조기 종료 방지" 메커니즘이지 resolution% 보장이 아니다 —
+> 점수는 여전히 외부 채점 산출(과장 금지).
 
 ### 1.2 SOTA++ 스탠스 (구 "minimal-surface" 거부 입장 대체)
 
-> **2026-05-19 사용자 명시 지시로 전환**. v0.1~0.8의 "minimal-surface /
-> <20k LoC 강박"은 메모리 SOTA++ 패스(ADR-0008)와 동일 패턴으로 **공식
-> 폐기**됐다. 본 에이전트는 이제 Claude Code v2의 **능력·견고성 메커니즘을
-> LoC 무관·ROI 무관으로 의도적으로 흡수**한다. §1.1의 20k LoC 항목, §8의
-> "v2 대비 31배 가벼움", §13.1의 "subagent는 범위 외" 등 본 전환과 직접
-> 모순되는 잔존 "minimal" 서술은 이 절이 우선한다(개별 절은 흡수 시점에
-> 점진 정정 — 전면 재작성하지 않고 상위 스탠스로 갈음).
+> **전역 LoC 예산 없음** (ADR-0012). v0.1~0.9의 minimal-surface / <20k LoC
+> 강박은 ADR-0008·ADR-0011에서 이미 폐기됐으며, 본 레포는 **코드 줄 수 상한을
+> 두지 않는다**. 대신 슬라이스 격리·신규 npm dep 최소화·env-gated 기본 OFF·
+> 테스트 피라미드가 품질 게이트다. 본 에이전트는 Claude Code v2의 **능력·견고성
+> 메커니즘을 LoC·ROI 무관으로 의도적 흡수**한다(§16·ADR-0011).
 
 **살아남는 불가침 불변식 2개** (SOTA++ 흡수가 깰 수 없는 것):
 
@@ -635,7 +634,7 @@ hot = true
 
 ## 8. Phase 계획
 
-### Phase 1 — Core ReAct (2주, ~3k LoC)
+### Phase 1 — Core ReAct (2주)
 
 ```
 shared/  llm/anthropic  tool/{bash,read,write,edit,grep,glob}
@@ -648,7 +647,7 @@ runtime/shell  storage  stream/stdout  permission  agent/loop  apps/cli
 - 파일 편집·테스트 실행 성공
 - 30+ turn 안정 동작
 
-### Phase 1.5 — Memory + LSP (1주, +~2k LoC)
+### Phase 1.5 — Memory + LSP (1주)
 
 ```
 memory/{working, sqlite}  lsp/pyright  observability/logger
@@ -657,7 +656,7 @@ tool/test-runner (정교화)
 
 **Done 정의**: 메모리 영속, LSP 진단 도구로 노출.
 
-### Phase 2 — SWE-bench 도전 (1개월, +~3k LoC)
+### Phase 2 — SWE-bench 도전 (1개월)
 
 ```
 tool/edit/fuzzy  apps/bench  tool/localize  permission/policy 강화
@@ -666,7 +665,7 @@ agent/dispatch (per-tool concurrency)  agent/compaction
 
 **Done 정의**: SWE-bench Verified 50%+ 단일 trajectory.
 
-### Phase 3 — Best-of-N + 운영 (2개월, +~5k LoC)
+### Phase 3 — Best-of-N + 운영 (2개월)
 
 ```
 apps/bench (N=5 sampling, voting)  observability/metrics
@@ -675,18 +674,9 @@ lsp/typescript  llm/openai  stream/sse  runtime/sandbox(docker)
 
 **Done 정의**: SWE-bench Verified 70%+, 단일 바이너리 배포 가능.
 
-### 총 예상
-
-```
-Phase 1     ~3k LoC
-Phase 1.5  +2k
-Phase 2    +3k
-Phase 3    +5k
-─────────────────
-합계      ~13k LoC
-```
-
-v2 (406k) 대비 **31배 가벼움**.
+> Phase 범위는 **Done 정의·슬라이스 단위**로 관리한다. 전역 LoC 예산은
+> 없다(ADR-0012). v2(406k) 대비 가벼운 아키텍처(ReAct·슬라이스 격리)는
+> 유지하되, 줄 수 목표는 추적하지 않는다.
 
 ---
 
@@ -793,7 +783,7 @@ v2 (406k) 대비 **31배 가벼움**.
 - **agent state 영속화** → (v0.1 계획: 미구현) **현재 구현됨** `agent/state.ts`, `--state`/`--resume` (기본 OFF, env-gated).
 - **슬라이스 격리 강제** → Biome 2.x `overrides[]` 채택 (ADR-0001).
 - **Tool 인터페이스** → (v0.1 계획: Phase 2 연기) **현재 v2 구현됨** `isConcurrencySafe` + `AsyncIterable<ToolEvent>`, dispatch 동시성 배칭.
-- **MCP / Best-of-N** → (v0.1 미해결 Q4·Q5) **현재 구현됨** `mcp/` 슬라이스 + `agent/mcp-bridge.ts`(`QUANTA_MCP_CONFIG`), Best-of-N 샘플러는 `apps/bench/sampler.ts`. subagent는 여전히 범위 외.
+- **MCP / Best-of-N / subagent** → (v0.1 미해결 Q4·Q5) **현재 구현됨** `mcp/` + `agent/mcp-bridge.ts`, Best-of-N `apps/bench/sampler.ts`, subagent/skill은 §16·`@/subagent`·`@/skill`(ADR-0011).
 - **LLM provider** → §8에서 Phase 3였던 OpenAI 어댑터를 Phase 1에 선반영 (실 검증 키가 OpenAI, 포트 기존재). Anthropic/OpenAI 런타임 스위치. 상세 ADR-0002.
 - **루프 견고화 + compaction (v0.4)** → §8에서 Phase 2였던 compaction을 Phase 1 루프에 편입: proactive(턴 상단 토큰압) + reactive(PTL 트리거). 함께 in-loop 실패 복구 추가 — transient는 bounded backoff 재시도, PTL→reactive compact 후 동일 턴 재개, max_output_tokens는 continue meta 주입, malformed tool_use 1회 교정, empty turn 캡. **same-turn 복구는 maxTurns 카운터 불소모** (정상 tool round만 증가). 근거: §8 Phase 1 Done "30+ turn 안정"은 단일 transient 오류에도 죽지 않아야 성립. e2e(`agent-recovery-e2e`)·OpenAI 어댑터 테스트로 검증.
 - **프롬프트 캐시 (v0.4)** → 매 턴 system 재조립 폐기, 정적 프리픽스 고정 + 동적 컨텍스트는 꼬리 `<system-reminder>` 1메시지. 양 provider 캐시 프리픽스 안정. 시스템 프롬프트 강화 동반. 상세 ADR-0004. (참고: 사전조사 결과 hooks/plan/`AsyncIterable` tool 인터페이스는 위 항목들과 별개로 이미 선구현된 상태였음 — 본 절 상단 "제외/연기" 표기는 v0.1 시점 계획값.)
@@ -867,6 +857,11 @@ export type StreamEvent =
 - **FallbackLLM 멀티-provider 스왑** + `stream_reset` tombstone.
 - **CompactionBreaker**: rapid-refill/thrash 차단기 + `reactiveCompact`
   fail-fast.
+- **verify-before-finish 가드**: 마지막 mutating tool 이후 검증 0회인데
+  완료 시도 시 기존 nudge/recovery로 1턴 강제(`maxTrips` cap). 검증 인정은
+  best-effort 휴리스틱 게이트(`test_runner` 항상 / `bash`는 test·repro
+  정규식 매칭 시만). default-OFF, bench-gated(`instance.swebench`만),
+  순수 `@/agent/verify-guard.ts` (ADR-0013). efficacy/% 주장 없음.
 
 ### 16.3 Tier 1 — 능력 슬라이스·스트리밍
 
@@ -907,3 +902,4 @@ CC v2 메커니즘은 직접 복사하지 않는다 — 동작을 **재유도(re
 | 0.7 | 2026-05-19 | SOTA++ 메모리 심화(ADR-0008 연장): tier가 회상 랭킹에 실제 작용(W_TIER=2, semantic>episodic — "계층형 회상" 빵꾸 해소), `memory_search` tier/kind/minImportance 필터, `memory.recallTiers`+`QUANTA_MEMORY_RECALL_TIERS`, 메모리 관측성(`AgentRecorder` memory.recall/persist/distilled/consolidate/evict 카운터, `onStats` 옵저버). 반환형 불변·동작 보존, 신규 dep 0. 523 테스트 통과 |
 | 0.8 | 2026-05-19 | 문서 정직성 정정: §1.1 SWE-bench 50%/70% 측정 정직성 주석(메커니즘 구현·결정론 검증 / 퍼센트는 외부 eval 대상), §3.1 `tool/→storage/` 예외 명문화(biome 강제 매트릭스 정합), §3.2/§4 LSP가 `agent/lsp-bridge.ts`로 `diagnostics` 도구 노출(ADR-0009), §4 트리에 memory-stats/memory-tools/lsp-bridge 추가. 사문화 export `planSystemAugmentation`/`PLAN_AUGMENTATION` 제거(in-loop 카피는 prompt.ts `PLAN_NOTICE`로 일원화). ADR-0005 결번 placeholder |
 | 0.9 | 2026-05-19 | **Claude Code v2 SOTA++ 흡수 (Tier 0+1, ADR-0011)**: §1.2를 minimal-surface 거부 → SOTA++ 스탠스로 재작성(20k LoC·"31배 가벼움"·"subagent 범위 외" 잔존 minimal 서술을 상위 스탠스로 갈음, 불변식 2개=슬라이스 격리·RFC/ADR 동기, 의도적 미흡수 4종 근거). §3.2 슬라이스표에 `@/subagent`·`@/skill` 추가. 신규 §16(통합 계약=AgentConfig optional·동작 보존, Tier 0 하드닝, Tier 1 슬라이스/스트리밍, 미흡수, 역공학 doc 간접화 주의). Tier 0+1 src/슬라이스+테스트 동반 랜딩(문서 전용 아님). 전체 레포 `tsc` 0, 단위+통합 피라미드 그린(하드 카운트 비고정) |
+| 1.0 | 2026-05-19 | **전역 LoC 예산 폐기 (ADR-0012)**: §1.1 20k 항목 삭제, §1.2·§8 LoC/“31배” 서술 정리, §13.1 subagent 구현 반영. 품질 게이트=슬라이스 격리·dep 최소·테스트 |

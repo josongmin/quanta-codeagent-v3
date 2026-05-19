@@ -224,10 +224,19 @@ const SWEBENCH_DIRECTIVE = [
   "  tests; your test edits are discarded and only waste turns.",
   "- Make the SMALLEST correct change. Use `edit` for targeted hunks. Do NOT",
   "  rewrite or reformat whole files; do NOT `write` over an existing file.",
+  "- NEVER run `git checkout`/`reset`/`clean`/`stash`/`restore`, re-clone, or",
+  "  any command that discards your own edits. Your final git diff IS the",
+  "  submission — do not let bash commands wipe it.",
+  "- Reproduce first: from the issue, construct the concrete failing scenario",
+  "  (the exact input/call the issue describes) and confirm it currently",
+  "  misbehaves before you edit.",
   "- Infer the EXACT required behavior (signatures, error messages, return",
-  "  values, edge cases) from the issue text and match it precisely.",
-  "- Before stopping: find and run the existing test(s) most specific to the",
-  "  code you changed; if they fail or you broke nearby behavior, iterate.",
+  "  values, edge cases) from the issue and match it precisely — a fix that is",
+  "  close but not exact still fails the hidden test.",
+  "- MANDATORY before you stop: after your final edit, run the repository's",
+  "  existing test(s) most specific to the changed code AND your reproduction",
+  "  of the issue. If anything fails, iterate. Do NOT stop right after an edit",
+  "  without running tests — an unverified edit is the #1 cause of failure.",
   "- Keep the final diff minimal and isolated to the fix.",
 ].join("\n")
 
@@ -264,6 +273,11 @@ const buildConfig = (
     // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
     // without this, large-repo instances PTL-die instead of compacting.
     compaction: {},
+    // SOTA++ verify-guard (ADR-0013): observed bench failure — agent edits a
+    // source file then declares "done" with 0 verification → wrong fix ships.
+    // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
+    // byte-identical). Absent ⇒ guard OFF, loop unchanged.
+    ...(instance.swebench ? { verifyGuard: { maxTrips: 2 } } : {}),
   }
 }
 

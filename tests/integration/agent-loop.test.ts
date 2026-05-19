@@ -224,6 +224,147 @@ describe("runAgent integration", () => {
     expect(lastCall).toBeLessThan(firstResult)
   })
 
+  // SOTA++ Tier 0 verify-guard: observed bench failure — the agent edits a
+  // source file then declares "done" with ZERO verification calls after the
+  // edit, so a wrong fix ships. With `verifyGuard` configured the loop must
+  // force one more turn until a test_runner/bash runs after the last edit.
+  test("(g) verifyGuard: edit then finish is blocked until a test runs after the edit", async () => {
+    const file = join(dir, "fix.txt")
+    const llm = new FakeLLM([
+      // turn 1: mutate source
+      toolUseScript("c1", "write", { path: file, content: "patched" }),
+      // turn 2: model tries to finish with NO verification since the edit
+      textScript("all done"),
+      // forced turn: now it runs a REAL test. R1's tightened policy only
+      // counts a `bash` as verification when its command matches the
+      // test/repro regex — a noise command like `echo`/`git status` would NOT
+      // satisfy the guard (that loophole is the empirically-confirmed 0-trip
+      // defect this guard exists to close), so use an actual pytest invocation.
+      toolUseScript("c3", "bash", { command: "python -m pytest tests/ -q" }),
+      // turn 4: finish for real
+      textScript("verified and done"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const cfg = {
+      ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
+      verifyGuard: { maxTrips: 2 },
+    }
+    const outcome = await runAgent(cfg)
+
+    expect(outcome.reason).toBe("completed")
+
+    // Exactly one `unverified` recovery happened.
+    const unverified = stream.events.filter(
+      (e) => e.type === "recovery" && e.reason === "unverified",
+    )
+    expect(unverified).toHaveLength(1)
+
+    // The forcing message text was injected into the canonical transcript.
+    const forced = outcome.messages.some(
+      (m) =>
+        m.role === "user" &&
+        m.content.some((b) => b.type === "text" && b.text.includes("ran no test or reproduction")),
+    )
+    expect(forced).toBe(true)
+
+    // A bash call occurred (the verification) before the run completed.
+    const toolCalls = stream.events.filter((e) => e.type === "tool_call")
+    const names = toolCalls.map((e) => (e.type === "tool_call" ? e.name : ""))
+    expect(names).toEqual(["write", "bash"])
+  })
+
+  // Regression for the EMPIRICALLY-CONFIRMED prod defect: a real SWE-bench run
+  // had the guard fire 0 times because the agent ran a noise `bash`
+  // (`git status`) after editing and the OLD policy counted ANY bash as
+  // "verified". With R1's tightened policy a noise bash must NOT satisfy the
+  // guard: edit → bash(git status) → done MUST still be blocked & forced.
+  test("(g2) verifyGuard regression: a noise bash (git status) after an edit does NOT satisfy the guard", async () => {
+    const file = join(dir, "fix.txt")
+    const llm = new FakeLLM([
+      // turn 1: mutate source
+      toolUseScript("c1", "write", { path: file, content: "patched" }),
+      // turn 2: a NOISE bash (the exact prod loophole) — must NOT count.
+      toolUseScript("c2", "bash", { command: "git status" }),
+      // turn 3: model tries to finish — still unverified ⇒ guard MUST block.
+      textScript("all done"),
+      // forced turn 4: now a REAL test runs ⇒ guard satisfied.
+      toolUseScript("c4", "bash", { command: "python -m pytest -q" }),
+      // turn 5: finish for real.
+      textScript("verified and done"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const cfg = {
+      ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
+      verifyGuard: { maxTrips: 2 },
+    }
+    const outcome = await runAgent(cfg)
+
+    expect(outcome.reason).toBe("completed")
+    // The noise `git status` did NOT satisfy the guard: it still forced once.
+    const unverified = stream.events.filter(
+      (e) => e.type === "recovery" && e.reason === "unverified",
+    )
+    expect(unverified).toHaveLength(1)
+    // Ordered proof: write → git-status bash → forced → pytest bash.
+    const toolCalls = stream.events.filter((e) => e.type === "tool_call")
+    const names = toolCalls.map((e) => (e.type === "tool_call" ? e.name : ""))
+    expect(names).toEqual(["write", "bash", "bash"])
+  })
+
+  test("(h) verifyGuard maxTrips cap: edit→done repeated stops blocking, no infinite loop", async () => {
+    const file = join(dir, "loop.txt")
+    // The model is stubborn: every turn it just edits then says done. With
+    // maxTrips:1 the guard blocks ONCE then must let the run finish.
+    const llm = new FakeLLM([
+      toolUseScript("c1", "write", { path: file, content: "x" }),
+      textScript("done"),
+      textScript("done again"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const cfg = {
+      ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
+      verifyGuard: { maxTrips: 1 },
+    }
+    const outcome = await runAgent(cfg)
+
+    expect(outcome.reason).toBe("completed")
+    const unverified = stream.events.filter(
+      (e) => e.type === "recovery" && e.reason === "unverified",
+    )
+    // Blocked exactly once (the maxTrips:1 cap), then allowed to finish.
+    expect(unverified).toHaveLength(1)
+    // EXACT bounded turn count (matches the e2e sibling's exact-count style):
+    // slot-1 = the `write` tool turn; slot-2 = the finish attempt, forced once
+    // (maxTrips:1) as a SAME-turn re-stream then allowed through. The forced
+    // re-entry does NOT consume a turn slot, so the run completes at turn 2 —
+    // far below maxTurns:10 (proves no infinite forcing).
+    expect(outcome.turns).toBe(2)
+    expect(llm.calls).toBe(3)
+  })
+
+  test("(i) default-OFF byte-identical: same edit→done WITHOUT verifyGuard finishes at turn 2", async () => {
+    const file = join(dir, "fix.txt")
+    const llm = new FakeLLM([
+      toolUseScript("c1", "write", { path: file, content: "patched" }),
+      textScript("all done"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    // NO verifyGuard ⇒ the guard never constructs/consults: identical to before.
+    const outcome = await runAgent(baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10))
+
+    expect(outcome.reason).toBe("completed")
+    expect(outcome.turns).toBe(2)
+    expect(llm.calls).toBe(2)
+    const unverified = stream.events.filter(
+      (e) => e.type === "recovery" && e.reason === "unverified",
+    )
+    expect(unverified).toHaveLength(0)
+  })
+
   test("(f) safe read then unsafe write in one turn → result order preserved", async () => {
     const src = join(dir, "src.txt")
     const out = join(dir, "out.txt")

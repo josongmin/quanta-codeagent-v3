@@ -7,8 +7,8 @@
 ## 결정
 
 Claude Code v2의 능력·견고성 메커니즘을 **LoC 무관·ROI 무관으로 의도적
-흡수**한다. RFC의 minimal-surface / <20k LoC 강박은 ADR-0008과 동일 패턴으로
-사용자 명시 지시에 의해 **공식 폐기**한다(제약 override를 본 ADR이 기록).
+흡수**한다. RFC의 minimal-surface / <20k LoC 강박은 ADR-0008·본 ADR에서
+폐기됐으며, **전역 LoC 상한은 ADR-0012로 영구 철회**됐다.
 
 - **Tier 0** (agent 슬라이스 내, 슬라이스 무신설): HARD_DENY 경로 독립
   바이패스 차단(git `-c`/`--exec-path`/`--config-env`, find action-flag),
@@ -58,9 +58,9 @@ v2의 워크플로우 무게(406k LoC) 트라우마에서 나온 것이지만, C
   fallback·compaction thrash 내성으로 장수 trajectory 견고화, 격리 컨텍스트
   subagent + skill 동적 능력, 스트리밍 도구 디스패치 지연 단축. 슬라이스
   격리·동작 보존 무손상.
-- **잃은 것 / 비용**: RFC §1.1 20k LoC·§8 "31배 가벼움"·§12 anti-bloat
-  에토스를 **사용자 명시 지시로 의도적 override**(ADR-0008과 동일 성격).
-  LoC·이동 부품·표면 증가, worktree·classifier·fallback의 운영 복잡도.
+- **잃은 것 / 비용**: minimal-surface 에토스(§12 anti-bloat의 LoC 측면)를
+  **의도적 override**(ADR-0008과 동형; 전역 LoC 캡은 ADR-0012로 철회).
+  이동 부품·표면·worktree·classifier·fallback의 운영 복잡도 증가.
   **완화**: 전부 optional/주입식 기본 OFF, 미주입 시 루프 불변, 슬라이스
   격리 Biome 강제 유지, 미흡수 목록으로 네트워크/벤더 표면 명시적 차단,
   전체 테스트 피라미드 결정론 통과.

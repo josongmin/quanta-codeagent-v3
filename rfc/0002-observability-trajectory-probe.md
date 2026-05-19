@@ -4,7 +4,7 @@
 - **작성일**: 2026-05-19
 - **대상**: 실행 과정을 디버그 가능하게 만드는 관측 플랫폼 (특히 SWE-bench 다인스턴스 실행)
 - **선행**: RFC-0001(아키텍처), ADR-0003(test-pyramid), ADR-0006(sandbox env-scrub)
-- **원칙 상속**: anti-bloat(<20k LoC), 의존성 <5(신규 0), 슬라이스 격리(Biome 강제), `@/agent`/`apps`만 조립자
+- **원칙 상속**: anti-bloat(신규 dep 0 · 슬라이스 최소 · 경계 0; **LoC 캡 없음**, ADR-0012), 의존성 <5(신규 0), 슬라이스 격리(Biome 강제), `@/agent`/`apps`만 조립자
 - **리뷰 반영(v0.2)**: "100% 재구성" 표현 정정 · eval 모드 관측실패 hard-fail · pricingVersion · assistant_text 보존 · stream↛observability 경계 수정 · span/seq/schema-registry/patch·sandbox·verifier 증거 · redaction 게이트화 · probe 비권위
 
 ---
@@ -21,7 +21,7 @@
 - run_id → instance → attempt(Best-of-N) → turn → span(tool/llm) → tool_use 까지 **상관키로 슬라이스 조회** 가능.
 - 유료 실행의 **인스턴스별 토큰·비용·지연**이 집계로 남고, 비용은 **pricingVersion이 박혀 사후 재계산 가능**.
 - `bun run probe <run-dir>` 한 줄로 timeline·triage(가설, 권위 아님)·hotspots·cost 렌더.
-- 신규 런타임 의존성 **0**, 슬라이스 경계 위반 0, redaction 골든 테스트 통과. **anti-bloat 원칙은 유지하되 LoC 목표는 정직하게 재기**: 당초 "< 1.4k" 수치는 SOTA++ 산출 실측(신규 파일 단독 ≈1.7k)을 넘어 사문화 — 하드 LoC 캡 대신 "신규 dep 0 · 신규 슬라이스 최소 · 경계 위반 0"을 게이트로 본다(특정 LoC 숫자는 드리프트 방지 위해 비고정).
+- 신규 런타임 의존성 **0**, 슬라이스 경계 위반 0, redaction 골든 테스트 통과. **anti-bloat 게이트**: 신규 dep 0 · 신규 슬라이스 최소 · 경계 위반 0 (전역 LoC 캡 없음, ADR-0012).
 
 ### 1.2 Non-Goals
 
@@ -296,7 +296,7 @@ W-A→(B)→(C‖D), E는 스키마 확정 후 독립. 각 웨이브: tsc 0 / bi
 | JSONL 비대(500-instance) | 높 | 중 | 인스턴스별 파일·라인상한·tail+path(전체 저장 금지)·요약은 metrics.json |
 | 스키마 드리프트 | 중 | 중 | `schema`+`v`+골든, probe 후방호환 |
 | probe 오진을 단정으로 오용 | 중 | 중 | 비권위 설계(hint/confidence), 원증거 동시 제시 |
-| anti-bloat 침범 | 중 | 큼 | 신규 슬라이스 최소·dep 0 게이트(특정 LoC 캡은 §1.1대로 비고정), 신규 app만 ADR |
+| anti-bloat 침범 | 중 | 큼 | 신규 슬라이스 최소·dep 0·경계 0 게이트(LoC 캡 없음, ADR-0012), 신규 app만 ADR |
 
 ---
 

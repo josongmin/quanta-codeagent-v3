@@ -126,6 +126,13 @@ export interface AgentConfig {
    */
   compactionBreaker?: { disabled?: boolean; caps?: Partial<CompactionBreakerCaps> }
   /**
+   * Verify-guard control (SOTA++ Tier 0 safety). Absent ⇒ guard fully OFF and
+   * the loop is byte-identical. When present, a finish attempt right after a
+   * mutating tool with no test/reproduction since is blocked, forcing one more
+   * turn (up to `maxTrips`, default 2 — capped to avoid infinite forcing).
+   */
+  verifyGuard?: { maxTrips?: number }
+  /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like
    * `metrics?`/`hooks?`). When present the loop maintains a per-turn working

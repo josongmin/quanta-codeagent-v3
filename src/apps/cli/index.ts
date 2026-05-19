@@ -156,6 +156,20 @@ const buildSubagentConfig = (): AgentConfig["subagent"] | undefined => {
 }
 
 /**
+ * Resolve the verify-guard control from env (SOTA++ Tier 0 safety, ADR-0011).
+ * Default OFF: `QUANTA_VERIFY_GUARD` unset ⇒ `undefined` so the key is omitted
+ * and the loop is byte-identical (no tool-history, no finish interception).
+ * When set, a finish right after an unverified mutating tool is blocked,
+ * forcing one more turn up to `QUANTA_VERIFY_GUARD_MAX_TRIPS` (else default 2).
+ */
+const buildVerifyGuardConfig = (): AgentConfig["verifyGuard"] | undefined => {
+  if (process.env.QUANTA_VERIFY_GUARD === undefined) return undefined
+  const raw = process.env.QUANTA_VERIFY_GUARD_MAX_TRIPS
+  const trips = raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN
+  return Number.isFinite(trips) ? { maxTrips: trips } : {}
+}
+
+/**
  * Resolve the `skills` config block from env (SOTA++ Tier 1, ADR-0011).
  * Default OFF: `QUANTA_SKILLS_DIR` unset ⇒ `undefined` so the key is omitted
  * and no skill discovery happens / the `Skill`/`ToolSearch` tools are NOT
@@ -398,6 +412,7 @@ interface SessionDeps {
   subagentConfig: AgentConfig["subagent"] | undefined
   skillsConfig: AgentConfig["skills"] | undefined
   compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
+  verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
   summarizerLlm: LLMPort | undefined
 }
 
@@ -439,6 +454,7 @@ const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {
     ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
     ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
     ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
+    ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
   }
 }
 
@@ -454,6 +470,7 @@ interface Tooling {
   subagentConfig: AgentConfig["subagent"] | undefined
   skillsConfig: AgentConfig["skills"] | undefined
   compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
+  verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
 }
 
 const buildTooling = (mcpTools: Tool[], lspTools: Tool[], slog: StructuredLogger): Tooling => {
@@ -472,9 +489,11 @@ const buildTooling = (mcpTools: Tool[], lspTools: Tool[], slog: StructuredLogger
   const subagentConfig = buildSubagentConfig()
   const skillsConfig = buildSkillsConfig()
   const compactionBreakerConfig = buildCompactionBreakerConfig()
+  const verifyGuardConfig = buildVerifyGuardConfig()
   if (subagentConfig) slog.info("subagent.on", subagentConfig)
   if (skillsConfig) slog.info("skills.on", skillsConfig)
   if (compactionBreakerConfig) slog.info("compaction.breaker.config", compactionBreakerConfig)
+  if (verifyGuardConfig) slog.info("verify.guard.on", verifyGuardConfig)
   // Self-edit memory tools: only when a store exists and `memory.selfEditTools`
   // is not opted out (single knob: QUANTA_MEMORY_SELF_EDIT). With no store the
   // registry is byte-identical to before (nothing appended).
@@ -492,6 +511,7 @@ const buildTooling = (mcpTools: Tool[], lspTools: Tool[], slog: StructuredLogger
     subagentConfig,
     skillsConfig,
     compactionBreakerConfig,
+    verifyGuardConfig,
   }
 }
 
@@ -527,6 +547,7 @@ const main = async (): Promise<void> => {
     subagentConfig,
     skillsConfig,
     compactionBreakerConfig,
+    verifyGuardConfig,
   } = buildTooling(mcpTools, lspTools, slog)
   // `let` because a resumed session reassigns it before any turn (preserved).
   let sessionId = initialSessionId
@@ -591,6 +612,7 @@ const main = async (): Promise<void> => {
     subagentConfig,
     skillsConfig,
     compactionBreakerConfig,
+    verifyGuardConfig,
     summarizerLlm: buildSummarizerLlm(provider, abort.signal),
   }
   const session = (messages: Message[]): Promise<AgentOutcome> =>

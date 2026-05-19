@@ -1,6 +1,6 @@
 # Quanta CodeAgent v3
 
-ReAct 기반 코딩 에이전트. 처음부터 새로 작성. 목표: 전체 20k LoC 미만.
+ReAct 기반 코딩 에이전트. 처음부터 새로 작성.
 
 설계는 [rfc/0001-architecture.md](rfc/0001-architecture.md) 참조.
 Claude Code v2 리버스 분석은 `docs/analysis/`를 **이해 용도로만** 참고 (구조 복제 금지).

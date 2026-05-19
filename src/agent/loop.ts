@@ -19,6 +19,7 @@ import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
 import { streamingTurn } from "./streaming-dispatch"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
+import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
 
 /** Bounded per-turn recovery budgets. These cap SAME-TURN retries so a
  *  pathological provider can never spin the loop forever; once exhausted the
@@ -27,6 +28,24 @@ const MAX_TURN_STREAM_RETRIES = 3
 const MAX_OUTPUT_CONTINUES = 3
 const MAX_MALFORMED_RETRIES = 1
 const MAX_CONSECUTIVE_EMPTIES = 2
+
+/** SOTA++ Tier 0 verify-guard history element. A real SWE-bench run proved the
+ *  guard fired 0 times because the agent runs a noise `bash` (`git status`/`ls`)
+ *  after editing and the old policy counted ANY bash as "verified", defeating
+ *  the guard. R1's tightened `decideVerifyGuard` only counts a `bash` as a
+ *  verification when its command string matches a test/repro regex — so the
+ *  loop MUST carry the bash command string here (it previously pushed only the
+ *  name, leaving `arg` always undefined). `arg` is conditionally set for `bash`
+ *  ONLY (exactOptionalPropertyTypes: omitted, never `arg: undefined`). */
+type ToolHistoryEntry = { name: string; arg?: string }
+
+/** Shared frozen empty history for the guard-OFF path. `toolHistory` is
+ *  `undefined` when `config.verifyGuard` is absent; passing this shared
+ *  constant (instead of a fresh `[]` literal per turn) keeps the default-OFF
+ *  path allocation-free AND behaviorally byte-identical (decideVerifyGuard is
+ *  never reached when the guard is off — `applyAction` only needs a readonly
+ *  empty array to satisfy the type). */
+const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
 
 /**
  * ReAct loop. One `while` over turns; each turn = one LLM stream with tool
@@ -76,7 +95,7 @@ const emitUsage = (config: AgentConfig, ev: Extract<StreamEvent, { type: "usage"
 
 /** Stable, small set of `recovery` reasons (RFC-0002 §5.2). Group E maps these
  *  → trajectory kinds; keep the set closed so probe/triage can rely on it. */
-type RecoveryReason = "backoff" | "compact" | "nudge" | "empty" | "malformed"
+type RecoveryReason = "backoff" | "compact" | "nudge" | "empty" | "malformed" | "unverified"
 
 /** Pure side-effect emit of a `{type:"recovery"}` AgentEvent at a recovery
  *  point the loop ALREADY reaches (backoff/compact/nudge/empty/malformed). It
@@ -204,6 +223,7 @@ const streamConsume = async (
   recorder: AgentRecorder | undefined,
   classifier: AutoModeClassifier | undefined,
   skillGate: SkillGate | undefined,
+  toolHistory: ToolHistoryEntry[] | undefined,
 ): Promise<StreamConsumeResult> => {
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
@@ -274,6 +294,29 @@ const streamConsume = async (
       onToolStart: (call) => {
         config.stream.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input })
         recorder?.toolCall(call.name)
+        // SOTA++ Tier 0 verify-guard: ordered dispatched tool entries this run.
+        // `toolHistory` is created ONLY when `config.verifyGuard` is set, so
+        // with the guard absent this push never runs (byte-identical).
+        // A real SWE-bench run showed the guard fired 0 times: the agent ran a
+        // noise `bash` (`git status`) after editing and the old policy treated
+        // ANY bash as "verified". R1's tightened policy only counts a `bash`
+        // when its command matches a test/repro regex — so for `bash` we MUST
+        // carry the command string (the bash tool input is `{command:string}`);
+        // without it `arg` is always undefined and every real `pytest`/`python
+        // repro.py` would be (wrongly) treated as non-verify. For non-`bash`
+        // tools `arg` is OMITTED (exactOptionalPropertyTypes — never undefined).
+        if (toolHistory) {
+          const command =
+            call.name === "bash" &&
+            typeof call.input === "object" &&
+            call.input !== null &&
+            "command" in call.input
+              ? (call.input as { command: unknown }).command
+              : undefined
+          toolHistory.push(
+            typeof command === "string" ? { name: call.name, arg: command } : { name: call.name },
+          )
+        }
       },
       signal: config.signal,
     })
@@ -560,6 +603,52 @@ const CONTINUE: Step = { done: false }
  *  `{done:true}` with the terminal {@link TurnResult}. The `proceed` branch
  *  uses the tool_result blocks `streamingTurn` already produced (dispatch
  *  happened DURING the stream) instead of dispatching here. */
+/** SOTA++ Tier 0 verify-guard hook. Observed bench failure: the agent edits a
+ *  source file then declares "done" with ZERO verification calls after the edit
+ *  → a wrong fix ships. When `config.verifyGuard` is set and the model is about
+ *  to finish right after an unverified mutating tool, convert the completion
+ *  into the SAME nudge action the recovery machinery already understands
+ *  (`keepMessage:true` so the final assistant turn is preserved, no maxTurns
+ *  consumption, recovery emitted) up to `maxTrips`. `config.verifyGuard`
+ *  absent ⇒ this is never called (default-OFF, byte-identical). */
+/** True when this decided action is a finish attempt: an exhaustion-completed
+ *  (malformed/empty retries spent) OR a proceed turn that produced NO tool_use
+ *  (a pure-text "I'm done"). These are exactly the two points the loop accepts
+ *  a completion, so they are the points the verify-guard must intercept. */
+const isFinishAttempt = (action: RecoveryAction, message: AssembledMessage): boolean =>
+  action.do === "completed" ||
+  (action.do === "proceed" && !message.content.some((b) => b.type === "tool_use"))
+
+/** If `config.verifyGuard` is set and the model is finishing right after an
+ *  unverified edit, mutate `wm` with the kept assistant turn + the forcing
+ *  meta-user message and return `CONTINUE` (reusing the SAME nudge machinery:
+ *  no maxTurns consumption, recovery emitted). Returns `undefined` to let the
+ *  completion proceed unchanged. Guard absent ⇒ never blocks (byte-identical). */
+const verifyGuardStep = (
+  config: AgentConfig,
+  action: RecoveryAction,
+  message: AssembledMessage,
+  wm: WorkingMemory<Message>,
+  history: readonly ToolHistoryEntry[],
+  state: VerifyGuardState | undefined,
+): Step | undefined => {
+  if (config.verifyGuard === undefined || state === undefined) return undefined
+  if (!isFinishAttempt(action, message)) return undefined
+  // History already carries the `{name, arg?}` shape R1's policy needs (the
+  // bash command is captured at dispatch in `streamConsume` — see the empirical
+  // 0-trip finding there); pass it straight through, no per-call remap.
+  const verdict = decideVerifyGuard({
+    history,
+    cfg: config.verifyGuard,
+    state,
+  })
+  if (!verdict.block || verdict.text === undefined) return undefined
+  emitRecovery(config, "unverified")
+  wm.append(message)
+  wm.append(metaUser(verdict.text))
+  return CONTINUE
+}
+
 const applyAction = async (
   config: AgentConfig,
   action: RecoveryAction,
@@ -567,6 +656,8 @@ const applyAction = async (
   wm: WorkingMemory<Message>,
   ctxSystem: SystemPromptInput,
   breaker: CompactionBreaker | undefined,
+  history: readonly ToolHistoryEntry[],
+  verifyGuardState: VerifyGuardState | undefined,
 ): Promise<Step> => {
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
   if (action.do === "backoff") {
@@ -602,6 +693,11 @@ const applyAction = async (
   // and the (already dispatched) tool_result blocks.
   const success = result as StreamSuccess
   const message = success.message
+  // SOTA++ Tier 0: a finish attempt right after an unverified edit is forced
+  // into one more turn. All the branching/decision lives in `verifyGuardStep`
+  // so this hot path stays a single guarded call (default-OFF ⇒ undefined).
+  const guarded = verifyGuardStep(config, action, message, wm, history, verifyGuardState)
+  if (guarded) return guarded
   if (action.do === "completed") {
     // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
     // empty-turn-exhausted) previously returned WITHOUT appending the final
@@ -634,6 +730,8 @@ const runTurn = async (
   breaker: CompactionBreaker | undefined,
   classifier: AutoModeClassifier | undefined,
   skillGate: SkillGate | undefined,
+  toolHistory: ToolHistoryEntry[] | undefined,
+  verifyGuardState: VerifyGuardState | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -651,6 +749,7 @@ const runTurn = async (
       recorder,
       classifier,
       skillGate,
+      toolHistory,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -659,7 +758,19 @@ const runTurn = async (
         ? decideOnStreamError(result.error, result.message, rec)
         : decideOnAssembled(result.stopReason, result.message, rec)
 
-    const step = await applyAction(config, action, result, wm, ctx.system, breaker)
+    const step = await applyAction(
+      config,
+      action,
+      result,
+      wm,
+      ctx.system,
+      breaker,
+      // Audit [LOW]: the guard-OFF path used to allocate a throwaway `[]`
+      // EVERY turn (contradicting the byte-identical zero-allocation intent).
+      // Reuse one shared frozen empty array when the guard is off.
+      toolHistory ?? EMPTY_TOOL_HISTORY,
+      verifyGuardState,
+    )
     if (step.done) return step.result
   }
 }
@@ -690,6 +801,16 @@ const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentCon
       }
     : config
 
+/** SOTA++ Tier 0 verify-guard per-run resources. Built ONLY when
+ *  `config.verifyGuard` is set: a forcing-budget state object + an ordered
+ *  dispatched-tool-name log. Absent ⇒ both `undefined` (no allocation, the
+ *  history push + guard decision are never reached → loop byte-identical).
+ *  Extracted so `runAgent` gains no extra cognitive-complexity branch. */
+const buildVerifyGuard = (
+  config: AgentConfig,
+): { state?: VerifyGuardState; history?: ToolHistoryEntry[] } =>
+  config.verifyGuard ? { state: createVerifyGuardState(), history: [] } : {}
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // SOTA++ Tier 1 (ADR-0011): materialize optional subsystems ONCE. With no
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
@@ -711,6 +832,12 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const breaker = cfg.compactionBreaker?.disabled
     ? undefined
     : new CompactionBreaker(cfg.compactionBreaker?.caps)
+  // SOTA++ Tier 0 verify-guard (ADR-0011): per-run forcing budget + ordered
+  // dispatched-tool log, created ONLY when `cfg.verifyGuard` is set. Absent ⇒
+  // both stay `undefined`, no object is allocated, the history push and the
+  // guard decision are never reached → loop is byte-for-byte identical. The
+  // construction is factored out so `runAgent` gains ZERO new branch points.
+  const { state: verifyGuardState, history: toolHistory } = buildVerifyGuard(cfg)
 
   const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
     const messages = [...wm.snapshot()]
@@ -760,6 +887,8 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
       breaker,
       classifier,
       skillGate,
+      toolHistory,
+      verifyGuardState,
     )
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
