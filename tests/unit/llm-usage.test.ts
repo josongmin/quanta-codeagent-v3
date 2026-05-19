@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { StreamEvent, StreamInput } from "@/llm"
-import { assembleFromEvents } from "@/llm"
-import { AnthropicAdapter } from "@/llm"
+import { AnthropicAdapter, assembleFromEvents } from "@/llm"
 import type { OpenSlots, RawEvent, UsageAccumulator } from "@/llm/adapters/anthropic"
 import { mapRawEvent } from "@/llm/adapters/anthropic"
 import type { RawChunk } from "@/llm/adapters/openai"
@@ -67,15 +66,13 @@ describe("Anthropic adapter — usage emission (RFC-0002 §5.3)", () => {
       },
     ])
 
-    // Usage is emitted before (or at) the terminal message_stop.
+    // The stop_reason StreamEvent rides on the raw `message_delta`; usage MUST
+    // be emitted immediately before that terminal message_stop StreamEvent.
     const usageIdx = out.findIndex((e) => e.type === "usage")
     const stopIdx = out.findIndex((e) => e.type === "message_stop")
-    // message_stop itself maps to nothing in mapRawEvent; the stop_reason
-    // event comes from message_delta. Assert usage precedes any later events.
     expect(usageIdx).toBeGreaterThanOrEqual(0)
-    expect(stopIdx).toBe(-1) // message_stop emits no StreamEvent
-    const msgStop = out.findIndex((e) => e.type === "message_stop")
-    expect(msgStop).toBe(-1)
+    expect(stopIdx).toBeGreaterThan(usageIdx)
+    expect(out.at(-1)).toEqual({ type: "message_stop", stop_reason: "end_turn" })
   })
 
   test("no cache_read_input_tokens ⇒ usage event omits cacheReadTokens entirely (no zero)", () => {

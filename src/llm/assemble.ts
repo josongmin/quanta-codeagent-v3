@@ -9,11 +9,18 @@ export interface AssembledTurn {
  *  Anthropic streams content blocks sequentially (one completes before the
  *  next starts), so we can append by position without interleave tracking. */
 export const assembleFromEvents = (events: StreamEvent[]): AssembledTurn => {
-  const content: ContentBlock[] = []
+  let content: ContentBlock[] = []
   let stopReason = "end_turn"
 
   for (const ev of events) {
     switch (ev.type) {
+      case "stream_reset":
+        // Tombstone: the events seen so far are a dead partial. Drop all
+        // accumulated content/blocks and stop-reason so the assembled message
+        // reflects ONLY the replacement stream that follows.
+        content = []
+        stopReason = "end_turn"
+        break
       case "text_delta": {
         const last = content.at(-1)
         if (last?.type === "text") last.text += ev.delta

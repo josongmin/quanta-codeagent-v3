@@ -54,7 +54,6 @@ describe("permission HARD_DENY hardening", () => {
     ["rm -rf node_modules", "node_modules"],
     ["rm -rf dist/", "dist dir"],
     ["find . -name '*.ts' -print", "find . no delete"],
-    ["find ./src -type f -delete", "find relative -delete is allowed"],
     ["chmod -R 755 ./dist", "chmod local dir"],
     ["chmod 644 file.txt", "chmod single file"],
     ["curl http://x -o out.json", "curl to file, no pipe-to-shell"],

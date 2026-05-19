@@ -33,9 +33,10 @@ import { join, resolve } from "node:path"
 import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import type { AttemptObservation } from "./observe"
 import { isPythonSwebenchAvailable } from "./python-swebench"
 import { buildReport, writeReport } from "./report"
-import { runInstance } from "./runner"
+import { finalizeRun, runInstance } from "./runner"
 import { patchVote, sampleBestOfN } from "./sampler"
 import { loadCorpus } from "./swebench"
 import {
@@ -128,18 +129,48 @@ const printSummary = (summary: BenchSummary): void => {
  *  only when `QUANTA_SWEBENCH_PYTHON=1` and the harness is importable. */
 type RunCfg = Parameters<typeof runInstance>[1]
 
+/**
+ * Run-level observe handle (RFC §8). Resolved ONCE from `--observe-dir` /
+ * `QUANTA_OBSERVE_DIR`; undefined ⇒ default-OFF, byte-identical behavior.
+ */
+interface ObserveCtx {
+  dir: string
+  runId: string
+}
+
+/** Resolve the observe root, or undefined when neither flag/env is set. */
+const resolveObserve = (): ObserveCtx | undefined => {
+  const dir = argValue("--observe-dir") ?? process.env.QUANTA_OBSERVE_DIR
+  if (!dir) return undefined
+  const runId = process.env.QUANTA_RUN_ID ?? `run-${Date.now()}`
+  return { dir: resolve(process.cwd(), dir), runId }
+}
+
+/** Per-attempt observe handle for one instance (one file per attempt). */
+const attemptObs = (
+  obs: ObserveCtx | undefined,
+  attempt: number,
+): AttemptObservation | undefined =>
+  obs === undefined ? undefined : { dir: obs.dir, runId: obs.runId, attempt }
+
+const withObserve = (base: RunCfg, o: AttemptObservation | undefined): RunCfg =>
+  o === undefined ? base : { ...base, observe: o }
+
 /** Run one instance n times via Best-of-N; pick passing run, then majority
- *  patch vote as a tiebreak among equally-scored runs. */
+ *  patch vote as a tiebreak among equally-scored runs. Each attempt gets its
+ *  own 0-based observe file (RFC §8 Best-of-N: one file per attempt). */
 const resolveInstance = async (
   instance: Instance,
   base: Omit<RunCfg, never>,
   n: number,
+  obs?: ObserveCtx,
 ): Promise<InstanceResult> => {
-  if (n <= 1) return runInstance(instance, base)
+  if (n <= 1) return runInstance(instance, withObserve(base, attemptObs(obs, 0)))
 
+  let attempt = 0
   const out = await sampleBestOfN<InstanceResult>({
     n,
-    makeAttempt: () => runInstance(instance, base),
+    makeAttempt: () => runInstance(instance, withObserve(base, attemptObs(obs, attempt++))),
     score: (r) => (r.passed ? 1 : 0),
   })
 
@@ -171,6 +202,7 @@ const runDatasetMode = async (
   llm: LLMPort,
   meta: { provider: string; model: string },
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
+  obs?: ObserveCtx,
 ): Promise<void> => {
   const tasks: SwebenchTask[] = parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
   if (tasks.length === 0) {
@@ -204,6 +236,7 @@ const runDatasetMode = async (
           instance,
           { llm, maxTurns: cfg.maxTurns, timeoutMs: cfg.timeoutMs },
           cfg.n,
+          obs,
         ),
       )
     } catch (e) {
@@ -237,6 +270,21 @@ const runDatasetMode = async (
     resolved: results.filter((r) => r.passed).length,
     results,
   })
+  await finalizeObserve(obs, results)
+}
+
+/** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and
+ *  log resolved/total/degraded. No-op when observe is OFF. */
+const finalizeObserve = async (
+  obs: ObserveCtx | undefined,
+  results: InstanceResult[],
+): Promise<void> => {
+  if (obs === undefined) return
+  const summary = await finalizeRun(obs, results)
+  logger.info(
+    `observe: ${join(obs.dir, obs.runId)} — resolved ${summary.resolved}/${summary.total}` +
+      ` (${summary.degraded} degraded)`,
+  )
 }
 
 /** Resolve provider/model/LLM; exits 0 with guidance when the key is absent
@@ -256,12 +304,15 @@ const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLM
 
 /** Official-dataset entrypoint. Returns true when it handled the run (so main
  *  skips the custom-corpus path entirely). */
-const maybeRunDatasetMode = async (cfg: {
-  n: number
-  limitArg?: string
-  maxTurns: number
-  timeoutMs: number
-}): Promise<boolean> => {
+const maybeRunDatasetMode = async (
+  cfg: {
+    n: number
+    limitArg?: string
+    maxTurns: number
+    timeoutMs: number
+  },
+  obs?: ObserveCtx,
+): Promise<boolean> => {
   const datasetFile = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET ?? ""
   if (!datasetFile) return false
   if (!existsSync(datasetFile)) {
@@ -281,6 +332,7 @@ const maybeRunDatasetMode = async (cfg: {
       maxTurns: cfg.maxTurns,
       timeoutMs: cfg.timeoutMs,
     },
+    obs,
   )
   return true
 }
@@ -306,13 +358,16 @@ const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
 
 /** Custom-corpus entrypoint (the path when no --swebench dataset is given).
  *  Handles --dry-run (no LLM), empty-corpus + no-key guidance, then runs. */
-const runCustomCorpusMode = async (cfg: {
-  corpusRoot: string
-  n: number
-  limit: number | null
-  maxTurns: number
-  timeoutMs: number
-}): Promise<void> => {
+const runCustomCorpusMode = async (
+  cfg: {
+    corpusRoot: string
+    n: number
+    limit: number | null
+    maxTurns: number
+    timeoutMs: number
+  },
+  obs?: ObserveCtx,
+): Promise<void> => {
   const all = await loadCorpus(cfg.corpusRoot)
   const pythonHarness = process.env.QUANTA_SWEBENCH_PYTHON === "1"
 
@@ -349,13 +404,14 @@ const runCustomCorpusMode = async (cfg: {
   }
   const results: InstanceResult[] = []
   for (const instance of instances) {
-    results.push(await resolveInstance(instance, base, cfg.n))
+    results.push(await resolveInstance(instance, base, cfg.n, obs))
   }
   printSummary({
     total: results.length,
     resolved: results.filter((r) => r.passed).length,
     results,
   })
+  await finalizeObserve(obs, results)
 }
 
 const main = async (): Promise<void> => {
@@ -367,13 +423,17 @@ const main = async (): Promise<void> => {
   const limit = limitArg ? Number(limitArg) : null
   const maxTurns = Number(process.env.QUANTA_MAX_TURNS ?? "30")
   const timeoutMs = Number(process.env.QUANTA_BENCH_TIMEOUT_MS ?? "120000")
+  // RFC §8: default-OFF. Absent ⇒ NullStream, byte-identical to before.
+  const obs = resolveObserve()
 
   // Official-dataset mode takes precedence; when its flag/env is unset the
   // custom-corpus path is byte-for-byte unchanged.
-  if (await maybeRunDatasetMode({ n, ...(limitArg ? { limitArg } : {}), maxTurns, timeoutMs })) {
+  if (
+    await maybeRunDatasetMode({ n, ...(limitArg ? { limitArg } : {}), maxTurns, timeoutMs }, obs)
+  ) {
     return
   }
-  await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs })
+  await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs }, obs)
 }
 
 main().catch((e) => {

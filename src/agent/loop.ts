@@ -1,6 +1,6 @@
-import { assembleFromEvents, type Message, type SystemPromptInput } from "@/llm"
+import { assembleFromEvents, type Message, type StreamEvent, type SystemPromptInput } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
-import { LLMError } from "@/shared"
+import { LLMError, type RunContext } from "@/shared"
 import { compactIfNeeded, reactiveCompact } from "./compaction"
 import { dispatchTool } from "./dispatch"
 import { type PersistDeps, persistSession, recallContext } from "./memory"
@@ -104,6 +104,20 @@ const runBatch = async (
   return blocks
 }
 
+/** Bridge a `{type:"usage"}` StreamEvent (W-A2, currently dropped by
+ *  `assembleFromEvents`) to the homomorphic `AgentEvent` so recorders capture
+ *  token/usage. 1:1 field map; this is the ONLY new emit and is independent of
+ *  all existing control flow / emit ordering. */
+const emitUsage = (config: AgentConfig, ev: Extract<StreamEvent, { type: "usage" }>): void => {
+  config.stream.emit({
+    type: "usage",
+    inputTokens: ev.inputTokens,
+    outputTokens: ev.outputTokens,
+    model: ev.model,
+    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+  })
+}
+
 /** Consume one LLM stream, emitting assistant_text deltas. Returns the
  *  assembled message + normalized stop reason, or `{ error }` (carrying the
  *  raw thrown value so the loop can classify it) if the stream threw. */
@@ -127,6 +141,8 @@ const consumeTurnStream = async (
       events.push(ev)
       if (ev.type === "text_delta") {
         config.stream.emit({ type: "assistant_text", delta: ev.delta })
+      } else if (ev.type === "usage") {
+        emitUsage(config, ev)
       }
     }
   } catch (e) {
@@ -476,6 +492,13 @@ const runTurn = async (
   }
 }
 
+/** Per-turn correlation context (RFC-0002 §5.1/§5.4). A fresh shallow copy of
+ *  the caller's `config.run` with `turn` restamped — so `config.run` is NEVER
+ *  mutated. Returns `undefined` when unconfigured (zero overhead, loop
+ *  byte-identical). Pure: used only for correlation, never control flow. */
+const stampTurn = (run: RunContext | undefined, turn: number): RunContext | undefined =>
+  run ? { ...run, turn } : undefined
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const { stream, registry } = config
   // Canonical in-session message buffer (RFC §6.3). Seeded from the public
@@ -503,6 +526,15 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
 
   for (let turn = 1; turn <= config.maxTurns; turn++) {
     if (config.signal.aborted) return finish("aborted", turn - 1)
+    // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Computed every
+    // turn from a fresh shallow copy so the caller's `config.run` is NEVER
+    // mutated. It deliberately feeds no control flow / emit ordering /
+    // StopReason / messages — recorders correlate via their own injected
+    // `ctx`; this is the loop honouring the "loop advances `turn`" contract
+    // without any behavioural coupling. No downstream consumer in W-C (the
+    // explicit discard documents that intent; W-D/probe read `turn` off the
+    // trajectory, not via this binding).
+    void stampTurn(config.run, turn)
     stream.emit({ type: "turn_start", turn })
     recorder?.turn()
     if (config.hooks) await config.hooks.emit({ type: "turn_start", turn })

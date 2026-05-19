@@ -51,11 +51,23 @@ export interface SystemBlock {
 export type SystemPromptInput = string | SystemBlock[]
 
 export type StreamEvent =
+  /** Tombstone: every event yielded so far in this turn belongs to a now-dead
+   *  partial (e.g. a provider died mid-stream and {@link FallbackLLM} switched
+   *  to a backup). A consumer assembling a message MUST discard everything it
+   *  has accumulated and start fresh from the next event. Emitted as the first
+   *  event of the replacement stream; never emitted before any other event. */
+  | { type: "stream_reset" }
   | { type: "text_delta"; delta: string }
   | { type: "tool_use_start"; id: string; name: string }
   | { type: "tool_use_delta"; id: string; delta: string }
   | { type: "tool_use_end"; id: string; input: unknown }
-  | { type: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens?: number; model: string }
+  | {
+      type: "usage"
+      inputTokens: number
+      outputTokens: number
+      cacheReadTokens?: number
+      model: string
+    }
   | { type: "message_stop"; stop_reason: string }
 
 export interface StreamInput {

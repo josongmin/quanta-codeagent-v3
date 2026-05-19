@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import * as readline from "node:readline/promises"
 import {
   type AgentConfig,
@@ -18,8 +19,8 @@ import type { McpClient, McpServerConfig } from "@/mcp"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
 import { Metrics, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
-import { logger } from "@/shared"
-import { StdoutStream } from "@/stream"
+import { logger, type RunContext } from "@/shared"
+import { JsonlRecorder, StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { defaultTools, type Tool, ToolRegistry } from "@/tool"
 import { loadEnvFiles } from "./dotenv"
 
@@ -155,6 +156,14 @@ const resumePath = (): string | undefined => {
   return process.env.QUANTA_RESUME
 }
 
+/** Resolve the observe dir: `--observe-dir <d>` / `QUANTA_OBSERVE_DIR`.
+ *  Default OFF (undefined) → current behavior byte-identical. */
+const observeDir = (): string | undefined => {
+  const idx = process.argv.indexOf("--observe-dir")
+  if (idx >= 0) return process.argv[idx + 1]
+  return process.env.QUANTA_OBSERVE_DIR
+}
+
 /** Plan mode is on when `QUANTA_PLAN=1` or `--plan` is present. */
 const planEnabled = (): boolean => process.env.QUANTA_PLAN === "1" || hasArg("--plan")
 
@@ -184,7 +193,8 @@ const argvPrompt = (): string =>
     .filter((a) => a !== "--plan" && a !== "--lsp")
     .filter((a, i, arr) => {
       const flagged = arr[i - 1]
-      return a !== "--state" && a !== "--resume" && flagged !== "--state" && flagged !== "--resume"
+      const valued = ["--state", "--resume", "--observe-dir"]
+      return !valued.includes(a) && !valued.includes(flagged ?? "")
     })
     .join(" ")
     .trim()
@@ -273,7 +283,20 @@ const main = async (): Promise<void> => {
       ? memoryTools({ store, ...(embedder ? { embedder } : {}) })
       : []
   const registry = new ToolRegistry([...defaultTools, ...mcpTools, ...memTools, ...lspTools])
-  const stream = new StdoutStream()
+
+  // Observability (RFC-0002 §5.4/§8). Default OFF → byte-identical to today.
+  // When set: a runId tags a RunContext, and the stdout stream is fanned out
+  // to a JsonlRecorder writing the canonical trajectory.
+  const observe = observeDir()
+  let run: RunContext | undefined
+  let stream: StreamPort = new StdoutStream()
+  if (observe) {
+    const runId = crypto.randomUUID()
+    run = { runId }
+    const recorder = new JsonlRecorder(join(observe, runId, "session.jsonl"), { ctx: run })
+    stream = new TeeStream([stream, recorder])
+    slog.info("observe.on", { dir: observe, runId })
+  }
   const permission: PermissionContext = { mode }
 
   const abort = new AbortController()
@@ -313,6 +336,7 @@ const main = async (): Promise<void> => {
       ...(memoryConfig ? { memory: memoryConfig } : {}),
       ...(planMode ? { planMode: true } : {}),
       ...(metrics ? { metrics } : {}),
+      ...(run ? { run } : {}),
     }
     return runAgent(config)
   }

@@ -190,6 +190,26 @@ export const buildUsageEvent = (
   }
 }
 
+interface StreamState {
+  pending: Map<number, PendingCall>
+  finish: string | null
+  rawUsage: RawUsage | null | undefined
+  usageModel: string
+}
+
+/** Map one streamed chunk to events, threading finish/usage/model into the
+ *  shared state. The trailing usage chunk has empty `choices`, so usage/model
+ *  are captured before the early return. */
+function* processChunk(chunk: RawChunk, st: StreamState): Generator<StreamEvent> {
+  if (chunk.usage) st.rawUsage = chunk.usage
+  if (chunk.model) st.usageModel = chunk.model
+  const choice = chunk.choices[0]
+  if (!choice) return
+  if (choice.delta.content) yield { type: "text_delta", delta: choice.delta.content }
+  yield* mapToolCallDeltas(chunk, st.pending)
+  if (choice.finish_reason) st.finish = choice.finish_reason
+}
+
 export class OpenAIAdapter implements LLMPort {
   private readonly client: OpenAI
   private readonly model: string
@@ -226,33 +246,26 @@ export class OpenAIAdapter implements LLMPort {
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     const raw = await this.openRawStream(input)
-    const pending = new Map<number, PendingCall>()
-    let finish: string | null = null
-    let rawUsage: RawUsage | null | undefined
-    let usageModel = this.model
+    const st: StreamState = {
+      pending: new Map<number, PendingCall>(),
+      finish: null,
+      rawUsage: undefined,
+      usageModel: this.model,
+    }
 
     try {
-      for await (const chunk of raw) {
-        if (chunk.usage) rawUsage = chunk.usage
-        if (chunk.model) usageModel = chunk.model
-        const choice = chunk.choices[0]
-        if (!choice) continue
-        const content = choice.delta.content
-        if (content) yield { type: "text_delta", delta: content }
-        yield* mapToolCallDeltas(chunk, pending)
-        if (choice.finish_reason) finish = choice.finish_reason
-      }
+      for await (const chunk of raw) yield* processChunk(chunk, st)
     } catch (e) {
       if (e instanceof LLMError) throw e
       throw new LLMError(`OpenAI stream error: ${(e as Error).message}`, { cause: e })
     }
 
-    yield* finalizeCalls(pending)
-    const usageEvent = buildUsageEvent(rawUsage, usageModel)
+    yield* finalizeCalls(st.pending)
+    const usageEvent = buildUsageEvent(st.rawUsage, st.usageModel)
     if (usageEvent) yield usageEvent
     yield {
       type: "message_stop",
-      stop_reason: finish ? (STOP_REASON[finish] ?? finish) : "end_turn",
+      stop_reason: st.finish ? (STOP_REASON[st.finish] ?? st.finish) : "end_turn",
     }
   }
 }

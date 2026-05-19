@@ -5,4 +5,11 @@ export type AgentEvent =
   | { type: "tool_progress"; id: string; name: string; message: string }
   | { type: "tool_result"; id: string; name: string; ok: boolean; preview: string }
   | { type: "error"; message: string }
+  | {
+      type: "usage"
+      inputTokens: number
+      outputTokens: number
+      cacheReadTokens?: number
+      model: string
+    }
   | { type: "done"; reason: string; turns: number }

@@ -2,6 +2,8 @@ export { AnthropicAdapter } from "./adapters/anthropic"
 export { OpenAIAdapter } from "./adapters/openai"
 export type { AssembledTurn } from "./assemble"
 export { assembleFromEvents, hasToolUse } from "./assemble"
+export type { FallbackLLMOptions } from "./fallback"
+export { FallbackLLM, isFallbackTrigger } from "./fallback"
 export type { LLMPort } from "./ports"
 export type {
   ContentBlock,

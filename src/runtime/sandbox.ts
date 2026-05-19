@@ -58,7 +58,32 @@ const TRUNCATION_MARKER = "\n…[output truncated by sandbox maxOutputBytes]"
  *  SINGLE source of truth for the env allowlist — `runShell`'s scrubbed mode
  *  (src/runtime/shell.ts) imports {@link scrubEnv}, it does NOT keep its own
  *  copy of this list (ADR-0006: one Local-honored guarantee, one definition). */
-export const DEFAULT_ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TERM"]
+// Locale/identity, plus the infra vars a real edit→build→test loop needs:
+// corp proxy + custom-CA (npm/bun/git/pip fail behind a MITM proxy without
+// them), TMPDIR (pytest/tsc/bun temp), NODE_OPTIONS, and an active venv.
+// NONE of these can carry a provider credential, so the default-deny posture
+// (no `*_API_KEY`/`*_TOKEN`/`*_SECRET`) is preserved. Case-sensitive: tools
+// read both `HTTP_PROXY` and lowercase `http_proxy`, so both are listed.
+export const DEFAULT_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "TERM",
+  "TMPDIR",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_OPTIONS",
+  "VIRTUAL_ENV",
+]
 
 /** Build the scrubbed environment: ONLY allowlisted names, copied from the
  *  parent if present. The parent's full env (API keys, tokens, …) never

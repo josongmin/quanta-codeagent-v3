@@ -39,6 +39,13 @@ export interface Instance {
   swebench?: SwebenchMeta
 }
 
+/** Token usage rolled up for one instance (RFC-0002 §5.3, cost derivation). */
+export interface InstanceUsage {
+  model: string
+  inputTokens: number
+  outputTokens: number
+}
+
 /** Outcome of running one instance once. */
 export interface InstanceResult {
   id: string
@@ -49,6 +56,19 @@ export interface InstanceResult {
   turns: number
   /** Present only on a harness-level failure (setup crash, timeout, etc.). */
   error?: string
+  /**
+   * Observation verdict (RFC-0002 §3/§8/§12). `"degraded"` ⇒ the trajectory
+   * recorder failed under strict (eval) mode; the result is EXCLUDED from
+   * `resolved/total` and reported separately. Absent ⇒ `"ok"` (default-off
+   * runs never set this, preserving byte-identical behavior).
+   */
+  verdict?: "ok" | "degraded"
+  /** Absolute path of the captured `.patch` file (only when observing). */
+  patchPath?: string
+  /** Wall-clock instance duration in ms (only when observing). */
+  durationMs?: number
+  /** Rolled-up token usage (only when observing and the LLM reported it). */
+  usage?: InstanceUsage
 }
 
 /** One Best-of-N trajectory result. Generic so the sampler stays reusable. */

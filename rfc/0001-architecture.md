@@ -26,14 +26,39 @@ LLM이 사용자와 티키타카하며 코딩 태스크(읽기/검색/편집/테
 > 50%/70%는 목표치이지 레포가 보장하는 측정값이 아니다(머신은 진짜,
 > 점수는 외부 검증 대상).
 
-### 1.2 명시적 Non-Goals
+### 1.2 SOTA++ 스탠스 (구 "minimal-surface" 거부 입장 대체)
+
+> **2026-05-19 사용자 명시 지시로 전환**. v0.1~0.8의 "minimal-surface /
+> <20k LoC 강박"은 메모리 SOTA++ 패스(ADR-0008)와 동일 패턴으로 **공식
+> 폐기**됐다. 본 에이전트는 이제 Claude Code v2의 **능력·견고성 메커니즘을
+> LoC 무관·ROI 무관으로 의도적으로 흡수**한다. §1.1의 20k LoC 항목, §8의
+> "v2 대비 31배 가벼움", §13.1의 "subagent는 범위 외" 등 본 전환과 직접
+> 모순되는 잔존 "minimal" 서술은 이 절이 우선한다(개별 절은 흡수 시점에
+> 점진 정정 — 전면 재작성하지 않고 상위 스탠스로 갈음).
+
+**살아남는 불가침 불변식 2개** (SOTA++ 흡수가 깰 수 없는 것):
+
+1. **슬라이스 격리** — `@/agent`만 타 슬라이스 교차 import. 신규 슬라이스도
+   동일 (Biome `overrides[]` 강제, §3.1·§7.3·ADR-0001).
+2. **RFC/ADR 동기** — 모든 흡수는 RFC 본문 + ADR에 반영, 코드 동작 후 기록
+   (§9.1).
+
+**여전한 진짜 Non-Goals** (ReAct 본질상 또는 흡수 대상이 아님):
 
 - ❌ 결정론적 replay (LLM은 본질적으로 비결정적)
 - ❌ 전체 액션 사전 정의 (closed alphabet 강박 금지)
-- ❌ FSM/워크플로우 엔진 (ReAct이면 충분)
-- ❌ 87개 ADR (정량 상한 10개, 코드 동작 후 작성)
-- ❌ 모든 슬라이스에 ports/adapters 풀세트 (2nd impl 나올 때까지 약식)
-- ❌ 컨테이너 격리 등 enterprise 안전망 (필요할 때 추가)
+- ❌ FSM/워크플로우 엔진 (ReAct이면 충분 — v2 워크플로우 무게는 여전히 거부)
+- ❌ 가설 ADR (코드 동작 후 작성 — 정량 상한은 폐기, 절차는 유지 §9.1)
+
+**의도적 미흡수 — ROI 무관에도 제외** (§16에 흡수 목록과 함께 근거 명시):
+
+- ❌ 백그라운드 데몬 / launchd / remote-bridge — 운영 인프라이지 에이전트
+  능력이 아님, 네트워크·상시구동 표면 추가
+- ❌ Statsig/GrowthBook 원격 게이트 + kill-switch — 실험 인프라, 벤더·원격
+  제어 표면
+- ❌ Datadog + 코호트 텔레메트리 — 제품 분석, 프라이버시·벤더 표면
+- ❌ 전체 speculative 프롬프트 실행 — 레퍼런스 팀이 데드코드로 출하
+  (CC `JX8()=false`), 능력 이득 미검증
 
 ---
 
@@ -103,6 +128,8 @@ shared/ (공통 타입만)
 | **lsp** | 언어 서버 | 풀 (pyright + typescript 어댑터; `agent/lsp-bridge.ts`가 `diagnostics` 도구로 노출, ADR-0009) |
 | **observability** | 로그/메트릭 | 약식 (logger + metrics, 구현됨) |
 | **mcp** | MCP 클라이언트 + 브리지 | 약식 (client/jsonrpc, agent가 브리지) |
+| **subagent** | 격리 컨텍스트 서브에이전트 (SOTA++) | 약식 (`src/subagent/**`, agent가 `runAgent` 포크·worktree 격리, §16) |
+| **skill** | frontmatter 발견 + 조건부 활성 (SOTA++) | 약식 (`src/skill/**`, `Skill`/`ToolSearch` 도구, §16) |
 | **agent** | ReAct 루프 조립 | 약식 (자체 구현) |
 
 ---
@@ -800,6 +827,60 @@ export type StreamEvent =
 
 ---
 
+## 16. SOTA++ 흡수 — Claude Code v2 메커니즘 (Tier 0+1)
+
+> 2026-05-19. §1.2 SOTA++ 스탠스의 구체화. 본 세션에 빌드·전부 그린(전체
+> 레포 `tsc` exit 0, 708 단위 통과/0 실패). 결정 근거·트레이드오프·역공학
+> 문서 간접화 주의는 ADR-0010.
+
+### 16.1 통합 계약 (모든 항목 공통)
+
+기존 memory/compaction/hooks/plan 패턴과 동일: **`AgentConfig`의 신규
+필드는 전부 optional이며 부재 시 루프는 byte-for-byte 불변**. 신규 능력은
+주입식 포트(`ClassifierPort`/`SubagentRunner` 등)로 들어오고, 미주입 시
+경로가 죽은 채로 기존 동작이 보존된다. 신규 슬라이스(`@/subagent`,
+`@/skill`)는 §3.1 격리를 따른다 — `@/agent`만 이들을 import, 이들끼리
+교차 import 금지, Biome `overrides[]`에 동일 매트릭스 추가(§7.3·ADR-0001).
+
+### 16.2 Tier 0 — 견고성·안전 하드닝 (agent 슬라이스 내, 슬라이스 무신설)
+
+- **HARD_DENY 경로 독립 바이패스 차단**: `git -c`/`--exec-path`/
+  `--config-env`, `find` action-flag 집합 등 경로 우회 형태를 차단셋에 편입.
+- **auto-mode LLM 권한 분류기**: 신규 `auto` `PermissionMode`, 주입식
+  `ClassifierPort`, 위협 분류 프롬프트 그대로(verbatim), 2-stage, 거부
+  한도 3/20, AFK sticky.
+- **도구 결과 크기 캡 + 디스크 스필**: 200k 초과 시 `<persisted-output>`로
+  스필.
+- **FallbackLLM 멀티-provider 스왑** + `stream_reset` tombstone.
+- **CompactionBreaker**: rapid-refill/thrash 차단기 + `reactiveCompact`
+  fail-fast.
+
+### 16.3 Tier 1 — 능력 슬라이스·스트리밍
+
+- **subagent 시스템** (`@/subagent`): `Agent`/`Task` 도구 + `TaskRegistry`
+  + 주입식 `SubagentRunner`(루프의 `runAgent`를 포크) + git worktree
+  격리. §13.1의 "subagent 범위 외"를 본 절이 폐기.
+- **skill 시스템** (`@/skill`): `Skill`/`ToolSearch` 도구 + frontmatter
+  발견 + 조건부 경로 활성.
+- **스트리밍 도구 실행**: 모델 스트림 중 도구 디스패치 인터리브, 순서
+  보존, unsafe 도구에서 head-of-line.
+
+### 16.4 미흡수 (재확인)
+
+§1.2 "의도적 미흡수" 목록 — 데몬/launchd/remote-bridge, Statsig/
+GrowthBook 원격 게이트+kill-switch, Datadog+코호트 텔레메트리, 전체
+speculative 실행(CC가 데드코드로 출하). 사유: 제품/운영/실험 인프라이거나
+레퍼런스 팀이 죽인 코드 — 에이전트 능력이 아니고 네트워크/프라이버시/벤더
+표면을 추가한다. 근거 상술: ADR-0010.
+
+### 16.5 역공학 문서 간접화 주의
+
+CC v2 메커니즘은 직접 복사하지 않는다 — 동작을 **재유도(re-derive)하고
+행위 테스트로 고정**한다. 식별자·내부 상수는 행위 동치성의 근거가 아니며,
+검증 기준은 전체 테스트 피라미드의 결정론 통과다(ADR-0010 "검증").
+
+---
+
 ## 15. 변경 이력
 
 | 버전 | 날짜 | 변경 |
@@ -812,3 +893,4 @@ export type StreamEvent =
 | 0.6 | 2026-05-19 | SOTA++ 계층형 시맨틱 메모리 반영(ADR-0008): §6.3 재작성(tier/하이브리드 회상/distill/consolidate/evict/self-edit/EmbedderPort 주입), §3.1 memory↛@/llm 예외 명문화, §12 anti-bloat 의도적 override 위험 항목 추가. 신규 dep 0 |
 | 0.7 | 2026-05-19 | SOTA++ 메모리 심화(ADR-0008 연장): tier가 회상 랭킹에 실제 작용(W_TIER=2, semantic>episodic — "계층형 회상" 빵꾸 해소), `memory_search` tier/kind/minImportance 필터, `memory.recallTiers`+`QUANTA_MEMORY_RECALL_TIERS`, 메모리 관측성(`AgentRecorder` memory.recall/persist/distilled/consolidate/evict 카운터, `onStats` 옵저버). 반환형 불변·동작 보존, 신규 dep 0. 523 테스트 통과 |
 | 0.8 | 2026-05-19 | 문서 정직성 정정: §1.1 SWE-bench 50%/70% 측정 정직성 주석(메커니즘 구현·결정론 검증 / 퍼센트는 외부 eval 대상), §3.1 `tool/→storage/` 예외 명문화(biome 강제 매트릭스 정합), §3.2/§4 LSP가 `agent/lsp-bridge.ts`로 `diagnostics` 도구 노출(ADR-0009), §4 트리에 memory-stats/memory-tools/lsp-bridge 추가. 사문화 export `planSystemAugmentation`/`PLAN_AUGMENTATION` 제거(in-loop 카피는 prompt.ts `PLAN_NOTICE`로 일원화). ADR-0005 결번 placeholder |
+| 0.9 | 2026-05-19 | **Claude Code v2 SOTA++ 흡수 (Tier 0+1, ADR-0010)**: §1.2를 minimal-surface 거부 → SOTA++ 스탠스로 재작성(20k LoC·"31배 가벼움"·"subagent 범위 외" 잔존 minimal 서술을 상위 스탠스로 갈음, 불변식 2개=슬라이스 격리·RFC/ADR 동기, 의도적 미흡수 4종 근거). §3.2 슬라이스표에 `@/subagent`·`@/skill` 추가. 신규 §16(통합 계약=AgentConfig optional·동작 보존, Tier 0 하드닝, Tier 1 슬라이스/스트리밍, 미흡수, 역공학 doc 간접화 주의). src/tests 무변경(문서 전용). 전체 레포 `tsc` 0, 708 단위 통과/0 실패 |

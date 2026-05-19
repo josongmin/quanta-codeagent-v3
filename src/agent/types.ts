@@ -2,6 +2,7 @@ import type { LLMPort, Message } from "@/llm"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
 import type { PermissionContext, ToolAction } from "@/permission"
+import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { HookBus } from "./hooks"
@@ -85,6 +86,15 @@ export interface AgentConfig {
    * behavior identical.
    */
   metrics?: Metrics
+  /**
+   * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
+   * byte-identically (project-standard optional-context pattern, like
+   * `metrics?`/`hooks?`). When present the loop maintains a per-turn working
+   * copy (the caller's object is never mutated) used purely for trajectory
+   * correlation — it never changes control flow, StopReason, emit ordering,
+   * or messages.
+   */
+  run?: RunContext
 }
 
 export type StopReason = "completed" | "max_turns" | "aborted" | "error"

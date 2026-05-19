@@ -167,6 +167,26 @@ const summarize = (llm: LLMPort, prefix: Message[]): Promise<string> =>
 
 const REACTIVE_KEEP_TURNS = 2
 
+/**
+ * Minimum estimated input tokens before the post-build "did it actually
+ * shrink?" guard engages. Below this the prompt is already tiny and a PTL
+ * here is spurious; the synthetic continuation header can legitimately be
+ * *larger* than a trivial summarized prefix, so applying the drop check would
+ * mis-fire. (CC only ever reaches reactive compaction at real context
+ * pressure — this floor encodes that precondition explicitly.)
+ */
+const REACTIVE_MIN_INPUT_TOKENS = 4_000
+
+/**
+ * Required shrink ratio for a reactive compaction to be worth keeping. If the
+ * built `[synthetic, ...suffix]` is not at least this fraction smaller than
+ * the input, the limiting payload is in the retained suffix (an
+ * un-summarizable giant tool_result/file) — fail fast instead of handing the
+ * loop a prompt that is still over the window. Mirrors the breaker's
+ * `minProgressRatio` (see {@link CompactionBreaker}).
+ */
+const REACTIVE_MIN_DROP_RATIO = 0.15
+
 const CONTINUATION_SYSTEM =
   "You have been working on a coding task but have not completed it. Write a " +
   "structured, concise, actionable continuation summary so you can resume in " +
@@ -218,6 +238,28 @@ export const reactiveCompact = async (
     content: [{ type: "text", text: `<continuation summary>\n${summary}` }],
   }
   const messages = [synthetic, ...suffix]
+  // Fail-fast: even with a non-empty summary and a valid boundary the squeeze
+  // can be a no-op when the retained suffix itself holds the limiting payload
+  // (one giant tool_result/file the orphan-safe boundary cannot drop). Spinning
+  // a retry on a prompt that did not shrink just re-hits PTL — surface a clear
+  // failure instead. Guarded by REACTIVE_MIN_INPUT_TOKENS so a spurious PTL on
+  // an already-tiny transcript (where the synthetic header can exceed a trivial
+  // prefix) does not mis-fire. Mirrors CC's rapid_refill_breaker intent.
+  const inputTokens = estimateTokens(input.messages)
+  const outputTokens = estimateTokens(messages)
+  if (
+    inputTokens >= REACTIVE_MIN_INPUT_TOKENS &&
+    (inputTokens - outputTokens) / inputTokens < REACTIVE_MIN_DROP_RATIO
+  ) {
+    return {
+      ok: false,
+      reason:
+        "prompt still too long after max compaction: reactive compaction " +
+        `freed no meaningful context (${inputTokens}→${outputTokens} est. ` +
+        "tokens, < 15% drop) — the limiting payload (a giant file read or " +
+        "tool output) is in the retained suffix, not the summarized prefix",
+    }
+  }
   return { ok: true, messages, summaryTokens: estimateTokens([synthetic]) }
 }
 

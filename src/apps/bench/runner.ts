@@ -10,16 +10,32 @@
  * an import of @/runtime (apps may import slices, but keeping bench dependency-
  * light per the task brief and RFC §3.1 minimalism).
  */
+import { writeFileSync } from "node:fs"
 import { cp, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildSystemPrompt, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import type { SandboxData } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
+import { TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import {
+  type AttemptObservation,
+  BenchObserver,
+  countDiff,
+  finalizeRun,
+  type RunObservation,
+  type RunSummary,
+  UsageTap,
+  verifyLogTail,
+} from "./observe"
 import { evaluateWithPythonSwebench, type PySwebenchOpts } from "./python-swebench"
 import type { Instance, InstanceResult } from "./types"
+
+export type { RunObservation, RunSummary }
+export { finalizeRun }
 
 /** StreamPort that swallows every event — silent benchmark runs. */
 export class NullStream implements StreamPort {
@@ -45,6 +61,14 @@ export interface RunInstanceDeps {
     evaluate?: typeof evaluateWithPythonSwebench
     opts?: PySwebenchOpts
   }
+  /**
+   * RFC-0002 §8 observability. ABSENT (default) ⇒ `NullStream`, byte-identical
+   * to pre-W-D behavior — no files written. PRESENT ⇒ the agent stream is
+   * `TeeStream([NullStream, JsonlRecorder(<run>/<id>.<attempt>.jsonl)])` with
+   * `strict:true` (eval), plus bench-produced `sandbox`/`patch_generated`/
+   * `verify` lines. A strict recorder failure ⇒ `verdict:"degraded"`.
+   */
+  observe?: AttemptObservation
 }
 
 interface ExecResult {
@@ -105,11 +129,59 @@ const withGitSnapshot = async (
   return diff.code === 0 ? diff.stdout : ""
 }
 
+/**
+ * Env-scrub policy version tied to ADR-0006's sandbox allowlist. Bumped only
+ * when the scrub allowlist changes; stamped into every `sandbox` event so a
+ * trajectory records which policy governed the run.
+ */
+const ENV_POLICY_VERSION = "sandbox.v1"
+
+const trimOut = (r: ExecResult): string => (r.code === 0 ? r.stdout.trim() : "")
+
+/** Best-effort `<bin> --version` → first line, or undefined. */
+const probeVersion = async (bin: string, sandbox: string, timeoutMs: number): Promise<string> => {
+  const r = await exec(`${bin} --version 2>&1 | head -n1`, sandbox, timeoutMs)
+  return trimOut(r)
+}
+
+/**
+ * One-shot sandbox snapshot (RFC §5.2 `sandbox`). Gathered AFTER the repo is
+ * copied + base-checked-out and BEFORE the agent runs, so `repoCommit` is the
+ * pristine pre-agent HEAD. `git` is opportunistic — absence ⇒ empty commits,
+ * never throws. `python` is best-effort/optional.
+ */
+const gatherSandbox = async (
+  sandbox: string,
+  baseCommit: string | undefined,
+  timeoutMs: number,
+): Promise<SandboxData> => {
+  const head = await exec("git rev-parse HEAD", sandbox, timeoutMs)
+  const status = await exec("git status --porcelain", sandbox, timeoutMs)
+  const [bun, node, python] = await Promise.all([
+    probeVersion("bun", sandbox, timeoutMs),
+    probeVersion("node", sandbox, timeoutMs),
+    probeVersion("python3", sandbox, timeoutMs),
+  ])
+  const runtime: { bun?: string; node?: string; python?: string } = {
+    ...(bun !== "" ? { bun } : {}),
+    ...(node !== "" ? { node } : {}),
+    ...(python !== "" ? { python } : {}),
+  }
+  return {
+    repoCommit: trimOut(head),
+    baseCommit: baseCommit ?? trimOut(head),
+    worktreeDirty: status.code === 0 && status.stdout.trim() !== "",
+    runtime,
+    envPolicyVersion: ENV_POLICY_VERSION,
+  }
+}
+
 const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
   sandbox: string,
   signal: AbortSignal,
+  stream: StreamPort,
 ) => {
   const registry = new ToolRegistry(defaultTools)
   const permission: PermissionContext = { mode: "acceptEdits" }
@@ -127,7 +199,7 @@ const buildConfig = (
   return {
     llm: deps.llm,
     registry,
-    stream: new NullStream(),
+    stream,
     permission,
     messages,
     system: buildSystemPrompt(sandbox),
@@ -142,31 +214,196 @@ const buildConfig = (
   }
 }
 
+/** Pass/fail + the evidence a `verify` trajectory event needs (RFC §5.2). */
+interface VerifyOutcome {
+  passed: boolean
+  error?: string
+  /** The grading command (testCmd, or the python-harness pseudo-command). */
+  command: string
+  exitCode: number
+  failedTests: string[]
+  logTail: string
+  reportPath: string
+}
+
 /**
  * Decide pass/fail for the captured patch. When the Python harness is wired
  * AND the instance has swebench metadata, grade officially; otherwise (the
  * default) run the local `testCmd`. Never throws — a harness error degrades to
- * passed=false with the cause in `error`.
+ * passed=false with the cause in `error`. Returns rich evidence so the caller
+ * can emit a `verify` trajectory event; pass/fail semantics are unchanged.
  */
 const verify = async (
   instance: Instance,
   patch: string,
   sandbox: string,
   deps: RunInstanceDeps,
-): Promise<{ passed: boolean; error?: string }> => {
+): Promise<VerifyOutcome> => {
   if (deps.pythonSwebench && instance.swebench) {
     const evaluate = deps.pythonSwebench.evaluate ?? evaluateWithPythonSwebench
     const r = await evaluate(instance, patch, deps.pythonSwebench.opts ?? {})
-    return r.resolved ? { passed: true } : { passed: false, error: r.log.slice(0, 500) }
+    const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
+    return {
+      passed: r.resolved,
+      ...(r.resolved ? {} : { error: r.log.slice(0, 500) }),
+      command,
+      exitCode: r.resolved ? 0 : 1,
+      failedTests: [],
+      logTail: r.log.slice(-2000),
+      reportPath: "",
+    }
   }
   const test = await exec(instance.testCmd, sandbox, deps.timeoutMs)
-  return { passed: test.code === 0 }
+  return {
+    passed: test.code === 0,
+    command: instance.testCmd,
+    exitCode: test.code,
+    failedTests: [],
+    logTail: `${test.stdout}\n${test.stderr}`.slice(-2000),
+    reportPath: "",
+  }
 }
+
+/** Marker thrown when a strict (eval) recorder/observer write fails so the
+ *  outer catch can map it to `verdict:"degraded"` (RFC §3/§8/§12). */
+class ObservationError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = "ObservationError"
+  }
+}
+
+/** Per-attempt observation wiring (or the no-op default). `obs` is undefined
+ *  ⇒ NullStream, byte-identical to pre-W-D behavior. */
+interface Wiring {
+  stream: StreamPort
+  observer?: BenchObserver
+  usage?: UsageTap
+}
+
+/** Build the agent stream. Default-off ⇒ a bare `NullStream`. Observing ⇒
+ *  `TeeStream([NullStream, JsonlRecorder, UsageTap], {strict:true})` so a
+ *  recorder failure rethrows for `verdict:"degraded"` handling (RFC §8). */
+const buildWiring = (instance: Instance, observe: AttemptObservation | undefined): Wiring => {
+  if (observe === undefined) return { stream: new NullStream() }
+  let observer: BenchObserver
+  try {
+    observer = new BenchObserver(observe, instance.id)
+  } catch (e) {
+    // Strict (eval): an unwritable observe dir is an observation failure, not
+    // a silent fallback — surface it so the instance is marked degraded.
+    throw new ObservationError(e)
+  }
+  const usage = new UsageTap()
+  const stream = new TeeStream([new NullStream(), observer.recorder, usage], { strict: true })
+  return { stream, observer, usage }
+}
+
+/** Emit the one-shot `sandbox` snapshot before the agent runs. Strict: a
+ *  recorder failure becomes an {@link ObservationError}. */
+const emitSandbox = async (
+  observer: BenchObserver | undefined,
+  sandbox: string,
+  baseCommit: string | undefined,
+  timeoutMs: number,
+): Promise<void> => {
+  if (observer === undefined) return
+  const data = await gatherSandbox(sandbox, baseCommit, timeoutMs)
+  try {
+    observer.sandbox(data)
+  } catch (e) {
+    throw new ObservationError(e)
+  }
+}
+
+/** Persist the unified diff to `<run>/<id>.<attempt>.patch` and emit
+ *  `patch_generated` (filesChanged:0 for an empty patch). Returns the patch
+ *  file path so it lands in the summary. */
+const emitPatch = (
+  observe: AttemptObservation,
+  instance: Instance,
+  observer: BenchObserver,
+  patch: string,
+): string => {
+  const attempt = observe.attempt ?? 0
+  const diffPath = join(observe.dir, observe.runId, `${instance.id}.${attempt}.patch`)
+  const { filesChanged, hunks } = countDiff(patch)
+  try {
+    writeFileSync(diffPath, patch)
+    observer.patchGenerated({ diffPath, filesChanged, hunks, applyStatus: "generated" })
+  } catch (e) {
+    throw new ObservationError(e)
+  }
+  return diffPath
+}
+
+const emitVerify = (observer: BenchObserver | undefined, v: VerifyOutcome): void => {
+  if (observer === undefined) return
+  try {
+    observer.verify({
+      command: v.command,
+      exitCode: v.exitCode,
+      passed: v.passed,
+      failedTests: v.failedTests,
+      logTail: verifyLogTail(v.logTail),
+      reportPath: v.reportPath,
+    })
+  } catch (e) {
+    throw new ObservationError(e)
+  }
+}
+
+interface Phase {
+  patch: string
+  turns: number
+}
+
+/** Sandbox snapshot → agent (inside the git pre/post-image) → captured diff. */
+const runAgentPhase = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+  sandbox: string,
+  signal: AbortSignal,
+  w: Wiring,
+): Promise<Phase> => {
+  let turns = 0
+  const patch = await withGitSnapshot(
+    sandbox,
+    deps.timeoutMs,
+    instance.swebench?.baseCommit,
+    async () => {
+      await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
+      const outcome = await runAgent(buildConfig(instance, deps, sandbox, signal, w.stream))
+      turns = outcome.turns
+    },
+  )
+  return { patch, turns }
+}
+
+const okResult = (
+  instance: Instance,
+  phase: Phase,
+  v: VerifyOutcome,
+  extra: Partial<InstanceResult>,
+): InstanceResult => ({
+  id: instance.id,
+  passed: v.passed,
+  patch: phase.patch,
+  turns: phase.turns,
+  ...(v.error !== undefined ? { error: v.error } : {}),
+  ...extra,
+})
 
 /**
  * Run one instance once: sandbox → (setup) → agent → verify → diff. Always
  * cleans up the temp dir. Never throws for an instance-level failure — it is
  * reported via `InstanceResult.error` with passed=false.
+ *
+ * Observability (RFC §8) is a pure add-on gated on `deps.observe`: absent ⇒
+ * `NullStream`, byte-identical to before (no files written). Present ⇒ the
+ * agent stream is Tee'd into a strict `JsonlRecorder` plus bench `sandbox`/
+ * `patch_generated`/`verify` lines; a strict observation failure yields
+ * `verdict:"degraded"` (excluded from `resolved/total`).
  */
 export const runInstance = async (
   instance: Instance,
@@ -175,9 +412,11 @@ export const runInstance = async (
   const sandbox = await mkdtemp(join(tmpdir(), `bench-${instance.id}-`))
   const abort = new AbortController()
   const deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
-  let turns = 0
-  let patch = ""
+  const startedAt = Date.now()
+  let phase: Phase = { patch: "", turns: 0 }
+  let w: Wiring = { stream: new NullStream() }
   try {
+    w = buildWiring(instance, deps.observe)
     await cp(instance.repoPath, sandbox, { recursive: true })
 
     if (instance.setupCmd) {
@@ -193,34 +432,40 @@ export const runInstance = async (
       }
     }
 
-    patch = await withGitSnapshot(
-      sandbox,
-      deps.timeoutMs,
-      instance.swebench?.baseCommit,
-      async () => {
-        const outcome = await runAgent(buildConfig(instance, deps, sandbox, abort.signal))
-        turns = outcome.turns
-      },
-    )
+    phase = await runAgentPhase(instance, deps, sandbox, abort.signal, w)
+    const v = await verify(instance, phase.patch, sandbox, deps)
 
-    const v = await verify(instance, patch, sandbox, deps)
-    return {
-      id: instance.id,
-      passed: v.passed,
-      patch,
-      turns,
-      ...(v.error !== undefined ? { error: v.error } : {}),
+    const extra: Partial<InstanceResult> = {}
+    if (deps.observe && w.observer) {
+      extra.verdict = "ok"
+      extra.durationMs = Date.now() - startedAt
+      extra.patchPath = emitPatch(deps.observe, instance, w.observer, phase.patch)
+      emitVerify(w.observer, v)
+      const usage = w.usage?.total()
+      if (usage) extra.usage = usage
     }
+    return okResult(instance, phase, v, extra)
   } catch (e) {
+    if (e instanceof ObservationError) {
+      return {
+        id: instance.id,
+        passed: false,
+        patch: phase.patch,
+        turns: phase.turns,
+        verdict: "degraded",
+        error: `observation failed (strict): ${e.message}`,
+      }
+    }
     return {
       id: instance.id,
       passed: false,
-      patch,
-      turns,
+      patch: phase.patch,
+      turns: phase.turns,
       error: (e as Error).message,
     }
   } finally {
     clearTimeout(deadline)
+    w.observer?.close()
     await rm(sandbox, { recursive: true, force: true })
   }
 }
