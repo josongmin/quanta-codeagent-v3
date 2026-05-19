@@ -190,23 +190,39 @@ const buildUsageEvent = (usage: UsageAccumulator): StreamEvent | null => {
   }
 }
 
+/** Fold the prompt-side counts and resolved model from `message_start` into
+ *  the accumulator (pure mutation, emits nothing). */
+const absorbMessageStart = (m: RawMessageStart | undefined, usage: UsageAccumulator): void => {
+  if (m?.model) usage.model = m.model
+  if (!m?.usage) return
+  usage.inputTokens = m.usage.input_tokens
+  if (m.usage.cache_read_input_tokens !== undefined) {
+    usage.cacheReadTokens = m.usage.cache_read_input_tokens
+  }
+}
+
+/** Terminal `message_delta`: fold the completion count, then emit the usage
+ *  event (if any tokens were seen) immediately before `message_stop`. */
+function* finishOnMessageDelta(
+  ev: Extract<RawEvent, { type: "message_delta" }>,
+  usage: UsageAccumulator,
+): Generator<StreamEvent> {
+  if (ev.usage) usage.outputTokens = ev.usage.output_tokens
+  if (!ev.delta.stop_reason) return
+  const usageEvent = buildUsageEvent(usage)
+  if (usageEvent) yield usageEvent
+  yield { type: "message_stop", stop_reason: ev.delta.stop_reason }
+}
+
 export function* mapRawEvent(
   ev: RawEvent,
   open: OpenSlots,
   usage: UsageAccumulator = {},
 ): Generator<StreamEvent> {
   switch (ev.type) {
-    case "message_start": {
-      const m = ev.message
-      if (m?.model) usage.model = m.model
-      if (m?.usage) {
-        usage.inputTokens = m.usage.input_tokens
-        if (m.usage.cache_read_input_tokens !== undefined) {
-          usage.cacheReadTokens = m.usage.cache_read_input_tokens
-        }
-      }
+    case "message_start":
+      absorbMessageStart(ev.message, usage)
       break
-    }
     case "content_block_start": {
       const b = ev.content_block
       if (b.type === "tool_use") {
@@ -238,15 +254,9 @@ export function* mapRawEvent(
       open.delete(ev.index)
       break
     }
-    case "message_delta": {
-      if (ev.usage) usage.outputTokens = ev.usage.output_tokens
-      if (ev.delta.stop_reason) {
-        const usageEvent = buildUsageEvent(usage)
-        if (usageEvent) yield usageEvent
-        yield { type: "message_stop", stop_reason: ev.delta.stop_reason }
-      }
+    case "message_delta":
+      yield* finishOnMessageDelta(ev, usage)
       break
-    }
   }
 }
 

@@ -171,6 +171,25 @@ export function* finalizeCalls(pending: Map<number, PendingCall>): Generator<Str
   }
 }
 
+/** Map an OpenAI usage payload to the additive usage StreamEvent. Returns
+ *  `null` when the stream carried no usage (older models) so we never emit
+ *  zeros. `cacheReadTokens` is included only on a reported cache hit
+ *  (exactOptionalPropertyTypes: conditional spread, not undefined). */
+export const buildUsageEvent = (
+  usage: RawUsage | null | undefined,
+  model: string,
+): StreamEvent | null => {
+  if (!usage) return null
+  const cached = usage.prompt_tokens_details?.cached_tokens
+  return {
+    type: "usage",
+    inputTokens: usage.prompt_tokens,
+    outputTokens: usage.completion_tokens,
+    model,
+    ...(cached !== undefined ? { cacheReadTokens: cached } : {}),
+  }
+}
+
 export class OpenAIAdapter implements LLMPort {
   private readonly client: OpenAI
   private readonly model: string
@@ -209,9 +228,13 @@ export class OpenAIAdapter implements LLMPort {
     const raw = await this.openRawStream(input)
     const pending = new Map<number, PendingCall>()
     let finish: string | null = null
+    let rawUsage: RawUsage | null | undefined
+    let usageModel = this.model
 
     try {
       for await (const chunk of raw) {
+        if (chunk.usage) rawUsage = chunk.usage
+        if (chunk.model) usageModel = chunk.model
         const choice = chunk.choices[0]
         if (!choice) continue
         const content = choice.delta.content
@@ -225,6 +248,8 @@ export class OpenAIAdapter implements LLMPort {
     }
 
     yield* finalizeCalls(pending)
+    const usageEvent = buildUsageEvent(rawUsage, usageModel)
+    if (usageEvent) yield usageEvent
     yield {
       type: "message_stop",
       stop_reason: finish ? (STOP_REASON[finish] ?? finish) : "end_turn",
