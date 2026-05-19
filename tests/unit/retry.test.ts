@@ -136,4 +136,19 @@ describe("RetryingLLM", () => {
     await expect(collect(r.stream({ messages: [], tools: [] }))).rejects.toThrow("aborted")
     expect(inner.calls).toBe(1)
   })
+
+  // Regression: the CLI always wraps the adapter in RetryingLLM, so the loop's
+  // pre-stream `llm_request` (RFC-0002 §5.2/§9) read `config.llm.model`
+  // through THIS decorator. A live smoke caught it emitting `(unknown)`
+  // because RetryingLLM didn't forward `inner.model` — unit tests had missed
+  // the decorator entirely. Guard the forward + the exactOptional contract.
+  test("forwards inner.model so the decorated chain reports a faithful model", () => {
+    const withModel: LLMPort = { model: "gpt-4o", async *stream() {} }
+    expect(new RetryingLLM({ inner: withModel }).model).toBe("gpt-4o")
+
+    const noModel: LLMPort = { async *stream() {} }
+    const r = new RetryingLLM({ inner: noModel })
+    // exactOptionalPropertyTypes: absent, never an explicit `undefined`.
+    expect("model" in r && r.model !== undefined).toBe(false)
+  })
 })

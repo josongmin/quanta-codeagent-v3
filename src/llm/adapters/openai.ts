@@ -212,7 +212,7 @@ function* processChunk(chunk: RawChunk, st: StreamState): Generator<StreamEvent>
 
 export class OpenAIAdapter implements LLMPort {
   private readonly client: OpenAI
-  private readonly model: string
+  readonly model: string
   private readonly maxTokens: number
 
   constructor(config: OpenAIConfig) {

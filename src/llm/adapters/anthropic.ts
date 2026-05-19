@@ -119,7 +119,7 @@ const toAnthropicMessages = (messages: Message[]): Anthropic.MessageParam[] =>
 
 export class AnthropicAdapter implements LLMPort {
   private readonly client: Anthropic
-  private readonly model: string
+  readonly model: string
   private readonly maxTokens: number
 
   constructor(config: AnthropicConfig) {

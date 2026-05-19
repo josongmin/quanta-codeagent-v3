@@ -131,6 +131,13 @@ const throwIfAborted = (signal: AbortSignal | undefined): void => {
 }
 
 export class RetryingLLM implements LLMPort {
+  /** Forward the wrapped provider's configured model id so a decorated chain
+   *  (the CLI always wraps the adapter in RetryingLLM) still reports a
+   *  faithful model for the pre-stream `llm_request` (RFC-0002 §5.2/§9)
+   *  instead of degrading to `"unknown"`. Set conditionally (never an explicit
+   *  `undefined`) to satisfy `exactOptionalPropertyTypes`, mirroring
+   *  `FallbackLLM`. */
+  readonly model?: string
   private readonly inner: LLMPort
   private readonly maxRetries: number
   private readonly baseDelayMs: number
@@ -140,6 +147,8 @@ export class RetryingLLM implements LLMPort {
 
   constructor(opts: RetryingLLMOptions) {
     this.inner = opts.inner
+    const innerModel = opts.inner.model
+    if (innerModel !== undefined) this.model = innerModel
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES
     this.baseDelayMs = opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
     this.signal = opts.signal

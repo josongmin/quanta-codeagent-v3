@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { StreamEvent } from "@/llm"
+import type { LLMPort, StreamEvent } from "@/llm"
 import { assembleFromEvents } from "@/llm"
 import type { OpenSlots, RawEvent } from "@/llm/adapters/anthropic"
-import { finalizeToolInput, mapRawEvent } from "@/llm/adapters/anthropic"
+import { AnthropicAdapter, finalizeToolInput, mapRawEvent } from "@/llm/adapters/anthropic"
 import { LLMError } from "@/shared"
 
 /** Drive a sequence of raw SSE events through `mapRawEvent` with a shared
@@ -257,5 +257,17 @@ describe("mapping ↔ assembly contract", () => {
         { type: "tool_use", id: "tu_a", name: "read", input: { path: "f.ts" } },
       ],
     })
+  })
+})
+
+describe("AnthropicAdapter — LLMPort.model", () => {
+  test("exposes the configured model id as a readable .model", () => {
+    const adapter = new AnthropicAdapter({ apiKey: "test-key", model: "claude-sonnet-4-6" })
+    expect(adapter.model).toBe("claude-sonnet-4-6")
+  })
+
+  test("instance is assignable to LLMPort with .model readable", () => {
+    const port: LLMPort = new AnthropicAdapter({ apiKey: "test-key", model: "claude-opus-4-7" })
+    expect(port.model).toBe("claude-opus-4-7")
   })
 })

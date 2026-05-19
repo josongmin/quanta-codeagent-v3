@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, StreamEvent } from "@/llm"
+import type { LLMPort, Message, StreamEvent } from "@/llm"
 import { assembleFromEvents } from "@/llm"
 import type { PendingCall, RawChunk } from "@/llm/adapters/openai"
 import {
   finalizeCalls,
   mapToolCallDeltas,
+  OpenAIAdapter,
   STOP_REASON,
   toChatMessages,
 } from "@/llm/adapters/openai"
@@ -289,5 +290,17 @@ describe("mapping ↔ assembly contract", () => {
         { type: "tool_use", id: "tu_x", name: "read", input: { path: "x.ts" } },
       ],
     })
+  })
+})
+
+describe("OpenAIAdapter — LLMPort.model", () => {
+  test("exposes the configured model id as a readable .model", () => {
+    const adapter = new OpenAIAdapter({ apiKey: "test-key", model: "gpt-4o" })
+    expect(adapter.model).toBe("gpt-4o")
+  })
+
+  test("instance is assignable to LLMPort with .model readable", () => {
+    const port: LLMPort = new OpenAIAdapter({ apiKey: "test-key", model: "gpt-4o-mini" })
+    expect(port.model).toBe("gpt-4o-mini")
   })
 })

@@ -234,3 +234,22 @@ describe("FallbackLLM", () => {
     expect(p2.calls).toBe(1)
   })
 })
+
+describe("FallbackLLM — LLMPort.model", () => {
+  class ModeledLLM implements LLMPort {
+    constructor(readonly model: string) {}
+    async *stream(): AsyncIterable<StreamEvent> {}
+  }
+
+  test(".model returns the PRIMARY (index 0) provider's model", () => {
+    const llm = new FallbackLLM({
+      providers: [new ModeledLLM("claude-opus-4-7"), new ModeledLLM("gpt-4o")],
+    })
+    expect(llm.model).toBe("claude-opus-4-7")
+  })
+
+  test(".model is undefined when the primary omits model", () => {
+    const llm = new FallbackLLM({ providers: [new ScriptedLLM({ kind: "ok", events: [] })] })
+    expect(llm.model).toBeUndefined()
+  })
+})

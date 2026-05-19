@@ -95,12 +95,20 @@ export class FallbackLLM implements LLMPort {
   private readonly providers: readonly LLMPort[]
   private readonly signal: AbortSignal | undefined
   private readonly isFallbackTrigger: (e: unknown) => boolean
+  /** The chain reports the PRIMARY (index 0) provider's model — the one it
+   *  streams from first — so a fallback chain still emits a faithful
+   *  pre-stream `llm_request`. Absent if the primary omits `model`. */
+  readonly model?: string
 
   constructor(opts: FallbackLLMOptions) {
     if (opts.providers.length === 0) {
       throw new LLMError("FallbackLLM requires at least one provider")
     }
     this.providers = opts.providers
+    // Mirror the primary's model only when it exposes one (exactOptional:
+    // an absent model stays absent rather than an explicit `undefined`).
+    const primaryModel = opts.providers[0]?.model
+    if (primaryModel !== undefined) this.model = primaryModel
     this.signal = opts.signal
     this.isFallbackTrigger = opts.isFallbackTrigger ?? isFallbackTrigger
   }

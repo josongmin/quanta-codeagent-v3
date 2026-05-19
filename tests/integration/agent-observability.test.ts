@@ -15,6 +15,10 @@ class FakeLLM implements LLMPort {
   private readonly scripts: StreamEvent[][]
   private last: StreamEvent[] = []
   calls = 0
+  // LLMPort.model?: string — real adapters populate the configured model id;
+  // set it here so the pre-stream `llm_request` marker carries the real id
+  // (matching this fake's `usage.model`) instead of the "unknown" degrade.
+  readonly model = "fake-1"
 
   constructor(scripts: StreamEvent[][]) {
     this.scripts = scripts
@@ -132,10 +136,62 @@ describe("runAgent observability trajectory (RFC-0002 W-C)", () => {
     expect(usageLine.data.inputTokens).toBe(100)
     expect(usageLine.data.outputTokens).toBe(20)
 
+    // RFC-0002 §5.2/§9: the pre-stream `llm_request` marker carries the REAL
+    // configured model id (read off the typed `LLMPort.model`), NOT "unknown".
+    expect(kinds).toContain("llm_request")
+    const reqLines = lines.filter((l) => (l as { kind: string }).kind === "llm_request") as {
+      data: { model: string }
+      spanId?: string
+    }[]
+    expect(reqLines.length).toBeGreaterThan(0)
+    for (const r of reqLines) expect(r.data.model).toBe("fake-1")
+    // §11 span-pair: this run's llm_request and llm_usage share ONE llm span.
+    expect(reqLines[0]?.spanId).toBe(
+      (lines.find((l) => (l as { kind: string }).kind === "llm_usage") as { spanId?: string })
+        .spanId,
+    )
+
     // Per-turn correlation: every line carries the run id; turns advance.
     const turnNumbers = lines
       .filter((l) => (l as { kind: string }).kind === "turn_start")
       .map((l) => (l as { data: { turn: number } }).data.turn)
     expect(turnNumbers).toEqual([1, 2])
+  })
+
+  test('a double that omits LLMPort.model degrades to llm_request model "unknown"', async () => {
+    // Documents the INTENDED degrade: lightweight test doubles legitimately
+    // omit `model` (it is an optional on `LLMPort`). `configuredModel` then
+    // falls back to "unknown" — the only remaining "unknown" path. Real
+    // adapters always populate `model`, so this never hits in production.
+    class NoModelLLM implements LLMPort {
+      // deliberately NO `model` field (LLMPort.model is optional)
+      async *stream(): AsyncIterable<StreamEvent> {
+        yield { type: "text_delta", delta: "done" }
+        yield { type: "usage", inputTokens: 1, outputTokens: 1, model: "wire-only" }
+        yield { type: "message_stop", stop_reason: "end_turn" }
+      }
+    }
+    const runId = "run-nomodel"
+    const recorder = new JsonlRecorder(join(dir, runId, "session.jsonl"), {
+      ctx: { runId },
+      now: () => 1_700_000_000_000,
+    })
+    const registry = new ToolRegistry(defaultTools)
+    const outcome = await runAgent(
+      baseConfig(new NoModelLLM(), registry, recorder, dir, { mode: "acceptEdits" }, { runId }),
+    )
+    recorder.close()
+    expect(outcome.reason).toBe("completed")
+
+    const lines = readFileSync(join(dir, runId, "session.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { kind: string; data: { model?: string } })
+    const req = lines.find((l) => l.kind === "llm_request")
+    expect(req).toBeDefined()
+    expect(req?.data.model).toBe("unknown")
+    // The wire `usage` model is unaffected — only the pre-stream marker degrades.
+    const usage = lines.find((l) => l.kind === "llm_usage")
+    expect(usage?.data.model).toBe("wire-only")
   })
 })

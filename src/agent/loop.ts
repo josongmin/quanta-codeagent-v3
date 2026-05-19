@@ -86,16 +86,15 @@ const emitRecovery = (config: AgentConfig, reason: RecoveryReason, detail?: stri
 }
 
 /** Best-available configured model id for the pre-stream `llm_request`
- *  marker (RFC-0002 §5.2/§9). `LLMPort` deliberately exposes no pre-stream
- *  model accessor — the resolved model only materializes on the trailing
- *  provider `usage` event (the source `llm_usage` uses). Both shipped adapters
- *  (Anthropic/OpenAI) and `FallbackLLM` hold the configured model on a
- *  `model` field; read it via a narrow runtime probe (no interface change, no
- *  `any`) so the request marker carries the SAME model the adapter sends, and
- *  fall back to `"unknown"` when an adapter exposes none. Pure read. */
+ *  marker (RFC-0002 §5.2/§9). `LLMPort` now exposes the configured model id
+ *  as a typed optional (`LLMPort.model?: string`), so read it directly — both
+ *  shipped adapters (Anthropic/OpenAI) and `FallbackLLM` populate it, so the
+ *  request marker carries the SAME model the adapter sends. Lightweight test
+ *  doubles legitimately omit `model`; the `"unknown"` fallback is the genuine
+ *  (intended) degrade for that case only. Pure read. */
 const configuredModel = (llm: AgentConfig["llm"]): string => {
-  const m = (llm as { model?: unknown }).model
-  return typeof m === "string" && m !== "" ? m : "unknown"
+  const m = llm.model
+  return m !== undefined && m !== "" ? m : "unknown"
 }
 
 /** Pure side-effect emit of a `{type:"llm_request"}` AgentEvent IMMEDIATELY
