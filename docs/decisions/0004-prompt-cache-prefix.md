@@ -1,8 +1,8 @@
-# ADR-0003: 시스템 프롬프트를 정적 프리픽스로 고정해 캐시 적중
+# ADR-0004: 시스템 프롬프트를 정적 프리픽스로 고정해 캐시 적중
 
 - **상태**: Accepted
 - **날짜**: 2026-05-19
-- **관련**: RFC-0001 §3.1(슬라이스 격리), §9.2(LLM provider 메시지 계약 변경 = ADR 트리거), ADR-0002(2 provider 체제)
+- **관련**: RFC-0001 §3.1(슬라이스 격리), §9.2(LLM provider 메시지 계약 변경 = ADR 트리거), ADR-0002(2 provider 체제), ADR-0003(테스트 피라미드)
 
 ## 결정
 
@@ -19,6 +19,12 @@ user 메시지로 덧붙인다. 생산자 측을 `src/agent/prompt.ts`의
 `cache_control:{type:"ephemeral"}`를, 마지막 메시지 끝 블록에도 1개
 breakpoint를 부착한다. OpenAI는 자동 프리픽스 캐시라 `SystemBlock[]`를
 순서 보존해 단일 문자열로 평탄화만 한다(`cache` 플래그 무시).
+
+`AgentConfig.system`(호출자가 넘기는 정적 프롬프트)은 제거하지 않고
+`buildTurnContext`의 선택 입력 `system?`으로 그대로 흘려보낸다 — 세션당
+1회 설정·턴마다 불변이라 캐시 프리픽스로 안전하고, 죽은 필드 제거보다
+blast radius가 작다(apps/cli·테스트 cfg 무변경). 없으면 내장
+`buildSystemPrompt()` 폴백. 본문 강화 프롬프트는 이 폴백 기본값이다.
 
 ## 근거
 

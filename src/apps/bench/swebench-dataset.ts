@@ -1,0 +1,190 @@
+/**
+ * Official SWE-bench / SWE-bench Pro dataset adapter.
+ *
+ * ── Why this is separate from swebench.ts ─────────────────────────────────
+ * swebench.ts loads a *custom* corpus (Instance-shaped manifest + checked-out
+ * repos). This file ingests the OFFICIAL upstream dataset (the snake_case
+ * JSONL exported from the HuggingFace SWE-bench datasets) and turns each row
+ * into a runnable `Instance` by cloning the real repo at `base_commit`.
+ *
+ * ── What we can and cannot do locally ─────────────────────────────────────
+ * Official grading (FAIL_TO_PASS / PASS_TO_PASS over the gold `test_patch`)
+ * is only valid inside the official `swebench.harness.run_evaluation` Docker
+ * harness. That is environment-blocked here, so this adapter deliberately
+ * does NOT attempt local grading: `toInstance` sets `testCmd: "true"` (a
+ * no-op) and the real, gradeable signal is the captured `.patch`, emitted as
+ * an official-format `predictions.jsonl` for the user to feed to the Docker
+ * harness. We ignore the dataset's `patch` / `test_patch` / `FAIL_TO_PASS` /
+ * `PASS_TO_PASS` fields for exactly this reason.
+ *
+ * Dependency-light per the bench brief / RFC §3.1: git runs via a tiny local
+ * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
+ */
+import type { Instance } from "./types"
+
+/** A single official SWE-bench task (subset of the upstream row we use). */
+export interface SwebenchTask {
+  instanceId: string
+  repo: string
+  baseCommit: string
+  problemStatement: string
+  environmentSetupCommit?: string
+  /** The untouched upstream row, kept around for callers that need extra
+   *  fields (cheap — it is already parsed). */
+  raw: Record<string, unknown>
+}
+
+/** Result shape of the injected exec (mirrors runner.ts's local exec). */
+export interface ExecResult {
+  code: number
+  stdout: string
+  stderr: string
+}
+
+/** Same signature as runner.ts's private `exec` — injected so tests stay
+ *  hermetic and bench avoids an @/runtime dependency. */
+export type Exec = (cmd: string, cwd: string, timeoutMs: number) => Promise<ExecResult>
+
+/** Default `bash -c` exec via Bun.spawn with a hard timeout. Local copy of
+ *  runner.ts's helper (intentionally NOT imported — bench stays self-
+ *  contained per RFC §3.1). */
+export const defaultExec: Exec = async (cmd, cwd, timeoutMs) => {
+  const proc = Bun.spawn(["bash", "-c", cmd], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: process.env,
+  })
+  const timer = setTimeout(() => proc.kill(), timeoutMs)
+  try {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    const code = await proc.exited
+    return { code, stdout, stderr }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
+
+/** Coerce one raw upstream row into a SwebenchTask, or null when a required
+ *  field is missing/ill-typed (skipped, never throws). */
+const toTask = (raw: Record<string, unknown>): SwebenchTask | null => {
+  const instanceId = str(raw.instance_id)
+  const repo = str(raw.repo)
+  const baseCommit = str(raw.base_commit)
+  const problemStatement = str(raw.problem_statement)
+  if (!instanceId || !repo || !baseCommit || !problemStatement) return null
+  const environmentSetupCommit = str(raw.environment_setup_commit)
+  return {
+    instanceId,
+    repo,
+    baseCommit,
+    problemStatement,
+    ...(environmentSetupCommit !== undefined ? { environmentSetupCommit } : {}),
+    raw,
+  }
+}
+
+/**
+ * Parse official SWE-bench JSONL: one JSON object per line, OFFICIAL
+ * snake_case field names (`instance_id`, `repo`, `base_commit`,
+ * `problem_statement`, `environment_setup_commit`). Tolerant: blank and
+ * malformed lines are skipped, rows missing any required field are skipped.
+ * Never throws.
+ */
+export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
+  const out: SwebenchTask[] = []
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim()
+    if (trimmed === "") continue
+    try {
+      const row = JSON.parse(trimmed) as unknown
+      if (typeof row !== "object" || row === null) continue
+      const task = toTask(row as Record<string, unknown>)
+      if (task) out.push(task)
+    } catch {
+      // skip malformed line
+    }
+  }
+  return out
+}
+
+/**
+ * Produce a checked-out repo for `task` at `task.baseCommit` under `destDir`
+ * and return its path. Clones `https://github.com/<repo>.git` (override the
+ * base via `repoBaseUrl` so tests can clone a local path offline), then
+ * checks out `base_commit`; if the commit is absent after a (possibly
+ * shallow) clone it falls back to a full `git fetch`. Throws a precise Error
+ * on any git failure (the caller turns it into InstanceResult.error).
+ */
+export const prepareTaskRepo = async (
+  task: SwebenchTask,
+  destDir: string,
+  exec: Exec,
+  repoBaseUrl = "https://github.com/",
+  timeoutMs = 300000,
+): Promise<string> => {
+  const base = repoBaseUrl.endsWith("/") ? repoBaseUrl : `${repoBaseUrl}/`
+  const repoUrl = `${base}${task.repo}.git`
+
+  const clone = await exec(`git clone ${repoUrl} ${destDir}`, ".", timeoutMs)
+  if (clone.code !== 0) {
+    throw new Error(
+      `git clone failed for ${task.instanceId} (${repoUrl}, code ${clone.code}): ${clone.stderr.slice(0, 500)}`,
+    )
+  }
+
+  let checkout = await exec(`git checkout -q ${task.baseCommit}`, destDir, timeoutMs)
+  if (checkout.code !== 0) {
+    // Shallow / partial clone may not contain base_commit — deepen & retry.
+    const fetch = await exec(
+      `git fetch -q --unshallow || git fetch -q --depth=2147483647 origin`,
+      destDir,
+      timeoutMs,
+    )
+    if (fetch.code !== 0) {
+      throw new Error(
+        `git fetch (deepen) failed for ${task.instanceId} (code ${fetch.code}): ${fetch.stderr.slice(0, 500)}`,
+      )
+    }
+    checkout = await exec(`git checkout -q ${task.baseCommit}`, destDir, timeoutMs)
+    if (checkout.code !== 0) {
+      throw new Error(
+        `git checkout ${task.baseCommit} failed for ${task.instanceId} (code ${checkout.code}): ${checkout.stderr.slice(0, 500)}`,
+      )
+    }
+  }
+  return destDir
+}
+
+/**
+ * Adapt a SwebenchTask into a runnable `Instance`. `testCmd` is `"true"`: a
+ * deliberate no-op because local grading is impossible without the official
+ * Docker harness (see file header). The gradeable signal is the captured
+ * `.patch`, exported via `writePredictions`.
+ */
+export const toInstance = (task: SwebenchTask, repoPath: string): Instance => ({
+  id: task.instanceId,
+  repoPath,
+  problemStatement: task.problemStatement,
+  testCmd: "true",
+})
+
+/** One official SWE-bench prediction row (exact shape consumed by
+ *  `swebench.harness.run_evaluation`). */
+export interface Prediction {
+  instance_id: string
+  model_name_or_path: string
+  model_patch: string
+}
+
+/** Emit official SWE-bench predictions JSONL: one compact JSON object per
+ *  line, trailing newline. */
+export const writePredictions = async (file: string, rows: Prediction[]): Promise<void> => {
+  const body = rows.map((r) => JSON.stringify(r)).join("\n")
+  await Bun.write(file, rows.length === 0 ? "" : `${body}\n`)
+}

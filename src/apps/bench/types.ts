@@ -6,6 +6,20 @@
  * are local to the app and intentionally minimal.
  */
 
+/** Official SWE-bench instance metadata, present only for instances loaded
+ *  from the real `swebench.verified` corpus. Consumed by the optional Python
+ *  harness verifier (python-swebench.ts) — the local testCmd path ignores it. */
+export interface SwebenchMeta {
+  /** Upstream SWE-bench instance id, e.g. `astropy__astropy-12907`. */
+  instanceId: string
+  /** `org/name` GitHub slug, e.g. `astropy/astropy`. */
+  repo: string
+  /** Commit the buggy repo is checked out at. */
+  baseCommit: string
+  /** Commit whose env defines the test toolchain (optional upstream). */
+  environmentSetupCommit?: string
+}
+
 /** A single SWE-bench-style task. `repoPath` is treated as read-only: the
  *  runner copies it into a sandbox before the agent touches anything. */
 export interface Instance {
@@ -20,6 +34,9 @@ export interface Instance {
   testCmd: string
   /** Reference patch (informational; not applied by the TS harness). */
   goldPatch?: string
+  /** Present only for real `swebench.verified` instances — enables the
+   *  optional official Python harness verifier. */
+  swebench?: SwebenchMeta
 }
 
 /** Outcome of running one instance once. */

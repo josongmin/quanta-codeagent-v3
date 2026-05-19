@@ -1,5 +1,5 @@
 import type { LLMPort, Message } from "@/llm"
-import type { PersistentStorePort } from "@/memory"
+import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
 import type { PermissionContext, ToolAction } from "@/permission"
 import type { StreamPort } from "@/stream"
@@ -26,6 +26,35 @@ export interface AgentConfig {
   store?: PersistentStorePort
   /** Stable id for the current session, used to tag persisted memory. */
   sessionId?: string
+  /**
+   * Embedding provider for semantic recall + dedup (SOTA++ memory, RFC §6.3).
+   * Absent ⇒ recall/consolidation degrade to lexical+tag+freshness only; the
+   * loop is otherwise unchanged. Wired by the app layer (OpenAI adapter).
+   */
+  embedder?: EmbedderPort
+  /**
+   * Long-term memory tuning (SOTA++ memory, RFC §6.3). Absent ⇒ all defaults;
+   * with no `store` the whole block is inert. Behavior-preserving when unset.
+   */
+  memory?: {
+    /** Max entries folded into the recall context block. Default 5. */
+    recallLimit?: number
+    /**
+     * LLM-distill the finished transcript into structured records on session
+     * end (vs. the heuristic final-text dump). Default `true` when `llm` can
+     * serve it; ignored if it fails (graceful degrade to the heuristic).
+     */
+    distill?: boolean
+    /**
+     * Consolidate each new record against near-duplicates (LLM-arbitrated
+     * merge/supersede). Default `true` when `embedder` is present.
+     */
+    consolidate?: boolean
+    /** Per-tier caps for the post-persist eviction sweep. Defaults: see eviction.ts. */
+    evictionCaps?: { semanticMax?: number; episodicMax?: number }
+    /** Register the self-edit memory tools (memory_search/write/update). Default `true` when `store` is present. */
+    selfEditTools?: boolean
+  }
   /**
    * Compaction tuning. Absent ⇒ compaction is skipped entirely (existing
    * suites with no compaction config are unaffected).

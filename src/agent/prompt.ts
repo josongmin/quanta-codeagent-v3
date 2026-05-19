@@ -58,6 +58,10 @@ export interface TurnContextInput {
   cwd: string
   planMode: boolean
   memoryContext?: string
+  /** Caller-provided static base prompt. Set once per session and never
+   *  mutated per turn, so it stays a byte-stable cache prefix. Absent ⇒ the
+   *  built-in {@link buildSystemPrompt}. */
+  system?: string
 }
 
 export interface TurnContext {
@@ -94,7 +98,9 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
  * the tail varies.
  */
 export const buildTurnContext = (input: TurnContextInput): TurnContext => {
-  const system: SystemBlock[] = [{ type: "text", text: buildSystemPrompt(), cache: true }]
+  const system: SystemBlock[] = [
+    { type: "text", text: input.system ?? buildSystemPrompt(), cache: true },
+  ]
   const dynamic = buildDynamicContext(input)
   const messages: Message[] = [...input.baseMessages]
   if (dynamic !== undefined) {

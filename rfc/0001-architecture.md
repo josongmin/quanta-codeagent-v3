@@ -35,9 +35,9 @@ LLM이 사용자와 티키타카하며 코딩 태스크(읽기/검색/편집/테
 |------|-----|------|
 | 언어 | TypeScript | Claude 코딩 자신감 1위 |
 | 런타임 | Bun | 단일 도구 통합, 빠른 iteration, 단일 바이너리 |
-| LLM SDK | `@anthropic-ai/sdk` | 공식, 1급 지원 |
+| LLM SDK | `@anthropic-ai/sdk`, `openai` | 듀얼 provider 런타임 스위치 (ADR-0002) |
 | 스키마 검증 | `zod` | 도구 입력 검증, 모델 출력 파싱 |
-| DB | `bun:sqlite` | 내장, 의존성 0 |
+| DB | `bun:sqlite` | 내장, 의존성 0 (memory 슬라이스 영속화에 사용) |
 | Lint/Format | Biome | 단일 도구 |
 | 타입 체크 | `tsc --noEmit` (CI만) | 개발 중엔 Bun이 알아서 |
 
@@ -75,6 +75,8 @@ shared/ (공통 타입만)
 - 다른 슬라이스끼리 import 금지
 - `shared/`는 누구나 import 가능
 - 예외: `tool/` → `runtime/`, `memory/` → `storage/` (자연스러운 의존)
+- `memory/`는 `@/llm` import 불가 유지 — 시맨틱 회상에 필요한 임베딩은
+  memory가 소유한 주입식 `EmbedderPort`로 받고, 구현은 `@/agent`에 둠 (§6.3, ADR-0008)
 
 ### 3.2 슬라이스 목록
 
@@ -83,13 +85,14 @@ shared/ (공통 타입만)
 | **shared** | 공통 타입, 에러, 로거 | (utility) |
 | **llm** | LLM 추상화 + 어댑터 | 풀 헥사고날 |
 | **tool** | 도구 정의 + 레지스트리 | 풀 (Tool 인터페이스) |
-| **memory** | 작업/장기 메모리 | 풀 |
+| **memory** | 작업/장기 메모리 | 풀 (working + sqlite/in-memory, 구현됨) |
 | **storage** | 파일 I/O | 약식 (단일 구현) |
 | **stream** | 출력/이벤트 | 풀 |
 | **permission** | 정책 평가 | 약식 |
 | **runtime** | 셸/샌드박스 실행 | 약식 → 풀 (sandbox 시) |
-| **lsp** | 언어 서버 (P1) | 풀 |
-| **observability** | 로그/메트릭 | 약식 |
+| **lsp** | 언어 서버 | 풀 (pyright + typescript 어댑터, 구현됨) |
+| **observability** | 로그/메트릭 | 약식 (logger + metrics, 구현됨) |
+| **mcp** | MCP 클라이언트 + 브리지 | 약식 (client/jsonrpc, agent가 브리지) |
 | **agent** | ReAct 루프 조립 | 약식 (자체 구현) |
 
 ---
@@ -107,28 +110,36 @@ quanta-codeagent-v3/
 │   ├── llm/
 │   │   ├── types.ts             # Message, ContentBlock
 │   │   ├── ports.ts             # LLMPort
+│   │   ├── assemble.ts          # system 프리픽스 조립 (캐시)
 │   │   ├── adapters/
-│   │   │   └── anthropic.ts
+│   │   │   ├── anthropic.ts
+│   │   │   └── openai.ts        # ADR-0002
 │   │   └── index.ts
 │   │
 │   ├── tool/
 │   │   ├── types.ts             # Tool, ToolContext, ToolResult
 │   │   ├── registry.ts
+│   │   ├── schema.ts
 │   │   ├── bash/index.ts
 │   │   ├── read/index.ts
 │   │   ├── write/index.ts
 │   │   ├── edit/
 │   │   │   ├── index.ts
 │   │   │   ├── exact.ts
-│   │   │   └── fuzzy.ts         # Phase 2
+│   │   │   └── fuzzy.ts
 │   │   ├── grep/index.ts
 │   │   ├── glob/index.ts
+│   │   ├── localize/index.ts
 │   │   ├── test-runner/index.ts
 │   │   └── index.ts
 │   │
 │   ├── memory/
 │   │   ├── types.ts             # MemoryEntry, FreshnessBucket
 │   │   ├── working.ts           # 세션 내
+│   │   ├── ranking.ts           # recall 랭킹
+│   │   ├── vector.ts            # 임베딩/유사도
+│   │   ├── dedup.ts
+│   │   ├── eviction.ts
 │   │   ├── ports.ts             # PersistentStorePort
 │   │   ├── adapters/
 │   │   │   ├── sqlite.ts
@@ -157,29 +168,59 @@ quanta-codeagent-v3/
 │   │   ├── shell.ts             # Bun.$
 │   │   └── index.ts
 │   │
-│   ├── lsp/                     # Phase 1.5
+│   ├── lsp/
 │   │   ├── types.ts
 │   │   ├── ports.ts
 │   │   ├── adapters/
-│   │   │   └── pyright.ts
+│   │   │   ├── jsonrpc.ts
+│   │   │   ├── pyright.ts
+│   │   │   └── typescript.ts
 │   │   └── index.ts
 │   │
 │   ├── observability/
 │   │   ├── types.ts
-│   │   ├── logger.ts
+│   │   ├── logger.ts            # 구조화 로거
+│   │   ├── metrics.ts           # 메트릭 수집
+│   │   └── index.ts
+│   │
+│   ├── mcp/
+│   │   ├── types.ts
+│   │   ├── jsonrpc.ts
+│   │   ├── client.ts            # MCP 클라이언트
 │   │   └── index.ts
 │   │
 │   ├── agent/
 │   │   ├── types.ts             # AgentConfig
-│   │   ├── loop.ts              # ReAct 루프 (~300 LoC)
-│   │   ├── dispatch.ts          # 도구 디스패치
-│   │   ├── compaction.ts
+│   │   ├── loop.ts              # ReAct 루프
+│   │   ├── dispatch.ts          # 도구 디스패치 (동시성 배칭)
+│   │   ├── retry.ts             # in-loop 실패 복구
+│   │   ├── compaction.ts        # proactive/reactive
 │   │   ├── hooks.ts
+│   │   ├── plan.ts              # plan mode
+│   │   ├── state.ts             # state 영속/resume
+│   │   ├── metrics.ts
+│   │   ├── memory.ts            # WorkingMemory 배선
+│   │   ├── memory-consolidate.ts
+│   │   ├── memory-distill.ts
+│   │   ├── memory-embedder.ts
+│   │   ├── mcp-bridge.ts        # MCP 도구 브리지
+│   │   ├── prompt.ts            # 시스템 프롬프트
 │   │   └── index.ts
 │   │
 │   └── apps/
-│       ├── cli/index.ts
-│       └── bench/index.ts       # Phase 2: SWE-bench
+│       ├── cli/
+│       │   ├── dotenv.ts        # .env.dev 자동 로드
+│       │   └── index.ts
+│       └── bench/               # SWE-bench 하니스
+│           ├── runner.ts
+│           ├── sampler.ts       # Best-of-N
+│           ├── swebench.ts
+│           ├── swebench-dataset.ts
+│           ├── python-swebench.ts  # python seam
+│           ├── dry-run.ts
+│           ├── report.ts
+│           ├── types.ts
+│           └── index.ts
 │
 ├── tests/
 │   ├── unit/                    # core 단위 (mock adapter)
@@ -263,18 +304,57 @@ interface Tool<I = unknown, O = unknown> {
 ```
 
 ### 6.3 Memory
+
+세션 내 `WorkingMemory`(불변) + 영속 SOTA++ 계층형 시맨틱 메모리.
+의도적 anti-bloat override(§12 위험표·ADR-0008). 신규 npm 의존성 0.
+
 ```typescript
-interface WorkingMemory {
-  messages: Message[]
-  append(message: Message): void
-  snapshot(): readonly Message[]
+interface WorkingMemory<M = StoredMessage> {  // 세션 내 메시지 버퍼, 비영속
+  messages: M[]
+  append(message: M): void
+  snapshot(): readonly M[]
 }
 
-interface PersistentStorePort {
+interface PersistentStorePort {                // 영속 장기 메모리 (hexagonal)
   save(entry: MemoryEntry): Promise<void>
+  update(id: string, patch: Partial<MemoryEntry>): Promise<void>
+  delete(id: string): Promise<void>
+  get(id: string): Promise<MemoryEntry | undefined>
+  all(): Promise<MemoryEntry[]>
   recall(query: MemoryQuery): Promise<MemoryEntry[]>
 }
+
+interface EmbedderPort {                        // memory가 소유, @/agent가 구현
+  embed(texts: string[]): Promise<number[][]>
+}
 ```
+
+- **계층**: `tier` = `episodic`(세션 회상, 빠른 eviction) / `semantic`(중복제거된
+  내구 지식). `kind` = `fact|decision|observation|preference`. `working`은 tier가
+  아닌 비영속 메시지 버퍼.
+- **시맨틱 회상**: OpenAI `text-embedding-3-small`(1536d) 임베딩을 Float32
+  BLOB(sqlite)로 저장, 코사인 유사도. 하이브리드 랭킹(`ranking.ts`, 가중 합)
+  = 벡터(W=10, 지배항) + 텍스트 부분일치(5, 완전일치 +1) + 태그(4/태그) +
+  freshness(fresh3/recent2/stale1/archived0) + importance(×4) +
+  접근 강화(`min(log1p(accessCount),3)`). **텍스트는 더 이상 하드 필터가
+  아니라 점수 항** — paraphrase 누락 버그 제거. 태그는 여전히 하드 필터.
+- **distill**: 세션 종료 시 `distillSession`(@/agent)이 트랜스크립트를 LLM으로
+  구조화 레코드로 추출 → raw 최종-텍스트 덤프 대체. LLM/임베더 부재 시
+  휴리스틱 단일 요약으로 graceful degrade.
+- **consolidation/dedup**: `findNearDuplicates`(코사인 OR 토큰-Jaccard) →
+  LLM 중재 `arbitrateConsolidation`이 `insert|skip|merge|supersede` 결정.
+- **decay + eviction**: `planEviction`이 tier별 정원, 30일 초과 superseded
+  하드삭제, 정원 초과 저가치 삭제, archived 저가치 importance 감쇠를 계획
+  (순수 함수, 호출자가 적용).
+- **self-edit 도구**: store 존재 시 `memory_search`/`memory_write`/
+  `memory_update`를 에이전트에 등록(세션 중 자기 메모리 수정).
+- **슬라이스 격리 유지**: `src/memory/**`는 여전히 `@/llm`을 import 불가
+  (Biome 강제). memory는 주입식 `EmbedderPort` 인터페이스만 소유; OpenAI
+  구현 + 모든 LLM 주도 지능(임베딩/distill/consolidate)은 `@/agent`에 거주
+  (유일 교차 슬라이스 importer). memory는 순수 저장+랭킹+벡터수학으로 유지.
+- **동작 보존 / anti-bloat**: store/embedder 부재 ⇒ 루프 byte-for-byte 불변.
+  신규 엔트리 필드는 전부 optional, store 경계 `normalizeEntry`에서 정규화 →
+  구 행/구 호출자 그대로 동작. sqlite는 레거시 스키마를 open 시 자동 마이그레이션.
 
 ### 6.4 Stream
 ```typescript
@@ -629,29 +709,33 @@ v2 (406k) 대비 **31배 가벼움**.
 | Bun 호환성 이슈 | 낮 | 중 | Node fallback 코드 X (Bun 전용 commit) |
 | 의존성 폭증 | 중 | 큼 | 분기마다 의존성 리뷰. 5개 미만 유지 목표 |
 | LLM 비용 폭주 | 높 | 중 | dev 중 cost cap, CI에선 fixture 사용 |
+| memory 슬라이스 anti-bloat 의도적 override (SOTA++, ROI 무관) | 높(이미 발생) | 중 | 사용자 명시 지시로 한정·기록(ADR-0008). 신규 dep 0 유지, 전부 env-gated 기본 OFF, store/embedder 부재 시 루프 불변, 순수 결정론 코어 + 풀 테스트 피라미드, 임베딩/세션종료 LLM 실패는 lexical로 graceful degrade |
 
 ---
 
 ## 13. 미해결 질문
 
-다음은 코드 작성 중 결정:
+다음은 코드 작성 중 결정 (Q1–Q5 전부 해소됨 — §13.1 참조, 원 질문은 이력 보존):
 
-1. **Hook 시스템** — Phase 1에 포함? 아니면 Phase 2?
-2. **agent state 영속화** — 세션 resume 필요한가?
-3. **Plan mode** — 별도 도구로? 시스템 프롬프트 변경으로?
-4. **Best-of-N 구현 위치** — `agent/` 내부? 별도 `sampler/` 슬라이스?
-5. **MCP 지원** — Phase 어디서?
+1. **Hook 시스템** — Phase 1에 포함? 아니면 Phase 2? → 해소: `agent/hooks.ts` 구현 (§13.1).
+2. **agent state 영속화** — 세션 resume 필요한가? → 해소: `agent/state.ts`, CLI `--resume`/`QUANTA_RESUME` (§13.1).
+3. **Plan mode** — 별도 도구로? 시스템 프롬프트 변경으로? → 해소: `agent/plan.ts`, `QUANTA_PLAN` (§13.1).
+4. **Best-of-N 구현 위치** — `agent/` 내부? 별도 `sampler/` 슬라이스? → 해소: 별도 슬라이스 없이 `apps/bench/sampler.ts` (§13.1).
+5. **MCP 지원** — Phase 어디서? → 해소: `mcp/` 슬라이스 + `agent/mcp-bridge.ts` 구현, `QUANTA_MCP_CONFIG` (§13.1).
 
 **원칙**: 막힐 때 결정. 미리 결정하지 않음.
 
 ### 13.1 Phase 1 결정 (2026-05-19)
 
-- **Hook 시스템** → Phase 1 제외 (루프에 미포함, 후속 Phase).
-- **Plan mode** → 미구현 (후속).
-- **agent state 영속화** → 미구현 (CLI는 인메모리 멀티턴만).
+- **Hook 시스템** → (v0.1 계획: Phase 1 제외) **현재 구현됨** `agent/hooks.ts`, 루프 배선.
+- **Plan mode** → (v0.1 계획: 미구현) **현재 구현됨** `agent/plan.ts`, `QUANTA_PLAN`/`--plan`.
+- **agent state 영속화** → (v0.1 계획: 미구현) **현재 구현됨** `agent/state.ts`, `--state`/`--resume` (기본 OFF, env-gated).
 - **슬라이스 격리 강제** → Biome 2.x `overrides[]` 채택 (ADR-0001).
-- **Tool 인터페이스** → `isConcurrencySafe`/`AsyncIterable<ToolEvent>`는 Phase 2로 연기 (Phase 1은 `execute(): Promise<ToolResult>`).
+- **Tool 인터페이스** → (v0.1 계획: Phase 2 연기) **현재 v2 구현됨** `isConcurrencySafe` + `AsyncIterable<ToolEvent>`, dispatch 동시성 배칭.
+- **MCP / Best-of-N** → (v0.1 미해결 Q4·Q5) **현재 구현됨** `mcp/` 슬라이스 + `agent/mcp-bridge.ts`(`QUANTA_MCP_CONFIG`), Best-of-N 샘플러는 `apps/bench/sampler.ts`. subagent는 여전히 범위 외.
 - **LLM provider** → §8에서 Phase 3였던 OpenAI 어댑터를 Phase 1에 선반영 (실 검증 키가 OpenAI, 포트 기존재). Anthropic/OpenAI 런타임 스위치. 상세 ADR-0002.
+- **루프 견고화 + compaction (v0.4)** → §8에서 Phase 2였던 compaction을 Phase 1 루프에 편입: proactive(턴 상단 토큰압) + reactive(PTL 트리거). 함께 in-loop 실패 복구 추가 — transient는 bounded backoff 재시도, PTL→reactive compact 후 동일 턴 재개, max_output_tokens는 continue meta 주입, malformed tool_use 1회 교정, empty turn 캡. **same-turn 복구는 maxTurns 카운터 불소모** (정상 tool round만 증가). 근거: §8 Phase 1 Done "30+ turn 안정"은 단일 transient 오류에도 죽지 않아야 성립. e2e(`agent-recovery-e2e`)·OpenAI 어댑터 테스트로 검증.
+- **프롬프트 캐시 (v0.4)** → 매 턴 system 재조립 폐기, 정적 프리픽스 고정 + 동적 컨텍스트는 꼬리 `<system-reminder>` 1메시지. 양 provider 캐시 프리픽스 안정. 시스템 프롬프트 강화 동반. 상세 ADR-0004. (참고: 사전조사 결과 hooks/plan/`AsyncIterable` tool 인터페이스는 위 항목들과 별개로 이미 선구현된 상태였음 — 본 절 상단 "제외/연기" 표기는 v0.1 시점 계획값.)
 
 ---
 
@@ -701,3 +785,6 @@ export type StreamEvent =
 | 0.1 | 2026-05-19 | 최초 작성 |
 | 0.2 | 2026-05-19 | Phase 1 구현 반영: 빌드설정 현행화, Biome 2.x 슬라이스 격리(ADR-0001), §13.1 결정 기록 |
 | 0.3 | 2026-05-19 | OpenAI provider 선반영(ADR-0002), 의존성 `openai` 추가, §13.1 LLM provider 항목 |
+| 0.4 | 2026-05-19 | 루프 견고화 선반영: in-loop 실패 복구(transient backoff / PTL→reactive compact / max_output_tokens / malformed tool_use / empty turn, same-turn 재시도는 maxTurns 불소모) + proactive·reactive compaction을 Phase 1 루프에 편입(§8에선 Phase 2였음). 프롬프트 캐시 프리픽스 고정 + 시스템 프롬프트 강화(ADR-0004). e2e 복구·OpenAI 어댑터 테스트 추가. §13.1 항목 |
+| 0.5 | 2026-05-19 | Phase 1.5/2/3 구현 일괄 반영(문서 현행화): memory(working+sqlite+in-memory, recall/persist 배선)·lsp(pyright+typescript)·observability(logger+metrics)·mcp 슬라이스, Tool 인터페이스 v2(동시성 배칭), retry/compaction/hooks/plan/state/metrics + mcp-bridge, SWE-bench 하니스 + Best-of-N 샘플러 + python seam, WorkingMemory 루프 배선. §2·§3.2·§4 트리·§13 Q1–Q5 해소 표기 동기화 |
+| 0.6 | 2026-05-19 | SOTA++ 계층형 시맨틱 메모리 반영(ADR-0008): §6.3 재작성(tier/하이브리드 회상/distill/consolidate/evict/self-edit/EmbedderPort 주입), §3.1 memory↛@/llm 예외 명문화, §12 anti-bloat 의도적 override 위험 항목 추가. 신규 dep 0 |

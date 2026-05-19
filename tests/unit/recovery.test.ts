@@ -122,7 +122,9 @@ describe("reactiveCompact", () => {
     expect(res.messages.at(-1)).toEqual(textMsg("recent answer"))
     const useIds = new Set(
       res.messages.flatMap((m) =>
-        m.content.filter((b) => b.type === "tool_use").map((b) => (b.type === "tool_use" ? b.id : "")),
+        m.content
+          .filter((b) => b.type === "tool_use")
+          .map((b) => (b.type === "tool_use" ? b.id : "")),
       ),
     )
     for (const m of res.messages) {

@@ -21,6 +21,30 @@ CLI가 `.env.dev` → `.env.local` → `.env` 순으로 로드(먼저 값이 우
 - `QUANTA_PROVIDER` — `anthropic` | `openai` (기본: 키로 자동 추론)
 - `QUANTA_MODEL` (기본 provider별: `claude-sonnet-4-6` / `gpt-4o`)
 - `QUANTA_MAX_TURNS` (기본 `40`), `QUANTA_PERMISSION` (`default`|`acceptEdits`|`bypass`)
+- `QUANTA_MEMORY` (`sqlite`|`memory`, 미설정 시 OFF) — 메모리 표는 아래 참조
+- `QUANTA_PLAN=1` / `--plan` (plan mode), `QUANTA_METRICS=1` (메트릭)
+- `QUANTA_STATE_PATH` / `--state`, `QUANTA_RESUME` / `--resume` (state 영속·resume, 기본 OFF)
+- `QUANTA_MCP_CONFIG` — MCP 서버 설정 JSON 파일 경로 (미설정 시 OFF)
+
+## 메모리
+
+세션 내 working 메모리 + 영속 SOTA++ 계층형 시맨틱 메모리(설계: RFC §6.3,
+ADR-0008). store가 켜지면 종료된 세션을 LLM으로 distill해 구조화 지식으로
+적재하고, 다음 세션 시작 시 임베딩 기반 하이브리드 회상으로 관련 메모리를
+주입한다. 중복은 LLM 중재로 merge/supersede되고 tier별 정원으로 eviction된다.
+**전부 기본 OFF** — `QUANTA_MEMORY` 미설정 시 루프는 byte-for-byte 불변이고,
+임베더/LLM 부재 시 lexical 회상으로 graceful degrade한다. 신규 npm 의존성 0.
+
+| 환경변수 | 값 / 기본 | 효과 |
+|---|---|---|
+| `QUANTA_MEMORY` | `sqlite` \| `memory` \| 미설정(OFF) | 영속 store: 온디스크 sqlite / 휘발 in-memory / 없음 |
+| `QUANTA_MEMORY_PATH` | 기본 `.quanta/memory.sqlite` | sqlite store 파일 경로 |
+| `QUANTA_MEMORY_EMBED` | `off` \| 기타(기본 ON) | `off`면 임베딩 비활성(lexical만). store + `OPENAI_API_KEY` 있을 때만 ON |
+| `QUANTA_MEMORY_EMBED_MODEL` | 기본 `text-embedding-3-small` | 임베딩 모델 override |
+| `QUANTA_MEMORY_RECALL_LIMIT` | 정수, 기본 5 | 회상 컨텍스트에 접는 최대 엔트리 수 |
+| `QUANTA_MEMORY_DISTILL` | `off` (기본 ON) | `off`면 세션 종료 LLM distill 끔(휴리스틱 요약으로 degrade) |
+| `QUANTA_MEMORY_CONSOLIDATE` | `off` (기본 ON) | `off`면 LLM 중재 중복 통합 끔 |
+| `QUANTA_MEMORY_SELF_EDIT` | `off` (기본 ON) | `off`면 `memory.selfEditTools=false` → `memory_search/write/update` self-edit 도구 미등록 |
 
 ## 스크립트
 
@@ -39,4 +63,8 @@ CLI가 `.env.dev` → `.env.local` → `.env` 순으로 로드(먼저 값이 우
 ## Phase 1 범위
 
 `shared · llm · tool · runtime · storage · stream · permission · agent · apps/cli`
-— 단일 trajectory ReAct 루프. concurrency / compaction / hook / subagent 는 후속 Phase.
+— 단일 trajectory ReAct 루프 + in-loop 실패 복구, proactive·reactive compaction,
+per-input concurrency 배칭, hook, 프롬프트 캐시 프리픽스 고정(ADR-0004).
+
+이후 Phase 1.5/2/3 구현 반영: memory · lsp · observability · mcp 슬라이스,
+SWE-bench 하니스 + Best-of-N 샘플러. MCP·Best-of-N 구현됨, subagent는 범위 외.

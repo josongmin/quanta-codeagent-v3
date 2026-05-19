@@ -1,11 +1,10 @@
 import { assembleFromEvents, type Message, type SystemPromptInput } from "@/llm"
+import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import { LLMError } from "@/shared"
 import { compactIfNeeded, reactiveCompact } from "./compaction"
 import { dispatchTool } from "./dispatch"
-import { persistSession, recallContext } from "./memory"
+import { type PersistDeps, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
-// SEAM: buildTurnContext (owned by prompt-cache agent) — imported from its
-// canonical module; the agent index does not (yet) re-export it.
 import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
@@ -161,16 +160,20 @@ const dispatchTurnTools = async (
  *  spliced into the system string here (that splicing is the seam's job). */
 const resolveMemoryContext = async (
   config: AgentConfig,
-  messages: Message[],
+  wm: WorkingMemory<Message>,
 ): Promise<string | undefined> => {
   if (!config.store) return undefined
-  const lastUser = [...messages].reverse().find((m) => m.role === "user")
+  const lastUser = [...wm.snapshot()].reverse().find((m) => m.role === "user")
   const queryText = lastUser?.content
     .filter((b) => b.type === "text")
     .map((b) => (b.type === "text" ? b.text : ""))
     .join(" ")
     .trim()
-  const block = await recallContext(config.store, queryText ? { text: queryText } : {})
+  const block = await recallContext(
+    { store: config.store, ...(config.embedder ? { embedder: config.embedder } : {}) },
+    queryText || undefined,
+    { limit: config.memory?.recallLimit ?? 5 },
+  )
   return block ?? undefined
 }
 
@@ -179,11 +182,11 @@ const resolveMemoryContext = async (
 const maybeCompact = async (
   config: AgentConfig,
   system: SystemPromptInput,
-  messages: Message[],
-): Promise<Message[]> => {
-  if (!config.compaction) return messages
+  wm: WorkingMemory<Message>,
+): Promise<void> => {
+  if (!config.compaction) return
   const result = await compactIfNeeded({
-    messages,
+    messages: [...wm.snapshot()],
     llm: config.llm,
     system,
     ...(config.compaction.thresholdTokens !== undefined
@@ -193,7 +196,7 @@ const maybeCompact = async (
       ? { keepRecentTurns: config.compaction.keepRecentTurns }
       : {}),
   })
-  return result.compacted ? result.messages : messages
+  if (result.compacted) wm.replace(result.messages)
 }
 
 /** The STATIC system blocks for this session (no per-turn dynamic context);
@@ -203,7 +206,23 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
     baseMessages: [],
     cwd: config.cwd,
     planMode: config.planMode ?? false,
+    system: config.system,
   }).system
+
+/** Pure construction of the persistence dependency bag from config. Mirrors
+ *  the conditional-spread semantics required by `exactOptionalPropertyTypes`
+ *  (omit keys entirely, never assign `undefined`). Caller guards `config.store`
+ *  presence before invoking `persistSession`. */
+const buildPersistDeps = (config: AgentConfig): PersistDeps => ({
+  // biome-ignore lint/style/noNonNullAssertion: call site guards `config.store`
+  store: config.store!,
+  llm: config.llm,
+  ...(config.embedder ? { embedder: config.embedder } : {}),
+  ...(config.memory?.distill !== undefined ? { distill: config.memory.distill } : {}),
+  ...(config.memory?.consolidate !== undefined ? { consolidate: config.memory.consolidate } : {}),
+  ...(config.memory?.evictionCaps ? { evictionCaps: config.memory.evictionCaps } : {}),
+  signal: config.signal,
+})
 
 /** Abort-aware sleep used by the in-loop turn-retry backoff. Resolves early
  *  (no throw) if the signal trips so the caller's next abort check handles it. */
@@ -339,9 +358,73 @@ export const decideOnAssembled = (
  * stays ephemeral — it is the request tail, never persisted (so it can never
  * accumulate across turns/retries and always trails the conversation).
  */
+/** Rebuild the per-attempt request context: memory recall, proactive
+ *  compaction (mutates `messages` in place), then the buildTurnContext SEAM. */
+const prepareTurnContext = async (
+  config: AgentConfig,
+  wm: WorkingMemory<Message>,
+): Promise<ReturnType<typeof buildTurnContext>> => {
+  const memoryContext = await resolveMemoryContext(config, wm)
+  await maybeCompact(config, staticSystemFor(config), wm)
+  return buildTurnContext({
+    baseMessages: [...wm.snapshot()],
+    cwd: config.cwd,
+    planMode: config.planMode ?? false,
+    system: config.system,
+    ...(memoryContext !== undefined ? { memoryContext } : {}),
+  })
+}
+
+type Step = { done: false } | { done: true; result: TurnResult }
+const CONTINUE: Step = { done: false }
+
+/** Apply one decided {@link RecoveryAction}. Returns `{done:false}` to
+ *  re-enter the SAME turn (after mutating `messages`/sleeping/compacting) or
+ *  `{done:true}` with the terminal {@link TurnResult}. Behaviour is identical
+ *  to the previous inline branch chain — extracted only to bound complexity. */
+const applyAction = async (
+  config: AgentConfig,
+  action: RecoveryAction,
+  result: Awaited<ReturnType<typeof consumeTurnStream>>,
+  wm: WorkingMemory<Message>,
+  ctxSystem: SystemPromptInput,
+  recorder: AgentRecorder | undefined,
+): Promise<Step> => {
+  if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
+  if (action.do === "backoff") {
+    await sleep(backoffDelayMs(action.attempt), config.signal)
+    return CONTINUE
+  }
+  if (action.do === "compact") {
+    const compacted = await reactiveCompact({
+      messages: [...wm.snapshot()],
+      llm: config.llm,
+      system: ctxSystem,
+    })
+    if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
+    wm.replace(compacted.messages)
+    return CONTINUE
+  }
+  // From here the stream succeeded: `result` carries the assembled message.
+  const message = (result as { message: AssembledMessage }).message
+  if (action.do === "completed") return { done: true, result: { kind: "completed", message } }
+  if (action.do === "nudge") {
+    if (action.keepMessage) wm.append(message)
+    wm.append(metaUser(action.text))
+    return CONTINUE
+  }
+  // action.do === "proceed"
+  wm.append(message)
+  const toolCalls = message.content.filter((b) => b.type === "tool_use")
+  if (toolCalls.length === 0) return { done: true, result: { kind: "completed", message } }
+  const dispatched = await dispatchTurnTools(config, toolCalls, recorder)
+  if ("aborted" in dispatched) return { done: true, result: { kind: "aborted" } }
+  return { done: true, result: { kind: "tools", message, resultBlocks: dispatched.resultBlocks } }
+}
+
 const runTurn = async (
   config: AgentConfig,
-  messages: Message[],
+  wm: WorkingMemory<Message>,
   specs: ReturnType<AgentConfig["registry"]["specs"]>,
   recorder: AgentRecorder | undefined,
   rec: RecoveryState,
@@ -351,18 +434,9 @@ const runTurn = async (
   for (;;) {
     if (config.signal.aborted) return { kind: "aborted" }
 
-    // Rebuilt every attempt: memory recall, proactive compaction, then the
-    // SEAM. ctx.messages = canonical history + one ephemeral reminder tail.
-    const memoryContext = await resolveMemoryContext(config, messages)
-    const proactive = await maybeCompact(config, staticSystemFor(config), messages)
-    if (proactive !== messages) messages.splice(0, messages.length, ...proactive)
-    const ctx = buildTurnContext({
-      baseMessages: messages,
-      cwd: config.cwd,
-      planMode: config.planMode ?? false,
-      ...(memoryContext !== undefined ? { memoryContext } : {}),
-    })
-
+    // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
+    // reminder tail (the per-turn dynamic context, never persisted).
+    const ctx = await prepareTurnContext(config, wm)
     const result = await consumeTurnStream(config, ctx.messages, specs, ctx.system, recorder)
 
     const action =
@@ -370,45 +444,24 @@ const runTurn = async (
         ? decideOnStreamError(result.error, result.message, rec)
         : decideOnAssembled(result.stopReason, result.message, rec)
 
-    if (action.do === "error") return { kind: "error", reason: action.reason }
-    if (action.do === "backoff") {
-      await sleep(backoffDelayMs(action.attempt), config.signal)
-      continue
-    }
-    if (action.do === "compact") {
-      const compacted = await reactiveCompact({ messages, llm: config.llm, system: ctx.system })
-      if (!compacted.ok) return { kind: "error", reason: compacted.reason }
-      messages.splice(0, messages.length, ...compacted.messages)
-      continue
-    }
-    // From here the stream succeeded: `result` carries the assembled message.
-    const message = (result as { message: AssembledMessage }).message
-    if (action.do === "completed") return { kind: "completed", message }
-    if (action.do === "nudge") {
-      if (action.keepMessage) messages.push(message)
-      messages.push(metaUser(action.text))
-      continue
-    }
-    // action.do === "proceed"
-    messages.push(message)
-    const toolCalls = message.content.filter((b) => b.type === "tool_use")
-    if (toolCalls.length === 0) return { kind: "completed", message }
-    const dispatched = await dispatchTurnTools(config, toolCalls, recorder)
-    if ("aborted" in dispatched) return { kind: "aborted" }
-    return { kind: "tools", message, resultBlocks: dispatched.resultBlocks }
+    const step = await applyAction(config, action, result, wm, ctx.system, recorder)
+    if (step.done) return step.result
   }
 }
 
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const { stream, registry } = config
-  const messages: Message[] = [...config.messages]
+  // Canonical in-session message buffer (RFC §6.3). Seeded from the public
+  // `config.messages`; every history mutation below goes through this slice.
+  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(config.messages)
   const specs = registry.specs()
   const recorder = config.metrics ? new AgentRecorder(config.metrics) : undefined
   const sessionId = config.sessionId ?? "default"
 
   const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
+    const messages = [...wm.snapshot()]
     if (config.store) {
-      await persistSession(config.store, { sessionId, finalMessages: messages })
+      await persistSession(buildPersistDeps(config), { sessionId, finalMessages: messages })
     }
     recorder?.stopReason(reason)
     if (config.hooks) await config.hooks.emit({ type: "session_end", reason, turns })
@@ -427,7 +480,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     // Recovery counters are per-turn: SAME-TURN retries share & exhaust these,
     // a fresh turn starts clean. runTurn owns the SEAM (buildTurnContext) and
     // mutates `messages` (canonical history) in place.
-    const result = await runTurn(config, messages, specs, recorder, freshRecovery())
+    const result = await runTurn(config, wm, specs, recorder, freshRecovery())
 
     if (result.kind === "aborted") return finish("aborted", turn - 1)
     if (result.kind === "error") {
@@ -436,7 +489,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     }
     if (result.kind === "completed") return finish("completed", turn)
 
-    messages.push({ role: "user", content: result.resultBlocks })
+    wm.append({ role: "user", content: result.resultBlocks })
   }
 
   return finish("max_turns", config.maxTurns)

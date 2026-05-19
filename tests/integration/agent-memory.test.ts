@@ -52,7 +52,7 @@ const cfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentConfig
 })
 
 describe("agent + memory integration", () => {
-  test("session 1 persists, session 2 recalls (recall block in FakeLLM system)", async () => {
+  test("session 1 persists, session 2 recalls (recall rides trailing system-reminder)", async () => {
     const store = new InMemoryStore()
 
     const llm1 = new RecordingLLM([textScript("Implemented the widget refactor successfully")])
@@ -77,16 +77,30 @@ describe("agent + memory integration", () => {
         messages: [{ role: "user", content: [{ type: "text", text: "refactor the widget more" }] }],
       }),
     )
-    const sys = llm2.inputs[0]?.system ?? ""
-    expect(sys).toContain("## Relevant memory")
-    expect(sys).toContain("Implemented the widget refactor successfully")
-    expect(sys.startsWith("test-system")).toBe(true)
+    const input = llm2.inputs[0]
+    expect(input).toBeDefined()
+    // The system prompt is the byte-stable cache prefix (ADR-0003): it is the
+    // caller's static system, with NO per-turn data spliced in.
+    const sys = input?.system
+    expect(Array.isArray(sys)).toBe(true)
+    if (Array.isArray(sys)) expect(sys.map((b) => b.text).join("")).toBe("test-system")
+    // Recalled memory now rides the trailing <system-reminder> user message,
+    // never the cached prefix.
+    const tail = input?.messages.at(-1)
+    const tailText =
+      tail?.role === "user"
+        ? tail.content.map((b) => (b.type === "text" ? b.text : "")).join("")
+        : ""
+    expect(tailText).toContain("<system-reminder>")
+    expect(tailText).toContain("Implemented the widget refactor successfully")
   })
 
-  test("no store → system unchanged, store untouched (behavior-preserving)", async () => {
+  test("no store → static system is the stable prefix, nothing recalled", async () => {
     const llm = new RecordingLLM([textScript("hi")])
     await runAgent(cfg({ llm }))
-    expect(llm.inputs[0]?.system).toBe("test-system")
+    const sys = llm.inputs[0]?.system
+    expect(Array.isArray(sys)).toBe(true)
+    if (Array.isArray(sys)) expect(sys.map((b) => b.text).join("")).toBe("test-system")
   })
 
   test("compaction config path exercised end-to-end with tiny threshold", async () => {

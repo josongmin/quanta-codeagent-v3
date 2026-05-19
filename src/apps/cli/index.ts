@@ -3,15 +3,18 @@ import {
   type AgentConfig,
   type AgentOutcome,
   buildSystemPrompt,
+  CachingEmbedder,
   loadMcpTools,
   loadSession,
+  memoryTools,
+  OpenAIEmbedder,
   RetryingLLM,
   runAgent,
   saveSession,
 } from "@/agent"
 import { AnthropicAdapter, type LLMPort, type Message, OpenAIAdapter } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
-import { InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
+import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
 import { Metrics, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger } from "@/shared"
@@ -58,6 +61,15 @@ const DEFAULT_MODEL: Record<Provider, string> = {
  * unchanged: `QUANTA_MEMORY=sqlite` → on-disk SqliteStore (path from
  * `QUANTA_MEMORY_PATH`, default `.quanta/memory.sqlite`); `=memory` →
  * volatile InMemoryStore; unset / `off` → no store.
+ *
+ * SOTA++ memory env (all default OFF / behavior-preserving when no store):
+ *   QUANTA_MEMORY_EMBED        openai (default when store + OPENAI_API_KEY) | off
+ *   QUANTA_MEMORY_EMBED_MODEL  override embedding model (else adapter default)
+ *   QUANTA_MEMORY_RECALL_LIMIT int → memory.recallLimit
+ *   QUANTA_MEMORY_DISTILL      off → memory.distill=false
+ *   QUANTA_MEMORY_CONSOLIDATE  off → memory.consolidate=false
+ *   QUANTA_MEMORY_SELF_EDIT    off → memory.selfEditTools=false (also skips
+ *                              registering the memory_* self-edit tools)
  */
 const buildStore = (): PersistentStorePort | undefined => {
   const kind = process.env.QUANTA_MEMORY
@@ -66,6 +78,49 @@ const buildStore = (): PersistentStorePort | undefined => {
   }
   if (kind === "memory") return new InMemoryStore()
   return undefined
+}
+
+/**
+ * Build the semantic embedder from env. Default OFF so lexical-only recall is
+ * unchanged: enabled only when a `store` exists, `QUANTA_MEMORY_EMBED` is not
+ * `off`, and `OPENAI_API_KEY` is set (reusing the OpenAI env pattern from
+ * `buildLLM`). Absent ⇒ pure lexical/tag/freshness recall, zero behavior
+ * change vs today.
+ */
+const buildEmbedder = (store: PersistentStorePort | undefined): EmbedderPort | undefined => {
+  if (!store) return undefined
+  if (process.env.QUANTA_MEMORY_EMBED === "off") return undefined
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) return undefined
+  return new CachingEmbedder(
+    new OpenAIEmbedder({
+      apiKey,
+      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+      ...(process.env.QUANTA_MEMORY_EMBED_MODEL
+        ? { model: process.env.QUANTA_MEMORY_EMBED_MODEL }
+        : {}),
+    }),
+  )
+}
+
+/**
+ * Build the `memory` tuning block from env. Returns `undefined` when there is
+ * no store AND no flag set, so the config key is omitted entirely and current
+ * behavior is preserved exactly (respecting `exactOptionalPropertyTypes`).
+ */
+const buildMemoryConfig = (
+  store: PersistentStorePort | undefined,
+): AgentConfig["memory"] | undefined => {
+  const rawLimit = process.env.QUANTA_MEMORY_RECALL_LIMIT
+  const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : Number.NaN
+  const block = {
+    ...(Number.isFinite(limit) ? { recallLimit: limit } : {}),
+    ...(process.env.QUANTA_MEMORY_DISTILL === "off" ? { distill: false } : {}),
+    ...(process.env.QUANTA_MEMORY_CONSOLIDATE === "off" ? { consolidate: false } : {}),
+    ...(process.env.QUANTA_MEMORY_SELF_EDIT === "off" ? { selfEditTools: false } : {}),
+  }
+  if (!store && Object.keys(block).length === 0) return undefined
+  return block
 }
 
 const hasArg = (flag: string): boolean => process.argv.slice(2).includes(flag)
@@ -169,13 +224,26 @@ const main = async (): Promise<void> => {
     process.exit(1)
   }
   const store = buildStore()
+  const embedder = buildEmbedder(store)
   let sessionId: string = crypto.randomUUID()
-  if (store) logger.info(`memory on (kind=${process.env.QUANTA_MEMORY}, session=${sessionId})`)
+  if (store) {
+    logger.info(
+      `memory on (kind=${process.env.QUANTA_MEMORY}, embed=${embedder ? "on" : "off"}, session=${sessionId})`,
+    )
+  }
 
   // All features default OFF → behavior unchanged when no QUANTA_* flag set.
   const { planMode, metrics, state, resume, mcpTools, mcpClients } = await loadFeatures(slog)
 
-  const registry = new ToolRegistry([...defaultTools, ...mcpTools])
+  const memoryConfig = buildMemoryConfig(store)
+  // Self-edit memory tools: only when a store exists and `memory.selfEditTools`
+  // is not opted out (single knob: QUANTA_MEMORY_SELF_EDIT). With no store the
+  // registry is byte-identical to before (nothing appended).
+  const memTools: Tool[] =
+    store && memoryConfig?.selfEditTools !== false
+      ? memoryTools({ store, ...(embedder ? { embedder } : {}) })
+      : []
+  const registry = new ToolRegistry([...defaultTools, ...mcpTools, ...memTools])
   const stream = new StdoutStream()
   const permission: PermissionContext = { mode }
 
@@ -212,6 +280,8 @@ const main = async (): Promise<void> => {
       // Memory + compaction are co-gated: only active when a store is set, so
       // default (no QUANTA_MEMORY) runs are byte-for-byte unchanged.
       ...(store ? { store, sessionId, compaction: {} } : {}),
+      ...(embedder ? { embedder } : {}),
+      ...(memoryConfig ? { memory: memoryConfig } : {}),
       ...(planMode ? { planMode: true } : {}),
       ...(metrics ? { metrics } : {}),
     }

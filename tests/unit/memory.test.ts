@@ -1,206 +1,300 @@
 import { describe, expect, test } from "bun:test"
+import { persistSession, recallContext, SESSION_TAG } from "@/agent/memory"
+import type { LLMPort, Message, StreamEvent } from "@/llm"
 import {
-  bucketOf,
-  createWorkingMemory,
-  FRESH_MAX_MS,
+  EMBED_DIM,
+  type EmbedderPort,
   InMemoryStore,
   type MemoryEntry,
-  RECENT_MAX_MS,
-  STALE_MAX_MS,
+  type PersistentStorePort,
 } from "@/memory"
 
-const NOW = 1_700_000_000_000
+const assistant = (text: string): Message => ({
+  role: "assistant",
+  content: [{ type: "text", text }],
+})
+const user = (text: string): Message => ({ role: "user", content: [{ type: "text", text }] })
 
-const entry = (over: Partial<MemoryEntry> & Pick<MemoryEntry, "id">): MemoryEntry => ({
-  kind: "fact",
-  text: "default text",
-  tags: [],
-  createdAt: NOW,
-  ...over,
+/** Deterministic 1536-vec derived from a string hash (stable per text). */
+const fakeVec = (text: string): number[] => {
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) h = (h ^ text.charCodeAt(i)) * 16777619
+  const out = new Array<number>(EMBED_DIM)
+  for (let i = 0; i < EMBED_DIM; i++) {
+    h = (h ^ (h << 13)) >>> 0
+    out[i] = ((h % 2000) - 1000) / 1000
+  }
+  return out
+}
+
+/** FakeEmbedder: deterministic per-text vectors; optionally always throws. */
+const fakeEmbedder = (opts?: { throws?: boolean }): EmbedderPort => ({
+  embed: async (texts: string[]) => {
+    if (opts?.throws) throw new Error("embed down")
+    return texts.map(fakeVec)
+  },
 })
 
-describe("WorkingMemory", () => {
-  test("append + snapshot returns buffered messages", () => {
-    const wm = createWorkingMemory<{ role: string; content: unknown }>()
-    wm.append({ role: "user", content: "hi" })
-    wm.append({ role: "assistant", content: "yo" })
-    expect(wm.snapshot()).toHaveLength(2)
-    expect(wm.snapshot()[0]).toEqual({ role: "user", content: "hi" })
+/** FakeLLM: streams `out` as one text_delta + message_stop, or throws. */
+const fakeLLM = (out: string | { throw: true }): LLMPort => ({
+  stream(): AsyncIterable<StreamEvent> {
+    return {
+      async *[Symbol.asyncIterator]() {
+        if (typeof out !== "string") throw new Error("llm down")
+        yield { type: "text_delta", delta: out }
+        yield { type: "message_stop", stop_reason: "end_turn" }
+      },
+    }
+  },
+})
+
+/** Wrap a store so update() always throws (reinforcement robustness test). */
+const throwingUpdate = (inner: PersistentStorePort): PersistentStorePort => ({
+  save: (e) => inner.save(e),
+  update: () => Promise.reject(new Error("update boom")),
+  delete: (id) => inner.delete(id),
+  get: (id) => inner.get(id),
+  all: () => inner.all(),
+  recall: (q) => inner.recall(q),
+})
+
+describe("recallContext", () => {
+  test("lexical-only recall, formatted block", async () => {
+    const store = new InMemoryStore([
+      { id: "a", kind: "fact", text: "uses Postgres 16", tags: [], createdAt: 1 },
+    ])
+    const out = await recallContext({ store }, "database")
+    expect(out).toBe("## Relevant memory\n- (fact) uses Postgres 16")
   })
 
-  test("snapshot is an immutable copy (mutating it does not affect buffer)", () => {
-    const wm = createWorkingMemory<{ role: string; content: unknown }>()
-    wm.append({ role: "user", content: "a" })
-    const snap = wm.snapshot() as { role: string; content: unknown }[]
-    snap.push({ role: "user", content: "injected" })
-    expect(wm.snapshot()).toHaveLength(1)
+  test("with embedder embeds the query (still recalls)", async () => {
+    const store = new InMemoryStore([
+      { id: "a", kind: "fact", text: "uses Postgres 16", tags: [], createdAt: 1 },
+    ])
+    const out = await recallContext({ store, embedder: fakeEmbedder() }, "db engine")
+    expect(out).toContain("- (fact) uses Postgres 16")
   })
 
-  test("seeded constructor copies the initial array", () => {
-    const seed = [{ role: "user", content: "seed" }]
-    const wm = createWorkingMemory(seed)
-    seed.push({ role: "user", content: "mutated" })
-    expect(wm.snapshot()).toHaveLength(1)
+  test("embedder throwing degrades to lexical (no throw)", async () => {
+    const store = new InMemoryStore([{ id: "a", kind: "fact", text: "x", tags: [], createdAt: 1 }])
+    const out = await recallContext({ store, embedder: fakeEmbedder({ throws: true }) }, "q")
+    expect(out).toContain("- (fact) x")
   })
 
-  test("clear empties the buffer", () => {
-    const wm = createWorkingMemory<{ role: string; content: unknown }>()
-    wm.append({ role: "user", content: "x" })
-    wm.clear()
-    expect(wm.snapshot()).toHaveLength(0)
-    expect(wm.tokenEstimate()).toBe(0)
+  test("empty primary (tiers filter) falls back to SESSION_TAG", async () => {
+    const store = new InMemoryStore([
+      {
+        id: "s1",
+        kind: "decision",
+        tier: "episodic",
+        text: "decided on Bun",
+        tags: [SESSION_TAG],
+        createdAt: 1,
+      },
+    ])
+    // Primary restricted to semantic → empty; fallback (tags, no tier) finds it.
+    const out = await recallContext({ store }, "anything", { tiers: ["semantic"] })
+    expect(out).toBe("## Relevant memory\n- (decision) decided on Bun")
   })
 
-  test("replace swaps the buffer with a defensive copy", () => {
-    const wm = createWorkingMemory<{ role: string; content: unknown }>()
-    wm.append({ role: "user", content: "old" })
-    const next = [{ role: "assistant", content: "new" }]
-    wm.replace(next)
-    next.push({ role: "user", content: "leak" })
-    expect(wm.snapshot()).toEqual([{ role: "assistant", content: "new" }])
+  test("empty store → null", async () => {
+    const out = await recallContext({ store: new InMemoryStore() }, "q")
+    expect(out).toBeNull()
   })
 
-  test("tokenEstimate is chars/4 of serialized messages, rounded up", () => {
-    const wm = createWorkingMemory<{ role: string; content: unknown }>()
-    expect(wm.tokenEstimate()).toBe(0)
-    const msg = { role: "user", content: "hello" }
-    wm.append(msg)
-    const expected = Math.ceil(JSON.stringify(msg).length / 4)
-    expect(wm.tokenEstimate()).toBe(expected)
-    expect(wm.tokenEstimate()).toBeGreaterThan(0)
+  test("reinforcement bumps accessCount and importance", async () => {
+    const store = new InMemoryStore([
+      { id: "a", kind: "fact", text: "t", tags: [], createdAt: 1, importance: 0.5, accessCount: 2 },
+    ])
+    await recallContext({ store }, "t")
+    const e = await store.get("a")
+    expect(e?.accessCount).toBe(3)
+    expect(e?.importance).toBeCloseTo(0.52, 5)
+    expect(typeof e?.lastAccessedAt).toBe("number")
+  })
+
+  test("reinforcement failure does not break recall", async () => {
+    const inner = new InMemoryStore([{ id: "a", kind: "fact", text: "t", tags: [], createdAt: 1 }])
+    const out = await recallContext({ store: throwingUpdate(inner) }, "t")
+    expect(out).toContain("- (fact) t")
+  })
+
+  test("text truncated to 600 chars + ellipsis", async () => {
+    const long = "x".repeat(700)
+    const store = new InMemoryStore([{ id: "a", kind: "fact", text: long, tags: [], createdAt: 1 }])
+    const out = await recallContext({ store }, "x")
+    expect(out).toBe(`## Relevant memory\n- (fact) ${"x".repeat(600)}…`)
   })
 })
 
-describe("bucketOf thresholds", () => {
-  test("zero and negative ages are fresh", () => {
-    expect(bucketOf(0)).toBe("fresh")
-    expect(bucketOf(-5_000)).toBe("fresh")
-    expect(bucketOf(Number.NaN)).toBe("fresh")
-    expect(bucketOf(Number.POSITIVE_INFINITY)).toBe("archived")
-  })
-
-  test("fresh boundary is inclusive", () => {
-    expect(bucketOf(FRESH_MAX_MS)).toBe("fresh")
-    expect(bucketOf(FRESH_MAX_MS + 1)).toBe("recent")
-  })
-
-  test("recent boundary is inclusive", () => {
-    expect(bucketOf(RECENT_MAX_MS)).toBe("recent")
-    expect(bucketOf(RECENT_MAX_MS + 1)).toBe("stale")
-  })
-
-  test("stale boundary is inclusive; beyond is archived", () => {
-    expect(bucketOf(STALE_MAX_MS)).toBe("stale")
-    expect(bucketOf(STALE_MAX_MS + 1)).toBe("archived")
-  })
-})
-
-describe("InMemoryStore", () => {
-  test("save then recall round-trips and isolates against mutation", async () => {
+describe("persistSession", () => {
+  test("heuristic path (no llm) persists final assistant text", async () => {
     const store = new InMemoryStore()
-    const tags = ["alpha"]
-    await store.save(entry({ id: "1", text: "the quick brown fox", tags }))
-    tags.push("mutated-after-save")
-    const got = await store.recall({})
-    expect(got).toHaveLength(1)
-    expect(got[0]?.tags).toEqual(["alpha"])
-    // returned copy is isolated too
-    got[0]?.tags.push("x")
-    expect((await store.recall({}))[0]?.tags).toEqual(["alpha"])
-  })
-
-  test("save with empty id rejects", async () => {
-    const store = new InMemoryStore()
-    await expect(store.save(entry({ id: "" }))).rejects.toThrow("id is required")
-  })
-
-  test("save upserts by id", async () => {
-    const store = new InMemoryStore()
-    await store.save(entry({ id: "1", text: "v1" }))
-    await store.save(entry({ id: "1", text: "v2" }))
-    const got = await store.recall({})
-    expect(got).toHaveLength(1)
-    expect(got[0]?.text).toBe("v2")
-    expect(store.size).toBe(1)
-  })
-
-  test("seed constructor + size", () => {
-    const store = new InMemoryStore([entry({ id: "a" }), entry({ id: "b" })])
-    expect(store.size).toBe(2)
-  })
-
-  test("empty query returns all, ranked by freshness then createdAt/id desc", async () => {
-    const store = new InMemoryStore([
-      entry({ id: "old", createdAt: NOW - STALE_MAX_MS - 1 }), // archived
-      entry({ id: "mid", createdAt: NOW - RECENT_MAX_MS - 1 }), // stale
-      entry({ id: "new1", createdAt: NOW }), // fresh
-      entry({ id: "new2", createdAt: NOW }), // fresh, tie
-    ])
-    const got = await store.recall({})
-    // fresh first; tie between new1/new2 (same createdAt) broken by id desc
-    expect(got.map((e) => e.id)).toEqual(["new2", "new1", "mid", "old"])
-  })
-
-  test("tag filter requires overlap; ranking rewards more overlap", async () => {
-    const store = new InMemoryStore([
-      entry({ id: "none", tags: ["zzz"] }),
-      entry({ id: "one", tags: ["alpha"] }),
-      entry({ id: "two", tags: ["Alpha", "beta"] }), // case-insensitive
-    ])
-    const got = await store.recall({ tags: ["alpha", "beta"] })
-    expect(got.map((e) => e.id)).toEqual(["two", "one"])
-  })
-
-  test("text substring filter is case-insensitive; exact match ranks higher", async () => {
-    const store = new InMemoryStore([
-      entry({ id: "miss", text: "nothing relevant" }),
-      entry({ id: "sub", text: "contains NEEDLE inside" }),
-      entry({ id: "exact", text: "needle" }),
-    ])
-    const got = await store.recall({ text: "needle" })
-    expect(got.map((e) => e.id)).toEqual(["exact", "sub"])
-  })
-
-  test("kind filter restricts results", async () => {
-    const store = new InMemoryStore([
-      entry({ id: "f", kind: "fact" }),
-      entry({ id: "d", kind: "decision" }),
-      entry({ id: "o", kind: "observation" }),
-    ])
-    const got = await store.recall({ kinds: ["decision", "observation"] })
-    expect(got.map((e) => e.id).sort()).toEqual(["d", "o"])
-  })
-
-  test("freshness filter restricts by recency bucket", async () => {
-    // recall() ranks against real Date.now(); use real-time-relative ages.
-    const realNow = Date.now()
-    const store = new InMemoryStore([
-      entry({ id: "fresh", createdAt: realNow }),
-      entry({ id: "stale", createdAt: realNow - RECENT_MAX_MS - 1 }),
-    ])
-    const got = await store.recall({ freshness: ["fresh"] })
-    expect(got.map((e) => e.id)).toEqual(["fresh"])
-  })
-
-  test("limit caps results; default is 20", async () => {
-    const many = Array.from({ length: 25 }, (_v, i) =>
-      entry({ id: `e${String(i).padStart(2, "0")}`, createdAt: NOW + i }),
+    await persistSession(
+      { store },
+      { sessionId: "s1", finalMessages: [user("hi"), assistant("Final decision: ship it.")] },
     )
-    const store = new InMemoryStore(many)
-    expect(await store.recall({})).toHaveLength(20)
-    expect(await store.recall({ limit: 3 })).toHaveLength(3)
-    expect(await store.recall({ limit: 0 })).toHaveLength(0)
-    expect(await store.recall({ limit: -1 })).toHaveLength(0)
+    const all = await store.all()
+    expect(all).toHaveLength(1)
+    expect(all[0]?.text).toBe("Final decision: ship it.")
+    expect(all[0]?.tags).toContain(SESSION_TAG)
   })
 
-  test("no-match query returns empty", async () => {
-    const store = new InMemoryStore([entry({ id: "1", text: "abc", tags: ["x"] })])
-    expect(await store.recall({ text: "zzzzz" })).toEqual([])
-    expect(await store.recall({ tags: ["nope"] })).toEqual([])
-    expect(await store.recall({ kinds: ["decision"] })).toEqual([])
+  test("no assistant text → no-op", async () => {
+    const store = new InMemoryStore()
+    await persistSession({ store }, { sessionId: "s1", finalMessages: [user("hi")] })
+    expect((await store.all()).length).toBe(0)
   })
 
-  test("empty store returns empty", async () => {
-    expect(await new InMemoryStore().recall({})).toEqual([])
+  test("distill path (FakeLLM JSON array) inserts records", async () => {
+    const store = new InMemoryStore()
+    const json = JSON.stringify([
+      {
+        kind: "fact",
+        tier: "semantic",
+        text: "uses Bun runtime",
+        tags: ["stack"],
+        importance: 0.9,
+      },
+    ])
+    await persistSession(
+      { store, llm: fakeLLM(json) },
+      { sessionId: "s2", finalMessages: [user("q"), assistant("done")] },
+    )
+    const all = await store.all()
+    expect(all).toHaveLength(1)
+    expect(all[0]?.text).toBe("uses Bun runtime")
+    expect(all[0]?.kind).toBe("fact")
+  })
+
+  test("re-running a session updates rather than duplicates (deterministic id)", async () => {
+    const store = new InMemoryStore()
+    const input = { sessionId: "s3", finalMessages: [user("q"), assistant("stable summary")] }
+    await persistSession({ store }, input)
+    await persistSession({ store }, input)
+    // Second run: exact-text dupe → heuristic skip. Still one entry.
+    expect((await store.all()).length).toBe(1)
+  })
+
+  test("heuristic skip on exact-text dupe", async () => {
+    const store = new InMemoryStore([
+      { id: "old", kind: "decision", text: "ship it", tags: [SESSION_TAG], createdAt: 1 },
+    ])
+    await persistSession({ store }, { sessionId: "s4", finalMessages: [assistant("ship it")] })
+    expect((await store.all()).length).toBe(1)
+  })
+
+  test("LLM merge op updates target, does not save candidate", async () => {
+    const store = new InMemoryStore([
+      {
+        id: "old",
+        kind: "fact",
+        text: "alpha beta gamma delta",
+        tags: [],
+        createdAt: Date.now(),
+      },
+    ])
+    const op = JSON.stringify({
+      action: "merge",
+      intoId: "old",
+      text: "alpha beta gamma delta merged",
+      tags: ["db"],
+      importance: 0.8,
+    })
+    await persistSession(
+      { store, llm: fakeLLM(op), distill: false },
+      { sessionId: "s5", finalMessages: [assistant("alpha beta gamma delta epsilon")] },
+    )
+    const all = await store.all()
+    expect(all).toHaveLength(1)
+    expect(all[0]?.text).toBe("alpha beta gamma delta merged")
+    expect(all[0]?.importance).toBeCloseTo(0.8, 5)
+  })
+
+  test("LLM supersede op saves candidate and marks old superseded", async () => {
+    const store = new InMemoryStore([
+      { id: "old", kind: "fact", text: "one two three four five", tags: [], createdAt: Date.now() },
+    ])
+    const op = JSON.stringify({ action: "supersede", oldId: "old" })
+    await persistSession(
+      { store, llm: fakeLLM(op), distill: false },
+      { sessionId: "s6", finalMessages: [assistant("one two three four six")] },
+    )
+    const all = await store.all()
+    expect(all).toHaveLength(2)
+    const old = all.find((e) => e.id === "old")
+    expect(old?.supersededBy).toBeDefined()
+  })
+
+  test("LLM skip op persists nothing", async () => {
+    const store = new InMemoryStore([
+      { id: "old", kind: "fact", text: "uses postgres database thing", tags: [], createdAt: 1 },
+    ])
+    await persistSession(
+      { store, llm: fakeLLM('{"action":"skip"}'), distill: false },
+      { sessionId: "s7", finalMessages: [assistant("uses postgres database stuff")] },
+    )
+    expect((await store.all()).length).toBe(1)
+  })
+
+  test("eviction deletes cap-overflow entries", async () => {
+    const seed: MemoryEntry[] = []
+    for (let i = 0; i < 6; i++) {
+      seed.push({
+        id: `e${i}`,
+        kind: "fact",
+        tier: "episodic",
+        text: `entry ${i}`,
+        tags: [],
+        createdAt: 1000 + i,
+        importance: 0.1,
+      })
+    }
+    const store = new InMemoryStore(seed)
+    await persistSession(
+      { store, evictionCaps: { episodicMax: 2 } },
+      { sessionId: "s8", finalMessages: [assistant("a fresh distinct summary line")] },
+    )
+    const all = await store.all()
+    const episodic = all.filter((e) => e.tier === "episodic")
+    expect(episodic.length).toBeLessThanOrEqual(2)
+  })
+
+  test("eviction decays archived low-value survivors", async () => {
+    const old = Date.now() - 40 * 24 * 60 * 60 * 1000 // 40d → archived
+    const store = new InMemoryStore([
+      {
+        id: "arch",
+        kind: "fact",
+        tier: "semantic",
+        text: "old archived knowledge",
+        tags: [],
+        createdAt: old,
+        importance: 0.8,
+      },
+    ])
+    await persistSession(
+      { store },
+      { sessionId: "s9", finalMessages: [assistant("an unrelated brand new summary")] },
+    )
+    const e = await store.get("arch")
+    expect(e?.importance).toBeCloseTo(0.4, 5) // 0.8 * EVICTION_DECAY(0.5)
+  })
+
+  test("never throws when distill/store blow up", async () => {
+    const boomStore: PersistentStorePort = {
+      save: () => Promise.reject(new Error("save boom")),
+      update: () => Promise.reject(new Error("update boom")),
+      delete: () => Promise.reject(new Error("delete boom")),
+      get: () => Promise.reject(new Error("get boom")),
+      all: () => Promise.reject(new Error("all boom")),
+      recall: () => Promise.reject(new Error("recall boom")),
+    }
+    await expect(
+      persistSession(
+        { store: boomStore, llm: fakeLLM({ throw: true }) },
+        { sessionId: "s10", finalMessages: [assistant("text")] },
+      ),
+    ).resolves.toBeUndefined()
   })
 })

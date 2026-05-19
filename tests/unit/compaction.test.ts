@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { compactIfNeeded, estimateTokens, findBoundary } from "@/agent"
-import type { LLMPort, Message, StreamEvent } from "@/llm"
+import type { LLMPort, Message, StreamEvent, StreamInput, SystemPromptInput } from "@/llm"
 
 /** FakeLLM that records its StreamInput and yields a fixed summary text. */
 class SummarizingLLM implements LLMPort {
-  lastSystem: string | undefined
+  lastSystem: SystemPromptInput | undefined
   lastMessages: Message[] = []
   constructor(private readonly summary: string) {}
-  async *stream(input: { messages: Message[]; system?: string }): AsyncIterable<StreamEvent> {
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     this.lastSystem = input.system
     this.lastMessages = input.messages
     yield { type: "text_delta", delta: this.summary }

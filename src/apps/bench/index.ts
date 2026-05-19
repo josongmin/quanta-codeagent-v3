@@ -7,20 +7,41 @@
  * documented seam in swebench.ts and intentionally out of scope here.
  *
  * Env / argv:
+ *   --swebench <file> | QUANTA_SWEBENCH_DATASET    official dataset JSONL
+ *                                                  (takes precedence over --corpus)
+ *   --predictions <path>                           predictions out (default ./predictions.jsonl)
+ *   --report <path>                                report out (default ./bench-report.json)
  *   --corpus <dir> | QUANTA_SWEBENCH_CORPUS_ROOT   corpus root
  *   --n <int>                                      Best-of-N (default 1)
  *   --limit <int>                                  cap instances
+ *   --dry-run                                      load+count+print plan, NO LLM
  *   --model <id> | QUANTA_MODEL                    model id
  *   QUANTA_PROVIDER / ANTHROPIC_API_KEY / OPENAI_API_KEY  provider pick
+ *   QUANTA_SWEBENCH_PYTHON=1                        grade via official Python
+ *                                                  harness when available
  * Never crashes when keys are absent — prints guidance and exits 0.
  */
 import { existsSync, readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
+import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { isPythonSwebenchAvailable } from "./python-swebench"
+import { buildReport, writeReport } from "./report"
 import { runInstance } from "./runner"
 import { patchVote, sampleBestOfN } from "./sampler"
 import { loadCorpus } from "./swebench"
+import {
+  defaultExec,
+  type Prediction,
+  parseSwebenchJsonl,
+  prepareTaskRepo,
+  type SwebenchTask,
+  toInstance,
+  writePredictions,
+} from "./swebench-dataset"
 import type { BenchSummary, Instance, InstanceResult } from "./types"
 
 // ── tiny dotenv (no dependency, first-wins; apps/cli has its own copy) ──────
@@ -53,6 +74,8 @@ const argValue = (flag: string): string | undefined => {
   const i = process.argv.indexOf(flag)
   return i >= 0 ? process.argv[i + 1] : undefined
 }
+
+const argFlag = (flag: string): boolean => process.argv.includes(flag)
 
 type Provider = "anthropic" | "openai"
 
@@ -96,20 +119,22 @@ const printSummary = (summary: BenchSummary): void => {
   logger.info(`resolved ${summary.resolved}/${summary.total} (${pct}%)`)
 }
 
+/** Per-run config common to single & Best-of-N. `pythonSwebench` is present
+ *  only when `QUANTA_SWEBENCH_PYTHON=1` and the harness is importable. */
+type RunCfg = Parameters<typeof runInstance>[1]
+
 /** Run one instance n times via Best-of-N; pick passing run, then majority
  *  patch vote as a tiebreak among equally-scored runs. */
 const resolveInstance = async (
   instance: Instance,
-  llm: LLMPort,
+  base: Omit<RunCfg, never>,
   n: number,
-  maxTurns: number,
-  timeoutMs: number,
 ): Promise<InstanceResult> => {
-  if (n <= 1) return runInstance(instance, { llm, maxTurns, timeoutMs })
+  if (n <= 1) return runInstance(instance, base)
 
   const out = await sampleBestOfN<InstanceResult>({
     n,
-    makeAttempt: () => runInstance(instance, { llm, maxTurns, timeoutMs }),
+    makeAttempt: () => runInstance(instance, base),
     score: (r) => (r.passed ? 1 : 0),
   })
 
@@ -128,47 +153,218 @@ const resolveInstance = async (
   return out.best.value ?? { id: instance.id, passed: false, patch: "", turns: 0 }
 }
 
-const main = async (): Promise<void> => {
-  loadEnv([".env.dev", ".env.local", ".env"])
-
-  const corpusRoot = argValue("--corpus") ?? process.env.QUANTA_SWEBENCH_CORPUS_ROOT ?? ""
-  const n = Math.max(1, Number(argValue("--n") ?? "1"))
-  const limitArg = argValue("--limit")
-  const maxTurns = Number(process.env.QUANTA_MAX_TURNS ?? "30")
-  const timeoutMs = Number(process.env.QUANTA_BENCH_TIMEOUT_MS ?? "120000")
-
-  const all = await loadCorpus(corpusRoot)
-  if (all.length === 0) {
+/**
+ * Official-dataset mode: parse the SWE-bench JSONL, clone+checkout each task's
+ * real repo, run the EXISTING `resolveInstance` (Best-of-N unchanged) against
+ * it, then emit official predictions.jsonl + a baseline report. A
+ * `prepareTaskRepo` failure becomes a failed InstanceResult — the batch is
+ * never aborted. Reuses runInstance/Best-of-N verbatim; no run logic is
+ * duplicated here.
+ */
+const runDatasetMode = async (
+  datasetFile: string,
+  llm: LLMPort,
+  meta: { provider: string; model: string },
+  cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
+): Promise<void> => {
+  const tasks: SwebenchTask[] = parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
+  if (tasks.length === 0) {
     logger.info(
-      `No corpus found at "${corpusRoot || "(unset)"}". Set QUANTA_SWEBENCH_CORPUS_ROOT or pass --corpus <dir>. Nothing to run.`,
+      `No usable tasks parsed from "${datasetFile}". Expecting official SWE-bench JSONL. Nothing to run.`,
     )
     process.exit(0)
   }
-  const instances = limitArg ? all.slice(0, Number(limitArg)) : all
+  const selected = cfg.limit ? tasks.slice(0, cfg.limit) : tasks
 
+  logger.info(
+    `bench(swebench): ${selected.length} task(s), provider=${meta.provider}, model=${meta.model}, n=${cfg.n}`,
+  )
+
+  const results: InstanceResult[] = []
+  const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL
+  for (const task of selected) {
+    const work = await mkdtemp(join(tmpdir(), `swebench-${task.instanceId}-`))
+    const dest = join(work, "repo")
+    try {
+      await prepareTaskRepo(
+        task,
+        dest,
+        defaultExec,
+        repoBaseUrl ?? "https://github.com/",
+        cfg.timeoutMs,
+      )
+      const instance = toInstance(task, dest)
+      results.push(
+        await resolveInstance(
+          instance,
+          { llm, maxTurns: cfg.maxTurns, timeoutMs: cfg.timeoutMs },
+          cfg.n,
+        ),
+      )
+    } catch (e) {
+      results.push({
+        id: task.instanceId,
+        passed: false,
+        patch: "",
+        turns: 0,
+        error: (e as Error).message,
+      })
+    } finally {
+      await rm(work, { recursive: true, force: true })
+    }
+  }
+
+  const predictionsFile = argValue("--predictions") ?? "./predictions.jsonl"
+  const reportFile = argValue("--report") ?? "./bench-report.json"
+  const predictions: Prediction[] = results.map((r) => ({
+    instance_id: r.id,
+    model_name_or_path: meta.model,
+    model_patch: r.patch,
+  }))
+  await writePredictions(predictionsFile, predictions)
+  await writeReport(
+    reportFile,
+    buildReport({ provider: meta.provider, model: meta.model, n: cfg.n }, results),
+  )
+  logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
+  printSummary({
+    total: results.length,
+    resolved: results.filter((r) => r.passed).length,
+    results,
+  })
+}
+
+/** Resolve provider/model/LLM; exits 0 with guidance when the key is absent
+ *  (shared by both modes). `noun` tailors the message. */
+const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLMPort } => {
   const provider = pickProvider()
   const model = argValue("--model") ?? process.env.QUANTA_MODEL ?? DEFAULT_MODEL[provider]
   const llm = buildLLM(provider, model)
   if (!llm) {
     logger.info(
-      `Found ${instances.length} instance(s) but no API key for provider "${provider}". Set ANTHROPIC_API_KEY or OPENAI_API_KEY to run. Exiting.`,
+      `Found ${noun} but no API key for provider "${provider}". Set ANTHROPIC_API_KEY or OPENAI_API_KEY to run. Exiting.`,
     )
     process.exit(0)
   }
+  return { provider, model, llm }
+}
 
+/** Official-dataset entrypoint. Returns true when it handled the run (so main
+ *  skips the custom-corpus path entirely). */
+const maybeRunDatasetMode = async (cfg: {
+  n: number
+  limitArg?: string
+  maxTurns: number
+  timeoutMs: number
+}): Promise<boolean> => {
+  const datasetFile = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET ?? ""
+  if (!datasetFile) return false
+  if (!existsSync(datasetFile)) {
+    logger.info(
+      `No SWE-bench dataset at "${datasetFile}". Pass --swebench <dataset.jsonl> or set QUANTA_SWEBENCH_DATASET. Nothing to run.`,
+    )
+    process.exit(0)
+  }
+  const { provider, model, llm } = resolveLLM("a dataset")
+  await runDatasetMode(
+    datasetFile,
+    llm,
+    { provider, model },
+    {
+      n: cfg.n,
+      ...(cfg.limitArg ? { limit: Number(cfg.limitArg) } : {}),
+      maxTurns: cfg.maxTurns,
+      timeoutMs: cfg.timeoutMs,
+    },
+  )
+  return true
+}
+
+/** Build the optional Python-harness wiring for the runner. Returns undefined
+ *  unless `QUANTA_SWEBENCH_PYTHON=1` AND the official harness is importable
+ *  (probe is real here). Default-off ⇒ the local testCmd path is unchanged. */
+const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
+  if (process.env.QUANTA_SWEBENCH_PYTHON !== "1") return undefined
+  if (!(await isPythonSwebenchAvailable())) {
+    logger.info(
+      'QUANTA_SWEBENCH_PYTHON=1 but `python -c "import swebench"` failed — falling back to local testCmd verifier.',
+    )
+    return undefined
+  }
+  logger.info("using official Python swebench harness for grading")
+  return {}
+}
+
+/** Custom-corpus entrypoint (the path when no --swebench dataset is given).
+ *  Handles --dry-run (no LLM), empty-corpus + no-key guidance, then runs. */
+const runCustomCorpusMode = async (cfg: {
+  corpusRoot: string
+  n: number
+  limit: number | null
+  maxTurns: number
+  timeoutMs: number
+}): Promise<void> => {
+  const all = await loadCorpus(cfg.corpusRoot)
+  const pythonHarness = process.env.QUANTA_SWEBENCH_PYTHON === "1"
+
+  // `--dry-run`: load + count + print the plan; NEVER build an LLM or run.
+  if (argFlag("--dry-run")) {
+    const plan = buildDryRunPlan(cfg.corpusRoot, all, {
+      n: cfg.n,
+      limit: cfg.limit,
+      pythonHarness,
+    })
+    for (const line of formatDryRunPlan(plan)) logger.info(line)
+    process.exit(0)
+  }
+
+  if (all.length === 0) {
+    logger.info(
+      `No corpus found at "${cfg.corpusRoot || "(unset)"}". Set QUANTA_SWEBENCH_CORPUS_ROOT or pass --corpus <dir>. Nothing to run.`,
+    )
+    process.exit(0)
+  }
+  const instances = cfg.limit === null ? all : all.slice(0, cfg.limit)
+
+  const { provider, model, llm } = resolveLLM(`${instances.length} instance(s)`)
+  const pythonSwebench = await buildPythonSwebench()
   logger.info(
-    `bench: ${instances.length} instance(s), provider=${provider}, model=${model}, n=${n}`,
+    `bench: ${instances.length} instance(s), provider=${provider}, model=${model}, n=${cfg.n}`,
   )
 
+  const base: RunCfg = {
+    llm,
+    maxTurns: cfg.maxTurns,
+    timeoutMs: cfg.timeoutMs,
+    ...(pythonSwebench !== undefined ? { pythonSwebench } : {}),
+  }
   const results: InstanceResult[] = []
   for (const instance of instances) {
-    results.push(await resolveInstance(instance, llm, n, maxTurns, timeoutMs))
+    results.push(await resolveInstance(instance, base, cfg.n))
   }
   printSummary({
     total: results.length,
     resolved: results.filter((r) => r.passed).length,
     results,
   })
+}
+
+const main = async (): Promise<void> => {
+  loadEnv([".env.dev", ".env.local", ".env"])
+
+  const corpusRoot = argValue("--corpus") ?? process.env.QUANTA_SWEBENCH_CORPUS_ROOT ?? ""
+  const n = Math.max(1, Number(argValue("--n") ?? "1"))
+  const limitArg = argValue("--limit")
+  const limit = limitArg ? Number(limitArg) : null
+  const maxTurns = Number(process.env.QUANTA_MAX_TURNS ?? "30")
+  const timeoutMs = Number(process.env.QUANTA_BENCH_TIMEOUT_MS ?? "120000")
+
+  // Official-dataset mode takes precedence; when its flag/env is unset the
+  // custom-corpus path is byte-for-byte unchanged.
+  if (await maybeRunDatasetMode({ n, ...(limitArg ? { limitArg } : {}), maxTurns, timeoutMs })) {
+    return
+  }
+  await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs })
 }
 
 main().catch((e) => {

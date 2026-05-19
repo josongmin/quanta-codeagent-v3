@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { InMemoryStore, type MemoryEntry, SqliteStore } from "@/memory"
+import { InMemoryStore, type MemoryEntry, normalizeEntry, SqliteStore } from "@/memory"
 
 const NOW = 1_700_000_000_000
 
@@ -27,7 +27,11 @@ describe("SqliteStore (:memory:)", () => {
       await store.save(entry({ id: "1", text: "hello world", tags: ["greeting"] }))
       const got = await store.recall({ text: "hello" })
       expect(got).toHaveLength(1)
-      expect(got[0]).toEqual(entry({ id: "1", text: "hello world", tags: ["greeting"] }))
+      // Round-trip preserves all fields and applies the documented store-boundary
+      // defaults (tier/importance/updatedAt/accessCount) — see normalizeEntry.
+      expect(got[0]).toEqual(
+        normalizeEntry(entry({ id: "1", text: "hello world", tags: ["greeting"] })),
+      )
     } finally {
       store.close()
     }
