@@ -1,7 +1,14 @@
+import type { EditMismatchKind } from "./strategy-hint"
+
 export interface EditOutcome {
   ok: boolean
   message: string
   next?: string
+  /** Stable failure-class tag (CR2 follow-up). Present on every `ok: false`
+   *  outcome whose failure class the strategy-hint formatter understands;
+   *  absent on success and on input-validation failures (identical / empty
+   *  old_string) that don't carry a routing implication. */
+  kind?: EditMismatchKind
 }
 
 /** Exact-string replacement. Phase 1 only — fuzzy matching is Phase 2.
@@ -21,12 +28,13 @@ export const applyExactEdit = (
 
   const count = source.split(oldString).length - 1
   if (count === 0) {
-    return { ok: false, message: "old_string not found in file" }
+    return { ok: false, message: "old_string not found in file", kind: "not-found" }
   }
   if (count > 1 && !replaceAll) {
     return {
       ok: false,
       message: `old_string is not unique (${count} matches); pass replace_all or add context`,
+      kind: "ambiguous",
     }
   }
 

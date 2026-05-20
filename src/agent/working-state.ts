@@ -17,10 +17,24 @@ export interface OwnerCandidate {
   reason: string
 }
 
+/** Where a {@link Blocker} manifests. Typed (not free-form string) so the
+ *  surface is a routable category — the closeout-guard's four-truth-surface
+ *  reminder (`type/owner/wire/test`) and the audit-mode posture both rely on
+ *  these names being stable. `"build"` covers config/manifest/CI surfaces and
+ *  `"other"` is a deliberate escape hatch for surfaces a new task posture may
+ *  surface (adding a new tag is a typed change, NOT a silent rewrite). */
+export type BlockerSurface =
+  | "type"
+  | "owner"
+  | "wire"
+  | "test"
+  | "runtime"
+  | "build"
+  | "other"
+
 export interface Blocker {
   what: string
-  /** Where the blocker manifests: "type" | "wire" | "test" | "runtime" | etc. */
-  surface: string
+  surface: BlockerSurface
 }
 
 export interface NextStep {

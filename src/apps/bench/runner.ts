@@ -266,6 +266,35 @@ const SWEBENCH_DIRECTIVE = [
   "- Keep the final diff minimal and isolated to the fix.",
 ].join("\n")
 
+/**
+ * BENCH-INTENTIONAL OPT-OUTS (Codex SOTA++ absorption Phases 0-8 + Round 3):
+ * the SWE-bench grader is byte-sensitive (the official Python harness diffs
+ * the agent's patch against the reference), so the bench harness deliberately
+ * omits every optional Codex-absorption knob below. The agent runs in the
+ * *plainest possible posture* — only the cache lever (ADR-0004), compaction
+ * (ADR-0011), and `verifyGuard` (ADR-0013, when explicitly enabled by the
+ * caller) are touched. The omissions are NOT oversight; reintroducing them
+ * would change measurement integrity:
+ *
+ *   - `mode`             — bench is plain "default" (no plan/review/audit
+ *                          posture forcing); the agent's task is the diff,
+ *                          not the report shape.
+ *   - `repoRules`        — sandbox repo's own `CONTRIBUTING.md`/etc. is not
+ *                          loaded as agent authority; bench measures the
+ *                          agent's intrinsic skill, not its rule-reading.
+ *   - `hitl`             — bench is unattended (`acceptEdits` permission);
+ *                          a HITL gate would deadlock on every confirm.
+ *   - `closeoutGuard`    — closeout reminders shape report text, not patch
+ *                          contents; bench measures patches.
+ *   - `workingState`     — L3 scratchpad rides the reminder and changes the
+ *                          turn-context bytes; bench keeps a stable prompt.
+ *   - `skills`           — skill discovery + active-skills block likewise
+ *                          shifts the per-turn reminder.
+ *
+ * If a future bench mode wants any of these, add an opt-in flag — do NOT
+ * remove this comment block without an accompanying measurement-integrity
+ * ADR.
+ */
 const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,

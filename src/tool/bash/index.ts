@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
-import type { HITLTier, Tool, ToolContext, ToolEvent } from "../types"
+import type { HITLTier, Tool, ToolContext, ToolEvent, ToolResultEvidence } from "../types"
 
 const schema = z.object({
   command: z.string().describe("Shell command to run via bash -lc"),
@@ -11,6 +11,10 @@ type Input = z.infer<typeof schema>
 
 const MAX_OUTPUT = 30_000
 const CMD_PREVIEW = 80
+/** Local stderr-tail cap on `evidence.stderr`. Dispatch re-trims to its own
+ *  smaller `STDERR_TAIL_CAP` (2000) as a defense-in-depth backstop, so this
+ *  cap only bounds the per-tool attachment size. */
+const STDERR_CAP = 4_000
 
 /* HITL tier patterns (Codex hitl-audit.md). HARD_DENY (RCE, root-rm, fork
  * bomb, …) is enforced upstream by @/permission and maps to hand-off-required
@@ -89,11 +93,21 @@ export const bashTool: Tool<Input> = {
       body = `${body.slice(0, MAX_OUTPUT)}\n… (truncated, ${body.length - MAX_OUTPUT} more chars)`
     }
     const status = r.timedOut ? "timed out" : r.exitCode === 0 ? "exit 0" : `exit ${r.exitCode}`
+
+    // RFC-0002 §5.2 evidence. Attach via the typed `evidence` field (CR3:
+    // no more duck-typed extras on ToolResult). Each subfield is conditional-
+    // spread so `exactOptionalPropertyTypes` never sees `undefined`.
+    const evidence: ToolResultEvidence = {
+      ...(r.stderr ? { stderr: r.stderr.slice(-STDERR_CAP) } : {}),
+      exitCode: r.exitCode,
+    }
+
     yield {
       type: "result",
       result: {
         ok: r.exitCode === 0 && !r.timedOut,
         output: `[${status}]\n${body || "(no output)"}`,
+        evidence,
       },
     }
   },

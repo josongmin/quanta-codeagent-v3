@@ -240,13 +240,13 @@ describe("dispatchTool tool evidence (RFC-0002 §5.2 / C2)", () => {
       run: async function* () {
         yield {
           type: "result",
-          // Shell-class tools may duck-attach §5.2 evidence beyond {ok,output}.
+          // Shell-class tools attach §5.2 evidence via the typed
+          // `evidence` field (CR3: no more duck-typed extras on ToolResult).
           result: {
             ok: false,
             output: "[exit 1]\nboom",
-            stderr: "boom on stderr",
-            exitCode: 1,
-          } as { ok: boolean; output: string },
+            evidence: { stderr: "boom on stderr", exitCode: 1 },
+          },
         }
       },
     })

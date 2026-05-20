@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
 import { fileExists, readFile } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { Tool, ToolContext, ToolEvent, ToolResultEvidence } from "../types"
 
 const schema = z.object({
   command: z.string().optional().describe("Explicit test command (skips auto-detection)"),
@@ -14,6 +14,9 @@ type Input = z.infer<typeof schema>
 const DEFAULT_TIMEOUT = 120_000
 const MAX_TIMEOUT = 600_000
 const TAIL_CAP = 12_000
+/** Local stderr-tail cap on `evidence.stderr`. Dispatch re-trims to its own
+ *  smaller `STDERR_TAIL_CAP` (2000) as a defense-in-depth backstop. */
+const STDERR_EVIDENCE_CAP = 4_000
 
 const has = async (cwd: string, name: string): Promise<boolean> => fileExists(`${cwd}/${name}`)
 
@@ -109,11 +112,19 @@ export const testRunnerTool: Tool<Input> = {
     const v = verdict(combined, r.exitCode, r.timedOut)
     const ok = r.exitCode === 0 && !r.timedOut
 
+    // RFC-0002 §5.2 evidence (CR3: typed, not duck-smuggled). Conditional
+    // spread keeps `exactOptionalPropertyTypes` happy when stderr is empty.
+    const evidence: ToolResultEvidence = {
+      ...(r.stderr ? { stderr: r.stderr.slice(-STDERR_EVIDENCE_CAP) } : {}),
+      exitCode: r.exitCode,
+    }
+
     yield {
       type: "result",
       result: {
         ok,
         output: `$ ${resolved}\n[${status}] verdict: ${v}\n${tail || "(no output)"}`,
+        evidence,
       },
     }
   },

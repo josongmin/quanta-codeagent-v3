@@ -73,6 +73,7 @@ export { createSubagentRunner, type SubagentRunnerOptions } from "./subagent-run
 export type { AgentConfig, AgentOutcome, StopReason } from "./types"
 export {
   type Blocker,
+  type BlockerSurface,
   createWorkingStateSession,
   type DeferredValidation,
   emptyWorkingState,

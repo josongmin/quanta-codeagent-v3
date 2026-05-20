@@ -49,11 +49,20 @@ const ownerSchema = z.object({
   reason: cappedStr(MAX_STR, "reason").describe("Why this file is a likely owner."),
 })
 
+// Typed surface union (Codex four-truth-surfaces + the operational extras
+// we observe in practice). Closing the set forces a typed change to add a
+// new surface — silent free-form strings are no longer accepted. Mirrors
+// `BlockerSurface` in `@/tool/types` AND `@/agent/working-state`.
+const blockerSurfaceSchema = z
+  .enum(["type", "owner", "wire", "test", "runtime", "build", "other"])
+  .describe(
+    "Truth surface where the blocker manifests. Use one of: type, owner, wire, " +
+      "test, runtime, build, other.",
+  )
+
 const blockerSchema = z.object({
   what: cappedStr(MAX_STR, "what").describe("Concrete description of the blocker."),
-  surface: cappedStr(MAX_STR, "surface").describe(
-    'Where the blocker manifests, e.g. "type", "wire", "test", "runtime".',
-  ),
+  surface: blockerSurfaceSchema,
 })
 
 const nextStepSchema = z.object({
@@ -69,35 +78,49 @@ const deferredValidationSchema = z.object({
   reason: cappedStr(MAX_STR, "reason").describe("Why this validation was deferred."),
 })
 
-const schema = z.object({
-  ownerShortlist: z
-    .array(ownerSchema)
-    .max(MAX_LIST, `ownerShortlist must not exceed ${MAX_LIST} entries`)
-    .optional()
-    .describe("Replacement for the owner shortlist. Omit to leave unchanged."),
-  hypothesis: z
-    .union([
-      z.string().max(MAX_HYPOTHESIS, `hypothesis must not exceed ${MAX_HYPOTHESIS} characters`),
-      z.null(),
-    ])
-    .optional()
-    .describe("Working hypothesis. Pass a string to set, null to clear, omit to leave unchanged."),
-  blockers: z
-    .array(blockerSchema)
-    .max(MAX_LIST, `blockers must not exceed ${MAX_LIST} entries`)
-    .optional()
-    .describe("Replacement for the blockers list. Omit to leave unchanged."),
-  nextStepQueue: z
-    .array(nextStepSchema)
-    .max(MAX_LIST, `nextStepQueue must not exceed ${MAX_LIST} entries`)
-    .optional()
-    .describe("Replacement for the next-step queue. Omit to leave unchanged."),
-  deferredValidation: z
-    .array(deferredValidationSchema)
-    .max(MAX_LIST, `deferredValidation must not exceed ${MAX_LIST} entries`)
-    .optional()
-    .describe("Replacement for the deferred-validation list. Omit to leave unchanged."),
-})
+const schema = z
+  .object({
+    ownerShortlist: z
+      .array(ownerSchema)
+      .max(MAX_LIST, `ownerShortlist must not exceed ${MAX_LIST} entries`)
+      .optional()
+      .describe("Replacement for the owner shortlist. Omit to leave unchanged."),
+    hypothesis: z
+      .union([
+        z.string().max(MAX_HYPOTHESIS, `hypothesis must not exceed ${MAX_HYPOTHESIS} characters`),
+        z.null(),
+      ])
+      .optional()
+      .describe(
+        "Working hypothesis. Pass a string to set, null to clear, omit to leave unchanged.",
+      ),
+    blockers: z
+      .array(blockerSchema)
+      .max(MAX_LIST, `blockers must not exceed ${MAX_LIST} entries`)
+      .optional()
+      .describe("Replacement for the blockers list. Omit to leave unchanged."),
+    nextStepQueue: z
+      .array(nextStepSchema)
+      .max(MAX_LIST, `nextStepQueue must not exceed ${MAX_LIST} entries`)
+      .optional()
+      .describe("Replacement for the next-step queue. Omit to leave unchanged."),
+    deferredValidation: z
+      .array(deferredValidationSchema)
+      .max(MAX_LIST, `deferredValidation must not exceed ${MAX_LIST} entries`)
+      .optional()
+      .describe("Replacement for the deferred-validation list. Omit to leave unchanged."),
+  })
+  // Round 2 follow-up: a no-field call is a no-op that wastes a turn budget.
+  // The model occasionally re-fires update_working_state with an empty patch
+  // (likely a "I should track state but I have no diff to apply" loop). We
+  // reject it explicitly so the failure surfaces in the model's next turn
+  // and it routes to a more useful tool. Single-arg refine is the minimum
+  // contract change; deeper "is anything actually new?" diffing is left as a
+  // follow-up (would require state-snapshot access in the validator).
+  .refine((p) => Object.keys(p).length > 0, {
+    message:
+      "at least one field must be provided — empty update_working_state is a no-op; omit the tool call instead",
+  })
 
 type Input = z.infer<typeof schema>
 

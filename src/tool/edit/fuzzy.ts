@@ -70,6 +70,7 @@ const applyWindows = (
       outcome: {
         ok: false,
         message: `${strategy} matched ${spans.length} spans; ambiguous (pass replace_all or add context)`,
+        kind: "ambiguous",
       },
     }
   }
@@ -158,5 +159,6 @@ export const applyFuzzyEdit = (
     message:
       "no confident match (exact, whitespace-flexible, and anchored-trim all failed); " +
       "refine old_string — a wrong edit is worse than none",
+    kind: "fuzzy-no-confident",
   }
 }

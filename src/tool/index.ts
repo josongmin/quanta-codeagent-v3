@@ -51,11 +51,13 @@ export {
 } from "./lsp_nav"
 export { ToolRegistry } from "./registry"
 export type {
+  BlockerSurface,
   HITLTier,
   Tool,
   ToolContext,
   ToolEvent,
   ToolResult,
+  ToolResultEvidence,
   ToolSpec,
   WorkingStateHandle,
   WorkingStatePatch,

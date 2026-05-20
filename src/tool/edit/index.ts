@@ -3,7 +3,7 @@ import { FsJailError, readFile, writeFile } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
-import { classifyMismatch, formatStrategyHint } from "./strategy-hint"
+import { classifyMismatch, formatEditMismatchMarker, formatStrategyHint } from "./strategy-hint"
 
 const schema = z.object({
   path: z.string().describe("File path to edit"),
@@ -48,8 +48,21 @@ export const editTool: Tool<Input> = {
         // Phase 4: surface a structured next-strategy hint so the LLM can
         // switch to `scripted_replace` / re-read instead of re-trying the same
         // patch. Exit semantics unchanged (still ok:false) — message text only.
-        const hint = formatStrategyHint(classifyMismatch(result.message))
-        yield { type: "result", result: { ok: false, output: `${result.message}\n\n${hint}` } }
+        //
+        // CR2 follow-up: classify via the structural `result.kind` tag when
+        // present (compile-checked) and fall back to text sniffing otherwise.
+        // Append a stable `[edit-mismatch:<kind>]` marker so out-of-process
+        // consumers (or a future typed `ToolResult.evidence` field) can also
+        // recover the kind without re-implementing the text sniff.
+        const next = classifyMismatch(
+          result.kind !== undefined ? { kind: result.kind } : result.message,
+        )
+        const hint = formatStrategyHint(next)
+        const marker = result.kind !== undefined ? ` ${formatEditMismatchMarker(result.kind)}` : ""
+        yield {
+          type: "result",
+          result: { ok: false, output: `${result.message}${marker}\n\n${hint}` },
+        }
         return
       }
       await writeFile(input.path, result.next, ctx.cwd)

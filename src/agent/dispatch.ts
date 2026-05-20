@@ -1,7 +1,7 @@
 import type { ToolUseBlock } from "@/llm"
 import type { AutoModeClassifier, PermissionContext } from "@/permission"
 import { QuantaError, toError } from "@/shared"
-import type { ToolContext, WorkingStateHandle } from "@/tool"
+import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { deny, resultBlock } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
@@ -9,24 +9,29 @@ import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
 
-/** Max chars of stderr retained on the dispatch result (RFC-0002 §5.2). */
+/** Max chars of stderr retained on the dispatch result (RFC-0002 §5.2). The
+ *  per-tool cap on `evidence.stderr` is larger (4 000) — this is a defense-in-
+ *  depth backstop trimming the dispatch-side surface to a bounded tail. */
 const STDERR_TAIL_CAP = 2000
 
-/** Duck-read RFC-0002 §5.2 tool evidence a tool may attach to its ToolResult.
- *  `ToolResult` only declares `ok`/`output`; shell-class tools may carry
- *  `stderr`/`exitCode`/`fullLogPath` as extra props. Read defensively and
- *  conditional-set so `exactOptionalPropertyTypes` never sees `undefined`. */
+/** Read RFC-0002 §5.2 evidence from a `ToolResult.evidence` (CR3: typed, not
+ *  duck-typed). The dispatch surface flattens the optional nested fields onto
+ *  `DispatchResult` (`stderrTail` / `exitCode` / `fullLogPath`) — the stream
+ *  and trajectory recorders consume those flat fields unchanged. Each output
+ *  field is conditional-set so `exactOptionalPropertyTypes` never sees an
+ *  `undefined` value. */
 const evidenceOf = (
-  result: unknown,
+  result: ToolResult,
 ): Pick<DispatchResult, "stderrTail" | "exitCode" | "fullLogPath"> => {
-  const r = result as Record<string, unknown>
   const out: Pick<DispatchResult, "stderrTail" | "exitCode" | "fullLogPath"> = {}
-  if (typeof r.stderr === "string" && r.stderr.length > 0) {
-    out.stderrTail = r.stderr.slice(-STDERR_TAIL_CAP)
+  const ev = result.evidence
+  if (ev === undefined) return out
+  if (typeof ev.stderr === "string" && ev.stderr.length > 0) {
+    out.stderrTail = ev.stderr.slice(-STDERR_TAIL_CAP)
   }
-  if (typeof r.exitCode === "number") out.exitCode = r.exitCode
-  if (typeof r.fullLogPath === "string" && r.fullLogPath.length > 0) {
-    out.fullLogPath = r.fullLogPath
+  if (typeof ev.exitCode === "number") out.exitCode = ev.exitCode
+  if (typeof ev.fullLogPath === "string" && ev.fullLogPath.length > 0) {
+    out.fullLogPath = ev.fullLogPath
   }
   return out
 }

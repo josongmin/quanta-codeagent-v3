@@ -29,13 +29,25 @@ export interface WorkingStateHandle {
   snapshot(): WorkingStateSnapshot
 }
 
+/** Mirror of `BlockerSurface` from `@/agent/working-state` (kept here so
+ *  `@/tool` is slice-isolated from `@/agent`). Adding a new surface requires
+ *  updating BOTH sides — the compile-time assertion at the bottom of this
+ *  file enforces structural equivalence. */
+export type BlockerSurface =
+  | "type"
+  | "owner"
+  | "wire"
+  | "test"
+  | "runtime"
+  | "build"
+  | "other"
+
 /** Structural duck-typed mirror of `WorkingState` (kept here so `@/tool` is
- *  slice-isolated from `@/agent`). Fields are intentionally `unknown` shapes to
- *  the tool — the concrete tool re-derives them via zod. */
+ *  slice-isolated from `@/agent`). */
 export interface WorkingStateSnapshot {
   ownerShortlist: { file: string; reason: string }[]
   hypothesis?: string
-  blockers: { what: string; surface: string }[]
+  blockers: { what: string; surface: BlockerSurface }[]
   nextStepQueue: { what: string; deferred?: boolean }[]
   deferredValidation: { rail: string; reason: string }[]
 }
@@ -48,7 +60,7 @@ export interface WorkingStateSnapshot {
 export interface WorkingStatePatch {
   ownerShortlist?: { file: string; reason: string }[] | undefined
   hypothesis?: string | null | undefined
-  blockers?: { what: string; surface: string }[] | undefined
+  blockers?: { what: string; surface: BlockerSurface }[] | undefined
   nextStepQueue?: { what: string; deferred?: boolean | undefined }[] | undefined
   deferredValidation?: { rail: string; reason: string }[] | undefined
 }
@@ -57,6 +69,29 @@ export interface ToolResult {
   ok: boolean
   /** Text returned to the model as the tool_result content. */
   output: string
+  /** Optional execution evidence surfaced to RFC-0002 §5.2 trajectory.
+   *  Tools that exec shell commands attach stderr/exitCode/log-spill paths
+   *  here; tools that don't simply omit the field. Replaces the previous
+   *  duck-typed extra-prop smuggling on `ToolResult` (CR3): the dispatch
+   *  seam now reads `result.evidence?.*` through this typed surface so the
+   *  `stdErr` vs `stderr` casing drift can no longer slip past `tsc`. */
+  evidence?: ToolResultEvidence
+}
+
+/** Optional RFC-0002 §5.2 execution evidence a tool may attach to its
+ *  `ToolResult`. All fields are optional individually: a tool may carry just
+ *  a stderr tail, or just a spill path, or any combination. Implementations
+ *  cap their own field lengths; the dispatch seam re-trims `stderr` to its
+ *  own `STDERR_TAIL_CAP` as a defense-in-depth backstop. */
+export interface ToolResultEvidence {
+  /** Tail of stderr captured during execution. Implementations cap their
+   *  own length — dispatch trims again to its `STDERR_TAIL_CAP` backstop. */
+  stderr?: string
+  /** Process exit code when the tool spawned an external process. */
+  exitCode?: number
+  /** Absolute path to a full log when output spilled. Caller-resolved
+   *  (FS jail still applies to the path). */
+  fullLogPath?: string
 }
 
 /**
