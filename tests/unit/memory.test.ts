@@ -94,7 +94,9 @@ describe("recallContext", () => {
     ])
     // Primary restricted to semantic → empty; fallback (tags, no tier) finds it.
     const out = await recallContext({ store }, "anything", { tiers: ["semantic"] })
-    expect(out).toBe("## Memory hints (routing hints only — not proof)\n- (decision) decided on Bun")
+    expect(out).toBe(
+      "## Memory hints (routing hints only — not proof)\n- (decision) decided on Bun",
+    )
   })
 
   test("empty store → null", async () => {
@@ -166,7 +168,9 @@ describe("recallContext", () => {
     const out = await recallContext({ store, onStats: (s) => seen.push(s) }, "anything", {
       tiers: ["semantic"],
     })
-    expect(out).toBe("## Memory hints (routing hints only — not proof)\n- (decision) decided on Bun")
+    expect(out).toBe(
+      "## Memory hints (routing hints only — not proof)\n- (decision) decided on Bun",
+    )
     expect(seen).toHaveLength(1)
     expect(seen[0]).toEqual({ recalled: 1, embedded: false, fellBack: true })
   })
@@ -200,7 +204,9 @@ describe("recallContext", () => {
     const long = "x".repeat(700)
     const store = new InMemoryStore([{ id: "a", kind: "fact", text: long, tags: [], createdAt: 1 }])
     const out = await recallContext({ store }, "x")
-    expect(out).toBe(`## Memory hints (routing hints only — not proof)\n- (fact) ${"x".repeat(600)}…`)
+    expect(out).toBe(
+      `## Memory hints (routing hints only — not proof)\n- (fact) ${"x".repeat(600)}…`,
+    )
   })
 })
 

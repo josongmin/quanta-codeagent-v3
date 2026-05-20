@@ -108,7 +108,20 @@ export const createWorkingStateSession = (): WorkingStateSession => {
       return state
     },
     snapshot() {
-      return state
+      // Deep-copy: caller-visible "snapshot" must NOT alias live state, or
+      // a subsequent `mutate(...)` (e.g. from a concurrent tool call earlier
+      // in the same turn) would race a reader holding the snapshot. Inner
+      // arrays carry caller-supplied object references — clone the entries
+      // too so accidental `snap.blockers[0].what = "..."` cannot tamper with
+      // session state. `mutate(patch)` itself is replacement-only so this is
+      // the only seam where a live reference could escape.
+      return {
+        ownerShortlist: state.ownerShortlist.map((o) => ({ ...o })),
+        blockers: state.blockers.map((b) => ({ ...b })),
+        nextStepQueue: state.nextStepQueue.map((n) => ({ ...n })),
+        deferredValidation: state.deferredValidation.map((d) => ({ ...d })),
+        ...(state.hypothesis !== undefined ? { hypothesis: state.hypothesis } : {}),
+      }
     },
   }
 }

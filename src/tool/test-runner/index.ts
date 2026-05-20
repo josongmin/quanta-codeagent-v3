@@ -76,6 +76,11 @@ export const testRunnerTool: Tool<Input> = {
   isReadOnly: () => false,
   // Executes a test suite with arbitrary side effects; always serialize.
   isConcurrencySafe: () => false,
+  // HITL secure-by-default (ADR-0020 follow-up): running the project's own
+  // test suite is the canonical inner-loop action — pre-approval covers it.
+  // Without this opt-in, the `inferToolTier` fallback for mutating tools
+  // would force confirmation on every `bun test` even in `bypass`.
+  hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const resolved = input.command ?? (await detectCommand(ctx.cwd, input.path))

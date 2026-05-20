@@ -161,14 +161,28 @@ const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string
     ...(parent.embedder ? { embedder: parent.embedder } : {}),
     ...(parent.compaction ? { compaction: parent.compaction } : {}),
     ...(parent.planMode !== undefined ? { planMode: parent.planMode } : {}),
+    // SOTA++ Codex-absorption inheritance (Round 2 fix): a child fork MUST
+    // inherit the parent's safety / interaction posture or read-only modes
+    // (review/audit) silently broaden in the child. Read-only modes block
+    // mutating tools at dispatch — if the child collapses to `default`, a
+    // review-posture parent could spawn a child that writes. Verify/closeout
+    // guards and HITL 4-tier are also safety contracts the child must honor.
+    ...(parent.mode !== undefined ? { mode: parent.mode } : {}),
+    ...(parent.verifyGuard !== undefined ? { verifyGuard: parent.verifyGuard } : {}),
+    ...(parent.closeoutGuard !== undefined ? { closeoutGuard: parent.closeoutGuard } : {}),
+    ...(parent.hitl !== undefined ? { hitl: parent.hitl } : {}),
     // Propagated so a child can itself spawn sub-subagents — recursion is
     // bounded by the depth marker above + this runner's `req.depth > maxDepth`
     // deny guard (now the real, exercised bound, not belt-and-braces). Skills
     // are intentionally NOT propagated (a subagent gets a clean tool surface).
     ...(parent.subagent ? { subagent: parent.subagent } : {}),
-    // DROPPED on purpose: store, sessionId, memory, hooks, metrics, run.
-    // A subagent must not write into the parent's durable memory, emit into
-    // the parent's hook bus / metrics, or share its correlation context.
+    // DROPPED on purpose: store, sessionId, memory, hooks, metrics, run,
+    // repoRules, workingState. A subagent must not write into the parent's
+    // durable memory, emit into the parent's hook bus / metrics, or share its
+    // correlation context. `repoRules` is dropped because the child may run in
+    // a different `cwd` (worktree fork), where the parent's repo-local rules
+    // are stale authority. `workingState` is session-scoped (Codex memory L3)
+    // — each agent gets a fresh scratchpad.
   }
   return child
 }

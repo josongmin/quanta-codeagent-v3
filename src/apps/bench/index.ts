@@ -203,6 +203,53 @@ const resolveInstance = async (
  * never aborted. Reuses runInstance/Best-of-N verbatim; no run logic is
  * duplicated here.
  */
+/** Per-task driver extracted from `runDatasetMode` so the outer function's
+ *  cognitive complexity stays under the Biome ceiling. Each task gets a fresh
+ *  tmp workdir; a `prepareTaskRepo` failure degrades to a failed result rather
+ *  than aborting the batch. */
+type SwebenchTaskDeps = {
+  llm: LLMPort
+  cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number }
+  pythonSwebench: Awaited<ReturnType<typeof buildPythonSwebench>>
+  repair: { maxRounds: number } | undefined
+  obs: ObserveCtx | undefined
+  repoBaseUrl: string
+}
+
+const runSwebenchTask = async (
+  task: SwebenchTask,
+  deps: SwebenchTaskDeps,
+): Promise<InstanceResult> => {
+  const work = await mkdtemp(join(tmpdir(), `swebench-${task.instanceId}-`))
+  const dest = join(work, "repo")
+  try {
+    await prepareTaskRepo(task, dest, defaultExec, deps.repoBaseUrl, deps.cfg.timeoutMs)
+    const instance = toInstance(task, dest)
+    return await resolveInstance(
+      instance,
+      {
+        llm: deps.llm,
+        maxTurns: deps.cfg.maxTurns,
+        timeoutMs: deps.cfg.timeoutMs,
+        ...(deps.pythonSwebench !== undefined ? { pythonSwebench: deps.pythonSwebench } : {}),
+        ...(deps.repair !== undefined ? { repair: deps.repair } : {}),
+      },
+      deps.cfg.n,
+      deps.obs,
+    )
+  } catch (e) {
+    return {
+      id: task.instanceId,
+      passed: false,
+      patch: "",
+      turns: 0,
+      error: (e as Error).message,
+    }
+  } finally {
+    await rm(work, { recursive: true, force: true })
+  }
+}
+
 const runDatasetMode = async (
   datasetFile: string,
   llm: LLMPort,
@@ -241,44 +288,10 @@ const runDatasetMode = async (
   }
 
   const results: InstanceResult[] = []
-  const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL
+  const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL ?? "https://github.com/"
+  const taskDeps = { llm, cfg, pythonSwebench, repair, obs, repoBaseUrl }
   for (const task of selected) {
-    const work = await mkdtemp(join(tmpdir(), `swebench-${task.instanceId}-`))
-    const dest = join(work, "repo")
-    try {
-      await prepareTaskRepo(
-        task,
-        dest,
-        defaultExec,
-        repoBaseUrl ?? "https://github.com/",
-        cfg.timeoutMs,
-      )
-      const instance = toInstance(task, dest)
-      results.push(
-        await resolveInstance(
-          instance,
-          {
-            llm,
-            maxTurns: cfg.maxTurns,
-            timeoutMs: cfg.timeoutMs,
-            ...(pythonSwebench !== undefined ? { pythonSwebench } : {}),
-            ...(repair !== undefined ? { repair } : {}),
-          },
-          cfg.n,
-          obs,
-        ),
-      )
-    } catch (e) {
-      results.push({
-        id: task.instanceId,
-        passed: false,
-        patch: "",
-        turns: 0,
-        error: (e as Error).message,
-      })
-    } finally {
-      await rm(work, { recursive: true, force: true })
-    }
+    results.push(await runSwebenchTask(task, taskDeps))
   }
 
   const predictionsFile = argValue("--predictions") ?? "./predictions.jsonl"

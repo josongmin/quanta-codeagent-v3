@@ -3,11 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolContext, ToolResult } from "@/tool"
-import {
-  applyScriptedReplace,
-  applyScriptedReplaceBounded,
-  scriptedReplaceTool,
-} from "@/tool/scripted-replace"
+import { applyScriptedReplace, scriptedReplaceTool } from "@/tool/scripted-replace"
 
 const dir = mkdtempSync(join(tmpdir(), "scripted-replace-test-"))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -188,26 +184,73 @@ describe("applyScriptedReplace (pure core)", () => {
       })
       expect(r.ok).toBe(true)
     })
+
+    // Round 2: alternation-with-overlap ReDoS — `(a|a)+`, `(a|a)*b`,
+    // `(\w|\d)+x`. Catastrophic-backtracking is driven by overlapping
+    // alternatives under an unbounded quantifier, NOT by an inner quantifier.
+    // The Round 1 heuristic missed this; the Round 2 heuristic adds a
+    // separate rule for `(…|…)<quantifier>`.
+    test("rejects alternation-with-overlap `(a|a)+`", () => {
+      const r = applyScriptedReplace("a".repeat(20), {
+        pattern: "(a|a)+",
+        replacement: "x",
+        isRegex: true,
+      })
+      expect(r.ok).toBe(false)
+      expect(r.message).toMatch(/catastrophic-backtracking/i)
+    })
+
+    test("rejects alternation-with-overlap `(a|a)*b` and `(\\w|\\d)+x`", () => {
+      const a = applyScriptedReplace("xx", {
+        pattern: "(a|a)*b",
+        replacement: "y",
+        isRegex: true,
+      })
+      expect(a.ok).toBe(false)
+      const b = applyScriptedReplace("xx", {
+        pattern: "(\\w|\\d)+x",
+        replacement: "y",
+        isRegex: true,
+      })
+      expect(b.ok).toBe(false)
+    })
+
+    test("benign alternation without unbounded quantifier is NOT flagged", () => {
+      // `(a|b)` alone is fine; `(a|b)?` (bounded) is fine.
+      const a = applyScriptedReplace("apple", {
+        pattern: "(a|b)",
+        replacement: "X",
+        isRegex: true,
+      })
+      expect(a.ok).toBe(true)
+      const b = applyScriptedReplace("apple", {
+        pattern: "(a|b)?",
+        replacement: "X",
+        isRegex: true,
+      })
+      expect(b.ok).toBe(true)
+    })
   })
 
-  describe("ReDoS guard (wall-clock timeout)", () => {
-    test("`(a+)+$` against `a*40+X` either rejects or times out within 1500ms", async () => {
+  describe("ReDoS guard — heuristic alone is the defense", () => {
+    // The earlier `applyScriptedReplaceBounded` wrapper was removed: a sync
+    // regex pins the event loop, so the racing setTimeout never fires (the
+    // "timeout" only resolved cases where the engine was already returning
+    // quickly). The static `isReDoSSuspicious` heuristic + MAX_PATTERN_LEN
+    // cap are now the entire defense — see scripted-replace.ts module note.
+    test("catastrophic-backtracking pattern is rejected by the static heuristic", () => {
       const source = `${"a".repeat(40)}X`
-      const t0 = Date.now()
-      const r = await applyScriptedReplaceBounded(source, {
+      const r = applyScriptedReplace(source, {
         pattern: "(a+)+$",
         replacement: "y",
         isRegex: true,
       })
-      const elapsed = Date.now() - t0
       expect(r.ok).toBe(false)
-      // Either path (sanity reject OR timeout) returns a clear error message.
-      expect(r.message).toMatch(/catastrophic-backtracking|timed out|ReDoS/i)
-      expect(elapsed).toBeLessThan(1500)
+      expect(r.message).toMatch(/catastrophic-backtracking/i)
     })
 
-    test("benign pattern completes well under the timeout via bounded path", async () => {
-      const r = await applyScriptedReplaceBounded("foo bar foo", {
+    test("benign pattern completes in the synchronous path", () => {
+      const r = applyScriptedReplace("foo bar foo", {
         pattern: "foo",
         replacement: "X",
       })

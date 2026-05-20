@@ -40,6 +40,10 @@ const ALWAYS_CONFIRM_PATTERNS: RegExp[] = [
   /\bwget\b/,
   /\bgh\s+api\b/,
   new RegExp(String.raw`\bgit\b\s+${GIT_PREFIX}push\b`),
+  // `send-pack` is the low-level plumbing command behind `git push`; same
+  // network egress, same irreversibility. A motivated bypass would reach for
+  // it precisely because `push` is gated — escalate both paths identically.
+  new RegExp(String.raw`\bgit\b\s+${GIT_PREFIX}send-pack\b`),
   // `git fetch` with NO remote argument fetches `origin` by default; `git
   // fetch upstream` is just as risky as `git fetch origin`. We deliberately
   // drop the `\borigin\b` requirement that previously narrowed this rule —

@@ -52,9 +52,11 @@ byte-identical to pre-Phase-3.
 
 ## Mechanism
 
-- `prompt.ts` `resolveMode` and `mode.ts` `resolveAgentMode` apply the SAME
-  precedence so the per-turn reminder and the dispatch gate never disagree
-  on the active mode.
+- `mode.ts` exports the canonical `resolveAgentMode(mode, planMode)` and
+  `buildDynamicContext` (in `prompt.ts`) calls it directly — single source
+  of precedence, no duplicate to drift. The dispatch admissibility gate
+  also routes through the same function so the per-turn reminder and the
+  dispatch gate never disagree on the active mode.
 - The read-only mode set is centralized in `mode.ts`; future modes only need
   to be added in one place.
 

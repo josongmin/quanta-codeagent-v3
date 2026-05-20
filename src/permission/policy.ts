@@ -158,14 +158,25 @@ const hardDeny = (action: ToolAction): PermissionDecision | null => {
 /* ------------------------------------------------------------------------- *
  * Codex HITL 4-tier (hitl-audit.md) — tier inference.
  *
- * The default tier comes from `tool.hitlTier(input)` when the tool exposes
- * it. Absent ⇒ fall back to `isReadOnly`: read-only ⇒ "none", everything
- * else ⇒ "pre-approval-ok". `bash` always opts in via its own `hitlTier`
- * (network egress + mutating-git ⇒ always-confirm; HARD_DENY ⇒ resolved
- * separately upstream as hand-off-required).
+ * Precedence: `tool.hitlTier(input)` explicit value wins (e.g. `bash`'s
+ * network-egress + mutating-git classifier returning `always-confirm`).
+ * Absent ⇒ FAIL-CLOSED fallback:
+ *   - read-only tool                    ⇒ "none" (reversible, harmless)
+ *   - mutating tool with NO hitlTier()  ⇒ "always-confirm" (NOT
+ *     "pre-approval-ok")
  *
- * This helper has no dependency on the tool slice — it duck-reads the
- * `hitlTier` method off a thin interface so `@/permission` stays leaf.
+ * Rationale (security audit Round 3): a future high-blast-radius tool —
+ * `email_send`, `payment_authorize`, `slack_dm` — that forgets to implement
+ * `hitlTier()` would silently drop into a tier batch-approved by
+ * `acceptEdits`/`bypass` mode. Secure-by-default reverses the burden: the
+ * registry MUST explicitly opt a mutating tool into `pre-approval-ok`
+ * before it can ride loose. Existing default tools (`write`/`edit`/
+ * `test_runner`/`scripted_replace`) declare `hitlTier(): "pre-approval-ok"`
+ * explicitly to preserve their current behavior; an audit catches a missing
+ * declaration on a new tool as soon as a user invokes it under `bypass`.
+ *
+ * `@/permission` stays leaf: the helper duck-reads the `hitlTier` method off
+ * a thin interface (no `@/tool` import).
  * ------------------------------------------------------------------------- */
 
 interface HITLToolDuck {
@@ -174,13 +185,14 @@ interface HITLToolDuck {
 }
 
 /** Infer the effective HITL tier for a call. The tool's own `hitlTier(input)`
- *  wins; otherwise read-only ⇒ "none", mutating ⇒ "pre-approval-ok". The
- *  dispatch seam composes this with the HARD_DENY check (which overrides to
- *  "hand-off-required") to obtain the final routing tier. */
+ *  wins; otherwise read-only ⇒ "none", mutating ⇒ "always-confirm" (FAIL-
+ *  CLOSED — see module comment). The dispatch seam composes this with the
+ *  HARD_DENY check (which overrides to "hand-off-required") to obtain the
+ *  final routing tier. */
 export const inferToolTier = (tool: HITLToolDuck, input: unknown): HITLTier => {
   const explicit = tool.hitlTier?.(input)
   if (explicit) return explicit
-  return tool.isReadOnly() ? "none" : "pre-approval-ok"
+  return tool.isReadOnly() ? "none" : "always-confirm"
 }
 
 /** Phase 1 policy: read-only always allowed; destructive shell hard-denied;

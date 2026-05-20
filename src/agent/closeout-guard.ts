@@ -112,11 +112,17 @@ export const isCodeModificationSession = (
  *
  *   1. code-modification session (any history entry names a mutating tool —
  *      see {@link isCodeModificationSession}) ⇒ inject the Phase 4 four-truth-
- *      surface reminder {@link CODE_MOD_CLOSEOUT_REMINDER}. This wins over
- *      `fourRule` because code changes have a stricter post-condition
- *      contract (type/owner/wire/test) than general defended-claim closeout.
- *   2. else, `cfg.fourRule === true` ⇒ inject {@link CLOSEOUT_4RULE_REMINDER}
+ *      surface reminder {@link CODE_MOD_CLOSEOUT_REMINDER} — UNLESS the
+ *      caller explicitly opted into `cfg.fourRule: true`, which takes
+ *      precedence (the user's explicit choice beats the implicit detector
+ *      — standard "explicit-over-implicit" principle from Codex's
+ *      response-assembly contract). A caller that wants the 4-rule
+ *      checklist even on code-mod sessions opts in; a caller that wants
+ *      the four-surface walk on code-mod sessions leaves `fourRule`
+ *      unset (the default).
+ *   2. `cfg.fourRule === true` ⇒ inject {@link CLOSEOUT_4RULE_REMINDER}
  *      (the Phase 2 defended-claim R1–R4 + VerificationCloseout cue).
+ *      This is the explicit-override path that beats #1 too.
  *   3. else ⇒ inject the legacy one-liner {@link CLOSEOUT_REMINDER}.
  *
  * OFF rules (short-circuit before any of the above):
@@ -139,9 +145,15 @@ export const decideCloseoutGuard = (args: {
   if (cfg.enabled !== true) return { block: false }
   if (state.trips >= 1) return { block: false }
   state.trips += 1
+  // Explicit `fourRule:true` opt-in wins over the implicit code-mod detector
+  // (explicit-over-implicit). Caller chose the 4-rule discipline; respect it.
+  if (cfg.fourRule === true) return { block: true, text: CLOSEOUT_4RULE_REMINDER }
+  // Otherwise: code-mod session (any history entry names a mutating tool)
+  // gets the four-truth-surface reminder; non-code-mod falls through to
+  // the legacy one-liner below.
   if (isCodeModificationSession(args.history)) {
     return { block: true, text: CODE_MOD_CLOSEOUT_REMINDER }
   }
-  const text = cfg.fourRule === true ? CLOSEOUT_4RULE_REMINDER : CLOSEOUT_REMINDER
-  return { block: true, text }
+  // Neither explicit fourRule nor a code-mod session ⇒ legacy one-liner.
+  return { block: true, text: CLOSEOUT_REMINDER }
 }

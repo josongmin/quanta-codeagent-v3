@@ -28,21 +28,36 @@ import type {
  * session-scoped state at session start.
  */
 
+// SECURITY caps (Codex Round 3 review): the working state rides every turn's
+// reminder, so unbounded values let a single tool call balloon the prompt
+// budget indefinitely (DOS via context-window exhaustion). Two limits:
+//   - MAX_LIST: per-array entry count. 50 is well above any legitimate
+//     working-set size — an agent needing more than this should write
+//     durable artifacts instead (Codex memory-model rule).
+//   - MAX_STR / MAX_HYPOTHESIS: per-string char cap. Round 2 audit found a
+//     `hypothesis: "x".repeat(10_000_000)` attack — array caps alone don't
+//     stop a single 10 MB string from being injected into the reminder.
+const MAX_LIST = 50
+const MAX_STR = 500
+const MAX_HYPOTHESIS = 2_000
+
+const cappedStr = (max: number, label: string) =>
+  z.string().min(1).max(max, `${label} must not exceed ${max} characters`)
+
 const ownerSchema = z.object({
-  file: z.string().min(1).describe("Path to a candidate owner file."),
-  reason: z.string().min(1).describe("Why this file is a likely owner."),
+  file: cappedStr(MAX_STR, "file").describe("Path to a candidate owner file."),
+  reason: cappedStr(MAX_STR, "reason").describe("Why this file is a likely owner."),
 })
 
 const blockerSchema = z.object({
-  what: z.string().min(1).describe("Concrete description of the blocker."),
-  surface: z
-    .string()
-    .min(1)
-    .describe('Where the blocker manifests, e.g. "type", "wire", "test", "runtime".'),
+  what: cappedStr(MAX_STR, "what").describe("Concrete description of the blocker."),
+  surface: cappedStr(MAX_STR, "surface").describe(
+    'Where the blocker manifests, e.g. "type", "wire", "test", "runtime".',
+  ),
 })
 
 const nextStepSchema = z.object({
-  what: z.string().min(1).describe("Concrete next step."),
+  what: cappedStr(MAX_STR, "what").describe("Concrete next step."),
   deferred: z
     .boolean()
     .optional()
@@ -50,17 +65,9 @@ const nextStepSchema = z.object({
 })
 
 const deferredValidationSchema = z.object({
-  rail: z.string().min(1).describe('Validation rail, e.g. "pytest", "bun test", "tsc".'),
-  reason: z.string().min(1).describe("Why this validation was deferred."),
+  rail: cappedStr(MAX_STR, "rail").describe('Validation rail, e.g. "pytest", "bun test", "tsc".'),
+  reason: cappedStr(MAX_STR, "reason").describe("Why this validation was deferred."),
 })
-
-// SECURITY: cap each list at 50 entries. The working state rides every turn's
-// reminder, so an unbounded list would let a single tool call balloon the
-// prompt budget indefinitely (DOS via context-window exhaustion). 50 is well
-// above any legitimate working-set size — an agent that needs more entries
-// than that is no longer using L3 as a scratchpad and should write durable
-// artifacts instead (Codex memory-model rule).
-const MAX_LIST = 50
 
 const schema = z.object({
   ownerShortlist: z
@@ -69,7 +76,10 @@ const schema = z.object({
     .optional()
     .describe("Replacement for the owner shortlist. Omit to leave unchanged."),
   hypothesis: z
-    .union([z.string(), z.null()])
+    .union([
+      z.string().max(MAX_HYPOTHESIS, `hypothesis must not exceed ${MAX_HYPOTHESIS} characters`),
+      z.null(),
+    ])
     .optional()
     .describe("Working hypothesis. Pass a string to set, null to clear, omit to leave unchanged."),
   blockers: z

@@ -291,14 +291,6 @@ const AUDIT_NOTICE = [
   "Cite file:line evidence per mismatch. No fixes unless asked.",
 ].join("\n")
 
-/** Resolve the effective mode from new + legacy inputs. `mode` takes precedence
- *  when present so callers can migrate incrementally without breakage. */
-const resolveMode = (input: TurnContextInput): AgentMode => {
-  if (input.mode) return input.mode
-  if (input.planMode) return "plan"
-  return "default"
-}
-
 const modeNotice = (mode: AgentMode): string | undefined => {
   if (mode === "plan") return PLAN_NOTICE
   if (mode === "review") return REVIEW_NOTICE
@@ -372,7 +364,9 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
     `Today's date is ${new Date().toISOString().slice(0, 10)}.`,
     `Working directory: ${input.cwd}`,
   ]
-  const notice = modeNotice(resolveMode(input))
+  // SSOT mode precedence (ADR-0018): prompt + dispatch share resolveAgentMode
+  // so the per-turn notice and the dispatch admissibility gate never disagree.
+  const notice = modeNotice(resolveAgentMode(input.mode, input.planMode))
   if (notice) parts.push("", notice)
   if (input.repoRules) parts.push("", renderRepoRulesBlock(input.repoRules))
   if (input.activeSkills && input.activeSkills.length > 0) {

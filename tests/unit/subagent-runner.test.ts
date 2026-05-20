@@ -211,6 +211,64 @@ describe("createSubagentRunner — child config overrides", () => {
     await runner(req({ depth: 2 }))
     expect((seen[0] as unknown as { depth?: number }).depth).toBe(2)
   })
+
+  // Round 2 fix: Codex-absorption safety contracts MUST propagate to forked
+  // children. A review/audit-mode parent that spawns a child WITHOUT mode
+  // inheritance would silently allow the child to invoke mutating tools at
+  // dispatch, breaking the read-only posture. Same for verify-/closeout-guard
+  // and HITL 4-tier.
+  test("propagates mode/verifyGuard/closeoutGuard/hitl to the child (SOTA++ inheritance)", async () => {
+    const { run, seen } = capturing()
+    const parent = parentConfig({
+      mode: "review",
+      verifyGuard: { maxTrips: 2 },
+      closeoutGuard: { enabled: true, fourRule: true },
+      hitl: { enabled: true },
+    })
+    const runner = createSubagentRunner(parent, { run })
+    await runner(req())
+    const child = at(seen, 0)
+    expect(child.mode).toBe("review")
+    expect(child.verifyGuard).toEqual({ maxTrips: 2 })
+    expect(child.closeoutGuard).toEqual({ enabled: true, fourRule: true })
+    expect(child.hitl).toEqual({ enabled: true })
+  })
+
+  test("does NOT propagate repoRules or workingState (cwd-bound / session-scoped)", async () => {
+    const { run, seen } = capturing()
+    const parent = parentConfig({
+      repoRules: {
+        sourcePath: "/r/AGENTS.md",
+        entrypoint: "AGENTS.md",
+        body: "parent rules",
+        loadedAt: 1,
+      },
+      workingState: { enabled: true },
+    })
+    const runner = createSubagentRunner(parent, { run })
+    await runner(req())
+    const child = at(seen, 0)
+    // repoRules: the child may run in a different cwd (worktree fork) where
+    // the parent's repo-local authority is stale — intentional drop.
+    expect(child.repoRules).toBeUndefined()
+    // workingState: Codex L3 session-scoped — each agent gets a fresh
+    // scratchpad. Intentional drop.
+    expect(child.workingState).toBeUndefined()
+  })
+
+  test("omits SOTA++ fields entirely when the parent has none (no `undefined` assigns)", async () => {
+    const { run, seen } = capturing()
+    const parent = parentConfig()
+    expect(parent.mode).toBeUndefined()
+    expect(parent.hitl).toBeUndefined()
+    const runner = createSubagentRunner(parent, { run })
+    await runner(req())
+    const child = at(seen, 0)
+    expect("mode" in child).toBe(false)
+    expect("verifyGuard" in child).toBe(false)
+    expect("closeoutGuard" in child).toBe(false)
+    expect("hitl" in child).toBe(false)
+  })
 })
 
 describe("createSubagentRunner — abort propagation", () => {

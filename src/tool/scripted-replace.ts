@@ -46,28 +46,45 @@ const MAX_PATTERN_LEN = 256
 /** Wall-clock timeout for one regex application. The replace is wrapped in
  *  `Promise.race` against this timer so a catastrophic backtracker
  *  (`(a+)+$`, `(a|a?)*$`, etc.) cannot hang the agent turn. */
-const REDOS_TIMEOUT_MS = 1000
+// Removed `REDOS_TIMEOUT_MS` along with the Promise.race wrapper — see the
+// long NOTE near the bottom of this file. The remaining defense is the
+// static `isReDoSSuspicious` heuristic + `MAX_PATTERN_LEN`.
 
 /**
- * Heuristic ReDoS sanity check on a user-supplied regex source. Catches the
- * documented catastrophic-backtracking signature: an UNBOUNDED quantifier
- * (`+`/`*`/`{n,}`) INSIDE a group whose close-paren is itself followed by an
- * unbounded quantifier. The textbook ambiguities `(a+)+`, `(a*)*`, `(a+)*`,
- * `(a*)+`, `((ab)+)+`, `(a{1,})+`, etc. all share this shape — the inner
- * quantifier pumps multiple ways to match the same input, the outer
- * quantifier multiplies them.
+ * Heuristic ReDoS sanity check on a user-supplied regex source. Catches two
+ * documented catastrophic-backtracking signatures plus a length cap:
  *
- * Also reject anything > {@link MAX_PATTERN_LEN} characters, both as a sanity
- * check and as a cheap upper bound on ReDoS surface area. False positives
- * here cost only an extra user keystroke; a false negative can hang the
- * agent turn.
+ * 1. Nested-quantifier: an UNBOUNDED quantifier (`+`/`*`/`{n,}`) INSIDE a
+ *    group whose close-paren is itself followed by an unbounded quantifier.
+ *    `(a+)+`, `(a*)*`, `((ab)+)+`, `(a{1,})+` all share this shape — the
+ *    inner quantifier pumps multiple ways to match the same input, the
+ *    outer quantifier multiplies them.
+ * 2. Alternation-with-overlap: a group containing `|` followed by an
+ *    unbounded quantifier (`(a|a)+`, `(\w|\d)+b`). When alternatives overlap
+ *    in their match set the backtracking blows up the same way. This was a
+ *    Round 2 finding — the first heuristic missed it because there is no
+ *    inner quantifier.
+ *
+ * Anything > {@link MAX_PATTERN_LEN} characters is rejected outright as a
+ * cheap upper bound on ReDoS surface area. There is NO wall-clock backstop:
+ * `Promise.race` over a synchronous regex match cannot fire (the engine
+ * pins the event loop), so the static heuristic + length cap is the entire
+ * defense. See the bottom-of-file NOTE for the worker-thread / re2 path
+ * if a future workload requires hard isolation.
  */
 const isReDoSSuspicious = (pattern: string): boolean => {
   if (pattern.length > MAX_PATTERN_LEN) return true
-  // Inner unbounded quantifier, then `)`, optional lazy marker, then outer
-  // unbounded quantifier. Quantifiers covered: `+`, `*`, `{n,}` / `{n,m}`.
+  // 1. Nested quantifier — close-paren immediately followed by an unbounded
+  //    quantifier (optionally lazy via `?`), preceded by another unbounded
+  //    quantifier inside.
   const Q = String.raw`(?:[+*]|\{\d+,\d*\})`
-  return new RegExp(`${Q}\\)\\??${Q}`).test(pattern)
+  if (new RegExp(`${Q}\\)\\??${Q}`).test(pattern)) return true
+  // 2. Alternation under an unbounded quantifier — `(…|…)` immediately
+  //    followed by `+` / `*` / `{n,}`. We deliberately match `(…|…)` flat
+  //    (no nested groups inside) since nested alternation cases already get
+  //    caught by rule #1's nested quantifier signature.
+  if (new RegExp(String.raw`\([^()]*\|[^()]*\)\??${Q}`).test(pattern)) return true
+  return false
 }
 
 interface ApplyOutcome {
@@ -129,41 +146,29 @@ export const applyScriptedReplace = (
 }
 
 /**
- * Time-bounded wrapper around {@link applyScriptedReplace}. The synchronous
- * regex engine cannot be aborted mid-execution from JS, so we race the work
- * against a {@link REDOS_TIMEOUT_MS} timer in a worker-style microtask. If
- * the timer wins, the result reports a clear ReDoS-style timeout — the
- * underlying microtask still runs to completion in the background, but the
- * tool's caller is no longer waiting on it.
+ * NOTE — there is no `applyScriptedReplaceBounded` async wrapper here.
  *
- * This is a defense-in-depth layer behind the static {@link isReDoSSuspicious}
- * check: the sanity heuristic catches the documented shapes, the timeout
- * catches everything else.
+ * An earlier revision raced `applyScriptedReplace` against a `setTimeout`
+ * in a `Promise.race`. That was security theater: V8's regex engine is
+ * synchronous and cannot be aborted mid-execution from JS, so a true
+ * catastrophic-backtracking match would pin the event loop and prevent the
+ * timer callback from firing in the first place. The "timeout" only ever
+ * fired for cases where the engine was already going to return quickly.
+ *
+ * Real ReDoS defense lives in two upstream guards on `applyScriptedReplace`:
+ *
+ *   1. {@link isReDoSSuspicious} — static heuristic catching nested
+ *      quantifiers (`(a+)+`) and alternation-with-overlap (`(a|a)+`), plus
+ *      a {@link MAX_PATTERN_LEN} length cap. Patterns flagged here never
+ *      reach `new RegExp` at all.
+ *   2. The lexical scope of `applyScriptedReplace` — the engine matches
+ *      against a single in-memory string the tool just `readFile`'d, so
+ *      worst-case input size is bounded by file size and FS jail.
+ *
+ * If a future workload needs hard wall-clock isolation (untrusted patterns
+ * on multi-MB files) the right move is a worker thread or `re2-wasm` /
+ * `node-re2`, NOT a Promise.race over a synchronous call.
  */
-export const applyScriptedReplaceBounded = async (
-  source: string,
-  input: Pick<Input, "pattern" | "replacement" | "count" | "isRegex">,
-  timeoutMs: number = REDOS_TIMEOUT_MS,
-): Promise<ApplyOutcome> => {
-  return Promise.race<ApplyOutcome>([
-    // Schedule the work as a microtask so the timer is armed before the
-    // regex engine starts. We still cannot interrupt the engine — the timer
-    // just lets us return EARLY with a clear message.
-    new Promise<ApplyOutcome>((resolve) => {
-      queueMicrotask(() => resolve(applyScriptedReplace(source, input)))
-    }),
-    new Promise<ApplyOutcome>((resolve) =>
-      setTimeout(
-        () =>
-          resolve({
-            ok: false,
-            message: `regex timed out after ${timeoutMs}ms (suspected ReDoS)`,
-          }),
-        timeoutMs,
-      ),
-    ),
-  ])
-}
 
 /** Extract the capture-group list from `String.prototype.replace`'s function-
  *  callback arg tuple. Args layout: [match, p1, p2, ..., offset, string,
@@ -244,6 +249,10 @@ export const scriptedReplaceTool: Tool<Input> = {
   isReadOnly: () => false,
   // Mutates the filesystem; never run concurrently.
   isConcurrencySafe: () => false,
+  // HITL secure-by-default (ADR-0020 follow-up): same workspace-write
+  // posture as `edit`/`write` — pre-approval covers it. Required since the
+  // fallback for mutating tools is now `always-confirm`.
+  hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     try {

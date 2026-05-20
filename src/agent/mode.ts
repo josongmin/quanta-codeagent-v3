@@ -16,9 +16,13 @@ import type { AgentMode } from "./prompt"
  * module.
  */
 
-/** Modes that block mutating tools at the dispatch gate. Centralized so future
- *  modes (or override sets) can be added in one place. */
-const READ_ONLY_MODES = new Set<AgentMode>(["plan", "review", "audit"])
+/** Modes that PERMIT mutating tools. Phrased as a positive (mutating-allowed)
+ *  set rather than the inverse (read-only) so the default for any UNKNOWN
+ *  mode value at runtime is to BLOCK mutating tools — fail-closed. A future
+ *  read-only mode addition (e.g. "debug") gets the safe posture automatically
+ *  even if someone forgets to update this gate; an inverse `READ_ONLY_MODES`
+ *  list would silently grant write access to the new mode. */
+const MUTATING_MODES = new Set<AgentMode>(["default"])
 
 /** Resolve the effective mode from the new `mode` field and the legacy
  *  `planMode` boolean. `mode` wins when present so callers can migrate
@@ -35,11 +39,12 @@ export const resolveAgentMode = (
 }
 
 /** True iff `mode` forbids mutating tools and `action` is mutating. Read-only
- *  actions pass through every mode unchanged. Non-mode contexts (mode ===
- *  "default") always allow. */
+ *  actions pass through every mode unchanged. Fail-closed: a mode that is NOT
+ *  in {@link MUTATING_MODES} (including any unknown runtime value) blocks
+ *  mutating tools — a new mode forgotten by a future PR ships safe by default. */
 export const isMutatingToolBlockedInMode = (mode: AgentMode, action: ToolAction): boolean => {
-  if (!READ_ONLY_MODES.has(mode)) return false
-  return !action.isReadOnly
+  if (action.isReadOnly) return false
+  return !MUTATING_MODES.has(mode)
 }
 
 /** Human-readable rationale for the deny message returned when a mutating

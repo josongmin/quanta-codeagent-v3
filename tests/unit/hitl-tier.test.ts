@@ -79,6 +79,20 @@ describe("inferToolTier", () => {
     expect(inferToolTier(bashTool, { command: "git push" })).toBe("always-confirm")
   })
 
+  // Round 2 finding: `git send-pack` is the plumbing command behind `git push`
+  // — same network egress, same irreversibility. The Round 1 GIT_PREFIX fix
+  // missed it; Round 2 adds a dedicated pattern so motivated bypass via
+  // plumbing API hits the same always-confirm gate.
+  test("bash with `git send-pack origin main` ⇒ always-confirm (push plumbing bypass)", () => {
+    expect(inferToolTier(bashTool, { command: "git send-pack origin main" })).toBe("always-confirm")
+  })
+
+  test("bash with `git --no-pager send-pack origin main` ⇒ always-confirm", () => {
+    expect(inferToolTier(bashTool, { command: "git --no-pager send-pack origin main" })).toBe(
+      "always-confirm",
+    )
+  })
+
   test("bash with `curl https://x` ⇒ always-confirm (network egress)", () => {
     expect(inferToolTier(bashTool, { command: "curl https://example.com" })).toBe("always-confirm")
   })
@@ -193,6 +207,12 @@ describe("inferToolTier", () => {
 describe("dispatchTool HITL gate (config.hitl.enabled=true)", () => {
   const mutate = makeTool("mutate", {
     readOnly: false,
+    // CR3 follow-up: the inferToolTier fallback for a mutating tool is now
+    // `always-confirm` (secure-by-default). A test fixture that wants to
+    // exercise the `pre-approval-ok` path must declare it explicitly — same
+    // contract every real tool (write/edit/test_runner/scripted_replace)
+    // satisfies.
+    hitlTier: () => "pre-approval-ok",
     run: async function* () {
       yield { type: "result", result: { ok: true, output: "ran" } }
     },

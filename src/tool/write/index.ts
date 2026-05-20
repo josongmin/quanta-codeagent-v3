@@ -16,6 +16,12 @@ export const writeTool: Tool<Input> = {
   isReadOnly: () => false,
   // Mutates the filesystem; conservatively never run concurrently.
   isConcurrencySafe: () => false,
+  // HITL secure-by-default (ADR-0020 follow-up): writing a workspace file is
+  // a contained, reversible-in-VCS mutation — pre-approval covers it. Must
+  // be explicit; the `inferToolTier` fallback for a mutating tool is
+  // `always-confirm`, so omitting this opt-in would suddenly demand
+  // per-write confirmation even in `bypass` mode.
+  hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     // Resolve relative paths against the session cwd, not process.cwd().

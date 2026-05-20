@@ -27,6 +27,11 @@ export const editTool: Tool<Input> = {
   isReadOnly: () => false,
   // Mutates the filesystem; conservatively never run concurrently.
   isConcurrencySafe: () => false,
+  // HITL secure-by-default (ADR-0020 follow-up): targeted edit on an
+  // existing file is reversible-in-VCS — pre-approval covers it. Required
+  // explicit opt-in since the fallback for mutating tools is now
+  // `always-confirm`.
+  hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     // Resolve relative paths against the session cwd, not process.cwd().

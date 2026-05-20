@@ -169,15 +169,30 @@ describe("decideCloseoutGuard", () => {
     expect(r.text).not.toBe(CODE_MOD_CLOSEOUT_REMINDER)
   })
 
-  test("(14) code-mod session + fourRule:true ⇒ STILL CODE_MOD (code-mod wins)", () => {
+  // CR1 P1 fix (Round 3): explicit-over-implicit. A caller that EXPLICITLY
+  // sets `fourRule:true` chose the 4-rule discipline; the code-mod
+  // auto-detector must NOT silently overwrite that intent. The Round 1
+  // precedence (code-mod > fourRule) was wrong — it silently overrode user
+  // intent in the exact case where intent matters most.
+  test("(14) code-mod session + fourRule:true ⇒ 4-rule wins (explicit-over-implicit)", () => {
     const state = createCloseoutGuardState()
     const r = decideCloseoutGuard({
       state,
       cfg: { enabled: true, fourRule: true },
       history: [{ name: "edit" }],
     })
+    expect(r.text).toBe(CLOSEOUT_4RULE_REMINDER)
+    expect(r.text).not.toBe(CODE_MOD_CLOSEOUT_REMINDER)
+  })
+
+  test("(14b) code-mod session WITHOUT explicit fourRule ⇒ four-surface (default)", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({
+      state,
+      cfg: { enabled: true },
+      history: [{ name: "edit" }],
+    })
     expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
-    expect(r.text).not.toBe(CLOSEOUT_4RULE_REMINDER)
   })
 
   test("(15) CODE_MOD_CLOSEOUT_REMINDER names the four truth surfaces", () => {
