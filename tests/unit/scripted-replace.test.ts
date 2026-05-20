@@ -3,7 +3,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolContext, ToolResult } from "@/tool"
-import { applyScriptedReplace, scriptedReplaceTool } from "@/tool/scripted-replace"
+import {
+  applyScriptedReplace,
+  applyScriptedReplaceBounded,
+  scriptedReplaceTool,
+} from "@/tool/scripted-replace"
 
 const dir = mkdtempSync(join(tmpdir(), "scripted-replace-test-"))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -121,6 +125,133 @@ describe("applyScriptedReplace (pure core)", () => {
     })
     expect(r.ok).toBe(true)
     expect(r.next).toBe("price=$10")
+  })
+
+  // SECURITY: catastrophic-backtracking patterns must be rejected by the
+  // static sanity check BEFORE compilation. A pattern like `(a+)+$` is
+  // syntactically valid but pumps backtracking exponentially on non-matching
+  // input — sending it through `new RegExp(...).exec(...)` can hang the
+  // agent turn. We reject patterns that match the nested-quantifier shape.
+  describe("ReDoS guard (static sanity check)", () => {
+    test("rejects nested unbounded quantifier `(a+)+$`", () => {
+      const r = applyScriptedReplace("ignored", {
+        pattern: "(a+)+$",
+        replacement: "x",
+        isRegex: true,
+      })
+      expect(r.ok).toBe(false)
+      expect(r.message).toMatch(/catastrophic-backtracking/i)
+    })
+
+    test("rejects `(a*)*` and `(a+)+?`", () => {
+      const a = applyScriptedReplace("x", {
+        pattern: "(a*)*",
+        replacement: "y",
+        isRegex: true,
+      })
+      expect(a.ok).toBe(false)
+      const b = applyScriptedReplace("x", {
+        pattern: "(a+)+?",
+        replacement: "y",
+        isRegex: true,
+      })
+      expect(b.ok).toBe(false)
+    })
+
+    test("rejects a 257-char pattern (length cap)", () => {
+      const r = applyScriptedReplace("x", {
+        pattern: "a".repeat(257),
+        replacement: "y",
+        isRegex: true,
+      })
+      expect(r.ok).toBe(false)
+      expect(r.message).toMatch(/catastrophic-backtracking|256/i)
+    })
+
+    test("literal-mode patterns are NOT checked (the source is escaped)", () => {
+      // Even with the nested-quantifier shape in the literal substring, the
+      // literal path escapes every metachar so the engine sees an inert
+      // regex. The sanity check is only for regex mode.
+      const r = applyScriptedReplace("(a+)+$ is literal", {
+        pattern: "(a+)+$",
+        replacement: "x",
+      })
+      expect(r.ok).toBe(true)
+      expect(r.next).toBe("x is literal")
+    })
+
+    test("benign regexes with single quantifiers are not flagged", () => {
+      const r = applyScriptedReplace("foo_123", {
+        pattern: "foo_(\\d+)",
+        replacement: "bar_$1",
+        isRegex: true,
+      })
+      expect(r.ok).toBe(true)
+    })
+  })
+
+  describe("ReDoS guard (wall-clock timeout)", () => {
+    test("`(a+)+$` against `a*40+X` either rejects or times out within 1500ms", async () => {
+      const source = `${"a".repeat(40)}X`
+      const t0 = Date.now()
+      const r = await applyScriptedReplaceBounded(source, {
+        pattern: "(a+)+$",
+        replacement: "y",
+        isRegex: true,
+      })
+      const elapsed = Date.now() - t0
+      expect(r.ok).toBe(false)
+      // Either path (sanity reject OR timeout) returns a clear error message.
+      expect(r.message).toMatch(/catastrophic-backtracking|timed out|ReDoS/i)
+      expect(elapsed).toBeLessThan(1500)
+    })
+
+    test("benign pattern completes well under the timeout via bounded path", async () => {
+      const r = await applyScriptedReplaceBounded("foo bar foo", {
+        pattern: "foo",
+        replacement: "X",
+      })
+      expect(r.ok).toBe(true)
+      expect(r.next).toBe("X bar X")
+    })
+  })
+
+  // Native JS semantics: `$N` where N is OUT OF RANGE (e.g. `$5` for a
+  // regex with two groups) must stay LITERAL. The prior Codex-style
+  // "out-of-range = empty" behaviour surprised callers used to the
+  // standard. In-range-but-didn't-participate still maps to empty string
+  // (native behaviour).
+  describe("$N capture-group expansion (native JS semantics)", () => {
+    test("`$5` out-of-range stays literal `$5`", () => {
+      const r = applyScriptedReplace("hello", {
+        pattern: "h(e)(l)lo",
+        replacement: "[$1][$2][$5]",
+        isRegex: true,
+      })
+      expect(r.ok).toBe(true)
+      expect(r.next).toBe("[e][l][$5]")
+    })
+
+    test("`$N` in-range but group didn't participate ⇒ empty string", () => {
+      const r = applyScriptedReplace("a", {
+        pattern: "(a)|(b)",
+        replacement: "[$1][$2]",
+        isRegex: true,
+      })
+      expect(r.ok).toBe(true)
+      // The `(b)` group didn't participate — JS native renders empty there.
+      expect(r.next).toBe("[a][]")
+    })
+
+    test("`$9` out-of-range stays literal when regex has only one group", () => {
+      const r = applyScriptedReplace("foo_1", {
+        pattern: "foo_(\\d+)",
+        replacement: "$1:$9",
+        isRegex: true,
+      })
+      expect(r.ok).toBe(true)
+      expect(r.next).toBe("1:$9")
+    })
   })
 })
 

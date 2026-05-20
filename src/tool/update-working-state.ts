@@ -54,9 +54,18 @@ const deferredValidationSchema = z.object({
   reason: z.string().min(1).describe("Why this validation was deferred."),
 })
 
+// SECURITY: cap each list at 50 entries. The working state rides every turn's
+// reminder, so an unbounded list would let a single tool call balloon the
+// prompt budget indefinitely (DOS via context-window exhaustion). 50 is well
+// above any legitimate working-set size — an agent that needs more entries
+// than that is no longer using L3 as a scratchpad and should write durable
+// artifacts instead (Codex memory-model rule).
+const MAX_LIST = 50
+
 const schema = z.object({
   ownerShortlist: z
     .array(ownerSchema)
+    .max(MAX_LIST, `ownerShortlist must not exceed ${MAX_LIST} entries`)
     .optional()
     .describe("Replacement for the owner shortlist. Omit to leave unchanged."),
   hypothesis: z
@@ -65,14 +74,17 @@ const schema = z.object({
     .describe("Working hypothesis. Pass a string to set, null to clear, omit to leave unchanged."),
   blockers: z
     .array(blockerSchema)
+    .max(MAX_LIST, `blockers must not exceed ${MAX_LIST} entries`)
     .optional()
     .describe("Replacement for the blockers list. Omit to leave unchanged."),
   nextStepQueue: z
     .array(nextStepSchema)
+    .max(MAX_LIST, `nextStepQueue must not exceed ${MAX_LIST} entries`)
     .optional()
     .describe("Replacement for the next-step queue. Omit to leave unchanged."),
   deferredValidation: z
     .array(deferredValidationSchema)
+    .max(MAX_LIST, `deferredValidation must not exceed ${MAX_LIST} entries`)
     .optional()
     .describe("Replacement for the deferred-validation list. Omit to leave unchanged."),
 })
@@ -106,10 +118,15 @@ const changedFields = (input: Input): string[] => {
 /**
  * Build the `update_working_state` meta-tool against an explicit handle (the
  * agent loop owns the handle and passes it here at session start). When no
- * handle is closure-captured the tool falls back to `ctx.workingState`; with
- * neither, it reports a hard error so a misconfigured caller is caught early.
+ * handle is closure-captured (factory called with `undefined`) the tool falls
+ * back to `ctx.workingState` — populated by `dispatchTool` from the agent
+ * loop's session-scoped handle when `AgentConfig.workingState?.enabled` is set
+ * (ADR-0021). With neither, it reports a hard error so a misconfigured caller
+ * is caught early.
  */
-export const createUpdateWorkingStateTool = (handle: WorkingStateHandle): Tool<Input> => ({
+export const createUpdateWorkingStateTool = (
+  handle: WorkingStateHandle | undefined,
+): Tool<Input> => ({
   name: "update_working_state",
   description:
     "Update the per-task working state (Codex memory layer L3). Each provided " +

@@ -1,7 +1,7 @@
 import type { ToolUseBlock } from "@/llm"
 import type { AutoModeClassifier, PermissionContext } from "@/permission"
 import { QuantaError, toError } from "@/shared"
-import type { ToolContext } from "@/tool"
+import type { ToolContext, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { deny, resultBlock } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
@@ -37,13 +37,24 @@ const evidenceOf = (
 
 /** Run one tool call end to end: gates → execute → normalize errors.
  *  Tool/permission/plan/hook failures become error tool_results (the model
- *  recovers); only the loop's own fatal conditions propagate. */
+ *  recovers); only the loop's own fatal conditions propagate.
+ *
+ *  `workingState` is the optional session-scoped Codex memory L3 handle
+ *  (ADR-0021). When the agent loop has built one (`AgentConfig.workingState?.
+ *  enabled === true`) it is passed here so `ctx.workingState` is populated on
+ *  the {@link ToolContext} forwarded to every tool. Absent ⇒ the field is
+ *  OMITTED on `ctx` (exactOptionalPropertyTypes: never `undefined`), so
+ *  callers without the opt-in are byte-identical. The closure pattern
+ *  `createUpdateWorkingStateTool(handle)` continues to work — `ctx.workingState`
+ *  is the second seam so future tools (or callers that don't capture via
+ *  closure) can read the same handle. */
 export const dispatchTool = async (
   call: ToolUseBlock,
   config: AgentConfig,
   permission: PermissionContext,
   onProgress?: (message: string) => void,
   autoClassifier?: AutoModeClassifier,
+  workingState?: WorkingStateHandle,
 ): Promise<DispatchResult> => {
   const { registry } = config
 
@@ -64,10 +75,14 @@ export const dispatchTool = async (
   // SOTA++ subagent absorption (ADR-0011): propagate this agent's recursion
   // depth so the `Agent` tool can enforce `maxDepth`. Absent ⇒ omitted (the
   // tool duck-reads it as 0), so the default path is byte-identical.
+  // Phase 6 (ADR-0021): propagate the session-scoped WorkingState handle so
+  // tools that want to read/mutate L3 via the context seam (rather than a
+  // closure-captured handle) have a real path. Absent ⇒ omitted.
   const ctx: ToolContext = {
     cwd: config.cwd,
     signal: config.signal,
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
+    ...(workingState !== undefined ? { workingState } : {}),
   }
   const out = await execute(call, config, ctx, onProgress)
   if (config.hooks) {

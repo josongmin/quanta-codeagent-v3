@@ -90,6 +90,16 @@ to proof in the model's reading.
 - The session handle is allocated only when the feature is enabled;
   absent ⇒ no allocation, the per-turn block is omitted, the tool is not
   registered (byte-identical).
+- `ToolContext.workingState` is **now populated by `dispatchTool`** (it is
+  no longer a future-proof seam): the agent loop passes its session-scoped
+  `WorkingStateSession` to `dispatchTool` via a new optional parameter, and
+  dispatch conditionally sets `ctx.workingState` on every `ToolContext` it
+  hands to a tool. When `AgentConfig.workingState?.enabled !== true` the
+  handle is `undefined`, the spread is omitted, and `ctx.workingState`
+  stays unset (byte-identical for callers that did not opt in). The
+  closure-captured handle in `createUpdateWorkingStateTool(handle)` remains
+  the canonical wiring — `ctx.workingState` is the fallback path used when
+  the factory is called with `undefined`.
 
 ## Consequences
 

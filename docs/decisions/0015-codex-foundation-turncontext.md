@@ -10,7 +10,7 @@ agent analysis (`/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/a
 documents a much richer **operating contract** than our v3 ReAct loop currently
 exposes:
 
-- An 8-layer policy stack (system / developer / app / permission / mode /
+- A 9-layer policy stack (system / developer / app / permission / mode /
   repo-local / skill / user / working-state) with explicit activation timing.
 - A typed turn-context interface that names every per-turn injection: tool
   schemas, app capabilities, mode, session metadata, repo rules, memory.
@@ -52,15 +52,18 @@ Reminder injection order (top → bottom in the `<system-reminder>` block):
 Today's date is …
 Working directory: …
 [mode notice]              ← plan / review / audit (default omits)
-[repo-local rules]         ← if config.repoRules attached
-[memory hints]             ← labelled "routing hints only — not proof" (Phase 6)
-[working state]            ← Phase 6 addition
+[repo-local rules]         ← if config.repoRules attached (authority)
 [active skills]            ← Phase 7 addition
+[working state]            ← Phase 6 addition
+[memory hints]             ← labelled "routing hints only — not proof" (Phase 6)
 ```
 
-The repo-local block always renders BEFORE memory hints so Codex's trust
-ladder (`source/runtime > docs/memory`) is structurally enforced — repo
-authority precedes routing hints.
+The order encodes Codex's trust ladder structurally: authority (repo rules)
+precedes posture (active skills) precedes state (working) precedes hint
+(memory). Memory hints sit at the bottom because they are the WEAKEST
+evidence class. This is the order pinned by
+[tests/integration/sota-codex-full.test.ts](../../tests/integration/sota-codex-full.test.ts)
+and `tests/unit/skill-trigger-rules.test.ts`.
 
 ## Consequences
 
@@ -75,6 +78,16 @@ authority precedes routing hints.
   add `workingState`.
 - **Phase 7** (skill triggers) re-uses the same slot pattern to add
   `activeSkills`.
+
+## Deferred
+
+- **Activation timing lifecycle hooks** (Codex `prompt-and-policy-stack.md §3`
+  — `before-first-action / before-tool-selection / after-observation`) are
+  NOT shipped in Phase 0. The structural seams (block layering above) are
+  ready, but the lifecycle-phase enum and per-phase layer routing are
+  intentionally deferred to a future ADR — the current code activates all
+  applicable layers at `prepareTurnContext` time, which is sufficient for
+  every absorption that landed in Phases 1–8.
 
 ## Tests
 

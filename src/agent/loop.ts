@@ -237,6 +237,7 @@ const streamConsume = async (
   classifier: AutoModeClassifier | undefined,
   skillGate: SkillGate | undefined,
   toolHistory: ToolHistoryEntry[] | undefined,
+  workingState: WorkingStateSession | undefined,
 ): Promise<StreamConsumeResult> => {
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
@@ -271,6 +272,7 @@ const streamConsume = async (
                       message,
                     }),
                   classifier,
+                  workingState,
                 )
           // A successful `Skill` invocation (re)arms the scope for next calls.
           skillGate?.observe(call.name, call.input, out.ok)
@@ -691,11 +693,17 @@ const closeoutGuardStep = (
   action: RecoveryAction,
   message: AssembledMessage,
   wm: WorkingMemory<Message>,
+  history: readonly ToolHistoryEntry[],
   state: CloseoutGuardState | undefined,
 ): Step | undefined => {
   if (config.closeoutGuard === undefined || state === undefined) return undefined
   if (!isFinishAttempt(action, message)) return undefined
-  const verdict = decideCloseoutGuard({ cfg: config.closeoutGuard, state })
+  // History is duck-typed by `decideCloseoutGuard` as `ReadonlyArray<{name}>` so
+  // the `{name, arg?}` shape the verify-guard already captures flows straight
+  // through with zero remap — a session that called a mutating tool routes to
+  // the Phase 4 four-truth-surface reminder; non-code-mod sessions fall through
+  // to the legacy single/four-rule choice.
+  const verdict = decideCloseoutGuard({ cfg: config.closeoutGuard, state, history })
   if (!verdict.block || verdict.text === undefined) return undefined
   emitRecovery(config, "closeout")
   wm.append(message)
@@ -757,7 +765,7 @@ const applyAction = async (
   // closeout nudge per run. Ordered STRICTLY AFTER verify-guard: if verify
   // already blocked above we never reach here on this turn — closeout fires the
   // NEXT finish-intent (after verify is satisfied). Default-OFF ⇒ undefined.
-  const closedout = closeoutGuardStep(config, action, message, wm, closeoutGuardState)
+  const closedout = closeoutGuardStep(config, action, message, wm, history, closeoutGuardState)
   if (closedout) return closedout
   if (action.do === "completed") {
     // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
@@ -814,6 +822,7 @@ const runTurn = async (
       classifier,
       skillGate,
       toolHistory,
+      workingState,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -866,15 +875,22 @@ const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentCon
       }
     : config
 
-/** SOTA++ Tier 0 verify-guard per-run resources. Built ONLY when
- *  `config.verifyGuard` is set: a forcing-budget state object + an ordered
- *  dispatched-tool-name log. Absent ⇒ both `undefined` (no allocation, the
- *  history push + guard decision are never reached → loop byte-identical).
- *  Extracted so `runAgent` gains no extra cognitive-complexity branch. */
+/** SOTA++ Tier 0 verify-guard per-run resources. Built when EITHER
+ *  `config.verifyGuard` OR `config.closeoutGuard?.enabled === true` is set:
+ *  closeout-guard now duck-reads the same tool-history array to route a
+ *  code-modification session to the Phase 4 four-truth-surface reminder
+ *  (ADR-0019). With NEITHER set ⇒ both `undefined` (no allocation, the
+ *  history push + guard decisions are never reached → loop byte-identical).
+ *  The `state` (verifyGuardState) stays gated on `verifyGuard` alone. */
 const buildVerifyGuard = (
   config: AgentConfig,
-): { state?: VerifyGuardState; history?: ToolHistoryEntry[] } =>
-  config.verifyGuard ? { state: createVerifyGuardState(), history: [] } : {}
+): { state?: VerifyGuardState; history?: ToolHistoryEntry[] } => {
+  const needHistory = config.verifyGuard !== undefined || config.closeoutGuard?.enabled === true
+  const out: { state?: VerifyGuardState; history?: ToolHistoryEntry[] } = {}
+  if (config.verifyGuard) out.state = createVerifyGuardState()
+  if (needHistory) out.history = []
+  return out
+}
 
 /** SOTA++ CloseoutLens per-run resource. Built ONLY when
  *  `config.closeoutGuard?.enabled === true`: a single-shot trip counter.

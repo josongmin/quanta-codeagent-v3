@@ -38,9 +38,10 @@ generalized to a typed enum.
 3. `src/agent/plan.ts` → thin deprecated alias delegating to
    `isMutatingToolBlockedInMode("plan", …)`. Existing callers compile
    unchanged.
-4. `src/agent/dispatch.ts` `runGates` calls `resolveAgentMode` + the new
-   gate; deny payload uses `modeBlockReason` so the model sees a
-   mode-specific reason.
+4. `src/agent/admissibility-gate.ts` `runAdmissibilityGate` calls
+   `resolveAgentMode` + the new gate (the SSOT extraction from
+   `src/agent/dispatch.ts`, see ADR-0026); deny payload uses
+   `modeBlockReason` so the model sees a mode-specific reason.
 5. `src/agent/prompt.ts` `buildDynamicContext` adds mode notices:
    - `PLAN_NOTICE` (preserved).
    - **new** `REVIEW_NOTICE` — findings-first posture.

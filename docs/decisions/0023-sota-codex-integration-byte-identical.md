@@ -76,18 +76,31 @@ across integration. No legacy test was modified to make a Phase pass.
 
 ## Mechanism
 
-The "byte-identical" claim is a structural property of how each Phase was
-wired, not a runtime check. Three patterns recur:
+The contract is **"behaviorally equivalent for legacy flows"** — strict
+byte-identical applies to the LOOP control flow and emit ordering, NOT to
+the LLM request payload (which legitimately grows when new policy prose
+and new always-on tools are added). Three patterns recur:
 
 - **`?` field on AgentConfig + explicit `undefined` short-circuit at the
   call site**: e.g. `verifyGuard`, `closeoutGuard.fourRule`,
-  `hitl.enabled`, `workingState.enabled`.
+  `hitl.enabled`, `workingState.enabled`. These are structurally
+  byte-identical — the absent field traverses a `undefined` short-circuit
+  at the earliest point with no allocation.
 - **New tools default-registered but LLM-routed**: e.g. `scripted_replace`
-  — the model only invokes it if the prompt routes there.
+  is registered in `defaultTools` always-on. The model only invokes it
+  when prompt routes there, but the tool SCHEMA does enter the LLM request
+  (~776 bytes JSON / ~194 tokens per turn). Legacy LOOP behavior is
+  unchanged; LLM input bytes are not (this is the deliberate cost of
+  Phase 4 — a fresh tool only adds value when it's discoverable). The
+  bench harness can pass an explicit `registry` to opt out if a baseline
+  comparison demands identical tool listings.
 - **Static prompt growth**: Phase 1's policy stack / ladders / budget /
-  honesty rail / reporting shape are bytes added to the static
-  `buildSystemPrompt` output. The provider cache prefix grows but stays
-  byte-stable across a session, so cache hits are preserved.
+  honesty rail / reporting shape add ~11,500 bytes (~2,874 tokens) to
+  `buildSystemPrompt`. The provider cache prefix grows but stays
+  byte-stable across a session, so cache hits are preserved — first-turn
+  cost +$0.0086 (Anthropic) / +150–300ms TTFT, cached-turn cost
+  +$0.00086 each. Legacy callers can override via `AgentConfig.system`
+  to get the pre-Phase-1 prompt verbatim.
 
 ## Consequences
 

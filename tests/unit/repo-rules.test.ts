@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadRepoRules, REPO_RULE_CANDIDATES, renderRepoRulesBlock } from "@/agent"
@@ -69,6 +69,85 @@ describe("loadRepoRules", () => {
 
   test("REPO_RULE_CANDIDATES priority order is stable contract", () => {
     expect(REPO_RULE_CANDIDATES).toEqual(["AGENTS.md", "CLAUDE.md", ".codex/CODEX-RULES.md"])
+  })
+
+  // Security: symlinked rule files MUST NOT be loaded. An attacker can replace
+  // AGENTS.md with a symlink to ~/.ssh/id_rsa (or any sensitive file) and have
+  // the contents ride into the LLM prompt every turn as repo authority. We
+  // refuse to follow the link entirely — the next candidate (or undefined)
+  // is the correct outcome.
+  describe("symlink rejection (security)", () => {
+    test("symlink to a regular file is skipped (no body read)", async () => {
+      const target = join(cwd, "actual-secret.txt")
+      await writeFile(target, "SECRET CONTENT", "utf8")
+      await symlink(target, join(cwd, "AGENTS.md"))
+      const out = await loadRepoRules(cwd)
+      expect(out).toBeUndefined()
+    })
+
+    test("symlink to a missing file is skipped (no error)", async () => {
+      await symlink(join(cwd, "does-not-exist"), join(cwd, "AGENTS.md"))
+      const out = await loadRepoRules(cwd)
+      expect(out).toBeUndefined()
+    })
+
+    test("symlink AGENTS.md skips to next candidate (CLAUDE.md regular file wins)", async () => {
+      const target = join(cwd, "actual-secret.txt")
+      await writeFile(target, "SECRET CONTENT", "utf8")
+      await symlink(target, join(cwd, "AGENTS.md"))
+      await writeFile(join(cwd, "CLAUDE.md"), "legitimate rules", "utf8")
+      const out = await loadRepoRules(cwd)
+      expect(out?.entrypoint).toBe("CLAUDE.md")
+      expect(out?.body).toBe("legitimate rules")
+      // The symlinked secret never appears in the rendered body.
+      expect(out?.body).not.toContain("SECRET")
+    })
+  })
+
+  describe("size cap (DOS / prompt-budget protection)", () => {
+    test("32 KiB file is loaded entirely (under cap)", async () => {
+      const body = "a".repeat(32 * 1024)
+      await writeFile(join(cwd, "AGENTS.md"), body, "utf8")
+      const out = await loadRepoRules(cwd)
+      expect(out?.body.length).toBe(32 * 1024)
+      expect(out?.body).not.toContain("[truncated")
+    })
+
+    test("100 KiB file is truncated with a marker showing first 64 KiB", async () => {
+      const body = "a".repeat(100 * 1024)
+      await writeFile(join(cwd, "AGENTS.md"), body, "utf8")
+      const out = await loadRepoRules(cwd)
+      expect(out).toBeDefined()
+      // 64 KiB body + marker line; check the marker is present and the visible
+      // body is exactly 64 KiB of original content.
+      expect(out?.body).toContain("[truncated:")
+      expect(out?.body).toContain("64 KiB")
+      expect(out?.body).toContain(`${100 * 1024} bytes total`)
+      const upTo = out?.body.indexOf("\n\n[truncated:") ?? -1
+      expect(upTo).toBe(64 * 1024)
+    })
+
+    test("non-ENOENT errors (EACCES) silently fall through to next candidate", async () => {
+      // Simulate EACCES by writing the file then revoking read permission.
+      // Skip on platforms where chmod has no real effect (e.g. CI containers
+      // that run as root); the contract is "any error ⇒ skip", and any of
+      // the next-candidate fallbacks is correct.
+      const agents = join(cwd, "AGENTS.md")
+      await writeFile(agents, "forbidden", "utf8")
+      await chmod(agents, 0o000)
+      try {
+        await writeFile(join(cwd, "CLAUDE.md"), "fallback", "utf8")
+        const out = await loadRepoRules(cwd)
+        // Either we got CLAUDE.md (the EACCES skipped AGENTS.md as designed),
+        // or — on root — AGENTS.md remained readable and won. Both are
+        // acceptable; the contract is no throw and a valid result.
+        expect(out).toBeDefined()
+        expect(["AGENTS.md", "CLAUDE.md"]).toContain(out?.entrypoint ?? "")
+      } finally {
+        // Restore so cleanup can rm the dir.
+        await chmod(agents, 0o644)
+      }
+    })
   })
 })
 

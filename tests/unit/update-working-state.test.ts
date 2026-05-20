@@ -1,21 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import { createWorkingStateSession } from "@/agent"
-import { createUpdateWorkingStateTool, type ToolContext } from "@/tool"
+import { createUpdateWorkingStateTool, type ToolContext, type WorkingStateHandle } from "@/tool"
 
-const ctx = (): ToolContext => ({
+const ctx = (over: Partial<ToolContext> = {}): ToolContext => ({
   cwd: "/repo",
   signal: new AbortController().signal,
+  ...over,
 })
 
 const drain = async <I>(
   tool: ReturnType<typeof createUpdateWorkingStateTool>,
   input: I,
+  c: ToolContext = ctx(),
 ): Promise<{ ok: boolean; output: string }> => {
   let result = { ok: false, output: "" }
-  for await (const ev of tool.execute(
-    input as unknown as Parameters<typeof tool.execute>[0],
-    ctx(),
-  )) {
+  for await (const ev of tool.execute(input as unknown as Parameters<typeof tool.execute>[0], c)) {
     if (ev.type === "result") result = ev.result
   }
   return result
@@ -98,5 +97,117 @@ describe("update_working_state tool", () => {
     const tool = createUpdateWorkingStateTool(createWorkingStateSession())
     expect(tool.isReadOnly()).toBe(false)
     expect(tool.isConcurrencySafe({} as Parameters<typeof tool.isConcurrencySafe>[0])).toBe(false)
+  })
+
+  // Phase 6 (ADR-0021) seam: when the factory was constructed WITHOUT a
+  // closure-captured handle (`undefined`), the tool falls back to the
+  // ctx.workingState handle the agent loop's dispatch seam now populates.
+  test("factory undefined + ctx.workingState present ⇒ ctx fallback mutates state", async () => {
+    const session = createWorkingStateSession()
+    const tool = createUpdateWorkingStateTool(undefined)
+    // Pass the session as ctx.workingState — this is the path dispatch.ts now
+    // wires when `AgentConfig.workingState?.enabled === true`.
+    const out = await drain(
+      tool,
+      { hypothesis: "via ctx" },
+      ctx({ workingState: session as unknown as WorkingStateHandle }),
+    )
+    expect(out.ok).toBe(true)
+    expect(session.snapshot().hypothesis).toBe("via ctx")
+    expect(out.output).toContain("hypothesis")
+  })
+
+  // Phase 6 (ADR-0021) seam: with NEITHER closure-captured handle NOR a
+  // ctx.workingState the tool reports the clear misconfig error message
+  // instead of crashing on a null deref.
+  test("factory undefined + ctx without workingState ⇒ clear misconfig error", async () => {
+    const tool = createUpdateWorkingStateTool(undefined)
+    const out = await drain(tool, { hypothesis: "x" }, ctx())
+    expect(out.ok).toBe(false)
+    expect(out.output).toContain("no session WorkingState is attached")
+    expect(out.output).toContain("AgentConfig.workingState")
+  })
+
+  // Closure-captured handle wins over an (unexpected) ctx.workingState — the
+  // closure pattern is the canonical wiring; ctx is only the fallback path.
+  test("closure handle wins over ctx.workingState", async () => {
+    const closureSession = createWorkingStateSession()
+    const ctxSession = createWorkingStateSession()
+    const tool = createUpdateWorkingStateTool(closureSession)
+    await drain(
+      tool,
+      { hypothesis: "closure wins" },
+      ctx({ workingState: ctxSession as unknown as WorkingStateHandle }),
+    )
+    expect(closureSession.snapshot().hypothesis).toBe("closure wins")
+    expect(ctxSession.snapshot().hypothesis).toBeUndefined()
+  })
+
+  // summarize() after clearing hypothesis with `null` reports `hypothesis=none`
+  // (the empty / unset rendering — distinct from `hypothesis=set`).
+  test("summarize() after hypothesis:null reports hypothesis=none", async () => {
+    const session = createWorkingStateSession()
+    const tool = createUpdateWorkingStateTool(session)
+    await drain(tool, { hypothesis: "first guess" })
+    expect(session.snapshot().hypothesis).toBe("first guess")
+    const out = await drain(tool, { hypothesis: null })
+    expect(out.ok).toBe(true)
+    expect(out.output).toContain("hypothesis=none")
+    expect(out.output).not.toContain("hypothesis=set")
+  })
+
+  // SECURITY: each list array is capped at 50 entries so a single
+  // update_working_state call cannot balloon the per-turn reminder block
+  // indefinitely (DOS via prompt-budget exhaustion). The cap is enforced by
+  // the zod schema BEFORE the tool runs, surfaced as a validation error with
+  // the field name.
+  describe("array length caps (.max(50))", () => {
+    const tool = createUpdateWorkingStateTool(createWorkingStateSession())
+    const schema = tool.inputSchema
+
+    test("ownerShortlist with 51 entries fails validation", () => {
+      const arr = Array.from({ length: 51 }, (_, i) => ({
+        file: `f${i}.ts`,
+        reason: `r${i}`,
+      }))
+      const r = schema.safeParse({ ownerShortlist: arr })
+      expect(r.success).toBe(false)
+      if (!r.success) {
+        // The validation error must clearly name the offending field and the
+        // cap (50) — so the LLM / caller can correct the input.
+        const msg = JSON.stringify(r.error.issues)
+        expect(msg).toMatch(/ownerShortlist/)
+        expect(msg).toMatch(/50/)
+      }
+    })
+
+    test("blockers with 51 entries fails validation", () => {
+      const arr = Array.from({ length: 51 }, (_, i) => ({
+        what: `b${i}`,
+        surface: "type",
+      }))
+      expect(schema.safeParse({ blockers: arr }).success).toBe(false)
+    })
+
+    test("nextStepQueue with 51 entries fails validation", () => {
+      const arr = Array.from({ length: 51 }, (_, i) => ({ what: `step${i}` }))
+      expect(schema.safeParse({ nextStepQueue: arr }).success).toBe(false)
+    })
+
+    test("deferredValidation with 51 entries fails validation", () => {
+      const arr = Array.from({ length: 51 }, (_, i) => ({
+        rail: `rail${i}`,
+        reason: "x",
+      }))
+      expect(schema.safeParse({ deferredValidation: arr }).success).toBe(false)
+    })
+
+    test("exactly 50 entries is accepted (boundary)", () => {
+      const arr = Array.from({ length: 50 }, (_, i) => ({
+        file: `f${i}.ts`,
+        reason: `r${i}`,
+      }))
+      expect(schema.safeParse({ ownerShortlist: arr }).success).toBe(true)
+    })
   })
 })

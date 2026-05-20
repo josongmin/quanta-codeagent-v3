@@ -4,6 +4,7 @@ import { join } from "node:path"
 import {
   CLOSEOUT_4RULE_REMINDER,
   CLOSEOUT_REMINDER,
+  CODE_MOD_CLOSEOUT_REMINDER,
   createCloseoutGuardState,
   decideCloseoutGuard,
 } from "@/agent/closeout-guard"
@@ -100,6 +101,91 @@ describe("decideCloseoutGuard", () => {
     expect(CLOSEOUT_4RULE_REMINDER).toContain("rail:")
     expect(CLOSEOUT_4RULE_REMINDER).toContain("verdict:")
     expect(CLOSEOUT_4RULE_REMINDER).toContain("skipped because:")
+  })
+
+  // SOTA++ Phase 4: code-modification routing precedence. A history that
+  // contains a mutating tool call (`edit` / `write` / `scripted_replace`)
+  // routes to the Phase 4 four-truth-surface reminder, taking precedence over
+  // `cfg.fourRule`. Non-code-mod sessions fall through to the legacy choice.
+  test("(10) history contains {name:'edit'} + fourRule:false ⇒ CODE_MOD reminder (not legacy)", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({
+      state,
+      cfg: { enabled: true, fourRule: false },
+      history: [{ name: "edit" }],
+    })
+    expect(r.block).toBe(true)
+    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
+    expect(r.text).not.toBe(CLOSEOUT_REMINDER)
+    expect(state.trips).toBe(1)
+  })
+
+  test("(11) history contains {name:'scripted_replace'} ⇒ CODE_MOD reminder", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({
+      state,
+      cfg: { enabled: true },
+      history: [{ name: "bash" }, { name: "scripted_replace" }],
+    })
+    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
+    expect(state.trips).toBe(1)
+  })
+
+  test("(11b) history contains {name:'write'} ⇒ CODE_MOD reminder", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({
+      state,
+      cfg: { enabled: true },
+      history: [{ name: "write" }],
+    })
+    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
+  })
+
+  test("(12) empty history + fourRule:true ⇒ legacy 4-rule (not CODE_MOD)", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({
+      state,
+      cfg: { enabled: true, fourRule: true },
+      history: [],
+    })
+    expect(r.text).toBe(CLOSEOUT_4RULE_REMINDER)
+    expect(r.text).not.toBe(CODE_MOD_CLOSEOUT_REMINDER)
+  })
+
+  test("(12b) undefined history + fourRule:true ⇒ legacy 4-rule", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({ state, cfg: { enabled: true, fourRule: true } })
+    expect(r.text).toBe(CLOSEOUT_4RULE_REMINDER)
+  })
+
+  test("(13) empty history + fourRule:false ⇒ legacy one-liner CLOSEOUT_REMINDER", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({
+      state,
+      cfg: { enabled: true, fourRule: false },
+      history: [{ name: "bash" }, { name: "read" }],
+    })
+    expect(r.text).toBe(CLOSEOUT_REMINDER)
+    expect(r.text).not.toBe(CODE_MOD_CLOSEOUT_REMINDER)
+  })
+
+  test("(14) code-mod session + fourRule:true ⇒ STILL CODE_MOD (code-mod wins)", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({
+      state,
+      cfg: { enabled: true, fourRule: true },
+      history: [{ name: "edit" }],
+    })
+    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
+    expect(r.text).not.toBe(CLOSEOUT_4RULE_REMINDER)
+  })
+
+  test("(15) CODE_MOD_CLOSEOUT_REMINDER names the four truth surfaces", () => {
+    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("type")
+    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("owner")
+    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("wire")
+    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("test")
+    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("four truth surfaces")
   })
 })
 

@@ -329,6 +329,74 @@ describe("runAdmissibilityGate: canonical ordering", () => {
     expect(res).toBeNull()
   })
 
+  test("mode 'review' blocks a mutating tool with preview='review-blocked'", async () => {
+    const mutate = makeTool("mutate", { readOnly: false })
+    const c = cfg({
+      registry: new ToolRegistry([mutate]),
+      mode: "review",
+      permission: { mode: "bypass" },
+    })
+    const res = await runAdmissibilityGate(call("mutate"), c, { mode: "bypass" }, actionOf(mutate))
+    expect(res).not.toBeNull()
+    expect(res?.preview).toBe("review-blocked")
+    expect(res?.block.content).toContain("blocked in review mode: mutate")
+  })
+
+  test("mode 'audit' blocks a mutating tool with preview='audit-blocked'", async () => {
+    const mutate = makeTool("mutate", { readOnly: false })
+    const c = cfg({
+      registry: new ToolRegistry([mutate]),
+      mode: "audit",
+      permission: { mode: "bypass" },
+    })
+    const res = await runAdmissibilityGate(call("mutate"), c, { mode: "bypass" }, actionOf(mutate))
+    expect(res).not.toBeNull()
+    expect(res?.preview).toBe("audit-blocked")
+    expect(res?.block.content).toContain("blocked in audit mode: mutate")
+  })
+
+  test("mode 'review' allows read-only tools (only mutating tools are blocked)", async () => {
+    const ro = makeTool("ro", { readOnly: true })
+    const c = cfg({
+      registry: new ToolRegistry([ro]),
+      mode: "review",
+      permission: { mode: "bypass" },
+    })
+    const res = await runAdmissibilityGate(call("ro"), c, { mode: "bypass" }, actionOf(ro))
+    expect(res).toBeNull()
+  })
+
+  test("mode 'audit' allows read-only tools (only mutating tools are blocked)", async () => {
+    const ro = makeTool("ro", { readOnly: true })
+    const c = cfg({
+      registry: new ToolRegistry([ro]),
+      mode: "audit",
+      permission: { mode: "bypass" },
+    })
+    const res = await runAdmissibilityGate(call("ro"), c, { mode: "bypass" }, actionOf(ro))
+    expect(res).toBeNull()
+  })
+
+  test("review/audit blocks fire BEFORE HITL — confirm handler never invoked", async () => {
+    const mutate = makeTool("mutate", {
+      readOnly: false,
+      hitlTier: () => "always-confirm",
+    })
+    let confirmed = false
+    const c = cfg({
+      registry: new ToolRegistry([mutate]),
+      mode: "review",
+      hitl: { enabled: true },
+      onConfirm: async () => {
+        confirmed = true
+        return true
+      },
+    })
+    const res = await runAdmissibilityGate(call("mutate"), c, { mode: "default" }, actionOf(mutate))
+    expect(res?.preview).toBe("review-blocked")
+    expect(confirmed).toBe(false)
+  })
+
   test("HITL approved (always-confirm + accepted) still emits pre_tool_use hook", async () => {
     const tool = makeTool("dangerous", {
       readOnly: false,

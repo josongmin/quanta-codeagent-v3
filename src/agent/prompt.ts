@@ -1,4 +1,5 @@
 import type { Message, SystemBlock } from "@/llm"
+import { resolveAgentMode } from "./mode"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
 import { renderWorkingStateBlock, type WorkingState } from "./working-state"
 
@@ -334,6 +335,32 @@ const renderActiveSkillsBlock = (
   ].join("\n")
 }
 
+/**
+ * Defang any `<system-reminder>` / `</system-reminder>` substrings inside the
+ * dynamic block before we wrap it. The wrapper itself is a literal
+ * `<system-reminder>...</system-reminder>` pair, so any value inside
+ * (`repoRules.body`, working state, skill description, memory hints) that
+ * carries an UNESCAPED closer would terminate the harness reminder block —
+ * the text after it would then become indistinguishable from a
+ * system-attributed instruction, a classic prompt-injection vector for
+ * repo-checked content (`AGENTS.md` is on disk and ANY contributor can edit
+ * it). The same applies to a forged OPENER: an attacker could mid-block
+ * declare a new `<system-reminder>...` and convince the model the inner
+ * payload is harness-attributed.
+ *
+ * The fix inserts a backslash between `<` and `/` (or `<` and `s`) so the
+ * defanged form `<\/system-reminder>` / `<\system-reminder>` is not parsed
+ * as a tag by the harness or by the model's pattern-matcher, but stays
+ * human-readable in transcripts. Case-insensitive because pattern matchers
+ * treat `<SYSTEM-REMINDER>` the same as lowercase.
+ */
+export const escapeReminderBoundary = (s: string): string =>
+  // Insert a single `\` immediately after the opening `<` of any
+  // `<system-reminder>` or `</system-reminder>` token, case-insensitive. The
+  // callback form preserves the original casing of the match so transcripts
+  // stay faithful (`</SYSTEM-REMINDER>` → `<\/SYSTEM-REMINDER>`).
+  s.replace(/<(\/?system-reminder>)/gi, "<\\$1")
+
 /** Build the per-turn dynamic context — date, cwd, mode notice, repo rules,
  *  working state, memory — as a single block of text, or `undefined` when there
  *  is nothing to say. Order matters: repo-local rules ride ABOVE working state
@@ -356,10 +383,10 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
     const block = renderWorkingStateBlock(input.workingState)
     if (block) parts.push("", block)
   }
+  // Memory recall body already carries the trust-ladder H2 header inside
+  // `formatBlock` (src/agent/memory.ts) — append as-is, no double-label.
   const memory = input.memoryContext?.trim()
-  if (memory) {
-    parts.push("", "## Memory hints (routing hints only — not proof)", memory)
-  }
+  if (memory) parts.push("", memory)
   return parts.join("\n")
 }
 
@@ -378,9 +405,13 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
   const dynamic = buildDynamicContext(input)
   const messages: Message[] = [...input.baseMessages]
   if (dynamic !== undefined) {
+    // Defang inner `<system-reminder>` boundaries BEFORE wrapping so a
+    // value supplied by repoRules / memory / skills cannot terminate the
+    // outer block and forge a system-attributed instruction.
+    const safe = escapeReminderBoundary(dynamic)
     messages.push({
       role: "user",
-      content: [{ type: "text", text: `<system-reminder>\n${dynamic}\n</system-reminder>` }],
+      content: [{ type: "text", text: `<system-reminder>\n${safe}\n</system-reminder>` }],
     })
   }
   return { system, messages }

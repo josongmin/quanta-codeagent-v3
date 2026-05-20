@@ -20,8 +20,10 @@ draft before emitting the final answer:
 - **R4 Stale-memory** — memory hints are routing, never proof.
 
 `§5.3` defines the **VerificationCloseout** scaffold the LLM should attach
-when verification was in scope: `performed / rail / verdict / failure_class
-/ reason_if_skipped`.
+when verification was in scope. Codex names the fields `performed / rail /
+verdict / failure_class / reason_if_skipped`; our in-prompt scaffold
+renders them as `performed / rail / verdict / failure / skipped because`
+for brevity — field semantics are identical, only the labels differ.
 
 The single-line reminder did not articulate R1–R4 by name or require the
 scaffold.
@@ -51,11 +53,32 @@ Pure policy module — no I/O, no LLM, no imports beyond the sibling
 `./types`. The `closeout-guard module purity` test enforces this contract
 in CI.
 
-Selection inside `decideCloseoutGuard`:
+Routing precedence inside `decideCloseoutGuard` (after the existing OFF /
+single-shot short-circuits):
 
 ```ts
+if (isCodeModificationSession(args.history)) {
+  return { block: true, text: CODE_MOD_CLOSEOUT_REMINDER }
+}
 const text = cfg.fourRule === true ? CLOSEOUT_4RULE_REMINDER : CLOSEOUT_REMINDER
 ```
+
+So the full precedence is:
+
+1. code-modification session (any history entry names a mutating tool —
+   `edit` / `write` / `scripted_replace`) ⇒ **Phase 4 four-truth-surface
+   reminder** (`CODE_MOD_CLOSEOUT_REMINDER`). This takes precedence over
+   `fourRule` because a code change has a stricter post-condition contract
+   (type/owner/wire/test) than a general defended-claim closeout.
+2. else, `cfg.fourRule === true` ⇒ `CLOSEOUT_4RULE_REMINDER` (R1–R4 +
+   VerificationCloseout cue).
+3. else ⇒ legacy one-liner `CLOSEOUT_REMINDER`.
+
+The `history` parameter is duck-typed inline as `ReadonlyArray<{name:
+string}>` so the module stays import-free. The agent loop's existing
+`toolHistory` array (originally built only for `verifyGuard`) is now also
+built when `closeoutGuard.enabled === true` and threaded through to
+`decideCloseoutGuard`.
 
 ## Consequences
 

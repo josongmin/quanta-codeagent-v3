@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { lstat, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
 /**
@@ -55,10 +55,36 @@ export const loadRepoRules = async (cwd: string): Promise<RepoRules | undefined>
   return undefined
 }
 
+/** Maximum bytes of rule body that ride into the prompt every turn. Bodies
+ *  larger than this are truncated with a marker rather than rejected outright
+ *  — usability wins over a hard reject, but a runaway file cannot blow the
+ *  prompt budget. */
+export const MAX_BYTES = 64 * 1024
+
 const tryRead = async (path: string): Promise<string | undefined> => {
   try {
-    return await readFile(path, "utf8")
+    // SECURITY: `lstat` does NOT follow symlinks. We reject symlinks entirely
+    // because an attacker (or a careless contributor) could symlink AGENTS.md
+    // at `~/.ssh/id_rsa` (or any other secret), and the contents would then
+    // ride into the LLM prompt every turn as REPO POLICY. The only safe link
+    // policy here is to refuse: the link target has no trust relationship
+    // with the repo, but the LLM would treat the rendered body as authority.
+    const st = await lstat(path)
+    if (st.isSymbolicLink()) return undefined
+    if (!st.isFile()) return undefined
+    const body = await readFile(path, "utf8")
+    if (body.length > MAX_BYTES) {
+      // Truncate with an explicit marker so the LLM (and human auditors) can
+      // see that the rules were cut. The byte count refers to the UTF-16 code
+      // units returned by `readFile("utf8")` — same unit String.prototype.length
+      // reports, kept consistent for the marker.
+      return `${body.slice(0, MAX_BYTES)}\n\n[truncated: ${body.length} bytes total, showing first 64 KiB]`
+    }
+    return body
   } catch {
+    // ENOENT, EACCES, EISDIR, and any other transient/permission failure all
+    // fall through silently — the loader is best-effort and the next
+    // candidate (or no rules at all) is the correct outcome.
     return undefined
   }
 }

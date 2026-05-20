@@ -7,6 +7,57 @@ import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from
  *  high-blast-radius bypasses; a determined command can still evade a regex.
  *  Each pattern is tuned to avoid false-positives on legitimate dev commands
  *  (e.g. `rm -rf ./build`, `find . -name x`, `chmod -R 755 ./dist`). */
+/**
+ * Shell interpreter family used in pipe-to-shell guards. Includes POSIX +
+ * extended shells (`ksh`, `csh`/`tcsh`, `ash`) and the non-POSIX entries
+ * `fish`, `pwsh`, plus macOS `osascript` (which on macOS executes
+ * AppleScript / JavaScript-for-Automation — a full RCE channel that the
+ * narrower `(ba|z|da)?sh` set missed). Any new shell entry here MUST stay
+ * a static literal — no user input — so the regex engine can't be
+ * influenced by attacker-controlled text.
+ */
+const SHELL_GROUP = "(?:(?:ba|z|da|k|c|tc|a)?sh|fish|pwsh|osascript)"
+
+/**
+ * Script-interpreter family for the `curl … | <interp>` RCE bypass. The
+ * baseline set covers POSIX scripting languages; the additions catch the
+ * modern + macOS attack surface that previously slipped past:
+ *   - `lua` — common embedded scripting interp.
+ *   - `osascript` — macOS AppleScript / JXA executor.
+ *   - `pwsh` — PowerShell Core (cross-platform).
+ *   - `deno`, `bun` — modern JS/TS runtimes.
+ *   - `tsx` — `ts-node`/tsx pipe execution.
+ *   - `swift` — macOS Swift script runner.
+ */
+const INTERP_GROUP = "(?:python[0-9.]*|perl|node|ruby|php|lua|osascript|pwsh|deno|bun|tsx|swift)"
+
+/**
+ * Network-egress / exfiltration channel family. The original set (`curl`,
+ * `wget`, `nc`, `ncat`, `socat`, `telnet`) only covered direct
+ * stdout-piping tools; an attacker who can also reach for `openssl s_client`,
+ * `ssh`/`scp`/`sftp`/`rsync`, `mail`/`sendmail`/`mailx`, `ftp`/`tftp`, or a
+ * cloud-CLI uploader (`aws`, `gh`, `gcloud`, `az`) has equivalent
+ * exfiltration capability. Adding them closes the documented
+ * credential-exfil bypass classes.
+ */
+const EXFIL_GROUP =
+  "(?:curl|wget|nc|ncat|socat|telnet|openssl|ssh|scp|sftp|rsync|mail|sendmail|mailx|ftp|tftp|aws|gh|gcloud|az)"
+
+/**
+ * Anchored-on-`/` system root token set for the `rm -rf` / `chmod -R` /
+ * `find` guards. The original set covered the Linux FHS (`/etc`, `/usr`,
+ * `/var`, …). We add the macOS top-level directories:
+ *   - `Users` — every user's home tree lives here.
+ *   - `Library` — system + user library state.
+ *   - `Applications` — installed apps.
+ *   - `System`, `Network`, `Volumes`, `private` — macOS system roots.
+ * All entries are matched as an absolute root (the surrounding pattern
+ * requires a leading `/`), so a project-relative `./Users/foo` does NOT
+ * match — only `/Users/...` does.
+ */
+const SYSTEM_ROOTS =
+  "etc|usr|var|bin|sbin|lib64|lib|opt|root|boot|dev|sys|proc|home|srv|run|mnt|media|Users|Library|Applications|System|Network|Volumes|private"
+
 const HARD_DENY = [
   // Recursive+force `rm` aimed at a root-ish target. The prior pattern only
   // fired when the root token was the WHOLE final arg, so `rm -rf ~/.ssh`,
@@ -16,13 +67,12 @@ const HARD_DENY = [
   // `--force`, or a combined cluster containing f/F), in ANY order, possibly
   // split across separate args — then a dangerous target with an optional
   // path SUFFIX: `/`, `~`, `~/…`, `$HOME`, `$HOME/…`, `${HOME}`, `${HOME}/…`,
-  // a bare `/*` glob, OR an absolute system root (`/etc`,`/usr`,`/var`,`/bin`,
-  // `/sbin`,`/lib`,`/lib64`,`/opt`,`/root`,`/boot`,`/dev`,`/sys`,`/proc`,
-  // `/home`,`/srv`,`/run`,`/mnt`,`/media`). Still a best-effort denylist
-  // (RFC §1.2): project-relative / `/tmp` targets stay ALLOWED — `rm -rf
-  // ./build`, `rm -rf node_modules`, `rm -rf dist/`, `rm -rf /tmp/x` do NOT
-  // match (no system-root prefix; `/tmp` is deliberately excluded).
-  /\brm\b(?=(?:\s+-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive\b))(?:\s|$)|[\s\S]*?\s-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\b)(?=(?:\s|[\s\S])*?\s-(?:[a-zA-Z]*[fF][a-zA-Z]*|-force)\b)[\s\S]*?\s(?:\$\{?HOME\}?|~|\/(?:\*|etc|usr|var|bin|sbin|lib64|lib|opt|root|boot|dev|sys|proc|home|srv|run|mnt|media)?)(?:\/\S*)?(?=\s|$|;|&|\|)/,
+  // a bare `/*` glob, OR an absolute system root (`/etc`,`/usr`,`/Users`,
+  // `/Library`,`/Applications`,`/System`,`/Volumes`,`/private`, …). Still
+  // best-effort (RFC §1.2): project-relative / `/tmp` targets stay ALLOWED.
+  new RegExp(
+    String.raw`\brm\b(?=(?:\s+-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive\b))(?:\s|$)|[\s\S]*?\s-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\b)(?=(?:\s|[\s\S])*?\s-(?:[a-zA-Z]*[fF][a-zA-Z]*|-force)\b)[\s\S]*?\s(?:\$\{?HOME\}?|~|\/(?:\*|${SYSTEM_ROOTS})?)(?:\/\S*)?(?=\s|$|;|&|\|)`,
+  ),
   // `find <root> ... -delete` / `-exec rm` sweeping an absolute/home root.
   /\bfind\s+(\/|~|\$HOME)\S*.*-(delete|exec\s+rm)\b/,
   // PATH-INDEPENDENT: dangerous `find` action-flags fire regardless of where
@@ -45,29 +95,31 @@ const HARD_DENY = [
   // chmod/chown recursively from a root-ish path (e.g. `chmod -R 000 /`).
   /\bchmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+\S+\s+(\/|~|\$HOME)(\s|$)/,
   // Pipe a network download straight into a shell (`curl … | sh`,
-  // `wget … | bash`) — classic remote-code-exec bypass.
-  /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z|da)?sh\b/,
+  // `wget … | bash`, `… | fish`, `… | pwsh`, `… | osascript`) — classic RCE
+  // bypass. Includes ksh/csh/tcsh/ash on top of the original ba/z/da set.
+  new RegExp(String.raw`\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?${SHELL_GROUP}\b`),
   // `shutdown`/`reboot`/`halt` as an actual COMMAND (segment start or after
   // a `;`/`&&`/`||`/`|` separator, optional `sudo`) — NOT the bare word inside
   // a path, filename, or commit message (`git commit -m "fix shutdown race"`
   // must still pass; `sudo shutdown -h now` / `x && reboot` must not).
   /(?:^|[;&|]|\bsudo\s+)\s*(?:shutdown|reboot|halt)\b/,
   // S7b — credential exfiltration: reading a well-known local secret store
-  // and piping it into a network sender (`curl`/`wget`/`nc`/`ncat`/
-  // `socat`/`telnet`). Targets only the documented secret paths so normal
-  // `cat README | grep x` / `cat file | curl -d @-` of a project file stay
-  // ALLOWED — the secret token (`~/.ssh`, `~/.aws/credentials`, `.env`,
-  // `id_rsa`, `.netrc`, `.pgpass`, `~/.gnupg`) must appear on the LEFT of a
-  // pipe whose RIGHT side is a network egress tool.
-  /(?:~\/\.ssh\b|\$HOME\/\.ssh\b|\.aws\/credentials\b|\bid_rsa\b|\.netrc\b|\.pgpass\b|~\/\.gnupg\b|(?:^|[\s/'"=])\.env(?:\.\w+)?\b)[\s\S]*?\|\s*(?:sudo\s+)?(?:curl|wget|nc|ncat|socat|telnet)\b/,
-  // S7b — `base64 … | sh|bash|zsh|dash` (decode-then-execute RCE bypass).
-  // `base64 file.png` with no pipe-to-shell stays ALLOWED.
-  /\bbase64\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b/,
+  // and piping it into a network sender. Channel set extended beyond the
+  // direct curl/wget/nc family to also catch `openssl`/`ssh`/`scp`/`sftp`/
+  // `rsync`/`mail`/`sendmail`/`mailx`/`ftp`/`tftp`/cloud CLIs (`aws`/`gh`/
+  // `gcloud`/`az`) — any of them is an equivalent exfil channel.
+  new RegExp(
+    String.raw`(?:~\/\.ssh\b|\$HOME\/\.ssh\b|\.aws\/credentials\b|\bid_rsa\b|\.netrc\b|\.pgpass\b|~\/\.gnupg\b|(?:^|[\s/'"=])\.env(?:\.\w+)?\b)[\s\S]*?\|\s*(?:sudo\s+)?${EXFIL_GROUP}\b`,
+  ),
+  // S7b — `base64 … | sh|bash|zsh|dash|ksh|csh|fish|pwsh|osascript` (decode-
+  // then-execute RCE bypass). `base64 file.png` with no pipe stays ALLOWED.
+  new RegExp(String.raw`\bbase64\b[^|]*\|\s*(?:sudo\s+)?${SHELL_GROUP}\b`),
   // S7b — pipe a network download straight into a script interpreter
-  // (`curl … | python`, `wget … | perl|node|ruby|php`) — the interpreter
-  // analogue of the existing `curl … | sh` rule. `curl … -o f.json` (no
-  // pipe) and `cat f | python script.py` (no curl/wget) stay ALLOWED.
-  /\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:python[0-9.]*|perl|node|ruby|php)\b/,
+  // (`curl … | python`, `wget … | perl|node|ruby|php|lua|osascript|pwsh|
+  // deno|bun|tsx|swift`) — the interpreter analogue of `curl … | sh`.
+  // `curl … -o f.json` (no pipe) and `cat f | python script.py` (no
+  // curl/wget) stay ALLOWED.
+  new RegExp(String.raw`\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?${INTERP_GROUP}\b`),
   // S7b — raw write to a block device by redirection or `dd`/`tee` (disk
   // wipe / partition-table clobber). Broadens the existing `dd of=/dev/`
   // entry to common device prefixes and the `>`/`tee` forms. `dd if=in

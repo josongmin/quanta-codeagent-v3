@@ -60,8 +60,21 @@ wire  — every caller / import / config / wiring point matches.
 test  — failing scenario passes AND nearest existing tests still pass.
 ```
 
-The loop chooses which closeout reminder to inject (currently the existing
-single/four-rule path; a future ADR may add code-mod-specific routing).
+**Routing precedence (now implemented):** `decideCloseoutGuard` inspects
+the per-run tool history (the same `{name, arg?}` array verify-guard
+already maintains) and applies this precedence after the OFF / single-shot
+short-circuits:
+
+1. code-modification session (`isCodeModificationSession(history) === true`)
+   ⇒ `CODE_MOD_CLOSEOUT_REMINDER` — the four-truth-surface reminder.
+2. else, `cfg.fourRule === true` ⇒ `CLOSEOUT_4RULE_REMINDER` (Phase 2).
+3. else ⇒ legacy one-liner `CLOSEOUT_REMINDER`.
+
+The agent loop's `buildVerifyGuard` is widened to also allocate the
+history array when `closeoutGuard.enabled === true` (it was previously
+gated only on `verifyGuard`), and `closeoutGuardStep` passes the array to
+`decideCloseoutGuard`. Module purity is preserved: history is duck-typed
+inline as `ReadonlyArray<{name: string}>`.
 
 ## Mechanism
 

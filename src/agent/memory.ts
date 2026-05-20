@@ -61,10 +61,13 @@ const embedOne = async (
   }
 }
 
-/** Fold entries into the system-prompt augmentation block (original format). */
+/** Fold entries into the system-prompt augmentation block. The H2 carries the
+ *  trust-ladder downgrade verbatim (Codex `memory-model-audit.md`): recalled
+ *  memory is a ROUTING HINT, never proof. The prompt-side renderer no longer
+ *  prefixes a second label, so there's exactly one H2 for the memory block. */
 const formatBlock = (entries: readonly MemoryEntry[]): string => {
   const lines = entries.map((e) => `- (${e.kind}) ${truncate(e.text)}`)
-  return `## Relevant memory\n${lines.join("\n")}`
+  return `## Memory hints (routing hints only — not proof)\n${lines.join("\n")}`
 }
 
 /** Invoke an optional stats observer; an observer throw must never escape. */

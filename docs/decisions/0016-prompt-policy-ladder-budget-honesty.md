@@ -20,7 +20,7 @@ encode response-shaping policy that our system prompt did not articulate:
   this to the closeout-guard).
 - A **task-kind reporting shape** matrix (8 kinds) so the final answer
   matches the request shape.
-- An explicit **8-layer policy stack** so the LLM knows which layer governs
+- An explicit **9-layer policy stack** so the LLM knows which layer governs
   what (and that a user request cannot override L1–L5).
 
 ## Decision
@@ -76,4 +76,4 @@ mode notice, repo rules, working state, memory hints, active skills).
 - Codex `judgment-and-tool-usage-audit.md` §3, §5, §14.
 - Codex `budget-management-audit.md` (5-axis).
 - Codex `response-assembly-and-closeout.md` §5.4 (reporting shape table).
-- Codex `prompt-and-policy-stack.md` (8-layer stack).
+- Codex `prompt-and-policy-stack.md` (9-layer stack).

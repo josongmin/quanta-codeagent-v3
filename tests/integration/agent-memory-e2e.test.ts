@@ -139,7 +139,7 @@ describe("agent + SOTA++ memory (e2e through runAgent)", () => {
     expect(out2.reason).toBe("completed")
     expect(out2.turns).toBe(1)
 
-    // Assertion 2: the recalled "## Relevant memory" rides the trailing
+    // Assertion 2: the recalled "## Memory hints (routing hints only — not proof)" rides the trailing
     // <system-reminder> user message of session 2's first (non-distill) turn.
     const turnInput = llm2.inputs.find((i) => {
       const lastUser = [...i.messages].reverse().find((m) => m.role === "user")
@@ -153,7 +153,7 @@ describe("agent + SOTA++ memory (e2e through runAgent)", () => {
         ? tail.content.map((b) => (b.type === "text" ? b.text : "")).join("")
         : ""
     expect(tailText).toContain("<system-reminder>")
-    expect(tailText).toContain("## Relevant memory")
+    expect(tailText).toContain("## Memory hints (routing hints only — not proof)")
     expect(tailText).toContain(FACT_TEXT)
 
     // Assertion 3: reinforcement bumped access bookkeeping after recall.
@@ -182,6 +182,6 @@ describe("agent + SOTA++ memory (e2e through runAgent)", () => {
       tail?.role === "user"
         ? tail.content.map((b) => (b.type === "text" ? b.text : "")).join("")
         : ""
-    expect(tailText).not.toContain("## Relevant memory")
+    expect(tailText).not.toContain("## Memory hints (routing hints only — not proof)")
   })
 })

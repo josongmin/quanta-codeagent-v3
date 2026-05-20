@@ -105,6 +105,67 @@ describe("inferToolTier", () => {
     expect(inferToolTier(bashTool, { command: "git fetch origin main" })).toBe("always-confirm")
   })
 
+  // SECURITY: adversarial bypasses of the always-confirm gate via git's
+  // global-option prefix tokens. Each of these previously slipped past
+  // because the original prefix matcher only accepted tokens NOT starting
+  // with `-`. They MUST escalate to always-confirm.
+  describe("git global-option bypass hardening (always-confirm)", () => {
+    test.each([
+      ["git --no-pager push origin main", "long option --no-pager"],
+      ["git -C /repo push origin main", "short option -C with operand"],
+      ["git -c http.proxy=evil push", "short -c with config injection"],
+      ["git -c foo.bar=baz push origin main", "short -c with extra arg"],
+      ["git --git-dir=/x push origin main", "long --git-dir=value"],
+      ["git --git-dir /x push origin main", "long --git-dir with separate value"],
+      ["git --work-tree=/x push", "long --work-tree=value"],
+      ["git --no-pager --git-dir=/x push", "two chained long options"],
+      ["git\t--no-pager\tpush\torigin\tmain", "tab-separated tokens"],
+      ["git    push    origin    main", "extra-whitespace tokens"],
+    ])("`%s` ⇒ always-confirm (%s)", (command) => {
+      expect(inferToolTier(bashTool, { command })).toBe("always-confirm")
+    })
+
+    // `git fetch` with NO remote fetches `origin` by default — the prior gate
+    // required a literal `origin` substring, so `git fetch` and
+    // `git fetch upstream` slipped past. Both now escalate.
+    test.each([
+      ["git fetch", "bare git fetch (defaults to origin)"],
+      ["git fetch upstream", "git fetch non-origin remote"],
+      ["git -C dir fetch", "git -C ... fetch"],
+      ["git --no-pager fetch", "git --no-pager fetch"],
+    ])("`%s` ⇒ always-confirm (%s)", (command) => {
+      expect(inferToolTier(bashTool, { command })).toBe("always-confirm")
+    })
+
+    // `git commit --amend` / `git reset --hard` with global options also bypass.
+    test.each([
+      ["git --no-pager commit --amend -m x", "git --no-pager commit --amend"],
+      ["git -C repo commit --amend", "git -C ... commit --amend"],
+      ["git -c user.name=x commit --amend", "git -c ... commit --amend"],
+      ["git -C repo reset --hard HEAD~1", "git -C ... reset --hard"],
+      ["git --no-pager reset --hard origin/main", "git --no-pager reset --hard"],
+    ])("`%s` ⇒ always-confirm (%s)", (command) => {
+      expect(inferToolTier(bashTool, { command })).toBe("always-confirm")
+    })
+
+    // Negative controls: legitimate read-only / non-mutating git commands must
+    // NOT over-match. These all stay at pre-approval-ok.
+    test.each([
+      ["git status", "git status"],
+      ["git log --oneline", "git log"],
+      ["git diff", "git diff"],
+      ["git --no-pager status", "git --no-pager status"],
+      ["git -C /repo status", "git -C ... status"],
+      ["git -c user.name=x status", "git -c ... status"],
+      ["git --git-dir=/x log", "git --git-dir=value log"],
+      ["git commit -m fix", "ordinary git commit (no --amend)"],
+      ["git reset HEAD~1", "git reset without --hard"],
+      ["git checkout -b feature/x", "git checkout"],
+    ])("`%s` ⇒ pre-approval-ok (%s)", (command) => {
+      expect(inferToolTier(bashTool, { command })).toBe("pre-approval-ok")
+    })
+  })
+
   test("bash with `ls -la` ⇒ pre-approval-ok (default)", () => {
     expect(inferToolTier(bashTool, { command: "ls -la" })).toBe("pre-approval-ok")
   })

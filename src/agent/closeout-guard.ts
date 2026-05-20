@@ -62,8 +62,10 @@ export const CLOSEOUT_4RULE_REMINDER = [
  * Codex's `agent-loop-deep-dive.md §7` surface-alignment loop walks four truth
  * surfaces after an owner fix: type / owner / wire / test. This constant is a
  * SUPPLEMENT to {@link CLOSEOUT_REMINDER} / {@link CLOSEOUT_4RULE_REMINDER},
- * not a replacement — the loop picks which to inject based on whether the
- * session contains a mutating tool call (see {@link isCodeModificationSession}).
+ * not a replacement — {@link decideCloseoutGuard} picks which to inject based
+ * on whether the session contains a mutating tool call (see
+ * {@link isCodeModificationSession}); a code-modification session ALWAYS
+ * receives this four-surface reminder, taking precedence over `cfg.fourRule`.
  * Keeping the prior reminders untouched preserves Phase 2's contract.
  */
 export const CODE_MOD_CLOSEOUT_REMINDER = [
@@ -105,22 +107,41 @@ export const isCodeModificationSession = (
 /**
  * Decide whether to block a finish attempt and inject the closeout reminder.
  * Pure: the only side effect is incrementing `state.trips` when it blocks
- * (the loop owns the state object). Logic:
+ * (the loop owns the state object). Routing precedence (after the OFF /
+ * single-shot checks):
+ *
+ *   1. code-modification session (any history entry names a mutating tool —
+ *      see {@link isCodeModificationSession}) ⇒ inject the Phase 4 four-truth-
+ *      surface reminder {@link CODE_MOD_CLOSEOUT_REMINDER}. This wins over
+ *      `fourRule` because code changes have a stricter post-condition
+ *      contract (type/owner/wire/test) than general defended-claim closeout.
+ *   2. else, `cfg.fourRule === true` ⇒ inject {@link CLOSEOUT_4RULE_REMINDER}
+ *      (the Phase 2 defended-claim R1–R4 + VerificationCloseout cue).
+ *   3. else ⇒ inject the legacy one-liner {@link CLOSEOUT_REMINDER}.
+ *
+ * OFF rules (short-circuit before any of the above):
  *   - `cfg === undefined`        ⇒ guard OFF, byte-identical.
  *   - `cfg.enabled !== true`     ⇒ off unless explicitly enabled.
  *   - `state.trips >= 1`         ⇒ already tripped this run (single-shot cap).
- *   - `cfg.fourRule === true`    ⇒ inject {@link CLOSEOUT_4RULE_REMINDER}.
- *   - otherwise                  ⇒ inject the legacy {@link CLOSEOUT_REMINDER}.
+ *
+ * The `history` parameter is optional and duck-typed inline as
+ * `ReadonlyArray<{name: string}>` so this module stays import-free — the loop
+ * threads its existing `toolHistory` array straight through without any cross-
+ * slice import.
  */
 export const decideCloseoutGuard = (args: {
   state: CloseoutGuardState
   cfg: { enabled?: boolean; fourRule?: boolean } | undefined
+  history?: ReadonlyArray<{ name: string }>
 }): { block: boolean; text?: string } => {
   const { cfg, state } = args
   if (cfg === undefined) return { block: false }
   if (cfg.enabled !== true) return { block: false }
   if (state.trips >= 1) return { block: false }
   state.trips += 1
+  if (isCodeModificationSession(args.history)) {
+    return { block: true, text: CODE_MOD_CLOSEOUT_REMINDER }
+  }
   const text = cfg.fourRule === true ? CLOSEOUT_4RULE_REMINDER : CLOSEOUT_REMINDER
   return { block: true, text }
 }
