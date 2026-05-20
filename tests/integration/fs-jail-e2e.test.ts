@@ -27,12 +27,23 @@
  * any slice boundary the production code wouldn't cross.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { runAgent } from "@/agent"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
+
+const IS_WIN = process.platform === "win32"
 
 let parentDir: string
 let jail: string

@@ -509,3 +509,61 @@ flowchart TD
 - 의도는 고정 keyword router보다 넓게 해석되며, 최소한 `stable knowledge / research / inspection / modification / review / audit / visual / delegation` 정도의 typed split으로 보는 것이 observed behavior와 가장 잘 맞는다. `[STRONG-INFERENCE]`
 - code modification에서는 특히 `owner identification -> surface alignment -> edit strategy -> leftovers -> closeout`의 specialized repair loop가 핵심이다. `[STRONG-INFERENCE]`
 - 내부 구현이 정확히 어떤 hidden typed router/enum/planner로 되어 있는지는 직접 관측 불가이므로, 그 부분은 overclaim하지 않는 것이 맞다. `[FACT]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+원본 §13 "residual unknowns" 의 일부 — 특히 "judgment 가 LLM-side adaptive routing 인가, hidden typed router 인가" — 는 2026-05-21 deep dive 에서 부분적으로 풀렸다. **bash command admission 은 LLM-side 가 아니라 rule-table 기반**이라는 사실이 확인됐다.
+
+### R2.1 Bash command admission 은 prefix_rule 테이블 (LLM 판단 아님)
+
+- `[FACT]` `~/.codex/rules/default.rules` (353KB) — `prefix_rule(pattern=[…], decision="allow"|"deny")` 형식 entries.
+- `[FACT]` Coverage: git, build/test, python uv, pyright, pytest.
+- `[STRONG-INFERENCE]`: 즉 bash 명령 판단의 첫 단계는 LLM이 아니라 **정적 prefix matching 테이블**이다. 원본 §3.2 "LLM이 완전히 자유롭게 다 한다" 대안을 명백히 기각한다.
+
+### R2.2 원본 typed intent model 보정
+
+원본 §4.1 의 8-kind split (Stable Knowledge / Time-sensitive Research / Local Code Inspection / Code Modification / Review / Audit / Visual / Delegation) 은 LLM-side classification 추론이었다. Round 2 fact 를 반영하면:
+
+- bash command admission 은 **LLM kind 분류 이전에** 정적 rule table 을 통과해야 한다 (LLM 이 어떤 kind 로 분류했는지와 무관).
+- 따라서 실제 decision pipeline 은:
+
+```mermaid
+flowchart TD
+    A["User Request"] --> B["LLM Intent Kind (R1 §4)"]
+    B --> C["Evidence Requirement"]
+    C --> D["Tool Selection"]
+    D --> E{"Tool == bash?"}
+    E -->|Yes| F["prefix_rule admission table"]
+    F -->|allow| G["Execute"]
+    F -->|deny| H["Reject / escalate"]
+    E -->|No| G
+```
+
+- 원본 §5.4 "Select minimal sufficient tool path" 는 여전히 옳지만, **bash 경로에는 추가 admission gate 가 끼어든다**는 점이 보정 필요.
+
+### R2.3 Service tier `priority` 가 tool selection 에 미치는 영향
+
+- `[FACT]` `priority` tier ("Fast", 1.5x speed) 가 모델별 옵션으로 존재 (mode-and-plan-process Round 2 §R2.5 참조).
+- `[WEAK-INFERENCE]`: 동일 task 에서 tier=priority 일 때는 latency budget 이 낮으므로 LLM-side 가 **subagent 분기를 더 보수적으로** 선택할 가능성 — 즉 routing 결정이 tier-aware 일 가능성. 직접 evidence 는 cache 에 없다.
+
+### R2.4 Tool routing 의 server-side 핫스왑 가능성
+
+- `[FACT]` `models_cache.json` 의 `base_instructions` 가 ETag-keyed.
+- `[STRONG-INFERENCE]`: 즉 tool routing rationale 자체가 server-side 로 핫스왑 가능. 원본 §11 "naive tool router" 대안을 추가로 약화시킨다 — router 가 LLM 안에 있다 해도, 그 LLM 의 instruction 은 deploy-time 이 아니라 fetch-time 에 결정된다.
+
+### R2.5 원본 attack surface 보강
+
+- §9.1 "Over-automation assumption" 에 대한 보강: bash admission 은 실제로 자동화되어 있으나 그것은 LLM router 가 아니라 **prefix_rule 테이블** 이다 — 따라서 "외부 hard router 가 모든 의도를 분류한다" 모델은 **부분적으로 옳다** (적어도 bash subset 에서는).
+- 새 P1: 353KB prefix_rule 리스트의 cross-repo contamination — user-global 이므로 repo-A 에서 allow 한 destructive command 가 repo-B 에서도 자동 통과.
+
+### R2.6 새 unknown 해소
+
+- ~~"intent classifier 가 literal enum 인지 latent representation 인지" `[WEAK-INFERENCE]`~~ → **부분 해소**: 적어도 **bash command admission** 은 literal prefix_rule enum 이다. 그러나 task kind 분류 (`Local Code Inspection` vs `Code Modification` 등) 가 enum 이라는 evidence 는 여전히 없다. `[FACT]`
+
+### R2.7 Ownership map
+
+- **bash allowlist 파일 자체와 ingestion 경로**는 [repo-local-rule-ingestion-audit.md](./repo-local-rule-ingestion-audit.md) Round 2 update 가 소유한다.
+- **approval policy / sandbox / confirmation gate**는 [hitl-audit.md](./hitl-audit.md) Round 2 update 가 소유한다.
+- 이 문서는 **judgment/routing pipeline 안에서 admission gate 의 위치**만 다룬다.

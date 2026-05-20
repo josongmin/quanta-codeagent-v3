@@ -188,3 +188,46 @@ partial과 complete는 구조적으로 다르게 써야 한다.
 - reporting shape는 task kind에 따라 달라져도 honesty rail은 바뀌지 않는다
 - verification이 비어 있으면 그 빈칸을 그대로 보여줘야 한다
 - closeout은 “무엇이 증명됐는가”와 “무엇이 아직 안 닫혔는가”를 동시에 말해야 한다
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 round에서 response assembly가 thread-follower side에서 어떤 closeout-shaped event들을 받아 처리하는지가 fact level로 확인됐다.
+
+### A. Thread-follower event taxonomy (closeout-side)
+
+- `[FACT]` 13개의 distinct thread-follower event가 binary string evidence에서 복원됐다. closeout/response-assembly 관점에서 보면 다음과 같이 묶인다:
+
+| Group | Events | Role at closeout |
+| --- | --- | --- |
+| Turn lifecycle | `start-turn`, `submit-user-input`, `interrupt-turn`, `steer-turn` | answer assembly 시작과 mid-turn redirection의 entry/exit |
+| Compaction & edit | `compact-thread`, `edit-last-user-turn` | summary rail 갱신과 final-answer-affecting state mutation |
+| Approval & elicitation | `command-approval-decision`, `file-approval-decision`, `permissions-request-approval-response`, `submit-mcp-server-elicitation-response` | partial vs complete 판별에 영향을 주는 consent gate들 |
+| Posture switch | `set-model-and-reasoning`, `set-collaboration-mode` | reporting shape (`personality`, `effort`)을 직접 바꾸는 입력 |
+| Queue control | `set-queued-follow-ups-state` | 다음 turn 큐와 현재 closeout 분리 |
+
+- `[FACT]` 이 13개는 IPC envelope side(`tool-routing-and-triggering.md`가 IPC 자체를 owner)에서 같은 strings를 갖지만, 본 doc은 그 중 closeout-affecting subset만 본다.
+
+### B. Closeout impact of follower events
+
+§5 verification disclosure에 한 줄로 묶여 있던 것들이 이제 명시적 trigger를 가진다:
+
+| Closeout state | Triggering follower event(s) |
+| --- | --- |
+| `executed and green` / `executed and red` | preceded by `command-approval-decision` 또는 `permissions-request-approval-response` 가 admit한 실제 tool run |
+| `not requested` | 해당 event 없음, plain final answer로 닫힘 |
+| `blocked` | `command-approval-decision` / `file-approval-decision`에서 거부 또는 `interrupt-turn` 발생 |
+| partial → continue | `steer-turn` 또는 `set-queued-follow-ups-state`로 follow-up 큐로 위임 |
+
+§4 defended-claim filtering 규칙은 그대로지만, "block 발생 시 fact 표기"의 source가 위 event들로 좁혀진다.
+
+### C. Mid-turn mutation의 closeout 영향
+
+- `[FACT]` `edit-last-user-turn`은 user message 자체를 mutate한다. 이 경우 closeout text는 `original request → mutated request`를 둘 다 reference 가능하게 두는 것이 honesty rail에 맞다.
+- `[FACT]` `compact-thread`는 thread state를 변경한다. compaction 직후 closeout은 `compressed continuity rail`이 끼었음을 명시할 책임이 있다 (full lossless 주장 금지).
+- `[FACT]` `set-model-and-reasoning`이 turn 도중 발생하면 reporting shape가 바뀌어도 honesty rail은 바뀌면 안 됨. §9의 `broad summary drift`는 이런 mid-turn switch 시에 특히 위험하다.
+
+### D. What stays unchanged
+
+- §3 reporting shape table은 그대로.
+- §4 defended-claim filtering function은 그대로 `[MODEL]`.
+- §8 honesty rail 네 줄은 위 event 증거로 더 강해졌지만 표현은 유지한다.

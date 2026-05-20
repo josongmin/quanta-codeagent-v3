@@ -68,3 +68,18 @@
 - 여기서 `DB structure`라고 할 때는 현재 로컬에서 직접 보인 SQLite/JSONL surface를 우선 뜻한다.
 - service-side hidden store, retention policy, sync semantics는 evidence 없으면 `NON-CLAIM`으로 남긴다.
 - 추정 섹션은 `visible contract + local snapshot + 2026 desktop agent SOTA pattern` 조합으로만 올린다.
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+2026-05-21 deep dive에서 minified bundle/Rust binary 추가 추출이 진행되어, 이 pack 전반에 다음 축이 확정되었다.
+
+- **Thread-follower event taxonomy (13개 확정)**: thread state mutation은 JSON-RPC 2.0 channel envelope (`{event}-request`/`-response`/`-timeout`, timeout code `-32000`)로 흐른다. 13개 event 전체 enumerate는 [inferred-internal-architecture.md](./inferred-internal-architecture.md#round-2-update-2026-05-21-deep-dive)에 모은다.
+- **Session/turn JSONL schema 확정**: `archived_sessions/rollout-*.jsonl`의 `type` family에 `turn_context`가 추가 확인됐고, **매 turn마다 full snapshot** (cwd/policy/model/personality/collaboration_mode 등)이 박힌다. Owner는 [storage-and-db-audit.md](./storage-and-db-audit.md#round-2-update-2026-05-21-deep-dive)다.
+- **`logs_2.sqlite` 전모**: schema + 4개 index + sliding-window retention algorithm + WAL/PRAGMA + ~10일 cap이 모두 확인됐다. 14.8GB main + 14GB WAL가 normal이다. 전체 내용은 [storage-and-db-audit.md](./storage-and-db-audit.md#round-2-update-2026-05-21-deep-dive) 참조.
+- **`~/.codex/` directory inventory**: `config.toml`, `auth.json`, `.codex-global-state.json`, `models_cache.json`, `memories/` (git-versioned), `rules/default.rules` 등 풀 layout이 확정됐다. Owner는 [storage-and-db-audit.md](./storage-and-db-audit.md#round-2-update-2026-05-21-deep-dive).
+- **External-agent migration lifecycle**: subagent invocation과 별개로 codex가 `~/.claude/`, `.claude-plugin/`, `.claudeCode/`, `.claudeCowork/` 같은 타 agent 자료를 import하는 별도 lifecycle을 가진다. Owner는 [subagent/README.md](./subagent/README.md#round-2-update-2026-05-21-deep-dive).
+- **`thread-follower-set-collaboration-mode` event 확정 + `agent-mode-by-host-id.local`**: per-host trust mode (`full-access`/`read-only`)가 explicit event + global state knob 결합으로 관리된다. Owner는 [session-management-audit.md](./session-management-audit.md#round-2-update-2026-05-21-deep-dive).
+
+이 round-2 round는 round-1 facts를 부정하지 않고 확장한다. 다만 `logs_2.sqlite` retention/compaction을 `NON-CLAIM`으로 두었던 부분은 sliding-window algorithm 확정으로 일부 옮겨졌다.

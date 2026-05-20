@@ -203,3 +203,79 @@ def next_child_action(child_state, parent_state):
 - exact child memory graph cloning
 - scheduler policy
 - exact timeout/retry scheduler semantics
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 §1 visible interface table에 round-2에서 확인된 추가 lifecycle event family를 추가한다.
+
+### R2.1 External-agent migration lifecycle (NEW family)
+
+round-1의 visible interface 6개 (`spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, `close_agent`, `fork_context`)는 **in-process child** lifecycle이다. round-2에서는 **별도의 external-agent migration** lifecycle이 확인됐다. `[FACT]`
+
+Events (이름 순서 = 진행 순서):
+
+| Event | Most plausible meaning |
+| --- | --- |
+| `external_agent_import_detect_finished` | scan target directories complete |
+| `external_agent_import_provider_stage_finished` | per-provider data extraction complete |
+| `external_agent_import_session_completion_finished` | session-level import normalization complete |
+| `external_agent_import_finished` | full migration complete |
+
+Persistent state file: `external_agent_session_imports.json` `[FACT]`
+
+Runtime bridge channels:
+- `external_agent_tool_call`
+- `external_agent_tool_result`
+
+Import targets:
+- `~/.claude/`
+- `.claude-plugin/`
+- `.claudeCode/`
+- `.claudeCowork/`
+- `AGENTS.md` / `agents.md` (when present in target dirs)
+
+해석: `[STRONG-INFERENCE]`
+- 이 lifecycle은 `spawn_agent` child를 만드는 것이 아니라 다른 agent 도구의 자료를 detect → per-provider extract → session normalize → finish 순으로 import하는 4-stage state machine이다
+- 즉 “external-agent를 import 한 뒤 codex thread/conversation 시스템 안으로 가져온다”는 separate lifecycle
+- 그 결과로 만들어진 thread/conversation이 codex 내부에서 어떤 owner를 가지는지는 NON-CLAIM
+
+### R2.2 Background subagent lifecycle (NEW mode)
+
+round-2에서 확인된 추가 surface: `[FACT]`
+
+- `is-subagent-conversation-*.js` renderer hook
+- `/tasks` page UI
+- `use-is-background-subagents-enabled` feature gate
+- IPC channels: `list-pending-automation-run-threads`, `recommended-skills`, `install-recommended-skill`, `remove-skill`, `automation-update`
+
+해석:
+- `/tasks` page는 background subagent queue를 보여주는 surface다 `[STRONG-INFERENCE]`
+- 즉 subagent는 foreground (parent loop가 `wait_agent`로 합류) + background (queue) 두 mode를 가진다 `[STRONG-INFERENCE]`
+- background mode의 lifecycle은 round-1 §2 request/response flow와 다를 수 있다 — parent loop가 즉시 합류하지 않고 UI surface (`/tasks`)가 progress를 노출하는 형태가 가장 자연스럽다 `[SOTA-INFERENCE]`
+
+### R2.3 Updated visible interface table
+
+§1의 6개 tool에 round-2에서 확인된 두 lifecycle family를 추가:
+
+| Surface | Family | Direct meaning |
+| --- | --- | --- |
+| `spawn_agent` | foreground subagent | child 생성 (round-1) |
+| `send_input` | foreground subagent | existing child input (round-1) |
+| `resume_agent` | foreground subagent | closed child 재오픈 (round-1) |
+| `wait_agent` | foreground subagent | child final status 대기 (round-1) |
+| `close_agent` | foreground subagent | child 종료 (round-1) |
+| `fork_context` | foreground subagent | spawn 시 parent context 복제 (round-1) |
+| `/tasks` page + `list-pending-automation-run-threads` IPC | background subagent queue | UI-visible queued subagent surface (round-2) |
+| `external_agent_import_*` 4 events | external-agent migration | 4-stage import lifecycle (round-2) |
+| `external_agent_tool_call`, `external_agent_tool_result` | external-agent migration | bridge channels at runtime (round-2) |
+
+### R2.4 Interface boundary update
+
+§7 “안전하게 말하면 안 되는 것”에 추가:
+
+- exact relation between foreground subagent (`spawn_agent` family) and background subagent (`/tasks` family) — share scheduler? share table? `[NON-CLAIM]`
+- exact trigger for external-agent migration (manual vs auto-detect on startup) `[NON-CLAIM]`
+- whether `external_agent_tool_call` is bidirectional bridge or one-way `[NON-CLAIM]`
+- whether imported external agent sessions become subagent children or top-level threads `[NON-CLAIM]`

@@ -5,6 +5,7 @@ import {
   CachingEmbedder,
   createAutoClassifierPort,
   loadMcpTools,
+  loadSession,
   memoryTools,
   OpenAIEmbedder,
   RetryingLLM,
@@ -15,6 +16,7 @@ import type { McpClient, McpServerConfig } from "@/mcp"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
 import { Metrics, type StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
+import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
 import { logger, type RunContext } from "@/shared"
 import { JsonlRecorder, StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { defaultTools, gitTools, type Tool, ToolRegistry } from "@/tool"
@@ -254,11 +256,40 @@ export const statePath = (): string | undefined => {
   return process.env.QUANTA_STATE_PATH
 }
 
-/** Resolve the resume path: `--resume <p>` / `QUANTA_RESUME`. Default OFF. */
+/** Resolve the resume token: `--resume <token>` / `QUANTA_RESUME`. Default OFF.
+ *  The token is EITHER a filesystem path (V1 path-mode) OR an opaque session
+ *  id (V2 id-mode). Classification is done by {@link isPathLikeToken} at the
+ *  call-site so this helper stays a pure env/argv accessor. */
 export const resumePath = (): string | undefined => {
   const idx = process.argv.indexOf("--resume")
   if (idx >= 0) return process.argv[idx + 1]
   return process.env.QUANTA_RESUME
+}
+
+/** Heuristic: does this `--resume <token>` look like a filesystem path?
+ *  PATH MODE when the token contains `/` or `\`, OR ends in `.json`.
+ *  Otherwise the token is treated as an opaque session id (ID MODE). */
+export const isPathLikeToken = (token: string): boolean =>
+  token.includes("/") || token.includes("\\") || token.endsWith(".json")
+
+/** True when the run is in id-mode: a `--resume <id>` whose token is NOT
+ *  path-like, OR `--new-session` was passed (mints a fresh id). The CLI uses
+ *  this to auto-save to the session store after each turn. */
+export const idModeEnabled = (): boolean => {
+  if (hasArg("--new-session")) return true
+  const token = resumePath()
+  if (token === undefined) return false
+  return !isPathLikeToken(token)
+}
+
+/** Resolve the `--new-session` flag for id-mode startup. */
+export const newSessionFlag = (): boolean => hasArg("--new-session")
+
+/** Resolve the `--title <t>` flag (used by `--new-session`). */
+export const titleFlag = (): string | undefined => {
+  const idx = process.argv.indexOf("--title")
+  if (idx >= 0) return process.argv[idx + 1]
+  return undefined
 }
 
 /** Resolve the observe dir: `--observe-dir <d>` / `QUANTA_OBSERVE_DIR`.
@@ -304,13 +335,33 @@ export const readMcpConfig = async (slog: StructuredLogger): Promise<McpServerCo
   }
 }
 
+/**
+ * MEDIUM-12: this filter is a DENYLIST — every new top-level flag that
+ * isn't added here will leak into the LLM prompt (e.g. a user typing
+ * `--worktree` by mistake would have "--worktree" sent to the model).
+ * Future direction: invert to an allowlist (positional args only), but
+ * that's out of scope for this PR. For now we keep the list exhaustive.
+ */
 export const argvPrompt = (): string =>
   process.argv
     .slice(2)
-    .filter((a) => a !== "--plan" && a !== "--lsp" && a !== "--lsp-tools" && a !== "--git-tools")
+    .filter(
+      (a) =>
+        a !== "--plan" &&
+        a !== "--lsp" &&
+        a !== "--lsp-tools" &&
+        a !== "--git-tools" &&
+        a !== "--new-session" &&
+        a !== "--archived" &&
+        a !== "--worktree" &&
+        a !== "--force" &&
+        a !== "--ids" &&
+        a !== "--help" &&
+        a !== "-h",
+    )
     .filter((a, i, arr) => {
       const flagged = arr[i - 1]
-      const valued = ["--state", "--resume", "--observe-dir"]
+      const valued = ["--state", "--resume", "--observe-dir", "--title"]
       return !valued.includes(a) && !valued.includes(flagged ?? "")
     })
     .join(" ")
@@ -560,5 +611,153 @@ export const buildTooling = (
     skillsConfig,
     compactionBreakerConfig,
     verifyGuardConfig,
+  }
+}
+
+/** Inputs for {@link resolveResume} — every reachable code path is either
+ *  default-OFF or behind a flag the caller resolves up front. */
+export interface ResolveResumeInput {
+  resume: string | undefined
+  newSession: boolean
+  title: string | undefined
+  cwd: string
+  initialSessionId: string
+  slog: StructuredLogger
+}
+
+/** Resolved session-startup state. `idMeta` is `undefined` when the run is in
+ *  legacy (path-mode or no-resume) mode — the auto-save branch in `index.ts`
+ *  uses that as the "id-mode is unreachable" sentinel. */
+export interface ResumeResolution {
+  history: Message[]
+  sessionId: string
+  idMeta: SessionMeta | undefined
+  /** True iff id-mode (resumed by id OR `--new-session`). The CLI uses this
+   *  to defer the `quanta ready` log until the session id is known so the
+   *  log line can carry the id (legacy paths emit the log up front). */
+  inIdMode: boolean
+  /** Set when `--resume <id>` fails to resolve a session — caller exits 1. */
+  missingIdError: string | undefined
+  /** HIGH-5: set when both `--new-session` and `--resume <id>` are passed.
+   *  The combination is ambiguous (which session id wins?), so the caller
+   *  prints an error and exits 1 instead of silently ignoring one flag. */
+  conflictError: string | undefined
+}
+
+/** HIGH-LOW: default title for `--new-session`. Compact UTC `YYYY-MM-DD HH:mm`
+ *  (16 chars) is much friendlier than the prior full ISO. */
+export const defaultUntitled = (now: number): string =>
+  `Untitled ${new Date(now).toISOString().slice(0, 16).replace("T", " ")}`
+
+/** Resolve `--resume` / `--new-session` startup state. Extracted out of
+ *  `main()` to keep that function's cognitive complexity bounded. PURE w.r.t.
+ *  argv/env — all inputs are explicit, so testable in isolation if needed.
+ *
+ *  Behavior matrix:
+ *  - no resume / no new-session  → legacy default (empty history, initialId)
+ *  - `--resume <path-like>`      → V1 path-mode (loadSession + log via slog)
+ *  - `--resume <id-like>`        → V2 id-mode (loadSessionById, idMeta set)
+ *  - `--new-session [--title t]` → V2 id-mode (fresh id, stub saved) */
+export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeResolution> => {
+  const { resume, newSession, title, cwd, initialSessionId, slog } = input
+  // HIGH-5: `--new-session --resume <id>` previously silently ignored
+  // `--new-session` because the `if (resume !== undefined)` branch returned
+  // first. Reject the combination up front so the caller can exit 1 with a
+  // clear message — mirrors the `missingIdError` sentinel pattern.
+  if (resume !== undefined && newSession) {
+    return {
+      history: [],
+      sessionId: initialSessionId,
+      idMeta: undefined,
+      inIdMode: false,
+      missingIdError: undefined,
+      conflictError: "cannot combine --new-session with --resume",
+    }
+  }
+  if (resume !== undefined) {
+    if (isPathLikeToken(resume)) {
+      const prior = await loadSession(resume)
+      if (prior !== null) {
+        slog.info("state.resumed", { path: resume, messages: prior.messages.length })
+        return {
+          history: prior.messages,
+          sessionId: prior.sessionId,
+          idMeta: undefined,
+          inIdMode: false,
+          missingIdError: undefined,
+          conflictError: undefined,
+        }
+      }
+      return {
+        history: [],
+        sessionId: initialSessionId,
+        idMeta: undefined,
+        inIdMode: false,
+        missingIdError: undefined,
+        conflictError: undefined,
+      }
+    }
+    // ID MODE: opaque session id → load via the session store.
+    const saved = await loadSessionById(resume)
+    if (saved === undefined) {
+      return {
+        history: [],
+        sessionId: initialSessionId,
+        idMeta: undefined,
+        inIdMode: true,
+        missingIdError: resume,
+        conflictError: undefined,
+      }
+    }
+    slog.info("session.id_mode.on", {
+      id: saved.meta.id,
+      title: saved.meta.title,
+      cwd: saved.meta.cwd,
+      archived: saved.meta.archived,
+    })
+    return {
+      history: saved.messages,
+      sessionId: saved.meta.id,
+      idMeta: saved.meta,
+      inIdMode: true,
+      missingIdError: undefined,
+      conflictError: undefined,
+    }
+  }
+  if (newSession) {
+    const newId = crypto.randomUUID()
+    const now = Date.now()
+    const idMeta: SessionMeta = {
+      id: newId,
+      title: title ?? defaultUntitled(now),
+      cwd,
+      createdAt: now,
+      lastTouched: now,
+      archived: false,
+    }
+    await saveSessionById(idMeta, { reason: "fresh", turns: 0, messages: [] })
+    logger.info(`session: ${newId}`)
+    slog.info("session.id_mode.on", {
+      id: idMeta.id,
+      title: idMeta.title,
+      cwd: idMeta.cwd,
+      archived: idMeta.archived,
+    })
+    return {
+      history: [],
+      sessionId: newId,
+      idMeta,
+      inIdMode: true,
+      missingIdError: undefined,
+      conflictError: undefined,
+    }
+  }
+  return {
+    history: [],
+    sessionId: initialSessionId,
+    idMeta: undefined,
+    inIdMode: false,
+    missingIdError: undefined,
+    conflictError: undefined,
   }
 }

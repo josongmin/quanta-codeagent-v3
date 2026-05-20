@@ -90,20 +90,42 @@ const toAnthropicSystem = (system: SystemPromptInput): string | Anthropic.TextBl
   }))
 }
 
-/** Mark the final content block of the last message with an ephemeral
+/** Mark the LAST TEXT block of the last message with an ephemeral
  *  `cache_control` breakpoint, caching the whole conversation prefix (static
- *  system + prior turns) up to the per-turn tail. Mutates a shallow copy. */
+ *  system + prior turns) up to the per-turn tail. Mutates a shallow copy.
+ *
+ *  R-Phase5 P0-B: the Anthropic API only honors `cache_control` on `text`
+ *  blocks (server-side it is silently dropped on `tool_use` / `tool_result` /
+ *  `thinking` blocks, AND some SDK / server versions reject the request
+ *  outright). The prior implementation blindly stamped the TAIL block — when
+ *  the last message ended with a tool_use (assistant just issued a call) or
+ *  tool_result (user just returned a result), the breakpoint silently
+ *  evaporated and the cache never landed on the conversation prefix.
+ *
+ *  Walk BACKWARD from the tail to find the last `text` block; attach the
+ *  breakpoint there. If no text block exists in the last message (a turn
+ *  that's purely tool_use / tool_result with no narration), return unchanged
+ *  — the cache prefix on the SYSTEM blocks still applies, and the
+ *  conversation-prefix breakpoint just doesn't bind this turn. Pure shallow
+ *  copy, no mutation of input. */
 const cacheConversationPrefix = (messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] => {
   if (messages.length === 0) return messages
   const lastIdx = messages.length - 1
   const last = messages[lastIdx] as Anthropic.MessageParam
   if (typeof last.content === "string" || last.content.length === 0) return messages
   const blocks = [...last.content]
-  const tailIdx = blocks.length - 1
-  blocks[tailIdx] = {
-    ...(blocks[tailIdx] as Anthropic.ContentBlockParam),
+  let textIdx = -1
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if ((blocks[i] as { type?: string }).type === "text") {
+      textIdx = i
+      break
+    }
+  }
+  if (textIdx === -1) return messages
+  blocks[textIdx] = {
+    ...(blocks[textIdx] as Anthropic.TextBlockParam),
     cache_control: { type: "ephemeral" },
-  } as Anthropic.ContentBlockParam
+  } as Anthropic.TextBlockParam
   const out = [...messages]
   out[lastIdx] = { ...last, content: blocks }
   return out
@@ -244,6 +266,15 @@ export function* mapRawEvent(
           yield { type: "tool_use_delta", id: slot.id, delta: d.partial_json }
         }
       }
+      // R-Phase5 P1-F: `thinking_delta` is a declared RawDelta variant (see
+      // line 58) but Phase-1 of the adapter intentionally DROPS thinking
+      // blocks from the assembled message (see toAnthropicContent — thinking
+      // is filtered out before re-sending). The delta has no corresponding
+      // StreamEvent variant, so we drain it without action. A future phase
+      // that surfaces thinking would add a `thinking_delta` StreamEvent and
+      // accumulate here. Explicit handling beats the prior fall-through:
+      // the intent is documented at the call site, not buried in a switch.
+      // Any OTHER unrecognized delta type (defensive) also falls through.
       break
     }
     case "content_block_stop": {

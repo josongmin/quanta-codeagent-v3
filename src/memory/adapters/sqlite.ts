@@ -132,21 +132,34 @@ export class SqliteStore implements PersistentStorePort {
   save(entry: MemoryEntry): Promise<void> {
     if (!entry.id) return Promise.reject(new Error("MemoryEntry.id is required"))
     const n = normalizeEntry(entry)
-    this.insertStmt.run({
-      $id: n.id,
-      $kind: n.kind,
-      $tier: n.tier,
-      $text: n.text,
-      $tags: JSON.stringify(n.tags),
-      $importance: n.importance,
-      $created_at: n.createdAt,
-      $updated_at: n.updatedAt,
-      $access_count: n.accessCount,
-      $last_accessed_at: n.lastAccessedAt ?? null,
-      $embedding: n.embedding ? serializeVec(n.embedding) : null,
-      $superseded_by: n.supersededBy ?? null,
-      $session_id: n.sessionId ?? null,
-    })
+    // R-Phase5 P1-H: an INSERT can fail synchronously for non-data reasons
+    // (database locked, disk full, constraint violation introduced by a
+    // future schema bug) AND embedding serialization can throw if the vector
+    // is structurally malformed (NaN, length mismatch, ArrayBuffer corrupt).
+    // Wrap both so callers see a structured `Promise.reject(Error)` instead
+    // of a synchronous throw out of a function whose signature promises a
+    // Promise. The error message names the entry id so trajectory/probe can
+    // correlate. `persistSession` (caller) already swallows + reports stats.
+    try {
+      this.insertStmt.run({
+        $id: n.id,
+        $kind: n.kind,
+        $tier: n.tier,
+        $text: n.text,
+        $tags: JSON.stringify(n.tags),
+        $importance: n.importance,
+        $created_at: n.createdAt,
+        $updated_at: n.updatedAt,
+        $access_count: n.accessCount,
+        $last_accessed_at: n.lastAccessedAt ?? null,
+        $embedding: n.embedding ? serializeVec(n.embedding) : null,
+        $superseded_by: n.supersededBy ?? null,
+        $session_id: n.sessionId ?? null,
+      })
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return Promise.reject(new Error(`SqliteStore.save(${n.id}) failed: ${message}`))
+    }
     return Promise.resolve()
   }
 

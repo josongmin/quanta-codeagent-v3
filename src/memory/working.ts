@@ -10,7 +10,23 @@ export interface WorkingMemory<M = StoredMessage> {
   /** Mutable backing buffer. Prefer {@link WorkingMemory.snapshot} for reads. */
   messages: M[]
   append(message: M): void
-  /** Immutable view of the current buffer. */
+  /**
+   * Read-only view of the current buffer.
+   *
+   * **Shallow copy by design** (R-Phase4 P3-3 clarification): the returned
+   * array is a fresh allocation (so a caller can `.reverse()` / `.filter()`
+   * without mutating the buffer), but the message OBJECTS inside it are SHARED
+   * with the buffer. The agent loop and tool surface treat `Message` values as
+   * structurally immutable (every mutation produces a new value and uses
+   * `wm.append` / `wm.replace`), so the shallow copy is safe; a defensive
+   * deep-copy on every snapshot would be wasted work.
+   *
+   * NOTE: this is intentionally distinct from `WorkingState.snapshot`
+   * (`src/agent/working-state.ts:117`), which DOES deep-copy because its
+   * payload (`ownerShortlist`, `blockers`, etc.) is intended to be mutated by
+   * the host without aliasing the live state. The two surfaces have different
+   * contracts — don't conflate them.
+   */
   snapshot(): readonly M[]
   /** Drop all messages. */
   clear(): void

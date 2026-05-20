@@ -108,6 +108,26 @@ describe("session index-store", () => {
     expect(stillEmpty).toEqual([])
   })
 
+  test("partial-shape lines (wrong-type field) are skipped by validator", async () => {
+    // Audit Round 3 §C: a line whose `archived` field is a STRING ("true")
+    // instead of a boolean must be rejected by the shape validator, not
+    // coerced. Otherwise a malformed index could surface a session whose
+    // archived flag is unreliable. The good row alongside it MUST be kept.
+    const good = mkMeta({ id: "good-shape", lastTouched: 700 })
+    const bad = {
+      id: "bad-shape",
+      title: "B",
+      cwd: "/tmp",
+      createdAt: 100,
+      lastTouched: 100,
+      // intentionally a string, not a boolean
+      archived: "true",
+    }
+    writeFileSync(indexFilePath(), `${[JSON.stringify(good), JSON.stringify(bad)].join("\n")}\n`)
+    const list = await listSessions({ includeArchived: true })
+    expect(list.map((m) => m.id)).toEqual(["good-shape"])
+  })
+
   test("upsert + remove + upsert cycle keeps the file consistent", async () => {
     await upsertMeta(mkMeta({ id: "a", lastTouched: 100 }))
     await upsertMeta(mkMeta({ id: "b", lastTouched: 200 }))

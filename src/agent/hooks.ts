@@ -49,8 +49,17 @@ export type HookHandler<T extends HookEventType> = (event: HookEventOf<T>) => un
 const isDeny = (v: unknown): v is HookDeny =>
   typeof v === "object" && v !== null && typeof (v as HookDeny).deny === "string"
 
+/** Type-erased handler stored internally. The `HookBus.on` API preserves the
+ *  per-type narrowing by closure-capturing the user's `HookHandler<T>` and
+ *  routing only the type-matching events to it via the Map bucket key — so the
+ *  runtime cast inside the closure is safe by construction (the Map enforces
+ *  that a handler is only ever invoked with events of its registered type).
+ *  R-Phase4 P3-2: replaces the prior `as unknown as HookHandler<HookEventType>`
+ *  cast at registration time with a structural closure. */
+type AnyHookHandler = (event: HookEvent) => unknown
+
 export class HookBus {
-  private readonly handlers = new Map<HookEventType, HookHandler<HookEventType>[]>()
+  private readonly handlers = new Map<HookEventType, AnyHookHandler[]>()
   private readonly logger: StructuredLogger | undefined
 
   constructor(logger?: StructuredLogger) {
@@ -60,7 +69,12 @@ export class HookBus {
   /** Register `handler` for `type`. Handlers fire in registration order. */
   on<T extends HookEventType>(type: T, handler: HookHandler<T>): this {
     const list = this.handlers.get(type) ?? []
-    list.push(handler as unknown as HookHandler<HookEventType>)
+    // Closure-erase to the union: the Map key (`type`) GUARANTEES this stored
+    // closure is only invoked with events whose `.type === type`, so the
+    // narrowing assertion is safe at runtime (the alternative — `as unknown as
+    // HookHandler<HookEventType>` at the call-site of `on()` — was the lint
+    // warning hooks.ts:63 carried prior to R-Phase4 P3-2).
+    list.push((event: HookEvent) => handler(event as HookEventOf<T>))
     this.handlers.set(type, list)
     return this
   }

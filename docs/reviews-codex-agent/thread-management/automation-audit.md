@@ -395,3 +395,53 @@ Classification:
 - visible automation model은 `heartbeat`와 `cron` 두 종류를 중심으로 하며, 각각 `thread-bound follow-up`과 `workspace-bound recurring job`으로 구분된다. `[FACT]` + `[STRONG-INFERENCE]`
 - lifecycle은 `create/view/update/delete/suggested_create/suggested_update`를 포함한다. `[FACT]`
 - 따라서 Codex agent의 장기 continuity 모델은 이제 `artifact/summary/thread continuity`뿐 아니라 `native automation surface`까지 포함하는 것으로 보는 것이 가장 정확하다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 automation 외에 round-2에서 확인된 인접 automation/background rail evidence를 추가한다.
+
+### R2.1 Background subagent automation IPC channels
+
+round-2에서 발견된 IPC channel 이름들 (minified bundle 추출): `[FACT]`
+
+- `list-pending-automation-run-threads`
+- `recommended-skills`
+- `install-recommended-skill`
+- `remove-skill`
+- `automation-update`
+
+해석:
+- automation 자체는 round-1의 tool surface (`codex_app.automation_update`)뿐 아니라 IPC channel level에서도 `automation-update`로 노출된다 `[FACT]`
+- `list-pending-automation-run-threads`는 진행 중인 automation run에 묶인 thread list를 가져오는 channel로 보인다 `[STRONG-INFERENCE]`
+- `recommended-skills`/`install-recommended-skill`/`remove-skill`은 skill marketplace/install rail이다 — automation과는 다른 lane이지만 같은 IPC family를 공유 `[FACT]`
+
+### R2.2 Queued follow-ups vs automation
+
+round-2 thread-follower events에 `thread-follower-set-queued-follow-ups-state`가 있다. `[FACT]`
+
+이건 automation (heartbeat/cron)과 구별되는 별도 rail이다:
+
+| Rail | Domain |
+| --- | --- |
+| `heartbeat` automation | future wakeup of current thread |
+| `cron` automation | detached workspace recurrence |
+| queued follow-ups state | thread-bound near-term deferred items (next turn or shortly after) |
+
+해석:
+- 즉 Codex의 background work 모델은 round-1에서 본 `heartbeat`/`cron` 이외에 thread-bound queue rail이 하나 더 있다 `[STRONG-INFERENCE]`
+- automation은 “시간 trigger”, queued follow-ups는 “turn boundary trigger”에 가깝다 `[STRONG-INFERENCE]`
+
+### R2.3 Automation persistence directory confirmed
+
+round-1 §8.1에서 `~/.codex/automations/**/automation.toml` 파일을 확인하지 못했다고 적었다. round-2 directory inventory에서 `~/.codex/automations/` 디렉토리는 존재한다는 것이 확인됐다. `[FACT]`
+
+다만 이 round에서는 디렉토리 내부 file inventory는 점검하지 않았으므로, automation.toml 존재 여부는 여전히 NON-CLAIM이다.
+
+### R2.4 Updated unknowns
+
+이전 §14 unknowns 중:
+- ~~exact automation UI rendering in app~~ → `list-pending-automation-run-threads` IPC가 있다는 사실이 round-2에서 확인됐다 `[FACT]`. 즉 UI는 이 channel로 진행 중 automation을 조회할 가능성이 높다 `[STRONG-INFERENCE]`
+- automation execution engine 자체는 여전히 unknown
+- queued follow-ups semantics는 새로 unknown으로 들어옴

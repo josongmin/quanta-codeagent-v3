@@ -86,6 +86,7 @@ Subagent-specific deep dive: [subagent/README.md](/Users/songmin/Documents/code-
 | `thread_dynamic_tools(thread_id, position, name, ...)` exists | tool surface can be projected per thread | `[FACT]` |
 | recent sample rows repeatedly expose `automation_update`, `read_thread_terminal`, `load_workspace_dependencies` per thread | session-local tool surface is not just abstract prompt state | `[FACT]` + `[STRONG-INFERENCE]` |
 | `thread_spawn_edges(parent_thread_id, child_thread_id, status)` exists | lineage/fork state has a local persisted representation | `[FACT]` |
+| `threads.thread_source='subagent'` rows are a large share of the population | persisted `threads` table spans more than top-level user chats | `[FACT]` + `[STRONG-INFERENCE]` |
 
 ---
 
@@ -518,3 +519,87 @@ Classification:
 - 직접 관측 가능한 session state는 mode, sandbox, approval, network, cwd, shell, subagent IDs, tool handles, and conversation history다. `[FACT]`
 - `write_stdin(session_id)`와 `resume_agent(id)`는 resumable session/child-session semantics를 직접 보여준다. `[FACT]`
 - artifacts와 summary는 long-running work의 continuity/handoff rail로 기능한다고 보는 것이 observed behavior와 가장 잘 맞는다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 session/turn 단위 state 가시성을 더 확정한다. storage layout/`logs_2.sqlite` deep dive는 [storage-and-db-audit.md](./storage-and-db-audit.md#round-2-update-2026-05-21-deep-dive)가 owner다.
+
+### R2.1 Turn-level full snapshot rail
+
+`archived_sessions/rollout-*.jsonl`의 한 line type `turn_context`가 직접 확인됐다. `[FACT]`
+
+payload keys:
+
+```
+turn_id, cwd, current_date, timezone, approval_policy, sandbox_policy,
+permission_profile, model, personality, collaboration_mode,
+realtime_active, effort, summary, user_instructions, truncation_policy
+```
+
+의미:
+- 매 turn마다 **execution state + policy state + instruction state의 full snapshot**이 한 line으로 박힌다 `[FACT]`
+- 즉 session state model의 §4 (policy/instruction), §5 (thread), §6 (execution)가 turn 단위로 self-contained하게 기록된다 `[STRONG-INFERENCE]`
+- 이건 round-1의 §10.2 recovery model을 훨씬 더 강하게 한다 — 같은 thread 재진입이든 fork든, 그 turn의 policy/sandbox/model/personality/collaboration_mode를 정확히 재구성 가능 `[STRONG-INFERENCE]`
+
+### R2.2 `session_meta` payload keys
+
+같은 archived rollout의 `session_meta` line payload keys (직접 확인): `[FACT]`
+
+```
+id, timestamp, cwd, originator, cli_version, source, model_provider,
+base_instructions, git
+```
+
+- `source`와 `originator`가 sub-field로 박혀서 session origin (user vs subagent vs automation 등)이 self-describing하다 `[STRONG-INFERENCE]`
+- `git` payload는 thread row의 `git_sha`/`git_branch`/`git_origin_url`과 같은 기원을 가질 가능성이 높다 `[STRONG-INFERENCE]`
+
+### R2.3 Session/thread ID format
+
+`session_index.jsonl` line schema (확정): `[FACT]`
+
+```json
+{"id":"019df0da-7f60-7f20-9d1a-d128bf054cea","thread_name":"...","updated_at":"<ISO8601>"}
+```
+
+- `id`는 UUID v7-like 형태 (`019df0da-7f60-7...` time-prefix) `[FACT]`
+- 즉 thread/session ID는 시간순 정렬이 가능한 sortable identifier다 `[STRONG-INFERENCE]`
+- index lag: 이 머신에는 `archived_sessions/` 6,326 files vs `session_index.jsonl` 5,607 lines — 즉 archived rollout이 index보다 약간 앞선다 `[FACT]` + `[STRONG-INFERENCE]`
+
+### R2.4 Collaboration mode is an explicit RPC mutation
+
+이전 §4에서 “mode는 user request가 아니라 new developer instruction으로만 바뀐다”라고 적었던 것을 확장한다.
+
+round-2 evidence: `[FACT]`
+
+- `thread-follower-set-collaboration-mode` event가 thread-follower channel에 explicit하게 존재한다
+- `turn_context.collaboration_mode`가 매 turn snapshot으로 박힌다
+- `.codex-global-state.json`에는 `agent-mode-by-host-id.local = "full-access"|"read-only"`라는 별도 global trust knob이 있다
+
+해석:
+- per-thread collaboration_mode와 per-host agent-mode는 다른 layer다 `[STRONG-INFERENCE]`
+- per-host knob (`full-access`/`read-only`)이 더 외곽 trust gate로 작동하고, per-thread collaboration_mode는 그 안에서 conversation 단위 모드를 표현하는 것으로 보인다 `[STRONG-INFERENCE]`
+- mode mutation이 UI RPC로 노출된 것은 §4.3 “high-priority mutation only” rule을 binary RPC level로 구체화한 것이다 `[STRONG-INFERENCE]`
+
+### R2.5 Approval/elicitation as session events
+
+round-1 §6에는 `approval` metadata는 있지만 approval flow가 어떻게 mutate되는지는 모델 층이었다. round-2는 4개 explicit approval events를 확정한다. `[FACT]`
+
+- `thread-follower-command-approval-decision`
+- `thread-follower-file-approval-decision`
+- `thread-follower-permissions-request-approval-response`
+- `thread-follower-submit-mcp-server-elicitation-response`
+
+해석:
+- approval flow는 conversation prompt가 아니라 typed RPC channel을 통한 별도 mutation이다 `[STRONG-INFERENCE]`
+- mcp server elicitation도 같은 channel family를 공유한다 → tool RPC vs approval RPC가 unified envelope를 쓴다 `[STRONG-INFERENCE]`
+- 이건 §12.3 “subagent is stateless RPC” false assumption과 같은 결로, approval/elicitation도 일회성 conversational input이 아닌 first-class lifecycle event다 `[STRONG-INFERENCE]`
+
+### R2.6 Updated unknowns
+
+round-1 §15에서 일부 unknowns가 보강됐다:
+
+- ~~thread compaction/summarization internals~~ → `thread-follower-compact-thread` event 존재가 확인됐다 (mechanism은 여전히 black-box) `[FACT]`
+- ~~live terminal session retention policy~~ → 여전히 unknown (변화 없음)
+- approval/elicitation flow → typed RPC envelope임이 확인됨 `[FACT]`

@@ -352,3 +352,69 @@ Classification:
 - Default mode는 `reasonable assumptions + immediate execution` 편향이 강하고, `request_user_input`는 unavailable이다. `[FACT]`
 - Plan mode는 직접 활성화되어 있지는 않지만, `request_user_input`와 `update_plan`를 결합하는 `structured branching / checkpoint` 프로세스를 가질 가능성이 매우 높다. `[STRONG-INFERENCE]`
 - 따라서 Default vs Plan의 핵심 차이는 “설명 길이”가 아니라, `human choice를 언제 어떻게 구조화해서 loop에 집어넣는가`다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+원본은 mode를 `Default / Plan` 두 축으로 보고 reasoning effort를 다루지 않았다. 2026-05-21 deep dive 결과 mode 와 reasoning effort 는 **직교 축**이며, plan mode 는 자체 reasoning effort knob를 갖는다는 게 드러났다.
+
+### R2.1 Models cache: 7 models, 272K ctx, 95% effective window
+
+- `[FACT]` `~/.codex/models_cache.json` 에 캐시된 모델 7종:
+  - `gpt-5.5`
+  - `gpt-5.4`
+  - `gpt-5.4-mini`
+  - `gpt-5.3-codex`
+  - `gpt-5.3-codex-spark`
+  - `gpt-5.2`
+  - `codex-auto-review`
+- `[FACT]` 모두 272K context, 95% effective window.
+- `[FACT]` 모델별 service tier에 `priority` 존재 — display name "Fast", 1.5x speed.
+- `[FACT]` Web search capability 모델별 차이: `gpt-5.5` 는 `text_and_image`, `gpt-5.3-codex` 는 `text` 만.
+- `[FACT]` `gpt-5.3-codex` 는 `gpt-5.4` 로 upgrade 유도하는 migration prompt가 documented 되어 있다.
+- `[FACT]` `gpt-5.1-codex-max` 는 ghost: cache에도 binary에도 없고, 오직 `~/.codex/config.toml: [notice] hide_gpt-5.1-codex-max_migration_prompt = true` 한 줄로만 흔적이 남아 있다. rolled-back 인지 internal-only 인지 불명. `[FACT: not enough evidence]`
+
+### R2.2 Reasoning effort: 6-tier ladder
+
+- `[FACT]` Cache view 의 reasoning effort enum: `low, medium (default), high, xhigh`.
+- `[FACT]` Chronicle 바이너리에서는 extended enum 발견: `none, minimal` 추가.
+- `[STRONG-INFERENCE]`: 전체 ladder는 6-tier — `none, minimal, low, medium, high, xhigh`. Cache view 가 4-tier만 노출하는 건 product-tier filtering 으로 보인다.
+
+### R2.3 Plan mode 가 자체 reasoning effort knob를 가진다 (직접 사실)
+
+- `[FACT]` `~/.codex/config.toml: plan_mode_reasoning_effort = "high"`.
+- `[FACT]` `~/.codex/config.toml: model_reasoning_effort = "xhigh"` (top-level / Default mode).
+- `[STRONG-INFERENCE]`: 즉 Plan mode 진입은 단순히 `request_user_input` 가용성만 바꾸는 것이 아니라 **reasoning budget도 별도로 조정**한다. 원본 §6 difference matrix 에서 누락된 축.
+
+### R2.4 원본 §6 difference matrix 보정
+
+원본 매트릭스에 다음 행을 추가해야 한다:
+
+| Axis | Default mode | Plan mode | Classification |
+| --- | --- | --- | --- |
+| Reasoning effort | `model_reasoning_effort = "xhigh"` | `plan_mode_reasoning_effort = "high"` | `[FACT]` |
+| Effort tunability | per-user top-level | per-user plan-specific override | `[FACT]` |
+| Effort ladder | 6-tier (none → xhigh) | 6-tier (same enum) | `[STRONG-INFERENCE]` |
+
+흥미로운 점: 이 머신에서는 **Default mode 가 Plan mode 보다 reasoning effort 가 높게** 설정돼 있다 (xhigh > high). 일반적 직관과 반대다.
+
+- `[WEAK-INFERENCE]`: Plan mode 는 user-checkpoint 가 들어가서 모델 단독 reasoning 비중이 낮으므로 effort 를 낮게 잡아도 충분하다는 budget 설계일 가능성.
+
+### R2.5 Service tier `priority` (Fast lane)
+
+- `[FACT]` `priority` tier 가 모델별로 존재 — display name "Fast", 1.5x speed.
+- `[STRONG-INFERENCE]`: tier 는 mode 와 직교한다 — Plan mode + priority tier, Default mode + standard tier 등 임의 조합이 가능해 보인다. 다만 cache에서 직접 조합 evidence 는 없다.
+
+### R2.6 새 attack surface
+
+- **P1**: `models_cache.json` 이 ETag-keyed 라 서버 측에서 reasoning effort 기본값을 핫스왑 가능 — 사용자가 인식하지 못한 채 effort tier 가 강등/승격될 수 있다.
+- **P1**: `plan_mode_reasoning_effort` 와 `model_reasoning_effort` 가 별도 knob 라서 user가 두 mode 간 effort 차이를 잘못 설정하면 (예: plan="none") plan mode 가 사실상 무력화된다.
+- **P2**: Ghost 모델 `gpt-5.1-codex-max` migration suppression flag 가 config에 남아 있다는 건 rollback 흔적 잔존 — supply-chain 관점에서 dead 코드 경로 위험.
+
+### R2.7 Ownership map
+
+- **Personality template variables** (`personality_pragmatic` / `personality_friendly` / `personality_default`)는 [prompt-and-policy-stack.md](./prompt-and-policy-stack.md) Round 2 update 가 소유한다.
+- **Approval policy `approvals_reviewer = "user"` / `turn_context.approval_policy = "on-request"`**는 [hitl-audit.md](./hitl-audit.md) Round 2 update 가 소유한다.
+- **Service tier 의 비용/속도 함의**는 [budget-management-audit.md](./budget-management-audit.md) Round 2 update 가 소유한다.
+- 이 문서는 **mode ↔ reasoning effort 매핑과 models_cache 구조**만 다룬다.

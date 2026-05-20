@@ -376,3 +376,63 @@ Classification:
 - 현재 enabled plugin은 `Browser Use`, `Documents`, `GitHub`, `Presentations`, `Spreadsheets`다. `[FACT]`
 - plugin 정책은 “관련 plugin이 있으면 standalone path보다 우선하라”는 routing preference를 명시적으로 가진다. `[FACT]`
 - plugin은 task routing과 UX path를 바꾸는 capability layer이며, 그 실제 실행은 plugin-contributed skills, MCP resources, app tools를 통해 이루어진다. `[FACT]` + `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 Codex Desktop build 2867 (codex-rs 0.130.0)의 bundled plugin payload를 직접 inspect한 round-2 결과를 정리한다.
+
+### R2.1 Plugin manifest schema (FACT)
+
+- Plugin manifest path: `<plugin>/.codex-plugin/plugin.json` (hidden `.codex-plugin` subdir, **not** bare `plugin.json`). `[FACT]`
+- MCP server config (when plugin provides MCP): `<plugin>/.mcp.json` (sibling file). `[FACT]`
+- Common schema across the 4 bundled plugins: `[FACT]`
+  ```
+  { name, version, description, author{name,email?,url?}, homepage?, license, keywords,
+    mcpServers?, skills?,
+    interface: { displayName, shortDescription, longDescription, developerName, category,
+                 capabilities[Interactive|Read|Write], websiteURL, privacyPolicyURL,
+                 termsOfServiceURL, logo, composerIcon?, defaultPrompt[], brandColor,
+                 screenshots[] } }
+  ```
+- **No `permissions` field in the manifest** — permission gating is OS-level (entitlements/extension permissions), not declarative. `[FACT]`
+
+### R2.2 Four bundled plugins (FACT)
+
+#### 1. `computer-use` v1.0.793
+
+- MCP server entry: `./Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient mcp`. `[FACT]`
+- Actual main executable inside the nested .app: `SkyComputerUseService` (Mach-O arm64, bundle id `com.openai.sky.CUAService`, min macOS 14.4). `[FACT]`
+- Frameworks/symbols: AXUIElement, AccessibilitySupport, EventTap, UIRecorder, SyntheticAppFocusEnforcer, SystemFocusedUIElementObserver, SystemFrontmostApplicationTracker, WindowOrderingObserver, CGEvent. `[FACT]`
+- Entitlements: `com.apple.security.application-groups = 2DC432GLL2.com.openai.sky.CUAService`, `com.apple.security.automation.apple-events = true`. `[FACT]`
+
+#### 2. `browser` v0.1.0-alpha2
+
+- Aliases: `@browser`, `@browser-use`. `[FACT]`
+- Runtime: `scripts/browser-client.mjs` (~199KB, Node REPL). `[FACT]`
+- API surface: `browser.tabs.{selected,new,list}()`, `browser.nameSession(...)`, screenshots via `nodeRepl.emitImage()`. `[FACT]`
+- Default scope: localhost, file://, in-app browser tabs. `[FACT]`
+
+#### 3. `chrome` v0.1.7
+
+- Chrome extension id: `hehggadaopoacecdllhhajmbjkdcmajg`. `[FACT]`
+- Native messaging host: `com.openai.codexextension`. `[FACT]`
+- `installManifest.mjs` writes host manifest to Chrome's NativeMessagingHosts dir. `[FACT]`
+- Separate bundled `extension-host` native binary (macos/windows/linux × arm64/x64) bridges Chrome ↔ Codex. `[FACT]`
+- Privacy notice (verbatim): "Browser data from using this plugin may be used for training". `[FACT]`
+- Manifest declares Capabilities: Interactive + Read only (**no Write**). `[FACT]`
+
+#### 4. `latex` v0.2.0
+
+- Bundles Tectonic at `bin/tectonic`. `[FACT]`
+- Fallback path: system TeX Live or managed runtime at `~/.cache/codex-runtimes/codex-texlive/full`. `[FACT]`
+- Three skills: `latex-compile`, `latex-doctor`, `texlive-runtime-installer`. `[FACT]`
+- No root/sudo usage observed in install flow. `[FACT]`
+
+### R2.3 Implications for the plugin model
+
+- §3의 best-fit model (`plugin -> {skills, MCP, app capability}`)은 round-2 evidence와 정확히 일치한다. plugin.json의 `mcpServers?`와 `skills?` 필드가 directly 그 bundle 구조를 schema 레벨에서 보여준다. `[FACT]` + `[STRONG-INFERENCE]`
+- `[MODEL]` "permissions are OS-level, not declarative" 사실은 §11.4의 false-assumption(enabled plugin == every hidden feature callable)을 강화한다 — plugin manifest 자체는 capability를 *advertise*만 할 뿐, 실제 admissibility는 OS entitlements + 별도 permission rail이 결정한다.
+- `chrome` plugin의 "no Write" capability와 "training에 사용될 수 있다" privacy notice는 plugin이 **trust-boundary metadata**도 expose함을 보여준다. 이는 §6의 plugin-specific audit에 새 차원을 더한다. `[FACT]`
+- §6.1 Browser Use 항목은 이제 두 개의 별도 plugin (`browser` alpha + `chrome` v0.1.7)으로 분리되어야 한다. round-1에서 단일 "Browser Use"로 본 것은 user-facing alias 통합이지, packaging 단위는 두 개다. `[FACT]`

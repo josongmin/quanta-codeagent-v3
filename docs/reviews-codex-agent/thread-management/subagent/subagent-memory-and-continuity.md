@@ -107,3 +107,57 @@ subagent 결과를 받았다고 해서 그 자체를 durable truth로 취급하�
 - subagent persistent store exact shape
 - child context retention after platform restart
 - arbitrary cross-thread automatic child recall
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 subagent continuity rail에 round-2에서 확인된 추가 substrate evidence를 추가한다. 다만 background subagent / external-agent migration lifecycle 자체는 [subagent-management-audit.md](./subagent-management-audit.md#round-2-update-2026-05-21-deep-dive)와 [subagent-lifecycle-and-runtime-interface.md](./subagent-lifecycle-and-runtime-interface.md#round-2-update-2026-05-21-deep-dive)가 owner다.
+
+### R2.1 External-agent import has its own persistent state file
+
+round-2 발견: `external_agent_session_imports.json`이라는 persistent state file이 존재한다. `[FACT]`
+
+해석:
+- 이건 in-process subagent의 child handle이 아니라 **imported external-agent session state**를 유지하는 별도 rail이다 `[FACT]`
+- 즉 subagent continuity의 sibling rail로 “import 기록”이 디스크에 남는다 `[STRONG-INFERENCE]`
+- round-1 §2 continuity ladder에는 in-process child 4 rail만 있었지만, round-2부터는 “imported external-agent session lineage”라는 5번째 rail이 추가된다 `[STRONG-INFERENCE]`
+
+### R2.2 Background subagent continuity
+
+round-2 facts: `/tasks` page + `list-pending-automation-run-threads` IPC. `[FACT]`
+
+해석:
+- background subagent의 continuity는 “queue에 들어가 있다 + UI에서 가시화된다”는 형태로 in-process child보다 약간 강할 가능성이 높다 `[STRONG-INFERENCE]`
+- 다만 backend queue persistence (디스크에 어떻게 남는가)는 NON-CLAIM
+- foreground subagent와 달리 background subagent는 parent loop가 `wait_agent`로 즉시 join하지 않으므로, “child packet → parent integration” shape가 다를 수 있다 `[STRONG-INFERENCE]`
+
+### R2.3 Updated continuity ladder
+
+§2 ladder에 round-2 추가:
+
+| Continuity rail | Strength | Safe claim | Unsafe overclaim |
+| --- | --- | --- | --- |
+| child id / handle | medium | child can be referenced again until close | durable global agent registry |
+| forked context | medium | some parent context can seed child | exact full memory graph copy |
+| child final result | medium | child output can be reintegrated | full persistent work log |
+| child after close | weak | maybe resumable only if explicitly supported | guaranteed durable child resurrection |
+| background subagent queue entry (`/tasks`) | medium | UI-visible queue item until processed | durable proof substrate |
+| external-agent session import (`external_agent_session_imports.json`) | medium | imported session lineage persists in JSON file | full session content embedded |
+
+### R2.4 Relative strength updates
+
+§2.1 table에 추가:
+
+| Rail | Relative strength versus subagent context | Why |
+| --- | --- | --- |
+| `~/.codex/memories/` (git-versioned) | stronger | cross-thread durable memory substrate (round-2 confirmed) |
+| `archived_sessions/*.jsonl` `turn_context` snapshot | stronger | turn-self-contained re-construction surface (round-2 confirmed) |
+| `external_agent_session_imports.json` | similar | discrete import lineage rail, not continuous work log |
+
+### R2.5 Updated non-claims
+
+추가:
+- whether background subagent queue items survive app restart
+- whether `external_agent_session_imports.json` is append-only or rewritten
+- whether imported external-agent sessions get a `turn_context` rail of their own

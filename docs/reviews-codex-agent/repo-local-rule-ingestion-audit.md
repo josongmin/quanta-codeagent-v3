@@ -350,3 +350,57 @@ Classification:
 - 현재 세션에 이미 주입된 상위 컨텍스트(system/developer/app/mode/skills/plugins)가 있고, repo-local rule ingestion은 그 아래 별도 층으로 작동한다고 보는 것이 가장 정확하다. `[STRONG-INFERENCE]`
 - 이 repo에서는 [AGENTS.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/AGENTS.md)가 SSOT라고 직접 명시돼 있으므로 primary repo-local rule entrypoint다. `[FACT]`
 - `CLAUDE.md`, `.codex/CODEX-RULES.md`, `.codexignore`, `.codex/CODEX-START-PROMPT.md`는 존재하지만, `AGENTS.md`가 포인터/보조 rail 성격을 직접 시사하므로 secondary/on-demand 경로로 보는 것이 가장 타당하다. `[FACT]` + `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+원본은 repo 경계 안의 `AGENTS.md` / `.codex/*` ingestion만 다뤘다. 2026-05-21 deep dive 결과, Codex는 **user-global `~/.codex/rules/` 레일**과 **per-project trust 레일**을 별도로 운영한다는 사실이 직접 확인됐다. 이건 repo-local SSOT와 다른 축이지만, ingestion 의사결정에 동시 영향을 주므로 이 문서가 같이 다룬다.
+
+### R2.1 User-global rules: `~/.codex/rules/default.rules`
+
+- `[FACT]` 파일 존재: `~/.codex/rules/default.rules` — 353KB.
+- `[FACT]` 형식: `prefix_rule(pattern=[…], decision="allow"|"deny")` 기반 bash command allowlist/denylist.
+- `[FACT]` Coverage: git, build/test, python uv, pyright, pytest 류 일반 명령.
+- `[STRONG-INFERENCE]`: 이건 repo-local `.codexignore` 와는 다른 축이다 — `.codexignore` 가 file-visibility 레일이라면, `default.rules` 는 **bash command admission** 레일이다.
+
+### R2.2 Per-project trust in user config
+
+- `[FACT]` `~/.codex/config.toml` 에 per-project trust 엔트리 존재: `[projects."<path>"] trust_level = "untrusted" | "trusted"`.
+- `[STRONG-INFERENCE]`: trust level이 `untrusted` 면 repo-local `AGENTS.md` / `.codex/CODEX-RULES.md` 가 있어도 추가 confirmation gate 가 끼어들 가능성이 높다. 즉 SSOT entrypoint 평가 자체가 trust gate를 통과한 후에야 일어난다.
+
+### R2.3 원본 ingestion model에 대한 보정
+
+원본 §3 mermaid는 `Session bootstrap → Repo entrypoint (AGENTS.md) → Repo SSOT → Secondary rails` 로 그렸다. Round 2 보정:
+
+```mermaid
+flowchart TD
+    A["Session bootstrap"] --> P["Per-project trust gate (~/.codex/config.toml)"]
+    P -->|trusted| B["Repo entrypoint (AGENTS.md)"]
+    P -->|untrusted| Q["Reduced ingestion + extra confirmation"]
+    B --> C["Repo SSOT rules"]
+    C --> D["Secondary rails (CLAUDE.md / .codex/*)"]
+    A --> R["User-global bash allowlist (~/.codex/rules/default.rules)"]
+    R --> E["Command admission decision"]
+    D --> E
+    E --> F["Execute"]
+```
+
+- user-global `default.rules` 는 repo-local rule 과 별도 레일이며, 둘 다 command admission에 동시 영향을 준다.
+- per-project trust gate 는 repo entrypoint를 **읽기 전에** 평가된다 — repo가 untrusted면 SSOT가 있어도 reduced ingestion.
+
+### R2.4 새 unknown 보정
+
+- ~~`.codexignore` exact semantics 미확인~~ → 여전히 미확인. 그러나 `default.rules` 의 prefix_rule 문법과는 명백히 다른 형식 (gitignore-style vs prefix_rule). 따라서 두 파일을 같은 layer로 묶지 말 것. `[FACT]`
+
+### R2.5 새 attack surface
+
+- **P1**: `~/.codex/rules/default.rules` 가 user-global이라 repo 간 cross-contamination 위험. repo A에서 `git push --force` 를 allow 해두면 repo B에서도 자동 통과.
+- **P1**: per-project trust 가 `~/.codex/config.toml` 의 한 줄로 바뀌므로, malicious local script가 `trust_level = "trusted"` 를 주입하면 admission 게이트가 우회된다.
+- **P2**: 353KB 분량의 prefix_rule 리스트는 사람이 사실상 audit 불가 — 사실상 "trusted blob"가 되어 root-of-trust 가 모호해진다.
+
+### R2.6 Ownership map
+
+- **Approval policy / sandbox / `approvals_reviewer = "user"`** 같은 confirmation surface는 [hitl-audit.md](./hitl-audit.md) Round 2 update 가 소유한다.
+- 이 문서는 **rule 파일 자체의 ingestion 경로**만 다룬다.
+- Repo-local SSOT (AGENTS.md) 의 primary 위치 결론은 R1에서 유지된다.

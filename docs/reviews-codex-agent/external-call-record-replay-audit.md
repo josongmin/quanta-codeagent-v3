@@ -562,3 +562,66 @@ even after strengthening current cassette path, these remain:
 - 포맷은 꽤 잘 정의돼 있지만, replay validator는 아직 실질적으로 placeholder라서 presence-only proof에 가깝다. `[FACT]` + `[STRONG-INFERENCE]`
 - 따라서 `포맷 SSOT는 있음`, `완전한 replay authority는 아직 미완성`이 현재 가장 정확한 판정이다. `[STRONG-INFERENCE]`
 - LLM/API/DB까지 일반화하려면 kind taxonomy, canonical normalization, redaction, per-entry replay compare, golden replay harness가 추가로 필요하다. `[STRONG-INFERENCE]`
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 doc은 본래 Quanta repo 측 cassette evidence를 다루지만, Codex가 실제로 어떤 external endpoint surface를 가지고 있는지를 fact로 확인하면 record/replay 일반화 작업의 target surface가 명확해진다.
+
+### A. Codex external endpoint surface (Rust binary hardcoded)
+
+- `[FACT]` Rust binary string evidence에서 발견된 endpoint:
+  - `https://api.openai.com/v1/responses` — Responses API, SSE streaming
+  - `https://api.openai.com/v1/realtime` — WebSocket (voice/audio)
+  - `https://api.openai.com/auth`
+  - `https://api.openai.com/profile`
+  - `https://auth.openai.com/oauth/token`
+  - `https://chatgpt.com/backend-api`
+  - `https://chatgpt.com/codex-backend/agent-identity` — multi-agent JWT validation (신규 surface)
+- `[FACT]` Custom CA bundle을 두 가지 env로 받는다: `SSL_CERT_FILE`, `CODEX_CA_CERTIFICATE`.
+- `[FACT]` Telemetry / credits 응답 header: `x-codex-credits-balance`, `x-codex-credits-has-credits`, `x-codex-credits-unlimited`, `x-codex-promo-message`.
+- `[FACT]` `models_cache.json`은 ETag-keyed (server-pushed system prompts + personality templates를 cache).
+
+### B. Anthropic SDK presence
+
+- `[FACT]` Codex bundle 안 `app-session.js`와 `worker.js`에 Anthropic SDK가 vendored되어 있다. binary string evidence: `cache_creation_input_tokens`, `cache_read_input_tokens`, `anthropic.response.timestamp`, `anthropic_error`, `anthropic.stream_error`.
+- `[MODEL]` Trigger path는 **결정되지 않았다**. 현재 증거는 다음 둘 사이를 결정해주지 않는다:
+  - (a) `external-agent-migration` 패키지가 Claude Code 데이터를 import할 때만 SDK가 동작 (one-shot migration only)
+  - (b) live multi-provider routing — 사용자 세션 중에도 Anthropic이 호출 가능
+
+`[NON-CLAIM]` Codex가 OpenAI 외 다른 provider로 live agent loop를 돌리는지 여부.
+
+### C. Record/replay 일반화에 미치는 영향
+
+§13/§15에서 `LLM/API/DB 일반화`를 roadmap으로 두었던 것이 이제 구체화된다:
+
+| External kind | Required canonicalization | Class |
+| --- | --- | --- |
+| OpenAI Responses API (SSE) | request body + SSE event sequence를 deterministic으로 normalize. `x-codex-*` 헤더는 cassette payload에서 redact 또는 분리. | `[STRONG-INFERENCE]` |
+| OpenAI Realtime (WebSocket) | frame-level message log + binary audio chunk hash. cassette V1 entry shape로는 부족, V2 candidate. | `[STRONG-INFERENCE]` |
+| `chatgpt.com/codex-backend/agent-identity` (JWT) | JWT는 cassette에 그대로 적으면 안 됨 — claim digest로 redact. | `[STRONG-INFERENCE]` |
+| Anthropic SDK calls (if live) | cache token counts (`cache_creation_input_tokens` 등)를 normalization rule에 포함. | `[STRONG-INFERENCE]` |
+| `models_cache.json` (ETag) | model registry hydration은 cassette external interaction이 아니라 build-time artifact로 분리. | `[STRONG-INFERENCE]` |
+
+### D. §13 missing pieces 갱신
+
+§13에 추가되어야 하는 항목:
+
+- multi-endpoint provider classifier (OpenAI vs Anthropic vs internal `chatgpt.com/codex-backend`).
+- WebSocket frame log shape (Realtime API).
+- JWT/credentials redaction rule (현재 §15 residual risk의 secret/PII에 구체적 surface가 붙음).
+- ETag-keyed registry는 cassette 밖이라는 boundary 명시.
+
+### E. CA bundle / network policy
+
+- `[FACT]` `SSL_CERT_FILE`, `CODEX_CA_CERTIFICATE`가 정상 path. 즉 corporate CA를 통해 endpoint 호출이 가능하다는 의미.
+- Record 측: cassette는 endpoint URL은 기록하지만 CA bundle/cert chain까지 capture할 의무는 없다 (replay determinism scope 밖).
+
+### F. Ownership 정정
+
+- `[FACT]` 이 doc은 Codex external surface 자체의 owner다. Skybridge / MCP UI surface는 `mcp-usage-audit.md` owner. `logs_2.sqlite` 등 local storage 측 retention은 `thread-management/storage-and-db-audit.md` owner.
+- `[FACT]` Anthropic SDK presence와 trigger path 논의는 본 doc에서만 다룬다 — `agent-loop-deep-dive.md`에서는 본 doc으로만 위임.
+
+### G. What stays unchanged
+
+- §1 Final verdict는 그대로 (Quanta repo 측 cassette는 그대로 fragile-to-partial).
+- §16 summary 5줄은 유지. Codex 측 endpoint surface 발견은 Quanta cassette의 정확성에 즉시 영향을 주지 않는다.

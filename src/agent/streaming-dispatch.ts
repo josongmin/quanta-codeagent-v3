@@ -116,12 +116,34 @@ interface TurnState {
 
 /** Abandon every in-flight dispatch + reset accumulation (stream_reset). The
  *  promises are intentionally left unawaited (fire-and-forget tombstone): their
- *  results are discarded because their slots are dropped. */
+ *  results are discarded because their slots are dropped. We attach a noop
+ *  `.catch` so a late rejection on an abandoned promise does NOT surface as an
+ *  `unhandledRejection` warning under Bun/Node (R-Phase2 P1-2). */
 const resetForTombstone = (state: TurnState): void => {
+  for (const slot of state.slots) {
+    if (slot.promise) slot.promise.catch(() => undefined)
+  }
   state.rawEvents = []
   state.slots.length = 0
   state.barrierEngaged = false
 }
+
+/** Synthesize a structurally-valid `tool_result` block for the very rare case
+ *  where an injected `dispatch(call)` rejects instead of resolving with an
+ *  error outcome (its documented contract: dispatch wraps every error into an
+ *  ok:false tool_result block and NEVER throws). Treating a rejection as a
+ *  surfaced error block keeps the ordering invariant whole (Phase 4 always
+ *  produces one block per scheduled call) and the loop can `decideOnAssembled`
+ *  against it the same way as any other error result. R-Phase1 P0-1. */
+const dispatchFailedBlock = (call: StreamingCall, msg: string): ResultBlocks[number] => ({
+  type: "tool_result",
+  tool_use_id: call.id,
+  content:
+    `Tool "${call.name}" dispatch threw unexpectedly: ${msg}. ` +
+    "This is an internal contract violation (dispatch is supposed to return " +
+    "an ok:false block, not throw); surface to the user and continue.",
+  is_error: true,
+})
 
 /** Resolve a finished `tool_use` block off the partially-assembled message so
  *  the call object is exactly what the loop would have dispatched. */
@@ -196,7 +218,15 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
 /** Phase 3: run the deferred slots (the barrier call + everything after it,
  *  plus any safe calls stuck behind the barrier) STRICTLY SERIALLY in
  *  model-call order — never overlapping side-effecting work. Returns false iff
- *  cancelled mid-drain. */
+ *  cancelled mid-drain.
+ *
+ *  R-Phase1 P0-1: a rejection on a single slot's dispatch MUST NOT short-circuit
+ *  the loop — that would leave LATER deferred calls un-dispatched (their slots
+ *  have no `promise` set), Phase 4 would then `await undefined as Promise`, and
+ *  the ordering invariant ("one result block per scheduled call, in model-call
+ *  order") would silently break. We swallow rejections HERE; Phase 4 detects
+ *  rejected promises via `Promise.allSettled` and emits a synthetic dispatch-
+ *  failed block in the slot's position. */
 const drainDeferredSlots = async (
   slots: Slot[],
   dispatch: StreamingDispatch,
@@ -208,25 +238,53 @@ const drainDeferredSlots = async (
     if (isAborted(signal)) return false
     onToolStart?.(slot.call)
     slot.promise = dispatch(slot.call)
-    await slot.promise
+    try {
+      await slot.promise
+    } catch {
+      // Defensive: dispatch is contractually no-throw (every error path inside
+      // it MUST resolve to an ok:false tool_result block). If a future refactor
+      // breaks that, we keep marching so the remaining deferred slots still
+      // dispatch and Phase 4 still produces one block per call.
+    }
   }
   return true
 }
 
 /** Phase 4: collect results STRICTLY in original model call order. `slots` is
- *  already model-call ordered; awaiting settled promises is just unwrapping. */
+ *  already model-call ordered; awaiting settled promises is just unwrapping.
+ *
+ *  R-Phase1 P0-1: uses `Promise.allSettled` so a rejected slot promise becomes
+ *  a synthesized `dispatchFailedBlock` rather than a thrown exception — keeps
+ *  the ordering invariant whole even under contract violations in `dispatch`. */
 const collectResultBlocks = async (slots: Slot[]): Promise<ResultBlocks> => {
+  const settled = await Promise.allSettled(slots.map((s) => s.promise as Promise<DispatchOutcome>))
   const resultBlocks: ResultBlocks = []
-  for (const slot of slots) {
-    const outcome = await (slot.promise as Promise<DispatchOutcome>)
-    resultBlocks.push(outcome.block)
-  }
+  settled.forEach((res, i) => {
+    if (res.status === "fulfilled") {
+      resultBlocks.push(res.value.block)
+      return
+    }
+    const slot = slots[i]
+    if (slot === undefined) return
+    const msg = res.reason instanceof Error ? res.reason.message : String(res.reason)
+    resultBlocks.push(dispatchFailedBlock(slot.call, msg))
+  })
   return resultBlocks
 }
 
 /**
  * Drive one logical model turn with interleaved tool execution. See the file
  * header for the full ordering/barrier contract.
+ *
+ * AbortSignal contract (R-Phase2 P1-4): the `signal` parameter gates BETWEEN
+ * phases — `streamingTurn` checks `isAborted(signal)` at every phase boundary
+ * but does NOT pass `signal` into the injected `dispatch(call)`. The caller
+ * (the agent loop's `dispatch` binding, see `loop.ts streamConsume`) is
+ * responsible for threading `config.signal` into `ctx.signal` and individual
+ * tools that may run long (`bash` / `test_runner`) listen on it themselves.
+ * The implication: an abort that arrives WHILE a tool is executing reaches
+ * that tool directly via its `ctx.signal`; one that arrives between phases
+ * short-circuits this engine without starting any further dispatches.
  */
 export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingTurnResult> => {
   const { events, dispatch, onToolStart, signal } = args
@@ -244,7 +302,14 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
 
   // Phase 2: settle every early-started (in-flight) dispatch. These were the
   // concurrency-safe overlap calls; awaiting them now is the join point.
-  await Promise.all(state.slots.filter((s) => s.promise).map((s) => s.promise as Promise<unknown>))
+  //
+  // R-Phase1 P0-1: `Promise.allSettled` (was `Promise.all`) — a single rejected
+  // early dispatch must NOT short-circuit Phase 3 + Phase 4. The rejection is
+  // re-observed by `collectResultBlocks` and surfaced as a `dispatchFailedBlock`
+  // so the ordering invariant (one block per scheduled call) is preserved.
+  await Promise.allSettled(
+    state.slots.filter((s) => s.promise).map((s) => s.promise as Promise<unknown>),
+  )
 
   if (isAborted(signal)) return { kind: "aborted" }
 

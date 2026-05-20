@@ -199,3 +199,73 @@ child를 썼으면 parent는 closeout 전에 최소 이 다섯 개를 다시 확
 - child storage backend
 - child state durability after close
 - platform-wide automatic child recall
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 subagent 모델에 round-2에서 새로 확인된 background subagent rail과 external-agent migration rail evidence를 추가한다. detailed lifecycle/runtime IPC는 [subagent-lifecycle-and-runtime-interface.md](./subagent-lifecycle-and-runtime-interface.md#round-2-update-2026-05-21-deep-dive)가 owner다.
+
+### R2.1 Foreground subagent vs background subagent
+
+round-1의 subagent 모델은 `spawn_agent`/`send_input`/`wait_agent`/`close_agent` 기반 **foreground synchronous child**였다. round-2에서는 background queued subagent rail도 확인됐다. `[FACT]`
+
+증거:
+- `is-subagent-conversation-*.js` renderer hook
+- `/tasks` page (background subagent queue UI)
+- `use-is-background-subagents-enabled` feature gate
+- `list-pending-automation-run-threads` IPC channel
+
+해석:
+- subagent에는 최소 두 가지 모델이 있다: `[STRONG-INFERENCE]`
+  - foreground: parent loop가 `wait_agent`로 직접 합류
+  - background: queue에 들어가고 `/tasks` UI에서 inspect, parent loop와 별도로 진행
+- §3 best-fit model은 foreground subagent에 더 정확히 맞고, background subagent는 별도 lifecycle 모델이 필요하다 `[STRONG-INFERENCE]`
+
+### R2.2 Subagent vs external-agent migration
+
+round-2 발견: codex는 “타 agent 자료 import lifecycle”을 subagent invocation과 **별도로** 가진다. `[FACT]`
+
+External-agent migration events:
+- `external_agent_import_detect_finished`
+- `external_agent_import_provider_stage_finished`
+- `external_agent_import_session_completion_finished`
+- `external_agent_import_finished`
+
+Persistent state: `external_agent_session_imports.json` `[FACT]`
+
+Runtime bridge: `external_agent_tool_call`, `external_agent_tool_result` `[FACT]`
+
+Import targets: `~/.claude/`, `.claude-plugin/`, `.claudeCode/`, `.claudeCowork/`, plus `AGENTS.md` / `agents.md` files `[FACT]`
+
+해석:
+- 이건 codex가 다른 agent ecosystem (예: Claude Code, Cowork)의 session/skill/agents.md를 import하는 별도 lifecycle이다 `[FACT]`
+- subagent invocation과는 다른 차원이지만, “외부 agent 자료를 codex 내부 thread로 끌어옴” → external-agent를 일종의 source-of-context subagent처럼 처리하는 모델 `[STRONG-INFERENCE]`
+- 즉 §1 final model에 새 row를 추가해야 한다: external-agent migration은 `[FACT]` lifecycle이고, child session primitive와는 다른 lifecycle event family `[STRONG-INFERENCE]`
+
+### R2.3 Updated final model
+
+§1 final model에 보강:
+
+**`FACT` (round-2 추가)**
+- `is-subagent-conversation-*.js` renderer hook 존재
+- `/tasks` page + `use-is-background-subagents-enabled` feature gate 존재
+- `list-pending-automation-run-threads` IPC 존재
+- `external_agent_import_*` events 4종 존재
+- `external_agent_session_imports.json` 존재
+- `external_agent_tool_call` / `external_agent_tool_result` bridge channels 존재
+- 위 import targets 5종
+
+**`STRONG-INFERENCE` (round-2 추가)**
+- subagent has at least two modes: foreground (in-process child) and background (queued, UI-visible)
+- external-agent migration is a separate lifecycle, not subagent invocation
+- background subagent의 durable evidence는 `/tasks` rail에 있을 가능성
+
+### R2.4 Updated non-claims
+
+이전 §9 non-claims에 추가:
+
+- exact backend queue and dispatch semantics of background subagents
+- whether foreground subagent (`spawn_agent`) and background subagent (`/tasks`) share the same `state_5.sqlite.threads` row population or not
+- exact migration trigger that runs `external_agent_import_*` lifecycle (manual vs auto-detect)
+- whether imported external agents become standalone threads or become subagent children

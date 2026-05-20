@@ -300,3 +300,74 @@ Classification:
 - `logs_2.sqlite`는 observability rail로 보는 것이 가장 정확하다. `[STRONG-INFERENCE]`
 - automation은 recovery log 자체가 아니라 later wakeup/follow-up rail로 보는 것이 가장 정확하다. `[STRONG-INFERENCE]`
 - live shell/process state는 continuation identifier가 있더라도 durable restart-recovery rail로는 약하게 봐야 한다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 logging/recovery rail에 round-2에서 확인된 retention 알고리즘과 turn-snapshot rail evidence를 추가한다. schema deep dive는 [storage-and-db-audit.md](./storage-and-db-audit.md#round-2-update-2026-05-21-deep-dive)가 owner다.
+
+### R2.1 `logs_2.sqlite` retention is now characterized
+
+round-1에서는 `logs_2.sqlite`가 observability rail이라는 사실까지만 안전하게 말했다. round-2에서는 retention algorithm이 binary string으로 직접 확인됐다. `[FACT]`
+
+핵심:
+- cumulative `estimated_bytes` sliding-window cap + `DELETE FROM logs WHERE ts < ?` + `PRAGMA wal_checkpoint(PASSIVE)` 조합 `[FACT]`
+- 이 머신에서 effective retention ≈ ~10 days (4.38M rows over 9.95 days, 1.49 GB/day, ~3.6KB/row) `[FACT]`
+- WAL이 14GB까지 부푸는 것은 long-running write connection이 checkpoint를 피해 disk I/O spike를 막는 패턴 `[MODEL]`
+- exact byte threshold parameter는 binary string에 static하게 안 보인다 `[FACT]`
+
+### R2.2 Recovery model refinement
+
+§7의 “Recovery strength by rail” table에 보강:
+
+| Rail | Round-2 refinement |
+| --- | --- |
+| Structured logs DB | retention ≈ 10일이라는 점이 확정됐으므로, **>10일 이전 incident**의 semantic recovery는 `logs_2.sqlite`에서 기대할 수 없다 `[STRONG-INFERENCE]` |
+| Archived rollout JSONL | `turn_context` line이 매 turn full snapshot으로 박힘이 확인됐으므로, **fork/resume이 turn-self-contained**하다 `[FACT]` + `[STRONG-INFERENCE]` |
+| `~/.codex/memories/` | git-versioned memory directory가 있다는 사실이 round-2에서 확인됐다. `MEMORY.md` + `memory_summary.md` + `raw_memories.md` + `rollout_summaries/` 가 존재 → durable cross-session memory rail이 round-1에서 추정한 것보다 더 명시적이다 `[FACT]` |
+
+### R2.3 Recovery from a turn boundary
+
+archived rollout `turn_context` payload keys (확인됨): `[FACT]`
+
+```
+turn_id, cwd, current_date, timezone, approval_policy, sandbox_policy,
+permission_profile, model, personality, collaboration_mode,
+realtime_active, effort, summary, user_instructions, truncation_policy
+```
+
+해석:
+- 어떤 turn 시점에서든 그 turn의 policy/sandbox/model/personality/collaboration_mode를 정확히 재구성할 수 있다 `[STRONG-INFERENCE]`
+- 즉 round-1 §5.1 “same-thread recovery”의 강도가 한 단계 올라간다 — thread history만이 아니라 turn별 policy snapshot까지 복구 가능 `[STRONG-INFERENCE]`
+- 이건 user-facing recovery에서 “mode/sandbox가 도중에 바뀐 thread”를 fork할 때 유용한 디스크 substrate다 `[STRONG-INFERENCE]`
+
+### R2.4 Memory rail strengthened by `~/.codex/memories/`
+
+round-1 §15.5 “cross-thread memory restoration rules”를 weak inference로 두었던 부분이 round-2에서 일부 해소된다. `[FACT]`
+
+- `~/.codex/memories/` 디렉토리가 git-versioned로 존재한다 (즉 history-bearing)
+- `MEMORY.md`, `memory_summary.md`, `raw_memories.md` 3-tier 구조가 보인다
+- `rollout_summaries/` 서브디렉토리 존재 → archived rollout과 summary 사이의 별도 rail
+- `extensions/chronicle/resources/` 존재 → chronicle feature가 memory rail에 piggyback
+
+해석:
+- cross-thread memory rail은 round-1에서 “direct evidence가 없다”고 한 것보다 더 명시적이다 `[FACT]`
+- 다만 “arbitrary cross-thread automatic recall”이 어떤 trigger로 이뤄지는지는 여전히 black-box `[NON-CLAIM]`
+
+### R2.5 Updated false confidence traps
+
+추가 추가:
+
+5. “`logs_2.sqlite`만 있으면 long-window incident recovery가 된다”
+   - 아니다 — sliding window가 ~10일이므로 그보다 오래된 incident는 archived rollout JSONL이나 memories rail에서만 찾을 수 있다 `[STRONG-INFERENCE]`
+
+6. “`~/.codex/memories/`는 단순 markdown notes다”
+   - 아니다 — git-versioned 3-tier 구조 + chronicle resources를 가진 first-class memory rail이다 `[FACT]`
+
+### R2.6 Updated unknowns
+
+이전 §10 unknowns 중:
+- ~~hidden backend logging retention/rotation semantics~~ → sliding-window over cumulative `estimated_bytes` + PASSIVE WAL checkpoint로 확정 `[FACT]`
+- ~~exact summary/compression trigger thresholds~~ → trigger event 자체는 `thread-follower-compact-thread`로 확인됐지만 threshold는 여전히 unknown
+- `~/.codex/memories/`의 read/write trigger semantics는 여전히 unknown

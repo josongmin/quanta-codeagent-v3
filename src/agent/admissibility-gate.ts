@@ -111,7 +111,22 @@ const runHitlGate = async (
         "denied",
       )
     }
-    const approved = await config.onConfirm(action)
+    // R-Phase5 P0-C: a host-provided onConfirm callback is user code and may
+    // throw (REPL closed, network UI race, custom handler bug). The dispatch
+    // contract is "no throw out of execute", so a throwing onConfirm MUST NOT
+    // propagate — convert it into a structured deny so the loop sees a
+    // recoverable error result.
+    let approved = false
+    try {
+      approved = await config.onConfirm(action)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return deny(
+        call.id,
+        `Confirmation handler failed for ${call.name} (always-confirm tier): ${message}`,
+        "error",
+      )
+    }
     if (!approved) {
       return deny(
         call.id,
@@ -146,7 +161,18 @@ const runModePolicy = async (
     return deny(call.id, `Permission denied: ${decision.reason}`, "denied")
   }
   if (decision.kind === "ask") {
-    const approved = config.onConfirm ? await config.onConfirm(action) : false
+    // R-Phase5 P0-C: mirror the HITL branch — wrap host onConfirm in try-catch
+    // so a throwing handler becomes a structured deny, never an uncaught
+    // exception propagating into the dispatch pipeline.
+    let approved = false
+    if (config.onConfirm) {
+      try {
+        approved = await config.onConfirm(action)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        return deny(call.id, `Confirmation handler failed: ${message}`, "error")
+      }
+    }
     if (!approved) return deny(call.id, `User declined: ${decision.reason}`, "declined")
   }
   return null

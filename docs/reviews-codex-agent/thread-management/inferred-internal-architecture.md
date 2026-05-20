@@ -38,6 +38,7 @@ Overview router: [README.md](/Users/songmin/Documents/code-new/semantica-codegra
 
 - `state_5.sqlite`, `logs_2.sqlite`, `sqlite/codex-dev.db`가 실제 존재한다 `[FACT]`
 - `session_index.jsonl`, `history.jsonl`, `archived_sessions/rollout-*.jsonl`가 실제 존재한다 `[FACT]`
+- `~/.codex/sessions/**/rollout-*.jsonl`도 실제 존재한다 `[FACT]`
 - 2026-05-21 local snapshot 기준:
   - `threads_count = 6950` `[FACT]`
   - `spawn_edges_count = 5986` `[FACT]`
@@ -46,6 +47,9 @@ Overview router: [README.md](/Users/songmin/Documents/code-new/semantica-codegra
   - `session_index.jsonl = 5570 lines` `[FACT]`
   - `history.jsonl = 1358 lines` `[FACT]`
   - `archived rollout JSONL files = 6211` `[FACT]`
+  - `active session rollout JSONL files = 739` `[FACT]`
+  - `threads.thread_source='subagent' = 4304` `[FACT]`
+  - `threads.thread_source='user' = 318` `[FACT]`
 
 ### 2.2 Migration and runtime evidence
 
@@ -65,8 +69,11 @@ Overview router: [README.md](/Users/songmin/Documents/code-new/semantica-codegra
 - `thread_spawn_edges(parent_thread_id, child_thread_id, status)` table이 있고 `open/closed` row sample이 보인다 `[FACT]`
 - `thread_dynamic_tools(thread_id, position, name, namespace, ...)` table이 있다 `[FACT]`
 - 최신 thread sample들에서 `automation_update`, `read_thread_terminal`, `load_workspace_dependencies`가 thread-bound dynamic tool set으로 반복 노출된다 `[FACT]`
+- `threads` population은 `subagent` rows가 다수를 차지한다 `[FACT]`
+- joined edge sample에서 child rows 다수는 `subagent`였다 `[FACT]`
 
 이 조합은 thread가 단순 message blob이 아니라 structured runtime object임을 강하게 시사한다. `[STRONG-INFERENCE]`
+다만 이 dataset는 top-level user chat보다 broader thread universe를 반영한다. `[STRONG-INFERENCE]`
 
 ---
 
@@ -119,6 +126,7 @@ best-fit model:
 
 best-fit model:
 - `state_5.sqlite`가 canonical local state store 역할을 맡고, `session_index.jsonl`은 lightweight index/cache or export rail을 맡는 구조가 가장 설명력이 높다 `[STRONG-INFERENCE]` + `[SOTA-INFERENCE]`
+- 특히 `threads`는 top-level chats only가 아니라 subagent/derived thread까지 포함하는 broader object table일 가능성이 높다 `[STRONG-INFERENCE]`
 
 ### 3.4 Execution/session manager
 
@@ -186,9 +194,10 @@ sequenceDiagram
 best-fit sequence:
 1. parent thread row exists in `threads` `[FACT]`
 2. child thread row is created `[STRONG-INFERENCE]`
-3. `thread_spawn_edges` row links parent and child `[STRONG-INFERENCE]`
+3. a shared lineage relation may be persisted, possibly through `thread_spawn_edges` or a sibling mechanism `[SOTA-INFERENCE]`
 4. child keeps same or near-identical `cwd` `[SOTA-INFERENCE]`
 5. title/preview/first-user-message bootstrap follows normal thread creation path `[SOTA-INFERENCE]`
+6. current `thread_spawn_edges` evidence is subagent-heavy, so UI local fork를 이 table에 직결하는 것은 아직 과하다 `[STRONG-INFERENCE]`
 
 ## 4.3 New worktree fork
 
@@ -202,8 +211,8 @@ best-fit sequence:
 
 best-fit sequence:
 1. load queryable thread rows from `state_5.sqlite` `[STRONG-INFERENCE]`
-2. load or refresh lightweight list/index from `session_index.jsonl` `[SOTA-INFERENCE]`
-3. reopen archived detail through `rollout_path` into archived JSONL when needed `[STRONG-INFERENCE]`
+2. materialize user-visible filtered list/index from `session_index.jsonl` or equivalent derived rail `[SOTA-INFERENCE]`
+3. reopen active or archived detail through `rollout_path` into `~/.codex/sessions/...` or `~/.codex/archived_sessions/...` JSONL when needed `[STRONG-INFERENCE]`
 4. use `logs_2.sqlite` mainly for observability rather than user-facing semantic recovery `[STRONG-INFERENCE]`
 
 ---
@@ -257,7 +266,8 @@ best-fit sequence:
 | `state_5.sqlite` | canonical local control-plane state | `threads`, `thread_spawn_edges`, `thread_dynamic_tools`, `_sqlx_migrations` | `[STRONG-INFERENCE]` |
 | `logs_2.sqlite` | high-volume observability and runtime telemetry | `logs`, `thread_id`, `codex_api::sse::responses`, `session_loop...submission_dispatch` | `[STRONG-INFERENCE]` |
 | `sqlite/codex-dev.db` | app-service side state for automation/inbox/features | `automations`, `automation_runs`, `inbox_items`, `local_app_server_feature_enablement` | `[STRONG-INFERENCE]` |
-| `session_index.jsonl` | lightweight index/cache/export rail | `id`, `thread_name`, `updated_at` rows | `[STRONG-INFERENCE]` |
+| `session_index.jsonl` | filtered/materialized index/cache/export rail | line count mismatch vs `threads` and lightweight row shape | `[STRONG-INFERENCE]` |
+| `~/.codex/sessions/*.jsonl` | active session rollout rail | `threads.rollout_path`, sessions-dir file population | `[STRONG-INFERENCE]` |
 | `history.jsonl` | lightweight prompt/text history rail | `session_id`, `ts`, `text` rows | `[STRONG-INFERENCE]` |
 | `archived_sessions/*.jsonl` | detailed replay/archive rail | `session_meta`, `response_item` rows | `[STRONG-INFERENCE]` |
 
@@ -269,7 +279,102 @@ best-fit sequence:
 
 - exact native UI framework choice
 - exact cloud sync backend
-- exact WAL/retention/compaction policy
+- ~~exact WAL/retention/compaction policy~~ **CORRECTED 2026-05-21**: `logs_2.sqlite`의 retention algorithm은 binary string으로 직접 확인되었다 (sliding-window over cumulative `estimated_bytes` + PASSIVE WAL checkpoint). exact byte threshold value는 여전히 안 보인다. Owner: [storage-and-db-audit.md](./storage-and-db-audit.md#r24-logs_2sqlite-deep-dive).
 - exact rule for when JSONL and SQLite writes happen in what order
 - exact code path that populates every `thread_spawn_edges` row
 - whether `codex-dev.db` uses SQLx or a different migration path
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 이 문서의 “runtime loop + control plane” 모델을 round-2 facts로 보강한다. storage layout deep dive는 sibling document인 [storage-and-db-audit.md](./storage-and-db-audit.md#round-2-update-2026-05-21-deep-dive)가 owner다 — 여기서는 thread-follower channel과 runtime architecture 변경에만 집중한다.
+
+### R2.1 Thread-follower channel envelope
+
+minified bundle 분석에서 확인된 **13개 distinct thread-follower events**: `[FACT]`
+
+1. `thread-follower-start-turn`
+2. `thread-follower-submit-user-input`
+3. `thread-follower-interrupt-turn`
+4. `thread-follower-steer-turn`
+5. `thread-follower-compact-thread`
+6. `thread-follower-edit-last-user-turn`
+7. `thread-follower-command-approval-decision`
+8. `thread-follower-file-approval-decision`
+9. `thread-follower-permissions-request-approval-response`
+10. `thread-follower-submit-mcp-server-elicitation-response`
+11. `thread-follower-set-model-and-reasoning`
+12. `thread-follower-set-collaboration-mode`
+13. `thread-follower-set-queued-follow-ups-state`
+
+Channel envelope: `[FACT]`
+
+- JSON-RPC 2.0 framing
+- request/response naming: `{event}-request`, `{event}-response`, `{event}-timeout`
+- timeout error code: `-32000`
+
+해석: `[STRONG-INFERENCE]`
+
+- session loop와 UI shell 사이는 thin, typed JSON-RPC 채널이다 (round-1의 `UI ↔ runtime` 분리 가설과 일치)
+- 13개 event는 turn-level mutation (start/submit/interrupt/steer/compact/edit), approval response (command/file/permissions/mcp elicitation), 그리고 session-level config (model+reasoning, collaboration_mode, queued follow-ups state)를 모두 cover한다
+- 즉 UI 상에서 보이는 거의 모든 user-driven thread mutation은 이 13개 채널 중 하나로 흐른다
+
+### R2.2 Updated 4.1 active-turn dataflow
+
+round-1 sequence는 그대로 유효하지만, `UI → L` edge가 thread-follower JSON-RPC envelope임이 추가로 확정됐다.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as UI shell
+    participant L as Session loop
+    participant M as Model/SSE stream
+    participant S as State repo
+    participant G as Logs DB
+    participant J as JSONL rollouts
+
+    U->>UI: send message
+    UI->>L: thread-follower-submit-user-input-request (JSON-RPC 2.0)
+    L->>M: dispatch request
+    M-->>L: SSE deltas and tool events
+    L->>S: update thread metadata and tool state
+    L->>G: append structured telemetry (with cumulative_estimated_bytes accounting)
+    L->>J: append rollout events (session_meta / turn_context / event_msg:* / response_item)
+    L-->>UI: thread-follower-submit-user-input-response
+```
+
+추가 모델:
+- `thread-follower-interrupt-turn` / `thread-follower-steer-turn`은 in-flight turn 중간 redirect rail이다 `[STRONG-INFERENCE]`
+- `thread-follower-edit-last-user-turn`은 UI rewind/edit rail이다 `[STRONG-INFERENCE]`
+- `thread-follower-compact-thread`는 user-driven summary 압축 trigger다 `[STRONG-INFERENCE]`
+
+### R2.3 Turn-snapshot rail
+
+archived rollout의 `turn_context` line은 **매 turn마다** `turn_id, cwd, current_date, timezone, approval_policy, sandbox_policy, permission_profile, model, personality, collaboration_mode, realtime_active, effort, summary, user_instructions, truncation_policy` 전체를 박는다. `[FACT]`
+
+→ round-1의 “rollout JSONL은 append-only event log”라는 결론을 강화한다. 추가로:
+
+- fork/resume이 turn-self-contained하다 — 어느 turn에서든 그 turn의 policy/model/cwd/personality를 정확히 재구성 가능 `[STRONG-INFERENCE]`
+- `thread-follower-set-collaboration-mode`로 mutate되는 collaboration_mode가 `turn_context`에 박힌다는 점은 RPC와 rollout이 같은 source of truth를 공유한다는 강한 단서다 `[STRONG-INFERENCE]`
+
+### R2.4 Storage ownership map (round-2 refresh)
+
+이전 §6 table에 추가/정정:
+
+| Store | Round-2 refinement |
+| --- | --- |
+| `logs_2.sqlite` | sliding-window retention over cumulative `estimated_bytes` + PASSIVE WAL checkpoint; ~10 days cap on this machine. Full schema/index/algorithm은 [storage-and-db-audit.md](./storage-and-db-audit.md#r24-logs_2sqlite-deep-dive)가 owner |
+| `archived_sessions/*.jsonl` | per-turn full `turn_context` snapshot 추가 확인 |
+| `session_index.jsonl` | UUID v7-like `id` 확인 (시간순 prefix) |
+| `~/.codex/config.toml` | 전체 schema 노출됨 — model/reasoning/personality/projects/features/plugins/marketplaces. Owner는 [storage-and-db-audit.md](./storage-and-db-audit.md#r22-codexconfigtoml-schema) |
+| `~/.codex/.codex-global-state.json` | electron-persisted atom state; `agent-mode-by-host-id.local` (full-access/read-only) 포함 |
+| `~/.codex/memories/` | git-versioned memory store (MEMORY.md + summaries + rollout_summaries/ + chronicle extension resources) |
+
+### R2.5 Updated non-claims
+
+이전 §7에서 retention/compaction 항목은 round-2에서 부분 해소됐고, 새로 보이는 unclaims:
+
+- exact byte threshold value parameter for `logs_2.sqlite` retention `[NON-CLAIM]`
+- whether all 13 thread-follower events fan-in to a single `submission_dispatch` or separate handlers `[NON-CLAIM]`
+- whether `turn_context.collaboration_mode` is the *source* of truth, or `agent-mode-by-host-id.local` is, or they are independently maintained `[NON-CLAIM]`

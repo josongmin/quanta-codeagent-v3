@@ -24,7 +24,7 @@ Overview router: [README.md](/Users/songmin/Documents/code-new/semantica-codegra
 
 1. `Copy session ID`, `Copy working directory`, `Open in Finder`는 이미 존재하는 thread metadata read path일 가능성이 높다. `[STRONG-INFERENCE]`
 2. `Rename chat`, `Archive chat`는 `threads` row mutation 성격이 가장 강하다. `[FACT]` + `[STRONG-INFERENCE]`
-3. `Fork into local`, `Fork into new worktree`는 child thread row + lineage edge write를 동반하는 구조가 가장 자연스럽다. `[FACT]` + `[SOTA-INFERENCE]`
+3. `Fork into local`, `Fork into new worktree`는 child thread row를 만들 가능성이 높지만, lineage edge write surface는 현재 evidence만으로 특정 table에 못 박기 어렵다. `[STRONG-INFERENCE]` + `[SOTA-INFERENCE]`
 4. `Pin chat`, `Mark as unread`는 현재 관측한 `threads` schema에 직접 필드가 안 보여, 별도 metadata rail일 가능성이 높다. `[FACT]` + `[SOTA-INFERENCE]`
 
 ---
@@ -52,6 +52,7 @@ Overview router: [README.md](/Users/songmin/Documents/code-new/semantica-codegra
 - `threads.id`, `cwd`, `title`, `preview`, `archived`, `archived_at`, `git_sha`, `git_branch`, `rollout_path` `[FACT]`
 - `thread_spawn_edges(parent_thread_id, child_thread_id, status)` `[FACT]`
 - `session_index.jsonl` rows with `id`, `thread_name`, `updated_at` `[FACT]`
+- joined edge sample에서 child rows 다수는 `thread_source='subagent'`였다 `[FACT]`
 
 ### 2.3 Default title/preview behavior snapshot
 
@@ -74,8 +75,8 @@ Overview router: [README.md](/Users/songmin/Documents/code-new/semantica-codegra
 | `Copy working directory` | `threads.cwd` exists | read `threads.cwd` | clipboard side effect only | `[STRONG-INFERENCE]` |
 | `Copy session ID` | `threads.id`, `session_index.id` exist | read thread/session ID | clipboard side effect only | `[STRONG-INFERENCE]` |
 | `Copy deeplink` | action exists, thread is addressable | read `threads.id` plus hidden deeplink resolver metadata | maybe `thread_source` or app route state | `[SOTA-INFERENCE]` |
-| `Fork into local` | `thread_spawn_edges` exists, thread rows exist | create child `threads` row + create `thread_spawn_edges` row | same `cwd`, same repo lineage, new rollout path | `[SOTA-INFERENCE]` |
-| `Fork into new worktree` | distinct action from local fork; `cwd`/git fields exist | create child `threads` row + edge row | new worktree path in `cwd`, likely changed `git_branch`/`git_sha` | `[SOTA-INFERENCE]` |
+| `Fork into local` | thread rows exist; lineage rail exists but is subagent-heavy | create child `threads` row | possibly shared lineage rail, same `cwd`, same repo lineage, new rollout path | `[SOTA-INFERENCE]` |
+| `Fork into new worktree` | distinct action from local fork; `cwd`/git fields exist | create child `threads` row | possibly shared lineage rail, new worktree path in `cwd`, likely changed `git_branch`/`git_sha` | `[SOTA-INFERENCE]` |
 | `Open in new window` | action exists, thread is addressable | no canonical thread mutation required | UI/view-state only, maybe window session metadata | `[SOTA-INFERENCE]` |
 
 ---
@@ -105,11 +106,12 @@ best-fit write path:
 
 strongest anchor:
 - `thread_spawn_edges` stores parent-child relationships with `open/closed` status `[FACT]`
+- but current observed usage is heavily subagent/delegation flavored `[FACT]`
 
 best-fit write path:
 1. allocate child thread ID `[SOTA-INFERENCE]`
 2. insert child `threads` row `[SOTA-INFERENCE]`
-3. insert lineage edge row `[STRONG-INFERENCE]`
+3. persist some lineage relation, possibly via `thread_spawn_edges` or sibling metadata rail `[SOTA-INFERENCE]`
 4. preserve same `cwd` or repo root `[SOTA-INFERENCE]`
 
 ## 4.4 `Fork into new worktree`
@@ -122,7 +124,7 @@ best-fit write path:
 1. perform local fork steps `[SOTA-INFERENCE]`
 2. provision or bind separate git worktree `[SOTA-INFERENCE]`
 3. set child `cwd` to new worktree path `[SOTA-INFERENCE]`
-4. persist child lineage edge the same way or similarly to local fork `[SOTA-INFERENCE]`
+4. persist child lineage relation the same way or similarly to local fork `[SOTA-INFERENCE]`
 
 ## 4.5 `Pin chat` and `Mark as unread`
 
@@ -141,9 +143,9 @@ menu 바깥에서도 같은 thread object에 대해 아래 write가 일어나는
 
 | Runtime event | Most plausible write set | Why |
 | --- | --- | --- |
-| new thread creation | insert `threads` row, append `session_index.jsonl`, create rollout JSONL path | current snapshot has all three rail types |
+| new thread creation | insert `threads` row, update filtered/materialized index, create live rollout JSONL path | current snapshot has SQLite plus active rollout rails |
 | send message / receive response | update `threads.updated_at_*`, maybe `preview`, append rollout JSONL, append logs row | `threads`, archived rollout JSONL, logs DB all exist |
-| subagent spawn | create child lineage relation, maybe child thread row or sibling runtime state | `thread_spawn_edges` with open/closed status exists |
+| subagent spawn | create child lineage relation, maybe child thread row or sibling runtime state | `thread_spawn_edges` with open/closed status and subagent-heavy population exists |
 | dynamic tool injection | update `thread_dynamic_tools` rows | per-thread tool rows exist |
 
 모두 `[STRONG-INFERENCE]` 또는 `[SOTA-INFERENCE]`.
@@ -159,3 +161,73 @@ menu 바깥에서도 같은 thread object에 대해 아래 write가 일어나는
 - deeplink resolver exact implementation
 - every local fork and worktree fork sharing exactly one code path
 - rename always mutating both SQLite and JSONL synchronously
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 UI action → persistence mapping에 round-2 RPC channel evidence를 추가한다. 저장 schema deep dive는 [storage-and-db-audit.md](./storage-and-db-audit.md#round-2-update-2026-05-21-deep-dive)가 owner다.
+
+### R2.1 Thread-follower RPC envelope as a new write surface
+
+round-2에서 확인된 13개 thread-follower events는 모두 JSON-RPC 2.0 framing이다. `[FACT]`
+
+- request: `{event}-request`
+- response: `{event}-response`
+- timeout: `{event}-timeout` (error code `-32000`)
+
+따라서 “UI action → local state write”의 정확한 모델은:
+
+```
+UI action → thread-follower-{event}-request (JSON-RPC) → runtime mutate → response → optional cascade write (SQLite/JSONL)
+```
+
+`[STRONG-INFERENCE]`
+
+### R2.2 RPC-mapped UI actions
+
+13개 events 중 §3 mapping table의 UI action과 직접 매핑되는 것이 일부 있다. `[FACT]` + `[STRONG-INFERENCE]`
+
+| Round-1 UI action | Most plausible thread-follower event | Confidence |
+| --- | --- | --- |
+| user sends a message | `thread-follower-submit-user-input` | `[STRONG-INFERENCE]` |
+| user cancels/interrupts a turn | `thread-follower-interrupt-turn` | `[STRONG-INFERENCE]` |
+| user steers/redirects mid-turn | `thread-follower-steer-turn` | `[STRONG-INFERENCE]` |
+| user invokes compaction/summarize | `thread-follower-compact-thread` | `[STRONG-INFERENCE]` |
+| user edits last user message | `thread-follower-edit-last-user-turn` | `[STRONG-INFERENCE]` |
+| user changes model or reasoning effort | `thread-follower-set-model-and-reasoning` | `[STRONG-INFERENCE]` |
+| user switches collaboration mode | `thread-follower-set-collaboration-mode` | `[STRONG-INFERENCE]` |
+| user manages queued follow-ups | `thread-follower-set-queued-follow-ups-state` | `[STRONG-INFERENCE]` |
+| approve/reject a shell command | `thread-follower-command-approval-decision` | `[STRONG-INFERENCE]` |
+| approve/reject a file write | `thread-follower-file-approval-decision` | `[STRONG-INFERENCE]` |
+| approve a permission elevation | `thread-follower-permissions-request-approval-response` | `[STRONG-INFERENCE]` |
+| respond to MCP elicitation | `thread-follower-submit-mcp-server-elicitation-response` | `[STRONG-INFERENCE]` |
+| start a new turn | `thread-follower-start-turn` | `[STRONG-INFERENCE]` |
+
+### R2.3 Context-menu actions are NOT in the thread-follower 13
+
+명시적으로 확인된 사실: round-1의 sidebar/context-menu actions (Pin chat, Rename chat, Archive chat, Mark as unread, Open in Finder, Copy WD, Copy session ID, Copy deeplink, **Fork into local**, **Fork into new worktree**, Open in new window) 중 **어느 것도 thread-follower 13개 event 이름과 직접 매치되지 않는다**. `[FACT]`
+
+해석:
+- context-menu action은 별도의 lower-level RPC family (또는 direct local store mutation)로 흐를 가능성이 높다 `[STRONG-INFERENCE]`
+- 즉 `Rename chat` → `threads.title` mutation은 thread-follower event를 거치지 않고 더 가까운 store API로 갈 수 있다 `[SOTA-INFERENCE]`
+- `Fork into local` / `Fork into new worktree`도 thread-follower 13개에 없으므로 별도 fork RPC + git/worktree broker 조합으로 보는 것이 적절하다 `[STRONG-INFERENCE]`
+
+### R2.4 Effect on §3 mapping confidence
+
+§3 mapping table은 round-2에서도 그대로 유효하지만, 다음 두 axis로 보강한다:
+
+- `Pin chat`, `Mark as unread`, `Rename chat`, `Archive chat`, `Fork *`, `Open in new window`: 모두 thread-follower 13개 밖이므로 별도 IPC/store-side write surface로 봐야 한다 `[STRONG-INFERENCE]`
+- turn-level user mutations (submit/edit/interrupt/steer/compact/start-turn)은 RPC envelope 안에서 흐르며 그 결과로 SQLite + JSONL rollout 둘 다에 cascade write가 일어날 가능성이 높다 `[STRONG-INFERENCE]`
+
+### R2.5 Turn-context cascade evidence
+
+`thread-follower-set-model-and-reasoning` / `thread-follower-set-collaboration-mode` event는 RPC level mutation이고, 그 변경이 다음 turn의 `turn_context` JSONL line에 박혀서 archive된다. `[FACT]` + `[STRONG-INFERENCE]`
+
+→ 즉 RPC mutation은 **다음 turn의 rollout snapshot에서 확인할 수 있는** durable side effect를 남긴다. 이건 RPC 채널이 isolated control plane이 아니라 archive rail과 fan-out 관계임을 보여준다 `[STRONG-INFERENCE]`.
+
+### R2.6 Updated non-claims
+
+- exact set of IPC channels behind context-menu actions (not in the 13 thread-follower events) `[NON-CLAIM]`
+- whether RPC mutation always writes to SQLite first then JSONL, or vice versa `[NON-CLAIM]`
+- whether `thread-follower-edit-last-user-turn` rewrites rollout JSONL in place or appends a corrective `event_msg:*` line `[NON-CLAIM]`

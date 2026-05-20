@@ -21,9 +21,28 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import type { ValidateArgs, ValidatorResult } from "../../src/apps/bench/repair/types"
+import { buildRepairContext } from "../../src/apps/bench/repair/context"
+import { runRepairRounds } from "../../src/apps/bench/repair/index"
+import type {
+  ExecFn,
+  RunOnceResult,
+  ValidateArgs,
+  ValidatorResult,
+} from "../../src/apps/bench/repair/types"
 import { runInstance } from "../../src/apps/bench/runner"
 import type { Instance } from "../../src/apps/bench/types"
+
+/**
+ * b2 wall-clock budget: each `runInstance` spawns multiple `bash -c` children
+ * (git init/commit/checkout + bash exec for tool_use bash + diff capture). On a
+ * fully cold CI worker, two repair rounds × ~6 shell spawns each can edge above
+ * the bun default 5000ms test timeout — which exactly matches the observed
+ * `5001ms` flake. Hoist every `runInstance`-driven repair test to a 30s budget
+ * so the assertions are event-driven (validator-call counts / agent-run counts)
+ * rather than wall-clock-bound. Pure orchestrator tests (no runInstance) keep
+ * the default budget.
+ */
+const RUN_INSTANCE_TIMEOUT_MS = 30_000
 
 const DEPS = { maxTurns: 5, timeoutMs: 30000 }
 
@@ -175,132 +194,152 @@ const countLines = (s: string): number =>
     .filter((l) => l !== "").length
 
 describe("b2 — bench repair rounds integration", () => {
-  test("1. default-OFF byte-identical: no deps.repair ⇒ 1 agent run, 1 verify, outcome unchanged", async () => {
-    await withTmp(async (dir) => {
-      const inst = makeSwebenchInstance(dir, "byte-identical")
-      const llm = new ScriptedLLM([
-        { kind: "edit", file: "math.js", old: "return a - b", new: "return a + b" },
-      ])
-      // Spy via local testCmd: wrap the instance.testCmd with a counter sentinel.
-      const counterFile = join(dir, "verify-count")
-      writeFileSync(counterFile, "")
-      const spy: Instance = {
-        ...inst,
-        testCmd: `echo x >> "${counterFile}" && ${inst.testCmd}`,
-      }
-      const r = await runInstance(spy, { ...DEPS, llm })
-      // The agent's scene was scripted to fire once and produce the fix.
-      expect(llm.agentRuns).toBe(1)
-      // testCmd ran exactly once ⇒ official verify() was called exactly once.
-      expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
-      expect(r.passed).toBe(true)
-      expect(r.patch).toContain("return a + b")
-    })
-  })
-
-  test("2. round0 fails → round1 passes: validator gates the loop", async () => {
-    await withTmp(async (dir) => {
-      const inst = makeSwebenchInstance(dir, "round0-fail-round1-pass")
-      const llm = new ScriptedLLM([
-        // Round 0: wrong fix + bash verification.
-        {
-          kind: "editAndBash",
-          file: "math.js",
-          old: "return a - b",
-          new: "return a * b", // still wrong
-          bash: `node -e "require('./math.js')"`,
-        },
-        // Round 1 (after seedMsg): correct fix + bash verification.
-        {
-          kind: "editAndBash",
-          file: "math.js",
-          old: "return a * b",
-          new: "return a + b",
-          bash: `node -e "require('./math.js')"`,
-        },
-      ])
-      let validateCalls = 0
-      const fakeValidate = async (_args: ValidateArgs): Promise<ValidatorResult> => {
-        validateCalls += 1
-        return validateCalls === 1
-          ? { ok: false, failTail: "AssertionError: expected 5 got 6" }
-          : { ok: true }
-      }
-      // Verify-spy on the official grader.
-      const counterFile = join(dir, "verify-count")
-      writeFileSync(counterFile, "")
-      const spy: Instance = {
-        ...inst,
-        testCmd: `echo x >> "${counterFile}" && ${inst.testCmd}`,
-      }
-      const r = await runInstance(spy, {
-        ...DEPS,
-        llm,
-        repair: { maxRounds: 2, validate: fakeValidate },
+  test(
+    "1. default-OFF byte-identical: no deps.repair ⇒ 1 agent run, 1 verify, outcome unchanged",
+    async () => {
+      await withTmp(async (dir) => {
+        const inst = makeSwebenchInstance(dir, "byte-identical")
+        const llm = new ScriptedLLM([
+          { kind: "edit", file: "math.js", old: "return a - b", new: "return a + b" },
+        ])
+        // Spy via local testCmd: wrap the instance.testCmd with a counter sentinel.
+        const counterFile = join(dir, "verify-count")
+        writeFileSync(counterFile, "")
+        const spy: Instance = {
+          ...inst,
+          testCmd: `echo x >> "${counterFile}" && ${inst.testCmd}`,
+        }
+        const r = await runInstance(spy, { ...DEPS, llm })
+        // The agent's scene was scripted to fire once and produce the fix.
+        expect(llm.agentRuns).toBe(1)
+        // testCmd ran exactly once ⇒ official verify() was called exactly once.
+        expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
+        expect(r.passed).toBe(true)
+        expect(r.patch).toContain("return a + b")
       })
-      expect(llm.agentRuns).toBe(2)
-      expect(validateCalls).toBe(2)
-      // Official grader called EXACTLY ONCE, with the cumulative final patch.
-      expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
-      expect(r.passed).toBe(true)
-      expect(r.patch).toContain("return a + b")
-    })
-  })
+    },
+    RUN_INSTANCE_TIMEOUT_MS,
+  )
 
-  test("3. maxRounds cap: validator never ok ⇒ exactly maxRounds+1 agent runs, validated:false", async () => {
-    await withTmp(async (dir) => {
-      const inst = makeSwebenchInstance(dir, "cap")
-      // 3 scenes: every scene emits a bash so lastVerifyCmd is populated; the
-      // edits keep mutating but the fake validator REFUSES to say ok.
-      const llm = new ScriptedLLM([
-        {
-          kind: "editAndBash",
-          file: "math.js",
-          old: "return a - b",
-          new: "return a * b",
-          bash: `node -e "1"`,
-        },
-        {
-          kind: "editAndBash",
-          file: "math.js",
-          old: "return a * b",
-          new: "return a / b",
-          bash: `node -e "1"`,
-        },
-        {
-          kind: "editAndBash",
-          file: "math.js",
-          old: "return a / b",
-          new: "return a % b",
-          bash: `node -e "1"`,
-        },
-      ])
-      let validateCalls = 0
-      const fakeValidate = async (_args: ValidateArgs): Promise<ValidatorResult> => {
-        validateCalls += 1
-        return { ok: false, failTail: `round ${validateCalls} fail` }
-      }
-      const counterFile = join(dir, "verify-count")
-      writeFileSync(counterFile, "")
-      const spy: Instance = {
-        ...inst,
-        testCmd: `echo x >> "${counterFile}" && ${inst.testCmd}`,
-      }
-      await runInstance(spy, {
-        ...DEPS,
-        llm,
-        repair: { maxRounds: 2, validate: fakeValidate },
+  test(
+    "2. round0 fails → round1 passes: validator gates the loop",
+    async () => {
+      await withTmp(async (dir) => {
+        const inst = makeSwebenchInstance(dir, "round0-fail-round1-pass")
+        const llm = new ScriptedLLM([
+          // Round 0: wrong fix + bash verification.
+          {
+            kind: "editAndBash",
+            file: "math.js",
+            old: "return a - b",
+            new: "return a * b", // still wrong
+            bash: `node -e "require('./math.js')"`,
+          },
+          // Round 1 (after seedMsg): correct fix + bash verification.
+          {
+            kind: "editAndBash",
+            file: "math.js",
+            old: "return a * b",
+            new: "return a + b",
+            bash: `node -e "require('./math.js')"`,
+          },
+        ])
+        let validateCalls = 0
+        const fakeValidate = async (_args: ValidateArgs): Promise<ValidatorResult> => {
+          validateCalls += 1
+          return validateCalls === 1
+            ? { ok: false, failTail: "AssertionError: expected 5 got 6" }
+            : { ok: true }
+        }
+        // Verify-spy on the official grader.
+        const counterFile = join(dir, "verify-count")
+        writeFileSync(counterFile, "")
+        const spy: Instance = {
+          ...inst,
+          testCmd: `echo x >> "${counterFile}" && ${inst.testCmd}`,
+        }
+        const r = await runInstance(spy, {
+          ...DEPS,
+          llm,
+          repair: { maxRounds: 2, validate: fakeValidate },
+        })
+        expect(llm.agentRuns).toBe(2)
+        expect(validateCalls).toBe(2)
+        // Official grader called EXACTLY ONCE, with the cumulative final patch.
+        expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
+        expect(r.passed).toBe(true)
+        expect(r.patch).toContain("return a + b")
       })
-      // Round 0 + 2 repair rounds = 3 agent runs, 3 validator calls.
-      expect(llm.agentRuns).toBe(3)
-      expect(validateCalls).toBe(3)
-      // Official grader: exactly once at the end.
-      expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
-    })
-  })
+    },
+    // b2 flake root-cause: this test was the canary because it is THE one that
+    // exercises BOTH (a) two runInstance-internal agent runs AND (b) two bash
+    // tool_use spawns AND (c) the full git-snapshot wrap — together edging the
+    // default 5000ms ceiling on a cold runner. Assertions are event-driven
+    // (agent-run / validate-call counts); raising the budget keeps the
+    // semantics unchanged while removing the wall-clock dependency.
+    RUN_INSTANCE_TIMEOUT_MS,
+  )
 
-  test("4. single sandbox / continue-from-patched-tree: round 1 sees round 0's edits", async () => {
-    await withTmp(async (dir) => {
+  test(
+    "3. maxRounds cap: validator never ok ⇒ exactly maxRounds+1 agent runs, validated:false",
+    async () => {
+      await withTmp(async (dir) => {
+        const inst = makeSwebenchInstance(dir, "cap")
+        // 3 scenes: every scene emits a bash so lastVerifyCmd is populated; the
+        // edits keep mutating but the fake validator REFUSES to say ok.
+        const llm = new ScriptedLLM([
+          {
+            kind: "editAndBash",
+            file: "math.js",
+            old: "return a - b",
+            new: "return a * b",
+            bash: `node -e "1"`,
+          },
+          {
+            kind: "editAndBash",
+            file: "math.js",
+            old: "return a * b",
+            new: "return a / b",
+            bash: `node -e "1"`,
+          },
+          {
+            kind: "editAndBash",
+            file: "math.js",
+            old: "return a / b",
+            new: "return a % b",
+            bash: `node -e "1"`,
+          },
+        ])
+        let validateCalls = 0
+        const fakeValidate = async (_args: ValidateArgs): Promise<ValidatorResult> => {
+          validateCalls += 1
+          return { ok: false, failTail: `round ${validateCalls} fail` }
+        }
+        const counterFile = join(dir, "verify-count")
+        writeFileSync(counterFile, "")
+        const spy: Instance = {
+          ...inst,
+          testCmd: `echo x >> "${counterFile}" && ${inst.testCmd}`,
+        }
+        await runInstance(spy, {
+          ...DEPS,
+          llm,
+          repair: { maxRounds: 2, validate: fakeValidate },
+        })
+        // Round 0 + 2 repair rounds = 3 agent runs, 3 validator calls.
+        expect(llm.agentRuns).toBe(3)
+        expect(validateCalls).toBe(3)
+        // Official grader: exactly once at the end.
+        expect(countLines(readFileSync(counterFile, "utf8"))).toBe(1)
+      })
+    },
+    RUN_INSTANCE_TIMEOUT_MS,
+  )
+
+  test(
+    "4. single sandbox / continue-from-patched-tree: round 1 sees round 0's edits",
+    async () => {
+      await withTmp(async (dir) => {
       const inst = makeSwebenchInstance(dir, "sandbox-continuity")
       // Capture the sandbox path from each scene's user message (via the
       // injectable validator — which receives `args.sandbox` for each round).

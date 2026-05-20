@@ -309,3 +309,53 @@ Classification:
 - git action은 underlying execution success와 app reporting이 분리돼 있고, directive는 success 후 반영 rail이다. `[STRONG-INFERENCE]`
 - destructive git action, amend, interactive git, unrelated-change revert는 강하게 제한된다. `[FACT]`
 - 따라서 이 에이전트의 git process는 “항상 자동으로 version-control까지 마감하는 루프”라기보다, “사용자 요청과 policy gate가 있을 때만 들어가는 controlled workflow lane”으로 설명하는 것이 가장 정확하다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 라운드에서 실제 설치된 `Codex.app` (build 2867) IPC 인벤토리를 직접 본 결과, git/branch/PR action이 **app-level IPC surface**로 노출되어 있다는 점이 추가로 관측됐다. §4.1에서는 "shell execution capability가 있다"로 추론했는데, Round 2는 그 위에 **named IPC channels**가 따로 있다는 직접 증거를 더한다.
+
+### 15. Git IPC channels (directly observed)
+
+다음 IPC channel이 직접 관측된다:
+
+- `[FACT]` `git-push`
+- `[FACT]` `git-checkout-branch`
+- `[FACT]` `git-create-branch`
+- `[FACT]` `git-merge-base`
+- `[FACT]` `git-origins`
+- `[FACT]` `electron-clone-workspace-repo`
+
+해석:
+- §4.1의 "execution layer는 shell이다" 추론과 양립하면서도, app process가 자체 IPC로 git operation을 노출한다는 점이 추가된다. `[STRONG-INFERENCE]`
+- 즉 `::git-create-branch` 같은 app directive (§2.1)는 단순 UI hint가 아니라, IPC handler가 실제로 underlying git operation을 수행하는 rail일 가능성이 더 높다. `[STRONG-INFERENCE]`
+- `electron-clone-workspace-repo`는 workspace bootstrap 시점의 clone path가 별도 channel로 존재함을 보여준다. `[FACT]`
+
+### 16. GitHub-specific IPC channels (directly observed)
+
+- `[FACT]` `gh-cli-status`
+- `[FACT]` `gh-current-user`
+- `[FACT]` `gh-pr-board`
+- `[FACT]` `gh-pr-checks`
+- `[FACT]` `gh-pr-merge`
+- `[FACT]` `gh-pr-comment`
+- `[FACT]` `gh-pr-update`
+
+해석:
+- §7에서 추론한 "GitHub plugin이 PR/CI/review workflow rail이다"는 시각과 일치한다. `[STRONG-INFERENCE]`
+- 다만 이 채널들은 `gh` CLI invocation wrapper 가능성이 가장 높고 (`gh-cli-status`가 그 가설을 시사한다), Codex가 GitHub REST API를 직접 호출한다고는 단정하지 않는다. `[STRONG-INFERENCE]`
+- `gh-pr-board`는 PR 목록을 board view로 가져오는 dedicated channel이 있음을 시사하며, 단순 GitHub plugin skill 호출보다 app surface가 더 두껍다는 의미다. `[STRONG-INFERENCE]`
+
+### 17. Implication for §3 best-fit model
+
+§3의 best-fit model은 여전히 유효하지만, "Execute git action non-interactively" step의 실제 실행 경로는:
+
+1. shell `git ...` invocation (기존 추론)
+2. app IPC channel handler (Round 2 추가 가능성)
+
+두 가지가 공존할 수 있다. `[STRONG-INFERENCE]`
+
+특히 `::git-*` directive와 동명 IPC channel pair (`::git-create-branch` ↔ `git-create-branch`, `::git-push` ↔ `git-push` 등)는 directive emission이 곧 IPC dispatch trigger일 가능성을 시사한다. `[STRONG-INFERENCE]`
+
+단, directive ↔ IPC dispatch의 정확한 wiring은 minified renderer bundle 안에서 직접 확인하지 못했으므로 단정하지 않는다. `[WEAK-INFERENCE]`

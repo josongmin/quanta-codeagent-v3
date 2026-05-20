@@ -1,3 +1,4 @@
+import { rename, unlink } from "node:fs/promises"
 import { fileExists, readFile, writeFile } from "@/storage"
 import { removeFromIndex, upsertMeta } from "./index-store"
 import { archivedFilePath, sessionFilePath } from "./paths"
@@ -6,23 +7,36 @@ import { type SavedSession, type SavePayload, SESSION_VERSION, type SessionMeta 
 /**
  * Id-addressable session store — the per-file half. Each id maps to exactly
  * one JSON file: either `<root>/<id>.json` (active) or
- * `<root>/archived/<id>.json` (archived). Writes go through `Bun.write` + tmp
- * rename for atomicity, same idiom as `src/agent/state.ts:46-50`.
+ * `<root>/archived/<id>.json` (archived). Writes are real-atomic: full body
+ * is staged in `<target>.tmp` then `rename()`-d into place. POSIX guarantees
+ * rename atomicity within the same filesystem, so a crash mid-write leaves
+ * the existing target untouched (no partial / torn JSON).
  *
  * Reads NEVER throw on missing/corrupt — they return `undefined`. Writes throw
  * only on programmer errors (we don't catch — let it bubble). The CLI is the
  * caller and decides how to surface failures.
  */
 
-/** Atomic write of one session-JSON file. Bun.write auto-creates parents. */
+/** Real-atomic write of one session-JSON file: full body is written to a
+ *  per-writer `.tmp.<pid>.<rand>` then `rename()`-d to the target. The unique
+ *  tmp suffix prevents two concurrent writers from stomping on each other's
+ *  staging file — under the prior shared-`<path>.tmp` scheme the SECOND
+ *  rename would throw ENOENT because the first rename had already consumed
+ *  the source. With per-writer tmps, both renames target the same final path
+ *  and POSIX `rename(2)` makes the LAST one win atomically. `writeFile` (from
+ *  the storage slice) auto-creates parents; `rename` requires both paths to
+ *  be on the same filesystem (always true here — both live under
+ *  `sessionsRoot()`). */
 const writeSessionFile = async (path: string, body: string): Promise<void> => {
-  const tmp = `${path}.tmp`
+  const tmp = `${path}.tmp.${process.pid}.${crypto.randomUUID().slice(0, 8)}`
+  await writeFile(tmp, body)
   try {
-    await writeFile(tmp, body)
-    await Bun.write(path, Bun.file(tmp))
-    await Bun.file(tmp).delete()
-  } catch {
-    await writeFile(path, body)
+    await rename(tmp, path)
+  } catch (e) {
+    // Rename failed (e.g. EACCES on a read-only dir). Clean up our staging
+    // file so it doesn't masquerade as a stale leftover on the next run.
+    await unlink(tmp).catch(() => undefined)
+    throw e
   }
 }
 
@@ -167,9 +181,11 @@ export const forkSession = async (
     lastTouched: now,
     archived: false,
   }
-  // Deep-copy messages by re-parsing — defensive against any later mutation by
-  // the caller, and keeps the source untouched (fork MUST NOT mutate source).
-  const messagesCopy = JSON.parse(JSON.stringify(source.messages)) as typeof source.messages
+  // Deep-copy messages via structuredClone — defensive against later mutation
+  // by the caller, and keeps the source untouched (fork MUST NOT mutate source).
+  // Bun supports structuredClone natively and it's faster + safer than the old
+  // JSON.parse(JSON.stringify(...)) round-trip (no Date/Map loss surprises).
+  const messagesCopy = structuredClone(source.messages)
   const saved: SavedSession = {
     version: SESSION_VERSION,
     meta: newMeta,

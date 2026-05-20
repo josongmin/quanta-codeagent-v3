@@ -459,3 +459,67 @@ flowchart TD
 - 가장 강한 visible budget rule은 `tool calls are expensive`, `read minimum`, `test-last`, `do not re-read`, `parallelize only when justified`다. `[FACT]`
 - 실제 동작은 rigid quota라기보다, **qualitative budget rules + LLM-side adaptive routing** 모델이 가장 잘 설명한다. `[STRONG-INFERENCE]`
 - validation을 줄이는 대신 honesty rail을 강화하는 구조가 존재한다고 보는 것이 observed behavior와 가장 잘 맞는다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+원본은 5축 (`tool / read / edit / validation / parallelism`) qualitative budget 만 다뤘다. 2026-05-21 deep dive 에서 Codex 가 **실제 credit/credit-balance HTTP 레일**과 **service tier 기반 speed budget**, 그리고 **fast-mode rollout metrics IPC** 를 운영한다는 사실이 직접 확인됐다. 즉 원본의 qualitative budget 5축에 **monetary credit budget** 과 **service-tier latency budget** 두 축이 더해진다.
+
+### R2.1 Monetary credit budget — HTTP response headers
+
+- `[FACT]` Codex Rust 바이너리는 다음 HTTP response header 를 직접 파싱한다:
+  - `x-codex-credits-balance`
+  - `x-codex-credits-has-credits`
+  - `x-codex-credits-unlimited`
+  - `x-codex-promo-message`
+- `[STRONG-INFERENCE]`: 즉 원본의 qualitative "tool calls are expensive" 가 실제로는 **quantitative credit metering** 으로 뒷받침되고 있다. 원본 §14 unknown 1번 ("hidden internal quantitative cost score가 있는지") 은 **server-side 에 분명히 존재** 한다 — 다만 그 score 가 client-side 의사결정에 직접 들어가는지는 여전히 미확인.
+
+### R2.2 Service tier `priority` = explicit latency budget knob
+
+- `[FACT]` 모델별 service tier 에 `priority` 존재 (display name "Fast", 1.5x speed). (mode-and-plan-process Round 2 §R2.5 참조.)
+- `[STRONG-INFERENCE]`: 즉 latency budget 이 binary user choice (standard / priority) 로 명시 exposed 되어 있다. 원본 §9 parallelism budget 은 latency 의 한 측면 (병렬화) 만 다뤘지만, service tier 는 **per-turn unit latency** 까지 가격이 매겨져 있다.
+
+### R2.3 Fast-mode rollout metrics IPC
+
+- `[FACT]` IPC channel 존재: `fast-mode-rollout-metrics`.
+- `[STRONG-INFERENCE]`: rollout 동안 fast-mode usage 를 client→server 로 metering 하는 측정 레일. 원본 §10 stopping condition 에는 client-only metric 만 있었지만, 실제로는 **server-visible rollout telemetry** 가 budget 결정과 결합되어 있을 가능성 — 직접 evidence 는 channel 이름 뿐.
+
+### R2.4 원본 budget pipeline 보정
+
+원본 §4 pipeline (`Load Constraints → Task Kind → Estimate evidence → Cheapest sufficient path → Execute → Observe → Adapt`) 에 추가해야 할 단계:
+
+```mermaid
+flowchart TD
+    A["User Request"] --> B["Load Constraints"]
+    B --> CB["Read credit balance headers (x-codex-credits-*)"]
+    CB --> ST["Resolve service tier (standard / priority)"]
+    ST --> C["Task Kind"]
+    C --> D["Evidence need"]
+    D --> E["Cheapest sufficient path under credit + tier budget"]
+    E --> F["Execute"]
+    F --> M["Emit fast-mode-rollout-metrics if priority tier"]
+    M --> G["Observe"]
+    G --> H["Adapt or stop"]
+```
+
+- credit balance 가 0/depleted 일 때 stopping condition 이 자동 trigger 될 가능성 (`[WEAK-INFERENCE]` — 직접 evidence 없음).
+- `x-codex-promo-message` 는 budget-adjacent UX hint 로 보임 — 직접 의사결정에 들어가지는 않을 가능성이 높지만 분류 미확정.
+
+### R2.5 원본 §11 attack surface 보강
+
+- 원본 §11.1 "No-budget model" 은 qualitative rules 만 근거로 했지만, Round 2 fact (credit headers + service tier) 로 **definitively 기각**. credit metering 은 server-side 에 hard-wired.
+- 원본 §11.2 "Over-hard budget model" 도 부분 보정: client-side 는 여전히 qualitative + adaptive 지만, **server-side 는 quantitative credit metering**. 따라서 hybrid 모델이 정답.
+- 새 P1: `x-codex-credits-unlimited: true` header 가 spoof 되면 client 측 budget discipline 이 풀려 무제한 호출 모드로 전환될 가능성 — 다만 client 가 그 header 를 어떻게 신뢰하는지 직접 evidence 없음.
+
+### R2.6 원본 §14 unknown 해소 정도
+
+- ~~"hidden internal quantitative cost score 가 있는지"~~ → **server-side 에 분명히 있다** (credit balance + has_credits + unlimited flags). client-side 에 quantitative score 가 노출되는지는 여전히 부분 미확인. `[FACT]`
+- ~~"tool choice 에 explicit numeric budget 이 있는지"~~ → 여전히 직접 evidence 없음. service tier 는 turn-level 이지 tool-level 이 아니다. `[FACT: not enough evidence]`
+- ~~"latent confidence/expected-value scoring"~~ → 직접 evidence 없음, 변동 없음.
+
+### R2.7 Ownership map
+
+- **Reasoning effort enum (`none/minimal/low/medium/high/xhigh`)** 자체는 [mode-and-plan-process-audit.md](./mode-and-plan-process-audit.md) Round 2 update 가 소유한다. reasoning effort 는 turn-level compute budget knob 지만 정의 위치는 mode doc.
+- **`models_cache.json` 서버 핫스왑 attack surface** 는 prompt-and-policy-stack / mode-and-plan-process 가 분담 소유한다.
+- 이 문서는 **monetary credit budget + service tier latency budget + fast-mode rollout metrics** 만 다룬다.

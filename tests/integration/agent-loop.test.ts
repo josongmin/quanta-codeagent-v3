@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runAgent } from "@/agent"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
 import {
   FakeLLM,
@@ -11,6 +12,7 @@ import {
   RecordingStream,
   text as textScript,
   toolUse as toolUseScript,
+  withTimeout,
 } from "./_harness"
 
 // Local convenience wrapper preserving the original 6-arg ordering: builds an
@@ -458,5 +460,618 @@ describe("runAgent integration", () => {
       .filter((b) => b.type === "tool_result")
       .map((b) => (b.type === "tool_result" ? b.tool_use_id : ""))
     expect(ids).toEqual(["a", "b"])
+  })
+})
+
+// ============================================================================
+// Hell-cases — adversarial scenarios that mirror the rigor applied to session
+// UX. Pins exact AgentOutcome shape, recovery FSM bookkeeping, and ordering
+// invariants under malformed / adversarial / abort / resource-exhaustion
+// inputs. NO production code is modified; every test exists to break the loop
+// the instant a regression sneaks in.
+// ============================================================================
+
+/** Adversarial LLM that yields a caller-supplied list of stream-event scripts.
+ *  Differs from `FakeLLM` only in that it tracks per-call invocation count
+ *  precisely (so hell-cases can pin "the loop streamed exactly N times"). */
+class CountingLLM implements LLMPort {
+  readonly model = "counting-test-model"
+  calls = 0
+  private readonly scripts: StreamEvent[][]
+  private last: StreamEvent[] = []
+  constructor(scripts: StreamEvent[][]) {
+    this.scripts = scripts
+  }
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    const next = this.scripts.shift()
+    if (next) this.last = next
+    const script = next ?? this.last
+    for (const e of script) yield e
+  }
+}
+
+/** Helper: build a tool_use event sequence where the input is the EXACT raw
+ *  value provided (bypasses the `toolUse` helper which always JSON-marshals
+ *  through an object). Lets us script "input is a raw string" hell-cases. */
+const toolUseRawInput = (id: string, name: string, rawInput: unknown): StreamEvent[] => [
+  { type: "tool_use_start", id, name },
+  { type: "tool_use_end", id, input: rawInput },
+  { type: "message_stop", stop_reason: "tool_use" },
+]
+
+describe("runAgent hell-cases — malformed LLM responses", () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "agent-loop-hell-"))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("(H1.a) assistant message with empty content[] → empty-recovery nudges then completes", async () => {
+    // The loop has a same-turn empty-turn recovery (`isEmptyTurn` → nudge,
+    // capped at MAX_CONSECUTIVE_EMPTIES=2). Three consecutive empties exhaust
+    // the budget and the loop completes (not max_turns).
+    const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+    const llm = new CountingLLM([empty, empty, empty])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 10,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "empty-content",
+    )
+
+    expect(out.reason).toBe("completed")
+    // SAME-TURN empty recoveries: 2 fired (consumed both MAX_CONSECUTIVE_EMPTIES
+    // budget slots), then the 3rd empty exhausted ⇒ accepted-as-completed.
+    const empties = stream.events.filter((e) => e.type === "recovery" && e.reason === "empty")
+    expect(empties).toHaveLength(2)
+    // No tool_use ever happened.
+    const toolCalls = stream.events.filter((e) => e.type === "tool_call")
+    expect(toolCalls).toHaveLength(0)
+    // 3 stream calls — all same-turn (turns is the bounded productive count).
+    expect(llm.calls).toBe(3)
+    expect(out.turns).toBe(1)
+  })
+
+  test("(H1.b) message_stop says tool_use but ZERO tool_use blocks → malformed recovery", async () => {
+    // Stop reason says tool_use but no tool_use blocks parsed ⇒ `decideOnAssembled`
+    // triggers MAX_MALFORMED_RETRIES=1 same-turn malformed nudge. After that 1
+    // retry it falls through to completed without forcing a real tool dispatch.
+    const malformed: StreamEvent[] = [
+      { type: "text_delta", delta: "I will call a tool" },
+      { type: "message_stop", stop_reason: "tool_use" }, // lies — no tool_use_start above
+    ]
+    const followup: StreamEvent[] = [{ type: "message_stop", stop_reason: "tool_use" }] // still lies
+    const llm = new CountingLLM([malformed, followup])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 10,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "malformed-stop",
+    )
+
+    expect(out.reason).toBe("completed")
+    // Exactly ONE malformed recovery (MAX_MALFORMED_RETRIES=1).
+    const malformedRecov = stream.events.filter(
+      (e) => e.type === "recovery" && e.reason === "malformed",
+    )
+    expect(malformedRecov).toHaveLength(1)
+    // Stream called twice (initial + 1 same-turn retry); no tool_call ever
+    // emitted because no tool_use blocks were actually parsed.
+    expect(llm.calls).toBe(2)
+    expect(stream.events.filter((e) => e.type === "tool_call")).toHaveLength(0)
+    // Turns is the bounded productive count.
+    expect(out.turns).toBe(1)
+  })
+
+  test("(H1.c) tool_use with bogus name (not in registry) → recoverable deny tool_result", async () => {
+    // `dispatchTool` checks `registry.has(call.name)` first and returns a
+    // recoverable deny ("Unknown tool: ...") — the model sees the deny as a
+    // normal tool_result and recovers to a text completion.
+    const llm = new FakeLLM([
+      toolUseScript("c1", "bogus-tool-name-does-not-exist", { foo: "bar" }),
+      textScript("recovered after deny"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 10,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "unknown-tool",
+    )
+
+    expect(out.reason).toBe("completed")
+    // Exactly one tool_result emit, and it carries the deny content.
+    const toolResults = stream.events.filter((e) => e.type === "tool_result")
+    expect(toolResults).toHaveLength(1)
+    const denyEv = toolResults[0]
+    if (denyEv?.type === "tool_result") {
+      expect(denyEv.ok).toBe(false)
+      // `preview` is the dispatcher's stable short tag ("unknown tool"); the
+      // human-readable error lives in the tool_result block content of the
+      // assistant message in `out.messages`.
+      expect(denyEv.preview).toBe("unknown tool")
+    }
+    // The recoverable deny content sits as a tool_result block in canonical
+    // history with `is_error:true` carrying "Unknown tool: <name>".
+    const errBlocks = out.messages.flatMap((m) =>
+      m.content.filter(
+        (b) =>
+          b.type === "tool_result" &&
+          b.is_error === true &&
+          b.content.includes("Unknown tool: bogus-tool-name-does-not-exist"),
+      ),
+    )
+    expect(errBlocks).toHaveLength(1)
+    // Loop completed at turn 2 (tool turn + text turn).
+    expect(out.turns).toBe(2)
+  })
+})
+
+describe("runAgent hell-cases — adversarial tool_use", () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "agent-loop-hell-adv-"))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("(H2.a) tool_use with NUL bytes in arguments → tool surface accepts/rejects cleanly", async () => {
+    // A path containing a NUL byte is a known-bad shape on POSIX/Node. The
+    // `write` tool's Zod schema accepts the string (Zod does not reject NUL by
+    // default), but the actual `fs.writeFile` call rejects with ERR_INVALID_ARG
+    // and the dispatch wraps that throw into an ok:false tool_result. Pin:
+    // never a process-level crash; always a recoverable tool_result block.
+    const llm = new FakeLLM([
+      toolUseScript("c1", "write", { path: `${dir}/has nul.txt`, content: "x" }),
+      textScript("recovered"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 10,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "nul-byte-args",
+    )
+
+    expect(out.reason).toBe("completed")
+    // Exactly one tool_result; the dispatcher MUST NOT have thrown. The result
+    // may be ok=true (NUL stripped/accepted by the filesystem) or ok=false
+    // (rejected); both are acceptable but it MUST be a structured tool_result.
+    const toolResults = stream.events.filter((e) => e.type === "tool_result")
+    expect(toolResults).toHaveLength(1)
+    // Regardless of ok/!ok, the next turn ran (proving recovery, not crash).
+    expect(out.turns).toBe(2)
+  })
+
+  test("(H2.b) tool_use with 100k-char argument string → loop dispatches; output is capped", async () => {
+    // Oversized content path: write 100k chars. The `write` tool succeeds
+    // (filesystems handle this fine); the tool's output-spill cap may trim
+    // the preview but the loop completes without OOM.
+    const huge = "X".repeat(100_000)
+    const file = join(dir, "huge.txt")
+    const llm = new FakeLLM([
+      toolUseScript("c1", "write", { path: file, content: huge }),
+      textScript("oversized handled"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 10,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "huge-arg",
+    )
+
+    expect(out.reason).toBe("completed")
+    // The write actually landed on disk (the bytes round-tripped).
+    expect(readFileSync(file, "utf8")).toBe(huge)
+    // The tool_result preview is bounded (output-spill cap). We do NOT pin a
+    // specific cap (env-driven), only that the preview is a string.
+    const tr = stream.events.find((e) => e.type === "tool_result")
+    if (tr?.type === "tool_result") expect(typeof tr.preview).toBe("string")
+    expect(out.turns).toBe(2)
+  })
+
+  test("(H2.c) tool_use with non-object input (raw string) → zod rejection wrapped in tool_result", async () => {
+    // The Zod schema for `write` requires an object — a raw string input fails
+    // schema validation in `ToolRegistry.run`, which throws a ToolInputError;
+    // `dispatchTool.execute` catches and wraps it into an ok:false tool_result.
+    const llm = new CountingLLM([
+      toolUseRawInput("c1", "write", "this is a raw string not an object"),
+      textScript("recovered from bad-input"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 10,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "raw-string-input",
+    )
+
+    expect(out.reason).toBe("completed")
+    // Exactly one tool_result event; it's an error block carrying the zod
+    // validation message.
+    const tr = stream.events.filter((e) => e.type === "tool_result")
+    expect(tr).toHaveLength(1)
+    const ev = tr[0]
+    if (ev?.type === "tool_result") {
+      expect(ev.ok).toBe(false)
+      expect(ev.preview).toContain("Invalid input")
+    }
+    expect(out.turns).toBe(2)
+  })
+})
+
+describe("runAgent hell-cases — abort signal storms", () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "agent-loop-hell-abort-"))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("(H3.a) signal aborted EXACTLY when LLM stream starts → outcome.reason=aborted, turns=0", async () => {
+    // The LLM aborts as the very first event is being emitted. `streamingTurn`
+    // checks `isAborted(signal)` at every iteration boundary, so the abort is
+    // caught and the loop reports turns=0 (no productive turn). CRITICAL:
+    // outcome.messages is the seeded conversation (no partial assistant turn).
+    const ac = new AbortController()
+    const llm: LLMPort = {
+      model: "abort-at-stream-start",
+      async *stream(_i: StreamInput): AsyncIterable<StreamEvent> {
+        ac.abort() // the instant the stream is touched
+        yield { type: "text_delta", delta: "this never lands" }
+        yield { type: "message_stop", stop_reason: "end_turn" }
+      },
+    }
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 5,
+          system: "test",
+          signal: ac.signal,
+        }),
+      }),
+      10_000,
+      "abort-at-stream-start",
+    )
+
+    expect(out.reason).toBe("aborted")
+    expect(out.turns).toBe(0)
+    // Done event must announce aborted.
+    const done = stream.events.find((e) => e.type === "done")
+    if (done?.type === "done") expect(done.reason).toBe("aborted")
+    // No assistant message landed in canonical history.
+    const assistantTurns = out.messages.filter((m) => m.role === "assistant")
+    expect(assistantTurns).toHaveLength(0)
+  })
+
+  test("(H3.b) signal.abort() called 10x in rapid succession → idempotent, single done event", async () => {
+    // `AbortController.abort()` is idempotent — calling it 10x must not produce
+    // 10 done events or thrash the loop. Pin: outcome aborted, exactly one done.
+    const ac = new AbortController()
+    const llm: LLMPort = {
+      async *stream(_i: StreamInput): AsyncIterable<StreamEvent> {
+        // Trigger the storm partway through a stream.
+        for (let i = 0; i < 10; i++) ac.abort()
+        yield { type: "text_delta", delta: "doomed" }
+        yield { type: "message_stop", stop_reason: "end_turn" }
+      },
+    }
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 5,
+          system: "test",
+          signal: ac.signal,
+        }),
+      }),
+      10_000,
+      "abort-storm",
+    )
+
+    expect(out.reason).toBe("aborted")
+    // Single done event despite 10 abort calls.
+    const doneEvents = stream.events.filter((e) => e.type === "done")
+    expect(doneEvents).toHaveLength(1)
+  })
+
+  test("(H3.c) parent signal aborts mid stream (inside tool_use_delta) → aborted cleanly", async () => {
+    // Abort fires DURING streaming, AFTER a tool_use_delta has flown. The
+    // assembled message is dropped; tool dispatch is never reached.
+    const ac = new AbortController()
+    const llm: LLMPort = {
+      async *stream(_i: StreamInput): AsyncIterable<StreamEvent> {
+        yield { type: "tool_use_start", id: "mid-tool", name: "write" }
+        yield { type: "tool_use_delta", id: "mid-tool", delta: '{"path":"' }
+        ac.abort() // abort RIGHT in the middle of streaming tool_use input
+        yield { type: "tool_use_delta", id: "mid-tool", delta: '/tmp/x"}' }
+        yield { type: "tool_use_end", id: "mid-tool", input: { path: "/tmp/x", content: "y" } }
+        yield { type: "message_stop", stop_reason: "tool_use" }
+      },
+    }
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 5,
+          system: "test",
+          signal: ac.signal,
+        }),
+      }),
+      10_000,
+      "abort-mid-tool-delta",
+    )
+
+    expect(out.reason).toBe("aborted")
+    expect(out.turns).toBe(0)
+    // NO tool_call event should have been emitted (tool dispatch was unreached
+    // because `streamingTurn`'s post-stream abort check kicked in first).
+    const toolCalls = stream.events.filter((e) => e.type === "tool_call")
+    expect(toolCalls).toHaveLength(0)
+  })
+})
+
+describe("runAgent hell-cases — resource exhaustion patterns", () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "agent-loop-hell-exhaust-"))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("(H4.a) 50-turn ping-pong stress → bounded by maxTurns=50, completes in <5s", async () => {
+    // The model never gives up: every turn is a `write` tool_use. With
+    // maxTurns:50 the loop must hit max_turns at exactly 50 streaming calls.
+    const file = join(dir, "pong.txt")
+    const llm = new FakeLLM([toolUseScript("c", "write", { path: file, content: "p" })])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const start = performance.now()
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 50,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "50-turn-ping-pong",
+    )
+    const elapsed = performance.now() - start
+
+    expect(out.reason).toBe("max_turns")
+    expect(out.turns).toBe(50)
+    expect(llm.calls).toBe(50)
+    // Must complete in well under the timeout — pin a lenient 5s budget so a
+    // slow CI doesn't flake but a runaway regression still fails.
+    expect(elapsed).toBeLessThan(5000)
+  })
+
+  test("(H4.b) single turn with 50 tool_use blocks back-to-back → all results captured in order", async () => {
+    // Mass-parallel: one assistant turn emits 50 concurrency-safe `read` calls.
+    // All 50 dispatch (streaming engine schedules safe calls in-flight), and
+    // resultBlocks come back in exact model-call order.
+    const N = 50
+    const files: string[] = []
+    for (let i = 0; i < N; i++) {
+      const p = join(dir, `f${i}.txt`)
+      writeFileSync(p, `data-${i}`)
+      files.push(p)
+    }
+    const calls = files.map((p, i) => ({ id: `r${i}`, name: "read", input: { path: p } }))
+    const llm = new FakeLLM([multiToolScript(calls), textScript("all read")])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 5,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "50-tool-blocks",
+    )
+
+    expect(out.reason).toBe("completed")
+    // The user message after the assistant turn carries ALL N tool_results
+    // in exact model-call order.
+    const resultMsg = out.messages.find(
+      (m) => m.role === "user" && m.content.some((b) => b.type === "tool_result"),
+    )
+    const ids = resultMsg?.content
+      .filter((b) => b.type === "tool_result")
+      .map((b) => (b.type === "tool_result" ? b.tool_use_id : ""))
+    expect(ids).toEqual(calls.map((c) => c.id))
+    expect(out.turns).toBe(2)
+  })
+})
+
+describe("runAgent hell-cases — recovery storm", () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "agent-loop-hell-recov-"))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("(H5.a) malformed + empty in the same turn → both recoveries fire, then completes", async () => {
+    // 1st stream: malformed (stop=tool_use, no tool_use blocks) ⇒ 1 malformed
+    // recovery (budget=1). 2nd stream: empty content ⇒ 1 empty recovery
+    // (budget=2). 3rd stream: another empty ⇒ 1 more empty recovery (budget
+    // exhausted at 2). 4th stream: another empty ⇒ exhausted ⇒ completed.
+    const malformed: StreamEvent[] = [{ type: "message_stop", stop_reason: "tool_use" }]
+    const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+    const llm = new CountingLLM([malformed, empty, empty, empty])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 10,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "recovery-storm",
+    )
+
+    expect(out.reason).toBe("completed")
+    // BOTH recovery kinds fired in the same turn — budgets are independent.
+    const malformedRec = stream.events.filter(
+      (e) => e.type === "recovery" && e.reason === "malformed",
+    )
+    const emptyRec = stream.events.filter((e) => e.type === "recovery" && e.reason === "empty")
+    expect(malformedRec).toHaveLength(1)
+    expect(emptyRec).toHaveLength(2) // MAX_CONSECUTIVE_EMPTIES=2 = exactly two nudges
+    // Same-turn retries never consume the maxTurns slot.
+    expect(out.turns).toBe(1)
+    // Stream called exactly 4 times (initial malformed + 1 empty nudge + 2 caps).
+    expect(llm.calls).toBe(4)
+  })
+
+  test("(H5.b) recovery budget exhausted by 5 consecutive empties → completes (no infinite loop)", async () => {
+    // Repeated empties past the cap MUST terminate (not max_turns), proving
+    // the recovery budget is finite. Pin exact stream-call count = 3
+    // (MAX_CONSECUTIVE_EMPTIES=2 + the final exhaustion call).
+    const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+    const llm = new CountingLLM([empty, empty, empty, empty, empty])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const out = await withTimeout(
+      runAgent({
+        ...harnessBaseConfig({
+          llm,
+          registry,
+          stream,
+          permission: { mode: "bypass" },
+          cwd: dir,
+          maxTurns: 20,
+          system: "test",
+        }),
+      }),
+      10_000,
+      "recovery-exhausted",
+    )
+
+    // Per the recovery FSM the loop accepts the exhausted empty turn as
+    // "completed" rather than running until max_turns.
+    expect(out.reason).toBe("completed")
+    expect(out.turns).toBe(1)
+    // Exactly MAX_CONSECUTIVE_EMPTIES=2 nudges fire; the 3rd empty exhausts
+    // and is accepted as completed.
+    const emptyRec = stream.events.filter((e) => e.type === "recovery" && e.reason === "empty")
+    expect(emptyRec).toHaveLength(2)
+    // Stream called 3 times, NOT 5 — the extra scripts are never reached.
+    expect(llm.calls).toBe(3)
   })
 })

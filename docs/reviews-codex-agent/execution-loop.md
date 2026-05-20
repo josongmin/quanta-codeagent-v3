@@ -141,3 +141,39 @@ flowchart LR
 - Codex는 `순정 ReAct`라기보다 `policy-constrained tool-using iterative agent`다.
 - Planner-heavy 시스템도 아니고, reflex bot도 아니다.
 - 실제 체감은 `light planner + iterative executor + repair loop`에 가깝다.
+
+## Round 2 update (2026-05-21 deep dive)
+
+`agent-loop-deep-dive.md`가 binary structure를 깊게 다루고, 이 doc은 그 binary가 실제 어떤 subcommand surface에서 loop를 돌리는지로 닫는다.
+
+### Codex Rust binary subcommand surface — loop entry points
+
+- `[FACT]` Codex CLI binary path: `/Applications/Codex.app/Contents/Resources/codex`. 182MB Mach-O arm64, `codex-rs` workspace, CLI version 0.130.0 (models_cache `client_version` 기준으로 server-pushed 0.131.0 존재).
+- `[FACT]` 실제로 loop을 trigger하는 subcommand 표:
+
+| Subcommand | Loop kind | Notes |
+| --- | --- | --- |
+| `exec` | one-shot iterative loop | CLI 진입의 default agent loop |
+| `exec-server` | persistent JSON-RPC loop | app-session host에서 turn router |
+| `tui` | interactive iterative loop | terminal UI에서 동일 inner loop |
+| `chat` | chat-style loop | message-only interaction |
+| `resume` | continuation loop | rollout/session resume 진입 |
+| `apply` | non-loop one-shot | V4A patch 적용 path |
+| `mcp` | MCP subprocess driver | tool-routing 쪽 owner |
+| `shell` | shell skill driver | tool-inventory 쪽 owner |
+| `skill-install` / `skill-list` / `market-place-install` | non-loop admin | skills audit으로 위임 |
+| `login` / `feedback` / `feedback-internal` / `notification` | side-channel | loop 외부 |
+
+- `[FACT]` 이 중 `exec`, `exec-server`, `tui`, `chat`, `resume` 다섯 개가 동일 inner agent loop를 공유한다고 보는 게 binary-string 증거와 가장 잘 맞는다. (별도 inner loop string은 발견되지 않음.)
+- `[FACT]` `--dangerously-bypass-approvals-and-sandbox` flag가 binary에 존재하지만 default disabled. loop의 admissibility gate를 우회하는 단일 surface.
+
+### Loop boundary 갱신
+
+- mermaid §1 / §5의 `런타임이 실제 도구 실행`은 위 subcommand 중 어느 것을 통해 들어왔는지에 무관하게 동일하다는 점만 명시한다.
+- bypass flag는 §1 J 분기(`종료 조건`)가 아니라 §5의 `Runtime`이 외부에서 enforcement를 끊는 axis다. 따라서 loop의 graph는 바뀌지 않고, runtime side enforcement만 약해진다.
+
+### What does not change
+
+- ReAct-like inner shape는 그대로다.
+- specialized loops (code-repair, review, audit) 분리도 그대로다.
+- repair loop 안의 `owner -> adjacent truth surfaces -> patch -> verification/closeout` discipline도 그대로다.

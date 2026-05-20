@@ -463,3 +463,63 @@ Classification:
 - approval policy와 confirmation policy는 다른 축이며, 현재 세션은 `approval never`이지만 confirmation-required actions는 여전히 많다. `[FACT]` + `[STRONG-INFERENCE]`
 - HITL는 특히 deletion, sensitive data transmission, representational communication, permissions, installs/runs, financial/medical/security-sensitive actions에서 강하게 작동한다. `[FACT]`
 - 가장 설명력 높은 모델은 `action classification -> HITL tier assignment -> execute / confirm / handoff` state machine이다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+원본은 현재 session-level confirmation policy (`approval=never` 인데도 confirmation tier 4단계 존재) 만 다뤘다. 2026-05-21 deep dive 에서 user-global approval defaults, per-project trust gate, 그리고 archived turn_context 에서 직접 회수한 approval policy field 를 확인했다.
+
+### R2.1 User-global approval defaults
+
+- `[FACT]` `~/.codex/config.toml` 의 `approvals_reviewer = "user"` — 기본 reviewer 는 사용자 본인.
+- `[FACT]` Archived session 에서 직접 회수한 `turn_context.approval_policy = "on-request"`.
+- `[STRONG-INFERENCE]`: 즉 product 기본값은 원본이 본 `approval=never` 가 아니라 `on-request`. 현재 session 의 `never` 는 explicit override 다. 원본 §3.1 의 "approval=never" 는 **이 session 에서만 true**.
+
+### R2.2 Per-project trust 가 HITL 에 들어오는 위치
+
+- `[FACT]` Per-project trust entry 존재: `[projects."<path>"] trust_level = "untrusted" | "trusted"`.
+- `[STRONG-INFERENCE]`: trust=untrusted 인 repo 에서는 원본 §5 의 4-tier confirmation 사다리에 **암묵적 5번째 tier (per-action confirm-all)** 가 끼어드는 것으로 해석된다. 직접 evidence 는 trust_level 의 enum 값 두 개 뿐.
+
+### R2.3 원본 §3 approval ≠ confirmation 구분에 대한 보강
+
+원본 §3 은 approval (runtime/permission) 과 confirmation (policy/consent) 을 직교축으로 그렸다. Round 2 보강:
+
+```mermaid
+flowchart TD
+    A["Candidate action"] --> T["Per-project trust gate"]
+    T -->|trusted| R["Runtime approval policy"]
+    T -->|untrusted| C0["Force action-time confirmation"]
+    R -->|never| C1["Skip runtime escalation"]
+    R -->|on-request| C2["Ask approvals_reviewer when ambiguous"]
+    C1 --> H["HITL tier (R1 §5)"]
+    C2 --> H
+    C0 --> H
+    H --> D1["Hand-off"]
+    H --> D2["Always confirm"]
+    H --> D3["Pre-approval works"]
+    H --> D4["No confirmation needed"]
+```
+
+즉 실제로는 **3축 직교** — `trust_gate × approval_policy × confirmation_tier`. 원본의 2축 모델은 trust 축을 누락하고 있었다.
+
+### R2.4 Chronicle privacy gate 는 HITL surface 가 아니다 (negative finding)
+
+- `[FACT]` Chronicle 의 privacy filter (Chrome incognito, Safari Private, Google Meet 도메인 제외) 는 **자동 차단** 이지 사용자 confirmation 을 요구하지 않는다 (memory-model-audit Round 2 §R2.1 참조).
+- `[STRONG-INFERENCE]`: 즉 chronicle 은 HITL 이 아니라 **declarative privacy policy**. 새 HITL tier 가 아니라 원본 §5.1 consent-critical 의 묵시적 **자동 deny rule** 에 해당한다.
+
+### R2.5 새 attack surface
+
+- **P0**: `approvals_reviewer = "user"` 가 user-global config 한 줄로 변경 가능. malicious local script 가 `approvals_reviewer = "agent"` 같은 (미확인이지만 enum 후보) 값으로 바꾸면 HITL gate 가 우회될 수 있다.
+- **P0**: per-project trust 의 `trust_level = "trusted"` 가 한 줄 주입으로 활성화되면 untrusted-mode 의 force-confirm 이 비활성화된다.
+- **P1**: 원본 §11.2 "approval never 는 confirmation 미존재 의미 아니다" 와 마찬가지로, **on-request 도 confirmation 미존재 의미가 아니다** — 두 정책 모두 HITL tier 와 직교.
+
+### R2.6 원본 unknown 보정
+
+- ~~"action classes 가 내부에서 literal enum 인지 prompt-mediated 분류인지"~~ → 부분 해소: bash subset 은 prefix_rule 테이블 (literal enum 형식). 그러나 sensitive-data/representational/handoff 분류는 여전히 prompt-mediated 로 보이며 정적 테이블 evidence 없음. `[FACT]`
+
+### R2.7 Ownership map
+
+- **bash command 정적 admission 테이블 (`~/.codex/rules/default.rules`)** 자체는 [repo-local-rule-ingestion-audit.md](./repo-local-rule-ingestion-audit.md) Round 2 update 가 소유한다.
+- **Chronicle 화면 캡처 + privacy filter 의 storage substrate** 는 [memory-model-audit.md](./memory-model-audit.md) Round 2 update 가 소유한다.
+- 이 문서는 **HITL tier × approval_policy × trust_gate 3축 직교 모델**만 다룬다.

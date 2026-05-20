@@ -280,3 +280,69 @@ derived part:
 - `update_plan`, subagent, summary, artifact, thread continuity도 visible하다. 그것들의 역할 분해는 모델 층위다. `[FACT]` + `[STRONG-INFERENCE]`
 - 가장 설명력 높은 모델은 `trigger detection -> rail selection -> continuity externalization -> wakeup or detached execution -> re-entry and closeout`이다. `[STRONG-INFERENCE]`
 - 이 모델은 합리적 추론 기반이지만, backend persistence internals까지 본 것은 아니다. `[NON-CLAIM]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 long-horizon task의 continuity externalization rail에 round-2에서 확인된 sub-rail evidence를 추가한다.
+
+### R2.1 Queued follow-ups state is a first-class rail
+
+round-2에서 확인된 thread-follower event 중 long-horizon task management와 직접 관련된 것: `[FACT]`
+
+- `thread-follower-set-queued-follow-ups-state`
+
+해석:
+- “queued follow-ups”라는 thread-attached deferred work queue가 thread-follower channel에 명시적으로 존재한다 `[FACT]`
+- 즉 §4.1 “Stage 1. Trigger detection”과 “Stage 5. Wakeup/re-entry” 사이에 thread-bound queue lane이 별도 rail로 존재한다 `[STRONG-INFERENCE]`
+- 이건 round-1의 `update_plan` (current-session decomposition)과도, `heartbeat`/`cron` (future wakeup)과도 다른 중간 rail이다 `[STRONG-INFERENCE]`
+
+### R2.2 Updated rail role split
+
+§3.2 table에 row 추가:
+
+| Rail | Most plausible role | Why this is not stronger than that |
+| --- | --- | --- |
+| queued follow-ups | thread-bound deferred work queue | `thread-follower-set-queued-follow-ups-state` event 존재로 surface는 확정. backend queue semantics는 안 보임 |
+
+이전 rails와의 관계:
+- `update_plan`: current-session in-flight plan
+- queued follow-ups: thread-bound 다음 turn-or-later deferred items
+- `heartbeat`: thread-bound future wakeup
+- `cron`: workspace-bound detached recurrence
+
+`[STRONG-INFERENCE]`
+
+### R2.3 Continuity externalization rail expanded
+
+round-1 §4.1 “Stage 4. Continuity externalization”의 substrate가 round-2에서 더 명시적이다:
+
+| Substrate | Round-2 evidence |
+| --- | --- |
+| workspace artifacts | 변화 없음 |
+| compressed summary | `thread-follower-compact-thread` event 존재가 확인됐다 — user-driven compact trigger 가능 `[FACT]` |
+| `~/.codex/memories/` | git-versioned `MEMORY.md` + `memory_summary.md` + `raw_memories.md` + `rollout_summaries/` 디렉토리 존재 `[FACT]` |
+| `archived_sessions/*.jsonl` `turn_context` snapshot | 매 turn full policy/model/cwd snapshot이 박힌다 `[FACT]` |
+| queued follow-ups state | thread-bound deferred queue `[FACT]` |
+
+즉 long-horizon re-entry 때 “무엇을 다시 읽을 것인가”의 후보가 round-1보다 훨씬 명확해진다 `[STRONG-INFERENCE]`.
+
+### R2.4 Heartbeat-attached state inspection
+
+round-1 §2.4에서 “automation persistence backend exact shape를 알 수 없다”고 한 부분에 round-2 evidence가 일부 들어온다. `[FACT]`
+
+- `automations/` 디렉토리가 `~/.codex/` 아래 존재 (round-2 inventory)
+- `sqlite/codex-dev.db.automations` table 존재 (round-1)
+- automation tool description은 `$CODEX_HOME/automations/*/automation.toml`을 inspect하라고 적혀 있다 (round-1)
+
+해석:
+- automation persistence는 `automations/` 디렉토리 + `codex-dev.db.automations` table 두 곳을 같이 쓸 가능성이 높다 `[STRONG-INFERENCE]`
+- 다만 “지금 이 머신에 row가 0”인 점은 round-1에서 본 caveat 그대로 — `automations/` 디렉토리도 같은 round-2 시점에 점검이 필요 (이 round에서는 size만 확인)
+
+### R2.5 Updated NON-CLAIM boundary
+
+이전 §7의 NON-CLAIMs는 그대로 유효. 추가:
+
+6. exact semantics of `thread-follower-set-queued-follow-ups-state` (visible event, but queue execution and reordering semantics는 안 보임)
+7. whether `~/.codex/memories/` is read on re-entry automatically, or only on explicit user/skill trigger

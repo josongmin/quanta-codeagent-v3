@@ -380,3 +380,56 @@ Classification:
 - 현재 세션 기준 Codex의 가장 큰 차별점은 `도구가 많다` 자체가 아니라, **정책 계층이 두꺼운 execution-oriented agent contract**라는 점이다. `[STRONG-INFERENCE]`
 - mode, sandbox, approval, HITL, plugin preference, repo-local ops, budget rules, honesty rail이 동시에 visible하게 작동한다는 점이 일반 chat assistant나 단순 coding bot과 구분되는 핵심이다. `[FACT]` + `[STRONG-INFERENCE]`
 - 반대로 hidden planner/memory/replay superiority까지는 현재 증거로 차별점이라고 주장하면 안 된다. `[FACT]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 라운드는 실제 설치된 `Codex.app` (build 2867) 바이너리/리소스/IPC를 직접 본 결과, **시스템 아키텍처 수준의 차별점**이 추가로 드러났다. 기존 differentiator 1~8은 contract surface 차원에 머물렀지만, Round 2는 **runtime topology**가 비교 baseline과 본질적으로 다른 부분이다.
+
+세부 `[FACT]` 출처는 [direct-observable-facts.md](direct-observable-facts.md) §14~26 참조.
+
+### 16. Differentiator 9: always-on screen-memory daemon
+
+- `[FACT]` Codex는 별도의 `codex_chronicle` daemon을 번들한다. 4.3 MB Rust binary로, continuous screen capture + OCR + recursive summarization을 수행해 `~/.codex/memories/`에 git-versioned로 누적한다.
+- `[FACT]` 이 머신에서 `~/.codex/memories/extensions/chronicle/resources/`에 1,390개 markdown summary 파일(39.8 MB)이 존재한다.
+- Claude Code 같은 비교 baseline에서는 이에 대응하는 always-on screen-memory daemon이 관측되지 않았다. `[STRONG-INFERENCE]`
+
+### 17. Differentiator 10: vendored `browser-use` deep integration
+
+- `[FACT]` `package.json`에 `browser-api`, `browser-backend-common`, `browser-common`이 internal workspace 패키지로 들어 있고, `../../../lib/browser_use/` 아래에서 linked된다.
+- `[FACT]` native peer authorization binary가 함께 ship된다.
+- 단순한 plugin이 아니라 vendored library + native peer라는 점이 일반 coding agent와 구분된다. `[STRONG-INFERENCE]`
+
+### 18. Differentiator 11: in-app MCP server (`SkyComputerUseService`)
+
+- `[FACT]` `Codex Computer Use.app` 안에 `SkyComputerUseService`라는 자체 MCP server가 들어 있고, macOS Accessibility + CGEvent framework를 사용한다.
+- 즉 MCP를 단순 client로만 쓰는 것이 아니라, desktop automation을 위한 자체 MCP server를 in-app으로 ship한다. `[STRONG-INFERENCE]`
+
+### 19. Differentiator 12: `extension-host` native binary + Chrome extension pairing
+
+- `[FACT]` OS/arch별 `extension-host` native binary가 ship되며, native messaging host name `com.openai.codexextension`을 통해 Chrome extension (`hehggadaopoacecdllhhajmbjkdcmajg`)과 page한다.
+- browser extension과 native binary의 페어링 자체가 시스템 차원의 surface로, 일반 chat agent에서는 보기 어려운 구성이다. `[STRONG-INFERENCE]`
+
+### 20. Differentiator 13: `bare-modifier-monitor` global modifier-key hook
+
+- `[FACT]` `bare-modifier-monitor`라는 별도의 Swift binary (150 KB)가 ship된다.
+- global modifier-key hook을 별도 프로세스로 실행하는 구조는 chat assistant 비교 baseline에는 없다. `[STRONG-INFERENCE]`
+
+### 21. Differentiator 14: Skybridge MCP UI sandbox protocol
+
+- `[FACT]` MCP UI widget이 Skybridge라는 iframe-based sandbox protocol을 통해 격리되며, 12개의 named MessagePort로 host와 통신한다.
+- single-origin iframe sandbox는 일반 chat assistant가 갖지 않는 attack-surface containment layer다. `[STRONG-INFERENCE]`
+
+### 22. Differentiator 15: structured local agent-activity trace
+
+- `[FACT]` `~/.codex/logs_2.sqlite`는 Sentry/Datadog-style schema의 structured agent activity trace를 로컬에 보존하고, size-based sliding window로 retention된다.
+- chat-only assistant나 simple coding agent에서는 이런 high-resolution local audit trail이 보이지 않는다. `[STRONG-INFERENCE]`
+
+### 23. Round 2 — implication for "execution-oriented agent contract" framing
+
+§15에서 정리한 "정책 계층이 두꺼운 execution-oriented agent contract"는 여전히 핵심이지만, Round 2는 **그 contract가 단순 prompt-level이 아니라 system-level (daemon, native binary, MCP server, iframe sandbox, audit trail)** 차원에서 구현돼 있음을 직접 관측했다.
+
+즉:
+- 기존 차별점이 "thick policy"였다면,
+- Round 2가 추가하는 차별점은 "thick runtime topology"다. `[STRONG-INFERENCE]`

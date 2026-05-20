@@ -377,19 +377,29 @@ const resolveMemoryContext = async (
     .map((b) => (b.type === "text" ? b.text : ""))
     .join(" ")
     .trim()
-  const block = await recallContext(
-    {
-      store: config.store,
-      ...(config.embedder ? { embedder: config.embedder } : {}),
-      ...(recorder ? { onStats: (s) => recorder.memoryRecall(s) } : {}),
-    },
-    queryText || undefined,
-    {
-      limit: config.memory?.recallLimit ?? 5,
-      ...(config.memory?.recallTiers ? { tiers: config.memory.recallTiers } : {}),
-    },
-  )
-  return block ?? undefined
+  // R-Phase1 P0-3: memory recall is best-effort — a failing embedder or store
+  // must not break the turn. Convert the throw into an `error` AgentEvent (so
+  // probe/triage can see the failure) and degrade to "no memory context", same
+  // observable as a configured-but-empty store.
+  try {
+    const block = await recallContext(
+      {
+        store: config.store,
+        ...(config.embedder ? { embedder: config.embedder } : {}),
+        ...(recorder ? { onStats: (s) => recorder.memoryRecall(s) } : {}),
+      },
+      queryText || undefined,
+      {
+        limit: config.memory?.recallLimit ?? 5,
+        ...(config.memory?.recallTiers ? { tiers: config.memory.recallTiers } : {}),
+      },
+    )
+    return block ?? undefined
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    config.stream.emit({ type: "error", message: `memory recall failed: ${message}` })
+    return undefined
+  }
 }
 
 /** Proactive top-of-turn compaction when compaction config is present. No-op
@@ -403,21 +413,44 @@ const maybeCompact = async (
   if (!config.compaction) return
   const snapshot = [...wm.snapshot()]
   const before = estimateTokens(snapshot)
-  const result = await compactIfNeeded({
-    messages: snapshot,
-    // ADR-0011: optional dedicated summarizer model; absent ⇒ main
-    // llm (byte-identical). Summarization is low-stakes; a cheaper/faster
-    // model spares the main model on every compaction.
-    llm: config.compaction.summarizerLlm ?? config.llm,
-    system,
-    ...(config.compaction.thresholdTokens !== undefined
-      ? { thresholdTokens: config.compaction.thresholdTokens }
-      : {}),
-    ...(config.compaction.keepRecentTurns !== undefined
-      ? { keepRecentTurns: config.compaction.keepRecentTurns }
-      : {}),
-  })
+  // R-Phase1 P0-2: proactive compaction failures (summarizer LLM throws / times
+  // out / rate-limits) must surface as an `error` AgentEvent for trajectory +
+  // probe, NOT propagate as an uncaught exception that aborts the turn before
+  // any observability lands. We degrade gracefully (skip compaction this turn);
+  // the reactive PTL path remains as the safety net for actual token-budget
+  // overruns. RFC §1.2 default-OFF byte-identical preserved — when compaction
+  // is unconfigured, the try-catch never runs.
+  let result: Awaited<ReturnType<typeof compactIfNeeded>>
+  try {
+    result = await compactIfNeeded({
+      messages: snapshot,
+      // ADR-0011: optional dedicated summarizer model; absent ⇒ main
+      // llm (byte-identical). Summarization is low-stakes; a cheaper/faster
+      // model spares the main model on every compaction.
+      llm: config.compaction.summarizerLlm ?? config.llm,
+      system,
+      ...(config.compaction.thresholdTokens !== undefined
+        ? { thresholdTokens: config.compaction.thresholdTokens }
+        : {}),
+      ...(config.compaction.keepRecentTurns !== undefined
+        ? { keepRecentTurns: config.compaction.keepRecentTurns }
+        : {}),
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    config.stream.emit({
+      type: "error",
+      message: `proactive compaction failed: ${message}`,
+    })
+    return
+  }
   if (result.compacted) {
+    // R-Phase2 P1-1: emit a `recovery:"compact"` event with `detail:"proactive"`
+    // so trajectory consumers can distinguish proactive (top-of-turn threshold)
+    // compactions from reactive (PTL-driven) ones. The reactive site already
+    // emits the `compact` reason; this closes the symmetry. Pure observation
+    // (NullStream swallows), no control-flow impact.
+    emitRecovery(config, "compact", "proactive")
     // Tier 0 safety hardening (ADR-0011): feed the thrash counter. A proactive compact
     // that fails to meaningfully shrink is a no-progress strike.
     breaker?.recordProactive(before, estimateTokens(result.messages))
@@ -951,6 +984,19 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
         sessionId,
         finalMessages: messages,
       })
+    }
+    // R-Phase5 P0-A: graceful shutdown of any pending background subagents.
+    // `features.cleanup` is set ONLY when `config.subagent` is configured
+    // (features.ts:204+), so `?.()` is a no-op for default-OFF sessions
+    // (RFC §1.2 byte-identical preserved). Idempotent: a second call sees
+    // `pendingIds() === []` and returns immediately. Failures are best-effort
+    // (the session is already finishing) — surface as an `error` event so
+    // probe/triage can see them, but do NOT block the outcome resolution.
+    try {
+      await features.cleanup?.()
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      stream.emit({ type: "error", message: `subagent cleanup failed: ${message}` })
     }
     recorder?.stopReason(reason)
     if (cfg.hooks) await cfg.hooks.emit({ type: "session_end", reason, turns })

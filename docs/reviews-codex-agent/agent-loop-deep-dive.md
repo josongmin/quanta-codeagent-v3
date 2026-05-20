@@ -431,3 +431,53 @@ flowchart TD
 5. 코드 작업은 단순 1-pass가 아니라 `owner -> adjacent surfaces -> edit strategy -> leftovers -> closeout`의 repair loop를 가진다. `[STRONG-INFERENCE]`
 6. review와 audit는 code modification과 다른 specialized loop를 가진다. `[STRONG-INFERENCE]`
 7. 내부 구현이 정확히 어떤 hidden typed router/enum으로 되어 있는지는 직접 관측 불가다. `[FACT]`
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 round에서는 Codex Rust binary 자체를 풀어서, `[WEAK-INFERENCE]`로만 가지고 있던 hidden runtime의 일부를 `[FACT]` 수준으로 끌어올린다.
+
+### A. Codex Rust binary fingerprint
+
+- `[FACT]` Binary path: `/Applications/Codex.app/Contents/Resources/codex`.
+- `[FACT]` 182MB Mach-O arm64. CLI version 0.130.0 (models_cache의 `client_version`은 server-pushed 0.131.0).
+- `[FACT]` Workspace crates (string table에서 복원): `codex-core, codex-api, codex-client, codex-exec, codex-exec-server, codex-mcp, codex-mcp-client, codex-cli, codex-tui, codex-app-server, codex-linux-sandbox, codex-plugin, codex-skill-install, codex-skill-list, codex-network`.
+- `[FACT]` Built-in tools (binary string evidence): `shell, apply_patch (V4A diff with *** Begin Patch / *** End Patch), read, list_files, search (rg-backed), web_search, bash`.
+- `[FACT]` 182MB 크기의 origin: static tokio + reqwest + rustls + sqlx + ratatui + WebRTC + V8 (for Node REPL support) + ~50% debug symbols. **No embedded ML models** (no `.onnx` / `.gguf` / `.safetensors`).
+- `[FACT]` Bypass flag exists: `--dangerously-bypass-approvals-and-sandbox` (default disabled).
+
+### B. Crate-to-loop ownership mapping
+
+| Crate | What this round's evidence assigns to it | Class |
+| --- | --- | --- |
+| `codex-core` | inner agent loop, tool dispatch (`core/src/tools/router.rs` path string 존재) | `[FACT]` for path string, `[STRONG-INFERENCE]` for loop ownership |
+| `codex-app-server` | Electron-fronted JSON-RPC turn router (Round 2의 `exec-server` 상위) | `[STRONG-INFERENCE]` |
+| `codex-tui` | terminal UI agent loop entry | `[STRONG-INFERENCE]` |
+| `codex-mcp` / `codex-mcp-client` | MCP transport (위임: `mcp-usage-audit.md`) | `[STRONG-INFERENCE]` |
+| `codex-linux-sandbox` | sandbox enforcement layer | `[STRONG-INFERENCE]` |
+| `codex-plugin` | plugin host (위임: `plugin-audit.md`) | `[STRONG-INFERENCE]` |
+| `codex-skill-install` / `codex-skill-list` | skill admin path (위임: `skills-audit.md`) | `[STRONG-INFERENCE]` |
+| `codex-network` | HTTP/SSE/WebSocket client layer (위임: `external-call-record-replay-audit.md`) | `[STRONG-INFERENCE]` |
+
+### C. §9 checklist upgrades
+
+이전 §9.3 WEAK-INFERENCE에서 강도가 바뀐 항목:
+
+- ~~"내부에서 literal enum/ADT가 정확히 어떤 이름으로 구현돼 있는지"~~ **CORRECTED 2026-05-21**: crate 경계까지는 `[FACT]`이지만 enum 멤버 자체는 여전히 unknown. WEAK → FACT는 crate 단위에서만 적용된다.
+- ~~"exact prompt serialization order"~~ **CORRECTED 2026-05-21**: 그대로 WEAK-INFERENCE. binary string 증거가 prompt order를 결정하지 않는다.
+
+§9.2 STRONG-INFERENCE 신규 항목:
+
+- inner agent loop는 단일 crate (`codex-core`) 안에 closed되어 있고, surface entry (`exec`, `exec-server`, `tui`, `chat`, `resume`)들은 같은 loop를 공유한다. (subcommand 분배는 `execution-loop.md` owner.)
+- tool dispatch는 `core/src/tools/router.rs` path string으로 noun-form ownership을 가진다. (tool routing surface는 `tool-routing-and-triggering.md` owner.)
+- sandbox/approval enforcement crate (`codex-linux-sandbox`)는 LLM이 아니라 runtime side에 있다 — `[MODEL]`이던 boundary가 `[STRONG-INFERENCE]`로 승격.
+
+### D. What deliberately stays unchanged
+
+- §3 intent understanding의 `constraint-bounded LLM routing` 결론은 binary 증거에 의해 더 강해졌지만 표현은 유지한다.
+- §4 task-kind taxonomy는 binary string에서 enum literal로 발견된 것은 아니라서 `[STRONG-INFERENCE]` 그대로.
+- §7 specialized sub-loops도 `[STRONG-INFERENCE]` 유지.
+
+### E. NON-CLAIM 추가
+
+- hidden planner가 `codex-core` 안의 어떤 module path에 있는지 단정하지 않는다. (`core/src/tools/router.rs` 외에는 path string이 안정적이지 않음.)
+- LLM provider routing (OpenAI vs Anthropic)이 단일 trigger condition인지 multi-provider인지는 이 doc에서 결론짓지 않는다. (`external-call-record-replay-audit.md` owner.)

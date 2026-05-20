@@ -376,7 +376,13 @@
         "!src/apps/**",
         "tests/**",
         "!tests/unit/cli-summarizer.test.ts",
-        "!tests/unit/dotenv.test.ts"
+        "!tests/unit/cli-session-commands.test.ts",
+        "!tests/unit/cli-resume-heuristic.test.ts",
+        "!tests/unit/dotenv.test.ts",
+        "!tests/unit/env-knob-branches.test.ts",
+        "!tests/integration/session-ux-e2e.test.ts",
+        "!tests/integration/session-chaos-and-attack.test.ts",
+        "!tests/integration/session-stress-and-concurrent.test.ts"
       ],
       "linter": {
         "rules": {

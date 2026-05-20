@@ -21,7 +21,15 @@
     "bench": "bun run src/apps/bench/index.ts",
     "probe": "bun run src/apps/probe/index.ts",
     "bench:verified": "bun run src/apps/bench/index.ts --swebench /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl",
-    "fc": "bun run tools/feature-catalog/cli.ts"
+    "fc": "bun run tools/feature-catalog/cli.ts",
+    "eval": "bun run src/apps/eval/index.ts",
+    "eval:audit": "bun run src/apps/eval/index.ts audit",
+    "eval:synthetic": "bun run src/apps/eval/index.ts synthetic",
+    "eval:trajectory": "bun run src/apps/eval/index.ts trajectory",
+    "eval:replay": "bun run src/apps/eval/index.ts trajectory replay",
+    "eval:compare": "bun run src/apps/eval/index.ts compare",
+    "eval:generate": "bun run src/apps/eval/index.ts generate",
+    "eval:report": "bun run src/apps/eval/index.ts report"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",

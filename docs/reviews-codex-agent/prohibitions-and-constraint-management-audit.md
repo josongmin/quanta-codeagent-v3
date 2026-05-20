@@ -416,3 +416,35 @@ flowchart TD
 - 실제 집행은 주로 `pre-action filtering`, `tool path restriction`, `final-answer honesty`의 세 rail로 나타난다. `[STRONG-INFERENCE]`
 - 사용자 요청은 독립 절대 명령이 아니라 상위 정책 경계 안에서만 실행된다. `[FACT]` + `[STRONG-INFERENCE]`
 - hidden internal implementation details는 직접 관측되지 않으므로, literal policy engine 존재를 단정하는 것은 피하는 것이 맞다. `[FACT]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 Codex Desktop build 2867 (codex-rs 0.130.0)에서 plugin-shipped SKILL.md policy를 직접 inspect한 round-2 결과를 정리한다. Round-2 evidence는 §4의 typed prohibition 분류를 plugin 수준 policy로 확장한다.
+
+### R2.1 Computer Use plugin — 4-tier action policy (FACT)
+
+Computer Use plugin의 `SKILL.md`는 4-tier prohibition/consent policy를 명시한다:
+
+| Tier | Examples | Action gate |
+| --- | --- | --- |
+| **Always confirm at action-time** | financial transactions, CAPTCHAs, software install, communications to third parties | mandatory user confirmation `[FACT]` |
+| **Pre-approval works** | login, file uploads, browser permission requests | confirmation can be hoisted to earlier in the flow `[FACT]` |
+| **No confirm needed** | cookie consent, ToS acceptance, file downloads | proceed without confirmation `[FACT]` |
+| **Always hand-off to user** | password changes, HTTPS bypasses, paywall bypasses | the agent must not act; user must drive `[FACT]` |
+
+`[MODEL]` 이 4-tier 체계는 round-1 §4.4 "HITL consent permission"에서 추상적으로 본 4-axis policy의 plugin-specific concretization이다. round-1 문서가 generic하게 enumerate한 HITL classes는 **Computer Use plugin이 ground-truth source**임이 round-2에서 확인된다.
+
+### R2.2 Browser/Chrome plugin — capability + privacy constraints (FACT)
+
+- `chrome` plugin v0.1.7 manifest declares `capabilities: [Interactive, Read]` only — **no Write**. `[FACT]`
+- `chrome` plugin privacy notice (verbatim): **"Browser data from using this plugin may be used for training"**. `[FACT]`
+- `browser` plugin v0.1.0-alpha2 default scope is restricted to `localhost`, `file://`, in-app browser tabs only. `[FACT]`
+
+### R2.3 Implications for the prohibition model
+
+- §4.4 edit prohibitions ("위험하거나 dishonest한 수정 방지")는 plugin level에서도 직접 enforced된다. `chrome` plugin이 Write capability를 **선언적으로 빼버린 것**은 plugin manifest 자체가 prohibition channel임을 보여준다. v3가 plugin model을 흡수한다면 capability subset declaration을 통한 prohibition rail을 가져올 가치가 있다. `[FACT]`
+- §4.1 fact/truth prohibitions와 별도로, **data-flow prohibitions**라는 새 category가 round-2에서 드러난다: chrome plugin의 "data may be used for training" notice는 prohibition이 아니라 *disclosure*지만, 그 disclosure 자체가 사용자에게 **trust boundary를 informed-consent로 surface**하는 권한 메커니즘이다. round-1 framework에는 이 axis가 없었다. `[FACT]` + `[MODEL]`
+- Computer Use plugin의 "always hand-off to user" tier는 round-1 §4.3 escalation prohibition과 §4.4 destructive command prohibition의 union을 plugin-domain language로 표현한다. password changes / HTTPS bypasses / paywall bypasses는 모두 *technically possible*이지만 *categorically forbidden* paths다. `[FACT]`
+- §11 best-fit management model의 priority-ordered stack에 round-2가 한 위치를 추가한다: plugin-shipped SKILL.md policy는 `Repo-local Rules`와 `Skill-specific Rules` 사이에 위치하는 또 다른 layer다. plugin manifest의 `capabilities` subset declaration은 그보다 더 위(tool-level allowlist 수준)에서 동작한다. `[FACT]` + `[MODEL]`

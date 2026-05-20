@@ -26,6 +26,7 @@
 - [tool-inventory-and-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/tool-inventory-and-usage-audit.md)
 - [mcp-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/mcp-usage-audit.md)
 - [plugin-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/plugin-audit.md)
+- [browser-runtime/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/README.md)
 - [memory-model-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/memory-model-audit.md)
 - [thread-management/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/thread-management/README.md)
 - [session-management-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/thread-management/session-management-audit.md)
@@ -143,6 +144,7 @@ depth taxonomy 대응:
 | permission and consent gating | capability exposure, sandbox, approval, HITL rails | choose compliant path among allowed ones | [permission-management-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/permission-management-audit.md), [sandbox-and-approval-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/sandbox-and-approval-audit.md), [hitl-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/hitl-audit.md) |
 | tool execution | actual process/browser/web/tool run, result capture, session ids | decide whether and when to call | [turn-context-and-runtime-interface.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/turn-context-and-runtime-interface.md) |
 | tool, MCP, and plugin family choice | visible tools, plugins, MCP resource rails | map signal family to best execution surface | [tool-inventory-and-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/tool-inventory-and-usage-audit.md), [mcp-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/mcp-usage-audit.md), [plugin-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/plugin-audit.md) |
+| browser subsystem specifics | browser plugin contract, browser-client bootstrap, tab/capability runtime, browser comment overlay, browser safety | choose browser path, understand live browser constraints, explain selected-region comment sync, rebuild similar subsystem | [browser-runtime/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/README.md) |
 | working state | thread history persistence, session handles, artifact persistence | owner shortlist, hypothesis, blockers, next-step queue | [memory-model-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/memory-model-audit.md) |
 | task decomposition and queueing | none | current active item, pending items, deferred validation, closeout queue | [task-management-and-todo-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/task-management-and-todo-audit.md) |
 | bounded subagent delegation | child lifecycle surface, child handles, optional fork surface | sidecar task split, ownership boundary, integration timing | [subagent/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/thread-management/subagent/README.md) |
@@ -248,6 +250,7 @@ memory/session 문서를 다시 재복제하지 않고, continuity strength만 m
 | exact visible tool families and when they are chosen | skim here | [tool-inventory-and-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/tool-inventory-and-usage-audit.md) |
 | MCP discovery vs retrieval vs execution | skim here | [mcp-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/mcp-usage-audit.md) |
 | plugin-preferred capability routing | skim here | [plugin-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/plugin-audit.md) |
+| browser plugin/runtime, selected-region overlay, and tab/capability surface | skim here | [browser-runtime/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/README.md) |
 | non-LSP local signals | skim here | [may-20-codex-signal.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/may-20-codex-signal.md) |
 | LSP-like semantic surface | skim here | [may-20-codex-lsp.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/may-20-codex-lsp.md) |
 | working state와 memory recovery | skim here | [memory-model-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/memory-model-audit.md), [thread-management/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/thread-management/README.md), [session-management-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/thread-management/session-management-audit.md) |
@@ -294,3 +297,31 @@ memory/session 문서를 다시 재복제하지 않고, continuity strength만 m
 - LLM은 `의도와 증거 조건`을 해석한다
 - 둘은 `tool call -> observation -> state update` 인터페이스로 반복한다
 - 이 router는 전체 지도를 제공하고, 실제 논증은 owner depth 문서에서 닫는다
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 router 본문에는 새로운 fact를 추가하지 않는다. depth doc 사이의 ownership 정정만 고정한다.
+
+새로운 ownership 갱신:
+
+| Topic introduced in deep dive | Owner doc (definitive fact 위치) | Router의 역할 |
+| --- | --- | --- |
+| Anthropic SDK literal (`cache_creation_input_tokens`, `anthropic.stream_error`) presence in `app-session.js` + `worker.js` | [external-call-record-replay-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/external-call-record-replay-audit.md) | trigger path는 `[MODEL]`로만 가지고 router는 multi-provider 단정을 하지 않는다 |
+| Skybridge / MCP UI surface 및 `settings.mcp.detail.command`, `tool_search` 류 IPC | [mcp-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/mcp-usage-audit.md) | router는 MCP를 boundary로만 언급, 채널 카탈로그는 깊이 문서가 소유 |
+| `logs_2.sqlite` (logs retention, sliding window, PASSIVE wal_checkpoint) | [thread-management/storage-and-db-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/thread-management/storage-and-db-audit.md) | router는 continuity rail 표에만 weak reference 유지 |
+| Rust workspace crate 구조 (`codex-core`, `codex-app-server`, `codex-tui`, …) 및 subcommand 목록 | [agent-loop-deep-dive.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/agent-loop-deep-dive.md) / [execution-loop.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/execution-loop.md) | router는 cite하지 않고 owner 문서로만 위임 |
+| `turn_context` record schema (`approval_policy, sandbox_policy, personality, collaboration_mode, ...`) | [turn-context-and-runtime-interface.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/turn-context-and-runtime-interface.md) | router는 6.section continuity 외에는 schema 미보유 |
+| Thread-follower event taxonomy (13개 distinct events) | [response-assembly-and-closeout.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/response-assembly-and-closeout.md) 의 closeout-side 사용, [tool-routing-and-triggering.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/tool-routing-and-triggering.md) 의 IPC envelope 사용 | router는 단일 owner를 강제하지 않고 두 곳에서 다른 lens로 cite한다 |
+| OpenAI/ChatGPT endpoint 목록, telemetry 헤더, `models_cache.json` ETag | [external-call-record-replay-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/external-call-record-replay-audit.md) | router는 transport boundary 단정 안 함 |
+| 4 V4A `apply_patch` markers, `~/.codex/rules/default.rules` allowlist | [tool-inventory-and-usage-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/tool-inventory-and-usage-audit.md) | router는 capability map row에 노출하지 않는다 |
+
+router 자체 invariants 변경:
+
+- §3 Canonical invariants table에는 row 추가 없음. deep-dive에서 발견된 binary-level facts는 invariant level이 아니라 capability map / surface inventory level이다.
+- §4 Boundary summary는 그대로 유지. 신규 facts는 depth doc 내부 capability/observation level이다.
+- §6 Continuity boundary의 `live exec session`, `workspace artifacts` row는 그대로 유지하되, `logs_2.sqlite` 같은 implementation-level evidence는 owner doc에 두고 router는 weak reference만 유지한다.
+
+규칙:
+
+- Router는 binary-strings, schema 필드, IPC envelope 같은 implementation-level fact를 다시 인용하지 않는다.
+- depth doc 사이 권한 충돌이 의심되면 위 표를 새 owner 진위로 본다.

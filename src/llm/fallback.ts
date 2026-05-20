@@ -135,6 +135,15 @@ export class FallbackLLM implements LLMPort {
       yielded.value = true
       yield ev
     }
+    // R-Phase5 P1-G: if the replacement provider yielded ZERO events (an
+    // edge case — accepted-but-empty response, or all events filtered) AND
+    // a prior partial exists, we still need to tombstone the dead partial.
+    // Otherwise the assembler keeps the prior provider's half-streamed
+    // content as the final message. Pre-fix the `for await` never ran, so
+    // `resetEmitted` stayed false and the tombstone was dropped silently.
+    if (priorPartial && !resetEmitted) {
+      yield { type: "stream_reset" }
+    }
   }
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {

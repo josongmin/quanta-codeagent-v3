@@ -445,3 +445,71 @@ Classification:
 - 이미 읽은 파일, 최근 실패, 현재 task decomposition, 남은 갭은 working memory로 보는 것이 observed behavior와 가장 잘 맞는다. `[STRONG-INFERENCE]`
 - 로컬 문서/파일/코드 변경은 durable artifact memory 역할을 한다. `[STRONG-INFERENCE]`
 - 현재 세션에는 explicit long-term global memory API evidence가 없으므로, 그 부분은 overclaim하면 안 된다. `[FACT]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+원본 작성 당시에는 `dedicated memory tool 없음 / artifact-as-memory` 모델로 닫았다. 2026-05-21 deep dive에서 Codex Desktop (build 2867, codex-rs 0.130.0) 바이너리를 직접 검사한 결과, 그 결론은 **이 세션 안에서는 옳지만 전체 product 차원에서는 보수적이었다**는 게 드러났다. Codex는 별도 memory daemon과 git-versioned memories 트리를 운영한다.
+
+### R2.1 Chronicle = 별도 memory daemon (separate binary, separate process)
+
+- `[FACT]` Binary: `/Applications/Codex.app/Contents/Resources/codex_chronicle` (4.3MB Mach-O arm64), Rust + tokio.
+- `[FACT]` Single-instance lock: `$STORAGE_ROOT/codex_chronicle.lock` + `chronicle-started.pid` (별도 PID, 별도 lifecycle).
+- `[FACT]` Persistent storage path: `~/.codex/memories/extensions/chronicle/resources/{ISO}-{4alpha}-{10min|6h}-{slug}.md`.
+- `[FACT]` Ephemeral storage: `$TMPDIR/chronicle/screen_recording/{ts}-display-{display_id}/{ -latest.jpg, .capture.json, .ocr.jsonl, frame-N-MINUTEBUCKETZ.jpg}`.
+- `[FACT]` Capture trigger enum: `FirstFrame`, `VisualChange`, `Heartbeat`, `MinuteBucket`. Adaptive sampling — 프레임 처리가 느려지면 backoff.
+- `[FACT]` OCR via Apple Vision; 화면 캡처 via Apple ScreenCaptureKit.
+- `[FACT]` Two-tier recursive summarizer: `10min` (per-minute updates) → `6h` (per-hour, rolls up children). Time format `%Y-%m-%dT%H-%M-%SZ`.
+- `[FACT]` Privacy filter excludes Chrome incognito (`com.google.Chrome[.beta|.canary|.dev]`), Safari Technology Preview / Safari Private Browsing, Google Meet (`meet.google.com`).
+- `[FACT]` Consolidation model invocation: `codex chronicle` spawns `codex exec --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --sandbox read-only` (자체 subprocess) — 메인 agent와 분리된 locked-down 인스턴스.
+- `[FACT]` Locked-down TOML reconstructed (consolidation subprocess가 쓰는 config):
+  ```toml
+  [model_provider] model_provider = "openai-memgen"
+  [model_providers.openai-memgen]
+    name = "OpenAI"
+    requires_openai_auth = true
+    supports_websockets = true
+    http_headers = { "X-OpenAI-Memgen-Request" = "true" }
+  [features] memories=false, apps=false, plugins=false, multi_agent=false,
+             tool_search=false, tool_suggest=false, web_search="disabled"
+  [mcp_servers]   # empty
+  [plugins]       # empty
+  [apps] _default.enabled=false
+  [analytics] enabled=false
+  [otel] exporter="none", trace_exporter="none", metrics_exporter="none"
+  [project] doc_max_bytes=0
+  [skills.bundled] enabled=false
+  [[skills.config]] name="chronicle", enabled=false
+  ```
+- `[FACT]` 이 머신 실측: 1,390개 chronicle summary markdown / 39.8MB / 8일치.
+- `[FACT]` 설치 sentinel: `~/.codex/.codex-chronicle-assets-to-install.marker` (16-char hex, 예: `be2e105c8ac9cfcb`) — bundled chronicle asset 버전 마커.
+- `[FACT]` Bundled skill installed to `~/.codex/skills/chronicle/instructions.md` (5.8KB) + `resources/` (~2MB).
+
+### R2.2 Codex memory layer는 git-versioned tree다
+
+- `[FACT]` `~/.codex/memories/` 는 **git-versioned** 디렉터리이며 다음을 포함한다:
+  - `MEMORY.md` (411KB on this machine)
+  - `memory_summary.md` (73KB)
+  - `raw_memories.md` (714KB)
+  - `rollout_summaries/`
+  - `.git/`
+- `[FACT]` Chronicle resources는 같은 트리의 별도 namespace `extensions/chronicle/resources/` 아래에 들어간다. memories 트리와 chronicle 트리는 분리된 namespace지만 같은 git-versioned root 안에 있다.
+
+### R2.3 원본 결론에 대한 보정
+
+원본 §11 ("hidden vector memory / user-global persistent preference store / cross-thread autobiographical memory API: not enough evidence") 는 **현재 세션 안에서 보이는 tool surface에만 한정**해서는 여전히 옳다. 그러나 Codex Desktop product 차원에서는 다음과 같이 보정된다:
+
+- ~~user-global persistent preference store는 직접 증거가 없다~~ **CORRECTED 2026-05-21**: `~/.codex/memories/` 가 user-global, git-versioned, persistent memory store다. session tool로 직접 노출되지 않을 뿐 product 차원에서는 존재한다. `[FACT]`
+- ~~cross-thread autobiographical memory API 증거 없음~~ **CORRECTED 2026-05-21**: chronicle daemon은 화면 OCR 기반의 cross-thread autobiographical memory를 OS-level에서 수집한다. agent thread tool로 노출되지는 않지만 product subsystem으로 존재한다. `[FACT]`
+
+### R2.4 새 attack surface
+
+- **P0**: chronicle 화면 캡처가 privacy filter를 우회당하면 (Incognito 우회, Meet 도메인 미감지 등) 의도치 않은 화면 컨텐츠가 git-versioned memories 트리에 영구 기록된다.
+- **P1**: `~/.codex/memories/.git/` 가 git-versioned라는 점은 손상/탬퍼링 evidence trail이 남는다는 뜻이며 동시에 memory rollback이 가능하다는 뜻이다.
+- **P1**: chronicle consolidation subprocess가 `--ignore-user-config --ignore-rules --sandbox read-only` 로 격리되지만, 그 격리가 풀리면 사용자 chronicle을 임의 LLM 호출에 노출시킬 수 있다.
+
+### R2.5 Sibling doc ownership
+
+- chronicle의 **prompt-injection defense system prompt 문구**는 [prompt-and-policy-stack.md](./prompt-and-policy-stack.md) Round 2 update 가 소유한다.
+- chronicle의 **HITL/consent surface**(예: 화면 캡처 동의)는 [hitl-audit.md](./hitl-audit.md) Round 2 update 가 소유한다 — 이 문서는 메모리 substrate 그 자체만 다룬다.

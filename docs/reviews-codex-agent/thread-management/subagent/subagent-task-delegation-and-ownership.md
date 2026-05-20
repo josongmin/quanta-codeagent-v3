@@ -140,3 +140,63 @@ child가 무언가를 결론냈더라도 마지막 승자는 parent-side fresh e
 4. older docs or memory
 
 즉 child result는 strong hint일 수는 있어도 final authority는 아니다.
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 task delegation / ownership 모델에 round-2에서 확인된 background subagent와 external-agent migration evidence를 반영한다. 두 별도 lifecycle 자체의 owner는 [subagent-management-audit.md](./subagent-management-audit.md#round-2-update-2026-05-21-deep-dive)와 [subagent-lifecycle-and-runtime-interface.md](./subagent-lifecycle-and-runtime-interface.md#round-2-update-2026-05-21-deep-dive)다.
+
+### R2.1 Delegation mode matters now
+
+round-1에서는 delegation = foreground sidecar 하나의 모델로 가정했다. round-2 facts 후로는 delegation surface에 최소 3가지 mode가 있다:
+
+| Mode | Surface | Round-2 evidence |
+| --- | --- | --- |
+| foreground subagent | `spawn_agent` family | round-1 그대로 |
+| background subagent | `/tasks` page + `list-pending-automation-run-threads` IPC | `[FACT]` |
+| external-agent migration | `external_agent_import_*` events + `external_agent_tool_call`/`_result` bridge | `[FACT]` |
+
+해석:
+- ownership/integration contract는 mode마다 다르게 적용돼야 한다 `[STRONG-INFERENCE]`
+- 즉 §1 “직접 보이는 rule”은 foreground subagent 기준이고, background subagent와 external-agent에는 별도 ownership 정책이 필요하다 `[STRONG-INFERENCE]`
+
+### R2.2 Foreground vs background ownership
+
+| Axis | Foreground subagent | Background subagent |
+| --- | --- | --- |
+| Parent loop integration | `wait_agent` synchronous join | UI-visible queue + later integration |
+| Critical-path block | parent can stall on `wait_agent` | parent doesn't stall — UI surfaces it |
+| Ownership boundary check | parent must check before `close_agent` | UI/automation flow must check at result time |
+| Closeout authority | parent thread | possibly automation or UI-driven review |
+
+`[STRONG-INFERENCE]`
+
+해석:
+- background subagent는 “delegate and forget, review later in `/tasks`” 패턴에 가깝다 `[STRONG-INFERENCE]`
+- 따라서 §5 “Main-thread discipline”의 closeout owner 규칙은 background subagent의 경우 parent thread가 아닌 review surface일 수 있다 `[STRONG-INFERENCE]`
+
+### R2.3 External-agent migration is not delegation
+
+external-agent migration은 task delegation이 아니라 **외부 도구 자료 import** lifecycle이다. `[FACT]`
+
+따라서:
+- §3 “Good split vs bad split” table은 external-agent에는 적용되지 않는다 `[STRONG-INFERENCE]`
+- ownership boundary 대신 “import scope/contract”가 중요해진다 `[STRONG-INFERENCE]`
+- 즉 external-agent는 별도 owner doc이 필요하지만, 현재 이 pack에서는 NON-CLAIM 경계만 유지한다
+
+### R2.4 Updated bad-split list
+
+§1 + §3에 추가:
+
+7. background subagent에 immediate-blocker work를 넣고 parent thread를 join하지 않음
+   - 결과: critical-path가 멈춘 채로 `/tasks` queue에 잠김 `[STRONG-INFERENCE]`
+
+8. external-agent migration을 task delegation으로 오해
+   - 결과: import lifecycle을 spawn-like RPC로 잘못 다룸 `[STRONG-INFERENCE]`
+
+### R2.5 Updated non-claims
+
+- exact merge-contract semantics for background subagent results (no foreground `wait_agent` join)
+- exact ownership boundary policy applied during external-agent migration
+- whether background subagent의 thread row가 `state_5.sqlite.threads.thread_source`에서 어떤 값을 가지는지

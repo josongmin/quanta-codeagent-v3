@@ -215,3 +215,104 @@ Later in the thread, the following additional facts became directly observable.
 1. a heartbeat automation named `Codex Agent Follow-up` was created in this thread. `[FACT]`
 2. the returned automation identifier was `codex-agent-follow-up`. `[FACT]`
 3. automation is therefore not merely an app-level hinted capability; it is a current-session directly exercised capability. `[FACT]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 실제 설치된 `Codex.app` (build 2867) 바이너리/asar/리소스/entitlements/IPC 직접 관측 결과를 누적 `[FACT]`로 적는다. 기존 12개 섹션을 이어 14번부터 매긴다.
+
+### 14. App bundle identity
+
+1. `Codex.app` package.json reports app version `26.513.31313`, build `2867`, prod flavor. `[FACT]`
+2. bundled Electron version is `42.0.1`. `[FACT]`
+3. bundled Node.js runtime is `v24.14.0` (both inside Electron and as separate `node` binary in Resources). `[FACT]`
+4. `app.asar` SHA256 integrity hash on this machine is `8242a5ba1fb767ed47284033b053c30f3be701be046f2d9b1525986f8b03b509`. `[FACT]`
+5. code signing team identifier is `2DC432GLL2` (OpenAI). `[FACT]`
+6. minimum supported macOS version is `12.0` (Monterey). `[FACT]`
+7. the app was built with Xcode 16.0. `[FACT]`
+8. custom URL scheme registered is `codex://`. `[FACT]`
+
+### 15. Entitlements and security posture
+
+1. `com.apple.security.app-sandbox` = false. `[FACT]`
+2. `com.apple.security.automation.apple-events` = true. `[FACT]`
+3. `com.apple.security.cs.allow-jit` = true. `[FACT]`
+4. `com.apple.security.cs.allow-unsigned-executable-memory` = true. `[FACT]`
+5. `com.apple.security.device.audio-input` = true. `[FACT]`
+6. `com.apple.security.files.user-selected.read-write` = true. `[FACT]`
+7. `com.apple.security.network.client` = true. `[FACT]`
+8. `keychain-access-groups` includes `2DC432GLL2.*`. `[FACT]`
+9. `NSAllowsArbitraryLoads` = true in `Info.plist` (cleartext HTTP permitted at platform layer). `[FACT]`
+
+### 16. Update channel
+
+1. Sparkle appcast feed URL is `https://persistent.oaistatic.com/codex-app-prod/appcast.xml`. `[FACT]`
+2. Sparkle uses Ed25519 signing for updates. `[FACT]`
+
+### 17. Bundled native binaries
+
+1. `codex` Rust binary on disk is 182 MB. `[FACT]`
+2. `codex_chronicle` Rust binary on disk is 4.3 MB. `[FACT]`
+3. `node` (separately bundled in Resources) is `v24.14.0`. `[FACT]`
+4. `rg` (ripgrep) is bundled in Resources. `[FACT]`
+
+### 18. `~/.codex/` on-disk inventory (this machine, 2026-05-21)
+
+1. `~/.codex/rules/default.rules` is 353 KB. `[FACT]`
+2. `~/.codex/logs_2.sqlite` is 14.8 GB on disk; its WAL file is 14 GB. `[FACT]`
+3. `~/.codex/archived_sessions/` contains 6,326 items. `[FACT]`
+4. `~/.codex/memories/extensions/chronicle/resources/` contains 1,390 markdown summary files totaling 39.8 MB. `[FACT]`
+5. `~/.codex/pets/` directory exists and is empty on this machine. `[FACT]`
+6. `~/.codex/node_repl/` directory exists and tracks Node REPL state used by browser/computer-use plugin bootstraps. `[FACT]`
+
+### 19. `config.toml` and `auth.json`
+
+1. `~/.codex/config.toml` sets `model = "gpt-5.4-mini"`. `[FACT]`
+2. `~/.codex/config.toml` sets `model_reasoning_effort = "xhigh"`. `[FACT]`
+3. `~/.codex/config.toml` sets `personality = "pragmatic"`. `[FACT]`
+4. `~/.codex/config.toml` sets `approvals_reviewer = "user"`. `[FACT]`
+5. `~/.codex/config.toml` sets `plan_mode_reasoning_effort = "high"`. `[FACT]`
+6. `~/.codex/auth.json` mode is `chatgpt` (ChatGPT/Google OAuth). `[FACT]`
+7. `~/.codex/installation_id` on disk is a 36-byte UUID. `[FACT]`
+
+### 20. Models cache
+
+1. `models_cache.json` is ETag-keyed. `[FACT]`
+2. cached models on this machine: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2`, `codex-auto-review` (7 models). `[FACT]`
+3. all cached models report a context window of 272K tokens. `[FACT]`
+4. reasoning-effort enum visible in cache is `low, medium (default), high, xhigh`. `[FACT]`
+5. extended reasoning-effort enum visible inside `codex_chronicle` binary adds `none, minimal` (full 6-tier). `[FACT]`
+6. service tier `priority` (advertised as 1.5x speed) appears per model in the cache. `[FACT]`
+
+### 21. Thread/event stream surface
+
+1. there are 13 distinct `thread-follower-*` events enumerated in the bundles (see [thread-management/](thread-management/) for the list). `[FACT]`
+
+### 22. IPC surface
+
+1. 378 IPC channels are enumerated across the Electron bundles. `[FACT]`
+
+### 23. Skybridge / MCP UI sandbox
+
+1. there are 12 named `MessagePort`s in the Skybridge MCP UI protocol. `[FACT]`
+2. Skybridge iframe origin is `https://web-sandbox.oaiusercontent.com/?app=skybridge&locale=…&deviceType=desktop&unsafeSkipTargetOriginCheck=true`. `[FACT]`
+
+### 24. Bundled plugins
+
+1. 4 plugins are bundled at `/Applications/Codex.app/Contents/Resources/plugins/openai-bundled/plugins/`: `computer-use v1.0.793`, `browser v0.1.0-alpha2`, `chrome v0.1.7`, `latex v0.2.0`. `[FACT]`
+2. Chrome plugin extension ID is `hehggadaopoacecdllhhajmbjkdcmajg`. `[FACT]`
+3. Chrome plugin native messaging host name is `com.openai.codexextension`. `[FACT]`
+4. Chrome plugin privacy notice states "Browser data from using this plugin may be used for training". `[FACT]`
+
+### 25. Anthropic SDK markers in bundles
+
+1. `cache_creation_input_tokens` string appears in `app-session.js`. `[FACT]`
+2. `cache_read_input_tokens` string appears in `app-session.js`. `[FACT]`
+3. `anthropic.response.timestamp` string appears in `app-session.js`. `[FACT]`
+4. `anthropic_error` string appears in `worker.js`. `[FACT]`
+5. `anthropic.stream_error` string appears in `worker.js`. `[FACT]`
+
+### 26. Round 2 — observed correction
+
+1. ~~`comment-preload.js` was filed under MCP-related preloads in Round 1.~~ **CORRECTED 2026-05-21**: Round-2 evidence shows `comment-preload.js` is the browser sidebar annotation overlay preload, not part of the MCP sandbox; the MCP sandbox preload is a separate 2KB file `sandbox-preload.js`. `[FACT]`

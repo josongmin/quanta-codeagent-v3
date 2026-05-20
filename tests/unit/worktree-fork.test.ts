@@ -19,6 +19,13 @@ const gitAvailable = async (): Promise<boolean> => {
   }
 }
 
+// Probe git ONCE at module load (top-level await is allowed in Bun test files)
+// so `test.skipIf(!HAS_GIT)` makes the runner emit a real `skipped` count when
+// git is absent. The prior pattern (`if (!gitAvailable) return`) silently
+// PASSED — making the suite green in environments where git was missing was
+// indistinguishable from an actually-green suite.
+const HAS_GIT = await gitAvailable()
+
 /** Init a throwaway git repo with one commit; returns its absolute path. */
 const makeRepo = async (): Promise<string> => {
   const dir = mkdtempSync(join(tmpdir(), "wt-fork-"))
@@ -43,10 +50,9 @@ describe("createPersistentWorktree / removeWorktree", () => {
     }
   })
 
-  test(
+  test.skipIf(!HAS_GIT)(
     "creates the worktree directory + branch on a real git repo",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       cleanups.push(repo)
 
@@ -62,10 +68,9 @@ describe("createPersistentWorktree / removeWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!HAS_GIT)(
     "places the worktree under .quanta/worktrees/<safeId>",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       cleanups.push(repo)
 
@@ -76,10 +81,9 @@ describe("createPersistentWorktree / removeWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!HAS_GIT)(
     "default branch name follows fork-<safeId>",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       cleanups.push(repo)
 
@@ -89,10 +93,9 @@ describe("createPersistentWorktree / removeWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!HAS_GIT)(
     "custom branch override is respected",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       cleanups.push(repo)
 
@@ -104,10 +107,9 @@ describe("createPersistentWorktree / removeWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!HAS_GIT)(
     "removeWorktree cleans up and returns true on success",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       cleanups.push(repo)
 
@@ -125,10 +127,14 @@ describe("createPersistentWorktree / removeWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
-    "removeWorktree on an already-removed worktree returns false (no throw)",
+  test.skipIf(!HAS_GIT)(
+    "removeWorktree on an already-removed worktree is idempotent (returns true, no throw)",
     async () => {
-      if (!(await gitAvailable())) return
+      // Idempotency contract: callers depend on "worktree dir is gone" as
+      // success. A second remove on a missing path therefore must also
+      // succeed — the desired state is already reached. (See audit MEDIUM-4:
+      // partial-failure orchestration relies on this primitive being safe to
+      // retry.)
       const repo = await makeRepo()
       cleanups.push(repo)
 
@@ -137,15 +143,14 @@ describe("createPersistentWorktree / removeWorktree", () => {
       expect(first).toBe(true)
 
       const second = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
-      expect(second).toBe(false)
+      expect(second).toBe(true)
     },
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!HAS_GIT)(
     "throws WorktreeForkError on a non-git directory",
     async () => {
-      if (!(await gitAvailable())) return
       const dir = mkdtempSync(join(tmpdir(), "wt-fork-nogit-"))
       cleanups.push(dir)
 
@@ -154,10 +159,9 @@ describe("createPersistentWorktree / removeWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!HAS_GIT)(
     "sanitizes weird ids containing `/` or `;`",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       cleanups.push(repo)
 

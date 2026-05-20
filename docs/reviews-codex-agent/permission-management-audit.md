@@ -422,3 +422,44 @@ Classification:
 - 현재 세션의 권한관리는 단일 sandbox rail이 아니라, `capability visibility`, `sandbox/network`, `approval/escalation`, `HITL consent`, `repo-local operational boundary`, `mode gating`의 다층 구조로 보는 것이 가장 정확하다. `[STRONG-INFERENCE]`
 - 직접 관측 가능한 현재 세션 상태는 `danger-full-access`, `network enabled`, `approval never`, `request_user_input unavailable in Default`, `repo-local cg-dispatch only`다. `[FACT]`
 - 따라서 “실행 가능”과 “허용됨”과 “동의됨”은 서로 다른 질문이다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 Codex Desktop build 2867 (codex-rs 0.130.0)의 Electron IPC surface와 per-host trust-mode state를 직접 inspect한 round-2 결과를 정리한다.
+
+### R2.1 IPC channel inventory (FACT)
+
+- 378개의 IPC channels enumerated across Electron main↔renderer surface. `[FACT]`
+- Top 10 most privileged channels: `[FACT]`
+
+  | # | Channel | Privilege concern |
+  |---|---------|-------------------|
+  | 1 | `upload-local-file-over-sftp` | arbitrary egress |
+  | 2 | `openai-api-key` | credential exposed to renderer |
+  | 3 | `computer-use-background-auth-read` / `-write` | Keychain bridge |
+  | 4 | `primary-runtime-update-*` | arbitrary code install |
+  | 5 | `electron-clone-workspace-repo` | repo-level write |
+  | 6 | `thread-follower-command-approval-decision` | approval-decision injection |
+  | 7 | `gh-pr-update` | GitHub-side write |
+  | 8 | `remote-workspace-directory-entries` | remote FS read |
+  | 9 | `mcp-app-sandbox-host-message` | iframe sandbox bridge |
+  | 10 | `browser-use-file-transfer-origin-add` | browser-trust expansion |
+
+### R2.2 Per-host trust-mode state (FACT)
+
+- atom-state contains `agent-mode-by-host-id.local = "full-access" | "read-only"` — a **per-host trust mode** that gates how broadly the agent may act on a given workspace/host. `[FACT]`
+
+### R2.3 Implications for the permission model
+
+- §4의 5-layer model (capability → sandbox/network → approval → HITL → repo-local)에 round-2가 한 layer를 더 명시적으로 드러낸다: **per-host trust mode**. `agent-mode-by-host-id`는 workspace/host 단위로 권한 envelope를 narrow/wide로 switch한다. 이는 §4.5 "repo-local operational permission"의 implementation rail이다. `[FACT]`
+- §5 permission matrix는 round-2 evidence로 확장되어야 한다:
+
+  | Permission rail | Round-2 mechanism | Classification |
+  | --- | --- | --- |
+  | IPC privilege | 378 channels, top-10 critical | `[FACT]` |
+  | Per-host trust | `agent-mode-by-host-id.local` atom | `[FACT]` |
+- §8.1 "visibility != admissibility"는 IPC 채널 수준에서도 그대로 적용된다: 378개 채널이 *exposed*되어 있지만, 각 채널의 실제 호출 가능 여부는 별도 trust/approval rail이 결정한다. v3가 이 surface를 흡수할 때는 채널 count가 아니라 **privilege-classified subset**만 의미가 있다. `[FACT]` + `[MODEL]`
+- `[MODEL]` `openai-api-key`가 renderer에 노출되는 IPC channel로 존재한다는 사실은 round-1 §11.2 ("visible tool == allowed action") false-assumption의 mirror 사례다: credential channel이 *exposed*되어 있다고 해서 모든 renderer context가 자유롭게 호출할 수 있다는 의미는 아니다. 그러나 v3는 이 패턴을 그대로 흡수하면 안 된다 — credential은 main process 안에 머물러야 한다.
+- top-10 channels 중 `thread-follower-command-approval-decision`은 approval rail이 IPC-driven임을 directly 보여준다. round-1 §4.3 approval permission layer의 implementation evidence. `[FACT]`

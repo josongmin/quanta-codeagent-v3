@@ -1,3 +1,4 @@
+import { rename, unlink } from "node:fs/promises"
 import { fileExists, readFile, writeFile } from "@/storage"
 import { indexFilePath } from "./paths"
 import type { SessionMeta } from "./types"
@@ -5,13 +6,22 @@ import type { SessionMeta } from "./types"
 /**
  * `index.jsonl` is the lightweight directory of sessions — one JSON object per
  * line, one line per session-id. We rewrite the whole file on every upsert
- * (atomic .tmp + rename). The file is small (≤ a few KB even for hundreds of
- * sessions), so the cost is negligible and we avoid append-then-dedupe shenanigans.
+ * (atomic per-writer-tmp + rename). The file is small (≤ a few KB even for
+ * hundreds of sessions), so the cost is negligible and we avoid
+ * append-then-dedupe shenanigans.
  *
- * CONCURRENCY: single CLI process per user session is the design assumption,
- * so simultaneous upserts use **last-writer-wins**. If two processes ever race,
- * one of the two metadata updates is lost — but the per-session JSON file is
- * never affected (each id is its own file). Documented; acceptable for v3.
+ * CONCURRENCY (in-process): `upsertMeta` and `removeFromIndex` serialize on
+ * an internal promise-chain mutex so the read-modify-write window is atomic
+ * within ONE process — every concurrent caller's update lands in the final
+ * map (no lost updates within a single CLI run). The atomic write itself
+ * uses a per-writer `<index>.tmp.<pid>.<rand>` so concurrent writers (e.g.
+ * cross-process) don't ENOENT each other on rename.
+ *
+ * CONCURRENCY (cross-process): if two separate CLI processes ever race, the
+ * mutex is per-process so they can still last-writer-wins each other —
+ * documented and acceptable for v3 (each id has its own JSON file, which
+ * never loses data). The previous shared-tmp scheme threw ENOENT on the
+ * second rename; per-writer tmps make all concurrent renames succeed cleanly.
  */
 
 /** Parse `index.jsonl` to a `Map<id, meta>`. Corrupt / wrong-shape lines are
@@ -47,35 +57,65 @@ const readIndexMap = async (): Promise<Map<string, SessionMeta>> => {
   return out
 }
 
-/** Atomically rewrite `index.jsonl` from the given map. Order: stable by id
- * ascending so diffs are clean and reviewable. */
+/** Real-atomically rewrite `index.jsonl` from the given map. Order: stable by
+ *  id ascending so diffs are clean and reviewable. Full body is staged in a
+ *  per-writer `.tmp.<pid>.<rand>` then `rename()`-d to the target —
+ *  POSIX-atomic so a crash mid-write never leaves a partial / torn
+ *  `index.jsonl`, and concurrent writers don't ENOENT each other (each owns
+ *  its own staging file). */
 const writeIndexMap = async (map: Map<string, SessionMeta>): Promise<void> => {
   const path = indexFilePath()
   const ids = [...map.keys()].sort()
   const lines = ids.map((id) => JSON.stringify(map.get(id))).join("\n")
   const body = lines === "" ? "" : `${lines}\n`
-  const tmp = `${path}.tmp`
+  const tmp = `${path}.tmp.${process.pid}.${crypto.randomUUID().slice(0, 8)}`
+  await writeFile(tmp, body)
   try {
-    await writeFile(tmp, body)
-    await Bun.write(path, Bun.file(tmp))
-    await Bun.file(tmp).delete()
-  } catch {
-    await writeFile(path, body)
+    await rename(tmp, path)
+  } catch (e) {
+    await unlink(tmp).catch(() => undefined)
+    throw e
   }
 }
 
-export const upsertMeta = async (meta: SessionMeta): Promise<void> => {
-  const map = await readIndexMap()
-  map.set(meta.id, meta)
-  await writeIndexMap(map)
+/** In-process serialization for read-modify-write index updates. Each call
+ *  chains onto the previous one's settled tail so two awaiters of
+ *  `upsertMeta`/`removeFromIndex` from the same process never interleave
+ *  their read+write windows. Promise-chain mutex pattern: cheap (single
+ *  promise reference), fair (FIFO), and naturally drains when idle. */
+let indexMutex: Promise<unknown> = Promise.resolve()
+const withIndexMutex = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const prev = indexMutex
+  let release!: () => void
+  indexMutex = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  try {
+    await prev
+  } catch {
+    // A previous holder rejecting must not poison the queue.
+  }
+  try {
+    return await fn()
+  } finally {
+    release()
+  }
 }
 
-export const removeFromIndex = async (id: string): Promise<void> => {
-  const map = await readIndexMap()
-  if (!map.has(id)) return
-  map.delete(id)
-  await writeIndexMap(map)
-}
+export const upsertMeta = async (meta: SessionMeta): Promise<void> =>
+  withIndexMutex(async () => {
+    const map = await readIndexMap()
+    map.set(meta.id, meta)
+    await writeIndexMap(map)
+  })
+
+export const removeFromIndex = async (id: string): Promise<void> =>
+  withIndexMutex(async () => {
+    const map = await readIndexMap()
+    if (!map.has(id)) return
+    map.delete(id)
+    await writeIndexMap(map)
+  })
 
 export const listSessions = async (opts?: {
   includeArchived?: boolean

@@ -345,3 +345,57 @@ Classification:
 - approval policy 역시 직접 존재가 관측되며, 현재는 `never`다. `[FACT]`
 - 따라서 현재 세션은 “파일시스템 제약은 거의 없지만, approval/escalation path는 닫힌” configuration으로 보는 것이 맞다. `[STRONG-INFERENCE]`
 - 일반화하면, tool execution은 `availability -> admissibility under sandbox/approval -> actual execution`의 단계로 이해하는 것이 가장 정확하다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 Codex Desktop build 2867 (codex-rs 0.130.0)의 sandbox/approval enforcement layer를 직접 inspect한 round-2 결과를 정리한다.
+
+### R2.1 Approval rules engine (FACT)
+
+- `~/.codex/rules/default.rules` (~353KB) — bash command **allowlist** via `prefix_rule(pattern=[…], decision="allow"|"deny")`. `[FACT]`
+- Covers git, build, test, python `uv`, `pyright`, `pytest` commands. `[FACT]`
+- This file is the **base of approval gating** — the rule-engine input that decides whether a command can run without per-action approval. `[FACT]`
+- Default `approvals_reviewer = "user"` in `config.toml`. `[FACT]`
+- Observed in archived sessions: `turn_context.approval_policy = "on-request"`. `[FACT]`
+
+`[MODEL]` round-1 §2.1의 `approval policy = never`는 the *runtime session-level* state. round-2 evidence shows the *default config-file value* is `"on-request"`, with `"never"` being a per-session override (such as the current dangerous-bypass session). The two are not contradictory but live at different config layers.
+
+### R2.2 Bypass flag (FACT)
+
+- Codex Rust subcommand exposes a `--dangerously-bypass-approvals-and-sandbox` flag. `[FACT]`
+- The flag is **disabled by default**. `[FACT]`
+- `[MODEL]` Round-1 §2.1의 `approval=never + danger-full-access` 조합 세션은 사실상 이 bypass flag 또는 동등 config가 활성화된 deployment configuration에 해당한다.
+
+### R2.3 OS-level sandbox primitives (FACT)
+
+- **macOS Seatbelt** profile fragments visible in Rust binary strings: `(version 1)`, `(allow file-read*)`, `(subpath (param "…"))`, `(allow network-outbound (remote ip "localhost:..."))`. `[FACT]`
+- **Linux**: Landlock-based sandbox via `codex-linux-sandbox` crate. `[FACT]`
+
+`[MODEL]` Round-1 §9.1의 "filesystem sandboxing이 있을 수 있다"는 strong inference는 round-2에서 directly confirmed: Codex는 macOS에서는 Seatbelt(`sandbox-exec`), Linux에서는 Landlock을 사용하여 OS-level enforcement를 한다. `danger-full-access`는 이 layer를 disable한 mode.
+
+### R2.4 Codex.app entitlements (FACT)
+
+Codex.app 자체의 entitlements (Team ID 2DC432GLL2, OpenAI):
+
+| Entitlement | Value | Classification |
+| --- | --- | --- |
+| `com.apple.security.app-sandbox` | **false** (Codex.app 자체는 unsandboxed) | `[FACT]` |
+| `com.apple.security.automation.apple-events` | true | `[FACT]` |
+| `com.apple.security.cs.allow-jit` | true | `[FACT]` |
+| `com.apple.security.cs.allow-unsigned-executable-memory` | true | `[FACT]` |
+| `com.apple.security.device.audio-input` | true | `[FACT]` |
+| `com.apple.security.files.user-selected.read-write` | true | `[FACT]` |
+| `com.apple.security.network.client` | true | `[FACT]` |
+| `keychain-access-groups` | `2DC432GLL2.*` | `[FACT]` |
+| `NSAllowsArbitraryLoads` (Info.plist) | true (cleartext HTTP allowed) | `[FACT]` |
+
+- asar integrity SHA256: `8242a5ba1fb767ed47284033b053c30f3be701be046f2d9b1525986f8b03b509`. `[FACT]`
+
+### R2.5 Implications for the sandbox/approval model
+
+- §3.1 "sandbox mode exists"는 round-2에서 **mechanism-level**로 확정된다: macOS Seatbelt + Linux Landlock이 enforcement primitive. `[FACT]`
+- §3.2 "approval policy exists"도 mechanism-level로 확정: `~/.codex/rules/default.rules`가 allow/deny prefix rule engine이다. round-1에서 "literal policy engine 존재를 단정하지 말라"고 한 보수성은 round-2 evidence로 완화 가능 — **the rule engine literally exists as a 353KB rules file consumed by the Rust core**. `[FACT]`
+- §10.2 "danger-full-access means no constraints at all" false-assumption은 더욱 강해진다: Codex.app 자체는 unsandboxed지만 spawned subprocess는 여전히 Seatbelt/Landlock으로 wrap될 수 있다. host app sandboxing과 child execution sandboxing은 **별도 축**이다. `[FACT]`
+- `NSAllowsArbitraryLoads=true` + `allow-unsigned-executable-memory=true` 조합은 Codex.app이 **electron + JIT-heavy runtime + cleartext HTTP**를 모두 허용한 매우 넓은 host trust boundary 위에서 동작함을 보여준다. v3가 흡수할 sandbox model을 design할 때는 이 두 entitlement를 ROI-positive로 가져오지 말 것. `[FACT]` + `[MODEL]`

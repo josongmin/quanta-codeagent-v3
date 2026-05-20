@@ -491,3 +491,32 @@ Classification:
 - skill 사용은 `선택 -> SKILL.md 열기 -> 필요한 만큼만 읽기 -> workflow 적용`의 progressive disclosure 흐름을 따른다. `[FACT]`
 - plugin-contributed skill도 같은 모델을 따르되, plugin namespace와 capability preference를 가진다. `[FACT]` + `[STRONG-INFERENCE]`
 - 이 대화에서 `$ss`, `$rr`, `$aa`는 실제로 explicit trigger로 작동했고, 답변 posture를 바꾸었다. `[FACT]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 Codex Desktop build 2867 (codex-rs 0.130.0)의 on-disk skill layout과 marketplace bootstrap을 직접 inspect한 round-2 결과를 정리한다.
+
+### R2.1 Skill on-disk layout (FACT)
+
+- Plugin-contributed skills layout: `<plugin>/skills/<skill_name>/SKILL.md` (markdown). `[FACT]`
+- Some skill directories ship an adjacent `agents/openai.yaml` file. `[FACT]`
+- Skills are loaded from `<plugin>/skills/` at plugin init time. Each subdir has its own `SKILL.md` doc. `[FACT]`
+
+`[MODEL]` `agents/openai.yaml`의 존재는 single skill이 OpenAI-side managed agent profile까지 carry할 수 있음을 시사하지만, 정확한 wiring 경로는 round-2 evidence만으로는 미확정.
+
+### R2.2 Marketplace / bootstrap (FACT)
+
+- Two bundled marketplaces declared in `config.toml`: `[FACT]`
+  - `openai-bundled` — local source at `~/.codex/.tmp/bundled-marketplaces/openai-bundled`
+  - `openai-primary-runtime` — local source at `~/.cache/codex-runtimes/codex-primary-runtime/...`
+- User skill dir: `~/.codex/skills/` (empty by default after fresh install). `[FACT]`
+- One concrete user skill installed via marker file: `~/.codex/skills/chronicle/instructions.md` (~5.8KB). `[FACT]`
+
+### R2.3 Implications for the skills model
+
+- §3.2 best-fit exposure model은 정확하다. round-2가 추가하는 것은 *어디서* `SKILL.md`가 로드되는가에 대한 concrete path: `<plugin>/skills/<name>/SKILL.md` (bundled) 또는 `~/.codex/skills/<name>/` (user). `[FACT]`
+- §3.3 "hidden global skill registry backend" 미지수는 부분적으로 해소된다: bootstrap은 hidden DB가 아니라 **local-source marketplace dir + per-plugin `skills/` walk**가 1차 surface다. 다만 marketplace sync/update lifecycle 내부는 여전히 미관측. `[FACT]` + `[WEAK-INFERENCE]`
+- plugin-prefixed skill name (`github:gh-fix-ci`)은 §7.1의 인용대로 directly 관측되며, packaging 측면에서 `<plugin>/skills/<name>/SKILL.md` 파일이 그 namespace의 ground-truth source임이 확인된다. `[FACT]`
+- user skill dir이 empty라는 사실은 §8의 explicit-invocation 대부분이 **plugin-contributed skill**이거나 **bundled marketplace skill**임을 의미한다 — pure user-authored skill은 round-2 시점에 chronicle 하나뿐. `[FACT]`

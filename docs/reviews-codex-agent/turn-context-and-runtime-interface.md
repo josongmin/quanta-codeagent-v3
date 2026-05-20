@@ -277,3 +277,98 @@ def normalize_observation(raw_tool_result, tool_name):
 - tool call과 final answer 선택은 LLM이 한다
 - observation transport는 runtime이 하고, 의미 해석은 LLM이 한다
 - 이 handshake를 owner 문서로 따로 분리해야 loop 설명이 monolith로 다시 붕괴하지 않는다
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 round에서 `TurnContext`의 추상 schema (§6.1)가 실제 archived rollout 안에서 어떤 field로 직렬화되는지가 fact level로 확인됐다.
+
+### A. Per-turn record schema
+
+- `[FACT]` 매 turn은 `~/.codex/archived_sessions/rollout-{ISO}.jsonl` 안에 다음 field를 가지는 `turn_context` record를 쓴다:
+
+```text
+turn_context {
+  turn_id,
+  cwd,
+  current_date,
+  timezone,
+  approval_policy,
+  sandbox_policy,
+  permission_profile,
+  model,
+  personality,
+  collaboration_mode,
+  realtime_active,
+  effort,
+  summary,
+  user_instructions,
+  truncation_policy
+}
+```
+
+- `[FACT]` Session prologue (`session_meta`) record는 turn record와 다른 schema를 가지며 매 session 시작 시 한 번 기록된다:
+
+```text
+session_meta {
+  id,
+  timestamp,
+  cwd,
+  originator,
+  cli_version,
+  source,
+  model_provider,
+  base_instructions,
+  git
+}
+```
+
+- `[FACT]` 매 turn 동안 발생하는 event types (rollout JSONL line kinds): `event_msg:task_started`, `response_item:message`, `event_msg:user_message`, `event_msg:token_count`, `event_msg:turn_aborted`.
+
+### B. Schema → §3 injection-table mapping
+
+§3 표의 추상 라벨들이 실제 어떤 record field에 대응되는지가 fact 수준으로 좁혀진다:
+
+| §3 abstract injection | Concrete field(s) in turn_context | Class |
+| --- | --- | --- |
+| `session metadata` (`cwd`, shell, date, timezone, sandbox, approval) | `cwd`, `current_date`, `timezone`, `approval_policy`, `sandbox_policy`, `permission_profile` | `[FACT]` |
+| `mode policy` | `collaboration_mode`, `personality`, `effort` | `[FACT]` |
+| `developer/runtime policy` | `truncation_policy`, `realtime_active` | `[FACT]` |
+| `user request` | `user_instructions` (current turn) | `[FACT]` |
+| `tool schemas` / `capability metadata` | not in `turn_context` record (carried by transport layer) | `[FACT]` (negative) |
+| `model` selection | `model` (per-turn, can change mid-session) | `[FACT]` |
+
+`session_meta` mapping:
+
+| §3 abstract injection | Concrete `session_meta` field | Class |
+| --- | --- | --- |
+| `app context` | `originator`, `source`, `cli_version` | `[FACT]` |
+| `base policy stack` | `base_instructions` | `[FACT]` |
+| `model provider` | `model_provider` | `[FACT]` |
+| `repo-local bootstrap` | `git`, `cwd` | `[FACT]` |
+
+### C. §6.1 TurnContext model upgrade
+
+§6.1의 `TurnContext { ... }`는 `[MODEL]` 표기지만 위 schema와 다음 mapping이 fact다:
+
+- `instruction_stack` ⊇ `base_instructions` (session) + `user_instructions` (turn).
+- `session_metadata` ≈ `cwd, current_date, timezone, approval_policy, sandbox_policy, permission_profile`.
+- `mode` ≈ `collaboration_mode + personality + effort`.
+- LLM model selection 자체가 turn-level field(`model`)라는 점이 §6.1에 암시되어 있던 것보다 강한 사실이다. 매 turn에 model이 바뀔 수 있다는 의미.
+
+### D. Per-turn event ordering as observation contract
+
+§7 tick-tock과 §8 lifecycle을 보강하는 사실:
+
+- `[FACT]` Turn 진행 중 rollout JSONL에 적히는 line 순서가 그대로 contract다. `event_msg:task_started` → (`response_item:message` 와 `event_msg:user_message`가 섞이며) → `event_msg:token_count` → 종료 시 success면 turn_context 또는 다음 turn의 task_started, abort 시 `event_msg:turn_aborted`.
+- `event_msg:token_count`는 turn 종료 직전 budget accounting line이라는 점이 budget-management-audit doc과 합쳐 보면 안정적이다.
+
+### E. What is now clarified that was previously NON-CLAIM
+
+- ~~"persistence backend not directly observable"~~ **CORRECTED 2026-05-21**: rollout JSONL은 `~/.codex/archived_sessions/rollout-{ISO}.jsonl`로 실재. (binary persistence는 `thread-management/storage-and-db-audit.md` owner.) turn context schema는 더 이상 hidden이 아니다.
+- ~~"personality/effort/realtime_active는 외부에서 보이지 않는다"~~ **CORRECTED 2026-05-21**: turn_context record에 명시 field로 존재.
+
+### F. What stays unchanged
+
+- §11의 현재 (Quanta) 세션 capability map은 변경 없음 — Codex 측 binary 사실이지 본 세션 surface 사실은 아니다.
+- §8 tool-call lifecycle의 phase 분할은 그대로 유지.
+- §9의 error normalization shape는 `[MODEL]` 그대로.

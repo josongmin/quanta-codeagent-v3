@@ -123,3 +123,41 @@ Overview router: [may-20-codex-agent-loop.md](/Users/songmin/Documents/code-new/
 따라서:
 - 구현 상세를 hidden source처럼 읽으면 안 되고
 - 현재 세션의 visible evidence와 non-claims를 같이 봐야 한다.
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 라운드는 실제 설치된 `Codex.app` (build 2867) entitlements / IPC channel / Skybridge MCP UI protocol / plugin bundles / on-disk state를 직접 관측하면서 추가로 식별된 **system-level risk**를 누적한다.
+
+§1의 P0/P1/P2/P3 분류는 그대로 유지하되, Round 2는 system-platform 차원의 risk이므로 `Critical / High / Medium / Low` severity로 별도 묶었다. §1과는 다른 축이므로 ID는 `RISK-R2-*`로 분리한다.
+
+### 6. Round 2 risk register
+
+| ID | Risk | Severity | Evidence |
+|---|---|---|---|
+| RISK-R2-01 | Unsandboxed Electron host + JIT + unsigned executable memory allowed | Critical | `Codex.app` entitlements file (`app-sandbox=false`, `cs.allow-jit=true`, `cs.allow-unsigned-executable-memory=true`) |
+| RISK-R2-02 | `runWidgetCode` Skybridge port + `setAdditionalGlobals` accept arbitrary code/globals; security depends on host allowlist not visible in renderer | Critical | `sandbox-preload.js` protocol surface |
+| RISK-R2-03 | `upload-local-file-over-sftp` IPC enables arbitrary egress | Critical | IPC channel inventory (378 channels) |
+| RISK-R2-04 | `codex_chronicle` continuous screen capture after a single user permission grant | High | `codex_chronicle` 4.3 MB binary + `~/.codex/memories/extensions/chronicle/resources/` (1,390 summary files, 39.8 MB) |
+| RISK-R2-05 | 14.8 GB local `logs_2.sqlite` audit trail (forensic exposure) | High | observed file size on disk |
+| RISK-R2-06 | `bare-modifier-monitor` global modifier-key hook process | Medium | Swift binary (150 KB) and string analysis |
+| RISK-R2-07 | Vendored `browser-use` library + Chromium plugin auto-install | Medium | `package.json` (`browser-api`, `browser-backend-common`, `browser-common`) + bundled `chrome` plugin |
+| RISK-R2-08 | 378 IPC channels — sender validation consistency hard to verify in minified bundles | Medium | bundle audit |
+| RISK-R2-09 | `claude-code-import` IPC reads `~/.claude/` including auth | Medium | IPC channel inventory |
+| RISK-R2-10 | `NSAllowsArbitraryLoads=true` (cleartext HTTP permitted at platform layer) | Low | `Info.plist`; network policy is assumed to be enforced in Rust core, but not directly observed |
+
+### 7. Round 2 cross-cutting observations
+
+- Round 1의 RISK-01~10이 주로 contract / model-of-behavior level이었던 반면, Round 2는 host-OS attack surface level이다. 즉 두 라운드는 직교한다.
+- Round 2 위험은 Codex 사용자가 desktop app을 install하는 것 자체로 incurred되는 ambient risk이며, agent action 여부와 무관하게 존재한다.
+- 비교 안전 강도:
+  - RISK-R2-01~03: 직접 exploitable한 IPC/preload surface가 있다는 사실 자체로 Critical
+  - RISK-R2-04~05: privacy/forensic exposure이지 즉시 RCE는 아니므로 High
+  - RISK-R2-06~09: feature/구조적 위험, allowlist/host-policy에 따라 변동되므로 Medium
+  - RISK-R2-10: platform setting이며 Rust core가 enforcement를 갖고 있을 것이라 가정해 Low
+
+### 8. Most important Round 2 warning
+
+- Round 2 risk는 "agent가 잘못된 의사결정을 내릴 위험"이 아니라 **"앱 자체의 host-level capability가 사용자/시스템에 노출하는 위험"**이다.
+- 따라서 mitigations §3의 항목과는 별도로, system-level mitigation (entitlements review, IPC allowlist, MCP server allowlist, retention policy, telemetry transparency)이 함께 검토돼야 한다.

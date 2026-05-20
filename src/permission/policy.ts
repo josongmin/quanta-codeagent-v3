@@ -86,8 +86,15 @@ const HARD_DENY_RULES: readonly HardDenyRule[] = [
     name: "rm-recursive-force-system-root",
     description:
       "Recursive+force `rm` whose target is `/`, `~`, `$HOME`, `/*`, or an absolute system root (Linux FHS + macOS roots). Project-relative and /tmp targets stay allowed.",
+    // R-Phase5 P1-D: all three lazy spans are length-bounded to 500 chars to
+    // prevent catastrophic backtracking on adversarial inputs. Real-world bash
+    // commands are well under this limit (`rm -rf /etc/foo` is ~16 chars); a
+    // hypothetical 500+ char `rm` command with the wrong flag/target shape
+    // would simply not match the rule (still falls through to other gates).
+    // The simpler `[\s\S]{0,500}?` replaces the equivalent `(?:\s|[\s\S]){0,500}?`
+    // — `\s ⊂ [\s\S]` so the alternation was redundant.
     pattern: new RegExp(
-      String.raw`\brm\b(?=(?:\s+-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive\b))(?:\s|$)|[\s\S]*?\s-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\b)(?=(?:\s|[\s\S])*?\s-(?:[a-zA-Z]*[fF][a-zA-Z]*|-force)\b)[\s\S]*?\s(?:\$\{?HOME\}?|~|\/(?:\*|${SYSTEM_ROOTS})?)(?:\/\S*)?(?=\s|$|;|&|\|)`,
+      String.raw`\brm\b(?=(?:\s+-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive\b))(?:\s|$)|[\s\S]{0,500}?\s-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\b)(?=[\s\S]{0,500}?\s-(?:[a-zA-Z]*[fF][a-zA-Z]*|-force)\b)[\s\S]{0,500}?\s(?:\$\{?HOME\}?|~|\/(?:\*|${SYSTEM_ROOTS})?)(?:\/\S*)?(?=\s|$|;|&|\|)`,
     ),
   },
   {

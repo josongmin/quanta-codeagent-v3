@@ -438,3 +438,41 @@ Classification:
 - 현재 세션에서 보이는 task management는 `explicit plan tool + implicit working queue + artifact-backed ledger + bounded delegation` 조합에 가깝다. `[STRONG-INFERENCE]`
 - explicit visible todo CRUD tool은 없지만, `update_plan`, `subagent tools`, `gap/next-step reporting`, `artifact accumulation`이 todo-like state를 충분히 설명한다. `[FACT]` + `[STRONG-INFERENCE]`
 - 따라서 “todo가 나온다”는 것은 hidden todo app보다, **working-state queue가 externalized되거나 plan state로 surfaced되는 현상**으로 이해하는 것이 가장 정확하다. `[STRONG-INFERENCE]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 라운드에서 실제 설치된 `Codex.app` (build 2867) IPC 인벤토리/렌더러 번들을 직접 본 결과, task management/automation 쪽에 **app-level surface가 별도로 존재**한다는 점이 추가로 관측됐다.
+
+### 17. App-level `/tasks` page surface
+
+- `[FACT]` `/tasks` page가 별도의 renderer surface로 존재한다. `tasks-*.js` 번들 asset과, 이 surface를 토글하는 feature gate `use-is-background-subagents-enabled-*.js`가 직접 관측된다.
+
+해석:
+- 이건 thread 안의 plan/queue state와는 별도로 존재하는 **app-level task pane**이다. `[STRONG-INFERENCE]`
+- 즉 §8의 working queue 모델 위에, app surface가 한 층 더 얹혀 있을 가능성이 있다. `[STRONG-INFERENCE]`
+- 단, 이 surface의 정확한 data model과 thread queue 간의 동기 방향은 직접 관측되지 않았다. `[WEAK-INFERENCE]`
+
+### 18. Automation run IPCs
+
+다음 IPC channel이 직접 관측된다:
+
+- `[FACT]` `list-pending-automation-run-threads`
+- `[FACT]` `automation-update`
+- `[FACT]` `install-recommended-skill`
+- `[FACT]` `recommended-skills`
+
+해석:
+- automation runs는 별도의 thread-like entity로 추적되며, 단순 cron callback이 아니라 pending state까지 관리하는 surface가 있다. `[STRONG-INFERENCE]`
+- `install-recommended-skill` / `recommended-skills`는 task에 맞는 skill을 surface가 추천/설치하는 rail이 있음을 시사한다. `[STRONG-INFERENCE]`
+- 즉 §13.3의 in-thread automation 관측에 더해, **app surface가 자체적으로 task/skill recommendation을 한다**는 점이 추가된다. `[STRONG-INFERENCE]`
+
+### 19. Implication for the working-queue model
+
+§8의 working queue 모델은 여전히 in-thread agenda 설명에는 맞다.
+Round 2가 추가하는 것은:
+- **app surface가 별도의 task pane을 갖는다**는 점
+- **automation surface가 pending/recommended 메타-상태를 가진다**는 점
+
+이 둘은 thread-internal working queue와 직교하는 layer로, "app이 보여주는 task list"와 "thread agent가 사용하는 task list"가 동일한 SSOT인지는 단정하지 않는다. `[WEAK-INFERENCE]`

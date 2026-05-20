@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type { Producer, RunContext, TrajectoryKind } from "@/shared"
-import { makeEvent, toError } from "@/shared"
+import { logger, makeEvent, toError } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 import type { DegradedRecord } from "./tee"
@@ -148,8 +148,18 @@ export class JsonlRecorder implements StreamPort {
       // Best-effort: bypass the (possibly broken) buffered path with a direct
       // append so the trace records that something was dropped.
       appendFileSync(this.target, `${line}\n`)
-    } catch {
-      // swallow — never throw to the agent in non-strict mode
+    } catch (e) {
+      // R-Phase2 P1-3: never throw to the agent in non-strict mode, but ALSO
+      // never silently lose the signal that observability itself is broken.
+      // A failed degraded-line append usually means the target file is
+      // unwritable (permissions / volume gone / filesystem full); emit a
+      // single stderr line so an operator can see "trajectory is now blind".
+      logger.warn("jsonl-recorder: degraded-line append failed", {
+        reason,
+        target: this.target,
+        droppedEvents: this.dropped,
+        error: e instanceof Error ? e.message : String(e),
+      })
     }
   }
 

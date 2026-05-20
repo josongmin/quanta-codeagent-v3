@@ -17,6 +17,8 @@ export { listSessions, removeFromIndex, upsertMeta } from "./index-store"
 export {
   archivedFilePath,
   indexFilePath,
+  SessionIdError,
+  sanitizeId,
   sessionFilePath,
   sessionsRoot,
 } from "./paths"

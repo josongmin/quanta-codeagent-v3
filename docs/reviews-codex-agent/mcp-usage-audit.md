@@ -321,3 +321,39 @@ Classification:
 - direct policy는 MCP resource를 가능한 경우 web보다 우선하라고 말하며, discovery는 `tool_search`를 우선하라고 말한다. `[FACT]`
 - plugin은 MCP와 동일하지 않고, skill/MCP/app capability bundle로 보는 것이 가장 정확하다. `[STRONG-INFERENCE]`
 - 현재 문서 작성 기준으로는 MCP capability surface는 직접 보이지만, live connected resource inventory 자체는 확인하지 않았으므로 그 부분은 non-claim으로 남겨야 한다. `[FACT]`
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 섹션은 Codex Desktop build 2867 (codex-rs 0.130.0)의 native MCP transport와 Skybridge iframe sandbox를 직접 inspect한 round-2 결과를 정리한다.
+
+### R2.1 Codex-native MCP transport (FACT)
+
+- Codex Rust binary는 두 개의 별도 crate를 가진다: `codex-mcp` (server-side)와 `codex-mcp-client` (client-side). `[FACT]`
+- `codex mcp` 서브커맨드는 Codex 자체를 MCP server mode로 실행한다. `[FACT]`
+- MCP servers는 Codex Rust core가 spawn하는 **subprocess**로 동작한다. `[FACT]`
+- Computer Use plugin의 MCP server는 `<plugin>/Codex Computer Use.app/.../SkyComputerUseClient mcp`로 spawn된다 — stdio JSON-RPC presumed. `[FACT]` + `[WEAK-INFERENCE]`
+
+### R2.2 Skybridge MCP UI iframe protocol (FACT)
+
+이건 §2.1의 `list/read_mcp_resource` (stdio MCP transport)와는 **별도 채널**이다. Skybridge는 MCP server가 UI widget을 렌더할 때 쓰는 sandboxed iframe protocol이다.
+
+- Iframe URL pattern: `https://web-sandbox.oaiusercontent.com/?app=skybridge&locale=…&deviceType=desktop&unsafeSkipTargetOriginCheck=true#initId=<id>`. `[FACT]`
+- `initId` regex: `[A-Za-z0-9_-]{1,128}`. `[FACT]`
+- Origin allowlist: `web-sandbox.oaiusercontent.com` or `*.web-sandbox.oaiusercontent.com`. `[FACT]`
+- 12 named MessagePorts: `[FACT]`
+  - host→guest (7): `runWidgetCode`, `setAdditionalGlobals`, `setSafeArea`, `setTheme`, `setWidgetData`, `setWidgetView`, `notifyMcpAppsToolResult`
+  - guest→host (5): `navigate`, `notifyMcpAppsHostContext`, `notifyMcpAppsToolInput`, `notifyMcpAppsToolCancelled`, `requestMcpAppsResourceTeardown`
+- IPC bridge channels (Electron main ↔ renderer ↔ iframe): `codex_desktop:mcp-app-sandbox-host-message` and `codex_desktop:mcp-app-sandbox-guest-message`. `[FACT]`
+
+### R2.3 Security model concern
+
+- `[MODEL]` `runWidgetCode` port accepts `{code, context}` with no visible allowlist on the host side of the message contract. Security therefore depends entirely on **host-side MCP server allowlisting** — the iframe sandbox alone does not restrict which code strings can be sent. This is a P1-relevant invariant for v3 if we ever adopt MCP UI widgets.
+- `[MODEL]` `unsafeSkipTargetOriginCheck=true` query parameter in the iframe URL further indicates that origin enforcement is delegated to the message-port layer rather than `postMessage` targetOrigin matching.
+
+### R2.4 Implications for the MCP model
+
+- §4 best-fit MCP model (`discover → list → read`)은 stdio resource transport에만 적용된다. **UI widget MCP는 별도 rail**이며 message-port protocol을 따른다. round-1 문서는 이 두 rail을 묶어서 다뤘으므로 round-2 이후로는 분리해서 분석해야 한다. `[FACT]`
+- §6.1의 "plugin은 MCP를 포함할 수 있다"는 round-2에서 directly 확인된다: Computer Use plugin은 `mcpServers` field와 함께 SkyComputerUseClient를 declared MCP server로 expose한다. `[FACT]`
+- §12 unknowns 중 "MCP authentication/session lifecycle internals"는 부분적으로 해소: subprocess 모델 + stdio라는 confirmed transport assumption이 추가됐다. server-side resource semantics는 여전히 unknown. `[FACT]` + `[WEAK-INFERENCE]`

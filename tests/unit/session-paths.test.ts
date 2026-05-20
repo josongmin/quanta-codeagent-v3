@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { archivedFilePath, indexFilePath, sessionFilePath, sessionsRoot } from "@/session"
+import {
+  archivedFilePath,
+  indexFilePath,
+  SessionIdError,
+  sanitizeId,
+  sessionFilePath,
+  sessionsRoot,
+} from "@/session"
 
 describe("session paths", () => {
   let envSnapshot: NodeJS.ProcessEnv
@@ -46,5 +53,52 @@ describe("session paths", () => {
     expect(sessionsRoot()).toBe("/tmp/first")
     process.env.QUANTA_SESSIONS_DIR = "/tmp/second"
     expect(sessionsRoot()).toBe("/tmp/second")
+  })
+
+  describe("sanitizeId (HIGH-1 traversal guard)", () => {
+    test("accepts a randomUUID-shaped id unchanged", () => {
+      const id = crypto.randomUUID()
+      expect(sanitizeId(id)).toBe(id)
+    })
+
+    test("accepts plain alphanumeric and common punctuation", () => {
+      expect(sanitizeId("abc")).toBe("abc")
+      expect(sanitizeId("sess_v2.42-foo")).toBe("sess_v2.42-foo")
+    })
+
+    test("rejects empty string", () => {
+      expect(() => sanitizeId("")).toThrow(SessionIdError)
+    })
+
+    test("rejects path-separator chars (traversal)", () => {
+      expect(() => sanitizeId("../etc/passwd")).toThrow(SessionIdError)
+      expect(() => sanitizeId("foo/bar")).toThrow(SessionIdError)
+      expect(() => sanitizeId("foo\\bar")).toThrow(SessionIdError)
+    })
+
+    test('rejects "." and ".." segments', () => {
+      expect(() => sanitizeId(".")).toThrow(SessionIdError)
+      expect(() => sanitizeId("..")).toThrow(SessionIdError)
+    })
+
+    test("rejects leading dash (CLI-flag confusion)", () => {
+      expect(() => sanitizeId("-rf")).toThrow(SessionIdError)
+    })
+
+    test("rejects control chars + NUL", () => {
+      expect(() => sanitizeId("foo\x00bar")).toThrow(SessionIdError)
+      expect(() => sanitizeId("foo\x01bar")).toThrow(SessionIdError)
+      expect(() => sanitizeId("foo\nbar")).toThrow(SessionIdError)
+    })
+
+    test("rejects ids over the length cap", () => {
+      expect(() => sanitizeId("a".repeat(129))).toThrow(SessionIdError)
+    })
+
+    test("sessionFilePath / archivedFilePath route through sanitizeId", () => {
+      process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
+      expect(() => sessionFilePath("../escape")).toThrow(SessionIdError)
+      expect(() => archivedFilePath("../escape")).toThrow(SessionIdError)
+    })
   })
 })

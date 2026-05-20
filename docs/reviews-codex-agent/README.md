@@ -24,6 +24,8 @@ Overview router: [may-20-codex-agent-loop.md](/Users/songmin/Documents/code-new/
   - typed task model, fact vs inference, stop/uncertainty discipline
 - [thread-management/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/thread-management/README.md)
   - thread, session, fork, recovery, storage, automation 전용 pack
+- [browser-runtime/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/README.md)
+  - in-app browser, browser plugin/runtime, tab/capability surface, safety, reimplementation pack
 
 세부 문서:
 - [turn-context-and-runtime-interface.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/turn-context-and-runtime-interface.md)
@@ -48,6 +50,18 @@ Overview router: [may-20-codex-agent-loop.md](/Users/songmin/Documents/code-new/
   - how memory appears to be structured across thread history, instruction stack, working state, artifacts, and subagents
 - [plugin-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/plugin-audit.md)
   - plugin model, plugin-contributed skills, trigger rules, and plugin/runtime boundaries
+- [browser-runtime/README.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/README.md)
+  - browser subsystem 전체 router
+- [browser-runtime/browser-surface-and-capability-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/browser-surface-and-capability-audit.md)
+  - visible browser/plugin/tab/capability surface inventory
+- [browser-runtime/browser-runtime-and-transport-architecture.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/browser-runtime-and-transport-architecture.md)
+  - browser-client bootstrap, backend split, session transport, CDP seam, best-fit runtime model
+- [browser-runtime/browser-comment-overlay-and-agent-sync.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/browser-comment-overlay-and-agent-sync.md)
+  - selected region overlay, comment marker, annotated screenshot, browser comment to thread sync
+- [browser-runtime/browser-safety-and-admissibility-model.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/browser-safety-and-admissibility-model.md)
+  - untrusted page rule, confirmation taxonomy, capability gating, browser-specific safety model
+- [browser-runtime/browser-reimplementation-blueprint.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/browser-runtime/browser-reimplementation-blueprint.md)
+  - Codex-like browser subsystem을 새로 만들 때의 API/control-plane/roadmap/failure modes
 - [mode-and-plan-process-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/mode-and-plan-process-audit.md)
   - differences between Default and Plan mode, and the inferred internal process of Plan mode
 - [permission-management-audit.md](/Users/songmin/Documents/code-new/semantica-codegraph-v2/docs/analysis/codex-agent/permission-management-audit.md)
@@ -112,3 +126,28 @@ Overview router: [may-20-codex-agent-loop.md](/Users/songmin/Documents/code-new/
 주의:
 - 이 디렉터리 문서는 제품 내부 비공개 원문 프롬프트를 복제하지 않는다.
 - 대신 외부에서 관측 가능한 사실과, 그 사실로부터 재구성 가능한 실행 모델을 정리한다.
+
+---
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 라운드는 실제 설치된 `Codex.app` (build `2867`, `26.513.31313`, prod) 바이너리/asar/리소스/entitlements/IPC 인벤토리를 직접 관측한 deep dive다.
+
+업데이트된 문서:
+- [direct-observable-facts.md](direct-observable-facts.md) — build/version, Electron/Node, asar SHA256, entitlements, Sparkle feed, custom URL scheme, codex/codex_chronicle binary 크기, `~/.codex/` on-disk inventory, `config.toml`/`auth.json` 모드, models cache, reasoning-effort enum, IPC 인벤토리(378), Skybridge MessagePort(12), bundled plugins, Anthropic SDK markers
+- [unknowns-and-non-claims.md](unknowns-and-non-claims.md) — Anthropic 트래픽 routing 비주장, `gpt-5.1-codex-max` 활성 모델 비주장, `~/.codex/pets/` 의미 비주장, `logs_2.sqlite` secret 비주장, workspace 패키지 공개 소스 비주장, `comment-preload.js` MCP 오해 정정, `runWidgetCode` exploitability 비주장, 1.49GB/day 비주장
+- [comparative-differentiators-audit.md](comparative-differentiators-audit.md) — codex_chronicle (always-on screen capture), vendored browser-use, in-app MCP server, extension-host native binary, bare-modifier-monitor, Skybridge sandbox, logs_2.sqlite 구조 trace
+- [cross-cutting-risk-register.md](cross-cutting-risk-register.md) — unsandboxed Electron + JIT, runWidgetCode/setAdditionalGlobals, SFTP upload IPC, codex_chronicle screen capture, 14.8GB logs_2.sqlite, global modifier-key hook, browser-use vendoring, 378 IPC sender validation, claude-code-import 위험, NSAllowsArbitraryLoads
+- [task-management-and-todo-audit.md](task-management-and-todo-audit.md) — `/tasks` 페이지 renderer surface, automation runs IPC 인벤토리
+- [git-and-branch-management-audit.md](git-and-branch-management-audit.md) — git/gh-cli IPC 인벤토리
+- [terminal/README.md](terminal/README.md) — Round 2 pointer
+- [terminal/terminal-surface-and-tool-contract-audit.md](terminal/terminal-surface-and-tool-contract-audit.md) — node-pty v1.1.0, terminal-shell-options IPC
+- [terminal/terminal-runtime-and-session-architecture.md](terminal/terminal-runtime-and-session-architecture.md) — WSL detection logic, 27 external IDE/terminal "Open in", node_repl dir
+- [terminal/terminal-state-and-recovery-audit.md](terminal/terminal-state-and-recovery-audit.md) — node_repl state persistence
+- [terminal/terminal-reimplementation-blueprint.md](terminal/terminal-reimplementation-blueprint.md) — node-pty/WSL/Open-in target list가 design requirement에 추가
+
+Round 2 evidence 출처:
+- `/Applications/Codex.app/Contents/Resources/app.asar/package.json` (Electron 42.0.1 / Node 24.14.0 / app v26.513.31313 build 2867)
+- `/Applications/Codex.app/Contents/Info.plist` (entitlements, Sparkle, NSAllowsArbitraryLoads, codex:// scheme)
+- `~/.codex/config.toml`, `~/.codex/auth.json`, `~/.codex/models_cache.json`
+- IPC/Skybridge/plugin bundle scan

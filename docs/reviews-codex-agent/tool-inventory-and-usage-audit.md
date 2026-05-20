@@ -585,4 +585,57 @@ Classification:
 - 이 중 실전 핵심은 `exec_command`, `apply_patch`, `multi_tool_use.parallel`, `web.run`이다. `[FACT]` + `[STRONG-INFERENCE]`
 - 도구 선택은 단순 존재 여부가 아니라 `policy filtering -> task suitability -> current-state suitability -> cheapest sufficient path` 순으로 이해하는 것이 observed behavior와 가장 잘 맞는다. `[STRONG-INFERENCE]`
 - image/browser/subagent/MCP/node_repl/plan tools는 주 작업이 아니더라도 분명한 별도 역할을 가진다. `[FACT]`
+
+## Round 2 update (2026-05-21 deep dive)
+
+이 round에서는 Codex Rust binary 측의 built-in tool inventory가 fact level로 복원됐다. 본 doc의 기존 §2가 현 세션의 inventory를 다루었다면, 이 update는 **Codex 자체가 노출하는 built-in surface**를 별도 축으로 추가한다.
+
+### A. Codex binary built-in tools
+
+- `[FACT]` Codex Rust binary가 노출하는 built-in tools (string evidence):
+  1. `shell`
+  2. `apply_patch` — V4A diff format with `*** Begin Patch` / `*** End Patch` literal markers
+  3. `read`
+  4. `list_files`
+  5. `search` — rg-backed
+  6. `web_search`
+  7. `bash`
+- `[FACT]` Tool dispatch는 `core/src/tools/router.rs` (Rust crate `codex-core`) 경로로 routed된다 (binary string evidence).
+- `[FACT]` `bash` / `shell` 호출은 `~/.codex/rules/default.rules` allowlist (353KB) 의해 gated된다. format은 `prefix_rule(pattern=[…], decision=…)`.
+
+### B. Quanta 세션 inventory와 mapping (correspondence, not identity)
+
+기존 §2.1의 23개 callable tool은 Quanta 세션 surface이고, 위 §A는 Codex binary surface다. **둘은 같은 universe가 아니다.** 다음 mapping은 시맨틱 유사성에 대한 `[MODEL]` 표기:
+
+| Codex built-in (binary) | Closest Quanta-session equivalent | Class |
+| --- | --- | --- |
+| `shell` / `bash` | `functions.exec_command` | `[MODEL]` correspondence |
+| `apply_patch` | `functions.apply_patch` | `[MODEL]` correspondence |
+| `read` | `functions.exec_command` (`sed -n` 사용) | `[MODEL]` correspondence |
+| `list_files` | `functions.exec_command` (`ls`/`rg --files`) | `[MODEL]` correspondence |
+| `search` (rg) | `functions.exec_command` (`rg`) | `[MODEL]` correspondence |
+| `web_search` | `web.run` | `[MODEL]` correspondence |
+
+차이 (`[FACT]`):
+
+- Codex binary는 `read`, `list_files`, `search`를 **별도 typed tool**로 노출하지만, 현재 Quanta 세션은 `exec_command` 단일 surface 위에 동일 기능을 얹는다.
+- Codex binary는 `bash`와 `shell`을 **두 개의 분리된 tool**로 노출한다 — 이는 §8.1 ("exec_command 하나면 나머지는 의미 없다")와 정면으로 어긋나는 trap이 binary level에서도 실재함을 의미한다.
+
+### C. Quick-switch command surface
+
+- `[FACT]` 9 quick-switch slot commands: `codex.command.thread1` ... `codex.command.thread9`.
+- `[FACT]` 추가로 부분 복원된 command IDs: `codex.command.composer.{open,start}`, `codex.command.{archive,find,focus,copy,force,manage,new,open,personality,mcp,install,log,keyboard,tuck,next,previous,show,toggle}`, `codex.command.global-dictation-{hotkey,history,recording}`, `settings.agent.*`, `settings.mcp.detail.command`.
+
+이 command IDs는 tool이 아니라 UI-level command surface다. §2.2 ("non-tool app directives")와 같은 분류로 들어간다.
+
+### D. §8 attack surface 추가
+
+- `[FACT]` `apply_patch`의 V4A diff format은 binary string에 literal로 박혀 있다 — patch envelope을 임의로 wrapping해서는 안 된다 (envelope mismatch가 곧 patch failure).
+- `[FACT]` `bash` / `shell` allowlist는 single file (`~/.codex/rules/default.rules`)로 SSOT다. 다른 곳에서 prefix rule을 inject하는 path는 string evidence에 없다.
+
+### E. What stays unchanged
+
+- §2.1의 23개 Quanta-session callable list는 그대로.
+- §7의 typical combinations는 그대로.
+- §9 unknowns는 hidden ranking 측면에서 그대로 unknown (binary surface 복원은 enum 멤버를 결정하지 않음).
 - app directives는 tool과 구분해야 한다. `[FACT]`

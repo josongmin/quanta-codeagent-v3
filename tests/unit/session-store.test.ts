@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Message } from "@/llm"
@@ -66,6 +66,9 @@ describe("session store", () => {
     expect(loaded?.messages).toEqual(payload.messages)
     // lastTouched is bumped to now
     expect(loaded?.meta.lastTouched ?? 0).toBeGreaterThanOrEqual(meta.createdAt)
+    // Index is also updated as part of the same save (paired write contract).
+    const list = await listSessions()
+    expect(list.map((m) => m.id)).toContain("rt-1")
   })
 
   test("loadSessionById finds an archived file", async () => {
@@ -168,25 +171,47 @@ describe("session store", () => {
     expect(forked?.meta.cwd).toBe("/elsewhere")
   })
 
-  test("forkSession does NOT mutate the source", async () => {
+  test("forkSession deep-copies messages so the fork can be mutated independently", async () => {
+    // The prior version of this test asserted equality but never mutated the
+    // fork's messages — it could pass with a SHALLOW copy (or even
+    // referentially-shared) array. The deep-copy invariant matters because the
+    // agent loop will push into `session.messages` in-place after a fork; if
+    // the source array were the same reference, a subsequent runAgent on the
+    // fork would silently rewrite the source's persisted history.
     const sourceMeta = mkMeta({ id: "imm", title: "ImmSource", createdAt: 100, lastTouched: 100 })
-    const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    ]
     await saveSessionById(sourceMeta, mkPayload({ messages }))
     const sourceBefore = await loadSessionById("imm")
+    const originalLen = sourceBefore?.messages.length ?? 0
 
-    await forkSession("imm")
+    const newId = await forkSession("imm")
+    const fork = await loadSessionById(newId)
+    if (!fork) throw new Error("forkSession did not return a loadable fork")
+    // Mutate the fork's in-memory array AND persist — this is the realistic
+    // shape (the agent loop loads, appends, saves). After the save, the source
+    // file must still hold the original transcript.
+    fork.messages.push({ role: "user", content: [{ type: "text", text: "TAMPER" }] })
+    await saveSessionById(fork.meta, {
+      reason: "test-mutated",
+      turns: fork.turns + 1,
+      messages: fork.messages,
+    })
 
-    const sourceAfter = await loadSessionById("imm")
-    expect(sourceAfter?.meta.id).toBe(sourceBefore?.meta.id)
-    expect(sourceAfter?.meta.title).toBe(sourceBefore?.meta.title)
-    expect(sourceAfter?.meta.createdAt).toBe(sourceBefore?.meta.createdAt)
-    expect(sourceAfter?.meta.lastTouched).toBe(sourceBefore?.meta.lastTouched)
-    expect(sourceAfter?.messages).toEqual(sourceBefore?.messages ?? [])
-    // And messages are not referentially shared: mutating forked side leaves
-    // source untouched (deep-copy invariant).
-    const forks = await listSessions()
-    const forkId = forks.find((m) => m.id !== "imm")?.id
-    expect(forkId).toBeDefined()
+    const reloaded = await loadSessionById("imm")
+    expect(reloaded?.messages).toHaveLength(originalLen)
+    expect(
+      reloaded?.messages.some((m) =>
+        m.content.some((b) => b.type === "text" && b.text === "TAMPER"),
+      ),
+    ).toBe(false)
+
+    // Source meta also unchanged (no incidental lastTouched bump from fork).
+    expect(reloaded?.meta.title).toBe(sourceBefore?.meta.title)
+    expect(reloaded?.meta.createdAt).toBe(sourceBefore?.meta.createdAt)
+    expect(reloaded?.meta.lastTouched).toBe(sourceBefore?.meta.lastTouched)
   })
 
   test("forkSession throws on missing source", async () => {
@@ -217,5 +242,70 @@ describe("session store", () => {
     await renameSession("missing", "x")
     await deleteSession("missing")
     expect(await loadSessionById("missing")).toBeUndefined()
+  })
+
+  // Audit Round 3 §C — corrupt-on-disk inputs must NEVER throw out of loadSessionById.
+  test("loadSessionById returns undefined for a corrupt V2 file (no throw)", async () => {
+    // Plant deliberately-broken JSON at the per-id path. loadSessionById is
+    // contractually best-effort: a torn / partially-written file must surface
+    // as `undefined`, not propagate a SyntaxError up into the CLI dispatcher.
+    writeFileSync(sessionFilePath("corrupt-1"), "{this is not json")
+    const loaded = await loadSessionById("corrupt-1")
+    expect(loaded).toBeUndefined()
+  })
+
+  test("loadSessionById returns undefined for a wrong-version file", async () => {
+    // Forward-compat guard: a future V99 schema MUST be ignored by the V2
+    // reader (return undefined) instead of being half-parsed into a wrong-
+    // shape SavedSession. Otherwise a downgrade-then-upgrade cycle could
+    // surface a typed-but-incoherent session to callers.
+    const wrong = {
+      version: 99,
+      meta: mkMeta({ id: "wrongver" }),
+      reason: "x",
+      turns: 0,
+      messages: [],
+    }
+    writeFileSync(sessionFilePath("wrongver"), JSON.stringify(wrong))
+    expect(await loadSessionById("wrongver")).toBeUndefined()
+  })
+
+  test("concurrent saveSessionById same id: file ends whole, one payload wins", async () => {
+    // Documented concurrency model (index-store.ts:11-15): single CLI process
+    // per user, last-writer-wins. Per-id JSON is "never affected (each id is
+    // its own file)". In practice, two parallel saves share the same
+    // `<id>.json.tmp` staging path, so one rename can lose the file out from
+    // under the other and throw ENOENT — that's a known surface of the
+    // last-writer-wins contract. We pin the OBSERVABLE invariant: regardless
+    // of whether both saves succeed or one throws, the final on-disk file is
+    // EXACTLY one of the two payloads (never half-merged, never torn).
+    const meta1 = mkMeta({ id: "concur" })
+    const payload1 = mkPayload({ reason: "A", turns: 1 })
+    const payload2 = mkPayload({ reason: "B", turns: 2 })
+    const results = await Promise.allSettled([
+      saveSessionById(meta1, payload1),
+      saveSessionById({ ...meta1 }, payload2),
+    ])
+    // At least one must succeed (otherwise nothing was written).
+    expect(results.some((r) => r.status === "fulfilled")).toBe(true)
+    const loaded = await loadSessionById("concur")
+    expect(loaded).toBeDefined()
+    // EXACTLY one of the two payloads - never a fusion.
+    const reasonOk = loaded?.reason === "A" || loaded?.reason === "B"
+    expect(reasonOk).toBe(true)
+    // And the turns field must match its payload (no cross-merge).
+    if (loaded?.reason === "A") expect(loaded.turns).toBe(1)
+    if (loaded?.reason === "B") expect(loaded.turns).toBe(2)
+  })
+
+  test("saveSessionById with meta.archived=true lands in the archived path", async () => {
+    // When a caller stamps archived=true directly on the meta, the save MUST
+    // route to <root>/archived/<id>.json — the active path stays empty.
+    const meta = mkMeta({ id: "sav-arc", archived: true })
+    await saveSessionById(meta, mkPayload())
+    expect(existsSync(sessionFilePath("sav-arc"))).toBe(false)
+    expect(existsSync(archivedFilePath("sav-arc"))).toBe(true)
+    const loaded = await loadSessionById("sav-arc")
+    expect(loaded?.meta.archived).toBe(true)
   })
 })
