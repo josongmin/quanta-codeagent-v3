@@ -185,6 +185,113 @@ describe("ToolRegistry", () => {
     }
   })
 
+  test("run() WIRED seam: over-cap spill routes spillPath → evidence.fullLogPath", async () => {
+    const big = "C".repeat(5_000)
+    const tool: Tool<Record<string, never>> = {
+      name: "evidence-bigout",
+      description: "test",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      async *execute(): AsyncIterable<ToolEvent> {
+        yield { type: "result", result: { ok: true, output: big } }
+      },
+    }
+    const reg = new ToolRegistry([tool as Tool])
+    const dir = mkdtempSync(join(tmpdir(), "registry-evidence-"))
+    const prev = process.env.QUANTA_TOOL_OUTPUT_MAX
+    process.env.QUANTA_TOOL_OUTPUT_MAX = "100"
+    try {
+      const result = await reg.run("evidence-bigout", {}, ctx(dir))
+      expect(result.ok).toBe(true)
+      // The new wiring: spill path is surfaced via the typed evidence field.
+      expect(result.evidence).toBeDefined()
+      expect(typeof result.evidence?.fullLogPath).toBe("string")
+      const fullLogPath = result.evidence?.fullLogPath as string
+      expect(fullLogPath.length).toBeGreaterThan(0)
+      // The advertised path must actually exist and hold the original output.
+      expect(existsSync(fullLogPath)).toBe(true)
+      expect(readFileSync(fullLogPath, "utf8")).toBe(big)
+      // And lives under <cwd>/.quanta/tool-output/.
+      expect(fullLogPath.startsWith(join(dir, ".quanta", "tool-output"))).toBe(true)
+      // The marker in `output` references the same path.
+      expect(result.output).toContain(fullLogPath)
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_TOOL_OUTPUT_MAX
+      else process.env.QUANTA_TOOL_OUTPUT_MAX = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("run() WIRED seam: spill merges with existing evidence (stderr/exitCode preserved)", async () => {
+    const big = "D".repeat(5_000)
+    const tool: Tool<Record<string, never>> = {
+      name: "evidence-merge",
+      description: "test",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      async *execute(): AsyncIterable<ToolEvent> {
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: big,
+            evidence: { stderr: "boom", exitCode: 2 },
+          },
+        }
+      },
+    }
+    const reg = new ToolRegistry([tool as Tool])
+    const dir = mkdtempSync(join(tmpdir(), "registry-evidence-merge-"))
+    const prev = process.env.QUANTA_TOOL_OUTPUT_MAX
+    process.env.QUANTA_TOOL_OUTPUT_MAX = "100"
+    try {
+      const result = await reg.run("evidence-merge", {}, ctx(dir))
+      // Existing evidence is preserved...
+      expect(result.evidence?.stderr).toBe("boom")
+      expect(result.evidence?.exitCode).toBe(2)
+      // ...and fullLogPath is added.
+      expect(typeof result.evidence?.fullLogPath).toBe("string")
+      expect(existsSync(result.evidence?.fullLogPath as string)).toBe(true)
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_TOOL_OUTPUT_MAX
+      else process.env.QUANTA_TOOL_OUTPUT_MAX = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("run() WIRED seam: sub-cap path leaves evidence untouched (no fullLogPath added)", async () => {
+    const tool: Tool<Record<string, never>> = {
+      name: "evidence-undercap",
+      description: "test",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      async *execute(): AsyncIterable<ToolEvent> {
+        yield {
+          type: "result",
+          result: {
+            ok: true,
+            output: "tiny",
+            evidence: { stderr: "warn-only", exitCode: 0 },
+          },
+        }
+      },
+    }
+    const reg = new ToolRegistry([tool as Tool])
+    const dir = mkdtempSync(join(tmpdir(), "registry-undercap-"))
+    try {
+      const result = await reg.run("evidence-undercap", {}, ctx(dir))
+      expect(result.output).toBe("tiny")
+      expect(result.evidence?.stderr).toBe("warn-only")
+      expect(result.evidence?.exitCode).toBe(0)
+      expect(result.evidence?.fullLogPath).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("run() throws ToolExecutionError when the tool yields no result", async () => {
     const tool: Tool<Record<string, never>> = {
       name: "silent",

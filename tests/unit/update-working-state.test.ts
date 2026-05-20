@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { createWorkingStateSession } from "@/agent"
-import { createUpdateWorkingStateTool, type ToolContext, type WorkingStateHandle } from "@/tool"
+import {
+  createUpdateWorkingStateTool,
+  ToolRegistry,
+  type ToolContext,
+  type WorkingStateHandle,
+} from "@/tool"
 
 const ctx = (over: Partial<ToolContext> = {}): ToolContext => ({
   cwd: "/repo",
@@ -21,7 +26,12 @@ const drain = async <I>(
 }
 
 describe("update_working_state tool", () => {
-  test("empty input → no change, output mentions (no changes)", async () => {
+  // In-process drain bypasses zod (no schema parse). The .refine that rejects
+  // `{}` only fires via the production registry path — see the dedicated
+  // schema-level test below. The in-process path is still useful (and tested
+  // here) to confirm the no-changes branch when callers DO bypass validation
+  // (e.g. internal harness calls), but it does NOT represent production flow.
+  test("in-process drain (zod-bypassed): empty input → no change", async () => {
     const session = createWorkingStateSession()
     const tool = createUpdateWorkingStateTool(session)
     const out = await drain(tool, {})
@@ -29,6 +39,32 @@ describe("update_working_state tool", () => {
     expect(out.output).toContain("(no changes)")
     expect(session.snapshot().ownerShortlist).toEqual([])
     expect(session.snapshot().hypothesis).toBeUndefined()
+  })
+
+  // R5 audit B5 fix: the `.refine((p) => Object.keys(p).length > 0)` on the
+  // zod schema rejects `{}` at the schema layer. Production callers route
+  // through `ToolRegistry.run` which runs `safeParse` first — verify the
+  // rejection fires end-to-end with the documented error wording.
+  test("registry path: empty input rejected by zod .refine", async () => {
+    const session = createWorkingStateSession()
+    const tool = createUpdateWorkingStateTool(session)
+    const registry = new ToolRegistry([tool])
+    await expect(registry.run("update_working_state", {}, ctx())).rejects.toThrow(
+      /at least one field/i,
+    )
+  })
+
+  test("registry path: a populated input still passes the refine", async () => {
+    const session = createWorkingStateSession()
+    const tool = createUpdateWorkingStateTool(session)
+    const registry = new ToolRegistry([tool])
+    const result = await registry.run(
+      "update_working_state",
+      { hypothesis: "fixed-something" },
+      ctx(),
+    )
+    expect(result.ok).toBe(true)
+    expect(session.snapshot().hypothesis).toBe("fixed-something")
   })
 
   test("setting ownerShortlist replaces (not appends)", async () => {

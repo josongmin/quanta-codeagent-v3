@@ -69,12 +69,15 @@ describe("buildSystemPrompt", () => {
       expect(lower).toContain("do not re-issue the identical call")
     })
 
-    test("write safe code — OWASP classes called out", () => {
-      expect(lower).toContain("write safe code")
+    test("security posture — one-line vuln avoidance (Round 5 OWASP prune)", () => {
+      // CR1 R5 fix B: the verbose OWASP-top-10 paragraph was cargo. Compressed
+      // to ONE sentence that still names injection classes as proofs and keeps
+      // the actionable "fix it immediately" rule. The substring "owasp" is
+      // intentionally NOT required anymore — the list was the cargo.
       expect(lower).toContain("command injection")
-      expect(lower).toContain("sql injection")
-      expect(lower).toContain("path")
-      expect(lower).toContain("owasp")
+      expect(lower).toContain("sql")
+      expect(lower).toContain("path traversal")
+      expect(lower).toContain("fix it immediately")
     })
 
     test("refuses destructive-primary tooling, assists defensive security", () => {
@@ -105,9 +108,12 @@ describe("buildSystemPrompt", () => {
       expect(lower).toContain("don't start implementing")
     })
 
-    test("context-compaction note (not limited by the context window)", () => {
-      expect(lower).toContain("automatically compacted")
-      expect(lower).toContain("not limited by the context window")
+    test("context-compaction note is ABSENT (Round 5 cargo prune)", () => {
+      // CR1 R5 fix B: the "older parts may be automatically compacted" paragraph
+      // is harness-internal state the model cannot observe or act on. Removed
+      // to shrink the cached prefix; this guard pins the deletion.
+      expect(lower).not.toContain("automatically compacted")
+      expect(lower).not.toContain("not limited by the context window")
     })
   })
 

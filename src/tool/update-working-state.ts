@@ -173,6 +173,15 @@ export const createUpdateWorkingStateTool = (
   // Mutates session state — must serialize w.r.t. any other call that reads
   // or writes the same handle. Cheap to gate at head-of-line.
   isConcurrencySafe: () => false,
+  // HITL secure-by-default (Round 5 audit A1 fix): even though the only side
+  // effect is updating session-scoped L3 memory (zero blast radius outside
+  // the current run), `isReadOnly()` is false — so without this explicit
+  // opt-in, the `inferToolTier` fail-closed fallback would classify each call
+  // as `always-confirm` and trigger onConfirm on every turn. That deadlock
+  // would make working-state unusable in HITL-enabled bench / dev sessions.
+  // Pre-approval is the right tier: the mutation is bounded, session-local,
+  // and reversible (the next `mutate` is a full replacement).
+  hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const h = handle ?? ctx.workingState

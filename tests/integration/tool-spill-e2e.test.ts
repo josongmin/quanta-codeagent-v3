@@ -87,5 +87,15 @@ describe("GAP 3 — result-size cap + spill through real registry/dispatch", () 
     expect(full).toBe(`BIGSTART ${GIANT} BIGEND`)
     // The marker references that exact spill path so the model can Read it.
     expect(tr.content).toContain(spillPath)
+
+    // R5-A wiring: the spill path must flow all the way through the stream
+    // (registry → result.evidence.fullLogPath → dispatch.evidenceOf →
+    // DispatchResult.fullLogPath → loop emit "tool_result"). Confirm the
+    // trajectory event carries the same path the marker advertised.
+    const toolResultEvents = stream.events.filter((e) => e.type === "tool_result")
+    expect(toolResultEvents).toHaveLength(1)
+    const trEv = toolResultEvents[0]
+    if (trEv?.type !== "tool_result") throw new Error("expected tool_result event")
+    expect(trEv.fullLogPath).toBe(spillPath)
   })
 })

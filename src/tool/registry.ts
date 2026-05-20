@@ -76,11 +76,25 @@ export class ToolRegistry {
     if (result === undefined) {
       throw new ToolExecutionError(`Tool ${name} produced no result`)
     }
-    const { output } = capToolOutput(result.output, {
+    const capped = capToolOutput(result.output, {
       maxChars: envMaxChars(process.env),
       spillDir: join(ctx.cwd, ".quanta", "tool-output"),
       spillKeep: envSpillKeep(process.env),
     })
-    return output === result.output ? result : { ...result, output }
+    if (capped.output === result.output) return result
+    // Route the spill path (if any) into the typed `evidence.fullLogPath` so
+    // the dispatch seam (`evidenceOf`) can flatten it onto `DispatchResult.
+    // fullLogPath` → trajectory `tool_end.fullLogPath`. exactOptionalPropertyTypes-
+    // safe: the `evidence` field is only set when we have something to add, and
+    // existing evidence subfields (stderr/exitCode) are merged through, not
+    // clobbered.
+    const next: ToolResult = {
+      ...result,
+      output: capped.output,
+      ...(capped.spillPath !== undefined
+        ? { evidence: { ...result.evidence, fullLogPath: capped.spillPath } }
+        : {}),
+    }
+    return next
   }
 }
