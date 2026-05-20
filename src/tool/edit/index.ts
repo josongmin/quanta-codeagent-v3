@@ -3,6 +3,7 @@ import { FsJailError, readFile, writeFile } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
+import { classifyMismatch, formatStrategyHint } from "./strategy-hint"
 
 const schema = z.object({
   path: z.string().describe("File path to edit"),
@@ -39,7 +40,11 @@ export const editTool: Tool<Input> = {
         result = applyFuzzyEdit(source, input.old_string, input.new_string, replaceAll)
       }
       if (!result.ok || result.next === undefined) {
-        yield { type: "result", result: { ok: false, output: result.message } }
+        // Phase 4: surface a structured next-strategy hint so the LLM can
+        // switch to `scripted_replace` / re-read instead of re-trying the same
+        // patch. Exit semantics unchanged (still ok:false) — message text only.
+        const hint = formatStrategyHint(classifyMismatch(result.message))
+        yield { type: "result", result: { ok: false, output: `${result.message}\n\n${hint}` } }
         return
       }
       await writeFile(input.path, result.next, ctx.cwd)

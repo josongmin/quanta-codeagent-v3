@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type AgentConfig, HookBus, runAgent } from "@/agent"
@@ -9,15 +9,18 @@ import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 
-/** Yields one scripted StreamEvent[] per stream() call, in order. */
+/** Yields one scripted StreamEvent[] per stream() call, in order. Captures the
+ *  messages passed in so tests can inspect the per-turn reminder tail. */
 class FakeLLM implements LLMPort {
   private readonly scripts: StreamEvent[][]
   private last: StreamEvent[] = []
   calls = 0
+  readonly seenMessages: Message[][] = []
   constructor(scripts: StreamEvent[][]) {
     this.scripts = scripts
   }
-  async *stream(): AsyncIterable<StreamEvent> {
+  async *stream(input: { messages: Message[] }): AsyncIterable<StreamEvent> {
+    this.seenMessages.push(input.messages)
     const next = this.scripts.shift()
     if (next) this.last = next
     const script = next ?? this.last
@@ -209,5 +212,52 @@ describe("agent feature wiring", () => {
     expect(snap.counters["agent.stop_reason.completed"]).toBe(1)
     expect(snap.timers["agent.llm_stream"]?.count).toBe(2)
     expect(snap.timers["agent.tool_exec"]?.count).toBe(1)
+  })
+
+  // Phase 7: Skill trigger rules end-to-end (Codex `skills-audit.md` mirror).
+  // The seed at session start must surface the discovered skill catalogue +
+  // trigger rules in the per-turn `<system-reminder>` reminder tail, and the
+  // skill-less path must remain byte-identical.
+  test("config.skills ⇒ active-skills block appears in the per-turn reminder", async () => {
+    const skillsDir = join(dir, "skills")
+    mkdirSync(join(skillsDir, "review"), { recursive: true })
+    writeFileSync(
+      join(skillsDir, "review", "SKILL.md"),
+      "---\nname: review\ndescription: Review a pull request\n---\nReview body.\n",
+    )
+
+    const llm = new FakeLLM([textScript("ok")])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const outcome = await runAgent({
+      ...baseConfig(llm, registry, stream, dir, { mode: "acceptEdits" }),
+      skills: { dir: skillsDir },
+    })
+
+    expect(outcome.reason).toBe("completed")
+    // The reminder rides as the trailing user message every turn.
+    const sent = llm.seenMessages[0] ?? []
+    const tail = sent[sent.length - 1]
+    const text =
+      tail?.content[0]?.type === "text" ? tail.content[0].text : ""
+    expect(text).toContain("## Active skills")
+    expect(text).toContain("- $review — Review a pull request")
+    expect(text).toContain("Trigger rules:")
+    expect(text).toContain("Progressive disclosure")
+  })
+
+  test("without config.skills ⇒ no active-skills block (byte-identical)", async () => {
+    const llm = new FakeLLM([textScript("ok")])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const outcome = await runAgent(baseConfig(llm, registry, stream, dir, { mode: "acceptEdits" }))
+
+    expect(outcome.reason).toBe("completed")
+    const sent = llm.seenMessages[0] ?? []
+    const tail = sent[sent.length - 1]
+    const text =
+      tail?.content[0]?.type === "text" ? tail.content[0].text : ""
+    expect(text).not.toContain("## Active skills")
+    expect(text).not.toContain("Trigger rules:")
   })
 })

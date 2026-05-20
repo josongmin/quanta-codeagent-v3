@@ -25,6 +25,7 @@ import { backoffDelayMs, classifyLLMError } from "./retry"
 import { streamingTurn } from "./streaming-dispatch"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
+import type { WorkingStateSession } from "./working-state"
 
 /** Bounded per-turn recovery budgets. These cap SAME-TURN retries so a
  *  pathological provider can never spin the loop forever; once exhausted the
@@ -595,15 +596,28 @@ const prepareTurnContext = async (
   wm: WorkingMemory<Message>,
   recorder: AgentRecorder | undefined,
   breaker: CompactionBreaker | undefined,
+  activeSkills: { name: string; description: string }[] | undefined,
+  workingState: WorkingStateSession | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder)
   await maybeCompact(config, staticSystemFor(config), wm, breaker)
+  // SOTA++ Codex memory L3: snapshot the session WorkingState on every attempt
+  // so the per-turn reminder reflects mutations the tool just made earlier in
+  // the same turn. Absent ⇒ block omitted, byte-identical.
+  const wsSnapshot = workingState?.snapshot()
   return buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
     planMode: config.planMode ?? false,
     system: config.system,
+    ...(config.mode !== undefined ? { mode: config.mode } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
+    ...(config.repoRules !== undefined ? { repoRules: config.repoRules } : {}),
+    // Cached at session start by `buildSessionFeatures`; passed through every
+    // turn without re-discovery (Codex anti-reread). Absent ⇒ no block in the
+    // rendered reminder (byte-identical for skill-less sessions).
+    ...(activeSkills !== undefined ? { activeSkills } : {}),
+    ...(wsSnapshot !== undefined ? { workingState: wsSnapshot } : {}),
   })
 }
 
@@ -780,6 +794,8 @@ const runTurn = async (
   toolHistory: ToolHistoryEntry[] | undefined,
   verifyGuardState: VerifyGuardState | undefined,
   closeoutGuardState: CloseoutGuardState | undefined,
+  activeSkills: { name: string; description: string }[] | undefined,
+  workingState: WorkingStateSession | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -788,7 +804,7 @@ const runTurn = async (
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
-    const ctx = await prepareTurnContext(config, wm, recorder, breaker)
+    const ctx = await prepareTurnContext(config, wm, recorder, breaker, activeSkills, workingState)
     const result = await streamConsume(
       config,
       ctx.messages,
@@ -876,6 +892,10 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const cfg = buildEffectiveConfig(config, features.extraTools)
   const classifier = features.classifier
   const skillGate = buildSkillGate(features.skillAllowlists)
+  // Cached once at session start (Codex anti-reread). Passed straight into the
+  // per-turn reminder by `prepareTurnContext`. Absent ⇒ no block emitted, so
+  // skill-less sessions stay byte-identical end-to-end.
+  const activeSkills = features.activeSkills
   const { stream } = cfg
   // Canonical in-session message buffer (RFC §6.3). Seeded from the public
   // `config.messages`; every history mutation below goes through this slice.
@@ -902,6 +922,11 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
+  // SOTA++ Codex memory L3 (Phase 6 absorption): session-scoped WorkingState.
+  // Wired in by `buildSessionFeatures` when `cfg.workingState?.enabled === true`;
+  // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-
+  // identical for callers without the opt-in).
+  const workingState = features.workingState
 
   const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
     const messages = [...wm.snapshot()]
@@ -954,6 +979,8 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
       toolHistory,
       verifyGuardState,
       closeoutGuardState,
+      activeSkills,
+      workingState,
     )
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire

@@ -1,5 +1,5 @@
 import { type AutoModeClassifier, CLASSIFIER_SYSTEM_PROMPT } from "./classifier"
-import type { PermissionContext, PermissionDecision, ToolAction } from "./types"
+import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from "./types"
 
 /** Patterns refused outright regardless of mode. Best-effort, conservative
  *  denylist — NOT a sandbox and NOT an exhaustive policy engine (RFC §1.2:
@@ -83,15 +83,52 @@ const bashCommand = (input: unknown): string => {
   return ""
 }
 
-/** Returns the HARD_DENY decision for a bash action, or null if it does not
- *  match. Path-independent dangerous patterns always win first, before mode. */
-const hardDeny = (action: ToolAction): PermissionDecision | null => {
+/** Returns the HARD_DENY reason string for a bash action, or null if it does
+ *  not match. Path-independent dangerous patterns always win first, before
+ *  mode. HARD_DENY hits ARE the `hand-off-required` tier — they cross a
+ *  security boundary that no agent mode can authorize. Exposed so the
+ *  dispatch seam can phrase the deny message as a human-handoff request when
+ *  the HITL 4-tier gate is enabled. */
+export const hardDenyReason = (action: ToolAction): string | null => {
   if (action.tool !== "bash") return null
   const cmd = bashCommand(action.input)
   for (const pat of HARD_DENY) {
-    if (pat.test(cmd)) return { kind: "deny", reason: `Blocked dangerous command: ${cmd}` }
+    if (pat.test(cmd)) return `Blocked dangerous command: ${cmd}`
   }
   return null
+}
+
+const hardDeny = (action: ToolAction): PermissionDecision | null => {
+  const reason = hardDenyReason(action)
+  return reason ? { kind: "deny", reason } : null
+}
+
+/* ------------------------------------------------------------------------- *
+ * Codex HITL 4-tier (hitl-audit.md) — tier inference.
+ *
+ * The default tier comes from `tool.hitlTier(input)` when the tool exposes
+ * it. Absent ⇒ fall back to `isReadOnly`: read-only ⇒ "none", everything
+ * else ⇒ "pre-approval-ok". `bash` always opts in via its own `hitlTier`
+ * (network egress + mutating-git ⇒ always-confirm; HARD_DENY ⇒ resolved
+ * separately upstream as hand-off-required).
+ *
+ * This helper has no dependency on the tool slice — it duck-reads the
+ * `hitlTier` method off a thin interface so `@/permission` stays leaf.
+ * ------------------------------------------------------------------------- */
+
+interface HITLToolDuck {
+  isReadOnly(): boolean
+  hitlTier?(input: unknown): HITLTier
+}
+
+/** Infer the effective HITL tier for a call. The tool's own `hitlTier(input)`
+ *  wins; otherwise read-only ⇒ "none", mutating ⇒ "pre-approval-ok". The
+ *  dispatch seam composes this with the HARD_DENY check (which overrides to
+ *  "hand-off-required") to obtain the final routing tier. */
+export const inferToolTier = (tool: HITLToolDuck, input: unknown): HITLTier => {
+  const explicit = tool.hitlTier?.(input)
+  if (explicit) return explicit
+  return tool.isReadOnly() ? "none" : "pre-approval-ok"
 }
 
 /** Phase 1 policy: read-only always allowed; destructive shell hard-denied;

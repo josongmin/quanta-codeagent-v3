@@ -7,6 +7,8 @@ import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { HookBus } from "./hooks"
+import type { AgentMode } from "./prompt"
+import type { RepoRules } from "./repo-rules"
 
 export interface AgentConfig {
   llm: LLMPort
@@ -88,9 +90,26 @@ export interface AgentConfig {
   /**
    * Plan mode (RFC §13 Q3). When true: system prompt is augmented and any
    * non-read-only tool is blocked before permission/execute. Absent/false ⇒
-   * unchanged.
+   * unchanged. Superseded by `mode` (see below) — both are accepted; `mode`
+   * wins when set.
    */
   planMode?: boolean
+  /**
+   * Agent interaction mode (Codex `mode-and-plan-process-audit.md` absorption).
+   * Extends `planMode` into a typed enum: `default | plan | review | audit`.
+   * `plan` matches the legacy boolean. `review` / `audit` add task-posture
+   * mode notices in the per-turn reminder; tool gating for these is wired in
+   * Phase 3. Absent ⇒ derived from `planMode` (byte-identical).
+   */
+  mode?: AgentMode
+  /**
+   * Repo-local rules to inject ahead of memory hints as repo authority (Codex
+   * `repo-local-rule-ingestion-audit.md` absorption). Loaded by the caller
+   * (e.g. via `loadRepoRules(cwd)`) — the loop does not auto-read so contexts
+   * that should NOT adopt workspace rules (bench sandboxes, agent forks) stay
+   * byte-identical. Absent ⇒ no repo-rules block.
+   */
+  repoRules?: RepoRules
   /**
    * Metrics registry (RFC §8 Phase 3). Absent ⇒ no metrics recorded; loop
    * behavior identical.
@@ -129,7 +148,9 @@ export interface AgentConfig {
    * Verify-guard control (SOTA++ Tier 0 safety). Absent ⇒ guard fully OFF and
    * the loop is byte-identical. When present, a finish attempt right after a
    * mutating tool with no test/reproduction since is blocked, forcing one more
-   * turn (up to `maxTrips`, default 2 — capped to avoid infinite forcing).
+   * turn (up to `maxTrips`, default 1 — capped to avoid infinite forcing;
+   * lowered from 2 in ADR-0013 변경 이력 per the negative empirical from
+   * ADR-0014 — bench callers may still explicitly override).
    */
   verifyGuard?: { maxTrips?: number }
   /** Closeout guard (Codex CloseoutLens §4 mirror). Optional, absent ⇒ guard
@@ -137,8 +158,30 @@ export interface AgentConfig {
    *  pre-finish nudge injects the closeout reminder (keep only defended claims,
    *  state if verification not run, separate fact from inference, match
    *  requested reporting shape) once per run. Single-shot by design — no
-   *  maxTrips knob (multiple closeout nudges just thrash). */
-  closeoutGuard?: { enabled?: boolean }
+   *  maxTrips knob (multiple closeout nudges just thrash).
+   *
+   *  `fourRule:true` (Codex `response-assembly-and-closeout.md §5.2` verbatim
+   *  absorption) replaces the single-line reminder with the full 4-rule
+   *  defended-claim checklist + VerificationCloseout scaffold cue. Use when
+   *  the workload demands the stricter discipline (review/audit/SWE-bench).
+   *  Absent / false ⇒ legacy one-liner. */
+  closeoutGuard?: { enabled?: boolean; fourRule?: boolean }
+  /**
+   * Working state opt-in (Codex memory L3 absorption). Absent ⇒ no working-
+   * state block is rendered, the `update_working_state` tool is NOT registered,
+   * and the loop is byte-identical. When set, the loop builds a session-scoped
+   * `WorkingState`, plumbs it through `ToolContext.workingState`, registers the
+   * `update_working_state` meta-tool, and renders the L3 block in the per-turn
+   * reminder (BELOW repo-rules, ABOVE memory hints).
+   */
+  workingState?: { enabled: boolean }
+  /** HITL 4-tier gate (Codex hitl-audit.md absorption). Absent ⇒ legacy
+   *  single-tier behavior (byte-identical). When enabled, every dispatch
+   *  computes the effective tier and routes through tier-specific gates:
+   *  hand-off-required terminates, always-confirm always calls onConfirm
+   *  (cannot be skipped by acceptEdits/bypass), pre-approval-ok defers to the
+   *  existing mode policy, and none allows. */
+  hitl?: { enabled?: boolean }
   /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like

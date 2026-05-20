@@ -49,9 +49,16 @@ export {
 } from "./memory-stats"
 export { memoryTools } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
+export { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
 export { isMutatingToolBlockedInPlan } from "./plan"
-export type { TurnContext, TurnContextInput } from "./prompt"
+export type { AgentMode, TurnContext, TurnContextInput } from "./prompt"
 export { buildSystemPrompt, buildTurnContext } from "./prompt"
+export {
+  loadRepoRules,
+  renderRepoRulesBlock,
+  REPO_RULE_CANDIDATES,
+  type RepoRules,
+} from "./repo-rules"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
 export { loadSession, type SaveSessionInput, saveSession } from "./state"
 export {
@@ -64,3 +71,15 @@ export {
 } from "./streaming-dispatch"
 export { createSubagentRunner, type SubagentRunnerOptions } from "./subagent-runner"
 export type { AgentConfig, AgentOutcome, StopReason } from "./types"
+export {
+  type Blocker,
+  createWorkingStateSession,
+  type DeferredValidation,
+  emptyWorkingState,
+  type NextStep,
+  type OwnerCandidate,
+  renderWorkingStateBlock,
+  type WorkingState,
+  type WorkingStatePatch,
+  type WorkingStateSession,
+} from "./working-state"

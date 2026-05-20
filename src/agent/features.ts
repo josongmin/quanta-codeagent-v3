@@ -49,7 +49,7 @@
  */
 
 import { AutoModeClassifier } from "@/permission"
-import type { Tool } from "@/tool"
+import { createUpdateWorkingStateTool, type Tool } from "@/tool"
 import { createSkillTool, createToolSearchTool, discoverSkills, skillToolAllowlist } from "../skill"
 import {
   createAgentTool,
@@ -60,6 +60,7 @@ import {
 import { createAutoClassifierPort } from "./auto-classifier"
 import { createSubagentRunner } from "./subagent-runner"
 import type { AgentConfig } from "./types"
+import { createWorkingStateSession, type WorkingStateSession } from "./working-state"
 
 /** Materialized Tier-1 subsystems for one session. All fields are
  *  "absent ⇒ feature off"; the loop merges/threads them and otherwise behaves
@@ -84,6 +85,19 @@ export interface SessionFeatures {
    *  is denied as a recoverable tool_result). Present only when ≥1 discovered
    *  skill declares `tools:`; absent ⇒ no scoping (byte-identical). */
   skillAllowlists?: Map<string, string[]>
+  /** Active-skill inventory cached at session start (Codex `skills-audit.md`
+   *  mirror). One `{name, description}` per discovered skill — used by the
+   *  per-turn reminder to advertise the catalogue + trigger rules without
+   *  re-discovering on every turn (Codex anti-reread). The skill BODY stays
+   *  lazy (progressive disclosure); only metadata rides here. Present only
+   *  when `config.skills` is set; absent ⇒ no block (byte-identical). */
+  activeSkills?: { name: string; description: string }[]
+  /** Session-scoped WorkingState (Codex memory L3 absorption). Present only
+   *  when `config.workingState?.enabled === true`; absent ⇒ the
+   *  `update_working_state` tool is NOT in `extraTools` and the loop renders
+   *  no L3 block (byte-identical). The loop retains this to snapshot the
+   *  current state into the per-turn reminder. */
+  workingState?: WorkingStateSession
 }
 
 /**
@@ -115,7 +129,11 @@ export interface SessionFeatures {
 const buildSkillFeatures = async (
   config: AgentConfig,
   dir: string,
-): Promise<{ tools: Tool[]; allowlists: Map<string, string[]> | undefined }> => {
+): Promise<{
+  tools: Tool[]
+  allowlists: Map<string, string[]> | undefined
+  inventory: { name: string; description: string }[]
+}> => {
   const skills = await discoverSkills(dir)
   const tools: Tool[] = [
     createSkillTool(skills),
@@ -126,7 +144,12 @@ const buildSkillFeatures = async (
     const allow = skillToolAllowlist(s)
     if (allow) al.set(s.name, allow)
   }
-  return { tools, allowlists: al.size > 0 ? al : undefined }
+  // Plain `{name, description}` shape so the prompt slice never imports
+  // `@/skill` (slice isolation — Codex skills-audit mirror). Built ONCE here
+  // (the loop calls buildSessionFeatures once at session start), then passed
+  // through every turn without re-discovery.
+  const inventory = skills.map((s) => ({ name: s.name, description: s.description }))
+  return { tools, allowlists: al.size > 0 ? al : undefined, inventory }
 }
 
 export const buildSessionFeatures = async (config: AgentConfig): Promise<SessionFeatures> => {
@@ -134,6 +157,8 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   let taskRegistry: TaskRegistry | undefined
   let classifier: AutoModeClassifier | undefined
   let skillAllowlists: Map<string, string[]> | undefined
+  let activeSkills: { name: string; description: string }[] | undefined
+  let workingState: WorkingStateSession | undefined
 
   // --- Subagent block -----------------------------------------------------
   if (config.subagent) {
@@ -159,6 +184,10 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
     const sf = await buildSkillFeatures(config, config.skills.dir)
     extraTools.push(...sf.tools)
     skillAllowlists = sf.allowlists
+    // Inventory is present whenever `config.skills` is set — even an empty
+    // array (no SKILL.md files yet) — so the prompt slice can gate purely on
+    // `length > 0` and stays byte-identical for skill-less sessions.
+    activeSkills = sf.inventory
   }
 
   // --- Auto-mode classifier ----------------------------------------------
@@ -166,10 +195,22 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
     classifier = new AutoModeClassifier(createAutoClassifierPort({ llm: config.llm }))
   }
 
+  // --- Working state (Codex memory L3) -----------------------------------
+  // Build the session-scoped WorkingState handle + register the meta-tool that
+  // mutates it. Absent ⇒ neither resource is allocated, the L3 block is not
+  // rendered, and `update_working_state` is NOT in the registry — the loop is
+  // byte-identical for all callers that do not opt in.
+  if (config.workingState?.enabled === true) {
+    workingState = createWorkingStateSession()
+    extraTools.push(createUpdateWorkingStateTool(workingState) as Tool)
+  }
+
   return {
     extraTools,
     ...(classifier ? { classifier } : {}),
     ...(taskRegistry ? { taskRegistry } : {}),
     ...(skillAllowlists ? { skillAllowlists } : {}),
+    ...(activeSkills ? { activeSkills } : {}),
+    ...(workingState ? { workingState } : {}),
   }
 }

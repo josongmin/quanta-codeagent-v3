@@ -5,6 +5,7 @@ import { globTool } from "./glob"
 import { grepTool } from "./grep"
 import { localizeTool } from "./localize"
 import { readTool } from "./read"
+import { scriptedReplaceTool } from "./scripted-replace"
 import { testRunnerTool } from "./test-runner"
 import type { Tool } from "./types"
 import { writeTool } from "./write"
@@ -18,7 +19,18 @@ export {
   nullDiagnosticsProvider,
 } from "./diagnostics"
 export { ToolRegistry } from "./registry"
-export type { Tool, ToolContext, ToolEvent, ToolResult, ToolSpec } from "./types"
+export { createUpdateWorkingStateTool } from "./update-working-state"
+export type {
+  HITLTier,
+  Tool,
+  ToolContext,
+  ToolEvent,
+  ToolResult,
+  ToolSpec,
+  WorkingStateHandle,
+  WorkingStatePatch,
+  WorkingStateSnapshot,
+} from "./types"
 
 /**
  * Built-in tool set: Phase 1 six + Phase 2 localize / test_runner + the
@@ -30,6 +42,10 @@ export const defaultTools: Tool[] = [
   readTool as Tool,
   writeTool as Tool,
   editTool as Tool,
+  // Phase 4: `scripted_replace` is registered by default — the LLM only routes
+  // to it when `edit` surfaces a strategy hint or the prompt calls for bulk
+  // substitution. Sessions that never invoke it see byte-identical behavior.
+  scriptedReplaceTool as Tool,
   bashTool as Tool,
   grepTool as Tool,
   globTool as Tool,

@@ -306,8 +306,11 @@ const buildConfig = (
     // SOTA++ verify-guard (ADR-0013): observed bench failure — agent edits a
     // source file then declares "done" with 0 verification → wrong fix ships.
     // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
-    // byte-identical). Absent ⇒ guard OFF, loop unchanged.
-    ...(instance.swebench ? { verifyGuard: { maxTrips: 2 } } : {}),
+    // byte-identical). Absent ⇒ guard OFF, loop unchanged. Pass `{}` so the
+    // current `DEFAULT_MAX_TRIPS` (1) applies; the prior explicit `2` produced
+    // the negative empirical that motivated ADR-0013's default reduction —
+    // inheriting the default makes the lesson actually apply on the bench path.
+    ...(instance.swebench ? { verifyGuard: {} } : {}),
   }
 }
 

@@ -1,30 +1,16 @@
 import type { ToolAction } from "@/permission"
+import { isMutatingToolBlockedInMode } from "./mode"
 
 /**
- * Plan mode (RFC §13 Q3 → DECISION: system-prompt augmentation + a permission-
- * style gate, NO separate "plan" tool).
+ * Plan mode gate — DEPRECATED alias.
  *
- * Rationale: a dedicated plan tool would be a closed-alphabet action (RFC §1.2
- * explicitly rejects pre-defining the full action set) and would need its own
- * schema, registry entry, and dispatch branch — exactly the v2 weight this
- * project avoids. Plan mode is not a new capability; it is a *restriction* plus
- * a prompt nudge. So we express it as (a) a system-prompt augmentation telling
- * the model to explore read-only and emit a concrete plan, and (b) a gate in
- * dispatch that blocks any non-read-only tool before it can run. This reuses
- * the existing system-augmentation copy pattern (memory recall in loop.ts) and
- * mirrors the permission-deny tool_result shape, adding zero new surface area.
- *
- * Behavior-preserving: `planMode` is optional on {@link AgentConfig}; absent ⇒
- * neither the prompt notice nor the gate is reached, default path unchanged.
- *
- * Post ADR-0004 the in-loop plan prompt copy lives in `PLAN_NOTICE`
- * (src/agent/prompt.ts) — folded into the per-turn `<system-reminder>` tail of
- * `buildTurnContext`. This file now owns only the dispatch-side gate.
+ * Original RFC §13 Q3 design: a single boolean restriction (read-only tools
+ * only) + a per-turn prompt notice, NO new tool. That remains correct, but
+ * Phase 3 (Codex `mode-and-plan-process-audit.md` absorption) generalizes the
+ * gate into a typed enum that ALSO covers `review` / `audit` read-only
+ * postures. New code should call {@link isMutatingToolBlockedInMode} with the
+ * resolved {@link AgentMode}; this thin wrapper is preserved so unmigrated
+ * callers compile and behave unchanged.
  */
-
-/**
- * True when `action` mutates and must be blocked in plan mode. Read-only
- * actions (the permission action already carries `isReadOnly`) are allowed; an
- * action is blocked iff it is not read-only.
- */
-export const isMutatingToolBlockedInPlan = (action: ToolAction): boolean => !action.isReadOnly
+export const isMutatingToolBlockedInPlan = (action: ToolAction): boolean =>
+  isMutatingToolBlockedInMode("plan", action)

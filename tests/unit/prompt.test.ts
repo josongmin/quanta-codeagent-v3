@@ -109,6 +109,128 @@ describe("buildSystemPrompt", () => {
       expect(lower).toContain("not limited by the context window")
     })
   })
+
+  // Phase 1 absorptions — Codex policy stack / claim ladder / trust ladder /
+  // budget / honesty / reporting shape. Each guard pins one absorption by a
+  // stable concept match so reorganization survives but deletion fails.
+  describe("Codex-absorption guarantees are present (Phase 1)", () => {
+    const lower = buildSystemPrompt().toLowerCase()
+
+    test("8-layer policy stack with explicit override rule", () => {
+      expect(lower).toContain("policy stack")
+      // Layer markers present
+      expect(lower).toContain("l1 system")
+      expect(lower).toContain("l5 mode")
+      expect(lower).toContain("l6 repo-local")
+      expect(lower).toContain("l9 working state")
+      // The non-bypass rule: user can't override higher layers
+      expect(lower).toContain("cannot override")
+    })
+
+    test("claim ladder (FACT / INFERENCE / UNKNOWN) with ordering", () => {
+      expect(lower).toContain("claim ladder")
+      expect(lower).toContain("fact")
+      expect(lower).toContain("inference")
+      expect(lower).toContain("unknown")
+      expect(lower).toContain("never present inference or unknown as fact")
+    })
+
+    test("trust ladder (source/runtime > tests > docs/memory), grep is presence-only", () => {
+      expect(lower).toContain("trust ladder")
+      expect(lower).toContain("primary truth")
+      expect(lower).toContain("routing hint")
+      expect(lower).toContain("a grep hit is presence evidence only")
+    })
+
+    test("5-axis budget discipline (tool/read/edit/validation/parallelism)", () => {
+      expect(lower).toContain("budget discipline")
+      expect(lower).toContain("tool-call budget")
+      expect(lower).toContain("read budget")
+      expect(lower).toContain("edit budget")
+      expect(lower).toContain("validation budget")
+      expect(lower).toContain("parallelism budget")
+      // Specific anti-patterns named
+      expect(lower).toContain("read-until-minimally-sufficient")
+      expect(lower).toContain("ls -r")
+      expect(lower).toContain("rg --files")
+    })
+
+    test("honesty rail 4-rule (Codex defended-claim filter)", () => {
+      expect(lower).toContain("honesty rail")
+      // R1 source-read
+      expect(lower).toContain("did not read")
+      // R2 verification-run
+      expect(lower).toContain("did not run")
+      // R3 partial-complete
+      expect(lower).toContain("partial work complete")
+      // R4 weak-signal
+      expect(lower).toContain("weak signal")
+    })
+
+    test("reporting shape table includes the 8 task kinds", () => {
+      const p = buildSystemPrompt()
+      expect(p).toContain("Reporting shape by task kind")
+      expect(p.toLowerCase()).toContain("stable knowledge")
+      expect(p.toLowerCase()).toContain("time-sensitive research")
+      expect(p.toLowerCase()).toContain("local code inspection")
+      expect(p.toLowerCase()).toContain("code modification")
+      expect(p.toLowerCase()).toContain("review")
+      expect(p.toLowerCase()).toContain("audit")
+      expect(p.toLowerCase()).toContain("visual / browser")
+      expect(p.toLowerCase()).toContain("delegation")
+    })
+
+    test("audit kind names the four truth surfaces (type/owner/wire/test)", () => {
+      const p = buildSystemPrompt()
+      expect(p).toContain("type / owner / wire / test")
+    })
+
+    test("VerificationCloseout scaffold (performed/rail/verdict/failure/skipped)", () => {
+      const lower2 = buildSystemPrompt().toLowerCase()
+      expect(lower2).toContain("verification report")
+      expect(lower2).toContain("performed:")
+      expect(lower2).toContain("rail:")
+      expect(lower2).toContain("verdict:")
+      expect(lower2).toContain("skipped because:")
+    })
+  })
+
+  // Phase 7: Codex `tool-routing-and-triggering.md` absorption. The routing
+  // matrix says the TRUTH CONDITION picks the tool, not the keyword. This
+  // section pins the named entries so a deletion fails the build.
+  describe("Codex-absorption guarantees are present (Phase 7 — tool routing)", () => {
+    const p = buildSystemPrompt()
+    const lower = p.toLowerCase()
+
+    test("'Tool routing' section is present with the truth-condition framing", () => {
+      expect(p).toContain("Tool routing")
+      expect(lower).toContain("truth condition picks the tool")
+      expect(lower).toContain("not the keyword")
+      expect(lower).toContain("do not match tools to query strings")
+    })
+
+    test("routing matrix names every entry (web / grep / edit / scripted_replace / test_runner / Agent / ToolSearch)", () => {
+      // Each routing entry must be discoverable.
+      expect(lower).toContain("web/research tool")
+      expect(lower).toContain("grep / read / glob / localize")
+      expect(lower).toContain("edit (one minimal patch)")
+      expect(lower).toContain("scripted_replace")
+      expect(lower).toContain("test_runner")
+      expect(lower).toContain("batch tool calls in one message")
+      expect(p).toContain("Agent tool (explicit permission only)")
+      expect(p).toContain("ToolSearch (preferred over raw")
+      expect(lower).toContain("list_mcp_resources")
+    })
+
+    test("matrix lives near the budget section (consistent placement)", () => {
+      const budgetIdx = p.indexOf("Budget discipline")
+      const routingIdx = p.indexOf("Tool routing")
+      const honestyIdx = p.indexOf("Honesty rail")
+      expect(budgetIdx).toBeGreaterThanOrEqual(0)
+      expect(routingIdx).toBeGreaterThan(budgetIdx)
+      expect(honestyIdx).toBeGreaterThan(routingIdx)
+    })
+  })
 })
 
 describe("buildTurnContext system block", () => {
@@ -202,5 +324,82 @@ describe("buildTurnContext dynamic context message", () => {
     expect(text).toContain("Working directory:")
     expect(text).toContain("PLAN MODE is active")
     expect(text).toContain("remember this")
+  })
+})
+
+describe("buildTurnContext mode resolution (Phase 0)", () => {
+  test("explicit mode wins over legacy planMode", () => {
+    const out = buildTurnContext(base({ mode: "review", planMode: true }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).toContain("REVIEW MODE is active")
+    expect(text).not.toContain("PLAN MODE is active")
+  })
+
+  test("review mode emits findings-first notice", () => {
+    const out = buildTurnContext(base({ mode: "review" }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).toContain("REVIEW MODE is active")
+    expect(text).toContain("findings-first")
+  })
+
+  test("audit mode emits 4-surface notice", () => {
+    const out = buildTurnContext(base({ mode: "audit" }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).toContain("AUDIT MODE is active")
+    expect(text).toContain("four truth surfaces")
+    expect(text).toContain("type, owner, wire, test")
+  })
+
+  test("default mode emits no mode notice (byte-identical to legacy)", () => {
+    const out = buildTurnContext(base({ mode: "default" }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).not.toContain("PLAN MODE is active")
+    expect(text).not.toContain("REVIEW MODE is active")
+    expect(text).not.toContain("AUDIT MODE is active")
+  })
+
+  test("planMode:true with no mode → effective plan mode (backward compat)", () => {
+    const out = buildTurnContext(base({ planMode: true }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).toContain("PLAN MODE is active")
+  })
+})
+
+describe("buildTurnContext repo-local rules (Phase 0)", () => {
+  const rules = {
+    sourcePath: "/repo/AGENTS.md",
+    entrypoint: "AGENTS.md" as const,
+    body: "no heuristics; fail-closed; front-door build only",
+    loadedAt: 0,
+  }
+
+  test("repoRules block appears with the entrypoint citation", () => {
+    const out = buildTurnContext(base({ repoRules: rules }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).toContain("## Repo-local rules (from AGENTS.md)")
+    expect(text).toContain("no heuristics; fail-closed; front-door build only")
+  })
+
+  test("repoRules block precedes memory hints (repo authority > routing hint)", () => {
+    const out = buildTurnContext(base({ repoRules: rules, memoryContext: "memory-hint-marker" }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    const repoIdx = text.indexOf("## Repo-local rules")
+    const memIdx = text.indexOf("memory-hint-marker")
+    expect(repoIdx).toBeGreaterThanOrEqual(0)
+    expect(memIdx).toBeGreaterThanOrEqual(0)
+    expect(repoIdx).toBeLessThan(memIdx)
+  })
+
+  test("absent repoRules ⇒ no block (byte-identical for repos without rule files)", () => {
+    const out = buildTurnContext(base())
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).not.toContain("Repo-local rules")
+  })
+
+  test("repoRules block does NOT shift the cached system prefix", () => {
+    const withoutRules = buildTurnContext(base()).system
+    const withRules = buildTurnContext(base({ repoRules: rules })).system
+    // Repo-local rules ride in the dynamic reminder, NEVER in the cached prefix.
+    expect(withRules).toEqual(withoutRules)
   })
 })

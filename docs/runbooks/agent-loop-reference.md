@@ -18,10 +18,10 @@ runtime은 **기계적 invariant**(스키마/permission/capture/스트림 dispat
 most-trusted → least:
 
 1. **source text** — `read` / `edit` 응답, `grep`·`glob` 매치 본문
-2. **runtime/build/test output** — `bash` / `test_runner`의 exitCode + stdout/stderr tail (`dispatch.ts:42-44`)
+2. **runtime/build/test output** — `bash` / `test_runner`의 exitCode + stderr tail (capture: `dispatch.ts:42-44` evidenceOf, durationMs는 `:166-177`에서 부착)
 3. **LSP semantic** — `diagnostics` tool (`QUANTA_LSP=1` gate, default OFF)
 4. **git diff** — bench `withGitSnapshot` 누적 diff (`runner.ts:174 sourceOnlyDiff`)
-5. **memory recall** — `memory_search` 결과는 **재검증 전엔 한 단계 강등**
+5. **memory recall** — `@/memory` 슬라이스 회상 (loop 내부에서 `recallContext`로 주입, 별도 사용자-호출형 tool은 미노출); **재검증 전엔 한 단계 강등**
 6. **docs / hints** — least trusted
 
 **원칙**: source > inference. test output은 *necessary-but-not-sufficient* — 이번 세션 초반 `testCmd:"true"` no-op로 "100%"가 찍힌 사고가 그 이유다(grading-wiring 수정으로 해소). 통과 신호가 곧 진실은 아니다, 통과시킨 rail이 무엇인지까지 확인해야 한다.
@@ -45,9 +45,9 @@ most-trusted → least:
 | bash / test_runner | `{stdout, stderr, exitCode, durationMs, fullLogPath}` | exit code, 실패 한두 줄, 경로 |
 | edit / write | `{path, applied, hunks?}` 또는 mismatch 에러 | 적용 여부, 충돌 위치 |
 | grep / glob / read | 매치 라인 / 파일목록 / 파일본문 | 후보 위치, 다음 read 타겟 |
+| localize | symbol·file·line 후보 목록 | LSP 없이도 빠른 owner 좁히기 |
 | diagnostics (LSP) | `[{file, range, severity, message}]` | 타입/심볼 오류 (QUANTA_LSP=1일 때만) |
-| memory_search | `[{snippet, score, source}]` | 후보 단서 — 재검증 의무 |
-| subagent (Agent/Task) | 최종 텍스트 + 사용 tool log | 요약된 결론 (위임 가능 범위 한정) |
+| `agent` (subagent), `Skill`, `ToolSearch` | `QUANTA_SUBAGENT` / `QUANTA_SKILLS_DIR` env-gated. 자식 최종 텍스트 + 사용 tool log / 활성 skill 본문 / deferred tool 카탈로그 | 요약된 위임 결론 / 적용할 skill / 호출 가능한 tool 한정 |
 
 ## 5. Recovery & guards
 
@@ -70,7 +70,7 @@ most-trusted → least:
 | axis | 의미 | default |
 |---|---|---|
 | `maxTurns` | per-run turn ceiling | config |
-| `verifyGuard.maxTrips` | finish-time verify 강제 cap (ADR-0013 업데이트로 1) | 1 |
+| `verifyGuard.maxTrips` | finish-time verify 강제 cap (ADR-0013 변경 이력 2→1) — bench는 `{}` 명시로 default 상속 (`runner.ts:310`) | 1 |
 | `closeoutGuard` | per-run single-shot, maxTrips knob 의도적 없음 | OFF (opt-in) |
 | `repair.maxRounds` | bench-only external repair budget (`QUANTA_REPAIR_ROUNDS`) | 0 (opt-in) |
 | `compaction.*` | context-window 안전 | config |
@@ -84,7 +84,7 @@ v3는 Codex 문서식 per-axis budget (validation/read/edit 별도 예산)을 **
 | stale docs/memory as truth | 과거 사실로 현재 판단 | 사례 없음 (이번 세션) | trust-ladder 강등은 doc-level 권고, 코드 강제 X |
 | fake 100% via no-op testCmd | 통과 신호가 가짜 | 세션 초 `testCmd:"true"`로 100% 찍힘 — grading-wiring fix로 해소 | 통과 rail 검증, source-only diff 필수 |
 | grep-only closure | grep 매치만으로 종결 | RFC §1.2 anti-bloat 영역 | source/runtime corroboration 요구 (trust-ladder) |
-| 잘못된 rail green / patch fixation | patch 자체엔 PASS, 의도와 무관 | 초기 183 KB astropy diff 관측 | `sourceOnlyDiff` filter (`runner.ts:174`) |
+| 잘못된 rail green / patch fixation | patch 자체엔 PASS, 의도와 무관 | 초기 trial에서 test-file까지 patch에 포함하는 비대 diff가 PASS_TO_PASS를 깨는 사례 (구체 size/repo는 본 세션 artifact 미보존 — 일반 패턴은 `runner.ts:140-170` 주석에 명시) | `sourceOnlyDiff` filter (`runner.ts:174`) |
 | LSP over-trust | semantic 오신호 | 현재 미관측 | default OFF (`QUANTA_LSP`) |
 | context drift on long thread | 후반 turn에서 사실 흐림 | proactive+reactive compaction이 흡수 | `compaction.ts` + `CompactionBreaker` |
 | forced-verify over-correction | guard가 멀쩡한 답을 망친다 | repair-rounds n=1 r=2 Easy-5: **2/5 (40%)** vs 베이스라인 3/5, `django__django-10914` **PASS→FAIL** 회귀 | default OFF / opt-in (ADR-0014 한계 (d)) |
@@ -96,11 +96,11 @@ v3는 Codex 문서식 per-axis budget (validation/read/edit 별도 예산)을 **
 
 | Codex 패턴 | 미채택 이유 |
 |---|---|
-| §5.7 weighted scoring formula for tool path | workflow-engine 회귀 — RFC §1.2 |
-| §5.8 dynamic task-kind reclassification | closed-alphabet 위반 — RFC Non-Goals |
-| task-lens-per-classification (RepairLens/ReviewLens/AuditLens/ResearchLens 등을 classifier가 wire) | closed-alphabet 위반 — RFC §1.2 |
-| per-axis budget (read/edit/validation 별도) | anti-bloat — §6 외 axis 추가 금지 |
-| `request_user_input` interactive primitive | table-extending feature creep — RFC Non-Goals |
+| §5.7 weighted scoring formula for tool path | runtime이 tool 선택 결정자가 됨 = workflow-engine 회귀 — RFC §1.2 |
+| §5.8 dynamic task-kind reclassification | task-kind state machine = runtime이 행동 분기 결정자가 됨, RFC Non-Goals(`FSM/워크플로우 엔진 금지`) |
+| task-lens-per-classification (RepairLens/ReviewLens/AuditLens/ResearchLens 등을 classifier가 wire) | 위와 같은 이유 (분류기 + per-kind 분기 = workflow) — RFC §1.2 |
+| per-axis budget (read/edit/validation 별도) | anti-bloat — RFC §1.2 (`<20k LoC` 폐기 이후에도 surface 확장 자체는 ADR 트리거); v3는 `maxTurns` 안에서 LLM이 자체 배분 |
+| `request_user_input` interactive primitive | table-extending feature creep — RFC Non-Goals(전체 액션 사전 정의 강박 금지) |
 
 ## 9. Footer
 

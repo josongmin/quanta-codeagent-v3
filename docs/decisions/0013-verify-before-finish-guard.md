@@ -25,7 +25,7 @@ gpt-4o가 검증을 스킵하는 것이 재현된다.
 
 마지막 mutating tool(`edit`|`write`) 이후 **검증 호출 0회**인데 모델이
 완료를 시도하면, **기존 nudge/recovery 머시너리**로 1턴을 강제한다
-(recovery reason `"unverified"`). `maxTrips`(기본 2) cap으로 무한 강제·
+(recovery reason `"unverified"`). `maxTrips`(기본 1, 변경 이력 §하단) cap으로 무한 강제·
 턴예산 소진을 방지한다.
 
 검증으로 인정되는 기준(정밀 규칙, `verify-guard.ts`):
@@ -69,7 +69,7 @@ gpt-4o가 검증을 스킵하는 것이 재현된다.
   정규식일 뿐이다 — 의도적으로 꾸민(또는 우연한) 명령은 false-positive
   (검증 아닌데 인정)·false-negative(실제 검증인데 미인정)가 날 수 있다.
   검증의 견고한 증명이 **아니다**.
-- **(b) maxTrips cap은 의도적 누수**: `maxTrips`(기본 2)회 강제 후에는
+- **(b) maxTrips cap은 의도적 누수**: `maxTrips`(기본 1)회 강제 후에는
   미검증 완료를 그대로 통과시킨다(턴예산 안전을 위한 고의 설계 —
   무한 강제 방지).
 - **(c) resolution% 무관**: 본 가드는 그 자체로 resolution%를 올리지

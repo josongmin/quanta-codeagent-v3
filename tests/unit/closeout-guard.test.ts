@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+  CLOSEOUT_4RULE_REMINDER,
   CLOSEOUT_REMINDER,
   createCloseoutGuardState,
   decideCloseoutGuard,
@@ -60,6 +61,45 @@ describe("decideCloseoutGuard", () => {
     expect(CLOSEOUT_REMINDER).toContain("verification")
     expect(CLOSEOUT_REMINDER).toContain("fact from inference")
     expect(CLOSEOUT_REMINDER).toContain("reporting shape")
+  })
+
+  // SOTA++ Phase 2: 4-rule defended-claim checklist (Codex
+  // `response-assembly-and-closeout.md §5.2`). The `fourRule:true` flag swaps
+  // the one-liner for the full checklist + VerificationCloseout cue.
+  test("(6) cfg.fourRule=true ⇒ blocks with 4-rule checklist instead of one-liner", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({ state, cfg: { enabled: true, fourRule: true } })
+    expect(r.block).toBe(true)
+    expect(r.text).toBe(CLOSEOUT_4RULE_REMINDER)
+    expect(r.text).not.toBe(CLOSEOUT_REMINDER)
+    expect(state.trips).toBe(1)
+  })
+
+  test("(7) cfg.fourRule=false (or absent) keeps the legacy one-liner", () => {
+    const state = createCloseoutGuardState()
+    const r = decideCloseoutGuard({ state, cfg: { enabled: true, fourRule: false } })
+    expect(r.text).toBe(CLOSEOUT_REMINDER)
+  })
+
+  test("(8) fourRule mode is still single-shot per run", () => {
+    const state = createCloseoutGuardState()
+    const first = decideCloseoutGuard({ state, cfg: { enabled: true, fourRule: true } })
+    expect(first.block).toBe(true)
+    const second = decideCloseoutGuard({ state, cfg: { enabled: true, fourRule: true } })
+    expect(second).toEqual({ block: false })
+    expect(state.trips).toBe(1)
+  })
+
+  test("(9) CLOSEOUT_4RULE_REMINDER names R1-R4 + VerificationCloseout cue", () => {
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("R1 Read-source")
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("R2 Run-verify")
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("R3 Grep-proof")
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("R4 Stale-memory")
+    // VerificationCloseout scaffold cue
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("performed:")
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("rail:")
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("verdict:")
+    expect(CLOSEOUT_4RULE_REMINDER).toContain("skipped because:")
   })
 })
 

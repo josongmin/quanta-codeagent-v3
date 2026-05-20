@@ -13,8 +13,9 @@ export {
   STAGE1_FAST_TAIL,
   STAGE2_THINKING_TAIL,
 } from "./classifier"
-export { evaluate, evaluateAuto } from "./policy"
+export { evaluate, evaluateAuto, hardDenyReason, inferToolTier } from "./policy"
 export type {
+  HITLTier,
   PermissionContext,
   PermissionDecision,
   PermissionMode,
