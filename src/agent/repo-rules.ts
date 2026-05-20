@@ -37,11 +37,7 @@ export interface RepoRules {
 /** Files searched, in priority order. The first present + non-empty file wins.
  *  Order is part of the contract: `AGENTS.md` is Codex SSOT; `CLAUDE.md` is the
  *  Claude Code convention; the `.codex/` path is a legacy alternate. */
-export const REPO_RULE_CANDIDATES = [
-  "AGENTS.md",
-  "CLAUDE.md",
-  ".codex/CODEX-RULES.md",
-] as const
+export const REPO_RULE_CANDIDATES = ["AGENTS.md", "CLAUDE.md", ".codex/CODEX-RULES.md"] as const
 
 /** Load repo-local rules from the first present candidate under `cwd`. Returns
  *  `undefined` when no file is present or all candidates are empty — the

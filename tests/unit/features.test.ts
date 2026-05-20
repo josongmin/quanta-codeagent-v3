@@ -284,4 +284,39 @@ describe("buildSessionFeatures", () => {
     // since it is the only skill the whole map is absent.
     expect(f.skillAllowlists).toBeUndefined()
   })
+
+  // --- Phase 6: Codex memory L3 (workingState) ---------------------------
+
+  test("workingState absent ⇒ tool NOT registered, no session (byte-identical)", async () => {
+    const f = await buildSessionFeatures(cfg())
+    expect(names(f.extraTools)).not.toContain("update_working_state")
+    expect(f.workingState).toBeUndefined()
+  })
+
+  test("workingState.enabled=false ⇒ tool NOT registered", async () => {
+    const f = await buildSessionFeatures(cfg({ workingState: { enabled: false } }))
+    expect(names(f.extraTools)).not.toContain("update_working_state")
+    expect(f.workingState).toBeUndefined()
+  })
+
+  test("workingState.enabled=true ⇒ tool registered, session built", async () => {
+    const f = await buildSessionFeatures(cfg({ workingState: { enabled: true } }))
+    expect(names(f.extraTools)).toContain("update_working_state")
+    expect(f.workingState).toBeDefined()
+    // The tool's closure shares state with the returned session: mutating via
+    // the tool reflects in the session's snapshot.
+    const tool = must(
+      f.extraTools.find((t) => t.name === "update_working_state"),
+      "update_working_state tool",
+    )
+    for await (const _ev of tool.execute(
+      { ownerShortlist: [{ file: "a.ts", reason: "p" }] } as Parameters<typeof tool.execute>[0],
+      { cwd: "/repo", signal: new AbortController().signal },
+    )) {
+      // consume
+    }
+    expect(must(f.workingState, "workingState").snapshot().ownerShortlist).toEqual([
+      { file: "a.ts", reason: "p" },
+    ])
+  })
 })

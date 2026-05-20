@@ -1,5 +1,11 @@
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent, WorkingStateHandle, WorkingStateSnapshot } from "./types"
+import type {
+  Tool,
+  ToolContext,
+  ToolEvent,
+  WorkingStateHandle,
+  WorkingStateSnapshot,
+} from "./types"
 
 /**
  * `update_working_state` — Codex memory L3 meta-tool (memory-model-audit.md
@@ -56,9 +62,7 @@ const schema = z.object({
   hypothesis: z
     .union([z.string(), z.null()])
     .optional()
-    .describe(
-      "Working hypothesis. Pass a string to set, null to clear, omit to leave unchanged.",
-    ),
+    .describe("Working hypothesis. Pass a string to set, null to clear, omit to leave unchanged."),
   blockers: z
     .array(blockerSchema)
     .optional()

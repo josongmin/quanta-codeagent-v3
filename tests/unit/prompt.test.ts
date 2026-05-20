@@ -365,6 +365,177 @@ describe("buildTurnContext mode resolution (Phase 0)", () => {
   })
 })
 
+describe("buildTurnContext working state (Phase 6 — Codex memory L3)", () => {
+  const rules = {
+    sourcePath: "/repo/AGENTS.md",
+    entrypoint: "AGENTS.md" as const,
+    body: "no heuristics; fail-closed",
+    loadedAt: 0,
+  }
+
+  test("non-empty workingState renders a ## Working state block", () => {
+    const out = buildTurnContext(
+      base({
+        workingState: {
+          ownerShortlist: [{ file: "a.ts", reason: "primary" }],
+          blockers: [],
+          nextStepQueue: [],
+          deferredValidation: [],
+        },
+      }),
+    )
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).toContain("## Working state")
+    expect(text).toContain("a.ts")
+    expect(text).toContain("primary")
+  })
+
+  test("empty workingState ⇒ no block (byte-identical when nothing to carry)", () => {
+    const out = buildTurnContext(
+      base({
+        workingState: {
+          ownerShortlist: [],
+          blockers: [],
+          nextStepQueue: [],
+          deferredValidation: [],
+        },
+      }),
+    )
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).not.toContain("## Working state")
+  })
+
+  test("workingState block sits between repoRules and memory hints", () => {
+    const out = buildTurnContext(
+      base({
+        repoRules: rules,
+        workingState: {
+          ownerShortlist: [{ file: "owner.ts", reason: "primary" }],
+          blockers: [],
+          nextStepQueue: [],
+          deferredValidation: [],
+        },
+        memoryContext: "memory-hint-marker",
+      }),
+    )
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    const repoIdx = text.indexOf("## Repo-local rules")
+    const wsIdx = text.indexOf("## Working state")
+    const memIdx = text.indexOf("memory-hint-marker")
+    expect(repoIdx).toBeGreaterThanOrEqual(0)
+    expect(wsIdx).toBeGreaterThan(repoIdx)
+    expect(memIdx).toBeGreaterThan(wsIdx)
+  })
+
+  test("workingState never shifts the cached system prefix", () => {
+    const withoutWs = buildTurnContext(base()).system
+    const withWs = buildTurnContext(
+      base({
+        workingState: {
+          ownerShortlist: [{ file: "a.ts", reason: "p" }],
+          blockers: [],
+          nextStepQueue: [],
+          deferredValidation: [],
+        },
+      }),
+    ).system
+    expect(withWs).toEqual(withoutWs)
+  })
+})
+
+describe("buildTurnContext memory hints label (Phase 6 — routing-hint trust)", () => {
+  test("memoryContext renders under the new routing-hint label", () => {
+    const out = buildTurnContext(base({ memoryContext: "uses Postgres 16" }))
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).toContain("## Memory hints (routing hints only — not proof)")
+    expect(text).toContain("uses Postgres 16")
+  })
+
+  test("absent memoryContext ⇒ no routing-hint label", () => {
+    const out = buildTurnContext(base())
+    const text = reminderText(out.messages[out.messages.length - 1] as Message)
+    expect(text).not.toContain("Memory hints (routing hints only")
+  })
+})
+
+describe("buildSystemPrompt artifact-as-memory paragraph (Phase 6)", () => {
+  test("declares durable state belongs in workspace files", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("Durable state belongs in workspace files")
+    expect(p).toContain("artifacts are SSOT")
+  })
+
+  test("artifact paragraph sits between trust ladder and budget discipline", () => {
+    const p = buildSystemPrompt()
+    const trustIdx = p.indexOf("Trust ladder")
+    const artifactIdx = p.indexOf("Durable state belongs in workspace files")
+    const budgetIdx = p.indexOf("Budget discipline")
+    expect(trustIdx).toBeGreaterThanOrEqual(0)
+    expect(artifactIdx).toBeGreaterThan(trustIdx)
+    expect(budgetIdx).toBeGreaterThan(artifactIdx)
+  })
+})
+
+// Codex `may-20-codex-signal.md §10` anti-signals absorption. These are the
+// seven weak signals the agent must NOT treat as proof; they ride between the
+// existing "Trust ladder" section and the artifact paragraph. Each guard pins
+// one anti-signal by exact-name match; deletion / rename fails the build.
+describe("buildSystemPrompt anti-signals section (Codex §10 absorption)", () => {
+  const p = buildSystemPrompt()
+
+  test("section header is present verbatim", () => {
+    expect(p).toContain("Anti-signals (treat as ROUTING HINTS, never proof):")
+  })
+
+  test("all seven anti-signal names appear", () => {
+    expect(p).toContain("Absence from grep")
+    expect(p).toContain("Nice file name")
+    expect(p).toContain("Passing shape snapshot")
+    expect(p).toContain("A quick fix exists")
+    expect(p).toContain("One green command")
+    expect(p).toContain("Old handoff note")
+    expect(p).toContain("Visual looks okay")
+  })
+
+  test("section sits between Trust ladder and Durable state paragraph", () => {
+    const trustIdx = p.indexOf("Trust ladder (when sources disagree")
+    const antiIdx = p.indexOf("Anti-signals (treat as ROUTING HINTS, never proof):")
+    const durableIdx = p.indexOf("Durable state belongs in workspace files")
+    expect(trustIdx).toBeGreaterThanOrEqual(0)
+    expect(antiIdx).toBeGreaterThan(trustIdx)
+    expect(durableIdx).toBeGreaterThan(antiIdx)
+  })
+
+  test("section sits AFTER the existing grep-presence-only bullet", () => {
+    // Anti-signals expands on the same trust-ladder thread; the existing
+    // "grep hit is presence evidence only" bullet must still precede.
+    const grepIdx = p.indexOf("A grep hit is presence evidence only")
+    const antiIdx = p.indexOf("Anti-signals (treat as ROUTING HINTS, never proof):")
+    expect(grepIdx).toBeGreaterThanOrEqual(0)
+    expect(antiIdx).toBeGreaterThan(grepIdx)
+  })
+
+  test("buildSystemPrompt remains byte-stable across 100 calls (cache-prefix invariant)", () => {
+    // The cache lever (ADR-0003/0004): any added text must be deterministic +
+    // position-stable. Calling 100x and asserting identical output proves the
+    // new section did not introduce per-call variance (e.g. Date.now leakage).
+    const first = buildSystemPrompt()
+    for (let i = 0; i < 100; i++) {
+      expect(buildSystemPrompt()).toBe(first)
+    }
+  })
+
+  test("cache marker invariant — buildTurnContext system[0] still has cache:true", () => {
+    // Sanity: adding the anti-signals section did not change the SystemBlock
+    // shape that signals the provider cache breakpoint.
+    const { system } = buildTurnContext(base())
+    expect(system).toHaveLength(1)
+    expect(system[0]?.type).toBe("text")
+    expect(system[0]?.cache).toBe(true)
+    expect(system[0]?.text).toContain("Anti-signals (treat as ROUTING HINTS, never proof):")
+  })
+})
+
 describe("buildTurnContext repo-local rules (Phase 0)", () => {
   const rules = {
     sourcePath: "/repo/AGENTS.md",

@@ -113,6 +113,22 @@ export const createWorkingStateSession = (): WorkingStateSession => {
   }
 }
 
+/** Render a non-empty list under a sub-header (e.g. "### Owner shortlist") via
+ *  the provided item renderer. Returns `[]` when the list is empty so the
+ *  caller's accumulator stays compact. Extracted to keep the public
+ *  `renderWorkingStateBlock` under the project's cognitive-complexity budget. */
+const renderSection = <T>(
+  header: string,
+  items: readonly T[],
+  fmt: (item: T) => string,
+): string[] => (items.length === 0 ? [] : ["", header, ...items.map(fmt)])
+
+/** Render the hypothesis section, if any. */
+const renderHypothesis = (hypothesis: string | undefined): string[] => {
+  if (hypothesis === undefined || hypothesis.trim() === "") return []
+  return ["", "### Hypothesis", hypothesis.trim()]
+}
+
 /** Render a WorkingState as a compact markdown block for the per-turn reminder.
  *  Returns `undefined` when the state is empty (no clutter when there is
  *  nothing to carry). Sub-headers are emitted only for non-empty fields so the
@@ -120,26 +136,24 @@ export const createWorkingStateSession = (): WorkingStateSession => {
 export const renderWorkingStateBlock = (state: WorkingState): string | undefined => {
   if (isEmpty(state)) return undefined
   const lines: string[] = ["## Working state"]
-  if (state.ownerShortlist.length > 0) {
-    lines.push("", "### Owner shortlist")
-    for (const o of state.ownerShortlist) lines.push(`- ${o.file} — ${o.reason}`)
-  }
-  if (state.hypothesis !== undefined && state.hypothesis.trim() !== "") {
-    lines.push("", "### Hypothesis", state.hypothesis.trim())
-  }
-  if (state.blockers.length > 0) {
-    lines.push("", "### Blockers")
-    for (const b of state.blockers) lines.push(`- [${b.surface}] ${b.what}`)
-  }
-  if (state.nextStepQueue.length > 0) {
-    lines.push("", "### Next steps")
-    for (const n of state.nextStepQueue) {
-      lines.push(`- ${n.what}${n.deferred ? " (deferred)" : ""}`)
-    }
-  }
-  if (state.deferredValidation.length > 0) {
-    lines.push("", "### Deferred validation")
-    for (const d of state.deferredValidation) lines.push(`- ${d.rail}: ${d.reason}`)
-  }
+  lines.push(
+    ...renderSection(
+      "### Owner shortlist",
+      state.ownerShortlist,
+      (o) => `- ${o.file} — ${o.reason}`,
+    ),
+    ...renderHypothesis(state.hypothesis),
+    ...renderSection("### Blockers", state.blockers, (b) => `- [${b.surface}] ${b.what}`),
+    ...renderSection(
+      "### Next steps",
+      state.nextStepQueue,
+      (n) => `- ${n.what}${n.deferred ? " (deferred)" : ""}`,
+    ),
+    ...renderSection(
+      "### Deferred validation",
+      state.deferredValidation,
+      (d) => `- ${d.rail}: ${d.reason}`,
+    ),
+  )
   return lines.join("\n")
 }

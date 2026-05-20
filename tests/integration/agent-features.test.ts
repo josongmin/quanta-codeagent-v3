@@ -189,6 +189,53 @@ describe("agent feature wiring", () => {
     expect(denied).toHaveLength(1)
   })
 
+  test("workingState absent ⇒ update_working_state NOT available; loop byte-identical", async () => {
+    const file = join(dir, "ws-off.txt")
+    const llm = new FakeLLM([
+      toolUseScript("u1", "update_working_state", { hypothesis: "x" }),
+      textScript("done"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const outcome = await runAgent(baseConfig(llm, registry, stream, dir, { mode: "acceptEdits" }))
+    expect(outcome.reason).toBe("completed")
+    // Default-OFF: the tool is unknown → dispatch returns a deny tool_result.
+    const blocks = outcome.messages.flatMap((m) =>
+      m.content.filter((b) => b.type === "tool_result"),
+    )
+    const denied = blocks.find(
+      (b) => b.type === "tool_result" && b.content.includes("Unknown tool: update_working_state"),
+    )
+    expect(denied).toBeDefined()
+    expect(existsSync(file)).toBe(false)
+  })
+
+  test("workingState enabled ⇒ update_working_state present, mutates session state", async () => {
+    const llm = new FakeLLM([
+      toolUseScript("u1", "update_working_state", {
+        ownerShortlist: [{ file: "src/a.ts", reason: "primary" }],
+        hypothesis: "the dispatcher races",
+      }),
+      textScript("done"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const outcome = await runAgent({
+      ...baseConfig(llm, registry, stream, dir, { mode: "acceptEdits" }),
+      workingState: { enabled: true },
+    })
+    expect(outcome.reason).toBe("completed")
+    const tres = outcome.messages.flatMap((m) => m.content.filter((b) => b.type === "tool_result"))
+    const ok = tres.find(
+      (b) =>
+        b.type === "tool_result" &&
+        !b.is_error &&
+        b.content.includes("ownerShortlist") &&
+        b.content.includes("owners=1"),
+    )
+    expect(ok).toBeDefined()
+  })
+
   test("metrics snapshot records turns + tool_calls counters", async () => {
     const file = join(dir, "m.txt")
     const llm = new FakeLLM([
@@ -238,8 +285,7 @@ describe("agent feature wiring", () => {
     // The reminder rides as the trailing user message every turn.
     const sent = llm.seenMessages[0] ?? []
     const tail = sent[sent.length - 1]
-    const text =
-      tail?.content[0]?.type === "text" ? tail.content[0].text : ""
+    const text = tail?.content[0]?.type === "text" ? tail.content[0].text : ""
     expect(text).toContain("## Active skills")
     expect(text).toContain("- $review — Review a pull request")
     expect(text).toContain("Trigger rules:")
@@ -255,8 +301,7 @@ describe("agent feature wiring", () => {
     expect(outcome.reason).toBe("completed")
     const sent = llm.seenMessages[0] ?? []
     const tail = sent[sent.length - 1]
-    const text =
-      tail?.content[0]?.type === "text" ? tail.content[0].text : ""
+    const text = tail?.content[0]?.type === "text" ? tail.content[0].text : ""
     expect(text).not.toContain("## Active skills")
     expect(text).not.toContain("Trigger rules:")
   })

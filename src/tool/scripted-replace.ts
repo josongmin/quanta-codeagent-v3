@@ -16,9 +16,7 @@ import type { Tool, ToolContext, ToolEvent } from "./types"
  */
 const schema = z.object({
   file: z.string().describe("File path (absolute or relative to cwd)"),
-  pattern: z
-    .string()
-    .describe("Literal substring by default; a JS regex source when isRegex=true"),
+  pattern: z.string().describe("Literal substring by default; a JS regex source when isRegex=true"),
   replacement: z
     .string()
     .describe("Replacement string. In regex mode, `$1`/`$&` capture refs are honoured."),
@@ -149,7 +147,10 @@ export const scriptedReplaceTool: Tool<Input> = {
       await writeFile(input.file, r.next, ctx.cwd)
       yield {
         type: "result",
-        result: { ok: true, output: `${input.file}: ${r.message} (replacements=${r.replacements})` },
+        result: {
+          ok: true,
+          output: `${input.file}: ${r.message} (replacements=${r.replacements})`,
+        },
       }
     } catch (e) {
       if (e instanceof FsJailError) {

@@ -60,6 +60,34 @@ LLM이 사용자와 티키타카하며 코딩 태스크(읽기/검색/편집/테
 - ❌ 전체 speculative 프롬프트 실행 — 레퍼런스 팀이 데드코드로 출하
   (CC `JX8()=false`), 능력 이득 미검증
 
+**Codex agent 분석 흡수 (2026-05-20, ADR-0015~0023)** — 운영 계약(operating
+contract)을 코드로 박은 9-phase SOTA++ 흡수. 의도적 미흡수 항목 추가:
+
+- ❌ Long-horizon heartbeat / cron (`codex_app.automation_update`) — CLI/bench
+  agent는 단일 세션, 자동화 rail 무의미
+- ❌ Plugin bundle (skills + MCP + app capability) — skill로 동등 cover,
+  추상 추가 시 불필요 복잡도
+- ❌ Cassette validator strict per-entry — Codex 자체가 placeholder P0
+  gap, RFC-0002 JsonlRecorder가 더 견고
+- ❌ Hidden global memory DB — Codex 분석도 NON-CLAIM, overclaim 방지
+- ❌ Git directive 5종 (`::git-stage` 등) — UI rail 없는 CLI에서 무의미
+
+흡수된 9-phase (ADR로 박혀 있음):
+
+- ADR-0015 — Phase 0 Foundation: TurnContext + repo-rules 로더
+- ADR-0016 — Phase 1 Prompt policy: claim ladder + trust ladder + budget +
+  honesty rail + reporting shape
+- ADR-0017 — Phase 2 Closeout: defended-claim 4-rule + VerificationCloseout
+- ADR-0018 — Phase 3 Mode enum: default / plan / review / audit
+- ADR-0019 — Phase 4 Code intel: edit-strategy hint + scripted_replace +
+  4-truth-surface closeout
+- ADR-0020 — Phase 5 HITL 4-tier: HandOff / AlwaysConfirm / PreApproval /
+  None
+- ADR-0021 — Phase 6 Memory 5-layer: WorkingState L3 + artifact rail L4
+- ADR-0022 — Phase 7 Skill triggers + tool routing matrix
+- ADR-0023 — Phase 8 Integration: default-OFF byte-identical invariant +
+  reminder ordering
+
 ---
 
 ## 2. 기술 스택

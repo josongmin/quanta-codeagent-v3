@@ -18,8 +18,38 @@ export {
   formatDiagnostics,
   nullDiagnosticsProvider,
 } from "./diagnostics"
+export type {
+  GitBlameInput,
+  GitDiffInput,
+  GitLogInput,
+  GitRunner,
+  GitRunResult,
+  GitStatusInput,
+} from "./git"
+export {
+  defaultGitRunner,
+  gitBlameTool,
+  gitDiffTool,
+  gitLogTool,
+  gitStatusTool,
+  gitTools,
+} from "./git"
+export type {
+  LspNavProvider,
+  LspNavSession,
+  NavHover,
+  NavLocation,
+  NavPos,
+  NavRange,
+  NavRenamePreview,
+  NavSymbolInfo,
+  NavSymbolKind,
+} from "./lsp_nav"
+export {
+  lspNavTools,
+  nullLspNavProvider,
+} from "./lsp_nav"
 export { ToolRegistry } from "./registry"
-export { createUpdateWorkingStateTool } from "./update-working-state"
 export type {
   HITLTier,
   Tool,
@@ -31,6 +61,7 @@ export type {
   WorkingStatePatch,
   WorkingStateSnapshot,
 } from "./types"
+export { createUpdateWorkingStateTool } from "./update-working-state"
 
 /**
  * Built-in tool set: Phase 1 six + Phase 2 localize / test_runner + the

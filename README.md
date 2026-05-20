@@ -25,6 +25,9 @@ CLI가 `.env.dev` → `.env.local` → `.env` 순으로 로드(먼저 값이 우
 - `QUANTA_PLAN=1` / `--plan` (plan mode), `QUANTA_METRICS=1` (메트릭)
 - `QUANTA_STATE_PATH` / `--state`, `QUANTA_RESUME` / `--resume` (state 영속·resume, 기본 OFF)
 - `QUANTA_MCP_CONFIG` — MCP 서버 설정 JSON 파일 경로 (미설정 시 OFF)
+- `QUANTA_LSP=1` — LSP diagnostics(`diagnostics` 도구) 실제 provider 스왑(ADR-0009)
+- `QUANTA_LSP_TOOLS=full` — LSP nav 8 도구(`lsp_definition`/`_references`/`_hover`/`_type_definition`/`_implementation`/`_document_symbol`/`_workspace_symbol`/`_rename_preview`) 등록(ADR-0024). 기본 OFF, registry byte-identical
+- `QUANTA_GIT_TOOLS=1` — git 1급 도구 4종(`git_diff`/`git_status`/`git_log`/`git_blame`) 등록(ADR-0025). 기본 OFF
 - `QUANTA_SUBAGENT` / `QUANTA_SKILLS_DIR` / `QUANTA_MODEL_FALLBACK` / `QUANTA_COMPACT_BREAKER` — SOTA++ 표는 아래 참조
 
 ## 메모리

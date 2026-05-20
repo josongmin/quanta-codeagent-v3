@@ -14,7 +14,7 @@ import {
   runAgent,
   saveSession,
 } from "@/agent"
-import { lspDiagnosticsTool } from "@/agent/lsp-bridge"
+import { lspDiagnosticsTool, lspNavToolList } from "@/agent/lsp-bridge"
 import { AnthropicAdapter, FallbackLLM, type LLMPort, type Message, OpenAIAdapter } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
@@ -22,7 +22,7 @@ import { Metrics, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger, type RunContext } from "@/shared"
 import { JsonlRecorder, StdoutStream, type StreamPort, TeeStream } from "@/stream"
-import { defaultTools, type Tool, ToolRegistry } from "@/tool"
+import { defaultTools, gitTools, type Tool, ToolRegistry } from "@/tool"
 import { loadEnvFiles } from "./dotenv"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
@@ -271,6 +271,18 @@ const planEnabled = (): boolean => process.env.QUANTA_PLAN === "1" || hasArg("--
  *  bridge itself still degrades gracefully if a server binary is absent. */
 const lspEnabled = (): boolean => process.env.QUANTA_LSP === "1" || hasArg("--lsp")
 
+/** SOTA++ Codex `may-20-codex-lsp.md` absorption (ADR-0015). LSP NAV tools
+ *  (definition / references / hover / type_definition / implementation /
+ *  document_symbol / workspace_symbol / rename_preview) are NOT in
+ *  `defaultTools` — they expand the tool surface, so opt-in only via
+ *  `QUANTA_LSP_TOOLS=full`. With the knob unset the registry is byte-identical. */
+const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "full"
+
+/** SOTA++ Codex `may-20-codex-signal.md` absorption (ADR-0016). First-class
+ *  git tools (diff/status/log/blame) are NOT in `defaultTools` to keep the
+ *  default registry byte-identical. Opt-in via `QUANTA_GIT_TOOLS=1`. */
+const gitToolsEnabled = (): boolean => process.env.QUANTA_GIT_TOOLS === "1"
+
 /** Read MCP server configs from `QUANTA_MCP_CONFIG` (a JSON file). OFF if unset. */
 const readMcpConfig = async (slog: StructuredLogger): Promise<McpServerConfig[]> => {
   const path = process.env.QUANTA_MCP_CONFIG
@@ -288,7 +300,7 @@ const readMcpConfig = async (slog: StructuredLogger): Promise<McpServerConfig[]>
 const argvPrompt = (): string =>
   process.argv
     .slice(2)
-    .filter((a) => a !== "--plan" && a !== "--lsp")
+    .filter((a) => a !== "--plan" && a !== "--lsp" && a !== "--lsp-tools" && a !== "--git-tools")
     .filter((a, i, arr) => {
       const flagged = arr[i - 1]
       const valued = ["--state", "--resume", "--observe-dir"]
@@ -305,6 +317,12 @@ interface Features {
   mcpTools: Tool[]
   mcpClients: McpClient[]
   lspTools: Tool[]
+  /** SOTA++ ADR-0015: LSP nav tools (8). Default-OFF; appended to registry
+   *  when `QUANTA_LSP_TOOLS=full`. */
+  lspNavTools: Tool[]
+  /** SOTA++ ADR-0016: first-class git tools (4). Default-OFF; appended to
+   *  registry when `QUANTA_GIT_TOOLS=1`. */
+  gitToolList: Tool[]
 }
 
 /** Resolve all default-OFF feature flags from env/argv and start MCP servers.
@@ -321,13 +339,29 @@ const loadFeatures = async (slog: StructuredLogger): Promise<Features> => {
   // no-op one in defaultTools, so appending it lets the registry's last-write
   // -wins map swap in the real provider (same merge path as MCP tools).
   const lspTools: Tool[] = lspEnabled() ? [lspDiagnosticsTool()] : []
+  // SOTA++ ADR-0015: LSP nav tools. NOT in defaultTools — opt-in only.
+  const lspNavTools: Tool[] = lspNavEnabled() ? lspNavToolList() : []
+  // SOTA++ ADR-0016: first-class git tools. NOT in defaultTools — opt-in only.
+  const gitToolList: Tool[] = gitToolsEnabled() ? gitTools() : []
 
   if (planMode) slog.info("plan.mode.on")
   if (metrics) slog.info("metrics.on")
   if (state) slog.info("state.persist.on", { path: state })
   if (mcpTools.length > 0) slog.info("mcp.tools.loaded", { count: mcpTools.length })
   if (lspTools.length > 0) slog.info("lsp.diagnostics.on")
-  return { planMode, metrics, state, resume, mcpTools, mcpClients, lspTools }
+  if (lspNavTools.length > 0) slog.info("lsp.nav.on", { count: lspNavTools.length })
+  if (gitToolList.length > 0) slog.info("git.tools.on", { count: gitToolList.length })
+  return {
+    planMode,
+    metrics,
+    state,
+    resume,
+    mcpTools,
+    mcpClients,
+    lspTools,
+    lspNavTools,
+    gitToolList,
+  }
 }
 
 /** Interactive REPL loop: each line continues the same conversation. */
@@ -473,7 +507,13 @@ interface Tooling {
   verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
 }
 
-const buildTooling = (mcpTools: Tool[], lspTools: Tool[], slog: StructuredLogger): Tooling => {
+const buildTooling = (
+  mcpTools: Tool[],
+  lspTools: Tool[],
+  lspNavTools: Tool[],
+  gitToolList: Tool[],
+  slog: StructuredLogger,
+): Tooling => {
   const store = buildStore()
   const embedder = buildEmbedder(store)
   const sessionId = crypto.randomUUID()
@@ -501,7 +541,19 @@ const buildTooling = (mcpTools: Tool[], lspTools: Tool[], slog: StructuredLogger
     store && memoryConfig?.selfEditTools !== false
       ? memoryTools({ store, ...(embedder ? { embedder } : {}) })
       : []
-  const registry = new ToolRegistry([...defaultTools, ...mcpTools, ...memTools, ...lspTools])
+  // Tool merge order (last-write-wins via ToolRegistry's Map): defaultTools →
+  // mcp → memory → lsp-diagnostics (swaps the no-op diagnostics in defaultTools)
+  // → lsp-nav (8 new tools, opt-in) → git (4 new tools, opt-in). All trailing
+  // groups are empty arrays when their knobs are unset, so the registry is
+  // byte-identical to today when no SOTA++ knob is set.
+  const registry = new ToolRegistry([
+    ...defaultTools,
+    ...mcpTools,
+    ...memTools,
+    ...lspTools,
+    ...lspNavTools,
+    ...gitToolList,
+  ])
   return {
     store,
     embedder,
@@ -535,8 +587,17 @@ const main = async (): Promise<void> => {
     process.exit(1)
   }
   // All features default OFF → behavior unchanged when no QUANTA_* flag set.
-  const { planMode, metrics, state, resume, mcpTools, mcpClients, lspTools } =
-    await loadFeatures(slog)
+  const {
+    planMode,
+    metrics,
+    state,
+    resume,
+    mcpTools,
+    mcpClients,
+    lspTools,
+    lspNavTools,
+    gitToolList,
+  } = await loadFeatures(slog)
 
   const {
     store,
@@ -548,7 +609,7 @@ const main = async (): Promise<void> => {
     skillsConfig,
     compactionBreakerConfig,
     verifyGuardConfig,
-  } = buildTooling(mcpTools, lspTools, slog)
+  } = buildTooling(mcpTools, lspTools, lspNavTools, gitToolList, slog)
   // `let` because a resumed session reassigns it before any turn (preserved).
   let sessionId = initialSessionId
 

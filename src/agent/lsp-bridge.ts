@@ -2,9 +2,12 @@ import { extname } from "node:path"
 import { type LspClient, PyrightAdapter, TypescriptAdapter } from "@/lsp"
 import { logger } from "@/shared"
 import {
+  lspNavTools as buildLspNavTools,
   type DiagnosticsProvider,
   type DiagnosticsSession,
   diagnosticsTool,
+  type LspNavProvider,
+  type LspNavSession,
   type Tool,
 } from "@/tool"
 
@@ -114,3 +117,76 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
  * here spawns a server until the tool is actually called.
  */
 export const lspDiagnosticsTool = (): Tool => diagnosticsTool(lspDiagnosticsProvider()) as Tool
+
+/* ------------------------------------------------------------------------- *
+ * LSP nav (definition/references/hover/symbol/rename-preview) — SOTA++
+ * Codex `may-20-codex-lsp.md` absorption (ADR-0015).
+ *
+ * Same provider/session/null-degrade ethos as the diagnostics path: we adapt
+ * the live {@link LspClient} (which now implements the 8 nav RPCs added in
+ * Wave B1) to the slice-isolated {@link LspNavSession} interface. The
+ * structural compatibility of the LSP and nav-tool type families means the
+ * adaptation is just a pass-through — every nav method delegates to the
+ * matching `LspClient` method, and `stop()` shuts the server down.
+ *
+ * Default OFF: not added to `defaultTools`; the CLI registers these tools
+ * only when `QUANTA_LSP_TOOLS=full` is set (next-step wiring). With the env
+ * unset the tool surface is byte-identical to today.
+ * --------------------------------------------------------------------------*/
+
+/** Adapt a live {@link LspClient} to the slice-isolated {@link LspNavSession}.
+ *  The two type families (`@/lsp` and `@/tool/lsp_nav`) are structurally
+ *  identical (same `Pos`/`Range`/`Location`/`SymbolInfo`/`Hover`/`RenamePreview`
+ *  shapes), so the adapter is a method-by-method forwarder. The client is
+ *  the same one used for diagnostics — one server is shared across every nav
+ *  call this session makes against the same file (didOpen is dedup'd in
+ *  Wave B1's LspClient). */
+const adaptToNavSession = (client: LspClient): LspNavSession => ({
+  definition: (file, pos) => client.definition(file, pos),
+  references: (file, pos, includeDeclaration) => client.references(file, pos, includeDeclaration),
+  hover: (file, pos) => client.hover(file, pos),
+  typeDefinition: (file, pos) => client.typeDefinition(file, pos),
+  implementation: (file, pos) => client.implementation(file, pos),
+  documentSymbol: (file) => client.documentSymbol(file),
+  workspaceSymbol: (query) => client.workspaceSymbol(query),
+  prepareRename: (file, pos) => client.prepareRename(file, pos),
+  stop: () => client.stop(),
+})
+
+/** The real nav provider: extension → server, with graceful unavailability.
+ *  Mirrors {@link lspDiagnosticsProvider} exactly — reuses the same
+ *  `specFor` + `isAvailable` machinery so a single per-process binary probe
+ *  serves both diagnostics and nav. */
+export const lspNavProvider = (): LspNavProvider => ({
+  unavailableReason: (filePath) => {
+    const spec = specFor(filePath)
+    return spec
+      ? `${spec.bin} is not installed or not on PATH`
+      : `no language server for ${extname(filePath) || "this file type"}`
+  },
+  open: async (filePath, cwd): Promise<LspNavSession | null> => {
+    const spec = specFor(filePath)
+    if (!spec) return null
+    if (!(await isAvailable(spec.bin))) return null
+    const client = spec.create(cwd)
+    try {
+      await client.start()
+    } catch (e) {
+      logger.warn("lsp: failed to start language server (nav)", {
+        bin: spec.bin,
+        error: String(e),
+      })
+      await client.stop().catch(() => undefined)
+      return null
+    }
+    return adaptToNavSession(client)
+  },
+})
+
+/**
+ * Build the LSP-backed nav tool set (8 tools — see `@/tool/lsp_nav` for the
+ * inventory). The CLI appends these to the registry only when
+ * `QUANTA_LSP_TOOLS=full` is set; with the knob unset the tool surface is
+ * unchanged. Nothing here spawns a server until a tool is actually called.
+ */
+export const lspNavToolList = (): Tool[] => buildLspNavTools(lspNavProvider())

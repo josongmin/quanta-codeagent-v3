@@ -55,9 +55,9 @@ export type { AgentMode, TurnContext, TurnContextInput } from "./prompt"
 export { buildSystemPrompt, buildTurnContext } from "./prompt"
 export {
   loadRepoRules,
-  renderRepoRulesBlock,
   REPO_RULE_CANDIDATES,
   type RepoRules,
+  renderRepoRulesBlock,
 } from "./repo-rules"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
 export { loadSession, type SaveSessionInput, saveSession } from "./state"

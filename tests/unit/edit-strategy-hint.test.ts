@@ -5,9 +5,9 @@ import { join } from "node:path"
 import type { ToolContext, ToolResult } from "@/tool"
 import { editTool } from "@/tool/edit"
 import {
-  STRATEGY_HINT_PREFIX,
   classifyMismatch,
   formatStrategyHint,
+  STRATEGY_HINT_PREFIX,
 } from "@/tool/edit/strategy-hint"
 
 const dir = mkdtempSync(join(tmpdir(), "edit-strategy-hint-test-"))

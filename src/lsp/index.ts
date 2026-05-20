@@ -4,4 +4,15 @@ export { PyrightAdapter } from "./adapters/pyright"
 export type { TypescriptAdapterOptions } from "./adapters/typescript"
 export { languageIdFor, TypescriptAdapter } from "./adapters/typescript"
 export type { LspPort } from "./ports"
-export type { Diagnostic, DiagnosticSeverity, LspServerInfo, Pos } from "./types"
+export type {
+  Diagnostic,
+  DiagnosticSeverity,
+  Hover,
+  Location,
+  LspServerInfo,
+  Pos,
+  Range,
+  RenamePreview,
+  SymbolInfo,
+  SymbolKind,
+} from "./types"
