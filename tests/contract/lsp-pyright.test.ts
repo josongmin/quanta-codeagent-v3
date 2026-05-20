@@ -109,8 +109,9 @@ describe("PyrightAdapter (integration)", () => {
     const adapter = new PyrightAdapter({ cwd: dir, requestTimeoutMs: 6_000 })
     await adapter.start()
     await adapter.stop()
-    // Second stop must be a no-op, not a throw or hang.
-    await adapter.stop()
-    expect(true).toBe(true)
+    // W1-A audit fix: previous `expect(true).toBe(true)` was vapor — it
+    // passed without expressing intent. `resolves.toBeUndefined()` makes the
+    // idempotent contract explicit (second `stop()` settles cleanly).
+    await expect(adapter.stop()).resolves.toBeUndefined()
   }, 15_000)
 })

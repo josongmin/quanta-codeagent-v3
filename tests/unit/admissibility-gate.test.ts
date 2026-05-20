@@ -1,6 +1,6 @@
 /**
- * Order-locking tests for `runAdmissibilityGate` (SOTA++ Codex `may-20-codex-
- * agent-loop.md §5` absorption — ADR-0018). These assertions lock the canonical
+ * Order-locking tests for `runAdmissibilityGate` (Codex `may-20-codex-agent-
+ * loop.md §5` absorption — ADR-0018). These assertions lock the canonical
  * dispatch-time gate ordering: plan-mode block → HITL tier (when enabled) →
  * mode policy (HARD_DENY inside) → pre_tool_use hook. The extraction in Wave
  * B4 must be behavior-preserving, so each test constructs a config that would

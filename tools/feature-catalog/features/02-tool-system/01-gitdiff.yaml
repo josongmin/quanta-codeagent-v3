@@ -1,0 +1,18 @@
+id: gitdiff
+title: git_diff
+section: 2
+subsystem: Git 1급 도구 (ADR-0025)
+order: 1
+maturity: L4
+status: stable
+purpose: git_diff/git_status/git_log/git_blame — read-only·concurrency-safe·GitRunner 주입, mutating은 bash 잔류
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_GIT_TOOLS]
+deliberate_hold: null
+notes: ''

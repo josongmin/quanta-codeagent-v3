@@ -3,7 +3,7 @@ import type { EmbedderPort } from "@/memory"
 import { LLMError } from "@/shared"
 
 /**
- * Concrete {@link EmbedderPort} implementations (RFC §6.3, SOTA++ memory).
+ * Concrete {@link EmbedderPort} implementations (RFC §6.3, long-term memory).
  * The memory slice owns the port but cannot import @/llm or `openai`; the
  * concrete providers live here in @/agent (the only cross-slice importer).
  *

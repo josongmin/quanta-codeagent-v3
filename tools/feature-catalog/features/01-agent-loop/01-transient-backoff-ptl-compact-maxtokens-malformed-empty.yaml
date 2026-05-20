@@ -1,0 +1,18 @@
+id: transient-backoff-ptl-compact-maxtokens-malformed-empty
+title: transient backoff / PTL→compact / max_tokens / malformed / empty
+section: 1
+subsystem: Same-turn 복구
+order: 1
+maturity: L5
+status: stable
+purpose: transient backoff / PTL→compact / max_tokens / malformed / empty
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

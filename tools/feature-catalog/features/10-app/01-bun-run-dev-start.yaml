@@ -1,0 +1,18 @@
+id: bun-run-dev-start
+title: bun run dev|start
+section: 10
+subsystem: CLI
+order: 1
+maturity: L4
+status: stable
+purpose: bun run dev|start, .env 로드, 전 SOTA++ 노브 default OFF
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

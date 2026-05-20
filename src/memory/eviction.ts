@@ -1,4 +1,4 @@
-// Pure eviction planner for the durable store (RFC §6.3, SOTA++ memory).
+// Pure eviction planner for the durable store (RFC §6.3, long-term memory).
 // Runs as a periodic full-store sweep: bounds each tier, prunes ancient
 // superseded rows, and decays long-archived low-value memories. Returns only
 // ids — the caller performs the actual delete()/update() so this stays pure

@@ -1,0 +1,18 @@
+id: retryingllm
+title: RetryingLLM
+section: 7
+subsystem: Retry
+order: 1
+maturity: L5
+status: stable
+purpose: RetryingLLM pre-stream만 backoff, mid-stream rethrow, PTL→compact 라우팅
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -9,3 +9,5 @@ export {
 } from "./sandbox"
 export { runShell } from "./shell"
 export type { ShellOptions, ShellResult } from "./types"
+export type { PersistentWorktree } from "./worktree-fork"
+export { createPersistentWorktree, removeWorktree, WorktreeForkError } from "./worktree-fork"

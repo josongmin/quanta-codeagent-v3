@@ -342,6 +342,59 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/session/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/agent": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/tool": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/memory": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/**",
+        "!src/apps/**",
+        "tests/**",
+        "!tests/unit/cli-summarizer.test.ts",
+        "!tests/unit/dotenv.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

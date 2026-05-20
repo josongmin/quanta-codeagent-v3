@@ -1,0 +1,18 @@
+id: quantamemory-path-embed-embedmodel-recalllimit-distill-conso
+title: QUANTA_MEMORY[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SEL
+section: 5
+subsystem: 도구/노브
+order: 2
+maturity: L4
+status: stable
+purpose: '[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SELF_EDIT/_RECALL_TIERS]'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_MEMORY]
+deliberate_hold: null
+notes: ''

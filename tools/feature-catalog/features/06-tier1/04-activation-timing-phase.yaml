@@ -1,0 +1,19 @@
+id: activation-timing-phase
+title: Activation-timing phase 분리
+section: 6
+subsystem: Mode enum (ADR-0018)
+order: 4
+maturity: L1
+status: hold
+purpose: Activation-timing phase 분리 — 현재 트리거 cache는 session-start 1회 + per-turn 라벨 주입만. 시점별 phase machine은 후속 phase로 의식적 보류
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: tart 1회 + per-turn 라벨 주입만. 시점별 phase machine은 후속 phase로 의식적 보류
+notes: ''

@@ -1,0 +1,18 @@
+id: fsjailerror
+title: FsJailError
+section: 3
+subsystem: FS jail (`src/storage/service.ts`)
+order: 1
+maturity: L4
+status: stable
+purpose: FsJailError — assertPathInWorkspace/assertPathInsideBaseDir로 baseDir 밖 경로 escape 차단. state.ts 같은 no-baseDir 콜러는 pre-jail back-compat 유지 옵트아웃, cross-repo 작업).
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: [tests/unit/fs-jail.test.ts]
+    integration: [tests/integration/fs-jail-e2e.test.ts]
+    contract: []
+knobs: [QUANTA_FS_JAIL]
+deliberate_hold: null
+notes: 'storage 슬라이스 단일 강제 지점. runAgent e2e(, 3 tests): write ../escape.txt → ok:false + 파일 미생성, 시 동일 호출 성공 + 파일 생성, read 경계초과 시 파일 내용 leak 없이 ok:false. 16 단위() + storage pure 헬퍼 단위 + 통합 layer 완비'

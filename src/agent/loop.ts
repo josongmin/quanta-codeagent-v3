@@ -35,7 +35,7 @@ const MAX_OUTPUT_CONTINUES = 3
 const MAX_MALFORMED_RETRIES = 1
 const MAX_CONSECUTIVE_EMPTIES = 2
 
-/** SOTA++ Tier 0 verify-guard history element. A real SWE-bench run proved the
+/** Verify-guard history element (Tier 0 safety hardening). A real SWE-bench run proved the
  *  guard fired 0 times because the agent runs a noise `bash` (`git status`/`ls`)
  *  after editing and the old policy counted ANY bash as "verified", defeating
  *  the guard. R1's tightened `decideVerifyGuard` only counts a `bash` as a
@@ -66,14 +66,14 @@ const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
  * - compaction (RFC §13.1, ADR-0004 신호): proactive at turn-top under token
  *   pressure (`compactIfNeeded`) + reactive on a PTL trigger (`reactiveCompact`)
  *   that resumes the same turn after compacting. A session `CompactionBreaker`
- *   (SOTA++ Tier 0, ADR-0011) aborts a compact↔PTL thrash spin.
+ *   (Tier 0 safety hardening, ADR-0011) aborts a compact↔PTL thrash spin.
  * - hooks + memory/metrics wiring: `HookBus` events, working-memory + long-term
  *   recall/persist (`recallContext`/`persistSession`), `AgentRecorder` counters.
  * - ADR-0004 cached prompt: the loop consumes `buildTurnContext`'s
  *   `{ system, messages }` (static cache-prefix system + a single trailing
  *   `<system-reminder>` for the per-turn dynamic context); it does NOT
  *   re-assemble the system prompt per turn.
- * - SOTA++ (ADR-0011): streaming tool execution — a concurrency-safe tool is
+ * - ADR-0011: streaming tool execution — a concurrency-safe tool is
  *   dispatched the instant its `tool_use` block finishes streaming (overlapping
  *   the rest of the model stream); a non-safe call is a head-of-line barrier
  *   run after the stream completes. `tool_result` blocks stay in the model's
@@ -81,7 +81,7 @@ const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
  *   permission classifier are materialized once via `buildSessionFeatures`.
  *
  * With NO Tier-1 config and a turn that yields 0 or only non-safe tool calls,
- * behaviour is byte-for-byte identical to the pre-SOTA++ batched path.
+ * behaviour is byte-for-byte identical to the pre-absorption batched path.
  */
 type AssembledMessage = ReturnType<typeof assembleFromEvents>["message"]
 
@@ -169,7 +169,7 @@ type StreamSuccess = {
 }
 type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } | { aborted: true }
 
-/** Skill tool-scoping ENFORCEMENT (SOTA++ ADR-0011). Once a skill that
+/** Skill tool-scoping ENFORCEMENT (ADR-0011). Once a skill that
  *  declared a `tools:` allowlist is invoked, subsequent tool calls are
  *  restricted to that allowlist (+ the skill meta-tools) until another skill
  *  resets it. Built only when ≥1 discovered skill declared an allowlist;
@@ -215,8 +215,8 @@ const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut =
 type StreamDispatchOut = { block: ToolResultBlock; ok: boolean; preview: string }
 
 /**
- * Consume one LLM stream WITH interleaved tool execution (SOTA++ streaming
- * tool exec, ADR-0011). Delegates the stream/dispatch interleaving + ordering
+ * Consume one LLM stream WITH interleaved tool execution (streaming tool
+ * exec, ADR-0011). Delegates the stream/dispatch interleaving + ordering
  * + head-of-line barrier + abort/tombstone handling to the pure
  * `streamingTurn` engine; this seam only binds the loop's collaborators
  * (registry, dispatch, stream emits, metrics, the session auto-classifier) and
@@ -225,7 +225,7 @@ type StreamDispatchOut = { block: ToolResultBlock; ok: boolean; preview: string 
  * retry without consuming a `maxTurns` slot. The early dispatches are pure
  * latency win — when the recovery decision is `nudge`/`completed`/`compact`
  * the (read-only, since only concurrency-safe calls start early) results are
- * simply discarded, exactly as the pre-SOTA++ path discarded un-dispatched
+ * simply discarded, exactly as the pre-absorption path discarded un-dispatched
  * calls.
  */
 const streamConsume = async (
@@ -254,7 +254,7 @@ const streamConsume = async (
       dispatch: async (call) => {
         const s = recorder?.toolExec()
         try {
-          // SOTA++ (ADR-0011): enforce the active skill's tool allowlist —
+          // ADR-0011: enforce the active skill's tool allowlist —
           // an out-of-scope tool is denied as a recoverable tool_result
           // WITHOUT dispatching it. No gate / no active skill ⇒ unchanged.
           const out =
@@ -309,7 +309,7 @@ const streamConsume = async (
       onToolStart: (call) => {
         config.stream.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input })
         recorder?.toolCall(call.name)
-        // SOTA++ Tier 0 verify-guard: ordered dispatched tool entries this run.
+        // Verify-guard (Tier 0 safety hardening): ordered dispatched tool entries this run.
         // `toolHistory` is created ONLY when `config.verifyGuard` is set, so
         // with the guard absent this push never runs (byte-identical).
         // A real SWE-bench run showed the guard fired 0 times: the agent ran a
@@ -405,7 +405,7 @@ const maybeCompact = async (
   const before = estimateTokens(snapshot)
   const result = await compactIfNeeded({
     messages: snapshot,
-    // SOTA++ (ADR-0011): optional dedicated summarizer model; absent ⇒ main
+    // ADR-0011: optional dedicated summarizer model; absent ⇒ main
     // llm (byte-identical). Summarization is low-stakes; a cheaper/faster
     // model spares the main model on every compaction.
     llm: config.compaction.summarizerLlm ?? config.llm,
@@ -418,7 +418,7 @@ const maybeCompact = async (
       : {}),
   })
   if (result.compacted) {
-    // SOTA++ Tier 0 (ADR-0011): feed the thrash counter. A proactive compact
+    // Tier 0 safety hardening (ADR-0011): feed the thrash counter. A proactive compact
     // that fails to meaningfully shrink is a no-progress strike.
     breaker?.recordProactive(before, estimateTokens(result.messages))
     wm.replace(result.messages)
@@ -603,7 +603,7 @@ const prepareTurnContext = async (
 ): Promise<ReturnType<typeof buildTurnContext>> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder)
   await maybeCompact(config, staticSystemFor(config), wm, breaker)
-  // SOTA++ Codex memory L3: snapshot the session WorkingState on every attempt
+  // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
   const wsSnapshot = workingState?.snapshot()
@@ -631,7 +631,7 @@ const CONTINUE: Step = { done: false }
  *  `{done:true}` with the terminal {@link TurnResult}. The `proceed` branch
  *  uses the tool_result blocks `streamingTurn` already produced (dispatch
  *  happened DURING the stream) instead of dispatching here. */
-/** SOTA++ Tier 0 verify-guard hook. Observed bench failure: the agent edits a
+/** Verify-guard hook (Tier 0 safety hardening). Observed bench failure: the agent edits a
  *  source file then declares "done" with ZERO verification calls after the edit
  *  → a wrong fix ships. When `config.verifyGuard` is set and the model is about
  *  to finish right after an unverified mutating tool, convert the completion
@@ -677,7 +677,7 @@ const verifyGuardStep = (
   return CONTINUE
 }
 
-/** SOTA++ CloseoutLens hook (Codex App agent loop doc §4 mirror). v3 has NO
+/** Closeout reminder hook (Codex App agent loop doc §4 mirror). v3 has NO
  *  finish-time self-check: at the moment of completion the agent can overclaim
  *  ("verified" when no verification ran, mix fact with inference, ignore the
  *  requested reporting shape). When `config.closeoutGuard?.enabled === true`
@@ -733,7 +733,7 @@ const applyAction = async (
   }
   if (action.do === "compact") {
     emitRecovery(config, "compact")
-    // SOTA++ Tier 0 (ADR-0011): trip the breaker BEFORE another reactive
+    // Tier 0 safety hardening (ADR-0011): trip the breaker BEFORE another reactive
     // squeeze so a compact↔PTL thrash spin aborts with a clear reason
     // instead of looping until maxTurns / a provider 400.
     const verdict = breaker?.check()
@@ -742,7 +742,7 @@ const applyAction = async (
     const before = estimateTokens(snapshot)
     const compacted = await reactiveCompact({
       messages: snapshot,
-      // SOTA++ (ADR-0011): dedicated summarizer model when configured;
+      // ADR-0011: dedicated summarizer model when configured;
       // absent (or no compaction block) ⇒ main llm (byte-identical).
       llm: config.compaction?.summarizerLlm ?? config.llm,
       system: ctxSystem,
@@ -756,12 +756,12 @@ const applyAction = async (
   // and the (already dispatched) tool_result blocks.
   const success = result as StreamSuccess
   const message = success.message
-  // SOTA++ Tier 0: a finish attempt right after an unverified edit is forced
+  // Tier 0 safety hardening: a finish attempt right after an unverified edit is forced
   // into one more turn. All the branching/decision lives in `verifyGuardStep`
   // so this hot path stays a single guarded call (default-OFF ⇒ undefined).
   const guarded = verifyGuardStep(config, action, message, wm, history, verifyGuardState)
   if (guarded) return guarded
-  // SOTA++ CloseoutLens (§4 mirror): a finish attempt is given one single-shot
+  // Closeout reminder (§4 mirror): a finish attempt is given one single-shot
   // closeout nudge per run. Ordered STRICTLY AFTER verify-guard: if verify
   // already blocked above we never reach here on this turn — closeout fires the
   // NEXT finish-intent (after verify is satisfied). Default-OFF ⇒ undefined.
@@ -857,16 +857,16 @@ const stampTurn = (run: RunContext | undefined, turn: number): RunContext | unde
   run ? { ...run, turn } : undefined
 
 /** Reconstruct the `Tool[]` backing a registry (it is construct-only — no
- *  enumerator) so SOTA++ extra tools can be merged into a fresh registry. */
+ *  enumerator) so extra tools can be merged into a fresh registry. */
 const registryTools = (r: AgentConfig["registry"]): Tool[] =>
   r
     .specs()
     .map((s) => r.get(s.name))
     .filter((t): t is Tool => t !== undefined)
 
-/** Fold SOTA++ extra tools (subagent/skill) into a fresh registry. With none
+/** Fold extra tools (subagent/skill) into a fresh registry. With none
  *  (`extraTools` empty) returns the SAME config by identity, so the loop stays
- *  byte-for-byte identical to the pre-SOTA++ path. */
+ *  byte-for-byte identical to the pre-absorption path. */
 const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentConfig =>
   extraTools.length > 0
     ? {
@@ -875,7 +875,7 @@ const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentCon
       }
     : config
 
-/** SOTA++ Tier 0 verify-guard per-run resources. Built when EITHER
+/** Verify-guard per-run resources (Tier 0 safety hardening). Built when EITHER
  *  `config.verifyGuard` OR `config.closeoutGuard?.enabled === true` is set:
  *  closeout-guard now duck-reads the same tool-history array to route a
  *  code-modification session to the Phase 4 four-truth-surface reminder
@@ -892,7 +892,7 @@ const buildVerifyGuard = (
   return out
 }
 
-/** SOTA++ CloseoutLens per-run resource. Built ONLY when
+/** Closeout reminder per-run resource. Built ONLY when
  *  `config.closeoutGuard?.enabled === true`: a single-shot trip counter.
  *  Absent (or `enabled !== true`) ⇒ `undefined` (no allocation, the guard
  *  decision is never reached → loop byte-identical). Extracted so `runAgent`
@@ -901,9 +901,9 @@ const buildCloseoutGuard = (config: AgentConfig): CloseoutGuardState | undefined
   config.closeoutGuard?.enabled === true ? createCloseoutGuardState() : undefined
 
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
-  // SOTA++ Tier 1 (ADR-0011): materialize optional subsystems ONCE. With no
+  // Tier 1 capability (ADR-0011): materialize optional subsystems ONCE. With no
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
-  // identity, so the loop is byte-for-byte identical to the pre-SOTA++ path.
+  // identity, so the loop is byte-for-byte identical to the pre-absorption path.
   const features = await buildSessionFeatures(config)
   const cfg = buildEffectiveConfig(config, features.extraTools)
   const classifier = features.classifier
@@ -919,26 +919,26 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const specs = cfg.registry.specs()
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
   const sessionId = cfg.sessionId ?? "default"
-  // SOTA++ Tier 0 (ADR-0011): one breaker per session. ON by default with
+  // Tier 0 safety hardening (ADR-0011): one breaker per session. ON by default with
   // DEFAULT_COMPACTION_BREAKER_CAPS — only trips on pathological compaction
   // thrash, so configured-but-normal and unconfigured sessions are unaffected.
   const breaker = cfg.compactionBreaker?.disabled
     ? undefined
     : new CompactionBreaker(cfg.compactionBreaker?.caps)
-  // SOTA++ Tier 0 verify-guard (ADR-0011): per-run forcing budget + ordered
+  // Verify-guard (ADR-0011, Tier 0 safety hardening): per-run forcing budget + ordered
   // dispatched-tool log, created ONLY when `cfg.verifyGuard` is set. Absent ⇒
   // both stay `undefined`, no object is allocated, the history push and the
   // guard decision are never reached → loop is byte-for-byte identical. The
   // construction is factored out so `runAgent` gains ZERO new branch points.
   const { state: verifyGuardState, history: toolHistory } = buildVerifyGuard(cfg)
-  // SOTA++ CloseoutLens (§4 mirror): single-shot per-run closeout budget,
+  // Closeout reminder (§4 mirror): single-shot per-run closeout budget,
   // created ONLY when `cfg.closeoutGuard?.enabled === true`. Absent (or
   // `enabled !== true`) ⇒ stays `undefined`, no object is allocated, the
   // guard decision is never reached → loop is byte-for-byte identical. The
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
-  // SOTA++ Codex memory L3 (Phase 6 absorption): session-scoped WorkingState.
+  // Codex absorption — memory L3 (Phase 6): session-scoped WorkingState.
   // Wired in by `buildSessionFeatures` when `cfg.workingState?.enabled === true`;
   // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-
   // identical for callers without the opt-in).
@@ -1021,7 +1021,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     if (result.kind === "completed") return finish("completed", turn)
 
     // A real tool turn landed (not stuck thrashing compaction) — clear the
-    // consecutive no-progress strikes (SOTA++ Tier 0, ADR-0011).
+    // consecutive no-progress strikes (Tier 0 safety hardening, ADR-0011).
     breaker?.noteProgress()
     wm.append({ role: "user", content: result.resultBlocks })
   }

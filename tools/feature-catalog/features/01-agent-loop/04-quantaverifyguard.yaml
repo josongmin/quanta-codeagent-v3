@@ -1,0 +1,18 @@
+id: quantaverifyguard
+title: QUANTA_VERIFY_GUARD
+section: 1
+subsystem: Verify-guard (Tier 0) · ADR-0013
+order: 4
+maturity: L4
+status: stable
+purpose: / (기본 OFF)
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_VERIFY_GUARD, QUANTA_VERIFY_GUARD_MAX_TRIPS]
+deliberate_hold: null
+notes: ''

@@ -1,5 +1,5 @@
 /**
- * Phase 4 SOTA++ absorption — edit-strategy hints. Codex's edit-strategy state
+ * Phase 4 Codex absorption — edit-strategy hints. Codex's edit-strategy state
  * machine (`agent-loop-deep-dive.md §7`, `tool-routing-and-triggering.md`)
  * teaches the model to SWITCH strategies on patch-context mismatch instead of
  * spinning on the same patch. We surface a structured `nextStrategy` plus a

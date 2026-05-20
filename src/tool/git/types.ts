@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-/** Git first-class tool contract (SOTA++ Codex `may-20-codex-signal.md`
+/** Git first-class tool contract (Codex `may-20-codex-signal.md`
  *  absorption — ADR-0016).
  *
  *  Slice isolation: `@/tool/git` shells to `git` directly via an injected

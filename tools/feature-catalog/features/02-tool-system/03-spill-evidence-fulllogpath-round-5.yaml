@@ -1,0 +1,18 @@
+id: spill-evidence-fulllogpath-round-5
+title: Spill → `evidence.fullLogPath` 라우팅 (Round 5)
+section: 2
+subsystem: 결과 cap + disk-spill (Tier 0)
+order: 3
+maturity: L5
+status: stable
+purpose: Spill → evidence.fullLogPath 라우팅 (Round 5) — registry.ts:91-97가 capToolOutput.spillPath를 ToolResult.evidence.fullLogPath에 머지. 이전엔 duck-typed extra-prop, 이제 타입 surface 단일 경로 — dispatch seam evidenceOf가 그대로 trajectory tool_end.fullLogPath로 평탄화
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

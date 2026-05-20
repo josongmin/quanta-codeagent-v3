@@ -209,7 +209,7 @@ describe("buildSessionFeatures", () => {
     expect(c.registry.specs().map((s) => s.name)).toEqual(before)
   })
 
-  // --- SOTA++ skill tool-scoping ENFORCEMENT data (ADR-0011) --------------
+  // --- Skill tool-scoping ENFORCEMENT data (ADR-0011) --------------------
 
   test("skillAllowlists: ONLY scoped skill present, no-tools skill absent", async () => {
     const dir = await mkdtemp(join(tmpdir(), "feat-allow-"))

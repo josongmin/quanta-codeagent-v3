@@ -18,7 +18,7 @@ import { cfg, RecordingStream, withTimeout } from "./_harness"
  *
  * Asserts: (1) the child actually forked and ran (its scripted turn produced
  * the answer the parent surfaces as a tool_result summary), (2) the parent
- * then completes, and (3) SOTA++ ADR-0011: `buildChildConfig` now PROPAGATES
+ * then completes, and (3) ADR-0011: `buildChildConfig` now PROPAGATES
  * `config.subagent` into the child, so a forked child ALSO registers the
  * `agent` tool and CAN spawn sub-subagents. Recursion is bounded MULTI-LEVEL
  * by `maxDepth`: with `maxDepth:2` a parent→child→grandchild chain spawns real
@@ -127,7 +127,7 @@ describe("GAP 6 — real recursive subagent fork through runAgent", () => {
   })
 
   test("recursion is bounded MULTI-LEVEL by maxDepth: parent→child→grandchild, the next spawn is a recoverable deny", async () => {
-    // SOTA++ ADR-0011: `buildChildConfig` (subagent-runner.ts) NOW propagates
+    // ADR-0011: `buildChildConfig` (subagent-runner.ts) NOW propagates
     // `config.subagent` into the child, so the child's own `runAgent`/
     // `buildSessionFeatures` DOES register an `agent` tool — a forked child can
     // itself spawn sub-subagents. Recursion is bounded MULTI-LEVEL by

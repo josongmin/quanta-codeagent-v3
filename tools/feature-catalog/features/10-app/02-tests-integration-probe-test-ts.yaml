@@ -1,0 +1,18 @@
+id: tests-integration-probe-test-ts
+title: tests/integration/probe.test.ts
+section: 10
+subsystem: Probe (trajectory inspector) — `src/apps/probe/**` · `bun run probe` · RFC-0002 §7 / ADR-0010
+order: 2
+maturity: L4
+status: stable
+purpose: '통합 테스트: (10 tests) — trajectory JSONL 다양한 변형에 대한 graceful 처리 + view 별 렌더 일관성'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: [tests/integration/probe.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

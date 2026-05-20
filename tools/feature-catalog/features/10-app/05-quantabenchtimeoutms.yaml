@@ -1,0 +1,18 @@
+id: quantabenchtimeoutms
+title: QUANTA_BENCH_TIMEOUT_MS
+section: 10
+subsystem: 벤치
+order: 5
+maturity: L4
+status: stable
+purpose: 'Bench 실행 노브: —'
+evidence:
+  code: [src/apps/bench/index.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_BENCH_TIMEOUT_MS]
+deliberate_hold: null
+notes: ''

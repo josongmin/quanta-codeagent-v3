@@ -1,0 +1,18 @@
+id: read-write-edit
+title: read/write/edit
+section: 2
+subsystem: 코어 도구 9종
+order: 1
+maturity: L5
+status: stable
+purpose: read/write/edit/bash/grep/glob/localize/diagnostics/test_runner
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -1,0 +1,18 @@
+id: evidence-toolresultevidence
+title: 'evidence?: ToolResultEvidence'
+section: 2
+subsystem: '`ToolResult.evidence` 타입 필드 (FU2)'
+order: 1
+maturity: L5
+status: stable
+purpose: 'evidence?: ToolResultEvidence — 이전 duck-typed extra-prop smuggling을 타입 surface로 대체. stdErr vs stderr casing drift가 더 이상 tsc를 못 빠져나감.'
+evidence:
+  code: [src/tool/types.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '발견 사항: bash + test_runner는 필드가 dead였음 — 본 라운드에서 ACTUALLY 평면화.'

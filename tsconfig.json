@@ -49,10 +49,12 @@
       "@/subagent/*": ["./src/subagent/*"],
       "@/skill": ["./src/skill/index.ts"],
       "@/skill/*": ["./src/skill/*"],
+      "@/session": ["./src/session/index.ts"],
+      "@/session/*": ["./src/session/*"],
       "@/agent": ["./src/agent/index.ts"],
       "@/agent/*": ["./src/agent/*"]
     }
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "tools"],
   "exclude": ["node_modules", "dist"]
 }

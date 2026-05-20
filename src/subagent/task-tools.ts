@@ -2,8 +2,6 @@ import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import type { TaskRecord, TaskRegistry } from "./registry"
 
-const POLL_INTERVAL_MS = 100
-
 const outputSchema = z.object({
   task_id: z.string().describe("Id returned by a background agent launch"),
   block: z
@@ -45,23 +43,38 @@ const notFound = (taskId: string): ToolEvent => ({
   result: { ok: false, output: `No task found with id: ${taskId}` },
 })
 
-/** Poll the registry until the task settles, the deadline passes, or the
- *  context is aborted. Returns the latest record (or undefined if removed). */
+/** Race the registry's event-driven settle Promise against a timeout and the
+ *  tool context's abort signal. We race instead of polling so the wait resolves
+ *  the instant the task transitions to a terminal status (registry resolves
+ *  the settler in `complete`/`fail`/`stop`) — no 100ms granularity, no wakeups.
+ *  Both timer and abort listener are cleaned up unconditionally so a settled-
+ *  early path leaves no dangling resources. */
 const waitForSettle = async (
   registry: TaskRegistry,
   taskId: string,
   ctx: ToolContext,
   timeoutMs: number,
 ): Promise<TaskRecord | undefined> => {
-  const deadline = Date.now() + timeoutMs
-  let rec = registry.get(taskId)
-  while (Date.now() < deadline) {
-    if (ctx.signal.aborted) break
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
-    rec = registry.get(taskId)
-    if (!rec || settled(rec)) break
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs)
+  })
+  const aborted = new Promise<void>((resolve) => {
+    if (ctx.signal.aborted) {
+      resolve()
+      return
+    }
+    onAbort = () => resolve()
+    ctx.signal.addEventListener("abort", onAbort, { once: true })
+  })
+  try {
+    await Promise.race([registry.waitForSettle(taskId), timeout, aborted])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    if (onAbort) ctx.signal.removeEventListener("abort", onAbort)
   }
-  return rec
+  return registry.get(taskId)
 }
 
 /** `task_output` — poll (or block on) a background subagent task by id. */

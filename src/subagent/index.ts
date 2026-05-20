@@ -2,14 +2,21 @@
  * Subagent slice — public API.
  *
  * Wire-up the main thread (the only allowed cross-importer, via @/agent) does:
- *   const reg = new TaskRegistry()
- *   const agent = createAgentTool({ runner, maxDepth: 3, registry: reg })
- *   registry.register([
- *     agent,
- *     createTaskOutputTool(reg),
- *     createTaskStopTool(reg),
- *   ])
- * where `runner` is a forked runAgent (depth+1, filtered registry, own memory).
+ *   const agentTool = createAgentTool({ runner, maxDepth: 3 })
+ *   const taskRegistry = agentTool.registry
+ *   // merge into a fresh ToolRegistry (constructor-only):
+ *   extraTools.push(
+ *     agentTool,
+ *     createTaskOutputTool(taskRegistry),
+ *     createTaskStopTool(taskRegistry),
+ *   )
+ * `createAgentTool` mints a fresh `TaskRegistry` when none is passed and
+ * re-exposes whichever instance it used as `.registry`; the host reads that
+ * back and threads the SAME instance into the Task* tools so all three observe
+ * the same background tasks. See `src/agent/features.ts:174-179` for the live
+ * wiring. `runner` is a forked `runAgent` (depth+1, filtered registry, own
+ * memory) and MUST chain `req.signal` into the child loop so `task_stop`
+ * actually unwinds the fork.
  *
  * Recommended AgentConfig field:
  *   subagent?: { runner: SubagentRunner; maxDepth?: number }
@@ -18,7 +25,7 @@
 
 export type { AgentToolOptions } from "./agent-tool"
 export { createAgentTool } from "./agent-tool"
-export type { TaskRecord, TaskStatus } from "./registry"
+export type { TaskRecord, TaskRegistryOptions, TaskStatus } from "./registry"
 export { TaskRegistry } from "./registry"
 export { createTaskOutputTool, createTaskStopTool } from "./task-tools"
 export type {
@@ -26,4 +33,5 @@ export type {
   SubagentResult,
   SubagentRunner,
   TaskBudget,
+  TaskKind,
 } from "./types"

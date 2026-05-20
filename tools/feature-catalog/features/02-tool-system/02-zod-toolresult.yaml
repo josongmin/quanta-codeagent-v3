@@ -1,0 +1,18 @@
+id: zod-toolresult
+title: zod 입력검증 → 회복가능 tool_result
+section: 2
+subsystem: 디스패치/배칭
+order: 2
+maturity: L5
+status: stable
+purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

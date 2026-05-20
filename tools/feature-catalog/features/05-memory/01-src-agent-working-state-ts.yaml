@@ -1,0 +1,18 @@
+id: src-agent-working-state-ts
+title: src/agent/working-state.ts
+section: 5
+subsystem: L3 WorkingState (ADR-0021)
+order: 1
+maturity: L4
+status: stable
+purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
+evidence:
+  code: [src/agent/working-state.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'update_working_state meta-tool — patch는 replace(append 아님), hypothesis: null clears workingState.enabled (기본 OFF)'

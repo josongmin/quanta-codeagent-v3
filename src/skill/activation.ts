@@ -53,11 +53,15 @@ export const matchesAnyGlob = (path: string, patterns: string[]): boolean => {
  * match — i.e. the conditional skills a host *could* choose to activate.
  * Skills without `paths:` are never returned here.
  *
- * Honesty note: this DOES NOTHING on its own. `paths:` is NOT auto-activated
- * during a normal run — no code in this slice or the agent calls this function.
- * Conditional `paths:` activation only happens if a host explicitly calls
- * `skillsActivatedFor(skills, changedPaths)` after file changes and then acts
- * on the result. Until then, declaring `paths:` has no runtime effect.
+ * Honesty note: this slice does NOT WATCH the filesystem. `paths:` only takes
+ * effect when a host passes `changedPaths` to it — directly, or via
+ * `AgentConfig.skills.changedPaths` (the agent slice wires that into the
+ * per-turn skill-suggestion inventory in `features.ts`). Without
+ * `changedPaths` from a host, declaring `paths:` has no runtime effect: a
+ * skill with `paths:` is still present in the unconditional inventory, and
+ * a skill without `paths:` is unaffected by this filter at all. The
+ * invocable surface (the `Skill` tool) is NEVER narrowed — only the
+ * suggestion inventory is.
  */
 export const skillsActivatedFor = (skills: Skill[], changedPaths: string[]): Skill[] =>
   skills.filter(

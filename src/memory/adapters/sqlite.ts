@@ -31,7 +31,7 @@ interface MemoryRow {
 const isKind = (v: string): v is MemoryKind => (MEMORY_KINDS as readonly string[]).includes(v)
 
 /**
- * Columns added by SOTA++ memory on top of the legacy schema
+ * Columns added by long-term memory on top of the legacy schema
  * (`id, kind, text, tags, created_at, session_id`). The constructor ALTERs in
  * any that are missing so a legacy db migrates transparently on open.
  */
@@ -50,7 +50,7 @@ const NEW_COLUMNS: ReadonlyArray<readonly [string, string]> = [
  *
  * The schema is created idempotently (CREATE TABLE IF NOT EXISTS) and
  * forward-migrated on construction: `PRAGMA table_info` is diffed against the
- * full SOTA++ column set and any missing columns are `ALTER TABLE ... ADD
+ * full long-term-memory column set and any missing columns are `ALTER TABLE ... ADD
  * COLUMN`-ed, so opening a legacy db (only `id,kind,text,tags,created_at,
  * session_id`) just works and old rows stay readable. The cheap `kind` filter
  * is pushed into SQL; all other filtering / ranking (incl. vector) is the
@@ -116,7 +116,7 @@ export class SqliteStore implements PersistentStorePort {
     this.deleteStmt = this.db.query("DELETE FROM memories WHERE id = ?")
   }
 
-  /** Idempotently ALTER in any SOTA++ columns missing from a legacy db. */
+  /** Idempotently ALTER in any long-term-memory columns missing from a legacy db. */
   private migrate(): void {
     const cols = this.db.query("PRAGMA table_info(memories)").all() as Array<{
       name: string

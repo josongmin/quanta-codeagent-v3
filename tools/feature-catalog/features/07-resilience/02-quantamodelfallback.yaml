@@ -1,0 +1,18 @@
+id: quantamodelfallback
+title: QUANTA_MODEL_FALLBACK
+section: 7
+subsystem: 모델 Fallback (Tier 0)
+order: 2
+maturity: L4
+status: stable
+purpose: ', retry-inner/fallback-outer'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_MODEL_FALLBACK]
+deliberate_hold: null
+notes: ''

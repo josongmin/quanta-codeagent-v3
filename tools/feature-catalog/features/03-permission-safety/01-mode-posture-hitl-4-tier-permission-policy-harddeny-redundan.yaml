@@ -1,0 +1,18 @@
+id: mode-posture-hitl-4-tier-permission-policy-harddeny-redundan
+title: mode-posture → HITL 4-tier → permission policy (HARD_DENY redundant guard) → pre
+section: 3
+subsystem: Admissibility-gate SSOT (ADR-0026)
+order: 1
+maturity: L5
+status: stable
+purpose: '단일 함수 runAdmissibilityGate로 추출 — 순서: mode-posture → HITL 4-tier → permission policy → pre_tool_use hook. dispatch.ts는 thin caller.'
+evidence:
+  code: [src/agent/admissibility-gate.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: + dispatch-helpers.ts + dispatch-types.ts (구조 SSOT)

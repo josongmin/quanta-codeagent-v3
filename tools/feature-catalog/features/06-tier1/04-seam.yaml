@@ -1,0 +1,18 @@
+id: seam
+title: 읽기 seam 노출
+section: 6
+subsystem: 스킬 — `Skill` 도구
+order: 4
+maturity: L3
+status: stable
+purpose: 'model/effort 스코핑 — author-advisory 본질 유지(강제 안 함). 읽기 seam 노출: skillModelOverride(skill) / skillEffortOverride(skill) () — skill.model/skill.effort 직접 reach 대신 type-safe undefined-fallback.'
+evidence:
+  code: [src/skill/skill-tool.ts]
+  adrs: []
+  tests:
+    unit: [tests/unit/skill-overrides.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '단위 테스트: inherit literal 보존, effort: 0 보존, 빈 문자열 model → undefined sentinel, ?? fallback 호스트 합성 패턴 검증'

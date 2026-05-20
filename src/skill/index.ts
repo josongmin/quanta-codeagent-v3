@@ -8,6 +8,8 @@
  *   - {@link createSkillTool}       the `Skill` tool (body + advisory note)
  *   - {@link createToolSearchTool}  the `ToolSearch` tool (lexical catalog search)
  *   - {@link skillToolAllowlist}    enforcement seam: a skill's declared tool allowlist
+ *   - {@link skillModelOverride}    read seam: a skill's declared `model:` override (advisory)
+ *   - {@link skillEffortOverride}   read seam: a skill's declared `effort:` override (advisory)
  *   - {@link skillsActivatedFor}    host-callable conditional-`paths:` helper
  *
  * What this slice does and does NOT do (honest seam, not a silent no-op):
@@ -35,6 +37,12 @@
 export { matchesAnyGlob, skillsActivatedFor } from "./activation"
 export { discoverSkills } from "./discover"
 export { parseFrontmatter } from "./frontmatter"
-export { createSkillTool, scopingNote, skillToolAllowlist } from "./skill-tool"
+export {
+  createSkillTool,
+  scopingNote,
+  skillEffortOverride,
+  skillModelOverride,
+  skillToolAllowlist,
+} from "./skill-tool"
 export { createToolSearchTool } from "./tool-search"
 export type { ParsedFrontmatter, Skill, SkillEffort } from "./types"

@@ -180,7 +180,7 @@ describe("createSubagentRunner — child config overrides", () => {
     expect(child.run).toBeUndefined()
     expect(child.sessionId).toBeUndefined()
     expect(child.memory).toBeUndefined()
-    // SOTA++ ADR-0011: `subagent` is now PROPAGATED into the child (same
+    // ADR-0011: `subagent` is now PROPAGATED into the child (same
     // object/value as the parent) so a forked child can itself spawn
     // sub-subagents; recursion stays bounded by the depth marker + maxDepth
     // deny guard. `skills` is still NOT propagated (clean tool surface).
@@ -217,7 +217,7 @@ describe("createSubagentRunner — child config overrides", () => {
   // inheritance would silently allow the child to invoke mutating tools at
   // dispatch, breaking the read-only posture. Same for verify-/closeout-guard
   // and HITL 4-tier.
-  test("propagates mode/verifyGuard/closeoutGuard/hitl to the child (SOTA++ inheritance)", async () => {
+  test("propagates mode/verifyGuard/closeoutGuard/hitl to the child (Codex-absorption inheritance)", async () => {
     const { run, seen } = capturing()
     const parent = parentConfig({
       mode: "review",
@@ -256,7 +256,7 @@ describe("createSubagentRunner — child config overrides", () => {
     expect(child.workingState).toBeUndefined()
   })
 
-  test("omits SOTA++ fields entirely when the parent has none (no `undefined` assigns)", async () => {
+  test("omits absorption fields entirely when the parent has none (no `undefined` assigns)", async () => {
     const { run, seen } = capturing()
     const parent = parentConfig()
     expect(parent.mode).toBeUndefined()
@@ -383,12 +383,17 @@ describe("createSubagentRunner — worktree isolation", () => {
     expect(at(seen, 0).cwd).toBe("/plain")
   })
 
-  test("isolation:none ⇒ uses req.cwd when provided, else parent cwd", async () => {
+  test("isolation:none ⇒ child cwd is the parent cwd (req.cwd field removed)", async () => {
+    // Round 2: `SubagentRequest.cwd` was removed; the child ALWAYS inherits
+    // `parent.cwd` on the no-isolation path. This regression keeps the
+    // parent-cwd flow pinned so a future re-introduction of a per-request cwd
+    // override has to retire this assertion explicitly.
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig({ cwd: "/repo" }), { run })
-    await runner(req({ isolation: "none", cwd: "/custom" }))
-    expect(at(seen, 0).cwd).toBe("/custom")
     await runner(req({ isolation: "none" }))
+    expect(at(seen, 0).cwd).toBe("/repo")
+    // Missing isolation ⇒ same path (no isolation), parent.cwd inherited.
+    await runner(req())
     expect(at(seen, 1).cwd).toBe("/repo")
   })
 })

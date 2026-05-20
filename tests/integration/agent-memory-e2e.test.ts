@@ -1,3 +1,7 @@
+// TODO(migrate-to-harness): swap the local `FakeLLM` + `RecordingStream` for
+// `tests/integration/_harness.ts` exports (`FakeLLM` + `RecordingStream` +
+// `baseConfig`). See `agent-loop.test.ts` for the pattern. Deferred from
+// refactor B to keep that PR scoped to 3 files.
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
@@ -8,7 +12,7 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import { ToolRegistry } from "@/tool"
 
 /**
- * End-to-end SOTA++ memory wiring exercised through the REAL `runAgent`:
+ * End-to-end long-term memory wiring exercised through the REAL `runAgent`:
  * two sessions over one shared `InMemoryStore` with a deterministic fake LLM
  * + fake embedder. Asserts distill→persist→embed (session 1), recall into the
  * turn payload + reinforcement (session 2), and a behavior-preserving control
@@ -94,7 +98,7 @@ const DISTILL_S1 = JSON.stringify([
   { kind: "fact", tier: "semantic", text: FACT_TEXT, tags: ["preference"], importance: 0.9 },
 ])
 
-describe("agent + SOTA++ memory (e2e through runAgent)", () => {
+describe("agent + long-term memory (e2e through runAgent)", () => {
   test("session 1 distills+embeds, session 2 recalls into the turn + reinforces", async () => {
     const store = new InMemoryStore()
     const embedder = new FakeEmbedder()

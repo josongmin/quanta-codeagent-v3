@@ -1,0 +1,18 @@
+id: unit-46-nav-tool-unit-12-formatter-unit
+title: unit + 46 nav-tool unit + 12 formatter unit
+section: 9
+subsystem: LSP nav 확장 (ADR-0024)
+order: 3
+maturity: L4
+status: stable
+purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

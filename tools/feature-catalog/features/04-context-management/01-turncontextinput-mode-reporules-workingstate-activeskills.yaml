@@ -1,0 +1,18 @@
+id: turncontextinput-mode-reporules-workingstate-activeskills
+title: TurnContextInput.{mode, repoRules, workingState, activeSkills}
+section: 4
+subsystem: TurnContext 1급 필드 (ADR-0015)
+order: 1
+maturity: L4
+status: stable
+purpose: TurnContextInput.{mode, repoRules, workingState, activeSkills} 모두 optional — 미설정 ⇒ 해당 reminder 블록 미렌더.
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

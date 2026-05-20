@@ -1,0 +1,18 @@
+id: lspdefinition
+title: lsp_definition
+section: 9
+subsystem: LSP nav 확장 (ADR-0024)
+order: 2
+maturity: L4
+status: stable
+purpose: 8 도구 lsp_definition/_references/_hover/_type_definition/_implementation/_document_symbol/_workspace_symbol/_rename_preview — 1-based human coords, nullLspNavProvider 기본, structural mirror 타입으로 slice 격리
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_LSP_TOOLS]
+deliberate_hold: null
+notes: ''

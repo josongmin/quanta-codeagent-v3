@@ -1,0 +1,18 @@
+id: codemodcloseoutreminder
+title: CODE_MOD_CLOSEOUT_REMINDER
+section: 2
+subsystem: 4-truth-surface 클로즈아웃 (ADR-0019)
+order: 1
+maturity: L4
+status: stable
+purpose: CODE_MOD_CLOSEOUT_REMINDER + isCodeModificationSession(history) 감지. closeout-guard에서 단발 주입, 모듈 순수성 보존
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

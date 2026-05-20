@@ -164,4 +164,39 @@ describe("createWorkingStateSession", () => {
     s.mutate({})
     expect(JSON.stringify(s.snapshot())).toBe(before)
   })
+
+  // V3-F2 fix: snapshot() returns a DEEP COPY, not a live alias. The R3 fix
+  // explicitly clones inner entries (`o => ({...o})`) so a caller can hold a
+  // snapshot across a `mutate(...)` without race. Reverting to `return state`
+  // (the pre-R3 shape) would silently re-introduce a concurrent-reader race.
+  // These two tests pin the deep-copy contract.
+  test("snapshot is decoupled from later mutations (outer-array alias check)", () => {
+    const s = createWorkingStateSession()
+    s.mutate({ ownerShortlist: [{ file: "a.ts", reason: "first" }] })
+    const snap = s.snapshot()
+    expect(snap.ownerShortlist).toHaveLength(1)
+    // Mutate AFTER snapshot — the snapshot must NOT see the new state.
+    s.mutate({ ownerShortlist: [{ file: "b.ts", reason: "later" }] })
+    expect(snap.ownerShortlist).toHaveLength(1)
+    expect(snap.ownerShortlist[0]?.file).toBe("a.ts")
+  })
+
+  test("snapshot is decoupled from later mutations (inner-object alias check)", () => {
+    const s = createWorkingStateSession()
+    s.mutate({ blockers: [{ what: "race", surface: "runtime" }] })
+    const snap = s.snapshot()
+    // Mutate the snapshot's inner object directly — session state must NOT
+    // observe it (caller mutating a "read-only snapshot" cannot tamper).
+    if (snap.blockers[0]) snap.blockers[0].what = "tampered"
+    expect(s.snapshot().blockers[0]?.what).toBe("race")
+  })
+
+  test("snapshot is decoupled from later mutations (inner-array push check)", () => {
+    const s = createWorkingStateSession()
+    s.mutate({ ownerShortlist: [{ file: "a.ts", reason: "first" }] })
+    const snap = s.snapshot()
+    // External push into the snapshot's array — session state must NOT grow.
+    snap.ownerShortlist.push({ file: "evil.ts", reason: "appended" })
+    expect(s.snapshot().ownerShortlist).toHaveLength(1)
+  })
 })

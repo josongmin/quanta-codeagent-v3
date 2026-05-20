@@ -16,7 +16,7 @@ import { distillSession, finalAssistantText } from "./memory-distill"
 import { emptyPersistStats, type PersistStats, type RecallStats } from "./memory-stats"
 
 /**
- * Agent ↔ long-term memory orchestration (RFC §6.3, SOTA++ memory). Two
+ * Agent ↔ long-term memory orchestration (RFC §6.3). Two
  * best-effort pipelines composed from the pure memory slice + the sibling
  * distill/consolidate/embedder modules:
  *
@@ -88,6 +88,12 @@ export interface RecallDeps {
    * exactly once per {@link recallContext} call with the recall outcome.
    */
   onStats?: (s: RecallStats) => void
+  /**
+   * Wall-clock injection seam. Defaults to {@link Date.now}. Tests inject a
+   * fixed function so freshness/eviction thresholds (40d) are deterministic
+   * regardless of CI clock skew.
+   */
+  now?: () => number
 }
 
 /**
@@ -101,12 +107,13 @@ export interface RecallDeps {
 const reinforce = async (
   store: PersistentStorePort,
   entries: readonly MemoryEntry[],
+  now: () => number,
 ): Promise<void> => {
   try {
     for (const e of entries) {
       await store.update(e.id, {
         accessCount: (e.accessCount ?? 0) + 1,
-        lastAccessedAt: Date.now(),
+        lastAccessedAt: now(),
         importance: Math.min(1, (e.importance ?? 0.5) + 0.02),
       })
     }
@@ -140,7 +147,7 @@ export const recallContext = async (
     return null
   }
 
-  await reinforce(deps.store, entries)
+  await reinforce(deps.store, entries, deps.now ?? Date.now)
   emitStats(deps.onStats, {
     recalled: entries.length,
     embedded: Boolean(embedding),
@@ -165,6 +172,12 @@ export interface PersistDeps {
    * (best-effort with whatever was counted even when the pipeline errors).
    */
   onStats?: (s: PersistStats) => void
+  /**
+   * Wall-clock injection seam. Defaults to {@link Date.now}. Tests inject a
+   * fixed function so freshness/eviction thresholds (40d) are deterministic
+   * regardless of CI clock skew.
+   */
+  now?: () => number
 }
 
 export interface PersistInput {
@@ -293,8 +306,9 @@ const sweepEviction = async (
   deps: PersistDeps,
   stats: PersistStats,
   all: readonly MemoryEntry[],
+  now: number,
 ): Promise<void> => {
-  const plan = planEviction(all, deps.evictionCaps)
+  const plan = planEviction(all, deps.evictionCaps, now)
   const byId = new Map(all.map((e) => [e.id, e]))
   for (const id of plan.decay) {
     const e = byId.get(id)
@@ -340,7 +354,7 @@ export const persistSession = async (deps: PersistDeps, input: PersistInput): Pr
     // kept in lock-step with the store); only the scan count drops to 1.
     const snapshot: MemoryEntry[] = [...(await deps.store.all())]
 
-    const now = Date.now()
+    const now = (deps.now ?? Date.now)()
     for (const record of records) {
       const candidate = await buildCandidate(deps, input.sessionId, record, now)
       const dupes = findNearDuplicates(candidate, snapshot)
@@ -348,7 +362,7 @@ export const persistSession = async (deps: PersistDeps, input: PersistInput): Pr
       await applyOp(deps.store, candidate, op, stats, snapshot)
     }
 
-    await sweepEviction(deps, stats, snapshot)
+    await sweepEviction(deps, stats, snapshot, now)
     emitStats(deps.onStats, stats)
   } catch {
     // Persistence is advisory; never propagate. Still emit whatever was

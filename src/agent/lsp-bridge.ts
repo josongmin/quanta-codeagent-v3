@@ -119,8 +119,8 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
 export const lspDiagnosticsTool = (): Tool => diagnosticsTool(lspDiagnosticsProvider()) as Tool
 
 /* ------------------------------------------------------------------------- *
- * LSP nav (definition/references/hover/symbol/rename-preview) — SOTA++
- * Codex `may-20-codex-lsp.md` absorption (ADR-0015).
+ * LSP nav (definition/references/hover/symbol/rename-preview) — Codex
+ * `may-20-codex-lsp.md` absorption (ADR-0015).
  *
  * Same provider/session/null-degrade ethos as the diagnostics path: we adapt
  * the live {@link LspClient} (which now implements the 8 nav RPCs added in

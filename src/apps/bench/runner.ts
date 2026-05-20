@@ -267,7 +267,7 @@ const SWEBENCH_DIRECTIVE = [
 ].join("\n")
 
 /**
- * BENCH-INTENTIONAL OPT-OUTS (Codex SOTA++ absorption Phases 0-8 + Round 3):
+ * BENCH-INTENTIONAL OPT-OUTS (Codex absorption Phases 0-8 + Round 3):
  * the SWE-bench grader is byte-sensitive (the official Python harness diffs
  * the agent's patch against the reference), so the bench harness deliberately
  * omits every optional Codex-absorption knob below. The agent runs in the
@@ -332,7 +332,7 @@ const buildConfig = (
     // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
     // without this, large-repo instances PTL-die instead of compacting.
     compaction: {},
-    // SOTA++ verify-guard (ADR-0013): observed bench failure — agent edits a
+    // Verify-guard (ADR-0013): observed bench failure — agent edits a
     // source file then declares "done" with 0 verification → wrong fix ships.
     // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
     // byte-identical). Absent ⇒ guard OFF, loop unchanged. Pass `{}` so the

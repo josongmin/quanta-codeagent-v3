@@ -1,0 +1,18 @@
+id: quantasubagent-maxdepth
+title: QUANTA_SUBAGENT[_MAX_DEPTH]
+section: 6
+subsystem: 서브에이전트
+order: 3
+maturity: L4
+status: stable
+purpose: git worktree 격리 [_MAX_DEPTH]
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_SUBAGENT]
+deliberate_hold: null
+notes: ''

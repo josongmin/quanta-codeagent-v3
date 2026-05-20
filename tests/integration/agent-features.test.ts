@@ -2,70 +2,39 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type AgentConfig, HookBus, runAgent } from "@/agent"
-import type { LLMPort, Message, StreamEvent } from "@/llm"
+import { HookBus, runAgent } from "@/agent"
+import type { LLMPort } from "@/llm"
 import { Metrics } from "@/observability"
 import type { PermissionContext } from "@/permission"
-import type { AgentEvent, StreamPort } from "@/stream"
+import type { StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import {
+  FakeLLM,
+  baseConfig as harnessBaseConfig,
+  RecordingStream,
+  text as textScript,
+  toolUse as toolUseScript,
+} from "./_harness"
 
-/** Yields one scripted StreamEvent[] per stream() call, in order. Captures the
- *  messages passed in so tests can inspect the per-turn reminder tail. */
-class FakeLLM implements LLMPort {
-  private readonly scripts: StreamEvent[][]
-  private last: StreamEvent[] = []
-  calls = 0
-  readonly seenMessages: Message[][] = []
-  constructor(scripts: StreamEvent[][]) {
-    this.scripts = scripts
-  }
-  async *stream(input: { messages: Message[] }): AsyncIterable<StreamEvent> {
-    this.seenMessages.push(input.messages)
-    const next = this.scripts.shift()
-    if (next) this.last = next
-    const script = next ?? this.last
-    this.calls += 1
-    for (const ev of script) yield ev
-  }
-}
-
-/** StreamPort double recording every emitted AgentEvent. */
-class RecordingStream implements StreamPort {
-  readonly events: AgentEvent[] = []
-  emit(event: AgentEvent): void {
-    this.events.push(event)
-  }
-}
-
-const toolUseScript = (id: string, name: string, input: unknown): StreamEvent[] => [
-  { type: "tool_use_start", id, name },
-  { type: "tool_use_end", id, input },
-  { type: "message_stop", stop_reason: "tool_use" },
-]
-
-const textScript = (text: string): StreamEvent[] => [
-  { type: "text_delta", delta: text },
-  { type: "message_stop", stop_reason: "end_turn" },
-]
-
+// Local convenience wrapper preserving the original 5-arg ordering. The
+// harness `baseConfig` defaults `maxTurns:5` while this file uses 10 — pin
+// it explicitly here so per-test bodies stay byte-identical.
 const baseConfig = (
   llm: LLMPort,
   registry: ToolRegistry,
   stream: StreamPort,
   cwd: string,
   permission: PermissionContext,
-): AgentConfig => ({
-  llm,
-  registry,
-  stream,
-  permission,
-  messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] as Message[],
-  system: "test",
-  cwd,
-  maxTurns: 10,
-  signal: new AbortController().signal,
-  onConfirm: async () => false,
-})
+): import("@/agent").AgentConfig =>
+  harnessBaseConfig({
+    llm,
+    registry,
+    stream,
+    permission,
+    cwd,
+    maxTurns: 10,
+    system: "test",
+  })
 
 describe("agent feature wiring", () => {
   let dir: string

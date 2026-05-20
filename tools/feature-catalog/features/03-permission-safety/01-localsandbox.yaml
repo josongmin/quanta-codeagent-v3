@@ -1,0 +1,18 @@
+id: localsandbox
+title: LocalSandbox
+section: 3
+subsystem: 런타임 샌드박스
+order: 1
+maturity: L4
+status: stable
+purpose: LocalSandbox
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

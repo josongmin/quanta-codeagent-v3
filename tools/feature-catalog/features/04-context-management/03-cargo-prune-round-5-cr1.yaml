@@ -1,0 +1,18 @@
+id: cargo-prune-round-5-cr1
+title: Cargo prune (Round 5 CR1)
+section: 4
+subsystem: 시스템 프롬프트+캐시 prefix
+order: 3
+maturity: L5
+status: stable
+purpose: Cargo prune — buildSystemPrompt에서 compaction-note 단락 제거, OWASP block을 한 줄로 압축. 캐시 prefix byte-stable 보존하면서 토큰 비용 감소.
+evidence:
+  code: [src/agent/prompt.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

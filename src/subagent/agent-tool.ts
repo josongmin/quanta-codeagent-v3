@@ -1,7 +1,7 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { TaskRegistry } from "./registry"
-import type { SubagentRequest, SubagentResult, SubagentRunner } from "./types"
+import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
 
 const DEFAULT_MAX_DEPTH = 3
 
@@ -25,9 +25,78 @@ const agentSchema = z.object({
     .describe('"worktree" runs the subagent in an isolated git worktree.'),
   max_turns: z.number().optional().describe("Turn budget for the child loop"),
   max_tokens: z.number().optional().describe("Token budget for the child loop"),
+  task_kind: z
+    .enum(["read", "edit", "review"])
+    .optional()
+    .describe(
+      "Coarse role: 'read' (read-only analysis), 'edit' (file modification), 'review' " +
+        "(read-only critique). Used to derive a default tool allowlist when `tools` is not set.",
+    ),
+  result_shape: z
+    .string()
+    .optional()
+    .describe(
+      "One-line format spec for the child's final answer (e.g. 'JSON: {ok, files[], summary}'). " +
+        "Injected into the child's seed prompt.",
+    ),
+  owned_surfaces: z
+    .array(z.string())
+    .optional()
+    .describe("Files/paths the child is permitted to read or modify."),
+  forbidden_surfaces: z
+    .array(z.string())
+    .optional()
+    .describe("Files/paths the child must NOT touch. Pairs with owned_surfaces."),
+  continue_from: z
+    .string()
+    .optional()
+    .describe(
+      "Prior task_id (from a settled background task) — prepends its finalText to the new " +
+        "child's seed as a 'Previous attempt' block. Unknown/evicted id returns a recoverable error.",
+    ),
+  checkpoint: z
+    .boolean()
+    .optional()
+    .describe(
+      "When true, runner injects guidance for the child to write interim progress to " +
+        "'<cwd>/.subagent-state/<task_id>.md'. Parent reads via the normal `read` tool. " +
+        "Incompatible with isolation:'worktree' (parent cannot read inside a throwaway worktree).",
+    ),
 })
 
 type AgentInput = z.infer<typeof agentSchema>
+
+/** Codex-derived default tool allowlists keyed by coarse task role.
+ *  - "read"   → pure inspection set (no writers, no shell).
+ *  - "edit"   → inspection + writers + bash for build/test loops.
+ *  - "review" → strictest read-only subset for critique passes.
+ *  Explicit `tools` on the request ALWAYS wins; this table is only consulted
+ *  when the caller passed `task_kind` and omitted `tools`. Names mirror the
+ *  actual tool registry in `src/tool/` (lsp_nav exposes three sub-tools). */
+const deriveToolFilter = (kind: TaskKind): string[] => {
+  const readOnly = [
+    "read",
+    "grep",
+    "glob",
+    "lsp_references",
+    "lsp_document_symbol",
+    "lsp_workspace_symbol",
+    "diagnostics",
+    "localize",
+  ]
+  if (kind === "read") return readOnly
+  if (kind === "review")
+    return [
+      "read",
+      "grep",
+      "glob",
+      "lsp_references",
+      "lsp_document_symbol",
+      "lsp_workspace_symbol",
+      "diagnostics",
+    ]
+  return [...readOnly, "write", "edit", "bash"]
+}
 
 export interface AgentToolOptions {
   runner: SubagentRunner
@@ -38,10 +107,11 @@ export interface AgentToolOptions {
 }
 
 /** Read the caller's recursion depth off the ToolContext if the host set it.
- *  The slice does not depend on @/agent's context shape; we duck-type a
- *  numeric `depth` and default to 0 (root) when absent. */
+ *  `ToolContext.depth?: number` is part of the public type; the `>= 0`
+ *  typeof guard is a defensive backstop against hosts that leave the field
+ *  unset (treated as root) or pass nonsense. */
 const ctxDepth = (ctx: ToolContext): number => {
-  const d = (ctx as unknown as { depth?: unknown }).depth
+  const d = ctx.depth
   return typeof d === "number" && d >= 0 ? d : 0
 }
 
@@ -51,61 +121,175 @@ const summarize = (r: SubagentResult): string => {
   return `${head} ${turns}\n\n${r.finalText}`.trim()
 }
 
-/** Build the {@link SubagentRequest} from validated tool input, omitting
- *  optional fields that were not supplied (preserves prior spread semantics). */
-const buildRequest = (input: AgentInput, childDepth: number): SubagentRequest => {
+/** Look up `continue_from` in the registry. Returns the prior attempt's
+ *  finalText if found and settled; undefined if the id is unknown/evicted or
+ *  the task never produced a finalText. The caller surfaces a recoverable
+ *  deny when this returns undefined. */
+const resolvePriorAttempt = (registry: TaskRegistry, continueFrom: string): string | undefined => {
+  const rec = registry.get(continueFrom)
+  if (!rec) return undefined
+  const text = rec.result?.finalText
+  return text && text.length > 0 ? text : undefined
+}
+
+/** Compute the checkpoint path the runner will inject. `<cwd>/.subagent-state/<taskId>.md`
+ *  with the slice's cwd being the parent's (the runner is responsible for
+ *  using the right cwd when isolation:worktree is rejected at this layer). */
+const buildCheckpointPath = (cwd: string, taskId: string): string => {
+  // node:path-free construction — we don't depend on node:path at the slice.
+  const sep = cwd.endsWith("/") ? "" : "/"
+  return `${cwd}${sep}.subagent-state/${taskId}.md`
+}
+
+/** Build the optional `budget` block, or `undefined` if neither field was set.
+ *  Extracted to keep `buildRequest`'s cog-complexity score in the cap. */
+const buildBudget = (input: AgentInput): TaskBudget | undefined => {
   const hasBudget = input.max_turns !== undefined || input.max_tokens !== undefined
+  if (!hasBudget) return undefined
+  return {
+    ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
+    ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
+  }
+}
+
+/** Build the {@link SubagentRequest} from validated tool input, omitting
+ *  optional fields that were not supplied (preserves prior spread semantics).
+ *  When `task_kind` is set AND `tools` is absent, derive a default allowlist
+ *  from the kind — explicit `tools` always wins. `priorAttempt` /
+ *  `checkpointPath` are resolved at the execute() layer and threaded in here
+ *  as already-resolved values (the builder stays a pure function). */
+const buildRequest = (
+  input: AgentInput,
+  childDepth: number,
+  priorAttempt: string | undefined,
+  checkpointPath: string | undefined,
+): SubagentRequest => {
+  const effectiveTools =
+    input.tools ?? (input.task_kind !== undefined ? deriveToolFilter(input.task_kind) : undefined)
+  const budget = buildBudget(input)
   return {
     prompt: input.prompt,
     depth: childDepth,
     ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
-    ...(input.tools !== undefined ? { toolFilter: input.tools } : {}),
+    ...(effectiveTools !== undefined ? { toolFilter: effectiveTools } : {}),
     ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
-    ...(hasBudget
-      ? {
-          budget: {
-            ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
-            ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
-          },
-        }
+    ...(input.task_kind !== undefined ? { taskKind: input.task_kind } : {}),
+    ...(input.result_shape !== undefined ? { resultShape: input.result_shape } : {}),
+    ...(input.owned_surfaces !== undefined ? { ownedSurfaces: input.owned_surfaces } : {}),
+    ...(input.forbidden_surfaces !== undefined
+      ? { forbiddenSurfaces: input.forbidden_surfaces }
       : {}),
+    ...(priorAttempt !== undefined ? { priorAttempt } : {}),
+    ...(checkpointPath !== undefined ? { checkpointPath } : {}),
+    ...(budget !== undefined ? { budget } : {}),
   }
 }
 
-/** Register a background task and fire the runner; returns the launch result. */
+/** Register a background task and fire the runner; returns the launch result.
+ *  CRITICAL: the per-task `AbortController` returned by `registry.register`
+ *  must be threaded into the runner request via `req.signal`. Without that
+ *  wiring, `task_stop` → `registry.stop(id)` flips the status flag but the
+ *  child loop keeps running. The request is rebuilt (not mutated) so the
+ *  builder stays a pure function. `taskId` is minted at the execute() layer
+ *  (before this call) so the checkpoint path can encode it pre-launch. */
 const launchBackground = (
   opts: AgentToolOptions,
   registry: TaskRegistry,
   input: AgentInput,
   req: SubagentRequest,
+  taskId: string,
 ): ToolEvent => {
-  const id = registry.newId()
-  registry.register({
-    id,
+  const ac = registry.register({
+    id: taskId,
     description: input.prompt.slice(0, 120),
     ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
   })
+  const signaledReq: SubagentRequest = { ...req, signal: ac.signal }
   // Fire and forget; the registry record settles when the runner returns.
   void opts
-    .runner(req)
-    .then((r) => registry.complete(id, r))
-    .catch((e: unknown) => registry.fail(id, e instanceof Error ? e.message : String(e)))
+    .runner(signaledReq)
+    .then((r) => registry.complete(taskId, r))
+    .catch((e: unknown) => registry.fail(taskId, e instanceof Error ? e.message : String(e)))
   return {
     type: "result",
     result: {
       ok: true,
       output:
-        `Subagent launched in background. task_id: ${id}\n` +
-        `Poll with task_output({ task_id: "${id}" }) or cancel with task_stop.`,
+        `Subagent launched in background. task_id: ${taskId}\n` +
+        `Poll with task_output({ task_id: "${taskId}" }) or cancel with task_stop.`,
     },
   }
 }
 
+/** Recoverable deny helper — yields a single `result` tool_event with `ok:false`
+ *  and the given message. Keeps execute() linear and under the cog-complexity cap. */
+const deny = (message: string): ToolEvent => ({
+  type: "result",
+  result: { ok: false, output: message },
+})
+
+/** Mint the task id used to (a) name the checkpoint file pre-launch and
+ *  (b) key the background registration. Foreground uses a synthetic
+ *  `fg_<uuid>` id (no registry entry; deterministic-per-request); background
+ *  uses the registry's own `newId()` so the same id is later observed by
+ *  task_output / task_stop. */
+const mintTaskId = (registry: TaskRegistry, isBackground: boolean): string =>
+  isBackground ? registry.newId() : `fg_${crypto.randomUUID()}`
+
+/** Pre-flight validation that may produce a recoverable denial. Returns either
+ *  a {@link ToolEvent} (the deny — execute() yields it and returns) OR the
+ *  resolved `priorAttempt` text the caller threads into the request. Keeps the
+ *  `execute()` generator linear and under the cog-complexity cap. */
+type Preflight =
+  | { kind: "deny"; event: ToolEvent }
+  | { kind: "ok"; priorAttempt: string | undefined }
+
+const preflight = (input: AgentInput, registry: TaskRegistry): Preflight => {
+  if (input.continue_from !== undefined) {
+    const prior = resolvePriorAttempt(registry, input.continue_from)
+    if (prior === undefined) {
+      return {
+        kind: "deny",
+        event: deny(
+          `Cannot continue from ${input.continue_from}: unknown or no retained finalText (LRU may have evicted).`,
+        ),
+      }
+    }
+    return { kind: "ok", priorAttempt: prior }
+  }
+  if (input.checkpoint === true && input.isolation === "worktree") {
+    return {
+      kind: "deny",
+      event: deny(
+        'Checkpoint is incompatible with isolation:"worktree" — parent cannot read inside a throwaway worktree. Use isolation:"none" (default) for checkpoint.',
+      ),
+    }
+  }
+  return { kind: "ok", priorAttempt: undefined }
+}
+
+/** Mint task id + checkpoint path together when at least one is needed.
+ *  Foreground without checkpoint ⇒ no id minted (taskId === ""), no path.
+ *  Returns the pair so the caller can pass `taskId` into launchBackground
+ *  AND inject `checkpointPath` into the request — both share one id. */
+const resolveTaskInfo = (
+  input: AgentInput,
+  ctx: ToolContext,
+  registry: TaskRegistry,
+): { taskId: string; checkpointPath: string | undefined } => {
+  const isBackground = input.background === true
+  const wantsCheckpoint = input.checkpoint === true
+  if (!wantsCheckpoint && !isBackground) return { taskId: "", checkpointPath: undefined }
+  const taskId = mintTaskId(registry, isBackground)
+  const checkpointPath = wantsCheckpoint ? buildCheckpointPath(ctx.cwd, taskId) : undefined
+  return { taskId, checkpointPath }
+}
+
 /**
- * The `Agent` tool (alias `Task`). Foreground ⇒ await the injected runner and
- * return its summary as the tool result. Background ⇒ register the task in the
- * in-memory {@link TaskRegistry} and return a task id immediately; the forked
- * runner resolves it asynchronously. Depth past `maxDepth` is denied.
+ * The `agent` tool. Foreground ⇒ await the injected runner and return its
+ * summary as the tool result. Background ⇒ register the task in the in-memory
+ * {@link TaskRegistry} and return a task id immediately; the forked runner
+ * resolves it asynchronously. Depth past `maxDepth` is denied.
  *
  * The returned object carries `.registry` so the host can wire the matching
  * `task_output` / `task_stop` tools against the same registry instance.
@@ -119,9 +303,11 @@ export const createAgentTool = (
   const tool: Tool<AgentInput> & { registry: TaskRegistry } = {
     name: "agent",
     description:
-      "Launch a subagent to autonomously handle a delegated task. Alias: Task. " +
+      "Launch a subagent to autonomously handle a delegated task. " +
       "Foreground returns the subagent's summary; set background:true to get a " +
-      "task id and poll with task_output / cancel with task_stop.",
+      "task id and poll with task_output / cancel with task_stop. " +
+      "Pass continue_from to warm-start from a prior task's findings; pass checkpoint:true " +
+      "(non-isolation only) to enable interim progress at .subagent-state/<task_id>.md.",
     inputSchema: agentSchema,
     isReadOnly: () => true,
     // Spawning a child agent has unbounded side effects via its own tools;
@@ -130,24 +316,29 @@ export const createAgentTool = (
     registry,
 
     async *execute(input: AgentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-      const parentDepth = ctxDepth(ctx)
-      const childDepth = parentDepth + 1
+      const childDepth = ctxDepth(ctx) + 1
 
       if (childDepth > maxDepth) {
-        yield {
-          type: "result",
-          result: {
-            ok: false,
-            output: `Subagent denied: recursion depth ${childDepth} exceeds maxDepth ${maxDepth}.`,
-          },
-        }
+        yield deny(`Subagent denied: recursion depth ${childDepth} exceeds maxDepth ${maxDepth}.`)
         return
       }
 
-      const req = buildRequest(input, childDepth)
+      // continue_from registry lookup + checkpoint/worktree incompatibility.
+      // Either resolves to a deny (returned here) or to the priorAttempt text
+      // the runner's seed-augmentation step (parallel agent F) merges.
+      const pre = preflight(input, registry)
+      if (pre.kind === "deny") {
+        yield pre.event
+        return
+      }
+
+      // Mint the task id ONCE so the SAME id keys (a) the background registry
+      // entry AND (b) the checkpoint file path the child writes to.
+      const { taskId, checkpointPath } = resolveTaskInfo(input, ctx, registry)
+      const req = buildRequest(input, childDepth, pre.priorAttempt, checkpointPath)
 
       if (input.background === true) {
-        yield launchBackground(opts, registry, input, req)
+        yield launchBackground(opts, registry, input, req, taskId)
         return
       }
 
@@ -156,13 +347,7 @@ export const createAgentTool = (
         const r = await opts.runner(req)
         yield { type: "result", result: { ok: r.ok, output: summarize(r) } }
       } catch (e: unknown) {
-        yield {
-          type: "result",
-          result: {
-            ok: false,
-            output: `Subagent error: ${e instanceof Error ? e.message : String(e)}`,
-          },
-        }
+        yield deny(`Subagent error: ${e instanceof Error ? e.message : String(e)}`)
       }
     },
   }

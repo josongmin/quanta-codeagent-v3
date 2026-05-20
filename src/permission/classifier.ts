@@ -43,7 +43,7 @@ export type ClassifierPort = (req: ClassifyRequest) => Promise<ClassifyDecision>
 
 /* ------------------------------------------------------------------------- *
  * VERBATIM threat-taxonomy system prompt (auto-mode-classifier.md §1.5).
- * The fidelity of this wording is the SOTA value — do not paraphrase.
+ * The fidelity of this wording is load-bearing — do not paraphrase.
  * ------------------------------------------------------------------------- */
 
 export const CLASSIFIER_SYSTEM_PROMPT = `You are a security monitor for autonomous AI coding agents.

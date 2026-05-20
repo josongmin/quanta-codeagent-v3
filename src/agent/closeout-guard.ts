@@ -1,5 +1,5 @@
 /**
- * Closeout guard (SOTA++ CloseoutLens — Codex App agent loop doc §4 mirror).
+ * Closeout guard (closeout reminder — Codex App agent loop doc §4 mirror).
  * Pure, deterministic policy: no LLM, no I/O. Addresses an observed gap —
  * v3 has NO finish-time self-check, so the agent can produce overclaims at
  * the moment of completion ("verified" when no verification ran, fact mixed
@@ -31,7 +31,7 @@ export const createCloseoutGuardState = (): CloseoutGuardState => ({ trips: 0 })
 export const CLOSEOUT_REMINDER =
   "Before finishing: keep only defended claims, state explicitly if verification was not run, separate fact from inference, and match the requested reporting shape. Then stop only if those hold."
 
-/** SOTA++ defended-claim 4-rule (Codex `response-assembly-and-closeout.md §5.2`
+/** Defended-claim 4-rule (Codex `response-assembly-and-closeout.md §5.2`
  *  verbatim absorption). Each rule names a recoverable failure mode and the
  *  fix; the model is expected to walk the four rules over the claims in its
  *  draft before emitting the final answer. The verification-report cue points
@@ -58,7 +58,7 @@ export const CLOSEOUT_4RULE_REMINDER = [
 ].join("\n")
 
 /**
- * Phase 4 SOTA++ absorption — code-modification surface-alignment reminder.
+ * Phase 4 Codex absorption — code-modification surface-alignment reminder.
  * Codex's `agent-loop-deep-dive.md §7` surface-alignment loop walks four truth
  * surfaces after an owner fix: type / owner / wire / test. This constant is a
  * SUPPLEMENT to {@link CLOSEOUT_REMINDER} / {@link CLOSEOUT_4RULE_REMINDER},

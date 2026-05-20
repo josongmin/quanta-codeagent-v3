@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
-import type { Skill } from "./types"
+import type { Skill, SkillEffort } from "./types"
 
 const schema = z.object({
   name: z
@@ -18,6 +18,32 @@ type Input = z.infer<typeof schema>
  */
 export const skillToolAllowlist = (s: Skill): string[] | undefined =>
   s.tools && s.tools.length > 0 ? s.tools : undefined
+
+/**
+ * Read seam for the author-declared `model:` override on a skill, if any.
+ * Symmetric companion to {@link skillToolAllowlist}: the skill slice does NOT
+ * swap the model — that is a turn-loop concern. This helper is what a host
+ * (CLI, daemon) calls when it wants to honour the advisory; without it,
+ * authors had to reach for `skill.model` directly and risk drift if the
+ * field name ever changed. Promotes the catalog row 6.2 `model` scoping from
+ * pure advisory (L2) to advisory + enforceable seam (L3) — the host owns
+ * actual enforcement.
+ *
+ * Returns `undefined` when no override is declared. `exactOptionalProperty
+ * Types`-safe: never returns an explicit `undefined` for `s.model = ""`.
+ */
+export const skillModelOverride = (s: Skill): string | undefined =>
+  typeof s.model === "string" && s.model.length > 0 ? s.model : undefined
+
+/**
+ * Read seam for the author-declared `effort:` override on a skill, if any.
+ * Companion to {@link skillModelOverride}: same advisory→seam upgrade for the
+ * `effort` axis. Honours the union `low | medium | high | max | number`; a
+ * numeric `0` is a valid override (e.g. "no extended thinking"), so the
+ * defined-check is on `=== undefined`, not falsy.
+ */
+export const skillEffortOverride = (s: Skill): SkillEffort | undefined =>
+  s.effort === undefined ? undefined : s.effort
 
 /**
  * One-line human-readable summary of the scoping a skill *declares*. These are

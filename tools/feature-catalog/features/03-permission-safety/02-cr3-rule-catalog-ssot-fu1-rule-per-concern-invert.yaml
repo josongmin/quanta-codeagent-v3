@@ -1,0 +1,18 @@
+id: cr3-rule-catalog-ssot-fu1-rule-per-concern-invert
+title: CR3 rule-catalog SSOT + FU1 rule-per-concern invert
+section: 3
+subsystem: HARD_DENY (경로무관 하드닝)
+order: 2
+maturity: L5
+status: stable
+purpose: CR3 rule-catalog SSOT + FU1 rule-per-concern invert — HardDenyRule[] 16개 명명 객체. 이전 RegExp[]에서 인버트 — 신규 17번째 룰 추가 시 positive+negative 케이스 미작성 ⇒ 빌드 fail-closed.
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: [tests/unit/permission-rules.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 룰별 mustBlock/mustAllow 케이스 강제, 이름 unique 불변식

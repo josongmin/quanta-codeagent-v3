@@ -15,12 +15,21 @@ export interface TaskBudget {
   maxTokens?: number
 }
 
+/** Codex-style coarse role classification for a subagent. The slice itself is
+ *  agnostic; the agent-side runner uses it to derive a default tool allowlist
+ *  when the caller did not pass an explicit one (`toolFilter`). A caller's
+ *  explicit `toolFilter` ALWAYS wins — `taskKind` is a default, not an
+ *  override. */
+export type TaskKind = "read" | "edit" | "review"
+
 export interface SubagentRequest {
   /** The task prompt handed to the child agent. */
   prompt: string
   /** Named subagent profile (e.g. "Explore", "Plan"). Absent ⇒ fork/general. */
   agentType?: string
-  /** Tool-name allowlist the child registry is filtered to. Absent ⇒ inherit. */
+  /** Tool-name allowlist the child registry is filtered to. Absent ⇒ inherit
+   *  (or, when `taskKind` is set, a kind-derived default). Explicit value wins
+   *  over any kind-derived default. */
   toolFilter?: string[]
   /** "worktree" ⇒ run the child in an isolated git worktree. */
   isolation?: "none" | "worktree"
@@ -28,8 +37,47 @@ export interface SubagentRequest {
   depth: number
   /** Optional token/turn budget passthrough for the forked loop. */
   budget?: TaskBudget
-  /** Working directory the child should run in (worktree path when isolated). */
-  cwd?: string
+  /** Per-request abort signal. The runner MUST chain this into the child
+   *  loop's signal so an external cancellation (e.g. `task_stop` triggering
+   *  the registry's per-task `AbortController`) actually unwinds the forked
+   *  `runAgent`. Absent ⇒ only the parent loop's signal cancels the child
+   *  (legacy / foreground call path). */
+  signal?: AbortSignal
+  /** Typed role classification (read / edit / review). When set AND
+   *  `toolFilter` is absent the runner derives a sensible default allowlist
+   *  from the kind. Always overridable by an explicit `toolFilter`. */
+  taskKind?: TaskKind
+  /** Codex `expected_output_shape`: a one-line spec the runner injects into
+   *  the child's seed prompt so the child formats its final assistant turn in
+   *  a shape the parent can parse without bespoke extraction. Free text;
+   *  caller's responsibility to keep it tight. */
+  resultShape?: string
+  /** Codex `ownership_boundary` (owned half): explicit list of files/paths
+   *  the child is permitted to read/modify. The runner injects this into the
+   *  child seed so the child LLM self-checks before touching anything else
+   *  (`worktree` provides physical isolation; this provides intent gating). */
+  ownedSurfaces?: string[]
+  /** Codex `ownership_boundary` (forbidden half): explicit no-go list. Pairs
+   *  with `ownedSurfaces`; either side may be set independently. */
+  forbiddenSurfaces?: string[]
+  /** Codex `resume_agent` equivalent — RESOLVED summary of a prior attempt
+   *  (typically `TaskRecord.result.finalText` looked up from the registry by
+   *  the `agent` tool). The runner injects this as a "## Previous attempt"
+   *  block at the top of the child seed so the child starts warm. The slice
+   *  does NOT resolve registry lookups itself; the agent-tool boundary does
+   *  that and passes the resolved text here. Absent ⇒ no prior-attempt
+   *  injection (byte-identical for callers that don't opt in). */
+  priorAttempt?: string
+  /** Codex `checkpoint` equivalent — absolute path where the child should
+   *  periodically write interim findings so the parent can monitor progress
+   *  and recover work after a `task_stop`. The runner injects guidance text
+   *  pointing at this path into the child seed. Caller (agent-tool) decides
+   *  the path; convention: `<parent.cwd>/.subagent-state/<task_id>.md`.
+   *  Incompatible with `isolation:"worktree"` (parent cannot read inside a
+   *  throwaway worktree) — the agent-tool refuses that combination. Absent
+   *  ⇒ no checkpoint guidance (byte-identical for callers that don't opt
+   *  in). */
+  checkpointPath?: string
 }
 
 export interface SubagentResult {

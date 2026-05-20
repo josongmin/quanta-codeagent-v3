@@ -1,0 +1,18 @@
+id: default-acceptedits-bypass-auto
+title: default|acceptEdits|bypass|auto
+section: 3
+subsystem: 권한 모드
+order: 1
+maturity: L4
+status: stable
+purpose: default|acceptEdits|bypass|auto , onConfirm 콜백
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_PERMISSION]
+deliberate_hold: null
+notes: ''

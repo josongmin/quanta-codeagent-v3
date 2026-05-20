@@ -1,0 +1,18 @@
+id: compactionbreaker
+title: CompactionBreaker
+section: 4
+subsystem: 압축 circuit-breaker (Tier 0)
+order: 1
+maturity: L4
+status: stable
+purpose: CompactionBreaker 4-사이트, thrash abort [_*]
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_COMPACT_BREAKER]
+deliberate_hold: null
+notes: ''

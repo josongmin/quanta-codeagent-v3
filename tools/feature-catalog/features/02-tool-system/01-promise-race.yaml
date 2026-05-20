@@ -1,0 +1,18 @@
+id: promise-race
+title: Promise.race
+section: 2
+subsystem: '`applyScriptedReplaceBounded` 제거 (R3-P1)'
+order: 1
+maturity: L5
+status: stable
+purpose: '이전 sync regex를 Promise.race로 감싸 setTimeout 타임아웃 시도 → event loop pinned, setTimeout never fires . 회수: 진짜 ReDoS 방어는 applyScriptedReplace의 (1) literal-only fallback + length cap heuristic, (2) FS-jail · count cap뿐.'
+evidence:
+  code: [src/tool/scripted-replace.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 에 NOTE 명시

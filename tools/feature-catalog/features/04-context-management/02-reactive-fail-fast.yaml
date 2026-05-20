@@ -1,0 +1,18 @@
+id: reactive-fail-fast
+title: reactive fail-fast
+section: 4
+subsystem: 압축(LLM 요약)
+order: 2
+maturity: L4
+status: stable
+purpose: reactive fail-fast
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

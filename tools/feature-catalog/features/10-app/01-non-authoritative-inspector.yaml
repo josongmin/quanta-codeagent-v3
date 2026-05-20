@@ -1,0 +1,18 @@
+id: non-authoritative-inspector
+title: 읽기 전용, NON-authoritative inspector
+section: 10
+subsystem: Probe (trajectory inspector) — `src/apps/probe/**` · `bun run probe` · RFC-0002 §7 / ADR-0010
+order: 1
+maturity: L4
+status: stable
+purpose: '읽기 전용, NON-authoritative inspector — JSONL trajectory 파일 또는 run-dir을 인자로 받아 timeline / failed / slow / cost 4 view 렌더. 4 모듈: parse.ts, triage.ts, render.ts, index.ts(CLI entry).'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '옵션: --instance ID / --failed / --slow / --cost / --json. exit 0 on success, exit 1 ONLY on usage error — 절대 crash 안 함, 절대 write/delete 안 함. main(argv) export로 단위 테스트 직접 호출'

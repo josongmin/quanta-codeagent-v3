@@ -1,0 +1,18 @@
+id: jsonlrecorder
+title: JsonlRecorder
+section: 8
+subsystem: 이벤트/Trajectory (RFC-0002)
+order: 2
+maturity: L4
+status: stable
+purpose: JsonlRecorder+TeeStream , 구조화 로거
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_OBSERVE_DIR]
+deliberate_hold: null
+notes: ''

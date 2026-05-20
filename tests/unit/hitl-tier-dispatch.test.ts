@@ -1,10 +1,12 @@
-/* Codex HITL 4-tier gate (hitl-audit.md absorption). Covers:
- *   - inferToolTier defaults from isReadOnly() when hitlTier() absent.
- *   - bash hitlTier(): network egress + mutating-git ⇒ always-confirm;
- *     other commands ⇒ pre-approval-ok.
+/* Codex HITL 4-tier gate — dispatch half of `hitl-tier.test.ts`.
+ * Covers `dispatchTool`'s HITL behaviour:
  *   - HARD_DENY routes through dispatch as "Action requires human handoff…".
  *   - always-confirm cannot be skipped by `acceptEdits`/`bypass` mode.
+ *   - hand-off-required denies even in bypass.
+ *   - none / pre-approval-ok tiers defer to existing mode policy.
  *   - hitl.enabled absent ⇒ legacy behaviour preserved (byte-identical).
+ * Classifier-level coverage of `inferToolTier` and bash hitlTier() lives in
+ * `hitl-tier-classifier.test.ts`.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -12,13 +14,11 @@ import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import type { ToolUseBlock } from "@/llm"
-import { inferToolTier, type PermissionContext } from "@/permission"
+import type { PermissionContext } from "@/permission"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
 import { bashTool } from "@/tool/bash"
-import { editTool } from "@/tool/edit"
 import { readTool } from "@/tool/read"
-import { writeTool } from "@/tool/write"
 
 const makeTool = (
   name: string,
@@ -55,154 +55,6 @@ const baseConfig = (over: Partial<AgentConfig>): AgentConfig =>
     permission: { mode: "acceptEdits" } as PermissionContext,
     ...over,
   }) as AgentConfig
-
-describe("inferToolTier", () => {
-  test("read tool (read-only, no explicit hitlTier) ⇒ none", () => {
-    expect(inferToolTier(readTool, { path: "x.ts" })).toBe("none")
-  })
-
-  test("write tool (mutating, no explicit hitlTier) ⇒ pre-approval-ok", () => {
-    expect(inferToolTier(writeTool, { path: "x.ts", content: "y" })).toBe("pre-approval-ok")
-  })
-
-  test("edit tool (mutating, no explicit hitlTier) ⇒ pre-approval-ok", () => {
-    expect(inferToolTier(editTool, { path: "x.ts", old_string: "a", new_string: "b" })).toBe(
-      "pre-approval-ok",
-    )
-  })
-
-  test("bash with `git push origin main` ⇒ always-confirm", () => {
-    expect(inferToolTier(bashTool, { command: "git push origin main" })).toBe("always-confirm")
-  })
-
-  test("bash with `git push` (no remote) ⇒ always-confirm (mutating git egress)", () => {
-    expect(inferToolTier(bashTool, { command: "git push" })).toBe("always-confirm")
-  })
-
-  // Round 2 finding: `git send-pack` is the plumbing command behind `git push`
-  // — same network egress, same irreversibility. The Round 1 GIT_PREFIX fix
-  // missed it; Round 2 adds a dedicated pattern so motivated bypass via
-  // plumbing API hits the same always-confirm gate.
-  test("bash with `git send-pack origin main` ⇒ always-confirm (push plumbing bypass)", () => {
-    expect(inferToolTier(bashTool, { command: "git send-pack origin main" })).toBe("always-confirm")
-  })
-
-  test("bash with `git --no-pager send-pack origin main` ⇒ always-confirm", () => {
-    expect(inferToolTier(bashTool, { command: "git --no-pager send-pack origin main" })).toBe(
-      "always-confirm",
-    )
-  })
-
-  test("bash with `curl https://x` ⇒ always-confirm (network egress)", () => {
-    expect(inferToolTier(bashTool, { command: "curl https://example.com" })).toBe("always-confirm")
-  })
-
-  test("bash with `wget https://x` ⇒ always-confirm", () => {
-    expect(inferToolTier(bashTool, { command: "wget https://example.com/file" })).toBe(
-      "always-confirm",
-    )
-  })
-
-  test("bash with `gh api repos/foo/bar` ⇒ always-confirm", () => {
-    expect(inferToolTier(bashTool, { command: "gh api repos/foo/bar" })).toBe("always-confirm")
-  })
-
-  test("bash with `git commit --amend` ⇒ always-confirm", () => {
-    expect(inferToolTier(bashTool, { command: "git commit --amend -m fix" })).toBe("always-confirm")
-  })
-
-  test("bash with `git reset --hard HEAD~1` ⇒ always-confirm", () => {
-    expect(inferToolTier(bashTool, { command: "git reset --hard HEAD~1" })).toBe("always-confirm")
-  })
-
-  test("bash with `git fetch origin` ⇒ always-confirm", () => {
-    expect(inferToolTier(bashTool, { command: "git fetch origin main" })).toBe("always-confirm")
-  })
-
-  // SECURITY: adversarial bypasses of the always-confirm gate via git's
-  // global-option prefix tokens. Each of these previously slipped past
-  // because the original prefix matcher only accepted tokens NOT starting
-  // with `-`. They MUST escalate to always-confirm.
-  describe("git global-option bypass hardening (always-confirm)", () => {
-    test.each([
-      ["git --no-pager push origin main", "long option --no-pager"],
-      ["git -C /repo push origin main", "short option -C with operand"],
-      ["git -c http.proxy=evil push", "short -c with config injection"],
-      ["git -c foo.bar=baz push origin main", "short -c with extra arg"],
-      ["git --git-dir=/x push origin main", "long --git-dir=value"],
-      ["git --git-dir /x push origin main", "long --git-dir with separate value"],
-      ["git --work-tree=/x push", "long --work-tree=value"],
-      ["git --no-pager --git-dir=/x push", "two chained long options"],
-      ["git\t--no-pager\tpush\torigin\tmain", "tab-separated tokens"],
-      ["git    push    origin    main", "extra-whitespace tokens"],
-    ])("`%s` ⇒ always-confirm (%s)", (command) => {
-      expect(inferToolTier(bashTool, { command })).toBe("always-confirm")
-    })
-
-    // `git fetch` with NO remote fetches `origin` by default — the prior gate
-    // required a literal `origin` substring, so `git fetch` and
-    // `git fetch upstream` slipped past. Both now escalate.
-    test.each([
-      ["git fetch", "bare git fetch (defaults to origin)"],
-      ["git fetch upstream", "git fetch non-origin remote"],
-      ["git -C dir fetch", "git -C ... fetch"],
-      ["git --no-pager fetch", "git --no-pager fetch"],
-    ])("`%s` ⇒ always-confirm (%s)", (command) => {
-      expect(inferToolTier(bashTool, { command })).toBe("always-confirm")
-    })
-
-    // `git commit --amend` / `git reset --hard` with global options also bypass.
-    test.each([
-      ["git --no-pager commit --amend -m x", "git --no-pager commit --amend"],
-      ["git -C repo commit --amend", "git -C ... commit --amend"],
-      ["git -c user.name=x commit --amend", "git -c ... commit --amend"],
-      ["git -C repo reset --hard HEAD~1", "git -C ... reset --hard"],
-      ["git --no-pager reset --hard origin/main", "git --no-pager reset --hard"],
-    ])("`%s` ⇒ always-confirm (%s)", (command) => {
-      expect(inferToolTier(bashTool, { command })).toBe("always-confirm")
-    })
-
-    // Negative controls: legitimate read-only / non-mutating git commands must
-    // NOT over-match. These all stay at pre-approval-ok.
-    test.each([
-      ["git status", "git status"],
-      ["git log --oneline", "git log"],
-      ["git diff", "git diff"],
-      ["git --no-pager status", "git --no-pager status"],
-      ["git -C /repo status", "git -C ... status"],
-      ["git -c user.name=x status", "git -c ... status"],
-      ["git --git-dir=/x log", "git --git-dir=value log"],
-      ["git commit -m fix", "ordinary git commit (no --amend)"],
-      ["git reset HEAD~1", "git reset without --hard"],
-      ["git checkout -b feature/x", "git checkout"],
-    ])("`%s` ⇒ pre-approval-ok (%s)", (command) => {
-      expect(inferToolTier(bashTool, { command })).toBe("pre-approval-ok")
-    })
-  })
-
-  test("bash with `ls -la` ⇒ pre-approval-ok (default)", () => {
-    expect(inferToolTier(bashTool, { command: "ls -la" })).toBe("pre-approval-ok")
-  })
-
-  test("bash with `git status` ⇒ pre-approval-ok (read-only git)", () => {
-    expect(inferToolTier(bashTool, { command: "git status" })).toBe("pre-approval-ok")
-  })
-
-  test("bash with `bun test` ⇒ pre-approval-ok", () => {
-    expect(inferToolTier(bashTool, { command: "bun test" })).toBe("pre-approval-ok")
-  })
-
-  test("explicit hitlTier() wins over isReadOnly() inference", () => {
-    const t = makeTool("custom", {
-      readOnly: true,
-      run: async function* () {
-        yield { type: "result", result: { ok: true, output: "" } }
-      },
-      hitlTier: () => "always-confirm",
-    })
-    expect(inferToolTier(t, {})).toBe("always-confirm")
-  })
-})
 
 describe("dispatchTool HITL gate (config.hitl.enabled=true)", () => {
   const mutate = makeTool("mutate", {

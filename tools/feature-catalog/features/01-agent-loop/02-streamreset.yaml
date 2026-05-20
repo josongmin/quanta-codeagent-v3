@@ -1,0 +1,18 @@
+id: streamreset
+title: stream_reset
+section: 1
+subsystem: 스트리밍 도구 실행
+order: 2
+maturity: L4
+status: stable
+purpose: stream_reset tombstone
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

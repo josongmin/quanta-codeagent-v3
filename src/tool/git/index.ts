@@ -1,4 +1,4 @@
-/** First-class git tool slice (Wave B3 — SOTA++ Codex `may-20-codex-signal.md`
+/** First-class git tool slice (Wave B3 — Codex `may-20-codex-signal.md`
  *  absorption, ADR-0016).
  *
  *  Exposes four READ-ONLY, CONCURRENCY-SAFE tools — `git_diff`, `git_status`,

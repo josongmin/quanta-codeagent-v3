@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-05-20T16:55:41.879Z",
+  "tsc": {
+    "exit": 0,
+    "errors": 0
+  },
+  "biome": {
+    "exit": 1,
+    "errors": 4
+  },
+  "tests": {
+    "pass": 2039,
+    "fail": 0,
+    "skip": 2,
+    "expect_count": 5799,
+    "files": 160,
+    "by_tier": {
+      "unit": {
+        "files": 0,
+        "tests": 0
+      },
+      "integration": {
+        "files": 0,
+        "tests": 0
+      },
+      "contract": {
+        "files": 0,
+        "tests": 0
+      }
+    }
+  }
+}

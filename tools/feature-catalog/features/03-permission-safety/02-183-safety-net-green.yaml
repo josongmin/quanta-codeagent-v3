@@ -1,0 +1,18 @@
+id: 183-safety-net-green
+title: 단언 단위 + 183 통합 safety net 그대로 green
+section: 3
+subsystem: Admissibility-gate SSOT (ADR-0026)
+order: 2
+maturity: L5
+status: stable
+purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행위 보존 추출)
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

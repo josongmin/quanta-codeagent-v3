@@ -1,0 +1,18 @@
+id: 2026-05-21
+title: 매트릭스 보강 (2026-05-21)
+section: 6
+subsystem: Mode enum (ADR-0018)
+order: 2
+maturity: L4
+status: stable
+purpose: review/audit 모드 — dispatch에서 mutating 차단 + 프롬프트에 REVIEW_NOTICE/AUDIT_NOTICE 주입. 별도 도구 없음.
+evidence:
+  code: []
+  adrs: [18]
+  tests:
+    unit: []
+    integration: [tests/integration/mode-block-e2e.test.ts, tests/integration/mode-block-matrix-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'runAgent e2e(, 5 tests): plan/review/audit 각각 mutating tool dispatch 차단(execute() 미도달 검증) → ok:false + 모드명 preview → 루프 completed, default mode 통과 controle, read-only는 audit에서도 실행 — 루프 layer dispatch …'

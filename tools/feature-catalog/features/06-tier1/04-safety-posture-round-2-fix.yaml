@@ -1,0 +1,18 @@
+id: safety-posture-round-2-fix
+title: Safety-posture 전파 (Round 2 fix)
+section: 6
+subsystem: 서브에이전트
+order: 4
+maturity: L5
+status: stable
+purpose: Safety-posture 전파 — buildChildConfig가 부모의 mode/verifyGuard/closeoutGuard/hitl를 옵셔널 spread로 자식에 전파. 이전엔 자식이 default mode로 붕괴 가능 → review-posture 부모가 mutating 자식을 spawn할 위험.
+evidence:
+  code: [src/agent/subagent-runner.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

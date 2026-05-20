@@ -1,0 +1,18 @@
+id: harddeny-readonly-short-circuit
+title: HARD_DENY 선행 / readonly short-circuit
+section: 3
+subsystem: Auto-mode LLM 분류기
+order: 2
+maturity: L4
+status: stable
+purpose: HARD_DENY 선행 / readonly short-circuit
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

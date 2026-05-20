@@ -1,0 +1,18 @@
+id: agent
+title: agent
+section: 6
+subsystem: 서브에이전트
+order: 1
+maturity: L4
+status: stable
+purpose: agent(=Task) 실 runAgent fork, task_output/task_stop+TaskRegistry
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -1,0 +1,18 @@
+id: e2e
+title: e2e
+section: 3
+subsystem: Policy-injection 적대성 게이트 (ADR-0027)
+order: 1
+maturity: L4
+status: stable
+purpose: '12 시나리오 e2e: bypass-claim/system-tag-smuggle/system-reminder-spoof/authority-claim/plan-bypass/HITL-bypass/hook-deny-spoof/persistent-multi-turn/base64-to-sh/find-delete/git-config-inject + benign control'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -76,21 +76,25 @@ describe("bench-eval: real corpus loader", () => {
     expect(await loadCorpus(dir)).toEqual([])
   })
 
-  test("(b) loadCorpus on the real $QUANTA_SWEBENCH_CORPUS_ROOT (if present)", async () => {
-    const root = process.env.QUANTA_SWEBENCH_CORPUS_ROOT
-    if (!root || !existsSync(root)) {
-      // Env unset/absent in this environment — skip cleanly, stay green.
-      expect(true).toBe(true)
-      return
-    }
-    const corpus = await loadCorpus(root)
-    expect(corpus.length).toBeGreaterThanOrEqual(1)
-    const first = corpus[0] as Instance
-    expect(first.id.length).toBeGreaterThan(0)
-    expect(first.problemStatement.length).toBeGreaterThan(0)
-    expect(first.testCmd.length).toBeGreaterThan(0)
-    expect(existsSync(first.repoPath)).toBe(true)
-  })
+  // W1-A audit fix: previous body had `expect(true).toBe(true); return` for
+  // the missing-env path — passing without any assertion of intent. We now
+  // use `test.skipIf` so the runner surface a real `skipped` count when the
+  // optional env is unset, instead of pretending the test ran.
+  const benchCorpusEnv = process.env.QUANTA_SWEBENCH_CORPUS_ROOT
+  const benchCorpusAvailable = Boolean(benchCorpusEnv && existsSync(benchCorpusEnv))
+  test.skipIf(!benchCorpusAvailable)(
+    "(b) loadCorpus on the real $QUANTA_SWEBENCH_CORPUS_ROOT (if present)",
+    async () => {
+      const root = benchCorpusEnv as string
+      const corpus = await loadCorpus(root)
+      expect(corpus.length).toBeGreaterThanOrEqual(1)
+      const first = corpus[0] as Instance
+      expect(first.id.length).toBeGreaterThan(0)
+      expect(first.problemStatement.length).toBeGreaterThan(0)
+      expect(first.testCmd.length).toBeGreaterThan(0)
+      expect(existsSync(first.repoPath)).toBe(true)
+    },
+  )
 
   test("missing/empty root still → [] (unchanged contract)", async () => {
     expect(await loadCorpus(join(dir, "nope"))).toEqual([])

@@ -3,7 +3,7 @@ import { FsJailError, fileExists, readFile, writeFile } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "./types"
 
 /**
- * Phase 4 SOTA++ absorption — `scripted_replace` (Codex
+ * Phase 4 Codex absorption — `scripted_replace` (Codex
  * `tool-routing-and-triggering.md`: "patch is for local + stable context;
  * scripted replace is for duplicated blocks, bulk substitution, or patch
  * context mismatch"). Sibling of `edit` — same FS-jail discipline + atomic

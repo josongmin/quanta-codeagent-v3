@@ -1,0 +1,18 @@
+id: quantaskillsdir
+title: QUANTA_SKILLS_DIR
+section: 6
+subsystem: 스킬 — `Skill` 도구
+order: 1
+maturity: L4
+status: stable
+purpose: frontmatter 발견 → 본문 컨텍스트 주입
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_SKILLS_DIR]
+deliberate_hold: null
+notes: ''

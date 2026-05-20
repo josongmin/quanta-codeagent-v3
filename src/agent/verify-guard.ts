@@ -1,5 +1,5 @@
 /**
- * Verify-guard (SOTA++ Tier 0 safety). Pure, deterministic policy: no LLM, no
+ * Verify-guard (Tier 0 safety hardening). Pure, deterministic policy: no LLM, no
  * I/O. Addresses an observed bench failure where the agent edits a source file
  * then declares "done" WITHOUT running any test or reproduction (0 verification
  * calls after the edit) → a wrong fix ships. When the model tries to finish

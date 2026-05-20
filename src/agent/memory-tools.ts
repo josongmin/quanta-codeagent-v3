@@ -10,7 +10,7 @@ import {
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
 /**
- * Self-edit memory tools (RFC §6.3, SOTA++ memory). Let the model search,
+ * Self-edit memory tools (RFC §6.3, long-term memory). Let the model search,
  * write, and revise its own durable memory mid-session. Every `execute` is
  * defensive: any failure yields a single `ok:false` result rather than
  * throwing out of the generator (the dispatcher must never see a throw).

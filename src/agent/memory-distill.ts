@@ -3,7 +3,7 @@ import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from
 import { MEMORY_KINDS, MEMORY_TIERS, type MemoryKind, type MemoryTier } from "@/memory"
 
 /**
- * LLM-driven session distillation (RFC §6.3, SOTA++ memory). Reads a finished
+ * LLM-driven session distillation (RFC §6.3, long-term memory). Reads a finished
  * transcript and extracts durable knowledge as structured memories. Never
  * throws — every failure path degrades to a single heuristic summary entry
  * (or `[]`), so the agent loop can call this unconditionally.

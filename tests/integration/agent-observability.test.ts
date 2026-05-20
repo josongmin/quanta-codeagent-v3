@@ -1,3 +1,7 @@
+// TODO(migrate-to-harness): swap the local `FakeLLM` + `RecordingStream` +
+// `baseConfig` for `tests/integration/_harness.ts` exports
+// (`FakeLLM` + `RecordingStream` + `baseConfig`). See `agent-loop.test.ts` for
+// the pattern. Deferred from refactor B to keep that PR scoped to 3 files.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"

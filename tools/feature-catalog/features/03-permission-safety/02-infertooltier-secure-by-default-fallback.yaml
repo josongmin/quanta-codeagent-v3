@@ -1,0 +1,18 @@
+id: infertooltier-secure-by-default-fallback
+title: '`inferToolTier` secure-by-default fallback'
+section: 3
+subsystem: HITL 4-tier (ADR-0020)
+order: 2
+maturity: L5
+status: stable
+purpose: "inferToolTier secure-by-default fallback (R3-P1): 도구의 hitlTier?(input) 미선언 시 read-only ⇒ \"none\", mutating ⇒ \"always-confirm\". 기본 도구 write/edit/test_runner/scripted_replace는 pre-approval-ok 명시 opt-in."
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 신규 mutating 도구가 hitlTier() 깜빡 → 모든 변경 confirm 강제, silent privilege escalation 차단

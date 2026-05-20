@@ -1,0 +1,18 @@
+id: cfg-fourrule-true
+title: cfg.fourRule:true
+section: 1
+subsystem: Closeout 4-rule (ADR-0017)
+order: 1
+maturity: L4
+status: stable
+purpose: cfg.fourRule:true 활성 시 CLOSEOUT_4RULE_REMINDER 단발 주입 — R1 Read-source / R2 Run-verify / R3 Grep-proof / R4 Stale-memory + VerificationCloseout scaffold . 단발, 모듈 순수성 보존 closeoutGuard.fourRule
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

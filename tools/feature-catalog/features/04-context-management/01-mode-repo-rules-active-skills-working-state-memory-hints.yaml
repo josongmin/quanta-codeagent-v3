@@ -1,0 +1,18 @@
+id: mode-repo-rules-active-skills-working-state-memory-hints
+title: mode → repo-rules → active-skills → working-state → memory-hints
+section: 4
+subsystem: Reminder block 순서 (ADR-0023)
+order: 1
+maturity: L5
+status: stable
+purpose: mode → repo-rules → active-skills → working-state → memory-hints . 통합 e2e 6 테스트()로 pin
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: [tests/integration/sota-codex-full.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

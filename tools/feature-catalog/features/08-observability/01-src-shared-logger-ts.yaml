@@ -1,0 +1,18 @@
+id: src-shared-logger-ts
+title: src/shared/logger.ts
+section: 8
+subsystem: 운영 진단 노브
+order: 1
+maturity: L4
+status: stable
+purpose: / 임계값 threshold — line-based stderr writer + level filter. Bench/observe 실행 식별자 }) — trajectory/report 메타데이터 상관키.
+evidence:
+  code: [src/observability/logger.ts, src/shared/logger.ts]
+  adrs: []
+  tests:
+    unit: [tests/unit/logger-threshold.test.ts]
+    integration: []
+    contract: []
+knobs: [QUANTA_LOG_LEVEL, QUANTA_RUN_ID]
+deliberate_hold: null
+notes: '단위 테스트(, 8 tests): default(info+), env=debug 전체 통과, env=error 단일 통과, explicit option override env, 잘못된 값 → info fallback, child logger inherit + fields merge, multi-line field JSON-escape 1줄 framing, …'

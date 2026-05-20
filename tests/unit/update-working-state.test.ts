@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { createWorkingStateSession } from "@/agent"
 import {
   createUpdateWorkingStateTool,
-  ToolRegistry,
   type ToolContext,
+  ToolRegistry,
   type WorkingStateHandle,
 } from "@/tool"
 
@@ -244,6 +244,64 @@ describe("update_working_state tool", () => {
         reason: `r${i}`,
       }))
       expect(schema.safeParse({ ownerShortlist: arr }).success).toBe(true)
+    })
+  })
+
+  // V3-F3 fix: per-string char caps (`MAX_STR=500`, `MAX_HYPOTHESIS=2000`).
+  // Round 3 added these to block a `hypothesis: "x".repeat(10_000_000)` style
+  // prompt-budget DOS. The array-length caps above protected entry COUNT;
+  // these protect entry SIZE. Without these tests, reverting MAX_STR to
+  // `Infinity` would silently regress the DOS defense.
+  describe("per-string char caps (MAX_STR=500, MAX_HYPOTHESIS=2000)", () => {
+    const tool = createUpdateWorkingStateTool(createWorkingStateSession())
+    const schema = tool.inputSchema
+
+    test("ownerShortlist entry with file > 500 chars fails with field name + cap", () => {
+      const r = schema.safeParse({
+        ownerShortlist: [{ file: "a".repeat(501), reason: "ok" }],
+      })
+      expect(r.success).toBe(false)
+      if (!r.success) {
+        const msg = JSON.stringify(r.error.issues)
+        expect(msg).toMatch(/file/)
+        expect(msg).toMatch(/500/)
+      }
+    })
+
+    test("blocker `what` field > 500 chars rejected", () => {
+      const r = schema.safeParse({
+        blockers: [{ what: "x".repeat(501), surface: "type" }],
+      })
+      expect(r.success).toBe(false)
+    })
+
+    test("deferredValidation rail > 500 chars rejected", () => {
+      const r = schema.safeParse({
+        deferredValidation: [{ rail: "y".repeat(501), reason: "ok" }],
+      })
+      expect(r.success).toBe(false)
+    })
+
+    test("hypothesis > 2000 chars rejected with field name + cap", () => {
+      const r = schema.safeParse({ hypothesis: "z".repeat(2001) })
+      expect(r.success).toBe(false)
+      if (!r.success) {
+        const msg = JSON.stringify(r.error.issues)
+        expect(msg).toMatch(/hypothesis/)
+        expect(msg).toMatch(/2000/)
+      }
+    })
+
+    test("exactly 500 chars accepted (boundary)", () => {
+      expect(
+        schema.safeParse({
+          ownerShortlist: [{ file: "a".repeat(500), reason: "ok" }],
+        }).success,
+      ).toBe(true)
+    })
+
+    test("exactly 2000 chars in hypothesis accepted (boundary)", () => {
+      expect(schema.safeParse({ hypothesis: "z".repeat(2000) }).success).toBe(true)
     })
   })
 })

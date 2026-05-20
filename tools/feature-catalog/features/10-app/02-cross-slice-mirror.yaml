@@ -1,0 +1,18 @@
+id: cross-slice-mirror
+title: Cross-slice 타입-레벨 mirror 단언
+section: 10
+subsystem: 아키텍처 정책
+order: 2
+maturity: L5
+status: stable
+purpose: Cross-slice 타입-레벨 mirror 단언 (FU4) — HITLTier 및 BlockerSurface 양쪽 union 형 일치를 AssertEqual<A,B> 타입-레벨 항등식으로 컴파일 게이트. — 한 쪽만 union 추가/변경 시 tsc --noEmit fail-closed.
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: [tests/unit/cross-slice-mirrors.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 이전엔 런타임 assertion만 → silent drift 가능했음. 슬라이스 격리 + drift 방지

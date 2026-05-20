@@ -1,3 +1,7 @@
+// TODO(migrate-to-harness): swap the local `ScriptedLLM` + `RecordingStream`
+// for `tests/integration/_harness.ts` exports (`ScriptedLLM` + `RecordingStream`
+// + `baseConfig`). See `agent-loop.test.ts` for the pattern. Deferred from
+// refactor B to keep that PR scoped to 3 files.
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
@@ -9,7 +13,7 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, ToolRegistry } from "@/tool"
 
 /**
- * End-to-end coverage of the SOTA++ Tier-0 verify-guard through the REAL
+ * End-to-end coverage of the Tier 0 verify-guard through the REAL
  * `runAgent` loop (scripted fake LLMPort + a real ToolRegistry of deterministic
  * stub tools — no filesystem, no network). The unit suite proves the pure
  * `decideVerifyGuard` policy; THIS suite proves the loop wiring in

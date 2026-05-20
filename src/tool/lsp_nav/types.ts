@@ -1,4 +1,4 @@
-/** LSP-nav tool slice contract (SOTA++ Codex `may-20-codex-lsp.md` absorption
+/** LSP-nav tool slice contract (Codex `may-20-codex-lsp.md` absorption
  *  — ADR-0015).
  *
  *  Slice isolation (RFC §3.1, enforced by biome): `@/tool` MUST NOT import

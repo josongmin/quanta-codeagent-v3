@@ -1,0 +1,18 @@
+id: src-agent-closeout-guard-ts
+title: src/agent/closeout-guard.ts
+section: 1
+subsystem: Closeout 4-rule (ADR-0017)
+order: 3
+maturity: L4
+status: stable
+purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'
+evidence:
+  code: [src/agent/closeout-guard.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

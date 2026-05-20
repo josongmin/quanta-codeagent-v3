@@ -1,0 +1,18 @@
+id: git-c
+title: git -c
+section: 3
+subsystem: HARD_DENY (경로무관 하드닝)
+order: 1
+maturity: L5
+status: stable
+purpose: rm-rf/mkfs/dd/fork-bomb/curl|sh + git -c·find 액션플래그, FP 가드
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

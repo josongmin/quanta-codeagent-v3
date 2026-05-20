@@ -1,0 +1,18 @@
+id: lspport
+title: LspPort
+section: 9
+subsystem: LSP nav 확장 (ADR-0024)
+order: 1
+maturity: L4
+status: stable
+purpose: 'LspPort에 8 RPC 추가: definition/references/hover/typeDefinition/implementation/documentSymbol/workspaceSymbol/prepareRename. capability 부재는 null로 graceful surface'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

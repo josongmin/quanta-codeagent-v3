@@ -1,0 +1,18 @@
+id: memorysearch-write-update
+title: memory_search/write/update
+section: 5
+subsystem: 도구/노브
+order: 1
+maturity: L4
+status: stable
+purpose: self-edit memory_search/write/update, lexical graceful degrade
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

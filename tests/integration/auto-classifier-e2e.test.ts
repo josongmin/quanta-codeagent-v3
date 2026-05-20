@@ -17,7 +17,7 @@ import { cfg, RecordingStream, withTimeout } from "./_harness"
  * The port the session classifier wraps is `createAutoClassifierPort({ llm:
  * config.llm })`, i.e. it is driven entirely by `config.llm`. We make that a
  * DETERMINISTIC MOCK by branching on the StreamInput: a classifier request
- * (its `system` carries the SOTA taxonomy + a `<transcript>` user message) gets
+ * (its `system` carries the threat taxonomy + a `<transcript>` user message) gets
  * a scripted XML verdict; a normal model turn gets the model script. No real
  * network, fully deterministic.
  *
@@ -73,7 +73,7 @@ class AutoLLM implements LLMPort {
   }
 }
 
-/** Truthy stub so policy.ts passes the SOTA taxonomy as the classifier system
+/** Truthy stub so policy.ts passes the canonical taxonomy as the classifier system
  *  prompt. The actual port used is the features-built llm-backed one — this
  *  only selects the systemPrompt string. */
 const stubPort: ClassifierPort = async () => ({ verdict: "allow", reason: "stub" })

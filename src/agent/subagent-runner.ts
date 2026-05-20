@@ -45,6 +45,30 @@
  * bound (not belt-and-braces). Beyond maxDepth the nested `agent` call returns
  * a recoverable "max subagent depth exceeded" tool_result and the parent
  * continues. Verified end-to-end by tests/integration/subagent-fork-e2e.test.ts.
+ *
+ * --- CANCELLATION SEAM ---
+ *
+ * The child's `signal` is composed from TWO sources via {@link chainedSignal}:
+ *   - Parent loop abort (`parent.signal`) — existing, propagates user/host
+ *     cancellation down the fork tree.
+ *   - Per-task abort (`req.signal`, driven by `TaskRegistry.stop(id)` from the
+ *     `task_stop` tool) — NEW, lets an in-flight forked `runAgent` unwind on a
+ *     targeted cancel without aborting the whole parent loop.
+ * Either signal aborting aborts the child. Composition happens once in
+ * {@link buildChildConfig} so both worktree-isolated and non-isolated paths
+ * inherit it.
+ *
+ * --- CODEX SEED-AUGMENTATION SEAM ---
+ *
+ * The child's seed prompt is built by {@link buildSeedPrompt} from up to five
+ * optional {@link SubagentRequest} fields. Full ordering when all set:
+ *   1. `priorAttempt` block (Codex `resume_agent`, PREPENDED above prompt)
+ *   2. `req.prompt`
+ *   3. `ownedSurfaces` block (Codex ownership boundary)
+ *   4. `forbiddenSurfaces` block (Codex ownership boundary)
+ *   5. `checkpointPath` block (Codex `checkpoint`, operational guidance)
+ *   6. `resultShape` block (Codex `expected_output_shape`)
+ * When none are set the seed is byte-identical to `req.prompt`.
  */
 
 import type { Message } from "@/llm"
@@ -117,24 +141,67 @@ const filterRegistry = (parent: ToolRegistry, toolFilter: string[] | undefined):
   return new ToolRegistry(kept)
 }
 
-/** Chain a fresh child {@link AbortSignal} to the parent's: aborting the
- *  parent aborts the child; the child's controller is otherwise independent
- *  (the child finishing never touches the parent). If the parent is already
- *  aborted the child starts aborted too. */
-const chainedSignal = (parent: AbortSignal): AbortSignal => {
-  const child = new AbortController()
-  if (parent.aborted) child.abort()
-  else parent.addEventListener("abort", () => child.abort(), { once: true })
-  return child.signal
+/** Compose the child's {@link AbortSignal} from up to two sources: the parent
+ *  loop's signal and an optional per-request signal (e.g. the `TaskRegistry`
+ *  per-task controller driven by `task_stop`). Aborting EITHER source aborts
+ *  the child. When `extra` is absent we return `parent` directly — the child
+ *  config never aborts its own signal, so sharing the parent's is safe and
+ *  keeps the no-extra path allocation-free. With `extra`, `AbortSignal.any`
+ *  returns a fresh signal that aborts when ANY input aborts (already-aborted
+ *  inputs produce an already-aborted result). */
+const chainedSignal = (parent: AbortSignal, extra?: AbortSignal): AbortSignal =>
+  extra ? AbortSignal.any([parent, extra]) : parent
+
+/** Build the child's seed user-prompt text. When the caller sets NONE of the
+ *  five opt-in fields (`priorAttempt`, `ownedSurfaces`, `forbiddenSurfaces`,
+ *  `checkpointPath`, `resultShape`) the result is byte-identical to
+ *  `req.prompt` (preserves the legacy non-opt-in call path — load-bearing
+ *  regression invariant). Ordering rationale: prior context first (warm-start
+ *  the child), then the task, then boundary constraints, then operational
+ *  guidance (checkpoint), then the output spec. */
+const buildSeedPrompt = (req: SubagentRequest): string => {
+  const parts: string[] = []
+  if (req.priorAttempt && req.priorAttempt.length > 0) {
+    parts.push(
+      `## Previous attempt's findings\n${req.priorAttempt}\n\n## Current task\n${req.prompt}`,
+    )
+  } else {
+    parts.push(req.prompt)
+  }
+  if (req.ownedSurfaces && req.ownedSurfaces.length > 0) {
+    parts.push(
+      `**Owned surfaces** (you may read/modify these): ${req.ownedSurfaces.map((s) => `- ${s}`).join("\n")}`,
+    )
+  }
+  if (req.forbiddenSurfaces && req.forbiddenSurfaces.length > 0) {
+    parts.push(
+      `**Forbidden surfaces** (do NOT touch): ${req.forbiddenSurfaces.map((s) => `- ${s}`).join("\n")}`,
+    )
+  }
+  if (req.checkpointPath && req.checkpointPath.length > 0) {
+    parts.push(
+      `**Checkpoint**: Write your interim progress to \`${req.checkpointPath}\` every few turns (use the \`write\` or \`edit\` tool). The parent uses this file to monitor and to recover work if you are stopped.`,
+    )
+  }
+  if (req.resultShape && req.resultShape.length > 0) {
+    parts.push(`**Final answer format**: ${req.resultShape}`)
+  }
+  return parts.join("\n\n")
 }
 
 /** Construct the CHILD {@link AgentConfig} by shallow-cloning `parent` and
  *  applying the subagent overrides (see the override table in the report).
  *  `store`/`hooks`/`metrics`/`run`/`sessionId`/`memory` are DROPPED so a child
  *  never persists into the parent's long-term memory or pollutes its
- *  correlation/observability; `llm`/`stream`/`permission`/`system` are kept. */
+ *  correlation/observability; `llm`/`stream`/`permission`/`system` are kept.
+ *  Seed is `[{ role: "user", content: [{ type: "text", text:
+ *  buildSeedPrompt(req) }] }]` — see {@link buildSeedPrompt} for the
+ *  five-field (priorAttempt / ownedSurfaces / forbiddenSurfaces /
+ *  checkpointPath / resultShape) augmentation rules. */
 const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string): AgentConfig => {
-  const seed: Message[] = [{ role: "user", content: [{ type: "text", text: req.prompt }] }]
+  const seed: Message[] = [
+    { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
+  ]
   // Shallow clone, then strip the inheritance-unsafe keys. We rebuild the
   // object explicitly (rather than `delete`) to satisfy
   // exactOptionalPropertyTypes: omit keys entirely, never assign `undefined`.
@@ -147,12 +214,13 @@ const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string
     system: parent.system,
     cwd,
     maxTurns: req.budget?.maxTurns ?? parent.maxTurns,
-    signal: chainedSignal(parent.signal),
-    // Depth marker; dispatch.ts surfaces it onto ToolContext. NOTE: this
-    // child gets no `subagent` config below, so it registers no `agent` tool
+    // Child abort is composed from BOTH the parent loop's signal and the
+    // per-request signal (driven by `TaskRegistry.stop(id)` from `task_stop`).
+    // Either source aborting unwinds the forked `runAgent`. See chainedSignal.
+    signal: chainedSignal(parent.signal, req.signal),
     // Recursion-depth marker; dispatch.ts surfaces it onto ToolContext so the
     // child's `agent` tool computes `childDepth = depth+1`. With `subagent`
-    // propagated below, this is now LOAD-BEARING: the maxDepth guard actually
+    // propagated below, this is LOAD-BEARING: the maxDepth guard actually
     // bounds real multi-level recursion. Duck-typed cast sets it
     // unconditionally without tripping exactOptionalPropertyTypes.
     ...({ depth: req.depth } as { depth: number }),
@@ -161,7 +229,7 @@ const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string
     ...(parent.embedder ? { embedder: parent.embedder } : {}),
     ...(parent.compaction ? { compaction: parent.compaction } : {}),
     ...(parent.planMode !== undefined ? { planMode: parent.planMode } : {}),
-    // SOTA++ Codex-absorption inheritance (Round 2 fix): a child fork MUST
+    // Codex-absorption inheritance (Round 2 fix): a child fork MUST
     // inherit the parent's safety / interaction posture or read-only modes
     // (review/audit) silently broaden in the child. Read-only modes block
     // mutating tools at dispatch — if the child collapses to `default`, a
@@ -230,8 +298,10 @@ export const createSubagentRunner = (
     }
 
     // No isolation (explicit "none", missing, or worktree requested but the
-    // parent cwd is not a git repo — graceful fallback, never fail).
-    const child = buildChildConfig(parent, req, req.cwd ?? parent.cwd)
+    // parent cwd is not a git repo — graceful fallback, never fail). The child
+    // always inherits `parent.cwd` here; the worktree path is only ever the
+    // override in the isolated branch above.
+    const child = buildChildConfig(parent, req, parent.cwd)
     return toResult(await run(child))
   }
 }

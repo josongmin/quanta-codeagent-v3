@@ -1,0 +1,18 @@
+id: while
+title: while
+section: 1
+subsystem: 턴 상태머신
+order: 1
+maturity: L5
+status: stable
+purpose: 단일 while 루프, FSM weight 없음
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

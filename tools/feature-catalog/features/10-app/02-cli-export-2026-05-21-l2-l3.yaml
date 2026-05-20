@@ -1,0 +1,18 @@
+id: cli-export-2026-05-21-l2-l3
+title: CLI 헬퍼 export 폐쇄 (2026-05-21, L2→L3)
+section: 10
+subsystem: CLI
+order: 2
+maturity: L3
+status: stable
+purpose: 'CLI 헬퍼 export 폐쇄 — 분리: 모든 pure-ish helper (buildLLM/DEFAULT_MODEL/buildStore/buildEmbedder/parseRecallTiers/buildMemoryConfig/buildSubagentConfig/buildVerifyGuardConfig/buildSkillsConfig/buildCompactionBreakerConfig/buildSummarizerLlm/fallbackModels/hasArg/statePath/resumePath/observeDir/planEnabled/lspEnabled/lspNavEnabled/gitToolsEnabled/readMcpConfig/argvPrompt/loadFeatures/buildStreaming/compo'
+evidence:
+  code: [src/apps/cli/internal.ts]
+  adrs: []
+  tests:
+    unit: [tests/unit/cli-summarizer.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'main().catch(...) top-level 호출 보존. 의 로컬 재구현 제거 → 실제 buildSummarizerLlm/compactionDep 직접 import해 검증(9 pass). 새 Biome 격리 규칙 : src/에서 src/apps/와 tests/unit/{cli-summarizer,dotenv}.test.ts만 제외하고 /apps/cli…'

@@ -77,13 +77,14 @@ afterAll(async () => {
 })
 
 describe("git tools — integration (real git)", () => {
-  test("environment probe", () => {
-    if (!gitAvailable) {
-      // Skip politely — log and pass.
-      // biome-ignore lint/suspicious/noConsole: integration skip notice
-      console.log("[skip] git not in PATH — integration tests are no-ops")
-    }
-    expect(true).toBe(true)
+  // W1-A audit fix: previous "environment probe" test always called
+  // `expect(true).toBe(true)` so it claimed PASS regardless of whether git
+  // was actually probed. Replace with a real assertion: the suite runs only
+  // when `gitAvailable` is true (verified at module load), and this test
+  // pins that the probe latched correctly. When git is absent the test is
+  // skipped, surfaced as `skipped`, not silently green.
+  test.skipIf(!gitAvailable)("environment probe — git is available", () => {
+    expect(gitAvailable).toBe(true)
   })
 
   test("git_status: working tree clean after a commit", async () => {

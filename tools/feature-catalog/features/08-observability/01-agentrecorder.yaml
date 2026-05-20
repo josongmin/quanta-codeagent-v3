@@ -1,0 +1,18 @@
+id: agentrecorder
+title: AgentRecorder
+section: 8
+subsystem: 메트릭
+order: 1
+maturity: L4
+status: stable
+purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_METRICS]
+deliberate_hold: null
+notes: ''

@@ -1,0 +1,18 @@
+id: llm-distill
+title: 세션종료 LLM distill
+section: 5
+subsystem: 자동 지식처리
+order: 1
+maturity: L4
+status: stable
+purpose: 세션종료 LLM distill(휴리스틱 폴백), dedup→LLM 중재, eviction+decay
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

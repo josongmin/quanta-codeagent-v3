@@ -1,0 +1,18 @@
+id: hookbus
+title: HookBus
+section: 9
+subsystem: Hooks (RFC §13)
+order: 1
+maturity: L4
+status: stable
+purpose: 인프로세스 HookBus 5 이벤트, pre_tool_use deny
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -1,0 +1,18 @@
+id: dockersandbox
+title: DockerSandbox
+section: 3
+subsystem: 런타임 샌드박스
+order: 2
+maturity: L4
+status: stable
+purpose: 'DockerSandbox — Sandbox.run() 풀 파이프라인 e2e: stub dockerBin로 실 Bun.spawn → 정책→argv→spawn→stdout/stderr 분리→exitCode→timeout→maxOutputBytes cap→SandboxUnavailableError→env allowlist→isAvailable() 5s kill guard. Docker daemon 의존 없이 BLOCKING gate에서 stub 바이너리로 spawn 경로를 통과 — contract 3 tests는 실 daemon, integration 10 tests는 stub.'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: [tests/integration/docker-sandbox-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '+ runAgent 통합 layer: sandbox-backed Tool dispatch에서 SandboxUnavailableError/기타 예외 → ok:false 매핑, 루프 abort 없음 — tool_result 채널 contract 폐쇄'

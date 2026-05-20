@@ -1,0 +1,18 @@
+id: quantaprovider
+title: QUANTA_PROVIDER
+section: 7
+subsystem: 모델 Fallback (Tier 0)
+order: 3
+maturity: L5
+status: stable
+purpose: '이중 provider Anthropic+OpenAI / (). 인증 prerequisite: ANTHROPIC_API_KEY / OPENAI_API_KEY , OPENAI_BASE_URL.'
+evidence:
+  code: [src/apps/cli/dotenv.ts]
+  adrs: [2]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_MODEL, QUANTA_PROVIDER]
+deliberate_hold: null
+notes: CLI는 .env 자동 로드()

@@ -1,0 +1,18 @@
+id: toolcontext-depth
+title: ToolContext.depth
+section: 2
+subsystem: 디스패치/배칭
+order: 3
+maturity: L4
+status: stable
+purpose: subagent 깊이 ToolContext.depth 전파
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

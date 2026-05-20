@@ -8,7 +8,7 @@ import type { Diagnostic, Hover, Location, Pos, RenamePreview, SymbolInfo } from
  *  every resource (process, timers, listeners). Implementations must be safe
  *  to {@link stop} even if {@link start} failed or never ran.
  *
- *  Nav methods (SOTA++ Codex `may-20-codex-lsp.md` absorption — ADR-0015):
+ *  Nav methods (Codex `may-20-codex-lsp.md` absorption — ADR-0015):
  *  every nav method returns `null` when the server reports the capability as
  *  unsupported / returns a `null` payload. An empty array (`[]`) means the
  *  feature ran but had no results. This split lets callers distinguish "not

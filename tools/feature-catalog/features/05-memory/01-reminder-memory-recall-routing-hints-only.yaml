@@ -1,0 +1,18 @@
+id: reminder-memory-recall-routing-hints-only
+title: 동적 reminder의 memory recall 블록에 "routing hints only
+section: 5
+subsystem: Memory-hints 라벨 (ADR-0021)
+order: 1
+maturity: L4
+status: stable
+purpose: 동적 reminder의 memory recall 블록에 "routing hints only — not proof" 라벨 prefix — L3/L4 회상의 인식론적 지위 명시
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

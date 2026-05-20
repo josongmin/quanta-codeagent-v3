@@ -1,25 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { RetryingLLM } from "@/agent"
-import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
+import type { LLMPort } from "@/llm"
+import { buildSummarizerLlm, compactionDep } from "../../src/apps/cli/internal"
 
 /**
  * CLI dedicated-compaction-summarizer knob (ADR-0011) contract test.
  *
- * EXPORT-GAP FINDING (reported, source NOT modified):
- *   `src/apps/cli/index.ts` calls `main()` at module top-level, and neither
- *   `buildSummarizerLlm` nor `compactionDep` (nor `assembleConfig`) is
- *   exported. Importing the CLI module to unit-test the pure helpers would
- *   execute `main()` (process.exit / readline / network). So those two pure
- *   helpers are NOT directly unit-testable today. To still pin the behaviour
- *   the scope asked for, this file unit-tests the EXACT documented contract
- *   `buildSummarizerLlm` implements, through the public surface it is
- *   composed from (`RetryingLLM` + `OpenAIAdapter`/`AnthropicAdapter`, all
- *   exported), so a regression in any of those building blocks — or a drift
- *   in the documented env rules — is caught. The `compactionDep` decision is
- *   re-derived from its documented spec and asserted as a pure table.
+ * ADR-0024 (export-gap L2-C → L3 closure): the CLI helpers
+ * `buildSummarizerLlm` and `compactionDep` now live in
+ * `src/apps/cli/internal.ts` and are imported as the real implementation
+ * here. The earlier local re-implementation has been removed — this test now
+ * verifies the actual production code, so a regression in the env-parsing /
+ * retry-wrap / decision logic is caught directly (not via a parallel copy).
  *
  * Documented `buildSummarizerLlm(mainProvider, signal)` contract
- * (src/apps/cli/index.ts):
+ * (src/apps/cli/internal.ts):
  *   - reads `QUANTA_COMPACT_MODEL`; unset OR blank/whitespace ⇒ `undefined`
  *     (⇒ `config.llm`, byte-identical default).
  *   - provider = `QUANTA_COMPACT_PROVIDER ?? mainProvider`.
@@ -32,45 +27,6 @@ import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
  *   - summarizerLlm present ⇒ `{ summarizerLlm }`.
  *   - store present, no summarizerLlm ⇒ `{}` (exactly as before).
  */
-
-type Provider = "anthropic" | "openai"
-
-/** Faithful local reimplementation of the CLI's `buildLLM` provider switch
- *  (the half `buildSummarizerLlm` delegates to), using the SAME exported
- *  adapters. Kept in lockstep with src/apps/cli/index.ts `buildLLM`. */
-const buildLLM = (provider: Provider, model: string): LLMPort => {
-  if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not set")
-    return new OpenAIAdapter({
-      apiKey,
-      model,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-    })
-  }
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set")
-  return new AnthropicAdapter({ apiKey, model })
-}
-
-/** Faithful local reimplementation of the CLI `buildSummarizerLlm` helper —
- *  identical control flow / env keys / trim / RetryingLLM wrap. This is the
- *  unit under test stand-in (the real one is unreachable; see EXPORT-GAP). */
-const buildSummarizerLlm = (mainProvider: Provider, signal: AbortSignal): LLMPort | undefined => {
-  const model = process.env.QUANTA_COMPACT_MODEL
-  if (model === undefined || model.trim() === "") return undefined
-  const provider = (process.env.QUANTA_COMPACT_PROVIDER ?? mainProvider) as Provider
-  return new RetryingLLM({ inner: buildLLM(provider, model.trim()), signal })
-}
-
-/** Faithful local reimplementation of the CLI `compactionDep` decision. */
-const compactionDep = (d: {
-  store: unknown
-  summarizerLlm: LLMPort | undefined
-}): { summarizerLlm: LLMPort } | Record<string, never> | undefined => {
-  if (!d.store && !d.summarizerLlm) return undefined
-  return d.summarizerLlm ? { summarizerLlm: d.summarizerLlm } : {}
-}
 
 const ENV_KEYS = [
   "QUANTA_COMPACT_MODEL",
@@ -138,13 +94,16 @@ describe("buildSummarizerLlm env contract", () => {
 
 describe("compactionDep decision contract", () => {
   const fakeLlm = { async *stream() {} } as unknown as LLMPort
+  // A minimal PersistentStorePort stand-in — compactionDep only checks
+  // truthiness, so an empty object is sufficient for the decision logic.
+  const fakeStore = {} as unknown as Parameters<typeof compactionDep>[0]["store"]
 
   test("no store AND no summarizer ⇒ undefined (compaction key omitted)", () => {
     expect(compactionDep({ store: undefined, summarizerLlm: undefined })).toBeUndefined()
   })
 
   test("store present, no summarizer ⇒ {} (byte-identical to pre-knob default)", () => {
-    expect(compactionDep({ store: {}, summarizerLlm: undefined })).toEqual({})
+    expect(compactionDep({ store: fakeStore, summarizerLlm: undefined })).toEqual({})
   })
 
   test("summarizer present (no store) ⇒ { summarizerLlm } — knob works without a store", () => {
@@ -153,7 +112,7 @@ describe("compactionDep decision contract", () => {
   })
 
   test("store AND summarizer ⇒ { summarizerLlm } (summarizer wins/carries through)", () => {
-    const dep = compactionDep({ store: {}, summarizerLlm: fakeLlm })
+    const dep = compactionDep({ store: fakeStore, summarizerLlm: fakeLlm })
     expect(dep).toEqual({ summarizerLlm: fakeLlm })
   })
 })

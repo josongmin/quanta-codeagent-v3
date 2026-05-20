@@ -1,0 +1,18 @@
+id: persisted-output
+title: <persisted-output>
+section: 2
+subsystem: 결과 cap + disk-spill (Tier 0)
+order: 1
+maturity: L4
+status: stable
+purpose: <persisted-output> 스필 + GC
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

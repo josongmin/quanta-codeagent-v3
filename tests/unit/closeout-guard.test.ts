@@ -57,14 +57,14 @@ describe("decideCloseoutGuard", () => {
     expect(state.trips).toBe(1)
   })
 
-  test("(5) CLOSEOUT_REMINDER contains all four CloseoutLens directives", () => {
-    expect(CLOSEOUT_REMINDER).toContain("defended claims")
-    expect(CLOSEOUT_REMINDER).toContain("verification")
-    expect(CLOSEOUT_REMINDER).toContain("fact from inference")
-    expect(CLOSEOUT_REMINDER).toContain("reporting shape")
-  })
+  // W2 audit fix: (5) was a substring-keyword tautology over the same module's
+  // own `CLOSEOUT_REMINDER` constant — passing meant the test author and the
+  // implementation author hard-coded the same words. The routing tests
+  // `(3)`-`(4b)` already `toBe(CLOSEOUT_REMINDER)` for object-equality, and the
+  // e2e at `tests/integration/sota-codex-full.test.ts` checks reminder
+  // injection through the loop. The keyword test was deleted as vapor.
 
-  // SOTA++ Phase 2: 4-rule defended-claim checklist (Codex
+  // Phase 2 absorption: 4-rule defended-claim checklist (Codex
   // `response-assembly-and-closeout.md §5.2`). The `fourRule:true` flag swaps
   // the one-liner for the full checklist + VerificationCloseout cue.
   test("(6) cfg.fourRule=true ⇒ blocks with 4-rule checklist instead of one-liner", () => {
@@ -91,19 +91,12 @@ describe("decideCloseoutGuard", () => {
     expect(state.trips).toBe(1)
   })
 
-  test("(9) CLOSEOUT_4RULE_REMINDER names R1-R4 + VerificationCloseout cue", () => {
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("R1 Read-source")
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("R2 Run-verify")
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("R3 Grep-proof")
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("R4 Stale-memory")
-    // VerificationCloseout scaffold cue
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("performed:")
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("rail:")
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("verdict:")
-    expect(CLOSEOUT_4RULE_REMINDER).toContain("skipped because:")
-  })
+  // W2 audit fix: (9) deleted — same substring-keyword tautology pattern as
+  // (5). Routing tests (6)/(7)/(8) `toBe(CLOSEOUT_4RULE_REMINDER)` already
+  // pin the constant by identity; the sota-codex-full e2e asserts that the
+  // 4-rule text reaches the agent transcript through closeout-guard fire.
 
-  // SOTA++ Phase 4: code-modification routing precedence. A history that
+  // Phase 4 absorption: code-modification routing precedence. A history that
   // contains a mutating tool call (`edit` / `write` / `scripted_replace`)
   // routes to the Phase 4 four-truth-surface reminder, taking precedence over
   // `cfg.fourRule`. Non-code-mod sessions fall through to the legacy choice.
@@ -195,13 +188,11 @@ describe("decideCloseoutGuard", () => {
     expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
   })
 
-  test("(15) CODE_MOD_CLOSEOUT_REMINDER names the four truth surfaces", () => {
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("type")
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("owner")
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("wire")
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("test")
-    expect(CODE_MOD_CLOSEOUT_REMINDER).toContain("four truth surfaces")
-  })
+  // W2 audit fix: (15) deleted — same substring-keyword tautology. Routing
+  // tests (10)-(14b) `toBe(CODE_MOD_CLOSEOUT_REMINDER)` already pin the
+  // constant; `tests/integration/sota-codex-full.test.ts` "code-mod closeout
+  // routing through the loop" verifies the four-surface text reaches the
+  // forced meta-user message in the agent transcript.
 })
 
 describe("closeout-guard module purity", () => {

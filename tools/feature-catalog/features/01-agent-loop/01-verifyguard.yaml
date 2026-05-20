@@ -1,0 +1,18 @@
+id: verifyguard
+title: 'verifyGuard: {}'
+section: 1
+subsystem: Verify-guard (Tier 0) · ADR-0013
+order: 1
+maturity: L4
+status: stable
+purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.
+evidence:
+  code: [src/apps/bench/runner.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '실측 0트립 — best-effort, empirically inert on this agent/model. bench는 verifyGuard: {}로 기본 inherit'

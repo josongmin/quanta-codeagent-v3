@@ -1,7 +1,7 @@
 import { assembleFromEvents, type Message, type StreamEvent } from "@/llm"
 
 /**
- * Streaming tool-execution engine (SOTA++ latency centerpiece).
+ * Streaming tool-execution engine (streaming latency optimization).
  *
  * Replaces the loop's sequential "consume the whole model stream, THEN dispatch
  * the turn's tool calls" with an INTERLEAVED schedule: the instant a `tool_use`

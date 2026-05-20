@@ -1,0 +1,18 @@
+id: proactive
+title: proactive
+section: 4
+subsystem: 압축(LLM 요약)
+order: 1
+maturity: L5
+status: stable
+purpose: proactive(임계) + reactive(PTL) + orphan-safe 경계
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Skill } from "../../src/skill"
@@ -12,6 +12,25 @@ import {
   skillToolAllowlist,
 } from "../../src/skill"
 import type { ToolContext, ToolResult, ToolSpec } from "../../src/tool"
+
+// W1-C audit finding: this file used `mkdtemp` once with NO cleanup, leaking
+// /tmp dirs on every test run. Route through `tmpDir(prefix)` and register
+// for `afterAll` removal.
+const tmpDirs: string[] = []
+const tmpDir = async (prefix: string): Promise<string> => {
+  const d = await mkdtemp(join(tmpdir(), prefix))
+  tmpDirs.push(d)
+  return d
+}
+afterAll(async () => {
+  for (const d of tmpDirs) {
+    try {
+      await rm(d, { recursive: true, force: true })
+    } catch {
+      // best-effort cleanup
+    }
+  }
+})
 
 const CTX: ToolContext = { cwd: "/", signal: new AbortController().signal }
 
@@ -79,7 +98,7 @@ describe("parseFrontmatter", () => {
 
 describe("discoverSkills", () => {
   test("nested SKILL.md + flat *.md, sorted, name override, collision", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "skills-"))
+    const dir = await tmpDir("skills-")
 
     await mkdir(join(dir, "alpha"))
     await writeFile(

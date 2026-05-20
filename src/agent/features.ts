@@ -1,5 +1,5 @@
 /**
- * Session-features builder (SOTA++ Tier-1 absorption final wiring, ADR-0011).
+ * Session-features builder (Tier 1 capability final wiring, ADR-0011).
  *
  * `buildSessionFeatures` is the single PURE materialization seam the loop calls
  * ONCE at session start to turn the optional `AgentConfig` Tier-1 blocks
@@ -50,7 +50,13 @@
 
 import { AutoModeClassifier } from "@/permission"
 import { createUpdateWorkingStateTool, type Tool } from "@/tool"
-import { createSkillTool, createToolSearchTool, discoverSkills, skillToolAllowlist } from "../skill"
+import {
+  createSkillTool,
+  createToolSearchTool,
+  discoverSkills,
+  skillsActivatedFor,
+  skillToolAllowlist,
+} from "../skill"
 import {
   createAgentTool,
   createTaskOutputTool,
@@ -79,7 +85,14 @@ export interface SessionFeatures {
    *  `config.subagent` is configured. The loop should retain this if it needs
    *  to observe/inspect background tasks. */
   taskRegistry?: TaskRegistry
-  /** SOTA++ skill tool-scoping ENFORCEMENT data (ADR-0011): skill name →
+  /** Graceful shutdown hook for the subagent block. Aborts all currently-
+   *  running background tasks (via `TaskRegistry.stop`) and awaits their settle
+   *  via `waitForSettle`. Present only when `config.subagent` is configured.
+   *  Idempotent: calling twice is safe (second call sees `pendingIds() === []`
+   *  and returns immediately). The loop should invoke this at session end
+   *  before resolving the outcome. */
+  cleanup?: () => Promise<void>
+  /** Skill tool-scoping ENFORCEMENT data (ADR-0011): skill name →
    *  author-declared `tools:` allowlist, for skills that declared a non-empty
    *  one. The loop enforces this (a tool not in the active skill's allowlist
    *  is denied as a recoverable tool_result). Present only when ≥1 discovered
@@ -108,7 +121,11 @@ export interface SessionFeatures {
  *   filtered registry), the `agent` tool against a fresh shared `TaskRegistry`,
  *   and the matching `task_output`/`task_stop` tools against the SAME registry
  *   instance (`createAgentTool` returns it as `.registry`). The returned
- *   `taskRegistry` is that exact instance.
+ *   `taskRegistry` is that exact instance. Also produces a `cleanup()` hook
+ *   that aborts + awaits all currently-running background tasks; the loop MUST
+ *   invoke this at session end for clean shutdown (NOTE: actual loop wiring is
+ *   a follow-up — finalization in `loop.ts` has several paths that need
+ *   careful integration, intentionally out of scope here).
  * - `config.skills` ⇒ `discoverSkills(dir)` (missing dir ⇒ `[]` per its
  *   contract) then register `Skill` + `ToolSearch`. The tools are registered
  *   UNCONDITIONALLY whenever `config.skills` is set — even with zero discovered
@@ -123,7 +140,7 @@ export interface SessionFeatures {
  * - none of the above ⇒ `{ extraTools: [] }`.
  */
 /** Discover skills + build the `Skill`/`ToolSearch` tools and the declared
- *  tool-allowlist map (SOTA++ ADR-0011). Extracted from
+ *  tool-allowlist map (ADR-0011). Extracted from
  *  {@link buildSessionFeatures} so that function stays under the cognitive-
  *  complexity budget; pure except `discoverSkills`'s directory IO. */
 const buildSkillFeatures = async (
@@ -136,6 +153,10 @@ const buildSkillFeatures = async (
 }> => {
   const skills = await discoverSkills(dir)
   const tools: Tool[] = [
+    // `createSkillTool` ALWAYS receives the full discovered list — a user can
+    // still invoke any skill by name. The `paths:` filter below only narrows
+    // the per-turn SUGGESTION inventory, never the invocable surface (that
+    // would silently strip authority).
     createSkillTool(skills),
     createToolSearchTool(() => config.registry.specs()),
   ]
@@ -148,13 +169,32 @@ const buildSkillFeatures = async (
   // `@/skill` (slice isolation — Codex skills-audit mirror). Built ONCE here
   // (the loop calls buildSessionFeatures once at session start), then passed
   // through every turn without re-discovery.
-  const inventory = skills.map((s) => ({ name: s.name, description: s.description }))
+  //
+  // `paths:` conditional activation (L1→L2 host-driven wiring): when
+  // `config.skills.changedPaths` is set, narrow the suggestion inventory to
+  //   - every skill WITHOUT `paths:` (unconditional — always in the inventory),
+  //   - plus every skill WITH `paths:` whose globs match any changed path
+  //     (via `skillsActivatedFor` — the dedicated helper that already filters
+  //     out unconditional skills).
+  // `changedPaths` unset ⇒ identity, byte-identical with prior behavior —
+  // RFC §1.2 default-OFF. The invocable surface (the `Skill` tool) is NEVER
+  // narrowed — only the per-turn SUGGESTION inventory is filtered.
+  const changedPaths = config.skills?.changedPaths
+  const activated =
+    changedPaths !== undefined && changedPaths.length > 0
+      ? [
+          ...skills.filter((s) => s.paths === undefined || s.paths.length === 0),
+          ...skillsActivatedFor(skills, changedPaths),
+        ]
+      : skills
+  const inventory = activated.map((s) => ({ name: s.name, description: s.description }))
   return { tools, allowlists: al.size > 0 ? al : undefined, inventory }
 }
 
 export const buildSessionFeatures = async (config: AgentConfig): Promise<SessionFeatures> => {
   const extraTools: Tool[] = []
   let taskRegistry: TaskRegistry | undefined
+  let cleanup: (() => Promise<void>) | undefined
   let classifier: AutoModeClassifier | undefined
   let skillAllowlists: Map<string, string[]> | undefined
   let activeSkills: { name: string; description: string }[] | undefined
@@ -175,8 +215,22 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
       runner,
       ...(config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {}),
     })
-    taskRegistry = agentTool.registry
-    extraTools.push(agentTool, createTaskOutputTool(taskRegistry), createTaskStopTool(taskRegistry))
+    // Bind a NON-undefined local so the cleanup closure doesn't need a non-
+    // null assertion on the outer `taskRegistry` (which is typed as optional
+    // for callers that don't configure subagent).
+    const reg = agentTool.registry
+    taskRegistry = reg
+    extraTools.push(agentTool, createTaskOutputTool(reg), createTaskStopTool(reg))
+    cleanup = async (): Promise<void> => {
+      const ids = reg.pendingIds()
+      if (ids.length === 0) return
+      // Stop each (idempotent — stop on already-settled is a no-op).
+      for (const id of ids) reg.stop(id)
+      // Await all settles in parallel. waitForSettle resolves immediately for
+      // already-settled tasks, so this is bounded by the slowest in-flight
+      // runner observing the abort and unwinding.
+      await Promise.all(ids.map((id) => reg.waitForSettle(id)))
+    }
   }
 
   // --- Skill block --------------------------------------------------------
@@ -209,6 +263,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
     extraTools,
     ...(classifier ? { classifier } : {}),
     ...(taskRegistry ? { taskRegistry } : {}),
+    ...(cleanup ? { cleanup } : {}),
     ...(skillAllowlists ? { skillAllowlists } : {}),
     ...(activeSkills ? { activeSkills } : {}),
     ...(workingState ? { workingState } : {}),

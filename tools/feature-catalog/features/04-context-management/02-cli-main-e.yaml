@@ -1,0 +1,18 @@
+id: cli-main-e
+title: (CLI 순수헬퍼 직접 유닛테스트 불가 — main() 톱레벨; 루프 e
+section: 4
+subsystem: 전용 요약 모델
+order: 2
+maturity: L4
+status: stable
+purpose: 톱레벨; 루프 e2e로 검증, lockstep cli 테스트)
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

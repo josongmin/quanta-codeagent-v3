@@ -6,7 +6,7 @@ export interface ToolContext {
   /** Subagent recursion depth of the agent that owns this call (0 = root).
    *  Optional + duck-typed: the subagent slice reads it to enforce maxDepth;
    *  absent ⇒ treated as 0. Propagated by the dispatch seam from
-   *  `AgentConfig.depth` (SOTA++ subagent absorption, ADR-0011). */
+   *  `AgentConfig.depth` (subagent absorption, ADR-0011). */
   depth?: number
   /** Session-scoped WorkingState handle (Codex memory L3 absorption). Optional
    *  and duck-typed so the `@/tool` slice never imports `@/agent`: the agent
@@ -118,17 +118,29 @@ export interface Tool<I = unknown> {
   isConcurrencySafe(input: I): boolean
   execute(input: I, ctx: ToolContext): AsyncIterable<ToolEvent>
   /** OPTIONAL: input-dependent HITL tier (Codex hitl-audit.md absorption).
-   *  When omitted, the dispatch gate infers tier from `isReadOnly()`
-   *  (true ⇒ "none", false ⇒ "pre-approval-ok"). Tools whose tier varies
-   *  per-input (e.g. `bash` — `git push` is always-confirm, `ls` is
+   *  When omitted, the dispatch gate infers tier from `isReadOnly()`:
+   *  `true ⇒ "none"` (reversible, harmless), `false ⇒ "always-confirm"`
+   *  (fail-closed secure-by-default, see `inferToolTier` in
+   *  `@/permission/policy`). Tools that DO mutate but want pre-approval
+   *  semantics (e.g. `write`/`edit`/`test_runner`/`scripted_replace`)
+   *  explicitly opt in via `hitlTier: () => "pre-approval-ok"`. Tools whose
+   *  tier varies per-input (`bash` — `git push` is always-confirm, `ls` is
    *  pre-approval-ok) provide their own classifier here. Only consulted
    *  when the HITL gate is explicitly enabled in `AgentConfig.hitl`. */
   hitlTier?(input: I): HITLTier
 }
 
-/** Provider-agnostic schema the agent forwards to the LLM. */
+/** Provider-agnostic schema the agent forwards to the LLM.
+ *  `aliases` is a discovery-only hint used by the `ToolSearch` skill for
+ *  lexical scoring (token + substring match at name-weight). It is NEVER
+ *  forwarded to LLM provider adapters — both `@/llm/adapters/anthropic` and
+ *  `@/llm/adapters/openai` explicitly project to `{ name, description,
+ *  input_schema }` so the alias hint stays inside the tool catalog and the
+ *  on-wire `tools` payload remains byte-identical for callers that omit
+ *  `aliases`. */
 export interface ToolSpec {
   name: string
   description: string
   input_schema: Record<string, unknown>
+  aliases?: string[]
 }

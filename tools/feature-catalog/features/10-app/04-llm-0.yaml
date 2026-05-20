@@ -1,0 +1,18 @@
+id: llm-0
+title: LLM 호출 0
+section: 10
+subsystem: 벤치
+order: 4
+maturity: L4
+status: stable
+purpose: '--dry-run 모드 () — 순수 plan builder: 코퍼스 load + count + per-instance preview, LLM 호출 0. 통합 전 정합성/필터 검증, CI 비용 없음'
+evidence:
+  code: [src/apps/bench/dry-run.ts]
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

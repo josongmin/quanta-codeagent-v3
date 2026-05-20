@@ -1,3 +1,7 @@
+// TODO(migrate-to-harness): swap the local `RecordingStream` + one-off LLM
+// double for `tests/integration/_harness.ts` exports (`FakeLLM`/`ScriptedLLM`
+// + `RecordingStream` + `baseConfig`). See `agent-loop.test.ts` for the
+// pattern. Deferred from refactor B to keep that PR scoped to 3 files.
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"

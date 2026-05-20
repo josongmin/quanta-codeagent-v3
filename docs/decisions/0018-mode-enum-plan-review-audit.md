@@ -83,3 +83,58 @@ byte-identical to pre-Phase-3.
 
 - Codex `mode-and-plan-process-audit.md`.
 - ADR-0004 (original plan-mode design — superseded by mode enum here).
+
+## Intentional non-absorption — closure rationale (2026-05-21)
+
+### L1-B — Plan-mode meta-tools (`update_plan` / `request_user_input`)
+(status: HOLD)
+
+The enum opens the seam for Codex-style plan-mode meta-tools (`update_plan`
+state machine, `request_user_input` structured choice) but they are not
+wired. Today `plan` mode only forbids mutating dispatch and injects
+`PLAN_NOTICE`.
+
+**Why hold:**
+- Claude Code exposes `EnterPlanMode` / `ExitPlanMode` (permission
+  gates), NOT a `update_plan` state machine. Codex' own `update_plan`
+  binds to its daemon's structured-choice surface — there is no
+  equivalent surface in a single-shot CLI session, so the data the tool
+  would manipulate (plan revision graph, user selection ack) has no
+  consumer.
+- A meta-tool added without a daemon consumer is a sink: the model would
+  emit `update_plan` calls but the CLI cannot present the structured
+  choice back to the user; it would degrade to plain text the model
+  already emits.
+
+**Promotion path (L1 → L3):** gated on a daemon/IDE host that can render
+structured plan revisions and round-trip user choice. At that point a
+separate ADR (e.g. ADR-0028 "Plan meta-tool surface") defines the tool
+schema, the registry binding, and the host protocol. Not done now —
+no consumer.
+
+### L3-F — review/audit notice (status: closed via dispatch e2e matrix)
+
+review/audit modes are advisory-by-design: they switch prompt notices and
+block mutating dispatch, but there is no separate `Review` / `Audit` tool
+and the actual findings-format compliance (`{file:line, severity, what,
+why, impact}` for review; four-truth-surface for audit) is **prompt-only**
+guidance the model is expected to follow. Real LLM behavior compliance
+cannot be verified inside the deterministic test gate (it's a prompt
+contract, not an executable one).
+
+**What CAN be verified deterministically** (and is, as of 2026-05-21):
+- `MUTATING_MODES` fail-closed: any tool whose dispatch reaches the
+  admissibility gate under `plan`/`review`/`audit` is rejected with the
+  mode-specific `modeBlockReason`.
+- `REVIEW_NOTICE` / `AUDIT_NOTICE` prompt injection: the per-turn system
+  prompt the LLM sees contains the mode-appropriate notice when and
+  only when the mode is set.
+- Matrix coverage: 4 modes × 4 mutating tools (edit / write /
+  scripted_replace / mutating bash) — every combination dispatched
+  through real `runAgent` + scripted LLM and asserted to produce the
+  expected `ok:true | ok:false` outcome per the read-only set.
+
+This closes the verifiable surface. The unverifiable surface (does the
+real LLM honor the findings-first shape in a review run?) remains
+**empirical** and lives in the Easy-5 bench smoke / future eval suites,
+not the unit/integration tier.

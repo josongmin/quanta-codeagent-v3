@@ -1,0 +1,18 @@
+id: agentevent
+title: AgentEvent
+section: 8
+subsystem: 이벤트/Trajectory (RFC-0002)
+order: 1
+maturity: L4
+status: stable
+purpose: AgentEvent, usage 브리지, RunContext 상관
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

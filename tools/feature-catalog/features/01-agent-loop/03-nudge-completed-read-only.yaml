@@ -1,0 +1,18 @@
+id: nudge-completed-read-only
+title: nudge/completed 전 디스패치된 read-only 결과 폐기
+section: 1
+subsystem: 스트리밍 도구 실행
+order: 3
+maturity: L4
+status: stable
+purpose: nudge/completed 전 디스패치된 read-only 결과 폐기
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

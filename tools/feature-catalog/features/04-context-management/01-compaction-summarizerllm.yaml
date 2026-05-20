@@ -1,0 +1,18 @@
+id: compaction-summarizerllm
+title: compaction.summarizerLlm
+section: 4
+subsystem: 전용 요약 모델
+order: 1
+maturity: L4
+status: stable
+purpose: compaction.summarizerLlm 양 사이트 ?? config.llm /_PROVIDER
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_COMPACT_MODEL]
+deliberate_hold: null
+notes: ''

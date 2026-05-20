@@ -1,0 +1,18 @@
+id: runrepairrounds
+title: runRepairRounds
+section: 10
+subsystem: 벤치
+order: 3
+maturity: L5
+status: stable
+purpose: 순수 정책 runRepairRounds/validate/buildRepairContext
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

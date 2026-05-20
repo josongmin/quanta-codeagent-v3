@@ -1,0 +1,18 @@
+id: git-init
+title: git init
+section: 2
+subsystem: Git 1급 도구 (ADR-0025)
+order: 2
+maturity: L4
+status: stable
+purpose: 45 tests
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -1,0 +1,18 @@
+id: tool-scoping
+title: tool-scoping 강제
+section: 6
+subsystem: 스킬 — `Skill` 도구
+order: 2
+maturity: L4
+status: stable
+purpose: tool-scoping 강제
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

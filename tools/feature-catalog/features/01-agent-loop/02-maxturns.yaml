@@ -1,0 +1,18 @@
+id: maxturns
+title: maxTurns
+section: 1
+subsystem: 턴 상태머신
+order: 2
+maturity: L5
+status: stable
+purpose: maxTurns
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_MAX_TURNS]
+deliberate_hold: null
+notes: ''

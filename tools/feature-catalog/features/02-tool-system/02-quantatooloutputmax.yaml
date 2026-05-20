@@ -1,0 +1,18 @@
+id: quantatooloutputmax
+title: QUANTA_TOOL_OUTPUT_MAX
+section: 2
+subsystem: 결과 cap + disk-spill (Tier 0)
+order: 2
+maturity: L4
+status: stable
+purpose: (200k) / _SPILL_KEEP(50), sub-cap byte-identical
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_TOOL_OUTPUT_MAX]
+deliberate_hold: null
+notes: ''

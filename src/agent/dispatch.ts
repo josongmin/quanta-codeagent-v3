@@ -9,10 +9,15 @@ import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
 
-/** Max chars of stderr retained on the dispatch result (RFC-0002 §5.2). The
- *  per-tool cap on `evidence.stderr` is larger (4 000) — this is a defense-in-
- *  depth backstop trimming the dispatch-side surface to a bounded tail. */
-const STDERR_TAIL_CAP = 2000
+/** Max chars of stderr retained on the dispatch result (RFC-0002 §5.2).
+ *  Kept in lock-step with the per-tool cap (bash/test_runner = 4 000) so this
+ *  is genuinely a defense-in-depth backstop — for a well-behaved tool the
+ *  trim is idempotent (`slice(-4000)` of an already-≤4000 string), and it
+ *  only kicks in when a third-party tool exceeds the agreed cap. R5 audit
+ *  C1 found the previous 2 000 here silently dropped the front half of
+ *  every well-behaved tool's evidence; matching caps removes that no-op
+ *  layered halving. */
+const STDERR_TAIL_CAP = 4_000
 
 /** Read RFC-0002 §5.2 evidence from a `ToolResult.evidence` (CR3: typed, not
  *  duck-typed). The dispatch surface flattens the optional nested fields onto
@@ -77,7 +82,7 @@ export const dispatchTool = async (
   const gated = await runAdmissibilityGate(call, config, permission, action, autoClassifier)
   if (gated) return gated
 
-  // SOTA++ subagent absorption (ADR-0011): propagate this agent's recursion
+  // Subagent absorption (ADR-0011): propagate this agent's recursion
   // depth so the `Agent` tool can enforce `maxDepth`. Absent ⇒ omitted (the
   // tool duck-reads it as 0), so the default path is byte-identical.
   // Phase 6 (ADR-0021): propagate the session-scoped WorkingState handle so

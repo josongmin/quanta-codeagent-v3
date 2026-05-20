@@ -1,0 +1,18 @@
+id: fallbackllm
+title: FallbackLLM
+section: 7
+subsystem: 모델 Fallback (Tier 0)
+order: 1
+maturity: L4
+status: stable
+purpose: FallbackLLM overload 스왑, pre-yield 투명 / post-yield tombstone
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -1,0 +1,19 @@
+id: lexical-refine-2026-05-21
+title: Lexical refine (2026-05-21)
+section: 6
+subsystem: 스킬 — `Skill` 도구
+order: 3
+maturity: L2
+status: hold
+purpose: ToolSearch — 어휘 카탈로그 검색(스키마 반환). server-side deferral 아님(정직히 기술).
+evidence:
+  code: []
+  adrs: [22]
+  tests:
+    unit: [tests/unit/tool-search.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: h.test.ts`). honesty IS feature — server-side deferral은 의도적 미흡수 유지( 명문화)
+notes: 'Lexical refine : (a) CamelCase/snake_case/kebab-case 토큰 분해 , (b) description 첫 줄 매치 가중치 2→4점, 본문 매치 2점 유지(4+2 누적 가능), (c) 선택적 aliases?: string[] 필드 — alias 토큰 = name 토큰(+10), alias substring(+5), 쿼리=a…'

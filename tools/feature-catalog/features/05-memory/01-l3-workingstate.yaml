@@ -1,0 +1,18 @@
+id: l3-workingstate
+title: L3 WorkingState
+section: 5
+subsystem: 5-layer naming (ADR-0021)
+order: 1
+maturity: L4
+status: stable
+purpose: Codex 5-layer 명명 정렬 — L1 system/cache prefix · L2 turn context · L3 WorkingState · L4 long-term store · L5 artifact files. 명명만 정합
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

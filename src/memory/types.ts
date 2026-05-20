@@ -32,7 +32,7 @@ export type MemoryKind = "fact" | "decision" | "observation" | "preference"
 export const MEMORY_KINDS: readonly MemoryKind[] = ["fact", "decision", "observation", "preference"]
 
 /**
- * Hierarchical memory tier (RFC §6.3, SOTA++ memory):
+ * Hierarchical memory tier (RFC §6.3, long-term memory):
  * - `episodic`  : raw per-session events / summaries, time-indexed, evicted fast.
  * - `semantic`  : distilled, deduplicated, durable knowledge (the long-term core).
  *
@@ -54,7 +54,7 @@ export const EMBED_DIM = 1536
 /**
  * A single durable memory record.
  *
- * Fields added for SOTA++ memory (`tier`, `importance`, `updatedAt`,
+ * Fields added for long-term memory (`tier`, `importance`, `updatedAt`,
  * `accessCount`, `lastAccessedAt`, `embedding`, `supersededBy`) are all
  * **optional** so pre-existing call sites and persisted rows remain valid.
  * {@link normalizeEntry} applies documented runtime defaults at the store

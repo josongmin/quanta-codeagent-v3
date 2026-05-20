@@ -16,10 +16,30 @@
  *  - cost math stamps pricingVersion and yields null for an unknown model;
  *  - `--json` shape is stable and self-labels as a hypothesis.
  */
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+/** W1-C/D audit finding: this file used `mkdtempSync` 5x with NO cleanup,
+ *  leaking /tmp dirs on every test run. Each call-site now routes through
+ *  `tmp(prefix)` which registers the dir for `afterAll` removal. */
+const tmpDirs: string[] = []
+const tmp = (prefix: string): string => {
+  const d = mkdtempSync(join(tmpdir(), prefix))
+  tmpDirs.push(d)
+  return d
+}
+afterAll(() => {
+  for (const d of tmpDirs) {
+    try {
+      rmSync(d, { recursive: true, force: true })
+    } catch {
+      // best-effort cleanup; ignore EBUSY/EACCES from a parallel reader
+    }
+  }
+})
+
 import { makeEvent, type RunContext, type TrajectoryEvent } from "@/shared"
 import { main } from "../../src/apps/probe/index"
 import { loadRun, loadTrajectory } from "../../src/apps/probe/parse"
@@ -96,7 +116,7 @@ const buildFailing = (): TrajectoryEvent[] => {
 
 describe("probe parser — tolerant ingest (RFC §3.7 forward-compat)", () => {
   const mkFile = (body: string): string => {
-    const dir = mkdtempSync(join(tmpdir(), "probe-parse-"))
+    const dir = tmp("probe-parse-")
     const f = join(dir, "inst-1.0.jsonl")
     writeFileSync(f, body)
     return f
@@ -143,7 +163,7 @@ describe("probe parser — tolerant ingest (RFC §3.7 forward-compat)", () => {
 
 describe("probe parser — span pairing", () => {
   test("tool_call↔tool_result and llm_request↔llm_usage share spanId; events sort by seq", () => {
-    const dir = mkdtempSync(join(tmpdir(), "probe-span-"))
+    const dir = tmp("probe-span-")
     const f = join(dir, "inst-1.0.jsonl")
     // Write deliberately OUT of seq order to prove stable seq sort.
     const events = buildFailing()
@@ -292,7 +312,7 @@ describe("render — hotspots ordered by duration; cost stamps pricingVersion", 
         costUsd: null,
       }),
     ]
-    const dir = mkdtempSync(join(tmpdir(), "probe-cost-"))
+    const dir = tmp("probe-cost-")
     const f = join(dir, "inst-x.0.jsonl")
     writeFileSync(f, toJsonl(events))
     const run = loadRun(f)
@@ -308,7 +328,7 @@ describe("render — hotspots ordered by duration; cost stamps pricingVersion", 
 
 describe("probe CLI — end-to-end over a synthetic run dir", () => {
   const setupRun = (): { dir: string } => {
-    const dir = mkdtempSync(join(tmpdir(), "probe-run-"))
+    const dir = tmp("probe-run-")
     writeFileSync(join(dir, "inst-1.0.jsonl"), toJsonl(buildFailing()))
     return { dir }
   }

@@ -1,0 +1,19 @@
+id: plan-mode
+title: 미흡수
+section: 6
+subsystem: Mode enum (ADR-0018)
+order: 3
+maturity: L1
+status: hold
+purpose: 'Plan-mode 메타도구 — 미흡수: dispatch 차단 외 structured-choice / plan state-machine 도구 미배선. CLI 환경 ROI 낮음, 별도 ADR 후보'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'te_plan/request_user_input 등 Codex update_plan` 동급) — 미흡수: dispatch 차단 외 structured-choice / plan state-machine 도구 미배선. CLI 환경 ROI 낮음, 별도 ADR 후보'
+notes: ''

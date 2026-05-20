@@ -1,4 +1,4 @@
-// Pure near-duplicate detection for consolidation (RFC §6.3, SOTA++ memory).
+// Pure near-duplicate detection for consolidation (RFC §6.3, long-term memory).
 // Before saving a new memory, the store asks: does an equivalent entry already
 // exist? A match is semantic (cosine) OR lexical (token-Jaccard) — either is
 // enough, so paraphrases and embedding-less rows both get caught. Returns only

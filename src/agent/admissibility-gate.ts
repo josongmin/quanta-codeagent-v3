@@ -1,6 +1,6 @@
 /**
- * Admissibility-gate SSOT (SOTA++ Codex `may-20-codex-agent-loop.md §5`
- * absorption — ADR-0018). Single canonical function that runs ALL pre-execute
+ * Admissibility-gate SSOT (Codex `may-20-codex-agent-loop.md §5` absorption
+ * — ADR-0018). Single canonical function that runs ALL pre-execute
  * gates in ONE place, in ONE documented order, with ONE testable seam.
  *
  * Before this extraction, gate ordering was distributed across `dispatch.ts#
@@ -125,7 +125,7 @@ const runHitlGate = async (
   return "fallthrough"
 }
 
-/** Mode-based permission decision (legacy path). SOTA++ Tier 1 (ADR-0011):
+/** Mode-based permission decision (legacy path). Tier 1 capability (ADR-0011):
  *  "auto" mode routes to the session-scoped LLM classifier; all other modes
  *  use the synchronous policy verbatim. */
 const runModePolicy = async (

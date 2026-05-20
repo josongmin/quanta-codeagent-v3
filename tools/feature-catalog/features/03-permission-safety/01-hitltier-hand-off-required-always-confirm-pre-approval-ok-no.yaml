@@ -1,0 +1,18 @@
+id: hitltier-hand-off-required-always-confirm-pre-approval-ok-no
+title: HITLTier = hand-off-required | always-confirm | pre-approval-ok | none
+section: 3
+subsystem: HITL 4-tier (ADR-0020)
+order: 1
+maturity: L4
+status: stable
+purpose: HITLTier = hand-off-required | always-confirm | pre-approval-ok | none. Tool.hitlTier?(input) duck-typed mirror in @/tool/types; bashHitlTier로 curl/wget/gh api/git push/git fetch ...
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: origin 및 mutating-git → always-confirm. HARD_DENY는 HandOff로 라우팅 . always-confirm은 bypass/acceptEdits로 우회 불가 hitl.enabled (기본 OFF)

@@ -31,13 +31,13 @@ export interface AgentConfig {
   /** Stable id for the current session, used to tag persisted memory. */
   sessionId?: string
   /**
-   * Embedding provider for semantic recall + dedup (SOTA++ memory, RFC §6.3).
+   * Embedding provider for semantic recall + dedup (long-term memory, RFC §6.3).
    * Absent ⇒ recall/consolidation degrade to lexical+tag+freshness only; the
    * loop is otherwise unchanged. Wired by the app layer (OpenAI adapter).
    */
   embedder?: EmbedderPort
   /**
-   * Long-term memory tuning (SOTA++ memory, RFC §6.3). Absent ⇒ all defaults;
+   * Long-term memory tuning (RFC §6.3). Absent ⇒ all defaults;
    * with no `store` the whole block is inert. Behavior-preserving when unset.
    */
   memory?: {
@@ -59,7 +59,7 @@ export interface AgentConfig {
     /** Register the self-edit memory tools (memory_search/write/update). Default `true` when `store` is present. */
     selfEditTools?: boolean
     /**
-     * Restrict per-turn recall to these tiers (SOTA++ memory, RFC §6.3).
+     * Restrict per-turn recall to these tiers (long-term memory, RFC §6.3).
      * Absent ⇒ recall spans all tiers (behavior-preserving). e.g.
      * `["semantic"]` recalls only durable distilled knowledge.
      */
@@ -73,7 +73,7 @@ export interface AgentConfig {
     thresholdTokens?: number
     keepRecentTurns?: number
     /**
-     * Dedicated LLM for the compaction SUMMARY turn (SOTA++ cost/latency,
+     * Dedicated LLM for the compaction SUMMARY turn (cost/latency,
      * ADR-0011). Summarization is a bounded, low-stakes task — a cheaper/
      * faster model is usually sufficient and avoids spending the main model
      * on every 120k-token compaction. Absent ⇒ uses `config.llm` (the main
@@ -119,25 +119,34 @@ export interface AgentConfig {
    * Subagent recursion depth of THIS agent (0 = root user session). Set by
    * the subagent runner for forked children; propagated onto `ToolContext`
    * by the dispatch seam so the `Agent` tool can enforce `maxDepth`. Absent ⇒
-   * 0 (root). SOTA++ subagent absorption (ADR-0011).
+   * 0 (root). Subagent absorption (ADR-0011).
    */
   depth?: number
   /**
-   * Enable the subagent system (SOTA++ Tier 1, ADR-0011). Absent ⇒ the
+   * Enable the subagent system (Tier 1 capability, ADR-0011). Absent ⇒ the
    * `Agent`/`Task`/`TaskOutput`/`TaskStop` tools are NOT registered and the
    * loop is byte-identical. When present the loop builds a `SubagentRunner`
    * (forked `runAgent`, depth+1, filtered registry) and registers the tools.
    */
   subagent?: { maxDepth?: number }
   /**
-   * Enable the skill system (SOTA++ Tier 1, ADR-0011). Absent ⇒ no skill
+   * Enable the skill system (Tier 1 capability, ADR-0011). Absent ⇒ no skill
    * discovery and the `Skill`/`ToolSearch` tools are NOT registered (loop
    * byte-identical). When present, skills are discovered from `dir` at
    * session start and the tools are registered.
+   *
+   * `changedPaths` (optional, conservative L1→L2 wiring): when set, the
+   * per-turn active-skills inventory is pre-filtered via
+   * `skillsActivatedFor(allSkills, changedPaths)` — a skill with `paths:` in
+   * its frontmatter only appears in the inventory when one of those globs
+   * matches a changed path. A skill WITHOUT `paths:` is always included
+   * (unconditional). `changedPaths` UNSET ⇒ no filter, exact prior behavior
+   * (byte-identical). Hosts compute this list however they want (git diff,
+   * file watcher, manual hint).
    */
-  skills?: { dir: string }
+  skills?: { dir: string; changedPaths?: string[] }
   /**
-   * Compaction circuit-breaker control (SOTA++ Tier 0 safety, ADR-0011). The
+   * Compaction circuit-breaker control (Tier 0 safety hardening, ADR-0011). The
    * breaker is ON by default with `DEFAULT_COMPACTION_BREAKER_CAPS` — it only
    * trips on pathological compaction thrash (≥N consecutive no-progress
    * compactions), so normal flows are unaffected. `disabled:true` opts out;
@@ -145,7 +154,7 @@ export interface AgentConfig {
    */
   compactionBreaker?: { disabled?: boolean; caps?: Partial<CompactionBreakerCaps> }
   /**
-   * Verify-guard control (SOTA++ Tier 0 safety). Absent ⇒ guard fully OFF and
+   * Verify-guard control (Tier 0 safety hardening). Absent ⇒ guard fully OFF and
    * the loop is byte-identical. When present, a finish attempt right after a
    * mutating tool with no test/reproduction since is blocked, forcing one more
    * turn (up to `maxTrips`, default 1 — capped to avoid infinite forcing;

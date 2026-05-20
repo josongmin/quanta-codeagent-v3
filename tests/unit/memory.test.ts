@@ -15,6 +15,16 @@ const assistant = (text: string): Message => ({
 })
 const user = (text: string): Message => ({ role: "user", content: [{ type: "text", text }] })
 
+/**
+ * Fixed epoch for deterministic wall-clock arithmetic in eviction/freshness
+ * tests. The memory module's `archived` boundary lives at exactly 40 days
+ * past `createdAt`; with a real `Date.now()`, CI clock skew or a slow setup
+ * could nudge entries across that boundary. Pinning both ends to `TEST_NOW`
+ * (and injecting it via the `now` deps seam) makes the threshold unambiguous.
+ */
+const TEST_NOW = 1_700_000_000_000
+const fixedNow = (): number => TEST_NOW
+
 /** Deterministic 1536-vec derived from a string hash (stable per text). */
 const fakeVec = (text: string): number[] => {
   let h = 2166136261
@@ -274,7 +284,7 @@ describe("persistSession", () => {
         kind: "fact",
         text: "alpha beta gamma delta",
         tags: [],
-        createdAt: Date.now(),
+        createdAt: TEST_NOW,
       },
     ])
     const op = JSON.stringify({
@@ -285,7 +295,7 @@ describe("persistSession", () => {
       importance: 0.8,
     })
     await persistSession(
-      { store, llm: fakeLLM(op), distill: false },
+      { store, llm: fakeLLM(op), distill: false, now: fixedNow },
       { sessionId: "s5", finalMessages: [assistant("alpha beta gamma delta epsilon")] },
     )
     const all = await store.all()
@@ -296,11 +306,11 @@ describe("persistSession", () => {
 
   test("LLM supersede op saves candidate and marks old superseded", async () => {
     const store = new InMemoryStore([
-      { id: "old", kind: "fact", text: "one two three four five", tags: [], createdAt: Date.now() },
+      { id: "old", kind: "fact", text: "one two three four five", tags: [], createdAt: TEST_NOW },
     ])
     const op = JSON.stringify({ action: "supersede", oldId: "old" })
     await persistSession(
-      { store, llm: fakeLLM(op), distill: false },
+      { store, llm: fakeLLM(op), distill: false, now: fixedNow },
       { sessionId: "s6", finalMessages: [assistant("one two three four six")] },
     )
     const all = await store.all()
@@ -344,7 +354,7 @@ describe("persistSession", () => {
   })
 
   test("eviction decays archived low-value survivors", async () => {
-    const old = Date.now() - 40 * 24 * 60 * 60 * 1000 // 40d → archived
+    const old = TEST_NOW - 40 * 24 * 60 * 60 * 1000 // 40d → archived
     const store = new InMemoryStore([
       {
         id: "arch",
@@ -357,7 +367,7 @@ describe("persistSession", () => {
       },
     ])
     await persistSession(
-      { store },
+      { store, now: fixedNow },
       { sessionId: "s9", finalMessages: [assistant("an unrelated brand new summary")] },
     )
     const e = await store.get("arch")
@@ -428,7 +438,7 @@ describe("persistSession", () => {
 
   test("onStats: merge op increments merged", async () => {
     const store = new InMemoryStore([
-      { id: "old", kind: "fact", text: "alpha beta gamma delta", tags: [], createdAt: Date.now() },
+      { id: "old", kind: "fact", text: "alpha beta gamma delta", tags: [], createdAt: TEST_NOW },
     ])
     const op = JSON.stringify({
       action: "merge",
@@ -439,7 +449,7 @@ describe("persistSession", () => {
     })
     const seen: import("@/agent/memory-stats").PersistStats[] = []
     await persistSession(
-      { store, llm: fakeLLM(op), distill: false, onStats: (s) => seen.push(s) },
+      { store, llm: fakeLLM(op), distill: false, onStats: (s) => seen.push(s), now: fixedNow },
       { sessionId: "ps5", finalMessages: [assistant("alpha beta gamma delta epsilon")] },
     )
     expect(seen).toHaveLength(1)
@@ -448,12 +458,12 @@ describe("persistSession", () => {
 
   test("onStats: supersede op increments superseded", async () => {
     const store = new InMemoryStore([
-      { id: "old", kind: "fact", text: "one two three four five", tags: [], createdAt: Date.now() },
+      { id: "old", kind: "fact", text: "one two three four five", tags: [], createdAt: TEST_NOW },
     ])
     const op = JSON.stringify({ action: "supersede", oldId: "old" })
     const seen: import("@/agent/memory-stats").PersistStats[] = []
     await persistSession(
-      { store, llm: fakeLLM(op), distill: false, onStats: (s) => seen.push(s) },
+      { store, llm: fakeLLM(op), distill: false, onStats: (s) => seen.push(s), now: fixedNow },
       { sessionId: "ps6", finalMessages: [assistant("one two three four six")] },
     )
     expect(seen).toHaveLength(1)
@@ -484,7 +494,7 @@ describe("persistSession", () => {
   })
 
   test("onStats: eviction sweep reports decayed", async () => {
-    const old = Date.now() - 40 * 24 * 60 * 60 * 1000
+    const old = TEST_NOW - 40 * 24 * 60 * 60 * 1000
     const store = new InMemoryStore([
       {
         id: "arch",
@@ -498,7 +508,7 @@ describe("persistSession", () => {
     ])
     const seen: import("@/agent/memory-stats").PersistStats[] = []
     await persistSession(
-      { store, onStats: (s) => seen.push(s) },
+      { store, onStats: (s) => seen.push(s), now: fixedNow },
       { sessionId: "ps8", finalMessages: [assistant("an unrelated brand new summary")] },
     )
     expect(seen).toHaveLength(1)
@@ -676,7 +686,7 @@ describe("persistSession", () => {
           kind: "fact",
           text: "alpha beta gamma delta",
           tags: [],
-          createdAt: Date.now(),
+          createdAt: TEST_NOW,
         },
       ])
       await persistSession(
@@ -692,6 +702,7 @@ describe("persistSession", () => {
             }),
           ),
           distill: false,
+          now: fixedNow,
         },
         { sessionId: "c10e", finalMessages: [assistant("alpha beta gamma delta epsilon")] },
       )
@@ -706,7 +717,7 @@ describe("persistSession", () => {
           kind: "fact",
           text: "one two three four five",
           tags: [],
-          createdAt: Date.now(),
+          createdAt: TEST_NOW,
         },
       ])
       await persistSession(
@@ -714,6 +725,7 @@ describe("persistSession", () => {
           store: sStore,
           llm: fakeLLM(JSON.stringify({ action: "supersede", oldId: "old" })),
           distill: false,
+          now: fixedNow,
         },
         { sessionId: "c10f", finalMessages: [assistant("one two three four six")] },
       )

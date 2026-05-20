@@ -1,7 +1,7 @@
 import type { MemoryEntry, MemoryQuery } from "./types"
 
 /**
- * Durable long-term memory store (RFC §6.3, SOTA++ memory). Two adapters exist
+ * Durable long-term memory store (RFC §6.3). Two adapters exist
  * (in-memory, sqlite) → full hexagonal per RFC §5.1. All adapters normalize
  * entries on the boundary ({@link import("./types").normalizeEntry}) and share
  * the ranking layer, so semantics never diverge.

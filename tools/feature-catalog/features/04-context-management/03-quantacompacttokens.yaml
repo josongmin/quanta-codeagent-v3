@@ -1,0 +1,18 @@
+id: quantacompacttokens
+title: QUANTA_COMPACT_TOKENS
+section: 4
+subsystem: 압축(LLM 요약)
+order: 3
+maturity: L4
+status: stable
+purpose: 'TODO: review from migration'
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_COMPACT_TOKENS]
+deliberate_hold: null
+notes: ''

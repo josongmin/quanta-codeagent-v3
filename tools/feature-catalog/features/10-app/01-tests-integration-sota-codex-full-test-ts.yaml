@@ -1,0 +1,18 @@
+id: tests-integration-sota-codex-full-test-ts
+title: tests/integration/sota-codex-full.test.ts
+section: 10
+subsystem: Codex 흡수 통합 불변식 (ADR-0023)
+order: 1
+maturity: L5
+status: stable
+purpose: default-OFF byte-identical 불변식 — 전 9 phase opt-in 노브 미설정 시 legacy 시스템 프롬프트 + reminder 블록과 byte-동일. legacy unit tests 미변경(보존 증명).
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit: []
+    integration: [tests/integration/sota-codex-full.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 통합 e2e 6 테스트로 composition pin

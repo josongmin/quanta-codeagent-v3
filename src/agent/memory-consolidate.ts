@@ -3,7 +3,7 @@ import { assembleFromEvents, type LLMPort, type StreamEvent } from "@/llm"
 import type { MemoryEntry } from "@/memory"
 
 /**
- * LLM-arbitrated memory consolidation (RFC §6.3, SOTA++ memory). Given a new
+ * LLM-arbitrated memory consolidation (RFC §6.3, long-term memory). Given a new
  * candidate and its near-duplicates, decide the op that preserves knowledge
  * without loss. Never throws — llm/parse failures fall back to a
  * token-Jaccard heuristic.

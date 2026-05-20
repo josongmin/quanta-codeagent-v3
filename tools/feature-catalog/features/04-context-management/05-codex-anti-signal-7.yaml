@@ -1,0 +1,18 @@
+id: codex-anti-signal-7
+title: Codex anti-signal 7개 흡수
+section: 4
+subsystem: 시스템 프롬프트+캐시 prefix
+order: 5
+maturity: L5
+status: stable
+purpose: 'Codex anti-signal 7개 흡수 (): absence-from-grep / nice-file-name / passing-shape-snapshot / quick-fix-exists / one-green-command / old-handoff-note / visual-looks-okay — cache prefix byte-stability 100-call 보존'
+evidence:
+  code: []
+  adrs: [27]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

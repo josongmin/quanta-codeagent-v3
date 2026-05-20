@@ -2,79 +2,37 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
-import type { LLMPort, Message, StreamEvent } from "@/llm"
-import type { PermissionContext } from "@/permission"
-import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import {
+  FakeLLM,
+  baseConfig as harnessBaseConfig,
+  multiToolUse as multiToolScript,
+  RecordingStream,
+  text as textScript,
+  toolUse as toolUseScript,
+} from "./_harness"
 
-/** Yields one scripted StreamEvent[] per stream() call, in order. */
-class FakeLLM implements LLMPort {
-  private readonly scripts: StreamEvent[][]
-  private last: StreamEvent[] = []
-  calls = 0
-
-  constructor(scripts: StreamEvent[][]) {
-    this.scripts = scripts
-  }
-
-  async *stream(): AsyncIterable<StreamEvent> {
-    const next = this.scripts.shift()
-    if (next) this.last = next
-    const script = next ?? this.last
-    this.calls += 1
-    for (const ev of script) yield ev
-  }
-}
-
-/** StreamPort double recording every emitted AgentEvent. */
-class RecordingStream implements StreamPort {
-  readonly events: AgentEvent[] = []
-  emit(event: AgentEvent): void {
-    this.events.push(event)
-  }
-}
-
-const toolUseScript = (id: string, name: string, input: unknown): StreamEvent[] => [
-  { type: "tool_use_start", id, name },
-  { type: "tool_use_end", id, input },
-  { type: "message_stop", stop_reason: "tool_use" },
-]
-
-/** One assistant turn issuing multiple tool_use blocks in order. */
-const multiToolScript = (calls: { id: string; name: string; input: unknown }[]): StreamEvent[] => [
-  ...calls.flatMap((c): StreamEvent[] => [
-    { type: "tool_use_start", id: c.id, name: c.name },
-    { type: "tool_use_end", id: c.id, input: c.input },
-  ]),
-  { type: "message_stop", stop_reason: "tool_use" },
-]
-
-const textScript = (text: string): StreamEvent[] => [
-  { type: "text_delta", delta: text },
-  { type: "message_stop", stop_reason: "end_turn" },
-]
-
+// Local convenience wrapper preserving the original 6-arg ordering: builds an
+// `AgentConfig` from the harness defaults but overrides the call-site knobs
+// each test sets (cwd, permission, maxTurns). Keeps the per-test bodies untouched.
 const baseConfig = (
-  llm: LLMPort,
-  registry: ToolRegistry,
-  stream: StreamPort,
+  llm: import("@/llm").LLMPort,
+  registry: import("@/tool").ToolRegistry,
+  stream: import("@/stream").StreamPort,
   cwd: string,
-  permission: PermissionContext,
+  permission: import("@/permission").PermissionContext,
   maxTurns: number,
-): AgentConfig => ({
-  llm,
-  registry,
-  stream,
-  permission,
-  messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] as Message[],
-  system: "test",
-  cwd,
-  maxTurns,
-  signal: new AbortController().signal,
-  onConfirm: async () => false,
-})
+): import("@/agent").AgentConfig =>
+  harnessBaseConfig({
+    llm,
+    registry,
+    stream,
+    permission,
+    cwd,
+    maxTurns,
+    system: "test",
+  })
 
 describe("runAgent integration", () => {
   let dir: string
@@ -224,7 +182,7 @@ describe("runAgent integration", () => {
     expect(lastCall).toBeLessThan(firstResult)
   })
 
-  // SOTA++ Tier 0 verify-guard: observed bench failure — the agent edits a
+  // Verify-guard (Tier 0 safety hardening): observed bench failure — the agent edits a
   // source file then declares "done" with ZERO verification calls after the
   // edit, so a wrong fix ships. With `verifyGuard` configured the loop must
   // force one more turn until a test_runner/bash runs after the last edit.
@@ -365,7 +323,7 @@ describe("runAgent integration", () => {
     expect(unverified).toHaveLength(0)
   })
 
-  // SOTA++ CloseoutLens (§4 mirror). v3 has NO finish-time self-check; without
+  // Closeout reminder (§4 mirror). v3 has NO finish-time self-check; without
   // `closeoutGuard` the loop must behave EXACTLY as before — a model that
   // finishes immediately just finishes, no extra turn, no `closeout` recovery
   // event, no transcript injection. This is the byte-identical default-OFF pin.
@@ -383,7 +341,7 @@ describe("runAgent integration", () => {
     expect(closeout).toHaveLength(0)
   })
 
-  // SOTA++ CloseoutLens enabled: the agent attempts to finish on turn 1 →
+  // Closeout reminder enabled: the agent attempts to finish on turn 1 →
   // closeout blocks ONCE (single-shot by design — there is NO maxTrips knob),
   // injects the reminder, forces one more turn; turn 2 finishes normally.
   test("(k) closeoutGuard enabled fires exactly once before finish", async () => {
@@ -423,7 +381,7 @@ describe("runAgent integration", () => {
     expect(llm.calls).toBe(2)
   })
 
-  // SOTA++ CloseoutLens × verify-guard interaction. Ordered (verify first,
+  // Closeout reminder × verify-guard interaction. Ordered (verify first,
   // closeout second): both can fire in the same RUN (different turns), but only
   // verify can fire on its triggering finish; closeout fires the next finish
   // attempt AFTER verify is satisfied. Script: edit → verify-blocks → real

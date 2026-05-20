@@ -1,5 +1,9 @@
+// TODO(migrate-to-harness): swap the local `FakeLLM` + `RecordingStream` +
+// `baseConfig` for `tests/integration/_harness.ts` exports
+// (`FakeLLM` + `RecordingStream` + `baseConfig`). See `agent-loop.test.ts` for
+// the pattern. Deferred from refactor B to keep that PR scoped to 3 files.
 /**
- * SOTA++ skill tool-scoping ENFORCEMENT — end-to-end (ADR-0011).
+ * Skill tool-scoping ENFORCEMENT — end-to-end (ADR-0011).
  *
  * Proves the loop's `SkillGate` is actually wired through
  * runAgent → runTurn → streamConsume → dispatch closure:
