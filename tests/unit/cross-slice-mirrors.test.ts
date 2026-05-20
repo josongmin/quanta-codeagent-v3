@@ -20,13 +20,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { HITLTier as PermissionHITLTier } from "@/permission"
 import type { BlockerSurface as AgentBlockerSurface } from "@/agent"
+import type { HITLTier as PermissionHITLTier } from "@/permission"
 import type { BlockerSurface as ToolBlockerSurface, HITLTier as ToolHITLTier } from "@/tool"
 
-type AssertEqual<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-  ? true
-  : never
+type AssertEqual<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : never
 
 const _assertHITLMirror: AssertEqual<PermissionHITLTier, ToolHITLTier> = true
 const _assertBlockerSurfaceMirror: AssertEqual<AgentBlockerSurface, ToolBlockerSurface> = true

@@ -23,14 +23,7 @@ export interface OwnerCandidate {
  *  these names being stable. `"build"` covers config/manifest/CI surfaces and
  *  `"other"` is a deliberate escape hatch for surfaces a new task posture may
  *  surface (adding a new tag is a typed change, NOT a silent rewrite). */
-export type BlockerSurface =
-  | "type"
-  | "owner"
-  | "wire"
-  | "test"
-  | "runtime"
-  | "build"
-  | "other"
+export type BlockerSurface = "type" | "owner" | "wire" | "test" | "runtime" | "build" | "other"
 
 export interface Blocker {
   what: string

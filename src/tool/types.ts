@@ -33,14 +33,7 @@ export interface WorkingStateHandle {
  *  `@/tool` is slice-isolated from `@/agent`). Adding a new surface requires
  *  updating BOTH sides — the compile-time assertion at the bottom of this
  *  file enforces structural equivalence. */
-export type BlockerSurface =
-  | "type"
-  | "owner"
-  | "wire"
-  | "test"
-  | "runtime"
-  | "build"
-  | "other"
+export type BlockerSurface = "type" | "owner" | "wire" | "test" | "runtime" | "build" | "other"
 
 /** Structural duck-typed mirror of `WorkingState` (kept here so `@/tool` is
  *  slice-isolated from `@/agent`). */
