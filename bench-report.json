@@ -1,47 +1,46 @@
 {
-  "timestamp": "2026-05-19T17:52:51.695Z",
+  "timestamp": "2026-05-20T05:29:52.515Z",
   "model": "gpt-4o",
   "provider": "openai",
   "n": 1,
   "totals": {
     "total": 5,
-    "resolved": 1,
-    "resolvedPct": 20
+    "resolved": 2,
+    "resolvedPct": 40
   },
   "perInstance": [
     {
       "id": "django__django-10097",
       "passed": false,
-      "turns": 10,
-      "patchBytes": 598,
-      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10097-DF8Qou/predictions.jsonl --run_id quanta-django__django-10097-1779212255876 --instance_ids django__django-10097 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
+      "turns": 55,
+      "patchBytes": 25508982,
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10097-twTlhs/predictions.jsonl --run_id quanta-django__django-10097-1779254137876 --instance_ids django__django-10097 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): te-packages/sqlparse/keywords.py\npatching file env/lib/python3.9/site-packages/sqlp"
     },
     {
       "id": "django__django-10880",
-      "passed": false,
-      "turns": 16,
-      "patchBytes": 469,
-      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10880-GIfUFd/predictions.jsonl --run_id quanta-django__django-10880-1779212732086 --instance_ids django__django-10880 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
+      "passed": true,
+      "turns": 66,
+      "patchBytes": 638
     },
     {
       "id": "django__django-10914",
-      "passed": true,
-      "turns": 8,
-      "patchBytes": 625
+      "passed": false,
+      "turns": 48,
+      "patchBytes": 2028,
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10914-PA9vXo/predictions.jsonl --run_id quanta-django__django-10914-1779254537021 --instance_ids django__django-10914 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
     },
     {
       "id": "django__django-10999",
       "passed": false,
-      "turns": 16,
+      "turns": 36,
       "patchBytes": 497,
-      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10999-pwqjNp/predictions.jsonl --run_id quanta-django__django-10999-1779212975799 --instance_ids django__django-10999 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-10999-YcVfGf/predictions.jsonl --run_id quanta-django__django-10999-1779254695331 --instance_ids django__django-10999 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
     },
     {
       "id": "django__django-11066",
-      "passed": false,
-      "turns": 21,
-      "patchBytes": 8746093,
-      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /tmp/pyswe-django__django-11066-jiMQEs/predictions.jsonl --run_id quanta-django__django-11066-1779213105235 --instance_ids django__django-11066 --max_workers 1 --cache_level none --clean True --dataset_name /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...\nAll instances run.\nCleaning cached images...\nRemoved 0 image"
+      "passed": true,
+      "turns": 20,
+      "patchBytes": 767
     }
   ]
 }

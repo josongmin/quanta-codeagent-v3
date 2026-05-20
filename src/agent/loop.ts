@@ -9,6 +9,11 @@ import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import type { AutoModeClassifier } from "@/permission"
 import { LLMError, type RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
+import {
+  type CloseoutGuardState,
+  createCloseoutGuardState,
+  decideCloseoutGuard,
+} from "./closeout-guard"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import { dispatchTool } from "./dispatch"
@@ -95,7 +100,14 @@ const emitUsage = (config: AgentConfig, ev: Extract<StreamEvent, { type: "usage"
 
 /** Stable, small set of `recovery` reasons (RFC-0002 §5.2). Group E maps these
  *  → trajectory kinds; keep the set closed so probe/triage can rely on it. */
-type RecoveryReason = "backoff" | "compact" | "nudge" | "empty" | "malformed" | "unverified"
+type RecoveryReason =
+  | "backoff"
+  | "compact"
+  | "nudge"
+  | "empty"
+  | "malformed"
+  | "unverified"
+  | "closeout"
 
 /** Pure side-effect emit of a `{type:"recovery"}` AgentEvent at a recovery
  *  point the loop ALREADY reaches (backoff/compact/nudge/empty/malformed). It
@@ -649,6 +661,34 @@ const verifyGuardStep = (
   return CONTINUE
 }
 
+/** SOTA++ CloseoutLens hook (Codex App agent loop doc §4 mirror). v3 has NO
+ *  finish-time self-check: at the moment of completion the agent can overclaim
+ *  ("verified" when no verification ran, mix fact with inference, ignore the
+ *  requested reporting shape). When `config.closeoutGuard?.enabled === true`
+ *  and the model is about to finish, convert that completion into the SAME
+ *  nudge action the recovery machinery already understands (`keepMessage:true`
+ *  so the final assistant turn is preserved, no maxTurns consumption, recovery
+ *  emitted) ONCE per run. Ordering: this runs AFTER `verifyGuardStep`, so when
+ *  verify also fires it trips FIRST on its triggering finish; closeout fires
+ *  the next time the agent attempts to finish AFTER verify is satisfied. Guard
+ *  absent or `enabled !== true` ⇒ never blocks (default-OFF, byte-identical). */
+const closeoutGuardStep = (
+  config: AgentConfig,
+  action: RecoveryAction,
+  message: AssembledMessage,
+  wm: WorkingMemory<Message>,
+  state: CloseoutGuardState | undefined,
+): Step | undefined => {
+  if (config.closeoutGuard === undefined || state === undefined) return undefined
+  if (!isFinishAttempt(action, message)) return undefined
+  const verdict = decideCloseoutGuard({ cfg: config.closeoutGuard, state })
+  if (!verdict.block || verdict.text === undefined) return undefined
+  emitRecovery(config, "closeout")
+  wm.append(message)
+  wm.append(metaUser(verdict.text))
+  return CONTINUE
+}
+
 const applyAction = async (
   config: AgentConfig,
   action: RecoveryAction,
@@ -658,6 +698,7 @@ const applyAction = async (
   breaker: CompactionBreaker | undefined,
   history: readonly ToolHistoryEntry[],
   verifyGuardState: VerifyGuardState | undefined,
+  closeoutGuardState: CloseoutGuardState | undefined,
 ): Promise<Step> => {
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
   if (action.do === "backoff") {
@@ -698,6 +739,12 @@ const applyAction = async (
   // so this hot path stays a single guarded call (default-OFF ⇒ undefined).
   const guarded = verifyGuardStep(config, action, message, wm, history, verifyGuardState)
   if (guarded) return guarded
+  // SOTA++ CloseoutLens (§4 mirror): a finish attempt is given one single-shot
+  // closeout nudge per run. Ordered STRICTLY AFTER verify-guard: if verify
+  // already blocked above we never reach here on this turn — closeout fires the
+  // NEXT finish-intent (after verify is satisfied). Default-OFF ⇒ undefined.
+  const closedout = closeoutGuardStep(config, action, message, wm, closeoutGuardState)
+  if (closedout) return closedout
   if (action.do === "completed") {
     // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
     // empty-turn-exhausted) previously returned WITHOUT appending the final
@@ -732,6 +779,7 @@ const runTurn = async (
   skillGate: SkillGate | undefined,
   toolHistory: ToolHistoryEntry[] | undefined,
   verifyGuardState: VerifyGuardState | undefined,
+  closeoutGuardState: CloseoutGuardState | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -770,6 +818,7 @@ const runTurn = async (
       // Reuse one shared frozen empty array when the guard is off.
       toolHistory ?? EMPTY_TOOL_HISTORY,
       verifyGuardState,
+      closeoutGuardState,
     )
     if (step.done) return step.result
   }
@@ -811,6 +860,14 @@ const buildVerifyGuard = (
 ): { state?: VerifyGuardState; history?: ToolHistoryEntry[] } =>
   config.verifyGuard ? { state: createVerifyGuardState(), history: [] } : {}
 
+/** SOTA++ CloseoutLens per-run resource. Built ONLY when
+ *  `config.closeoutGuard?.enabled === true`: a single-shot trip counter.
+ *  Absent (or `enabled !== true`) ⇒ `undefined` (no allocation, the guard
+ *  decision is never reached → loop byte-identical). Extracted so `runAgent`
+ *  gains no extra cognitive-complexity branch — mirrors `buildVerifyGuard`. */
+const buildCloseoutGuard = (config: AgentConfig): CloseoutGuardState | undefined =>
+  config.closeoutGuard?.enabled === true ? createCloseoutGuardState() : undefined
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // SOTA++ Tier 1 (ADR-0011): materialize optional subsystems ONCE. With no
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
@@ -838,6 +895,13 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // guard decision are never reached → loop is byte-for-byte identical. The
   // construction is factored out so `runAgent` gains ZERO new branch points.
   const { state: verifyGuardState, history: toolHistory } = buildVerifyGuard(cfg)
+  // SOTA++ CloseoutLens (§4 mirror): single-shot per-run closeout budget,
+  // created ONLY when `cfg.closeoutGuard?.enabled === true`. Absent (or
+  // `enabled !== true`) ⇒ stays `undefined`, no object is allocated, the
+  // guard decision is never reached → loop is byte-for-byte identical. The
+  // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
+  // gains ZERO new branch points.
+  const closeoutGuardState = buildCloseoutGuard(cfg)
 
   const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
     const messages = [...wm.snapshot()]
@@ -889,6 +953,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
       skillGate,
       toolHistory,
       verifyGuardState,
+      closeoutGuardState,
     )
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire

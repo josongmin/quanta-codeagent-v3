@@ -75,6 +75,11 @@ gpt-4o가 검증을 스킵하는 것이 재현된다.
 - **(c) resolution% 무관**: 본 가드는 그 자체로 resolution%를 올리지
   않는다 — 조기-종료-없는-검증만 유도할 뿐, 올바른 수정 생성은 여전히
   모델 몫이고 점수는 외부 채점 산출이다(RFC §1.1).
+- **(d) Empirical inertness (실측, 2026-05-20)**: Easy-5 real SWE-bench 런에서
+  `unverified` recovery 이벤트 = **0회** (5/5 인스턴스). 강화된
+  SWEBENCH_DIRECTIVE 하에서 모델이 edit 직후 `test_runner`를 이미 돌리므로
+  가드가 강제할 여지가 없다. 결론: 구조적으로 정확하지만 본 에이전트/모델
+  조합에서 운영상 **no-op**. 깨진 게 아니라 발동 안 됨.
 
 ## 변경 이력
 
@@ -82,6 +87,10 @@ gpt-4o가 검증을 스킵하는 것이 재현된다.
   **0회 발동(no-op)**. `TEST_LIKE_RE` 휴리스틱으로 타이트닝하여
   실제로 발동하도록 교정(본 ADR은 교정된 설계를 문서화 — code-after,
   RFC §9.1).
+- `DEFAULT_MAX_TRIPS: 2 → 1` (2026-05-20). 근거: Codex App agent loop가
+  관측한 `should_verify` default-OFF 스탠스와 정합하며, ADR-0014의
+  repair-rounds 실측(negative delta — 추가 강제가 over-correction 유발)이
+  default-OFF 방향을 empirically 받친다. 덜 강제하는 쪽으로 캡을 좁힘.
 
 ## 불변식 영향
 

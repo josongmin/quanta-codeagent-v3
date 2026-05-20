@@ -228,6 +228,17 @@ const runDatasetMode = async (
   // undefined here and runner.verify() silently falls back to the no-op local
   // `testCmd:"true"` — i.e. `--swebench` could never reach real grading.
   const pythonSwebench = await buildPythonSwebench()
+  // b2 external repair rounds (ADR-0014). Default-OFF byte-identical: absent
+  // ⇒ key omitted from deps ⇒ runner takes single-pass path (G2 gating). Set
+  // either via `--repair-rounds <int>` or `QUANTA_REPAIR_ROUNDS`.
+  const repairArg = argValue("--repair-rounds") ?? process.env.QUANTA_REPAIR_ROUNDS
+  const repair =
+    repairArg !== undefined && repairArg !== ""
+      ? { maxRounds: Math.max(0, Number(repairArg)) }
+      : undefined
+  if (repair !== undefined) {
+    logger.info(`bench: repair rounds enabled (maxRounds=${repair.maxRounds})`)
+  }
 
   const results: InstanceResult[] = []
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL
@@ -251,6 +262,7 @@ const runDatasetMode = async (
             maxTurns: cfg.maxTurns,
             timeoutMs: cfg.timeoutMs,
             ...(pythonSwebench !== undefined ? { pythonSwebench } : {}),
+            ...(repair !== undefined ? { repair } : {}),
           },
           cfg.n,
           obs,

@@ -150,14 +150,13 @@ describe("decideVerifyGuard", () => {
     expect(state.trips).toBe(0)
   })
 
-  test("(8) default maxTrips is 2 when cfg {}", () => {
+  test("(8) default maxTrips is 1 when cfg {}", () => {
     const state = createVerifyGuardState()
     expect(decideVerifyGuard({ history: h("edit"), cfg: {}, state }).block).toBe(true)
-    expect(decideVerifyGuard({ history: h("edit"), cfg: {}, state }).block).toBe(true)
-    expect(state.trips).toBe(2)
-    // third qualifying call: cap (2) reached ⇒ no block
+    expect(state.trips).toBe(1)
+    // second qualifying call: cap (1) reached ⇒ no block
     expect(decideVerifyGuard({ history: h("edit"), cfg: {}, state }).block).toBe(false)
-    expect(state.trips).toBe(2)
+    expect(state.trips).toBe(1)
   })
 
   test("write counts as a mutating tool", () => {

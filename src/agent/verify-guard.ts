@@ -4,8 +4,9 @@
  * then declares "done" WITHOUT running any test or reproduction (0 verification
  * calls after the edit) → a wrong fix ships. When the model tries to finish
  * right after a mutating tool with no verification since, the loop forces one
- * more turn (up to `maxTrips`, default 2 — capped to avoid infinite forcing /
- * turn-budget burn). Absent config ⇒ guard fully OFF (byte-identical loop).
+ * more turn (up to `maxTrips`, default 1 — less forcing; empirically 0-trip on
+ * Easy-5 gpt-4o and ADR-0014 repair-rounds측정에서 과도 강제가 over-correction
+ * 유발). Absent config ⇒ guard fully OFF (byte-identical loop).
  */
 
 /** Per-session forcing budget. One instance per agent run. */
@@ -44,7 +45,7 @@ const isVerify = (entry: { name: string; arg?: string }): boolean => {
   return false
 }
 
-const DEFAULT_MAX_TRIPS = 2
+const DEFAULT_MAX_TRIPS = 1
 
 /**
  * Decide whether to block a finish attempt and force one more turn. Pure: the

@@ -23,8 +23,9 @@ LLM이 사용자와 티키타카하며 코딩 태스크(읽기/검색/편집/테
 > 퍼센트* 자체는 비차단 실-LLM eval 티어(§10.4)와 외부 Docker/Python
 > 채점에서만 산출되며, 본 레포는 그 퍼센트를 스스로 증명하지 않는다.
 > 50%/70%는 목표치이지 레포가 보장하는 측정값이 아니다(머신은 진짜,
-> 점수는 외부 검증 대상). verify-before-finish 가드(§16·ADR-0013)는
-> "오답서 조기 종료 방지" 메커니즘이지 resolution% 보장이 아니다 —
+> 점수는 외부 검증 대상). verify-before-finish 가드(§16·ADR-0013)와
+> bench 외부 repair 라운드(§16·ADR-0014)는 각각 "오답서 조기 종료 방지"·
+> "실패 후 한 번 더 시도" 메커니즘이지 resolution% 보장이 아니다 —
 > 점수는 여전히 외부 채점 산출(과장 금지).
 
 ### 1.2 SOTA++ 스탠스 (구 "minimal-surface" 거부 입장 대체)
@@ -862,6 +863,14 @@ export type StreamEvent =
   best-effort 휴리스틱 게이트(`test_runner` 항상 / `bash`는 test·repro
   정규식 매칭 시만). default-OFF, bench-gated(`instance.swebench`만),
   순수 `@/agent/verify-guard.ts` (ADR-0013). efficacy/% 주장 없음.
+- **bench 외부 repair 라운드**: 단일패스 실패 시 에이전트 자신의 verify cmd
+  /repro 재실행으로 라운드별 게이팅, 실패 시 누적 diff + failTail + 원본
+  problem을 seed 메시지로 합성해 같은 sandbox에 `runAgent` 재호출
+  (continue-from-patched-tree, `withGitSnapshot` 단일 wrap). hidden 필드
+  (`FAIL_TO_PASS`/`test_patch`/공식 report) 미참조(no-leak 골든). 공식
+  `verify()`는 라운드 종료 후 정확히 1회, 절대 피드백 안 됨. default-OFF
+  byte-identical(`RunInstanceDeps.repair` 부재 ⇒ 단일패스), swebench-gated.
+  `src/apps/bench/repair/**` (ADR-0014). efficacy/% 주장 없음.
 
 ### 16.3 Tier 1 — 능력 슬라이스·스트리밍
 

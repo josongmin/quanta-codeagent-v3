@@ -35,6 +35,15 @@ import {
   verifyLogTail,
 } from "./observe"
 import { evaluateWithPythonSwebench, type PySwebenchOpts } from "./python-swebench"
+import { runRepairRounds } from "./repair"
+import { buildRepairContext } from "./repair/context"
+import type {
+  BuildRepairContextArgs,
+  RunOnceResult,
+  ValidateArgs,
+  ValidatorResult,
+} from "./repair/types"
+import { validate as defaultValidate } from "./repair/validator"
 import type { Instance, InstanceResult } from "./types"
 
 export type { RunObservation, RunSummary }
@@ -72,6 +81,23 @@ export interface RunInstanceDeps {
    * `verify` lines. A strict recorder failure ⇒ `verdict:"degraded"`.
    */
   observe?: AttemptObservation
+  /**
+   * b2 — External repair rounds (RFC §16, ADR-0014). ABSENT (default) ⇒ feature
+   * OFF / byte-identical single-pass; same gating posture as `pythonSwebench?`/
+   * `observe?`. When present AND `instance.swebench` is set, the runner wraps
+   * `runAgentPhase` in `runRepairRounds`: rounds share ONE sandbox (continue-
+   * from-patched-tree, no git reset between rounds), the official `verify()`
+   * runs EXACTLY ONCE at the end (no-leak invariant — never fed back to the
+   * agent), and the seed message handed to round ≥1 is built from the agent's
+   * own validator failure tail (NOT from any dataset hidden field).
+   * `validate`/`buildContext` are injectable test seams; production defaults
+   * are the G1 implementations.
+   */
+  repair?: {
+    maxRounds?: number
+    validate?: (args: ValidateArgs) => Promise<ValidatorResult>
+    buildContext?: (args: BuildRepairContextArgs) => string
+  }
 }
 
 interface ExecResult {
@@ -246,16 +272,20 @@ const buildConfig = (
   sandbox: string,
   signal: AbortSignal,
   stream: StreamPort,
+  seedMsg?: string,
 ) => {
   const registry = new ToolRegistry(defaultTools)
   const permission: PermissionContext = { mode: "acceptEdits" }
   const base = `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
+  // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
+  // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
+  // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
+  const baseText = instance.swebench ? `${base}${SWEBENCH_DIRECTIVE}` : base
+  const text = seedMsg !== undefined && seedMsg !== "" ? `${baseText}\n\n${seedMsg}` : baseText
   const messages: Message[] = [
     {
       role: "user",
-      content: [
-        { type: "text", text: instance.swebench ? `${base}${SWEBENCH_DIRECTIVE}` : base },
-      ],
+      content: [{ type: "text", text }],
     },
   ]
   return {
@@ -429,6 +459,68 @@ interface Phase {
   turns: number
 }
 
+/**
+ * Capture the agent's LAST `bash`/`test_runner` tool call argument by
+ * wrapping a downstream `StreamPort` and intercepting `tool_call` events. Pure
+ * tap: every event is forwarded unchanged; the bench can read `lastVerifyCmd`
+ * after `runAgent` returns. For `bash`, `input.command` carries the shell
+ * string; for `test_runner` the tool name itself counts as a verification — we
+ * record the tool name (no command string is associated) so the validator can
+ * still fall back to the agent's `reproPath` (or return degenerate).
+ */
+class LastVerifyCmdTap implements StreamPort {
+  lastVerifyCmd: string | undefined
+  constructor(private readonly downstream: StreamPort) {}
+  emit(event: AgentEvent): void {
+    if (event.type === "tool_call") {
+      if (event.name === "bash") {
+        const input = event.input
+        if (typeof input === "object" && input !== null && "command" in input) {
+          const cmd = (input as { command: unknown }).command
+          if (typeof cmd === "string" && cmd !== "") this.lastVerifyCmd = cmd
+        }
+      } else if (event.name === "test_runner") {
+        // test_runner has no shell-equivalent string; treat the tool-call name
+        // as a sentinel so the orchestrator knows the agent DID verify (the
+        // validator falls back to reproPath / degenerate when cmd is unset).
+        this.lastVerifyCmd = "test_runner"
+      }
+    }
+    this.downstream.emit(event)
+  }
+}
+
+/**
+ * Run the agent ONCE in the sandbox (no git wrap — caller controls snapshot
+ * boundaries). Returns the cumulative diff + turns + lastVerifyCmd captured
+ * from the stream. Used both by the single-pass path and by the per-round
+ * `runOnce` closure of the repair orchestrator (continue-from-patched-tree).
+ */
+const runAgentOnce = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+  sandbox: string,
+  signal: AbortSignal,
+  w: Wiring,
+  seedMsg: string | undefined,
+  timeoutMs: number,
+): Promise<RunOnceResult> => {
+  const tap = new LastVerifyCmdTap(w.stream)
+  const outcome = await runAgent(buildConfig(instance, deps, sandbox, signal, tap, seedMsg))
+  // Capture the cumulative diff CURRENTLY in the worktree (without resetting
+  // the index): mirrors `withGitSnapshot`'s final diff step. `git` is
+  // opportunistic — absence ⇒ "".
+  const G = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
+  const diff = await exec(`${G} add -A && ${G} diff --cached --no-color`, sandbox, timeoutMs)
+  const patch = diff.code === 0 ? sourceOnlyDiff(diff.stdout) : ""
+  const result: RunOnceResult = {
+    patch,
+    turns: outcome.turns,
+    ...(tap.lastVerifyCmd !== undefined ? { lastVerifyCmd: tap.lastVerifyCmd } : {}),
+  }
+  return result
+}
+
 /** Sandbox snapshot → agent (inside the git pre/post-image) → captured diff. */
 const runAgentPhase = async (
   instance: Instance,
@@ -449,6 +541,51 @@ const runAgentPhase = async (
     },
   )
   return { patch, turns }
+}
+
+/**
+ * Repair-path phase: ONE `withGitSnapshot` wraps ALL rounds (so the prior
+ * round's edits persist into round N+1 — no `git reset/clean` between rounds).
+ * The official `verify()` is NEVER invoked here — it runs ONCE outside, on the
+ * cumulative final patch (no-leak invariant). The validator/buildContext are
+ * injectable; production defaults are G1's `validate`/`buildRepairContext`.
+ */
+const runRepairPhase = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+  sandbox: string,
+  signal: AbortSignal,
+  w: Wiring,
+  repair: NonNullable<RunInstanceDeps["repair"]>,
+): Promise<Phase> => {
+  let turns = 0
+  let finalPatch = ""
+  const patch = await withGitSnapshot(
+    sandbox,
+    deps.timeoutMs,
+    instance.swebench?.baseCommit,
+    async () => {
+      await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
+      const out = await runRepairRounds({
+        config: { ...(repair.maxRounds !== undefined ? { maxRounds: repair.maxRounds } : {}) },
+        problem: instance.problemStatement,
+        runOnce: (seedMsg) =>
+          runAgentOnce(instance, deps, sandbox, signal, w, seedMsg, deps.timeoutMs),
+        validate: repair.validate ?? defaultValidate,
+        buildContext: repair.buildContext ?? buildRepairContext,
+        sandbox,
+        exec,
+        timeoutMs: deps.timeoutMs,
+      })
+      turns = out.turns
+      finalPatch = out.patch
+    },
+  )
+  // `patch` (from withGitSnapshot's final diff) is the canonical capture; if
+  // available we prefer it (it reflects the worktree at end of all rounds).
+  // `finalPatch` is the orchestrator's view of the last round's diff — they
+  // agree by construction (continue-from-patched-tree, single sandbox).
+  return { patch: patch !== "" ? patch : finalPatch, turns }
 }
 
 const okResult = (
@@ -503,7 +640,17 @@ export const runInstance = async (
       }
     }
 
-    phase = await runAgentPhase(instance, deps, sandbox, abort.signal, w)
+    // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
+    // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
+    // ABSENT ⇒ existing single-pass path verbatim (byte-identical: same calls,
+    // same buildConfig (no seedMsg), same single withGitSnapshot/runAgent,
+    // same single verify()). The official verify() ALWAYS runs exactly once,
+    // OUTSIDE the repair loop — its result is never fed back to the agent
+    // (no-leak invariant; also enforced by code locality).
+    phase =
+      deps.repair !== undefined && instance.swebench !== undefined
+        ? await runRepairPhase(instance, deps, sandbox, abort.signal, w, deps.repair)
+        : await runAgentPhase(instance, deps, sandbox, abort.signal, w)
     const v = await verify(instance, phase.patch, sandbox, deps)
 
     const extra: Partial<InstanceResult> = {}

@@ -365,6 +365,114 @@ describe("runAgent integration", () => {
     expect(unverified).toHaveLength(0)
   })
 
+  // SOTA++ CloseoutLens (§4 mirror). v3 has NO finish-time self-check; without
+  // `closeoutGuard` the loop must behave EXACTLY as before — a model that
+  // finishes immediately just finishes, no extra turn, no `closeout` recovery
+  // event, no transcript injection. This is the byte-identical default-OFF pin.
+  test("(j) closeout default-OFF byte-identical: no closeoutGuard ⇒ no closeout event, no forced turn", async () => {
+    const llm = new FakeLLM([textScript("all done")])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    // NO closeoutGuard ⇒ guard never constructs/consults: byte-identical.
+    const outcome = await runAgent(baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10))
+
+    expect(outcome.reason).toBe("completed")
+    expect(outcome.turns).toBe(1)
+    expect(llm.calls).toBe(1)
+    const closeout = stream.events.filter((e) => e.type === "recovery" && e.reason === "closeout")
+    expect(closeout).toHaveLength(0)
+  })
+
+  // SOTA++ CloseoutLens enabled: the agent attempts to finish on turn 1 →
+  // closeout blocks ONCE (single-shot by design — there is NO maxTrips knob),
+  // injects the reminder, forces one more turn; turn 2 finishes normally.
+  test("(k) closeoutGuard enabled fires exactly once before finish", async () => {
+    const llm = new FakeLLM([
+      // turn 1: model tries to finish immediately
+      textScript("all done"),
+      // forced turn 2: model finishes for real after the closeout reminder
+      textScript("verified and complete"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const cfg = {
+      ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
+      closeoutGuard: { enabled: true },
+    }
+    const outcome = await runAgent(cfg)
+
+    expect(outcome.reason).toBe("completed")
+    // Exactly one `closeout` recovery happened (single-shot per run).
+    const closeout = stream.events.filter((e) => e.type === "recovery" && e.reason === "closeout")
+    expect(closeout).toHaveLength(1)
+
+    // The closeout reminder text was injected into the canonical transcript.
+    const forced = outcome.messages.some(
+      (m) =>
+        m.role === "user" &&
+        m.content.some((b) => b.type === "text" && b.text.includes("defended claims")),
+    )
+    expect(forced).toBe(true)
+
+    // The forced re-entry is SAME-TURN (does NOT consume a maxTurns slot, just
+    // like verify-guard's nudge machinery): the blocked finish + the successful
+    // finish both live inside ONE turn slot. The model was streamed TWICE
+    // (closeout forces a re-stream after injecting the reminder), so llm.calls
+    // == 2 while outcome.turns == 1.
+    expect(outcome.turns).toBe(1)
+    expect(llm.calls).toBe(2)
+  })
+
+  // SOTA++ CloseoutLens × verify-guard interaction. Ordered (verify first,
+  // closeout second): both can fire in the same RUN (different turns), but only
+  // verify can fire on its triggering finish; closeout fires the next finish
+  // attempt AFTER verify is satisfied. Script: edit → verify-blocks → real
+  // pytest → closeout-blocks → final finish.
+  test("(l) closeoutGuard × verifyGuard interaction: both fire, ordered verify-first then closeout", async () => {
+    const file = join(dir, "fix.txt")
+    const llm = new FakeLLM([
+      // turn 1: mutate source
+      toolUseScript("c1", "write", { path: file, content: "patched" }),
+      // turn 2: model tries to finish → verify-guard blocks (no test since edit)
+      textScript("all done"),
+      // forced turn 2 (re-entry): now a REAL test runs → verify satisfied
+      toolUseScript("c3", "bash", { command: "python -m pytest tests/ -q" }),
+      // turn 3: model tries to finish → closeout blocks (single-shot)
+      textScript("verified and done"),
+      // forced turn 3 (re-entry): final finish for real
+      textScript("complete"),
+    ])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const cfg = {
+      ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
+      verifyGuard: { maxTrips: 1 },
+      closeoutGuard: { enabled: true },
+    }
+    const outcome = await runAgent(cfg)
+
+    expect(outcome.reason).toBe("completed")
+
+    // verify-guard trip count == 1, closeout trip count == 1.
+    const unverified = stream.events.filter(
+      (e) => e.type === "recovery" && e.reason === "unverified",
+    )
+    expect(unverified).toHaveLength(1)
+    const closeout = stream.events.filter((e) => e.type === "recovery" && e.reason === "closeout")
+    expect(closeout).toHaveLength(1)
+
+    // Recovery reasons appear in order (verify-guard fires first; closeout
+    // fires on the NEXT finish-intent after verify is satisfied).
+    const recoveryReasons = stream.events
+      .filter((e) => e.type === "recovery")
+      .map((e) => (e.type === "recovery" ? e.reason : ""))
+    const unverifiedIdx = recoveryReasons.indexOf("unverified")
+    const closeoutIdx = recoveryReasons.indexOf("closeout")
+    expect(unverifiedIdx).toBeGreaterThanOrEqual(0)
+    expect(closeoutIdx).toBeGreaterThanOrEqual(0)
+    expect(unverifiedIdx).toBeLessThan(closeoutIdx)
+  })
+
   test("(f) safe read then unsafe write in one turn → result order preserved", async () => {
     const src = join(dir, "src.txt")
     const out = join(dir, "out.txt")

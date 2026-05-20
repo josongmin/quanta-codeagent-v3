@@ -132,6 +132,13 @@ export interface AgentConfig {
    * turn (up to `maxTrips`, default 2 — capped to avoid infinite forcing).
    */
   verifyGuard?: { maxTrips?: number }
+  /** Closeout guard (Codex CloseoutLens §4 mirror). Optional, absent ⇒ guard
+   *  fully OFF and the loop is byte-identical. When `enabled` true, a single
+   *  pre-finish nudge injects the closeout reminder (keep only defended claims,
+   *  state if verification not run, separate fact from inference, match
+   *  requested reporting shape) once per run. Single-shot by design — no
+   *  maxTrips knob (multiple closeout nudges just thrash). */
+  closeoutGuard?: { enabled?: boolean }
   /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like
