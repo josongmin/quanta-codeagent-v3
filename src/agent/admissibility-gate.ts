@@ -35,13 +35,14 @@ import {
   evaluateStack,
   type HITLTier,
   hardDenyReason,
-  inferToolTier,
   type PermissionContext,
   type PermissionStore,
   resolveHostId,
 } from "@/permission"
 import { deny, HANDOFF_SUFFIX } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
+import type { ToolHitlAnnotation } from "./hitl-tier"
+import { getToolHitlTier } from "./hitl-tier-registry"
 import { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
 import type { AgentConfig } from "./types"
 
@@ -66,18 +67,80 @@ const runPreToolUseHook = async (
   return null
 }
 
-/** Resolve the effective HITL tier for a known-registered tool. The unknown-
- *  tool case is guarded upstream by `dispatchTool`; we mirror the legacy
- *  defensive fallback so this helper still has a defined answer if invoked
- *  with a stale registry. */
-const resolveHitlTier = (
+/** Strictness ordering for HITL tiers — composes the tool's own declaration
+ *  with the name-based registry annotation by taking the more restrictive of
+ *  the two. The "more restrictive" axis is well-defined: `hand-off-required`
+ *  is strictest (blocks even with explicit confirm), then `always-confirm`
+ *  (forces a prompt regardless of mode), then `pre-approval-ok` (defers to
+ *  mode), then `none` (allows). Composing this way means a host that adds a
+ *  `hitl-overrides.json` entry can only TIGHTEN the gate, never loosen the
+ *  tool's own declaration — a one-way safety ratchet. */
+const TIER_STRICTNESS: Readonly<Record<HITLTier, number>> = {
+  "hand-off-required": 3,
+  "always-confirm": 2,
+  "pre-approval-ok": 1,
+  none: 0,
+}
+
+const stricter = (a: HITLTier, b: HITLTier): HITLTier =>
+  TIER_STRICTNESS[a] >= TIER_STRICTNESS[b] ? a : b
+
+/** Read the tool's EXPLICIT `hitlTier(input)` declaration, if any. Returns
+ *  `null` when the tool did not declare one (so the caller knows to defer to
+ *  the registry's annotation instead of the fail-closed `inferToolTier`
+ *  default). This is the only way to distinguish "tool said pre-approval-ok"
+ *  from "tool said nothing and the policy inferred always-confirm". */
+const explicitToolTier = (
+  tool: ReturnType<AgentConfig["registry"]["get"]>,
+  input: unknown,
+): HITLTier | null => {
+  if (!tool) return null
+  const duck = tool as { hitlTier?: (i: unknown) => HITLTier }
+  if (typeof duck.hitlTier !== "function") return null
+  return duck.hitlTier(input)
+}
+
+/** Resolve the effective HITL annotation for a known-registered tool by
+ *  composing the registry's name-based annotation with the tool's own
+ *  `hitlTier(input)` declaration (ADR-0047).
+ *
+ *  Composition rules (the registry never silently loosens an EXPLICIT tool
+ *  declaration; absent declarations defer to the registry):
+ *    1. If the tool DECLARED a tier explicitly (`tool.hitlTier(input)` exists),
+ *       compose with the registry by taking the STRICTER of the two — a
+ *       one-way ratchet so a host's `~/.quanta/hitl-overrides.json` can only
+ *       tighten an authored tool.
+ *    2. If the tool did NOT declare a tier, use the registry's annotation
+ *       verbatim. The registry's table is the system's authoritative source
+ *       for tools that didn't self-classify — fixing the secure-by-default
+ *       fallback's tendency to over-escalate well-known orchestration tools
+ *       (`spawn_agent`, `wait_agent`, …) that are intrinsically harmless.
+ *
+ *  The returned annotation carries the registry's `reason` and
+ *  `handoffMessage` whenever the registry's tier wins the composition — so
+ *  a handoff deny block surfaces the human-readable guidance from the
+ *  override / pattern table. */
+const resolveHitlAnnotation = (
   config: AgentConfig,
   call: ToolUseBlock,
-  action: AdmissibilityAction,
-): HITLTier => {
+  _action: AdmissibilityAction,
+): { tier: HITLTier; annotation: ToolHitlAnnotation } => {
   const tool = config.registry.get(call.name)
-  if (tool) return inferToolTier(tool, call.input)
-  return action.isReadOnly ? "none" : "pre-approval-ok"
+  const declared = explicitToolTier(tool, call.input)
+  const registry = getToolHitlTier(call.name, call.input)
+
+  if (declared === null) {
+    // No explicit tool declaration — the registry's annotation is
+    // authoritative. For tools the registry does not know either (unknown
+    // mutating tool, no override), `getToolHitlTier` returns
+    // `pre-approval-ok` (backwards-compat default).
+    return { tier: registry.tier, annotation: registry }
+  }
+
+  // Tool declared a tier — take the stricter of the two (one-way ratchet).
+  const composed = stricter(declared, registry.tier)
+  const annotation: ToolHitlAnnotation = registry.tier === composed ? registry : { tier: composed }
+  return { tier: composed, annotation }
 }
 
 /**
@@ -99,13 +162,17 @@ const runHitlGate = async (
     return deny(call.id, `Action requires human handoff: ${denyReason}${HANDOFF_SUFFIX}`, "handoff")
   }
 
-  const tier = resolveHitlTier(config, call, action)
+  const { tier, annotation } = resolveHitlAnnotation(config, call, action)
   if (tier === "hand-off-required") {
-    return deny(
-      call.id,
-      `Action requires human handoff: ${call.name} is classified hand-off-required${HANDOFF_SUFFIX}`,
-      "handoff",
-    )
+    // Prefer the registry-provided handoffMessage when present (ADR-0047) —
+    // it carries operator-facing guidance that's more useful than the generic
+    // wording. Falls back to the legacy phrasing for tools whose tier comes
+    // from `Tool.hitlTier()` alone (no registry annotation).
+    const body =
+      annotation.handoffMessage !== undefined
+        ? `Action requires human handoff: ${annotation.handoffMessage}${HANDOFF_SUFFIX}`
+        : `Action requires human handoff: ${call.name} is classified hand-off-required${HANDOFF_SUFFIX}`
+    return deny(call.id, body, "handoff")
   }
   if (tier === "always-confirm") {
     if (!config.onConfirm) {

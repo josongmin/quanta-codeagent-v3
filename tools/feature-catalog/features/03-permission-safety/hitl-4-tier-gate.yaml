@@ -1,0 +1,39 @@
+id: hitl-4-tier-gate
+title: HITL 4-tier annotation registry (ADR-0047)
+section: 3
+subsystem: HITL annotation registry + per-command pattern dispatch
+order: 5
+maturity: L3
+status: new
+purpose: |
+  Per-tool + per-command HITL 4-tier annotation registry composed with the
+  tool's own hitlTier() declaration via a one-way ratchet
+  (hand-off-required > always-confirm > pre-approval-ok > none). Host
+  override at ~/.quanta/hitl-overrides.json lets a deployment TIGHTEN tier
+  classifications without forking tools; exec_command/bash route through a
+  central command-pattern table (rm -rf /, mkfs, dd of=/dev/, sudo,
+  history -c => hand-off; git push --force, git push, rm -rf <subdir> =>
+  always-confirm; ls/pwd/cat <file> => none). hand-off-required deny
+  surfaces handoffMessage so the UI sees WHY the agent gave up.
+evidence:
+  code:
+    - src/agent/hitl-tier.ts
+    - src/agent/hitl-tier-registry.ts
+    - src/agent/admissibility-gate.ts
+  adrs: [26, 29, 47]
+  tests:
+    unit:
+      - tests/unit/hitl-tier-registry.test.ts
+      - tests/unit/hitl-tier-gate.test.ts
+    integration:
+      - tests/integration/hitl-tier-dispatch-e2e.test.ts
+    contract: []
+knobs:
+  - config.hitl.enabled (default false; when unset, byte-identical legacy path)
+  - QUANTA_HITL_OVERRIDES (env override path; default ~/.quanta/hitl-overrides.json)
+deliberate_hold: null
+notes: |
+  Composition rule is a one-way ratchet — host overrides can only tighten an
+  authored tool's tier, never loosen it. Orthogonal to ADR-0029 reviewer
+  3-tier (which selects WHO decides when confirmation is required, not
+  WHETHER).

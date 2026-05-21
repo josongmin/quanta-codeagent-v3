@@ -82,6 +82,9 @@ export interface RuntimeConfig {
   /** Sessions root override (`QUANTA_SESSIONS_DIR`). Absent ⇒ session/paths
    *  computes `~/.quanta/sessions`. */
   readonly sessionsDir: string | undefined
+  /** HITL overrides JSON path (`QUANTA_HITL_OVERRIDES`). Absent ⇒
+   *  `agent/hitl-tier-registry` defaults to `~/.quanta/hitl-overrides.json`. */
+  readonly hitlOverridesPath: string | undefined
   /** Tool output cap (`QUANTA_TOOL_OUTPUT_MAX`). Absent ⇒ default in
    *  `tool/output-spill.ts`. */
   readonly toolOutputMaxChars: number | undefined
@@ -112,6 +115,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),
     pricingVersion: stringOrUndef(env["QUANTA_PRICING_VERSION"]),
     sessionsDir: stringOrUndef(env["QUANTA_SESSIONS_DIR"]),
+    hitlOverridesPath: stringOrUndef(env["QUANTA_HITL_OVERRIDES"]),
     toolOutputMaxChars: parsePositiveInt(env["QUANTA_TOOL_OUTPUT_MAX"], "QUANTA_TOOL_OUTPUT_MAX"),
     toolOutputSpillKeep: parsePositiveInt(
       env["QUANTA_TOOL_OUTPUT_SPILL_KEEP"],
