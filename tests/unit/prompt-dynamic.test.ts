@@ -279,10 +279,22 @@ describe("buildTurnContext repo-local rules (Phase 0)", () => {
     expect(text).not.toContain("Repo-local rules")
   })
 
-  test("repoRules block does NOT shift the cached system prefix", () => {
+  test("repoRules activates 4-section preset — base prefix block stays byte-stable", () => {
+    // Claude Desktop 1.7196 `systemPromptSectionCache` pattern: repo-local
+    // rules ride as a SEPARATE cached section (`project_md`) so a CLAUDE.md
+    // edit only invalidates the trailing affected breakpoint while the base
+    // section stays warm. Legacy invariant (no shift at all) is retired —
+    // see ADR-prompt-sections-default-on.
     const withoutRules = buildTurnContext(base()).system
     const withRules = buildTurnContext(base({ repoRules: rules })).system
-    // Repo-local rules ride in the dynamic reminder, NEVER in the cached prefix.
-    expect(withRules).toEqual(withoutRules)
+    // Legacy single-block when no rules.
+    expect(withoutRules).toHaveLength(1)
+    // Sectioned (base + project_md) when rules are present.
+    expect(withRules.length).toBeGreaterThanOrEqual(2)
+    // Base section is identical in both — only the trailing project_md is new.
+    expect(withRules[0]).toEqual(withoutRules[0] as (typeof withRules)[0])
+    // Project_md carries the rule body and is cache:true.
+    expect(withRules[1]?.text).toContain(rules.body)
+    expect(withRules[1]?.cache).toBe(true)
   })
 })

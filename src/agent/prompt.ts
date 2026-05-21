@@ -1,5 +1,10 @@
 import type { Message, SystemBlock } from "@/llm"
 import { resolveAgentMode } from "./mode"
+import {
+  buildSectionedSystemBlocks,
+  fourSectionPreset,
+  validateSectionsCacheBudget,
+} from "./prompt-sections"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
 import { renderWorkingStateBlock, type WorkingState } from "./working-state"
 
@@ -258,6 +263,17 @@ export interface TurnContextInput {
    *  mutated per turn, so it stays a byte-stable cache prefix. Absent ⇒ the
    *  built-in {@link buildSystemPrompt}. */
   system?: string
+  /** Caller-supplied STATIC session context (e.g. tool inventory hash, surface
+   *  flag, install id). Rides the 4-section preset as the `session_ctx`
+   *  breakpoint when present (Claude Desktop 1.7196 pattern). Per-turn dynamic
+   *  data (date, cwd, plan notice) does NOT belong here — that stays in the
+   *  trailing `<system-reminder>` user message. */
+  sessionCtx?: string
+  /** User-supplied STATIC prefix (e.g. global `~/CLAUDE.md` body). When set,
+   *  buildTurnContext activates the 4-section preset and pins `user_append`
+   *  as a distinct cache breakpoint so changes here only invalidate the tail.
+   *  Absent ⇒ legacy single-block prefix (byte-identical). */
+  userAppend?: string
 }
 
 export interface TurnContext {
@@ -388,9 +404,32 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
  * the tail varies.
  */
 export const buildTurnContext = (input: TurnContextInput): TurnContext => {
-  const system: SystemBlock[] = [
-    { type: "text", text: input.system ?? buildSystemPrompt(), cache: true },
-  ]
+  const basePrompt = input.system ?? buildSystemPrompt()
+  // 4-section preset (Claude Desktop 1.7196 `systemPromptSectionCache` mirror)
+  // activates only when the caller supplies repo-local rules text OR a static
+  // user-append; otherwise we stay byte-identical to the legacy single-block
+  // shape so existing callers and their cached prefixes are untouched.
+  const projectMd = input.repoRules?.body
+  const useSectioned =
+    (projectMd !== undefined && projectMd.trim().length > 0) ||
+    (input.userAppend !== undefined && input.userAppend.trim().length > 0) ||
+    (input.sessionCtx !== undefined && input.sessionCtx.trim().length > 0)
+  const system: SystemBlock[] = useSectioned
+    ? (() => {
+        const sections = fourSectionPreset({
+          base: basePrompt,
+          ...(projectMd !== undefined ? { projectMd } : {}),
+          ...(input.sessionCtx !== undefined ? { sessionCtx: input.sessionCtx } : {}),
+          ...(input.userAppend !== undefined ? { userAppend: input.userAppend } : {}),
+        })
+        // Fail-soft cache-budget check: the validator can only return ok:false
+        // here if the preset itself ever exceeds 4 sections, which it cannot by
+        // construction. Kept as a guard so future preset growth surfaces in
+        // dev rather than at the provider's 400-on-too-many-breakpoints.
+        validateSectionsCacheBudget(sections)
+        return buildSectionedSystemBlocks(sections)
+      })()
+    : [{ type: "text", text: basePrompt, cache: true }]
   const dynamic = buildDynamicContext(input)
   const messages: Message[] = [...input.baseMessages]
   if (dynamic !== undefined) {
