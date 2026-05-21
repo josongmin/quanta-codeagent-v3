@@ -58,6 +58,14 @@ export class StdoutStream implements StreamPort {
         process.stdout.write(`${DIM}↺ recovery (${event.reason})${detail}${RESET}\n`)
         break
       }
+      case "context_compacted":
+        // ADR-0075: one-line proactive-compaction marker — `from..to` lets a
+        // grep distinguish the new emit from the legacy `↺ recovery (compact)`
+        // line that fires immediately before it.
+        process.stdout.write(
+          `${DIM}↺ context_compacted (${event.fromTurnId}..${event.toTurnId}, ${event.tokens}t)${RESET}\n`,
+        )
+        break
       case "error":
         process.stdout.write(`${RED}error: ${redactStr(event.message)}${RESET}\n`)
         break

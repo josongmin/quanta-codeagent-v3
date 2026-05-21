@@ -17,6 +17,11 @@ import {
 } from "./closeout-guard"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
+import {
+  appendSummary,
+  type ConversationSummaryArchive,
+  createArchive,
+} from "./conversation-summary-archive"
 import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
 import { buildSessionFeatures } from "./features"
@@ -469,16 +474,51 @@ const resolveMemoryContext = async (
 }
 
 /** Proactive top-of-turn compaction when compaction config is present. No-op
- *  (same array reference) otherwise, so unconfigured suites are unaffected. */
+ *  (same array reference) otherwise, so unconfigured suites are unaffected.
+ *
+ *  ADR-0075 (Cursor absorption): when `config.onPreCompact` is set the
+ *  threshold-and-boundary-passing case routes through that callback before the
+ *  summarizer runs. `defer_one_turn` skips THIS turn (the breaker still
+ *  observes no progress; the cycle re-evaluates next turn). When
+ *  `config.compaction.archive === true` a session-scoped
+ *  {@link ConversationSummaryArchive} is updated and a `context_compacted`
+ *  AgentEvent is emitted IMMEDIATELY AFTER the legacy
+ *  `recovery:{reason:"compact"}` line — so existing consumers see the same
+ *  ordered marker and new consumers can correlate the archive entry. Default-
+ *  OFF: with no archive flag the archive arg is undefined and the new emit
+ *  path is fully skipped (byte-identical). */
 const maybeCompact = async (
   config: AgentConfig,
   system: SystemPromptInput,
   wm: WorkingMemory<Message>,
   breaker: CompactionBreaker | undefined,
+  archive: ConversationSummaryArchive | undefined,
+  turn: number,
 ): Promise<void> => {
   if (!config.compaction) return
+  // Capture the optional callback into a local so the spread below carries a
+  // narrowed (non-undefined) reference into the closure without a non-null
+  // assertion. Absent ⇒ `preflight` is omitted entirely from `compactIfNeeded`'s
+  // input (byte-identical legacy fast-path).
+  const onPreCompact = config.onPreCompact
   const snapshot = [...wm.snapshot()]
   const before = estimateTokens(snapshot)
+  // ADR-0075 — build the {from,to}TurnId pair UP FRONT so a successful
+  // compaction can stamp the archive without re-deriving identifiers from a
+  // mutated `wm`. `toTurnId` is the turn we're entering; `fromTurnId` is the
+  // earliest still-archivable turn id. The loop has no per-message turn-id
+  // mechanism today, so we use the run's turn counter as a stable string and
+  // record the same `t<n>` for both ends — the archive consumer cares about
+  // grouping + ordering across the session, not granularity within a turn.
+  // (Future ADR-0034 wiring may upgrade these to real envelope turn_ids
+  // without a contract break.)
+  const turnId = config.run?.turn !== undefined ? `t${config.run.turn}` : `t${turn}`
+  // Stable for the from-side: every successful compaction folds everything
+  // older than the suffix, so the first-archive entry's `fromTurnId` is the
+  // session origin, and subsequent ones cover the gap between archives.
+  // We derive that gap from the LAST archived entry — falling back to the
+  // session origin `t0` when none exists.
+  const fromTurnId = archive?.summaries.at(-1)?.toTurnId ?? "t0"
   // R-Phase1 P0-2: proactive compaction failures (summarizer LLM throws / times
   // out / rate-limits) must surface as an `error` AgentEvent for trajectory +
   // probe, NOT propagate as an uncaught exception that aborts the turn before
@@ -501,6 +541,25 @@ const maybeCompact = async (
       ...(config.compaction.keepRecentTurns !== undefined
         ? { keepRecentTurns: config.compaction.keepRecentTurns }
         : {}),
+      // ADR-0075 — Cursor HITL hook. Absent `onPreCompact` ⇒ NO preflight
+      // attribute set (compactIfNeeded fast-paths past the await, byte-
+      // identical legacy). When set, the host gets the typed
+      // {@link PreCompactRequestQuery}; the loop maps its
+      // {@link PreCompactDecision} 1-to-1 to the `compactIfNeeded` preflight
+      // protocol. Any exception thrown from the host callback propagates
+      // into the surrounding try/catch and degrades to the existing
+      // proactive-error path (compaction deferred this turn).
+      ...(onPreCompact !== undefined
+        ? {
+            preflight: async (q: {
+              currentTokens: number
+              threshold: number
+              proposedKeep: number
+              proposedSummaryTokens: number
+            }): Promise<"approve" | "defer_one_turn" | "force_now"> =>
+              onPreCompact({ turnId, ...q }),
+          }
+        : {}),
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
@@ -521,7 +580,42 @@ const maybeCompact = async (
     // that fails to meaningfully shrink is a no-progress strike.
     breaker?.recordProactive(before, estimateTokens(result.messages))
     wm.replace(result.messages)
+    // ADR-0075 archive + marker. Strictly AFTER `wm.replace`: a subscriber
+    // that reacts to `context_compacted` by reading `wm` (e.g. a debug UI
+    // snapshotting "history at compaction time") must see the post-compaction
+    // buffer, not a half-applied state. Same reason `recordProactive` runs
+    // before `replace` — the breaker observes the SIZES and the marker
+    // observes the result. The legacy recovery emit comes FIRST so consumers
+    // that only watch the existing channel keep working byte-identically.
+    if (archive !== undefined) {
+      const summaryText = extractSummaryText(result.messages[0])
+      const entry = {
+        fromTurnId,
+        toTurnId: turnId,
+        summary: summaryText,
+        ts: Date.now(),
+        tokens: result.summaryTokens,
+      }
+      appendSummary(archive, entry)
+      config.stream.emit({ type: "context_compacted", ...entry })
+    }
   }
+}
+
+/** Pull the human-readable summary text out of the synthetic
+ *  `<conversation summary>` user message that `compactIfNeeded` produces.
+ *  Defensive: returns `""` for any malformed shape — the archive caller
+ *  still records the entry (the loop's invariant is that
+ *  `result.compacted:true` implies a synthetic text block, but we don't want a
+ *  one-off LLM oddity to throw on the archive path). The strip preserves the
+ *  exact text the summarizer emitted; we drop only the `<conversation summary>\n`
+ *  wrapper because it is presentational, not part of the archive payload. */
+const SUMMARY_WRAPPER_RE = /^<conversation summary>\n/
+const extractSummaryText = (msg: Message | undefined): string => {
+  if (!msg || msg.content.length === 0) return ""
+  const first = msg.content[0]
+  if (!first || first.type !== "text") return ""
+  return first.text.replace(SUMMARY_WRAPPER_RE, "")
 }
 
 /** The STATIC system blocks for this session (no per-turn dynamic context);
@@ -699,9 +793,11 @@ const prepareTurnContext = async (
   breaker: CompactionBreaker | undefined,
   activeSkills: { name: string; description: string }[] | undefined,
   workingState: WorkingStateSession | undefined,
+  archive: ConversationSummaryArchive | undefined,
+  turn: number,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder)
-  await maybeCompact(config, staticSystemFor(config), wm, breaker)
+  await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
   // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
@@ -904,6 +1000,8 @@ const runTurn = async (
   activeSkills: { name: string; description: string }[] | undefined,
   workingState: WorkingStateSession | undefined,
   collector: TurnWorkMetricsCollector | undefined,
+  archive: ConversationSummaryArchive | undefined,
+  turn: number,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -912,7 +1010,16 @@ const runTurn = async (
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
-    const ctx = await prepareTurnContext(config, wm, recorder, breaker, activeSkills, workingState)
+    const ctx = await prepareTurnContext(
+      config,
+      wm,
+      recorder,
+      breaker,
+      activeSkills,
+      workingState,
+      archive,
+      turn,
+    )
     const result = await streamConsume(
       config,
       ctx.messages,
@@ -1196,6 +1303,14 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-
   // identical for callers without the opt-in).
   const workingState = features.workingState
+  // ADR-0075 — Cursor-style ConversationSummaryArchive. Built ONLY when
+  // `cfg.compaction?.archive === true`; absent ⇒ `undefined`, no allocation,
+  // and `maybeCompact` skips the archive-append + `context_compacted` emit
+  // path entirely (byte-identical to the pre-archive loop). One archive per
+  // session lifetime (never shared across `runAgent` invocations) — the loop
+  // owns it.
+  const summaryArchive: ConversationSummaryArchive | undefined =
+    cfg.compaction?.archive === true ? createArchive() : undefined
 
   const finish = async (
     reason: StopReason,
@@ -1332,6 +1447,8 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         activeSkills,
         workingState,
         workCollector,
+        summaryArchive,
+        turn,
       )
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"

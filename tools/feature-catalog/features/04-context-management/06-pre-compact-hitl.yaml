@@ -1,0 +1,28 @@
+id: pre-compact-hitl
+title: PreCompactRequestQuery (HITL)
+section: 4
+subsystem: 압축 HITL + summary archive (Cursor 흡수)
+order: 6
+maturity: L4
+status: stable
+purpose: 압축 직전 호스트에 HITL 질의 (approve/defer/force) + ConversationSummaryArchive 슬라이딩 윈도우 + context_compacted AgentEvent 마커
+evidence:
+  code:
+    - src/agent/types.ts
+    - src/agent/compaction.ts
+    - src/agent/conversation-summary-archive.ts
+    - src/agent/loop.ts
+    - src/stream/types.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/stream/adapters/stdout.ts
+  adrs: [75]
+  tests:
+    unit:
+      - tests/unit/conversation-summary-archive.test.ts
+      - tests/unit/compaction-precompact.test.ts
+      - tests/unit/compaction-archive-loop.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'default-OFF (onPreCompact / compaction.archive 미설정 시 byte-identical legacy). turn_id는 현재 t<n> 합성, ADR-0034 envelope의 진짜 turn_id wiring은 follow-up.'

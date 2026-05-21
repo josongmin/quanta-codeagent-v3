@@ -26,6 +26,21 @@ export type AgentEvent =
     }
   // RFC-0002 §5.2 `recovery` — backoff/compact/nudge/empty/malformed traces.
   | { type: "recovery"; reason: string; detail?: string }
+  // ADR-0075: Cursor-style proactive-compaction marker. Emitted ALONGSIDE the
+  // existing `recovery:{reason:"compact"}` event (so legacy consumers stay
+  // working byte-identically — the recovery emit precedes this one in the
+  // same call site) when `compaction.archive:true` is configured. Carries the
+  // archive entry payload (fromTurnId..toTurnId + summary + ts + tokens) so a
+  // session jsonl recorder / UI can render the compaction history without
+  // re-parsing the synthetic `<conversation summary>` user message.
+  | {
+      type: "context_compacted"
+      fromTurnId: string
+      toTurnId: string
+      summary: string
+      ts: number
+      tokens: number
+    }
   | { type: "error"; message: string }
   | {
       type: "usage"

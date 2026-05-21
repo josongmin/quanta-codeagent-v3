@@ -7,6 +7,13 @@ export {
   DEFAULT_COMPACTION_BREAKER_CAPS,
 } from "./compaction-breaker"
 export {
+  appendSummary,
+  archivedTokens,
+  type ConversationSummaryArchive,
+  type ConversationSummaryEntry,
+  createArchive,
+} from "./conversation-summary-archive"
+export {
   type HandoffRequiredEvent,
   type HITLTier,
   type HitlTier,
@@ -132,7 +139,13 @@ export {
   type SubmissionOp,
   submissionFromMessages,
 } from "./submission"
-export type { AgentConfig, AgentOutcome, StopReason } from "./types"
+export type {
+  AgentConfig,
+  AgentOutcome,
+  PreCompactDecision,
+  PreCompactRequestQuery,
+  StopReason,
+} from "./types"
 export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
 export {
   type Blocker,

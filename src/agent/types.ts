@@ -22,6 +22,48 @@ import type { StopCategory } from "./stop-category"
 import type { Submission } from "./submission"
 import type { WorkMetricsSink } from "./work-metrics-collector"
 
+/**
+ * Cursor-style pre-compact HITL query payload (ADR-0075). Built by the loop at
+ * the moment a proactive compaction is about to fire and passed to
+ * `AgentConfig.onPreCompact`. Fields are POST-decision proposals — `proposedKeep`
+ * is the keepRecentTurns that will be used, `proposedSummaryTokens` is a
+ * heuristic estimate based on the summarizable prefix size (so a UI can warn
+ * "this will summarize ~12k tokens of history").
+ *
+ * `turnId` is the canonical turn identifier (the loop already stamps
+ * `RunContext.turn` per turn; the query uses a stringified form to stay
+ * stable across an eventual id-shape change). When no `RunContext` is wired,
+ * the loop synthesizes a deterministic `t<n>` id from the turn counter so the
+ * surface always sees a string.
+ */
+export interface PreCompactRequestQuery {
+  /** Stable identifier for the turn whose top is firing the compaction. */
+  turnId: string
+  /** Estimated tokens of the current transcript (chars/4 heuristic) — the
+   *  signal that crossed the threshold. */
+  currentTokens: number
+  /** The configured / resolved threshold that was crossed. */
+  threshold: number
+  /** keepRecentTurns proposed by the loop — typically the configured value. */
+  proposedKeep: number
+  /** Heuristic estimate of how much transcript will be folded into the
+   *  summary, in tokens — i.e. the size of the SUMMARIZABLE PREFIX (not the
+   *  size of the produced summary, which is typically a fraction of this).
+   *  Surfaced for UI prompts like "this will summarize up to ~Nk tokens of
+   *  history". Not used by the loop. */
+  proposedSummaryTokens: number
+}
+
+/**
+ * User decision returned from `AgentConfig.onPreCompact`:
+ *   - `"approve"` — proceed with this compaction normally;
+ *   - `"defer_one_turn"` — skip the compaction this turn; re-evaluate next turn;
+ *   - `"force_now"` — proceed (same loop effect as `approve`) but with an
+ *     explicit "user forced" marker that downstream emit/log layers may surface
+ *     differently. The loop itself treats `force_now` and `approve` identically.
+ */
+export type PreCompactDecision = "approve" | "defer_one_turn" | "force_now"
+
 export interface AgentConfig {
   llm: LLMPort
   registry: ToolRegistry
@@ -93,7 +135,35 @@ export interface AgentConfig {
      * summarizer can degrade resumed-context fidelity — opt in deliberately.
      */
     summarizerLlm?: LLMPort
+    /**
+     * Cursor-style sliding-window archive of per-compaction summaries
+     * (ADR-0075). When `true`, the loop builds a session-scoped
+     * {@link ConversationSummaryArchive} and appends a
+     * {@link ConversationSummaryEntry} after every proactive compaction; an
+     * `event_msg:context_compacted` AgentEvent is emitted at the same seam so
+     * a session jsonl recorder / UI can render the compaction history.
+     * Absent/`false` ⇒ no archive constructed, no event emitted, the loop is
+     * byte-for-byte identical to the pre-archive path.
+     */
+    archive?: boolean
   }
+  /**
+   * Cursor-style pre-compact HITL hook (ADR-0075). When the proactive
+   * compaction path is ABOUT to fire (token threshold crossed AND a
+   * summarizable boundary exists), the loop builds a
+   * {@link PreCompactRequestQuery} and awaits this callback. Decisions:
+   *   - `"approve"` (default when this callback is ABSENT, preserving
+   *      byte-identical legacy) — proceed with the compaction;
+   *   - `"defer_one_turn"` — skip THIS turn's compaction; the proactive path
+   *      will be re-evaluated next turn (the breaker still observes the no-op);
+   *   - `"force_now"` — proceed regardless of any host-side deferral logic
+   *      (the loop treats it like `approve`; the distinct value is kept so a
+   *      UI can record "user explicitly forced it").
+   * Errors thrown from the callback are caught and surfaced as an `error`
+   * AgentEvent, then the compaction is deferred this turn (fail-safe: never
+   * fold history without an answer). Absent ⇒ auto-approve, byte-identical.
+   */
+  onPreCompact?: (query: PreCompactRequestQuery) => Promise<PreCompactDecision>
   /**
    * In-process hook bus (RFC §13 Q1). Absent ⇒ no events emitted, zero
    * overhead, loop byte-for-byte unchanged.

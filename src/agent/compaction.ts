@@ -127,6 +127,29 @@ export interface CompactInput {
   system: SystemPromptInput
   thresholdTokens?: number
   keepRecentTurns?: number
+  /**
+   * Cursor-style pre-compact HITL hook (ADR-0075). When provided, the
+   * summarizer is consulted ONLY AFTER `preflight` resolves. The seam stays
+   * inside `compactIfNeeded` (vs. the loop) so unit tests can exercise the
+   * full preflight→summarize→archive chain without a runAgent harness, and
+   * the `proposedSummaryTokens` heuristic stays co-located with the prefix-
+   * size computation. Absent ⇒ auto-approve, byte-identical (no callback
+   * allocated, no extra await).
+   *
+   * Return values:
+   *   - `"approve"` / `"force_now"` ⇒ proceed (the loop treats both as approve);
+   *   - `"defer_one_turn"` ⇒ skip THIS compaction; `compactIfNeeded` returns
+   *      `{compacted:false}` and the loop's breaker observes the no-op.
+   *
+   * A thrown error is propagated to the caller (the loop wraps in try/catch
+   * and degrades gracefully via the existing proactive-compaction error path).
+   */
+  preflight?: (q: {
+    currentTokens: number
+    threshold: number
+    proposedKeep: number
+    proposedSummaryTokens: number
+  }) => Promise<"approve" | "defer_one_turn" | "force_now">
 }
 
 export type CompactResult =
@@ -272,11 +295,20 @@ export const reactiveCompact = async (
 /**
  * Compact `messages` if over the token threshold. Behavior-preserving when
  * under: returns the same array with `compacted:false`.
+ *
+ * Cursor-style HITL hook (ADR-0075): when `input.preflight` is provided, the
+ * loop checks the threshold + boundary first (cheap pure-arithmetic guards) and
+ * ONLY THEN consults the host. A `"defer_one_turn"` reply short-circuits to
+ * `{compacted:false}` (the loop's breaker observes the no-op via the same
+ * before/after token comparison); `"approve"`/`"force_now"` proceed to the
+ * summarizer. Absent preflight ⇒ auto-approve, NO extra await, NO callback
+ * allocation — byte-identical to the pre-hook path.
  */
 export const compactIfNeeded = async (input: CompactInput): Promise<CompactResult> => {
   const threshold = resolveThreshold(input.thresholdTokens)
   const keepTurns = input.keepRecentTurns ?? DEFAULT_KEEP_TURNS
-  if (estimateTokens(input.messages) <= threshold) {
+  const currentTokens = estimateTokens(input.messages)
+  if (currentTokens <= threshold) {
     return { compacted: false, messages: input.messages }
   }
   const boundary = findBoundary(input.messages, keepTurns)
@@ -286,6 +318,25 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
   }
   const prefix = input.messages.slice(0, boundary)
   const suffix = input.messages.slice(boundary)
+  // ADR-0075 — preflight HITL. Ordered AFTER the cheap threshold + boundary
+  // guards so a degenerate "one giant turn" never wakes the host UI for a
+  // decision that can't matter (compaction would no-op anyway). The proposed
+  // summary-tokens estimate is the chars/4 heuristic over the prefix (the
+  // actual produced summary is typically a fraction of this, but the upper
+  // bound is what the UI cares about: "this will summarize up to ~Nk tokens").
+  if (input.preflight !== undefined) {
+    const decision = await input.preflight({
+      currentTokens,
+      threshold,
+      proposedKeep: keepTurns,
+      proposedSummaryTokens: estimateTokens(prefix),
+    })
+    if (decision === "defer_one_turn") {
+      return { compacted: false, messages: input.messages }
+    }
+    // `approve` and `force_now` both fall through to the summarizer — the
+    // loop differentiates them only for emit/log purposes.
+  }
   const summary = await summarize(input.llm, prefix)
   const synthetic: Message = {
     role: "user",

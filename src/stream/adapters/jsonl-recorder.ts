@@ -203,6 +203,16 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   tool_progress: "tool_progress",
   tool_result: "tool_result",
   recovery: "recovery",
+  // ADR-0075: the dedicated `context_compacted` AgentEvent maps onto the
+  // existing trajectory `recovery` kind (same family — a same-turn no-progress
+  // recovery point) so we DON'T need a new TrajectoryKind (which would
+  // ripple through the redaction policy + every probe consumer). The
+  // archive-payload fields (fromTurnId/toTurnId/summary/ts/tokens) ride in
+  // `data` via `dataOf` and stay 1st-class JSON. The legacy
+  // `recovery:{reason:"compact",detail:"proactive"}` line is emitted FIRST
+  // at the same loop seam, so a consumer that only watches the legacy
+  // channel still sees compactions byte-identically.
+  context_compacted: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -245,6 +255,19 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
     case "recovery":
       // RFC-0002 §5.2 recovery contract: reason required, detail optional.
       return { reason: e.reason, ...(e.detail !== undefined ? { detail: e.detail } : {}) }
+    case "context_compacted":
+      // ADR-0075: archive entry payload — fromTurnId..toTurnId + summary +
+      // ts + tokens. `reason:"context_compacted"` is added so this
+      // recovery-kind line is greppable apart from the legacy
+      // `reason:"compact"` line that fires immediately before it.
+      return {
+        reason: "context_compacted",
+        fromTurnId: e.fromTurnId,
+        toTurnId: e.toTurnId,
+        summary: e.summary,
+        ts: e.ts,
+        tokens: e.tokens,
+      }
     case "error":
       return { message: e.message }
     case "usage":
