@@ -34,6 +34,7 @@ import {
 import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
 import { buildSessionFeatures } from "./features"
+import type { IdeSnapshot } from "./ide-context"
 import { type PersistDeps, type PlacedRecord, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
@@ -849,6 +850,7 @@ const prepareTurnContext = async (
   archive: ConversationSummaryArchive | undefined,
   turn: number,
   citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
+  ideSnapshot: IdeSnapshot | null | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder, citationSink)
   await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
@@ -869,6 +871,12 @@ const prepareTurnContext = async (
     // rendered reminder (byte-identical for skill-less sessions).
     ...(activeSkills !== undefined ? { activeSkills } : {}),
     ...(wsSnapshot !== undefined ? { workingState: wsSnapshot } : {}),
+    // ADR-0080 — IDE context. Snapshot is captured ONCE at turn-entry in
+    // `runAgentInner` and forwarded through every same-turn retry of this
+    // turn so the rendered block stays stable across the retry budget.
+    // `undefined` (no provider wired) ⇒ key omitted ⇒ buildTurnContext
+    // emits no `<ide-context>` block (byte-identical).
+    ...(ideSnapshot !== undefined ? { ideSnapshot } : {}),
   })
 }
 
@@ -1057,6 +1065,7 @@ const runTurn = async (
   archive: ConversationSummaryArchive | undefined,
   turn: number,
   citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
+  ideSnapshot: IdeSnapshot | null | undefined,
   /** ADR-0077: capture sink — invoked on every successful sampling-request so
    *  the outer loop can surface the LAST turn's snapshot on AgentOutcome. */
   onTurnTiming?: (t: TurnTiming) => void,
@@ -1078,6 +1087,7 @@ const runTurn = async (
       archive,
       turn,
       citationSink,
+      ideSnapshot,
     )
     const result = await streamConsume(
       config,
@@ -1525,6 +1535,26 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // helper above runAgent — keeps the runAgent body free of new branches.
     const { collector: workCollector, turnId: workTurnId } = buildWorkMetricsResources(cfg)
 
+    // ADR-0080 — IDE context provider seam. Snapshot is captured ONCE at
+    // turn-entry (NOT per same-turn retry) so the rendered `<ide-context>`
+    // block stays stable across the retry budget — the model never sees the
+    // editor "shift" between attempts of the SAME turn. A reject/throw is
+    // caught at the boundary and surfaced as an `error` AgentEvent; the
+    // snapshot then degrades to `null` so the loop proceeds (an IDE bug must
+    // not abort the turn). With no provider wired the variable stays
+    // `undefined` ⇒ buildTurnContext omits the `ideSnapshot` key entirely
+    // and the loop is byte-identical to the pre-ADR path.
+    let ideSnapshot: IdeSnapshot | null | undefined
+    if (cfg.ideContextProvider !== undefined) {
+      try {
+        ideSnapshot = await cfg.ideContextProvider.snapshot(cfg.signal)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        stream.emit({ type: "error", message: `ide-context provider failed: ${message}` })
+        ideSnapshot = null
+      }
+    }
+
     // Codex 10-step span tree — `session_task.turn`. Opens before the per-
     // turn work begins, closes after `runTurn` returns (success OR failure).
     // The turnId is derived from `activeTurnRef.currentTurn` when set (reuse
@@ -1558,6 +1588,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         summaryArchive,
         turn,
         citationSink,
+        ideSnapshot,
         (t) => {
           lastTurnTiming = t
         },

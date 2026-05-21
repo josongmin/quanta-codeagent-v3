@@ -1,0 +1,58 @@
+id: ide-context-provider-seam
+title: IDE context provider seam (ADR-0080)
+section: 1
+subsystem: 턴 라이프사이클 — host→agent IDE 신호 (Tier-1 IDE host enablement)
+order: 80
+maturity: L3
+status: new
+purpose: |
+  IDE host (VS Code extension, MCP IDE bridge 등) 가 turn-by-turn 에디터 상태를
+  모델에 보낼 수 있는 단일 진입점. 신규 `src/agent/ide-context.ts` 의 닫힌 shape
+  `IdeSnapshot` (activeFile/openTabs/selection/diagnostics, 모든 필드 optional)
+  + `IdeContextProvider.snapshot(signal)` 포트. `AgentConfig.ideContextProvider`
+  미설정 ⇒ 루프는 provider를 호출하지 않고 buildTurnContext spread에서 키 자체가
+  생략되어 렌더링 경로 미도달 ⇒ byte-identical 레거시 (RFC §1.2 default-OFF).
+  설정 ⇒ runAgentInner 턴 진입부에서 ONCE 캡처 (same-turn retry는 동일 스냅샷
+  재사용) → `renderIdeContext` 가 deterministic `<ide-context>` 블록 생성
+  (sections 는 해당 필드 present일 때만) → buildTurnContext가 마지막 user 메시지의
+  첫 text block 앞에 prepend (호출자 baseMessages는 mutate 안 함, 얕은 복사 슬롯
+  교체). 트레일링 `<system-reminder>` 보다 앞 (user-side trust attribution).
+  모든 사용자-공급 fragment (paths, selection text, diagnostic messages, tab paths)
+  는 기존 `escapeReminderBoundary` 통과 — `</system-reminder>` 위조 차단.
+  Provider 가 throw/reject ⇒ `stream.emit({type:"error", message:"ide-context
+  provider failed: …"})` + ideSnapshot=null 로 graceful degrade (boundary, NOT
+  fallback). Provider 가 `null` 반환 ⇒ "IDE 미연결" 닫힌 신호 ⇒ 블록 미렌더.
+evidence:
+  code:
+    - src/agent/ide-context.ts
+    - src/agent/types.ts
+    - src/agent/prompt.ts
+    - src/agent/loop.ts
+  adrs: [80]
+  tests:
+    unit:
+      - tests/unit/agent/ide-context-render.test.ts
+    integration:
+      - tests/integration/ide-context-provider-wire.test.ts
+    contract: []
+knobs:
+  - name: ideContextProvider
+    type: IdeContextProvider | undefined
+    default: undefined
+    effect: |
+      undefined ⇒ provider 미호출, `<ide-context>` 미렌더, byte-identical 레거시.
+      설정 ⇒ 매 턴 진입 시 `snapshot(cfg.signal)` 1회 호출하여 렌더링.
+deliberate_hold:
+  reason: |
+    seam만 박힘. 실제 VS Code extension / MCP IDE bridge / Tauri sidecar 구현체는
+    surface 별로 별도 PR. subagent runner는 IDE provider를 자동 상속시키지 않음
+    (의도적 — subagent는 격리된 sub-conversation).
+  promotion_path: |
+    VS Code extension (또는 MCP IDE bridge) 1개가 실제 데이터로 와이어업되고,
+    sessionId 별 IDE 컨텍스트가 jsonl envelope 에 기록되면 L4.
+notes: |
+  Negative invariants:
+   - IDE 상태를 `<system-reminder>` 안에 넣지 말 것 (trust boundary).
+   - Provider 부재 시 IDE 블록 추정 금지 (no heuristic).
+   - `IdeSnapshot` shape 에 임의 키 추가 금지 (closed shape).
+   - Same-turn retry 마다 `snapshot()` 재호출 금지 (한 턴 = 한 스냅샷).

@@ -3,8 +3,8 @@ title: Agent-loop branch hardening — refusal / thinking carry-over / deny-and-
 section: 1
 subsystem: 턴 라이프사이클 — branch 가드 (gap analysis, ADR-0076)
 order: 76
-maturity: L3
-status: new
+maturity: L4
+status: refined
 purpose: |
   docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent
   loop의 4개 결함 중 3개 shipped + 1개 deferred. Gap-1 — Provider refusal/abnormal stop:
@@ -24,11 +24,22 @@ purpose: |
   시 deny DispatchResult를 emit하면서 steer를 result envelope steerInjection?: string에 attach.
   Gap-3 — Submission op dispatcher: 6-variant union shape는 존재하나 entry-point 분기는 deferred
   (loop.ts 동시 co-development 회피).
+
+  Hell-gate hardening (181 hell case + 2 e2e smoke): 6 신규 hell-test file이
+  3개 추가 invariant를 PIN — (i) signature_delta가 thinking_delta 없이 도착하면
+  ThinkingBlock 합성하지 않고 silently drop (orphan은 후속 thinking에 back-attach
+  안 함), (ii) ConfirmDecision normalize는 `{__proto__:{decision:"allow"}}`형
+  prototype-pollution 입력에 대해 보호적으로 deny로 narrow, (iii) OpenAI
+  content_filter finish_reason은 last-wins. 부분 와이어링(steerInjection emit OK /
+  loop consumer 미연결)은 G-1~G-1d 4-test partial-wiring guard로 파일 grep 기반
+  regression pin — 향후 wiring PR이 guard를 의식적으로 갱신하지 않으면 자동 실패.
 evidence:
   code:
     - src/agent/loop.ts
     - src/agent/confirm-decision.ts
     - src/agent/admissibility-gate.ts
+    - src/agent/streaming-dispatch.ts
+    - src/agent/dispatch-types.ts
     - src/agent/types.ts
     - src/llm/types.ts
     - src/llm/assemble.ts
@@ -42,18 +53,36 @@ evidence:
       - tests/unit/llm/openai-thinking.test.ts
       - tests/unit/llm/assemble-thinking.test.ts
       - tests/unit/agent/confirm-decision.test.ts
-    integration: [tests/integration/admissibility-deny-steer.test.ts]
+      - tests/unit/recovery-hell.test.ts
+      - tests/unit/llm/assemble-thinking-hell.test.ts
+      - tests/unit/llm/anthropic-thinking-hell.test.ts
+      - tests/unit/llm/openai-thinking-hell.test.ts
+      - tests/unit/agent/confirm-decision-hell.test.ts
+    integration:
+      - tests/integration/admissibility-deny-steer.test.ts
+      - tests/integration/admissibility-deny-steer-hell.test.ts
     contract: []
 knobs: []
 deliberate_hold:
   reason: |
-    Gap-1 / Gap-2 / Gap-4는 모두 shipped + 테스트. Gap-3(Submission op dispatcher의 loop
-    entry-point 분기 — interrupt → AbortController.abort, cancel_subagent →
-    conversation-action.decideAction, reload_user_config → 턴 경계 재로드, shutdown →
-    graceful close)은 loop.ts 동시 작업 충돌 회피로 deferred. deny_and_steer의 loop
-    steerInjection consumer(다음 턴 user message로 hand)는 ADR-0076 §Integration seam
-    기술됐으나 미배선(Gap-3 dispatch refactor에 dependency).
+    Gap-1 / Gap-2 / Gap-4는 모두 shipped + 테스트 + 헬게이트 + e2e smoke. Gap-3
+    (Submission op dispatcher의 loop entry-point 분기 — interrupt →
+    AbortController.abort, cancel_subagent → conversation-action.decideAction,
+    reload_user_config → 턴 경계 재로드, shutdown → graceful close)은 loop.ts
+    동시 작업 충돌 회피로 deferred. deny_and_steer의 loop steerInjection
+    consumer(다음 턴 user message로 hand)는 ADR-0076 §Integration seam 5-step
+    patch로 spec됐으나 미배선 — G-1~G-1d partial-wiring guard로 PIN.
   promotion_path: |
-    loop.ts quiescent 시 Submission op dispatcher entry-point 분기를 추가하고 steerInjection을
-    next-turn user message로 consume하면 L4.
-notes: 'tikitaka 14-refusal-handled smoke fixture로 Gap-1 end-to-end 회귀 가드. ThinkingBlock의 wire 재직렬화는 Anthropic signature / OpenAI re-encode 양쪽 어댑터 contract test로 보장.'
+    loop.ts quiescent 시 Submission op dispatcher entry-point 분기를 추가하고
+    steerInjection을 next-turn user message로 consume + G-1~G-1d guard 갱신하면
+    L5 (Gap-3 + Gap-4 양쪽 closure).
+notes: |
+  e2e 회귀 가드: tikitaka smoke fixture 2종 — 14-refusal-handled (Gap-1 happy
+  path: refusal → terminal error, no retry consumption) + 15-refusal-mid-tool
+  (refusal과 tool_use가 같은 stream에 공존하는 critical invariant: refusal이
+  tool_use를 트리거하지 않고 즉시 terminal). 181 hell-case 분포:
+  recovery-hell(30) · assemble-thinking-hell(27) · anthropic-thinking-hell(21) ·
+  openai-thinking-hell(21) · confirm-decision-hell(55) · admissibility-deny-steer-hell(27).
+  ThinkingBlock의 wire 재직렬화는 Anthropic signature / OpenAI re-encode 양쪽
+  어댑터 contract test로 보장. 추가 PIN 3종 — orphan signature_delta silent
+  drop, prototype-pollution narrow-to-deny, OpenAI content_filter last-wins.

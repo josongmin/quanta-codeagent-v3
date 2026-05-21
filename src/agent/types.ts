@@ -15,6 +15,7 @@ import type { ConfirmDecision } from "./confirm-decision"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
+import type { IdeContextProvider } from "./ide-context"
 import type { PlanExitPort } from "./plan-exit-flow"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
@@ -412,6 +413,21 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * a resumed session), so passing both is a SUPERSET, not a contradiction.
    */
   submission?: Submission
+  /**
+   * ADR-0080 IDE context provider seam. Absent ⇒ no snapshot is captured per
+   * turn, no `<ide-context>` block is rendered, and the loop is byte-identical
+   * to the pre-ADR path. When present, the loop awaits
+   * `ideContextProvider.snapshot(turnSignal)` ONCE per turn entry; a non-null
+   * snapshot is deterministically rendered (see `renderIdeContext`) and
+   * PREPENDED to the latest user message body (NOT inside the trailing
+   * `<system-reminder>` — IDE state is user-side context, not a harness
+   * reminder). Provider rejections/throws are caught at the boundary, logged
+   * via `stream.emit({type:"error", ...})`, and treated as `null` — an IDE
+   * bug must not crash the turn (this is a boundary, NOT a fallback for
+   * missing data). The provider receives the turn's AbortSignal and is
+   * responsible for honoring it.
+   */
+  ideContextProvider?: IdeContextProvider
 }
 
 export type StopReason = "completed" | "max_turns" | "aborted" | "error"
