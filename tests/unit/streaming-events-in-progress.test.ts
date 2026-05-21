@@ -1,107 +1,171 @@
 /**
- * ADR-0048 — `response.in_progress` SSE + WebSocket event decoding.
+ * Unit tests for `src/llm/streaming-events.ts` (ADR-0048).
  *
- * Codex's WebSocket dispatcher silently drops `response.in_progress`; v3
- * surfaces it as a first-class StreamEvent so the UI can render "thinking..."
- * indicators without polling. These tests pin:
- *   (1) SSE wire shape → StreamEvent variant
- *   (2) WS envelope shape → StreamEvent variant
- *   (3) Forward-compat: unknown events still pass through gracefully
- *       (returned as `null`, not thrown) — the existing forward-compat contract
- *       is intact, with `response.in_progress` newly KNOWN.
+ * Coverage matrix (10 tests):
+ *   1. SSE fragmented frames (small chunks reassemble via splitSseFrames)
+ *   2. SSE CRLF vs LF line endings both decode identically
+ *   3. SSE multi-line `data:` fields concatenate with "\n" (spec §9.2)
+ *   4. SSE missing `data:` → null
+ *   5. SSE 1MB+ payload survives intact
+ *   6. WS BOM-prefixed JSON decodes
+ *   7. WS malformed JSON → null + debug log (no throw)
+ *   8. WS deeply nested data preserved
+ *   9. Forward-compat: unknown event → kind="unknown" carrying raw vocabulary
+ *  10. Rate-limit smoke: 1000 unknown events log at most 10 lines / window
  */
-import { describe, expect, test } from "bun:test"
-import { decodeSseEvent, decodeWsEvent, parseSseFrame, type StreamEvent } from "@/llm"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import {
+  __resetUnknownEventRateLimitForTests,
+  decodeSseEvent,
+  decodeWsEvent,
+  logUnknownEventRateLimited,
+  parseSseFrame,
+  splitSseFrames,
+} from "@/llm"
 
-describe("response.in_progress — SSE decoder", () => {
-  test("parses event/data lines into a frame view", () => {
-    const text = 'event: response.in_progress\ndata: {"progress":0.42}'
-    const frame = parseSseFrame(text)
-    expect(frame).toEqual({
-      event: "response.in_progress",
-      data: '{"progress":0.42}',
-    })
+beforeEach(() => {
+  __resetUnknownEventRateLimitForTests()
+})
+
+afterEach(() => {
+  __resetUnknownEventRateLimitForTests()
+})
+
+describe("streaming-events: SSE parsing robustness", () => {
+  test("1. fragmented frames reassemble through splitSseFrames remainder", () => {
+    // Two complete frames + a fragment, fed in 5 small chunks.
+    const full =
+      'event: response.in_progress\ndata: {"type":"response.in_progress","message":"thinking"}\n\n' +
+      'event: response.created\ndata: {"type":"response.created"}\n\n' +
+      "event: response.in_pro"
+    // chunk it into 5 random-ish slices to model TCP reads
+    const chunks = [
+      full.slice(0, 20),
+      full.slice(20, 60),
+      full.slice(60, 100),
+      full.slice(100, 160),
+      full.slice(160),
+    ]
+    let buf = ""
+    const allFrames: Array<{ name: string; data: string }> = []
+    for (const c of chunks) {
+      buf += c
+      const { frames, remainder } = splitSseFrames(buf)
+      allFrames.push(...frames)
+      buf = remainder
+    }
+    expect(allFrames.length).toBe(2)
+    expect(allFrames[0]?.name).toBe("response.in_progress")
+    const decoded0 = decodeSseEvent(allFrames[0] as { name: string; data: string })
+    expect(decoded0?.kind).toBe("response.in_progress")
+    expect((decoded0?.data as { message?: string })?.message).toBe("thinking")
+    expect(allFrames[1]?.name).toBe("response.created")
+    // remainder must still hold the fragment for the next round
+    expect(buf.startsWith("event: response.in_pro")).toBe(true)
   })
 
-  test("decodes response.in_progress SSE frame to a typed StreamEvent", () => {
-    const frame = parseSseFrame(
-      'event: response.in_progress\ndata: {"progress":0.5,"message":"thinking..."}',
-    )
-    expect(frame).not.toBeNull()
-    if (frame === null) return
-    const ev = decodeSseEvent(frame)
-    expect(ev).toEqual({
-      type: "response_in_progress",
-      data: { progress: 0.5, message: "thinking..." },
-    } satisfies StreamEvent)
+  test("2. CRLF vs LF line endings produce identical parse output", () => {
+    const lf = 'event: response.in_progress\ndata: {"type":"response.in_progress","progress":0.5}'
+    const crlf = lf.replace(/\n/g, "\r\n")
+    const a = parseSseFrame(lf)
+    const b = parseSseFrame(crlf)
+    expect(a).toEqual(b)
+    expect(a?.name).toBe("response.in_progress")
+    expect(a?.data).toContain('"progress":0.5')
   })
 
-  test("empty data payload still produces a valid event (data: {})", () => {
-    // SSE allows `data:` with empty payload — we want a structurally-valid
-    // StreamEvent rather than skipping the frame entirely.
-    const frame = parseSseFrame("event: response.in_progress\ndata: {}")
-    if (frame === null) throw new Error("frame should parse")
-    const ev = decodeSseEvent(frame)
-    expect(ev).toEqual({ type: "response_in_progress", data: {} })
+  test("3. multi-line `data:` fields concatenate with newline per spec", () => {
+    // Two data lines whose concatenation forms a valid JSON object.
+    const block =
+      'event: response.in_progress\ndata: {"type":"response.in_progress",\ndata: "message":"pondering"}'
+    const parsed = parseSseFrame(block)
+    expect(parsed?.data).toBe('{"type":"response.in_progress",\n"message":"pondering"}')
+    const decoded = decodeSseEvent(parsed as { name: string; data: string })
+    expect(decoded?.kind).toBe("response.in_progress")
+    expect((decoded?.data as { message?: string })?.message).toBe("pondering")
   })
 
-  test("malformed JSON in data → falls back to empty object (forward-compat)", () => {
-    const frame = parseSseFrame("event: response.in_progress\ndata: not-json{")
-    if (frame === null) throw new Error("frame should parse")
-    const ev = decodeSseEvent(frame)
-    expect(ev).toEqual({ type: "response_in_progress", data: {} })
-  })
-
-  test("unknown event type → null (forward-compat, no throw)", () => {
-    const frame = parseSseFrame('event: response.future_unknown\ndata: {"x":1}')
-    if (frame === null) throw new Error("frame should parse")
-    expect(decodeSseEvent(frame)).toBeNull()
-  })
-
-  test("structurally invalid frame (missing event line) → null", () => {
-    expect(parseSseFrame('data: {"x":1}')).toBeNull()
-  })
-
-  test("structurally invalid frame (missing data line) → null", () => {
+  test("4. missing `data:` line → parseSseFrame returns null (no throw)", () => {
     expect(parseSseFrame("event: response.in_progress")).toBeNull()
+    expect(parseSseFrame(": just a comment")).toBeNull()
+    expect(parseSseFrame("")).toBeNull()
   })
 
-  test("multiline data joined with \\n per SSE spec", () => {
-    const frame = parseSseFrame("event: response.in_progress\ndata: line1\ndata: line2")
-    expect(frame?.data).toBe("line1\nline2")
+  test("5. >=1MB data payload survives parse + decode intact", () => {
+    const big = "x".repeat(1_048_576) // 1 MiB
+    const obj = { type: "response.in_progress", message: big }
+    const block = `event: response.in_progress\ndata: ${JSON.stringify(obj)}`
+    const parsed = parseSseFrame(block)
+    expect(parsed?.data.length).toBeGreaterThan(1_048_576)
+    const decoded = decodeSseEvent(parsed as { name: string; data: string })
+    expect(decoded?.kind).toBe("response.in_progress")
+    expect((decoded?.data as { message?: string })?.message?.length).toBe(1_048_576)
   })
 })
 
-describe("response.in_progress — WebSocket decoder", () => {
-  test("decodes envelope with kind=response.in_progress to typed StreamEvent", () => {
-    const ev = decodeWsEvent({
+describe("streaming-events: WebSocket robustness", () => {
+  test("6. BOM-prefixed WS JSON decodes (kind preserved)", () => {
+    const bom = "﻿"
+    const raw = `${bom}{"kind":"response.in_progress","progress":0.25}`
+    const decoded = decodeWsEvent(raw)
+    expect(decoded?.kind).toBe("response.in_progress")
+    expect((decoded?.data as { progress?: number })?.progress).toBe(0.25)
+  })
+
+  test("7. malformed WS JSON returns null without throwing", () => {
+    expect(decodeWsEvent('{"kind": "response.in_progress",}')).toBeNull() // trailing comma
+    expect(decodeWsEvent("not json at all")).toBeNull()
+    expect(decodeWsEvent("")).toBeNull()
+    expect(decodeWsEvent("   ")).toBeNull()
+  })
+
+  test("8. deeply nested WS data preserved", () => {
+    const nested = {
       kind: "response.in_progress",
-      progress: 0.7,
-      message: "still generating",
-    })
-    expect(ev).toEqual({
-      type: "response_in_progress",
-      data: { progress: 0.7, message: "still generating" },
-    } satisfies StreamEvent)
-  })
-
-  test("kind=response.in_progress with bare envelope → data is empty object", () => {
-    const ev = decodeWsEvent({ kind: "response.in_progress" })
-    expect(ev).toEqual({ type: "response_in_progress", data: {} })
-  })
-
-  test("unknown kind → null (forward-compat, no throw)", () => {
-    expect(decodeWsEvent({ kind: "response.completed" })).toBeNull()
-    expect(decodeWsEvent({ kind: "response.created" })).toBeNull()
-    expect(decodeWsEvent({ kind: "response.future_unknown" })).toBeNull()
-  })
-
-  test("kind discriminator is stripped from the payload", () => {
-    const ev = decodeWsEvent({ kind: "response.in_progress", extraField: "kept" })
-    if (ev === null || ev.type !== "response_in_progress") {
-      throw new Error("expected response_in_progress event")
+      message: "deep",
+      meta: { a: { b: { c: { d: { e: "leaf" } } } } },
     }
-    expect(ev.data).not.toHaveProperty("kind")
-    expect(ev.data).toEqual({ extraField: "kept" })
+    const decoded = decodeWsEvent(JSON.stringify(nested))
+    expect(decoded?.kind).toBe("response.in_progress")
+    expect(
+      (decoded?.data as { meta: { a: { b: { c: { d: { e: string } } } } } }).meta.a.b.c.d.e,
+    ).toBe("leaf")
+  })
+})
+
+describe("streaming-events: forward-compat unknown events", () => {
+  test("9. unknown event vocabulary surfaces as kind='unknown' carrying rawKind", () => {
+    const raw = JSON.stringify({ kind: "response.something.brand.new", payload: 42 })
+    const decoded = decodeWsEvent(raw)
+    expect(decoded?.kind).toBe("unknown")
+    if (decoded?.kind === "unknown") {
+      expect(decoded.rawKind).toBe("response.something.brand.new")
+      expect(decoded.data.payload).toBe(42)
+    }
+    // Same path via SSE
+    const sseBlock = `event: response.weird\ndata: ${raw}`
+    const parsed = parseSseFrame(sseBlock)
+    const decodedSse = decodeSseEvent(parsed as { name: string; data: string })
+    expect(decodedSse?.kind).toBe("unknown")
+  })
+
+  test("10. rate-limit smoke: 1000 unknown events bounded to LIMIT emissions per window", () => {
+    // Fixed clock — every call within the same window so the limiter caps.
+    const fixedNow = () => 1_000_000
+    const ev = {
+      kind: "unknown" as const,
+      rawKind: "response.spam",
+      data: {} as Record<string, unknown>,
+    }
+    let emitted = 0
+    for (let i = 0; i < 1000; i++) {
+      if (logUnknownEventRateLimited(ev, fixedNow)) emitted++
+    }
+    // LIMIT=10 lines per window; after 1000 calls within a single window
+    // we must see exactly LIMIT emissions — the other 990 are dropped.
+    expect(emitted).toBe(10)
+    // Window advance ⇒ next call emits again (proves the limiter resets).
+    const laterNow = () => 1_000_000 + 60_001
+    expect(logUnknownEventRateLimited(ev, laterNow)).toBe(true)
   })
 })

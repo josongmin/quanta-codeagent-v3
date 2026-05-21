@@ -77,6 +77,20 @@ export type StreamEvent =
       cacheReadTokens?: number
       model: string
     }
+  /** Heartbeat: provider is still "thinking" — no new content yet. Surfaced
+   *  ONLY by adapters that decode an OpenAI Responses API `response.in_progress`
+   *  event (see ADR-0048). Carries an optional human-readable `message`,
+   *  an optional `progress` ratio (0..1), and the provider-side `createdAt`
+   *  timestamp when present, so a UI can render a "thinking…" indicator
+   *  without losing any other in-flight state. Assemblers must IGNORE this
+   *  event when reconstructing the final message: it is non-cumulative
+   *  signal, not content. */
+  | {
+      type: "response_in_progress"
+      message?: string
+      progress?: number
+      createdAt?: number
+    }
   | { type: "message_stop"; stop_reason: string }
   /** ADR-0048 forward-compat: OpenAI Responses API emits a `response.in_progress`
    *  SSE/WebSocket frame while the model is still generating but has no new

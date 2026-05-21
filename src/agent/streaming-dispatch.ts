@@ -46,6 +46,31 @@ import { assembleFromEvents, type Message, type StreamEvent } from "@/llm"
 type AssembledMessage = ReturnType<typeof assembleFromEvents>["message"]
 type ResultBlocks = AssembledMessage["content"]
 
+/** UI-facing "thinking…" heartbeat surfaced from a provider's
+ *  `response.in_progress` event (ADR-0048). The seam is additive: when the
+ *  caller does NOT register an {@link InProgressHandler}, nothing changes
+ *  about stream consumption (the event is just skipped during assembly, the
+ *  same as a no-op). When the caller DOES register one, each
+ *  `response_in_progress` {@link StreamEvent} fires the handler exactly once
+ *  with the carried metadata plus a `timestamp` filled in at observation time
+ *  (so the handler sees a stable receive-side clock even when the provider
+ *  omits `createdAt`). */
+export interface InProgressIndicator {
+  kind: "in-progress"
+  /** Optional human-readable status the provider attached to the heartbeat. */
+  message?: string
+  /** Optional ratio in [0..1]. May be absent. */
+  progress?: number
+  /** Receive-side millisecond timestamp (always populated; defaults to
+   *  `Date.now()` at observation if the provider didn't supply one). */
+  timestamp: number
+}
+
+/** Handler signature for the in-progress seam. The handler is called inline
+ *  from the stream consumer; it MUST NOT block or throw (callers should wrap
+ *  user code with their own try/catch). */
+export type InProgressHandler = (indicator: InProgressIndicator) => void
+
 /** A single tool call resolved off the assembled stream. */
 export interface StreamingCall {
   id: string
@@ -74,6 +99,11 @@ export interface StreamingTurnArgs {
   /** Fired once per call the instant it is scheduled (in model-call order for
    *  early-started safe calls; at drain time for deferred calls). */
   onToolStart?: (call: StreamingCall) => void
+  /** Optional heartbeat seam (ADR-0048). Invoked whenever the upstream stream
+   *  yields a `response_in_progress` event so a UI can paint a "thinking…"
+   *  indicator without us having to invent one. Behaviour is additive — when
+   *  this is `undefined` the engine's observable result is unchanged. */
+  onInProgress?: InProgressHandler
   /** Cooperative cancellation: an abort between/within phases ⇒ `aborted`. */
   signal?: AbortSignal
 }
@@ -205,6 +235,23 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
 
   if (ev.type === "text_delta") {
     args.onTextDelta?.(ev.delta)
+    return
+  }
+
+  if (ev.type === "response_in_progress") {
+    // ADR-0048: fire the heartbeat seam if registered. We FILL IN `timestamp`
+    // here (receive side) so the handler always sees a stable monotonic-ish
+    // clock; if the provider supplied `createdAt` we forward that as the
+    // authoritative value instead.
+    if (args.onInProgress !== undefined) {
+      const indicator: InProgressIndicator = {
+        kind: "in-progress",
+        timestamp: ev.createdAt ?? Date.now(),
+        ...(ev.message !== undefined ? { message: ev.message } : {}),
+        ...(ev.progress !== undefined ? { progress: ev.progress } : {}),
+      }
+      args.onInProgress(indicator)
+    }
     return
   }
 

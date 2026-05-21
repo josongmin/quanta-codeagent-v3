@@ -37,6 +37,11 @@ export const assembleFromEvents = (events: StreamEvent[]): AssembledTurn => {
       }
       case "tool_use_delta":
         break
+      case "response_in_progress":
+        // Heartbeat / "thinking…" indicator (ADR-0048). NOT content; assemblers
+        // explicitly skip it so the reconstructed message is byte-identical to
+        // a stream that never emitted any heartbeat.
+        break
       case "message_stop":
         stopReason = ev.stop_reason
         break
