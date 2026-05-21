@@ -19,10 +19,15 @@
  *  - **Per-session**: one instance per `runAgent` invocation (constructed in
  *    `loop.ts` at session start; absent in `AgentConfig` ⇒ no gate, byte-
  *    identical to the pre-gate path).
- *  - **Two-regime**: general tools get a forgiving window/threshold; env-
- *    modifying shell commands (pip/npm/apt/chmod/export/…) get a tighter
- *    fast-brake because in this harness those commands NEVER mutate the
- *    sandbox (so a repeat literally cannot change state).
+ *  - **Three-regime** (bucket KEY differs, not just the threshold):
+ *      · general — exact `<name> <canonical-args>` (byte-identical spins).
+ *      · env     — ALL env-mutating shell commands (pip/npm/apt/chmod/export/
+ *        ensurepip/…) collapse to ONE bucket, so the same intent under many
+ *        spellings counts together. Live failure (sklearn): 11 DIFFERENT
+ *        commands chasing one missing dep — exact-match dedup never caught it.
+ *      · edit    — one bucket per target file, so variant edits to the same
+ *        file count together. Live failure (pallets): 13 variant edits to one
+ *        `__init__`, none landing.
  *  - **No new event type**: blocked calls return a synthetic
  *    {@link ToolResultBlock} matching the deny-style helper in
  *    `dispatch-helpers.ts#resultBlock` — the loop's tool_result pipeline
@@ -70,16 +75,18 @@ export const DEFAULT_DEDUP_GATE_CAPS: DedupGateCaps = {
  *
  *   - package managers: pip / pip3 / python -m pip / python3 -m pip /
  *     npm / yarn / pnpm / apt / apt-get / conda / brew
+ *   - python bootstrap: python -m ensurepip / python -m venv
  *   - permission/ownership: chmod / chown
  *   - shell state: export
  *   - elevation: sudo (almost always wrapping one of the above)
  *
  *  In this harness env-modifying commands are deliberately NEVER allowed to
- *  succeed (the sandbox is read-only with respect to the system), so any
- *  repeat past the first attempt is pure thrash — hence the strict 2-cap.
+ *  succeed (the sandbox is read-only with respect to the system), so a few
+ *  attempts past the first are pure thrash — hence the tight single-bucket
+ *  cap (any 3 env attempts in the window, regardless of spelling).
  */
 const ENV_PREFIX_REGEX =
-  /^(?:sudo\s+)?(?:pip3?|python3?\s+-m\s+pip|npm|yarn|pnpm|apt(?:-get)?|conda|brew|chmod|chown|export)\b/i
+  /^(?:sudo\s+)?(?:pip3?|python3?\s+-m\s+(?:pip|ensurepip|venv)|npm|yarn|pnpm|apt(?:-get)?|conda|brew|chmod|chown|export)\b/i
 
 /** True when this bash command should be routed to the env regime. Operates
  *  on the FIRST clause only (everything before the first `;`/`&&`/`||`) so a
@@ -208,12 +215,20 @@ export class DedupGate {
    *  trivially testable: the count returned matches the number of identical
    *  calls observed including the current one. */
   record(name: string, args: unknown, turn: number): DedupVerdict {
-    const bashCmd = bashCommandOf(name, args)
-    const env = bashCmd !== undefined && isEnvBashCommand(bashCmd)
-    const window = env ? this.caps.envWindow : this.caps.generalWindow
-    const threshold = env ? this.caps.envThreshold : this.caps.generalThreshold
+    const { regime, key } = bucketOf(name, args)
+    const window =
+      regime === "env"
+        ? this.caps.envWindow
+        : regime === "edit"
+          ? this.caps.editWindow
+          : this.caps.generalWindow
+    const threshold =
+      regime === "env"
+        ? this.caps.envThreshold
+        : regime === "edit"
+          ? this.caps.editThreshold
+          : this.caps.generalThreshold
 
-    const key = `${name} ${canonicalizeArgs(args)}`
     const prior = this.history.get(key) ?? []
     // Prune entries outside the active window (we count "within last N turns
     // INCLUDING the current turn", so a turn is in-window when
@@ -229,13 +244,8 @@ export class DedupGate {
     return {
       blocked: true,
       count: kept.length,
-      regime: env ? "env" : "general",
-      observation: buildObservation({
-        name,
-        count: kept.length,
-        window,
-        env,
-      }),
+      regime,
+      observation: buildObservation({ name, count: kept.length, window, regime }),
     }
   }
 
@@ -261,23 +271,38 @@ export class DedupGate {
 
 /** Render the observation text. Kept in a separate function so the exact
  *  wording is in one place (and trivially editable without touching the
- *  state machine). The env clause is appended ONLY in the env regime so the
- *  general-regime guidance stays short. */
+ *  state machine). One message per regime — env and edit get tailored
+ *  guidance because their thrash shapes (and the right corrective action)
+ *  differ from a plain byte-identical repeat. */
 const buildObservation = (args: {
   name: string
   count: number
   window: number
-  env: boolean
+  regime: "general" | "env" | "edit"
 }): string => {
-  const base =
+  if (args.regime === "env") {
+    return (
+      `[dedup-gate] You have attempted ${args.count} environment-modifying commands ` +
+      `in the last ${args.window} turns (install / package-manager / chmod / etc, ` +
+      `under various spellings). These are NOT permitted in this harness — the ` +
+      `sandbox is read-only with respect to the system, so no spelling will ` +
+      `succeed. Stop trying to change the environment: if a dependency is missing, ` +
+      `declare the environment unavailable for verification and finish with your ` +
+      `code change as the deliverable.`
+    )
+  }
+  if (args.regime === "edit") {
+    return (
+      `[dedup-gate] You have edited this same file ${args.count} times in the last ` +
+      `${args.window} turns without the change landing. Repeating variant edits is ` +
+      `flailing. Re-read the current file state, run the test to see the ACTUAL ` +
+      `failure, then reconsider — do not keep trying spelling variants of the same edit.`
+    )
+  }
+  return (
     `[dedup-gate] This exact tool call (${args.name}) was issued ${args.count} times in ` +
     `the last ${args.window} turns and produced the same observation each time. ` +
     `Repeating it will not change state. Change tactic: try a different file, ` +
     `a different command, or declare done.`
-  if (!args.env) return base
-  return (
-    `${base} Env-modifying commands like pip/npm/apt are NOT permitted in this ` +
-    `harness — if the environment is missing dependencies, declare the env ` +
-    `unavailable and stop.`
   )
 }

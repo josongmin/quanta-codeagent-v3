@@ -54,12 +54,14 @@ describe("canonicalizeArgs", () => {
 })
 
 describe("DedupGate — defaults & PASS path (general regime)", () => {
-  test("defaults: general 8/3, env 4/2", () => {
+  test("defaults: general 8/3, env 4/3, edit 8/5", () => {
     expect(DEFAULT_DEDUP_GATE_CAPS).toEqual({
       generalWindow: 8,
       generalThreshold: 3,
       envWindow: 4,
-      envThreshold: 2,
+      envThreshold: 3,
+      editWindow: 8,
+      editThreshold: 5,
     })
   })
 
@@ -155,37 +157,45 @@ describe("DedupGate — BLOCKED cases (general regime)", () => {
   })
 })
 
-describe("DedupGate — env regime (fast brake)", () => {
-  test("2 calls to bash(pip install flask): first passes, 2nd blocked", () => {
+describe("DedupGate — env regime (single bucket, fast brake)", () => {
+  test("3 IDENTICAL pip installs: first 2 pass, 3rd blocked", () => {
     const g = new DedupGate()
     const v = recordSeries(g, [
       { name: "bash", args: { command: "pip install flask" }, turn: 1 },
       { name: "bash", args: { command: "pip install flask" }, turn: 2 },
+      { name: "bash", args: { command: "pip install flask" }, turn: 3 },
     ])
-    expect(v[0]?.blocked).toBe(false)
-    expect(v[1]?.blocked).toBe(true)
-    if (v[1]?.blocked) {
-      expect(v[1].regime).toBe("env")
-      expect(v[1].observation).toContain("Env-modifying commands")
-      expect(v[1].observation).toContain("pip/npm/apt")
+    expect(v.map((x) => x.blocked)).toEqual([false, false, true])
+    if (v[2]?.blocked) {
+      expect(v[2].regime).toBe("env")
+      expect(v[2].observation).toContain("environment-modifying commands")
     }
   })
 
-  test("4 calls to bash(pip install flask) in turns 5/6/7/8: turn 6 onwards blocked", () => {
+  test("SINGLE BUCKET: 3 DIFFERENT env commands count together (the sklearn thrash)", () => {
+    // The real failure: same intent (install a dep) under many spellings —
+    // exact-match dedup never caught it. Single bucket must brake by the 3rd.
     const g = new DedupGate()
     const v = recordSeries(g, [
-      { name: "bash", args: { command: "pip install flask" }, turn: 5 },
-      { name: "bash", args: { command: "pip install flask" }, turn: 6 },
-      { name: "bash", args: { command: "pip install flask" }, turn: 7 },
-      { name: "bash", args: { command: "pip install flask" }, turn: 8 },
+      { name: "bash", args: { command: "pip install setuptools" }, turn: 1 },
+      { name: "bash", args: { command: "python3 -m pip install joblib" }, turn: 2 },
+      { name: "bash", args: { command: "apt-get install python3-distutils" }, turn: 3 },
     ])
-    expect(v[0]?.blocked).toBe(false)
-    expect(v[1]?.blocked).toBe(true) // env threshold = 2
-    expect(v[2]?.blocked).toBe(true)
-    expect(v[3]?.blocked).toBe(true)
+    expect(v.map((x) => x.blocked)).toEqual([false, false, true])
+    if (v[2]?.blocked) expect(v[2].regime).toBe("env")
   })
 
-  test("env regime prefixes: pip/pip3/python -m pip/python3 -m pip/npm/yarn/pnpm/apt/apt-get/conda/brew/chmod/chown/export/sudo all detected", () => {
+  test("interleaved env spellings + sudo/brew/ensurepip all share the bucket", () => {
+    const g = new DedupGate()
+    const v = recordSeries(g, [
+      { name: "bash", args: { command: "brew install python@3" }, turn: 1 },
+      { name: "bash", args: { command: "sudo apt-get install -y python3-distutils" }, turn: 2 },
+      { name: "bash", args: { command: "python3 -m pip install --user distutils" }, turn: 3 },
+    ])
+    expect(v[2]?.blocked).toBe(true)
+  })
+
+  test("env regime prefixes: pip/pip3/python -m pip/npm/yarn/pnpm/apt/apt-get/conda/brew/chmod/chown/export/sudo all routed to env", () => {
     const commands = [
       "pip install flask",
       "pip3 install flask",
@@ -205,33 +215,87 @@ describe("DedupGate — env regime (fast brake)", () => {
     ]
     for (const cmd of commands) {
       const g = new DedupGate()
-      const a = g.record("bash", { command: cmd }, 1)
-      const b = g.record("bash", { command: cmd }, 2)
-      expect(a.blocked).toBe(false)
-      expect(b.blocked).toBe(true)
-      if (b.blocked) expect(b.regime).toBe("env")
+      // env threshold 3 ⇒ 3rd identical blocks, and regime is env
+      g.record("bash", { command: cmd }, 1)
+      g.record("bash", { command: cmd }, 2)
+      const c = g.record("bash", { command: cmd }, 3)
+      expect(c.blocked).toBe(true)
+      if (c.blocked) expect(c.regime).toBe("env")
     }
   })
 
   test("env-detection is case-insensitive on the FIRST token", () => {
     const g = new DedupGate()
-    expect(g.record("bash", { command: "PIP install flask" }, 1).blocked).toBe(false)
-    expect(g.record("bash", { command: "PIP install flask" }, 2).blocked).toBe(true)
+    g.record("bash", { command: "PIP install flask" }, 1)
+    g.record("bash", { command: "PIP install x" }, 2)
+    expect(g.record("bash", { command: "PIP install y" }, 3).blocked).toBe(true)
   })
 
   test("env-detection looks only at the first clause (chained && pytest)", () => {
     const g = new DedupGate()
-    // First clause is `pip install x` ⇒ env regime ⇒ second identical attempt blocked
-    expect(g.record("bash", { command: "pip install x && pytest" }, 1).blocked).toBe(false)
-    expect(g.record("bash", { command: "pip install x && pytest" }, 2).blocked).toBe(true)
+    g.record("bash", { command: "pip install x && pytest" }, 1)
+    g.record("bash", { command: "pip install y && pytest" }, 2)
+    expect(g.record("bash", { command: "pip install z && pytest" }, 3).blocked).toBe(true)
+  })
+
+  test("a single legit env command passes (interactive: install once is fine)", () => {
+    const g = new DedupGate()
+    expect(g.record("bash", { command: "pip install flask" }, 1).blocked).toBe(false)
   })
 
   test("non-env bash command does NOT trigger env regime (general threshold applies)", () => {
     const g = new DedupGate()
-    // 'pytest' is general; second identical should still pass (threshold 3)
     expect(g.record("bash", { command: "pytest" }, 1).blocked).toBe(false)
     expect(g.record("bash", { command: "pytest" }, 2).blocked).toBe(false)
     expect(g.record("bash", { command: "pytest" }, 3).blocked).toBe(true)
+  })
+})
+
+describe("DedupGate — edit regime (per-file thrash brake)", () => {
+  test("5 variant edits to the SAME file: first 4 pass, 5th blocked (the pallets thrash)", () => {
+    // pallets: 13 different old_string/pattern edits to blueprints.py, none
+    // landing. Per-file bucket must brake the flailing.
+    const g = new DedupGate()
+    const file = "src/flask/blueprints.py"
+    const v = recordSeries(g, [
+      { name: "edit", args: { path: file, old_string: "a", new_string: "x" }, turn: 1 },
+      { name: "edit", args: { path: file, old_string: "b", new_string: "y" }, turn: 2 },
+      { name: "scripted_replace", args: { file, pattern: "c", replacement: "z" }, turn: 3 },
+      { name: "edit", args: { path: file, old_string: "d", new_string: "w" }, turn: 4 },
+      { name: "scripted_replace", args: { file, pattern: "e", replacement: "v" }, turn: 5 },
+    ])
+    expect(v.slice(0, 4).every((x) => !x.blocked)).toBe(true)
+    expect(v[4]?.blocked).toBe(true)
+    if (v[4]?.blocked) {
+      expect(v[4].regime).toBe("edit")
+      expect(v[4].observation).toContain("edited this same file")
+    }
+  })
+
+  test("edits to DIFFERENT files do not share a bucket", () => {
+    const g = new DedupGate()
+    const v = recordSeries(g, [
+      { name: "edit", args: { path: "/a.py", old_string: "1", new_string: "2" }, turn: 1 },
+      { name: "edit", args: { path: "/b.py", old_string: "1", new_string: "2" }, turn: 2 },
+      { name: "edit", args: { path: "/c.py", old_string: "1", new_string: "2" }, turn: 3 },
+      { name: "edit", args: { path: "/d.py", old_string: "1", new_string: "2" }, turn: 4 },
+      { name: "edit", args: { path: "/e.py", old_string: "1", new_string: "2" }, turn: 5 },
+    ])
+    expect(v.every((x) => !x.blocked)).toBe(true)
+  })
+
+  test("scripted_replace `file` field is bucketed same as edit `path`", () => {
+    const g = new DedupGate()
+    const file = "/same.py"
+    const v = recordSeries(g, [
+      { name: "edit", args: { path: file, old_string: "1", new_string: "2" }, turn: 1 },
+      { name: "scripted_replace", args: { file, pattern: "x", replacement: "y" }, turn: 2 },
+      { name: "edit", args: { path: file, old_string: "3", new_string: "4" }, turn: 3 },
+      { name: "scripted_replace", args: { file, pattern: "z", replacement: "w" }, turn: 4 },
+      { name: "edit", args: { path: file, old_string: "5", new_string: "6" }, turn: 5 },
+    ])
+    expect(v[4]?.blocked).toBe(true)
+    if (v[4]?.blocked) expect(v[4].regime).toBe("edit")
   })
 })
 
@@ -239,56 +303,43 @@ describe("DedupGate — per-session isolation", () => {
   test("two DedupGate instances do NOT share state", () => {
     const a = new DedupGate()
     const b = new DedupGate()
+    // Prime `a` to the env brake (3 attempts ⇒ 3rd blocked).
     expect(a.record("bash", { command: "pip install flask" }, 1).blocked).toBe(false)
-    // b is fresh — same call at turn 1 must also pass
-    expect(b.record("bash", { command: "pip install flask" }, 1).blocked).toBe(false)
-    // a's second call is blocked (env regime)
-    expect(a.record("bash", { command: "pip install flask" }, 2).blocked).toBe(true)
-    // b's second call ALSO blocked (independent state, same trajectory)
-    expect(b.record("bash", { command: "pip install flask" }, 2).blocked).toBe(true)
+    expect(a.record("bash", { command: "pip install flask" }, 2).blocked).toBe(false)
+    expect(a.record("bash", { command: "pip install flask" }, 3).blocked).toBe(true)
+    // `b` is fresh — its first attempt at turn 3 must still pass (no shared state).
+    expect(b.record("bash", { command: "pip install flask" }, 3).blocked).toBe(false)
   })
 })
 
-describe("DedupGate — replay: synthetic pallets 21-turn env-loop trace", () => {
-  test("8x bash(pip install flask) + other env commands: gate fires by turn 6 (well before turn 7)", () => {
+describe("DedupGate — replay: live sklearn env-thrash trace (11 distinct commands)", () => {
+  test("the EXACT sklearn postfix sequence is braked by the 3rd env attempt", () => {
+    // Verbatim from the gpt-4o-mini postfix run (sklearn.018, calls 7-19): the
+    // model fired 11 DIFFERENT env-mutating commands chasing one missing dep.
+    // Exact-match dedup never caught it; the single bucket must brake by #3.
     const g = new DedupGate()
-    // Synthetic trace mirroring the observed pallets failure:
-    //  turns 1-4: pip install flask repeated
-    //  turn 5: chmod (different env command)
-    //  turn 6: export
-    //  turn 7-12: pip install flask resumed
-    //  ...
-    const trace: Array<{ turn: number; name: string; args: unknown }> = []
-    for (let t = 1; t <= 8; t++) trace.push({ turn: t, name: "bash", args: { command: "pip install flask" } })
-    // Add some interleaved env junk so the trace looks realistic
-    trace.push({ turn: 9, name: "bash", args: { command: "chmod +x /tmp/x" } })
-    trace.push({ turn: 10, name: "bash", args: { command: "chmod +x /tmp/x" } })
-    trace.push({ turn: 11, name: "bash", args: { command: "export PATH=/foo" } })
-    trace.push({ turn: 12, name: "bash", args: { command: "export PATH=/foo" } })
-
-    const verdicts = trace.map((t) => ({
-      turn: t.turn,
-      verdict: g.record(t.name, t.args, t.turn),
-    }))
-
-    // Identify when the first BLOCK fires for pip install flask
-    const firstBlockedTurn = verdicts.find((v) => v.verdict.blocked)?.turn
-    expect(firstBlockedTurn).toBeDefined()
-    expect(firstBlockedTurn).toBeLessThanOrEqual(7)
-    expect(firstBlockedTurn).toBeGreaterThanOrEqual(2) // env regime fires at #2
-
-    // chmod is also env regime — repeats blocked
-    const chmodVerdicts = verdicts.filter(
-      (v) =>
-        v.turn === 9 || v.turn === 10,
-    )
-    expect(chmodVerdicts[0]?.verdict.blocked).toBe(false)
-    expect(chmodVerdicts[1]?.verdict.blocked).toBe(true)
-
-    // export likewise
-    const exportVerdicts = verdicts.filter((v) => v.turn === 11 || v.turn === 12)
-    expect(exportVerdicts[0]?.verdict.blocked).toBe(false)
-    expect(exportVerdicts[1]?.verdict.blocked).toBe(true)
+    const cmds = [
+      "pip install setuptools",
+      "python3 -m pip install setuptools",
+      "python3 -m pip install joblib",
+      "apt-get install python3-distutils",
+      "brew install python@3",
+      "python3 -m pip install distutils",
+      "sudo apt-get install -y python3-distutils",
+      "python3 -m pip install --user distutils",
+      "python3 -m pip install python3-distutils",
+      "apt install python3-distutils",
+      "python3 -m ensurepip",
+    ]
+    const verdicts = cmds.map((command, i) => g.record("bash", { command }, i + 1))
+    // First two pass (window 4, threshold 3), 3rd blocked, and the brake holds
+    // for the remaining 8 attempts (would have saved ~8 wasted turns live).
+    expect(verdicts[0]?.blocked).toBe(false)
+    expect(verdicts[1]?.blocked).toBe(false)
+    expect(verdicts[2]?.blocked).toBe(true)
+    expect(verdicts.slice(2).every((v) => v.blocked)).toBe(true)
+    const firstBlocked = verdicts.findIndex((v) => v.blocked) + 1
+    expect(firstBlocked).toBe(3)
   })
 })
 
