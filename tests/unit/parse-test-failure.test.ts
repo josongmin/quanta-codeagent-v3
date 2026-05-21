@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { ToolContext, ToolResult } from "@/tool"
-import { parseTestFailure, parseTestFailureTool } from "@/tool"
+import { classifyFrame, parseTestFailure, parseTestFailureTool } from "@/tool"
 
 const ctx = (): ToolContext => ({ cwd: "/tmp", signal: new AbortController().signal })
 
@@ -94,6 +94,63 @@ describe("parseTestFailure (pure) — framework patterns", () => {
 
   test("empty output → []", () => {
     expect(parseTestFailure("", 30)).toEqual([])
+  })
+})
+
+describe("parseTestFailure — tier classification + ranking (R-Phase8 #1)", () => {
+  test("user-code frame ranks ABOVE vendored node_modules frame", () => {
+    const out = [
+      "  at run (/repo/node_modules/jest-runner/build/x.js:120:10)",
+      "  at testFn (/repo/src/auth.ts:42:5)",
+    ].join("\n")
+    const frames = parseTestFailure(out, 30)
+    // user-code src/auth.ts must come first despite appearing later in the log.
+    expect(frames[0]?.file).toBe("/repo/src/auth.ts")
+    expect(frames[0]?.tier).toBe("user")
+    expect(frames.find((f) => f.file.includes("node_modules"))?.tier).toBe("vendored")
+  })
+
+  test("ordering: user > test > vendored", () => {
+    const out = [
+      "/repo/node_modules/lib/v.js:1:1",
+      "/repo/tests/auth.test.ts:9:2",
+      "/repo/src/handler.ts:55:3",
+    ].join("\n")
+    const tiers = parseTestFailure(out, 30).map((f) => f.tier)
+    expect(tiers).toEqual(["user", "test", "vendored"])
+  })
+
+  test("python site-packages / .venv classified vendored", () => {
+    const out = [
+      'File "/proj/.venv/lib/python3.11/site-packages/requests/api.py", line 59, in get',
+      'File "/proj/app/service.py", line 12, in handle',
+    ].join("\n")
+    const frames = parseTestFailure(out, 30)
+    expect(frames[0]?.file).toBe("/proj/app/service.py")
+    expect(frames.find((f) => f.file.includes("site-packages"))?.tier).toBe("vendored")
+  })
+
+  test("vendored flood cannot push user frame past max_results cap", () => {
+    // 20 node_modules frames + 1 user frame; cap 5. The user frame MUST survive
+    // because ranking happens BEFORE the cap.
+    const noise = Array.from(
+      { length: 20 },
+      (_, i) => `/repo/node_modules/p/f${i}.js:${i + 1}:1`,
+    ).join("\n")
+    const out = `${noise}\n/repo/src/real.ts:7:1`
+    const frames = parseTestFailure(out, 5)
+    expect(frames).toHaveLength(5)
+    expect(frames[0]?.file).toBe("/repo/src/real.ts")
+    expect(frames[0]?.tier).toBe("user")
+  })
+
+  test("classifyFrame: user / test / vendored buckets", () => {
+    expect(classifyFrame("src/x.ts")).toBe("user")
+    expect(classifyFrame("tests/x.test.ts")).toBe("test")
+    expect(classifyFrame("pkg/foo_test.go")).toBe("test")
+    expect(classifyFrame("node_modules/lib/x.js")).toBe("vendored")
+    expect(classifyFrame("target/release/build.rs")).toBe("vendored")
+    expect(classifyFrame("dist/bundle.js")).toBe("vendored")
   })
 })
 

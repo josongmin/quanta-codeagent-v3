@@ -376,7 +376,7 @@ describe("git tools barrel", () => {
     expect(typeof defaultGitRunner.run).toBe("function")
   })
 
-  test("gitTools() with no arg returns all eight tools (6 read-only + 2 mutating)", async () => {
+  test("gitTools() with no arg returns all nine tools (7 read-only + 2 mutating)", async () => {
     const { gitTools } = await import("@/tool/git")
     const tools = gitTools()
     const names = tools.map((t) => t.name).sort()
@@ -389,20 +389,22 @@ describe("git tools barrel", () => {
       "git_diff",
       "git_log",
       "git_status",
+      "git_upstream_check",
     ])
-    // Read-only tools: 6 (diff/status/log/blame + churn/blame_heatmap fault-
-    // localization signals). Mutating tools: 2 (git_commit, git_branch_switch).
+    // Read-only tools: 7 (diff/status/log/blame + churn/blame_heatmap fault-
+    // localization signals + upstream_check divergence probe). Mutating tools:
+    // 2 (git_commit, git_branch_switch).
     const readOnlyCount = tools.filter((t) => t.isReadOnly()).length
-    expect(readOnlyCount).toBe(6)
+    expect(readOnlyCount).toBe(7)
     const mutatingCount = tools.filter((t) => !t.isReadOnly()).length
     expect(mutatingCount).toBe(2)
   })
 
-  test("gitTools(runner) injects the runner across all eight", async () => {
+  test("gitTools(runner) injects the runner across all nine", async () => {
     const { gitTools } = await import("@/tool/git")
     const runner = new FakeRunner(okResult(""))
     const tools = gitTools(runner)
-    expect(tools).toHaveLength(8)
+    expect(tools).toHaveLength(9)
     // We can't introspect; just ensure each tool is callable and the runner observes a call.
     const statusTool = tools.find((x) => x.name === "git_status")
     if (!statusTool) throw new Error("git_status missing")

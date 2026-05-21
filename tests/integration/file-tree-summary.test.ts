@@ -79,4 +79,34 @@ describe("file_tree_summary", () => {
     expect(fileTreeSummaryTool.isReadOnly?.()).toBe(true)
     expect(fileTreeSummaryTool.isConcurrencySafe?.({})).toBe(true)
   })
+
+  test("summarize:true annotates files with first declaration/comment (R-Phase8 #3)", async () => {
+    const r = await run({ summarize: true })
+    expect(r.ok).toBe(true)
+    // index.ts / loop.ts / a.ts all start with `export const ...` — the purpose
+    // pass should attach that line after the filename with a ` — ` separator.
+    expect(r.output).toMatch(/index\.ts\s+— export const x/)
+    expect(r.output).toMatch(/loop\.ts\s+— export const loop/)
+  })
+
+  test("summarize omitted → structure only (no ` — ` annotations)", async () => {
+    const r = await run({})
+    expect(r.ok).toBe(true)
+    expect(r.output).not.toContain(" — export")
+  })
+})
+
+describe("parsePurposeRows (pure)", () => {
+  test("first match per file wins; trims; caps length", async () => {
+    const { parsePurposeRows } = await import("@/tool/file-tree-summary")
+    const stdout = [
+      "src/a.ts:1:  export const a = 1",
+      "src/a.ts:5:  export const b = 2", // second hit ignored
+      "src/b.ts:3:// a comment",
+    ].join("\n")
+    const map = parsePurposeRows(stdout)
+    expect(map.get("src/a.ts")).toBe("export const a = 1")
+    expect(map.get("src/b.ts")).toBe("// a comment")
+    expect(map.size).toBe(2)
+  })
 })

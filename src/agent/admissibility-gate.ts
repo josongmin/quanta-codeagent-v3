@@ -110,8 +110,8 @@ const reviewAndDecide = async (
   call: ToolUseBlock,
   config: AgentConfig,
   action: AdmissibilityAction,
-  actionKey: string,
   opts: AdmissibilityWaveAOptions,
+  origin: "rule" | "hitl",
 ): Promise<DispatchResult | null> => {
   // Guarded by the call sites, but keep the invariant explicit: a reviewer
   // escalation with no port is a wiring error, never a silent allow.
@@ -122,6 +122,12 @@ const reviewAndDecide = async (
       "rule_ask",
     )
   }
+  // actionKey is `${tool}|${shellCommand}` when the tool exposes a command,
+  // else the bare tool name — the same key a sticky-precedence DenialMemory is
+  // recorded under, so a prior guardian_denied / user_aborted short-circuits
+  // re-review of the identical action.
+  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  const actionKey = shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
   const keyed: ToolActionKeyed = {
     tool: action.tool,
     input: action.input,
@@ -133,18 +139,21 @@ const reviewAndDecide = async (
     turnId: String(config.run?.turn ?? 0),
     priorDenials: opts.priorDenials ?? [],
     configReviewer: opts.defaultReviewer ?? "user",
-    decidedAt: opts.decidedAt ?? (() => Date.now()),
+    decidedAt: opts.decidedAt ? opts.decidedAt() : Date.now(),
   }
   const dec = await reviewAction(keyed, ctx, opts.reviewerPort)
   const tag = reviewerTag(dec.reviewer)
   if (isAllowed(dec.outcome)) return runPreToolUseHook(call, config)
+  // Rule-ask escalations carry an `origin=rule` marker so the surface can tell
+  // a denylist-rule escalation apart from an always-confirm-tier escalation.
+  const originSuffix = origin === "rule" ? " (origin=rule)" : ""
   if (dec.outcome === "user_aborted") {
-    return deny(call.id, `User aborted: ${dec.rationale}${HANDOFF_SUFFIX}`, tag)
+    return deny(call.id, `User aborted: ${dec.rationale}${originSuffix}${HANDOFF_SUFFIX}`, tag)
   }
   if (dec.outcome === "guardian_denied") {
-    return deny(call.id, `Guardian denied: ${dec.rationale}`, tag)
+    return deny(call.id, `Guardian denied: ${dec.rationale}${originSuffix}`, tag)
   }
-  return deny(call.id, `User declined: ${dec.rationale}`, tag)
+  return deny(call.id, `User declined: ${dec.rationale}${originSuffix}`, tag)
 }
 
 /** Emit pre_tool_use hook, returning a hook-denied result or null to proceed. */
@@ -425,38 +434,6 @@ export const runAdmissibilityGate = async (
   autoClassifier?: AutoModeClassifier,
   opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
-  // 0. Prefix-rule DSL gate (ADR-0031) — consulted BEFORE mode/HITL/policy so
-  //    an explicit `allow` short-circuits every downstream gate, a `deny` is
-  //    terminal, an `ask` escalates to the reviewer, and `no_match` honors
-  //    `noMatchPolicy` (default "fallthrough" ⇒ legacy gates). The match key is
-  //    the tool's shell command when it exposes one, else the tool name (so a
-  //    `allow read_file` rule still matches a non-shell tool). Absent
-  //    `rulesStore` ⇒ skipped (byte-identical).
-  if (opts.rulesStore) {
-    const ruleKey = config.registry.extractShellCommand(action.tool, action.input) ?? action.tool
-    const m = opts.rulesStore.match(ruleKey)
-    if (m.kind === "matched") {
-      if (m.rule.action === "allow") return runPreToolUseHook(call, config)
-      if (m.rule.action === "deny") {
-        return deny(call.id, `Denied by ${m.rule.layer} rule '${m.rule.prefix}': ${ruleKey}`, "rule_deny")
-      }
-      // m.rule.action === "ask" — escalate (deny with rule_ask tag if unwired).
-      if (opts.reviewerPort === undefined) {
-        return deny(
-          call.id,
-          `Rule 'ask ${m.rule.prefix}' matched '${ruleKey}' but no ReviewerPort is wired.`,
-          "rule_ask",
-        )
-      }
-      return reviewAndDecide(call, config, action, ruleKey, opts)
-    }
-    // m.kind === "no_match"
-    if (opts.noMatchPolicy === "deny") {
-      return deny(call.id, `No rule matched '${ruleKey}' and noMatchPolicy='deny'.`, "rule_no_match_deny")
-    }
-    // "fallthrough" (or absent) ⇒ fall through to the legacy gates below.
-  }
-
   // 1. Mode-posture block (plan/review/audit) — fires BEFORE any HITL or
   //    permission work so a blocked mutating tool never reaches the classifier
   //    or the confirm prompt. Read-only tools always pass through.
@@ -465,7 +442,60 @@ export const runAdmissibilityGate = async (
     return deny(call.id, modeBlockReason(effectiveMode, call.name), `${effectiveMode}-blocked`)
   }
 
-  // 2. HITL 4-tier gate (when enabled). HARD_DENY lives INSIDE this branch as
+  // 2. HARD_DENY security boundary — pulled AHEAD of the rule DSL + HITL/
+  //    reviewer ONLY when Wave A options are active (rulesStore/reviewerPort),
+  //    so a rule `allow` cannot bypass the denylist and the reviewer port is
+  //    never consulted for a denylisted command. Mode-block (above) still wins.
+  //    Without Wave A options this is skipped and the legacy policy-internal
+  //    HARD_DENY (step 5 `evaluate`) stays byte-identical.
+  if (opts.rulesStore !== undefined || opts.reviewerPort !== undefined) {
+    const hardDenyCommand = config.registry.extractShellCommand(action.tool, action.input)
+    const hardDeny = hardDenyReason({
+      tool: action.tool,
+      input: action.input,
+      isReadOnly: action.isReadOnly,
+      shellCommand: hardDenyCommand,
+    })
+    if (hardDeny !== null) {
+      return deny(call.id, `Action requires human handoff: ${hardDeny}${HANDOFF_SUFFIX}`, "handoff")
+    }
+  }
+
+  // 3. Prefix-rule DSL gate (ADR-0031) — after mode + HARD_DENY. `allow` ⇒ admit,
+  //    `deny` ⇒ terminal, `ask` ⇒ reviewer (or rule_ask deny if no port),
+  //    `no_match` ⇒ noMatchPolicy ("deny" terminal, else fallthrough). Match key
+  //    = the tool's shell command when present, else the tool name (so
+  //    `allow read_file` matches a non-shell tool). Absent rulesStore ⇒ skipped.
+  if (opts.rulesStore) {
+    const ruleKey = config.registry.extractShellCommand(action.tool, action.input) ?? action.tool
+    const m = opts.rulesStore.match(ruleKey)
+    if (m.kind === "matched") {
+      if (m.rule.action === "allow") return runPreToolUseHook(call, config)
+      if (m.rule.action === "deny") {
+        return deny(
+          call.id,
+          `Permission denied by rule '${m.rule.prefix}' (${m.rule.layer}): ${ruleKey}`,
+          "rule_deny",
+        )
+      }
+      // m.rule.action === "ask" — escalate (rule_ask deny if no port wired).
+      if (opts.reviewerPort === undefined) {
+        return deny(
+          call.id,
+          `Rule 'ask ${m.rule.prefix}' matched '${ruleKey}' but no ReviewerPort is wired.`,
+          "rule_ask",
+        )
+      }
+      return reviewAndDecide(call, config, action, opts, "rule")
+    }
+    // m.kind === "no_match"
+    if (opts.noMatchPolicy === "deny") {
+      return deny(call.id, `no rule matched '${ruleKey}' (noMatchPolicy='deny').`, "rule_no_match_deny")
+    }
+    // "fallthrough" (or absent) ⇒ fall through to the legacy gates below.
+  }
+
+  // 4. HITL 4-tier gate (when enabled). HARD_DENY lives INSIDE this branch as
   //    well as inside `evaluate()` below — keeping both is intentional: the
   //    HITL branch phrases the deny as a hand-off-required terminator, while
   //    the policy branch keeps the legacy "Permission denied" wording for
@@ -478,7 +508,7 @@ export const runAdmissibilityGate = async (
     if (opts.reviewerPort !== undefined) {
       const { tier } = resolveHitlTier(config, call, action)
       if (tier === "always-confirm") {
-        return reviewAndDecide(call, config, action, action.tool, opts)
+        return reviewAndDecide(call, config, action, opts, "hitl")
       }
     }
     const hitlResult = await runHitlGate(call, config, action)

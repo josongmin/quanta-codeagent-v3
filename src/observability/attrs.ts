@@ -198,6 +198,32 @@ export const toolAttrs = (args: {
   return attrs(base)
 }
 
+/**
+ * Build the attribute bag for a work-metrics span/event (absorb #6, v0.dev
+ * `workMetrics`). Per-file diff stats are aggregated into scalar totals
+ * (filesChanged / linesAdded / linesRemoved) because OTel attributes are flat
+ * scalars/arrays — the full per-file breakdown lives in {@link WorkMetrics}
+ * itself, not on the span. `costUsd` is emitted only when present.
+ */
+export const workMetricsAttrs = (m: {
+  filesChanged: number
+  linesAdded: number
+  linesRemoved: number
+  actions: number
+  linesRead: number
+  costUsd?: number
+}): Attrs => {
+  const base: AttrsInput = {
+    [QUANTA_ATTRS.work.filesChanged]: m.filesChanged,
+    [QUANTA_ATTRS.work.linesAdded]: m.linesAdded,
+    [QUANTA_ATTRS.work.linesRemoved]: m.linesRemoved,
+    [QUANTA_ATTRS.work.actions]: m.actions,
+    [QUANTA_ATTRS.work.linesRead]: m.linesRead,
+  }
+  if (m.costUsd !== undefined) base[QUANTA_ATTRS.work.costUsd] = m.costUsd
+  return attrs(base)
+}
+
 /** Build the attribute bag for a permission-review span (ADR-0029). */
 export const permissionAttrs = (args: {
   reviewerTier: string

@@ -1,6 +1,6 @@
 /**
  * `bun run probe <run-dir | trajectory.jsonl> [--instance ID] [--failed]
- *  [--slow] [--cost] [--json]` — RFC-0002 §7, Wave E.
+ *  [--slow] [--cost] [--funnel] [--json]` — RFC-0002 §7, Wave E.
  *
  * READ-ONLY, NON-authoritative inspector (RFC §1.2 / §3 원칙8). Never writes
  * or deletes anything; never crashes on malformed input (degrades with a clear
@@ -9,6 +9,7 @@
  */
 import type { TrajectoryEvent } from "@/shared"
 import { logger } from "@/shared"
+import { observeFunnel, renderFunnel } from "./funnel"
 import { type AttemptTraj, loadRun, type ParsedRun, type RunSummaryLike } from "./parse"
 import { costJson, renderCost, renderHotspots, renderTimeline } from "./render"
 import { triage } from "./triage"
@@ -19,6 +20,7 @@ interface Args {
   failed: boolean
   slow: boolean
   cost: boolean
+  funnel: boolean
   json: boolean
 }
 
@@ -38,6 +40,7 @@ const parseArgs = (argv: string[]): Args => {
     failed: argv.includes("--failed"),
     slow: argv.includes("--slow"),
     cost: argv.includes("--cost"),
+    funnel: argv.includes("--funnel"),
     json: argv.includes("--json"),
   }
 }
@@ -125,12 +128,23 @@ const buildJson = (run: ParsedRun, args: Args): unknown => {
   }
 }
 
+/** Funnel-adherence view: per-instance 3-stage localization observation. */
+const renderFunnelView = (run: ParsedRun, args: Args): void => {
+  emit("localization funnel (NON-authoritative — a low stage is not a defect):")
+  for (const [id, attempts] of selectInstances(run, args.instance)) {
+    const report = observeFunnel(eventsOf(attempts))
+    emit(`  ${id}:`)
+    for (const line of renderFunnel(report).split("\n")) emit(`  ${line}`)
+  }
+}
+
 /** A single-attempt path with no summary ⇒ behave as a single trajectory. */
 const renderSingle = (run: ParsedRun, args: Args): void => {
   const attempts = [...run.instances.values()][0] ?? []
   const events = eventsOf(attempts)
   if (args.slow) emit(renderHotspots(events))
   else if (args.cost) emit(renderCost(run.instances, run.summary))
+  else if (args.funnel) emit(renderFunnel(observeFunnel(events)))
   else if (args.failed) renderTriage(run, args)
   else emit(renderTimeline(events))
 }
@@ -143,7 +157,7 @@ export const main = async (argv: string[]): Promise<number> => {
   const args = parseArgs(argv)
   if (args.path === undefined) {
     logger.error(
-      "usage: probe <run-dir | trajectory.jsonl> [--instance ID] [--failed] [--slow] [--cost] [--json]",
+      "usage: probe <run-dir | trajectory.jsonl> [--instance ID] [--failed] [--slow] [--cost] [--funnel] [--json]",
     )
     return 1
   }
@@ -177,6 +191,10 @@ export const main = async (argv: string[]): Promise<number> => {
   }
   if (args.cost) {
     emit(renderCost(run.instances, run.summary))
+    return 0
+  }
+  if (args.funnel) {
+    renderFunnelView(run, args)
     return 0
   }
   if (args.failed) {

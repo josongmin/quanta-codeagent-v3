@@ -24,6 +24,7 @@ import { gitLogTool } from "./log"
 import { defaultGitRunner } from "./runner"
 import { gitStatusTool } from "./status"
 import type { GitRunner } from "./types"
+import { gitUpstreamCheckTool } from "./upstream"
 
 export { gitBlameTool } from "./blame"
 export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
@@ -45,7 +46,9 @@ export type {
   GitRunner,
   GitRunResult,
   GitStatusInput,
+  GitUpstreamCheckInput,
 } from "./types"
+export { gitUpstreamCheckTool } from "./upstream"
 
 /** Build the git tools wired to a runner. When omitted, the default
  *  Bun.spawn-backed runner is used. Order: read-only first (diff/status/log/
@@ -58,6 +61,8 @@ export const gitTools = (runner: GitRunner = defaultGitRunner): Tool[] => [
   // Stage-1 fault-localization signals (read-only, concurrency-safe).
   gitChurnTool(runner) as Tool,
   gitBlameHeatmapTool(runner) as Tool,
+  // Upstream-divergence check (read-only, v0 chat=branch absorption, #5).
+  gitUpstreamCheckTool(runner) as Tool,
   gitCommitTool(runner) as Tool,
   gitBranchSwitchTool(runner) as Tool,
 ]

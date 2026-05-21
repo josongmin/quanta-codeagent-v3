@@ -34,12 +34,24 @@ const schema = z.object({
     .max(2000)
     .optional()
     .describe("Cap total files listed (default 400, max 2000)"),
+  summarize: z
+    .boolean()
+    .optional()
+    .describe(
+      "Annotate each file with its first declaration/comment line (purpose hint). " +
+        "Adds one ripgrep pass; capped at 200 files for cost.",
+    ),
 })
 
 type Input = z.infer<typeof schema>
 
 const DEFAULT_DEPTH = 3
 const DEFAULT_MAX_FILES = 400
+/** Hard cap on per-file purpose extraction (summarize mode) — bounds the
+ *  second ripgrep pass + render width on huge trees. */
+const SUMMARY_FILE_CAP = 200
+/** Truncate a purpose hint so the tree stays scannable. */
+const SUMMARY_LEN = 80
 
 const sq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 
@@ -86,18 +98,51 @@ const aggregate = (files: string[], maxDepth: number, maxFiles: number): TreeAgg
   return { byDir, deepRollup, total, truncated }
 }
 
+/** First declaration / docstring / comment line per file is a cheap "purpose"
+ *  signal (Codex file-topology). Language-agnostic alternation: a leading
+ *  export/def/class/func/interface/type/fn/public/module.exports, OR the first
+ *  line/block comment. One ripgrep `-m1` pass extracts the first match per
+ *  file. */
+const PURPOSE_RE = String.raw`^\s*(?:export\s|def\s|class\s|func\s|function\s|interface\s|type\s|fn\s|pub\s|public\s|module\.exports|//|#\s|/\*\*?)`
+
+/** Parse `path:line:text` rows from the purpose pass into a `relpath → hint`
+ *  map. The hint is the trimmed match line, capped. Exported pure for tests. */
+export const parsePurposeRows = (stdout: string): Map<string, string> => {
+  const map = new Map<string, string>()
+  for (const row of stdout.split("\n")) {
+    const m = row.match(/^(.+?):(\d+):(.*)$/)
+    if (!m) continue
+    const file = m[1]
+    const text = (m[3] ?? "").trim()
+    if (!file || text.length === 0 || map.has(file)) continue
+    map.set(file, text.length > SUMMARY_LEN ? `${text.slice(0, SUMMARY_LEN)}…` : text)
+  }
+  return map
+}
+
 /** Render the aggregate as an indented tree, directories sorted, files sorted
- *  within each directory, per-directory count shown. */
-const render = (agg: TreeAgg, maxFiles: number): string => {
+ *  within each directory, per-directory count shown. When `summaries` is
+ *  given, each file gets a ` — <first-decl/comment>` purpose annotation. */
+const render = (
+  agg: TreeAgg,
+  maxFiles: number,
+  summaries: Map<string, string> | undefined,
+): string => {
   if (agg.byDir.size === 0 && agg.deepRollup.size === 0) return "(no files)"
   const dirs = [...agg.byDir.keys()].sort((a, b) => a.localeCompare(b))
   const out: string[] = []
+  const purposeOf = (dir: string, base: string): string => {
+    if (summaries === undefined) return ""
+    const rel = dir === "." ? base : `${dir}/${base}`
+    const hint = summaries.get(rel)
+    return hint ? `  — ${hint}` : ""
+  }
   for (const dir of dirs) {
     const files = (agg.byDir.get(dir) ?? []).sort((a, b) => a.localeCompare(b))
     const indent = dir === "." ? "" : "  ".repeat(dir.split("/").length)
     out.push(`${indent}${dir}/ (${files.length})`)
     const fileIndent = `${indent}  `
-    for (const f of files) out.push(`${fileIndent}${f}`)
+    for (const f of files) out.push(`${fileIndent}${f}${purposeOf(dir, f)}`)
     const rolled = agg.deepRollup.get(dir)
     if (rolled !== undefined) out.push(`${fileIndent}…/ (+${rolled} deeper, increase max_depth)`)
   }
@@ -116,8 +161,9 @@ export const fileTreeSummaryTool: Tool<Input> = {
   name: "file_tree_summary",
   description:
     "Summarize a repo's directory STRUCTURE (depth-bounded tree + per-dir file " +
-    "counts, .gitignore-respecting). Use it in Stage 1 of fault localization to " +
-    "see where modules live before reading files. Structure only, not file purpose.",
+    "counts, .gitignore-respecting). Stage 1 of fault localization — see where " +
+    "modules live before reading files. Pass summarize:true to annotate each " +
+    "file with its first declaration/comment (a cheap purpose hint).",
   inputSchema: schema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
@@ -166,6 +212,33 @@ export const fileTreeSummaryTool: Tool<Input> = {
     }
 
     const agg = aggregate(files, maxDepth, maxFiles)
-    yield { type: "result", result: { ok: true, output: render(agg, maxFiles) } }
+
+    // Optional purpose layer: one extra `rg -m1` pass extracting the first
+    // declaration/comment line per file (capped). Failure here degrades to a
+    // structure-only tree — the purpose hint is a bonus, never load-bearing.
+    let summaries: Map<string, string> | undefined
+    if (input.summarize === true) {
+      yield { type: "progress", message: "extracting per-file purpose…" }
+      const purposeParts = [
+        "rg",
+        "--no-heading",
+        "--line-number",
+        "--color=never",
+        "-m",
+        "1",
+        "--max-filesize",
+        "1M",
+        "-e",
+        sq(PURPOSE_RE),
+      ]
+      if (jailedPath !== undefined) purposeParts.push(sq(jailedPath))
+      const pr = await runShell(purposeParts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
+      if (pr.exitCode <= 1 && !pr.timedOut) {
+        const rows = pr.stdout.trimEnd().split("\n").slice(0, SUMMARY_FILE_CAP).join("\n")
+        summaries = parsePurposeRows(rows)
+      }
+    }
+
+    yield { type: "result", result: { ok: true, output: render(agg, maxFiles, summaries) } }
   },
 }

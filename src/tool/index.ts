@@ -14,6 +14,7 @@ import type { Tool } from "./types"
 import { writeTool } from "./write"
 
 export { applyPatchTool, FsJailViolationError } from "./apply-patch"
+export { DeferredResultRegistry, UnknownDeferredHandleError } from "./deferred"
 export {
   type DiagnosticItem,
   type DiagnosticsProvider,
@@ -22,6 +23,14 @@ export {
   formatDiagnostics,
   nullDiagnosticsProvider,
 } from "./diagnostics"
+export type { DefineToolSpec, StreamingInputStep } from "./factory"
+export {
+  defineTool,
+  driveStreamingInput,
+  enforceOutputSchema,
+  renderModelOutput,
+  validateToolOutput,
+} from "./factory"
 export { fileTreeSummaryTool } from "./file-tree-summary"
 export type {
   GitBlameInput,
@@ -32,6 +41,7 @@ export type {
   GitRunner,
   GitRunResult,
   GitStatusInput,
+  GitUpstreamCheckInput,
 } from "./git"
 export {
   defaultGitRunner,
@@ -44,6 +54,7 @@ export {
   gitLogTool,
   gitStatusTool,
   gitTools,
+  gitUpstreamCheckTool,
   rankBlame,
   rankChurn,
 } from "./git"
@@ -62,10 +73,18 @@ export {
   lspNavTools,
   nullLspNavProvider,
 } from "./lsp_nav"
-export { type FailureFrame, parseTestFailure, parseTestFailureTool } from "./parse-test-failure"
+export {
+  classifyFrame,
+  type FailureFrame,
+  type FrameTier,
+  parseTestFailure,
+  parseTestFailureTool,
+} from "./parse-test-failure"
 export { ToolRegistry } from "./registry"
 export type {
   BlockerSurface,
+  DeferredHandle,
+  DeferredToolResult,
   HITLTier,
   Tool,
   ToolContext,

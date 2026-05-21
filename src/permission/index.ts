@@ -79,6 +79,8 @@ export {
   recordRiskSeen,
   recordUserOverride,
 } from "./post-denial"
+export type { PendingPermission } from "./remember-patterns"
+export { autoResolvable, grantPatterns, PatternGrantStore } from "./remember-patterns"
 export {
   DenialPrecedenceConflictError,
   ReviewerUnavailableError,

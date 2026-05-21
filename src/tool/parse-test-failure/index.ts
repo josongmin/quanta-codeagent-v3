@@ -26,11 +26,41 @@ type Input = z.infer<typeof schema>
 
 const DEFAULT_MAX = 30
 
+/** Where a frame's file sits in the edit-likelihood hierarchy. Codex ranks the
+ *  user-code assertion frame far above library/stdlib frames — the real edit
+ *  location is almost never inside vendored code. `user` ranks above `test`
+ *  because a failing assertion's CAUSE is usually in the code under test, not
+ *  the test harness; both rank far above `vendored`. */
+export type FrameTier = "user" | "test" | "vendored"
+
+const TIER_RANK: Record<FrameTier, number> = { user: 0, test: 1, vendored: 2 }
+
+/** Vendored / third-party / build-output path fragments. A frame whose file
+ *  matches any of these is noise for fault localization — the edit goes in
+ *  user code, not here. Covers JS (node_modules/.pnp), Python (site-packages/
+ *  .venv/dist-packages), Rust (.cargo/target), system libs, and common build
+ *  output dirs. */
+const VENDORED_RE =
+  /(?:^|\/)(?:node_modules|\.pnp|site-packages|dist-packages|\.venv|venv|\.cargo|vendor|third_party|\.tox|__pycache__)(?:\/)|(?:^|\/)(?:dist|build|out|target\/(?:debug|release))\/|^\/usr\/(?:lib|local\/lib)\//
+
+/** Test-file path/name heuristics across ecosystems. */
+const TEST_FILE_RE =
+  /(?:^|\/)tests?\/|(?:^|\/)__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:py|go|rs)$|(?:^|\/)test_[^/]*\.py$|Test\.java$|Tests?\.cs$/
+
+/** Classify a file path into its edit-likelihood tier. */
+export const classifyFrame = (file: string): FrameTier => {
+  if (VENDORED_RE.test(file)) return "vendored"
+  if (TEST_FILE_RE.test(file)) return "test"
+  return "user"
+}
+
 export interface FailureFrame {
   file: string
   line: number
   framework: string
   message: string
+  /** Edit-likelihood tier (user > test > vendored). R-Phase8 ranking. */
+  tier: FrameTier
 }
 
 /** One regex rule: a framework tag + a matcher that yields {file,line,message}
@@ -98,9 +128,15 @@ const RULES: Rule[] = [
 ]
 
 /** Parse `output` into deduped failure frames, first-rule-wins on framework
- *  tag for a given `file:line` key. Exported pure for unit tests. */
+ *  tag for a given `file:line` key, then RANK so the most-likely edit location
+ *  surfaces first: user-code frames before test frames before vendored frames
+ *  (stable within each tier to preserve discovery/stack order). The cap is
+ *  applied AFTER ranking so a flood of `node_modules` frames can never push the
+ *  real user-code frame past `maxResults` (R-Phase8 #1). Exported pure. */
 export const parseTestFailure = (output: string, maxResults: number): FailureFrame[] => {
   const byKey = new Map<string, FailureFrame>()
+  let discovery = 0
+  const order = new Map<string, number>()
   for (const rule of RULES) {
     rule.re.lastIndex = 0
     let m: RegExpExecArray | null = rule.re.exec(output)
@@ -109,7 +145,8 @@ export const parseTestFailure = (output: string, maxResults: number): FailureFra
       if (mapped && Number.isFinite(mapped.line) && looksLikeFile(mapped.file)) {
         const key = `${mapped.file}:${mapped.line}`
         if (!byKey.has(key)) {
-          byKey.set(key, { ...mapped, framework: rule.framework })
+          byKey.set(key, { ...mapped, framework: rule.framework, tier: classifyFrame(mapped.file) })
+          order.set(key, discovery++)
         } else if (mapped.message) {
           // Enrich an existing frame's empty message without changing its tag.
           const cur = byKey.get(key) as FailureFrame
@@ -119,22 +156,36 @@ export const parseTestFailure = (output: string, maxResults: number): FailureFra
       m = rule.re.exec(output)
     }
   }
-  return [...byKey.values()].slice(0, maxResults)
+  const keyOf = (f: FailureFrame): string => `${f.file}:${f.line}`
+  return [...byKey.values()]
+    .sort((a, b) => {
+      const t = TIER_RANK[a.tier] - TIER_RANK[b.tier]
+      if (t !== 0) return t
+      return (order.get(keyOf(a)) ?? 0) - (order.get(keyOf(b)) ?? 0)
+    })
+    .slice(0, maxResults)
 }
 
 const render = (frames: FailureFrame[]): string => {
   if (frames.length === 0) return "(no file:line locations found in output)"
+  // Tier marker only for non-user frames (user frames are the default / most
+  // likely target — keeping them unmarked keeps the high-signal rows clean).
+  const tierMark = (t: FrameTier): string => (t === "user" ? "" : `  «${t}»`)
   return frames
-    .map((f) => `${f.file}:${f.line}  [${f.framework}]${f.message ? `  ${f.message}` : ""}`)
+    .map(
+      (f) =>
+        `${f.file}:${f.line}  [${f.framework}]${tierMark(f.tier)}${f.message ? `  ${f.message}` : ""}`,
+    )
     .join("\n")
 }
 
 export const parseTestFailureTool: Tool<Input> = {
   name: "parse_test_failure",
   description:
-    "Extract candidate edit locations (file:line) from raw test/build output. " +
-    "Recognizes pytest, python traceback, jest/vitest/bun, go test, cargo. " +
-    "Use in Stage 3 of fault localization — log frames outrank search hits.",
+    "Extract + rank candidate edit locations (file:line) from raw test/build " +
+    "output. Recognizes pytest, python traceback, jest/vitest/bun, go test, " +
+    "cargo. Ranks user-code frames above test frames above vendored " +
+    "(node_modules/site-packages/…) noise. Stage 3 of fault localization.",
   inputSchema: schema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

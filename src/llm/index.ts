@@ -4,6 +4,13 @@ export type { AssembledTurn } from "./assemble"
 export { assembleFromEvents, hasToolUse } from "./assemble"
 export type { FallbackLLMOptions } from "./fallback"
 export { FallbackLLM, isFallbackTrigger } from "./fallback"
+export type { ModelCandidate, ModelSwapRetryOptions } from "./model-swap"
+export {
+  NoAlternateModelError,
+  pickNextModel,
+  resolveRetryModel,
+  streamWithModel,
+} from "./model-swap"
 export type { LLMPort } from "./ports"
 export type { DecodedProviderEvent, ParsedSseFrame } from "./streaming-events"
 export {

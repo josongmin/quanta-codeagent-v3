@@ -63,6 +63,14 @@ export { memoryTools } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
 export { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
 export { isMutatingToolBlockedInPlan } from "./plan"
+export type { PlanExitDecision, PlanExitOutcome } from "./plan-exit"
+export {
+  ALL_PLAN_EXIT_DECISIONS,
+  buildPlanExit,
+  PlanExitInvariantError,
+  planExitAllowsMutation,
+  planExitStaysInPlan,
+} from "./plan-exit"
 export type { AgentMode, TurnContext, TurnContextInput } from "./prompt"
 export { buildSystemPrompt, buildTurnContext } from "./prompt"
 export {

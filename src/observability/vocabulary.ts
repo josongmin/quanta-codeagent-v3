@@ -163,6 +163,18 @@ export const QUANTA_ATTRS = {
     queryDurationMs: "quanta.sqlite.query.duration_ms",
     walCheckpointMode: "quanta.sqlite.wal_checkpoint.mode",
   },
+  /** absorb #6 (v0.dev `workMetrics`): per-turn cost/work transparency —
+   *  files touched, lines added/removed, agent actions, lines read, and the
+   *  best-effort USD cost. Emitted per-turn (and folded per-session) once the
+   *  loop wiring lands. */
+  work: {
+    filesChanged: "quanta.work.files_changed",
+    linesAdded: "quanta.work.lines_added",
+    linesRemoved: "quanta.work.lines_removed",
+    actions: "quanta.work.actions",
+    linesRead: "quanta.work.lines_read",
+    costUsd: "quanta.work.cost_usd",
+  },
 } as const
 
 // ---------------------------------------------------------------------------

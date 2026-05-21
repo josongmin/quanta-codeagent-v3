@@ -144,6 +144,8 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   parse_test_failure: null,
   git_churn: null,
   git_blame_heatmap: null,
+  // Read-only upstream-divergence check (v0 chat=branch absorption, #5).
+  git_upstream_check: null,
   // Mutating built-ins
   write: "write_filesystem",
   edit: "write_filesystem",

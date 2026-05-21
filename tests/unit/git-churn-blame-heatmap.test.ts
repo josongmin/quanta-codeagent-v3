@@ -188,6 +188,36 @@ describe("gitBlameHeatmapTool", () => {
     expect(args).toContain("--line-porcelain")
     expect(args).toContain("--")
     expect(args).toContain("src/x.ts")
+    // No -L when no range given.
+    expect(args).not.toContain("-L")
+  })
+
+  test("line range → git blame -L <start>,<end> (R-Phase8 #4)", async () => {
+    const runner = new FakeRunner(ok(porcelain(["Jane"])))
+    await collect(gitBlameHeatmapTool(runner), { file: "src/x.ts", start_line: 10, end_line: 40 })
+    const args = runner.calls[0]?.args ?? []
+    const li = args.indexOf("-L")
+    expect(li).toBeGreaterThanOrEqual(0)
+    expect(args[li + 1]).toBe("10,40")
+  })
+
+  test("start_line without end_line → invalid input (must be paired)", async () => {
+    const r = await collect(gitBlameHeatmapTool(new FakeRunner(ok(""))), {
+      file: "x.ts",
+      start_line: 5,
+    })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("invalid input")
+  })
+
+  test("end_line < start_line → invalid input", async () => {
+    const r = await collect(gitBlameHeatmapTool(new FakeRunner(ok(""))), {
+      file: "x.ts",
+      start_line: 40,
+      end_line: 10,
+    })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("invalid input")
   })
 
   test("renders pct-padded ownership rows", async () => {

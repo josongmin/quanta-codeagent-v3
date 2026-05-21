@@ -41,6 +41,15 @@ export type GitDiffInput = z.infer<typeof gitDiffInputSchema>
 export const gitStatusInputSchema = z.object({})
 export type GitStatusInput = z.infer<typeof gitStatusInputSchema>
 
+// --- git_upstream_check ------------------------------------------------------
+
+/** Read-only, no-network upstream-divergence check (absorb #5, v0.dev
+ *  chat=branch `upstreamChanges`). Takes no args: it inspects the CURRENT
+ *  branch's already-fetched remote-tracking ref. It deliberately does NOT
+ *  `git fetch` (network + index mutation stays on `bash`). */
+export const gitUpstreamCheckInputSchema = z.object({})
+export type GitUpstreamCheckInput = z.infer<typeof gitUpstreamCheckInputSchema>
+
 // --- git_log -----------------------------------------------------------------
 
 export const gitLogInputSchema = z.object({
@@ -81,11 +90,37 @@ export type GitChurnInput = z.infer<typeof gitChurnInputSchema>
 /** Stage-1 ownership signal: per-file author line distribution. Who owns the
  *  most lines of a file is a weak-but-useful "who to ask / who last touched
  *  this surface" signal (Codex blame ownership). READ-ONLY, CONCURRENCY-SAFE. */
-export const gitBlameHeatmapInputSchema = z.object({
-  file: z.string().describe("File to compute author line-ownership distribution for"),
-  /** Max authors to list. Default 10, capped at 50. */
-  n: z.number().int().positive().max(50).optional().describe("Top-N authors (default 10, max 50)"),
-})
+export const gitBlameHeatmapInputSchema = z
+  .object({
+    file: z.string().describe("File to compute author line-ownership distribution for"),
+    /** Max authors to list. Default 10, capped at 50. */
+    n: z
+      .number()
+      .int()
+      .positive()
+      .max(50)
+      .optional()
+      .describe("Top-N authors (default 10, max 50)"),
+    /** 1-based start line to scope ownership to a region (e.g. one function).
+     *  Requires `end_line`. Maps to `git blame -L <start>,<end>`. */
+    start_line: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based start line (with end_line)"),
+    /** 1-based end line (inclusive). Requires `start_line`. */
+    end_line: z.number().int().positive().optional().describe("1-based end line (with start_line)"),
+  })
+  .refine((v) => (v.start_line === undefined) === (v.end_line === undefined), {
+    message: "start_line and end_line must be provided together",
+  })
+  .refine(
+    (v) => v.start_line === undefined || v.end_line === undefined || v.end_line >= v.start_line,
+    {
+      message: "end_line must be >= start_line",
+    },
+  )
 export type GitBlameHeatmapInput = z.infer<typeof gitBlameHeatmapInputSchema>
 
 // --- git_commit --------------------------------------------------------------

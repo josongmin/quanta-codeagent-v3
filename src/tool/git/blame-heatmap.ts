@@ -38,8 +38,9 @@ const formatBody = (rows: { author: string; lines: number; pct: number }[]): str
 export const gitBlameHeatmapTool = (runner: GitRunner): Tool<GitBlameHeatmapInput> => ({
   name: "git_blame_heatmap",
   description:
-    "Per-author line-ownership distribution for one file (who owns the most " +
-    "lines). Stage-1 ownership signal for fault localization. Read-only.",
+    "Per-author line-ownership distribution for one file, or a line range " +
+    "(start_line/end_line → one function). Stage-1 ownership signal for fault " +
+    "localization. Read-only.",
   inputSchema: gitBlameHeatmapInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
@@ -53,14 +54,21 @@ export const gitBlameHeatmapTool = (runner: GitRunner): Tool<GitBlameHeatmapInpu
       }
       return
     }
-    const { file, n } = parsed.data
+    const { file, n, start_line, end_line } = parsed.data
     const topN = n ?? 10
     // `--line-porcelain` repeats the author header for every line (vs
     // `--porcelain` which dedups by commit) — exactly what per-line counting
-    // needs. `--` guards a filename that could look like a flag.
-    const args = ["blame", "--line-porcelain", "--", file]
+    // needs. `-L <start>,<end>` scopes ownership to one region (e.g. a single
+    // function) when both bounds are given. `--` guards a filename that could
+    // look like a flag.
+    const args = ["blame", "--line-porcelain"]
+    if (start_line !== undefined && end_line !== undefined) {
+      args.push("-L", `${start_line},${end_line}`)
+    }
+    args.push("--", file)
 
-    yield { type: "progress", message: `git blame heatmap -- ${file}` }
+    const region = start_line !== undefined ? ` -L ${start_line},${end_line}` : ""
+    yield { type: "progress", message: `git blame heatmap${region} -- ${file}` }
 
     const out = await safeRun(runner, args, ctx.cwd, "git blame")
     if (out.kind === "spawn-error") {

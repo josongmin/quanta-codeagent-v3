@@ -69,6 +69,18 @@ export interface ToolResult {
    *  seam now reads `result.evidence?.*` through this typed surface so the
    *  `stdErr` vs `stderr` casing drift can no longer slip past `tsc`. */
   evidence?: ToolResultEvidence
+  /** OPTIONAL (absorb #1): structured value paired with `output`. When a tool
+   *  declares an `outputSchema`, the dispatch seam validates THIS field (not
+   *  `output`) against the schema. Absent ⇒ no structured payload; existing
+   *  callers are byte-identical. Typed `unknown` here so `ToolResult` stays
+   *  non-generic; `defineTool` narrows it at the factory boundary. */
+  structured?: unknown
+  /** OPTIONAL (absorb #1): a deferred-result marker. When a tool sets
+   *  `supportsDeferredResults` and returns a placeholder it is still running
+   *  in, this carries the handle the poller resolves later. The presence of
+   *  `deferred` means `output` is a provisional placeholder, not the final
+   *  answer. Absent ⇒ ordinary synchronous result (byte-identical). */
+  deferred?: DeferredHandle
 }
 
 /** Optional RFC-0002 §5.2 execution evidence a tool may attach to its
@@ -90,10 +102,32 @@ export interface ToolResultEvidence {
 /**
  * Events a tool streams while running. A tool yields zero or more `progress`
  * events, then exactly one terminal `result` — which MUST be the last event.
+ *
+ * Deferred results (absorb #1) are carried on the terminal `result` via the
+ * OPTIONAL `ToolResult.deferred` handle — NOT as a separate event variant.
+ * Keeping the union at `progress | result` preserves byte-identical type
+ * narrowing for every existing call site that switches on `event.type`.
  */
 export type ToolEvent =
   | { type: "progress"; message: string }
   | { type: "result"; result: ToolResult }
+
+/** OPTIONAL (absorb #1): an opaque, serializable handle identifying a deferred
+ *  tool result. The dispatch seam hands this to a `DeferredResultRegistry` which
+ *  resolves the final `ToolResult` once the out-of-band work completes. Kept
+ *  minimal & string-keyed so it can cross a JSON boundary unchanged. */
+export interface DeferredHandle {
+  /** Stable id the registry/poller keys on. Unique within a session. */
+  id: string
+  /** Optional human-facing hint shown while the result is pending. */
+  hint?: string | undefined
+}
+
+/** OPTIONAL (absorb #1): the resolution outcome of a deferred handle, as
+ *  surfaced by `DeferredResultRegistry.poll`. */
+export type DeferredToolResult =
+  | { state: "pending"; handle: DeferredHandle }
+  | { state: "resolved"; handle: DeferredHandle; result: ToolResult }
 
 /**
  * Codex HITL 4-tier taxonomy (hitl-audit.md). Structurally identical to
@@ -108,10 +142,33 @@ export type HITLTier = "hand-off-required" | "always-confirm" | "pre-approval-ok
  * `ToolEvent`s; `isConcurrencySafe(input)` lets the dispatcher batch pure
  * reads to run in parallel while keeping side-effecting calls serialized.
  */
-export interface Tool<I = unknown> {
+export interface Tool<I = unknown, O = unknown> {
   name: string
   description: string
   inputSchema: z.ZodType<I>
+  /** OPTIONAL (absorb #1): schema for the tool's STRUCTURED result
+   *  (`ToolResult.structured`). When present, the dispatch seam validates the
+   *  structured payload via {@link validateToolOutput}; a mismatch is surfaced
+   *  as an `ok:false` ToolResult instructing the model to retry — never thrown
+   *  past the loop. Absent ⇒ no structured-output contract (byte-identical). */
+  outputSchema?: z.ZodType<O>
+  /** OPTIONAL (absorb #1): produce a COMPACT, model-facing rendering of a
+   *  result, distinct from the richer UI/`output` text, to save tokens. When
+   *  absent the dispatch seam uses `result.output` as today (byte-identical). */
+  toModelOutput?(result: ToolResult): string
+  /** OPTIONAL (absorb #1): when `true`, this tool may return a deferred result
+   *  (a `{type:"deferred"}` event or `ToolResult.deferred`) that a
+   *  `DeferredResultRegistry` resolves later. Absent/false ⇒ synchronous only. */
+  supportsDeferredResults?: boolean
+  /** OPTIONAL (absorb #1): streaming-input callbacks, mirroring the LLM
+   *  `tool_use_start` / `tool_use_delta` / `tool_use_end` events. The dispatch
+   *  seam invokes these as the tool-call arguments stream in, BEFORE `execute`.
+   *  All three are individually optional and side-effecting only (the parsed
+   *  input is still passed to `execute`). Drive them in tests/dispatch via
+   *  {@link driveStreamingInput}. */
+  onInputStart?(): void
+  onInputDelta?(delta: string): void
+  onInputAvailable?(input: I): void
   isReadOnly(): boolean
   /** True ⇒ this call has no observable interaction with any other call and
    *  may run concurrently with other concurrency-safe calls. */
