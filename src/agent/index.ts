@@ -13,6 +13,7 @@ export {
   ConfirmDecisionError,
   isAllowed as isConfirmDecisionAllowed,
   normalizeConfirm,
+  READONLY_DENY_STEER_NOTE,
 } from "./confirm-decision"
 export {
   appendSummary,

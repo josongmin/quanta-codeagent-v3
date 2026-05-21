@@ -10,7 +10,7 @@ describe("assembleFromEvents", () => {
       { type: "message_stop", stop_reason: "end_turn" },
     ]
     const { message, stopReason } = assembleFromEvents(events)
-    expect(message.content).toEqual([{ type: "text", text: "Hello" }])
+    expect(message.content).toEqual([{ type: "text", text: "Hello", phase: "final_answer" }])
     expect(stopReason).toBe("end_turn")
     expect(hasToolUse(message)).toBe(false)
   })

@@ -44,7 +44,7 @@ describe("ADR-0076 Gap-2 — assembleFromEvents thinking accumulation", () => {
     const { message } = assembleFromEvents(events)
     expect(message.content).toEqual([
       { type: "thinking", thinking: "first I think", signature: "sig1" },
-      { type: "text", text: "then I speak" },
+      { type: "text", text: "then I speak", phase: "final_answer" },
     ])
   })
 
@@ -69,7 +69,7 @@ describe("ADR-0076 Gap-2 — assembleFromEvents thinking accumulation", () => {
       { type: "message_stop", stop_reason: "end_turn" },
     ]
     const { message } = assembleFromEvents(events)
-    expect(message.content).toEqual([{ type: "text", text: "hi" }])
+    expect(message.content).toEqual([{ type: "text", text: "hi", phase: "final_answer" }])
     expect(message.content.some((b) => b.type === "thinking")).toBe(false)
   })
 
@@ -80,7 +80,7 @@ describe("ADR-0076 Gap-2 — assembleFromEvents thinking accumulation", () => {
       { type: "message_stop", stop_reason: "end_turn" },
     ]
     const { message } = assembleFromEvents(events)
-    expect(message.content).toEqual([{ type: "text", text: "hi" }])
+    expect(message.content).toEqual([{ type: "text", text: "hi", phase: "final_answer" }])
   })
 
   test("redacted:true preserved on the ThinkingBlock and never merges with plaintext", () => {
@@ -119,9 +119,9 @@ describe("ADR-0076 Gap-2 — assembleFromEvents thinking accumulation", () => {
     const { message } = assembleFromEvents(events)
     expect(message.content).toEqual([
       { type: "thinking", thinking: "round 1", signature: "s1" },
-      { type: "text", text: "interlude" },
+      { type: "text", text: "interlude", phase: "final_answer" },
       { type: "thinking", thinking: "round 2", signature: "s2" },
-      { type: "text", text: "final" },
+      { type: "text", text: "final", phase: "final_answer" },
     ])
   })
 
@@ -155,7 +155,7 @@ describe("ADR-0076 Gap-2 — assembleFromEvents thinking accumulation", () => {
     const { message } = assembleFromEvents(events)
     expect(message.content).toEqual([
       { type: "thinking", thinking: "live reasoning", signature: "livesig" },
-      { type: "text", text: "alive" },
+      { type: "text", text: "alive", phase: "final_answer" },
     ])
   })
 

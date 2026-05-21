@@ -178,7 +178,7 @@ describe("streamingTurn", () => {
     if (res.kind !== "assembled") return
     // Only the post-reset message survives.
     expect(res.message.content).toEqual([
-      { type: "text", text: "fresh" },
+      { type: "text", text: "fresh", phase: "commentary" },
       { type: "tool_use", id: "live1", name: "read", input: { p: "y" } },
     ])
     expect(res.resultBlocks.map((b) => (b.type === "tool_result" ? b.tool_use_id : ""))).toEqual([

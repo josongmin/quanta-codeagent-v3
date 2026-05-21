@@ -26,6 +26,11 @@ export type {
   TimerStats,
   TimerStop,
 } from "./types"
+export {
+  createTurnTimingCapture,
+  type TurnTiming,
+  type TurnTimingCapture,
+} from "./turn-timing"
 export { GEN_AI_ATTRS, QUANTA_ATTRS } from "./vocabulary"
 export {
   accumulateWorkMetrics,

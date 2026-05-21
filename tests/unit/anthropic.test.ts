@@ -253,7 +253,7 @@ describe("mapping ↔ assembly contract", () => {
     expect(message).toEqual({
       role: "assistant",
       content: [
-        { type: "text", text: "Calling tool" },
+        { type: "text", text: "Calling tool", phase: "commentary" },
         { type: "tool_use", id: "tu_a", name: "read", input: { path: "f.ts" } },
       ],
     })

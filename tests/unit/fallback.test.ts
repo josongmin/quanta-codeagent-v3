@@ -100,7 +100,7 @@ describe("FallbackLLM", () => {
     // assembled message is just the fallback content
     expect(assembleFromEvents(events).message).toEqual({
       role: "assistant",
-      content: [{ type: "text", text: "from-fb" }],
+      content: [{ type: "text", text: "from-fb", phase: "final_answer" }],
     })
   })
 
@@ -129,7 +129,7 @@ describe("FallbackLLM", () => {
     const { message } = assembleFromEvents(events)
     expect(message).toEqual({
       role: "assistant",
-      content: [{ type: "text", text: "clean fallback" }],
+      content: [{ type: "text", text: "clean fallback", phase: "final_answer" }],
     })
   })
 
@@ -146,7 +146,9 @@ describe("FallbackLLM", () => {
     const events = await collect(llm.stream({ messages: [], tools: [] }))
     expect(events).toEqual([text("dead1"), { type: "stream_reset" }, text("final"), stop()])
     expect(events.filter((e) => e.type === "stream_reset")).toHaveLength(1)
-    expect(assembleFromEvents(events).message.content).toEqual([{ type: "text", text: "final" }])
+    expect(assembleFromEvents(events).message.content).toEqual([
+      { type: "text", text: "final", phase: "final_answer" },
+    ])
   })
 
   test("all providers fail with trigger → rethrows the LAST error", async () => {

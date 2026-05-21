@@ -241,7 +241,10 @@ describe("assembleFromEvents — usage event is non-content and ignored", () => 
     const a = assembleFromEvents(withUsage)
     const b = assembleFromEvents(withoutUsage)
     expect(a).toEqual(b)
-    expect(a.message).toEqual({ role: "assistant", content: [{ type: "text", text: "Result" }] })
+    expect(a.message).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "Result", phase: "final_answer" }],
+    })
     expect(a.stopReason).toBe("end_turn")
   })
 })

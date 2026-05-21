@@ -1,6 +1,6 @@
 import type { LLMPort, Message, ModelCandidate } from "@/llm"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
-import type { Metrics } from "@/observability"
+import type { Metrics, TurnTiming } from "@/observability"
 import type {
   PatternGrantStore,
   PermissionContext,
@@ -476,6 +476,15 @@ export interface AgentOutcome {
    * only read `reason`.
    */
   memoryCitations?: ReadonlyArray<MemoryCitation>
+  /**
+   * ADR-0077 TTFT trio — wall-clock anchors of the LAST sampling-request of
+   * the run (the one that produced the final assistant message). Absent on
+   * runs that never opened a stream (e.g. immediate abort) ⇒ byte-identical
+   * for callers that only read `reason`. Captured by
+   * `createTurnTimingCapture` and threaded through the loop's per-turn
+   * sampling-request seam.
+   */
+  turnTiming?: TurnTiming
 }
 
 // ─────────────────────────────────────────────────────────────────────────

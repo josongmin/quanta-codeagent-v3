@@ -214,6 +214,11 @@ export const GEN_AI_ATTRS = {
   response: {
     model: "gen_ai.response.model",
     finishReason: "gen_ai.response.finish_reasons",
+    /** ADR-0077 TTFT — wall-clock ms from `llm.stream(...)` open to the FIRST
+     *  model-output chunk (text / thinking / tool_use start). Emitted per
+     *  sampling-request span; omitted when no chunk was observed (e.g. empty
+     *  stream / immediate abort). Sourced from `TurnTiming.firstTokenLatencyMs`. */
+    timeToFirstTokenMs: "gen_ai.response.time_to_first_token_ms",
   },
   usage: {
     inputTokens: "gen_ai.usage.input_tokens",

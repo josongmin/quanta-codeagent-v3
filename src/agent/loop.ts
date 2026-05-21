@@ -6,7 +6,16 @@ import type {
   ToolResultBlock,
 } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
-import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
+import {
+  attrs,
+  createTurnTimingCapture,
+  endSpan,
+  QUANTA_ATTRS,
+  SPAN_NAMES,
+  type Span,
+  startSpan,
+  type TurnTiming,
+} from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
 import { LLMError, type RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
@@ -202,6 +211,10 @@ type StreamSuccess = {
   message: AssembledMessage
   stopReason: string
   resultBlocks: AssembledMessage["content"]
+  /** ADR-0077: wall-clock anchors for THIS sampling-request (`requestSentAt`,
+   *  `firstTokenAt`, `streamEndAt`). Always present on a success — captured
+   *  unconditionally so the trio is observable for every productive turn. */
+  turnTiming: TurnTiming
 }
 type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } | { aborted: true }
 
@@ -292,6 +305,11 @@ const streamConsume = async (
   const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
   const stop = recorder?.llmStream()
+  // ADR-0077 turn-timing trio. Captured around EVERY sampling-request: each
+  // SAME-TURN retry is a new request, so each gets its own capture. The loop
+  // surfaces the LAST successful turn's snapshot on `AgentOutcome.turnTiming`.
+  const timing = createTurnTimingCapture()
+  timing.markRequestSent()
   try {
     const outcome = await streamingTurn({
       events: teeUsage(
@@ -301,6 +319,7 @@ const streamConsume = async (
         collector,
       ),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
+      onFirstChunk: () => timing.markFirstToken(),
       // L3 wire (absorb #1, ADR-0060): route streaming `tool_use_*` events to
       // each tool's optional `onInputStart/Delta/Available` callbacks. The
       // seam is a one-`Map.get` fast-path no-op for tools that declare none,
@@ -400,10 +419,12 @@ const streamConsume = async (
       samplingStatus = "aborted"
       return { aborted: true }
     }
+    timing.markStreamEnd()
     return {
       message: outcome.message as AssembledMessage,
       stopReason: outcome.stopReason,
       resultBlocks: outcome.resultBlocks as AssembledMessage["content"],
+      turnTiming: timing.snapshot(),
     }
   } catch (e) {
     samplingStatus = "error"
@@ -1036,6 +1057,9 @@ const runTurn = async (
   archive: ConversationSummaryArchive | undefined,
   turn: number,
   citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
+  /** ADR-0077: capture sink — invoked on every successful sampling-request so
+   *  the outer loop can surface the LAST turn's snapshot on AgentOutcome. */
+  onTurnTiming?: (t: TurnTiming) => void,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -1068,6 +1092,11 @@ const runTurn = async (
       collector,
     )
     if ("aborted" in result) return { kind: "aborted" }
+
+    // ADR-0077: a successful stream consume always carries a TurnTiming
+    // snapshot. The error branch carries none (the stream threw before
+    // `markStreamEnd` — surfacing partial timing would be a fallback path).
+    if ("turnTiming" in result) onTurnTiming?.(result.turnTiming)
 
     const action =
       "error" in result
@@ -1369,6 +1398,13 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       }
     : undefined
 
+  // ADR-0077 turn-timing trio — mutable slot updated on every successful
+  // `streamConsume` (`applyAction` mirrors the field onto here). Surfaced on
+  // `AgentOutcome.turnTiming` at finish. Absent until the first productive
+  // turn — runs that never opened a stream observe NO field (default-OFF
+  // byte-identical for legacy callers).
+  let lastTurnTiming: TurnTiming | undefined
+
   const finish = async (
     reason: StopReason,
     turns: number,
@@ -1413,11 +1449,17 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // the whole run (configured but no recall hits ever) we OMIT the field
     // entirely so a default outcome stays byte-identical for callers that
     // only read `reason`/`turns`/`messages`.
+    //
+    // ADR-0077 turn-timing trio: surface when at least one productive turn
+    // streamed (`lastTurnTiming` is `undefined` for runs that aborted before
+    // any sampling-request opened). Same conditional-spread pattern keeps
+    // legacy callers byte-identical.
     const out: AgentOutcome = { reason, turns, messages }
     if (stopCategory !== undefined) out.stopCategory = stopCategory
     if (memoryCitations !== undefined && memoryCitations.length > 0) {
       out.memoryCitations = memoryCitations
     }
+    if (lastTurnTiming !== undefined) out.turnTiming = lastTurnTiming
     return out
   }
 
@@ -1516,6 +1558,9 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         summaryArchive,
         turn,
         citationSink,
+        (t) => {
+          lastTurnTiming = t
+        },
       )
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"

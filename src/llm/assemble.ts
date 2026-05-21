@@ -53,6 +53,36 @@ const appendSignatureDelta = (content: ContentBlock[], signature: string): void 
   if (thinking) thinking.signature = (thinking.signature ?? "") + signature
 }
 
+/** ADR-0077 phase marker — STRUCTURAL post-pass.
+ *
+ *  Tag every {@link TextBlock} in `content` with its conversational phase by
+ *  ONE backward scan:
+ *    - while the scan has not yet seen a `tool_use`, encountered text is
+ *      `"final_answer"` (model's trailing closeout);
+ *    - once a `tool_use` has been seen, every text block to the LEFT is
+ *      `"commentary"` (model talked, then acted).
+ *
+ *  This is a pure function with no heuristics — the rule is "a text block at
+ *  index `i` is commentary IFF `∃ j > i : content[j].type === "tool_use"`".
+ *  Non-text blocks pass through untouched. Mutates the array in place so a
+ *  byte-identical caller (one that ignores `phase`) sees zero observable
+ *  change in shape.
+ *
+ *  Deterministic. Idempotent (running it twice yields the same tags). */
+export const determinePhases = (content: ContentBlock[]): void => {
+  let sawToolUse = false
+  for (let i = content.length - 1; i >= 0; i--) {
+    const b = content[i]
+    if (b === undefined) continue
+    if (b.type === "tool_use") {
+      sawToolUse = true
+      continue
+    }
+    if (b.type !== "text") continue
+    b.phase = sawToolUse ? "commentary" : "final_answer"
+  }
+}
+
 /** Reconstruct the assistant message from a stream of {@link StreamEvent}.
  *  Anthropic streams content blocks sequentially (one completes before the
  *  next starts), so we can append by position without interleave tracking. */
@@ -98,6 +128,10 @@ export const assembleFromEvents = (events: StreamEvent[]): AssembledTurn => {
         break
     }
   }
+
+  // ADR-0077 post-pass: tag each TextBlock with its structural phase. Single
+  // backward scan in `determinePhases` — see its doc comment for the rule.
+  determinePhases(content)
 
   return { message: { role: "assistant", content }, stopReason }
 }

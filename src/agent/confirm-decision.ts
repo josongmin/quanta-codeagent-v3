@@ -121,6 +121,15 @@ export const normalizeConfirm = (r: boolean | ConfirmDecision): ConfirmDecision 
  *  is truthy; both `deny` and `deny_and_steer` are refusals. */
 export const isAllowed = (d: ConfirmDecision): boolean => d.decision === "allow"
 
+/** ADR-0077: appended to a `deny_and_steer` steer when the denied tool is
+ *  declared read-only (`Tool.isReadOnly() === true`, i.e. `mutating === false`).
+ *  Tells the model the denied call would not have changed state, so a retry
+ *  with different parameters is structurally safe. The phrasing is fixed (not
+ *  derived from anything per-call) so a tool's readonly nature carries the
+ *  same wording every time. */
+export const READONLY_DENY_STEER_NOTE =
+  "\n\nNote: this action is read-only — no state would have changed. Retrying with different parameters is safe."
+
 /**
  * Extract the corrective steer text from a `deny_and_steer` decision. Returns
  * `null` for `allow` / `deny` (no steer to inject). Throws
@@ -128,11 +137,20 @@ export const isAllowed = (d: ConfirmDecision): boolean => d.decision === "allow"
  * (empty steer) — the invariant is also enforced by {@link normalizeConfirm},
  * so a normalized value never trips this; the guard makes the function safe to
  * call on a raw, un-normalized union too.
+ *
+ * ADR-0077 `isReadonly` parameter — when `true` the {@link READONLY_DENY_STEER_NOTE}
+ * is APPENDED to the steer (atomic with the deny). The flag is DECLARED by the
+ * caller (`Tool.isReadOnly()` from the registry lookup the gate already
+ * performs), never inferred from text/heuristics. `false` / `undefined` ⇒ steer
+ * is returned verbatim (byte-identical for every existing caller).
  */
-export const buildDenySteerMessage = (d: ConfirmDecision): string | null => {
+export const buildDenySteerMessage = (
+  d: ConfirmDecision,
+  isReadonly?: boolean,
+): string | null => {
   if (d.decision !== "deny_and_steer") return null
   if (typeof d.steer !== "string" || d.steer.trim().length === 0) {
     throw new ConfirmDecisionError("steer", "deny_and_steer requires a non-empty steer")
   }
-  return d.steer
+  return isReadonly === true ? d.steer + READONLY_DENY_STEER_NOTE : d.steer
 }

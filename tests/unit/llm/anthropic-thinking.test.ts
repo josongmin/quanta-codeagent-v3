@@ -312,7 +312,7 @@ describe("ADR-0076 Gap-2 — Anthropic carry-over serialization", () => {
     const { message } = assembleFromEvents(events)
     expect(message.content).toEqual([
       { type: "thinking", thinking: "chain of thought", signature: "SIG_PART2" },
-      { type: "text", text: "result" },
+      { type: "text", text: "result", phase: "final_answer" },
     ])
 
     const { adapter, captured } = adapterWithCapture()

@@ -289,14 +289,30 @@ const denyFromConfirm = (
   decision: ConfirmDecision,
   baseContent: string,
   basePreview: string,
+  config: AdmissibilityGateConfig,
 ): DispatchResult => {
-  const steer = buildDenySteerMessage(decision)
+  // ADR-0077: consult the registry the gate already owns (no parallel lookup
+  // path). The tool's DECLARED `isReadOnly()` decides whether to append the
+  // readonly note to the steer; absent tool / mutating tool ⇒ verbatim steer
+  // (byte-identical for legacy callers).
+  const tool = config.registry.get(call.name)
+  const isReadonly = tool ? tool.isReadOnly() : false
+  const steer = buildDenySteerMessage(decision, isReadonly)
   if (steer === null) {
     return deny(call.id, baseContent, basePreview)
   }
   // deny_and_steer: deny AND carry the corrective instruction atomically.
   const result = deny(call.id, `${baseContent} Steer: ${steer}`, "deny_steer")
-  return { ...result, steerInjection: steer }
+  // ADR-0077: surface the declared readonly flag on the DispatchResult's
+  // typed failure envelope so trajectory/permission consumers can branch on
+  // it without re-deriving from the tool registry. The shape is the existing
+  // {@link ToolFailure.permission_denied} variant — unchanged when the tool
+  // is mutating (omitted, byte-identical).
+  return {
+    ...result,
+    steerInjection: steer,
+    failure: { mode: "permission_denied", isReadonly },
+  }
 }
 
 /** Run the always-confirm branch — calls `onConfirm`, normalizes the result
@@ -333,6 +349,7 @@ const runAlwaysConfirmBranch = async (
       decision,
       `User declined: ${call.name} requires explicit confirmation (always-confirm tier).`,
       "declined",
+      config,
     )
   }
   return null
@@ -451,7 +468,7 @@ const resolveAskBranch = async (
   // ADR-0076 Gap-4: a `deny_and_steer` decision from the mode-policy ask-branch
   // also surfaces its steer (the verb is decision-shaped, not branch-shaped).
   if (!isConfirmAllowed(decision)) {
-    return denyFromConfirm(call, decision, `User declined: ${reason}`, "declined")
+    return denyFromConfirm(call, decision, `User declined: ${reason}`, "declined", config)
   }
   return null
 }

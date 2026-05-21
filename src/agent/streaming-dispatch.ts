@@ -113,6 +113,14 @@ export interface StreamingTurnArgs {
    *  unchanged. Handler errors are swallowed in place so a faulty consumer
    *  cannot poison the surrounding stream-processing invariants. */
   onToolInput?: ToolInputStreamSeam
+  /** ADR-0077 TTFT seam — invoked exactly once on the FIRST of
+   *  (`text_delta` | `thinking_delta` | `tool_use_start`) observed off the
+   *  upstream events. Idempotent on the caller's side is expected (the loop
+   *  wires a `TurnTimingCapture.markFirstToken` which is itself idempotent),
+   *  but the engine still fires only on the first qualifying event so the
+   *  observable seam is byte-identical for callers that wire it OFF and
+   *  predictable for callers that wire it ON. Absent ⇒ no-op. */
+  onFirstChunk?: () => void
   /** Cooperative cancellation: an abort between/within phases ⇒ `aborted`. */
   signal?: AbortSignal
 }
@@ -179,6 +187,11 @@ interface TurnState {
   /** True once a concurrency-unsafe call has been seen this turn: it is a
    *  head-of-line barrier, so nothing AFTER it may start early either. */
   barrierEngaged: boolean
+  /** ADR-0077: TTFT one-shot latch — true once the first qualifying chunk
+   *  has fired `onFirstChunk`. Independent of `stream_reset`: a tombstone
+   *  abandons the dead partial, so the FIRST chunk of the REPLACEMENT stream
+   *  is what we measure (latch reset on stream_reset). */
+  firstChunkSeen: boolean
 }
 
 /** Abandon every in-flight dispatch + reset accumulation (stream_reset). The
@@ -193,6 +206,9 @@ const resetForTombstone = (state: TurnState): void => {
   state.rawEvents = []
   state.slots.length = 0
   state.barrierEngaged = false
+  // ADR-0077: a tombstone abandons the dead partial; the FIRST chunk of the
+  // REPLACEMENT stream is the true TTFT signal.
+  state.firstChunkSeen = false
 }
 
 /** Synthesize a structurally-valid `tool_result` block for the very rare case
@@ -269,6 +285,17 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
   }
 
   state.rawEvents.push(ev)
+
+  // ADR-0077 TTFT: fire `onFirstChunk` exactly once, on the FIRST of
+  // (text_delta | thinking_delta | tool_use_start). The latch is reset by
+  // `resetForTombstone`, so a post-reset replacement stream re-measures.
+  if (
+    !state.firstChunkSeen &&
+    (ev.type === "text_delta" || ev.type === "thinking_delta" || ev.type === "tool_use_start")
+  ) {
+    state.firstChunkSeen = true
+    args.onFirstChunk?.()
+  }
 
   if (ev.type === "text_delta") {
     args.onTextDelta?.(ev.delta)
@@ -394,7 +421,12 @@ const collectResultBlocks = async (slots: Slot[]): Promise<ResultBlocks> => {
 export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingTurnResult> => {
   const { events, dispatch, onToolStart, signal } = args
 
-  const state: TurnState = { rawEvents: [], slots: [], barrierEngaged: false }
+  const state: TurnState = {
+    rawEvents: [],
+    slots: [],
+    barrierEngaged: false,
+    firstChunkSeen: false,
+  }
 
   for await (const ev of events) {
     if (isAborted(signal)) return { kind: "aborted" }

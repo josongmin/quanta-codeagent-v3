@@ -17,6 +17,18 @@ export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | Thinking
 export interface TextBlock {
   type: "text"
   text: string
+  /** ADR-0077 phase marker — STRUCTURAL (not inferred).
+   *
+   *  Set by {@link determinePhases} as a post-pass after `assembleFromEvents`:
+   *  a text block is `"commentary"` IFF the assistant message's `content[]`
+   *  has at least one `tool_use` block AFTER it (i.e. the model talks, then
+   *  acts). Otherwise `"final_answer"` — the trailing text is the user-facing
+   *  closeout.
+   *
+   *  Deterministic single backward scan; no probabilistic classifier. Consumers
+   *  that ignore this field observe byte-identical behaviour (absent on every
+   *  legacy / freshly-streamed block until the post-pass tags it). */
+  phase?: "commentary" | "final_answer"
 }
 
 export interface ToolUseBlock {
