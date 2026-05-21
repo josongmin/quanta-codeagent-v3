@@ -23,7 +23,54 @@ export {
   OutcomeInvariantError,
   requiresUserConfirmation,
 } from "./outcome"
-export { evaluate, evaluateAuto, hardDenyReason, inferToolTier } from "./policy"
+export type { HostAgentMode } from "./per-host-mode"
+export {
+  clearHostMode,
+  getHostMode,
+  hostAllowsMutation,
+  resolveHostId,
+  setHostMode,
+} from "./per-host-mode"
+export type { ThreadPermission } from "./per-thread-store"
+export {
+  clearThreadPermission,
+  getThreadPermission,
+  setThreadPermission,
+  threadAllowsMutation,
+} from "./per-thread-store"
+export type {
+  CreatePermissionStoreOptions,
+  DenialRecord,
+  PermissionState,
+  PermissionStore,
+} from "./permission-store"
+export {
+  __resetDefaultPermissionStore,
+  computeActionSignature,
+  createPermissionStore,
+  defaultStateFilePath,
+  getDefaultPermissionStore,
+} from "./permission-store"
+export type {
+  EvaluateStackOptions,
+  PermissionStackContext,
+} from "./policy"
+export {
+  evaluate,
+  evaluateAuto,
+  evaluateStack,
+  hardDenyReason,
+  inferToolTier,
+} from "./policy"
+export type { PostDenialAction, PostDenialClock } from "./post-denial"
+export {
+  clearDenialRecord,
+  getDenialRecord,
+  hasPostDenialOverride,
+  recordDenial,
+  recordRiskSeen,
+  recordUserOverride,
+} from "./post-denial"
 export {
   DenialPrecedenceConflictError,
   ReviewerUnavailableError,

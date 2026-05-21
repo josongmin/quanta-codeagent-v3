@@ -200,6 +200,21 @@ export interface AgentConfig {
    * or messages.
    */
   run?: RunContext
+  /**
+   * Permission stack opt-in (ADR-0046 — per-thread + per-host + post-denial
+   * precedence). Absent / `enabled:false` ⇒ admissibility-gate skips the
+   * stack consultation and the loop is byte-identical. When `enabled:true`,
+   * the gate consults the stack BEFORE the legacy mode-policy:
+   *   1. post-denial user override beats every rule below;
+   *   2. per-thread record (keyed by `sessionId`) decides next;
+   *   3. per-host mode (`hostId`, defaults to `resolveHostId()`) decides next;
+   *   4. fall through to the legacy mode-policy.
+   *
+   * The store is the process singleton unless tests inject one via the
+   * `store` option (handled inside the `admissibility-gate` wrapper, not
+   * here, to keep this config type IO-free).
+   */
+  permissionStack?: { enabled?: boolean; hostId?: string }
 }
 
 export type StopReason = "completed" | "max_turns" | "aborted" | "error"

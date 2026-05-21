@@ -1,0 +1,32 @@
+id: per-thread-permissions
+title: 스레드별 권한 (heartbeat-thread-permissions-by-id 동등물)
+section: 3
+subsystem: 권한 스택 (ADR-0046)
+order: 10
+maturity: L3
+status: new
+purpose: |
+  스레드 단위로 sandboxPolicy + approvalPolicy + approvalsReviewer를
+  지정한다. 한 스레드는 read-only로, 다른 스레드는 danger-full-access로
+  병행 운영 가능. admissibility-gate가 HARD_DENY 다음, mode-policy 앞에서
+  consult — opt-in flag(config.permissionStack.enabled)로 활성화.
+evidence:
+  code:
+    - src/permission/permission-store.ts
+    - src/permission/per-thread-store.ts
+    - src/permission/policy.ts
+    - src/agent/admissibility-gate.ts
+    - src/agent/types.ts
+  adrs: [29, 46]
+  tests:
+    unit:
+      - tests/unit/permission-per-thread.test.ts
+    integration:
+      - tests/integration/permission-stack-gate-e2e.test.ts
+    contract: []
+knobs: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
+deliberate_hold: null
+notes: |
+  영속 파일은 ~/.quanta/permission-state.json. JSON atomic write
+  (tmp + rename) + 200ms debounce. 단일 프로세스 가정 — 다중 프로세스
+  surface가 생기면 lock-file ADR.

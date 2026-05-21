@@ -1,4 +1,8 @@
 import { type AutoModeClassifier, CLASSIFIER_SYSTEM_PROMPT } from "./classifier"
+import { hostAllowsMutation } from "./per-host-mode"
+import { threadAllowsMutation } from "./per-thread-store"
+import type { PermissionStore } from "./permission-store"
+import { getDefaultPermissionStore } from "./permission-store"
 import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from "./types"
 
 /** Patterns refused outright regardless of mode. Best-effort, conservative
@@ -341,4 +345,104 @@ export const evaluateAuto = async (
   if (decision.verdict === "allow") return { kind: "allow" }
   if (decision.verdict === "deny") return { kind: "deny", reason: decision.reason }
   return { kind: "ask", reason: decision.reason }
+}
+
+/* ------------------------------------------------------------------------- *
+ * ADR-0046 — Permission stack (per-thread + per-host + post-denial).
+ *
+ * `evaluateStack` extends the base policy with three Codex-inspired axes
+ * stacked on top of HARD_DENY:
+ *
+ *  precedence (highest to lowest):
+ *    1. HARD_DENY                  — security boundary; nothing overrides.
+ *    2. post-denial user override  — `(threadId, actionSignature)` has a
+ *                                    complete `denied → seenRisk → override`
+ *                                    sequence ⇒ allow.
+ *    3. per-thread permission      — `threadId` has an explicit record ⇒
+ *                                    use its sandboxPolicy to allow/deny.
+ *    4. per-host agent mode        — `hostId` has an explicit record ⇒
+ *                                    `read-only`/`full-access` decides.
+ *    5. global default             — fall through to `evaluate(action, ctx)`.
+ *
+ * read-only actions still bypass everything except HARD_DENY (consistent
+ * with the base `evaluate`). The function is SYNCHRONOUS — the same
+ * "auto mode degrades to ask" contract as `evaluate`. Callers needing the
+ * classifier path should compose `evaluateAuto` themselves.
+ *
+ * Pure with respect to global state: the store is the singleton by default,
+ * but tests can inject a per-test instance via `opts.store`.
+ * ------------------------------------------------------------------------- */
+
+export interface PermissionStackContext {
+  /** Thread id — anchors per-thread + post-denial precedence. */
+  threadId: string
+  /** Host id — anchors per-host mode. Use `resolveHostId()` from
+   *  `per-host-mode.ts` when uncertain. */
+  hostId: string
+  /** Canonical action signature for the post-denial axis. Caller computes
+   *  via `computeActionSignature({tool, workdir, args})`. */
+  actionSignature: string
+  /** Workdir — feeds `threadAllowsMutation`'s writable-root check. */
+  workdir: string
+}
+
+export interface EvaluateStackOptions {
+  /** Override the store (test isolation). Defaults to the process singleton. */
+  store?: PermissionStore
+}
+
+/** Synchronous precedence-aware permission resolver. Returns the same
+ *  `PermissionDecision` shape as `evaluate()` so call sites that wrap it
+ *  remain interchangeable.
+ *
+ *  See module comment for the precedence table. */
+export const evaluateStack = (
+  action: ToolAction,
+  ctx: PermissionContext,
+  stack: PermissionStackContext,
+  opts: EvaluateStackOptions = {},
+): PermissionDecision => {
+  // HARD_DENY ALWAYS wins — even read-only actions can't reach a shell-
+  // equivalent path that hits the denylist (defensive: `isReadOnly=true`
+  // for a shell tool would be a registry bug, but the gate fires anyway).
+  const denied = hardDeny(action)
+  if (denied) return denied
+
+  if (action.isReadOnly) return { kind: "allow" }
+
+  const store = opts.store ?? getDefaultPermissionStore()
+
+  // 2. Post-denial user override — explicit re-approval after seeing risk
+  //    overrides any rule below. The store enforces the timestamp ordering
+  //    invariant (deniedAt ≤ seenRiskAt ≤ userOverrideAt).
+  if (store.hasPostDenialOverride(stack.threadId, stack.actionSignature)) {
+    return { kind: "allow" }
+  }
+
+  // 3. Per-thread permission record (highest among rule-based axes).
+  const threadPerm = store.getThread(stack.threadId)
+  if (threadPerm !== undefined) {
+    const writable = threadAllowsMutation(threadPerm, stack.workdir)
+    if (writable) return { kind: "allow" }
+    return {
+      kind: "deny",
+      reason: `Per-thread policy (${threadPerm.sandboxPolicy.type}) refuses ${action.tool} on ${stack.workdir}`,
+    }
+  }
+
+  // 4. Per-host agent-mode default.
+  const hostMode = store.getHost(stack.hostId)
+  const hostVerdict = hostAllowsMutation(hostMode)
+  if (hostVerdict === false) {
+    return {
+      kind: "deny",
+      reason: `Per-host mode (${hostMode}) refuses ${action.tool} on host ${stack.hostId}`,
+    }
+  }
+  if (hostVerdict === true) {
+    return { kind: "allow" }
+  }
+
+  // 5. Fall through to the global default (mode-based evaluate).
+  return evaluate(action, ctx)
 }

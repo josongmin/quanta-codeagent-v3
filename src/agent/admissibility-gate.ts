@@ -29,12 +29,16 @@
 import type { ToolUseBlock } from "@/llm"
 import {
   type AutoModeClassifier,
+  computeActionSignature,
   evaluate,
   evaluateAuto,
+  evaluateStack,
   type HITLTier,
   hardDenyReason,
   inferToolTier,
   type PermissionContext,
+  type PermissionStore,
+  resolveHostId,
 } from "@/permission"
 import { deny, HANDOFF_SUFFIX } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
@@ -140,6 +144,57 @@ const runHitlGate = async (
   return "fallthrough"
 }
 
+/**
+ * Permission-stack consultation (ADR-0046). When `config.permissionStack?.
+ * enabled` is true, consult per-thread / per-host / post-denial axes BEFORE
+ * the legacy mode policy. Returns:
+ *   - a short-circuit {@link DispatchResult} when the stack denies the call,
+ *   - `"allow"` when the stack explicitly allows (skip mode policy),
+ *   - `null` when the stack has nothing to say (fall through to mode policy).
+ *
+ * Pure dispatch — the store and host-id are injected via opts so tests can
+ * isolate. Production callers leave both undefined and the singleton +
+ * `resolveHostId()` are used.
+ */
+const runPermissionStack = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  permission: PermissionContext,
+  action: AdmissibilityAction,
+  opts: { store?: PermissionStore } = {},
+): DispatchResult | "allow" | null => {
+  if (config.permissionStack?.enabled !== true) return null
+  // Need a thread id — sessionId is the only stable handle the loop carries.
+  // Absent ⇒ skip the stack rather than synthesize a fake id (a synthesized
+  // id would silently fail to match any UI-set thread record).
+  const threadId = config.sessionId
+  if (typeof threadId !== "string" || threadId.length === 0) return null
+
+  const hostId = config.permissionStack.hostId ?? resolveHostId()
+  const actionSignature = computeActionSignature({
+    tool: action.tool,
+    workdir: config.cwd,
+    args: action.input,
+  })
+  const decision = evaluateStack(
+    {
+      tool: action.tool,
+      input: action.input,
+      isReadOnly: action.isReadOnly,
+    },
+    permission,
+    { threadId, hostId, actionSignature, workdir: config.cwd },
+    opts.store !== undefined ? { store: opts.store } : {},
+  )
+  if (decision.kind === "allow") return "allow"
+  if (decision.kind === "deny") {
+    return deny(call.id, `Permission denied: ${decision.reason}`, "denied")
+  }
+  // `ask` ⇒ no opinion from the stack; fall through to the legacy mode policy
+  // (which is the canonical place for the `ask → onConfirm` handshake).
+  return null
+}
+
 /** Mode-based permission decision (legacy path). Tier 1 capability (ADR-0011):
  *  "auto" mode routes to the session-scoped LLM classifier; all other modes
  *  use the synchronous policy verbatim. */
@@ -195,6 +250,7 @@ export const runAdmissibilityGate = async (
   permission: PermissionContext,
   action: AdmissibilityAction,
   autoClassifier?: AutoModeClassifier,
+  opts: { permissionStore?: PermissionStore } = {},
 ): Promise<DispatchResult | null> => {
   // 1. Mode-posture block (plan/review/audit) — fires BEFORE any HITL or
   //    permission work so a blocked mutating tool never reaches the classifier
@@ -218,11 +274,26 @@ export const runAdmissibilityGate = async (
     }
   }
 
-  // 3. Permission policy (HARD_DENY + mode-driven decision; "auto" routes
+  // 3. Permission stack consultation (ADR-0046, opt-in via
+  //    config.permissionStack.enabled). Highest-priority axis after HARD_DENY:
+  //    post-denial override → per-thread → per-host → fall through.
+  const stackResult = runPermissionStack(
+    call,
+    config,
+    permission,
+    action,
+    opts.permissionStore !== undefined ? { store: opts.permissionStore } : {},
+  )
+  if (stackResult !== null && stackResult !== "allow") return stackResult
+  // `"allow"` from the stack ⇒ skip mode policy (the stack's allow is
+  //    authoritative) and emit the pre_tool_use hook last.
+  if (stackResult === "allow") return runPreToolUseHook(call, config)
+
+  // 4. Permission policy (HARD_DENY + mode-driven decision; "auto" routes
   //    through the injected classifier).
   const policyResult = await runModePolicy(call, config, permission, action, autoClassifier)
   if (policyResult) return policyResult
 
-  // 4. pre_tool_use hook — repo-local code (or test spy) may deny last.
+  // 5. pre_tool_use hook — repo-local code (or test spy) may deny last.
   return runPreToolUseHook(call, config)
 }
