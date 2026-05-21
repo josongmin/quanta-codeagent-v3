@@ -14,7 +14,6 @@
  */
 import { writeFileSync } from "node:fs"
 import { cp, mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildSystemPrompt, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
@@ -25,6 +24,7 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { CACHE_PATHSPECS } from "./cache-pathspecs"
+import { benchWorkRoot } from "./paths"
 import {
   type AttemptObservation,
   BenchObserver,
@@ -716,7 +716,7 @@ export const runInstance = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
-  const sandbox = await mkdtemp(join(tmpdir(), `bench-${instance.id}-`))
+  const sandbox = await mkdtemp(join(benchWorkRoot(), `bench-${instance.id}-`))
   const abort = new AbortController()
   const deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
   const startedAt = Date.now()

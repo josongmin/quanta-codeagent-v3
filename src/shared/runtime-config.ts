@@ -99,6 +99,19 @@ export interface RuntimeConfig {
    *  Absent ⇒ adapter default (120_000 ms). Read ONCE at adapter
    *  construction; T1 hang-stream guard. Long completions are OK. */
   readonly llmStreamIdleMs: number | undefined
+  /** Quanta home dir override (`QUANTA_HOME`). Absent ⇒ feature sites compute
+   *  `~/.quanta`. Used by ADR-0046 permission-store path resolution. */
+  readonly quantaHome: string | undefined
+  /** Bench artifacts root override (`QUANTA_BENCH_HOME`). Absent ⇒ bench
+   *  computes a PERSISTENT default (never tmp): `<quantaHome>/bench`, else
+   *  macOS `~/Library/quanta-codeagent-v3/bench`, else `~/.quanta/bench`. */
+  readonly benchHome: string | undefined
+  /** Permission state-file override (`QUANTA_PERMISSION_STATE`). Absent ⇒
+   *  feature site computes `<quantaHome>/permission-state.json`. */
+  readonly permissionStateFile: string | undefined
+  /** SSH connection marker (`SSH_CONNECTION`). Used by ADR-0046's
+   *  `resolveHostId()` to decide between `<user>@<host>` and `localhost`. */
+  readonly sshConnection: string | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -123,6 +136,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       "QUANTA_LLM_STREAM_FIRST_CHUNK_MS",
     ),
     llmStreamIdleMs: parsePositiveInt(env["QUANTA_LLM_STREAM_IDLE_MS"], "QUANTA_LLM_STREAM_IDLE_MS"),
+    quantaHome: stringOrUndef(env["QUANTA_HOME"]),
+    benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),
+    permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),
+    sshConnection: stringOrUndef(env["SSH_CONNECTION"]),
   })
 }
 

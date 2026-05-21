@@ -28,11 +28,11 @@
  */
 import { existsSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { benchRunDir, benchRunId, benchWorkRoot } from "./paths"
 import { aggregate, classify } from "./failure-classifier"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
@@ -172,12 +172,14 @@ interface ObserveCtx {
   runId: string
 }
 
-/** Resolve the observe root, or undefined when neither flag/env is set. */
+/** Resolve the observe root. Defaults to the PERSISTENT bench runs dir so
+ *  trajectories survive across sessions (override with `--observe-dir` /
+ *  `QUANTA_OBSERVE_DIR`). */
 const resolveObserve = (): ObserveCtx | undefined => {
-  const dir = argValue("--observe-dir") ?? process.env.QUANTA_OBSERVE_DIR
-  if (!dir) return undefined
-  const runId = process.env.QUANTA_RUN_ID ?? `run-${Date.now()}`
-  return { dir: resolve(process.cwd(), dir), runId }
+  const runId = benchRunId()
+  const flag = argValue("--observe-dir") ?? process.env.QUANTA_OBSERVE_DIR
+  const dir = flag ? resolve(process.cwd(), flag) : join(benchRunDir(runId), "observe")
+  return { dir, runId }
 }
 
 /** Per-attempt observe handle for one instance (one file per attempt). */
@@ -248,7 +250,7 @@ const runSwebenchTask = async (
   task: SwebenchTask,
   deps: SwebenchTaskDeps,
 ): Promise<InstanceResult> => {
-  const work = await mkdtemp(join(tmpdir(), `swebench-${task.instanceId}-`))
+  const work = await mkdtemp(join(benchWorkRoot(), `swebench-${task.instanceId}-`))
   const dest = join(work, "repo")
   try {
     await prepareTaskRepo(task, dest, defaultExec, deps.repoBaseUrl, deps.cfg.timeoutMs)
@@ -323,13 +325,32 @@ const runDatasetMode = async (
   }
 
   await writeArtifacts(
-    argValue("--predictions") ?? "./predictions.jsonl",
-    argValue("--report") ?? "./bench-report.json",
+    argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
+    argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json"),
     results,
     { provider: meta.provider, model: meta.model, n: cfg.n },
   )
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
+}
+
+/** D-fix: shared `--predictions` / `--report` writer for both bench modes.
+ *  Pure-by-signature (paths + results + meta are explicit args, no argv reads)
+ *  so the contract is unit-testable without spawning the CLI. */
+export const writeArtifacts = async (
+  predictionsFile: string,
+  reportFile: string,
+  results: InstanceResult[],
+  meta: { provider: string; model: string; n: number },
+): Promise<void> => {
+  const predictions: Prediction[] = results.map((r) => ({
+    instance_id: r.id,
+    model_name_or_path: meta.model,
+    model_patch: r.patch,
+  }))
+  await writePredictions(predictionsFile, predictions)
+  await writeReport(reportFile, buildReport(meta, results))
+  logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
 }
 
 /** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and
@@ -467,42 +488,13 @@ const runCustomCorpusMode = async (
   }
   // D-fix: write `--predictions` / `--report` from BOTH bench modes.
   await writeArtifacts(
-    argValue("--predictions") ?? "./predictions.jsonl",
-    argValue("--report") ?? "./bench-report.json",
+    argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
+    argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json"),
     results,
     { provider, model, n: cfg.n },
   )
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
-}
-
-/**
- * D-fix: shared `--predictions` / `--report` writer for BOTH the official
- * dataset path and the custom-corpus path. Pure-by-signature (paths +
- * results + meta are explicit args, no argv reads) so the contract is
- * unit-testable without spawning the CLI.
- *
- * Before this, `runCustomCorpusMode` skipped these writes entirely — the
- * operator passed `--report /tmp/X.json` and the file silently never got
- * written, leaving the only post-run signal as the stdout `[FAIL]
- * (turns=N)` lines. After-the-fact triage of "WHY did the agent fail"
- * was impossible because the per-instance patch + error tail lived only
- * in memory.
- */
-export const writeArtifacts = async (
-  predictionsFile: string,
-  reportFile: string,
-  results: InstanceResult[],
-  meta: { provider: string; model: string; n: number },
-): Promise<void> => {
-  const predictions: Prediction[] = results.map((r) => ({
-    instance_id: r.id,
-    model_name_or_path: meta.model,
-    model_patch: r.patch,
-  }))
-  await writePredictions(predictionsFile, predictions)
-  await writeReport(reportFile, buildReport(meta, results))
-  logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
 }
 
 const main = async (): Promise<void> => {
@@ -514,7 +506,11 @@ const main = async (): Promise<void> => {
   const limit = limitArg ? Number(limitArg) : null
   const maxTurns = Number(process.env.QUANTA_MAX_TURNS ?? "30")
   const timeoutMs = Number(process.env.QUANTA_BENCH_TIMEOUT_MS ?? "120000")
-  // RFC §8: default-OFF. Absent ⇒ NullStream, byte-identical to before.
+  // Pin the run id ONCE so observe + predictions + report all group under the
+  // same persistent `<benchHome>/runs/<runId>/` dir (no per-call Date.now drift).
+  process.env.QUANTA_RUN_ID ??= benchRunId()
+  // Trajectories persist by default now (the prior tmp default reaped them);
+  // pass `--observe-dir`/`QUANTA_OBSERVE_DIR` to override the location.
   const obs = resolveObserve()
 
   // Official-dataset mode takes precedence; when its flag/env is unset the

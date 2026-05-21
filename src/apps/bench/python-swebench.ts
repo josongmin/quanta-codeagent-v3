@@ -33,8 +33,8 @@
  * cannot inject shell.
  */
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { benchWorkRoot } from "./paths"
 import type { Instance } from "./types"
 
 export interface SpawnResult {
@@ -233,7 +233,7 @@ export const evaluateWithPythonSwebench = async (
 
   const modelName = opts.modelName ?? "quanta"
   const runId = `quanta-${meta.instanceId}-${Date.now()}`
-  const work = await mkdtemp(join(tmpdir(), `pyswe-${meta.instanceId}-`))
+  const work = await mkdtemp(join(benchWorkRoot(), `pyswe-${meta.instanceId}-`))
   const predictionsPath = join(work, "predictions.jsonl")
   try {
     await writeFile(
