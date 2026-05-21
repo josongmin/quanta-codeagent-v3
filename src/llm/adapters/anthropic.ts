@@ -7,20 +7,14 @@ interface AnthropicConfig {
   apiKey: string
   model: string
   maxTokens?: number
-<<<<<<< Updated upstream
   /** Anthropic beta channels to activate per request, joined with comma into
    *  the `anthropic-beta` HTTP header. Examples: `skills-2025-10-02`,
-   *  `oauth-2025-04-20`. Empty / undefined ⇒ no header sent (byte-identical
-   *  to pre-feature). Set ONCE at the SDK client level — beta channels are a
-   *  per-conversation property (one adapter = one session), so `defaultHeaders`
-   *  is the minimal-surface seam. Tier-0 absorption #0-6. */
-=======
-  /** Date-versioned Anthropic beta channels to activate per request. Joined
-   *  with comma into the `anthropic-beta` HTTP header. Examples:
-   *  `skills-2025-10-02`, `oauth-2025-04-20`. Order is preserved; empty array
-   *  or omitted sends no header (legacy behavior — byte-identical to today's
-   *  requests). Reference: Claude Desktop 1.7196.3 observed channels. */
->>>>>>> Stashed changes
+   *  `oauth-2025-04-20`, `environments-2025-11-01` (Environments API; Claude
+   *  Desktop 1.7196.3 round-2 finding — sandbox/microVM correlate). Empty /
+   *  undefined ⇒ no header sent (byte-identical to pre-feature). Set ONCE at
+   *  the SDK client level — beta channels are a per-conversation property
+   *  (one adapter = one session), so `defaultHeaders` is the minimal-surface
+   *  seam. Tier-0 absorption #0-6. */
   betaHeaders?: readonly string[]
 }
 
@@ -161,15 +155,6 @@ export class AnthropicAdapter implements LLMPort {
   readonly betaHeaders: readonly string[]
 
   constructor(config: AnthropicConfig) {
-<<<<<<< Updated upstream
-=======
-    // betaHeaders default OFF: when empty/undefined the SDK constructor is
-    // invoked without `defaultHeaders`, producing byte-identical requests to
-    // the pre-feature codebase. When non-empty we set `anthropic-beta` once
-    // at the client level rather than per-request — beta channels are a
-    // per-conversation property (one adapter = one session), so
-    // `defaultHeaders` is the minimal-surface seam.
->>>>>>> Stashed changes
     this.betaHeaders = config.betaHeaders ?? []
     const beta = this.betaHeaders.join(",")
     this.client =

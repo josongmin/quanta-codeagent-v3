@@ -44,12 +44,8 @@ export interface BenchReport {
   }
   /** Aggregated failure counts across results. `byTermination` is a covering
    *  partition; `bySignal` is non-exclusive (one failure can carry multiple
-<<<<<<< Updated upstream
-   *  signals). Empty objects when 0/n failed. */
-=======
    *  signals). Both are emitted in every report; empty objects when 0/n
    *  failed. */
->>>>>>> Stashed changes
   failureBreakdown: FailureBreakdown
   perInstance: PerInstanceReport[]
 }
@@ -64,11 +60,7 @@ export const buildReport = (
   // / summary.json. Never count a strict-degraded instance here.
   const { resolved, total } = resolvedTotals(results)
   const classifications = results.map((r) => classify(r))
-<<<<<<< Updated upstream
-  const failed = classifications.filter((c) => c.termination !== "passed")
-=======
   const failedClassifications = classifications.filter((c) => c.termination !== "passed")
->>>>>>> Stashed changes
   return {
     timestamp: meta.timestamp ?? new Date().toISOString(),
     model: meta.model,
@@ -79,11 +71,7 @@ export const buildReport = (
       resolved,
       resolvedPct: total === 0 ? 0 : Math.round((resolved / total) * 100),
     },
-<<<<<<< Updated upstream
-    failureBreakdown: aggregate(failed),
-=======
     failureBreakdown: aggregate(failedClassifications),
->>>>>>> Stashed changes
     perInstance: results.map((r, i) => {
       const c = classifications[i] ?? { termination: "unknown", signals: [] }
       return {

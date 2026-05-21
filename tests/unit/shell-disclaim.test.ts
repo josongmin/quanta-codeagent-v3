@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { DockerSandbox } from "@/runtime/sandbox"
 import {
   defaultDisclaimedBashArgv,
   disclaimedShellArgv,
   isShellInterp,
   SHELL_INTERPS,
 } from "@/runtime/shell-disclaim"
-import { DockerSandbox } from "@/runtime/sandbox"
 
 describe("SHELL_INTERPS", () => {
   test("exactly bash / zsh / sh", () => {

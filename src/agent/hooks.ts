@@ -59,20 +59,11 @@ const isDeny = (v: unknown): v is HookDeny =>
  *  cast at registration time with a structural closure. */
 type AnyHookHandler = (event: HookEvent) => unknown
 
-<<<<<<< Updated upstream
 /** Registration options for {@link HookBus.on}. `matcher` is consulted ONLY
  *  for tool-shaped events (`pre_tool_use` / `post_tool_use`) — other variants
  *  carry no `name` field and the matcher is ignored. Omitting `options` is
  *  byte-identical to the prior 2-arg signature. Tier-0 absorption #0-1 (AWF
  *  2-matcher). */
-=======
-/** Registration options for {@link HookBus.on}. The matcher applies ONLY to
- *  tool-shaped events (`pre_tool_use`, `post_tool_use`) — other variants have
- *  no `name` field, so for them the matcher is ignored and the handler runs.
- *  Tier-0 absorption #0-1 (AWF 2-matcher): a host can wire one handler for the
- *  FS-tools channel and another for the agent-tools channel, without per-call
- *  pattern checks in user code. */
->>>>>>> Stashed changes
 export interface HookOnOptions {
   matcher?: ToolMatcher
 }
@@ -95,12 +86,7 @@ export class HookBus {
 
   /** Register `handler` for `type`. Handlers fire in registration order.
    *  Optional `options.matcher` gates dispatch on tool-shaped events
-<<<<<<< Updated upstream
    *  (`pre_tool_use`, `post_tool_use`); non-tool events ignore it. */
-=======
-   *  (`pre_tool_use`, `post_tool_use`); non-tool events ignore it. Omitting
-   *  `options` is byte-identical to the prior 2-arg signature. */
->>>>>>> Stashed changes
   on<T extends HookEventType>(type: T, handler: HookHandler<T>, options?: HookOnOptions): this {
     const list = this.handlers.get(type) ?? []
     // Closure-erase to the union: the Map key (`type`) GUARANTEES this stored

@@ -22,7 +22,13 @@
 
 export type EffortLevel = "default" | "max" | "high" | "medium" | "low"
 
-export const EFFORT_LEVELS = ["default", "max", "high", "medium", "low"] as const satisfies readonly EffortLevel[]
+export const EFFORT_LEVELS = [
+  "default",
+  "max",
+  "high",
+  "medium",
+  "low",
+] as const satisfies readonly EffortLevel[]
 
 export const DEFAULT_EFFORT: EffortLevel = "default"
 

@@ -35,6 +35,7 @@ import {
   evaluateStack,
   type HITLTier,
   hardDenyReason,
+  inferToolTier,
   type PermissionContext,
   type PermissionStore,
   resolveHostId,

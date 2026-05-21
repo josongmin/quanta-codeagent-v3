@@ -117,19 +117,11 @@ const buildLLM = (provider: Provider, model: string): LLMPort | null => {
   return new AnthropicAdapter({ apiKey, model })
 }
 
-<<<<<<< Updated upstream
-/** Compact failure tag for the console FAIL line. Empty string for a passing
- *  run. Examples:
- *    `[hung_stream:dirty_cache_leak]`
- *    `[completed_unresolved:verify_loop_stuck]`
- *    `[max_turns_exhausted]`  (no signals) */
-=======
 /** Compact failure tag for the console FAIL line. Returns "" when the
  *  classification is `passed`. Examples:
  *    `[FAIL][hung_stream:dirty_cache_leak]`
  *    `[FAIL][completed_unresolved:verify_loop_stuck]`
  *    `[FAIL][max_turns_exhausted]` (no signals) */
->>>>>>> Stashed changes
 const failureTag = (r: InstanceResult): string => {
   if (r.passed) return ""
   const c = classify(r)
@@ -152,11 +144,7 @@ const printSummary = (summary: BenchSummary): void => {
   const pct = total === 0 ? 0 : Math.round((resolved / total) * 100)
   const deg = degraded > 0 ? ` (${degraded} degraded)` : ""
   logger.info(`resolved ${resolved}/${total} (${pct}%)${deg}`)
-<<<<<<< Updated upstream
-  // Failure-pattern rollup — suppressed when nothing failed.
-=======
   // Failure-pattern rollup — one line per axis, suppressed when 0 failed.
->>>>>>> Stashed changes
   const failed = summary.results.filter((r) => !r.passed).map((r) => classify(r))
   if (failed.length === 0) return
   const bd = aggregate(failed)
@@ -165,15 +153,9 @@ const printSummary = (summary: BenchSummary): void => {
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([k, v]) => `${k}=${v}`)
       .join(", ")
-<<<<<<< Updated upstream
-  const termLine = fmt(bd.byTermination as Record<string, number>)
-  if (termLine !== "") logger.info(`failures: ${termLine}`)
-  const sigLine = fmt(bd.bySignal as Record<string, number>)
-=======
   const termLine = fmt(bd.byTermination)
   if (termLine !== "") logger.info(`failures: ${termLine}`)
   const sigLine = fmt(bd.bySignal)
->>>>>>> Stashed changes
   if (sigLine !== "") logger.info(`signals: ${sigLine}`)
 }
 
@@ -348,39 +330,6 @@ const runDatasetMode = async (
   )
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
-<<<<<<< Updated upstream
-}
-
-/**
- * D-fix: shared `--predictions` / `--report` writer for BOTH the official
- * dataset path and the custom-corpus path. Pure-by-signature (paths +
- * results + meta are explicit args, no argv reads) so the contract is
- * unit-testable without spawning the CLI. Wraps `buildReport` (which now
- * embeds the failure classification) + `writePredictions`.
- *
- * Before this seam existed, `runCustomCorpusMode` skipped these writes
- * entirely — the operator passed `--report /tmp/X.json` and the file was
- * silently never written, leaving the only post-run signal as the stdout
- * `[FAIL] (turns=N)` lines. After-the-fact triage of "WHY did the agent
- * fail" was impossible because the per-instance patch + classification
- * lived only in memory.
- */
-export const writeArtifacts = async (
-  predictionsFile: string,
-  reportFile: string,
-  results: InstanceResult[],
-  meta: { provider: string; model: string; n: number },
-): Promise<void> => {
-  const predictions: Prediction[] = results.map((r) => ({
-    instance_id: r.id,
-    model_name_or_path: meta.model,
-    model_patch: r.patch,
-  }))
-  await writePredictions(predictionsFile, predictions)
-  await writeReport(reportFile, buildReport(meta, results))
-  logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
-=======
->>>>>>> Stashed changes
 }
 
 /** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and

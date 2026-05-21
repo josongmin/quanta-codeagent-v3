@@ -14,11 +14,7 @@
  * starting with read_" passes a RegExp, NOT a magic prefix string.
  */
 
-export type ToolMatcher =
-  | string
-  | readonly string[]
-  | RegExp
-  | ((name: string) => boolean)
+export type ToolMatcher = string | readonly string[] | RegExp | ((name: string) => boolean)
 
 /** Canonical matcher for filesystem-touching tools. AWF group: the same set
  *  Claude Desktop pins to the FS PreToolUse hook channel. */

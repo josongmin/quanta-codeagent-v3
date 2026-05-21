@@ -7,7 +7,7 @@ import {
   isSlashCommand,
   runSlashCommand,
   type SlashContext,
-} from "@/apps/cli/slash-commands"
+} from "../../src/apps/cli/slash-commands"
 
 interface Captured {
   out: string

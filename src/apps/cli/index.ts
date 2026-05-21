@@ -106,6 +106,18 @@ const runSessionMain = async (): Promise<number> => {
   return code
 }
 
+/** Run the matching built-in slash command and exit. Extracted from `main()`
+ *  to keep its cognitive complexity within the biome budget — the slash gate
+ *  is one decision (`isSlashCommand`) plus one dispatch (`runSlashCommand`)
+ *  and reads cleanly as its own helper. Tier-2 absorption #2-1. */
+const runSlashMain = async (tok: string): Promise<number> => {
+  return runSlashCommand(process.argv.slice(2).join(" "), {
+    out: (s) => process.stdout.write(s),
+    err: (s) => process.stderr.write(s),
+    cwd: process.cwd(),
+  })
+}
+
 const main = async (): Promise<void> => {
   // Early route: `quanta session …` is fully handled by the subcommand
   // dispatcher and never touches the agent loop / REPL wiring below.
@@ -114,18 +126,13 @@ const main = async (): Promise<void> => {
     process.exit(code)
   }
 
-  // Tier 2 absorption #2-1: built-in slash commands never invoke the LLM and
-  // must short-circuit BEFORE any agent / session / LLM plumbing fires. The
-  // gate matches only `/<letter>...` so `/path/to/file` (a path-mode resume
-  // arg) and bare `--flag` invocations fall through to the legacy paths.
+  // Tier-2 absorption #2-1: built-in slash commands short-circuit BEFORE any
+  // LLM / session plumbing. The gate matches only `/<letter>...` so legacy
+  // path-mode resume arguments and bare `--flag` invocations still fall
+  // through to the agent / REPL path.
   const slashTok = process.argv[2]
   if (slashTok !== undefined && isSlashCommand(slashTok)) {
-    const code = await runSlashCommand(process.argv.slice(2).join(" "), {
-      out: (s) => process.stdout.write(s),
-      err: (s) => process.stderr.write(s),
-      cwd: process.cwd(),
-    })
-    process.exit(code)
+    process.exit(await runSlashMain(slashTok))
   }
 
   // MEDIUM-10: top-level `--help` / `-h` BEFORE any LLM/REPL wiring so a help

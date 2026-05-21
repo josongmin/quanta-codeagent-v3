@@ -36,10 +36,7 @@ export const isShellInterp = (s: string): s is ShellInterp => SHELL_INTERP_SET.h
  *
  * The caller is responsible for quoting / escaping `command` if it must be
  * treated as a single token — this function passes it through verbatim. */
-export const disclaimedShellArgv = (
-  shell: ShellInterp,
-  command: string,
-): readonly string[] => {
+export const disclaimedShellArgv = (shell: ShellInterp, command: string): readonly string[] => {
   switch (shell) {
     case "bash":
       return ["bash", "--noprofile", "--norc", "-c", command]

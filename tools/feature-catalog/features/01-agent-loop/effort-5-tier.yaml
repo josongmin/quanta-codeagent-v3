@@ -1,0 +1,18 @@
+id: effort-5-tier
+title: Effort 5-tier session dimension
+section: 1
+subsystem: 세션 노브 (ADR-0057)
+order: 8
+maturity: L4
+status: new
+purpose: 'EffortLevel = default | max | high | medium | low — 세션 단위 효력 축. SkillEffort (per-skill, numeric 포함) 와 직교 — numeric skill 값은 axis 투표 안 함, named tier만 vote. parseEffort (case-insensitive env), resolveEffort (skill > session > default), effortToTokenBudget (1024/4096/16384/64000/undefined), createEffortStore factory.'
+evidence:
+  code: [src/agent/effort.ts]
+  adrs: [57]
+  tests:
+    unit: [tests/unit/effort.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Tier-0 absorption #0-5. Pure leaf 모듈 — 어떤 슬라이스도 안 import. Adapter / loop wiring 은 별도 phase.'
