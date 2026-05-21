@@ -168,13 +168,6 @@ export class AnthropicAdapter implements LLMPort {
 
   constructor(config: AnthropicConfig) {
     this.betaHeaders = config.betaHeaders ?? []
-    const beta = this.betaHeaders.join(",")
-    this.client =
-      beta.length > 0
-        ? new Anthropic({ apiKey: config.apiKey, defaultHeaders: { "anthropic-beta": beta } })
-        : new Anthropic({ apiKey: config.apiKey })
-    this.model = config.model
-    this.maxTokens = config.maxTokens ?? 8192
     const env = runtimeConfig()
     const override: { firstChunkMs?: number; idleMs?: number } = {}
     if (config.streamFirstChunkMs !== undefined) override.firstChunkMs = config.streamFirstChunkMs
@@ -184,6 +177,23 @@ export class AnthropicAdapter implements LLMPort {
       env.llmStreamIdleMs,
       override,
     )
+    // T1 gap-closer: the per-request SDK `timeout` covers the `create()` call
+    // itself (HTTP connect + time-to-first-byte) — the hang point the stream
+    // wrapper CANNOT see because it decorates the AsyncIterable returned AFTER
+    // create() resolves. We bound it to the first-chunk budget and let the SDK
+    // retry once rather than burn the whole instance deadline on a TTFT stall.
+    const beta = this.betaHeaders.join(",")
+    const base = {
+      apiKey: config.apiKey,
+      timeout: this.streamTimeoutMs.firstChunkMs,
+      maxRetries: 2,
+    }
+    this.client =
+      beta.length > 0
+        ? new Anthropic({ ...base, defaultHeaders: { "anthropic-beta": beta } })
+        : new Anthropic(base)
+    this.model = config.model
+    this.maxTokens = config.maxTokens ?? 8192
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {

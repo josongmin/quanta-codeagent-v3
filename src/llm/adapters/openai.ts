@@ -249,12 +249,6 @@ export class OpenAIAdapter implements LLMPort {
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
 
   constructor(config: OpenAIConfig) {
-    this.client = new OpenAI({
-      apiKey: config.apiKey,
-      ...(config.baseURL ? { baseURL: config.baseURL } : {}),
-    })
-    this.model = config.model
-    this.maxTokens = config.maxTokens ?? 8192
     const env = runtimeConfig()
     const override: { firstChunkMs?: number; idleMs?: number } = {}
     if (config.streamFirstChunkMs !== undefined) override.firstChunkMs = config.streamFirstChunkMs
@@ -264,6 +258,20 @@ export class OpenAIAdapter implements LLMPort {
       env.llmStreamIdleMs,
       override,
     )
+    // T1 gap-closer: the per-request SDK `timeout` covers the `create()` call
+    // itself (HTTP connect + time-to-first-byte) — the hang point the stream
+    // wrapper CANNOT see because it decorates the AsyncIterable returned AFTER
+    // create() resolves. A huge-prompt instance (swebench django-11179) hangs
+    // here for the SDK's 10-min default, burning the whole bench deadline. We
+    // bound it to the first-chunk budget and let the SDK retry once.
+    this.client = new OpenAI({
+      apiKey: config.apiKey,
+      timeout: this.streamTimeoutMs.firstChunkMs,
+      maxRetries: 2,
+      ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+    })
+    this.model = config.model
+    this.maxTokens = config.maxTokens ?? 8192
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawChunk>> {
