@@ -262,7 +262,7 @@ const runPermissionStack = (
   return null
 }
 
-/** Phase C — trust-scope short-circuit for the ask-branch (ADR-0045). DEFAULT
+/** Phase C — trust-scope short-circuit for the ask-branch (ADR-0050). DEFAULT
  *  OFF: returns false unless `config.trustScope` is set AND the registry
  *  confirms a positive grant for `(projectKey, action.tool)`. The registry
  *  owns once_only consumption; the gate never branches on scope literals. */
@@ -280,7 +280,7 @@ const resolveAskBranch = async (
   action: AdmissibilityAction,
   reason: string,
 ): Promise<DispatchResult | null> => {
-  // Phase C — trust-scope registry wire-up (ADR-0045). DEFAULT OFF.
+  // Phase C — trust-scope registry wire-up (ADR-0050). DEFAULT OFF.
   if (trustScopeGrants(config, action)) return null
   let approved = false
   if (config.onConfirm) {

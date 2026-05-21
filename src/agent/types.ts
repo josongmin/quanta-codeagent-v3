@@ -192,7 +192,7 @@ export interface AgentConfig {
    *  existing mode policy, and none allows. */
   hitl?: { enabled?: boolean }
   /**
-   * Trust-scope registry (Phase C wire-up, ADR-0045). When set, the
+   * Trust-scope registry (Phase C wire-up, ADR-0050). When set, the
    * admissibility-gate's ask-branch consults `registry.hasGrant(projectKey,
    * { tool })` BEFORE invoking `onConfirm`. A positive grant skips the prompt
    * and admits the call; `once_only` grants are consumed inline by the

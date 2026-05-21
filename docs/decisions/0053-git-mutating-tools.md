@@ -1,4 +1,4 @@
-# ADR-0045: Git mutating 1급 도구 (commit, branch_switch) — Claude Desktop `commitWipForBranchSwitch` 흡수
+# ADR-0053: Git mutating 1급 도구 (commit, branch_switch) — Claude Desktop `commitWipForBranchSwitch` 흡수
 
 - **상태**: Accepted
 - **날짜**: 2026-05-21

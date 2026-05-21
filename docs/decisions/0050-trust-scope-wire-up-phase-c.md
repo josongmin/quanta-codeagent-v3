@@ -1,4 +1,4 @@
-# ADR-0045 — Trust-Scope Registry Wire-Up (Phase C)
+# ADR-0050 — Trust-Scope Registry Wire-Up (Phase C)
 
 ## Status
 

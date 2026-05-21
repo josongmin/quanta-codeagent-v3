@@ -1,4 +1,4 @@
-# ADR-0045 — Sectioned system prompt default ON (Claude Desktop `systemPromptSectionCache` 흡수)
+# ADR-0051 — Sectioned system prompt default ON (Claude Desktop `systemPromptSectionCache` 흡수)
 
 - **상태**: Accepted
 - **날짜**: 2026-05-21

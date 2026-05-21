@@ -33,3 +33,6 @@ coverage/
 
 # Cache
 .cache/
+
+# Claude Code subagent worktrees (per-agent isolation)
+.claude/worktrees/

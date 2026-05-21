@@ -1,4 +1,4 @@
-# ADR-0045 (잠정 번호) — Context-usage metrics + surface-agnostic status line
+# ADR-0054  — Context-usage metrics + surface-agnostic status line
 
 - **상태**: Accepted (small slice; behavior-preserving)
 - **날짜**: 2026-05-21

@@ -1,4 +1,4 @@
-# ADR-0045 — Message-id rewind (Claude Desktop 1.7196.3 parity)
+# ADR-0052 — Message-id rewind (Claude Desktop 1.7196.3 parity)
 
 - **상태**: Accepted
 - **날짜**: 2026-05-21
