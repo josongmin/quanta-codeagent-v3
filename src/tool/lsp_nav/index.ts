@@ -216,9 +216,12 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const references: Tool<ReferencesInput> = {
     name: "lsp_references",
     description:
-      "LSP references for the symbol at PATH:LINE:CHARACTER (1-based). " +
-      "Includes the declaration site unless includeDeclaration:false. " +
-      "Returns a clean message when no language server is available — never fails the turn.",
+      "PREFER over grep when answering 'where else is this symbol used?'. Given " +
+      "PATH:LINE:CHARACTER (1-based) pointing at a symbol, returns every call " +
+      "site / read site with file:range — semantic, follows imports and " +
+      "aliases, no false positives from name shadowing. Includes the " +
+      "declaration site unless includeDeclaration:false. Returns a clean " +
+      "message when no language server is available — never fails the turn.",
     inputSchema: referencesSchema,
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
@@ -266,8 +269,11 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const documentSymbol: Tool<DocumentInput> = {
     name: "lsp_document_symbol",
     description:
-      "Enumerate document symbols (functions / classes / variables) for PATH. " +
-      "Returns a clean message when no language server is available — never fails the turn.",
+      "PREFER over reading a large file when you only need its outline. Returns " +
+      "the file's symbol tree (classes, methods, functions, nested scopes) with " +
+      "kind+range, semantic — not raw text. One call replaces 'open file, read " +
+      "lines, scroll, locate class'. Returns a clean message when no language " +
+      "server is available — never fails the turn.",
     inputSchema: documentSchema,
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
@@ -289,8 +295,13 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const workspaceSymbol: Tool<WorkspaceInput> = {
     name: "lsp_workspace_symbol",
     description:
-      "Search workspace symbols matching QUERY via the language server selected by PATH. " +
-      "Returns a clean message when no language server is available — never fails the turn.",
+      "PREFER over grep when finding a CLASS, FUNCTION, METHOD, or other code " +
+      "symbol BY NAME across the repo. Returns symbol kind (class/function/" +
+      "method/variable), defining file:range, and container — semantic results, " +
+      "not text matches. Use grep only when searching for raw text/patterns " +
+      "(comments, error strings, regex literals). PATH selects which language " +
+      "server to use (file extension determines the server). Returns a clean " +
+      "message when no language server is available — never fails the turn.",
     inputSchema: workspaceSchema,
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
