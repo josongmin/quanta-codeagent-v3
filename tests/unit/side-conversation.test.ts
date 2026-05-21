@@ -1,218 +1,238 @@
 /**
- * ADR-0049 — Side-conversation seam.
+ * ADR-0049 side-conversation seam unit tests.
  *
- * Pins the public contract:
- *   (1) The system prompt is byte-identical to Codex's verbatim string.
- *   (2) Only read-only tools reach the LLM — no `write`/`edit`/`bash`/etc.
- *   (3) Default model selection prefers `opts.model`, falls back to the LLM
- *       port's configured model, finally "unknown".
- *   (4) `effort` is runtime-restricted to "low" or "medium"; high/xhigh throw
- *       even when bypassed via `as any`.
- *   (5) Parent thread id is recorded for telemetry; it is never forwarded as
- *       an LLM message (separate context window).
+ * Covers (15 tests):
+ *   1. byte-identical Codex base prompt
+ *   2. delimiter present and stable between base and addendum
+ *   3. SIDE_CONVERSATION_PROMPT == base + delimiter + addendum (no other content)
+ *   4. tool allowlist subset of planModeMutatingTable read-only set
+ *   5. tool allowlist EQUALS planModeMutatingTable read-only set (no silent drift)
+ *   6. effort type — runtime guard rejects "high" via `as any`
+ *   7. effort type — runtime guard rejects "xhigh" from JSON.parse
+ *   8. effort type — runtime guard rejects null / undefined / object
+ *   9. filterSideConversationTools rejects mutating tool
+ *  10. filterSideConversationTools rejects unknown tool
+ *  11. runSideConversation returns answer + tokens + duration
+ *  12. runSideConversation emits OTel span with thread.side / kind / parent_id
+ *  13. runSideConversation aborts when parent signal fires
+ *  14. runSideConversation rejects over-budget input
+ *  15. runSideConversation rejects over-budget output (post-stream)
  */
-import { describe, expect, test } from "bun:test"
-import { planModeMutatingTable } from "@/agent/mode"
+
+import { describe, expect, it } from "bun:test"
 import {
+  assertSideConversationEffort,
+  DEFAULT_SIDE_CONVERSATION_INPUT_TOKEN_BUDGET,
+  filterSideConversationTools,
   runSideConversation,
   SIDE_CONVERSATION_PROMPT,
+  SIDE_CONVERSATION_PROMPT_BASE,
+  SIDE_CONVERSATION_PROMPT_DELIMITER,
+  SIDE_CONVERSATION_QUANTA_ADDENDUM,
   SIDE_CONVERSATION_TOOL_NAMES,
-} from "@/agent/side-conversation"
+  SideConversationAbortedError,
+  SideConversationBudgetError,
+  type SideConversationEffort,
+  SideConversationEffortError,
+  type SideConversationSpanAttributes,
+  SideConversationToolError,
+} from "@/agent"
+import { planModeMutatingTable } from "@/agent/mode"
 import type { LLMPort, StreamEvent, StreamInput, ToolSchema } from "@/llm"
 
-/** Captures the StreamInput passed to the fake LLM so tests can assert the
- *  tool list / system / messages were filtered correctly. */
-interface CapturedCall {
-  input: StreamInput
-}
+// ---------------------------------------------------------------------------
+// Local fixture: scripted LLM. Kept inline (no harness import) so the unit
+// suite is self-contained.
+// ---------------------------------------------------------------------------
 
-const fakeLlm = (events: StreamEvent[], captured: CapturedCall[], model?: string): LLMPort => {
-  const port: LLMPort = {
-    stream(input: StreamInput): AsyncIterable<StreamEvent> {
-      captured.push({ input })
-      return {
-        async *[Symbol.asyncIterator]() {
-          for (const ev of events) yield ev
-        },
-      }
-    },
-    ...(model !== undefined ? { model } : {}),
+class FakeLlm implements LLMPort {
+  readonly inputs: StreamInput[] = []
+  readonly model = "fake-side-conv"
+  constructor(private readonly script: StreamEvent[]) {}
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.inputs.push(input)
+    for (const e of this.script) yield e
   }
-  return port
 }
 
-const textOnly = (text: string): StreamEvent[] => [
-  { type: "text_delta", delta: text },
-  { type: "message_stop", stop_reason: "end_turn" },
-]
+const textAnswer = (
+  text: string,
+  opts?: { inputTokens?: number; outputTokens?: number },
+): StreamEvent[] => {
+  const ev: StreamEvent[] = [
+    { type: "text_delta", delta: text },
+    { type: "message_stop", stop_reason: "end_turn" },
+  ]
+  if (opts) {
+    ev.splice(1, 0, {
+      type: "usage",
+      inputTokens: opts.inputTokens ?? 0,
+      outputTokens: opts.outputTokens ?? 0,
+      model: "fake-side-conv",
+    })
+  }
+  return ev
+}
 
-describe("SIDE_CONVERSATION_PROMPT — byte-identical to Codex verbatim", () => {
-  test("equals Codex's exact prompt string (no paraphrase)", () => {
-    // Verbatim Codex string — DO NOT EDIT (the test enforces byte-equality).
-    const expected =
+// ---------------------------------------------------------------------------
+
+describe("side-conversation prompt invariants", () => {
+  it("1. byte-identical Codex base prompt — exact literal pin", () => {
+    // Pinned literal — drift here is a Codex absorption violation.
+    expect(SIDE_CONVERSATION_PROMPT_BASE).toBe(
       "You are a side-conversation assistant, separate from the main thread. " +
-      "Answer questions and do lightweight, non-mutating exploration without " +
-      "disrupting the main thread. If there is no user question after this " +
-      "boundary yet, wait for one."
-    expect(SIDE_CONVERSATION_PROMPT).toBe(expected)
+        "Answer questions and do lightweight, non-mutating exploration without disrupting the main thread.",
+    )
   })
 
-  test("starts with the Codex signature phrase", () => {
-    // Defense against accidental prefix shift (e.g. someone adds a Quanta
-    // policy banner ahead of the Codex string).
-    expect(SIDE_CONVERSATION_PROMPT.startsWith("You are a side-conversation assistant")).toBe(true)
+  it("2. delimiter present and stable between base and addendum", () => {
+    expect(SIDE_CONVERSATION_PROMPT_DELIMITER).toBe("\n\n--- quanta side-conv addendum ---\n\n")
+    // Effective prompt MUST contain the delimiter exactly once.
+    const occurrences =
+      SIDE_CONVERSATION_PROMPT.split(SIDE_CONVERSATION_PROMPT_DELIMITER).length - 1
+    expect(occurrences).toBe(1)
+  })
+
+  it("3. SIDE_CONVERSATION_PROMPT == base + delimiter + addendum (no extra content)", () => {
+    expect(SIDE_CONVERSATION_PROMPT).toBe(
+      SIDE_CONVERSATION_PROMPT_BASE +
+        SIDE_CONVERSATION_PROMPT_DELIMITER +
+        SIDE_CONVERSATION_QUANTA_ADDENDUM,
+    )
   })
 })
 
-describe("SIDE_CONVERSATION_TOOL_NAMES — read-only-by-construction", () => {
-  test("every named tool is classified read-only (null) in the mode table", () => {
+describe("side-conversation tool allowlist invariants", () => {
+  it("4. every allowlisted tool is read-only in planModeMutatingTable", () => {
     const table = planModeMutatingTable()
     for (const name of SIDE_CONVERSATION_TOOL_NAMES) {
-      expect(table).toHaveProperty(name)
-      expect(table[name]).toBeNull()
+      expect(name in table).toBe(true)
+      expect(table[name]).toBe(null)
     }
   })
 
-  test("does NOT include any mutating tool", () => {
-    const banned = ["write", "edit", "scripted_replace", "bash", "update_working_state"]
-    for (const b of banned) {
-      expect(SIDE_CONVERSATION_TOOL_NAMES).not.toContain(b)
-    }
+  it("5. allowlist EQUALS planModeMutatingTable read-only set — fails loudly on drift", () => {
+    const table = planModeMutatingTable()
+    const readOnly = Object.keys(table)
+      .filter((k) => table[k] === null)
+      .sort()
+    const allowed = [...SIDE_CONVERSATION_TOOL_NAMES].sort()
+    // If a new read-only tool is added to planModeMutatingTable without
+    // updating SIDE_CONVERSATION_TOOL_NAMES, this assertion's diff names it.
+    expect(allowed).toEqual(readOnly)
   })
 })
 
-describe("runSideConversation — wires LLM correctly", () => {
-  test("forwards only read-only tools to the adapter (mutating tools never sent)", async () => {
-    const captured: CapturedCall[] = []
-    const llm = fakeLlm(textOnly("Sure, regex matches digits."), captured, "side-model")
-    await runSideConversation({
-      parentThreadId: "thread-parent-1",
-      question: "What does this regex do?",
-      llm,
-    })
-    expect(captured.length).toBe(1)
-    const call = captured[0]
-    if (!call) throw new Error("capture missing")
-    const names = call.input.tools.map((t: ToolSchema) => t.name).sort()
-    expect(names).toEqual([...SIDE_CONVERSATION_TOOL_NAMES].sort())
-    // No mutating tools forwarded.
-    for (const banned of ["write", "edit", "bash", "scripted_replace"]) {
-      expect(names).not.toContain(banned)
-    }
-  })
-
-  test("forwards the verbatim system prompt and ONLY the question (no parent context)", async () => {
-    const captured: CapturedCall[] = []
-    const llm = fakeLlm(textOnly("answer"), captured, "side-model")
-    await runSideConversation({
-      parentThreadId: "thread-parent-1",
-      question: "regex meaning?",
-      llm,
-    })
-    const call = captured[0]
-    if (!call) throw new Error("capture missing")
-    expect(call.input.system).toBe(SIDE_CONVERSATION_PROMPT)
-    // Exactly ONE user message containing the question; parent thread id is
-    // NOT forwarded as a message.
-    expect(call.input.messages.length).toBe(1)
-    expect(call.input.messages[0]).toEqual({
-      role: "user",
-      content: [{ type: "text", text: "regex meaning?" }],
-    })
-  })
-
-  test("returns the joined assistant text + token usage", async () => {
-    const llm = fakeLlm(
-      [
-        { type: "text_delta", delta: "It " },
-        { type: "text_delta", delta: "matches digits." },
-        { type: "usage", inputTokens: 12, outputTokens: 7, model: "side-model" },
-        { type: "message_stop", stop_reason: "end_turn" },
-      ],
-      [],
-      "side-model",
+describe("side-conversation effort runtime guard", () => {
+  it('6. rejects "high" via `as any` bypass', () => {
+    expect(() => assertSideConversationEffort("high" as unknown as SideConversationEffort)).toThrow(
+      SideConversationEffortError,
     )
-    const res = await runSideConversation({
-      parentThreadId: "p1",
-      question: "?",
+  })
+
+  it('7. rejects "xhigh" from JSON.parse', () => {
+    const parsed = JSON.parse('{"effort":"xhigh"}') as { effort: unknown }
+    expect(() => assertSideConversationEffort(parsed.effort)).toThrow(SideConversationEffortError)
+  })
+
+  it("8. rejects null / undefined / object", () => {
+    expect(() => assertSideConversationEffort(null)).toThrow(SideConversationEffortError)
+    expect(() => assertSideConversationEffort(undefined)).toThrow(SideConversationEffortError)
+    expect(() => assertSideConversationEffort({ effort: "low" })).toThrow(
+      SideConversationEffortError,
+    )
+    // Sanity: allowed values pass.
+    expect(() => assertSideConversationEffort("low")).not.toThrow()
+    expect(() => assertSideConversationEffort("medium")).not.toThrow()
+  })
+})
+
+describe("filterSideConversationTools", () => {
+  it("9. rejects a mutating tool (write)", () => {
+    const tools: ToolSchema[] = [{ name: "write", description: "x", input_schema: {} }]
+    expect(() => filterSideConversationTools(tools)).toThrow(SideConversationToolError)
+  })
+
+  it("10. rejects an unknown tool", () => {
+    const tools: ToolSchema[] = [{ name: "totally_made_up", description: "x", input_schema: {} }]
+    expect(() => filterSideConversationTools(tools)).toThrow(SideConversationToolError)
+  })
+})
+
+describe("runSideConversation behavior", () => {
+  it("11. returns answer + tokens + duration", async () => {
+    const llm = new FakeLlm(textAnswer("hello world", { inputTokens: 12, outputTokens: 34 }))
+    const result = await runSideConversation({
+      parentSessionId: "parent-1",
+      question: "What is 2+2?",
       llm,
     })
-    expect(res.answer).toBe("It matches digits.")
-    expect(res.tokens).toEqual({ input: 12, output: 7 })
+    expect(result.answer).toBe("hello world")
+    expect(result.tokens).toEqual({ input: 12, output: 34 })
+    expect(result.durationMs).toBeGreaterThanOrEqual(0)
+    expect(result.stopReason).toBe("end_turn")
+    // The LLM received the verbatim prompt + the question, no tool registry leak.
+    expect(llm.inputs[0]?.system).toBe(SIDE_CONVERSATION_PROMPT)
   })
 
-  test("zero usage events → tokens are zero (older models)", async () => {
-    const llm = fakeLlm(textOnly("ok"), [], "side-model")
-    const res = await runSideConversation({ parentThreadId: "p1", question: "?", llm })
-    expect(res.tokens).toEqual({ input: 0, output: 0 })
-  })
-})
-
-describe("effort cap — never high/xhigh", () => {
-  test('"low" and "medium" both accepted; default is "low"', async () => {
-    const llm = fakeLlm(textOnly("ok"), [], "m")
-    await expect(
-      runSideConversation({ parentThreadId: "p", question: "?", llm, effort: "low" }),
-    ).resolves.toBeDefined()
-    await expect(
-      runSideConversation({ parentThreadId: "p", question: "?", llm, effort: "medium" }),
-    ).resolves.toBeDefined()
-    // Default (no `effort`) — should also resolve.
-    await expect(
-      runSideConversation({ parentThreadId: "p", question: "?", llm }),
-    ).resolves.toBeDefined()
+  it("12. emits OTel span with thread.side / kind / parent_id", async () => {
+    const llm = new FakeLlm(textAnswer("ok", { inputTokens: 5, outputTokens: 6 }))
+    let captured: SideConversationSpanAttributes | undefined
+    await runSideConversation({
+      parentSessionId: "parent-2",
+      question: "ping?",
+      llm,
+      observe: (s) => {
+        captured = s
+      },
+    })
+    expect(captured).toBeDefined()
+    expect(captured?.["quanta.thread.side"]).toBe(true)
+    expect(captured?.["quanta.thread.kind"]).toBe("side")
+    expect(captured?.["quanta.thread.parent_id"]).toBe("parent-2")
+    expect(captured?.["gen_ai.usage.input_tokens"]).toBe(5)
+    expect(captured?.["gen_ai.usage.output_tokens"]).toBe(6)
   })
 
-  test('"high" / "xhigh" bypassed via cast → runtime guard throws', async () => {
-    const llm = fakeLlm(textOnly("ok"), [], "m")
+  it("13. aborts when parent signal fires before streaming", async () => {
+    const llm = new FakeLlm(textAnswer("never-seen"))
+    const ac = new AbortController()
+    ac.abort()
     await expect(
       runSideConversation({
-        parentThreadId: "p",
-        question: "?",
+        parentSessionId: "p",
+        question: "q",
         llm,
-        effort: "high" as unknown as "low",
+        signal: ac.signal,
       }),
-    ).rejects.toThrow(/effort must be "low" or "medium"/)
+    ).rejects.toBeInstanceOf(SideConversationAbortedError)
+    // LLM was never actually invoked.
+    expect(llm.inputs.length).toBe(0)
+  })
+
+  it("14. rejects over-budget input (pre-stream)", async () => {
+    const llm = new FakeLlm(textAnswer("ok"))
+    // Construct a question larger than the default budget.
+    const long = "x".repeat(DEFAULT_SIDE_CONVERSATION_INPUT_TOKEN_BUDGET * 4 + 100)
     await expect(
       runSideConversation({
-        parentThreadId: "p",
-        question: "?",
+        parentSessionId: "p",
+        question: long,
         llm,
-        effort: "xhigh" as unknown as "low",
       }),
-    ).rejects.toThrow(/effort must be "low" or "medium"/)
+    ).rejects.toBeInstanceOf(SideConversationBudgetError)
+    expect(llm.inputs.length).toBe(0)
   })
-})
 
-describe("default model selection", () => {
-  test("opts.model wins over llm.model", async () => {
-    // We don't see the resolved model in the result, but we can prove the
-    // adapter received the StreamInput unchanged (the adapter picks the
-    // model from its own config — runSideConversation only logs it).
-    // This test asserts the function does not THROW on either combination,
-    // exercising the resolveModel branch.
-    const llm = fakeLlm(textOnly("ok"), [], "fallback-model")
+  it("15. rejects over-budget output (post-stream)", async () => {
+    const llm = new FakeLlm(textAnswer("ok", { inputTokens: 1, outputTokens: 9999 }))
     await expect(
       runSideConversation({
-        parentThreadId: "p",
-        question: "?",
+        parentSessionId: "p",
+        question: "small",
         llm,
-        model: "explicit-side-model",
+        outputTokenBudget: 100,
       }),
-    ).resolves.toBeDefined()
-  })
-
-  test("absent opts.model → falls back to llm.model", async () => {
-    const llm = fakeLlm(textOnly("ok"), [], "fallback-model")
-    await expect(
-      runSideConversation({ parentThreadId: "p", question: "?", llm }),
-    ).resolves.toBeDefined()
-  })
-
-  test("both absent → still succeeds (model resolves to 'unknown')", async () => {
-    const llm = fakeLlm(textOnly("ok"), [])
-    await expect(
-      runSideConversation({ parentThreadId: "p", question: "?", llm }),
-    ).resolves.toBeDefined()
+    ).rejects.toBeInstanceOf(SideConversationBudgetError)
   })
 })

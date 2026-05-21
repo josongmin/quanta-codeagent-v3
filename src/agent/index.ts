@@ -73,12 +73,29 @@ export {
 } from "./repo-rules"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
 export {
+  assertSideConversationEffort,
+  DEFAULT_SIDE_CONVERSATION_INPUT_TOKEN_BUDGET,
+  DEFAULT_SIDE_CONVERSATION_OUTPUT_TOKEN_BUDGET,
+  dispatchSideConversation,
+  estimateSideConversationTokens,
+  filterSideConversationTools,
   runSideConversation,
   SIDE_CONVERSATION_PROMPT,
+  SIDE_CONVERSATION_PROMPT_BASE,
+  SIDE_CONVERSATION_PROMPT_DELIMITER,
+  SIDE_CONVERSATION_QUANTA_ADDENDUM,
   SIDE_CONVERSATION_TOOL_NAMES,
+  SideConversationAbortedError,
+  SideConversationBudgetError,
   type SideConversationEffort,
+  SideConversationEffortError,
   type SideConversationOptions,
+  type SideConversationRequest,
+  type SideConversationResolver,
+  type SideConversationResponse,
   type SideConversationResult,
+  type SideConversationSpanAttributes,
+  SideConversationToolError,
 } from "./side-conversation"
 export { loadSession, type SaveSessionInput, saveSession } from "./state"
 export {

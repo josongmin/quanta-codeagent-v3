@@ -1,11 +1,11 @@
-id: side-conversation
-title: Side-conversation seam (parallel read-only sub-thread)
+id: side-conversation-seam
+title: Side-conversation read-only sub-thread seam
 section: 1
-subsystem: Side-conversation seam (ADR-0049)
-order: 14
+subsystem: Side-conversation (ADR-0049)
+order: 20
 maturity: L3
 status: new
-purpose: Codex `codex.thread.side` 등가 — parent thread를 interrupt하지 않고 별도 짧은 LLM 호출로 사용자 질문에 답하는 lightweight read-only sub-thread. system prompt는 Codex verbatim (byte-identical 단위 테스트), 도구는 read/grep/glob 3개로 제한, reasoning effort는 `low`/`medium`만 (type + runtime 이중 guard). subagent 아님 — session/working-tree/별도 로그 없음, parent process만 공유. 텔레메트리는 canonical `quanta.thread.side=true` attribute.
+purpose: Lightweight read-only sub-thread that runs alongside the main agent loop without disrupting it. Codex `codex.thread.side` absorption (build 2867 round-4 §G). Verbatim Codex base prompt pinned by `toBe`-literal test; quanta-specific sticky-taint addendum concatenated after a stable delimiter. Tool allowlist EQUALS the planModeMutatingTable read-only complement (drift fails CI). Effort cap is type+runtime double-gated against `as any` and JSON.parse bypass. Token budgets (8192/4096 default) enforced on both directions, with explicit error. Cancellation propagates from parent via AbortSignal. OTel emits `quanta.thread.side=true` + `quanta.thread.kind="side"` + parent_id. Dispatch router (`dispatchSideConversation`) is the public UI/CLI seam — host injects LLM resolver and abort signal; parent agent loop is never touched.
 evidence:
   code:
     - src/agent/side-conversation.ts
@@ -18,9 +18,10 @@ evidence:
       - tests/integration/side-conversation-e2e.test.ts
     contract: []
 knobs:
-  - effort (low | medium; high/xhigh 금지)
-  - model (caller가 provider/model 선택; 미지정 시 `llm.model` fallback)
+  - inputTokenBudget (default 8192)
+  - outputTokenBudget (default 4096)
+  - effort ("low" | "medium" only, runtime-guarded against `as any` / JSON bypass)
 deliberate_hold:
-  reason: read-only tool dispatch 엔진 미연결 (현재 모델에 tool schema는 보여주지만 실제 read/grep/glob 호출은 실행 안 됨). session/persistence wiring + 동시성 throttle도 후속 슬라이스.
-  promotion_path: (1) read-only dispatch 엔진을 plug-in해서 실제 file read/grep을 수행, (2) 동시성 한도 정책 추가 (UI throttle 책임 vs 엔진 책임 결정), (3) session JSONL에 side conv 흔적 남길지 옵트인 결정.
-notes: 'Codex parity는 의도된 흡수 — system prompt byte-equality는 양쪽 telemetry/prompt corpus를 grep 호환 유지하기 위한 hard requirement. ADR-0044 negative invariants 위배 없음 (read-only이고 권한 우회 경로 없음).'
+  reason: Default model selection is intentionally host-controlled (cheaper sibling recommended but not pinned in code — LLM pricing 3-month cycle would lag).
+  promotion_path: When v3 ships a cost-tier registry, wire side-conv to it and add a `defaultModel: "cheap"` resolver shortcut.
+notes: 'Side-conv is NOT a subagent (no nickname per ADR-0042, no spawn lifecycle per ADR-0041) and NOT plan-mode (which is a posture of the MAIN thread per ADR-0036). It is a separate thread surface.'
