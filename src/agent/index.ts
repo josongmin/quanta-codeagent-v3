@@ -7,6 +7,18 @@ export {
   DEFAULT_COMPACTION_BREAKER_CAPS,
 } from "./compaction-breaker"
 export {
+  type HandoffRequiredEvent,
+  type HITLTier,
+  type HitlTier,
+  isHandoffRequiredEvent,
+} from "./hitl-tier"
+export {
+  __resetHitlOverrides,
+  builtinAnnotations,
+  type HitlAnnotation,
+  resolveHitlAnnotation,
+} from "./hitl-tier-registry"
+export {
   HookBus,
   type HookDeny,
   type HookEvent,

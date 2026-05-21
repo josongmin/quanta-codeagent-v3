@@ -1,49 +1,67 @@
 /**
- * Unit tests for the HITL 4-tier composition inside `runAdmissibilityGate`
- * (ADR-0047). The gate composes:
- *   - the tool's own `hitlTier(input)` declaration, with
- *   - the name-based registry annotation (`getToolHitlTier`)
- * by taking the STRICTER of the two (one-way ratchet — registry can only
- * tighten, never loosen the tool's own declaration).
+ * ADR-0047 — HITL tier gate: `HandoffRequiredEvent` emission tests.
  *
- * These tests construct minimal tools and assert the gate's outcome for each
- * tier:
- *   - tier=hand-off-required ⇒ deny preview="handoff"
- *   - tier=always-confirm    ⇒ deny preview="declined" (or admissible after
- *                              approval) — fires regardless of approval_policy
- *   - tier=pre-approval-ok   ⇒ falls through to mode policy
- *   - tier=none              ⇒ admissible (skip mode policy + classifier)
+ * Covers the admissibility-gate's behaviour around the new typed handoff
+ * event seam:
+ *   - HARD_DENY hit fires onHandoff(event) with `reason: "hard-deny:..."`
+ *   - explicit hand-off-required tier fires onHandoff(event) with
+ *     `reason: "tier:hand-off-required"` (no registry escalation)
+ *   - registry-promoted hand-off-required fires onHandoff with
+ *     `reason: "registry:<tool>"`
+ *   - event payload is fully populated (tool, args, handoffMessage,
+ *     timestamp)
+ *   - absent `onHandoff` ⇒ byte-identical legacy behaviour (no event)
+ *   - throwing `onHandoff` is swallowed; deny result is stable
+ *   - `isHandoffRequiredEvent` predicate accepts canonical shape +
+ *     rejects malformed
+ *   - non-handoff tiers do NOT fire the event
  */
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { runAdmissibilityGate } from "@/agent/admissibility-gate"
+import { type HandoffRequiredEvent, isHandoffRequiredEvent } from "@/agent/hitl-tier"
 import { __resetHitlOverrides } from "@/agent/hitl-tier-registry"
 import type { ToolUseBlock } from "@/llm"
 import type { HITLTier, PermissionContext } from "@/permission"
-import type { Tool, ToolEvent } from "@/tool"
+import { __resetRuntimeConfig } from "@/shared"
+import type { Tool } from "@/tool"
 import { ToolRegistry } from "@/tool"
+
+let tmp: string
+
+beforeEach(() => {
+  tmp = join(tmpdir(), `hitl-gate-${process.pid}-${Date.now()}`)
+  mkdirSync(tmp, { recursive: true })
+})
+afterEach(() => {
+  rmSync(tmp, { recursive: true, force: true })
+  delete process.env["QUANTA_HITL_OVERRIDES"]
+  __resetRuntimeConfig()
+  __resetHitlOverrides()
+})
 
 const makeTool = (
   name: string,
   opts: {
     readOnly?: boolean
-    schema?: z.ZodTypeAny
     hitlTier?: (input: unknown) => HITLTier
   } = {},
 ): Tool => {
   const tool: Tool = {
     name,
     description: `${name}`,
-    inputSchema: (opts.schema ?? z.object({})) as z.ZodType<unknown>,
+    inputSchema: z.object({}).passthrough() as z.ZodType<unknown>,
     isReadOnly: () => opts.readOnly ?? false,
     isConcurrencySafe: () => opts.readOnly ?? false,
-    execute: async function* (): AsyncIterable<ToolEvent> {
-      yield { type: "result", result: { ok: true, output: "ran" } }
-    },
+    execute: () =>
+      (async function* () {
+        yield { type: "result", result: { ok: true, output: "ran" } }
+      })(),
   }
   if (opts.hitlTier) {
     ;(tool as Tool & { hitlTier: (input: unknown) => HITLTier }).hitlTier = opts.hitlTier
@@ -51,7 +69,7 @@ const makeTool = (
   return tool
 }
 
-const call = (name: string, input: unknown = {}, id = "c1"): ToolUseBlock => ({
+const callBlock = (name: string, input: unknown = {}, id = "c1"): ToolUseBlock => ({
   type: "tool_use",
   id,
   name,
@@ -67,253 +85,205 @@ const cfg = (over: Partial<AgentConfig> = {}): AgentConfig =>
     ...over,
   }) as AgentConfig
 
-describe("HITL tier gate — built-in registry composition", () => {
-  beforeEach(() => {
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
-  })
-
-  test("exec_command with `rm -rf /` ⇒ hand-off-required (deny preview='handoff') even with bypass + onConfirm", async () => {
-    // The tool itself has NO hitlTier — the registry's command-pattern match
-    // is what escalates this to hand-off-required.
-    const exec = makeTool("exec_command", { schema: z.object({ command: z.string() }) })
-    const c = cfg({
-      registry: new ToolRegistry([exec]),
-      hitl: { enabled: true },
-      onConfirm: async () => true,
-      permission: { mode: "bypass" },
-    })
-    const input = { command: "rm -rf /" }
+describe("onHandoff event seam", () => {
+  test("HARD_DENY fires onHandoff(event) with hard-deny reason tag", async () => {
+    const captured: HandoffRequiredEvent[] = []
+    const bash = makeTool("bash")
+    const call = callBlock("bash", { command: "rm -rf /" })
+    const before = Date.now()
     const res = await runAdmissibilityGate(
-      call("exec_command", input),
-      c,
-      { mode: "bypass" },
-      { tool: "exec_command", input, isReadOnly: false },
+      call,
+      cfg({
+        registry: new ToolRegistry([bash]),
+        hitl: { enabled: true },
+        permission: { mode: "bypass" } as PermissionContext,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "bypass" } as PermissionContext,
+      // shellCommand is consumed by hardDenyReason via duck-typing — we
+      // structurally widen here so the gate sees the same surface dispatch
+      // would have populated.
+      Object.assign(
+        { tool: "bash", input: { command: "rm -rf /" }, isReadOnly: false },
+        { shellCommand: "rm -rf /" },
+      ),
     )
-    expect(res).not.toBeNull()
     expect(res?.preview).toBe("handoff")
-    // The registry's handoffMessage should be surfaced.
-    expect(res?.block.content).toContain("rm -rf")
+    expect(captured).toHaveLength(1)
+    const ev = captured[0]
+    if (!ev) throw new Error("expected event")
+    expect(ev.kind).toBe("hitl-handoff")
+    expect(ev.tool).toBe("bash")
+    expect(ev.args).toEqual({ command: "rm -rf /" })
+    expect(ev.handoffMessage).toContain("human handoff")
+    expect(ev.reason.startsWith("hard-deny:")).toBe(true)
+    expect(ev.timestamp).toBeGreaterThanOrEqual(before)
+    expect(ev.timestamp).toBeLessThanOrEqual(Date.now())
   })
 
-  test("exec_command with `git push --force` ⇒ always-confirm; declined ⇒ deny preview='declined'", async () => {
-    const exec = makeTool("exec_command", { schema: z.object({ command: z.string() }) })
-    let asked = false
-    const c = cfg({
-      registry: new ToolRegistry([exec]),
-      hitl: { enabled: true },
-      onConfirm: async () => {
-        asked = true
-        return false
-      },
-      // Even bypass cannot skip always-confirm.
-      permission: { mode: "bypass" },
-    })
-    const input = { command: "git push --force origin main" }
+  test("explicit hand-off-required tier fires onHandoff with tier reason tag", async () => {
+    const captured: HandoffRequiredEvent[] = []
+    const sensitive = makeTool("sensitive", { hitlTier: () => "hand-off-required" })
     const res = await runAdmissibilityGate(
-      call("exec_command", input),
-      c,
-      { mode: "bypass" },
-      { tool: "exec_command", input, isReadOnly: false },
+      callBlock("sensitive", { x: 1 }),
+      cfg({
+        registry: new ToolRegistry([sensitive]),
+        hitl: { enabled: true },
+        permission: { mode: "bypass" } as PermissionContext,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "bypass" } as PermissionContext,
+      { tool: "sensitive", input: { x: 1 }, isReadOnly: false },
     )
-    expect(asked).toBe(true)
-    expect(res?.preview).toBe("declined")
-    expect(res?.block.content).toContain("always-confirm tier")
+    expect(res?.preview).toBe("handoff")
+    expect(captured).toHaveLength(1)
+    const ev = captured[0]
+    if (!ev) throw new Error("expected event")
+    expect(ev.reason).toBe("tier:hand-off-required")
+    expect(ev.tool).toBe("sensitive")
+    expect(ev.args).toEqual({ x: 1 })
   })
 
-  test("exec_command with `ls` ⇒ none (admissible, no mode policy consulted)", async () => {
-    const exec = makeTool("exec_command", { schema: z.object({ command: z.string() }) })
-    let confirmCalled = false
-    const c = cfg({
-      registry: new ToolRegistry([exec]),
-      hitl: { enabled: true },
-      onConfirm: async () => {
-        confirmCalled = true
-        return false
-      },
-      // default mode would normally ask for a mutating tool — but tier=none
-      // short-circuits that.
-      permission: { mode: "default" },
-    })
-    const input = { command: "ls -la" }
-    const res = await runAdmissibilityGate(
-      call("exec_command", input),
-      c,
-      { mode: "default" },
-      { tool: "exec_command", input, isReadOnly: false },
-    )
-    expect(res).toBeNull()
-    expect(confirmCalled).toBe(false)
-  })
-
-  test("apply_patch ⇒ pre-approval-ok; bypass mode allows admissibly", async () => {
-    const ap = makeTool("apply_patch")
-    const c = cfg({
-      registry: new ToolRegistry([ap]),
-      hitl: { enabled: true },
-      permission: { mode: "bypass" },
-    })
-    const res = await runAdmissibilityGate(
-      call("apply_patch"),
-      c,
-      { mode: "bypass" },
-      { tool: "apply_patch", input: {}, isReadOnly: false },
-    )
-    expect(res).toBeNull()
-  })
-
-  test("spawn_agent ⇒ none; admissible without confirm", async () => {
-    const sa = makeTool("spawn_agent")
-    const c = cfg({
-      registry: new ToolRegistry([sa]),
-      hitl: { enabled: true },
-      permission: { mode: "default" },
-    })
-    const res = await runAdmissibilityGate(
-      call("spawn_agent"),
-      c,
-      { mode: "default" },
-      { tool: "spawn_agent", input: {}, isReadOnly: false },
-    )
-    expect(res).toBeNull()
-  })
-
-  test("unknown tool with mutating semantics ⇒ pre-approval-ok (today's behavior, backwards compat)", async () => {
-    // A mutating tool with NO hitlTier declaration and NO registry entry must
-    // fall through to mode policy (default ⇒ ask). The crucial check is that
-    // the registry doesn't escalate to always-confirm or hand-off-required.
-    const unknown = makeTool("totally_new_tool", {
-      readOnly: false,
-      hitlTier: () => "pre-approval-ok",
-    })
-    let asked = false
-    const c = cfg({
-      registry: new ToolRegistry([unknown]),
-      hitl: { enabled: true },
-      onConfirm: async () => {
-        asked = true
-        return true
-      },
-      permission: { mode: "default" },
-    })
-    const res = await runAdmissibilityGate(
-      call("totally_new_tool"),
-      c,
-      { mode: "default" },
-      { tool: "totally_new_tool", input: {}, isReadOnly: false },
-    )
-    expect(asked).toBe(true)
-    expect(res).toBeNull()
-  })
-})
-
-describe("HITL tier gate — registry ESCALATES tool declarations (one-way ratchet)", () => {
-  beforeEach(() => {
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
-  })
-
-  test("tool declares 'pre-approval-ok' but registry pattern says 'always-confirm' ⇒ always-confirm wins", async () => {
-    // Tool says everything is fine; registry sees `git push` and escalates.
-    const exec = makeTool("exec_command", {
-      schema: z.object({ command: z.string() }),
-      hitlTier: () => "pre-approval-ok",
-    })
-    let asked = false
-    const c = cfg({
-      registry: new ToolRegistry([exec]),
-      hitl: { enabled: true },
-      onConfirm: async () => {
-        asked = true
-        return false
-      },
-      permission: { mode: "bypass" },
-    })
-    const input = { command: "git push origin main" }
-    const res = await runAdmissibilityGate(
-      call("exec_command", input),
-      c,
-      { mode: "bypass" },
-      { tool: "exec_command", input, isReadOnly: false },
-    )
-    expect(asked).toBe(true)
-    expect(res?.preview).toBe("declined")
-  })
-
-  test("tool declares 'always-confirm' but registry says 'none' ⇒ always-confirm wins (registry CANNOT loosen)", async () => {
-    // Edge case: registry has read ⇒ none, but tool overrides itself to
-    // always-confirm. The stricter declaration (tool's) must win.
-    const t = makeTool("read", {
-      readOnly: true,
-      hitlTier: () => "always-confirm",
-    })
-    let asked = false
-    const c = cfg({
-      registry: new ToolRegistry([t]),
-      hitl: { enabled: true },
-      onConfirm: async () => {
-        asked = true
-        return false
-      },
-      permission: { mode: "bypass" },
-    })
-    const res = await runAdmissibilityGate(
-      call("read", { path: "x.ts" }),
-      c,
-      { mode: "bypass" },
-      { tool: "read", input: { path: "x.ts" }, isReadOnly: true },
-    )
-    expect(asked).toBe(true)
-    expect(res?.preview).toBe("declined")
-  })
-})
-
-describe("HITL tier gate — user override file", () => {
-  let tmp: string
-  let overridesPath: string
-
-  beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "hitl-gate-"))
-    overridesPath = join(tmp, "hitl-overrides.json")
-    process.env.QUANTA_HITL_OVERRIDES = overridesPath
-    __resetHitlOverrides()
-  })
-
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true })
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
-  })
-
-  test("override forces hand-off-required on a normally-OK tool", async () => {
+  test("registry-promoted hand-off-required fires onHandoff with registry reason tag", async () => {
+    const overridePath = join(tmp, "h.json")
     writeFileSync(
-      overridesPath,
+      overridePath,
       JSON.stringify({
-        write: {
-          tier: "hand-off-required",
-          handoffMessage: "All writes require manual operator approval per ops policy.",
+        version: 1,
+        annotations: [
+          {
+            tool: "write",
+            tier: "hand-off-required",
+            reason: "audit policy: writes always handed off",
+          },
+        ],
+      }),
+      "utf8",
+    )
+    process.env["QUANTA_HITL_OVERRIDES"] = overridePath
+    __resetRuntimeConfig()
+    __resetHitlOverrides()
+
+    const captured: HandoffRequiredEvent[] = []
+    const write = makeTool("write", { hitlTier: () => "pre-approval-ok" })
+    const res = await runAdmissibilityGate(
+      callBlock("write", { path: "x", content: "y" }),
+      cfg({
+        registry: new ToolRegistry([write]),
+        hitl: { enabled: true },
+        permission: { mode: "default" } as PermissionContext,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "default" } as PermissionContext,
+      { tool: "write", input: { path: "x", content: "y" }, isReadOnly: false },
+    )
+    expect(res?.preview).toBe("handoff")
+    expect(captured).toHaveLength(1)
+    const ev = captured[0]
+    if (!ev) throw new Error("expected event")
+    expect(ev.reason).toBe("registry:write")
+    expect(ev.handoffMessage).toContain("audit policy: writes always handed off")
+  })
+
+  test("absent onHandoff ⇒ byte-identical legacy deny (no throw, same preview)", async () => {
+    const sensitive = makeTool("sensitive", { hitlTier: () => "hand-off-required" })
+    const res = await runAdmissibilityGate(
+      callBlock("sensitive"),
+      cfg({
+        registry: new ToolRegistry([sensitive]),
+        hitl: { enabled: true },
+        permission: { mode: "default" } as PermissionContext,
+        // onHandoff intentionally absent
+      }),
+      { mode: "default" } as PermissionContext,
+      { tool: "sensitive", input: {}, isReadOnly: false },
+    )
+    expect(res?.preview).toBe("handoff")
+    expect(res?.block.content).toContain("human handoff")
+  })
+
+  test("throwing onHandoff is swallowed; deny result stays stable", async () => {
+    const sensitive = makeTool("sensitive", { hitlTier: () => "hand-off-required" })
+    const res = await runAdmissibilityGate(
+      callBlock("sensitive"),
+      cfg({
+        registry: new ToolRegistry([sensitive]),
+        hitl: { enabled: true },
+        permission: { mode: "default" } as PermissionContext,
+        onHandoff: () => {
+          throw new Error("UI listener exploded")
         },
       }),
-    )
-    __resetHitlOverrides()
-    const writeTool = makeTool("write", {
-      schema: z.object({ path: z.string(), content: z.string() }),
-      hitlTier: () => "pre-approval-ok",
-    })
-    const c = cfg({
-      registry: new ToolRegistry([writeTool]),
-      hitl: { enabled: true },
-      onConfirm: async () => true,
-      permission: { mode: "bypass" },
-    })
-    const input = { path: "x.ts", content: "y" }
-    const res = await runAdmissibilityGate(
-      call("write", input),
-      c,
-      { mode: "bypass" },
-      { tool: "write", input, isReadOnly: false },
+      { mode: "default" } as PermissionContext,
+      { tool: "sensitive", input: {}, isReadOnly: false },
     )
     expect(res?.preview).toBe("handoff")
-    expect(res?.block.content).toContain("manual operator approval")
+    expect(res?.block.content).toContain("human handoff")
+  })
+
+  test("non-handoff tier (always-confirm) does NOT fire onHandoff", async () => {
+    const captured: HandoffRequiredEvent[] = []
+    const tool = makeTool("custom", { hitlTier: () => "always-confirm" })
+    await runAdmissibilityGate(
+      callBlock("custom"),
+      cfg({
+        registry: new ToolRegistry([tool]),
+        hitl: { enabled: true },
+        permission: { mode: "bypass" } as PermissionContext,
+        onConfirm: async () => true,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "bypass" } as PermissionContext,
+      { tool: "custom", input: {}, isReadOnly: false },
+    )
+    expect(captured).toHaveLength(0)
+  })
+
+  test("none tier (read-only) does NOT fire onHandoff", async () => {
+    const captured: HandoffRequiredEvent[] = []
+    const ro = makeTool("read-thing", { readOnly: true })
+    await runAdmissibilityGate(
+      callBlock("read-thing"),
+      cfg({
+        registry: new ToolRegistry([ro]),
+        hitl: { enabled: true },
+        permission: { mode: "default" } as PermissionContext,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "default" } as PermissionContext,
+      { tool: "read-thing", input: {}, isReadOnly: true },
+    )
+    expect(captured).toHaveLength(0)
+  })
+})
+
+describe("isHandoffRequiredEvent predicate", () => {
+  test("accepts canonical shape", () => {
+    const ev: HandoffRequiredEvent = {
+      kind: "hitl-handoff",
+      tool: "bash",
+      args: { command: "x" },
+      handoffMessage: "boom",
+      reason: "tier:hand-off-required",
+      timestamp: 123,
+    }
+    expect(isHandoffRequiredEvent(ev)).toBe(true)
+  })
+
+  test("rejects null / undefined / primitive / wrong kind", () => {
+    expect(isHandoffRequiredEvent(null)).toBe(false)
+    expect(isHandoffRequiredEvent(undefined)).toBe(false)
+    expect(isHandoffRequiredEvent("hitl-handoff")).toBe(false)
+    expect(isHandoffRequiredEvent({ kind: "other" })).toBe(false)
+    expect(
+      isHandoffRequiredEvent({
+        kind: "hitl-handoff",
+        tool: 42,
+        args: {},
+        handoffMessage: "x",
+        reason: "y",
+        timestamp: 0,
+      }),
+    ).toBe(false)
   })
 })

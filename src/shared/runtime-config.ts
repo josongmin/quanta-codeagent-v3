@@ -90,18 +90,12 @@ export interface RuntimeConfig {
   readonly toolOutputMaxChars: number | undefined
   /** Tool spill retention (`QUANTA_TOOL_OUTPUT_SPILL_KEEP`). Absent ⇒ default. */
   readonly toolOutputSpillKeep: number | undefined
-  /** Quanta home dir (`QUANTA_HOME`). Absent ⇒ feature site computes
-   *  `~/.quanta`. ADR-0046 permission-store reads this for its state-file
-   *  default. */
-  readonly quantaHome: string | undefined
-  /** Permission state-file override (`QUANTA_PERMISSION_STATE`). Absent ⇒
-   *  feature site computes `<quantaHome>/permission-state.json`. */
-  readonly permissionStateFile: string | undefined
-  /** SSH connection marker (`SSH_CONNECTION`). Used by ADR-0046's
-   *  `resolveHostId()` to decide between `<user>@<host>` and `localhost`.
-   *  The actual string content doesn't matter (presence is the only signal);
-   *  stored verbatim for diagnostic surfacing. */
-  readonly sshConnection: string | undefined
+  /** Operator HITL tier-override file path (`QUANTA_HITL_OVERRIDES`). Absent ⇒
+   *  registry loads built-in annotations only. ADR-0047. Schema: JSON
+   *  `{ "version": 1, "annotations": [{ "tool": "<name>", "commandPrefix"?:
+   *  "<str>", "tier": "<HitlTier>", "reason"?: "<str>" }] }`. Malformed file
+   *  ⇒ stderr warn + fall back (never throws at startup). */
+  readonly hitlOverridesPath: string | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -121,9 +115,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_TOOL_OUTPUT_SPILL_KEEP"],
       "QUANTA_TOOL_OUTPUT_SPILL_KEEP",
     ),
-    quantaHome: stringOrUndef(env["QUANTA_HOME"]),
-    permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),
-    sshConnection: stringOrUndef(env["SSH_CONNECTION"]),
+    hitlOverridesPath: stringOrUndef(env["QUANTA_HITL_OVERRIDES"]),
   })
 }
 

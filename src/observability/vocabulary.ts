@@ -118,6 +118,22 @@ export const QUANTA_ATTRS = {
      *  can render the 3-step funnel. */
     postDenialEvent: "quanta.permission.post_denial.event",
   },
+  hitl: {
+    /** ADR-0047: final tier the admissibility-gate resolved for a tool call.
+     *  Literal union: `"hand-off-required" | "always-confirm" |
+     *  "pre-approval-ok" | "none"`. Emitted on every dispatch that runs the
+     *  HITL gate (i.e. `config.hitl.enabled === true`). */
+    tierResolved: "quanta.hitl.tier_resolved",
+    /** ADR-0047: `true` when the resolved tier was promoted by the
+     *  annotation registry (built-in or operator override) above the
+     *  upstream classifier's baseline. `false` when the baseline already
+     *  matched. */
+    registryEscalated: "quanta.hitl.registry_escalated",
+    /** ADR-0047: short kebab-case tag describing why a handoff event
+     *  fired (`"hard-deny:<rule-name>"`, `"registry:<tool>"`, or
+     *  `"tier:hand-off-required"`). Only set on handoff emissions. */
+    handoffEmitted: "quanta.hitl.handoff_emitted",
+  },
   patch: {
     /** ADR-0028 V4A patch op: `"add" | "delete" | "update"`. */
     op: "quanta.patch.op",

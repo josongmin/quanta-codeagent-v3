@@ -1,318 +1,272 @@
 /**
- * HITL 4-tier annotation registry (ADR-0047). A NAME-based table that
- * classifies the inherent sensitivity of each tool/command independently of
- * the tool's own `hitlTier(input)` method.
+ * ADR-0047 — HITL tier annotation registry.
  *
- * Why this exists alongside `Tool.hitlTier?(input)`:
- *   - `Tool.hitlTier()` is per-tool, self-declared by the tool author. Useful
- *     but only as strict as the author was willing to be.
- *   - This registry is per-tool-NAME (and for `exec_command`/`bash`,
- *     per-argv-pattern). It is consulted FIRST by the gate so a host can
- *     opt a single deployment into a stricter stance (or override a missing
- *     declaration on an MCP tool) without forking the tool implementation.
- *   - A user-level config file at `~/.quanta/hitl-overrides.json` further
- *     overrides the built-in table at startup. Missing/invalid file ⇒ silent
- *     skip (registry returns built-ins). This file is OPTIONAL; the default
- *     behavior is byte-identical for any caller that never creates it.
+ * A tier *annotation* registry sits between the tool's own `hitlTier(input)`
+ * method (which ADR-0020 defined) and the admissibility-gate. It exists so:
  *
- * Resolution order (most specific wins):
- *   1. user override (by tool name) loaded from `~/.quanta/hitl-overrides.json`
- *   2. built-in command/argv pattern match (for `exec_command` + `bash`)
- *   3. built-in tool-name annotation (table below)
- *   4. fallback ⇒ `pre-approval-ok` (today's behavior; backwards compatible)
+ *  1. Built-in tier hints can attach to tools that DON'T own their own
+ *     classifier — `bash` cases beyond the ones the bash classifier covers,
+ *     and any future tool whose tier policy is decided by the agent
+ *     framework (not the tool slice).
+ *  2. Operators can override built-in annotations via a JSON file at
+ *     `~/.quanta/hitl-overrides.json` (path resolved by `runtimeConfig.
+ *     hitlOverridesPath`). Overrides are clamped to a **one-way ratchet**:
+ *     they may ESCALATE a tier (e.g. pre-approval-ok → always-confirm)
+ *     but never DOWNGRADE `hand-off-required` (the gate's last-line
+ *     security boundary).
  *
- * The dispatch gate (`admissibility-gate.ts`) composes this with the
- * `inferToolTier` duck-typed call on the tool itself — built-in name match
- * wins so an out-of-the-box `bash` invocation that LOOKS dangerous is gated
- * even if `bashTool.hitlTier()` would have called it `pre-approval-ok`.
+ * Resolution precedence (highest priority first):
+ *  - explicit `tool.hitlTier(input)` returning `"hand-off-required"`
+ *    (cannot be downgraded by any later layer)
+ *  - operator override clamped against built-in (escalate-only)
+ *  - built-in annotation
+ *  - `tool.hitlTier(input)` for non-handoff tiers
+ *  - secure-by-default fallback in `@/permission#inferToolTier`
+ *
+ * The registry is intentionally simple — exact tool-name match + optional
+ * command-prefix match. Regex matching is deliberately NOT supported to
+ * keep evaluation deterministic and the override file auditable. A more
+ * expressive matcher would push us toward a DSL (see ADR-0031 for a
+ * precedent we explicitly do NOT want to repeat here).
+ *
+ * Failure mode: malformed override file ⇒ stderr warn + fall back to
+ * built-in annotations. The agent NEVER throws at startup over a bad
+ * override file; that would be a foot-gun for operators who edit it by
+ * hand. (Schema errors are still surfaced loudly so they're actionable.)
  */
 
-import { existsSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
-import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
-import type { HitlTier, ToolHitlAnnotation } from "./hitl-tier"
+import { readFileSync } from "node:fs"
+import { z } from "zod"
+import { runtimeConfig } from "@/shared"
+import type { HitlTier } from "./hitl-tier"
 
-/* ------------------------------------------------------------------------- *
- * Built-in command/argv pattern table.
- *
- * Used for shell-class tools (`bash`, `exec_command`) where the tier is a
- * function of the command string, not the tool name. Each entry is matched
- * in order; the first hit wins.
- *
- * Hand-off (irreversible / unsafe-by-mode-bypass):
- *   - `rm -rf /` at FS root or `~`/`$HOME` — destruction of the user tree.
- *   - `mkfs` / `dd of=/dev/…` — irreversible volume format / partition wipe.
- *   - `chmod -R 777 /` at FS root — mass permission clobber.
- *   - `sudo …` — privileged escalation (operator must consciously authorize).
- *   - `history -c` — covers tracks; security trail erase.
- *
- * Always-confirm (high-blast-radius but recoverable):
- *   - `rm -rf <anywhere else>` — recursive force, NOT at FS root.
- *   - `git push --force` / `git push -f` — overwrite remote history.
- *   - `git push` (any) — network egress.
- *
- * None (read-only / harmless):
- *   - `ls`, `pwd`, `echo`, `cat <file>`, `which`, `whoami`, `date`, `id`
- *     (single-arg, no shell metachar).
- * ------------------------------------------------------------------------- */
+/** Zod tier validator — produces a precise error message including the
+ *  offending value when an override file contains an unknown tier. */
+const TierSchema = z.enum(["hand-off-required", "always-confirm", "pre-approval-ok", "none"])
 
-interface CommandPattern {
-  readonly pattern: RegExp
+/** Single annotation entry. `commandPrefix` is OPTIONAL — when absent the
+ *  rule fires on every invocation of `tool`. When present it must be a
+ *  literal string prefix of the tool input's `command` field (or the input
+ *  itself when the tool's input is a string). */
+const AnnotationSchema = z
+  .object({
+    tool: z.string().min(1),
+    commandPrefix: z.string().optional(),
+    tier: TierSchema,
+    /** Free-form rationale that flows through to deny messages / telemetry.
+     *  Operators are encouraged to fill it in for audit trails. */
+    reason: z.string().optional(),
+  })
+  .strict()
+
+const OverrideFileSchema = z.object({
+  /** Schema version for forward-compat. Unknown ⇒ stderr warn + skip file. */
+  version: z.literal(1),
+  annotations: z.array(AnnotationSchema).default([]),
+})
+
+/** Frozen public shape of a registry entry. Same fields as the schema but
+ *  the `tier` is typed as the canonical `HitlTier` literal union. */
+export interface HitlAnnotation {
+  readonly tool: string
+  readonly commandPrefix?: string
   readonly tier: HitlTier
-  readonly reason: string
-  readonly handoffMessage?: string
+  readonly reason?: string
 }
 
-const COMMAND_PATTERNS: readonly CommandPattern[] = [
-  // ----- hand-off-required (irreversible / privileged) -----
-  {
-    pattern:
-      /\brm\s+(?:-[A-Za-z]*[rR][A-Za-z]*[fF][A-Za-z]*|-[A-Za-z]*[fF][A-Za-z]*[rR][A-Za-z]*|-rf|-fr|--recursive\s+--force|--force\s+--recursive)\s+(?:\$\{?HOME\}?|~|\/)(?:\s|$|;|&|\|)/,
-    tier: "hand-off-required",
-    reason: "rm -rf at filesystem root or HOME is irreversible",
-    handoffMessage:
-      "Refusing to run `rm -rf /` (or `rm -rf ~`). This destroys the user tree and cannot be undone by any agent. A human operator must execute this manually if intended.",
-  },
-  {
-    pattern: /\bmkfs[\w.]*\b/,
-    tier: "hand-off-required",
-    reason: "mkfs formats a filesystem; volume wipe is irreversible",
-    handoffMessage:
-      "Refusing to format a filesystem (`mkfs`). This destroys all data on the target volume and cannot be undone. A human operator must execute this manually if intended.",
-  },
-  {
-    pattern: /\bdd\b[^|;&\n]*\bof=\/dev\//,
-    tier: "hand-off-required",
-    reason: "dd of=/dev/... writes raw bytes to a block device",
-    handoffMessage:
-      "Refusing to `dd` to a block device. This overwrites raw partition data and cannot be undone. A human operator must execute this manually if intended.",
-  },
-  {
-    pattern: /\bchmod\s+-[A-Za-z]*R[A-Za-z]*\s+777\s+(?:\$\{?HOME\}?|~|\/)(?:\s|$)/,
-    tier: "hand-off-required",
-    reason: "chmod -R 777 on root/HOME — mass permission clobber",
-    handoffMessage:
-      "Refusing to recursively chmod 777 the filesystem root or HOME. This grants world-write on every file in the tree and is virtually impossible to roll back.",
-  },
-  {
-    pattern: /(?:^|[;&|]|\bsudo\s+)\s*sudo\b/,
-    tier: "hand-off-required",
-    reason: "sudo requires privileged escalation",
-    handoffMessage:
-      "Refusing to run a command under `sudo`. Privileged escalation must be performed by a human operator, not the agent.",
-  },
-  {
-    pattern: /\bhistory\s+-c\b/,
-    tier: "hand-off-required",
-    reason: "history -c erases the shell history (audit-trail removal)",
-    handoffMessage:
-      "Refusing to clear shell history. This is an audit-trail erasure; only a human operator may make that choice.",
-  },
-
-  // ----- always-confirm (high-blast-radius but reversible/network) -----
-  {
-    // `git push --force` / `-f` covers the documented force-push bypass.
-    // Project-wide style: bound the wildcard span so we don't accidentally
-    // span a newline-encoded multi-command.
-    pattern: /\bgit\b[\s\S]{0,200}?\bpush\b[\s\S]{0,200}?(?:--force\b|-f\b|--force-with-lease\b)/,
-    tier: "always-confirm",
-    reason: "force-push rewrites remote history",
-  },
-  {
-    pattern: /\bgit\b[\s\S]{0,200}?\bpush\b/,
-    tier: "always-confirm",
-    reason: "git push is a network egress and external state mutation",
-  },
-  {
-    pattern:
-      /\brm\s+(?:-[A-Za-z]*[rR][A-Za-z]*[fF][A-Za-z]*|-[A-Za-z]*[fF][A-Za-z]*[rR][A-Za-z]*|-rf|-fr)\b/,
-    tier: "always-confirm",
-    reason: "rm -rf recursively deletes files; confirm scope before running",
-  },
-
-  // ----- none (read-only / harmless) -----
-  {
-    pattern:
-      /^\s*(?:ls|pwd|echo|whoami|date|id|which|hostname|uname|uptime)(?:\s+[^|;&<>$`\n]*)?\s*$/,
-    tier: "none",
-    reason: "read-only / harmless inspection command",
-  },
-  {
-    // single-file `cat`, `head`, `tail` with no piping/redirection.
-    pattern: /^\s*(?:cat|head|tail)\s+[^\s|;&<>$`]+\s*$/,
-    tier: "none",
-    reason: "single-file read with no piping/redirection",
-  },
-]
-
-/* ------------------------------------------------------------------------- *
- * Built-in per-tool-name annotation table.
- *
- * Tool names with no entry here fall back to `pre-approval-ok` (today's
- * behavior). This map is data, not policy — adding/removing an entry is a
- * one-line change reviewable by a non-author.
- * ------------------------------------------------------------------------- */
-
-const BUILTIN_TOOL_ANNOTATIONS: Readonly<Record<string, ToolHitlAnnotation>> = {
-  // Mutating but reversible — defer to existing approval_policy.
-  apply_patch: { tier: "pre-approval-ok", reason: "file edit (reversible)" },
-  write: { tier: "pre-approval-ok", reason: "file write (reversible)" },
-  edit: { tier: "pre-approval-ok", reason: "file edit (reversible)" },
-  write_stdin: { tier: "pre-approval-ok", reason: "stdin write to subprocess" },
-  send_input: { tier: "pre-approval-ok", reason: "input to a running process" },
-  scripted_replace: { tier: "pre-approval-ok", reason: "scripted text replace (reversible)" },
-
-  // Subagent lifecycle — orchestration, no direct side-effects.
-  spawn_agent: { tier: "none", reason: "lifecycle: subagent spawn is orchestration" },
-  agent: { tier: "none", reason: "lifecycle: subagent spawn is orchestration" },
-  wait_agent: { tier: "none", reason: "lifecycle: wait on subagent" },
-  task_output: { tier: "none", reason: "lifecycle: read subagent output" },
-  close_agent: { tier: "none", reason: "lifecycle: close subagent" },
-  task_stop: { tier: "none", reason: "lifecycle: stop subagent" },
-
-  // Read-only / inspection tools.
-  read: { tier: "none", reason: "file read (no side effects)" },
-  grep: { tier: "none", reason: "search (no side effects)" },
-  glob: { tier: "none", reason: "file listing (no side effects)" },
-  ls: { tier: "none", reason: "directory listing (no side effects)" },
-
-  // Shell-class — dynamic; the actual tier is resolved by the command-pattern
-  // table above. The bare-name entry here is the catch-all fallback when the
-  // pattern table doesn't match.
-  bash: { tier: "pre-approval-ok", reason: "shell command (pattern-classified)" },
-  exec_command: { tier: "pre-approval-ok", reason: "shell command (pattern-classified)" },
-}
-
-/* ------------------------------------------------------------------------- *
- * User overrides from `~/.quanta/hitl-overrides.json`.
- *
- * File format:
- *   { "<tool-name>": { "tier": "...", "reason": "...", "handoffMessage": "..." } }
- *
- * Read ONCE at module load. Missing / unreadable / malformed file ⇒ empty
- * map (no overrides applied, no log noise). Tests can invoke
- * `__resetHitlOverrides` to force a re-read after writing a fixture file
- * — production code never calls it.
- * ------------------------------------------------------------------------- */
-
-let userOverrides: Map<string, ToolHitlAnnotation> | null = null
-
-const VALID_TIERS: ReadonlySet<HitlTier> = new Set<HitlTier>([
-  "hand-off-required",
-  "always-confirm",
-  "pre-approval-ok",
-  "none",
+/** Built-in annotation table. ORDER MATTERS — the first matching entry
+ *  wins. Keep entries ordered most-specific (longest commandPrefix) to
+ *  most-general (tool-only) so an operator reading this file can predict
+ *  which one fires. */
+const BUILTIN_ANNOTATIONS: readonly HitlAnnotation[] = Object.freeze([
+  // No built-in annotations ship by default — the bash classifier already
+  // covers the well-known cases (curl/wget/git push/git fetch/git reset
+  // --hard/git commit --amend). The registry exists so the OPERATOR can
+  // add their own without changing source code. Future absorption rounds
+  // may add framework-owned entries here; today the list is intentionally
+  // empty so the byte-identical contract holds for default callers.
 ])
 
-const isAnnotationShape = (v: unknown): v is ToolHitlAnnotation => {
-  if (v === null || typeof v !== "object") return false
-  const obj = v as Record<string, unknown>
-  if (typeof obj.tier !== "string" || !VALID_TIERS.has(obj.tier as HitlTier)) return false
-  if (obj.reason !== undefined && typeof obj.reason !== "string") return false
-  if (obj.handoffMessage !== undefined && typeof obj.handoffMessage !== "string") return false
-  return true
+/** Lazy-cached override list. The override file is read at most once per
+ *  process; tests reset via `__resetHitlOverrides`. */
+let overrideCache: readonly HitlAnnotation[] | undefined
+
+const stderrWarn = (msg: string): void => {
+  process.stderr.write(`[quanta] hitl-overrides: ${msg}\n`)
 }
 
-const loadUserOverrides = (path: string): Map<string, ToolHitlAnnotation> => {
-  const out = new Map<string, ToolHitlAnnotation>()
-  if (!existsSync(path)) return out
+/** Convert a parsed override entry to the frozen public shape. */
+const freezeAnnotation = (raw: z.infer<typeof AnnotationSchema>): HitlAnnotation => {
+  const out: { -readonly [K in keyof HitlAnnotation]: HitlAnnotation[K] } = {
+    tool: raw.tool,
+    tier: raw.tier,
+  }
+  if (raw.commandPrefix !== undefined) out.commandPrefix = raw.commandPrefix
+  if (raw.reason !== undefined) out.reason = raw.reason
+  return Object.freeze(out)
+}
+
+/** Load operator overrides from `runtimeConfig().hitlOverridesPath`. Absent
+ *  path ⇒ empty list (byte-identical legacy). File errors ⇒ stderr warn +
+ *  empty list. Schema errors ⇒ stderr warn + empty list. Never throws. */
+const loadOverridesFromDisk = (): readonly HitlAnnotation[] => {
+  const path = runtimeConfig().hitlOverridesPath
+  if (path === undefined || path.length === 0) return Object.freeze([])
+
   let raw: string
   try {
     raw = readFileSync(path, "utf8")
-  } catch {
-    return out
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code
+    // ENOENT is the common case — the operator simply hasn't written one.
+    // Don't warn for missing files; only warn for permission / IO errors.
+    if (code !== "ENOENT") {
+      const msg = e instanceof Error ? e.message : String(e)
+      stderrWarn(`failed to read ${path}: ${msg} — falling back to built-in annotations`)
+    }
+    return Object.freeze([])
   }
+
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
-  } catch {
-    return out
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    stderrWarn(`malformed JSON in ${path}: ${msg} — falling back to built-in annotations`)
+    return Object.freeze([])
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return out
-  for (const [name, val] of Object.entries(parsed as Record<string, unknown>)) {
-    if (isAnnotationShape(val)) out.set(name, val)
+
+  const result = OverrideFileSchema.safeParse(parsed)
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
+      .join("\n")
+    stderrWarn(
+      `schema validation failed for ${path}:\n${issues}\n — falling back to built-in annotations`,
+    )
+    return Object.freeze([])
   }
-  return out
+
+  return Object.freeze(result.data.annotations.map(freezeAnnotation))
 }
 
-const overridesPath = (): string =>
-  runtimeConfig().hitlOverridesPath ?? join(homedir(), ".quanta", "hitl-overrides.json")
-
-const getUserOverrides = (): Map<string, ToolHitlAnnotation> => {
-  if (userOverrides === null) userOverrides = loadUserOverrides(overridesPath())
-  return userOverrides
+/** Return the cached override list, loading on first call. */
+const overrides = (): readonly HitlAnnotation[] => {
+  if (overrideCache === undefined) overrideCache = loadOverridesFromDisk()
+  return overrideCache
 }
 
-/** Test-only seam: force a re-read of `~/.quanta/hitl-overrides.json` (or the
- *  env-overridden path). Also bumps the runtime-config cache so a test that
- *  mutates `QUANTA_HITL_OVERRIDES` between cases picks up the new value.
- *  Production code never calls this. */
+/** Test-only: reset the override cache so a test can drive a different
+ *  file snapshot. Production code MUST NOT call this. */
 export const __resetHitlOverrides = (): void => {
-  userOverrides = null
-  __resetRuntimeConfig()
+  overrideCache = undefined
 }
 
-/* ------------------------------------------------------------------------- *
- * Public API.
- * ------------------------------------------------------------------------- */
+/** Numeric strictness ranking — higher = stricter. Used to enforce the
+ *  one-way ratchet on overrides (never relax a built-in / explicit tier). */
+const TIER_RANK: Readonly<Record<HitlTier, number>> = Object.freeze({
+  none: 0,
+  "pre-approval-ok": 1,
+  "always-confirm": 2,
+  "hand-off-required": 3,
+})
 
-/**
- * Extract a shell command string from a tool's input, when present. Looks at
- * `command` (bash) and `parsed_cmd` (codex-style argv array) — both are the
- * documented input shapes for shell-class tools. Returns `null` when the
- * input does not represent a shell command (caller falls back to name-only
- * resolution).
- */
+/** Choose the STRICTER of two tiers (max by rank). The gate uses this to
+ *  apply an override on top of a built-in / explicit tier so the override
+ *  can only escalate. */
+const maxTier = (a: HitlTier, b: HitlTier): HitlTier => (TIER_RANK[a] >= TIER_RANK[b] ? a : b)
+
+/** Extract the `command` string from a tool input shape, if present.
+ *  Returns `null` for shapes that don't carry one (so command-prefix rules
+ *  simply don't fire — never throws on malformed input). */
 const extractCommand = (input: unknown): string | null => {
+  if (typeof input === "string") return input
   if (input === null || typeof input !== "object") return null
-  const obj = input as Record<string, unknown>
-  if (typeof obj.command === "string") return obj.command
-  if (Array.isArray(obj.parsed_cmd)) {
-    return obj.parsed_cmd.filter((s): s is string => typeof s === "string").join(" ")
+  const cmd = (input as Record<string, unknown>)["command"]
+  return typeof cmd === "string" ? cmd : null
+}
+
+/** Look up the first matching annotation in a list. */
+const findAnnotation = (
+  table: readonly HitlAnnotation[],
+  tool: string,
+  command: string | null,
+): HitlAnnotation | undefined => {
+  for (const a of table) {
+    if (a.tool !== tool) continue
+    if (a.commandPrefix !== undefined) {
+      if (command === null) continue
+      if (!command.startsWith(a.commandPrefix)) continue
+    }
+    return a
   }
-  if (Array.isArray(obj.argv)) {
-    return obj.argv.filter((s): s is string => typeof s === "string").join(" ")
-  }
-  return null
+  return undefined
 }
 
 /**
- * Resolve the effective HITL annotation for a tool call.
+ * Resolve the effective tier annotation for a tool call.
  *
- * Order (most specific wins):
- *   1. user override by tool name (`~/.quanta/hitl-overrides.json`)
- *   2. command/argv pattern match (only for shell-class tools — `bash`,
- *      `exec_command`, anything whose input exposes `command` or `parsed_cmd`)
- *   3. built-in tool-name annotation
- *   4. fallback ⇒ `pre-approval-ok` (today's behavior)
+ * @param tool       Name of the tool being dispatched.
+ * @param input      Raw tool input (matched against `commandPrefix` if present).
+ * @param baseline   The tier the upstream classifier (`inferToolTier` or the
+ *                   tool's own `hitlTier`) already resolved. Used to enforce
+ *                   the one-way ratchet — overrides can only ESCALATE this.
  *
- * Pure (no I/O on the hot path — overrides are read once at first call and
- * cached). Safe to invoke for every dispatch.
+ * @returns The final tier, plus the matching annotation when one applied.
+ *          When no rule matches, `tier === baseline` and `matched` is
+ *          `undefined` (so callers can tell "registry stayed silent" from
+ *          "registry returned the same tier deliberately").
  */
-export const getToolHitlTier = (toolName: string, args: unknown): ToolHitlAnnotation => {
-  // 1. user override
-  const override = getUserOverrides().get(toolName)
-  if (override !== undefined) return override
+export const resolveHitlAnnotation = (
+  tool: string,
+  input: unknown,
+  baseline: HitlTier,
+): { tier: HitlTier; matched: HitlAnnotation | undefined } => {
+  // hand-off-required from the upstream classifier is the gate's final
+  // security boundary — no registry layer (built-in or override) may
+  // relax it. Short-circuit before we even read the override list.
+  if (baseline === "hand-off-required") {
+    return { tier: "hand-off-required", matched: undefined }
+  }
 
-  // 2. command/argv pattern match (shell-class tools)
-  const cmd = extractCommand(args)
-  if (cmd !== null && cmd.length > 0) {
-    for (const p of COMMAND_PATTERNS) {
-      if (p.pattern.test(cmd)) {
-        return {
-          tier: p.tier,
-          reason: p.reason,
-          ...(p.handoffMessage !== undefined ? { handoffMessage: p.handoffMessage } : {}),
-        }
-      }
+  const command = extractCommand(input)
+
+  // Built-in annotations apply first; the override list is then layered on
+  // top with strict-only semantics (`maxTier`). This preserves the
+  // ordering invariant that an operator can only TIGHTEN policy.
+  const builtin = findAnnotation(BUILTIN_ANNOTATIONS, tool, command)
+  const override = findAnnotation(overrides(), tool, command)
+
+  let tier: HitlTier = baseline
+  let matched: HitlAnnotation | undefined
+
+  if (builtin !== undefined) {
+    tier = maxTier(tier, builtin.tier)
+    matched = builtin
+  }
+  if (override !== undefined) {
+    const escalated = maxTier(tier, override.tier)
+    // Only record `matched = override` when the override actually moved
+    // the needle. A no-op override entry (e.g. `tier: "none"` for a tool
+    // that was already `always-confirm`) is silently ignored — the
+    // operator gets neither a tier change nor a misleading "matched" log.
+    if (escalated !== tier) {
+      tier = escalated
+      matched = override
+    } else if (TIER_RANK[override.tier] < TIER_RANK[tier]) {
+      // Operator tried to DOWNGRADE the tier — one-way ratchet refuses.
+      // We don't throw (the gate stays best-effort) but we surface the
+      // attempt so it's actionable.
+      stderrWarn(
+        `override for tool="${tool}"${override.commandPrefix !== undefined ? ` commandPrefix="${override.commandPrefix}"` : ""} tried to downgrade tier from "${tier}" to "${override.tier}" — ignored (one-way ratchet)`,
+      )
     }
   }
 
-  // 3. built-in tool-name annotation
-  const builtin = BUILTIN_TOOL_ANNOTATIONS[toolName]
-  if (builtin !== undefined) return builtin
-
-  // 4. fallback — preserve today's behavior
-  return { tier: "pre-approval-ok", reason: "default (no annotation)" }
+  return { tier, matched }
 }
+
+/** Public read of the built-in table — exposed for tests that assert the
+ *  default shipping policy. Production callers MUST go through
+ *  `resolveHitlAnnotation`. */
+export const builtinAnnotations = (): readonly HitlAnnotation[] => BUILTIN_ANNOTATIONS

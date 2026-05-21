@@ -1,310 +1,499 @@
 /**
- * Unit tests for `getToolHitlTier` (ADR-0047) — the name-based HITL 4-tier
- * annotation registry. Covers:
- *   - built-in tool-name annotations (apply_patch, write, spawn_agent, …)
- *   - dynamic command/argv dispatch (exec_command/bash)
- *   - dangerous-command patterns (rm -rf /, mkfs, dd of=/dev, sudo, …)
- *   - safe-command patterns (ls, pwd, …)
- *   - user override via `~/.quanta/hitl-overrides.json` (env-redirected for
- *     test isolation — `QUANTA_HITL_OVERRIDES`)
- *   - fallback for unknown tool ⇒ pre-approval-ok (backwards compat)
+ * ADR-0047 — HITL annotation registry tests.
+ *
+ * Covers `resolveHitlAnnotation`:
+ *   - precedence (baseline < built-in < override, but only when ratchet permits)
+ *   - one-way ratchet (escalate only; downgrade refused + warned)
+ *   - hand-off-required short-circuit (no override can relax it)
+ *   - override file loader: missing file / malformed JSON / unknown tier /
+ *     unknown schema fields / wrong version
+ *   - commandPrefix matching: exact prefix, malformed input (no `command`
+ *     field), input as raw string, no-match falls through
+ *   - cache reset seam (`__resetHitlOverrides`)
+ *   - runtimeConfig null/undefined path stays silent
  */
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { __resetHitlOverrides, getToolHitlTier } from "@/agent/hitl-tier-registry"
+import {
+  __resetHitlOverrides,
+  builtinAnnotations,
+  type HitlAnnotation,
+  resolveHitlAnnotation,
+} from "@/agent/hitl-tier-registry"
+import { __resetRuntimeConfig } from "@/shared"
 
-describe("getToolHitlTier — built-in tool-name annotations", () => {
-  beforeEach(() => {
-    // Ensure no stale overrides leak in from another test.
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
-  })
+let tmp: string
+let stderrCalls: string[] = []
+let originalStderrWrite: typeof process.stderr.write
 
-  test("apply_patch ⇒ pre-approval-ok", () => {
-    expect(getToolHitlTier("apply_patch", {}).tier).toBe("pre-approval-ok")
-  })
+const captureStderr = (): void => {
+  stderrCalls = []
+  originalStderrWrite = process.stderr.write.bind(process.stderr)
+  process.stderr.write = ((chunk: unknown): boolean => {
+    stderrCalls.push(typeof chunk === "string" ? chunk : String(chunk))
+    return true
+  }) as typeof process.stderr.write
+}
 
-  test("write ⇒ pre-approval-ok", () => {
-    expect(getToolHitlTier("write", { path: "x.ts", content: "y" }).tier).toBe("pre-approval-ok")
-  })
+const restoreStderr = (): void => {
+  process.stderr.write = originalStderrWrite
+}
 
-  test("edit ⇒ pre-approval-ok", () => {
-    expect(getToolHitlTier("edit", {}).tier).toBe("pre-approval-ok")
-  })
+const writeOverridesFile = (json: string): string => {
+  const path = join(tmp, "hitl-overrides.json")
+  writeFileSync(path, json, "utf8")
+  return path
+}
 
-  test("write_stdin ⇒ pre-approval-ok", () => {
-    expect(getToolHitlTier("write_stdin", {}).tier).toBe("pre-approval-ok")
-  })
+const applyOverridePath = (path: string | undefined): void => {
+  if (path === undefined) delete process.env["QUANTA_HITL_OVERRIDES"]
+  else process.env["QUANTA_HITL_OVERRIDES"] = path
+  __resetRuntimeConfig()
+  __resetHitlOverrides()
+}
 
-  test("send_input ⇒ pre-approval-ok", () => {
-    expect(getToolHitlTier("send_input", {}).tier).toBe("pre-approval-ok")
-  })
+beforeEach(() => {
+  tmp = join(tmpdir(), `hitl-overrides-${process.pid}-${Date.now()}`)
+  mkdirSync(tmp, { recursive: true })
+  captureStderr()
+})
 
-  test("spawn_agent ⇒ none (lifecycle orchestration)", () => {
-    expect(getToolHitlTier("spawn_agent", {}).tier).toBe("none")
-  })
+afterEach(() => {
+  rmSync(tmp, { recursive: true, force: true })
+  delete process.env["QUANTA_HITL_OVERRIDES"]
+  __resetRuntimeConfig()
+  __resetHitlOverrides()
+  restoreStderr()
+})
 
-  test("agent ⇒ none", () => {
-    expect(getToolHitlTier("agent", {}).tier).toBe("none")
-  })
-
-  test("wait_agent ⇒ none", () => {
-    expect(getToolHitlTier("wait_agent", {}).tier).toBe("none")
-  })
-
-  test("task_output ⇒ none", () => {
-    expect(getToolHitlTier("task_output", {}).tier).toBe("none")
-  })
-
-  test("close_agent ⇒ none", () => {
-    expect(getToolHitlTier("close_agent", {}).tier).toBe("none")
-  })
-
-  test("task_stop ⇒ none", () => {
-    expect(getToolHitlTier("task_stop", {}).tier).toBe("none")
-  })
-
-  test("read ⇒ none (read-only)", () => {
-    expect(getToolHitlTier("read", { path: "x.ts" }).tier).toBe("none")
-  })
-
-  test("grep ⇒ none", () => {
-    expect(getToolHitlTier("grep", { pattern: "x" }).tier).toBe("none")
-  })
-
-  test("glob ⇒ none", () => {
-    expect(getToolHitlTier("glob", { pattern: "*" }).tier).toBe("none")
-  })
-
-  test("unknown tool ⇒ pre-approval-ok (safe default)", () => {
-    expect(getToolHitlTier("some_new_tool_unseen_before", {}).tier).toBe("pre-approval-ok")
+describe("built-in table", () => {
+  test("ships empty (framework-owned slot reserved; bash classifier already covers cases)", () => {
+    expect(builtinAnnotations()).toEqual([])
   })
 })
 
-describe("getToolHitlTier — exec_command/bash dynamic dispatch", () => {
-  beforeEach(() => {
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
+describe("resolveHitlAnnotation — baseline passthrough", () => {
+  test("no override file, no built-in match ⇒ returns baseline unchanged", () => {
+    applyOverridePath(undefined)
+    const r = resolveHitlAnnotation("read", { path: "x.ts" }, "none")
+    expect(r.tier).toBe("none")
+    expect(r.matched).toBeUndefined()
   })
 
-  // ----- hand-off-required (irreversible) -----
-  test("`rm -rf /` ⇒ hand-off-required (with handoffMessage)", () => {
-    const result = getToolHitlTier("exec_command", { command: "rm -rf /" })
-    expect(result.tier).toBe("hand-off-required")
-    expect(result.handoffMessage).toBeDefined()
-    expect(result.handoffMessage).toContain("rm -rf")
+  test("baseline already pre-approval-ok stays when no override matches", () => {
+    applyOverridePath(undefined)
+    const r = resolveHitlAnnotation("write", { path: "x.ts" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(r.matched).toBeUndefined()
   })
 
-  test("`rm -rf ~` ⇒ hand-off-required", () => {
-    expect(getToolHitlTier("exec_command", { command: "rm -rf ~" }).tier).toBe("hand-off-required")
-  })
-
-  test("`rm -rf $HOME` ⇒ hand-off-required", () => {
-    expect(getToolHitlTier("exec_command", { command: "rm -rf $HOME" }).tier).toBe(
-      "hand-off-required",
-    )
-  })
-
-  test("`mkfs.ext4 /dev/sda1` ⇒ hand-off-required", () => {
-    expect(getToolHitlTier("exec_command", { command: "mkfs.ext4 /dev/sda1" }).tier).toBe(
-      "hand-off-required",
-    )
-  })
-
-  test("`dd if=/dev/zero of=/dev/sda` ⇒ hand-off-required", () => {
-    expect(
-      getToolHitlTier("exec_command", { command: "dd if=/dev/zero of=/dev/sda bs=1M" }).tier,
-    ).toBe("hand-off-required")
-  })
-
-  test("`chmod -R 777 /` ⇒ hand-off-required", () => {
-    expect(getToolHitlTier("exec_command", { command: "chmod -R 777 /" }).tier).toBe(
-      "hand-off-required",
-    )
-  })
-
-  test("`sudo apt install x` ⇒ hand-off-required", () => {
-    expect(getToolHitlTier("exec_command", { command: "sudo apt install vim" }).tier).toBe(
-      "hand-off-required",
-    )
-  })
-
-  test("`history -c` ⇒ hand-off-required", () => {
-    expect(getToolHitlTier("exec_command", { command: "history -c" }).tier).toBe(
-      "hand-off-required",
-    )
-  })
-
-  // ----- always-confirm (high-blast-radius, reversible or network) -----
-  test("`git push --force` ⇒ always-confirm", () => {
-    expect(getToolHitlTier("exec_command", { command: "git push --force origin main" }).tier).toBe(
-      "always-confirm",
-    )
-  })
-
-  test("`git push -f` ⇒ always-confirm", () => {
-    expect(getToolHitlTier("exec_command", { command: "git push -f" }).tier).toBe("always-confirm")
-  })
-
-  test("`git push origin main` ⇒ always-confirm (network egress)", () => {
-    expect(getToolHitlTier("exec_command", { command: "git push origin main" }).tier).toBe(
-      "always-confirm",
-    )
-  })
-
-  test("`rm -rf /tmp/foo` ⇒ always-confirm (NOT at root)", () => {
-    expect(getToolHitlTier("exec_command", { command: "rm -rf /tmp/foo" }).tier).toBe(
-      "always-confirm",
-    )
-  })
-
-  test("`rm -rf ./build` ⇒ always-confirm", () => {
-    expect(getToolHitlTier("exec_command", { command: "rm -rf ./build" }).tier).toBe(
-      "always-confirm",
-    )
-  })
-
-  // ----- none (read-only / harmless) -----
-  test("`ls` ⇒ none", () => {
-    expect(getToolHitlTier("exec_command", { command: "ls" }).tier).toBe("none")
-  })
-
-  test("`ls -la` ⇒ none", () => {
-    expect(getToolHitlTier("exec_command", { command: "ls -la" }).tier).toBe("none")
-  })
-
-  test("`pwd` ⇒ none", () => {
-    expect(getToolHitlTier("exec_command", { command: "pwd" }).tier).toBe("none")
-  })
-
-  test("`whoami` ⇒ none", () => {
-    expect(getToolHitlTier("exec_command", { command: "whoami" }).tier).toBe("none")
-  })
-
-  test("`cat file.txt` ⇒ none", () => {
-    expect(getToolHitlTier("exec_command", { command: "cat file.txt" }).tier).toBe("none")
-  })
-
-  // ----- catch-all (pattern doesn't match) -----
-  test("`bun test` ⇒ pre-approval-ok (default, name match)", () => {
-    expect(getToolHitlTier("exec_command", { command: "bun test" }).tier).toBe("pre-approval-ok")
-  })
-
-  test("`npm install` ⇒ pre-approval-ok", () => {
-    expect(getToolHitlTier("exec_command", { command: "npm install" }).tier).toBe("pre-approval-ok")
-  })
-
-  // ----- argv-array form -----
-  test("argv-form parsed_cmd `[rm, -rf, /]` ⇒ hand-off-required", () => {
-    expect(getToolHitlTier("exec_command", { parsed_cmd: ["rm", "-rf", "/"] }).tier).toBe(
-      "hand-off-required",
-    )
-  })
-
-  test("argv-form `[git, push, origin, main]` ⇒ always-confirm", () => {
-    expect(
-      getToolHitlTier("exec_command", { parsed_cmd: ["git", "push", "origin", "main"] }).tier,
-    ).toBe("always-confirm")
-  })
-
-  // bash works the same way
-  test("bash with `git push --force` ⇒ always-confirm", () => {
-    expect(getToolHitlTier("bash", { command: "git push --force" }).tier).toBe("always-confirm")
-  })
-
-  test("bash with `rm -rf /etc` ⇒ hand-off-required", () => {
-    // /etc is a system root, matched by the `/` (with optional trailing path)
-    // branch of the hand-off pattern.
-    const result = getToolHitlTier("bash", { command: "rm -rf /etc" })
-    // Either hand-off or always-confirm is acceptable for /etc — assert it
-    // escalates above pre-approval-ok at minimum.
-    expect(["hand-off-required", "always-confirm"]).toContain(result.tier)
+  test("baseline already always-confirm stays without override", () => {
+    applyOverridePath(undefined)
+    const r = resolveHitlAnnotation("bash", { command: "git push origin main" }, "always-confirm")
+    expect(r.tier).toBe("always-confirm")
+    expect(r.matched).toBeUndefined()
   })
 })
 
-describe("getToolHitlTier — user overrides via ~/.quanta/hitl-overrides.json", () => {
-  let tmp: string
-  let overridesPath: string
-
-  beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "hitl-test-"))
-    overridesPath = join(tmp, "hitl-overrides.json")
-    process.env.QUANTA_HITL_OVERRIDES = overridesPath
-    __resetHitlOverrides()
-  })
-
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true })
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
-  })
-
-  test("user override takes precedence over built-in annotation", () => {
-    // Built-in: apply_patch ⇒ pre-approval-ok
-    // Override: apply_patch ⇒ always-confirm
-    writeFileSync(
-      overridesPath,
+describe("resolveHitlAnnotation — one-way ratchet", () => {
+  test("hand-off-required baseline is preserved even with relaxing override", () => {
+    const path = writeOverridesFile(
       JSON.stringify({
-        apply_patch: { tier: "always-confirm", reason: "operator policy" },
+        version: 1,
+        annotations: [{ tool: "bash", tier: "none" }],
       }),
     )
-    __resetHitlOverrides()
-    const result = getToolHitlTier("apply_patch", {})
-    expect(result.tier).toBe("always-confirm")
-    expect(result.reason).toBe("operator policy")
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "anything" }, "hand-off-required")
+    expect(r.tier).toBe("hand-off-required")
+    // `matched` is undefined because the registry short-circuits before
+    // reading the override list when baseline is hand-off-required.
+    expect(r.matched).toBeUndefined()
   })
 
-  test("user override can promote `read` (none) to `always-confirm`", () => {
-    writeFileSync(overridesPath, JSON.stringify({ read: { tier: "always-confirm" } }))
-    __resetHitlOverrides()
-    expect(getToolHitlTier("read", { path: "x.ts" }).tier).toBe("always-confirm")
-  })
-
-  test("user override can mark an unknown tool as hand-off-required with custom message", () => {
-    writeFileSync(
-      overridesPath,
+  test("override can ESCALATE pre-approval-ok → always-confirm", () => {
+    const path = writeOverridesFile(
       JSON.stringify({
-        slack_dm: {
-          tier: "hand-off-required",
-          handoffMessage: "Slack DMs cannot be sent automatically by policy.",
-        },
+        version: 1,
+        annotations: [
+          {
+            tool: "bash",
+            commandPrefix: "kubectl apply",
+            tier: "always-confirm",
+            reason: "k8s cluster mutations",
+          },
+        ],
       }),
     )
-    __resetHitlOverrides()
-    const result = getToolHitlTier("slack_dm", {})
-    expect(result.tier).toBe("hand-off-required")
-    expect(result.handoffMessage).toBe("Slack DMs cannot be sent automatically by policy.")
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation(
+      "bash",
+      { command: "kubectl apply -f x.yaml" },
+      "pre-approval-ok",
+    )
+    expect(r.tier).toBe("always-confirm")
+    expect(r.matched?.reason).toBe("k8s cluster mutations")
   })
 
-  test("missing override file ⇒ built-in behavior (no error)", () => {
-    // overridesPath not created. The registry must silently fall back.
-    __resetHitlOverrides()
-    expect(getToolHitlTier("apply_patch", {}).tier).toBe("pre-approval-ok")
-  })
-
-  test("malformed JSON ⇒ silent fallback to built-in", () => {
-    writeFileSync(overridesPath, "{ this is not valid json")
-    __resetHitlOverrides()
-    expect(getToolHitlTier("apply_patch", {}).tier).toBe("pre-approval-ok")
-  })
-
-  test("invalid tier value in override ⇒ silently dropped (built-in wins)", () => {
-    writeFileSync(
-      overridesPath,
+  test("override can ESCALATE pre-approval-ok → hand-off-required", () => {
+    const path = writeOverridesFile(
       JSON.stringify({
-        apply_patch: { tier: "nonsense-tier" },
+        version: 1,
+        annotations: [
+          {
+            tool: "bash",
+            commandPrefix: "terraform apply",
+            tier: "hand-off-required",
+            reason: "infra change management",
+          },
+        ],
       }),
     )
-    __resetHitlOverrides()
-    expect(getToolHitlTier("apply_patch", {}).tier).toBe("pre-approval-ok")
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation(
+      "bash",
+      { command: "terraform apply -auto-approve" },
+      "pre-approval-ok",
+    )
+    expect(r.tier).toBe("hand-off-required")
+    expect(r.matched?.tool).toBe("bash")
   })
 
-  test("override directory only — file missing ⇒ no error", () => {
-    rmSync(overridesPath, { force: true })
-    mkdirSync(tmp, { recursive: true })
+  test("override DOWNGRADE refused: always-confirm → none is ignored + warns", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", tier: "none", reason: "wrongly relaxed" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "git push" }, "always-confirm")
+    expect(r.tier).toBe("always-confirm")
+    // matched stays undefined because the override didn't apply.
+    expect(r.matched).toBeUndefined()
+    expect(stderrCalls.join("")).toContain("downgrade")
+  })
+
+  test("override at SAME tier is a no-op (matched stays undefined)", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", tier: "pre-approval-ok" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "ls -la" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(r.matched).toBeUndefined()
+  })
+})
+
+describe("resolveHitlAnnotation — commandPrefix matching", () => {
+  test("commandPrefix matches when input.command starts with the prefix", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", commandPrefix: "kubectl", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "kubectl get pods" }, "pre-approval-ok")
+    expect(r.tier).toBe("always-confirm")
+  })
+
+  test("commandPrefix does NOT match when input.command differs", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", commandPrefix: "kubectl", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "ls -la" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(r.matched).toBeUndefined()
+  })
+
+  test("commandPrefix matches against raw string input", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "shell", commandPrefix: "sudo", tier: "hand-off-required" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("shell", "sudo systemctl restart x", "pre-approval-ok")
+    expect(r.tier).toBe("hand-off-required")
+  })
+
+  test("malformed input (no `command` field) skips commandPrefix rules silently", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [
+          { tool: "bash", commandPrefix: "kubectl", tier: "always-confirm" },
+          { tool: "bash", tier: "pre-approval-ok" },
+        ],
+      }),
+    )
+    applyOverridePath(path)
+    // Input has no `command` field — prefix rules fall through, tool-only
+    // rule matches but is same-tier so no change.
+    const r = resolveHitlAnnotation("bash", { foo: "bar" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+  })
+
+  test("null input does not throw", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", commandPrefix: "kubectl", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", null, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+  })
+
+  test("undefined input does not throw", () => {
+    applyOverridePath(undefined)
+    const r = resolveHitlAnnotation("bash", undefined, "none")
+    expect(r.tier).toBe("none")
+  })
+
+  test("first matching rule wins (insertion order)", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [
+          { tool: "bash", commandPrefix: "kubectl apply", tier: "hand-off-required" },
+          { tool: "bash", commandPrefix: "kubectl", tier: "always-confirm" },
+        ],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation(
+      "bash",
+      { command: "kubectl apply -f x.yaml" },
+      "pre-approval-ok",
+    )
+    // First match wins → hand-off-required. (Operator is responsible for
+    // ordering most-specific first.)
+    expect(r.tier).toBe("hand-off-required")
+  })
+})
+
+describe("override file loader — failure modes", () => {
+  test("missing path env ⇒ empty overrides, no warn", () => {
+    applyOverridePath(undefined)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toBe("")
+  })
+
+  test("ENOENT (file does not exist) ⇒ silent fallback to built-in", () => {
+    applyOverridePath(join(tmp, "missing.json"))
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    // ENOENT is the common case; we deliberately don't warn for it.
+    expect(stderrCalls.join("")).not.toContain("missing.json")
+  })
+
+  test("malformed JSON ⇒ stderr warn + fall back to built-in", () => {
+    const path = writeOverridesFile("{ not json")
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toContain("malformed JSON")
+  })
+
+  test("unknown tier value ⇒ stderr warn + fall back to built-in", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", tier: "wide-open" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toContain("schema validation failed")
+  })
+
+  test("wrong version ⇒ stderr warn + fall back to built-in", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 99,
+        annotations: [{ tool: "bash", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toContain("schema validation failed")
+  })
+
+  test("unknown extra field ⇒ schema rejects (strict mode) + warn", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", tier: "always-confirm", extraField: 42 }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toContain("schema validation")
+  })
+
+  test("missing `tool` field ⇒ schema rejects", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toContain("schema validation")
+  })
+
+  test("annotations omitted defaults to empty array (file with only version)", () => {
+    const path = writeOverridesFile(JSON.stringify({ version: 1 }))
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toBe("")
+  })
+
+  test("override path is empty string ⇒ treated as absent (no read attempt)", () => {
+    process.env["QUANTA_HITL_OVERRIDES"] = ""
+    __resetRuntimeConfig()
     __resetHitlOverrides()
-    expect(getToolHitlTier("apply_patch", {}).tier).toBe("pre-approval-ok")
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("pre-approval-ok")
+    expect(stderrCalls.join("")).toBe("")
+  })
+})
+
+describe("override caching + reset seam", () => {
+  test("override list is cached across calls", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", commandPrefix: "x", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const a = resolveHitlAnnotation("bash", { command: "x stuff" }, "pre-approval-ok")
+    // Mutate the file out from under us — cache should hold the original.
+    writeFileSync(path, JSON.stringify({ version: 1, annotations: [] }), "utf8")
+    const b = resolveHitlAnnotation("bash", { command: "x stuff" }, "pre-approval-ok")
+    expect(a.tier).toBe("always-confirm")
+    expect(b.tier).toBe("always-confirm")
+  })
+
+  test("__resetHitlOverrides forces re-read", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", commandPrefix: "x", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    expect(resolveHitlAnnotation("bash", { command: "x stuff" }, "pre-approval-ok").tier).toBe(
+      "always-confirm",
+    )
+    writeFileSync(path, JSON.stringify({ version: 1, annotations: [] }), "utf8")
+    __resetHitlOverrides()
+    expect(resolveHitlAnnotation("bash", { command: "x stuff" }, "pre-approval-ok").tier).toBe(
+      "pre-approval-ok",
+    )
+  })
+
+  test("returned annotation list is frozen (cannot mutate from outside)", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    // Drive a single resolution to populate cache.
+    resolveHitlAnnotation("bash", {}, "pre-approval-ok")
+    // builtinAnnotations() returns a frozen array — mutation should
+    // throw in strict mode. (The override list is private and only
+    // touched via `resolveHitlAnnotation`, so we check the public
+    // surface that callers actually have access to.)
+    expect(() => {
+      ;(builtinAnnotations() as HitlAnnotation[]).push({
+        tool: "x",
+        tier: "always-confirm",
+      })
+    }).toThrow()
+  })
+})
+
+describe("hand-off-required preservation invariants", () => {
+  test("baseline=hand-off-required with no override ⇒ stays hand-off-required", () => {
+    applyOverridePath(undefined)
+    const r = resolveHitlAnnotation("bash", { command: "rm -rf /" }, "hand-off-required")
+    expect(r.tier).toBe("hand-off-required")
+  })
+
+  test("baseline=hand-off-required with tier=none override ⇒ stays hand-off-required", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", tier: "none" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "rm -rf /" }, "hand-off-required")
+    expect(r.tier).toBe("hand-off-required")
+  })
+
+  test("override tier=hand-off-required + baseline=none ⇒ escalates to hand-off-required", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "read", tier: "hand-off-required", reason: "compliance" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("read", { path: "/etc/secret" }, "none")
+    expect(r.tier).toBe("hand-off-required")
+    expect(r.matched?.reason).toBe("compliance")
+  })
+})
+
+describe("optional fields", () => {
+  test("annotation without `reason` works", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "bash", commandPrefix: "x", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")
+    expect(r.tier).toBe("always-confirm")
+    expect(r.matched?.reason).toBeUndefined()
+  })
+
+  test("annotation without `commandPrefix` matches every input for that tool", () => {
+    const path = writeOverridesFile(
+      JSON.stringify({
+        version: 1,
+        annotations: [{ tool: "write", tier: "always-confirm" }],
+      }),
+    )
+    applyOverridePath(path)
+    const r = resolveHitlAnnotation("write", { path: "x", content: "y" }, "pre-approval-ok")
+    expect(r.tier).toBe("always-confirm")
   })
 })

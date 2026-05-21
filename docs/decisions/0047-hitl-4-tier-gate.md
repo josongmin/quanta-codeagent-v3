@@ -1,131 +1,176 @@
-# ADR-0047 — HITL 4-tier annotation registry
+# ADR-0047 — HITL 4-tier gate: annotation registry + handoff seam
 
-Status: accepted (2026-05-21)
-Phase: SOTA++ Codex Desktop build 2867 absorption — round 4
-Supersedes: none. Extends ADR-0020 (4-tier enum + gate) and ADR-0026
-(admissibility-gate SSOT).
+- **상태**: Accepted
+- **날짜**: 2026-05-21
+- **확장 대상 ADR**: ADR-0020 (4-tier 정의), ADR-0026 (admissibility-gate SSOT),
+  ADR-0029 (3-tier reviewer — 직교 축)
+- **관련 ADR**: ADR-0046 (permission stack — sibling track, 비교차)
+- **관련 메모**: `[[codex-desktop-build-2867-round-4]]` (Guardian "Post-denial
+  precedence"), Codex `hitl-audit.md`
 
-## Context
+## 맥락
 
-ADR-0020 introduced the 4-tier `HITLTier` enum
-(`"hand-off-required" | "always-confirm" | "pre-approval-ok" | "none"`) and
-wired it through `runHitlGate`. The gate consulted exactly ONE source for
-each call: the tool's own `hitlTier?(input)` declaration, with a fallback
-inference from `isReadOnly()`.
+ADR-0020은 HITL 4-tier 어휘(`hand-off-required | always-confirm |
+pre-approval-ok | none`)를 정의하고 admissibility-gate 안에 라우팅을
+박았다. ADR-0026은 그 라우팅을 단일 SSOT 함수로 추출했다. 두 ADR이
+다루지 않은 두 부분이 남아있다:
 
-Two gaps surfaced during the Codex Desktop build 2867 round-4 review
-(`codex-desktop-build-2867-round-4`) of the Computer Use SKILL.md
-confirmation policy:
+1. **annotation registry** — 도구가 직접 `hitlTier(input)`을 구현하지 않는
+   경우(framework-owned 결정, 운영자별 정책 차이) tier를 어디서 결정할지.
+2. **handoff UI seam** — 게이트가 `hand-off-required`로 거절했을 때
+   UI(또는 외부 컨슈머)가 그 사실을 알 수 있는 *구조화된* 채널이 없었다.
+   현재는 deny 메시지의 텍스트를 파싱해야만 했다.
 
-1. **Authored vs. deployed stance.** A tool author chooses a default tier
-   when shipping the tool. Hosts that deploy that tool in a stricter
-   environment (regulated industries, shared multi-user installs) have no
-   way to tighten the tier without forking the tool source. Conversely,
-   well-known orchestration tools (`spawn_agent`, `wait_agent`, …) that did
-   not self-classify defaulted to the secure-by-default `always-confirm`
-   fallback — an over-escalation that broke ergonomic subagent flows.
-2. **Per-command, not per-tool, sensitivity.** `exec_command` /
-   `bash` carry the most blast radius variance of any tool: `ls` and
-   `rm -rf /` enter the same code path. The tool can self-declare a tier,
-   but the declaration is per-INVOCATION (it sees `input.command`) — and
-   our Codex review showed authors rarely encode the full
-   "irreversible / privileged / network-egress" matrix. We needed a
-   centrally-reviewable command/argv pattern table.
+## 결정
 
-## Decision
+### R1. `HitlTier` 어휘 SSOT 재확인 + agent surface alias
 
-Introduce a 2-layer composition in front of the existing tier gate:
+`@/permission/types.ts#HITLTier`가 SSOT다. `src/agent/hitl-tier.ts`는
+이를 **그대로 re-export**하고 lower-camel alias `HitlTier`를 추가한다.
+새 타입을 정의하지 않는다 — 두 모듈에 enum이 따로 살면 시간이 지나며
+드리프트가 일어난다.
 
-1. **Per-tool annotation registry** (`src/agent/hitl-tier-registry.ts`).
-   Built-in table maps tool names to default `ToolHitlAnnotation`
-   `{ tier, reason?, handoffMessage? }`. The table is data, not policy —
-   one-line additions are reviewable.
+### R2. Annotation registry (`src/agent/hitl-tier-registry.ts`)
 
-2. **Per-command pattern table** (same file). Shell-class tools
-   (`bash`, `exec_command`, anything carrying `command` / `parsed_cmd` /
-   `argv`) route through a regex/argv-pattern array that classifies the
-   actual command string. First match wins; falls through to the tool's
-   own annotation when nothing matches.
+```typescript
+interface HitlAnnotation {
+  readonly tool: string
+  readonly commandPrefix?: string
+  readonly tier: HitlTier
+  readonly reason?: string
+}
 
-3. **User override file** at `~/.quanta/hitl-overrides.json` (or
-   `$QUANTA_HITL_OVERRIDES`). Read ONCE at first call, cached. Maps tool
-   name → annotation. Missing / malformed file ⇒ silent fallback to
-   built-ins. Invalid tier values are dropped per-key.
+resolveHitlAnnotation(tool, input, baseline) → { tier, matched }
+```
 
-4. **Composition rule (one-way ratchet)** inside
-   `admissibility-gate.ts#resolveHitlAnnotation`:
-   - If the tool DECLARED a tier explicitly (`tool.hitlTier(input)`
-     exists), compose with the registry by taking the STRICTER of the
-     two (`hand-off-required > always-confirm > pre-approval-ok > none`).
-     A host's override can only TIGHTEN; never loosen an authored tool.
-   - If the tool did NOT declare a tier, the registry's annotation is
-     authoritative. This fixes the over-escalation of orchestration tools.
+- **Built-in 테이블** — 빌트인은 일부러 비어있다. 기본 케이스(curl/wget/
+  git push/git fetch/git reset --hard/git commit --amend)는 이미 bash
+  classifier가 커버한다. 빌트인 슬롯은 **framework-owned** 결정을 추후
+  추가할 자리로 남겨둔다 — 빈 채로 가는 것이 byte-identical 계약 유지.
+- **Operator overrides** — `~/.quanta/hitl-overrides.json`(경로는
+  `QUANTA_HITL_OVERRIDES`로 변경 가능)에서 로드한다.
+- **One-way ratchet** — override는 tier를 *escalate*만 할 수 있다.
+  built-in이 `pre-approval-ok`였는데 override가 `always-confirm`이면 적용.
+  built-in이 `always-confirm`인데 override가 `none`이면 무시 + stderr
+  warn (one-way ratchet 위반).
+- **`hand-off-required` 보호** — upstream classifier(또는
+  built-in)에서 이미 `hand-off-required`로 결정된 경우 override는 절대
+  내릴 수 없다. registry는 그 분기를 short-circuit.
 
-5. **`handoffMessage` propagation.** When the resolved tier is
-   `hand-off-required` AND the registry / override carries a
-   `handoffMessage`, the dispatch gate surfaces that message in the deny
-   block's `content` (instead of the generic "X is classified
-   hand-off-required" suffix). This is what makes the deny non-silent —
-   the UI sees WHY the agent gave up and WHAT the operator should do.
+### R3. Failure mode
 
-## Tier rubric (with examples)
+Override 파일이 깨졌을 때(JSON 파싱 실패, 알려지지 않은 tier, 스키마 위반):
+- **throw하지 않는다.** 시작 시점 throw는 운영자에게 foot-gun.
+- stderr에 warn 한 줄 출력 + 빌트인 어노테이션만으로 fallback.
+- ENOENT(파일 없음)는 warn 없이 silent — 운영자가 단순히 작성 안 한 일반 케이스.
 
-| Tier | Meaning | Examples |
-|---|---|---|
-| `hand-off-required` | Irreversible, privileged, or audit-trail-erasing. NO mode authorizes; deny is terminal and surfaces a handoff message. | `rm -rf /`, `mkfs`, `dd of=/dev/sda`, `chmod -R 777 /`, `sudo …`, `history -c` |
-| `always-confirm` | High blast radius but reversible / observable. Forces `onConfirm` regardless of mode (even `bypass`). Missing handler ⇒ deny. | `git push --force`, `git push` (network egress), `rm -rf <subdir>` |
-| `pre-approval-ok` | Mutating but reversible. Defers to the existing `approval_policy` / mode policy. | `apply_patch`, `write`, `edit`, `write_stdin`, `send_input` |
-| `none` | Read-only or pure orchestration; no side effects an operator cares about. Skip mode policy. | `read`, `grep`, `glob`, `ls`, `spawn_agent`, `wait_agent`, `task_output`, `bash` with `ls` / `pwd` / `cat <file>` |
+### R4. `HandoffRequiredEvent` UI seam
 
-## Relationship to ADR-0026 (admissibility gate)
+`src/agent/hitl-tier.ts`에 typed event 정의:
 
-ADR-0026 set the canonical 4-stage admissibility-gate order:
+```typescript
+interface HandoffRequiredEvent {
+  readonly kind: "hitl-handoff"
+  readonly tool: string
+  readonly args: unknown
+  readonly handoffMessage: string
+  readonly reason: string
+  readonly timestamp: number
+}
+```
 
-1. visible
-2. plan / review / audit mode block
-3. HITL tier (this ADR's surface)
-4. permission policy (HARD_DENY + mode decision)
-5. repo-local `pre_tool_use` hook
+`AgentConfig.onHandoff?: (event: HandoffRequiredEvent) => void` 콜백
+seam을 추가한다. admissibility-gate가 `hand-off-required` deny를 낼 때
+(HARD_DENY 히트 또는 명시적/registry-promoted tier) 이벤트를 발사한다.
+콜백 try/catch 래핑 — 호스트 측 버그가 dispatch로 전파되지 않는다 (deny
+result가 권위; 이벤트는 best-effort 알림).
 
-This ADR fills in stage 3 with the registry composition above. The other
-stages are untouched; backwards compat is preserved by the
-`config.hitl?.enabled === true` gating — when unset, the legacy path is
-byte-identical.
+### R5. OTel telemetry
 
-## Relationship to ADR-0029 (reviewer 3-tier)
+`src/observability/vocabulary.ts#hitl`에 3개 키 추가:
+- `quanta.hitl.tier_resolved` — 매 HITL 게이트 실행마다 resolved tier
+- `quanta.hitl.registry_escalated` — registry가 baseline tier를 escalate했는지
+- `quanta.hitl.handoff_emitted` — handoff 이벤트의 reason 태그
 
-`ReviewerTier` (ADR-0029) is ORTHOGONAL to `HITLTier`. HITL classifies
-WHETHER a confirmation is required and HOW recoverable a deny is.
-ReviewerTier selects WHO decides when confirmation IS required (which
-reviewer escalation path runs). Both axes coexist; this ADR does not
-change reviewer routing.
+### R6. 한계 / 의도적 negative space
 
-## Consequences
+- **regex 매칭 지원하지 않는다.** override 파일은 exact tool name + 옵션
+  literal `commandPrefix`만 받는다. regex는 (a) 평가가 비결정적이 될 수 있고
+  (b) 운영자가 손으로 감사하기 어려워진다. ADR-0031 prefix DSL의 학습:
+  단순함을 깨지 말 것.
+- **GUI override editor 없다.** Phase 1은 dev tool. JSON 직접 편집.
+- **per-session override 없다.** Override 파일은 process-life cached
+  (`__resetHitlOverrides` test seam만). 운영자가 파일을 바꿔도 프로세스
+  재시작 전까지는 반영되지 않는다 — 의도적 (runtime mutation 추적이
+  악몽이라).
 
-- Hosts can install `~/.quanta/hitl-overrides.json` to enforce a policy
-  posture (e.g. "no writes without manual approval") without forking
-  any tool.
-- Subagent orchestration tools (`spawn_agent`, …) no longer escalate to
-  `always-confirm` from the secure-by-default fallback.
-- `exec_command` / `bash` invocations are tier-classified centrally; the
-  pattern table is the SSOT for "what's a hand-off-class command".
-- The composition is a one-way ratchet — a host CANNOT relax a tool's
-  own declared tier through the override file. This is intentional.
+## 메커니즘 (admissibility-gate 순서)
+
+```
+1. mode-posture block (plan/review/audit)
+2. HITL gate (enabled일 때):
+     a. HARD_DENY → handoff deny + onHandoff(event)
+     b. resolveHitlAnnotation(call.name, call.input, inferToolTier(...))
+     c. tier === hand-off-required → handoff deny + onHandoff(event)
+     d. tier === always-confirm   → onConfirm 강제
+     e. tier === none             → allow (mode policy skip)
+     f. tier === pre-approval-ok  → fall through to mode policy
+3. mode-policy (HARD_DENY redundant guard inside; auto-classifier route)
+4. pre_tool_use hook
+```
+
+## 결과
+
+- **byte-identical 기본 경로**: `config.hitl` absent, override 파일 absent
+  → 게이트는 ADR-0020 ADR-0026 그대로 동작.
+- **UI integration 가능**: `onHandoff` 콜백으로 deny 메시지를 파싱하지
+  않고 구조화된 이벤트 수신 가능.
+- **operator policy tightening**: `~/.quanta/hitl-overrides.json`에서
+  per-deploy tier를 조정 가능. one-way ratchet으로 안전.
+
+## 테스트
+
+- `tests/unit/hitl-tier-registry.test.ts` — 33개:
+  built-in 비어있음, override loader, JSON 파싱 실패 graceful,
+  unknown tier 스키마 거부, missing path silent, ratchet escalate-only,
+  ratchet downgrade warn, `hand-off-required` 강제 보존, commandPrefix
+  매칭, malformed input(`command` 필드 없음) 동작, ENOENT silent,
+  cache reset seam.
+- `tests/unit/hitl-tier-gate.test.ts` — 9개: gate가 handoff event를 발사,
+  payload 정확성, `onHandoff` 없을 때 byte-identical, throwing
+  `onHandoff` swallow, override가 always-confirm을 escalate, registry가
+  hand-off-required로 escalate.
+- `tests/integration/hitl-tier-dispatch-e2e.test.ts` — 7개: dispatchTool
+  통합, registry + admissibility 결합.
+
+## Override 예시
+
+```json
+{
+  "version": 1,
+  "annotations": [
+    {
+      "tool": "bash",
+      "commandPrefix": "kubectl apply",
+      "tier": "always-confirm",
+      "reason": "K8s cluster mutations require explicit confirm in this deploy"
+    },
+    {
+      "tool": "bash",
+      "commandPrefix": "terraform apply",
+      "tier": "hand-off-required",
+      "reason": "Infra changes go through change management — agent must hand off"
+    }
+  ]
+}
+```
 
 ## References
 
-- `src/agent/hitl-tier.ts` — `HitlTier` re-export + `ToolHitlAnnotation`
-  data shape.
-- `src/agent/hitl-tier-registry.ts` — `getToolHitlTier(name, args)` resolver,
-  command-pattern table, user-override loader, `__resetHitlOverrides`
-  test seam.
-- `src/agent/admissibility-gate.ts#resolveHitlAnnotation` — composition
-  rule (one-way ratchet).
-- `tests/unit/hitl-tier-registry.test.ts`,
-  `tests/unit/hitl-tier-gate.test.ts`,
-  `tests/integration/hitl-tier-dispatch-e2e.test.ts`.
-- ADR-0020 — HITL 4-tier gate (enum + initial gate wiring).
-- ADR-0026 — Admissibility-gate SSOT (canonical pre-execute order).
-- ADR-0029 — Reviewer 3-tier (orthogonal axis).
-- `codex-desktop-build-2867-round-4` — review notes that motivated the
-  registry + per-command pattern surface.
+- ADR-0020 — HITL 4-tier 정의 (확장 대상)
+- ADR-0026 — admissibility-gate SSOT (확장 대상)
+- ADR-0029 — reviewer 3-tier (직교 축)
+- ADR-0046 — permission stack (sibling track — 교차 없음)
+- ADR-0031 — prefix DSL (negative reference: 단순함 깨지 말 것)
+- Codex `hitl-audit.md`
+- `[[codex-desktop-build-2867-round-4]]` Guardian Post-denial precedence

@@ -1,51 +1,96 @@
 /**
- * End-to-end dispatch coverage for the HITL 4-tier annotation registry
- * (ADR-0047). Exercises `dispatchTool` — NOT `runAdmissibilityGate` directly
- * — so we catch any drift between the gate's composed-tier resolution and
- * the dispatch surface (`DispatchResult`).
+ * ADR-0047 — HITL tier gate end-to-end through dispatchTool.
  *
- * Each test stands up a minimal tool, configures `hitl.enabled = true`, and
- * asserts:
- *   - tier=hand-off-required ⇒ deny block with `preview="handoff"`, body
- *     carries the registry's `handoffMessage` (so the UI can render it)
- *   - tier=always-confirm ⇒ deny block with `preview="declined"` even under
- *     `mode: "bypass"`
- *   - tier=pre-approval-ok ⇒ tool RUNS under bypass mode
- *   - tier=none ⇒ tool RUNS even under `mode: "default"` (skips ask)
+ * The unit tests above cover the gate in isolation. This integration test
+ * exercises the full `dispatchTool` path with the registry + onHandoff
+ * seam wired through, asserting that:
+ *
+ *   1. An override that escalates a tool to `hand-off-required` is honored
+ *      end-to-end (dispatch rejects + fires onHandoff).
+ *   2. The classic HARD_DENY path fires onHandoff exactly once and produces
+ *      a deny with `preview === "handoff"`.
+ *   3. The registry's one-way ratchet survives the full dispatch path
+ *      (override cannot relax a built-in tier under dispatchTool).
+ *   4. Override file absent (default) ⇒ byte-identical legacy behaviour.
+ *   5. always-confirm escalation by override is enforced through dispatch.
+ *   6. onHandoff is NOT fired when the tier is non-handoff (allow / ask /
+ *      always-confirm declined).
+ *   7. Telemetry vocabulary keys exist for hitl tier / handoff (smoke; the
+ *      attribute emitter wiring is owned by the observability slice but the
+ *      keys must be canonical — drift here is the kind of bug that breaks
+ *      dashboards silently).
  */
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
+import type { HandoffRequiredEvent } from "@/agent/hitl-tier"
 import { __resetHitlOverrides } from "@/agent/hitl-tier-registry"
 import type { ToolUseBlock } from "@/llm"
-import type { HITLTier, PermissionContext } from "@/permission"
+import { QUANTA_ATTRS } from "@/observability/vocabulary"
+import type { PermissionContext } from "@/permission"
+import { __resetRuntimeConfig } from "@/shared"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
+
+let tmp: string
+
+beforeEach(() => {
+  tmp = join(tmpdir(), `hitl-e2e-${process.pid}-${Date.now()}`)
+  mkdirSync(tmp, { recursive: true })
+})
+afterEach(() => {
+  rmSync(tmp, { recursive: true, force: true })
+  delete process.env["QUANTA_HITL_OVERRIDES"]
+  __resetRuntimeConfig()
+  __resetHitlOverrides()
+})
+
+const setOverrides = (annotations: unknown[]): string => {
+  const path = join(tmp, "h.json")
+  writeFileSync(path, JSON.stringify({ version: 1, annotations }), "utf8")
+  process.env["QUANTA_HITL_OVERRIDES"] = path
+  __resetRuntimeConfig()
+  __resetHitlOverrides()
+  return path
+}
 
 const makeTool = (
   name: string,
   opts: {
     readOnly?: boolean
+    hitlTier?: (
+      input: unknown,
+    ) => "hand-off-required" | "always-confirm" | "pre-approval-ok" | "none"
     schema?: z.ZodTypeAny
-    hitlTier?: (input: unknown) => HITLTier
+    run?: () => AsyncIterable<ToolEvent>
   } = {},
 ): Tool => {
   const tool: Tool = {
     name,
     description: `${name}`,
-    inputSchema: (opts.schema ?? z.object({})) as z.ZodType<unknown>,
+    inputSchema: (opts.schema ?? z.object({}).passthrough()) as z.ZodType<unknown>,
     isReadOnly: () => opts.readOnly ?? false,
     isConcurrencySafe: () => opts.readOnly ?? false,
-    execute: async function* (): AsyncIterable<ToolEvent> {
-      yield { type: "result", result: { ok: true, output: "ran-ok" } }
-    },
+    execute: () =>
+      opts.run
+        ? opts.run()
+        : (async function* () {
+            yield { type: "result", result: { ok: true, output: "ran" } }
+          })(),
   }
   if (opts.hitlTier) {
-    ;(tool as Tool & { hitlTier: (input: unknown) => HITLTier }).hitlTier = opts.hitlTier
+    ;(
+      tool as Tool & {
+        hitlTier: (
+          input: unknown,
+        ) => "hand-off-required" | "always-confirm" | "pre-approval-ok" | "none"
+      }
+    ).hitlTier = opts.hitlTier
   }
   return tool
 }
@@ -66,162 +111,154 @@ const cfg = (over: Partial<AgentConfig> = {}): AgentConfig =>
     ...over,
   }) as AgentConfig
 
-describe("hitl-tier dispatch e2e — each tier surfaces a distinct DispatchResult", () => {
-  beforeEach(() => {
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
-  })
-
-  test("hand-off-required: dispatchTool returns a deny block with preview='handoff' carrying handoffMessage", async () => {
-    // exec_command + `rm -rf /` → registry pattern → hand-off-required.
-    const exec = makeTool("exec_command", { schema: z.object({ command: z.string() }) })
-    const c = cfg({
-      registry: new ToolRegistry([exec]),
-      hitl: { enabled: true },
-      onConfirm: async () => true,
-      permission: { mode: "bypass" },
-    })
-    const out = await dispatchTool(call("exec_command", { command: "rm -rf /" }), c, {
-      mode: "bypass",
-    })
-    expect(out.ok).toBe(false)
-    expect(out.preview).toBe("handoff")
-    // The handoff body must include enough information for a UI to show the
-    // operator what happened (not silent rejection).
-    expect(out.block.content).toContain("human handoff")
-    expect(out.block.content).toContain("rm -rf")
-    expect(out.block.content).toContain("Agent cannot proceed")
-    expect(out.block.is_error).toBe(true)
-  })
-
-  test("always-confirm: bypass mode cannot skip; declined ⇒ preview='declined'", async () => {
-    const exec = makeTool("exec_command", { schema: z.object({ command: z.string() }) })
-    let askedWith: unknown = null
-    const c = cfg({
-      registry: new ToolRegistry([exec]),
-      hitl: { enabled: true },
-      onConfirm: async (a) => {
-        askedWith = a
-        return false
+describe("dispatchTool + HITL registry (ADR-0047) e2e", () => {
+  test("override escalates pre-approval-ok ⇒ hand-off-required and fires onHandoff", async () => {
+    setOverrides([
+      {
+        tool: "write",
+        tier: "hand-off-required",
+        reason: "audit policy: writes always handed off",
       },
-      permission: { mode: "bypass" },
-    })
-    const out = await dispatchTool(call("exec_command", { command: "git push origin main" }), c, {
-      mode: "bypass",
-    })
-    expect(askedWith).not.toBeNull()
-    expect(out.ok).toBe(false)
-    expect(out.preview).toBe("declined")
-    expect(out.block.content).toContain("always-confirm tier")
-  })
-
-  test("always-confirm: accepted ⇒ tool runs (ok:true)", async () => {
-    const exec = makeTool("exec_command", { schema: z.object({ command: z.string() }) })
-    const c = cfg({
-      registry: new ToolRegistry([exec]),
-      hitl: { enabled: true },
-      onConfirm: async () => true,
-      permission: { mode: "bypass" },
-    })
-    const out = await dispatchTool(call("exec_command", { command: "git push origin main" }), c, {
-      mode: "bypass",
-    })
-    expect(out.ok).toBe(true)
-    expect(out.preview).toBe("ran-ok")
-  })
-
-  test("pre-approval-ok: bypass mode admits without confirm", async () => {
-    // apply_patch ⇒ registry says pre-approval-ok; bypass admits.
-    const ap = makeTool("apply_patch")
-    let askedCount = 0
-    const c = cfg({
-      registry: new ToolRegistry([ap]),
-      hitl: { enabled: true },
-      onConfirm: async () => {
-        askedCount += 1
-        return true
-      },
-      permission: { mode: "bypass" },
-    })
-    const out = await dispatchTool(call("apply_patch"), c, { mode: "bypass" })
-    expect(out.ok).toBe(true)
-    expect(askedCount).toBe(0)
-  })
-
-  test("none: default mode still admits (skips ask)", async () => {
-    // spawn_agent is registered as tier="none" in the registry.
-    const sa = makeTool("spawn_agent")
-    let askedCount = 0
-    const c = cfg({
-      registry: new ToolRegistry([sa]),
-      hitl: { enabled: true },
-      onConfirm: async () => {
-        askedCount += 1
-        return false
-      },
-      permission: { mode: "default" },
-    })
-    const out = await dispatchTool(call("spawn_agent"), c, { mode: "default" })
-    expect(out.ok).toBe(true)
-    expect(askedCount).toBe(0)
-  })
-
-  test("backwards compat: unknown tool + HITL disabled ⇒ default behavior unchanged", async () => {
-    // No hitl block ⇒ the new annotation registry is bypassed entirely; the
-    // existing mode policy gates the call.
-    const t = makeTool("totally_unknown", { readOnly: false })
-    const c = cfg({
-      registry: new ToolRegistry([t]),
-      permission: { mode: "bypass" },
-    })
-    const out = await dispatchTool(call("totally_unknown"), c, { mode: "bypass" })
-    expect(out.ok).toBe(true)
-  })
-})
-
-describe("hitl-tier dispatch e2e — user override file changes runtime behavior", () => {
-  let tmp: string
-  let overridesPath: string
-
-  beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "hitl-e2e-"))
-    overridesPath = join(tmp, "hitl-overrides.json")
-    process.env.QUANTA_HITL_OVERRIDES = overridesPath
-    __resetHitlOverrides()
-  })
-
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true })
-    delete process.env.QUANTA_HITL_OVERRIDES
-    __resetHitlOverrides()
-  })
-
-  test("override turns a normally-OK tool into hand-off-required (custom handoffMessage surfaces in deny body)", async () => {
-    writeFileSync(
-      overridesPath,
-      JSON.stringify({
-        write: {
-          tier: "hand-off-required",
-          handoffMessage: "Writes are disabled in this deployment by ops policy.",
-        },
+    ])
+    const captured: HandoffRequiredEvent[] = []
+    const write = makeTool("write", { hitlTier: () => "pre-approval-ok" })
+    const res = await dispatchTool(
+      call("write", { path: "x", content: "y" }),
+      cfg({
+        registry: new ToolRegistry([write]),
+        hitl: { enabled: true },
+        permission: { mode: "default" } as PermissionContext,
+        onHandoff: (e) => captured.push(e),
       }),
+      { mode: "default" } as PermissionContext,
     )
+    expect(res.ok).toBe(false)
+    expect(res.preview).toBe("handoff")
+    expect(captured).toHaveLength(1)
+    expect(captured[0]?.reason).toBe("registry:write")
+    expect(captured[0]?.handoffMessage).toContain("audit policy")
+  })
+
+  test("HARD_DENY fires onHandoff exactly once", async () => {
+    const captured: HandoffRequiredEvent[] = []
+    const bash = makeTool("bash", { schema: z.object({ command: z.string() }) })
+    // Wire shellCommand extractor so the gate sees the raw command.
+    ;(bash as Tool & { extractShellCommand?: (i: unknown) => string | null }).extractShellCommand =
+      (i) =>
+        typeof i === "object" &&
+        i !== null &&
+        typeof (i as { command?: unknown }).command === "string"
+          ? (i as { command: string }).command
+          : null
+    const res = await dispatchTool(
+      call("bash", { command: "rm -rf /" }),
+      cfg({
+        registry: new ToolRegistry([bash]),
+        hitl: { enabled: true },
+        permission: { mode: "bypass" } as PermissionContext,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "bypass" } as PermissionContext,
+    )
+    expect(res.ok).toBe(false)
+    expect(res.preview).toBe("handoff")
+    expect(captured).toHaveLength(1)
+    expect(captured[0]?.reason.startsWith("hard-deny:")).toBe(true)
+  })
+
+  test("override cannot RELAX a hand-off-required from the tool — ratchet survives dispatch", async () => {
+    setOverrides([{ tool: "sensitive", tier: "none", reason: "wrongly relaxed" }])
+    const sensitive = makeTool("sensitive", { hitlTier: () => "hand-off-required" })
+    const res = await dispatchTool(
+      call("sensitive"),
+      cfg({
+        registry: new ToolRegistry([sensitive]),
+        hitl: { enabled: true },
+        permission: { mode: "bypass" } as PermissionContext,
+      }),
+      { mode: "bypass" } as PermissionContext,
+    )
+    expect(res.ok).toBe(false)
+    expect(res.preview).toBe("handoff")
+  })
+
+  test("absent override file ⇒ byte-identical legacy behavior (no handoff for pre-approval-ok)", async () => {
+    delete process.env["QUANTA_HITL_OVERRIDES"]
+    __resetRuntimeConfig()
     __resetHitlOverrides()
-    const w = makeTool("write", {
-      schema: z.object({ path: z.string(), content: z.string() }),
-      hitlTier: () => "pre-approval-ok",
-    })
-    const c = cfg({
-      registry: new ToolRegistry([w]),
-      hitl: { enabled: true },
-      onConfirm: async () => true,
-      permission: { mode: "bypass" },
-    })
-    const out = await dispatchTool(call("write", { path: "x.ts", content: "y" }), c, {
-      mode: "bypass",
-    })
-    expect(out.ok).toBe(false)
-    expect(out.preview).toBe("handoff")
-    expect(out.block.content).toContain("Writes are disabled in this deployment")
+    const captured: HandoffRequiredEvent[] = []
+    const write = makeTool("write", { hitlTier: () => "pre-approval-ok" })
+    const res = await dispatchTool(
+      call("write", { path: "x", content: "y" }),
+      cfg({
+        registry: new ToolRegistry([write]),
+        hitl: { enabled: true },
+        permission: { mode: "acceptEdits" } as PermissionContext,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "acceptEdits" } as PermissionContext,
+    )
+    expect(res.ok).toBe(true)
+    expect(captured).toHaveLength(0)
+  })
+
+  test("override escalates pre-approval-ok ⇒ always-confirm; onConfirm is called", async () => {
+    setOverrides([
+      {
+        tool: "write",
+        commandPrefix: undefined,
+        tier: "always-confirm",
+        reason: "writes need confirm in this deploy",
+      },
+    ])
+    let confirmCalls = 0
+    const handoffEvents: HandoffRequiredEvent[] = []
+    const write = makeTool("write", { hitlTier: () => "pre-approval-ok" })
+    const res = await dispatchTool(
+      call("write", { path: "x", content: "y" }),
+      cfg({
+        registry: new ToolRegistry([write]),
+        hitl: { enabled: true },
+        permission: { mode: "bypass" } as PermissionContext,
+        onConfirm: async () => {
+          confirmCalls++
+          return true
+        },
+        onHandoff: (e) => handoffEvents.push(e),
+      }),
+      { mode: "bypass" } as PermissionContext,
+    )
+    expect(confirmCalls).toBe(1)
+    expect(res.ok).toBe(true)
+    expect(handoffEvents).toHaveLength(0)
+  })
+
+  test("always-confirm declined does NOT fire onHandoff (only handoff tier does)", async () => {
+    const captured: HandoffRequiredEvent[] = []
+    const tool = makeTool("custom", { hitlTier: () => "always-confirm" })
+    const res = await dispatchTool(
+      call("custom"),
+      cfg({
+        registry: new ToolRegistry([tool]),
+        hitl: { enabled: true },
+        permission: { mode: "default" } as PermissionContext,
+        onConfirm: async () => false,
+        onHandoff: (e) => captured.push(e),
+      }),
+      { mode: "default" } as PermissionContext,
+    )
+    expect(res.ok).toBe(false)
+    expect(res.preview).toBe("declined")
+    expect(captured).toHaveLength(0)
+  })
+
+  test("OTel vocabulary keys exist for hitl tier_resolved / registry_escalated / handoff_emitted", () => {
+    // Smoke: the canonical keys MUST be present on QUANTA_ATTRS.hitl. A
+    // typo / drop would break dashboards silently — this assertion catches
+    // it at test time. Wiring of the emitter into the gate is owned by
+    // the observability slice (separate ADR / PR).
+    expect(QUANTA_ATTRS.hitl.tierResolved).toBe("quanta.hitl.tier_resolved")
+    expect(QUANTA_ATTRS.hitl.registryEscalated).toBe("quanta.hitl.registry_escalated")
+    expect(QUANTA_ATTRS.hitl.handoffEmitted).toBe("quanta.hitl.handoff_emitted")
   })
 })

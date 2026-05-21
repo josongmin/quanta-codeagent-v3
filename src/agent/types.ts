@@ -6,6 +6,7 @@ import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
+import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
@@ -192,15 +193,15 @@ export interface AgentConfig {
    *  existing mode policy, and none allows. */
   hitl?: { enabled?: boolean }
   /**
-   * Trust-scope registry (Phase C wire-up, ADR-0050). When set, the
-   * admissibility-gate's ask-branch consults `registry.hasGrant(projectKey,
-   * { tool })` BEFORE invoking `onConfirm`. A positive grant skips the prompt
-   * and admits the call; `once_only` grants are consumed inline by the
-   * registry. Absent ⇒ no registry lookup; the gate path is byte-identical
-   * to the pre-Phase-C behavior (DEFAULT OFF, opt-in). The slice rule keeps
-   * the registry impl in `@/permission`; this type-import is the only seam.
+   * ADR-0047 UI integration seam. When the admissibility-gate emits a
+   * hand-off-required deny (HARD_DENY hit OR an explicit/registry-
+   * promoted `hand-off-required` tier), it ALSO fires this callback with
+   * a structured {@link HandoffRequiredEvent}. Absent ⇒ no event emitted
+   * (byte-identical legacy). The callback is wrapped in try/catch so a
+   * host-side bug never propagates into dispatch — emission is best-
+   * effort, the deny result is the authoritative signal.
    */
-  trustScope?: { registry: TrustScopeRegistry; projectKey: string }
+  onHandoff?: (event: HandoffRequiredEvent) => void
   /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like

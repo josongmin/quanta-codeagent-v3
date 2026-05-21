@@ -1,48 +1,89 @@
 /**
- * HITL 4-tier annotation surface (ADR-0047 — borrowed from Codex Computer Use
- * SKILL.md's confirmation policy).
+ * ADR-0047 — HITL 4-tier gate (registry + handoff seam).
  *
- * Per-tool HITL annotations classify the inherent sensitivity of an operation
- * independently of mode / approval policy / reviewer-tier. This is the data
- * shape; the matching dispatch logic lives in `hitl-tier-registry.ts`
- * (`getToolHitlTier`) and is consumed by `admissibility-gate.ts`.
+ * This module is the canonical agent-side surface for the 4-tier taxonomy
+ * defined by ADR-0020. It is a thin re-export of `HITLTier` from
+ * `@/permission` (the SSOT), plus the local aliases and seam types the
+ * registry / admissibility-gate / handoff callback need.
  *
- * Relationship to neighbours:
- *   - `HITLTier` (canonical literal union) is re-exported from
- *     `@/permission` so the dispatch seam already speaks the vocabulary —
- *     this module only adds an annotation wrapper carrying optional rationale
- *     + handoff message.
- *   - `Tool.hitlTier?(input)` (in `@/tool/types`) is per-tool, self-declared.
- *     The registry here is per-tool-NAME and ALWAYS overrides the tool's
- *     own declaration (so a host can opt a single deployment into a stricter
- *     stance without forking the tool implementation).
- *   - `ReviewerTier` (ADR-0029) is orthogonal — it selects WHO decides when
- *     confirmation is required; `HitlTier` classifies WHETHER and HOW.
+ * Why re-export instead of redefining: ADR-0020 already shipped the literal
+ * union (`hand-off-required | always-confirm | pre-approval-ok | none`) in
+ * `@/permission/types.ts`. ADR-0047 EXTENDS that surface (adds annotation
+ * registry, override file, handoff event); it does NOT supersede the tier
+ * enum. Keeping a single literal type prevents drift between
+ * `@/permission`'s gate logic and `@/agent`'s registry layer.
+ *
+ * Naming: this file standardises on the lower-camel `HitlTier` alias so
+ * agent-internal code reads consistently (`tier: HitlTier`). The original
+ * `HITLTier` name from `@/permission` remains exported verbatim for callers
+ * that match the legacy spelling — both names refer to the SAME type.
+ *
+ * See also: ADR-0020 (original 4-tier gate), ADR-0026 (admissibility-gate
+ * SSOT), ADR-0029 (3-tier reviewer — orthogonal axis), ADR-0046 (permission
+ * stack — different scope, owned by a sibling track).
  */
 
 import type { HITLTier } from "@/permission"
 
-/**
- * Re-export of the canonical 4-tier literal union (defined in `@/permission`
- * to stay close to the gate that enforces it). Re-exported here so callers
- * that consume the registry don't have to reach across slices for the type.
- */
+/** Lower-camel alias for the HITL 4-tier taxonomy. Same literal union as the
+ *  `HITLTier` SSOT in `@/permission`; this spelling reads better in
+ *  agent-internal code (`tier: HitlTier`). */
 export type HitlTier = HITLTier
 
+/** Re-export the original spelling so callers that match the ADR-0020 name
+ *  (`HITLTier`) keep compiling without churn. */
+export type { HITLTier } from "@/permission"
+
 /**
- * Per-tool HITL annotation. `tier` is mandatory; the optional fields are
- * UI/rationale payloads the dispatch gate forwards on a deny.
+ * Typed seam emitted by the admissibility-gate when an action is rejected
+ * because it resolves to the `hand-off-required` tier. ADR-0047 R5 §한계:
+ * the gate's tier resolution and the deny message it produces have until
+ * now been a private signal between the gate and the model — UI surfaces
+ * couldn't subscribe without parsing strings.
  *
- * - `reason`           — short, human-readable rationale shown in the deny
- *                        block content (joined onto the standard message).
- * - `handoffMessage`   — caller-facing message used only when
- *                        `tier === "hand-off-required"`. Surfaces to the UI
- *                        so the operator sees WHY the agent gave up and WHAT
- *                        they should do; replaces the generic suffix when
- *                        present.
+ * `HandoffRequiredEvent` makes the signal a first-class structured value:
+ * the gate constructs one whenever it emits a hand-off deny, and forwards
+ * it via `AgentConfig.onHandoff?(event)`. The callback path is opt-in
+ * (absent ⇒ no event, byte-identical legacy behaviour), so existing apps
+ * are unaffected.
+ *
+ * Field contracts:
+ *  - `kind`           — literal discriminator, always `"hitl-handoff"`.
+ *  - `tool`           — the tool name the model attempted to invoke.
+ *  - `args`           — the tool input as the model produced it (opaque).
+ *  - `handoffMessage` — the user-facing message the gate also returns to
+ *                       the model (kept identical so the operator and the
+ *                       model see the SAME explanation).
+ *  - `reason`         — short kebab-case tag identifying the trigger
+ *                       (e.g. `"hard-deny:<rule-name>"` or `"tier:hand-off-required"`).
+ *  - `timestamp`      — caller-provided ms-since-epoch. The gate reads
+ *                       `Date.now()` exactly once per emit. Pure logic
+ *                       (tests, replay) supplies a deterministic value via
+ *                       the optional clock seam on the callback site.
+ *
+ * All fields are required + readonly so the value is safe to log,
+ * serialize for trajectory replay, and compare structurally.
  */
-export interface ToolHitlAnnotation {
-  readonly tier: HitlTier
-  readonly reason?: string
-  readonly handoffMessage?: string
+export interface HandoffRequiredEvent {
+  readonly kind: "hitl-handoff"
+  readonly tool: string
+  readonly args: unknown
+  readonly handoffMessage: string
+  readonly reason: string
+  readonly timestamp: number
+}
+
+/** Type predicate — does `v` shape-match a `HandoffRequiredEvent`? Useful
+ *  for stream/trajectory consumers that receive heterogeneous events from
+ *  the agent loop and need to dispatch on `kind`. */
+export const isHandoffRequiredEvent = (v: unknown): v is HandoffRequiredEvent => {
+  if (v === null || typeof v !== "object") return false
+  const o = v as Record<string, unknown>
+  return (
+    o["kind"] === "hitl-handoff" &&
+    typeof o["tool"] === "string" &&
+    typeof o["handoffMessage"] === "string" &&
+    typeof o["reason"] === "string" &&
+    typeof o["timestamp"] === "number"
+  )
 }
