@@ -60,6 +60,34 @@ export const gitBlameInputSchema = z.object({
 })
 export type GitBlameInput = z.infer<typeof gitBlameInputSchema>
 
+// --- git_churn ---------------------------------------------------------------
+
+/** Stage-1 fault-localization aid (Codex "file topology" + recency signal).
+ *  Ranks files by how often they changed in a recent window — churn hotspots
+ *  are disproportionately where bugs live. READ-ONLY, CONCURRENCY-SAFE. */
+export const gitChurnInputSchema = z.object({
+  /** Git revision range / since-expression (e.g. "30.days", "HEAD~50"). When
+   *  absent, defaults to the last 200 commits. */
+  since: z.string().optional().describe('Window, e.g. "30.days" or "HEAD~50" (default last 200)'),
+  /** Restrict churn to files under this path. */
+  path: z.string().optional().describe("Restrict churn ranking to this path"),
+  /** Max ranked files to return. Default 20, capped at 100. */
+  n: z.number().int().positive().max(100).optional().describe("Top-N files (default 20, max 100)"),
+})
+export type GitChurnInput = z.infer<typeof gitChurnInputSchema>
+
+// --- git_blame_heatmap -------------------------------------------------------
+
+/** Stage-1 ownership signal: per-file author line distribution. Who owns the
+ *  most lines of a file is a weak-but-useful "who to ask / who last touched
+ *  this surface" signal (Codex blame ownership). READ-ONLY, CONCURRENCY-SAFE. */
+export const gitBlameHeatmapInputSchema = z.object({
+  file: z.string().describe("File to compute author line-ownership distribution for"),
+  /** Max authors to list. Default 10, capped at 50. */
+  n: z.number().int().positive().max(50).optional().describe("Top-N authors (default 10, max 50)"),
+})
+export type GitBlameHeatmapInput = z.infer<typeof gitBlameHeatmapInputSchema>
+
 // --- git_commit --------------------------------------------------------------
 
 /** Claude Desktop 1.7196.3 `commitWipForBranchSwitch` absorption: a session-

@@ -14,6 +14,8 @@
  *   --corpus <dir> | QUANTA_SWEBENCH_CORPUS_ROOT   corpus root
  *   --n <int>                                      Best-of-N (default 1)
  *   --limit <int>                                  cap instances
+ *   --instance <substr>                            select by id substring
+ *                                                  (applied before --limit)
  *   --dry-run                                      load+count+print plan, NO LLM
  *   --model <id> | QUANTA_MODEL                    model id
  *   QUANTA_PROVIDER / ANTHROPIC_API_KEY / OPENAI_API_KEY  provider pick
@@ -32,10 +34,10 @@ import { join, resolve } from "node:path"
 import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
-import { benchRunDir, benchRunId, benchWorkRoot } from "./paths"
 import { aggregate, classify } from "./failure-classifier"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
+import { benchRunDir, benchRunId, benchWorkRoot } from "./paths"
 import { isPythonSwebenchAvailable } from "./python-swebench"
 import { buildReport, writeReport } from "./report"
 import { finalizeRun, runInstance } from "./runner"
@@ -287,13 +289,19 @@ const runDatasetMode = async (
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
   obs?: ObserveCtx,
 ): Promise<void> => {
-  const tasks: SwebenchTask[] = parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
-  if (tasks.length === 0) {
+  const parsed: SwebenchTask[] = parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
+  if (parsed.length === 0) {
     logger.info(
       `No usable tasks parsed from "${datasetFile}". Expecting official SWE-bench JSONL. Nothing to run.`,
     )
     process.exit(0)
   }
+  // `--instance <substr>` filters by instance id before the limit slice.
+  const instanceFilter = argValue("--instance")
+  const tasks =
+    instanceFilter !== undefined && instanceFilter !== ""
+      ? parsed.filter((t) => t.instanceId.includes(instanceFilter))
+      : parsed
   const selected = cfg.limit ? tasks.slice(0, cfg.limit) : tasks
 
   logger.info(
@@ -448,7 +456,14 @@ const runCustomCorpusMode = async (
   },
   obs?: ObserveCtx,
 ): Promise<void> => {
-  const all = await loadCorpus(cfg.corpusRoot)
+  const loaded = await loadCorpus(cfg.corpusRoot)
+  // `--instance <substr>` selects by id substring BEFORE the limit slice, so a
+  // single repo (e.g. django) can be run without scanning the alphabetical head.
+  const instanceFilter = argValue("--instance")
+  const all =
+    instanceFilter !== undefined && instanceFilter !== ""
+      ? loaded.filter((i) => i.id.includes(instanceFilter))
+      : loaded
   const pythonHarness = process.env.QUANTA_SWEBENCH_PYTHON === "1"
 
   // `--dry-run`: load + count + print the plan; NEVER build an LLM or run.

@@ -64,10 +64,16 @@ export const systemSkillsDir = (): string => {
  */
 export const discoverSystemSkills = async (): Promise<Skill[]> => discoverSkills(systemSkillsDir())
 
-export type { ProgressAuditTrigger } from "./progress-audit"
+export type { LocalizeFaultTrigger } from "./localize-fault"
 // Per-skill wiring seams. Re-exported here so external callers (a slash-
 // router, a planner UI, ADR-0045 §wiring) import from
 // `@/skill/system-skills` without reaching into the per-skill directory.
+export {
+  findLocalizeFaultSkill,
+  LOCALIZE_FAULT_SKILL_NAME,
+  triggerLocalizeFault,
+} from "./localize-fault"
+export type { ProgressAuditTrigger } from "./progress-audit"
 export {
   findProgressAuditSkill,
   PROGRESS_AUDIT_SKILL_NAME,

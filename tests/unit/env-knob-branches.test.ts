@@ -47,6 +47,7 @@ const ENV_KEYS = [
   "QUANTA_VERIFY_GUARD",
   "QUANTA_VERIFY_GUARD_MAX_TRIPS",
   "QUANTA_SKILLS_DIR",
+  "QUANTA_SKILLS",
 ] as const
 
 const snapshot = (): Map<string, string | undefined> => {
@@ -285,5 +286,21 @@ describe("buildSkillsConfig — QUANTA_SKILLS_DIR", () => {
   test("path set → { dir }", () => {
     process.env.QUANTA_SKILLS_DIR = "/etc/quanta/skills"
     expect(buildSkillsConfig()).toEqual({ dir: "/etc/quanta/skills" })
+  })
+
+  test("QUANTA_SKILLS=1 (no dir) → {} (bundled system skills only — ADR-0045 follow-up)", () => {
+    process.env.QUANTA_SKILLS = "1"
+    expect(buildSkillsConfig()).toEqual({})
+  })
+
+  test("QUANTA_SKILLS=1 + QUANTA_SKILLS_DIR set → { dir } wins (dir is the superset)", () => {
+    process.env.QUANTA_SKILLS = "1"
+    process.env.QUANTA_SKILLS_DIR = "/custom/skills"
+    expect(buildSkillsConfig()).toEqual({ dir: "/custom/skills" })
+  })
+
+  test("QUANTA_SKILLS unset/non-1 → undefined (byte-identical default-OFF preserved)", () => {
+    process.env.QUANTA_SKILLS = "yes" // not exactly "1"
+    expect(buildSkillsConfig()).toBeUndefined()
   })
 })

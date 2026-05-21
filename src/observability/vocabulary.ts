@@ -120,6 +120,11 @@ export const QUANTA_ATTRS = {
      *  "user-override"`. Emitted by the `post-denial` facade so a dashboard
      *  can render the 3-step funnel. */
     postDenialEvent: "quanta.permission.post_denial.event",
+    /** Which decision layer produced the final verdict — coarser than
+     *  `stackSource`, used by the vocabulary-migration dashboards to bucket
+     *  decisions by owning subsystem (`"reviewer" | "stack" | "hitl" |
+     *  "hook"`). */
+    decidedBy: "quanta.permission.decided_by",
   },
   hitl: {
     /** ADR-0047: final tier the admissibility-gate resolved for a tool call.
@@ -143,6 +148,9 @@ export const QUANTA_ATTRS = {
     path: "quanta.patch.path",
     hunkCount: "quanta.patch.hunk_count",
     fuzzyMatched: "quanta.patch.fuzzy_matched",
+    /** ADR-0028 V4A fuzzy-match confidence tier when a hunk applied without
+     *  an exact context match — `"exact" | "whitespace" | "fuzzy"`. */
+    fuzzyMatchTier: "quanta.patch.fuzzy_match_tier",
   },
   rules: {
     /** `"system" | "user" | "project"`. */

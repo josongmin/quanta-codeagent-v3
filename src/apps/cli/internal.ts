@@ -176,14 +176,22 @@ export const buildVerifyGuardConfig = (): AgentConfig["verifyGuard"] | undefined
 }
 
 /**
- * Resolve the `skills` config block from env (Tier 1 capability, ADR-0011).
- * Default OFF: `QUANTA_SKILLS_DIR` unset ⇒ `undefined` so the key is omitted
- * and no skill discovery happens / the `Skill`/`ToolSearch` tools are NOT
- * registered (loop byte-identical). When set ⇒ skills are discovered from it.
+ * Resolve the `skills` config block from env (Tier 1 capability, ADR-0011 +
+ * ADR-0045 system-skills follow-up). Three states:
+ *   - `QUANTA_SKILLS_DIR=<path>`     → `{ dir }`  user dir + bundled system skills
+ *   - `QUANTA_SKILLS=1` / `--skills` → `{}`       bundled system skills ONLY
+ *     (localize-fault, progress-audit available without a user dir — the
+ *     whole point of bundled discipline skills per ADR-0045)
+ *   - none of the above             → `undefined` byte-identical default-OFF
+ *     (no Skill/ToolSearch tools registered; RFC §1.2)
+ * A user dir wins over the bare flag (it's a superset — it also pulls system
+ * skills in via `buildSkillFeatures`'s merge).
  */
 export const buildSkillsConfig = (): AgentConfig["skills"] | undefined => {
   const dir = process.env.QUANTA_SKILLS_DIR
-  return dir ? { dir } : undefined
+  if (dir) return { dir }
+  if (process.env.QUANTA_SKILLS === "1" || hasArg("--skills")) return {}
+  return undefined
 }
 
 /**

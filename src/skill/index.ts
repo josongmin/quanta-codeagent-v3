@@ -46,10 +46,14 @@ export {
 } from "./skill-tool"
 export {
   discoverSystemSkills,
+  findLocalizeFaultSkill,
   findProgressAuditSkill,
+  LOCALIZE_FAULT_SKILL_NAME,
+  type LocalizeFaultTrigger,
   PROGRESS_AUDIT_SKILL_NAME,
   type ProgressAuditTrigger,
   systemSkillsDir,
+  triggerLocalizeFault,
   triggerProgressAudit,
 } from "./system-skills"
 export { createToolSearchTool } from "./tool-search"

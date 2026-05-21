@@ -138,10 +138,19 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   git_log: null,
   git_diff: null,
   git_blame: null,
+  // Read-only fault-localization aids (Codex signal absorption): structure +
+  // log-parse + churn/ownership. All read-only — safe in plan mode.
+  file_tree_summary: null,
+  parse_test_failure: null,
+  git_churn: null,
+  git_blame_heatmap: null,
   // Mutating built-ins
   write: "write_filesystem",
   edit: "write_filesystem",
   scripted_replace: "write_filesystem",
+  // apply_patch (Wave C V4A): multi-file atomic patch — same write posture as
+  // edit/write/scripted_replace; blocks in plan mode (plan PROPOSES, not commits).
+  apply_patch: "write_filesystem",
   bash: "bash_mutating",
   update_working_state: "working_state_write",
   // Mutating git built-ins (ADR-0053, Claude Desktop 1.7196.3

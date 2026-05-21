@@ -56,7 +56,9 @@
       "@/rules": ["./src/rules/index.ts"],
       "@/rules/*": ["./src/rules/*"],
       "@/migration": ["./src/migration/index.ts"],
-      "@/migration/*": ["./src/migration/*"]
+      "@/migration/*": ["./src/migration/*"],
+      "@/patch": ["./src/patch/index.ts"],
+      "@/patch/*": ["./src/patch/*"]
     }
   },
   "include": ["src", "tests", "tools"],

@@ -32,23 +32,37 @@
 
 import type { ToolResultBlock } from "@/llm"
 
-/** Tunable caps. Defaults: general 8-turn/3-cap, env 4-turn/2-cap. */
+/** Tunable caps. Defaults: general 8-turn/3-cap, env 4-turn/3-cap (single
+ *  bucket), edit 8-turn/5-cap (per file). */
 export interface DedupGateCaps {
-  /** Sliding window (turns) for general (non-env-modifying) tool calls. */
+  /** Sliding window (turns) for general (non-env, non-edit) tool calls. */
   generalWindow: number
   /** Block at the Nth identical call within `generalWindow`. */
   generalThreshold: number
   /** Sliding window (turns) for env-modifying bash commands. */
   envWindow: number
-  /** Block at the Nth identical call within `envWindow`. Fast-brake. */
+  /** Block at the Nth env-modifying command within `envWindow`. Counts ALL
+   *  env-mutating commands in ONE bucket — not per exact string — because the
+   *  observed thrash fires the SAME intent (install a dep) under many different
+   *  spellings (`pip install x`, `python3 -m pip install x`, `apt-get …`,
+   *  `brew …`, `ensurepip`), which exact-match dedup never catches. */
   envThreshold: number
+  /** Sliding window (turns) for repeated edits to the SAME file. */
+  editWindow: number
+  /** Block at the Nth edit/scripted_replace to one file within `editWindow`.
+   *  Edits DO mutate state (unlike env repeats), so this is forgiving — it
+   *  catches "can't land the change, flailing on one file" (observed: 13
+   *  variant edits to the same `__init__`), not normal iterative editing. */
+  editThreshold: number
 }
 
 export const DEFAULT_DEDUP_GATE_CAPS: DedupGateCaps = {
   generalWindow: 8,
   generalThreshold: 3,
   envWindow: 4,
-  envThreshold: 2,
+  envThreshold: 3,
+  editWindow: 8,
+  editThreshold: 5,
 }
 
 /** Env-modifying command prefixes (case-insensitive on the FIRST shell token).
@@ -133,9 +147,43 @@ const bashCommandOf = (name: string, args: unknown): string | undefined => {
   return typeof cmd === "string" ? cmd : undefined
 }
 
+/** Edit-family tools whose target file is bucketed for thrash detection.
+ *  `edit`/`multi_edit` carry `path`; `scripted_replace` carries `file`. */
+const EDIT_TOOLS = new Set(["edit", "multi_edit", "scripted_replace"])
+
+/** Extract the normalized target file path for an edit-family tool, or
+ *  `undefined` for non-edit tools / malformed inputs (treat as general). */
+const editFileOf = (name: string, args: unknown): string | undefined => {
+  if (!EDIT_TOOLS.has(name)) return undefined
+  if (typeof args !== "object" || args === null) return undefined
+  const rec = args as { path?: unknown; file?: unknown }
+  const p = typeof rec.path === "string" ? rec.path : rec.file
+  return typeof p === "string" ? p.trim() : undefined
+}
+
+/** Bucket regime + key for a candidate dispatch. The KEY (not just the
+ *  threshold) is what differs per regime:
+ *   - env:     ALL env-mutating commands collapse to one `__env__` bucket, so
+ *              N attempts under different spellings count together.
+ *   - edit:    one bucket per target file (`__edit__:<path>`), so variant
+ *              edits to the same file count together.
+ *   - general: exact `<name> <canonical-args>` (catches byte-identical spins). */
+const bucketOf = (
+  name: string,
+  args: unknown,
+): { regime: "general" | "env" | "edit"; key: string } => {
+  const bashCmd = bashCommandOf(name, args)
+  if (bashCmd !== undefined && isEnvBashCommand(bashCmd)) {
+    return { regime: "env", key: "__env__" }
+  }
+  const editFile = editFileOf(name, args)
+  if (editFile !== undefined) return { regime: "edit", key: `__edit__:${editFile}` }
+  return { regime: "general", key: `${name} ${canonicalizeArgs(args)}` }
+}
+
 export type DedupVerdict =
   | { blocked: false }
-  | { blocked: true; observation: string; count: number; regime: "general" | "env" }
+  | { blocked: true; observation: string; count: number; regime: "general" | "env" | "edit" }
 
 /** Per-session dedup gate. State is a `Map<hashKey, number[]>` — the list of
  *  turns at which the call was made. Lookups prune entries outside the

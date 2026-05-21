@@ -223,6 +223,17 @@ describe("buildSystemPrompt", () => {
       expect(lower).toContain("list_mcp_resources")
     })
 
+    test("routing matrix carries the 3-stage fault-localization funnel (file→function→edit-location)", () => {
+      // Agentless funnel guidance: localize/grep → read+lsp_document_symbol →
+      // lsp_references/grep. Must mention all three stage anchors + the
+      // "rg locates, source proves" signal-trust rule.
+      expect(lower).toContain("localize a fault")
+      expect(lower).toContain("file → function → edit-location")
+      expect(lower).toContain("lsp_document_symbol")
+      expect(lower).toContain("lsp_references")
+      expect(lower).toContain("source text proves")
+    })
+
     test("matrix lives near the budget section (consistent placement)", () => {
       const budgetIdx = p.indexOf("Budget discipline")
       const routingIdx = p.indexOf("Tool routing")

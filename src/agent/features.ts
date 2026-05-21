@@ -147,13 +147,15 @@ export interface SessionFeatures {
  *  complexity budget; pure except `discoverSkills`'s directory IO. */
 const buildSkillFeatures = async (
   config: AgentConfig,
-  dir: string,
+  dir: string | undefined,
 ): Promise<{
   tools: Tool[]
   allowlists: Map<string, string[]> | undefined
   inventory: { name: string; description: string }[]
 }> => {
-  const userSkills = await discoverSkills(dir)
+  // `dir` OPTIONAL (ADR-0045 follow-up): when omitted, only bundled system
+  // skills load. `discoverSkills` is only called when a user dir is given.
+  const userSkills = dir !== undefined ? await discoverSkills(dir) : []
   // Bundled system skills (ADR-0045) — version-pinned, ship with the framework.
   // Merged into the discoverable set so the model can invoke disciplines like
   // `progress-audit` regardless of whether the user populated their own skills
@@ -249,6 +251,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   }
 
   // --- Skill block --------------------------------------------------------
+  // Runs whenever `config.skills` is present — including `skills: {}` (no user
+  // dir), which loads ONLY bundled system skills. Still fully opt-in: ABSENT
+  // ⇒ block skipped, no Skill tool, byte-identical (RFC §1.2).
   if (config.skills) {
     const sf = await buildSkillFeatures(config, config.skills.dir)
     extraTools.push(...sf.tools)

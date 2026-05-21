@@ -145,6 +145,31 @@ describe("buildSessionFeatures", () => {
     expect(skill.description).toContain("progress-audit")
   })
 
+  test("skills: {} (NO dir) ⇒ bundled system skills discovered — ADR-0045 follow-up", async () => {
+    // The whole point of bundled discipline skills: reachable WITHOUT a user
+    // dir. `skills: {}` (set by `QUANTA_SKILLS=1`) registers the Skill tool and
+    // advertises BOTH bundled skills with zero user-dir IO.
+    const f = await buildSessionFeatures(cfg({ skills: {} }))
+    expect(names(f.extraTools)).toEqual(["Skill", "ToolSearch"])
+    const skill = must(
+      f.extraTools.find((t) => t.name === "Skill"),
+      "Skill tool",
+    )
+    expect(skill.description).toContain("progress-audit")
+    expect(skill.description).toContain("localize-fault")
+    // The per-turn inventory carries both bundled skills too.
+    const invNames = (f.activeSkills ?? []).map((s) => s.name)
+    expect(invNames).toContain("progress-audit")
+    expect(invNames).toContain("localize-fault")
+  })
+
+  test("skills ABSENT ⇒ no Skill tool (byte-identical default-OFF, RFC §1.2)", async () => {
+    const f = await buildSessionFeatures(cfg())
+    expect(names(f.extraTools)).not.toContain("Skill")
+    expect(names(f.extraTools)).not.toContain("ToolSearch")
+    expect(f.activeSkills).toBeUndefined()
+  })
+
   test("ToolSearch tool ranks the live registry catalog", async () => {
     const dir = await mkdtemp(join(tmpdir(), "feat-ts-"))
     tmpDirs.push(dir)

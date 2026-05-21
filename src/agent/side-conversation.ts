@@ -45,6 +45,7 @@
 
 import type { LLMPort, Message, StreamEvent, ToolSchema } from "@/llm"
 import { assembleFromEvents } from "@/llm"
+import { GEN_AI_ATTRS, QUANTA_ATTRS } from "@/observability/vocabulary"
 import { QuantaError } from "@/shared"
 
 // ===========================================================================
@@ -141,6 +142,10 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "git_log",
   "git_diff",
   "git_blame",
+  "git_blame_heatmap",
+  "git_churn",
+  "file_tree_summary",
+  "parse_test_failure",
 ])
 
 // ===========================================================================
@@ -198,15 +203,24 @@ export interface SideConversationOptions {
   observe?: (span: SideConversationSpanAttributes) => void
 }
 
+/** Wire keys for the side-conversation span — all sourced from the
+ *  vocabulary SSOT (`@/observability`) so the orphan-literal scan stays
+ *  green and a key rename surfaces in one place. */
+type SideConvRequiredKey =
+  | typeof QUANTA_ATTRS.thread.side
+  | typeof QUANTA_ATTRS.thread.kind
+  | typeof QUANTA_ATTRS.thread.parentId
+  | typeof QUANTA_ATTRS.turn.durationMs
+type SideConvOptionalKey =
+  | typeof GEN_AI_ATTRS.usage.inputTokens
+  | typeof GEN_AI_ATTRS.usage.outputTokens
+
 /** OTel-shaped attribute set emitted for one side-conversation invocation. */
-export interface SideConversationSpanAttributes {
-  "quanta.thread.side": true
-  "quanta.thread.kind": "side"
-  "quanta.thread.parent_id": string
-  "quanta.turn.duration_ms": number
-  "gen_ai.usage.input_tokens"?: number
-  "gen_ai.usage.output_tokens"?: number
-}
+export type SideConversationSpanAttributes = Record<
+  SideConvRequiredKey,
+  string | number | boolean
+> &
+  Partial<Record<SideConvOptionalKey, number>>
 
 /**
  * Result of one side-conversation invocation.
@@ -396,13 +410,13 @@ const buildSpan = (
   outputTokens: number,
 ): SideConversationSpanAttributes => {
   const attrs: SideConversationSpanAttributes = {
-    "quanta.thread.side": true,
-    "quanta.thread.kind": "side",
-    "quanta.thread.parent_id": parentSessionId,
-    "quanta.turn.duration_ms": durationMs,
+    [QUANTA_ATTRS.thread.side]: true,
+    [QUANTA_ATTRS.thread.kind]: "side",
+    [QUANTA_ATTRS.thread.parentId]: parentSessionId,
+    [QUANTA_ATTRS.turn.durationMs]: durationMs,
   }
-  if (inputTokens) attrs["gen_ai.usage.input_tokens"] = inputTokens
-  if (outputTokens) attrs["gen_ai.usage.output_tokens"] = outputTokens
+  if (inputTokens) attrs[GEN_AI_ATTRS.usage.inputTokens] = inputTokens
+  if (outputTokens) attrs[GEN_AI_ATTRS.usage.outputTokens] = outputTokens
   return attrs
 }
 

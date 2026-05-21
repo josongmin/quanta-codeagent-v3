@@ -15,7 +15,9 @@
 
 import type { Tool } from "../types"
 import { gitBlameTool } from "./blame"
+import { gitBlameHeatmapTool } from "./blame-heatmap"
 import { gitBranchSwitchTool } from "./branch-switch"
+import { gitChurnTool } from "./churn"
 import { gitCommitTool } from "./commit"
 import { gitDiffTool } from "./diff"
 import { gitLogTool } from "./log"
@@ -24,15 +26,19 @@ import { gitStatusTool } from "./status"
 import type { GitRunner } from "./types"
 
 export { gitBlameTool } from "./blame"
+export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { gitBranchSwitchTool } from "./branch-switch"
+export { gitChurnTool, rankChurn } from "./churn"
 export { gitCommitTool } from "./commit"
 export { gitDiffTool } from "./diff"
 export { gitLogTool } from "./log"
 export { defaultGitRunner } from "./runner"
 export { gitStatusTool } from "./status"
 export type {
+  GitBlameHeatmapInput,
   GitBlameInput,
   GitBranchSwitchInput,
+  GitChurnInput,
   GitCommitInput,
   GitDiffInput,
   GitLogInput,
@@ -49,6 +55,9 @@ export const gitTools = (runner: GitRunner = defaultGitRunner): Tool[] => [
   gitStatusTool(runner) as Tool,
   gitLogTool(runner) as Tool,
   gitBlameTool(runner) as Tool,
+  // Stage-1 fault-localization signals (read-only, concurrency-safe).
+  gitChurnTool(runner) as Tool,
+  gitBlameHeatmapTool(runner) as Tool,
   gitCommitTool(runner) as Tool,
   gitBranchSwitchTool(runner) as Tool,
 ]

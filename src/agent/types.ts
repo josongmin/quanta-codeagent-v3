@@ -11,6 +11,7 @@ import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
+import type { ActiveTurnState } from "./steering"
 
 export interface AgentConfig {
   llm: LLMPort
@@ -134,8 +135,17 @@ export interface AgentConfig {
   /**
    * Enable the skill system (Tier 1 capability, ADR-0011). Absent ⇒ no skill
    * discovery and the `Skill`/`ToolSearch` tools are NOT registered (loop
-   * byte-identical). When present, skills are discovered from `dir` at
-   * session start and the tools are registered.
+   * byte-identical). When present, skills are discovered + the `Skill` /
+   * `ToolSearch` tools are registered.
+   *
+   * `dir` (OPTIONAL — ADR-0045 follow-up): the user skills directory. When
+   * OMITTED, only the BUNDLED system skills (`localize-fault`, `progress-audit`
+   * — version-pinned, shipped with the framework) are discovered. This lets a
+   * host enable the discipline skills WITHOUT remembering to point at a user
+   * dir (the whole rationale of bundled skills). `skills: {}` ⇒ system skills
+   * only; `skills: { dir }` ⇒ user dir + system skills (system wins on a name
+   * collision so a user skill cannot weaken a bundled one). `skills` ABSENT ⇒
+   * no Skill tool, byte-identical default-OFF (RFC §1.2).
    *
    * `changedPaths` (optional, conservative L1→L2 wiring): when set, the
    * per-turn active-skills inventory is pre-filtered via
@@ -146,7 +156,7 @@ export interface AgentConfig {
    * (byte-identical). Hosts compute this list however they want (git diff,
    * file watcher, manual hint).
    */
-  skills?: { dir: string; changedPaths?: string[] }
+  skills?: { dir?: string; changedPaths?: string[] }
   /**
    * Compaction circuit-breaker control (Tier 0 safety hardening, ADR-0011). The
    * breaker is ON by default with `DEFAULT_COMPACTION_BREAKER_CAPS` — it only
@@ -203,6 +213,22 @@ export interface AgentConfig {
    * effort, the deny result is the authoritative signal.
    */
   onHandoff?: (event: HandoffRequiredEvent) => void
+  /** ADR-0050 trust-scope wire-up (Phase C). DEFAULT OFF — absent ⇒ the
+   *  admissibility-gate ask-branch never short-circuits on scope. When set,
+   *  the gate consults `registry.hasGrant(projectKey, { tool })` before
+   *  calling host `onConfirm`. */
+  trustScope?: { registry: TrustScopeRegistry; projectKey: string }
+  /** ADR-0030 mid-turn steering: mutable ref the loop overwrites on every
+   *  turn boundary with the active {@link ActiveTurnState} (fresh
+   *  `currentTurn` header per turn; `currentTurn=null` + `isInterrupted`
+   *  reflecting the stop reason after finish). Absent ⇒ no state exposed
+   *  (byte-identical legacy). */
+  activeTurnRef?: { current: ActiveTurnState }
+  /** ADR-0030: awaited ONCE at the top of each turn (before the next LLM
+   *  call) so a surface can fence a mid-turn injection into the conversation
+   *  buffer before the loop snapshots it. Absent ⇒ never awaited
+   *  (byte-identical legacy). */
+  steerBarrier?: () => Promise<void>
   /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like

@@ -30,16 +30,24 @@ import type { ToolUseBlock } from "@/llm"
 import {
   type AutoModeClassifier,
   computeActionSignature,
+  type DenialMemory,
   evaluate,
   evaluateAuto,
   evaluateStack,
   type HITLTier,
   hardDenyReason,
   inferToolTier,
+  isAllowed,
   type PermissionContext,
   type PermissionStore,
+  type ReviewContext,
+  type ReviewerPort,
+  type ReviewerTier,
+  reviewAction,
   resolveHostId,
+  type ToolActionKeyed,
 } from "@/permission"
+import type { RulesStore } from "@/rules"
 import { deny, HANDOFF_SUFFIX } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
 import type { HandoffRequiredEvent, HitlTier } from "./hitl-tier"
@@ -51,6 +59,92 @@ export interface AdmissibilityAction {
   tool: string
   input: unknown
   isReadOnly: boolean
+}
+
+/**
+ * Wave A opt-in surface (ADR-0029 reviewer 3-tier + ADR-0031 prefix-rule DSL).
+ * Every field is optional; an all-undefined object (or the legacy 4-arg call)
+ * is byte-identical to the prior gate. `permissionStore` is carried here so the
+ * single `opts` parameter stays one object (the prior `{ permissionStore? }`
+ * shape is a structural subset — existing call sites compile unchanged).
+ *
+ *   - `rulesStore`     consulted FIRST (before mode/HITL/policy): allow ⇒ admit,
+ *                      deny ⇒ terminal, ask ⇒ reviewer, no_match ⇒ noMatchPolicy.
+ *   - `noMatchPolicy`  "deny" ⇒ terminal default-deny on no_match; "fallthrough"
+ *                      (or absent) ⇒ continue to the legacy gates.
+ *   - `reviewerPort`   when wired, the always-confirm HITL tier (and rule `ask`)
+ *                      escalate to `reviewAction` instead of the legacy onConfirm.
+ *   - `defaultReviewer` policy-default reviewer for the ReviewContext (default
+ *                      `"user"`).
+ *   - `priorDenials`   sticky-precedence inputs threaded into the ReviewContext.
+ *   - `decidedAt`      injectable clock for deterministic decision timestamps.
+ */
+export interface AdmissibilityWaveAOptions {
+  permissionStore?: PermissionStore
+  rulesStore?: RulesStore
+  noMatchPolicy?: "deny" | "fallthrough"
+  reviewerPort?: ReviewerPort
+  defaultReviewer?: ReviewerTier
+  priorDenials?: ReadonlyArray<DenialMemory>
+  decidedAt?: () => number
+}
+
+/** Map a `ReviewerTier` to the short preview tag suffix the dispatch seam
+ *  surfaces (`reviewer_user` / `reviewer_auto` / `reviewer_guardian`). */
+const reviewerTag = (reviewer: ReviewerTier): string =>
+  reviewer === "auto_review"
+    ? "reviewer_auto"
+    : reviewer === "guardian_subagent"
+      ? "reviewer_guardian"
+      : "reviewer_user"
+
+/**
+ * Run the reviewer escalation for an action (rule `ask` OR always-confirm tier
+ * with a wired port). Builds the `ToolActionKeyed` + `ReviewContext`, invokes
+ * `reviewAction`, and maps the 8-state outcome to an admit (null via the hook)
+ * or a terminal deny. Allowed outcomes route through `runPreToolUseHook`;
+ * `user_aborted` carries the hand-off suffix; other denials phrase the verb by
+ * reviewer. Throws from the port propagate (no silent catch).
+ */
+const reviewAndDecide = async (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  action: AdmissibilityAction,
+  actionKey: string,
+  opts: AdmissibilityWaveAOptions,
+): Promise<DispatchResult | null> => {
+  // Guarded by the call sites, but keep the invariant explicit: a reviewer
+  // escalation with no port is a wiring error, never a silent allow.
+  if (opts.reviewerPort === undefined) {
+    return deny(
+      call.id,
+      `Reviewer escalation requested for ${action.tool} but no ReviewerPort is wired.`,
+      "rule_ask",
+    )
+  }
+  const keyed: ToolActionKeyed = {
+    tool: action.tool,
+    input: action.input,
+    isReadOnly: action.isReadOnly,
+    actionKey,
+  }
+  const ctx: ReviewContext = {
+    sessionId: config.sessionId ?? "default",
+    turnId: String(config.run?.turn ?? 0),
+    priorDenials: opts.priorDenials ?? [],
+    configReviewer: opts.defaultReviewer ?? "user",
+    decidedAt: opts.decidedAt ?? (() => Date.now()),
+  }
+  const dec = await reviewAction(keyed, ctx, opts.reviewerPort)
+  const tag = reviewerTag(dec.reviewer)
+  if (isAllowed(dec.outcome)) return runPreToolUseHook(call, config)
+  if (dec.outcome === "user_aborted") {
+    return deny(call.id, `User aborted: ${dec.rationale}${HANDOFF_SUFFIX}`, tag)
+  }
+  if (dec.outcome === "guardian_denied") {
+    return deny(call.id, `Guardian denied: ${dec.rationale}`, tag)
+  }
+  return deny(call.id, `User declined: ${dec.rationale}`, tag)
 }
 
 /** Emit pre_tool_use hook, returning a hook-denied result or null to proceed. */
@@ -329,8 +423,40 @@ export const runAdmissibilityGate = async (
   permission: PermissionContext,
   action: AdmissibilityAction,
   autoClassifier?: AutoModeClassifier,
-  opts: { permissionStore?: PermissionStore } = {},
+  opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
+  // 0. Prefix-rule DSL gate (ADR-0031) — consulted BEFORE mode/HITL/policy so
+  //    an explicit `allow` short-circuits every downstream gate, a `deny` is
+  //    terminal, an `ask` escalates to the reviewer, and `no_match` honors
+  //    `noMatchPolicy` (default "fallthrough" ⇒ legacy gates). The match key is
+  //    the tool's shell command when it exposes one, else the tool name (so a
+  //    `allow read_file` rule still matches a non-shell tool). Absent
+  //    `rulesStore` ⇒ skipped (byte-identical).
+  if (opts.rulesStore) {
+    const ruleKey = config.registry.extractShellCommand(action.tool, action.input) ?? action.tool
+    const m = opts.rulesStore.match(ruleKey)
+    if (m.kind === "matched") {
+      if (m.rule.action === "allow") return runPreToolUseHook(call, config)
+      if (m.rule.action === "deny") {
+        return deny(call.id, `Denied by ${m.rule.layer} rule '${m.rule.prefix}': ${ruleKey}`, "rule_deny")
+      }
+      // m.rule.action === "ask" — escalate (deny with rule_ask tag if unwired).
+      if (opts.reviewerPort === undefined) {
+        return deny(
+          call.id,
+          `Rule 'ask ${m.rule.prefix}' matched '${ruleKey}' but no ReviewerPort is wired.`,
+          "rule_ask",
+        )
+      }
+      return reviewAndDecide(call, config, action, ruleKey, opts)
+    }
+    // m.kind === "no_match"
+    if (opts.noMatchPolicy === "deny") {
+      return deny(call.id, `No rule matched '${ruleKey}' and noMatchPolicy='deny'.`, "rule_no_match_deny")
+    }
+    // "fallthrough" (or absent) ⇒ fall through to the legacy gates below.
+  }
+
   // 1. Mode-posture block (plan/review/audit) — fires BEFORE any HITL or
   //    permission work so a blocked mutating tool never reaches the classifier
   //    or the confirm prompt. Read-only tools always pass through.
@@ -345,6 +471,16 @@ export const runAdmissibilityGate = async (
   //    the policy branch keeps the legacy "Permission denied" wording for
   //    classifier denials in auto mode.
   if (config.hitl?.enabled === true) {
+    // Wave A (ADR-0029): a wired reviewerPort intercepts the always-confirm
+    // tier and escalates to reviewAction instead of the legacy onConfirm. Every
+    // other tier keeps its runHitlGate semantics (hand-off-required deny / none
+    // allow / pre-approval fallthrough), so unset reviewerPort ⇒ byte-identical.
+    if (opts.reviewerPort !== undefined) {
+      const { tier } = resolveHitlTier(config, call, action)
+      if (tier === "always-confirm") {
+        return reviewAndDecide(call, config, action, action.tool, opts)
+      }
+    }
     const hitlResult = await runHitlGate(call, config, action)
     if (hitlResult !== "fallthrough") {
       // null ⇒ HITL approved, skip mode policy and emit hook + proceed.

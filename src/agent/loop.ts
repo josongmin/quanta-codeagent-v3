@@ -24,6 +24,7 @@ import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
 import { streamingTurn } from "./streaming-dispatch"
+import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
 import type { WorkingStateSession } from "./working-state"
@@ -1017,6 +1018,12 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const workingState = features.workingState
 
   const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
+    // ADR-0030: clear the active-turn header and reflect the stop reason so a
+    // surface can ask "are we still mid-turn? were we interrupted?" after the
+    // loop returns. Absent ref ⇒ no-op (byte-identical legacy).
+    if (cfg.activeTurnRef) {
+      cfg.activeTurnRef.current = { currentTurn: null, isInterrupted: reason === "aborted" }
+    }
     const messages = [...wm.snapshot()]
     if (cfg.store) {
       await persistSession(buildPersistDeps(cfg, recorder), {
@@ -1053,6 +1060,33 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
 
   for (let turn = 1; turn <= cfg.maxTurns; turn++) {
     if (cfg.signal.aborted) return finish("aborted", turn - 1)
+    // ADR-0030 mid-turn steering seam (default-OFF ⇒ both no-ops, byte-
+    // identical legacy). Order matters: await the barrier FIRST so a pending
+    // surface injection lands in the conversation buffer before we expose the
+    // fresh turn header and snapshot it for this turn's LLM call.
+    if (cfg.steerBarrier) {
+      // The surface may push a steered user message into the conversation
+      // buffer (`cfg.messages`) while the barrier resolves. `wm` holds its own
+      // copy (constructor does `[...initial]`), so reconcile the tail the
+      // barrier appended into `wm` — that is what the NEXT LLM snapshot reads.
+      const beforeLen = cfg.messages.length
+      await cfg.steerBarrier()
+      for (let i = beforeLen; i < cfg.messages.length; i++) {
+        const injected = cfg.messages[i]
+        if (injected) wm.append(injected)
+      }
+    }
+    if (cfg.activeTurnRef) {
+      cfg.activeTurnRef.current = {
+        currentTurn: makeTurnHeader({
+          turnId: crypto.randomUUID(),
+          kind: "main",
+          startedAt: Date.now(),
+          threadId: sessionId,
+        }),
+        isInterrupted: false,
+      }
+    }
     // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Pre-T3 this
     // was computed-and-discarded (`void stampTurn(...)`) so the caller's
     // `config.run` was never observed by downstream code. T3 reads the
