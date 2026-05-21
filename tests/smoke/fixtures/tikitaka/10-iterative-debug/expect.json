@@ -1,0 +1,10 @@
+{
+  "stopReason": "completed",
+  "turns": { "count": { "min": 6 } },
+  "toolCalls": {
+    "required": ["read", "edit"],
+    "counts": { "read": { "min": 2, "max": 2 }, "edit": { "min": 1, "max": 1 } }
+  },
+  "files": [{ "path": "parser.ts", "contains": ["split(\",\")"], "notContains": ["split()"] }],
+  "contextRetention": [{ "inRun": 0, "assistantTranscriptContains": ["parser.ts"] }]
+}

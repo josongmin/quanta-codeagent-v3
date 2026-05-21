@@ -1,0 +1,10 @@
+{
+  "stopReason": "completed",
+  "turns": { "count": { "min": 2, "max": 2 } },
+  "toolCalls": {
+    "required": ["grep"],
+    "forbidden": ["write", "edit"],
+    "counts": { "grep": { "min": 1, "max": 1 } }
+  },
+  "finalText": { "containsAny": ["util.ts", "calculate"] }
+}

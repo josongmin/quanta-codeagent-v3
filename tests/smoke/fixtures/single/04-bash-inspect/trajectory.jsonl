@@ -1,0 +1,5 @@
+{"run":0,"turn":0,"event":{"type":"tool_use_start","id":"b1","name":"bash"}}
+{"run":0,"turn":0,"event":{"type":"tool_use_end","id":"b1","input":{"command":"wc -l data.txt"}}}
+{"run":0,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
+{"run":0,"turn":1,"event":{"type":"text_delta","delta":"data.txt 는 5 줄입니다."}}
+{"run":0,"turn":1,"event":{"type":"message_stop","stop_reason":"end_turn"}}

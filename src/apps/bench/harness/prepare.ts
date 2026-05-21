@@ -9,6 +9,7 @@
  * resolve to `{ ok: false, … }` so the caller (bench CLI) can report + exit.
  */
 import { runtimeConfig } from "@/shared"
+import { hostArch } from "./arch"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./config"
 import { type DockerSpawn, listSwebenchImages } from "./images"
 
@@ -108,6 +109,33 @@ const tail = (s: string, lines = 50): string => s.split("\n").slice(-lines).join
 export const prepareImages = async (opts: PrepareImagesOpts): Promise<PrepareImagesResult> => {
   const spawn = opts.spawn ?? defaultSpawn
   const config = opts.config ?? resolveHarnessConfig()
+
+  // arm64 guard: `prepare_images` ALWAYS builds locally (it has no pull mode).
+  // SWE-bench base/env Dockerfiles pin linux/amd64, and conda's installer
+  // crashes under x86 emulation on Apple Silicon (build exits 133 at the
+  // miniconda step — observed). So prepare-images is only viable on native
+  // x86 hosts. On arm64 the warm-cache win is still had FOR FREE: run_evaluation
+  // PULLS the prebuilt env image and (with clean=false, the default) leaves it
+  // on disk for the next instance. Return early with guidance instead of
+  // burning a minute on a doomed build. Operators on arm64 who insist (e.g.
+  // a working binfmt setup) can override with QUANTA_SWEBENCH_PREPARE_FORCE=1.
+  //
+  // `injected` = the caller passed a fake spawn ⇒ this is a unit test; never
+  // short-circuit so the argv-contract tests still exercise the build path.
+  const injected = opts.spawn !== undefined
+  const forced = runtimeConfig().swebenchPrepareForce
+  if (!injected && !forced && hostArch() === "arm64") {
+    return {
+      ok: false,
+      preexistingEnvImages: 0,
+      log:
+        "prepare-images skipped on arm64: prepare_images builds x86 images " +
+        "locally and conda crashes under emulation (build exit 133). The warm " +
+        "cache is obtained automatically by running the eval directly " +
+        "(run_evaluation pulls prebuilt images and keeps them with clean=false). " +
+        "Set QUANTA_SWEBENCH_PREPARE_FORCE=1 to attempt the local build anyway.",
+    }
+  }
 
   // Warm-pool signal: how many env images already exist locally.
   let preexistingEnvImages = 0

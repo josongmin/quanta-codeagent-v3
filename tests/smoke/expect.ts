@@ -60,6 +60,20 @@ const checkTurns = (out: AssertionFailure[], spec: ExpectSpec, actual: number): 
   }
 }
 
+const checkRange = (
+  out: AssertionFailure[],
+  path: string,
+  range: { min?: number; max?: number },
+  actual: number,
+): void => {
+  if (range.min !== undefined && actual < range.min) {
+    fail(out, `${path}.min`, `>= ${range.min}`, String(actual))
+  }
+  if (range.max !== undefined && actual > range.max) {
+    fail(out, `${path}.max`, `<= ${range.max}`, String(actual))
+  }
+}
+
 const checkToolCalls = (
   out: AssertionFailure[],
   spec: ExpectSpec,
@@ -69,93 +83,70 @@ const checkToolCalls = (
   if (tc === undefined) return
   const order = capture.toolCallOrder()
   const counts = capture.toolCallCounts()
-  if (tc.required !== undefined) {
-    for (const t of tc.required) {
-      if ((counts[t] ?? 0) === 0) {
-        fail(out, `toolCalls.required[${t}]`, ">= 1 call", "0 calls")
-      }
-    }
+  for (const t of tc.required ?? []) {
+    if ((counts[t] ?? 0) === 0) fail(out, `toolCalls.required[${t}]`, ">= 1 call", "0 calls")
   }
-  if (tc.forbidden !== undefined) {
-    for (const t of tc.forbidden) {
-      const n = counts[t] ?? 0
-      if (n > 0) {
-        fail(out, `toolCalls.forbidden[${t}]`, "0 calls", `${n} calls`)
-      }
-    }
+  for (const t of tc.forbidden ?? []) {
+    const n = counts[t] ?? 0
+    if (n > 0) fail(out, `toolCalls.forbidden[${t}]`, "0 calls", `${n} calls`)
   }
-  if (tc.orderedPrefix !== undefined) {
-    for (let i = 0; i < tc.orderedPrefix.length; i++) {
-      const want = tc.orderedPrefix[i]
-      const got = order[i]
-      if (got !== want) {
-        fail(
-          out,
-          `toolCalls.orderedPrefix[${i}]`,
-          String(want),
-          got === undefined ? "<missing>" : got,
-        )
-      }
+  ;(tc.orderedPrefix ?? []).forEach((want, i) => {
+    const got = order[i]
+    if (got !== want) {
+      fail(out, `toolCalls.orderedPrefix[${i}]`, String(want), got ?? "<missing>")
     }
-  }
-  if (tc.counts !== undefined) {
-    for (const [t, range] of Object.entries(tc.counts)) {
-      const n = counts[t] ?? 0
-      if (range.min !== undefined && n < range.min) {
-        fail(out, `toolCalls.counts[${t}].min`, `>= ${range.min}`, String(n))
-      }
-      if (range.max !== undefined && n > range.max) {
-        fail(out, `toolCalls.counts[${t}].max`, `<= ${range.max}`, String(n))
-      }
-    }
+  })
+  for (const [t, range] of Object.entries(tc.counts ?? {})) {
+    checkRange(out, `toolCalls.counts[${t}]`, range, counts[t] ?? 0)
   }
 }
 
-const checkFiles = (out: AssertionFailure[], spec: ExpectSpec, cwd: string): void => {
-  if (spec.files === undefined) return
-  for (const f of spec.files) {
-    const full = join(cwd, f.path)
-    const exists = existsSync(full)
-    if (f.absent === true) {
-      if (exists) fail(out, `files[${f.path}].absent`, "must not exist", "exists")
-      continue
-    }
-    if (!exists) {
-      fail(out, `files[${f.path}]`, "exists", "missing")
-      continue
-    }
-    const body = readFileSync(full, "utf8")
-    if (f.contains !== undefined) {
-      for (const needle of f.contains) {
-        if (!body.includes(needle)) {
-          fail(out, `files[${f.path}].contains`, `contains ${JSON.stringify(needle)}`, "absent")
-        }
-      }
-    }
-    if (f.notContains !== undefined) {
-      for (const needle of f.notContains) {
-        if (body.includes(needle)) {
-          fail(out, `files[${f.path}].notContains`, `absent ${JSON.stringify(needle)}`, "found")
-        }
-      }
-    }
-    // linesAdded: applied only when the seed file is present — we count the
-    // delta vs the seed. Missing seed ⇒ skip (cannot infer "added").
-    if (f.linesAdded !== undefined) {
-      const seedPath = join(cwd, ".seed-snapshot", f.path)
-      if (existsSync(seedPath)) {
-        const before = readFileSync(seedPath, "utf8").split("\n").length
-        const after = body.split("\n").length
-        const added = Math.max(0, after - before)
-        if (f.linesAdded.min !== undefined && added < f.linesAdded.min) {
-          fail(out, `files[${f.path}].linesAdded.min`, `>= ${f.linesAdded.min}`, String(added))
-        }
-        if (f.linesAdded.max !== undefined && added > f.linesAdded.max) {
-          fail(out, `files[${f.path}].linesAdded.max`, `<= ${f.linesAdded.max}`, String(added))
-        }
-      }
+const checkLinesAdded = (
+  out: AssertionFailure[],
+  cwd: string,
+  f: NonNullable<ExpectSpec["files"]>[number],
+  body: string,
+): void => {
+  if (f.linesAdded === undefined) return
+  // Count the delta vs the seed snapshot. Missing seed ⇒ skip (cannot infer).
+  const seedPath = join(cwd, ".seed-snapshot", f.path)
+  if (!existsSync(seedPath)) return
+  const before = readFileSync(seedPath, "utf8").split("\n").length
+  const added = Math.max(0, body.split("\n").length - before)
+  checkRange(out, `files[${f.path}].linesAdded`, f.linesAdded, added)
+}
+
+const checkOneFile = (
+  out: AssertionFailure[],
+  cwd: string,
+  f: NonNullable<ExpectSpec["files"]>[number],
+): void => {
+  const full = join(cwd, f.path)
+  const exists = existsSync(full)
+  if (f.absent === true) {
+    if (exists) fail(out, `files[${f.path}].absent`, "must not exist", "exists")
+    return
+  }
+  if (!exists) {
+    fail(out, `files[${f.path}]`, "exists", "missing")
+    return
+  }
+  const body = readFileSync(full, "utf8")
+  for (const needle of f.contains ?? []) {
+    if (!body.includes(needle)) {
+      fail(out, `files[${f.path}].contains`, `contains ${JSON.stringify(needle)}`, "absent")
     }
   }
+  for (const needle of f.notContains ?? []) {
+    if (body.includes(needle)) {
+      fail(out, `files[${f.path}].notContains`, `absent ${JSON.stringify(needle)}`, "found")
+    }
+  }
+  checkLinesAdded(out, cwd, f, body)
+}
+
+const checkFiles = (out: AssertionFailure[], spec: ExpectSpec, cwd: string): void => {
+  for (const f of spec.files ?? []) checkOneFile(out, cwd, f)
 }
 
 const checkFinalText = (
@@ -166,34 +157,34 @@ const checkFinalText = (
   const t = spec.finalText
   if (t === undefined) return
   const text = capture.assistantText()
-  if (t.contains !== undefined) {
-    for (const needle of t.contains) {
-      if (!text.includes(needle)) {
-        fail(out, "finalText.contains", `contains ${JSON.stringify(needle)}`, "absent")
-      }
+  for (const needle of t.contains ?? []) {
+    if (!text.includes(needle)) {
+      fail(out, "finalText.contains", `contains ${JSON.stringify(needle)}`, "absent")
     }
   }
-  if (t.containsAny !== undefined && t.containsAny.length > 0) {
-    if (!t.containsAny.some((n) => text.includes(n))) {
-      fail(out, "finalText.containsAny", `any of ${JSON.stringify(t.containsAny)}`, "none matched")
+  if (
+    t.containsAny !== undefined &&
+    t.containsAny.length > 0 &&
+    !t.containsAny.some((n) => text.includes(n))
+  ) {
+    fail(out, "finalText.containsAny", `any of ${JSON.stringify(t.containsAny)}`, "none matched")
+  }
+  for (const needle of t.notContains ?? []) {
+    if (text.includes(needle)) {
+      fail(out, "finalText.notContains", `absent ${JSON.stringify(needle)}`, "found")
     }
   }
-  if (t.notContains !== undefined) {
-    for (const needle of t.notContains) {
-      if (text.includes(needle)) {
-        fail(out, "finalText.notContains", `absent ${JSON.stringify(needle)}`, "found")
-      }
+  checkRegex(out, t.regex, text)
+}
+
+const checkRegex = (out: AssertionFailure[], pattern: string | undefined, text: string): void => {
+  if (pattern === undefined) return
+  try {
+    if (!new RegExp(pattern).test(text)) {
+      fail(out, "finalText.regex", `match /${pattern}/`, "no match")
     }
-  }
-  if (t.regex !== undefined) {
-    try {
-      const re = new RegExp(t.regex)
-      if (!re.test(text)) {
-        fail(out, "finalText.regex", `match /${t.regex}/`, "no match")
-      }
-    } catch (e) {
-      fail(out, "finalText.regex", "valid regex", String(e))
-    }
+  } catch (e) {
+    fail(out, "finalText.regex", "valid regex", String(e))
   }
 }
 

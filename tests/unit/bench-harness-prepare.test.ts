@@ -183,6 +183,25 @@ describe("prepareImages", () => {
     expect(r.preexistingEnvImages).toBe(2) // base not counted
   })
 
+  test.skipIf(process.arch !== "arm64")(
+    "arm64 host without injected spawn ⇒ skipped with guidance (no doomed local build)",
+    async () => {
+      // No `spawn` injected → real path. On arm64 the guard short-circuits
+      // BEFORE spawning python (prepare_images would build x86 + crash conda
+      // under emulation). dockerSpawn injected so listSwebenchImages is hermetic.
+      const r = await prepareImages({
+        predictionsPath: "/tmp/p.jsonl",
+        runId: "rid",
+        datasetName: "ds",
+        config: CFG,
+        dockerSpawn: noEnvDocker,
+      })
+      expect(r.ok).toBe(false)
+      expect(r.log).toContain("skipped on arm64")
+      expect(r.log).toContain("QUANTA_SWEBENCH_PREPARE_FORCE")
+    },
+  )
+
   test("log contains cmd + exit + tail", async () => {
     const cap: Captured = { argv: [] }
     const r = await prepareImages({

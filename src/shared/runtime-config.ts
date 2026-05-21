@@ -181,6 +181,10 @@ export interface RuntimeConfig {
    *  for the harness (the package uses PEP 604 `list | None`, needs 3.10+);
    *  set to e.g. `python3.11` or an absolute path to override the probe. */
   readonly swebenchPythonBin: string | undefined
+  /** Force `--prepare-images` to attempt the local build even on arm64
+   *  (`QUANTA_SWEBENCH_PREPARE_FORCE`). Default false — arm64 skips prepare
+   *  (conda crashes under x86 emulation; the eval path pulls prebuilt). */
+  readonly swebenchPrepareForce: boolean
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -223,6 +227,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     swebenchNamespace: stringOrUndef(env["QUANTA_SWEBENCH_NAMESPACE"]),
     swebenchForceRebuild: parseBool(env["QUANTA_SWEBENCH_FORCE_REBUILD"]),
     swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),
+    swebenchPrepareForce: parseBool(env["QUANTA_SWEBENCH_PREPARE_FORCE"]),
   })
 }
 

@@ -75,6 +75,26 @@ const readExpect = (dir: string): ExpectSpec => {
   return JSON.parse(readFileSync(p, "utf8")) as ExpectSpec
 }
 
+interface ScenarioConfig {
+  permission: PermissionContext["mode"]
+  maxTurns: number
+}
+
+/** Optional per-scenario `config.json`. Defaults: `permission: "bypass"` (a
+ *  hermetic tmp sandbox with a REPLAYED LLM cannot do anything we did not
+ *  script, so we let every tool run — the `forbidden`-tools assertions are the
+ *  real behavioural safety check), `maxTurns: 8`. */
+const readConfig = (dir: string): ScenarioConfig => {
+  const p = join(dir, "config.json")
+  const base: ScenarioConfig = { permission: "bypass", maxTurns: 8 }
+  if (!existsSync(p)) return base
+  const parsed = JSON.parse(readFileSync(p, "utf8")) as Partial<ScenarioConfig>
+  return {
+    permission: parsed.permission ?? base.permission,
+    maxTurns: parsed.maxTurns ?? base.maxTurns,
+  }
+}
+
 const userMsg = (text: string): Message => ({
   role: "user",
   content: [{ type: "text", text }],
@@ -106,8 +126,10 @@ export const runConversation = async (args: {
   work: string
   llm: SmokeLLM
   capture: CaptureStream
+  config?: ScenarioConfig
 }): Promise<{ lastReason: string; totalTurns: number }> => {
   const { prompts, work, llm, capture } = args
+  const config = args.config ?? { permission: "bypass", maxTurns: 8 }
   const messages: Message[] = []
   let lastReason = "completed"
   let totalTurns = 0
@@ -115,7 +137,7 @@ export const runConversation = async (args: {
     messages.push(userMsg(prompts[i] as string))
     if (i > 0) llm.nextRun()
     capture.beginRun()
-    const outcome = await runAgent(buildConfig({ llm, capture, work, messages }))
+    const outcome = await runAgent(buildConfig({ llm, capture, work, messages, config }))
     messages.length = 0
     messages.push(...outcome.messages)
     lastReason = outcome.reason
@@ -152,6 +174,7 @@ export const runScenario = async (meta: ScenarioMeta): Promise<ScenarioResult> =
       work,
       llm: new TrajectoryReplayLLM(trajectory),
       capture,
+      config: readConfig(meta.dir),
     })
 
     const failures = runAssertions({
@@ -193,17 +216,19 @@ const buildConfig = (args: {
   capture: CaptureStream
   work: string
   messages: Message[]
+  config: ScenarioConfig
 }): AgentConfig => ({
   llm: args.llm,
   registry: new ToolRegistry(defaultTools),
   stream: args.capture,
-  // Smoke runs are non-interactive — auto-accept edits so write/edit tools run
-  // without a confirm prompt (the assertion layer + forbidden-tools sentinels
-  // are what gate safety here, deterministically).
-  permission: { mode: "acceptEdits" } as PermissionContext,
+  // Smoke runs are non-interactive in a hermetic tmp sandbox with a REPLAYED
+  // LLM — `bypass` lets every scripted tool run (the `forbidden`-tools
+  // assertions are the behavioural safety check). A scenario can override via
+  // `config.json` (e.g. to exercise the gate itself).
+  permission: { mode: args.config.permission } as PermissionContext,
   messages: [...args.messages],
   system: "You are a coding agent. Be concise.",
   cwd: args.work,
-  maxTurns: 8,
+  maxTurns: args.config.maxTurns,
   signal: new AbortController().signal,
 })
