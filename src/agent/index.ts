@@ -107,6 +107,15 @@ export {
 } from "./side-conversation"
 export { loadSession, type SaveSessionInput, saveSession } from "./state"
 export {
+  classifyErrorReason,
+  completedCategory,
+  interruptedCategory,
+  STOP_REASON_CODE,
+  type StopCategory,
+  type StopCategoryKind,
+  type StopReasonCode,
+} from "./stop-category"
+export {
   type DispatchOutcome,
   type StreamingCall,
   type StreamingDispatch,
@@ -115,6 +124,14 @@ export {
   streamingTurn,
 } from "./streaming-dispatch"
 export { createSubagentRunner, type SubagentRunnerOptions } from "./subagent-runner"
+export {
+  extractSeedMessages,
+  isUserInputSubmission,
+  SUBMISSION_LEGACY_ID_PREFIX,
+  type Submission,
+  type SubmissionOp,
+  submissionFromMessages,
+} from "./submission"
 export type { AgentConfig, AgentOutcome, StopReason } from "./types"
 export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
 export {

@@ -18,6 +18,8 @@ import type { PlanExitPort } from "./plan-exit-flow"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
 import type { ActiveTurnState } from "./steering"
+import type { StopCategory } from "./stop-category"
+import type { Submission } from "./submission"
 import type { WorkMetricsSink } from "./work-metrics-collector"
 
 export interface AgentConfig {
@@ -310,6 +312,19 @@ export interface AgentConfig {
    * (defines escalation sequence). Wired by the surface layer.
    */
   modelCandidates?: readonly ModelCandidate[]
+  /**
+   * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
+   * derives the seed user-turn from `submission.op` instead of `messages`
+   * (`user_input` / `user_input_with_turn_context` only — other op variants
+   * are accepted as shapes but the seed loop falls back to `messages`).
+   * Absent ⇒ legacy `messages` path drives the seed (byte-identical).
+   *
+   * When BOTH `submission` and `messages` are set, `submission` wins for the
+   * seed (the caller opted into the typed envelope explicitly); the loop
+   * still uses `config.messages` for any caller-supplied history tail (e.g.
+   * a resumed session), so passing both is a SUPERSET, not a contradiction.
+   */
+  submission?: Submission
 }
 
 export type StopReason = "completed" | "max_turns" | "aborted" | "error"
@@ -319,4 +334,11 @@ export interface AgentOutcome {
   turns: number
   /** Full transcript including tool results, for resume/inspection. */
   messages: Message[]
+  /**
+   * Structured stop category (ADR-0063, Spec B3). Optional add-on; when
+   * present a surface can render a richer "why" than the 4-element
+   * {@link StopReason} can express. Default-OFF (absent on every legacy
+   * outcome) ⇒ byte-identical for callers that only read `reason`.
+   */
+  stopCategory?: StopCategory
 }

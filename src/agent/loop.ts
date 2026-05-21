@@ -23,7 +23,14 @@ import { type PersistDeps, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
+import {
+  classifyErrorReason,
+  completedCategory,
+  interruptedCategory,
+  type StopCategory,
+} from "./stop-category"
 import { streamingTurn } from "./streaming-dispatch"
+import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
@@ -1044,9 +1051,22 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // skill-less sessions stay byte-identical end-to-end.
   const activeSkills = features.activeSkills
   const { stream } = cfg
-  // Canonical in-session message buffer (RFC §6.3). Seeded from the public
-  // `config.messages`; every history mutation below goes through this slice.
-  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(cfg.messages)
+  // ADR-0062 (Spec A3): typed Submission envelope wins for the seed when
+  // present AND projects to a user-input shape. The legacy `cfg.messages`
+  // remains the canonical history buffer — when a submission is provided
+  // we DERIVE the seed list (existing tail + projected user turn) but
+  // `cfg.messages` is left untouched (caller's object is never mutated,
+  // mirroring `stampTurn`'s discipline). Absent ⇒ byte-identical legacy.
+  const submissionSeed =
+    cfg.submission && isUserInputSubmission(cfg.submission)
+      ? extractSeedMessages(cfg.submission)
+      : undefined
+  // Canonical in-session message buffer (RFC §6.3). Seeded from `cfg.messages`
+  // (legacy) OR `cfg.messages` + projected submission turn appended (Spec A3
+  // — a Submission carrying a `user_input` op replaces / appends the last
+  // user turn so a resumed history + a new submission both work).
+  const seedMessages = submissionSeed ? [...cfg.messages, ...submissionSeed] : cfg.messages
+  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(seedMessages)
   const specs = cfg.registry.specs()
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
   const sessionId = cfg.sessionId ?? "default"
@@ -1089,7 +1109,11 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // identical for callers without the opt-in).
   const workingState = features.workingState
 
-  const finish = async (reason: StopReason, turns: number): Promise<AgentOutcome> => {
+  const finish = async (
+    reason: StopReason,
+    turns: number,
+    stopCategory?: StopCategory,
+  ): Promise<AgentOutcome> => {
     // ADR-0030: clear the active-turn header and reflect the stop reason so a
     // surface can ask "are we still mid-turn? were we interrupted?" after the
     // loop returns. Absent ref ⇒ no-op (byte-identical legacy).
@@ -1119,7 +1143,13 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     recorder?.stopReason(reason)
     if (cfg.hooks) await cfg.hooks.emit({ type: "session_end", reason, turns })
     stream.emit({ type: "done", reason, turns })
-    return { reason, turns, messages }
+    // ADR-0073 (Spec B3): attach the structured stop-category when the caller
+    // provided one. `exactOptionalPropertyTypes`: spread conditionally so
+    // legacy callers see an outcome with NO `stopCategory` field (byte-
+    // identical to pre-B3 — they cannot observe a `stopCategory: undefined`).
+    return stopCategory !== undefined
+      ? { reason, turns, messages, stopCategory }
+      : { reason, turns, messages }
   }
 
   // RFC-0002 §5.2 `session_start` — emitted ONCE at run start so the trajectory
@@ -1131,7 +1161,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   if (cfg.hooks) await cfg.hooks.emit({ type: "session_start", sessionId })
 
   for (let turn = 1; turn <= cfg.maxTurns; turn++) {
-    if (cfg.signal.aborted) return finish("aborted", turn - 1)
+    if (cfg.signal.aborted) return finish("aborted", turn - 1, interruptedCategory("user"))
     // ADR-0030 mid-turn steering seam (default-OFF ⇒ both no-ops, byte-
     // identical legacy). Order matters: await the barrier FIRST so a pending
     // surface injection lands in the conversation buffer before we expose the
@@ -1219,15 +1249,21 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     // helper. Skipped when no sink is wired (byte-identical) or the turn
     // aborted before any work landed (snapshot would be all-zeros — no signal).
     emitWorkMetrics(cfg, workCollector, workTurnId, result.kind)
-    if (result.kind === "aborted") return finish("aborted", turn - 1)
+    if (result.kind === "aborted") {
+      return finish("aborted", turn - 1, interruptedCategory("user"))
+    }
     if (result.kind === "error") {
       // Mirror the abort semantics: a turn that errored without producing a
       // productive model turn did no work, so it must not inflate the count.
       stream.emit({ type: "error", message: result.reason })
-      return finish("error", turn - 1)
+      // ADR-0073 (Spec B3): classify the free-form reason into a structured
+      // {@link StopCategory}. Pure classification — no IO, no clock; legacy
+      // `reason: "error"` stays the authoritative top-level outcome so a
+      // surface that only reads it sees byte-identical behavior.
+      return finish("error", turn - 1, classifyErrorReason(result.reason))
     }
     recorder?.turn()
-    if (result.kind === "completed") return finish("completed", turn)
+    if (result.kind === "completed") return finish("completed", turn, completedCategory("normal"))
 
     // A real tool turn landed (not stuck thrashing compaction) — clear the
     // consecutive no-progress strikes (Tier 0 safety hardening, ADR-0011).
@@ -1235,5 +1271,5 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     wm.append({ role: "user", content: result.resultBlocks })
   }
 
-  return finish("max_turns", cfg.maxTurns)
+  return finish("max_turns", cfg.maxTurns, completedCategory("max_turns"))
 }
