@@ -34,6 +34,8 @@
  */
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { runtimeConfig } from "@/shared"
+import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
 import { benchWorkRoot } from "./paths"
 import type { Instance } from "./types"
 
@@ -93,6 +95,10 @@ export interface PySwebenchOpts {
   modelName?: string
   /** Wall-clock budget for the harness invocation. Default 1800000 (30m). */
   timeoutMs?: number
+  /** Resolved harness config (cache/clean/workers/namespace/forceRebuild).
+   *  Absent ⇒ `resolveHarnessConfig()` is called inside `buildArgv` to pull
+   *  the frozen runtime-config defaults. Tests inject explicit configs. */
+  harnessConfig?: HarnessConfig
 }
 
 export interface PySwebenchResult {
@@ -103,8 +109,15 @@ export interface PySwebenchResult {
   log: string
 }
 
-/** The two interpreters we try, most-specific first. */
-const PYTHONS = ["python", "python3"] as const
+/** Python interpreter candidates, tried in order. Explicit override
+ *  (`QUANTA_SWEBENCH_PYTHON_BIN`) is checked FIRST. Default fallbacks are
+ *  `python` then `python3`. The `swebench` PyPI package needs 3.10+ (PEP 604
+ *  `list | None`); hosts whose `python3` is older MUST set the explicit
+ *  override or no candidate will resolve. */
+const pythonCandidates = (): readonly string[] => {
+  const override = runtimeConfig().swebenchPythonBin
+  return override ? [override, "python", "python3"] : ["python", "python3"]
+}
 
 /**
  * Detect the official Python harness. True iff some interpreter can
@@ -114,7 +127,7 @@ const PYTHONS = ["python", "python3"] as const
 export const isPythonSwebenchAvailable = async (opts: PySwebenchOpts = {}): Promise<boolean> => {
   if (opts.probe) return opts.probe()
   const spawn = opts.spawn ?? defaultSpawn
-  for (const py of PYTHONS) {
+  for (const py of pythonCandidates()) {
     try {
       const r = await spawn([py, "-c", "import swebench"], ".", 15000)
       if (r.code === 0) return true
@@ -127,7 +140,7 @@ export const isPythonSwebenchAvailable = async (opts: PySwebenchOpts = {}): Prom
 
 /** First interpreter that can import swebench, or null. */
 const resolvePython = async (spawn: Spawn): Promise<string | null> => {
-  for (const py of PYTHONS) {
+  for (const py of pythonCandidates()) {
     try {
       const r = await spawn([py, "-c", "import swebench"], ".", 15000)
       if (r.code === 0) return py
@@ -174,12 +187,24 @@ const collectResolvedIds = async (dir: string): Promise<string[]> => {
   return ids
 }
 
-const buildArgv = (
+/**
+ * Build the `run_evaluation` argv. Cache/clean/workers/namespace/force_rebuild
+ * flags flow from {@link resolveHarnessConfig} (frozen runtime-config), not
+ * hardcoded — SOTA defaults: `cache_level=env clean=false workers=min(4,75%cores)
+ * namespace=none` keep the per-repo env image warm across runs and build
+ * locally for the host arch (no x86 emulation on arm64).
+ *
+ * Operators restore the prior brittle defaults via env vars:
+ *   `QUANTA_SWEBENCH_CACHE_LEVEL=none QUANTA_SWEBENCH_CLEAN=true
+ *    QUANTA_SWEBENCH_MAX_WORKERS=1`.
+ */
+export const buildArgv = (
   python: string,
   predictionsPath: string,
   runId: string,
   instanceId: string,
   datasetName: string | undefined,
+  config: HarnessConfig = resolveHarnessConfig(),
 ): string[] => {
   const argv = [
     python,
@@ -191,12 +216,7 @@ const buildArgv = (
     runId,
     "--instance_ids",
     instanceId,
-    "--max_workers",
-    "1",
-    "--cache_level",
-    "none",
-    "--clean",
-    "True",
+    ...harnessFlags(config),
   ]
   if (datasetName) argv.push("--dataset_name", datasetName)
   return argv
@@ -226,7 +246,7 @@ export const evaluateWithPythonSwebench = async (
   if (!(await isPythonSwebenchAvailable(opts))) {
     return { resolved: false, log: "python swebench harness unavailable (import failed)" }
   }
-  const python = opts.probe ? PYTHONS[0] : await resolvePython(spawn)
+  const python = opts.probe ? pythonCandidates()[0]! : await resolvePython(spawn)
   if (!python) {
     return { resolved: false, log: "no python interpreter could import swebench" }
   }
@@ -245,7 +265,8 @@ export const evaluateWithPythonSwebench = async (
       })}\n`,
     )
     const datasetName = opts.datasetName ?? SWEBENCH_VERIFIED_DATASET
-    const argv = buildArgv(python, predictionsPath, runId, meta.instanceId, datasetName)
+    const harnessCfg = opts.harnessConfig ?? resolveHarnessConfig()
+    const argv = buildArgv(python, predictionsPath, runId, meta.instanceId, datasetName, harnessCfg)
     const run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
     const resolvedIds = await collectResolvedIds(work)
     const resolved = resolvedIds.includes(meta.instanceId)

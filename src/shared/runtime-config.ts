@@ -175,6 +175,12 @@ export interface RuntimeConfig {
   /** SWE-bench `--force_rebuild` (`QUANTA_SWEBENCH_FORCE_REBUILD`). Default
    *  false — reuse cached images unless explicitly invalidated. */
   readonly swebenchForceRebuild: boolean
+  /** Explicit Python interpreter for the SWE-bench harness
+   *  (`QUANTA_SWEBENCH_PYTHON_BIN`). Absent ⇒ python-swebench.ts probes
+   *  `python` then `python3`. Useful on hosts whose `python3` is too old
+   *  for the harness (the package uses PEP 604 `list | None`, needs 3.10+);
+   *  set to e.g. `python3.11` or an absolute path to override the probe. */
+  readonly swebenchPythonBin: string | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -216,6 +222,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     swebenchNamespace: stringOrUndef(env["QUANTA_SWEBENCH_NAMESPACE"]),
     swebenchForceRebuild: parseBool(env["QUANTA_SWEBENCH_FORCE_REBUILD"]),
+    swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),
   })
 }
 
