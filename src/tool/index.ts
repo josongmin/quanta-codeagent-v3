@@ -20,6 +20,8 @@ export {
 } from "./diagnostics"
 export type {
   GitBlameInput,
+  GitBranchSwitchInput,
+  GitCommitInput,
   GitDiffInput,
   GitLogInput,
   GitRunner,
@@ -29,6 +31,8 @@ export type {
 export {
   defaultGitRunner,
   gitBlameTool,
+  gitBranchSwitchTool,
+  gitCommitTool,
   gitDiffTool,
   gitLogTool,
   gitStatusTool,

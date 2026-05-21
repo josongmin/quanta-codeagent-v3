@@ -91,9 +91,10 @@ export type CollaborationMode = "default" | "plan"
  *     is treated as mutating in plan mode — the dispatch seam cannot inspect
  *     the command text deeply enough to be sure read-only `ls`/`cat` is not
  *     hiding a mutating side effect (process spawn, env write, network).
- *   - `git_mutating`: mutating git tools (none ship today — read-only git
- *     tools are `git_status`/`git_log`/`git_diff`/`git_blame`). Reserved so
- *     a future `git_commit`/`git_checkout` tool lands with the right tag.
+ *   - `git_mutating`: mutating git tools. Shipped: `git_commit` (regular +
+ *     wip-checkpoint modes) and `git_branch_switch` (ADR-0045, Claude
+ *     Desktop 1.7196.3 `commitWipForBranchSwitch` absorption). Read-only
+ *     git tools are `git_status`/`git_log`/`git_diff`/`git_blame`.
  *   - `network_write`: outbound network writes (none ship today — MCP/HTTP
  *     write surfaces). Reserved for the same reason as `git_mutating`.
  *   - `working_state_write`: mutates the durable working-state surface (e.g.
@@ -143,6 +144,12 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   scripted_replace: "write_filesystem",
   bash: "bash_mutating",
   update_working_state: "working_state_write",
+  // Mutating git built-ins (ADR-0045, Claude Desktop 1.7196.3
+  // `commitWipForBranchSwitch` absorption). git_commit creates a commit;
+  // git_branch_switch may write a wip checkpoint + change HEAD. Both block
+  // in plan mode — plan mode PROPOSES; it does not commit.
+  git_commit: "git_mutating",
+  git_branch_switch: "git_mutating",
 })
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}

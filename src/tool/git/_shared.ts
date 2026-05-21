@@ -35,3 +35,26 @@ export const stderrReason = (stderr: string, exitCode: number, toolName: string)
   if (isNotARepo(stderr)) return trimmed || "not a git repository"
   return trimmed || `${toolName} exited ${exitCode}`
 }
+
+/** Mutating-tool helper. Runs `git <args>` once and returns a discriminated
+ *  ok/error pair so callers can sequence multiple invocations (e.g. `git add`
+ *  then `git commit`) and bail at the first failure without nesting. Shares
+ *  the spawn-error normalization with {@link safeRun}. */
+export type MutateOutcome =
+  | { kind: "ok"; stdout: string; stderr: string }
+  | { kind: "err"; output: string }
+
+export const mutate = async (
+  runner: GitRunner,
+  args: readonly string[],
+  cwd: string,
+  toolName: string,
+): Promise<MutateOutcome> => {
+  const out = await safeRun(runner, args, cwd, toolName)
+  if (out.kind === "spawn-error") return { kind: "err", output: out.message }
+  const r = out.result
+  if (r.exitCode !== 0) {
+    return { kind: "err", output: stderrReason(r.stderr, r.exitCode, toolName) }
+  }
+  return { kind: "ok", stdout: r.stdout, stderr: r.stderr }
+}

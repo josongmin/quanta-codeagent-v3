@@ -59,3 +59,43 @@ export const gitBlameInputSchema = z.object({
   line: z.number().int().positive().describe("1-based line number to blame"),
 })
 export type GitBlameInput = z.infer<typeof gitBlameInputSchema>
+
+// --- git_commit --------------------------------------------------------------
+
+/** Claude Desktop 1.7196.3 `commitWipForBranchSwitch` absorption: a session-
+ *  boundary git checkpoint that is reversible and trust-eligible (mode="wip"),
+ *  plus a regular commit path that still routes through `always-confirm`
+ *  because it may be pushed (permanent). */
+export const gitCommitInputSchema = z.object({
+  /** Commit message. Optional in `wip` mode (a default is generated); required
+   *  for `regular` mode (validated at runtime). */
+  message: z.string().min(1).optional().describe("Commit message (required for regular mode)"),
+  /** "regular" (default) = `git add . && git commit`. "wip" = ephemeral
+   *  checkpoint, auto-message when `message` omitted, pre-approval-eligible. */
+  mode: z.enum(["wip", "regular"]).optional().describe("Commit mode: wip | regular"),
+  /** Restrict staging to these paths. Default = stage all (`.`). */
+  paths: z.array(z.string()).optional().describe("Paths to stage (default: all)"),
+})
+export type GitCommitInput = z.infer<typeof gitCommitInputSchema>
+
+// --- git_branch_switch -------------------------------------------------------
+
+/** Branch-name pattern: same alphabet as `safeBranch` in
+ *  `@/runtime/worktree-fork` ([A-Za-z0-9._/+-]), forbids leading `-` (CLI-flag
+ *  confusion), 64-char cap. Schema-level guard so a malicious branch name
+ *  cannot escape the argv we hand to `git`. */
+const BRANCH_NAME_RE = /^(?!-)[A-Za-z0-9._/+-]{1,64}$/
+
+export const gitBranchSwitchInputSchema = z.object({
+  branch: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(BRANCH_NAME_RE, "branch must match [A-Za-z0-9._/+-] (no leading '-')")
+    .describe("Branch to switch to"),
+  /** True ⇒ when working tree is dirty, auto-create a wip commit first. */
+  autoWip: z.boolean().optional().describe("Auto-commit dirty tree as wip before switching"),
+  /** True ⇒ create the branch (`git switch -c <branch>`). */
+  create: z.boolean().optional().describe("Create the branch (-c)"),
+})
+export type GitBranchSwitchInput = z.infer<typeof gitBranchSwitchInputSchema>

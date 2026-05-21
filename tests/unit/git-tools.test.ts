@@ -376,21 +376,30 @@ describe("git tools barrel", () => {
     expect(typeof defaultGitRunner.run).toBe("function")
   })
 
-  test("gitTools() with no arg returns all four tools", async () => {
+  test("gitTools() with no arg returns all six tools (4 read-only + 2 mutating)", async () => {
     const { gitTools } = await import("@/tool/git")
     const tools = gitTools()
     const names = tools.map((t) => t.name).sort()
-    expect(names).toEqual(["git_blame", "git_diff", "git_log", "git_status"])
-    for (const t of tools) {
-      expect(t.isReadOnly()).toBe(true)
-    }
+    expect(names).toEqual([
+      "git_blame",
+      "git_branch_switch",
+      "git_commit",
+      "git_diff",
+      "git_log",
+      "git_status",
+    ])
+    // Read-only tools: 4. Mutating tools: 2 (git_commit, git_branch_switch).
+    const readOnlyCount = tools.filter((t) => t.isReadOnly()).length
+    expect(readOnlyCount).toBe(4)
+    const mutatingCount = tools.filter((t) => !t.isReadOnly()).length
+    expect(mutatingCount).toBe(2)
   })
 
-  test("gitTools(runner) injects the runner across all four", async () => {
+  test("gitTools(runner) injects the runner across all six", async () => {
     const { gitTools } = await import("@/tool/git")
     const runner = new FakeRunner(okResult(""))
     const tools = gitTools(runner)
-    expect(tools).toHaveLength(4)
+    expect(tools).toHaveLength(6)
     // We can't introspect; just ensure each tool is callable and the runner observes a call.
     const statusTool = tools.find((x) => x.name === "git_status")
     if (!statusTool) throw new Error("git_status missing")
