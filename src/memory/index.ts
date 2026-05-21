@@ -13,7 +13,7 @@ export {
   planEviction,
 } from "./eviction"
 export type { PersistentStorePort } from "./ports"
-export { rankEntries } from "./ranking"
+export { rankEntries, scoreEntry } from "./ranking"
 export {
   bucketOf,
   DEFAULT_RECALL_LIMIT,

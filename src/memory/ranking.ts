@@ -130,6 +130,20 @@ const scoreOf = (e: NormalizedEntry, query: MemoryQuery, now: number): number =>
   TIER_WEIGHT[e.tier] * W_TIER
 
 /**
+ * Pure, exported score-of-one helper (ADR-0082 memory_citation provenance).
+ * Returns the SAME deterministic weighted-sum score `rankEntries` uses
+ * internally, for callers that already received the ranked entries from
+ * `PersistentStorePort.recall` and want to annotate them with the score that
+ * placed them. Normalizes the entry on the way in so callers can pass either
+ * a raw `MemoryEntry` (store boundary) or a `NormalizedEntry` (post-rank).
+ */
+export const scoreEntry = (
+  entry: MemoryEntry,
+  query: MemoryQuery,
+  now: number = Date.now(),
+): number => scoreOf(normalizeEntry(entry), query, now)
+
+/**
  * Filter + rank a candidate list. Pure and deterministic. Operates on
  * normalized entries. Sort: score desc, then importance desc, then updatedAt
  * desc, then createdAt desc, then id desc (total + deterministic). `now` is

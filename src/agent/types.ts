@@ -411,6 +411,43 @@ export interface AgentConfig {
 
 export type StopReason = "completed" | "max_turns" | "aborted" | "error"
 
+/**
+ * memory_citation provenance surface (ADR-0082). A record is "cited" iff it
+ * was actually placed into the prompt window for some turn of the run —
+ * provenance, NOT a heuristic match of the assistant's response text.
+ *
+ * Closed `where` enum encodes the placement seam:
+ *   - `system_prompt`         — folded into the static system prompt body.
+ *   - `reminder_tail`         — appended into the per-turn trailing
+ *                               `<system-reminder>` user message (the only
+ *                               site quanta currently renders recall blocks,
+ *                               so this is the value most citations carry).
+ *   - `tool_result_injection` — wrapped into a synthetic `tool_result`
+ *                               observation. Reserved for the seam; no
+ *                               builder writes this value today.
+ *
+ * The signal is ALWAYS captured when the memory subsystem is wired (no opt-in
+ * flag); the surface is the optional `AgentOutcome.memoryCitations` array.
+ * With no memory recall (store absent or no entries placed) the array is
+ * empty and the field is OMITTED from the outcome — byte-identical for
+ * callers that ignore it.
+ */
+export interface MemoryCitation {
+  /** Stable id of the placed memory record (matches `MemoryEntry.id`). */
+  readonly recordId: string
+  /** Recall score that placed the record in the prompt window. The exact
+   *  weighted-sum value `rankEntries` computed; comparable across citations
+   *  in the SAME turn (score scale depends on query, so cross-turn comparison
+   *  is informational only). */
+  readonly score: number
+  /** Closed enum — where the record was rendered into the prompt window. */
+  readonly where: "system_prompt" | "reminder_tail" | "tool_result_injection"
+  /** Approximate token cost of the record's text contribution to the prompt
+   *  (chars/4 heuristic, the same estimator the rest of the loop uses).
+   *  Omitted when the prompt assembler could not size the contribution. */
+  readonly tokensApprox?: number
+}
+
 export interface AgentOutcome {
   reason: StopReason
   turns: number
@@ -423,4 +460,15 @@ export interface AgentOutcome {
    * outcome) ⇒ byte-identical for callers that only read `reason`.
    */
   stopCategory?: StopCategory
+  /**
+   * memory_citation provenance surface (ADR-0082). Append-only across the
+   * run: every time a recall block lands in the prompt window for some turn,
+   * one {@link MemoryCitation} per placed record is appended (dedup is NOT
+   * applied — a record placed across N turns surfaces N citations, so a
+   * trajectory consumer can see "this record was anchored for N turns"). The
+   * field is OMITTED when no citations were captured (no store wired, or no
+   * recall hits across the whole run) — byte-identical for callers that
+   * only read `reason`.
+   */
+  memoryCitations?: ReadonlyArray<MemoryCitation>
 }
