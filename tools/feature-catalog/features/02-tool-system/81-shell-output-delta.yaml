@@ -1,0 +1,55 @@
+id: shell-output-delta-streaming
+title: shell_output_delta — typed event stream for long-running shell exec
+section: 2
+subsystem: 도구 시스템 — shell exec 이벤트 스트림 (PR-5, ADR-0081)
+order: 81
+maturity: L2
+status: new
+purpose: |
+  src/runtime/shell.ts의 runShell이 child process stdout/stderr를 buffered
+  string으로만 반환하던 것을, 옵션 `onShellEvent` observer 시 closed
+  discriminated `ShellExecEvent` union (start|stdout|stderr|exit|aborted)을
+  실시간 emit. observer 부재 ⇒ legacy buffered path와 byte-identical.
+  ToolContext에도 `onShellEvent?`을 노출해 bash tool이 forward — 미래의
+  sibling shell/exec/MCP run 도구도 동일 seam으로 stream 가능. 청크는
+  Uint8Array(미디코드)로 caller-encoding 선택. 누적 stdout/stderr는 여전히
+  ShellResult로 반환되어 legacy 소비자는 자동으로 byte-identical.
+evidence:
+  code:
+    - src/tool/shell-exec-types.ts
+    - src/runtime/shell.ts
+    - src/runtime/types.ts
+    - src/tool/types.ts
+    - src/tool/bash/index.ts
+  adrs: [81]
+  tests:
+    unit:
+      - tests/unit/tool/shell-exec-events.test.ts
+      - tests/unit/tool/shell-exec-events-stderr.test.ts
+      - tests/unit/tool/shell-exec-events-abort.test.ts
+      - tests/unit/tool/shell-exec-events-byte-identical.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: ToolContext.onShellEvent
+    type: ShellExecObserver | undefined
+    default: undefined
+    effect: |
+      absent ⇒ no event emission, legacy buffered path verbatim.
+      present ⇒ closed union event stream PLUS unchanged ShellResult.
+deliberate_hold:
+  reason: |
+    PR-5는 seam만 도입. UI 소비자 (CLI streaming TUI / web pane),
+    OTel `handle_tool_call` span의 chunk counter, model-loop의 progress
+    interleaving은 모두 follow-up.
+  promotion_path: |
+    CLI loop가 stream observer를 등록 + RFC-0002 §5.2 trajectory에 chunk
+    이벤트를 attach + 향후 `maxBufferedBytes` ring buffer config 도입하면
+    L3 (ADR §Consequences memory note).
+notes: |
+  - 청크는 Uint8Array, decode는 final ShellResult 빌드 시 한 번
+    (TextDecoder utf-8) — 기존 new Response(stream).text()와 동일 디코더.
+  - aborted는 user_abort/timeout 두 reason, exit과 mutually exclusive.
+  - per-stream offset은 byte 단위 (pre-chunk position).
+  - `@/runtime` 슬라이스가 `@/tool` import 안 함 — `RunShellEvent`는
+    구조적 미러, observer는 structurally assignable.

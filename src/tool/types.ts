@@ -1,5 +1,6 @@
 import type { HITLTier } from "@/shared"
 import type { z } from "zod"
+import type { ShellExecObserver } from "./shell-exec-types"
 
 export interface ToolContext {
   cwd: string
@@ -15,6 +16,14 @@ export interface ToolContext {
    *  and the `update_working_state` meta-tool mutates it through this seam.
    *  Absent ⇒ working-state feature is OFF (byte-identical for all callers). */
   workingState?: WorkingStateHandle
+  /** PR-5 / ADR-0081 — OPTIONAL observer for the closed `ShellExecEvent` union
+   *  emitted by shell-class tools (bash today; any future sibling shell tool
+   *  via the same seam). The bash tool forwards this directly to `runShell`
+   *  through `ShellOptions.onShellEvent`; absent ⇒ no events emitted, exact
+   *  byte-identical buffered behavior preserved (legacy path). Typed via
+   *  `ShellExecObserver` so a new variant on the union is a compile error at
+   *  every consumer that exhaustively switches on `event.kind`. */
+  onShellEvent?: ShellExecObserver
 }
 
 /** Duck-typed handle a tool uses to mutate or read the session WorkingState

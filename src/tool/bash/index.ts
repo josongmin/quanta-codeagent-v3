@@ -88,10 +88,13 @@ export const bashTool: Tool<Input> = {
     const shown = cmd.length > CMD_PREVIEW ? `${cmd.slice(0, CMD_PREVIEW)}…` : cmd
     yield { type: "progress", message: `running: ${shown}` }
 
+    // PR-5 / ADR-0081: forward the optional shell-event observer through to
+    // `runShell`. Absent (default) ⇒ buffered legacy path, byte-identical.
     const r = await runShell(cmd, {
       cwd: ctx.cwd,
       signal: ctx.signal,
       ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}),
+      ...(ctx.onShellEvent ? { onShellEvent: ctx.onShellEvent } : {}),
     })
 
     let body = [r.stdout, r.stderr].filter(Boolean).join("\n").trimEnd()
