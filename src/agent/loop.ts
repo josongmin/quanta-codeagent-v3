@@ -6,6 +6,7 @@ import type {
   ToolResultBlock,
 } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
+import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
 import { LLMError, type RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
@@ -277,6 +278,14 @@ const streamConsume = async (
   // observation: NullStream swallows it; the stream open + recovery control
   // flow below is byte-identical to the pre-emit path.
   emitLlmRequest(config)
+  // Codex 10-step span tree — `run_sampling_request`. Opens one OTel span
+  // per provider stream call (a SAME-TURN retry IS a new sampling request,
+  // so it gets its own span — consistent with Codex's tree). Closes after
+  // the stream completes / aborts / throws. No attrs at open: the cwd
+  // attribute Codex emits maps to `quanta.conversation.id` (already on the
+  // session span) so the run-sampling span body stays clean.
+  const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
+  let samplingStatus: "ok" | "error" | "aborted" = "ok"
   const stop = recorder?.llmStream()
   try {
     const outcome = await streamingTurn({
@@ -382,17 +391,27 @@ const streamConsume = async (
       },
       signal: config.signal,
     })
-    if (outcome.kind === "aborted") return { aborted: true }
+    if (outcome.kind === "aborted") {
+      samplingStatus = "aborted"
+      return { aborted: true }
+    }
     return {
       message: outcome.message as AssembledMessage,
       stopReason: outcome.stopReason,
       resultBlocks: outcome.resultBlocks as AssembledMessage["content"],
     }
   } catch (e) {
+    samplingStatus = "error"
     const message = e instanceof LLMError ? e.message : (e as Error).message
     return { error: e, message }
   } finally {
     stop?.()
+    // Single close site for `run_sampling_request`. Default-OFF (no sink) ⇒
+    // no-op (sentinel short-circuits both the close branch and the duration
+    // math). Note: this runs AFTER `stop?.()` so the recorder's llm-span
+    // close precedes the OTel span close — matching the existing recorder-
+    // first convention used elsewhere in the loop.
+    endSpan(samplingSpan, samplingStatus, attrs({}))
   }
 }
 
@@ -1028,7 +1047,76 @@ const emitWorkMetrics = (
   cfg.workMetricsSink.emit(metrics, { turnId })
 }
 
+/** Codex 10-step span tree — outer-most ring (`session_loop`). Default-OFF:
+ *  when no {@link SpanSink} is registered, both `startSpan` / `endSpan` return
+ *  the shared no-op sentinel — zero allocations, the loop is byte-identical
+ *  to the pre-span path. `attrs` use canonical {@link QUANTA_ATTRS} keys
+ *  (no raw strings — the vocabulary-orphan scan enforces this).
+ *
+ *  Session-id semantics: the sessionId IS the conversation/thread anchor for
+ *  this run (mirrors how `quanta.thread.id` was already populated by the
+ *  side-conversation absorption — see vocabulary.ts comments).
+ *  `quanta.thread.kind` is `"main"` here; subagent/side-conv spans set their
+ *  own kind. */
+const sessionSpanAttrs = (sessionId: string): ReturnType<typeof attrs> =>
+  attrs({
+    [QUANTA_ATTRS.conversation.id]: sessionId,
+    [QUANTA_ATTRS.thread.id]: sessionId,
+    [QUANTA_ATTRS.thread.kind]: "main",
+  })
+
+/** Codex 10-step span tree — turn ring (`session_task.turn`). Opens once per
+ *  logical turn (a SAME-TURN retry does NOT open a new span — it stays under
+ *  the same turn id, matching Codex's convention). On close, `quanta.turn.
+ *  duration_ms` is supplied by `endSpan` itself (computed from monotonic
+ *  start), so the close-attrs need only echo the id. */
+const turnSpanAttrs = (turnId: string): ReturnType<typeof attrs> =>
+  attrs({
+    [QUANTA_ATTRS.turn.id]: turnId,
+    [QUANTA_ATTRS.turn.kind]: "main",
+  })
+
+// (The `handle_tool_call` span is wrapped in `dispatch.ts` — closer to the
+// actual tool-execution surface so the span open / close stays adjacent to
+// the call sites that produce its status.)
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
+  // Codex 10-step span tree — root `session_loop` span. Wraps the WHOLE
+  // session body in a try/finally so the span always closes, even on a
+  // thrown LLMError / abort. Default-OFF (no sink) ⇒ both calls hit the
+  // shared NOOP_SPAN sentinel and are zero-allocation. The span attrs use
+  // canonical QUANTA_ATTRS keys; no raw strings.
+  const sessionId = config.sessionId ?? "default"
+  const sessionSpan: Span = startSpan(SPAN_NAMES.sessionLoop, sessionSpanAttrs(sessionId))
+  // Outcome status is derived from `outcome.reason` (the normal-return path)
+  // OR set to "error" by the catch branch (the thrown path). Tracked outside
+  // the try/finally so the finally has a single closing point — eliminating
+  // the "did we already close in catch?" question.
+  let spanStatus: "ok" | "error" | "aborted" = "ok"
+  try {
+    const outcome = await runAgentInner(config)
+    spanStatus =
+      outcome.reason === "aborted" ? "aborted" : outcome.reason === "error" ? "error" : "ok"
+    return outcome
+  } catch (e) {
+    // An EXCEPTION escaping `runAgentInner` is exceptional (the loop
+    // converts every recoverable failure into an outcome). Mark the span
+    // accordingly and re-throw so the caller's handling is preserved.
+    spanStatus = "error"
+    throw e
+  } finally {
+    // Single close site — runs on normal return AND on throw.
+    endSpan(sessionSpan, spanStatus, attrs({}))
+  }
+}
+
+/** Inner session loop. Identical body to the pre-span path; only the outer
+ *  `runAgent` wrapper handles the `session_loop` span. Kept as a separate
+ *  function (instead of inlining the span wrap) so the body's control flow
+ *  (the multiple `finish(...)` returns + the trailing `max_turns` return)
+ *  stays untouched — adding a `try/finally` around it inline would have
+ *  required restructuring every return path. */
+const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // Tier 1 capability (ADR-0011): materialize optional subsystems ONCE. With no
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
   // identity, so the loop is byte-for-byte identical to the pre-absorption path.
@@ -1214,25 +1302,48 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     // helper above runAgent — keeps the runAgent body free of new branches.
     const { collector: workCollector, turnId: workTurnId } = buildWorkMetricsResources(cfg)
 
+    // Codex 10-step span tree — `session_task.turn`. Opens before the per-
+    // turn work begins, closes after `runTurn` returns (success OR failure).
+    // The turnId is derived from `activeTurnRef.currentTurn` when set (reuse
+    // the same id so an OTel trace ties to the surface header), else a
+    // freshly-generated UUID (the canonical id for this turn). With no sink
+    // the wrap is two no-op calls (NOOP_SPAN sentinel). Status mapping:
+    // `aborted` ⇒ aborted, `error` ⇒ error, otherwise `ok`.
+    const turnId = cfg.activeTurnRef?.current.currentTurn?.turnId ?? crypto.randomUUID()
+    const turnSpan: Span = startSpan(SPAN_NAMES.turn, turnSpanAttrs(turnId))
+    let turnSpanStatus: "ok" | "error" | "aborted" = "ok"
     // Recovery counters are per-turn: SAME-TURN retries share & exhaust these,
     // a fresh turn starts clean. runTurn owns the SEAM (buildTurnContext) and
     // mutates `messages` (canonical history) in place.
-    const result = await runTurn(
-      cfg,
-      wm,
-      specs,
-      recorder,
-      freshRecovery(),
-      breaker,
-      classifier,
-      skillGate,
-      toolHistory,
-      verifyGuardState,
-      closeoutGuardState,
-      activeSkills,
-      workingState,
-      workCollector,
-    )
+    let result: TurnResult
+    try {
+      result = await runTurn(
+        cfg,
+        wm,
+        specs,
+        recorder,
+        freshRecovery(),
+        breaker,
+        classifier,
+        skillGate,
+        toolHistory,
+        verifyGuardState,
+        closeoutGuardState,
+        activeSkills,
+        workingState,
+        workCollector,
+      )
+      turnSpanStatus =
+        result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"
+    } catch (e) {
+      // runTurn does not throw today (every failure is converted to a
+      // TurnResult), but mark the span as error and re-throw if it ever
+      // does — the catch is defense in depth so the span always closes.
+      turnSpanStatus = "error"
+      endSpan(turnSpan, turnSpanStatus, attrs({}))
+      throw e
+    }
+    endSpan(turnSpan, turnSpanStatus, attrs({}))
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
     // at turn-top, so a turn that immediately aborted/errored BEFORE producing

@@ -1,7 +1,19 @@
-export { workMetricsAttrs } from "./attrs"
+export { type Attrs, attrs, mergeAttrs, workMetricsAttrs } from "./attrs"
 export { log, StructuredLogger } from "./logger"
 export { Metrics, metrics } from "./metrics"
 export { costUsd, PRICING_VERSION } from "./pricing"
+export {
+  __resetSpanSink,
+  endSpan,
+  getSpanSink,
+  SPAN_NAMES,
+  type Span,
+  type SpanName,
+  type SpanSink,
+  type SpanStatus,
+  setSpanSink,
+  startSpan,
+} from "./spans"
 export type {
   Counter,
   Gauge,

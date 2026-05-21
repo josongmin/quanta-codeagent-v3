@@ -1,4 +1,5 @@
 import type { ToolUseBlock } from "@/llm"
+import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import type { AutoModeClassifier, PermissionContext } from "@/permission"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
@@ -53,10 +54,7 @@ const evidenceOf = (
  *  Default-OFF preserved: when `config.dedupGate` is `undefined` this is a
  *  single property check + early return (zero allocation), so dispatch is
  *  byte-identical to the pre-T3 path for any caller that did not opt in. */
-const consultDedupGate = (
-  call: ToolUseBlock,
-  config: AgentConfig,
-): DispatchResult | null => {
+const consultDedupGate = (call: ToolUseBlock, config: AgentConfig): DispatchResult | null => {
   const gate = config.dedupGate
   if (!gate) return null
   // The gate is pure-by-state: it needs the caller-supplied turn (no
@@ -94,6 +92,55 @@ export const dispatchTool = async (
   onProgress?: (message: string) => void,
   autoClassifier?: AutoModeClassifier,
   workingState?: WorkingStateHandle,
+): Promise<DispatchResult> => {
+  // Codex 10-step span tree — `handle_tool_call` (innermost wrap). Opens
+  // BEFORE the unknown-tool / dedup / admissibility-gate denies so every
+  // dispatch attempt — admissible OR rejected — appears under the turn's
+  // span tree. Closes via the single `finally` site (no early returns leak
+  // an unclosed span). Status is derived from the final {@link DispatchResult}.
+  // Default-OFF (no sink) ⇒ all `startSpan`/`endSpan` calls are the shared
+  // NOOP_SPAN sentinel (zero allocation), so dispatch is byte-identical to
+  // the pre-span path.
+  const toolSpan: Span = startSpan(SPAN_NAMES.handleToolCall, toolSpanAttrs(call.name, call.id))
+  try {
+    const out = await dispatchToolInner(
+      call,
+      config,
+      permission,
+      onProgress,
+      autoClassifier,
+      workingState,
+    )
+    // Map `ok` ⇒ "success", non-ok ⇒ "error". A "blocked" outcome would
+    // need the admissibility-gate to signal it explicitly; today the gate
+    // returns a non-ok DispatchResult, so we surface it as "error" — the
+    // `quanta.tool.call.status` enum union includes "blocked" but the seam
+    // has no signal channel for it yet. Future work can refine.
+    endSpan(
+      toolSpan,
+      out.ok ? "ok" : "error",
+      attrs({ [QUANTA_ATTRS.tool.status]: out.ok ? "success" : "error" }),
+    )
+    return out
+  } catch (e) {
+    // `dispatchToolInner` does not throw today (every tool failure is
+    // converted to an error DispatchResult by `execute`'s catch), but
+    // mark the span as error and re-throw if it ever does — defense in
+    // depth so the span always closes.
+    endSpan(toolSpan, "error", attrs({ [QUANTA_ATTRS.tool.status]: "error" }))
+    throw e
+  }
+}
+
+/** Span-free dispatch body (extracted so the outer wrap keeps a single
+ *  control flow). Identical logic to the pre-span path. */
+const dispatchToolInner = async (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  permission: PermissionContext,
+  onProgress: ((message: string) => void) | undefined,
+  autoClassifier: AutoModeClassifier | undefined,
+  workingState: WorkingStateHandle | undefined,
 ): Promise<DispatchResult> => {
   const { registry } = config
 
@@ -150,6 +197,14 @@ export const dispatchTool = async (
   }
   return out
 }
+
+/** Build the `handle_tool_call` span open-attrs. Status (and durationMs)
+ *  fill in on close — at open time we only know the name + call_id. */
+const toolSpanAttrs = (name: string, callId: string) =>
+  attrs({
+    [QUANTA_ATTRS.tool.name]: name,
+    [QUANTA_ATTRS.tool.callId]: callId,
+  })
 
 /** Drive the registry, normalizing thrown errors into an error tool_result. */
 const execute = async (

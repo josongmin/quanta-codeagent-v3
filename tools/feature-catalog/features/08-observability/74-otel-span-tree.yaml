@@ -1,0 +1,25 @@
+id: otel-span-tree
+title: OTel span tree (Codex 10-step) — core 4-stage SDK-free wrap
+section: 8
+subsystem: 텔레메트리 — span 방출 seam + hot-path 4-step wrap
+order: 68
+maturity: L4
+status: new
+purpose: 'Codex 10-step OTel span tree 흡수 — core 4 stage. SDK-free `SpanSink` seam (`src/observability/spans.ts`): `onStart`/`onEnd` 2-method interface + module-level mutable sink (기본 null). sink 부재 ⇒ 공유 frozen NOOP_SPAN sentinel (0 alloc / 0 branch) → loop hot-path byte-identical (RFC §1.2). `startSpan`/`endSpan`은 try/finally 패턴 + monotonic `performance.now()` durationMs; sink throw는 catch+swallow (observability 버그가 loop abort 금지). SPAN_NAMES는 Codex literal verbatim — `session_loop`/`session_task.turn`/`run_sampling_request`/`handle_tool_call`. 4-step wrap: runAgent→runAgentInner (session_loop outermost) / turn loop (turn, SAME-TURN retry는 같은 span) / streamConsume (run_sampling_request, retry마다 새 span) / dispatch.ts (handle_tool_call, gate-deny 이전 open). 모든 attr은 QUANTA_ATTRS/attrs() 경유 — raw quanta.* 리터럴 0, vocabulary-orphan scan green.'
+evidence:
+  code:
+    - src/observability/spans.ts
+    - src/observability/index.ts
+    - src/agent/loop.ts
+    - src/agent/dispatch.ts
+  adrs: [74]
+  tests:
+    unit:
+      - tests/unit/observability/spans.test.ts
+    integration:
+      - tests/integration/spans-e2e.test.ts
+    contract: []
+knobs:
+  - 'setSpanSink(sink|null) — host(CLI/Tauri/Web)가 SpanSink 구현체를 wire; 미등록이 기본 (no-op)'
+deliberate_hold: null
+notes: 'OTel SDK / OTLP exporter 번들 미채택 — seam은 SpanSink interface만; 실제 OTLP/Honeycomb/JSONL 매핑은 host 구현 follow-up. full 10-11 deep tree (mcp/sub-submission/per-event)는 미채택 — core 4 stage만, 같은 seam 위에서 확장. first-class "blocked" tool status 채널 부재 — gate-deny는 현재 status="error"로 surface. ADR-0032 vocabulary 위에 얹음.'
