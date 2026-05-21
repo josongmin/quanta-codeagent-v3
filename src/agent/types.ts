@@ -1,7 +1,7 @@
 import type { LLMPort, Message } from "@/llm"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
-import type { PermissionContext, ToolAction } from "@/permission"
+import type { PermissionContext, ToolAction, TrustScopeRegistry } from "@/permission"
 import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
@@ -191,6 +191,16 @@ export interface AgentConfig {
    *  (cannot be skipped by acceptEdits/bypass), pre-approval-ok defers to the
    *  existing mode policy, and none allows. */
   hitl?: { enabled?: boolean }
+  /**
+   * Trust-scope registry (Phase C wire-up, ADR-0045). When set, the
+   * admissibility-gate's ask-branch consults `registry.hasGrant(projectKey,
+   * { tool })` BEFORE invoking `onConfirm`. A positive grant skips the prompt
+   * and admits the call; `once_only` grants are consumed inline by the
+   * registry. Absent ⇒ no registry lookup; the gate path is byte-identical
+   * to the pre-Phase-C behavior (DEFAULT OFF, opt-in). The slice rule keeps
+   * the registry impl in `@/permission`; this type-import is the only seam.
+   */
+  trustScope?: { registry: TrustScopeRegistry; projectKey: string }
   /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like

@@ -76,6 +76,13 @@ export {
   ReviewerUnavailableError,
   reviewAction,
 } from "./reviewer"
+export {
+  createInMemoryTrustScopeRegistry,
+  type TrustScope,
+  type TrustScopeAction,
+  type TrustScopeGrant,
+  type TrustScopeRegistry,
+} from "./trust-scope"
 export type {
   ApprovalDecision,
   ApprovalOutcome,

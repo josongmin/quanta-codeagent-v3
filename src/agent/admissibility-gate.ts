@@ -262,6 +262,39 @@ const runPermissionStack = (
   return null
 }
 
+/** Phase C — trust-scope short-circuit for the ask-branch (ADR-0045). DEFAULT
+ *  OFF: returns false unless `config.trustScope` is set AND the registry
+ *  confirms a positive grant for `(projectKey, action.tool)`. The registry
+ *  owns once_only consumption; the gate never branches on scope literals. */
+const trustScopeGrants = (config: AgentConfig, action: AdmissibilityAction): boolean => {
+  if (!config.trustScope) return false
+  return config.trustScope.registry.hasGrant(config.trustScope.projectKey, { tool: action.tool })
+}
+
+/** Resolve the `ask` branch: short-circuit on a trust-scope grant, otherwise
+ *  call host `onConfirm` (wrapped in try-catch so a throwing handler becomes
+ *  a structured deny, R-Phase5 P0-C). Returns a deny short-circuit or null. */
+const resolveAskBranch = async (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  action: AdmissibilityAction,
+  reason: string,
+): Promise<DispatchResult | null> => {
+  // Phase C — trust-scope registry wire-up (ADR-0045). DEFAULT OFF.
+  if (trustScopeGrants(config, action)) return null
+  let approved = false
+  if (config.onConfirm) {
+    try {
+      approved = await config.onConfirm(action)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return deny(call.id, `Confirmation handler failed: ${message}`, "error")
+    }
+  }
+  if (!approved) return deny(call.id, `User declined: ${reason}`, "declined")
+  return null
+}
+
 /** Mode-based permission decision (legacy path). Tier 1 capability (ADR-0011):
  *  "auto" mode routes to the session-scoped LLM classifier; all other modes
  *  use the synchronous policy verbatim. */
@@ -283,19 +316,7 @@ const runModePolicy = async (
     return deny(call.id, `Permission denied: ${decision.reason}`, "denied")
   }
   if (decision.kind === "ask") {
-    // R-Phase5 P0-C: mirror the HITL branch — wrap host onConfirm in try-catch
-    // so a throwing handler becomes a structured deny, never an uncaught
-    // exception propagating into the dispatch pipeline.
-    let approved = false
-    if (config.onConfirm) {
-      try {
-        approved = await config.onConfirm(action)
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
-        return deny(call.id, `Confirmation handler failed: ${message}`, "error")
-      }
-    }
-    if (!approved) return deny(call.id, `User declined: ${decision.reason}`, "declined")
+    return resolveAskBranch(call, config, action, decision.reason)
   }
   return null
 }
