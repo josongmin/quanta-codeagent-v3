@@ -5,6 +5,7 @@ import {
   fourSectionPreset,
   validateSectionsCacheBudget,
 } from "./prompt-sections"
+import { renderToolUseRules } from "./prompt-rules"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
 import { renderWorkingStateBlock, type WorkingState } from "./working-state"
 
@@ -155,27 +156,7 @@ export const buildSystemPrompt = (_cwd?: string): string =>
     "                                         list_mcp_resources)",
     "Do not match tools to query strings. Pick the cheapest tool whose",
     "output is sufficient evidence for the claim you intend to make.",
-    "- [R-ENV] Do NOT attempt to install dependencies or modify the environment.",
-    "  Commands like `pip`, `pip3`, `python -m pip`, `npm`, `yarn`, `apt`,",
-    "  `apt-get`, `conda`, `brew`, `chmod`, `chown`, `export`, `sudo` are owned",
-    "  by the harness, not by you. If a verify command fails because the",
-    "  environment is missing a package or a binary, declare that the environment",
-    "  is unavailable for verification and stop — your patch is the deliverable,",
-    "  not a working env.",
-    "- [R-STOP-ENV] When you have made the minimum coherent code change and",
-    "  verification is blocked by env (not by failing assertions), STOP.",
-    "  Repeating the same install or env command will not unblock you. Switching",
-    "  tactic means changing the code, not retrying the command.",
-    "- [R-SEARCH-FIRST] To locate files or symbols, prefer `localize` first; use",
-    "  `grep`/`glob` only with a concrete pattern you have evidence for. Do not",
-    "  fire repeated broad globs hoping for a match.",
-    "- [R-READ-FAILURE] When a test fails, READ the failure output before making",
-    "  any edit. Cite the failing assertion or error in your reasoning. Never edit",
-    "  blindly in response to a red test.",
-    "- [R-NO-THRASH] Reissuing the same tool call, or trying spelling variants of",
-    "  an edit that did not land, will not change the result. If something fails,",
-    "  diagnose the actual cause and change approach — do not repeat or",
-    "  vary-and-retry blindly.",
+    ...renderToolUseRules(),
     "",
     "Honesty rail (closeout — these are correctness rules, not tone):",
     "- Do not say you read a surface you did not read.",

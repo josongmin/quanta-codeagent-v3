@@ -23,7 +23,7 @@ import { redactValue, type SandboxData } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { CACHE_PATHSPECS } from "./cache-pathspecs"
+import { getCachePathspecs } from "./cache-pathspecs"
 import { evaluateWithPythonSwebench, type PySwebenchOpts } from "./harness"
 import {
   type AttemptObservation,
@@ -193,7 +193,7 @@ const gitStageAndDiffCached = async (cwd: string, timeoutMs: number): Promise<st
   const add = await execArgv([...GIT_ARGV, "add", "-A"], cwd, timeoutMs)
   if (add.code !== 0) return ""
   const diff = await execArgv(
-    [...GIT_ARGV, "diff", "--cached", "--no-color", "--", ".", ...CACHE_PATHSPECS],
+    [...GIT_ARGV, "diff", "--cached", "--no-color", "--", ".", ...getCachePathspecs()],
     cwd,
     timeoutMs,
   )

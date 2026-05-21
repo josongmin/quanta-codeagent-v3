@@ -36,6 +36,7 @@
  */
 
 import type { ToolResultBlock } from "@/llm"
+import { runtimeConfig } from "@/shared"
 
 /** Tunable caps. Defaults: general 8-turn/3-cap, env 4-turn/3-cap (single
  *  bucket), edit 8-turn/5-cap (per file). */
@@ -85,8 +86,31 @@ export const DEFAULT_DEDUP_GATE_CAPS: DedupGateCaps = {
  *  attempts past the first are pure thrash — hence the tight single-bucket
  *  cap (any 3 env attempts in the window, regardless of spelling).
  */
-const ENV_PREFIX_REGEX =
-  /^(?:sudo\s+)?(?:pip3?|python3?\s+-m\s+(?:pip|ensurepip|venv)|npm|yarn|pnpm|apt(?:-get)?|conda|brew|chmod|chown|export)\b/i
+/** Audited default env-prefix body. Each alternative is a regex fragment
+ *  (intentionally — `pip3?`, `python3?\s+-m\s+(?:pip|…)`, `apt(?:-get)?` carry
+ *  internal alternation that a pure literal list can't express). Operator
+ *  extras (`QUANTA_DEDUP_ENV_PREFIXES_EXTRA`) are added as ESCAPED literals
+ *  so `uv`, `poetry`, `cargo install`, etc. can be appended without knowing
+ *  regex syntax. */
+const DEFAULT_ENV_PREFIX_BODY =
+  "pip3?|python3?\\s+-m\\s+(?:pip|ensurepip|venv)|npm|yarn|pnpm|apt(?:-get)?|conda|brew|chmod|chown|export"
+
+const escapeRegexLiteral = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/** Build the env-detection regex from `DEFAULT_ENV_PREFIX_BODY` plus any
+ *  operator-supplied literal prefixes (merge, not replace). Recomputed per
+ *  call so test seams that flip `QUANTA_DEDUP_ENV_PREFIXES_EXTRA` and reset
+ *  the runtime-config cache see the new value. */
+const envPrefixRegex = (): RegExp => {
+  const extras = runtimeConfig().dedupEnvPrefixesExtra
+  const tail = extras
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+    .map(escapeRegexLiteral)
+    .join("|")
+  const body = tail.length > 0 ? `${DEFAULT_ENV_PREFIX_BODY}|${tail}` : DEFAULT_ENV_PREFIX_BODY
+  return new RegExp(`^(?:sudo\\s+)?(?:${body})\\b`, "i")
+}
 
 /** True when this bash command should be routed to the env regime. Operates
  *  on the FIRST clause only (everything before the first `;`/`&&`/`||`) so a
@@ -97,7 +121,7 @@ const isEnvBashCommand = (command: string): boolean => {
   // (pip leads). Conservative: misclassifying a chain as env only makes the
   // gate STRICTER, which is the safe direction for false positives.
   const head = command.split(/\s*(?:;|&&|\|\|)\s*/, 1)[0] ?? ""
-  return ENV_PREFIX_REGEX.test(head.trimStart())
+  return envPrefixRegex().test(head.trimStart())
 }
 
 /** Deterministically canonicalize tool args for hashing.

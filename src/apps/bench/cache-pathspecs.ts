@@ -26,11 +26,14 @@
  * caused the django leak.
  */
 
-/** Canonical noise directory names (no trailing `/`). The git pathspec list
- *  and the classifier regex are both derived from this single array, so the
+import { runtimeConfig } from "@/shared"
+
+/** Audited default noise directory names (no trailing `/`). Both the git
+ *  pathspec list and the classifier regex are derived from this single array
+ *  PLUS `runtimeConfig().cachePathspecsExtra` (operator MERGE seam), so the
  *  SSOT invariant cannot drift. Mirrors `failure-classifier.ts`'s prior
  *  local `CACHE_PATH_RE` alternation exactly, plus `.claude/worktrees`. */
-const CACHE_DIR_NAMES: readonly string[] = [
+export const DEFAULT_CACHE_DIR_NAMES: readonly string[] = [
   "outputs",
   ".cache",
   "__pycache__",
@@ -46,17 +49,40 @@ const CACHE_DIR_NAMES: readonly string[] = [
   ".claude/worktrees",
 ]
 
+/** Effective directory-name list = defaults ∪ env extras, deduped, order
+ *  preserved (defaults first, extras after). Recomputed per call so a test
+ *  flipping the env between cases sees the change after `__resetRuntimeConfig`. */
+const effectiveDirNames = (): readonly string[] => {
+  const extras = runtimeConfig().cachePathspecsExtra
+  if (extras.length === 0) return DEFAULT_CACHE_DIR_NAMES
+  const seen = new Set<string>(DEFAULT_CACHE_DIR_NAMES)
+  const out = [...DEFAULT_CACHE_DIR_NAMES]
+  for (const e of extras) {
+    const norm = e.replace(/\/+$/, "")
+    if (norm.length > 0 && !seen.has(norm)) {
+      seen.add(norm)
+      out.push(norm)
+    }
+  }
+  return out
+}
+
 /**
  * Git pathspec exclude arguments suitable for `git diff -- . :(exclude,top)…`.
  * The `top` magic anchors each pathspec to the repository root so a
- * sub-directory `git diff` invocation excludes the same paths.
+ * sub-directory `git diff` invocation excludes the same paths. Includes any
+ * operator-supplied extras from `QUANTA_BENCH_CACHE_PATHSPECS_EXTRA`.
  *
  * Usage:
- *   git("diff", "--cached", "--", ".", ...CACHE_PATHSPECS)
+ *   git("diff", "--cached", "--", ".", ...getCachePathspecs())
  */
-export const CACHE_PATHSPECS: readonly string[] = CACHE_DIR_NAMES.map(
-  (p) => `:(exclude,top)${p}/`,
-)
+export const getCachePathspecs = (): readonly string[] =>
+  effectiveDirNames().map((p) => `:(exclude,top)${p}/`)
+
+/** Back-compat re-export for callers that capture the spread at module init.
+ *  The function form `getCachePathspecs()` is preferred when an env override
+ *  needs to be respected mid-process (tests; otherwise immaterial). */
+export const CACHE_PATHSPECS: readonly string[] = getCachePathspecs()
 
 /** Escape a literal string for inclusion in a RegExp alternation. */
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -67,8 +93,12 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
  * `outputs/`. Imported by `failure-classifier.ts`'s `isDirtyCacheLeak` —
  * after T2 this should fire 0 times in normal operation (the runner prunes
  * at source); a positive match indicates the prune-at-source contract was
- * violated upstream.
+ * violated upstream. Recomputed per call for the same env-test reason as
+ * `getCachePathspecs()`.
  */
-export const CACHE_PATH_RE = new RegExp(
-  `(^|/)(${CACHE_DIR_NAMES.map(escapeRe).join("|")})/`,
-)
+export const getCachePathRe = (): RegExp =>
+  new RegExp(`(^|/)(${effectiveDirNames().map(escapeRe).join("|")})/`)
+
+/** Back-compat: regex frozen at module load. New code should call
+ *  `getCachePathRe()` for env-override sensitivity. */
+export const CACHE_PATH_RE: RegExp = getCachePathRe()

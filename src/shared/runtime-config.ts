@@ -30,6 +30,15 @@ export type LogLevel = (typeof LOG_LEVELS)[number]
 
 const LOG_LEVEL_SET = new Set<string>(LOG_LEVELS)
 
+/** SWE-bench Docker image cache levels (upstream `run_evaluation` vocabulary).
+ *  `none` rebuilds + discards everything; `env` (the upstream default and ours)
+ *  keeps base + per-repo env images warm; `instance` also keeps per-instance
+ *  images for fastest re-runs of the SAME instance. */
+export const SWEBENCH_CACHE_LEVELS = ["none", "base", "env", "instance"] as const
+export type SwebenchCacheLevel = (typeof SWEBENCH_CACHE_LEVELS)[number]
+
+const SWEBENCH_CACHE_LEVEL_SET = new Set<string>(SWEBENCH_CACHE_LEVELS)
+
 const stderrWarn = (msg: string): void => {
   // Direct write because the logger imports US; using logger here would loop.
   process.stderr.write(`[quanta] config: ${msg}\n`)
@@ -63,6 +72,30 @@ const parsePositiveInt = (raw: string | undefined, varName: string): number | un
 const parseBool = (raw: string | undefined): boolean => {
   if (raw === undefined) return false
   return raw === "1" || raw.toLowerCase() === "true" || raw.toLowerCase() === "on"
+}
+
+/** Parse a delimiter-separated list (`,` `:` `;` `\n`). Trims, drops empties.
+ *  Returns a frozen array (length 0 ⇒ caller treats as "no extras"). Used for
+ *  list-shaped env vars that EXTEND a code-side default (operator merge, not
+ *  replace) — keeps audited defaults intact while admitting ecosystem additions
+ *  (Rust `target/`, new package managers like `uv`/`poetry`, etc). */
+const parseStringList = (raw: string | undefined): readonly string[] => {
+  if (raw === undefined || raw.length === 0) return Object.freeze([])
+  const parts: string[] = []
+  for (const piece of raw.split(/[,:;\n]/)) {
+    const t = piece.trim()
+    if (t.length > 0) parts.push(t)
+  }
+  return Object.freeze(parts)
+}
+
+const parseSwebenchCacheLevel = (raw: string | undefined): SwebenchCacheLevel => {
+  if (raw === undefined) return "env"
+  if (SWEBENCH_CACHE_LEVEL_SET.has(raw)) return raw as SwebenchCacheLevel
+  stderrWarn(
+    `ignoring unknown QUANTA_SWEBENCH_CACHE_LEVEL="${raw}" — valid: ${SWEBENCH_CACHE_LEVELS.join("|")} — defaulting to "env"`,
+  )
+  return "env"
 }
 
 /** All runtime-tunable values, frozen at startup. Add fields here when a new
@@ -106,12 +139,42 @@ export interface RuntimeConfig {
    *  computes a PERSISTENT default (never tmp): `<quantaHome>/bench`, else
    *  macOS `~/Library/quanta-codeagent-v3/bench`, else `~/.quanta/bench`. */
   readonly benchHome: string | undefined
+  /** Extra cache directory names appended to the audited
+   *  `DEFAULT_CACHE_DIR_NAMES` SSOT in `apps/bench/cache-pathspecs.ts`.
+   *  `QUANTA_BENCH_CACHE_PATHSPECS_EXTRA` is a `,`/`:`/`;`/newline-separated
+   *  list — merge semantics (NOT replace), so adding `target` (Rust) does
+   *  not silently drop `__pycache__` (Python). Empty ⇒ defaults only. */
+  readonly cachePathspecsExtra: readonly string[]
+  /** Extra literal command prefixes appended to the audited env-regime
+   *  detection set in `agent/dispatch-dedup.ts#DEFAULT_ENV_PREFIXES`.
+   *  `QUANTA_DEDUP_ENV_PREFIXES_EXTRA` is a delimiter-separated list of
+   *  LITERAL first-token names (e.g. `uv,poetry,cargo`). Operator merge
+   *  semantics — defaults intact. Used to keep the dedup gate's env brake
+   *  current with new package managers without code edits. */
+  readonly dedupEnvPrefixesExtra: readonly string[]
   /** Permission state-file override (`QUANTA_PERMISSION_STATE`). Absent ⇒
    *  feature site computes `<quantaHome>/permission-state.json`. */
   readonly permissionStateFile: string | undefined
   /** SSH connection marker (`SSH_CONNECTION`). Used by ADR-0046's
    *  `resolveHostId()` to decide between `<user>@<host>` and `localhost`. */
   readonly sshConnection: string | undefined
+  /** SWE-bench Docker image cache level (`QUANTA_SWEBENCH_CACHE_LEVEL`).
+   *  Default `env` (upstream default) — keeps base+env images warm so a batch
+   *  doesn't rebuild the expensive per-repo conda env per instance. */
+  readonly swebenchCacheLevel: SwebenchCacheLevel
+  /** SWE-bench `--clean` flag (`QUANTA_SWEBENCH_CLEAN`). Default false — keep
+   *  images at/under cacheLevel between runs (warm pool). */
+  readonly swebenchClean: boolean
+  /** SWE-bench grading parallelism (`QUANTA_SWEBENCH_MAX_WORKERS`). Absent ⇒
+   *  the harness config computes `min(4, ceil(cpus * 0.75))`. */
+  readonly swebenchMaxWorkers: number | undefined
+  /** SWE-bench image namespace (`QUANTA_SWEBENCH_NAMESPACE`). Absent ⇒ the
+   *  harness config picks by arch ("none" ⇒ build locally; avoids x86 pulls
+   *  that would emulate on arm64). */
+  readonly swebenchNamespace: string | undefined
+  /** SWE-bench `--force_rebuild` (`QUANTA_SWEBENCH_FORCE_REBUILD`). Default
+   *  false — reuse cached images unless explicitly invalidated. */
+  readonly swebenchForceRebuild: boolean
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -135,11 +198,24 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_LLM_STREAM_FIRST_CHUNK_MS"],
       "QUANTA_LLM_STREAM_FIRST_CHUNK_MS",
     ),
-    llmStreamIdleMs: parsePositiveInt(env["QUANTA_LLM_STREAM_IDLE_MS"], "QUANTA_LLM_STREAM_IDLE_MS"),
+    llmStreamIdleMs: parsePositiveInt(
+      env["QUANTA_LLM_STREAM_IDLE_MS"],
+      "QUANTA_LLM_STREAM_IDLE_MS",
+    ),
     quantaHome: stringOrUndef(env["QUANTA_HOME"]),
     benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),
+    cachePathspecsExtra: parseStringList(env["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]),
+    dedupEnvPrefixesExtra: parseStringList(env["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]),
     permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),
     sshConnection: stringOrUndef(env["SSH_CONNECTION"]),
+    swebenchCacheLevel: parseSwebenchCacheLevel(env["QUANTA_SWEBENCH_CACHE_LEVEL"]),
+    swebenchClean: parseBool(env["QUANTA_SWEBENCH_CLEAN"]),
+    swebenchMaxWorkers: parsePositiveInt(
+      env["QUANTA_SWEBENCH_MAX_WORKERS"],
+      "QUANTA_SWEBENCH_MAX_WORKERS",
+    ),
+    swebenchNamespace: stringOrUndef(env["QUANTA_SWEBENCH_NAMESPACE"]),
+    swebenchForceRebuild: parseBool(env["QUANTA_SWEBENCH_FORCE_REBUILD"]),
   })
 }
 

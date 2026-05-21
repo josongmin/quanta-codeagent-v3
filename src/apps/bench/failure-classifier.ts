@@ -17,7 +17,7 @@
  * fixtures so a future detector cannot silently drift.
  */
 import { existsSync, readFileSync } from "node:fs"
-import { CACHE_PATH_RE } from "./cache-pathspecs"
+import { getCachePathRe } from "./cache-pathspecs"
 import type { InstanceResult } from "./types"
 
 /** How the run terminated. Covering partition — every failed result lands in
@@ -128,7 +128,8 @@ const isDirtyCacheLeak = (patch: string): boolean => {
   if (patch.trim() === "") return false
   const paths = diffHeaderPaths(patch)
   if (paths.length === 0) return false
-  return paths.every((p) => CACHE_PATH_RE.test(p))
+  const re = getCachePathRe()
+  return paths.every((p) => re.test(p))
 }
 
 const distinctEditedFiles = (patch: string): number => new Set(diffHeaderPaths(patch)).size

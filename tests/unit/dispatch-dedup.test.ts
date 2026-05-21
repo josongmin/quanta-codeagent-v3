@@ -6,6 +6,7 @@ import {
   DedupGate,
   DEFAULT_DEDUP_GATE_CAPS,
 } from "@/agent/dispatch-dedup"
+import { __resetRuntimeConfig } from "@/shared"
 
 /** Tiny helper: record N calls of the same shape at given turns and return the
  *  verdicts in order (so an assertion can read off `[pass, pass, blocked]`). */
@@ -340,6 +341,52 @@ describe("DedupGate — replay: live sklearn env-thrash trace (11 distinct comma
     expect(verdicts.slice(2).every((v) => v.blocked)).toBe(true)
     const firstBlocked = verdicts.findIndex((v) => v.blocked) + 1
     expect(firstBlocked).toBe(3)
+  })
+})
+
+describe("DedupGate — env-extension via QUANTA_DEDUP_ENV_PREFIXES_EXTRA", () => {
+  const SAVED = process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA
+  const reset = (): void => {
+    if (SAVED === undefined) delete process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA
+    else process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA = SAVED
+    __resetRuntimeConfig()
+  }
+
+  test("a NEW package manager (uv) routes to env regime when added via env", () => {
+    process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA = "uv,poetry"
+    __resetRuntimeConfig()
+    const g = new DedupGate()
+    // env threshold 3 — first 2 pass, 3rd blocks; regime must be "env"
+    g.record("bash", { command: "uv add flask" }, 1)
+    g.record("bash", { command: "uv add requests" }, 2)
+    const v = g.record("bash", { command: "uv add numpy" }, 3)
+    expect(v.blocked).toBe(true)
+    if (v.blocked) expect(v.regime).toBe("env")
+    reset()
+  })
+
+  test("defaults survive env extension (no replace)", () => {
+    process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA = "uv"
+    __resetRuntimeConfig()
+    const g = new DedupGate()
+    g.record("bash", { command: "pip install x" }, 1)
+    g.record("bash", { command: "pip install y" }, 2)
+    const v = g.record("bash", { command: "pip install z" }, 3)
+    expect(v.blocked).toBe(true)
+    if (v.blocked) expect(v.regime).toBe("env")
+    reset()
+  })
+
+  test("extra literals are regex-escaped (cargo+install matches as literal, not regex)", () => {
+    process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA = "cargo"
+    __resetRuntimeConfig()
+    const g = new DedupGate()
+    g.record("bash", { command: "cargo install foo" }, 1)
+    g.record("bash", { command: "cargo install bar" }, 2)
+    const v = g.record("bash", { command: "cargo install baz" }, 3)
+    expect(v.blocked).toBe(true)
+    if (v.blocked) expect(v.regime).toBe("env")
+    reset()
   })
 })
 

@@ -19,7 +19,14 @@ import { existsSync, readFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import { CACHE_PATH_RE, CACHE_PATHSPECS } from "@/../src/apps/bench/cache-pathspecs"
+import {
+  CACHE_PATH_RE,
+  CACHE_PATHSPECS,
+  DEFAULT_CACHE_DIR_NAMES,
+  getCachePathRe,
+  getCachePathspecs,
+} from "@/../src/apps/bench/cache-pathspecs"
+import { __resetRuntimeConfig } from "@/shared"
 import { classify } from "@/../src/apps/bench/failure-classifier"
 import type { InstanceResult } from "@/../src/apps/bench/types"
 
@@ -124,14 +131,18 @@ describe("prune-at-source — git layer excludes cache paths", () => {
 })
 
 describe("SSOT — runner.ts and failure-classifier.ts import from cache-pathspecs.ts", () => {
-  test("runner.ts imports CACHE_PATHSPECS from ./cache-pathspecs", () => {
+  test("runner.ts imports cache pathspecs from ./cache-pathspecs (const or fn form)", () => {
     const src = readFileSync(join(REPO_ROOT, "src/apps/bench/runner.ts"), "utf8")
-    expect(src).toMatch(/import\s+\{\s*CACHE_PATHSPECS\s*\}\s+from\s+["']\.\/cache-pathspecs["']/)
+    expect(src).toMatch(
+      /import\s+\{\s*(?:CACHE_PATHSPECS|getCachePathspecs)\s*\}\s+from\s+["']\.\/cache-pathspecs["']/,
+    )
   })
 
-  test("failure-classifier.ts imports CACHE_PATH_RE from ./cache-pathspecs", () => {
+  test("failure-classifier.ts imports cache path RE from ./cache-pathspecs (const or fn form)", () => {
     const src = readFileSync(join(REPO_ROOT, "src/apps/bench/failure-classifier.ts"), "utf8")
-    expect(src).toMatch(/import\s+\{\s*CACHE_PATH_RE\s*\}\s+from\s+["']\.\/cache-pathspecs["']/)
+    expect(src).toMatch(
+      /import\s+\{\s*(?:CACHE_PATH_RE|getCachePathRe)\s*\}\s+from\s+["']\.\/cache-pathspecs["']/,
+    )
   })
 
   test("failure-classifier.ts no longer defines its own CACHE_PATH_RE locally", () => {
@@ -142,6 +153,49 @@ describe("SSOT — runner.ts and failure-classifier.ts import from cache-pathspe
 
   test("SSOT file exists at the documented location", () => {
     expect(existsSync(join(REPO_ROOT, "src/apps/bench/cache-pathspecs.ts"))).toBe(true)
+  })
+})
+
+describe("env-extension — QUANTA_BENCH_CACHE_PATHSPECS_EXTRA merges with defaults", () => {
+  const SAVED = process.env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA
+  const reset = (): void => {
+    if (SAVED === undefined) delete process.env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA
+    else process.env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA = SAVED
+    __resetRuntimeConfig()
+  }
+
+  test("no env ⇒ defaults only", () => {
+    delete process.env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA
+    __resetRuntimeConfig()
+    const ps = getCachePathspecs()
+    expect(ps.length).toBe(DEFAULT_CACHE_DIR_NAMES.length)
+    expect(ps).toContain(":(exclude,top).claude/worktrees/")
+    reset()
+  })
+
+  test("env extras append (defaults preserved, deduped)", () => {
+    process.env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA = "target,vendor:outputs"
+    __resetRuntimeConfig()
+    const ps = getCachePathspecs()
+    // defaults intact
+    expect(ps).toContain(":(exclude,top)outputs/") // dedup: not duplicated
+    expect(ps).toContain(":(exclude,top)__pycache__/")
+    // extras appended
+    expect(ps).toContain(":(exclude,top)target/")
+    expect(ps).toContain(":(exclude,top)vendor/")
+    // length = defaults + 2 net new (outputs collides with default)
+    expect(ps.length).toBe(DEFAULT_CACHE_DIR_NAMES.length + 2)
+    reset()
+  })
+
+  test("env extras propagate into CACHE_PATH_RE", () => {
+    process.env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA = "target"
+    __resetRuntimeConfig()
+    const re = getCachePathRe()
+    expect(re.test("target/debug/foo")).toBe(true)
+    expect(re.test("a/b/target/x")).toBe(true)
+    expect(re.test("__pycache__/x")).toBe(true) // default still works
+    reset()
   })
 })
 
