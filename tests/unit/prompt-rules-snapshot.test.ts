@@ -54,6 +54,52 @@ describe("system prompt — T5a env-mod / stop-when-blocked rules", () => {
     expect(rstopCount).toBe(1)
   })
 
+  test("rule IDs [R-SEARCH-FIRST] [R-READ-FAILURE] [R-NO-THRASH] appear inline", () => {
+    expect(prompt).toContain("[R-SEARCH-FIRST]")
+    expect(prompt).toContain("[R-READ-FAILURE]")
+    expect(prompt).toContain("[R-NO-THRASH]")
+  })
+
+  test("R-SEARCH-FIRST pins the localize-first / no-broad-glob phrasing", () => {
+    // Type-B search thrashing: 7-8 empty globs before finding the file. The
+    // localize-first directive is the model-obedient short-circuit.
+    expect(prompt).toContain("prefer `localize` first")
+    expect(lower).toContain("do not")
+    expect(lower).toContain("fire repeated broad globs hoping for a match")
+  })
+
+  test("R-READ-FAILURE pins the read-before-edit-on-red phrasing", () => {
+    // Type-E/F: model edited without reading the test failure.
+    expect(prompt).toContain("READ the failure output before making")
+    expect(lower).toContain("cite the failing assertion or error")
+    expect(lower).toContain("never edit")
+  })
+
+  test("R-NO-THRASH pins the no-vary-and-retry phrasing", () => {
+    // Type-C/F: retried the same failing call / variant edits.
+    expect(prompt).toContain("Reissuing the same tool call")
+    expect(lower).toContain("spelling variants of")
+    expect(lower).toContain("vary-and-retry blindly")
+  })
+
+  test("each new rule appears EXACTLY once (no duplicate injection)", () => {
+    expect(prompt.split("[R-SEARCH-FIRST]").length - 1).toBe(1)
+    expect(prompt.split("[R-READ-FAILURE]").length - 1).toBe(1)
+    expect(prompt.split("[R-NO-THRASH]").length - 1).toBe(1)
+  })
+
+  test("new rules land between Tool routing and Honesty rail (cached prefix)", () => {
+    const toolRoutingIdx = prompt.indexOf("Tool routing")
+    const searchIdx = prompt.indexOf("[R-SEARCH-FIRST]")
+    const readIdx = prompt.indexOf("[R-READ-FAILURE]")
+    const thrashIdx = prompt.indexOf("[R-NO-THRASH]")
+    const honestyIdx = prompt.indexOf("Honesty rail")
+    expect(searchIdx).toBeGreaterThan(toolRoutingIdx)
+    expect(readIdx).toBeGreaterThan(searchIdx)
+    expect(thrashIdx).toBeGreaterThan(readIdx)
+    expect(honestyIdx).toBeGreaterThan(thrashIdx)
+  })
+
   test("cache-prefix invariance — buildSystemPrompt() is byte-stable across calls", () => {
     // ADR-0003/0004: the static prefix MUST be byte-identical so the provider
     // prompt-cache prefix holds across the whole session. Adding rules is fine
