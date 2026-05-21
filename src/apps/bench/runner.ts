@@ -16,6 +16,7 @@ import { writeFileSync } from "node:fs"
 import { cp, mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { buildSystemPrompt, runAgent } from "@/agent"
+import { lspNavToolList } from "@/agent/lsp-bridge"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { scrubEnv } from "@/runtime"
@@ -372,7 +373,13 @@ const buildConfig = (
   stream: StreamPort,
   seedMsg?: string,
 ) => {
-  const registry = new ToolRegistry(defaultTools)
+  // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI).
+  // When the language-server binary (`pyright-langserver` / `typescript-
+  // language-server`) is absent the per-call probe in `lsp-bridge` makes the
+  // tools emit a clean `ok:false` — registration is harmless without a server.
+  // Default-OFF preserves byte-identical bench behavior.
+  const lspNavTools = process.env.QUANTA_LSP_TOOLS === "full" ? lspNavToolList() : []
+  const registry = new ToolRegistry([...defaultTools, ...lspNavTools])
   const permission: PermissionContext = { mode: "acceptEdits" }
   const base = `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
