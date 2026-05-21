@@ -50,10 +50,12 @@
 
 import { AutoModeClassifier } from "@/permission"
 import { createUpdateWorkingStateTool, type Tool } from "@/tool"
+import type { Skill } from "../skill"
 import {
   createSkillTool,
   createToolSearchTool,
   discoverSkills,
+  discoverSystemSkills,
   skillsActivatedFor,
   skillToolAllowlist,
 } from "../skill"
@@ -151,7 +153,17 @@ const buildSkillFeatures = async (
   allowlists: Map<string, string[]> | undefined
   inventory: { name: string; description: string }[]
 }> => {
-  const skills = await discoverSkills(dir)
+  const userSkills = await discoverSkills(dir)
+  // Bundled system skills (ADR-0045) — version-pinned, ship with the framework.
+  // Merged into the discoverable set so the model can invoke disciplines like
+  // `progress-audit` regardless of whether the user populated their own skills
+  // dir. System skills WIN on a name collision so a user-supplied skill cannot
+  // impersonate / weaken a system one (the `byName` second-pass overrides).
+  const systemSkills = await discoverSystemSkills()
+  const byName = new Map<string, Skill>()
+  for (const s of userSkills) byName.set(s.name, s)
+  for (const s of systemSkills) byName.set(s.name, s)
+  const skills = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
   const tools: Tool[] = [
     // `createSkillTool` ALWAYS receives the full discovered list — a user can
     // still invoke any skill by name. The `paths:` filter below only narrows

@@ -44,5 +44,6 @@ export {
   skillModelOverride,
   skillToolAllowlist,
 } from "./skill-tool"
+export { discoverSystemSkills, systemSkillsDir } from "./system-skills"
 export { createToolSearchTool } from "./tool-search"
 export type { ParsedFrontmatter, Skill, SkillEffort } from "./types"

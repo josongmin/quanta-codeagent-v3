@@ -127,6 +127,10 @@ describe("buildSessionFeatures", () => {
       "Skill tool",
     )
     expect(skill.description).toContain("demo")
+    // ADR-0045: bundled system skills (e.g. `progress-audit`) are merged in
+    // unconditionally when `config.skills` is set. The user-supplied `demo`
+    // and the system `progress-audit` are both advertised.
+    expect(skill.description).toContain("progress-audit")
   })
 
   test("missing skills dir ⇒ tools STILL registered (documented behavior)", async () => {
@@ -136,7 +140,9 @@ describe("buildSessionFeatures", () => {
       f.extraTools.find((t) => t.name === "Skill"),
       "Skill tool",
     )
-    expect(skill.description).toContain("(none discovered)")
+    // ADR-0045: even when the user dir is missing, bundled system skills are
+    // still discovered — so the catalogue is non-empty.
+    expect(skill.description).toContain("progress-audit")
   })
 
   test("ToolSearch tool ranks the live registry catalog", async () => {
@@ -230,11 +236,13 @@ describe("buildSessionFeatures", () => {
     const f = await buildSessionFeatures(cfg({ skills: { dir } }))
     const al = must(f.skillAllowlists, "skillAllowlists")
     expect(al).toBeInstanceOf(Map)
-    // Only the scoped skill is a key; its value is exactly its declared list.
-    expect([...al.keys()]).toEqual(["scoped"])
+    // The user-declared scoped skill is present with its exact list.
     expect(al.get("scoped")).toEqual(["Read"])
     // The no-tools skill must NOT appear.
     expect(al.has("open")).toBe(false)
+    // ADR-0045: the bundled `progress-audit` system skill also declares
+    // `tools:`, so it appears in the allowlist map alongside user skills.
+    expect(al.get("progress-audit")).toEqual(["Read", "Grep", "Bash"])
     // Tools themselves are still registered regardless of scoping.
     expect(names(f.extraTools)).toEqual(["Skill", "ToolSearch"])
   })
@@ -252,7 +260,7 @@ describe("buildSessionFeatures", () => {
     expect(al.get("multi")).toEqual(["Read", "Grep", "Glob"])
   })
 
-  test("skillAllowlists: ABSENT entirely when no skill declares tools", async () => {
+  test("skillAllowlists: only system-skill entries when no user skill declares tools", async () => {
     const dir = await mkdtemp(join(tmpdir(), "feat-noallow-"))
     tmpDirs.push(dir)
     await mkdir(join(dir, "a"), { recursive: true })
@@ -260,8 +268,13 @@ describe("buildSessionFeatures", () => {
     await mkdir(join(dir, "b"), { recursive: true })
     await writeFile(join(dir, "b", "SKILL.md"), "---\nname: b\ndescription: d\n---\nbody\n")
     const f = await buildSessionFeatures(cfg({ skills: { dir } }))
-    // No skill declared `tools:` ⇒ no gate data at all (byte-identical loop).
-    expect(f.skillAllowlists).toBeUndefined()
+    // ADR-0045: bundled `progress-audit` declares `tools:` so the map exists,
+    // populated only with system-skill entries. Pre-0045 contract was
+    // `undefined` here, but the addition is opt-in via `config.skills`.
+    const al = must(f.skillAllowlists, "skillAllowlists")
+    expect(al.has("a")).toBe(false)
+    expect(al.has("b")).toBe(false)
+    expect(al.get("progress-audit")).toEqual(["Read", "Grep", "Bash"])
     // Tools still registered (gate is gated on config.skills, not contents).
     expect(names(f.extraTools)).toEqual(["Skill", "ToolSearch"])
   })
@@ -280,9 +293,11 @@ describe("buildSessionFeatures", () => {
       "---\nname: e\ndescription: d\ntools: []\n---\nbody\n",
     )
     const f = await buildSessionFeatures(cfg({ skills: { dir } }))
-    // skillToolAllowlist returns undefined for an empty list ⇒ not a key, and
-    // since it is the only skill the whole map is absent.
-    expect(f.skillAllowlists).toBeUndefined()
+    // skillToolAllowlist returns undefined for the empty-list user skill; the
+    // bundled `progress-audit` is still present (ADR-0045).
+    const al = must(f.skillAllowlists, "skillAllowlists")
+    expect(al.has("e")).toBe(false)
+    expect(al.get("progress-audit")).toEqual(["Read", "Grep", "Bash"])
   })
 
   // --- Phase 6: Codex memory L3 (workingState) ---------------------------
