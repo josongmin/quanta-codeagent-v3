@@ -23,6 +23,10 @@ describe("METRIC name table", () => {
       consolidateSkipped: "memory.consolidate.skipped",
       evictDecayed: "memory.evict.decayed",
       evictDeleted: "memory.evict.deleted",
+      // Canonical OTel GenAI usage keys — see vocabulary.ts.
+      tokensInput: "gen_ai.usage.input_tokens",
+      tokensOutput: "gen_ai.usage.output_tokens",
+      cacheRead: "gen_ai.usage.cache_read_input_tokens",
     })
   })
 })

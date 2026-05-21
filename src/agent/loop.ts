@@ -88,8 +88,17 @@ type AssembledMessage = ReturnType<typeof assembleFromEvents>["message"]
 /** Bridge a `{type:"usage"}` StreamEvent (W-A2, currently dropped by
  *  `assembleFromEvents`) to the homomorphic `AgentEvent` so recorders capture
  *  token/usage. 1:1 field map; this is the ONLY new emit and is independent of
- *  all existing control flow / emit ordering. */
-const emitUsage = (config: AgentConfig, ev: Extract<StreamEvent, { type: "usage" }>): void => {
+ *  all existing control flow / emit ordering.
+ *
+ *  Claude Desktop `getContextUsage` parity: also fans the same numbers out into
+ *  the optional `AgentRecorder`'s canonical OTel GenAI counters so the CLI
+ *  status line (or a future Tauri sidebar) can read live token consumption.
+ *  Recorder absent ⇒ no-op (byte-identical to the pre-wired path). */
+const emitUsage = (
+  config: AgentConfig,
+  ev: Extract<StreamEvent, { type: "usage" }>,
+  recorder: AgentRecorder | undefined,
+): void => {
   config.stream.emit({
     type: "usage",
     inputTokens: ev.inputTokens,
@@ -97,6 +106,7 @@ const emitUsage = (config: AgentConfig, ev: Extract<StreamEvent, { type: "usage"
     model: ev.model,
     ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
   })
+  recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
 }
 
 /** Stable, small set of `recovery` reasons (RFC-0002 §5.2). Group E maps these
@@ -152,9 +162,10 @@ const emitLlmRequest = (config: AgentConfig): void => {
 async function* teeUsage(
   config: AgentConfig,
   src: AsyncIterable<StreamEvent>,
+  recorder: AgentRecorder | undefined,
 ): AsyncIterable<StreamEvent> {
   for await (const ev of src) {
-    if (ev.type === "usage") emitUsage(config, ev)
+    if (ev.type === "usage") emitUsage(config, ev, recorder)
     yield ev
   }
 }
@@ -249,7 +260,7 @@ const streamConsume = async (
   const stop = recorder?.llmStream()
   try {
     const outcome = await streamingTurn({
-      events: teeUsage(config, config.llm.stream({ messages, system, tools: specs })),
+      events: teeUsage(config, config.llm.stream({ messages, system, tools: specs }), recorder),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
       dispatch: async (call) => {
         const s = recorder?.toolExec()

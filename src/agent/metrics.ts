@@ -1,4 +1,5 @@
 import type { Metrics } from "@/observability"
+import { GEN_AI_ATTRS } from "@/observability/vocabulary"
 import type { PersistStats, RecallStats } from "./memory-stats"
 
 /**
@@ -8,7 +9,13 @@ import type { PersistStats, RecallStats } from "./memory-stats"
  * loop only touches an {@link AgentRecorder} when `config.metrics` is present.
  */
 
-/** Stable metric names — kept in one place so the snapshot is predictable. */
+/** Stable metric names — kept in one place so the snapshot is predictable.
+ *
+ * Token-usage counters reuse the canonical OTel GenAI vocabulary
+ * (`gen_ai.usage.input_tokens` etc., declared in
+ * `src/observability/vocabulary.ts`) so a CLI status line — or any future
+ * surface (Tauri sidebar / Web REPL) — reads ONE well-known key, not a private
+ * loop-local namespace. Claude Desktop 1.7196.3 `getContextUsage` parity. */
 export const METRIC = {
   turns: "agent.turns",
   toolCalls: "agent.tool_calls",
@@ -27,6 +34,9 @@ export const METRIC = {
   consolidateSkipped: "memory.consolidate.skipped",
   evictDecayed: "memory.evict.decayed",
   evictDeleted: "memory.evict.deleted",
+  tokensInput: GEN_AI_ATTRS.usage.inputTokens,
+  tokensOutput: GEN_AI_ATTRS.usage.outputTokens,
+  cacheRead: GEN_AI_ATTRS.usage.cacheReadInputTokens,
 } as const
 
 /** Loop-facing recorder. Wraps a {@link Metrics} instance; every method is a
@@ -63,6 +73,23 @@ export class AgentRecorder {
     this.metrics.counter(METRIC.recallEntries).inc(s.recalled)
     if (s.embedded) this.metrics.counter(METRIC.recallSemantic).inc()
     if (s.fellBack) this.metrics.counter(METRIC.recallFallback).inc()
+  }
+
+  /**
+   * Record one token-usage report from a model stream (Claude Desktop
+   * `getContextUsage` parity). `input` / `output` are the raw GenAI semconv
+   * counters; `cacheRead` is registered lazily so the absent case stays a
+   * true no-op (no counter created on the registry — matches the optional
+   * shape of `StreamEvent { type:"usage" }`). All three keys are the canonical
+   * OTel GenAI semconv strings, so a CLI status line / Tauri sidebar reads
+   * the same names regardless of provider.
+   */
+  tokensUsed(input: number, output: number, cacheRead?: number): void {
+    this.metrics.counter(METRIC.tokensInput).inc(input)
+    this.metrics.counter(METRIC.tokensOutput).inc(output)
+    if (cacheRead !== undefined) {
+      this.metrics.counter(METRIC.cacheRead).inc(cacheRead)
+    }
   }
 
   /** Record one persistSession outcome (RFC §8 memory observability). */
