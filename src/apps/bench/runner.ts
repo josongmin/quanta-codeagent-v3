@@ -24,7 +24,7 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { CACHE_PATHSPECS } from "./cache-pathspecs"
-import { benchWorkRoot } from "./paths"
+import { evaluateWithPythonSwebench, type PySwebenchOpts } from "./harness"
 import {
   type AttemptObservation,
   BenchObserver,
@@ -35,7 +35,7 @@ import {
   UsageTap,
   verifyLogTail,
 } from "./observe"
-import { evaluateWithPythonSwebench, type PySwebenchOpts } from "./python-swebench"
+import { benchWorkRoot } from "./paths"
 import { runRepairRounds } from "./repair"
 import { buildRepairContext } from "./repair/context"
 import type {
@@ -726,6 +726,15 @@ export const runInstance = async (
     w = buildWiring(instance, deps.observe)
     await cp(instance.repoPath, sandbox, { recursive: true })
 
+    // T4 — per-instance env pre-preparation (fail-fast). When the instance
+    // carries a `setupCmd`, run it in the sandbox copy BEFORE the agent. This
+    // is the structural fix for Type-F (verify-loop stuck on env): the harness
+    // prepares the environment, the agent never has to. The command is the
+    // task author's responsibility to keep HOST-CLEAN (e.g. a per-instance
+    // venv created inside `sandbox`); the runner never installs against the
+    // host Python/global env. If setup exits non-zero we fail-fast with a
+    // DISTINCT `env_prep_failed` verdict and DO NOT run the agent — handing a
+    // half-prepared env to the agent is exactly the failure this prevents.
     if (instance.setupCmd) {
       const setup = await exec(instance.setupCmd, sandbox, deps.timeoutMs)
       if (setup.code !== 0) {
@@ -734,7 +743,8 @@ export const runInstance = async (
           passed: false,
           patch: "",
           turns: 0,
-          error: `setup failed (code ${setup.code}): ${setup.stderr.slice(0, 500)}`,
+          verdict: "env_prep_failed",
+          error: `env prep (setupCmd) failed (code ${setup.code}): ${setup.stderr.slice(0, 500)}`,
         }
       }
     }

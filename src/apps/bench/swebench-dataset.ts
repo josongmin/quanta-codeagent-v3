@@ -113,13 +113,54 @@ export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
   return out
 }
 
+/** Check out `ref` in `destDir`, deepening a shallow clone once on failure.
+ *  Throws a precise Error (with `label` for context) on any git failure. */
+const checkoutOrDeepen = async (
+  task: SwebenchTask,
+  destDir: string,
+  exec: Exec,
+  ref: string,
+  label: string,
+  timeoutMs: number,
+): Promise<void> => {
+  let checkout = await exec(`git checkout -q ${ref}`, destDir, timeoutMs)
+  if (checkout.code !== 0) {
+    // Shallow / partial clone may not contain `ref` — deepen & retry.
+    const fetch = await exec(
+      `git fetch -q --unshallow || git fetch -q --depth=2147483647 origin`,
+      destDir,
+      timeoutMs,
+    )
+    if (fetch.code !== 0) {
+      throw new Error(
+        `git fetch (deepen) failed for ${task.instanceId} (code ${fetch.code}): ${fetch.stderr.slice(0, 500)}`,
+      )
+    }
+    checkout = await exec(`git checkout -q ${ref}`, destDir, timeoutMs)
+    if (checkout.code !== 0) {
+      throw new Error(
+        `git checkout ${label} (${ref}) failed for ${task.instanceId} (code ${checkout.code}): ${checkout.stderr.slice(0, 500)}`,
+      )
+    }
+  }
+}
+
 /**
- * Produce a checked-out repo for `task` at `task.baseCommit` under `destDir`
- * and return its path. Clones `https://github.com/<repo>.git` (override the
- * base via `repoBaseUrl` so tests can clone a local path offline), then
- * checks out `base_commit`; if the commit is absent after a (possibly
- * shallow) clone it falls back to a full `git fetch`. Throws a precise Error
- * on any git failure (the caller turns it into InstanceResult.error).
+ * Produce a checked-out repo for `task` under `destDir` and return its path.
+ * Clones `https://github.com/<repo>.git` (override the base via `repoBaseUrl`
+ * so tests can clone a local path offline). If a shallow clone lacks a target
+ * commit it deepens once via `git fetch`.
+ *
+ * T4 (env pre-prep, Part A): when `task.environmentSetupCommit` is present we
+ * check it OUT FIRST. That is the upstream-designated commit carrying the
+ * correct `setup.py`/`requirements*.txt` for the instance's toolchain — the
+ * same commit the official SWE-bench Docker harness uses to build the env.
+ * Materializing those files (pure git, always correct, no host mutation) lets
+ * a later setup step install against the right manifest. We then check out
+ * `base_commit` so the FINAL working tree is the canonical buggy tree the
+ * agent must fix; the env-setup-commit's files survive only where base_commit
+ * does not overwrite them (matching upstream semantics). When the field is
+ * absent, behavior is byte-identical to before (base_commit checkout only).
  */
 export const prepareTaskRepo = async (
   task: SwebenchTask,
@@ -138,26 +179,17 @@ export const prepareTaskRepo = async (
     )
   }
 
-  let checkout = await exec(`git checkout -q ${task.baseCommit}`, destDir, timeoutMs)
-  if (checkout.code !== 0) {
-    // Shallow / partial clone may not contain base_commit — deepen & retry.
-    const fetch = await exec(
-      `git fetch -q --unshallow || git fetch -q --depth=2147483647 origin`,
+  if (task.environmentSetupCommit !== undefined && task.environmentSetupCommit !== "") {
+    await checkoutOrDeepen(
+      task,
       destDir,
+      exec,
+      task.environmentSetupCommit,
+      "environment_setup_commit",
       timeoutMs,
     )
-    if (fetch.code !== 0) {
-      throw new Error(
-        `git fetch (deepen) failed for ${task.instanceId} (code ${fetch.code}): ${fetch.stderr.slice(0, 500)}`,
-      )
-    }
-    checkout = await exec(`git checkout -q ${task.baseCommit}`, destDir, timeoutMs)
-    if (checkout.code !== 0) {
-      throw new Error(
-        `git checkout ${task.baseCommit} failed for ${task.instanceId} (code ${checkout.code}): ${checkout.stderr.slice(0, 500)}`,
-      )
-    }
   }
+  await checkoutOrDeepen(task, destDir, exec, task.baseCommit, "base_commit", timeoutMs)
   return destDir
 }
 

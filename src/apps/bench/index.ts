@@ -38,7 +38,7 @@ import { aggregate, classify } from "./failure-classifier"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
 import { benchRunDir, benchRunId, benchWorkRoot } from "./paths"
-import { isPythonSwebenchAvailable } from "./python-swebench"
+import { isPythonSwebenchAvailable } from "./harness"
 import { buildReport, writeReport } from "./report"
 import { finalizeRun, runInstance } from "./runner"
 import { patchVote, sampleBestOfN } from "./sampler"
@@ -134,7 +134,9 @@ const failureTag = (r: InstanceResult): string => {
 
 const printSummary = (summary: BenchSummary): void => {
   for (const r of summary.results) {
-    const verdict = (r.verdict ?? "ok") === "degraded" ? " DEGRADED" : ""
+    const v = r.verdict ?? "ok"
+    const verdict =
+      v === "degraded" ? " DEGRADED" : v === "env_prep_failed" ? " ENV_PREP_FAILED" : ""
     const mark = r.passed ? "PASS" : "FAIL"
     const tag = failureTag(r)
     const extra = r.error ? ` (${r.error})` : ""

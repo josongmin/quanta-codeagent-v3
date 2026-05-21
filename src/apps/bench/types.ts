@@ -58,11 +58,13 @@ export interface InstanceResult {
   error?: string
   /**
    * Observation verdict (RFC-0002 §3/§8/§12). `"degraded"` ⇒ the trajectory
-   * recorder failed under strict (eval) mode; the result is EXCLUDED from
-   * `resolved/total` and reported separately. Absent ⇒ `"ok"` (default-off
-   * runs never set this, preserving byte-identical behavior).
+   * recorder failed under strict (eval) mode; `"env_prep_failed"` ⇒ T4
+   * harness env pre-prep (setupCmd) failed BEFORE the agent ran. Both are
+   * EXCLUDED from `resolved/total` (the agent never got a fair shot). Absent
+   * ⇒ `"ok"` (default-off runs never set this, preserving byte-identical
+   * behavior).
    */
-  verdict?: "ok" | "degraded"
+  verdict?: "ok" | "degraded" | "env_prep_failed"
   /** Absolute path of the captured `.patch` file (only when observing). */
   patchPath?: string
   /** Wall-clock instance duration in ms (only when observing). */

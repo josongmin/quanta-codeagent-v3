@@ -163,7 +163,7 @@ export const verifyLogTail = (log: string | undefined): string => tail(log ?? ""
 interface SummaryInstance {
   id: string
   passed: boolean
-  verdict: "ok" | "degraded"
+  verdict: "ok" | "degraded" | "env_prep_failed"
   turns: number
   patchPath?: string
 }
@@ -186,7 +186,7 @@ export interface MetricsArtifact {
   snapshot: ReturnType<Metrics["snapshot"]>
 }
 
-const verdictOf = (r: InstanceResult): "ok" | "degraded" => r.verdict ?? "ok"
+const verdictOf = (r: InstanceResult): "ok" | "degraded" | "env_prep_failed" => r.verdict ?? "ok"
 
 /**
  * C8 — THE single operator-visible denominator (ADR-0010 strict→degraded).
