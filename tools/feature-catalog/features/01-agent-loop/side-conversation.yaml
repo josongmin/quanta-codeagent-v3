@@ -9,6 +9,9 @@ purpose: Lightweight read-only sub-thread that runs alongside the main agent loo
 evidence:
   code:
     - src/agent/side-conversation/index.ts
+    - src/agent/side-conversation/prompt.ts
+    - src/agent/side-conversation/run.ts
+    - src/agent/side-conversation/dispatch.ts
     - src/observability/vocabulary.ts
   adrs: [49]
   tests:
@@ -24,4 +27,4 @@ knobs:
 deliberate_hold:
   reason: Default model selection is intentionally host-controlled (cheaper sibling recommended but not pinned in code — LLM pricing 3-month cycle would lag).
   promotion_path: When v3 ships a cost-tier registry, wire side-conv to it and add a `defaultModel: "cheap"` resolver shortcut.
-notes: 'Side-conv is NOT a subagent (no nickname per ADR-0042, no spawn lifecycle per ADR-0041) and NOT plan-mode (which is a posture of the MAIN thread per ADR-0036). It is a separate thread surface.'
+notes: 'Side-conv is NOT a subagent (no nickname per ADR-0042, no spawn lifecycle per ADR-0041) and NOT plan-mode (which is a posture of the MAIN thread per ADR-0036). It is a separate thread surface. 2026-05-22 audit #10: the prior 540-LOC single file was split into a directory (`prompt.ts` byte-identical constants + integrity surface, `run.ts` executor+errors+budgeting, `dispatch.ts` resolver/request/response indirection) behind a barrel index — every external import path resolves unchanged.'
