@@ -40,6 +40,11 @@ export {
   type HookEventType,
   type HookHandler,
 } from "./hooks"
+export {
+  type IdeContextProvider,
+  type IdeSnapshot,
+  renderIdeContext,
+} from "./ide-context"
 export { runAgent } from "./loop"
 export {
   loadMcpTools,
