@@ -69,6 +69,15 @@ export type StreamEvent =
       model: string
     }
   | { type: "message_stop"; stop_reason: string }
+  /** ADR-0048 forward-compat: OpenAI Responses API emits a `response.in_progress`
+   *  SSE/WebSocket frame while the model is still generating but has no new
+   *  output to surface yet. Codex silently drops this event (their dispatcher
+   *  has no branch for it); v3 surfaces it as a first-class StreamEvent so the
+   *  UI can render "thinking..." indicators without polling.
+   *  The `data` payload is intentionally opaque — schema-on-wire is provider-
+   *  controlled and varies across model rollouts. Consumers pick the fields
+   *  they care about (e.g. `progress`, `message`). */
+  | { type: "response_in_progress"; data: Record<string, unknown> }
 
 export interface StreamInput {
   messages: Message[]

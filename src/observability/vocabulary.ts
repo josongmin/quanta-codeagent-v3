@@ -38,6 +38,11 @@ export const QUANTA_ATTRS = {
     depth: "quanta.thread.depth",
     tokensUsed: "quanta.thread.tokens_used",
     archived: "quanta.thread.archived",
+    /** ADR-0049: marks a span as belonging to a SIDE conversation — a
+     *  lightweight read-only sub-thread that runs in parallel to the main
+     *  turn (Codex `codex.thread.side` parity). Boolean: `true` only on
+     *  the side conv's own spans. */
+    side: "quanta.thread.side",
   },
   turn: {
     id: "quanta.turn.id",

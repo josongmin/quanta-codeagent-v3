@@ -1,0 +1,23 @@
+id: response-in-progress
+title: response.in_progress 이벤트 1급 SSE/WebSocket 처리
+section: 1
+subsystem: LLM streaming decoder (ADR-0048)
+order: 13
+maturity: L3
+status: new
+purpose: OpenAI Responses API의 `response.in_progress` 프레임(SSE + WebSocket)을 첫 시민 StreamEvent로 디코딩. Codex가 silently-drop하는 forward-compat gap을 막아 UI "thinking..." 인디케이터가 polling 없이 가능. 미지의 `response.*` 이벤트는 debug-log + null로 graceful pass-through — 단일 known-event 테이블이 SSE/WS 두 wire를 동시 커버.
+evidence:
+  code:
+    - src/llm/streaming-events.ts
+    - src/llm/types.ts
+  adrs: [48]
+  tests:
+    unit:
+      - tests/unit/streaming-events-in-progress.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: adapter wiring (실제 `adapters/openai.ts` 또는 동등 Responses API adapter가 이 디코더를 호출하도록 연결)은 별도 슬라이스로 분리.
+  promotion_path: OpenAI Responses API adapter 추가 시 SSE/WS 두 경로 모두 본 디코더를 호출하도록 wiring; consumer (CLI 렌더러, Web/Tauri) 측에 progress UI 표면 추가.
+notes: ''

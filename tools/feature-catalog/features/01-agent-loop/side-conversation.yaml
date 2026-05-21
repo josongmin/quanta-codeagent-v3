@@ -1,0 +1,26 @@
+id: side-conversation
+title: Side-conversation seam (parallel read-only sub-thread)
+section: 1
+subsystem: Side-conversation seam (ADR-0049)
+order: 14
+maturity: L3
+status: new
+purpose: Codex `codex.thread.side` 등가 — parent thread를 interrupt하지 않고 별도 짧은 LLM 호출로 사용자 질문에 답하는 lightweight read-only sub-thread. system prompt는 Codex verbatim (byte-identical 단위 테스트), 도구는 read/grep/glob 3개로 제한, reasoning effort는 `low`/`medium`만 (type + runtime 이중 guard). subagent 아님 — session/working-tree/별도 로그 없음, parent process만 공유. 텔레메트리는 canonical `quanta.thread.side=true` attribute.
+evidence:
+  code:
+    - src/agent/side-conversation.ts
+    - src/observability/vocabulary.ts
+  adrs: [49]
+  tests:
+    unit:
+      - tests/unit/side-conversation.test.ts
+    integration:
+      - tests/integration/side-conversation-e2e.test.ts
+    contract: []
+knobs:
+  - effort (low | medium; high/xhigh 금지)
+  - model (caller가 provider/model 선택; 미지정 시 `llm.model` fallback)
+deliberate_hold:
+  reason: read-only tool dispatch 엔진 미연결 (현재 모델에 tool schema는 보여주지만 실제 read/grep/glob 호출은 실행 안 됨). session/persistence wiring + 동시성 throttle도 후속 슬라이스.
+  promotion_path: (1) read-only dispatch 엔진을 plug-in해서 실제 file read/grep을 수행, (2) 동시성 한도 정책 추가 (UI throttle 책임 vs 엔진 책임 결정), (3) session JSONL에 side conv 흔적 남길지 옵트인 결정.
+notes: 'Codex parity는 의도된 흡수 — system prompt byte-equality는 양쪽 telemetry/prompt corpus를 grep 호환 유지하기 위한 hard requirement. ADR-0044 negative invariants 위배 없음 (read-only이고 권한 우회 경로 없음).'

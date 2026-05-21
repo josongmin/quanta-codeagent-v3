@@ -60,6 +60,14 @@ export {
   renderRepoRulesBlock,
 } from "./repo-rules"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
+export {
+  runSideConversation,
+  SIDE_CONVERSATION_PROMPT,
+  SIDE_CONVERSATION_TOOL_NAMES,
+  type SideConversationEffort,
+  type SideConversationOptions,
+  type SideConversationResult,
+} from "./side-conversation"
 export { loadSession, type SaveSessionInput, saveSession } from "./state"
 export {
   type DispatchOutcome,
