@@ -75,6 +75,18 @@ export const TOOL_USE_RULES: readonly PromptRule[] = [
       "  vary-and-retry blindly.",
     ],
   },
+  {
+    id: "R-NO-SHIM",
+    lines: [
+      "- [R-NO-SHIM] Do NOT create stub/mock/shim files (e.g. a fake `toml.py`,",
+      "  `pytest.py`, or an empty package) to bypass a missing dependency or to",
+      "  force a test to pass. If verification fails because a dependency or",
+      "  binary is missing, that is an environment limitation: declare the",
+      "  environment unavailable and stop. Your patch fixes the bug, not the",
+      "  test runner — files that exist only to silence an import error are not",
+      "  part of the fix and corrupt the diff.",
+    ],
+  },
 ]
 
 /** Flatten the rules into the line array the prompt builder splices in. The

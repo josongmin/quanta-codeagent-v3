@@ -82,10 +82,21 @@ describe("system prompt — T5a env-mod / stop-when-blocked rules", () => {
     expect(lower).toContain("vary-and-retry blindly")
   })
 
+  test("R-NO-SHIM pins the no-stub-files-to-bypass-deps phrasing", () => {
+    // Hard-task failure (pylint-4551): agent wrote a fake `toml.py` shim to
+    // bypass a missing dep so pytest would collect — cruft in the diff.
+    expect(prompt).toContain("[R-NO-SHIM]")
+    expect(lower).toContain("stub/mock/shim files")
+    expect(lower).toContain("bypass a missing dependency")
+    expect(lower).toContain("declare the")
+    expect(lower).toContain("environment unavailable")
+  })
+
   test("each new rule appears EXACTLY once (no duplicate injection)", () => {
     expect(prompt.split("[R-SEARCH-FIRST]").length - 1).toBe(1)
     expect(prompt.split("[R-READ-FAILURE]").length - 1).toBe(1)
     expect(prompt.split("[R-NO-THRASH]").length - 1).toBe(1)
+    expect(prompt.split("[R-NO-SHIM]").length - 1).toBe(1)
   })
 
   test("new rules land between Tool routing and Honesty rail (cached prefix)", () => {
