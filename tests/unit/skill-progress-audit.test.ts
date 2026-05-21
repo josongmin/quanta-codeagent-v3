@@ -1,22 +1,35 @@
 /**
  * Unit coverage for the bundled `progress-audit` system skill (ADR-0045).
  *
- * Three contracts are pinned here:
+ * Four contracts are pinned here:
  *   1. The SKILL.md frontmatter parses correctly through BOTH the lenient
  *      `parseFrontmatter` (which the discoverer uses to populate
- *      `Skill.tools`) AND the strict `parseSkillMarkdown` (which is the SSOT
- *      shape for category routing per ADR-0040). The skill ships both
- *      `tools:` (lenient runtime enforcement) and the strict 6-field set.
- *   2. The skill BODY contains every P0 critical rule verbatim — these six
+ *      `Skill.tools`) AND is REJECTED by the strict `parseSkillMarkdown`
+ *      (which is the SSOT shape for category routing per ADR-0040, with
+ *      `.strict()` Zod rejecting the extra lenient `tools:` key — see
+ *      ADR-0045 §한계 (a)).
+ *   2. The skill BODY contains every P0 critical rule verbatim, IN ORDER,
+ *      and each rule appears with its 1-based numbered prefix — these six
  *      rules are the entire reason the skill exists, so drift in the body
- *      must fail loudly at test time.
+ *      OR the numbering must fail loudly at test time.
  *   3. `discoverSystemSkills()` picks up the skill on startup with the
- *      expected `name`, `description`, and `tools:` allowlist.
+ *      expected `name`, `description`, and `tools:` allowlist, AND is
+ *      idempotent (two back-to-back calls return identical results).
+ *   4. The Pass-3 wiring seams (`PROGRESS_AUDIT_SKILL_NAME`,
+ *      `triggerProgressAudit`, `findProgressAuditSkill`) match the
+ *      frontmatter, are router-agnostic, and stay byte-stable across calls.
  */
 import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { discoverSystemSkills, parseFrontmatter, systemSkillsDir } from "../../src/skill"
+import {
+  discoverSystemSkills,
+  findProgressAuditSkill,
+  PROGRESS_AUDIT_SKILL_NAME,
+  parseFrontmatter,
+  systemSkillsDir,
+  triggerProgressAudit,
+} from "../../src/skill"
 import { parseSkillMarkdown } from "../../src/skill/skill-frontmatter"
 
 const SKILL_MD = join(systemSkillsDir(), "progress-audit", "SKILL.md")
@@ -46,16 +59,44 @@ describe("progress-audit SKILL.md — frontmatter", () => {
     // 6-field shape (`userInvocable`/`allowedTools`/`category`/`stability`).
     // The strict parser uses `.strict()` and rejects unknown keys, so the
     // SKILL.md does not round-trip through it as-is. This is a known
-    // limitation captured in ADR-0045 §한계: the lenient discoverer is the
-    // SSOT for runtime today; a follow-up may collapse the dual shape.
+    // limitation captured in ADR-0045 §한계 (a): the lenient discoverer is
+    // the SSOT for runtime today; a follow-up may collapse the dual shape.
     const raw = await readFile(SKILL_MD, "utf8")
     const r = parseSkillMarkdown(raw)
     expect(r.ok).toBe(false)
   })
+
+  test("dual-shape: lenient parser still reads BOTH `tools:` and `allowedTools:` fields", async () => {
+    // Defence-in-depth: if a future refactor unifies the strict + lenient
+    // parsers, both keys MUST keep working — `tools:` is what
+    // `skillToolAllowlist()` reads today (security-load-bearing), and
+    // `allowedTools:` is the ADR-0040 SSOT shape. If either disappears
+    // silently the security gate stays armed but the SSOT shape drifts.
+    const raw = await readFile(SKILL_MD, "utf8")
+    const { data } = parseFrontmatter(raw)
+    expect(data.tools).toEqual(["Read", "Grep", "Bash"])
+    // The strict-shape mirror is present in the same file. The lenient
+    // parser keeps it as a parallel array since it doesn't enforce the
+    // strict schema. It MUST be byte-identical to `tools:`.
+    expect(data.allowedTools).toEqual(["Read", "Grep", "Bash"])
+    // The other strict-shape SSOT fields are present in the file.
+    expect(data.userInvocable).toBe("true")
+    expect(data.category).toBe("skill")
+    expect(data.stability).toBe("stable")
+  })
+
+  test("lenient parser carries the description's `never claims complete` promise", async () => {
+    const raw = await readFile(SKILL_MD, "utf8")
+    const { data } = parseFrontmatter(raw)
+    // The frontmatter `description` carries the "never claims complete
+    // without verification" promise so the trigger matcher surfaces the
+    // discipline at catalogue-listing time, before the body is even read.
+    expect(String(data.description).toLowerCase()).toContain("never claims")
+  })
 })
 
-describe("progress-audit SKILL.md — P0 critical rules", () => {
-  test("body contains all six P0 rules in order", async () => {
+describe("progress-audit SKILL.md — P0 critical rules (structural)", () => {
+  test("body contains all six P0 rules in order AND with 1..6 numbering", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
     const { body } = parseFrontmatter(raw)
     // Each rule's load-bearing phrase. Drift in the wording is the bug the
@@ -79,11 +120,25 @@ describe("progress-audit SKILL.md — P0 critical rules", () => {
       expect(idx).toBeGreaterThanOrEqual(cursor)
       cursor = idx + p.length
     }
+    // STRUCTURAL: each rule appears as a numbered list item with `**Rule
+    // phrase.**` (or `Rule phrase"`) bolded — i.e. the AUTHORING shape, not
+    // just naked prose. Drift to "Six rules:" → bulleted format without
+    // numbering would fail this assertion.
+    for (let n = 1; n <= rulePhrases.length; n++) {
+      const phrase = rulePhrases[n - 1]
+      if (phrase === undefined) throw new Error("rulePhrases gap")
+      // Escape the phrase for regex; the line shape is `<n>. **<phrase>...`
+      // (the bold span may continue past the phrase since some rules have
+      // a trailing period inside the bold range — anchor only on the
+      // PREFIX). Multiline mode so `^` matches at line starts.
+      const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      expect(body).toMatch(new RegExp(`^\\s*${n}\\.\\s+\\*\\*${escaped}`, "m"))
+    }
   })
 
   test("body contains the outcome enum and forbids 'complete' wording", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
-    const { data, body } = parseFrontmatter(raw)
+    const { body } = parseFrontmatter(raw)
     // Outcome enum is the audit's terminal vocabulary.
     expect(body).toContain("success")
     expect(body).toContain("partial")
@@ -94,13 +149,9 @@ describe("progress-audit SKILL.md — P0 critical rules", () => {
     // the word inside an instruction sentence ("forbidden", "without
     // running step 6").
     expect(body).toContain("forbidden")
-    // The frontmatter `description` carries the "never claims complete without
-    // verification" promise so the trigger matcher surfaces the discipline at
-    // catalogue-listing time, before the body is even read.
-    expect(String(data.description).toLowerCase()).toContain("never claims")
   })
 
-  test("body lists the 7-step procedure", async () => {
+  test("body lists the 7-step procedure with structural numbering", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
     const { body } = parseFrontmatter(raw)
     // Each step header. Numbering must be 1..7 so the model can resume mid-
@@ -111,6 +162,16 @@ describe("progress-audit SKILL.md — P0 critical rules", () => {
     // Step 6 specifically mandates verification (tests / commands), which is
     // the promotion path from `partial` to `success`.
     expect(body).toContain("Verify with the narrowest trustworthy command")
+  })
+
+  test("body contains the 'Source attribution' section pointing at Codex", async () => {
+    // Provenance is load-bearing for the absorbed-from-Codex claim. If the
+    // attribution gets stripped (e.g. accidental re-write), the test fails.
+    const raw = await readFile(SKILL_MD, "utf8")
+    const { body } = parseFrontmatter(raw)
+    expect(body).toContain("Source attribution")
+    expect(body).toContain("Codex Desktop")
+    expect(body).toContain("ADR-0045")
   })
 })
 
@@ -143,5 +204,68 @@ describe("discoverSystemSkills() — bundled discovery", () => {
     // The skill's SKILL.md must exist on disk relative to this dir.
     const raw = await readFile(join(dir, "progress-audit", "SKILL.md"), "utf8")
     expect(raw).toContain("name: progress-audit")
+  })
+
+  test("discoverSystemSkills() is idempotent across back-to-back calls", async () => {
+    // Two calls in a row MUST return structurally identical results.
+    // (Filesystem IO is the only impurity; the result shape is deterministic.)
+    const a = await discoverSystemSkills()
+    const b = await discoverSystemSkills()
+    expect(a).toHaveLength(b.length)
+    // Compare each skill by serialisable fields — `sourcePath` is absolute
+    // and stable so it serialises byte-identical too.
+    for (let i = 0; i < a.length; i++) {
+      const sa = a[i]
+      const sb = b[i]
+      expect(sa?.name).toBe(sb?.name ?? "")
+      expect(sa?.description).toBe(sb?.description ?? "")
+      expect(sa?.tools).toEqual(sb?.tools ?? [])
+      expect(sa?.body).toBe(sb?.body ?? "")
+      expect(sa?.sourcePath).toBe(sb?.sourcePath ?? "")
+    }
+  })
+
+  test("discoverSystemSkills() returns skills sorted by name", async () => {
+    const skills = await discoverSystemSkills()
+    const names = skills.map((s) => s.name)
+    const sorted = [...names].sort((a, b) => a.localeCompare(b))
+    // `discoverSkills` is documented as sorted-by-name; the system layer
+    // delegates to it. This protects against a future refactor that
+    // accidentally reorders.
+    expect(names).toEqual(sorted)
+  })
+})
+
+describe("progress-audit wiring seams (ADR-0045 §wiring)", () => {
+  test("PROGRESS_AUDIT_SKILL_NAME matches the SKILL.md frontmatter `name:`", async () => {
+    const raw = await readFile(SKILL_MD, "utf8")
+    const { data } = parseFrontmatter(raw)
+    // SSOT alignment: the exported constant MUST equal whatever the SKILL.md
+    // declares. Renaming one without the other is a security-relevant drift
+    // (a router would arm the wrong skill, or no skill at all). Compare via
+    // string-typed locals so the narrow literal type on PROGRESS_AUDIT_SKILL_
+    // NAME doesn't reject the runtime-extracted value at compile time.
+    const declaredName: string = String(data.name ?? "")
+    const constantName: string = PROGRESS_AUDIT_SKILL_NAME
+    expect(constantName).toBe(declaredName)
+  })
+
+  test("triggerProgressAudit() returns the Skill-tool input shape", () => {
+    const args = triggerProgressAudit()
+    // Shape mirrors the `Skill` tool's input schema.
+    expect(args).toEqual({ name: PROGRESS_AUDIT_SKILL_NAME })
+    // Byte-stable: two calls return structurally identical objects (the
+    // function is documented as pure / idempotent).
+    const again = triggerProgressAudit()
+    expect(again).toEqual(args)
+  })
+
+  test("findProgressAuditSkill() returns the discovered skill record", async () => {
+    const pa = await findProgressAuditSkill()
+    expect(pa).toBeDefined()
+    if (!pa) return
+    expect(pa.name).toBe(PROGRESS_AUDIT_SKILL_NAME)
+    expect(pa.tools).toEqual(["Read", "Grep", "Bash"])
+    expect(pa.body.length).toBeGreaterThan(500)
   })
 })

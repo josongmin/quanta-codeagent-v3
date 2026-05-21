@@ -26,6 +26,7 @@ import { z } from "zod"
 import { type AgentConfig, runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { findProgressAuditSkill, PROGRESS_AUDIT_SKILL_NAME, triggerProgressAudit } from "@/skill"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
 import { buildSessionFeatures } from "../../src/agent/features"
@@ -248,5 +249,86 @@ describe("progress-audit system skill — discovery + scoping (e2e)", () => {
     // description for `progress-audit`.
     const skillTool = features.extraTools.find((t) => t.name === "Skill")
     expect(skillTool?.description).not.toContain("USER OVERRIDE")
+  })
+
+  test("user skill with malformed frontmatter does not crash discovery; system skill still present", async () => {
+    // Authoring mistake: missing closing fence. The lenient parser MUST
+    // degrade gracefully — the user skill becomes a stub-ish entry (parser
+    // contract documents `body` is the whole post-fence content), but
+    // discovery as a whole MUST NOT throw, and the bundled system skill
+    // MUST still appear so the audit discipline is preserved even when the
+    // user's own skill dir contains a broken file.
+    await mkdir(join(dir, "broken"), { recursive: true })
+    await writeFile(
+      join(dir, "broken", "SKILL.md"),
+      ["---", "name: broken", "description: missing closing fence"].join("\n"),
+    )
+
+    const cfg: AgentConfig = {
+      llm: { async *stream(): AsyncIterable<StreamEvent> {} } as LLMPort,
+      registry: new ToolRegistry([]),
+      stream: { emit: () => {} },
+      permission: { mode: "default" },
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      system: "SYS",
+      cwd: dir,
+      maxTurns: 10,
+      signal: new AbortController().signal,
+      skills: { dir },
+    }
+    const features = await buildSessionFeatures(cfg)
+    const skillTool = features.extraTools.find((t) => t.name === "Skill")
+    // System skill must still be listed.
+    expect(skillTool?.description).toContain("progress-audit")
+    // Bundled allowlist still wired.
+    expect(features.skillAllowlists?.get("progress-audit")).toEqual(["Read", "Grep", "Bash"])
+  })
+
+  test("triggerProgressAudit() arms the SAME gate the LLM-driven path arms", async () => {
+    // Equivalence: the router-agnostic helper returns `{ name: "progress-
+    // audit" }` and the existing dispatch path treats that input identically
+    // to one the LLM would have emitted. Probe: arm via the helper-derived
+    // input and verify the deny-on-Edit path triggers the same way the
+    // earlier "invoking progress-audit" test exercised.
+    const counts: Record<string, number> = {}
+    const registry = new ToolRegistry([countingTool("Read", counts), countingTool("Edit", counts)])
+
+    const helperInput = triggerProgressAudit()
+    // The helper output's `name` MUST match the canonical id.
+    expect(helperInput.name).toBe(PROGRESS_AUDIT_SKILL_NAME)
+    expect(PROGRESS_AUDIT_SKILL_NAME).toBe("progress-audit")
+
+    const llm = new FakeLLM([
+      // Arm via the helper-shaped input.
+      toolUseScript("s1", "Skill", helperInput),
+      // Disallowed tool — must be denied.
+      toolUseScript("d1", "Edit", {}),
+      textScript("done"),
+    ])
+    const stream = new RecordingStream()
+    const outcome = await runAgent({
+      ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }),
+      skills: { dir },
+    })
+    expect(outcome.reason).toBe("completed")
+    expect(counts.Edit).toBeUndefined() // gate denied it
+    const denied = allToolResults(outcome).filter(
+      (b) => b.type === "tool_result" && b.content.includes(SCOPE_MSG),
+    )
+    expect(denied).toHaveLength(1)
+  })
+
+  test("findProgressAuditSkill() exposes the bundled skill record (host-side preview seam)", async () => {
+    // Used by hosts that want to preview the skill body in a planner UI
+    // before arming the gate (e.g. show the 6 rules to the user). The
+    // returned record MUST match what `buildSessionFeatures` would put on
+    // the dispatch path.
+    const pa = await findProgressAuditSkill()
+    expect(pa).toBeDefined()
+    if (!pa) return
+    expect(pa.name).toBe(PROGRESS_AUDIT_SKILL_NAME)
+    expect(pa.tools).toEqual(["Read", "Grep", "Bash"])
+    expect(pa.body).toContain("No finding without code evidence")
+    expect(pa.body).toContain("Verify with the narrowest trustworthy command")
   })
 })

@@ -2,7 +2,13 @@
 
 - **상태**: Accepted
 - **날짜**: 2026-05-21
-- **관련**: ADR-0022(skill 트리거), ADR-0040(skill vs extension + 6-필드 frontmatter), ADR-0011(skill 토큰 scope enforcement), `codex-system-skills-pattern` memory
+- **관련**:
+  - ADR-0011 (skill 토큰 scope enforcement) — host loop가 `skillAllowlists` 게이트를 운영하는 SSOT.
+  - ADR-0022 (skill 트리거) — description 기반 trigger matching이 본 skill의 entry point.
+  - ADR-0029 (reviewer three-tier) — reviewer tier가 "누가 confirm을 결정하는가"라면 본 ADR은 "어떤 audit discipline을 따라야 하는가"로 직교.
+  - ADR-0040 (skill vs extension + 6-필드 frontmatter) — `category: skill` / `stability: stable` SSOT.
+  - ADR-0047 (HITL 4-tier gate) — progress-audit invocation은 read-only(`Skill` tool은 `none` 티어). 본 skill body는 mutator를 허용하지 않으므로 audit run 자체가 HITL critical action을 발생시키지 않음.
+  - memory: [[codex-system-skills-pattern]] / [[codex-desktop-build-2867-round-4]] §F.
 
 ## 맥락
 
@@ -133,11 +139,21 @@ command → 7) report (%/implemented/partial/blockers/P0/P1/P2).
   source-tree 실행에서는 `import.meta.url` 기반 resolve가 정상 동작. 향후
   compile 시 SKILL.md를 binary에 함께 포함하는 packaging은 별도 작업
   (현 단계 source-tree 실행만 검증).
-- **(c) 슬래시-명령 라우터 없음**: ADR-0040 §한계 (a)와 동일. 사용자가
-  `/progress-audit` 슬래시로 직접 invoke하는 CLI router는 follow-up.
-  지금은 LLM의 trigger description matching이 유일한 트리거 경로 —
-  description에 한국어 trigger 표현 ("진행률" / "코드 레벨로만" /
-  "P0/P1/P2") 적극 포함하여 keyword match 누락을 줄임.
+- **(c) 슬래시-명령 라우터 seam (router-agnostic wiring)**: ADR-0040
+  §한계 (a)와 같은 위치 — v3에는 centralized slash-command router가 아직
+  없음 (`src/apps/cli/slash-commands.ts` 미존재). 본 ADR follow-up으로
+  **Option 2 (router-agnostic seam)** 채택:
+  `src/skill/system-skills/progress-audit/index.ts`에 `PROGRESS_AUDIT_SKILL
+  _NAME` 상수와 `triggerProgressAudit()` 헬퍼를 export. 외부 router (CLI
+  slash, IDE plugin, planner UI, voice shortcut)는 이 함수를 호출해서
+  반환되는 `{ name: "progress-audit" }`를 기존 `Skill` 툴 dispatch에
+  먹이면 됨 — 라우터와 skill이 lockstep으로 drift하지 않도록 skill 측이
+  SSOT 보유. Option 1 (skill-tool 내부 hook)을 채택하지 않은 이유: skill-
+  tool은 slice-isolated이고 slash 라우팅은 그쪽 책임이 아님. router 자체
+  구현은 별도 ADR로 처리 (CLI vs Web vs IDE surface 결정 필요).
+  - LLM의 trigger description matching은 여전히 1차 경로 — description에
+    한국어 trigger 표현 ("진행률" / "코드 레벨로만" / "P0/P1/P2" /
+    "문서는 보지 말고") 적극 포함하여 keyword match 누락을 줄임.
 - **(d) `allowedTools` 적용 enforcement는 lenient 경로**: strict
   `parseSkillMarkdown`이 이 파일을 reject하므로 strict 기반 `assertAllowed
   Tool` enforcement는 unreachable. host loop가 사용하는 ADR-0011
@@ -156,6 +172,13 @@ command → 7) report (%/implemented/partial/blockers/P0/P1/P2).
 - **RFC §1.2 default-OFF**: `config.skills`가 unset이면 system skill도
   발견되지 않음 (gate가 `if (config.skills)` 안에 살아 있음). skill을
   켜는 사용자만 progress-audit 노출.
+- **HITL 4-tier (ADR-0047) 호환**: progress-audit invocation 자체는
+  `Skill` 툴이고 `BUILTIN_TOOL_ANNOTATIONS`에 entry가 없으므로 default
+  `pre-approval-ok`로 분류되지만, skill의 lenient `tools:` 게이트가
+  Read/Grep/Bash만 통과시키므로 mutator (Edit/Write/apply_patch) dispatch
+  자체가 봉쇄됨. 즉, progress-audit 안에 머무는 한 hand-off-required /
+  always-confirm 액션은 발생 불가능 — audit "report-only" 의도가 두 레이어
+  (skill allowlist + HITL tier table)에서 독립적으로 보장됨.
 
 ## 소스 attribution
 
