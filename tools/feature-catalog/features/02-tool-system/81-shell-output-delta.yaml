@@ -31,12 +31,7 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - name: ToolContext.onShellEvent
-    type: ShellExecObserver | undefined
-    default: undefined
-    effect: |
-      absent ⇒ no event emission, legacy buffered path verbatim.
-      present ⇒ closed union event stream PLUS unchanged ShellResult.
+  - "ToolContext.onShellEvent: ShellExecObserver | undefined (default undefined) — absent ⇒ no event emission, legacy buffered path verbatim. present ⇒ closed union event stream PLUS unchanged ShellResult."
 deliberate_hold:
   reason: |
     PR-5는 seam만 도입. UI 소비자 (CLI streaming TUI / web pane),

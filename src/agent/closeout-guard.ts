@@ -135,6 +135,15 @@ export const isCodeModificationSession = (
  * threads its existing `toolHistory` array straight through without any cross-
  * slice import.
  */
+/**
+ * ADR-0079 — when this returns `{block:true}` the loop ALSO sets
+ * `ToolChoiceTurnState.closeoutAttempted = true` so the NEXT turn's
+ * `resolveToolChoice` emits `{kind:"none"}` and forbids any further tool
+ * calls — the model MUST produce a text terminal turn (it cannot keep
+ * calling tools to delay the closeout). The flag is consumed at the next
+ * turn's entry and cleared in the same step; it never carries across more
+ * than one turn.
+ */
 export const decideCloseoutGuard = (args: {
   state: CloseoutGuardState
   cfg: { enabled?: boolean; fourRule?: boolean } | undefined

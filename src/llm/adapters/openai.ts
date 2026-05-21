@@ -2,7 +2,14 @@ import OpenAI from "openai"
 import { LLMError } from "@/shared"
 import type { LLMPort } from "../ports"
 import { withStreamTimeout } from "../stream-timeout"
-import type { ContentBlock, Message, StreamEvent, StreamInput, SystemPromptInput } from "../types"
+import type {
+  ContentBlock,
+  Message,
+  StreamEvent,
+  StreamInput,
+  SystemPromptInput,
+  ToolChoice,
+} from "../types"
 import {
   buildUsageEvent as buildUsageEventShared,
   parseToolInputOrThrow,
@@ -133,6 +140,47 @@ export const userParams = (blocks: ContentBlock[]): ChatParam[] => {
  *  deterministically. The `cache` flag is irrelevant here and ignored. */
 const flattenSystem = (system: SystemPromptInput): string =>
   typeof system === "string" ? system : system.map((b) => b.text).join("\n\n")
+
+/**
+ * ADR-0079 — map our orthogonal {@link ToolChoice} to OpenAI's `tool_choice`
+ * shape. Closed switch with a `never` default so adding a new variant is a
+ * compile error here AND in the Anthropic adapter. The `auto` case returns
+ * `undefined` so callers OMIT the field — byte-identical to the pre-feature
+ * path (OpenAI's default is auto). A `tool` choice whose `name` is not
+ * present in the request `tools` is a caller bug; we throw at the adapter so
+ * the request never reaches the provider with an unresolvable name (no
+ * silent fallback).
+ */
+export const toOpenAIToolChoice = (
+  choice: ToolChoice | undefined,
+  toolNames: readonly string[],
+): OpenAI.ChatCompletionToolChoiceOption | undefined => {
+  if (choice === undefined) return undefined
+  switch (choice.kind) {
+    case "auto":
+      // Byte-identical to pre-feature: OMIT the field. OpenAI's default is
+      // "auto" so emitting the literal string would be semantically the
+      // same but a different wire payload — we choose omit so default-OFF
+      // holds at the byte level.
+      return undefined
+    case "any":
+      return "required"
+    case "none":
+      return "none"
+    case "tool":
+      if (!toolNames.includes(choice.name)) {
+        throw new LLMError(
+          `tool_choice references unregistered tool name "${choice.name}" ` +
+            `(registered: ${toolNames.length === 0 ? "<none>" : toolNames.join(", ")})`,
+        )
+      }
+      return { type: "function", function: { name: choice.name } }
+    default: {
+      const _exhaustive: never = choice
+      return _exhaustive
+    }
+  }
+}
 
 export const toChatMessages = (
   system: SystemPromptInput | undefined,
@@ -283,6 +331,11 @@ export class OpenAIAdapter implements LLMPort {
     const tokenCap = usesCompletionTokensParam(this.model)
       ? { max_completion_tokens: this.maxTokens }
       : { max_tokens: this.maxTokens }
+    // ADR-0079 — resolve tool_choice BEFORE create() so an unregistered-name
+    // throw surfaces from the same path as any other request-construction
+    // failure. `undefined` ⇒ field omitted on the wire (byte-identical).
+    const toolNames = input.tools.map((t) => t.name)
+    const toolChoice = toOpenAIToolChoice(input.toolChoice, toolNames)
     try {
       return (await this.client.chat.completions.create({
         model: this.model,
@@ -296,6 +349,7 @@ export class OpenAIAdapter implements LLMPort {
           type: "function" as const,
           function: { name: t.name, description: t.description, parameters: t.input_schema },
         })),
+        ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
       })) as unknown as AsyncIterable<RawChunk>
     } catch (e) {
       throw LLMError.fromSdkError("openai", e)

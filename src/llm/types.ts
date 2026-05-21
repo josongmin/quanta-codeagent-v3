@@ -136,9 +136,30 @@ export type StreamEvent =
     }
   | { type: "message_stop"; stop_reason: string }
 
+/**
+ * ADR-0079 — pre-call tool_choice control (orthogonal to admissibility, which
+ * gates the post-call result). Closed discriminated union; adapters map 1:1 to
+ * provider-specific shapes. The default-OFF posture is `{kind:"auto"}` (or
+ * field absent) — adapters MUST emit a byte-identical wire payload to the
+ * pre-feature path in that case. Defined here (not imported from `@/agent`)
+ * because `llm/` is a lower layer and must not depend on `agent/`. The
+ * `agent/tool-choice.ts` ToolChoice type is structurally identical and the
+ * call sites cast freely between them.
+ */
+export type ToolChoice =
+  | { readonly kind: "auto" }
+  | { readonly kind: "any" }
+  | { readonly kind: "none" }
+  | { readonly kind: "tool"; readonly name: string }
+
 export interface StreamInput {
   messages: Message[]
   system?: SystemPromptInput
   tools: ToolSchema[]
   thinking?: { type: "enabled"; budget_tokens: number }
+  /** ADR-0079 — optional pre-call gate. Absent (or `{kind:"auto"}`) ⇒ adapters
+   *  emit the byte-identical pre-feature wire payload. `{kind:"tool",name}` with
+   *  a name that doesn't match any entry in `tools` throws at the adapter (NOT
+   *  a silent fallback). */
+  toolChoice?: ToolChoice
 }

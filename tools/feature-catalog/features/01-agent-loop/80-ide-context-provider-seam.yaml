@@ -36,12 +36,7 @@ evidence:
       - tests/integration/ide-context-provider-wire.test.ts
     contract: []
 knobs:
-  - name: ideContextProvider
-    type: IdeContextProvider | undefined
-    default: undefined
-    effect: |
-      undefined ⇒ provider 미호출, `<ide-context>` 미렌더, byte-identical 레거시.
-      설정 ⇒ 매 턴 진입 시 `snapshot(cfg.signal)` 1회 호출하여 렌더링.
+  - "AgentConfig.ideContextProvider: IdeContextProvider | undefined (default undefined) — undefined ⇒ provider 미호출, `<ide-context>` 미렌더, byte-identical 레거시. 설정 ⇒ 매 턴 진입 시 `snapshot(cfg.signal)` 1회 호출하여 렌더링."
 deliberate_hold:
   reason: |
     seam만 박힘. 실제 VS Code extension / MCP IDE bridge / Tauri sidecar 구현체는
