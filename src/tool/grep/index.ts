@@ -17,7 +17,11 @@ const MAX_LINES = 200
 
 export const grepTool: Tool<Input> = {
   name: "grep",
-  description: "Search file contents with ripgrep. Returns `path:line:match` rows.",
+  description:
+    "Search file contents with ripgrep. Returns `path:line:match` rows. " +
+    "Row output is capped at 200 lines. If you hit the cap, NARROW with a more " +
+    "specific pattern or restrict the `path` (e.g. `src/agent/`) before switching " +
+    "to a different tool or asking the user (ADR-0062).",
   inputSchema: schema,
   isReadOnly: () => true,
   // Read-only content search (rg has no side effects); safe to parallelize.

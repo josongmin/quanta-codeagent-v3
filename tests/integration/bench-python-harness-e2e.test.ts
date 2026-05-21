@@ -180,10 +180,24 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
     process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
     process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-c"] })
 
+    // Inject an explicit HarnessConfig to pin the argv contract independent
+    // of runtime-config defaults (which now flow from env via
+    // resolveHarnessConfig — `cache_level=env clean=false workers=4 namespace=none`
+    // are the SOTA defaults; the OLD `none/True/1` is still reachable via env
+    // override but we don't depend on it here).
     await evaluateWithPythonSwebench(
       mkInstance("case-c"),
       "diff --git a/x b/x\n--- a/x\n+++ b/x\n",
-      { datasetName: "princeton-nlp/SWE-bench_Lite" },
+      {
+        datasetName: "princeton-nlp/SWE-bench_Lite",
+        harnessConfig: {
+          cacheLevel: "env",
+          clean: false,
+          maxWorkers: 4,
+          namespace: "none",
+          forceRebuild: false,
+        },
+      },
     )
 
     const argv = readArgv()
@@ -206,13 +220,19 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
     expect(argv[i("--instance_ids") + 1]).toBe("case-c")
 
     expect(i("--max_workers")).toBeGreaterThan(-1)
-    expect(argv[i("--max_workers") + 1]).toBe("1")
+    expect(argv[i("--max_workers") + 1]).toBe("4")
 
     expect(i("--cache_level")).toBeGreaterThan(-1)
-    expect(argv[i("--cache_level") + 1]).toBe("none")
+    expect(argv[i("--cache_level") + 1]).toBe("env")
 
     expect(i("--clean")).toBeGreaterThan(-1)
-    expect(argv[i("--clean") + 1]).toBe("True")
+    expect(argv[i("--clean") + 1]).toBe("False")
+
+    expect(i("--namespace")).toBeGreaterThan(-1)
+    expect(argv[i("--namespace") + 1]).toBe("none")
+
+    // --force_rebuild absent unless explicitly enabled (default off)
+    expect(i("--force_rebuild")).toBe(-1)
 
     expect(i("--dataset_name")).toBeGreaterThan(-1)
     expect(argv[i("--dataset_name") + 1]).toBe("princeton-nlp/SWE-bench_Lite")

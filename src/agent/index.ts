@@ -116,6 +116,7 @@ export {
 } from "./streaming-dispatch"
 export { createSubagentRunner, type SubagentRunnerOptions } from "./subagent-runner"
 export type { AgentConfig, AgentOutcome, StopReason } from "./types"
+export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
 export {
   type Blocker,
   type BlockerSurface,

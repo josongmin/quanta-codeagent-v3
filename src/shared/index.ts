@@ -10,8 +10,13 @@ export {
 export type { LogLevel } from "./logger"
 export { logger } from "./logger"
 export type { RunContext } from "./run-context"
-export type { RuntimeConfig } from "./runtime-config"
-export { __resetRuntimeConfig, LOG_LEVELS, runtimeConfig } from "./runtime-config"
+export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
+export {
+  __resetRuntimeConfig,
+  LOG_LEVELS,
+  runtimeConfig,
+  SWEBENCH_CACHE_LEVELS,
+} from "./runtime-config"
 export type {
   DegradedData,
   LlmUsageData,

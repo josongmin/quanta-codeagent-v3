@@ -4,11 +4,19 @@
  *  to depend on the other's full implementation surface. */
 
 import type { ToolResultBlock } from "@/llm"
+import type { ToolFailure } from "@/tool"
 
 export interface DispatchResult {
   block: ToolResultBlock
   ok: boolean
   preview: string
+  /** OPTIONAL (absorb #2 — Cursor failure model): the typed failure reason
+   *  surfaced verbatim from `ToolResult.failure` during normalization. Lets the
+   *  loop/recorders branch on the failure KIND rather than parsing `preview`.
+   *  Omitted on success and whenever the tool did not classify its failure
+   *  (exactOptionalPropertyTypes: never set to `undefined`), so callers that do
+   *  not read it are byte-identical. */
+  failure?: ToolFailure
   /** Wall time of the tool execution in ms (RFC-0002 §5.2 evidence). Set for
    *  every executed tool; absent only on pre-execute deny short-circuits. */
   durationMs?: number

@@ -1,7 +1,7 @@
 id: git-upstream-check
 title: git_upstream_check — upstream 분기 감지 (read-only)
 section: 2
-subsystem: Git 1급 도구 (v0.dev chat=branch 흡수, ADR-0063)
+subsystem: Git 1급 도구 (v0.dev chat=branch 흡수, ADR-0064)
 order: 63
 maturity: L3
 status: new
@@ -13,7 +13,7 @@ purpose: |
   read-only·concurrency-safe — gitTools() 7번째 read-only 도구.
 evidence:
   code: [src/tool/git/upstream.ts, src/tool/git/index.ts, src/agent/mode.ts]
-  adrs: [63]
+  adrs: [64]
   tests:
     unit: [tests/unit/git-upstream-check.test.ts]
     integration: []

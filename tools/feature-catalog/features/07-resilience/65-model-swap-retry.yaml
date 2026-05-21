@@ -1,7 +1,7 @@
 id: model-swap-retry
 title: 모델 교체 retry (SubmitRetryBotMessage)
 section: 7
-subsystem: 복원력 — 모델 교체 (v0.dev 흡수, ADR-0065)
+subsystem: 복원력 — 모델 교체 (v0.dev 흡수, ADR-0066)
 order: 65
 maturity: L2
 status: new
@@ -13,7 +13,7 @@ purpose: |
   기존 RetryingLLM(동일 모델 transient)·FallbackLLM(provider 사망)과 명확히 구분.
 evidence:
   code: [src/llm/model-swap.ts]
-  adrs: [65]
+  adrs: [66]
   tests:
     unit: [tests/unit/model-swap-retry.test.ts]
     integration: []

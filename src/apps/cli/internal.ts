@@ -11,6 +11,7 @@ import {
   RetryingLLM,
 } from "@/agent"
 import { lspDiagnosticsTool, lspNavToolList } from "@/agent/lsp-bridge"
+import { type PersonaKind, resolvePersona } from "@/agent/persona"
 import { AnthropicAdapter, FallbackLLM, type LLMPort, type Message, OpenAIAdapter } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
@@ -43,6 +44,11 @@ export const pickProvider = (): Provider => {
   return "anthropic"
 }
 
+/** ADR-0068 persona slot — resolve `QUANTA_PERSONA` once at REPL start.
+ *  Absent ⇒ `"default"` (the explicit choice). Unknown value ⇒ named
+ *  `PersonaInvalidError` throw (no silent fallback per ADR-0067 §C). */
+export const pickPersona = (): PersonaKind => resolvePersona(process.env)
+
 export const buildLLM = (provider: Provider, model: string): LLMPort => {
   if (provider === "openai") {
     const apiKey = process.env.OPENAI_API_KEY
@@ -60,7 +66,7 @@ export const buildLLM = (provider: Provider, model: string): LLMPort => {
 
 export const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-6",
-  openai: "gpt-4o",
+  openai: "gpt-5",
 }
 
 /**
@@ -525,7 +531,7 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     stream: d.stream,
     permission: d.permission,
     messages,
-    system: buildSystemPrompt(d.cwd),
+    system: buildSystemPrompt(d.cwd, { persona: pickPersona() }),
     cwd: d.cwd,
     maxTurns: d.maxTurns,
     signal: d.signal,

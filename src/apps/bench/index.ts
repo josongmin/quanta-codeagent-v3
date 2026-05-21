@@ -16,6 +16,11 @@
  *   --limit <int>                                  cap instances
  *   --instance <substr>                            select by id substring
  *                                                  (applied before --limit)
+ *   --prepare-images                               pre-build SWE-bench env
+ *                                                  images for selected
+ *                                                  instances and EXIT (warm
+ *                                                  cache for the next run;
+ *                                                  requires --swebench)
  *   --dry-run                                      load+count+print plan, NO LLM
  *   --model <id> | QUANTA_MODEL                    model id
  *   QUANTA_PROVIDER / ANTHROPIC_API_KEY / OPENAI_API_KEY  provider pick
@@ -26,6 +31,29 @@
  *                                                   princeton-nlp/SWE-bench_Verified
  *                                                   (decoupled from --swebench,
  *                                                   which is the tasks input)
+ *
+ * Official-harness tuning (only used when QUANTA_SWEBENCH_PYTHON=1; flow
+ * through `harness/config.ts → resolveHarnessConfig()`):
+ *   QUANTA_SWEBENCH_CACHE_LEVEL    none|base|env|instance — image tiers that
+ *                                  survive the run. Default: env (keep base+
+ *                                  per-repo env images warm; reused by
+ *                                  subsequent instances).
+ *   QUANTA_SWEBENCH_CLEAN          true|false — remove images above cache
+ *                                  level after the run. Default: false.
+ *   QUANTA_SWEBENCH_MAX_WORKERS    positive int — instance-eval parallelism.
+ *                                  Default: min(4, 75%cores). Override on
+ *                                  beefy hosts (e.g. =8) for larger batches.
+ *   QUANTA_SWEBENCH_NAMESPACE      swebench|none|<other> — image registry
+ *                                  namespace. Default: arch-aware (arm64 ⇒
+ *                                  "swebench" pull, x64 ⇒ "none" local
+ *                                  build). Set "none" to force local build,
+ *                                  "swebench" to force prebuilt pull.
+ *   QUANTA_SWEBENCH_FORCE_REBUILD  true|false — ignore cached images and
+ *                                  rebuild. Default: false.
+ *   QUANTA_SWEBENCH_PYTHON_BIN     explicit python interpreter path (e.g.
+ *                                  /opt/homebrew/bin/python3.11). Default:
+ *                                  probe `python` then `python3` on PATH.
+ *
  * Never crashes when keys are absent — prints guidance and exits 0.
  */
 import { existsSync, readFileSync } from "node:fs"
@@ -35,10 +63,10 @@ import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { aggregate, classify } from "./failure-classifier"
+import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
 import { benchRunDir, benchRunId, benchWorkRoot } from "./paths"
-import { isPythonSwebenchAvailable } from "./harness"
 import { buildReport, writeReport } from "./report"
 import { finalizeRun, runInstance } from "./runner"
 import { patchVote, sampleBestOfN } from "./sampler"
@@ -100,7 +128,7 @@ const pickProvider = (): Provider => {
 
 const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-6",
-  openai: "gpt-4o",
+  openai: "gpt-5",
 }
 
 /** Build the LLM, or null when the provider's key is absent. */
@@ -284,6 +312,26 @@ const runSwebenchTask = async (
   }
 }
 
+/** `--prepare-images` worker: warm the Docker image pool for `instanceIds`
+ *  via the official `prepare_images` harness, log the outcome, and return the
+ *  process exit code (0 ok / 1 fail). The SOTA win: per-repo env image built
+ *  once here, reused by every later instance of that repo. */
+const runPrepareImages = async (instanceIds: string[]): Promise<number> => {
+  const result = await prepareImages({
+    predictionsPath:
+      argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
+    runId: benchRunId(),
+    instanceIds,
+    datasetName: argValue("--dataset-name") ?? "princeton-nlp/SWE-bench_Verified",
+    config: resolveHarnessConfig(),
+  })
+  logger.info(
+    `bench: prepare-images ${result.ok ? "OK" : "FAIL"} (preexisting env images: ${result.preexistingEnvImages})`,
+  )
+  if (!result.ok) logger.info(`prepare log tail:\n${result.log}`)
+  return result.ok ? 0 : 1
+}
+
 const runDatasetMode = async (
   datasetFile: string,
   llm: LLMPort,
@@ -309,6 +357,12 @@ const runDatasetMode = async (
   logger.info(
     `bench(swebench): ${selected.length} task(s), provider=${meta.provider}, model=${meta.model}, n=${cfg.n}`,
   )
+
+  // `--prepare-images`: warm the Docker image pool for the selected instances
+  // then EXIT — no LLM, no agent. Exits BEFORE any LLM/agent work below.
+  if (argFlag("--prepare-images")) {
+    process.exit(await runPrepareImages(selected.map((t) => t.instanceId)))
+  }
 
   // Official-dataset path MUST wire the Python harness too (the custom-corpus
   // path does at :396). Without this, `deps.pythonSwebench` is always

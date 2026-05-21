@@ -80,7 +80,7 @@ const pickProvider = (): Provider => {
 
 const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-6",
-  openai: "gpt-4o",
+  openai: "gpt-5",
 }
 
 const buildLLM = (provider: Provider, model: string): LLMPort | null => {

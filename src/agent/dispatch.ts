@@ -168,6 +168,12 @@ const execute = async (
       preview: result.output,
       durationMs,
       ...evidenceOf(result),
+      // absorb #2 (Cursor failure model): surface the tool's typed failure
+      // reason verbatim when it classified one. Omitted when absent so
+      // `exactOptionalPropertyTypes` never sees `undefined` and callers that
+      // do not read `failure` stay byte-identical. `ok`/`block`/`preview`
+      // derivation is unchanged.
+      ...(result.failure !== undefined ? { failure: result.failure } : {}),
     }
   } catch (e) {
     const durationMs = Math.max(0, Math.round(performance.now() - startedAt))

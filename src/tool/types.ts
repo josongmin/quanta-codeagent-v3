@@ -81,7 +81,46 @@ export interface ToolResult {
    *  `deferred` means `output` is a provisional placeholder, not the final
    *  answer. Absent ⇒ ordinary synchronous result (byte-identical). */
   deferred?: DeferredHandle
+  /** OPTIONAL (absorb #2 — Cursor `EditResult`/`ShellResult` failure model): a
+   *  TYPED, discriminated reason a tool failed, letting the model branch on the
+   *  failure KIND instead of regex-matching `output`.
+   *
+   *  INVARIANT: `failure` is only meaningful when `ok === false`. When present
+   *  it carries the typed reason IN ADDITION TO (never instead of) `output` —
+   *  `output` remains the model-facing tool_result text exactly as before, so a
+   *  tool that omits `failure` is byte-identical for every existing caller.
+   *  Tools opt in by populating it on their `ok:false` results; the dispatch
+   *  seam surfaces it onto `DispatchResult.failure` unchanged. */
+  failure?: ToolFailure
 }
+
+/** OPTIONAL (absorb #2 — Cursor `EditResult`/`ShellResult`): the discriminated
+ *  set of failure reasons a tool may classify on an `ok:false` `ToolResult`.
+ *  The literal `mode` is the discriminant; switching over it with a `never`
+ *  default is exhaustive (a new variant becomes a compile error at every site).
+ *
+ *  Variants chosen to match how v3 tools actually fail today:
+ *   - `not_found`: a target path/symbol/match did not exist (read on a missing
+ *     file, `edit` `old_string not found`, `scripted_replace` `pattern not
+ *     found`). `path` carried when the missing target is a file.
+ *   - `permission_denied`: the action was refused by the FS jail or a real
+ *     permission boundary. `isReadonly` distinguishes a refusal that exists
+ *     ONLY because the session/tool is in read-only mode (would succeed if
+ *     mutation were allowed) from a genuine permission denial — Cursor's
+ *     `is_readonly` flag.
+ *   - `rejected`: a human/gate declined the call (HITL deny, plan-mode block).
+ *     `reason` is the stable tag.
+ *   - `timeout`: execution exceeded a deadline. `timeoutMs` carried when known.
+ *   - `error`: any other failure. `modelVisibleError` is the safe text shown to
+ *     the model; `clientVisibleError` is richer detail for the UI/operator that
+ *     is NOT necessarily forwarded to the model (Cursor's
+ *     model-visible vs client-visible split). */
+export type ToolFailure =
+  | { mode: "not_found"; path?: string }
+  | { mode: "permission_denied"; path?: string; isReadonly?: boolean }
+  | { mode: "rejected"; reason: string }
+  | { mode: "timeout"; timeoutMs?: number }
+  | { mode: "error"; modelVisibleError?: string; clientVisibleError?: string }
 
 /** Optional RFC-0002 §5.2 execution evidence a tool may attach to its
  *  `ToolResult`. All fields are optional individually: a tool may carry just

@@ -89,6 +89,7 @@ export type {
   Tool,
   ToolContext,
   ToolEvent,
+  ToolFailure,
   ToolResult,
   ToolResultEvidence,
   ToolSpec,

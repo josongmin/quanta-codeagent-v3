@@ -163,7 +163,12 @@ export const fileTreeSummaryTool: Tool<Input> = {
     "Summarize a repo's directory STRUCTURE (depth-bounded tree + per-dir file " +
     "counts, .gitignore-respecting). Stage 1 of fault localization — see where " +
     "modules live before reading files. Pass summarize:true to annotate each " +
-    "file with its first declaration/comment (a cheap purpose hint).",
+    "file with its first declaration/comment (a cheap purpose hint). " +
+    "CAP RESPONSE (ADR-0062): when the output contains '+N deeper, increase " +
+    "max_depth' or 'file cap … reached — narrow with path or raise max_files', " +
+    "the NEXT call MUST apply that suggestion (double max_depth, narrow path, " +
+    "or raise max_files) before switching tools or asking the user to narrow " +
+    "down. The cap message names the exact next parameter — apply it.",
   inputSchema: schema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

@@ -24,9 +24,11 @@ import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
 import { streamingTurn } from "./streaming-dispatch"
+import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
+import { TurnWorkMetricsCollector } from "./work-metrics-collector"
 import type { WorkingStateSession } from "./working-state"
 
 /** Bounded per-turn recovery budgets. These cap SAME-TURN retries so a
@@ -100,6 +102,7 @@ const emitUsage = (
   config: AgentConfig,
   ev: Extract<StreamEvent, { type: "usage" }>,
   recorder: AgentRecorder | undefined,
+  collector: TurnWorkMetricsCollector | undefined,
 ): void => {
   config.stream.emit({
     type: "usage",
@@ -109,6 +112,12 @@ const emitUsage = (
     ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
   })
   recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
+  // absorb #6: per-turn work-metrics — only when caller wired a sink.
+  collector?.recordUsage({
+    tokensInput: ev.inputTokens,
+    tokensOutput: ev.outputTokens,
+    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+  })
 }
 
 /** Stable, small set of `recovery` reasons (RFC-0002 §5.2). Group E maps these
@@ -165,9 +174,10 @@ async function* teeUsage(
   config: AgentConfig,
   src: AsyncIterable<StreamEvent>,
   recorder: AgentRecorder | undefined,
+  collector: TurnWorkMetricsCollector | undefined,
 ): AsyncIterable<StreamEvent> {
   for await (const ev of src) {
-    if (ev.type === "usage") emitUsage(config, ev, recorder)
+    if (ev.type === "usage") emitUsage(config, ev, recorder, collector)
     yield ev
   }
 }
@@ -251,6 +261,7 @@ const streamConsume = async (
   skillGate: SkillGate | undefined,
   toolHistory: ToolHistoryEntry[] | undefined,
   workingState: WorkingStateSession | undefined,
+  collector: TurnWorkMetricsCollector | undefined,
 ): Promise<StreamConsumeResult> => {
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
@@ -262,8 +273,18 @@ const streamConsume = async (
   const stop = recorder?.llmStream()
   try {
     const outcome = await streamingTurn({
-      events: teeUsage(config, config.llm.stream({ messages, system, tools: specs }), recorder),
+      events: teeUsage(
+        config,
+        config.llm.stream({ messages, system, tools: specs }),
+        recorder,
+        collector,
+      ),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
+      // L3 wire (absorb #1, ADR-0060): route streaming `tool_use_*` events to
+      // each tool's optional `onInputStart/Delta/Available` callbacks. The
+      // seam is a one-`Map.get` fast-path no-op for tools that declare none,
+      // so this is byte-identical for every existing built-in.
+      onToolInput: buildToolInputSeam(config.registry),
       dispatch: async (call) => {
         const s = recorder?.toolExec()
         try {
@@ -289,6 +310,12 @@ const streamConsume = async (
                 )
           // A successful `Skill` invocation (re)arms the scope for next calls.
           skillGate?.observe(call.name, call.input, out.ok)
+          // absorb #6: per-turn work-metrics — count the action and, when the
+          // tool is `read`, count returned lines. Collector absent ⇒ no-op
+          // (the sink is unwired). recordRead duck-types the result shape so
+          // no `@/tool` import is needed here.
+          collector?.recordToolCall(call.name, out)
+          collector?.recordRead(call.name, out.preview)
           // RFC-0002 §5.2 enriched tool_result. CONTRACT with Group E: the
           // dispatch result exposes these EXACT optional field names
           // (`durationMs:number`, `stderrTail:string`, `exitCode:number`,
@@ -850,6 +877,7 @@ const runTurn = async (
   closeoutGuardState: CloseoutGuardState | undefined,
   activeSkills: { name: string; description: string }[] | undefined,
   workingState: WorkingStateSession | undefined,
+  collector: TurnWorkMetricsCollector | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -869,6 +897,7 @@ const runTurn = async (
       skillGate,
       toolHistory,
       workingState,
+      collector,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -946,6 +975,52 @@ const buildVerifyGuard = (
 const buildCloseoutGuard = (config: AgentConfig): CloseoutGuardState | undefined =>
   config.closeoutGuard?.enabled === true ? createCloseoutGuardState() : undefined
 
+/** Per-turn work-metrics resources (absorb #6, ADR-0064). Built ONLY when
+ *  `cfg.workMetricsSink` is wired. With the sink absent ⇒ both fields stay
+ *  `undefined`, no object is allocated, all `collector?.` no-op and the
+ *  finalize/emit helper short-circuits → loop byte-for-byte identical.
+ *
+ *  `turnId` reuses the ADR-0030 `activeTurnRef.currentTurn.turnId` when set
+ *  (so a surface that tracks both sees one UUID space); otherwise we mint a
+ *  fresh per-turn UUID so the sink ALWAYS gets a stable correlation id.
+ *  Extracted so `runAgent` gains no new branch — mirrors `buildVerifyGuard`. */
+const buildWorkMetricsResources = (
+  cfg: AgentConfig,
+): { collector?: TurnWorkMetricsCollector; turnId?: string } => {
+  if (cfg.workMetricsSink === undefined) return {}
+  return {
+    collector: new TurnWorkMetricsCollector(),
+    turnId: cfg.activeTurnRef?.current.currentTurn?.turnId ?? crypto.randomUUID(),
+  }
+}
+
+/** Finalize the collector and hand the snapshot to the sink. Skipped when no
+ *  sink is wired (default-OFF byte-identical) or when the turn aborted before
+ *  any work landed (snapshot is all-zeros → no signal). Extracted so `runAgent`
+ *  gains no new branch — mirrors `buildVerifyGuard`/`buildCloseoutGuard`.
+ *
+ *  TODO(absorb #6 cont.): collect numstat per-turn from git_diff results (or
+ *  spawn `git diff --numstat HEAD` here, gated on a git-repo check) so
+ *  `diffMap` reflects actual file changes; today it accumulates only when a
+ *  future tool routes numstat through `collector.recordDiff(...)`. */
+const emitWorkMetrics = (
+  cfg: AgentConfig,
+  collector: TurnWorkMetricsCollector | undefined,
+  turnId: string | undefined,
+  resultKind: TurnResult["kind"],
+): void => {
+  if (
+    cfg.workMetricsSink === undefined ||
+    collector === undefined ||
+    turnId === undefined ||
+    resultKind === "aborted"
+  ) {
+    return
+  }
+  const metrics = collector.finalize(cfg.llm.model)
+  cfg.workMetricsSink.emit(metrics, { turnId })
+}
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // Tier 1 capability (ADR-0011): materialize optional subsystems ONCE. With no
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
@@ -961,8 +1036,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const dedupGateActive =
     config.dedupGate !== undefined || config.dedupGateConfig?.disabled !== true
   const baseCfg = buildEffectiveConfig(config, features.extraTools)
-  const cfg: AgentConfig =
-    dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
+  const cfg: AgentConfig = dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
   const classifier = features.classifier
   const skillGate = buildSkillGate(features.skillAllowlists)
   // Cached once at session start (Codex anti-reread). Passed straight into the
@@ -991,9 +1065,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // `dedupGateConfig.disabled:true` opts out entirely.
   const dedupGate =
     cfg.dedupGate ??
-    (cfg.dedupGateConfig?.disabled
-      ? undefined
-      : new DedupGate(cfg.dedupGateConfig?.caps))
+    (cfg.dedupGateConfig?.disabled ? undefined : new DedupGate(cfg.dedupGateConfig?.caps))
   // Make the constructed gate visible to `dispatchTool` via the loop-local
   // effective config. Disabled / caller-already-set ⇒ no-op (cfg.dedupGate
   // either stays undefined or keeps the caller's instance verbatim).
@@ -1107,6 +1179,11 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     stream.emit({ type: "turn_start", turn })
     if (cfg.hooks) await cfg.hooks.emit({ type: "turn_start", turn })
 
+    // absorb #6 (ADR-0064): per-turn work-metrics. Both fields are `undefined`
+    // when no sink is wired (byte-identical, RFC §1.2). See `buildWorkMetrics`
+    // helper above runAgent — keeps the runAgent body free of new branches.
+    const { collector: workCollector, turnId: workTurnId } = buildWorkMetricsResources(cfg)
+
     // Recovery counters are per-turn: SAME-TURN retries share & exhaust these,
     // a fresh turn starts clean. runTurn owns the SEAM (buildTurnContext) and
     // mutates `messages` (canonical history) in place.
@@ -1124,6 +1201,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
       closeoutGuardState,
       activeSkills,
       workingState,
+      workCollector,
     )
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
@@ -1137,6 +1215,10 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     // agree. Normal-path counts are unperturbed (every productive turn still
     // counts exactly once; `max_turns` is reached only via productive tool
     // turns, so it still reports `cfg.maxTurns`).
+    // absorb #6 (ADR-0064): finalize + emit the per-turn work snapshot via a
+    // helper. Skipped when no sink is wired (byte-identical) or the turn
+    // aborted before any work landed (snapshot would be all-zeros — no signal).
+    emitWorkMetrics(cfg, workCollector, workTurnId, result.kind)
     if (result.kind === "aborted") return finish("aborted", turn - 1)
     if (result.kind === "error") {
       // Mirror the abort semantics: a turn that errored without producing a

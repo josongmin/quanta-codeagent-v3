@@ -1,7 +1,12 @@
-import type { LLMPort, Message } from "@/llm"
+import type { LLMPort, Message, ModelCandidate } from "@/llm"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
-import type { PermissionContext, ToolAction, TrustScopeRegistry } from "@/permission"
+import type {
+  PatternGrantStore,
+  PermissionContext,
+  ToolAction,
+  TrustScopeRegistry,
+} from "@/permission"
 import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
@@ -9,9 +14,11 @@ import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
+import type { PlanExitPort } from "./plan-exit-flow"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
 import type { ActiveTurnState } from "./steering"
+import type { WorkMetricsSink } from "./work-metrics-collector"
 
 export interface AgentConfig {
   llm: LLMPort
@@ -271,6 +278,38 @@ export interface AgentConfig {
    * here, to keep this config type IO-free).
    */
   permissionStack?: { enabled?: boolean; hostId?: string }
+  /**
+   * ADR-0061 (absorb #2) permission pattern-grant store — session-scoped
+   * cache of patterns the user has granted, used by the admissibility-gate
+   * to auto-pass actions whose `rememberPatterns` are fully covered.
+   * Default-OFF; see ADR-0061.
+   */
+  permissionPatternStore?: PatternGrantStore
+  /**
+   * ADR-0061 hardening — operator override allowing the pattern auto-pass
+   * to fire even when the action self-flags `isMaybeDangerous: true`.
+   * Absent/false ⇒ dangerous actions ALWAYS go through the reviewer.
+   */
+  permissionAllowDangerous?: boolean
+  /**
+   * Plan-exit port (ADR-0062). Host-supplied I/O seam that surfaces a plan
+   * and returns a {@link PlanExitOutcome}. Absent ⇒ plan-exit flow never
+   * invoked (legacy plan-mode posture unchanged). See `./plan-exit-flow.ts`.
+   */
+  planExitPort?: PlanExitPort
+  /**
+   * Per-turn work-metrics sink (ADR-0064). Absent ⇒ the loop instantiates no
+   * collector and emits nothing (byte-identical default-OFF). Present ⇒ one
+   * collector per turn; `emit(metrics, { turnId })` at turn end.
+   */
+  workMetricsSink?: WorkMetricsSink
+  /**
+   * ADR-0065 model-swap retry — opt-in ordered list of alternate models a
+   * surface (e.g. CLI `/retry-with`) can escalate to or jump to by id.
+   * Absent / empty ⇒ the slash command is a no-op. Order is significant
+   * (defines escalation sequence). Wired by the surface layer.
+   */
+  modelCandidates?: readonly ModelCandidate[]
 }
 
 export type StopReason = "completed" | "max_turns" | "aborted" | "error"

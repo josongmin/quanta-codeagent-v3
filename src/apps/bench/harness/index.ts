@@ -33,3 +33,18 @@ export {
   harnessFlags,
   resolveHarnessConfig,
 } from "./config"
+export {
+  classifyImage,
+  type DockerSpawn,
+  defaultDockerSpawn,
+  groupByTier,
+  hasEnvImage,
+  type ImageInfo,
+  type ImageTier,
+  listSwebenchImages,
+} from "./images"
+export {
+  type PrepareImagesOpts,
+  type PrepareImagesResult,
+  prepareImages,
+} from "./prepare"

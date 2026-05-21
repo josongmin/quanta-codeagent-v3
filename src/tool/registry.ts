@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { runtimeConfig, ToolExecutionError, ToolInputError } from "@/shared"
+import { enforceOutputSchema } from "./factory"
 import { capToolOutput, DEFAULT_SPILL_KEEP, DEFAULT_TOOL_OUTPUT_MAX } from "./output-spill"
 import { zodToJsonSchema } from "./schema"
 import type { Tool, ToolContext, ToolResult, ToolSpec } from "./types"
@@ -88,6 +89,18 @@ export class ToolRegistry {
     }
     if (result === undefined) {
       throw new ToolExecutionError(`Tool ${name} produced no result`)
+    }
+    // L3 wire (absorb #1, ADR-0060): enforce outputSchema then render model-
+    // facing output via toModelOutput. Both factory helpers fast-path when the
+    // tool declines to opt in, so a tool with neither field is byte-identical
+    // to the pre-wire path. enforce runs FIRST so a structured-validation
+    // failure (`ok:false` with a retry-instruction message) short-circuits
+    // toModelOutput; on ok results, toModelOutput supplies the compact model-
+    // facing string. Capping below applies to the rewritten output so the
+    // wire honours the existing token cap.
+    result = enforceOutputSchema(tool, result)
+    if (result.ok && tool.toModelOutput !== undefined) {
+      result = { ...result, output: tool.toModelOutput(result) }
     }
     // S5: read tunables from the frozen runtimeConfig — no per-call env reads.
     const cfg = runtimeConfig()

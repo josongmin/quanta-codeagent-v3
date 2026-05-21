@@ -58,13 +58,14 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers exactly 5 commands in documented order", () => {
+  test("registers the documented builtins in order (5 surface + /retry-with)", () => {
     expect(BUILTINS.map((c) => c.name)).toEqual([
       "/context",
       "/usage",
       "/color",
       "/navigate",
       "/wait",
+      "/retry-with",
     ])
   })
 })

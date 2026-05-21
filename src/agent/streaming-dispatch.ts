@@ -104,8 +104,45 @@ export interface StreamingTurnArgs {
    *  indicator without us having to invent one. Behaviour is additive — when
    *  this is `undefined` the engine's observable result is unchanged. */
   onInProgress?: InProgressHandler
+  /** Optional streaming-input seam (absorb #1, ADR-0060). When wired, each
+   *  `tool_use_start`/`tool_use_delta`/`tool_use_end` upstream event fires the
+   *  corresponding handler so the caller can drive the per-tool
+   *  `onInputStart`/`onInputDelta`/`onInputAvailable` callbacks (use
+   *  `@/agent/tool-input-streaming#buildToolInputSeam` for the registry-bound
+   *  default). Default-OFF: when `undefined`, observable behaviour is
+   *  unchanged. Handler errors are swallowed in place so a faulty consumer
+   *  cannot poison the surrounding stream-processing invariants. */
+  onToolInput?: ToolInputStreamSeam
   /** Cooperative cancellation: an abort between/within phases ⇒ `aborted`. */
   signal?: AbortSignal
+}
+
+/** Three-callback seam mirroring `tool_use_start`/`_delta`/`_end` upstream
+ *  events. See `StreamingTurnArgs.onToolInput`. */
+export interface ToolInputStreamSeam {
+  start(id: string, name: string): void
+  delta(id: string, delta: string): void
+  available(id: string, input: unknown): void
+}
+
+/** Swallow-on-throw helper for the {@link ToolInputStreamSeam} — keeps the
+ *  three branches in `handleStreamEvent` to a single line each, and bounds
+ *  the surrounding function's cognitive complexity (biome
+ *  `noExcessiveCognitiveComplexity` was tripping at 32 before the extract). */
+const fireToolInput = (
+  seam: ToolInputStreamSeam | undefined,
+  kind: "start" | "delta" | "available",
+  ev: Extract<StreamEvent, { type: `tool_use_${"start" | "delta" | "end"}` }>,
+): void => {
+  if (seam === undefined) return
+  try {
+    if (kind === "start" && ev.type === "tool_use_start") seam.start(ev.id, ev.name)
+    else if (kind === "delta" && ev.type === "tool_use_delta") seam.delta(ev.id, ev.delta)
+    else if (kind === "available" && ev.type === "tool_use_end") seam.available(ev.id, ev.input)
+  } catch {
+    // Intentional: a consumer error must not poison the stream-processing
+    // invariants (rawEvents accumulation, scheduling order, etc.).
+  }
 }
 
 export type StreamingTurnResult =
@@ -255,11 +292,32 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
     return
   }
 
-  if (ev.type === "tool_use_end") {
-    const call = resolveToolCall(state.rawEvents, ev.id)
-    if (call === undefined) return
-    scheduleResolvedCall(state, call, args.isConcurrencySafe, args.dispatch, args.onToolStart)
+  // The 3 `tool_use_*` events share an extraction (absorb #1, ADR-0060):
+  // fire the optional `onToolInput` seam, and additionally schedule the
+  // resolved call on `_end`. Single branch here keeps this dispatcher's
+  // cognitive complexity bounded — biome would otherwise flag the per-event
+  // branches added by the wire.
+  handleToolUseEvent(state, ev, args)
+}
+
+/** Route the three `tool_use_*` streaming events: fire the optional input
+ *  seam, and additionally schedule the resolved call when `_end` carries
+ *  the finalized input. Extracted from {@link handleStreamEvent} to keep
+ *  that dispatcher under the biome cognitive-complexity budget. */
+const handleToolUseEvent = (state: TurnState, ev: StreamEvent, args: StreamingTurnArgs): void => {
+  if (ev.type === "tool_use_start") {
+    fireToolInput(args.onToolInput, "start", ev)
+    return
   }
+  if (ev.type === "tool_use_delta") {
+    fireToolInput(args.onToolInput, "delta", ev)
+    return
+  }
+  if (ev.type !== "tool_use_end") return
+  fireToolInput(args.onToolInput, "available", ev)
+  const call = resolveToolCall(state.rawEvents, ev.id)
+  if (call === undefined) return
+  scheduleResolvedCall(state, call, args.isConcurrencySafe, args.dispatch, args.onToolStart)
 }
 
 /** Phase 3: run the deferred slots (the barrier call + everything after it,

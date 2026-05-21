@@ -90,6 +90,30 @@ export const QUANTA_ATTRS = {
     /** `"INIT" | "incremental"`. */
     consolidationMode: "quanta.memory.consolidation_mode",
     tokensUsed: "quanta.memory.tokens_used",
+    // ADR-0068 — 2-Phase consolidator (Codex absorption). Distinct from
+    // the legacy `phase_e2e_ms` (ADR-0008 SOTA hybrid recall) so dashboards
+    // can split per-turn recall cost from per-thread/per-global distill.
+    phase1: {
+      e2eMs: "quanta.memory.phase1.e2e_ms",
+      /** Turn count of the source session — drives MIN_TURN_THRESHOLD skip. */
+      turns: "quanta.memory.phase1.turns",
+      /** `"distilled" | "skipped"`. */
+      outcome: "quanta.memory.phase1.outcome",
+    },
+    phase2: {
+      e2eMs: "quanta.memory.phase2.e2e_ms",
+      /** `"INIT" | "incremental"` — same enum as `consolidationMode` but
+       *  scoped to phase2 spans to avoid attribute collision. */
+      mode: "quanta.memory.phase2.mode",
+      /** Stage1 entries consolidated this run. */
+      stage1Count: "quanta.memory.phase2.stage1_count",
+      tokensUsed: "quanta.memory.phase2.tokens_used",
+      /** `.git` commit SHA produced by the writer; null when git disabled. */
+      gitCommitSha: "quanta.memory.phase2.git_commit_sha",
+      bytesMemory: "quanta.memory.phase2.bytes.memory",
+      bytesRawMemories: "quanta.memory.phase2.bytes.raw_memories",
+      bytesMemorySummary: "quanta.memory.phase2.bytes.memory_summary",
+    },
   },
   permission: {
     /** ADR-0029 reviewer enum. */

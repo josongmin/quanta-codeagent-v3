@@ -14,6 +14,13 @@ export {
   STAGE2_THINKING_TAIL,
 } from "./classifier"
 export type {
+  AutoPassInput,
+  AutoPassOptions,
+  AutoPassResult,
+  FallThroughReason,
+} from "./gate-pattern-wire"
+export { autoPassByPatterns, grantAndCascade } from "./gate-pattern-wire"
+export type {
   CreatePermissionInspectorOptions,
   InspectAction,
   PermissionInspector,
@@ -81,6 +88,21 @@ export {
 } from "./post-denial"
 export type { PendingPermission } from "./remember-patterns"
 export { autoResolvable, grantPatterns, PatternGrantStore } from "./remember-patterns"
+export type {
+  ReasonCode,
+  ReviewDecision,
+  ReviewDecisionVerb,
+  ReviewKind,
+} from "./review-kind"
+export {
+  ALL_REASON_CODES,
+  ALL_REVIEW_DECISION_VERBS,
+  ALL_REVIEW_KINDS,
+  isDecisionLegalFor,
+  isExecutionBlocking,
+  reasonCodeFor,
+  stopCategoryFor,
+} from "./review-kind"
 export {
   DenialPrecedenceConflictError,
   ReviewerUnavailableError,

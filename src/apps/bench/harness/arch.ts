@@ -25,11 +25,12 @@ export const hostArch = (): HostArch => {
  *   - `arm64` ⇒ `"swebench"` (pull prebuilt x86_64 images from Docker Hub).
  *     SWE-bench base/env Dockerfiles pin `platform=linux/amd64` and the base
  *     image build requires a miniconda download that is slow + network-flaky
- *     when emulated. The PULL path runs the same image under Rosetta — slower
- *     per-test, but EVERY image is one network pull instead of a multi-step
- *     local build. This is the only reliable arm64 default; the empirical
- *     evidence is django-12419 RESOLVED via pull, vs base-image-build stuck
- *     at `wget miniconda.sh` via local build.
+ *     when emulated. The PULL path runs the same image under x86 emulation
+ *     (Rosetta on macOS, qemu on Linux) — slower per-test, but EVERY image
+ *     is one network pull instead of a multi-step local build. This is the
+ *     only reliable arm64 default; the empirical evidence is django-12419
+ *     RESOLVED via pull, vs base-image-build stuck at `wget miniconda.sh`
+ *     via local build.
  *
  *   - `x64` ⇒ `"none"` (build locally). Native amd64 host: local builds are
  *     native + cacheable, no emulation cost, and we don't depend on the

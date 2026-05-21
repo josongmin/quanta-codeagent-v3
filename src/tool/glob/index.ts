@@ -13,7 +13,11 @@ const MAX = 300
 
 export const globTool: Tool<Input> = {
   name: "glob",
-  description: "List files matching a glob pattern, relative to the base directory.",
+  description:
+    "List files matching a glob pattern, relative to the base directory. " +
+    "If the result is empty, NARROW with a more specific pattern or BROADEN " +
+    "(e.g. `src/agent/*.ts` ↔ `src/**/*.ts`) before switching to a different " +
+    "tool or asking the user to narrow down (ADR-0062).",
   inputSchema: schema,
   isReadOnly: () => true,
   // Read-only directory scan; no side effects, safe to parallelize.

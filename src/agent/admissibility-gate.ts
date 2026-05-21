@@ -29,6 +29,7 @@
 import type { ToolUseBlock } from "@/llm"
 import {
   type AutoModeClassifier,
+  autoPassByPatterns,
   computeActionSignature,
   type DenialMemory,
   evaluate,
@@ -43,8 +44,8 @@ import {
   type ReviewContext,
   type ReviewerPort,
   type ReviewerTier,
-  reviewAction,
   resolveHostId,
+  reviewAction,
   type ToolActionKeyed,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
@@ -59,6 +60,29 @@ export interface AdmissibilityAction {
   tool: string
   input: unknown
   isReadOnly: boolean
+  /**
+   * ADR-0061 (absorb #2) — patterns the action declares it would be satisfied
+   * by, e.g. `["bash:git status", "read:src/**"]`. When `config.
+   * permissionPatternStore` is wired AND every pattern is already granted in
+   * that store AND `isMaybeDangerous` is not set (or `permissionAllowDangerous`
+   * is true), the gate short-circuits with a synthetic
+   * `auto_review/config_allowed` decision BEFORE invoking the reviewer.
+   *
+   * Absent ⇒ never auto-passed (legacy path, byte-identical).
+   *
+   * TODO(absorb #2): expose `rememberPatterns` / `isMaybeDangerous` in the
+   * model-facing tool/schema surface so a future ADR can promote them onto
+   * the model contract. For now, the dispatch seam plumbs whatever the action
+   * carries; there is no model surface populating these yet.
+   */
+  rememberPatterns?: readonly string[] | undefined
+  /**
+   * ADR-0061 — model self-flag. When `true` the gate refuses to auto-pass on
+   * pattern coverage alone, even if every pattern is granted, UNLESS
+   * `config.permissionAllowDangerous === true`. Hardening over v0.dev's
+   * unconditional cascade.
+   */
+  isMaybeDangerous?: boolean | undefined
 }
 
 /**
@@ -461,6 +485,37 @@ export const runAdmissibilityGate = async (
     }
   }
 
+  // 2.5. Pattern-grant auto-pass (ADR-0061 absorb #2). DEFAULT OFF — fires only
+  //      when `config.permissionPatternStore` is wired AND the action carries
+  //      a non-empty `rememberPatterns` AND every pattern is already granted in
+  //      the store. Hardening: an `isMaybeDangerous: true` action is NEVER auto-
+  //      passed unless `config.permissionAllowDangerous === true`. The check is
+  //      a pure predicate (`@/permission/gate-pattern-wire.ts`); a fall-through
+  //      result simply continues to the rules DSL below. On auto-pass we still
+  //      route through `runPreToolUseHook` so a hook can veto last (parity with
+  //      every other allow path in this gate).
+  //
+  //      Placed BEFORE the rules DSL so a user-granted pattern combo behaves
+  //      like an explicit pre-approval — equivalent in spirit to a rules
+  //      `allow` written by the operator. HARD_DENY (above) still wins.
+  if (config.permissionPatternStore !== undefined) {
+    const autoPassOpts: { allowDangerous?: boolean; decidedAt?: () => number } = {}
+    if (config.permissionAllowDangerous === true) autoPassOpts.allowDangerous = true
+    if (opts.decidedAt !== undefined) autoPassOpts.decidedAt = opts.decidedAt
+    const res = autoPassByPatterns(
+      config.permissionPatternStore,
+      { rememberPatterns: action.rememberPatterns, isMaybeDangerous: action.isMaybeDangerous },
+      autoPassOpts,
+    )
+    if (res.kind === "auto_pass") {
+      // Synthetic `auto_review/config_allowed` decision; we don't surface the
+      // ApprovalDecision via this seam (the gate's contract is DispatchResult),
+      // but the predicate constructed + validated one. Route through the hook
+      // so a `pre_tool_use` veto still applies.
+      return runPreToolUseHook(call, config)
+    }
+  }
+
   // 3. Prefix-rule DSL gate (ADR-0031) — after mode + HARD_DENY. `allow` ⇒ admit,
   //    `deny` ⇒ terminal, `ask` ⇒ reviewer (or rule_ask deny if no port),
   //    `no_match` ⇒ noMatchPolicy ("deny" terminal, else fallthrough). Match key
@@ -490,7 +545,11 @@ export const runAdmissibilityGate = async (
     }
     // m.kind === "no_match"
     if (opts.noMatchPolicy === "deny") {
-      return deny(call.id, `no rule matched '${ruleKey}' (noMatchPolicy='deny').`, "rule_no_match_deny")
+      return deny(
+        call.id,
+        `no rule matched '${ruleKey}' (noMatchPolicy='deny').`,
+        "rule_no_match_deny",
+      )
     }
     // "fallthrough" (or absent) ⇒ fall through to the legacy gates below.
   }

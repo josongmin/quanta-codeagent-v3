@@ -322,3 +322,158 @@ describe("buildSystemPrompt anti-signals section (Codex §10 absorption)", () =>
     expect(system[0]?.text).toContain("Anti-signals (treat as ROUTING HINTS, never proof):")
   })
 })
+
+// ADR-0062 — Tool-failure ladder + exploration multi-step pattern.
+// Five rule invariants live in the base prompt. The LLM behavior itself is
+// exercised by `tests/eval/` real-LLM smokes; these unit assertions only
+// guarantee that the rule text is wired into `buildSystemPrompt()` and cannot
+// silently drop out during a refactor.
+describe("buildSystemPrompt — ADR-0062 tool-failure & exploration ladder", () => {
+  test("Tool failures & exploration section heading is present", () => {
+    expect(buildSystemPrompt()).toContain("Tool failures & exploration")
+  })
+
+  test("rule 1: cap hints are instructions, not capability boundaries", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("Cap hints are instructions")
+    expect(p).toContain("Cap-hint retries do NOT count as failures")
+  })
+
+  test("rule 2: two NON-CAP failures → switch tool, with canonical ladder", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("two NON-CAP failures")
+    expect(p).toContain("file_tree_summary → glob → ls → read")
+  })
+
+  test("rule 3: analysis tasks are multi-step (ORIENT → NARROW → CONFIRM)", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("multi-step BY DEFAULT")
+    expect(p).toContain("ORIENT")
+    expect(p).toContain("NARROW")
+    expect(p).toContain("CONFIRM")
+    expect(p).toContain("5–10 tool calls")
+  })
+
+  test("rule 4: never delegate the narrowing back to the user", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("Never delegate the narrowing back to the user")
+    expect(p).toContain("FORBIDDEN")
+    // Korean phrasings the agent was caught using verbatim in REPL replay.
+    expect(p).toContain("어떤 부분을 알고 싶으")
+    expect(p).toContain("narrow down 해주세요")
+  })
+
+  test("rule 5: FS-jail / .. is never the answer", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("FS-jail / path-escape errors")
+    expect(p).toContain('".." is NEVER the answer')
+  })
+
+  test("base prompt remains byte-stable across calls after the section was added", () => {
+    expect(buildSystemPrompt()).toBe(buildSystemPrompt())
+  })
+})
+
+// ADR-0067 — Prompt template SOTA++ (vs Codex L26/L213-214/L217/L471 +
+// Claude Code 1.7196.3 systemPromptSectionCache parity gaps).
+describe("buildSystemPrompt — ADR-0067 SOTA++ prompt template strengthening", () => {
+  test("B (user intent discipline) — minimize interruptions + don't ask early", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("User intent discipline")
+    expect(p).toContain("minimize")
+    expect(p).toContain("BEFORE asking the user to clarify")
+  })
+
+  test("A (internal vocabulary blacklist) — enumerated tokens NEVER expose", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("Internal vocabulary (NEVER expose to users")
+    expect(p).toContain("turn_id, tool_call_id, dispatch_seam")
+    expect(p).toContain("HARD_DENY, runHitlGate")
+    expect(p).toContain("byte-identical")
+  })
+
+  test("C (production code conduct) — four user-mandated invariants verbatim", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("Production code conduct")
+    expect(p).toContain("폴백 금지")
+    expect(p).toContain("에러삼킴 금지")
+    expect(p).toContain("짜치는 코딩 금지")
+    expect(p).toContain("휴리스틱 금지")
+  })
+
+  test("D (verification claims) — success words require command + exit + output", () => {
+    const p = buildSystemPrompt()
+    expect(p).toContain("Verification claims MUST cite command + exit + output")
+    expect(p).toContain('"fixed"')
+    expect(p).toContain('"완료"')
+    expect(p).toContain('"It should work" is a forbidden claim')
+  })
+
+  test("byte-stable after the four ADR-0067 sections were added", () => {
+    expect(buildSystemPrompt()).toBe(buildSystemPrompt())
+  })
+})
+
+// ADR-0068 — Persona slot (Codex `{{ personality }}` absorption).
+// `default` ⇒ byte-identical to the legacy single-arg call; the other two
+// personas splice a body + blank-line separator between the agent intro and
+// the Policy stack.
+describe("buildSystemPrompt — ADR-0068 persona slot", () => {
+  test("default persona ⇒ byte-identical to the legacy no-opts call", () => {
+    const legacy = buildSystemPrompt()
+    const explicit = buildSystemPrompt(undefined, { persona: "default" })
+    expect(explicit).toBe(legacy)
+  })
+
+  test("default persona ⇒ no persona body lines slip into the prompt", () => {
+    const p = buildSystemPrompt(undefined, { persona: "default" })
+    expect(p).not.toContain("Persona: collaborative partner")
+    expect(p).not.toContain("Persona: deeply pragmatic software engineer")
+  })
+
+  test("friendly persona ⇒ body present BEFORE the Policy stack", () => {
+    const p = buildSystemPrompt(undefined, { persona: "friendly" })
+    expect(p).toContain("Persona: collaborative partner")
+    expect(p).toContain("Warmth never overrides the honesty rail below")
+    const personaIdx = p.indexOf("Persona: collaborative partner")
+    const policyIdx = p.indexOf("Policy stack (highest to lowest priority")
+    expect(personaIdx).toBeGreaterThan(0)
+    expect(policyIdx).toBeGreaterThan(personaIdx)
+  })
+
+  test("pragmatic persona ⇒ body present BEFORE the Policy stack", () => {
+    const p = buildSystemPrompt(undefined, { persona: "pragmatic" })
+    expect(p).toContain("Persona: deeply pragmatic software engineer")
+    expect(p).toContain("Clarity > Pragmatism > Rigor")
+    const personaIdx = p.indexOf("Persona: deeply pragmatic")
+    const policyIdx = p.indexOf("Policy stack (highest to lowest priority")
+    expect(personaIdx).toBeGreaterThan(0)
+    expect(policyIdx).toBeGreaterThan(personaIdx)
+  })
+
+  test("non-default personas DIFFER from the default rendering", () => {
+    const def = buildSystemPrompt()
+    expect(buildSystemPrompt(undefined, { persona: "friendly" })).not.toBe(def)
+    expect(buildSystemPrompt(undefined, { persona: "pragmatic" })).not.toBe(def)
+  })
+
+  test("byte-stable: same persona ⇒ same prompt across calls", () => {
+    expect(buildSystemPrompt(undefined, { persona: "friendly" })).toBe(
+      buildSystemPrompt(undefined, { persona: "friendly" }),
+    )
+    expect(buildSystemPrompt(undefined, { persona: "pragmatic" })).toBe(
+      buildSystemPrompt(undefined, { persona: "pragmatic" }),
+    )
+  })
+
+  test("ADR-0067 sections still present in every persona (composition holds)", () => {
+    for (const persona of ["default", "friendly", "pragmatic"] as const) {
+      const p = buildSystemPrompt(undefined, { persona })
+      // Spot-check one load-bearing token from each ADR-0067 section.
+      expect(p).toContain("User intent discipline")
+      expect(p).toContain("Internal vocabulary (NEVER expose to users")
+      expect(p).toContain("Production code conduct")
+      expect(p).toContain("Verification claims MUST cite command + exit + output")
+    }
+  })
+})

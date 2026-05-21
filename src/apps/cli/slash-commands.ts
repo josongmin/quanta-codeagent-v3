@@ -8,11 +8,15 @@
  * entries to the registry, not by editing the dispatch switch.
  *
  * Slice discipline:
- *   - This file lives inside `src/apps/cli`. It imports `node:*` only — no
- *     `@/agent`, `@/llm`, etc. — so the slash layer remains a leaf surface
- *     and never invokes the LLM.
+ *   - This file lives inside `src/apps/cli`. The five Tier-2 builtins import
+ *     `node:*` only — surface-only commands MUST NOT invoke the LLM. The
+ *     ADR-0065 `/retry-with` session command (appended to BUILTINS) is the
+ *     deliberate exception: it needs the live transcript + an `LLMPort` from
+ *     `@/llm` and is OPT-IN via `SlashContext.retry` (absent ⇒ no-op).
  *   - The CLI entry-point gate guarantees a slash command short-circuits
- *     BEFORE any agent loop / LLM construction code runs.
+ *     BEFORE any agent loop / LLM construction code runs (surface commands);
+ *     `/retry-with` runs in session context where the loop has already
+ *     constructed its LLM stack.
  *
  * Preferences storage:
  *   - Path defaults to `<home>/.quanta/preferences.json` (where `<home>` is
@@ -26,6 +30,7 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 
 export interface SlashContext {
   readonly out: (s: string) => void
@@ -38,6 +43,11 @@ export interface SlashContext {
   readonly sleep?: ((ms: number) => Promise<void>) | undefined
   /** Override the preferences file path (test seam). */
   readonly prefsPath?: string | undefined
+  /** ADR-0065 model-swap retry session state. Absent ⇒ `/retry-with` prints
+   *  "no model candidates configured" and is a no-op (byte-identical to NOT
+   *  registering the command). Injected by the SURFACE (a future REPL or
+   *  session loop) — the 5 Tier-2 commands never read this field. */
+  readonly retry?: RetryWithSessionState | undefined
 }
 
 export interface SlashCommand {
@@ -235,6 +245,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   colorCmd,
   navigateCmd,
   waitCmd,
+  retryWithCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

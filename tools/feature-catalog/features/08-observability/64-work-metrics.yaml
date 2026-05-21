@@ -1,7 +1,7 @@
 id: work-metrics
 title: workMetrics — turn별 비용·작업 투명성
 section: 8
-subsystem: 작업 투명성 (v0.dev 흡수, ADR-0064)
+subsystem: 작업 투명성 (v0.dev 흡수, ADR-0065)
 order: 64
 maturity: L2
 status: new
@@ -13,7 +13,7 @@ purpose: |
   accumulateWorkMetrics(turn→session 순수 fold). pricing.ts로 cost 환산.
 evidence:
   code: [src/observability/work-metrics.ts, src/observability/vocabulary.ts, src/observability/attrs.ts]
-  adrs: [64]
+  adrs: [65]
   tests:
     unit: [tests/unit/work-metrics.test.ts]
     integration: []

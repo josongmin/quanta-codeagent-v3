@@ -67,6 +67,10 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — bench shells out to git/python; child env is intentionally the parent's.",
       "apps/bench/python-swebench.ts":
         "ENV PROPAGATION — same posture as swebench-dataset.ts; the Python harness inherits parent env.",
+      "apps/bench/harness/prepare.ts":
+        "ENV PROPAGATION — the Python prepare_images subprocess inherits parent env (Docker socket, PATH, HOME for conda).",
+      "apps/bench/harness/images.ts":
+        "ENV PROPAGATION — Bun.spawn `docker images` inherits parent env (DOCKER_HOST, PATH); not a feature-flag read.",
       "runtime/shell.ts":
         "ENV PROPAGATION — `inheritEnv:true` lets the spawned child see the parent's env directly (used by bench/agent shells); not a feature read.",
       "runtime/sandbox.ts":
