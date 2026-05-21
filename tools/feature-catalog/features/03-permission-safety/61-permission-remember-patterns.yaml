@@ -1,0 +1,29 @@
+id: permission-remember-patterns
+title: rememberPatterns — 권한 패턴 학습 + cascade 자동해소
+section: 3
+subsystem: 권한 학습 (v0.dev 흡수, ADR-0061)
+order: 61
+maturity: L2
+status: new
+purpose: |
+  v0.dev 권한 학습 흡수 — 모델이 필요 권한을 직접 제안(suggestedPermissions)하고 위험을
+  자가표시(isMaybeDangerous). "패턴 허용" 1회 → 대기 중인 모든 다른 tool 요청을 재평가해
+  rememberPatterns가 전부 allowed 집합에 포함되면 자동 통과(CASCADE). v0 원본 대비
+  하드닝: rememberPatterns=0인 요청은 절대 자동통과 안 함, isMaybeDangerous 요청은
+  allowDangerous 명시 없이는 cascade 제외.
+evidence:
+  code: [src/permission/remember-patterns.ts]
+  adrs: [61]
+  tests:
+    unit: [tests/unit/permission-remember-patterns.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    PatternGrantStore·autoResolvable·grantPatterns는 순수 모듈로 완성+테스트. 기존
+    admissibility-gate(8-state ApprovalOutcome)에 배선은 follow-up — 현재 opt-in.
+  promotion_path: |
+    admissibility-gate가 PatternGrantStore를 세션 스코프로 들고 user_approved_for_session
+    경로에 cascade를 호출하면 L3.
+notes: 'user_approved_for_session(ADR-0029)이 actionKey 단위 기억의 씨앗 — rememberPatterns는 그 위에 패턴-단위 cascade를 얹음.'
