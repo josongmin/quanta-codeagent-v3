@@ -1,6 +1,11 @@
 import { readdir, readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { parseFrontmatter } from "./frontmatter"
+<<<<<<< Updated upstream
+import { checkSkillSize } from "./skill-size"
+=======
+import { checkSkillSize, MAX_SKILL_SIZE_BYTES } from "./skill-size"
+>>>>>>> Stashed changes
 import type { Skill, SkillEffort } from "./types"
 
 /** Coerce a frontmatter value to a string[] (single scalar → one-element list). */
@@ -59,9 +64,40 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
  * Skills are returned sorted by name for deterministic output; on a name
  * collision the directory-form (SKILL.md) wins over the flat *.md form.
  */
+<<<<<<< Updated upstream
+/** Skip + log when a candidate file exceeds the 30 MB skill cap. Stat-failed
+ *  outcomes are silent — a missing file is the normal "not a skill" case. */
+const tooLargeWarning = (path: string, size: number): void => {
+  console.warn(`[skill] skipped ${path}: ${size} bytes exceeds the 30 MB cap`)
+=======
+/** Log a skipped skill once. `console.warn` chosen because @/skill is a leaf
+ *  slice (no logger import), and the message must surface during a discovery
+ *  pass where no agent context is available. */
+const warnSkippedSkill = (path: string, size: number): void => {
+  const detail =
+    size > 0 ? `${size} bytes exceeds ${MAX_SKILL_SIZE_BYTES} cap` : "stat failed (unreadable)"
+  console.warn(`[skill] skipped ${path}: ${detail}`)
+>>>>>>> Stashed changes
+}
+
 /** Read the directory-form skill (`<dir>/<name>/SKILL.md`), or null if absent. */
 const readNestedSkill = async (dir: string, name: string): Promise<Skill | null> => {
   const skillFile = join(dir, name, "SKILL.md")
+<<<<<<< Updated upstream
+  const sized = await checkSkillSize(skillFile)
+  if (!sized.ok) {
+    if (sized.reason === "too-large") tooLargeWarning(sized.path, sized.size)
+=======
+  const size = await checkSkillSize(skillFile)
+  if (!size.ok) {
+    // Skip on oversized OR stat error. A missing SKILL.md is the normal
+    // "this directory isn't a skill dir" path — silent. A stat error on an
+    // existing but unreadable file is logged so the user knows why discovery
+    // skipped it.
+    if (size.size > 0) warnSkippedSkill(skillFile, size.size)
+>>>>>>> Stashed changes
+    return null
+  }
   try {
     const raw = await readFile(skillFile, "utf8")
     return toSkill(name, skillFile, raw)
@@ -76,6 +112,17 @@ const readFlatSkill = async (dir: string, fileName: string): Promise<Skill | nul
   const id = basename(fileName, ".md")
   if (id.toLowerCase() === "skill") return null // SKILL.md handled via dir form
   const file = join(dir, fileName)
+<<<<<<< Updated upstream
+  const sized = await checkSkillSize(file)
+  if (!sized.ok) {
+    if (sized.reason === "too-large") tooLargeWarning(sized.path, sized.size)
+=======
+  const size = await checkSkillSize(file)
+  if (!size.ok) {
+    if (size.size > 0) warnSkippedSkill(file, size.size)
+>>>>>>> Stashed changes
+    return null
+  }
   try {
     const raw = await readFile(file, "utf8")
     return toSkill(id, file, raw)

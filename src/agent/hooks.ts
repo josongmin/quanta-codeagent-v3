@@ -1,4 +1,5 @@
 import type { StructuredLogger } from "@/observability"
+import { matchTool, type ToolMatcher } from "./tool-matchers"
 
 /**
  * Minimal in-process hook bus (RFC §13 Q1 → DECISION: Phase-3, in-process only).
@@ -58,23 +59,57 @@ const isDeny = (v: unknown): v is HookDeny =>
  *  cast at registration time with a structural closure. */
 type AnyHookHandler = (event: HookEvent) => unknown
 
+<<<<<<< Updated upstream
+/** Registration options for {@link HookBus.on}. `matcher` is consulted ONLY
+ *  for tool-shaped events (`pre_tool_use` / `post_tool_use`) — other variants
+ *  carry no `name` field and the matcher is ignored. Omitting `options` is
+ *  byte-identical to the prior 2-arg signature. Tier-0 absorption #0-1 (AWF
+ *  2-matcher). */
+=======
+/** Registration options for {@link HookBus.on}. The matcher applies ONLY to
+ *  tool-shaped events (`pre_tool_use`, `post_tool_use`) — other variants have
+ *  no `name` field, so for them the matcher is ignored and the handler runs.
+ *  Tier-0 absorption #0-1 (AWF 2-matcher): a host can wire one handler for the
+ *  FS-tools channel and another for the agent-tools channel, without per-call
+ *  pattern checks in user code. */
+>>>>>>> Stashed changes
+export interface HookOnOptions {
+  matcher?: ToolMatcher
+}
+
+interface StoredHandler {
+  readonly fn: AnyHookHandler
+  readonly matcher: ToolMatcher | undefined
+}
+
+const isToolEvent = (event: HookEvent): event is Extract<HookEvent, { name: string }> =>
+  event.type === "pre_tool_use" || event.type === "post_tool_use"
+
 export class HookBus {
-  private readonly handlers = new Map<HookEventType, AnyHookHandler[]>()
+  private readonly handlers = new Map<HookEventType, StoredHandler[]>()
   private readonly logger: StructuredLogger | undefined
 
   constructor(logger?: StructuredLogger) {
     this.logger = logger
   }
 
-  /** Register `handler` for `type`. Handlers fire in registration order. */
-  on<T extends HookEventType>(type: T, handler: HookHandler<T>): this {
+  /** Register `handler` for `type`. Handlers fire in registration order.
+   *  Optional `options.matcher` gates dispatch on tool-shaped events
+<<<<<<< Updated upstream
+   *  (`pre_tool_use`, `post_tool_use`); non-tool events ignore it. */
+=======
+   *  (`pre_tool_use`, `post_tool_use`); non-tool events ignore it. Omitting
+   *  `options` is byte-identical to the prior 2-arg signature. */
+>>>>>>> Stashed changes
+  on<T extends HookEventType>(type: T, handler: HookHandler<T>, options?: HookOnOptions): this {
     const list = this.handlers.get(type) ?? []
     // Closure-erase to the union: the Map key (`type`) GUARANTEES this stored
     // closure is only invoked with events whose `.type === type`, so the
     // narrowing assertion is safe at runtime (the alternative — `as unknown as
     // HookHandler<HookEventType>` at the call-site of `on()` — was the lint
     // warning hooks.ts:63 carried prior to R-Phase4 P3-2).
-    list.push((event: HookEvent) => handler(event as HookEventOf<T>))
+    const fn: AnyHookHandler = (event: HookEvent) => handler(event as HookEventOf<T>)
+    list.push({ fn, matcher: options?.matcher })
     this.handlers.set(type, list)
     return this
   }
@@ -82,15 +117,19 @@ export class HookBus {
   /**
    * Emit `event` to every registered handler sequentially. Returns the first
    * `{ deny }` produced by a `pre_tool_use` handler, else `null`. A throwing
-   * handler is caught + logged and does not abort the emit.
+   * handler is caught + logged and does not abort the emit. Handlers whose
+   * registered matcher rejects the tool name are skipped silently (only
+   * `pre_tool_use` / `post_tool_use` events carry a name).
    */
   async emit(event: HookEvent): Promise<HookDeny | null> {
     const list = this.handlers.get(event.type)
     if (list === undefined) return null
+    const toolEvent = isToolEvent(event)
     let denied: HookDeny | null = null
-    for (const handler of list) {
+    for (const stored of list) {
+      if (toolEvent && !matchTool(stored.matcher, event.name)) continue
       try {
-        const result = await handler(event)
+        const result = await stored.fn(event)
         if (denied === null && event.type === "pre_tool_use" && isDeny(result)) {
           denied = result
         }

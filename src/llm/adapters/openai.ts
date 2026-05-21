@@ -53,6 +53,24 @@ export const STOP_REASON: Record<string, string> = {
   length: "max_tokens",
 }
 
+/** Model-family detector: TRUE for OpenAI families that reject `max_tokens`
+ *  and require `max_completion_tokens` (reasoning models + GPT-5 line).
+ *  Pinned by prefix — adding a new family means one line here, not a regex
+ *  on the error message AFTER a 400. Exported for the unit test that pins
+ *  the contract per model id. */
+export const usesCompletionTokensParam = (model: string): boolean => {
+  const m = model.toLowerCase()
+  // o1/o3 reasoning families + gpt-5 generation all use max_completion_tokens.
+  // The trailing `-` / `.` cases bound the prefix so `gpt-5o-future` style
+  // model names are caught while `gpt-4o` (legacy) is not.
+  return (
+    m.startsWith("o1") ||
+    m.startsWith("o3") ||
+    m.startsWith("o4") ||
+    m.startsWith("gpt-5")
+  )
+}
+
 export const assistantParam = (blocks: ContentBlock[]): ChatParam => {
   const text = blocks
     .filter((b) => b.type === "text")
@@ -229,10 +247,21 @@ export class OpenAIAdapter implements LLMPort {
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawChunk>> {
+    // Token-cap param naming diverges between OpenAI families:
+    //  - Legacy chat models (`gpt-4o`, `gpt-4`, `gpt-3.5-*`, `gpt-4-turbo`,
+    //    `chatgpt-4o-latest`, …) accept `max_tokens`.
+    //  - Reasoning + GPT-5 generations (`o1*`, `o3*`, `gpt-5*`) REJECT
+    //    `max_tokens` with a 400 and require `max_completion_tokens`.
+    // Pick at request time off the configured model id; structured detection
+    // (not a heuristic on the error message AFTER we get rejected). Adding a
+    // new reasoning family ⇒ extend `usesCompletionTokensParam`.
+    const tokenCap = usesCompletionTokensParam(this.model)
+      ? { max_completion_tokens: this.maxTokens }
+      : { max_tokens: this.maxTokens }
     try {
       return (await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: this.maxTokens,
+        ...tokenCap,
         stream: true,
         // Opt into the trailing usage chunk (RFC-0002 §5.3). Older models that
         // don't support it simply omit the chunk — we then emit no usage.

@@ -27,6 +27,7 @@ import {
   titleFlag,
 } from "./internal"
 import { runSessionCommand } from "./session-commands"
+import { isSlashCommand, runSlashCommand } from "./slash-commands"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
@@ -110,6 +111,20 @@ const main = async (): Promise<void> => {
   // dispatcher and never touches the agent loop / REPL wiring below.
   if (process.argv[2] === "session") {
     const code = await runSessionMain()
+    process.exit(code)
+  }
+
+  // Tier 2 absorption #2-1: built-in slash commands never invoke the LLM and
+  // must short-circuit BEFORE any agent / session / LLM plumbing fires. The
+  // gate matches only `/<letter>...` so `/path/to/file` (a path-mode resume
+  // arg) and bare `--flag` invocations fall through to the legacy paths.
+  const slashTok = process.argv[2]
+  if (slashTok !== undefined && isSlashCommand(slashTok)) {
+    const code = await runSlashCommand(process.argv.slice(2).join(" "), {
+      out: (s) => process.stdout.write(s),
+      err: (s) => process.stderr.write(s),
+      cwd: process.cwd(),
+    })
     process.exit(code)
   }
 

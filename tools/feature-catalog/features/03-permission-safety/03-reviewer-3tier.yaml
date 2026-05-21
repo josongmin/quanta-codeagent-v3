@@ -1,0 +1,24 @@
+id: reviewer-3tier
+title: Reviewer 3-tier (user/auto_review/guardian_subagent) + 8-state outcome
+section: 3
+subsystem: 승인 표면 — reviewer + outcome invariant matrix
+order: 1
+maturity: L4
+status: new
+purpose: 'ReviewerTier (user|auto_review|guardian_subagent) × ApprovalOutcome 8-state (not_needed/config_allowed/guardian_approved|denied/user_approved|approved_for_session|denied|aborted). HITLTier(ADR-0020)와 직교 축 — HITL=위험 형태, Reviewer=결정자. invariant matrix는 `auto_review` deny 금지 + `guardian` user-only outcome 금지를 explicit literal set으로 enforce. sticky precedence: user_aborted > guardian_denied > user_denied (DenialPrecedenceConflictError로 silent winner 금지).'
+evidence:
+  code:
+    - src/permission/types.ts
+    - src/permission/outcome.ts
+    - src/permission/reviewer.ts
+    - src/permission/index.ts
+  adrs: [29]
+  tests:
+    unit:
+      - tests/unit/permission/outcome.test.ts
+      - tests/unit/permission/reviewer.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'admissibility-gate(ADR-0026)와의 결선은 follow-up. ReviewerPort 미주입 시 기존 1300+ 테스트 byte-identical.'

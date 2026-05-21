@@ -1,10 +1,14 @@
 import type { Message, SystemBlock } from "@/llm"
 import { resolveAgentMode } from "./mode"
+<<<<<<< Updated upstream
 import {
   buildSectionedSystemBlocks,
   fourSectionPreset,
   validateSectionsCacheBudget,
 } from "./prompt-sections"
+=======
+import { buildSectionedSystemBlocks, type SystemPromptSection } from "./prompt-sections"
+>>>>>>> Stashed changes
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
 import { renderWorkingStateBlock, type WorkingState } from "./working-state"
 
@@ -263,6 +267,7 @@ export interface TurnContextInput {
    *  mutated per turn, so it stays a byte-stable cache prefix. Absent ⇒ the
    *  built-in {@link buildSystemPrompt}. */
   system?: string
+<<<<<<< Updated upstream
   /** Caller-supplied STATIC session context (e.g. tool inventory hash, surface
    *  flag, install id). Rides the 4-section preset as the `session_ctx`
    *  breakpoint when present (Claude Desktop 1.7196 pattern). Per-turn dynamic
@@ -274,6 +279,15 @@ export interface TurnContextInput {
    *  as a distinct cache breakpoint so changes here only invalidate the tail.
    *  Absent ⇒ legacy single-block prefix (byte-identical). */
   userAppend?: string
+=======
+  /** Multi-section system prompt with per-section prompt-cache breakpoints
+   *  (Tier-0 absorption #0-3, ADR-0047). When set and non-empty REPLACES the
+   *  single-block `system` path — each section becomes a SystemBlock with
+   *  optional `cache:true` flag. Max 4 cache breakpoints (Anthropic API
+   *  limit; see {@link MAX_CACHE_BREAKPOINTS}). Absent / empty ⇒ legacy
+   *  single-prefix byte-identical to ADR-0004. */
+  systemSections?: readonly SystemPromptSection[]
+>>>>>>> Stashed changes
 }
 
 export interface TurnContext {
@@ -404,6 +418,7 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
  * the tail varies.
  */
 export const buildTurnContext = (input: TurnContextInput): TurnContext => {
+<<<<<<< Updated upstream
   const basePrompt = input.system ?? buildSystemPrompt()
   // 4-section preset (Claude Desktop 1.7196 `systemPromptSectionCache` mirror)
   // activates only when the caller supplies repo-local rules text OR a static
@@ -430,6 +445,22 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
         return buildSectionedSystemBlocks(sections)
       })()
     : [{ type: "text", text: basePrompt, cache: true }]
+=======
+  // Opt-in multi-section path (ADR-0047). When `systemSections` is set and
+  // yields at least one non-empty block, it REPLACES the legacy single
+  // SystemBlock. When the section list is empty / all blank, we fall back to
+  // the legacy path so we never ship `system: []` to the provider.
+  let system: SystemBlock[]
+  if (input.systemSections && input.systemSections.length > 0) {
+    const sectioned = buildSectionedSystemBlocks(input.systemSections)
+    system =
+      sectioned.length > 0
+        ? sectioned
+        : [{ type: "text", text: input.system ?? buildSystemPrompt(), cache: true }]
+  } else {
+    system = [{ type: "text", text: input.system ?? buildSystemPrompt(), cache: true }]
+  }
+>>>>>>> Stashed changes
   const dynamic = buildDynamicContext(input)
   const messages: Message[] = [...input.baseMessages]
   if (dynamic !== undefined) {

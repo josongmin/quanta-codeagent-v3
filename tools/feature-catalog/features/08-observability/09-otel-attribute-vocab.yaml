@@ -1,0 +1,22 @@
+id: otel-attribute-vocab
+title: OTel canonical attribute vocabulary (quanta.* 12 namespaces + gen_ai.* semconv)
+section: 8
+subsystem: 텔레메트리 — 키 어휘 + 컴파일-타임 enforce
+order: 1
+maturity: L4
+status: new
+purpose: 'Codex 70+ canonical attribute key 흡수. 12 `quanta.*` sub-namespace (conversation/thread/turn/tool/mcp/task/multi_agent/memory/permission/patch/rules/sqlite) + provider-neutral `gen_ai.*` (request/response/usage/tool/system) — OTel semconv 와이어 호환. `as const` 맵 → 컴파일-타임 string-literal union AttrKey; typo는 tsc fail. `attrs()` 빌더는 InvalidAttrValueError(key/value/reason) throw — null/undefined/NaN/Infinity/object/function/heterogeneous-array 거부. 새 key 추가에는 vocabulary.ts touch + 테스트 — 의도적 friction.'
+evidence:
+  code:
+    - src/observability/vocabulary.ts
+    - src/observability/attrs.ts
+  adrs: [32]
+  tests:
+    unit:
+      - tests/unit/observability/vocabulary.test.ts
+      - tests/unit/observability/attrs.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'standalone vocab port — OTLP exporter / metrics 마이그 follow-up. 기존 `metrics.ts` / `logger.ts` 등 호출자 변환은 ADR-0032 §"Integration seam" 따라 별도 PR.'

@@ -33,6 +33,7 @@ import { join, resolve } from "node:path"
 import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { aggregate, classify } from "./failure-classifier"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
 import { isPythonSwebenchAvailable } from "./python-swebench"
@@ -116,12 +117,34 @@ const buildLLM = (provider: Provider, model: string): LLMPort | null => {
   return new AnthropicAdapter({ apiKey, model })
 }
 
+<<<<<<< Updated upstream
+/** Compact failure tag for the console FAIL line. Empty string for a passing
+ *  run. Examples:
+ *    `[hung_stream:dirty_cache_leak]`
+ *    `[completed_unresolved:verify_loop_stuck]`
+ *    `[max_turns_exhausted]`  (no signals) */
+=======
+/** Compact failure tag for the console FAIL line. Returns "" when the
+ *  classification is `passed`. Examples:
+ *    `[FAIL][hung_stream:dirty_cache_leak]`
+ *    `[FAIL][completed_unresolved:verify_loop_stuck]`
+ *    `[FAIL][max_turns_exhausted]` (no signals) */
+>>>>>>> Stashed changes
+const failureTag = (r: InstanceResult): string => {
+  if (r.passed) return ""
+  const c = classify(r)
+  if (c.termination === "passed") return ""
+  const tail = c.signals.length > 0 ? `:${c.signals.join("+")}` : ""
+  return `[${c.termination}${tail}]`
+}
+
 const printSummary = (summary: BenchSummary): void => {
   for (const r of summary.results) {
     const verdict = (r.verdict ?? "ok") === "degraded" ? " DEGRADED" : ""
     const mark = r.passed ? "PASS" : "FAIL"
+    const tag = failureTag(r)
     const extra = r.error ? ` (${r.error})` : ""
-    logger.info(`  [${mark}${verdict}] ${r.id} (turns=${r.turns})${extra}`)
+    logger.info(`  [${mark}${verdict}]${tag} ${r.id} (turns=${r.turns})${extra}`)
   }
   // C8: the operator-visible headline uses the SAME degraded-excluding
   // denominator as observe.summarize / summary.json — never results.length.
@@ -129,6 +152,29 @@ const printSummary = (summary: BenchSummary): void => {
   const pct = total === 0 ? 0 : Math.round((resolved / total) * 100)
   const deg = degraded > 0 ? ` (${degraded} degraded)` : ""
   logger.info(`resolved ${resolved}/${total} (${pct}%)${deg}`)
+<<<<<<< Updated upstream
+  // Failure-pattern rollup — suppressed when nothing failed.
+=======
+  // Failure-pattern rollup — one line per axis, suppressed when 0 failed.
+>>>>>>> Stashed changes
+  const failed = summary.results.filter((r) => !r.passed).map((r) => classify(r))
+  if (failed.length === 0) return
+  const bd = aggregate(failed)
+  const fmt = (obj: Record<string, number>): string =>
+    Object.entries(obj)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ")
+<<<<<<< Updated upstream
+  const termLine = fmt(bd.byTermination as Record<string, number>)
+  if (termLine !== "") logger.info(`failures: ${termLine}`)
+  const sigLine = fmt(bd.bySignal as Record<string, number>)
+=======
+  const termLine = fmt(bd.byTermination)
+  if (termLine !== "") logger.info(`failures: ${termLine}`)
+  const sigLine = fmt(bd.bySignal)
+>>>>>>> Stashed changes
+  if (sigLine !== "") logger.info(`signals: ${sigLine}`)
 }
 
 /** Per-run config common to single & Best-of-N. `pythonSwebench` is present
@@ -294,21 +340,47 @@ const runDatasetMode = async (
     results.push(await runSwebenchTask(task, taskDeps))
   }
 
-  const predictionsFile = argValue("--predictions") ?? "./predictions.jsonl"
-  const reportFile = argValue("--report") ?? "./bench-report.json"
+  await writeArtifacts(
+    argValue("--predictions") ?? "./predictions.jsonl",
+    argValue("--report") ?? "./bench-report.json",
+    results,
+    { provider: meta.provider, model: meta.model, n: cfg.n },
+  )
+  printSummary({ ...resolvedTotals(results), results })
+  await finalizeObserve(obs, results)
+<<<<<<< Updated upstream
+}
+
+/**
+ * D-fix: shared `--predictions` / `--report` writer for BOTH the official
+ * dataset path and the custom-corpus path. Pure-by-signature (paths +
+ * results + meta are explicit args, no argv reads) so the contract is
+ * unit-testable without spawning the CLI. Wraps `buildReport` (which now
+ * embeds the failure classification) + `writePredictions`.
+ *
+ * Before this seam existed, `runCustomCorpusMode` skipped these writes
+ * entirely — the operator passed `--report /tmp/X.json` and the file was
+ * silently never written, leaving the only post-run signal as the stdout
+ * `[FAIL] (turns=N)` lines. After-the-fact triage of "WHY did the agent
+ * fail" was impossible because the per-instance patch + classification
+ * lived only in memory.
+ */
+export const writeArtifacts = async (
+  predictionsFile: string,
+  reportFile: string,
+  results: InstanceResult[],
+  meta: { provider: string; model: string; n: number },
+): Promise<void> => {
   const predictions: Prediction[] = results.map((r) => ({
     instance_id: r.id,
     model_name_or_path: meta.model,
     model_patch: r.patch,
   }))
   await writePredictions(predictionsFile, predictions)
-  await writeReport(
-    reportFile,
-    buildReport({ provider: meta.provider, model: meta.model, n: cfg.n }, results),
-  )
+  await writeReport(reportFile, buildReport(meta, results))
   logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
-  printSummary({ ...resolvedTotals(results), results })
-  await finalizeObserve(obs, results)
+=======
+>>>>>>> Stashed changes
 }
 
 /** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and
@@ -444,8 +516,44 @@ const runCustomCorpusMode = async (
   for (const instance of instances) {
     results.push(await resolveInstance(instance, base, cfg.n, obs))
   }
+  // D-fix: write `--predictions` / `--report` from BOTH bench modes.
+  await writeArtifacts(
+    argValue("--predictions") ?? "./predictions.jsonl",
+    argValue("--report") ?? "./bench-report.json",
+    results,
+    { provider, model, n: cfg.n },
+  )
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
+}
+
+/**
+ * D-fix: shared `--predictions` / `--report` writer for BOTH the official
+ * dataset path and the custom-corpus path. Pure-by-signature (paths +
+ * results + meta are explicit args, no argv reads) so the contract is
+ * unit-testable without spawning the CLI.
+ *
+ * Before this, `runCustomCorpusMode` skipped these writes entirely — the
+ * operator passed `--report /tmp/X.json` and the file silently never got
+ * written, leaving the only post-run signal as the stdout `[FAIL]
+ * (turns=N)` lines. After-the-fact triage of "WHY did the agent fail"
+ * was impossible because the per-instance patch + error tail lived only
+ * in memory.
+ */
+export const writeArtifacts = async (
+  predictionsFile: string,
+  reportFile: string,
+  results: InstanceResult[],
+  meta: { provider: string; model: string; n: number },
+): Promise<void> => {
+  const predictions: Prediction[] = results.map((r) => ({
+    instance_id: r.id,
+    model_name_or_path: meta.model,
+    model_patch: r.patch,
+  }))
+  await writePredictions(predictionsFile, predictions)
+  await writeReport(reportFile, buildReport(meta, results))
+  logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
 }
 
 const main = async (): Promise<void> => {

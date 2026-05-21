@@ -1,4 +1,5 @@
 import { QuantaError } from "@/shared"
+import { disclaimedShellArgv } from "./shell-disclaim"
 import type { ShellResult } from "./types"
 
 /**
@@ -26,6 +27,22 @@ export interface SandboxPolicy {
   maxOutputBytes?: number
   /** Wall-clock budget; the process is killed past this and `timedOut` is set. */
   timeoutMs?: number
+<<<<<<< Updated upstream
+  /** When true, launch the user shell with dotfile-skipping flags
+=======
+  /** When true, the user shell is launched with dotfile-skipping flags
+>>>>>>> Stashed changes
+   *  (`bash --noprofile --norc` / `zsh -f`). Approximates macOS
+   *  `POSIX_SPAWN_SETDISCLAIM` for in-process spawns — user `~/.bashrc` /
+   *  `~/.zshrc` cannot run in the child, so a hijacked dotfile cannot read
+   *  the child's env or piggy-back on its descriptors. Default false
+   *  (legacy behavior: `bash -lc` sources `.bashrc`/`.profile`). Tier-0
+<<<<<<< Updated upstream
+   *  absorption #0-2. */
+=======
+   *  absorption #0-2 (ADR-0046). */
+>>>>>>> Stashed changes
+  disclaimShell?: boolean
 }
 
 /** A command runner that applies a {@link SandboxPolicy} before/around the run. */
@@ -172,7 +189,15 @@ export class LocalSandbox implements Sandbox {
     const timeoutMs = policy.timeoutMs ?? DEFAULT_TIMEOUT_MS
     let timedOut = false
 
-    const proc = Bun.spawn(["bash", "-lc", command], {
+    const argv =
+      policy.disclaimShell === true
+<<<<<<< Updated upstream
+        ? [...disclaimedShellArgv("bash", command)]
+=======
+        ? disclaimedShellArgv("bash", command)
+>>>>>>> Stashed changes
+        : ["bash", "-lc", command]
+    const proc = Bun.spawn(argv, {
       cwd,
       env,
       stdout: "pipe",
@@ -316,7 +341,12 @@ export class DockerSandbox implements Sandbox {
     pushFlag(argv, "--memory", this.memory)
     pushFlag(argv, "--cpus", this.cpus)
 
-    argv.push(this.image, "bash", "-lc", command)
+    argv.push(this.image)
+    if (policy.disclaimShell === true) {
+      argv.push(...disclaimedShellArgv("bash", command))
+    } else {
+      argv.push("bash", "-lc", command)
+    }
     return argv
   }
 

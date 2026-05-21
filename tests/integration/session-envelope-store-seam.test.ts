@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { __resetRuntimeConfig } from "@/shared"
 import {
   appendEnvelope,
   type EventMsgRecord,
@@ -15,10 +16,23 @@ const root = mkdtempSync(join(tmpdir(), "session-envelope-seam-"))
 
 beforeAll(() => {
   process.env.QUANTA_SESSIONS_DIR = root
+  __resetRuntimeConfig()
+})
+
+// Other session test suites in this process pool also flip
+// QUANTA_SESSIONS_DIR and call __resetRuntimeConfig() in their own
+// beforeEach. Re-assert OUR root + reset cache before every test so a
+// concurrent suite's afterEach cleanup can't leak its cached path into our
+// reads. Reset is the contract — env mutation alone is insufficient because
+// the runtime-config layer memoizes sessionsRoot() per process.
+beforeEach(() => {
+  process.env.QUANTA_SESSIONS_DIR = root
+  __resetRuntimeConfig()
 })
 
 afterAll(() => {
   delete process.env.QUANTA_SESSIONS_DIR
+  __resetRuntimeConfig()
   rmSync(root, { recursive: true, force: true })
 })
 

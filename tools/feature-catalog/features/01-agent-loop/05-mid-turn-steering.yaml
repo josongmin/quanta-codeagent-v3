@@ -1,0 +1,22 @@
+id: mid-turn-steering
+title: Mid-turn steering + NonSteerableTurnKind + 8 closed rejection reasons
+section: 1
+subsystem: 턴 라이프사이클 — cancellation-free 주입
+order: 1
+maturity: L4
+status: new
+purpose: 'Codex `core-skills/src/injection.rs` 흡수. turn boundary 안 끊고 user input을 conversation에 주입 — abort/restart 없이 다음 step에서 모델이 본다. expectedTurnId optimistic concurrency + TurnKind(main|review|compact|standalone)로 review/compact/standalone 거부 + 8 closed rejection reasons enum(interrupted/no_active_turn/expected_turn_mismatch/non_steerable_{review,compact,standalone}/empty_input/input_too_large)로 trend 추적. clock 외부 주입(byte-stable replay).'
+evidence:
+  code:
+    - src/agent/turn-kind.ts
+    - src/agent/steering.ts
+  adrs: [30]
+  tests:
+    unit:
+      - tests/unit/agent/turn-kind.test.ts
+      - tests/unit/agent/steering.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'loop.ts 결선은 follow-up — `activeTurnRef` 주입 미사용 시 byte-identical(ADR-0023 §1.2 default-OFF 패턴).'
