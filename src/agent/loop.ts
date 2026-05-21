@@ -3,6 +3,7 @@ import type {
   Message,
   StreamEvent,
   SystemPromptInput,
+  ToolChoice,
   ToolResultBlock,
 } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
@@ -38,6 +39,12 @@ import {
 import { streamingTurn } from "./streaming-dispatch"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import { buildToolInputSeam } from "./tool-input-streaming"
+import {
+  consumeTurnSignals,
+  createToolChoiceTurnState,
+  resolveToolChoice,
+  type ToolChoiceTurnState,
+} from "./tool-choice"
 import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, StopReason } from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
@@ -275,6 +282,7 @@ const streamConsume = async (
   toolHistory: ToolHistoryEntry[] | undefined,
   workingState: WorkingStateSession | undefined,
   collector: TurnWorkMetricsCollector | undefined,
+  toolChoice: ToolChoice | undefined,
 ): Promise<StreamConsumeResult> => {
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
@@ -296,7 +304,16 @@ const streamConsume = async (
     const outcome = await streamingTurn({
       events: teeUsage(
         config,
-        config.llm.stream({ messages, system, tools: specs }),
+        // ADR-0079 — thread the pre-call tool_choice gate through to the
+        // adapter. `auto` (or `undefined`) ⇒ field omitted on the wire,
+        // byte-identical to the pre-feature path. Conditional spread keeps
+        // exactOptionalPropertyTypes happy (never assign `undefined`).
+        config.llm.stream({
+          messages,
+          system,
+          tools: specs,
+          ...(toolChoice !== undefined ? { toolChoice } : {}),
+        }),
         recorder,
         collector,
       ),
@@ -870,6 +887,7 @@ const verifyGuardStep = (
   wm: WorkingMemory<Message>,
   history: readonly ToolHistoryEntry[],
   state: VerifyGuardState | undefined,
+  toolChoiceTurnState: ToolChoiceTurnState,
 ): Step | undefined => {
   if (config.verifyGuard === undefined || state === undefined) return undefined
   if (!isFinishAttempt(action, message)) return undefined
@@ -883,6 +901,19 @@ const verifyGuardStep = (
   })
   if (!verdict.block || verdict.text === undefined) return undefined
   emitRecovery(config, "unverified")
+  // ADR-0079 — arm the NEXT turn's tool_choice gate. The forced re-entry
+  // (after wm.append'ing the forcing meta) restarts the OUTER `for turn` loop,
+  // which calls `runTurn` again — `consumeTurnSignals` at the top of runTurn
+  // reads this flag and clears it, so the next LLM stream sees
+  // `tool_choice:"any"` (force a tool call, typically a verify). Pure side
+  // effect on a turn-local mutable state object owned by the loop.
+  //
+  // NOTE: the verify-guard re-enters the SAME turn via the
+  // `wm.append + return CONTINUE` mechanism (no maxTurns slot consumed) — but
+  // that re-entry IS a new LLM stream call, conceptually a "next turn" from
+  // the tool_choice perspective. We arm here so the very next stream call
+  // (the forced re-entry) sees the gate.
+  toolChoiceTurnState.verifyGuardViolated = true
   wm.append(message)
   wm.append(metaUser(verdict.text))
   return CONTINUE
@@ -906,6 +937,7 @@ const closeoutGuardStep = (
   wm: WorkingMemory<Message>,
   history: readonly ToolHistoryEntry[],
   state: CloseoutGuardState | undefined,
+  toolChoiceTurnState: ToolChoiceTurnState,
 ): Step | undefined => {
   if (config.closeoutGuard === undefined || state === undefined) return undefined
   if (!isFinishAttempt(action, message)) return undefined
@@ -917,6 +949,13 @@ const closeoutGuardStep = (
   const verdict = decideCloseoutGuard({ cfg: config.closeoutGuard, state, history })
   if (!verdict.block || verdict.text === undefined) return undefined
   emitRecovery(config, "closeout")
+  // ADR-0079 — arm the NEXT LLM-call's tool_choice gate. The forced re-entry
+  // restarts the `for(;;)` in runTurn, where consumeTurnSignals reads + clears
+  // this flag and resolveToolChoice emits `{kind:"none"}` — the next stream
+  // FORBIDS any tool_use, forcing the model to produce a text terminal turn
+  // (it cannot keep calling tools to delay the closeout). Pure side effect
+  // on the loop-owned mutable state object.
+  toolChoiceTurnState.closeoutAttempted = true
   wm.append(message)
   wm.append(metaUser(verdict.text))
   return CONTINUE
@@ -932,6 +971,7 @@ const applyAction = async (
   history: readonly ToolHistoryEntry[],
   verifyGuardState: VerifyGuardState | undefined,
   closeoutGuardState: CloseoutGuardState | undefined,
+  toolChoiceTurnState: ToolChoiceTurnState,
 ): Promise<Step> => {
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
   if (action.do === "backoff") {
@@ -970,13 +1010,29 @@ const applyAction = async (
   // Tier 0 safety hardening: a finish attempt right after an unverified edit is forced
   // into one more turn. All the branching/decision lives in `verifyGuardStep`
   // so this hot path stays a single guarded call (default-OFF ⇒ undefined).
-  const guarded = verifyGuardStep(config, action, message, wm, history, verifyGuardState)
+  const guarded = verifyGuardStep(
+    config,
+    action,
+    message,
+    wm,
+    history,
+    verifyGuardState,
+    toolChoiceTurnState,
+  )
   if (guarded) return guarded
   // Closeout reminder (§4 mirror): a finish attempt is given one single-shot
   // closeout nudge per run. Ordered STRICTLY AFTER verify-guard: if verify
   // already blocked above we never reach here on this turn — closeout fires the
   // NEXT finish-intent (after verify is satisfied). Default-OFF ⇒ undefined.
-  const closedout = closeoutGuardStep(config, action, message, wm, history, closeoutGuardState)
+  const closedout = closeoutGuardStep(
+    config,
+    action,
+    message,
+    wm,
+    history,
+    closeoutGuardState,
+    toolChoiceTurnState,
+  )
   if (closedout) return closedout
   if (action.do === "completed") {
     // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
@@ -1018,11 +1074,24 @@ const runTurn = async (
   collector: TurnWorkMetricsCollector | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
+  toolChoiceTurnState: ToolChoiceTurnState,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
   for (;;) {
     if (config.signal.aborted) return { kind: "aborted" }
+
+    // ADR-0079 — consume the 1-turn-TTL signals AT EACH LLM-CALL ITERATION.
+    // The verify-/closeout-guard hooks ARM these flags at finish-intent then
+    // `return CONTINUE`, which loops back here to this consume — so the very
+    // next LLM stream sees `tool_choice` forced. Same-turn recovery paths
+    // (stream-error backoff, compact, output-limit nudge, malformed nudge,
+    // empty nudge) DO NOT re-arm the flags, so re-consuming them just
+    // returns `{kind:"auto"}` — byte-identical to the pre-feature path. The
+    // consume is the single canonical clear point: flags can never carry
+    // across more than one LLM stream call.
+    const signals = consumeTurnSignals(toolChoiceTurnState)
+    const toolChoice = resolveToolChoice(signals)
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
@@ -1047,6 +1116,10 @@ const runTurn = async (
       toolHistory,
       workingState,
       collector,
+      // ADR-0079 — `auto` is the default-OFF case; the adapter omits the
+      // field on the wire so the request is byte-identical to the pre-feature
+      // path. Pass it through anyway so the signal lifecycle stays uniform.
+      toolChoice,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -1068,6 +1141,7 @@ const runTurn = async (
       toolHistory ?? EMPTY_TOOL_HISTORY,
       verifyGuardState,
       closeoutGuardState,
+      toolChoiceTurnState,
     )
     if (step.done) return step.result
   }
@@ -1314,6 +1388,14 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
+  // ADR-0079 — pre-call tool_choice signal state. One per session; the two
+  // guards (verify, closeout) arm flags here at finish-intent and the loop
+  // consumes + clears them at the next LLM-call iteration. Always allocated
+  // (a single 2-boolean object): with no guards configured, no flag is ever
+  // armed, `consumeTurnSignals` returns `{}`, `resolveToolChoice` returns
+  // `{kind:"auto"}`, and the adapter omits the wire field — byte-identical
+  // to the pre-feature path.
+  const toolChoiceTurnState = createToolChoiceTurnState()
   // Codex absorption — memory L3 (Phase 6): session-scoped WorkingState.
   // Wired in by `buildSessionFeatures` when `cfg.workingState?.enabled === true`;
   // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-
@@ -1465,6 +1547,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         workCollector,
         summaryArchive,
         turn,
+        toolChoiceTurnState,
       )
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"

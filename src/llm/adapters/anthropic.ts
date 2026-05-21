@@ -2,7 +2,14 @@ import Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
 import type { LLMPort } from "../ports"
 import { withStreamTimeout } from "../stream-timeout"
-import type { ContentBlock, Message, StreamEvent, StreamInput, SystemPromptInput } from "../types"
+import type {
+  ContentBlock,
+  Message,
+  StreamEvent,
+  StreamInput,
+  SystemPromptInput,
+  ToolChoice,
+} from "../types"
 import { buildUsageEvent, parseToolInputOrThrow, resolveAdapterStreamTimeouts } from "./shared"
 
 interface AnthropicConfig {
@@ -182,6 +189,48 @@ const toAnthropicMessages = (messages: Message[]): Anthropic.MessageParam[] =>
       .filter((b): b is Anthropic.ContentBlockParam => b !== null),
   }))
 
+/**
+ * ADR-0079 — map our orthogonal {@link ToolChoice} to Anthropic's `tool_choice`
+ * shape. Closed switch with a `never` default so adding a new variant is a
+ * compile error here AND in the OpenAI adapter. The `auto` case returns
+ * `undefined` so callers OMIT the field on the wire — byte-identical to the
+ * pre-feature path. A `tool` choice whose `name` is not present in the request
+ * `tools` is a caller bug; we throw at the adapter so the request never reaches
+ * the provider with an unresolvable name (no silent fallback).
+ */
+export const toAnthropicToolChoice = (
+  choice: ToolChoice | undefined,
+  toolNames: readonly string[],
+): Anthropic.MessageCreateParams["tool_choice"] | undefined => {
+  if (choice === undefined) return undefined
+  switch (choice.kind) {
+    case "auto":
+      // Byte-identical to pre-feature: OMIT the field. The SDK default is
+      // auto, so emitting `{type:"auto"}` would be semantically identical
+      // but a different wire payload — we choose the omit form so the
+      // default-OFF promise holds at the byte level.
+      return undefined
+    case "any":
+      return { type: "any" }
+    case "none":
+      return { type: "none" }
+    case "tool":
+      if (!toolNames.includes(choice.name)) {
+        throw new LLMError(
+          `tool_choice references unregistered tool name "${choice.name}" ` +
+            `(registered: ${toolNames.length === 0 ? "<none>" : toolNames.join(", ")})`,
+        )
+      }
+      return { type: "tool", name: choice.name }
+    default: {
+      // Exhaustiveness check — adding a new ToolChoice variant without
+      // updating this switch is a compile error.
+      const _exhaustive: never = choice
+      return _exhaustive
+    }
+  }
+}
+
 export class AnthropicAdapter implements LLMPort {
   private readonly client: Anthropic
   readonly model: string
@@ -215,6 +264,12 @@ export class AnthropicAdapter implements LLMPort {
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {
+    // ADR-0079 — resolve tool_choice BEFORE the create() call so an
+    // unregistered-tool-name throw surfaces from the same try/catch as any
+    // other request-construction failure. `undefined` ⇒ field omitted on the
+    // wire, byte-identical to the pre-feature path.
+    const toolNames = input.tools.map((t) => t.name)
+    const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
     try {
       return (await this.client.messages.create({
         model: this.model,
@@ -228,6 +283,7 @@ export class AnthropicAdapter implements LLMPort {
           description: t.description,
           input_schema: t.input_schema as Anthropic.Tool.InputSchema,
         })),
+        ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
       })) as unknown as AsyncIterable<RawEvent>
     } catch (e) {
       throw LLMError.fromSdkError("anthropic", e)

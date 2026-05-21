@@ -51,6 +51,12 @@ const DEFAULT_MAX_TRIPS = 1
  * Decide whether to block a finish attempt and force one more turn. Pure: the
  * only side effect is incrementing `state.trips` when it blocks (the loop owns
  * the state object). `cfg === undefined` ⇒ guard OFF.
+ *
+ * ADR-0079 — when this returns `{block:true}` the loop ALSO sets
+ * `ToolChoiceTurnState.verifyGuardViolated = true` so the NEXT turn's
+ * `resolveToolChoice` emits `{kind:"any"}` and forces the model to call a tool
+ * (typically a verify). The flag is consumed at the next turn's entry and
+ * cleared in the same step; it never carries across more than one turn.
  */
 export const decideVerifyGuard = (args: {
   history: readonly { name: string; arg?: string }[]

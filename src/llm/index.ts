@@ -39,6 +39,7 @@ export type {
   SystemPromptInput,
   TextBlock,
   ThinkingBlock,
+  ToolChoice,
   ToolResultBlock,
   ToolSchema,
   ToolUseBlock,
