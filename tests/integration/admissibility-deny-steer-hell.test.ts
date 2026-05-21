@@ -507,7 +507,10 @@ describe("ADR-0076 Gap-4 HELL — HITL fires regardless of read-only status", ()
       actionOf(tool),
     )
     expect(res?.preview).toBe("deny_steer")
-    expect(res?.steerInjection).toBe("redact first")
+    // ADR-0077: read-only tools get the readonly note APPENDED to the host's
+    // steer (atomic augmentation, NOT replacement — host intent preserved).
+    expect(res?.steerInjection).toContain("redact first")
+    expect(res?.steerInjection).toContain("read-only")
   })
 })
 

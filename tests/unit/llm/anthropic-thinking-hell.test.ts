@@ -509,9 +509,12 @@ describe("ADR-0076 Gap-2 HELL — assemble × adapter wire-faithful roundtrip", 
       { type: "message_stop", stop_reason: "end_turn" },
     ]
     const { message } = assembleFromEvents(events)
+    // ADR-0077: structural `phase: "final_answer"` on the trailing text block
+    // (no tool_use follows). The adapter wire-mapping below strips it (see
+    // adapter test) — the field is assembly-side metadata only.
     expect(message.content).toEqual([
       { type: "thinking", thinking: "alpha beta gamma", signature: "SIG_X" },
-      { type: "text", text: "result" },
+      { type: "text", text: "result", phase: "final_answer" },
     ])
     const { adapter, captured } = adapterWithCapture()
     const next: StreamInput = {

@@ -49,7 +49,12 @@ describe("ADR-0076 Gap-2 HELL — orphan signature_delta", () => {
       { type: "message_stop", stop_reason: "end_turn" },
     ]
     const { message } = assembleFromEvents(events)
-    expect(message.content).toEqual([{ type: "text", text: "actual text" }])
+    // ADR-0077: every text block now carries a structural `phase`
+    // ({"commentary"|"final_answer"}) computed by a deterministic backward
+    // scan; a turn with no tool_use after the text ⇒ phase: "final_answer".
+    expect(message.content).toEqual([
+      { type: "text", text: "actual text", phase: "final_answer" },
+    ])
     expect(message.content.some((b) => b.type === "thinking")).toBe(false)
   })
 
@@ -203,9 +208,11 @@ describe("ADR-0076 Gap-2 HELL — block ordering invariants", () => {
       { type: "message_stop", stop_reason: "end_turn" },
     ]
     const { message } = assembleFromEvents(events)
+    // ADR-0077: text block carries structural `phase: "final_answer"` because
+    // no tool_use follows it in the assembled content[].
     expect(message.content).toEqual([
       { type: "thinking", thinking: "A" },
-      { type: "text", text: " mid " },
+      { type: "text", text: " mid ", phase: "final_answer" },
       { type: "thinking", thinking: "B" },
     ])
   })
