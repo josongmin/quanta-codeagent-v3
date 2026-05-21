@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
+import { runtimeConfig } from "@/shared/runtime-config"
 import type { LLMPort } from "../ports"
+import { resolveStreamTimeoutMs, withStreamTimeout } from "../stream-timeout"
 import type { ContentBlock, Message, StreamEvent, StreamInput, SystemPromptInput } from "../types"
 
 interface AnthropicConfig {
@@ -16,6 +18,12 @@ interface AnthropicConfig {
    *  (one adapter = one session), so `defaultHeaders` is the minimal-surface
    *  seam. Tier-0 absorption #0-6. */
   betaHeaders?: readonly string[]
+  /** T1 stream-hang guard overrides. Caller-supplied wins over env knobs
+   *  (`QUANTA_LLM_STREAM_FIRST_CHUNK_MS` / `QUANTA_LLM_STREAM_IDLE_MS`); env
+   *  wins over the defaults baked into `src/llm/stream-timeout.ts`. Read
+   *  ONCE at construction — no per-call re-read. */
+  streamFirstChunkMs?: number
+  streamIdleMs?: number
 }
 
 /** Minimal structural views of the raw SSE events we consume. The SDK's own
@@ -153,6 +161,10 @@ export class AnthropicAdapter implements LLMPort {
   readonly model: string
   private readonly maxTokens: number
   readonly betaHeaders: readonly string[]
+  /** T1 stream-hang guard: pinned at construction (env knobs + optional
+   *  caller overrides resolved ONCE) and applied to every `stream()` call
+   *  via the shared `withStreamTimeout` decorator. */
+  private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
 
   constructor(config: AnthropicConfig) {
     this.betaHeaders = config.betaHeaders ?? []
@@ -163,6 +175,15 @@ export class AnthropicAdapter implements LLMPort {
         : new Anthropic({ apiKey: config.apiKey })
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
+    const env = runtimeConfig()
+    const override: { firstChunkMs?: number; idleMs?: number } = {}
+    if (config.streamFirstChunkMs !== undefined) override.firstChunkMs = config.streamFirstChunkMs
+    if (config.streamIdleMs !== undefined) override.idleMs = config.streamIdleMs
+    this.streamTimeoutMs = resolveStreamTimeoutMs(
+      env.llmStreamFirstChunkMs,
+      env.llmStreamIdleMs,
+      override,
+    )
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {
@@ -195,9 +216,20 @@ export class AnthropicAdapter implements LLMPort {
     const usage: UsageAccumulator = { model: this.model }
 
     const raw = await this.openRawStream(input)
+    // T1: wrap the raw SDK stream with first-chunk + idle deadlines. A
+    // silently-hung stream now throws a structured `stream_corrupt` LLMError
+    // (message includes "timeout") that the agent loop's `classifyLLMError`
+    // routes through the existing same-turn retry path (RETRYABLE_MARKERS
+    // hit). On timeout the wrapper also cancels the upstream fetch via its
+    // own AbortController so no orphan request is left holding the socket.
+    const guarded = withStreamTimeout(raw, {
+      firstChunkMs: this.streamTimeoutMs.firstChunkMs,
+      idleMs: this.streamTimeoutMs.idleMs,
+      provider: "anthropic",
+    })
 
     try {
-      for await (const ev of raw) {
+      for await (const ev of guarded) {
         yield* mapRawEvent(ev, open, usage)
       }
     } catch (e) {

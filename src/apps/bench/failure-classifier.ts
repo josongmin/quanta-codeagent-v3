@@ -17,6 +17,7 @@
  * fixtures so a future detector cannot silently drift.
  */
 import { existsSync, readFileSync } from "node:fs"
+import { CACHE_PATH_RE } from "./cache-pathspecs"
 import type { InstanceResult } from "./types"
 
 /** How the run terminated. Covering partition — every failed result lands in
@@ -111,14 +112,18 @@ const diffHeaderPaths = (patch: string): string[] => {
   return out
 }
 
-/** Build/cache-shaped path family. Matched on segment boundaries so a real
- *  `outputs` package wouldn't be flagged unless it is literally under
- *  `outputs/`. */
-const CACHE_PATH_RE =
-  /(^|\/)(outputs|\.cache|__pycache__|dist|build|node_modules|\.tox|\.venv|venv|coverage|\.pytest_cache|\.mypy_cache)\//
-
-/** Dirty-cache leak: the patch ONLY modifies build/cache-shaped paths. A
- *  single source-shaped path disqualifies the signal. */
+/**
+ * Dirty-cache leak: the patch ONLY modifies build/cache-shaped paths. A
+ * single source-shaped path disqualifies the signal.
+ *
+ * INVARIANT ALARM (post-T2): the bench runner now prunes cache paths at the
+ * git layer via `CACHE_PATHSPECS` (see `cache-pathspecs.ts`), so under
+ * normal operation this detector should fire 0 times. A positive match
+ * means the prune-at-source contract was violated upstream — either a new
+ * cache-shaped path entered the worktree and is missing from the SSOT, or
+ * the pathspec exclude was bypassed. Treat any new occurrence as a bug
+ * report on the runner, not as a normal classification.
+ */
 const isDirtyCacheLeak = (patch: string): boolean => {
   if (patch.trim() === "") return false
   const paths = diffHeaderPaths(patch)

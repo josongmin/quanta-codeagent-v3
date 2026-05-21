@@ -3,6 +3,7 @@ import type { AutoModeClassifier, PermissionContext } from "@/permission"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
+import { DedupGate } from "./dispatch-dedup"
 import { deny, resultBlock } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
 import type { AgentConfig } from "./types"
@@ -45,6 +46,34 @@ const evidenceOf = (
 // and `./admissibility-gate.ts` can construct deny / tool_result values without
 // either file importing the other's full implementation surface.
 
+/** T3 — pre-flight dedup gate consult. Returns a synthetic non-error
+ *  tool_result {@link DispatchResult} to short-circuit a thrashing call, or
+ *  `null` when the gate is absent / unconfigured / the call is admissible.
+ *
+ *  Default-OFF preserved: when `config.dedupGate` is `undefined` this is a
+ *  single property check + early return (zero allocation), so dispatch is
+ *  byte-identical to the pre-T3 path for any caller that did not opt in. */
+const consultDedupGate = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+): DispatchResult | null => {
+  const gate = config.dedupGate
+  if (!gate) return null
+  // The gate is pure-by-state: it needs the caller-supplied turn (no
+  // Date.now/random) so a missing turn source means "no dedup window" — we
+  // skip rather than synthesize a fake counter that would behave randomly
+  // depending on call ordering across unrelated turns.
+  const turn = config.run?.turn
+  if (typeof turn !== "number") return null
+  const verdict = gate.record(call.name, call.input, turn)
+  if (!verdict.blocked) return null
+  return {
+    block: DedupGate.syntheticResult(call.id, verdict.observation),
+    ok: true,
+    preview: `dedup-gate-${verdict.regime}`,
+  }
+}
+
 /** Run one tool call end to end: gates → execute → normalize errors.
  *  Tool/permission/plan/hook failures become error tool_results (the model
  *  recovers); only the loop's own fatal conditions propagate.
@@ -71,6 +100,17 @@ export const dispatchTool = async (
   if (!registry.has(call.name)) {
     return deny(call.id, `Unknown tool: ${call.name}`, "unknown tool")
   }
+
+  // T3 — pre-flight dedup gate (SOTA++ structural brake on Type F Verify-Loop
+  // Stuck on Env). Consulted BEFORE the admissibility gate so a thrashing
+  // call never burns permission/HITL/hook work. Default-OFF: when
+  // `config.dedupGate` is absent (or `config.run?.turn` is unavailable so we
+  // have no turn source) this is a one-`undefined`-check no-op and dispatch
+  // is byte-identical. The block synthesizes a non-error tool_result mirroring
+  // `dispatch-helpers.ts#resultBlock(id, content, false)` — no new event type,
+  // the loop's tool_result pipeline handles it like any other observation.
+  const dedupShort = consultDedupGate(call, config)
+  if (dedupShort) return dedupShort
 
   // S16: populate `shellCommand` from the registry so the permission policy
   // applies HARD_DENY uniformly to ANY tool that exposes a shell-command

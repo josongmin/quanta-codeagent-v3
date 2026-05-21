@@ -24,6 +24,7 @@ import { redactValue, type SandboxData } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import { CACHE_PATHSPECS } from "./cache-pathspecs"
 import {
   type AttemptObservation,
   BenchObserver,
@@ -134,6 +135,72 @@ const exec = async (cmd: string, cwd: string, timeoutMs: number): Promise<ExecRe
 }
 
 /**
+ * Argv-form exec (no `bash -c`). Used for git pathspec-exclude invocations
+ * where the `:(exclude,top)…` magic must not pass through shell word-splitting
+ * or quote-stripping. Same env scrub + timeout semantics as {@link exec}.
+ */
+const execArgv = async (
+  argv: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+): Promise<ExecResult> => {
+  const proc = Bun.spawn([...argv], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: scrubEnv(),
+  })
+  const timer = setTimeout(() => proc.kill(), timeoutMs)
+  try {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    const code = await proc.exited
+    return { code, stdout, stderr }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Common git argv prefix for bench-internal commits — matches the `${G}`
+ * shell-string form used elsewhere but as an array so pathspec args stay
+ * intact (no shell word-splitting). The `-c` overrides also bypass any user
+ * `commit.gpgsign` config that would prompt for a signing key.
+ */
+const GIT_ARGV: readonly string[] = [
+  "git",
+  "-c",
+  "user.email=b@b",
+  "-c",
+  "user.name=b",
+  "-c",
+  "commit.gpgsign=false",
+]
+
+/**
+ * Stage everything in the worktree and capture the unified index diff with
+ * cache-shaped paths pruned AT SOURCE (T2 — patch sanitizer prune-at-source).
+ * Two steps because `git add -A` cannot share the same argv invocation as
+ * `git diff --cached` without a shell `&&`, and a shell would re-process the
+ * pathspec magic chars; here both steps run via argv-form `execArgv` so the
+ * pathspecs reach git verbatim.
+ *
+ * Returns "" on any git failure (opportunistic, matches surrounding policy).
+ */
+const gitStageAndDiffCached = async (cwd: string, timeoutMs: number): Promise<string> => {
+  const add = await execArgv([...GIT_ARGV, "add", "-A"], cwd, timeoutMs)
+  if (add.code !== 0) return ""
+  const diff = await execArgv(
+    [...GIT_ARGV, "diff", "--cached", "--no-color", "--", ".", ...CACHE_PATHSPECS],
+    cwd,
+    timeoutMs,
+  )
+  return diff.code === 0 ? sourceOnlyDiff(diff.stdout) : ""
+}
+
+/**
  * Snapshot helper: take a pre-image, run the agent, then diff.
  *
  * If the sandbox already contains a `.git` (real swebench cache repos do) and
@@ -159,8 +226,10 @@ const withGitSnapshot = async (
   const init = await exec(prep, sandbox, timeoutMs)
   await body()
   if (init.code !== 0) return ""
-  const diff = await exec(`${G} add -A && ${G} diff --cached --no-color`, sandbox, timeoutMs)
-  return diff.code === 0 ? sourceOnlyDiff(diff.stdout) : ""
+  // T2: exclude cache/build paths at the git layer via pathspec — pruning at
+  // source is structural, where the prior post-hoc filter let mixed
+  // source+cache patches (django leak, 2026-05-21) through.
+  return gitStageAndDiffCached(sandbox, timeoutMs)
 }
 
 /** SWE-bench predictions must be SOURCE-only: the official harness applies its
@@ -541,10 +610,8 @@ const runAgentOnce = async (
   const outcome = await runAgent(buildConfig(instance, deps, sandbox, signal, tap, seedMsg))
   // Capture the cumulative diff CURRENTLY in the worktree (without resetting
   // the index): mirrors `withGitSnapshot`'s final diff step. `git` is
-  // opportunistic — absence ⇒ "".
-  const G = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
-  const diff = await exec(`${G} add -A && ${G} diff --cached --no-color`, sandbox, timeoutMs)
-  const patch = diff.code === 0 ? sourceOnlyDiff(diff.stdout) : ""
+  // opportunistic — absence ⇒ "". T2: cache/build paths pruned at source.
+  const patch = await gitStageAndDiffCached(sandbox, timeoutMs)
   const result: RunOnceResult = {
     patch,
     turns: outcome.turns,

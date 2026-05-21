@@ -90,12 +90,15 @@ export interface RuntimeConfig {
   readonly toolOutputMaxChars: number | undefined
   /** Tool spill retention (`QUANTA_TOOL_OUTPUT_SPILL_KEEP`). Absent ⇒ default. */
   readonly toolOutputSpillKeep: number | undefined
-  /** Operator HITL tier-override file path (`QUANTA_HITL_OVERRIDES`). Absent ⇒
-   *  registry loads built-in annotations only. ADR-0047. Schema: JSON
-   *  `{ "version": 1, "annotations": [{ "tool": "<name>", "commandPrefix"?:
-   *  "<str>", "tier": "<HitlTier>", "reason"?: "<str>" }] }`. Malformed file
-   *  ⇒ stderr warn + fall back (never throws at startup). */
-  readonly hitlOverridesPath: string | undefined
+  /** LLM stream first-chunk timeout in ms (`QUANTA_LLM_STREAM_FIRST_CHUNK_MS`).
+   *  Absent ⇒ adapter default (60_000 ms). Read ONCE at adapter construction;
+   *  T1 hang-stream guard. Reasoning models (o1/o3/gpt-5) can take 30s+ to
+   *  first token, so default is generous. */
+  readonly llmStreamFirstChunkMs: number | undefined
+  /** LLM stream inter-chunk idle timeout in ms (`QUANTA_LLM_STREAM_IDLE_MS`).
+   *  Absent ⇒ adapter default (120_000 ms). Read ONCE at adapter
+   *  construction; T1 hang-stream guard. Long completions are OK. */
+  readonly llmStreamIdleMs: number | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -115,7 +118,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_TOOL_OUTPUT_SPILL_KEEP"],
       "QUANTA_TOOL_OUTPUT_SPILL_KEEP",
     ),
-    hitlOverridesPath: stringOrUndef(env["QUANTA_HITL_OVERRIDES"]),
+    llmStreamFirstChunkMs: parsePositiveInt(
+      env["QUANTA_LLM_STREAM_FIRST_CHUNK_MS"],
+      "QUANTA_LLM_STREAM_FIRST_CHUNK_MS",
+    ),
+    llmStreamIdleMs: parsePositiveInt(env["QUANTA_LLM_STREAM_IDLE_MS"], "QUANTA_LLM_STREAM_IDLE_MS"),
   })
 }
 

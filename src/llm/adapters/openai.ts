@@ -1,6 +1,7 @@
 import OpenAI from "openai"
-import { LLMError } from "@/shared"
+import { LLMError, runtimeConfig } from "@/shared"
 import type { LLMPort } from "../ports"
+import { resolveStreamTimeoutMs, withStreamTimeout } from "../stream-timeout"
 import type { ContentBlock, Message, StreamEvent, StreamInput, SystemPromptInput } from "../types"
 
 interface OpenAIConfig {
@@ -8,6 +9,12 @@ interface OpenAIConfig {
   model: string
   maxTokens?: number
   baseURL?: string
+  /** T1 stream-hang guard overrides. Caller-supplied wins over env knobs
+   *  (`QUANTA_LLM_STREAM_FIRST_CHUNK_MS` / `QUANTA_LLM_STREAM_IDLE_MS`); env
+   *  wins over the defaults baked into `src/llm/stream-timeout.ts`. Read
+   *  ONCE at construction — no per-call re-read. */
+  streamFirstChunkMs?: number
+  streamIdleMs?: number
 }
 
 // OpenAI separates tool results into their own `role:"tool"` messages, so the
@@ -236,6 +243,10 @@ export class OpenAIAdapter implements LLMPort {
   private readonly client: OpenAI
   readonly model: string
   private readonly maxTokens: number
+  /** T1 stream-hang guard: pinned at construction (env knobs + optional
+   *  caller overrides resolved ONCE) and applied to every `stream()` call
+   *  via the shared `withStreamTimeout` decorator. */
+  private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
 
   constructor(config: OpenAIConfig) {
     this.client = new OpenAI({
@@ -244,6 +255,15 @@ export class OpenAIAdapter implements LLMPort {
     })
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
+    const env = runtimeConfig()
+    const override: { firstChunkMs?: number; idleMs?: number } = {}
+    if (config.streamFirstChunkMs !== undefined) override.firstChunkMs = config.streamFirstChunkMs
+    if (config.streamIdleMs !== undefined) override.idleMs = config.streamIdleMs
+    this.streamTimeoutMs = resolveStreamTimeoutMs(
+      env.llmStreamFirstChunkMs,
+      env.llmStreamIdleMs,
+      override,
+    )
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawChunk>> {
@@ -279,6 +299,17 @@ export class OpenAIAdapter implements LLMPort {
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     const raw = await this.openRawStream(input)
+    // T1: wrap the raw SDK stream with first-chunk + idle deadlines. A
+    // silently-hung stream now throws a structured `stream_corrupt` LLMError
+    // (message includes "timeout") that the agent loop's `classifyLLMError`
+    // routes through the existing same-turn retry path (RETRYABLE_MARKERS
+    // hit). On timeout the wrapper also cancels the upstream fetch via its
+    // own AbortController so no orphan request is left holding the socket.
+    const guarded = withStreamTimeout(raw, {
+      firstChunkMs: this.streamTimeoutMs.firstChunkMs,
+      idleMs: this.streamTimeoutMs.idleMs,
+      provider: "openai",
+    })
     const st: StreamState = {
       pending: new Map<number, PendingCall>(),
       finish: null,
@@ -287,7 +318,7 @@ export class OpenAIAdapter implements LLMPort {
     }
 
     try {
-      for await (const chunk of raw) yield* processChunk(chunk, st)
+      for await (const chunk of guarded) yield* processChunk(chunk, st)
     } catch (e) {
       throw LLMError.fromSdkError("openai", e, "OpenAI stream error")
     }

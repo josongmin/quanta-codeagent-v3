@@ -17,6 +17,7 @@ import {
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import { dispatchTool } from "./dispatch"
+import { DedupGate } from "./dispatch-dedup"
 import { buildSessionFeatures } from "./features"
 import { type PersistDeps, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
@@ -949,7 +950,18 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
   // identity, so the loop is byte-for-byte identical to the pre-absorption path.
   const features = await buildSessionFeatures(config)
-  const cfg = buildEffectiveConfig(config, features.extraTools)
+  // T3 — when the dedup gate is active (caller pre-supplied a gate OR we'll
+  // construct one) the loop writes a per-turn stamped `run` AND attaches the
+  // gate to the loop-local `cfg`, both of which would mutate the caller's
+  // `AgentConfig` if `cfg` aliased `config`. So when the gate is active AND
+  // `buildEffectiveConfig` returned the original by identity (no Tier-1
+  // extra-tools rebuild), we take a shallow copy here. Gate disabled ⇒ no
+  // copy, original alias preserved (byte-identical to the pre-T3 path).
+  const dedupGateActive =
+    config.dedupGate !== undefined || config.dedupGateConfig?.disabled !== true
+  const baseCfg = buildEffectiveConfig(config, features.extraTools)
+  const cfg: AgentConfig =
+    dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
   const classifier = features.classifier
   const skillGate = buildSkillGate(features.skillAllowlists)
   // Cached once at session start (Codex anti-reread). Passed straight into the
@@ -969,6 +981,22 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const breaker = cfg.compactionBreaker?.disabled
     ? undefined
     : new CompactionBreaker(cfg.compactionBreaker?.caps)
+  // T3 — pre-flight dedup gate. ON by default with DEFAULT_DEDUP_GATE_CAPS so
+  // a pallets-style env-loop thrash is structurally braked. The gate is pure-
+  // by-state (deterministic, no Date.now/random) and per-session: one instance
+  // per `runAgent` invocation, never shared across sessions. Honors a
+  // caller-supplied `cfg.dedupGate` (test injection / explicit override) and
+  // falls back to constructing from `cfg.dedupGateConfig.caps`. Setting
+  // `dedupGateConfig.disabled:true` opts out entirely.
+  const dedupGate =
+    cfg.dedupGate ??
+    (cfg.dedupGateConfig?.disabled
+      ? undefined
+      : new DedupGate(cfg.dedupGateConfig?.caps))
+  // Make the constructed gate visible to `dispatchTool` via the loop-local
+  // effective config. Disabled / caller-already-set ⇒ no-op (cfg.dedupGate
+  // either stays undefined or keeps the caller's instance verbatim).
+  if (dedupGate !== undefined && cfg.dedupGate === undefined) cfg.dedupGate = dedupGate
   // Verify-guard (ADR-0011, Tier 0 safety hardening): per-run forcing budget + ordered
   // dispatched-tool log, created ONLY when `cfg.verifyGuard` is set. Absent ⇒
   // both stay `undefined`, no object is allocated, the history push and the
@@ -1025,15 +1053,23 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
 
   for (let turn = 1; turn <= cfg.maxTurns; turn++) {
     if (cfg.signal.aborted) return finish("aborted", turn - 1)
-    // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Computed every
-    // turn from a fresh shallow copy so the caller's `config.run` is NEVER
-    // mutated. It deliberately feeds no control flow / emit ordering /
-    // StopReason / messages — recorders correlate via their own injected
-    // `ctx`; this is the loop honouring the "loop advances `turn`" contract
-    // without any behavioural coupling. No downstream consumer in W-C (the
-    // explicit discard documents that intent; W-D/probe read `turn` off the
-    // trajectory, not via this binding).
-    void stampTurn(cfg.run, turn)
+    // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Pre-T3 this
+    // was computed-and-discarded (`void stampTurn(...)`) so the caller's
+    // `config.run` was never observed by downstream code. T3 reads the
+    // stamped `turn` from `cfg.run?.turn` inside `dispatchTool` to drive the
+    // dedup gate's sliding window, so when the gate is active we MUST
+    // actually thread the per-turn run. Two sub-cases:
+    //   1. caller supplied `config.run` ⇒ stamp `{...run, turn}` (still a
+    //      fresh copy — the caller's object is not mutated).
+    //   2. no `config.run` AND gate active ⇒ synthesize a minimal one
+    //      (`runId:sessionId`) so the structural brake actually engages for
+    //      the default RunContext-less path.
+    // Gate INACTIVE ⇒ neither branch runs (mirrors the pre-T3 discard),
+    // preserving byte-identical behavior for callers without the gate.
+    if (dedupGate) {
+      const stamped = stampTurn(cfg.run, turn)
+      cfg.run = stamped ?? { runId: sessionId, turn }
+    }
     stream.emit({ type: "turn_start", turn })
     if (cfg.hooks) await cfg.hooks.emit({ type: "turn_start", turn })
 

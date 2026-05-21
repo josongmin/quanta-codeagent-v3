@@ -1,0 +1,235 @@
+/**
+ * Pre-flight dispatch dedup gate (T3 — SOTA++ structural fix for bench
+ * Type F "Verify-Loop Stuck on Env"). A pure, deterministic state machine that
+ * detects identical (tool name + canonical args) calls within a sliding window
+ * and short-circuits with a synthetic observation block instead of dispatching.
+ *
+ * Precedent: this mirrors {@link CompactionBreaker}'s anti-thrash discipline
+ * (rapid-refill breaker, ADR-0011) applied one layer up — the breaker stops a
+ * compact↔PTL spin; this gate stops a `pip install flask` × N spin. The
+ * observed failure (pallets bench run): 17 turns repeating
+ * `pip install flask` / `chmod` / `export PATH` etc, same command, same
+ * observation, no environment delta. The classifier
+ * (`apps/bench/failure-classifier.ts#hasVerifyLoopStuck`) detects this AFTER
+ * the fact for grading — this gate is the BEFORE-the-fact pre-dispatch brake.
+ *
+ * Design properties:
+ *  - **Pure-by-state**: no `Date.now()`, no `Math.random()`; the caller passes
+ *    `turn` explicitly so the gate is deterministic and unit-testable.
+ *  - **Per-session**: one instance per `runAgent` invocation (constructed in
+ *    `loop.ts` at session start; absent in `AgentConfig` ⇒ no gate, byte-
+ *    identical to the pre-gate path).
+ *  - **Two-regime**: general tools get a forgiving window/threshold; env-
+ *    modifying shell commands (pip/npm/apt/chmod/export/…) get a tighter
+ *    fast-brake because in this harness those commands NEVER mutate the
+ *    sandbox (so a repeat literally cannot change state).
+ *  - **No new event type**: blocked calls return a synthetic
+ *    {@link ToolResultBlock} matching the deny-style helper in
+ *    `dispatch-helpers.ts#resultBlock` — the loop's tool_result pipeline
+ *    handles it like any other observation. Spec is `is_error:false` (this is
+ *    guidance, not an error).
+ */
+
+import type { ToolResultBlock } from "@/llm"
+
+/** Tunable caps. Defaults: general 8-turn/3-cap, env 4-turn/2-cap. */
+export interface DedupGateCaps {
+  /** Sliding window (turns) for general (non-env-modifying) tool calls. */
+  generalWindow: number
+  /** Block at the Nth identical call within `generalWindow`. */
+  generalThreshold: number
+  /** Sliding window (turns) for env-modifying bash commands. */
+  envWindow: number
+  /** Block at the Nth identical call within `envWindow`. Fast-brake. */
+  envThreshold: number
+}
+
+export const DEFAULT_DEDUP_GATE_CAPS: DedupGateCaps = {
+  generalWindow: 8,
+  generalThreshold: 3,
+  envWindow: 4,
+  envThreshold: 2,
+}
+
+/** Env-modifying command prefixes (case-insensitive on the FIRST shell token).
+ *  Hit ⇒ env regime (tighter window/threshold). Members:
+ *
+ *   - package managers: pip / pip3 / python -m pip / python3 -m pip /
+ *     npm / yarn / pnpm / apt / apt-get / conda / brew
+ *   - permission/ownership: chmod / chown
+ *   - shell state: export
+ *   - elevation: sudo (almost always wrapping one of the above)
+ *
+ *  In this harness env-modifying commands are deliberately NEVER allowed to
+ *  succeed (the sandbox is read-only with respect to the system), so any
+ *  repeat past the first attempt is pure thrash — hence the strict 2-cap.
+ */
+const ENV_PREFIX_REGEX =
+  /^(?:sudo\s+)?(?:pip3?|python3?\s+-m\s+pip|npm|yarn|pnpm|apt(?:-get)?|conda|brew|chmod|chown|export)\b/i
+
+/** True when this bash command should be routed to the env regime. Operates
+ *  on the FIRST clause only (everything before the first `;`/`&&`/`||`) so a
+ *  chain like `pip install x && pytest` is classed env (the env half is the
+ *  first action). Non-`bash` tools never reach this function. */
+const isEnvBashCommand = (command: string): boolean => {
+  // First clause only: a chain like `pip install x && pytest` is classed env
+  // (pip leads). Conservative: misclassifying a chain as env only makes the
+  // gate STRICTER, which is the safe direction for false positives.
+  const head = command.split(/\s*(?:;|&&|\|\|)\s*/, 1)[0] ?? ""
+  return ENV_PREFIX_REGEX.test(head.trimStart())
+}
+
+/** Deterministically canonicalize tool args for hashing.
+ *
+ *  Rules:
+ *   - JSON.stringify with sorted keys (stable across object property order).
+ *   - String values are trimmed and have runs of whitespace collapsed (so
+ *     "`pip   install   flask`" and "`pip install flask`" hash identically).
+ *   - Line endings normalized to `\n` (CRLF and LF hash identically).
+ *   - Non-string scalars (numbers/booleans/null) pass through verbatim.
+ *   - Arrays preserve order (semantic in tool arg shapes).
+ *   - `undefined`-valued keys are dropped (JSON.stringify already does this).
+ *   - Cycles fall through to a sentinel so a self-referential input does not
+ *     throw (defensive — real tool inputs are JSON-serializable).
+ *
+ *  We deliberately do NOT drop `timeout_ms` or `cwd` — the spec calls for
+ *  catching BYTE-identical repeats, not semantically-similar ones. Adding
+ *  drops here is a one-line tweak if false positives appear in production.
+ */
+export const canonicalizeArgs = (args: unknown): string => {
+  const seen = new WeakSet<object>()
+  const normalize = (v: unknown): unknown => {
+    if (typeof v === "string") {
+      return v.trim().replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ")
+    }
+    if (v === null || typeof v !== "object") return v
+    if (seen.has(v as object)) return "[cycle]"
+    seen.add(v as object)
+    if (Array.isArray(v)) return v.map(normalize)
+    const sortedKeys = Object.keys(v as Record<string, unknown>).sort()
+    const out: Record<string, unknown> = {}
+    for (const k of sortedKeys) {
+      const child = (v as Record<string, unknown>)[k]
+      if (child === undefined) continue
+      out[k] = normalize(child)
+    }
+    return out
+  }
+  try {
+    return JSON.stringify(normalize(args))
+  } catch {
+    // Defensive: a non-serializable input (BigInt, function) yields an
+    // unstable but unique enough fallback so the gate never throws.
+    return `__nonser__:${String(args)}`
+  }
+}
+
+/** Read the bash `command` field from a tool input shape. Returns `undefined`
+ *  for non-bash tools or malformed inputs (treat as general). */
+const bashCommandOf = (name: string, args: unknown): string | undefined => {
+  if (name !== "bash") return undefined
+  if (typeof args !== "object" || args === null) return undefined
+  const cmd = (args as { command?: unknown }).command
+  return typeof cmd === "string" ? cmd : undefined
+}
+
+export type DedupVerdict =
+  | { blocked: false }
+  | { blocked: true; observation: string; count: number; regime: "general" | "env" }
+
+/** Per-session dedup gate. State is a `Map<hashKey, number[]>` — the list of
+ *  turns at which the call was made. Lookups prune entries outside the
+ *  active window on every `record()` call (cheap; bounded by threshold). */
+export class DedupGate {
+  private readonly caps: DedupGateCaps
+  /** Hash key → ordered list of turns at which the call was issued (oldest
+   *  first). Bounded: pruned to entries within `window` on every record. */
+  private readonly history = new Map<string, number[]>()
+
+  constructor(caps: Partial<DedupGateCaps> = {}) {
+    this.caps = { ...DEFAULT_DEDUP_GATE_CAPS, ...caps }
+  }
+
+  /** Record a candidate dispatch. Returns `{blocked:false}` to proceed, or
+   *  `{blocked:true, observation, ...}` to short-circuit with the synthetic
+   *  observation message.
+   *
+   *  Even when BLOCKED the call is recorded — so a 4th identical attempt is
+   *  blocked the same as the 3rd (the model gets the same observation until
+   *  it changes tactic, which is the intended UX). This also keeps the state
+   *  trivially testable: the count returned matches the number of identical
+   *  calls observed including the current one. */
+  record(name: string, args: unknown, turn: number): DedupVerdict {
+    const bashCmd = bashCommandOf(name, args)
+    const env = bashCmd !== undefined && isEnvBashCommand(bashCmd)
+    const window = env ? this.caps.envWindow : this.caps.generalWindow
+    const threshold = env ? this.caps.envThreshold : this.caps.generalThreshold
+
+    const key = `${name} ${canonicalizeArgs(args)}`
+    const prior = this.history.get(key) ?? []
+    // Prune entries outside the active window (we count "within last N turns
+    // INCLUDING the current turn", so a turn is in-window when
+    // `turn - prior >= 0 && turn - prior < window`).
+    const kept: number[] = []
+    for (const t of prior) {
+      if (turn - t < window && turn - t >= 0) kept.push(t)
+    }
+    kept.push(turn)
+    this.history.set(key, kept)
+
+    if (kept.length < threshold) return { blocked: false }
+    return {
+      blocked: true,
+      count: kept.length,
+      regime: env ? "env" : "general",
+      observation: buildObservation({
+        name,
+        count: kept.length,
+        window,
+        env,
+      }),
+    }
+  }
+
+  /** Build a synthetic `tool_result` block for the blocked dispatch. The
+   *  caller wires this into the dispatch path so the loop sees a normal
+   *  observation (not an error) and the model gets the guidance text. */
+  static syntheticResult(id: string, observation: string): ToolResultBlock {
+    // Mirrors `dispatch-helpers.ts#resultBlock(id, content, false)`. Reused
+    // shape — the loop's tool_result pipeline handles this exactly like any
+    // other non-error observation.
+    return {
+      type: "tool_result",
+      tool_use_id: id,
+      content: observation,
+    }
+  }
+
+  /** Internal state size, for telemetry / assertions only. */
+  get size(): number {
+    return this.history.size
+  }
+}
+
+/** Render the observation text. Kept in a separate function so the exact
+ *  wording is in one place (and trivially editable without touching the
+ *  state machine). The env clause is appended ONLY in the env regime so the
+ *  general-regime guidance stays short. */
+const buildObservation = (args: {
+  name: string
+  count: number
+  window: number
+  env: boolean
+}): string => {
+  const base =
+    `[dedup-gate] This exact tool call (${args.name}) was issued ${args.count} times in ` +
+    `the last ${args.window} turns and produced the same observation each time. ` +
+    `Repeating it will not change state. Change tactic: try a different file, ` +
+    `a different command, or declare done.`
+  if (!args.env) return base
+  return (
+    `${base} Env-modifying commands like pip/npm/apt are NOT permitted in this ` +
+    `harness — if the environment is missing dependencies, declare the env ` +
+    `unavailable and stop.`
+  )
+}

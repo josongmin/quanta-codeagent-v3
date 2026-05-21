@@ -6,6 +6,7 @@ import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
+import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { AgentMode } from "./prompt"
@@ -211,6 +212,24 @@ export interface AgentConfig {
    * or messages.
    */
   run?: RunContext
+  /**
+   * Pre-flight dispatch dedup gate (T3, SOTA++ structural fix for bench
+   * Type F "Verify-Loop Stuck on Env"). When a {@link DedupGate} instance is
+   * present the dispatch seam consults it BEFORE the admissibility gate and
+   * short-circuits a too-frequently-repeated identical call with a synthetic
+   * tool_result observation. Absent ⇒ no gate, no allocation, dispatch is
+   * byte-identical to the pre-gate path. Constructed per-session by
+   * `runAgent` (one gate per run); `caps` overrides the default thresholds.
+   * The gate needs the current `turn` — read from `run.turn` (stamped per
+   * turn by the loop). With no `run` context the gate is bypassed (no turn
+   * source ⇒ no dedup window).
+   */
+  dedupGate?: DedupGate
+  /** Dedup-gate caps override (only consulted when `runAgent` constructs the
+   *  gate itself, i.e. caller did not pre-build `dedupGate`). Absent ⇒
+   *  {@link DEFAULT_DEDUP_GATE_CAPS}. Set `disabled:true` to opt out entirely
+   *  (gate not constructed, no consult cost). */
+  dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }
   /**
    * Permission stack opt-in (ADR-0046 — per-thread + per-host + post-denial
    * precedence). Absent / `enabled:false` ⇒ admissibility-gate skips the
