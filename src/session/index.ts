@@ -59,10 +59,12 @@ export {
 export {
   appendEnvelope,
   archiveSession,
+  assignMessageIds,
   deleteSession,
   forkSession,
   loadSessionById,
   renameSession,
+  rewindToMessage,
   saveSessionById,
   sessionEnvelopePath,
   unarchiveSession,

@@ -1,6 +1,7 @@
 import { rename, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
+import type { Message } from "@/llm"
 import { logger } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
 import type { SessionEnvelopeRecord } from "./envelope"
@@ -86,6 +87,12 @@ const contentBlockSchema = z.discriminatedUnion("type", [
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.array(contentBlockSchema),
+  /**
+   * Optional stable id for message-granularity rewind. Absent on legacy
+   * sessions → byte-identical default-OFF. Present only on sessions that
+   * pass through `assignMessageIds` (new sessions / rewind UX).
+   */
+  id: z.string().min(1).optional(),
 })
 const sessionMetaSchema = z.object({
   id: z.string().min(1),
@@ -283,4 +290,62 @@ export const appendEnvelope = async (
 ): Promise<void> => {
   const line = encodeSessionLine(record)
   await appendSessionLine(sessionEnvelopePath(sessionId), line)
+}
+
+/**
+ * Mint stable ids on any message that lacks one (Claude Desktop 1.7196.3
+ * parity — message-granularity rewind requires each message be addressable).
+ * Pure function: returns a new array; the input is not mutated. Messages
+ * that already carry an `id` are passed through byte-identically.
+ *
+ * Ids are minted via `crypto.randomUUID()` (matches the existing convention
+ * in this slice — see `writeSessionFile` and `forkSession`). Callers can
+ * pass an `idFor(index)` override for deterministic tests.
+ */
+export const assignMessageIds = (
+  messages: readonly Message[],
+  idFor?: (index: number) => string,
+): Message[] => {
+  return messages.map((m, i) => {
+    if (typeof m.id === "string" && m.id.length > 0) return { ...m }
+    return { ...m, id: idFor ? idFor(i) : crypto.randomUUID() }
+  })
+}
+
+/**
+ * Truncate `sessionId`'s transcript so the message with `msgId` is the LAST
+ * message — every message AFTER it is removed. The named message itself is
+ * preserved (Claude Desktop semantics: you rewind TO a checkpoint, not
+ * past it).
+ *
+ * Returns `{ removed }`. Missing session, empty transcript, and unknown
+ * `msgId` are no-ops returning `removed: 0` — never throws.
+ *
+ * The JSONL envelope log (ADR-0034) is NOT truncated here: it is an
+ * append-only event log, and downstream replay can intersect it with the
+ * current snapshot. (Phase-A scope; envelope truncation can be layered as
+ * a follow-up if a concrete need surfaces.)
+ */
+export const rewindToMessage = async (
+  sessionId: string,
+  msgId: string,
+): Promise<{ removed: number }> => {
+  const existing = await loadSessionById(sessionId)
+  if (existing === undefined) return { removed: 0 }
+  if (existing.messages.length === 0) return { removed: 0 }
+  const idx = existing.messages.findIndex((m) => m.id === msgId)
+  if (idx < 0) return { removed: 0 }
+  const removed = existing.messages.length - (idx + 1)
+  if (removed === 0) return { removed: 0 }
+  const truncated = existing.messages.slice(0, idx + 1)
+  const nextMeta: SessionMeta = { ...existing.meta, lastTouched: Date.now() }
+  const updated: SavedSession = {
+    ...existing,
+    meta: nextMeta,
+    messages: truncated,
+  }
+  const path = nextMeta.archived ? archivedFilePath(sessionId) : sessionFilePath(sessionId)
+  await writeSessionFile(path, JSON.stringify(updated))
+  await upsertMeta(nextMeta)
+  return { removed }
 }

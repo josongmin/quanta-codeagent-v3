@@ -9,6 +9,7 @@ import {
   listSessions,
   loadSessionById,
   renameSession,
+  rewindToMessage,
   SessionIdError,
   sessionFilePath,
   unarchiveSession,
@@ -79,6 +80,7 @@ const usage = (): string =>
     "  archive <id>                        archive a session",
     "  unarchive <id>                      unarchive a session",
     "  fork <id> [--title <t>] [--worktree] copy transcript to a new id",
+    "  rewind <id> <msg-id>                truncate transcript after msg-id",
     "  delete <id> [--force]               remove session file + index entry",
     "  path <id>                           print absolute file path",
     "",
@@ -373,6 +375,34 @@ const deriveWorktreeInfo = (
   return { repoRoot, worktreePath: cwd, branch: `fork-${remainder}` }
 }
 
+const cmdRewind = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
+  const unknown = checkUnknownArgs(args, 2, [], [])
+  if (unknown !== undefined) {
+    deps.err(errLine("rewind", `unexpected argument: ${unknown}`))
+    return 1
+  }
+  const id = args[0]
+  const msgId = args[1]
+  if (id === undefined || msgId === undefined) {
+    deps.err(errLine("rewind", "usage: rewind <id> <msg-id>"))
+    return 1
+  }
+  const existing = await loadSessionById(id)
+  if (existing === undefined) {
+    deps.err(errLine("rewind", `not found: ${id}`))
+    return 1
+  }
+  const result = await rewindToMessage(id, msgId)
+  if (result.removed === 0) {
+    // Could be: msg-id not in transcript, OR it was already the last message.
+    // Surface a clear, non-fatal message so the operator knows nothing changed.
+    deps.out(`rewind ${id}: no-op (msg-id not found or already last)\n`)
+    return 0
+  }
+  deps.out(`rewound ${id} → ${msgId} (removed ${result.removed} message(s))\n`)
+  return 0
+}
+
 const cmdDelete = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
   const unknown = checkUnknownArgs(args, 1, ["--force"], [])
   if (unknown !== undefined) {
@@ -482,6 +512,8 @@ export const runSessionCommand = async (
         return await cmdUnarchive(rest, deps)
       case "fork":
         return await cmdFork(rest, deps)
+      case "rewind":
+        return await cmdRewind(rest, deps)
       case "delete":
         return await cmdDelete(rest, deps)
       case "path":

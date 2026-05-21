@@ -1,6 +1,15 @@
 export interface Message {
   role: "user" | "assistant"
   content: ContentBlock[]
+  /**
+   * Optional stable id for message-granularity rewind UX (Claude Desktop
+   * 1.7196.3 parity). Absent on legacy sessions and on freshly-built
+   * Messages — `assignMessageIds` mints ids for new sessions; old sessions
+   * remain id-less to preserve the byte-identical default-OFF posture.
+   * Never sent to the LLM adapters: producers MUST strip / ignore it when
+   * shaping `StreamInput`.
+   */
+  id?: string
 }
 
 export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock
