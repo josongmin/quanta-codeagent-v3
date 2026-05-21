@@ -1,5 +1,5 @@
-import { isAbsolute, resolve } from "node:path"
 import { z } from "zod"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 /**
@@ -107,7 +107,19 @@ export const diagnosticsTool = (provider: DiagnosticsProvider): Tool<Input> => (
   isReadOnly: () => true,
   isConcurrencySafe: () => false,
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const abs = isAbsolute(input.path) ? input.path : resolve(ctx.cwd, input.path)
+    // S14: jail before opening — `path: "/etc/shadow"` would otherwise be
+    // opened by the LSP. The branded JailedPath is the only path the LSP
+    // provider may receive.
+    let abs: string
+    try {
+      abs = resolveJailed(input.path, ctx.cwd)
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
+    }
 
     let session: DiagnosticsSession | null
     try {

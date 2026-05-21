@@ -76,6 +76,12 @@ export const bashTool: Tool<Input> = {
   // Arbitrary shell side effects are unknowable; never run concurrently.
   isConcurrencySafe: () => false,
   hitlTier: bashHitlTier,
+  // S16: expose the raw shell command so the permission policy applies the
+  // HARD_DENY denylist UNIFORMLY to any tool that accepts a shell command,
+  // not just one whose `name === "bash"`. A future sibling shell tool
+  // (`shell`/`exec`/MCP `run`) only needs to set this method to opt into the
+  // same gate.
+  extractShellCommand: (input: Input): string => input.command ?? "",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const cmd = input.command

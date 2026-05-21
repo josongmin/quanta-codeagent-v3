@@ -72,10 +72,15 @@ export const dispatchTool = async (
     return deny(call.id, `Unknown tool: ${call.name}`, "unknown tool")
   }
 
+  // S16: populate `shellCommand` from the registry so the permission policy
+  // applies HARD_DENY uniformly to ANY tool that exposes a shell-command
+  // surface (`extractShellCommand` method) — not just one named "bash".
+  const shellCommand = registry.extractShellCommand(call.name, call.input)
   const action = {
     tool: call.name,
     input: call.input,
     isReadOnly: registry.isReadOnly(call.name),
+    ...(shellCommand !== null ? { shellCommand } : {}),
   }
 
   // SSOT pre-execute gate (see admissibility-gate.ts for the canonical order).

@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
+import { __resetRuntimeConfig } from "@/shared"
 import {
   FsJailError,
   fileExists,
@@ -50,11 +51,13 @@ describe("resolvePath", () => {
 
   test("absolute-over-baseDir no-op is restored with QUANTA_FS_JAIL=off", () => {
     process.env.QUANTA_FS_JAIL = "off"
+    __resetRuntimeConfig()
     try {
       const abs = join(dir, "abs.txt")
       expect(resolvePath(abs, "/some/other/base")).toBe(abs)
     } finally {
       delete process.env.QUANTA_FS_JAIL
+      __resetRuntimeConfig()
     }
   })
 
@@ -140,11 +143,13 @@ describe("FS jail (S6) — only when an explicit baseDir is passed", () => {
 
   test("QUANTA_FS_JAIL=off disables the jail even with a baseDir", () => {
     process.env.QUANTA_FS_JAIL = "off"
+    __resetRuntimeConfig()
     try {
       expect(resolvePath("/etc/hosts", dir)).toBe("/etc/hosts")
       expect(() => resolvePath("../../etc/hosts", dir)).not.toThrow()
     } finally {
       delete process.env.QUANTA_FS_JAIL
+      __resetRuntimeConfig()
     }
   })
 })

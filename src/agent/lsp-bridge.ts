@@ -59,6 +59,11 @@ const specFor = (filePath: string): ServerSpec | null => {
 
 /** Probe whether a server binary is launchable. Cached per process so a single
  *  agent run does not re-spawn `--version` for every diagnostics call. */
+/** Wall-clock budget for the `<bin> --version` availability probe. Set short
+ *  because the probe blocks tool registration / agent startup; a missing or
+ *  hung binary must NOT delay the whole session. */
+const LSP_AVAILABILITY_TIMEOUT_MS = 5_000
+
 const availabilityCache = new Map<string, boolean>()
 const isAvailable = async (bin: string): Promise<boolean> => {
   const cached = availabilityCache.get(bin)
@@ -68,7 +73,7 @@ const isAvailable = async (bin: string): Promise<boolean> => {
     const proc = Bun.spawn([bin, "--version"], { stdout: "pipe", stderr: "pipe" })
     const exit = await Promise.race([
       proc.exited,
-      new Promise<number>((r) => setTimeout(() => r(-1), 5_000)),
+      new Promise<number>((r) => setTimeout(() => r(-1), LSP_AVAILABILITY_TIMEOUT_MS)),
     ])
     try {
       proc.kill()

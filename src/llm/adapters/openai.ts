@@ -163,8 +163,12 @@ export function* finalizeCalls(pending: Map<number, PendingCall>): Generator<Str
     if (slot.args.trim()) {
       try {
         input = JSON.parse(slot.args)
-      } catch {
-        throw new LLMError(`Malformed tool input JSON for ${slot.id}`)
+      } catch (e) {
+        throw new LLMError(`Malformed tool input JSON for ${slot.id}`, {
+          kind: "stream_corrupt",
+          provider: "openai",
+          cause: e,
+        })
       }
     }
     yield { type: "tool_use_end", id: slot.id, input }
@@ -240,7 +244,7 @@ export class OpenAIAdapter implements LLMPort {
         })),
       })) as unknown as AsyncIterable<RawChunk>
     } catch (e) {
-      throw new LLMError(`OpenAI request failed: ${(e as Error).message}`, { cause: e })
+      throw LLMError.fromSdkError("openai", e)
     }
   }
 
@@ -256,8 +260,7 @@ export class OpenAIAdapter implements LLMPort {
     try {
       for await (const chunk of raw) yield* processChunk(chunk, st)
     } catch (e) {
-      if (e instanceof LLMError) throw e
-      throw new LLMError(`OpenAI stream error: ${(e as Error).message}`, { cause: e })
+      throw LLMError.fromSdkError("openai", e, "OpenAI stream error")
     }
 
     yield* finalizeCalls(st.pending)

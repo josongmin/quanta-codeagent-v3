@@ -11,6 +11,7 @@ import {
   type SessionMeta,
   saveSessionById,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 
 /**
  * HARD subprocess-spawn e2e for the session CLI.
@@ -152,6 +153,7 @@ describe("session CLI — subprocess e2e", () => {
     // The in-process pre-seeding code path (saveSessionById) reads this env
     // var the same way the subprocess does — so we set it in BOTH places.
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
 
   afterEach(() => {
@@ -161,6 +163,7 @@ describe("session CLI — subprocess e2e", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test(

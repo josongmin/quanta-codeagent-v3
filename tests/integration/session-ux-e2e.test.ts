@@ -15,6 +15,7 @@ import {
   saveSessionById,
   sessionFilePath,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 import { resolveResume } from "../../src/apps/cli/internal"
 import { runSessionCommand, type SessionCommandDeps } from "../../src/apps/cli/session-commands"
 
@@ -114,6 +115,7 @@ describe("session UX e2e (non-git lifecycle)", () => {
     envSnapshot = { ...process.env }
     sessionsDir = mkdtempSync(join(tmpdir(), "ux-e2e-sessions-"))
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(sessionsDir, { recursive: true, force: true })
@@ -121,6 +123,7 @@ describe("session UX e2e (non-git lifecycle)", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test("full lifecycle: ls > save > ls > show > rename > archive > unarchive > fork > delete > path", async () => {
@@ -288,6 +291,7 @@ describe("session UX e2e — worktree fork + cleanup", () => {
   beforeEach(() => {
     sessionsDir = mkdtempSync(join(tmpdir(), "ux-e2e-sessions-wt-"))
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(sessionsDir, { recursive: true, force: true })
@@ -295,6 +299,7 @@ describe("session UX e2e — worktree fork + cleanup", () => {
       rmSync(repoDir, { recursive: true, force: true })
       repoDir = undefined
     }
+    __resetRuntimeConfig()
   })
 
   test.skipIf(!HAS_GIT)(

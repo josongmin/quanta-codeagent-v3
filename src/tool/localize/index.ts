@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -132,9 +133,24 @@ export const localizeTool: Tool<Input> = {
       return
     }
 
+    // S14: jail the scope path BEFORE any rg invocation. Without this,
+    // `path: "/etc"` would scope the search to the host filesystem.
+    let scope: string | undefined
+    if (input.path !== undefined) {
+      try {
+        scope = resolveJailed(input.path, ctx.cwd)
+      } catch (e) {
+        if (e instanceof FsJailError) {
+          yield { type: "result", result: { ok: false, output: e.message } }
+          return
+        }
+        throw e
+      }
+    }
+
     const hits = new Map<string, Hit>()
     for (const term of tokens) {
-      await collectTerm(term, ctx, input.path, hits)
+      await collectTerm(term, ctx, scope, hits)
     }
 
     if (hits.size === 0) {

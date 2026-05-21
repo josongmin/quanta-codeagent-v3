@@ -18,6 +18,7 @@ import {
   saveSessionById,
   sessionsRoot,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 
 /**
  * Regression suite for Wave 1A / Wave 1B audit-finding fixes.
@@ -236,6 +237,7 @@ describe("MEDIUM-1 - real atomic rename leaves no .tmp residue after save", () =
     envSnapshot = { ...process.env }
     dir = mkdtempSync(join(tmpdir(), "atomic-rename-"))
     process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
@@ -243,6 +245,7 @@ describe("MEDIUM-1 - real atomic rename leaves no .tmp residue after save", () =
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test("saveSessionById leaves the final file and zero .tmp files", async () => {

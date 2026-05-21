@@ -124,11 +124,14 @@ describe("diagnostics tool — happy path with an injected fake client", () => {
   })
 
   test("ok:false when any error diagnostic is present", async () => {
+    // S14: paths now go through the FS jail (`ctx.cwd === "/repo"`). Use an
+    // in-jail abs path so the jail accepts it; the original `/abs/a.py` was
+    // an escape and is now refused upstream of the provider.
     const { result } = await run(diagnosticsTool(fakeProvider([diag()], {})), {
-      path: "/abs/a.py",
+      path: "/repo/a.py",
     })
     expect(result.ok).toBe(false)
-    expect(result.output).toContain("/abs/a.py: 1 error(s)")
+    expect(result.output).toContain("/repo/a.py: 1 error(s)")
   })
 
   test("ok:true when only warnings are present", async () => {

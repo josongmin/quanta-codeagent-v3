@@ -1,0 +1,23 @@
+id: skill-md-frontmatter
+title: SKILL.md 6-필드 frontmatter + Skills vs Extensions 분류
+section: 6
+subsystem: 스킬 — SKILL.md 분류
+order: 11
+maturity: L4
+status: new
+purpose: 'SKILL.md frontmatter 6-필드 strict schema (name/description/userInvocable/allowedTools/category/stability). category로 skill(LLM-callable) vs extension(시스템 전용) 분기. hand-roll YAML splitter — js-yaml 의존 0. empty allowedTools = NO tools (not "all", heuristic 금지). classify + assertAllowedTool host seam.'
+evidence:
+  code:
+    - src/skill/skill-frontmatter.ts
+    - src/skill/skill-vs-extension.ts
+  adrs: [40]
+  tests:
+    unit:
+      - tests/unit/skill-frontmatter-parse.test.ts
+      - tests/unit/skill-vs-extension.test.ts
+    integration:
+      - tests/integration/skill-md-fixtures.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '기존 src/skill/frontmatter.ts (lenient discover) 그대로 보존 — cache prefix byte-stability (ADR-0004) 회귀 0. 슬래시-명령 router는 follow-up.'

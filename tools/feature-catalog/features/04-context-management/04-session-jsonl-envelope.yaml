@@ -1,0 +1,26 @@
+id: session-jsonl-envelope
+title: Session JSONL envelope (5 top-level + 17+2 turn_context) (ADR-0034)
+section: 4
+subsystem: Session 영속화 / append-only rail
+order: 4
+maturity: L4
+status: new
+purpose: '`<sessionsRoot>/<id>.jsonl` append-only event log. 5 top-level discriminated-union types (session_meta / turn_context / event_msg / response_item / thread_spawn) + turn_context는 Codex 17 필드 + v3-extension 2 (parent_thread_id / thread_role)로 subagent 계보 영속. canonical key-sorted encoder로 byte-identical replay 보존. snapshot rail(`<id>.json`)은 그대로 — store.ts에 `appendEnvelope(id, record)` add-only seam만 추가.'
+evidence:
+  code:
+    - src/session/envelope.ts
+    - src/session/envelope-encoder.ts
+    - src/session/store.ts
+    - src/session/index.ts
+  adrs: [31]
+  tests:
+    unit:
+      - tests/unit/session-envelope-schema.test.ts
+      - tests/unit/session-envelope-encoding.test.ts
+      - tests/unit/session-envelope-streaming.test.ts
+    integration:
+      - tests/integration/session-envelope-store-seam.test.ts
+    contract: []
+knobs: [QUANTA_SESSIONS_DIR]
+deliberate_hold: null
+notes: '66 신규 단위 + 3 integration. snapshot↔JSONL 자동 동기는 의도적으로 두 rail 분리. subagent thread_spawn record로 SOTA hardening 계보를 영속 layer까지 확장.'

@@ -1,0 +1,25 @@
+id: plan-mode-dispatch-block
+title: Plan-mode dispatch-seam mutating block
+section: 1
+subsystem: Collaboration mode (ADR-0036)
+order: 10
+maturity: L3
+status: new
+purpose: Plan collaboration mode blocks every mutating tool at the dispatch seam via an explicit per-tool table (write/edit/scripted_replace/bash/update_working_state). Unknown tools throw UnknownToolError rather than silently passing. Mode transitions are sticky and only flip on a developer-channel mode=plan / mode=default directive. Standalone module — loop wiring is a follow-up.
+evidence:
+  code:
+    - src/agent/mode.ts
+    - src/agent/dispatch-seam-guard.ts
+  adrs: [35]
+  tests:
+    unit:
+      - tests/unit/mode-mutating-table.test.ts
+      - tests/unit/mode-plan-block.test.ts
+      - tests/unit/mode-transition.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: Loop-level wiring of checkDispatchAllowed into the real dispatch site is deferred (see ADR-0036 §한계). Module ships standalone-callable.
+  promotion_path: Patch src/agent/dispatch.ts to call checkDispatchAllowed before ToolRegistry.run; surface deny payload as a tool_result text body.
+notes: ''

@@ -1,16 +1,17 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { runtimeConfig } from "@/shared"
 
 /**
  * Session-store path resolution.
  *
  * Default root: `~/.quanta/sessions`. The `QUANTA_SESSIONS_DIR` env var
- * overrides this wholesale — same override pattern as `QUANTA_MEMORY_PATH`
- * (see `src/apps/cli/internal.ts:84`). Read at call time so tests can swap
- * roots per-case via `process.env`.
+ * overrides this wholesale. Validation lives in `runtime-config.ts`; the
+ * value is frozen at startup so a test that wants to swap roots per-case
+ * calls `__resetRuntimeConfig()` instead of mutating `process.env`.
  */
 export const sessionsRoot = (): string =>
-  process.env.QUANTA_SESSIONS_DIR ?? join(homedir(), ".quanta", "sessions")
+  runtimeConfig().sessionsDir ?? join(homedir(), ".quanta", "sessions")
 
 /** Thrown by {@link sanitizeId} when an id contains characters that would
  *  escape `sessionsRoot()` or otherwise misbehave as a filesystem name. */

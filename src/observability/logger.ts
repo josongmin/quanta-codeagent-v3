@@ -1,4 +1,4 @@
-import type { LogLevel } from "@/shared"
+import { type LogLevel, runtimeConfig } from "@/shared"
 import type { LogRecord, LogSink, StructuredLoggerOptions } from "./types"
 
 /** Severity ordering. Mirrors the convention in `@/shared`'s line logger
@@ -6,16 +6,12 @@ import type { LogRecord, LogSink, StructuredLoggerOptions } from "./types"
  *  without this slice re-implementing or importing its private `write`. */
 const ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
 
-const isLogLevel = (v: string | undefined): v is LogLevel =>
-  v === "debug" || v === "info" || v === "warn" || v === "error"
-
-/** Resolve the effective threshold: explicit option ›› `QUANTA_LOG_LEVEL` ›› `"info"`.
- *  Same env var and default as `@/shared`'s logger, intentionally. */
-const resolveLevel = (explicit: LogLevel | undefined): LogLevel => {
-  if (explicit !== undefined) return explicit
-  const env = process.env.QUANTA_LOG_LEVEL
-  return isLogLevel(env) ? env : "info"
-}
+/** Resolve the effective threshold: explicit option ›› `runtimeConfig().logLevel` ›› default.
+ *  S5: a single owner of the env (`runtime-config.ts`) validates `QUANTA_LOG_LEVEL`
+ *  once at startup — a garbage value falls back to `info` with a stderr warn,
+ *  rather than silently dropping every log line. */
+const resolveLevel = (explicit: LogLevel | undefined): LogLevel =>
+  explicit ?? runtimeConfig().logLevel
 
 const defaultSink: LogSink = (line) => {
   // stderr only: stdout is reserved for the agent stream (same rule as @/shared).

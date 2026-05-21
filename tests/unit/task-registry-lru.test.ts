@@ -118,7 +118,7 @@ describe("TaskRegistry — LRU eviction (maxRetained)", () => {
     // A third settled record via stop() — overflows the cap.
     reg.register({ id: "running-then-stopped", description: "x" })
     await tick()
-    expect(reg.stop("running-then-stopped")).toBe(true)
+    expect(reg.forceStop("running-then-stopped")).toBe(true)
 
     expect(reg.get("completed-1")).toBeUndefined()
     expect(reg.get("completed-2")?.status).toBe("completed")

@@ -103,9 +103,12 @@ describe("agent-tool — req.signal wiring (HIGH regression)", () => {
     const ev = await run(agent, { prompt: "never ends", background: true }, ctxAt(0))
     if (ev.type !== "result") throw new Error("expected result")
     const taskId = (ev.result.output.match(/task_id: (\S+)/) as RegExpMatchArray)[1] as string
+    const ownerToken = (
+      ev.result.output.match(/owner_token: (\S+)/) as RegExpMatchArray
+    )[1] as string
 
     // Stop it. The registry aborts its controller; the runner's listener fires.
-    const s = await run(stop, { task_id: taskId }, ctxAt(0))
+    const s = await run(stop, { task_id: taskId, owner_token: ownerToken }, ctxAt(0))
     if (s.type !== "result") throw new Error("expected result")
     expect(s.result.ok).toBe(true)
 
@@ -142,12 +145,15 @@ describe("agent-tool — req.signal wiring (HIGH regression)", () => {
     const ev = await run(agent, { prompt: "x", background: true }, ctxAt(0))
     if (ev.type !== "result") throw new Error("expected result")
     const taskId = (ev.result.output.match(/task_id: (\S+)/) as RegExpMatchArray)[1] as string
+    const ownerToken = (
+      ev.result.output.match(/owner_token: (\S+)/) as RegExpMatchArray
+    )[1] as string
 
-    const first = await run(stop, { task_id: taskId }, ctxAt(0))
+    const first = await run(stop, { task_id: taskId, owner_token: ownerToken }, ctxAt(0))
     if (first.type !== "result") throw new Error("expected result")
     expect(first.result.ok).toBe(true)
 
-    const second = await run(stop, { task_id: taskId }, ctxAt(0))
+    const second = await run(stop, { task_id: taskId, owner_token: ownerToken }, ctxAt(0))
     if (second.type !== "result") throw new Error("expected result")
     expect(second.result.ok).toBe(false)
     expect(second.result.output).toContain("unknown or already settled")
@@ -162,6 +168,9 @@ describe("agent-tool — req.signal wiring (HIGH regression)", () => {
     const ev = await run(agent, { prompt: "x", background: true }, ctxAt(0))
     if (ev.type !== "result") throw new Error("expected result")
     const taskId = (ev.result.output.match(/task_id: (\S+)/) as RegExpMatchArray)[1] as string
+    const ownerToken = (
+      ev.result.output.match(/owner_token: (\S+)/) as RegExpMatchArray
+    )[1] as string
 
     // W1-D / W2 audit fix: previous body raced settle Promises against
     // `setTimeout(5)` and `setTimeout(100)` to assert "running ⇒ pending"
@@ -190,7 +199,7 @@ describe("agent-tool — req.signal wiring (HIGH regression)", () => {
     // Now stop. waitForSettle must resolve via the internal event handler
     // before any further micro-task turn.
     const settle = reg.waitForSettle(taskId)
-    await run(stop, { task_id: taskId }, ctxAt(0))
+    await run(stop, { task_id: taskId, owner_token: ownerToken }, ctxAt(0))
     expect(await probe(settle)).toBe("settled")
     expect(reg.get(taskId)?.status).toBe("stopped")
   })

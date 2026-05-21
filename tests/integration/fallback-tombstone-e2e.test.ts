@@ -49,7 +49,7 @@ class Fallback implements LLMPort {
 
 describe("GAP 4 — FallbackLLM + tombstone through runAgent", () => {
   test("primary partial then 529 ⇒ fallback completes; only post-reset text kept", async () => {
-    const overload = new LLMError("529 Overloaded: upstream provider overloaded_error")
+    const overload = new LLMError("529 Overloaded", { kind: "overloaded", statusCode: 529 })
     // Status 529 makes isFallbackTrigger() match unconditionally.
     ;(overload as unknown as { status: number }).status = 529
 

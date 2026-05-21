@@ -1,0 +1,23 @@
+id: plugin-manifest
+title: 플러그인 매니페스트 (.quanta-plugin/plugin.json + .mcp.json + skills/)
+section: 6
+subsystem: 플러그인 — 매니페스트 + 디스커버리
+order: 10
+maturity: L4
+status: new
+purpose: '`.quanta-plugin/plugin.json` (strict Zod) + 옵셔널 `.mcp.json` + `skills/<name>/SKILL.md` 3-surface 레이아웃. Codex `.codex-plugin/` 패턴을 v3 path 명으로 흡수 (RFC §1.6). loader는 cause-typed PluginManifestError 분기 — silent fallback 0. discovery는 depth 4 cap + node_modules/.git/dot-dir skip + lex sort.'
+evidence:
+  code:
+    - src/skill/plugin-manifest.ts
+    - src/skill/plugin-loader.ts
+  adrs: [39]
+  tests:
+    unit:
+      - tests/unit/plugin-manifest-schema.test.ts
+      - tests/unit/plugin-loader.test.ts
+    integration:
+      - tests/integration/plugin-discovery.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Capability closed enum (Interactive/Read/Write). plugin runtime loader 호스트 통합은 follow-up.'

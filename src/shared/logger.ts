@@ -1,14 +1,23 @@
-export type LogLevel = "debug" | "info" | "warn" | "error"
+/**
+ * Structured stderr logger.
+ *
+ * Threshold gating reads from {@link runtimeConfig} on every `write` call so
+ * an env override applied AFTER module load (integration tests, child-spawn
+ * harness) is observed. The config itself is frozen at first access — see
+ * `./runtime-config.ts` — so the threshold doesn't churn within a run.
+ *
+ * Logs go to stderr so stdout stays reserved for the agent stream.
+ */
+import { type LogLevel, runtimeConfig } from "./runtime-config"
+
+export type { LogLevel }
 
 const ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
 
-const threshold: LogLevel = (process.env.QUANTA_LOG_LEVEL as LogLevel) ?? "info"
-
 const write = (level: LogLevel, msg: string, meta?: unknown): void => {
-  if (ORDER[level] < ORDER[threshold]) return
+  if (ORDER[level] < ORDER[runtimeConfig().logLevel]) return
   const line = `[${level}] ${msg}`
   const text = meta === undefined ? line : `${line} ${JSON.stringify(meta)}`
-  // Logs go to stderr so stdout stays reserved for the agent stream.
   process.stderr.write(`${text}\n`)
 }
 

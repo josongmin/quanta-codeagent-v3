@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { __resetRuntimeConfig } from "@/shared"
 import { FsJailError, readFile, resolvePath, writeFile } from "@/storage"
 import type { ToolContext, ToolResult } from "@/tool"
 import { editTool } from "@/tool/edit"
@@ -27,9 +28,11 @@ afterAll(() => {
 
 beforeEach(() => {
   delete process.env.QUANTA_FS_JAIL
+  __resetRuntimeConfig()
 })
 afterEach(() => {
   delete process.env.QUANTA_FS_JAIL
+  __resetRuntimeConfig()
 })
 
 const ctx = (): ToolContext => ({ cwd: jail, signal: new AbortController().signal })
@@ -75,6 +78,7 @@ describe("resolvePath jail enforcement", () => {
 
   test("QUANTA_FS_JAIL=off restores escape (opt-out works)", () => {
     process.env.QUANTA_FS_JAIL = "off"
+    __resetRuntimeConfig()
     expect(resolvePath("/etc/hosts", jail)).toBe("/etc/hosts")
     expect(() => resolvePath("../../etc/hosts", jail)).not.toThrow()
   })
@@ -157,6 +161,7 @@ describe("read/write/edit tools DENY escapes (ok:false, no throw, no write)", ()
 
   test("QUANTA_FS_JAIL=off lets the read tool escape again (opt-out)", async () => {
     process.env.QUANTA_FS_JAIL = "off"
+    __resetRuntimeConfig()
     const r = await drive(readTool, { path: join(outside, "secret.txt") })
     expect(r.ok).toBe(true)
     expect(r.output).toBe("1\tTOP-SECRET")

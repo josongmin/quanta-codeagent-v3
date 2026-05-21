@@ -200,23 +200,35 @@ const HARD_DENY: readonly RegExp[] = HARD_DENY_RULES.map((r) => r.pattern)
  *  `hardDenyReason()` for the projected check. */
 export { HARD_DENY_RULES, type HardDenyRule }
 
-const bashCommand = (input: unknown): string => {
-  if (input && typeof input === "object" && "command" in input) {
-    const c = (input as { command: unknown }).command
-    return typeof c === "string" ? c : ""
-  }
-  return ""
+/** Last-resort extraction for actions whose dispatcher did NOT populate
+ *  `shellCommand` (legacy callers / tests). Modern call sites populate the
+ *  field via `ToolRegistry.extractShellCommand`. This back-compat probe ONLY
+ *  triggers for `bash` so it cannot widen the gate; new shell tools must use
+ *  the typed registry-populated path. */
+const legacyBashCommand = (action: ToolAction): string | null => {
+  if (action.tool !== "bash") return null
+  const input = action.input
+  if (input === null || typeof input !== "object" || !("command" in input)) return null
+  const c = (input as { command: unknown }).command
+  return typeof c === "string" ? c : null
 }
 
-/** Returns the HARD_DENY reason string for a bash action, or null if it does
- *  not match. Path-independent dangerous patterns always win first, before
- *  mode. HARD_DENY hits ARE the `hand-off-required` tier — they cross a
- *  security boundary that no agent mode can authorize. Exposed so the
- *  dispatch seam can phrase the deny message as a human-handoff request when
- *  the HITL 4-tier gate is enabled. */
+/** Returns the HARD_DENY reason string for any shell-equivalent action, or
+ *  null if no pattern matches. Path-independent dangerous patterns always win
+ *  first, before mode. HARD_DENY hits ARE the `hand-off-required` tier —
+ *  they cross a security boundary that no agent mode can authorize.
+ *
+ *  S16 — STRUCTURAL CHANGE: this previously gated on `action.tool === "bash"`,
+ *  which meant any sibling shell tool (a future `shell`/`exec`/MCP `run`, a
+ *  typo'd `Bash`) silently sidestepped the entire dangerous-command denylist.
+ *  Now the gate fires on EVERY action whose `shellCommand` is set — populated
+ *  by the dispatch seam from `ToolRegistry.extractShellCommand` which in turn
+ *  reads each tool's own `extractShellCommand` method. Tools that don't
+ *  represent shell commands leave `shellCommand` unset and skip the gate. */
 export const hardDenyReason = (action: ToolAction): string | null => {
-  if (action.tool !== "bash") return null
-  const cmd = bashCommand(action.input)
+  const cmd =
+    typeof action.shellCommand === "string" ? action.shellCommand : legacyBashCommand(action)
+  if (cmd === null || cmd.length === 0) return null
   for (const pat of HARD_DENY) {
     if (pat.test(cmd)) return `Blocked dangerous command: ${cmd}`
   }

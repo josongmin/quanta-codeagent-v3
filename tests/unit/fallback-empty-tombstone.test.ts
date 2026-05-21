@@ -25,7 +25,7 @@ class ScriptedProvider implements LLMPort {
   async *stream(): AsyncIterable<StreamEvent> {
     for (const ev of this.script.events) yield ev
     if (this.script.throwAfter) {
-      throw new LLMError("529 overloaded")
+      throw new LLMError("529 overloaded", { kind: "overloaded", statusCode: 529 })
     }
   }
 }

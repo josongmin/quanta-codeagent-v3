@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -25,10 +26,27 @@ export const grepTool: Tool<Input> = {
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     yield { type: "progress", message: `searching for ${input.pattern}…` }
 
+    // S14: jail-validate the model-supplied path BEFORE building argv.
+    // Without this, `path: "/etc"` would escape the workspace via the
+    // ripgrep subprocess; the storage seam's `resolveJailed` is the only
+    // legitimate way to construct a `JailedPath`.
+    let jailedPath: string | undefined
+    if (input.path !== undefined) {
+      try {
+        jailedPath = resolveJailed(input.path, ctx.cwd)
+      } catch (e) {
+        if (e instanceof FsJailError) {
+          yield { type: "result", result: { ok: false, output: e.message } }
+          return
+        }
+        throw e
+      }
+    }
+
     const parts = ["rg", "--line-number", "--no-heading", "--color=never"]
     if (input.glob) parts.push("-g", sq(input.glob))
     parts.push("-e", sq(input.pattern))
-    if (input.path) parts.push(sq(input.path))
+    if (jailedPath !== undefined) parts.push(sq(jailedPath))
 
     const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
 

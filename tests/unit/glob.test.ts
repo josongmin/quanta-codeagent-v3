@@ -53,13 +53,27 @@ describe("globTool", () => {
     expect(r.output.split("\n").sort()).toEqual(["a.ts", "b.ts", join("src", "nested", "deep.ts")])
   })
 
-  test("explicit path overrides ctx.cwd", async () => {
+  test("explicit path overrides ctx.cwd (in-jail subdir)", async () => {
+    // S14: globTool's explicit `path` is now JAIL-VALIDATED — must resolve
+    // inside ctx.cwd. The old test used `tmpdir()` siblings; that's an
+    // intentional escape under the new contract and is rejected with
+    // `Path escapes the working-directory jail`. We test the legitimate
+    // "override to a SUBDIR of cwd" path which is what real callers use.
+    const sub = join(dir, "sub-override")
+    mkdirSync(sub, { recursive: true })
+    writeFileSync(join(sub, "only.ts"), "x")
+    const r = await run({ pattern: "*.ts", path: sub }, dir)
+    expect(r.ok).toBe(true)
+    expect(r.output).toBe("only.ts")
+  })
+
+  test("explicit path OUTSIDE ctx.cwd is REFUSED (S14)", async () => {
     const other = mkdtempSync(join(tmpdir(), "glob-test-other-"))
     try {
       writeFileSync(join(other, "only.ts"), "x")
       const r = await run({ pattern: "*.ts", path: other }, dir)
-      expect(r.ok).toBe(true)
-      expect(r.output).toBe("only.ts")
+      expect(r.ok).toBe(false)
+      expect(r.output).toContain("escapes the working-directory jail")
     } finally {
       rmSync(other, { recursive: true, force: true })
     }

@@ -1,7 +1,12 @@
 import { rename, unlink } from "node:fs/promises"
+import { join } from "node:path"
+import { z } from "zod"
+import { logger } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
+import type { SessionEnvelopeRecord } from "./envelope"
+import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
 import { removeFromIndex, upsertMeta } from "./index-store"
-import { archivedFilePath, sessionFilePath } from "./paths"
+import { archivedFilePath, sessionFilePath, sessionsRoot } from "./paths"
 import { type SavedSession, type SavePayload, SESSION_VERSION, type SessionMeta } from "./types"
 
 /**
@@ -40,38 +45,99 @@ const writeSessionFile = async (path: string, body: string): Promise<void> => {
   }
 }
 
-/** Best-effort read+parse of a `SavedSession` JSON. Returns undefined on any
- * failure (missing, parse error, wrong shape). */
+/**
+ * S19: zod-validated SavedSession schema. Every Message — including nested
+ * ContentBlock — must shape-check before the file is accepted.
+ *
+ * Why this matters: the prior validator only checked the envelope, then
+ * `parsed as SavedSession` cast the messages straight through. A corrupt or
+ * forged session file could plant arbitrary objects into the working-memory
+ * buffer that the agent loop would later happily feed to the LLM (or worse,
+ * to a tool that duck-reads the content shape). Reject the whole file on
+ * element-level mismatch — better to refuse a poisoned resume than to
+ * silently load it.
+ */
+const textBlockSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+})
+const toolUseBlockSchema = z.object({
+  type: z.literal("tool_use"),
+  id: z.string(),
+  name: z.string(),
+  input: z.unknown(),
+})
+const toolResultBlockSchema = z.object({
+  type: z.literal("tool_result"),
+  tool_use_id: z.string(),
+  content: z.string(),
+  is_error: z.boolean().optional(),
+})
+const thinkingBlockSchema = z.object({
+  type: z.literal("thinking"),
+  thinking: z.string(),
+})
+const contentBlockSchema = z.discriminatedUnion("type", [
+  textBlockSchema,
+  toolUseBlockSchema,
+  toolResultBlockSchema,
+  thinkingBlockSchema,
+])
+const messageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.array(contentBlockSchema),
+})
+const sessionMetaSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  cwd: z.string(),
+  createdAt: z.number().finite(),
+  lastTouched: z.number().finite(),
+  archived: z.boolean(),
+})
+const savedSessionSchema = z.object({
+  version: z.literal(SESSION_VERSION),
+  meta: sessionMetaSchema,
+  reason: z.string(),
+  turns: z.number().int().nonnegative(),
+  messages: z.array(messageSchema),
+})
+
+/** Strict read+parse of a `SavedSession` JSON. Returns `undefined` on
+ *  missing/parse-error AND on shape mismatch — the latter is LOGGED with the
+ *  zod error so an operator with a corrupt or forged session sees why the
+ *  file was refused, instead of just an empty result. */
 const readSavedSession = async (path: string): Promise<SavedSession | undefined> => {
+  if (!(await fileExists(path))) return undefined
+  let raw: string
   try {
-    if (!(await fileExists(path))) return undefined
-    const raw = await readFile(path)
-    const parsed = JSON.parse(raw) as Partial<SavedSession>
-    if (
-      parsed.version !== SESSION_VERSION ||
-      typeof parsed.reason !== "string" ||
-      typeof parsed.turns !== "number" ||
-      !Array.isArray(parsed.messages) ||
-      typeof parsed.meta !== "object" ||
-      parsed.meta === null
-    ) {
-      return undefined
-    }
-    const m = parsed.meta as Partial<SessionMeta>
-    if (
-      typeof m.id !== "string" ||
-      typeof m.title !== "string" ||
-      typeof m.cwd !== "string" ||
-      typeof m.createdAt !== "number" ||
-      typeof m.lastTouched !== "number" ||
-      typeof m.archived !== "boolean"
-    ) {
-      return undefined
-    }
-    return parsed as SavedSession
-  } catch {
+    raw = await readFile(path)
+  } catch (e) {
+    logger.warn("session: read failed", {
+      path,
+      error: e instanceof Error ? e.message : String(e),
+    })
     return undefined
   }
+  let json: unknown
+  try {
+    json = JSON.parse(raw)
+  } catch (e) {
+    logger.warn("session: malformed JSON — refusing to load", {
+      path,
+      error: e instanceof Error ? e.message : String(e),
+    })
+    return undefined
+  }
+  const result = savedSessionSchema.safeParse(json)
+  if (!result.success) {
+    logger.warn("session: schema mismatch — refusing to load", {
+      path,
+      issues: result.error.issues.slice(0, 5),
+    })
+    return undefined
+  }
+  return result.data as SavedSession
 }
 
 /** Delete a file if it exists; swallow ENOENT-style failures. */
@@ -202,4 +268,19 @@ export const deleteSession = async (id: string): Promise<void> => {
   await removeFileIfExists(sessionFilePath(id))
   await removeFileIfExists(archivedFilePath(id))
   await removeFromIndex(id)
+}
+
+/** Path of the per-session JSONL event log (ADR-0034). Lives next to the
+ *  snapshot JSON at `<sessionsRoot>/<id>.jsonl`. */
+export const sessionEnvelopePath = (id: string): string => join(sessionsRoot(), `${id}.jsonl`)
+
+/** Append-only seam for the JSONL envelope log (ADR-0034). Existing
+ *  snapshot-based methods (saveSessionById/loadSessionById/…) are NOT
+ *  affected — this is an additive rail. */
+export const appendEnvelope = async (
+  sessionId: string,
+  record: SessionEnvelopeRecord,
+): Promise<void> => {
+  const line = encodeSessionLine(record)
+  await appendSessionLine(sessionEnvelopePath(sessionId), line)
 }

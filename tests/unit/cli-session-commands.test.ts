@@ -15,6 +15,7 @@ import {
   saveSessionById,
   sessionFilePath,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 import { runSessionCommand, type SessionCommandDeps } from "../../src/apps/cli/session-commands"
 
 /**
@@ -109,6 +110,7 @@ describe("runSessionCommand", () => {
     envSnapshot = { ...process.env }
     dir = mkdtempSync(join(tmpdir(), "cli-session-"))
     process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
@@ -120,6 +122,7 @@ describe("runSessionCommand", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test("ls: lists active sessions only by default", async () => {

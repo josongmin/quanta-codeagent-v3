@@ -158,7 +158,7 @@ describe("buildSessionFeatures — cleanup() stops running tasks", () => {
     // Two tasks: one will be manually stopped first.
     const idA = registerStuck(reg)
     const idB = registerStuck(reg)
-    expect(reg.stop(idA)).toBe(true)
+    expect(reg.forceStop(idA)).toBe(true)
     expect(reg.get(idA)?.status).toBe("stopped")
 
     const winner = await raceTimer(cleanup(), 100)

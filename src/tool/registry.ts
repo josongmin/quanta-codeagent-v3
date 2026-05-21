@@ -1,6 +1,6 @@
 import { join } from "node:path"
-import { ToolExecutionError, ToolInputError } from "@/shared"
-import { capToolOutput, envMaxChars, envSpillKeep } from "./output-spill"
+import { runtimeConfig, ToolExecutionError, ToolInputError } from "@/shared"
+import { capToolOutput, DEFAULT_SPILL_KEEP, DEFAULT_TOOL_OUTPUT_MAX } from "./output-spill"
 import { zodToJsonSchema } from "./schema"
 import type { Tool, ToolContext, ToolResult, ToolSpec } from "./types"
 
@@ -30,6 +30,19 @@ export class ToolRegistry {
       description: t.description,
       input_schema: zodToJsonSchema(t.inputSchema),
     }))
+  }
+
+  /** S16: extract a shell command from a tool call when the tool implements
+   *  `extractShellCommand`. Returns `null` for tools that don't accept a
+   *  shell command, OR when input validation fails. Permission policy uses
+   *  this to apply HARD_DENY uniformly across every shell-equivalent tool
+   *  (bash, future `shell`/`exec`/MCP `run`), instead of hardcoding `bash`. */
+  extractShellCommand(name: string, rawInput: unknown): string | null {
+    const tool = this.tools.get(name)
+    if (!tool || tool.extractShellCommand === undefined) return null
+    const parsed = tool.inputSchema.safeParse(rawInput)
+    if (!parsed.success) return null
+    return tool.extractShellCommand(parsed.data)
   }
 
   /** Validate then ask the tool whether this call may run concurrently with
@@ -76,10 +89,12 @@ export class ToolRegistry {
     if (result === undefined) {
       throw new ToolExecutionError(`Tool ${name} produced no result`)
     }
+    // S5: read tunables from the frozen runtimeConfig — no per-call env reads.
+    const cfg = runtimeConfig()
     const capped = capToolOutput(result.output, {
-      maxChars: envMaxChars(process.env),
+      maxChars: cfg.toolOutputMaxChars ?? DEFAULT_TOOL_OUTPUT_MAX,
       spillDir: join(ctx.cwd, ".quanta", "tool-output"),
-      spillKeep: envSpillKeep(process.env),
+      spillKeep: cfg.toolOutputSpillKeep ?? DEFAULT_SPILL_KEEP,
     })
     if (capped.output === result.output) return result
     // Route the spill path (if any) into the typed `evidence.fullLogPath` so

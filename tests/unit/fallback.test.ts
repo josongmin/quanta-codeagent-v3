@@ -29,8 +29,12 @@ class ScriptedLLM implements LLMPort {
   }
 }
 
-const overload = (): LLMError => new LLMError('overloaded_error: {"type":"overloaded_error"}')
-const status529 = (): LLMError => Object.assign(new LLMError("HTTP 529"), { status: 529 })
+// S1: typed LLMError. Tests construct errors with their classification
+// explicit via `kind`; the old "message-string contains '529'" path was the
+// regex-routing surface we structurally removed.
+const overload = (): LLMError =>
+  new LLMError("overloaded_error", { kind: "overloaded", statusCode: 529 })
+const status529 = (): LLMError => new LLMError("HTTP 529", { kind: "overloaded", statusCode: 529 })
 const collect = async (it: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> => {
   const out: StreamEvent[] = []
   for await (const ev of it) out.push(ev)
@@ -40,35 +44,28 @@ const text = (t: string): StreamEvent => ({ type: "text_delta", delta: t })
 const stop = (): StreamEvent => ({ type: "message_stop", stop_reason: "end_turn" })
 
 describe("isFallbackTrigger classification", () => {
-  test("trigger: 529 status / overloaded / provider-unavailable phrasings", () => {
+  test("trigger: structured `overloaded` / `server_error` / `network` kinds", () => {
     expect(isFallbackTrigger(status529())).toBe(true)
-    for (const m of [
-      'overloaded_error: {"type":"overloaded_error"}',
-      "HTTP 529 overloaded",
-      "Repeated 529 Overloaded errors",
-      "503 service unavailable",
-      "no healthy upstream",
-      "upstream connect error",
-    ]) {
-      expect(isFallbackTrigger(new LLMError(m))).toBe(true)
-    }
+    expect(isFallbackTrigger(new LLMError("503", { kind: "server_error" }))).toBe(true)
+    expect(isFallbackTrigger(new LLMError("ECONNRESET", { kind: "network" }))).toBe(true)
+    // fromSdkError classifies real provider shapes:
+    expect(isFallbackTrigger(LLMError.fromSdkError("anthropic", { status: 529 }))).toBe(true)
+    expect(isFallbackTrigger(LLMError.fromSdkError("openai", { status: 502 }))).toBe(true)
   })
 
   test("non-trigger: auth/client/shape errors are rethrown immediately", () => {
-    for (const m of [
-      "401 invalid api key",
-      "400 invalid request",
-      "404 not found",
-      "malformed response",
-      "403 unauthorized",
-    ]) {
-      expect(isFallbackTrigger(new LLMError(m))).toBe(false)
-    }
+    expect(isFallbackTrigger(new LLMError("auth", { kind: "auth" }))).toBe(false)
+    expect(isFallbackTrigger(new LLMError("bad request", { kind: "bad_request" }))).toBe(false)
+    expect(isFallbackTrigger(new LLMError("not found", { kind: "not_found" }))).toBe(false)
+    expect(isFallbackTrigger(new LLMError("stream corrupt", { kind: "stream_corrupt" }))).toBe(
+      false,
+    )
+    // fromSdkError on 401:
+    expect(isFallbackTrigger(LLMError.fromSdkError("openai", { status: 401 }))).toBe(false)
   })
 
-  test("non-trigger: plain transient (429/timeout) is not a provider swap", () => {
-    expect(isFallbackTrigger(new LLMError("429 rate limit"))).toBe(false)
-    expect(isFallbackTrigger(new LLMError("request timeout"))).toBe(false)
+  test("non-trigger: rate_limit is same-turn retry, NOT a provider swap", () => {
+    expect(isFallbackTrigger(new LLMError("429", { kind: "rate_limit" }))).toBe(false)
   })
 
   test("non-LLMError is never a trigger", () => {

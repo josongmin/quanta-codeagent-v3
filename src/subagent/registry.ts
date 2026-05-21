@@ -2,6 +2,15 @@ import type { SubagentResult } from "./types"
 
 export type TaskStatus = "running" | "completed" | "failed" | "stopped"
 
+/**
+ * S17 — Unforgeable per-task capability token. `register()` returns this
+ * alongside the task id; the spawner stashes the token and surrenders it
+ * back to `stop(id, ownerToken)`. Without the matching token, `stop()`
+ * refuses — a sibling subagent that learns another's `id` cannot DoS-cancel
+ * it. Generated via `crypto.randomUUID()` so the token is 128-bit unguessable.
+ */
+export type TaskOwnerToken = string & { readonly __taskOwner: unique symbol }
+
 export interface TaskRecord {
   id: string
   description: string
@@ -53,6 +62,10 @@ export class TaskRegistry {
   private readonly tasks = new Map<string, TaskRecord>()
   private readonly aborters = new Map<string, AbortController>()
   private readonly settlers = new Map<string, { promise: Promise<void>; resolve: () => void }>()
+  /** S17: per-task owner token. The map IS the capability table — only the
+   *  caller of `register()` knows the token, so only that caller can
+   *  successfully stop the task. Tokens are deleted on settle. */
+  private readonly owners = new Map<string, TaskOwnerToken>()
   private readonly maxRetained: number
 
   constructor(opts: TaskRegistryOptions = {}) {
@@ -66,7 +79,14 @@ export class TaskRegistry {
     return `task_${crypto.randomUUID()}`
   }
 
-  register(rec: Omit<TaskRecord, "status" | "startedAt">): AbortController {
+  /** Registration returns `{abort, ownerToken}`. The caller MUST surface the
+   *  token back to whatever entity is allowed to cancel the task (e.g. the
+   *  LLM, by including it in the `task_run` tool result). Without the
+   *  matching token, `stop()` refuses. */
+  register(rec: Omit<TaskRecord, "status" | "startedAt">): {
+    abort: AbortController
+    ownerToken: TaskOwnerToken
+  } {
     const ac = new AbortController()
     this.tasks.set(rec.id, { ...rec, status: "running", startedAt: Date.now() })
     this.aborters.set(rec.id, ac)
@@ -75,7 +95,9 @@ export class TaskRegistry {
       resolve = r
     })
     this.settlers.set(rec.id, { promise, resolve })
-    return ac
+    const ownerToken = crypto.randomUUID() as TaskOwnerToken
+    this.owners.set(rec.id, ownerToken)
+    return { abort: ac, ownerToken }
   }
 
   get(id: string): TaskRecord | undefined {
@@ -106,6 +128,7 @@ export class TaskRegistry {
     this.aborters.delete(id)
     this.settlers.get(id)?.resolve()
     this.settlers.delete(id)
+    this.owners.delete(id)
     this.evictIfOverCap()
   }
 
@@ -118,13 +141,42 @@ export class TaskRegistry {
     this.aborters.delete(id)
     this.settlers.get(id)?.resolve()
     this.settlers.delete(id)
+    this.owners.delete(id)
     this.evictIfOverCap()
   }
 
-  /** Cancel a running task. Aborts the per-task controller (which the runner
-   *  is listening on via `SubagentRequest.signal`) and flips status. Returns
-   *  false if unknown or already settled. */
-  stop(id: string): boolean {
+  /** Cancel a running task — REQUIRES the owner token returned by
+   *  `register()`. A sibling agent that learns the `id` cannot cancel the
+   *  task without the matching token. Returns one of:
+   *    - "stopped"      — task was running AND the token matched
+   *    - "denied"       — task exists but the supplied token is wrong/missing
+   *    - "not-found"    — id unknown or task already settled
+   *
+   *  This is the structural fix for the task_stop DoS surface: capability
+   *  control, not "any caller can stop any id". */
+  stop(id: string, ownerToken: string): "stopped" | "denied" | "not-found" {
+    const t = this.tasks.get(id)
+    if (!t || t.status !== "running") return "not-found"
+    const expected = this.owners.get(id)
+    if (expected === undefined || ownerToken !== expected) return "denied"
+    this.aborters.get(id)?.abort()
+    t.status = "stopped"
+    t.endedAt = Date.now()
+    this.aborters.delete(id)
+    this.settlers.get(id)?.resolve()
+    this.settlers.delete(id)
+    this.owners.delete(id)
+    this.evictIfOverCap()
+    return "stopped"
+  }
+
+  /** Force-cancel a running task without an owner token. ONLY callable by
+   *  the session-lifecycle owner (e.g. agent shutdown `cleanupSession`) —
+   *  the public LLM-facing `task_stop` tool MUST go through {@link stop}.
+   *
+   *  This separation is the structural distinction: capability for the LLM
+   *  (token-gated), authority for the host (named method, not name-gated). */
+  forceStop(id: string): boolean {
     const t = this.tasks.get(id)
     if (!t || t.status !== "running") return false
     this.aborters.get(id)?.abort()
@@ -133,6 +185,7 @@ export class TaskRegistry {
     this.aborters.delete(id)
     this.settlers.get(id)?.resolve()
     this.settlers.delete(id)
+    this.owners.delete(id)
     this.evictIfOverCap()
     return true
   }

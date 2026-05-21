@@ -1,0 +1,24 @@
+id: agent-role
+title: agent_role enum (explorer/worker/none) + maestro nickname pool
+section: 6
+subsystem: 서브에이전트 — 역할 + 닉네임
+order: 13
+maturity: L4
+status: new
+purpose: 'Codex 통계 흡수 — explorer 42% (read-only wide-scope) / none 28% (parent 상속) / worker 16% (mutator narrow). POLICY_TABLE 명시적 (role × ToolKind) — 신규 ToolKind 추가는 빌드 fail. + 39 maestro nickname pool (15 conductors + 24 composers, ASCII ≤12 char). FNV-1a 32-bit deterministic seed→name. nextSequentialNickname 풀 exhaustion 시 null (no reuse, no fallback).'
+evidence:
+  code:
+    - src/subagent/role.ts
+    - src/subagent/nicknames.ts
+  adrs: [42]
+  tests:
+    unit:
+      - tests/unit/agent-role-policy.test.ts
+      - tests/unit/nicknames.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'role 적용은 task-spawn 시점 wiring follow-up — in-flight src/subagent/agent-tool.ts 수정 정책상 이번엔 contract + table만.'
+  promotion_path: 'in-flight 안정화 → spawn 경로에 getToolPolicyForRole 적용 → e2e 회귀 추가 → L5'
+notes: 'none role = empty/empty (inherit signal). 39 nickname 초과 시 host 정책 결정 — 자동 fallback 0.'

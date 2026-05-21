@@ -40,55 +40,49 @@ export interface FallbackLLMOptions {
   isFallbackTrigger?: (e: unknown) => boolean
 }
 
-/** Substrings (lowercased) marking a provider-overload / unrecoverable-provider
- *  failure that should move to the next provider rather than be retried in
- *  place. Derived from the v2 `zDH` predicate (`status === 529` or message
- *  contains `"overloaded_error"`) plus the documented "Repeated 529 Overloaded
- *  errors" terminal and explicit provider-unavailable phrasings. */
-const FALLBACK_MARKERS = [
-  "529",
+/** Kinds that warrant switching to the next provider. STRUCTURED — no regex
+ *  on `e.message`. Adapters set `LLMError.kind` at the boundary
+ *  ({@link LLMError.fromSdkError}); this set is the policy.
+ *
+ *  - `overloaded`     529-class: this provider is over capacity → try next.
+ *  - `server_error`   Non-529 5xx: provider-side bug → try next.
+ *  - `network`        Transport failure (ECONNRESET / EPIPE / DNS): peer
+ *                     reachability is the issue → another provider may work.
+ *
+ *  Explicitly NOT triggers (every provider would fail identically):
+ *  `auth`, `bad_request`, `not_found`, `stream_corrupt`, `aborted`,
+ *  `rate_limit` (latter is same-turn retried, not fallback'd), `unknown`. */
+const FALLBACK_KINDS = new Set<import("@/shared").LLMErrorKind>([
   "overloaded",
-  "overloaded_error",
-  "repeated 529",
-  "provider unavailable",
-  "service unavailable",
-  "no healthy upstream",
-  "upstream connect error",
-] as const
+  "server_error",
+  "network",
+])
 
-/** Substrings (lowercased) that are client/auth/shape errors: never a reason to
- *  try another provider (every provider would fail identically). Mirrors
- *  `RetryingLLM`'s FATAL_MARKERS so classification stays consistent. */
-const NON_FALLBACK_MARKERS = [
-  "401",
-  "403",
-  "400",
-  "404",
-  "invalid api key",
-  "authentication",
-  "unauthorized",
-  "permission",
-  "malformed",
-  "invalid request",
-  "not found",
-] as const
-
-/** True iff `e` is a provider-overload / unrecoverable-provider failure that
- *  warrants switching providers. Only {@link LLMError} is ever a trigger;
- *  unknown error types are treated as non-fallback (rethrown immediately).
- *  An explicit client/auth marker forces a non-fallback classification even if
- *  an overload marker also appears. */
+/** True iff `e` is a provider-overload / provider-side failure that warrants
+ *  switching providers. Only {@link LLMError} is ever a trigger; unknown
+ *  error types are treated as non-fallback (rethrown immediately). */
 export const isFallbackTrigger = (e: unknown): boolean => {
   if (!(e instanceof LLMError)) return false
-  const status = (e as { status?: unknown }).status
-  if (status === 529) return true
-  const msg = e.message.toLowerCase()
-  if (NON_FALLBACK_MARKERS.some((m) => msg.includes(m))) return false
-  return FALLBACK_MARKERS.some((m) => msg.includes(m))
+  return FALLBACK_KINDS.has(e.kind)
 }
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
-  if (signal?.aborted) throw new LLMError("aborted")
+  if (!signal?.aborted) return
+  // Capture the structured reason if the AbortController carried one — caller
+  // can distinguish user-cancel, deadline, upstream-shutdown.
+  const reason = signal.reason
+  const detail =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === "string"
+        ? reason
+        : reason === undefined
+          ? "abort signal fired"
+          : "abort signal fired with non-string reason"
+  throw new LLMError(`aborted: ${detail}`, {
+    kind: "aborted",
+    ...(reason instanceof Error ? { cause: reason } : {}),
+  })
 }
 
 export class FallbackLLM implements LLMPort {
@@ -102,7 +96,7 @@ export class FallbackLLM implements LLMPort {
 
   constructor(opts: FallbackLLMOptions) {
     if (opts.providers.length === 0) {
-      throw new LLMError("FallbackLLM requires at least one provider")
+      throw new LLMError("FallbackLLM requires at least one provider", { kind: "bad_request" })
     }
     this.providers = opts.providers
     // Mirror the primary's model only when it exposes one (exactOptional:
@@ -174,6 +168,6 @@ export class FallbackLLM implements LLMPort {
 
     // Unreachable: the loop either returns on success or rethrows on the last
     // provider. Defensive throw keeps the type checker honest.
-    throw new LLMError("FallbackLLM exhausted all providers")
+    throw new LLMError("FallbackLLM exhausted all providers", { kind: "unknown" })
   }
 }

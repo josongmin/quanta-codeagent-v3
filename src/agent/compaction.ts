@@ -1,5 +1,6 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents } from "@/llm"
+import { runtimeConfig } from "@/shared"
 
 /**
  * Single-tier conversation compaction (RFC §8 Phase 2 / §1.2: one tier, no
@@ -50,8 +51,11 @@ const blockChars = (b: ContentBlock): number => {
 
 const resolveThreshold = (explicit?: number): number => {
   if (explicit !== undefined) return explicit
-  const env = Number(process.env.QUANTA_COMPACT_TOKENS)
-  return Number.isFinite(env) && env > 0 ? env : DEFAULT_THRESHOLD
+  // S5: env is read in ONE place (runtimeConfig) — validated + frozen at
+  // startup. A garbage value there is rejected with a stderr warn rather
+  // than silently flipping the threshold here.
+  const env = runtimeConfig().compactTokens
+  return env !== undefined ? env : DEFAULT_THRESHOLD
 }
 
 /** tool_use ids referenced by tool_result blocks in `m` (if any). */

@@ -9,49 +9,62 @@ import {
   sessionFilePath,
   sessionsRoot,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 
 describe("session paths", () => {
   let envSnapshot: NodeJS.ProcessEnv
 
   beforeEach(() => {
     envSnapshot = { ...process.env }
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     for (const key of Object.keys(process.env)) {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test("default root is ~/.quanta/sessions", () => {
     delete process.env.QUANTA_SESSIONS_DIR
+    __resetRuntimeConfig()
     expect(sessionsRoot()).toBe(join(homedir(), ".quanta", "sessions"))
   })
 
   test("QUANTA_SESSIONS_DIR overrides the root", () => {
     process.env.QUANTA_SESSIONS_DIR = "/tmp/custom-sessions"
+    __resetRuntimeConfig()
     expect(sessionsRoot()).toBe("/tmp/custom-sessions")
   })
 
   test("sessionFilePath returns <root>/<id>.json", () => {
     process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
+    __resetRuntimeConfig()
     expect(sessionFilePath("abc")).toBe("/tmp/s/abc.json")
   })
 
   test("archivedFilePath returns <root>/archived/<id>.json", () => {
     process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
+    __resetRuntimeConfig()
     expect(archivedFilePath("abc")).toBe("/tmp/s/archived/abc.json")
   })
 
   test("indexFilePath returns <root>/index.jsonl", () => {
     process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
+    __resetRuntimeConfig()
     expect(indexFilePath()).toBe("/tmp/s/index.jsonl")
   })
 
-  test("paths re-evaluate the env on each call (no stale caching)", () => {
+  test("paths use the runtime-config snapshot (frozen at startup; reset for tests)", () => {
     process.env.QUANTA_SESSIONS_DIR = "/tmp/first"
+    __resetRuntimeConfig()
     expect(sessionsRoot()).toBe("/tmp/first")
+    // Mid-run env mutation does NOT flip (frozen):
     process.env.QUANTA_SESSIONS_DIR = "/tmp/second"
+    expect(sessionsRoot()).toBe("/tmp/first")
+    // Explicit reset is required to pick up the new value:
+    __resetRuntimeConfig()
     expect(sessionsRoot()).toBe("/tmp/second")
   })
 
@@ -97,6 +110,7 @@ describe("session paths", () => {
 
     test("sessionFilePath / archivedFilePath route through sanitizeId", () => {
       process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
+      __resetRuntimeConfig()
       expect(() => sessionFilePath("../escape")).toThrow(SessionIdError)
       expect(() => archivedFilePath("../escape")).toThrow(SessionIdError)
     })

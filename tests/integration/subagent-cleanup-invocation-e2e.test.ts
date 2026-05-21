@@ -60,17 +60,17 @@ describe("R-Phase5 P0-A — features.cleanup invocation in finish()", () => {
     // Register a stuck task (simulating a forked background child whose
     // runner never returns until aborted).
     const id = reg.newId()
-    const ac = reg.register({ id, description: "stuck-background" })
+    const { abort } = reg.register({ id, description: "stuck-background" })
     expect(reg.get(id)?.status).toBe("running")
     expect(reg.pendingIds()).toEqual([id])
-    expect(ac.signal.aborted).toBe(false)
+    expect(abort.signal.aborted).toBe(false)
 
     // Cleanup MUST abort and settle the task.
     await features.cleanup?.()
 
     expect(reg.get(id)?.status).toBe("stopped")
     expect(reg.pendingIds()).toEqual([])
-    expect(ac.signal.aborted).toBe(true)
+    expect(abort.signal.aborted).toBe(true)
 
     // Idempotent: calling cleanup again with no pending tasks is a no-op.
     await features.cleanup?.()

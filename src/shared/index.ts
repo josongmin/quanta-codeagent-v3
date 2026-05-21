@@ -1,3 +1,4 @@
+export type { LLMErrorKind, LLMProvider } from "./errors"
 export {
   LLMError,
   PermissionDeniedError,
@@ -9,6 +10,8 @@ export {
 export type { LogLevel } from "./logger"
 export { logger } from "./logger"
 export type { RunContext } from "./run-context"
+export type { RuntimeConfig } from "./runtime-config"
+export { __resetRuntimeConfig, LOG_LEVELS, runtimeConfig } from "./runtime-config"
 export type {
   DegradedData,
   LlmUsageData,

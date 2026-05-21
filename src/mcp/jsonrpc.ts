@@ -43,6 +43,25 @@ const concat = (a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> => {
 
 const NEWLINE = 0x0a
 
+/** S15: strict JSON-RPC 2.0 envelope validator. Spec requires every message
+ *  carry `jsonrpc:"2.0"` AND either an `id` (response) or a `method`
+ *  (notification/request). Without this, a hostile or buggy MCP server can
+ *  spoof responses with arbitrary `id`. */
+const isValidEnvelope = (m: unknown): m is JsonRpcMessage => {
+  if (typeof m !== "object" || m === null) return false
+  const o = m as Record<string, unknown>
+  if (o["jsonrpc"] !== "2.0") return false
+  const hasId = "id" in o
+  const hasMethod = "method" in o
+  if (!hasId && !hasMethod) return false
+  if (hasId) {
+    const id = o["id"]
+    if (typeof id !== "string" && typeof id !== "number") return false
+  }
+  if (hasMethod && typeof o["method"] !== "string") return false
+  return true
+}
+
 /** Accumulates raw stdout bytes and yields fully-received JSON-RPC messages.
  *
  *  Handles partial reads (a line spanning chunks stays buffered), coalesced
@@ -77,12 +96,19 @@ export class LineReader {
   private parseLine(line: string): JsonRpcMessage | null {
     const trimmed = line.trim()
     if (trimmed.length === 0) return null
+    let parsed: unknown
     try {
-      return JSON.parse(trimmed) as JsonRpcMessage
+      parsed = JSON.parse(trimmed)
     } catch {
       logger.warn("mcp: skipping malformed JSON-RPC line", { line: trimmed.slice(0, 200) })
       return null
     }
+    // S15: refuse anything that doesn't match the JSON-RPC 2.0 envelope.
+    if (!isValidEnvelope(parsed)) {
+      logger.warn("mcp: skipping non-jsonrpc envelope", { line: trimmed.slice(0, 200) })
+      return null
+    }
+    return parsed
   }
 }
 

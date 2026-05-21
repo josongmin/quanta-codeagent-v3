@@ -1,0 +1,27 @@
+id: jsonl-cumulative-retention
+title: JsonlRecorder cumulative-bytes sliding-window retention
+section: 8
+subsystem: 관측성 (RFC-0002 / ADR-0035)
+order: 9
+maturity: L4
+status: new
+purpose: jsonl trajectory 파일의 cumulative-bytes sliding-window retention + atomic rewrite + 명시적 busy error
+evidence:
+  code:
+    - src/stream/adapters/jsonl-retention.ts
+    - src/stream/types.ts
+    - src/stream/index.ts
+  adrs:
+    - 29
+  tests:
+    unit:
+      - tests/unit/jsonl-recorder-retention.test.ts
+    integration:
+      - tests/integration/jsonl-retention-realfile.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  add-only seam: 기존 JsonlRecorder API 미변경. applyRetention(filePath, opts)
+  + JsonlRecorderRetentionBusyError + RetentionPolicy public type. concurrent
+  writer 조정은 별도 ADR 책임 (본 feature는 retention pass 한 가지).

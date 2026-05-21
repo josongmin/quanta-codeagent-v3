@@ -41,35 +41,49 @@ const conversationText = (input: StreamInput): string =>
     )
     .join(" ")
 
-/** Latest task_id seen in any tool_result body — used by the parent to chain
- *  `task_output` / `continue_from` against the live id minted by the registry. */
-const findLastTaskId = (input: StreamInput): string | undefined => {
+/** Latest task_id + owner_token (S17) seen in any tool_result body — used by
+ *  the parent to chain `task_output` / `continue_from` / `task_stop` against
+ *  the live values minted by the registry. */
+const findLastTaskFields = (input: StreamInput): { taskId?: string; ownerToken?: string } => {
   for (let i = input.messages.length - 1; i >= 0; i--) {
     const m = input.messages[i]
     if (!m) continue
     for (const b of m.content) {
       if (b.type !== "tool_result") continue
-      const mt = b.content.match(/task_id: (\S+)/)
-      if (mt?.[1]) return mt[1]
+      const taskMatch = b.content.match(/task_id: (\S+)/)
+      const ownerMatch = b.content.match(/owner_token: (\S+)/)
+      if (taskMatch?.[1] || ownerMatch?.[1]) {
+        return {
+          ...(taskMatch?.[1] ? { taskId: taskMatch[1] } : {}),
+          ...(ownerMatch?.[1] ? { ownerToken: ownerMatch[1] } : {}),
+        }
+      }
     }
   }
-  return undefined
+  return {}
 }
 
-const rewriteTaskId = (e: StreamEvent, liveTaskId: string | undefined): StreamEvent => {
-  if (!liveTaskId) return e
+const rewriteTaskId = (
+  e: StreamEvent,
+  fields: { taskId?: string; ownerToken?: string },
+): StreamEvent => {
   if (e.type !== "tool_use_end") return e
   const inp = (e as { input?: unknown }).input
   if (!inp || typeof inp !== "object") return e
   const rec = inp as Record<string, unknown>
   let changed = false
   const out: Record<string, unknown> = { ...rec }
-  if (rec.task_id === "__PLACEHOLDER__") {
-    out.task_id = liveTaskId
+  if (fields.taskId !== undefined && rec.task_id === "__PLACEHOLDER__") {
+    out.task_id = fields.taskId
     changed = true
   }
-  if (rec.continue_from === "__PLACEHOLDER__") {
-    out.continue_from = liveTaskId
+  if (fields.taskId !== undefined && rec.continue_from === "__PLACEHOLDER__") {
+    out.continue_from = fields.taskId
+    changed = true
+  }
+  // S17: owner_token capability gate for task_stop.
+  if (fields.ownerToken !== undefined && rec.owner_token === "__PLACEHOLDER__") {
+    out.owner_token = fields.ownerToken
     changed = true
   }
   return changed ? { ...e, input: out } : e
@@ -155,9 +169,9 @@ describe("subagent continue_from — e2e prior attempt threaded into child seed"
     // task_id from the most recent tool_result in the parent transcript.
     const origStream = llm.stream.bind(llm)
     llm.stream = async function* (input: StreamInput): AsyncIterable<StreamEvent> {
-      const lastTaskId = findLastTaskId(input)
+      const lastTaskFields = findLastTaskFields(input)
       for await (const e of origStream(input)) {
-        yield rewriteTaskId(e, lastTaskId)
+        yield rewriteTaskId(e, lastTaskFields)
       }
     }
 
@@ -286,7 +300,10 @@ describe("subagent continue_from — e2e prior attempt threaded into child seed"
       // with no retained finalText.
       {
         match: "Subagent launched in background. task_id:",
-        events: toolCall("s1", "task_stop", { task_id: "__PLACEHOLDER__" }),
+        events: toolCall("s1", "task_stop", {
+          task_id: "__PLACEHOLDER__",
+          owner_token: "__PLACEHOLDER__",
+        }),
         once: true,
       },
       // Parent turn 3: now try to continue_from the stopped id. Should be a deny.
@@ -318,9 +335,9 @@ describe("subagent continue_from — e2e prior attempt threaded into child seed"
 
     const origStream = llm.stream.bind(llm)
     llm.stream = async function* (input: StreamInput): AsyncIterable<StreamEvent> {
-      const lastTaskId = findLastTaskId(input)
+      const lastTaskFields = findLastTaskFields(input)
       for await (const e of origStream(input)) {
-        yield rewriteTaskId(e, lastTaskId)
+        yield rewriteTaskId(e, lastTaskFields)
       }
     }
 

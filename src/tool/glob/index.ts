@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -20,7 +21,19 @@ export const globTool: Tool<Input> = {
 
   // A bounded directory scan is fast; no progress event needed.
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const base = input.path ?? ctx.cwd
+    // S14: jail the base dir BEFORE handing to Bun.Glob.scan — otherwise
+    // `path: "/Users/other"` would return every file the process can read.
+    // Default is the jail root itself (cwd), which is trivially in-jail.
+    let base: string
+    try {
+      base = input.path !== undefined ? resolveJailed(input.path, ctx.cwd) : ctx.cwd
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
+    }
     const glob = new Bun.Glob(input.pattern)
     const hits: string[] = []
     for await (const file of glob.scan({ cwd: base, onlyFiles: true, dot: false })) {

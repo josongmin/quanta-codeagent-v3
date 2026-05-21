@@ -17,6 +17,7 @@ import {
   sessionFilePath,
   unarchiveSession,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 
 const mkMeta = (overrides: Partial<SessionMeta> = {}): SessionMeta => ({
   id: overrides.id ?? "sess-1",
@@ -44,6 +45,7 @@ describe("session store", () => {
     envSnapshot = { ...process.env }
     dir = mkdtempSync(join(tmpdir(), "session-store-"))
     process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
@@ -51,6 +53,7 @@ describe("session store", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test("saveSessionById + loadSessionById roundtrip", async () => {

@@ -230,6 +230,11 @@ export interface DockerSandboxOptions {
 
 const DEFAULT_IMAGE = "node:22-slim"
 const CONTAINER_WORKDIR = "/workspace"
+/** Hard cap on the `docker version` availability probe — a daemon that doesn't
+ *  respond within this budget is treated as unavailable. Short because the
+ *  probe blocks scenario startup; longer than 5s and a hung daemon could
+ *  stall the whole eval / agent boot. */
+const DOCKER_PROBE_TIMEOUT_MS = 5_000
 
 /** Append a flag pair only when the value is present (keeps argv minimal and
  *  satisfies exactOptionalPropertyTypes without conditional spreads in argv). */
@@ -279,7 +284,7 @@ export class DockerSandbox implements Sandbox {
         } catch {
           // already exited
         }
-      }, 5_000)
+      }, DOCKER_PROBE_TIMEOUT_MS)
       try {
         return (await proc.exited) === 0
       } finally {

@@ -52,7 +52,11 @@
       "@/session": ["./src/session/index.ts"],
       "@/session/*": ["./src/session/*"],
       "@/agent": ["./src/agent/index.ts"],
-      "@/agent/*": ["./src/agent/*"]
+      "@/agent/*": ["./src/agent/*"],
+      "@/rules": ["./src/rules/index.ts"],
+      "@/rules/*": ["./src/rules/*"],
+      "@/migration": ["./src/migration/index.ts"],
+      "@/migration/*": ["./src/migration/*"]
     }
   },
   "include": ["src", "tests", "tools"],

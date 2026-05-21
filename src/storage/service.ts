@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs"
 import { stat } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { QuantaError } from "@/shared"
+import { QuantaError, runtimeConfig } from "@/shared"
 import type { FileInfo } from "./types"
 
 /** Raised when a tool's filesystem access escapes its `ctx.cwd` jail root.
@@ -14,11 +14,27 @@ export class FsJailError extends QuantaError {
   }
 }
 
-/** The FS jail is ON by default (secure-by-default). The documented escape
- *  hatch `QUANTA_FS_JAIL=off` disables it for power users / cross-repo work;
- *  when off, behavior is exactly the pre-jail behavior. Read at call time so
- *  tests can toggle it per-case. */
-const jailDisabled = (): boolean => process.env.QUANTA_FS_JAIL === "off"
+/** The FS jail is ON by default (secure-by-default). The escape hatch
+ *  `QUANTA_FS_JAIL=off` is read ONCE at startup via {@link runtimeConfig}
+ *  and frozen — mid-run env mutation does not flip it. */
+const jailDisabled = (): boolean => runtimeConfig().fsJailDisabled
+
+/**
+ * Branded path type.
+ *
+ * A `JailedPath` is an absolute path string that has been validated as
+ * inside (or equal to) some jail root via {@link resolveJailed}. The brand
+ * is at TYPE level only — at runtime it's a regular string — but the type
+ * system makes it impossible to construct one from a raw string without
+ * passing through the validator. Tools that touch the filesystem accept
+ * `JailedPath`, not `string`; the seam between "user-supplied" and "safe to
+ * spawn / open" is the brand.
+ *
+ * NEVER cast `string as JailedPath`. The anti-regression scanner forbids it
+ * outside this file. The only legitimate constructor is {@link resolveJailed}.
+ */
+declare const JailBrand: unique symbol
+export type JailedPath = string & { readonly [JailBrand]: true }
 
 /** Normalize an absolute path to its canonical segment list (collapsing `.`
  *  and resolving `..` lexically). Returns the cleaned absolute path. */
@@ -81,21 +97,49 @@ const enforceJail = (requested: string, baseDir: string, abs: string): string =>
   return abs
 }
 
-/** Resolve a possibly-relative path against `baseDir` (default `process.cwd()`)
- *  to an absolute path. An absolute `path` is returned unchanged. Tool callers
- *  pass their session `ctx.cwd`; non-tool callers keep the cwd default.
+/**
+ * Resolve a possibly-relative path against `baseDir` (default `process.cwd()`)
+ * to an absolute path. An absolute `path` is returned unchanged. Tool callers
+ * pass their session `ctx.cwd`; non-tool callers keep the cwd default.
  *
- *  FS JAIL (secure-by-default): when a tool explicitly passes a `baseDir`
- *  (its `ctx.cwd`), the resolved real path is confined to that jail root —
- *  `..` climbs, absolute paths landing outside, and symlink escapes are all
- *  rejected with {@link FsJailError}. No-baseDir callers (state.ts etc.) keep
- *  the exact pre-jail behavior for back-compat. `QUANTA_FS_JAIL=off` opts out. */
+ * BACK-COMPAT SEAM. Prefer {@link resolveJailed} in NEW tool code — it
+ * returns a branded `JailedPath` and refuses an empty/undefined `baseDir`
+ * (the prior silent-bypass bug). This `resolvePath` keeps the pre-jail
+ * `baseDir`-optional surface so existing non-tool callers (state.ts, session
+ * meta) work unchanged.
+ *
+ * FS JAIL (secure-by-default): when a tool explicitly passes a `baseDir`
+ * (its `ctx.cwd`), the resolved real path is confined to that jail root.
+ * No-baseDir callers keep the exact pre-jail behavior for back-compat.
+ * `QUANTA_FS_JAIL=off` opts out (read once at startup via `runtimeConfig`).
+ */
 export const resolvePath = (path: string, baseDir?: string): string => {
   const abs = resolve(baseDir || process.cwd(), path)
-  // The jail triggers EXACTLY when a tool passed an explicit, non-empty
-  // baseDir. Absent/empty baseDir ⇒ legacy callers, behavior unchanged.
   if (baseDir !== undefined && baseDir !== "") return enforceJail(path, baseDir, abs)
   return abs
+}
+
+/**
+ * The canonical "tool-supplied path → safe absolute path" constructor.
+ *
+ * Returns a {@link JailedPath} (branded). The brand is the only way for a
+ * downstream tool (spawn/argv builder, Bun.Glob, LSP open) to receive a
+ * path-typed value — the type system enforces that every spawn arg is
+ * jail-validated.
+ *
+ * Refuses an empty or undefined `jailRoot`. The prior "baseDir is
+ * `undefined`/`""` ⇒ skip the jail" code path was a silent-bypass surface:
+ * a caller that forgot to thread `ctx.cwd` got the legacy un-jailed
+ * behavior with no error.
+ */
+export const resolveJailed = (requested: string, jailRoot: string): JailedPath => {
+  if (typeof jailRoot !== "string" || jailRoot.length === 0) {
+    throw new FsJailError(
+      "resolveJailed requires a non-empty jail root — caller must thread ctx.cwd explicitly",
+    )
+  }
+  const abs = resolve(jailRoot, requested)
+  return enforceJail(requested, jailRoot, abs) as JailedPath
 }
 
 export const readFile = async (path: string, baseDir?: string): Promise<string> => {

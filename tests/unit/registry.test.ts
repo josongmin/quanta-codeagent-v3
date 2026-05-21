@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
-import { ToolExecutionError, ToolInputError } from "@/shared"
+import { __resetRuntimeConfig, ToolExecutionError, ToolInputError } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
 
@@ -135,6 +135,7 @@ describe("ToolRegistry", () => {
     const dir = mkdtempSync(join(tmpdir(), "registry-spill-"))
     const prev = process.env.QUANTA_TOOL_OUTPUT_MAX
     process.env.QUANTA_TOOL_OUTPUT_MAX = "100"
+    __resetRuntimeConfig()
     try {
       const result = await reg.run("bigout", {}, ctx(dir))
       // Marker substituted, original is NOT handed back verbatim.
@@ -155,6 +156,7 @@ describe("ToolRegistry", () => {
     } finally {
       if (prev === undefined) delete process.env.QUANTA_TOOL_OUTPUT_MAX
       else process.env.QUANTA_TOOL_OUTPUT_MAX = prev
+      __resetRuntimeConfig()
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -201,6 +203,7 @@ describe("ToolRegistry", () => {
     const dir = mkdtempSync(join(tmpdir(), "registry-evidence-"))
     const prev = process.env.QUANTA_TOOL_OUTPUT_MAX
     process.env.QUANTA_TOOL_OUTPUT_MAX = "100"
+    __resetRuntimeConfig()
     try {
       const result = await reg.run("evidence-bigout", {}, ctx(dir))
       expect(result.ok).toBe(true)
@@ -219,6 +222,7 @@ describe("ToolRegistry", () => {
     } finally {
       if (prev === undefined) delete process.env.QUANTA_TOOL_OUTPUT_MAX
       else process.env.QUANTA_TOOL_OUTPUT_MAX = prev
+      __resetRuntimeConfig()
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -246,6 +250,7 @@ describe("ToolRegistry", () => {
     const dir = mkdtempSync(join(tmpdir(), "registry-evidence-merge-"))
     const prev = process.env.QUANTA_TOOL_OUTPUT_MAX
     process.env.QUANTA_TOOL_OUTPUT_MAX = "100"
+    __resetRuntimeConfig()
     try {
       const result = await reg.run("evidence-merge", {}, ctx(dir))
       // Existing evidence is preserved...
@@ -257,6 +262,7 @@ describe("ToolRegistry", () => {
     } finally {
       if (prev === undefined) delete process.env.QUANTA_TOOL_OUTPUT_MAX
       else process.env.QUANTA_TOOL_OUTPUT_MAX = prev
+      __resetRuntimeConfig()
       rmSync(dir, { recursive: true, force: true })
     }
   })

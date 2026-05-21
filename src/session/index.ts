@@ -13,6 +13,40 @@
  * `QUANTA_SESSIONS_DIR` (same convention as `QUANTA_MEMORY_PATH`).
  */
 
+// ADR-0034: JSONL envelope (additive rail, not used by the snapshot store).
+export type {
+  EventMsgRecord,
+  ResponseItemRecord,
+  SessionEnvelopeRecord,
+  SessionMetaRecord,
+  ThreadSpawnRecord,
+  TurnContextRecord,
+} from "./envelope"
+export {
+  ApprovalPolicySchema,
+  CollaborationModeSchema,
+  EffortSchema,
+  EventMsgRecordSchema,
+  PermissionProfileSchema,
+  ResponseItemKindSchema,
+  ResponseItemRecordSchema,
+  SandboxPolicySchema,
+  SESSION_ENVELOPE_VERSION,
+  SessionEnvelopeRecordSchema,
+  SessionMetaRecordSchema,
+  ThreadRoleSchema,
+  ThreadSpawnRecordSchema,
+  TruncationPolicySchema,
+  TurnContextRecordSchema,
+} from "./envelope"
+export type { EnvelopeDecodeErrorKind } from "./envelope-encoder"
+export {
+  appendSessionLine,
+  decodeSessionLine,
+  EnvelopeDecodeError,
+  encodeSessionLine,
+  iterateSessionFile,
+} from "./envelope-encoder"
 export { listSessions, removeFromIndex, upsertMeta } from "./index-store"
 export {
   archivedFilePath,
@@ -23,12 +57,14 @@ export {
   sessionsRoot,
 } from "./paths"
 export {
+  appendEnvelope,
   archiveSession,
   deleteSession,
   forkSession,
   loadSessionById,
   renameSession,
   saveSessionById,
+  sessionEnvelopePath,
   unarchiveSession,
 } from "./store"
 export type { SavedSession, SavePayload, SessionMeta } from "./types"

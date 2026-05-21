@@ -1,0 +1,22 @@
+id: subagent-6-tools
+title: Subagent 6-tool 표준 (exec_command / write_stdin / spawn_agent / wait_agent / close_agent / send_input)
+section: 6
+subsystem: 서브에이전트 — 표준 도구 계약
+order: 12
+maturity: L3
+status: new
+purpose: 'Codex 통계 흡수: exec_command 75% + write_stdin 24% 지배. 6 tool contract-only (input/output Zod strict + success/error discriminator). handler는 in-flight registry follow-up. SUBAGENT_6_TOOL_CONTRACTS frozen dispatch table. 신규 tool 추가는 ADR 개정 필수.'
+evidence:
+  code:
+    - src/subagent/tools-6.ts
+  adrs: [41]
+  tests:
+    unit:
+      - tests/unit/subagent-tools-6-contracts.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'handler 구현은 in-flight src/subagent/agent-tool.ts / registry.ts 안정화 후 follow-up. 본 feature는 contract surface만.'
+  promotion_path: 'in-flight 안정화 → handler dispatch wiring → integration test 추가 → L4'
+notes: 'closed 6-set. error.cause는 free-form hint string (timeout/signal:.../abort 등).'

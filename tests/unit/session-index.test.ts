@@ -9,6 +9,7 @@ import {
   type SessionMeta,
   upsertMeta,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 
 const mkMeta = (overrides: Partial<SessionMeta> = {}): SessionMeta => ({
   id: overrides.id ?? "s-1",
@@ -27,6 +28,7 @@ describe("session index-store", () => {
     envSnapshot = { ...process.env }
     dir = mkdtempSync(join(tmpdir(), "session-index-"))
     process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
@@ -34,6 +36,7 @@ describe("session index-store", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test("upsertMeta + listSessions roundtrip", async () => {

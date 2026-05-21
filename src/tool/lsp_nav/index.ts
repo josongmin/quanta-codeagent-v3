@@ -1,5 +1,5 @@
-import { isAbsolute, resolve } from "node:path"
 import { z } from "zod"
+import { FsJailError, type JailedPath, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { formatHover, formatLocations, formatRenamePreview, formatSymbols } from "./formatters"
 import type {
@@ -80,9 +80,25 @@ const toNavPos = (line: number, character: number): NavPos => ({
   character: character - 1,
 })
 
-/** Absolute path resolved against `ctx.cwd` (mirrors diagnostics). */
-const absPath = (input: { path: string }, ctx: ToolContext): string =>
-  isAbsolute(input.path) ? input.path : resolve(ctx.cwd, input.path)
+/** S14: tool-supplied path → branded {@link JailedPath}. Throws
+ *  {@link FsJailError} on escape; every call site catches and emits the
+ *  standard `ok:false` result so a model that points at `/etc/passwd` gets
+ *  a clean "outside the jail" message instead of opening the file.
+ *  Returns `null` after emitting the result so callers can short-circuit. */
+async function* absOrEmitJail(
+  input: { path: string },
+  ctx: ToolContext,
+): AsyncGenerator<ToolEvent, JailedPath | null, undefined> {
+  try {
+    return resolveJailed(input.path, ctx.cwd)
+  } catch (e) {
+    if (e instanceof FsJailError) {
+      yield { type: "result", result: { ok: false, output: e.message } }
+      return null
+    }
+    throw e
+  }
+}
 
 /**
  * Open a session and yield exactly one terminal `result` event on
@@ -162,7 +178,8 @@ const positionTool = <I extends PositionInput>(
   isReadOnly: () => true,
   isConcurrencySafe: () => false,
   async *execute(input: I, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const abs = absPath(input, ctx)
+    const abs = yield* absOrEmitJail(input, ctx)
+    if (abs === null) return
     const session = yield* openOrEmitUnavailable(name, provider, abs, ctx.cwd)
     if (!session) return
     yield* runSession(
@@ -206,7 +223,8 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     async *execute(input: ReferencesInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-      const abs = absPath(input, ctx)
+      const abs = yield* absOrEmitJail(input, ctx)
+      if (abs === null) return
       const session = yield* openOrEmitUnavailable("lsp_references", provider, abs, ctx.cwd)
       if (!session) return
       const inc = input.includeDeclaration ?? true
@@ -254,7 +272,8 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     async *execute(input: DocumentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-      const abs = absPath(input, ctx)
+      const abs = yield* absOrEmitJail(input, ctx)
+      if (abs === null) return
       const session = yield* openOrEmitUnavailable("lsp_document_symbol", provider, abs, ctx.cwd)
       if (!session) return
       yield* runSession(
@@ -276,7 +295,8 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     async *execute(input: WorkspaceInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-      const abs = absPath(input, ctx)
+      const abs = yield* absOrEmitJail(input, ctx)
+      if (abs === null) return
       const session = yield* openOrEmitUnavailable("lsp_workspace_symbol", provider, abs, ctx.cwd)
       if (!session) return
       yield* runSession(

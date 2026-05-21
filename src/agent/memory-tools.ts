@@ -125,7 +125,7 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
     async *execute(input: WriteInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       try {
         const kind: MemoryKind = input.kind ?? "observation"
-        const id = `mem:tool:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
+        const id = `mem:tool:${Date.now().toString(36)}:${crypto.randomUUID().slice(0, 8)}`
         const entry: MemoryEntry = {
           id,
           kind,

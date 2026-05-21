@@ -13,8 +13,18 @@ const outputSchema = z.object({
 
 type OutputInput = z.infer<typeof outputSchema>
 
+/** Default block timeout for `task_output(block:true)`. 30s balances "give
+ *  a quick-running task time to settle" against "don't keep a tool call
+ *  blocked indefinitely". Callers can override via `timeout_ms`. */
+const DEFAULT_TASK_OUTPUT_BLOCK_MS = 30_000
+
 const stopSchema = z.object({
   task_id: z.string().describe("Id of the background task to cancel"),
+  owner_token: z
+    .string()
+    .describe(
+      "Capability token returned by `task_run`. Without the matching token the registry refuses the stop — a sibling agent that only knows the task_id cannot cancel another task.",
+    ),
 })
 
 type StopInput = z.infer<typeof stopSchema>
@@ -96,7 +106,12 @@ export const createTaskOutputTool = (registry: TaskRegistry): Tool<OutputInput> 
 
     if (input.block === true && !settled(rec)) {
       yield { type: "progress", message: `Waiting for ${input.task_id}…` }
-      rec = await waitForSettle(registry, input.task_id, ctx, input.timeout_ms ?? 30_000)
+      rec = await waitForSettle(
+        registry,
+        input.task_id,
+        ctx,
+        input.timeout_ms ?? DEFAULT_TASK_OUTPUT_BLOCK_MS,
+      )
       if (rec && !settled(rec)) {
         yield {
           type: "result",
@@ -128,15 +143,26 @@ export const createTaskStopTool = (registry: TaskRegistry): Tool<StopInput> => (
 
   // eslint-disable-next-line require-yield
   async *execute(input: StopInput): AsyncIterable<ToolEvent> {
-    const ok = registry.stop(input.task_id)
+    // S17: token-gated stop. Three terminal outcomes, structurally distinct
+    // (not just a single boolean) so the LLM sees what actually happened:
+    //   - stopped   ⇒ ok:true   — the task was running AND the token matched.
+    //   - denied    ⇒ ok:false  — task exists but the token is wrong/missing.
+    //   - not-found ⇒ ok:false  — id unknown or already settled.
+    const result = registry.stop(input.task_id, input.owner_token)
     yield {
       type: "result",
-      result: ok
-        ? { ok: true, output: `Stopped task ${input.task_id}.` }
-        : {
-            ok: false,
-            output: `Cannot stop ${input.task_id}: unknown or already settled.`,
-          },
+      result:
+        result === "stopped"
+          ? { ok: true, output: `Stopped task ${input.task_id}.` }
+          : result === "denied"
+            ? {
+                ok: false,
+                output: `Cannot stop ${input.task_id}: owner_token does not match. Pass the token returned by task_run.`,
+              }
+            : {
+                ok: false,
+                output: `Cannot stop ${input.task_id}: unknown or already settled.`,
+              },
     }
   },
 })

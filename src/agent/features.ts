@@ -224,8 +224,11 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
     cleanup = async (): Promise<void> => {
       const ids = reg.pendingIds()
       if (ids.length === 0) return
-      // Stop each (idempotent — stop on already-settled is a no-op).
-      for (const id of ids) reg.stop(id)
+      // S17: host-side cleanup uses `forceStop` — not the token-gated `stop`.
+      // The session owner has the authority to cancel ALL pending tasks at
+      // shutdown regardless of who minted them; per-task owner tokens are
+      // only the LLM-facing capability gate.
+      for (const id of ids) reg.forceStop(id)
       // Await all settles in parallel. waitForSettle resolves immediately for
       // already-settled tasks, so this is bounded by the slowest in-flight
       // runner observing the abort and unwinding.

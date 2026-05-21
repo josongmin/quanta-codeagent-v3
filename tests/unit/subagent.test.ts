@@ -156,8 +156,11 @@ describe("createAgentTool — background + Task* tools", () => {
     const ev = await run(agent, { prompt: "never ends", background: true }, ctxAt(0))
     if (ev.type !== "result") throw new Error("expected result")
     const taskId = (ev.result.output.match(/task_id: (\S+)/) as RegExpMatchArray)[1] as string
+    const ownerToken = (
+      ev.result.output.match(/owner_token: (\S+)/) as RegExpMatchArray
+    )[1] as string
 
-    const s = await run(stop, { task_id: taskId }, ctxAt(0))
+    const s = await run(stop, { task_id: taskId, owner_token: ownerToken }, ctxAt(0))
     if (s.type !== "result") throw new Error("expected result")
     expect(s.result.ok).toBe(true)
 
@@ -166,7 +169,7 @@ describe("createAgentTool — background + Task* tools", () => {
     expect(after.result.output).toContain("status: stopped")
 
     // Stopping again is a no-op failure.
-    const again = await run(stop, { task_id: taskId }, ctxAt(0))
+    const again = await run(stop, { task_id: taskId, owner_token: ownerToken }, ctxAt(0))
     if (again.type !== "result") throw new Error("expected result")
     expect(again.result.ok).toBe(false)
   })
@@ -190,6 +193,10 @@ describe("createAgentTool — background + Task* tools", () => {
     const ev = await run(agent, { prompt: "x", background: true }, ctxAt(0))
     if (ev.type !== "result") throw new Error("expected result")
     const taskId = (ev.result.output.match(/task_id: (\S+)/) as RegExpMatchArray)[1] as string
+    // No `task_stop` in this test — task settles naturally on its own — so we
+    // don't need the owner_token here. Test that the launch output STILL
+    // surfaces it (capability contract) but mark unused.
+    expect(ev.result.output).toMatch(/owner_token: \S+/)
 
     const done = await run(out, { task_id: taskId, block: true, timeout_ms: 2000 }, ctxAt(0))
     if (done.type !== "result") throw new Error("expected result")

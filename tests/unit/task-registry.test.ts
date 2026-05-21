@@ -92,7 +92,7 @@ describe("TaskRegistry — waitForSettle (event-driven)", () => {
     const reg = new TaskRegistry()
     const id = reg.newId()
     reg.register({ id, description: "x" })
-    reg.stop(id)
+    reg.forceStop(id)
     const winner = await raceAgainst(reg.waitForSettle(id), 5)
     expect(winner).toBe("settled")
   })
@@ -131,7 +131,7 @@ describe("TaskRegistry — waitForSettle (event-driven)", () => {
     const id = reg.newId()
     reg.register({ id, description: "x" })
     const settle = reg.waitForSettle(id)
-    reg.stop(id)
+    reg.forceStop(id)
     const winner = await raceAgainst(settle, 5)
     expect(winner).toBe("settled")
   })
@@ -141,13 +141,13 @@ describe("TaskRegistry — stop aborts the registered controller", () => {
   test("subscribers to the registered signal observe the abort", () => {
     const reg = new TaskRegistry()
     const id = reg.newId()
-    const ac = reg.register({ id, description: "x" })
+    const { abort: ac } = reg.register({ id, description: "x" })
     let aborted = false
     ac.signal.addEventListener("abort", () => {
       aborted = true
     })
     expect(ac.signal.aborted).toBe(false)
-    const ok = reg.stop(id)
+    const ok = reg.forceStop(id)
     expect(ok).toBe(true)
     expect(aborted).toBe(true)
     expect(ac.signal.aborted).toBe(true)
@@ -182,11 +182,11 @@ describe("TaskRegistry — settled tasks are immutable", () => {
   test("stop() on a settled task returns false and does NOT abort retroactively", () => {
     const reg = new TaskRegistry()
     const id = reg.newId()
-    const ac = reg.register({ id, description: "x" })
+    const { abort: ac } = reg.register({ id, description: "x" })
     reg.complete(id, okResult())
     // After complete, the registry forgets the controller, so stop() must be
     // a clean no-op (no double-abort, no status change).
-    const ret = reg.stop(id)
+    const ret = reg.forceStop(id)
     expect(ret).toBe(false)
     expect(reg.get(id)?.status).toBe("completed")
     // Controller was never aborted (complete doesn't abort, only stop does).
@@ -195,6 +195,6 @@ describe("TaskRegistry — settled tasks are immutable", () => {
 
   test("stop() on an unknown id returns false", () => {
     const reg = new TaskRegistry()
-    expect(reg.stop("task_does_not_exist")).toBe(false)
+    expect(reg.forceStop("task_does_not_exist")).toBe(false)
   })
 })

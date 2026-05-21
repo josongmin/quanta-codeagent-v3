@@ -14,6 +14,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { StructuredLogger } from "@/observability"
 import type { LogLevel } from "@/shared"
+import { __resetRuntimeConfig } from "@/shared"
 
 const ALL_LEVELS: LogLevel[] = ["debug", "info", "warn", "error"]
 
@@ -25,10 +26,12 @@ describe("StructuredLogger — QUANTA_LOG_LEVEL + explicit-option threshold", ()
   afterEach(() => {
     if (savedEnv === undefined) delete process.env.QUANTA_LOG_LEVEL
     else process.env.QUANTA_LOG_LEVEL = savedEnv
+    __resetRuntimeConfig()
   })
 
   test("default (env unset, no option) → info+ allowed, debug suppressed", () => {
     delete process.env.QUANTA_LOG_LEVEL
+    __resetRuntimeConfig()
     const lines: string[] = []
     const log = new StructuredLogger({ sink: (l) => lines.push(l) })
     log.debug("d", { x: 1 })
@@ -41,6 +44,7 @@ describe("StructuredLogger — QUANTA_LOG_LEVEL + explicit-option threshold", ()
 
   test("QUANTA_LOG_LEVEL=debug → all four levels emit", () => {
     process.env.QUANTA_LOG_LEVEL = "debug"
+    __resetRuntimeConfig()
     const lines: string[] = []
     const log = new StructuredLogger({ sink: (l) => lines.push(l) })
     for (const lvl of ALL_LEVELS) log[lvl]("e")
@@ -49,6 +53,7 @@ describe("StructuredLogger — QUANTA_LOG_LEVEL + explicit-option threshold", ()
 
   test("QUANTA_LOG_LEVEL=error → only error emits; the rest are silent", () => {
     process.env.QUANTA_LOG_LEVEL = "error"
+    __resetRuntimeConfig()
     const lines: string[] = []
     const log = new StructuredLogger({ sink: (l) => lines.push(l) })
     for (const lvl of ALL_LEVELS) log[lvl]("e")
@@ -58,6 +63,7 @@ describe("StructuredLogger — QUANTA_LOG_LEVEL + explicit-option threshold", ()
 
   test("explicit option overrides env (option=warn beats env=debug)", () => {
     process.env.QUANTA_LOG_LEVEL = "debug"
+    __resetRuntimeConfig()
     const lines: string[] = []
     const log = new StructuredLogger({ level: "warn", sink: (l) => lines.push(l) })
     log.debug("d")
@@ -70,6 +76,7 @@ describe("StructuredLogger — QUANTA_LOG_LEVEL + explicit-option threshold", ()
 
   test("invalid env value (typo) → falls back to 'info', no throw", () => {
     process.env.QUANTA_LOG_LEVEL = "verbose-banana"
+    __resetRuntimeConfig()
     const lines: string[] = []
     const log = new StructuredLogger({ sink: (l) => lines.push(l) })
     log.debug("d")
@@ -80,6 +87,7 @@ describe("StructuredLogger — QUANTA_LOG_LEVEL + explicit-option threshold", ()
 
   test("child logger inherits parent threshold; per-call fields merge over base", () => {
     process.env.QUANTA_LOG_LEVEL = "warn"
+    __resetRuntimeConfig()
     const lines: string[] = []
     const parent = new StructuredLogger({ sink: (l) => lines.push(l) }, { service: "agent" })
     const child = parent.child({ run: "r1" })
@@ -96,6 +104,7 @@ describe("StructuredLogger — QUANTA_LOG_LEVEL + explicit-option threshold", ()
 
   test("each record is one JSON line on the sink (no multi-line spillage)", () => {
     delete process.env.QUANTA_LOG_LEVEL
+    __resetRuntimeConfig()
     const lines: string[] = []
     const log = new StructuredLogger({ sink: (l) => lines.push(l) })
     log.info("multiline", { msg: "a\nb\nc" })

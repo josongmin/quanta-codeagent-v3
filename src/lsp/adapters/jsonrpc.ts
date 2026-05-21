@@ -30,6 +30,24 @@ export interface JsonRpcError {
 const HEADER_SEPARATOR = "\r\n\r\n"
 const CONTENT_LENGTH_RE = /content-length:\s*(\d+)/i
 
+/** S15: strict JSON-RPC 2.0 envelope validator. Spec requires `jsonrpc:"2.0"`
+ *  on every message; accepting any parseable JSON as a message let a buggy or
+ *  hostile server inject id-spoofed responses or wedge the dispatcher. */
+const isValidEnvelope = (m: unknown): m is JsonRpcMessage => {
+  if (typeof m !== "object" || m === null) return false
+  const o = m as Record<string, unknown>
+  if (o["jsonrpc"] !== "2.0") return false
+  const hasId = "id" in o
+  const hasMethod = "method" in o
+  if (!hasId && !hasMethod) return false
+  if (hasId) {
+    const id = o["id"]
+    if (typeof id !== "string" && typeof id !== "number") return false
+  }
+  if (hasMethod && typeof o["method"] !== "string") return false
+  return true
+}
+
 /** Encode a JSON value into a single Content-Length framed buffer. */
 export const encodeMessage = (payload: unknown): Uint8Array => {
   const json = JSON.stringify(payload)
@@ -98,7 +116,10 @@ export class MessageReader {
     this.buffer = this.buffer.subarray(bodyStart + contentLength)
 
     try {
-      return JSON.parse(bodyText) as JsonRpcMessage
+      const parsed = JSON.parse(bodyText) as unknown
+      // S15: never cast to JsonRpcMessage without envelope validation.
+      // Reject anything that doesn't carry `jsonrpc:"2.0"` + a usable id/method.
+      return isValidEnvelope(parsed) ? parsed : null
     } catch {
       return null
     }

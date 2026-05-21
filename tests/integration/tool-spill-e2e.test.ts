@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import { runAgent } from "@/agent"
+import { __resetRuntimeConfig } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
 import { cfg, ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
 
@@ -41,10 +42,12 @@ describe("GAP 3 — result-size cap + spill through real registry/dispatch", () 
     dir = mkdtempSync(join(tmpdir(), "tool-spill-"))
     prevEnv = process.env.QUANTA_TOOL_OUTPUT_MAX
     process.env.QUANTA_TOOL_OUTPUT_MAX = "500"
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     if (prevEnv === undefined) delete process.env.QUANTA_TOOL_OUTPUT_MAX
     else process.env.QUANTA_TOOL_OUTPUT_MAX = prevEnv
+    __resetRuntimeConfig()
     rmSync(dir, { recursive: true, force: true })
   })
 

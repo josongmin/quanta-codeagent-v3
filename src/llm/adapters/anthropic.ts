@@ -166,7 +166,7 @@ export class AnthropicAdapter implements LLMPort {
         })),
       })) as unknown as AsyncIterable<RawEvent>
     } catch (e) {
-      throw new LLMError(`Anthropic request failed: ${(e as Error).message}`, { cause: e })
+      throw LLMError.fromSdkError("anthropic", e)
     }
   }
 
@@ -186,8 +186,7 @@ export class AnthropicAdapter implements LLMPort {
         yield* mapRawEvent(ev, open, usage)
       }
     } catch (e) {
-      if (e instanceof LLMError) throw e
-      throw new LLMError(`Anthropic stream error: ${(e as Error).message}`, { cause: e })
+      throw LLMError.fromSdkError("anthropic", e, "Anthropic stream error")
     }
   }
 }
@@ -296,6 +295,9 @@ export const finalizeToolInput = (json: string, id: string): unknown => {
   try {
     return JSON.parse(json)
   } catch {
-    throw new LLMError(`Malformed tool input JSON for ${id}`)
+    throw new LLMError(`Malformed tool input JSON for ${id}`, {
+      kind: "stream_corrupt",
+      provider: "anthropic",
+    })
   }
 }

@@ -128,6 +128,15 @@ export interface Tool<I = unknown> {
    *  pre-approval-ok) provide their own classifier here. Only consulted
    *  when the HITL gate is explicitly enabled in `AgentConfig.hitl`. */
   hitlTier?(input: I): HITLTier
+  /** S16: OPTIONAL. When a tool accepts a raw shell command string, it
+   *  implements this to expose the command for HARD_DENY evaluation. The
+   *  permission policy gates ANY tool whose `extractShellCommand` returns a
+   *  non-null value through the same dangerous-pattern denylist as `bash` —
+   *  so a sibling shell tool (a future `shell`/`exec`/MCP `run` tool, a
+   *  typo'd `Bash`, etc.) cannot silently slip past the gate that previously
+   *  only matched `action.tool === "bash"`. Tools whose input is not a shell
+   *  string omit the method entirely. */
+  extractShellCommand?(input: I): string | null
 }
 
 /** Provider-agnostic schema the agent forwards to the LLM.

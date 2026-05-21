@@ -1,0 +1,23 @@
+id: queued-follow-ups
+title: Per-thread queued follow-ups with PausedReason
+section: 1
+subsystem: Follow-up queue (ADR-0037)
+order: 12
+maturity: L3
+status: new
+purpose: Per-thread FIFO follow-up queue with multi-thread isolation and serializable snapshot/restore. 10 explicit PausedReason values — popReady delivers iff pausedReason === null; documented condition per reason; drain at thread close. Standalone — UI integration is a follow-up.
+evidence:
+  code:
+    - src/agent/follow-up-queue.ts
+  adrs: [37]
+  tests:
+    unit:
+      - tests/unit/follow-up-queue.test.ts
+      - tests/unit/paused-reason-enum.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: UI surface for the queued count + per-thread persistence wiring is deferred (see ADR-0037 §한계).
+  promotion_path: Wire FollowUpQueue snapshot into session-resume; surface queued count to the CLI/UI before the next prompt is sent.
+notes: ''

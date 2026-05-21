@@ -199,12 +199,12 @@ const launchBackground = (
   req: SubagentRequest,
   taskId: string,
 ): ToolEvent => {
-  const ac = registry.register({
+  const { abort, ownerToken } = registry.register({
     id: taskId,
     description: input.prompt.slice(0, 120),
     ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
   })
-  const signaledReq: SubagentRequest = { ...req, signal: ac.signal }
+  const signaledReq: SubagentRequest = { ...req, signal: abort.signal }
   // Fire and forget; the registry record settles when the runner returns.
   void opts
     .runner(signaledReq)
@@ -214,9 +214,13 @@ const launchBackground = (
     type: "result",
     result: {
       ok: true,
+      // S17: surface the owner_token so the LLM can use it to cancel later.
+      // Without this token, sibling subagents that learn `task_id` cannot
+      // stop the task — the registry enforces the capability gate.
       output:
         `Subagent launched in background. task_id: ${taskId}\n` +
-        `Poll with task_output({ task_id: "${taskId}" }) or cancel with task_stop.`,
+        `owner_token: ${ownerToken}\n` +
+        `Poll with task_output({ task_id: "${taskId}" }) or cancel with task_stop({ task_id: "${taskId}", owner_token: "${ownerToken}" }).`,
     },
   }
 }

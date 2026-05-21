@@ -17,6 +17,7 @@ import {
   saveSessionById,
   sessionFilePath,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 import { runSessionCommand, type SessionCommandDeps } from "../../src/apps/cli/session-commands"
 
 /**
@@ -219,6 +220,7 @@ describe("session stress — index growth", () => {
     envSnapshot = { ...process.env }
     sessionsDir = mkdtempSync(join(tmpdir(), "stress-sessions-"))
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(sessionsDir, { recursive: true, force: true })
@@ -226,6 +228,7 @@ describe("session stress — index growth", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   // 1. 100 sessions in index — `listSessions` returns 100 sorted DESC; CLI ls < 1s.
@@ -342,6 +345,7 @@ describe("session stress — large payloads", () => {
     envSnapshot = { ...process.env }
     sessionsDir = mkdtempSync(join(tmpdir(), "stress-large-"))
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(sessionsDir, { recursive: true, force: true })
@@ -349,6 +353,7 @@ describe("session stress — large payloads", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   // 5. Single session with 5000 messages — roundtrip preserves first/mid/last.
@@ -433,6 +438,7 @@ describe("session concurrency — dispatcher races", () => {
     envSnapshot = { ...process.env }
     sessionsDir = mkdtempSync(join(tmpdir(), "stress-conc-"))
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(sessionsDir, { recursive: true, force: true })
@@ -440,6 +446,7 @@ describe("session concurrency — dispatcher races", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   // 8. 20 parallel saveSessionById — per-writer-tmp + in-process index
@@ -612,6 +619,7 @@ describe("session stress — worktree (git required)", () => {
   beforeEach(() => {
     sessionsDir = mkdtempSync(join(tmpdir(), "stress-wt-sessions-"))
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(sessionsDir, { recursive: true, force: true })
@@ -619,6 +627,7 @@ describe("session stress — worktree (git required)", () => {
       rmSync(repoDir, { recursive: true, force: true })
       repoDir = undefined
     }
+    __resetRuntimeConfig()
   })
 
   // 12. 5 parallel `session fork X --worktree` — under per-writer-tmp all
@@ -759,6 +768,7 @@ describe("session perf baselines", () => {
     envSnapshot = { ...process.env }
     sessionsDir = mkdtempSync(join(tmpdir(), "stress-perf-"))
     process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
   })
   afterEach(() => {
     rmSync(sessionsDir, { recursive: true, force: true })
@@ -766,6 +776,7 @@ describe("session perf baselines", () => {
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   // 15. Empty store `session ls --json` should be near-instant.
