@@ -239,6 +239,17 @@ export interface PersistDeps {
    * regardless of CI clock skew.
    */
   now?: () => number
+  /**
+   * ADR-0078 — when set, the distill input (serialized transcript) is
+   * redacted before crossing the LLM call. `disabled === true` ⇒ caller
+   * acknowledged the risk (validated at agent startup). Absent ⇒ legacy
+   * unredacted distill (preserved for non-loop callers and tests). The
+   * loop sets these unconditionally.
+   */
+  redactionDisabled?: boolean
+  redactionWhitelist?: ReadonlyArray<RegExp>
+  /** ADR-0078 — invoked once with hits aggregated by the distiller. */
+  onRedactionHits?: (hits: ReadonlyArray<import("@/security").RedactionHit>) => void
 }
 
 export interface PersistInput {
@@ -268,7 +279,12 @@ const distillRecords = async (
   finalMessages: Message[],
 ): Promise<DistilledRecord[]> => {
   if (deps.llm && deps.distill !== false) {
-    return distillSession(deps.llm, finalMessages, deps.signal ? { signal: deps.signal } : {})
+    return distillSession(deps.llm, finalMessages, {
+      ...(deps.signal ? { signal: deps.signal } : {}),
+      ...(deps.redactionDisabled === true ? { redactionDisabled: true } : {}),
+      ...(deps.redactionWhitelist ? { redactionWhitelist: deps.redactionWhitelist } : {}),
+      ...(deps.onRedactionHits ? { onRedactionHits: deps.onRedactionHits } : {}),
+    })
   }
   const t = finalAssistantText(finalMessages)
   return t

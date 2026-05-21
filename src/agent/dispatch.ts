@@ -1,6 +1,14 @@
+import { homedir } from "node:os"
 import type { ToolUseBlock } from "@/llm"
 import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import type { AutoModeClassifier, PermissionContext } from "@/permission"
+import {
+  classifyCommandShape,
+  classifyPath,
+  type RedactionHit,
+  redactSecrets,
+  type SensitivityClass,
+} from "@/security"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
@@ -206,6 +214,64 @@ const toolSpanAttrs = (name: string, callId: string) =>
     [QUANTA_ATTRS.tool.callId]: callId,
   })
 
+/**
+ * ADR-0078 Layer-1 source-class derivation. The tool call's `name` + `input`
+ * fields are inspected structurally:
+ *   - tools that read a file (`Read`, `read`, `view_file`) project to the
+ *     input's `path` / `file_path` field and run `classifyPath`;
+ *   - tools that execute a shell command (`Bash`, `bash`, `shell`) project
+ *     to the input's `command` field and run `classifyCommandShape`;
+ *   - everything else returns `null` (no source class — Layer 2 still runs).
+ *
+ * Returns the `[class, label]` pair the redactor needs; `label` rides into
+ * the `source_class_secret` placeholder so the user/audit can see WHERE
+ * the redacted output came from. Never throws — input shape mismatches
+ * fall through to `null`.
+ */
+const PATH_FIELDS: readonly string[] = ["path", "file_path", "filePath", "filename", "file"]
+
+const COMMAND_FIELDS: readonly string[] = ["command", "cmd", "script"]
+
+const PATH_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "Read",
+  "read",
+  "view_file",
+  "open_file",
+])
+
+const COMMAND_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "Bash",
+  "bash",
+  "shell",
+  "run",
+])
+
+const stringField = (input: unknown, fields: readonly string[]): string | null => {
+  if (!input || typeof input !== "object") return null
+  const obj = input as Record<string, unknown>
+  for (const f of fields) {
+    const v = obj[f]
+    if (typeof v === "string" && v.length > 0) return v
+  }
+  return null
+}
+
+const deriveSourceClass = (call: ToolUseBlock): { cls: SensitivityClass; label: string } | null => {
+  if (PATH_TOOL_NAMES.has(call.name)) {
+    const path = stringField(call.input, PATH_FIELDS)
+    if (path === null) return null
+    const cls = classifyPath(path, homedir())
+    return { cls, label: path }
+  }
+  if (COMMAND_TOOL_NAMES.has(call.name)) {
+    const cmd = stringField(call.input, COMMAND_FIELDS)
+    if (cmd === null) return null
+    const cls = classifyCommandShape(cmd)
+    return { cls, label: cmd }
+  }
+  return null
+}
+
 /** Drive the registry, normalizing thrown errors into an error tool_result. */
 const execute = async (
   call: ToolUseBlock,
@@ -217,10 +283,11 @@ const execute = async (
   try {
     const result = await config.registry.run(call.name, call.input, ctx, onProgress)
     const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
+    const { output, hits } = applyRedaction(result.output, call, config)
     return {
-      block: resultBlock(call.id, result.output, !result.ok),
+      block: resultBlock(call.id, output, !result.ok),
       ok: result.ok,
-      preview: result.output,
+      preview: output,
       durationMs,
       ...evidenceOf(result),
       // absorb #2 (Cursor failure model): surface the tool's typed failure
@@ -229,10 +296,43 @@ const execute = async (
       // do not read `failure` stay byte-identical. `ok`/`block`/`preview`
       // derivation is unchanged.
       ...(result.failure !== undefined ? { failure: result.failure } : {}),
+      ...(hits.length > 0 ? { redactionHits: hits } : {}),
     }
   } catch (e) {
     const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
     const message = e instanceof QuantaError ? e.message : toError(e).message
-    return { block: resultBlock(call.id, message, true), ok: false, preview: message, durationMs }
+    const { output, hits } = applyRedaction(message, call, config)
+    return {
+      block: resultBlock(call.id, output, true),
+      ok: false,
+      preview: output,
+      durationMs,
+      ...(hits.length > 0 ? { redactionHits: hits } : {}),
+    }
   }
+}
+
+/**
+ * ADR-0078 application point #1 — tool result normalization. Applies
+ * `redactSecrets({origin:"tool_result", sourceClass})` with the Layer-1
+ * class derived from the call's input shape. When the host has opted out
+ * via `config.redaction.disabled === true` (validated at startup) we
+ * skip — the disabled mode is announced as a `<system-reminder>` so the
+ * model is never silently unprotected.
+ */
+const applyRedaction = (
+  text: string,
+  call: ToolUseBlock,
+  config: AgentConfig,
+): { output: string; hits: ReadonlyArray<RedactionHit> } => {
+  if (config.redaction?.disabled === true) {
+    return { output: text, hits: [] }
+  }
+  const src = deriveSourceClass(call)
+  const result = redactSecrets(text, {
+    origin: "tool_result",
+    ...(src !== null ? { sourceClass: src.cls, sourceLabel: src.label } : {}),
+    ...(config.redaction?.whitelist !== undefined ? { whitelist: config.redaction.whitelist } : {}),
+  })
+  return { output: result.text, hits: result.hits }
 }

@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
 import { MEMORY_KINDS, MEMORY_TIERS, type MemoryKind, type MemoryTier } from "@/memory"
+import { type RedactionHit, redactSecrets } from "@/security"
 
 /**
  * LLM-driven session distillation (RFC §6.3, long-term memory). Reads a finished
@@ -170,16 +171,54 @@ const parseDistilled = (text: string, max: number): DistilledMemory[] | null => 
  * Distill durable memories from a finished transcript via one LLM call.
  * Robust by contract: any failure (llm throws, no text, unparseable, empty,
  * or `opts.signal` aborted) → heuristic single-entry fallback or `[]`.
+ *
+ * ADR-0078 application point #3: the serialized transcript is passed
+ * through `redactSecrets({origin:"memory_distill"})` BEFORE being prepended
+ * with the distill PROMPT. Any redaction hits are reported via
+ * `opts.onRedactionHits` so the loop can aggregate them onto the outcome.
+ * `opts.redactionDisabled === true` ⇒ skip — the caller has acked the
+ * risk; we still surface a `null` rollup so the auditor sees the gap.
  */
+export interface DistillOptions {
+  signal?: AbortSignal
+  max?: number
+  /** ADR-0078 — caller-supplied disable flag mirroring the agent config.
+   *  When `true` the distill input is NOT redacted (the host has the
+   *  acknowledged-risk gate). Absent / false ⇒ redaction applied. */
+  redactionDisabled?: boolean
+  /** ADR-0078 — invoked once with the hits produced by Layer-2 pattern
+   *  matching on the serialized transcript. Absent ⇒ hits are dropped on
+   *  the floor (still no silent redaction at the *distillation* boundary,
+   *  since the redaction itself happened in-band). Hosts that want the
+   *  audit rollup should supply this. */
+  onRedactionHits?: (hits: ReadonlyArray<RedactionHit>) => void
+  /** ADR-0078 — whitelist override forwarded to the redactor. */
+  redactionWhitelist?: ReadonlyArray<RegExp>
+}
+
 export const distillSession = async (
   llm: LLMPort,
   messages: Message[],
-  opts?: { signal?: AbortSignal; max?: number },
+  opts?: DistillOptions,
 ): Promise<DistilledMemory[]> => {
   const max = opts?.max ?? 8
   if (opts?.signal?.aborted) return fallback(messages)
   try {
-    const prompt = PROMPT.replace("{MAX}", String(max)) + serializeTranscript(messages)
+    const transcript = serializeTranscript(messages)
+    // ADR-0078 application point #3 — redact the distill input before the
+    // model sees it.
+    let safeTranscript: string
+    if (opts?.redactionDisabled === true) {
+      safeTranscript = transcript
+    } else {
+      const r = redactSecrets(transcript, {
+        origin: "memory_distill",
+        ...(opts?.redactionWhitelist !== undefined ? { whitelist: opts.redactionWhitelist } : {}),
+      })
+      safeTranscript = r.text
+      if (r.hits.length > 0) opts?.onRedactionHits?.(r.hits)
+    }
+    const prompt = PROMPT.replace("{MAX}", String(max)) + safeTranscript
     const events: StreamEvent[] = []
     for await (const ev of llm.stream({
       messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],

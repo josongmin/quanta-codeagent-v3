@@ -85,6 +85,10 @@ export interface DispatchOutcome {
   block: ResultBlocks[number]
   ok: boolean
   preview: string
+  /** ADR-0078 — redaction hits attached on the tool_result side of the
+   *  dispatch seam. Forwarded verbatim to the loop's aggregator. Absent ⇒
+   *  no hits (default-OFF or no matches). */
+  redactionHits?: ReadonlyArray<import("@/security").RedactionHit>
 }
 
 export interface StreamingTurnArgs {

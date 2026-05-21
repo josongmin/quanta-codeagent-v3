@@ -362,6 +362,12 @@ export interface TurnContextInput {
    *  controllable fragment so file content cannot forge `<system-reminder>`
    *  tags. */
   ideSnapshot?: IdeSnapshot | null
+  /** ADR-0078: when secret redaction is OFF (caller opted out with an
+   *  explicit `acknowledgedRisk`), surface a per-turn `<system-reminder>`
+   *  line `"Secret redaction DISABLED. Reason: <ack>"`. Absent ⇒ no line,
+   *  byte-identical for the default-ON path. The model sees the line so
+   *  "redaction off" is never invisible. */
+  redactionDisabledReason?: string
 }
 
 export interface TurnContext {
@@ -480,6 +486,11 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
   // `formatBlock` (src/agent/memory.ts) — append as-is, no double-label.
   const memory = input.memoryContext?.trim()
   if (memory) parts.push("", memory)
+  // ADR-0078 redaction-disabled banner. Surfaced as a single line so the
+  // model sees the ack reason every turn — opt-out is never silent. Absent
+  // ⇒ no line (byte-identical default-ON path).
+  const redact = input.redactionDisabledReason?.trim()
+  if (redact) parts.push("", `Secret redaction DISABLED. Reason: ${redact}`)
   return parts.join("\n")
 }
 

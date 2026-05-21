@@ -8,6 +8,7 @@ import type {
   TrustScopeRegistry,
 } from "@/permission"
 import type { RunContext } from "@/shared"
+import type { RedactionConfig, RedactionKind, RedactionOrigin } from "@/security"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
@@ -428,6 +429,34 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * responsible for honoring it.
    */
   ideContextProvider?: IdeContextProvider
+  /**
+   * Secret redaction (ADR-0078). DEFAULT-ON: with `redaction` absent, the
+   * content-plane invariant is active — tool result text, JSONL envelope
+   * writes, and memory-distill input are scrubbed through `redactSecrets`
+   * (closed RedactionKind enum, deterministic regex, no confidence
+   * scoring). Each match surfaces as a {@link RedactionHit} so the user
+   * and audit can see WHAT was hidden.
+   *
+   * To DISABLE the layer the caller MUST set `disabled: true` AND supply
+   * a non-empty `acknowledgedRisk` string; without the ack
+   * `normalizeRedactionConfig` throws a startup error and the agent
+   * refuses to start. `whitelist` is a list of structural overrides for
+   * patterns the user trusts (e.g. fixture tokens). See
+   * `src/security/redaction-config.ts`.
+   */
+  redaction?: RedactionConfig
+}
+
+/**
+ * Aggregated redaction counts surfaced on {@link AgentOutcome}. Per-hit
+ * detail (span / placeholder / origin file) lives in the on-disk JSONL
+ * envelope; the outcome carries the rollup so a host can render "N
+ * secrets hidden" without scanning the trajectory.
+ */
+export interface RedactionRollup {
+  readonly origin: RedactionOrigin
+  readonly kind: RedactionKind
+  readonly count: number
 }
 
 export type StopReason = "completed" | "max_turns" | "aborted" | "error"
@@ -501,6 +530,15 @@ export interface AgentOutcome {
    * sampling-request seam.
    */
   turnTiming?: TurnTiming
+  /**
+   * Aggregated secret-redaction hit counts (ADR-0078). Present whenever
+   * redaction is enabled AND at least one hit fired during the run.
+   * Absent ⇒ either no hits OR the layer is opt-out disabled. The host
+   * may render the rollup as "N secrets hidden" without scanning the
+   * trajectory. Per-hit detail (`RedactionHit`) lives in the JSONL
+   * envelope. Closed enum keys keep the rollup audit-stable.
+   */
+  redactions?: ReadonlyArray<RedactionRollup>
 }
 
 // ─────────────────────────────────────────────────────────────────────────

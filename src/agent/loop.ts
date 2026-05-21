@@ -18,6 +18,13 @@ import {
   type TurnTiming,
 } from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
+import {
+  type NormalizedRedactionConfig,
+  normalizeRedactionConfig,
+  type RedactionHit,
+  type RedactionOrigin,
+  redactSecrets,
+} from "@/security"
 import { LLMError, type RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
 import {
@@ -56,7 +63,13 @@ import {
   type ToolChoiceTurnState,
 } from "./tool-choice"
 import { makeTurnHeader } from "./turn-kind"
-import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
+import type {
+  AgentConfig,
+  AgentOutcome,
+  MemoryCitation,
+  RedactionRollup,
+  StopReason,
+} from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
 import { TurnWorkMetricsCollector } from "./work-metrics-collector"
 import type { WorkingStateSession } from "./working-state"
@@ -86,6 +99,81 @@ type ToolHistoryEntry = { name: string; arg?: string }
  *  never reached when the guard is off — `applyAction` only needs a readonly
  *  empty array to satisfy the type). */
 const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
+
+/**
+ * ADR-0078 — session-scoped aggregator for {@link RedactionHit}s. Collects
+ * hit counts keyed by `origin × kind`, frozen into a {@link RedactionRollup}
+ * array surfaced on {@link AgentOutcome}.
+ *
+ * Pure: no I/O, no shared global. One instance per `runAgent` invocation.
+ * `record` is the only mutator; `snapshot` returns a stable-sorted readonly
+ * array (sorted by `origin` then `kind`) so a fixture test sees the same
+ * ordering across runs.
+ */
+class RedactionAggregator {
+  private readonly counts: Map<string, RedactionRollup> = new Map()
+
+  record(origin: RedactionOrigin, hits: ReadonlyArray<RedactionHit>): void {
+    for (const h of hits) {
+      const key = `${origin}::${h.kind}`
+      const prev = this.counts.get(key)
+      if (prev !== undefined) {
+        this.counts.set(key, { origin, kind: h.kind, count: prev.count + 1 })
+      } else {
+        this.counts.set(key, { origin, kind: h.kind, count: 1 })
+      }
+    }
+  }
+
+  empty(): boolean {
+    return this.counts.size === 0
+  }
+
+  snapshot(): ReadonlyArray<RedactionRollup> {
+    const arr = Array.from(this.counts.values())
+    arr.sort((a, b) => {
+      if (a.origin !== b.origin) return a.origin.localeCompare(b.origin)
+      return a.kind.localeCompare(b.kind)
+    })
+    return Object.freeze(arr)
+  }
+}
+
+/** ADR-0078 — apply `envelope_jsonl` redaction to every text block on every
+ *  message in a transcript snapshot. Returns a NEW message array (input is
+ *  not mutated) and an aggregated hit list. When `cfg.enabled === false`
+ *  this is a no-op pass-through (host has acked the risk).
+ */
+const redactTranscriptForPersist = (
+  messages: Message[],
+  cfg: NormalizedRedactionConfig,
+): { messages: Message[]; hits: RedactionHit[] } => {
+  if (!cfg.enabled) return { messages, hits: [] }
+  const hits: RedactionHit[] = []
+  const out: Message[] = messages.map((m) => ({
+    ...m,
+    content: m.content.map((b) => {
+      if (b.type === "text") {
+        const r = redactSecrets(b.text, {
+          origin: "envelope_jsonl",
+          ...(cfg.whitelist.length > 0 ? { whitelist: cfg.whitelist } : {}),
+        })
+        if (r.hits.length > 0) hits.push(...r.hits)
+        return { ...b, text: r.text }
+      }
+      if (b.type === "tool_result") {
+        const r = redactSecrets(b.content, {
+          origin: "envelope_jsonl",
+          ...(cfg.whitelist.length > 0 ? { whitelist: cfg.whitelist } : {}),
+        })
+        if (r.hits.length > 0) hits.push(...r.hits)
+        return { ...b, content: r.text }
+      }
+      return b
+    }),
+  }))
+  return { messages: out, hits }
+}
 
 /**
  * ReAct loop. One `while` over turns; each turn = one LLM stream with tool
@@ -269,7 +357,14 @@ const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut =
   ok: false,
   preview: "skill-scoped",
 })
-type StreamDispatchOut = { block: ToolResultBlock; ok: boolean; preview: string }
+type StreamDispatchOut = {
+  block: ToolResultBlock
+  ok: boolean
+  preview: string
+  /** ADR-0078 — propagated from `dispatchTool` so the loop aggregator can
+   *  record per-turn redactions. Absent ⇒ no hits. */
+  redactionHits?: ReadonlyArray<RedactionHit>
+}
 
 /**
  * Consume one LLM stream WITH interleaved tool execution (streaming tool
@@ -297,6 +392,7 @@ const streamConsume = async (
   workingState: WorkingStateSession | undefined,
   collector: TurnWorkMetricsCollector | undefined,
   toolChoice: ToolChoice | undefined,
+  redactions: RedactionAggregator | undefined,
 ): Promise<StreamConsumeResult> => {
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
@@ -368,6 +464,13 @@ const streamConsume = async (
                 )
           // A successful `Skill` invocation (re)arms the scope for next calls.
           skillGate?.observe(call.name, call.input, out.ok)
+          // ADR-0078 — aggregate any tool-result redaction hits the dispatch
+          // seam attached. Default-OFF: when redaction is disabled or no hits
+          // fired, `redactionHits` is absent and this is a single-property
+          // check (zero allocation).
+          if (redactions && out.redactionHits && out.redactionHits.length > 0) {
+            redactions.record("tool_result", out.redactionHits)
+          }
           // absorb #6: per-turn work-metrics — count the action and, when the
           // tool is `read`, count returned lines. Collector absent ⇒ no-op
           // (the sink is unwired). recordRead duck-types the result shape so
@@ -682,6 +785,8 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
 const buildPersistDeps = (
   config: AgentConfig,
   recorder: AgentRecorder | undefined,
+  redactionCfg?: NormalizedRedactionConfig,
+  redactions?: RedactionAggregator,
 ): PersistDeps => ({
   // biome-ignore lint/style/noNonNullAssertion: call site guards `config.store`
   store: config.store!,
@@ -691,6 +796,15 @@ const buildPersistDeps = (
   ...(config.memory?.consolidate !== undefined ? { consolidate: config.memory.consolidate } : {}),
   ...(config.memory?.evictionCaps ? { evictionCaps: config.memory.evictionCaps } : {}),
   ...(recorder ? { onStats: (s) => recorder.memoryPersist(s) } : {}),
+  // ADR-0078 application point #3 — wire the distill input redactor. When
+  // the layer is OFF (host acked risk) we pass `redactionDisabled: true`
+  // so the distiller does NOT re-redact. The aggregator records hits so
+  // `AgentOutcome.redactions` carries the rollup.
+  ...(redactionCfg && !redactionCfg.enabled ? { redactionDisabled: true } : {}),
+  ...(redactionCfg && redactionCfg.whitelist.length > 0
+    ? { redactionWhitelist: redactionCfg.whitelist }
+    : {}),
+  ...(redactions ? { onRedactionHits: (h) => redactions.record("memory_distill", h) } : {}),
   signal: config.signal,
 })
 
@@ -868,6 +982,7 @@ const prepareTurnContext = async (
   turn: number,
   citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
   ideSnapshot: IdeSnapshot | null | undefined,
+  redactionCfg: NormalizedRedactionConfig | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder, citationSink)
   await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
@@ -875,6 +990,13 @@ const prepareTurnContext = async (
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
   const wsSnapshot = workingState?.snapshot()
+  // ADR-0078 — when redaction is OFF, surface the ack reason on every turn
+  // as a `<system-reminder>` line so the model is never silently
+  // unprotected. Enabled ⇒ field omitted (byte-identical default-ON).
+  const redactionDisabledReason =
+    redactionCfg && !redactionCfg.enabled && redactionCfg.acknowledgedRisk
+      ? redactionCfg.acknowledgedRisk
+      : undefined
   return buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
@@ -894,6 +1016,7 @@ const prepareTurnContext = async (
     // `undefined` (no provider wired) ⇒ key omitted ⇒ buildTurnContext
     // emits no `<ide-context>` block (byte-identical).
     ...(ideSnapshot !== undefined ? { ideSnapshot } : {}),
+    ...(redactionDisabledReason !== undefined ? { redactionDisabledReason } : {}),
   })
 }
 
@@ -1123,6 +1246,8 @@ const runTurn = async (
   citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
   ideSnapshot: IdeSnapshot | null | undefined,
   toolChoiceTurnState: ToolChoiceTurnState,
+  redactions: RedactionAggregator | undefined,
+  redactionCfg: NormalizedRedactionConfig | undefined,
   /** ADR-0077: capture sink — invoked on every successful sampling-request so
    *  the outer loop can surface the LAST turn's snapshot on AgentOutcome. */
   onTurnTiming?: (t: TurnTiming) => void,
@@ -1157,6 +1282,7 @@ const runTurn = async (
       turn,
       citationSink,
       ideSnapshot,
+      redactionCfg,
     )
     const result = await streamConsume(
       config,
@@ -1173,6 +1299,7 @@ const runTurn = async (
       // field on the wire so the request is byte-identical to the pre-feature
       // path. Pass it through anyway so the signal lifecycle stays uniform.
       toolChoice,
+      redactions,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -1372,6 +1499,11 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
  *  stays untouched — adding a `try/finally` around it inline would have
  *  required restructuring every return path. */
 const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
+  // ADR-0078 — validate the redaction config FIRST. `disabled: true` without a
+  // non-empty `acknowledgedRisk` throws `RedactionConfigError` here so a
+  // misconfigured host fails fast (startup), never mid-turn.
+  const redactionCfg = normalizeRedactionConfig(config.redaction)
+  const redactions = new RedactionAggregator()
   // Tier 1 capability (ADR-0011): materialize optional subsystems ONCE. With no
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
   // identity, so the loop is byte-for-byte identical to the pre-absorption path.
@@ -1510,9 +1642,19 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     }
     const messages = [...wm.snapshot()]
     if (cfg.store) {
-      await persistSession(buildPersistDeps(cfg, recorder), {
+      // ADR-0078 application point #2 — apply `envelope_jsonl` redaction
+      // over the snapshot for the rollup audit. We record the hits here so
+      // `AgentOutcome.redactions[]` carries a per-origin tally even though
+      // the message buffer the loop returns is left UN-redacted (host UIs
+      // / state-resume expect the live transcript). The persisted side
+      // gets the REDACTED snapshot; the distiller in `persistSession`
+      // re-runs its own `memory_distill`-origin pass so the rollup carries
+      // both origins independently.
+      const persisted = redactTranscriptForPersist(messages, redactionCfg)
+      if (persisted.hits.length > 0) redactions.record("envelope_jsonl", persisted.hits)
+      await persistSession(buildPersistDeps(cfg, recorder, redactionCfg, redactions), {
         sessionId,
-        finalMessages: messages,
+        finalMessages: messages, // original — distill runs its own pass
       })
     }
     // R-Phase5 P0-A: graceful shutdown of any pending background subagents.
@@ -1546,12 +1688,19 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // streamed (`lastTurnTiming` is `undefined` for runs that aborted before
     // any sampling-request opened). Same conditional-spread pattern keeps
     // legacy callers byte-identical.
+    // ADR-0078: attach the redaction rollup when at least one hit fired.
+    // Absent ⇒ no field on the outcome (byte-identical for callers that
+    // never opted into reading it).
+    const redactionsRollup: ReadonlyArray<RedactionRollup> | undefined = redactions.empty()
+      ? undefined
+      : redactions.snapshot()
     const out: AgentOutcome = { reason, turns, messages }
     if (stopCategory !== undefined) out.stopCategory = stopCategory
     if (memoryCitations !== undefined && memoryCitations.length > 0) {
       out.memoryCitations = memoryCitations
     }
     if (lastTurnTiming !== undefined) out.turnTiming = lastTurnTiming
+    if (redactionsRollup !== undefined) out.redactions = redactionsRollup
     return out
   }
 
@@ -1672,6 +1821,8 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         citationSink,
         ideSnapshot,
         toolChoiceTurnState,
+        redactions,
+        redactionCfg,
         (t) => {
           lastTurnTiming = t
         },

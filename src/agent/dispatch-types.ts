@@ -4,6 +4,7 @@
  *  to depend on the other's full implementation surface. */
 
 import type { ToolResultBlock } from "@/llm"
+import type { RedactionHit } from "@/security"
 import type { ToolFailure } from "@/tool"
 
 export interface DispatchResult {
@@ -39,4 +40,14 @@ export interface DispatchResult {
    * `admissibility-gate.ts`).
    */
   steerInjection?: string
+  /**
+   * ADR-0078 secret-redaction hits applied to this tool's result text on
+   * its way to the model. Each hit records `kind` (closed enum), `span`
+   * (start/end offsets INTO the POST-redaction text), and `placeholder`.
+   * Omitted on success when no hits fired AND whenever redaction is
+   * disabled (exactOptionalPropertyTypes: never `undefined`), so callers
+   * that don't read it stay byte-identical. The loop aggregates these
+   * onto `AgentOutcome.redactions`.
+   */
+  redactionHits?: ReadonlyArray<RedactionHit>
 }

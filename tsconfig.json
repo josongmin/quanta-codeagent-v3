@@ -58,7 +58,9 @@
       "@/migration": ["./src/migration/index.ts"],
       "@/migration/*": ["./src/migration/*"],
       "@/patch": ["./src/patch/index.ts"],
-      "@/patch/*": ["./src/patch/*"]
+      "@/patch/*": ["./src/patch/*"],
+      "@/security": ["./src/security/index.ts"],
+      "@/security/*": ["./src/security/*"]
     }
   },
   "include": ["src", "tests", "tools"],

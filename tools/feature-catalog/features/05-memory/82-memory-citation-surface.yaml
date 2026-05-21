@@ -5,7 +5,7 @@ subsystem: L2 long-term memory recall provenance
 order: 82
 maturity: L5
 status: stable
-purpose: >
+purpose: |
   Surface "which record was placed in this run's prompt window, where, with what
   score". Provenance signal (placement = citation), NOT a heuristic scan of the
   assistant's response. Closed where-enum
@@ -41,7 +41,7 @@ deliberate_hold:
   promotion_path: |
     Wire system_prompt or tool_result_injection placement on a real consumer path
     (with corresponding accumulator emit point) to expand the where-enum coverage.
-notes: >
+notes: |
   PlacedRecord.score equals the weighted-sum scoreEntry computes (`vector +
   text + tag + freshness + importance + access + tier`); identical to the
   ranking key. Reinforcement (accessCount bump) means same-record cross-turn
