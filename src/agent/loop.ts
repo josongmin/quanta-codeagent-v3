@@ -728,6 +728,22 @@ export const decideOnAssembled = (
   message: AssembledMessage,
   rec: RecoveryState,
 ): RecoveryAction => {
+  // ADR-0076 Gap-1: provider refusal / abnormal non-tool stop. The model
+  // stopped with an explicit refusal (Anthropic `refusal`, OpenAI content-
+  // policy stop). Surface it as an error so the run does NOT report the
+  // refusal text as a normal completion — the pre-ADR fall-through bug routed
+  // every unrecognized stop_reason to `proceed`→`completed`, disguising a
+  // refusal as success. `pause_turn` (server-tool resume) is intentionally
+  // NOT handled: we ship no server-side tools, so it cannot be emitted; adding
+  // a dead branch would be cargo.
+  if (stopReason === "refusal") {
+    return {
+      do: "error",
+      reason:
+        "Model refused to continue (stop_reason=refusal); the assistant " +
+        "message carries the refusal rationale, not a completed task.",
+    }
+  }
   if (stopReason === "max_tokens" && rec.outputContinues < MAX_OUTPUT_CONTINUES) {
     rec.outputContinues += 1
     return {

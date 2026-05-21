@@ -1,5 +1,6 @@
-export type { JailedPath } from "./service"
+export type { FileSystemPort, JailedPath } from "./service"
 export {
+  defaultFileSystemPort,
   FsJailError,
   fileExists,
   parentDir,

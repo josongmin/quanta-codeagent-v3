@@ -578,8 +578,12 @@ const main = async (): Promise<void> => {
   const maxTurns = Number(process.env.QUANTA_MAX_TURNS ?? "30")
   const timeoutMs = Number(process.env.QUANTA_BENCH_TIMEOUT_MS ?? "120000")
   // Pin the run id ONCE so observe + predictions + report all group under the
-  // same persistent `<benchHome>/runs/<runId>/` dir (no per-call Date.now drift).
-  process.env.QUANTA_RUN_ID ??= benchRunId()
+  // same persistent `<benchHome>/runs/<runId>/` dir (no per-call Date.now
+  // drift). MUST be written into env BEFORE the first `runtimeConfig()` read
+  // (which freezes `runId`): `benchRunId()` resolves `runtimeConfig().runId`,
+  // so we seed env here when unset, then every later `benchRunId()` returns the
+  // same pinned id from the frozen config.
+  process.env.QUANTA_RUN_ID ??= `run-${Date.now()}`
   // Trajectories persist by default now (the prior tmp default reaped them);
   // pass `--observe-dir`/`QUANTA_OBSERVE_DIR` to override the location.
   const obs = resolveObserve()

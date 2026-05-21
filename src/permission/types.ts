@@ -1,3 +1,4 @@
+import type { HITLTier } from "@/shared"
 import type { ClassifierPort } from "./classifier"
 
 export type PermissionDecision =
@@ -24,24 +25,13 @@ export interface ToolAction {
 }
 
 /**
- * Codex HITL 4-tier taxonomy (hitl-audit.md). Each tool action — and within
- * `bash`, each command — maps to exactly one tier. The dispatch gate routes
- * tier-specific behaviour (handoff terminates; always-confirm bypasses mode;
- * pre-approval-ok defers to the existing mode policy; none allows).
- *
- *  - "hand-off-required": agent must terminate; only a human can proceed
- *    (matches HARD_DENY patterns and password/safety-bypass scenarios).
- *  - "always-confirm": explicit confirm EVERY time, even under
- *    `acceptEdits`/`bypass` (deletion, permissions change, financial txn,
- *    sending DMs, mutating network egress like `git push`).
- *  - "pre-approval-ok": existing mode policy applies; can be batch-approved.
- *  - "none": read-only / reversible / harmless.
- *
- * Canonical home is `@/permission`. `@/tool` keeps its own structurally-
- * identical literal union to preserve slice isolation (biome forbids
- * `@/tool` from importing `@/permission`).
+ * Codex HITL 4-tier taxonomy (hitl-audit.md). Re-exported from the canonical
+ * `@/shared` declaration so the literal union can never drift between slices.
+ * `@/tool` and `@/agent` re-export the SAME type from `@/shared`; biome's
+ * import-direction rule permits this because `@/shared` is the leaf layer.
+ * See {@link import("@/shared").HITLTier} for the full tier semantics.
  */
-export type HITLTier = "hand-off-required" | "always-confirm" | "pre-approval-ok" | "none"
+export type { HITLTier }
 
 /** `auto` = use an injected model classifier (AutoModeClassifier) to decide
  *  allow/deny in place of an interactive prompt (AFK / long-running tasks).

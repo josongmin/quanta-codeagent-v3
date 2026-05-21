@@ -7,6 +7,14 @@ export {
   DEFAULT_COMPACTION_BREAKER_CAPS,
 } from "./compaction-breaker"
 export {
+  ALL_CONFIRM_DECISIONS,
+  buildDenySteerMessage,
+  type ConfirmDecision,
+  ConfirmDecisionError,
+  isAllowed as isConfirmDecisionAllowed,
+  normalizeConfirm,
+} from "./confirm-decision"
+export {
   appendSummary,
   archivedTokens,
   type ConversationSummaryArchive,

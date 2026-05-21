@@ -12,7 +12,15 @@ import {
 } from "@/agent"
 import { lspDiagnosticsTool, lspNavToolList } from "@/agent/lsp-bridge"
 import { type PersonaKind, resolvePersona } from "@/agent/persona"
-import { AnthropicAdapter, FallbackLLM, type LLMPort, type Message, OpenAIAdapter } from "@/llm"
+import {
+  createLLM,
+  DEFAULT_MODEL,
+  FallbackLLM,
+  type LLMPort,
+  type Message,
+  pickProvider as pickProviderFactory,
+  type Provider as LLMFactoryProvider,
+} from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
 import { Metrics, type StructuredLogger } from "@/observability"
@@ -34,40 +42,33 @@ import { defaultTools, gitTools, type Tool, ToolRegistry } from "@/tool"
 
 export const env = (k: string, fallback: string): string => process.env[k] ?? fallback
 
-export type Provider = "anthropic" | "openai"
+/** Provider union — re-exported from the `@/llm` factory (the single source of
+ *  truth). Kept as a CLI-local name so existing importers (`index.ts`, tests)
+ *  are unaffected. */
+export type Provider = LLMFactoryProvider
 
-export const pickProvider = (): Provider => {
-  const explicit = process.env.QUANTA_PROVIDER as Provider | undefined
-  if (explicit === "anthropic" || explicit === "openai") return explicit
-  if (process.env.ANTHROPIC_API_KEY) return "anthropic"
-  if (process.env.OPENAI_API_KEY) return "openai"
-  return "anthropic"
-}
+/** Provider selection. Thin wrapper over the `@/llm` factory's `pickProvider`,
+ *  passing live `process.env` so the CLI honors a `QUANTA_PROVIDER` /
+ *  key-presence change without a config-freeze round-trip (matches the
+ *  pre-factory behavior the unit tests pin). */
+export const pickProvider = (): Provider => pickProviderFactory(process.env)
 
 /** ADR-0068 persona slot — resolve `QUANTA_PERSONA` once at REPL start.
  *  Absent ⇒ `"default"` (the explicit choice). Unknown value ⇒ named
  *  `PersonaInvalidError` throw (no silent fallback per ADR-0067 §C). */
 export const pickPersona = (): PersonaKind => resolvePersona(process.env)
 
-export const buildLLM = (provider: Provider, model: string): LLMPort => {
-  if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not set")
-    return new OpenAIAdapter({
-      apiKey,
-      model,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-    })
-  }
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set")
-  return new AnthropicAdapter({ apiKey, model })
-}
+/** Build the main LLM adapter via the `@/llm` factory. Preserves the prior
+ *  contract: a missing provider key throws (the cli aborts loudly). The factory
+ *  resolves the api key + `OPENAI_BASE_URL` from the env we pass. */
+export const buildLLM = (provider: Provider, model: string): LLMPort =>
+  createLLM(provider, { model }, process.env)
 
-export const DEFAULT_MODEL: Record<Provider, string> = {
-  anthropic: "claude-sonnet-4-6",
-  openai: "gpt-5",
-}
+/** Default model id per provider — re-exported from the `@/llm` factory (the
+ *  single source of truth the three app entry points used to each duplicate).
+ *  Kept exported from `internal.ts` so `index.ts` / tests importing it from
+ *  here are unaffected. */
+export { DEFAULT_MODEL }
 
 /**
  * Build the long-term memory store from env. Default OFF so plain runs are
@@ -280,11 +281,9 @@ export const resumePath = (): string | undefined => {
   return process.env.QUANTA_RESUME
 }
 
-/** Heuristic: does this `--resume <token>` look like a filesystem path?
- *  PATH MODE when the token contains `/` or `\`, OR ends in `.json`.
- *  Otherwise the token is treated as an opaque session id (ID MODE). */
-export const isPathLikeToken = (token: string): boolean =>
-  token.includes("/") || token.includes("\\") || token.endsWith(".json")
+// `isPathLikeToken` moved to `./resume`; re-exported via the barrel block at
+//  the bottom of this file so existing importers still resolve it from
+//  `internal`. The local `idModeEnabled` below uses the imported binding.
 
 /** True when the run is in id-mode: a `--resume <id>` whose token is NOT
  *  path-like, OR `--new-session` was passed (mints a fresh id). The CLI uses
@@ -482,91 +481,11 @@ export const composeLLM = (
   return finalLLM
 }
 
-/** Inputs the per-turn `AgentConfig` is assembled from. Grouping the optional
- *  default-OFF knobs keeps `assembleConfig` a single cohesive site and lifts
- *  the conditional-spread chain out of `main`. */
-export interface SessionDeps {
-  llm: LLMPort
-  registry: ToolRegistry
-  stream: StreamPort
-  permission: PermissionContext
-  cwd: string
-  maxTurns: number
-  signal: AbortSignal
-  onConfirm: (action: ToolAction) => Promise<boolean>
-  store: PersistentStorePort | undefined
-  sessionId: string
-  embedder: EmbedderPort | undefined
-  memoryConfig: AgentConfig["memory"] | undefined
-  planMode: boolean
-  metrics: Metrics | undefined
-  run: RunContext | undefined
-  subagentConfig: AgentConfig["subagent"] | undefined
-  skillsConfig: AgentConfig["skills"] | undefined
-  compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
-  verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
-  summarizerLlm: LLMPort | undefined
-}
-
-/** Compaction config dependency. Present when memory/store is on (preserving
- *  the prior `compaction: {}` default) OR a dedicated summarizer model is set;
- *  carries `summarizerLlm` when configured. Absent when neither ⇒ omitted
- *  entirely (byte-identical to the pre-knob default path). */
-export const compactionDep = (d: {
-  store: PersistentStorePort | undefined
-  summarizerLlm: LLMPort | undefined
-}): AgentConfig["compaction"] | undefined => {
-  if (!d.store && !d.summarizerLlm) return undefined
-  return d.summarizerLlm ? { summarizerLlm: d.summarizerLlm } : {}
-}
-
-/** Assemble the per-turn `AgentConfig`. Every conditional spread is preserved
- *  verbatim (same keys, same gating) — this is a pure relocation so the wired
- *  knobs are byte-identical; it only moves the chain off `main`/`session`. */
-export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {
-  const compaction = compactionDep(d)
-  return {
-    llm: d.llm,
-    registry: d.registry,
-    stream: d.stream,
-    permission: d.permission,
-    messages,
-    system: buildSystemPrompt(d.cwd, { persona: pickPersona() }),
-    cwd: d.cwd,
-    maxTurns: d.maxTurns,
-    signal: d.signal,
-    onConfirm: d.onConfirm,
-    // Store/sessionId gated on memory; compaction is now decoupled so a
-    // dedicated summarizer model works without a store. Store-only ⇒
-    // `compaction: {}` exactly as before (byte-identical).
-    ...(d.store ? { store: d.store, sessionId: d.sessionId } : {}),
-    ...(compaction ? { compaction } : {}),
-    ...(d.embedder ? { embedder: d.embedder } : {}),
-    ...(d.memoryConfig ? { memory: d.memoryConfig } : {}),
-    ...(d.planMode ? { planMode: true } : {}),
-    ...(d.metrics ? { metrics: d.metrics } : {}),
-    ...(d.run ? { run: d.run } : {}),
-    ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
-    ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
-    ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
-    ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
-  }
-}
-
-/** The memory store + tool registry + per-run config knobs, resolved once.
- *  Pure relocation of the inline store/memory/registry block — same env
- *  gating, same logging, same conditional `memoryTools` registration. */
-export interface Tooling {
-  store: PersistentStorePort | undefined
-  embedder: EmbedderPort | undefined
-  sessionId: string
-  registry: ToolRegistry
-  memoryConfig: AgentConfig["memory"] | undefined
-  subagentConfig: AgentConfig["subagent"] | undefined
-  skillsConfig: AgentConfig["skills"] | undefined
-  compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
-  verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
-}
+// ── Split: `SessionDeps`, `compactionDep`, `assembleConfig`, `Tooling` live in
+//    `./config-assemble` (PURE composition, no env reads). Re-exported below so
+//    importers (`index.ts`, tests) are unaffected.
+export type { SessionDeps, Tooling } from "./config-assemble"
+export { assembleConfig, compactionDep } from "./config-assemble"
 
 export const buildTooling = (
   mcpTools: Tool[],

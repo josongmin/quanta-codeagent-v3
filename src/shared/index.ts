@@ -8,7 +8,7 @@ export {
   toError,
 } from "./errors"
 export type { LogLevel } from "./logger"
-export { logger } from "./logger"
+export { levelEnabled, LOG_LEVEL_ORDER, logger } from "./logger"
 export type { RunContext } from "./run-context"
 export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
 export {
@@ -37,5 +37,5 @@ export {
   redactValue,
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
-export type { Id, Result } from "./types"
-export { err, ok } from "./types"
+export type { HITLTier, Id, Result } from "./types"
+export { ALL_HITL_TIERS, err, ok } from "./types"

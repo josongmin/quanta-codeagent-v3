@@ -1,10 +1,5 @@
-import { type LogLevel, runtimeConfig } from "@/shared"
+import { type LogLevel, levelEnabled, runtimeConfig } from "@/shared"
 import type { LogRecord, LogSink, StructuredLoggerOptions } from "./types"
-
-/** Severity ordering. Mirrors the convention in `@/shared`'s line logger
- *  (debug < info < warn < error) so the two loggers stay threshold-compatible
- *  without this slice re-implementing or importing its private `write`. */
-const ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
 
 /** Resolve the effective threshold: explicit option ›› `runtimeConfig().logLevel` ›› default.
  *  S5: a single owner of the env (`runtime-config.ts`) validates `QUANTA_LOG_LEVEL`
@@ -28,13 +23,16 @@ const defaultSink: LogSink = (line) => {
  * the shared logger, because the shared logger's output format is not JSON.
  */
 export class StructuredLogger {
-  private readonly threshold: number
+  /** Effective threshold stored as the level NAME (not a numeric rank) so the
+   *  awkward reverse-lookup the old `levelName()` did for `child()` is gone —
+   *  level-gating routes through the shared `levelEnabled` predicate. */
+  private readonly threshold: LogLevel
   private readonly sink: LogSink
   private readonly now: () => number
   private readonly base: Record<string, unknown>
 
   constructor(options: StructuredLoggerOptions = {}, base: Record<string, unknown> = {}) {
-    this.threshold = ORDER[resolveLevel(options.level)]
+    this.threshold = resolveLevel(options.level)
     this.sink = options.sink ?? defaultSink
     this.now = options.now ?? Date.now
     this.base = base
@@ -43,20 +41,13 @@ export class StructuredLogger {
   /** Derive a child logger that injects `fields` into every record (e.g. a request id). */
   child(fields: Record<string, unknown>): StructuredLogger {
     return new StructuredLogger(
-      { level: this.levelName(), sink: this.sink, now: this.now },
+      { level: this.threshold, sink: this.sink, now: this.now },
       { ...this.base, ...fields },
     )
   }
 
-  private levelName(): LogLevel {
-    const entry = (Object.entries(ORDER) as [LogLevel, number][]).find(
-      ([, n]) => n === this.threshold,
-    )
-    return entry ? entry[0] : "info"
-  }
-
   private emit(level: LogLevel, event: string, fields?: Record<string, unknown>): void {
-    if (ORDER[level] < this.threshold) return
+    if (!levelEnabled(level, this.threshold)) return
     const record: LogRecord = {
       ts: this.now(),
       level,

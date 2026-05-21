@@ -11,6 +11,7 @@ import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
+import type { ConfirmDecision } from "./confirm-decision"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
@@ -75,8 +76,19 @@ export interface AgentConfig {
   cwd: string
   maxTurns: number
   signal: AbortSignal
-  /** Asked when the permission policy returns `ask`. Absent ⇒ treated as deny. */
-  onConfirm?: (action: ToolAction) => Promise<boolean>
+  /**
+   * Asked when the permission policy returns `ask` (or the always-confirm HITL
+   * tier fires). Absent ⇒ treated as deny.
+   *
+   * Returns either a legacy `boolean` (`true` allow / `false` deny —
+   * BYTE-IDENTICAL: every existing caller uses this form and is unchanged) or a
+   * structured {@link ConfirmDecision} (ADR-0076 Gap-4). A `ConfirmDecision`
+   * adds the `deny_and_steer` verb (Cursor REJECT_AND_TELL): deny the action
+   * AND carry a non-empty corrective `steer` the loop injects as the next-turn
+   * user message. The gate normalizes the return via `normalizeConfirm` and,
+   * on `deny_and_steer`, surfaces the steer on `DispatchResult.steerInjection`.
+   */
+  onConfirm?: (action: ToolAction) => Promise<boolean | ConfirmDecision>
   /**
    * Long-term memory store. Absent ⇒ recall/persist are skipped entirely and
    * the loop is byte-for-byte unchanged (RFC §6.3, behavior-preserving).

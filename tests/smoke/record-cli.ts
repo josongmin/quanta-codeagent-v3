@@ -15,37 +15,12 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
+import type { LLMPort } from "@/llm"
 import { CaptureStream } from "./capture-stream"
+import { buildLiveLLM } from "./provider"
 import { diffExpect, proposeExpect, RecordingLLM, serializeTrajectory } from "./recorder"
 import { discoverScenarios, loadPrompts, materializeWorkspace, runConversation } from "./runner"
 import type { ExpectSpec } from "./types"
-
-/** Build the live provider adapter from env, using ONLY the public `@/llm`
- *  slice (the smoke harness must not import `src/apps/cli` internals — ADR-0024
- *  slice isolation). `QUANTA_LLM_PROVIDER` selects openai (default) | anthropic;
- *  `QUANTA_SMOKE_MODEL` overrides the model. */
-const buildInnerLLM = (): { llm: LLMPort; provider: string; model: string } => {
-  const provider = (process.env.QUANTA_LLM_PROVIDER ?? "openai").toLowerCase()
-  if (provider === "anthropic") {
-    const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set")
-    const model = process.env.QUANTA_SMOKE_MODEL ?? "claude-sonnet-4-6"
-    return { llm: new AnthropicAdapter({ apiKey, model }), provider, model }
-  }
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error("OPENAI_API_KEY is not set")
-  const model = process.env.QUANTA_SMOKE_MODEL ?? "gpt-4o"
-  return {
-    llm: new OpenAIAdapter({
-      apiKey,
-      model,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-    }),
-    provider: "openai",
-    model,
-  }
-}
 
 const main = async (): Promise<void> => {
   const args = process.argv.slice(2)
@@ -66,7 +41,7 @@ const main = async (): Promise<void> => {
   let provider: string
   let model: string
   try {
-    const built = buildInnerLLM()
+    const built = buildLiveLLM()
     inner = built.llm
     provider = built.provider
     model = built.model

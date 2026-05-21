@@ -164,3 +164,31 @@ export const fileExists = async (path: string, baseDir?: string): Promise<boolea
 
 export const parentDir = (path: string, baseDir?: string): string =>
   dirname(resolvePath(path, baseDir))
+
+/**
+ * Injected filesystem port for the read/edit/write tools (#13). Mirrors the
+ * jail-enforcing `@/storage` free functions so a tool can route every fs
+ * call through one swappable seam — the same testability posture
+ * `apply_patch`/git use (`FileSystemPort`/`GitRunner`). The jail logic stays
+ * in {@link resolvePath}: each method still threads `baseDir` (the tool's
+ * `ctx.cwd`), so a port substitution does NOT widen the jail.
+ *
+ * The production port is {@link defaultFileSystemPort}; tests pass an
+ * in-memory stand-in. Behavior with the default is byte-identical to calling
+ * the free functions directly.
+ */
+export interface FileSystemPort {
+  readFile(path: string, baseDir?: string): Promise<string>
+  writeFile(path: string, content: string, baseDir?: string): Promise<void>
+  statFile(path: string, baseDir?: string): Promise<FileInfo>
+  fileExists(path: string, baseDir?: string): Promise<boolean>
+}
+
+/** Real `@/storage`-backed {@link FileSystemPort}. The default for every tool;
+ *  using it leaves behavior byte-identical to the pre-port direct calls. */
+export const defaultFileSystemPort: FileSystemPort = {
+  readFile,
+  writeFile,
+  statFile,
+  fileExists,
+}

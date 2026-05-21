@@ -49,6 +49,12 @@ import {
   type ToolActionKeyed,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
+import {
+  buildDenySteerMessage,
+  type ConfirmDecision,
+  isAllowed as isConfirmAllowed,
+  normalizeConfirm,
+} from "./confirm-decision"
 import { deny, HANDOFF_SUFFIX } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
 import type { HandoffRequiredEvent, HitlTier } from "./hitl-tier"
@@ -265,9 +271,39 @@ const buildHandoffDeny = (
   return deny(call.id, handoffMessage, "handoff")
 }
 
-/** Run the always-confirm branch — calls `onConfirm`, wraps host throws,
- *  returns the appropriate deny / null result. Factored out so the parent
- *  gate stays under the cognitive-complexity cap. */
+/**
+ * Map a normalized `deny`/`deny_and_steer` {@link ConfirmDecision} to a deny
+ * {@link DispatchResult}, attaching the corrective steer on the
+ * `deny_and_steer` arm (ADR-0076 Gap-4 — Cursor REJECT_AND_TELL). The base
+ * deny phrasing/preview is supplied by the caller so each branch keeps its
+ * legacy wording for the plain-`deny` case (byte-identical). On
+ * `deny_and_steer` the preview is bumped to `deny_steer` and the steer text is
+ * surfaced on `DispatchResult.steerInjection` for the loop to inject next turn.
+ *
+ * MUST be called only with a refusal (`deny` / `deny_and_steer`); an `allow`
+ * is a programming error and throws (the callers gate on `isConfirmAllowed`
+ * before reaching here).
+ */
+const denyFromConfirm = (
+  call: ToolUseBlock,
+  decision: ConfirmDecision,
+  baseContent: string,
+  basePreview: string,
+): DispatchResult => {
+  const steer = buildDenySteerMessage(decision)
+  if (steer === null) {
+    return deny(call.id, baseContent, basePreview)
+  }
+  // deny_and_steer: deny AND carry the corrective instruction atomically.
+  const result = deny(call.id, `${baseContent} Steer: ${steer}`, "deny_steer")
+  return { ...result, steerInjection: steer }
+}
+
+/** Run the always-confirm branch — calls `onConfirm`, normalizes the result
+ *  (byte-identical for the legacy boolean form), wraps host throws, and returns
+ *  the appropriate deny / null result. A structured `deny_and_steer` decision
+ *  (ADR-0076 Gap-4) denies AND attaches the steer to the result. Factored out
+ *  so the parent gate stays under the cognitive-complexity cap. */
 const runAlwaysConfirmBranch = async (
   call: ToolUseBlock,
   config: AgentConfig,
@@ -280,9 +316,9 @@ const runAlwaysConfirmBranch = async (
       "denied",
     )
   }
-  let approved = false
+  let decision: ConfirmDecision
   try {
-    approved = await config.onConfirm(action)
+    decision = normalizeConfirm(await config.onConfirm(action))
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return deny(
@@ -291,9 +327,10 @@ const runAlwaysConfirmBranch = async (
       "error",
     )
   }
-  if (!approved) {
-    return deny(
-      call.id,
+  if (!isConfirmAllowed(decision)) {
+    return denyFromConfirm(
+      call,
+      decision,
       `User declined: ${call.name} requires explicit confirmation (always-confirm tier).`,
       "declined",
     )
@@ -400,16 +437,22 @@ const resolveAskBranch = async (
 ): Promise<DispatchResult | null> => {
   // Phase C — trust-scope registry wire-up (ADR-0050). DEFAULT OFF.
   if (trustScopeGrants(config, action)) return null
-  let approved = false
+  // Default-deny when no handler is wired (byte-identical legacy: a missing
+  // onConfirm has always been treated as a refusal).
+  let decision: ConfirmDecision = { decision: "deny" }
   if (config.onConfirm) {
     try {
-      approved = await config.onConfirm(action)
+      decision = normalizeConfirm(await config.onConfirm(action))
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       return deny(call.id, `Confirmation handler failed: ${message}`, "error")
     }
   }
-  if (!approved) return deny(call.id, `User declined: ${reason}`, "declined")
+  // ADR-0076 Gap-4: a `deny_and_steer` decision from the mode-policy ask-branch
+  // also surfaces its steer (the verb is decision-shaped, not branch-shaped).
+  if (!isConfirmAllowed(decision)) {
+    return denyFromConfirm(call, decision, `User declined: ${reason}`, "declined")
+  }
   return null
 }
 

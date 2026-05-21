@@ -49,12 +49,21 @@ const TYPESCRIPT: ServerSpec = {
   create: (cwd) => new TypescriptAdapter({ cwd }),
 }
 
+/**
+ * Single source of extension→server truth (OCP): adding a language is ONE
+ * array entry, and both {@link specFor} and the `unavailableReason` closures
+ * read from this table so the extension logic is never echoed in two places.
+ * Extensions are matched case-insensitively (compared lowercase).
+ */
+const SERVERS: ReadonlyArray<{ exts: readonly string[]; spec: ServerSpec }> = [
+  { exts: [".py", ".pyi"], spec: PYRIGHT },
+  { exts: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"], spec: TYPESCRIPT },
+]
+
 /** Pick the server for a file by extension, or `null` if unsupported. */
 const specFor = (filePath: string): ServerSpec | null => {
   const ext = extname(filePath).toLowerCase()
-  if (ext === ".py" || ext === ".pyi") return PYRIGHT
-  if ([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) return TYPESCRIPT
-  return null
+  return SERVERS.find((entry) => entry.exts.includes(ext))?.spec ?? null
 }
 
 /** Probe whether a server binary is launchable. Cached per process so a single

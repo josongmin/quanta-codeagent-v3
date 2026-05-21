@@ -12,10 +12,21 @@ import { type LogLevel, runtimeConfig } from "./runtime-config"
 
 export type { LogLevel }
 
-const ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
+/** Canonical severity ordering (debug < info < warn < error). Single source
+ *  of truth for every level-gating logger so the two output formats (this
+ *  line logger + `@/observability`'s JSON logger) can never disagree on which
+ *  levels are enabled at a given threshold. */
+export const LOG_LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
+
+/** Should a record at `level` be emitted given the configured `threshold`?
+ *  Both arguments are level NAMES (not numeric ranks) so callers never touch
+ *  the ordering map directly. `error` is the strictest threshold; `debug` the
+ *  loosest. */
+export const levelEnabled = (level: LogLevel, threshold: LogLevel): boolean =>
+  LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[threshold]
 
 const write = (level: LogLevel, msg: string, meta?: unknown): void => {
-  if (ORDER[level] < ORDER[runtimeConfig().logLevel]) return
+  if (!levelEnabled(level, runtimeConfig().logLevel)) return
   const line = `[${level}] ${msg}`
   const text = meta === undefined ? line : `${line} ${JSON.stringify(meta)}`
   process.stderr.write(`${text}\n`)

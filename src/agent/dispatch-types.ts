@@ -27,4 +27,16 @@ export interface DispatchResult {
   exitCode?: number
   /** Path to a persisted full log, only when the tool actually wrote one. */
   fullLogPath?: string
+  /**
+   * ADR-0076 Gap-4 (`deny_and_steer` — Cursor REJECT_AND_TELL). Set ONLY on a
+   * deny short-circuit produced when `onConfirm` returned a structured
+   * `{ decision: "deny_and_steer", steer }`: carries the non-empty corrective
+   * instruction the loop injects as the NEXT-TURN user message (atomic with the
+   * deny). Omitted on every other path (exactOptionalPropertyTypes: never
+   * `undefined`), so callers that do not read it are byte-identical. The gate
+   * only ATTACHES the steer to the deny result — the loop owns the actual
+   * next-turn injection (see the ADR-0076 hand-off note in
+   * `admissibility-gate.ts`).
+   */
+  steerInjection?: string
 }

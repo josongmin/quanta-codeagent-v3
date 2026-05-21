@@ -185,6 +185,17 @@ export interface RuntimeConfig {
    *  (`QUANTA_SWEBENCH_PREPARE_FORCE`). Default false — arm64 skips prepare
    *  (conda crashes under x86 emulation; the eval path pulls prebuilt). */
   readonly swebenchPrepareForce: boolean
+  /** Pinned run id (`QUANTA_RUN_ID`). Set ONCE by the bench launcher so
+   *  observe + predictions + report all group under the same persistent
+   *  `runs/<runId>/` dir (no per-call `Date.now()` drift). Absent ⇒
+   *  `apps/bench/paths.ts#benchRunId` mints a `run-<Date.now()>` id. */
+  readonly runId: string | undefined
+  /** Preferences home override (`QUANTA_PREFS_HOME`). Absent ⇒ slash-command
+   *  prefs/usage paths fall back to `os.homedir()`. */
+  readonly prefsHome: string | undefined
+  /** Last-reported token count (`QUANTA_LAST_TOKENS`). Surfaced by the
+   *  `/context` slash command. Absent ⇒ the command omits the line. */
+  readonly lastTokens: string | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -228,6 +239,9 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     swebenchForceRebuild: parseBool(env["QUANTA_SWEBENCH_FORCE_REBUILD"]),
     swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),
     swebenchPrepareForce: parseBool(env["QUANTA_SWEBENCH_PREPARE_FORCE"]),
+    runId: stringOrUndef(env["QUANTA_RUN_ID"]),
+    prefsHome: stringOrUndef(env["QUANTA_PREFS_HOME"]),
+    lastTokens: stringOrUndef(env["QUANTA_LAST_TOKENS"]),
   })
 }
 

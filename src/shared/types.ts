@@ -4,3 +4,41 @@ export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value })
 export const err = <E>(error: E): Result<never, E> => ({ ok: false, error })
 
 export type Id<Brand extends string> = string & { __brand: Brand }
+
+/**
+ * Codex HITL 4-tier taxonomy (hitl-audit.md) — the CANONICAL declaration.
+ *
+ * Every tool action — and within `bash`, each command — maps to exactly one
+ * tier. The dispatch gate routes tier-specific behaviour (handoff terminates;
+ * always-confirm bypasses mode; pre-approval-ok defers to the existing mode
+ * policy; none allows).
+ *
+ *  - "hand-off-required": agent must terminate; only a human can proceed
+ *    (matches HARD_DENY patterns and password/safety-bypass scenarios).
+ *  - "always-confirm": explicit confirm EVERY time, even under
+ *    `acceptEdits`/`bypass` (deletion, permissions change, financial txn,
+ *    sending DMs, mutating network egress like `git push`).
+ *  - "pre-approval-ok": existing mode policy applies; can be batch-approved.
+ *  - "none": read-only / reversible / harmless.
+ *
+ * This lives in `@/shared` (the leaf layer below every slice) so the
+ * `@/permission`, `@/tool`, and `@/agent` slices can each import it WITHOUT
+ * violating the import-direction rule (biome forbids `@/tool ↔ @/permission`
+ * etc., but `@/shared` is reachable from all of them). Slices re-export it
+ * under the same name to preserve their public surface; the literal values
+ * are byte-identical because there is now only one source.
+ *
+ * CRITICAL: the string values feed permission decisions and telemetry keys —
+ * they must never drift. {@link ALL_HITL_TIERS} is the single ordered tuple a
+ * zod `z.enum(...)` is built from so the runtime validator can't diverge from
+ * the type either.
+ */
+export const ALL_HITL_TIERS = [
+  "hand-off-required",
+  "always-confirm",
+  "pre-approval-ok",
+  "none",
+] as const
+
+/** Canonical HITL 4-tier literal union, derived from {@link ALL_HITL_TIERS}. */
+export type HITLTier = (typeof ALL_HITL_TIERS)[number]

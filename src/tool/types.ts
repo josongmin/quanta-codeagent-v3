@@ -1,3 +1,4 @@
+import type { HITLTier } from "@/shared"
 import type { z } from "zod"
 
 export interface ToolContext {
@@ -169,12 +170,13 @@ export type DeferredToolResult =
   | { state: "resolved"; handle: DeferredHandle; result: ToolResult }
 
 /**
- * Codex HITL 4-tier taxonomy (hitl-audit.md). Structurally identical to
- * `HITLTier` in `@/permission`, redeclared here so the `@/tool` slice never
- * imports `@/permission` (biome forbids that direction). Dispatch composes
- * the two via duck-typing.
+ * Codex HITL 4-tier taxonomy (hitl-audit.md). Re-exported from the canonical
+ * `@/shared` declaration — NOT redeclared — so the `@/tool` and `@/permission`
+ * copies can never drift. `@/tool` reaching `@/shared` is allowed (the leaf
+ * layer); biome only forbids the `@/tool ↔ @/permission` direction. Dispatch
+ * still composes the two slices via duck-typing.
  */
-export type HITLTier = "hand-off-required" | "always-confirm" | "pre-approval-ok" | "none"
+export type { HITLTier }
 
 /**
  * Phase 2 tool contract (RFC §6.2). `execute` is an async generator yielding

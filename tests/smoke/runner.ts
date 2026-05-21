@@ -8,8 +8,18 @@ import type { PermissionContext } from "@/permission"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { CaptureStream } from "./capture-stream"
 import { runAssertions } from "./expect"
+import { runJudge } from "./judge"
+import { buildLiveLLM, hasProviderKey } from "./provider"
+import { RecordingLLM } from "./recorder"
 import { TrajectoryReplayLLM } from "./replay-llm"
-import type { Depth, ExpectSpec, ScenarioMeta, ScenarioResult, TrajectoryEntry } from "./types"
+import type {
+  AssertionFailure,
+  Depth,
+  ExpectSpec,
+  ScenarioMeta,
+  ScenarioResult,
+  TrajectoryEntry,
+} from "./types"
 
 /** An `LLMPort` that also exposes a `nextRun()` cursor — implemented by both
  *  the tier-0 {@link TrajectoryReplayLLM} and the record-mode `RecordingLLM`.
@@ -146,22 +156,38 @@ export const runConversation = async (args: {
   return { lastReason, totalTurns }
 }
 
-/**
- * Run a single scenario in tier-0 (replay) mode. Copies the seed into a tmp
- * workspace, drives `runAgent` once per prompt (advancing the replay LLM's
- * run cursor between prompts), then evaluates the assertion spec.
- */
-export const runScenario = async (meta: ScenarioMeta): Promise<ScenarioResult> => {
-  const started = Date.now()
+export type SmokeTier = "replay" | "live"
+
+/** Pick the LLM for a scenario run. `replay` reads the recorded trajectory;
+ *  `live` wraps the real provider (skipping politely when no key). Returns a
+ *  `skip` reason instead of an LLM when the tier cannot run this scenario. */
+const pickLlm = (meta: ScenarioMeta, tier: SmokeTier): { llm: SmokeLLM } | { skip: string } => {
+  if (tier === "live") {
+    if (!hasProviderKey()) return { skip: "no provider API key — live smoke skipped" }
+    return { llm: new RecordingLLM(buildLiveLLM().llm) }
+  }
   const trajectory = readTrajectory(meta.dir)
   if (trajectory === undefined) {
-    return {
-      meta,
-      status: "skipped",
-      skipReason: "no trajectory.jsonl — record with `bun run smoke:record` (tier-0 pending)",
-      failures: [],
-      durationMs: 0,
-    }
+    return { skip: "no trajectory.jsonl — record with `bun run smoke:record` (tier-0 pending)" }
+  }
+  return { llm: new TrajectoryReplayLLM(trajectory) }
+}
+
+/**
+ * Run a single scenario. `tier: "replay"` (default) drives the recorded
+ * trajectory hermetically; `tier: "live"` hits the real provider. Copies the
+ * seed into a tmp workspace, runs the conversation, evaluates the sync
+ * assertion spec, then (if a `judge` block applies) the async LLM-judge.
+ */
+export const runScenario = async (
+  meta: ScenarioMeta,
+  opts?: { tier?: SmokeTier },
+): Promise<ScenarioResult> => {
+  const tier = opts?.tier ?? "replay"
+  const started = Date.now()
+  const picked = pickLlm(meta, tier)
+  if ("skip" in picked) {
+    return { meta, status: "skipped", skipReason: picked.skip, failures: [], durationMs: 0 }
   }
 
   const prompts = readPrompts(meta.dir)
@@ -172,42 +198,66 @@ export const runScenario = async (meta: ScenarioMeta): Promise<ScenarioResult> =
     const { lastReason, totalTurns } = await runConversation({
       prompts,
       work,
-      llm: new TrajectoryReplayLLM(trajectory),
+      llm: picked.llm,
       capture,
       config: readConfig(meta.dir),
     })
 
-    const failures = runAssertions({
-      spec,
-      capture,
-      cwd: work,
-      stopReason: lastReason,
-      turns: totalTurns,
-    })
+    const failures = [
+      ...runAssertions({ spec, capture, cwd: work, stopReason: lastReason, turns: totalTurns }),
+    ]
     // wallSeconds budget is owned here (the runner holds the clock).
     const durationMs = Date.now() - started
     const wallMax = spec.budget?.wallSeconds?.max
-    const allFailures =
-      wallMax !== undefined && durationMs / 1000 > wallMax
-        ? [
-            ...failures,
-            {
-              path: "budget.wallSeconds.max",
-              expected: `<= ${wallMax}s`,
-              actual: `${(durationMs / 1000).toFixed(1)}s`,
-            },
-          ]
-        : failures
+    if (wallMax !== undefined && durationMs / 1000 > wallMax) {
+      failures.push({
+        path: "budget.wallSeconds.max",
+        expected: `<= ${wallMax}s`,
+        actual: `${(durationMs / 1000).toFixed(1)}s`,
+      })
+    }
+    // LLM-as-judge: tier-0 with a cached score is gated synchronously in
+    // `runAssertions`; here we run the LIVE judge when the tier is live (a
+    // separate provider call). Tier-0 with a judge block but no cache is a soft
+    // note (cannot judge without an LLM) — never a hard failure.
+    await applyJudge({ spec, tier, capture, failures })
+
     return {
       meta,
-      status: allFailures.length === 0 ? "passed" : "failed",
-      failures: allFailures,
+      status: failures.length === 0 ? "passed" : "failed",
+      failures,
       durationMs,
       stopReason: lastReason,
       turns: totalTurns,
     }
   } finally {
     rmSync(work, { recursive: true, force: true })
+  }
+}
+
+/** Run the LIVE LLM-judge for a scenario when applicable, pushing a failure
+ *  when the score is below threshold. No-op for tier-0 (handled sync) or when
+ *  no `judge` block is declared. */
+const applyJudge = async (args: {
+  spec: ExpectSpec
+  tier: SmokeTier
+  capture: CaptureStream
+  failures: AssertionFailure[]
+}): Promise<void> => {
+  const judge = args.spec.judge
+  if (judge === undefined || args.tier !== "live") return
+  if (!hasProviderKey()) return
+  const result = await runJudge({
+    judge,
+    text: args.capture.assistantText(),
+    llm: buildLiveLLM().llm,
+  })
+  if (result.score < judge.threshold) {
+    args.failures.push({
+      path: "judge",
+      expected: `score >= ${judge.threshold}`,
+      actual: `live score=${result.score} — ${result.rationale}`,
+    })
   }
 }
 

@@ -42,7 +42,7 @@ export const benchRunsRoot = (): string => ensureDir(join(benchHome(), "runs"))
 
 /** Stable run id for this process (shared by observe + predictions + report so
  *  they group under one `runs/<runId>/` dir). `QUANTA_RUN_ID` pins it. */
-export const benchRunId = (): string => process.env.QUANTA_RUN_ID ?? `run-${Date.now()}`
+export const benchRunId = (): string => runtimeConfig().runId ?? `run-${Date.now()}`
 
 /** Per-run output dir: `<benchHome>/runs/<runId>/`. Created on first call. */
 export const benchRunDir = (runId: string): string => ensureDir(join(benchRunsRoot(), runId))

@@ -86,6 +86,33 @@ describe("decideOnAssembled", () => {
     expect(decideOnAssembled("tool_use", toolMsg("t1"), rec).do).toBe("proceed")
     expect(decideOnAssembled("end_turn", textMsg("answer"), rec).do).toBe("proceed")
   })
+
+  // ADR-0076 Gap-1: provider refusal must surface as error, never disguised
+  // as a completed turn (the pre-ADR fall-through bug).
+  test("refusal stop_reason → error with refusal rationale", () => {
+    const rec = freshRecovery()
+    const a = decideOnAssembled("refusal", textMsg("I can't help with that."), rec)
+    expect(a.do).toBe("error")
+    expect(a.do === "error" && a.reason).toContain("refused")
+  })
+
+  test("refusal is error even when the message carries tool blocks", () => {
+    const rec = freshRecovery()
+    expect(decideOnAssembled("refusal", toolMsg("t1"), rec).do).toBe("error")
+  })
+
+  test("refusal does not consume recovery budget (terminal, not a retry)", () => {
+    const rec = freshRecovery()
+    decideOnAssembled("refusal", textMsg("no"), rec)
+    expect(rec.outputContinues).toBe(0)
+    expect(rec.malformedRetries).toBe(0)
+    expect(rec.consecutiveEmpties).toBe(0)
+  })
+
+  test("byte-identical: a non-refusal unrecognized stop_reason with content still proceeds", () => {
+    const rec = freshRecovery()
+    expect(decideOnAssembled("stop", textMsg("done"), rec).do).toBe("proceed")
+  })
 })
 
 class FixedLLM implements LLMPort {

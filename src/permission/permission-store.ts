@@ -17,7 +17,18 @@
  *   - deniedActions — keyed by `(threadId, actionSignature)` so a thread's
  *                     denial state is independent from its siblings'.
  *
- * Failure model:
+ * Composition (refactor #3): `createPermissionStore` is the composition point.
+ * It owns ONE live `MutableState` + ONE {@link JsonStateFile} persistence
+ * engine (atomic write / debounce / quarantine / parse-migrate), and layers
+ * three thin domain modules over them:
+ *   - {@link createThreadStore} — per-thread permissions.
+ *   - {@link createHostStore}   — per-host agent modes.
+ *   - {@link createDenialLedger}— post-denial precedence (the 3-timestamp
+ *     state machine, security-sensitive — preserved byte-identical).
+ * The public {@link PermissionStore} interface is unchanged so all external
+ * consumers keep working.
+ *
+ * Failure model (delegated to {@link JsonStateFile}):
  *   - Missing file at load    → start empty, no warning (cold-start).
  *   - Corrupt JSON            → start empty + write `.corrupt` sidecar so the
  *                               user can recover; never crash.
@@ -40,11 +51,11 @@
  * The production singleton is created by `getDefaultPermissionStore()`.
  */
 
-import { createHash, randomBytes } from "node:crypto"
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { runtimeConfig } from "@/shared/runtime-config"
+import { createJsonStateFile, type ParseOutcome } from "./json-state-file"
 
 /** Current on-disk schema version. Bump when the JSON shape changes; add a
  *  parallel branch in {@link parseState} so older versions can be migrated
@@ -140,10 +151,6 @@ export const computeActionSignature = (input: {
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32)
 }
 
-const stderrWarn = (msg: string): void => {
-  process.stderr.write(`[quanta] permission-store: ${msg}\n`)
-}
-
 /** Resolve the default state file path. `QUANTA_PERMISSION_STATE` overrides;
  *  otherwise `<QUANTA_HOME>/permission-state.json` (or `~/.quanta/permission-
  *  state.json` if `QUANTA_HOME` is unset — mirrors the Codex convention).
@@ -181,18 +188,11 @@ const snapshot = (state: MutableState): PermissionState =>
     deniedActions: Object.freeze({ ...state.deniedActions }),
   })
 
-/** Distinguished outcomes of `parseState`. The caller takes the right action
- *  per outcome — schema mismatch quarantines to a versioned sidecar so a
- *  future migration can recover, while malformed-shape just starts empty. */
-type ParseOutcome =
-  | { kind: "ok"; state: PermissionState }
-  | { kind: "version-mismatch"; foundVersion: number | string | null }
-  | { kind: "shape-invalid"; reason: string }
-
 /** Validate a parsed JSON payload — soft-fail to an empty state when the
  *  shape is wrong rather than crash. Returns a distinguished outcome so the
- *  caller can write a useful sidecar (corrupt vs unsupported-version). */
-const parseState = (raw: unknown): ParseOutcome => {
+ *  {@link JsonStateFile} engine can write a useful sidecar (corrupt vs
+ *  unsupported-version). */
+const parseState = (raw: unknown): ParseOutcome<PermissionState> => {
   if (raw === null || typeof raw !== "object") {
     return { kind: "shape-invalid", reason: "root must be a JSON object" }
   }
@@ -228,7 +228,20 @@ const parseState = (raw: unknown): ParseOutcome => {
   }
 }
 
-export interface PermissionStore {
+/** Narrow read-only view of the store — just the methods the permission
+ *  policy resolver (`evaluateStack`) consults (ISP, refactor #3). Concrete
+ *  {@link PermissionStore} implements this union; callers that only read
+ *  (e.g. `EvaluateStackOptions.store`) accept the narrow interface so they
+ *  cannot accidentally mutate the store. */
+export interface PermissionReader {
+  /** True when `(threadId, actionSignature)` has a complete override
+   *  sequence: deniedAt ≤ seenRiskAt ≤ userOverrideAt. */
+  hasPostDenialOverride(threadId: string, actionSignature: string): boolean
+  getThread(threadId: string): ThreadPermission | undefined
+  getHost(hostId: string): HostAgentMode | undefined
+}
+
+export interface PermissionStore extends PermissionReader {
   /** Initialize from disk. Safe to call multiple times — second call is a
    *  no-op once `load()` has resolved. */
   load(): Promise<void>
@@ -240,8 +253,6 @@ export interface PermissionStore {
 
   // -- Read API -------------------------------------------------------------
   snapshot(): PermissionState
-  getThread(threadId: string): ThreadPermission | undefined
-  getHost(hostId: string): HostAgentMode | undefined
   getDenial(threadId: string, actionSignature: string): DenialRecord | undefined
   /** Frozen list of every per-thread record. Order unspecified. */
   listThreads(): ReadonlyMap<string, ThreadPermission>
@@ -265,10 +276,6 @@ export interface PermissionStore {
   recordUserOverride(threadId: string, actionSignature: string, userOverrideAt: number): void
   clearDenial(threadId: string, actionSignature: string): void
 
-  /** True when `(threadId, actionSignature)` has a complete override
-   *  sequence: deniedAt ≤ seenRiskAt ≤ userOverrideAt. */
-  hasPostDenialOverride(threadId: string, actionSignature: string): boolean
-
   /** Test seam: drop all in-memory state + remove the file. */
   reset(): Promise<void>
 }
@@ -283,336 +290,211 @@ export interface CreatePermissionStoreOptions {
   now?: () => number
 }
 
-export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): PermissionStore => {
-  const filePath = opts.filePath ?? defaultStateFilePath()
-  const debounceMs = opts.debounceMs ?? 200
-  let state: MutableState = cloneAsMutable(emptyState())
-  let loaded = false
-  let pendingTimer: ReturnType<typeof setTimeout> | null = null
-  let pendingFlush: Promise<void> | null = null
+/* ------------------------------------------------------------------------- *
+ * Domain module: per-thread permissions.
+ * ------------------------------------------------------------------------- */
 
-  /** Per-instance unique tmp suffix. Two stores sharing the same `filePath`
-   *  (multi-process scenario) use DIFFERENT tmp paths so they don't clobber
-   *  each other's in-flight write. The final `rename` is still last-write-
-   *  wins (atomic), but neither write tears the JSON. */
-  const tmpSuffix = `.tmp.${process.pid}.${randomBytes(4).toString("hex")}`
-  const tmpPath = `${filePath}${tmpSuffix}`
+/** Structural equality on `ThreadPermission`. Used by `setThread` to skip
+ *  a redundant flush when the record didn't actually change — keeps the
+ *  store idempotent (setting the same perm twice = single write). */
+const threadPermEqual = (a: ThreadPermission, b: ThreadPermission): boolean =>
+  a.approvalPolicy === b.approvalPolicy &&
+  a.approvalsReviewer === b.approvalsReviewer &&
+  JSON.stringify(canonicalize(a.sandboxPolicy)) === JSON.stringify(canonicalize(b.sandboxPolicy))
 
-  /**
-   * Atomic write: write to per-instance `.tmp.<pid>.<rand>`, then `rename`
-   * over the final path. Avoids torn-write on crash AND prevents two
-   * processes from clobbering each other's tmp file. On the unhappy path
-   * the `.tmp` is unlinked so a crashed previous attempt can never linger.
-   *
-   * Concurrency:
-   *   - Intra-process: serialized externally via {@link enqueueWrite} so two
-   *     back-to-back mutations never `rename` over each other.
-   *   - Multi-process: per-instance tmp suffix avoids tmp clobber; the final
-   *     rename is still last-write-wins (see module comment).
-   */
-  const writeToDisk = async (): Promise<void> => {
-    try {
-      await mkdir(dirname(filePath), { recursive: true })
-      const payload = JSON.stringify(snapshot(state), null, 2)
-      await writeFile(tmpPath, payload, "utf8")
-      await rename(tmpPath, filePath)
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      stderrWarn(`flush failed (${filePath}): ${message}`)
-      // Best-effort cleanup: remove a partial `.tmp` so the next write
-      // starts from a clean slate (no orphan-tmp accumulation).
-      try {
-        await unlink(tmpPath)
-      } catch {
-        // tmp may not exist — that's fine.
-      }
-    }
-  }
-
-  /** True ⇨ a mutation since the last successful write is awaiting flush.
-   *  Set by every mutating API, cleared right before `writeToDisk` is called.
-   *  Used to skip "write nothing" rewrites in `flush()` so idempotent set*()
-   *  cannot bump the file's mtime. */
-  let dirty = false
-
-  /**
-   * Serialize writes through `pendingFlush`. A second mutation that arrives
-   * while the first is in flight does NOT race a second `rename` — it queues
-   * to run after the in-flight one resolves. Returns the promise of the
-   * write that captured this mutation, so callers awaiting `flush()` see
-   * their bytes hit disk.
-   *
-   * Behavior:
-   *   - dirty + idle ⇒ start a fresh write, clear dirty.
-   *   - dirty + in-flight ⇒ chain a new write after the current one
-   *     (captures the latest state on the chained `writeToDisk` callback).
-   *   - clean + in-flight ⇒ just return the in-flight promise (no double-write).
-   *   - clean + idle ⇒ no-op (returns resolved promise).
-   */
-  const enqueueWrite = (): Promise<void> => {
-    if (!dirty) return pendingFlush ?? Promise.resolve()
-    const prior = pendingFlush ?? Promise.resolve()
-    // Capture the dirty bit at queue time so a NEW mutation arriving while
-    // we're awaiting `prior` still gets its own write (it re-sets dirty).
-    dirty = false
-    const next = prior.then(writeToDisk)
-    pendingFlush = next.finally(() => {
-      // Clear the slot ONLY if we were the most recent enqueue. A later
-      // enqueue would have overwritten `pendingFlush` already.
-      if (pendingFlush === next) pendingFlush = null
-    })
-    return next
-  }
-
-  const flush = async (): Promise<void> => {
-    if (pendingTimer !== null) {
-      clearTimeout(pendingTimer)
-      pendingTimer = null
-    }
-    // If a debounced write was queued but not yet started, run it now
-    // (combined with any new mutations since). Also waits on any in-flight
-    // write so `await flush()` is a true "bytes are durable" barrier.
-    await enqueueWrite()
-  }
-
-  const flushDebounced = (): void => {
-    dirty = true
-    if (debounceMs <= 0) {
-      // Tests with debounceMs:0 still serialize through the queue — fixes
-      // the prior "fire-and-forget hits a deleted tmpdir during teardown"
-      // noise by ensuring `await flush()` drains all queued writes.
-      void enqueueWrite()
-      return
-    }
-    if (pendingTimer !== null) clearTimeout(pendingTimer)
-    pendingTimer = setTimeout(() => {
-      pendingTimer = null
-      void enqueueWrite()
-    }, debounceMs)
-    // Don't keep the event loop alive solely for the flush.
-    if (typeof (pendingTimer as { unref?: () => void }).unref === "function") {
-      ;(pendingTimer as { unref?: () => void }).unref?.()
-    }
-  }
-
-  /** Quarantine bytes to a versioned sidecar (`.corrupt`, `.unsupported-vN`).
-   *  Best-effort — if the sidecar write fails we keep going with an empty
-   *  state in memory. */
-  const quarantine = async (suffix: string, raw: string): Promise<void> => {
-    try {
-      await writeFile(`${filePath}.${suffix}`, raw, "utf8")
-    } catch {
-      // best-effort — the in-memory state is still safe.
-    }
-  }
-
-  /** Read bytes from disk OR signal "not present yet" via `null`. Surfaces
-   *  unexpected IO errors (permission denied, EISDIR, …) to the caller as a
-   *  warning rather than crashing the process. */
-  const readRawState = async (): Promise<string | null> => {
-    try {
-      return await readFile(filePath, "utf8")
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      if (code === "ENOENT") return null
-      const message = e instanceof Error ? e.message : String(e)
-      stderrWarn(`load failed (${filePath}): ${message} — starting empty`)
-      return null
-    }
-  }
-
-  /** Parse bytes already known to exist. Splits the three terminal cases so
-   *  `load()` stays well under the complexity ceiling. */
-  const parseRawState = async (raw: string): Promise<PermissionState | null> => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      stderrWarn(`state file corrupt JSON (${filePath}): ${message} — starting empty`)
-      await quarantine("corrupt", raw)
-      return null
-    }
-    const outcome = parseState(parsed)
-    if (outcome.kind === "ok") return outcome.state
-    if (outcome.kind === "version-mismatch") {
-      stderrWarn(
-        `state file schema mismatch (${filePath}) — found version=${String(outcome.foundVersion)}, expected ${STATE_VERSION} — starting empty (quarantined)`,
-      )
-      await quarantine(`unsupported-v${String(outcome.foundVersion)}`, raw)
-      return null
-    }
-    stderrWarn(`state file shape invalid (${filePath}): ${outcome.reason} — starting empty`)
-    return null
-  }
-
-  const load = async (): Promise<void> => {
-    if (loaded) return
-    loaded = true
-    const raw = await readRawState()
-    if (raw === null) {
-      state = cloneAsMutable(emptyState())
-      return
-    }
-    const validated = await parseRawState(raw)
-    state = cloneAsMutable(validated ?? emptyState())
-  }
-
-  // -- Read API ---------------------------------------------------------------
-  const getThread = (threadId: string): ThreadPermission | undefined => state.perThread[threadId]
-  const getHost = (hostId: string): HostAgentMode | undefined => state.perHost[hostId]
-  const getDenial = (threadId: string, actionSignature: string): DenialRecord | undefined =>
-    state.deniedActions[denialKey(threadId, actionSignature)]
-
-  const listThreads = (): ReadonlyMap<string, ThreadPermission> => {
+const createThreadStore = (
+  state: () => MutableState,
+  onMutate: () => void,
+): {
+  get(threadId: string): ThreadPermission | undefined
+  list(): ReadonlyMap<string, ThreadPermission>
+  set(threadId: string, perm: ThreadPermission): void
+  clear(threadId: string): void
+} => ({
+  get: (threadId) => state().perThread[threadId],
+  list: () => {
     const m = new Map<string, ThreadPermission>()
-    for (const [k, v] of Object.entries(state.perThread)) m.set(k, v)
+    for (const [k, v] of Object.entries(state().perThread)) m.set(k, v)
     return m
-  }
-  const listHosts = (): ReadonlyMap<string, HostAgentMode> => {
-    const m = new Map<string, HostAgentMode>()
-    for (const [k, v] of Object.entries(state.perHost)) m.set(k, v)
-    return m
-  }
-  const listThreadDenials = (threadId: string): readonly DenialRecord[] => {
-    const out: DenialRecord[] = []
-    for (const r of Object.values(state.deniedActions)) {
-      if (r.threadId === threadId) out.push(r)
-    }
-    return out
-  }
-
-  /** Structural equality on `ThreadPermission`. Used by `setThread` to skip
-   *  a redundant flush when the record didn't actually change — keeps the
-   *  store idempotent (setting the same perm twice = single write). */
-  const threadPermEqual = (a: ThreadPermission, b: ThreadPermission): boolean =>
-    a.approvalPolicy === b.approvalPolicy &&
-    a.approvalsReviewer === b.approvalsReviewer &&
-    JSON.stringify(canonicalize(a.sandboxPolicy)) === JSON.stringify(canonicalize(b.sandboxPolicy))
-
-  // -- Write API --------------------------------------------------------------
-  const setThread = (threadId: string, perm: ThreadPermission): void => {
-    const existing = state.perThread[threadId]
+  },
+  set: (threadId, perm) => {
+    const existing = state().perThread[threadId]
     if (existing !== undefined && threadPermEqual(existing, perm)) return // idempotent
-    state.perThread[threadId] = perm
-    flushDebounced()
-  }
-  const clearThread = (threadId: string): void => {
-    if (state.perThread[threadId] === undefined) return // idempotent
-    delete state.perThread[threadId]
-    flushDebounced()
-  }
-  const setHost = (hostId: string, mode: HostAgentMode): void => {
-    if (state.perHost[hostId] === mode) return // idempotent
-    state.perHost[hostId] = mode
-    flushDebounced()
-  }
-  const clearHost = (hostId: string): void => {
-    if (state.perHost[hostId] === undefined) return // idempotent
-    delete state.perHost[hostId]
-    flushDebounced()
-  }
+    state().perThread[threadId] = perm
+    onMutate()
+  },
+  clear: (threadId) => {
+    if (state().perThread[threadId] === undefined) return // idempotent
+    delete state().perThread[threadId]
+    onMutate()
+  },
+})
 
-  const recordDenial = (args: {
+/* ------------------------------------------------------------------------- *
+ * Domain module: per-host agent modes.
+ * ------------------------------------------------------------------------- */
+
+const createHostStore = (
+  state: () => MutableState,
+  onMutate: () => void,
+): {
+  get(hostId: string): HostAgentMode | undefined
+  list(): ReadonlyMap<string, HostAgentMode>
+  set(hostId: string, mode: HostAgentMode): void
+  clear(hostId: string): void
+} => ({
+  get: (hostId) => state().perHost[hostId],
+  list: () => {
+    const m = new Map<string, HostAgentMode>()
+    for (const [k, v] of Object.entries(state().perHost)) m.set(k, v)
+    return m
+  },
+  set: (hostId, mode) => {
+    if (state().perHost[hostId] === mode) return // idempotent
+    state().perHost[hostId] = mode
+    onMutate()
+  },
+  clear: (hostId) => {
+    if (state().perHost[hostId] === undefined) return // idempotent
+    delete state().perHost[hostId]
+    onMutate()
+  },
+})
+
+/* ------------------------------------------------------------------------- *
+ * Domain module: post-denial precedence ledger.
+ *
+ * The 3-timestamp state machine (deniedAt → seenRiskAt → userOverrideAt) is
+ * the most logic-dense + security-sensitive part of the store. Behavior is
+ * preserved byte-identical: `recordDenial` resets the sequence, risk/override
+ * recording is a no-op without a prior denial, and `hasPostDenialOverride`
+ * enforces deniedAt ≤ seenRiskAt ≤ userOverrideAt.
+ * ------------------------------------------------------------------------- */
+
+const createDenialLedger = (
+  state: () => MutableState,
+  onMutate: () => void,
+): {
+  get(threadId: string, actionSignature: string): DenialRecord | undefined
+  listForThread(threadId: string): readonly DenialRecord[]
+  recordDenial(args: {
     threadId: string
     actionSignature: string
     deniedAt: number
     deniedReason: string
-  }): void => {
+  }): void
+  recordRiskSeen(threadId: string, actionSignature: string, seenRiskAt: number): void
+  recordUserOverride(threadId: string, actionSignature: string, userOverrideAt: number): void
+  clear(threadId: string, actionSignature: string): void
+  hasOverride(threadId: string, actionSignature: string): boolean
+} => ({
+  get: (threadId, actionSignature) => state().deniedActions[denialKey(threadId, actionSignature)],
+  listForThread: (threadId) => {
+    const out: DenialRecord[] = []
+    for (const r of Object.values(state().deniedActions)) {
+      if (r.threadId === threadId) out.push(r)
+    }
+    return out
+  },
+  recordDenial: (args) => {
     const key = denialKey(args.threadId, args.actionSignature)
     // Recording a fresh denial RESETS the override sequence — once we've
     // denied again, any prior `seenRiskAt`/`userOverrideAt` is stale.
-    state.deniedActions[key] = {
+    state().deniedActions[key] = {
       threadId: args.threadId,
       actionSignature: args.actionSignature,
       deniedAt: args.deniedAt,
       deniedReason: args.deniedReason,
     }
-    flushDebounced()
-  }
-
-  const recordRiskSeen = (threadId: string, actionSignature: string, seenRiskAt: number): void => {
+    onMutate()
+  },
+  recordRiskSeen: (threadId, actionSignature, seenRiskAt) => {
     const key = denialKey(threadId, actionSignature)
-    const existing = state.deniedActions[key]
+    const existing = state().deniedActions[key]
     if (existing === undefined) {
       // Recording risk-seen without a prior denial is a no-op (defensive).
       return
     }
-    state.deniedActions[key] = { ...existing, seenRiskAt }
-    flushDebounced()
-  }
-
-  const recordUserOverride = (
-    threadId: string,
-    actionSignature: string,
-    userOverrideAt: number,
-  ): void => {
+    state().deniedActions[key] = { ...existing, seenRiskAt }
+    onMutate()
+  },
+  recordUserOverride: (threadId, actionSignature, userOverrideAt) => {
     const key = denialKey(threadId, actionSignature)
-    const existing = state.deniedActions[key]
+    const existing = state().deniedActions[key]
     if (existing === undefined) return
-    state.deniedActions[key] = { ...existing, userOverrideAt }
-    flushDebounced()
-  }
-
-  const clearDenial = (threadId: string, actionSignature: string): void => {
-    delete state.deniedActions[denialKey(threadId, actionSignature)]
-    flushDebounced()
-  }
-
-  const hasPostDenialOverride = (threadId: string, actionSignature: string): boolean => {
-    const rec = state.deniedActions[denialKey(threadId, actionSignature)]
+    state().deniedActions[key] = { ...existing, userOverrideAt }
+    onMutate()
+  },
+  clear: (threadId, actionSignature) => {
+    delete state().deniedActions[denialKey(threadId, actionSignature)]
+    onMutate()
+  },
+  hasOverride: (threadId, actionSignature) => {
+    const rec = state().deniedActions[denialKey(threadId, actionSignature)]
     if (rec === undefined) return false
     if (rec.seenRiskAt === undefined || rec.userOverrideAt === undefined) return false
     // Sequence enforcement: deniedAt ≤ seenRiskAt ≤ userOverrideAt.
     if (rec.seenRiskAt < rec.deniedAt) return false
     if (rec.userOverrideAt < rec.seenRiskAt) return false
     return true
+  },
+})
+
+export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): PermissionStore => {
+  const filePath = opts.filePath ?? defaultStateFilePath()
+  const debounceMs = opts.debounceMs ?? 200
+  let state: MutableState = cloneAsMutable(emptyState())
+
+  // ONE persistence engine + ONE file handle, shared by all three domains.
+  const file = createJsonStateFile<PermissionState>({
+    filePath,
+    debounceMs,
+    emptyState,
+    serialize: (s) => JSON.stringify(s, null, 2),
+    parse: parseState,
+    stateVersion: STATE_VERSION,
+  })
+
+  const getState = (): MutableState => state
+  const liveSnapshot = (): PermissionState => snapshot(state)
+  const onMutate = (): void => file.flushDebounced(liveSnapshot)
+
+  // Three thin domain modules over the shared state + persistence seam.
+  const threads = createThreadStore(getState, onMutate)
+  const hosts = createHostStore(getState, onMutate)
+  const denials = createDenialLedger(getState, onMutate)
+
+  const load = async (): Promise<void> => {
+    await file.load((s) => {
+      state = cloneAsMutable(s)
+    })
   }
 
   const reset = async (): Promise<void> => {
-    if (pendingTimer !== null) {
-      clearTimeout(pendingTimer)
-      pendingTimer = null
-    }
-    // Wait on any in-flight write so we don't unlink mid-rename — without
-    // this, a flush queued by a recent set*() could resurrect the file we
-    // just deleted (Heisenbug seen in stress tests).
-    if (pendingFlush !== null) {
-      try {
-        await pendingFlush
-      } catch {
-        // Surfaced via stderrWarn already.
-      }
-    }
+    await file.reset()
     state = cloneAsMutable(emptyState())
-    loaded = false
-    try {
-      await unlink(filePath)
-    } catch {
-      // best-effort — file may not exist yet.
-    }
   }
 
   return {
     load,
-    flush,
-    flushDebounced,
-    snapshot: (): PermissionState => snapshot(state),
-    getThread,
-    getHost,
-    getDenial,
-    listThreads,
-    listHosts,
-    listThreadDenials,
-    setThread,
-    clearThread,
-    setHost,
-    clearHost,
-    recordDenial,
-    recordRiskSeen,
-    recordUserOverride,
-    clearDenial,
-    hasPostDenialOverride,
+    flush: () => file.flush(liveSnapshot),
+    flushDebounced: () => file.flushDebounced(liveSnapshot),
+    snapshot: liveSnapshot,
+    getThread: threads.get,
+    getHost: hosts.get,
+    getDenial: denials.get,
+    listThreads: threads.list,
+    listHosts: hosts.list,
+    listThreadDenials: denials.listForThread,
+    setThread: threads.set,
+    clearThread: threads.clear,
+    setHost: hosts.set,
+    clearHost: hosts.clear,
+    recordDenial: denials.recordDenial,
+    recordRiskSeen: denials.recordRiskSeen,
+    recordUserOverride: denials.recordUserOverride,
+    clearDenial: denials.clear,
+    hasPostDenialOverride: denials.hasOverride,
     reset,
   }
 }

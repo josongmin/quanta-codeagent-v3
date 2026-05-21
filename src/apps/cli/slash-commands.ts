@@ -30,6 +30,7 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { runtimeConfig } from "@/shared"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 
 export interface SlashContext {
@@ -68,7 +69,7 @@ interface Preferences {
 
 const WAIT_MAX_SECONDS = 3600
 
-const prefsHome = (): string => process.env.QUANTA_PREFS_HOME ?? homedir()
+const prefsHome = (): string => runtimeConfig().prefsHome ?? homedir()
 
 const prefsFilePath = (ctx: SlashContext): string => {
   if (ctx.prefsPath !== undefined) return ctx.prefsPath
@@ -96,7 +97,7 @@ const contextCmd: SlashCommand = {
   name: "/context",
   describe: "Show current context-window usage",
   async run(_args, ctx) {
-    const lastTokens = process.env.QUANTA_LAST_TOKENS
+    const lastTokens = runtimeConfig().lastTokens
     ctx.out("context: not yet wired (Phase 1 placeholder)\n")
     ctx.out("Reports tokens-used / remaining once the loop exports per-turn usage.\n")
     if (lastTokens !== undefined && lastTokens !== "") {

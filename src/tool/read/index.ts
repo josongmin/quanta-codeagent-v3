@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { FsJailError, readFile, statFile } from "@/storage"
+import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -12,7 +12,11 @@ type Input = z.infer<typeof schema>
 
 const DEFAULT_LIMIT = 2000
 
-export const readTool: Tool<Input> = {
+/** Build the `read` tool against an injected {@link FileSystemPort} (#13).
+ *  `fs` defaults to the real `@/storage`-backed port, so the exported
+ *  {@link readTool} is byte-identical to the pre-port direct-call version;
+ *  tests pass an in-memory port for isolation. */
+export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> => ({
   name: "read",
   description:
     "Read a text file. Returns content with 1-based line numbers (`<n>\\t<line>`). " +
@@ -28,9 +32,9 @@ export const readTool: Tool<Input> = {
     // read is read-only but STILL jailed: an unguarded absolute
     // `/etc/passwd` or `../../.ssh/id_rsa` is denied by default. Catch the
     // jail escape and surface ok:false — never an uncaught throw.
-    let info: Awaited<ReturnType<typeof statFile>>
+    let info: Awaited<ReturnType<typeof fs.statFile>>
     try {
-      info = await statFile(input.path, ctx.cwd)
+      info = await fs.statFile(input.path, ctx.cwd)
     } catch (e) {
       if (e instanceof FsJailError) {
         yield { type: "result", result: { ok: false, output: e.message } }
@@ -43,7 +47,7 @@ export const readTool: Tool<Input> = {
       return
     }
 
-    const text = await readFile(input.path, ctx.cwd)
+    const text = await fs.readFile(input.path, ctx.cwd)
     const lines = text.split("\n")
     const start = Math.max(0, (input.offset ?? 1) - 1)
     const end = Math.min(lines.length, start + (input.limit ?? DEFAULT_LIMIT))
@@ -58,4 +62,7 @@ export const readTool: Tool<Input> = {
       result: { ok: true, output: numbered === "" ? "(empty file)" : numbered + note },
     }
   },
-}
+})
+
+/** Default-port `read` tool used by the registry. */
+export const readTool: Tool<Input> = makeReadTool()

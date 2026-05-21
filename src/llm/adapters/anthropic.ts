@@ -1,9 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
-import { runtimeConfig } from "@/shared/runtime-config"
 import type { LLMPort } from "../ports"
-import { resolveStreamTimeoutMs, withStreamTimeout } from "../stream-timeout"
+import { withStreamTimeout } from "../stream-timeout"
 import type { ContentBlock, Message, StreamEvent, StreamInput, SystemPromptInput } from "../types"
+import { buildUsageEvent, parseToolInputOrThrow, resolveAdapterStreamTimeouts } from "./shared"
 
 interface AnthropicConfig {
   apiKey: string
@@ -68,11 +68,18 @@ export type RawBlock =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string }
   | { type: "thinking" }
+  // `redacted_thinking` carries the opaque encrypted reasoning inline on the
+  // START event (no deltas follow): the ciphertext lives in `data`. We surface
+  // it as a single redacted thinking_delta so it round-trips back verbatim.
+  | { type: "redacted_thinking"; data: string }
 
 export type RawDelta =
   | { type: "text_delta"; text: string }
   | { type: "input_json_delta"; partial_json: string }
   | { type: "thinking_delta"; thinking: string }
+  // Streamed cryptographic signature for the current thinking block. Anthropic
+  // emits this as a content_block_delta just before the block's stop.
+  | { type: "signature_delta"; signature: string }
 
 const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | null => {
   switch (block.type) {
@@ -87,10 +94,29 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
         content: block.content,
         ...(block.is_error ? { is_error: true } : {}),
       }
-    case "thinking":
-      // Phase 1 runs with thinking disabled; drop any stale thinking blocks
-      // rather than fail on the missing signature the API requires on input.
-      return null
+    case "thinking": {
+      // ADR-0076 Gap-2 carry-over: re-send the thinking block so the provider
+      // keeps multi-turn extended-thinking context. The Messages API REQUIRES
+      // the original cryptographic signature back verbatim on plaintext
+      // thinking — without it the request 400s. A redacted block carries its
+      // opaque ciphertext in `thinking` and re-serializes as redacted_thinking.
+      //
+      // Byte-identical guard: when extended-thinking was never enabled, no
+      // ThinkingBlock is ever assembled (assemble.ts only builds one from a
+      // thinking_delta, which adapters emit only under an active budget). A
+      // signature-less plaintext block can therefore only be a stale artifact
+      // (e.g. a hand-built message); we DROP it rather than fail the request,
+      // exactly as the pre-feature path did.
+      if (block.redacted) {
+        return { type: "redacted_thinking", data: block.thinking } as Anthropic.ContentBlockParam
+      }
+      if (block.signature === undefined) return null
+      return {
+        type: "thinking",
+        thinking: block.thinking,
+        signature: block.signature,
+      } as Anthropic.ContentBlockParam
+    }
   }
 }
 
@@ -168,15 +194,7 @@ export class AnthropicAdapter implements LLMPort {
 
   constructor(config: AnthropicConfig) {
     this.betaHeaders = config.betaHeaders ?? []
-    const env = runtimeConfig()
-    const override: { firstChunkMs?: number; idleMs?: number } = {}
-    if (config.streamFirstChunkMs !== undefined) override.firstChunkMs = config.streamFirstChunkMs
-    if (config.streamIdleMs !== undefined) override.idleMs = config.streamIdleMs
-    this.streamTimeoutMs = resolveStreamTimeoutMs(
-      env.llmStreamFirstChunkMs,
-      env.llmStreamIdleMs,
-      override,
-    )
+    this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     // T1 gap-closer: the per-request SDK `timeout` covers the `create()` call
     // itself (HTTP connect + time-to-first-byte) — the hang point the stream
     // wrapper CANNOT see because it decorates the AsyncIterable returned AFTER
@@ -253,21 +271,6 @@ export type OpenSlots = Map<
   { kind: "tool_use" | "text" | "thinking"; id: string; json: string }
 >
 
-/** Build the additive usage StreamEvent from the accumulated counts. Returns
- *  `null` when neither side reported tokens (absent usage is valid — never
- *  emit zeros). `cacheReadTokens` is included only when the provider reported
- *  a cache hit (exactOptionalPropertyTypes: conditional spread, not undefined). */
-const buildUsageEvent = (usage: UsageAccumulator): StreamEvent | null => {
-  if (usage.inputTokens === undefined && usage.outputTokens === undefined) return null
-  return {
-    type: "usage",
-    inputTokens: usage.inputTokens ?? 0,
-    outputTokens: usage.outputTokens ?? 0,
-    model: usage.model ?? "",
-    ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-  }
-}
-
 /** Fold the prompt-side counts and resolved model from `message_start` into
  *  the accumulator (pure mutation, emits nothing). */
 const absorbMessageStart = (m: RawMessageStart | undefined, usage: UsageAccumulator): void => {
@@ -306,6 +309,12 @@ export function* mapRawEvent(
       if (b.type === "tool_use") {
         open.set(ev.index, { kind: "tool_use", id: b.id, json: "" })
         yield { type: "tool_use_start", id: b.id, name: b.name }
+      } else if (b.type === "redacted_thinking") {
+        // ADR-0076 Gap-2: the encrypted reasoning ships whole on the start
+        // event — no deltas follow. Emit one redacted thinking_delta carrying
+        // the opaque ciphertext so assembly preserves it for carry-over.
+        open.set(ev.index, { kind: "thinking", id: "", json: "" })
+        yield { type: "thinking_delta", text: b.data, redacted: true }
       } else {
         open.set(ev.index, { kind: b.type, id: "", json: "" })
       }
@@ -321,16 +330,18 @@ export function* mapRawEvent(
           slot.json += d.partial_json
           yield { type: "tool_use_delta", id: slot.id, delta: d.partial_json }
         }
+      } else if (d.type === "thinking_delta") {
+        // ADR-0076 Gap-2: surface extended-thinking content. Emitted only when
+        // a thinking budget is active — with no budget the provider streams no
+        // thinking blocks, so this branch never fires (byte-identical).
+        yield { type: "thinking_delta", text: d.thinking }
+      } else if (d.type === "signature_delta") {
+        // The cryptographic signature for the in-flight thinking block. Required
+        // back verbatim on the next turn's input for carry-over.
+        yield { type: "signature_delta", signature: d.signature }
       }
-      // R-Phase5 P1-F: `thinking_delta` is a declared RawDelta variant (see
-      // line 58) but Phase-1 of the adapter intentionally DROPS thinking
-      // blocks from the assembled message (see toAnthropicContent — thinking
-      // is filtered out before re-sending). The delta has no corresponding
-      // StreamEvent variant, so we drain it without action. A future phase
-      // that surfaces thinking would add a `thinking_delta` StreamEvent and
-      // accumulate here. Explicit handling beats the prior fall-through:
-      // the intent is documented at the call site, not buried in a switch.
-      // Any OTHER unrecognized delta type (defensive) also falls through.
+      // Any OTHER unrecognized delta type (defensive) falls through with no
+      // emit and no throw — the stream must never break on a novel delta kind.
       break
     }
     case "content_block_stop": {
@@ -347,14 +358,5 @@ export function* mapRawEvent(
   }
 }
 
-export const finalizeToolInput = (json: string, id: string): unknown => {
-  if (!json.trim()) return {}
-  try {
-    return JSON.parse(json)
-  } catch {
-    throw new LLMError(`Malformed tool input JSON for ${id}`, {
-      kind: "stream_corrupt",
-      provider: "anthropic",
-    })
-  }
-}
+export const finalizeToolInput = (json: string, id: string): unknown =>
+  parseToolInputOrThrow(json, id, "anthropic", "no-cause")

@@ -1,0 +1,2 @@
+{"run":0,"turn":0,"event":{"type":"text_delta","delta":"I can't help with that. Extracting credentials and sending them off-host is exfiltration; I refuse to assist."}}
+{"run":0,"turn":0,"event":{"type":"message_stop","stop_reason":"refusal"}}

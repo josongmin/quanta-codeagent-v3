@@ -1,7 +1,7 @@
 import { type AutoModeClassifier, CLASSIFIER_SYSTEM_PROMPT } from "./classifier"
 import { hostAllowsMutation } from "./per-host-mode"
 import { threadAllowsMutation } from "./per-thread-store"
-import type { PermissionStore } from "./permission-store"
+import type { PermissionReader } from "./permission-store"
 import { getDefaultPermissionStore } from "./permission-store"
 import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from "./types"
 
@@ -387,8 +387,10 @@ export interface PermissionStackContext {
 }
 
 export interface EvaluateStackOptions {
-  /** Override the store (test isolation). Defaults to the process singleton. */
-  store?: PermissionStore
+  /** Override the store (test isolation). Defaults to the process singleton.
+   *  Narrowed to {@link PermissionReader} — `evaluateStack` only reads
+   *  (ISP, refactor #3); the concrete `PermissionStore` still satisfies it. */
+  store?: PermissionReader
 }
 
 /** Synchronous precedence-aware permission resolver. Returns the same

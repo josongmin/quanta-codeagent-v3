@@ -36,6 +36,21 @@ export interface ToolResultBlock {
 export interface ThinkingBlock {
   type: "thinking"
   thinking: string
+  /** Anthropic extended-thinking cryptographic signature (ADR-0076 Gap-2).
+   *  The Messages API REQUIRES this back verbatim on the input side when a
+   *  prior-turn thinking block is re-sent in a multi-turn conversation — a
+   *  missing signature causes a 400 and breaks the thinking carry-over chain.
+   *  Accumulated from `signature_delta` StreamEvents during assembly and
+   *  serialized straight back by the adapter. Absent for OpenAI reasoning
+   *  (opaque, no client-visible signature) and absent when extended-thinking
+   *  was never enabled (byte-identical to pre-feature ThinkingBlocks). */
+  signature?: string
+  /** TRUE when the provider returned an encrypted / redacted reasoning block
+   *  (Anthropic `redacted_thinking`). The `thinking` field then holds the
+   *  opaque ciphertext rather than human-readable reasoning; we preserve it
+   *  verbatim so it can be carried back to the provider unmodified. Absent
+   *  ⇒ ordinary plaintext thinking. */
+  redacted?: true
 }
 
 /** JSON-schema description of a tool, as sent to the model. */
@@ -67,6 +82,22 @@ export type StreamEvent =
    *  event of the replacement stream; never emitted before any other event. */
   | { type: "stream_reset" }
   | { type: "text_delta"; delta: string }
+  /** Extended-thinking / reasoning content delta (ADR-0076 Gap-2). Emitted
+   *  ONLY when a thinking budget is active (Anthropic `thinking:{enabled}`) or
+   *  a reasoning model streams a summary (OpenAI). Consecutive deltas for the
+   *  same logical thinking block accumulate, in stream order, into the leading
+   *  {@link ThinkingBlock} of the assembled assistant message. `redacted:true`
+   *  marks an opaque encrypted reasoning block whose `text` is ciphertext to be
+   *  preserved verbatim, not human-readable. With NO thinking budget set, zero
+   *  of these are emitted, so the assembled message is byte-identical to the
+   *  pre-feature path. */
+  | { type: "thinking_delta"; text: string; redacted?: true }
+  /** Anthropic extended-thinking signature delta (ADR-0076 Gap-2). The provider
+   *  streams the cryptographic signature for the just-completed thinking block;
+   *  deltas accumulate into {@link ThinkingBlock.signature}. The signature is
+   *  REQUIRED back on the input side for multi-turn carry-over. OpenAI reasoning
+   *  has no client-visible signature and emits none of these. */
+  | { type: "signature_delta"; signature: string }
   | { type: "tool_use_start"; id: string; name: string }
   | { type: "tool_use_delta"; id: string; delta: string }
   | { type: "tool_use_end"; id: string; input: unknown }

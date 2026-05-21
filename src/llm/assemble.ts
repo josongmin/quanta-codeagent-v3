@@ -1,8 +1,56 @@
-import type { ContentBlock, Message, StreamEvent } from "./types"
+import type { ContentBlock, Message, StreamEvent, ThinkingBlock } from "./types"
 
 export interface AssembledTurn {
   message: Message
   stopReason: string
+}
+
+/** Last ThinkingBlock in assembly order, or undefined. Used to attach a
+ *  streamed `signature_delta` to the thinking block it closes. */
+const findLastThinking = (content: ContentBlock[]): ThinkingBlock | undefined => {
+  for (let i = content.length - 1; i >= 0; i--) {
+    const b = content[i]
+    if (b?.type === "thinking") return b
+  }
+  return undefined
+}
+
+/** Append a `text_delta`'s text: extends the trailing TextBlock or opens a
+ *  new one. Other block kinds at the tail are NOT extended — text never
+ *  merges into thinking / tool_use. */
+const appendTextDelta = (content: ContentBlock[], delta: string): void => {
+  const last = content.at(-1)
+  if (last?.type === "text") last.text += delta
+  else content.push({ type: "text", text: delta })
+}
+
+/** ADR-0076 Gap-2: accumulate extended-thinking / reasoning content. A run
+ *  of consecutive thinking_delta events folds into one ThinkingBlock; the
+ *  first delta after any NON-thinking block (text / tool_use) opens a fresh
+ *  block, so provider-ordered multi-block thinking is preserved. The
+ *  `redacted` flag is sticky to the block it opens — an opaque ciphertext
+ *  block never merges with a plaintext one. */
+const appendThinkingDelta = (content: ContentBlock[], text: string, redacted: boolean): void => {
+  const last = content.at(-1)
+  if (last?.type === "thinking" && !!last.redacted === redacted) {
+    last.thinking += text
+    return
+  }
+  content.push({
+    type: "thinking",
+    thinking: text,
+    ...(redacted ? { redacted: true } : {}),
+  })
+}
+
+/** ADR-0076 Gap-2: Anthropic streams the signature for the just-emitted
+ *  thinking block. Attach it to the most-recent ThinkingBlock (the one this
+ *  signature closes); chunked signatures accumulate. A signature with no
+ *  preceding thinking block is structurally impossible from the provider;
+ *  if it ever occurs we drop it rather than fabricate a content block. */
+const appendSignatureDelta = (content: ContentBlock[], signature: string): void => {
+  const thinking = findLastThinking(content)
+  if (thinking) thinking.signature = (thinking.signature ?? "") + signature
 }
 
 /** Reconstruct the assistant message from a stream of {@link StreamEvent}.
@@ -21,12 +69,15 @@ export const assembleFromEvents = (events: StreamEvent[]): AssembledTurn => {
         content = []
         stopReason = "end_turn"
         break
-      case "text_delta": {
-        const last = content.at(-1)
-        if (last?.type === "text") last.text += ev.delta
-        else content.push({ type: "text", text: ev.delta })
+      case "text_delta":
+        appendTextDelta(content, ev.delta)
         break
-      }
+      case "thinking_delta":
+        appendThinkingDelta(content, ev.text, ev.redacted === true)
+        break
+      case "signature_delta":
+        appendSignatureDelta(content, ev.signature)
+        break
       case "tool_use_start":
         content.push({ type: "tool_use", id: ev.id, name: ev.name, input: {} })
         break

@@ -64,11 +64,7 @@ export const DEFAULT_IDLE_MS = 120_000
  *  string-match without depending on the surrounding prose. */
 type TimeoutReason = "first-chunk" | "idle"
 
-const buildTimeoutError = (
-  reason: TimeoutReason,
-  ms: number,
-  provider: LLMProvider,
-): LLMError => {
+const buildTimeoutError = (reason: TimeoutReason, ms: number, provider: LLMProvider): LLMError => {
   // Message includes "timeout" so `classifyLLMError` in `src/agent/retry.ts`
   // (which checks `RETRYABLE_MARKERS` for "timeout"/"timed out") routes this
   // through the existing same-turn retry path. Do NOT change this wording

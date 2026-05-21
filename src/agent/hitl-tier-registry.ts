@@ -37,12 +37,14 @@
 
 import { readFileSync } from "node:fs"
 import { z } from "zod"
-import { runtimeConfig } from "@/shared"
+import { ALL_HITL_TIERS, runtimeConfig } from "@/shared"
 import type { HitlTier } from "./hitl-tier"
 
 /** Zod tier validator — produces a precise error message including the
- *  offending value when an override file contains an unknown tier. */
-const TierSchema = z.enum(["hand-off-required", "always-confirm", "pre-approval-ok", "none"])
+ *  offending value when an override file contains an unknown tier. Built from
+ *  the canonical `ALL_HITL_TIERS` tuple so the runtime validator can never
+ *  drift from the `HITLTier` literal union. */
+const TierSchema = z.enum(ALL_HITL_TIERS)
 
 /** Single annotation entry. `commandPrefix` is OPTIONAL — when absent the
  *  rule fires on every invocation of `tool`. When present it must be a

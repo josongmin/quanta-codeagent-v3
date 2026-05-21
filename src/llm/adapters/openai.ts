@@ -1,8 +1,13 @@
 import OpenAI from "openai"
-import { LLMError, runtimeConfig } from "@/shared"
+import { LLMError } from "@/shared"
 import type { LLMPort } from "../ports"
-import { resolveStreamTimeoutMs, withStreamTimeout } from "../stream-timeout"
+import { withStreamTimeout } from "../stream-timeout"
 import type { ContentBlock, Message, StreamEvent, StreamInput, SystemPromptInput } from "../types"
+import {
+  buildUsageEvent as buildUsageEventShared,
+  parseToolInputOrThrow,
+  resolveAdapterStreamTimeouts,
+} from "./shared"
 
 interface OpenAIConfig {
   apiKey: string
@@ -42,6 +47,16 @@ export type RawChunk = {
   choices: {
     delta: {
       content?: string | null
+      // Reasoning summary deltas (ADR-0076 Gap-2). Reasoning models stream a
+      // human-readable summary of their thinking on one of these fields; the
+      // exact key diverges across the OpenAI Chat Completions surface and
+      // OpenAI-compatible providers, so we read both. OpenAI reasoning is
+      // OPAQUE — there is no client-visible signature, so we never emit a
+      // signature_delta from this adapter. Both omitted on non-reasoning
+      // models / when no reasoning effort is requested ⇒ zero thinking_delta
+      // emitted (byte-identical to the pre-feature path).
+      reasoning?: string | null
+      reasoning_content?: string | null
       tool_calls?: {
         index: number
         id?: string
@@ -70,12 +85,7 @@ export const usesCompletionTokensParam = (model: string): boolean => {
   // o1/o3 reasoning families + gpt-5 generation all use max_completion_tokens.
   // The trailing `-` / `.` cases bound the prefix so `gpt-5o-future` style
   // model names are caught while `gpt-4o` (legacy) is not.
-  return (
-    m.startsWith("o1") ||
-    m.startsWith("o3") ||
-    m.startsWith("o4") ||
-    m.startsWith("gpt-5")
-  )
+  return m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4") || m.startsWith("gpt-5")
 }
 
 export const assistantParam = (blocks: ContentBlock[]): ChatParam => {
@@ -184,18 +194,7 @@ export function* mapToolCallDeltas(
 
 export function* finalizeCalls(pending: Map<number, PendingCall>): Generator<StreamEvent> {
   for (const slot of [...pending.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1])) {
-    let input: unknown = {}
-    if (slot.args.trim()) {
-      try {
-        input = JSON.parse(slot.args)
-      } catch (e) {
-        throw new LLMError(`Malformed tool input JSON for ${slot.id}`, {
-          kind: "stream_corrupt",
-          provider: "openai",
-          cause: e,
-        })
-      }
-    }
+    const input = parseToolInputOrThrow(slot.args, slot.id, "openai", "with-cause")
     yield { type: "tool_use_end", id: slot.id, input }
   }
 }
@@ -210,13 +209,12 @@ export const buildUsageEvent = (
 ): StreamEvent | null => {
   if (!usage) return null
   const cached = usage.prompt_tokens_details?.cached_tokens
-  return {
-    type: "usage",
+  return buildUsageEventShared({
     inputTokens: usage.prompt_tokens,
     outputTokens: usage.completion_tokens,
     model,
     ...(cached !== undefined ? { cacheReadTokens: cached } : {}),
-  }
+  })
 }
 
 interface StreamState {
@@ -234,6 +232,13 @@ function* processChunk(chunk: RawChunk, st: StreamState): Generator<StreamEvent>
   if (chunk.model) st.usageModel = chunk.model
   const choice = chunk.choices[0]
   if (!choice) return
+  // ADR-0076 Gap-2: reasoning summary delta → thinking_delta. The OpenAI Chat
+  // Completions surface and compatible providers diverge between `reasoning`
+  // and `reasoning_content`; read both, preferring `reasoning` when both
+  // populated on the same chunk (provider bug guard — concatenating would
+  // double-count). No signature: OpenAI reasoning is opaque.
+  const r = choice.delta.reasoning ?? choice.delta.reasoning_content
+  if (r) yield { type: "thinking_delta", text: r }
   if (choice.delta.content) yield { type: "text_delta", delta: choice.delta.content }
   yield* mapToolCallDeltas(chunk, st.pending)
   if (choice.finish_reason) st.finish = choice.finish_reason
@@ -249,15 +254,7 @@ export class OpenAIAdapter implements LLMPort {
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
 
   constructor(config: OpenAIConfig) {
-    const env = runtimeConfig()
-    const override: { firstChunkMs?: number; idleMs?: number } = {}
-    if (config.streamFirstChunkMs !== undefined) override.firstChunkMs = config.streamFirstChunkMs
-    if (config.streamIdleMs !== undefined) override.idleMs = config.streamIdleMs
-    this.streamTimeoutMs = resolveStreamTimeoutMs(
-      env.llmStreamFirstChunkMs,
-      env.llmStreamIdleMs,
-      override,
-    )
+    this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     // T1 gap-closer: the per-request SDK `timeout` covers the `create()` call
     // itself (HTTP connect + time-to-first-byte) — the hang point the stream
     // wrapper CANNOT see because it decorates the AsyncIterable returned AFTER

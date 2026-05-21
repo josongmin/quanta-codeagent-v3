@@ -56,6 +56,7 @@ export {
 export type {
   CreatePermissionStoreOptions,
   DenialRecord,
+  PermissionReader,
   PermissionState,
   PermissionStore,
 } from "./permission-store"

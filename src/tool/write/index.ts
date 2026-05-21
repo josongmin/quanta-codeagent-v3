@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { FsJailError, fileExists, writeFile } from "@/storage"
+import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -9,7 +9,11 @@ const schema = z.object({
 
 type Input = z.infer<typeof schema>
 
-export const writeTool: Tool<Input> = {
+/** Build the `write` tool against an injected {@link FileSystemPort} (#13).
+ *  `fs` defaults to the real `@/storage`-backed port, so the exported
+ *  {@link writeTool} is byte-identical to the pre-port direct-call version;
+ *  tests pass an in-memory port for isolation. */
+export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> => ({
   name: "write",
   description: "Write a file, creating or fully overwriting it. Creates parent dirs.",
   inputSchema: schema,
@@ -28,8 +32,8 @@ export const writeTool: Tool<Input> = {
     // The jail check fires inside fileExists()/writeFile() BEFORE any bytes
     // are written, so a denied path is NEVER a partial write.
     try {
-      const existed = await fileExists(input.path, ctx.cwd)
-      await writeFile(input.path, input.content, ctx.cwd)
+      const existed = await fs.fileExists(input.path, ctx.cwd)
+      await fs.writeFile(input.path, input.content, ctx.cwd)
       const bytes = Buffer.byteLength(input.content, "utf8")
       yield {
         type: "result",
@@ -46,4 +50,7 @@ export const writeTool: Tool<Input> = {
       throw e
     }
   },
-}
+})
+
+/** Default-port `write` tool used by the registry. */
+export const writeTool: Tool<Input> = makeWriteTool()

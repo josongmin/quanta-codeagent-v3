@@ -2,16 +2,17 @@
  * ADR-0047 — HITL 4-tier gate (registry + handoff seam).
  *
  * This module is the canonical agent-side surface for the 4-tier taxonomy
- * defined by ADR-0020. It is a thin re-export of `HITLTier` from
- * `@/permission` (the SSOT), plus the local aliases and seam types the
- * registry / admissibility-gate / handoff callback need.
+ * defined by ADR-0020. It is a thin re-export of `HITLTier` (re-exported here
+ * via `@/permission`, whose own copy now re-exports the SSOT in `@/shared`),
+ * plus the local aliases and seam types the registry / admissibility-gate /
+ * handoff callback need.
  *
- * Why re-export instead of redefining: ADR-0020 already shipped the literal
- * union (`hand-off-required | always-confirm | pre-approval-ok | none`) in
- * `@/permission/types.ts`. ADR-0047 EXTENDS that surface (adds annotation
- * registry, override file, handoff event); it does NOT supersede the tier
- * enum. Keeping a single literal type prevents drift between
- * `@/permission`'s gate logic and `@/agent`'s registry layer.
+ * Why re-export instead of redefining: the literal union
+ * (`hand-off-required | always-confirm | pre-approval-ok | none`) lives ONCE
+ * in `@/shared/types.ts` and every slice re-exports it. ADR-0047 EXTENDS the
+ * agent surface (adds annotation registry, override file, handoff event); it
+ * does NOT supersede the tier enum. The single canonical type prevents drift
+ * between `@/permission`'s gate logic and `@/agent`'s registry layer.
  *
  * Naming: this file standardises on the lower-camel `HitlTier` alias so
  * agent-internal code reads consistently (`tier: HitlTier`). The original

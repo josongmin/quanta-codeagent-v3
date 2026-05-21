@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { FsJailError, readFile, writeFile } from "@/storage"
+import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
@@ -20,7 +20,11 @@ const schema = z.object({
 
 type Input = z.infer<typeof schema>
 
-export const editTool: Tool<Input> = {
+/** Build the `edit` tool against an injected {@link FileSystemPort} (#13).
+ *  `fs` defaults to the real `@/storage`-backed port, so the exported
+ *  {@link editTool} is byte-identical to the pre-port direct-call version;
+ *  tests pass an in-memory port for isolation. */
+export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> => ({
   name: "edit",
   description: "Exact string replacement in an existing file. old_string must match verbatim.",
   inputSchema: schema,
@@ -38,7 +42,7 @@ export const editTool: Tool<Input> = {
     // The jail check fires in readFile() (and again in writeFile()) BEFORE
     // any write, so a denied path is NEVER a partial write.
     try {
-      const source = await readFile(input.path, ctx.cwd)
+      const source = await fs.readFile(input.path, ctx.cwd)
       const replaceAll = input.replace_all ?? false
       let result = applyExactEdit(source, input.old_string, input.new_string, replaceAll)
       if ((!result.ok || result.next === undefined) && input.fuzzy) {
@@ -65,7 +69,7 @@ export const editTool: Tool<Input> = {
         }
         return
       }
-      await writeFile(input.path, result.next, ctx.cwd)
+      await fs.writeFile(input.path, result.next, ctx.cwd)
       yield { type: "result", result: { ok: true, output: `${input.path}: ${result.message}` } }
     } catch (e) {
       if (e instanceof FsJailError) {
@@ -75,4 +79,7 @@ export const editTool: Tool<Input> = {
       throw e
     }
   },
-}
+})
+
+/** Default-port `edit` tool used by the registry. */
+export const editTool: Tool<Input> = makeEditTool()
