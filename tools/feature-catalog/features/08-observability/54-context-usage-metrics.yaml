@@ -1,0 +1,33 @@
+id: context-usage-metrics
+title: Context-usage metrics fan-out + surface-agnostic status line
+section: 8
+subsystem: 텔레메트리 — 토큰 사용량 / status line (Claude Desktop getContextUsage 흡수, ADR-0054)
+order: 54
+maturity: L4
+status: new
+purpose: |
+  Claude Desktop 1.7196.3의 getContextUsage IPC sidebar 노출 흡수 — v3는 estimateTokens / provider
+  usage StreamEvent로 내부 계산 중이었으나 어떤 surface도 user-facing 표시 없음. (1)
+  AgentRecorder.tokensUsed(input, output, cacheRead?) 추가 — vocabulary의 canonical
+  gen_ai.usage.{input,output,cache_read_input}_tokens / METRIC.tokensInput/Output/cacheRead
+  상수로 직접 fan-out(drift 방지). cacheRead 미전달 시 카운터 미생성(lazy registry no-op 보존).
+  (2) src/apps/cli/status-line.ts (신규) — surface-agnostic pure function
+  formatContextUsage(used, max, model?). 20-cell bar(5%/cell), k-suffix 숫자, oversize `!` 마커,
+  model fallback "unknown". @/agent import 0 — Tauri/Web이 copy-paste 없이 import 가능.
+  (3) loop.ts::emitUsage에 recorder?.tokensUsed(...) 1-line fan-out, recorder 부재 ⇒ no-op
+  (byte-identical 유지).
+evidence:
+  code:
+    - src/agent/loop.ts
+    - src/apps/cli/status-line.ts
+    - src/observability/vocabulary.ts
+  adrs: [54]
+  tests:
+    unit:
+      - tests/unit/agent/metrics-tokens.test.ts
+      - tests/unit/cli/status-line.test.ts
+    integration: [tests/integration/agent-metrics-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Negative invariants: (a) 상시 토큰 stream subscription IPC 도입 안 함(pull-only — surface가 recorder snapshot polling), (b) per-model context max 자동 lookup table 없음(caller가 max 명시 전달), (c) status line은 string return only — surface가 표시 정책 결정(CLI prompt prefix vs Tauri sidebar vs REPL header).'

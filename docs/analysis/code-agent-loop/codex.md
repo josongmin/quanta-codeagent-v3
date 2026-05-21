@@ -128,7 +128,30 @@ response_item:message(assistant) → function_call ×N → output ×N → …
 ```
 
 ### 1) 코어 시스템 프롬프트 — `session_meta.base_instructions.text` (실측 12,950자)
-시작: `"You are Codex, a coding agent based on GPT-5. You and the user share the same workspace…"`
+
+**Identity (verbatim, 첫 문장)**:
+```
+You are Codex, a coding agent based on GPT-5. You and the user share the
+same workspace and collaborate to achieve the user's goals.
+```
+
+**Personality (verbatim)**:
+```
+You are a deeply pragmatic, effective software engineer. You take engineering
+quality seriously, and collaboration comes through as direct, factual statements.
+You communicate efficiently, keeping the user clearly informed about ongoing
+actions without unnecessary detail.
+```
+
+**Values (verbatim 발췌)**:
+```
+- Clarity: You communicate reasoning explicitly and concretely…
+- Pragmatism: You keep the end goal and momentum in mind…
+- Rigor: You expect technical arguments to be coherent and defensible…
+```
+
+→ Claude `"You are Claude Code, Anthropic's official CLI for Claude."`와 동형 — identity 한 줄 + personality + values.
+
 13개 섹션 (실측 마크다운 헤더):
 ```
 # Personality (## Values / ## Interaction Style / ## Escalation)
@@ -195,6 +218,183 @@ dynamic_tools: [
 | compaction 후 | `compacted.replacement_history`로 과거 치환 + turn_context.summary 연속성 |
 | 모델 교체 | turn_context.model 변경 (세션 중 gpt-5↔gpt-5.4 가능) |
 | subagent | 별도 thread (spawn_agent), 자식은 자체 turn_context |
+
+---
+
+## A++. ★ 프롬프트 템플릿 카탈로그 — 상황별로 정확히 무엇이 보내지나 (실측 verbatim)
+
+### Layer 0 — 세션 단 1회 (`session_meta.base_instructions.text`, 12,950자)
+```text
+You are Codex, a coding agent based on GPT-5. You and the user share the
+same workspace and collaborate to achieve the user's goals.
+
+# Personality
+You are a deeply pragmatic, effective software engineer. …
+
+## Values
+- Clarity: You communicate reasoning explicitly and concretely…
+- Pragmatism: You keep the end goal and momentum in mind…
+- Rigor: You expect technical arguments to be coherent and defensible…
+
+## Interaction Style
+## Escalation
+
+# General
+## Editing constraints
+## Special user requests
+## Autonomy and persistence
+## Frontend tasks
+
+# Working with the user
+## Formatting rules
+## Final answer instructions
+## Intermediary updates
+```
+→ Responses-API `instructions` 필드로 매핑. **세션당 1회**, ETag·personality 템플릿 서버푸시.
+
+### Layer 1 — 첫 developer 메시지의 7 조건부 블록 (각각 `content[]` 원소, 실측 verbatim)
+
+**T1. `<permissions instructions>`** [항상]
+```text
+<permissions instructions>
+Filesystem sandboxing defines which files can be read or written.
+`sandbox_…` (정책 문장 4-6줄)
+Approval policy is currently never. Do not provide the `sandbox_permissions…
+</permissions instructions>
+```
+
+**T2. `<app-context>`** [Desktop/CLI 별 내용 다름]
+```text
+<app-context>
+# Codex desktop context
+- You are running inside Codex Desktop…
+</app-context>
+```
+
+**T3. `## Memory`** [memory 활성 시]
+```text
+## Memory
+
+You have access to a memory folder with guidance from prior runs. It can save
+time and help you stay consistent. Use it whenever it is likely to help.
+```
+
+**T4. `<collaboration_mode>`** [mode별 본문 다름 — default 실측]
+```text
+<collaboration_mode>
+# Collaboration Mode: Default
+
+You are now in Default mode…
+```
+(Plan/Triage/Multitask 모드는 본문 치환 — 200 세션 전체 default라 verbatim 미확인. settings.developer_instructions로 mode별 지침 주입)
+
+**T5. `<personality_spec>`** [사용자 커스텀 personality 설정 시]
+```text
+<personality_spec> The user has requested a new communication style. Future
+responses should…
+```
+
+**T6. `<skills_instructions>`** [활성 skill 있을 때만]
+```text
+<skills_instructions>
+## Skills
+A skill is a set of local instructions to follow that is stored in a `SKILL…
+### Available skills
+- imagegen: Generate or edit raster images when the task benefits from AI-c…
+- (기타 활성 skill 항목)
+```
+
+**T7. `<plugins_instructions>`** [설치 plugin 있을 때만]
+```text
+<plugins_instructions>
+## Plugins
+A plugin is a local bundle of skills, MCP servers, and apps. Below is the l…
+### Available plugins
+- `Browser`: Browser / browser-use plugin Aliases: @browser, @browser-use,…
+```
+
+### Layer 2 — 첫 user 메시지 (repo-rules 주입)
+```text
+# AGENTS.md instructions for <repo path>
+# AGENTS.md
+<environment_context>
+  <cwd>/Users/.../repo</cwd>
+  <git>{branch, sha, dirty}</git>
+  <os>{platform, shell, date}</os>
+  ...
+</environment_context>
+```
+→ Cursor `selected_context.cursor_rules` / Claude `CLAUDE.md` 와 같은 역할. **첫 턴 1회만** (이후 unchanged).
+
+### Layer 3 — 연속 턴 user 메시지 (실측 verbatim)
+```text
+# Context from my IDE setup:
+
+## Open tabs:
+- <filename>: <path/>
+- ...
+
+## Active file: <path> [+ optional ## Cursor position]
+
+## My request for Codex:
+<실제 사용자 입력 텍스트>
+```
+→ **매 연속 턴마다 active file / open tabs 재주입**. Cursor의 SelectedContext에 해당.
+
+### Layer 4 — function_call_output (도구 결과 주입 형식)
+```text
+Chunk ID: <8자hex>
+Wall time: 0.0000 seconds
+Process exited with code <N>
+Original token count: <N>
+Output:
+<stdout/stderr 본문, truncate된 경우>
+```
+→ exec_command 결과는 **정규화된 메타데이터(time/exit/tokens) + Output:** 본문. apply_patch 결과는 `{"output":"Success. Updated the following files:\nM /…"}`.
+
+### Layer 5 — compaction 시 history 치환
+```text
+event_msg:context_compacted (마커, payload 없음)
+compacted{
+  "message": "",                          // 항상 빈 문자열
+  "replacement_history": [
+    { "type":"message", "role":"user", "content":[…] },
+    { "type":"message", "role":"assistant", "phase":"final_answer",
+      "content":[{"type":"output_text","text":"…요약…"}] },
+    ...
+  ]
+}
+```
+→ 과거 turn 전체를 합성 요약 message로 치환. `turn_context.summary` 필드도 갱신.
+
+### ★ 상황별 페이로드 변화 매트릭스 (어느 블록이 언제 들어가나)
+
+| 상황 | base_instr (L0) | dev 블록 (L1: T1~T7) | user repo-rules (L2) | user IDE-ctx (L3) | turn_context | 비고 |
+|---|---|---|---|---|---|---|
+| **세션 첫 턴** | ✅ 풀 12950자 | T1+T2+T3+T4+T5*+T6*+T7* (*조건부) | ✅ AGENTS.md + env | ✅ IDE state | ✅ 첫 스냅샷 | ETag 캐시 prefix 생성 |
+| **연속 턴** | (캐시 hit) | (캐시 hit) | (생략 — 첫 턴만) | ✅ 매 턴 재주입 | ✅ 갱신 | model 변경 가능 |
+| **mode=Plan** | 동일 | T4 본문이 Plan 지침 + settings.developer_instructions | 동일 | 동일 | mode="plan" | mutating 차단 신호 |
+| **skill 매칭** | 동일 | T6 추가 (`<skills_instructions>`) | 동일 | 동일 | — | glob/description 매칭 시 |
+| **plugin 설치** | 동일 | T7 추가 | 동일 | 동일 | — | Browser/SchemeXYZ 등 |
+| **personality 커스텀** | 동일 | T5 추가 | 동일 | 동일 | personality 필드 | 기본 "pragmatic" |
+| **compaction 후** | 동일 | 동일 | 생략 | 동일 | summary 채워짐 | replacement_history로 과거 치환 |
+| **모델 교체** | 동일 | 동일 | 동일 | 동일 | **model 필드 변경** | 세션 중 gpt-5 ↔ gpt-5.4 |
+| **subagent spawn** | 자식 thread 자체 | 자식 자체 7블록 | 자식 cwd 기준 | 자식 prompt | 자식 turn_context | spawn_agent message로 inception |
+| **HITL hand-off** | 동일 | 동일 | 동일 | + handoff suffix | — | 도구 deny 후 |
+| **tool error reroute** | 동일 | 동일 | 동일 | 동일 | — | function_call_output에 status 표시 |
+| **interrupt** | n/a | n/a | n/a | n/a | n/a | `Op::interrupt` → `turn_aborted{reason:"interrupted"}` |
+
+### Cursor / Claude 대비 (3-way prompt-assembly 대조)
+| 평면 | Cursor | Claude | Codex |
+|---|---|---|---|
+| 시스템 프롬프트 | `explicit_context.context` | `system` 파라미터 (text/array) | `instructions` (base_instructions.text) |
+| 동적 지침 | `request_context` 38필드 | per-turn `<system-reminder>` (캐시 밖) | turn_context 16필드 + developer 7블록 |
+| repo-rules | `cursor_rules` selected | `CLAUDE.md` (캐시 prefix 안) | AGENTS.md (첫 user 메시지 안) |
+| IDE 상태 | `SelectedContext` 28멤버 | env reminder (cwd/git) | `# Context from my IDE setup` (연속턴) |
+| 모드별 분기 | `unified_mode` enum | permission mode + thinking budget | `collaboration_mode` + settings.developer_instructions |
+| skill | rules.mdc + skills | skill 목록 + skill_path | `<skills_instructions>` 블록 |
+| persona | (cloud 서버) | identity 3-variant 텍스트 | `<personality_spec>` (사용자 커스텀) + base 인격 |
+| tool 결과 | `tool_results` 메시지 안 필드 | `tool_result` 블록 (user 메시지 안) | `function_call_output` 독립 response_item |
 
 ---
 
@@ -388,6 +588,105 @@ handler 체인 [FACT, OTel]: `handle_responses → handle_output_item_done → h
 
 ---
 
+## D+. ★ Loop lifecycle — 한 턴에서 일어나는 모든 일 (claude.md §4.5 대응)
+
+분기 트리(§D)는 "응답 1건"을 처리하는 법이고, 이 절은 **한 turn 처음→끝까지의 전 단계**.
+codex-rs는 `handle_responses` → handler 체인 (FACT, OTel). 실측 레코드 순서로 단계화:
+
+```
+┌─ TURN 진입 ──────────────────────────────────────────────────┐
+│ [P1] Submission op 수신 (user_input 등 6종)                    │
+│ [P2] turn_context 스냅샷 작성 (16필드: cwd/policy/model/effort) │
+│ [P3] base_instructions(코어 시스템프롬프트, 캐시) 결합           │
+│ [P4] developer 7블록 조건부 주입 (permissions/app-context/      │
+│         memory/collaboration_mode/personality/skills/plugins)   │
+│ [P5] AGENTS.md + environment_context 주입 (repo-rules)         │
+│ [P6] 사용자 입력 + IDE context(active file/open tabs) 패킹      │
+│ [P7] tools[] (content-hash 캐시) + dynamic_tools[] 등재         │
+│ [P8] Responses-API request 조립: {model, instructions, input[], │
+│         tools[], reasoning:{effort}}                            │
+└──────────────────────────────────────────────────────────────┘
+                          │
+┌─ STREAM 소비 (SSE/WS) ───────────────────────────────────────┐
+│ [S1] POST/WS chatgpt.com/backend-api/codex/responses (zstd)    │
+│ [S2] event.kind 12종 디스패치:                                   │
+│       response.created → task_started{turn_id,                  │
+│            model_context_window, collaboration_mode_kind}       │
+│       response.output_item.added → 새 item 시작                  │
+│       response.output_text.delta → agent_message 누적            │
+│       response.function_call_arguments.delta → arguments 누적    │
+│       response.output_item.done → item 확정 →                   │
+│         handle_output_item_done(OTel) →                         │
+│         handle_tool_call → handle_tool_call_with_source →      │
+│         dispatch_tool_call_with_code_mode_result{               │
+│            tool_name, call_id, aborted}                         │
+│       response.completed → 종료                                  │
+│ [S3] reasoning item ← Fernet-encrypted (클라엔 평문 없음)        │
+│ [S4] message(assistant) phase: commentary → 중간 / final_answer  │
+│ [S5] ★ 네이티브 다중 function_call: 한 턴 N개 연속 emit (max     │
+│         observed=17), call_id 각자 다름, 모델이 직접 병렬화      │
+└──────────────────────────────────────────────────────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+   stream error                      정상 assembled
+          │                               │
+┌─ 에러 복구 ─────────┐      ┌─ 도구 dispatch / 종료 결정 ─────────┐
+│ overloaded/rate     │      │ function_call(s) ≥1 →               │
+│  → backoff retry    │      │   각 call: admissibility 5-stage    │
+│ context_overflow    │      │   → exec → function_call_output     │
+│  → compact + retry  │      │     {call_id, output}               │
+│ usage_limit_exceeded│      │   → 모델 재진입(tick-tock)           │
+│  → event_msg:error  │      │ assistant message만 (no fc) →       │
+│  → fail-fast        │      │   task_complete → finish            │
+└─────────────────────┘      └───────────────────────────────────┘
+                                       │
+┌─ 도구 dispatch 전 admissibility 5-stage (매 call) ────────────┐
+│ 1. tool visible?     ← tools[] + dynamic_tools[] 등재 확인       │
+│ 2. sandbox/approval  ← sandbox_policy.type × approval_policy 매트│
+│                         릭스 ({read-only|workspace-write|         │
+│                         danger-full-access} × {never|on-request|  │
+│                         on-failure|always})                       │
+│ 3. HITL 4-tier       ← hand-off-required | always-confirm |       │
+│                         pre-approval-ok | none                    │
+│ 4. repo-rules        ← AGENTS.md/.codex 규칙 컴플라이언스          │
+│ 5. exec              ← Seatbelt(macOS)/Landlock+seccomp(Linux)    │
+│                         OS 레벨 강제                              │
+│ + Guardian: 사용자가 위험 본 후 재승인 → 이전 deny override        │
+└──────────────────────────────────────────────────────────────┘
+                          │
+┌─ TURN 종료 후 ────────────────────────────────────────────────┐
+│ [E1] event_msg:agent_message{phase:"final_answer"} (있으면)     │
+│ [E2] event_msg:token_count{info, rate_limits{primary,secondary}}│
+│ [E3] event_msg:task_complete{turn_id, last_agent_message,       │
+│         completed_at, duration_ms, time_to_first_token_ms}      │
+│ [E4] 토큰 압박 시 → event_msg:context_compacted +                │
+│         compacted{message:"", replacement_history[]}            │
+│         → turn_context.summary 갱신                              │
+│ [E5] rollout JSONL append (5종: session_meta/turn_context/       │
+│         response_item/event_msg/compacted)                       │
+│ [E6] follow-up 큐(set-queued-follow-ups-state) → 다음 턴 피드   │
+│ [E7] 중단/롤백 가능:                                              │
+│         turn_aborted{reason:"interrupted", duration_ms}         │
+│         thread_rolled_back{num_turns}                           │
+└──────────────────────────────────────────────────────────────┘
+                          │
+              function_call N개면 → 다음 sub-turn (tick-tock)
+              task_complete면 → finish
+```
+
+### SAME-TURN 복구 (turn 카운터 안 먹고 재진입)
+| 트리거 | 동작 |
+|---|---|
+| stream error (529/5xx) | backoff retry (Codex는 백오프 정책 docs에 없음, INFERENCE) |
+| context overflow | reactive compaction → `event_msg:context_compacted` + `compacted{replacement_history[]}` |
+| `usage_limit_exceeded` | `event_msg:error{codex_error_info:"usage_limit_exceeded"}` → fail (1건 실측) |
+| 사용자 interrupt | `Op::interrupt` → `event_msg:turn_aborted{reason:"interrupted"}` |
+| mid-turn redirect | `steer-turn` IPC event (분석 docs) |
+
+→ Claude의 max_tokens/empty/malformed nudge에 해당하는 SAME-TURN 복구는 Codex rollout에 명시 없음 (서버가 처리해서 안 보일 가능성, INFERENCE).
+
+---
+
 ## E. 저게 다야? — action space vs control
 
 ### 닫힌 것 (actuation 동사)
@@ -424,14 +723,39 @@ handler 체인 [FACT, OTel]: `handle_responses → handle_output_item_done → h
 
 ---
 
-## G. 흡수 시사점 (quanta v3)
+## G. 흡수 시사점 (quanta v3) — claude.md §6와 동형 깊이
+
+### v3 대응표 (Codex 패턴 → v3 파일)
+| Codex | v3 |
+|---|---|
+| `base_instructions.text` (코어 시스템프롬프트) | [prompt.ts `buildSystemPrompt`](../../../src/agent/prompt.ts) |
+| developer 7블록 (조건부 주입) | [prompt-sections.ts `fourSectionPreset`](../../../src/agent/prompt-sections.ts) |
+| AGENTS.md + environment_context | [repo-rules.ts](../../../src/agent/repo-rules.ts) |
+| turn_context per-turn 스냅샷 | [working-state.ts](../../../src/agent/working-state.ts) + AgentConfig |
+| Fernet-encrypted reasoning | (v3 미보유 — 추론 평문 노출, 서버 사이드 암호화 없음) |
+| event_msg:context_compacted + compacted{} | [compaction.ts](../../../src/agent/compaction.ts) |
+| dispatch_tool_call admissibility 5-stage | [admissibility-gate.ts](../../../src/agent/admissibility-gate.ts) |
+| Seatbelt/Landlock OS 샌드박스 | [shell-disclaim.ts](../../../src/runtime/shell-disclaim.ts) + [fs-jail](../../../src/storage/service.ts) |
+| 네이티브 다중 function_call | [streaming-dispatch.ts](../../../src/agent/streaming-dispatch.ts) — concurrency-safe 인라인 |
+| `exec_command` 단일 도구로 모든 file ops | v3는 read/grep/glob 분리 (Cursor식) ← 흡수 갭 |
+| Submission op 6종 (interrupt 등 제어) | [loop.ts signal](../../../src/agent/loop.ts) AbortSignal로 통합 |
+
+### 핵심 결론
 
 1. **action space 계약(enum+분기트리)은 베낄 수 있음** — v3 ToolRegistry로 이미 닫힘.
-2. **통제는 한 곳 아님** — 서버(두뇌)+샌드박스(OS)+정책(rule/HITL) 3평면. v3도 admissibility gate + FS jail + repo-rules로 동형 (이미 구조적으로 맞음).
-3. **`exec`/`mcp` 열린 게이트 밑에 sandbox+permission 필수** — v3가 심볼릭링크 탈옥 deny를 P0로 올린 이유와 동일. Codex Seatbelt 프로파일은 `~/.claude/.../memory/codex-seatbelt-sandbox-profile`에 verbatim 보존 → 데스크톱 진출 시 copy-paste.
+2. **통제는 한 곳 아님** — 서버(두뇌)+샌드박스(OS)+정책(rule/HITL) 3평면. v3 admissibility gate + FS jail + repo-rules로 동형 (이미 구조적으로 맞음).
+3. **`exec`/`mcp` 열린 게이트 밑에 sandbox+permission 필수** — v3 심볼릭링크 탈옥 deny P0와 동일. Codex Seatbelt 프로파일은 `~/.claude/.../memory/codex-seatbelt-sandbox-profile`에 verbatim 보존 → 데스크톱 진출 시 copy-paste.
 4. **role 4-체계(OpenAI 표준)가 v3에 친화적** — v3도 user/assistant/system/tool. Codex 쪽이 흡수 용이.
-5. **멀티툴은 네이티브 다중 tool_use가 정답** — v3 streaming-dispatch가 이미 한 턴 다중 tool_use 처리(병렬 안전성 플래그 보유). 메타툴 wrapper 흉내낼 필요 없음. ✅ 이미 올바른 방향.
-6. **`function_call_output`은 `output` 단일 필드** — 풍부한 status oneof(Cursor식)는 불필요. v3 ToolResult.ok + output로 충분.
+5. **멀티툴 = 네이티브 다중 function_call** — v3 streaming-dispatch가 이미 처리. ✅ 이미 올바른 방향.
+6. **`function_call_output`은 `output` 단일 필드** — Cursor식 status oneof 불필요. v3 `ToolResult.ok + output`로 충분.
+
+### ★ 흡수 갭 (v3가 명시 미처리)
+- **Reasoning 암호화**: Codex는 reasoning 본문이 Fernet 암호화 (모델 사고 보안). v3는 평문. server-side encryption 검토 가치 (서비스 시 IP 보호).
+- **`exec_command` 단일 도구 철학**: Codex는 read/grep/glob/ls 전부 `exec_command(ripgrep/cat …)`로 통일. v3는 도구 enum 분리 — 어느 쪽이 옳은지는 모델 정책 의존(분리 = 명시적 권한 gating 용이; 통합 = 모델 자유도 높음).
+- **20개 event_msg 중 v3 미보유**: `collab_waiting_end`/`collab_agent_spawn_end`/`collab_close_end`(멀티에이전트 lifecycle), `agent_reasoning`(plaintext, 0.003%), `thread_rolled_back`(체크포인트 롤백). v3 subagent는 cancellation까지 있으나 lifecycle 이벤트 미발행.
+- **`task_complete.duration_ms / time_to_first_token_ms`** — v3 metrics 슬라이스에 추가 가능 (관측성 정밀화).
+- **`token_count.rate_limits.{primary,secondary}` 2-window**: v3는 단일 budget. provider rate-limit 2-window 표면 흡수 가치.
+- **`apply_patch`를 `custom_tool_call`로 분리** — V4A 패치를 1급 도구 타입으로. v3는 `edit` 도구로 흡수했으나 V4A grammar 자체는 codex-v4a-patch-grammar 메모리에 verbatim 보존 → 복원 가능.
 
 ---
 
@@ -448,6 +772,18 @@ handler 체인 [FACT, OTel]: `handle_responses → handle_output_item_done → h
 - **도구 스키마 "전부 서버전용" → `dynamic_tools[]`가 session_meta에 full inputSchema 박힘** (app/MCP/automation류)
 - 시스템 프롬프트 = base_instructions.text 1개가 아니라 **3층**: ①base_instructions(코어) ②developer 7블록(permissions/app-context/memory/collaboration_mode/personality_spec/skills/plugins, 조건부) ③user앞 AGENTS.md+environment_context
 - 연속 턴 user message에 **IDE context(active file/open tabs) 매 턴 재주입** 실측
+- **★ reasoning 페이로드 = `{summary[], content:null, encrypted_content:"gAAAAAB…"}` (Fernet 암호화)** — 클라엔 평문 없음 (이전 `{...}` shape 미상이 완전 해소)
+- event_msg **12-13종 → 실측 20종** (+`exec_command_end` 15필드, `collab_waiting_end/agent_spawn_end/close_end`(멀티에이전트), `agent_reasoning` plaintext rare, `error{codex_error_info}`, `item_completed`, `thread_name_updated`, `mcp_tool_call_end`)
+- `token_count.rate_limits`에 **primary+secondary 2-window** + `plan_type`/`credits`/`rate_limit_reached_type` (이전판 primary만 언급)
+- `task_complete` +3필드: `completed_at, duration_ms, time_to_first_token_ms` (이전 turn_id+last_agent_message만)
+- `task_started`가 config 운반: `model_context_window`(예 121600), `collaboration_mode_kind`
+- `turn_aborted.reason = "interrupted"` (실측 단일 값)
+- `thread_rolled_back = {num_turns}` 단 1필드
+- `compacted.message` 항상 빈 문자열 (`""`) — 요약 본문은 `replacement_history[]`에만
+- **도구 실측 ~12종** (광고 23개 중) — `exec_command` **73%** + `write_stdin` **22%** (codex.md 이전판 write_stdin 누락) + subagent 4종(spawn/wait/close/send_input) + plan/dynamic_tools 등. `resume_agent` 500파일 **0건**, MCP function_call 0건 (rollout 미기록)
+- 파일 도구(read/grep/glob/ls) **모두 `exec_command`로 통합** — 별도 도구 아님 (Codex는 shell-one-tool 철학, Cursor enum 44개와 정반대)
+- `function_call_output.output`이 드물게(0.01%) `[{type:input_text|input_image, …}]` content-part 배열 (멀티모달/automation)
+- `agent_message`에 **`memory_citation`** 필드 (1360/47999 non-null) — 메모리 인용 surface
 
 > 출처: `~/.codex/archived_sessions/rollout-2026-05-21T03-16-29-…ca.jsonl` 외 50+ 파일 직접 파싱.
 > 이전 추론본: `docs/reviews-codex-agent/{turn-context-and-runtime-interface,may-21-codex-desktop-build-2867-round-3,-round-4}.md`.

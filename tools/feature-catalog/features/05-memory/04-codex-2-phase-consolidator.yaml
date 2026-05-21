@@ -1,0 +1,52 @@
+id: codex-2-phase-consolidator
+title: Codex 2-phase memory consolidator — per-thread distill + cross-session synthesizer
+section: 5
+subsystem: 장기 메모리 — LLM 합성 distill (Codex 흡수, ADR-0068)
+order: 4
+maturity: L3
+status: new
+purpose: |
+  Codex memory model의 2-phase distill+consolidator 흡수 — 기존 SOTA++ hybrid recall
+  (ADR-0008, embedding+lexical+tag+freshness+tier+reinforcement)이 메우지 못한 두 구조적
+  갭을 닫음. (1) **사용자-검수가능 distilled 지식 부재** — embedding store는 opaque sqlite blob,
+  세션 간 학습 내용을 한 파일로 열어볼 수 없었음. (2) **세션 간 LLM consolidator 부재** —
+  per-turn 신호는 embed되지만 LLM이 합성된 뷰(선호 / 반복 패턴 / 결정된 아키텍처 규칙)로
+  해석한 적 없음. Phase 1 = per-thread distill orchestrator(runPhase1) — 세션 종료 시 thread
+  신호를 LLM으로 1차 distill해 Stage1Store에 적재. Phase 2 = cross-session consolidator
+  (phase2-llm) — 전역 워터마크 기반으로 stage1 출력을 LLM으로 통합해 사용자-가시 markdown
+  3-file(role/preferences/architecture)에 git-tracked write. WatermarkConflictError /
+  RolloutTaintedError로 동시 실행 / 중단 회복을 통제. constants.ts에 caps / thresholds /
+  OTel 키 SSOT.
+evidence:
+  code:
+    - src/memory/consolidate/index.ts
+    - src/memory/consolidate/phase1.ts
+    - src/memory/consolidate/phase2.ts
+    - src/memory/consolidate/phase2-llm.ts
+    - src/memory/consolidate/writer.ts
+    - src/memory/consolidate/store.ts
+    - src/memory/consolidate/git.ts
+    - src/memory/consolidate/schema.ts
+    - src/memory/consolidate/paths.ts
+    - src/memory/consolidate/constants.ts
+  adrs: [68]
+  tests:
+    unit:
+      - tests/unit/memory-consolidate.test.ts
+      - tests/unit/memory/consolidate-store.test.ts
+      - tests/unit/memory/consolidate-writer.test.ts
+      - tests/unit/memory/consolidate-phase1.test.ts
+      - tests/unit/memory/consolidate-phase2.test.ts
+    integration: [tests/integration/consolidate-phase2-end-to-end.test.ts]
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Phase 1 orchestrator + Phase 2 LLM port + writer(파일 3-file 원자 쓰기) + store(SQLite
+    어댑터) + schema(idempotent migration) + git ops + 워터마크/회복 에러는 완성+테스트.
+    세션-종료 자동 트리거 와이어업과 PII redaction 정책은 follow-up — 수동 호출 / 테스트로만
+    실행 가능.
+  promotion_path: |
+    loop의 세션 종료 hook에서 runPhase1을 자동 호출하고 일정 임계에서 Phase 2를 cron/배치
+    실행으로 wire하면 L4.
+notes: 'v1 self-audit에서 7 SOTA++ 결함(파일 역할 오매핑/주입 섹션 오류/사이즈 cap 부재/수동 편집 보존 누락/부분 원자성/default-on opt-in flip 민감 누출 위험/LLM provider 미정)을 잡아 v2로 재설계. ADR-0008 hybrid recall(per-turn 페어와이즈)와 직교 — recall은 즉시 검색용, consolidator는 사용자-가시 종합용.'

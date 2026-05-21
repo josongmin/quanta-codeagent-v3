@@ -44,6 +44,11 @@ export interface SlashContext {
   readonly sleep?: ((ms: number) => Promise<void>) | undefined
   /** Override the preferences file path (test seam). */
   readonly prefsPath?: string | undefined
+  /** Override the preferences-home directory (test seam). When set, takes
+   *  precedence over `runtimeConfig().prefsHome` so per-test isolation does
+   *  not depend on mutating `process.env.QUANTA_PREFS_HOME` after
+   *  `runtimeConfig()` has already validated-and-frozen its snapshot. */
+  readonly prefsHome?: string | undefined
   /** ADR-0065 model-swap retry session state. Absent ⇒ `/retry-with` prints
    *  "no model candidates configured" and is a no-op (byte-identical to NOT
    *  registering the command). Injected by the SURFACE (a future REPL or
@@ -69,7 +74,8 @@ interface Preferences {
 
 const WAIT_MAX_SECONDS = 3600
 
-const prefsHome = (): string => runtimeConfig().prefsHome ?? homedir()
+const prefsHome = (ctx?: SlashContext): string =>
+  ctx?.prefsHome ?? runtimeConfig().prefsHome ?? homedir()
 
 const prefsFilePath = (ctx: SlashContext): string => {
   if (ctx.prefsPath !== undefined) return ctx.prefsPath
@@ -135,7 +141,7 @@ const usageCmd: SlashCommand = {
   name: "/usage",
   describe: "Show aggregated lifetime + recent usage",
   async run(_args, ctx) {
-    const path = join(prefsHome(), ".quanta", "usage.jsonl")
+    const path = join(prefsHome(ctx), ".quanta", "usage.jsonl")
     if (!existsSync(path)) {
       ctx.out("(no usage recorded yet)\n")
       return 0

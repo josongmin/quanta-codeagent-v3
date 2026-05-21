@@ -1,0 +1,34 @@
+id: conversation-action-steering
+title: ConversationAction — typed mid-turn user action oneof (5-arm)
+section: 1
+subsystem: 미드턴 스티어링 — 타입드 액션 대수 (Cursor 흡수, ADR-0071)
+order: 71
+maturity: L3
+status: new
+purpose: |
+  Cursor ConversationAction oneof 흡수 — 기존 단일 free-text SteerRequest 위에 5-arm 타입드
+  액션 레이어를 PURE + ADDITIVE + DEFAULT-OFF로 적층. ConversationAction = user_message{prepend[]}
+  / cancel{reason} / cancel_subagent{subagent_id} / summarize / resume. 핵심 신규 능력은
+  **cancel_subagent** — 부모 턴을 unwind하지 않고 자식 subagent 하나만 취소 (기존 cancel은 항상
+  턴 전체 unwind). ActionOutcome = accepted_injection{injection} | accepted_control{action} |
+  rejected{reason, rejectedAt}. ActionRejectionReason은 SteerRejectionReason 재사용 +
+  control_turn_mismatch + not_interrupted + unknown_subagent. ControlExpectation.expectedTurnId
+  opt-in optimistic-concurrency. decideAction은 caller-supplied clock으로 Date.now() 미호출
+  (ADR-0030 미러). steer()는 user_message 경로의 정식 구현으로 byte-identical 유지.
+evidence:
+  code: [src/agent/conversation-action.ts, src/agent/steering.ts]
+  adrs: [71]
+  tests:
+    unit: [tests/unit/agent/conversation-action.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    decideAction + 5-arm 액션 union + 거부 사유 + ControlExpectation은 순수 모듈로 완성+테스트.
+    loop가 surface-supplied ConversationAction을 소비하고 accepted_control의 side effect를
+    실행(cancel_subagent는 자식만 취소, 부모 턴 계속)하는 통합은 follow-up.
+  promotion_path: |
+    loop가 ActiveTurnState를 생성해 decideAction을 호출하고 cancel_subagent를 ADR-0011
+    subagent registry에 매핑해 named child만 abort하면 L4.
+notes: 'steer()/SteerRequest/SteerOutcome/SteerRejectionReason 전부 byte-identical 무변경 — user_message 경로는 기존 구현에 delegate (재구현 아님). cancel_subagent의 unknown_subagent 거부는 shape 검증만 (registry 조회는 loop 책임).'

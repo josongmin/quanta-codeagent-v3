@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
 import * as readline from "node:readline/promises"
-import { type AgentOutcome, RetryingLLM, runAgent, saveSession } from "@/agent"
+import { type AgentOutcome, buildSystemPrompt, RetryingLLM, runAgent, saveSession } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
@@ -21,6 +21,7 @@ import {
   loadFeatures,
   newSessionFlag,
   observeDir,
+  pickPersona,
   pickProvider,
   resolveResume,
   type SessionDeps,
@@ -266,11 +267,16 @@ const main = async (): Promise<void> => {
   // Built AFTER the resume block so a resumed `sessionId` is captured (the
   // store-gated branch in assembleConfig must see the post-resume id, exactly
   // as the prior call-time closure did).
+  // System prompt is built here (instead of inside `assembleConfig`) so the
+  // pure composition module stays env-free; the persona is resolved via
+  // `pickPersona()` which reads the env at the composition root.
+  const system = buildSystemPrompt(cwd, { persona: pickPersona() })
   const sessionDeps: SessionDeps = {
     llm: finalLLM,
     registry,
     stream,
     permission,
+    system,
     cwd,
     maxTurns,
     signal: abort.signal,

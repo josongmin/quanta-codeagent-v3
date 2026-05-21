@@ -1,0 +1,33 @@
+id: persona-slot
+title: Persona slot — Codex {{ personality }} Handlebars absorption
+section: 1
+subsystem: 시스템 프롬프트 — 페르소나 enum (Codex absorption, ADR-0068)
+order: 70
+maturity: L3
+status: new
+purpose: |
+  Codex Desktop base_instructions의 `{{ personality }}` Handlebars 슬롯 흡수. 3-arm 닫힌
+  enum PersonaKind = default | friendly | pragmatic. `default`는 빈 본문(byte-identical
+  pre-ADR 프롬프트, 모든 snapshot/prefix-cache hit 보존). 비-default 본문은 톤 가이드 + 마지막
+  guardrail 라인(honesty/evidence/trust ladder에 톤 재바인딩 — friendly가 hedging으로,
+  pragmatic이 curt-and-wrong으로 미끄러지는 것 방지). resolvePersona는 QUANTA_PERSONA env
+  를 closed equality-check (silent fallback 금지 — 미지값은 PersonaInvalidError throw).
+  buildSystemPrompt(_cwd?, { persona }) seam으로 1회 resolve 후 베이스 프롬프트에 베이크
+  (mid-session 전환은 v1 범위 밖 — prefix-cache re-prefill 회피).
+evidence:
+  code: [src/agent/persona.ts, src/agent/prompt.ts]
+  adrs: [68]
+  tests:
+    unit:
+      - tests/unit/agent/persona.test.ts
+      - tests/unit/prompt-system.test.ts
+    integration: []
+    contract: []
+knobs: [QUANTA_PERSONA]
+deliberate_hold:
+  reason: |
+    enum + 본문 + resolver + prompt 합성은 완성+테스트. /persona 슬래시 커맨드나
+    SetPersonality 런타임 이벤트(Codex) 미배선 — REPL 시작 시 env로만 선택.
+  promotion_path: |
+    REPL 슬래시 명령으로 세션 내 전환(prefix-cache invalidation 비용 명시)을 wire하면 L4.
+notes: 'Codex personality_default/friendly/pragmatic 3-element catalog를 1:1 흡수. friendly = collaborative partner ("we"/"let'\''s"); pragmatic = terse engineering register. default-OFF / byte-identical (RFC §1.2).'

@@ -1,0 +1,36 @@
+id: review-kind-matrix
+title: ReviewKind × isExecutionBlocking × reason_code matrix + scoped-allowlist verbs
+section: 3
+subsystem: HITL 게이트 — 무엇을 리뷰하는가 축 (Cursor 흡수, ADR-0070)
+order: 62
+maturity: L3
+status: new
+purpose: |
+  Cursor approval gate의 타입드 매트릭스 흡수 — quanta 권한 레이어에 "무엇을 리뷰하는가" 축
+  추가. HITLTier(ADR-0020 — 행위 risk 형상)와 ReviewerTier(ADR-0029 — 누가 결정)와 직교.
+  ReviewKind = edit | delete | terminal | mcp | web_fetch | web_search | plan + ALL_REVIEW_KINDS.
+  isExecutionBlocking(kind) — **plan만 false** (계획 제시는 advisory, 턴 정지 불필요), 나머지
+  6개는 실행 게이트. ReasonCode 닫힌 union(`<kind>.needs_approval` ×7) + reasonCodeFor + 전체
+  array. ReviewDecision discriminated union 6-arm: run / skip / allowlist_commands{commands} /
+  allowlist_tool{server, tool} / allowlist_domain{domain} / reject_and_tell{message} —
+  reject_and_tell은 steering seam으로 모델에 사유 되먹임(Cursor REJECT_AND_TELL_WHAT_TO_DO_
+  DIFFERENTLY 흡수). stopCategoryFor(kind) → {stopCategory:"needs_user_approval", reasonCode}
+  로 ADR-0073 StopCategory matrix와 합성. isDecisionLegalFor(kind, decision)으로 verb×kind
+  합법성 검사 — allowlist_commands⇒terminal, allowlist_tool⇒mcp, allowlist_domain⇒web_*.
+evidence:
+  code: [src/permission/review-kind.ts]
+  adrs: [70]
+  tests:
+    unit: [tests/unit/permission/review-kind.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    ReviewKind union + isExecutionBlocking + ReviewDecision verbs + stopCategoryFor 매핑은
+    PURE 모듈로 완성+테스트. evaluate/evaluateStack/reviewAction에서 이를 호출하는 caller
+    배선은 follow-up — 현재는 opt-in seam만 노출.
+  promotion_path: |
+    HITL UI가 ReviewDecision verbs를 surface하고 reject_and_tell의 message를 steering
+    seam(ADR-0030/0071)으로 라우팅하면 L4.
+notes: 'PLAN non-blocking 의미는 plan posture(ADR-0063)와 직교 — plan-exit는 plan posture 종료 방식, ReviewKind.plan은 plan 자체에 대한 리뷰 신호. allow/ask/deny 3-state PermissionDecision은 무변경 — 본 매트릭스는 그 위에 얹는 add-on seam.'

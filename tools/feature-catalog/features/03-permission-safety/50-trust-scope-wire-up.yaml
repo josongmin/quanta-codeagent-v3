@@ -1,0 +1,35 @@
+id: trust-scope-wire-up
+title: Trust-scope registry wire-up (Phase C) — persistent grant memory ask-skip
+section: 3
+subsystem: HITL 게이트 — 그랜트 기억 / ask-skip (ADR-0050)
+order: 50
+maturity: L3
+status: new
+purpose: |
+  TrustScope enum(always_allow | project | workspace | session | once_only | deny)을 위한
+  in-memory registry + admissibility-gate 단일 wire-up. Phase A에서 enum, Phase B에서 registry
+  스케치 후 caller가 없었는데 Phase C가 runModePolicy의 ask 브랜치에서 onConfirm 호출 직전에
+  registry.hasGrant(projectKey, { tool }) 조회로 ask를 단락. once_only는 hasGrant 내부에서
+  positive-and-consume(게이트는 if 1중첩 유지). deny-scoped grant는 ask-skip으로 취급하지 않음 —
+  registry POSITIVE_SCOPES set이 deny 제외. AgentConfig.trustScope?: { registry, projectKey }
+  미설정 시 byte-identical(레거시 onConfirm 경로 그대로). always-confirm tier는 의도적으로
+  short-circuit 안 함(이 tier의 핵심이 batch-approval 우회).
+evidence:
+  code:
+    - src/permission/trust-scope.ts
+    - src/agent/admissibility-gate.ts
+  adrs: [50]
+  tests:
+    unit: [tests/unit/permission/trust-scope-wire.test.ts]
+    integration: [tests/integration/trust-scope-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    registry + gate 1-line wire-up + once_only 소비 + 6-scope enum 완성+테스트. 실제 grant
+    제스처(UI "always allow project"/"workspace"/"session" 버튼)와 영속 store(파일/SQLite)
+    backed registry는 surface 책임 — follow-up.
+  promotion_path: |
+    file-backed/sqlite registry + CLI/Tauri UI에서 grant verb를 노출하고 explicit deny path
+    까지 wire하면 L4.
+notes: '@/permission 슬라이스 격리 유지: trust-scope.ts는 @/agent import 0, gate는 type-import만. RFC §1.2 default-OFF byte-identical 보장.'

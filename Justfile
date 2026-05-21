@@ -14,25 +14,38 @@ set shell := ["bash", "-uc"]
 
 BUN := env_var_or_default("BUN", "/Users/songmin/.bun/bin/bun")
 CLI := "src/apps/cli/index.ts"
+# Default provider for `just cli` / `just once`. Override per-invocation:
+#   PROVIDER=anthropic just cli      # one-off Anthropic
+#   just cli-anthropic               # alias
+PROVIDER := env_var_or_default("PROVIDER", "openai")
+# Default OpenAI model. The adapter (`src/llm/adapters/openai.ts`) detects the
+# GPT-5 family via `usesCompletionTokensParam` and auto-routes to
+# `max_completion_tokens` — no extra config needed. Override per-invocation:
+#   MODEL=gpt-4o just cli
+MODEL := env_var_or_default("MODEL", "gpt-5")
 
 # Default recipe: show the recipe list.
 default:
     @just --list
 
-# Tikitaka REPL — interactive multi-turn conversation. Pass an optional
-# positional prompt to short-circuit into one-shot mode.
+# Tikitaka REPL — interactive multi-turn conversation. OpenAI + gpt-5 by
+# default; override with `PROVIDER=anthropic` and/or `MODEL=...`. Pass an
+# optional positional prompt to short-circuit into one-shot mode.
 cli *args:
-    {{BUN}} run {{CLI}} {{args}}
+    QUANTA_LLM_PROVIDER={{PROVIDER}} QUANTA_MODEL={{MODEL}} {{BUN}} run {{CLI}} {{args}}
 
 # One-shot prompt with edits auto-approved (safer default for non-interactive).
 once prompt:
-    QUANTA_PERMISSION=acceptEdits {{BUN}} run {{CLI}} {{quote(prompt)}}
+    QUANTA_LLM_PROVIDER={{PROVIDER}} QUANTA_MODEL={{MODEL}} QUANTA_PERMISSION=acceptEdits {{BUN}} run {{CLI}} {{quote(prompt)}}
 
-# Force OpenAI provider (env override).
+# Explicit OpenAI alias — same as `just cli` when PROVIDER isn't overridden.
+# Honors the `MODEL` env (defaults to gpt-5).
 cli-openai *args:
-    QUANTA_LLM_PROVIDER=openai {{BUN}} run {{CLI}} {{args}}
+    QUANTA_LLM_PROVIDER=openai QUANTA_MODEL={{MODEL}} {{BUN}} run {{CLI}} {{args}}
 
-# Force Anthropic provider (env override).
+# Force Anthropic provider. Deliberately does NOT pass `MODEL` (gpt-5 would
+# 404 on Anthropic) — uses the CLI's anthropic default model unless you set
+# `QUANTA_MODEL=claude-...` explicitly.
 cli-anthropic *args:
     QUANTA_LLM_PROVIDER=anthropic {{BUN}} run {{CLI}} {{args}}
 

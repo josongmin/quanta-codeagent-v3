@@ -1,0 +1,30 @@
+id: sectioned-system-prompt
+title: 4-section system prompt + per-section cache_control breakpoints
+section: 1
+subsystem: 시스템 프롬프트 — 4-section cache (Claude Desktop 흡수, ADR-0051)
+order: 51
+maturity: L4
+status: new
+purpose: |
+  Claude Desktop 1.7196.3의 systemPromptSectionCache 패턴 흡수 — 30-50 KiB 단일 cached
+  SystemBlock 대신 base + project_md + session_ctx + user_append 4-section named/byte-stable
+  분할로 각 section에 cache_control breakpoint 부여(Anthropic 4-breakpoint cap에 정확히 맞춤).
+  CLAUDE.md(project) / ~/CLAUDE.md(user-supplied prefix)가 바뀌어도 전체 prefix invalidate 없이
+  trailing 영향 section만 재계산 — base는 영구 warm. 신규 모듈 src/agent/prompt-sections.ts +
+  MAX_CACHE_BREAKPOINTS=4, PromptSection{name,text,cache}, buildSectionedSystemBlocks,
+  defaultPromptSections(legacy 1-section), fourSectionPreset(빈 input은 collapse — 빈 블록 없음),
+  validateSectionsCacheBudget(fail-soft). buildTurnContext가 repoRules.body / sessionCtx /
+  userAppend 중 하나라도 non-empty면 4-section 자동 활성, 셋 다 없으면 byte-identical 단일
+  SystemBlock(레거시 caller prefix 1바이트도 변하지 않음).
+evidence:
+  code:
+    - src/agent/prompt-sections.ts
+    - src/agent/prompt.ts
+  adrs: [51]
+  tests:
+    unit: [tests/unit/agent/prompt-sections.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'ADR-0003(단일 cached prefix) 위에 얹는 add-only 확장 — 4-section 미활성 path는 byte-identical. dynamic reminder의 repoRules trailing <system-reminder> 블록은 의도적 중복(static section과 동적 reminder는 다른 cache 정책).'

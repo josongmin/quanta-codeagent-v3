@@ -170,14 +170,120 @@ the next LLM call. One-shot — cleared after injection.
 ## Verification
 - `tsc --noEmit` clean
 - `biome check src/agent tests/unit src/llm` exit 0
-- New unit tests:
-  - `recovery.test.ts` ADR-0076 block (4 cases, refusal terminal, no
-    budget consumption, byte-identical for non-refusal)
-  - `assemble-thinking.test.ts` + adapter thinking emit (≥35 cases)
+- **Baseline tests** (Gap-1/2/4 happy-path + key edges): 98 pass / 0 fail / 170 expects
+  - `recovery.test.ts` ADR-0076 block (4 cases: refusal terminal, no budget
+    consumption, byte-identical for non-refusal, tool blocks ignored)
+  - `assemble-thinking.test.ts` + `anthropic-thinking.test.ts` +
+    `openai-thinking.test.ts` (44 cases — ThinkingBlock assembly, signature
+    carry-over, redacted variant, OpenAI signature-never invariant,
+    end-to-end roundtrip)
   - `confirm-decision.test.ts` + `admissibility-deny-steer.test.ts`
-    (≥30 cases)
-- E2E smoke (`tests/smoke/`): a planted-refusal scenario must finish
-  with `reason:"error"`, not `reason:"completed"`.
+    (~52 cases — boolean byte-identical, union round-trip, malformed →
+    ConfirmDecisionError, deny_and_steer steerInjection emit at gate)
+- **Hell-gate tests** (181 pass / 0 fail / 260 expects across 6 files): see §Hell-gate below.
+- **E2E smoke** (`tests/smoke/`): two scenarios — `14-refusal-handled`
+  (text refusal → `reason:"error"`) and `15-refusal-mid-tool` (tool_use
+  block in same turn as refusal → still `reason:"error"`, malicious
+  command never executes). Both PASS in `bun run smoke` (15 total smoke
+  fixtures pass, 0 regression vs pre-ADR baseline).
+
+## Hell-gate (181 adversarial cases across 6 files)
+
+Six dedicated `*-hell.test.ts` files pin attack vectors, edge cases,
+and the partial-wiring guard:
+
+| File | Cases | Focus |
+|---|---:|---|
+| `tests/unit/recovery-hell.test.ts` | 30 | refusal × tool_use, ThinkingBlock, case-variants (`Refusal`/`REFUSAL`/`refused`/`blocked` → fall-through), priority vs max_tokens/empty, `pause_turn`/`content_filtered`/`guardrail_intervened` as NI #2 dead-branch sentinels, budget non-consumption |
+| `tests/unit/llm/assemble-thinking-hell.test.ts` | 27 | signature_delta without preceding thinking_delta, stream_reset mid-thinking, multi-block ordering, redacted+non-redacted mixing, 10MB thinking, signature concat, empty signature behavior PIN |
+| `tests/unit/llm/anthropic-thinking-hell.test.ts` | 21 | SSE→StreamEvent edge cases, redacted_thinking start as 1-shot redacted delta, wire-faithful carry-over with `{type:"thinking", thinking, signature}` / `{type:"redacted_thinking", data}`, large signature (4KB), non-ASCII signature, cache_control anchor regression |
+| `tests/unit/llm/openai-thinking-hell.test.ts` | 21 | `reasoning`/`reasoning_content` prefer-canonical, **`signature_delta` NEVER emitted** (NI #4 invariant), ThinkingBlock auto-drop on assistant input serialization, `content_filter` finish_reason last-wins behavior PIN |
+| `tests/unit/agent/confirm-decision-hell.test.ts` | 55 | malformed unions (null/undefined/number/string/Symbol/Promise/Array), prompt-injection in steer (`</tool_result>`, fake system tags) preserved verbatim, control-chars/newlines/100KB steers, prototype-pollution PIN, ConfirmDecisionError.field debug carry |
+| `tests/integration/admissibility-deny-steer-hell.test.ts` | 27 | multi-tool deny_and_steer collection, HARD_DENY > deny_and_steer precedence, mode-block precedence, sticky-denial precedence, **G-1 ~ G-1d regression guard** (see §Partial-wiring guard below) |
+
+**Total: 181 cases / 260 expects / 0 fail.**
+
+## Partial-wiring guard (G-1 ~ G-1d — Gap-4 critical)
+
+The self-audit confirmed `admissibility-gate.ts` emits
+`DispatchResult.steerInjection` on `deny_and_steer`, but **the loop
+does not yet consume it** — `streaming-dispatch.ts:369`
+(`collectResultBlocks`) pushes `res.value.block` only, dropping
+`steerInjection`. This is a deliberate deferral (see §Trade-offs and the
+Integration-seam patch below), but a silent drift to "wired everywhere
+but the consumer" would be invisible without a structural guard.
+
+`admissibility-deny-steer-hell.test.ts §G` pins the state of the wiring
+across the dispatch chain by file-grep, so the partial-wiring boundary
+is observable as a test invariant:
+
+- **G-1** asserts `readFileSync("src/agent/loop.ts").match(/steerInjection/g) === null`
+- **G-1b** asserts the same for `src/agent/dispatch.ts`
+- **G-1c** asserts the same for `src/agent/streaming-dispatch.ts`
+- **G-1d** asserts `src/agent/admissibility-gate.ts` contains exactly ONE
+  positive `steerInjection: steer` assignment (positive control —
+  proves the emit seam exists where the ADR promises)
+
+**Drift-detection contract**: the moment a PR lands that wires
+`steerInjection` into the loop's consumer side, G-1/G-1b/G-1c will
+fail. The PR author MUST then update or delete the guard with an
+explicit migration comment — silent partial-wiring is structurally
+impossible.
+
+## Newly discovered invariants (PINNED, not yet hardened)
+
+Three behaviors the hell-gate suite revealed and PINNED as
+regression tests. They are NOT bugs to fix in this ADR; they are
+documented quirks future hardening can address — the PIN means the
+hardening change is observable as a test diff.
+
+1. **Empty-string signature in `signature_delta`** — `assemble.ts`
+   sets `ThinkingBlock.signature = ""` when an empty
+   `signature_delta` arrives. The Anthropic adapter's carry-over guard
+   checks only `signature === undefined`, so `signature: ""` flows to
+   the wire. A provider rejection here would manifest as a runtime
+   400. Test `H-3c` PINs the current behavior; a future hardening
+   adding `signature.trim() === ""` guard will surface as the H-3c
+   diff.
+2. **Prototype-pollution `__proto__:{decision:"allow"}`** —
+   `normalizeConfirm` currently uses `'decision' in obj`, which walks
+   the prototype chain. The polluted object passes as
+   `{decision:"allow"}`. Test `C-10` PINs this. Hardening to
+   `Object.hasOwn(obj, "decision")` would flip C-10 to throw — a
+   conscious decision flag.
+3. **OpenAI `processChunk` finish_reason last-wins** — a trailing
+   `finalChunk()` can overwrite an earlier `content_filter`
+   finish_reason. The `openai-thinking-hell.test.ts` `content_filter`
+   case PINs this. A future change to preserve abnormal finish_reasons
+   over trailing benign chunks will surface as a diff there.
+
+## Integration-seam follow-up patch (Gap-4 wiring — separate PR)
+
+The exact minimal patch to consume `steerInjection`, ready to apply
+when `loop.ts`/`streaming-dispatch.ts` are quiescent:
+
+1. `streaming-dispatch.ts` `collectResultBlocks`: return
+   `{ resultBlocks, steerInjections: readonly string[] }` instead of
+   `ResultBlocks`. Push `res.value.steerInjection` (when present) into
+   the second array.
+2. `streaming-dispatch.ts` `StreamingTurnResult.assembled`: add
+   `steerInjections?: readonly string[]`.
+3. `streaming-dispatch.ts` `streamingTurn` last `return`: include
+   `steerInjections` in the `assembled` payload.
+4. `loop.ts` (`TurnResult` propagation around line 1119): after
+   `wm.append({ role: "user", content: result.resultBlocks })`, for
+   each non-empty `steerInjection` append a
+   `metaUser(steer)` so the next LLM call sees the steer as a user
+   message. Mark with the `origin="deny_steer"` reminder tag if
+   present (Cursor `is_simulated_msg` alignment).
+5. Delete G-1/G-1b/G-1c (partial-wiring guard) and replace with a
+   positive consumption-side test in `admissibility-deny-steer-hell.test.ts`
+   asserting `wm` contains the steer text after a `deny_and_steer`
+   turn.
+
+When this PR lands, the seven negative-invariant section's NI #5
+("`steerInjection` is a one-shot") becomes enforceable at the loop
+level, not just at the test level.
 
 ## Related
 - ADR-0030 mid-turn steer (steer primitive — `deny_and_steer` reuses)

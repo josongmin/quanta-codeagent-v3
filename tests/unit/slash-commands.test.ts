@@ -34,6 +34,11 @@ const buildCtx = (
       },
       cwd,
       prefsPath,
+      // `/usage` reads `prefsHome/.quanta/usage.jsonl`. Inject the per-test
+      // tmp dir explicitly via the SlashContext seam so isolation does not
+      // depend on `process.env.QUANTA_PREFS_HOME` mutation surviving past
+      // `runtimeConfig()`'s validate-once snapshot (#6 runtime-config SSOT).
+      prefsHome: cwd,
       sleep: sleepImpl,
     },
   }

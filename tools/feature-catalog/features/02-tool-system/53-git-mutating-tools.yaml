@@ -1,0 +1,32 @@
+id: git-mutating-tools
+title: git_commit + git_branch_switch — 1급 mutating git tools with WIP checkpoint
+section: 2
+subsystem: 도구 — git mutating 1급화 (Claude Desktop commitWipForBranchSwitch 흡수, ADR-0053)
+order: 53
+maturity: L4
+status: new
+purpose: |
+  Claude Desktop 1.7196.3의 commitWipForBranchSwitch 패턴 흡수 — git push/commit/checkout을
+  bash 통과 + always-confirm 일괄 게이팅하던 구조에서 도구 단위로 1급화. (1) git_commit({
+  message?, mode?, paths? }) — mode="regular"(default)는 message 필수 + add + commit -m,
+  hitlTier="always-confirm"(push 가능한 영구 commit). mode="wip"은 message 생략 시 `wip: <ISO>`
+  자동 생성 + all-files staged + hooks 통과(--no-verify 안 함), hitlTier="pre-approval-ok"
+  (세션 경계 reversible 체크포인트, trust-scope eligible). isReadOnly()=false /
+  isConcurrencySafe()=false. (2) git_branch_switch({ target, autoWip? }) — autoWip true 시
+  dirty tree를 wip commit으로 체크포인트한 후 switch(stash 잊기 방지), false면 일반 checkout.
+  ADR-0025(read-only git 1급)는 무변경 — mutating만 분리해 1급화.
+evidence:
+  code:
+    - src/tool/git/commit.ts
+    - src/tool/git/branch-switch.ts
+    - src/tool/git/_shared.ts
+  adrs: [53]
+  tests:
+    unit:
+      - tests/unit/tool/git-commit.test.ts
+      - tests/unit/tool/git-branch-switch.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'HITL 4-tier(ADR-0020) 정착으로 도구별 hitlTier() 분기가 안전해진 후 진행. ADR-0044(negative invariants)와 정합 — bash GIT_PREFIX 매칭은 mutating 1급 도구 등록 후 우회 가능성 검토 필요(별도 마이그레이션).'

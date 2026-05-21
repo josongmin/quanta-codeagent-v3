@@ -29,6 +29,8 @@ import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
 import { logger, type RunContext } from "@/shared"
 import { JsonlRecorder, StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { defaultTools, gitTools, type Tool, ToolRegistry } from "@/tool"
+import type { Tooling } from "./config-assemble"
+import { isPathLikeToken } from "./resume"
 
 /**
  * ADR-0024 (export-gap closure): CLI `internal.ts` is the home of all

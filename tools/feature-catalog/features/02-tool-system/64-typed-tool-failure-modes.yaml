@@ -1,0 +1,36 @@
+id: typed-tool-failure-modes
+title: ToolFailure discriminated union — 5-mode typed per-failure-mode results
+section: 2
+subsystem: 도구 결과 — 타입드 실패 사유 (Cursor EditResult/ShellResult 흡수, ADR-0069)
+order: 64
+maturity: L3
+status: new
+purpose: |
+  Cursor EditResult/ShellResult의 discriminated failure union 흡수 — 기존 ok:false 도구 결과의
+  output 문자열을 모델이 정규식으로 재파싱하던 부담을 닫힌 enum으로 대체. ToolResult.failure?:
+  ToolFailure 옵셔널 필드 추가(없으면 byte-identical). mode가 discriminant:
+  not_found{path?} / permission_denied{path?, isReadonly?} / rejected{reason} /
+  timeout{timeoutMs?} / error{modelVisibleError?, clientVisibleError?}. isReadonly 분리로
+  "모드만 바꾸면 되는 거부"와 "진짜 권한 거부"를 모델이 분기 가능 (Cursor is_readonly). error
+  변종은 model-visible vs client-visible을 분리해 컨텍스트 오염 없이 운영 디버깅 정보 보존.
+  DispatchResult.failure는 ToolResult.failure가 있을 때만 통과(없으면 omit), ok/block/preview
+  파생 무변경.
+evidence:
+  code:
+    - src/tool/types.ts
+    - src/agent/dispatch-types.ts
+    - src/agent/dispatch.ts
+  adrs: [69]
+  tests:
+    unit: [tests/unit/agent/tool-failure-mode.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    ToolFailure 5-variant union + dispatch 통과 경로는 완성+테스트. v3 도구(read/edit/scripted_replace
+    등)가 실제 ok:false 경로에서 failure 필드를 populate하는 도구별 마이그레이션은 follow-up.
+  promotion_path: |
+    read 미존재 파일 / edit "old_string not found" / FsJail 거부 / HITL deny / timeout 각각의
+    도구가 failure를 채우고 prompt rule이 mode별 분기 가이드를 인용하면 L4.
+notes: 'ToolEvent 변종이 아닌 ToolResult.failure 필드로만 구현 — 새 이벤트 추가 시 event.type switch 하는 기존 호출부의 narrowing이 깨지는 회귀(deferred 흡수와 동일 회피). default-OFF byte-identical (RFC §1.2).'

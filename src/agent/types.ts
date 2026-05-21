@@ -65,7 +65,12 @@ export interface PreCompactRequestQuery {
  */
 export type PreCompactDecision = "approve" | "defer_one_turn" | "force_now"
 
-export interface AgentConfig {
+// AgentConfig `extends` the three cohesion groups defined at the BOTTOM of
+// this file (SafetyConfig / PermissionExtrasConfig / SteeringConfig).
+// Declaration-merging keeps every field shape byte-identical to consumers;
+// the inheritance documents the grouping and lets each subsystem take a
+// narrow slice as its parameter type (audit #1).
+export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, SteeringConfig {
   llm: LLMPort
   registry: ToolRegistry
   stream: StreamPort
@@ -424,3 +429,64 @@ export interface AgentOutcome {
    */
   stopCategory?: StopCategory
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// AgentConfig cohesion groups (Round-3 audit #1 — additive seam).
+// AgentConfig `extends` these so the flat field set on the public type is
+// byte-identical (consumers reading `config.verifyGuard` etc. are unchanged),
+// but each subsystem can now take the narrow slice it actually needs as its
+// parameter type — turning the 53-field god-config into a documented
+// composition of cohesive sub-configs without a breaking restructure.
+//
+// Field types here MUST stay byte-identical to the AgentConfig body
+// declarations above; declaration-merging requires identical signatures.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Safety / guard knobs. Each member is default-OFF when absent. */
+export interface SafetyConfig {
+  compactionBreaker?: { disabled?: boolean; caps?: Partial<CompactionBreakerCaps> }
+  verifyGuard?: { maxTrips?: number }
+  closeoutGuard?: { enabled?: boolean; fourRule?: boolean }
+  dedupGate?: DedupGate
+  dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }
+}
+
+/** Permission-stack add-ons orthogonal to the core {@link AgentConfig.permission}
+ *  context. Each is default-OFF. */
+export interface PermissionExtrasConfig {
+  hitl?: { enabled?: boolean }
+  trustScope?: { registry: TrustScopeRegistry; projectKey: string }
+  permissionStack?: { enabled?: boolean; hostId?: string }
+  permissionPatternStore?: PatternGrantStore
+  permissionAllowDangerous?: boolean
+}
+
+/** Mid-turn steering wiring (ADR-0030). Default-OFF when absent. */
+export interface SteeringConfig {
+  activeTurnRef?: { current: ActiveTurnState }
+  steerBarrier?: () => Promise<void>
+}
+
+/** Narrow contract for {@link runAdmissibilityGate} — Round-3 audit #9
+ *  ("feature envy on AgentConfig"). The gate reads exactly these fields;
+ *  taking the narrow type instead of the whole `AgentConfig` documents the
+ *  surface and prevents accidental growth. `AgentConfig` is assignable to
+ *  it, so existing callers (`dispatch.ts`) need no change. */
+export type AdmissibilityGateConfig = Pick<
+  AgentConfig,
+  | "cwd"
+  | "hitl"
+  | "hooks"
+  | "mode"
+  | "onConfirm"
+  | "onHandoff"
+  | "permissionAllowDangerous"
+  | "permissionPatternStore"
+  | "permissionStack"
+  | "planMode"
+  | "registry"
+  | "run"
+  | "sessionId"
+  | "trustScope"
+>
+

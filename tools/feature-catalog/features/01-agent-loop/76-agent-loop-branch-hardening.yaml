@@ -1,0 +1,59 @@
+id: agent-loop-branch-hardening
+title: Agent-loop branch hardening — refusal / thinking carry-over / deny-and-steer
+section: 1
+subsystem: 턴 라이프사이클 — branch 가드 (gap analysis, ADR-0076)
+order: 76
+maturity: L3
+status: new
+purpose: |
+  docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent
+  loop의 4개 결함 중 3개 shipped + 1개 deferred. Gap-1 — Provider refusal/abnormal stop:
+  decideOnAssembled에 stopReason==="refusal" 신규 브랜치(max_tokens / tool_use / empty 앞)
+  → terminal {do:"error", reason:"Model refused to continue …"}, outputContinues /
+  malformedRetries / consecutiveEmpties 미소비. pre-ADR fall-through는 refusal 텍스트를 정상
+  completion으로 위장(가장 ROI 높은 fix). pause_turn / content_filtered / guardrail_intervened는
+  dead code 회피 — 서버 도구 / Bedrock guardrail 흡수 시 재평가. Gap-2 — Reasoning/thinking
+  carry-over: StreamEvent에 thinking_delta + signature_delta 추가, assembleFromEvents가
+  연속 delta를 1 ThinkingBlock으로 fold + signature를 last ThinkingBlock에 부착, 어시스턴트
+  메시지 prepend로 provider order(thinking before text/tool_use) 보존. Anthropic SSE / OpenAI
+  reasoning summary 어댑터 emit. multi-turn carry-over는 자동 — ThinkingBlock이 메시지에 타고,
+  wm.append → 다음 턴 StreamInput.messages → 어댑터가 wire 형식으로 재직렬화. Gap-4 —
+  deny_and_steer verb: ConfirmDecision discriminated union {allow|deny|deny_and_steer{steer}}
+  + AgentConfig.onConfirm 시그니처 확장 + normalizeConfirm bridge(boolean ↔ ConfirmDecision,
+  레거시 caller byte-identical). admissibility-gate의 always-confirm 브랜치가 deny_and_steer
+  시 deny DispatchResult를 emit하면서 steer를 result envelope steerInjection?: string에 attach.
+  Gap-3 — Submission op dispatcher: 6-variant union shape는 존재하나 entry-point 분기는 deferred
+  (loop.ts 동시 co-development 회피).
+evidence:
+  code:
+    - src/agent/loop.ts
+    - src/agent/confirm-decision.ts
+    - src/agent/admissibility-gate.ts
+    - src/agent/types.ts
+    - src/llm/types.ts
+    - src/llm/assemble.ts
+    - src/llm/adapters/anthropic.ts
+    - src/llm/adapters/openai.ts
+  adrs: [76]
+  tests:
+    unit:
+      - tests/unit/anthropic-thinking-delta.test.ts
+      - tests/unit/llm/anthropic-thinking.test.ts
+      - tests/unit/llm/openai-thinking.test.ts
+      - tests/unit/llm/assemble-thinking.test.ts
+      - tests/unit/agent/confirm-decision.test.ts
+    integration: [tests/integration/admissibility-deny-steer.test.ts]
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Gap-1 / Gap-2 / Gap-4는 모두 shipped + 테스트. Gap-3(Submission op dispatcher의 loop
+    entry-point 분기 — interrupt → AbortController.abort, cancel_subagent →
+    conversation-action.decideAction, reload_user_config → 턴 경계 재로드, shutdown →
+    graceful close)은 loop.ts 동시 작업 충돌 회피로 deferred. deny_and_steer의 loop
+    steerInjection consumer(다음 턴 user message로 hand)는 ADR-0076 §Integration seam
+    기술됐으나 미배선(Gap-3 dispatch refactor에 dependency).
+  promotion_path: |
+    loop.ts quiescent 시 Submission op dispatcher entry-point 분기를 추가하고 steerInjection을
+    next-turn user message로 consume하면 L4.
+notes: 'tikitaka 14-refusal-handled smoke fixture로 Gap-1 end-to-end 회귀 가드. ThinkingBlock의 wire 재직렬화는 Anthropic signature / OpenAI re-encode 양쪽 어댑터 contract test로 보장.'

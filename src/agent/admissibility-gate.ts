@@ -60,7 +60,7 @@ import type { DispatchResult } from "./dispatch-types"
 import type { HandoffRequiredEvent, HitlTier } from "./hitl-tier"
 import { type HitlAnnotation, resolveHitlAnnotation } from "./hitl-tier-registry"
 import { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
-import type { AgentConfig } from "./types"
+import type { AdmissibilityGateConfig } from "./types"
 
 export interface AdmissibilityAction {
   tool: string
@@ -138,7 +138,7 @@ const reviewerTag = (reviewer: ReviewerTier): string =>
  */
 const reviewAndDecide = async (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
   opts: AdmissibilityWaveAOptions,
   origin: "rule" | "hitl",
@@ -189,7 +189,7 @@ const reviewAndDecide = async (
 /** Emit pre_tool_use hook, returning a hook-denied result or null to proceed. */
 const runPreToolUseHook = async (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
 ): Promise<DispatchResult | null> => {
   if (!config.hooks) return null
   const hookDeny = await config.hooks.emit({
@@ -209,7 +209,7 @@ const runPreToolUseHook = async (
  *  registry can ESCALATE the tier (one-way ratchet) but never relax
  *  `hand-off-required`. */
 const resolveHitlTier = (
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   call: ToolUseBlock,
   action: AdmissibilityAction,
 ): { tier: HitlTier; matched: HitlAnnotation | undefined } => {
@@ -227,7 +227,7 @@ const resolveHitlTier = (
  *  callback is wrapped in a try/catch so a host-side bug never propagates
  *  into dispatch — emission MUST NOT change the deny result. */
 const emitHandoffEvent = (
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   call: ToolUseBlock,
   handoffMessage: string,
   reason: string,
@@ -257,7 +257,7 @@ const emitHandoffEvent = (
  *  complexity stays under the project cap. */
 const buildHandoffDeny = (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   matched: HitlAnnotation | undefined,
 ): DispatchResult => {
   const suffix = matched?.reason !== undefined ? ` (${matched.reason})` : ""
@@ -306,7 +306,7 @@ const denyFromConfirm = (
  *  so the parent gate stays under the cognitive-complexity cap. */
 const runAlwaysConfirmBranch = async (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
 ): Promise<DispatchResult | null> => {
   if (!config.onConfirm) {
@@ -347,7 +347,7 @@ const runAlwaysConfirmBranch = async (
  */
 const runHitlGate = async (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
 ): Promise<DispatchResult | null | "fallthrough"> => {
   // HARD_DENY hits ARE the hand-off-required tier (security boundary crossing
@@ -380,7 +380,7 @@ const runHitlGate = async (
  */
 const runPermissionStack = (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   permission: PermissionContext,
   action: AdmissibilityAction,
   opts: { store?: PermissionStore } = {},
@@ -421,7 +421,7 @@ const runPermissionStack = (
  *  OFF: returns false unless `config.trustScope` is set AND the registry
  *  confirms a positive grant for `(projectKey, action.tool)`. The registry
  *  owns once_only consumption; the gate never branches on scope literals. */
-const trustScopeGrants = (config: AgentConfig, action: AdmissibilityAction): boolean => {
+const trustScopeGrants = (config: AdmissibilityGateConfig, action: AdmissibilityAction): boolean => {
   if (!config.trustScope) return false
   return config.trustScope.registry.hasGrant(config.trustScope.projectKey, { tool: action.tool })
 }
@@ -431,7 +431,7 @@ const trustScopeGrants = (config: AgentConfig, action: AdmissibilityAction): boo
  *  a structured deny, R-Phase5 P0-C). Returns a deny short-circuit or null. */
 const resolveAskBranch = async (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
   reason: string,
 ): Promise<DispatchResult | null> => {
@@ -461,7 +461,7 @@ const resolveAskBranch = async (
  *  use the synchronous policy verbatim. */
 const runModePolicy = async (
   call: ToolUseBlock,
-  config: AgentConfig,
+  config: AdmissibilityGateConfig,
   permission: PermissionContext,
   action: AdmissibilityAction,
   autoClassifier?: AutoModeClassifier,
@@ -495,7 +495,13 @@ const runModePolicy = async (
  */
 export const runAdmissibilityGate = async (
   call: ToolUseBlock,
-  config: AgentConfig,
+  // Audit #9 — narrowed from full `AgentConfig` to `AdmissibilityGateConfig`
+  // (the 14 fields this function and its internal helpers actually read).
+  // `AgentConfig` is assignable to it via TS structural subtyping, so
+  // existing callers (`dispatch.ts`) pass `config` unchanged. The narrower
+  // type prevents accidental field creep and documents the surface in one
+  // place — every internal helper in this file takes the same narrow type.
+  config: AdmissibilityGateConfig,
   permission: PermissionContext,
   action: AdmissibilityAction,
   autoClassifier?: AutoModeClassifier,
