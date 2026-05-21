@@ -9,11 +9,32 @@ import {
   type MemoryTier,
   type PersistentStorePort,
   planEviction,
+  scoreEntry,
 } from "@/memory"
 import { EVICTION_DECAY } from "@/memory/eviction"
 import { arbitrateConsolidation, type ConsolidationOp } from "./memory-consolidate"
 import { distillSession, finalAssistantText } from "./memory-distill"
 import { emptyPersistStats, type PersistStats, type RecallStats } from "./memory-stats"
+
+/**
+ * One placed-in-window record (ADR-0082 memory_citation provenance — the
+ * memory-side half of the signal, before the prompt assembler stamps the
+ * `where` field). Emitted by {@link recallContext} via `onPlaced` for every
+ * entry that survives the recall-limit budget and is folded into the rendered
+ * block — i.e. exactly the entries that go into the prompt window. The score
+ * is the deterministic weighted-sum {@link rankEntries} computed; callers
+ * (the loop) join this against the rendering seam to mint a
+ * {@link import("./types").MemoryCitation}.
+ */
+export interface PlacedRecord {
+  /** The record's stable id (matches `MemoryEntry.id`). */
+  readonly recordId: string
+  /** Weighted-sum recall score (the value that placed it in the budget). */
+  readonly score: number
+  /** Approximate token cost of the rendered text line — `chars/4` heuristic
+   *  matching the rest of the loop's estimator. */
+  readonly tokensApprox: number
+}
 
 /**
  * Agent ↔ long-term memory orchestration (RFC §6.3). Two
@@ -89,6 +110,20 @@ export interface RecallDeps {
    */
   onStats?: (s: RecallStats) => void
   /**
+   * ADR-0082 memory_citation provenance — invoked at most ONCE per
+   * {@link recallContext} call, immediately before the formatted block is
+   * returned, with the ordered list of placed records (in the same order
+   * they appear in the rendered block). When the recall finds no entries the
+   * callback is NOT invoked (no signal to emit). Best-effort by contract:
+   * an `onPlaced` throw is swallowed (mirrors {@link emitStats}) so the
+   * citation signal can never break recall.
+   *
+   * The loop's accumulator joins each PlacedRecord against the rendering
+   * seam (system_prompt | reminder_tail | tool_result_injection) to mint a
+   * full {@link import("./types").MemoryCitation}.
+   */
+  onPlaced?: (placed: readonly PlacedRecord[]) => void
+  /**
    * Wall-clock injection seam. Defaults to {@link Date.now}. Tests inject a
    * fixed function so freshness/eviction thresholds (40d) are deterministic
    * regardless of CI clock skew.
@@ -138,8 +173,14 @@ export const recallContext = async (
 
   let entries = await deps.store.recall(query)
   let fellBack = false
+  let queryForScore: MemoryQuery = query
   if (entries.length === 0) {
-    entries = await deps.store.recall({ tags: [SESSION_TAG], limit })
+    // Fallback query: ranking now operates on TAG-only, so the score we
+    // attach to citations must reflect THAT query (else the score we report
+    // is the score from the empty first-query attempt, not the score that
+    // actually placed the entry). Use the same tag-only query for scoring.
+    queryForScore = { tags: [SESSION_TAG], limit }
+    entries = await deps.store.recall(queryForScore)
     fellBack = true
   }
   if (entries.length === 0) {
@@ -153,6 +194,26 @@ export const recallContext = async (
     embedded: Boolean(embedding),
     fellBack,
   })
+  // ADR-0082 — emit placed-record provenance BEFORE returning the rendered
+  // block. The store's `recall` already enforces `query.limit` (the recall
+  // budget), so every `entries[]` row IS a record that survived the budget
+  // and is folded into the rendered block. Best-effort: a host-callback
+  // throw is swallowed (citations are observability — never break recall).
+  if (deps.onPlaced) {
+    const now = (deps.now ?? Date.now)()
+    const placed: PlacedRecord[] = entries.map((e) => ({
+      recordId: e.id,
+      score: scoreEntry(e, queryForScore, now),
+      // chars/4 against the SAME truncate() the block renderer applies, so
+      // the surfaced tokensApprox matches the size that landed in the prompt.
+      tokensApprox: Math.ceil(truncate(e.text).length / 4),
+    }))
+    try {
+      deps.onPlaced(placed)
+    } catch {
+      // Observability is advisory; never let it break recall.
+    }
+  }
   return formatBlock(entries)
 }
 

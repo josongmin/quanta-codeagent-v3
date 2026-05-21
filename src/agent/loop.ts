@@ -25,7 +25,7 @@ import {
 import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
 import { buildSessionFeatures } from "./features"
-import { type PersistDeps, persistSession, recallContext } from "./memory"
+import { type PersistDeps, type PlacedRecord, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
@@ -39,7 +39,7 @@ import { streamingTurn } from "./streaming-dispatch"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
-import type { AgentConfig, AgentOutcome, StopReason } from "./types"
+import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
 import { TurnWorkMetricsCollector } from "./work-metrics-collector"
 import type { WorkingStateSession } from "./working-state"
@@ -435,11 +435,18 @@ const metaUser = (text: string): Message => ({
 /** Recalled long-term memory text for this session, or `undefined` when no
  *  store is configured or nothing relevant is found. The user's last text
  *  seeds the query. Folded into the turn context by `buildTurnContext`, not
- *  spliced into the system string here (that splicing is the seam's job). */
+ *  spliced into the system string here (that splicing is the seam's job).
+ *
+ *  ADR-0082 — when `placedSink` is supplied, the recall layer reports the
+ *  placed records (id + score + tokensApprox) BEFORE the formatted block is
+ *  returned; the loop joins those rows against the rendering seam (today
+ *  always `reminder_tail`, since memory rides the trailing system-reminder
+ *  user message — never the cached system prefix) to mint citations. */
 const resolveMemoryContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
   recorder: AgentRecorder | undefined,
+  placedSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
 ): Promise<string | undefined> => {
   if (!config.store) return undefined
   const lastUser = [...wm.snapshot()].reverse().find((m) => m.role === "user")
@@ -458,6 +465,7 @@ const resolveMemoryContext = async (
         store: config.store,
         ...(config.embedder ? { embedder: config.embedder } : {}),
         ...(recorder ? { onStats: (s) => recorder.memoryRecall(s) } : {}),
+        ...(placedSink ? { onPlaced: placedSink } : {}),
       },
       queryText || undefined,
       {
@@ -801,7 +809,15 @@ export const decideOnAssembled = (
  * accumulate across turns/retries and always trails the conversation).
  */
 /** Rebuild the per-attempt request context: memory recall, proactive
- *  compaction (mutates `messages` in place), then the buildTurnContext SEAM. */
+ *  compaction (mutates `messages` in place), then the buildTurnContext SEAM.
+ *
+ *  `citationSink` (ADR-0082): when supplied, the recall layer reports placed
+ *  records (id+score+tokensApprox) BEFORE the rendered block returns; we
+ *  join each placed row with `where:"reminder_tail"` (memory ALWAYS rides
+ *  the trailing `<system-reminder>` user message in v3 — see prompt.ts
+ *  buildTurnContext: the cached system prefix never carries per-turn data)
+ *  and push into the run-scoped citation collector. Absent ⇒ no signal
+ *  captured, byte-identical. */
 const prepareTurnContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
@@ -811,8 +827,9 @@ const prepareTurnContext = async (
   workingState: WorkingStateSession | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
+  citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
-  const memoryContext = await resolveMemoryContext(config, wm, recorder)
+  const memoryContext = await resolveMemoryContext(config, wm, recorder, citationSink)
   await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
   // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
@@ -1018,6 +1035,7 @@ const runTurn = async (
   collector: TurnWorkMetricsCollector | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
+  citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -1035,6 +1053,7 @@ const runTurn = async (
       workingState,
       archive,
       turn,
+      citationSink,
     )
     const result = await streamConsume(
       config,
@@ -1328,6 +1347,28 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   const summaryArchive: ConversationSummaryArchive | undefined =
     cfg.compaction?.archive === true ? createArchive() : undefined
 
+  // ADR-0082 memory_citation accumulator. Built ONLY when a memory store is
+  // wired (`cfg.store` present) — with no store, `resolveMemoryContext`
+  // short-circuits and the sink would never be called, so we save the
+  // allocation entirely (preserving the default-OFF byte-identical contract).
+  // The sink stamps `where: "reminder_tail"` because the v3 prompt assembler
+  // ALWAYS renders memory into the trailing `<system-reminder>` user message
+  // — the static system prefix carries no per-turn data (ADR-0003). Append-
+  // only across the run: a record placed across N turns produces N rows.
+  const memoryCitations: MemoryCitation[] | undefined = cfg.store ? [] : undefined
+  const citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined = memoryCitations
+    ? (placed) => {
+        for (const p of placed) {
+          memoryCitations.push({
+            recordId: p.recordId,
+            score: p.score,
+            where: "reminder_tail",
+            tokensApprox: p.tokensApprox,
+          })
+        }
+      }
+    : undefined
+
   const finish = async (
     reason: StopReason,
     turns: number,
@@ -1366,9 +1407,18 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // provided one. `exactOptionalPropertyTypes`: spread conditionally so
     // legacy callers see an outcome with NO `stopCategory` field (byte-
     // identical to pre-B3 — they cannot observe a `stopCategory: undefined`).
-    return stopCategory !== undefined
-      ? { reason, turns, messages, stopCategory }
-      : { reason, turns, messages }
+    //
+    // ADR-0082 — surface memory citations when ANY were captured. `memoryCitations`
+    // is only constructed when a store is wired; when it ends up empty across
+    // the whole run (configured but no recall hits ever) we OMIT the field
+    // entirely so a default outcome stays byte-identical for callers that
+    // only read `reason`/`turns`/`messages`.
+    const out: AgentOutcome = { reason, turns, messages }
+    if (stopCategory !== undefined) out.stopCategory = stopCategory
+    if (memoryCitations !== undefined && memoryCitations.length > 0) {
+      out.memoryCitations = memoryCitations
+    }
+    return out
   }
 
   // RFC-0002 §5.2 `session_start` — emitted ONCE at run start so the trajectory
@@ -1465,6 +1515,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         workCollector,
         summaryArchive,
         turn,
+        citationSink,
       )
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"

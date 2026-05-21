@@ -50,6 +50,7 @@ export {
   type PersistDeps,
   type PersistInput,
   persistSession,
+  type PlacedRecord,
   type RecallDeps,
   recallContext,
   SESSION_TAG,
@@ -150,6 +151,7 @@ export {
 export type {
   AgentConfig,
   AgentOutcome,
+  MemoryCitation,
   PreCompactDecision,
   PreCompactRequestQuery,
   StopReason,

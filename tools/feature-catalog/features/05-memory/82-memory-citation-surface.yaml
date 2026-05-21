@@ -1,0 +1,48 @@
+id: memory-citation-surface
+title: memory_citation provenance surface (ADR-0082)
+section: 5
+subsystem: L2 long-term memory recall provenance
+order: 82
+maturity: L5
+status: stable
+purpose: >
+  Surface "which record was placed in this run's prompt window, where, with what
+  score". Provenance signal (placement = citation), NOT a heuristic scan of the
+  assistant's response. Closed where-enum
+  {system_prompt|reminder_tail|tool_result_injection}; today every v3 citation
+  is `reminder_tail` (memory always rides the trailing <system-reminder> user
+  message — the cached system prefix carries no per-turn data, ADR-0003).
+  AgentOutcome.memoryCitations is OMITTED when no store is wired OR no recall
+  hits land across the run → byte-identical for legacy callers.
+evidence:
+  code:
+    - src/agent/types.ts        # MemoryCitation + AgentOutcome.memoryCitations
+    - src/agent/memory.ts       # RecallDeps.onPlaced + PlacedRecord emit
+    - src/agent/loop.ts         # run-scoped accumulator + sink + finish() surface
+    - src/memory/ranking.ts     # scoreEntry export (weighted-sum for citation)
+    - src/memory/index.ts       # @/memory re-export of scoreEntry
+    - src/agent/index.ts        # @/agent re-export of MemoryCitation/PlacedRecord
+  adrs:
+    - docs/decisions/0082-memory-citation-provenance.md
+  tests:
+    unit:
+      - tests/unit/agent/memory-citation-accumulator.test.ts
+    integration:
+      - tests/integration/memory-citation-end-to-end.test.ts
+    contract: []
+knobs:
+  - name: AgentConfig.store
+    default: undefined
+    effect: when absent the accumulator is not allocated; outcome.memoryCitations omitted (byte-identical).
+  - name: AgentConfig.memory.recallLimit
+    default: 5
+    effect: budget that decides placement; the limit IS the filter that produces citations.
+deliberate_hold:
+  - "system_prompt placement seam (today unused — memory only rides reminder_tail per ADR-0003 cache-prefix discipline)."
+  - "tool_result_injection placement seam (reserved for future side-conv / Codex-style tool wrapper)."
+  - "no heuristic response-text scan: 'cited iff placed-in-prompt' is the ONLY contract."
+notes: >
+  PlacedRecord.score equals the weighted-sum scoreEntry computes (`vector +
+  text + tag + freshness + importance + access + tier`); identical to the
+  ranking key. Reinforcement (accessCount bump) means same-record cross-turn
+  scores may drift — that's the intended best-effort signal, not a bug.
