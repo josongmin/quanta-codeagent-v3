@@ -6,10 +6,14 @@ order: 10
 maturity: L3
 status: new
 purpose: |
-  스레드 단위로 sandboxPolicy + approvalPolicy + approvalsReviewer를
-  지정한다. 한 스레드는 read-only로, 다른 스레드는 danger-full-access로
-  병행 운영 가능. admissibility-gate가 HARD_DENY 다음, mode-policy 앞에서
-  consult — opt-in flag(config.permissionStack.enabled)로 활성화.
+  **Thread-level override** — 특정 sessionId(스레드)에 대해 sandboxPolicy +
+  approvalPolicy + approvalsReviewer를 명시 지정한다. 한 스레드는 read-only,
+  형제 스레드는 danger-full-access로 병행 운영 가능. ADR-0046 우선순위
+  3위(post-denial 다음, per-host 위).
+
+  Codex `heartbeat-thread-permissions-by-id` 매핑의 v3 대응. admissibility-
+  gate가 HARD_DENY/HITL 다음, mode-policy 앞에서 consult — opt-in flag
+  (config.permissionStack.enabled)로 활성화.
 evidence:
   code:
     - src/permission/permission-store.ts

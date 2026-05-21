@@ -13,6 +13,14 @@ export {
   STAGE1_FAST_TAIL,
   STAGE2_THINKING_TAIL,
 } from "./classifier"
+export type {
+  CreatePermissionInspectorOptions,
+  InspectAction,
+  PermissionInspector,
+  ResolutionExplanation,
+  ResolutionSource,
+} from "./inspector"
+export { getPermissionInspector } from "./inspector"
 export {
   ALL_OUTCOMES,
   ALL_REVIEWERS,

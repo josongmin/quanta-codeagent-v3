@@ -87,6 +87,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await store.flush()
   await rm(tmp, { recursive: true, force: true })
 })
 

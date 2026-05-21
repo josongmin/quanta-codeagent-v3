@@ -6,11 +6,14 @@ order: 11
 maturity: L3
 status: new
 purpose: |
-  hostId(SSH_CONNECTION 환경변수 기반 결정론적 식별자, 부재 시 localhost)
-  단위로 full-access / read-only / custom 기본값을 잡는다. 원격 SSH
-  호스트는 read-only로 기본, localhost는 full-access — 사용자가 명시적
-  override 없이 안전한 기본을 받을 수 있게 한다. 우선순위에서 per-thread
-  바로 아래.
+  **Host-level default** — hostId(SSH_CONNECTION 기반 결정론적 식별자,
+  부재 시 localhost) 단위로 full-access / read-only / custom 기본값을 잡는다.
+  per-thread record가 없을 때만 적용 — 즉 "이 호스트에서 새로 열린 스레드의
+  기본 정책". 원격 SSH 호스트는 read-only, localhost는 full-access를 흔히
+  잡는다.
+
+  Codex `agent-mode-by-host-id`의 v3 대응. ADR-0046 우선순위 4위(per-thread
+  다음, global default 위).
 evidence:
   code:
     - src/permission/permission-store.ts

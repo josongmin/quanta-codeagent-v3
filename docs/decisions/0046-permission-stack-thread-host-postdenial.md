@@ -2,8 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-05-21
-- **Related**: ADR-0026 (admissibility-gate SSOT), ADR-0029 (reviewer 3-tier),
-  ADR-0027 (anti-signals / policy-injection hardening),
+- **Related**: ADR-0026 (admissibility-gate SSOT — single entry point that
+  consults this stack), ADR-0029 (reviewer 3-tier — post-denial sits AFTER
+  reviewer denies), ADR-0027 (anti-signals / policy-injection hardening),
+  ADR-0030 (mid-turn steering — the UI surface that consumes the inspector),
+  ADR-0047 (HITL 4-tier gate — orthogonal axis, composed in
+  `runAdmissibilityGate`),
   [[codex-desktop-build-2867-round-4]] (per-thread + per-host + post-denial
   axes), [[codex-feature-catalog-2026-05-21]] §3 (permission state slices).
 
@@ -174,9 +178,23 @@ signature. 프로세스 간 재현 가능 (해시 입력이 순수 함수).
 - `src/permission/per-host-mode.ts` — facade + hostId 해결.
 - `src/permission/post-denial.ts` — 3-step state machine.
 - `src/permission/policy.ts` — `evaluateStack`.
+- `src/permission/inspector.ts` — `getPermissionInspector()` 프로그래밍 surface
+  (3-pass polish 후속, CLI/Tauri 대시보드 seam).
 - `src/permission/index.ts` — 새 export.
-- `src/agent/admissibility-gate.ts` — opt-in stack consultation.
+- `src/agent/admissibility-gate.ts` — opt-in stack consultation
+  (`runPermissionStack` 내부 함수가 `evaluateStack`을 호출).
 - `src/agent/types.ts` — `AgentConfig.permissionStack`.
+- `src/observability/vocabulary.ts` — `quanta.permission.stack.*` OTel
+  attribute keys (`source`, `verdict`, `action_signature`, `thread_id`,
+  `host_id`, `post_denial.event`).
+
+## Naming convention
+
+- **Public**: `evaluateStack` (sync precedence resolver), `getPermissionInspector`
+  (read-only programmatic surface).
+- **Internal seam**: `runPermissionStack` (in admissibility-gate; wraps
+  `evaluateStack` with the gate's `DispatchResult` shape).
+- Avoid `consultPermissionStack` / other synonyms — keeps `grep` deterministic.
 
 ## Tests
 

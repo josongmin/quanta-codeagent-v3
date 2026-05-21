@@ -37,6 +37,9 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  // Drain any queued writes BEFORE removing the tmp dir — otherwise a
+  // debounced flush races the rmdir and surfaces an ENOENT warn.
+  await store.flush()
   await rm(tmp, { recursive: true, force: true })
 })
 

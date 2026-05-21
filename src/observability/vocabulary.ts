@@ -95,6 +95,28 @@ export const QUANTA_ATTRS = {
     outcome: "quanta.permission.outcome",
     /** `"low" | "medium" | "high"`. */
     riskLevel: "quanta.permission.risk_level",
+    /** ADR-0046 stack axis that produced the verdict — one of
+     *  `"read-only-bypass" | "post-denial-override" | "per-thread" | "per-host" |
+     *  "global-default"`. Used to attribute a deny/allow to its source axis. */
+    stackSource: "quanta.permission.stack.source",
+    /** ADR-0046 stack verdict — `"allow" | "deny" | "ask"`. Set every time
+     *  the gate consults the stack (independent of `outcome` which is the
+     *  reviewer's final word). */
+    stackVerdict: "quanta.permission.stack.verdict",
+    /** ADR-0046 actionSignature (32-hex). Anchors a per-(thread, action)
+     *  trace across the deny → seen-risk → override sequence. */
+    actionSignature: "quanta.permission.action_signature",
+    /** ADR-0046 thread-id resolved from `sessionId` at gate time. Distinct
+     *  from `quanta.thread.id` (which is the conversation thread); the
+     *  permission slice uses sessionId as its thread anchor. */
+    threadId: "quanta.permission.thread_id",
+    /** ADR-0046 host-id from `resolveHostId()` — `${user}@${host}` or
+     *  `localhost`. */
+    hostId: "quanta.permission.host_id",
+    /** ADR-0046 post-denial state transition kind — `"denied" | "risk-seen" |
+     *  "user-override"`. Emitted by the `post-denial` facade so a dashboard
+     *  can render the 3-step funnel. */
+    postDenialEvent: "quanta.permission.post_denial.event",
   },
   patch: {
     /** ADR-0028 V4A patch op: `"add" | "delete" | "update"`. */

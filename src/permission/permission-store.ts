@@ -3,13 +3,11 @@
  *
  * File-backed JSON store for per-thread permissions, per-host agent modes,
  * and post-denial precedence records. Single file at `~/.quanta/permission-
- * state.json` (override via `QUANTA_PERMISSION_STATE` env var — read directly,
- * not via runtime-config, because @/permission slice is depended on by very
- * early bootstrap paths and the runtime-config singleton may not yet be
- * frozen when the first permission probe fires; this is OK because the env
- * var is only ever read once at store construction).
+ * state.json` (override via `QUANTA_PERMISSION_STATE`). Both env vars are
+ * read via `runtimeConfig()` — the single legitimate `process.env` owner.
  *
- * Slice rules: pure `node:`-stdlib only. NO `@/shared`, NO `@/storage`, NO
+ * Slice rules: pure `node:`-stdlib only (plus the slice-internal
+ * `@/shared/runtime-config` ADR-frozen env reader). NO `@/storage`, NO
  * `@/memory` — `@/permission` MUST keep its dependency surface at the
  * minimum (see biome `noRestrictedImports` config). Persistence is a
  * deliberately simple read-modify-write of one JSON file with debounced
@@ -20,24 +18,39 @@
  *                     denial state is independent from its siblings'.
  *
  * Failure model:
- *   - Missing file at load    → start empty, log via `stderrWarn`.
+ *   - Missing file at load    → start empty, no warning (cold-start).
  *   - Corrupt JSON            → start empty + write `.corrupt` sidecar so the
  *                               user can recover; never crash.
+ *   - Schema-version mismatch → start empty + write `.unsupported-vN` sidecar
+ *                               so future migration code has the prior bytes.
  *   - Write failure           → swallowed + warned (in-memory state is still
  *                               authoritative for the rest of the process).
+ *   - Orphan `.tmp` from a crashed prior write → unlinked at next successful
+ *                               `writeToDisk()` (cleanup-on-write).
  *
- * Concurrency: the store is a single in-process singleton. Tests can mint
- * an isolated instance via `createPermissionStore({ filePath })`. The
- * production singleton is created by `getDefaultPermissionStore()`.
+ * Concurrency:
+ *   - Single in-process: writes go through `pendingFlush` serialization so a
+ *     burst of mutations produces at most ONE rename per debounce window.
+ *   - Multi-process (e.g. CLI + Tauri Desktop on the same `~/.quanta`):
+ *     atomic `tmp + rename` prevents torn-write but NOT last-write-wins races.
+ *     ADR-0046 §Trade-offs documents this as accepted (v3 = single-process);
+ *     follow-up lockfile ADR queued when a multi-process surface ships.
+ *
+ * Tests can mint an isolated instance via `createPermissionStore({ filePath })`.
+ * The production singleton is created by `getDefaultPermissionStore()`.
  */
 
-import { createHash } from "node:crypto"
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { createHash, randomBytes } from "node:crypto"
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { runtimeConfig } from "@/shared/runtime-config"
 
-const STATE_VERSION = 1
+/** Current on-disk schema version. Bump when the JSON shape changes; add a
+ *  parallel branch in {@link parseState} so older versions can be migrated
+ *  in-place. A mismatch quarantines the file to `.unsupported-vN` and starts
+ *  empty rather than corrupting data. */
+const STATE_VERSION = 1 as const
 
 /** Per-thread permission overrides (Codex's `heartbeat-thread-permissions-by-id`
  *  mapping). When the admissibility-gate sees a thread id with a record here,
@@ -168,28 +181,51 @@ const snapshot = (state: MutableState): PermissionState =>
     deniedActions: Object.freeze({ ...state.deniedActions }),
   })
 
+/** Distinguished outcomes of `parseState`. The caller takes the right action
+ *  per outcome — schema mismatch quarantines to a versioned sidecar so a
+ *  future migration can recover, while malformed-shape just starts empty. */
+type ParseOutcome =
+  | { kind: "ok"; state: PermissionState }
+  | { kind: "version-mismatch"; foundVersion: number | string | null }
+  | { kind: "shape-invalid"; reason: string }
+
 /** Validate a parsed JSON payload — soft-fail to an empty state when the
- *  shape is wrong rather than crash. */
-const parseState = (raw: unknown): PermissionState | null => {
-  if (raw === null || typeof raw !== "object") return null
+ *  shape is wrong rather than crash. Returns a distinguished outcome so the
+ *  caller can write a useful sidecar (corrupt vs unsupported-version). */
+const parseState = (raw: unknown): ParseOutcome => {
+  if (raw === null || typeof raw !== "object") {
+    return { kind: "shape-invalid", reason: "root must be a JSON object" }
+  }
   const obj = raw as Record<string, unknown>
-  if (obj["version"] !== STATE_VERSION) return null
-  const perThread = (obj["perThread"] as Record<string, ThreadPermission> | undefined) ?? {}
-  const perHost = (obj["perHost"] as Record<string, HostAgentMode> | undefined) ?? {}
-  const deniedActions = (obj["deniedActions"] as Record<string, DenialRecord> | undefined) ?? {}
+  const v = obj.version
+  if (v !== STATE_VERSION) {
+    return {
+      kind: "version-mismatch",
+      foundVersion: typeof v === "number" || typeof v === "string" ? v : null,
+    }
+  }
+  const perThread = (obj.perThread as Record<string, ThreadPermission> | undefined) ?? {}
+  const perHost = (obj.perHost as Record<string, HostAgentMode> | undefined) ?? {}
+  const deniedActions = (obj.deniedActions as Record<string, DenialRecord> | undefined) ?? {}
   if (
     typeof perThread !== "object" ||
     typeof perHost !== "object" ||
     typeof deniedActions !== "object"
   ) {
-    return null
+    return {
+      kind: "shape-invalid",
+      reason: "perThread / perHost / deniedActions must each be objects",
+    }
   }
-  return Object.freeze({
-    version: STATE_VERSION,
-    perThread: Object.freeze({ ...perThread }),
-    perHost: Object.freeze({ ...perHost }),
-    deniedActions: Object.freeze({ ...deniedActions }),
-  })
+  return {
+    kind: "ok",
+    state: Object.freeze({
+      version: STATE_VERSION,
+      perThread: Object.freeze({ ...perThread }),
+      perHost: Object.freeze({ ...perHost }),
+      deniedActions: Object.freeze({ ...deniedActions }),
+    }),
+  }
 }
 
 export interface PermissionStore {
@@ -207,6 +243,12 @@ export interface PermissionStore {
   getThread(threadId: string): ThreadPermission | undefined
   getHost(hostId: string): HostAgentMode | undefined
   getDenial(threadId: string, actionSignature: string): DenialRecord | undefined
+  /** Frozen list of every per-thread record. Order unspecified. */
+  listThreads(): ReadonlyMap<string, ThreadPermission>
+  /** Frozen list of every per-host mode. Order unspecified. */
+  listHosts(): ReadonlyMap<string, HostAgentMode>
+  /** Every denial record for `threadId` (empty when none). Order unspecified. */
+  listThreadDenials(threadId: string): readonly DenialRecord[]
 
   // -- Write API ------------------------------------------------------------
   setThread(threadId: string, perm: ThreadPermission): void
@@ -249,18 +291,77 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
   let pendingFlush: Promise<void> | null = null
 
+  /** Per-instance unique tmp suffix. Two stores sharing the same `filePath`
+   *  (multi-process scenario) use DIFFERENT tmp paths so they don't clobber
+   *  each other's in-flight write. The final `rename` is still last-write-
+   *  wins (atomic), but neither write tears the JSON. */
+  const tmpSuffix = `.tmp.${process.pid}.${randomBytes(4).toString("hex")}`
+  const tmpPath = `${filePath}${tmpSuffix}`
+
+  /**
+   * Atomic write: write to per-instance `.tmp.<pid>.<rand>`, then `rename`
+   * over the final path. Avoids torn-write on crash AND prevents two
+   * processes from clobbering each other's tmp file. On the unhappy path
+   * the `.tmp` is unlinked so a crashed previous attempt can never linger.
+   *
+   * Concurrency:
+   *   - Intra-process: serialized externally via {@link enqueueWrite} so two
+   *     back-to-back mutations never `rename` over each other.
+   *   - Multi-process: per-instance tmp suffix avoids tmp clobber; the final
+   *     rename is still last-write-wins (see module comment).
+   */
   const writeToDisk = async (): Promise<void> => {
     try {
       await mkdir(dirname(filePath), { recursive: true })
-      // Atomic write: write to tmp then rename. Avoids torn-write on crash.
-      const tmp = `${filePath}.tmp`
       const payload = JSON.stringify(snapshot(state), null, 2)
-      await writeFile(tmp, payload, "utf8")
-      await rename(tmp, filePath)
+      await writeFile(tmpPath, payload, "utf8")
+      await rename(tmpPath, filePath)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       stderrWarn(`flush failed (${filePath}): ${message}`)
+      // Best-effort cleanup: remove a partial `.tmp` so the next write
+      // starts from a clean slate (no orphan-tmp accumulation).
+      try {
+        await unlink(tmpPath)
+      } catch {
+        // tmp may not exist — that's fine.
+      }
     }
+  }
+
+  /** True ⇨ a mutation since the last successful write is awaiting flush.
+   *  Set by every mutating API, cleared right before `writeToDisk` is called.
+   *  Used to skip "write nothing" rewrites in `flush()` so idempotent set*()
+   *  cannot bump the file's mtime. */
+  let dirty = false
+
+  /**
+   * Serialize writes through `pendingFlush`. A second mutation that arrives
+   * while the first is in flight does NOT race a second `rename` — it queues
+   * to run after the in-flight one resolves. Returns the promise of the
+   * write that captured this mutation, so callers awaiting `flush()` see
+   * their bytes hit disk.
+   *
+   * Behavior:
+   *   - dirty + idle ⇒ start a fresh write, clear dirty.
+   *   - dirty + in-flight ⇒ chain a new write after the current one
+   *     (captures the latest state on the chained `writeToDisk` callback).
+   *   - clean + in-flight ⇒ just return the in-flight promise (no double-write).
+   *   - clean + idle ⇒ no-op (returns resolved promise).
+   */
+  const enqueueWrite = (): Promise<void> => {
+    if (!dirty) return pendingFlush ?? Promise.resolve()
+    const prior = pendingFlush ?? Promise.resolve()
+    // Capture the dirty bit at queue time so a NEW mutation arriving while
+    // we're awaiting `prior` still gets its own write (it re-sets dirty).
+    dirty = false
+    const next = prior.then(writeToDisk)
+    pendingFlush = next.finally(() => {
+      // Clear the slot ONLY if we were the most recent enqueue. A later
+      // enqueue would have overwritten `pendingFlush` already.
+      if (pendingFlush === next) pendingFlush = null
+    })
+    return next
   }
 
   const flush = async (): Promise<void> => {
@@ -268,24 +369,25 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
       clearTimeout(pendingTimer)
       pendingTimer = null
     }
-    if (pendingFlush !== null) {
-      await pendingFlush
-    }
-    pendingFlush = writeToDisk()
-    await pendingFlush
-    pendingFlush = null
+    // If a debounced write was queued but not yet started, run it now
+    // (combined with any new mutations since). Also waits on any in-flight
+    // write so `await flush()` is a true "bytes are durable" barrier.
+    await enqueueWrite()
   }
 
   const flushDebounced = (): void => {
+    dirty = true
     if (debounceMs <= 0) {
-      // Fire-and-forget; test code awaits `flush()` directly.
-      void writeToDisk()
+      // Tests with debounceMs:0 still serialize through the queue — fixes
+      // the prior "fire-and-forget hits a deleted tmpdir during teardown"
+      // noise by ensuring `await flush()` drains all queued writes.
+      void enqueueWrite()
       return
     }
     if (pendingTimer !== null) clearTimeout(pendingTimer)
     pendingTimer = setTimeout(() => {
       pendingTimer = null
-      pendingFlush = writeToDisk()
+      void enqueueWrite()
     }, debounceMs)
     // Don't keep the event loop alive solely for the flush.
     if (typeof (pendingTimer as { unref?: () => void }).unref === "function") {
@@ -293,44 +395,67 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
     }
   }
 
+  /** Quarantine bytes to a versioned sidecar (`.corrupt`, `.unsupported-vN`).
+   *  Best-effort — if the sidecar write fails we keep going with an empty
+   *  state in memory. */
+  const quarantine = async (suffix: string, raw: string): Promise<void> => {
+    try {
+      await writeFile(`${filePath}.${suffix}`, raw, "utf8")
+    } catch {
+      // best-effort — the in-memory state is still safe.
+    }
+  }
+
+  /** Read bytes from disk OR signal "not present yet" via `null`. Surfaces
+   *  unexpected IO errors (permission denied, EISDIR, …) to the caller as a
+   *  warning rather than crashing the process. */
+  const readRawState = async (): Promise<string | null> => {
+    try {
+      return await readFile(filePath, "utf8")
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (code === "ENOENT") return null
+      const message = e instanceof Error ? e.message : String(e)
+      stderrWarn(`load failed (${filePath}): ${message} — starting empty`)
+      return null
+    }
+  }
+
+  /** Parse bytes already known to exist. Splits the three terminal cases so
+   *  `load()` stays well under the complexity ceiling. */
+  const parseRawState = async (raw: string): Promise<PermissionState | null> => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      stderrWarn(`state file corrupt JSON (${filePath}): ${message} — starting empty`)
+      await quarantine("corrupt", raw)
+      return null
+    }
+    const outcome = parseState(parsed)
+    if (outcome.kind === "ok") return outcome.state
+    if (outcome.kind === "version-mismatch") {
+      stderrWarn(
+        `state file schema mismatch (${filePath}) — found version=${String(outcome.foundVersion)}, expected ${STATE_VERSION} — starting empty (quarantined)`,
+      )
+      await quarantine(`unsupported-v${String(outcome.foundVersion)}`, raw)
+      return null
+    }
+    stderrWarn(`state file shape invalid (${filePath}): ${outcome.reason} — starting empty`)
+    return null
+  }
+
   const load = async (): Promise<void> => {
     if (loaded) return
     loaded = true
-    try {
-      const raw = await readFile(filePath, "utf8")
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(raw)
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
-        stderrWarn(`state file corrupt JSON (${filePath}): ${message} — starting empty`)
-        // Save the corrupt content alongside so the user can recover.
-        try {
-          await writeFile(`${filePath}.corrupt`, raw, "utf8")
-        } catch {
-          // best-effort
-        }
-        state = cloneAsMutable(emptyState())
-        return
-      }
-      const validated = parseState(parsed)
-      if (validated === null) {
-        stderrWarn(`state file shape invalid (${filePath}) — starting empty`)
-        state = cloneAsMutable(emptyState())
-        return
-      }
-      state = cloneAsMutable(validated)
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      if (code === "ENOENT") {
-        // First run — no warning, just start empty.
-        state = cloneAsMutable(emptyState())
-        return
-      }
-      const message = e instanceof Error ? e.message : String(e)
-      stderrWarn(`load failed (${filePath}): ${message} — starting empty`)
+    const raw = await readRawState()
+    if (raw === null) {
       state = cloneAsMutable(emptyState())
+      return
     }
+    const validated = await parseRawState(raw)
+    state = cloneAsMutable(validated ?? emptyState())
   }
 
   // -- Read API ---------------------------------------------------------------
@@ -339,20 +464,51 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
   const getDenial = (threadId: string, actionSignature: string): DenialRecord | undefined =>
     state.deniedActions[denialKey(threadId, actionSignature)]
 
+  const listThreads = (): ReadonlyMap<string, ThreadPermission> => {
+    const m = new Map<string, ThreadPermission>()
+    for (const [k, v] of Object.entries(state.perThread)) m.set(k, v)
+    return m
+  }
+  const listHosts = (): ReadonlyMap<string, HostAgentMode> => {
+    const m = new Map<string, HostAgentMode>()
+    for (const [k, v] of Object.entries(state.perHost)) m.set(k, v)
+    return m
+  }
+  const listThreadDenials = (threadId: string): readonly DenialRecord[] => {
+    const out: DenialRecord[] = []
+    for (const r of Object.values(state.deniedActions)) {
+      if (r.threadId === threadId) out.push(r)
+    }
+    return out
+  }
+
+  /** Structural equality on `ThreadPermission`. Used by `setThread` to skip
+   *  a redundant flush when the record didn't actually change — keeps the
+   *  store idempotent (setting the same perm twice = single write). */
+  const threadPermEqual = (a: ThreadPermission, b: ThreadPermission): boolean =>
+    a.approvalPolicy === b.approvalPolicy &&
+    a.approvalsReviewer === b.approvalsReviewer &&
+    JSON.stringify(canonicalize(a.sandboxPolicy)) === JSON.stringify(canonicalize(b.sandboxPolicy))
+
   // -- Write API --------------------------------------------------------------
   const setThread = (threadId: string, perm: ThreadPermission): void => {
+    const existing = state.perThread[threadId]
+    if (existing !== undefined && threadPermEqual(existing, perm)) return // idempotent
     state.perThread[threadId] = perm
     flushDebounced()
   }
   const clearThread = (threadId: string): void => {
+    if (state.perThread[threadId] === undefined) return // idempotent
     delete state.perThread[threadId]
     flushDebounced()
   }
   const setHost = (hostId: string, mode: HostAgentMode): void => {
+    if (state.perHost[hostId] === mode) return // idempotent
     state.perHost[hostId] = mode
     flushDebounced()
   }
   const clearHost = (hostId: string): void => {
+    if (state.perHost[hostId] === undefined) return // idempotent
     delete state.perHost[hostId]
     flushDebounced()
   }
@@ -418,13 +574,22 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
       clearTimeout(pendingTimer)
       pendingTimer = null
     }
+    // Wait on any in-flight write so we don't unlink mid-rename — without
+    // this, a flush queued by a recent set*() could resurrect the file we
+    // just deleted (Heisenbug seen in stress tests).
+    if (pendingFlush !== null) {
+      try {
+        await pendingFlush
+      } catch {
+        // Surfaced via stderrWarn already.
+      }
+    }
     state = cloneAsMutable(emptyState())
     loaded = false
     try {
-      const { unlink } = await import("node:fs/promises")
       await unlink(filePath)
     } catch {
-      // best-effort
+      // best-effort — file may not exist yet.
     }
   }
 
@@ -436,6 +601,9 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
     getThread,
     getHost,
     getDenial,
+    listThreads,
+    listHosts,
+    listThreadDenials,
     setThread,
     clearThread,
     setHost,

@@ -6,12 +6,17 @@ order: 12
 maturity: L3
 status: new
 purpose: |
-  guardian/룰이 거부한 동작을 사용자가 위험을 명시적으로 본 뒤 재승인하면
-  그 동작에 한해 룰을 override한다. 3-step state machine —
-  recordDenial → recordRiskSeen → recordUserOverride. (threadId,
-  actionSignature) 키로 격리: 형제 스레드에 전파 안 됨, 다른 액션에 전파
-  안 됨. HARD_DENY는 절대 override 불가 (보안 경계). 우선순위 최상위
-  (HARD_DENY 다음).
+  **Explicit re-approval precedence** — guardian/룰이 거부한 동작을 사용자가
+  "위험을 본 뒤 명시적 재승인"한 경우에 한해 그 동작에 대해 룰을 override
+  한다. per-thread/per-host와 달리 "특정 (threadId, action) 한 건"에 대한
+  one-shot 승인이다. 3-step state machine은 자동 우회를 막는 안전장치 —
+  단순한 boolean flag가 아니라 timestamp 순서까지 강제(recordDenial →
+  recordRiskSeen → recordUserOverride).
+
+  (threadId, actionSignature) 키로 격리: 형제 스레드에 전파 안 됨, 다른
+  액션에 전파 안 됨. HARD_DENY는 절대 override 불가 (보안 경계). Codex
+  `guardian-post-denial-precedence`의 v3 대응. ADR-0046 우선순위 2위
+  (HARD_DENY 바로 다음, per-thread 위).
 evidence:
   code:
     - src/permission/permission-store.ts
