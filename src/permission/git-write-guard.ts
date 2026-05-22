@@ -19,6 +19,18 @@
  *     `core.editor`, `[alias]` and `[filter "…"].clean/.smudge` all name
  *     executables that git will run. Writing config relocates/installs hooks
  *     and command shims, an indirect path to the same code execution.
+ *   - `.git/config.worktree` — the per-worktree config overlay
+ *     (`extensions.worktreeConfig`). Git reads it with the SAME authority as
+ *     `.git/config`, so it names the SAME executable-bearing keys
+ *     (`core.hooksPath`, `[filter].clean/.smudge`, aliases). Denying
+ *     `.git/config` while leaving this writable is a trivially-equivalent
+ *     bypass. (Cursor cursorsandbox audit delta.)
+ *   - `.git/info/attributes` — repo-internal gitattributes git executes with
+ *     repo authority: a `filter=foo` attribute here, paired with a
+ *     `[filter "foo"].clean/.smudge` already in config, runs an arbitrary
+ *     command on checkout/add. Same `[filter]`-driven execution class as
+ *     `.git/config`, just the other half of the pair. (Cursor cursorsandbox
+ *     audit delta.)
  *   - `.git/hooks` (the directory itself) — creating/replacing the directory
  *     (e.g. via symlink) is equivalent to controlling its contents.
  *   - `.vscode/**` — `tasks.json` / `launch.json` carry shell command lines an
@@ -60,12 +72,27 @@
  *  - `git_hooks_dir` — the `.git/hooks` directory entry itself (no trailing
  *                      path component). Controlling the dir == controlling its
  *                      hooks (symlink/replace).
- *  - `git_config`    — the `.git/config` file. Names executables git will run
- *                      (`core.hooksPath`, `[filter].clean`, aliases, …).
+ *  - `git_config`    — the `.git/config` file OR its per-worktree overlay
+ *                      `.git/config.worktree`. Both name executables git will
+ *                      run (`core.hooksPath`, `[filter].clean`, aliases, …) and
+ *                      git reads them with identical authority, so they share
+ *                      one reason. (`config.worktree`: Cursor cursorsandbox
+ *                      audit delta.)
+ *  - `git_attributes`— the `.git/info/attributes` file. A repo-internal
+ *                      gitattributes git executes with repo authority; a
+ *                      `filter=…` line here pairs with a `[filter].clean/.smudge`
+ *                      in config to run an arbitrary command on checkout/add —
+ *                      the other half of the `git_config` filter-exec pair.
+ *                      (Cursor cursorsandbox audit delta.)
  *  - `editor_config` — a file UNDER `.vscode/` (`tasks.json` / `launch.json` /
  *                      `settings.json`). Editor-driven command execution.
  */
-export type GitWriteProtectReason = "git_hooks" | "git_hooks_dir" | "git_config" | "editor_config"
+export type GitWriteProtectReason =
+  | "git_hooks"
+  | "git_hooks_dir"
+  | "git_config"
+  | "git_attributes"
+  | "editor_config"
 
 /** All protect reasons enumerated — used by callers/tests for exhaustive
  *  coverage assertions without `as const` gymnastics. */
@@ -73,6 +100,7 @@ export const ALL_GIT_WRITE_PROTECT_REASONS: ReadonlyArray<GitWriteProtectReason>
   "git_hooks",
   "git_hooks_dir",
   "git_config",
+  "git_attributes",
   "editor_config",
 ]
 
@@ -107,10 +135,11 @@ const firstGitDirIndex = (segments: ReadonlyArray<string>): number =>
  * or `.github/…` never match.
  *
  * Resolution order (a path can structurally satisfy only one):
- *   1. `.git/hooks/<something>`            → `git_hooks`
- *   2. `.git/hooks` (terminal dir entry)   → `git_hooks_dir`
- *   3. `.git/config`                       → `git_config`
- *   4. `.vscode/<something>`               → `editor_config`
+ *   1. `.git/hooks/<something>`             → `git_hooks`
+ *   2. `.git/hooks` (terminal dir entry)    → `git_hooks_dir`
+ *   3. `.git/config` | `.git/config.worktree` → `git_config`
+ *   4. `.git/info/attributes`               → `git_attributes`
+ *   5. `.vscode/<something>`                → `editor_config`
  */
 export const gitWriteProtectReason = (relativeOrAbsPath: string): GitWriteProtectReason | null => {
   const segments = segmentsOf(relativeOrAbsPath)
@@ -122,10 +151,24 @@ export const gitWriteProtectReason = (relativeOrAbsPath: string): GitWriteProtec
       // `.git/hooks` with a further component is a hook file; bare is the dir.
       return segments.length > gitIdx + 2 ? "git_hooks" : "git_hooks_dir"
     }
-    if (afterGit === "config" && segments.length === gitIdx + 2) {
-      // `.git/config` exactly — not `.git/config/x` (no such git layout) and
-      // not `.git/configfoo`.
+    if (
+      (afterGit === "config" || afterGit === "config.worktree") &&
+      segments.length === gitIdx + 2
+    ) {
+      // `.git/config` or `.git/config.worktree` exactly — not `.git/config/x`
+      // (no such git layout) and not `.git/configfoo`. The per-worktree overlay
+      // is read with identical authority, so it shares the `git_config` reason.
       return "git_config"
+    }
+    if (
+      afterGit === "info" &&
+      segments[gitIdx + 2] === "attributes" &&
+      segments.length === gitIdx + 3
+    ) {
+      // `.git/info/attributes` exactly — repo-internal gitattributes git
+      // executes (filter-driven exec). Not `.git/info/<other>` (e.g. exclude is
+      // a plain ignore list with no exec surface).
+      return "git_attributes"
     }
   }
 

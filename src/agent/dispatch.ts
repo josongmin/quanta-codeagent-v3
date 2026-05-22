@@ -1,6 +1,10 @@
 import type { ToolUseBlock } from "@/llm"
 import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
-import type { AutoModeClassifier, PermissionContext } from "@/permission"
+import {
+  type AutoModeClassifier,
+  gitWriteProtectReason,
+  type PermissionContext,
+} from "@/permission"
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
@@ -230,6 +234,15 @@ const dispatchToolInner = async (
   const ctx: ToolContext = {
     cwd: config.cwd,
     signal: config.signal,
+    // ADR-0091 git-write-protection L3 wire: the `write`/`edit` tools call this
+    // pure path-pattern detector with their resolved target BEFORE any fs op
+    // and statically deny code-execution / policy-escape vectors (`.git/hooks`,
+    // `.git/config{,.worktree}`, `.git/info/attributes`, `.vscode/**`). Wired
+    // unconditionally — the matcher is pure (no I/O, no state, no config), so
+    // exposing it cannot change behavior for any path the detector returns
+    // `null` for (byte-identical for ordinary writes). `@/tool` consumes it via
+    // the duck-typed `GitWriteGuard` seam so it never imports `@/permission`.
+    gitWriteGuard: gitWriteProtectReason,
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
     ...(workingState !== undefined ? { workingState } : {}),
     ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),

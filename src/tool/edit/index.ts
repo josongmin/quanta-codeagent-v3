@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
+import { gitWriteGuardDeny } from "../git-write-guard-result"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
@@ -20,6 +21,22 @@ const schema = z.object({
 
 type Input = z.infer<typeof schema>
 
+/** Build the `ok:false` mismatch `ToolResult` when neither the exact nor the
+ *  fuzzy edit applied. Extracted from `execute` (pure: no I/O) so the generator
+ *  body stays flat. Phase-4 strategy-hint semantics are unchanged — it
+ *  classifies via the structural `result.kind` tag when present and appends the
+ *  stable `[edit-mismatch:<kind>]` marker so out-of-process consumers can
+ *  recover the kind without re-sniffing the message text. */
+const buildMismatchResult = (result: {
+  message: string
+  kind?: Parameters<typeof formatEditMismatchMarker>[0]
+}): { ok: false; output: string } => {
+  const next = classifyMismatch(result.kind !== undefined ? { kind: result.kind } : result.message)
+  const hint = formatStrategyHint(next)
+  const marker = result.kind !== undefined ? ` ${formatEditMismatchMarker(result.kind)}` : ""
+  return { ok: false, output: `${result.message}${marker}\n\n${hint}` }
+}
+
 /** Build the `edit` tool against an injected {@link FileSystemPort} (#13).
  *  `fs` defaults to the real `@/storage`-backed port, so the exported
  *  {@link editTool} is byte-identical to the pre-port direct-call version;
@@ -38,6 +55,16 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    // ADR-0091 git-write-protection: an edit targeting `.git/{hooks,config,
+    // config.worktree,info/attributes}` or `.vscode/**` is a code-execution /
+    // policy-escape vector. Static-deny BEFORE the read, mirroring the
+    // FsJailError hard-stop below — never a partial write. Default-OFF: absent
+    // `ctx.gitWriteGuard` the helper returns null (byte-identical legacy path).
+    const guardDeny = gitWriteGuardDeny(input.path, ctx)
+    if (guardDeny) {
+      yield guardDeny
+      return
+    }
     // Resolve relative paths against the session cwd, not process.cwd().
     // The jail check fires in readFile() (and again in writeFile()) BEFORE
     // any write, so a denied path is NEVER a partial write.
@@ -51,22 +78,9 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       if (!result.ok || result.next === undefined) {
         // Phase 4: surface a structured next-strategy hint so the LLM can
         // switch to `scripted_replace` / re-read instead of re-trying the same
-        // patch. Exit semantics unchanged (still ok:false) — message text only.
-        //
-        // CR2 follow-up: classify via the structural `result.kind` tag when
-        // present (compile-checked) and fall back to text sniffing otherwise.
-        // Append a stable `[edit-mismatch:<kind>]` marker so out-of-process
-        // consumers (or a future typed `ToolResult.evidence` field) can also
-        // recover the kind without re-implementing the text sniff.
-        const next = classifyMismatch(
-          result.kind !== undefined ? { kind: result.kind } : result.message,
-        )
-        const hint = formatStrategyHint(next)
-        const marker = result.kind !== undefined ? ` ${formatEditMismatchMarker(result.kind)}` : ""
-        yield {
-          type: "result",
-          result: { ok: false, output: `${result.message}${marker}\n\n${hint}` },
-        }
+        // patch. Exit semantics unchanged (still ok:false). Built by the
+        // extracted `buildMismatchResult` helper (keeps this generator flat).
+        yield { type: "result", result: buildMismatchResult(result) }
         return
       }
       await fs.writeFile(input.path, result.next, ctx.cwd)

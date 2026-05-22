@@ -89,6 +89,7 @@ export type {
   BlockerSurface,
   DeferredHandle,
   DeferredToolResult,
+  GitWriteGuard,
   HITLTier,
   PlanExitRequester,
   PlanExitToolDecision,

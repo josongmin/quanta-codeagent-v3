@@ -3,29 +3,35 @@ title: git-write-protection 정적 deny (.git/{hooks,config} + .vscode)
 section: 3
 subsystem: 코드실행 탈옥 벡터 차단 (Cursor cursorsandbox 흡수, ADR-0091)
 order: 91
-maturity: L2
-status: new
+maturity: L3
+status: stable
 purpose: |
   Cursor cursorsandbox의 Seatbelt write-deny-regex를 surface-agnostic 정적 detector로
   흡수 — .git/hooks·.git/config·.vscode write는 곧 임의 코드 실행(git/에디터가 auto-run)
   이므로 정통 샌드박스 탈옥 벡터. gitWriteProtectReason(path)는 순수 경로-패턴 매처
   (I/O 0, 상태 0): 세그먼트 앵커 매칭(substring 아님)으로 .gitignore/git/config/notes/.git-stuff
   false-deny 원천 차단, 중첩 .git(submodule/worktree) 전 세그먼트 스캔. .cursorignore·
-  *.code-workspace는 고의 제외(Cursor 고유, quanta 벡터 아님).
+  *.code-workspace는 고의 제외(Cursor 고유, quanta 벡터 아님). L3 wiring(ADR-0091): write/edit
+  툴이 fs write 직전 ctx.gitWriteGuard(duck-typed seam — @/tool은 @/permission 미import)를
+  통해 호출, non-null이면 ok:false + typed permission_denied failure로 정적 deny(부분 쓰기 0,
+  FsJailError와 동일 hard-stop). dispatch.ts가 gitWriteProtectReason을 무조건 주입(매처가
+  pure라 일반 경로는 byte-identical). SOTA++ delta(Cursor cursorsandbox 흡수): .git/config.worktree
+  (per-worktree config overlay, config와 동일 권한)·.git/info/attributes(filter-exec gitattributes)
+  추가 deny — git_attributes reason 신설, git_config는 config.worktree 포함.
 evidence:
   code:
     - src/permission/git-write-guard.ts
+    - src/tool/git-write-guard-result.ts
+    - src/tool/write/index.ts
+    - src/tool/edit/index.ts
+    - src/agent/dispatch.ts
   adrs: [91]
   tests:
-    unit: [tests/unit/permission/git-write-guard.test.ts]
+    unit:
+      - tests/unit/permission/git-write-guard.test.ts
+      - tests/unit/git-write-protection-wired.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    L2 — 순수 detector만 추가, 아직 아무도 호출 안 함(DEFAULT-OFF). dispatch.ts/
-    loop.ts/inspector.ts(타 트랙 소유)는 무수정이라 실제 deny 집행 효과 0.
-  promotion_path: |
-    write 타겟을 gitWriteProtectReason에 통과시켜 non-null이면 정적 deny + typed stop을
-    dispatch-seam/permission-gate에 wiring하면 L3.
+deliberate_hold: null
 notes: '리터럴-유니온 + ALL_* 런타임 배열 + never default exhaustive switch(review-kind.ts 미러). OS 샌드박스 비의존이라 모든 surface에서 동작.'

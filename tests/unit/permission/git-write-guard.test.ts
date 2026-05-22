@@ -23,9 +23,9 @@ import {
 } from "@/permission/git-write-guard"
 
 describe("git-write-guard — enum completeness", () => {
-  test("ALL_GIT_WRITE_PROTECT_REASONS enumerates exactly 4 unique literals", () => {
-    expect(ALL_GIT_WRITE_PROTECT_REASONS.length).toBe(4)
-    expect(new Set(ALL_GIT_WRITE_PROTECT_REASONS).size).toBe(4)
+  test("ALL_GIT_WRITE_PROTECT_REASONS enumerates exactly 5 unique literals", () => {
+    expect(ALL_GIT_WRITE_PROTECT_REASONS.length).toBe(5)
+    expect(new Set(ALL_GIT_WRITE_PROTECT_REASONS).size).toBe(5)
   })
 })
 
@@ -42,6 +42,14 @@ describe("git-write-guard — protected patterns HIT", () => {
     // .git/config → git_config
     [".git/config", "git_config"],
     [".git/config/", "git_config"],
+    // .git/config.worktree (per-worktree overlay) → git_config (Cursor delta)
+    [".git/config.worktree", "git_config"],
+    [".git/config.worktree/", "git_config"],
+    ["vendor/lib/.git/config.worktree", "git_config"],
+    // .git/info/attributes (filter-exec attributes) → git_attributes (Cursor delta)
+    [".git/info/attributes", "git_attributes"],
+    [".git/info/attributes/", "git_attributes"],
+    ["modules/sub/.git/info/attributes", "git_attributes"],
     // .vscode/* → editor_config
     [".vscode/tasks.json", "editor_config"],
     [".vscode/launch.json", "editor_config"],
@@ -118,6 +126,13 @@ describe("git-write-guard — near-misses do NOT match", () => {
     // configfoo / hooksfoo are different segments
     ".git/configfoo",
     ".git/hooksfoo/x",
+    // config.worktreefoo is a different segment, not the worktree overlay
+    ".git/config.worktreefoo",
+    // .git/info/exclude is a plain ignore list — no exec surface, not denied
+    ".git/info/exclude",
+    ".git/info",
+    ".git/info/attributes/extra",
+    ".git/info/attributesfoo",
     // bare .vscode dir (no file under it) — creating empty dir has no exec effect
     ".vscode",
     ".vscode/",
@@ -144,6 +159,7 @@ describe("git-write-guard — exhaustive switch over reason compiles + runs", ()
       case "git_hooks":
       case "git_hooks_dir":
       case "git_config":
+      case "git_attributes":
       case "editor_config":
         return reason
       default: {
@@ -161,7 +177,13 @@ describe("git-write-guard — exhaustive switch over reason compiles + runs", ()
 
   test("the matcher only ever returns a member of the closed union (or null)", () => {
     const observed = new Set<GitWriteProtectReason>()
-    const samples = [".git/hooks/pre-commit", ".git/hooks", ".git/config", ".vscode/tasks.json"]
+    const samples = [
+      ".git/hooks/pre-commit",
+      ".git/hooks",
+      ".git/config",
+      ".git/info/attributes",
+      ".vscode/tasks.json",
+    ]
     for (const s of samples) {
       const r = gitWriteProtectReason(s)
       if (r !== null) {

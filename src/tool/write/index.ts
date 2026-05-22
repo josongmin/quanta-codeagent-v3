@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
+import { gitWriteGuardDeny } from "../git-write-guard-result"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -30,6 +31,17 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
     hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
     async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      // ADR-0091 git-write-protection: a write to `.git/{hooks,config,config.
+      // worktree,info/attributes}` or `.vscode/**` is a code-execution / policy
+      // -escape vector (git/editor auto-runs them). Static-deny BEFORE any fs
+      // call, mirroring the FsJailError hard-stop posture below — never a
+      // partial write. Default-OFF: when `ctx.gitWriteGuard` is unwired the
+      // helper returns null and the path is byte-identical.
+      const guardDeny = gitWriteGuardDeny(input.path, ctx)
+      if (guardDeny) {
+        yield guardDeny
+        return
+      }
       // Resolve relative paths against the session cwd, not process.cwd().
       // The jail check fires inside fileExists()/writeFile() BEFORE any bytes
       // are written, so a denied path is NEVER a partial write.

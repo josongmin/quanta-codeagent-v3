@@ -32,7 +32,25 @@ export interface ToolContext {
    *  the concrete requester from `AgentConfig.planExitPort` (wrapping
    *  `runPlanExitFlow`). Absent ⇒ the tool is not registered. */
   requestPlanExit?: PlanExitRequester
+  /** ADR-0091 — OPTIONAL git-write-protection detector. The `write`/`edit`
+   *  tools call this with their resolved target path BEFORE touching the
+   *  filesystem; a non-null return is a static escape-vector deny (`.git/hooks`,
+   *  `.git/config`, `.git/config.worktree`, `.git/info/attributes`, `.vscode/`)
+   *  and the tool yields an `ok:false` ToolResult with a typed
+   *  `permission_denied` failure. Duck-typed so `@/tool` never imports
+   *  `@/permission` (slice isolation, RFC 3.1): the dispatch seam wires the
+   *  concrete `gitWriteProtectReason` from `@/permission/git-write-guard`. The
+   *  returned string is the opaque reason tag surfaced to the model. Absent ⇒
+   *  no git-write guard (byte-identical legacy path). */
+  gitWriteGuard?: GitWriteGuard
 }
+
+/** Duck-typed git-write-protection detector injected via {@link ToolContext}.
+ *  Structural mirror of `gitWriteProtectReason` from `@/permission/git-write-
+ *  guard` (kept here so `@/tool` stays slice-isolated from `@/permission`):
+ *  PURE path-pattern matcher, no I/O. Returns an opaque reason tag string when
+ *  writing `path` would be a code-execution / policy-escape vector, else null. */
+export type GitWriteGuard = (path: string) => string | null
 
 /** ADR-0086 plan-exit decision — structural mirror of `PlanExitDecision`
  *  (`@/agent/plan-exit`); dispatch bridges the two by value. */
