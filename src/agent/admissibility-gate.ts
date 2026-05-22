@@ -39,8 +39,10 @@ import {
   grantAndCascade,
   type HITLTier,
   hardDenyReason,
+  inferReviewKind,
   inferToolTier,
   isAllowed,
+  isDecisionLegalFor,
   type LearningSource,
   type PendingPermission,
   type PermissionContext,
@@ -150,6 +152,27 @@ export interface AdmissibilityWaveAOptions {
     learningSource: LearningSource
     suggestedAllowlistEntry: string | null
   }) => void
+  /**
+   * ADR-0070 review-kind matrix (L3→L4) — Cursor `allowlist_escalated` re-run
+   * pattern. A mutable Set the gate consults BEFORE invoking the reviewer:
+   * when the action's `actionKey` is already in the set, the reviewer is
+   * SKIPPED and the gate emits a synthetic auto-pass through the pre-hook.
+   * On a reviewer approval, the gate ADDS the actionKey so a subsequent
+   * structurally-equivalent call within the same run does not re-prompt.
+   *
+   * Caller-owned (typically one Set per `runAgent` invocation, scoped to the
+   * run). Absent ⇒ the escalation cache is bypassed entirely (every reviewer
+   * round runs as before — byte-identical legacy).
+   */
+  allowlistEscalated?: Set<string>
+  /**
+   * ADR-0070 review-kind matrix (L3→L4) — when set, the gate FORCES this
+   * {@link ReviewKind} on the `ReviewContext` instead of deriving it via
+   * {@link inferReviewKind}. Used by tests and surfaces that already know the
+   * kind (e.g. an MCP-only host). Absent ⇒ inferred from the tool + readonly
+   * shape.
+   */
+  reviewKindOverride?: import("@/permission").ReviewKind
 }
 
 /** Map a `ReviewerTier` to the short preview tag suffix the dispatch seam
@@ -191,25 +214,81 @@ const reviewAndDecide = async (
   // re-review of the identical action.
   const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
   const actionKey = shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
+
+  // ADR-0070 allowlist_escalated re-run pattern — Cursor parity. When a prior
+  // approval recorded this actionKey, skip the reviewer entirely and proceed
+  // through the pre-hook. The cache is run-scoped (caller-owned Set).
+  if (opts.allowlistEscalated?.has(actionKey)) {
+    return runPreToolUseHook(call, config, opts)
+  }
+
   const keyed: ToolActionKeyed = {
     tool: action.tool,
     input: action.input,
     isReadOnly: action.isReadOnly,
     actionKey,
   }
+  // ADR-0070 — attach the WHAT-IS-BEING-REVIEWED axis. Overridable via
+  // `opts.reviewKindOverride`; otherwise inferred from the tool name + readonly
+  // shape. The port may consume `ctx.reviewKind` to render a kind-typed UI; if
+  // it doesn't, the field is ignored (byte-identical legacy port behavior).
+  const reviewKind = opts.reviewKindOverride ?? inferReviewKind(action.tool, action.isReadOnly)
   const ctx: ReviewContext = {
     sessionId: config.sessionId ?? "default",
     turnId: String(config.run?.turn ?? 0),
     priorDenials: opts.priorDenials ?? [],
     configReviewer: opts.defaultReviewer ?? "user",
     decidedAt: opts.decidedAt ? opts.decidedAt() : Date.now(),
+    reviewKind,
   }
   const dec = await reviewAction(keyed, ctx, opts.reviewerPort)
   const tag = reviewerTag(dec.reviewer)
-  if (isAllowed(dec.outcome)) return runPreToolUseHook(call, config, opts)
+
+  // ADR-0070 — validate the OPTIONAL richer verb against the reviewKind.
+  // A port that returns a verb illegal for the kind (e.g. `allowlist_commands`
+  // on an `edit` kind) MUST be rejected — this is a wiring/contract bug, not
+  // a user-facing decision. Surfaced as a typed deny so a host learns about
+  // the malformed verb without trusting it as an allow.
+  if (dec.verb !== undefined && !isDecisionLegalFor(reviewKind, dec.verb)) {
+    return deny(
+      call.id,
+      `Reviewer returned illegal verb '${dec.verb.verb}' for reviewKind='${reviewKind}'.`,
+      "reviewer_verb_illegal",
+    )
+  }
+
+  if (isAllowed(dec.outcome)) {
+    // ADR-0070 — record the actionKey in the allowlist_escalated cache so a
+    // subsequent structurally-equivalent call within the same run skips review.
+    opts.allowlistEscalated?.add(actionKey)
+    return runPreToolUseHook(call, config, opts)
+  }
+
   // Rule-ask escalations carry an `origin=rule` marker so the surface can tell
   // a denylist-rule escalation apart from an always-confirm-tier escalation.
   const originSuffix = origin === "rule" ? " (origin=rule)" : ""
+
+  // ADR-0070 — `reject_and_tell` carries a steering message for the model.
+  // We synthesize a `deny_and_steer` ConfirmDecision and route it through the
+  // EXISTING {@link denyFromConfirm} seam so the gate has exactly ONE
+  // `steerInjection:` assignment site (regression-guarded by
+  // admissibility-deny-steer-hell.test.ts §G-1d).
+  if (dec.verb !== undefined && dec.verb.verb === "reject_and_tell") {
+    const baseContent =
+      dec.outcome === "user_aborted"
+        ? `User aborted: ${dec.rationale}${originSuffix}${HANDOFF_SUFFIX}`
+        : dec.outcome === "guardian_denied"
+          ? `Guardian denied: ${dec.rationale}${originSuffix}`
+          : `User declined: ${dec.rationale}${originSuffix}`
+    return denyFromConfirm(
+      call,
+      { decision: "deny_and_steer", steer: dec.verb.message },
+      baseContent,
+      tag,
+      config,
+    )
+  }
+
   if (dec.outcome === "user_aborted") {
     return deny(call.id, `User aborted: ${dec.rationale}${originSuffix}${HANDOFF_SUFFIX}`, tag)
   }

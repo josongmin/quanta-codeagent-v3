@@ -188,6 +188,56 @@ export const stopCategoryFor = (
 })
 
 /**
+ * Infer the {@link ReviewKind} for an action from its tool name + read-only
+ * flag. Pure heuristic — extracts the WHAT-IS-BEING-REVIEWED axis from the
+ * shape of the call without consulting any port.
+ *
+ * Rules (closed, ordered):
+ *   - `web_fetch` / `webFetch` / `fetch` / `http*` tool names ⇒ `web_fetch`.
+ *   - `web_search` / `webSearch` / `search`-suffixed tool names ⇒ `web_search`.
+ *   - tool name starts with `mcp__` (the project MCP namespace) ⇒ `mcp`.
+ *   - `delete` / `rm` / `remove`-shaped names ⇒ `delete`.
+ *   - extractShellCommand-bearing tools (or names matching `bash`/`shell`/
+ *     `exec`/`run`/`terminal`) ⇒ `terminal`.
+ *   - read-only tools that did not match above ⇒ `plan` (advisory, non-
+ *     blocking — the closest "no execution" kind we have).
+ *   - everything else ⇒ `edit` (the safest mutating default).
+ *
+ * The caller passes `isReadOnly` explicitly — we never call into the tool
+ * registry from this pure module. Returns a deterministic kind; the gate
+ * uses it to attach `reviewKind` to the `ReviewContext`.
+ */
+export const inferReviewKind = (tool: string, isReadOnly: boolean): ReviewKind => {
+  const name = tool.toLowerCase()
+  // MCP namespace is checked FIRST so an `mcp_search` (e.g. the project's MCP
+  // skill-search) classifies as `mcp`, not `web_search` (which is the wider
+  // bucket).
+  if (name.startsWith("mcp__") || name.startsWith("mcp_")) return "mcp"
+  if (name === "web_fetch" || name === "webfetch" || name === "fetch" || name.startsWith("http")) {
+    return "web_fetch"
+  }
+  if (name === "web_search" || name === "websearch" || name.endsWith("_search")) {
+    return "web_search"
+  }
+  if (name === "delete" || name === "rm" || name === "remove" || name.endsWith("_delete")) {
+    return "delete"
+  }
+  if (
+    name === "bash" ||
+    name === "shell" ||
+    name === "exec" ||
+    name === "run" ||
+    name === "terminal" ||
+    name.endsWith("_exec") ||
+    name.endsWith("_shell")
+  ) {
+    return "terminal"
+  }
+  if (isReadOnly) return "plan"
+  return "edit"
+}
+
+/**
  * Whether `decision` is a legal verb for `kind`.
  *
  * The universal verbs (`run`, `skip`, `reject_and_tell`) are legal for every

@@ -158,7 +158,10 @@ const assertReviewerAvailable = (reviewer: ReviewerTier, port: ReviewerPort): vo
 }
 
 /** Validate a port-supplied decision against the invariant matrix. Throws
- *  `OutcomeInvariantError` via `buildDecision` if invalid. */
+ *  `OutcomeInvariantError` via `buildDecision` if invalid. Preserves the
+ *  optional ADR-0070 review-kind verb when present (the gate validates the
+ *  verb against `ctx.reviewKind` itself — the reviewer module stays orthogonal
+ *  to the WHAT-IS-BEING-REVIEWED axis). */
 const validateDecision = (decision: ApprovalDecision): ApprovalDecision =>
   buildDecision({
     reviewer: decision.reviewer,
@@ -166,6 +169,7 @@ const validateDecision = (decision: ApprovalDecision): ApprovalDecision =>
     riskLevel: decision.riskLevel,
     rationale: decision.rationale,
     decidedAt: decision.decidedAt,
+    ...(decision.verb !== undefined ? { verb: decision.verb } : {}),
   })
 
 /** Main entry point. Resolves sticky precedence, then dispatches to the

@@ -11,6 +11,7 @@
  * fallback. The reviewer module relies on this guarantee.
  */
 
+import type { ReviewDecision } from "./review-kind"
 import type { ApprovalDecision, ApprovalOutcome, ReviewerTier } from "./types"
 
 /** All eight outcome literals, enumerated. Kept here as a runtime-visible
@@ -160,8 +161,12 @@ export const buildDecision = (args: {
   riskLevel: "low" | "medium" | "high"
   rationale: string
   decidedAt: number
+  /** ADR-0070 review-kind matrix (L3→L4) — OPTIONAL richer decision verb.
+   *  When passed, surfaces on the returned {@link ApprovalDecision.verb}
+   *  unchanged; the gate validates it against `ReviewContext.reviewKind`. */
+  verb?: ReviewDecision
 }): ApprovalDecision => {
-  const { reviewer, outcome, riskLevel, rationale, decidedAt } = args
+  const { reviewer, outcome, riskLevel, rationale, decidedAt, verb } = args
   if (!isAdmissible(reviewer, outcome)) {
     throw new OutcomeInvariantError(
       reviewer,
@@ -179,5 +184,7 @@ export const buildDecision = (args: {
       `decidedAt must be a finite non-negative integer (got ${decidedAt})`,
     )
   }
-  return { reviewer, outcome, riskLevel, rationale, decidedAt }
+  return verb !== undefined
+    ? { reviewer, outcome, riskLevel, rationale, decidedAt, verb }
+    : { reviewer, outcome, riskLevel, rationale, decidedAt }
 }

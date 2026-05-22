@@ -114,6 +114,7 @@ export {
   ALL_REASON_CODES,
   ALL_REVIEW_DECISION_VERBS,
   ALL_REVIEW_KINDS,
+  inferReviewKind,
   isDecisionLegalFor,
   isExecutionBlocking,
   reasonCodeFor,

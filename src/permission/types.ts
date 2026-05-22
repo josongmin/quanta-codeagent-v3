@@ -1,5 +1,6 @@
 import type { HITLTier } from "@/shared"
 import type { ClassifierPort } from "./classifier"
+import type { ReviewDecision, ReviewKind } from "./review-kind"
 
 export type PermissionDecision =
   | { kind: "allow" }
@@ -119,6 +120,13 @@ export interface ApprovalDecision {
   /** Caller-provided ms-since-epoch. Pure logic never reads the wall clock;
    *  tests and trajectory replay supply a deterministic value. */
   readonly decidedAt: number
+  /** ADR-0070 review-kind matrix (L3→L4) — OPTIONAL richer decision verb the
+   *  reviewer port may attach. When set, the gate validates the verb against
+   *  the `ReviewContext.reviewKind` via `isDecisionLegalFor` and routes the
+   *  `reject_and_tell.message` into the steering seam (becomes
+   *  `DispatchResult.steerInjection`). Absent ⇒ legacy `outcome`-only path
+   *  (byte-identical for every existing ReviewerPort impl). */
+  readonly verb?: ReviewDecision
 }
 
 /** Sticky post-denial precedence record — once an actionKey has been denied
@@ -169,4 +177,12 @@ export interface ReviewContext {
   readonly configReviewer: ReviewerTier
   /** Caller-provided clock for deterministic decisions. */
   readonly decidedAt: number
+  /** ADR-0070 review-kind matrix (L3→L4) — OPTIONAL "what is being reviewed"
+   *  axis. When set, the port may render the prompt with a kind-typed UI
+   *  (`edit` vs `terminal` vs `web_fetch` …) AND attach a richer
+   *  {@link ApprovalDecision.verb} the gate validates against this kind via
+   *  `isDecisionLegalFor`. The gate computes this via {@link inferReviewKind}
+   *  before invoking the port. Absent ⇒ port renders the legacy generic
+   *  confirm prompt (byte-identical). */
+  readonly reviewKind?: ReviewKind
 }
