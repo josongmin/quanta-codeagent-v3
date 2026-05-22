@@ -79,7 +79,10 @@ describe("agent loop — skill model/effort override enforcement (ADR-0011 §6.2
       "---\nname: boost\ndescription: escalate\nmodel: boost-model\neffort: high\n---\nThink harder.\n",
     )
     // Base port: turn-1 invokes the skill, then a defensive completion.
-    const base = new RecordingLLM("base-model", [invokeSkill("s1", "boost"), finishText("base done")])
+    const base = new RecordingLLM("base-model", [
+      invokeSkill("s1", "boost"),
+      finishText("base done"),
+    ])
     // Candidate port (id === skill's `model:`): yields the post-activation turn.
     const boost = new RecordingLLM("boost-model", [finishText("boosted")])
 

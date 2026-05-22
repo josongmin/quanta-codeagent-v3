@@ -289,15 +289,10 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
         tokens: e.tokens,
       }
     case "in_progress":
-      // ADR-0048: heartbeat payload — receive-side timestamp + the optional
-      // provider-supplied status/percentage. `reason:"in_progress"` keeps this
-      // recovery-kind line greppable apart from real recovery points.
-      return {
-        reason: "in_progress",
-        timestamp: e.timestamp,
-        ...(e.message !== undefined ? { message: e.message } : {}),
-        ...(e.progress !== undefined ? { progress: e.progress } : {}),
-      }
+      // ADR-0048: heartbeat payload. The two optional-field branches live in
+      // `inProgressData` so this case stays a single statement (keeps `dataOf`
+      // under the cognitive-complexity budget).
+      return inProgressData(e)
     case "error":
       return { message: e.message }
     case "usage":
@@ -317,6 +312,19 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
       return assertNever(e, "AgentEvent")
   }
 }
+
+/** ADR-0048: heartbeat payload — receive-side timestamp + the optional
+ *  provider-supplied status/percentage. `reason:"in_progress"` keeps this
+ *  recovery-kind line greppable apart from real recovery points. Extracted from
+ *  `dataOf` so its switch case stays a single statement. */
+const inProgressData = (
+  e: Extract<AgentEvent, { type: "in_progress" }>,
+): Record<string, unknown> => ({
+  reason: "in_progress",
+  timestamp: e.timestamp,
+  ...(e.message !== undefined ? { message: e.message } : {}),
+  ...(e.progress !== undefined ? { progress: e.progress } : {}),
+})
 
 /** Deterministic span/parent for an event given the active turn span. */
 const spanOf = (e: AgentEvent, turnSpanId: string): { spanId?: string; parentSpanId?: string } => {

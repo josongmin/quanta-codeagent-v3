@@ -72,17 +72,12 @@ export class StdoutStream implements StreamPort {
       case "llm_request":
         process.stdout.write(`${DIM}— llm request (${event.model}) —${RESET}\n`)
         break
-      case "in_progress": {
-        // ADR-0048: provider "thinking…" heartbeat. Render a terse one-liner,
-        // appending the optional status / percentage when carried.
-        const pct = event.progress !== undefined ? ` ${Math.round(event.progress * 100)}%` : ""
-        const msg =
-          event.message !== undefined && event.message !== ""
-            ? `: ${oneLine(event.message)}`
-            : ""
-        process.stdout.write(`${DIM}… thinking${pct}${msg}${RESET}\n`)
+      case "in_progress":
+        // ADR-0048: provider "thinking…" heartbeat. The two optional-field
+        // branches live in `renderInProgress` so this case stays a single
+        // statement (keeps `emit`'s cognitive complexity under the budget).
+        process.stdout.write(renderInProgress(event))
         break
-      }
       case "usage":
         process.stdout.write(
           `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,
@@ -100,6 +95,16 @@ export class StdoutStream implements StreamPort {
       }
     }
   }
+}
+
+/** ADR-0048: render the `in_progress` heartbeat one-liner, appending the
+ *  optional percentage + status when the provider carried them. Extracted from
+ *  `emit` so the switch case stays a single statement. */
+const renderInProgress = (event: Extract<AgentEvent, { type: "in_progress" }>): string => {
+  const pct = event.progress !== undefined ? ` ${Math.round(event.progress * 100)}%` : ""
+  const msg =
+    event.message !== undefined && event.message !== "" ? `: ${oneLine(event.message)}` : ""
+  return `${DIM}… thinking${pct}${msg}${RESET}\n`
 }
 
 /** Mask secrets in a free-text string via the single-source @/shared scrub.

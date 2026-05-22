@@ -153,6 +153,21 @@ export interface SessionFeatures {
  *   mode ⇒ no classifier.
  * - none of the above ⇒ `{ extraTools: [] }`.
  */
+/** ADR-0011 §6.2 → L4: the per-skill model/effort override entry, or
+ *  `undefined` when the skill declares neither (a non-empty `model:` string
+ *  AND/OR any defined `effort:`, including numeric 0). Extracted from the
+ *  per-skill loop in {@link buildSkillFeatures} so that loop stays a single
+ *  branch (keeps the function under the cognitive-complexity budget). */
+const skillOverrideEntry = (s: Skill): SkillTurnOverride | undefined => {
+  const model = skillModelOverride(s)
+  const effort = skillEffortOverride(s)
+  if (model === undefined && effort === undefined) return undefined
+  return {
+    ...(model !== undefined ? { model } : {}),
+    ...(effort !== undefined ? { effort } : {}),
+  }
+}
+
 /** Discover skills + build the `Skill`/`ToolSearch` tools and the declared
  *  tool-allowlist map (ADR-0011). Extracted from
  *  {@link buildSessionFeatures} so that function stays under the cognitive-
@@ -200,14 +215,8 @@ const buildSkillFeatures = async (
   for (const s of skills) {
     const allow = skillToolAllowlist(s)
     if (allow) al.set(s.name, allow)
-    const model = skillModelOverride(s)
-    const effort = skillEffortOverride(s)
-    if (model !== undefined || effort !== undefined) {
-      ov.set(s.name, {
-        ...(model !== undefined ? { model } : {}),
-        ...(effort !== undefined ? { effort } : {}),
-      })
-    }
+    const override = skillOverrideEntry(s)
+    if (override) ov.set(s.name, override)
   }
   // Plain `{name, description}` shape so the prompt slice never imports
   // `@/skill` (slice isolation — Codex skills-audit mirror). Built ONCE here
@@ -332,12 +341,31 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   return {
     extraTools,
-    ...(classifier ? { classifier } : {}),
-    ...(taskRegistry ? { taskRegistry } : {}),
-    ...(cleanup ? { cleanup } : {}),
-    ...(skillAllowlists ? { skillAllowlists } : {}),
-    ...(skillOverrides ? { skillOverrides } : {}),
-    ...(activeSkills ? { activeSkills } : {}),
-    ...(workingState ? { workingState } : {}),
+    ...optionalFeatureFields({
+      classifier,
+      taskRegistry,
+      cleanup,
+      skillAllowlists,
+      skillOverrides,
+      activeSkills,
+      workingState,
+    }),
   }
+}
+
+/** Fold the optional, "absent ⇒ feature off" {@link SessionFeatures} fields
+ *  into a partial that omits every `undefined` entry — preserving the prior
+ *  `...(x ? { x } : {})` semantics for ALL fields in ONE place. Extracted so
+ *  `buildSessionFeatures` carries no per-field conditional-spread branches
+ *  (keeps it under the cognitive-complexity budget). */
+const optionalFeatureFields = (
+  f: {
+    [K in keyof Omit<SessionFeatures, "extraTools">]: SessionFeatures[K] | undefined
+  },
+): Partial<SessionFeatures> => {
+  const out: Partial<SessionFeatures> = {}
+  for (const [k, v] of Object.entries(f)) {
+    if (v !== undefined) (out as Record<string, unknown>)[k] = v
+  }
+  return out
 }

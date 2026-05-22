@@ -14,7 +14,7 @@
 import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
 import type { StreamEvent } from "@/llm"
-import { FakeLLM, baseConfig, RecordingStream } from "./_harness"
+import { baseConfig, FakeLLM, RecordingStream } from "./_harness"
 
 const heartbeatTurn = (createdAt: number): StreamEvent[] => [
   { type: "text_delta", delta: "thinking " },
