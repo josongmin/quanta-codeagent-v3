@@ -1,7 +1,12 @@
 import * as readline from "node:readline/promises"
 import { type AgentOutcome, buildSystemPrompt, RetryingLLM, runAgent } from "@/agent"
 import type { ContentBlock, ImageBlock, LLMPort, Message } from "@/llm"
-import { buildShellOtelObserver, StructuredLogger } from "@/observability"
+import {
+  buildCostDashboard,
+  buildShellOtelObserver,
+  renderDashboardText,
+  StructuredLogger,
+} from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger } from "@/shared"
 import { composeShellObservers } from "@/tool"
@@ -315,7 +320,14 @@ export const runRepl = async (): Promise<void> => {
     const outcome = await session(history)
     history = outcome.messages
     await persistTurn({ state, idMeta, sessionId, messages: history, outcome })
-    if (metrics) slog.info("metrics.snapshot", { snapshot: metrics.snapshot() })
+    if (metrics) {
+      const snap = metrics.snapshot()
+      slog.info("metrics.snapshot", { snapshot: snap })
+      // ADR-0085: render the cost & cache dashboard to stderr after each turn
+      // when metrics are enabled — keeps the structured log AND gives the
+      // operator a human-readable cost/latency/cache summary inline.
+      process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
+    }
   }
 
   try {

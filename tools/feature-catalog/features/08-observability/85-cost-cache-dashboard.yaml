@@ -1,0 +1,25 @@
+id: cost-cache-dashboard
+title: Cost & cache 대시보드
+section: 8
+subsystem: 비용·캐시 가시화 (ADR-0085)
+order: 85
+maturity: L3
+status: new
+purpose: |
+  MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·
+  turns·toolCalls(byTool)·stopReasons·latency(p50/p95)·shell rollup 집계. 새 수집 0
+  (AgentRecorder/shell-otel가 채운 counter/timer만 read). 3 renderer: text(터미널)·
+  markdown(PR)·JSON. CLI는 metrics 활성 시 turn 종료마다 stderr로 text 블록 출력.
+  cost는 unknown model이면 null(가짜 $0 금지).
+evidence:
+  code:
+    - src/observability/cost-dashboard.ts
+    - src/apps/cli/repl.ts
+  adrs: [85]
+  tests:
+    unit: [tests/unit/cost-dashboard.test.ts]
+    integration: []
+    contract: []
+knobs: [QUANTA_METRICS]
+deliberate_hold: null
+notes: '데이터 이미 있던 것의 표현 surface. 세션 누적만 (per-turn delta는 follow-up). markdown은 PR 코멘트용.'

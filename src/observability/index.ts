@@ -1,4 +1,10 @@
 export { type Attrs, attrs, mergeAttrs, workMetricsAttrs } from "./attrs"
+export {
+  buildCostDashboard,
+  type CostDashboard,
+  renderDashboardMarkdown,
+  renderDashboardText,
+} from "./cost-dashboard"
 export { log, StructuredLogger } from "./logger"
 export { Metrics, metrics } from "./metrics"
 export { costUsd, PRICING_VERSION } from "./pricing"
