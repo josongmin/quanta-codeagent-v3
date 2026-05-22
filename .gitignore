@@ -36,3 +36,7 @@ coverage/
 
 # Claude Code subagent worktrees (per-agent isolation)
 .claude/worktrees/
+
+# SWE-bench smoke live-run artifacts (baseline is picks.jsonl, not these)
+tests/smoke/swebench/predictions.jsonl
+tests/smoke/swebench/bench-report.json

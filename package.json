@@ -22,6 +22,8 @@
     "smoke:live": "bun run tests/smoke/index.ts --tier=live",
     "smoke:report": "bun run tests/smoke/index.ts --report",
     "smoke:record": "bun run tests/smoke/record-cli.ts",
+    "smoke:swebench": "bun run src/apps/bench/index.ts --swebench tests/smoke/swebench/picks.jsonl --predictions tests/smoke/swebench/predictions.jsonl --report tests/smoke/swebench/bench-report.json",
+    "smoke:swebench:audit": "bun run tests/smoke/swebench/select.ts --audit",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src tests",
     "lint:fix": "biome check --write src tests",
