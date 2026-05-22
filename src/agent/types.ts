@@ -12,6 +12,7 @@ import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { ShellExecObserver } from "@/tool/shell-exec-types"
+import type { BranchSearchConfig } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { ConfirmDecision } from "./confirm-decision"
@@ -404,6 +405,22 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * (defines escalation sequence). Wired by the surface layer.
    */
   modelCandidates?: readonly ModelCandidate[]
+  /**
+   * ADR-0083 speculative branch search — opt-in N-best verifier-prover.
+   * When set, the `branch_search` first-class tool is registered (the model
+   * may call it on hard edits) and `runBranchSearch` becomes available to
+   * downstream callers (e.g. a future verify-guard auto-trigger). Absent ⇒
+   * tool unregistered, no scoring overhead, byte-identical legacy path.
+   *
+   * Per-mode wiring (see `apps/agent/mode-presets`):
+   *   - cli      : enabled, defaultN=3 (interactive budget)
+   *   - bench    : enabled, defaultN=5 (score-maximizing)
+   *   - ci-bot   : DISABLED (no human review — N-best decisions need oversight)
+   *   - daemon   : enabled, defaultN=3 (nightly batch — opt-in per task)
+   *
+   * The closed `BranchSearchConfig` lives in `@/agent/branch-search/types`.
+   */
+  branchSearch?: BranchSearchConfig
   /**
    * ADR-0081 shell output delta streaming — opt-in observer for the typed
    * `ShellExecEvent` stream. The dispatch seam forwards this to

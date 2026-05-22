@@ -2,6 +2,7 @@ export { type Attrs, attrs, mergeAttrs, workMetricsAttrs } from "./attrs"
 export { log, StructuredLogger } from "./logger"
 export { Metrics, metrics } from "./metrics"
 export { costUsd, PRICING_VERSION } from "./pricing"
+export { buildShellOtelObserver } from "./shell-exec-otel"
 export {
   __resetSpanSink,
   endSpan,
@@ -14,6 +15,11 @@ export {
   setSpanSink,
   startSpan,
 } from "./spans"
+export {
+  createTurnTimingCapture,
+  type TurnTiming,
+  type TurnTimingCapture,
+} from "./turn-timing"
 export type {
   Counter,
   Gauge,
@@ -26,11 +32,6 @@ export type {
   TimerStats,
   TimerStop,
 } from "./types"
-export {
-  createTurnTimingCapture,
-  type TurnTiming,
-  type TurnTimingCapture,
-} from "./turn-timing"
 export { GEN_AI_ATTRS, QUANTA_ATTRS } from "./vocabulary"
 export {
   accumulateWorkMetrics,

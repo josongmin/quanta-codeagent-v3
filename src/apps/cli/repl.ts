@@ -1,9 +1,10 @@
 import * as readline from "node:readline/promises"
 import { type AgentOutcome, buildSystemPrompt, RetryingLLM, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
-import { StructuredLogger } from "@/observability"
+import { buildShellOtelObserver, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger } from "@/shared"
+import { composeShellObservers } from "@/tool"
 import {
   argvPrompt,
   assembleConfig,
@@ -26,6 +27,7 @@ import {
 } from "./internal"
 import { runSessionCommand } from "./session-commands"
 import { persistTurn, switchToSessionCwd } from "./session-io"
+import { buildShellStreamPainter } from "./shell-stream-painter"
 import { runSlashCommand } from "./slash-commands"
 
 /**
@@ -246,6 +248,23 @@ export const runRepl = async (): Promise<void> => {
   // pure composition module stays env-free; the persona is resolved via
   // `pickPersona()` which reads the env at the composition root.
   const system = buildSystemPrompt(cwd, { persona: pickPersona() })
+  // ADR-0081 L4 surface wire: compose the CLI's shell-output observers.
+  //   - `buildShellStreamPainter()` paints stdout/stderr chunks to stderr live
+  //     (dim ANSI when stderr-TTY, plain when piped or `NO_COLOR` set). Built
+  //     ONLY for interactive stdin TTYs so `cat … | bun cli …` stays
+  //     byte-identical to the pre-wire buffered path.
+  //   - `buildShellOtelObserver(metrics)` updates per-run counters when the
+  //     metrics registry is wired.
+  // `composeShellObservers` swallows per-observer throws so a painter on a
+  // closed TTY cannot break the OTel counter and vice versa. When neither
+  // observer is built, the field is `undefined` and `runShell` skips event
+  // allocation entirely.
+  const painterObs = process.stdin.isTTY ? buildShellStreamPainter() : undefined
+  const otelObs = metrics ? buildShellOtelObserver(metrics) : undefined
+  const onShellEvent =
+    painterObs !== undefined || otelObs !== undefined
+      ? composeShellObservers(painterObs, otelObs)
+      : undefined
   const sessionDeps: SessionDeps = {
     llm: finalLLM,
     registry,
@@ -268,6 +287,7 @@ export const runRepl = async (): Promise<void> => {
     compactionBreakerConfig,
     verifyGuardConfig,
     summarizerLlm: buildSummarizerLlm(provider, abort.signal),
+    onShellEvent,
   }
   const session = (messages: Message[]): Promise<AgentOutcome> =>
     runAgent(assembleConfig(messages, sessionDeps))

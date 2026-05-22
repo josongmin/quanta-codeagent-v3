@@ -410,6 +410,7 @@
         "!tests/unit/cli-resume-heuristic.test.ts",
         "!tests/unit/slash-commands.test.ts",
         "!tests/unit/cli-retry-with.test.ts",
+        "!tests/unit/shell-exec-observers-surface.test.ts",
         "!tests/unit/cli/**",
         "!tests/unit/dotenv.test.ts",
         "!tests/unit/env-knob-branches.test.ts",

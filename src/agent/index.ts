@@ -157,6 +157,25 @@ export type {
   StopReason,
 } from "./types"
 export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
+// ADR-0083 speculative branch search — types-only re-export (impl lives in
+// the branch-search subdirectory; consumers import from `@/agent/branch-search`
+// for runtime fns, but type access via `@/agent` keeps AgentConfig users
+// branchless).
+export type {
+  BranchCandidate,
+  BranchSearchConfig,
+  BranchSearchRequest,
+  BranchSearchResult,
+  BranchSeed,
+  BranchTraceEvent,
+  CandidateScore,
+  Isolator,
+  Scorer,
+  Selector,
+  Verifier,
+  VerifierKind,
+  VerifierSignal,
+} from "./branch-search"
 // RFC may-22-unified-agent-runtime — run-mode + budget slices.
 export {
   asDials,
