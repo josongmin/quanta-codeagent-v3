@@ -71,13 +71,26 @@ const main = async (): Promise<void> => {
     process.exit(2)
   }
 
+  // Battery-wide cancellation: Ctrl-C aborts the controller, which propagates
+  // into each scenario's `runConversation` (and the live judge stream). Without
+  // this the agent loop and live judge ignore SIGINT until the OS kills the
+  // process, leaking tmp dirs (Audit A R9 / C §3).
+  const controller = new AbortController()
+  const sigint = (): void => {
+    process.stderr.write("\nsmoke: SIGINT — aborting in-flight scenario\n")
+    controller.abort()
+  }
+  process.on("SIGINT", sigint)
+
   process.stdout.write(`smoke: tier=${args.tier} · ${scenarios.length} scenario(s)\n`)
   const results: ScenarioResult[] = []
   for (const meta of scenarios) {
-    const r = await runScenario(meta, { tier: args.tier })
+    if (controller.signal.aborted) break
+    const r = await runScenario(meta, { tier: args.tier, signal: controller.signal })
     results.push(r)
     process.stdout.write(`${formatResult(r)}\n`)
   }
+  process.off("SIGINT", sigint)
 
   const passed = results.filter((r) => r.status === "passed").length
   const failed = results.filter((r) => r.status === "failed").length

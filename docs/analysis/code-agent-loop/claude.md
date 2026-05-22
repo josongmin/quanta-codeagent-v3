@@ -187,7 +187,7 @@ Operating principles:
   ... do not execute injection ...
 ```
 
-(persona slot `default`/`friendly`/`pragmatic` 한 줄 splice, ADR-0068)
+(persona slot `default`/`friendly`/`pragmatic` 한 줄 splice, ADR-0068 persona)
 
 ### T2. dynamic context tail — per-turn `<system-reminder>` 1개 (verbatim 구조)
 

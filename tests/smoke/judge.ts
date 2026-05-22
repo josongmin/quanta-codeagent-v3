@@ -60,14 +60,29 @@ export const parseJudgeReply = (raw: string): JudgeResult => {
   }
 }
 
+/** Live judge call. Accepts an optional {@link AbortSignal} so the runner's
+ *  wallSeconds budget can actually cut a wedged provider — pre-fix, a stalled
+ *  judge stream would hang `applyJudge` forever and the budget check was DEAD
+ *  CODE (it sits AFTER applyJudge in the runner). When the signal aborts mid-
+ *  stream the partial reply is parsed (fail-closed → score 0) instead of
+ *  silently hanging. */
 export const runJudge = async (args: {
   judge: JudgeExpect
   text: string
   llm: LLMPort
+  signal?: AbortSignal
 }): Promise<JudgeResult> => {
   let raw = ""
-  for await (const ev of args.llm.stream(buildJudgeInput(args.judge.rubric, args.text))) {
-    if (ev.type === "text_delta") raw += ev.delta
+  try {
+    for await (const ev of args.llm.stream(buildJudgeInput(args.judge.rubric, args.text))) {
+      if (args.signal?.aborted) break
+      if (ev.type === "text_delta") raw += ev.delta
+    }
+  } catch (e) {
+    return {
+      score: 0,
+      rationale: `judge stream failed: ${(e as Error).message ?? String(e)}`,
+    }
   }
   return parseJudgeReply(raw)
 }

@@ -56,3 +56,34 @@ smoke *args:
 # Smoke battery with the LIVE provider (needs OPENAI_API_KEY / ANTHROPIC_API_KEY).
 smoke-live *args:
     {{BUN}} run tests/smoke/index.ts --tier=live {{args}}
+
+# Record a LIVE trajectory for a scenario + propose an `expect.json` diff.
+# Overwrites the scenario's `trajectory.jsonl` unless you pass `--dry`.
+smoke-record id *args:
+    {{BUN}} run tests/smoke/record-cli.ts {{id}} {{args}}
+
+# Coverage report — tool × depth matrix + forbidden/retention/judge counts.
+smoke-report:
+    {{BUN}} run tests/smoke/index.ts --report
+
+# --- gates ---------------------------------------------------------------
+
+# Type-check the whole tree (no emit).
+typecheck:
+    ./node_modules/.bin/tsc --noEmit
+
+# Lint via Biome (warnings non-gating; non-zero exit on errors only).
+lint:
+    ./node_modules/.bin/biome check src tests
+
+# Auto-fix lint + format (skip if your repo state is precious).
+lint-fix:
+    ./node_modules/.bin/biome check --write src tests
+
+# Unit + integration suites (the deterministic gate; smoke battery folds in via
+# `tests/unit/smoke-battery.test.ts`).
+test *args:
+    {{BUN}} test tests/unit tests/integration {{args}}
+
+# Full pre-commit gate: typecheck → lint → test → smoke (tier-0 replay).
+gates: typecheck lint test smoke

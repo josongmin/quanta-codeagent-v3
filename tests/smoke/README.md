@@ -16,10 +16,12 @@ bun run smoke:record <id> --dry # record + print, write nothing
 The battery also runs inside `bun test` via `tests/unit/smoke-battery.test.ts`,
 so every PR gates on tier-0.
 
-**Catalog (13 scenarios):**
+**Catalog (15 scenarios — single 4 · medium 4 · tikitaka 7):**
 - single — `01-read-summarize` · `02-glob-list` · `03-grep-symbol` · `04-bash-inspect`
 - medium — `05-read-then-edit` · `06-grep-then-fix` · `07-test-then-impl` · `08-plan-then-go`
-- tikitaka — `09-multi-file-rename` · `10-iterative-debug` · `11-context-callback` · `12-correction-undo` · `13-spec-clarify`
+- tikitaka — `09-multi-file-rename` · `10-iterative-debug` · `11-context-callback` · `12-correction-undo` · `13-spec-clarify` · `14-refusal-handled` · `15-refusal-mid-tool`
+
+The coverage report (`bun run smoke --report`) is the source of truth — run it any time the catalog grows.
 
 ## Layout
 
@@ -51,7 +53,7 @@ Industry-SOTA blend (Inspect AI / promptfoo / Braintrust). All blocks optional:
 | `finalText` | `contains` / `containsAny` / `notContains` / `regex` |
 | `contextRetention[]` | a given run's assistant text mentions a prior fact (tikitaka recall) |
 | `budget` | `wallSeconds` / `tokensInput` / `tokensOutput` max |
-| `judge` | LLM-as-judge rubric + threshold (Phase 2; `cached` score honoured now) |
+| `judge` | LLM-as-judge rubric + threshold — `cached.score` gates tier-0 sync; live judge runs in tier-1 with fail-closed JSON parse |
 
 ## Trajectory format
 
@@ -77,18 +79,38 @@ Exhausting a trajectory mid-run throws (a stale fixture FAILS loud → re-record
 1. `mkdir -p fixtures/<depth>/<NN-name>/seed` and drop seed files in.
 2. Write `prompts.jsonl` (one user message per line).
 3. Write `expect.json`.
-4. Record the trajectory (Phase 2: `bun run smoke:record <id>`); until then,
-   hand-author `trajectory.jsonl` from a known-good live run.
+4. Record the trajectory: `bun run smoke:record <id>` (live provider call;
+   needs `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`). Until you record, hand-author
+   `trajectory.jsonl` from a known-good live run — but note edit `old_string`
+   MUST be unique in the (post-prior-edits) seed unless `replace_all:true`,
+   otherwise the edit is a silent no-op.
 
 ## Tiers
 
 - **tier-0 replay** — implemented. Hermetic, $0, <1s/scenario. CI default; folded
-  into `bun test`.
+  into `bun test` via `tests/unit/smoke-battery.test.ts`.
+- **tier-1 live** — implemented. `bun run smoke --tier=live` (or
+  `QUANTA_SMOKE_LIVE=1`) hits the real provider via the public `@/llm` adapters.
+  Polite-skip when the key is absent (no hard fail). Live LLM-judge runs on
+  scenarios that carry a `judge` block.
 - **record mode** — implemented. `smoke:record <id>` wraps the live provider
   (`QUANTA_LLM_PROVIDER` openai|anthropic, `QUANTA_SMOKE_MODEL` to override),
   captures the trajectory to `trajectory.jsonl`, and prints a field-level diff
   of the existing `expect.json` vs an expectation PROPOSED from the observed run
-  (exact stopReason / turns / tool counts). Requires the provider key.
-- **tier-1 live battery** — roadmap. A `QUANTA_SMOKE_LIVE=1` mode that runs the
-  whole battery against the real provider in nightly cron, skipping politely
-  when the key is absent.
+  (stopReason / turns / tool counts). Requires the provider key. **Overwrites
+  `trajectory.jsonl` without confirmation** unless `--dry`.
+- **coverage report** — `bun run smoke --report` (or `bun run smoke:report`)
+  prints a tool × depth matrix plus forbidden-sentinel / context-retention /
+  judge counts. Designed to surface use-case gaps as the catalog grows.
+
+## Caveats / sharp edges
+
+- `trajectory.jsonl` only scripts the model's decisions — the **tools run for
+  real** against the tmp workspace. Never paste a destructive `bash` command
+  into a recording you intend to replay.
+- Default permission is `bypass` (hermetic sandbox); a scenario can opt in to
+  `acceptEdits` / `default` via `config.json` to exercise the gate itself.
+- The smoke harness uses `QUANTA_SMOKE_MODEL` (default `gpt-4o`) for live tier;
+  the runtime CLI uses `QUANTA_MODEL` (Justfile default `gpt-5`). These are
+  deliberately separate envs — record/replay should be cheap, the runtime CLI
+  benefits from the strongest model.

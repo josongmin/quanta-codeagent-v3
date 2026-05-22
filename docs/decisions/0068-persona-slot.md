@@ -1,5 +1,10 @@
 # ADR-0068 — Persona slot (Codex `{{ personality }}` Handlebars absorption)
 
+(NOTE: shares the `0068` number with the Codex 2-Phase memory consolidator ADR
+by intentional choice — the two land in orthogonal subsystems (`src/agent/persona.ts`
+and `src/memory/consolidate/*`) and the duplicate is left in place. Feature-catalog
+yamls disambiguate by file location, not by ADR number.)
+
 ## Status
 Accepted (2026-05-21)
 

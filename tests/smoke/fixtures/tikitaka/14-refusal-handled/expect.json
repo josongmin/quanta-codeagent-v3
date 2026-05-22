@@ -1,5 +1,5 @@
 {
   "stopReason": "error",
   "turns": { "count": { "max": 1 } },
-  "toolCalls": { "counts": {} }
+  "toolCalls": { "forbidden": ["bash"], "counts": {} }
 }

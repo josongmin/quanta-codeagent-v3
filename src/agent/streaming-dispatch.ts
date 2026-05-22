@@ -454,13 +454,32 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
 
   if (isAborted(signal)) return { kind: "aborted" }
 
-  if (!(await drainDeferredSlots(state.slots, dispatch, onToolStart, signal))) {
-    return { kind: "aborted" }
+  // ADR-0076 Gap-5 — refusal in-stream short-circuit. When the provider stops
+  // with `stop_reason: "refusal"`, ANY tool calls that were queued mid-stream
+  // are part of the refused intent and MUST NOT execute. We skip Phase 3
+  // (deferred dispatch — barrier-blocked unsafe calls that haven't started
+  // yet). Phase 2 already settled the concurrency-safe overlap calls that
+  // pre-started — we cannot un-start those (their `dispatch(call)` was fired
+  // at `scheduleResolvedCall`) so we collect their results in Phase 4.
+  // The loop's `decideOnAssembled` will declare the turn terminal (error)
+  // regardless, and `runStep` does NOT `wm.append` on error — so orphan
+  // tool_use blocks in `message.content` never carry to the next turn.
+  if (stopReason !== "refusal") {
+    if (!(await drainDeferredSlots(state.slots, dispatch, onToolStart, signal))) {
+      return { kind: "aborted" }
+    }
+    if (isAborted(signal)) return { kind: "aborted" }
   }
 
-  if (isAborted(signal)) return { kind: "aborted" }
-
-  const resultBlocks = await collectResultBlocks(state.slots)
+  // Phase 4: collect ONLY slots that actually dispatched. On the normal path
+  // every slot has a promise (Phase 1 in-flight OR Phase 3 deferred-dispatched).
+  // On the refusal short-circuit, deferred slots have `promise === undefined`
+  // and are excluded — their tool calls never ran, so they produce no result
+  // block. The orphan tool_use blocks remain in `message.content` but are
+  // discarded by the loop along with the message (error return without
+  // wm.append).
+  const dispatched = state.slots.filter((s) => s.promise !== undefined)
+  const resultBlocks = await collectResultBlocks(dispatched)
 
   return { kind: "assembled", message: message as Message, stopReason, resultBlocks }
 }

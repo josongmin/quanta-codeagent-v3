@@ -20,10 +20,12 @@ export class TrajectoryReplayLLM implements LLMPort {
    *  prompt stability across compaction). */
   readonly inputs: StreamInput[] = []
   private readonly byRunTurn: Map<string, StreamEvent[]>
+  private readonly scenarioHint: string
   private run = 0
   private turn = 0
 
-  constructor(entries: readonly TrajectoryEntry[]) {
+  constructor(entries: readonly TrajectoryEntry[], scenarioHint = "<unknown>") {
+    this.scenarioHint = scenarioHint
     const buckets = new Map<string, StreamEvent[]>()
     for (const e of entries) {
       const key = `${e.run}:${e.turn}`
@@ -51,6 +53,7 @@ export class TrajectoryReplayLLM implements LLMPort {
     if (bucket === undefined) {
       throw new Error(
         `smoke trajectory exhausted at run=${this.run} turn=${this.turn} ` +
+          `for scenario "${this.scenarioHint}" ` +
           `(no events recorded for this bucket — re-record the fixture)`,
       )
     }

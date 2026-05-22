@@ -20,14 +20,37 @@ export class MissingProviderKeyError extends Error {
   }
 }
 
+export class InvalidProviderError extends Error {
+  constructor(readonly raw: string) {
+    super(
+      `QUANTA_LLM_PROVIDER="${raw}" is not a known provider (expected: openai | anthropic). ` +
+        "Set it explicitly or unset to use the openai default.",
+    )
+    this.name = "InvalidProviderError"
+  }
+}
+
 export interface BuiltProvider {
   llm: LLMPort
-  provider: string
+  provider: SmokeProvider
   model: string
 }
 
+export type SmokeProvider = "openai" | "anthropic"
+
+/** Resolve `QUANTA_LLM_PROVIDER` to the closed `SmokeProvider` union. Throws
+ *  {@link InvalidProviderError} on any unknown value — closes the silent-typo
+ *  footgun where `QUANTA_LLM_PROVIDER=open_ai` would route to OpenAI without a
+ *  warning. Absent ⇒ "openai" (documented default). */
+export const resolveProvider = (raw: string | undefined): SmokeProvider => {
+  if (raw === undefined || raw === "") return "openai"
+  const norm = raw.toLowerCase()
+  if (norm === "openai" || norm === "anthropic") return norm
+  throw new InvalidProviderError(raw)
+}
+
 export const buildLiveLLM = (): BuiltProvider => {
-  const provider = (process.env.QUANTA_LLM_PROVIDER ?? "openai").toLowerCase()
+  const provider = resolveProvider(process.env.QUANTA_LLM_PROVIDER)
   if (provider === "anthropic") {
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) throw new MissingProviderKeyError("anthropic")
@@ -37,11 +60,12 @@ export const buildLiveLLM = (): BuiltProvider => {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new MissingProviderKeyError("openai")
   const model = process.env.QUANTA_SMOKE_MODEL ?? "gpt-4o"
+  const baseURL = process.env.OPENAI_BASE_URL?.trim()
   return {
     llm: new OpenAIAdapter({
       apiKey,
       model,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+      ...(baseURL ? { baseURL } : {}),
     }),
     provider: "openai",
     model,
@@ -49,9 +73,11 @@ export const buildLiveLLM = (): BuiltProvider => {
 }
 
 /** True iff the selected provider has a usable key — lets callers decide to
- *  skip before doing any setup work. */
+ *  skip before doing any setup work. Propagates {@link InvalidProviderError}
+ *  for typo'd env values so callers can fail loudly rather than silently
+ *  routing to the default. */
 export const hasProviderKey = (): boolean => {
-  const provider = (process.env.QUANTA_LLM_PROVIDER ?? "openai").toLowerCase()
+  const provider = resolveProvider(process.env.QUANTA_LLM_PROVIDER)
   return provider === "anthropic"
     ? Boolean(process.env.ANTHROPIC_API_KEY)
     : Boolean(process.env.OPENAI_API_KEY)

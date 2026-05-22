@@ -3,8 +3,8 @@ title: Agent-loop branch hardening — refusal / thinking carry-over / deny-and-
 section: 1
 subsystem: 턴 라이프사이클 — branch 가드 (gap analysis, ADR-0076)
 order: 76
-maturity: L4
-status: refined
+maturity: L3
+status: new
 purpose: |
   docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent
   loop의 4개 결함 중 3개 shipped + 1개 deferred. Gap-1 — Provider refusal/abnormal stop:
@@ -24,6 +24,16 @@ purpose: |
   시 deny DispatchResult를 emit하면서 steer를 result envelope steerInjection?: string에 attach.
   Gap-3 — Submission op dispatcher: 6-variant union shape는 존재하나 entry-point 분기는 deferred
   (loop.ts 동시 co-development 회피).
+
+  Gap-5 — Refusal in-stream tool short-circuit (self-audit follow-up, 2026-05-22):
+  streamingTurn의 Phase 3 (drainDeferredSlots — barrier-blocked unsafe tool
+  dispatch)가 `stopReason === "refusal"`이면 SKIP. 자체 audit 발견 — 기존
+  Gap-1은 `decideOnAssembled`(post-stream)에서만 단락하므로 mid-stream tool_use
+  가 deferred slot으로 들어간 후 message_stop=refusal이 와도 bash가 실제로
+  실행되었음(smoke 15-refusal-mid-tool가 매 CI run마다 `echo malicious` 실행).
+  Phase 4는 dispatched slot(promise!==undefined)만 collect — orphan tool_use
+  블록은 message.content에 남지만 runStep의 error 분기가 wm.append 없이 즉시
+  종료하므로 carry-over 오염 없음. byte-identical: non-refusal 경로 변화 0.
 
   Hell-gate hardening (181 hell case + 2 e2e smoke): 6 신규 hell-test file이
   3개 추가 invariant를 PIN — (i) signature_delta가 thinking_delta 없이 도착하면
@@ -48,6 +58,7 @@ evidence:
   adrs: [76]
   tests:
     unit:
+      - tests/unit/recovery.test.ts
       - tests/unit/anthropic-thinking-delta.test.ts
       - tests/unit/llm/anthropic-thinking.test.ts
       - tests/unit/llm/openai-thinking.test.ts
@@ -79,8 +90,9 @@ deliberate_hold:
 notes: |
   e2e 회귀 가드: tikitaka smoke fixture 2종 — 14-refusal-handled (Gap-1 happy
   path: refusal → terminal error, no retry consumption) + 15-refusal-mid-tool
-  (refusal과 tool_use가 같은 stream에 공존하는 critical invariant: refusal이
-  tool_use를 트리거하지 않고 즉시 terminal). 181 hell-case 분포:
+  (refusal과 tool_use가 같은 stream에 공존하는 critical invariant — Gap-5에
+  의해 bash 실제 실행 안 됨; expect.json이 `toolCalls.forbidden:["bash"]` +
+  `counts.bash.max:0`로 PIN). 181 hell-case 분포:
   recovery-hell(30) · assemble-thinking-hell(27) · anthropic-thinking-hell(21) ·
   openai-thinking-hell(21) · confirm-decision-hell(55) · admissibility-deny-steer-hell(27).
   ThinkingBlock의 wire 재직렬화는 Anthropic signature / OpenAI re-encode 양쪽

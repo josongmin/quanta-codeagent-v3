@@ -280,9 +280,12 @@ const buildHandoffDeny = (
  * `deny_and_steer` the preview is bumped to `deny_steer` and the steer text is
  * surfaced on `DispatchResult.steerInjection` for the loop to inject next turn.
  *
- * MUST be called only with a refusal (`deny` / `deny_and_steer`); an `allow`
- * is a programming error and throws (the callers gate on `isConfirmAllowed`
- * before reaching here).
+ * MUST be called only with a refusal (`deny` / `deny_and_steer`). All current
+ * callers gate on `isConfirmAllowed` before reaching here, so an `allow` is
+ * unreachable in practice; if one ever leaks through, `buildDenySteerMessage`
+ * returns `null` (only `deny_and_steer` produces a steer body) and the
+ * function falls back to the plain `deny(...)` shape — defensive, not a
+ * silent allow.
  */
 const denyFromConfirm = (
   call: ToolUseBlock,

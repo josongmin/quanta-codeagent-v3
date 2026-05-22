@@ -285,6 +285,43 @@ When this PR lands, the seven negative-invariant section's NI #5
 ("`steerInjection` is a one-shot") becomes enforceable at the loop
 level, not just at the test level.
 
+## Addendum (2026-05-22) — Gap-5: Refusal in-stream tool short-circuit
+
+A 3-round self-audit after Gap-1/2/4 shipped found a structural hole in
+Gap-1 that the post-stream `decideOnAssembled` check could not close:
+when a `tool_use` block resolved mid-stream and was queued as a deferred
+slot (`scheduleResolvedCall` engages the head-of-line barrier on the
+first concurrency-unsafe tool, e.g. `bash`), the deferred dispatch ran
+in Phase 3 (`drainDeferredSlots`) BEFORE `streamingTurn` returned and
+BEFORE the loop's terminal-refusal branch could fire. Evidence: the
+smoke fixture `tikitaka/15-refusal-mid-tool` was actually executing
+`echo malicious` on disk in every CI run, with `expect.json` asserting
+only `stopReason: "error"` and not the tool-count, so the malicious
+side effect was invisible.
+
+**Decision**: in `streamingTurn` (`src/agent/streaming-dispatch.ts`),
+skip Phase 3 when `stopReason === "refusal"`. Phase 4 then collects
+results only for slots that actually dispatched (Phase 1 in-flight
+overlap calls — concurrency-safe, already started before the refusal
+event arrived in stream — `slot.promise !== undefined`). Deferred
+slots have `slot.promise === undefined` and are excluded; their
+tool calls never run. The assembled message still contains the
+orphan `tool_use` blocks, but `runStep` returns terminal `error` on
+`decideOnAssembled`'s refusal branch WITHOUT `wm.append` (loop.ts
+line 1145) — orphan blocks are discarded with the message, so the
+next-turn `StreamInput.messages` is never polluted.
+
+**Smoke fixture hardening**: `15-refusal-mid-tool/expect.json` now
+asserts `toolCalls.forbidden: ["bash"]` and `counts.bash.max: 0` to
+PIN the short-circuit at the e2e level. `14-refusal-handled` adds
+the same forbidden-bash guard so the no-tool refusal path is also
+explicit.
+
+**Byte-identical guard**: non-refusal stop reasons retain the prior
+control flow exactly — `if (stopReason !== "refusal")` wraps Phase 3
+verbatim. The Phase 4 filter `state.slots.filter((s) => s.promise !== undefined)`
+is a no-op on the normal path (every slot has a promise post-Phase 3).
+
 ## Related
 - ADR-0030 mid-turn steer (steer primitive — `deny_and_steer` reuses)
 - ADR-0048 `response_in_progress` heartbeat (orthogonal — partial vs stop)

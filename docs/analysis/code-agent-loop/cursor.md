@@ -5,7 +5,7 @@
 ## 목차
 - §0 증거 파일 · §1 아키텍처(3계층)
 - **요청 경로**: §2 envelope/필드 · §2A 프롬프트·payload 내용물 · §2B 상황별 조립 매트릭스
-- **루프 내부**: §2C 턴 라이프사이클(이벤트 순서·동시성) · §2D 지속/취소/재진입 · §2E hook·permission·compaction 끼어드는 지점 · §2F 백그라운드·병렬 · **§2G 프롬프트 템플릿 카탈로그 (상황별 verbatim)**
+- **루프 내부**: §2C 턴 라이프사이클(이벤트 순서·동시성) · §2D 지속/취소/재진입 · §2E hook·permission·compaction 끼어드는 지점 · §2F 백그라운드·병렬 · **§2G 프롬프트 템플릿 카탈로그 (상황별 verbatim)** · **§2H 코드 로컬라이제이션 요약** (상세 → [cursor-localization.md](./cursor-localization.md))
 - **응답 경로**: §3 typed enum/메시지 · §4 분기 트리 D1–D10
 - §5 통제 모델(닫힌 verb / 열린 effect) · §6 quanta 흡수 시사점
 
@@ -724,6 +724,41 @@ attached_files, system_notification, task_notification, agent_notification
 
 ### 한 줄 요약
 **클라가 *짓는* 프롬프트 ≈ 30개 verbatim 템플릿** (위 a–v + SKILL.md 활성본문 6+). 나머지 — 코어 persona, 모드 지시문, 메모리, 환경 렌더링, 루프 거버너 기본 메시지, simulated re-entry 본문, skill activation wrap — 전부 서버 조립. **즉 "클라이언트가 모델에 보낸다"의 90%는 서버 조립이고, 클라이언트 quirk(홈/자식/CI/diff-tab/MCP-auth/debug/browser-elem)이 나머지 10%다.**
+
+---
+
+## 2H. 코드 로컬라이제이션 — 요약 (상세: [cursor-localization.md](./cursor-localization.md))
+
+> 자세한 컴포넌트·RPC·핸드셰이크·턴별 조립·증거는 별도 문서. 여기는 한 페이지 요약.
+
+**큰 정정**: 직관과 다르게 **Cursor는 클라 retrieval에 tree-sitter도 LSP도 안 쓴다**. `treesitter.getDefinedSymbols/getReferencedSymbols/getImportantDefinitionNames`는 클라 wasm 호출이 아니라 **`aiserver.v1.AiService.IsolatedTreesitter`** 서버 RPC. 동봉된 tree-sitter wasm 4개(css/typescript/ini/regex)는 *VS Code core 에디터 highlighting 전용*, `cursor-retrieval`에서 0회 참조. `vscode.execute*Provider` LSP 명령도 retrieval에서 0건.
+
+**클라가 *실제로* 하는 일 5개:**
+1. **Merkle 파일트리** — Rust NAPI `@anysphere/file-service`로 파일 해시 트리만
+2. **simhash** — 워크스페이스 leaf 해시 float 벡터(서버가 "같은 코드베이스 재활용" 판정)
+3. **`crepectl` 로컬 grep 데몬** — Rust ripgrep-derived, in-memory index, `grep_search`/`ripgrep_search`/`glob_file_search` 백엔드. **retrieval 무관**, 순수 on-demand
+4. **FS watcher 2개**(merkle용 + GrepClient용 별개) - `**` glob
+5. **턴마다 *통째* 파일을 prompt 봉투에 담아 서버에 올림** — `getCodeChunksFromFileSelections`: @-멘션/가시/AI-편집/컴포저 파일을 **chunk 안 함, line 1부터 전체** (`CodeChunk{startLineNumber:1, lines:전체}`), max 16 병렬
+
+**서버가 다 한다 🔒:** 청킹(`RechunkerChoice` IDENTITY/600/2400/4000toks) / 임베딩 / 벡터스토어 / tree-sitter 심볼(`IsolatedTreesitter`) / `ContextItem` 분류 (FileChunk/OutlineChunk/SparseFileChunk/LspSubgraphChunk) / outline / 의존그래프 / rerank.
+
+**클라 디스크 상태**: `~/Library/Application Support/Cursor/User/workspaceStorage/<hash>/anysphere.cursor-retrieval/`에 `embeddable_files.txt`(인덱싱 대상 목록) + `high_level_folder_description.txt`(서버 생성 요약) 둘뿐. **SQLite/벡터/임베딩 캐시 0**.
+
+**핸드셰이크 + sync**: `FastRepoInitHandshakeV2{rootHash, simhash[], pathKeyHash, do_copy}` → 서버가 같은 codebase 가지면 카피 재활용 → 아니면 `SyncMerkleSubtreeV2` subtree 재귀(match/mismatch) → leaf 도달 시 `FastUpdateFileV2{ADD/DELETE/MODIFY/BATCH}` 업로드. **Delta payload는 풀-파일** (`LocalFile.file.contents` UTF-8 전체) — diff/청크 delta 아님, "delta"는 *어느 파일을* 보낼지의 결정.
+
+**★ Drift 방어 — 4단 (이벤트 안 믿음)**: ①매 chat 턴 `recent_edits` overlay(0s, fresh) ②Rust 내부 debounced rehash(이벤트당) ③**서버 주도 subtree-walk 화해 ≥60s**(★ 진짜 보장 — watcher 100% 놓쳐도 60초 내 복구) ④handshake 매 cycle ground truth 재정립(UP_TO_DATE/OUT_OF_SYNC/EMPTY). race lock 4-timer로 중복 sync 차단. 의도적 drift 허용: oversized 파일 silent skip, upload 중 race는 다음 tick 화해, 자가 `removeRepositoryV2` 없음(사용자 명시 reindex만). 상세 → [cursor-localization.md §17](./cursor-localization.md#17-delta-sync--drift-방어--변경분이-어긋나면-빵꾸-안-나나).
+
+**Ignore 4-layer 우선순위**: admin blocklistPath → admin unifiedJsonBlocklist → `cursor.general.globalCursorIgnoreList` → `.cursorignore`/`.cursorindexingignore`. **홈 디렉토리 인덱싱 거부**.
+
+**모델이 부르는 도구의 2-step semantic search**: `codebase_search`(SEMANTIC_SEARCH_CODEBASE) → top-K 후보 메타만 → 모델이 골라 **`read_semsearch_files`**(#1) → 본문 hydrate.
+
+**`read_file` vs retrieval — 두 분리 경로**:
+- `read_file`: 바이트 range 그대로 (NOT chunked), `tool_results`로 반환, +`matching_cursor_rules`(glob 매칭 .mdc 자동첨부)+`images[]`(PDF/이미지)
+- retrieval: 서버가 `ContextItem`으로 골라 echo, 클라 UI는 "shown to model" 오버레이만
+
+**`CodeChunk.Intent` 9-value**: COMPOSER/COMPRESSED_COMPOSER/RECENTLY_VIEWED/OUTLINE/MENTIONED/SELECTION/AI_EDITED/VISIBLE/TERMINAL_SELECTION — chunk 출처 모델에 명시.
+
+**quanta 흡수 결론 (정정)**: Cursor의 "클라 가볍게 + 서버 다 함"은 *백엔드 있는 회사만 가능한 결정*. quanta(BYO-API-key, 백엔드 없음)는 청킹·심볼·임베딩을 *어디선가* 해야 함 — 직접 결정 사항. 베낄 가치 있는 건 **결과 envelope**(2-step search / intent-tagged CodeChunk / `matching_cursor_rules` 자동첨부 / 4-layer ignore / retrieval↔read 분리)뿐, 인프라 패턴(Merkle 핸드셰이크/서버 청킹)은 흡수 부적합. 상세 시사 → [cursor-localization.md §15](./cursor-localization.md#15-quanta-흡수-시사--정정된-결론).
 
 ---
 

@@ -576,50 +576,75 @@ describe("ADR-0076 Gap-4 — REGRESSION GUARD: loop NOT yet consuming steerInjec
    *    below but NOT shipped in this ADR."
    *
    * Until a follow-up PR lands the consumer, the loop file MUST contain
-   * zero `steerInjection` references — otherwise an undocumented partial
-   * wiring would silently drift in. The day the wiring lands, this guard
-   * starts failing — by design, so the PR author updates it (or deletes
-   * the guard once the seam is permanent).
+   * zero CODE references to `steerInjection` (comments / JSDoc explaining
+   * the gap are EXPECTED and excluded by the comment-stripper) — otherwise
+   * an undocumented partial wiring would silently drift in. The day the
+   * wiring lands, this guard starts failing — by design, so the PR author
+   * updates it (or deletes the guard once the seam is permanent).
    *
-   * Implementation: load `src/agent/loop.ts` from disk and string-search.
-   * Strict but cheap; the alternative (running the loop end-to-end and
-   * asserting "no injection") is much more invasive.
+   * 2026-05-22 audit refinement: the original implementation used a raw
+   * `/steerInjection/g` match which false-positived on JSDoc / line
+   * comments that legitimately explain the un-wired seam, and the
+   * positive-control G-1d's `/steerInjection:\s*steer/g` would have
+   * false-negated if the local var were renamed (e.g. to `steerText`).
+   * Both are tightened: comments are stripped before the negative match,
+   * and the positive control uses `\bsteerInjection\s*:/g` so any
+   * structural assignment target survives a rename.
+   *
+   * Implementation: load `src/agent/loop.ts` from disk, strip line + block
+   * comments, then string-search. Strict but cheap; the alternative
+   * (running the loop end-to-end and asserting "no injection") is much
+   * more invasive.
    */
-  test("G-1: src/agent/loop.ts contains ZERO 'steerInjection' references", () => {
-    const loopPath = resolve(__dirname, "../../src/agent/loop.ts")
-    const src = readFileSync(loopPath, "utf8")
-    const count = (src.match(/steerInjection/g) ?? []).length
-    expect(count).toBe(0)
+  const stripComments = (src: string): string =>
+    src
+      // block comments first so /*…//…*/ stays a block comment
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "")
+
+  const countCodeRefs = (path: string): number => {
+    const src = readFileSync(resolve(__dirname, path), "utf8")
+    return (stripComments(src).match(/\bsteerInjection\b/g) ?? []).length
+  }
+
+  test("G-1: src/agent/loop.ts contains ZERO CODE 'steerInjection' references", () => {
+    expect(countCodeRefs("../../src/agent/loop.ts")).toBe(0)
   })
 
-  test("G-1b: src/agent/dispatch.ts contains ZERO 'steerInjection' references (consumer-side seam)", () => {
-    const dispatchPath = resolve(__dirname, "../../src/agent/dispatch.ts")
-    const src = readFileSync(dispatchPath, "utf8")
-    const count = (src.match(/steerInjection/g) ?? []).length
-    // dispatch.ts may carry the field through (it's a typed pass-through via
-    // DispatchResult) but MUST NOT actively consume it (i.e. inject as a
-    // user_message). The strictest assertion is that the symbol does not
-    // appear at all in dispatch.ts itself. If a future structural
-    // refactoring needs to thread the field, this guard will catch it.
-    expect(count).toBe(0)
+  test("G-1b: src/agent/dispatch.ts contains ZERO CODE 'steerInjection' references", () => {
+    // dispatch.ts may carry the field through the typed envelope but MUST
+    // NOT actively consume it (i.e. inject as user_message). Comments
+    // explaining that pass-through are allowed and stripped before match.
+    expect(countCodeRefs("../../src/agent/dispatch.ts")).toBe(0)
   })
 
-  test("G-1c: src/agent/streaming-dispatch.ts contains ZERO 'steerInjection' references", () => {
-    const streamingPath = resolve(__dirname, "../../src/agent/streaming-dispatch.ts")
-    const src = readFileSync(streamingPath, "utf8")
-    const count = (src.match(/steerInjection/g) ?? []).length
-    expect(count).toBe(0)
+  test("G-1c: src/agent/streaming-dispatch.ts contains ZERO CODE 'steerInjection' references", () => {
+    expect(countCodeRefs("../../src/agent/streaming-dispatch.ts")).toBe(0)
   })
 
-  test("G-1d: gate EMITS steerInjection at exactly the documented seam (positive control)", () => {
-    // Positive control: confirm the field IS set at the gate. This pairs
+  test("G-1d: gate EMITS steerInjection at exactly one assignment site (positive control)", () => {
+    // Positive control — confirm the field IS set at the gate. This pairs
     // with the negative guards above to show the gap is structural, not
-    // accidental.
+    // accidental. Uses `\bsteerInjection\s*:` so the assertion survives a
+    // rename of the local steer variable (e.g. `steer` → `steerText`).
     const gatePath = resolve(__dirname, "../../src/agent/admissibility-gate.ts")
-    const src = readFileSync(gatePath, "utf8")
-    // Expect exactly the documented `steerInjection: steer` assignment
-    // (one site at `denyFromConfirm`).
-    const count = (src.match(/steerInjection:\s*steer/g) ?? []).length
+    const src = stripComments(readFileSync(gatePath, "utf8"))
+    const count = (src.match(/\bsteerInjection\s*:/g) ?? []).length
+    expect(count).toBe(1)
+  })
+
+  test("G-1e: comment-stripper sanity — a fake stub with steerInjection in CODE is detected", () => {
+    // Positive control on the matcher itself. Without this, a future
+    // refactor that "stripped too much" could silently render the
+    // negative G-1 guards toothless. Synthesizes a one-line shadow
+    // source resembling a real consumer wire and confirms the matcher
+    // catches it (count = 1, not 0).
+    const fakeShadow =
+      "// commentary about steerInjection is allowed\n" +
+      "const x = res.steerInjection ?? ''\n" +
+      "/* multi-line note mentioning steerInjection */\n"
+    const stripped = stripComments(fakeShadow)
+    const count = (stripped.match(/\bsteerInjection\b/g) ?? []).length
     expect(count).toBe(1)
   })
 })

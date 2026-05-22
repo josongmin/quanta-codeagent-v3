@@ -78,6 +78,17 @@ export class CaptureStream implements StreamPort {
     return undefined
   }
 
+  /** Every `error` event message in order — used by the runner to surface the
+   *  agent-loop error detail when `outcome.reason === "error"` (Audit A R8 / C
+   *  low). Empty array when the run had no error events. */
+  errorMessages(): string[] {
+    const out: string[] = []
+    for (const ev of this.events) {
+      if (ev.type === "error") out.push(ev.message)
+    }
+    return out
+  }
+
   /** Sum of input + output tokens across ALL `usage` events. */
   totalUsage(): { inputTokens: number; outputTokens: number } {
     let inp = 0

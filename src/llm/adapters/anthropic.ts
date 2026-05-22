@@ -114,15 +114,31 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
       // signature-less plaintext block can therefore only be a stale artifact
       // (e.g. a hand-built message); we DROP it rather than fail the request,
       // exactly as the pre-feature path did.
+      //
+      // `satisfies` (not `as`) on both arms — the SDK's `ContentBlockParam`
+      // union exports `RedactedThinkingBlockParam` / `ThinkingBlockParam`
+      // structurally; `satisfies` catches a future required-field widening
+      // at compile time whereas `as` would silently mask it.
       if (block.redacted) {
-        return { type: "redacted_thinking", data: block.thinking } as Anthropic.ContentBlockParam
+        return {
+          type: "redacted_thinking",
+          data: block.thinking,
+        } satisfies Anthropic.ContentBlockParam
       }
       if (block.signature === undefined) return null
       return {
         type: "thinking",
         thinking: block.thinking,
         signature: block.signature,
-      } as Anthropic.ContentBlockParam
+      } satisfies Anthropic.ContentBlockParam
+    }
+    default: {
+      // Exhaustiveness pin: a future `ContentBlock` variant must come back
+      // here and decide its Anthropic mapping consciously — silent drop is
+      // not acceptable for a content-bearing block. The `never` cast fails
+      // compilation if the union widens; runtime fall-through is impossible.
+      const _exhaustive: never = block
+      return _exhaustive
     }
   }
 }
@@ -351,6 +367,48 @@ function* finishOnMessageDelta(
   yield { type: "message_stop", stop_reason: ev.delta.stop_reason }
 }
 
+/** Translate one Anthropic `content_block_delta`'s inner `RawDelta` payload
+ *  into our `StreamEvent` shape. Exhaustiveness is enforced by `default: never`
+ *  so a future widening of `RawDelta` (e.g. a new `citations_delta` arm) MUST
+ *  come back here and decide its mapping consciously — no silent drop. */
+function* yieldFromContentBlockDelta(
+  d: RawDelta,
+  open: OpenSlots,
+  index: number,
+): Generator<StreamEvent> {
+  switch (d.type) {
+    case "text_delta":
+      yield { type: "text_delta", delta: d.text }
+      return
+    case "input_json_delta": {
+      const slot = open.get(index)
+      if (slot) {
+        slot.json += d.partial_json
+        yield { type: "tool_use_delta", id: slot.id, delta: d.partial_json }
+      }
+      return
+    }
+    case "thinking_delta":
+      // ADR-0076 Gap-2: surface extended-thinking content. Emitted only when
+      // a thinking budget is active — with no budget the provider streams no
+      // thinking blocks, so this branch never fires (byte-identical).
+      yield { type: "thinking_delta", text: d.thinking }
+      return
+    case "signature_delta":
+      // The cryptographic signature for the in-flight thinking block.
+      // Required back verbatim on the next turn's input for carry-over.
+      yield { type: "signature_delta", signature: d.signature }
+      return
+    default: {
+      // Exhaustiveness pin. SDK union widening fails compilation here; the
+      // runtime cannot fall through to a silent drop.
+      const _exhaustive: never = d
+      void _exhaustive
+      return
+    }
+  }
+}
+
 export function* mapRawEvent(
   ev: RawEvent,
   open: OpenSlots,
@@ -377,27 +435,7 @@ export function* mapRawEvent(
       break
     }
     case "content_block_delta": {
-      const d = ev.delta
-      if (d.type === "text_delta") {
-        yield { type: "text_delta", delta: d.text }
-      } else if (d.type === "input_json_delta") {
-        const slot = open.get(ev.index)
-        if (slot) {
-          slot.json += d.partial_json
-          yield { type: "tool_use_delta", id: slot.id, delta: d.partial_json }
-        }
-      } else if (d.type === "thinking_delta") {
-        // ADR-0076 Gap-2: surface extended-thinking content. Emitted only when
-        // a thinking budget is active — with no budget the provider streams no
-        // thinking blocks, so this branch never fires (byte-identical).
-        yield { type: "thinking_delta", text: d.thinking }
-      } else if (d.type === "signature_delta") {
-        // The cryptographic signature for the in-flight thinking block. Required
-        // back verbatim on the next turn's input for carry-over.
-        yield { type: "signature_delta", signature: d.signature }
-      }
-      // Any OTHER unrecognized delta type (defensive) falls through with no
-      // emit and no throw — the stream must never break on a novel delta kind.
+      yield* yieldFromContentBlockDelta(ev.delta, open, ev.index)
       break
     }
     case "content_block_stop": {
