@@ -3,8 +3,8 @@ title: Phase marker + TTFT + readonly deny-steer trio
 section: 1
 subsystem: 턴 라이프사이클 — 3-plane 구조적 신호 (ADR-0077)
 order: 77
-maturity: L3
-status: new
+maturity: L4
+status: stable
 purpose: |
   하나의 PR로 3개의 직교 신호를 흡수 — 각각 다른 plane(data / observability /
   control)에서 누락된 declared 답을 구조적으로 확보. 모든 의사결정이 producer가
@@ -49,19 +49,32 @@ evidence:
       - tests/unit/llm/assemble-phase.test.ts
       - tests/unit/observability/turn-timing.test.ts
       - tests/unit/agent/readonly-deny-steer.test.ts
+      - tests/unit/phase-ttft-readonly-trio-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    3개 plane 모두 shipped + tests. 추가 흡수 후보 (deferred — 별도 ADR 예정):
-    (a) per-tool TTFT histogram by model (현재는 last-turn snapshot 1개);
-    (b) phase marker를 streaming 중 점진적으로 tag (현재는 post-pass);
-    (c) READONLY_DENY_STEER_NOTE의 i18n / templating (현재는 fixed string).
-  promotion_path: |
-    turnTiming을 모든 turn 배열로 surface하고 OTel TTFT 분포 dashboard 와이어업,
-    phase marker를 OTel attribute (quanta.assistant.phase[])로 emit하면 L4.
+deliberate_hold: null
 notes: |
+  L4 wire-up (2026-05-23):
+  - Plane-B: `streamConsume` builds wall-clock anchors (requestSentAt before
+    `llm.stream(...)`, firstTokenAt on engine's `onFirstChunk` fire — OVERWRITES
+    on every fire so REPLACEMENT stream wins after tombstone, streamEndAt in
+    the `finally`). `outcome.turnTiming` is the LAST sampling-request's
+    snapshot; OMITTED when no stream ever opened.
+  - Plane-C: `denyFromConfirm` (admissibility-gate.ts) extracts
+    `isReadonly = config.registry.get(call.name)?.isReadOnly()` and threads
+    it into `buildDenySteerMessage`. Already wired pre-L4; pinned by hellgate
+    against false-positive on null registry entry.
+  - SOTA (Cursor `setTtftMs`): `safeTtftMs` rejects non-finite / negative
+    and exposes `ttftMs` / `totalTtftMs` scalar slots on TurnTiming. OTel
+    attr `gen_ai.response.time_to_first_token_ms` emitted on
+    `run_sampling_request` span-close ONLY when guard passes.
+  Deferred (별도 ADR 예정):
+  (a) per-tool TTFT histogram by model;
+  (b) phase marker를 streaming 중 점진적으로 tag (현재는 post-pass);
+  (c) READONLY_DENY_STEER_NOTE의 i18n / templating.
+
+  Original notes:
   ADR-0076 Gap-4의 deny_and_steer verb 위에 readonly note를 atomic append하는 형태.
   TTFT capture는 stream_reset과 동작 상호작용 — replacement stream의 first chunk가
   진짜 TTFT 신호이므로 resetForTombstone이 firstChunkSeen latch도 리셋. 3 plane은

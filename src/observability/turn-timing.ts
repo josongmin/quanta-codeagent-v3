@@ -34,6 +34,13 @@
  *  `requestSentAt <= firstTokenAt <= streamEndAt`. Enforced by the order in
  *  which the loop calls the capture methods, not by runtime checks here —
  *  any violation is a programming bug in the wiring, not user data.
+ *
+ *  SOTA-mirror (Cursor `setTtftMs(n)`): `ttftMs` / `totalTtftMs` are the
+ *  scalar projections explicitly emit-guarded against non-finite (NaN /
+ *  Infinity) and negative (clock-skew) values — exactly the two failure
+ *  modes the Cursor surface rejects before writing telemetry. A value that
+ *  fails either guard surfaces as `null` here so the OTel emit can omit
+ *  the attribute rather than poison the dashboard with a junk number.
  */
 export interface TurnTiming {
   readonly requestSentAt: number
@@ -41,6 +48,27 @@ export interface TurnTiming {
   readonly firstTokenLatencyMs: number | null
   readonly streamEndAt: number
   readonly totalDurationMs: number
+  /** SOTA Cursor `ttft_ms`: scalar first-token latency, post-guard.
+   *  `null` iff (a) no first token was ever stamped, OR (b) the raw
+   *  arithmetic produced a non-finite / negative value (clock skew /
+   *  out-of-order marks). Mirrors `firstTokenLatencyMs` on the happy path. */
+  readonly ttftMs: number | null
+  /** SOTA Cursor `total_ttft_ms`: scalar total duration, post-guard.
+   *  `null` iff the raw arithmetic produced a non-finite / negative value.
+   *  Mirrors `totalDurationMs` on the happy path. */
+  readonly totalTtftMs: number | null
+}
+
+/** SOTA emit-guard mirroring Cursor `setTtftMs`: reject non-finite (NaN /
+ *  ±Infinity) AND negative values. Returns the input verbatim on the happy
+ *  path; `null` otherwise. Exported so a downstream OTel emitter can apply
+ *  the same guard to externally-sourced latency values (the dashboard
+ *  contract is "ttft_ms is a non-negative finite ms — or absent"). */
+export const safeTtftMs = (raw: number | null): number | null => {
+  if (raw === null) return null
+  if (!Number.isFinite(raw)) return null
+  if (raw < 0) return null
+  return raw
 }
 
 /** Mutable capture handle. Constructed at turn-top; mutated by the loop /
@@ -109,12 +137,23 @@ export const createTurnTimingCapture = (clock: Clock = Date.now): TurnTimingCapt
     const req = requestSentAt ?? 0
     const end = streamEndAt ?? 0
     const firstTokenLatencyMs = firstTokenAt === null ? null : firstTokenAt - req
+    const totalDurationMs = end - req
+    // SOTA mirror (Cursor `setTtftMs`): apply the non-finite/negative
+    // guard to both scalar projections at snapshot time so downstream
+    // emitters (`outcome.turnTiming`, OTel `gen_ai.response.time_to_first_token_ms`)
+    // get the post-guard value uniformly. A `null` here means "do not
+    // emit the attribute / surface the field"; the raw `firstTokenLatencyMs`
+    // / `totalDurationMs` stay untouched so legacy readers keep their math.
+    const ttftMs = safeTtftMs(firstTokenLatencyMs)
+    const totalTtftMs = safeTtftMs(totalDurationMs)
     const out: TurnTiming = {
       requestSentAt: req,
       firstTokenAt,
       firstTokenLatencyMs,
       streamEndAt: end,
-      totalDurationMs: end - req,
+      totalDurationMs,
+      ttftMs,
+      totalTtftMs,
     }
     return Object.freeze(out)
   }

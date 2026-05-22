@@ -1,6 +1,15 @@
 import type { LLMPort, Message, StreamEvent, SystemPromptInput, ToolResultBlock } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
-import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability"
+import {
+  attrs,
+  endSpan,
+  GEN_AI_ATTRS,
+  SPAN_NAMES,
+  type Span,
+  safeTtftMs,
+  startSpan,
+  type TurnTiming,
+} from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
 import {
   normalizeRedactionConfig,
@@ -371,6 +380,7 @@ const streamConsume = async (
   collector: TurnWorkMetricsCollector | undefined,
   toolChoiceState: ToolChoiceTurnState,
   onRedaction: (origin: RedactionOrigin, hits: readonly RedactionHit[]) => void,
+  onTurnTiming?: (timing: TurnTiming) => void,
 ): Promise<StreamConsumeResult> => {
   // ADR-0079 — resolve the pre-call tool_choice from the loop-owned turn state.
   // `consumeTurnSignals` reads + clears the 1-turn-TTL flags armed by the
@@ -407,6 +417,27 @@ const streamConsume = async (
   // Absent gate / absent override ⇒ `{ llm: config.llm }` with no `thinking`,
   // i.e. byte-identical to the pre-feature stream call.
   const turnLlm = resolveSkillTurnOverride(config, skillGate?.activeOverride())
+  // ADR-0077 Plane-B (L4 wire): TTFT anchors captured directly in this
+  // closure. Built BEFORE `llm.stream(...)` so `requestSentAt` is the
+  // wall-clock anchor immediately preceding the adapter call (matches
+  // Cursor's `submitChat.hangTtft` anchor).
+  //
+  // Tombstone (stream_reset) handling: the engine resets its own
+  // `firstChunkSeen` latch so the REPLACEMENT stream's first chunk re-fires
+  // `onFirstChunk`. Per ADR-0077 invariant ("FIRST chunk of the REPLACEMENT
+  // stream is the TTFT signal") we OVERWRITE `firstTokenAt` on every fire
+  // — `createTurnTimingCapture.markFirstToken` is by-design idempotent (it
+  // freezes the first stamp), so we capture the anchor directly. Sink
+  // (`onTurnTiming`) is what surfaces the snapshot; absent ⇒ snapshot is
+  // built locally and discarded.
+  const requestSentAt = Date.now()
+  let firstTokenAt: number | null = null
+  const markFirstChunk = (): void => {
+    // Each engine fire is a fresh first-chunk event (the engine guarantees
+    // at most one fire per stream, possibly multiple across stream_resets).
+    // OVERWRITE so the REPLACEMENT stream's chunk wins.
+    firstTokenAt = Date.now()
+  }
   try {
     const outcome = await streamingTurn({
       events: teeUsage(
@@ -543,6 +574,12 @@ const streamConsume = async (
           ...(indicator.message !== undefined ? { message: indicator.message } : {}),
           ...(indicator.progress !== undefined ? { progress: indicator.progress } : {}),
         }),
+      // ADR-0077 Plane-B (L4 wire): fire on the FIRST of
+      // (text_delta | thinking_delta | tool_use_start). The engine gates
+      // the seam (only fires once per stream + re-fires after stream_reset).
+      // Our `markFirstChunk` OVERWRITES so the REPLACEMENT stream's chunk
+      // wins for the surfaced TTFT (honors ADR-0077 tombstone invariant).
+      onFirstChunk: markFirstChunk,
       signal: config.signal,
     })
     if (outcome.kind === "aborted") {
@@ -560,12 +597,43 @@ const streamConsume = async (
     return { error: e, message }
   } finally {
     stop?.()
+    // ADR-0077 Plane-B (L4 wire): build the TurnTiming snapshot + surface
+    // via the optional sink + emit `gen_ai.response.time_to_first_token_ms`
+    // as a span-close attr. The snapshot uses `safeTtftMs` so a non-finite /
+    // negative (clock-skew) value surfaces as `null` on the scalar fields —
+    // never poisons OTel with a junk number. We mark stream-end HERE (in
+    // the finally) so error / abort paths still get a `streamEndAt` anchor
+    // for the duration math (mirrors Cursor `hangTtft` which records even
+    // on a hung stream so the timeout itself is measurable).
+    const streamEndAt = Date.now()
+    const firstTokenLatencyMs = firstTokenAt === null ? null : firstTokenAt - requestSentAt
+    const totalDurationMs = streamEndAt - requestSentAt
+    const timing: TurnTiming = Object.freeze({
+      requestSentAt,
+      firstTokenAt,
+      firstTokenLatencyMs,
+      streamEndAt,
+      totalDurationMs,
+      // SOTA mirror (Cursor `setTtftMs`): post-guard scalar projections.
+      // A non-finite / negative raw arithmetic ⇒ `null` so the consumer
+      // omits the attr / field rather than reporting junk.
+      ttftMs: safeTtftMs(firstTokenLatencyMs),
+      totalTtftMs: safeTtftMs(totalDurationMs),
+    })
+    onTurnTiming?.(timing)
+    // OTel: emit the TTFT attribute on the sampling-span close ONLY when
+    // we have a guarded value (the absent / non-finite / negative case
+    // omits the attr, matching the Cursor `setTtftMs` reject-and-skip
+    // contract). Other attrs stay empty (default-OFF byte-identical for
+    // the no-TTFT case).
+    const ttftAttr =
+      timing.ttftMs !== null ? { [GEN_AI_ATTRS.response.timeToFirstTokenMs]: timing.ttftMs } : {}
     // Single close site for `run_sampling_request`. Default-OFF (no sink) ⇒
     // no-op (sentinel short-circuits both the close branch and the duration
     // math). Note: this runs AFTER `stop?.()` so the recorder's llm-span
     // close precedes the OTel span close — matching the existing recorder-
     // first convention used elsewhere in the loop.
-    endSpan(samplingSpan, samplingStatus, attrs({}))
+    endSpan(samplingSpan, samplingStatus, attrs(ttftAttr))
   }
 }
 
@@ -1157,6 +1225,7 @@ const runTurn = async (
   toolChoiceState: ToolChoiceTurnState,
   citations: MemoryCitation[],
   onRedaction: (origin: RedactionOrigin, hits: readonly RedactionHit[]) => void,
+  onTurnTiming: ((timing: TurnTiming) => void) | undefined,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -1189,6 +1258,7 @@ const runTurn = async (
       collector,
       toolChoiceState,
       onRedaction,
+      onTurnTiming,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -1367,6 +1437,19 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // owns it.
   const summaryArchive: ConversationSummaryArchive | undefined =
     cfg.compaction?.archive === true ? createArchive() : undefined
+  // ADR-0077 Plane-B (L4 wire): session-scoped slot for the LAST sampling-
+  // request's TurnTiming snapshot. `streamConsume` overwrites this on every
+  // stream close (productive turn OR error/abort). `finish()` surfaces it on
+  // `AgentOutcome.turnTiming` ONLY when non-null AND the run produced at
+  // least one productive turn (i.e. a stream was actually opened). The
+  // YAML's "마지막 productive turn의 snapshot surface" contract: a no-stream
+  // immediate-abort run never opens a stream so the slot stays null and the
+  // outcome field stays omitted (byte-identical for callers that only read
+  // `reason`).
+  let lastTurnTiming: TurnTiming | null = null
+  const recordTurnTiming = (timing: TurnTiming): void => {
+    lastTurnTiming = timing
+  }
 
   const finish = async (
     reason: StopReason,
@@ -1434,6 +1517,12 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       ...(stopCategory !== undefined ? { stopCategory } : {}),
       ...(memoryCitations.length > 0 ? { memoryCitations } : {}),
       ...(redactions !== undefined ? { redactions } : {}),
+      // ADR-0077 Plane-B (L4 wire): surface the LAST sampling-request's
+      // timing snapshot ONLY when a stream was actually opened (i.e.
+      // `streamConsume` ran at least once and overwrote the slot). An
+      // immediate-abort / no-stream run leaves the slot null and the
+      // field is omitted — byte-identical for callers that ignore it.
+      ...(lastTurnTiming !== null ? { turnTiming: lastTurnTiming } : {}),
     }
   }
 
@@ -1538,6 +1627,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         toolChoiceState,
         memoryCitations,
         recordRedaction,
+        recordTurnTiming,
       )
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"

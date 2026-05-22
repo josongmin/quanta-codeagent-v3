@@ -23,6 +23,7 @@ export {
 } from "./spans"
 export {
   createTurnTimingCapture,
+  safeTtftMs,
   type TurnTiming,
   type TurnTimingCapture,
 } from "./turn-timing"
