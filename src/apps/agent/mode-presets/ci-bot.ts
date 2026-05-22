@@ -249,7 +249,12 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
     return `quanta ci-bot: completed (turns=${outcome.turns}, reason=${outcome.reason})`
   })()
 
-  await postPrComment(pr, summary, wiring.gh)
+  if (req.ciBot?.dryRun === true) {
+    // Safe e2e mode: print what would be posted, do NOT call `gh pr comment`.
+    logger.info(`ci-bot[dry-run]: would post comment on PR ${pr}:\n${summary}`)
+  } else {
+    await postPrComment(pr, summary, wiring.gh)
+  }
 
   return { exitCode: reasonToExitCode(outcome.reason), outcome }
 }

@@ -61,6 +61,11 @@ export interface CiBotExtras {
   pr: string
   /** Repo working dir (a branch-only clone). Defaults to caller cwd. */
   cwd?: string
+  /** When `true`, the ci-bot runner does NOT post the final PR comment via
+   *  `gh pr comment`. The body is printed to stdout instead. Used for safe
+   *  e2e validation without external side effects (no real PR write). The
+   *  `gh pr view` read is still performed so the agent gets real PR context. */
+  dryRun?: boolean
 }
 
 /** Run-outcome envelope returned by every mode runner. Mirrors the shape
