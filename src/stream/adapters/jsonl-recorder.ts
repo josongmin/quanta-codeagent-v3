@@ -176,15 +176,28 @@ export class JsonlRecorder implements StreamPort {
   flush(): void {
     if (this.buf.length === 0) return
     const chunk = this.buf.join("")
-    this.buf.length = 0
+    // Append FIRST, clear only on success. If `appendFileSync` throws (disk
+    // full / volume gone / EPERM) the buffered lines stay in `this.buf` so a
+    // later `flush()` / `close()` can retry — a write error must never
+    // silently drop already-buffered events. The caller's try/catch
+    // (`record`) turns the throw into a `degrade()` degraded-line + count.
     appendFileSync(this.target, chunk)
+    this.buf.length = 0
   }
 
-  /** Flush + close. Idempotent. */
+  /** Flush + close. Idempotent. Never throws to the caller: a failed final
+   *  flush is downgraded to a best-effort degraded line so close() at the end
+   *  of a run can't crash the agent (mirrors the non-strict emit contract). */
   close(): void {
     if (this.closed) return
     this.closed = true
-    this.flush()
+    try {
+      this.flush()
+    } catch (e) {
+      // strict mode still surfaces the failure; non-strict records a degraded
+      // line and swallows so a torn-down volume can't fault the shutdown path.
+      this.degrade(toError(e), this.strict)
+    }
   }
 
   /** Snapshot of degraded state for the caller. */

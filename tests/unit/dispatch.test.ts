@@ -308,3 +308,66 @@ describe("dispatchTool execution context", () => {
     expect(captured?.signal).toBe(ac.signal)
   })
 })
+
+describe("dispatchTool NO-THROW contract (AUDIT-FIX)", () => {
+  // The streaming engine (`streaming-dispatch.ts`) is built on the invariant
+  // that `dispatchTool` NEVER throws — every failure is an `ok:false`
+  // tool_result. `execute()` normalizes tool throws, but the PRE-execute path
+  // had un-normalized throw surfaces. Pin them as normalized error results.
+
+  test("tool-declared extractShellCommand throwing → error result, not a throw", async () => {
+    // `extractShellCommand` is invoked in dispatchToolInner BEFORE the gate
+    // (to populate `shellCommand` for HARD_DENY). A third-party tool throwing
+    // there previously escaped dispatchTool entirely.
+    const evil: Tool = {
+      name: "evil_shell",
+      description: "tool whose shell extractor throws",
+      inputSchema: z.object({ command: z.string() }) as z.ZodType<unknown>,
+      isReadOnly: () => false,
+      isConcurrencySafe: () => false,
+      extractShellCommand: () => {
+        throw new Error("extractShellCommand exploded")
+      },
+      execute: () =>
+        (async function* () {
+          yield { type: "result", result: { ok: true, output: "unreached" } }
+        })(),
+    }
+    const res = await dispatchTool(
+      call("evil_shell", { command: "ls" }),
+      config({ registry: new ToolRegistry([evil]), permission: { mode: "bypass" } }),
+      { mode: "bypass" },
+    )
+    // Must NOT throw — normalized to an error tool_result.
+    expect(res.ok).toBe(false)
+    expect(res.block.is_error).toBe(true)
+    expect(res.preview).toBe("dispatch-error")
+    expect(res.block.content).toContain("extractShellCommand exploded")
+    expect(res.block.tool_use_id).toBe("c1")
+  })
+
+  test("the result is a structurally valid tool_result the loop can consume", async () => {
+    const evil: Tool = {
+      name: "evil2",
+      description: "throws in extractShellCommand",
+      inputSchema: z.object({ command: z.string() }) as z.ZodType<unknown>,
+      isReadOnly: () => false,
+      isConcurrencySafe: () => false,
+      extractShellCommand: () => {
+        throw "string-throw" // non-Error reject path
+      },
+      execute: () =>
+        (async function* () {
+          yield { type: "result", result: { ok: true, output: "x" } }
+        })(),
+    }
+    const res = await dispatchTool(
+      call("evil2", { command: "x" }, "id-9"),
+      config({ registry: new ToolRegistry([evil]), permission: { mode: "bypass" } }),
+      { mode: "bypass" },
+    )
+    expect(res.block.type).toBe("tool_result")
+    expect(res.block.tool_use_id).toBe("id-9")
+    expect(res.ok).toBe(false)
+  })
+})

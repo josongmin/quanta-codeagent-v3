@@ -119,7 +119,7 @@ const collectSkillEntries = async (pluginDir: string): Promise<PluginSkillEntry[
       // common, expected case, not an error. Logging it would be per-scan noise.
     }
   }
-  out.sort((a, b) => a.name.localeCompare(b.name))
+  out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   return out
 }
 
@@ -225,8 +225,12 @@ export const discoverPlugins = async (rootDir: string): Promise<DiscoveredPlugin
     }
   }
   await visit(rootDir, 0)
-  found.sort((a, b) =>
-    a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : basename(a.dir).localeCompare(basename(b.dir)),
-  )
+  found.sort((a, b) => {
+    if (a.dir < b.dir) return -1
+    if (a.dir > b.dir) return 1
+    const ba = basename(a.dir)
+    const bb = basename(b.dir)
+    return ba < bb ? -1 : ba > bb ? 1 : 0
+  })
   return found
 }

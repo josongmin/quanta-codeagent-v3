@@ -44,6 +44,14 @@ describe("classifyPath — dotfile / extension / SSH / tree rules", () => {
     expect(classifyPath(`${HOME}/.docker/config.json`, HOME)).toBe("secret")
   })
 
+  test("git-credentials / legacy dockercfg / gcloud ADC are secret", () => {
+    expect(classifyPath(`${HOME}/.git-credentials`, HOME)).toBe("secret")
+    expect(classifyPath(`${HOME}/.dockercfg`, HOME)).toBe("secret")
+    expect(
+      classifyPath(`${HOME}/.config/gcloud/application_default_credentials.json`, HOME),
+    ).toBe("secret")
+  })
+
   test("~/.gnupg/** is secret regardless of basename", () => {
     expect(classifyPath(`${HOME}/.gnupg/private-keys-v1.d/abc.key`, HOME)).toBe("secret")
     expect(classifyPath(`${HOME}/.gnupg/pubring.kbx`, HOME)).toBe("secret")
@@ -106,6 +114,19 @@ describe("classifyCommandShape — first-token + arg shape", () => {
   test("cat against a normal file is public", () => {
     expect(classifyCommandShape("cat /repo/src/index.ts")).toBe("public")
     expect(classifyCommandShape("cat README.md")).toBe("public")
+  })
+
+  test("pagers / dumpers against a secret path are also secret", () => {
+    expect(classifyCommandShape("head ~/.ssh/id_rsa")).toBe("secret")
+    expect(classifyCommandShape("tail ~/.netrc")).toBe("secret")
+    expect(classifyCommandShape("less ~/.aws/credentials")).toBe("secret")
+    expect(classifyCommandShape("xxd ~/.ssh/id_ed25519")).toBe("secret")
+    expect(classifyCommandShape("strings /etc/ssl/private.pem")).toBe("secret")
+  })
+
+  test("pagers against a normal file are public", () => {
+    expect(classifyCommandShape("head /repo/src/index.ts")).toBe("public")
+    expect(classifyCommandShape("less README.md")).toBe("public")
   })
 
   test("password manager CLIs are secret", () => {

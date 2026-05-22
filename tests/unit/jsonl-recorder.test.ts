@@ -367,4 +367,52 @@ describe("JsonlRecorder — failure handling", () => {
     expect(() => rec.close()).not.toThrow()
     expect(readLines(path)).toHaveLength(1)
   })
+
+  test("flush() failure preserves the buffer for retry (no silent drop)", () => {
+    const path = join(dir, "i1.0.jsonl")
+    // Batch < FLUSH_BATCH so nothing flushes on emit; the events sit buffered.
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "turn_start", turn: 1 })
+    rec.emit({ type: "assistant_text", delta: "x" })
+
+    // First flush throws (disk full); buffer must NOT be cleared.
+    let fail = true
+    const orig = (rec as unknown as { flush(): void }).flush.bind(rec)
+    const buf = (rec as unknown as { buf: string[] }).buf
+    ;(rec as unknown as { flush(): void }).flush = () => {
+      if (fail) throw new Error("disk full")
+      orig()
+    }
+    expect(() => (rec as unknown as { flush(): void }).flush()).toThrow("disk full")
+    // The two buffered lines are still pending — they were not dropped.
+    expect(buf.length).toBe(2)
+
+    // Recover: a real flush now drains the preserved buffer to disk.
+    fail = false
+    ;(rec as unknown as { flush(): void }).flush = orig
+    rec.close()
+    expect(readLines(path)).toHaveLength(2)
+  })
+
+  test("close() never throws even when the final flush fails (non-strict)", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "turn_start", turn: 1 })
+    ;(rec as unknown as { flush(): void }).flush = () => {
+      throw new Error("volume gone")
+    }
+    expect(() => rec.close()).not.toThrow()
+    // The failure is surfaced via the degraded snapshot, not swallowed silently.
+    expect(rec.degraded().length).toBeGreaterThanOrEqual(1)
+  })
+
+  test("strict mode: a failing final flush rethrows from close()", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, strict: true, ...fixedClocks() })
+    rec.emit({ type: "turn_start", turn: 1 })
+    ;(rec as unknown as { flush(): void }).flush = () => {
+      throw new Error("volume gone")
+    }
+    expect(() => rec.close()).toThrow("volume gone")
+  })
 })

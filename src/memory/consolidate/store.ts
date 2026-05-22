@@ -38,6 +38,29 @@ interface Stage1Row {
   usage_count: number
 }
 
+/** Minimal runtime shape-check for a `stage1_outputs` row before casting. Guards
+ *  the critical columns `rowToStage1Output` dereferences: the string/number
+ *  fields must be present + correctly typed, and the two nullable numerics must
+ *  be `number | null`. Well-formed rows pass unchanged; malformed rows (corrupt
+ *  / hand-edited DB) are rejected so callers can skip rather than emit garbage. */
+const isStage1Row = (r: unknown): r is Stage1Row => {
+  if (typeof r !== "object" || r === null) return false
+  const o = r as Record<string, unknown>
+  const isNumOrNull = (v: unknown): boolean => v === null || typeof v === "number"
+  return (
+    typeof o.thread_id === "string" &&
+    typeof o.rollout_slug === "string" &&
+    typeof o.rollout_summary === "string" &&
+    typeof o.raw_memory === "string" &&
+    typeof o.preference_signals === "string" &&
+    typeof o.source_updated_at === "number" &&
+    typeof o.selected_for_phase2 === "number" &&
+    isNumOrNull(o.selected_for_phase2_source_updated_at) &&
+    isNumOrNull(o.last_usage) &&
+    typeof o.usage_count === "number"
+  )
+}
+
 interface WatermarkRow {
   id: number
   last_success_at: number | null
@@ -146,9 +169,22 @@ export class Stage1Store implements Stage1StorePort {
     const cap = limit ?? DEFAULT_FETCH_LIMIT
     const rows =
       watermark === null
-        ? (this.fetchAllStmt.all(cap) as Stage1Row[])
-        : (this.fetchSinceStmt.all(watermark, cap) as Stage1Row[])
-    return Promise.resolve(rows.map(rowToStage1Output))
+        ? (this.fetchAllStmt.all(cap) as unknown[])
+        : (this.fetchSinceStmt.all(watermark, cap) as unknown[])
+    // SQLite is dynamically typed: a hand-edited or partially-written DB can
+    // yield rows whose columns are NULL or the wrong primitive. Validate the
+    // shape before the cast and skip malformed rows with a warn (refuse/skip,
+    // like rowToEntry's tolerant mapping) rather than emitting malformed
+    // Stage1Output objects downstream.
+    const out: Stage1Output[] = []
+    for (const r of rows) {
+      if (!isStage1Row(r)) {
+        process.stderr.write("[quanta] consolidate: skipping malformed stage1_outputs row\n")
+        continue
+      }
+      out.push(rowToStage1Output(r))
+    }
+    return Promise.resolve(out)
   }
 
   countSince(watermark: number | null): Promise<number> {

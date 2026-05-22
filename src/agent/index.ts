@@ -56,9 +56,11 @@ export {
 export {
   HookBus,
   type HookDeny,
+  type HookEmitResult,
   type HookEvent,
   type HookEventType,
   type HookHandler,
+  type HookUpdatedInput,
 } from "./hooks"
 export { type IdeContextProvider, type IdeSnapshot, renderIdeContext } from "./ide-context"
 export { runAgent } from "./loop"

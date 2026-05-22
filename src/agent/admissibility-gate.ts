@@ -108,6 +108,11 @@ export interface AdmissibilityAction {
  *                      `"user"`).
  *   - `priorDenials`   sticky-precedence inputs threaded into the ReviewContext.
  *   - `decidedAt`      injectable clock for deterministic decision timestamps.
+ *   - `onInputMutation` outbound sink for a `pre_tool_use` hook's `updatedInput`
+ *                      rewrite (Cursor parity). Invoked at most once per gate
+ *                      run, on the admit path only, with the composed rewrite.
+ *                      Absent ⇒ rewrites are silently dropped (the gate stays
+ *                      byte-identical for callers that don't opt in).
  */
 export interface AdmissibilityWaveAOptions {
   permissionStore?: PermissionStore
@@ -117,6 +122,7 @@ export interface AdmissibilityWaveAOptions {
   defaultReviewer?: ReviewerTier
   priorDenials?: ReadonlyArray<DenialMemory>
   decidedAt?: () => number
+  onInputMutation?: (next: unknown) => void
 }
 
 /** Map a `ReviewerTier` to the short preview tag suffix the dispatch seam
@@ -173,7 +179,7 @@ const reviewAndDecide = async (
   }
   const dec = await reviewAction(keyed, ctx, opts.reviewerPort)
   const tag = reviewerTag(dec.reviewer)
-  if (isAllowed(dec.outcome)) return runPreToolUseHook(call, config)
+  if (isAllowed(dec.outcome)) return runPreToolUseHook(call, config, opts)
   // Rule-ask escalations carry an `origin=rule` marker so the surface can tell
   // a denylist-rule escalation apart from an always-confirm-tier escalation.
   const originSuffix = origin === "rule" ? " (origin=rule)" : ""
@@ -186,18 +192,28 @@ const reviewAndDecide = async (
   return deny(call.id, `User declined: ${dec.rationale}${originSuffix}`, tag)
 }
 
-/** Emit pre_tool_use hook, returning a hook-denied result or null to proceed. */
+/** Emit pre_tool_use hook, returning a hook-denied result or null to proceed.
+ *  When a handler rewrote the tool args (`updatedInput`, Cursor parity) and the
+ *  call was NOT denied, the rewrite is surfaced to dispatch via
+ *  `opts.onInputMutation` so the executed input is the mutated one. The gate
+ *  itself stays control-flow-pure (it never mutates `call`/`config`); the sink
+ *  is the only outbound channel and is a no-op when unwired. */
 const runPreToolUseHook = async (
   call: ToolUseBlock,
   config: AdmissibilityGateConfig,
+  opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
   if (!config.hooks) return null
-  const hookDeny = await config.hooks.emit({
+  const result = await config.hooks.emit({
     type: "pre_tool_use",
     name: call.name,
     input: call.input,
   })
-  if (hookDeny) return deny(call.id, `Hook denied: ${hookDeny.deny}`, "hook-denied")
+  if (result.deny) return deny(call.id, `Hook denied: ${result.deny.deny}`, "hook-denied")
+  // A rewrite only matters when the call is admitted. `emit` includes the
+  // `updatedInput` KEY only when a handler set it (presence is the signal, not
+  // truthiness), so a rewrite to a falsy value is still propagated.
+  if ("updatedInput" in result) opts.onInputMutation?.(result.updatedInput)
   return null
 }
 
@@ -506,6 +522,48 @@ const runModePolicy = async (
 }
 
 /**
+ * Gate step 2 — HARD_DENY security boundary, pulled AHEAD of the rule DSL +
+ * HITL/reviewer + pattern auto-pass when ANY allow-capable bypass is active
+ * (rulesStore / reviewerPort / permissionPatternStore), so a rule `allow`, a
+ * reviewer approval, OR a pattern-grant auto-pass cannot route around the
+ * denylist. Mode-block (caller, step 1) still wins. Without any of those this
+ * returns `null` and the legacy policy-internal HARD_DENY (step 5 `evaluate`)
+ * stays byte-identical.
+ *
+ * AUDIT-FIX (gate fail-open): `permissionPatternStore` was previously NOT in
+ * this trigger. With only `permissionPatternStore` wired, step 2.5
+ * (`autoPassByPatterns`) could `auto_pass` a covered-pattern action straight
+ * to the hook, skipping BOTH the HITL HARD_DENY branch AND the policy
+ * `evaluate` HARD_DENY — a security-boundary bypass. Including it here closes
+ * that hole; existing rulesStore/reviewerPort/legacy paths are unchanged.
+ *
+ * Extracted from `runAdmissibilityGate` so the trigger predicate + inner
+ * deny live in one place and the parent function's cognitive complexity does
+ * not grow with the added condition.
+ */
+const earlyHardDeny = (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): DispatchResult | null => {
+  const bypassActive =
+    opts.rulesStore !== undefined ||
+    opts.reviewerPort !== undefined ||
+    config.permissionPatternStore !== undefined
+  if (!bypassActive) return null
+  const hardDenyCommand = config.registry.extractShellCommand(action.tool, action.input)
+  const hardDeny = hardDenyReason({
+    tool: action.tool,
+    input: action.input,
+    isReadOnly: action.isReadOnly,
+    shellCommand: hardDenyCommand,
+  })
+  if (hardDeny === null) return null
+  return deny(call.id, `Action requires human handoff: ${hardDeny}${HANDOFF_SUFFIX}`, "handoff")
+}
+
+/**
  * Run all pre-execute gates in canonical order. Returns a {@link
  * DispatchResult} to short-circuit the call, or `null` when the call is
  * admissible and execute should proceed.
@@ -539,23 +597,12 @@ export const runAdmissibilityGate = async (
   }
 
   // 2. HARD_DENY security boundary — pulled AHEAD of the rule DSL + HITL/
-  //    reviewer ONLY when Wave A options are active (rulesStore/reviewerPort),
-  //    so a rule `allow` cannot bypass the denylist and the reviewer port is
-  //    never consulted for a denylisted command. Mode-block (above) still wins.
-  //    Without Wave A options this is skipped and the legacy policy-internal
-  //    HARD_DENY (step 5 `evaluate`) stays byte-identical.
-  if (opts.rulesStore !== undefined || opts.reviewerPort !== undefined) {
-    const hardDenyCommand = config.registry.extractShellCommand(action.tool, action.input)
-    const hardDeny = hardDenyReason({
-      tool: action.tool,
-      input: action.input,
-      isReadOnly: action.isReadOnly,
-      shellCommand: hardDenyCommand,
-    })
-    if (hardDeny !== null) {
-      return deny(call.id, `Action requires human handoff: ${hardDeny}${HANDOFF_SUFFIX}`, "handoff")
-    }
-  }
+  //    reviewer + pattern auto-pass when ANY allow-capable bypass is active
+  //    (rulesStore/reviewerPort/permissionPatternStore). See
+  //    {@link earlyHardDeny} for the full rationale (including the AUDIT-FIX
+  //    that added permissionPatternStore to the trigger to close a fail-open).
+  const earlyDeny = earlyHardDeny(call, config, action, opts)
+  if (earlyDeny) return earlyDeny
 
   // 2.5. Pattern-grant auto-pass (ADR-0061 absorb #2). DEFAULT OFF — fires only
   //      when `config.permissionPatternStore` is wired AND the action carries
@@ -584,7 +631,7 @@ export const runAdmissibilityGate = async (
       // ApprovalDecision via this seam (the gate's contract is DispatchResult),
       // but the predicate constructed + validated one. Route through the hook
       // so a `pre_tool_use` veto still applies.
-      return runPreToolUseHook(call, config)
+      return runPreToolUseHook(call, config, opts)
     }
   }
 
@@ -597,7 +644,7 @@ export const runAdmissibilityGate = async (
     const ruleKey = config.registry.extractShellCommand(action.tool, action.input) ?? action.tool
     const m = opts.rulesStore.match(ruleKey)
     if (m.kind === "matched") {
-      if (m.rule.action === "allow") return runPreToolUseHook(call, config)
+      if (m.rule.action === "allow") return runPreToolUseHook(call, config, opts)
       if (m.rule.action === "deny") {
         return deny(
           call.id,
@@ -646,7 +693,7 @@ export const runAdmissibilityGate = async (
     if (hitlResult !== "fallthrough") {
       // null ⇒ HITL approved, skip mode policy and emit hook + proceed.
       // non-null ⇒ short-circuit deny.
-      return hitlResult ?? runPreToolUseHook(call, config)
+      return hitlResult ?? runPreToolUseHook(call, config, opts)
     }
   }
 
@@ -663,7 +710,7 @@ export const runAdmissibilityGate = async (
   if (stackResult !== null && stackResult !== "allow") return stackResult
   // `"allow"` from the stack ⇒ skip mode policy (the stack's allow is
   //    authoritative) and emit the pre_tool_use hook last.
-  if (stackResult === "allow") return runPreToolUseHook(call, config)
+  if (stackResult === "allow") return runPreToolUseHook(call, config, opts)
 
   // 4. Permission policy (HARD_DENY + mode-driven decision; "auto" routes
   //    through the injected classifier).
@@ -671,5 +718,5 @@ export const runAdmissibilityGate = async (
   if (policyResult) return policyResult
 
   // 5. pre_tool_use hook — repo-local code (or test spy) may deny last.
-  return runPreToolUseHook(call, config)
+  return runPreToolUseHook(call, config, opts)
 }

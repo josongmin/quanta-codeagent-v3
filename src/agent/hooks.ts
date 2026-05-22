@@ -19,6 +19,20 @@ import { matchTool, type ToolMatcher } from "./tool-matchers"
  * - A `pre_tool_use` handler may return `{ deny: string }` to block the call.
  *   The first deny wins; the tool becomes an error tool_result and the model
  *   recovers (mirrors the permission-deny path in dispatch.ts).
+ * - A `pre_tool_use` handler may return `{ updatedInput }` to REWRITE the tool
+ *   arguments before execution (Cursor `updated_input` parity, AWF
+ *   `beforeShellExecution`/`beforeReadFile` mutate seam). Rewrites COMPOSE: each
+ *   subsequent handler sees the prior handler's `updatedInput` as its
+ *   `event.input`, so a chain of handlers can each refine the args. The LAST
+ *   rewrite is what `emit` returns.
+ *
+ *   SECURITY: a rewrite is applied at the pre_tool_use seam, which dispatch runs
+ *   AFTER the permission / HARD_DENY gates have evaluated the ORIGINAL input. A
+ *   hook is operator-authored local code at the same trust level as the
+ *   permission config itself, so this is intentional (it cannot be reached by
+ *   the model or by untrusted content); it is NOT a sandbox-escape vector. A
+ *   handler that both denies AND rewrites is treated as a deny (the rewrite is
+ *   moot because the call never executes).
  */
 
 export type HookEvent =
@@ -38,17 +52,39 @@ export interface HookDeny {
   deny: string
 }
 
+/** A `pre_tool_use` handler may return this to REWRITE the tool input before
+ *  execution (Cursor `updated_input` parity). Presence of the `updatedInput`
+ *  KEY is the signal — the value itself is opaque (the tool re-validates its
+ *  own schema), so a rewrite to `undefined`/`null` is still an explicit
+ *  rewrite, distinct from a no-op handler that returns nothing. */
+export interface HookUpdatedInput {
+  updatedInput: unknown
+}
+
 /**
- * A handler may return anything; only a `{ deny: string }` from a
- * `pre_tool_use` handler is acted on (it blocks the call). Returning nothing
- * is the common no-op case, so the return type is intentionally `unknown`
- * (a `HookDeny | void` union trips biome's noConfusingVoidType, and forcing
- * every no-op handler to `return undefined` is poor ergonomics).
+ * A handler may return anything; only a `{ deny: string }` and/or
+ * `{ updatedInput }` from a `pre_tool_use` handler is acted on (deny blocks the
+ * call; updatedInput rewrites its args). Returning nothing is the common no-op
+ * case, so the return type is intentionally `unknown` (a `HookDeny | void`
+ * union trips biome's noConfusingVoidType, and forcing every no-op handler to
+ * `return undefined` is poor ergonomics).
  */
 export type HookHandler<T extends HookEventType> = (event: HookEventOf<T>) => unknown
 
+/** Result of {@link HookBus.emit}. `deny` carries the first `pre_tool_use`
+ *  refusal (else null); `updatedInput` is PRESENT (key included) only when a
+ *  `pre_tool_use` handler rewrote the args, carrying the last/composed rewrite.
+ *  Non-pre_tool_use events always return `{ deny: null }`. */
+export interface HookEmitResult {
+  deny: HookDeny | null
+  updatedInput?: unknown
+}
+
 const isDeny = (v: unknown): v is HookDeny =>
   typeof v === "object" && v !== null && typeof (v as HookDeny).deny === "string"
+
+const isUpdatedInput = (v: unknown): v is HookUpdatedInput =>
+  typeof v === "object" && v !== null && "updatedInput" in v
 
 /** Type-erased handler stored internally. The `HookBus.on` API preserves the
  *  per-type narrowing by closure-capturing the user's `HookHandler<T>` and
@@ -102,22 +138,42 @@ export class HookBus {
 
   /**
    * Emit `event` to every registered handler sequentially. Returns the first
-   * `{ deny }` produced by a `pre_tool_use` handler, else `null`. A throwing
-   * handler is caught + logged and does not abort the emit. Handlers whose
-   * registered matcher rejects the tool name are skipped silently (only
+   * `{ deny }` produced by a `pre_tool_use` handler (else null) plus, when a
+   * `pre_tool_use` handler rewrote the args, the composed `updatedInput`. A
+   * throwing handler is caught + logged and does not abort the emit. Handlers
+   * whose registered matcher rejects the tool name are skipped silently (only
    * `pre_tool_use` / `post_tool_use` events carry a name).
+   *
+   * For `pre_tool_use`, each handler sees the latest input: a `{ updatedInput }`
+   * from an earlier handler becomes the `event.input` the next handler receives,
+   * so rewrites compose deterministically in registration order.
    */
-  async emit(event: HookEvent): Promise<HookDeny | null> {
+  async emit(event: HookEvent): Promise<HookEmitResult> {
     const list = this.handlers.get(event.type)
-    if (list === undefined) return null
+    if (list === undefined) return { deny: null }
     const toolEvent = isToolEvent(event)
+    const isPre = event.type === "pre_tool_use"
     let denied: HookDeny | null = null
+    // Track the (possibly rewritten) pre_tool_use input so successive handlers
+    // compose. `mutated` records whether ANY handler set it (so a rewrite to a
+    // falsy value is still surfaced).
+    let currentInput: unknown = isPre ? (event as HookEventOf<"pre_tool_use">).input : undefined
+    let mutated = false
     for (const stored of list) {
       if (toolEvent && !matchTool(stored.matcher, event.name)) continue
+      // Re-materialize the event with the latest input for pre_tool_use so a
+      // prior handler's rewrite is visible to this one.
+      const dispatched: HookEvent = isPre
+        ? { type: "pre_tool_use", name: (event as HookEventOf<"pre_tool_use">).name, input: currentInput }
+        : event
       try {
-        const result = await stored.fn(event)
-        if (denied === null && event.type === "pre_tool_use" && isDeny(result)) {
-          denied = result
+        const result = await stored.fn(dispatched)
+        if (isPre) {
+          if (denied === null && isDeny(result)) denied = result
+          if (isUpdatedInput(result)) {
+            currentInput = result.updatedInput
+            mutated = true
+          }
         }
       } catch (e) {
         this.logger?.error("hook.handler.error", {
@@ -126,6 +182,6 @@ export class HookBus {
         })
       }
     }
-    return denied
+    return { deny: denied, ...(mutated ? { updatedInput: currentInput } : {}) }
   }
 }

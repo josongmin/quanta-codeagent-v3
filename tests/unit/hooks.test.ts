@@ -45,8 +45,8 @@ describe("HookBus", () => {
     bus.on("post_tool_use", () => {
       reached = true
     })
-    const deny = await bus.emit({ type: "post_tool_use", name: "read", ok: true, output: "x" })
-    expect(deny).toBeNull()
+    const result = await bus.emit({ type: "post_tool_use", name: "read", ok: true, output: "x" })
+    expect(result.deny).toBeNull()
     expect(reached).toBe(true)
     expect(lines).toHaveLength(1)
     const rec = JSON.parse(lines[0] ?? "{}") as { event: string; fields: { error: string } }
@@ -63,7 +63,7 @@ describe("HookBus", () => {
       return { deny: "later" }
     })
     const result = await bus.emit({ type: "pre_tool_use", name: "write", input: {} })
-    expect(result).toEqual({ deny: "nope" })
+    expect(result.deny).toEqual({ deny: "nope" })
     // later handlers still run (isolation), but the first deny is what's returned
     expect(secondRan).toBe(true)
   })
@@ -73,12 +73,12 @@ describe("HookBus", () => {
     // a non-pre_tool_use handler returning a deny-shaped value is ignored
     bus.on("turn_start", () => ({ deny: "ignored" }) as unknown as undefined)
     const result = await bus.emit({ type: "turn_start", turn: 2 })
-    expect(result).toBeNull()
+    expect(result.deny).toBeNull()
   })
 
-  test("emit with no handlers returns null (zero overhead path)", async () => {
+  test("emit with no handlers returns { deny: null } (zero overhead path)", async () => {
     const bus = new HookBus()
     const result = await bus.emit({ type: "session_end", reason: "completed", turns: 3 })
-    expect(result).toBeNull()
+    expect(result.deny).toBeNull()
   })
 })

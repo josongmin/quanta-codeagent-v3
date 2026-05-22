@@ -55,6 +55,15 @@ const blockChars = (b: ContentBlock): number => {
       return b.content.length
     case "image":
       return IMAGE_CHAR_ESTIMATE
+    default: {
+      // ContentBlock is a closed union — `_exhaustive` pins it at build time so
+      // a new variant fails tsc here instead of silently returning `undefined`
+      // (which would corrupt the token estimate). At runtime (e.g. a block from
+      // a forward-compat payload) fall back to its serialized length rather than
+      // NaN-poisoning the running sum.
+      const _exhaustive: never = b
+      return JSON.stringify(_exhaustive ?? {}).length
+    }
   }
 }
 

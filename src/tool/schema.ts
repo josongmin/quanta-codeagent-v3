@@ -36,7 +36,17 @@ const node = (schema: AnyDef): Record<string, unknown> => {
       }
       return { type: "object", properties, required, ...desc }
     }
+    case "ZodAny":
+    case "ZodUnknown":
+      // Intentionally unconstrained: an open schema (no `type`) means "any JSON
+      // value", which is the correct mapping for z.any()/z.unknown(). Several
+      // tool inputs legitimately use z.any() (e.g. passthrough payloads).
+      return { ...desc }
     default:
+      // Any other unhandled `typeName` falls back to an open (unconstrained)
+      // schema rather than throwing: a tool advertising a permissive schema is
+      // a safe degradation, whereas throwing here crashes the whole turn at
+      // registry-build time. Tool inputs use only the constructs above + any.
       return { ...desc }
   }
 }

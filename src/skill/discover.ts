@@ -164,5 +164,5 @@ export const discoverSkills = async (dir: string): Promise<Skill[]> => {
   for (const s of flat) byName.set(s.name, s)
   for (const s of nested) byName.set(s.name, s) // nested overrides flat
 
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 }

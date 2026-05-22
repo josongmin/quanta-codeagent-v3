@@ -123,6 +123,35 @@ describe("Layer-2 format patterns — positive matches", () => {
     expect(r.hits.some((h) => h.kind === "generic_api_key_assignment")).toBe(true)
   })
 
+  test("generic_api_key_assignment — JSON object form (quoted key)", () => {
+    // `"api_key":"<secret>"` — the key's closing quote must not break the
+    // assignment anchor (regression guard for the optional `["']?` after key).
+    const r = redactSecrets(`{"api_key":"abcdef0123456789abcdef0123"}`, {
+      origin: "tool_result",
+    })
+    expect(r.hits.some((h) => h.kind === "generic_api_key_assignment")).toBe(true)
+    expect(r.text).not.toContain("abcdef0123456789abcdef0123")
+  })
+
+  test("slack_token (xoxb / xoxp)", () => {
+    for (const tok of [
+      "xoxb-1234567890-1234567890123-abcdefghijklmnopqrstuvwx",
+      "xoxp-1234567890-1234567890123-abcdefghijklmnopqrstuvwx",
+    ]) {
+      const r = redactSecrets(`SLACK=${tok}`, { origin: "tool_result" })
+      expect(r.hits.some((h) => h.kind === "slack_token")).toBe(true)
+      expect(r.text).not.toContain(tok)
+    }
+  })
+
+  test("jwt (three base64url segments)", () => {
+    const jwt =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dQw4w9WgXcQ4u3J5kK2pXr8mYzT1sBvN0aQ"
+    const r = redactSecrets(`token: ${jwt}`, { origin: "tool_result" })
+    expect(r.hits.some((h) => h.kind === "jwt")).toBe(true)
+    expect(r.text).not.toContain(jwt)
+  })
+
   test("source_class_secret short-circuits — entire output replaced", () => {
     const r = redactSecrets("AKIAIOSFODNN7EXAMPLE and other secrets", {
       origin: "tool_result",

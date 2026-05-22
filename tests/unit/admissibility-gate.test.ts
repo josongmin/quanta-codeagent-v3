@@ -584,3 +584,53 @@ describe("runAdmissibilityGate: parity with dispatchTool", () => {
     }
   })
 })
+
+describe("runAdmissibilityGate: pattern auto-pass CANNOT bypass HARD_DENY (AUDIT-FIX)", () => {
+  // Fail-open closed: with ONLY `permissionPatternStore` wired (no rulesStore /
+  // reviewerPort), a covered-pattern action used to skip the pulled-ahead
+  // HARD_DENY at gate step 2 and `auto_pass` straight to the hook — routing a
+  // denylisted command (e.g. `rm -rf /`) around the security boundary. The fix
+  // adds permissionPatternStore to the step-2 trigger so HARD_DENY fires first.
+  test("HARD_DENY beats a fully-covered pattern auto-pass", async () => {
+    const { PatternGrantStore } = await import("@/permission")
+    const bash = makeTool("bash", { readOnly: false, schema: bashSchema })
+    const store = new PatternGrantStore(["bash:rm"]) // pattern IS granted
+    const input = { command: "rm -rf /" }
+    const action: AdmissibilityAction = {
+      tool: "bash",
+      input,
+      isReadOnly: false,
+      rememberPatterns: ["bash:rm"],
+    }
+    const c = cfg({
+      registry: new ToolRegistry([bash]),
+      permissionPatternStore: store,
+      permission: { mode: "bypass" },
+    } as Partial<AgentConfig>)
+    const res = await runAdmissibilityGate(call("bash", input), c, { mode: "bypass" }, action)
+    // HARD_DENY must win — NOT a null (auto-pass) result.
+    expect(res).not.toBeNull()
+    expect(res?.preview).toBe("handoff")
+    expect(res?.block.content).toContain("human handoff")
+  })
+
+  test("a SAFE covered-pattern action (no HARD_DENY) still auto-passes", async () => {
+    const { PatternGrantStore } = await import("@/permission")
+    const readish = makeTool("read_file", { readOnly: true, schema: z.object({ path: z.string() }) })
+    const store = new PatternGrantStore(["read:src"])
+    const action: AdmissibilityAction = {
+      tool: "read_file",
+      input: { path: "src/x.ts" },
+      isReadOnly: true,
+      rememberPatterns: ["read:src"],
+    }
+    const c = cfg({
+      registry: new ToolRegistry([readish]),
+      permissionPatternStore: store,
+      permission: { mode: "default" },
+    } as Partial<AgentConfig>)
+    const res = await runAdmissibilityGate(call("read_file", { path: "src/x.ts" }), c, { mode: "default" }, action)
+    // No HARD_DENY on a read-only path ⇒ auto-pass admits (null).
+    expect(res).toBeNull()
+  })
+})

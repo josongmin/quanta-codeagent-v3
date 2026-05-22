@@ -102,17 +102,17 @@ describe("HookBus matcher (Tier-0 #0-1 AWF 2-matcher)", () => {
     )
 
     const fsDeny = await bus.emit({ type: "pre_tool_use", name: "write", input: {} })
-    expect(fsDeny).toEqual({ deny: "fs blocked write" })
+    expect(fsDeny.deny).toEqual({ deny: "fs blocked write" })
     expect(fsSeen).toEqual(["write"])
     expect(agentSeen).toEqual([])
 
     const agentDeny = await bus.emit({ type: "pre_tool_use", name: "task", input: {} })
-    expect(agentDeny).toEqual({ deny: "agent blocked task" })
+    expect(agentDeny.deny).toEqual({ deny: "agent blocked task" })
     expect(fsSeen).toEqual(["write"])
     expect(agentSeen).toEqual(["task"])
 
     const passThrough = await bus.emit({ type: "pre_tool_use", name: "bash", input: {} })
-    expect(passThrough).toBeNull()
+    expect(passThrough.deny).toBeNull()
     expect(fsSeen).toEqual(["write"])
     expect(agentSeen).toEqual(["task"])
   })
@@ -122,7 +122,7 @@ describe("HookBus matcher (Tier-0 #0-1 AWF 2-matcher)", () => {
     bus.on("pre_tool_use", () => ({ deny: "first" }), { matcher: ["read"] })
     bus.on("pre_tool_use", () => ({ deny: "second" }), { matcher: /^read/ })
     const result = await bus.emit({ type: "pre_tool_use", name: "read", input: {} })
-    expect(result).toEqual({ deny: "first" })
+    expect(result.deny).toEqual({ deny: "first" })
   })
 
   test("matcher is ignored on non-tool events (session_start handler with matcher still fires)", async () => {
@@ -161,7 +161,7 @@ describe("HookBus matcher (Tier-0 #0-1 AWF 2-matcher)", () => {
       { matcher: ["write"] },
     )
     const deny = await bus.emit({ type: "pre_tool_use", name: "write", input: {} })
-    expect(deny).toBeNull()
+    expect(deny.deny).toBeNull()
     expect(siblingRan).toBe(true)
     expect(lines).toHaveLength(1)
     const rec = JSON.parse(lines[0] ?? "{}") as { event: string; fields: { error: string } }

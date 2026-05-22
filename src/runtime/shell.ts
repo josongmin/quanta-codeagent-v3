@@ -163,6 +163,16 @@ export const runShell = async (
         observer(exit)
       }
       return { stdout, stderr, exitCode, timedOut: timedOutFlag }
+    } catch (e) {
+      // LEAK FIX: a throw here (observer callback raised, or a stream read
+      // rejected) means we never reached `await proc.exited`, so the child is
+      // still running and would orphan. Kill it on the way out. `kill()` is a
+      // no-op-safe wrapper if it has already exited. The terminal `exit`/
+      // `aborted` event is intentionally NOT emitted on this internal-failure
+      // path (the contract guarantees exactly one terminal event only on a
+      // normal completion / abort, not on observer-thrown failures).
+      kill()
+      throw e
     } finally {
       clearTimeout(timer)
       options.signal?.removeEventListener("abort", onAbort)
@@ -178,6 +188,11 @@ export const runShell = async (
     ])
     const exitCode = await proc.exited
     return { stdout: stdoutText, stderr: stderrText, exitCode, timedOut: timedOutFlag }
+  } catch (e) {
+    // LEAK FIX (mirror of the observer path): if draining the pipes rejects we
+    // never awaited `proc.exited`; kill the child so it cannot orphan.
+    kill()
+    throw e
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener("abort", onAbort)

@@ -566,6 +566,10 @@ const runCustomCorpusMode = async (
   await finalizeObserve(obs, results)
 }
 
+/** Default per-instance wall-clock cap (2 min). Overridable via the
+ *  `QUANTA_BENCH_TIMEOUT_MS` runtime-config field (`cfg.benchTimeoutMs`). */
+const DEFAULT_BENCH_TIMEOUT_MS = 120_000
+
 const main = async (): Promise<void> => {
   loadEnv([".env.dev", ".env.local", ".env"])
 
@@ -591,7 +595,7 @@ const main = async (): Promise<void> => {
   // (BUDGET_PRESETS.batch.maxTurns = 60) instead of the prior local `30` drift.
   const cfg = runtimeConfig()
   const maxTurns = cfg.maxTurnsBatch ?? BUDGET_PRESETS.batch.maxTurns ?? 60
-  const timeoutMs = cfg.benchTimeoutMs ?? 120_000
+  const timeoutMs = cfg.benchTimeoutMs ?? DEFAULT_BENCH_TIMEOUT_MS
   // Trajectories persist by default now (the prior tmp default reaped them);
   // pass `--observe-dir`/`QUANTA_OBSERVE_DIR` to override the location.
   const obs = resolveObserve()

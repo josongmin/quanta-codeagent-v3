@@ -86,4 +86,28 @@ describe("False-positive guards — must NOT redact normal text", () => {
     const r = redactSecrets(input, { origin: "tool_result" })
     expect(r.hits.every((h) => h.kind !== "gcp_service_account_key")).toBe(true)
   })
+
+  test("dotted version / identifier is NOT a JWT (no eyJ anchor)", () => {
+    const input = "build v1.2.3 module foo.bar.baz logger.info.call"
+    const r = redactSecrets(input, { origin: "tool_result" })
+    expect(r.unchanged).toBe(true)
+  })
+
+  test("single base64 segment starting eyJ is NOT a JWT (needs 3 segments)", () => {
+    const input = "decoded eyJsb29rcyBsaWtlIGpzb24 from the payload"
+    const r = redactSecrets(input, { origin: "tool_result" })
+    expect(r.hits.every((h) => h.kind !== "jwt")).toBe(true)
+  })
+
+  test("word 'xoxbox' / 'xerox' is NOT a slack token", () => {
+    const input = "the xerox machine and xoxbox toy are unrelated"
+    const r = redactSecrets(input, { origin: "tool_result" })
+    expect(r.hits.every((h) => h.kind !== "slack_token")).toBe(true)
+  })
+
+  test("JSON config with short api_key value is unchanged", () => {
+    const input = `{"api_key":"short"}`
+    const r = redactSecrets(input, { origin: "tool_result" })
+    expect(r.unchanged).toBe(true)
+  })
 })

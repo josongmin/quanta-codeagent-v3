@@ -22,6 +22,39 @@ describe("runShell", () => {
   })
 })
 
+describe("runShell child-process leak on observer throw (lifecycle audit)", () => {
+  /** REGRESSION: when the typed-event observer throws mid-drain, the child must
+   *  be killed on the way out, not orphaned. Before the fix the `finally` only
+   *  cleared the timer/listener and left a long-running child alive (verified
+   *  by the audit repro: a `sleep` survived for its full duration). We assert
+   *  the throw propagates AND the child is dead shortly after. */
+  test("kills the child when the observer callback throws", async () => {
+    // Capture the pid from the `start` event, then throw from the first chunk
+    // observer call so the drain rejects.
+    let pid = -1
+    const boom = new Error("observer boom")
+    await expect(
+      runShell("echo first; sleep 30", {
+        onShellEvent: (e) => {
+          if (e.kind === "start") pid = e.pid
+          if (e.kind === "stdout") throw boom
+        },
+      }),
+    ).rejects.toBe(boom)
+
+    expect(pid).toBeGreaterThan(0)
+    // Give the kill a beat to take effect, then assert the child is gone.
+    await Bun.sleep(300)
+    let alive = true
+    try {
+      process.kill(pid, 0) // signal 0 = existence probe; throws ESRCH if gone
+    } catch {
+      alive = false
+    }
+    expect(alive).toBe(false)
+  })
+})
+
 describe("runShell env scrubbing (ADR-0006)", () => {
   test("scrubs *_API_KEY / *_SECRET from the child by default", async () => {
     process.env.OPENAI_API_KEY = "sk-fake-openai"

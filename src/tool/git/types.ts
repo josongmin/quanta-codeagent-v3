@@ -9,9 +9,11 @@ import { z } from "zod"
  *  without a real git repo (and the integration suite uses tmpdir + `git
  *  init` to assert against real git).
  *
- *  All four tools are READ-ONLY and CONCURRENCY-SAFE. Mutating git commands
- *  (commit / restore / checkout / push) deliberately stay on `bash` so the
- *  permission/HARD_DENY/HITL layer governs them as before. */
+ *  The 9 git tools split into 7 READ-ONLY + CONCURRENCY-SAFE (status, diff,
+ *  log, blame, churn, blame_heatmap, upstream_check) and 2 MUTATING (commit,
+ *  branch_switch) that route through the permission/HARD_DENY/HITL layer.
+ *  Other mutating git commands (restore / checkout / push) deliberately stay
+ *  on `bash` so that same layer governs them as before. */
 
 export interface GitRunResult {
   stdout: string

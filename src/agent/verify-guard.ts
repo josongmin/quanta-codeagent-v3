@@ -7,7 +7,20 @@
  * more turn (up to `maxTrips`, default 1 — less forcing; empirically 0-trip on
  * Easy-5 gpt-4o and ADR-0014 repair-rounds측정에서 과도 강제가 over-correction
  * 유발). Absent config ⇒ guard fully OFF (byte-identical loop).
+ *
+ * The "is this a real test/repro run?" recognition lives in `./verify-signal`
+ * (a pure per-ecosystem registry); this module owns only the gating state
+ * machine. The signal symbols are re-exported below for back-compat.
  */
+
+import { isTestLikeCommand } from "./verify-signal"
+
+export {
+  isTestLikeCommand,
+  matchVerifyCommand,
+  TEST_LIKE_RE,
+  type VerifyMatcher,
+} from "./verify-signal"
 
 /** Per-session forcing budget. One instance per agent run. */
 export interface VerifyGuardState {
@@ -25,37 +38,14 @@ export const VERIFY_FORCE_MESSAGE =
 const MUTATING = new Set(["edit", "write"])
 
 /**
- * Conservative matcher: a `bash` command counts as verification ONLY if it
- * looks like a real test or reproduction invocation. Plain shell noise
- * (`git status`, `ls`, `echo`, `cat`, `grep`) deliberately does NOT match —
- * that loophole is the exact defect this guard exists to close.
- *
- * Soundness contract (the matcher is a *signal*, and a signal must minimize
- * BOTH error directions):
- *   - false NEGATIVE (a real test run not recognized) ⇒ the guard over-forces
- *     a model that already verified — the "over-correction" the maxTrips=1
- *     default fights. So the runner set spans the major ecosystems
- *     (py/js-ts/go/rust/ruby/php/.net/jvm/elixir/swift/c++), not just python.
- *   - false POSITIVE (a non-test command counted as verification) ⇒ the guard
- *     is defeated (the model skips real verification). So `python <file>.py`
- *     is NOT a blanket match: a bare `python manage.py runserver` /
- *     `python setup.py build` is NOT verification. Only test/repro-shaped
- *     filenames (`test_*.py`, `*_test.py`, `conftest.py`) or the explicit
- *     `reproduce`/`repro` token count.
- * Runner *names* (jest/pytest/…) carry a leading boundary so they match a
- * command position, not a substring inside another word.
- */
-export const TEST_LIKE_RE =
-  /(?:^|\s|;|&&|\|\||\|)(?:pytest|tox|nox|unittest|jest|vitest|mocha|jasmine|cypress|playwright|rspec|phpunit|ctest)\b|python3?\s+-m\s+(?:pytest|unittest)\b|\bbun\s+test\b|\bnode\b[^|]*--test\b|\b(?:npm|pnpm|yarn)\s+(?:test|run\s+\S*test\S*)\b|\bgo\s+test\b|\bcargo\s+(?:test|nextest)\b|\bmake\s+(?:test|check)\b|\bdeno\s+test\b|\bdotnet\s+test\b|\bmvn\s+(?:test|verify)\b|\bgradlew?\s+\S*test\b|\bmix\s+test\b|\bswift\s+test\b|\brake\s+test\b|\bpython3?\s+\S*(?:test|conftest)\S*\.py\b|\bmanage\.py\s+test\b|reproduce|\brepro\b/i
-
-/**
  * A history entry counts as verification iff it is the dedicated verify tool,
- * or a `bash` call whose command string looks like an actual test/repro run.
+ * or a `bash` call whose command string looks like an actual test/repro run
+ * (see {@link isTestLikeCommand} — the soundness contract lives there).
  */
 const isVerify = (entry: { name: string; arg?: string }): boolean => {
   if (entry.name === "test_runner") return true
   if (entry.name === "bash") {
-    return typeof entry.arg === "string" && entry.arg.length > 0 && TEST_LIKE_RE.test(entry.arg)
+    return typeof entry.arg === "string" && entry.arg.length > 0 && isTestLikeCommand(entry.arg)
   }
   return false
 }

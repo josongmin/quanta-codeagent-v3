@@ -33,11 +33,15 @@ import {
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
 
+/** Per-branch verify budget for IDE: 60s — interactive surface, a human is
+ *  waiting, so cap each speculative branch tighter than the autonomous daemon. */
+const IDE_BRANCH_TIMEOUT_MS = 60_000
+
 /** IDE default branch_search: interactive budget (N=3, fast verifiers). */
 const IDE_BRANCH_SEARCH: BranchSearchConfig = {
   defaultN: 3,
   defaultVerifierKinds: ["tsc", "lint"],
-  timeoutPerBranchMs: 60_000,
+  timeoutPerBranchMs: IDE_BRANCH_TIMEOUT_MS,
   isolation: "worktree",
 }
 

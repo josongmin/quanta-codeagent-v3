@@ -37,6 +37,8 @@ export type RedactionKind =
   | "openssh_private_key_block"
   | "url_with_userinfo"
   | "generic_api_key_assignment"
+  | "slack_token"
+  | "jwt"
   | "source_class_secret"
 
 export interface RedactionHit {
@@ -159,13 +161,34 @@ const patterns: ReadonlyArray<Pattern> = [
     kind: "url_with_userinfo",
     regex: /\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@[^\s]+/g,
   },
+  // Slack token — fixed `xox[bparse]-` prefix + ≥10 token chars. Slack's
+  // documented token shapes (bot `xoxb`, user `xoxp`, app `xoxa`, refresh
+  // `xoxr`, legacy `xoxs`, config `xoxe`). The prefix is distinctive enough
+  // that this carries no realistic false-positive risk in source/prose.
+  {
+    kind: "slack_token",
+    regex: /\bxox[baprse]-[A-Za-z0-9-]{10,}\b/g,
+  },
+  // JWT — three base64url segments separated by dots. Anchored on `eyJ`,
+  // which is the base64url encoding of `{"` and therefore the universal
+  // start of a JWT header (`{"alg":...}`). Anchoring on `eyJ` (rather than a
+  // bare 3-dot-segment shape) avoids tripping on ordinary dotted identifiers
+  // or version strings. Each segment is a bounded char class with a literal
+  // `.` separator — linear time, no backtracking.
+  {
+    kind: "jwt",
+    regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+  },
   // Generic API-key assignment — last resort for `API_KEY = "abc..."` shapes
-  // in dotenv files / shell exports. Requires ≥20 alphanumerics on the RHS
-  // so a short example value (`API_KEY=foo`) does not trip.
+  // in dotenv files / shell exports / JSON config. Requires ≥20 alphanumerics
+  // on the RHS so a short example value (`API_KEY=foo`) does not trip. The
+  // optional `["']?` AFTER the key name lets the JSON object form
+  // (`"api_key":"<secret>"`) match too — the key's own closing quote no
+  // longer breaks the assignment anchor.
   {
     kind: "generic_api_key_assignment",
     regex:
-      /\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|auth[_-]?token|private[_-]?token)\s*[=:]\s*["']?[A-Za-z0-9_\-]{20,}["']?/gi,
+      /\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|auth[_-]?token|private[_-]?token)["']?\s*[=:]\s*["']?[A-Za-z0-9_\-]{20,}["']?/gi,
   },
 ]
 
@@ -290,6 +313,8 @@ export const assertKindWired = (k: RedactionKind): string => {
     case "openssh_private_key_block":
     case "url_with_userinfo":
     case "generic_api_key_assignment":
+    case "slack_token":
+    case "jwt":
     case "source_class_secret":
       return placeholderFor(k)
     default:

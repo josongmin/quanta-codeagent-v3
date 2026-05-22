@@ -126,12 +126,26 @@ export const dispatchTool = async (
     )
     return out
   } catch (e) {
-    // `dispatchToolInner` does not throw today (every tool failure is
-    // converted to an error DispatchResult by `execute`'s catch), but
-    // mark the span as error and re-throw if it ever does — defense in
-    // depth so the span always closes.
+    // NO-THROW CONTRACT (AUDIT-FIX). `dispatchTool` is the loop's single-tool
+    // pipeline and the streaming engine (`streaming-dispatch.ts`) is built on
+    // the documented invariant that it NEVER throws — every failure becomes an
+    // `ok:false` tool_result. `execute()` already normalizes tool throws, but
+    // the PRE-execute path has un-normalized throw surfaces that escape here:
+    //   · `registry.extractShellCommand` → tool-declared `extractShellCommand`
+    //     (third-party code) can throw (called at `dispatchToolInner` L168).
+    //   · `runAdmissibilityGate` → a wired `reviewerPort` rethrows by design
+    //     (`reviewAndDecide`: "throws from the port propagate").
+    //   · the dedup gate / a non-conforming `config.hooks.emit`.
+    // Previously this `catch` re-threw, breaking the contract: the streaming
+    // engine survived it (allSettled + synthetic block) but produced a generic
+    // "dispatch threw unexpectedly" message instead of a proper error
+    // tool_result, and any NON-streaming caller would see a raw exception.
+    // We now NORMALIZE the throw into an error DispatchResult so the no-throw
+    // contract holds structurally for EVERY path. The span is still closed
+    // error before returning.
     endSpan(toolSpan, "error", attrs({ [QUANTA_ATTRS.tool.status]: "error" }))
-    throw e
+    const message = e instanceof QuantaError ? e.message : toError(e).message
+    return deny(call.id, `Tool dispatch failed for ${call.name}: ${message}`, "dispatch-error")
   }
 }
 
@@ -174,8 +188,24 @@ const dispatchToolInner = async (
   }
 
   // SSOT pre-execute gate (see admissibility-gate.ts for the canonical order).
-  const gated = await runAdmissibilityGate(call, config, permission, action, autoClassifier)
+  // A `pre_tool_use` hook may rewrite the tool args (Cursor `updated_input`
+  // parity). The gate runs that hook on its admit path and surfaces the rewrite
+  // through `onInputMutation`; we capture it here and execute the MUTATED input.
+  // Default-OFF: no hooks (or no rewrite) ⇒ `rewritten` stays undefined and the
+  // executed call is byte-identical to the pre-hook path. The wrapper object
+  // (`{ value }`) lets a hook legitimately rewrite to a falsy value.
+  let rewritten: { value: unknown } | undefined
+  const gated = await runAdmissibilityGate(call, config, permission, action, autoClassifier, {
+    onInputMutation: (next) => {
+      rewritten = { value: next }
+    },
+  })
   if (gated) return gated
+  // SECURITY: the rewrite is applied AFTER the permission / HARD_DENY gates ran
+  // on the original input. A hook is operator-authored local code at the trust
+  // level of the permission config itself, so this is intentional (the model
+  // and untrusted content cannot reach it). See hooks.ts `emit` security note.
+  const effectiveCall: ToolUseBlock = rewritten ? { ...call, input: rewritten.value } : call
 
   // Subagent absorption (ADR-0011): propagate this agent's recursion
   // depth so the `Agent` tool can enforce `maxDepth`. Absent ⇒ omitted (the
@@ -209,11 +239,11 @@ const dispatchToolInner = async (
     // Types` honoured — never `onShellEvent: undefined`).
     ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
   }
-  const out = await execute(call, config, ctx, onProgress)
+  const out = await execute(effectiveCall, config, ctx, onProgress)
   if (config.hooks) {
     await config.hooks.emit({
       type: "post_tool_use",
-      name: call.name,
+      name: effectiveCall.name,
       ok: out.ok,
       output: out.preview,
     })

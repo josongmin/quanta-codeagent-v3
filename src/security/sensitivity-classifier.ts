@@ -90,8 +90,15 @@ export const classifyPath = (absolutePath: string, home: string): SensitivityCla
   // 4. specific secret-bearing config files.
   if (p.endsWith("/.aws/credentials") || p.endsWith("/.aws/config")) return "secret"
   if (p.endsWith("/.docker/config.json")) return "secret"
+  // Legacy docker auth file (`~/.dockercfg`) — base64 registry credentials.
+  if (bn === ".dockercfg") return "secret"
+  // git credential store — plaintext `https://user:pass@host` lines.
+  if (bn === ".git-credentials") return "secret"
   if (p.endsWith("/.config/gh/hosts.yml") || p.endsWith("/.config/gh/hosts.yaml")) return "secret"
   if (p.endsWith("/.kube/config")) return "secret"
+  // gcloud Application Default Credentials — holds a refresh token. Lives
+  // under ~/.config/gcloud so it would otherwise fall through to "internal".
+  if (p.endsWith("/application_default_credentials.json")) return "secret"
 
   // 5. tree matches — anything under ~/.gnupg/ is a key ring.
   if (p.includes("/.gnupg/")) return "secret"
@@ -183,6 +190,23 @@ const tokenize = (cmd: string): string[] => {
  *   - `keychain` / `security find-generic-password` / `pass *` /
  *     `op read *` — password-manager CLIs.
  */
+/** Commands that stream raw file bytes to stdout — any secret-classified
+ *  path argument leaks identically to `cat`. Kept as an explicit closed set
+ *  (no fuzzy matching) so the rule stays structural. */
+const FILE_READERS: ReadonlySet<string> = new Set([
+  "cat",
+  "head",
+  "tail",
+  "less",
+  "more",
+  "bat",
+  "xxd",
+  "od",
+  "hexdump",
+  "strings",
+  "nl",
+])
+
 export const classifyCommandShape = (cmd: string): SensitivityClass => {
   const head = firstToken(cmd)
   if (head.length === 0) return "public"
@@ -191,8 +215,11 @@ export const classifyCommandShape = (cmd: string): SensitivityClass => {
   // bare `printenv` / `env` with no args.
   if ((head === "printenv" || head === "env") && tokens.length === 1) return "secret"
 
-  // `cat <path>` where path classifies as secret.
-  if (head === "cat" && tokens.length >= 2) {
+  // File-reading command (`cat` / pager / dumper) against a secret path.
+  // Any of these prints raw file bytes to stdout, so a secret-classified
+  // path argument leaks the same way `cat` does (`head ~/.ssh/id_rsa`,
+  // `less ~/.aws/credentials`, `xxd ~/.netrc`, …).
+  if (FILE_READERS.has(head) && tokens.length >= 2) {
     // Inspect EVERY non-flag arg — `cat -A ~/.env` should still flag.
     for (let i = 1; i < tokens.length; i++) {
       const arg = tokens[i]!

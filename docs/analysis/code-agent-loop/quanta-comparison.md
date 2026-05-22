@@ -11,6 +11,13 @@
 > - **reviewer 개념도 quanta 유일이 아니다** — Claude Code `advisor` tool(stronger reviewer model) + code-reviewer/security-reviewer named subagent 실재. quanta가 유일한 건 **8-state ApprovalOutcome + invariant 검증 + typed 3-tier enum**(형식화), reviewer "기능"이 아님.
 > - **Codex subagent = 9-tool**(6 아님), **memory = 3-layer**(durable+chronicle+ad_hoc, 2-phase 아님), **sandbox = sandbox_mode 3단 config**(seatbelt는 Rust 내부).
 > - **Cursor hook 실측 ≤8**(내가 "20" 과장 — minified 한계), **44 ToolCall은 strings 미검증**(protobuf descriptor 기반 주장).
+>
+> ⚠️ **2차 심층 검증 정정 (도구 수·인프라 실측)**:
+> - **도구 수 전부 과소였음** — 실측: **Cursor 52**(CLIENT_SIDE_TOOL_V2 enum), **Claude Code 20**(+Monitor/TaskStop/Cron×3/Worktree×2/NotebookRead), **Codex 18**(+js/js_reset/view_image/automation_update/resume_agent), quanta ~25. (내 "13-20" 틀림)
+> - **Cursor hook 실측 15**(8도 20도 아님), **AgentServerMessage는 strings로 6 field만**(21은 descriptor 기반).
+> - **Codex `view_image` 도구**(이미지 입력 있음), **원격 telemetry 0**(로컬 JSONL만 — 메모리 OTel은 내부 span).
+> - **Claude advisor tool verbatim 확인**(stronger reviewer model, NO params, full history forward), **CC token 회계 server-side**(클라 미노출), **CC firstChunk timeout 없음**(idle만).
+> - **세션 persistence 4사 실측**: quanta/Codex=JSONL append-only, Claude=per-session JSON, **Cursor=SQLite vscdb**.
 
 ---
 
@@ -83,11 +90,11 @@
 # B. TOOLS / PERMISSION / SANDBOX
 
 ## B1. 도구 인벤토리
-- **quanta** ✅ — 표준 + git **9** + apply-patch + lsp_nav + localize + test-runner + parse-test-failure + deferred + working-state 메타툴. (~25개)
+- **quanta** ✅ — ✅소스확인 — **default-on 13**(read/write/edit/scripted_replace/apply_patch/bash/grep/glob/localize/file_tree_summary/parse_test_failure/test_runner/diagnostics — `buildDefaultTools()` 배열 13항목) + **env-gate**(git **9** via `QUANTA_GIT_TOOLS=1` / lsp_nav **8** via `QUANTA_LSP_TOOLS=full`) = **카탈로그 30**(+deferred/working-state 메타툴). "~25"는 default(13)도 카탈로그(30)도 아닌 중간값 — 정정.
 - **Codex** ✅ — ✅소스확인 — **18 도구**(archived_sessions 전수): apply_patch/exec_command/**js**/**js_reset**(JS 실행)/**view_image**(이미지)/**automation_update**/read_thread_terminal/load_workspace_dependencies/list_mcp_resources/read_mcp_resource/update_plan/request_user_input + subagent 6(spawn/wait/close/resume/send_input/write_stdin).
 - **Claude** ✅ — ✅소스확인 — **20 도구**(CC 바이너리 strings): Bash/Read/Write/Edit/MultiEdit/Glob/Grep/**Monitor**/NotebookEdit/NotebookRead/WebFetch/WebSearch/TodoWrite/Task/**TaskStop**/Skill/**CronCreate/CronDelete/CronList**/**EnterWorktree/ExitWorktree** (13 아님 — Cron 스케줄/Worktree/Monitor 추가).
 - **Cursor** ✅ — ✅소스확인 — **52 ToolCall**(`CLIENT_SIDE_TOOL_V2_*` enum 실측, 44/53 아님): READ_FILE_V2/EDIT_FILE_V2/RUN_TERMINAL_COMMAND_V2/SEMANTIC_SEARCH_FULL/CALL_MCP_TOOL/COMPUTER_USE/WEB_SEARCH/WEB_FETCH/TASK_V2/DEEP_SEARCH/KNOWLEDGE_BASE/...
-- **판정**: ★ 실측 정정 — **Cursor 52 > quanta ~25 > Claude 20 > Codex 18**. Cursor가 도구 수 최다(52, descriptor 실측). 다 13보다 많음(내 "13-20" 과소).
+- **판정**: ★ 실측 정정 — **Cursor 52 > quanta 30 카탈로그(13 default-on + 17 env-gate) > Claude 20 > Codex 18**. Cursor가 도구 수 최다(52, descriptor 실측). 다 13보다 많음(내 "13-20" 과소). quanta는 default-on 13만 비교하면 최소이나, env-gate 포함 카탈로그는 30.
 
 ## B2. 도구 계약 (모델에 스키마 노출)
 - **quanta** ✅ — `tools[]`에 full JSON schema. `Tool` interface: isReadOnly/isConcurrencySafe/hitlTier/extractShellCommand 선언.
@@ -488,7 +495,7 @@
 | **F3 git 신호** | ✅✅ **9 전용 도구** (✅소스확인): git_status/git_diff/git_log/git_blame/**git_blame_heatmap**/**git_churn**/**git_upstream_check**/git_commit/git_branch_switch | ✅ `git`(bash) + git_repos context | ✅ Desktop: getGitDiff/getGitInfo/getGitCommits/getWorkingTreeStatus IPC | ✅ SelectedContext.git_diff + commit_note_chunk + file_diff_history(ContextItem) + active_branch | ★ quanta git 신호 가장 세분(blame_heatmap/churn=핫스팟, upstream_check). Cursor=ContextItem rerank / Claude=Desktop IPC |
 | **F4 LSP 진단/정의** | ✅ `diagnostics`(LSP 진단) + `lsp_nav`(정의/참조 점프) | 🟡 bash(전용 미확인) | 🟡 `read_lints` 유사(미확인) | ✅✅ `read_lints`(14) + `lsp_subgraph_chunk`(call/import 이웃, **서버 IsolatedTreesitter RPC**) + go_to_definition_result(ContextItem) | Cursor=서버 LSP subgraph rerank / quanta=클라 LSP 도구 / Codex 약함 |
 | **F5 터미널 로그/출력** | ✅ `bash`(stdout/stderr/exit) + output-spill(거대출력 tail-keep) + shell PTY(startShellPty 버퍼) | ✅✅ `exec_command` + **`read_thread_terminal`**(터미널 로그 신호 1급 도구) | ✅ Desktop: startShellPty/getShellPtyBuffer/getBusyShellPtyKeys | ✅✅ shell_output_delta(start/stdout/stderr/exit) + terminal_history(ContextItem) + console_logs(SelectedContext) | Cursor/Codex=터미널 히스토리 1급 신호 / quanta=output-spill / Claude=PTY 버퍼 |
-| **F6 테스트 출력** | ✅✅ `test-runner` + **`parse-test-failure`**(출력→구조화 실패) + verify-guard 연동 | 🟡 bash | 🟡 bash | 🟡 loop-on-ci skill(gh pr checks) | ★ quanta만 테스트 실패를 **구조화 parse** + verify-guard 입력 |
+| **F6 테스트 출력** | ✅✅ `test-runner` + **`parse-test-failure`**(출력→구조화 실패, 모델용 독립 도구) ‖ verify-guard는 **별개** 메커니즘(`verify-signal`의 test-like 명령 인식으로 종료 차단) | 🟡 bash | 🟡 bash | 🟡 loop-on-ci skill(gh pr checks) | ★ quanta만 테스트 실패를 **구조화 parse**. ⚠️정정: parse-test-failure는 verify-guard에 **연동 안 됨**(verify-guard↔verify-signal, parse-test-failure는 tool registry의 독립 도구) |
 | **F7 lint** | ✅ diagnostics 경유 | 🟡 bash | 🟡 | ✅ read_lints + lints(ContextItem) | Cursor=ContextItem lints rerank / quanta=diagnostics |
 | **F8 에디터 컨텍스트** (selection/open/visible) | ✅ `injectIdeContext`(✅소스확인) — `ideContextProvider.snapshot()` + `renderIdeContext` + redaction banner, loop.ts:848 wire. host가 provider 주입(seam 완성, IDE surface 도착 시 채움) | ❌ (CLI, 에디터 무관) | 🟡 Desktop(openInEditor) | ✅✅✅ SelectedContext 28(files/code_selections/terminals/open_and_recently_viewed/cursor position) + CodeChunk.Intent 9(VISIBLE/SELECTION/RECENTLY_VIEWED/AI_EDITED) | ★ Cursor 압도(IDE 네이티브, 28멤버). quanta=provider seam 구현됨(IDE host 미연결), Codex=없음 |
 | **F9 메모리 recall** | ✅✅ semantic+tag+freshness recall + "routing only" 헤더 | ✅✅ 3-layer(durable+chronicle+ad_hoc) | ❌ | 🟡 `<memories>`(100% 서버) | quanta/Codex=클라 recall / Cursor=서버 / Claude=없음 |

@@ -166,7 +166,9 @@ const buildSkillFeatures = async (
   const byName = new Map<string, Skill>()
   for (const s of userSkills) byName.set(s.name, s)
   for (const s of systemSkills) byName.set(s.name, s)
-  const skills = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+  const skills = [...byName.values()].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  )
   const tools: Tool[] = [
     // `createSkillTool` ALWAYS receives the full discovered list — a user can
     // still invoke any skill by name. The `paths:` filter below only narrows

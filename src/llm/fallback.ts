@@ -19,8 +19,15 @@ import type { StreamEvent, StreamInput } from "./types"
  *   assembler has half a dead message). Instead the FIRST event from the
  *   replacement provider is a `{ type: "stream_reset" }` tombstone, so the
  *   consumer ({@link assembleFromEvents}) discards the dead partial and keeps
- *   only the fallback's output. The tombstone is emitted at most once per
- *   switch and only when a real fallback event follows.
+ *   only the fallback's output. The tombstone is emitted **once per switch
+ *   that follows a partial** (NOT once per turn): if three providers each
+ *   stream a partial then fail before a fourth succeeds, the consumer sees
+ *   THREE tombstones. This is required for correctness — a single global
+ *   tombstone would reset only the first dead partial and let the second and
+ *   third providers' dead partials leak into the assembled message. Each
+ *   tombstone is lazy: emitted only when a real fallback event actually
+ *   follows (an accepted-but-empty replacement still tombstones the prior
+ *   partial via the post-loop guard below).
  * - Exhausting every provider rethrows the LAST error.
  * - A non-fallback error (auth/400/malformed/etc.) is rethrown IMMEDIATELY
  *   without trying any further provider.

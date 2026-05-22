@@ -216,6 +216,12 @@ export class LocalSandbox implements Sandbox {
         exitCode,
         timedOut,
       }
+    } catch (e) {
+      // LEAK FIX: a throw before `await proc.exited` (e.g. a pipe read
+      // rejected) leaves the child running and orphaned. Kill it on the way
+      // out. `kill()` is no-op-safe if the process has already exited.
+      kill()
+      throw e
     } finally {
       clearTimeout(timer)
     }
@@ -375,6 +381,13 @@ export class DockerSandbox implements Sandbox {
         exitCode,
         timedOut,
       }
+    } catch (e) {
+      // LEAK FIX: throw before `await proc.exited` leaves the docker child
+      // running. Kill it so it cannot orphan (the `--rm` flag only cleans the
+      // container on its OWN exit, so the host-side `docker run` process must
+      // still be reaped). `kill()` is no-op-safe post-exit.
+      kill()
+      throw e
     } finally {
       clearTimeout(timer)
     }

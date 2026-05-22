@@ -256,7 +256,19 @@ const scheduleResolvedCall = (
   const slot: Slot = { order: state.slots.length, call }
   state.slots.push(slot)
 
-  const safe = isConcurrencySafe(call.name, call.input)
+  // AUDIT-FIX (classification throw surface): `isConcurrencySafe` is the loop's
+  // `registry.isConcurrencySafe`, which invokes the tool-DECLARED
+  // `isConcurrencySafe(input)` (third-party code). A throw there would escape
+  // the un-try/catch'd `for await` in `streamingTurn` and crash the whole turn.
+  // Treat a throwing classifier as UNSAFE (serialize) — the safe direction:
+  // the call is deferred and runs in the Phase 3 serial drain like any other
+  // unsafe call, never overlapping side-effecting work.
+  let safe: boolean
+  try {
+    safe = isConcurrencySafe(call.name, call.input)
+  } catch {
+    safe = false
+  }
   if (!safe) {
     // First unsafe call ⇒ engage the head-of-line barrier. It (and every
     // later call) is deferred to the post-stream serial phase.

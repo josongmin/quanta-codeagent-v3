@@ -29,11 +29,15 @@ import {
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
 
+/** Per-branch verify budget for daemon: 90s — no human waiting, so allow a
+ *  longer speculative branch than IDE for the diagnostic-rich verifier set. */
+const DAEMON_BRANCH_TIMEOUT_MS = 90_000
+
 /** Daemon default branch_search: diagnostic-rich verifiers (next-day review). */
 const DAEMON_BRANCH_SEARCH: BranchSearchConfig = {
   defaultN: 3,
   defaultVerifierKinds: ["tsc", "lint", "lsp_diag"],
-  timeoutPerBranchMs: 90_000,
+  timeoutPerBranchMs: DAEMON_BRANCH_TIMEOUT_MS,
   isolation: "worktree",
 }
 
