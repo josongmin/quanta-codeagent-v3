@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-05-22T10:34:42.072Z",
+  "model": "gpt-5",
+  "provider": "openai",
+  "n": 1,
+  "totals": {
+    "total": 5,
+    "resolved": 0,
+    "resolvedPct": 0
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "harness_error": 5
+    },
+    "bySignal": {
+      "empty_patch": 2
+    }
+  },
+  "perInstance": [
+    {
+      "id": "django__django-10097",
+      "passed": false,
+      "turns": 16,
+      "patchBytes": 633,
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-django__django-10097-lgGhGF/predictions.jsonl --run_id quanta-django__django-10097-1779445224706 --instance_ids django__django-10097 --max_workers 4 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): t: UnixHTTPConnectionPool(host='localhost', port=None): Read timed out",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "django__django-10554",
+      "passed": false,
+      "turns": 9,
+      "patchBytes": 0,
+      "error": "empty prediction for django__django-10554",
+      "failure": {
+        "termination": "harness_error",
+        "signals": [
+          "empty_patch"
+        ]
+      }
+    },
+    {
+      "id": "django__django-10880",
+      "passed": false,
+      "turns": 0,
+      "patchBytes": 0,
+      "error": "git clone failed for django__django-10880 (https://github.com/django/django.git, code 143): Cloning into '/Users/songmin/Library/quanta-codeagent-v3/bench/work/swebench-django__django-10880-whEGeq/repo'...\nfatal: early EOF\n",
+      "failure": {
+        "termination": "harness_error",
+        "signals": [
+          "empty_patch"
+        ]
+      }
+    },
+    {
+      "id": "django__django-10914",
+      "passed": false,
+      "turns": 12,
+      "patchBytes": 625,
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-django__django-10914-CvYK5M/predictions.jsonl --run_id quanta-django__django-10914-1779445777295 --instance_ids django__django-10914 --max_workers 4 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): t: UnixHTTPConnectionPool(host='localhost', port=None): Read timed out",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "django__django-10973",
+      "passed": false,
+      "turns": 17,
+      "patchBytes": 2986,
+      "error": "cmd: python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-django__django-10973-1iz2UO/predictions.jsonl --run_id quanta-django__django-10973-1779446013398 --instance_ids django__django-10973 --max_workers 4 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): t: UnixHTTPConnectionPool(host='localhost', port=None): Read timed out",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    }
+  ]
+}

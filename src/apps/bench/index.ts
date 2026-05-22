@@ -59,7 +59,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
+import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { logger } from "@/shared"
 import {
   aggregate,
@@ -117,38 +117,6 @@ const argValue = (flag: string): string | undefined => {
 }
 
 const argFlag = (flag: string): boolean => process.argv.includes(flag)
-
-type Provider = "anthropic" | "openai"
-
-// Local provider pick — duplicated from apps/cli on purpose (no cross-app import).
-const pickProvider = (): Provider => {
-  const explicit = process.env.QUANTA_PROVIDER as Provider | undefined
-  if (explicit === "anthropic" || explicit === "openai") return explicit
-  if (process.env.ANTHROPIC_API_KEY) return "anthropic"
-  if (process.env.OPENAI_API_KEY) return "openai"
-  return "anthropic"
-}
-
-const DEFAULT_MODEL: Record<Provider, string> = {
-  anthropic: "claude-sonnet-4-6",
-  openai: "gpt-5",
-}
-
-/** Build the LLM, or null when the provider's key is absent. */
-const buildLLM = (provider: Provider, model: string): LLMPort | null => {
-  if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) return null
-    return new OpenAIAdapter({
-      apiKey,
-      model,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-    })
-  }
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return null
-  return new AnthropicAdapter({ apiKey, model })
-}
 
 /** Compact failure tag for the console FAIL line. Returns "" when the
  *  classification is `passed`. Examples:
@@ -437,15 +405,19 @@ const finalizeObserve = async (
 /** Resolve provider/model/LLM; exits 0 with guidance when the key is absent
  *  (shared by both modes). `noun` tailors the message. */
 const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLMPort } => {
-  const provider = pickProvider()
-  const model = argValue("--model") ?? process.env.QUANTA_MODEL ?? DEFAULT_MODEL[provider]
-  const llm = buildLLM(provider, model)
+  const provider = pickProvider(process.env)
+  // `--model` > `QUANTA_MODEL` > canonical DEFAULT_MODEL[provider] (the factory
+  // fills the default when `model` is omitted). Provider pick, key lookup, and
+  // OPENAI_BASE_URL handling all live in the shared factory now (OCP/DIP).
+  const modelArg = argValue("--model") ?? process.env.QUANTA_MODEL
+  const llm = tryCreateLLM(provider, modelArg !== undefined ? { model: modelArg } : {}, process.env)
   if (!llm) {
     logger.info(
       `Found ${noun} but no API key for provider "${provider}". Set ANTHROPIC_API_KEY or OPENAI_API_KEY to run. Exiting.`,
     )
     process.exit(0)
   }
+  const model = modelArg ?? DEFAULT_MODEL[provider]
   return { provider, model, llm }
 }
 

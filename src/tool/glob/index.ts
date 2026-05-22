@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import { defineTool } from "../factory"
+import type { ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   pattern: z.string().describe("Glob pattern, e.g. 'src/**/*.ts'"),
@@ -11,7 +12,7 @@ type Input = z.infer<typeof schema>
 
 const MAX = 300
 
-export const globTool: Tool<Input> = {
+export const globTool = defineTool<Input>({
   name: "glob",
   description:
     "List files matching a glob pattern, relative to the base directory. " +
@@ -52,4 +53,4 @@ export const globTool: Tool<Input> = {
     const more = hits.length > MAX ? `\n… (truncated at ${MAX})` : ""
     yield { type: "result", result: { ok: true, output: hits.slice(0, MAX).join("\n") + more } }
   },
-}
+})

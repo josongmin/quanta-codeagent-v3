@@ -16,6 +16,18 @@ import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
  * A tool defined with NONE of the optional members is byte-identical to a
  * hand-written `Tool` literal — `defineTool` only copies fields that are
  * present (respecting `exactOptionalPropertyTypes`).
+ *
+ * CANONICAL TEMPLATE: this is the blessed way to construct a tool. The
+ * representative built-ins `grep`, `glob`, `read`, and `write` are defined
+ * through it (see their `index.ts`), so it is a production path — not a
+ * test-only shim. New tools SHOULD use `defineTool`; the remaining hand-written
+ * literals / `make*Tool(port)` builders are kept as-is only because migrating
+ * them carries no behavior win (they predate the factory and are stable).
+ *
+ * The security passthroughs (`hitlTier`, `extractShellCommand`,
+ * `classifySource`) are first-class spec members because the registry and the
+ * dispatch redaction/HITL gates read them; a tool that touches a path or a
+ * shell command MUST declare the relevant one here (see `read`/`write`).
  */
 
 export interface DefineToolSpec<I, O> {
@@ -28,6 +40,7 @@ export interface DefineToolSpec<I, O> {
   // --- optional passthroughs (existing Tool surface) ---
   hitlTier?: Tool<I, O>["hitlTier"]
   extractShellCommand?: Tool<I, O>["extractShellCommand"]
+  classifySource?: Tool<I, O>["classifySource"]
   // --- absorb #1 optional capabilities ---
   outputSchema?: z.ZodType<O>
   toModelOutput?(result: ToolResult): string
@@ -50,6 +63,7 @@ export const defineTool = <I, O = unknown>(spec: DefineToolSpec<I, O>): Tool<I, 
   }
   if (spec.hitlTier !== undefined) tool.hitlTier = spec.hitlTier
   if (spec.extractShellCommand !== undefined) tool.extractShellCommand = spec.extractShellCommand
+  if (spec.classifySource !== undefined) tool.classifySource = spec.classifySource
   if (spec.outputSchema !== undefined) tool.outputSchema = spec.outputSchema
   if (spec.toModelOutput !== undefined) tool.toModelOutput = spec.toModelOutput
   if (spec.supportsDeferredResults !== undefined) {

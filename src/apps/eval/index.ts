@@ -20,7 +20,7 @@
  */
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
+import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { logger } from "@/shared"
 import { runAudit } from "./audit"
 import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
@@ -66,56 +66,30 @@ const loadEnv = (files: readonly string[]): void => {
 
 loadEnv([".env", ".env.local", ".env.dev"])
 
-// ── provider pick ────────────────────────────────────────────────────────────
-
-type Provider = "anthropic" | "openai"
-
-const pickProvider = (): Provider => {
-  const explicit = process.env["QUANTA_PROVIDER"] as Provider | undefined
-  if (explicit === "anthropic" || explicit === "openai") return explicit
-  if (process.env["ANTHROPIC_API_KEY"] !== undefined) return "anthropic"
-  if (process.env["OPENAI_API_KEY"] !== undefined) return "openai"
-  return "anthropic"
-}
-
-const DEFAULT_MODEL: Record<Provider, string> = {
-  anthropic: "claude-sonnet-4-6",
-  openai: "gpt-5",
-}
-
-const buildLLM = (provider: Provider, model: string): LLMPort | null => {
-  if (provider === "openai") {
-    const apiKey = process.env["OPENAI_API_KEY"]
-    if (apiKey === undefined) return null
-    return new OpenAIAdapter({
-      apiKey,
-      model,
-      ...(process.env["OPENAI_BASE_URL"] !== undefined
-        ? { baseURL: process.env["OPENAI_BASE_URL"] }
-        : {}),
-    })
-  }
-  const apiKey = process.env["ANTHROPIC_API_KEY"]
-  if (apiKey === undefined) return null
-  return new AnthropicAdapter({ apiKey, model })
-}
+// ── provider pick + LLM construction (delegated to the shared @/llm factory) ──
+// Provider precedence, per-provider key env vars, OPENAI_BASE_URL, and the
+// canonical DEFAULT_MODEL all live in `@/llm` (OCP/DIP). `process.env` is the
+// composition-root env view handed to the factory.
 
 const resolveLLM = (
   role: "agent" | "judge" | "classifier",
 ): { llm: LLMPort; provider: Provider; model: string } | null => {
-  const provider = pickProvider()
+  const provider = pickProvider(process.env)
   const envKey =
     role === "judge"
       ? "QUANTA_JUDGE_MODEL"
       : role === "classifier"
         ? "QUANTA_CLASSIFIER_MODEL"
         : "QUANTA_MODEL"
-  const model = argValue("--model") ?? process.env[envKey] ?? DEFAULT_MODEL[provider]
-  const llm = buildLLM(provider, model)
+  // `--model` > per-role model env > canonical DEFAULT_MODEL[provider] (the
+  // factory fills the default when `model` is omitted).
+  const modelArg = argValue("--model") ?? process.env[envKey]
+  const llm = tryCreateLLM(provider, modelArg !== undefined ? { model: modelArg } : {}, process.env)
   if (llm === null) {
     console.error(`eval/${role}: ${provider.toUpperCase()}_API_KEY not set — skip ${role} step`)
     return null
   }
+  const model = modelArg ?? DEFAULT_MODEL[provider]
   return { llm, provider, model }
 }
 

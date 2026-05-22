@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs"
-import { stat } from "node:fs/promises"
+import { mkdir, rename, stat, unlink } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { QuantaError, runtimeConfig } from "@/shared"
 import type { FileInfo } from "./types"
@@ -164,6 +164,28 @@ export const fileExists = async (path: string, baseDir?: string): Promise<boolea
 
 export const parentDir = (path: string, baseDir?: string): string =>
   dirname(resolvePath(path, baseDir))
+
+/**
+ * Jailed file delete. Resolves `path` through {@link resolvePath} (so an
+ * explicit `baseDir` confines it to the same jail root as read/write/edit),
+ * then unlinks. Added so `apply_patch` can route its delete op through the ONE
+ * storage jail instead of carrying a second bespoke jail. */
+export const deleteFile = async (path: string, baseDir?: string): Promise<void> => {
+  await unlink(resolvePath(path, baseDir))
+}
+
+/**
+ * Jailed file rename. BOTH endpoints go through {@link resolvePath}, so an
+ * explicit `baseDir` jails the source AND the destination identically to the
+ * read/write/edit chokepoint — neither end can escape. Creates the
+ * destination's parent directory first (mirrors {@link writeFile}'s implicit
+ * `Bun.write` mkdir). */
+export const renameFile = async (from: string, to: string, baseDir?: string): Promise<void> => {
+  const absFrom = resolvePath(from, baseDir)
+  const absTo = resolvePath(to, baseDir)
+  await mkdir(dirname(absTo), { recursive: true })
+  await rename(absFrom, absTo)
+}
 
 /**
  * Injected filesystem port for the read/edit/write tools (#13). Mirrors the

@@ -3,27 +3,33 @@
 // Bridges the pure `@/patch` slice (parser + applier + FileSystemPort) to the
 // agent's tool surface. Owns:
 //
-//   1. `FsJailFileSystemPort` — a concrete `FileSystemPort` that confines
-//      every read/write/delete/rename to a single jail root (`ctx.cwd`).
-//      Distinct from `@/storage`'s `FsJailError` (text-only diagnostic):
-//      a jail violation here throws a typed `FsJailViolationError` so the
-//      apply pipeline can distinguish "boundary breach" from "patch grammar
-//      error" / "anchor not found" categorically.
+//   1. `FsJailFileSystemPort` — a thin ADAPTER that satisfies `@/patch`'s
+//      storage-agnostic `FileSystemPort` by routing every path through
+//      `@/storage`'s ONE jail (`resolveJailed` → the same `enforceJail`
+//      chokepoint that read/write/edit use). There is no second jail anymore:
+//      a sandbox-escape bug now has exactly ONE place to hide. Storage raises
+//      a text-only `FsJailError`; this adapter re-types it as the categorical
+//      `FsJailViolationError` so the apply pipeline can still tell a "boundary
+//      breach" apart from a "patch grammar error" / "anchor not found".
 //
 //   2. `applyPatchTool` — the `Tool` entry that parses + applies a V4A patch
 //      and propagates EVERY named error (PatchParseError /
 //      PatchAnchorNotFoundError / PatchApplyError / FsJailViolationError)
 //      to the registry without silent catch.
 //
-// Determinism: jail boundary check is `path.resolve` + `realpath` (for
-// existing ancestors, defeats symlink TOCTOU) + `startsWith(jailRoot +
-// path.sep)` AND `=== jailRoot`. No heuristics, no fallback, no graceful
-// skip — every violation throws.
+// Determinism: the jail boundary check is delegated wholesale to
+// `@/storage.resolveJailed` (lexical `..` collapse + `realpath` of the longest
+// existing ancestor, defeating symlink escape, + segment-boundary containment;
+// honours `QUANTA_FS_JAIL=off`). The adapter adds only the two trivial
+// pre-checks storage does not perform — empty path and embedded NUL byte —
+// both unambiguous attacks rejected before any resolve. No heuristics, no
+// fallback, no graceful skip — every violation throws.
 
 import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { z } from "zod"
 import { type ApplyResult, applyPatch, type FileSystemPort, parsePatch } from "@/patch"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "./types"
 
 /**
@@ -54,7 +60,6 @@ export interface NodeFsLike {
   unlink(p: string): Promise<void>
   rename(from: string, to: string): Promise<void>
   mkdir(p: string, options: { recursive: true }): Promise<string | undefined>
-  realpath(p: string): Promise<string>
   stat(p: string): Promise<{ isFile(): boolean; isDirectory(): boolean }>
 }
 
@@ -64,24 +69,26 @@ interface PortOptions {
 }
 
 /**
- * `FileSystemPort` implementation rooted at `jailRoot`. Every public method
- * routes its target path through {@link FsJailFileSystemPort.assertInside}
- * BEFORE touching the underlying filesystem.
+ * ADAPTER that satisfies `@/patch`'s storage-agnostic {@link FileSystemPort}
+ * by routing every path through `@/storage`'s ONE jail. There is no second
+ * jail implementation here — {@link FsJailFileSystemPort.assertInside}
+ * delegates the entire boundary decision to `@/storage.resolveJailed`, which
+ * is the SAME `enforceJail` chokepoint the read/write/edit tools use:
  *
- * Jail boundary algorithm (deterministic, three-stage):
- *   1. Reject empty paths and any path containing a NUL byte
- *      (`String.prototype.includes('\0')`) — both are unambiguous attacks.
- *   2. Lexically resolve via `path.resolve(jailRoot, target)`. The resolver
- *      collapses `..` segments AGAINST the jail root, so `../../etc/passwd`
- *      lands outside and is rejected.
- *   3. Resolve symlinks on the longest existing prefix via
- *      `fs.realpath` — applied to BOTH the jail root and the target. The
- *      pair is compared with `realTarget === realRoot ||
- *      realTarget.startsWith(realRoot + path.sep)`. The trailing separator
- *      is REQUIRED — otherwise `/tmp/jail-extra` passes a `/tmp/jail` root.
+ *   - lexical `..` collapse against the jail root,
+ *   - `realpath` of the longest existing ancestor (defeats symlink escape,
+ *     including the `/tmp/jail-extra` vs `/tmp/jail` sibling-prefix trap, via
+ *     segment-boundary containment),
+ *   - `QUANTA_FS_JAIL=off` opt-out, read once at startup.
  *
- * Symlink TOCTOU is defeated by always re-resolving immediately before the
- * I/O call, so a swap between check and use forces another `realpath`.
+ * The adapter adds only the two trivial pre-checks storage does not do — empty
+ * path and embedded NUL byte — and re-types storage's text-only
+ * {@link FsJailError} as the categorical {@link FsJailViolationError} so the
+ * apply pipeline keeps its "boundary breach" vs "grammar / anchor" distinction.
+ *
+ * Symlink TOCTOU is defeated the same way storage does it: every I/O method
+ * re-resolves through `resolveJailed` immediately before the syscall, so a
+ * swap between check and use forces another `realpath`.
  */
 export class FsJailFileSystemPort implements FileSystemPort {
   private readonly jailRoot: string
@@ -98,95 +105,58 @@ export class FsJailFileSystemPort implements FileSystemPort {
     this.fs = opts.fs ?? (nodeFs as unknown as NodeFsLike)
   }
 
-  /** Resolve `target` against the jail root and verify it stays inside.
-   *  Throws {@link FsJailViolationError} on any violation. Returns the
-   *  resolved absolute path to use for the actual I/O call. */
-  private async assertInside(target: string): Promise<string> {
-    // (1) Trivial rejects — never normalised, never resolved.
+  /** Resolve `target` against the jail root and verify it stays inside, by
+   *  delegating to the single `@/storage` jail. Throws
+   *  {@link FsJailViolationError} on any violation (re-typed from storage's
+   *  {@link FsJailError}). Returns the resolved absolute path for the I/O call. */
+  private assertInside(target: string): string {
+    // Trivial rejects storage does not cover — never resolved, unambiguous
+    // attacks. (`resolveJailed("", root)` would otherwise resolve to the root
+    // itself, and a NUL byte must never reach a syscall.)
     if (typeof target !== "string" || target.length === 0) {
       throw new FsJailViolationError(String(target), this.jailRoot)
     }
     if (target.includes("\0")) {
       throw new FsJailViolationError(target, this.jailRoot)
     }
-
-    // (2) Lexical resolve against the jail root.
-    const lexical = path.resolve(this.jailRoot, target)
-
-    // (3) Symlink-real resolve for the jail root and the longest existing
-    //     ancestor of the target. We can't `realpath` a not-yet-created
-    //     file, so we climb until we find a real ancestor and re-append.
-    const realRoot = await this.realResolve(this.jailRoot)
-    const realTarget = await this.realResolve(lexical)
-
-    // startsWith(realRoot + path.sep) is REQUIRED — otherwise `/tmp/jail-extra`
-    // would pass for a `/tmp/jail` root. Equality is the only other accept.
-    const sep = path.sep
-    const acceptableEqual = realTarget === realRoot
-    const acceptablePrefix = realTarget.startsWith(realRoot + sep)
-    if (!acceptableEqual && !acceptablePrefix) {
-      throw new FsJailViolationError(target, this.jailRoot)
-    }
-    return realTarget
-  }
-
-  /** Realpath the longest EXISTING prefix of `abs`, then re-append the
-   *  not-yet-existing tail. Symlinks in the existing portion are resolved;
-   *  symlinks introduced LATER are caught by the next `assertInside` (TOCTOU
-   *  guard — every I/O re-resolves immediately before the syscall). */
-  private async realResolve(abs: string): Promise<string> {
-    const segs = abs.split(path.sep).filter((s) => s.length > 0)
-    for (let i = segs.length; i >= 0; i--) {
-      const candidate = path.sep + segs.slice(0, i).join(path.sep) || path.sep
-      try {
-        const real = await this.fs.realpath(candidate)
-        const tail = segs.slice(i)
-        if (tail.length === 0) return real
-        // Normalise the rejoin so any `.` or `..` in the tail (defensive — the
-        // caller already lexically resolved, but be belt-and-suspenders)
-        // collapses on the resolved real root.
-        return path.resolve(real, ...tail)
-      } catch {
-        // Ancestor doesn't exist — climb up.
+    // The ONE jail. resolveJailed throws FsJailError on escape; re-type it as
+    // the categorical FsJailViolationError, leaving any other error to surface.
+    try {
+      return resolveJailed(target, this.jailRoot)
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        throw new FsJailViolationError(target, this.jailRoot)
       }
+      throw e
     }
-    // Filesystem root must always exist; the loop guarantees we return above.
-    // Surface a clear error if it ever doesn't.
-    throw new FsJailViolationError(abs, this.jailRoot)
   }
 
   async readFile(p: string): Promise<string> {
-    const resolved = await this.assertInside(p)
+    const resolved = this.assertInside(p)
     return this.fs.readFile(resolved, "utf8")
   }
 
   async writeFile(p: string, content: string): Promise<void> {
-    const resolved = await this.assertInside(p)
-    const parent = path.dirname(resolved)
-    // Re-assert the parent is inside the jail. `path.dirname` of an
-    // in-jail path is always in-jail or === jailRoot, but we still go
-    // through `assertInside` so the mkdir target is normalised + realpath'd.
-    await this.assertInside(path.relative(this.jailRoot, parent) || ".")
-    await this.fs.mkdir(parent, { recursive: true })
+    const resolved = this.assertInside(p)
+    // The parent of an in-jail path is in-jail by construction; mkdir it.
+    await this.fs.mkdir(path.dirname(resolved), { recursive: true })
     await this.fs.writeFile(resolved, content, "utf8")
   }
 
   async deleteFile(p: string): Promise<void> {
-    const resolved = await this.assertInside(p)
+    const resolved = this.assertInside(p)
     await this.fs.unlink(resolved)
   }
 
   async renameFile(from: string, to: string): Promise<void> {
-    const resolvedFrom = await this.assertInside(from)
-    const resolvedTo = await this.assertInside(to)
-    const parent = path.dirname(resolvedTo)
-    await this.assertInside(path.relative(this.jailRoot, parent) || ".")
-    await this.fs.mkdir(parent, { recursive: true })
+    const resolvedFrom = this.assertInside(from)
+    const resolvedTo = this.assertInside(to)
+    await this.fs.mkdir(path.dirname(resolvedTo), { recursive: true })
     await this.fs.rename(resolvedFrom, resolvedTo)
   }
 
   async exists(p: string): Promise<boolean> {
-    const resolved = await this.assertInside(p)
+    const resolved = this.assertInside(p)
     try {
       await this.fs.stat(resolved)
       return true

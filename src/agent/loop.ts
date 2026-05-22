@@ -1,12 +1,6 @@
-import type {
-  assembleFromEvents,
-  Message,
-  StreamEvent,
-  SystemPromptInput,
-  ToolResultBlock,
-} from "@/llm"
+import type { Message, StreamEvent, SystemPromptInput, ToolResultBlock } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
-import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
+import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
 import {
   normalizeRedactionConfig,
@@ -14,13 +8,8 @@ import {
   type RedactionOrigin,
   redactSecrets,
 } from "@/security"
-import { LLMError, type RunContext } from "@/shared"
-import { type Tool, ToolRegistry } from "@/tool"
-import {
-  type CloseoutGuardState,
-  createCloseoutGuardState,
-  decideCloseoutGuard,
-} from "./closeout-guard"
+import { LLMError } from "@/shared"
+import { type CloseoutGuardState, decideCloseoutGuard } from "./closeout-guard"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import {
@@ -32,10 +21,44 @@ import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
 import { buildSessionFeatures } from "./features"
 import { renderIdeContext } from "./ide-context"
-import { type PersistDeps, persistSession, recallContext } from "./memory"
+import { persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
-import { backoffDelayMs, classifyLLMError } from "./retry"
+import {
+  type AssembledMessage,
+  decideOnAssembled,
+  decideOnStreamError,
+  freshRecovery,
+  type RecoveryAction,
+  type RecoveryReason,
+  type RecoveryState,
+} from "./recovery"
+
+// Backward-compatible re-exports: the stream-error/recovery FSM moved to
+// `./recovery` (SRP decomposition) but historically lived in `loop.ts`.
+// Existing consumers (`tests/unit/recovery*.test.ts`) import these from
+// `@/agent/loop`, so re-export them to keep the public surface stable.
+export {
+  decideOnAssembled,
+  decideOnStreamError,
+  freshRecovery,
+  type RecoveryState,
+} from "./recovery"
+
+import { backoffDelayMs } from "./retry"
+import {
+  buildCloseoutGuard,
+  buildEffectiveConfig,
+  buildPersistDeps,
+  buildVerifyGuard,
+  buildWorkMetricsResources,
+  createRedactionRollup,
+  emitWorkMetrics,
+  sessionSpanAttrs,
+  stampTurn,
+  type ToolHistoryEntry,
+  turnSpanAttrs,
+} from "./session-resources"
 import {
   classifyErrorReason,
   completedCategory,
@@ -52,34 +75,10 @@ import {
 } from "./tool-choice"
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
-import type {
-  AgentConfig,
-  AgentOutcome,
-  MemoryCitation,
-  RedactionRollup,
-  StopReason,
-} from "./types"
-import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
-import { TurnWorkMetricsCollector } from "./work-metrics-collector"
+import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
+import { decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
+import type { TurnWorkMetricsCollector } from "./work-metrics-collector"
 import type { WorkingStateSession } from "./working-state"
-
-/** Bounded per-turn recovery budgets. These cap SAME-TURN retries so a
- *  pathological provider can never spin the loop forever; once exhausted the
- *  loop degrades gracefully (finish / accept-partial) rather than hanging. */
-const MAX_TURN_STREAM_RETRIES = 3
-const MAX_OUTPUT_CONTINUES = 3
-const MAX_MALFORMED_RETRIES = 1
-const MAX_CONSECUTIVE_EMPTIES = 2
-
-/** Verify-guard history element (Tier 0 safety hardening). A real SWE-bench run proved the
- *  guard fired 0 times because the agent runs a noise `bash` (`git status`/`ls`)
- *  after editing and the old policy counted ANY bash as "verified", defeating
- *  the guard. R1's tightened `decideVerifyGuard` only counts a `bash` as a
- *  verification when its command string matches a test/repro regex — so the
- *  loop MUST carry the bash command string here (it previously pushed only the
- *  name, leaving `arg` always undefined). `arg` is conditionally set for `bash`
- *  ONLY (exactOptionalPropertyTypes: omitted, never `arg: undefined`). */
-type ToolHistoryEntry = { name: string; arg?: string }
 
 /** Shared frozen empty history for the guard-OFF path. `toolHistory` is
  *  `undefined` when `config.verifyGuard` is absent; passing this shared
@@ -119,7 +118,6 @@ const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
  * With NO Tier-1 config and a turn that yields 0 or only non-safe tool calls,
  * behaviour is byte-for-byte identical to the pre-absorption batched path.
  */
-type AssembledMessage = ReturnType<typeof assembleFromEvents>["message"]
 
 /** Bridge a `{type:"usage"}` StreamEvent (W-A2, currently dropped by
  *  `assembleFromEvents`) to the homomorphic `AgentEvent` so recorders capture
@@ -156,17 +154,6 @@ const emitUsage = (
     ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
   })
 }
-
-/** Stable, small set of `recovery` reasons (RFC-0002 §5.2). Group E maps these
- *  → trajectory kinds; keep the set closed so probe/triage can rely on it. */
-type RecoveryReason =
-  | "backoff"
-  | "compact"
-  | "nudge"
-  | "empty"
-  | "malformed"
-  | "unverified"
-  | "closeout"
 
 /** Pure side-effect emit of a `{type:"recovery"}` AgentEvent at a recovery
  *  point the loop ALREADY reaches (backoff/compact/nudge/empty/malformed). It
@@ -490,11 +477,6 @@ const streamConsume = async (
   }
 }
 
-/** True when the assembled turn produced nothing usable: no text, no tool_use
- *  (e.g. an empty completion or a thinking-only block). */
-const isEmptyTurn = (m: AssembledMessage): boolean =>
-  !m.content.some((b) => (b.type === "text" && b.text.trim() !== "") || b.type === "tool_use")
-
 /** A short out-of-band user message used to steer the model on a same-turn
  *  retry (output-limit / malformed-tool / empty). Kept terse on purpose. */
 const metaUser = (text: string): Message => ({
@@ -712,34 +694,6 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
     system: config.system,
   }).system
 
-/** Pure construction of the persistence dependency bag from config. Mirrors
- *  the conditional-spread semantics required by `exactOptionalPropertyTypes`
- *  (omit keys entirely, never assign `undefined`). Caller guards `config.store`
- *  presence before invoking `persistSession`. */
-const buildPersistDeps = (
-  config: AgentConfig,
-  recorder: AgentRecorder | undefined,
-  redactionEnabled: boolean,
-  onRedaction: (origin: RedactionOrigin, hits: readonly RedactionHit[]) => void,
-): PersistDeps => ({
-  // biome-ignore lint/style/noNonNullAssertion: call site guards `config.store`
-  store: config.store!,
-  llm: config.llm,
-  ...(config.embedder ? { embedder: config.embedder } : {}),
-  ...(config.memory?.distill !== undefined ? { distill: config.memory.distill } : {}),
-  ...(config.memory?.consolidate !== undefined ? { consolidate: config.memory.consolidate } : {}),
-  ...(config.memory?.evictionCaps ? { evictionCaps: config.memory.evictionCaps } : {}),
-  ...(recorder ? { onStats: (s) => recorder.memoryPersist(s) } : {}),
-  // ADR-0078 point #3 — redact the serialized transcript before the distill LLM
-  // call. Disabled ⇒ `redactionDisabled:true` so distillSession skips redaction
-  // (acknowledged-risk posture); enabled ⇒ hits fold into the run rollup under
-  // the `memory_distill` origin.
-  ...(config.redaction?.whitelist ? { redactionWhitelist: config.redaction.whitelist } : {}),
-  ...(redactionEnabled ? {} : { redactionDisabled: true }),
-  onRedactionHits: (hits) => onRedaction("memory_distill", hits),
-  signal: config.signal,
-})
-
 /** Abort-aware sleep used by the in-loop turn-retry backoff. Resolves early
  *  (no throw) if the signal trips so the caller's next abort check handles it. */
 const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
@@ -764,116 +718,6 @@ type TurnResult =
   | { kind: "completed"; message?: AssembledMessage }
   | { kind: "aborted" }
   | { kind: "error"; reason: string }
-
-/** Mutable per-turn recovery counters, threaded so the budgets are SAME-TURN
- *  (a fresh turn resets them; same-turn retries decrement the shared budget). */
-export interface RecoveryState {
-  streamRetries: number
-  outputContinues: number
-  malformedRetries: number
-  consecutiveEmpties: number
-}
-
-export const freshRecovery = (): RecoveryState => ({
-  streamRetries: 0,
-  outputContinues: 0,
-  malformedRetries: 0,
-  consecutiveEmpties: 0,
-})
-
-/** What the turn driver should do next. `retry_*` re-enters the SAME turn
- *  (no turn increment); `nudge` first appends a meta user message; `compact`
- *  asks for reactive compaction; `backoff` sleeps `delayMs` first. */
-type RecoveryAction =
-  | { do: "backoff"; attempt: number }
-  | { do: "compact" }
-  | { do: "nudge"; keepMessage: boolean; text: string; reason: RecoveryReason }
-  | { do: "proceed" }
-  | { do: "completed" }
-  | { do: "error"; reason: string }
-
-/** Pure policy for a thrown stream error: classify it, consult the SAME-TURN
- *  budget, and decide. Mutates `rec` (consumes a retry slot) only when it
- *  actually elects to retry — kept here so the decision is unit-testable. */
-export const decideOnStreamError = (
-  error: unknown,
-  message: string,
-  rec: RecoveryState,
-): RecoveryAction => {
-  const kind = classifyLLMError(error)
-  if (kind === "retryable") {
-    if (rec.streamRetries >= MAX_TURN_STREAM_RETRIES) {
-      return { do: "error", reason: `LLM stream failed after retries: ${message}` }
-    }
-    const attempt = rec.streamRetries
-    rec.streamRetries += 1
-    return { do: "backoff", attempt }
-  }
-  if (kind === "prompt_too_long") return { do: "compact" }
-  return { do: "error", reason: message }
-}
-
-/** Pure policy for a successfully assembled turn: decide whether it is final,
- *  needs a SAME-TURN nudge+retry (output-limit / malformed / empty), or should
- *  proceed to tool dispatch. Mutates `rec` only when it elects a nudge/retry. */
-export const decideOnAssembled = (
-  stopReason: string,
-  message: AssembledMessage,
-  rec: RecoveryState,
-): RecoveryAction => {
-  // ADR-0076 Gap-1: provider refusal / abnormal non-tool stop. The model
-  // stopped with an explicit refusal (Anthropic `refusal`, OpenAI content-
-  // policy stop). Surface it as an error so the run does NOT report the
-  // refusal text as a normal completion — the pre-ADR fall-through bug routed
-  // every unrecognized stop_reason to `proceed`→`completed`, disguising a
-  // refusal as success. `pause_turn` (server-tool resume) is intentionally
-  // NOT handled: we ship no server-side tools, so it cannot be emitted; adding
-  // a dead branch would be cargo.
-  if (stopReason === "refusal") {
-    return {
-      do: "error",
-      reason:
-        "Model refused to continue (stop_reason=refusal); the assistant " +
-        "message carries the refusal rationale, not a completed task.",
-    }
-  }
-  if (stopReason === "max_tokens" && rec.outputContinues < MAX_OUTPUT_CONTINUES) {
-    rec.outputContinues += 1
-    return {
-      do: "nudge",
-      keepMessage: true,
-      text: "Output limit hit — continue exactly where you left off, do not repeat.",
-      reason: "nudge",
-    }
-  }
-  const hasTools = message.content.some((b) => b.type === "tool_use")
-  if (stopReason === "tool_use" && !hasTools) {
-    if (rec.malformedRetries < MAX_MALFORMED_RETRIES) {
-      rec.malformedRetries += 1
-      return {
-        do: "nudge",
-        keepMessage: true,
-        text:
-          "Your previous tool call was malformed/incomplete. Re-issue it as a " +
-          "single valid tool call.",
-        reason: "malformed",
-      }
-    }
-    return { do: "completed" }
-  }
-  if (!hasTools && isEmptyTurn(message)) {
-    if (rec.consecutiveEmpties >= MAX_CONSECUTIVE_EMPTIES) return { do: "completed" }
-    rec.consecutiveEmpties += 1
-    return {
-      do: "nudge",
-      keepMessage: true,
-      text: "You returned an empty response. Continue the task or give your final answer.",
-      reason: "empty",
-    }
-  }
-  rec.consecutiveEmpties = 0
-  return { do: "proceed" }
-}
 
 /**
  * Drive one logical turn to a terminal {@link TurnResult}, performing all
@@ -1273,132 +1117,6 @@ const runTurn = async (
   }
 }
 
-/** Per-turn correlation context (RFC-0002 §5.1/§5.4). A fresh shallow copy of
- *  the caller's `config.run` with `turn` restamped — so `config.run` is NEVER
- *  mutated. Returns `undefined` when unconfigured (zero overhead, loop
- *  byte-identical). Pure: used only for correlation, never control flow. */
-const stampTurn = (run: RunContext | undefined, turn: number): RunContext | undefined =>
-  run ? { ...run, turn } : undefined
-
-/** Reconstruct the `Tool[]` backing a registry (it is construct-only — no
- *  enumerator) so extra tools can be merged into a fresh registry. */
-const registryTools = (r: AgentConfig["registry"]): Tool[] =>
-  r
-    .specs()
-    .map((s) => r.get(s.name))
-    .filter((t): t is Tool => t !== undefined)
-
-/** Fold extra tools (subagent/skill) into a fresh registry. With none
- *  (`extraTools` empty) returns the SAME config by identity, so the loop stays
- *  byte-for-byte identical to the pre-absorption path. */
-const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentConfig =>
-  extraTools.length > 0
-    ? {
-        ...config,
-        registry: new ToolRegistry([...registryTools(config.registry), ...extraTools]),
-      }
-    : config
-
-/** Verify-guard per-run resources (Tier 0 safety hardening). Built when EITHER
- *  `config.verifyGuard` OR `config.closeoutGuard?.enabled === true` is set:
- *  closeout-guard now duck-reads the same tool-history array to route a
- *  code-modification session to the Phase 4 four-truth-surface reminder
- *  (ADR-0019). With NEITHER set ⇒ both `undefined` (no allocation, the
- *  history push + guard decisions are never reached → loop byte-identical).
- *  The `state` (verifyGuardState) stays gated on `verifyGuard` alone. */
-const buildVerifyGuard = (
-  config: AgentConfig,
-): { state?: VerifyGuardState; history?: ToolHistoryEntry[] } => {
-  const needHistory = config.verifyGuard !== undefined || config.closeoutGuard?.enabled === true
-  const out: { state?: VerifyGuardState; history?: ToolHistoryEntry[] } = {}
-  if (config.verifyGuard) out.state = createVerifyGuardState()
-  if (needHistory) out.history = []
-  return out
-}
-
-/** Closeout reminder per-run resource. Built ONLY when
- *  `config.closeoutGuard?.enabled === true`: a single-shot trip counter.
- *  Absent (or `enabled !== true`) ⇒ `undefined` (no allocation, the guard
- *  decision is never reached → loop byte-identical). Extracted so `runAgent`
- *  gains no extra cognitive-complexity branch — mirrors `buildVerifyGuard`. */
-const buildCloseoutGuard = (config: AgentConfig): CloseoutGuardState | undefined =>
-  config.closeoutGuard?.enabled === true ? createCloseoutGuardState() : undefined
-
-/** Per-turn work-metrics resources (absorb #6, ADR-0064). Built ONLY when
- *  `cfg.workMetricsSink` is wired. With the sink absent ⇒ both fields stay
- *  `undefined`, no object is allocated, all `collector?.` no-op and the
- *  finalize/emit helper short-circuits → loop byte-for-byte identical.
- *
- *  `turnId` reuses the ADR-0030 `activeTurnRef.currentTurn.turnId` when set
- *  (so a surface that tracks both sees one UUID space); otherwise we mint a
- *  fresh per-turn UUID so the sink ALWAYS gets a stable correlation id.
- *  Extracted so `runAgent` gains no new branch — mirrors `buildVerifyGuard`. */
-const buildWorkMetricsResources = (
-  cfg: AgentConfig,
-): { collector?: TurnWorkMetricsCollector; turnId?: string } => {
-  if (cfg.workMetricsSink === undefined) return {}
-  return {
-    collector: new TurnWorkMetricsCollector(),
-    turnId: cfg.activeTurnRef?.current.currentTurn?.turnId ?? crypto.randomUUID(),
-  }
-}
-
-/** Finalize the collector and hand the snapshot to the sink. Skipped when no
- *  sink is wired (default-OFF byte-identical) or when the turn aborted before
- *  any work landed (snapshot is all-zeros → no signal). Extracted so `runAgent`
- *  gains no new branch — mirrors `buildVerifyGuard`/`buildCloseoutGuard`.
- *
- *  TODO(absorb #6 cont.): collect numstat per-turn from git_diff results (or
- *  spawn `git diff --numstat HEAD` here, gated on a git-repo check) so
- *  `diffMap` reflects actual file changes; today it accumulates only when a
- *  future tool routes numstat through `collector.recordDiff(...)`. */
-const emitWorkMetrics = (
-  cfg: AgentConfig,
-  collector: TurnWorkMetricsCollector | undefined,
-  turnId: string | undefined,
-  resultKind: TurnResult["kind"],
-): void => {
-  if (
-    cfg.workMetricsSink === undefined ||
-    collector === undefined ||
-    turnId === undefined ||
-    resultKind === "aborted"
-  ) {
-    return
-  }
-  const metrics = collector.finalize(cfg.llm.model)
-  cfg.workMetricsSink.emit(metrics, { turnId })
-}
-
-/** Codex 10-step span tree — outer-most ring (`session_loop`). Default-OFF:
- *  when no {@link SpanSink} is registered, both `startSpan` / `endSpan` return
- *  the shared no-op sentinel — zero allocations, the loop is byte-identical
- *  to the pre-span path. `attrs` use canonical {@link QUANTA_ATTRS} keys
- *  (no raw strings — the vocabulary-orphan scan enforces this).
- *
- *  Session-id semantics: the sessionId IS the conversation/thread anchor for
- *  this run (mirrors how `quanta.thread.id` was already populated by the
- *  side-conversation absorption — see vocabulary.ts comments).
- *  `quanta.thread.kind` is `"main"` here; subagent/side-conv spans set their
- *  own kind. */
-const sessionSpanAttrs = (sessionId: string): ReturnType<typeof attrs> =>
-  attrs({
-    [QUANTA_ATTRS.conversation.id]: sessionId,
-    [QUANTA_ATTRS.thread.id]: sessionId,
-    [QUANTA_ATTRS.thread.kind]: "main",
-  })
-
-/** Codex 10-step span tree — turn ring (`session_task.turn`). Opens once per
- *  logical turn (a SAME-TURN retry does NOT open a new span — it stays under
- *  the same turn id, matching Codex's convention). On close, `quanta.turn.
- *  duration_ms` is supplied by `endSpan` itself (computed from monotonic
- *  start), so the close-attrs need only echo the id. */
-const turnSpanAttrs = (turnId: string): ReturnType<typeof attrs> =>
-  attrs({
-    [QUANTA_ATTRS.turn.id]: turnId,
-    [QUANTA_ATTRS.turn.kind]: "main",
-  })
-
 // (The `handle_tool_call` span is wrapped in `dispatch.ts` — closer to the
 // actual tool-execution surface so the span open / close stays adjacent to
 // the call sites that produce its status.)
@@ -1536,17 +1254,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // identical). When redaction is disabled, dispatch/distill/envelope never
   // produce hits so the rollup stays empty (the banner is the user-facing seam).
   const redactionEnabled = normalizeRedactionConfig(cfg.redaction).enabled
-  const redactionAgg = new Map<string, RedactionRollup>()
-  const recordRedaction = (origin: RedactionOrigin, hits: readonly RedactionHit[]): void => {
-    for (const h of hits) {
-      const key = `${origin} ${h.kind}`
-      const cur = redactionAgg.get(key)
-      redactionAgg.set(
-        key,
-        cur ? { ...cur, count: cur.count + 1 } : { origin, kind: h.kind, count: 1 },
-      )
-    }
-  }
+  const { agg: redactionAgg, record: recordRedaction } = createRedactionRollup()
   // Codex absorption — memory L3 (Phase 6): session-scoped WorkingState.
   // Wired in by `buildSessionFeatures` when `cfg.workingState?.enabled === true`;
   // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-

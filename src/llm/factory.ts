@@ -14,7 +14,7 @@ export type Provider = LLMProvider
  *  entry points (`cli`, `bench`, `eval`) previously each duplicated. */
 export const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-6",
-  openai: "gpt-5",
+  openai: "gpt-5-mini",
 }
 
 /** Per-provider env var holding the API key, in the precedence order the call

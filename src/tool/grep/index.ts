@@ -1,7 +1,8 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import { defineTool } from "../factory"
+import type { ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   pattern: z.string().describe("Regex pattern (ripgrep syntax)"),
@@ -15,7 +16,7 @@ const sq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 
 const MAX_LINES = 200
 
-export const grepTool: Tool<Input> = {
+export const grepTool = defineTool<Input>({
   name: "grep",
   description:
     "Search file contents with ripgrep. Returns `path:line:match` rows. " +
@@ -70,4 +71,4 @@ export const grepTool: Tool<Input> = {
     const more = lines.length > MAX_LINES ? `\n… (${lines.length - MAX_LINES} more matches)` : ""
     yield { type: "result", result: { ok: true, output: shown + more } }
   },
-}
+})

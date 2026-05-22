@@ -214,6 +214,27 @@ export type { HITLTier }
  * Phase 2 tool contract (RFC §6.2). `execute` is an async generator yielding
  * `ToolEvent`s; `isConcurrencySafe(input)` lets the dispatcher batch pure
  * reads to run in parallel while keeping side-effecting calls serialized.
+ *
+ * MEMBER MAP (ISP — every optional member is read by a real production seam,
+ * so none may be removed without breaking that consumer; this is documentation
+ * of WHICH seam, not a delete list):
+ *
+ *   Core (always set):       name / description / inputSchema / isReadOnly /
+ *                            isConcurrencySafe / execute.
+ *   Security hooks (set by   `hitlTier` → permission HITL gate;
+ *   built-in tools today):   `extractShellCommand` → registry.extractShellCommand
+ *                            (bash); `classifySource` → dispatch redaction
+ *                            (read). These are the members built-ins actually
+ *                            populate; `defineTool` exposes all three as
+ *                            first-class spec passthroughs.
+ *   Result-shape hooks       `outputSchema` → registry.run via
+ *   (absorb #1, wired but    enforceOutputSchema (also subagent task-tools);
+ *   no built-in sets yet):   `toModelOutput` → registry.run compact rendering.
+ *   Streaming/deferred       `onInputStart`/`onInputDelta`/`onInputAvailable`
+ *   (absorb #1, wired but    → @/agent/tool-input-streaming + streaming-dispatch;
+ *   no built-in sets yet):   `supportsDeferredResults` → @/tool/deferred. These
+ *                            are speculative for built-ins but load-bearing for
+ *                            their seams — keep, do not delete.
  */
 export interface Tool<I = unknown, O = unknown> {
   name: string

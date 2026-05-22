@@ -21,14 +21,14 @@ PROVIDER := env_var_or_default("PROVIDER", "openai")
 # Default OpenAI model. The adapter (`src/llm/adapters/openai.ts`) detects the
 # GPT-5 family via `usesCompletionTokensParam` and auto-routes to
 # `max_completion_tokens` — no extra config needed. Override per-invocation:
-#   MODEL=gpt-4o just cli
-MODEL := env_var_or_default("MODEL", "gpt-5")
+#   MODEL=gpt-5 just cli
+MODEL := env_var_or_default("MODEL", "gpt-5-mini")
 
 # Default recipe: show the recipe list.
 default:
     @just --list
 
-# Tikitaka REPL — interactive multi-turn conversation. OpenAI + gpt-5 by
+# Tikitaka REPL — interactive multi-turn conversation. OpenAI + gpt-5-mini by
 # default; override with `PROVIDER=anthropic` and/or `MODEL=...`. Pass an
 # optional positional prompt to short-circuit into one-shot mode.
 cli *args:
@@ -39,7 +39,7 @@ once prompt:
     QUANTA_LLM_PROVIDER={{PROVIDER}} QUANTA_MODEL={{MODEL}} QUANTA_PERMISSION=acceptEdits {{BUN}} run {{CLI}} {{quote(prompt)}}
 
 # Explicit OpenAI alias — same as `just cli` when PROVIDER isn't overridden.
-# Honors the `MODEL` env (defaults to gpt-5).
+# Honors the `MODEL` env (defaults to gpt-5-mini).
 cli-openai *args:
     QUANTA_LLM_PROVIDER=openai QUANTA_MODEL={{MODEL}} {{BUN}} run {{CLI}} {{args}}
 

@@ -6,7 +6,10 @@
  * builds its own surface-specific AgentConfig core. The entry just routes.
  *
  * Hard rules (RFC may-22 / Phase 4):
- *  • NO `process.env.X` reads here. Env values come from `runtimeConfig()`.
+ *  • NO scattered `process.env.X` reads here. `runtimeConfig()` owns the
+ *    typed env knobs; provider/key resolution is delegated to the `@/llm`
+ *    factory, which receives `process.env` ONCE at this composition root
+ *    (the factory itself never touches the global env — see factory.ts).
  *  • NO silent defaults. Defaults flow from `BUDGET_PRESETS` via
  *    `assembleAgentConfig`, not from this file.
  *  • mode-presets are loaded via DYNAMIC import so this file is decoupled
@@ -22,7 +25,7 @@ import { loadEnvFiles } from "../cli/dotenv"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
-import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
+import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -30,38 +33,27 @@ import type { AssembleRequest } from "./assemble"
 import { type AgentArgs, AgentArgsError, formatHelp, parseAgentArgs } from "./cli-args"
 import type { RunOutcome } from "./run"
 
-const DEFAULT_MODEL_BY_PROVIDER = {
-  openai: "gpt-5-mini",
-  anthropic: "claude-sonnet-4-6",
-} as const
-
-/** Pick provider from explicit arg + env API key precedence. */
-const resolveProvider = (explicit?: "openai" | "anthropic"): "openai" | "anthropic" => {
-  if (explicit) return explicit
-  if (process.env.ANTHROPIC_API_KEY) return "anthropic"
-  if (process.env.OPENAI_API_KEY) return "openai"
-  return "anthropic"
-}
-
-/** Build a real LLM adapter from operator args + env API keys. Returns null
- *  when the provider's API key is absent; the caller decides exit semantics. */
-const buildLLM = (provider: "openai" | "anthropic", model: string): LLMPort | null => {
-  if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY
-    return apiKey ? new OpenAIAdapter({ apiKey, model }) : null
-  }
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  return apiKey ? new AnthropicAdapter({ apiKey, model }) : null
-}
-
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
  *  individual fields (e.g. ci-bot replaces `registry` with the restricted
  *  git+gh tool set), but having a baseline avoids each runner duplicating
- *  the LLM construction logic. */
+ *  the LLM construction logic.
+ *
+ *  Provider pick + key lookup + adapter construction are delegated to the
+ *  shared `@/llm` factory (OCP/DIP). `process.env` is handed to the factory
+ *  HERE — the single composition-root touchpoint — so the factory stays env-
+ *  agnostic and the canonical {@link DEFAULT_MODEL} (no local copy) is used. */
 const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] => {
-  const provider = resolveProvider(p.provider)
-  const model = p.model ?? DEFAULT_MODEL_BY_PROVIDER[provider]
-  const llm = buildLLM(provider, model)
+  // QUANTA_PROVIDER drives the factory pick; an explicit `--provider` flag must
+  // still win, so seed it into the env view the factory reads.
+  const env =
+    p.provider !== undefined ? { ...process.env, QUANTA_PROVIDER: p.provider } : process.env
+  const provider = pickProvider(env)
+  // model omitted ⇒ factory fills canonical DEFAULT_MODEL[provider].
+  const llm: LLMPort | null = tryCreateLLM(
+    provider,
+    p.model !== undefined ? { model: p.model } : {},
+    env,
+  )
   if (llm === null) {
     logger.error(
       `no API key for provider '${provider}'. Set OPENAI_API_KEY or ANTHROPIC_API_KEY (or --provider <other>).`,
