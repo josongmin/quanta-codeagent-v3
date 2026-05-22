@@ -88,7 +88,7 @@ StreamUnifiedChat / **StreamUnifiedChatWithTools(BiDi, 메인 루프)** / …Wit
 `ConversationMessage`(~90): 1 text · **2 type(MessageType)** · 13 bubble_id · 18 tool_results · 45/46 thinking · 85 thinking_style · 51 supported_tools · 66 subagent_return · 71 todos · 82/95 is_simulated_msg/reason.
 
 ### 도구를 모델에 알리는 법
-- **빌트인**: `supported_tools`에 **enum id만**(63값 `ClientSideToolV2`). **JSON 스키마 본체는 서버전용 — 클라 추출 불가.**
+- **빌트인**: `supported_tools`에 **enum id만**(`ClientSideToolV2` — **53 entries, max field# 63 sparse**; +#24 BACKGROUND_COMPOSER_FOLLOWUP). **JSON 스키마 본체는 서버전용 — 클라 추출 불가.**
 - **MCP**: `mcp_tools`에 풀 스키마(parameters=JSON-schema). 런타임 동적 주입.
 - `tool_choice` 강제 enum 없음 → gating은 `supported_tools`+`tools_requiring_accepted_return`+`should_disable_tools`로만.
 
@@ -791,7 +791,7 @@ attached_files, system_notification, task_notification, agent_notification
 
 ### `agent.v1.ToolCall` oneof — 44멤버 (모델이 호출 가능한 전부)
 shell(1)·delete(3)·glob(4)·grep(5)·read(8)·update_todos(9)·read_todos(10)·edit(12)·ls(13)·read_lints(14)·mcp(15)·sem_search(16)·create_plan(17)·web_search(18)·**task(19)**·list_mcp_resources(20)·read_mcp_resource(21)·apply_agent_diff(22)·ask_question(23)·fetch(24)·switch_mode(25)·generate_image(28)·record_screen(29)·computer_use(30)·write_shell_stdin(31)·**reflect(32)**·setup_vm_environment(33)·truncated(34)·start_grind_execution(35)·start_grind_planning(36)·web_fetch(37)·report_bugfix_results(38)·ai_attribution(39)·pr_management(40)·mcp_auth(41)·**await(42)**·blame_by_file_path(43)·get_mcp_tools(44)·report_bug(45)·set_active_branch(46)·communicate_update(48)·send_final_summary(49)·update_pr_code_tour(50)·replace_env(51)·edit_pr_labels(52). 각 멤버=`{1 args:XxxArgs, 2 result:XxxResult}`.
-(서버 advertise용 `aiserver.v1.ClientSideToolV2`는 63값 — `*_V2` 진화형 포함)
+(서버 advertise용 `aiserver.v1.ClientSideToolV2`는 **53 entries**, max field# 63 sparse — `*_V2` 진화형 + #24 BACKGROUND_COMPOSER_FOLLOWUP 포함)
 
 ### `ExecServerMessage` ⇄ `ExecClientMessage` — 24 exec 쌍 (엔진→클라 실행 위임)
 header `{1 id, 15 exec_id, 19 span_context}`. shell(2)·write(3)·delete(4)·grep(5)·read(7)·ls(8)·diagnostics(9)·request_context(10)·mcp(11)·shell_stream(14)·background_shell_spawn(16)·list/read_mcp_resource(17/18)·fetch(20)·record_screen(21)·computer_use(22)·write_shell_stdin(23)·execute_hook(27)·**subagent(28)**·redacted_read(29)·force_background_shell(30)·force_background_subagent(31)·mcp_state(36)·**subagent_await(37)**. 응답은 **같은 field#**에 `xxx_result`로 페어링.
@@ -864,6 +864,6 @@ header `{1 id, 15 exec_id, 19 span_context}`. shell(2)·write(3)·delete(4)·gre
 ## 6. quanta 흡수 시사점
 - **action space 계약은 베낄 수 있다** — typed ToolCall union + per-failure-mode result oneof + D1–D10 분기트리 (P0 0069로 일부 착수).
 - **HUMAN/AI 2-role + 시스템프롬프트=별도 필드(explicit_context)** 모델 = 우리 `SystemPromptInput`(블록)과 정합. 도구결과를 3번째 role로 두지 않는 설계.
-- **closed verb + open effect** 교훈: 도구 enum을 닫는 것만으로 "통제"가 안 된다 → `shell`/`mcp` 게이트 밑에 **sandbox+permission 울타리**가 필수. (P0 심볼릭링크 탈옥 deny를 1순위로 올린 근거.)
+- **closed verb + open effect** 교훈: 도구 enum을 닫는 것만으로 "통제"가 안 된다 → `shell`/`mcp` 게이트 밑에 **sandbox+permission 울타리**가 필수. (근거: cursorsandbox seatbelt가 `.git/{hooks,config}`/`.vscode`/`.cursorignore` write를 deny-regex로 차단 — ✅[cursor-rust-engine.md §3.2](cursor-rust-engine.md) verbatim 검증. P0 흡수 #1.)
 - **통제는 계층 분산** — quanta도 dispatch seam(게이트) + permission(정책) + (desktop 진출 시)sandbox를 분리 평면으로. "한 곳에서 통제"를 노리지 말 것.
 - 흡수 백로그 상세 → [cursor-repomap.md](../code-agent-suit/cursor-repomap.md), 흡수 판정 → memory `cursor-3.2-absorption`.

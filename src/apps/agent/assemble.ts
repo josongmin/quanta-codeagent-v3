@@ -61,6 +61,10 @@ export interface CiBotExtras {
   pr: string
   /** Repo working dir (a branch-only clone). Defaults to caller cwd. */
   cwd?: string
+  /** `--dry-run`: read the PR and run the agent, but do NOT post the summary
+   *  comment back to GitHub (the `gh pr comment` write is skipped). The run
+   *  still produces its outcome + exit code. Default = false (comment posted). */
+  dryRun?: boolean
 }
 
 /** Run-outcome envelope returned by every mode runner. Mirrors the shape
@@ -88,6 +92,10 @@ export interface AssembleRequestSeams {
   loadCorpus?: (root: string) => Promise<unknown[]>
   /** GitHub `gh` runner for ci-bot. Default = a real `Bun.spawn(["gh", …])`. */
   ghRun?: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>
+  /** Inner git runner for ci-bot (BEFORE the branch-only guard wraps it).
+   *  Default = the real `defaultGitRunner`. Tests inject a fake to assert the
+   *  branch-only guard rejects protected-branch writes without touching git. */
+  gitRun?: (args: readonly string[], cwd: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
 }
 
 /** Operator input for assemble: mode + dials override + base AgentConfig core

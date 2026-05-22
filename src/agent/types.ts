@@ -12,6 +12,7 @@ import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import type { ShellExecObserver } from "@/tool/shell-exec-types"
+import type { BranchSearchConfig } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { ConfirmDecision } from "./confirm-decision"
@@ -421,6 +422,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * surface (server-sent events).
    */
   onShellEvent?: ShellExecObserver
+  /**
+   * ADR-0084 speculative branch search — opt-in N-best verifier-prover. When
+   * set, `buildSessionFeatures` registers the `branch_search` tool (the model
+   * may call it on hard edits). Absent ⇒ tool unregistered, no scoring
+   * overhead, byte-identical legacy single-trajectory path. Per-mode wiring in
+   * `apps/agent/mode-presets`; closed `BranchSearchConfig` in
+   * `@/agent/branch-search`. ci-bot leaves it unset (unattended N-best risk).
+   */
+  branchSearch?: BranchSearchConfig
   /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`

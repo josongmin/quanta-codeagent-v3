@@ -103,15 +103,23 @@ describe("headless.runMode — exit-code mapping", () => {
     expect(out.exitCode).toBe(1)
   })
 
-  test("reason=max_turns → exitCode 2", async () => {
+  // Audit R2: exit codes now route through the SINGLE canonical table in
+  // `../run` (exitCodeForOutcome), so max_turns→1 (was a divergent 2 here).
+  test("reason=max_turns → exitCode 1 (canonical table)", async () => {
     const seams = { runAgent: async () => fakeOutcome("max_turns") }
     const out = await runMode(baseReq({ seams }))
-    expect(out.exitCode).toBe(2)
+    expect(out.exitCode).toBe(1)
   })
 
   test("reason=budget_exhausted → exitCode 2", async () => {
     const seams = { runAgent: async () => fakeOutcome("budget_exhausted") }
     const out = await runMode(baseReq({ seams }))
     expect(out.exitCode).toBe(2)
+  })
+
+  test("reason=aborted → exitCode 130 (canonical table)", async () => {
+    const seams = { runAgent: async () => fakeOutcome("aborted") }
+    const out = await runMode(baseReq({ seams }))
+    expect(out.exitCode).toBe(130)
   })
 })

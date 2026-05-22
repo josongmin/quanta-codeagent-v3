@@ -156,5 +156,23 @@ export const LEVER_FIELDS = [
 /** Static checked length so any future addition forces a matrix update. */
 export type LeverField = (typeof LEVER_FIELDS)[number]
 
+// ─────────────────────────────────────────────────────────────────────────
+// Drift guard (audit R3 fix): LEVER_FIELDS is a hand-maintained array, but it
+// MUST stay in lock-step with ModePolicy's lever keys. These two type-level
+// assertions fail to compile if the lists drift — e.g. adding a 13th lever to
+// ModePolicy without appending it to LEVER_FIELDS (or vice versa) is a build
+// error, not a silently-green test.
+// ─────────────────────────────────────────────────────────────────────────
+type ModePolicyLeverKey = Exclude<keyof ModePolicy, "mode">
+type Assert<T extends true> = T
+type _LeverFieldsCoverPolicy = Assert<
+  ModePolicyLeverKey extends LeverField ? true : false
+>
+type _PolicyCoversLeverFields = Assert<
+  LeverField extends ModePolicyLeverKey ? true : false
+>
+// Reference the aliases so `noUnusedLocals`-style lint keeps them live.
+export type _LeverDriftGuard = _LeverFieldsCoverPolicy | _PolicyCoversLeverFields
+
 /** Enumerate every mode — single source of truth for matrix tests. */
 export const ALL_AGENT_MODES = ["interactive", "headless", "batch", "ci-bot"] as const satisfies readonly AgentMode[]

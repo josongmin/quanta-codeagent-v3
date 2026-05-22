@@ -35,18 +35,7 @@ import {
   type RunOutcome,
   resolveRunAgent,
 } from "../assemble"
-
-/** Map an `AgentOutcome.reason` to a process exit code following the same
- *  table as `apps/cli/index.ts`: completed/aborted = 0 (user-driven), error
- *  = 1, max_turns / budget_exhausted = 2 (operator-visible exhaustion). */
-const reasonToExitCode = (reason: string): number => {
-  if (reason === "completed") return 0
-  if (reason === "aborted") return 0
-  if (reason === "error") return 1
-  if (reason === "max_turns") return 2
-  if (reason === "budget_exhausted") return 2
-  return 1
-}
+import { exitCodeForOutcome } from "../run"
 
 /** Build the AgentConfig.base for headless. Reuses the caller's `req.base`
  *  fields where present, fills the rest with safe headless defaults. The single
@@ -119,5 +108,8 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
     }
   }
 
-  return { exitCode: reasonToExitCode(outcome.reason), outcome }
+  // Canonical exit-code table lives in `../run` (audit R2: headless previously
+  // mapped aborted→0 and max_turns→2, diverging from the shared table where
+  // aborted→130 / max_turns→1).
+  return { exitCode: exitCodeForOutcome(outcome), outcome }
 }

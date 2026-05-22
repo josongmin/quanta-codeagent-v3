@@ -1536,22 +1536,26 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       return finish("error", turn - 1, classifyErrorReason(result.reason))
     }
     recorder?.turn()
+
+    // RFC may-22 Phase 1 + audit R1 fix: BudgetMeter exhaustion check runs
+    // BEFORE the `completed` early-return so a cap (cost / tokens / tools)
+    // blown DURING the terminal turn reports `budget_exhausted` rather than a
+    // false `completed` (exit 0). The check is here — after this turn's usage
+    // ticks have all fired (emitWorkMetrics is post-turn) and after the
+    // aborted/error early-returns (user intent / LLM error stay authoritative)
+    // — so it covers BOTH the completing turn and the continue-to-next-turn
+    // path with a single propositional check. Default-OFF (no meter ⇒ no
+    // check, byte-identical legacy).
+    const ex = cfg.budgetMeter?.checkExhausted()
+    if (ex?.exhausted) {
+      return finish("budget_exhausted", turn, completedCategory("max_turns"))
+    }
     if (result.kind === "completed") return finish("completed", turn, completedCategory("normal"))
 
     // A real tool turn landed (not stuck thrashing compaction) — clear the
     // consecutive no-progress strikes (Tier 0 safety hardening, ADR-0011).
     breaker?.noteProgress()
     wm.append({ role: "user", content: result.resultBlocks })
-
-    // RFC may-22 Phase 1: BudgetMeter turn-end exhaustion check. Default-OFF
-    // (no meter ⇒ no check, byte-identical legacy). Propositional check only
-    // — `dial !== undefined && observed > dial`. On exhaustion, finish with
-    // `reason: "budget_exhausted"` and a `completed` stop-category (the run
-    // produced real work; it just hit a configured ceiling).
-    const ex = cfg.budgetMeter?.checkExhausted()
-    if (ex?.exhausted) {
-      return finish("budget_exhausted", turn, completedCategory("max_turns"))
-    }
   }
 
   return finish("max_turns", cfg.maxTurns, completedCategory("max_turns"))

@@ -13,6 +13,8 @@ export {
   STAGE1_FAST_TAIL,
   STAGE2_THINKING_TAIL,
 } from "./classifier"
+export type { BranchOnlyVerdict } from "./branch-only"
+export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {
   AutoPassInput,
   AutoPassOptions,

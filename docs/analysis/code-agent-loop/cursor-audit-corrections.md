@@ -17,11 +17,12 @@
 
 ## 1. ★ 가장 중요한 정정 5개 (의사결정에 영향)
 
-### 1.1 ❌ "symbolic-link 탈옥 방어 deny" 증거가 틀렸다 (영향: P0 흡수 #1)
-- **이전 claim** (cursor-repomap.md §7, cursor.md §2H, P0 흡수 시사): `cursorsandbox` Rust 바이너리에 `"found symlink in .git/hooks"` 같은 preflight symlink 탐지 문자열이 있고, `.git/hooks`/`.git/config`/`.vscode`/`.cursor` write deny가 sandbox 프로파일에 박혀있다.
-- **실제 검증**: ❌ NAPI strings에 `"found symlink in .git/hooks"` 0건. `.git/hooks` 서브스트링 자체 NAPI 0건. 실제 보이는 건 `.git/logs/HEAD`, `.git/index` 같은 **file event ignore 필터** 문자열뿐 — 이건 watcher 무시 패턴이지 sandbox deny 아님.
-- **의미**: "symbolic-link 탈옥 방어 deny" Cursor가 *그 형태로* 한다는 증거 없음. **P0 흡수 #1 (quanta dispatch seam에 `.git/hooks` write 정적 deny)은 여전히 좋은 아이디어**지만 *Cursor를 근거로* 제시할 수 없음. quanta 자체 보안 결정으로 재포지셔닝 필요.
-- **patch 필요**: cursor.md / cursor-localization.md / cursor-repomap.md에서 "symlink 탈옥 방어" 부분 삭제 또는 "Cursor 미관측"으로 재표기.
+### 1.1 ⚠️ "symbolic-link 탈옥 방어" — 표현·위치 정정, 단 흡수 타겟은 유효 (영향: P0 흡수 #1)
+- **이전 claim**: `cursorsandbox`에 `"found symlink in .git/hooks"` preflight symlink 탐지 문자열 + `.git/hooks`/`.git/config`/`.vscode`/`.cursor` write deny.
+- **1차 검증 (FILESVC_NAPI 대상)**: ❌ NAPI에 `"found symlink in .git/hooks"` 0건 — 이건 **엉뚱한 바이너리를 봤음**. NAPI(file-service)가 아니라 **cursorsandbox**가 sandbox 담당.
+- **★ reconciled (rust-engine deep dive, [cursor-rust-engine.md §3.2](cursor-rust-engine.md))**: ✅ **cursorsandbox seatbelt SBPL에 deny-regex가 verbatim 존재**: `(deny file-write* (regex "^.*/\.git/hooks($|/.*)"))`, `.git/config`, `.vscode`, `.cursorignore`, `.code-workspace`, `.cursor/` 부분deny(+`rules|commands|worktrees|skills|agents` whitelist). **즉 deny 자체는 진짜다.**
+- **틀린 부분만 정정**: (a) "preflight **symlink 탐지**" → 실제는 symlink **resolve**(`sandbox: found symlink:`)이고 차단은 deny-regex로. (b) "`found symlink in .git/hooks`" 문자열 → 존재 안 함. (c) 위치 NAPI → cursorsandbox.
+- **의미**: **P0 흡수 #1 (quanta seam에 `.git/{hooks,config}` write 정적 deny) 유효 + 이제 evidence 있음.** Cursor가 실제로 한다(cursorsandbox). cursor.md/repomap/메모리 패치 완료(표현·위치 정정).
 
 ### 1.2 ❌ ClientSideToolV2 "63 values" → 실제 **53 entries** (sparse 0,1,3,5-9,11,12,15,16,18,19,23-35,38-63)
 - **누락된 항목**: `#24 CLIENT_SIDE_TOOL_V2_BACKGROUND_COMPOSER_FOLLOWUP` (검증됨)

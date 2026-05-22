@@ -37,8 +37,11 @@ describe("isHostAllowed — wildcard suffix", () => {
     expect(isHostAllowed("https://objects.githubusercontent.com/x", allowlist)).toBe(true)
   })
 
-  test("bare suffix matches wildcard (apex)", () => {
-    expect(isHostAllowed("githubusercontent.com", allowlist)).toBe(true)
+  test("bare apex NOT matched by wildcard (audit R2: strict subdomains only)", () => {
+    // `*.githubusercontent.com` matches subdomains but NOT the bare apex —
+    // matching the apex would broaden the allowlist beyond intent. To permit
+    // the apex too, it must be listed explicitly.
+    expect(isHostAllowed("githubusercontent.com", allowlist)).toBe(false)
   })
 
   test("non-matching suffix denied", () => {

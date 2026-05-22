@@ -52,8 +52,11 @@ const hostOf = (urlOrHost: string): string | null => {
 const matches = (host: string, entry: string): boolean => {
   const e = entry.toLowerCase()
   if (e.startsWith("*.")) {
+    // Audit R2 fix: `*.x` matches STRICT subdomains only (`a.x`), NOT the bare
+    // apex `x`. Matching the apex broadened the allowlist beyond intent (only
+    // subdomains were meant). To allow the apex too, list it explicitly.
     const suffix = e.slice(1) // ".example.com"
-    return host === suffix.slice(1) || host.endsWith(suffix)
+    return host.endsWith(suffix) && host.length > suffix.length
   }
   return host === e
 }

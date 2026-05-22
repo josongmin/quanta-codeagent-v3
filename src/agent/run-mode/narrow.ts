@@ -11,7 +11,8 @@
  * `narrowMode` is a TS assertion function — it does not return; it narrows.
  */
 
-import type { AgentMode, ModePolicy } from "./types"
+import { MODE_PRESETS } from "./presets"
+import { type AgentMode, LEVER_FIELDS, type ModePolicy } from "./types"
 
 /**
  * Compile-time narrow: after this call, `policy` is typed as
@@ -29,74 +30,29 @@ export function narrowMode<M extends AgentMode>(
   }
 }
 
-/** Per-mode invariant checker map — split out so each cell stays cohesive
- *  and the public `assertModeMatrix` is a thin dispatch. Each invariant fn
- *  performs propositional kind comparisons only (no numerical thresholds). */
-type MatrixChecker = (p: ModePolicy) => void
-
-const assertBatch: MatrixChecker = (p) => {
-  if (p.permission.kind !== "auto") {
-    throw new Error("matrix: batch mode requires permission.kind === 'auto'")
-  }
-  if (p.externalDeps.kind !== "hermetic") {
-    throw new Error("matrix: batch mode requires externalDeps.kind === 'hermetic'")
-  }
-  if (p.sandbox.kind !== "per-instance") {
-    throw new Error("matrix: batch mode requires sandbox.kind === 'per-instance'")
-  }
-  if (p.output.kind !== "structured") {
-    throw new Error("matrix: batch mode requires output.kind === 'structured'")
-  }
-  if (p.network.kind !== "denied") {
-    throw new Error("matrix: batch mode requires network.kind === 'denied'")
-  }
-}
-
-const assertInteractive: MatrixChecker = (p) => {
-  if (p.permission.kind !== "reviewer-backed") {
-    throw new Error("matrix: interactive mode requires permission.kind === 'reviewer-backed'")
-  }
-  if (p.externalDeps.kind !== "host") {
-    throw new Error("matrix: interactive mode requires externalDeps.kind === 'host'")
-  }
-  if (p.sandbox.kind !== "user-cwd") {
-    throw new Error("matrix: interactive mode requires sandbox.kind === 'user-cwd'")
-  }
-}
-
-const assertHeadless: MatrixChecker = (p) => {
-  if (p.permission.kind !== "auto") {
-    throw new Error("matrix: headless mode requires permission.kind === 'auto'")
-  }
-  if (p.termination.kind !== "single-turn") {
-    throw new Error("matrix: headless mode requires termination.kind === 'single-turn'")
-  }
-}
-
-const assertCiBot: MatrixChecker = (p) => {
-  if (p.gitWrite.kind !== "branch-only") {
-    throw new Error("matrix: ci-bot mode requires gitWrite.kind === 'branch-only'")
-  }
-  if (p.output.kind !== "github-check") {
-    throw new Error("matrix: ci-bot mode requires output.kind === 'github-check'")
-  }
-  if (p.network.kind !== "allowlist") {
-    throw new Error("matrix: ci-bot mode requires network.kind === 'allowlist'")
-  }
-}
-
-const MATRIX_CHECKERS: Record<AgentMode, MatrixChecker> = {
-  interactive: assertInteractive,
-  headless: assertHeadless,
-  batch: assertBatch,
-  "ci-bot": assertCiBot,
-}
-
 /**
- * Defensive runtime check enforcing the matrix invariants from RFC §6.2. Each
- * cell is a propositional `if (lever.kind !== Y) throw`. There are NO
- * numerical thresholds here — only kind comparisons.
+ * Defensive runtime check enforcing the full matrix from RFC §6.2.
+ *
+ * Audit R1 fix: the prior implementation hand-checked only 13 of the 48 cells
+ * (3-5 levers per mode), so a cast-corrupted lever in any unchecked cell
+ * sailed through — defeating the stated "defense against unsafe casts"
+ * purpose. This version compares EVERY one of the 12 lever `kind`s against
+ * the canonical `MODE_PRESETS[mode]` reference, so all 48 cells are enforced
+ * and the check can never drift from the preset matrix (single source of
+ * truth). Propositional only — string `kind` equality, no thresholds.
  */
 export const assertModeMatrix = (policy: ModePolicy): void => {
-  MATRIX_CHECKERS[policy.mode](policy)
+  const ref = MODE_PRESETS[policy.mode]
+  if (ref === undefined) {
+    throw new Error(`matrix: unknown mode ${JSON.stringify(policy.mode)}`)
+  }
+  for (const lever of LEVER_FIELDS) {
+    const got = policy[lever].kind
+    const want = ref[lever].kind
+    if (got !== want) {
+      throw new Error(
+        `matrix: ${policy.mode} mode requires ${lever}.kind === ${JSON.stringify(want)}, got ${JSON.stringify(got)}`,
+      )
+    }
+  }
 }

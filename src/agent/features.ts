@@ -66,6 +66,7 @@ import {
   type TaskRegistry,
 } from "../subagent"
 import { createAutoClassifierPort } from "./auto-classifier"
+import { buildBranchSearchTool } from "./branch-search-runner"
 import { createSubagentRunner } from "./subagent-runner"
 import type { AgentConfig } from "./types"
 import { createWorkingStateSession, type WorkingStateSession } from "./working-state"
@@ -249,6 +250,13 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
       await Promise.all(ids.map((id) => reg.waitForSettle(id)))
     }
   }
+
+  // --- Branch search block (ADR-0083) -------------------------------------
+  // `config.branchSearch` ⇒ register the `branch_search` N-best tool, with its
+  // `runCandidate` bound to a candidate-scoped `runAgent` fork and the isolator
+  // chosen per `isolation`. ABSENT ⇒ no tool, byte-identical (RFC §1.2).
+  const branchTool = buildBranchSearchTool(config)
+  if (branchTool) extraTools.push(branchTool)
 
   // --- Skill block --------------------------------------------------------
   // Runs whenever `config.skills` is present — including `skills: {}` (no user

@@ -124,7 +124,7 @@
 - **resumable 전체 상태** — summary+subagent_states+file_states_v2 — `ENGINE` `ConversationStateStructure`
 
 ## 7. Sandbox / Permission / Network
-- ★ **심볼릭링크 탈옥방어 deny** — .git/hooks·.git/config·.vscode·.cursor·.cursorignore write 차단 + preflight 탐지 — `SANDBOX` deny regex 6종 + "found symlink in .git/hooks"
+- ★ **`.git/hooks`·`.git/config`·`.vscode`·`.cursorignore` write deny** (✅ verbatim 검증, [cursor-rust-engine.md §3.2](../code-agent-loop/cursor-rust-engine.md)) — `SANDBOX`(cursorsandbox) seatbelt SBPL deny-regex. `.cursor/`는 부분deny+`rules|commands|worktrees|skills|agents` whitelist. ⚠️정정: "preflight symlink 탐지"/"found symlink in .git/hooks"는 **틀림** — symlink는 *resolve*만(`sandbox: found symlink:`), 차단은 deny-regex로. 흡수 타겟 자체는 유효
 - **command classifier → sandbox 제안** — 모델이 sandbox필요여부+allowlist패턴 동봉, 클라가 로컬정책 교차검증 — `ENGINE` `CommandClassifierResult{commands,suggested_sandbox_mode,classification_failed}`, `Command.suggestedAllowlistEntry`
 - **SandboxPolicy** — RW/RO 경로, tmp차단, allowlist면제 플래그 — `ENGINE` `SandboxPolicy{additional_readwrite_paths,disable_tmp_write,allowlist_escalated,capture_denies}`
 - **sandbox mode 3-tier** — insecure_none / workspace_readwrite / workspace_readonly — `ENGINE` `SandboxPolicy.Type` enum

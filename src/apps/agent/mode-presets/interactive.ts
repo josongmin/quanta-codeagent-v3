@@ -37,6 +37,7 @@ import {
   type RunOutcome,
   resolveRunAgent,
 } from "../assemble"
+import { exitCodeForOutcome } from "../run"
 
 /** Build the MINIMUM AgentConfig.base needed for `assembleAgentConfig` to
  *  validate the interactive matrix. Real wiring (llm + registry + REPL stream)
@@ -86,7 +87,9 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (req.seams?.runAgent) {
     const runner = resolveRunAgent(req.seams)
     const outcome = await runner(cfg)
-    return { exitCode: outcome.reason === "error" ? 1 : 0, outcome }
+    // Canonical exit-code table (audit R2: was a bespoke `error?1:0`, which
+    // mapped budget_exhausted/max_turns/aborted all to 0).
+    return { exitCode: exitCodeForOutcome(outcome), outcome }
   }
 
   // Real REPL delegate. `runRepl` owns its own SIGINT wiring and exits via
