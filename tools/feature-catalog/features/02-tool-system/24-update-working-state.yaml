@@ -1,0 +1,24 @@
+id: update-working-state
+title: update_working_state — per-task 스크래치패드 메타도구 (Codex memory L3)
+section: 2
+subsystem: 메타도구 — working-state 관리 (Codex memory L3, ADR-0021)
+order: 24
+maturity: L3
+status: stable
+purpose: |
+  모델이 free-form per-task 스크래치패드(owner shortlist / hypothesis / blockers /
+  deferred validation / next-step queue)를 유지하는 메타도구. 각 필드는 delta가 아닌
+  REPLACEMENT. 세션-스코프 WorkingStateHandle을 factory 클로저로 캡처. mutating·
+  concurrency-UNSAFE. config가 working-state를 주입할 때만 registry에 등록(미주입 ⇒
+  loop byte-identical).
+evidence:
+  code:
+    - src/tool/update-working-state.ts
+  adrs: [21]
+  tests:
+    unit: [tests/unit/update-working-state.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Codex Round-3 DOS 완화 캡: MAX_LIST=50 / MAX_STR=500 / MAX_HYPOTHESIS=2000. L3 WorkingState(ADR-0021) 데이터구조 위의 모델-주도 갱신 surface.'

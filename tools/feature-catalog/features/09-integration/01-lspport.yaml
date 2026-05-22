@@ -7,12 +7,15 @@ maturity: L4
 status: stable
 purpose: 'LspPort에 8 RPC 추가: definition/references/hover/typeDefinition/implementation/documentSymbol/workspaceSymbol/prepareRename. capability 부재는 null로 graceful surface'
 evidence:
-  code: []
-  adrs: []
+  code:
+    - src/lsp/ports.ts
+    - src/lsp/adapters/base.ts
+    - src/lsp/types.ts
+  adrs: [24]
   tests:
-    unit: []
+    unit: [tests/unit/lsp-jsonrpc.test.ts, tests/unit/lsp-nav-definition.test.ts, tests/unit/lsp-nav-references.test.ts]
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
-notes: ''
+notes: 'LspClient(adapters/base.ts)가 8 nav RPC 전부 구현 — wire shape를 @/lsp/types로 정규화, 미지원/null은 null 반환. 도구 레이어는 [lspdefinition] 09-integration/02.'

@@ -1,0 +1,23 @@
+id: parse-test-failure
+title: parse_test_failure — Stage-3 fault-localization (로그 파싱)
+section: 2
+subsystem: Fault-localization aids (Codex signal 흡수) — Stage-3 stack-trace 추출
+order: 21
+maturity: L4
+status: stable
+purpose: |
+  raw 테스트/빌드 출력에서 file:line 위치를 프레임워크 무관하게 추출하는 default
+  tool (pytest/jest/vitest/bun-test/go-test/cargo-test + generic path:line:col).
+  stack-trace 프레임은 검색 hit보다 높은 신뢰의 edit-location 신호(Codex 8/9 trust).
+  순수 함수 — read-only + concurrency-safe (I/O 0). buildDefaultTools에 상시 등록.
+evidence:
+  code:
+    - src/tool/parse-test-failure/index.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/parse-test-failure.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'file_tree_summary(Stage-1)와 짝. vendored/test 티어 분류로 신뢰도 가중.'

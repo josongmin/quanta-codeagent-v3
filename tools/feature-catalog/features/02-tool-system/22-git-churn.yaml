@@ -1,0 +1,22 @@
+id: git-churn
+title: git_churn — 파일 변경빈도 핫스팟 (fault-localization 신호)
+section: 2
+subsystem: Git 1급 도구 (ADR-0025) — fault-localization 신호
+order: 22
+maturity: L4
+status: stable
+purpose: |
+  최근 윈도우 내 변경 빈도로 파일을 랭킹하는 git tool (churn 핫스팟). 자주 바뀌는
+  파일에 버그가 불균형하게 모인다는 Stage-1 fault-localization 신호. gitTools()에
+  등록, read-only + concurrency-safe (git log 부작용 0). rankChurn은 순수 함수로 분리.
+evidence:
+  code:
+    - src/tool/git/churn.ts
+  adrs: [25]
+  tests:
+    unit: [tests/unit/git-churn-blame-heatmap.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'git_blame_heatmap(소유권 신호)와 짝 — ADR-0025 git 1급 도구의 fault-localization 확장.'

@@ -1,0 +1,23 @@
+id: file-tree-summary
+title: file_tree_summary — Stage-1 fault-localization (repo 구조)
+section: 2
+subsystem: Fault-localization aids (Codex signal 흡수) — Stage-1 file topology
+order: 20
+maturity: L4
+status: stable
+purpose: |
+  depth-bounded·.gitignore 준수 디렉터리 트리 + per-directory 파일 수를 반환하는
+  default tool. 모델이 파일을 고르기 전 repo 모듈 레이아웃을 파악하는 Stage-1
+  fault-localization 신호(Codex "file topology"). read-only + concurrency-safe
+  (ripgrep --files = 순수 함수). buildDefaultTools에 상시 등록.
+evidence:
+  code:
+    - src/tool/file-tree-summary/index.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: [tests/integration/file-tree-summary.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'parse_test_failure(Stage-3)와 짝 — Codex 3-stage fault-localization 신호 흡수.'

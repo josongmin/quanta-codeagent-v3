@@ -1,0 +1,27 @@
+id: eval-five-tier
+title: eval 앱 — 5-tier 검증 스택 (audit/synthetic/public/trajectory/compare)
+section: 10
+subsystem: eval 앱 (RFC-0003) — 로컬 품질 검증 스택
+order: 8
+maturity: L3
+status: stable
+purpose: |
+  `bun run eval` — taxonomy(12 major/~120 leaf) 기반 5-tier 로컬 검증 스택.
+  Tier 0 audit(정적 grep 커버리지 매트릭스) / Tier 1 synthetic(LLM-judge 시나리오 run) /
+  Tier 2 public(SWE-bench Verified bench-report 래핑) / Tier 3 trajectory(실세션 분류·
+  replay·freeze) / Tier 4 compare(A/B pairwise judge). append-only JSONL 저장
+  (EvalRecord 엔벨로프 + tier별 payload), report가 tier-agnostic 집계·markdown 렌더.
+evidence:
+  code:
+    - src/apps/eval/index.ts
+    - src/apps/eval/synthetic/index.ts
+    - src/apps/eval/trajectory/replay.ts
+    - src/apps/eval/report/index.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/eval-audit-matrix.test.ts, tests/unit/eval-pairwise-judge.test.ts, tests/unit/eval-replay-verdict.test.ts, tests/unit/eval-freeze.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Tier 0-3 운영, Tier 4 compare는 stub(quanta/claude-code/cursor/aider 어댑터 골격). storage 스키마 additive 필드는 별도 [eval-schema-additive] 87. RFC-0003 Phase B(2026-05-21) 랜딩.'
