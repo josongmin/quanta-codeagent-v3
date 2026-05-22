@@ -189,4 +189,65 @@ describe("TEST_LIKE_RE", () => {
     expect(TEST_LIKE_RE.test("ls -la")).toBe(false)
     expect(TEST_LIKE_RE.test("echo hi")).toBe(false)
   })
+
+  // ── false-NEGATIVE fix: major-ecosystem test runners must be recognized so
+  //    the guard does not over-force a model that already verified. ──────────
+  test("recognizes JS/TS test runners (was a false negative → over-forcing)", () => {
+    for (const cmd of [
+      "npx jest",
+      "vitest run",
+      "pnpm test",
+      "yarn test",
+      "deno test",
+      "npx mocha",
+      "npx playwright test",
+      "npx cypress run",
+      "pnpm run unit-test",
+    ]) {
+      expect(TEST_LIKE_RE.test(cmd)).toBe(true)
+    }
+  })
+
+  test("recognizes non-JS/python test runners", () => {
+    for (const cmd of [
+      "go test ./...",
+      "cargo test",
+      "cargo nextest run",
+      "dotnet test",
+      "mvn verify",
+      "mvn test",
+      "./gradlew test",
+      "bundle exec rspec",
+      "phpunit",
+      "ctest",
+      "mix test",
+      "swift test",
+      "rake test",
+    ]) {
+      expect(TEST_LIKE_RE.test(cmd)).toBe(true)
+    }
+  })
+
+  test("recognizes python test/repro shapes incl. django", () => {
+    for (const cmd of [
+      "python test_x.py",
+      "python conftest.py",
+      "python x_test.py",
+      "python tests/runtests.py auth",
+      "python manage.py test myapp",
+      "python reproduce_bug.py",
+      "python repro.py",
+    ]) {
+      expect(TEST_LIKE_RE.test(cmd)).toBe(true)
+    }
+  })
+
+  // ── false-POSITIVE fix: arbitrary `python <file>.py` is NOT verification.
+  //    Counting it as verify would DEFEAT the guard (model skips real tests). ─
+  test("does NOT count a bare non-test python script as verification", () => {
+    expect(TEST_LIKE_RE.test("python manage.py runserver")).toBe(false)
+    expect(TEST_LIKE_RE.test("python setup.py build")).toBe(false)
+    expect(TEST_LIKE_RE.test("python main.py")).toBe(false)
+    expect(TEST_LIKE_RE.test("python manage.py migrate")).toBe(false)
+  })
 })

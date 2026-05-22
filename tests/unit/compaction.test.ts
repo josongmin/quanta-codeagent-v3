@@ -76,6 +76,40 @@ describe("findBoundary", () => {
     const plain = [userText("s"), assistantText("a1"), assistantText("a2")]
     expect(findBoundary(plain, 1)).toBe(2)
   })
+
+  test("keepTurns=0 with an assistant tail does not crash (empty-suffix guard)", () => {
+    // Regression: the initial scan can leave the boundary at messages.length
+    // (empty suffix) when the (keepTurns+1)-th assistant is the LAST message —
+    // the break fires before `idx = i`, so idx stays at the sentinel length.
+    // The orphan-walk then dereferenced messages[length] (undefined) and threw
+    // a TypeError. The walk must treat an empty suffix as already orphan-free.
+    const msgs = [assistantText("a1"), assistantText("a2")]
+    expect(() => findBoundary(msgs, 0)).not.toThrow()
+    expect(findBoundary(msgs, 0)).toBe(msgs.length)
+  })
+
+  test("keepTurns=0 over a tool pair stays orphan-free and never out of bounds", () => {
+    // The empty-suffix path must not leave a dangling tool_result either.
+    const msgs = [
+      assistantToolUse("t1", "calling"),
+      toolResult("t1", "result"),
+      assistantText("done"),
+    ]
+    const b = findBoundary(msgs, 0)
+    const suffix = msgs.slice(b)
+    const useIds = new Set(
+      suffix.flatMap((m) =>
+        m.content
+          .filter((x) => x.type === "tool_use")
+          .map((x) => (x.type === "tool_use" ? x.id : "")),
+      ),
+    )
+    for (const m of suffix) {
+      for (const x of m.content) {
+        if (x.type === "tool_result") expect(useIds.has(x.tool_use_id)).toBe(true)
+      }
+    }
+  })
 })
 
 describe("compactIfNeeded", () => {

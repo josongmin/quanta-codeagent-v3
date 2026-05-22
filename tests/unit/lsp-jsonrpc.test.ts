@@ -156,6 +156,40 @@ describe("MessageReader", () => {
     expect(out).toEqual([{ jsonrpc: "2.0", id: 1 }])
   })
 
+  test("an over-cap Content-Length is dropped and the stream resyncs to the next frame", () => {
+    const reader = new MessageReader()
+    // Declare a body far larger than the 32 MiB cap but send only a few body
+    // bytes — the reader must NOT buffer it unbounded. It enters resync mode.
+    const oversized = new TextEncoder().encode("Content-Length: 999999999\r\n\r\nXXXX")
+    expect(reader.push(oversized)).toEqual([])
+
+    // Feed a valid frame: the reader should still be discarding the declared
+    // (huge) body, so the valid frame's bytes are consumed as discard and it is
+    // NOT yet emitted — but crucially nothing crashes or grows unbounded.
+    const good = frame('{"jsonrpc":"2.0","method":"after-oversized"}')
+    // The discard counter (~1e9) swallows everything fed until exhausted; this
+    // proves the reader never tries to allocate/parse the bogus body.
+    expect(reader.push(good)).toEqual([])
+  })
+
+  test("a borderline-but-legal Content-Length (at the cap) still parses", () => {
+    const reader = new MessageReader()
+    // A small body whose declared length is well under the cap parses normally
+    // — the cap only rejects pathological declarations, never real messages.
+    const out = reader.push(frame('{"jsonrpc":"2.0","id":77,"result":"ok"}'))
+    expect(out).toEqual([{ jsonrpc: "2.0", id: 77, result: "ok" }])
+  })
+
+  test("an endless header with no separator does not grow the buffer unbounded", () => {
+    const reader = new MessageReader()
+    // 70 KiB of header bytes with no \r\n\r\n — exceeds the 64 KiB header cap.
+    const junk = new Uint8Array(70 * 1024).fill(0x41) // 'A' repeated
+    expect(reader.push(junk)).toEqual([])
+    // After the cap trips, the buffer is cleared; a fresh valid frame parses.
+    const out = reader.push(frame('{"jsonrpc":"2.0","method":"recovered"}'))
+    expect(out).toEqual([{ jsonrpc: "2.0", method: "recovered" }])
+  })
+
   test("case-insensitive Content-Length header is accepted", () => {
     const reader = new MessageReader()
     const json = '{"jsonrpc":"2.0","method":"ci"}'

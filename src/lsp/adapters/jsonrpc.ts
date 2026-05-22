@@ -30,6 +30,20 @@ export interface JsonRpcError {
 const HEADER_SEPARATOR = "\r\n\r\n"
 const CONTENT_LENGTH_RE = /content-length:\s*(\d+)/i
 
+/** Hard ceiling on a single framed message body. A buggy or hostile server can
+ *  declare an arbitrarily large `Content-Length` (or never send the header
+ *  separator), which would otherwise make {@link MessageReader} buffer
+ *  unbounded bytes forever — a memory-exhaustion / stream-wedge DoS. Mirrors
+ *  the MCP `MAX_RESULT_CHARS` (200k) cap in spirit; 32 MiB is far above any
+ *  legitimate LSP response (whole-file symbol trees, large hovers) while still
+ *  bounding the worst case. An over-cap frame is dropped, not buffered. */
+const MAX_FRAME_BYTES = 32 * 1024 * 1024
+/** Cap on header-block bytes accumulated before the `\r\n\r\n` separator. A
+ *  server that streams an endless header (no separator) must not grow the
+ *  buffer without bound. 64 KiB is generous for `Content-Length` + any extra
+ *  headers an LSP server might send. */
+const MAX_HEADER_BYTES = 64 * 1024
+
 /** S15: strict JSON-RPC 2.0 envelope validator. Spec requires `jsonrpc:"2.0"`
  *  on every message; accepting any parseable JSON as a message let a buggy or
  *  hostile server inject id-spoofed responses or wedge the dispatcher. */
@@ -80,6 +94,11 @@ const findHeaderEnd = (buf: Uint8Array): number => {
 export class MessageReader {
   private buffer: Uint8Array<ArrayBuffer> = new Uint8Array(new ArrayBuffer(0))
   private readonly decoder = new TextDecoder()
+  /** Bytes still to be discarded from an over-cap frame's body. While > 0 the
+   *  reader is in "resync" mode: it throws away exactly the declared body
+   *  length so the stream stays frame-aligned for the next valid message
+   *  instead of desyncing. */
+  private discardRemaining = 0
 
   /** Feed a freshly-read chunk; returns every complete message now available
    *  (zero, one, or many — coalesced server flushes are split here). Bytes for
@@ -96,8 +115,24 @@ export class MessageReader {
   }
 
   private tryParseOne(): JsonRpcMessage | null {
+    // Drain any pending over-cap body bytes before looking for a new header,
+    // so the stream realigns to the next frame rather than desyncing.
+    if (this.discardRemaining > 0) {
+      const drop = Math.min(this.discardRemaining, this.buffer.byteLength)
+      this.buffer = this.buffer.subarray(drop)
+      this.discardRemaining -= drop
+      if (this.discardRemaining > 0) return null
+    }
+
     const headerEnd = findHeaderEnd(this.buffer)
-    if (headerEnd < 0) return null
+    if (headerEnd < 0) {
+      // No separator yet. Guard against an unbounded header: a server that
+      // never sends `\r\n\r\n` must not grow the buffer forever.
+      if (this.buffer.byteLength > MAX_HEADER_BYTES) {
+        this.buffer = this.buffer.subarray(this.buffer.byteLength)
+      }
+      return null
+    }
 
     const headerText = this.decoder.decode(this.buffer.subarray(0, headerEnd))
     const match = CONTENT_LENGTH_RE.exec(headerText)
@@ -109,6 +144,17 @@ export class MessageReader {
 
     const contentLength = Number(match[1])
     const bodyStart = headerEnd + HEADER_SEPARATOR.length
+
+    // Frame-size DoS guard: an over-cap declared length is never buffered.
+    // Skip the header now and discard the declared body as it streams in.
+    if (contentLength > MAX_FRAME_BYTES) {
+      const afterHeader = this.buffer.subarray(bodyStart)
+      const drop = Math.min(contentLength, afterHeader.byteLength)
+      this.buffer = afterHeader.subarray(drop)
+      this.discardRemaining = contentLength - drop
+      return null
+    }
+
     if (this.buffer.byteLength < bodyStart + contentLength) return null
 
     const bodyBytes = this.buffer.subarray(bodyStart, bodyStart + contentLength)

@@ -74,6 +74,39 @@ describe("S3 conservative discipline — project/tmp rm still allowed", () => {
   })
 })
 
+// S-Audit P1 — quoted / subshell-wrapped absolute-root targets previously
+// slipped the `rm`/`chmod` rules because the target's trailing terminator set
+// (`\s|$|;|&|\|`) excluded the closing quote/paren, and an opening quote/paren
+// sat between the whitespace and the root token. The terminator was WIDENED and
+// an optional opening quote/paren added — the absolute/home root token is still
+// required, so relative quoted targets stay allowed.
+describe("S-Audit P1 HARD_DENY — quoted / subshell rm+chmod root bypasses now blocked", () => {
+  test.each([
+    ['rm -rf "/usr"', "double-quoted absolute root"],
+    ["rm -rf '/var'", "single-quoted absolute root"],
+    ["(rm -rf /)", "subshell-wrapped bare root"],
+    ['bash -c "rm -rf /"', "quoted -c payload, bare root"],
+    ["sh -c 'rm -rf /etc'", "single-quoted -c payload"],
+    ['rm -rf "$HOME"', "quoted $HOME"],
+    ['chmod -R 777 "/"', "quoted chmod root"],
+    ["(chmod -R 777 /)", "subshell chmod root"],
+    ['bash -c "chmod -R 777 ~"', "quoted chmod home"],
+  ])("denies %s (%s)", (command) => {
+    expect(decide(command)).toBe("deny")
+  })
+
+  // Relative quoted targets MUST stay allowed — the widening must not weaken
+  // the conservative discipline.
+  test.each([
+    ['rm -rf "./dist"', "quoted relative dist"],
+    ['rm -rf "build/x"', "quoted relative subdir"],
+    ['chmod -R 755 "./build"', "quoted relative chmod"],
+    ["(rm -rf ./build)", "subshell relative"],
+  ])("still allows %s (%s)", (command) => {
+    expect(decide(command)).not.toBe("deny")
+  })
+})
+
 describe("T0.2 false-positive discipline — legit commands still pass", () => {
   test.each([
     // capital -C is `git -C <dir>` (change dir), NOT config injection.
@@ -286,5 +319,27 @@ describe("S7 CLI default permission mode", () => {
     delete process.env.QUANTA_PERMISSION
     const ro = { tool: "read", input: {}, isReadOnly: true } as const
     expect(evaluate(ro, { mode: resolveMode() }).kind).toBe("allow")
+  })
+})
+
+// S-Audit P1 — precedence: HARD_DENY is checked BEFORE the read-only fast-path
+// in `evaluate` (and `evaluateAuto`), matching `evaluateStack`. A shell-bearing
+// action mislabeled `isReadOnly: true` (registry bug / spoof) must NOT bypass
+// the denylist. A GENUINE read-only tool (no shellCommand) still allows.
+describe("S-Audit P1 precedence — HARD_DENY beats a spoofed isReadOnly:true", () => {
+  test("isReadOnly:true + dangerous shellCommand ⇒ deny (not allow)", () => {
+    const spoof = {
+      tool: "bash",
+      input: { command: "rm -rf /" },
+      isReadOnly: true,
+      shellCommand: "rm -rf /",
+    } as const
+    expect(evaluate(spoof, { mode: "bypass" }).kind).toBe("deny")
+    expect(evaluate(spoof, { mode: "default" }).kind).toBe("deny")
+  })
+
+  test("genuine read-only tool (no shellCommand) still allows", () => {
+    const ro = { tool: "read", input: {}, isReadOnly: true } as const
+    expect(evaluate(ro, { mode: "default" }).kind).toBe("allow")
   })
 })

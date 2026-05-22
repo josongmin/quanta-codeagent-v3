@@ -498,3 +498,43 @@ describe("LspClient nav RPC — wire mapping edges", () => {
     ])
   })
 })
+
+/** Exposes the REAL (non-overridden) `sendRequest` so the lifecycle guard can
+ *  be exercised. Unlike {@link FakeLspClient} this does NOT replace
+ *  `sendRequest` — it only surfaces it publicly and uses a short timeout so a
+ *  guard regression (request hangs instead of rejecting) fails the test fast
+ *  rather than waiting the full default timeout. */
+class RealSendLspClient extends LspClient {
+  constructor() {
+    super(
+      { defaultCommand: ["unused"], languageIdFor: () => "typescript" },
+      { requestTimeoutMs: 250 },
+    )
+  }
+  callSendRequest(method: string, params: unknown): Promise<unknown> {
+    return this.sendRequest(method, params)
+  }
+}
+
+describe("LspClient lifecycle — sendRequest after stop/exit (base.ts guard)", () => {
+  test("a request after stop() rejects promptly instead of hanging until timeout", async () => {
+    const c = new RealSendLspClient()
+    await c.stop() // never started: flips `stopped`, leaves proc null
+    const started = Date.now()
+    await expect(c.callSendRequest("textDocument/definition", {})).rejects.toThrow(
+      /after server stopped\/exited/,
+    )
+    // Must reject synchronously-ish, not after the 250ms timeout.
+    expect(Date.now() - started).toBeLessThan(200)
+  })
+
+  test("the `shutdown` method is exempt from the guard (stop() issues it post-stop)", async () => {
+    // shutdown after stop must NOT be rejected by the guard — it would instead
+    // register a pending entry and (with no proc) settle via the timeout path.
+    // We only assert the guard does not short-circuit it with the stop/exit
+    // rejection message.
+    const c = new RealSendLspClient()
+    await c.stop()
+    await expect(c.callSendRequest("shutdown", null)).rejects.toThrow(/timed out/)
+  })
+})

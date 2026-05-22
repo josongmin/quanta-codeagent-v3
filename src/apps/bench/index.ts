@@ -59,8 +59,9 @@
 import { existsSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
-import { logger } from "@/shared"
+import { logger, runtimeConfig } from "@/shared"
 import {
   aggregate,
   benchRunDir,
@@ -91,10 +92,12 @@ const unquote = (v: string): string =>
     ? v.slice(1, -1)
     : v
 
-/** Parse one `KEY=VALUE` line into a pair, or null for blanks/comments. */
+/** Parse one `KEY=VALUE` line into a pair, or null for blanks/comments. A
+ *  leading `export ` prefix is stripped (matches apps/cli dotenv). */
 const parseEnvLine = (raw: string): [string, string] | null => {
-  const line = raw.trim()
+  let line = raw.trim()
   if (line === "" || line.startsWith("#")) return null
+  if (line.startsWith("export ")) line = line.slice("export ".length).trimStart()
   const eq = line.indexOf("=")
   if (eq <= 0) return null
   return [line.slice(0, eq).trim(), unquote(line.slice(eq + 1).trim())]
@@ -117,6 +120,21 @@ const argValue = (flag: string): string | undefined => {
 }
 
 const argFlag = (flag: string): boolean => process.argv.includes(flag)
+
+/** Parse a `--flag <int>` argv value as a positive integer. `Number()` returns
+ *  NaN on garbage (e.g. `--n abc`) and `Number("")`===0; both used to slip
+ *  through the raw `Math.max(1, Number(...))` parses. Returns `fallback` when
+ *  the flag is absent OR its value is not a positive integer. */
+const argPositiveInt = (flag: string, fallback: number): number => {
+  const raw = argValue(flag)
+  if (raw === undefined) return fallback
+  if (!/^\d+$/.test(raw.trim())) {
+    logger.warn(`ignoring invalid ${flag}="${raw}" — must be a positive integer`)
+    return fallback
+  }
+  const n = Number.parseInt(raw.trim(), 10)
+  return Number.isSafeInteger(n) && n > 0 ? n : fallback
+}
 
 /** Compact failure tag for the console FAIL line. Returns "" when the
  *  classification is `passed`. Examples:
@@ -344,10 +362,15 @@ const runDatasetMode = async (
   // ⇒ key omitted from deps ⇒ runner takes single-pass path (G2 gating). Set
   // either via `--repair-rounds <int>` or `QUANTA_REPAIR_ROUNDS`.
   const repairArg = argValue("--repair-rounds") ?? process.env.QUANTA_REPAIR_ROUNDS
+  // Strict non-negative-int parse: a garbage value (NaN) previously flowed into
+  // `Math.max(0, NaN)` === NaN and reached `maxRounds`, silently breaking the
+  // repair-round comparison. NaN/negative ⇒ 0 (no repair).
+  const repairRounds =
+    repairArg !== undefined && /^\d+$/.test(repairArg.trim())
+      ? Number.parseInt(repairArg.trim(), 10)
+      : 0
   const repair =
-    repairArg !== undefined && repairArg !== ""
-      ? { maxRounds: Math.max(0, Number(repairArg)) }
-      : undefined
+    repairArg !== undefined && repairArg !== "" ? { maxRounds: repairRounds } : undefined
   if (repair !== undefined) {
     logger.info(`bench: repair rounds enabled (maxRounds=${repair.maxRounds})`)
   }
@@ -547,11 +570,14 @@ const main = async (): Promise<void> => {
   loadEnv([".env.dev", ".env.local", ".env"])
 
   const corpusRoot = argValue("--corpus") ?? process.env.QUANTA_SWEBENCH_CORPUS_ROOT ?? ""
-  const n = Math.max(1, Number(argValue("--n") ?? "1"))
+  const n = argPositiveInt("--n", 1)
   const limitArg = argValue("--limit")
-  const limit = limitArg ? Number(limitArg) : null
-  const maxTurns = Number(process.env.QUANTA_MAX_TURNS ?? "30")
-  const timeoutMs = Number(process.env.QUANTA_BENCH_TIMEOUT_MS ?? "120000")
+  // `--limit` is an optional positive-int cap; absent ⇒ no cap. A garbage value
+  // (NaN) previously slid through `Number(limitArg)` and produced `slice(0, NaN)`
+  // === `slice(0, 0)` (silently selecting ZERO instances). Use the strict parse;
+  // `0` (no valid value) ⇒ no cap.
+  const limitParsed = limitArg !== undefined ? argPositiveInt("--limit", 0) : 0
+  const limit = limitParsed > 0 ? limitParsed : null
   // Pin the run id ONCE so observe + predictions + report all group under the
   // same persistent `<benchHome>/runs/<runId>/` dir (no per-call Date.now
   // drift). MUST be written into env BEFORE the first `runtimeConfig()` read
@@ -559,6 +585,13 @@ const main = async (): Promise<void> => {
   // so we seed env here when unset, then every later `benchRunId()` returns the
   // same pinned id from the frozen config.
   process.env.QUANTA_RUN_ID ??= `run-${Date.now()}`
+  // maxTurns / timeoutMs flow through the runtime-config SSOT parser, which
+  // rejects NaN-on-garbage (a raw `Number("abc")` used to yield NaN and silently
+  // disable the turn cap). Default converges to the canonical batch preset
+  // (BUDGET_PRESETS.batch.maxTurns = 60) instead of the prior local `30` drift.
+  const cfg = runtimeConfig()
+  const maxTurns = cfg.maxTurnsBatch ?? BUDGET_PRESETS.batch.maxTurns ?? 60
+  const timeoutMs = cfg.benchTimeoutMs ?? 120_000
   // Trajectories persist by default now (the prior tmp default reaped them);
   // pass `--observe-dir`/`QUANTA_OBSERVE_DIR` to override the location.
   const obs = resolveObserve()

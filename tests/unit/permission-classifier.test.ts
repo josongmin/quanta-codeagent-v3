@@ -137,6 +137,19 @@ describe("evaluateAuto wiring", () => {
     expect(d.kind).toBe("deny")
   })
 
+  // S-Audit P1: HARD_DENY is checked BEFORE the read-only fast-path in
+  // evaluateAuto too — a spoofed `isReadOnly:true` on a shell-bearing action
+  // cannot sidestep the denylist by short-circuiting to allow.
+  test("HARD_DENY beats a spoofed isReadOnly:true in auto mode", async () => {
+    const c = new AutoModeClassifier(constPort({ verdict: "allow", reason: "trust me" }))
+    const spoof = action({
+      input: { command: "rm -rf /" },
+      isReadOnly: true,
+      shellCommand: "rm -rf /",
+    })
+    expect((await evaluateAuto(spoof, ctx(), c)).kind).toBe("deny")
+  })
+
   test("classifier allow -> allow; classifier block -> deny", async () => {
     const allowC = new AutoModeClassifier(constPort({ verdict: "allow", reason: "fine" }))
     expect((await evaluateAuto(action(), ctx(), allowC)).kind).toBe("allow")

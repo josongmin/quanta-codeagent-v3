@@ -80,6 +80,24 @@ describe("loadEnvFiles", () => {
     expect(process.env.URL).toBe("postgres://u:p@h/db?x=1")
   })
 
+  test("strips a leading `export ` prefix (shell-sourceable .env)", () => {
+    const f = envFile(`export EXPORTED=yes\nexport QUOTED="with space"\nPLAIN=raw\n`)
+    loadEnvFiles([f])
+    expect(process.env.EXPORTED).toBe("yes")
+    expect(process.env.QUOTED).toBe("with space")
+    expect(process.env.PLAIN).toBe("raw")
+    // The literal `export FOO` key must NOT be created.
+    expect(process.env["export EXPORTED"]).toBeUndefined()
+  })
+
+  test("a key literally named `export` (no space) is left intact", () => {
+    // Only the `export ` PREFIX (with a space) is stripped; `export=1` is a
+    // legitimate KEY=VALUE pair and must round-trip unchanged.
+    const f = envFile("export=1\n")
+    loadEnvFiles([f])
+    expect(process.env.export).toBe("1")
+  })
+
   test("does not override a value already set in process.env", () => {
     process.env.PRESET = "from-real-env"
     const f = envFile("PRESET=from-file\n")

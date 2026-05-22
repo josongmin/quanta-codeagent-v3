@@ -53,8 +53,9 @@ const loadEnv = (files: readonly string[]): void => {
     const p = resolve(process.cwd(), f)
     if (!existsSync(p)) continue
     for (const raw of readFileSync(p, "utf8").split("\n")) {
-      const line = raw.trim()
+      let line = raw.trim()
       if (line === "" || line.startsWith("#")) continue
+      if (line.startsWith("export ")) line = line.slice("export ".length).trimStart()
       const eq = line.indexOf("=")
       if (eq <= 0) continue
       const k = line.slice(0, eq).trim()

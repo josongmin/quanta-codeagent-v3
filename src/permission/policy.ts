@@ -99,10 +99,17 @@ export const inferToolTier = (tool: HITLToolDuck, input: unknown): HITLTier => {
  *  applying the read-only allow and the HARD_DENY guard. The main thread
  *  should call `evaluateAuto()` instead when it can drive the classifier. */
 export const evaluate = (action: ToolAction, ctx: PermissionContext): PermissionDecision => {
-  if (action.isReadOnly) return { kind: "allow" }
-
+  // HARD_DENY ALWAYS wins — checked BEFORE the read-only fast-path so a tool
+  // mislabeled `isReadOnly:true` that nonetheless carries a shell-equivalent
+  // `shellCommand` (registry bug / spoofed action) can never sidestep the
+  // denylist. `hardDeny` only fires when a shell command is present, so a
+  // genuine read-only tool (no `shellCommand`) still falls straight through
+  // to the allow below. This mirrors `evaluateStack`'s ordering (precedence
+  // level 1) and the documented "HARD_DENY beats everything" invariant.
   const denied = hardDeny(action)
   if (denied) return denied
+
+  if (action.isReadOnly) return { kind: "allow" }
 
   if (ctx.mode === "bypass" || ctx.mode === "acceptEdits") return { kind: "allow" }
   if (ctx.mode === "auto") {
@@ -131,12 +138,16 @@ export const evaluateAuto = async (
 ): Promise<PermissionDecision> => {
   if (ctx.mode !== "auto") return evaluate(action, ctx)
 
-  if (action.isReadOnly) return { kind: "allow" }
-
-  // HARD_DENY beats the classifier — it crosses a security boundary and no
-  // user/model context authorizes it.
+  // HARD_DENY beats the classifier AND the read-only fast-path — it crosses a
+  // security boundary and no user/model context (nor a possibly-spoofed
+  // `isReadOnly:true` on a shell-bearing action) authorizes it. Checked first
+  // so it matches `evaluate`/`evaluateStack` precedence level 1. `hardDeny`
+  // is a no-op when no `shellCommand` is present, so genuine read-only tools
+  // still allow below.
   const denied = hardDeny(action)
   if (denied) return denied
+
+  if (action.isReadOnly) return { kind: "allow" }
 
   const decision = await classifier.evaluate({
     tool: action.tool,

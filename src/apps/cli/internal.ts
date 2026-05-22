@@ -353,38 +353,47 @@ export const readMcpConfig = async (slog: StructuredLogger): Promise<McpServerCo
 }
 
 /**
- * MEDIUM-12: this filter is a DENYLIST — every new top-level flag that
- * isn't added here will leak into the LLM prompt (e.g. a user typing
- * `--worktree` by mistake would have "--worktree" sent to the model).
- * Future direction: invert to an allowlist (positional args only), but
- * that's out of scope for this PR. For now we keep the list exhaustive.
+ * Flags that consume the FOLLOWING argv token as their value (`--flag <value>`).
+ * Their value must never become part of the prompt — e.g. `--state foo` must
+ * drop both `--state` and `foo`. This list is the single source of truth shared
+ * by {@link argvPrompt} (so the value is skipped, not treated as a positional)
+ * and {@link argvImages} (which extracts `--image` values).
  */
-export const argvPrompt = (): string =>
-  process.argv
-    .slice(2)
-    .filter(
-      (a) =>
-        a !== "--plan" &&
-        a !== "--lsp" &&
-        a !== "--lsp-tools" &&
-        a !== "--git-tools" &&
-        a !== "--new-session" &&
-        a !== "--archived" &&
-        a !== "--worktree" &&
-        a !== "--force" &&
-        a !== "--ids" &&
-        a !== "--help" &&
-        a !== "-h",
-    )
-    .filter((a, i, arr) => {
-      const flagged = arr[i - 1]
-      // ADR-0083: `--image <path>` — drop both the flag and its value so the
-      // image path never leaks into the prompt text.
-      const valued = ["--state", "--resume", "--observe-dir", "--title", "--image"]
-      return !valued.includes(a) && !valued.includes(flagged ?? "")
-    })
-    .join(" ")
-    .trim()
+const VALUED_FLAGS = ["--state", "--resume", "--observe-dir", "--title", "--image"] as const
+
+/**
+ * Build the seed prompt from positional (non-flag) argv tokens.
+ *
+ * ALLOWLIST semantics (inverted from the prior denylist, which leaked any
+ * unknown flag into the LLM prompt — e.g. a mistyped `--worktree` was sent to
+ * the model verbatim because it wasn't in the strip-list): a token becomes part
+ * of the prompt ONLY when it is a positional argument — i.e. it does NOT start
+ * with `-` AND it is not the value consumed by a {@link VALUED_FLAGS} flag.
+ * Every `-`/`--`-prefixed token (known or not, including the `--flag=value`
+ * form) is excluded by construction, so no new top-level flag can ever leak.
+ *
+ * Byte-identical for the common case: a plain `quanta "fix the bug"` (or any
+ * mix of recognized flags + a positional prompt) yields exactly the same joined
+ * positional text as before. The only behavior change is for tokens that begin
+ * with `-` and were previously NOT in the denylist — those used to leak into
+ * the prompt and are now correctly dropped.
+ */
+export const argvPrompt = (): string => {
+  const argv = process.argv.slice(2)
+  const positionals: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === undefined) continue
+    if (a.startsWith("-")) {
+      // A valued flag also consumes its following token, so skip the value too
+      // (prevents `--state foo` from leaving `foo` as a stray positional).
+      if ((VALUED_FLAGS as readonly string[]).includes(a)) i += 1
+      continue
+    }
+    positionals.push(a)
+  }
+  return positionals.join(" ").trim()
+}
 
 /** ADR-0083 multi-modal — extract every `--image <path>` value from argv (the
  *  flag is repeatable). Empty when no `--image` is passed (byte-identical: the

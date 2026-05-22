@@ -68,6 +68,20 @@ describe("assertAllowedTool / isToolAllowed", () => {
     expect(isToolAllowed(fm({ allowedTools: ["Read"] }), "read")).toBe(false)
   })
 
+  test("exact-match only — no prefix over-match (Read not allowed by [ReadFile])", () => {
+    // Tool-name analog of the rules-matcher `rm` MUST NOT match `rmdir`
+    // guard. `allowedTools` membership is whole-string `Array.includes`, so
+    // a requested tool that is merely a PREFIX (or substring) of an allowed
+    // tool name must NOT be permitted — otherwise a skill granting `ReadFile`
+    // would silently widen to `Read`, `ReadFileLines`, etc.
+    const guarded = fm({ allowedTools: ["ReadFile"] })
+    expect(isToolAllowed(guarded, "Read")).toBe(false)
+    expect(() => assertAllowedTool(guarded, "Read")).toThrow(ToolNotAllowedBySkillError)
+    // ...and the exact name is still permitted.
+    expect(isToolAllowed(guarded, "ReadFile")).toBe(true)
+    expect(() => assertAllowedTool(guarded, "ReadFile")).not.toThrow()
+  })
+
   test("error message names the offending tool and skill", () => {
     let caught: unknown
     try {

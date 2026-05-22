@@ -100,8 +100,16 @@ const HARD_DENY_RULES: readonly HardDenyRule[] = [
     // would simply not match the rule (still falls through to other gates).
     // The simpler `[\s\S]{0,500}?` replaces the equivalent `(?:\s|[\s\S]){0,500}?`
     // — `\s ⊂ [\s\S]` so the alternation was redundant.
+    // S-Audit P1: the trailing terminator set was widened from `\s|$|;|&|\|`
+    // to ALSO accept a closing quote (`"`/`'`) or closing paren (`)`). Without
+    // it, an absolute-root `rm -rf` wrapped in a subshell (`(rm -rf /)`) or a
+    // quoted `-c` payload (`bash -c "rm -rf /"`, `rm -rf "/usr"`, `rm -rf '/var'`)
+    // slipped the rule because the target `/`…`)`/`"`/`'` had no whitespace
+    // terminator after it. The target group still REQUIRES an absolute/home
+    // root (`$HOME`/`~`/`/<root>`), so project-relative quoted targets like
+    // `rm -rf "./dist"` stay allowed. Strengthens the deny only.
     pattern: new RegExp(
-      String.raw`\brm\b(?=(?:\s+-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive\b))(?:\s|$)|[\s\S]{0,500}?\s-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\b)(?=[\s\S]{0,500}?\s-(?:[a-zA-Z]*[fF][a-zA-Z]*|-force)\b)[\s\S]{0,500}?\s(?:\$\{?HOME\}?|~|\/(?:\*|${SYSTEM_ROOTS})?)(?:\/\S*)?(?=\s|$|;|&|\|)`,
+      String.raw`\brm\b(?=(?:\s+-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive\b))(?:\s|$)|[\s\S]{0,500}?\s-(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)\b)(?=[\s\S]{0,500}?\s-(?:[a-zA-Z]*[fF][a-zA-Z]*|-force)\b)[\s\S]{0,500}?\s["'(]?(?:\$\{?HOME\}?|~|\/(?:\*|${SYSTEM_ROOTS})?)(?:\/\S*)?(?=\s|$|;|&|\||["')])`,
     ),
   },
   {
@@ -153,8 +161,12 @@ const HARD_DENY_RULES: readonly HardDenyRule[] = [
   {
     name: "chmod-recursive-system-root",
     description:
-      "`chmod -R` (recursive) whose target is `/`, `~`, or `$HOME` — mass permission clobber.",
-    pattern: /\bchmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+\S+\s+(\/|~|\$HOME)(\s|$)/,
+      '`chmod -R` (recursive) whose target is `/`, `~`, or `$HOME` — mass permission clobber. Optional opening quote/paren + widened terminator catch the quoted/subshell forms (`chmod -R 777 "/"`, `(chmod -R 777 /)`).',
+    // S-Audit P1: same quote/paren terminator widening as the `rm` rule —
+    // a quoted or subshell-wrapped absolute-root target previously slipped.
+    // The root token (`/`/`~`/`$HOME`) is still required so relative targets
+    // (`chmod -R 755 ./dist`) stay allowed.
+    pattern: /\bchmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+\S+\s+["'(]?(\/|~|\$HOME)(\s|$|["')])/,
   },
   {
     name: "curl-wget-pipe-to-shell",

@@ -543,6 +543,15 @@ export class LspClient implements LspPort {
     const payload =
       params === undefined ? { jsonrpc: "2.0", id, method } : { jsonrpc: "2.0", id, method, params }
     return new Promise<unknown>((resolve, reject) => {
+      // Lifecycle guard: if the server has already exited or we've stopped,
+      // reject immediately instead of registering a pending entry whose
+      // `send()` would silently no-op (stdin gone) and only fail on timeout —
+      // a needless `requestTimeoutMs` hang. Mirrors McpClient.request().
+      // `shutdown` is exempt: stop() issues it after setting `stopped`.
+      if ((this.exited || this.stopped) && method !== "shutdown") {
+        reject(new Error(`LSP request "${method}" issued after server stopped/exited`))
+        return
+      }
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`LSP request "${method}" timed out after ${this.requestTimeoutMs}ms`))

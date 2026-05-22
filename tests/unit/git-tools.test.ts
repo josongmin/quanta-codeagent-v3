@@ -136,6 +136,26 @@ describe("gitDiffTool", () => {
     const t = gitDiffTool(new FakeRunner(okResult("")))
     expect(t.inputSchema.safeParse({ paths: "a.ts" }).success).toBe(false)
   })
+
+  // SECURITY: a leading-dash `base` is a bare positional that git parses as an
+  // OPTION (`--output=` is an arbitrary-file write; `--ext-diff` runs a command),
+  // escaping the read-only contract. It must be rejected before reaching argv.
+  test("leading-dash base is rejected (no option injection), runner never called", async () => {
+    for (const base of ["--output=/tmp/pwn", "-G.", "--ext-diff"]) {
+      const runner = new FakeRunner(okResult(""))
+      const { result } = await collect(gitDiffTool(runner), { base })
+      expect(result.ok).toBe(false)
+      expect(result.output).toMatch(/must not begin with '-'/)
+      // The dangerous argv must never have been handed to git.
+      expect(runner.calls.length).toBe(0)
+    }
+  })
+
+  test("a normal revision is still passed through verbatim", async () => {
+    const runner = new FakeRunner(okResult(""))
+    await collect(gitDiffTool(runner), { base: "HEAD~3" })
+    expect(runner.calls[0]?.args).toEqual(["diff", "HEAD~3"])
+  })
 })
 
 // ============================================================================

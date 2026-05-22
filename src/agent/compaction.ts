@@ -92,8 +92,13 @@ export const findBoundary = (messages: Message[], keepTurns: number): number => 
     }
     idx = i
   }
-  // Expand backwards until no retained tool_result is orphaned.
-  while (idx > 0) {
+  // Expand backwards until no retained tool_result is orphaned. The head guard
+  // (`idx < messages.length`) matters when the initial scan leaves an EMPTY
+  // suffix (`idx === messages.length`, e.g. keepTurns=0 with an assistant tail):
+  // there is no retained message to orphan, so `messages[idx]` must NOT be
+  // dereferenced (it is `undefined` → TypeError). An empty suffix is already
+  // self-consistent, so the walk is a no-op there.
+  while (idx > 0 && idx < messages.length) {
     const suffixIds = new Set<string>()
     for (let i = idx; i < messages.length; i++) {
       for (const id of toolUseIds(messages[i] as Message)) suffixIds.add(id)
