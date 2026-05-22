@@ -47,7 +47,7 @@ const LIGHT_REPOS = new Set([
   "sympy/sympy",
 ])
 
-interface Row {
+export interface Row {
   instance_id: string
   repo: string
   difficulty: string
@@ -70,7 +70,7 @@ const f2pCount = (row: Row): number => {
 }
 
 /** Smoke-grade gate. Returns the list of violated criteria (empty = passes). */
-const violations = (row: Row): string[] => {
+export const violations = (row: Row): string[] => {
   const v: string[] = []
   if (row.difficulty !== "<15 min fix") v.push(`difficulty=${row.difficulty}`)
   const files = goldFiles(row.patch)
@@ -148,4 +148,5 @@ const main = async (): Promise<void> => {
   console.log("\nAUDIT OK: all pinned smoke picks satisfy criteria.")
 }
 
-await main()
+// Run as a CLI only; importing (e.g. the guard test) must not fetch.
+if (import.meta.main) await main()
