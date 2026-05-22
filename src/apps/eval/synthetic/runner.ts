@@ -22,11 +22,13 @@ import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { buildSystemPrompt, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
+import { costUsd } from "@/observability/pricing"
 import type { PermissionContext } from "@/permission"
 import { logger, type RunContext } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder, TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import type { TokenUsage } from "../storage/schema"
 import { type EvalMeta, writeMeta } from "../trajectory/meta"
 import type { Scenario } from "./scenario"
 
@@ -40,6 +42,23 @@ class CapturingStream implements StreamPort {
     if (event.type === "tool_call") {
       this.toolCalls.push({ name: event.name, input: event.input })
     }
+  }
+
+  /** Sum every `{type:"usage"}` AgentEvent the agent loop emitted over the run
+   *  (the loop fans one per `llm_usage` provider event via `emitUsage`). Returns
+   *  the raw token totals; the caller decides whether to omit a zero-token run.
+   *  Pure read over `events` — no side effects. */
+  sumUsage(): { inputTokens: number; outputTokens: number; cacheReadTokens: number } {
+    let inputTokens = 0
+    let outputTokens = 0
+    let cacheReadTokens = 0
+    for (const e of this.events) {
+      if (e.type !== "usage") continue
+      inputTokens += e.inputTokens
+      outputTokens += e.outputTokens
+      cacheReadTokens += e.cacheReadTokens ?? 0
+    }
+    return { inputTokens, outputTokens, cacheReadTokens }
   }
 }
 
@@ -83,6 +102,12 @@ export interface RunResult {
   events: readonly AgentEvent[]
   /** JSONL trajectory path when `recordTo` was set. */
   trajectoryPath?: string
+  /** ADR-0087 — token accounting summed over the run's `usage` events. Omitted
+   *  when the run produced zero tokens (no usage events / null LLM). */
+  tokens?: TokenUsage
+  /** ADR-0087 — estimated USD cost (`costUsd(model, …)`). `null` when the model
+   *  id is unknown to the price table; omitted entirely when no usage data. */
+  costUsd?: number | null
 }
 
 /** Best-effort cleanup; never throws. */
@@ -210,6 +235,11 @@ export const runScenario = async (scenario: Scenario, opts: RunOpts): Promise<Ru
       }
       writeMeta(opts.recordTo, meta)
     }
+    // ADR-0087 — token + cost rollup (see `rollupTokenCost`). Returns a
+    // ready-to-spread object: absent fields when there's no usage / no price, so
+    // the payload is byte-identical to the pre-feature path. Model id comes from
+    // the run's LLM port (the same string baked into the meta sidecar above).
+    const tokenCost = rollupTokenCost(capture, opts.llm.model)
     const forbiddenHit = detectForbidden(capture.toolCalls, scenario.forbidden)
     // Filter then guard the delta type: an `assistant_text` event with a
     // missing/non-string delta would join to the literal string "undefined"
@@ -230,9 +260,35 @@ export const runScenario = async (scenario: Scenario, opts: RunOpts): Promise<Ru
       stopReason,
       events: capture.events,
       ...(opts.recordTo !== undefined ? { trajectoryPath: opts.recordTo } : {}),
+      ...tokenCost,
     }
   } finally {
     await safeRm(sandbox)
+  }
+}
+
+/** ADR-0087 — derive a ready-to-spread `{tokens?, costUsd?}` slice from the
+ *  captured `usage` events. A zero-token run (no usage events, e.g. a
+ *  non-streaming mock or an aborted start) returns `{}` so the payload is
+ *  byte-identical to the pre-feature path. `costUsd` is `null` for a run whose
+ *  `model` is absent from the price table, and OMITTED when there's no usage OR
+ *  no model id at all. */
+const rollupTokenCost = (
+  capture: CapturingStream,
+  model: string | undefined,
+): { tokens?: TokenUsage; costUsd?: number | null } => {
+  const usage = capture.sumUsage()
+  const hasUsage = usage.inputTokens > 0 || usage.outputTokens > 0 || usage.cacheReadTokens > 0
+  if (!hasUsage) return {}
+  const tokens: TokenUsage = {
+    prompt: usage.inputTokens,
+    completion: usage.outputTokens,
+    ...(usage.cacheReadTokens > 0 ? { cacheRead: usage.cacheReadTokens } : {}),
+  }
+  if (model === undefined) return { tokens }
+  return {
+    tokens,
+    costUsd: costUsd(model, usage.inputTokens, usage.outputTokens, usage.cacheReadTokens),
   }
 }
 

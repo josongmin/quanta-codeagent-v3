@@ -157,6 +157,11 @@ export const runSynthetic = async (opts: SyntheticRunOpts): Promise<SyntheticSum
           toolsUsed: run.toolsUsed,
           ...(run.forbiddenHit !== undefined ? { forbiddenHit: run.forbiddenHit } : {}),
           durationMs: run.durationMs,
+          // ADR-0087 — fill the additive token/cost fields when the run captured
+          // usage. `costUsd` is dropped for null (unknown model) so the payload
+          // stays byte-identical to the pre-feature path when there's no price.
+          ...(run.tokens ? { tokens: run.tokens } : {}),
+          ...(typeof run.costUsd === "number" ? { costUsd: run.costUsd } : {}),
         },
       })
     } catch (e) {
@@ -180,12 +185,19 @@ export const runSynthetic = async (opts: SyntheticRunOpts): Promise<SyntheticSum
     }
   }
   const durationMs = Date.now() - start
+  // ADR-0087 — run-level status + reproduction params. `params.model` is the
+  // agent LLM id when the port reports one (omitted otherwise so the field stays
+  // absent for a model-less double). `status:"finished"` marks the terminal
+  // state; the catch-per-scenario above keeps the run itself from throwing.
+  const model = opts.agent.model
   await store.finish({
     runId,
     tier: "synthetic",
     argv: process.argv.slice(2),
     counts,
     durationMs,
+    status: "finished",
+    ...(model !== undefined ? { params: { model } } : {}),
   })
   return { runId, total: files.length, counts, durationMs }
 }

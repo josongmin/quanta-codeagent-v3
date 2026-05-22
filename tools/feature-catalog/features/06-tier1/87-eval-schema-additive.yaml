@@ -3,8 +3,8 @@ title: Eval 스키마 additive 필드 (keyed metrics / token·cost / run status�
 section: 6
 subsystem: 로컬 eval 저장 (Cursor EvalTrackingService 흡수, ADR-0087)
 order: 87
-maturity: L2
-status: new
+maturity: L3
+status: refined
 purpose: |
   Cursor aiserver.v1.EvalTrackingService에서 typed shape 3개만 흡수 — JSONL
   append-only eval 저장(schema.ts, zod 없음 plain TS)에 OPTIONAL·additive 필드 추가.
@@ -15,16 +15,27 @@ purpose: |
 evidence:
   code:
     - src/apps/eval/storage/schema.ts
+    - src/apps/eval/synthetic/runner.ts
+    - src/apps/eval/synthetic/index.ts
+    - src/apps/eval/report/coverage-matrix.ts
+    - src/apps/eval/report/markdown.ts
   adrs: [87]
   tests:
-    unit: [tests/unit/eval-schema-additive.test.ts]
+    unit:
+      - tests/unit/eval-schema-additive.test.ts
+      - tests/unit/eval-runner-token-cost.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    L2 — schema seam만 추가. eval runner는 아직 metrics/tokens/status/params를
-    채우지 않고 report/는 렌더 안 함(타 트랙 소유 파일). 채택은 점진적.
-  promotion_path: |
-    runner가 run당 Metric[]/TokenUsage/costUsd를 emit하고 report/가 렌더하면 L3.
-notes: 'score?를 교체가 아니라 보강(병존). PAYLOAD_KINDS 디스크리미네이터 불변 → result-store.readAll/coverage-matrix narrowing 무회귀.'
+deliberate_hold: null
+notes: |
+  L3 — runner FILLS / report RENDERS. CapturingStream.sumUsage()가 loop가 emit한
+  {type:"usage"} AgentEvent를 합산 → RunResult.tokens?/costUsd?(costUsd는
+  @/observability/pricing.costUsd(model,…) 호출, unknown model → null). index.ts가
+  SyntheticPayload.tokens?/costUsd?로 conditional-spread하고 store.finish에
+  status:"finished"+params:{model} 추가. report TokenCostRollup가 synthetic+public
+  payload의 tokens/costUsd를 합산 → CoverageMatrix.tokenCost?, markdown
+  "Token & Cost Summary" 섹션 + headline Tokens=/Cost=$. 전부 데이터 없으면 absent =
+  byte-identical. score?를 교체가 아니라 보강(병존). PAYLOAD_KINDS 디스크리미네이터 불변 →
+  result-store.readAll/coverage-matrix narrowing 무회귀. metrics[]는 아직 per-scenario
+  manual emit이 없어 runner가 채우지 않음(named-axis 메트릭은 호출자가 향후 채울 seam).

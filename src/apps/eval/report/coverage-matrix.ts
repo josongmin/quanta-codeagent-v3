@@ -50,6 +50,20 @@ export interface MajorBlock {
   rows: readonly UseCaseRow[]
 }
 
+/** ADR-0087 — token + cost rollup summed over every payload that carries the
+ *  additive `tokens`/`costUsd` fields (synthetic + public). Absent from the
+ *  matrix entirely when NO record reported any usage, so the rendered report is
+ *  byte-identical to the pre-feature path on a usage-free corpus. */
+export interface TokenCostRollup {
+  prompt: number
+  completion: number
+  cacheRead: number
+  /** Summed estimated USD over records that carried a `costUsd`. */
+  costUsd: number
+  /** Number of records that contributed token data (for averaging upstream). */
+  records: number
+}
+
 export interface CoverageMatrix {
   /** Order matches TAXONOMY. */
   blocks: readonly MajorBlock[]
@@ -57,6 +71,8 @@ export interface CoverageMatrix {
   tiers: readonly EvalTier[]
   /** Run summary line counts (records seen). */
   recordsSeen: number
+  /** ADR-0087 — aggregate token/cost rollup; absent when no record had usage. */
+  tokenCost?: TokenCostRollup
 }
 
 const verdictFromRecord = (rec: EvalRecord): Verdict => {
@@ -86,8 +102,26 @@ const emptyCell = (): MatrixCell => ({ verdict: "skipped", count: 0 })
 export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatrix => {
   const byUsecase = new Map<UseCaseId, Record<EvalTier, MatrixCell>>()
   let seen = 0
+  // ADR-0087 — running token/cost rollup. `roll.records` stays 0 until a
+  // synthetic/public payload carries `tokens`, at which point the rollup is
+  // attached; an all-usage-free corpus leaves `tokenCost` undefined.
+  const roll: TokenCostRollup = {
+    prompt: 0,
+    completion: 0,
+    cacheRead: 0,
+    costUsd: 0,
+    records: 0,
+  }
   for (const rec of records) {
     seen += 1
+    const p = rec.payload
+    if ((p.kind === "synthetic" || p.kind === "public") && p.tokens !== undefined) {
+      roll.prompt += p.tokens.prompt
+      roll.completion += p.tokens.completion
+      roll.cacheRead += p.tokens.cacheRead ?? 0
+      if (typeof p.costUsd === "number") roll.costUsd += p.costUsd
+      roll.records += 1
+    }
     const id = rec.usecase
     let row = byUsecase.get(id)
     if (row === undefined) {
@@ -133,5 +167,10 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
   void leafById
   void parseId
   void allLeaves
-  return { blocks, tiers: TIER_ORDER, recordsSeen: seen }
+  return {
+    blocks,
+    tiers: TIER_ORDER,
+    recordsSeen: seen,
+    ...(roll.records > 0 ? { tokenCost: roll } : {}),
+  }
 }
