@@ -25,6 +25,7 @@ import {
 import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
 import { buildSessionFeatures } from "./features"
+import { renderIdeContext } from "./ide-context"
 import { type PersistDeps, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
@@ -37,9 +38,15 @@ import {
 } from "./stop-category"
 import { streamingTurn } from "./streaming-dispatch"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
+import {
+  consumeTurnSignals,
+  createToolChoiceTurnState,
+  resolveToolChoice,
+  type ToolChoiceTurnState,
+} from "./tool-choice"
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
-import type { AgentConfig, AgentOutcome, StopReason } from "./types"
+import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
 import { TurnWorkMetricsCollector } from "./work-metrics-collector"
 import type { WorkingStateSession } from "./working-state"
@@ -291,7 +298,15 @@ const streamConsume = async (
   toolHistory: ToolHistoryEntry[] | undefined,
   workingState: WorkingStateSession | undefined,
   collector: TurnWorkMetricsCollector | undefined,
+  toolChoiceState: ToolChoiceTurnState,
 ): Promise<StreamConsumeResult> => {
+  // ADR-0079 — resolve the pre-call tool_choice from the loop-owned turn state.
+  // `consumeTurnSignals` reads + clears the 1-turn-TTL flags armed by the
+  // verify/closeout guards on the PRIOR stream's finish-intent; `resolveToolChoice`
+  // applies the 4-way precedence. `auto` ⇒ field omitted from `StreamInput` so the
+  // wire payload is byte-identical to the pre-feature path (the adapter only
+  // emits provider `tool_choice` for `any`/`none`).
+  const toolChoice = resolveToolChoice(consumeTurnSignals(toolChoiceState))
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
   // is later teed from the provider `usage` event). The recorder gives both
@@ -317,7 +332,12 @@ const streamConsume = async (
     const outcome = await streamingTurn({
       events: teeUsage(
         config,
-        config.llm.stream({ messages, system, tools: specs }),
+        config.llm.stream({
+          messages,
+          system,
+          tools: specs,
+          ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+        }),
         recorder,
         collector,
       ),
@@ -465,6 +485,7 @@ const resolveMemoryContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
   recorder: AgentRecorder | undefined,
+  citations: MemoryCitation[],
 ): Promise<string | undefined> => {
   if (!config.store) return undefined
   const lastUser = [...wm.snapshot()].reverse().find((m) => m.role === "user")
@@ -483,6 +504,19 @@ const resolveMemoryContext = async (
         store: config.store,
         ...(config.embedder ? { embedder: config.embedder } : {}),
         ...(recorder ? { onStats: (s) => recorder.memoryRecall(s) } : {}),
+        // ADR-0082 — provenance seam: every record that landed in the rendered
+        // recall block becomes one citation. Memory rides the reminder tail
+        // today, so `where` is fixed to "reminder_tail" (the only render path).
+        onPlaced: (placed) => {
+          for (const p of placed) {
+            citations.push({
+              recordId: p.recordId,
+              score: p.score,
+              where: "reminder_tail",
+              tokensApprox: p.tokensApprox,
+            })
+          }
+        },
       },
       queryText || undefined,
       {
@@ -825,6 +859,46 @@ export const decideOnAssembled = (
  * stays ephemeral — it is the request tail, never persisted (so it can never
  * accumulate across turns/retries and always trails the conversation).
  */
+/** ADR-0080 — capture the IDE snapshot for this turn-context build and PREPEND
+ *  the rendered `<ide-context>` block to the latest NON-reminder user message
+ *  (IDE state is user-side context, not a harness reminder). No provider ⇒ ctx
+ *  unchanged (byte-identical). A provider rejection is caught at the boundary,
+ *  surfaced as an `error` AgentEvent, and treated as a null snapshot (no block)
+ *  so an IDE bug never aborts the turn — this is a boundary, NOT a fallback. */
+const injectIdeContext = async (
+  config: AgentConfig,
+  ctx: ReturnType<typeof buildTurnContext>,
+): Promise<ReturnType<typeof buildTurnContext>> => {
+  const provider = config.ideContextProvider
+  if (provider === undefined) return ctx
+  let block = ""
+  try {
+    block = renderIdeContext(await provider.snapshot(config.signal))
+  } catch (e) {
+    config.stream.emit({
+      type: "error",
+      message: `ide-context provider failed: ${e instanceof Error ? e.message : String(e)}`,
+    })
+    return ctx
+  }
+  if (block === "") return ctx
+  const messages = ctx.messages
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m?.role !== "user") continue
+    const idx = m.content.findIndex((b) => b.type === "text")
+    const tb = idx >= 0 ? m.content[idx] : undefined
+    if (tb?.type !== "text" || tb.text.startsWith("<system-reminder>")) continue
+    // Clone message + text block — `baseMessages` shares object refs with `wm`,
+    // so mutating in place would corrupt canonical history.
+    const newContent = [...m.content]
+    newContent[idx] = { ...tb, text: `${block}\n\n${tb.text}` }
+    messages[i] = { ...m, content: newContent }
+    break
+  }
+  return ctx
+}
+
 /** Rebuild the per-attempt request context: memory recall, proactive
  *  compaction (mutates `messages` in place), then the buildTurnContext SEAM. */
 const prepareTurnContext = async (
@@ -836,14 +910,15 @@ const prepareTurnContext = async (
   workingState: WorkingStateSession | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
+  citations: MemoryCitation[],
 ): Promise<ReturnType<typeof buildTurnContext>> => {
-  const memoryContext = await resolveMemoryContext(config, wm, recorder)
+  const memoryContext = await resolveMemoryContext(config, wm, recorder, citations)
   await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
   // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
   const wsSnapshot = workingState?.snapshot()
-  return buildTurnContext({
+  const ctx = buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
     planMode: config.planMode ?? false,
@@ -857,6 +932,9 @@ const prepareTurnContext = async (
     ...(activeSkills !== undefined ? { activeSkills } : {}),
     ...(wsSnapshot !== undefined ? { workingState: wsSnapshot } : {}),
   })
+  // ADR-0080 — fold the IDE snapshot into the built context (no provider ⇒
+  // returned unchanged, byte-identical).
+  return injectIdeContext(config, ctx)
 }
 
 type Step = { done: false } | { done: true; result: TurnResult }
@@ -895,6 +973,7 @@ const verifyGuardStep = (
   wm: WorkingMemory<Message>,
   history: readonly ToolHistoryEntry[],
   state: VerifyGuardState | undefined,
+  toolChoiceState: ToolChoiceTurnState,
 ): Step | undefined => {
   if (config.verifyGuard === undefined || state === undefined) return undefined
   if (!isFinishAttempt(action, message)) return undefined
@@ -908,6 +987,10 @@ const verifyGuardStep = (
   })
   if (!verdict.block || verdict.text === undefined) return undefined
   emitRecovery(config, "unverified")
+  // ADR-0079 — arm tool_choice:{kind:"any"} for the FORCED re-entry so the model
+  // is required to call a tool (typically the missing verify). Consumed + cleared
+  // by the next `streamConsume` (1-turn TTL).
+  toolChoiceState.verifyGuardViolated = true
   wm.append(message)
   wm.append(metaUser(verdict.text))
   return CONTINUE
@@ -931,6 +1014,7 @@ const closeoutGuardStep = (
   wm: WorkingMemory<Message>,
   history: readonly ToolHistoryEntry[],
   state: CloseoutGuardState | undefined,
+  toolChoiceState: ToolChoiceTurnState,
 ): Step | undefined => {
   if (config.closeoutGuard === undefined || state === undefined) return undefined
   if (!isFinishAttempt(action, message)) return undefined
@@ -942,6 +1026,11 @@ const closeoutGuardStep = (
   const verdict = decideCloseoutGuard({ cfg: config.closeoutGuard, state, history })
   if (!verdict.block || verdict.text === undefined) return undefined
   emitRecovery(config, "closeout")
+  // ADR-0079 — arm tool_choice:{kind:"none"} for the FORCED re-entry so the model
+  // is FORBIDDEN from emitting any tool_use (it must produce the terminal closeout
+  // text). Consumed + cleared by the next `streamConsume` (1-turn TTL). Ordered
+  // after verify, whose `any` wins the precedence ladder if both co-arm.
+  toolChoiceState.closeoutAttempted = true
   wm.append(message)
   wm.append(metaUser(verdict.text))
   return CONTINUE
@@ -957,6 +1046,7 @@ const applyAction = async (
   history: readonly ToolHistoryEntry[],
   verifyGuardState: VerifyGuardState | undefined,
   closeoutGuardState: CloseoutGuardState | undefined,
+  toolChoiceState: ToolChoiceTurnState,
 ): Promise<Step> => {
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
   if (action.do === "backoff") {
@@ -995,13 +1085,29 @@ const applyAction = async (
   // Tier 0 safety hardening: a finish attempt right after an unverified edit is forced
   // into one more turn. All the branching/decision lives in `verifyGuardStep`
   // so this hot path stays a single guarded call (default-OFF ⇒ undefined).
-  const guarded = verifyGuardStep(config, action, message, wm, history, verifyGuardState)
+  const guarded = verifyGuardStep(
+    config,
+    action,
+    message,
+    wm,
+    history,
+    verifyGuardState,
+    toolChoiceState,
+  )
   if (guarded) return guarded
   // Closeout reminder (§4 mirror): a finish attempt is given one single-shot
   // closeout nudge per run. Ordered STRICTLY AFTER verify-guard: if verify
   // already blocked above we never reach here on this turn — closeout fires the
   // NEXT finish-intent (after verify is satisfied). Default-OFF ⇒ undefined.
-  const closedout = closeoutGuardStep(config, action, message, wm, history, closeoutGuardState)
+  const closedout = closeoutGuardStep(
+    config,
+    action,
+    message,
+    wm,
+    history,
+    closeoutGuardState,
+    toolChoiceState,
+  )
   if (closedout) return closedout
   if (action.do === "completed") {
     // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
@@ -1043,6 +1149,8 @@ const runTurn = async (
   collector: TurnWorkMetricsCollector | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
+  toolChoiceState: ToolChoiceTurnState,
+  citations: MemoryCitation[],
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
@@ -1060,6 +1168,7 @@ const runTurn = async (
       workingState,
       archive,
       turn,
+      citations,
     )
     const result = await streamConsume(
       config,
@@ -1072,6 +1181,7 @@ const runTurn = async (
       toolHistory,
       workingState,
       collector,
+      toolChoiceState,
     )
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -1093,6 +1203,7 @@ const runTurn = async (
       toolHistory ?? EMPTY_TOOL_HISTORY,
       verifyGuardState,
       closeoutGuardState,
+      toolChoiceState,
     )
     if (step.done) return step.result
   }
@@ -1339,6 +1450,19 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
+  // ADR-0079 — session-scoped tool_choice turn state. Always constructed (a
+  // bare `{verifyGuardViolated:false, closeoutAttempted:false}`); with no guard
+  // ever arming a flag, `consumeTurnSignals` always yields `{}` and
+  // `resolveToolChoice` always returns `{kind:"auto"}` ⇒ the field is omitted
+  // from every `StreamInput` (byte-identical wire payload, default-OFF).
+  const toolChoiceState = createToolChoiceTurnState()
+  // ADR-0082 — run-scoped memory_citation accumulator. Append-only: each
+  // recall that places records into the prompt window pushes one citation per
+  // placed record (via the `recallContext` `onPlaced` seam, threaded through
+  // `prepareTurnContext` → `resolveMemoryContext`). `finish()` attaches it to
+  // the outcome ONLY when non-empty (no store / no recall hits ⇒ omitted,
+  // byte-identical).
+  const memoryCitations: MemoryCitation[] = []
   // Codex absorption — memory L3 (Phase 6): session-scoped WorkingState.
   // Wired in by `buildSessionFeatures` when `cfg.workingState?.enabled === true`;
   // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-
@@ -1391,9 +1515,17 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // provided one. `exactOptionalPropertyTypes`: spread conditionally so
     // legacy callers see an outcome with NO `stopCategory` field (byte-
     // identical to pre-B3 — they cannot observe a `stopCategory: undefined`).
-    return stopCategory !== undefined
-      ? { reason, turns, messages, stopCategory }
-      : { reason, turns, messages }
+    // ADR-0073 stopCategory + ADR-0082 memoryCitations are both optional
+    // add-ons: spread each only when present so a legacy outcome carries
+    // neither field (byte-identical — callers that read only `reason` cannot
+    // observe an `undefined`/empty-array property).
+    return {
+      reason,
+      turns,
+      messages,
+      ...(stopCategory !== undefined ? { stopCategory } : {}),
+      ...(memoryCitations.length > 0 ? { memoryCitations } : {}),
+    }
   }
 
   // RFC-0002 §5.2 `session_start` — emitted ONCE at run start so the trajectory
@@ -1494,6 +1626,8 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         workCollector,
         summaryArchive,
         turn,
+        toolChoiceState,
+        memoryCitations,
       )
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"

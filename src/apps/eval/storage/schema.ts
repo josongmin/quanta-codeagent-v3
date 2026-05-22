@@ -53,6 +53,26 @@ export interface AuditPayload {
   note?: string
 }
 
+// ── Cross-tier additive shapes (ADR-0087, Cursor EvalTracking §7.3) ─────────
+
+/** Keyed metric (Cursor `RunMetricItem`). Strictly richer than a single
+ *  `score`: an arbitrary named axis + optional unit + optional step (turn
+ *  index), so a run can carry many metrics over its lifetime. */
+export interface Metric {
+  key: string
+  value: number
+  unit?: string
+  step?: number
+}
+
+/** Per-run token accounting (Cursor Run token fields). */
+export interface TokenUsage {
+  prompt: number
+  completion: number
+  cacheRead?: number
+  cacheWrite?: number
+}
+
 /** Tier 1 — one synthetic scenario verdict. */
 export interface SyntheticPayload {
   kind: "synthetic"
@@ -71,6 +91,12 @@ export interface SyntheticPayload {
   trajectory?: string
   /** Wall-clock ms. */
   durationMs: number
+  /** ADR-0087 — keyed metrics over the run (augments, never replaces, `score`). */
+  metrics?: readonly Metric[]
+  /** ADR-0087 — token accounting for this run. */
+  tokens?: TokenUsage
+  /** ADR-0087 — estimated USD cost for this run. */
+  costUsd?: number
 }
 
 /** Tier 2 — one public benchmark instance verdict. */
@@ -84,6 +110,12 @@ export interface PublicPayload {
   /** Patch produced (sha256 of diff for quick equality checks). */
   patchSha256?: string
   durationMs: number
+  /** ADR-0087 — keyed metrics over the run (augments, never replaces, `score`). */
+  metrics?: readonly Metric[]
+  /** ADR-0087 — token accounting for this run. */
+  tokens?: TokenUsage
+  /** ADR-0087 — estimated USD cost for this run. */
+  costUsd?: number
 }
 
 /** Tier 3 — one real session classified + replayed (replay optional). */
@@ -130,4 +162,8 @@ export interface RunSummaryRecord {
   counts: Record<Verdict, number>
   /** Total wall-clock ms of the run. */
   durationMs: number
+  /** ADR-0087 — run lifecycle status (terminal subset of Cursor `EvalRunStatus`). */
+  status?: "running" | "finished" | "failed" | "killed"
+  /** ADR-0087 — reproduction parameter snapshot (Cursor `RunParamKV`). */
+  params?: Readonly<Record<string, string | number | boolean>>
 }

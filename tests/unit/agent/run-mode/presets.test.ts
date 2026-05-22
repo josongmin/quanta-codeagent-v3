@@ -1,5 +1,6 @@
 /**
- * MODE_PRESETS matrix coverage — 4 modes × 12 levers = 48 cells all defined.
+ * MODE_PRESETS matrix coverage — 6 modes × 12 levers = 72 cells all defined.
+ * (ADR-0092 expanded ALL_AGENT_MODES with `ide` + `daemon`.)
  *
  * Each lever in `ModePolicy` is a discriminated union with a non-optional
  * `kind` field; we assert that every cell has a non-empty kind string. This
@@ -16,7 +17,7 @@ import {
   type ModePolicy,
 } from "@/agent"
 
-describe("MODE_PRESETS 4×12 matrix", () => {
+describe("MODE_PRESETS 6×12 matrix", () => {
   test("every mode has a preset entry", () => {
     for (const mode of ALL_AGENT_MODES) {
       expect(MODE_PRESETS[mode]).toBeDefined()
@@ -24,7 +25,7 @@ describe("MODE_PRESETS 4×12 matrix", () => {
     }
   })
 
-  test("48 cells (4 modes × 12 levers) are all defined with non-empty kind", () => {
+  test("72 cells (6 modes × 12 levers) are all defined with non-empty kind", () => {
     let cellCount = 0
     for (const mode of ALL_AGENT_MODES) {
       const policy = MODE_PRESETS[mode]
@@ -36,7 +37,7 @@ describe("MODE_PRESETS 4×12 matrix", () => {
         cellCount += 1
       }
     }
-    expect(cellCount).toBe(48)
+    expect(cellCount).toBe(72)
   })
 
   test("LEVER_FIELDS contains exactly the 12 documented levers", () => {

@@ -5,6 +5,7 @@
  * phase2.ts / writer.ts / prompt-sections.ts. Tests assert these values
  * directly so a renumbering is a deliberate, reviewable change.
  */
+import { QUANTA_ATTRS } from "@/observability/vocabulary"
 
 /** Hard cap on user-read MEMORY.md (Phase 2 consolidated). Phase 2 prompt
  *  is instructed to rolling-distill older entries when the assembled
@@ -51,17 +52,20 @@ export const DEFAULT_MEMORY_MODE = "disabled" as const
  *  with permissive mode (caller's responsibility to fix). */
 export const MEMORY_DIR_MODE = 0o700
 
-/** OTel attribute vocabulary additions (ADR-0032 — Wave D folds these
- *  into `src/observability/vocabulary.ts`). Listed here so the pipeline
- *  uses them without circular import. */
-export const MEMORY_PHASE1_E2E_MS_KEY = "quanta.memory.phase1.e2e_ms"
-export const MEMORY_PHASE1_TURNS_KEY = "quanta.memory.phase1.turns"
-export const MEMORY_PHASE1_OUTCOME_KEY = "quanta.memory.phase1.outcome"
-export const MEMORY_PHASE2_E2E_MS_KEY = "quanta.memory.phase2.e2e_ms"
-export const MEMORY_PHASE2_MODE_KEY = "quanta.memory.phase2.mode"
-export const MEMORY_PHASE2_STAGE1_COUNT_KEY = "quanta.memory.phase2.stage1_count"
-export const MEMORY_PHASE2_TOKENS_USED_KEY = "quanta.memory.phase2.tokens_used"
-export const MEMORY_PHASE2_GIT_COMMIT_KEY = "quanta.memory.phase2.git_commit_sha"
-export const MEMORY_PHASE2_BYTES_MEMORY_KEY = "quanta.memory.phase2.bytes.memory"
-export const MEMORY_PHASE2_BYTES_RAW_KEY = "quanta.memory.phase2.bytes.raw_memories"
-export const MEMORY_PHASE2_BYTES_SUMMARY_KEY = "quanta.memory.phase2.bytes.memory_summary"
+/** OTel attribute vocabulary additions (ADR-0032 — Wave D). The canonical
+ *  keys live in `src/observability/vocabulary.ts`; these aliases re-export
+ *  them so the pipeline keeps stable local names while the single source of
+ *  truth stays in the vocabulary module (orphan-literal scan invariant). The
+ *  direct `vocabulary` import (not the `@/observability` barrel) avoids the
+ *  observability↔consolidate circular dep. */
+export const MEMORY_PHASE1_E2E_MS_KEY = QUANTA_ATTRS.memory.phase1.e2eMs
+export const MEMORY_PHASE1_TURNS_KEY = QUANTA_ATTRS.memory.phase1.turns
+export const MEMORY_PHASE1_OUTCOME_KEY = QUANTA_ATTRS.memory.phase1.outcome
+export const MEMORY_PHASE2_E2E_MS_KEY = QUANTA_ATTRS.memory.phase2.e2eMs
+export const MEMORY_PHASE2_MODE_KEY = QUANTA_ATTRS.memory.phase2.mode
+export const MEMORY_PHASE2_STAGE1_COUNT_KEY = QUANTA_ATTRS.memory.phase2.stage1Count
+export const MEMORY_PHASE2_TOKENS_USED_KEY = QUANTA_ATTRS.memory.phase2.tokensUsed
+export const MEMORY_PHASE2_GIT_COMMIT_KEY = QUANTA_ATTRS.memory.phase2.gitCommitSha
+export const MEMORY_PHASE2_BYTES_MEMORY_KEY = QUANTA_ATTRS.memory.phase2.bytesMemory
+export const MEMORY_PHASE2_BYTES_RAW_KEY = QUANTA_ATTRS.memory.phase2.bytesRawMemories
+export const MEMORY_PHASE2_BYTES_SUMMARY_KEY = QUANTA_ATTRS.memory.phase2.bytesMemorySummary
