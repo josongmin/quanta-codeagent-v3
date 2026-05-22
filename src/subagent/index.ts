@@ -25,9 +25,26 @@
 
 export type { AgentToolOptions } from "./agent-tool"
 export { createAgentTool } from "./agent-tool"
+export { dispatchSubagent6, isSubagent6Tool, type Subagent6Deps } from "./dispatch-6"
+export {
+  handleCloseAgent,
+  handleExecCommand,
+  handleSendInput,
+  handleSpawnAgent,
+  handleWaitAgent,
+  handleWriteStdin,
+  InputChannelRegistry,
+  MAX_PTY,
+  PtyTable,
+} from "./handlers-6"
 export type { TaskRecord, TaskRegistryOptions, TaskStatus } from "./registry"
 export { TaskRegistry } from "./registry"
 export { createTaskOutputTool, createTaskStopTool } from "./task-tools"
+export {
+  SUBAGENT_6_TOOL_CONTRACTS,
+  SUBAGENT_6_TOOL_NAMES,
+  type Subagent6ToolName,
+} from "./tools-6"
 export type {
   SubagentRequest,
   SubagentResult,
