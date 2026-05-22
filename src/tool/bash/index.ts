@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
+import { classifyCommandShape } from "@/security"
 import type { HITLTier, Tool, ToolContext, ToolEvent, ToolResultEvidence } from "../types"
 
 const schema = z.object({
@@ -82,6 +83,12 @@ export const bashTool: Tool<Input> = {
   // (`shell`/`exec`/MCP `run`) only needs to set this method to opt into the
   // same gate.
   extractShellCommand: (input: Input): string => input.command ?? "",
+  // PR-2 self-audit fix (ADR-0078): DECLARED source-class classifier. Pre-fix
+  // this lived as a hard-coded `COMMAND_TOOL_NAMES` set in `dispatch.ts`; now
+  // the tool that runs the shell command declares its own classification —
+  // a future `shell`/`exec`/MCP `run` tool opts into Layer-1 redaction by
+  // implementing this same method (in parallel to its `extractShellCommand`).
+  classifySource: (input: Input) => classifyCommandShape(input.command ?? ""),
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const cmd = input.command

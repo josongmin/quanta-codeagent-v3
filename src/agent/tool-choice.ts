@@ -59,14 +59,16 @@
  *   - `none` — forbid the model from calling any tool (force a text turn).
  *   - `tool` — force the model to call the named tool specifically.
  *
- * `readonly` everywhere because these objects flow through pure functions and
- * adapter mappings; mutating one would be a semantic bug.
+ * SoT consolidation (PR-3 self-audit fix): the canonical definition lives in
+ * `@/llm` (the wire-layer owner — adapters map `ToolChoice` to provider
+ * payloads). This module re-exports it so `agent/` and `llm/` share one
+ * compile-time identity; a future variant addition lands in one place and
+ * every consumer (resolver / adapters / tests) refuses to compile if it
+ * forgets a branch. `llm/` still does not depend on `agent/` — the SoT lives
+ * in the lower layer.
  */
-export type ToolChoice =
-  | { readonly kind: "auto" }
-  | { readonly kind: "any" }
-  | { readonly kind: "none" }
-  | { readonly kind: "tool"; readonly name: string }
+export type { ToolChoice } from "@/llm"
+import type { ToolChoice } from "@/llm"
 
 /**
  * Closed signal struct consumed by `resolveToolChoice`. Every field is optional

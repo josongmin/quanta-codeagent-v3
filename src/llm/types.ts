@@ -141,10 +141,12 @@ export type StreamEvent =
  * gates the post-call result). Closed discriminated union; adapters map 1:1 to
  * provider-specific shapes. The default-OFF posture is `{kind:"auto"}` (or
  * field absent) — adapters MUST emit a byte-identical wire payload to the
- * pre-feature path in that case. Defined here (not imported from `@/agent`)
- * because `llm/` is a lower layer and must not depend on `agent/`. The
- * `agent/tool-choice.ts` ToolChoice type is structurally identical and the
- * call sites cast freely between them.
+ * pre-feature path in that case.
+ *
+ * SoT (PR-3 self-audit fix): the canonical definition lives HERE in the wire
+ * layer; `@/agent/tool-choice.ts` re-exports it so resolver, adapters, and
+ * tests share one compile-time identity. `llm/` still does not depend on
+ * `agent/` — agent imports DOWN to llm, which is the natural direction.
  */
 export type ToolChoice =
   | { readonly kind: "auto" }

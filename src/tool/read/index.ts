@@ -1,4 +1,6 @@
+import { homedir } from "node:os"
 import { z } from "zod"
+import { classifyPath } from "@/security"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
@@ -25,6 +27,12 @@ export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
   isReadOnly: () => true,
   // Pure read of a single file: no side effects, safe to run concurrently.
   isConcurrencySafe: () => true,
+  // PR-2 self-audit fix (ADR-0078): DECLARED source-class classifier. Pre-fix
+  // this lived as a hard-coded `PATH_TOOL_NAMES` set in `dispatch.ts`; now the
+  // tool that touches the filesystem path declares its own classification —
+  // a future `view_file`/`open_file`/MCP-`fs.read` tool opts into Layer-1
+  // redaction by implementing this same method.
+  classifySource: (input) => classifyPath(input.path, homedir()),
 
   // A single file read is fast; no progress event needed.
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {

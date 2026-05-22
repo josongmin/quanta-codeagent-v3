@@ -1,14 +1,7 @@
-import { homedir } from "node:os"
 import type { ToolUseBlock } from "@/llm"
 import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import type { AutoModeClassifier, PermissionContext } from "@/permission"
-import {
-  classifyCommandShape,
-  classifyPath,
-  type RedactionHit,
-  redactSecrets,
-  type SensitivityClass,
-} from "@/security"
+import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
@@ -215,61 +208,60 @@ const toolSpanAttrs = (name: string, callId: string) =>
   })
 
 /**
- * ADR-0078 Layer-1 source-class derivation. The tool call's `name` + `input`
- * fields are inspected structurally:
- *   - tools that read a file (`Read`, `read`, `view_file`) project to the
- *     input's `path` / `file_path` field and run `classifyPath`;
- *   - tools that execute a shell command (`Bash`, `bash`, `shell`) project
- *     to the input's `command` field and run `classifyCommandShape`;
- *   - everything else returns `null` (no source class — Layer 2 still runs).
+ * ADR-0078 Layer-1 source-class derivation. PR-2 self-audit fix: consults the
+ * tool's DECLARED `classifySource(input)` method via the registry — no
+ * `tool.name` / argument-field-name string matching. Pre-fix this was a
+ * hard-coded `PATH_TOOL_NAMES` / `COMMAND_TOOL_NAMES` set that silently
+ * skipped any custom tool whose name wasn't in the set (a leak surface that
+ * directly contradicted the structural posture PR-1 established for
+ * `Tool.isReadOnly()`). Now every file/command-touching tool DECLARES its
+ * classifier; absence means the tool surfaces no path/cmd input and Layer-2
+ * pattern matching is the only redaction (behavior-preserving for tools
+ * that don't deal with paths/commands).
  *
- * Returns the `[class, label]` pair the redactor needs; `label` rides into
- * the `source_class_secret` placeholder so the user/audit can see WHERE
- * the redacted output came from. Never throws — input shape mismatches
- * fall through to `null`.
+ * The `label` rides into the `source_class_secret` placeholder so the user/
+ * audit can see WHERE the redacted output came from; we derive it from the
+ * tool's `extractShellCommand` (already a declared method) or — for path
+ * tools — from a single canonical `path` field on the input. The latter is
+ * intentionally narrow: the structural contract is that a tool declaring
+ * `classifySource` for a path input also exposes `{path: string}` (current
+ * convention; the `read` tool's schema enforces this). Tools wanting a
+ * different label can expose `extractShellCommand` or future
+ * `extractSourceLabel`.
+ *
+ * Never throws — a tool that throws inside `classifySource` is caught and
+ * treated as `null` (Layer-2 only) so a tool-side bug cannot break dispatch.
  */
-const PATH_FIELDS: readonly string[] = ["path", "file_path", "filePath", "filename", "file"]
-
-const COMMAND_FIELDS: readonly string[] = ["command", "cmd", "script"]
-
-const PATH_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "Read",
-  "read",
-  "view_file",
-  "open_file",
-])
-
-const COMMAND_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "Bash",
-  "bash",
-  "shell",
-  "run",
-])
-
-const stringField = (input: unknown, fields: readonly string[]): string | null => {
-  if (!input || typeof input !== "object") return null
-  const obj = input as Record<string, unknown>
-  for (const f of fields) {
-    const v = obj[f]
-    if (typeof v === "string" && v.length > 0) return v
+const deriveSourceClass = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+): { cls: SensitivityClass; label: string } | null => {
+  const tool = config.registry.get(call.name)
+  if (tool === undefined || tool.classifySource === undefined) return null
+  let cls: SensitivityClass | null
+  try {
+    cls = tool.classifySource(call.input)
+  } catch {
+    // Tool-side bug must not break dispatch — treat as no source class.
+    return null
   }
-  return null
-}
-
-const deriveSourceClass = (call: ToolUseBlock): { cls: SensitivityClass; label: string } | null => {
-  if (PATH_TOOL_NAMES.has(call.name)) {
-    const path = stringField(call.input, PATH_FIELDS)
-    if (path === null) return null
-    const cls = classifyPath(path, homedir())
-    return { cls, label: path }
-  }
-  if (COMMAND_TOOL_NAMES.has(call.name)) {
-    const cmd = stringField(call.input, COMMAND_FIELDS)
-    if (cmd === null) return null
-    const cls = classifyCommandShape(cmd)
-    return { cls, label: cmd }
-  }
-  return null
+  if (cls === null) return null
+  // Label derivation: prefer the tool's declared shell-command extractor
+  // (already used by HARD_DENY); fall back to a `path` field on the input
+  // for filesystem tools. A tool exposing neither still gets Layer-1 by
+  // class but a generic label.
+  const shellCmd = tool.extractShellCommand?.(call.input) ?? null
+  const inputPath =
+    call.input !== null && typeof call.input === "object" && "path" in call.input
+      ? (call.input as { path: unknown }).path
+      : null
+  const label =
+    typeof shellCmd === "string" && shellCmd.length > 0
+      ? shellCmd
+      : typeof inputPath === "string" && inputPath.length > 0
+        ? inputPath
+        : `<${call.name}>`
+  return { cls, label }
 }
 
 /** Drive the registry, normalizing thrown errors into an error tool_result. */
@@ -328,7 +320,7 @@ const applyRedaction = (
   if (config.redaction?.disabled === true) {
     return { output: text, hits: [] }
   }
-  const src = deriveSourceClass(call)
+  const src = deriveSourceClass(call, config)
   const result = redactSecrets(text, {
     origin: "tool_result",
     ...(src !== null ? { sourceClass: src.cls, sourceLabel: src.label } : {}),

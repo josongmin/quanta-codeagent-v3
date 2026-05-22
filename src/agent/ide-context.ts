@@ -90,12 +90,16 @@ const isEmptySnapshot = (snapshot: IdeSnapshot): boolean => {
 }
 
 /** Render the `## Active file:` heading. Returns `undefined` when the field is
- *  absent so the renderer can skip the section without emitting a blank line. */
+ *  absent so the renderer can skip the section without emitting a blank line.
+ *  PR-4 self-audit fix: every interpolated field — including numeric `line`,
+ *  union `severity`, tuple `range` — goes through `String(...)` +
+ *  `escapeReminderBoundary` so a provider returning the wrong runtime shape
+ *  (untyped JS host, `as any` cast) cannot forge `<system-reminder>` tags. */
 const renderActiveFile = (file: IdeSnapshot["activeFile"]): string | undefined => {
   if (file === undefined) return undefined
   const path = escapeReminderBoundary(file.path)
   return file.line !== undefined
-    ? `## Active file: ${path}:${file.line}`
+    ? `## Active file: ${path}:${escapeReminderBoundary(String(file.line))}`
     : `## Active file: ${path}`
 }
 
@@ -117,8 +121,10 @@ const renderSelection = (selection: IdeSnapshot["selection"]): string[] | undefi
   if (selection === undefined) return undefined
   const path = escapeReminderBoundary(selection.path)
   const [start, end] = selection.range
+  const startStr = escapeReminderBoundary(String(start))
+  const endStr = escapeReminderBoundary(String(end))
   const text = escapeReminderBoundary(selection.text)
-  return [`## Selection in ${path} [${start}:${end}]:`, text]
+  return [`## Selection in ${path} [${startStr}:${endStr}]:`, text]
 }
 
 /** Render the `## Diagnostics:` block (heading + one bullet per item). Returns
@@ -129,7 +135,9 @@ const renderDiagnostics = (diagnostics: IdeSnapshot["diagnostics"]): string[] | 
   for (const d of diagnostics) {
     const path = escapeReminderBoundary(d.path)
     const message = escapeReminderBoundary(d.message)
-    lines.push(`- ${d.severity} ${path}:${d.line} — ${message}`)
+    const severity = escapeReminderBoundary(String(d.severity))
+    const line = escapeReminderBoundary(String(d.line))
+    lines.push(`- ${severity} ${path}:${line} — ${message}`)
   }
   return lines
 }

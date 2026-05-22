@@ -1,3 +1,4 @@
+import type { SensitivityClass } from "@/security"
 import type { HITLTier } from "@/shared"
 import type { z } from "zod"
 import type { ShellExecObserver } from "./shell-exec-types"
@@ -244,6 +245,23 @@ export interface Tool<I = unknown, O = unknown> {
    *  only matched `action.tool === "bash"`. Tools whose input is not a shell
    *  string omit the method entirely. */
   extractShellCommand?(input: I): string | null
+  /** PR-2 self-audit fix (ADR-0078): OPTIONAL structural declaration of the
+   *  tool result's source sensitivity class for the secret-redaction gate.
+   *  Mirrors the {@link extractShellCommand} pattern — tools that touch a
+   *  filesystem path or run a shell command DECLARE their classifier here,
+   *  rather than the dispatch seam guessing from `tool.name` / argument-field
+   *  names. Returning `"secret"` causes the dispatch redaction layer to
+   *  replace the entire tool result with `[REDACTED:source_class_secret]`
+   *  before the model sees it; returning `"public"`/`"internal"` falls
+   *  through to the Layer-2 deterministic-regex pattern matcher; returning
+   *  `null` (or omitting the method) is identical to today's behavior
+   *  (Layer-2 only, no source-class short-circuit). Pre-fix this lived in a
+   *  hard-coded `PATH_TOOL_NAMES` / `COMMAND_TOOL_NAMES` set in dispatch.ts
+   *  — a name-and-field-string heuristic that silently skipped any tool
+   *  whose name wasn't `"Read"/"read"/"view_file"/"open_file"/"Bash"/...`.
+   *  Declaration-based posture: a custom tool that adds a new file/command
+   *  surface explicitly opts in by implementing this method. */
+  classifySource?(input: I): SensitivityClass | null
 }
 
 /** Provider-agnostic schema the agent forwards to the LLM.
