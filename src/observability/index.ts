@@ -10,19 +10,6 @@ export { Metrics, metrics } from "./metrics"
 export { costUsd, PRICING_VERSION } from "./pricing"
 export { buildShellOtelObserver } from "./shell-exec-otel"
 export {
-  classifyEvidence,
-  type EvidenceVerdict,
-  SIGNAL_TRUST,
-  type SignalFamily,
-  SignalLedger,
-  type SignalLedgerSnapshot,
-  TOOL_SIGNAL,
-  type ToolContribution,
-  toolContribution,
-  type TrustBand,
-  trustBand,
-} from "./signal-trust"
-export {
   __resetSpanSink,
   endSpan,
   getSpanSink,

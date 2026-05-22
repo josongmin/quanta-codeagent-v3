@@ -83,11 +83,11 @@
 # B. TOOLS / PERMISSION / SANDBOX
 
 ## B1. 도구 인벤토리
-- **quanta** ✅ — 표준 13 + git(commit/branch_switch/blame/diff/log/status) + apply-patch + lsp_nav + localize + test-runner + deferred + working-state 메타툴.
-- **Codex** ✅ — 표준 + 6 subagent tool + apply_patch V4A.
-- **Claude** ✅ — 13 표준 + Desktop(browser_batch/computer_use/tabs_context_mcp).
-- **Cursor** ✅ — 44 ToolCall (cursor.md protobuf descriptor 기준). ⚠️ strings grep으론 6개만 확인(SHELL/READ_FILE/EDIT_FILE/DELETE_FILE/SEARCH_CODE/RUN_TERMINAL — minified라 44 직접 미검증).
-- **판정**: Cursor 도구 수 최다(44 descriptor 주장). quanta/Codex/Claude ~13-20. ⚠️ 44는 protobuf 분석값, strings 검증은 6.
+- **quanta** ✅ — 표준 + git **9** + apply-patch + lsp_nav + localize + test-runner + parse-test-failure + deferred + working-state 메타툴. (~25개)
+- **Codex** ✅ — ✅소스확인 — **18 도구**(archived_sessions 전수): apply_patch/exec_command/**js**/**js_reset**(JS 실행)/**view_image**(이미지)/**automation_update**/read_thread_terminal/load_workspace_dependencies/list_mcp_resources/read_mcp_resource/update_plan/request_user_input + subagent 6(spawn/wait/close/resume/send_input/write_stdin).
+- **Claude** ✅ — ✅소스확인 — **20 도구**(CC 바이너리 strings): Bash/Read/Write/Edit/MultiEdit/Glob/Grep/**Monitor**/NotebookEdit/NotebookRead/WebFetch/WebSearch/TodoWrite/Task/**TaskStop**/Skill/**CronCreate/CronDelete/CronList**/**EnterWorktree/ExitWorktree** (13 아님 — Cron 스케줄/Worktree/Monitor 추가).
+- **Cursor** ✅ — ✅소스확인 — **52 ToolCall**(`CLIENT_SIDE_TOOL_V2_*` enum 실측, 44/53 아님): READ_FILE_V2/EDIT_FILE_V2/RUN_TERMINAL_COMMAND_V2/SEMANTIC_SEARCH_FULL/CALL_MCP_TOOL/COMPUTER_USE/WEB_SEARCH/WEB_FETCH/TASK_V2/DEEP_SEARCH/KNOWLEDGE_BASE/...
+- **판정**: ★ 실측 정정 — **Cursor 52 > quanta ~25 > Claude 20 > Codex 18**. Cursor가 도구 수 최다(52, descriptor 실측). 다 13보다 많음(내 "13-20" 과소).
 
 ## B2. 도구 계약 (모델에 스키마 노출)
 - **quanta** ✅ — `tools[]`에 full JSON schema. `Tool` interface: isReadOnly/isConcurrencySafe/hitlTier/extractShellCommand 선언.
@@ -113,7 +113,7 @@
 ## B5. reviewer 다단 승인 (★ 정정)
 - **quanta** ✅ — `ReviewerTier` 3종(user/auto_review/guardian_subagent) + `ApprovalOutcome` **8-state** + invariant 검증(OutcomeInvariantError) + sticky DenialMemory precedence. **typed enum + 컴파일타임 exhaustiveness**.
 - **Codex** 🟡 — config `approvals_reviewer="user"` (reviewer 역할 개념 있음, 다단 outcome enum은 미확인).
-- **Claude** 🟡 — ✅소스확인 — `advisor` tool(stronger reviewer model) + named reviewer subagent(code-reviewer/security-reviewer/tech-lead). **subagent 패턴** — outcome enum/invariant은 없음.
+- **Claude** 🟡 — ✅소스확인(verbatim) — `advisor` tool: *"backed by a stronger reviewer model. Takes NO parameters — your entire conversation history is automatically forwarded. Call advisor BEFORE substantive work … when complete (make deliverable durable first) … when stuck"*. `--advisor <model>` CLI flag. + named reviewer subagent(code-reviewer/security-reviewer/tech-lead). **정교한 advisor 패턴** — 단 outcome enum/invariant은 없음(quanta와 다른 축).
 - **Cursor** 🟡 — 결정동사(RUN/SKIP/ALLOWLIST/REJECT_AND_TELL) per reviewKind. reviewer tier enum/outcome matrix 없음.
 - **판정**: reviewer "기능"은 Codex/Claude도 있음(정정). **quanta만 8-state ApprovalOutcome + invariant 검증 + typed 3-tier**로 형식화 — 나머지는 subagent/config/결정동사 등 비형식.
 
@@ -493,7 +493,7 @@
 | **F8 에디터 컨텍스트** (selection/open/visible) | ✅ `injectIdeContext`(✅소스확인) — `ideContextProvider.snapshot()` + `renderIdeContext` + redaction banner, loop.ts:848 wire. host가 provider 주입(seam 완성, IDE surface 도착 시 채움) | ❌ (CLI, 에디터 무관) | 🟡 Desktop(openInEditor) | ✅✅✅ SelectedContext 28(files/code_selections/terminals/open_and_recently_viewed/cursor position) + CodeChunk.Intent 9(VISIBLE/SELECTION/RECENTLY_VIEWED/AI_EDITED) | ★ Cursor 압도(IDE 네이티브, 28멤버). quanta=provider seam 구현됨(IDE host 미연결), Codex=없음 |
 | **F9 메모리 recall** | ✅✅ semantic+tag+freshness recall + "routing only" 헤더 | ✅✅ 3-layer(durable+chronicle+ad_hoc) | ❌ | 🟡 `<memories>`(100% 서버) | quanta/Codex=클라 recall / Cursor=서버 / Claude=없음 |
 | **F10 환경** (cwd/env/platform/date) | ✅ buildDynamicContext env 블록(date/cwd) | ✅ RequestContextEnv | ✅ Desktop getSystemInfo + env 블록 | ✅✅ EnvironmentInfo(platform/arch/shell/timezone/cursor_version) + RequestContextEnv(sandbox_enabled/secret_redaction) | Cursor 가장 풍부(arch/timezone/version) |
-| **F11 이미지/스크린** | ❌ (✅소스확인 — computer_use/screenshot/record_screen 도구 없음) | ✅ computer-use/ 디렉터리 | ✅ Desktop computer_use(TCC screen capture) + image block | ✅✅ record_screen + computer_use + images(SelectedContext) + browser_element pick | ★ quanta 갭 확정(computer use 도구 0). 3사 다 screen/image |
+| **F11 이미지/스크린** | ❌ (✅소스확인 — computer_use/screenshot/record_screen 도구 없음) | ✅ ✅소스확인 — **`view_image` 도구** + Computer Use.app | ✅ Desktop computer_use(TCC screen capture) + image block | ✅✅ record_screen + computer_use + images(SelectedContext) + browser_element pick | ★ quanta 갭 확정(도구 0). Codex=view_image, Claude/Cursor=computer_use. 3사 다 이미지 입력 |
 | **F12 web** | ❌ (✅소스확인 — src/tool/에 web/fetch/search 도구 없음) | ✅ browser/ 디렉터리 | ✅ WebFetch/WebSearch 도구 | ✅✅ web_search(18)+web_fetch(37)+fetch(24) + 도메인 allowlist | ★ quanta 갭 확정. 3사 web 1급 |
 | **F13 MCP resources** | 🟡 mcpListResources/mcpReadResource(client) | ✅ MCP | ✅ list/read_mcp_resource | ✅ list_mcp_resources(20)+read_mcp_resource(21) | 다 지원, quanta는 표준 client |
 | **F14 작업 상태** (todos/working-state) | ✅✅ **working-state**(owner/hypothesis/blockers/nextStep/deferred) + TodoWrite | ✅ update_plan + update_todos(corpus) | ✅ TodoWrite | ✅ update_todos(9)+read_todos(10) + ConversationState.todos | quanta working-state가 가장 구조화(5-field L3 메모리) |
@@ -513,6 +513,46 @@
 - quanta가 신호에서 **이기는 것**(✅검증): **F3 git 9-도구**(blame_heatmap/churn/upstream_check — 4사 최다) · F6 테스트 구조화(parse-test-failure 유일) · F9 memory recall(Codex와 공동, Claude/Cursor엔 ❌) · F14 working-state 구조화 · F2 localize.
 
 → 한 줄: **신호의 "양·rerank"는 Cursor(IDE 네이티브+서버), "구조화·누적"은 quanta(parse-failure+working-state+memory). quanta의 신호 입력 갭은 에디터-컨텍스트(F8)·스크린(F11)·web(F12)·터미널-히스토리(F5)** — 대부분 surface(IDE/desktop) 도착 시 메꿔질 것.
+
+---
+
+# G. 세션 / observability / cost / 모델 라우팅 (인프라 축, ✅소스 실측)
+
+## G1. 세션 persistence (transcript 저장 형식)
+- **quanta** ✅ — JSONL envelope([session/envelope.ts](../../../src/session/envelope.ts), ADR-0034): 5 record type(session_meta/turn_context 17필드/event_msg/response_item/thread_spawn) + 별도 snapshot JSON(`<id>.json`) for resume. archived/ 분리.
+- **Codex** ✅ — ✅소스확인 — `rollout-YYYY-MM-DDTHH-MM-SS-<UUID>.jsonl`: 3 top-level(timestamp/type/payload) × {session_meta/turn_context/event_msg/response_item}(quanta가 흡수한 원본). + history.jsonl(session_id/ts/text 단순 로그). 13.1M 라인/26 세션/최대 22MB.
+- **Claude** ✅ — ✅소스확인 — `claude-code-sessions/<workspace-uuid>/<session-uuid>/local_<uuid>.json`: sessionId/cliSessionId/cwd/originCwd/createdAt/lastActivityAt/model/effort/isArchived/title/titleSource/permissionMode/remoteMcpServersConfig. resume/fork 메타.
+- **Cursor** ✅ — ✅소스확인 — **SQLite** `state.vscdb`(+wal/shm) + `workspace.json`(folder path). on-disk transcript는 thin call-log(text+tool_use), 결과는 사이드카 DB 재구성.
+- **판정**: quanta/Codex=JSONL append-only(동일 계보 — quanta가 Codex 흡수). Claude=per-session JSON. Cursor=SQLite. ★ quanta+Codex가 **append-only 이벤트 로그**로 deterministic replay 가능, Cursor는 DB 재구성 필요.
+
+## G2. observability / telemetry
+- **quanta** ✅ — OTel vocabulary([observability/vocabulary.ts](../../../src/observability/vocabulary.ts), quanta.{thread,memory}.* + gen_ai.usage.*) + Metrics registry + AgentRecorder. **원격 전송은 opt-in**(NullStream 기본).
+- **Codex** ✅ — ✅소스확인 — **원격 telemetry 0**(grep otel/sentry/trace = 0). 로컬 archived_sessions JSONL만. (메모리의 codex OTel 70+ attr는 codex-rs 내부 span일 뿐 config 원격 전송 없음 — 정정).
+- **Claude** ✅ — Desktop=Sentry(@sentry/electron, release SHA pin) + Statsig + GrowthBook. CC 바이너리=telemetry 문자열 + Sentry dep.
+- **Cursor** ✅ — ✅소스확인 — OpenTelemetry(span_context/trace/telemetry, per-exec OTel 전파).
+- **판정**: Claude(Sentry 3-stack)+Cursor(OTel)가 원격 telemetry 적극. quanta=OTel vocab 있으나 opt-in. ★ **Codex는 원격 telemetry 없음**(로컬만) — privacy 측면 특이.
+
+## G3. cost / token 회계
+- **quanta** ✅ — [observability/pricing.ts](../../../src/observability/pricing.ts)(in/out/cache_read per-M, pinned pricing version) + AgentRecorder.tokensUsed + status-line(`/context`). usage 이벤트 → 회계.
+- **Codex** ✅ — ✅소스확인 — archived_sessions response_item.usage에 **완전 추적**(input_tokens 5440/output 7263/cached 2730/total_tokens 회). 로컬 완전 기록.
+- **Claude** 🟡 — ✅소스확인 — **server-side only**(CC 바이너리에 token 회계 문자열 0). model 선택만 세션에 기록(cost 상관용). Desktop은 `/usage` 명령 있으나 CC는 없음.
+- **Cursor** ✅ — ✅소스확인 — input/output/cache_read/cache_write + cost + **credit**(요금제 크레딧) 완전 추적.
+- **판정**: quanta(pricing.ts 계산)+Codex(JSONL 기록)+Cursor(credit까지)가 클라 cost 회계. ★ **Claude만 server-side**(클라 token 미노출). quanta는 pricing 계산을 클라가 하는 게 차별(BYO-key라 필요).
+
+## G4. 모델 라우팅 / multi-provider
+- **quanta** ✅ — dual provider(Anthropic+OpenAI adapter) + FallbackLLM(stream_reset swap) + Bedrock/Vertex/Foundry env([[quanta-v3-state]]).
+- **Codex** ✅ — GPT-5 기반 + models_cache.json + sandbox_mode.
+- **Claude** ✅ — Anthropic + Bedrock/Vertex/Foundry base URL + 3-tier model env(HAIKU/SONNET/OPUS).
+- **Cursor** ✅✅ — ✅소스확인 — **multi-provider**(gpt-5/claude/gemini) + allow_model_fallbacks + fallback_model + best_of_n + max_mode + azure/bedrock. 가장 많은 provider.
+- **판정**: Cursor가 multi-provider(3+ 모델 family)+best_of_n 최다. quanta=dual+fallback, Claude=Anthropic+enterprise base. 다 fallback 있음.
+
+## G-축 종합
+- **세션**: quanta=Codex(JSONL append-only, replay 가능) ↔ Cursor(SQLite, DB 재구성). Claude(per-session JSON).
+- **observability**: Claude(Sentry 3-stack)+Cursor(OTel) 적극 ↔ quanta(opt-in) ↔ Codex(원격 0, 로컬만).
+- **cost**: quanta/Codex/Cursor 클라 회계 ↔ Claude server-side. quanta는 BYO-key라 pricing 계산 클라 필수.
+- **라우팅**: Cursor multi(gpt-5/claude/gemini)+best_of_n 최다 ↔ quanta dual+fallback.
+
+★ **인프라 결론**: quanta는 세션(JSONL replay)·cost(클라 pricing) 단단, observability는 opt-in(원격 미적극 — Codex와 유사 privacy). Cursor는 인프라 전반 가장 무겁다(SQLite+OTel+credit+multi-provider+best_of_n) — 백엔드 회사 특성. **quanta 갭(인프라)**: 적극적 원격 observability(Sentry/OTel 송신), best_of_n 같은 multi-sample은 없음(BYO-key 비용 우려로 의도적일 수 있음).
 
 ---
 
