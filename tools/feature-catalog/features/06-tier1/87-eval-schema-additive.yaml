@@ -1,0 +1,30 @@
+id: eval-schema-additive
+title: Eval 스키마 additive 필드 (keyed metrics / token·cost / run status·params)
+section: 6
+subsystem: 로컬 eval 저장 (Cursor EvalTrackingService 흡수, ADR-0087)
+order: 87
+maturity: L2
+status: new
+purpose: |
+  Cursor aiserver.v1.EvalTrackingService에서 typed shape 3개만 흡수 — JSONL
+  append-only eval 저장(schema.ts, zod 없음 plain TS)에 OPTIONAL·additive 필드 추가.
+  Metric{key,value,unit?,step?}(단일 score보다 우월: named axis + step), TokenUsage
+  {prompt,completion,cacheRead?,cacheWrite?}, SyntheticPayload/PublicPayload에
+  metrics?/tokens?/costUsd?, RunSummaryRecord에 status?(running|finished|failed|killed)
+  + params?(재현용). 원격 sink·Ray·cron·RPC는 흡수 안 함(negative invariant).
+evidence:
+  code:
+    - src/apps/eval/storage/schema.ts
+  adrs: [87]
+  tests:
+    unit: [tests/unit/eval-schema-additive.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    L2 — schema seam만 추가. eval runner는 아직 metrics/tokens/status/params를
+    채우지 않고 report/는 렌더 안 함(타 트랙 소유 파일). 채택은 점진적.
+  promotion_path: |
+    runner가 run당 Metric[]/TokenUsage/costUsd를 emit하고 report/가 렌더하면 L3.
+notes: 'score?를 교체가 아니라 보강(병존). PAYLOAD_KINDS 디스크리미네이터 불변 → result-store.readAll/coverage-matrix narrowing 무회귀.'
