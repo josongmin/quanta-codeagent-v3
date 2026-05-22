@@ -32,6 +32,7 @@ import { type EffortLevel, effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
 import { renderIdeContext } from "./ide-context"
 import { persistSession, recallContext } from "./memory"
+import { runMemoryConsolidatorHook } from "./memory-consolidator-hook"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import {
@@ -1307,6 +1308,37 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     const outcome = await runAgentInner(config)
     spanStatus =
       outcome.reason === "aborted" ? "aborted" : outcome.reason === "error" ? "error" : "ok"
+    // ADR-0068 Wave D (L4 wire): session-end consolidator hook. Fires ONLY
+    // when the session ended cleanly (spanStatus === "ok") AND the host
+    // opted in via `cfg.memoryConsolidator`. The hook itself is no-throw —
+    // every internal failure (port/store missing, distill throw, store
+    // throw) is converted into a structured outcome surfaced as an `error`
+    // AgentEvent + the session still returns its real outcome. Phase 2
+    // (cross-session synthesizer) is NON-GOAL here per audit; the host
+    // runs it on its own schedule (threshold / explicit trigger).
+    if (spanStatus === "ok") {
+      await runMemoryConsolidatorHook(
+        {
+          sessionOk: true,
+          consolidator: config.memoryConsolidator,
+          sessionId: config.sessionId,
+          rolloutMessages: outcome.messages,
+          turnCount: outcome.turns,
+        },
+        (event) => {
+          if (event.kind === "error") {
+            config.stream.emit({
+              type: "error",
+              message: `memory consolidator hook failed: ${event.message}`,
+            })
+          }
+          // `skipped` / `distilled` outcomes are intentionally not
+          // surfaced as AgentEvents — they are observability concerns
+          // for the consolidator span (Wave D follow-up), not user-
+          // facing outcomes.
+        },
+      )
+    }
     return outcome
   } catch (e) {
     // An EXCEPTION escaping `runAgentInner` is exceptional (the loop

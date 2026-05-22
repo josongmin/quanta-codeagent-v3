@@ -1,5 +1,5 @@
 import type { LLMPort, Message, ModelCandidate } from "@/llm"
-import type { EmbedderPort, PersistentStorePort } from "@/memory"
+import type { EmbedderPort, PersistentStorePort, Phase1Port, Stage1StorePort } from "@/memory"
 import type { Metrics, TurnTiming } from "@/observability"
 import type {
   PatternGrantStore,
@@ -142,6 +142,42 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
      * `["semantic"]` recalls only durable distilled knowledge.
      */
     recallTiers?: ("episodic" | "semantic")[]
+  }
+  /**
+   * ADR-0068 2-phase memory consolidator session-end hook (L4 wire).
+   * Absent ⇒ no consolidator runs at session-end (byte-identical for every
+   * legacy caller — RFC §1.2 default-OFF). When set, the loop's
+   * `runAgent` finally calls `runPhase1` IFF the session ended without an
+   * error (spanStatus === "ok") and either:
+   *   - `enabled: true` (auto-trigger on session-end), OR
+   *   - `forceSummarization: true` (SOTA Cursor `force_summarization` — runs
+   *     even when the per-thread turn-count would otherwise skip,
+   *     surfacing in the consolidator's `memoryMode: "enabled"` arm).
+   * Errors are caught and surfaced as `error` AgentEvents (non-fatal —
+   * the session is already finishing); they do NOT propagate.
+   *
+   * Phase 2 (cross-session synthesizer + writer) is NON-GOAL for the
+   * session-end hook (per audit: Phase 2 is threshold / explicit-trigger
+   * driven, not cron). The host runs Phase 2 separately when ready.
+   */
+  memoryConsolidator?: {
+    /** Auto-trigger Phase 1 on session-end (spanStatus === "ok"). */
+    enabled?: boolean
+    /** SOTA Cursor `force_summarization` — when true, the per-thread
+     *  `memoryMode` arm fires `"enabled"` even if the host did not set
+     *  `enabled: true`, AND the call runs even when this would otherwise
+     *  be skipped. */
+    forceSummarization?: boolean
+    /** LLM-backed Phase1Port (distill rollout → summary + rawMemory +
+     *  preferenceSignals). REQUIRED to actually run Phase 1; absent ⇒
+     *  the hook records a skip (no LLM port wired) without throwing. */
+    port?: Phase1Port
+    /** Stage1Store (SQLite upsert sink). REQUIRED; absent ⇒ skip. */
+    store?: Stage1StorePort
+    /** Stable thread id for the Stage1Output PRIMARY KEY. Falls back to
+     *  `config.sessionId` when omitted; if BOTH are absent the call is
+     *  skipped (the consolidator refuses an empty thread id). */
+    threadId?: string
   }
   /**
    * Compaction tuning. Absent ⇒ compaction is skipped entirely (existing

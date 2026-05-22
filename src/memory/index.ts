@@ -1,9 +1,25 @@
 export { InMemoryStore } from "./adapters/in-memory"
 export { SqliteStore } from "./adapters/sqlite"
+/** ADR-0068 2-phase consolidator surface (Phase 1 = per-thread distill). Wave
+ *  D session-end hook in `@/agent` wires `runPhase1` through these ports so
+ *  the loop never reaches into `consolidate/*` internals (RFC §3.1 layering). */
+export {
+  Phase1DistillError,
+  type Phase1Input,
+  type Phase1Outcome,
+  type Phase1Port,
+  runPhase1,
+  type Stage1Output,
+  Stage1Store,
+  type Stage1StorePort,
+} from "./consolidate"
 /** Phase-2 consolidated `memory_summary.md` hard byte cap. Re-exported through
  *  the `@/memory` barrel so consumers (e.g. `@/agent/prompt-sections`) need not
  *  reach into the `consolidate/constants` internal path. */
-export { MEMORY_SUMMARY_MAX_BYTES } from "./consolidate/constants"
+export {
+  MEMORY_SUMMARY_MAX_BYTES,
+  MIN_TURN_THRESHOLD as MEMORY_CONSOLIDATE_MIN_TURNS,
+} from "./consolidate/constants"
 export {
   DEFAULT_DUPE_THRESHOLDS,
   type DupeThresholds,
