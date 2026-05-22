@@ -3,8 +3,8 @@ title: defineTool — output-schema + toModelOutput + deferred + streaming-input
 section: 2
 subsystem: 도구 팩토리 (v0.dev 흡수, ADR-0060)
 order: 60
-maturity: L3
-status: refined
+maturity: L4
+status: stable
 purpose: |
   v0.dev createProviderToolFactoryWithOutputSchema 흡수 — Tool에 4개 OPTIONAL 능력
   추가: outputSchema(결과 Zod 검증, 불일치 시 ok:false retry-지시), toModelOutput(모델용
@@ -16,17 +16,25 @@ evidence:
     - src/tool/factory.ts
     - src/tool/deferred.ts
     - src/tool/types.ts
+    - src/tool/registry.ts
+    - src/agent/tool-input-streaming.ts
+    - src/agent/streaming-dispatch.ts
+    - src/agent/loop.ts
   adrs: [60]
   tests:
-    unit: [tests/unit/tool-factory.test.ts]
+    unit:
+      - tests/unit/tool-factory.test.ts
+      - tests/unit/tool-factory-l3-wire.test.ts
+      - tests/unit/tool-output-schema-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    팩토리·검증·deferred registry·streaming-input 드라이버는 순수 함수로 완성+테스트되었으나
-    live streaming-dispatch 배선은 follow-up(// TODO(absorb #1)). 현재는 opt-in seam.
-  promotion_path: |
-    driveStreamingInput을 streaming-dispatch의 tool_use_start/delta/end에 매핑하고
-    outputSchema 검증을 dispatch seam에 배선하면 L3.
-notes: 'ToolEvent union은 progress|result 2-variant 유지(deferred는 ToolResult.deferred 필드) — 기존 내로잉 byte-identical 보존.'
+deliberate_hold: null
+notes: |
+  L4 완료 (2026-05-23): streaming-input 시seam이 loop.ts:434에서 `onToolInput:
+  buildToolInputSeam(config.registry)`로 streamingTurn에 배선됨. registry.run()이
+  enforceOutputSchema → toModelOutput 순으로 결과를 후처리(둘 다 default-OFF
+  fast-path). hellgate가 malformed JSON delta / multi-field reject / nested
+  path / cross-id interleave / re-start / deferred-result interaction / E2E
+  까지 커버. ToolEvent union은 progress|result 2-variant 유지(deferred는
+  ToolResult.deferred 필드).
