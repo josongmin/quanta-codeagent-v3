@@ -7,10 +7,11 @@ import type {
   ToolAction,
   TrustScopeRegistry,
 } from "@/permission"
-import type { RunContext } from "@/shared"
 import type { RedactionConfig, RedactionKind, RedactionOrigin } from "@/security"
+import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
+import type { ShellExecObserver } from "@/tool/shell-exec-types"
 import type { BudgetMeter } from "./budget"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { ConfirmDecision } from "./confirm-decision"
@@ -404,6 +405,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   modelCandidates?: readonly ModelCandidate[]
   /**
+   * ADR-0081 shell output delta streaming — opt-in observer for the typed
+   * `ShellExecEvent` stream. The dispatch seam forwards this to
+   * `ToolContext.onShellEvent` so the `bash` tool (and any future shell-
+   * funnel tool) can stream incremental stdout/stderr without re-buffering.
+   *
+   * Absent ⇒ legacy buffered path is byte-identical (`runShell` skips event
+   * emission entirely, no allocation). Present ⇒ start/stdout/stderr/exit|
+   * aborted events fire in canonical order; the consumer MUST handle all
+   * five `ShellExecEvent.kind` variants (exhaustive switch with `never`
+   * default — adding a variant becomes a compile error at every caller).
+   *
+   * Use cases: CLI streaming TUI (paint output as it arrives), OTel span
+   * exporter (chunk counter / bytes-attribute on the bash span), web/Tauri
+   * surface (server-sent events).
+   */
+  onShellEvent?: ShellExecObserver
+  /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`
    * (`user_input` / `user_input_with_turn_context` only — other op variants
@@ -627,4 +645,3 @@ export type AdmissibilityGateConfig = Pick<
   | "sessionId"
   | "trustScope"
 >
-

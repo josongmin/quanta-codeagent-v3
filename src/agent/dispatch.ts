@@ -186,6 +186,11 @@ const dispatchToolInner = async (
     signal: config.signal,
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
     ...(workingState !== undefined ? { workingState } : {}),
+    // ADR-0081 L3 wire: forward the agent-level shell observer into every
+    // tool's ToolContext. The bash tool conditionally hands it to runShell,
+    // which only allocates events when this is present (`exactOptionalProperty
+    // Types` honoured — never `onShellEvent: undefined`).
+    ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
   }
   const out = await execute(call, config, ctx, onProgress)
   if (config.hooks) {

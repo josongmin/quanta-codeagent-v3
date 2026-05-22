@@ -3,8 +3,8 @@ title: 모델 교체 retry (SubmitRetryBotMessage)
 section: 7
 subsystem: 복원력 — 모델 교체 (v0.dev 흡수, ADR-0066)
 order: 65
-maturity: L2
-status: new
+maturity: L3
+status: refined
 purpose: |
   v0.dev SubmitRetryBotMessage{messageId, retryModelId} 흡수 — 특정 turn을 의도적으로
   다른 모델로 재실행(불만족 응답 재시도, opus→max 자동 에스컬레이션). resolveRetryModel

@@ -786,6 +786,188 @@ github-sparse-freq-tiny  github-sparse-freq-inv
 
 ---
 
+## §8. 라운드2 audit — 정정·신규 (3 병렬 검증 워커)
+
+> 본문 초고 작성 후 3개 audit가 가져온 정정·신규. 마킹 ✓/≈/🔒 동일.
+
+### 8.0 빌드 provenance ✓
+- Cargo workspace 이름 **`everysphere`** (build host path `/Users/runner/work/everysphere/everysphere/_work/1/s/`) — Cursor 내부 monorepo 명. **GitHub Actions macOS runner**에서 빌드.
+- **gitoxide = vendored fork**, 핀: `git checkouts/gitoxide-c5184609f4b57c0c/9e8bbba/...` — Anysphere가 gitoxide를 fork해서 commit `9e8bbba`에 핀(퍼블리시 crate 아님).
+- Cursor-owned crate 풀세트(확장): `bugbot-util`, `codebase-snapshot`, `crepe`, `cursorignore`, **`git_graph`**, **`gix-snapshot`**, **`ignore`**(자체 fork), **`merkle_tree`** — 본문 §3엔 6개로 적었지만 **8개**.
+
+### 8.1 crepe 추가 발견 (워커 B)
+- **소스 파일 13개 풀세트**: lib.rs / index.rs / index_builder.rs / serialization.rs / disk_index.rs / query.rs / ngrams.rs / regex.rs / freq.rs / filter.rs / case_folding.rs / git/mod.rs / ripgrep/{util,json}.rs. **`spillable_index.rs`+`bin/crepectl.rs`**는 `crepectl` CLI에만 link (`.node` 아님).
+- **인덱스 = mmap-resident** ✓ 결정적: verbatim `"ngram table extends beyond mmap bounds"`. 디스크 → mmap → 쿼리.
+- **LSM-style segment chaining** ✓: 메타데이터 `parent_sha`/`has_parent`로 세그먼트 체인, `loading parent index for segment` (serialization.rs:966).
+- **3개 독립 4 GB cap** ✓ (분리): postings 파일 / 단일 posting list / metadata offset. 각각 verbatim 에러.
+- **Ancestor walk + main branch fallback** ✓: `"no candidate indexes found (best is N commits away)"` / `"main branch is N commits away; falling back to current commit"`. **인덱스가 commit SHA로 키잉**되어 가장 가까운 조상 commit 인덱스 재사용.
+- **NAPI 옵션** 4개 추가: `maxIndexHoursSinceCreated`, `maxIndexHoursSinceAccessed`, `maxIndexRevisionDiff`, `maxInMemoryDocuments` on GrepClientOptions — staleness 임계.
+- **crepectl CLI의 진짜 역할** ✓ 정정: 본문엔 "별도 헬퍼"라고 적었는데, audit 결과 **메모리 바운드된 build 전용 spillable indexer**. 디폴트 메모리 한도 = **시스템 RAM 25%**. 쿼리는 **항상 in-process** (mmap), CLI는 build만. `--memory-limit` flag.
+- **Filter 모드 3종** ✓: `no-filter` / `hidden-file-filter` / `ripgrep-default-filter`.
+- **Skip 사유 4종** ✓: `skip (glob_matcher)` / `skip (subpath)` / `skip (missing metadata)` / `skip (read error)`.
+- **파일 이벤트 분류** ✓: `processing document M A D ??` — git status 그대로 (M=Modified / A=Added / D=Deleted / ??=Untracked).
+- **4가지 sparse codec 의미** ≈: `crc32`(integrity) / `freq`(frequency-coded VB) / `freq-tiny`(small-block) / `freq-inv`(inverse-frequency). 정확한 layout 🔒.
+- **ngram size 🔒** — 상수 strings 부재. ≈ inferred 3 (GitHub Blackbird 계보 + `literal query too short` 패턴).
+
+### 8.2 gix-snapshot 추가 발견 (워커 C) — 실은 2개 crate
+- **본문 정정**: gix-snapshot은 단일 crate가 아니라 **2개**:
+  - `crates/gix-snapshot/` — 저수준 엔진 (gitoxide-based)
+  - `crates/codebase-snapshot/` — 고수준 client/manager (storage budget, file watcher, AIMD, NAPI wrapper)
+  - NAPI 글루: `packages/file-service/src/snapshot.rs`
+
+#### 8.2.1 Shadow repo = 진짜 bare gitoxide repo ✓
+- 경로 layout: `{snapshotsBaseDir}/{codebase_uuid}/`
+- **bare git repo**: verbatim `[core] / repositoryformatversion = 0 / bare = true` 인라인 config + HEAD ref `ref: refs/heads/main`
+- **synthetic author**: `git-native-history <capture@cursor.invalid>` — `cursor.invalid` 도메인으로 유출 방지 ★
+- `objects/info` / `hooks` 디렉토리 (정통 git)
+- Legacy `snapshots/`→`.snapshots-migrate-…` 마이그레이션 ✓
+- NAPI 옵션: `snapshotsBaseDir`, init은 `codebase_uuid`+`base_dir` 필수
+
+#### 8.2.2 SnapshotMetadataWire 4 필드 ✓
+verbatim `struct SnapshotMetadataWire with 4 elements` + 필드명 `ignoreBlobId` + `latencySeconds` + `SnapshotReason`(internally tagged). 4번째 ≈ `version` 또는 `agent_request_id`.
+
+#### 8.2.3 Storage budget — operational vs cleanup ✓
+- **Operational** (pause): "Snapshot storage exceeds operational budget; pausing operations"
+- **Cleanup** (wipe): "Snapshot storage exceeds cleanup budget, wiping to reclaim space" — **전체 폴더 wipe** (LRU 아님). Re-init from scratch.
+- OTel: `storage_budget.operational_exceeded` / `.cleanup` / `.usage_ratio` / `.check_error`
+- 백그라운드 모니터 thread: `storage-budget-monitor`
+- 임계 ratio 🔒 (compiled constant)
+
+#### 8.2.4 3 locks + worker pool ✓
+- `maintenance.lock` / `init.lock` / `baseline.lock` — 전부 on-disk file-level → **multi-process safe** ★. Cursor 창 여러 개 동시 OK.
+- Worker lane state machine: `{Running → TimedOut → Backoff}`. Soft timeout 안 죽임, lane만 stale 마킹.
+
+#### 8.2.5 Geometric repack — 2 kind ✓
+- 2종: **`shadow_repack`** + **`blob_repack`**
+- Trigger: `"Launching {kind} repack: N packs in Ms"`
+- Skip: `"Skipping geometric repack: storage budget pause flag set"`, `"applying extended repack cooldown to limit duplicate pack retention"`
+- 입력 pack 크기 cap: `"Filtered N oversized packs (> bytes) from repack candidates"` — 큰 pack은 안 건드림
+- 기하 ratio 🔒
+
+#### 8.2.6 BlobStore = legacy loose→pack 마이그레이션 ✓
+시작 시: `"Migrating N legacy loose objects to packfiles"`. 비-blob skip, corrupt skip. 원자 쓰기: `NamedTempFile` + `PackWriter dropped without finish()` (abort path).
+
+#### 8.2.7 4-phase write (실은 5 sub-span) ✓
+1. `snapshot_writer.plan` — 변경 path gather (secondary index diff)
+2. `snapshot_writer.ingest` — blob 읽기+패킹
+3. `snapshot_writer.commit.build_tree` — tree 업서트 (**incremental by default**, full fallback)
+4. `snapshot_writer.commit.create_commit` — snapshot commit 생성
+5. `snapshot_writer.commit.finalize_index` — secondary index + ref 이동
+
+verbatim 요약: `"Snapshot created in N ms: commit=, reused=, written=, skipped=, removed=, tree= (removals=, upserts=), index_written="`
+
+#### 8.2.8 4 worker class ✓
+**scan / diff / discover / ingest** (gitoxide `in_parallel`). panic harness가 `gix-snapshot-{worker_kind}` thread name으로 격리.
+
+#### 8.2.9 Cross-process shared baseline ✓
+- 파일: `baseline.marker` + `secondary-index-baseline`
+- Pub: `"Published shared baseline: N entries, root_key=..."`
+- Adopt 시: warm restart (`"running warm restart"`), 실패 시 full init (`"falling back to full init"`)
+- 조건: `ignore_config_hash` 매칭 필요 (불일치 → `"Skipping baseline refresh: config mismatch"`)
+- **여러 Cursor 프로세스/창이 한 워크스페이스 빠르게 공유** ★
+
+#### 8.2.10 AIMD capture budget — 별도 파이프라인 ★
+- **본문 정정**: AIMD는 *snapshot 엔진*과 별개. 사용자의 *진짜 .git* 히스토리를 슬라이스 떠서 packfile 업로드 (`cursor.codebaseTelemetry.triggerGitHistoryCapture` 명령 백엔드).
+- NAPI 구조 `CaptureBudget` 5필드: `maxCommits` / `maxWallTimeMs` / `maxPackBytes` / `targetDurationMs` / `consecutiveOverBudget`
+- 로직 ≈: under budget → additive increase `maxCommits`; over → counter++ → 임계 시 multiplicative decrease
+- 캡처 stage 4단: `RefStore → CommitPack → TreePack → BlobPack` (`GitHistoryStage` ✓)
+- DeferredBlobReason 5종: `StageCeiling` / `ExceedsSizeLimit` / `MissingInSource` / `ModeOnlyChange` / `PreimageNotRequested`
+
+#### 8.2.11 Time-travel API ✓ 정정
+- **`getBfsPaths`** (plural, 본문엔 `getBfsPath` 잘못) — Breadth-First-Search paths. `gix-traverse/src/tree/breadthfirst.rs` 사용.
+- `inEditorChangedFiles` / `inEditorContext` — shadow-repo HEAD vs 워킹트리 diff
+- `disposeFast` vs `dispose`: fast는 OTel detach (background drain), 일반은 flush 완료까지 block
+
+#### 8.2.12 Chain walk 안전장치 ✓
+- `"Chain walk exceeded depth limit: walked N commits"` — 무한루프/손상 ref 방어
+- **first-parent chain 엄격** ✓: `markRegistered`/`markVerified` 시 strict linear chain. 위반 시 `AdvanceResult::NotOnChain`/`InvariantViolation`.
+- `AdvanceResult` 4 variant: `Advanced` / `AlreadyAtOrPast` / `NotOnChain` / `InvariantViolation`
+
+#### 8.2.13 GeneratePackfileStatus ✓
+5 variant: `Ready / NoWork / TooManyPending / Corrupt / IoError` — 외부 cloud upload 사전체크.
+
+### 8.3 GitClient — 큰 정정 ★ (워커 D)
+**본문은 GitClient를 "generic git facade"로 묘사했는데 audit 결과 NO.** 실제 NAPI 메서드:
+```
+getCommitChain · getCommitVerifyData · getRepoHeadSha ·
+getTotalCommitCount · getVerifyCommit · throwIfCommitDoesntExist
+```
+→ **commit-verification + chain-walking 전용**. 시그니처 검증·체인 enumeration. `getBfsPath` 같은 거 *없음* (그건 `CodebaseSnapshotClient`).
+
+호출자 분리: **bugbot-util은 `git` 셸**(NOT gix). **GitClient는 gix 직접**. 같은 바이너리 내 *2개 git 경로* 공존 — 의도적 분리.
+
+### 8.4 DiffClient — imara-diff Myers+Histogram ✓
+- 알고리즘: **imara-diff 0.1.8** (gix-diff의 엔진)
+- Myers AND Histogram 둘 다 구현
+- **Patience 명시적 미구현** ✓ verbatim: `"'patience' diff is not implemented and can default to 'histogram' if lenient config is used, and defaults to histogram if unset for fastest and best results"`
+- Rename detection: `core.renames`/`renameLimit` 존중, `"renameLimit ... actually squared, so 1000 stands for up to 1 million diffs"`
+
+### 8.5 bugbot-util — 큰 정정 ★
+- **본문 정정**: gitoxide 쓰는 게 아니라 **`git` 바이너리 셸 호출**. CLI args 인벤토리:
+  ```
+  diff -U<N> --no-color --src-prefix=a/ --dst-prefix=b/
+       --ignore-submodules={all,none} --name-status -M -z
+       --find-renames --diff-filter=RAMD --first-parent
+  cat-file --batch / cat-file blob <SHA>
+  check-attr --stdin     (linguist-generated 체크)
+  ls-files --other --exclude-standard
+  config --get-regexp / merge-base / rev-parse / symbolic-ref --short
+  ```
+- **`.cursor/BUGBOT.md`** ✓ — bugbot 룰 매니페스트 파일.
+- NAPI 클래스: **`LocalBugbotContext`**. 메서드 `getBugbotRules` / `inEditorChangedFiles` / `inEditorContext`.
+- TS enum: `InEditorSourceKind` = `workingTree | singleCommit`
+- "Agent Review" = bugbot 유저-페이싱 이름. 같은 파이프라인.
+- 호출 계층 (line numbers verbatim): `gather:492` → `gather_changed_files:1243` → `{find_changed_files:1048, find_untracked_files:1089, find_changed_files_in_submodule:794}` → `{process_files_in_repo:688, process_files_in_submodules:373, gather_context_for_untracked_files:312}` → `calculate_git_diff_internal:638` → aggregated rollup
+- Submodule regex verbatim: `(?m)^Submodule (.*?) contains modified content$|Submodule (.*?) ([a-f0-9]+)..[a-f0-9]+`
+
+### 8.6 Hash 알고리즘 — 결정적 (워커 D)
+- **SHA-1만** ✓: verbatim `"gix::ObjectId should always be 20 bytes"` + `" is not a lowercase 40-hex SHA-1"`
+- **`sha1-checked` 스타일** ✓: verbatim `"Detected SHA-1 collision attack with digest"` — SHAttered-class 공격 방어.
+- **SHA-256 git repo** ✓: variant 있지만 verbatim `"Support for SHA256 is prepared but not fully implemented yet. For now we abort when encountered"` — **만나면 abort**. 실용상 미지원.
+- **xxhash / blake3 / blake2 / siphash / farmhash / cityhash / murmur / wyhash / metro / t1ha / twox-hash / ahash 모두 부재** ✓ — 전 binary scan 0 hit.
+- `filebuf_hash` 토큰 ≈ 파일 버퍼 SHA-1 추정.
+- Tree-node 결합 해시 ≈ 자식 해시 concat SHA-1 (verbatim `"Updated branch hashes"` + `"<root>"` sentinel).
+
+### 8.7 simhash — 실제론 거의 black box 🔒
+- 본문에서 `≈ Charikar 64-bit`라고 추정했는데, audit 결과 strings에 **dimension/algorithm 흔적 0**:
+  - ❌ `Datasketches` / `charikar` / `hamming` / `LSH` 부재
+  - ❌ 인접 numeric constant `64/128/256` 부재
+  - ❌ `f32`/`f64` 컨텍스트 부재
+- verbatim만: `"SimHash for"` / `"failed to compute SimHash for tree:"` / `"Error in get_subtree_hash"` / NAPI `getSimhash`
+- 호출 context 2곳: per-tree (NAPI) + `git_history::capture` (역사 트리 simhash)
+- → **본문 §4.1 MerkleClient의 simhash 단락은 🔒 강화 표기 필요** (Charikar 추정은 너무 강했음)
+
+### 8.8 Ignore layer — 5단 ✓ (본문보다 1단 더)
+실제 우선순위 (위→아래):
+1. `globalCursorIgnorePatterns` (user/global)
+2. `unifiedJsonBlocklistPath` (admin policy, JSON)
+3. `blocklistPath` (admin policy, legacy plain)
+4. `.cursorindexingignore` (repo, indexing-specific)
+5. `.cursorignore` (repo, general)
+6. `.gitignore` 계층 (standard `ignore` Rust crate)
+
+**ignore 파일 변경 → 풀 rebuild 강제** ✓: `"cannot perform incremental update on an ignore file (root hash cannot be None) → Starting full rebuild for roots:"`
+
+본문에서 `ignore_config_hash` 키워드 언급했는데 **binary에 부재** ✓ — 본문 §4.1 해당 줄 ⚠️ 삭제 권장.
+
+### 8.9 종합 — 본문에서 고쳐야 할 12 항목
+| 항목 | 본문 (틀린/약한) | audit 정정 |
+|---|---|---|
+| GitClient 역할 | "generic git facade" | **commit-verification 전용** (6 메서드) |
+| `getBfsPath` 위치/이름 | (모호) | **`getBfsPaths`(plural)**, CodebaseSnapshotClient 소유, BFS over tree |
+| gix-snapshot crate 수 | 1개 | **2개** (gix-snapshot + codebase-snapshot) |
+| simhash 차원/알고리즘 | "≈ Charikar 64-bit" | 🔒 (증거 부재) |
+| `ignore_config_hash` 키워드 | 언급 | **binary 부재**, 삭제 |
+| crepectl 역할 | "별도 helper" | **메모리바운드 build 전용 spillable**, 쿼리 안 함 |
+| bugbot-util git 호출 방식 | (모호) | **셸 `git` 바이너리** (NOT gix) |
+| 인덱스 storage | "디스크 영속" | **mmap-resident**, 3개 4GB cap, LSM chain |
+| ignore layer 단수 | 4단 | **5단** (unifiedJson + legacy 분리) |
+| `disposeFast` vs `dispose` | (없음) | fast = OTel detach, full = flush block |
+| AIMD 범위 | "snapshot 엔진" | **별도 파이프라인** (사용자 .git 캡처용) |
+| Cursor-owned crate 수 | 6개 | **8개** (+`git_graph`, `ignore`, `merkle_tree`) |
+
+---
+
 ## Appendix: ✓ verbatim vs ≈ inferred 요약
 
 | Section | ✓ 비중 | ≈/🔒 부분 |
