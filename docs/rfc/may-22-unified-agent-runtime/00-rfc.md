@@ -350,3 +350,5 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
 | 날짜 | 버전 | 변경 |
 |---|---|---|
 | 2026-05-22 | Draft | 초안 작성 — sphinx-7590 drift evidence + 5축 분기 정의 |
+
+<!-- ci-bot e2e smoke marker (will be reverted) -->
