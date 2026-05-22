@@ -3,7 +3,7 @@ title: eval 앱 — 5-tier 검증 스택 (audit/synthetic/public/trajectory/comp
 section: 10
 subsystem: eval 앱 (RFC-0003) — 로컬 품질 검증 스택
 order: 8
-maturity: L3
+maturity: L4
 status: stable
 purpose: |
   `bun run eval` — taxonomy(12 major/~120 leaf) 기반 5-tier 로컬 검증 스택.
@@ -11,17 +11,34 @@ purpose: |
   Tier 2 public(SWE-bench Verified bench-report 래핑) / Tier 3 trajectory(실세션 분류·
   replay·freeze) / Tier 4 compare(A/B pairwise judge). append-only JSONL 저장
   (EvalRecord 엔벨로프 + tier별 payload), report가 tier-agnostic 집계·markdown 렌더.
+  Tier 4 compare adapters (quanta/claude-code/cursor/aider) 4종 모두 운영 — cursor는
+  `-p <prompt> --output-format text --force`, aider는 `--message <prompt> --yes-always
+  --no-auto-commits --no-git --no-stream --no-pretty --no-show-model-warnings`. CLI
+  미설치 시 `available()` 가 `{ok:false}` 반환 → `runCompare` 가 graceful skip 으로
+  bookkeeping 만 기록. SIGTERM→SIGKILL grace + stderr tail truncation 으로 timeout/
+  hang 안전. Pairwise judge 의 parse 실패는 `parseFailed:true` + `winnerIndex:-1`
+  로 partial/tie 카운트 오염 방지.
 evidence:
   code:
     - src/apps/eval/index.ts
     - src/apps/eval/synthetic/index.ts
     - src/apps/eval/trajectory/replay.ts
     - src/apps/eval/report/index.ts
+    - src/apps/eval/compare/index.ts
+    - src/apps/eval/compare/adapters/cli-base.ts
+    - src/apps/eval/compare/adapters/cursor.ts
+    - src/apps/eval/compare/adapters/aider.ts
   adrs: []
   tests:
-    unit: [tests/unit/eval-audit-matrix.test.ts, tests/unit/eval-pairwise-judge.test.ts, tests/unit/eval-replay-verdict.test.ts, tests/unit/eval-freeze.test.ts]
-    integration: []
+    unit:
+      - tests/unit/eval-audit-matrix.test.ts
+      - tests/unit/eval-pairwise-judge.test.ts
+      - tests/unit/eval-replay-verdict.test.ts
+      - tests/unit/eval-freeze.test.ts
+      - tests/unit/eval-compare-adapters.test.ts
+    integration:
+      - tests/integration/eval-five-tier-compare-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'Tier 0-3 운영, Tier 4 compare는 stub(quanta/claude-code/cursor/aider 어댑터 골격). storage 스키마 additive 필드는 별도 [eval-schema-additive] 87. RFC-0003 Phase B(2026-05-21) 랜딩.'
+notes: 'Tier 0-3 + Tier 4 compare 모두 운영(L4). 4개 adapter 모두 buildArgv pinning + timeout 회복 contract test 로 잠금. storage 스키마 additive 필드(metrics/tokens/costUsd)는 별도 [eval-schema-additive]. RFC-0003 Phase B(2026-05-21) 랜딩, L4 promotion 2026-05-23.'
