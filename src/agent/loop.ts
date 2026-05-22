@@ -1,4 +1,4 @@
-import type { Message, StreamEvent, SystemPromptInput, ToolResultBlock } from "@/llm"
+import type { LLMPort, Message, StreamEvent, SystemPromptInput, ToolResultBlock } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
@@ -19,6 +19,7 @@ import {
 } from "./conversation-summary-archive"
 import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
+import { type EffortLevel, effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
 import { renderIdeContext } from "./ide-context"
 import { persistSession, recallContext } from "./memory"
@@ -233,16 +234,41 @@ type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } |
  *  resets it. Built only when ≥1 discovered skill declared an allowlist;
  *  absent ⇒ no scoping (loop byte-identical). */
 const SKILL_META_TOOLS = new Set(["Skill", "ToolSearch"])
+/** Author-declared per-skill model/effort override (ADR-0011 §6.2 → L4).
+ *  `effort` mirrors `SkillEffort` (`low|medium|high|max|<number>`); a numeric
+ *  value is a RAW token budget, a named tier maps via `effortToTokenBudget`.
+ *  Carried structurally (no `@/skill` import) — features.ts builds the map from
+ *  `skillModelOverride`/`skillEffortOverride`. */
+export interface SkillTurnOverride {
+  model?: string
+  effort?: EffortLevel | number
+}
 interface SkillGate {
   /** False ⇒ the call must be denied (not in the active skill's allowlist). */
   allow(name: string): boolean
   /** Observe a completed dispatch; a successful `Skill` invocation with a
-   *  declared allowlist arms/replaces the active scope. */
+   *  declared allowlist arms/replaces the active scope, and (independently)
+   *  arms/replaces the active model/effort override. */
   observe(name: string, input: unknown, ok: boolean): void
+  /** The active skill's model/effort override, or `undefined` when no skill is
+   *  active or the active one declared none. Read once per turn at the stream
+   *  open so the override is turn-scoped to the turns AFTER activation. */
+  activeOverride(): SkillTurnOverride | undefined
 }
-const buildSkillGate = (allowlists: Map<string, string[]> | undefined): SkillGate | undefined => {
-  if (!allowlists || allowlists.size === 0) return undefined
+/** Build the skill gate when EITHER a tool allowlist OR a model/effort override
+ *  is declared by ≥1 discovered skill. Absent both ⇒ `undefined` (loop
+ *  byte-identical). The tool-scoping (`allow`) is driven solely by allowlists;
+ *  overrides ride independently so a skill can override model/effort WITHOUT
+ *  narrowing tools (and vice-versa). */
+const buildSkillGate = (
+  allowlists: Map<string, string[]> | undefined,
+  overrides: Map<string, SkillTurnOverride> | undefined,
+): SkillGate | undefined => {
+  const hasAllow = allowlists !== undefined && allowlists.size > 0
+  const hasOverride = overrides !== undefined && overrides.size > 0
+  if (!hasAllow && !hasOverride) return undefined
   let active: Set<string> | undefined
+  let activeOverride: SkillTurnOverride | undefined
   return {
     allow: (name) => active === undefined || SKILL_META_TOOLS.has(name) || active.has(name),
     observe: (name, input, ok) => {
@@ -252,10 +278,48 @@ const buildSkillGate = (allowlists: Map<string, string[]> | undefined): SkillGat
           ? (input as { name: unknown }).name
           : undefined
       const skill = typeof raw === "string" ? raw.trim().replace(/^\//, "") : ""
-      const allow = allowlists.get(skill)
+      const allow = allowlists?.get(skill)
       if (allow) active = new Set(allow)
+      // Inheritance: a freshly-activated skill REPLACES the prior override
+      // (skill > session config > default). A skill with no override clears it
+      // back to "no skill override" so the session/default path resumes.
+      activeOverride = overrides?.get(skill)
     },
+    activeOverride: () => activeOverride,
   }
+}
+
+/** Resolve the per-turn LLM port + thinking budget given the active skill's
+ *  override (if any). Pure: no clock, no IO. Precedence is skill > session
+ *  config > default — here we only fold in the SKILL layer (the session/default
+ *  thinking budget is whatever the loop already passes, i.e. none today, so an
+ *  absent override is byte-identical). A `model` override swaps the port to the
+ *  matching `config.modelCandidates` entry by id; an unknown id (or no
+ *  candidate registry) leaves `config.llm` untouched (advisory degrade — the
+ *  model id alone cannot construct a port). An `effort` override becomes a
+ *  `thinking:{type:"enabled",budget_tokens}` field: a numeric effort is the raw
+ *  budget, a named tier maps via `effortToTokenBudget` (the `"default"` tier and
+ *  a non-positive/absent budget ⇒ no `thinking` field, byte-identical). */
+const resolveSkillTurnOverride = (
+  config: AgentConfig,
+  override: SkillTurnOverride | undefined,
+): { llm: LLMPort; thinking?: { type: "enabled"; budget_tokens: number } } => {
+  if (override === undefined) return { llm: config.llm }
+  const swapped =
+    override.model !== undefined
+      ? config.modelCandidates?.find((c) => c.id === override.model)?.port
+      : undefined
+  const llm = swapped ?? config.llm
+  const budget =
+    typeof override.effort === "number"
+      ? override.effort
+      : override.effort !== undefined
+        ? effortToTokenBudget(override.effort)
+        : undefined
+  if (budget !== undefined && budget > 0) {
+    return { llm, thinking: { type: "enabled", budget_tokens: budget } }
+  }
+  return { llm }
 }
 /** Recoverable deny when a tool is outside the active skill's allowlist. */
 const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut => ({
@@ -336,14 +400,22 @@ const streamConsume = async (
   const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
   const stop = recorder?.llmStream()
+  // ADR-0011 §6.2 (L4): apply the ACTIVE skill's model/effort override to THIS
+  // turn. The gate armed `activeOverride` when a skill was last invoked, so the
+  // override naturally scopes to the turns AFTER activation and is re-read each
+  // turn (a sibling skill with no override clears it back to session/default).
+  // Absent gate / absent override ⇒ `{ llm: config.llm }` with no `thinking`,
+  // i.e. byte-identical to the pre-feature stream call.
+  const turnLlm = resolveSkillTurnOverride(config, skillGate?.activeOverride())
   try {
     const outcome = await streamingTurn({
       events: teeUsage(
         config,
-        config.llm.stream({
+        turnLlm.llm.stream({
           messages,
           system,
           tools: specs,
+          ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
           ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
           // Thread the loop's abort signal (user Ctrl+C / cancel) into the LLM
           // stream so an in-flight provider request aborts on cancel instead of
@@ -1201,7 +1273,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   const baseCfg = buildEffectiveConfig(config, features.extraTools)
   const cfg: AgentConfig = dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
   const classifier = features.classifier
-  const skillGate = buildSkillGate(features.skillAllowlists)
+  const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
   // Cached once at session start (Codex anti-reread). Passed straight into the
   // per-turn reminder by `prepareTurnContext`. Absent ⇒ no block emitted, so
   // skill-less sessions stay byte-identical end-to-end.

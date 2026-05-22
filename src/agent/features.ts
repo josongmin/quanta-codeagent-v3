@@ -56,6 +56,8 @@ import {
   createToolSearchTool,
   discoverSkills,
   discoverSystemSkills,
+  skillEffortOverride,
+  skillModelOverride,
   skillsActivatedFor,
   skillToolAllowlist,
 } from "../skill"
@@ -67,6 +69,7 @@ import {
 } from "../subagent"
 import { createAutoClassifierPort } from "./auto-classifier"
 import { buildBranchSearchTool } from "./branch-search-runner"
+import type { SkillTurnOverride } from "./loop"
 import { createSubagentRunner } from "./subagent-runner"
 import type { AgentConfig } from "./types"
 import { createWorkingStateSession, type WorkingStateSession } from "./working-state"
@@ -101,6 +104,14 @@ export interface SessionFeatures {
    *  is denied as a recoverable tool_result). Present only when ≥1 discovered
    *  skill declares `tools:`; absent ⇒ no scoping (byte-identical). */
   skillAllowlists?: Map<string, string[]>
+  /** Skill model/effort ENFORCEMENT data (ADR-0011 §6.2 → L4): skill name →
+   *  author-declared `{model?, effort?}` override, for skills that declared at
+   *  least one. The loop applies the ACTIVE skill's override to the next turn
+   *  (swap the LLM port by id from `config.modelCandidates`; cap the thinking
+   *  budget from the effort tier). Inheritance is skill > session > default.
+   *  Present only when ≥1 discovered skill declares `model:`/`effort:`; absent
+   *  ⇒ no override (byte-identical). */
+  skillOverrides?: Map<string, SkillTurnOverride>
   /** Active-skill inventory cached at session start (Codex `skills-audit.md`
    *  mirror). One `{name, description}` per discovered skill — used by the
    *  per-turn reminder to advertise the catalogue + trigger rules without
@@ -152,6 +163,7 @@ const buildSkillFeatures = async (
 ): Promise<{
   tools: Tool[]
   allowlists: Map<string, string[]> | undefined
+  overrides: Map<string, SkillTurnOverride> | undefined
   inventory: { name: string; description: string }[]
 }> => {
   // `dir` OPTIONAL (ADR-0045 follow-up): when omitted, only bundled system
@@ -178,9 +190,24 @@ const buildSkillFeatures = async (
     createToolSearchTool(() => config.registry.specs()),
   ]
   const al = new Map<string, string[]>()
+  // ADR-0011 §6.2 → L4: build the per-skill model/effort override map alongside
+  // the allowlist map. A skill contributes an entry only when it declares
+  // `model:` AND/OR `effort:` (a non-empty model string, or any defined effort
+  // including numeric 0). Skills with neither leave the map untouched, so an
+  // all-advisory-free skill set yields `undefined` and the loop stays
+  // byte-identical.
+  const ov = new Map<string, SkillTurnOverride>()
   for (const s of skills) {
     const allow = skillToolAllowlist(s)
     if (allow) al.set(s.name, allow)
+    const model = skillModelOverride(s)
+    const effort = skillEffortOverride(s)
+    if (model !== undefined || effort !== undefined) {
+      ov.set(s.name, {
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { effort } : {}),
+      })
+    }
   }
   // Plain `{name, description}` shape so the prompt slice never imports
   // `@/skill` (slice isolation — Codex skills-audit mirror). Built ONCE here
@@ -205,7 +232,12 @@ const buildSkillFeatures = async (
         ]
       : skills
   const inventory = activated.map((s) => ({ name: s.name, description: s.description }))
-  return { tools, allowlists: al.size > 0 ? al : undefined, inventory }
+  return {
+    tools,
+    allowlists: al.size > 0 ? al : undefined,
+    overrides: ov.size > 0 ? ov : undefined,
+    inventory,
+  }
 }
 
 export const buildSessionFeatures = async (config: AgentConfig): Promise<SessionFeatures> => {
@@ -214,6 +246,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   let cleanup: (() => Promise<void>) | undefined
   let classifier: AutoModeClassifier | undefined
   let skillAllowlists: Map<string, string[]> | undefined
+  let skillOverrides: Map<string, SkillTurnOverride> | undefined
   let activeSkills: { name: string; description: string }[] | undefined
   let workingState: WorkingStateSession | undefined
 
@@ -268,6 +301,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
     const sf = await buildSkillFeatures(config, config.skills.dir)
     extraTools.push(...sf.tools)
     skillAllowlists = sf.allowlists
+    skillOverrides = sf.overrides
     // Inventory is present whenever `config.skills` is set — even an empty
     // array (no SKILL.md files yet) — so the prompt slice can gate purely on
     // `length > 0` and stays byte-identical for skill-less sessions.
@@ -302,6 +336,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
     ...(taskRegistry ? { taskRegistry } : {}),
     ...(cleanup ? { cleanup } : {}),
     ...(skillAllowlists ? { skillAllowlists } : {}),
+    ...(skillOverrides ? { skillOverrides } : {}),
     ...(activeSkills ? { activeSkills } : {}),
     ...(workingState ? { workingState } : {}),
   }
