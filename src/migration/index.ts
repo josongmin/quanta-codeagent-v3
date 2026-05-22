@@ -5,6 +5,7 @@
  * agent` (and the migration slice's own tests) may import from this index.
  */
 
+export { contentSha256, wasAlreadyImported } from "./dedup"
 export { detectExternalAgents, detectorContracts } from "./detector"
 export { type RunImportOptions, runImport, UnknownProviderRejectedError } from "./importer"
 export {
@@ -13,6 +14,12 @@ export {
   importLogPath,
   loadImportLog,
 } from "./persistence"
+export {
+  claudeCodeTranslator,
+  type SessionTranslator,
+  type TranslatableProvider,
+  translatorFor,
+} from "./translators"
 export {
   ALL_PROVIDERS,
   type DetectedAgent,

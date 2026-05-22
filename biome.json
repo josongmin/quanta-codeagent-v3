@@ -389,7 +389,6 @@
                   "@/runtime": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
                   "@/lsp": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
                   "@/observability": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
-                  "@/llm": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
                   "@/subagent": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
                   "@/skill": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
                   "@/session": "Slice isolation (ADR-0038): @/migration depends on @/shared only"

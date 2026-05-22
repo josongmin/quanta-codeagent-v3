@@ -25,16 +25,12 @@ beforeEach(async () => {
   await mkdir(join(home, ".claude/projects/proj-b"), { recursive: true })
   await mkdir(join(home, ".claude/skills"), { recursive: true })
   await writeFile(join(home, ".claude/auth.json"), JSON.stringify({ token: "x" }), "utf8")
-  await writeFile(
-    join(home, ".claude/projects/proj-a/session-1.json"),
-    JSON.stringify({ id: "s-1" }),
-    "utf8",
-  )
-  await writeFile(
-    join(home, ".claude/projects/proj-b/session-2.json"),
-    JSON.stringify({ id: "s-2" }),
-    "utf8",
-  )
+  // L4: stage 3 translates real `*.jsonl` transcripts. Seed two valid Claude
+  // Code sessions (one user line each) so both translate + count.
+  const seedLine = (text: string): string =>
+    `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } })}\n`
+  await writeFile(join(home, ".claude/projects/proj-a/session-1.jsonl"), seedLine("a"), "utf8")
+  await writeFile(join(home, ".claude/projects/proj-b/session-2.jsonl"), seedLine("b"), "utf8")
   await writeFile(join(home, ".claude/skills/code-review.md"), "skill", "utf8")
   await writeFile(join(home, ".claude/skills/test-writer.md"), "skill", "utf8")
   await writeFile(join(home, ".claude/skills/refactor.md"), "skill", "utf8")

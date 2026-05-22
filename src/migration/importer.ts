@@ -12,6 +12,7 @@ import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { QuantaError } from "@/shared"
 import { detectExternalAgents } from "./detector"
+import { translatorFor } from "./translators"
 import type { ExternalAgentProvider, ImportEventSink, ImportResult } from "./types"
 
 /** Caller-side options for `runImport`. */
@@ -105,36 +106,94 @@ const stageProvider = async (
   }
 }
 
-/** Stage 3: session completion — would actually parse each session into v3
- *  shape. Brief scopes this to: count = discovered (1:1 import), skills
- *  count via `skills/` subdir if present and opted-in. */
+/** Recursively collect every `*.jsonl` transcript path under `dir`. Claude
+ *  Code lays sessions out as `projects/<slug>/<id>.jsonl`; we walk the tree
+ *  so nested project slugs are covered. ENOENT ⇒ empty (no sessions dir). */
+const collectJsonlPaths = async (dir: string): Promise<string[]> => {
+  let entries: Array<{ name: string; isDir: boolean }>
+  try {
+    const dirents = await readdir(dir, { withFileTypes: true })
+    entries = dirents.map((d) => ({ name: d.name, isDir: d.isDirectory() }))
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "ENOENT") return []
+    throw err
+  }
+  const out: string[] = []
+  for (const entry of entries) {
+    const full = join(dir, entry.name)
+    if (entry.isDir) {
+      out.push(...(await collectJsonlPaths(full)))
+    } else if (entry.name.endsWith(".jsonl")) {
+      out.push(full)
+    }
+  }
+  return out.sort()
+}
+
+/** Count importable skills under `<root>/skills`. ENOENT (no skills dir) ⇒ 0;
+ *  any other error propagates to the caller's try/catch. Returns 0 when
+ *  `includeSkills` is false (caller opted out). */
+const countSkills = async (root: string, includeSkills: boolean): Promise<number> => {
+  if (!includeSkills) return 0
+  try {
+    const entries = await readdir(join(root, "skills"))
+    return entries.length
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "ENOENT") return 0
+    throw err
+  }
+}
+
+/** Stage 3: session completion — translate each provider session transcript
+ *  into v3 `Message[]` via the provider translator (L4). Sessions are
+ *  discovered as `*.jsonl` files under `projects/` (claude_code) / `sessions/`
+ *  (others). Halt-on-error: the FIRST translation failure emits
+ *  `session_completion_finished {ok:false}` and returns. A successfully
+ *  translated session is counted regardless of message count (a zero-message
+ *  but well-formed transcript still imports). Skills counting via the
+ *  `skills/` subdir is preserved unchanged. */
 const stageSessionCompletion = async (
   root: string,
   provider: Exclude<ExternalAgentProvider, "unknown">,
-  sessionsDiscovered: number,
   includeSkills: boolean,
   emit: ImportEventSink,
 ): Promise<{ ok: true; sessionsImported: number; skillsImported: number } | { ok: false }> => {
   try {
-    let skillsImported = 0
-    if (includeSkills) {
-      const skillsDir = join(root, "skills")
+    const sessionsDir = provider === "claude_code" ? join(root, "projects") : join(root, "sessions")
+    const jsonlPaths = await collectJsonlPaths(sessionsDir)
+    const translator = translatorFor(provider)
+
+    let sessionsImported = 0
+    for (const path of jsonlPaths) {
       try {
-        const entries = await readdir(skillsDir)
-        skillsImported = entries.length
+        // Translation result (Message[]) is intentionally not persisted here —
+        // the importer's contract is to PROVE the transcript translates and
+        // tally it; persistence into v3 sessions is the follow-up. A throw is
+        // a halt-on-error condition.
+        await translator.translateFromFile(path, provider)
+        sessionsImported++
       } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code
-        if (code !== "ENOENT") throw err
+        emit({
+          stage: "session_completion_finished",
+          ok: false,
+          provider,
+          error: `translate ${path}: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return { ok: false }
       }
     }
+
+    const skillsImported = await countSkills(root, includeSkills)
     emit({
       stage: "session_completion_finished",
       ok: true,
       provider,
-      sessionsImported: sessionsDiscovered,
+      sessionsImported,
       skillsImported,
     })
-    return { ok: true, sessionsImported: sessionsDiscovered, skillsImported }
+    return { ok: true, sessionsImported, skillsImported }
   } catch (err) {
     emit({
       stage: "session_completion_finished",
@@ -185,13 +244,7 @@ export const runImport = async (
     return r
   }
 
-  const sc = await stageSessionCompletion(
-    det.root,
-    provider,
-    ps.sessionsDiscovered,
-    includeSkills,
-    emit,
-  )
+  const sc = await stageSessionCompletion(det.root, provider, includeSkills, emit)
   if (!sc.ok) {
     const r: ImportResult = {
       provider,

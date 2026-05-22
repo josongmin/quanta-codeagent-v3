@@ -1,4 +1,11 @@
+import { homedir } from "node:os"
 import type { Message } from "@/llm"
+import {
+  appendImportLog,
+  type ExternalAgentProvider,
+  type ImportEvent,
+  runImport,
+} from "@/migration"
 import { createPersistentWorktree, isGitRepo, removeWorktree, WorktreeForkError } from "@/runtime"
 import {
   archivedFilePath,
@@ -33,6 +40,9 @@ export interface SessionCommandDeps {
   err: (s: string) => void
   /** Interactive confirm. Resolves to `true` only on an explicit yes. */
   confirm: (prompt: string) => Promise<boolean>
+  /** Home directory to scan for external-agent installs (`import` subcommand).
+   *  Injectable so tests can point at a tmp home; defaults to `os.homedir()`. */
+  homeDir?: string
 }
 
 /** Truncate to `n` characters, appending an ellipsis when shortened. */
@@ -82,8 +92,18 @@ const usage = (): string =>
     "  rewind <id> <msg-id>                truncate transcript after msg-id",
     "  delete <id> [--force]               remove session file + index entry",
     "  path <id>                           print absolute file path",
+    "  import <provider>                   import sessions from an external agent",
+    "                                       (provider: claude_code | cursor | aider)",
     "",
   ].join("\n")
+
+/** Providers the `import` subcommand accepts. `unknown` is intentionally
+ *  excluded — it is a typed sentinel, never a user-supplied value. */
+const IMPORT_PROVIDERS: readonly Exclude<ExternalAgentProvider, "unknown">[] = [
+  "claude_code",
+  "cursor",
+  "aider",
+]
 
 /** Read a `--<flag> <value>` pair out of `args`. Returns `undefined` if absent. */
 const readValueFlag = (args: string[], flag: string): string | undefined => {
@@ -475,6 +495,59 @@ const cmdPath = async (args: string[], deps: SessionCommandDeps): Promise<number
   return 0
 }
 
+const cmdImport = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
+  const unknown = checkUnknownArgs(args, 1, ["--no-skills"], [])
+  if (unknown !== undefined) {
+    deps.err(errLine("import", `unexpected argument: ${unknown}`))
+    return 1
+  }
+  const provider = args.find((a) => !a.startsWith("--"))
+  if (provider === undefined) {
+    deps.err(errLine("import", "missing <provider> (claude_code | cursor | aider)"))
+    return 1
+  }
+  if (!IMPORT_PROVIDERS.includes(provider as Exclude<ExternalAgentProvider, "unknown">)) {
+    deps.err(
+      errLine("import", `unknown provider: ${provider} (expected claude_code | cursor | aider)`),
+    )
+    return 1
+  }
+  const home = deps.homeDir ?? homedir()
+  const includeSkills = !hasFlag(args, "--no-skills")
+
+  const events: ImportEvent[] = []
+  const result = await runImport(
+    provider as Exclude<ExternalAgentProvider, "unknown">,
+    { homeDir: home, includeSkills },
+    (e) => events.push(e),
+  )
+
+  const ok = result.errors.length === 0
+  // Record the run in the persisted import log (best-effort; a busy-lock or
+  // write error is surfaced but does not change the import's own exit code,
+  // which reflects whether the translation succeeded).
+  try {
+    await appendImportLog(home, {
+      timestamp: new Date().toISOString(),
+      provider: result.provider,
+      stage: "import_finished",
+      ok,
+      detail: `sessions=${result.sessionsImported}, skills=${result.skillsImported}`,
+    })
+  } catch (e) {
+    deps.err(`session import: warning: failed to write import log: ${(e as Error).message}\n`)
+  }
+
+  if (!ok) {
+    deps.err(errLine("import", `failed: ${result.errors.join("; ")}`))
+    return 1
+  }
+  deps.out(
+    `imported ${result.provider}: ${result.sessionsImported} session(s), ${result.skillsImported} skill(s)\n`,
+  )
+  return 0
+}
+
 /** Entry point for the `session` subcommand dispatcher.
  *
  * `args` is the slice AFTER `quanta session` (i.e. `process.argv.slice(3)`).
@@ -517,6 +590,8 @@ export const runSessionCommand = async (
         return await cmdDelete(rest, deps)
       case "path":
         return await cmdPath(rest, deps)
+      case "import":
+        return await cmdImport(rest, deps)
       default:
         deps.err(`session: unknown subcommand: ${sub}\n`)
         deps.out(usage())

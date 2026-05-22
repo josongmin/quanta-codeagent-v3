@@ -30,7 +30,13 @@ const seedClaude = async (sessionCount: number, withSkills: boolean): Promise<vo
   })
   await mkdir(join(home, ".claude/projects"), { recursive: true })
   for (let i = 0; i < sessionCount; i++) {
-    await writeFile(join(home, `.claude/projects/sess-${i}.json`), "{}", "utf8")
+    // L4: stage 3 translates real `*.jsonl` transcripts, so seed valid
+    // Claude Code session JSONL (one user line) rather than empty `.json`.
+    const line = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: `hi ${i}` }] },
+    })
+    await writeFile(join(home, `.claude/projects/sess-${i}.jsonl`), `${line}\n`, "utf8")
   }
   if (withSkills) {
     await mkdir(join(home, ".claude/skills"), { recursive: true })
