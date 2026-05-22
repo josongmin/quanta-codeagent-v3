@@ -455,14 +455,26 @@ const runPermissionStack = (
 
 /** Phase C — trust-scope short-circuit for the ask-branch (ADR-0050). DEFAULT
  *  OFF: returns false unless `config.trustScope` is set AND the registry
- *  confirms a positive grant for `(projectKey, action.tool)`. The registry
- *  owns once_only consumption; the gate never branches on scope literals. */
+ *  confirms a positive grant for `(projectKey, action.tool[, actionKey])`. The
+ *  registry owns once_only consumption; the gate never branches on scope
+ *  literals.
+ *
+ *  L4 promotion (persistent registry — `trust-scope-store.ts`): the registry's
+ *  `hasGrant` cascade now keys on (tool, actionKey, command-pattern). The gate
+ *  derives the action's `actionKey` from the same `extractShellCommand` source
+ *  the reviewer dispatch uses, so a persisted `bash|git status` grant is hit
+ *  for the same call shape the reviewer would see. Absent shell command ⇒
+ *  tool-only lookup (legacy behavior — pure widening, byte-identical to
+ *  pre-L4 callers that pass an in-memory registry). */
 const trustScopeGrants = (
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
 ): boolean => {
   if (!config.trustScope) return false
-  return config.trustScope.registry.hasGrant(config.trustScope.projectKey, { tool: action.tool })
+  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  const lookup: { tool: string; actionKey?: string } = { tool: action.tool }
+  if (shellCommand !== null) lookup.actionKey = `${action.tool}|${shellCommand}`
+  return config.trustScope.registry.hasGrant(config.trustScope.projectKey, lookup)
 }
 
 /** Resolve the `ask` branch: short-circuit on a trust-scope grant, otherwise

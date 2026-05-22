@@ -124,6 +124,14 @@ export {
   type TrustScopeGrant,
   type TrustScopeRegistry,
 } from "./trust-scope"
+export {
+  createPersistentTrustScopeRegistry,
+  defaultProjectOverlayPath,
+  defaultTrustScopeStatePath,
+  type PersistentTrustScopeOptions,
+  type PersistentTrustScopeRecord,
+  type PersistentTrustScopeRegistry,
+} from "./trust-scope-store"
 export type {
   ApprovalDecision,
   ApprovalOutcome,
