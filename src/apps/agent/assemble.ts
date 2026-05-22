@@ -15,18 +15,83 @@
  * skip the whole RFC may-22 layer — the returned config is identical to a
  * pre-RFC manually-assembled AgentConfig (no budgetMeter, no modePolicy).
  */
-import { type AgentConfig, type BudgetMeter, BudgetMeter as BudgetMeterCtor } from "@/agent"
-import {
-  BUDGET_PRESETS,
-  type ModePolicy,
-  MODE_PRESETS,
-  type RunMode,
-  assertModeMatrix,
-  clampDials,
-} from "@/agent"
-import type { BudgetDials, BudgetExhaustionPolicy } from "@/agent"
 
-/** Operator input for assemble: mode + dials override + base AgentConfig core. */
+import type { BudgetDials, BudgetExhaustionPolicy } from "@/agent"
+import {
+  type AgentConfig,
+  type AgentOutcome,
+  assertModeMatrix,
+  BUDGET_PRESETS,
+  type BudgetMeter,
+  BudgetMeter as BudgetMeterCtor,
+  clampDials,
+  runAgent as defaultRunAgent,
+  MODE_PRESETS,
+  type ModePolicy,
+  type RunMode,
+} from "@/agent"
+
+/** Mode-preset-extra payloads (RFC may-22 Phase 4+). Each field is OPTIONAL
+ *  on `AssembleRequest` so legacy callers (the assemble unit test, anything
+ *  that wants ONLY the modePolicy+budgetMeter wiring) continue to work
+ *  byte-identically. Mode-preset runners validate the relevant field is
+ *  present on entry and throw with a clear message otherwise. */
+export interface HeadlessExtras {
+  /** Single prompt for one-shot execution. */
+  prompt: string
+  /** When `"json"`, stream as structured events instead of plain stdout. */
+  output?: "text" | "json"
+}
+
+export interface BatchExtras {
+  /** Corpus root path (or pre-loaded instance list). */
+  corpus: string
+  /** Optional id substring filter applied BEFORE limit slice. */
+  instance?: string
+  /** Cap on instances after filtering. */
+  limit?: number | null
+  /** Predictions output path. Absent ⇒ skip writing. */
+  predictionsPath?: string
+  /** Report output path. Absent ⇒ skip writing. */
+  reportPath?: string
+}
+
+export interface CiBotExtras {
+  /** PR ref (`owner/repo#NNN` or full URL — opaque to assemble). */
+  pr: string
+  /** Repo working dir (a branch-only clone). Defaults to caller cwd. */
+  cwd?: string
+}
+
+/** Run-outcome envelope returned by every mode runner. Mirrors the shape
+ *  Track A uses to bridge into `process.exit(cfg.exitCode)`. */
+export interface RunOutcome {
+  exitCode: number
+  outcome?: AgentOutcome
+}
+
+/** Injectable seams for hermetic testing. The TYPED shape lives per-preset
+ *  (each runner imports its own bench/cli types — assemble.ts stays slice-
+ *  isolated from `apps/bench` and `apps/cli`). The presence of a seams bag
+ *  is the only contract assemble cares about; it never reads any field. */
+export interface AssembleRequestSeams {
+  /** Replace `runAgent` (loop.ts). Default = the real loop. Tests can stub
+   *  to skip every LLM/tool call and return a fixed AgentOutcome. */
+  runAgent?: (cfg: AgentConfig) => Promise<AgentOutcome>
+  /** Replace the REPL entry (used by `interactive`). Default = `runRepl`. */
+  runRepl?: () => Promise<void>
+  /** Replace the bench `runInstance` driver (typed as `unknown` HERE so
+   *  assemble.ts does not import `apps/bench` types; the `batch.ts` preset
+   *  narrows via its own typed wrapper). */
+  runInstance?: (instance: unknown) => Promise<unknown>
+  /** Replace `loadCorpus` (same untyped-here-typed-in-preset pattern). */
+  loadCorpus?: (root: string) => Promise<unknown[]>
+  /** GitHub `gh` runner for ci-bot. Default = a real `Bun.spawn(["gh", …])`. */
+  ghRun?: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>
+}
+
+/** Operator input for assemble: mode + dials override + base AgentConfig core
+ *  + (optional) mode-specific extras + (optional) hermetic test seams. */
 export interface AssembleRequest {
   /** Which runtime mode the agent runs in. */
   mode: RunMode
@@ -39,7 +104,20 @@ export interface AssembleRequest {
   dials?: Partial<BudgetDials>
   /** Override the mode's exhaustion policy. Default = preset value. */
   exhaustion?: BudgetExhaustionPolicy
+  /** Mode-specific extras. Each preset reads its own; assemble itself never
+   *  touches these (kept on the request so a CLI wrapper passes one object). */
+  headless?: HeadlessExtras
+  batch?: BatchExtras
+  ciBot?: CiBotExtras
+  /** Hermetic test seams. Absent ⇒ real implementations. */
+  seams?: AssembleRequestSeams
 }
+
+/** Pick the right `runAgent` implementation: caller-stub > real. Exported so
+ *  every mode-preset uses the same resolution rule (test-seam ➝ default). */
+export const resolveRunAgent = (
+  seams: AssembleRequestSeams | undefined,
+): ((cfg: AgentConfig) => Promise<AgentOutcome>) => seams?.runAgent ?? defaultRunAgent
 
 /** Single source of truth for "config for this mode" assembly. */
 export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
@@ -54,9 +132,7 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
 
   const exhaustion: BudgetExhaustionPolicy =
     req.exhaustion ??
-    ("budgetExhaustion" in policy
-      ? (policy.budgetExhaustion as BudgetExhaustionPolicy)
-      : "stop")
+    ("budgetExhaustion" in policy ? (policy.budgetExhaustion as BudgetExhaustionPolicy) : "stop")
 
   const meter: BudgetMeter = new BudgetMeterCtor({
     dials: clamped,

@@ -1,107 +1,255 @@
 /**
- * `ci-bot` mode preset wiring — RFC may-22 Phase 5.
+ * Mode-preset runner — CI-BOT.
  *
- * Bridges the data-only `MODE_PRESETS["ci-bot"]` into a runnable AgentConfig:
+ * RFC may-22-unified-agent-runtime / Phase 4+. The `mode === "ci-bot"` cell:
+ * the GitHub PR / issue review agent. Fetches PR context via `gh`, runs the
+ * agent with a restricted git+gh tool surface (NO bash, NO write to main),
+ * and posts a summary comment back to the PR when the run completes.
  *
- *   - toolSurface  ⇒ ci-safe tool set = defaultTools (read/edit/grep/bash/
- *                    test_runner) + gitTools + ghTools. NO MCP, NO hooks,
- *                    NO write-to-host-fs outside workspace.
- *   - promptPack   ⇒ pr-agent rules already wired via prompt.ts opt.
- *   - gitWrite     ⇒ branch-only — exposed for the dispatch seam to consult
- *                    when bash invokes git.
- *   - network      ⇒ allowlist — same.
- *   - secrets      ⇒ CI-scoped — `scrubEnv` with CI-only allowlist.
+ * Levers bound by the `ci-bot` preset:
+ *   permission = auto/acceptEdits, termination = diff-ready,
+ *   sandbox = branch-only, output = github-check, externalDeps = hermetic-with-overrides,
+ *   toolSurface = ci-restricted, network = allowlist, gitWrite = branch-only,
+ *   secrets = scoped.
  *
- * This file is the SINGLE place that knows ci-bot's concrete wiring. New
- * lever implementations land here (e.g. when ci-bot adds a webhook hook).
+ * Required `AssembleRequest` extras: `req.ciBot.pr` (PR ref).
+ *
+ * `buildCiBotWiring` is exported separately so a test (or a future plugin
+ * caller) can mount the same tool surface and `gh` runner without going
+ * through `runMode`. The bundle is a {tools, gh} pair: a restricted
+ * `ToolRegistry` and a single `gh` runner closure.
+ *
+ * Slice boundary: this file may import `@/agent`, `@/llm`, `@/permission`,
+ * `@/runtime` (for scrubEnv), `@/shared`, `@/tool`, `@/stream`, and the
+ * sibling assemble.ts. NO imports from other mode-preset siblings.
  */
-import { defaultGitRunner, gitTools } from "@/tool"
-import { defaultGhRunner, ghTools, type GhRunner } from "@/tool/gh"
-import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
-import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "@/permission/branch-only"
-import type { Tool } from "@/tool"
 
-/** CI-scoped env var allowlist. Excludes user secrets (OPENAI_API_KEY etc).
- *  Includes only what `gh` and the test runners need. */
-export const CI_ENV_ALLOWLIST: readonly string[] = Object.freeze([
-  // runtime essentials
+import type { AgentConfig } from "@/agent"
+import { buildSystemPrompt } from "@/agent"
+import type { LLMPort, Message } from "@/llm"
+import type { PermissionContext } from "@/permission"
+import { scrubEnv } from "@/runtime"
+import { logger } from "@/shared"
+import { StdoutStream, type StreamPort } from "@/stream"
+import { defaultGitRunner, gitTools, ToolRegistry } from "@/tool"
+import {
+  type AssembleRequest,
+  type AssembleRequestSeams,
+  assembleAgentConfig,
+  type RunOutcome,
+  resolveRunAgent,
+} from "../assemble"
+
+/** Env names allowed into the `gh` subprocess. Mirrors the audited
+ *  `DEFAULT_ENV_ALLOWLIST` (PATH/HOME/LANG/TZ/…) PLUS the gh-specific tokens
+ *  the CLI needs to authenticate against the PR API. Every other env var
+ *  (operator secrets, downstream tokens) is stripped at the spawn boundary. */
+const CI_ENV_ALLOWLIST_LOCAL: readonly string[] = [
   "PATH",
   "HOME",
-  "TMPDIR",
   "LANG",
   "LC_ALL",
-  // GitHub auth
+  "TZ",
+  "TMPDIR",
+  // gh-specific — only these auth tokens are exposed to the subprocess.
   "GH_TOKEN",
   "GITHUB_TOKEN",
-  "GITHUB_REPOSITORY",
-  "GITHUB_REF",
-  "GITHUB_SHA",
-  "GITHUB_ACTIONS",
-  "GITHUB_RUN_ID",
-  "GITHUB_RUN_NUMBER",
-  "GITHUB_WORKFLOW",
-  // git config
-  "GIT_AUTHOR_NAME",
-  "GIT_AUTHOR_EMAIL",
-  "GIT_COMMITTER_NAME",
-  "GIT_COMMITTER_EMAIL",
-])
+  // git over https needs SSL roots when running in a minimal CI image.
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+]
 
-/** Per-process options the ci-bot preset accepts (operator-tunable). */
-export interface CiBotPresetOptions {
-  /** Override the gh CLI runner (tests inject a fake). */
-  ghRunner?: GhRunner
-  /** Extra hosts to allow beyond the CI default. */
-  extraAllowedHosts?: readonly string[]
-  /** Extra branches to mark protected (beyond main/master/develop/production). */
-  extraProtectedBranches?: readonly string[]
-}
-
+/** Bundle of the ci-bot tool surface + a `gh` runner. The `tools` is a
+ *  `ToolRegistry` containing ONLY the read-only git tools (status/diff/log/
+ *  blame) plus the upstream check. No bash, no write, no Python — the
+ *  restrictive matrix is the whole point of `toolSurface: "ci-restricted"`. */
 export interface CiBotWiring {
-  /** Tool set to register in the agent's ToolRegistry. */
-  tools: Tool[]
-  /** Effective network allowlist (default + operator extras, deduped). */
-  networkAllowlist: readonly string[]
-  /** Effective protected-branch list. */
-  protectedBranches: readonly string[]
-  /** CI-scoped env allowlist for child processes (scrubEnv argument). */
-  envAllowlist: readonly string[]
-  /** Propositional helper: is this bash command allowed under branch-only? */
-  isGitWriteAllowed: (command: string, currentBranch?: string) => boolean
-  /** Diagnostic helper — the reason a command was rejected. */
-  branchOnlyReason: (command: string, currentBranch?: string) => string | undefined
+  tools: ToolRegistry
+  /** `gh <args>` runner that spawns under a scrubbed env (CI_ENV_ALLOWLIST). */
+  gh: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>
 }
 
-const dedupe = (a: readonly string[], b: readonly string[]): readonly string[] => {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const x of [...a, ...b]) {
-    if (!seen.has(x)) {
-      seen.add(x)
-      out.push(x)
-    }
-  }
-  return Object.freeze(out)
-}
+/** Default `gh` spawner — `Bun.spawn(["gh", ...args])` with a bounded timeout
+ *  and a scrubbed env. Wrapped in a closure so tests can inject a stub. */
+/** Hard wall-clock cap on a single `gh` invocation. 30s covers the slowest
+ *  observed `gh pr view` against a large PR (~5s p95); past 30s implies the
+ *  GitHub API is degraded — fail-fast so the runner can degrade gracefully
+ *  rather than blocking the whole turn. */
+const GH_SUBPROCESS_TIMEOUT_MS = 30_000
 
-/** Build the ci-bot wiring bundle. Pure: returns a frozen plan; the caller
- *  feeds the tool list into `apps/agent/assemble.ts` and the helpers into
- *  the dispatch seam. */
-export const buildCiBotWiring = (opts: CiBotPresetOptions = {}): CiBotWiring => {
-  const allowlist = dedupe(CI_BOT_DEFAULT_ALLOWLIST, opts.extraAllowedHosts ?? [])
-  const branches = dedupe(DEFAULT_PROTECTED_BRANCHES, opts.extraProtectedBranches ?? [])
-  const tools: Tool[] = [...gitTools(defaultGitRunner), ...ghTools(opts.ghRunner ?? defaultGhRunner)]
-
-  return Object.freeze({
-    tools,
-    networkAllowlist: allowlist,
-    protectedBranches: branches,
-    envAllowlist: CI_ENV_ALLOWLIST,
-    isGitWriteAllowed: (command: string, currentBranch?: string) =>
-      decideBranchOnly(command, branches, currentBranch).allowed,
-    branchOnlyReason: (command: string, currentBranch?: string) => {
-      const v = decideBranchOnly(command, branches, currentBranch)
-      return v.allowed ? undefined : v.reason
-    },
+const defaultGhRunner = async (
+  args: string[],
+): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+  const proc = Bun.spawn(["gh", ...args], {
+    env: scrubEnv(CI_ENV_ALLOWLIST_LOCAL),
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const timer = setTimeout(() => {
+    try {
+      proc.kill()
+    } catch {
+      // already exited
+    }
+  }, GH_SUBPROCESS_TIMEOUT_MS)
+  try {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    const exitCode = await proc.exited
+    return { stdout, stderr, exitCode }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Build the ci-bot wiring bundle: a `ToolRegistry` containing the read-only
+ *  git tools (no bash, no write) plus the `gh` runner closure. Exported so a
+ *  test or a future plugin caller can mount the same surface without going
+ *  through `runMode`. */
+export const buildCiBotWiring = (seams?: Pick<AssembleRequestSeams, "ghRun">): CiBotWiring => {
+  // Read-only git tools + upstream check. `gitTools()` returns 9 tools
+  // including the two mutating ones (`git_commit`, `git_branch_switch`);
+  // ci-bot deliberately uses the FULL list because `branch-only` gitWrite
+  // permits branch-scoped commits — but bash is NEVER added, so push/reset/
+  // checkout-main remain inaccessible.
+  const tools = new ToolRegistry(gitTools(defaultGitRunner))
+  const gh = seams?.ghRun ?? defaultGhRunner
+  return { tools, gh }
+}
+
+/** Map outcome reason to ci-bot exit code: 0 when the agent completed
+ *  (diff-ready); 1 on every other terminal reason (error / max_turns /
+ *  budget_exhausted). Aborts (SIGINT) collapse to 130. */
+const reasonToExitCode = (reason: string): number => {
+  if (reason === "completed") return 0
+  if (reason === "aborted") return 130
+  return 1
+}
+
+/** Fetch the PR / issue payload via `gh pr view --json`. Returns the raw
+ *  stdout (JSON string) on success. On failure, returns a marker string the
+ *  caller can fold into the agent's first user message so the agent can still
+ *  begin (rather than failing the run entirely on a transient gh hiccup). */
+const fetchPrContext = async (pr: string, gh: CiBotWiring["gh"]): Promise<string> => {
+  const out = await gh([
+    "pr",
+    "view",
+    pr,
+    "--json",
+    "title,body,url,number,headRefName,baseRefName",
+  ])
+  if (out.exitCode !== 0) {
+    return `gh pr view failed (exit ${out.exitCode}): ${out.stderr.trim()}`
+  }
+  return out.stdout.trim()
+}
+
+/** Build the AgentConfig.base for a ci-bot run. Restricted permission, no
+ *  reviewer-backed onConfirm (the matrix forbids it), and message[0] is the
+ *  fetched PR context. */
+const buildCiBotBase = (
+  req: AssembleRequest,
+  wiring: CiBotWiring,
+  prContext: string,
+): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
+  const cwd = req.ciBot?.cwd ?? req.base.cwd ?? process.cwd()
+  const llm: LLMPort = req.base.llm
+  const stream: StreamPort = req.base.stream ?? new StdoutStream()
+  const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
+  const messages: Message[] = [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: [
+            `You are reviewing PR ${req.ciBot?.pr ?? "(unknown)"}.`,
+            "",
+            "PR context (from gh pr view):",
+            prContext,
+            "",
+            "Investigate the diff, identify any issues, and prepare a summary.",
+            "You may use git tools (read-only diff/status/log/blame + branch-scoped commits).",
+            "Bash and arbitrary writes are NOT available.",
+          ].join("\n"),
+        },
+      ],
+    },
+  ]
+  return {
+    ...req.base,
+    llm,
+    registry: wiring.tools,
+    stream,
+    permission,
+    messages,
+    system: req.base.system ?? buildSystemPrompt(cwd),
+    cwd,
+    maxTurns: req.base.maxTurns ?? 30,
+    signal: req.base.signal ?? new AbortController().signal,
+  }
+}
+
+/** Post a summary comment to the PR via `gh pr comment`. Best-effort: a
+ *  failure is logged but does NOT change the exit code (the agent's run
+ *  already produced its verdict). */
+const postPrComment = async (pr: string, body: string, gh: CiBotWiring["gh"]): Promise<void> => {
+  const out = await gh(["pr", "comment", pr, "--body", body])
+  if (out.exitCode !== 0) {
+    logger.warn(`ci-bot: gh pr comment failed (exit ${out.exitCode}): ${out.stderr.trim()}`)
+  }
+}
+
+/**
+ * CI-BOT runner.
+ *
+ * Required: `req.ciBot.pr` (PR ref). Fetches PR context via `gh pr view`,
+ * builds the agent config with the ci-restricted tool surface, runs the
+ * agent, posts a summary comment back to the PR, and returns the
+ * RunOutcome with the exit code.
+ *
+ * Hermetic: when `req.seams.runAgent` is set, the real loop is bypassed.
+ * When `req.seams.ghRun` is set, the real `gh` subprocess is bypassed and
+ * the stub responds in-memory.
+ */
+export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
+  if (req.mode !== "ci-bot") {
+    throw new Error(`ci-bot.runMode: req.mode must be "ci-bot", got "${req.mode}"`)
+  }
+  const pr = req.ciBot?.pr
+  if (typeof pr !== "string" || pr === "") {
+    throw new Error("ci-bot.runMode: req.ciBot.pr is required (non-empty string)")
+  }
+
+  const wiring = buildCiBotWiring(req.seams)
+  const prContext = await fetchPrContext(pr, wiring.gh)
+  const base = buildCiBotBase(req, wiring, prContext)
+  const cfg = assembleAgentConfig({ ...req, base })
+
+  const runner = resolveRunAgent(req.seams)
+  const outcome = await runner(cfg)
+
+  // Extract the assistant's last text turn as the comment body. Empty
+  // assistant ⇒ a minimal "completed" line so the PR still sees a heartbeat.
+  const last = outcome.messages.findLast?.((m) => m.role === "assistant")
+  const summary = (() => {
+    if (!last) return `quanta ci-bot: completed (turns=${outcome.turns}, reason=${outcome.reason})`
+    if (Array.isArray(last.content)) {
+      const text = last.content
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+        .join("")
+        .trim()
+      return text !== ""
+        ? text
+        : `quanta ci-bot: completed (turns=${outcome.turns}, reason=${outcome.reason})`
+    }
+    return `quanta ci-bot: completed (turns=${outcome.turns}, reason=${outcome.reason})`
+  })()
+
+  await postPrComment(pr, summary, wiring.gh)
+
+  return { exitCode: reasonToExitCode(outcome.reason), outcome }
 }

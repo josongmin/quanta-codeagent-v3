@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test"
 import {
   buildCiBotWiring,
   CI_ENV_ALLOWLIST,
-} from "@/../src/apps/agent/mode-presets/ci-bot"
+} from "@/../src/apps/agent/mode-presets/ci-bot-policy"
 
 describe("buildCiBotWiring — tool surface", () => {
   test("includes git + gh tools", () => {
