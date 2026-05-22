@@ -40,3 +40,4 @@ coverage/
 # SWE-bench smoke live-run artifacts (baseline is picks.jsonl, not these)
 tests/smoke/swebench/predictions.jsonl
 tests/smoke/swebench/bench-report.json
+tests/smoke/swebench/recordings/trajectories/
