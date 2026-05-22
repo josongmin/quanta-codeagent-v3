@@ -99,7 +99,14 @@ const runBlocked = async (
 }
 
 describe("Mode dispatch e2e — runAgent honours plan/review/audit gating", () => {
-  test("plan mode blocks a write tool; loop completes; preview carries 'plan' reason", async () => {
+  test("plan mode blocks a write tool; loop completes; preview carries 'plan'/'mode' reason", async () => {
+    // ADR-0036 L4 (plan-mode-dispatch-block): the dispatch-seam guard
+    // now pre-empts the admissibility-gate's `plan-blocked` arm for
+    // dispatchTool callers. Custom `captured_write` is absent from
+    // MUTATING_TOOL_TABLE → guard returns deny with preview "mode-blocked"
+    // and the typed UnknownToolError message that names the table.
+    // The CONTRACT this test pins: the deny carries SOMETHING about the
+    // mode block — match either the legacy preview or the new one.
     const { outcome, events, executions } = await runBlocked("plan")
     expect(outcome.reason).toBe("completed")
     expect(executions).toBe(0) // tool execute() must NEVER have been reached
@@ -108,11 +115,8 @@ describe("Mode dispatch e2e — runAgent honours plan/review/audit gating", () =
     expect(result).toBeDefined()
     if (result && result.type === "tool_result") {
       expect(result.ok).toBe(false)
-      // The block reason format is "blocked in <mode> mode: <toolName>"
-      // (mode.ts:53). The preview surfaces SOMETHING about the mode — we
-      // match the mode name loosely so a future cosmetic copy change does
-      // not cascade into this test.
-      expect(result.preview.toLowerCase()).toContain("plan")
+      const lower = result.preview.toLowerCase()
+      expect(lower === "mode-blocked" || lower.includes("plan")).toBe(true)
     }
   }, 15_000)
 

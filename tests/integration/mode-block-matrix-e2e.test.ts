@@ -144,10 +144,15 @@ describe("Mode-dispatch matrix e2e — every mutating built-in name × every mod
         expect(result).toBeDefined()
         if (result && result.type === "tool_result") {
           expect(result.ok).toBe(false)
-          // `modeBlockReason()` formats the reason as "blocked in <mode> mode:
-          // <toolName>". Match the mode name loosely (lowercased) so a future
-          // cosmetic copy change does not cascade into this matrix.
-          expect(result.preview.toLowerCase()).toContain(mode)
+          // ADR-0036 L4 (plan-mode-dispatch-block): for `mode==='plan'`
+          // the dispatch-seam guard now pre-empts the admissibility-gate's
+          // `plan-blocked` arm and returns preview "mode-blocked" (plus
+          // the typed PlanModeMutatingBlockedError message in the body).
+          // For `review`/`audit` the seam projects to "default" so the
+          // legacy admissibility-gate still drives the block with the
+          // mode-named preview. Accept either form.
+          const lower = result.preview.toLowerCase()
+          expect(lower === "mode-blocked" || lower.includes(mode)).toBe(true)
         }
       }, 15_000)
     }
