@@ -47,6 +47,9 @@ export interface AgentArgs {
   instance?: string
   /** ci-bot: `--pr <num>` (kept as string — surface decides numeric shape). */
   pr?: string
+  /** ci-bot: `--dry-run` — stub the PR-comment write (read the PR but do not
+   *  post). Used for safe e2e validation. Absent ⇒ real post. */
+  ciBotDryRun?: boolean
   /** `--help` / `-h` short-circuit. */
   help: boolean
 }
@@ -178,6 +181,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   let prompt: string | undefined
   let corpus: string | undefined
   let instance: string | undefined
+  let ciBotDryRun = false
   let pr: string | undefined
   const dials: Partial<BudgetDials> = {}
 
@@ -255,6 +259,13 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
       continue
     }
 
+    if (a === "--dry-run") {
+      // ci-bot only: stub the PR-comment write at the runner edge.
+      ciBotDryRun = true
+      i += 1
+      continue
+    }
+
     if (isDialFlag(a)) {
       const raw = takeValue(argv, i, a)
       const n = parseIntStrict(raw, a)
@@ -295,6 +306,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   if (corpus !== undefined) out.corpus = corpus
   if (instance !== undefined) out.instance = instance
   if (pr !== undefined) out.pr = pr
+  if (ciBotDryRun) out.ciBotDryRun = true
   return out
 }
 
