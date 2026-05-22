@@ -1,6 +1,19 @@
 import { escapeReminderBoundary } from "./prompt"
 
 /**
+ * Defang BOTH boundary tag families a user-controlled fragment could forge:
+ * the outer `<system-reminder>` wrapper (the rendered block is ultimately
+ * prepended to a user message that may itself be inside a reminder downstream)
+ * AND this block's own `<ide-context>` wrapper. `escapeReminderBoundary` alone
+ * only handles `system-reminder`; a selection text or diagnostic message
+ * carrying a literal `</ide-context>` would otherwise terminate THIS block's
+ * wrapper and let the trailing payload read as out-of-band context — the exact
+ * trust-boundary break the renderer's docstring promises against. Same backslash
+ * defang form (`<\/ide-context>` / `<\ide-context>`), case-insensitive. */
+const escapeContextBoundary = (s: string): string =>
+  escapeReminderBoundary(s).replace(/<(\/?ide-context>)/gi, "<\\$1")
+
+/**
  * IDE context provider seam (ADR-0080).
  *
  * The loop has no way to know what file the human is currently editing, which
@@ -97,9 +110,9 @@ const isEmptySnapshot = (snapshot: IdeSnapshot): boolean => {
  *  (untyped JS host, `as any` cast) cannot forge `<system-reminder>` tags. */
 const renderActiveFile = (file: IdeSnapshot["activeFile"]): string | undefined => {
   if (file === undefined) return undefined
-  const path = escapeReminderBoundary(file.path)
+  const path = escapeContextBoundary(file.path)
   return file.line !== undefined
-    ? `## Active file: ${path}:${escapeReminderBoundary(String(file.line))}`
+    ? `## Active file: ${path}:${escapeContextBoundary(String(file.line))}`
     : `## Active file: ${path}`
 }
 
@@ -109,7 +122,7 @@ const renderOpenTabs = (tabs: IdeSnapshot["openTabs"]): string[] | undefined => 
   if (!tabs || tabs.length === 0) return undefined
   const lines: string[] = ["## Open tabs:"]
   for (const tab of tabs) {
-    const path = escapeReminderBoundary(tab.path)
+    const path = escapeContextBoundary(tab.path)
     lines.push(tab.dirty === true ? `- ${path} [dirty]` : `- ${path}`)
   }
   return lines
@@ -119,11 +132,11 @@ const renderOpenTabs = (tabs: IdeSnapshot["openTabs"]): string[] | undefined => 
  *  `undefined` when no selection is present. */
 const renderSelection = (selection: IdeSnapshot["selection"]): string[] | undefined => {
   if (selection === undefined) return undefined
-  const path = escapeReminderBoundary(selection.path)
+  const path = escapeContextBoundary(selection.path)
   const [start, end] = selection.range
-  const startStr = escapeReminderBoundary(String(start))
-  const endStr = escapeReminderBoundary(String(end))
-  const text = escapeReminderBoundary(selection.text)
+  const startStr = escapeContextBoundary(String(start))
+  const endStr = escapeContextBoundary(String(end))
+  const text = escapeContextBoundary(selection.text)
   return [`## Selection in ${path} [${startStr}:${endStr}]:`, text]
 }
 
@@ -133,10 +146,10 @@ const renderDiagnostics = (diagnostics: IdeSnapshot["diagnostics"]): string[] | 
   if (!diagnostics || diagnostics.length === 0) return undefined
   const lines: string[] = ["## Diagnostics:"]
   for (const d of diagnostics) {
-    const path = escapeReminderBoundary(d.path)
-    const message = escapeReminderBoundary(d.message)
-    const severity = escapeReminderBoundary(String(d.severity))
-    const line = escapeReminderBoundary(String(d.line))
+    const path = escapeContextBoundary(d.path)
+    const message = escapeContextBoundary(d.message)
+    const severity = escapeContextBoundary(String(d.severity))
+    const line = escapeContextBoundary(String(d.line))
     lines.push(`- ${severity} ${path}:${line} — ${message}`)
   }
   return lines

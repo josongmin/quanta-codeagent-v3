@@ -303,4 +303,30 @@ describe("T1 wiring — both adapters use withStreamTimeout", () => {
     expect(src).toContain("withStreamTimeout")
     expect(src).toContain('provider: "anthropic"')
   })
+
+  // Caller-cancellation threading (source-level pin): each adapter MUST forward
+  // the incoming StreamInput.signal in TWO places — into the SDK request
+  // options (aborts create()/TTFT) AND into the withStreamTimeout wrapper
+  // (composes with the timeout controller, aborts the post-create() stream).
+  // If a refactor drops either, an in-flight model stream stops aborting on
+  // user cancel and the socket hangs — the exact bug this fix closes. The
+  // source-level assertion is the right granularity: the adapters construct a
+  // real SDK client internally (no injection seam), so a behavioural mock would
+  // require inventing one; the wrapper's own caller-signal→controller
+  // propagation is already proven behaviourally above.
+  test("openai adapter forwards input.signal to SDK options AND timeout wrapper", () => {
+    const src = readFileSync(resolve(root, "src/llm/adapters/openai.ts"), "utf8")
+    // SDK request options: second arg to chat.completions.create.
+    expect(src).toContain("input.signal ? { signal: input.signal } : undefined")
+    // Timeout wrapper composition.
+    expect(src).toContain("...(input.signal ? { signal: input.signal } : {})")
+  })
+
+  test("anthropic adapter forwards input.signal to SDK options AND timeout wrapper", () => {
+    const src = readFileSync(resolve(root, "src/llm/adapters/anthropic.ts"), "utf8")
+    // SDK request options: second arg to messages.create.
+    expect(src).toContain("input.signal ? { signal: input.signal } : undefined")
+    // Timeout wrapper composition.
+    expect(src).toContain("...(input.signal ? { signal: input.signal } : {})")
+  })
 })

@@ -6,7 +6,7 @@ import { logger } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
 import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
-import { removeFromIndex, upsertMeta } from "./index-store"
+import { listSessions, removeFromIndex, upsertMeta } from "./index-store"
 import { archivedFilePath, sessionFilePath, sessionsRoot } from "./paths"
 import { type SavedSession, type SavePayload, SESSION_VERSION, type SessionMeta } from "./types"
 
@@ -58,9 +58,20 @@ const writeSessionFile = async (path: string, body: string): Promise<void> => {
  * element-level mismatch — better to refuse a poisoned resume than to
  * silently load it.
  */
+// IMPORTANT: these element schemas MUST stay LOSSLESS w.r.t. the `ContentBlock`
+// union in `@/llm` (TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock
+// | ImageBlock). zod strips unknown keys on `safeParse`, so any optional field
+// dropped here is silently LOST on resume — and any block variant omitted makes
+// a *valid* session refuse to load. Both are resume-fidelity bugs. Mirror every
+// field/variant the producers can persist:
+//   - TextBlock.phase           (ADR-0077 phase marker)
+//   - ThinkingBlock.signature   (Anthropic carry-back — missing ⇒ 400 on resume)
+//   - ThinkingBlock.redacted    (encrypted reasoning preservation)
+//   - ImageBlock                (ADR-0083 multimodal input)
 const textBlockSchema = z.object({
   type: z.literal("text"),
   text: z.string(),
+  phase: z.enum(["commentary", "final_answer"]).optional(),
 })
 const toolUseBlockSchema = z.object({
   type: z.literal("tool_use"),
@@ -77,12 +88,20 @@ const toolResultBlockSchema = z.object({
 const thinkingBlockSchema = z.object({
   type: z.literal("thinking"),
   thinking: z.string(),
+  signature: z.string().optional(),
+  redacted: z.literal(true).optional(),
+})
+const imageBlockSchema = z.object({
+  type: z.literal("image"),
+  data: z.string(),
+  mediaType: z.string(),
 })
 const contentBlockSchema = z.discriminatedUnion("type", [
   textBlockSchema,
   toolUseBlockSchema,
   toolResultBlockSchema,
   thinkingBlockSchema,
+  imageBlockSchema,
 ])
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -170,10 +189,39 @@ export const saveSessionById = async (meta: SessionMeta, payload: SavePayload): 
   await upsertMeta(touched)
 }
 
+/** Reconcile the lightweight index with a session's on-disk meta. The per-id
+ *  JSON file is the source of truth (it is written FIRST in every mutator);
+ *  `index.jsonl` is a derived cache written SECOND. A crash in that window
+ *  leaves the JSON correct but the index stale/absent, so the session goes
+ *  missing from `listSessions`. We self-heal here on load: if the index entry
+ *  differs from (or is missing relative to) the on-disk meta, re-upsert. This
+ *  is bounded (one session, only when divergent) and idempotent — the common
+ *  case (index already matches) does NOT write, so steady-state behavior is
+ *  byte-identical. */
+const reconcileIndexFromMeta = async (meta: SessionMeta): Promise<void> => {
+  const known = (await listSessions({ includeArchived: true })).find((m) => m.id === meta.id)
+  if (
+    known !== undefined &&
+    known.title === meta.title &&
+    known.cwd === meta.cwd &&
+    known.createdAt === meta.createdAt &&
+    known.lastTouched === meta.lastTouched &&
+    known.archived === meta.archived
+  ) {
+    return // index already agrees — no write
+  }
+  await upsertMeta(meta)
+}
+
 export const loadSessionById = async (id: string): Promise<SavedSession | undefined> => {
   const active = await readSavedSession(sessionFilePath(id))
-  if (active !== undefined) return active
-  return readSavedSession(archivedFilePath(id))
+  if (active !== undefined) {
+    await reconcileIndexFromMeta(active.meta)
+    return active
+  }
+  const archived = await readSavedSession(archivedFilePath(id))
+  if (archived !== undefined) await reconcileIndexFromMeta(archived.meta)
+  return archived
 }
 
 export const archiveSession = async (id: string): Promise<void> => {

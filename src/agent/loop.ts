@@ -345,6 +345,11 @@ const streamConsume = async (
           system,
           tools: specs,
           ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+          // Thread the loop's abort signal (user Ctrl+C / cancel) into the LLM
+          // stream so an in-flight provider request aborts on cancel instead of
+          // hanging the socket until completion/timeout. Same signal already
+          // passed to streamingTurn + tool ctx below.
+          signal: config.signal,
         }),
         recorder,
         collector,

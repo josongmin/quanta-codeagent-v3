@@ -74,7 +74,7 @@ export const appendImportLog = async (homeDir: string, entry: ImportLogEntry): P
       version: 1,
       entries: [...current.entries, entry],
     }
-    const tmp = `${path}.tmp.${process.pid}.${Date.now()}`
+    const tmp = `${path}.tmp.${process.pid}.${crypto.randomUUID().slice(0, 8)}`
     await writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
     await rename(tmp, path)
   } finally {

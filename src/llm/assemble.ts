@@ -123,9 +123,22 @@ export const assembleFromEvents = (events: StreamEvent[]): AssembledTurn => {
         // explicitly skip it so the reconstructed message is byte-identical to
         // a stream that never emitted any heartbeat.
         break
+      case "usage":
+        // Token accounting, not content. Assemblers ignore it so the
+        // reconstructed message is identical whether or not a usage event was
+        // emitted. Listed explicitly to satisfy the `default: never` pin below.
+        break
       case "message_stop":
         stopReason = ev.stop_reason
         break
+      default: {
+        // Exhaustiveness pin: a new StreamEvent variant fails compilation here
+        // and must consciously decide whether it contributes to the assembled
+        // message — no silent drop.
+        const _exhaustive: never = ev
+        void _exhaustive
+        break
+      }
     }
   }
 

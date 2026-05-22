@@ -41,6 +41,18 @@ const stderrWarn = (msg: string): void => {
   process.stderr.write(`[quanta] permission-store: ${msg}\n`)
 }
 
+/** Route a fire-and-forget write's rejection to the same stderr-warn surface
+ *  the synchronous write path uses, so a rejected `enqueueWrite()` (e.g. with
+ *  `debounceMs:0` in tests) can never surface as an unhandled rejection.
+ *  `writeToDisk` already swallows its own IO errors, so this is a defensive
+ *  backstop for the promise-chain itself — the happy path is unaffected. */
+const swallowWriteRejection =
+  (filePath: string) =>
+  (e: unknown): void => {
+    const message = e instanceof Error ? e.message : String(e)
+    stderrWarn(`flush failed (${filePath}): ${message}`)
+  }
+
 /** Distinguished outcomes of a state `parse`. The engine takes the right
  *  action per outcome — schema mismatch quarantines to a versioned sidecar so
  *  a future migration can recover, while malformed-shape just starts empty. */
@@ -186,13 +198,13 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
       // Tests with debounceMs:0 still serialize through the queue — fixes
       // the prior "fire-and-forget hits a deleted tmpdir during teardown"
       // noise by ensuring `await flush()` drains all queued writes.
-      void enqueueWrite()
+      enqueueWrite().catch(swallowWriteRejection(filePath))
       return
     }
     if (pendingTimer !== null) clearTimeout(pendingTimer)
     pendingTimer = setTimeout(() => {
       pendingTimer = null
-      void enqueueWrite()
+      enqueueWrite().catch(swallowWriteRejection(filePath))
     }, debounceMs)
     // Don't keep the event loop alive solely for the flush.
     if (typeof (pendingTimer as { unref?: () => void }).unref === "function") {

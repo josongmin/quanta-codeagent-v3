@@ -44,6 +44,11 @@ process.stdin.on("data", (c) => {
           content: [{ type: "text", text: "it failed" }],
           isError: true,
         } })
+      } else if (msg.params.name === "huge") {
+        // Emit a single text block far larger than the 200k client cap.
+        reply({ jsonrpc: "2.0", id: msg.id, result: {
+          content: [{ type: "text", text: "x".repeat(500000) }],
+        } })
       } else {
         reply({ jsonrpc: "2.0", id: msg.id, result: {
           content: [
@@ -103,6 +108,18 @@ describe("McpClient against a mock MCP server", () => {
     const res = await c.callTool("alpha", { who: "quanta" })
     await c.stop()
     expect(res).toEqual({ ok: true, content: "hello quanta\nline2" })
+  })
+
+  it("caps an oversized tool result with a truncation marker (DOS guard)", async () => {
+    const c = makeClient()
+    await c.start()
+    const res = await c.callTool("huge", {})
+    await c.stop()
+    expect(res.ok).toBe(true)
+    // Capped to the 200k head + a single-line marker; never the full 500k.
+    expect(res.content.length).toBeLessThan(500_000)
+    expect(res.content.startsWith("x".repeat(200_000))).toBe(true)
+    expect(res.content).toContain("[truncated: 300000 bytes omitted]")
   })
 
   it("maps isError results to ok:false", async () => {

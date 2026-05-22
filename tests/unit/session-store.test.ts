@@ -312,3 +312,97 @@ describe("session store", () => {
     expect(loaded?.meta.archived).toBe(true)
   })
 })
+
+/**
+ * Resume-fidelity: the on-load `savedSessionSchema` must be LOSSLESS w.r.t. the
+ * full `ContentBlock` union. A field stripped here is silently lost on resume;
+ * a block variant omitted makes a *valid* session refuse to load entirely.
+ */
+describe("session store — content-block round-trip fidelity", () => {
+  let dir: string
+  let envSnapshot: NodeJS.ProcessEnv
+  beforeEach(() => {
+    envSnapshot = { ...process.env }
+    dir = mkdtempSync(join(tmpdir(), "session-fidelity-"))
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    for (const key of Object.keys(process.env)) {
+      if (!(key in envSnapshot)) delete process.env[key]
+    }
+    Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
+  })
+
+  test("preserves TextBlock.phase, ThinkingBlock.signature/redacted, and ImageBlock", async () => {
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [{ type: "image", data: "QkFTRTY0", mediaType: "image/png" }],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "reasoned", signature: "sig-abc" },
+          { type: "thinking", thinking: "ciphertext", redacted: true },
+          { type: "text", text: "let me act", phase: "commentary" },
+          { type: "tool_use", id: "tu1", name: "bash", input: { cmd: "ls" } },
+          { type: "text", text: "done", phase: "final_answer" },
+        ],
+      },
+    ]
+    const meta = mkMeta({ id: "fidelity-1" })
+    await saveSessionById(meta, { reason: "ok", turns: 1, messages })
+    const loaded = await loadSessionById("fidelity-1")
+    expect(loaded).toBeDefined()
+    // Lossless: reloaded messages must deep-equal what we wrote.
+    expect(loaded?.messages).toEqual(messages)
+  })
+
+  test("a session containing an ImageBlock still LOADS (not refused)", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "image", data: "QQ==", mediaType: "image/jpeg" }] },
+    ]
+    await saveSessionById(mkMeta({ id: "img-load" }), { reason: "ok", turns: 1, messages })
+    const loaded = await loadSessionById("img-load")
+    expect(loaded?.messages.length).toBe(1)
+  })
+})
+
+/**
+ * Crash-window self-heal: the per-id JSON is written FIRST, the index SECOND.
+ * If the index is stale/absent (simulating a crash in that window), the next
+ * `loadSessionById` must reconcile it back so `listSessions` sees the session.
+ */
+describe("session store — index reconcile on load", () => {
+  let dir: string
+  let envSnapshot: NodeJS.ProcessEnv
+  beforeEach(() => {
+    envSnapshot = { ...process.env }
+    dir = mkdtempSync(join(tmpdir(), "session-reconcile-"))
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    for (const key of Object.keys(process.env)) {
+      if (!(key in envSnapshot)) delete process.env[key]
+    }
+    Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
+  })
+
+  test("load re-adds a session whose index line was lost mid-write", async () => {
+    await saveSessionById(mkMeta({ id: "heal-1", title: "Healed" }), mkPayload())
+    // Simulate a crash AFTER the JSON write but BEFORE/clobbering the index:
+    // wipe index.jsonl so the session is orphaned (JSON present, not listed).
+    writeFileSync(join(dir, "index.jsonl"), "")
+    expect((await listSessions()).some((m) => m.id === "heal-1")).toBe(false)
+    // Loading the orphaned session must self-heal the index.
+    const loaded = await loadSessionById("heal-1")
+    expect(loaded?.meta.title).toBe("Healed")
+    expect((await listSessions()).some((m) => m.id === "heal-1")).toBe(true)
+  })
+})

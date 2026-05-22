@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-05-22T14:00:09.095Z",
+  "model": "gpt-5",
+  "provider": "openai",
+  "n": 1,
+  "totals": {
+    "total": 1,
+    "resolved": 0,
+    "resolvedPct": 0
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "harness_error": 1
+    },
+    "bySignal": {
+      "empty_patch": 1
+    }
+  },
+  "perInstance": [
+    {
+      "id": "django__django-10880",
+      "passed": false,
+      "turns": 10,
+      "patchBytes": 0,
+      "error": "empty prediction for django__django-10880",
+      "failure": {
+        "termination": "harness_error",
+        "signals": [
+          "empty_patch"
+        ]
+      }
+    }
+  ]
+}

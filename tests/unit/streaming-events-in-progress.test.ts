@@ -91,6 +91,35 @@ describe("streaming-events: SSE parsing robustness", () => {
     expect(parseSseFrame("")).toBeNull()
   })
 
+  test("4b. lone-CR chunk boundary inside a multi-line event does NOT split it", () => {
+    // A single CRLF-terminated event whose JSON spans TWO `data:` lines. Chunk
+    // the byte stream so chunk1 ends on the lone `\r` that terminates the FIRST
+    // `data:` line and chunk2 opens with the matching `\n`. A naive
+    // normalize-then-split converts the stray `\r` to `\n`; the next chunk's
+    // `\n` then forms a spurious `\n\n`, splitting one event into two frames and
+    // corrupting the JSON (`{"a":1,` + `"b":2}`). The carry-the-CR fix keeps the
+    // CRLF intact so the event reassembles into ONE valid frame.
+    const full =
+      'event: response.in_progress\r\ndata: {"type":"response.in_progress",\r\ndata: "message":"a"}\r\n\r\n'
+    const splitAt = full.indexOf('",\r') + 3 // just past the lone `\r` of the first data line
+    const chunks = [full.slice(0, splitAt), full.slice(splitAt)]
+    expect(chunks[0]?.endsWith("\r")).toBe(true) // precondition: split lands on lone CR
+    let buf = ""
+    const allFrames: Array<{ name: string; data: string }> = []
+    for (const c of chunks) {
+      buf += c
+      const { frames, remainder } = splitSseFrames(buf)
+      allFrames.push(...frames)
+      buf = remainder
+    }
+    // Exactly ONE frame — the bug yields two (corrupt JSON + orphan fragment).
+    expect(allFrames.length).toBe(1)
+    expect(allFrames[0]?.name).toBe("response.in_progress")
+    const decoded = decodeSseEvent(allFrames[0] as { name: string; data: string })
+    expect(decoded?.kind).toBe("response.in_progress")
+    expect((decoded?.data as { message?: string })?.message).toBe("a")
+  })
+
   test("5. >=1MB data payload survives parse + decode intact", () => {
     const big = "x".repeat(1_048_576) // 1 MiB
     const obj = { type: "response.in_progress", message: big }

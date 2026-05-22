@@ -362,20 +362,28 @@ export class OpenAIAdapter implements LLMPort {
     const toolNames = input.tools.map((t) => t.name)
     const toolChoice = toOpenAIToolChoice(input.toolChoice, toolNames)
     try {
-      return (await this.client.chat.completions.create({
-        model: this.model,
-        ...tokenCap,
-        stream: true,
-        // Opt into the trailing usage chunk (RFC-0002 §5.3). Older models that
-        // don't support it simply omit the chunk — we then emit no usage.
-        stream_options: { include_usage: true },
-        messages: toChatMessages(input.system, input.messages),
-        tools: input.tools.map((t) => ({
-          type: "function" as const,
-          function: { name: t.name, description: t.description, parameters: t.input_schema },
-        })),
-        ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
-      })) as unknown as AsyncIterable<RawChunk>
+      return (await this.client.chat.completions.create(
+        {
+          model: this.model,
+          ...tokenCap,
+          stream: true,
+          // Opt into the trailing usage chunk (RFC-0002 §5.3). Older models that
+          // don't support it simply omit the chunk — we then emit no usage.
+          stream_options: { include_usage: true },
+          messages: toChatMessages(input.system, input.messages),
+          tools: input.tools.map((t) => ({
+            type: "function" as const,
+            function: { name: t.name, description: t.description, parameters: t.input_schema },
+          })),
+          ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+        },
+        // Caller cancellation: the SDK request-options `signal` aborts the
+        // underlying fetch — covers the create()/TTFT phase that the stream
+        // wrapper cannot see. Composes with the per-request `timeout` set at
+        // construction (whichever fires first cancels). Absent ⇒ `undefined`
+        // options, byte-identical to the pre-feature path.
+        input.signal ? { signal: input.signal } : undefined,
+      )) as unknown as AsyncIterable<RawChunk>
     } catch (e) {
       throw LLMError.fromSdkError("openai", e)
     }
@@ -393,6 +401,12 @@ export class OpenAIAdapter implements LLMPort {
       firstChunkMs: this.streamTimeoutMs.firstChunkMs,
       idleMs: this.streamTimeoutMs.idleMs,
       provider: "openai",
+      // Compose the caller's signal into the wrapper: when it fires, the
+      // wrapper aborts its OWN internal controller and tears down the timeout
+      // race cleanly. Handles the post-create() streaming phase (the SDK
+      // signal above handles create()/TTFT). Absent ⇒ wrapper still self-aborts
+      // on its own timeouts (byte-identical).
+      ...(input.signal ? { signal: input.signal } : {}),
     })
     const st: StreamState = {
       pending: new Map<number, PendingCall>(),

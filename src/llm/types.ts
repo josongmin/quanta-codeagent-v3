@@ -179,4 +179,13 @@ export interface StreamInput {
    *  a name that doesn't match any entry in `tools` throws at the adapter (NOT
    *  a silent fallback). */
   toolChoice?: ToolChoice
+  /** Caller's cancellation signal (user Ctrl+C / cancel / deadline). When it
+   *  fires, the adapter aborts the in-flight provider HTTP request so the
+   *  socket is released immediately rather than hanging until completion or
+   *  the SDK timeout. Threaded end-to-end: loop → StreamInput → adapter SDK
+   *  request options, and composed with the stream-timeout wrapper's internal
+   *  controller so either trip tears down the upstream symmetrically. Optional
+   *  → absent is byte-identical to the pre-feature path (no signal forwarded,
+   *  no behavioural change). */
+  signal?: AbortSignal
 }

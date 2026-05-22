@@ -7,6 +7,14 @@ const PROTOCOL_VERSION = "2025-06-18"
 const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 
+/** Max chars of joined tool-result text we hand back from `callTool`. A
+ *  malicious/buggy MCP server returning a huge text blob would otherwise flow
+ *  unbounded into memory and the model prompt (DOS). Mirrors the repo-wide
+ *  tool-output cap (`@/tool` `output-spill.ts` `DEFAULT_TOOL_OUTPUT_MAX =
+ *  200_000`); kept as a local constant because `@/mcp` may not import `@/tool`
+ *  (slice isolation, RFC §3.1). Sub-cap results are returned byte-identical. */
+const MAX_RESULT_CHARS = 200_000
+
 /** Typed MCP failure. Stable code lets callers branch without string matching. */
 export class McpError extends QuantaError {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -50,6 +58,16 @@ const joinTextBlocks = (content: ContentBlock[] | undefined): string =>
     .filter((b) => b.type === "text" && typeof b.text === "string")
     .map((b) => b.text ?? "")
     .join("\n")
+
+/** Bound the joined text to {@link MAX_RESULT_CHARS}. Sub-cap input is returned
+ *  by reference (byte-identical, no allocation). Over-cap input is truncated to
+ *  the head with a clear `[truncated: N bytes omitted]` marker so the model and
+ *  any downstream caller can see the result was clipped. */
+const capResultText = (text: string): string => {
+  if (text.length <= MAX_RESULT_CHARS) return text
+  const omitted = text.length - MAX_RESULT_CHARS
+  return `${text.slice(0, MAX_RESULT_CHARS)}\n[truncated: ${omitted} bytes omitted]`
+}
 
 /** Build the spawn env. The full parent env is intentionally NOT inherited so
  *  host secrets never reach an arbitrary server; only PATH is kept so the
@@ -131,7 +149,7 @@ export class McpClient {
     })) as ToolsCallResult
     return {
       ok: res.isError !== true,
-      content: joinTextBlocks(res.content),
+      content: capResultText(joinTextBlocks(res.content)),
     }
   }
 

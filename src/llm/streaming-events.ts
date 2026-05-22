@@ -205,9 +205,23 @@ export const parseSseFrame = (block: string): ParsedSseFrame | null => {
  * (chunked HTTP, small TCP windows, etc.).
  */
 export const splitSseFrames = (buf: string): { frames: ParsedSseFrame[]; remainder: string } => {
-  const normalized = buf.replace(/\r\n?/g, "\n")
+  // Partial-read hazard: a chunk that ends on a lone `\r` may be the first half
+  // of a `\r\n` line terminator split across the transport boundary. If we
+  // normalized that trailing `\r` to `\n` here and the NEXT chunk began with
+  // `\n` (the back half of the CRLF), prepending the remainder would synthesize
+  // a spurious `\n\n` and split ONE logical event into two. Defer a trailing
+  // lone `\r` into the remainder untouched so the CRLF re-forms on the next
+  // call. (A `\r` that is genuinely the last byte of the stream stays in the
+  // remainder and is simply never emitted — same as any unterminated frame.)
+  let head = buf
+  let carry = ""
+  if (head.charCodeAt(head.length - 1) === 0x0d /* '\r' */) {
+    head = head.slice(0, -1)
+    carry = "\r"
+  }
+  const normalized = head.replace(/\r\n?/g, "\n")
   const parts = normalized.split(/\n\n/)
-  const remainder = parts.pop() ?? ""
+  const remainder = (parts.pop() ?? "") + carry
   const frames: ParsedSseFrame[] = []
   for (const block of parts) {
     const parsed = parseSseFrame(block)

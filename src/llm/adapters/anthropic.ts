@@ -299,20 +299,29 @@ export class AnthropicAdapter implements LLMPort {
     const toolNames = input.tools.map((t) => t.name)
     const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
     try {
-      return (await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        stream: true,
-        ...(input.system ? { system: toAnthropicSystem(input.system) } : {}),
-        ...(input.thinking ? { thinking: input.thinking } : {}),
-        messages: cacheConversationPrefix(toAnthropicMessages(input.messages)),
-        tools: input.tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          input_schema: t.input_schema as Anthropic.Tool.InputSchema,
-        })),
-        ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
-      })) as unknown as AsyncIterable<RawEvent>
+      return (await this.client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          stream: true,
+          ...(input.system ? { system: toAnthropicSystem(input.system) } : {}),
+          ...(input.thinking ? { thinking: input.thinking } : {}),
+          messages: cacheConversationPrefix(toAnthropicMessages(input.messages)),
+          tools: input.tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema as Anthropic.Tool.InputSchema,
+          })),
+          ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+        },
+        // Caller cancellation: the SDK request-options `signal` aborts the
+        // underlying fetch — covers the create()/TTFT phase that the stream
+        // wrapper cannot see (it only decorates the AsyncIterable returned
+        // AFTER create() resolves). Composes with the per-request `timeout`
+        // set at construction: whichever fires first cancels the request.
+        // Absent ⇒ `undefined` options, byte-identical to the pre-feature path.
+        input.signal ? { signal: input.signal } : undefined,
+      )) as unknown as AsyncIterable<RawEvent>
     } catch (e) {
       throw LLMError.fromSdkError("anthropic", e)
     }
@@ -338,6 +347,12 @@ export class AnthropicAdapter implements LLMPort {
       firstChunkMs: this.streamTimeoutMs.firstChunkMs,
       idleMs: this.streamTimeoutMs.idleMs,
       provider: "anthropic",
+      // Compose the caller's signal into the wrapper: when it fires, the
+      // wrapper aborts its OWN internal controller and tears down the timeout
+      // race cleanly. This handles the post-create() streaming phase (the SDK
+      // signal above handles the create()/TTFT phase). Absent ⇒ wrapper still
+      // self-aborts on its own timeouts (byte-identical).
+      ...(input.signal ? { signal: input.signal } : {}),
     })
 
     try {
@@ -461,6 +476,21 @@ export function* mapRawEvent(
     case "message_delta":
       yield* finishOnMessageDelta(ev, usage)
       break
+    case "message_stop":
+    case "ping":
+      // Intentionally emit nothing. The terminal `message_stop` StreamEvent is
+      // synthesized from `message_delta`'s `stop_reason` (carries the reason,
+      // which the raw `message_stop` does not); `ping` is a keep-alive. Listed
+      // explicitly so the `default: never` below pins exhaustiveness — a future
+      // RawEvent variant must come back here and decide its mapping.
+      break
+    default: {
+      // Exhaustiveness pin: a new RawEvent arm fails compilation here rather
+      // than being silently dropped.
+      const _exhaustive: never = ev
+      void _exhaustive
+      break
+    }
   }
 }
 

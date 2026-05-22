@@ -86,7 +86,21 @@ export const runBranchSearch = async (
   })
 
   try {
-    const allScored = await Promise.all(candidates.map((c) => scoreCandidate(c, req)))
+    // allSettled (not all): a verifier/scorer that THROWS on ONE candidate must
+    // not discard the sibling scores (matches propose.ts's per-candidate
+    // isolation invariant). `scoreCandidate` swallows the default verifier's
+    // crashes internally, but `req.verifier`/`req.scorer` are injected ports —
+    // a custom one may reject. A rejected candidate folds to FAILED_SCORE so it
+    // simply loses, never poisons the batch or the selection.
+    const settled = await Promise.allSettled(candidates.map((c) => scoreCandidate(c, req)))
+    const allScored = settled.map((s, i) => {
+      if (s.status === "fulfilled") return s.value
+      // `candidates` and `settled` are index-aligned (allSettled preserves
+      // order), so `cand` is always defined.
+      const cand = candidates[i] as (typeof candidates)[number]
+      safeTrace(req.onTrace, { kind: "candidate-scored", id: cand.id, total: 0, signals: [] })
+      return { cand, score: FAILED_SCORE }
+    })
     const winner = req.selector(allScored)
     const winnerScore = allScored.find((s) => s.cand.id === winner.id)?.score ?? FAILED_SCORE
     safeTrace(req.onTrace, {

@@ -19,10 +19,11 @@
  * --------
  * This file ships a minimal, SDK-FREE seam:
  *
- *   1. A {@link SpanSink} interface — three methods (`onStart` / `onEnd` /
- *      `onError`). Anything that wants to receive spans implements this.
- *      The actual mapping to OTel / Honeycomb / a JSONL file lives in the
- *      consumer, not here.
+ *   1. A {@link SpanSink} interface — two methods (`onStart` / `onEnd`).
+ *      Anything that wants to receive spans implements this. The terminal
+ *      outcome (ok / error / aborted) is carried by `onEnd`'s `status`
+ *      argument rather than a separate `onError` callback. The actual mapping
+ *      to OTel / Honeycomb / a JSONL file lives in the consumer, not here.
  *   2. A module-level mutable sink that defaults to `null`. When `null`
  *      every span call returns a single shared no-op {@link Span} object —
  *      no allocations, no try/finally cost beyond a function call.

@@ -75,8 +75,21 @@ export class BudgetMeter {
     this.startedAtMs = this.clock()
   }
 
-  /** Increment the counter for `kind` by `n` (default 1). Pure state mutation. */
+  /**
+   * Increment the counter for `kind` by `n` (default 1). Pure state mutation.
+   *
+   * `n` is hardened against non-finite / negative deltas. Token + cost dials
+   * are fed by provider-reported usage (`loop.ts` passes `ev.inputTokens` /
+   * `ev.outputTokens` straight through); when a provider omits a usage field
+   * or reports `NaN`, an unguarded `counter += NaN` would POISON the counter
+   * for the rest of the run — every later `observed > dial` becomes
+   * `NaN > dial === false`, silently DISABLING the token + cost caps. We reject
+   * a non-finite or negative `n` (a programmer/provider error) as a no-op so a
+   * single bad usage report cannot defeat the budget gate. Valid finite
+   * non-negative deltas are unaffected (byte-identical).
+   */
   tick(kind: TickKind, n = 1): void {
+    if (!Number.isFinite(n) || n < 0) return
     switch (kind) {
       case "turn":
         this.turns += n
