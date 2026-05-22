@@ -14,6 +14,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { appendSummary, archivedTokens, createArchive } from "@/agent"
+import { MAX_ARCHIVED_SUMMARIES } from "@/agent/conversation-summary-archive"
 
 const sample = (over: Partial<Parameters<typeof appendSummary>[1]>) => ({
   fromTurnId: "t0",
@@ -69,5 +70,44 @@ describe("ConversationSummaryArchive", () => {
     appendSummary(a, sample({ tokens: 11 }))
     appendSummary(a, sample({ tokens: 3 }))
     expect(archivedTokens(a)).toBe(21)
+  })
+
+  test("soft cap (ADR-0075): no eviction at or below MAX_ARCHIVED_SUMMARIES", () => {
+    const a = createArchive()
+    for (let i = 0; i < MAX_ARCHIVED_SUMMARIES; i++) {
+      appendSummary(a, sample({ summary: `s${i}`, tokens: 1 }))
+    }
+    // Exactly at the cap: nothing dropped, oldest still present.
+    expect(a.summaries.length).toBe(MAX_ARCHIVED_SUMMARIES)
+    expect(a.summaries[0]?.summary).toBe("s0")
+    expect(a.summaries.at(-1)?.summary).toBe(`s${MAX_ARCHIVED_SUMMARIES - 1}`)
+    expect(archivedTokens(a)).toBe(MAX_ARCHIVED_SUMMARIES)
+  })
+
+  test("soft cap (ADR-0075): evicts oldest FIFO, retains most-recent, accounting stays consistent", () => {
+    const a = createArchive()
+    const overshoot = 10
+    const total = MAX_ARCHIVED_SUMMARIES + overshoot
+    for (let i = 0; i < total; i++) {
+      // tokens=i so we can verify archivedTokens reflects exactly the retained window.
+      appendSummary(a, sample({ summary: `s${i}`, tokens: i }))
+    }
+    // Holds exactly the cap, never more.
+    expect(a.summaries.length).toBe(MAX_ARCHIVED_SUMMARIES)
+    // Oldest `overshoot` entries (s0..s9) were evicted (FIFO from the front).
+    expect(a.summaries[0]?.summary).toBe(`s${overshoot}`)
+    // Most-recent entry — the only one the loop's `.at(-1)` consumer needs — is retained.
+    expect(a.summaries.at(-1)?.summary).toBe(`s${total - 1}`)
+    // No evicted summary survives.
+    expect(a.summaries.some((e) => e.summary === "s0")).toBe(false)
+    // Ordering preserved + sliding-window contiguity intact across the window.
+    for (let j = 1; j < a.summaries.length; j++) {
+      expect(a.summaries[j]?.summary).toBe(`s${overshoot + j}`)
+    }
+    // Accounting consistent: archivedTokens sums ONLY the retained window
+    // (tokens i for i in [overshoot, total)), not the evicted prefix.
+    let expected = 0
+    for (let i = overshoot; i < total; i++) expected += i
+    expect(archivedTokens(a)).toBe(expected)
   })
 })

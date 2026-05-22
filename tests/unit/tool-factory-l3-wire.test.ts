@@ -284,4 +284,27 @@ describe("buildToolInputSeam", () => {
     seam.delta("u1", "should-be-dropped")
     expect(log).toEqual(["live"])
   })
+
+  test("leak guard: tombstoned start-without-available entries are LRU-evicted, not leaked", () => {
+    // A `start` whose call is tombstoned mid-args never reaches `available`, so
+    // its id→name entry would leak. Simulate many such abandoned starts; the
+    // map is bounded by an LRU cap, so the OLDEST entries are evicted. We prove
+    // eviction behaviourally: after flooding past the cap, the first id's
+    // `delta` is a no-op (its entry was reclaimed), while the most-recent id
+    // still routes — i.e. memory stayed bounded without dropping a live call.
+    const log: string[] = []
+    const reg = new ToolRegistry([buildTool("a", { onInputDelta: (d) => log.push(d) }) as Tool])
+    const seam = buildToolInputSeam(reg)
+
+    // u-first is the oldest; flood enough fresh ids to push it out of the cap.
+    seam.start("u-first", "a")
+    for (let i = 0; i < 512; i++) seam.start(`u-${i}`, "a")
+
+    // Oldest entry evicted ⇒ its delta is dropped (no-op).
+    seam.delta("u-first", "evicted")
+    // A recent entry is still tracked ⇒ its delta routes.
+    seam.delta("u-511", "kept")
+
+    expect(log).toEqual(["kept"])
+  })
 })

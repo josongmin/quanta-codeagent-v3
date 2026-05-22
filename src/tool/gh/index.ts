@@ -25,6 +25,34 @@ import { z } from "zod"
 import { scrubEnv } from "@/runtime"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
+/**
+ * SECURITY (mirrors `git/diff.ts` leading-dash rejection): a PR/issue
+ * identifier is a bare POSITIONAL argument to `gh` (`gh pr view <id>`). A
+ * `-`-leading value (`--web`, `-R/owner/evil`, `--repo=…`) would be parsed by
+ * `gh` as a FLAG rather than a number/URL — arg-injection. `gh` accepts a
+ * numeric issue/PR number OR a full `https://…` URL; both are validated here.
+ * A malformed identifier is rejected before it reaches argv, surfaced as a
+ * deterministic `ok:false` (never thrown to the loop).
+ *
+ * Accepted: a positive integer (`42`, `#42`) or an `http(s)://…` URL. Anything
+ * beginning with `-`, or any other shape, is rejected.
+ */
+const normalizeRef = (raw: string | number): string | undefined => {
+  const s = String(raw).trim()
+  if (s.length === 0) return undefined
+  // Plain number, optionally with a leading `#` (a common human shorthand).
+  const num = s.startsWith("#") ? s.slice(1) : s
+  if (/^[0-9]+$/.test(num)) return num
+  // Full URL form — must be http(s) so it can never be a `-`-leading flag.
+  if (/^https?:\/\//i.test(s)) return s
+  return undefined
+}
+
+/** Raised (and caught in `execute`) when a PR/issue identifier is malformed. */
+const refRejected = (kind: "PR" | "issue", raw: string | number): string =>
+  `invalid ${kind} identifier '${String(raw)}': expected a positive number or an ` +
+  "http(s) URL (a leading-dash value would be parsed as a gh flag)"
+
 /** Injectable subprocess boundary — argv, cwd, timeout → result. */
 export interface GhRunResult {
   code: number
@@ -96,8 +124,13 @@ export const ghPrViewTool = (runner: GhRunner = defaultGhRunner): Tool<PrViewInp
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   async *execute(input: PrViewInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const ref = normalizeRef(input.pr)
+    if (ref === undefined) {
+      yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
+      return
+    }
     const fields = input.fields ?? DEFAULT_PR_FIELDS
-    const argv = ["gh", "pr", "view", String(input.pr), "--json", fields.join(",")]
+    const argv = ["gh", "pr", "view", ref, "--json", fields.join(",")]
     yield { type: "progress", message: `gh pr view #${input.pr}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
@@ -120,7 +153,12 @@ export const ghIssueViewTool = (runner: GhRunner = defaultGhRunner): Tool<IssueV
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   async *execute(input: IssueViewInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const argv = ["gh", "issue", "view", String(input.issue), "--json", "title,body,state,labels,url"]
+    const ref = normalizeRef(input.issue)
+    if (ref === undefined) {
+      yield { type: "result", result: { ok: false, output: refRejected("issue", input.issue) } }
+      return
+    }
+    const argv = ["gh", "issue", "view", ref, "--json", "title,body,state,labels,url"]
     yield { type: "progress", message: `gh issue view #${input.issue}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
@@ -143,7 +181,12 @@ export const ghCheckStatusTool = (runner: GhRunner = defaultGhRunner): Tool<Chec
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   async *execute(input: CheckStatusInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const argv = ["gh", "pr", "checks", String(input.pr), "--json", "name,state,bucket,description"]
+    const ref = normalizeRef(input.pr)
+    if (ref === undefined) {
+      yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
+      return
+    }
+    const argv = ["gh", "pr", "checks", ref, "--json", "name,state,bucket,description"]
     yield { type: "progress", message: `gh pr checks #${input.pr}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
@@ -171,7 +214,12 @@ export const ghPrCommentTool = (runner: GhRunner = defaultGhRunner): Tool<PrComm
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   async *execute(input: PrCommentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const argv = ["gh", "pr", "comment", String(input.pr), "--body", input.body]
+    const ref = normalizeRef(input.pr)
+    if (ref === undefined) {
+      yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
+      return
+    }
+    const argv = ["gh", "pr", "comment", ref, "--body", input.body]
     yield { type: "progress", message: `gh pr comment #${input.pr}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {

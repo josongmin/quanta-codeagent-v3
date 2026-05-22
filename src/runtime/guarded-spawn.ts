@@ -42,6 +42,93 @@
  *    throw skips it for free, identical to the prior code.
  */
 
+/** Grace period between the polite SIGTERM and the forceful SIGKILL. A child
+ *  that traps or ignores SIGTERM (`trap '' TERM`) would otherwise run to
+ *  natural completion despite an abort/timeout; after this window we escalate
+ *  to SIGKILL (signal 9), which cannot be trapped. Kept as an UPPER_SNAKE_CASE
+ *  named const — the runtime scanner bans bare magic timeouts. Well-behaved
+ *  children exit on the initial SIGTERM long before this fires, so their
+ *  timing is unchanged (the grace timer is cleared the moment the child
+ *  exits). */
+export const KILL_GRACE_MS = 2_000
+
+/** Structural mirror of the slice of `Bun.Subprocess` the escalating kill
+ *  needs: a `kill(signal?)` that accepts an OS signal name/number, and an
+ *  `exited` promise that resolves when the child is reaped. Kept structural so
+ *  the helper does not couple the guard module to the full Bun type. */
+export interface KillableChild {
+  kill(signal?: number | NodeJS.Signals): void
+  readonly exited: Promise<number>
+}
+
+/** What {@link escalatingKill} hands back: the `kill` closure to wire into a
+ *  {@link GuardedSpawnHooks} (and the abort/timeout handlers), plus a
+ *  `disarm` that cancels the pending SIGKILL grace timer. Call `disarm` once
+ *  the child has exited (or in the guard's `finally`) so the grace timer never
+ *  leaks past the child's lifetime. */
+export interface EscalatingKill {
+  /** SIGTERM now; arm a one-shot SIGKILL after {@link KILL_GRACE_MS} unless the
+   *  child exits (or {@link disarm} is called) first. No-op-safe and idempotent
+   *  re-arm: repeated calls re-send SIGTERM but never stack multiple timers. */
+  readonly kill: () => void
+  /** Clear the pending SIGKILL grace timer, if any. Idempotent. */
+  readonly disarm: () => void
+}
+
+/**
+ * Build a SIGTERM→SIGKILL escalating kill for a spawned child.
+ *
+ * WHY — `proc.kill()` sends a single SIGTERM. A child that traps or ignores
+ * TERM (`trap '' TERM; sleep 30`) survives the abort/timeout and runs to
+ * natural completion, defeating cancellation. This wraps the polite kill so
+ * that, if the child has NOT exited within {@link KILL_GRACE_MS}, we escalate
+ * to SIGKILL (signal 9) — which the OS delivers unconditionally.
+ *
+ * The grace timer is one-shot and self-clearing: it is cleared when the child's
+ * `exited` promise resolves (well-behaved children exit on TERM before it
+ * fires, so SIGKILL is never sent and their timing is unaffected) and again in
+ * `disarm`, so it can never outlive the child.
+ *
+ * Centralized here so every spawn site (runShell, LocalSandbox, DockerSandbox)
+ * gets the same escalation by passing this `kill` to {@link withSpawnedChild}
+ * and `disarm` in its `cleanup`.
+ */
+export const escalatingKill = (proc: KillableChild): EscalatingKill => {
+  let graceTimer: ReturnType<typeof setTimeout> | undefined
+  const disarm = () => {
+    if (graceTimer !== undefined) {
+      clearTimeout(graceTimer)
+      graceTimer = undefined
+    }
+  }
+  // Clear the grace timer the instant the child is reaped — covers the common
+  // case where the child exits on SIGTERM (or on its own) before the grace
+  // window elapses, so the SIGKILL is never sent and the timer never leaks.
+  void proc.exited.then(disarm, disarm)
+
+  const kill = () => {
+    try {
+      proc.kill() // polite SIGTERM first
+    } catch {
+      // already exited
+    }
+    // Arm the escalation only once; a re-entrant kill() must not stack timers.
+    if (graceTimer !== undefined) return
+    graceTimer = setTimeout(() => {
+      graceTimer = undefined
+      try {
+        proc.kill("SIGKILL") // signal 9 — uncatchable, for TERM-trapping children
+      } catch {
+        // already exited in the grace window
+      }
+    }, KILL_GRACE_MS)
+    // Don't let the grace timer keep the event loop alive on its own.
+    graceTimer.unref?.()
+  }
+
+  return { kill, disarm }
+}
+
 /** A spawned-child handle the guard needs to clean up. Structural — it only
  *  needs `kill`, which both `Bun.Subprocess` and our no-op-safe wrappers have.
  *  We deliberately do NOT depend on the full `Bun.Subprocess` type so the

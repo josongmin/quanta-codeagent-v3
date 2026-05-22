@@ -1,4 +1,4 @@
-import { withSpawnedChild } from "./guarded-spawn"
+import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { scrubEnv } from "./sandbox"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
@@ -69,13 +69,10 @@ export const runShell = async (
   }
 
   let abortReason: "user_abort" | "timeout" | null = null
-  const kill = () => {
-    try {
-      proc.kill()
-    } catch {
-      // already exited
-    }
-  }
+  // SIGTERM→SIGKILL escalation: a child that traps/ignores SIGTERM is force-
+  // killed after KILL_GRACE_MS. `disarm` clears the grace timer; we call it in
+  // the guard's `cleanup` so it cannot leak past the child's lifetime.
+  const { kill, disarm } = escalatingKill(proc)
   const onAbort = () => {
     if (abortReason === null) abortReason = "user_abort"
     kill()
@@ -143,7 +140,14 @@ export const runShell = async (
     // normal/abort completion, none on an internal observer-thrown failure;
     // the guard kills the still-running child instead).
     return withSpawnedChild(
-      { kill, timer, cleanup: () => options.signal?.removeEventListener("abort", onAbort) },
+      {
+        kill,
+        timer,
+        cleanup: () => {
+          disarm()
+          options.signal?.removeEventListener("abort", onAbort)
+        },
+      },
       async () => {
         await Promise.all([stdoutDone, stderrDone])
         const exitCode = await proc.exited
@@ -180,7 +184,14 @@ export const runShell = async (
   // ⇒ no streaming work, no event allocations. Same guard as the observer
   // path (kill-on-throw + timer/listener teardown via `withSpawnedChild`).
   return withSpawnedChild(
-    { kill, timer, cleanup: () => options.signal?.removeEventListener("abort", onAbort) },
+    {
+      kill,
+      timer,
+      cleanup: () => {
+        disarm()
+        options.signal?.removeEventListener("abort", onAbort)
+      },
+    },
     async () => {
       const [stdoutText, stderrText] = await Promise.all([
         new Response(proc.stdout).text(),

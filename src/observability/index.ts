@@ -7,7 +7,7 @@ export {
 } from "./cost-dashboard"
 export { log, StructuredLogger } from "./logger"
 export { Metrics, metrics } from "./metrics"
-export { costUsd, PRICING_VERSION } from "./pricing"
+export { costUsd, PRICING_VERSION, type Provider, providerOf } from "./pricing"
 export { buildShellOtelObserver } from "./shell-exec-otel"
 export {
   __resetSpanSink,

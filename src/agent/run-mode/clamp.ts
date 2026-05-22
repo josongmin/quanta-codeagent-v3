@@ -36,17 +36,32 @@ const DIAL_FIELDS = [
   "compactionTokenThreshold",
 ] as const satisfies readonly (keyof BudgetDials)[]
 
+/** Treat a NaN / ±Infinity / negative value as "not a valid dial". Dials are
+ *  all non-negative finite budgets; a non-finite or negative requested/cap is a
+ *  programmer/config error that, if let through, would either propagate `NaN`
+ *  into the meter's comparisons (silently disabling the gate — see
+ *  `budget/meter.ts#tick`) or set a nonsensical negative budget. Mirror the
+ *  `Number.isFinite` guard pattern: a bad value is dropped (treated as absent)
+ *  rather than clamped to it. */
+const isValidDial = (n: number | undefined): n is number =>
+  n !== undefined && Number.isFinite(n) && n >= 0
+
 /** Resolve one (requested, cap) pair into the effective value + clamp signal.
- *  Pure — no I/O. */
+ *  Pure — no I/O. Non-finite / negative requested or cap values are treated as
+ *  absent (defensive: see {@link isValidDial}). */
 const resolveDial = (
   requested: number | undefined,
   cap: number | undefined,
 ): { value: number | undefined; clamped: boolean } => {
-  if (requested === undefined && cap === undefined) return { value: undefined, clamped: false }
-  if (requested === undefined) return { value: cap, clamped: false }
-  if (cap === undefined) return { value: requested, clamped: false }
-  if (requested > cap) return { value: cap, clamped: true }
-  return { value: requested, clamped: false }
+  // Defensive normalization: collapse any invalid (NaN/±Inf/negative) input to
+  // `undefined` so the propositional logic below never sees a poison value.
+  const req = isValidDial(requested) ? requested : undefined
+  const c = isValidDial(cap) ? cap : undefined
+  if (req === undefined && c === undefined) return { value: undefined, clamped: false }
+  if (req === undefined) return { value: c, clamped: false }
+  if (c === undefined) return { value: req, clamped: false }
+  if (req > c) return { value: c, clamped: true }
+  return { value: req, clamped: false }
 }
 
 /**

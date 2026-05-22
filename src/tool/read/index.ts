@@ -7,8 +7,13 @@ import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
-  offset: z.number().optional().describe("1-based line to start from"),
-  limit: z.number().optional().describe("Max lines to read (default 2000)"),
+  // `offset` is a 1-based line index: it must be a non-negative integer.
+  // `limit` is a line COUNT: it must be a positive integer. A `limit:0` or a
+  // negative value previously produced an empty slice that surfaced the
+  // "(empty file)" sentinel on a NON-empty file (misleading). Reject such
+  // values at the schema boundary with a clear validation error instead.
+  offset: z.number().int().min(0).optional().describe("1-based line to start from"),
+  limit: z.number().int().positive().optional().describe("Max lines to read (default 2000)"),
 })
 
 type Input = z.infer<typeof schema>

@@ -147,7 +147,7 @@ describe("bench observability (RFC-0002 W-D)", () => {
         pricingVersion: string
         snapshot: { counters: Record<string, number> }
       }
-      expect(metrics.pricingVersion).toBe("pricing.v1")
+      expect(metrics.pricingVersion).toBe("pricing.v2")
       expect(metrics.snapshot.counters.instances).toBe(1)
       expect(metrics.snapshot.counters.passed).toBe(1)
       const summary = JSON.parse(readFileSync(summaryFile, "utf8")) as {

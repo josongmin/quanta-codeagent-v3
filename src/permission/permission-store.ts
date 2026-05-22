@@ -440,6 +440,132 @@ const createDenialLedger = (
   },
 })
 
+/* ------------------------------------------------------------------------- *
+ * Multi-process read-reconcile-MERGE (ADR-0046 follow-up: clobber fix).
+ *
+ * Two agent processes sharing `~/.quanta/permission-state.json` each load once,
+ * mutate in-memory, then flush via tmp+rename. The rename is atomic but a BLIND
+ * overwrite — process B's flush silently discarded grants/denials A wrote in
+ * between. We turn that into last-write-MERGE by re-reading the on-disk state
+ * at flush time and folding it into our payload with these per-sub-store rules:
+ *
+ *   - perThread / perHost grants — 3-WAY merge (peer-added vs locally-deleted):
+ *       · a key on disk that is NOT in our baseline ⇒ a PEER added it ⇒ adopt
+ *         (UNION — never drop a peer's grant).
+ *       · a key in our baseline that WE removed in-memory ⇒ our revocation wins
+ *         (we do NOT resurrect a grant we deliberately cleared — fail toward
+ *         MORE restriction, per the security rule).
+ *       · a key we currently hold ⇒ our value wins (we are the live writer).
+ *
+ *   - deniedActions ledger — denials are SECURITY-CRITICAL and must NEVER be
+ *     lost (losing a denial = silently re-allowing). So this is NOT a 3-way
+ *     merge: it is a most-restrictive UNION that ignores local deletions of a
+ *     peer's denial. Per `(threadId, actionSignature)` key:
+ *       · only one side has it ⇒ keep that record.
+ *       · both sides have it ⇒ keep the record whose `deniedAt` is LATEST (a
+ *         fresh `recordDenial` supersedes — it intentionally resets the
+ *         override sequence), then re-attach the override timestamps
+ *         (`seenRiskAt`/`userOverrideAt`) ONLY when they belong to that same
+ *         (latest) denial generation, taking the max of each. This guarantees
+ *         neither side's denial is dropped AND a stale peer can never resurrect
+ *         an override sequence that a newer denial reset.
+ *
+ * SINGLE-PROCESS IDENTITY LAW: when we are the only writer, the file we re-read
+ * deep-equals our `baseline` (we wrote it last), so: every disk key is in
+ * baseline (nothing to adopt), nothing was locally deleted that isn't already
+ * gone, and every denial generation matches ⇒ the merge returns exactly the
+ * in-memory state. Byte-identical to the legacy blind-overwrite. (Verified by
+ * the full existing suite passing unchanged.)
+ * ------------------------------------------------------------------------- */
+
+/** Pick the more-advanced denial record for a key present on BOTH sides. A
+ *  newer `deniedAt` supersedes (the reset semantics of `recordDenial`); when
+ *  the two denials are the same generation (equal `deniedAt`) we take the max
+ *  of each override timestamp so neither side's progress is lost. A stale
+ *  peer's override timestamps are dropped when our `deniedAt` is newer. */
+const mergeDenialRecord = (a: DenialRecord, b: DenialRecord): DenialRecord => {
+  // The record with the strictly-later denial wins its base fields; its
+  // override timestamps belong to that generation.
+  const [newer, older] = a.deniedAt >= b.deniedAt ? [a, b] : [b, a]
+  if (newer.deniedAt > older.deniedAt) {
+    // Different generations: the older record's seen/override are stale (the
+    // newer denial reset the sequence). Keep ONLY the newer record's fields.
+    return newer
+  }
+  // Same generation (equal deniedAt): fold override progress from both sides,
+  // taking the max so neither in-flight override step is dropped.
+  const maxOpt = (x: number | undefined, y: number | undefined): number | undefined => {
+    if (x === undefined) return y
+    if (y === undefined) return x
+    return Math.max(x, y)
+  }
+  const seenRiskAt = maxOpt(a.seenRiskAt, b.seenRiskAt)
+  const userOverrideAt = maxOpt(a.userOverrideAt, b.userOverrideAt)
+  const merged: DenialRecord = {
+    threadId: newer.threadId,
+    actionSignature: newer.actionSignature,
+    deniedAt: newer.deniedAt,
+    // deniedReason is informational; prefer the newer record's (a's on tie).
+    deniedReason: newer.deniedReason,
+    // Re-attach override timestamps only when present (exactOptionalProperty).
+    ...(seenRiskAt !== undefined ? { seenRiskAt } : {}),
+    ...(userOverrideAt !== undefined ? { userOverrideAt } : {}),
+  }
+  return merged
+}
+
+/** 3-way merge of a grant map (perThread / perHost). `inMemory` is the live
+ *  authoritative base; a disk key absent from `baseline` is peer-added (adopt);
+ *  a baseline key WE removed stays removed (revocation wins). */
+const mergeGrantMap = <V>(
+  onDisk: Readonly<Record<string, V>>,
+  inMemory: Readonly<Record<string, V>>,
+  baseline: Readonly<Record<string, V>>,
+): Record<string, V> => {
+  // Start from our live state — our values win for keys we currently hold.
+  const out: Record<string, V> = { ...inMemory }
+  for (const [k, v] of Object.entries(onDisk)) {
+    if (k in out) continue // we hold it ⇒ our value wins.
+    if (k in baseline) continue // we knew it + dropped it ⇒ revocation wins.
+    out[k] = v // peer-added since our baseline ⇒ adopt (never drop a grant).
+  }
+  return out
+}
+
+/** Reconcile the on-disk state with our in-memory state per the documented
+ *  per-sub-store policy. Pure; satisfies the single-process identity law. */
+const mergePermissionState = (args: {
+  onDisk: PermissionState | null
+  inMemory: PermissionState
+  baseline: PermissionState | null
+}): PermissionState => {
+  const { onDisk, inMemory } = args
+  // No readable peer state (absent / corrupt / mismatch) ⇒ write our own. A
+  // corrupt peer file must NOT wipe us, and we have nothing to merge in.
+  if (onDisk === null) return inMemory
+  const baseline = args.baseline ?? emptyState()
+
+  const perThread = mergeGrantMap(onDisk.perThread, inMemory.perThread, baseline.perThread)
+  const perHost = mergeGrantMap(onDisk.perHost, inMemory.perHost, baseline.perHost)
+
+  // Denials: most-restrictive UNION — start from our live ledger, then fold in
+  // every disk denial (a peer's denial we don't have, or a more-advanced
+  // version of one we share). We deliberately do NOT honor a local delete of a
+  // denial here: a disk denial is preserved even if absent from memory.
+  const deniedActions: Record<string, DenialRecord> = { ...inMemory.deniedActions }
+  for (const [key, diskRec] of Object.entries(onDisk.deniedActions)) {
+    const ours = deniedActions[key]
+    deniedActions[key] = ours === undefined ? diskRec : mergeDenialRecord(ours, diskRec)
+  }
+
+  return Object.freeze({
+    version: STATE_VERSION,
+    perThread: Object.freeze(perThread),
+    perHost: Object.freeze(perHost),
+    deniedActions: Object.freeze(deniedActions),
+  })
+}
+
 export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): PermissionStore => {
   const filePath = opts.filePath ?? defaultStateFilePath()
   const debounceMs = opts.debounceMs ?? 200
@@ -453,6 +579,7 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
     serialize: (s) => JSON.stringify(s, null, 2),
     parse: parseState,
     stateVersion: STATE_VERSION,
+    mergeWithDisk: mergePermissionState,
   })
 
   const getState = (): MutableState => state

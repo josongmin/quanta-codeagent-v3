@@ -111,6 +111,69 @@ describe("gh_pr_view", () => {
     expect(r.ok).toBe(false)
     expect(r.output).toContain("authentication required")
   })
+
+  test("leading-dash PR identifier is rejected before reaching argv (arg-injection)", async () => {
+    const { runner, calls } = makeRunner({
+      "gh pr view": { code: 0, stdout: "{}", stderr: "" },
+    })
+    const [view] = ghTools(runner)
+    if (!view) throw new Error("missing tool")
+    // `--web` / `-R/owner/evil` would be parsed by `gh` as a FLAG, not a PR ref.
+    const r = await runOnce(view, { pr: "--web" })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("invalid PR identifier")
+    // The malformed value never reached the runner.
+    expect(calls.length).toBe(0)
+  })
+
+  test("a full http(s) URL and a #-prefixed number are accepted", async () => {
+    const { runner, calls } = makeRunner({
+      "gh pr view": { code: 0, stdout: "{}", stderr: "" },
+    })
+    const [view] = ghTools(runner)
+    if (!view) throw new Error("missing tool")
+    await runOnce(view, { pr: "https://github.com/o/r/pull/7" })
+    expect(calls[0]?.[3]).toBe("https://github.com/o/r/pull/7")
+
+    await runOnce(view, { pr: "#42" })
+    // `#42` normalizes to the bare number.
+    expect(calls[1]?.[3]).toBe("42")
+  })
+})
+
+describe("gh leading-dash rejection across positional-ref tools", () => {
+  test("gh_issue_view rejects a leading-dash issue id", async () => {
+    const { runner, calls } = makeRunner({})
+    const tools = ghTools(runner)
+    const tool = tools.find((t) => t.name === "gh_issue_view")
+    if (!tool) throw new Error("missing tool")
+    const r = await runOnce(tool, { issue: "-R/evil" })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("invalid issue identifier")
+    expect(calls.length).toBe(0)
+  })
+
+  test("gh_check_status rejects a leading-dash pr id", async () => {
+    const { runner, calls } = makeRunner({})
+    const tools = ghTools(runner)
+    const tool = tools.find((t) => t.name === "gh_check_status")
+    if (!tool) throw new Error("missing tool")
+    const r = await runOnce(tool, { pr: "--json" })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("invalid PR identifier")
+    expect(calls.length).toBe(0)
+  })
+
+  test("gh_pr_comment rejects a leading-dash pr id", async () => {
+    const { runner, calls } = makeRunner({})
+    const tools = ghTools(runner)
+    const tool = tools.find((t) => t.name === "gh_pr_comment")
+    if (!tool) throw new Error("missing tool")
+    const r = await runOnce(tool, { pr: "-x", body: "hi" })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("invalid PR identifier")
+    expect(calls.length).toBe(0)
+  })
 })
 
 describe("gh_pr_comment", () => {

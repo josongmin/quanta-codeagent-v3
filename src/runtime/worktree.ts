@@ -1,4 +1,5 @@
 import { runShell } from "./shell"
+import type { ShellResult } from "./types"
 
 /** Outcome of a {@link withWorktree} run handed back to the caller. */
 export interface WorktreeInfo {
@@ -32,6 +33,72 @@ const git = async (repoRoot: string, args: string) => {
   // user/model string is interpolated. Run through the shared shell runner so
   // env scrubbing + timeout behavior match the rest of the runtime.
   return runShell(`git ${args}`, { cwd: repoRoot })
+}
+
+/** Bounded number of attempts for `git worktree add` when it loses the repo
+ *  lock race against a concurrent worktree operation. Small on purpose — the
+ *  contention window is brief, so a handful of tries with backoff converges. */
+export const MAX_WORKTREE_LOCK_RETRIES = 5
+/** Base backoff between `git worktree add` retries. Multiplied by the attempt
+ *  index for a light linear backoff so concurrent forks de-stagger. */
+export const WORKTREE_LOCK_BACKOFF_MS = 50
+
+/** True only for TRANSIENT git LOCK-contention failures — a concurrent
+ *  `git worktree add` / index write briefly held a repo lock. These are the
+ *  ONLY failures we retry; any other non-zero exit (bad ref, branch exists for
+ *  a different worktree, disk full, …) is a real error and must fail
+ *  immediately, NOT be retried. Matches the stderr/stdout git emits for the
+ *  lock race: `index.lock`, `worktrees/<name>/locked`, "already locked",
+ *  "Unable to create '...lock'". */
+export const isTransientWorktreeLockError = (stderr: string): boolean =>
+  /index\.lock|worktrees?\/[^\s]*\/locked|already locked|unable to create.*\.lock|cannot lock ref/i.test(
+    stderr,
+  )
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Run a `git worktree add ...` invocation with a bounded retry on TRANSIENT
+ * lock contention ONLY (see {@link isTransientWorktreeLockError}). Concurrent
+ * `session fork --worktree` calls race for the repo-level lock; the loser gets
+ * a lock error even though a retry moments later succeeds. A NON-lock failure
+ * is returned immediately and is NOT retried.
+ *
+ * IDEMPOTENCY: a prior aborted attempt can leave a half-created worktree dir
+ * behind, which would make the next `worktree add` fail with "already exists".
+ * Before each retry we prune git's stale-worktree registrations
+ * (`git worktree prune`) and best-effort remove a leftover directory so the
+ * retry starts from a clean slate rather than erroring on the leftover.
+ *
+ * @param git           the module's `git(repoRoot, args)` runner.
+ * @param repoRoot      repo to run git in.
+ * @param addArgs       the full `worktree add ...` arg string.
+ * @param worktreePath  the dir the add targets (for leftover cleanup).
+ * @returns the final {@link ShellResult}-shaped result (success, or the last
+ *          failure if retries are exhausted / the failure was non-transient).
+ */
+export const runWorktreeAddWithRetry = async (
+  git: (repoRoot: string, args: string) => Promise<ShellResult>,
+  repoRoot: string,
+  addArgs: string,
+  worktreePath: string,
+): Promise<ShellResult> => {
+  let result = await git(repoRoot, addArgs)
+  for (let attempt = 1; attempt < MAX_WORKTREE_LOCK_RETRIES && result.exitCode !== 0; attempt++) {
+    const stderr = `${result.stderr}\n${result.stdout}`
+    // Non-lock failure ⇒ a genuine error; fail immediately, do not retry.
+    if (!isTransientWorktreeLockError(stderr)) return result
+    await sleep(WORKTREE_LOCK_BACKOFF_MS * attempt)
+    // Idempotency: a lock-aborted attempt can leave a half-created worktree dir
+    // and/or a stale registration behind, which would make the next add fail
+    // with "already exists" instead of retrying the lock cleanly. Best-effort
+    // remove the leftover dir, then prune git's stale-worktree records, so this
+    // retry starts from a clean slate. Both are no-ops when nothing was left.
+    await git(repoRoot, `worktree remove --force -- "${worktreePath}"`).catch(() => undefined)
+    await git(repoRoot, "worktree prune").catch(() => undefined)
+    result = await git(repoRoot, addArgs)
+  }
+  return result
 }
 
 /** Slugify an id into the `/`-segment charset git worktree names allow. */
@@ -77,7 +144,14 @@ export const withWorktree = async <T>(
   const branch = `worktree-${slug}`
   const worktreePath = `${repoRoot}/.claude/worktrees/${name}`
 
-  const add = await git(repoRoot, `worktree add --no-track -B ${branch} "${worktreePath}" HEAD`)
+  // Bounded retry on TRANSIENT git lock contention only (concurrent worktree
+  // ops racing for the repo lock); a non-lock failure fails immediately.
+  const add = await runWorktreeAddWithRetry(
+    git,
+    repoRoot,
+    `worktree add --no-track -B ${branch} "${worktreePath}" HEAD`,
+    worktreePath,
+  )
   if (add.exitCode !== 0) {
     throw new WorktreeError(
       `git worktree add failed for ${name}`,

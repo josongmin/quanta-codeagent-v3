@@ -175,7 +175,7 @@ describe("actionSignature — adversarial inputs", () => {
 })
 
 describe("permission-store — concurrency", () => {
-  test("two stores on the same file → last-write-wins, no torn JSON", async () => {
+  test("two stores flushing CONCURRENTLY → no torn JSON; ≥1 grant survives", async () => {
     const filePath = join(tmp, "shared-state.json")
     const a = createPermissionStore({ filePath, debounceMs: 0 })
     const b = createPermissionStore({ filePath, debounceMs: 0 })
@@ -183,17 +183,18 @@ describe("permission-store — concurrency", () => {
     await b.load()
     a.setHost("h-a", "full-access")
     b.setHost("h-b", "read-only")
+    // `Promise.all` fires both flushes so their read-reconcile RE-READS can
+    // overlap BEFORE either rename lands — the inherent TOCTOU window that only
+    // a real OS lockfile (the deferred v4 ADR) can close. The merge fixes the
+    // realistic SEQUENTIAL interleave (see the "multi-process MERGE" block,
+    // which proves both grants survive); here we only assert the always-true
+    // floor: atomic rename ⇒ valid JSON, and at least one writer's grant lands.
     await Promise.all([a.flush(), b.flush()])
-    // File must be valid JSON (atomic rename prevented torn-write).
     const raw = await readFile(filePath, "utf8")
     const parsed = JSON.parse(raw) as { perHost: Record<string, string> }
-    // Last-write-wins: one of the writes won; the loser is lost. ADR-0046
-    // documents this as accepted (v3 = single-process assumption).
     const hosts = parsed.perHost
     const winnerCount =
       Number(hosts["h-a"] === "full-access") + Number(hosts["h-b"] === "read-only")
-    // At least one winner is present; both could coincidentally land
-    // (Promise.all serializes nothing, but the disk rename is atomic).
     expect(winnerCount).toBeGreaterThanOrEqual(1)
   })
 
@@ -327,5 +328,127 @@ describe("permission-store — list APIs", () => {
     expect(store.listThreadDenials("t1")).toHaveLength(2)
     expect(store.listThreadDenials("t2")).toHaveLength(1)
     expect(store.listThreadDenials("never")).toHaveLength(0)
+  })
+})
+
+describe("permission-store — multi-process read-reconcile-MERGE (clobber fix)", () => {
+  test("(a) A grants X, B grants Y (stale), B flushes ⇒ file has BOTH grants", async () => {
+    const filePath = join(tmp, "merge-grants.json")
+    const a = createPermissionStore({ filePath, debounceMs: 0 })
+    const b = createPermissionStore({ filePath, debounceMs: 0 })
+    await a.load()
+    await b.load() // B's in-memory baseline is empty at this point.
+    // A grants X and persists FIRST.
+    a.setThread("t-X", {
+      approvalPolicy: "never",
+      approvalsReviewer: "agent",
+      sandboxPolicy: { type: "danger-full-access" },
+    })
+    await a.flush()
+    // B — which never saw X — grants Y and flushes. A blind overwrite would
+    // drop X; the merge re-reads X off disk and folds it in.
+    b.setThread("t-Y", {
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "read-only" },
+    })
+    await b.flush()
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as {
+      perThread: Record<string, { approvalPolicy: string }>
+    }
+    expect(parsed.perThread["t-X"]).toBeDefined()
+    expect(parsed.perThread["t-Y"]).toBeDefined()
+    expect(parsed.perThread["t-X"]?.approvalPolicy).toBe("never")
+    expect(parsed.perThread["t-Y"]?.approvalPolicy).toBe("on-request")
+  })
+
+  test("(b) A records a DENIAL, B (stale) flushes ⇒ the denial SURVIVES in the file", async () => {
+    const filePath = join(tmp, "merge-denial.json")
+    const a = createPermissionStore({ filePath, debounceMs: 0 })
+    const b = createPermissionStore({ filePath, debounceMs: 0 })
+    await a.load()
+    await b.load() // B is stale: it never observes A's denial in-memory.
+    const sig = computeActionSignature({ tool: "bash", workdir: "/repo", args: { command: "x" } })
+    // A denies and persists.
+    a.recordDenial({ threadId: "t1", actionSignature: sig, deniedAt: 1000, deniedReason: "nope" })
+    await a.flush()
+    // B mutates something unrelated and flushes. Losing the denial = silently
+    // re-allowing — the merge MUST preserve it even though B never had it.
+    b.setHost("h-b", "read-only")
+    await b.flush()
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as {
+      deniedActions: Record<string, { deniedAt: number; deniedReason: string }>
+    }
+    const key = `t1::${sig}`
+    expect(parsed.deniedActions[key]).toBeDefined()
+    expect(parsed.deniedActions[key]?.deniedAt).toBe(1000)
+    // And B's own unrelated mutation also landed (merge, not clobber).
+    const hosts = (parsed as unknown as { perHost: Record<string, string> }).perHost
+    expect(hosts["h-b"]).toBe("read-only")
+  })
+
+  test("a peer's denial is NOT resurrected-as-stale: a NEWER denial generation supersedes", async () => {
+    // Guards the override-reset invariant across processes: if A re-denies
+    // (resetting the override sequence) and B holds a stale completed-override
+    // record, the merge must NOT let B's stale seen/override revive the bypass.
+    const filePath = join(tmp, "merge-denial-reset.json")
+    const sig = computeActionSignature({ tool: "edit", workdir: "/r", args: { p: "a" } })
+    const key = `t1::${sig}`
+    // Plant a STALE completed-override on disk (older deniedAt=100).
+    const a = createPermissionStore({ filePath, debounceMs: 0 })
+    await a.load()
+    a.recordDenial({ threadId: "t1", actionSignature: sig, deniedAt: 100, deniedReason: "old" })
+    a.recordRiskSeen("t1", sig, 110)
+    a.recordUserOverride("t1", sig, 120)
+    await a.flush()
+    // B loads, then issues a FRESH denial (deniedAt=500) — newer generation,
+    // override sequence intentionally reset.
+    const b = createPermissionStore({ filePath, debounceMs: 0 })
+    await b.load()
+    b.recordDenial({ threadId: "t1", actionSignature: sig, deniedAt: 500, deniedReason: "new" })
+    await b.flush()
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as {
+      deniedActions: Record<string, { deniedAt: number; seenRiskAt?: number; userOverrideAt?: number }>
+    }
+    const rec = parsed.deniedActions[key]
+    expect(rec?.deniedAt).toBe(500)
+    // The stale override timestamps from the OLD generation must be gone.
+    expect(rec?.seenRiskAt).toBeUndefined()
+    expect(rec?.userOverrideAt).toBeUndefined()
+  })
+
+  test("single-process repeated flush is identity (byte-for-byte stable, mtime unchanged)", async () => {
+    const filePath = join(tmp, "identity.json")
+    const s = createPermissionStore({ filePath, debounceMs: 0 })
+    await s.load()
+    s.setHost("h1", "read-only")
+    s.recordDenial({ threadId: "t1", actionSignature: "sig", deniedAt: 1, deniedReason: "r" })
+    await s.flush()
+    const bytes1 = await readFile(filePath, "utf8")
+    const mtime1 = (await stat(filePath)).mtimeMs
+    await new Promise((r) => setTimeout(r, 5))
+    // Flushing again with NO mutation must not rewrite (dirty=false), and even
+    // a forced re-flush via a no-op set must yield byte-identical content.
+    await s.flush()
+    const bytes2 = await readFile(filePath, "utf8")
+    expect(bytes2).toBe(bytes1)
+    expect((await stat(filePath)).mtimeMs).toBe(mtime1)
+  })
+
+  test("a locally-cleared grant is NOT resurrected by its own prior on-disk copy", async () => {
+    // Single-writer revocation: set→flush (disk has it)→clear→flush. The merge
+    // re-reads the prior on-disk grant but the 3-way diff (in baseline, removed
+    // in memory) keeps the revocation — fail toward MORE restriction.
+    const filePath = join(tmp, "revoke.json")
+    const s = createPermissionStore({ filePath, debounceMs: 0 })
+    await s.load()
+    s.setHost("h-revoke", "full-access")
+    await s.flush()
+    s.clearHost("h-revoke")
+    await s.flush()
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as {
+      perHost: Record<string, string>
+    }
+    expect(parsed.perHost["h-revoke"]).toBeUndefined()
   })
 })

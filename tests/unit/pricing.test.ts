@@ -1,9 +1,26 @@
 import { describe, expect, test } from "bun:test"
-import { costUsd, PRICING_VERSION } from "@/observability"
+import { costUsd, PRICING_VERSION, providerOf } from "@/observability"
 
 describe("PRICING_VERSION", () => {
   test("is the versioned price-table key", () => {
-    expect(PRICING_VERSION).toBe("pricing.v1")
+    // Bumped v1 → v2 with the provider-aware cache-read fix: the table now
+    // carries per-model cacheReadPerM and OpenAI no longer double-counts cache.
+    expect(PRICING_VERSION).toBe("pricing.v2")
+  })
+})
+
+describe("providerOf", () => {
+  test("gpt/o1/o3 prefixes → openai", () => {
+    expect(providerOf("gpt-4o")).toBe("openai")
+    expect(providerOf("gpt-4o-mini")).toBe("openai")
+    expect(providerOf("o1-preview")).toBe("openai")
+    expect(providerOf("o3-mini")).toBe("openai")
+  })
+  test("claude prefix → anthropic", () => {
+    expect(providerOf("claude-opus-4-7")).toBe("anthropic")
+  })
+  test("unknown prefix defaults to anthropic (additive semantics)", () => {
+    expect(providerOf("mystery-model")).toBe("anthropic")
   })
 })
 
@@ -48,13 +65,63 @@ describe("costUsd", () => {
     expect(costUsd("gpt-4o", 0, 0)).toBe(0)
   })
 
-  test("cacheReadTokens billed at the input rate (documented choice)", () => {
-    // gpt-4o input $2.5/1M; 1M cacheRead adds 2.5 on top of 12.5 = 15
-    expect(costUsd("gpt-4o", 1_000_000, 1_000_000, 1_000_000)).toBe(15)
+  // ── UPDATED for the provider-aware cache-read fix (pricing.v2) ──────────
+  // OLD (pricing.v1, BUGGY): cacheRead was billed at the full input rate and
+  // ADDED on top of input for every provider:
+  //     (input + cacheRead)*inRate + output*outRate
+  //     gpt-4o 1M/1M/1M → (1M+1M)*2.5/1M + 1M*10/1M = 5 + 10 = 15  ← pinned 15
+  // That double-counts OpenAI: its `prompt_tokens` ALREADY INCLUDES
+  // `cached_tokens`, so the 1M cacheRead was being charged once inside the 1M
+  // input AND again as a separate +2.5. The correct OpenAI bill carves the
+  // cached portion OUT of input and re-prices it at the discounted cache rate:
+  //     (input − cacheRead)*inRate + cacheRead*cacheRate + output*outRate
+  //     = (1M−1M)*2.5/1M + 1M*1.25/1M + 1M*10/1M = 0 + 1.25 + 10 = 11.25
+  test("OpenAI cacheRead is carved out of prompt_tokens, not double-counted", () => {
+    // gpt-4o: in $2.5/1M, cached $1.25/1M, out $10/1M.
+    expect(costUsd("gpt-4o", 1_000_000, 1_000_000, 1_000_000)).toBe(11.25)
+    // No cache hit → unchanged from v1 (cacheRead 0 carves nothing): 12.5.
+    expect(costUsd("gpt-4o", 1_000_000, 1_000_000, 0)).toBe(12.5)
+  })
+
+  test("Anthropic cacheRead is additive at the discounted cache-read rate", () => {
+    // claude-opus-4-7: in $15/1M, cache-read $1.50/1M, out $75/1M.
+    // input_tokens EXCLUDES cache reads → input stays whole, cacheRead adds at
+    // the discounted rate: 1M*15 + 1M*1.5 + 1M*75 (all /1M) = 91.5
+    expect(costUsd("claude-opus-4-7", 1_000_000, 1_000_000, 1_000_000)).toBe(91.5)
+  })
+
+  test("no double-count: same token counts, OpenAI cost < Anthropic-style additive", () => {
+    // Hold rates equal by comparing each provider against its OWN additive
+    // (v1-style) upper bound. The fix must make OpenAI cheaper than the additive
+    // model when cache hits; Anthropic stays additive (its API really excludes
+    // cache from input), so it is NOT reduced below its additive baseline.
+    const inTok = 1_000_000
+    const outTok = 500_000
+    const cacheTok = 800_000
+
+    // OpenAI (gpt-4o): correct carve-out vs the buggy additive (input+cache).
+    const openaiCorrect = costUsd("gpt-4o", inTok, outTok, cacheTok) as number
+    const openaiAdditiveBug = ((inTok + cacheTok) * 2.5 + outTok * 10) / 1_000_000
+    expect(openaiCorrect).toBeLessThan(openaiAdditiveBug)
+    // Hand-check: (1M−0.8M)*2.5 + 0.8M*1.25 + 0.5M*10 all /1M = 0.5 + 1.0 + 5 = 6.5
+    expect(openaiCorrect).toBeCloseTo(6.5, 9)
+
+    // Anthropic (claude-sonnet-4-6): cacheRead added at discounted rate ($0.30)
+    // is strictly cheaper than the old input-rate ($3) treatment.
+    const anthroNew = costUsd("claude-sonnet-4-6", inTok, outTok, cacheTok) as number
+    const anthroV1 = ((inTok + cacheTok) * 3 + outTok * 15) / 1_000_000
+    expect(anthroNew).toBeLessThan(anthroV1)
   })
 
   test("omitting cacheReadTokens equals passing zero", () => {
     expect(costUsd("gpt-4o", 1000, 1000)).toBe(costUsd("gpt-4o", 1000, 1000, 0))
+    expect(costUsd("claude-opus-4-7", 1000, 1000)).toBe(costUsd("claude-opus-4-7", 1000, 1000, 0))
+  })
+
+  test("OpenAI cacheRead clamps to input (malformed cached > prompt → no negative)", () => {
+    // cached(2M) > input(1M): clamp to 1M cached, 0 fresh → 1M*1.25 + out.
+    // = 1.25 + 0 = 1.25 (no negative fresh portion).
+    expect(costUsd("gpt-4o", 1_000_000, 0, 2_000_000)).toBe(1.25)
   })
 
   test("monotonic: more tokens never decreases cost", () => {

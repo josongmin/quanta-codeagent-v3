@@ -29,8 +29,14 @@
  * Concurrency:
  *   - Single in-process: writes serialize through `pendingFlush` so a burst of
  *     mutations produces at most ONE rename per debounce window.
- *   - Multi-process: per-instance tmp suffix avoids tmp clobber; the final
- *     rename is still last-write-wins (atomic, never torn).
+ *   - Multi-process: per-instance tmp suffix avoids tmp clobber. The final
+ *     rename is atomic (never torn). When a `mergeWithDisk` reconciler is
+ *     supplied, every flush RE-READS the on-disk file and merges it with the
+ *     in-memory state before serializing → last-write-MERGE, not -WINS, so a
+ *     peer's grants/denials written between our load and our flush survive.
+ *     (Still not a substitute for an OS lock under pathological interleaving —
+ *     a true lockfile remains the v4 follow-up — but it removes the silent
+ *     clobber of grants/denials, which is the security-critical loss.)
  */
 
 import { randomBytes } from "node:crypto"
@@ -75,6 +81,29 @@ export interface JsonStateFileOptions<T> {
   parse: (raw: unknown) => ParseOutcome<T>
   /** Expected schema version — only used in the version-mismatch warning. */
   stateVersion: number
+  /** Read-reconcile-MERGE hook (ADR-0046 follow-up: multi-process clobber fix).
+   *
+   *  When supplied, EVERY flush re-reads the current on-disk state and merges
+   *  it with the live in-memory state BEFORE serializing — turning concurrent
+   *  flushes from last-write-WINS into last-write-MERGE so a peer process's
+   *  grants/denials written between our `load()` and our flush are never
+   *  blindly clobbered.
+   *
+   *  Args:
+   *    - `onDisk`   — the freshly re-read + parsed on-disk state, or `null`
+   *                   when the file is absent (first write) OR unreadable /
+   *                   corrupt (we refuse to let a corrupt peer file wipe us).
+   *    - `inMemory` — this instance's live state (the authoritative base).
+   *    - `baseline` — the state this instance last persisted/loaded, so the
+   *                   merge can do a 3-way diff (peer-added vs locally-deleted)
+   *                   instead of a lossy union. `null` until the first
+   *                   successful load/write.
+   *
+   *  MUST be a pure function and MUST satisfy the single-process IDENTITY law:
+   *  when `onDisk` deep-equals `baseline` (i.e. WE are the only writer), the
+   *  result MUST equal `inMemory` byte-for-byte so the single-process path is
+   *  unchanged. When absent, the engine falls back to writing `inMemory`. */
+  mergeWithDisk?: (args: { onDisk: T | null; inMemory: T; baseline: T | null }) => T
 }
 
 /**
@@ -98,13 +127,18 @@ export interface JsonStateFile<T> {
 }
 
 export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonStateFile<T> => {
-  const { filePath, debounceMs, emptyState, serialize, parse, stateVersion } = opts
+  const { filePath, debounceMs, emptyState, serialize, parse, stateVersion, mergeWithDisk } = opts
   let loaded = false
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
   let pendingFlush: Promise<void> | null = null
   /** Snapshot getter captured at the time a flush is scheduled, so a debounced
    *  or queued write serializes the LATEST state at write time. */
   let snapshotState: () => T = emptyState
+  /** The state this instance last loaded-from / persisted-to disk. Drives the
+   *  3-way merge (peer-added vs locally-deleted). `null` until first load/write
+   *  resolves; the merge treats `null` baseline as "adopt all on-disk records"
+   *  (we have no proof we ever deleted anything). */
+  let baseline: T | null = null
 
   /** Per-instance unique tmp suffix. Two stores sharing the same `filePath`
    *  (multi-process scenario) use DIFFERENT tmp paths so they don't clobber
@@ -125,12 +159,49 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
    *   - Multi-process: per-instance tmp suffix avoids tmp clobber; the final
    *     rename is still last-write-wins (see module comment).
    */
+  /** Silent re-read used by the merge path (NOT load). Returns the parsed
+   *  on-disk state, or `null` when the file is absent OR unreadable OR corrupt
+   *  OR a version/shape mismatch. Crucially this NEVER quarantines and NEVER
+   *  throws: a peer process mid-rename, a corrupt peer file, or a future-schema
+   *  peer must NOT wipe our in-memory state nor crash our flush — we simply
+   *  fall back to writing our own state (`null` ⇒ merge sees no disk records).
+   *  The real `load()` path keeps its quarantine/sidecar behavior intact. */
+  const rereadForMerge = async (): Promise<T | null> => {
+    if (mergeWithDisk === undefined) return null
+    let raw: string
+    try {
+      raw = await readFile(filePath, "utf8")
+    } catch {
+      return null // absent (first write) or unreadable — fall back to our state.
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return null // corrupt peer file — do NOT let it wipe us, do NOT crash.
+    }
+    const outcome = parse(parsed)
+    return outcome.kind === "ok" ? outcome.state : null
+  }
+
   const writeToDisk = async (): Promise<void> => {
     try {
       await mkdir(dirname(filePath), { recursive: true })
-      const payload = serialize(snapshotState())
+      const inMemory = snapshotState()
+      // Read-reconcile-MERGE: fold any peer-written records on disk into our
+      // payload so a concurrent flush is last-write-MERGE, not -WINS. Absent
+      // mergeWithDisk ⇒ legacy blind-overwrite (identical bytes). Single
+      // process ⇒ onDisk deep-equals baseline ⇒ merge is identity (see law).
+      const merged =
+        mergeWithDisk === undefined
+          ? inMemory
+          : mergeWithDisk({ onDisk: await rereadForMerge(), inMemory, baseline })
+      const payload = serialize(merged)
       await writeFile(tmpPath, payload, "utf8")
       await rename(tmpPath, filePath)
+      // The merged state is now what's on disk → it becomes our new baseline so
+      // the next 3-way merge diffs against what we actually persisted.
+      baseline = merged
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       stderrWarn(`flush failed (${filePath}): ${message}`)
@@ -268,11 +339,18 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     loaded = true
     const raw = await readRawState()
     if (raw === null) {
-      setState(emptyState())
+      const cold = emptyState()
+      // Establish a baseline even on cold start: we KNOW we loaded an empty
+      // file, so any record that later appears on disk is peer-added (adopt),
+      // and any record we never set was never ours to delete.
+      baseline = cold
+      setState(cold)
       return
     }
     const validated = await parseRawState(raw)
-    setState(validated ?? emptyState())
+    const initial = validated ?? emptyState()
+    baseline = initial
+    setState(initial)
   }
 
   const reset = async (): Promise<void> => {
@@ -291,6 +369,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
       }
     }
     loaded = false
+    baseline = null
     try {
       await unlink(filePath)
     } catch {

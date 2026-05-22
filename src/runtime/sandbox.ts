@@ -1,5 +1,5 @@
 import { QuantaError } from "@/shared"
-import { withSpawnedChild } from "./guarded-spawn"
+import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { disclaimedShellArgv } from "./shell-disclaim"
 import type { ShellResult } from "./types"
 
@@ -193,13 +193,9 @@ export class LocalSandbox implements Sandbox {
       stderr: "pipe",
     })
 
-    const kill = () => {
-      try {
-        proc.kill()
-      } catch {
-        // already exited
-      }
-    }
+    // SIGTERM→SIGKILL escalation (KILL_GRACE_MS): a TERM-trapping child is
+    // force-killed; `disarm` clears the grace timer in the guard's cleanup.
+    const { kill, disarm } = escalatingKill(proc)
     const timer = setTimeout(() => {
       timedOut = true
       kill()
@@ -207,7 +203,7 @@ export class LocalSandbox implements Sandbox {
 
     // GUARDED: kill-on-throw + timer teardown via `withSpawnedChild`
     // (src/runtime/guarded-spawn.ts) instead of an inline catch/finally.
-    return withSpawnedChild({ kill, timer }, async () => {
+    return withSpawnedChild({ kill, timer, cleanup: disarm }, async () => {
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
@@ -352,13 +348,9 @@ export class DockerSandbox implements Sandbox {
     let timedOut = false
 
     const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" })
-    const kill = () => {
-      try {
-        proc.kill()
-      } catch {
-        // already exited
-      }
-    }
+    // SIGTERM→SIGKILL escalation (KILL_GRACE_MS): a `docker run` that ignores
+    // TERM is force-killed; `disarm` clears the grace timer in cleanup.
+    const { kill, disarm } = escalatingKill(proc)
     const timer = setTimeout(() => {
       timedOut = true
       kill()
@@ -368,7 +360,7 @@ export class DockerSandbox implements Sandbox {
     // host-side `docker run` process must still be reaped on a mid-drain throw
     // (the `--rm` flag only cleans the CONTAINER on its own exit), so the same
     // guard the local path uses applies here unchanged.
-    return withSpawnedChild({ kill, timer }, async () => {
+    return withSpawnedChild({ kill, timer, cleanup: disarm }, async () => {
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),

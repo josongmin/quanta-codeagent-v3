@@ -111,4 +111,34 @@ describe("clampDials — propositional clamping", () => {
     expect(out.maxToolCalls).toBe(100)
     expect(out.maxCostUsd).toBe(5)
   })
+
+  test("NaN / non-finite / negative requested or cap is dropped (treated as absent)", () => {
+    // A NaN/Inf/negative dial would otherwise poison the meter's comparisons
+    // (NaN > dial === false silently disables a cap) or set a nonsensical
+    // negative budget. The guard drops the invalid value rather than clamping.
+    expect(clampDials({ maxTurns: Number.NaN }, { maxTurns: 100 }).maxTurns).toBe(100)
+    expect(
+      clampDials({ maxTurns: Number.POSITIVE_INFINITY }, { maxTurns: 100 }).maxTurns,
+    ).toBe(100)
+    expect(clampDials({ maxTurns: -5 }, { maxTurns: 100 }).maxTurns).toBe(100)
+    // An invalid CAP is treated as absent ⇒ a valid request passes through.
+    expect(clampDials({ maxTurns: 7 }, { maxTurns: Number.NaN }).maxTurns).toBe(7)
+    expect(clampDials({ maxTurns: 7 }, { maxTurns: -1 }).maxTurns).toBe(7)
+    // Both invalid ⇒ field is dropped entirely (undefined).
+    expect(clampDials({ maxTurns: Number.NaN }, { maxTurns: Number.NaN }).maxTurns).toBeUndefined()
+  })
+
+  test("invalid request does NOT emit a [budget-cap] clamp log line", () => {
+    const { lines } = captureStderr(() => {
+      clampDials({ maxTurns: Number.NaN }, { maxTurns: 100 })
+    })
+    expect(lines.join("")).not.toContain("[budget-cap]")
+  })
+
+  test("valid positive inputs are unaffected by the finiteness guard", () => {
+    const out = clampDials({ maxTurns: 30, maxCostUsd: 0 }, { maxTurns: 50, maxCostUsd: 5 })
+    expect(out.maxTurns).toBe(30)
+    // 0 is a valid non-negative budget and must pass through.
+    expect(out.maxCostUsd).toBe(0)
+  })
 })

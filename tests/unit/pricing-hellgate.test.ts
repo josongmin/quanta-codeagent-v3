@@ -7,14 +7,12 @@
  * float-overflow, or negative cost.
  *
  * IMPORTANT — cache_read pricing (read this before "fixing" a failure):
- *   The hellgate brief asked us to assert "cache_read priced at the cache_read
- *   rate (not full input rate) — the discount is applied". The CURRENT source
- *   (`pricing.v1`, src/observability/pricing.ts) does the OPPOSITE BY DESIGN:
- *   the docstring states cacheReadTokens are billed at the **input rate** as a
- *   conservative upper bound, with per-provider cache discounts deferred to a
- *   future `pricing.vN`. There is NO cache_read discount to assert today.
- *   These tests therefore pin the ACTUAL documented behavior (input-rate) and
- *   the report flags the brief↔source premise mismatch as a finding, not a bug.
+ *   As of `pricing.v2` cache_read IS discounted and PROVIDER-AWARE (the v1
+ *   "billed at full input rate, additive for all providers" posture was a
+ *   double-count bug for OpenAI, whose `prompt_tokens` already includes
+ *   `cached_tokens`). These tests now pin the corrected behavior:
+ *     - OpenAI: cached portion carved OUT of input, re-priced at cacheReadPerM.
+ *     - Anthropic: cacheRead additive at the discounted cacheReadPerM rate.
  */
 import { describe, expect, test } from "bun:test"
 import { costUsd, PRICING_VERSION } from "@/observability"
@@ -44,7 +42,7 @@ describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
   }
 
   test("PRICING_VERSION is the pinned table key", () => {
-    expect(PRICING_VERSION).toBe("pricing.v1")
+    expect(PRICING_VERSION).toBe("pricing.v2")
   })
 })
 
@@ -52,22 +50,31 @@ describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
 /* 2. cache_read posture (documented: input rate, NO discount)         */
 /* ------------------------------------------------------------------ */
 
-describe("G3 cache_read pricing (pricing.v1: billed at INPUT rate — no discount)", () => {
-  test("cacheReadTokens add cost at the INPUT rate, not a discounted rate", () => {
-    // gpt-4o input $2.5/1M. 1M cacheRead therefore adds exactly 2.5 — the SAME
-    // as 1M of fresh input. If a discount were applied this would be < 2.5.
-    const base = costUsd("gpt-4o", 1_000_000, 1_000_000) as number // 12.5
+describe("G3 cache_read pricing (pricing.v2: provider-aware, discounted)", () => {
+  test("OpenAI: cached portion carved out of prompt_tokens at the cache rate", () => {
+    // gpt-4o: in $2.5/1M, cached $1.25/1M (0.5×), out $10/1M.
+    // prompt_tokens (1M) ALREADY includes the 1M cache_read, so cache is NOT
+    // added on top — it is re-priced: (1M−1M)*2.5 + 1M*1.25 + 1M*10 = 11.25.
+    const base = costUsd("gpt-4o", 1_000_000, 1_000_000) as number // 12.5, no cache
     const withCache = costUsd("gpt-4o", 1_000_000, 1_000_000, 1_000_000) as number
-    expect(withCache).toBe(15) // 12.5 + 2.5  (full input rate)
-    expect(withCache - base).toBe(2.5) // the cache delta == the input rate
-    // Equivalence: a cache_read token costs the same as an input token here.
-    expect(costUsd("gpt-4o", 2_000_000, 0)).toBe(costUsd("gpt-4o", 1_000_000, 0, 1_000_000))
+    expect(withCache).toBe(11.25)
+    // A cache hit LOWERS cost vs an all-fresh prompt of the same size (discount).
+    expect(withCache).toBeLessThan(base)
+    // Carve-out identity: fully-cached 1M prompt == pricing 1M purely at cache rate.
+    expect(costUsd("gpt-4o", 1_000_000, 0, 1_000_000)).toBe((1_000_000 * 1.25) / 1_000_000)
+  })
+
+  test("Anthropic: cacheRead additive at the discounted cache-read rate", () => {
+    // claude-opus-4-7: in $15/1M, cache-read $1.5/1M (0.1×), out $75/1M.
+    // input_tokens EXCLUDES cache → 1M*15 + 1M*1.5 + 1M*75 = 91.5.
+    const base = costUsd("claude-opus-4-7", 1_000_000, 1_000_000) as number // 90
+    const withCache = costUsd("claude-opus-4-7", 1_000_000, 1_000_000, 1_000_000) as number
+    expect(withCache).toBe(91.5)
+    expect(withCache - base).toBe(1.5) // delta == discounted cache-read rate
   })
 
   test("omitting cacheReadTokens equals passing 0 (default-arg parity)", () => {
-    expect(costUsd("claude-opus-4-7", 1234, 5678)).toBe(
-      costUsd("claude-opus-4-7", 1234, 5678, 0),
-    )
+    expect(costUsd("claude-opus-4-7", 1234, 5678)).toBe(costUsd("claude-opus-4-7", 1234, 5678, 0))
   })
 })
 
@@ -138,10 +145,16 @@ describe("G3 huge token counts stay finite + correct", () => {
     expect(r2).toBeGreaterThanOrEqual(r)
   })
 
-  test("huge cacheRead does not overflow and is added at input rate", () => {
-    const r = costUsd("gpt-4o", 0, 0, 1_000_000_000_000) as number
-    expect(Number.isFinite(r)).toBe(true)
-    expect(r).toBe(2_500_000) // 1e12 cacheRead @ input rate, same as input
+  test("huge cacheRead does not overflow and is priced at the cache rate", () => {
+    // OpenAI carve-out clamps cached to input (0 here), so a cacheRead with no
+    // matching prompt_tokens contributes nothing — no overflow, no NaN.
+    const clamped = costUsd("gpt-4o", 0, 0, 1_000_000_000_000) as number
+    expect(Number.isFinite(clamped)).toBe(true)
+    expect(clamped).toBe(0) // cached clamped to input(0); nothing to re-price
+    // With matching prompt_tokens the 1e12 cached tokens price at $1.25/1M.
+    const priced = costUsd("gpt-4o", 1_000_000_000_000, 0, 1_000_000_000_000) as number
+    expect(Number.isFinite(priced)).toBe(true)
+    expect(priced).toBe(1_250_000) // 1e12 @ $1.25/1M cache rate
   })
 
   test("Infinity / NaN token inputs do not silently produce a bogus finite cost", () => {

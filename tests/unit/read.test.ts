@@ -94,6 +94,24 @@ describe("readTool", () => {
     expect(readTool.inputSchema.safeParse({ path: 123 }).success).toBe(false)
   })
 
+  test("schema rejects limit:0 / negative / non-int (avoids misleading empty read)", () => {
+    // A `limit:0` or negative value previously sliced to empty and surfaced the
+    // "(empty file)" sentinel on a NON-empty file. The tightened schema rejects
+    // these at the boundary with a clear validation error instead.
+    expect(readTool.inputSchema.safeParse({ path: "x", limit: 0 }).success).toBe(false)
+    expect(readTool.inputSchema.safeParse({ path: "x", limit: -5 }).success).toBe(false)
+    expect(readTool.inputSchema.safeParse({ path: "x", limit: 1.5 }).success).toBe(false)
+    // A positive integer limit is still accepted.
+    expect(readTool.inputSchema.safeParse({ path: "x", limit: 1 }).success).toBe(true)
+  })
+
+  test("schema rejects a negative / non-int offset, accepts 0 and positive ints", () => {
+    expect(readTool.inputSchema.safeParse({ path: "x", offset: -1 }).success).toBe(false)
+    expect(readTool.inputSchema.safeParse({ path: "x", offset: 2.5 }).success).toBe(false)
+    expect(readTool.inputSchema.safeParse({ path: "x", offset: 0 }).success).toBe(true)
+    expect(readTool.inputSchema.safeParse({ path: "x", offset: 3 }).success).toBe(true)
+  })
+
   test("a relative path resolves against ctx.cwd, not process.cwd()", async () => {
     // The file lives only under the session cwd (dir); a bare name must hit it.
     writeFileSync(join(dir, "relative-read.txt"), "from-ctx-cwd")

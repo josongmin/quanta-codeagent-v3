@@ -19,16 +19,39 @@ import type { ToolInputStreamSeam } from "./streaming-dispatch"
  *  - Tracks the (id → name) mapping locally so `delta`/`available` can find
  *    the right tool without re-parsing the event stream. Cleared on
  *    `available` to bound memory by outstanding-in-turn calls.
+ *  - LEAK GUARD: the seam contract has no reset hook, and a `start` whose call
+ *    is later tombstoned mid-args (FallbackLLM `stream_reset` discards the dead
+ *    partial WITHOUT replaying `tool_use_end`) never reaches `available` — so
+ *    its entry would otherwise leak one slot per abandoned call, unbounded over
+ *    a long-running turn/session. We bound the map with a small LRU cap: when a
+ *    `start` would exceed the cap, the OLDEST entry is evicted (insertion order
+ *    via `Map`). The cap is far above any realistic count of concurrently
+ *    outstanding tool calls in one turn, so a legitimate `delta`/`available`
+ *    pairing is never evicted out from under a live call; only stale
+ *    tombstoned entries are reclaimed.
  *  - The seam contract guarantees the caller wraps invocation in try/catch
  *    (see `streaming-dispatch#fireToolInput`); we still defensively swallow
  *    callback errors here so a faulty third-party tool cannot surface as a
  *    thrown error at all.
  */
+/** Bound on outstanding (id → name) entries. A turn never has more than a
+ *  handful of tool calls in flight at once; this cap is far above that, so it
+ *  only ever reclaims entries leaked by tombstoned `start`-without-`_end`
+ *  calls — never a live pairing. */
+const MAX_OUTSTANDING_IDS = 256
+
 export const buildToolInputSeam = (registry: ToolRegistry): ToolInputStreamSeam => {
   const idToName = new Map<string, string>()
 
   return {
     start(id, name) {
+      // LRU leak guard: evict the oldest entry (insertion order) when the map
+      // is at capacity and this is a NEW id. Re-`start` of an existing id just
+      // refreshes its name (handled by the set below). See module docstring.
+      if (!idToName.has(id) && idToName.size >= MAX_OUTSTANDING_IDS) {
+        const oldest = idToName.keys().next().value
+        if (oldest !== undefined) idToName.delete(oldest)
+      }
       idToName.set(id, name)
       const tool = registry.get(name)
       if (tool?.onInputStart === undefined) return

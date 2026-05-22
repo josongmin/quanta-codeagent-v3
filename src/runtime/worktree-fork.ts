@@ -1,5 +1,5 @@
 import { runShell } from "./shell"
-import { isGitRepo } from "./worktree"
+import { isGitRepo, runWorktreeAddWithRetry } from "./worktree"
 
 /** A persistent (not auto-removed) git worktree spun up for top-level
  *  conversation fork. Unlike {@link withWorktree}, this does NOT clean up on
@@ -103,9 +103,15 @@ export const createPersistentWorktree = async (
 
   // `-B` already delimits the branch arg; quoting + `--` after it gives belt-
   // and-braces protection in case a sanitized token still resembles a flag.
-  const add = await git(
+  // Bounded retry on TRANSIENT git lock contention only — concurrent
+  // `session fork --worktree` calls race for the repo lock and the loser sees
+  // a lock error that a moment-later retry clears. A NON-lock failure (bad
+  // ref, etc.) is returned by the helper without retry and fails below.
+  const add = await runWorktreeAddWithRetry(
+    git,
     repoRoot,
     `worktree add --no-track -B "${branch}" -- "${worktreePath}" "${baseRef}"`,
+    worktreePath,
   )
   if (add.exitCode !== 0) {
     throw new WorktreeForkError(
