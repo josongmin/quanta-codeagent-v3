@@ -36,6 +36,7 @@ evidence:
     - src/agent/tool-choice.ts
     - src/agent/loop.ts
     - src/agent/verify-guard.ts
+    - src/agent/verify-signal.ts
     - src/agent/closeout-guard.ts
     - src/llm/types.ts
     - src/llm/adapters/anthropic.ts

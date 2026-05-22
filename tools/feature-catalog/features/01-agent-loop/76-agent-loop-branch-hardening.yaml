@@ -3,7 +3,7 @@ title: Agent-loop branch hardening — refusal / thinking carry-over / deny-and-
 section: 1
 subsystem: 턴 라이프사이클 — branch 가드 (gap analysis, ADR-0076)
 order: 76
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent
@@ -74,19 +74,7 @@ evidence:
       - tests/integration/admissibility-deny-steer-hell.test.ts
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    Gap-1 / Gap-2 / Gap-4는 모두 shipped + 테스트 + 헬게이트 + e2e smoke. Gap-3
-    (Submission op dispatcher의 loop entry-point 분기 — interrupt →
-    AbortController.abort, cancel_subagent → conversation-action.decideAction,
-    reload_user_config → 턴 경계 재로드, shutdown → graceful close)은 loop.ts
-    동시 작업 충돌 회피로 deferred. deny_and_steer의 loop steerInjection
-    consumer(다음 턴 user message로 hand)는 ADR-0076 §Integration seam 5-step
-    patch로 spec됐으나 미배선 — G-1~G-1d partial-wiring guard로 PIN.
-  promotion_path: |
-    loop.ts quiescent 시 Submission op dispatcher entry-point 분기를 추가하고
-    steerInjection을 next-turn user message로 consume + G-1~G-1d guard 갱신하면
-    L5 (Gap-3 + Gap-4 양쪽 closure).
+deliberate_hold: null
 notes: |
   e2e 회귀 가드: tikitaka smoke fixture 2종 — 14-refusal-handled (Gap-1 happy
   path: refusal → terminal error, no retry consumption) + 15-refusal-mid-tool

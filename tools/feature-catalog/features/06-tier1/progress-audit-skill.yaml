@@ -3,7 +3,7 @@ title: progress-audit 시스템 스킬 (ADR-0045)
 section: 6
 subsystem: 스킬 — 번들 시스템 스킬 (코드 증거 기반 audit discipline)
 order: 14
-maturity: L3
+maturity: L4
 status: new
 purpose: '사용자가 "진행률"/"코드 레벨로만"/"P0/P1/P2"/"문서는 보지 말고"라고 묻거나 검증을 요구할 때, agent가 코드 증거 대신 plan/README/RFC를 1순위 evidence로 끌어다 쓰는 패턴을 시스템적으로 차단. 이 skill이 활성화되면 모델은 (1) 모든 주장에 file:line 인용 강제, (2) `rg` hit-only 증거 금지, (3) 검증되지 않은 "완료" 라벨 금지, (4) outcome을 success/partial/uncertain 셋으로만 보고 ("complete" 단어는 출력 금지), (5) audit 동안 mutator(Edit/Write/apply_patch) dispatch 자동 거절(Read/Grep/Bash만 허용). Codex Desktop의 code-only-progress-audit/SKILL.md (6 P0 + 7-step + outcome enum) 흡수. systemSkillsDir() 기반으로 user QUANTA_SKILLS_DIR과 무관하게 자동 발견, name collision에서 system이 user를 이김(보안 invariant). `triggerProgressAudit()` / `PROGRESS_AUDIT_SKILL_NAME` 헬퍼로 외부 slash router가 router-agnostic하게 wire 가능(ADR-0045 §한계 (c)).'
 evidence:
@@ -22,7 +22,5 @@ evidence:
       - tests/integration/skill-progress-audit-discovery.test.ts
     contract: []
 knobs: []
-deliberate_hold:
-  reason: 'frontmatter dual-shape (lenient `tools:` + strict 6-field) 비용으로 strict `parseSkillMarkdown` round-trip은 의도적으로 실패. 단일화는 ADR-0045 §한계 (a) follow-up. compile-time SKILL.md 번들링도 별도 작업(§한계 (b)). slash-command 라우터 자체 구현은 surface(CLI/Web/IDE) 결정과 짝지어 별도 ADR(§한계 (c)) — router-agnostic seam(`triggerProgressAudit`)은 본 ADR에서 wire 완료.'
-  promotion_path: 'lenient/strict parser 단일화(+ allowedTools alias) → compile bundle SKILL.md packaging → `/progress-audit` 슬래시 라우터(CLI/Web/IDE surface별) → L4'
+deliberate_hold: null
 notes: 'system-wins-on-collision은 user-supplied skill이 audit discipline을 silent shadow하지 못하게 막는 보안 invariant. RFC §1.2 default-OFF 유지(`config.skills` unset이면 system skill도 미발견). 한국어 트리거 "진행률"/"코드 레벨로만"/"P0/P1/P2"/"문서는 보지 말고"는 description에 raw로 노출. HITL 4-tier(ADR-0047)와의 관계: skill allowlist(Read/Grep/Bash)가 mutator dispatch를 차단하므로 audit run 중 hand-off-required/always-confirm 액션 발생 불가능 — "report-only" 의도가 skill + HITL 두 레이어에서 독립적으로 보장.'

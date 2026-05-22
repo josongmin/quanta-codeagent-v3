@@ -3,7 +3,7 @@ title: 스레드별 권한 (heartbeat-thread-permissions-by-id 동등물)
 section: 3
 subsystem: 권한 스택 (ADR-0046)
 order: 10
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   **Thread-level override** — 특정 sessionId(스레드)에 대해 sandboxPolicy +

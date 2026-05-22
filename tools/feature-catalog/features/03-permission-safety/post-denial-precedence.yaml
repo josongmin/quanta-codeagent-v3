@@ -3,7 +3,7 @@ title: post-denial 사용자 override (guardian-post-denial-precedence 동등물
 section: 3
 subsystem: 권한 스택 (ADR-0046)
 order: 12
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   **Explicit re-approval precedence** — guardian/룰이 거부한 동작을 사용자가

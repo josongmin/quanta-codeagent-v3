@@ -3,7 +3,7 @@ title: 호스트별 기본 agent-mode (agent-mode-by-host-id 동등물)
 section: 3
 subsystem: 권한 스택 (ADR-0046)
 order: 11
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   **Host-level default** — hostId(SSH_CONNECTION 기반 결정론적 식별자,

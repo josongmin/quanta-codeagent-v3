@@ -3,7 +3,7 @@ title: Multi-modal 이미지 입력 (dual-provider)
 section: 2
 subsystem: 멀티모달 (ADR-0083)
 order: 83
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   ContentBlock에 ImageBlock 추가 — 스크린샷·다이어그램 입력. 두 어댑터가 각자 native

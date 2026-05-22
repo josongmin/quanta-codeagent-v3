@@ -3,7 +3,7 @@ title: branch_search — N-best verifier-prover (speculative branch search)
 section: 6
 subsystem: 투기적 분기 탐색 (Agentless 흡수, ADR-0084)
 order: 83
-maturity: L3
+maturity: L4
 status: refined
 purpose: |
   하드 edit를 N개 후보로 격리 워크스페이스에서 병렬 시도 → 닫힌 Verifier 포트(tsc/test/
@@ -29,14 +29,5 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    loop 배선 완료 — buildSessionFeatures가 config.branchSearch 설정 시 branch_search
-    도구를 extraTools에 등록(runCandidate→runAgent fork + isolator는 branch-search-runner.ts).
-    caller가 AgentConfig.branchSearch 세팅하면 즉시 동작(L3). 남은 건 mode-preset
-    default-on 정책(cli=3/bench=5/daemon=3/ci-bot 비활성)을 apps/agent에 박는 것 — 그건
-    surface 정책이라 별도. 미설정 시 byte-identical(도구 미등록).
-  promotion_path: |
-    apps/agent/mode-presets/{interactive,batch,headless}.ts가 base.branchSearch를
-    프리셋별 기본값으로 채우면 모든 모드 default-on → L4. 라이브 SWE-bench delta 측정 후 가중치 튜닝.
+deliberate_hold: null
 notes: 'isolator는 node_modules 심볼릭 해저드 명시 가드(unlink 링크 먼저, 그 다음 rm). N 하드캡 8(Agentless §6 plateau). winner diff 적용은 호출자 책임 — 오케스트레이터는 부모 워크스페이스 무접촉(negative invariant).'

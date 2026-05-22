@@ -3,7 +3,7 @@ title: Cost & cache 대시보드
 section: 8
 subsystem: 비용·캐시 가시화 (ADR-0085)
 order: 85
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·

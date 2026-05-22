@@ -3,7 +3,7 @@ title: Persona slot — Codex {{ personality }} Handlebars absorption
 section: 1
 subsystem: 시스템 프롬프트 — 페르소나 enum (Codex absorption, ADR-0068 persona)
 order: 70
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   Codex Desktop base_instructions의 `{{ personality }}` Handlebars 슬롯 흡수. 3-arm 닫힌
@@ -24,10 +24,5 @@ evidence:
     integration: []
     contract: []
 knobs: [QUANTA_PERSONA]
-deliberate_hold:
-  reason: |
-    enum + 본문 + resolver + prompt 합성은 완성+테스트. /persona 슬래시 커맨드나
-    SetPersonality 런타임 이벤트(Codex) 미배선 — REPL 시작 시 env로만 선택.
-  promotion_path: |
-    REPL 슬래시 명령으로 세션 내 전환(prefix-cache invalidation 비용 명시)을 wire하면 L4.
+deliberate_hold: null
 notes: 'Codex personality_default/friendly/pragmatic 3-element catalog를 1:1 흡수. friendly = collaborative partner ("we"/"let'\''s"); pragmatic = terse engineering register. default-OFF / byte-identical (RFC §1.2).'
