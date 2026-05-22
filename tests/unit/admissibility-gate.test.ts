@@ -451,6 +451,12 @@ describe("runAdmissibilityGate: parity with dispatchTool", () => {
       onConfirm?: () => Promise<boolean>
       expectPreview: string | null // null ⇒ tool runs (ok:true)
       expectContent?: string
+      /** ADR-0036 L4: scenarios where the dispatch path legitimately
+       *  diverges from the direct admissibility-gate path (the seam guard
+       *  pre-empts). When set, the parity comparison checks `direct`
+       *  against `expectPreview/Content` and `dispatched` against
+       *  `divergent.dispatchedPreview/Content`. */
+      divergent?: { dispatchedPreview: string; dispatchedContent: string }
     }
     const bash = makeTool("bash", { readOnly: false, schema: bashSchema })
     const ro = makeTool("ro", { readOnly: true })
@@ -502,13 +508,25 @@ describe("runAdmissibilityGate: parity with dispatchTool", () => {
         expectPreview: null,
       },
       {
-        name: "plan mode blocks mutating tool",
+        // ADR-0036 L4 (plan-mode-dispatch-block): the dispatch path now
+        // pre-empts the admissibility gate's `plan-blocked` arm with the
+        // SEAM GUARD's `mode-blocked` reply. The runAdmissibilityGate
+        // direct path still surfaces the legacy "plan-blocked" reply
+        // (the gate is reachable from any caller, e.g. an external host),
+        // so the two paths legitimately diverge here. We exclude this
+        // scenario from the parity comparison via `direct === false` and
+        // assert each path separately below.
+        name: "plan mode blocks mutating tool (DIVERGENT after L4 seam wire)",
         tool: mutate,
         input: {},
         permission: { mode: "default" },
         planMode: true,
         expectPreview: "plan-blocked",
         expectContent: "blocked in plan mode",
+        divergent: {
+          dispatchedPreview: "mode-blocked",
+          dispatchedContent: "not classified in the plan-mode mutating table",
+        },
       },
       {
         name: "acceptEdits + mutating ⇒ allow",
@@ -570,6 +588,20 @@ describe("runAdmissibilityGate: parity with dispatchTool", () => {
         // Tool ran — both paths should reflect ok-success.
         expect(direct, `[${s.name}] direct should be null when admissible`).toBeNull()
         expect(dispatched.ok, `[${s.name}] dispatched should be ok`).toBe(true)
+      } else if (s.divergent) {
+        // ADR-0036 L4: the dispatch path differs from the direct gate
+        // path because the seam guard pre-empts. Assert each separately.
+        expect(direct, `[${s.name}] direct should not be null`).not.toBeNull()
+        expect(direct?.preview, `[${s.name}] direct preview`).toBe(s.expectPreview)
+        if (s.expectContent) {
+          expect(direct?.block.content, `[${s.name}] direct content`).toContain(s.expectContent)
+        }
+        expect(dispatched.preview, `[${s.name}] dispatched preview`).toBe(
+          s.divergent.dispatchedPreview,
+        )
+        expect(dispatched.block.content, `[${s.name}] dispatched content`).toContain(
+          s.divergent.dispatchedContent,
+        )
       } else {
         expect(direct, `[${s.name}] direct should not be null`).not.toBeNull()
         expect(direct?.preview, `[${s.name}] direct preview`).toBe(s.expectPreview)
@@ -616,7 +648,10 @@ describe("runAdmissibilityGate: pattern auto-pass CANNOT bypass HARD_DENY (AUDIT
 
   test("a SAFE covered-pattern action (no HARD_DENY) still auto-passes", async () => {
     const { PatternGrantStore } = await import("@/permission")
-    const readish = makeTool("read_file", { readOnly: true, schema: z.object({ path: z.string() }) })
+    const readish = makeTool("read_file", {
+      readOnly: true,
+      schema: z.object({ path: z.string() }),
+    })
     const store = new PatternGrantStore(["read:src"])
     const action: AdmissibilityAction = {
       tool: "read_file",
@@ -629,7 +664,12 @@ describe("runAdmissibilityGate: pattern auto-pass CANNOT bypass HARD_DENY (AUDIT
       permissionPatternStore: store,
       permission: { mode: "default" },
     } as Partial<AgentConfig>)
-    const res = await runAdmissibilityGate(call("read_file", { path: "src/x.ts" }), c, { mode: "default" }, action)
+    const res = await runAdmissibilityGate(
+      call("read_file", { path: "src/x.ts" }),
+      c,
+      { mode: "default" },
+      action,
+    )
     // No HARD_DENY on a read-only path ⇒ auto-pass admits (null).
     expect(res).toBeNull()
   })

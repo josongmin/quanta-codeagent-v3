@@ -245,6 +245,32 @@ export const assertNotMutatingInPlanMode = (mode: CollaborationMode, toolName: s
   throw new PlanModeMutatingBlockedError(toolName, kind)
 }
 
+/** Resolve the effective {@link CollaborationMode} from an `AgentConfig`-like
+ *  surface (just the two fields we read). Precedence:
+ *    1. explicit `collaborationMode` field (set by host / developer-channel
+ *       transition) wins;
+ *    2. otherwise fall back to the 4-mode `AgentMode` → 2-mode projection
+ *       (only `"plan"` from {@link resolveAgentMode} maps to `"plan"`; every
+ *       other posture, including `review`/`audit`, projects to `"default"`).
+ *
+ *  Default-OFF for legacy callers: a config with NEITHER field set yields
+ *  `"default"` so the dispatch seam never blocks. This is the same shape
+ *  `dispatch.ts` used pre-L4 when constructing `runPlanExitFlow`'s collab
+ *  argument, factored here so the dispatch seam, plan-exit flow, and any
+ *  future caller share ONE projection.
+ *
+ *  Pure: no IO, no clock, no read of process env. Takes the narrow slice it
+ *  needs (the three optional `AgentConfig` fields). */
+export const resolveCollaborationMode = (config: {
+  collaborationMode?: CollaborationMode
+  mode?: AgentMode
+  planMode?: boolean
+}): CollaborationMode => {
+  if (config.collaborationMode === "plan") return "plan"
+  if (config.collaborationMode === "default") return "default"
+  return resolveAgentMode(config.mode, config.planMode) === "plan" ? "plan" : "default"
+}
+
 /** Strict regex for the `mode=…` directive that a developer message must
  *  carry to cause a collaboration-mode transition. Anchored — anything other
  *  than the bare directive (with optional surrounding whitespace) is treated

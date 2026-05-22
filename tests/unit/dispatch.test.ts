@@ -117,9 +117,17 @@ describe("dispatchTool error normalization", () => {
 })
 
 describe("dispatchTool gates", () => {
-  test("plan mode blocks a mutating tool before execute", async () => {
+  test("plan mode blocks a mutating tool before execute (ADR-0036 L4 seam-guard)", async () => {
+    // ADR-0036 L4: the dispatch-seam guard fires BEFORE the legacy
+    // admissibility gate. Custom (non-built-in) tools are not in
+    // `MUTATING_TOOL_TABLE`, so the seam guard denies them with
+    // `UnknownToolError` in plan mode (fail-closed) — never silently
+    // allowing a forgotten classification. To exercise the
+    // PlanModeMutatingBlockedError arm we use a real built-in (`write`)
+    // that IS classified in the table; for the unknown-tool arm see the
+    // sibling test below.
     let executed = false
-    const guarded = makeTool("mutate", {
+    const guarded = makeTool("write", {
       readOnly: false,
       run: async function* () {
         executed = true
@@ -127,13 +135,36 @@ describe("dispatchTool gates", () => {
       },
     })
     const res = await dispatchTool(
-      call("mutate", {}),
+      call("write", {}),
       config({ registry: new ToolRegistry([guarded]), planMode: true }),
       perm,
     )
     expect(res.ok).toBe(false)
-    expect(res.preview).toBe("plan-blocked")
-    expect(res.block.content).toContain("blocked in plan mode: mutate")
+    expect(res.preview).toBe("mode-blocked")
+    expect(res.block.content).toContain("blocked in plan collaboration mode")
+    expect(executed).toBe(false)
+  })
+
+  test("plan mode denies an unknown tool via UnknownToolError (fail-closed)", async () => {
+    // ADR-0036: a tool absent from MUTATING_TOOL_TABLE in plan mode is a
+    // fail-closed deny (a future tool added without classification cannot
+    // bypass the gate by being forgotten).
+    let executed = false
+    const guarded = makeTool("mutate-unknown", {
+      readOnly: false,
+      run: async function* () {
+        executed = true
+        yield { type: "result", result: { ok: true, output: "ran" } }
+      },
+    })
+    const res = await dispatchTool(
+      call("mutate-unknown", {}),
+      config({ registry: new ToolRegistry([guarded]), planMode: true }),
+      perm,
+    )
+    expect(res.ok).toBe(false)
+    expect(res.preview).toBe("mode-blocked")
+    expect(res.block.content).toContain("not classified in the plan-mode mutating table")
     expect(executed).toBe(false)
   })
 

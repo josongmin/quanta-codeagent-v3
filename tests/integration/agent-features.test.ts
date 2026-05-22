@@ -81,8 +81,13 @@ describe("agent feature wiring", () => {
     const blocks = outcome.messages.flatMap((m) =>
       m.content.filter((b) => b.type === "tool_result"),
     )
+    // ADR-0036 L4: dispatch-seam guard pre-empts → surfaces
+    // "blocked in plan collaboration mode" (typed-error message).
     const denied = blocks.find(
-      (b) => b.type === "tool_result" && b.content.includes("blocked in plan mode"),
+      (b) =>
+        b.type === "tool_result" &&
+        (b.content.includes("blocked in plan mode") ||
+          b.content.includes("blocked in plan collaboration mode")),
     )
     expect(denied).toBeDefined()
     if (denied?.type === "tool_result") expect(denied.is_error).toBe(true)

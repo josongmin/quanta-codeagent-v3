@@ -11,8 +11,9 @@ import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { DedupGate } from "./dispatch-dedup"
 import { deny, resultBlock } from "./dispatch-helpers"
+import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
-import { resolveAgentMode } from "./mode"
+import { resolveCollaborationMode } from "./mode"
 import { runPlanExitFlow } from "./plan-exit-flow"
 import type { AgentConfig } from "./types"
 
@@ -169,6 +170,33 @@ const dispatchToolInner = async (
     return deny(call.id, `Unknown tool: ${call.name}`, "unknown tool")
   }
 
+  // ADR-0036 L4 wire (plan-mode-dispatch-block): consult the dispatch-seam
+  // guard BEFORE the dedup gate / admissibility gate. The seam is a single
+  // table lookup (`MUTATING_TOOL_TABLE`) and a `default` collaboration mode
+  // short-circuits to `{ ok: true }` in one branch, so this is byte-identical
+  // for every caller that hasn't opted in (the default of
+  // `resolveCollaborationMode` is `"default"`).
+  //
+  // Read-only fast path: a tool that DECLARES `isReadOnly() === true` is
+  // unconditionally allowed in plan posture regardless of table membership.
+  // The registry's per-tool `isReadOnly()` is the runtime SSOT for the
+  // mutating-vs-read-only invariant — every built-in tool implements it; a
+  // host that ships a custom read-only tool without remembering to add it to
+  // the table should still be allowed (the table is fail-closed FOR
+  // MUTATING tools, not for safe ones). For mutating / unknown calls we
+  // route through the seam guard which fails-closed via UnknownToolError on
+  // any tool missing from MUTATING_TOOL_TABLE — that's where the "no silent
+  // mutating bypass" invariant lives. SOTA (Codex): the block is dispatch-
+  // time + stateless (no per-turn unwinding); a `default` ⇒ `plan`
+  // transition only affects calls AFTER the transition.
+  const collab = resolveCollaborationMode(config)
+  if (collab === "plan" && !registry.isReadOnly(call.name)) {
+    const seamDecision = checkDispatchAllowed({ collaborationMode: collab }, { name: call.name })
+    if (!seamDecision.ok) {
+      return deny(call.id, seamDecision.reason.message, "mode-blocked")
+    }
+  }
+
   // T3 — pre-flight dedup gate (SOTA++ structural brake on Type F Verify-Loop
   // Stuck on Env). Consulted BEFORE the admissibility gate so a thrashing
   // call never burns permission/HITL/hook work. Default-OFF: when
@@ -223,10 +251,11 @@ const dispatchToolInner = async (
   // PlanExitToolOutcome, so it crosses the slice boundary by value. Absent ⇒
   // omitted (the `request_plan_exit` tool is not registered anyway).
   const planExitPort = config.planExitPort
-  // `runPlanExitFlow` takes the 2-mode CollaborationMode ("default" | "plan")
-  // and throws unless it is "plan" — so coerce the 4-mode AgentMode down: only
-  // "plan" maps to "plan", every other posture is "default".
-  const collabMode = resolveAgentMode(config.mode, config.planMode) === "plan" ? "plan" : "default"
+  // `runPlanExitFlow` takes the 2-mode CollaborationMode ("default" | "plan").
+  // Use the shared `resolveCollaborationMode` projection so the plan-exit
+  // flow agrees with the dispatch-seam guard about the active collab posture
+  // (explicit `config.collaborationMode` wins, else 4-mode → 2-mode fallback).
+  const collabMode = collab
   const requestPlanExit =
     planExitPort !== undefined
       ? (plan: string) => runPlanExitFlow(collabMode, plan, planExitPort)

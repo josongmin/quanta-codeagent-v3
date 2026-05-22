@@ -209,6 +209,25 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   mode?: AgentMode
   /**
+   * Plan-vs-Default collaboration mode (ADR-0036). 2-mode enum tied to the
+   * DISPATCH SEAM (orthogonal to {@link mode}, which drives the per-turn
+   * PROMPT posture). In `"plan"` posture every mutating tool is blocked at
+   * the dispatch seam BEFORE any tool implementation runs — the block is
+   * driven by an explicit per-tool table in `./mode.ts#MUTATING_TOOL_TABLE`
+   * so a future tool added without classifying its mutating-kind is a hard
+   * fail rather than a silent allow.
+   *
+   * Default-OFF: absent ⇒ derived as `"default"` (no block, byte-identical
+   * for every legacy caller). The two-mode collaboration enum is INTENT-
+   * DISTINCT from the 4-mode {@link mode}: a host may legitimately run a
+   * `mode: "review"` posture (a read-only-by-prompt mode) without setting
+   * `collaborationMode: "plan"` — the prompt posture controls what the
+   * model is told; the dispatch posture controls what the registry will
+   * RUN. Setting both keeps the safe direction: the dispatch seam blocks
+   * mutating calls regardless of what the prompt says.
+   */
+  collaborationMode?: import("./mode").CollaborationMode
+  /**
    * Repo-local rules to inject ahead of memory hints as repo authority (Codex
    * `repo-local-rule-ingestion-audit.md` absorption). Loaded by the caller
    * (e.g. via `loadRepoRules(cwd)`) — the loop does not auto-read so contexts

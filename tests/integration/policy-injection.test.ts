@@ -227,7 +227,12 @@ describe("policy injection — prompt + dispatch gate resist authority-override 
     // Plan mode rejects the mutating write; either deny path is fine.
     const denied = results.find((r) => r.isError)
     expect(denied).toBeDefined()
-    expect(denied?.content ?? "").toMatch(/blocked in plan mode|Permission denied|Jail/)
+    // ADR-0036 L4: the dispatch-seam guard pre-empts the admissibility gate.
+    // Plan-mode mutating call surfaces "blocked in plan collaboration mode".
+    // Other paths (permission, jail) may still produce their own phrasing.
+    expect(denied?.content ?? "").toMatch(
+      /blocked in plan mode|blocked in plan collaboration mode|Permission denied|Jail/,
+    )
   })
 
   test("6. HITL bypass attempt — always-confirm tier denies when onConfirm refuses", async () => {

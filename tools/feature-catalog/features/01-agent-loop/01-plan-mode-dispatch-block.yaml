@@ -3,23 +3,44 @@ title: Plan-mode dispatch-seam mutating block
 section: 1
 subsystem: Collaboration mode (ADR-0036)
 order: 10
-maturity: L3
-status: new
-purpose: Plan collaboration mode blocks every mutating tool at the dispatch seam via an explicit per-tool table (write/edit/scripted_replace/bash/update_working_state). Unknown tools throw UnknownToolError rather than silently passing. Mode transitions are sticky and only flip on a developer-channel mode=plan / mode=default directive. Standalone module — loop wiring is a follow-up.
+maturity: L4
+status: stable
+purpose: Plan collaboration mode blocks every mutating tool at the dispatch seam via an explicit per-tool table (write/edit/scripted_replace/apply_patch/bash/update_working_state/git_commit/git_branch_switch). Unknown tools throw UnknownToolError rather than silently passing. Mode transitions are sticky and only flip on a developer-channel mode=plan / mode=default directive. L4 (2026-05-23) wires `checkDispatchAllowed` at `dispatch.ts` after `registry.has`, with a read-only fast path that defers to `registry.isReadOnly()` so custom read-only tools pass through without table membership.
 evidence:
   code:
     - src/agent/mode.ts
     - src/agent/dispatch-seam-guard.ts
+    - src/agent/dispatch.ts
+    - src/agent/types.ts
   adrs: [36]
   tests:
     unit:
       - tests/unit/mode-mutating-table.test.ts
       - tests/unit/mode-plan-block.test.ts
       - tests/unit/mode-transition.test.ts
+      - tests/unit/plan-mode-dispatch-block-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: Loop-level wiring of checkDispatchAllowed into the real dispatch site is deferred (see ADR-0036 §한계). Module ships standalone-callable.
-  promotion_path: Patch src/agent/dispatch.ts to call checkDispatchAllowed before ToolRegistry.run; surface deny payload as a tool_result text body.
-notes: ''
+deliberate_hold: null
+notes: |
+  L4 wire-up (2026-05-23):
+  - `AgentConfig.collaborationMode?: "default" | "plan"` (default-OFF; absent ⇒
+    "default" via `resolveCollaborationMode` projection). Explicit field wins;
+    falls back to 4-mode `mode === "plan"` ⇒ "plan", else `planMode === true`
+    ⇒ "plan", else "default". `mode === "review"` / `"audit"` project to
+    "default" — those are PROMPT postures, not DISPATCH postures (host opts
+    into dispatch posture explicitly).
+  - `dispatchToolInner` calls `checkDispatchAllowed` AFTER `registry.has` and
+    BEFORE dedup/admissibility/execute. Read-only fast path: when
+    `registry.isReadOnly(name) === true` the seam is skipped (the table is
+    fail-closed for MUTATING tools, not for safe ones — custom read-only
+    test tools still work in plan posture).
+  - Deny carries the typed `PlanModeMutatingBlockedError` or
+    `UnknownToolError` message via `deny(call.id, reason.message,
+    "mode-blocked")`. The legacy admissibility-gate's `plan-blocked` arm
+    is now DOMINATED by the seam guard for dispatchTool callers (the gate
+    arm remains reachable for any external host that invokes
+    `runAdmissibilityGate` directly).
+  - SOTA (Codex): dispatch-time + stateless (no per-turn unwinding);
+    transitions only affect calls AFTER the flip. Cluster D Feature 1.
