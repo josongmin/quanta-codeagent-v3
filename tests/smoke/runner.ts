@@ -195,7 +195,14 @@ export const runConversation = async (args: {
     if (i > 0) llm.nextRun()
     capture.beginRun()
     const outcome = await runAgent(
-      buildConfig({ llm, capture, work, messages, config, ...(args.signal ? { signal: args.signal } : {}) }),
+      buildConfig({
+        llm,
+        capture,
+        work,
+        messages,
+        config,
+        ...(args.signal ? { signal: args.signal } : {}),
+      }),
     )
     messages.length = 0
     messages.push(...outcome.messages)
@@ -292,7 +299,13 @@ export const runScenario = async (
     // `runAssertions`; here we run the LIVE judge when the tier is live (a
     // separate provider call). Tier-0 with a judge block but no cache is a soft
     // note (cannot judge without an LLM) — never a hard failure.
-    await applyJudge({ spec, tier, capture, failures, ...(opts?.signal ? { signal: opts.signal } : {}) })
+    await applyJudge({
+      spec,
+      tier,
+      capture,
+      failures,
+      ...(opts?.signal ? { signal: opts.signal } : {}),
+    })
 
     return {
       meta,

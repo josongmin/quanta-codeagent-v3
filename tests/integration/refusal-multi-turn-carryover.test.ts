@@ -132,9 +132,7 @@ describe("ADR-0076 — refusal multi-turn carry-over", () => {
     const out = await withTimeout(runAgent(cfg({ llm })), 10_000, "M-3")
     expect(out.reason).toBe("completed")
     const finalAssistant = out.messages.findLast((m) => m.role === "assistant")
-    expect(
-      finalAssistant?.content.some((b) => b.type === "text" && b.text === "Done."),
-    ).toBe(true)
+    expect(finalAssistant?.content.some((b) => b.type === "text" && b.text === "Done.")).toBe(true)
   })
 
   test("M-4: refusal error reason mentions 'refused' so host UI can branch", async () => {

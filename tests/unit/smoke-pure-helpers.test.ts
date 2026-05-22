@@ -223,9 +223,7 @@ describe("CaptureStream.assistantTextByRun", () => {
 // TrajectoryReplayLLM — cursor + exhaustion.
 // =====================================================================
 describe("TrajectoryReplayLLM", () => {
-  const drain = async (
-    iter: AsyncIterable<unknown>,
-  ): Promise<unknown[]> => {
+  const drain = async (iter: AsyncIterable<unknown>): Promise<unknown[]> => {
     const out: unknown[] = []
     for await (const ev of iter) out.push(ev)
     return out

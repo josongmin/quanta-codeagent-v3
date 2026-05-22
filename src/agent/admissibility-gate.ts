@@ -441,7 +441,10 @@ const runPermissionStack = (
  *  OFF: returns false unless `config.trustScope` is set AND the registry
  *  confirms a positive grant for `(projectKey, action.tool)`. The registry
  *  owns once_only consumption; the gate never branches on scope literals. */
-const trustScopeGrants = (config: AdmissibilityGateConfig, action: AdmissibilityAction): boolean => {
+const trustScopeGrants = (
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+): boolean => {
   if (!config.trustScope) return false
   return config.trustScope.registry.hasGrant(config.trustScope.projectKey, { tool: action.tool })
 }

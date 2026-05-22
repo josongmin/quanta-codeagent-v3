@@ -7,7 +7,7 @@ maturity: L4
 status: stable
 purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.
 evidence:
-  code: [src/apps/bench/runner.ts]
+  code: [src/apps/bench/eval/driver.ts]
   adrs: []
   tests:
     unit: []

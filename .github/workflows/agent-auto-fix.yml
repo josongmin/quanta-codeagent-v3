@@ -1,0 +1,50 @@
+# Agent Auto-Fix — label-triggered fix-up of the PR branch
+#
+# Triggered when someone labels the PR "agent-fix-me". The agent checks out the
+# PR head (NOT main), runs fixes, and commits to that branch via the ci-bot mode.
+# The branch-only gitWrite permission (src/permission/branch-only.ts) enforces
+# that the agent can never push to a protected branch even if it tries.
+#
+# `pull_request` (not `pull_request_target`) is used deliberately. With `labeled`
+# on `pull_request`, the runner inherits fork-level privileges, which means a
+# malicious fork can not exfiltrate base-repo secrets via this entry. The
+# permissions block also restricts the GITHUB_TOKEN scope to the minimum needed.
+#
+# Timeout is GH-side belt+braces over the ci-bot mode's BudgetCaps.
+name: agent-auto-fix
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-fix:
+    name: agent auto-fix
+    if: contains(github.event.pull_request.labels.*.name, 'agent-fix-me')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: checkout PR head (not base)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+      - name: setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: install deps
+        run: bun install --frozen-lockfile
+      - name: agent auto-fix
+        run: bun run agent:ci-bot --pr ${{ github.event.pull_request.number }} --action auto-fix

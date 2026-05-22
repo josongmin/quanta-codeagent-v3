@@ -5,6 +5,11 @@
   "scripts": {
     "dev": "bun --hot run src/apps/cli/index.ts",
     "start": "bun run src/apps/cli/index.ts",
+    "agent": "bun run src/apps/agent/index.ts",
+    "agent:interactive": "bun run src/apps/agent/index.ts --mode interactive",
+    "agent:headless": "bun run src/apps/agent/index.ts --mode headless",
+    "agent:batch": "bun run src/apps/agent/index.ts --mode batch",
+    "agent:ci-bot": "bun run src/apps/agent/index.ts --mode ci-bot",
     "test": "bun test tests/unit tests/integration",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",

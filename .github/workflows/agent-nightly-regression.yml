@@ -1,0 +1,46 @@
+# Agent Nightly Regression — cron-driven batch eval over the local benchmark corpus
+#
+# Scope: read-only. Produces predictions + report artifacts; no PR comment, no
+# commit. 08:00 UTC keeps it well after the existing `ci.yml` 06:00 UTC eval slot.
+#
+# Timeout is GH-side belt+braces over the batch mode's BudgetCaps.
+name: agent-nightly-regression
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  regression:
+    name: nightly batch eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: install deps
+        run: bun install --frozen-lockfile
+      - name: agent batch
+        run: bun run agent:batch --corpus ./benchmark --predictions $RUNNER_TEMP/preds.jsonl --report $RUNNER_TEMP/report.json
+      - name: upload regression artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-regression
+          path: |
+            ${{ runner.temp }}/preds.jsonl
+            ${{ runner.temp }}/report.json
