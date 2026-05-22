@@ -290,6 +290,36 @@ describe("ci-bot.runMode — gh + runAgent flow", () => {
     expect(out.exitCode).toBe(1)
   })
 
+  test("--dry-run reads the PR + runs the agent but does NOT post a comment", async () => {
+    const ghCalls: string[][] = []
+    const seams = {
+      ghRun: async (args: string[]) => {
+        ghCalls.push(args)
+        return { stdout: '{"title":"t"}', stderr: "", exitCode: 0 }
+      },
+      runAgent: async () => fakeOutcome("completed"),
+    }
+    const out = await runMode(baseReq({ seams, ciBot: { pr: "owner/repo#42", dryRun: true } }))
+    expect(out.exitCode).toBe(0)
+    // gh pr view ran...
+    expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "view")).toBe(true)
+    // ...but gh pr comment did NOT.
+    expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "comment")).toBe(false)
+  })
+
+  test("without --dry-run a comment IS posted", async () => {
+    const ghCalls: string[][] = []
+    const seams = {
+      ghRun: async (args: string[]) => {
+        ghCalls.push(args)
+        return { stdout: '{"title":"t"}', stderr: "", exitCode: 0 }
+      },
+      runAgent: async () => fakeOutcome("completed"),
+    }
+    await runMode(baseReq({ seams, ciBot: { pr: "owner/repo#42" } }))
+    expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "comment")).toBe(true)
+  })
+
   test("aborted reason maps to exitCode 130", async () => {
     const seams = {
       ghRun: okGh,

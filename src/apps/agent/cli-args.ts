@@ -144,6 +144,38 @@ const parseIntStrict = (s: string, flag: string): number => {
   if (n < 0) {
     throw new AgentArgsError(`flag '${flag}' must be >= 0, got ${n}`)
   }
+  // Audit R2: `/^-?\d+$/` happily accepts a 400-digit string; `parseInt` then
+  // returns a value past Number.MAX_SAFE_INTEGER where integer identity is lost
+  // (`9007199254740993 === 9007199254740992`). A budget dial silently rounded
+  // to a different integer is a correctness hole — reject it as out of range.
+  if (n > Number.MAX_SAFE_INTEGER) {
+    throw new AgentArgsError(
+      `flag '${flag}' exceeds the maximum safe integer (${Number.MAX_SAFE_INTEGER}), got '${s}'`,
+    )
+  }
+  return n
+}
+
+/** Parse `s` as a non-negative finite number (allows a fractional part). Used
+ *  for `--max-cost-usd`, whose dial is a dollar ceiling ($1.50 is valid). */
+const parseFloatStrict = (s: string, flag: string): number => {
+  // Accept `12`, `12.5`, `.5`, `0.50` — but NOT `12abc`, `1e9`, `Infinity`,
+  // `NaN`, or empty fraction. Propositional: a strict decimal grammar.
+  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(s)) {
+    throw new AgentArgsError(`flag '${flag}' expects a number, got '${s}'`)
+  }
+  const n = Number.parseFloat(s)
+  if (!Number.isFinite(n)) {
+    throw new AgentArgsError(`flag '${flag}' expects a finite number, got '${s}'`)
+  }
+  if (n < 0) {
+    throw new AgentArgsError(`flag '${flag}' must be >= 0, got ${n}`)
+  }
+  if (n > Number.MAX_SAFE_INTEGER) {
+    throw new AgentArgsError(
+      `flag '${flag}' exceeds the maximum safe value (${Number.MAX_SAFE_INTEGER}), got '${s}'`,
+    )
+  }
   return n
 }
 
@@ -185,6 +217,20 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   let pr: string | undefined
   const dials: Partial<BudgetDials> = {}
 
+  // Audit R2: duplicate-flag guard. None of our flags are repeatable, so the
+  // propositional rule is "a flag seen twice is an error" — silently taking the
+  // last `--mode` (or any other flag) hid operator typos. `-p` canonicalizes to
+  // `--prompt` so the two spellings cannot both be passed.
+  const seen = new Set<string>()
+  const canonFlag = (f: string): string => (f === "-p" ? "--prompt" : f)
+  const markSeen = (f: string): void => {
+    const c = canonFlag(f)
+    if (seen.has(c)) {
+      throw new AgentArgsError(`flag '${c}' specified more than once`)
+    }
+    seen.add(c)
+  }
+
   let i = 0
   while (i < argv.length) {
     const a = argv[i]
@@ -192,6 +238,10 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
       i++
       continue
     }
+    // Every token at a loop-head position is a flag (values are consumed via
+    // takeValue + i+=2 and never reach here). Dedup recognized + unknown alike;
+    // unknown flags still throw below.
+    if (a.startsWith("-")) markSeen(a)
 
     if (a === "--mode") {
       const v = takeValue(argv, i, a)
