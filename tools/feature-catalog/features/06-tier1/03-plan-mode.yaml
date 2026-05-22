@@ -5,7 +5,7 @@ subsystem: Mode enum (ADR-0018)
 order: 3
 maturity: L1
 status: hold
-purpose: 'Plan-mode 메타도구 — 미흡수: dispatch 차단 외 structured-choice / plan state-machine 도구 미배선. CLI 환경 ROI 낮음, 별도 ADR 후보'
+purpose: 'Plan-mode structured 메타도구(Codex update_plan/create_plan/request_user_input 동급) — 미흡수. dispatch-seam mutating 차단은 별개로 done(ADR-0036 plan-mode-dispatch-block L3, ADR-0063/0086 plan-exit 3-way L3); 여기서 미흡수인 건 plan state-machine을 모델이 직접 갱신/분기하는 structured-choice 도구.'
 evidence:
   code: []
   adrs: []
@@ -15,5 +15,9 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold:
-  reason: 'te_plan/request_user_input 등 Codex update_plan` 동급) — 미흡수: dispatch 차단 외 structured-choice / plan state-machine 도구 미배선. CLI 환경 ROI 낮음, 별도 ADR 후보'
+  reason: |
+    DONE(별개 feature): dispatch 차단 = ADR-0036(plan-mode-dispatch-block L3),
+    plan-exit 3-way = ADR-0063/0086(L3). 여기 미흡수 = Codex update_plan/
+    create_plan/request_user_input 류의 structured plan-state-machine + structured
+    -choice 도구(모델이 plan을 직접 갱신/분기). CLI 환경 ROI 낮아 의식적 보류, 별도 ADR 후보.
 notes: ''

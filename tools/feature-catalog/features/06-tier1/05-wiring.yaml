@@ -3,11 +3,13 @@ title: 루프 wiring 추가
 section: 6
 subsystem: 스킬 — `Skill` 도구
 order: 5
-maturity: L2
+maturity: L3
 status: stable
-purpose: 'paths: 조건부 활성 — skillsActivatedFor/skillToolAllowlist 호스트 API 노출. 루프 wiring 추가 (R6 L1→L2): AgentConfig.skills.changedPaths?: string[] 옵셔널 필드 — set 시 buildSkillFeatures가 unconditional 스킬 + paths: 매칭 스킬로 per-turn suggestion inventory 구성.'
+purpose: 'paths: 조건부 활성 — skillsActivatedFor/skillToolAllowlist 호스트 API 노출. AgentConfig.skills.changedPaths?: string[] 옵셔널 필드 — set 시 buildSkillFeatures가 unconditional 스킬 + paths: 매칭 스킬로 per-turn suggestion inventory 구성. buildSessionFeatures → runAgent 실경로에 배선됨(L3), 5 e2e 통과.'
 evidence:
-  code: []
+  code:
+    - src/agent/features.ts
+    - src/skill/activation.ts
   adrs: []
   tests:
     unit: []

@@ -3,8 +3,8 @@ title: shell_output_delta — typed event stream for long-running shell exec
 section: 2
 subsystem: 도구 시스템 — shell exec 이벤트 스트림 (PR-5, ADR-0081)
 order: 81
-maturity: L2
-status: new
+maturity: L4
+status: stable
 purpose: |
   src/runtime/shell.ts의 runShell이 child process stdout/stderr를 buffered
   string으로만 반환하던 것을, 옵션 `onShellEvent` observer 시 closed
@@ -16,11 +16,12 @@ purpose: |
   ShellResult로 반환되어 legacy 소비자는 자동으로 byte-identical.
 evidence:
   code:
-    - src/tool/shell-exec-types.ts
     - src/runtime/shell.ts
-    - src/runtime/types.ts
-    - src/tool/types.ts
     - src/tool/bash/index.ts
+    - src/tool/shell-exec-observers.ts
+    - src/apps/cli/shell-stream-painter.ts
+    - src/observability/shell-exec-otel.ts
+    - src/apps/cli/repl.ts
   adrs: [81]
   tests:
     unit:
@@ -28,19 +29,13 @@ evidence:
       - tests/unit/tool/shell-exec-events-stderr.test.ts
       - tests/unit/tool/shell-exec-events-abort.test.ts
       - tests/unit/tool/shell-exec-events-byte-identical.test.ts
+      - tests/unit/dispatch-shell-observer-forward.test.ts
+      - tests/unit/shell-exec-observers-surface.test.ts
     integration: []
     contract: []
 knobs:
   - "ToolContext.onShellEvent: ShellExecObserver | undefined (default undefined) — absent ⇒ no event emission, legacy buffered path verbatim. present ⇒ closed union event stream PLUS unchanged ShellResult."
-deliberate_hold:
-  reason: |
-    PR-5는 seam만 도입. UI 소비자 (CLI streaming TUI / web pane),
-    OTel `handle_tool_call` span의 chunk counter, model-loop의 progress
-    interleaving은 모두 follow-up.
-  promotion_path: |
-    CLI loop가 stream observer를 등록 + RFC-0002 §5.2 trajectory에 chunk
-    이벤트를 attach + 향후 `maxBufferedBytes` ring buffer config 도입하면
-    L3 (ADR §Consequences memory note).
+deliberate_hold: null
 notes: |
   - 청크는 Uint8Array, decode는 final ShellResult 빌드 시 한 번
     (TextDecoder utf-8) — 기존 new Response(stream).text()와 동일 디코더.

@@ -15,5 +15,8 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold:
-  reason: tart 1회 + per-turn 라벨 주입만. 시점별 phase machine은 후속 phase로 의식적 보류
+  reason: |
+    스킬 트리거 cache는 session-start 1회 + per-turn 라벨 주입만. 시점별 활성화-타이밍
+    phase machine은 후속 phase로 의식적 보류. (ADR-0077 phase-ttft-readonly-trio의
+    출력 commentary/final_answer phase와는 별개 개념 — 그건 LLM 출력 단계 태깅.)
 notes: ''
