@@ -1,6 +1,6 @@
+import type { z } from "zod"
 import type { SensitivityClass } from "@/security"
 import type { HITLTier } from "@/shared"
-import type { z } from "zod"
 import type { ShellExecObserver } from "./shell-exec-types"
 
 export interface ToolContext {
@@ -25,7 +25,29 @@ export interface ToolContext {
    *  `ShellExecObserver` so a new variant on the union is a compile error at
    *  every consumer that exhaustively switches on `event.kind`. */
   onShellEvent?: ShellExecObserver
+  /** ADR-0086 — OPTIONAL plan-exit requester. The `request_plan_exit` tool
+   *  calls this to surface a finished plan to whoever decides (CLI prompt /
+   *  IDE modal / RPC) and get back the 3-way {@link PlanExitToolOutcome}.
+   *  Duck-typed so `@/tool` never imports `@/agent`: the dispatch seam builds
+   *  the concrete requester from `AgentConfig.planExitPort` (wrapping
+   *  `runPlanExitFlow`). Absent ⇒ the tool is not registered. */
+  requestPlanExit?: PlanExitRequester
 }
+
+/** ADR-0086 plan-exit decision — structural mirror of `PlanExitDecision`
+ *  (`@/agent/plan-exit`); dispatch bridges the two by value. */
+export type PlanExitToolDecision = "approved" | "rejected" | "changes_requested"
+
+/** Structural mirror of `PlanExitOutcome`. `feedback` is non-empty IFF
+ *  `decision === "changes_requested"` (the producer `buildPlanExit` enforces
+ *  it; the tool only relays). */
+export interface PlanExitToolOutcome {
+  readonly decision: PlanExitToolDecision
+  readonly feedback?: string
+}
+
+/** Requester the `request_plan_exit` tool invokes. */
+export type PlanExitRequester = (plan: string) => Promise<PlanExitToolOutcome>
 
 /** Duck-typed handle a tool uses to mutate or read the session WorkingState
  *  without importing `@/agent`. The agent loop is the only producer; tools are

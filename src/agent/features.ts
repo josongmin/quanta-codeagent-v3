@@ -49,7 +49,7 @@
  */
 
 import { AutoModeClassifier } from "@/permission"
-import { createUpdateWorkingStateTool, type Tool } from "@/tool"
+import { createUpdateWorkingStateTool, requestPlanExitTool, type Tool } from "@/tool"
 import type { Skill } from "../skill"
 import {
   createSkillTool,
@@ -285,6 +285,13 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   if (config.workingState?.enabled === true) {
     workingState = createWorkingStateSession()
     extraTools.push(createUpdateWorkingStateTool(workingState) as Tool)
+  }
+
+  // ADR-0086: register `request_plan_exit` ONLY when a plan-exit port is wired.
+  // The dispatch seam builds `ctx.requestPlanExit` from the same port; absent ⇒
+  // the tool is not in the registry and the loop is byte-identical.
+  if (config.planExitPort !== undefined) {
+    extraTools.push(requestPlanExitTool() as Tool)
   }
 
   return {

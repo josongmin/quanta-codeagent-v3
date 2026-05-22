@@ -8,6 +8,8 @@ import { runAdmissibilityGate } from "./admissibility-gate"
 import { DedupGate } from "./dispatch-dedup"
 import { deny, resultBlock } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
+import { resolveAgentMode } from "./mode"
+import { runPlanExitFlow } from "./plan-exit-flow"
 import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
@@ -181,11 +183,26 @@ const dispatchToolInner = async (
   // Phase 6 (ADR-0021): propagate the session-scoped WorkingState handle so
   // tools that want to read/mutate L3 via the context seam (rather than a
   // closure-captured handle) have a real path. Absent ⇒ omitted.
+  // ADR-0086 plan-exit bridge: when a port is wired, expose a requester that
+  // runs the flow (mode-guard + feedback-iff-changes invariant enforced by
+  // `runPlanExitFlow`). PlanExitOutcome is structurally the @/tool
+  // PlanExitToolOutcome, so it crosses the slice boundary by value. Absent ⇒
+  // omitted (the `request_plan_exit` tool is not registered anyway).
+  const planExitPort = config.planExitPort
+  // `runPlanExitFlow` takes the 2-mode CollaborationMode ("default" | "plan")
+  // and throws unless it is "plan" — so coerce the 4-mode AgentMode down: only
+  // "plan" maps to "plan", every other posture is "default".
+  const collabMode = resolveAgentMode(config.mode, config.planMode) === "plan" ? "plan" : "default"
+  const requestPlanExit =
+    planExitPort !== undefined
+      ? (plan: string) => runPlanExitFlow(collabMode, plan, planExitPort)
+      : undefined
   const ctx: ToolContext = {
     cwd: config.cwd,
     signal: config.signal,
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
     ...(workingState !== undefined ? { workingState } : {}),
+    ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
     // ADR-0081 L3 wire: forward the agent-level shell observer into every
     // tool's ToolContext. The bash tool conditionally hands it to runShell,
     // which only allocates events when this is present (`exactOptionalProperty

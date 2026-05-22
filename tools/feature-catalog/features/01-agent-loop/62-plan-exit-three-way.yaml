@@ -3,8 +3,8 @@ title: Plan 모드 3-way exit (approve / reject / request-changes)
 section: 1
 subsystem: 협업 모드 (v0.dev 흡수, ADR-0063)
 order: 62
-maturity: L2
-status: new
+maturity: L3
+status: refined
 purpose: |
   v0.dev PlanModeExit{Approve,Reject,RequestChanges} 흡수 — plan 모드 종료를 기존
   2-way(approve/reject)에서 3-way로 확장. changes_requested는 feedback 필수(빌더가
@@ -12,17 +12,11 @@ purpose: |
   approve만 mutation 허용(planExitAllowsMutation), reject는 plan 폐기 후 종료.
 evidence:
   code: [src/agent/plan-exit.ts]
-  adrs: [63]
+  adrs: [63, 86]
   tests:
     unit: [tests/unit/plan-exit.test.ts]
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    buildPlanExit + 술어(planExitAllowsMutation/StaysInPlan)는 순수 모듈로 완성+테스트.
-    loop/side-conversation에 plan-exit 게이트 배선은 follow-up(// TODO(absorb #3)).
-  promotion_path: |
-    loop가 plan posture 종료 시 buildPlanExit로 사용자 결정을 수집하고 changes_requested에서
-    plan 재생성 루프를 돌면 L3.
+deliberate_hold: null
 notes: 'mode.ts의 CollaborationMode(default|plan)와 직교 — plan-exit는 plan posture를 어떻게 떠나는지를 결정.'

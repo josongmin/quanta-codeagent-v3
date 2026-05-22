@@ -81,6 +81,7 @@ export {
   parseTestFailureTool,
 } from "./parse-test-failure"
 export { ToolRegistry } from "./registry"
+export { requestPlanExitTool } from "./request-plan-exit"
 export { composeShellObservers, noopShellObserver } from "./shell-exec-observers"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
 export type {
@@ -88,6 +89,9 @@ export type {
   DeferredHandle,
   DeferredToolResult,
   HITLTier,
+  PlanExitRequester,
+  PlanExitToolDecision,
+  PlanExitToolOutcome,
   Tool,
   ToolContext,
   ToolEvent,
