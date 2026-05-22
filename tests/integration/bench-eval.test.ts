@@ -11,6 +11,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { loadCorpus, writeSyntheticRealCorpus } from "../../src/apps/bench/corpus/loader"
 import { buildDryRunPlan, formatDryRunPlan } from "../../src/apps/bench/dry-run"
 import {
   evaluateWithPythonSwebench,
@@ -18,7 +19,6 @@ import {
   type Spawn,
   SWEBENCH_VERIFIED_DATASET,
 } from "../../src/apps/bench/python-swebench"
-import { loadCorpus, writeSyntheticRealCorpus } from "../../src/apps/bench/swebench"
 import type { Instance } from "../../src/apps/bench/types"
 
 const mkInstance = (
@@ -195,7 +195,7 @@ describe("bench-eval: python swebench seam (hermetic)", () => {
     const repo = mkdtempSync(join(tmpdir(), "bench-eval-repo-"))
     try {
       await mkdir(repo, { recursive: true })
-      const { runInstance } = await import("../../src/apps/bench/runner")
+      const { runInstance } = await import("../../src/apps/bench/eval")
       const noopLLM = {
         async *stream() {
           yield { type: "text_delta" as const, delta: "noop" }

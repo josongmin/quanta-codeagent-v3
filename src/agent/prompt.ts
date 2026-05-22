@@ -1,8 +1,11 @@
 import type { Message, SystemBlock } from "@/llm"
-import { type IdeSnapshot, renderIdeContext } from "./ide-context"
 import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
-import { renderToolUseRules } from "./prompt-rules"
+import {
+  type AgentMode as PromptPackMode,
+  renderPackByMode,
+  renderToolUseRules,
+} from "./prompt-rules"
 import {
   buildSectionedSystemBlocks,
   fourSectionPreset,
@@ -30,7 +33,10 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  *  (see {@link buildTurnContext}), kept off the cached prefix on purpose.
  *  The param remains so existing callers (apps) compile unchanged until the
  *  loop is migrated to {@link buildTurnContext}. */
-export const buildSystemPrompt = (_cwd?: string, opts?: { persona?: PersonaKind }): string =>
+export const buildSystemPrompt = (
+  _cwd?: string,
+  opts?: { persona?: PersonaKind; promptPack?: PromptPackMode },
+): string =>
   [
     "You are Quanta, an autonomous coding agent working directly in a developer's",
     "repository. You operate in a ReAct loop: reason, call a tool, observe the",
@@ -219,7 +225,11 @@ export const buildSystemPrompt = (_cwd?: string, opts?: { persona?: PersonaKind 
     "                                         list_mcp_resources)",
     "Do not match tools to query strings. Pick the cheapest tool whose",
     "output is sufficient evidence for the claim you intend to make.",
-    ...renderToolUseRules(),
+    // Pack-selection seam: when `promptPack` is set the caller gets the
+    // mode-specific rule set (headless / batch / ci-bot); when absent we
+    // call `renderToolUseRules()` so the interactive default stays byte-
+    // identical to pre-slice output and the cached prefix is unchanged.
+    ...(opts?.promptPack !== undefined ? renderPackByMode(opts.promptPack) : renderToolUseRules()),
     "",
     "Honesty rail (closeout — these are correctness rules, not tone):",
     "- Do not say you read a surface you did not read.",
@@ -351,23 +361,6 @@ export interface TurnContextInput {
    *  as a distinct cache breakpoint so changes here only invalidate the tail.
    *  Absent ⇒ legacy single-block prefix (byte-identical). */
   userAppend?: string
-  /** ADR-0080 IDE context provider seam. When present, the rendered
-   *  `<ide-context>` block is PREPENDED to the LAST user message's first text
-   *  block — so the model sees fresh editor state for THIS turn. Sits ABOVE
-   *  the user's text but BELOW any earlier conversation, and BEFORE the
-   *  trailing `<system-reminder>` (IDE state is user-side context, not a
-   *  harness reminder). Absent / `null` / empty snapshot ⇒ no block emitted
-   *  (byte-identical). The `escapeReminderBoundary` defang already used by
-   *  the dynamic reminder is applied inside the renderer to every user-
-   *  controllable fragment so file content cannot forge `<system-reminder>`
-   *  tags. */
-  ideSnapshot?: IdeSnapshot | null
-  /** ADR-0078: when secret redaction is OFF (caller opted out with an
-   *  explicit `acknowledgedRisk`), surface a per-turn `<system-reminder>`
-   *  line `"Secret redaction DISABLED. Reason: <ack>"`. Absent ⇒ no line,
-   *  byte-identical for the default-ON path. The model sees the line so
-   *  "redaction off" is never invisible. */
-  redactionDisabledReason?: string
 }
 
 export interface TurnContext {
@@ -486,59 +479,7 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
   // `formatBlock` (src/agent/memory.ts) — append as-is, no double-label.
   const memory = input.memoryContext?.trim()
   if (memory) parts.push("", memory)
-  // ADR-0078 redaction-disabled banner. Surfaced as a single line so the
-  // model sees the ack reason every turn — opt-out is never silent. Absent
-  // ⇒ no line (byte-identical default-ON path).
-  const redact = input.redactionDisabledReason?.trim()
-  if (redact) parts.push("", `Secret redaction DISABLED. Reason: ${redact}`)
   return parts.join("\n")
-}
-
-/**
- * ADR-0080 — prepend the rendered `<ide-context>` block to the LAST user
- * message's first text block, in-place on the supplied (already-shallow-
- * copied) `messages` array. The caller's `baseMessages` array AND each
- * contained message object are untouched: we replace the slot with a fresh
- * message that wraps the modified content blocks. With an empty block (no
- * provider, `null` snapshot, or every field absent) this is a no-op so the
- * pre-ADR path stays byte-identical.
- *
- * Fall-back: with NO user message in history we append a dedicated user turn
- * carrying just the IDE block. `baseMessages` ALWAYS contains at least the
- * seed user turn in practice, so this branch is a safety net, not a routine
- * path.
- */
-const prependIdeBlock = (messages: Message[], ideBlock: string): Message[] => {
-  if (ideBlock === "") return messages
-  let lastUserIdx = -1
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]?.role === "user") {
-      lastUserIdx = i
-      break
-    }
-  }
-  if (lastUserIdx === -1) {
-    messages.push({ role: "user", content: [{ type: "text", text: ideBlock }] })
-    return messages
-  }
-  const target = messages[lastUserIdx] as Message
-  const firstTextIdx = target.content.findIndex((b) => b.type === "text")
-  if (firstTextIdx === -1) {
-    // No text block — insert one at the top so the IDE block precedes the
-    // existing non-text content (e.g. tool_result blocks). This preserves
-    // call ordering of the existing blocks.
-    messages[lastUserIdx] = {
-      ...target,
-      content: [{ type: "text" as const, text: ideBlock }, ...target.content],
-    }
-    return messages
-  }
-  const original = target.content[firstTextIdx]
-  if (original?.type !== "text") throw new Error("findIndex contract violated")
-  const newContent = [...target.content]
-  newContent[firstTextIdx] = { type: "text" as const, text: `${ideBlock}\n${original.text}` }
-  messages[lastUserIdx] = { ...target, content: newContent }
-  return messages
 }
 
 /**
@@ -577,15 +518,7 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
       })()
     : [{ type: "text", text: basePrompt, cache: true }]
   const dynamic = buildDynamicContext(input)
-  // ADR-0080 — IDE context provider seam. Render the snapshot (if any) and
-  // PREPEND it to the LAST user message's first text block. The renderer
-  // already runs `escapeReminderBoundary` over every user-controllable
-  // fragment, so a file's content cannot forge `<system-reminder>` tags. A
-  // `null` / empty snapshot returns "" and short-circuits the prepend below.
-  const messages: Message[] = prependIdeBlock(
-    [...input.baseMessages],
-    renderIdeContext(input.ideSnapshot ?? null),
-  )
+  const messages: Message[] = [...input.baseMessages]
   if (dynamic !== undefined) {
     // Defang inner `<system-reminder>` boundaries BEFORE wrapping so a
     // value supplied by repoRules / memory / skills cannot terminate the

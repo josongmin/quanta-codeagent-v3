@@ -13,7 +13,7 @@ import {
   classify,
   type FailureBreakdown,
   type FailureClassification,
-} from "./failure-classifier"
+} from "./corpus/failure-classifier"
 import { resolvedTotals } from "./observe"
 import type { InstanceResult } from "./types"
 

@@ -11,6 +11,7 @@ import type { RunContext } from "@/shared"
 import type { RedactionConfig, RedactionKind, RedactionOrigin } from "@/security"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
+import type { BudgetMeter } from "./budget"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
@@ -20,6 +21,7 @@ import type { IdeContextProvider } from "./ide-context"
 import type { PlanExitPort } from "./plan-exit-flow"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
+import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
 import type { StopCategory } from "./stop-category"
 import type { Submission } from "./submission"
@@ -445,6 +447,26 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `src/security/redaction-config.ts`.
    */
   redaction?: RedactionConfig
+  /**
+   * RFC may-22-unified-agent-runtime / Phase 0 — mode policy slot.
+   *
+   * The 12-lever discriminated-union vector for this run (interactive /
+   * headless / batch / ci-bot). Absent ⇒ no mode policy is consulted and the
+   * loop is byte-for-byte identical to the pre-RFC path (default-OFF
+   * RFC §1.2 / byte-identical contract). Wired by `apps/agent/assemble.ts`
+   * (Phase 4); the loop itself never reads this directly today.
+   */
+  modePolicy?: ModePolicy
+  /**
+   * RFC may-22-unified-agent-runtime / Phase 1 — budget meter slot.
+   *
+   * When present, the loop's tick sites (turn / model_call / tool_call /
+   * shell_command / test_run / token usage) call `meter.tick(kind)` and
+   * the per-turn epilogue calls `checkExhausted()`. Absent ⇒ optional-chain
+   * no-op, byte-identical loop. The meter is operator-owned (clamped by
+   * `ModePolicy.budgetCaps`); the loop only emits ticks.
+   */
+  budgetMeter?: BudgetMeter
 }
 
 /**
@@ -459,7 +481,12 @@ export interface RedactionRollup {
   readonly count: number
 }
 
-export type StopReason = "completed" | "max_turns" | "aborted" | "error"
+export type StopReason =
+  | "completed"
+  | "max_turns"
+  | "aborted"
+  | "error"
+  | "budget_exhausted" /* RFC may-22 — BudgetMeter cap hit before completion */
 
 /**
  * memory_citation provenance surface (ADR-0082). A record is "cited" iff it

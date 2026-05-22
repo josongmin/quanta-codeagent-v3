@@ -17,8 +17,8 @@
  * fixtures so a future detector cannot silently drift.
  */
 import { existsSync, readFileSync } from "node:fs"
+import type { InstanceResult } from "../types"
 import { getCachePathRe } from "./cache-pathspecs"
-import type { InstanceResult } from "./types"
 
 /** How the run terminated. Covering partition — every failed result lands in
  *  exactly one bucket. */

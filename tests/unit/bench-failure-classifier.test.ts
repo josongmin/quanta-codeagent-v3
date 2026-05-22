@@ -13,7 +13,7 @@ import {
   aggregate,
   classify,
   type FailureClassification,
-} from "@/../src/apps/bench/failure-classifier"
+} from "@/../src/apps/bench/corpus/failure-classifier"
 import type { InstanceResult } from "@/../src/apps/bench/types"
 
 /** Build an InstanceResult + matching .patch/.jsonl pair on disk. The
@@ -67,10 +67,9 @@ describe("classify — termination axis", () => {
   })
 
   test("session_end aborted + turns=0 → hung_stream", () => {
-    const { result, cleanup } = setup(
-      { id: "hung", passed: false, patch: "", turns: 0 },
-      [sessionEnd("aborted", 0)],
-    )
+    const { result, cleanup } = setup({ id: "hung", passed: false, patch: "", turns: 0 }, [
+      sessionEnd("aborted", 0),
+    ])
     try {
       expect(classify(result).termination).toBe("hung_stream")
     } finally {

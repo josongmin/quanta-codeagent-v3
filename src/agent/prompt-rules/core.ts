@@ -1,7 +1,7 @@
 /**
- * Typed SSOT for the tool-use rules injected into `buildSystemPrompt()`.
+ * Core tool-use rules (verbatim move from the prior `src/agent/prompt-rules.ts`).
  *
- * Why this file exists: the 5 rules below were inline string-array entries in
+ * Why this file exists: the 6 rules below were inline string-array entries in
  * `prompt.ts`. Pulling them into a typed list with explicit `id`s gives:
  *   - A single, audit-friendly place to read/review the agent's safety contract.
  *   - Stable IDs that anti-regression tests pin (so a rename of the text
@@ -14,6 +14,9 @@
  * disable a guardrail (e.g. drop R-ENV and let the agent thrash on pip).
  * Adding a rule means editing this file and updating the snapshot tests —
  * exactly the friction we want at this seam.
+ *
+ * The order matters: the model reads them top-down and R-ENV / R-STOP-ENV are
+ * the most load-bearing — keep them first.
  */
 
 export interface PromptRule {
@@ -26,9 +29,10 @@ export interface PromptRule {
   readonly lines: readonly string[]
 }
 
-/** The 5 tool-use rules. Order matters (the model reads them top-down and
- *  R-ENV / R-STOP-ENV are the most load-bearing — keep them first). */
-export const TOOL_USE_RULES: readonly PromptRule[] = [
+/** The 6 core tool-use rules — byte-identical to the prior `TOOL_USE_RULES`
+ *  list. Mode-specific packs (assistant / task-runner / benchmark / pr-agent)
+ *  include these in full and may append additional rules. */
+export const CORE_RULES: readonly PromptRule[] = [
   {
     id: "R-ENV",
     lines: [
@@ -88,9 +92,3 @@ export const TOOL_USE_RULES: readonly PromptRule[] = [
     ],
   },
 ]
-
-/** Flatten the rules into the line array the prompt builder splices in. The
- *  output is byte-identical to the prior inline form (no separator between
- *  rules — they read as one continuous bulleted block). */
-export const renderToolUseRules = (): readonly string[] =>
-  TOOL_USE_RULES.flatMap((r) => r.lines)

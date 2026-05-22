@@ -21,15 +21,15 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { buildRepairContext } from "../../src/apps/bench/repair/context"
-import { runRepairRounds } from "../../src/apps/bench/repair/index"
+import { runInstance } from "../../src/apps/bench/eval"
+import { buildRepairContext } from "../../src/apps/bench/eval/repair/context"
+import { runRepairRounds } from "../../src/apps/bench/eval/repair/index"
 import type {
   ExecFn,
   RunOnceResult,
   ValidateArgs,
   ValidatorResult,
-} from "../../src/apps/bench/repair/types"
-import { runInstance } from "../../src/apps/bench/runner"
+} from "../../src/apps/bench/eval/repair/types"
 import type { Instance } from "../../src/apps/bench/types"
 
 /**
@@ -706,7 +706,7 @@ describe("HC-C. validator chaos (production validate + fake exec)", () => {
   // Import production validate. Done lazily because we already wire the
   // injected validate in many other tests.
   const importValidate = async () =>
-    (await import("../../src/apps/bench/repair/validator")).validate
+    (await import("../../src/apps/bench/eval/repair/validator")).validate
 
   test("validator command times out (exec returns nonzero, captures partial output)", async () => {
     const validate = await importValidate()

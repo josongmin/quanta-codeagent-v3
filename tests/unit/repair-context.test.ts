@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { buildRepairContext } from "../../src/apps/bench/repair/context"
+import { buildRepairContext } from "../../src/apps/bench/eval/repair/context"
 
 const SMALL_PROBLEM = "Fix the `foo()` function so that `foo(0)` returns 1 instead of 0."
 

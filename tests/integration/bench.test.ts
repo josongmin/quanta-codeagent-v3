@@ -4,13 +4,13 @@ import { chmod } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { runInstance } from "../../src/apps/bench/runner"
-import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/swebench"
 import {
   type Prediction,
   parseSwebenchJsonl,
   writePredictions,
-} from "../../src/apps/bench/swebench-dataset"
+} from "../../src/apps/bench/corpus/dataset"
+import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
+import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
 
 /**

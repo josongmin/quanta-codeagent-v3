@@ -56,6 +56,8 @@ const RULES: readonly Rule[] = [
       "apps/cli/internal.ts":
         "CLI feature-flag bootstrap — threads typed values via AgentConfig; downstream modules never read env directly. TODO(S5): migrate to runtimeConfig progressively.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
+      "apps/bench/eval/driver.ts":
+        "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
       "apps/probe/index.ts":
         "probe CLI bootstraps env before module loads (same posture as other CLI entries)",
@@ -63,7 +65,7 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION (not config read) — copies a hardcoded ALLOWED_ENV set INTO the spawned git child; this is intentional pass-through, not a feature read.",
       "mcp/client.ts":
         "ENV PROPAGATION — passes the parent's PATH so the MCP stdio child can find its binary; not a feature-flag read.",
-      "apps/bench/swebench-dataset.ts":
+      "apps/bench/corpus/dataset.ts":
         "ENV PROPAGATION — bench shells out to git/python; child env is intentionally the parent's.",
       "apps/bench/python-swebench.ts":
         "ENV PROPAGATION — same posture as swebench-dataset.ts; the Python harness inherits parent env.",

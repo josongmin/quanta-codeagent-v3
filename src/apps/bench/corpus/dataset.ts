@@ -20,7 +20,7 @@
  * Dependency-light per the bench brief / RFC §3.1: git runs via a tiny local
  * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
  */
-import type { Instance } from "./types"
+import type { Instance } from "../types"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
 export interface SwebenchTask {

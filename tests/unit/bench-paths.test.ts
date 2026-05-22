@@ -8,7 +8,12 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { tmpdir } from "node:os"
-import { benchHome, benchRunDir, benchRunsRoot, benchWorkRoot } from "@/../src/apps/bench/paths"
+import {
+  benchHome,
+  benchRunDir,
+  benchRunsRoot,
+  benchWorkRoot,
+} from "@/../src/apps/bench/corpus/paths"
 import { __resetRuntimeConfig } from "@/shared"
 
 const SAVED = { ...process.env }

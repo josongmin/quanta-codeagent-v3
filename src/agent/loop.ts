@@ -3,28 +3,11 @@ import type {
   Message,
   StreamEvent,
   SystemPromptInput,
-  ToolChoice,
   ToolResultBlock,
 } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
-import {
-  attrs,
-  createTurnTimingCapture,
-  endSpan,
-  QUANTA_ATTRS,
-  SPAN_NAMES,
-  type Span,
-  startSpan,
-  type TurnTiming,
-} from "@/observability"
+import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
-import {
-  type NormalizedRedactionConfig,
-  normalizeRedactionConfig,
-  type RedactionHit,
-  type RedactionOrigin,
-  redactSecrets,
-} from "@/security"
 import { LLMError, type RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
 import {
@@ -42,8 +25,7 @@ import {
 import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
 import { buildSessionFeatures } from "./features"
-import type { IdeSnapshot } from "./ide-context"
-import { type PersistDeps, type PlacedRecord, persistSession, recallContext } from "./memory"
+import { type PersistDeps, persistSession, recallContext } from "./memory"
 import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import { backoffDelayMs, classifyLLMError } from "./retry"
@@ -56,20 +38,8 @@ import {
 import { streamingTurn } from "./streaming-dispatch"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import { buildToolInputSeam } from "./tool-input-streaming"
-import {
-  consumeTurnSignals,
-  createToolChoiceTurnState,
-  resolveToolChoice,
-  type ToolChoiceTurnState,
-} from "./tool-choice"
 import { makeTurnHeader } from "./turn-kind"
-import type {
-  AgentConfig,
-  AgentOutcome,
-  MemoryCitation,
-  RedactionRollup,
-  StopReason,
-} from "./types"
+import type { AgentConfig, AgentOutcome, StopReason } from "./types"
 import { createVerifyGuardState, decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
 import { TurnWorkMetricsCollector } from "./work-metrics-collector"
 import type { WorkingStateSession } from "./working-state"
@@ -99,81 +69,6 @@ type ToolHistoryEntry = { name: string; arg?: string }
  *  never reached when the guard is off — `applyAction` only needs a readonly
  *  empty array to satisfy the type). */
 const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
-
-/**
- * ADR-0078 — session-scoped aggregator for {@link RedactionHit}s. Collects
- * hit counts keyed by `origin × kind`, frozen into a {@link RedactionRollup}
- * array surfaced on {@link AgentOutcome}.
- *
- * Pure: no I/O, no shared global. One instance per `runAgent` invocation.
- * `record` is the only mutator; `snapshot` returns a stable-sorted readonly
- * array (sorted by `origin` then `kind`) so a fixture test sees the same
- * ordering across runs.
- */
-class RedactionAggregator {
-  private readonly counts: Map<string, RedactionRollup> = new Map()
-
-  record(origin: RedactionOrigin, hits: ReadonlyArray<RedactionHit>): void {
-    for (const h of hits) {
-      const key = `${origin}::${h.kind}`
-      const prev = this.counts.get(key)
-      if (prev !== undefined) {
-        this.counts.set(key, { origin, kind: h.kind, count: prev.count + 1 })
-      } else {
-        this.counts.set(key, { origin, kind: h.kind, count: 1 })
-      }
-    }
-  }
-
-  empty(): boolean {
-    return this.counts.size === 0
-  }
-
-  snapshot(): ReadonlyArray<RedactionRollup> {
-    const arr = Array.from(this.counts.values())
-    arr.sort((a, b) => {
-      if (a.origin !== b.origin) return a.origin.localeCompare(b.origin)
-      return a.kind.localeCompare(b.kind)
-    })
-    return Object.freeze(arr)
-  }
-}
-
-/** ADR-0078 — apply `envelope_jsonl` redaction to every text block on every
- *  message in a transcript snapshot. Returns a NEW message array (input is
- *  not mutated) and an aggregated hit list. When `cfg.enabled === false`
- *  this is a no-op pass-through (host has acked the risk).
- */
-const redactTranscriptForPersist = (
-  messages: Message[],
-  cfg: NormalizedRedactionConfig,
-): { messages: Message[]; hits: RedactionHit[] } => {
-  if (!cfg.enabled) return { messages, hits: [] }
-  const hits: RedactionHit[] = []
-  const out: Message[] = messages.map((m) => ({
-    ...m,
-    content: m.content.map((b) => {
-      if (b.type === "text") {
-        const r = redactSecrets(b.text, {
-          origin: "envelope_jsonl",
-          ...(cfg.whitelist.length > 0 ? { whitelist: cfg.whitelist } : {}),
-        })
-        if (r.hits.length > 0) hits.push(...r.hits)
-        return { ...b, text: r.text }
-      }
-      if (b.type === "tool_result") {
-        const r = redactSecrets(b.content, {
-          origin: "envelope_jsonl",
-          ...(cfg.whitelist.length > 0 ? { whitelist: cfg.whitelist } : {}),
-        })
-        if (r.hits.length > 0) hits.push(...r.hits)
-        return { ...b, content: r.text }
-      }
-      return b
-    }),
-  }))
-  return { messages: out, hits }
-}
 
 /**
  * ReAct loop. One `while` over turns; each turn = one LLM stream with tool
@@ -230,6 +125,11 @@ const emitUsage = (
     ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
   })
   recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
+  // RFC may-22 Phase 1: BudgetMeter ticks for token accounting. Optional
+  // chain ⇒ absence is byte-identical. Counts the SAME numbers we already
+  // record above so meter snapshot agrees with recorder.tokensUsed().
+  config.budgetMeter?.tick("input_tokens", ev.inputTokens)
+  config.budgetMeter?.tick("output_tokens", ev.outputTokens)
   // absorb #6: per-turn work-metrics — only when caller wired a sink.
   collector?.recordUsage({
     tokensInput: ev.inputTokens,
@@ -284,6 +184,17 @@ const emitLlmRequest = (config: AgentConfig): void => {
   config.stream.emit({ type: "llm_request", model: configuredModel(config.llm) })
 }
 
+/** RFC may-22 Phase 1: BudgetMeter tick helper for tool dispatch. Folds the
+ *  bash → shell_command and test_runner → test_run sub-counters into a single
+ *  call site so the `streamConsume` dispatch callback's cognitive complexity
+ *  doesn't grow. Optional-chain on every read so a meter-less config is
+ *  byte-for-byte identical to the pre-RFC path. */
+const tickToolDispatch = (config: AgentConfig, name: string): void => {
+  config.budgetMeter?.tick("tool_call")
+  if (name === "bash") config.budgetMeter?.tick("shell_command")
+  if (name === "test_runner") config.budgetMeter?.tick("test_run")
+}
+
 /** Pass-through wrapper over the model stream that tees `usage` events to the
  *  W-C `emitUsage` bridge (RFC-0002) WITHOUT consuming any other event —
  *  `streamingTurn` has no `onUsage` collaborator, so the bridge lives here so
@@ -307,10 +218,6 @@ type StreamSuccess = {
   message: AssembledMessage
   stopReason: string
   resultBlocks: AssembledMessage["content"]
-  /** ADR-0077: wall-clock anchors for THIS sampling-request (`requestSentAt`,
-   *  `firstTokenAt`, `streamEndAt`). Always present on a success — captured
-   *  unconditionally so the trio is observable for every productive turn. */
-  turnTiming: TurnTiming
 }
 type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } | { aborted: true }
 
@@ -357,14 +264,7 @@ const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut =
   ok: false,
   preview: "skill-scoped",
 })
-type StreamDispatchOut = {
-  block: ToolResultBlock
-  ok: boolean
-  preview: string
-  /** ADR-0078 — propagated from `dispatchTool` so the loop aggregator can
-   *  record per-turn redactions. Absent ⇒ no hits. */
-  redactionHits?: ReadonlyArray<RedactionHit>
-}
+type StreamDispatchOut = { block: ToolResultBlock; ok: boolean; preview: string }
 
 /**
  * Consume one LLM stream WITH interleaved tool execution (streaming tool
@@ -391,8 +291,6 @@ const streamConsume = async (
   toolHistory: ToolHistoryEntry[] | undefined,
   workingState: WorkingStateSession | undefined,
   collector: TurnWorkMetricsCollector | undefined,
-  toolChoice: ToolChoice | undefined,
-  redactions: RedactionAggregator | undefined,
 ): Promise<StreamConsumeResult> => {
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
@@ -401,6 +299,11 @@ const streamConsume = async (
   // observation: NullStream swallows it; the stream open + recovery control
   // flow below is byte-identical to the pre-emit path.
   emitLlmRequest(config)
+  // RFC may-22 Phase 1: BudgetMeter tick — one model_call per stream open.
+  // SAME-TURN retries open a new stream so they count distinctly, which
+  // matches `maxModelCalls` semantics (a single turn may legitimately spend
+  // multiple model calls via backoff). Default-OFF: undefined meter ⇒ no-op.
+  config.budgetMeter?.tick("model_call")
   // Codex 10-step span tree — `run_sampling_request`. Opens one OTel span
   // per provider stream call (a SAME-TURN retry IS a new sampling request,
   // so it gets its own span — consistent with Codex's tree). Closes after
@@ -410,30 +313,15 @@ const streamConsume = async (
   const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
   const stop = recorder?.llmStream()
-  // ADR-0077 turn-timing trio. Captured around EVERY sampling-request: each
-  // SAME-TURN retry is a new request, so each gets its own capture. The loop
-  // surfaces the LAST successful turn's snapshot on `AgentOutcome.turnTiming`.
-  const timing = createTurnTimingCapture()
-  timing.markRequestSent()
   try {
     const outcome = await streamingTurn({
       events: teeUsage(
         config,
-        // ADR-0079 — thread the pre-call tool_choice gate through to the
-        // adapter. `auto` (or `undefined`) ⇒ field omitted on the wire,
-        // byte-identical to the pre-feature path. Conditional spread keeps
-        // exactOptionalPropertyTypes happy (never assign `undefined`).
-        config.llm.stream({
-          messages,
-          system,
-          tools: specs,
-          ...(toolChoice !== undefined ? { toolChoice } : {}),
-        }),
+        config.llm.stream({ messages, system, tools: specs }),
         recorder,
         collector,
       ),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
-      onFirstChunk: () => timing.markFirstToken(),
       // L3 wire (absorb #1, ADR-0060): route streaming `tool_use_*` events to
       // each tool's optional `onInputStart/Delta/Available` callbacks. The
       // seam is a one-`Map.get` fast-path no-op for tools that declare none,
@@ -441,6 +329,10 @@ const streamConsume = async (
       onToolInput: buildToolInputSeam(config.registry),
       dispatch: async (call) => {
         const s = recorder?.toolExec()
+        // RFC may-22 Phase 1: BudgetMeter tick — every tool dispatch counts
+        // as one tool_call; bash → shell_command; test_runner → test_run.
+        // Optional chain so absence is byte-identical to pre-RFC.
+        tickToolDispatch(config, call.name)
         try {
           // ADR-0011: enforce the active skill's tool allowlist —
           // an out-of-scope tool is denied as a recoverable tool_result
@@ -464,13 +356,6 @@ const streamConsume = async (
                 )
           // A successful `Skill` invocation (re)arms the scope for next calls.
           skillGate?.observe(call.name, call.input, out.ok)
-          // ADR-0078 — aggregate any tool-result redaction hits the dispatch
-          // seam attached. Default-OFF: when redaction is disabled or no hits
-          // fired, `redactionHits` is absent and this is a single-property
-          // check (zero allocation).
-          if (redactions && out.redactionHits && out.redactionHits.length > 0) {
-            redactions.record("tool_result", out.redactionHits)
-          }
           // absorb #6: per-turn work-metrics — count the action and, when the
           // tool is `read`, count returned lines. Collector absent ⇒ no-op
           // (the sink is unwired). recordRead duck-types the result shape so
@@ -540,12 +425,10 @@ const streamConsume = async (
       samplingStatus = "aborted"
       return { aborted: true }
     }
-    timing.markStreamEnd()
     return {
       message: outcome.message as AssembledMessage,
       stopReason: outcome.stopReason,
       resultBlocks: outcome.resultBlocks as AssembledMessage["content"],
-      turnTiming: timing.snapshot(),
     }
   } catch (e) {
     samplingStatus = "error"
@@ -577,18 +460,11 @@ const metaUser = (text: string): Message => ({
 /** Recalled long-term memory text for this session, or `undefined` when no
  *  store is configured or nothing relevant is found. The user's last text
  *  seeds the query. Folded into the turn context by `buildTurnContext`, not
- *  spliced into the system string here (that splicing is the seam's job).
- *
- *  ADR-0082 — when `placedSink` is supplied, the recall layer reports the
- *  placed records (id + score + tokensApprox) BEFORE the formatted block is
- *  returned; the loop joins those rows against the rendering seam (today
- *  always `reminder_tail`, since memory rides the trailing system-reminder
- *  user message — never the cached system prefix) to mint citations. */
+ *  spliced into the system string here (that splicing is the seam's job). */
 const resolveMemoryContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
   recorder: AgentRecorder | undefined,
-  placedSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
 ): Promise<string | undefined> => {
   if (!config.store) return undefined
   const lastUser = [...wm.snapshot()].reverse().find((m) => m.role === "user")
@@ -607,7 +483,6 @@ const resolveMemoryContext = async (
         store: config.store,
         ...(config.embedder ? { embedder: config.embedder } : {}),
         ...(recorder ? { onStats: (s) => recorder.memoryRecall(s) } : {}),
-        ...(placedSink ? { onPlaced: placedSink } : {}),
       },
       queryText || undefined,
       {
@@ -785,8 +660,6 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
 const buildPersistDeps = (
   config: AgentConfig,
   recorder: AgentRecorder | undefined,
-  redactionCfg?: NormalizedRedactionConfig,
-  redactions?: RedactionAggregator,
 ): PersistDeps => ({
   // biome-ignore lint/style/noNonNullAssertion: call site guards `config.store`
   store: config.store!,
@@ -796,15 +669,6 @@ const buildPersistDeps = (
   ...(config.memory?.consolidate !== undefined ? { consolidate: config.memory.consolidate } : {}),
   ...(config.memory?.evictionCaps ? { evictionCaps: config.memory.evictionCaps } : {}),
   ...(recorder ? { onStats: (s) => recorder.memoryPersist(s) } : {}),
-  // ADR-0078 application point #3 — wire the distill input redactor. When
-  // the layer is OFF (host acked risk) we pass `redactionDisabled: true`
-  // so the distiller does NOT re-redact. The aggregator records hits so
-  // `AgentOutcome.redactions` carries the rollup.
-  ...(redactionCfg && !redactionCfg.enabled ? { redactionDisabled: true } : {}),
-  ...(redactionCfg && redactionCfg.whitelist.length > 0
-    ? { redactionWhitelist: redactionCfg.whitelist }
-    : {}),
-  ...(redactions ? { onRedactionHits: (h) => redactions.record("memory_distill", h) } : {}),
   signal: config.signal,
 })
 
@@ -962,15 +826,7 @@ export const decideOnAssembled = (
  * accumulate across turns/retries and always trails the conversation).
  */
 /** Rebuild the per-attempt request context: memory recall, proactive
- *  compaction (mutates `messages` in place), then the buildTurnContext SEAM.
- *
- *  `citationSink` (ADR-0082): when supplied, the recall layer reports placed
- *  records (id+score+tokensApprox) BEFORE the rendered block returns; we
- *  join each placed row with `where:"reminder_tail"` (memory ALWAYS rides
- *  the trailing `<system-reminder>` user message in v3 — see prompt.ts
- *  buildTurnContext: the cached system prefix never carries per-turn data)
- *  and push into the run-scoped citation collector. Absent ⇒ no signal
- *  captured, byte-identical. */
+ *  compaction (mutates `messages` in place), then the buildTurnContext SEAM. */
 const prepareTurnContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
@@ -980,23 +836,13 @@ const prepareTurnContext = async (
   workingState: WorkingStateSession | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
-  citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
-  ideSnapshot: IdeSnapshot | null | undefined,
-  redactionCfg: NormalizedRedactionConfig | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
-  const memoryContext = await resolveMemoryContext(config, wm, recorder, citationSink)
+  const memoryContext = await resolveMemoryContext(config, wm, recorder)
   await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
   // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
   const wsSnapshot = workingState?.snapshot()
-  // ADR-0078 — when redaction is OFF, surface the ack reason on every turn
-  // as a `<system-reminder>` line so the model is never silently
-  // unprotected. Enabled ⇒ field omitted (byte-identical default-ON).
-  const redactionDisabledReason =
-    redactionCfg && !redactionCfg.enabled && redactionCfg.acknowledgedRisk
-      ? redactionCfg.acknowledgedRisk
-      : undefined
   return buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
@@ -1010,13 +856,6 @@ const prepareTurnContext = async (
     // rendered reminder (byte-identical for skill-less sessions).
     ...(activeSkills !== undefined ? { activeSkills } : {}),
     ...(wsSnapshot !== undefined ? { workingState: wsSnapshot } : {}),
-    // ADR-0080 — IDE context. Snapshot is captured ONCE at turn-entry in
-    // `runAgentInner` and forwarded through every same-turn retry of this
-    // turn so the rendered block stays stable across the retry budget.
-    // `undefined` (no provider wired) ⇒ key omitted ⇒ buildTurnContext
-    // emits no `<ide-context>` block (byte-identical).
-    ...(ideSnapshot !== undefined ? { ideSnapshot } : {}),
-    ...(redactionDisabledReason !== undefined ? { redactionDisabledReason } : {}),
   })
 }
 
@@ -1056,7 +895,6 @@ const verifyGuardStep = (
   wm: WorkingMemory<Message>,
   history: readonly ToolHistoryEntry[],
   state: VerifyGuardState | undefined,
-  toolChoiceTurnState: ToolChoiceTurnState,
 ): Step | undefined => {
   if (config.verifyGuard === undefined || state === undefined) return undefined
   if (!isFinishAttempt(action, message)) return undefined
@@ -1070,19 +908,6 @@ const verifyGuardStep = (
   })
   if (!verdict.block || verdict.text === undefined) return undefined
   emitRecovery(config, "unverified")
-  // ADR-0079 — arm the NEXT turn's tool_choice gate. The forced re-entry
-  // (after wm.append'ing the forcing meta) restarts the OUTER `for turn` loop,
-  // which calls `runTurn` again — `consumeTurnSignals` at the top of runTurn
-  // reads this flag and clears it, so the next LLM stream sees
-  // `tool_choice:"any"` (force a tool call, typically a verify). Pure side
-  // effect on a turn-local mutable state object owned by the loop.
-  //
-  // NOTE: the verify-guard re-enters the SAME turn via the
-  // `wm.append + return CONTINUE` mechanism (no maxTurns slot consumed) — but
-  // that re-entry IS a new LLM stream call, conceptually a "next turn" from
-  // the tool_choice perspective. We arm here so the very next stream call
-  // (the forced re-entry) sees the gate.
-  toolChoiceTurnState.verifyGuardViolated = true
   wm.append(message)
   wm.append(metaUser(verdict.text))
   return CONTINUE
@@ -1106,7 +931,6 @@ const closeoutGuardStep = (
   wm: WorkingMemory<Message>,
   history: readonly ToolHistoryEntry[],
   state: CloseoutGuardState | undefined,
-  toolChoiceTurnState: ToolChoiceTurnState,
 ): Step | undefined => {
   if (config.closeoutGuard === undefined || state === undefined) return undefined
   if (!isFinishAttempt(action, message)) return undefined
@@ -1118,13 +942,6 @@ const closeoutGuardStep = (
   const verdict = decideCloseoutGuard({ cfg: config.closeoutGuard, state, history })
   if (!verdict.block || verdict.text === undefined) return undefined
   emitRecovery(config, "closeout")
-  // ADR-0079 — arm the NEXT LLM-call's tool_choice gate. The forced re-entry
-  // restarts the `for(;;)` in runTurn, where consumeTurnSignals reads + clears
-  // this flag and resolveToolChoice emits `{kind:"none"}` — the next stream
-  // FORBIDS any tool_use, forcing the model to produce a text terminal turn
-  // (it cannot keep calling tools to delay the closeout). Pure side effect
-  // on the loop-owned mutable state object.
-  toolChoiceTurnState.closeoutAttempted = true
   wm.append(message)
   wm.append(metaUser(verdict.text))
   return CONTINUE
@@ -1140,7 +957,6 @@ const applyAction = async (
   history: readonly ToolHistoryEntry[],
   verifyGuardState: VerifyGuardState | undefined,
   closeoutGuardState: CloseoutGuardState | undefined,
-  toolChoiceTurnState: ToolChoiceTurnState,
 ): Promise<Step> => {
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
   if (action.do === "backoff") {
@@ -1179,29 +995,13 @@ const applyAction = async (
   // Tier 0 safety hardening: a finish attempt right after an unverified edit is forced
   // into one more turn. All the branching/decision lives in `verifyGuardStep`
   // so this hot path stays a single guarded call (default-OFF ⇒ undefined).
-  const guarded = verifyGuardStep(
-    config,
-    action,
-    message,
-    wm,
-    history,
-    verifyGuardState,
-    toolChoiceTurnState,
-  )
+  const guarded = verifyGuardStep(config, action, message, wm, history, verifyGuardState)
   if (guarded) return guarded
   // Closeout reminder (§4 mirror): a finish attempt is given one single-shot
   // closeout nudge per run. Ordered STRICTLY AFTER verify-guard: if verify
   // already blocked above we never reach here on this turn — closeout fires the
   // NEXT finish-intent (after verify is satisfied). Default-OFF ⇒ undefined.
-  const closedout = closeoutGuardStep(
-    config,
-    action,
-    message,
-    wm,
-    history,
-    closeoutGuardState,
-    toolChoiceTurnState,
-  )
+  const closedout = closeoutGuardStep(config, action, message, wm, history, closeoutGuardState)
   if (closedout) return closedout
   if (action.do === "completed") {
     // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
@@ -1243,31 +1043,11 @@ const runTurn = async (
   collector: TurnWorkMetricsCollector | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
-  citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined,
-  ideSnapshot: IdeSnapshot | null | undefined,
-  toolChoiceTurnState: ToolChoiceTurnState,
-  redactions: RedactionAggregator | undefined,
-  redactionCfg: NormalizedRedactionConfig | undefined,
-  /** ADR-0077: capture sink — invoked on every successful sampling-request so
-   *  the outer loop can surface the LAST turn's snapshot on AgentOutcome. */
-  onTurnTiming?: (t: TurnTiming) => void,
 ): Promise<TurnResult> => {
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
   for (;;) {
     if (config.signal.aborted) return { kind: "aborted" }
-
-    // ADR-0079 — consume the 1-turn-TTL signals AT EACH LLM-CALL ITERATION.
-    // The verify-/closeout-guard hooks ARM these flags at finish-intent then
-    // `return CONTINUE`, which loops back here to this consume — so the very
-    // next LLM stream sees `tool_choice` forced. Same-turn recovery paths
-    // (stream-error backoff, compact, output-limit nudge, malformed nudge,
-    // empty nudge) DO NOT re-arm the flags, so re-consuming them just
-    // returns `{kind:"auto"}` — byte-identical to the pre-feature path. The
-    // consume is the single canonical clear point: flags can never carry
-    // across more than one LLM stream call.
-    const signals = consumeTurnSignals(toolChoiceTurnState)
-    const toolChoice = resolveToolChoice(signals)
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
@@ -1280,9 +1060,6 @@ const runTurn = async (
       workingState,
       archive,
       turn,
-      citationSink,
-      ideSnapshot,
-      redactionCfg,
     )
     const result = await streamConsume(
       config,
@@ -1295,18 +1072,8 @@ const runTurn = async (
       toolHistory,
       workingState,
       collector,
-      // ADR-0079 — `auto` is the default-OFF case; the adapter omits the
-      // field on the wire so the request is byte-identical to the pre-feature
-      // path. Pass it through anyway so the signal lifecycle stays uniform.
-      toolChoice,
-      redactions,
     )
     if ("aborted" in result) return { kind: "aborted" }
-
-    // ADR-0077: a successful stream consume always carries a TurnTiming
-    // snapshot. The error branch carries none (the stream threw before
-    // `markStreamEnd` — surfacing partial timing would be a fallback path).
-    if ("turnTiming" in result) onTurnTiming?.(result.turnTiming)
 
     const action =
       "error" in result
@@ -1326,7 +1093,6 @@ const runTurn = async (
       toolHistory ?? EMPTY_TOOL_HISTORY,
       verifyGuardState,
       closeoutGuardState,
-      toolChoiceTurnState,
     )
     if (step.done) return step.result
   }
@@ -1499,11 +1265,6 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
  *  stays untouched — adding a `try/finally` around it inline would have
  *  required restructuring every return path. */
 const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
-  // ADR-0078 — validate the redaction config FIRST. `disabled: true` without a
-  // non-empty `acknowledgedRisk` throws `RedactionConfigError` here so a
-  // misconfigured host fails fast (startup), never mid-turn.
-  const redactionCfg = normalizeRedactionConfig(config.redaction)
-  const redactions = new RedactionAggregator()
   // Tier 1 capability (ADR-0011): materialize optional subsystems ONCE. With no
   // Tier-1 config `features.extraTools` is empty and `cfg === config` by
   // identity, so the loop is byte-for-byte identical to the pre-absorption path.
@@ -1578,14 +1339,6 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
-  // ADR-0079 — pre-call tool_choice signal state. One per session; the two
-  // guards (verify, closeout) arm flags here at finish-intent and the loop
-  // consumes + clears them at the next LLM-call iteration. Always allocated
-  // (a single 2-boolean object): with no guards configured, no flag is ever
-  // armed, `consumeTurnSignals` returns `{}`, `resolveToolChoice` returns
-  // `{kind:"auto"}`, and the adapter omits the wire field — byte-identical
-  // to the pre-feature path.
-  const toolChoiceTurnState = createToolChoiceTurnState()
   // Codex absorption — memory L3 (Phase 6): session-scoped WorkingState.
   // Wired in by `buildSessionFeatures` when `cfg.workingState?.enabled === true`;
   // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-
@@ -1600,35 +1353,6 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   const summaryArchive: ConversationSummaryArchive | undefined =
     cfg.compaction?.archive === true ? createArchive() : undefined
 
-  // ADR-0082 memory_citation accumulator. Built ONLY when a memory store is
-  // wired (`cfg.store` present) — with no store, `resolveMemoryContext`
-  // short-circuits and the sink would never be called, so we save the
-  // allocation entirely (preserving the default-OFF byte-identical contract).
-  // The sink stamps `where: "reminder_tail"` because the v3 prompt assembler
-  // ALWAYS renders memory into the trailing `<system-reminder>` user message
-  // — the static system prefix carries no per-turn data (ADR-0003). Append-
-  // only across the run: a record placed across N turns produces N rows.
-  const memoryCitations: MemoryCitation[] | undefined = cfg.store ? [] : undefined
-  const citationSink: ((placed: readonly PlacedRecord[]) => void) | undefined = memoryCitations
-    ? (placed) => {
-        for (const p of placed) {
-          memoryCitations.push({
-            recordId: p.recordId,
-            score: p.score,
-            where: "reminder_tail",
-            tokensApprox: p.tokensApprox,
-          })
-        }
-      }
-    : undefined
-
-  // ADR-0077 turn-timing trio — mutable slot updated on every successful
-  // `streamConsume` (`applyAction` mirrors the field onto here). Surfaced on
-  // `AgentOutcome.turnTiming` at finish. Absent until the first productive
-  // turn — runs that never opened a stream observe NO field (default-OFF
-  // byte-identical for legacy callers).
-  let lastTurnTiming: TurnTiming | undefined
-
   const finish = async (
     reason: StopReason,
     turns: number,
@@ -1642,19 +1366,9 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     }
     const messages = [...wm.snapshot()]
     if (cfg.store) {
-      // ADR-0078 application point #2 — apply `envelope_jsonl` redaction
-      // over the snapshot for the rollup audit. We record the hits here so
-      // `AgentOutcome.redactions[]` carries a per-origin tally even though
-      // the message buffer the loop returns is left UN-redacted (host UIs
-      // / state-resume expect the live transcript). The persisted side
-      // gets the REDACTED snapshot; the distiller in `persistSession`
-      // re-runs its own `memory_distill`-origin pass so the rollup carries
-      // both origins independently.
-      const persisted = redactTranscriptForPersist(messages, redactionCfg)
-      if (persisted.hits.length > 0) redactions.record("envelope_jsonl", persisted.hits)
-      await persistSession(buildPersistDeps(cfg, recorder, redactionCfg, redactions), {
+      await persistSession(buildPersistDeps(cfg, recorder), {
         sessionId,
-        finalMessages: messages, // original — distill runs its own pass
+        finalMessages: messages,
       })
     }
     // R-Phase5 P0-A: graceful shutdown of any pending background subagents.
@@ -1677,31 +1391,9 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // provided one. `exactOptionalPropertyTypes`: spread conditionally so
     // legacy callers see an outcome with NO `stopCategory` field (byte-
     // identical to pre-B3 — they cannot observe a `stopCategory: undefined`).
-    //
-    // ADR-0082 — surface memory citations when ANY were captured. `memoryCitations`
-    // is only constructed when a store is wired; when it ends up empty across
-    // the whole run (configured but no recall hits ever) we OMIT the field
-    // entirely so a default outcome stays byte-identical for callers that
-    // only read `reason`/`turns`/`messages`.
-    //
-    // ADR-0077 turn-timing trio: surface when at least one productive turn
-    // streamed (`lastTurnTiming` is `undefined` for runs that aborted before
-    // any sampling-request opened). Same conditional-spread pattern keeps
-    // legacy callers byte-identical.
-    // ADR-0078: attach the redaction rollup when at least one hit fired.
-    // Absent ⇒ no field on the outcome (byte-identical for callers that
-    // never opted into reading it).
-    const redactionsRollup: ReadonlyArray<RedactionRollup> | undefined = redactions.empty()
-      ? undefined
-      : redactions.snapshot()
-    const out: AgentOutcome = { reason, turns, messages }
-    if (stopCategory !== undefined) out.stopCategory = stopCategory
-    if (memoryCitations !== undefined && memoryCitations.length > 0) {
-      out.memoryCitations = memoryCitations
-    }
-    if (lastTurnTiming !== undefined) out.turnTiming = lastTurnTiming
-    if (redactionsRollup !== undefined) out.redactions = redactionsRollup
-    return out
+    return stopCategory !== undefined
+      ? { reason, turns, messages, stopCategory }
+      : { reason, turns, messages }
   }
 
   // RFC-0002 §5.2 `session_start` — emitted ONCE at run start so the trajectory
@@ -1714,6 +1406,10 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
 
   for (let turn = 1; turn <= cfg.maxTurns; turn++) {
     if (cfg.signal.aborted) return finish("aborted", turn - 1, interruptedCategory("user"))
+    // RFC may-22 Phase 1: BudgetMeter tick — turn start. Optional-chain ⇒ when
+    // `cfg.budgetMeter === undefined` the call is a no-op and the loop is
+    // byte-for-byte identical to the pre-RFC path.
+    cfg.budgetMeter?.tick("turn")
     // ADR-0030 mid-turn steering seam (default-OFF ⇒ both no-ops, byte-
     // identical legacy). Order matters: await the barrier FIRST so a pending
     // surface injection lands in the conversation buffer before we expose the
@@ -1766,26 +1462,6 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // helper above runAgent — keeps the runAgent body free of new branches.
     const { collector: workCollector, turnId: workTurnId } = buildWorkMetricsResources(cfg)
 
-    // ADR-0080 — IDE context provider seam. Snapshot is captured ONCE at
-    // turn-entry (NOT per same-turn retry) so the rendered `<ide-context>`
-    // block stays stable across the retry budget — the model never sees the
-    // editor "shift" between attempts of the SAME turn. A reject/throw is
-    // caught at the boundary and surfaced as an `error` AgentEvent; the
-    // snapshot then degrades to `null` so the loop proceeds (an IDE bug must
-    // not abort the turn). With no provider wired the variable stays
-    // `undefined` ⇒ buildTurnContext omits the `ideSnapshot` key entirely
-    // and the loop is byte-identical to the pre-ADR path.
-    let ideSnapshot: IdeSnapshot | null | undefined
-    if (cfg.ideContextProvider !== undefined) {
-      try {
-        ideSnapshot = await cfg.ideContextProvider.snapshot(cfg.signal)
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
-        stream.emit({ type: "error", message: `ide-context provider failed: ${message}` })
-        ideSnapshot = null
-      }
-    }
-
     // Codex 10-step span tree — `session_task.turn`. Opens before the per-
     // turn work begins, closes after `runTurn` returns (success OR failure).
     // The turnId is derived from `activeTurnRef.currentTurn` when set (reuse
@@ -1818,14 +1494,6 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         workCollector,
         summaryArchive,
         turn,
-        citationSink,
-        ideSnapshot,
-        toolChoiceTurnState,
-        redactions,
-        redactionCfg,
-        (t) => {
-          lastTurnTiming = t
-        },
       )
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"
@@ -1874,6 +1542,16 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // consecutive no-progress strikes (Tier 0 safety hardening, ADR-0011).
     breaker?.noteProgress()
     wm.append({ role: "user", content: result.resultBlocks })
+
+    // RFC may-22 Phase 1: BudgetMeter turn-end exhaustion check. Default-OFF
+    // (no meter ⇒ no check, byte-identical legacy). Propositional check only
+    // — `dial !== undefined && observed > dial`. On exhaustion, finish with
+    // `reason: "budget_exhausted"` and a `completed` stop-category (the run
+    // produced real work; it just hit a configured ceiling).
+    const ex = cfg.budgetMeter?.checkExhausted()
+    if (ex?.exhausted) {
+      return finish("budget_exhausted", turn, completedCategory("max_turns"))
+    }
   }
 
   return finish("max_turns", cfg.maxTurns, completedCategory("max_turns"))

@@ -4,8 +4,6 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { buildReport, writeReport } from "../../src/apps/bench/report"
-import { runInstance } from "../../src/apps/bench/runner"
 import {
   defaultExec,
   type Prediction,
@@ -13,7 +11,9 @@ import {
   prepareTaskRepo,
   toInstance,
   writePredictions,
-} from "../../src/apps/bench/swebench-dataset"
+} from "../../src/apps/bench/corpus/dataset"
+import { runInstance } from "../../src/apps/bench/eval"
+import { buildReport, writeReport } from "../../src/apps/bench/report"
 
 /** Mirror of bench.test.ts's FixingLLM: one edit turn via the real edit tool,
  *  then a final text turn. Extracts the sandbox from the runner's prompt. */

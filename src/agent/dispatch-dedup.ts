@@ -10,7 +10,7 @@
  * observed failure (pallets bench run): 17 turns repeating
  * `pip install flask` / `chmod` / `export PATH` etc, same command, same
  * observation, no environment delta. The classifier
- * (`apps/bench/failure-classifier.ts#hasVerifyLoopStuck`) detects this AFTER
+ * (`apps/bench/corpus/failure-classifier.ts#hasVerifyLoopStuck`) detects this AFTER
  * the fact for grading — this gate is the BEFORE-the-fact pre-dispatch brake.
  *
  * Design properties:

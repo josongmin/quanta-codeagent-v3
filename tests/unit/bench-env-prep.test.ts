@@ -19,8 +19,12 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { runInstance } from "../../src/apps/bench/runner"
-import { defaultExec, parseSwebenchJsonl, prepareTaskRepo } from "../../src/apps/bench/swebench-dataset"
+import {
+  defaultExec,
+  parseSwebenchJsonl,
+  prepareTaskRepo,
+} from "../../src/apps/bench/corpus/dataset"
+import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
 
 const GIT = "git -c user.email=t@t -c user.name=t -c commit.gpgsign=false"

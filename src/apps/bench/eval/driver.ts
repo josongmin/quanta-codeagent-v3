@@ -1,44 +1,33 @@
 /**
- * Single-instance SWE-bench-style runner.
+ * Single-instance SWE-bench-style runner — top-level orchestration.
  *
  * Prepares an isolated sandbox copy of the instance repo (the corpus is NEVER
  * mutated), runs a real agent (runAgent + defaultTools) against the problem
- * statement, then runs the instance's testCmd to decide pass/fail and captures
- * a unified diff of the sandbox as the produced patch.
+ * statement, then runs the instance's testCmd (or the Python harness) to
+ * decide pass/fail and captures a unified diff of the sandbox as the produced
+ * patch.
  *
- * Shell exec is a tiny local Bun.spawn helper, but it spawns children with the
- * single-source `@/runtime` `scrubEnv()` allowlist (NOT raw `process.env`) so a
- * bench child can never inherit `OPENAI_API_KEY`/tokens — that is what makes
- * the trajectory's `envPolicyVersion` stamp truthful (C9). Apps may import
- * slices (RFC §3.1); reusing scrubEnv keeps ONE env policy, not a fork.
+ * This file is the ONLY place that ties the eval sub-slice together:
+ *   sandbox.create → env-prep.run → snapshot.withSnapshot(runAgent) →
+ *   verdict.verify → report.emit*. Each step lives in its own sibling module
+ *   (sandbox.ts / env-prep.ts / snapshot.ts / verdict.ts / report.ts / exec.ts).
+ *
+ * Behavior is byte-identical to the pre-decompose `src/apps/bench/runner.ts`;
+ * this is a pure structural refactor.
  */
-import { writeFileSync } from "node:fs"
-import { cp, mkdtemp, rm } from "node:fs/promises"
-import { join } from "node:path"
 import { buildSystemPrompt, runAgent } from "@/agent"
 import { lspNavToolList } from "@/agent/lsp-bridge"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { scrubEnv } from "@/runtime"
-import { redactValue, type SandboxData } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { TeeStream } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { getCachePathspecs } from "./cache-pathspecs"
-import { evaluateWithPythonSwebench, type PySwebenchOpts } from "./harness"
-import {
-  type AttemptObservation,
-  BenchObserver,
-  countDiff,
-  finalizeRun,
-  type RunObservation,
-  type RunSummary,
-  UsageTap,
-  verifyLogTail,
-} from "./observe"
-import { benchWorkRoot } from "./paths"
-import { runRepairRounds } from "./repair"
+import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
+import type { evaluateWithPythonSwebench, PySwebenchOpts } from "../python-swebench"
+import type { Instance, InstanceResult } from "../types"
+import { runEnvPrep } from "./env-prep"
+import { exec } from "./exec"
 import { buildRepairContext } from "./repair/context"
+import { runRepairRounds } from "./repair/index"
 import type {
   BuildRepairContextArgs,
   RunOnceResult,
@@ -46,17 +35,18 @@ import type {
   ValidatorResult,
 } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
-import type { Instance, InstanceResult } from "./types"
-
-export type { RunObservation, RunSummary }
-export { finalizeRun }
-
-/** StreamPort that swallows every event — silent benchmark runs. */
-export class NullStream implements StreamPort {
-  emit(_event: AgentEvent): void {
-    // intentionally empty
-  }
-}
+import {
+  buildWiring,
+  emitPatch,
+  emitSandbox,
+  emitVerify,
+  NullStream,
+  ObservationError,
+  type Wiring,
+} from "./report"
+import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
+import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { verify } from "./verdict"
 
 export interface RunInstanceDeps {
   llm: LLMPort
@@ -99,209 +89,6 @@ export interface RunInstanceDeps {
     maxRounds?: number
     validate?: (args: ValidateArgs) => Promise<ValidatorResult>
     buildContext?: (args: BuildRepairContextArgs) => string
-  }
-}
-
-interface ExecResult {
-  code: number
-  stdout: string
-  stderr: string
-}
-
-/**
- * Minimal `bash -c` exec via Bun.spawn with a hard timeout. C9: children are
- * spawned with the single-source `scrubEnv()` allowlist (PATH/HOME/proxy/
- * locale/TMPDIR preserved so git/bun/node still work) — the parent's secrets
- * (`OPENAI_API_KEY`/tokens) are NEVER inherited. This makes the `sandbox`
- * trajectory event's `envPolicyVersion` claim true.
- */
-const exec = async (cmd: string, cwd: string, timeoutMs: number): Promise<ExecResult> => {
-  const proc = Bun.spawn(["bash", "-c", cmd], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: scrubEnv(),
-  })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const code = await proc.exited
-    return { code, stdout, stderr }
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/**
- * Argv-form exec (no `bash -c`). Used for git pathspec-exclude invocations
- * where the `:(exclude,top)…` magic must not pass through shell word-splitting
- * or quote-stripping. Same env scrub + timeout semantics as {@link exec}.
- */
-const execArgv = async (
-  argv: readonly string[],
-  cwd: string,
-  timeoutMs: number,
-): Promise<ExecResult> => {
-  const proc = Bun.spawn([...argv], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: scrubEnv(),
-  })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const code = await proc.exited
-    return { code, stdout, stderr }
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/**
- * Common git argv prefix for bench-internal commits — matches the `${G}`
- * shell-string form used elsewhere but as an array so pathspec args stay
- * intact (no shell word-splitting). The `-c` overrides also bypass any user
- * `commit.gpgsign` config that would prompt for a signing key.
- */
-const GIT_ARGV: readonly string[] = [
-  "git",
-  "-c",
-  "user.email=b@b",
-  "-c",
-  "user.name=b",
-  "-c",
-  "commit.gpgsign=false",
-]
-
-/**
- * Stage everything in the worktree and capture the unified index diff with
- * cache-shaped paths pruned AT SOURCE (T2 — patch sanitizer prune-at-source).
- * Two steps because `git add -A` cannot share the same argv invocation as
- * `git diff --cached` without a shell `&&`, and a shell would re-process the
- * pathspec magic chars; here both steps run via argv-form `execArgv` so the
- * pathspecs reach git verbatim.
- *
- * Returns "" on any git failure (opportunistic, matches surrounding policy).
- */
-const gitStageAndDiffCached = async (cwd: string, timeoutMs: number): Promise<string> => {
-  const add = await execArgv([...GIT_ARGV, "add", "-A"], cwd, timeoutMs)
-  if (add.code !== 0) return ""
-  const diff = await execArgv(
-    [...GIT_ARGV, "diff", "--cached", "--no-color", "--", ".", ...getCachePathspecs()],
-    cwd,
-    timeoutMs,
-  )
-  return diff.code === 0 ? sourceOnlyDiff(diff.stdout) : ""
-}
-
-/**
- * Snapshot helper: take a pre-image, run the agent, then diff.
- *
- * If the sandbox already contains a `.git` (real swebench cache repos do) and
- * `baseCommit` is supplied, we hard-checkout that commit FIRST so the agent
- * starts from the canonical buggy tree, then commit it as the pristine base.
- * Otherwise we `git init` a fresh repo over the copied files. After the agent
- * runs, `git add -A && git diff --cached` yields a proper unified
- * `diff --git a/… b/…` patch — exactly the SWE-bench prediction format. `git`
- * is opportunistic; absence/failure ⇒ "" rather than throwing.
- */
-const withGitSnapshot = async (
-  sandbox: string,
-  timeoutMs: number,
-  baseCommit: string | undefined,
-  body: () => Promise<void>,
-): Promise<string> => {
-  const G = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
-  const hasGit = (await exec("git rev-parse --git-dir", sandbox, timeoutMs)).code === 0
-  const prep =
-    hasGit && baseCommit
-      ? `${G} checkout -q -f ${baseCommit} && ${G} reset -q --hard ${baseCommit} && ${G} clean -qfdx`
-      : `git init -q . && ${G} add -A && ${G} commit -q -m base --allow-empty`
-  const init = await exec(prep, sandbox, timeoutMs)
-  await body()
-  if (init.code !== 0) return ""
-  // T2: exclude cache/build paths at the git layer via pathspec — pruning at
-  // source is structural, where the prior post-hoc filter let mixed
-  // source+cache patches (django leak, 2026-05-21) through.
-  return gitStageAndDiffCached(sandbox, timeoutMs)
-}
-
-/** SWE-bench predictions must be SOURCE-only: the official harness applies its
- *  own gold `test_patch`, so any test-file hunk a model emits is at best
- *  discarded and at worst conflicts with / skews grading (observed: agents
- *  editing `tests/` produced large diffs that failed PASS_TO_PASS). Drop the
- *  per-file sections of a unified `git diff` whose path is a test file/dir.
- *  Pure, order-preserving; non-test (source) hunks pass through verbatim. */
-const TEST_PATH_RE = /(^|\/)tests?\//i
-const TEST_FILE_RE = /(^|\/)(test_[^/]+|[^/]+_test|conftest)\.(py|js|ts|tsx)$/i
-export const sourceOnlyDiff = (diff: string): string => {
-  if (diff.trim() === "") return diff
-  const out: string[] = []
-  let skip = false
-  for (const line of diff.split("\n")) {
-    const m = line.match(/^diff --git a\/\S+ b\/(\S+)/)
-    if (m) {
-      const p = m[1] ?? ""
-      skip = TEST_PATH_RE.test(p) || TEST_FILE_RE.test(p)
-    }
-    if (!skip) out.push(line)
-  }
-  return out.join("\n")
-}
-
-/**
- * Env-scrub policy version tied to the sandbox allowlist. Bumped only when the
- * scrub allowlist changes; stamped into every `sandbox` event so a trajectory
- * records which policy governed the run. `sandbox.v2` (Group A coordinated):
- * the allowlist no longer carries NODE_OPTIONS/NODE_EXTRA_CA_CERTS, and bench
- * `exec()` now spawns children with `scrubEnv()` — so the stamp is truthful.
- */
-const ENV_POLICY_VERSION = "sandbox.v2"
-
-const trimOut = (r: ExecResult): string => (r.code === 0 ? r.stdout.trim() : "")
-
-/** Best-effort `<bin> --version` → first line, or undefined. */
-const probeVersion = async (bin: string, sandbox: string, timeoutMs: number): Promise<string> => {
-  const r = await exec(`${bin} --version 2>&1 | head -n1`, sandbox, timeoutMs)
-  return trimOut(r)
-}
-
-/**
- * One-shot sandbox snapshot (RFC §5.2 `sandbox`). Gathered AFTER the repo is
- * copied + base-checked-out and BEFORE the agent runs, so `repoCommit` is the
- * pristine pre-agent HEAD. `git` is opportunistic — absence ⇒ empty commits,
- * never throws. `python` is best-effort/optional.
- */
-const gatherSandbox = async (
-  sandbox: string,
-  baseCommit: string | undefined,
-  timeoutMs: number,
-): Promise<SandboxData> => {
-  const head = await exec("git rev-parse HEAD", sandbox, timeoutMs)
-  const status = await exec("git status --porcelain", sandbox, timeoutMs)
-  const [bun, node, python] = await Promise.all([
-    probeVersion("bun", sandbox, timeoutMs),
-    probeVersion("node", sandbox, timeoutMs),
-    probeVersion("python3", sandbox, timeoutMs),
-  ])
-  const runtime: { bun?: string; node?: string; python?: string } = {
-    ...(bun !== "" ? { bun } : {}),
-    ...(node !== "" ? { node } : {}),
-    ...(python !== "" ? { python } : {}),
-  }
-  return {
-    repoCommit: trimOut(head),
-    baseCommit: baseCommit ?? trimOut(head),
-    worktreeDirty: status.code === 0 && status.stdout.trim() !== "",
-    runtime,
-    envPolicyVersion: ENV_POLICY_VERSION,
   }
 }
 
@@ -416,149 +203,6 @@ const buildConfig = (
     // the negative empirical that motivated ADR-0013's default reduction —
     // inheriting the default makes the lesson actually apply on the bench path.
     ...(instance.swebench ? { verifyGuard: {} } : {}),
-  }
-}
-
-/** Pass/fail + the evidence a `verify` trajectory event needs (RFC §5.2). */
-interface VerifyOutcome {
-  passed: boolean
-  error?: string
-  /** The grading command (testCmd, or the python-harness pseudo-command). */
-  command: string
-  exitCode: number
-  failedTests: string[]
-  logTail: string
-  reportPath: string
-}
-
-/**
- * Decide pass/fail for the captured patch. When the Python harness is wired
- * AND the instance has swebench metadata, grade officially; otherwise (the
- * default) run the local `testCmd`. Never throws — a harness error degrades to
- * passed=false with the cause in `error`. Returns rich evidence so the caller
- * can emit a `verify` trajectory event; pass/fail semantics are unchanged.
- */
-const verify = async (
-  instance: Instance,
-  patch: string,
-  sandbox: string,
-  deps: RunInstanceDeps,
-): Promise<VerifyOutcome> => {
-  if (deps.pythonSwebench && instance.swebench) {
-    const evaluate = deps.pythonSwebench.evaluate ?? evaluateWithPythonSwebench
-    const r = await evaluate(instance, patch, deps.pythonSwebench.opts ?? {})
-    const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
-    return {
-      passed: r.resolved,
-      ...(r.resolved ? {} : { error: r.log.slice(0, 500) }),
-      command,
-      exitCode: r.resolved ? 0 : 1,
-      failedTests: [],
-      logTail: r.log.slice(-2000),
-      reportPath: "",
-    }
-  }
-  const test = await exec(instance.testCmd, sandbox, deps.timeoutMs)
-  return {
-    passed: test.code === 0,
-    command: instance.testCmd,
-    exitCode: test.code,
-    failedTests: [],
-    logTail: `${test.stdout}\n${test.stderr}`.slice(-2000),
-    reportPath: "",
-  }
-}
-
-/** Marker thrown when a strict (eval) recorder/observer write fails so the
- *  outer catch can map it to `verdict:"degraded"` (RFC §3/§8/§12). */
-class ObservationError extends Error {
-  constructor(cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause))
-    this.name = "ObservationError"
-  }
-}
-
-/** Per-attempt observation wiring (or the no-op default). `obs` is undefined
- *  ⇒ NullStream, byte-identical to pre-W-D behavior. */
-interface Wiring {
-  stream: StreamPort
-  observer?: BenchObserver
-  usage?: UsageTap
-}
-
-/** Build the agent stream. Default-off ⇒ a bare `NullStream`. Observing ⇒
- *  `TeeStream([NullStream, JsonlRecorder, UsageTap], {strict:true})` so a
- *  recorder failure rethrows for `verdict:"degraded"` handling (RFC §8). */
-const buildWiring = (instance: Instance, observe: AttemptObservation | undefined): Wiring => {
-  if (observe === undefined) return { stream: new NullStream() }
-  let observer: BenchObserver
-  try {
-    observer = new BenchObserver(observe, instance.id)
-  } catch (e) {
-    // Strict (eval): an unwritable observe dir is an observation failure, not
-    // a silent fallback — surface it so the instance is marked degraded.
-    throw new ObservationError(e)
-  }
-  const usage = new UsageTap()
-  const stream = new TeeStream([new NullStream(), observer.recorder, usage], { strict: true })
-  return { stream, observer, usage }
-}
-
-/** Emit the one-shot `sandbox` snapshot before the agent runs. Strict: a
- *  recorder failure becomes an {@link ObservationError}. */
-const emitSandbox = async (
-  observer: BenchObserver | undefined,
-  sandbox: string,
-  baseCommit: string | undefined,
-  timeoutMs: number,
-): Promise<void> => {
-  if (observer === undefined) return
-  const data = await gatherSandbox(sandbox, baseCommit, timeoutMs)
-  try {
-    observer.sandbox(data)
-  } catch (e) {
-    throw new ObservationError(e)
-  }
-}
-
-/** Persist the unified diff to `<run>/<id>.<attempt>.patch` and emit
- *  `patch_generated` (filesChanged:0 for an empty patch). Returns the patch
- *  file path so it lands in the summary. */
-const emitPatch = (
-  observe: AttemptObservation,
-  instance: Instance,
-  observer: BenchObserver,
-  patch: string,
-): string => {
-  const attempt = observe.attempt ?? 0
-  const diffPath = join(observe.dir, observe.runId, `${instance.id}.${attempt}.patch`)
-  // S2: a committed `.env`/fixture token captured in the diff must NOT land
-  // raw on disk. Scrub via the single-source @/shared redactor; countDiff runs
-  // on the scrubbed text so filesChanged/hunks still reflect what we wrote.
-  const safePatch = redactValue(patch) as string
-  const { filesChanged, hunks } = countDiff(safePatch)
-  try {
-    writeFileSync(diffPath, safePatch)
-    observer.patchGenerated({ diffPath, filesChanged, hunks, applyStatus: "generated" })
-  } catch (e) {
-    throw new ObservationError(e)
-  }
-  return diffPath
-}
-
-const emitVerify = (observer: BenchObserver | undefined, v: VerifyOutcome): void => {
-  if (observer === undefined) return
-  try {
-    observer.verify({
-      command: v.command,
-      exitCode: v.exitCode,
-      passed: v.passed,
-      failedTests: v.failedTests,
-      logTail: verifyLogTail(v.logTail),
-      reportPath: v.reportPath,
-    })
-  } catch (e) {
-    throw new ObservationError(e)
   }
 }
 
@@ -697,7 +341,7 @@ const runRepairPhase = async (
 const okResult = (
   instance: Instance,
   phase: Phase,
-  v: VerifyOutcome,
+  v: { passed: boolean; error?: string },
   extra: Partial<InstanceResult>,
 ): InstanceResult => ({
   id: instance.id,
@@ -723,7 +367,7 @@ export const runInstance = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
-  const sandbox = await mkdtemp(join(benchWorkRoot(), `bench-${instance.id}-`))
+  const sandbox = await createSandbox(instance)
   const abort = new AbortController()
   const deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
   const startedAt = Date.now()
@@ -731,28 +375,22 @@ export const runInstance = async (
   let w: Wiring = { stream: new NullStream() }
   try {
     w = buildWiring(instance, deps.observe)
-    await cp(instance.repoPath, sandbox, { recursive: true })
+    await copyRepo(instance, sandbox)
 
     // T4 — per-instance env pre-preparation (fail-fast). When the instance
-    // carries a `setupCmd`, run it in the sandbox copy BEFORE the agent. This
-    // is the structural fix for Type-F (verify-loop stuck on env): the harness
-    // prepares the environment, the agent never has to. The command is the
-    // task author's responsibility to keep HOST-CLEAN (e.g. a per-instance
-    // venv created inside `sandbox`); the runner never installs against the
-    // host Python/global env. If setup exits non-zero we fail-fast with a
-    // DISTINCT `env_prep_failed` verdict and DO NOT run the agent — handing a
-    // half-prepared env to the agent is exactly the failure this prevents.
-    if (instance.setupCmd) {
-      const setup = await exec(instance.setupCmd, sandbox, deps.timeoutMs)
-      if (setup.code !== 0) {
-        return {
-          id: instance.id,
-          passed: false,
-          patch: "",
-          turns: 0,
-          verdict: "env_prep_failed",
-          error: `env prep (setupCmd) failed (code ${setup.code}): ${setup.stderr.slice(0, 500)}`,
-        }
+    // carries a `setupCmd`, run it in the sandbox copy BEFORE the agent. If
+    // setup exits non-zero we fail-fast with a DISTINCT `env_prep_failed`
+    // verdict and DO NOT run the agent — handing a half-prepared env to the
+    // agent is exactly the failure this prevents.
+    const prep = await runEnvPrep(instance, sandbox, deps.timeoutMs)
+    if (!prep.ok) {
+      return {
+        id: instance.id,
+        passed: false,
+        patch: "",
+        turns: 0,
+        verdict: "env_prep_failed",
+        error: `env prep (setupCmd) failed (code ${prep.code}): ${prep.stderr.slice(0, 500)}`,
       }
     }
 
@@ -800,6 +438,10 @@ export const runInstance = async (
   } finally {
     clearTimeout(deadline)
     w.observer?.close()
-    await rm(sandbox, { recursive: true, force: true })
+    await cleanupSandbox(sandbox)
   }
 }
+
+// Re-export the observation usage tap so test fixtures and other internals can
+// continue to use bench's typed surface unchanged.
+export { BenchObserver, UsageTap }

@@ -61,25 +61,28 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
 import { logger } from "@/shared"
-import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
-import { aggregate, classify } from "./failure-classifier"
-import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
-import type { AttemptObservation } from "./observe"
-import { resolvedTotals } from "./observe"
-import { benchRunDir, benchRunId, benchWorkRoot } from "./paths"
-import { buildReport, writeReport } from "./report"
-import { finalizeRun, runInstance } from "./runner"
-import { patchVote, sampleBestOfN } from "./sampler"
-import { loadCorpus } from "./swebench"
 import {
+  aggregate,
+  benchRunDir,
+  benchRunId,
+  benchWorkRoot,
+  classify,
   defaultExec,
+  loadCorpus,
   type Prediction,
   parseSwebenchJsonl,
   prepareTaskRepo,
   type SwebenchTask,
   toInstance,
   writePredictions,
-} from "./swebench-dataset"
+} from "./corpus"
+import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { finalizeRun, runInstance } from "./eval"
+import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
+import type { AttemptObservation } from "./observe"
+import { resolvedTotals } from "./observe"
+import { buildReport, writeReport } from "./report"
+import { patchVote, sampleBestOfN } from "./sampler"
 import type { BenchSummary, Instance, InstanceResult } from "./types"
 
 // ── tiny dotenv (no dependency, first-wins; apps/cli has its own copy) ──────

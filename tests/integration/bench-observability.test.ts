@@ -13,9 +13,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { isTrajectoryEvent } from "@/shared"
+import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
+import { finalizeRun, type RunObservation, runInstance } from "../../src/apps/bench/eval"
 import { buildReport } from "../../src/apps/bench/report"
-import { finalizeRun, type RunObservation, runInstance } from "../../src/apps/bench/runner"
-import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/swebench"
 import type { Instance, InstanceResult } from "../../src/apps/bench/types"
 
 /** FakeLLM that fixes the planted add() bug with the real edit tool. Copied

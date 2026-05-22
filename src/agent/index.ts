@@ -15,6 +15,7 @@ export {
   normalizeConfirm,
   READONLY_DENY_STEER_NOTE,
 } from "./confirm-decision"
+export { type IdeSnapshot, renderIdeContext } from "./ide-context"
 export {
   appendSummary,
   archivedTokens,
@@ -41,11 +42,6 @@ export {
   type HookEventType,
   type HookHandler,
 } from "./hooks"
-export {
-  type IdeContextProvider,
-  type IdeSnapshot,
-  renderIdeContext,
-} from "./ide-context"
 export { runAgent } from "./loop"
 export {
   loadMcpTools,
@@ -56,7 +52,6 @@ export {
   type PersistDeps,
   type PersistInput,
   persistSession,
-  type PlacedRecord,
   type RecallDeps,
   recallContext,
   SESSION_TAG,
@@ -157,12 +152,53 @@ export {
 export type {
   AgentConfig,
   AgentOutcome,
-  MemoryCitation,
   PreCompactDecision,
   PreCompactRequestQuery,
   StopReason,
 } from "./types"
 export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
+// RFC may-22-unified-agent-runtime — run-mode + budget slices.
+export {
+  asDials,
+  type BudgetCaps,
+  type BudgetClampEvent,
+  type BudgetDials,
+  type BudgetEvent,
+  type BudgetExhaustedEvent,
+  type BudgetExhaustion,
+  type BudgetExhaustionPolicy,
+  BudgetMeter,
+  type BudgetMeterOptions,
+  type BudgetTickEvent,
+  type BudgetUsage,
+  isBudgetEvent,
+  makeClampEvent,
+  type TickKind,
+} from "./budget"
+export {
+  ALL_AGENT_MODES,
+  type AgentMode as RunMode,
+  assertModeMatrix,
+  BUDGET_PRESETS,
+  type ExternalDepsLever,
+  type GitWriteLever,
+  LEVER_FIELDS,
+  type LeverField,
+  type MemoryLever,
+  MODE_PRESETS,
+  type ModePolicy,
+  narrowMode,
+  type NetworkLever,
+  type ObservationLever,
+  type OutputLever,
+  type PermissionLever,
+  type PromptPackLever,
+  type SandboxLever,
+  type SecretsLever,
+  type TerminationLever,
+  type ToolSurfaceLever,
+  clampDials,
+} from "./run-mode"
 export {
   type Blocker,
   type BlockerSurface,

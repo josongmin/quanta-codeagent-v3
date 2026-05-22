@@ -35,8 +35,8 @@
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { runtimeConfig } from "@/shared"
+import { benchWorkRoot } from "./corpus/paths"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
-import { benchWorkRoot } from "./paths"
 import type { Instance } from "./types"
 
 export interface SpawnResult {
