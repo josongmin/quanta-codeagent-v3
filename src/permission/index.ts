@@ -95,8 +95,15 @@ export {
   recordRiskSeen,
   recordUserOverride,
 } from "./post-denial"
-export type { PendingPermission } from "./remember-patterns"
-export { autoResolvable, grantPatterns, PatternGrantStore } from "./remember-patterns"
+export type { ClassifiedCommand, LearningSource, PendingPermission } from "./remember-patterns"
+export {
+  autoResolvable,
+  classifyCommand,
+  computeSubcommandTokens,
+  grantPatterns,
+  inferSuggestedAllowlistEntry,
+  PatternGrantStore,
+} from "./remember-patterns"
 export type {
   ReasonCode,
   ReviewDecision,

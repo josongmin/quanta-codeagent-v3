@@ -3,27 +3,51 @@ title: rememberPatterns — 권한 패턴 학습 + cascade 자동해소
 section: 3
 subsystem: 권한 학습 (v0.dev 흡수, ADR-0061)
 order: 61
-maturity: L3
-status: refined
+maturity: L4
+status: stable
 purpose: |
   v0.dev 권한 학습 흡수 — 모델이 필요 권한을 직접 제안(suggestedPermissions)하고 위험을
   자가표시(isMaybeDangerous). "패턴 허용" 1회 → 대기 중인 모든 다른 tool 요청을 재평가해
   rememberPatterns가 전부 allowed 집합에 포함되면 자동 통과(CASCADE). v0 원본 대비
   하드닝: rememberPatterns=0인 요청은 절대 자동통과 안 함, isMaybeDangerous 요청은
   allowDangerous 명시 없이는 cascade 제외.
+
+  **L4 promotion (2026-05-23)** — Cursor `ClassifiedCommand` (cursor/agent-exec.js:99207-99213)
+  흡수 + admissibility-gate 배선. 신규 surface:
+
+  - `classifyCommand({toolName, actionKey})` → `{name, arguments[], subcommandTokens[],
+    suggestedAllowlistEntry}` — leading-token sequence 형태 ("npm,install")로 패턴 제안.
+    `sudo` 접두사 제거 + flag(`-x`, `--save-dev`) 토큰에서 종료 + 최소 2 / 최대 4 토큰
+    상한. 결정적, 순수, 어휘 변동성 ML 의존 없음.
+  - `LearningSource` enum (`user_accept` | `classifier`) — 추후 trajectory 소비자가
+    grant 출처를 exhaustive switch 가능.
+  - `AdmissibilityWaveAOptions.pendingPermissions` + `onPatternCascade` — gate가
+    `runAlwaysConfirmBranch`/`resolveAskBranch`의 user-approved 경로에서 grantAndCascade를
+    호출하고 결과(grantedPatterns, cascadedToolCallIds, learningSource,
+    suggestedAllowlistEntry)를 호출자에 통지. dangerous 게이트 유지 (allowDangerous=false면
+    cascade skip). pattern store 미설정 ⇒ byte-identical 레거시 경로.
+  - 두 user-approved 경로(always-confirm tier + 모드정책 ask) 모두 cascadeOnApprove 통과 →
+    동일 패턴이 두 번째 호출에서 `autoPassByPatterns`로 단락.
 evidence:
-  code: [src/permission/remember-patterns.ts]
+  code:
+    - src/permission/remember-patterns.ts
+    - src/permission/gate-pattern-wire.ts
+    - src/agent/admissibility-gate.ts
   adrs: [61]
   tests:
-    unit: [tests/unit/permission-remember-patterns.test.ts]
-    integration: []
+    unit:
+      - tests/unit/permission-remember-patterns.test.ts
+      - tests/unit/permission/remember-patterns-classifier-hell.test.ts
+    integration:
+      - tests/integration/remember-patterns-cascade-hell.test.ts
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    PatternGrantStore·autoResolvable·grantPatterns는 순수 모듈로 완성+테스트. 기존
-    admissibility-gate(8-state ApprovalOutcome)에 배선은 follow-up — 현재 opt-in.
-  promotion_path: |
-    admissibility-gate가 PatternGrantStore를 세션 스코프로 들고 user_approved_for_session
-    경로에 cascade를 호출하면 L3.
-notes: 'user_approved_for_session(ADR-0029)이 actionKey 단위 기억의 씨앗 — rememberPatterns는 그 위에 패턴-단위 cascade를 얹음.'
+deliberate_hold: null
+notes: |
+  user_approved_for_session(ADR-0029)이 actionKey 단위 기억의 씨앗 — rememberPatterns는 그 위에
+  패턴-단위 cascade를 얹음. L4 promotion에서 출처를 명확히 한 LearningSource enum까지 추가해
+  trajectory 소비자가 "왜 자동허용됐는가"를 exhaustive switch로 분기 가능.
+
+  Out-of-scope follow-ups: ML 분류기 v2(현재는 deterministic prefix-token sniffer;
+  알려진 위험 플래그 over-fit 우려), 모델 surface(rememberPatterns/isMaybeDangerous를 모델
+  계약에 노출하는 schema 필드 — 현재는 dispatch seam이 action에 plumb만 함).

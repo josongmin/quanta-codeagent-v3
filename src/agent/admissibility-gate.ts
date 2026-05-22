@@ -30,15 +30,19 @@ import type { ToolUseBlock } from "@/llm"
 import {
   type AutoModeClassifier,
   autoPassByPatterns,
+  classifyCommand,
   computeActionSignature,
   type DenialMemory,
   evaluate,
   evaluateAuto,
   evaluateStack,
+  grantAndCascade,
   type HITLTier,
   hardDenyReason,
   inferToolTier,
   isAllowed,
+  type LearningSource,
+  type PendingPermission,
   type PermissionContext,
   type PermissionStore,
   type ReviewContext,
@@ -123,6 +127,29 @@ export interface AdmissibilityWaveAOptions {
   priorDenials?: ReadonlyArray<DenialMemory>
   decidedAt?: () => number
   onInputMutation?: (next: unknown) => void
+  /**
+   * ADR-0061 (L3→L4) — pending-permission queue the cascade folds when a
+   * user approves a call carrying `rememberPatterns`. Each pending request
+   * whose patterns become covered by the just-granted set has its
+   * `toolCallId` reported via {@link onPatternCascade}. Absent ⇒ no cascade
+   * is computed (byte-identical to pre-L4 callers).
+   */
+  pendingPermissions?: ReadonlyArray<PendingPermission>
+  /**
+   * ADR-0061 (L3→L4) — invoked when at least one pending request was newly
+   * resolvable by the just-granted patterns. The `cascadedToolCallIds` are
+   * the ids the caller can now auto-pass. `learningSource` tags WHY the
+   * grant landed (`user_accept` for explicit confirm, `classifier` for the
+   * pattern auto-pass path). Pure notification — the gate never auto-runs
+   * cascaded calls itself (that's the loop's job, deferred). Absent ⇒
+   * the cascade computation is skipped entirely.
+   */
+  onPatternCascade?: (info: {
+    grantedPatterns: readonly string[]
+    cascadedToolCallIds: readonly string[]
+    learningSource: LearningSource
+    suggestedAllowlistEntry: string | null
+  }) => void
 }
 
 /** Map a `ReviewerTier` to the short preview tag suffix the dispatch seam
@@ -343,6 +370,7 @@ const runAlwaysConfirmBranch = async (
   call: ToolUseBlock,
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
   if (!config.onConfirm) {
     return deny(
@@ -371,6 +399,10 @@ const runAlwaysConfirmBranch = async (
       config,
     )
   }
+  // ADR-0061 L4 cascade — user approved, fold rememberPatterns into the store
+  // and notify the caller of any newly-resolvable pending requests. Default-OFF
+  // (no-op when permissionPatternStore / onPatternCascade absent).
+  cascadeOnApprove(config, action, opts, "user_accept")
   return null
 }
 
@@ -385,6 +417,7 @@ const runHitlGate = async (
   call: ToolUseBlock,
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null | "fallthrough"> => {
   // HARD_DENY hits ARE the hand-off-required tier (security boundary crossing
   // — no mode authorizes them). Phrase as a handoff demand.
@@ -397,7 +430,7 @@ const runHitlGate = async (
 
   const { tier, matched } = resolveHitlTier(config, call, action)
   if (tier === "hand-off-required") return buildHandoffDeny(call, config, matched)
-  if (tier === "always-confirm") return runAlwaysConfirmBranch(call, config, action)
+  if (tier === "always-confirm") return runAlwaysConfirmBranch(call, config, action, opts)
   if (tier === "none") return null
   return "fallthrough"
 }
@@ -453,6 +486,60 @@ const runPermissionStack = (
   return null
 }
 
+/**
+ * L4 wiring (ADR-0061 absorb #2) — cascade-on-approval. When the host's
+ * `onConfirm` returns allow for a call carrying `rememberPatterns`, this
+ * helper:
+ *   1. Folds those patterns into `config.permissionPatternStore` (so future
+ *      structurally-equivalent actions can auto-pass via `autoPassByPatterns`).
+ *   2. Computes which `opts.pendingPermissions` are now fully covered.
+ *   3. Notifies the caller via `opts.onPatternCascade` so the loop can choose
+ *      to short-circuit those queued requests (deferred wiring — the gate
+ *      itself does NOT auto-execute them; cascade is pure information).
+ *
+ * Skipped when the store, the patterns, or the notifier is absent (i.e. the
+ * default-OFF path stays byte-identical for callers that don't opt in).
+ *
+ * The classifier-emitted `suggestedAllowlistEntry` is included in the
+ * notification so a surface can display "grant 'npm,install'" instead of the
+ * literal command. The classifier is deterministic + pure (no ML);
+ * `learningSource` distinguishes a user-driven cascade from a future
+ * classifier-driven auto-pass.
+ */
+const cascadeOnApprove = (
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+  learningSource: LearningSource,
+): void => {
+  const store = config.permissionPatternStore
+  if (store === undefined) return
+  const patterns = action.rememberPatterns
+  if (patterns === undefined || patterns.length === 0) return
+  // ADR-0061 hardening: dangerous actions only cascade on operator override.
+  if (action.isMaybeDangerous === true && config.permissionAllowDangerous !== true) return
+  const pending = opts.pendingPermissions ?? []
+  const cascaded = grantAndCascade(store, patterns, {
+    pending,
+    allowDangerous: config.permissionAllowDangerous === true,
+  })
+  if (opts.onPatternCascade === undefined) return
+  // Compute the classifier surface from the same actionKey the trust-scope
+  // wire-up uses, so the suggested pattern matches the persisted-grant shape.
+  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  const actionKey = shellCommand !== null ? `${action.tool}|${shellCommand}` : null
+  const classified = classifyCommand({
+    toolName: action.tool,
+    ...(actionKey !== null ? { actionKey } : {}),
+  })
+  opts.onPatternCascade({
+    grantedPatterns: patterns,
+    cascadedToolCallIds: cascaded,
+    learningSource,
+    suggestedAllowlistEntry: classified.suggestedAllowlistEntry,
+  })
+}
+
 /** Phase C — trust-scope short-circuit for the ask-branch (ADR-0050). DEFAULT
  *  OFF: returns false unless `config.trustScope` is set AND the registry
  *  confirms a positive grant for `(projectKey, action.tool[, actionKey])`. The
@@ -485,6 +572,7 @@ const resolveAskBranch = async (
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
   reason: string,
+  opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
   // Phase C — trust-scope registry wire-up (ADR-0050). DEFAULT OFF.
   if (trustScopeGrants(config, action)) return null
@@ -504,6 +592,8 @@ const resolveAskBranch = async (
   if (!isConfirmAllowed(decision)) {
     return denyFromConfirm(call, decision, `User declined: ${reason}`, "declined", config)
   }
+  // ADR-0061 L4 cascade — user approved via the mode-policy ask path.
+  cascadeOnApprove(config, action, opts, "user_accept")
   return null
 }
 
@@ -516,6 +606,7 @@ const runModePolicy = async (
   permission: PermissionContext,
   action: AdmissibilityAction,
   autoClassifier?: AutoModeClassifier,
+  opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
   const decision =
     permission.mode === "auto" && autoClassifier
@@ -528,7 +619,7 @@ const runModePolicy = async (
     return deny(call.id, `Permission denied: ${decision.reason}`, "denied")
   }
   if (decision.kind === "ask") {
-    return resolveAskBranch(call, config, action, decision.reason)
+    return resolveAskBranch(call, config, action, decision.reason, opts)
   }
   return null
 }
@@ -701,7 +792,7 @@ export const runAdmissibilityGate = async (
         return reviewAndDecide(call, config, action, opts, "hitl")
       }
     }
-    const hitlResult = await runHitlGate(call, config, action)
+    const hitlResult = await runHitlGate(call, config, action, opts)
     if (hitlResult !== "fallthrough") {
       // null ⇒ HITL approved, skip mode policy and emit hook + proceed.
       // non-null ⇒ short-circuit deny.
@@ -726,7 +817,7 @@ export const runAdmissibilityGate = async (
 
   // 4. Permission policy (HARD_DENY + mode-driven decision; "auto" routes
   //    through the injected classifier).
-  const policyResult = await runModePolicy(call, config, permission, action, autoClassifier)
+  const policyResult = await runModePolicy(call, config, permission, action, autoClassifier, opts)
   if (policyResult) return policyResult
 
   // 5. pre_tool_use hook — repo-local code (or test spy) may deny last.

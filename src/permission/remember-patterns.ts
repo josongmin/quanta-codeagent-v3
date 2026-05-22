@@ -1,6 +1,7 @@
 /**
  * Permission learning — remember-patterns + cascade auto-resolve (ADR absorb #2,
- * from v0.dev's pending-permission bundle).
+ * from v0.dev's pending-permission bundle) + ClassifiedCommand suggested-allowlist
+ * surface (L3→L4 promotion: Cursor absorption).
  *
  * Pure module. No IO, no wall-clock, no cross-slice imports. Lives entirely in
  * `@/permission` and must NOT reach into `@/llm` or `@/agent` (biome slice
@@ -128,5 +129,136 @@ export class PatternGrantStore {
       alreadyResolved: resolved,
       allowDangerous: opts?.allowDangerous,
     }).map((t) => t.toolCallId)
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// L4 promotion — ClassifiedCommand `suggested_allowlist_entry` surface.
+//
+// Cursor reference (`cursor/agent-exec.js:99207-99213`):
+//
+//   ClassifiedCommand{name, arguments[], suggested_allowlist_entry, subcommand_tokens[]}
+//
+// A classifier proposes a TOKEN-SEQUENCE allowlist entry (e.g. `"npm,install"`)
+// so the user grants a *pattern* (every `npm install …`) instead of the literal
+// invocation. Our surface is intentionally smaller than Cursor's:
+//
+//   - We do NOT ship the ML classifier itself (overfitting risk on known-
+//     dangerous flags). The current implementation is a deterministic
+//     prefix-token sniffer over the action's stable key.
+//   - The pattern is computed at the GATE seam (so the gate gives every
+//     reviewer / surface a consistent suggestion without re-tokenizing).
+//   - The suggested entry is OPT-IN — a surface that does not want to
+//     surface it can ignore the field.
+//
+// `learning_source` tag — when a grant lands, the registry records WHICH
+// path produced it: `user_accept` for an explicit confirm, `classifier` for
+// a pattern auto-pass. This lets a host display "auto-allowed because of
+// the npm,install grant" instead of "auto-allowed".
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Where a granted pattern came from. Closed enum so trajectory consumers
+ *  can switch exhaustively without string-matching. */
+export type LearningSource = "user_accept" | "classifier"
+
+/** Cursor's ClassifiedCommand surface, narrowed to what the gate uses. */
+export interface ClassifiedCommand {
+  /** Tool name (e.g. `"bash"`). */
+  readonly name: string
+  /** Tokenized arguments — for an `actionKey` of `"bash|git status"` the
+   *  tokens are `["git","status"]`. Pure data; no executable semantics. */
+  readonly arguments: readonly string[]
+  /** Subcommand tokens — first N tokens that form the durable "shape" of
+   *  the command (e.g. `["git","status"]` for `git status --porcelain`). */
+  readonly subcommandTokens: readonly string[]
+  /** Suggested pattern in `"npm,install"` form (leading-token sequence,
+   *  comma-separated). `null` when no useful pattern could be derived (e.g.
+   *  an action with no shell command — non-shell tools yield no tokens). */
+  readonly suggestedAllowlistEntry: string | null
+}
+
+const SAFE_LEADING_TOKENS = 2
+const MAX_LEADING_TOKENS = 4
+
+/** Heuristic guard for tokens that should NOT extend a pattern beyond their
+ *  position. A `-`-prefixed flag like `--save-dev` is highly invocation-
+ *  specific — the pattern stops at the prior token. Per the v0.dev hardening
+ *  guard (the absorption ADR's overfitting concern). */
+const isFlagLike = (token: string): boolean => token.startsWith("-")
+
+/** Tokenize an actionKey (`bash|git status --porcelain`) into the command's
+ *  ordered tokens. Drops the tool prefix. Pure. */
+const tokenizeAction = (actionKey: string): string[] => {
+  const idx = actionKey.indexOf("|")
+  const body = idx >= 0 ? actionKey.slice(idx + 1) : actionKey
+  return body
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+}
+
+/** Compute the subcommand tokens for a tokenized actionKey: the leading
+ *  non-flag tokens up to `MAX_LEADING_TOKENS`. Returns `[]` when no usable
+ *  leading tokens exist. */
+export const computeSubcommandTokens = (tokens: readonly string[]): string[] => {
+  const out: string[] = []
+  for (const t of tokens) {
+    if (isFlagLike(t)) break
+    out.push(t)
+    if (out.length >= MAX_LEADING_TOKENS) break
+  }
+  return out
+}
+
+/** Derive a suggested allowlist entry from an action's `actionKey`. Returns
+ *  `null` when the action does not present a usable leading-token sequence
+ *  (no actionKey, fewer than `SAFE_LEADING_TOKENS` non-flag tokens, or a
+ *  classifier-flagged dangerous shape).
+ *
+ *  Hardening:
+ *    - When the first token is `sudo` we drop it and use the next leading
+ *      tokens — `sudo npm install` becomes `npm,install`, not `sudo,npm`.
+ *    - At least two tokens required (so we never propose `"npm"` alone —
+ *      too broad). Override the floor via `minTokens` (default 2).
+ *
+ *  Pure; safe to call on every dispatch even when the gate is opted out. */
+export const inferSuggestedAllowlistEntry = (args: {
+  toolName: string
+  actionKey?: string | null
+  minTokens?: number
+}): string | null => {
+  const actionKey = args.actionKey
+  if (actionKey === undefined || actionKey === null || actionKey.length === 0) return null
+  const tokens = tokenizeAction(actionKey)
+  // Strip a leading `sudo` so we propose the underlying command pattern.
+  const stripped = tokens[0] === "sudo" ? tokens.slice(1) : tokens
+  const subcommand = computeSubcommandTokens(stripped)
+  const floor = args.minTokens ?? SAFE_LEADING_TOKENS
+  if (subcommand.length < floor) return null
+  return subcommand.join(",")
+}
+
+/** Build a {@link ClassifiedCommand} for an action. The gate exposes this on
+ *  the reviewer-port seam so a UI can render "grant 'npm install' (pattern)"
+ *  instead of the literal full invocation. */
+export const classifyCommand = (args: {
+  toolName: string
+  actionKey?: string | null
+}): ClassifiedCommand => {
+  const tokens =
+    args.actionKey === undefined || args.actionKey === null ? [] : tokenizeAction(args.actionKey)
+  const subcommand = computeSubcommandTokens(tokens[0] === "sudo" ? tokens.slice(1) : tokens)
+  const suggested = inferSuggestedAllowlistEntry({
+    toolName: args.toolName,
+    ...(args.actionKey !== undefined && args.actionKey !== null
+      ? { actionKey: args.actionKey }
+      : {}),
+  })
+  return {
+    name: args.toolName,
+    arguments: tokens,
+    subcommandTokens: subcommand,
+    suggestedAllowlistEntry: suggested,
   }
 }
