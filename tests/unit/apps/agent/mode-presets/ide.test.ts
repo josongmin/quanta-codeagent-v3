@@ -88,7 +88,7 @@ describe("ide.runMode — config assembly", () => {
       defaultN: 7,
       defaultVerifierKinds: ["tsc"],
       timeoutPerBranchMs: 1000,
-      isolation: "in-process",
+      isolation: "tmpdir",
     }
     let cfgSeen: AgentConfig | undefined
     const seams = {
@@ -99,7 +99,7 @@ describe("ide.runMode — config assembly", () => {
     }
     await runMode(baseReq({ seams, base: { ...baseReq().base, branchSearch: override } }))
     expect(cfgSeen?.branchSearch?.defaultN).toBe(7)
-    expect(cfgSeen?.branchSearch?.isolation).toBe("in-process")
+    expect(cfgSeen?.branchSearch?.isolation).toBe("tmpdir")
   })
 })
 
