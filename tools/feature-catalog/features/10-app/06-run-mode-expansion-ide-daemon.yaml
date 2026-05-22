@@ -3,8 +3,8 @@ title: Run-mode expansion — ide + daemon (C1, ADR-0092)
 section: 10
 subsystem: Unified Agent Runtime — 모드 매트릭스 (RFC may-22)
 order: 6
-maturity: L3
-status: new
+maturity: L4
+status: stable
 purpose: |
   RFC may-22 4-mode(interactive/headless/batch/ci-bot) × 12-lever ModePolicy
   매트릭스에 2개 surface 셀 추가. ide = 에디터 임베디드(VS Code/Tauri):
@@ -15,6 +15,12 @@ purpose: |
   컬럼 + BUDGET_PRESETS 컬럼 완비. branch_search(ADR-0084) default-on (ide N=3
   tsc+lint/60s, daemon N=3 tsc+lint+lsp_diag/90s). 기존 4모드는 byte-identical.
   AgentMode SSOT를 run-mode/types.ts로 통일 — prompt-rules의 중복 4-mode 열거 삭제.
+  In-repo L4 promotion 2026-05-23 — full `runMode(ide)` / `runMode(daemon)` e2e
+  smoke (InMemoryStream + scripted LLM): 12-lever vector binding, BUDGET_PRESETS
+  post-clamp, branch_search default, sessionId 캐리, idempotent re-start, abort
+  signal → exit 130, caller override semantics. 외부 호스트 어댑터(VS Code 익스
+  텐션 / cron 스케줄러)는 mode-presets/{ide,daemon}.ts docstring에 명시된 contract
+  대로 stream/onConfirm/messages/ideContextProvider를 주입 — 그 부분이 진정한 L5.
 evidence:
   code:
     - src/agent/run-mode/types.ts
@@ -25,18 +31,13 @@ evidence:
     - src/apps/agent/mode-presets/daemon.ts
   adrs: [92]
   tests:
-    unit: [tests/unit/apps/agent/anti-regression-invariants.test.ts]
-    integration: []
+    unit:
+      - tests/unit/apps/agent/anti-regression-invariants.test.ts
+      - tests/unit/apps/agent/mode-presets/ide.test.ts
+      - tests/unit/apps/agent/mode-presets/daemon.test.ts
+    integration:
+      - tests/integration/mode-runners-ide-daemon-e2e.test.ts
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    서버측 모드 셀 + 러너 + cli-args VALID_MODES + 동적 dispatch(import ./mode-presets/${mode})
-    완비 → 모드 지정 시 즉시 동작(L3). ide의 실제 에디터 어댑터(structured StreamPort +
-    onConfirm 모달 + messages 시드 주입)는 repo 밖 surface 책임 — 러너는 StdoutStream
-    폴백으로 헤드리스 스모크만 가능. daemon의 cron-to-cron 영속 state store(SQLite/파일)
-    는 호스트가 req.base.store + sessionId 재사용으로 소유 — 러너는 단일-task 실행기.
-  promotion_path: |
-    에디터 어댑터(VS Code/Tauri extension)가 structured stream + 모달 onConfirm을 주입하고
-    daemon 스케줄러가 영속 store를 backed하면 L4. 라이브 IDE 세션 + 야간 daemon 런 측정 후.
-notes: '모드 추가는 의도된 drift signal — 6 exhaustive seam(union+ALL_AGENT_MODES / MODE_PRESETS+BUDGET_PRESETS Record / renderPackByMode switch / VALID_MODES / mode-presets 러너 / 72-cell 테스트) 전부 갱신 안 하면 tsc 또는 테스트 실패. 두 "ONLY mode" invariant는 집합 멤버십으로 확장(reviewer-backed={ide,interactive}, branch-only={ci-bot,daemon}). 러너는 sibling mode-preset import 금지(assemble 경유).'
+deliberate_hold: null
+notes: '모드 추가는 의도된 drift signal — 6 exhaustive seam(union+ALL_AGENT_MODES / MODE_PRESETS+BUDGET_PRESETS Record / renderPackByMode switch / VALID_MODES / mode-presets 러너 / 72-cell 테스트) 전부 갱신 안 하면 tsc 또는 테스트 실패. 두 "ONLY mode" invariant는 집합 멤버십으로 확장(reviewer-backed={ide,interactive}, branch-only={ci-bot,daemon}). 러너는 sibling mode-preset import 금지(assemble 경유). In-repo L4 stop-point: 외부 host 어댑터(VS Code/Tauri ext + cron 스케줄러)는 별도 surface 트랙.'

@@ -18,6 +18,36 @@
  *
  * Slice boundary: imports `@/agent`, `@/llm`, `@/permission`, `@/shared`,
  * `@/tool`, `@/stream`, and sibling assemble.ts. NO mode-preset sibling import.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * Exterior adapter contract (VS Code / Tauri host, OUT OF REPO):
+ *
+ *   The IDE host (extension or sidecar process) is responsible for SEEDING
+ *   these fields on `req.base` before calling `runMode`. The contract is
+ *   declarative — this runner does NOT construct any of them, only validates
+ *   they are present in their expected slot or falls back to safe defaults.
+ *
+ *     - `req.base.messages` — user prompt seed (chat history if reused).
+ *     - `req.base.stream` — STRUCTURED event channel the editor UI consumes
+ *       (e.g. SSE bridge → webview, MessagePort, Tauri command). Falls back
+ *       to `StdoutStream` ONLY for the headless smoke test — production
+ *       hosts MUST inject their own.
+ *     - `req.base.onConfirm` — reviewer modal hook. The IDE shows a Code
+ *       Action / Quickpick / modal and resolves the boolean. This is the
+ *       single source of human consent for the `ide` cell (reviewer-backed
+ *       permission lever).
+ *     - `req.base.permission` — initial PermissionContext (defaults to
+ *       `{ mode: "default" }`). The host can promote to acceptEdits per
+ *       turn via the standard PermissionContext mutations.
+ *     - `req.base.ideContextProvider` (optional) — see `src/agent/ide-
+ *       context.ts`. The IDE host injects active file + selection +
+ *       diagnostics per turn via this provider.
+ *     - `req.base.sessionId` (optional) — stable id so persistent memory
+ *       (mode lever) survives reloads.
+ *
+ *   Exit code mapping is owned by `exitCodeForOutcome` (../run.ts) — the
+ *   editor host should map non-zero exits to a visible status badge.
+ * ──────────────────────────────────────────────────────────────────────────
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"

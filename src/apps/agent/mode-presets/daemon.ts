@@ -14,6 +14,40 @@
  *
  * Slice boundary: imports `@/agent`, `@/llm`, `@/permission`, `@/shared`,
  * `@/tool`, `@/stream`, and sibling assemble.ts. NO mode-preset sibling import.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * Exterior adapter contract (scheduler / webhook host, OUT OF REPO):
+ *
+ *   Daemon mode is a SINGLE-TASK executor. The host (cron service, GitHub
+ *   webhook responder, queue worker, …) is responsible for the lifetime
+ *   loop AROUND `runMode`. The contract is:
+ *
+ *     - `req.base.messages` — the task payload (e.g. "review PR #42",
+ *       "respond to webhook X").
+ *     - `req.base.stream` — STRUCTURED event channel the host persists for
+ *       later inspection (e.g. JSONL recorder, S3 log sink). Falls back to
+ *       `StdoutStream` ONLY for the headless smoke; production hosts MUST
+ *       inject their own.
+ *     - `req.base.cwd` — per-instance worktree (the sandbox lever). The host
+ *       creates and tears down the worktree; this runner does NOT.
+ *     - `req.base.sessionId` (optional) — stable id so persistent memory
+ *       (mode lever) carries cron-to-cron. Two consecutive `runMode`
+ *       invocations with the same sessionId share memory state.
+ *     - `req.base.store` (optional) — persistent state store the host
+ *       backs (file / SQLite). This runner reads/writes through it via
+ *       the standard mechanisms; ownership is the host's.
+ *     - `req.base.permission` — defaults to `{ mode: "acceptEdits" }`
+ *       since there is no human. Network is gated by the `allowlist`
+ *       lever, git writes are gated by `branch-only`.
+ *
+ *   Idempotency: invoking `runMode` twice with the same `sessionId` is
+ *   safe — the assembler builds a fresh BudgetMeter each call (the meter
+ *   is per-task, not per-session). Persistent state lives on
+ *   `req.base.store`, which the host owns.
+ *
+ *   Exit code mapping is owned by `exitCodeForOutcome` (../run.ts) — the
+ *   host should propagate non-zero exits to its retry / alert policy.
+ * ──────────────────────────────────────────────────────────────────────────
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"
