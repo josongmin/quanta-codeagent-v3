@@ -71,7 +71,18 @@ export {
   type HookHandler,
   type HookUpdatedInput,
 } from "./hooks"
-export { type IdeContextProvider, type IdeSnapshot, renderIdeContext } from "./ide-context"
+export {
+  FileSystemIdeContextProvider,
+  type FileSystemIdeContextProviderOpts,
+  type IdeContextMetadata,
+  type IdeContextMetadataSink,
+  type IdeContextProvider,
+  type IdeContextTier,
+  type IdeSnapshot,
+  renderIdeContext,
+  toMetadataSnapshot,
+  toRelativePath,
+} from "./ide-context"
 export { runAgent } from "./loop"
 export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {
