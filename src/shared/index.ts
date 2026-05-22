@@ -8,7 +8,7 @@ export {
   toError,
 } from "./errors"
 export type { LogLevel } from "./logger"
-export { levelEnabled, LOG_LEVEL_ORDER, logger } from "./logger"
+export { LOG_LEVEL_ORDER, levelEnabled, logger } from "./logger"
 export type { RunContext } from "./run-context"
 export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
 export {
@@ -17,6 +17,7 @@ export {
   runtimeConfig,
   SWEBENCH_CACHE_LEVELS,
 } from "./runtime-config"
+export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
 export type {
   DegradedData,
   LlmUsageData,

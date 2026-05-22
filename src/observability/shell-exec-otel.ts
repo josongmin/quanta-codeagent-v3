@@ -1,4 +1,4 @@
-import type { ShellExecEvent, ShellExecObserver } from "@/tool"
+import type { ShellExecEvent, ShellExecObserver } from "@/shared"
 import type { Metrics } from "./metrics"
 
 /**

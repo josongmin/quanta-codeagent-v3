@@ -42,7 +42,7 @@
 
 import type { LLMPort, Message, StreamEvent, ToolSchema } from "@/llm"
 import { assembleFromEvents } from "@/llm"
-import { GEN_AI_ATTRS, QUANTA_ATTRS } from "@/observability/vocabulary"
+import { GEN_AI_ATTRS, QUANTA_ATTRS } from "@/observability"
 import { QuantaError } from "@/shared"
 import { SIDE_CONVERSATION_PROMPT } from "./prompt"
 

@@ -5,8 +5,6 @@
  * phase2.ts / writer.ts / prompt-sections.ts. Tests assert these values
  * directly so a renumbering is a deliberate, reviewable change.
  */
-import { QUANTA_ATTRS } from "@/observability/vocabulary"
-
 /** Hard cap on user-read MEMORY.md (Phase 2 consolidated). Phase 2 prompt
  *  is instructed to rolling-distill older entries when the assembled
  *  output would exceed this; the writer ALSO enforces a hard rejection
@@ -52,20 +50,15 @@ export const DEFAULT_MEMORY_MODE = "disabled" as const
  *  with permissive mode (caller's responsibility to fix). */
 export const MEMORY_DIR_MODE = 0o700
 
-/** OTel attribute vocabulary additions (ADR-0032 — Wave D). The canonical
- *  keys live in `src/observability/vocabulary.ts`; these aliases re-export
- *  them so the pipeline keeps stable local names while the single source of
- *  truth stays in the vocabulary module (orphan-literal scan invariant). The
- *  direct `vocabulary` import (not the `@/observability` barrel) avoids the
- *  observability↔consolidate circular dep. */
-export const MEMORY_PHASE1_E2E_MS_KEY = QUANTA_ATTRS.memory.phase1.e2eMs
-export const MEMORY_PHASE1_TURNS_KEY = QUANTA_ATTRS.memory.phase1.turns
-export const MEMORY_PHASE1_OUTCOME_KEY = QUANTA_ATTRS.memory.phase1.outcome
-export const MEMORY_PHASE2_E2E_MS_KEY = QUANTA_ATTRS.memory.phase2.e2eMs
-export const MEMORY_PHASE2_MODE_KEY = QUANTA_ATTRS.memory.phase2.mode
-export const MEMORY_PHASE2_STAGE1_COUNT_KEY = QUANTA_ATTRS.memory.phase2.stage1Count
-export const MEMORY_PHASE2_TOKENS_USED_KEY = QUANTA_ATTRS.memory.phase2.tokensUsed
-export const MEMORY_PHASE2_GIT_COMMIT_KEY = QUANTA_ATTRS.memory.phase2.gitCommitSha
-export const MEMORY_PHASE2_BYTES_MEMORY_KEY = QUANTA_ATTRS.memory.phase2.bytesMemory
-export const MEMORY_PHASE2_BYTES_RAW_KEY = QUANTA_ATTRS.memory.phase2.bytesRawMemories
-export const MEMORY_PHASE2_BYTES_SUMMARY_KEY = QUANTA_ATTRS.memory.phase2.bytesMemorySummary
+// Layering note (RFC §3.1): `@/memory` may only depend on `@/storage` +
+// `@/shared`, NOT on `@/observability`. This file previously re-exported
+// `QUANTA_ATTRS.memory.*` telemetry attribute keys (MEMORY_PHASE1_*_KEY /
+// MEMORY_PHASE2_*_KEY) purely as stable local aliases. They had ZERO consumers
+// in src/ or tests/ (the only mention was a comment in phase1.ts), so the alias
+// import was a pure layering violation with no behavioral payload. Removed.
+//
+// The canonical OTel keys still live in `src/observability/vocabulary.ts`
+// (`QUANTA_ATTRS.memory.phase1.*` / `.phase2.*`) and remain the single source
+// of truth; any future telemetry emission belongs in the observability layer
+// (or an emitter wired via `attrs.ts`), which is where it can reference the
+// vocabulary without inverting the dependency direction.

@@ -6,12 +6,14 @@ import {
   createAutoClassifierPort,
   loadMcpTools,
   loadSession,
+  lspDiagnosticsTool,
+  lspNavToolList,
   memoryTools,
   OpenAIEmbedder,
+  type PersonaKind,
   RetryingLLM,
+  resolvePersona,
 } from "@/agent"
-import { lspDiagnosticsTool, lspNavToolList } from "@/agent/lsp-bridge"
-import { type PersonaKind, resolvePersona } from "@/agent/persona"
 import {
   createLLM,
   DEFAULT_MODEL,

@@ -72,7 +72,7 @@
  */
 
 import type { Message } from "@/llm"
-import { isGitRepo, withWorktree } from "@/runtime/worktree"
+import { isGitRepo, withWorktree } from "@/runtime"
 import { ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
 import { runAgent } from "./loop"

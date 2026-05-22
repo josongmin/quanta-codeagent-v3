@@ -15,8 +15,7 @@
  * Behavior is byte-identical to the pre-decompose `src/apps/bench/runner.ts`;
  * this is a pure structural refactor.
  */
-import { buildSystemPrompt, runAgent } from "@/agent"
-import { lspNavToolList } from "@/agent/lsp-bridge"
+import { buildSystemPrompt, lspNavToolList, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"

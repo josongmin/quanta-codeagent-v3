@@ -113,9 +113,10 @@ const collectSkillEntries = async (pluginDir: string): Promise<PluginSkillEntry[
       const st = await stat(skillMd)
       if (st.isFile()) out.push({ name: ent.name, skillMdPath: skillMd })
     } catch {
-      // No SKILL.md inside this dir — not a plugin skill entry. Silent skip
-      // here is intentional: this enumerates *plugin-shipped* skills only;
-      // a foreign dir under skills/ is not an error, just not a skill.
+      // No SKILL.md inside this dir (or it is unreadable) — not a plugin skill
+      // entry. Silent skip here is intentional and documented: this enumerates
+      // *plugin-shipped* skills only, so a foreign dir under skills/ is the
+      // common, expected case, not an error. Logging it would be per-scan noise.
     }
   }
   out.sort((a, b) => a.name.localeCompare(b.name))

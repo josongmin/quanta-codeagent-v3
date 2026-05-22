@@ -62,6 +62,7 @@ export {
 } from "./hooks"
 export { type IdeContextProvider, type IdeSnapshot, renderIdeContext } from "./ide-context"
 export { runAgent } from "./loop"
+export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {
   loadMcpTools,
   mcpToolName,
@@ -98,6 +99,7 @@ export {
 export { memoryTools } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
 export { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
+export { type PersonaKind, resolvePersona } from "./persona"
 export { isMutatingToolBlockedInPlan } from "./plan"
 export type { PlanExitDecision, PlanExitOutcome } from "./plan-exit"
 export {

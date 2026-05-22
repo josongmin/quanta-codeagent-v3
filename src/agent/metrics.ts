@@ -1,5 +1,4 @@
-import type { Metrics } from "@/observability"
-import { GEN_AI_ATTRS } from "@/observability/vocabulary"
+import { GEN_AI_ATTRS, type Metrics } from "@/observability"
 import type { PersistStats, RecallStats } from "./memory-stats"
 
 /**

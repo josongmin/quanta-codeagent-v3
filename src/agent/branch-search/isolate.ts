@@ -23,7 +23,7 @@
 import { cpSync, existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runShell } from "@/runtime/shell"
+import { runShell } from "@/runtime"
 import type { Isolator } from "./types"
 
 export interface TmpdirIsolatorOptions {

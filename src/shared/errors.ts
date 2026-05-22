@@ -1,3 +1,21 @@
+/**
+ * ── Project error-handling convention ──────────────────────────────────────
+ *
+ * THROW (via the {@link QuantaError} hierarchy below) for exceptional /
+ * programmer errors and unrecoverable faults — the agent, LLM and permission
+ * slices follow this. RETURN `Result<T, E>` (`src/shared/types`) for EXPECTED
+ * domain failures — tool-execution outcomes and input validation — which is
+ * why the tool slice is Result-shaped. The split is by design; do not
+ * mass-convert one to the other.
+ *
+ * Classify an external / SDK error EXACTLY ONCE, at the boundary
+ * (e.g. {@link LLMError.fromSdkError}), into a discriminated `.kind`.
+ * Downstream policy code branches on `.kind` (and `.statusCode`) — it must
+ * NEVER re-parse `error.message` to recover meaning the boundary already
+ * captured.
+ * ───────────────────────────────────────────────────────────────────────────
+ */
+
 /** Base error carrying a stable machine-readable code. */
 export class QuantaError extends Error {
   readonly code: string

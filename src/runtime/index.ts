@@ -9,5 +9,6 @@ export {
 } from "./sandbox"
 export { runShell } from "./shell"
 export type { RunShellEvent, ShellOptions, ShellResult } from "./types"
+export { isGitRepo, withWorktree } from "./worktree"
 export type { PersistentWorktree } from "./worktree-fork"
 export { createPersistentWorktree, removeWorktree, WorktreeForkError } from "./worktree-fork"

@@ -64,9 +64,20 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
  *  outcomes are silent — a missing file is the normal "not a skill" case.
  *  `@/skill` is a leaf slice (no `@/observability` import allowed by Biome
  *  boundaries) so `console.warn` is the only sanctioned sink here. */
-// biome-ignore lint/suspicious/noConsole: leaf slice cannot import a structured logger
 const tooLargeWarning = (path: string, size: number): void => {
+  // biome-ignore lint/suspicious/noConsole: leaf slice cannot import a structured logger
   console.warn(`[skill] skipped ${path}: ${size} bytes exceeds the 30 MB cap`)
+}
+
+/** Warn when a candidate file passed the size check (so it exists & is in
+ *  range) yet the subsequent read failed — a genuine permissions / transient
+ *  IO error rather than the normal "no SKILL.md, not a skill" case. Discovery
+ *  still continues past the entry; this only makes the swallow observable.
+ *  Same leaf-slice constraint as {@link tooLargeWarning}: `console.warn` is the
+ *  only sanctioned sink. */
+const unreadableWarning = (path: string, reason: string): void => {
+  // biome-ignore lint/suspicious/noConsole: leaf slice cannot import a structured logger
+  console.warn(`[skill] skipped ${path}: unreadable (${reason})`)
 }
 
 /** Read the directory-form skill (`<dir>/<name>/SKILL.md`), or null if absent. */
@@ -80,8 +91,12 @@ const readNestedSkill = async (dir: string, name: string): Promise<Skill | null>
   try {
     const raw = await readFile(skillFile, "utf8")
     return toSkill(name, skillFile, raw)
-  } catch {
-    // No SKILL.md in this dir — not a skill dir, skip.
+  } catch (e) {
+    // `checkSkillSize` already stat-confirmed the file exists & is in range, so
+    // reaching here means the read itself failed (permissions / transient IO),
+    // NOT the normal "no SKILL.md, not a skill dir" case. Make it observable
+    // then continue discovery past this entry.
+    unreadableWarning(skillFile, e instanceof Error ? e.message : String(e))
     return null
   }
 }
@@ -99,8 +114,11 @@ const readFlatSkill = async (dir: string, fileName: string): Promise<Skill | nul
   try {
     const raw = await readFile(file, "utf8")
     return toSkill(id, file, raw)
-  } catch {
-    // Unreadable file — skip.
+  } catch (e) {
+    // `checkSkillSize` already stat-confirmed the file; a failure here is a
+    // genuine read error (permissions / transient IO), not "not a skill".
+    // Make it observable then continue discovery past this entry.
+    unreadableWarning(file, e instanceof Error ? e.message : String(e))
     return null
   }
 }
@@ -126,6 +144,9 @@ export const discoverSkills = async (dir: string): Promise<Skill[]> => {
   try {
     entries = await readdir(dir, { withFileTypes: true })
   } catch {
+    // Missing/unreadable skills root is the normal "user has no skills here"
+    // case (fired for every absent search path at session start). Logging it
+    // would be per-startup noise, so we stay silent by design and yield [].
     return []
   }
 

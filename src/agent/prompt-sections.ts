@@ -1,5 +1,5 @@
 import type { SystemBlock } from "@/llm"
-import { MEMORY_SUMMARY_MAX_BYTES } from "@/memory/consolidate/constants"
+import { MEMORY_SUMMARY_MAX_BYTES } from "@/memory"
 
 /**
  * Sectioned system prompt assembly.

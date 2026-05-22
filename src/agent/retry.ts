@@ -84,10 +84,38 @@ const PTL_MARKERS = [
   "too many tokens",
 ] as const
 
+/** {@link LLMErrorKind} values (from `@/shared`, the boundary classifier) that
+ *  unambiguously map to "transient, safe to retry". */
+const RETRYABLE_KINDS: ReadonlySet<string> = new Set([
+  "overloaded",
+  "rate_limit",
+  "server_error",
+  "network",
+])
+
+/** {@link LLMErrorKind} values that unambiguously map to "never retry". */
+const FATAL_KINDS: ReadonlySet<string> = new Set([
+  "auth",
+  "bad_request",
+  "not_found",
+  "stream_corrupt",
+  "aborted",
+])
+
 /** True iff `e` looks like a transient LLM failure worth retrying. Only
- *  {@link LLMError} is ever retryable; unknown error types are treated fatal. */
+ *  {@link LLMError} is ever retryable; unknown error types are treated fatal.
+ *
+ *  Branches on the boundary-assigned `.kind` discriminator first: when the
+ *  classifier (`LLMError.fromSdkError`) tagged a definitive kind, that decides
+ *  it without re-sniffing the message. Only when `.kind` is `"unknown"` (no
+ *  structured signal was available — e.g. a bare `new LLMError(msg)`) do we
+ *  fall back to the legacy message-marker scan, preserving prior behavior
+ *  byte-for-byte for that path. */
 export const isRetryable = (e: unknown): boolean => {
   if (!(e instanceof LLMError)) return false
+  if (RETRYABLE_KINDS.has(e.kind)) return true
+  if (FATAL_KINDS.has(e.kind)) return false
+  // e.kind === "unknown": no boundary classification — fall back to markers.
   const msg = e.message.toLowerCase()
   if (FATAL_MARKERS.some((m) => msg.includes(m))) return false
   return RETRYABLE_MARKERS.some((m) => msg.includes(m))
@@ -95,7 +123,14 @@ export const isRetryable = (e: unknown): boolean => {
 
 /** True iff `e`'s message indicates the prompt exceeded the model's context
  *  window. Checked BEFORE {@link isRetryable} (PTL must drive compaction, and
- *  some providers phrase it with a 400 that would otherwise read as fatal). */
+ *  some providers phrase it with a 400 that would otherwise read as fatal).
+ *
+ *  NOTE: this one stays message-based deliberately. The {@link LLMErrorKind}
+ *  vocabulary has no `prompt_too_long` member — providers surface PTL as a
+ *  400, which the boundary classifies as `bad_request` (indistinguishable from
+ *  other client errors at the status level). The specific "context window"
+ *  wording is the only available signal, so the marker scan is the correct
+ *  (not legacy-fallback) mechanism here until a dedicated kind exists. */
 export const isPromptTooLong = (e: unknown): boolean => {
   if (!(e instanceof LLMError)) return false
   const msg = e.message.toLowerCase()

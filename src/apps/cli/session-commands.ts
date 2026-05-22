@@ -1,6 +1,5 @@
 import type { Message } from "@/llm"
-import { createPersistentWorktree, removeWorktree, WorktreeForkError } from "@/runtime"
-import { isGitRepo } from "@/runtime/worktree"
+import { createPersistentWorktree, isGitRepo, removeWorktree, WorktreeForkError } from "@/runtime"
 import {
   archivedFilePath,
   archiveSession,

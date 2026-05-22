@@ -1,5 +1,9 @@
 export { InMemoryStore } from "./adapters/in-memory"
 export { SqliteStore } from "./adapters/sqlite"
+/** Phase-2 consolidated `memory_summary.md` hard byte cap. Re-exported through
+ *  the `@/memory` barrel so consumers (e.g. `@/agent/prompt-sections`) need not
+ *  reach into the `consolidate/constants` internal path. */
+export { MEMORY_SUMMARY_MAX_BYTES } from "./consolidate/constants"
 export {
   DEFAULT_DUPE_THRESHOLDS,
   type DupeThresholds,

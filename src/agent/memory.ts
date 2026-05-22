@@ -2,6 +2,7 @@ import type { LLMPort, Message } from "@/llm"
 import {
   EMBED_DIM,
   type EmbedderPort,
+  EVICTION_DECAY,
   type EvictionCaps,
   findNearDuplicates,
   type MemoryEntry,
@@ -11,7 +12,6 @@ import {
   planEviction,
   scoreEntry,
 } from "@/memory"
-import { EVICTION_DECAY } from "@/memory/eviction"
 import { arbitrateConsolidation, type ConsolidationOp } from "./memory-consolidate"
 import { distillSession, finalAssistantText } from "./memory-distill"
 import { emptyPersistStats, type PersistStats, type RecallStats } from "./memory-stats"

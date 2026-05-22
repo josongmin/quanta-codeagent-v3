@@ -6,7 +6,7 @@
  * `combineVerifiers` runs a tier in PARALLEL and concatenates.
  */
 
-import { runShell } from "@/runtime/shell"
+import { runShell } from "@/runtime"
 import type { Verifier, VerifierSignal } from "./types"
 
 type Clock = () => number

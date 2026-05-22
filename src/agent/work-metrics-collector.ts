@@ -28,7 +28,7 @@ import {
   type FileDiffStat,
   parseNumstat,
   type WorkMetrics,
-} from "@/observability/work-metrics"
+} from "@/observability"
 
 /** Sink the loop emits the per-turn {@link WorkMetrics} into when configured.
  *  Absent ⇒ no collector is instantiated, no emit (byte-identical). The
