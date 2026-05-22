@@ -7,9 +7,12 @@
  * No imports from `@/apps`, `@/llm`, `@/tool`.
  */
 
+export { clampDials } from "./clamp"
+export { assertModeMatrix, narrowMode } from "./narrow"
+export { BUDGET_PRESETS, MODE_PRESETS } from "./presets"
 export {
-  ALL_AGENT_MODES,
   type AgentMode,
+  ALL_AGENT_MODES,
   type ExternalDepsLever,
   type GitWriteLever,
   LEVER_FIELDS,
@@ -26,7 +29,3 @@ export {
   type TerminationLever,
   type ToolSurfaceLever,
 } from "./types"
-
-export { BUDGET_PRESETS, MODE_PRESETS } from "./presets"
-export { assertModeMatrix, narrowMode } from "./narrow"
-export { clampDials } from "./clamp"

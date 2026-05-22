@@ -14,8 +14,11 @@
  * `permission.kind === "reviewer-backed"`).
  */
 
-/** Closed run-mode union (4 surfaces). */
-export type AgentMode = "interactive" | "headless" | "batch" | "ci-bot"
+/** Closed run-mode union (6 surfaces). `ide` + `daemon` (ADR-0092, C1) extend
+ *  the original 4: `ide` = editor-embedded (structured event output + IDE
+ *  context provider + reviewer-modal); `daemon` = long-running scheduled
+ *  service (persistent state across runs + per-task worktree + allowlist). */
+export type AgentMode = "interactive" | "headless" | "batch" | "ci-bot" | "ide" | "daemon"
 
 // ─────────────────────────────────────────────────────────────────────────
 // Lever 1 — permission: who decides borderline actions
@@ -36,10 +39,7 @@ export type TerminationLever =
 // ─────────────────────────────────────────────────────────────────────────
 // Lever 3 — sandbox: where mutations land
 // ─────────────────────────────────────────────────────────────────────────
-export type SandboxLever =
-  | { kind: "user-cwd" }
-  | { kind: "per-instance" }
-  | { kind: "branch-only" }
+export type SandboxLever = { kind: "user-cwd" } | { kind: "per-instance" } | { kind: "branch-only" }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Lever 4 — output: shape of the run product
@@ -94,10 +94,7 @@ export type ObservationLever =
 // ─────────────────────────────────────────────────────────────────────────
 // Lever 10 — network: outbound access
 // ─────────────────────────────────────────────────────────────────────────
-export type NetworkLever =
-  | { kind: "open" }
-  | { kind: "allowlist" }
-  | { kind: "denied" }
+export type NetworkLever = { kind: "open" } | { kind: "allowlist" } | { kind: "denied" }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Lever 11 — gitWrite: who/what is allowed to mutate the working repo
@@ -165,14 +162,17 @@ export type LeverField = (typeof LEVER_FIELDS)[number]
 // ─────────────────────────────────────────────────────────────────────────
 type ModePolicyLeverKey = Exclude<keyof ModePolicy, "mode">
 type Assert<T extends true> = T
-type _LeverFieldsCoverPolicy = Assert<
-  ModePolicyLeverKey extends LeverField ? true : false
->
-type _PolicyCoversLeverFields = Assert<
-  LeverField extends ModePolicyLeverKey ? true : false
->
+type _LeverFieldsCoverPolicy = Assert<ModePolicyLeverKey extends LeverField ? true : false>
+type _PolicyCoversLeverFields = Assert<LeverField extends ModePolicyLeverKey ? true : false>
 // Reference the aliases so `noUnusedLocals`-style lint keeps them live.
 export type _LeverDriftGuard = _LeverFieldsCoverPolicy | _PolicyCoversLeverFields
 
 /** Enumerate every mode — single source of truth for matrix tests. */
-export const ALL_AGENT_MODES = ["interactive", "headless", "batch", "ci-bot"] as const satisfies readonly AgentMode[]
+export const ALL_AGENT_MODES = [
+  "interactive",
+  "headless",
+  "batch",
+  "ci-bot",
+  "ide",
+  "daemon",
+] as const satisfies readonly AgentMode[]

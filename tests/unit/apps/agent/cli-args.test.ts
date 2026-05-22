@@ -6,11 +6,7 @@
  * enum validation, help short-circuit). No heuristic / threshold tests.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  AgentArgsError,
-  formatHelp,
-  parseAgentArgs,
-} from "@/../src/apps/agent/cli-args"
+import { AgentArgsError, formatHelp, parseAgentArgs } from "@/../src/apps/agent/cli-args"
 
 describe("parseAgentArgs — happy paths", () => {
   test("valid --mode interactive parses", () => {
@@ -100,14 +96,13 @@ describe("parseAgentArgs — error paths", () => {
   })
 
   test("unknown flag throws AgentArgsError", () => {
-    expect(() => parseAgentArgs(["--mode", "interactive", "--foo"]))
-      .toThrow(/unknown flag '--foo'/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--foo"])).toThrow(/unknown flag '--foo'/)
   })
 
   test("--corpus without --mode batch throws", () => {
-    expect(() =>
-      parseAgentArgs(["--mode", "interactive", "--corpus", "/x"]),
-    ).toThrow(/--corpus is only valid with --mode batch/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--corpus", "/x"])).toThrow(
+      /--corpus is only valid with --mode batch/,
+    )
   })
 
   test("--pr without --mode ci-bot throws", () => {
@@ -123,21 +118,21 @@ describe("parseAgentArgs — error paths", () => {
   })
 
   test("non-integer dial throws", () => {
-    expect(() =>
-      parseAgentArgs(["--mode", "interactive", "--max-turns", "abc"]),
-    ).toThrow(/expects an integer/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--max-turns", "abc"])).toThrow(
+      /expects an integer/,
+    )
   })
 
   test("dial value with non-numeric suffix throws (not silently parsed)", () => {
-    expect(() =>
-      parseAgentArgs(["--mode", "interactive", "--max-turns", "12abc"]),
-    ).toThrow(/expects an integer/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--max-turns", "12abc"])).toThrow(
+      /expects an integer/,
+    )
   })
 
   test("negative dial throws", () => {
-    expect(() =>
-      parseAgentArgs(["--mode", "interactive", "--max-turns", "-1"]),
-    ).toThrow(/must be >= 0/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--max-turns", "-1"])).toThrow(
+      /must be >= 0/,
+    )
   })
 
   test("invalid --mode enum throws", () => {
@@ -145,26 +140,21 @@ describe("parseAgentArgs — error paths", () => {
   })
 
   test("invalid --provider enum throws", () => {
-    expect(() =>
-      parseAgentArgs(["--mode", "interactive", "--provider", "google"]),
-    ).toThrow(/--provider must be/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--provider", "google"])).toThrow(
+      /--provider must be/,
+    )
   })
 
   test("invalid --exhaustion enum throws", () => {
-    expect(() =>
-      parseAgentArgs([
-        "--mode",
-        "interactive",
-        "--exhaustion",
-        "panic",
-      ]),
-    ).toThrow(/--exhaustion must be/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--exhaustion", "panic"])).toThrow(
+      /--exhaustion must be/,
+    )
   })
 
   test("flag value that looks like another flag is rejected", () => {
-    expect(() =>
-      parseAgentArgs(["--mode", "interactive", "--model", "--provider"]),
-    ).toThrow(/flag '--model' requires a value/)
+    expect(() => parseAgentArgs(["--mode", "interactive", "--model", "--provider"])).toThrow(
+      /flag '--model' requires a value/,
+    )
   })
 
   test("flag missing its value at end of argv throws", () => {

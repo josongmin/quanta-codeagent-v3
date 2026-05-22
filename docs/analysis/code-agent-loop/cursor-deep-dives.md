@@ -271,4 +271,10 @@ honorable mention: `BackgroundComposerService(114)` babysit 백엔드 (follow-up
 | **eval schema additive** | EvalTracking §7.3 | 0-1 | storage/schema.ts에 Metric{key,value,unit,step}+EvalRunStatus+params+token/cost (optional) |
 | **declarative automation** | Automations §7.4 | 1 | cron+manual trigger → agentic_filter → agent spawn → run record + per-automation memory |
 
-**보류**: DashboardService policy slice (team/global/repo/user 정책 resolution) — socket error, 다음 라운드 재시도. team 배포 기능 도입 시 reference.
+### 7.6 DashboardService policy slice — **Tier 3 reference-only** ✅ (재시도 완료)
+- typeName @32415490. policy 관련 ~25 메서드 검증: `GetTeamRules`/`GetTeamCommands`/`GetGlobalCommands(surface)`/`GetRepoSlashCommands(repo_url,git_ref)`/`GetBackgroundComposerSlashCommands(bc_id)`/`GetTeamHooks`/`GetManagedSkills`/`ResolvePluginsByRef`/`GetEffectiveUserPlugins`/`GetCloudAgentPluginsSnapshot`/`InstallUserPlugin`/`InstallTeamPlugin` + Bugbot rule layer(`GetBugbot{TeamRules,LearnedRules,ManualRepositoryRules,Mode,Settings}`).
+- ★ **핵심 구조 발견**: **resolution read는 `team_id`/`user_id`를 안 받음** — 신원은 auth 세션에서 추론, **merge는 서버측**, 클라는 pre-resolved 리스트 수신. `team_id`는 write/admin RPC에만.
+- **effective-set = provenance flag**: `EffectivePlugin{plugin, is_team_required, is_enabled, has_team_configured_variables, configured_variables}` — flat merged list 대신 **각 항목에 "어느 layer가 강제/소유하나" 태그**. precedence = `required(team) > user-toggle > default`. `is_required` 비트가 Rule/BugbotRule/EffectivePlugin/install_mode에 반복 = 보편적 mandatory-layer 비트.
+- **Plugin = bundle**: marketplace Plugin이 `skills[]/subagents[]/hooks[]/rules[]/commands[]` 함께 carry — plugin 단위 resolution 후 확장. 깔끔한 distribution unit.
+- **directory-group scoping**: required-policy가 sub-group(`directory_group_ids`)별, flat team-wide 아님 (monorepo/sub-org).
+- ★ **흡수 (Tier 3 — team 기능 도입 시 reference)**: quanta는 team/global/repo/user policy layering·서버 신원 없음. 이식 가능 패턴: ①**서버측 merge + thin client**(read에 tenant id 없음, 신원=auth, agent loop 밖에서 resolve — client precedence 버그 회피) ②**`Effective<T>` envelope w/ source_layer + is_locked + provenance** ③`is_required` 보편 mandatory 비트 ④directory-group scoping ⑤Plugin-as-bundle distribution unit. **흡수 X**: Bugbot GitHub-coupled layer(installation_id/repo_node_id), marketplace CRUD, surface enum(CLASSIC/GLASS/CLI). team 배포 기능 도입 시 reference.

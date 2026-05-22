@@ -149,9 +149,9 @@ const branchOnlyGuardedRunner = (
 }
 
 /** Adapt an `AssembleRequestSeams["gitRun"]` closure into a `GitRunner`. */
-const gitRunnerFromSeam = (
-  seam: NonNullable<AssembleRequestSeams["gitRun"]>,
-): GitRunner => ({ run: (args, cwd) => seam(args, cwd) })
+const gitRunnerFromSeam = (seam: NonNullable<AssembleRequestSeams["gitRun"]>): GitRunner => ({
+  run: (args, cwd) => seam(args, cwd),
+})
 
 /** Build the ci-bot wiring bundle: a `ToolRegistry` containing the git tools
  *  (wrapped in the branch-only guard) plus the `gh` runner closure. Exported

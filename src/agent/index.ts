@@ -1,4 +1,23 @@
 export { createAutoClassifierPort } from "./auto-classifier"
+export type { BranchSearchConfig } from "./branch-search"
+// RFC may-22-unified-agent-runtime — run-mode + budget slices.
+export {
+  asDials,
+  type BudgetCaps,
+  type BudgetClampEvent,
+  type BudgetDials,
+  type BudgetEvent,
+  type BudgetExhaustedEvent,
+  type BudgetExhaustion,
+  type BudgetExhaustionPolicy,
+  BudgetMeter,
+  type BudgetMeterOptions,
+  type BudgetTickEvent,
+  type BudgetUsage,
+  isBudgetEvent,
+  makeClampEvent,
+  type TickKind,
+} from "./budget"
 export { compactIfNeeded, estimateTokens, findBoundary } from "./compaction"
 export {
   type BreakerVerdict,
@@ -15,7 +34,6 @@ export {
   normalizeConfirm,
   READONLY_DENY_STEER_NOTE,
 } from "./confirm-decision"
-export { type IdeSnapshot, renderIdeContext } from "./ide-context"
 export {
   appendSummary,
   archivedTokens,
@@ -42,6 +60,7 @@ export {
   type HookEventType,
   type HookHandler,
 } from "./hooks"
+export { type IdeSnapshot, renderIdeContext } from "./ide-context"
 export { runAgent } from "./loop"
 export {
   loadMcpTools,
@@ -97,6 +116,30 @@ export {
   renderRepoRulesBlock,
 } from "./repo-rules"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
+export {
+  type AgentMode as RunMode,
+  ALL_AGENT_MODES,
+  assertModeMatrix,
+  BUDGET_PRESETS,
+  clampDials,
+  type ExternalDepsLever,
+  type GitWriteLever,
+  LEVER_FIELDS,
+  type LeverField,
+  type MemoryLever,
+  MODE_PRESETS,
+  type ModePolicy,
+  type NetworkLever,
+  narrowMode,
+  type ObservationLever,
+  type OutputLever,
+  type PermissionLever,
+  type PromptPackLever,
+  type SandboxLever,
+  type SecretsLever,
+  type TerminationLever,
+  type ToolSurfaceLever,
+} from "./run-mode"
 export {
   assertSideConversationEffort,
   DEFAULT_SIDE_CONVERSATION_INPUT_TOKEN_BUDGET,
@@ -157,48 +200,6 @@ export type {
   StopReason,
 } from "./types"
 export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
-// RFC may-22-unified-agent-runtime — run-mode + budget slices.
-export {
-  asDials,
-  type BudgetCaps,
-  type BudgetClampEvent,
-  type BudgetDials,
-  type BudgetEvent,
-  type BudgetExhaustedEvent,
-  type BudgetExhaustion,
-  type BudgetExhaustionPolicy,
-  BudgetMeter,
-  type BudgetMeterOptions,
-  type BudgetTickEvent,
-  type BudgetUsage,
-  isBudgetEvent,
-  makeClampEvent,
-  type TickKind,
-} from "./budget"
-export {
-  ALL_AGENT_MODES,
-  type AgentMode as RunMode,
-  assertModeMatrix,
-  BUDGET_PRESETS,
-  type ExternalDepsLever,
-  type GitWriteLever,
-  LEVER_FIELDS,
-  type LeverField,
-  type MemoryLever,
-  MODE_PRESETS,
-  type ModePolicy,
-  narrowMode,
-  type NetworkLever,
-  type ObservationLever,
-  type OutputLever,
-  type PermissionLever,
-  type PromptPackLever,
-  type SandboxLever,
-  type SecretsLever,
-  type TerminationLever,
-  type ToolSurfaceLever,
-  clampDials,
-} from "./run-mode"
 export {
   type Blocker,
   type BlockerSurface,

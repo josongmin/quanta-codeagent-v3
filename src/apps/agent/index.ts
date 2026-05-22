@@ -112,6 +112,8 @@ export interface AssembleRequestPartial {
   prompt?: string
   corpus?: string
   instance?: string
+  predictions?: string
+  report?: string
   pr?: string
   /** ci-bot only: stub the PR comment write at the runner edge. */
   ciBotDryRun?: boolean
@@ -129,6 +131,8 @@ export const toAssembleRequest = (args: AgentArgs): AssembleRequestPartial => {
   if (args.prompt !== undefined) out.prompt = args.prompt
   if (args.corpus !== undefined) out.corpus = args.corpus
   if (args.instance !== undefined) out.instance = args.instance
+  if (args.predictions !== undefined) out.predictions = args.predictions
+  if (args.report !== undefined) out.report = args.report
   if (args.pr !== undefined) out.pr = args.pr
   if (args.ciBotDryRun) out.ciBotDryRun = true
   return out
@@ -147,9 +151,7 @@ export interface MainDeps {
 }
 
 /** Default loader — dynamic import keeps `index.ts` decoupled from preset shape. */
-const defaultLoadDispatcher = async (
-  mode: AssembleRequest["mode"],
-): Promise<ModeDispatcher> => {
+const defaultLoadDispatcher = async (mode: AssembleRequest["mode"]): Promise<ModeDispatcher> => {
   const mod = (await import(`./mode-presets/${mode}`)) as ModeDispatcher
   return mod
 }
@@ -215,7 +217,12 @@ const liftToAssembleRequest = (p: AssembleRequestPartial): AssembleRequest => {
   if (p.mode === "headless" && p.prompt !== undefined) {
     out.headless = { prompt: p.prompt }
   } else if (p.mode === "batch" && p.corpus !== undefined) {
-    out.batch = { corpus: p.corpus, ...(p.instance !== undefined ? { instance: p.instance } : {}) }
+    out.batch = {
+      corpus: p.corpus,
+      ...(p.instance !== undefined ? { instance: p.instance } : {}),
+      ...(p.predictions !== undefined ? { predictionsPath: p.predictions } : {}),
+      ...(p.report !== undefined ? { reportPath: p.report } : {}),
+    }
   } else if (p.mode === "ci-bot" && p.pr !== undefined) {
     out.ciBot = { pr: p.pr, ...(p.ciBotDryRun ? { dryRun: true } : {}) }
   }

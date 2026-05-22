@@ -12,10 +12,9 @@
  */
 
 import { logger } from "@/shared"
-
+import type { BudgetClampEvent } from "../budget/events"
 import { makeClampEvent } from "../budget/events"
 import type { BudgetCaps, BudgetDials } from "../budget/types"
-import type { BudgetClampEvent } from "../budget/events"
 
 /** Field names common to `BudgetDials` and `BudgetCaps`. */
 const DIAL_FIELDS = [

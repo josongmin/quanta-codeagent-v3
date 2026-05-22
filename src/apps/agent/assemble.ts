@@ -95,7 +95,10 @@ export interface AssembleRequestSeams {
   /** Inner git runner for ci-bot (BEFORE the branch-only guard wraps it).
    *  Default = the real `defaultGitRunner`. Tests inject a fake to assert the
    *  branch-only guard rejects protected-branch writes without touching git. */
-  gitRun?: (args: readonly string[], cwd: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
+  gitRun?: (
+    args: readonly string[],
+    cwd: string,
+  ) => Promise<{ stdout: string; stderr: string; exitCode: number }>
 }
 
 /** Operator input for assemble: mode + dials override + base AgentConfig core

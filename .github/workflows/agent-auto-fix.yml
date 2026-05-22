@@ -47,4 +47,9 @@ jobs:
       - name: install deps
         run: bun install --frozen-lockfile
       - name: agent auto-fix
-        run: bun run agent:ci-bot --pr ${{ github.event.pull_request.number }} --action auto-fix
+        # NOTE: a distinct "auto-fix" behavior (commit fixes to the PR branch)
+        # is not yet implemented — an unrecognized flag is not parsed and would
+        # exit 64. Until the review/auto-fix split lands, ci-bot performs a
+        # review pass (read PR + post summary). gitWrite=branch-only already
+        # permits branch-scoped commits when that behavior is added.
+        run: bun run agent:ci-bot --pr ${{ github.event.pull_request.number }}

@@ -18,7 +18,7 @@ import {
   ALL_AGENT_MODES,
   assertModeMatrix,
   BUDGET_PRESETS,
-  BudgetMeter,
+  type BudgetMeter,
   LEVER_FIELDS,
   MODE_PRESETS,
   type ModePolicy,
@@ -55,8 +55,8 @@ describe("invariants §5.1 — matrix runtime defense", () => {
 // ─── §5.3 — wiring drift detectors ─────────────────────────────────────────
 
 describe("invariants §5.3 — every lever filled across every mode", () => {
-  test("48 cells (4 modes × 12 levers) all have a non-empty kind discriminator", () => {
-    expect(ALL_AGENT_MODES.length).toBe(4)
+  test("72 cells (6 modes × 12 levers) all have a non-empty kind discriminator", () => {
+    expect(ALL_AGENT_MODES.length).toBe(6)
     expect(LEVER_FIELDS.length).toBe(12)
     let cells = 0
     for (const mode of ALL_AGENT_MODES) {
@@ -71,7 +71,7 @@ describe("invariants §5.3 — every lever filled across every mode", () => {
         cells++
       }
     }
-    expect(cells).toBe(48)
+    expect(cells).toBe(72)
   })
 
   test("BUDGET_PRESETS covers every mode (no missing default)", () => {
@@ -124,18 +124,25 @@ describe("invariants §5.4 — preset semantics that must not flip", () => {
     expect(policy.externalDeps.kind).toBe("hermetic")
   })
 
-  test("interactive mode is the ONLY mode with reviewer-backed permission", () => {
+  test("reviewer-backed permission is exactly the human-near modes (interactive + ide)", () => {
+    // ADR-0092 (C1): `ide` joins `interactive` as human-near — both gate
+    // borderline actions through a reviewer (terminal prompt vs IDE modal).
+    // The remaining modes are auto/headless. Broadened from the original
+    // "interactive ONLY" invariant when `ide` landed.
     const reviewerModes = ALL_AGENT_MODES.filter(
       (m) => MODE_PRESETS[m].permission.kind === "reviewer-backed",
     )
-    expect(reviewerModes).toEqual(["interactive"])
+    expect(reviewerModes.sort()).toEqual(["ide", "interactive"])
   })
 
-  test("ci-bot is the ONLY mode with branch-only gitWrite (PR posture)", () => {
+  test("branch-only gitWrite is exactly the PR-posture modes (ci-bot + daemon)", () => {
+    // ADR-0092 (C1): `daemon` joins `ci-bot` on branch-only git — both write
+    // changes to a side branch, never main/master (no human at the keyboard
+    // to push). Broadened from the original "ci-bot ONLY" invariant.
     const branchOnlyModes = ALL_AGENT_MODES.filter(
       (m) => MODE_PRESETS[m].gitWrite.kind === "branch-only",
     )
-    expect(branchOnlyModes).toEqual(["ci-bot"])
+    expect(branchOnlyModes.sort()).toEqual(["ci-bot", "daemon"])
   })
 
   test("undefined budgetMeter ⇒ AgentConfig is byte-identical to a non-meter config", () => {

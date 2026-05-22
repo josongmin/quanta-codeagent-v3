@@ -78,12 +78,56 @@ const CI_BOT: ModePolicy = {
   secrets: { kind: "scoped" },
 }
 
-/** The full 4×12 matrix. Indexing is `MODE_PRESETS[mode]`. */
+/** IDE (ADR-0092, C1) — editor-embedded surface (VS Code / Tauri). Distinct
+ *  from `interactive` on OUTPUT (`structured` events the IDE UI parses, not
+ *  `stdout-chat`) + `full-trajectory` observation. Otherwise human-near like
+ *  interactive (reviewer-backed via an IDE modal, user-cwd, host deps + full
+ *  LSP tools, persistent memory). */
+const IDE: ModePolicy = {
+  mode: "ide",
+  permission: { kind: "reviewer-backed" },
+  termination: { kind: "user-stop" },
+  sandbox: { kind: "user-cwd" },
+  output: { kind: "structured" },
+  externalDeps: { kind: "host" },
+  toolSurface: { kind: "full" },
+  promptPack: { kind: "assistant" },
+  memory: { kind: "persistent" },
+  observation: { kind: "full-trajectory" },
+  network: { kind: "open" },
+  gitWrite: { kind: "free" },
+  secrets: { kind: "host-env" },
+}
+
+/** DAEMON (ADR-0092, C1) — long-running scheduled service (nightly PR review,
+ *  webhook responder). Distinct from `headless` (one-shot) on memory
+ *  (`persistent` cron-to-cron) + sandbox (`per-instance` worktree) +
+ *  termination (`diff-ready`) + network (`allowlist`) + gitWrite
+ *  (`branch-only`). No human ⇒ auto/acceptEdits within the allowlist. */
+const DAEMON: ModePolicy = {
+  mode: "daemon",
+  permission: { kind: "auto", policy: "acceptEdits" },
+  termination: { kind: "diff-ready" },
+  sandbox: { kind: "per-instance" },
+  output: { kind: "structured" },
+  externalDeps: { kind: "hermetic-with-overrides" },
+  toolSurface: { kind: "headless-safe" },
+  promptPack: { kind: "task-runner" },
+  memory: { kind: "persistent" },
+  observation: { kind: "full-trajectory" },
+  network: { kind: "allowlist" },
+  gitWrite: { kind: "branch-only" },
+  secrets: { kind: "scoped" },
+}
+
+/** The full 6×12 matrix. Indexing is `MODE_PRESETS[mode]`. */
 export const MODE_PRESETS: Record<AgentMode, ModePolicy> = {
   interactive: INTERACTIVE,
   headless: HEADLESS,
   batch: BATCH,
   "ci-bot": CI_BOT,
+  ide: IDE,
+  daemon: DAEMON,
 }
 
 /**
@@ -137,9 +181,31 @@ const CI_BOT_BUDGET: BudgetDials = {
   maxConsecutiveFailures: 3,
 }
 
+/** IDE: human-paced like interactive — generous turns, no wall-clock cap. */
+const IDE_BUDGET: BudgetDials = {
+  maxTurns: 200,
+  maxRetries: 8,
+  maxConsecutiveFailures: 5,
+}
+
+/** DAEMON: bounded per scheduled task (cron-sized) — branch-only, cost-capped. */
+const DAEMON_BUDGET: BudgetDials = {
+  maxTurns: 40,
+  maxWallClockMs: 1_200_000, // 20 min
+  maxModelCalls: 80,
+  maxToolCalls: 250,
+  maxShellCommands: 100,
+  maxFilesChanged: 60,
+  maxCostUsd: 3,
+  maxRetries: 5,
+  maxConsecutiveFailures: 4,
+}
+
 export const BUDGET_PRESETS: Record<AgentMode, BudgetDials> = {
   interactive: INTERACTIVE_BUDGET,
   headless: HEADLESS_BUDGET,
   batch: BATCH_BUDGET,
   "ci-bot": CI_BOT_BUDGET,
+  ide: IDE_BUDGET,
+  daemon: DAEMON_BUDGET,
 }

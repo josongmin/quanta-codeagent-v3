@@ -1,3 +1,5 @@
+export type { BranchOnlyVerdict } from "./branch-only"
+export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {
   AutoDecision,
   ClassifierPort,
@@ -13,8 +15,6 @@ export {
   STAGE1_FAST_TAIL,
   STAGE2_THINKING_TAIL,
 } from "./classifier"
-export type { BranchOnlyVerdict } from "./branch-only"
-export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {
   AutoPassInput,
   AutoPassOptions,
@@ -22,6 +22,12 @@ export type {
   FallThroughReason,
 } from "./gate-pattern-wire"
 export { autoPassByPatterns, grantAndCascade } from "./gate-pattern-wire"
+export type { GitWriteProtectReason } from "./git-write-guard"
+export {
+  ALL_GIT_WRITE_PROTECT_REASONS,
+  gitWriteProtectReason,
+  isGitWriteProtected,
+} from "./git-write-guard"
 export type {
   CreatePermissionInspectorOptions,
   InspectAction,

@@ -16,8 +16,7 @@
  * are consumed by the corresponding `./mode-presets/<mode>.ts` worker.
  */
 
-import type { RunMode } from "@/agent"
-import type { BudgetDials, BudgetExhaustionPolicy } from "@/agent"
+import type { BudgetDials, BudgetExhaustionPolicy, RunMode } from "@/agent"
 
 // Alias for readability — `RunMode` from `@/agent` is the run-mode slice's
 // closed `interactive|headless|batch|ci-bot` union. (The barrel also exports
@@ -45,6 +44,10 @@ export interface AgentArgs {
   corpus?: string
   /** batch: `--instance <substr>`. */
   instance?: string
+  /** batch: `--predictions <path>` — JSONL predictions output. */
+  predictions?: string
+  /** batch: `--report <path>` — JSON report output. */
+  report?: string
   /** ci-bot: `--pr <num>` (kept as string — surface decides numeric shape). */
   pr?: string
   /** ci-bot: `--dry-run` — stub the PR-comment write (read the PR but do not
@@ -68,7 +71,7 @@ export class AgentArgsError extends Error {
 // crash downstream.
 // ─────────────────────────────────────────────────────────────────────────
 
-const VALID_MODES = ["interactive", "headless", "batch", "ci-bot"] as const
+const VALID_MODES = ["interactive", "headless", "batch", "ci-bot", "ide", "daemon"] as const
 const VALID_PROVIDERS = ["openai", "anthropic"] as const satisfies readonly ProviderToken[]
 const VALID_EXHAUSTION = [
   "ask-user",
@@ -110,11 +113,9 @@ const DIAL_FLAG_MAP = {
 
 type DialFlag = keyof typeof DIAL_FLAG_MAP
 
-const isDialFlag = (s: string): s is DialFlag =>
-  Object.hasOwn(DIAL_FLAG_MAP, s)
+const isDialFlag = (s: string): s is DialFlag => Object.hasOwn(DIAL_FLAG_MAP, s)
 
-const isValidMode = (s: string): s is AgentMode =>
-  (VALID_MODES as readonly string[]).includes(s)
+const isValidMode = (s: string): s is AgentMode => (VALID_MODES as readonly string[]).includes(s)
 
 const isValidProvider = (s: string): s is ProviderToken =>
   (VALID_PROVIDERS as readonly string[]).includes(s)
@@ -213,6 +214,8 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   let prompt: string | undefined
   let corpus: string | undefined
   let instance: string | undefined
+  let predictions: string | undefined
+  let report: string | undefined
   let ciBotDryRun = false
   let pr: string | undefined
   const dials: Partial<BudgetDials> = {}
@@ -246,9 +249,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
     if (a === "--mode") {
       const v = takeValue(argv, i, a)
       if (!isValidMode(v)) {
-        throw new AgentArgsError(
-          `--mode must be one of ${VALID_MODES.join("|")}, got '${v}'`,
-        )
+        throw new AgentArgsError(`--mode must be one of ${VALID_MODES.join("|")}, got '${v}'`)
       }
       mode = v
       i += 2
@@ -303,6 +304,18 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
       continue
     }
 
+    if (a === "--predictions") {
+      predictions = takeValue(argv, i, a)
+      i += 2
+      continue
+    }
+
+    if (a === "--report") {
+      report = takeValue(argv, i, a)
+      i += 2
+      continue
+    }
+
     if (a === "--pr") {
       pr = takeValue(argv, i, a)
       i += 2
@@ -318,8 +331,10 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
 
     if (isDialFlag(a)) {
       const raw = takeValue(argv, i, a)
-      const n = parseIntStrict(raw, a)
       const key = DIAL_FLAG_MAP[a]
+      // `maxCostUsd` is a dollar ceiling (fractional); every other dial is an
+      // integer count/byte/ms/token unit.
+      const n = key === "maxCostUsd" ? parseFloatStrict(raw, a) : parseIntStrict(raw, a)
       dials[key] = n
       i += 2
       continue
@@ -341,6 +356,12 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   if (instance !== undefined && mode !== "batch") {
     throw new AgentArgsError(`--instance is only valid with --mode batch`)
   }
+  if (predictions !== undefined && mode !== "batch") {
+    throw new AgentArgsError(`--predictions is only valid with --mode batch`)
+  }
+  if (report !== undefined && mode !== "batch") {
+    throw new AgentArgsError(`--report is only valid with --mode batch`)
+  }
   if (pr !== undefined && mode !== "ci-bot") {
     throw new AgentArgsError(`--pr is only valid with --mode ci-bot`)
   }
@@ -355,6 +376,8 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   if (prompt !== undefined) out.prompt = prompt
   if (corpus !== undefined) out.corpus = corpus
   if (instance !== undefined) out.instance = instance
+  if (predictions !== undefined) out.predictions = predictions
+  if (report !== undefined) out.report = report
   if (pr !== undefined) out.pr = pr
   if (ciBotDryRun) out.ciBotDryRun = true
   return out
@@ -393,6 +416,8 @@ MODE-SPECIFIC
   -p, --prompt <text>     headless only — task body
   --corpus <dir>          batch only — corpus directory
   --instance <substr>     batch only — instance filter substring
+  --predictions <path>    batch only — JSONL predictions output path
+  --report <path>         batch only — JSON report output path
   --pr <num>              ci-bot only — PR number
 
 BUDGET DIALS (operator-requested ceilings; clamped to per-mode caps)

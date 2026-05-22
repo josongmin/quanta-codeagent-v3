@@ -45,4 +45,7 @@ jobs:
       - name: install deps
         run: bun install --frozen-lockfile
       - name: agent review
-        run: bun run agent:ci-bot --pr ${{ github.event.pull_request.number }} --action review
+        # ci-bot's only behavior today IS review (read PR + post a summary
+        # comment). The review/auto-fix action split is future work; passing an
+        # unrecognized flag would exit 64 (EX_USAGE), so only valid flags here.
+        run: bun run agent:ci-bot --pr ${{ github.event.pull_request.number }}

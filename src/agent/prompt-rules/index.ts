@@ -25,13 +25,15 @@ import { TASK_RUNNER_PACK } from "./task-runner"
 /**
  * Pack-selection enum. Distinct from `prompt.ts`'s `AgentMode`
  * (`default|plan|review|audit`) on purpose — that enum is the legacy 4-mode
- * task posture; this one names the *runtime surface* a session was launched
- * on (interactive CLI vs headless task vs batch harness vs PR-bot CI).
+ * task posture; this one names the *runtime surface* a session was launched on.
  *
- * TODO: migrate to `@/agent/run-mode`'s export once Worker A's slice lands.
- * Until then this is the SSOT for the pack-selection enum.
+ * SSOT migration DONE (ADR-0092): re-exports `@/agent/run-mode`'s `AgentMode`
+ * (the run-mode slice has landed) so the pack registry and the mode matrix can
+ * never drift — adding a mode there forces a `renderPackByMode` case here.
  */
-export type AgentMode = "interactive" | "headless" | "batch" | "ci-bot"
+export type { AgentMode } from "../run-mode/types"
+
+import type { AgentMode } from "../run-mode/types"
 
 /** Dispatch a mode to its pack and flatten to the line array `prompt.ts`
  *  splices into the static system prompt. Exhaustive over the 4 modes — adding
@@ -48,6 +50,12 @@ export const renderPackByMode = (mode: AgentMode): readonly string[] => {
       return BENCHMARK_PACK.flatMap((r) => r.lines)
     case "ci-bot":
       return PR_AGENT_PACK.flatMap((r) => r.lines)
+    // ADR-0092 (C1): ide/daemon reuse existing packs per their promptPack
+    // lever — ide = assistant (human-near), daemon = task-runner (autonomous).
+    case "ide":
+      return ASSISTANT_PACK.flatMap((r) => r.lines)
+    case "daemon":
+      return TASK_RUNNER_PACK.flatMap((r) => r.lines)
   }
 }
 

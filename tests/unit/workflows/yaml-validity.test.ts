@@ -68,16 +68,22 @@ describe("workflow yaml validity", () => {
     })
   }
 
-  test("agent-pr-review.yml: invokes agent:ci-bot with --action review", () => {
+  // Audit R2/FIX-9: `--action` is NOT a flag `parseAgentArgs` accepts, so the
+  // prior invocations exited 64 (EX_USAGE) — the workflows were dead on
+  // arrival. They now invoke ci-bot with only parser-valid flags. The
+  // review/auto-fix behavioral split is tracked as future work.
+  test("agent-pr-review.yml: invokes agent:ci-bot with parser-valid flags (no --action)", () => {
     const { src } = loadWorkflow("agent-pr-review.yml")
     expect(src).toContain("bun run agent:ci-bot")
-    expect(src).toContain("--action review")
+    expect(src).toContain("--pr")
+    expect(src).not.toContain("--action")
   })
 
-  test("agent-auto-fix.yml: invokes agent:ci-bot with --action auto-fix", () => {
+  test("agent-auto-fix.yml: invokes agent:ci-bot with parser-valid flags (no --action)", () => {
     const { src } = loadWorkflow("agent-auto-fix.yml")
     expect(src).toContain("bun run agent:ci-bot")
-    expect(src).toContain("--action auto-fix")
+    expect(src).toContain("--pr")
+    expect(src).not.toContain("--action")
   })
 
   test("agent-nightly-regression.yml: invokes agent:batch with corpus + predictions + report", () => {
