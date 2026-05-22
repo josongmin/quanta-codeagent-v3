@@ -125,7 +125,7 @@ const VALID_PERMISSION_MODES = new Set<PermissionContext["mode"]>([
  *  real behavioural safety check), `maxTurns: 8`. Invalid `permission` values
  *  THROW (Audit C §2 medium — silent fallback to "ask" would hide the misconfig
  *  in scenarios where the gate is the actual subject under test). */
-const readConfig = (dir: string): ScenarioConfig => {
+export const readConfig = (dir: string): ScenarioConfig => {
   const p = join(dir, "config.json")
   const base: ScenarioConfig = { permission: "bypass", maxTurns: 8 }
   if (!existsSync(p)) return base
@@ -262,10 +262,13 @@ export const runScenario = async (
       ...runAssertions({ spec, capture, cwd: work, stopReason: lastReason, turns: totalTurns }),
     ]
     // Surface the agent-loop error message when the run terminated with
-    // `reason==="error"` (Audit A R8 / C low): the underlying error event is
-    // captured but pre-fix only the bare stopReason mismatch reached the
-    // ScenarioResult — diagnostics for stale trajectories were nearly opaque.
-    if (lastReason === "error") {
+    // `reason==="error"` UNEXPECTEDLY (Audit A R8 / C low): the underlying
+    // error event is captured but pre-fix only the bare stopReason mismatch
+    // reached the ScenarioResult — diagnostics for stale trajectories were
+    // nearly opaque. Skipped when the fixture explicitly asserts
+    // `stopReason: "error"` — for refusal/recovery scenarios the error event
+    // IS the expected terminal state.
+    if (lastReason === "error" && spec.stopReason !== "error") {
       const errMessages = capture.errorMessages()
       if (errMessages.length > 0) {
         failures.push({

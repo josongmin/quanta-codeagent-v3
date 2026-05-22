@@ -142,15 +142,13 @@ describe("ADR-0076 — refusal multi-turn carry-over", () => {
     const stream = new RecordingStream()
     const out = await withTimeout(runAgent(cfg({ llm, stream })), 10_000, "M-4")
     expect(out.reason).toBe("error")
-    // Either AgentOutcome.errorReason or the emitted error event surfaces
-    // the refusal — match either path. The decideOnAssembled branch produces
-    // a reason string containing "refused" (see loop.ts line ~903).
+    // `AgentOutcome.reason` is the closed StopReason enum; the human-readable
+    // "refused" rationale rides on the emitted `error` event (decideOnAssembled
+    // → runStep error branch → emitRecovery / stream.emit({type:"error", ...}).
     const errEvent = stream.events.find((e) => e.type === "error")
-    const reasonMatches = (s: string | undefined) => s !== undefined && /refus/i.test(s)
-    const ok =
-      reasonMatches(out.errorReason) ||
-      (errEvent !== undefined && errEvent.type === "error" && reasonMatches(errEvent.message))
-    expect(ok).toBe(true)
+    expect(errEvent).toBeDefined()
+    if (errEvent === undefined || errEvent.type !== "error") return
+    expect(/refus/i.test(errEvent.message)).toBe(true)
   })
 
   test("M-5: refusal turn DOES count as a turn (turns >= 1) — terminal but accounted", async () => {

@@ -19,11 +19,29 @@ import type { LLMPort } from "@/llm"
 import { CaptureStream } from "./capture-stream"
 import { buildLiveLLM } from "./provider"
 import { diffExpect, proposeExpect, RecordingLLM, serializeTrajectory } from "./recorder"
-import { discoverScenarios, loadPrompts, materializeWorkspace, runConversation } from "./runner"
+import {
+  discoverScenarios,
+  loadPrompts,
+  materializeWorkspace,
+  readConfig,
+  runConversation,
+} from "./runner"
 import type { ExpectSpec } from "./types"
+
+const KNOWN_FLAGS = new Set(["--dry"])
 
 const main = async (): Promise<void> => {
   const args = process.argv.slice(2)
+  // Reject unknown flags loudly (Audit C §3 medium) — pre-fix `--dry-only`
+  // silently slipped through `includes("--dry")` substring matches.
+  const unknown = args.filter((a) => a.startsWith("--") && !KNOWN_FLAGS.has(a))
+  if (unknown.length > 0) {
+    process.stderr.write(
+      `smoke:record: unknown flag(s) ${unknown.join(", ")} ` +
+        `(known: ${[...KNOWN_FLAGS].join(", ")})\n`,
+    )
+    process.exit(2)
+  }
   const dry = args.includes("--dry")
   const id = args.find((a) => !a.startsWith("--"))
   if (id === undefined) {
@@ -63,6 +81,11 @@ const main = async (): Promise<void> => {
       work,
       llm: recordingLlm,
       capture,
+      // Audit A R4: pass the scenario's `config.json` (if any) so record and
+      // replay drive the agent with the same permission/maxTurns. Pre-fix the
+      // recorder always used the default `bypass`/8 and any scenario authored
+      // with a `config.json` would silently diverge between record and replay.
+      config: readConfig(meta.dir),
     })
     lastReason = r.lastReason
     totalTurns = r.totalTurns
