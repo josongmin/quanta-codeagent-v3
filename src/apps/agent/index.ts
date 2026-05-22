@@ -18,14 +18,83 @@
  *   • exit 0 on `--help` (after a usage dump to stdout).
  */
 
-import { runtimeConfig } from "@/shared"
+import { loadEnvFiles } from "../cli/dotenv"
+
+loadEnvFiles([".env.dev", ".env.local", ".env"])
+
+import { AnthropicAdapter, type LLMPort, OpenAIAdapter } from "@/llm"
+import { logger, runtimeConfig } from "@/shared"
+import type { AgentEvent, StreamPort } from "@/stream"
+import { defaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
 import { type AgentArgs, AgentArgsError, formatHelp, parseAgentArgs } from "./cli-args"
 import type { RunOutcome } from "./run"
 
+const DEFAULT_MODEL_BY_PROVIDER = {
+  openai: "gpt-5-mini",
+  anthropic: "claude-sonnet-4-6",
+} as const
+
+/** Pick provider from explicit arg + env API key precedence. */
+const resolveProvider = (explicit?: "openai" | "anthropic"): "openai" | "anthropic" => {
+  if (explicit) return explicit
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic"
+  if (process.env.OPENAI_API_KEY) return "openai"
+  return "anthropic"
+}
+
+/** Build a real LLM adapter from operator args + env API keys. Returns null
+ *  when the provider's API key is absent; the caller decides exit semantics. */
+const buildLLM = (provider: "openai" | "anthropic", model: string): LLMPort | null => {
+  if (provider === "openai") {
+    const apiKey = process.env.OPENAI_API_KEY
+    return apiKey ? new OpenAIAdapter({ apiKey, model }) : null
+  }
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  return apiKey ? new AnthropicAdapter({ apiKey, model }) : null
+}
+
+/** Build the `AgentConfig` base from CLI args. Per-mode runners can override
+ *  individual fields (e.g. ci-bot replaces `registry` with the restricted
+ *  git+gh tool set), but having a baseline avoids each runner duplicating
+ *  the LLM construction logic. */
+const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] => {
+  const provider = resolveProvider(p.provider)
+  const model = p.model ?? DEFAULT_MODEL_BY_PROVIDER[provider]
+  const llm = buildLLM(provider, model)
+  if (llm === null) {
+    logger.error(
+      `no API key for provider '${provider}'. Set OPENAI_API_KEY or ANTHROPIC_API_KEY (or --provider <other>).`,
+    )
+    process.exit(2)
+  }
+  // Minimal stream — error events surface to stderr so a wrapper failure is
+  // diagnosable even when a runner doesn't replace the stream. Per-mode
+  // runners typically override with their own observability (REPL stdout,
+  // structured JSONL, etc).
+  const stream: StreamPort = {
+    emit: (e: AgentEvent): void => {
+      if (e.type === "error") {
+        process.stderr.write(`[stream-error] ${JSON.stringify(e)}\n`)
+      }
+    },
+  }
+  return {
+    llm,
+    registry: new ToolRegistry(defaultTools),
+    stream,
+    permission: { mode: "acceptEdits" },
+    messages: [],
+    system: "",
+    cwd: process.cwd(),
+    maxTurns: p.dials?.maxTurns ?? 30,
+    signal: new AbortController().signal,
+  } as AssembleRequest["base"]
+}
+
 /** Per-mode dispatcher contract. Each `./mode-presets/<mode>.ts` exports this. */
 export interface ModeDispatcher {
-  runMode: (req: AssembleRequestPartial) => Promise<RunOutcome>
+  runMode: (req: AssembleRequest) => Promise<RunOutcome>
 }
 
 /**
@@ -44,6 +113,8 @@ export interface AssembleRequestPartial {
   corpus?: string
   instance?: string
   pr?: string
+  /** ci-bot only: stub the PR comment write at the runner edge. */
+  ciBotDryRun?: boolean
 }
 
 /** Lift mode + dials + per-mode fields out of `AgentArgs`. Pure projection. */
@@ -59,6 +130,7 @@ export const toAssembleRequest = (args: AgentArgs): AssembleRequestPartial => {
   if (args.corpus !== undefined) out.corpus = args.corpus
   if (args.instance !== undefined) out.instance = args.instance
   if (args.pr !== undefined) out.pr = args.pr
+  if (args.ciBotDryRun) out.ciBotDryRun = true
   return out
 }
 
@@ -119,9 +191,35 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   }
 
   const dispatcher = await loadDispatcher(args.mode)
-  const req = toAssembleRequest(args)
-  const outcome = await dispatcher.runMode(req)
+  const partial = toAssembleRequest(args)
+  // Translate flat CLI shape → nested AssembleRequest the runners consume
+  // (each runner reads its own mode-specific extras: req.headless / req.batch
+  // / req.ciBot). The `base` is a stub — runners build the real AgentConfig
+  // internally; assemble.ts only needs `base` populated for modePolicy +
+  // budgetMeter, which the runners assemble themselves.
+  const fullReq = liftToAssembleRequest(partial)
+  const outcome = await dispatcher.runMode(fullReq)
   exit(outcome.exitCode)
+}
+
+/** Translate the flat CLI projection to the nested AssembleRequest shape
+ *  the mode runners consume. Per-mode extras are populated only for the
+ *  active mode; other slots stay undefined. The `base` is populated with
+ *  an LLM built from provider/model (operator flags + env API keys) so the
+ *  per-mode runner can rely on `req.base.llm` being a real adapter. */
+const liftToAssembleRequest = (p: AssembleRequestPartial): AssembleRequest => {
+  const base = buildBaseFromArgs(p)
+  const out: AssembleRequest = { mode: p.mode, base }
+  if (p.dials !== undefined) out.dials = p.dials
+  if (p.exhaustion !== undefined) out.exhaustion = p.exhaustion
+  if (p.mode === "headless" && p.prompt !== undefined) {
+    out.headless = { prompt: p.prompt }
+  } else if (p.mode === "batch" && p.corpus !== undefined) {
+    out.batch = { corpus: p.corpus, ...(p.instance !== undefined ? { instance: p.instance } : {}) }
+  } else if (p.mode === "ci-bot" && p.pr !== undefined) {
+    out.ciBot = { pr: p.pr, ...(p.ciBotDryRun ? { dryRun: true } : {}) }
+  }
+  return out
 }
 
 // Production entry — only fires when this module is the process entry point.
