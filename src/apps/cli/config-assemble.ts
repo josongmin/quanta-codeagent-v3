@@ -51,6 +51,11 @@ export interface SessionDeps {
    *  (painter + OTel exporter). Absent ⇒ runShell stays on its legacy
    *  buffered path (byte-identical). */
   onShellEvent: AgentConfig["onShellEvent"] | undefined
+  /** ADR-0064 L4 per-turn work-metrics sink. The CLI builds a default
+   *  stderr-summary sink gated on the `QUANTA_METRICS` knob (same gate as the
+   *  cost dashboard). Absent ⇒ the loop allocates no collector and emits
+   *  nothing (byte-identical default-OFF). */
+  workMetricsSink: AgentConfig["workMetricsSink"] | undefined
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -111,5 +116,6 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
     ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
     ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
+    ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
   }
 }

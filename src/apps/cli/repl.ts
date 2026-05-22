@@ -1,11 +1,12 @@
 import * as readline from "node:readline/promises"
-import { type AgentOutcome, buildSystemPrompt, RetryingLLM, runAgent } from "@/agent"
+import { type AgentConfig, type AgentOutcome, buildSystemPrompt, RetryingLLM, runAgent } from "@/agent"
 import type { ContentBlock, ImageBlock, LLMPort, Message } from "@/llm"
 import {
   buildCostDashboard,
   buildShellOtelObserver,
   renderDashboardText,
   StructuredLogger,
+  summarizeWorkMetrics,
 } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger } from "@/shared"
@@ -284,6 +285,16 @@ export const runRepl = async (): Promise<void> => {
     painterObs !== undefined || otelObs !== undefined
       ? composeShellObservers(painterObs, otelObs)
       : undefined
+  // ADR-0064 L4: default per-turn work-metrics sink. The collector + emit are
+  // already wired in the loop (gated on `AgentConfig.workMetricsSink`), but
+  // there was no DEFAULT sink, so the metrics were collected and dropped. Wire
+  // one human-readable stderr line per turn — gated on the SAME `QUANTA_METRICS`
+  // knob (`metrics`) that already drives the cost/cache dashboard, and routed to
+  // the SAME stderr surface so the two summaries sit together. Metrics OFF ⇒
+  // sink undefined ⇒ the loop allocates no collector (byte-identical).
+  const workMetricsSink: AgentConfig["workMetricsSink"] | undefined = metrics
+    ? { emit: (m): void => void process.stderr.write(`work: ${summarizeWorkMetrics(m)}\n`) }
+    : undefined
   const sessionDeps: SessionDeps = {
     llm: finalLLM,
     registry,
@@ -307,6 +318,7 @@ export const runRepl = async (): Promise<void> => {
     verifyGuardConfig,
     summarizerLlm: buildSummarizerLlm(provider, abort.signal),
     onShellEvent,
+    workMetricsSink,
   }
   const session = (messages: Message[]): Promise<AgentOutcome> =>
     runAgent(assembleConfig(messages, sessionDeps))
