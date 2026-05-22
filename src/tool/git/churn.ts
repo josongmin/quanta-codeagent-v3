@@ -1,3 +1,4 @@
+import { byteCompare } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitChurnInput, type GitRunner, gitChurnInputSchema } from "./types"
@@ -24,7 +25,7 @@ export const rankChurn = (stdout: string, topN: number): { file: string; count: 
   }
   return [...counts.entries()]
     .map(([file, count]) => ({ file, count }))
-    .sort((a, b) => (b.count !== a.count ? b.count - a.count : a.file.localeCompare(b.file)))
+    .sort((a, b) => (b.count !== a.count ? b.count - a.count : byteCompare(a.file, b.file)))
     .slice(0, topN)
 }
 

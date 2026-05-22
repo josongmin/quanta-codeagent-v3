@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
+import { byteCompare } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
@@ -85,7 +86,7 @@ const render = (hits: Hit[], tokens: string[], max: number): string => {
       b.score !== a.score
         ? b.score - a.score
         : a.h.file !== b.h.file
-          ? a.h.file.localeCompare(b.h.file)
+          ? byteCompare(a.h.file, b.h.file)
           : a.h.line - b.h.line,
     )
     .slice(0, max)

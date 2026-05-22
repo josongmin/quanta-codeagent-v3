@@ -1,17 +1,22 @@
-import { escapeReminderBoundary } from "./prompt"
+import { escapeBoundary } from "./untrusted"
 
 /**
  * Defang BOTH boundary tag families a user-controlled fragment could forge:
  * the outer `<system-reminder>` wrapper (the rendered block is ultimately
  * prepended to a user message that may itself be inside a reminder downstream)
- * AND this block's own `<ide-context>` wrapper. `escapeReminderBoundary` alone
- * only handles `system-reminder`; a selection text or diagnostic message
- * carrying a literal `</ide-context>` would otherwise terminate THIS block's
- * wrapper and let the trailing payload read as out-of-band context — the exact
- * trust-boundary break the renderer's docstring promises against. Same backslash
- * defang form (`<\/ide-context>` / `<\ide-context>`), case-insensitive. */
-const escapeContextBoundary = (s: string): string =>
-  escapeReminderBoundary(s).replace(/<(\/?ide-context>)/gi, "<\\$1")
+ * AND this block's own `<ide-context>` wrapper. A selection text or diagnostic
+ * message carrying a literal `</ide-context>` would otherwise terminate THIS
+ * block's wrapper and let the trailing payload read as out-of-band context —
+ * the exact trust-boundary break the renderer's docstring promises against.
+ *
+ * This is now a thin alias over the canonical {@link escapeBoundary} helper
+ * (`src/agent/untrusted.ts`) bound to the `ide-context` tag — the SINGLE
+ * enforced path all untrusted fragments funnel through. `escapeBoundary`
+ * always also defangs `system-reminder`, so the behavior is byte-identical to
+ * the prior local form (`escapeReminderBoundary(s).replace(/<(\/?ide-context>)/gi,
+ * "<\\$1")`): same backslash defang form (`<\/ide-context>` / `<\ide-context>`),
+ * case-insensitive, casing preserved. */
+const escapeContextBoundary = (s: string): string => escapeBoundary("ide-context", s)
 
 /**
  * IDE context provider seam (ADR-0080).

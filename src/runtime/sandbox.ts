@@ -1,4 +1,5 @@
 import { QuantaError } from "@/shared"
+import { withSpawnedChild } from "./guarded-spawn"
 import { disclaimedShellArgv } from "./shell-disclaim"
 import type { ShellResult } from "./types"
 
@@ -204,7 +205,9 @@ export class LocalSandbox implements Sandbox {
       kill()
     }, timeoutMs)
 
-    try {
+    // GUARDED: kill-on-throw + timer teardown via `withSpawnedChild`
+    // (src/runtime/guarded-spawn.ts) instead of an inline catch/finally.
+    return withSpawnedChild({ kill, timer }, async () => {
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
@@ -216,15 +219,7 @@ export class LocalSandbox implements Sandbox {
         exitCode,
         timedOut,
       }
-    } catch (e) {
-      // LEAK FIX: a throw before `await proc.exited` (e.g. a pipe read
-      // rejected) leaves the child running and orphaned. Kill it on the way
-      // out. `kill()` is no-op-safe if the process has already exited.
-      kill()
-      throw e
-    } finally {
-      clearTimeout(timer)
-    }
+    })
   }
 
   /** Validate + resolve the working directory. `normalizeJail` throws a
@@ -369,7 +364,11 @@ export class DockerSandbox implements Sandbox {
       kill()
     }, timeoutMs)
 
-    try {
+    // GUARDED: kill-on-throw + timer teardown via `withSpawnedChild`. The
+    // host-side `docker run` process must still be reaped on a mid-drain throw
+    // (the `--rm` flag only cleans the CONTAINER on its own exit), so the same
+    // guard the local path uses applies here unchanged.
+    return withSpawnedChild({ kill, timer }, async () => {
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
@@ -381,15 +380,6 @@ export class DockerSandbox implements Sandbox {
         exitCode,
         timedOut,
       }
-    } catch (e) {
-      // LEAK FIX: throw before `await proc.exited` leaves the docker child
-      // running. Kill it so it cannot orphan (the `--rm` flag only cleans the
-      // container on its OWN exit, so the host-side `docker run` process must
-      // still be reaped). `kill()` is no-op-safe post-exit.
-      kill()
-      throw e
-    } finally {
-      clearTimeout(timer)
-    }
+    })
   }
 }

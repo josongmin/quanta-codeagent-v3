@@ -6,6 +6,7 @@
  * `no→fail`, `tbd→skipped`).
  */
 
+import { assertNever } from "@/shared"
 import type { EvalRecord } from "../storage"
 import { allLeaves, leafById, parseId, TAXONOMY } from "../taxonomy"
 import type { CoverageLevel, EvalTier, UseCaseId, Verdict } from "../types"
@@ -56,14 +57,6 @@ export interface CoverageMatrix {
   tiers: readonly EvalTier[]
   /** Run summary line counts (records seen). */
   recordsSeen: number
-}
-
-/** Exhaustiveness sentinel: a `never` parameter forces the switch above to
- *  cover every union arm at compile time. If a new `payload.kind` is added to
- *  `storage/schema.ts` without a corresponding case here, this call site is
- *  the type error. */
-const assertNever = (x: never): never => {
-  throw new Error(`unhandled payload kind: ${JSON.stringify(x)}`)
 }
 
 const verdictFromRecord = (rec: EvalRecord): Verdict => {

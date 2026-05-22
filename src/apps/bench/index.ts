@@ -61,7 +61,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
-import { logger, runtimeConfig } from "@/shared"
+import { byteCompare, logger, runtimeConfig } from "@/shared"
 import {
   aggregate,
   benchRunDir,
@@ -171,7 +171,7 @@ const printSummary = (summary: BenchSummary): void => {
   const bd = aggregate(failed)
   const fmt = (obj: Record<string, number>): string =>
     Object.entries(obj)
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .sort((a, b) => b[1] - a[1] || byteCompare(a[0], b[0]))
       .map(([k, v]) => `${k}=${v}`)
       .join(", ")
   const termLine = fmt(bd.byTermination)

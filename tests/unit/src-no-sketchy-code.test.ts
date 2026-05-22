@@ -145,6 +145,21 @@ const RULES: readonly Rule[] = [
         "LSP_REQUEST_TIMEOUT_MS et al. are declared as named consts elsewhere",
     },
   },
+  {
+    id: "no-locale-compare",
+    // `.localeCompare(` — locale/ICU-dependent ordering.
+    pattern: /\.localeCompare\(/,
+    why: "localeCompare is locale/ICU-dependent → sorted output varies across machines, breaking the byte-identical replay + prompt-cache invariant. Use `byteCompare` from `src/shared/byte-compare.ts`.",
+    // No allowlist: all src/ localeCompare call sites were migrated to
+    // byteCompare (R6 structural). The whole class is now actively guarded —
+    // a new localeCompare anywhere under src/ trips the scan.
+  },
+  {
+    id: "no-raw-number-env",
+    // `Number(... process.env ...)` / `parseInt(process.env...)` on one line.
+    pattern: /(?:Number|parseInt|parseFloat)\s*\([^)]*process\.env/,
+    why: "Parsing process.env with raw Number()/parseInt() yields NaN on garbage input, silently disabling caps/limits. Route through the validated parsers in `runtime-config.ts`. (Currently zero violations — keep it so.)",
+  },
 ]
 
 const isAllowed = (rule: Rule, relativePath: string): boolean =>

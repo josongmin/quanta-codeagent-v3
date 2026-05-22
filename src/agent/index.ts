@@ -42,6 +42,14 @@ export {
   createArchive,
 } from "./conversation-summary-archive"
 export {
+  GLOB_RULE_DIRS,
+  type GlobRule,
+  loadGlobRules,
+  MAX_RULE_BYTES,
+  renderGlobRulesBlock,
+  selectGlobRules,
+} from "./glob-rules"
+export {
   type HandoffRequiredEvent,
   type HITLTier,
   type HitlTier,
@@ -203,6 +211,7 @@ export type {
   PreCompactRequestQuery,
   StopReason,
 } from "./types"
+export { embedUntrusted, escapeBoundary } from "./untrusted"
 export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
 export {
   type Blocker,

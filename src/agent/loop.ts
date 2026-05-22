@@ -836,6 +836,13 @@ const prepareTurnContext = async (
     ...(config.mode !== undefined ? { mode: config.mode } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
     ...(config.repoRules !== undefined ? { repoRules: config.repoRules } : {}),
+    // File-scoped rules (Cursor `.cursor/rules` parity). Loaded once by the
+    // caller; selection (alwaysApply ∪ glob-matched) is computed per turn in
+    // `buildTurnContext` from `changedPaths`. Absent ⇒ no block, byte-identical.
+    ...(config.globRules !== undefined ? { globRules: config.globRules.rules } : {}),
+    ...(config.globRules?.changedPaths !== undefined
+      ? { changedPaths: config.globRules.changedPaths }
+      : {}),
     // Cached at session start by `buildSessionFeatures`; passed through every
     // turn without re-discovery (Codex anti-reread). Absent ⇒ no block in the
     // rendered reminder (byte-identical for skill-less sessions).

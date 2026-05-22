@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
+import { byteCompare } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
@@ -129,7 +130,7 @@ const render = (
   summaries: Map<string, string> | undefined,
 ): string => {
   if (agg.byDir.size === 0 && agg.deepRollup.size === 0) return "(no files)"
-  const dirs = [...agg.byDir.keys()].sort((a, b) => a.localeCompare(b))
+  const dirs = [...agg.byDir.keys()].sort((a, b) => byteCompare(a, b))
   const out: string[] = []
   const purposeOf = (dir: string, base: string): string => {
     if (summaries === undefined) return ""
@@ -138,7 +139,7 @@ const render = (
     return hint ? `  — ${hint}` : ""
   }
   for (const dir of dirs) {
-    const files = (agg.byDir.get(dir) ?? []).sort((a, b) => a.localeCompare(b))
+    const files = (agg.byDir.get(dir) ?? []).sort((a, b) => byteCompare(a, b))
     const indent = dir === "." ? "" : "  ".repeat(dir.split("/").length)
     out.push(`${indent}${dir}/ (${files.length})`)
     const fileIndent = `${indent}  `

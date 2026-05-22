@@ -1,3 +1,4 @@
+import { byteCompare } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitBlameHeatmapInput, type GitRunner, gitBlameHeatmapInputSchema } from "./types"
@@ -24,7 +25,7 @@ export const rankBlame = (
   if (total === 0) return []
   return [...counts.entries()]
     .map(([author, lines]) => ({ author, lines, pct: Math.round((lines / total) * 100) }))
-    .sort((a, b) => (b.lines !== a.lines ? b.lines - a.lines : a.author.localeCompare(b.author)))
+    .sort((a, b) => (b.lines !== a.lines ? b.lines - a.lines : byteCompare(a.author, b.author)))
     .slice(0, topN)
 }
 

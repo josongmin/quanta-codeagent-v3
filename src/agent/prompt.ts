@@ -1,4 +1,5 @@
 import type { Message, SystemBlock } from "@/llm"
+import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
 import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
 import {
@@ -12,6 +13,7 @@ import {
   validateSectionsCacheBudget,
 } from "./prompt-sections"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
+import { embedUntrusted, escapeBoundary } from "./untrusted"
 import { renderWorkingStateBlock, type WorkingState } from "./working-state"
 
 /**
@@ -335,6 +337,15 @@ export interface TurnContextInput {
    *  (Codex `repo-local-rule-ingestion-audit.md` mirror). Absent ⇒ no block,
    *  byte-identical for callers that don't wire the loader. */
   repoRules?: RepoRules
+  /** File-scoped rules (Cursor `.cursor/rules/*.mdc` parity). The FULL loaded
+   *  set; the per-turn selection (alwaysApply ∪ glob-matched) is computed here
+   *  from `changedPaths`. Absent / empty ⇒ no block, byte-identical for callers
+   *  that don't wire the loader. */
+  globRules?: GlobRule[]
+  /** Files in play this turn — drives glob-rule selection. A glob rule injects
+   *  only when one of these matches its globs; `alwaysApply` rules ignore it.
+   *  Absent ⇒ only `alwaysApply` glob rules ride (no glob can match). */
+  changedPaths?: string[]
   /** Active skills discovered for this session (Codex `skills-audit.md` mirror).
    *  Each entry is the skill `{name, description}` — the body is loaded lazily
    *  via the `Skill` tool (progressive disclosure). Rendered as the "## Active
@@ -438,18 +449,16 @@ const renderActiveSkillsBlock = (
  * declare a new `<system-reminder>...` and convince the model the inner
  * payload is harness-attributed.
  *
- * The fix inserts a backslash between `<` and `/` (or `<` and `s`) so the
- * defanged form `<\/system-reminder>` / `<\system-reminder>` is not parsed
- * as a tag by the harness or by the model's pattern-matcher, but stays
- * human-readable in transcripts. Case-insensitive because pattern matchers
- * treat `<SYSTEM-REMINDER>` the same as lowercase.
+ * This is now a thin alias over the canonical {@link escapeBoundary} helper
+ * (`src/agent/untrusted.ts`) bound to the `system-reminder` tag — the SINGLE
+ * enforced path all untrusted fragments funnel through. The behavior is
+ * byte-identical to the prior local implementation
+ * (`s.replace(/<(\/?system-reminder>)/gi, "<\\$1")`): a single `\` is inserted
+ * immediately after the opening `<` of any `<system-reminder>` /
+ * `</system-reminder>` token, case-insensitive, casing preserved
+ * (`</SYSTEM-REMINDER>` → `<\/SYSTEM-REMINDER>`).
  */
-export const escapeReminderBoundary = (s: string): string =>
-  // Insert a single `\` immediately after the opening `<` of any
-  // `<system-reminder>` or `</system-reminder>` token, case-insensitive. The
-  // callback form preserves the original casing of the match so transcripts
-  // stay faithful (`</SYSTEM-REMINDER>` → `<\/SYSTEM-REMINDER>`).
-  s.replace(/<(\/?system-reminder>)/gi, "<\\$1")
+export const escapeReminderBoundary = (s: string): string => escapeBoundary("system-reminder", s)
 
 /** Build the per-turn dynamic context — date, cwd, mode notice, repo rules,
  *  working state, memory — as a single block of text, or `undefined` when there
@@ -467,6 +476,14 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
   const notice = modeNotice(resolveAgentMode(input.mode, input.planMode))
   if (notice) parts.push("", notice)
   if (input.repoRules) parts.push("", renderRepoRulesBlock(input.repoRules))
+  // File-scoped rules (Cursor `.cursor/rules` parity) ride right after the
+  // top-level repo contract — both are repo authority, but these are selected
+  // per-turn by the files in play. Absent / no selection ⇒ no block.
+  if (input.globRules && input.globRules.length > 0) {
+    const selected = selectGlobRules(input.globRules, input.changedPaths ?? [])
+    const block = renderGlobRulesBlock(selected)
+    if (block) parts.push("", block)
+  }
   if (input.activeSkills && input.activeSkills.length > 0) {
     const block = renderActiveSkillsBlock(input.activeSkills)
     if (block) parts.push("", block)
@@ -520,13 +537,16 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
   const dynamic = buildDynamicContext(input)
   const messages: Message[] = [...input.baseMessages]
   if (dynamic !== undefined) {
-    // Defang inner `<system-reminder>` boundaries BEFORE wrapping so a
-    // value supplied by repoRules / memory / skills cannot terminate the
-    // outer block and forge a system-attributed instruction.
-    const safe = escapeReminderBoundary(dynamic)
+    // Route the assembled dynamic block through the canonical untrusted-embed
+    // helper: it defangs inner `<system-reminder>` boundaries BEFORE wrapping so
+    // a value supplied by repoRules / memory / skills cannot terminate the outer
+    // block and forge a system-attributed instruction. Byte-identical to the
+    // prior inline `<system-reminder>\n${escapeReminderBoundary(dynamic)}\n
+    // </system-reminder>` form — the wrapper and escape are unchanged, only the
+    // path is now the single enforced one.
     messages.push({
       role: "user",
-      content: [{ type: "text", text: `<system-reminder>\n${safe}\n</system-reminder>` }],
+      content: [{ type: "text", text: embedUntrusted("system-reminder", dynamic) }],
     })
   }
   return { system, messages }

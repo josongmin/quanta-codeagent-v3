@@ -39,6 +39,7 @@
  */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, resolve } from "node:path"
+import { byteCompare } from "@/shared"
 import type { Instance } from "../types"
 
 const exists = async (p: string): Promise<boolean> => {
@@ -125,7 +126,7 @@ const loadDirCorpus = async (root: string): Promise<Instance[]> => {
     const inst = await loadDirInstance(root, join(root, e.name))
     if (inst) out.push(inst)
   }
-  return out.sort((a, b) => a.id.localeCompare(b.id))
+  return out.sort((a, b) => byteCompare(a.id, b.id))
 }
 
 // ── Real `swebench.verified` corpus (primary) ──────────────────────────────
@@ -224,7 +225,7 @@ const loadRealCorpus = async (root: string, taskDir: string): Promise<Instance[]
       // skip unreadable task file
     }
   }
-  return out.sort((a, b) => a.id.localeCompare(b.id))
+  return out.sort((a, b) => byteCompare(a.id, b.id))
 }
 
 /**

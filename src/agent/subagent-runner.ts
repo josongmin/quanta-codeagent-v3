@@ -245,12 +245,12 @@ const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string
     // are intentionally NOT propagated (a subagent gets a clean tool surface).
     ...(parent.subagent ? { subagent: parent.subagent } : {}),
     // DROPPED on purpose: store, sessionId, memory, hooks, metrics, run,
-    // repoRules, workingState. A subagent must not write into the parent's
-    // durable memory, emit into the parent's hook bus / metrics, or share its
-    // correlation context. `repoRules` is dropped because the child may run in
-    // a different `cwd` (worktree fork), where the parent's repo-local rules
-    // are stale authority. `workingState` is session-scoped (Codex memory L3)
-    // — each agent gets a fresh scratchpad.
+    // repoRules, globRules, workingState. A subagent must not write into the
+    // parent's durable memory, emit into the parent's hook bus / metrics, or
+    // share its correlation context. `repoRules` / `globRules` are dropped
+    // because the child may run in a different `cwd` (worktree fork), where the
+    // parent's file-scoped rules are stale authority. `workingState` is
+    // session-scoped (Codex memory L3) — each agent gets a fresh scratchpad.
   }
   return child
 }

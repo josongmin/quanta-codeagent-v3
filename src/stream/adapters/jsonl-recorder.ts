@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type { Producer, RunContext, TrajectoryKind } from "@/shared"
-import { logger, makeEvent, toError } from "@/shared"
+import { assertNever, logger, makeEvent, toError } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 import type { DegradedRecord } from "./tee"
@@ -293,6 +293,11 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
       }
     case "done":
       return { reason: e.reason, turns: e.turns }
+    default:
+      // Exhaustiveness pin: a new AgentEvent variant must come back here and
+      // declare its trajectory `data` payload — without this the return type
+      // would silently widen to include `undefined` (a dropped payload).
+      return assertNever(e, "AgentEvent")
   }
 }
 

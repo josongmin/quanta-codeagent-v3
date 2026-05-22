@@ -1,3 +1,5 @@
+export type { GuardedSpawnHooks } from "./guarded-spawn"
+export { withSpawnedChild } from "./guarded-spawn"
 export type { DockerSandboxOptions, Sandbox, SandboxPolicy } from "./sandbox"
 export {
   DEFAULT_ENV_ALLOWLIST,

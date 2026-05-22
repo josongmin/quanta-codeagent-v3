@@ -17,6 +17,7 @@ import type { BudgetMeter } from "./budget"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
+import type { GlobRule } from "./glob-rules"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { IdeContextProvider } from "./ide-context"
@@ -215,6 +216,16 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * byte-identical. Absent ⇒ no repo-rules block.
    */
   repoRules?: RepoRules
+  /**
+   * File-scoped rules (Cursor `.cursor/rules/*.mdc` parity — glob-matched +
+   * always-applied kinds). Loaded by the caller (e.g. `loadGlobRules(cwd)`),
+   * same opt-in posture as `repoRules`. `rules` is the FULL discovered set;
+   * `changedPaths` is the per-turn file list that drives glob selection (a host
+   * may pass the same list it gives `skills.changedPaths`). Each turn the loop
+   * injects `alwaysApply` rules ∪ rules whose globs match a changed path.
+   * Absent ⇒ no block, byte-identical (RFC §1.2 default-OFF).
+   */
+  globRules?: { rules: GlobRule[]; changedPaths?: string[] }
   /**
    * Metrics registry (RFC §8 Phase 3). Absent ⇒ no metrics recorded; loop
    * behavior identical.

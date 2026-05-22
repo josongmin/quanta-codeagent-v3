@@ -13,7 +13,7 @@
 > - **Cursor hook 실측 ≤8**(내가 "20" 과장 — minified 한계), **44 ToolCall은 strings 미검증**(protobuf descriptor 기반 주장).
 >
 > ⚠️ **2차 심층 검증 정정 (도구 수·인프라 실측)**:
-> - **도구 수 전부 과소였음** — 실측: **Cursor 52**(CLIENT_SIDE_TOOL_V2 enum), **Claude Code 20**(+Monitor/TaskStop/Cron×3/Worktree×2/NotebookRead), **Codex 18**(+js/js_reset/view_image/automation_update/resume_agent), quanta ~25. (내 "13-20" 틀림)
+> - **도구 수 전부 과소였음** — 실측: **Cursor 52**(CLIENT_SIDE_TOOL_V2 enum), **Claude Code 20**(+Monitor/TaskStop/Cron×3/Worktree×2/NotebookRead), **Codex 18**(+js/js_reset/view_image/automation_update/resume_agent), quanta **30 카탈로그**(13 default-on + git 9/lsp 8 env-gate). (내 "13-20"/"~25" 틀림 — B1 참조)
 > - **Cursor hook 실측 15**(8도 20도 아님), **AgentServerMessage는 strings로 6 field만**(21은 descriptor 기반).
 > - **Codex `view_image` 도구**(이미지 입력 있음), **원격 telemetry 0**(로컬 JSONL만 — 메모리 OTel은 내부 span).
 > - **Claude advisor tool verbatim 확인**(stronger reviewer model, NO params, full history forward), **CC token 회계 server-side**(클라 미노출), **CC firstChunk timeout 없음**(idle만).

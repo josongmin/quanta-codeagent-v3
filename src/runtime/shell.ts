@@ -1,3 +1,4 @@
+import { withSpawnedChild } from "./guarded-spawn"
 import { scrubEnv } from "./sandbox"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
@@ -135,68 +136,60 @@ export const runShell = async (
       observer(event)
     })
 
-    try {
-      await Promise.all([stdoutDone, stderrDone])
-      const exitCode = await proc.exited
-      const decoder = new TextDecoder("utf-8")
-      stdout = decoder.decode(concat(stdoutChunks))
-      stderr = decoder.decode(concat(stderrChunks))
-      // Terminal event: aborted takes precedence (timeout/user_abort) over a
-      // plain exit. `proc.exited` resolves with the OS exit code; on a kill
-      // it is typically non-zero. Bun does not surface `NodeJS.Signals` on
-      // its ShellPromise here, so we report `signal: null` and rely on the
-      // `aborted` event to carry the reason.
-      if (abortReason !== null) {
-        const aborted: RunShellEvent = {
-          kind: "aborted",
-          reason: abortReason,
-          abortedAt: Date.now(),
+    // GUARDED: kill-on-throw + timer/abort-listener teardown live in
+    // `withSpawnedChild` (src/runtime/guarded-spawn.ts), not inline here. The
+    // body emits the terminal `exit`/`aborted` event on its NORMAL-return path
+    // only — a throw skips it, which is the contract (exactly one terminal on
+    // normal/abort completion, none on an internal observer-thrown failure;
+    // the guard kills the still-running child instead).
+    return withSpawnedChild(
+      { kill, timer, cleanup: () => options.signal?.removeEventListener("abort", onAbort) },
+      async () => {
+        await Promise.all([stdoutDone, stderrDone])
+        const exitCode = await proc.exited
+        const decoder = new TextDecoder("utf-8")
+        stdout = decoder.decode(concat(stdoutChunks))
+        stderr = decoder.decode(concat(stderrChunks))
+        // Terminal event: aborted takes precedence (timeout/user_abort) over a
+        // plain exit. `proc.exited` resolves with the OS exit code; on a kill
+        // it is typically non-zero. Bun does not surface `NodeJS.Signals` on
+        // its ShellPromise here, so we report `signal: null` and rely on the
+        // `aborted` event to carry the reason.
+        if (abortReason !== null) {
+          const aborted: RunShellEvent = {
+            kind: "aborted",
+            reason: abortReason,
+            abortedAt: Date.now(),
+          }
+          observer(aborted)
+        } else {
+          const exit: RunShellEvent = {
+            kind: "exit",
+            code: exitCode,
+            signal: null,
+            exitedAt: Date.now(),
+          }
+          observer(exit)
         }
-        observer(aborted)
-      } else {
-        const exit: RunShellEvent = {
-          kind: "exit",
-          code: exitCode,
-          signal: null,
-          exitedAt: Date.now(),
-        }
-        observer(exit)
-      }
-      return { stdout, stderr, exitCode, timedOut: timedOutFlag }
-    } catch (e) {
-      // LEAK FIX: a throw here (observer callback raised, or a stream read
-      // rejected) means we never reached `await proc.exited`, so the child is
-      // still running and would orphan. Kill it on the way out. `kill()` is a
-      // no-op-safe wrapper if it has already exited. The terminal `exit`/
-      // `aborted` event is intentionally NOT emitted on this internal-failure
-      // path (the contract guarantees exactly one terminal event only on a
-      // normal completion / abort, not on observer-thrown failures).
-      kill()
-      throw e
-    } finally {
-      clearTimeout(timer)
-      options.signal?.removeEventListener("abort", onAbort)
-    }
+        return { stdout, stderr, exitCode, timedOut: timedOutFlag }
+      },
+    )
   }
 
   // Legacy buffered path — byte-identical to the pre-PR-5 code. No observer
-  // ⇒ no streaming work, no event allocations.
-  try {
-    const [stdoutText, stderrText] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const exitCode = await proc.exited
-    return { stdout: stdoutText, stderr: stderrText, exitCode, timedOut: timedOutFlag }
-  } catch (e) {
-    // LEAK FIX (mirror of the observer path): if draining the pipes rejects we
-    // never awaited `proc.exited`; kill the child so it cannot orphan.
-    kill()
-    throw e
-  } finally {
-    clearTimeout(timer)
-    options.signal?.removeEventListener("abort", onAbort)
-  }
+  // ⇒ no streaming work, no event allocations. Same guard as the observer
+  // path (kill-on-throw + timer/listener teardown via `withSpawnedChild`).
+  return withSpawnedChild(
+    { kill, timer, cleanup: () => options.signal?.removeEventListener("abort", onAbort) },
+    async () => {
+      const [stdoutText, stderrText] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      const exitCode = await proc.exited
+      return { stdout: stdoutText, stderr: stderrText, exitCode, timedOut: timedOutFlag }
+    },
+  )
 }
 
 /** Concatenate captured byte chunks into a single buffer for final decoding.

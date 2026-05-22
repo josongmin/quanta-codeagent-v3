@@ -151,37 +151,58 @@ export class HookBus {
   async emit(event: HookEvent): Promise<HookEmitResult> {
     const list = this.handlers.get(event.type)
     if (list === undefined) return { deny: null }
+    // pre_tool_use is the only variant that can deny or rewrite input — it owns
+    // the composition loop. Every other event just fires its (matched) handlers.
+    if (event.type === "pre_tool_use") return this.emitPreToolUse(event, list)
     const toolEvent = isToolEvent(event)
-    const isPre = event.type === "pre_tool_use"
-    let denied: HookDeny | null = null
-    // Track the (possibly rewritten) pre_tool_use input so successive handlers
-    // compose. `mutated` records whether ANY handler set it (so a rewrite to a
-    // falsy value is still surfaced).
-    let currentInput: unknown = isPre ? (event as HookEventOf<"pre_tool_use">).input : undefined
-    let mutated = false
     for (const stored of list) {
       if (toolEvent && !matchTool(stored.matcher, event.name)) continue
-      // Re-materialize the event with the latest input for pre_tool_use so a
-      // prior handler's rewrite is visible to this one.
-      const dispatched: HookEvent = isPre
-        ? { type: "pre_tool_use", name: (event as HookEventOf<"pre_tool_use">).name, input: currentInput }
-        : event
-      try {
-        const result = await stored.fn(dispatched)
-        if (isPre) {
-          if (denied === null && isDeny(result)) denied = result
-          if (isUpdatedInput(result)) {
-            currentInput = result.updatedInput
-            mutated = true
-          }
-        }
-      } catch (e) {
-        this.logger?.error("hook.handler.error", {
-          event: event.type,
-          error: (e as Error).message,
-        })
+      await this.runHandler(stored, event)
+    }
+    return { deny: null }
+  }
+
+  /** Composition loop for `pre_tool_use`: threads the (possibly rewritten) input
+   *  through matched handlers, recording the first deny and the last rewrite. */
+  private async emitPreToolUse(
+    event: HookEventOf<"pre_tool_use">,
+    list: StoredHandler[],
+  ): Promise<HookEmitResult> {
+    let denied: HookDeny | null = null
+    let currentInput: unknown = event.input
+    let mutated = false
+    for (const stored of list) {
+      if (!matchTool(stored.matcher, event.name)) continue
+      // Re-materialize with the latest input so a prior handler's rewrite is
+      // visible to this one (rewrites compose in registration order).
+      const result = await this.runHandler(stored, {
+        type: "pre_tool_use",
+        name: event.name,
+        input: currentInput,
+      })
+      // Normalize to a pure HookDeny — a handler may return a combined
+      // `{ deny, updatedInput }`, but the deny channel carries only the reason
+      // string (the rewrite rides the separate updatedInput channel).
+      if (denied === null && isDeny(result)) denied = { deny: result.deny }
+      if (isUpdatedInput(result)) {
+        currentInput = result.updatedInput
+        mutated = true
       }
     }
     return { deny: denied, ...(mutated ? { updatedInput: currentInput } : {}) }
+  }
+
+  /** Run one stored handler, isolating + logging a throw (returns `undefined`
+   *  on throw so the caller treats it as a no-op result). */
+  private async runHandler(stored: StoredHandler, event: HookEvent): Promise<unknown> {
+    try {
+      return await stored.fn(event)
+    } catch (e) {
+      this.logger?.error("hook.handler.error", {
+        event: event.type,
+        error: (e as Error).message,
+      })
+      return undefined
+    }
   }
 }
