@@ -3,16 +3,16 @@ title: 읽기 seam 노출
 section: 6
 subsystem: 스킬 — `Skill` 도구
 order: 4
-maturity: L3
+maturity: L4
 status: stable
-purpose: 'model/effort 스코핑 — author-advisory 본질 유지(강제 안 함). 읽기 seam 노출: skillModelOverride(skill) / skillEffortOverride(skill) () — skill.model/skill.effort 직접 reach 대신 type-safe undefined-fallback.'
+purpose: 'model/effort 스코핑 — 읽기 seam(skillModelOverride/skillEffortOverride)에 더해 loop 하니스에서 ENFORCE(L4, ADR-0011 §6.2). features.ts가 skill별 {model?,effort?} override 맵을 빌드하고, SkillGate가 활성 skill의 override를 추적(Skill 호출마다 재무장; override 없는 sibling skill은 클리어), streamConsume이 stream-open 시점에 적용 — config.modelCandidates에서 id로 LLM 포트 swap + effortToTokenBudget로 thinking budget 캡(숫자 effort=raw budget). 상속 우선순위: skill > session config > default. Additive/default-OFF: override 없는 skill은 무변경, 미지의 model id/후보 레지스트리 부재 시 config.llm 그대로(advisory degrade) → stream 호출 byte-identical.'
 evidence:
-  code: [src/skill/skill-tool.ts]
+  code: [src/skill/skill-tool.ts, src/agent/features.ts, src/agent/loop.ts]
   adrs: []
   tests:
     unit: [tests/unit/skill-overrides.test.ts]
-    integration: []
+    integration: [tests/integration/loop-skill-override.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null
-notes: '단위 테스트: inherit literal 보존, effort: 0 보존, 빈 문자열 model → undefined sentinel, ?? fallback 호스트 합성 패턴 검증'
+notes: '단위 테스트: inherit literal 보존, effort: 0 보존, 빈 문자열 model → undefined sentinel, ?? fallback 호스트 합성 패턴 검증. 통합 테스트(loop-skill-override): model+effort skill → 다음 turn이 candidate 포트+thinking budget 사용, override 없는 sibling skill이 클리어, override 없는 skill set은 매 turn byte-identical. 잔여 scope: model swap은 config.modelCandidates에 등록된 포트가 있어야 실효 — 후보 레지스트리 미주입 surface에서는 model override가 advisory로 degrade(effort는 항상 실효).'

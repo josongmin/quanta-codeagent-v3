@@ -3,9 +3,9 @@ title: response.in_progress streaming event
 section: 1
 subsystem: Streaming envelope (ADR-0048)
 order: 48
-maturity: L3
-status: new
-purpose: Ingest OpenAI Responses API v2 `response.in_progress` event so UI can show 'thinking' indicator without dropping events. Closes Codex Desktop build 2867 forward-compat gap (Codex silent-drops this event). Provides SSE/WS wire-level parser (parseSseFrame / splitSseFrames / decodeSseEvent / decodeWsEvent) with fragmented-frame, CRLF, multi-line data, BOM, rate-limited unknown-event handling. Adds StreamEvent variant `response_in_progress` (assembler skips it — non-cumulative heartbeat) and an additive `onInProgress` seam on streaming-dispatch (`InProgressIndicator { kind, message?, progress?, timestamp }`).
+maturity: L4
+status: stable
+purpose: Ingest OpenAI Responses API v2 `response.in_progress` event so UI can show 'thinking' indicator without dropping events. Closes Codex Desktop build 2867 forward-compat gap (Codex silent-drops this event). Provides SSE/WS wire-level parser (parseSseFrame / splitSseFrames / decodeSseEvent / decodeWsEvent) with fragmented-frame, CRLF, multi-line data, BOM, rate-limited unknown-event handling. Adds StreamEvent variant `response_in_progress` (assembler skips it — non-cumulative heartbeat) and an additive `onInProgress` seam on streaming-dispatch (`InProgressIndicator { kind, message?, progress?, timestamp }`). L4 wire (ADR-0048): the agent loop now passes `onInProgress` into its `streamingTurn(...)` call and emits a new `in_progress` AgentEvent (`{ timestamp, message?, progress? }`) on `config.stream`; StdoutStream renders it as a "thinking…" line and JsonlRecorder maps it onto the `recovery` TrajectoryKind (tagged `reason:"in_progress"`). Default-OFF byte-identical — the provider must yield the event AND a non-null stream must be wired for it to surface.
 evidence:
   code:
     - src/llm/streaming-events.ts
@@ -13,15 +13,18 @@ evidence:
     - src/llm/index.ts
     - src/llm/assemble.ts
     - src/agent/streaming-dispatch.ts
+    - src/agent/loop.ts
+    - src/stream/types.ts
+    - src/stream/adapters/stdout.ts
+    - src/stream/adapters/jsonl-recorder.ts
   adrs: [48]
   tests:
     unit:
       - tests/unit/streaming-events-in-progress.test.ts
     integration:
       - tests/integration/streaming-dispatch-in-progress-e2e.test.ts
+      - tests/integration/loop-in-progress.test.ts
     contract: []
 knobs: []
-deliberate_hold:
-  reason: Wire-level parser is not yet on the hot path — Anthropic SDK keeps its own SSE parser, and the OpenAI Responses API wire integration is a follow-up phase. The module is callable standalone today and is fully exercised by unit/integration tests.
-  promotion_path: When an OpenAI-Responses-direct adapter lands, route its SSE/WS frames through decodeSseEvent/decodeWsEvent and emit `response_in_progress` StreamEvents into the existing streaming-dispatch path.
-notes: ''
+deliberate_hold: null
+notes: 'L4: loop→stream wire landed (in_progress AgentEvent round-trips end-to-end). Remaining scope is the OpenAI-Responses-direct wire parser (decodeSseEvent/decodeWsEvent) staying off the hot path until that adapter lands — the Anthropic SDK keeps its own SSE parser; until then the heartbeat is sourced from the existing StreamEvent path. That parser work does not block the loop seam, which is fully exercised here.'
