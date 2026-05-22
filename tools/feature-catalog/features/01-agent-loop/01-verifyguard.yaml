@@ -8,7 +8,7 @@ status: stable
 purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.
 evidence:
   code: [src/apps/bench/eval/driver.ts]
-  adrs: []
+  adrs: [13]
   tests:
     unit: []
     integration: []

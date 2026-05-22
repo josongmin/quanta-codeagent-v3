@@ -13,7 +13,7 @@ evidence:
     - src/shared/jsonrpc/correlation.ts
     - src/shared/jsonrpc/channel-naming.ts
     - src/shared/jsonrpc/index.ts
-  adrs: [30]
+  adrs: [33]
   tests:
     unit:
       - tests/unit/jsonrpc-envelope.test.ts

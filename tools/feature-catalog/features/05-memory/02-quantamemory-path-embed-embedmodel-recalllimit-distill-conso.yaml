@@ -8,7 +8,7 @@ status: stable
 purpose: '[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SELF_EDIT/_RECALL_TIERS]'
 evidence:
   code: []
-  adrs: []
+  adrs: [8]
   tests:
     unit: []
     integration: []

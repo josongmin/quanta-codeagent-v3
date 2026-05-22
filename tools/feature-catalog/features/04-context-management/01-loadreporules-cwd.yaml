@@ -8,7 +8,7 @@ status: stable
 purpose: 'loadRepoRules(cwd) opt-in — 우선순위 AGENTS.md > CLAUDE.md > .codex/CODEX-RULES.md, 첫 비공백 파일만 채택. <system-reminder>에 ## Repo-local rules 블록 inject .'
 evidence:
   code: [src/agent/repo-rules.ts]
-  adrs: []
+  adrs: [15]
   tests:
     unit: []
     integration: []

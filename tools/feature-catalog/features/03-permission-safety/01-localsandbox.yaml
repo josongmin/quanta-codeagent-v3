@@ -8,7 +8,7 @@ status: stable
 purpose: LocalSandbox
 evidence:
   code: []
-  adrs: []
+  adrs: [6]
   tests:
     unit: []
     integration: []

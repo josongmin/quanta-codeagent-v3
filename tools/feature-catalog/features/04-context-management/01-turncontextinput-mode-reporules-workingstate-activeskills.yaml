@@ -8,7 +8,7 @@ status: stable
 purpose: TurnContextInput.{mode, repoRules, workingState, activeSkills} 모두 optional — 미설정 ⇒ 해당 reminder 블록 미렌더.
 evidence:
   code: []
-  adrs: []
+  adrs: [15]
   tests:
     unit: []
     integration: []

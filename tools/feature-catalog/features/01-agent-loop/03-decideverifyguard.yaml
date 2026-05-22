@@ -8,7 +8,7 @@ status: stable
 purpose: 순수정책 decideVerifyGuard
 evidence:
   code: []
-  adrs: []
+  adrs: [13]
   tests:
     unit: []
     integration: []

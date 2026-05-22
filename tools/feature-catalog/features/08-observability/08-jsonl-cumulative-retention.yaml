@@ -12,7 +12,7 @@ evidence:
     - src/stream/types.ts
     - src/stream/index.ts
   adrs:
-    - 29
+    - 35
   tests:
     unit:
       - tests/unit/jsonl-recorder-retention.test.ts

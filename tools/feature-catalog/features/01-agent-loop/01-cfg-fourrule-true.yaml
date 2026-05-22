@@ -8,7 +8,7 @@ status: stable
 purpose: cfg.fourRule:true 활성 시 CLOSEOUT_4RULE_REMINDER 단발 주입 — R1 Read-source / R2 Run-verify / R3 Grep-proof / R4 Stale-memory + VerificationCloseout scaffold . 단발, 모듈 순수성 보존 closeoutGuard.fourRule
 evidence:
   code: []
-  adrs: []
+  adrs: [17]
   tests:
     unit: []
     integration: []

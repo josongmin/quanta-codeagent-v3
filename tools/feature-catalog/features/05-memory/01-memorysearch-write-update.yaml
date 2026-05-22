@@ -8,7 +8,7 @@ status: stable
 purpose: self-edit memory_search/write/update, lexical graceful degrade
 evidence:
   code: []
-  adrs: []
+  adrs: [8]
   tests:
     unit: []
     integration: []

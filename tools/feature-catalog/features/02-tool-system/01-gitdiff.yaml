@@ -8,7 +8,7 @@ status: stable
 purpose: git_diff/git_status/git_log/git_blame — read-only·concurrency-safe·GitRunner 주입, mutating은 bash 잔류
 evidence:
   code: []
-  adrs: []
+  adrs: [25]
   tests:
     unit: []
     integration: []

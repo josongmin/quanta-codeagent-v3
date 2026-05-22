@@ -8,7 +8,7 @@ status: stable
 purpose: 'DockerSandbox — Sandbox.run() 풀 파이프라인 e2e: stub dockerBin로 실 Bun.spawn → 정책→argv→spawn→stdout/stderr 분리→exitCode→timeout→maxOutputBytes cap→SandboxUnavailableError→env allowlist→isAvailable() 5s kill guard. Docker daemon 의존 없이 BLOCKING gate에서 stub 바이너리로 spawn 경로를 통과 — contract 3 tests는 실 daemon, integration 10 tests는 stub.'
 evidence:
   code: []
-  adrs: []
+  adrs: [6]
   tests:
     unit: []
     integration: [tests/integration/docker-sandbox-e2e.test.ts]

@@ -10,7 +10,7 @@ evidence:
   code:
     - src/agent/mode.ts
     - src/agent/dispatch-seam-guard.ts
-  adrs: [35]
+  adrs: [36]
   tests:
     unit:
       - tests/unit/mode-mutating-table.test.ts

@@ -8,7 +8,7 @@ status: stable
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
 evidence:
   code: [src/agent/working-state.ts]
-  adrs: []
+  adrs: [21]
   tests:
     unit: []
     integration: []

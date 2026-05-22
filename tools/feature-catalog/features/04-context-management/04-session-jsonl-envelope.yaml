@@ -12,7 +12,7 @@ evidence:
     - src/session/envelope-encoder.ts
     - src/session/store.ts
     - src/session/index.ts
-  adrs: [31]
+  adrs: [34]
   tests:
     unit:
       - tests/unit/session-envelope-schema.test.ts
