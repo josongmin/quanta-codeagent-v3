@@ -81,6 +81,7 @@ export {
   parseTestFailureTool,
 } from "./parse-test-failure"
 export { ToolRegistry } from "./registry"
+export { composeShellObservers, noopShellObserver } from "./shell-exec-observers"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
 export type {
   BlockerSurface,

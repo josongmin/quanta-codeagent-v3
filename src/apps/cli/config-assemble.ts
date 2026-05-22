@@ -1,10 +1,10 @@
 import type { AgentConfig } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
+import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
 import type { PermissionContext, ToolAction } from "@/permission"
 import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
-import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { ToolRegistry } from "@/tool"
 
 /**
@@ -47,6 +47,10 @@ export interface SessionDeps {
   compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
   verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
   summarizerLlm: LLMPort | undefined
+  /** ADR-0081 shell-output-delta observer composed by the CLI surface
+   *  (painter + OTel exporter). Absent ⇒ runShell stays on its legacy
+   *  buffered path (byte-identical). */
+  onShellEvent: AgentConfig["onShellEvent"] | undefined
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -106,5 +110,6 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
     ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
     ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
+    ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
   }
 }
