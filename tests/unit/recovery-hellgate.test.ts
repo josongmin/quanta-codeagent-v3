@@ -1,4 +1,9 @@
 /**
+ * ★ CONTRACT — A3: src/agent/recovery.ts per-kind caps (stream≤3 / output≤3 /
+ *   malformed≤1 / empty≤2) are EXACT off-by-one bounded; loop.ts:1557 turn-1
+ *   accounting → recovery does NOT consume a turn slot; no refund across types.
+ *   Each assertion labeled CONTRACT (invariant) vs CHARACTERIZATION (observed).
+ *
  * A3 — RecoveryAction budget-exhaustion BOUNDARY hell-gate.
  *
  * These tests pin the EXACT boundary of every same-turn recovery budget by

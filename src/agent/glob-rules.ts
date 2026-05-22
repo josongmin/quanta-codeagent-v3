@@ -41,6 +41,15 @@ const RULE_EXTENSIONS = [".mdc", ".md"] as const
  *  than rejected — usability over a hard fail, but it cannot blow the budget. */
 export const MAX_RULE_BYTES = 16 * 1024
 
+/** Cap on the TOTAL bytes the rendered glob-rules block contributes to the
+ *  per-turn prompt. Without this, a malicious repo with N×`alwaysApply: true`
+ *  rule files would inject N × MAX_RULE_BYTES every turn, blowing the prompt
+ *  budget (and the provider's token limit). Matches the 64 KiB cap repo-rules
+ *  uses for its single-file body — same scale, same per-turn budget posture.
+ *  When the cap is hit, later rules are dropped with an explicit marker so
+ *  the model (and auditor) can see the truncation. */
+export const MAX_RENDER_BYTES = 64 * 1024
+
 /** A discovered file-scoped rule. */
 export interface GlobRule {
   /** Absolute path the rule was loaded from. */
@@ -148,14 +157,35 @@ export const selectGlobRules = (rules: GlobRule[], changedPaths: string[]): Glob
 /** Render selected rules as the per-turn `<system-reminder>` section. Returns
  *  `undefined` when the selection is empty (nothing to inject). Each rule cites
  *  its source basename + scope so the model treats it as file-scoped repo
- *  authority. */
+ *  authority.
+ *
+ *  Budget: rules are emitted in order until cumulative bytes would exceed
+ *  {@link MAX_RENDER_BYTES}; remaining rules are dropped with an explicit
+ *  truncation marker so the model (and an auditor) can see what was cut. This
+ *  is the DoS guard against a repo planting many `alwaysApply: true` files. */
 export const renderGlobRulesBlock = (rules: GlobRule[]): string | undefined => {
   if (rules.length === 0) return undefined
-  const sections = rules.map((r) => {
+  const sections: string[] = []
+  let used = 0
+  let droppedAt = -1
+  for (let i = 0; i < rules.length; i++) {
+    const r = rules[i] as GlobRule
     const scope = r.alwaysApply ? "always" : `globs: ${r.globs.join(", ")}`
     const name = basename(r.sourcePath)
     const desc = r.description !== undefined ? ` — ${r.description}` : ""
-    return `### ${name} (${scope})${desc}\n${r.body}`
-  })
-  return `## File-scoped rules\nThese rules apply to files in scope this turn; treat them as repo authority.\n\n${sections.join("\n\n")}`
+    const section = `### ${name} (${scope})${desc}\n${r.body}`
+    // +2 accounts for the `\n\n` joiner between sections (over-counts on the
+    // last section but that just makes the cap slightly stricter — safe).
+    if (used + section.length + 2 > MAX_RENDER_BYTES) {
+      droppedAt = i
+      break
+    }
+    sections.push(section)
+    used += section.length + 2
+  }
+  const truncation =
+    droppedAt >= 0
+      ? `\n\n[truncated: ${rules.length - droppedAt} more rule(s) dropped; cumulative body exceeded ${MAX_RENDER_BYTES} bytes]`
+      : ""
+  return `## File-scoped rules\nThese rules apply to files in scope this turn; treat them as repo authority.\n\n${sections.join("\n\n")}${truncation}`
 }

@@ -1,4 +1,11 @@
 /**
+ * ★ CONTRACT — F3: ADR-0016 (src/tool/git/) — 9 git tools split 7 read-only +
+ *   2 mutating (commit/branch_switch). All return TYPED graceful results on
+ *   degenerate repos (empty / detached HEAD / dirty / no upstream / nothing
+ *   staged); never crashes (`execute()` has no try/catch — an escaped throw is
+ *   a real bug, not a slow test). Uses real `defaultGitRunner` against real
+ *   tempdir + `git init`.
+ *
  * F3 — git tools on DEGENERATE repos (HELLGATE).
  *
  * Unlike `git-tools.test.ts` (which injects a FakeRunner to assert argv +

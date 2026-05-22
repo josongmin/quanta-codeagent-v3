@@ -54,45 +54,32 @@ const matchFull = (tokens: GlobTok[], s: string): boolean => {
   const T = tokens.length
   const L = s.length
   const memo = new Int8Array((T + 1) * (L + 1))
-  const go = (ti: number, si: number): boolean => {
+  // Mutually-recursive nested function declarations (hoisted, so `step`/`star`
+  // can reference `go`). Split out of one body to keep each under the
+  // cognitive-complexity cap; the memo makes the recursion poly-bounded.
+  function star(ti: number, si: number, crossSlash: boolean): boolean {
+    // consume 0..k chars (crossSlash: any incl `/`; else non-`/`), trying the
+    // continuation at each length until one matches.
+    let j = si
+    for (;;) {
+      if (go(ti + 1, j)) return true
+      if (j < L && (crossSlash || s[j] !== "/")) j++
+      else return false
+    }
+  }
+  function step(ti: number, si: number): boolean {
+    if (ti === T) return si === L
+    const tok = tokens[ti] as GlobTok
+    if (tok.k === "lit") return si < L && s[si] === tok.c && go(ti + 1, si + 1)
+    if (tok.k === "one") return si < L && s[si] !== "/" && go(ti + 1, si + 1)
+    if (tok.k === "seg") return star(ti, si, false)
+    return star(ti, si, true) // any
+  }
+  function go(ti: number, si: number): boolean {
     const key = ti * (L + 1) + si
     const cached = memo[key]
     if (cached !== 0) return cached === 1
-    let res: boolean
-    if (ti === T) {
-      res = si === L
-    } else {
-      const tok = tokens[ti] as GlobTok
-      if (tok.k === "lit") {
-        res = si < L && s[si] === tok.c && go(ti + 1, si + 1)
-      } else if (tok.k === "one") {
-        res = si < L && s[si] !== "/" && go(ti + 1, si + 1)
-      } else if (tok.k === "seg") {
-        // consume 0..k non-`/` chars, trying the continuation at each length
-        res = false
-        let j = si
-        for (;;) {
-          if (go(ti + 1, j)) {
-            res = true
-            break
-          }
-          if (j < L && s[j] !== "/") j++
-          else break
-        }
-      } else {
-        // any: consume 0..k of ANYTHING (including `/`)
-        res = false
-        let j = si
-        for (;;) {
-          if (go(ti + 1, j)) {
-            res = true
-            break
-          }
-          if (j < L) j++
-          else break
-        }
-      }
-    }
+    const res = step(ti, si)
     memo[key] = res ? 1 : 2
     return res
   }
@@ -103,6 +90,18 @@ const matchFull = (tokens: GlobTok[], s: string): boolean => {
  *  case — see {@link matchesAnyGlob}. Module-level so it is allocated once. */
 const ANY_SLASH: GlobTok[] = [{ k: "any" }, { k: "lit", c: "/" }]
 
+/** Hard caps on inputs to {@link matchesAnyGlob}. The DP matcher is
+ *  O(tokens·len²) in time and O(tokens·len) in memory (Int8Array memo); without
+ *  bounds a malicious 100KB glob or a multi-megabyte path could pin CPU or blow
+ *  out memory. Real file paths are bounded by the OS (PATH_MAX = 4096 on Linux);
+ *  real globs are short (< 100 chars in practice). The caps below are generous
+ *  multiples so legitimate inputs never hit them; over-cap inputs short-circuit
+ *  to a no-match (safe failure mode — a malicious oversized glob/path simply
+ *  never matches anything). Chosen as power-of-two multiples of the OS limit
+ *  rather than n=1-tuned thresholds. */
+export const MAX_GLOB_LEN = 4096
+export const MAX_PATH_LEN = 8192
+
 /**
  * True if `path` matches any of the gitignore-style `patterns`. Pure helper:
  * it is exported for a host to call; nothing in this slice calls it.
@@ -112,11 +111,18 @@ const ANY_SLASH: GlobTok[] = [{ k: "any" }, { k: "lit", c: "/" }]
  *   - pattern WITHOUT `/` ⇒ basename-anywhere: it matches the whole path OR a
  *     suffix that begins right after a `/`. The latter is modelled by trying
  *     the pattern again with a `**\/` prefix (any chars then a `/` boundary).
+ *
+ * Safety: a `path` longer than {@link MAX_PATH_LEN} or any pattern longer than
+ * {@link MAX_GLOB_LEN} is treated as a no-match for that input (matchesAnyGlob
+ * still scans the rest of `patterns`). This is the DoS guard for the DP
+ * matcher's O(T·L) state-space.
  */
 export const matchesAnyGlob = (path: string, patterns: string[]): boolean => {
   const norm = path.replace(/\\/g, "/").replace(/^\.?\//, "")
+  if (norm.length > MAX_PATH_LEN) return false
   return patterns.some((p) => {
     const glob = p.trim()
+    if (glob.length === 0 || glob.length > MAX_GLOB_LEN) return false
     const tokens = tokenize(glob)
     if (glob.includes("/")) return matchFull(tokens, norm)
     return matchFull(tokens, norm) || matchFull([...ANY_SLASH, ...tokens], norm)

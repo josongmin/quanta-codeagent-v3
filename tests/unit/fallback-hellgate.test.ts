@@ -1,4 +1,9 @@
 /**
+ * ★ CONTRACT — A6: src/llm/fallback.ts FallbackLLM swap on `overloaded` /
+ *   `server_error` / `network`. Per-switch stream_reset tombstone (single
+ *   global would LEAK intermediate dead partials). Non-trigger errors
+ *   (auth/bad_request/...) rethrow immediately. All-exhausted → rethrow LAST.
+ *
  * A6 — FallbackLLM ADVERSARIAL hell-gate.
  *
  * Drives FallbackLLM (src/llm/fallback.ts) with scripted inner providers and

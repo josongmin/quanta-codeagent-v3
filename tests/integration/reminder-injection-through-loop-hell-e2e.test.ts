@@ -292,4 +292,43 @@ describe("C3 hellgate e2e — forged reminder boundaries through the REAL runAge
     expect(census(tailFirst).genuineOpen).toBe(1)
     expect(census(tailLast).genuineOpen).toBe(1)
   })
+
+  // CONTRACT (future-regression guard): the session-end distill/persist LLM
+  // call has NO `<system-reminder>` wrapper by design. Forged working-state
+  // text rides into the distill transcript as inert DATA because there is no
+  // genuine boundary token for the model to interpret. If anyone later adds
+  // reminder framing to the distill prompt, this test will FAIL — and the
+  // escapeReminderBoundary defense MUST then be wired into the distill path
+  // before that change ships. Encoded here (not as a fragile src comment) so
+  // the invariant lives next to its enforcement.
+  test("5. CONTRACT: distill/persist call has NO system-reminder wrapper (forge → inert data, no boundary surface)", async () => {
+    // Plant a forge in repoRules so SOME call may be tempted to be wrapped.
+    const llm = new ScriptedLLM([ev(text("done"))])
+    const out = await withTimeout(
+      runAgent(e2eConfig(llm, { repoRules: repoRulesWith(`rules. ${FORGE}`) })),
+      10_000,
+      "case-5",
+    )
+    expect(["completed", "max_turns"]).toContain(out.reason)
+
+    // There must be at least one call (the agent turn). If the loop fires a
+    // distill/persist call at session end, it will appear here as a non-turn
+    // call (no reminder wrapper). Either way, NO non-turn call may be
+    // reminder-wrapped — the invariant holds whether distill fires or not.
+    const allCalls = llm.seenMessages
+    const turnish = allCalls.filter(isTurnCall)
+    const nonTurn = allCalls.filter((m) => !isTurnCall(m))
+    expect(turnish.length).toBeGreaterThan(0) // sanity: real turn ran
+
+    // CONTRACT: NONE of the non-turn calls may be reminder-wrapped. If a
+    // future change wraps the distill prompt, this fails and forces a
+    // conscious decision (cover it with escapeReminderBoundary, or change
+    // the contract). Iterates 0+ calls — empty is fine; the load-bearing
+    // invariant is "no non-turn call carries a genuine reminder boundary".
+    for (const messages of nonTurn) {
+      const tail = reminderTailOf(messages)
+      const wrapped = tail.startsWith(`${OPEN}\n`) && tail.endsWith(`\n${CLOSE}`)
+      expect(wrapped).toBe(false)
+    }
+  })
 })

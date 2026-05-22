@@ -1,3 +1,11 @@
+/**
+ * ★ CONTRACT — C3: src/agent/prompt.ts `escapeReminderBoundary` neutralizes
+ *   forged `<system-reminder>` / `</system-reminder>` tokens in repoRules /
+ *   memory / workingState fields. Genuine boundary count remains exactly 1
+ *   per dynamic context block (the trailing reminder); forged ones ride as
+ *   inert escaped DATA. Cache prefix stays byte-identical across turns
+ *   (per-turn forgery churn does not move the breakpoint).
+ */
 import { describe, expect, test } from "bun:test"
 import type { TurnContextInput } from "@/agent"
 import { buildTurnContext } from "@/agent"

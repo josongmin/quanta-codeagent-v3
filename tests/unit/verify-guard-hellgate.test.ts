@@ -1,3 +1,21 @@
+/**
+ * ★ CONTRACT — verify-guard hard-gate (ADR-0067 verification discipline).
+ *   src/agent/verify-guard.ts `decideVerifyGuard` BLOCKS closeout when:
+ *     (a) the session mutated code (edit/write/scripted_replace fired), AND
+ *     (b) NO test-like bash command ran afterward (registry in
+ *         src/agent/verify-signal.ts: pytest/bun test/npm test/go test/cargo
+ *         test/jest/vitest/make test/tox/python -m pytest/... — 16+ matchers).
+ *   `VERIFY_FORCE_MESSAGE` is injected as a forced continuation; the lying-
+ *   command set (git status / echo / cd && ls / runserver / `true` / ...)
+ *   must NOT satisfy. Negative-table loophole is the precise security boundary.
+ *
+ *   THIS IS THE FLAGSHIP CLAIM ("거짓-success 방지 = hard gate, not prompt").
+ *   Every assertion is labeled inline: CONTRACT (gate blocks/satisfies) vs
+ *   CHARACTERIZATION (exact recognizer return shape). Both halves of the
+ *   lying-command table and the real-runner table use the REAL
+ *   decideVerifyGuard / isTestLikeCommand / matchVerifyCommand — no
+ *   reimplemented regex in tests.
+ */
 import { describe, expect, test } from "bun:test"
 import {
   createVerifyGuardState,

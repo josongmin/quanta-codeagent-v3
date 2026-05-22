@@ -1,4 +1,8 @@
 /**
+ * ★ CONTRACT — A4: src/agent/streaming-dispatch.ts HOL barrier (state.
+ *   barrierEngaged on first concurrency-UNSAFE tool) + Slot.order preserves
+ *   model-call order in resultBlocks. Trailing-safe-after-unsafe = serialized.
+ *
  * A4 — streaming HEAD-OF-LINE barrier ADVERSARIAL hell-gate.
  *
  * Drives the pure `streamingTurn` engine (src/agent/streaming-dispatch.ts) with

@@ -1,3 +1,13 @@
+/**
+ * ★ CONTRACT — E2: src/tool/edit/{fuzzy,strategy-hint}.ts + src/patch (V4A).
+ *   3-stage recovery ladder: exact → fuzzy (whitespace-flex) → no-confident-
+ *   match returns ok:false + structured `classifyMismatch` / `formatStrategy
+ *   Hint` naming the next action (read_then_patch / scripted_replace).
+ *   Ambiguous match (old_string appears 2+ times) → reject + scripted_replace
+ *   hint, file NOT mutated. apply_patch V4A `*** Move to:` rename + edit is
+ *   ATOMIC (invalid edit ⇒ rename does NOT half-apply; occupied dest ⇒ both
+ *   files untouched).
+ */
 import { describe, expect, test } from "bun:test"
 import {
   applyPatch,

@@ -125,7 +125,10 @@ describe("HELLGATE glob rules — selection has no false positives", () => {
   })
 
   test("empty changedPaths selects ONLY alwaysApply rules, never a glob rule", () => {
-    const rules = [rule({ globs: ["*.ts"], body: "G" }), rule({ alwaysApply: true, globs: [], body: "A" })]
+    const rules = [
+      rule({ globs: ["*.ts"], body: "G" }),
+      rule({ alwaysApply: true, globs: [], body: "A" }),
+    ]
     expect(selectGlobRules(rules, []).map((r) => r.body)).toEqual(["A"])
   })
 })

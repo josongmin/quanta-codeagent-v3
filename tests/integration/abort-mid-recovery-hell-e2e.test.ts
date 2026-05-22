@@ -1,4 +1,15 @@
 /**
+ * ★ CONTRACT — AbortSignal yields a clean, prompt, no-orphan termination at the
+ *   hardest moments: mid backoff-sleep (src/agent/recovery.ts + abort-aware
+ *   sleep), mid HOL-barrier deferred drain (src/agent/streaming-dispatch.ts),
+ *   and mid verify-guard forced turn (src/agent/verify-guard.ts, ADR-0067).
+ *   Invariants: no deferred tool starts after abort; no retry/forced stream
+ *   opens after abort; loop reports {reason:"aborted", turns:turn-1}
+ *   (loop.ts:1557 turn-1 accounting); `withTimeout` proves no hang.
+ *
+ *   Each test labels its assertions: CONTRACT (clean-termination/no-orphan)
+ *   vs CHARACTERIZATION (exact llm.calls / abort-moment timing).
+ *
  * HELLGATE — abort at the NASTIEST in-loop moments, driving the REAL `runAgent`.
  *
  * `tests/integration/agent-abort.test.ts` already covers the COARSE abort

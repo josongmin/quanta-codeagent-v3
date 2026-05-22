@@ -1,4 +1,10 @@
 /**
+ * ★ CONTRACT — B6: ADR-0050 5-tier TrustScope (always_allow / project /
+ *   workspace / session / once_only / deny) as 2D space×time matrix.
+ *   src/permission/trust-scope.ts: once_only consumed exactly once (first hit
+ *   admits, second re-prompts); grants never leak across projectKey/tool/
+ *   actionKey; deny is sticky and never reported as a positive grant.
+ *
  * HELLGATE — trust-scope race / double-consume / cross-scope leak proofs (B6).
  *
  * Security invariants under attack:

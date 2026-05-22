@@ -1,4 +1,11 @@
 /**
+ * ★ CONTRACT — B5: ADR-0029 reviewer-tier × outcome enum. src/permission/
+ *   outcome.ts ALL_OUTCOMES (8 states), `_exhaustive: never` exhaustiveness,
+ *   `buildDecision` throws OutcomeInvariantError on every illegal
+ *   reviewer×outcome cell (24-cell matrix). Sticky DenialMemory precedence:
+ *   user_aborted > guardian_denied > user_denied (monotone — no later allow
+ *   can override a sticky denial).
+ *
  * HELLGATE — outcome invariant FULL MATRIX + sticky-denial conflict proofs (B5).
  *
  * Two security invariants under attack:

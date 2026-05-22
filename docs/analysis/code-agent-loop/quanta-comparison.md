@@ -6,6 +6,8 @@
 
 **검증 상태 (2026-05-22 실제 소스 재확인)**: quanta=코드 / **Codex 0.130.0**=`/opt/homebrew/lib/node_modules/@openai/codex` + `~/.codex/{config.toml,memories/,rules/,archived_sessions/}` 실제 확인 / **Cursor 3.2.16**=`/Applications/Cursor.app` extensions + `cursorsandbox` 바이너리 strings(minified 한계 — 숫자 일부 미검증) / **Claude Code 2.1.138**=205MB 바이너리 strings + Desktop asar.
 
+★ **각 "quanta 이김" 주장의 실행 증거 → §실행 가능한 증거 인덱스 (mutation-proven hellgate tests + cross-subsystem e2e). 추론 아니라 `bun test <파일>`로 재현 가능.**
+
 > ⚠️ **이전 버전 정정 (실제 소스 검증으로 드러난 내 추론 오류)**:
 > - **trust scope는 quanta 유일이 아니다** — Codex config.toml `trust_level="trusted/untrusted"`(per-project), Claude Code `trustedNetworkDirectories`/TrustDialog 실재. quanta는 5-tier matrix로 더 세분일 뿐.
 > - **reviewer 개념도 quanta 유일이 아니다** — Claude Code `advisor` tool(stronger reviewer model) + code-reviewer/security-reviewer named subagent 실재. quanta가 유일한 건 **8-state ApprovalOutcome + invariant 검증 + typed 3-tier enum**(형식화), reviewer "기능"이 아님.
@@ -575,6 +577,53 @@
 - **trust scope** — Codex(per-project 2-state) + Claude(dir trust) 둘 다. quanta는 5-tier로 더 세분일 뿐.
 - **reviewer 기능** — Claude advisor + named reviewer subagent. quanta는 형식화(8-state)가 다른 것.
 - **5-tier가 아닌 trust 자체**는 흔함.
+
+---
+
+## ★ 실행 가능한 증거 인덱스 (executable evidence — claims are mutation-proven, not inferred)
+
+각 "quanta 이김" 축은 2026-05-22~23 mutation-testing으로 검증된 헬게이트 테스트(unit) + cross-subsystem e2e가 강제합니다. 모든 적대 케이스에 control/discriminator(차별군)가 동반되어 vacuous-pass 불가. 재현: `bun test <파일>` (toolchain: `/Users/songmin/.bun/bin/bun`).
+
+### unit 헬게이트 (단일 축 불변식)
+
+| 축 | 주장 | 증거 테스트 | 강제하는 계약 |
+|---|---|---|---|
+| A3 | 동일-턴 복구가 turn slot 안 먹음, 예산 타입 간 환불 없음 | [recovery-hellgate](../../../tests/unit/recovery-hellgate.test.ts) | src/agent/recovery.ts 캡 (stream≤3/output≤3/malformed≤1/empty≤2) + loop.ts:1557 turn-1 회계 |
+| A4 | HOL barrier + model-call order 보존 | [streaming-dispatch-hellgate](../../../tests/unit/streaming-dispatch-hellgate.test.ts) | src/agent/streaming-dispatch.ts barrier + Slot.order |
+| A6 | 529 swap → stream_reset(per-switch) → dead partial 폐기 | [fallback-hellgate](../../../tests/unit/fallback-hellgate.test.ts) | src/llm/fallback.ts (per-switch tombstone — single은 누설 버그) |
+| B3 | admissibility 8-stage SSOT 단일 함수, 옵션 absent 시 레거시와 byte-identical | [admissibility-hellgate](../../../tests/unit/admissibility-hellgate.test.ts) | ADR-0018 + Wave A (ADR-0029/0031/0046/0050/0061) |
+| B5 | ApprovalOutcome 8-state + invariant throw, sticky denial 단조성 | [outcome-hellgate](../../../tests/unit/outcome-hellgate.test.ts) | ADR-0029 reviewer (src/permission/outcome.ts ALL_OUTCOMES=8, exhaustiveness) |
+| B6 | TrustScope 5-tier 2D matrix, once_only 정확히 1회 consume | [trust-scope-hellgate](../../../tests/unit/trust-scope-hellgate.test.ts) | ADR-0050 (src/permission/trust-scope.ts) |
+| B10 | fs-jail 중첩 symlink 체인 차단 + branded type, opt-out 명시 | [fs-jail-hellgate](../../../tests/unit/fs-jail-hellgate.test.ts) | src/storage/service.ts FsJailError + realpath chain |
+| C3 | escapeReminderBoundary가 다중 위조 boundary 무력화, genuine 1개 유지 | [prompt-escape-hellgate](../../../tests/unit/prompt-escape-hellgate.test.ts) | src/agent/prompt.ts escapeReminderBoundary |
+| C4 | 4-section cache breakpoint cap, prefix byte-identical | [prompt-sections-hellgate](../../../tests/unit/prompt-sections-hellgate.test.ts) | ADR-0004 cache prefix (src/agent/prompt-sections.ts MAX_CACHE_BREAKPOINTS=4) |
+| C5 | memory recall hard filters, supersede 체인, eviction 30d 경계 | [memory-hellgate](../../../tests/unit/memory-hellgate.test.ts) | src/memory/{ranking,dedup,eviction,consolidate}.ts |
+| C7/D5 | verify-guard가 거짓말 명령 22종을 차단, 진짜 러너 13생태계만 satisfy | [verify-guard-hellgate](../../../tests/unit/verify-guard-hellgate.test.ts) | ADR-0067 (src/agent/verify-guard.ts + verify-signal.ts) |
+| D6 | thrash breaker 3-strike + 15% progress 경계 | [compaction-breaker-hellgate](../../../tests/unit/compaction-breaker-hellgate.test.ts) | src/agent/compaction-breaker.ts DEFAULT_COMPACTION_BREAKER_CAPS |
+| E2 | edit exact→fuzzy→strategy-hint 3단, V4A rename atomic | [edit-recovery-hellgate](../../../tests/unit/edit-recovery-hellgate.test.ts) | src/tool/edit/{fuzzy,strategy-hint}.ts + src/patch (V4A) |
+| F3 | git 9-tool degenerate-repo graceful (empty/detached/dirty/no-upstream) | [git-tools-hellgate](../../../tests/unit/git-tools-hellgate.test.ts) | ADR-0016 (src/tool/git/) |
+| G1 | JSONL envelope byte-identical round-trip, key-order determinism | [session-envelope-hellgate](../../../tests/unit/session-envelope-hellgate.test.ts) | ADR-0034 (src/session/envelope.ts) |
+| G3 | costUsd unknown-model⇒null (null-proto + hasOwn), cache_read@input rate | [pricing-hellgate](../../../tests/unit/pricing-hellgate.test.ts) | RFC-0002 §5.3 PRICING_VERSION (src/observability/pricing.ts) |
+
+### cross-subsystem e2e (조합 불변식 — 단일 축 e2e는 못 잡는다)
+
+| 조합 | 증거 e2e | 강제하는 조합 불변식 |
+|---|---|---|
+| 다른 복구 타입이 한 턴에 연쇄 | [recovery-composition-hell-e2e](../../../tests/integration/recovery-composition-hell-e2e.test.ts) | 예산이 타입 간 환불 안 됨 + freshRecovery 턴별 리셋 |
+| fallback × verify-guard × closeout | [fallback-x-verify-closeout-hell-e2e](../../../tests/integration/fallback-x-verify-closeout-hell-e2e.test.ts) | swap 복구가 verify gate를 우회 못 함 |
+| abort × backoff/barrier/forced-verify | [abort-mid-recovery-hell-e2e](../../../tests/integration/abort-mid-recovery-hell-e2e.test.ts) | 가장 험한 순간에 abort = 깨끗 종료, orphan/hang 없음 |
+| HARD_DENY × 멀티툴 × HOL × order | [hard-deny-mid-multitool-hell-e2e](../../../tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts) | 위험 도구만 deny, 안전 형제 실행, 결과 순서 보존, 위험 명령 실제 미실행 |
+| 위조 boundary가 실제 루프 통과 | [reminder-injection-through-loop-hell-e2e](../../../tests/integration/reminder-injection-through-loop-hell-e2e.test.ts) | LLM이 받는 프롬프트의 genuine boundary 정확히 1개 (+ distill 호출엔 reminder wrapper 없음 = 위조 불가) |
+| flagship verify-guard | [verify-guard-hellgate-e2e](../../../tests/integration/verify-guard-hellgate-e2e.test.ts) | edit→`git status`만으론 게이트 안 풀림, 진짜 pytest로만 satisfy (stub은 `z.object({}).passthrough()`로 ZodAny 결합 끊음) |
+| breaker × recovery 인터리브 | [breaker-x-recovery-hell-e2e](../../../tests/integration/breaker-x-recovery-hell-e2e.test.ts) | recovery 넛지/backoff가 breaker thrash 카운터 마스킹 안 함 |
+
+### 발견된 동작 (CHARACTERIZATION — 명세된 계약 아니라 *관찰된* 동작; 변하면 리뷰 대상)
+- **FallbackLLM은 턴 간 stateless**: 루프가 매 턴 `stream()` 호출 → providers[0]부터 재시작. 각 턴 독립성은 의도된 계약, 정확한 `.calls` 카운트는 CHARACTERIZATION.
+- **breaker 루프-도달 trip은 cap=1**: `reactiveCompact`의 자체 fail-fast(boundary/drop-ratio)가 2번째 squeeze를 먼저 차단. default cap=3 경계는 unit 레이어에서만 도달 가능.
+- **distill/persist 프롬프트엔 `<system-reminder>` wrapper 없음**: 위조 working-state 텍스트가 거기 실려도 inert. 향후 distill에 reminder framing 추가 시 escapeBoundary 커버 필요 — 위 reminder-injection e2e가 이를 회귀 가드로 강제.
+
+### 안 다룬 것 (정직히)
+**B1 도구 수, B2 스키마 노출, B11 hook, B12 MCP** 등 인벤토리/통합 축은 비교 정보이지 강제 가능한 불변식 아님. **C1 정책스택**은 prompt-system.test.ts가 마커 단언으로 일부 커버하나 mutation 미검증. **C8 mode**, **A5 compaction**(통합 — 위 D6 + breaker-x-recovery 조합으로 부분 커버). 후속 hellgate 후보.
 
 ---
 **자매**: [cursor.md](cursor.md) · [claude.md](claude.md)

@@ -1,4 +1,17 @@
 /**
+ * ★ CONTRACT — HARD_DENY × multi-tool-turn × HOL-barrier × result-order through
+ *   the REAL `runAgent` loop. References:
+ *   - ADR-0018 admissibility SSOT, ADR-0029/0031/0046/0050/0061 Wave A.
+ *   - src/agent/admissibility-gate.ts early HARD_DENY pull (rm-rf / curl|bash /
+ *     fork-bomb), src/agent/streaming-dispatch.ts HOL barrier.
+ *   Invariants: dangerous tool denied + handoff event, safe siblings still
+ *   execute, dangerous command NEVER executed (stub records actual exec),
+ *   tool_result ordering preserved (model-call order), no mode (incl. bypass)
+ *   can override HARD_DENY.
+ *
+ *   Each test labels assertions: CONTRACT (deny/order/never-executed) vs
+ *   CHARACTERIZATION (exact event counts, preview strings).
+ *
  * HELLGATE e2e — HARD_DENY in the MIDDLE of a multi-tool assistant turn,
  * driven through the REAL `runAgent` loop (NOT `runAdmissibilityGate` /
  * `dispatchTool` / `streamingTurn` in isolation).

@@ -1,3 +1,12 @@
+/**
+ * ★ CONTRACT — C5: src/memory/{ranking,dedup,eviction,consolidate}.ts.
+ *   recall HARD filters (tag / freshness / supersede) cannot be bypassed by a
+ *   max-vector-score decoy. Supersede CHAIN A→B→C: only C is recalled (A and
+ *   B excluded even if higher-scored). Eviction 30d boundary EXACT (decay vs
+ *   delete, EVICTION_DECAY=0.5); superseded + aged → deleted; archived
+ *   survivors → decay (not delete). Tier caps INDEPENDENT (flood one → others
+ *   not evicted; over-cap drops lowest-priority first).
+ */
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_EVICTION_CAPS, EVICTION_DECAY, planEviction } from "@/memory/eviction"
 import { rankEntries } from "@/memory/ranking"

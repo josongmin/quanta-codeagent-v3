@@ -1,4 +1,11 @@
 /**
+ * ★ CONTRACT — G3: RFC-0002 §5.3 PRICING_VERSION (src/observability/pricing.ts)
+ *   "Unknown model ⇒ null (not an error)" + cache_read billed at INPUT rate +
+ *   zero-tokens known-model ⇒ 0. Structural defense: TABLE is `Object.create(
+ *   null)` (no prototype chain) + call-site `Object.hasOwn` guard — prototype-
+ *   named models (constructor/__proto__/toString/hasOwnProperty/valueOf) are
+ *   genuinely unknown → null, NOT NaN (the original silent bug this fixed).
+ *
  * G3 — cost / pricing boundaries (HELLGATE).
  *
  * Locks the pinned price table against silent drift, asserts the EXACT

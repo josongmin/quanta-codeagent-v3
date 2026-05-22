@@ -1,4 +1,10 @@
 /**
+ * ★ CONTRACT — B10: src/storage/service.ts FsJailError + branded JailedPath
+ *   (compile-time escape prevention) + realpath-chain symlink resolution. A
+ *   nested symlink chain (jail/a → jail/b → /outside) is rejected; in-jail
+ *   symlinks are not false-positives; `QUANTA_FS_JAIL=off` is the only opt-out
+ *   (non-sticky); anti-regression scanner rejects `as JailedPath` casts.
+ *
  * HELLGATE — fs-jail traversal attacks (B10).
  *
  * Security invariant under attack: NO path manipulation can read or write

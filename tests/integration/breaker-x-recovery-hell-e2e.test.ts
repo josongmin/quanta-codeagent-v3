@@ -5,6 +5,20 @@ import { LLMError } from "@/shared"
 import { cfg, ev, RecordingStream, ScriptedLLM, text, thr, withTimeout } from "./_harness"
 
 /**
+ * ★ CONTRACT — compaction thrash breaker (src/agent/compaction-breaker.ts,
+ *   DEFAULT_COMPACTION_BREAKER_CAPS 3/0.15) is NOT masked by SAME-TURN recovery
+ *   (max_tokens nudges, transient backoffs). Trip reason `rapid_refill_breaker`;
+ *   `withTimeout` proves no infinite spin; maxTurns is NOT the savior.
+ *   Discriminator: healthy compaction (≥15% progress) does NOT trip.
+ *
+ *   DISCOVERED BEHAVIOR (label inline):
+ *   - Loop-reachable trip is at cap=1 because reactiveCompact's own fail-fast
+ *     (boundary / drop-ratio) intercepts the 2nd squeeze before strike 3.
+ *     Default cap=3 boundary is pinned at the unit layer
+ *     (tests/unit/compaction-breaker-hellgate.test.ts) via the pure state
+ *     machine. "Breaker NOT masked by recovery" is CONTRACT; cap=1-loop-
+ *     reachable is CHARACTERIZATION of the reactiveCompact interaction.
+ *
  * HELLGATE — compaction-thrash breaker × SAME-TURN recovery COMPOSITION.
  *
  * Existing coverage (DO NOT duplicate):

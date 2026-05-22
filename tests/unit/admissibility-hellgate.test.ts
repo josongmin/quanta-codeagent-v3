@@ -1,4 +1,10 @@
 /**
+ * ★ CONTRACT — B3: ADR-0018 admissibility SSOT (single `runAdmissibilityGate`)
+ *   + Wave A (ADR-0029/0031/0046/0050/0061). HARD_DENY beats every allow
+ *   signal (trust always_allow + rule allow + onConfirm + hook allow + bypass
+ *   mode). pre_tool_use hook is the irrevocable last gate. rule "ask" without
+ *   ReviewerPort fails closed. Options absent → byte-identical legacy path.
+ *
  * HELLGATE — adversarial admissibility-gate stage-ordering proofs (B3).
  *
  * These are NOT happy-path tests. Each case stacks EVERY available allow

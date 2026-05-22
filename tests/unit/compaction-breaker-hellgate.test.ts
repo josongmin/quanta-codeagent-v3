@@ -1,3 +1,12 @@
+/**
+ * ★ CONTRACT — D6: src/agent/compaction-breaker.ts CompactionBreaker. The
+ *   3-strike consecutive-reactive-compaction boundary is EXACT off-by-one
+ *   (2 allowed, 3rd trips with reason `rapid_refill_breaker`). The 15%
+ *   progress-ratio threshold is INCLUSIVE on the documented side (use
+ *   exported `DEFAULT_COMPACTION_BREAKER_CAPS`, no magic literals). Trip
+ *   surfaces as a clean structured abort (not infinite spin, not maxTurns
+ *   exhaustion). Healthy compaction (≥15% progress) resets the strike.
+ */
 import { describe, expect, test } from "bun:test"
 import { CompactionBreaker, DEFAULT_COMPACTION_BREAKER_CAPS } from "@/agent/compaction-breaker"
 

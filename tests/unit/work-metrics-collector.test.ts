@@ -199,10 +199,12 @@ describe("TurnWorkMetricsCollector — finalize", () => {
     expect(m.tokensOutput).toBe(800)
     expect(m.cacheReadTokens).toBe(100)
     expect(m.diffMap).toHaveLength(3)
-    // Sonnet: $3/M in (+ cacheRead at input rate) + $15/M out
-    //   inCost = (1200 + 100) * 3 / 1e6 = 0.0039
-    //   outCost = 800 * 15 / 1e6        = 0.012
-    //   total                            = 0.0159
-    expect(m.estimatedCostUsd).toBeCloseTo(0.0159, 6)
+    // Sonnet (pricing v2 — Anthropic cacheRead billed at the discounted
+    // cache-read rate $0.3/M = 0.1×in, NOT the full input rate):
+    //   inCost     = 1200 * 3   / 1e6 = 0.0036
+    //   cacheCost  = 100  * 0.3 / 1e6 = 0.00003
+    //   outCost    = 800  * 15  / 1e6 = 0.012
+    //   total                          = 0.01563
+    expect(m.estimatedCostUsd).toBeCloseTo(0.01563, 6)
   })
 })

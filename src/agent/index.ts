@@ -45,6 +45,7 @@ export {
   GLOB_RULE_DIRS,
   type GlobRule,
   loadGlobRules,
+  MAX_RENDER_BYTES,
   MAX_RULE_BYTES,
   renderGlobRulesBlock,
   selectGlobRules,

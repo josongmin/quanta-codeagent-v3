@@ -154,7 +154,9 @@ describe("probe main — integration", () => {
     restore()
     expect(code).toBe(0)
     const text = read()
-    expect(text).toMatch(/pricing\.v1/)
+    // Match any pricing version (the probe prints the live PRICING_VERSION,
+    // which bumps when the cost model changes — don't pin a specific number).
+    expect(text).toMatch(/pricing\.v\d/)
     expect(text).toMatch(/\$|n\/a/)
   })
 

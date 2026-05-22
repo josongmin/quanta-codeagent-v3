@@ -1,3 +1,17 @@
+/**
+ * ★ CONTRACT — Composition of FallbackLLM (src/llm/fallback.ts) × verify-guard
+ *   (src/agent/verify-guard.ts, ADR-0067) × closeout in ONE `runAgent` run.
+ *   - Per-switch stream_reset tombstone: dead partials from N intermediate
+ *     providers must each be tombstoned; single-tombstone would LEAK b1, c1...
+ *     (proven adversarially in the unit fallback-hellgate).
+ *   - Fallback recovery does NOT bypass verify-guard: a fallback-swapped edit
+ *     still requires a real test command afterward to satisfy the gate.
+ *
+ *   DISCOVERED BEHAVIOR (label inline):
+ *   - FallbackLLM is STATELESS per turn — the loop calls .stream() per turn and
+ *     FallbackLLM restarts at providers[0]. Turn independence is CONTRACT;
+ *     exact .calls counts per turn are CHARACTERIZATION.
+ */
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"

@@ -1,3 +1,12 @@
+/**
+ * ★ CONTRACT — C4: ADR-0004 cache prefix (src/agent/prompt-sections.ts).
+ *   `fourSectionPreset` + `MAX_CACHE_BREAKPOINTS = 4` cap is HARD — with 5
+ *   cacheable inputs (base + project_md + session_ctx + user_append +
+ *   memorySummary), the section count stays ≤ 4 (memorySummary coalesces with
+ *   session_ctx). `validateSectionsCacheBudget` rejects a hand-built 5-cached
+ *   list. cache:false sections do not consume budget. Cached prefix is byte-
+ *   identical across turns (per-turn churn lives in trailing user, not prefix).
+ */
 import { describe, expect, test } from "bun:test"
 import type { TurnContextInput } from "@/agent"
 import { buildTurnContext } from "@/agent"

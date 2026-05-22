@@ -34,7 +34,7 @@
  *      `skillsActivatedFor(skills, changedPaths)` and act on the result.
  *      Declaring `paths:` has no runtime effect until a host does this.
  */
-export { matchesAnyGlob, skillsActivatedFor } from "./activation"
+export { MAX_GLOB_LEN, MAX_PATH_LEN, matchesAnyGlob, skillsActivatedFor } from "./activation"
 export { discoverSkills } from "./discover"
 export { parseFrontmatter } from "./frontmatter"
 export {

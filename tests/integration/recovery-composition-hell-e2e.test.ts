@@ -1,4 +1,12 @@
 /**
+ * ★ CONTRACT — Composition of SAME-TURN recovery types in one `runAgent` run.
+ *   - src/agent/recovery.ts caps: stream≤3 / output≤3 / malformed≤1 / empty≤2 (per-kind, no refund across types)
+ *   - src/agent/loop.ts:1557-1560 documents `turn-1` accounting: a no-work
+ *     error/abort reports turns-1 and does NOT count as a model turn.
+ *   - freshRecovery() per logical turn → budgets reset between turns, not within.
+ *   Each assertion is labeled inline: CONTRACT (invariant) vs CHARACTERIZATION
+ *   (observed exact .calls / events; change = behavior change to review).
+ *
  * HELLGATE — recovery COMPOSITION across the REAL `runAgent` loop.
  *
  * The existing `agent-recovery-e2e.test.ts` + `recovery-hellgate.test.ts`
