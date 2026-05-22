@@ -162,6 +162,11 @@ export interface ToolResult {
  *   - `rejected`: a human/gate declined the call (HITL deny, plan-mode block).
  *     `reason` is the stable tag.
  *   - `timeout`: execution exceeded a deadline. `timeoutMs` carried when known.
+ *   - `spawn_error`: an external process could not be launched at all (Cursor
+ *     `ShellSpawnError` — e.g. `command not found`, ENOENT). Distinct from
+ *     `error` because the retry strategy differs: the model should pick a
+ *     DIFFERENT command rather than re-read an error string. `error` carries the
+ *     spawn diagnostic.
  *   - `error`: any other failure. `modelVisibleError` is the safe text shown to
  *     the model; `clientVisibleError` is richer detail for the UI/operator that
  *     is NOT necessarily forwarded to the model (Cursor's
@@ -171,6 +176,7 @@ export type ToolFailure =
   | { mode: "permission_denied"; path?: string; isReadonly?: boolean }
   | { mode: "rejected"; reason: string }
   | { mode: "timeout"; timeoutMs?: number }
+  | { mode: "spawn_error"; error: string }
   | { mode: "error"; modelVisibleError?: string; clientVisibleError?: string }
 
 /** Optional RFC-0002 §5.2 execution evidence a tool may attach to its

@@ -52,13 +52,27 @@ export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
         info = await fs.statFile(input.path, ctx.cwd)
       } catch (e) {
         if (e instanceof FsJailError) {
-          yield { type: "result", result: { ok: false, output: e.message } }
+          yield {
+            type: "result",
+            result: {
+              ok: false,
+              output: e.message,
+              failure: { mode: "permission_denied", path: input.path, isReadonly: false },
+            },
+          }
           return
         }
         throw e
       }
       if (info.isDirectory) {
-        yield { type: "result", result: { ok: false, output: `${input.path} is a directory` } }
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: `${input.path} is a directory`,
+            failure: { mode: "not_found", path: input.path },
+          },
+        }
         return
       }
 

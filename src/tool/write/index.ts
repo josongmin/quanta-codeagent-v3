@@ -58,7 +58,14 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
         }
       } catch (e) {
         if (e instanceof FsJailError) {
-          yield { type: "result", result: { ok: false, output: e.message } }
+          yield {
+            type: "result",
+            result: {
+              ok: false,
+              output: e.message,
+              failure: { mode: "permission_denied", path: input.path, isReadonly: false },
+            },
+          }
           return
         }
         throw e

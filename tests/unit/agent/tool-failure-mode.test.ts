@@ -82,6 +82,10 @@ describe("(b) each ToolFailure mode round-trips through dispatch normalization",
     { name: "rejected", failure: { mode: "rejected", reason: "user-declined" } },
     { name: "timeout", failure: { mode: "timeout", timeoutMs: 30_000 } },
     {
+      name: "spawn_error",
+      failure: { mode: "spawn_error", error: "bash: nope: command not found" },
+    },
+    {
       name: "error",
       failure: {
         mode: "error",
@@ -147,6 +151,8 @@ describe("(d) exhaustiveness — switch over ToolFailure['mode'] with never defa
         return `rejected:${f.reason}`
       case "timeout":
         return `timeout:${f.timeoutMs ?? "?"}`
+      case "spawn_error":
+        return `spawn_error:${f.error}`
       case "error":
         return `error:${f.modelVisibleError ?? "?"}`
       default: {
@@ -164,6 +170,9 @@ describe("(d) exhaustiveness — switch over ToolFailure['mode'] with never defa
     expect(describeFailure({ mode: "permission_denied" })).toBe("permission_denied:denied")
     expect(describeFailure({ mode: "rejected", reason: "r" })).toBe("rejected:r")
     expect(describeFailure({ mode: "timeout", timeoutMs: 5 })).toBe("timeout:5")
+    expect(describeFailure({ mode: "spawn_error", error: "not found" })).toBe(
+      "spawn_error:not found",
+    )
     expect(describeFailure({ mode: "error", modelVisibleError: "boom" })).toBe("error:boom")
   })
 })

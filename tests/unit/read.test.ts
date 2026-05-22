@@ -85,6 +85,41 @@ describe("readTool", () => {
     expect(r.output).toContain("is a directory")
   })
 
+  test("directory path → failure.mode not_found with path (absorb #2)", async () => {
+    const sub = join(dir, "adir-typed")
+    mkdirSync(sub)
+    const r = await run({ path: sub })
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "not_found", path: sub })
+    // Human-readable output preserved.
+    expect(r.output).toContain("is a directory")
+  })
+
+  test("FS jail escape → failure.mode permission_denied isReadonly:false (absorb #2)", async () => {
+    const jail = mkdtempSync(join(tmpdir(), "read-jail-typed-"))
+    const outside = mkdtempSync(join(tmpdir(), "read-outside-typed-"))
+    const victim = join(outside, "secret.txt")
+    writeFileSync(victim, "top-secret")
+    try {
+      const prev = process.env.QUANTA_FS_JAIL
+      delete process.env.QUANTA_FS_JAIL
+      let result: ToolResult | undefined
+      for await (const ev of readTool.execute({ path: victim } as never, ctx(jail))) {
+        if (ev.type === "result") result = ev.result
+      }
+      expect(result?.ok).toBe(false)
+      expect(result?.failure).toEqual({
+        mode: "permission_denied",
+        path: victim,
+        isReadonly: false,
+      })
+      if (prev !== undefined) process.env.QUANTA_FS_JAIL = prev
+    } finally {
+      rmSync(jail, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
   test("missing file rejects with a not-found error", async () => {
     // statFile() runs first and surfaces the OS ENOENT for a missing path.
     await expect(run({ path: join(dir, "ghost.txt") })).rejects.toThrow(/ENOENT|not found/i)

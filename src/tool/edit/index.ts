@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { Tool, ToolContext, ToolEvent, ToolFailure } from "../types"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
 import { classifyMismatch, formatEditMismatchMarker, formatStrategyHint } from "./strategy-hint"
@@ -27,14 +27,24 @@ type Input = z.infer<typeof schema>
  *  classifies via the structural `result.kind` tag when present and appends the
  *  stable `[edit-mismatch:<kind>]` marker so out-of-process consumers can
  *  recover the kind without re-sniffing the message text. */
-const buildMismatchResult = (result: {
-  message: string
-  kind?: Parameters<typeof formatEditMismatchMarker>[0]
-}): { ok: false; output: string } => {
+const buildMismatchResult = (
+  result: {
+    message: string
+    kind?: Parameters<typeof formatEditMismatchMarker>[0]
+  },
+  path: string,
+): { ok: false; output: string; failure: ToolFailure } => {
   const next = classifyMismatch(result.kind !== undefined ? { kind: result.kind } : result.message)
   const hint = formatStrategyHint(next)
   const marker = result.kind !== undefined ? ` ${formatEditMismatchMarker(result.kind)}` : ""
-  return { ok: false, output: `${result.message}${marker}\n\n${hint}` }
+  // The old_string did not match: the target text was not found in the file.
+  // Typed as `not_found` so the model branches to re-read / fuzzy instead of
+  // regex-sniffing the hint text. `output` is unchanged (byte-identical).
+  return {
+    ok: false,
+    output: `${result.message}${marker}\n\n${hint}`,
+    failure: { mode: "not_found", path },
+  }
 }
 
 /** Build the `edit` tool against an injected {@link FileSystemPort} (#13).
@@ -80,14 +90,21 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
         // switch to `scripted_replace` / re-read instead of re-trying the same
         // patch. Exit semantics unchanged (still ok:false). Built by the
         // extracted `buildMismatchResult` helper (keeps this generator flat).
-        yield { type: "result", result: buildMismatchResult(result) }
+        yield { type: "result", result: buildMismatchResult(result, input.path) }
         return
       }
       await fs.writeFile(input.path, result.next, ctx.cwd)
       yield { type: "result", result: { ok: true, output: `${input.path}: ${result.message}` } }
     } catch (e) {
       if (e instanceof FsJailError) {
-        yield { type: "result", result: { ok: false, output: e.message } }
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: e.message,
+            failure: { mode: "permission_denied", path: input.path, isReadonly: false },
+          },
+        }
         return
       }
       throw e

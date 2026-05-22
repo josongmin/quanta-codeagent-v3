@@ -1,7 +1,14 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
 import { classifyCommandShape } from "@/security"
-import type { HITLTier, Tool, ToolContext, ToolEvent, ToolResultEvidence } from "../types"
+import type {
+  HITLTier,
+  Tool,
+  ToolContext,
+  ToolEvent,
+  ToolFailure,
+  ToolResultEvidence,
+} from "../types"
 
 const schema = z.object({
   command: z.string().describe("Shell command to run via bash -lc"),
@@ -58,6 +65,30 @@ const ALWAYS_CONFIRM_PATTERNS: RegExp[] = [
   new RegExp(String.raw`\bgit\b\s+${GIT_PREFIX}commit\b[\s\S]*--amend\b`),
   new RegExp(String.raw`\bgit\b\s+${GIT_PREFIX}reset\b[\s\S]*--hard\b`),
 ]
+
+/** Derive a TYPED {@link ToolFailure} from the existing `ShellResult` shape
+ *  WITHOUT touching `runtime/shell.ts` (owned by another track). Only the two
+ *  cases cleanly recoverable from `{exitCode, timedOut, stderr}`:
+ *   - `timeout`: the runtime already flags `timedOut` — carry the deadline.
+ *   - `spawn_error`: `bash -lc` exits 127 with `command not found` on stderr
+ *     when the program can't be launched at all (Cursor `ShellSpawnError`). The
+ *     127+stderr heuristic is the ONLY signal available without editing the
+ *     runtime to surface a real spawn ENOENT; a script that legitimately exits
+ *     127 without that stderr text is NOT misclassified.
+ *  Any other non-zero exit stays a plain command failure (no `failure` field —
+ *  byte-identical to the pre-migration result). */
+const deriveBashFailure = (
+  r: { exitCode: number; timedOut: boolean; stderr: string },
+  timeoutMs: number | undefined,
+): ToolFailure | undefined => {
+  if (r.timedOut) {
+    return timeoutMs !== undefined ? { mode: "timeout", timeoutMs } : { mode: "timeout" }
+  }
+  if (r.exitCode === 127 && /command not found/i.test(r.stderr)) {
+    return { mode: "spawn_error", error: r.stderr.trim().slice(-STDERR_CAP) || "command not found" }
+  }
+  return undefined
+}
 
 const bashHitlTier = (input: Input): HITLTier => {
   const cmd = input.command ?? ""
@@ -118,12 +149,18 @@ export const bashTool: Tool<Input> = {
       exitCode: r.exitCode,
     }
 
+    // Typed failure on the ok:false path only (additive; `output`+`evidence`
+    // unchanged). Conditional-spread so a plain non-zero exit stays
+    // byte-identical (no `failure` key at all).
+    const failure = deriveBashFailure(r, input.timeout_ms)
+
     yield {
       type: "result",
       result: {
         ok: r.exitCode === 0 && !r.timedOut,
         output: `[${status}]\n${body || "(no output)"}`,
         evidence,
+        ...(failure ? { failure } : {}),
       },
     }
   },

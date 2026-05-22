@@ -396,3 +396,51 @@ describe("scriptedReplaceTool integration (FS)", () => {
     ).toBe(false)
   })
 })
+
+describe("scriptedReplaceTool typed failure.mode (absorb #2)", () => {
+  test("missing file → failure.mode not_found with path", async () => {
+    const f = join(dir, "ghost-typed.txt")
+    const r = await run({ file: f, pattern: "foo", replacement: "x" })
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "not_found", path: f })
+    // Human-readable output preserved alongside the typed failure.
+    expect(r.output).toMatch(/File not found/)
+  })
+
+  test("pattern-not-found → failure.mode not_found (no path: file exists)", async () => {
+    const f = join(dir, "no-match-typed.txt")
+    writeFileSync(f, "hello world")
+    const r = await run({ file: f, pattern: "absent_token", replacement: "x" })
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "not_found" })
+    expect(r.output).toMatch(/not found/)
+  })
+
+  test("rejected pattern (empty) → failure.mode rejected with reason", async () => {
+    const f = join(dir, "reject-typed.txt")
+    writeFileSync(f, "abc")
+    const r = await run({ file: f, pattern: "", replacement: "x" })
+    expect(r.ok).toBe(false)
+    expect(r.failure?.mode).toBe("rejected")
+    if (r.failure?.mode === "rejected")
+      expect(r.failure.reason).toMatch(/pattern must not be empty/)
+  })
+
+  test("FS jail → failure.mode permission_denied with isReadonly:false", async () => {
+    const jail = mkdtempSync(join(tmpdir(), "scripted-replace-jail-typed-"))
+    const outside = mkdtempSync(join(tmpdir(), "scripted-replace-outside-typed-"))
+    const victim = join(outside, "secret.txt")
+    writeFileSync(victim, "original-content")
+    try {
+      const prev = process.env.QUANTA_FS_JAIL
+      delete process.env.QUANTA_FS_JAIL
+      const r = await run({ file: victim, pattern: "original", replacement: "x" }, jail)
+      expect(r.ok).toBe(false)
+      expect(r.failure).toEqual({ mode: "permission_denied", path: victim, isReadonly: false })
+      if (prev !== undefined) process.env.QUANTA_FS_JAIL = prev
+    } finally {
+      rmSync(jail, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+})

@@ -84,4 +84,33 @@ describe("writeTool", () => {
     expect(readFileSync(join(dir, "relative-write.txt"), "utf8")).toBe("based")
     expect(existsSync(join(process.cwd(), "relative-write.txt"))).toBe(false)
   })
+
+  test("FS jail escape → failure.mode permission_denied isReadonly:false (absorb #2)", async () => {
+    const jail = mkdtempSync(join(tmpdir(), "write-jail-typed-"))
+    const outside = mkdtempSync(join(tmpdir(), "write-outside-typed-"))
+    const victim = join(outside, "secret.txt")
+    try {
+      const prev = process.env.QUANTA_FS_JAIL
+      delete process.env.QUANTA_FS_JAIL
+      let result: ToolResult | undefined
+      for await (const ev of writeTool.execute(
+        { path: victim, content: "pwned" } as never,
+        ctx(jail),
+      )) {
+        if (ev.type === "result") result = ev.result
+      }
+      expect(result?.ok).toBe(false)
+      expect(result?.failure).toEqual({
+        mode: "permission_denied",
+        path: victim,
+        isReadonly: false,
+      })
+      // Denied write is never partial — the victim file was never created.
+      expect(existsSync(victim)).toBe(false)
+      if (prev !== undefined) process.env.QUANTA_FS_JAIL = prev
+    } finally {
+      rmSync(jail, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
 })

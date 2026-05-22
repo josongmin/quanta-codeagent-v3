@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { FsJailError, fileExists, readFile, writeFile } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "./types"
+import type { Tool, ToolContext, ToolEvent, ToolFailure } from "./types"
 
 /**
  * Phase 4 Codex absorption — `scripted_replace` (Codex
@@ -92,6 +92,11 @@ interface ApplyOutcome {
   message: string
   next?: string
   replacements?: number
+  /** Discriminant on the `ok:false` path so the tool can map to a TYPED
+   *  {@link ToolFailure} without regex-sniffing `message`. `not_found` ⇒ the
+   *  pattern matched nothing; `rejected` ⇒ a bad/unsafe pattern was refused
+   *  (empty / ReDoS-suspicious / uncompilable). Absent on the ok:true path. */
+  failureKind?: "not_found" | "rejected"
 }
 
 /** Pure replacement core. Returns the new source plus the count actually
@@ -102,7 +107,7 @@ export const applyScriptedReplace = (
   input: Pick<Input, "pattern" | "replacement" | "count" | "isRegex">,
 ): ApplyOutcome => {
   if (input.pattern === "") {
-    return { ok: false, message: "pattern must not be empty" }
+    return { ok: false, message: "pattern must not be empty", failureKind: "rejected" }
   }
   // SECURITY: reject patterns that look like ReDoS bait BEFORE compiling.
   // A regex like `(a+)+$` is syntactically valid but pumps backtracking
@@ -116,6 +121,7 @@ export const applyScriptedReplace = (
         "rejected pattern: looks like a catastrophic-backtracking regex " +
         "(nested unbounded quantifier or > 256 chars). Rewrite without " +
         "nested quantifiers, or pass `isRegex: false` for a literal match.",
+      failureKind: "rejected",
     }
   }
   let regex: RegExp
@@ -124,7 +130,7 @@ export const applyScriptedReplace = (
     regex = new RegExp(body, "g")
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e)
-    return { ok: false, message: `invalid regex: ${reason}` }
+    return { ok: false, message: `invalid regex: ${reason}`, failureKind: "rejected" }
   }
   const cap = input.count ?? Number.POSITIVE_INFINITY
   let applied = 0
@@ -140,7 +146,7 @@ export const applyScriptedReplace = (
     return expandReplacement(input.replacement, args)
   })
   if (applied === 0) {
-    return { ok: false, message: `pattern not found in file` }
+    return { ok: false, message: `pattern not found in file`, failureKind: "not_found" }
   }
   return { ok: true, message: `Replaced ${applied} occurrence(s)`, next, replacements: applied }
 }
@@ -259,13 +265,28 @@ export const scriptedReplaceTool: Tool<Input> = {
       // Pre-check existence so the error message is descriptive rather than
       // surfacing the raw `File not found` from readFile.
       if (!(await fileExists(input.file, ctx.cwd))) {
-        yield { type: "result", result: { ok: false, output: `File not found: ${input.file}` } }
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: `File not found: ${input.file}`,
+            failure: { mode: "not_found", path: input.file },
+          },
+        }
         return
       }
       const source = await readFile(input.file, ctx.cwd)
       const r = applyScriptedReplace(source, input)
       if (!r.ok || r.next === undefined) {
-        yield { type: "result", result: { ok: false, output: r.message } }
+        // Map the pure-core discriminant to a typed failure. `not_found` ⇒ the
+        // pattern matched nothing (no path: the file IS there, the match isn't);
+        // `rejected` ⇒ an empty/uncompilable/ReDoS-suspicious pattern was
+        // refused (carry the reason). `output` is unchanged (byte-identical).
+        const failure: ToolFailure =
+          r.failureKind === "rejected"
+            ? { mode: "rejected", reason: r.message }
+            : { mode: "not_found" }
+        yield { type: "result", result: { ok: false, output: r.message, failure } }
         return
       }
       await writeFile(input.file, r.next, ctx.cwd)
@@ -278,7 +299,14 @@ export const scriptedReplaceTool: Tool<Input> = {
       }
     } catch (e) {
       if (e instanceof FsJailError) {
-        yield { type: "result", result: { ok: false, output: e.message } }
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: e.message,
+            failure: { mode: "permission_denied", path: input.file, isReadonly: false },
+          },
+        }
         return
       }
       throw e

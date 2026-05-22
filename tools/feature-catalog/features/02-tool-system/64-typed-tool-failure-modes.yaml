@@ -1,16 +1,18 @@
 id: typed-tool-failure-modes
-title: ToolFailure discriminated union — 5-mode typed per-failure-mode results
+title: ToolFailure discriminated union — 6-mode typed per-failure-mode results
 section: 2
 subsystem: 도구 결과 — 타입드 실패 사유 (Cursor EditResult/ShellResult 흡수, ADR-0069)
 order: 64
-maturity: L3
-status: new
+maturity: L4
+status: stable
 purpose: |
   Cursor EditResult/ShellResult의 discriminated failure union 흡수 — 기존 ok:false 도구 결과의
   output 문자열을 모델이 정규식으로 재파싱하던 부담을 닫힌 enum으로 대체. ToolResult.failure?:
   ToolFailure 옵셔널 필드 추가(없으면 byte-identical). mode가 discriminant:
   not_found{path?} / permission_denied{path?, isReadonly?} / rejected{reason} /
-  timeout{timeoutMs?} / error{modelVisibleError?, clientVisibleError?}. isReadonly 분리로
+  timeout{timeoutMs?} / spawn_error{error} / error{modelVisibleError?, clientVisibleError?}.
+  spawn_error는 Cursor ShellSpawnError 흡수 — "프로세스 자체가 안 뜸"(command not found/ENOENT)을
+  일반 error와 구분(재시도 전략이 다름: 다른 명령으로 전환). isReadonly 분리로
   "모드만 바꾸면 되는 거부"와 "진짜 권한 거부"를 모델이 분기 가능 (Cursor is_readonly). error
   변종은 model-visible vs client-visible을 분리해 컨텍스트 오염 없이 운영 디버깅 정보 보존.
   DispatchResult.failure는 ToolResult.failure가 있을 때만 통과(없으면 omit), ok/block/preview
@@ -20,17 +22,35 @@ evidence:
     - src/tool/types.ts
     - src/agent/dispatch-types.ts
     - src/agent/dispatch.ts
+    - src/tool/git-write-guard-result.ts
+    - src/tool/read/index.ts
+    - src/tool/edit/index.ts
+    - src/tool/write/index.ts
+    - src/tool/scripted-replace.ts
+    - src/tool/bash/index.ts
+    - src/agent/prompt-rules/core.ts
   adrs: [69]
   tests:
-    unit: [tests/unit/agent/tool-failure-mode.test.ts]
+    unit:
+      - tests/unit/agent/tool-failure-mode.test.ts
+      - tests/unit/read.test.ts
+      - tests/unit/edit.test.ts
+      - tests/unit/write.test.ts
+      - tests/unit/scripted-replace.test.ts
+      - tests/unit/bash.test.ts
+      - tests/unit/agent/prompt-rules/packs.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    ToolFailure 5-variant union + dispatch 통과 경로는 완성+테스트. v3 도구(read/edit/scripted_replace
-    등)가 실제 ok:false 경로에서 failure 필드를 populate하는 도구별 마이그레이션은 follow-up.
-  promotion_path: |
-    read 미존재 파일 / edit "old_string not found" / FsJail 거부 / HITL deny / timeout 각각의
-    도구가 failure를 채우고 prompt rule이 mode별 분기 가이드를 인용하면 L4.
-notes: 'ToolEvent 변종이 아닌 ToolResult.failure 필드로만 구현 — 새 이벤트 추가 시 event.type switch 하는 기존 호출부의 narrowing이 깨지는 회귀(deferred 흡수와 동일 회피). default-OFF byte-identical (RFC §1.2).'
+deliberate_hold: null
+notes: |
+  ToolEvent 변종이 아닌 ToolResult.failure 필드로만 구현 — 새 이벤트 추가 시 event.type switch 하는
+  기존 호출부의 narrowing이 깨지는 회귀(deferred 흡수와 동일 회피). 없으면 byte-identical (RFC §1.2).
+  L4 마이그레이션 완료: read(FsJail→permission_denied, dir→not_found) / edit(old_string-not-found→
+  not_found, FsJail→permission_denied) / write(FsJail→permission_denied) / scripted_replace(file/pattern
+  →not_found, bad-pattern→rejected, FsJail→permission_denied) / bash(timedOut→timeout, exit127+
+  "command not found"→spawn_error). 모델 가이드는 prompt-rules/core.ts의 [R-FAILURE-MODE] 규칙(7번째
+  core rule, 전 모드 적용)이 mode별 분기를 인용. spawn_error는 runtime/shell.ts(다른 트랙 소유)를
+  건드리지 않고 기존 ShellResult{exitCode,stderr}에서 127+stderr 휴리스틱으로 유도 — 진짜 spawn
+  ENOENT를 surface하는 ShellResult 확장은 follow-up(현재는 휴리스틱이 유일 신호, 127 정상 종료
+  스크립트는 오분류 안 됨).

@@ -91,7 +91,7 @@ describe("invariants §5.3 — every lever filled across every mode", () => {
     }
   })
 
-  test("every mode's prompt pack contains the 6 CORE rules verbatim (no silent drop)", () => {
+  test("every mode's prompt pack contains the 7 CORE rules verbatim (no silent drop)", () => {
     const CORE_IDS = [
       "[R-ENV]",
       "[R-STOP-ENV]",
@@ -99,6 +99,7 @@ describe("invariants §5.3 — every lever filled across every mode", () => {
       "[R-READ-FAILURE]",
       "[R-NO-THRASH]",
       "[R-NO-SHIM]",
+      "[R-FAILURE-MODE]",
     ]
     for (const mode of ALL_AGENT_MODES) {
       const text = renderPackByMode(mode).join("\n")

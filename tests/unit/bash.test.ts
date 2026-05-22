@@ -89,6 +89,30 @@ describe("bashTool", () => {
     expect(result.output).toContain("[timed out]")
   })
 
+  test("timeout → failure.mode timeout with timeoutMs (absorb #2)", async () => {
+    const { result } = await collect({ command: "sleep 5", timeout_ms: 50 }, ctx(dir))
+    expect(result.ok).toBe(false)
+    expect(result.failure).toEqual({ mode: "timeout", timeoutMs: 50 })
+  })
+
+  test("command-not-found (exit 127) → failure.mode spawn_error (absorb #2)", async () => {
+    const { result } = await collect(
+      { command: "this_command_definitely_does_not_exist_xyz" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(false)
+    expect(result.failure?.mode).toBe("spawn_error")
+    if (result.failure?.mode === "spawn_error") {
+      expect(result.failure.error.toLowerCase()).toContain("command not found")
+    }
+  })
+
+  test("ordinary non-zero exit carries NO failure (byte-identical legacy)", async () => {
+    const { result } = await collect({ command: "false" }, ctx(dir))
+    expect(result.ok).toBe(false)
+    expect(result.failure).toBeUndefined()
+  })
+
   test("long command is previewed in the progress event", async () => {
     const cmd = `echo ${"x".repeat(200)}`
     const { events } = await collect({ command: cmd }, ctx(dir))

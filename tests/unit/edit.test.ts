@@ -60,3 +60,46 @@ describe("applyExactEdit", () => {
     expect(applyExactEdit("xyz", "q", "w", false).ok).toBe(false)
   })
 })
+
+describe("editTool typed failure.mode (absorb #2)", () => {
+  test("old_string not found → failure.mode not_found with path", async () => {
+    const f = join(dir, "mismatch-typed.txt")
+    writeFileSync(f, "const a = 1")
+    const r = await run({ path: f, old_string: "does-not-exist", new_string: "x" })
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "not_found", path: f })
+    // File untouched and the strategy-hint output is preserved.
+    expect(readFileSync(f, "utf8")).toBe("const a = 1")
+    expect(r.output.length).toBeGreaterThan(0)
+  })
+
+  test("FS jail escape → failure.mode permission_denied isReadonly:false", async () => {
+    const jail = mkdtempSync(join(tmpdir(), "edit-jail-typed-"))
+    const outside = mkdtempSync(join(tmpdir(), "edit-outside-typed-"))
+    const victim = join(outside, "secret.txt")
+    writeFileSync(victim, "original-content")
+    try {
+      const prev = process.env.QUANTA_FS_JAIL
+      delete process.env.QUANTA_FS_JAIL
+      let result: ToolResult | undefined
+      for await (const ev of editTool.execute(
+        { path: victim, old_string: "original", new_string: "x" } as never,
+        ctx(jail),
+      )) {
+        if (ev.type === "result") result = ev.result
+      }
+      expect(result?.ok).toBe(false)
+      expect(result?.failure).toEqual({
+        mode: "permission_denied",
+        path: victim,
+        isReadonly: false,
+      })
+      // Victim byte-identical (denied write is never partial).
+      expect(readFileSync(victim, "utf8")).toBe("original-content")
+      if (prev !== undefined) process.env.QUANTA_FS_JAIL = prev
+    } finally {
+      rmSync(jail, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+})

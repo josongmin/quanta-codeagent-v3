@@ -29,9 +29,9 @@ export interface PromptRule {
   readonly lines: readonly string[]
 }
 
-/** The 6 core tool-use rules — byte-identical to the prior `TOOL_USE_RULES`
- *  list. Mode-specific packs (assistant / task-runner / benchmark / pr-agent)
- *  include these in full and may append additional rules. */
+/** The 7 core tool-use rules. Mode-specific packs (assistant / task-runner /
+ *  benchmark / pr-agent) include these in full and may append additional
+ *  rules. */
 export const CORE_RULES: readonly PromptRule[] = [
   {
     id: "R-ENV",
@@ -89,6 +89,17 @@ export const CORE_RULES: readonly PromptRule[] = [
       "  environment unavailable and stop. Your patch fixes the bug, not the",
       "  test runner — files that exist only to silence an import error are not",
       "  part of the fix and corrupt the diff.",
+    ],
+  },
+  {
+    id: "R-FAILURE-MODE",
+    lines: [
+      "- [R-FAILURE-MODE] When a tool result carries a typed `failure.mode`, branch",
+      "  on it instead of regex-matching the text: not_found → re-check the path or",
+      "  retry with fuzzy matching; permission_denied with isReadonly → mutations",
+      "  are off, do not retry the write; rejected → revise per the reason; timeout →",
+      "  narrow the scope and rerun; spawn_error → the command could not launch, use",
+      "  a different command; error → read modelVisibleError for the cause.",
     ],
   },
 ]

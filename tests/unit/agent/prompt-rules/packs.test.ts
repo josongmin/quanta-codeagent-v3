@@ -5,7 +5,7 @@ import { type AgentMode, CORE_RULES, renderPackByMode } from "@/agent/prompt-rul
  * Pack-level invariants for each of the 4 modes.
  *
  *   1. Every pack returns a non-empty line array.
- *   2. Every pack includes ALL 6 core-rule ID tags inline (no pack drops a
+ *   2. Every pack includes ALL 7 core-rule ID tags inline (no pack drops a
  *      core rule).
  *   3. Mode-specific packs include their additional rule IDs.
  *   4. No ID appears more than once in a single pack (no accidental dedupe
@@ -19,6 +19,7 @@ const CORE_IDS = [
   "R-READ-FAILURE",
   "R-NO-THRASH",
   "R-NO-SHIM",
+  "R-FAILURE-MODE",
 ] as const
 
 const expectIdAppearsOnce = (lines: readonly string[], id: string) => {
@@ -37,7 +38,7 @@ describe("renderPackByMode — all 4 modes", () => {
       expect(lines.length).toBeGreaterThan(0)
     })
 
-    test(`${mode}: contains all 6 CORE_RULE ID tags`, () => {
+    test(`${mode}: contains all 7 CORE_RULE ID tags`, () => {
       const lines = renderPackByMode(mode)
       for (const id of CORE_IDS) {
         expect(lines.join("\n")).toContain(`[${id}]`)
@@ -84,7 +85,7 @@ describe("renderPackByMode — mode-specific new rules", () => {
     expect(joined).not.toContain("[R-NO-PUSH-MAIN]")
   })
 
-  test("CORE_RULES export shape matches the 6 expected IDs in order", () => {
+  test("CORE_RULES export shape matches the 7 expected IDs in order", () => {
     expect(CORE_RULES.map((r) => r.id)).toEqual([...CORE_IDS])
   })
 })
