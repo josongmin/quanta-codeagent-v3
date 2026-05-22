@@ -226,6 +226,13 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   // at the same loop seam, so a consumer that only watches the legacy
   // channel still sees compactions byte-identically.
   context_compacted: "recovery",
+  // ADR-0048: the transient `in_progress` heartbeat maps onto the existing
+  // trajectory `recovery` kind (same rationale as `context_compacted` — a
+  // same-turn observation point that does NOT warrant a new TrajectoryKind
+  // rippling through the redaction policy + every probe consumer). The
+  // heartbeat payload (timestamp + optional message/progress) rides in `data`
+  // via `dataOf`, tagged `reason:"in_progress"` so it stays greppable.
+  in_progress: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -280,6 +287,16 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
         summary: e.summary,
         ts: e.ts,
         tokens: e.tokens,
+      }
+    case "in_progress":
+      // ADR-0048: heartbeat payload — receive-side timestamp + the optional
+      // provider-supplied status/percentage. `reason:"in_progress"` keeps this
+      // recovery-kind line greppable apart from real recovery points.
+      return {
+        reason: "in_progress",
+        timestamp: e.timestamp,
+        ...(e.message !== undefined ? { message: e.message } : {}),
+        ...(e.progress !== undefined ? { progress: e.progress } : {}),
       }
     case "error":
       return { message: e.message }

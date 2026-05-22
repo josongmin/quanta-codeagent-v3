@@ -8,6 +8,15 @@ export type AgentEvent =
   // `llm_usage`, completing the §11 llm_request↔llm_usage span-pair golden.
   | { type: "llm_request"; model: string }
   | { type: "assistant_text"; delta: string }
+  // ADR-0048 in-progress heartbeat — surfaced from a provider's
+  // `response.in_progress` event so a UI can paint a "thinking…" indicator.
+  // Mirrors the `InProgressIndicator` the streaming engine produces: a stable
+  // receive-side `timestamp` plus the optional provider-supplied `message` /
+  // `progress`. Emitted ONLY when the loop wires `onInProgress` (which it now
+  // does unconditionally — but the provider must actually yield the event AND
+  // the configured stream must be non-null for it to surface). NullStream
+  // swallows it, so the default-OFF byte-identical contract holds.
+  | { type: "in_progress"; timestamp: number; message?: string; progress?: number }
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "tool_progress"; id: string; name: string; message: string }
   // RFC-0002 §5.2 `tool_result` data contract: `preview` is the stdout tail;

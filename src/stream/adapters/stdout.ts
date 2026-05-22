@@ -72,6 +72,17 @@ export class StdoutStream implements StreamPort {
       case "llm_request":
         process.stdout.write(`${DIM}— llm request (${event.model}) —${RESET}\n`)
         break
+      case "in_progress": {
+        // ADR-0048: provider "thinking…" heartbeat. Render a terse one-liner,
+        // appending the optional status / percentage when carried.
+        const pct = event.progress !== undefined ? ` ${Math.round(event.progress * 100)}%` : ""
+        const msg =
+          event.message !== undefined && event.message !== ""
+            ? `: ${oneLine(event.message)}`
+            : ""
+        process.stdout.write(`${DIM}… thinking${pct}${msg}${RESET}\n`)
+        break
+      }
       case "usage":
         process.stdout.write(
           `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,

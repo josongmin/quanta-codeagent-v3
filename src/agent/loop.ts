@@ -456,6 +456,21 @@ const streamConsume = async (
           )
         }
       },
+      // ADR-0048 L4 wire: surface the provider's `response.in_progress`
+      // heartbeat as an `in_progress` AgentEvent so a UI can paint a
+      // "thinking…" indicator. The indicator carries a stable receive-side
+      // `timestamp` plus the optional provider-supplied `message`/`progress`;
+      // we forward each present field via the same exact-optional spread the
+      // sibling `tool_result` emit uses. Default-OFF byte-identical: when the
+      // provider never yields the event the seam never fires, and when
+      // `config.stream` is NullStream the emit is a no-op.
+      onInProgress: (indicator) =>
+        config.stream.emit({
+          type: "in_progress",
+          timestamp: indicator.timestamp,
+          ...(indicator.message !== undefined ? { message: indicator.message } : {}),
+          ...(indicator.progress !== undefined ? { progress: indicator.progress } : {}),
+        }),
       signal: config.signal,
     })
     if (outcome.kind === "aborted") {
