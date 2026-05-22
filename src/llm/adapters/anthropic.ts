@@ -132,6 +132,18 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
         signature: block.signature,
       } satisfies Anthropic.ContentBlockParam
     }
+    case "image":
+      // ADR-0083 multi-modal: Anthropic Messages API base64 image source. The
+      // media type is narrowed to the SDK's accepted literal set; the CLI
+      // image-loader only ever emits one of these four, so the cast is safe.
+      return {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: block.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+          data: block.data,
+        },
+      } satisfies Anthropic.ContentBlockParam
     default: {
       // Exhaustiveness pin: a future `ContentBlock` variant must come back
       // here and decide its Anthropic mapping consciously — silent drop is

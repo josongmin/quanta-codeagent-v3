@@ -1,0 +1,28 @@
+id: multimodal-image-input
+title: Multi-modal 이미지 입력 (dual-provider)
+section: 2
+subsystem: 멀티모달 (ADR-0083)
+order: 83
+maturity: L3
+status: new
+purpose: |
+  ContentBlock에 ImageBlock 추가 — 스크린샷·다이어그램 입력. 두 어댑터가 각자 native
+  형태로 직렬화: Anthropic {type:image, source:{base64}}, OpenAI content-array
+  {type:image_url, image_url:{url:"data:..."}}. CLI --image <path> (repeatable,
+  png/jpeg/webp/gif, 20MB cap) → 첫 turn 첨부. 이미지 없으면 byte-identical
+  (OpenAI plain-string 유지). compaction은 고정 토큰 추정 + placeholder.
+evidence:
+  code:
+    - src/llm/types.ts
+    - src/llm/adapters/anthropic.ts
+    - src/llm/adapters/openai.ts
+    - src/apps/cli/image-loader.ts
+    - src/apps/cli/repl.ts
+  adrs: [83]
+  tests:
+    unit: [tests/unit/llm-image-block.test.ts, tests/unit/cli-image-loader.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '입력만 (image OUTPUT 생성 미흡수). 대화 중간 재첨부는 /image 슬래시 follow-up. dual-provider 동급.'

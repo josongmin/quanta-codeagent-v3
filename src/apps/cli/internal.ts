@@ -16,10 +16,10 @@ import {
   createLLM,
   DEFAULT_MODEL,
   FallbackLLM,
+  type Provider as LLMFactoryProvider,
   type LLMPort,
   type Message,
   pickProvider as pickProviderFactory,
-  type Provider as LLMFactoryProvider,
 } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
@@ -376,11 +376,27 @@ export const argvPrompt = (): string =>
     )
     .filter((a, i, arr) => {
       const flagged = arr[i - 1]
-      const valued = ["--state", "--resume", "--observe-dir", "--title"]
+      // ADR-0083: `--image <path>` — drop both the flag and its value so the
+      // image path never leaks into the prompt text.
+      const valued = ["--state", "--resume", "--observe-dir", "--title", "--image"]
       return !valued.includes(a) && !valued.includes(flagged ?? "")
     })
     .join(" ")
     .trim()
+
+/** ADR-0083 multi-modal — extract every `--image <path>` value from argv (the
+ *  flag is repeatable). Empty when no `--image` is passed (byte-identical: the
+ *  CLI seed message stays text-only). */
+export const argvImages = (): string[] => {
+  const argv = process.argv.slice(2)
+  const out: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--image" && argv[i + 1] !== undefined) {
+      out.push(argv[i + 1] as string)
+    }
+  }
+  return out
+}
 
 export interface Features {
   planMode: boolean
@@ -549,6 +565,7 @@ export const buildTooling = (
   }
 }
 
+export type { ResolveResumeInput, ResumeResolution } from "./resume"
 // ── Resume state machine (`isPathLikeToken`, `defaultUntitled`, `resolveResume`
 //    + types) lives in `./resume` (ADR-0024 split). Re-exported here so existing
 //    importers (`index.ts`, tests) continue to resolve them from `./internal`.
@@ -557,4 +574,3 @@ export {
   isPathLikeToken,
   resolveResume,
 } from "./resume"
-export type { ResolveResumeInput, ResumeResolution } from "./resume"

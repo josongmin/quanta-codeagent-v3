@@ -29,11 +29,18 @@ interface OpenAIConfig {
   streamIdleMs?: number
 }
 
+/** OpenAI vision content part (ADR-0083). User message content widens from a
+ *  plain string to an array of parts ONLY when an `ImageBlock` is present —
+ *  otherwise the string form is kept (byte-identical default-OFF). */
+export type UserContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+
 // OpenAI separates tool results into their own `role:"tool"` messages, so the
 // mapping is less direct than Anthropic's. These params mirror only what we send.
 export type ChatParam =
   | { role: "system"; content: string }
-  | { role: "user"; content: string }
+  | { role: "user"; content: string | UserContentPart[] }
   | { role: "tool"; tool_call_id: string; content: string }
   | {
       role: "assistant"
@@ -125,7 +132,25 @@ export const userParams = (blocks: ContentBlock[]): ChatParam[] => {
     .filter((b) => b.type === "text")
     .map((b) => (b.type === "text" ? b.text : ""))
     .join("")
-  if (text !== "") params.push({ role: "user", content: text })
+  const images = blocks.filter(
+    (b): b is Extract<ContentBlock, { type: "image" }> => b.type === "image",
+  )
+  if (images.length > 0) {
+    // ADR-0083 multi-modal: emit OpenAI's content-ARRAY form so text + images
+    // ride on a single user message. A data-URL carries the base64 inline.
+    const parts: UserContentPart[] = []
+    if (text !== "") parts.push({ type: "text", text })
+    for (const img of images) {
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${img.mediaType};base64,${img.data}` },
+      })
+    }
+    params.push({ role: "user", content: parts })
+  } else if (text !== "") {
+    // No images ⇒ legacy plain-string content (byte-identical).
+    params.push({ role: "user", content: text })
+  }
   for (const b of blocks) {
     if (b.type === "tool_result") {
       params.push({ role: "tool", tool_call_id: b.tool_use_id, content: b.content })

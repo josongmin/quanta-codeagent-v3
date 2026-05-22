@@ -1,11 +1,13 @@
 import * as readline from "node:readline/promises"
 import { type AgentOutcome, buildSystemPrompt, RetryingLLM, runAgent } from "@/agent"
-import type { LLMPort, Message } from "@/llm"
+import type { ContentBlock, ImageBlock, LLMPort, Message } from "@/llm"
 import { buildShellOtelObserver, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger } from "@/shared"
 import { composeShellObservers } from "@/tool"
+import { loadImageBlock } from "./image-loader"
 import {
+  argvImages,
   argvPrompt,
   assembleConfig,
   buildLLM,
@@ -66,6 +68,20 @@ export const topLevelUsage = (): string =>
     "  -h, --help                           Show this help",
     "",
   ].join("\n")
+
+/** ADR-0083: resolve `--image <path>` attachments to {@link ImageBlock}s, or
+ *  exit 1 with a clear message on a load failure (bad path / unsupported type /
+ *  oversize). Extracted from `runRepl` so the loader's try/catch does not push
+ *  that already-large function over the biome cognitive-complexity budget.
+ *  Empty when no `--image` is passed (byte-identical text-only seed). */
+const loadSeedImages = (): ImageBlock[] => {
+  try {
+    return argvImages().map(loadImageBlock)
+  } catch (e) {
+    logger.error((e as Error).message)
+    process.exit(1)
+  }
+}
 
 /** Interactive REPL loop: each line continues the same conversation. */
 export const runReplLoop = async (
@@ -197,6 +213,9 @@ export const runRepl = async (): Promise<void> => {
   }
 
   const argPrompt = argvPrompt()
+  // ADR-0083 multi-modal: load any `--image <path>` attachments ONCE (helper
+  // keeps runRepl's complexity flat). They ride on the FIRST user turn only.
+  let pendingImages: ImageBlock[] = loadSeedImages()
 
   // Preserve the legacy "quanta ready" timing: log BEFORE resume work for
   // every legacy path (default-OFF + V1 path-mode) so the new code path can
@@ -288,7 +307,11 @@ export const runRepl = async (): Promise<void> => {
     runAgent(assembleConfig(messages, sessionDeps))
 
   const turn = async (text: string): Promise<void> => {
-    history.push({ role: "user", content: [{ type: "text", text }] })
+    // ADR-0083: attach seed images to the FIRST turn only, then drain so
+    // subsequent REPL lines are text-only (byte-identical when no --image).
+    const content: ContentBlock[] = [{ type: "text", text }, ...pendingImages]
+    pendingImages = []
+    history.push({ role: "user", content })
     const outcome = await session(history)
     history = outcome.messages
     await persistTurn({ state, idMeta, sessionId, messages: history, outcome })

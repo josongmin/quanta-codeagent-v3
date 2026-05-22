@@ -36,6 +36,13 @@ export const estimateTokens = (messages: Message[]): number => {
   return Math.ceil(chars / 4)
 }
 
+/** Rough context-token footprint of an image, in chars (ADR-0083). The base64
+ *  length is NOT a faithful proxy (a 1 MB image is ~1.3 M base64 chars but only
+ *  ~1.5 k tokens to the model), so we use a fixed estimate ≈ 1.5 k tokens
+ *  (`estimateTokens` divides by 4) — enough to nudge the compaction threshold
+ *  without letting a large attachment explode it. */
+const IMAGE_CHAR_ESTIMATE = 6000
+
 const blockChars = (b: ContentBlock): number => {
   switch (b.type) {
     case "text":
@@ -46,6 +53,8 @@ const blockChars = (b: ContentBlock): number => {
       return b.name.length + JSON.stringify(b.input ?? {}).length
     case "tool_result":
       return b.content.length
+    case "image":
+      return IMAGE_CHAR_ESTIMATE
   }
 }
 
@@ -113,6 +122,8 @@ const renderBlock = (b: ContentBlock): string => {
       return `(tool_use ${b.name}) ${JSON.stringify(b.input ?? {})}`
     case "tool_result":
       return `(tool_result) ${b.content}`
+    case "image":
+      return `(image ${b.mediaType})`
   }
 }
 

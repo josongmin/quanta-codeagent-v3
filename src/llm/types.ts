@@ -12,7 +12,22 @@ export interface Message {
   id?: string
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | ImageBlock
+
+/** Multi-modal image input (ADR-0083). Appears ONLY on the input/user side of
+ *  a conversation — the model never streams an image back, so assemblers that
+ *  reconstruct messages from `StreamEvent`s never produce one. Both providers
+ *  consume it: Anthropic via `{type:"image", source:{type:"base64", …}}`,
+ *  OpenAI via a `{type:"image_url", image_url:{url:"data:…;base64,…"}}` content
+ *  part. Default-OFF byte-identical: a message with no `ImageBlock` is wired
+ *  exactly as before (OpenAI keeps the plain-string user content form). */
+export interface ImageBlock {
+  type: "image"
+  /** Base64-encoded image bytes, NO `data:` URI prefix. */
+  data: string
+  /** IANA media type — `image/png` | `image/jpeg` | `image/webp` | `image/gif`. */
+  mediaType: string
+}
 
 export interface TextBlock {
   type: "text"
