@@ -53,6 +53,8 @@ const RULES: readonly Rule[] = [
       "apps/cli/dotenv.ts":
         "user-facing dotenv loader writes into process.env BEFORE any module reads runtimeConfig()",
       "apps/cli/index.ts": "CLI bootstraps the same loader before module-level reads",
+      "apps/agent/index.ts":
+        "unified agent CLI entry — same bootstrap posture as apps/cli/index.ts: loadEnvFiles() runs before the API-key reads in buildLLM/resolveProvider (provider selection is a launch-time decision, not a feature read).",
       "apps/cli/internal.ts":
         "CLI feature-flag bootstrap — threads typed values via AgentConfig; downstream modules never read env directly. TODO(S5): migrate to runtimeConfig progressively.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
