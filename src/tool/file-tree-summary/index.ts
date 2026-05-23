@@ -43,6 +43,14 @@ const schema = z.object({
       "Annotate each file with its first declaration/comment line (purpose hint). " +
         "Adds one ripgrep pass; capped at 200 files for cost.",
     ),
+  rank: z
+    .enum(["alpha", "recency", "size"])
+    .optional()
+    .describe(
+      "How to order dirs in the rendered tree. 'alpha' (default) = byte-sorted; " +
+        "'size' = by file count desc, tie-break by byte-sort; " +
+        "'recency' = by recent git change hits desc (30d window), tie-break by byte-sort.",
+    ),
 })
 
 type Input = z.infer<typeof schema>
@@ -103,6 +111,75 @@ interface TreeAgg {
    *  render order (dir-sorted, then file-sorted within dir). This is the
    *  EXACT set the purpose pass must scan — populated by aggregate(). */
   renderedFiles: string[]
+}
+
+/**
+ * Parse `git log --since=30d --name-only --pretty=format:` stdout into a
+ * dir → hit-count map. Every parent directory of each changed file path gets
+ * +1. Pure function (no I/O) — fully unit-testable.
+ */
+export const parseRecencyHits = (stdout: string): Map<string, number> => {
+  const hits = new Map<string, number>()
+  for (const line of stdout.split("\n")) {
+    const p = line.trim()
+    if (p.length === 0) continue
+    // Accumulate every ancestor directory (not the file itself — we sort dirs).
+    const segs = p.split("/")
+    for (let i = 1; i < segs.length; i++) {
+      const dir = segs.slice(0, i).join("/")
+      hits.set(dir, (hits.get(dir) ?? 0) + 1)
+    }
+    // Also credit the immediate dir for root-level files (segs.length === 1).
+    if (segs.length === 1) {
+      hits.set(".", (hits.get(".") ?? 0) + 1)
+    }
+  }
+  return hits
+}
+
+/** Comparator: sort directories by rank strategy.
+ *  "alpha" → byte-sort (default, byte-identical to existing behaviour).
+ *  "size"  → file-count desc, tie-break byte-sort.
+ *  "recency" → recency hits desc, tie-break byte-sort. */
+export const makeDirComparator = (
+  rank: "alpha" | "recency" | "size",
+  byDir: Map<string, string[]>,
+  recencyHits: Map<string, number>,
+): ((a: string, b: string) => number) => {
+  if (rank === "alpha") return (a, b) => byteCompare(a, b)
+  if (rank === "size") {
+    return (a, b) => {
+      const diff = (byDir.get(b)?.length ?? 0) - (byDir.get(a)?.length ?? 0)
+      return diff !== 0 ? diff : byteCompare(a, b)
+    }
+  }
+  // rank === "recency"
+  return (a, b) => {
+    const diff = (recencyHits.get(b) ?? 0) - (recencyHits.get(a) ?? 0)
+    return diff !== 0 ? diff : byteCompare(a, b)
+  }
+}
+
+/**
+ * Build per-dir extension breakdown string for the dir-header.
+ * Rule (exact — no fuzzy): show ONLY IF dir has ≥3 files AND ≥2 distinct exts.
+ * Returns top-3 exts by count, formatted as `ext=N ext=N ext=N`.
+ * Returns "" if condition not met (caller shows bare count).
+ * Pure function — no I/O.
+ */
+export const extBreakdown = (files: string[]): string => {
+  if (files.length < 3) return ""
+  const counts = new Map<string, number>()
+  for (const f of files) {
+    const dot = f.lastIndexOf(".")
+    const ext = dot > 0 ? f.slice(dot + 1) : ""
+    if (ext.length > 0) counts.set(ext, (counts.get(ext) ?? 0) + 1)
+  }
+  if (counts.size < 2) return ""
+  const top3 = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || byteCompare(a[0], b[0]))
+    .slice(0, 3)
+  return top3.map(([e, n]) => `${e}=${n}`).join(" ")
 }
 
 const aggregate = (files: string[], maxDepth: number, maxFiles: number): TreeAgg => {
@@ -200,16 +277,37 @@ export const parsePurposeRows = (stdout: string): Map<string, string> => {
 /** Exported for tests. */
 export { isNoiseLine }
 
+/** Emit one rollup line in the canonical form.
+ *  Indent is determined by the segment depth of the ancestor path. */
+const rollupLine = (ancestor: string, count: number): string => {
+  const depth = ancestor === "." ? 0 : ancestor.split("/").length
+  const indent = "  ".repeat(depth + 1)
+  return `${indent}${ancestor}/ …/ (+${count} deeper, increase max_depth)`
+}
+
+/** Append lines for orphan deep-rollup ancestors (those not in byDir). */
+const appendOrphanRollups = (out: string[], agg: TreeAgg): void => {
+  for (const [ancestor, count] of [...agg.deepRollup.entries()].sort((a, b) =>
+    byteCompare(a[0], b[0]),
+  )) {
+    if (!agg.byDir.has(ancestor)) out.push(rollupLine(ancestor, count))
+  }
+}
+
 /** Render the aggregate as an indented tree, directories sorted, files sorted
  *  within each directory, per-directory count shown. When `summaries` is
- *  given, each file gets a ` — <first-decl/comment>` purpose annotation. */
+ *  given, each file gets a ` — <first-decl/comment>` purpose annotation.
+ *  `rank` controls directory ordering; `recencyHits` is used only for "recency". */
 const render = (
   agg: TreeAgg,
   maxFiles: number,
   summaries: Map<string, string> | undefined,
+  rank: "alpha" | "recency" | "size" = "alpha",
+  recencyHits: Map<string, number> = new Map(),
 ): string => {
   if (agg.byDir.size === 0 && agg.deepRollup.size === 0) return "(no files)"
-  const dirs = [...agg.byDir.keys()].sort((a, b) => byteCompare(a, b))
+  const cmp = makeDirComparator(rank, agg.byDir, recencyHits)
+  const dirs = [...agg.byDir.keys()].sort(cmp)
   const out: string[] = []
   const purposeOf = (dir: string, base: string): string => {
     if (summaries === undefined) return ""
@@ -220,21 +318,32 @@ const render = (
   for (const dir of dirs) {
     const files = (agg.byDir.get(dir) ?? []).sort((a, b) => byteCompare(a, b))
     const indent = dir === "." ? "" : "  ".repeat(dir.split("/").length)
-    out.push(`${indent}${dir}/ (${files.length})`)
+    const breakdown = extBreakdown(files)
+    const countLabel = breakdown.length > 0 ? `${files.length}, ${breakdown}` : `${files.length}`
+    out.push(`${indent}${dir}/ (${countLabel})`)
     const fileIndent = `${indent}  `
     for (const f of files) out.push(`${fileIndent}${f}${purposeOf(dir, f)}`)
     const rolled = agg.deepRollup.get(dir)
-    if (rolled !== undefined) out.push(`${fileIndent}…/ (+${rolled} deeper, increase max_depth)`)
+    // Unified rollup line: same helper used below for orphan ancestors.
+    if (rolled !== undefined) out.push(rollupLine(dir, rolled))
   }
-  // Deep rollups whose ancestor was itself beyond maxDepth (no byDir entry).
-  for (const [ancestor, count] of [...agg.deepRollup.entries()].sort()) {
-    if (agg.byDir.has(ancestor)) continue
-    out.push(`${ancestor}/ …/ (+${count} deeper, increase max_depth)`)
-  }
+  appendOrphanRollups(out, agg)
   if (agg.truncated) {
     out.push(`… (file cap ${maxFiles} reached — narrow with path or raise max_files)`)
   }
   return out.join("\n")
+}
+
+/** Fetch recency hit-counts via a single git-log call.
+ *  Returns an empty map on any failure (non-git dir, no commits, etc.) so
+ *  callers silently fall back to alpha ordering. */
+const fetchRecencyHits = async (cwd: string, signal: AbortSignal): Promise<Map<string, number>> => {
+  const gr = await runShell("git log --since='30 days ago' --name-only --pretty=format:", {
+    cwd,
+    signal,
+  })
+  if (gr.exitCode === 0 && !gr.timedOut) return parseRecencyHits(gr.stdout)
+  return new Map()
 }
 
 export const fileTreeSummaryTool: Tool<Input> = {
@@ -307,6 +416,12 @@ export const fileTreeSummaryTool: Tool<Input> = {
 
     const agg = aggregate(files, maxDepth, maxFiles)
 
+    // Recency ranking: ONE git-log call, placed AFTER the rg --files block.
+    // Failure (non-git dir, no commits, etc.) silently falls back to "alpha".
+    const rank = input.rank ?? "alpha"
+    const recencyHits =
+      rank === "recency" ? await fetchRecencyHits(ctx.cwd, ctx.signal) : new Map<string, number>()
+
     // Optional purpose layer: one extra `rg -m5` pass extracting up to 5
     // candidate lines per file so parsePurposeRows can skip noise lines and
     // return the first surviving non-noise line. Scans EXACTLY the files that
@@ -315,7 +430,6 @@ export const fileTreeSummaryTool: Tool<Input> = {
     let summaries: Map<string, string> | undefined
     if (input.summarize === true) {
       yield { type: "progress", message: "extracting per-file purpose…" }
-      // Target the exact rendered files, capped.
       const targetFiles = agg.renderedFiles.slice(0, SUMMARY_FILE_CAP)
       if (targetFiles.length > 0) {
         const purposeParts = [
@@ -339,6 +453,9 @@ export const fileTreeSummaryTool: Tool<Input> = {
       }
     }
 
-    yield { type: "result", result: { ok: true, output: render(agg, maxFiles, summaries) } }
+    yield {
+      type: "result",
+      result: { ok: true, output: render(agg, maxFiles, summaries, rank, recencyHits) },
+    }
   },
 }
