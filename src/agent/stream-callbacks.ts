@@ -48,7 +48,7 @@
  */
 
 import type { ToolResultBlock } from "@/llm"
-import type { Span } from "@/observability"
+import type { Span, TurnTimingCapture } from "@/observability"
 import type { RedactionHit } from "@/security"
 import { dispatchTool } from "./dispatch"
 import type { DispatchOutcome, InProgressIndicator, StreamingCall } from "./streaming-dispatch"
@@ -73,21 +73,9 @@ export interface StreamCallbacks {
   onFirstChunk: () => void
 }
 
-/** TTFT cell — a mutable single-slot for the first-chunk timestamp. Hoisted
- *  out of the dispatch-callback closure so the host's `finally` block can
- *  read the final value without re-capturing it. `value` is `undefined`
- *  when no qualifying chunk has been observed (engine-side guarantee:
- *  `onFirstChunk` fires at most once per stream, possibly multiple times
- *  across `stream_reset` tombstones; per ADR-0077 the REPLACEMENT stream's
- *  fire wins, so we OVERWRITE rather than freeze). */
-export interface FirstTokenCell {
-  value: number | undefined
-}
-
-/** Anchors captured at `streamConsume` open. `requestSentAt` is the
- *  wall-clock anchor immediately preceding the adapter call (matches
- *  Cursor's `submitChat.hangTtft` anchor); `firstTokenAtCell` is the
- *  one-slot cell the `onFirstChunk` callback overwrites.
+/** Anchors captured at `streamConsume` open. The shared timing capture is
+ *  passed down to the adapter so it can stamp the actual POST boundary, while
+ *  the loop still stamps first-token and stream-end at the stream seam.
  *
  *  `samplingSpan` + `samplingStatus` are listed for forward compatibility
  *  with a future iteration that may want to surface OTel sampling-span
@@ -95,8 +83,7 @@ export interface FirstTokenCell {
  *  lifecycle stays inside `streamConsume`'s try/catch/finally so error
  *  + abort paths remain trivial to reason about). */
 export interface TurnTimingAnchors {
-  requestSentAt: number
-  firstTokenAtCell: FirstTokenCell
+  turnTimingCapture: TurnTimingCapture
   samplingSpan?: Span
   samplingStatus?: "ok" | "error" | "aborted"
 }
@@ -180,7 +167,7 @@ export const createStreamDispatcher = (
   // every reference below stays byte-identical (config/recorder/classifier/…).
   const { config, recorder, classifier, skillGate } = session
   const { toolHistory, workingState, collector, onRedaction } = state
-  const { firstTokenAtCell } = anchors
+  const { turnTimingCapture } = anchors
 
   const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
     const s = recorder?.toolExec()
@@ -318,7 +305,7 @@ export const createStreamDispatcher = (
   // Each engine fire is a fresh first-chunk event; OVERWRITE so the
   // REPLACEMENT stream's chunk wins (honors ADR-0077 tombstone invariant).
   const onFirstChunk = (): void => {
-    firstTokenAtCell.value = Date.now()
+    turnTimingCapture.markFirstToken()
   }
 
   return { dispatch, onTextDelta, onToolStart, onInProgress, onFirstChunk }

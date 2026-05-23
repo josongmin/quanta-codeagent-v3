@@ -169,6 +169,12 @@ export type ToolChoice =
   | { readonly kind: "none" }
   | { readonly kind: "tool"; readonly name: string }
 
+/** Minimal timing-capture seam for the active provider wire request.
+ *  Structural only; the loop passes the full capture object through. */
+export interface RequestTimingCapture {
+  markRequestSent(): void
+}
+
 export interface StreamInput {
   messages: Message[]
   system?: SystemPromptInput
@@ -188,4 +194,10 @@ export interface StreamInput {
    *  → absent is byte-identical to the pre-feature path (no signal forwarded,
    *  no behavioural change). */
   signal?: AbortSignal
+  /**
+   * Wall-clock capture for the active provider wire request.
+   * The loop passes this through so the adapter can stamp the actual POST
+   * boundary instead of the caller's preflight time.
+   */
+  turnTimingCapture?: RequestTimingCapture
 }

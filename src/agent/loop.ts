@@ -6,7 +6,7 @@ import {
   GEN_AI_ATTRS,
   SPAN_NAMES,
   type Span,
-  safeTtftMs,
+  createTurnTimingCapture,
   startSpan,
   type TurnTiming,
 } from "@/observability"
@@ -92,11 +92,7 @@ import {
   refusalCategory,
   type StopCategory,
 } from "./stop-category"
-import {
-  createStreamDispatcher,
-  type FirstTokenCell,
-  type TurnTimingAnchors,
-} from "./stream-callbacks"
+import { createStreamDispatcher, type TurnTimingAnchors } from "./stream-callbacks"
 import { streamingTurn } from "./streaming-dispatch"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import { consumeTurnSignals, createToolChoiceTurnState, resolveToolChoice } from "./tool-choice"
@@ -455,30 +451,18 @@ const streamConsume = async (
   // Absent gate / absent override ⇒ `{ llm: config.llm }` with no `thinking`,
   // i.e. byte-identical to the pre-feature stream call.
   const turnLlm = resolveSkillTurnOverride(config, skillGate?.activeOverride())
-  // ADR-0077 Plane-B (L4 wire): TTFT anchors captured directly in this
-  // closure. Built BEFORE `llm.stream(...)` so `requestSentAt` is the
-  // wall-clock anchor immediately preceding the adapter call (matches
-  // Cursor's `submitChat.hangTtft` anchor).
-  //
-  // Tombstone (stream_reset) handling: the engine resets its own
-  // `firstChunkSeen` latch so the REPLACEMENT stream's first chunk re-fires
-  // `onFirstChunk`. Per ADR-0077 invariant ("FIRST chunk of the REPLACEMENT
-  // stream is the TTFT signal") the cell is OVERWRITTEN on every fire (the
-  // factory does this directly; `createTurnTimingCapture.markFirstToken` is
-  // by-design idempotent — it freezes the first stamp — so we capture the
-  // anchor directly via the mutable cell). Sink (`onTurnTiming`) is what
-  // surfaces the snapshot; absent ⇒ snapshot is built locally and discarded.
-  const requestSentAt = Date.now()
-  const firstTokenAtCell: FirstTokenCell = { value: undefined }
+  // ADR-0077 Plane-B (L4 wire): timing capture shared with the adapter.
+  // The adapter stamps `requestSentAt` at the actual POST boundary; the
+  // stream dispatcher stamps `firstTokenAt` on the first output chunk and
+  // this `finally` block stamps `streamEndAt` after the stream drains.
+  const turnTimingCapture = createTurnTimingCapture()
   // R2-B P3 — hoist the dispatch closure + 4 stream callbacks into the
   // `createStreamDispatcher` factory (`./stream-callbacks`). Pure mechanical
   // extract: every closure body is byte-identical to the prior inline form,
   // every collaborator (`config`/`recorder`/`classifier`/`skillGate`/
   // `workingState`/`collector`/`toolHistory`/`onRedaction`) is read off the
-  // SAME `TurnSession`/`TurnState` bundles. The factory captures the TTFT
-  // cell so `onFirstChunk` writes through to this scope (the finally block
-  // below reads `firstTokenAtCell.value` for the TurnTiming snapshot).
-  const anchors: TurnTimingAnchors = { requestSentAt, firstTokenAtCell }
+  // SAME `TurnSession`/`TurnState` bundles.
+  const anchors: TurnTimingAnchors = { turnTimingCapture }
   const callbacks = createStreamDispatcher(session, state, anchors)
   try {
     const outcome = await streamingTurn({
@@ -495,6 +479,7 @@ const streamConsume = async (
           // hanging the socket until completion/timeout. Same signal already
           // passed to streamingTurn + tool ctx below.
           signal: config.signal,
+          turnTimingCapture,
         }),
         recorder,
         collector,
@@ -523,35 +508,11 @@ const streamConsume = async (
     return { error: e, message }
   } finally {
     stop?.()
-    // ADR-0077 Plane-B (L4 wire): build the TurnTiming snapshot + surface
-    // via the optional sink + emit `gen_ai.response.time_to_first_token_ms`
-    // as a span-close attr. The snapshot uses `safeTtftMs` so a non-finite /
-    // negative (clock-skew) value surfaces as `null` on the scalar fields —
-    // never poisons OTel with a junk number. We mark stream-end HERE (in
-    // the finally) so error / abort paths still get a `streamEndAt` anchor
-    // for the duration math (mirrors Cursor `hangTtft` which records even
-    // on a hung stream so the timeout itself is measurable).
-    const streamEndAt = Date.now()
-    // The cell stores `undefined` until the engine fires `onFirstChunk`; the
-    // `TurnTiming.firstTokenAt` contract is `number | null`, so normalize
-    // here. Byte-identical to the prior `let firstTokenAt: number | null = null`
-    // pattern (same `null` surfaced both to TurnTiming and to the latency
-    // math, same `null`→omit-attr behaviour at `endSpan`).
-    const firstTokenAt = firstTokenAtCell.value ?? null
-    const firstTokenLatencyMs = firstTokenAt === null ? null : firstTokenAt - requestSentAt
-    const totalDurationMs = streamEndAt - requestSentAt
-    const timing: TurnTiming = Object.freeze({
-      requestSentAt,
-      firstTokenAt,
-      firstTokenLatencyMs,
-      streamEndAt,
-      totalDurationMs,
-      // SOTA mirror (Cursor `setTtftMs`): post-guard scalar projections.
-      // A non-finite / negative raw arithmetic ⇒ `null` so the consumer
-      // omits the attr / field rather than reporting junk.
-      ttftMs: safeTtftMs(firstTokenLatencyMs),
-      totalTtftMs: safeTtftMs(totalDurationMs),
-    })
+    // ADR-0077 Plane-B (L4 wire): stamp the final anchor and surface the
+    // snapshot via the optional sink + OTel attr. The capture is shared with
+    // the adapter, so `requestSentAt` reflects the actual wire POST boundary.
+    turnTimingCapture.markStreamEnd()
+    const timing: TurnTiming = turnTimingCapture.snapshot()
     onTurnTiming?.(timing)
     // OTel: emit the TTFT attribute on the sampling-span close ONLY when
     // we have a guarded value (the absent / non-finite / negative case

@@ -33,13 +33,7 @@ import {
 import { LLMError } from "@/shared"
 import type { LLMErrorKind } from "@/shared/errors"
 import type { LLMPort } from "../ports"
-import type {
-  Message,
-  StreamEvent,
-  StreamInput,
-  SystemPromptInput,
-  ToolSchema,
-} from "../types"
+import type { Message, StreamEvent, StreamInput, SystemPromptInput, ToolSchema } from "../types"
 
 const RESPONSES_PATH = "/responses"
 const MODELS_PATH = "/models"
@@ -115,10 +109,10 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     const path = chatgptTokenPath(home)
     const rec = await readToken(path)
     if (rec === null) {
-      throw new LLMError(
-        "ChatGPT-OAuth: not signed in — run `quanta /login --chatgpt` first.",
-        { kind: "auth", provider: "chatgpt-oauth" },
-      )
+      throw new LLMError("ChatGPT-OAuth: not signed in — run `quanta /login --chatgpt` first.", {
+        kind: "auth",
+        provider: "chatgpt-oauth",
+      })
     }
     if (!isExpired(rec, this.nowMs(), TOKEN_REFRESH_SKEW_MS)) return rec
     const cfg = resolveOAuthConfig(this.env)
@@ -234,6 +228,8 @@ export class ChatGPTOAuthAdapter implements LLMPort {
 
     const body = buildResponsesBody(input, effectiveModel)
 
+    // Stamp the actual provider wire boundary after token/catalog preflight.
+    input.turnTimingCapture?.markRequestSent()
     const res = await this.fetchImpl(url, {
       method: "POST",
       headers,
@@ -385,10 +381,7 @@ const toolsToResponsesShape = (tools: readonly ToolSchema[]): readonly Responses
  *  2026-05-23), so a non-empty default is mandatory. */
 const DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
 
-export const buildResponsesBody = (
-  input: StreamInput,
-  model: string,
-): Record<string, unknown> => {
+export const buildResponsesBody = (input: StreamInput, model: string): Record<string, unknown> => {
   const items: ResponsesInputItem[] = []
   for (const m of input.messages) {
     for (const it of messageToItems(m)) items.push(it)
@@ -480,8 +473,7 @@ interface ResponsesEvent {
   readonly item_id?: string
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  v !== null && typeof v === "object"
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object"
 
 async function* parseSSE(
   body: ReadableStream<Uint8Array>,

@@ -9,6 +9,7 @@ import {
   ChatGPTOAuthAdapter,
 } from "@/llm/adapters/chatgpt-oauth"
 import type { StreamEvent, StreamInput } from "@/llm/types"
+import type { TurnTimingCapture } from "@/observability"
 import { LLMError } from "@/shared"
 
 /**
@@ -43,7 +44,7 @@ afterEach(async () => {
 /** Multi-call fetch mock — dispatches by URL substring so a `/models` GET
  *  and a `/responses` POST in the same test can return different shapes.
  *  Returns the FIRST handler that the URL contains. */
-const dispatchFetch =
+const _dispatchFetch =
   (handlers: { match: string; respond: () => Response }[]) =>
   async (url: string, _init?: RequestInit): Promise<Response> => {
     for (const h of handlers) {
@@ -52,15 +53,15 @@ const dispatchFetch =
     throw new Error(`unexpected fetch URL: ${url}`)
   }
 
-const catalogResponse = (
-  models: readonly { model: string; is_default?: boolean }[],
-): Response =>
+const catalogResponse = (models: readonly { model: string; is_default?: boolean }[]): Response =>
   new Response(JSON.stringify({ models }), {
     status: 200,
     headers: { "content-type": "application/json" },
   })
 
-const seedToken = async (overrides: Partial<Parameters<typeof writeToken>[1]> = {}): Promise<void> => {
+const seedToken = async (
+  overrides: Partial<Parameters<typeof writeToken>[1]> = {},
+): Promise<void> => {
   await writeToken(chatgptTokenPath(dir), {
     access_token: "at-test",
     refresh_token: "rt-test",
@@ -166,6 +167,55 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
       type: "message_stop",
       stop_reason: "end_turn",
     })
+  })
+
+  test("marks requestSentAt on the actual /responses POST, not during /models preflight", async () => {
+    await seedToken()
+    const marks: string[] = []
+    const timingCapture: TurnTimingCapture = {
+      markRequestSent: () => {
+        marks.push("request")
+      },
+      markFirstToken: () => {
+        marks.push("first")
+      },
+      markStreamEnd: () => {
+        marks.push("end")
+      },
+      snapshot: () => ({
+        requestSentAt: 0,
+        firstTokenAt: null,
+        firstTokenLatencyMs: null,
+        streamEndAt: 0,
+        totalDurationMs: 0,
+        ttftMs: null,
+        totalTtftMs: null,
+      }),
+    }
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        expect(marks).toEqual([])
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      expect(marks).toEqual(["request"])
+      expect(init?.method).toBe("POST")
+      return sseResponse([
+        'data: {"type":"response.completed","response":{"model":"gpt-5","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+    await collect(
+      a.stream({
+        ...emptyStreamInput(),
+        turnTimingCapture: timingCapture,
+      }),
+    )
+    expect(marks).toContain("request")
   })
 
   test("catalog swap: configured model absent → backend-default used + body shows swapped slug", async () => {

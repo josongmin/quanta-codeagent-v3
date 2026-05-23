@@ -95,6 +95,17 @@ export {
   toMetadataSnapshot,
   toRelativePath,
 } from "./ide-context"
+export {
+  composeIssueHint,
+  EMPTY_HINT as EMPTY_ISSUE_HINT,
+  extractCodeFences,
+  extractErrors,
+  extractFiles,
+  extractIssueHint,
+  extractSymbols,
+  extractTracebackPaths,
+  type IssueHint,
+} from "./issue-hint"
 export { runAgent } from "./loop"
 export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {

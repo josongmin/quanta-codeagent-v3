@@ -19,6 +19,8 @@ import {
   type AgentConfig,
   type BranchSearchConfig,
   buildSystemPrompt,
+  composeIssueHint,
+  extractIssueHint,
   lspNavToolList,
   runAgent,
 } from "@/agent"
@@ -221,6 +223,7 @@ export const benchOptIns = (): {
   skills: AgentConfig["skills"] | undefined
   localizePhase: AgentConfig["localizePhase"] | undefined
   branchSearch: BranchSearchConfig | undefined
+  issueHint: boolean
 } => {
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
@@ -260,7 +263,12 @@ export const benchOptIns = (): {
           isolation: "tmpdir",
         }
       : undefined
-  return { lspNav, subagent, skills, localizePhase, branchSearch }
+  // Issue-text hint injection (Agentless paper, localization +5pp). Strict
+  // accept-list: `1` or `on` ⇒ on; anything else ⇒ off (default OFF preserves
+  // byte-identical measurement until explicit opt-in).
+  const v = process.env.QUANTA_BENCH_ISSUE_HINT
+  const issueHint = v === "1" || v === "on"
+  return { lspNav, subagent, skills, localizePhase, branchSearch, issueHint }
 }
 
 /** Pure parser for the `QUANTA_BENCH_LOCALIZE_PHASE` env var. Exported for
@@ -317,7 +325,12 @@ export const buildConfig = (
   // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
   // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
   const baseText = instance.swebench ? `${base}${SWEBENCH_DIRECTIVE}` : base
-  const text = seedMsg !== undefined && seedMsg !== "" ? `${baseText}\n\n${seedMsg}` : baseText
+  // Agentless hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT=1`).
+  // When opt-in is ON AND extraction yields a non-empty hint, PREPEND markdown
+  // hint block to the user message. Empty hint ⇒ no change ⇒ byte-identical.
+  const hint = opt.issueHint ? composeIssueHint(extractIssueHint(instance.problemStatement)) : ""
+  const hintedBase = hint !== "" ? `${hint}\n\n${baseText}` : baseText
+  const text = seedMsg !== undefined && seedMsg !== "" ? `${hintedBase}\n\n${seedMsg}` : hintedBase
   const messages: Message[] = [
     {
       role: "user",

@@ -102,8 +102,8 @@ export interface AgentOutcome {
    * the run (the one that produced the final assistant message). Absent on
    * runs that never opened a stream (e.g. immediate abort) ⇒ byte-identical
    * for callers that only read `reason`. Captured by
-   * `createTurnTimingCapture` and threaded through the loop's per-turn
-   * sampling-request seam.
+   * `createTurnTimingCapture`, with `requestSentAt` stamped by the adapter at
+   * the actual provider POST boundary.
    */
   turnTiming?: TurnTiming
   /**

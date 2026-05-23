@@ -3,8 +3,8 @@
  *
  * Records the three wall-clock anchors that pin down a single LLM-stream turn:
  *
- *   1. `requestSentAt`  — the moment the loop hands the request to the LLM
- *      adapter (i.e. `llm.stream(...)` is called).
+ *   1. `requestSentAt`  — the moment the provider wire request is actually
+ *      sent (the adapter stamps this immediately before the POST).
  *   2. `firstTokenAt`   — the moment the FIRST piece of model output (text,
  *      thinking, or tool_use start) arrives off the stream. Idempotent: only
  *      the first call records; later calls are no-ops. `null` when the
@@ -72,10 +72,10 @@ export const safeTtftMs = (raw: number | null): number | null => {
 }
 
 /** Mutable capture handle. Constructed at turn-top; mutated by the loop /
- *  stream consumer; snapshotted at turn-end. */
+ *  adapter / stream consumer; snapshotted at turn-end. */
 export interface TurnTimingCapture {
-  /** Stamp `requestSentAt`. MUST be called exactly once, immediately before
-   *  the LLM stream is opened. */
+  /** Stamp `requestSentAt`. MUST be called exactly once, at the actual
+   *  provider wire boundary (immediately before the POST leaves). */
   markRequestSent(): void
   /** Stamp `firstTokenAt` ONLY on the very first call; idempotent on every
    *  subsequent call. Wired to fire on the first of
