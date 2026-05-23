@@ -67,14 +67,19 @@ const ALWAYS_CONFIRM_PATTERNS: RegExp[] = [
 ]
 
 /** Derive a TYPED {@link ToolFailure} from the existing `ShellResult` shape
- *  WITHOUT touching `runtime/shell.ts` (owned by another track). Only the two
- *  cases cleanly recoverable from `{exitCode, timedOut, stderr}`:
+ *  WITHOUT touching `runtime/shell.ts` (owned by another track). The classifier
+ *  recognises three cleanly-recoverable bash exit shapes:
  *   - `timeout`: the runtime already flags `timedOut` — carry the deadline.
  *   - `spawn_error`: `bash -lc` exits 127 with `command not found` on stderr
  *     when the program can't be launched at all (Cursor `ShellSpawnError`). The
  *     127+stderr heuristic is the ONLY signal available without editing the
  *     runtime to surface a real spawn ENOENT; a script that legitimately exits
  *     127 without that stderr text is NOT misclassified.
+ *   - `permission_denied`: `bash -lc` exits 126 with `Permission denied` on
+ *     stderr when the file exists but the OS refused the exec (e.g. `chmod
+ *     644` on a script, EACCES on `execve`). Distinct from `spawn_error` (the
+ *     binary WAS found — the kernel refused), and from a session read-only
+ *     mode refusal (`isReadonly` is explicitly absent here — real OS denial).
  *  Any other non-zero exit stays a plain command failure (no `failure` field —
  *  byte-identical to the pre-migration result). */
 const deriveBashFailure = (
@@ -86,6 +91,14 @@ const deriveBashFailure = (
   }
   if (r.exitCode === 127 && /command not found/i.test(r.stderr)) {
     return { mode: "spawn_error", error: r.stderr.trim().slice(-STDERR_CAP) || "command not found" }
+  }
+  // exit 126 + "Permission denied" on stderr is bash's standard EACCES-on-
+  // execve diagnostic (POSIX shell convention). Narrowing on BOTH the exit
+  // code AND the stderr text avoids misclassifying an unrelated 126 (POSIX
+  // also reserves 126 for "command found but not executable" but the
+  // matching stderr is the load-bearing signal).
+  if (r.exitCode === 126 && /permission denied/i.test(r.stderr)) {
+    return { mode: "permission_denied" }
   }
   return undefined
 }

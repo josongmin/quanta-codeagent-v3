@@ -120,9 +120,16 @@ describe("readTool", () => {
     }
   })
 
-  test("missing file rejects with a not-found error", async () => {
+  test("missing file ⇒ typed not_found (gap closure, absorb #2 extension)", async () => {
     // statFile() runs first and surfaces the OS ENOENT for a missing path.
-    await expect(run({ path: join(dir, "ghost.txt") })).rejects.toThrow(/ENOENT|not found/i)
+    // Pre-fix `read` re-threw past the loop; now the tool catches ENOENT
+    // (and the inner `File not found:` shape) and produces a typed
+    // `not_found` failure with the requested path verbatim.
+    const ghost = join(dir, "ghost.txt")
+    const r = await run({ path: ghost })
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "not_found", path: ghost })
+    expect(r.output).toContain("File not found")
   })
 
   test("schema rejects a non-string path", () => {
