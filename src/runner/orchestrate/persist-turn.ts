@@ -1,0 +1,65 @@
+import type { AgentOutcome } from "@/agent"
+import { saveSession } from "@/agent"
+import type { Message } from "@/llm"
+import { type SavePayload, type SessionMeta, saveSessionById } from "@/session"
+
+/**
+ * Per-turn persistence — surface-AGNOSTIC.
+ *
+ * Verbatim relocation of the inline save block from the CLI REPL's `turn`
+ * closure. Two independent default-OFF persistence paths:
+ *
+ *   1. `--state <p>` path-mode transcript (legacy `saveSession`).
+ *   2. Id-mode auto-save via `saveSessionById` when `idMeta` is set
+ *      (so `quanta --resume <id>` self-persists without `--state`).
+ *
+ * Both fire only when their respective gate is set — no new branches.
+ *
+ * Layer-2 slice (`@/runner/orchestrate`): may import `@/agent`, `@/llm`,
+ * `@/session`. Default-OFF posture preserved: when neither `state` nor
+ * `idMeta` is set, this is a no-op.
+ *
+ * `apps/cli/session-io.ts` re-exports {@link persistTurn} from here so the
+ * existing call site in `repl.ts` and the unit test reach the same function.
+ */
+
+/** Inputs for {@link persistTurn} — every field mirrors the bindings the
+ *  in-line REPL block used to close over. */
+export interface PersistTurnInput {
+  /** Path-mode transcript path from `--state <p>` / `QUANTA_STATE_PATH`.
+   *  Default OFF (undefined) → skip path-mode save. */
+  state: string | undefined
+  /** Id-mode session meta (set when resumed by id or `--new-session`).
+   *  Default OFF (undefined) → skip id-mode auto-save. */
+  idMeta: SessionMeta | undefined
+  /** Opaque session id (used by path-mode save metadata even when idMeta
+   *  is undefined — preserved verbatim from the prior inline behavior). */
+  sessionId: string
+  /** Post-turn message history. */
+  messages: Message[]
+  /** Outcome of the just-completed turn. */
+  outcome: AgentOutcome
+}
+
+export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
+  const { state, idMeta, sessionId, messages, outcome } = input
+  if (state) {
+    await saveSession(state, {
+      sessionId,
+      messages,
+      reason: outcome.reason,
+      turns: outcome.turns,
+    })
+  }
+  if (idMeta) {
+    // Auto-save in id-mode: per-turn persistence so `quanta --resume <id>`
+    // self-persists without the user touching `--state`. No log emitted
+    // here — would be too chatty inside the REPL.
+    const payload: SavePayload = {
+      reason: outcome.reason,
+      turns: outcome.turns,
+      messages,
+    }
+    await saveSessionById(idMeta, payload)
+  }
+}

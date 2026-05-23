@@ -1,14 +1,8 @@
 import { homedir } from "node:os"
 import { emitKeypressEvents } from "node:readline"
 import * as readline from "node:readline/promises"
-import {
-  type AgentConfig,
-  type AgentOutcome,
-  buildSystemPrompt,
-  RetryingLLM,
-  runAgent,
-} from "@/agent"
-import type { ContentBlock, ImageBlock, LLMPort, Message } from "@/llm"
+import { type AgentConfig, buildSystemPrompt, RetryingLLM } from "@/agent"
+import type { ImageBlock, LLMPort, Message } from "@/llm"
 import {
   buildCostDashboard,
   buildShellOtelObserver,
@@ -17,12 +11,11 @@ import {
   summarizeWorkMetrics,
 } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
+import { runOnce } from "@/runner"
 import { logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { composeShellObservers } from "@/tool"
 import { loadImageBlock } from "./image-loader"
-import { AbortError, readLine } from "./raw-line-reader"
-import { installStatusBar, type StatusBar } from "./status-bar"
 import {
   argvImages,
   argvPrompt,
@@ -45,8 +38,9 @@ import {
   type SessionDeps,
   titleFlag,
 } from "./internal"
+import { AbortError, readLine } from "./raw-line-reader"
 import { runSessionCommand } from "./session-commands"
-import { persistTurn, switchToSessionCwd } from "./session-io"
+import { switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
 import {
   describeSlashCommand,
@@ -55,6 +49,7 @@ import {
   type SkillRow,
   slashCompleter,
 } from "./slash-commands"
+import { installStatusBar, type StatusBar } from "./status-bar"
 
 /**
  * CLI REPL + main-orchestration body.
@@ -561,13 +556,24 @@ export const runRepl = async (): Promise<void> => {
     try {
       // ADR-0083: attach seed images to the FIRST turn only, then drain so
       // subsequent REPL lines are text-only (byte-identical when no --image).
-      const content: ContentBlock[] = [{ type: "text", text }, ...pendingImages]
+      // `runOnce` (surface-agnostic Layer-2 driver) handles the
+      // history.push → runAgent → persistTurn atom; the CLI surface keeps
+      // the status bar / Esc-Esc / dashboard wrappers here. Byte-identical
+      // post-condition: `history = result.messages`, `pendingImages = []`
+      // (drained as before).
+      const seedImages = pendingImages
       pendingImages = []
-      history.push({ role: "user", content })
       const turnDeps = { ...sessionDeps, signal: turnSignal }
-      const outcome = await runAgent(assembleConfig(history, turnDeps))
-      history = outcome.messages
-      await persistTurn({ state, idMeta, sessionId, messages: history, outcome })
+      const result = await runOnce({
+        deps: turnDeps,
+        assembleConfig,
+        history,
+        prompt: text,
+        pendingImages: seedImages,
+        state,
+        idMeta,
+      })
+      history = result.messages
       if (metrics) {
         const snap = metrics.snapshot()
         slog.info("metrics.snapshot", { snapshot: snap })

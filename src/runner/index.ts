@@ -20,8 +20,12 @@
  *   - Public re-exports go through this barrel so consumers depend on the
  *     slice contract, not internal file paths.
  */
-// `assemble/` is the first populated sub-slice (the others — orchestrate/,
-// session-ops/ — remain scaffolds for later phases). The barrel re-exports
-// the public assemble factories so consumers depend on `@/runner` (the slice
-// contract), not internal file paths.
+// Sub-slice barrels — each populated independently across Phase-1 tracks.
+// `assemble/` — typed-config → built collaborators (Track-A).
+// `orchestrate/` — `runOnce` + resume FSM + per-turn save (Track-C).
+// `session-ops/` re-exports go through its own barrel (`./session-ops`); not
+// re-spread here to keep the top-level `@/runner` surface tight (consumers
+// reach session-ops via `@/runner/session-ops` to make the dependency
+// explicit at the call site).
 export * from "./assemble"
+export * from "./orchestrate"
