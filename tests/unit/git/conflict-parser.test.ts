@@ -177,8 +177,7 @@ describe("conflict-parser — Group B marker length", () => {
 
 describe("conflict-parser — Group C line terminators", () => {
   test("C10: CRLF throughout — offsets correct, slice round-trip reproduces block", () => {
-    const src =
-      "before\r\n<<<<<<< HEAD\r\nO\r\n=======\r\nT\r\n>>>>>>> b\r\nafter\r\n"
+    const src = "before\r\n<<<<<<< HEAD\r\nO\r\n=======\r\nT\r\n>>>>>>> b\r\nafter\r\n"
     const r = parseConflicts(src)
     expect(r.blocks.length).toBe(1)
     const b = r.blocks[0]
@@ -232,7 +231,9 @@ describe("conflict-parser — Group D diagnostics", () => {
     expect(u).toBeDefined()
     // lineCount includes the open + 4 content lines = 5 (the trailing newline
     // doesn't add a phantom line). lineCount + 1 = 6.
-    const lineCount = src.split(/\r?\n/).filter((l, i, a) => i < a.length - 1 || l.length > 0).length
+    const lineCount = src
+      .split(/\r?\n/)
+      .filter((l, i, a) => i < a.length - 1 || l.length > 0).length
     expect(u?.line).toBe(lineCount + 1)
   })
 

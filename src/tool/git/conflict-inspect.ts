@@ -180,9 +180,7 @@ const renderPerFile = (per: PerFileResult): string => {
     lines.push("  diagnostics: 0")
   } else {
     const head = `  diagnostics: ${parse.diagnostics.length}`
-    const detail = parse.diagnostics
-      .map((d) => `line ${d.line}: ${d.kind}`)
-      .join("; ")
+    const detail = parse.diagnostics.map((d) => `line ${d.line}: ${d.kind}`).join("; ")
     lines.push(`${head} — ${detail}`)
   }
   return lines.join("\n")
@@ -211,19 +209,47 @@ interface DiscoverOutcome {
 }
 
 const discoverPaths = async (runner: GitRunner, ctx: ToolContext): Promise<DiscoverOutcome> => {
-  const out = await safeRun(
-    runner,
-    ["status", "--porcelain=v1"],
-    ctx.cwd,
-    "git status",
-    ctx.signal,
-  )
+  const out = await safeRun(runner, ["status", "--porcelain=v1"], ctx.cwd, "git status", ctx.signal)
   if (out.kind === "spawn-error") return { ok: false, errorOutput: out.message }
   const r = out.result
   if (r.exitCode !== 0) {
     return { ok: false, errorOutput: stderrReason(r.stderr, r.exitCode, "git status") }
   }
   return { ok: true, paths: parseConflictPaths(r.stdout) }
+}
+
+/** Resolution of the path source — discriminated so the execute loop can branch
+ *  cleanly without re-doing the discover-or-validate decision. */
+type PathResolution =
+  | { readonly kind: "ok"; readonly paths: ReadonlyArray<string>; readonly progress?: string }
+  | { readonly kind: "err"; readonly output: string }
+
+const resolvePaths = async (
+  inputPaths: ReadonlyArray<string> | undefined,
+  runner: GitRunner,
+  ctx: ToolContext,
+): Promise<PathResolution> => {
+  if (inputPaths !== undefined) {
+    const v = validatePaths(inputPaths)
+    if (!v.ok) return { kind: "err", output: v.reason ?? "invalid paths" }
+    return { kind: "ok", paths: inputPaths }
+  }
+  const disc = await discoverPaths(runner, ctx)
+  if (!disc.ok) return { kind: "err", output: disc.errorOutput ?? "discover failed" }
+  return { kind: "ok", paths: disc.paths ?? [], progress: "git status --porcelain=v1" }
+}
+
+interface CapPlan {
+  readonly toRead: ReadonlyArray<string>
+  readonly capMessage: string | null
+}
+
+const planRead = (candidatePaths: ReadonlyArray<string>, cap: number): CapPlan => {
+  if (candidatePaths.length <= cap) return { toRead: candidatePaths, capMessage: null }
+  return {
+    toRead: candidatePaths.slice(0, cap),
+    capMessage: `Found ${candidatePaths.length} conflicts; inspecting first ${cap} (raise maxFiles to see more)`,
+  }
 }
 
 export const gitConflictInspectTool = (runner: GitRunner): Tool<GitConflictInspectInput> => ({
@@ -246,46 +272,29 @@ export const gitConflictInspectTool = (runner: GitRunner): Tool<GitConflictInspe
     const { paths: inputPaths, maxFiles } = parsed.data
     const cap = maxFiles ?? DEFAULT_MAX_FILES
 
-    let candidatePaths: string[]
-    if (inputPaths !== undefined) {
-      const v = validatePaths(inputPaths)
-      if (!v.ok) {
-        yield {
-          type: "result",
-          result: { ok: false, output: v.reason ?? "invalid paths" },
-        }
-        return
-      }
-      candidatePaths = [...inputPaths]
-    } else {
+    if (inputPaths === undefined) {
       yield { type: "progress", message: "git status --porcelain=v1" }
-      const disc = await discoverPaths(runner, ctx)
-      if (!disc.ok) {
-        yield { type: "result", result: { ok: false, output: disc.errorOutput ?? "discover failed" } }
-        return
-      }
-      candidatePaths = disc.paths ?? []
+    }
+    const resolved = await resolvePaths(inputPaths, runner, ctx)
+    if (resolved.kind === "err") {
+      yield { type: "result", result: { ok: false, output: resolved.output } }
+      return
     }
 
+    const candidatePaths = resolved.paths
     if (candidatePaths.length === 0) {
       yield { type: "result", result: { ok: true, output: "(no conflicts)" } }
       return
     }
 
-    let capMessage: string | null = null
-    let toRead = candidatePaths
-    if (toRead.length > cap) {
-      capMessage = `Found ${candidatePaths.length} conflicts; inspecting first ${cap} (raise maxFiles to see more)`
-      toRead = toRead.slice(0, cap)
-    }
-
-    yield { type: "progress", message: `inspecting ${toRead.length} file(s)` }
+    const plan = planRead(candidatePaths, cap)
+    yield { type: "progress", message: `inspecting ${plan.toRead.length} file(s)` }
     const results: PerFileResult[] = []
-    for (const p of toRead) {
+    for (const p of plan.toRead) {
       results.push(await readAndParse(ctx.cwd, p))
     }
 
-    const out = formatOverall(results, candidatePaths.length, capMessage)
+    const out = formatOverall(results, candidatePaths.length, plan.capMessage)
     yield { type: "result", result: { ok: true, output: truncate(out) } }
   },
 })

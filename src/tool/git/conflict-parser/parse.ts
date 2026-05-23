@@ -221,6 +221,202 @@ const fail = (
   diagnostics: partial.diagnostics,
 })
 
+/** Mutable per-block state used by the body-scan step handlers. */
+interface BlockScanState {
+  baseIdx: number
+  baseLabel: string | undefined
+  sepIdx: number
+  diagnostics: ConflictParseDiagnostic[]
+}
+
+/** Per-line verdict the step handlers return to the outer loop. */
+type StepVerdict =
+  | { readonly kind: "continue" }
+  | { readonly kind: "abandon"; readonly result: BlockScan }
+  | { readonly kind: "complete"; readonly result: BlockScan }
+
+/** Build a successful complete-scan result. */
+const complete = (state: BlockScanState, closeIdx: number, closeLabel: string): BlockScan => ({
+  baseIdx: state.baseIdx,
+  ...(state.baseLabel !== undefined ? { baseLabel: state.baseLabel } : {}),
+  sepIdx: state.sepIdx,
+  closeIdx,
+  closeLabel,
+  lengthMismatch: false,
+  nested: false,
+  resumeAt: closeIdx + 1,
+  diagnostics: state.diagnostics,
+})
+
+/** Build a fail-scan result preserving the partial state. */
+const abandon = (state: BlockScanState, resumeAt: number, reason: "length" | "nested"): BlockScan =>
+  fail(
+    { baseIdx: state.baseIdx, sepIdx: state.sepIdx, diagnostics: state.diagnostics },
+    resumeAt,
+    reason,
+  )
+
+/** Handle a nested open or malformed open inside an active block. */
+const handleNestedOrMalformedOpen = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  malformed: boolean,
+): StepVerdict => {
+  if (malformed) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `malformed open marker at line ${rec.lineNumber}: expected '<<<<<<< <label>' (with a single space before label)`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  state.diagnostics.push({
+    kind: "nested",
+    line: rec.lineNumber,
+    message: `nested '<<<<<<<' open marker at line ${rec.lineNumber} while previous conflict is still open`,
+  })
+  return { kind: "abandon", result: abandon(state, j + 1, "nested") }
+}
+
+/** Handle a base marker (`|||||||`) inside the block. */
+const handleBase = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  runLen: number,
+  label: string,
+  openRunLen: number,
+): StepVerdict => {
+  if (state.sepIdx !== -1 || state.baseIdx !== -1) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `unexpected base marker at line ${rec.lineNumber}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  if (runLen !== openRunLen) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `base marker length ${runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  state.baseIdx = j
+  state.baseLabel = label
+  return { kind: "continue" }
+}
+
+/** Handle a separator (`=======`) inside the block. */
+const handleSep = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  runLen: number,
+  openRunLen: number,
+): StepVerdict => {
+  if (state.sepIdx !== -1) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `unexpected second separator at line ${rec.lineNumber}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  if (runLen !== openRunLen) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `separator length ${runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  state.sepIdx = j
+  return { kind: "continue" }
+}
+
+/** Handle a close marker (`>>>>>>>`) inside the block. */
+const handleClose = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  runLen: number,
+  label: string,
+  openRunLen: number,
+): StepVerdict => {
+  if (runLen !== openRunLen) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `close marker length ${runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  return { kind: "complete", result: complete(state, j, label) }
+}
+
+/** Step the per-line dispatch — one line of a block scan. */
+const stepBlock = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  openRunLen: number,
+): StepVerdict => {
+  const m = classifyLine(rec.text)
+  switch (m.kind) {
+    case "open":
+      return handleNestedOrMalformedOpen(state, rec, j, false)
+    case "open_malformed":
+      return handleNestedOrMalformedOpen(state, rec, j, true)
+    case "base":
+      return handleBase(state, rec, j, m.runLen, m.label, openRunLen)
+    case "base_malformed":
+      state.diagnostics.push({
+        kind: "marker_at_offset",
+        line: rec.lineNumber,
+        message: `malformed base marker at line ${rec.lineNumber}`,
+      })
+      return { kind: "abandon", result: abandon(state, j + 1, "length") }
+    case "sep":
+      return handleSep(state, rec, j, m.runLen, openRunLen)
+    case "sep_malformed":
+      // `=======xyz` style — overwhelmingly NOT a separator (markdown / etc).
+      // Don't abandon block on this; treat as plain content.
+      return { kind: "continue" }
+    case "close":
+      return handleClose(state, rec, j, m.runLen, m.label, openRunLen)
+    case "close_malformed":
+      state.diagnostics.push({
+        kind: "marker_at_offset",
+        line: rec.lineNumber,
+        message: `malformed close marker at line ${rec.lineNumber}: expected '>>>>>>> <label>' (with a single space before label)`,
+      })
+      return { kind: "abandon", result: abandon(state, j + 1, "length") }
+    case "none":
+      return { kind: "continue" }
+    default: {
+      const _exhaust: never = m
+      void _exhaust
+      return { kind: "continue" }
+    }
+  }
+}
+
+/** Build the EOF-reached fall-through result (no close encountered). */
+const eofScan = (state: BlockScanState, linesLen: number): BlockScan => ({
+  baseIdx: state.baseIdx,
+  ...(state.baseLabel !== undefined ? { baseLabel: state.baseLabel } : {}),
+  sepIdx: state.sepIdx,
+  closeIdx: -1,
+  closeLabel: "",
+  lengthMismatch: false,
+  nested: false,
+  resumeAt: linesLen,
+  diagnostics: state.diagnostics,
+})
+
 /**
  * Scan the body of a conflict that opened at `lines[startIdx]` with the given
  * `openRunLen`. Returns one of:
@@ -236,139 +432,19 @@ const scanBlockBody = (
   startIdx: number,
   openRunLen: number,
 ): BlockScan => {
-  const diagnostics: ConflictParseDiagnostic[] = []
-  let baseIdx = -1
-  let baseLabel: string | undefined
-  let sepIdx = -1
-
+  const state: BlockScanState = {
+    baseIdx: -1,
+    baseLabel: undefined,
+    sepIdx: -1,
+    diagnostics: [],
+  }
   for (let j = startIdx + 1; j < lines.length; j++) {
     const rec = lines[j]
     if (!rec) continue
-    const m = classifyLine(rec.text)
-
-    // Nested open of ANY tolerated length → abandon block.
-    if (m.kind === "open") {
-      diagnostics.push({
-        kind: "nested",
-        line: rec.lineNumber,
-        message: `nested '<<<<<<<' open marker at line ${rec.lineNumber} while previous conflict is still open`,
-      })
-      // Resume AFTER the second open so the outer loop doesn't re-classify it.
-      return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "nested")
-    }
-    if (m.kind === "open_malformed") {
-      // Treat like a malformed-marker mid-block: abandon block but record diag.
-      diagnostics.push({
-        kind: "marker_at_offset",
-        line: rec.lineNumber,
-        message: `malformed open marker at line ${rec.lineNumber}: expected '<<<<<<< <label>' (with a single space before label)`,
-      })
-      return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-    }
-
-    // base marker — accepted ONLY before separator AND only matching open length.
-    if (m.kind === "base") {
-      if (sepIdx !== -1 || baseIdx !== -1) {
-        // A second `|||` after the separator or after another base is malformed.
-        diagnostics.push({
-          kind: "marker_at_offset",
-          line: rec.lineNumber,
-          message: `unexpected base marker at line ${rec.lineNumber}`,
-        })
-        return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-      }
-      if (m.runLen !== openRunLen) {
-        diagnostics.push({
-          kind: "marker_at_offset",
-          line: rec.lineNumber,
-          message: `base marker length ${m.runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
-        })
-        return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-      }
-      baseIdx = j
-      baseLabel = m.label
-      continue
-    }
-    if (m.kind === "base_malformed") {
-      diagnostics.push({
-        kind: "marker_at_offset",
-        line: rec.lineNumber,
-        message: `malformed base marker at line ${rec.lineNumber}`,
-      })
-      return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-    }
-
-    if (m.kind === "sep") {
-      if (sepIdx !== -1) {
-        // Two separators in one block → malformed.
-        diagnostics.push({
-          kind: "marker_at_offset",
-          line: rec.lineNumber,
-          message: `unexpected second separator at line ${rec.lineNumber}`,
-        })
-        return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-      }
-      if (m.runLen !== openRunLen) {
-        diagnostics.push({
-          kind: "marker_at_offset",
-          line: rec.lineNumber,
-          message: `separator length ${m.runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
-        })
-        return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-      }
-      sepIdx = j
-      continue
-    }
-    if (m.kind === "sep_malformed") {
-      // A `=======xyz` style — overwhelmingly NOT a separator (markdown / etc).
-      // Don't abandon block on this; treat as plain content.
-      continue
-    }
-
-    if (m.kind === "close") {
-      if (m.runLen !== openRunLen) {
-        diagnostics.push({
-          kind: "marker_at_offset",
-          line: rec.lineNumber,
-          message: `close marker length ${m.runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
-        })
-        return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-      }
-      return {
-        baseIdx,
-        ...(baseLabel !== undefined ? { baseLabel } : {}),
-        sepIdx,
-        closeIdx: j,
-        closeLabel: m.label,
-        lengthMismatch: false,
-        nested: false,
-        resumeAt: j + 1,
-        diagnostics,
-      }
-    }
-    if (m.kind === "close_malformed") {
-      diagnostics.push({
-        kind: "marker_at_offset",
-        line: rec.lineNumber,
-        message: `malformed close marker at line ${rec.lineNumber}: expected '>>>>>>> <label>' (with a single space before label)`,
-      })
-      return fail({ baseIdx, sepIdx, diagnostics }, j + 1, "length")
-    }
-    // m.kind === "none" → plain line, keep scanning.
+    const verdict = stepBlock(state, rec, j, openRunLen)
+    if (verdict.kind === "abandon" || verdict.kind === "complete") return verdict.result
   }
-
-  // EOF without close.
-  return {
-    baseIdx,
-    ...(baseLabel !== undefined ? { baseLabel } : {}),
-    sepIdx,
-    closeIdx: -1,
-    closeLabel: "",
-    lengthMismatch: false,
-    nested: false,
-    resumeAt: lines.length,
-    diagnostics,
-  }
+  return eofScan(state, lines.length)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -417,6 +493,56 @@ const buildBlock = (
   }
 }
 
+/** Handle a top-level OPEN marker. Returns the next top-level step. Extracted
+ *  from {@link classifyTopLevel} to keep cognitive complexity under the cap. */
+const handleOpenAt = (
+  lines: ReadonlyArray<LineRec>,
+  idx: number,
+  openLine: LineRec,
+  openLabel: string,
+  openRunLen: number,
+): TopLevelStep => {
+  const scan = scanBlockBody(lines, idx, openRunLen)
+
+  if (scan.closeIdx === -1) {
+    // Three sub-cases: nested, length-mismatch (already diagnosed), or EOF.
+    if (!scan.nested && !scan.lengthMismatch) {
+      return {
+        diagnostics: [
+          ...scan.diagnostics,
+          {
+            kind: "unterminated",
+            line: lines.length + 1,
+            message: `unterminated conflict: open marker at line ${openLine.lineNumber} has no matching '>>>>>>>' before EOF`,
+          },
+        ],
+        nextIdx: scan.resumeAt,
+      }
+    }
+    // Nested / length-mismatch: spec says "resume scanning from after the
+    // second open" / "resume after the open" — `scan.resumeAt` encodes that.
+    return { diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
+  }
+
+  if (scan.sepIdx === -1) {
+    return {
+      diagnostics: [
+        ...scan.diagnostics,
+        {
+          kind: "no_separator",
+          line: openLine.lineNumber,
+          message: `conflict at line ${openLine.lineNumber} has open and close markers but no '=======' separator between them`,
+        },
+      ],
+      nextIdx: scan.resumeAt,
+    }
+  }
+
+  const block = buildBlock(lines, idx, openLabel, scan)
+  if (!block) return { diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
+  return { block, diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
+}
+
 /** Inspect `lines[idx]` at top-level. */
 const classifyTopLevel = (lines: ReadonlyArray<LineRec>, idx: number): TopLevelStep => {
   const line = lines[idx]
@@ -425,46 +551,7 @@ const classifyTopLevel = (lines: ReadonlyArray<LineRec>, idx: number): TopLevelS
   const m = classifyLine(line.text)
 
   if (m.kind === "open") {
-    const scan = scanBlockBody(lines, idx, m.runLen)
-
-    if (scan.closeIdx === -1) {
-      // Three sub-cases: nested, length-mismatch (already diagnosed), or EOF.
-      if (!scan.nested && !scan.lengthMismatch) {
-        // EOF without close → unterminated.
-        return {
-          diagnostics: [
-            ...scan.diagnostics,
-            {
-              kind: "unterminated",
-              line: lines.length + 1,
-              message: `unterminated conflict: open marker at line ${line.lineNumber} has no matching '>>>>>>>' before EOF`,
-            },
-          ],
-          nextIdx: scan.resumeAt,
-        }
-      }
-      // Nested / length-mismatch: spec says "resume scanning from after the
-      // second open" / "resume after the open" — `scan.resumeAt` already encodes that.
-      return { diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
-    }
-
-    if (scan.sepIdx === -1) {
-      return {
-        diagnostics: [
-          ...scan.diagnostics,
-          {
-            kind: "no_separator",
-            line: line.lineNumber,
-            message: `conflict at line ${line.lineNumber} has open and close markers but no '=======' separator between them`,
-          },
-        ],
-        nextIdx: scan.resumeAt,
-      }
-    }
-
-    const block = buildBlock(lines, idx, m.label, scan)
-    if (!block) return { diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
-    return { block, diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
+    return handleOpenAt(lines, idx, line, m.label, m.runLen)
   }
 
   if (m.kind === "open_malformed") {

@@ -26,10 +26,11 @@
  *  13. Length-8 markers + CRLF → tool delegates to the hardened parser
  *      (proves the tool is NOT reimplementing scan logic).
  */
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { gitConflictInspectTool } from "@/tool/git/conflict-inspect"
 import type { GitRunner, GitRunResult } from "@/tool/git/types"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
@@ -49,11 +50,7 @@ class FakeRunner implements GitRunner {
   constructor(
     private readonly result: GitRunResult | ((args: readonly string[]) => GitRunResult),
   ) {}
-  async run(
-    args: readonly string[],
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<GitRunResult> {
+  async run(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GitRunResult> {
     this.calls.push({ args: [...args], cwd, signal })
     return typeof this.result === "function" ? this.result(args) : this.result
   }
@@ -104,13 +101,7 @@ const twoWay = (oursLabel = "HEAD", theirsLabel = "feature"): string =>
   `<<<<<<< ${oursLabel}\nO\n=======\nT\n>>>>>>> ${theirsLabel}\n`
 
 const threeWay = (): string =>
-  "<<<<<<< HEAD\n" +
-  "O\n" +
-  "||||||| anc\n" +
-  "B\n" +
-  "=======\n" +
-  "T\n" +
-  ">>>>>>> feature\n"
+  "<<<<<<< HEAD\n" + "O\n" + "||||||| anc\n" + "B\n" + "=======\n" + "T\n" + ">>>>>>> feature\n"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tmpdir + file fixture setup
@@ -211,11 +202,7 @@ describe("git_conflict_inspect tool hellgate", () => {
     writeFile("present.ts", twoWay())
     const runner = new ForbiddenRunner()
     const tool = gitConflictInspectTool(runner)
-    const { result } = await collect(
-      tool,
-      { paths: ["present.ts", "missing.ts"] },
-      ctxIn(),
-    )
+    const { result } = await collect(tool, { paths: ["present.ts", "missing.ts"] }, ctxIn())
     expect(result.ok).toBe(true)
     expect(result.output).toContain("present.ts: 1 conflict block(s)")
     expect(result.output).toContain("missing.ts: read error")
