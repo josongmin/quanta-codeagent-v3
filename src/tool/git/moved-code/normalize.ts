@@ -1,44 +1,52 @@
 /**
- * Line + body normalization for the moved-code matcher (ADR-0109).
+ * Line normalization for moved-code detection (ADR-0109 §결정).
  *
- * Defensive normalizations:
- *  - trailing whitespace stripped — refactor often touches trailing space
- *  - leading whitespace stripped — reindent should not change the move signal
- *  - blank lines dropped — `\n\n` insertion/removal does not change behavior
- *  - identifiers tokenized via `[A-Za-z0-9_]+` (word characters) — language-
- *    agnostic and language-independent, no AST dependency
+ * Two consumers:
+ *   - `normalizeBody(body)` — used for similarity comparison + the `body` field
+ *     stored on a {@link MovedBlock}. Strips leading/trailing whitespace,
+ *     collapses internal runs of whitespace, drops fully-blank lines.
+ *   - `tokenize(body)` — used by the Jaccard similarity scorer. Splits the
+ *     normalized body on whitespace into a multiset of tokens.
+ *
+ * Pure functions — no I/O, no globals. NORMALIZATION IS LOSSY BY DESIGN:
+ * indentation changes / trailing-whitespace fixes / blank-line insertions
+ * collapse to the same canonical form, which is exactly what makes a "moved"
+ * detection robust against reformat-on-move.
  */
 
-/** Normalize a single line: collapse leading/trailing whitespace. Returns
- *  `null` for lines that are entirely whitespace (caller drops them). */
-export const normalizeLine = (line: string): string | null => {
-  const trimmed = line.trim()
-  return trimmed.length === 0 ? null : trimmed
-}
-
-/** Normalize a hunk body: split by `\n`, drop blank lines, trim each. The
- *  output is the canonical form the matcher compares — `body` strings that
- *  normalize to the same array are matcher-equivalent regardless of
- *  whitespace / indent / blank-line shifts. */
-export const normalizeLines = (body: string): readonly string[] => {
+/** Split body into lines, drop blank-after-trim, normalize internal whitespace. */
+export const normalizeLines = (body: string): string[] => {
+  if (body.length === 0) return []
+  const lines = body.split("\n")
   const out: string[] = []
-  for (const line of body.split("\n")) {
-    const n = normalizeLine(line)
-    if (n !== null) out.push(n)
+  for (const raw of lines) {
+    // Trim + collapse interior runs of \s to a single space.
+    const trimmed = raw.trim().replace(/\s+/g, " ")
+    if (trimmed.length === 0) continue
+    out.push(trimmed)
   }
   return out
 }
 
-/** Identifier-level tokenizer. Splits on non-word characters; case-
- *  sensitive (a rename from `Foo` → `foo` IS a real change, not a move).
- *  Returns tokens in occurrence order (multiset semantics — duplicates kept). */
-export const tokenize = (text: string): readonly string[] => {
-  const matches = text.match(/[A-Za-z0-9_]+/g)
-  return matches ?? []
-}
+/** Re-join normalized lines with `\n` — the canonical body form. */
+export const normalizeBody = (body: string): string => normalizeLines(body).join("\n")
 
-/** Tokenize an entire normalized body for similarity comparison. Same as
- *  calling `tokenize` on the joined lines; pre-extracted as a seam so
- *  callers can swap in a different tokenizer without rippling. */
-export const tokenizeBody = (lines: readonly string[]): readonly string[] =>
-  tokenize(lines.join("\n"))
+/**
+ * Tokenize for Jaccard. We split on ANY non-identifier character (the
+ * "word-character" class `[A-Za-z0-9_]`). This is the canonical token model
+ * used by most code-clone detectors and by `git diff --word-diff=porcelain`'s
+ * default regex — it treats `tally.total` as 2 tokens (`tally`, `total`),
+ * which is what makes a single-identifier rename (HELL-14) still score
+ * above the 0.85 floor for a 5-line block.
+ *
+ * Pure-punctuation runs do not survive (they are dropped along with the
+ * whitespace), which is intentional: punctuation is usually shared between
+ * any two non-trivially-different blocks and would inflate similarity if
+ * kept as tokens.
+ */
+export const tokenize = (body: string): string[] => {
+  const norm = normalizeLines(body).join(" ")
+  if (norm.length === 0) return []
+  // Match runs of word characters. `g` flag returns all matches.
+  return norm.match(/[A-Za-z0-9_]+/g) ?? []
+}

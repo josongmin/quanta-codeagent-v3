@@ -1,30 +1,25 @@
 /**
- * Weighted Jaccard similarity over token multisets (ADR-0109).
+ * Jaccard token similarity for moved-code detection (ADR-0109 §결정).
  *
- * Why weighted Jaccard (over Levenshtein):
- *   - O(N+M) build (count) + O(K) compare (K = distinct tokens). Levenshtein
- *     is O(N×M) per pair — for big PRs (N hunks × M hunks × N×M lines each)
- *     this dominates. Jaccard is the only realistic O choice.
- *   - Reorder-invariant. A function body whose statements got shuffled but
- *     not edited still matches as moved (Levenshtein would penalize).
- *   - Codex + Cursor both use token-set similarity in their move
- *     detection — well-validated against real PR review noise.
+ * Jaccard chosen over Levenshtein:
+ *   - O(N+M) build + O(min(N,M)) intersection, vs O(N×M) for edit distance —
+ *     keeps the outer O(|removed|×|added|) loop tractable under the
+ *     {@link ClassifyOptions.maxPairs} cap.
+ *   - Robust to in-block line reordering on move (a tolerated normalization).
+ *   - Multiset semantics: a token that appears 3 times on each side
+ *     contributes |intersection|=3, not 1 — so repeating boilerplate
+ *     (e.g. `await`) doesn't inflate similarity beyond what's earned.
  *
- * Weighted variant (vs set Jaccard):
- *   - sum(min) / sum(max) per token across two multisets. A 5×`return`
- *     block matched against another 5×`return` block scores high; a
- *     5×`return` block matched against 1×`return` block scores lower
- *     (correct — different "weight" of the same identifier).
+ * The Codex `apply_patch` matcher and Cursor's code-move heuristics both use
+ * token-bag comparisons (not raw edit distance) for the same reason: cheap
+ * + robust to whitespace/reorder noise after normalization.
  *
- * Output range [0, 1] — 1.0 means identical multisets (modulo
- * normalization), 0.0 means disjoint. Empty input on either side ⇒ 0.0
- * (matcher then rejects via {@link ClassifyOptions.minSimilarity}).
+ * Returns 0 when both sides are empty (degenerate; classified as "no match"
+ * by the minLines floor anyway).
  */
 
-import { tokenize } from "./normalize"
-
-/** Build a count map (multiset) over tokens. Pure. */
-const toCounts = (tokens: readonly string[]): Map<string, number> => {
+/** Build a multiset (token → count) from a token list. */
+const multiset = (tokens: readonly string[]): Map<string, number> => {
   const m = new Map<string, number>()
   for (const t of tokens) {
     m.set(t, (m.get(t) ?? 0) + 1)
@@ -32,31 +27,32 @@ const toCounts = (tokens: readonly string[]): Map<string, number> => {
   return m
 }
 
-/** Weighted Jaccard over two token multisets. Returns 0.0 when either side
- *  is empty (no signal to compute on). */
-export const weightedJaccard = (a: readonly string[], b: readonly string[]): number => {
-  if (a.length === 0 || b.length === 0) return 0
-  const ca = toCounts(a)
-  const cb = toCounts(b)
-  let intersection = 0
+/**
+ * Weighted Jaccard over multisets:
+ *   sim = Σ min(a[t], b[t])  /  Σ max(a[t], b[t])
+ *
+ * Both sums range over the union of token universes. Identical multisets ⇒ 1.0;
+ * disjoint ⇒ 0.0.
+ */
+export const jaccardSimilarity = (
+  aTokens: readonly string[],
+  bTokens: readonly string[],
+): number => {
+  if (aTokens.length === 0 && bTokens.length === 0) return 0
+  const a = multiset(aTokens)
+  const b = multiset(bTokens)
+  let inter = 0
   let union = 0
-  // Union of distinct tokens = keys(ca) ∪ keys(cb). Walk both, but count
-  // each distinct token exactly once for the denominator.
-  const visited = new Set<string>()
-  for (const [tok, na] of ca) {
-    const nb = cb.get(tok) ?? 0
-    intersection += Math.min(na, nb)
-    union += Math.max(na, nb)
-    visited.add(tok)
+  // Iterate union of keys.
+  const keys = new Set<string>()
+  for (const k of a.keys()) keys.add(k)
+  for (const k of b.keys()) keys.add(k)
+  for (const k of keys) {
+    const av = a.get(k) ?? 0
+    const bv = b.get(k) ?? 0
+    inter += Math.min(av, bv)
+    union += Math.max(av, bv)
   }
-  for (const [tok, nb] of cb) {
-    if (visited.has(tok)) continue
-    // tok appears only in b — adds nb to the union (max with implicit 0 in a).
-    union += nb
-  }
-  return union === 0 ? 0 : intersection / union
+  if (union === 0) return 0
+  return inter / union
 }
-
-/** Convenience: tokenize two bodies and return the weighted Jaccard. */
-export const bodySimilarity = (bodyA: string, bodyB: string): number =>
-  weightedJaccard(tokenize(bodyA), tokenize(bodyB))

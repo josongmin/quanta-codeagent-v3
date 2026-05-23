@@ -1,6 +1,11 @@
 import type { LLMPort, Message, ModelCandidate } from "@/llm"
+<<<<<<< HEAD
 import type { EmbedderPort, PersistentStorePort, Phase1Port, Stage1StorePort } from "@/memory"
 import type { Metrics } from "@/observability"
+=======
+import type { EmbedderPort, PersistentStorePort } from "@/memory"
+import type { Metrics, TurnTiming } from "@/observability"
+>>>>>>> 9c06d9c (refactor(agent/types): split memory + compaction config blocks (byte-identical))
 import type {
   PatternGrantStore,
   PermissionContext,
@@ -13,7 +18,6 @@ import type { StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
 import type { BranchSearchConfig } from "./branch-search"
 import type { BudgetMeter } from "./budget"
-import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
@@ -29,8 +33,16 @@ import type { RepoRules } from "./repo-rules"
 import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
 import type { Submission } from "./submission"
+import type {
+  CompactionBreakerOptions,
+  CompactionConfigBlock,
+  OnPreCompactCallback,
+  PreCompactRequestQuery,
+} from "./types/compaction-config"
+import type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
 import type { WorkMetricsSink } from "./work-metrics-collector"
 
+<<<<<<< HEAD
 // Outcome surface re-exported from ./types/agent-outcome (cohesion split,
 // byte-identical). Keeps the `from "./types"` import contract unchanged for
 // the 132 consumer files that depend on these names being on this module.
@@ -82,6 +94,19 @@ export interface PreCompactRequestQuery {
  *     differently. The loop itself treats `force_now` and `approve` identically.
  */
 export type PreCompactDecision = "approve" | "defer_one_turn" | "force_now"
+=======
+// Re-export the extracted memory + compaction config types so that every
+// existing consumer reading them via `from "./types"` (or the `@/agent`
+// barrel) keeps working byte-for-byte after this split.
+export type {
+  CompactionBreakerOptions,
+  CompactionConfigBlock,
+  OnPreCompactCallback,
+  PreCompactDecision,
+  PreCompactRequestQuery,
+} from "./types/compaction-config"
+export type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
+>>>>>>> 9c06d9c (refactor(agent/types): split memory + compaction config blocks (byte-identical))
 
 // AgentConfig `extends` the three cohesion groups defined at the BOTTOM of
 // this file (SafetyConfig / PermissionExtrasConfig / SteeringConfig).
@@ -135,113 +160,34 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
   /**
    * Long-term memory tuning (RFC §6.3). Absent ⇒ all defaults;
    * with no `store` the whole block is inert. Behavior-preserving when unset.
+   * See {@link MemoryConfigBlock} for the field-level docs.
    */
-  memory?: {
-    /** Max entries folded into the recall context block. Default 5. */
-    recallLimit?: number
-    /**
-     * LLM-distill the finished transcript into structured records on session
-     * end (vs. the heuristic final-text dump). Default `true` when `llm` can
-     * serve it; ignored if it fails (graceful degrade to the heuristic).
-     */
-    distill?: boolean
-    /**
-     * Consolidate each new record against near-duplicates (LLM-arbitrated
-     * merge/supersede). Default `true` when `embedder` is present.
-     */
-    consolidate?: boolean
-    /** Per-tier caps for the post-persist eviction sweep. Defaults: see eviction.ts. */
-    evictionCaps?: { semanticMax?: number; episodicMax?: number }
-    /** Register the self-edit memory tools (memory_search/write/update). Default `true` when `store` is present. */
-    selfEditTools?: boolean
-    /**
-     * Restrict per-turn recall to these tiers (long-term memory, RFC §6.3).
-     * Absent ⇒ recall spans all tiers (behavior-preserving). e.g.
-     * `["semantic"]` recalls only durable distilled knowledge.
-     */
-    recallTiers?: ("episodic" | "semantic")[]
-  }
+  memory?: MemoryConfigBlock
   /**
    * ADR-0068 2-phase memory consolidator session-end hook (L4 wire).
    * Absent ⇒ no consolidator runs at session-end (byte-identical for every
-   * legacy caller — RFC §1.2 default-OFF). When set, the loop's
-   * `runAgent` finally calls `runPhase1` IFF the session ended without an
-   * error (spanStatus === "ok") and either:
-   *   - `enabled: true` (auto-trigger on session-end), OR
-   *   - `forceSummarization: true` (SOTA Cursor `force_summarization` — runs
-   *     even when the per-thread turn-count would otherwise skip,
-   *     surfacing in the consolidator's `memoryMode: "enabled"` arm).
-   * Errors are caught and surfaced as `error` AgentEvents (non-fatal —
-   * the session is already finishing); they do NOT propagate.
-   *
-   * Phase 2 (cross-session synthesizer + writer) is NON-GOAL for the
-   * session-end hook (per audit: Phase 2 is threshold / explicit-trigger
-   * driven, not cron). The host runs Phase 2 separately when ready.
+   * legacy caller — RFC §1.2 default-OFF). See {@link MemoryConsolidatorBlock}
+   * for the field-level docs (enabled / forceSummarization / port / store /
+   * threadId semantics).
    */
-  memoryConsolidator?: {
-    /** Auto-trigger Phase 1 on session-end (spanStatus === "ok"). */
-    enabled?: boolean
-    /** SOTA Cursor `force_summarization` — when true, the per-thread
-     *  `memoryMode` arm fires `"enabled"` even if the host did not set
-     *  `enabled: true`, AND the call runs even when this would otherwise
-     *  be skipped. */
-    forceSummarization?: boolean
-    /** LLM-backed Phase1Port (distill rollout → summary + rawMemory +
-     *  preferenceSignals). REQUIRED to actually run Phase 1; absent ⇒
-     *  the hook records a skip (no LLM port wired) without throwing. */
-    port?: Phase1Port
-    /** Stage1Store (SQLite upsert sink). REQUIRED; absent ⇒ skip. */
-    store?: Stage1StorePort
-    /** Stable thread id for the Stage1Output PRIMARY KEY. Falls back to
-     *  `config.sessionId` when omitted; if BOTH are absent the call is
-     *  skipped (the consolidator refuses an empty thread id). */
-    threadId?: string
-  }
+  memoryConsolidator?: MemoryConsolidatorBlock
   /**
    * Compaction tuning. Absent ⇒ compaction is skipped entirely (existing
-   * suites with no compaction config are unaffected).
+   * suites with no compaction config are unaffected). See
+   * {@link CompactionConfigBlock} for the field-level docs
+   * (thresholdTokens / keepRecentTurns / summarizerLlm / archive).
    */
-  compaction?: {
-    thresholdTokens?: number
-    keepRecentTurns?: number
-    /**
-     * Dedicated LLM for the compaction SUMMARY turn (cost/latency,
-     * ADR-0011). Summarization is a bounded, low-stakes task — a cheaper/
-     * faster model is usually sufficient and avoids spending the main model
-     * on every 120k-token compaction. Absent ⇒ uses `config.llm` (the main
-     * model), so behavior is byte-identical when unset. Tradeoff: a weaker
-     * summarizer can degrade resumed-context fidelity — opt in deliberately.
-     */
-    summarizerLlm?: LLMPort
-    /**
-     * Cursor-style sliding-window archive of per-compaction summaries
-     * (ADR-0075). When `true`, the loop builds a session-scoped
-     * {@link ConversationSummaryArchive} and appends a
-     * {@link ConversationSummaryEntry} after every proactive compaction; an
-     * `event_msg:context_compacted` AgentEvent is emitted at the same seam so
-     * a session jsonl recorder / UI can render the compaction history.
-     * Absent/`false` ⇒ no archive constructed, no event emitted, the loop is
-     * byte-for-byte identical to the pre-archive path.
-     */
-    archive?: boolean
-  }
+  compaction?: CompactionConfigBlock
   /**
    * Cursor-style pre-compact HITL hook (ADR-0075). When the proactive
    * compaction path is ABOUT to fire (token threshold crossed AND a
    * summarizable boundary exists), the loop builds a
-   * {@link PreCompactRequestQuery} and awaits this callback. Decisions:
-   *   - `"approve"` (default when this callback is ABSENT, preserving
-   *      byte-identical legacy) — proceed with the compaction;
-   *   - `"defer_one_turn"` — skip THIS turn's compaction; the proactive path
-   *      will be re-evaluated next turn (the breaker still observes the no-op);
-   *   - `"force_now"` — proceed regardless of any host-side deferral logic
-   *      (the loop treats it like `approve`; the distinct value is kept so a
-   *      UI can record "user explicitly forced it").
-   * Errors thrown from the callback are caught and surfaced as an `error`
-   * AgentEvent, then the compaction is deferred this turn (fail-safe: never
-   * fold history without an answer). Absent ⇒ auto-approve, byte-identical.
+   * {@link PreCompactRequestQuery} and awaits this callback. See
+   * {@link OnPreCompactCallback} for the full semantics (approve /
+   * defer_one_turn / force_now / error → defer). Absent ⇒ auto-approve,
+   * byte-identical.
    */
-  onPreCompact?: (query: PreCompactRequestQuery) => Promise<PreCompactDecision>
+  onPreCompact?: OnPreCompactCallback
   /**
    * In-process hook bus (RFC §13 Q1). Absent ⇒ no events emitted, zero
    * overhead, loop byte-for-byte unchanged.
@@ -347,10 +293,11 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * Compaction circuit-breaker control (Tier 0 safety hardening, ADR-0011). The
    * breaker is ON by default with `DEFAULT_COMPACTION_BREAKER_CAPS` — it only
    * trips on pathological compaction thrash (≥N consecutive no-progress
-   * compactions), so normal flows are unaffected. `disabled:true` opts out;
-   * `caps` overrides individual thresholds.
+   * compactions), so normal flows are unaffected. See
+   * {@link CompactionBreakerOptions} (`disabled` opts out; `caps` overrides
+   * individual thresholds).
    */
-  compactionBreaker?: { disabled?: boolean; caps?: Partial<CompactionBreakerCaps> }
+  compactionBreaker?: CompactionBreakerOptions
   /**
    * Verify-guard control (Tier 0 safety hardening). Absent ⇒ guard fully OFF and
    * the loop is byte-identical. When present, a finish attempt right after a
@@ -678,7 +625,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
 
 /** Safety / guard knobs. Each member is default-OFF when absent. */
 export interface SafetyConfig {
-  compactionBreaker?: { disabled?: boolean; caps?: Partial<CompactionBreakerCaps> }
+  compactionBreaker?: CompactionBreakerOptions
   verifyGuard?: { maxTrips?: number }
   closeoutGuard?: { enabled?: boolean; fourRule?: boolean }
   dedupGate?: DedupGate

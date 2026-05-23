@@ -1,28 +1,29 @@
 /**
- * Moved-code detector types (ADR-0109 — Cursor `pr-review-canvas` algorithm
- * implementation). Closed-port: pure types + a single public seam
- * (`classifyDiff` in `./index.ts`) so the algorithm can be swapped or
- * extended without rippling.
+ * Moved-code detector — ADR-0109 (PR-review canvas: §2 "moved" category).
+ *
+ * Public contract types. Pure data shapes — no methods, no `any`, no sentinels.
+ * Numeric fields use closed ranges documented in field doc-comments; algorithm
+ * details live in {@link ./index.ts}.
+ *
+ * Slice isolation: this module is consumed by the pr-review-canvas system
+ * skill and (future) git_diff post-processing. Detector is pure; no I/O.
  */
 
-/** A single hunk extracted from a unified diff. Each hunk is one contiguous
- *  block of `+` or `-` lines under one file path. */
+/** A single contiguous `-` or `+` hunk from a unified diff. */
 export interface DiffHunk {
+  /** Relative path inside the repo (post-`b/`-prefix strip). Never empty. */
   readonly file: string
-  /** 1-based first line in the hunk (in the post-image for `added`, pre-image
-   *  for `removed`). */
+  /** 1-based start line in the source file ("removed") or target file ("added"). */
   readonly startLine: number
-  /** 1-based last line in the hunk (inclusive). */
+  /** 1-based end line (inclusive). `endLine >= startLine` always. */
   readonly endLine: number
+  /** Polarity of the hunk. */
   readonly kind: "added" | "removed"
-  /** Body lines joined by `\n`. Excludes the diff marker; only the code. */
+  /** Raw lines of the hunk body, joined by `\n`. NO `+`/`-` prefix. */
   readonly body: string
 }
 
-/** A detected move — a `removed` block matched to an `added` block above
- *  the configured similarity threshold. The `similarity` field is the
- *  computed score in `[0, 1]`; the `body` is the NORMALIZED form (used by
- *  the matcher) so a caller can render attribution. */
+/** A pair of matched `-` and `+` hunks recognized as a moved block. */
 export interface MovedBlock {
   readonly fromFile: string
   readonly fromStartLine: number
@@ -30,36 +31,44 @@ export interface MovedBlock {
   readonly toFile: string
   readonly toStartLine: number
   readonly toEndLine: number
+  /** Jaccard token similarity ∈ [0, 1]. ≥ {@link ClassifyOptions.minSimilarity}. */
   readonly similarity: number
+  /** Normalized body of the matched block (whitespace-collapsed, blank-line-stripped). */
   readonly body: string
 }
 
-/** Output of {@link classifyDiff}. Closed shape — every input hunk lands in
- *  exactly one category: `logic` (real change, surfaces in the review),
- *  `moved` (relocation, suppressed from the main review), or `mechanical`
- *  (reserved for a future expansion — empty array today). */
+/** Result of {@link ./index.ts#classifyDiff}. Categories are disjoint. */
 export interface DiffClassification {
+  /** Hunks that are NOT part of a recognized moved pair. Render as normal diff. */
   readonly logic: readonly DiffHunk[]
+  /** Recognized moved-code pairs. Each input `-`/`+` hunk appears in at most one. */
   readonly moved: readonly MovedBlock[]
+  /**
+   * Mechanical-only hunks (pure reformat / whitespace). Currently always empty —
+   * follow-up per ADR-0109 §결과. Field exists in contract so callers can branch
+   * once the classifier is enabled without a future breaking change.
+   */
   readonly mechanical: readonly DiffHunk[]
 }
 
-/** Tuning knobs for the matcher. Defaults are pinned by ADR-0109 §결정
- *  with justification — they are NOT arbitrary thresholds
- *  ([[no-heuristics-only-validated]] compliance). */
+/** Tuning knobs. All defaults justified in ADR-0109 §결정. */
 export interface ClassifyOptions {
-  /** Minimum lines in BOTH `-` and `+` blocks for a move to count.
-   *  Default 5 — defends against short-code false positives where two
-   *  unrelated 2-line blocks happen to share their token set. */
+  /**
+   * Minimum number of NON-BLANK normalized lines in EACH side of a candidate
+   * pair. Below this, the pair is rejected to avoid short-block false
+   * positives (e.g. a 2-line import moved between files).
+   * Default: 5.
+   */
   readonly minLines?: number
-  /** Minimum weighted-Jaccard similarity for a move to count. Default
-   *  0.85 — precision-favored. Override to `0.7` for a more lenient
-   *  refactor-tolerant matcher (rename one identifier still detected).
-   *  See HELL-14 for the calibration evidence. */
+  /**
+   * Minimum Jaccard token similarity for a pair to qualify as "moved".
+   * Default: 0.85.
+   */
   readonly minSimilarity?: number
-  /** Hard cap on pairwise comparisons. Default 10_000 — for a PR with
-   *  100 `-` × 100 `+` hunks this is just at the cap; beyond that the
-   *  detector returns ALL hunks as logic (no false moves from
-   *  combinatorial blow-up). */
+  /**
+   * Maximum |removed| × |added| pair-product allowed. Above this we skip
+   * detection (everything → logic) to bound O(N×M) cost on huge diffs.
+   * Default: 10_000.
+   */
   readonly maxPairs?: number
 }

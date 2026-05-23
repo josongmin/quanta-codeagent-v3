@@ -1,301 +1,399 @@
 /**
- * ADR-0109 hellgate — moved-code detector + unified-diff parser.
+ * ★ CONTRACT — ADR-0109 moved-code classifier (src/tool/git/moved-code).
+ *   `classifyDiff(hunks, opts?)` produces three disjoint categories:
+ *   {logic, moved, mechanical}. A moved-pair requires BOTH sides to have
+ *   ≥ minLines (default 5) NON-BLANK normalized lines AND Jaccard token
+ *   similarity ≥ minSimilarity (default 0.85). The cap |removed|×|added|
+ *   ≤ maxPairs (default 10_000) bounds worst case; above it, everything
+ *   falls through to logic. Best-similarity-first 1:1 greedy match.
  *
- * 19 adversarial cases (HELL-1~16 algorithm + HELL-17~19 parser). The
- * detector is pure (no IO), so every case exercises the state machine
- * directly with hand-built `DiffHunk[]` inputs.
+ * HELLGATE — 16 adversarial cases proving short-block / partial-match /
+ * threshold / asymmetric / pair-cap / multi-file / unicode-path invariants.
+ *
+ * These tests are TIGHTLY COUPLED to the constants in
+ * src/tool/git/moved-code/index.ts (DEFAULT_MIN_LINES=5,
+ * DEFAULT_MIN_SIMILARITY=0.85, DEFAULT_MAX_PAIRS=10_000). If any of those
+ * constants change, ADR-0109 §결정 must be updated FIRST, then this file
+ * follows. The constants are justified there as conservative-pick — not
+ * tuned to a single corpus.
  */
-
 import { describe, expect, test } from "bun:test"
-import {
-  bodySimilarity,
-  classifyDiff,
-  type DiffHunk,
-  normalizeLines,
-  parseUnifiedDiff,
-  tokenize,
-} from "@/tool/git/moved-code"
+import type { DiffHunk } from "@/tool/git/moved-code"
+import { classifyDiff, parseUnifiedDiff } from "@/tool/git/moved-code"
 
-const mkRemoved = (file: string, startLine: number, body: string): DiffHunk => ({
+/** 5-line block — long enough to clear the minLines floor by default. */
+const FIVE_LINE_BLOCK = [
+  "function alpha(input) {",
+  "  const result = doWork(input)",
+  "  if (result.ok) return result.value",
+  "  throw new Error(result.reason)",
+  "}",
+].join("\n")
+
+const mk = (
+  file: string,
+  startLine: number,
+  kind: "added" | "removed",
+  body: string,
+): DiffHunk => ({
   file,
   startLine,
   endLine: startLine + body.split("\n").length - 1,
-  kind: "removed",
+  kind,
   body,
 })
 
-const mkAdded = (file: string, startLine: number, body: string): DiffHunk => ({
-  file,
-  startLine,
-  endLine: startLine + body.split("\n").length - 1,
-  kind: "added",
-  body,
-})
-
-const SAMPLE_FUNC = `export const handle = (req: Request): Response => {
-  const start = Date.now()
-  const parsed = parse(req)
-  const result = compute(parsed)
-  console.log("elapsed", Date.now() - start)
-  return new Response(JSON.stringify(result))
-}`
-
-describe("ADR-0109 moved-code detector — algorithm (hellgate)", () => {
-  test("HELL-1: exact body across files ⇒ moved pair, logic empty", () => {
-    const r = mkRemoved("src/a.ts", 10, SAMPLE_FUNC)
-    const a = mkAdded("src/b.ts", 5, SAMPLE_FUNC)
-    const out = classifyDiff([r, a])
-    expect(out.moved).toHaveLength(1)
-    expect(out.logic).toHaveLength(0)
+describe("moved-code detector hellgate", () => {
+  test("HELL-1: exact function move A → B is detected as one moved pair", () => {
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", FIVE_LINE_BLOCK),
+      mk("src/b.ts", 20, "added", FIVE_LINE_BLOCK),
+    ])
+    expect(out.moved.length).toBe(1)
+    expect(out.logic.length).toBe(0)
     expect(out.moved[0]?.fromFile).toBe("src/a.ts")
     expect(out.moved[0]?.toFile).toBe("src/b.ts")
-    expect(out.moved[0]?.similarity).toBeGreaterThan(0.99)
+    expect(out.moved[0]?.similarity).toBe(1)
   })
 
-  test("HELL-2: partial match below threshold ⇒ both stay in logic", () => {
-    const r = mkRemoved("src/a.ts", 1, ["one", "two", "three", "four", "five", "six"].join("\n"))
-    const a = mkAdded(
-      "src/b.ts",
-      1,
-      ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"].join("\n"),
-    )
-    const out = classifyDiff([r, a])
-    expect(out.moved).toHaveLength(0)
-    expect(out.logic).toHaveLength(2)
+  test("HELL-2: partial-match (50% different) is NOT moved — both stay in logic", () => {
+    const removed = [
+      "function alpha(input) {",
+      "  const result = doWork(input)",
+      "  if (result.ok) return result.value",
+      "  throw new Error(result.reason)",
+      "}",
+    ].join("\n")
+    // ~50% token churn: different identifiers, different control flow.
+    const added = [
+      "function beta(payload) {",
+      "  return queue.enqueue(payload)",
+      "  // entirely different",
+      "  // body",
+      "}",
+    ].join("\n")
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", removed),
+      mk("src/b.ts", 20, "added", added),
+    ])
+    expect(out.moved.length).toBe(0)
+    expect(out.logic.length).toBe(2)
   })
 
-  test("HELL-3: blocks under minLines (default 5) not considered for move", () => {
-    const r = mkRemoved("src/a.ts", 1, ["one", "two"].join("\n"))
-    const a = mkAdded("src/b.ts", 1, ["one", "two"].join("\n"))
-    const out = classifyDiff([r, a])
-    expect(out.moved).toHaveLength(0)
-    expect(out.logic).toHaveLength(2)
+  test("HELL-3: below minLines (default 5) is rejected even at sim=1.0", () => {
+    const small = ["a()", "b()", "c()"].join("\n") // 3 lines
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", small),
+      mk("src/b.ts", 20, "added", small),
+    ])
+    expect(out.moved.length).toBe(0)
+    expect(out.logic.length).toBe(2)
   })
 
-  test("HELL-4: indentation-only difference ⇒ moved (normalize strips lead whitespace)", () => {
-    const r = mkRemoved("src/a.ts", 1, SAMPLE_FUNC)
-    const a = mkAdded(
-      "src/b.ts",
-      1,
-      SAMPLE_FUNC.split("\n")
-        .map((l) => `  ${l}`)
-        .join("\n"),
-    )
-    const out = classifyDiff([r, a])
-    expect(out.moved).toHaveLength(1)
+  test("HELL-4: indentation-only difference is detected as moved (normalize strips indent)", () => {
+    const removed = FIVE_LINE_BLOCK
+    // Same body, every line re-indented.
+    const added = FIVE_LINE_BLOCK.split("\n")
+      .map((l) => `        ${l}`)
+      .join("\n")
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", removed),
+      mk("src/b.ts", 20, "added", added),
+    ])
+    expect(out.moved.length).toBe(1)
+    expect(out.moved[0]?.similarity).toBe(1)
   })
 
-  test("HELL-5: trailing whitespace-only difference ⇒ moved", () => {
-    const r = mkRemoved("src/a.ts", 1, SAMPLE_FUNC)
-    const a = mkAdded(
-      "src/b.ts",
-      1,
-      SAMPLE_FUNC.split("\n")
-        .map((l) => `${l}   `)
-        .join("\n"),
-    )
-    const out = classifyDiff([r, a])
-    expect(out.moved).toHaveLength(1)
+  test("HELL-5: trailing-whitespace-only difference is detected as moved", () => {
+    const removed = FIVE_LINE_BLOCK
+    const added = FIVE_LINE_BLOCK.split("\n")
+      .map((l) => `${l}   `)
+      .join("\n")
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", removed),
+      mk("src/b.ts", 20, "added", added),
+    ])
+    expect(out.moved.length).toBe(1)
+    expect(out.moved[0]?.similarity).toBe(1)
   })
 
-  test("HELL-6: blank-line insertions ⇒ moved (normalize drops blank lines)", () => {
-    const r = mkRemoved("src/a.ts", 1, SAMPLE_FUNC)
-    const linesWithBlanks: string[] = []
-    for (const l of SAMPLE_FUNC.split("\n")) {
-      linesWithBlanks.push(l)
-      linesWithBlanks.push("")
-    }
-    const a = mkAdded("src/b.ts", 1, linesWithBlanks.join("\n"))
-    const out = classifyDiff([r, a])
-    expect(out.moved).toHaveLength(1)
+  test("HELL-6: blank-line insertions/deletions are tolerated (normalized away)", () => {
+    const removed = FIVE_LINE_BLOCK
+    const added = FIVE_LINE_BLOCK.split("\n").join("\n\n") // double-spaced
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", removed),
+      mk("src/b.ts", 20, "added", added),
+    ])
+    expect(out.moved.length).toBe(1)
+    expect(out.moved[0]?.similarity).toBe(1)
   })
 
-  test("HELL-7: same-file move ⇒ fromFile === toFile", () => {
-    const r = mkRemoved("src/a.ts", 10, SAMPLE_FUNC)
-    const a = mkAdded("src/a.ts", 200, SAMPLE_FUNC)
-    const out = classifyDiff([r, a])
-    expect(out.moved).toHaveLength(1)
+  test("HELL-7: same-file in-file move (A:10 → A:50) is detected (fromFile === toFile)", () => {
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", FIVE_LINE_BLOCK),
+      mk("src/a.ts", 50, "added", FIVE_LINE_BLOCK),
+    ])
+    expect(out.moved.length).toBe(1)
     expect(out.moved[0]?.fromFile).toBe("src/a.ts")
     expect(out.moved[0]?.toFile).toBe("src/a.ts")
     expect(out.moved[0]?.fromStartLine).toBe(10)
-    expect(out.moved[0]?.toStartLine).toBe(200)
+    expect(out.moved[0]?.toStartLine).toBe(50)
   })
 
-  test("HELL-8: mixed move + real change ⇒ one moved, two logic", () => {
-    const moved1 = mkRemoved("src/a.ts", 1, SAMPLE_FUNC)
-    const moved2 = mkAdded("src/b.ts", 1, SAMPLE_FUNC)
-    const realChange = mkRemoved(
-      "src/c.ts",
-      1,
-      ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"].join("\n"),
-    )
-    const realChangeAdded = mkAdded(
-      "src/c.ts",
-      1,
-      ["alpha", "beta", "different", "delta", "epsilon", "zeta"].join("\n"),
-    )
-    const out = classifyDiff([moved1, moved2, realChange, realChangeAdded])
-    expect(out.moved).toHaveLength(1)
-    // Real change hunks stay in logic (similarity < 1.0 but maybe high)
-    // — they're under minLines OR pass through as logic.
-    expect(out.logic.length).toBeGreaterThanOrEqual(0)
+  test("HELL-8: mixed move + genuine change — moved pair recognized, rest stays in logic", () => {
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", FIVE_LINE_BLOCK),
+      mk("src/b.ts", 20, "added", FIVE_LINE_BLOCK),
+      // A genuine, unrelated change.
+      mk(
+        "src/c.ts",
+        5,
+        "removed",
+        ["// old comment", "let x = 1", "let y = 2", "let z = 3", "let w = 4"].join("\n"),
+      ),
+      mk(
+        "src/c.ts",
+        5,
+        "added",
+        [
+          "// totally different",
+          "const m = mapper()",
+          "await m.run()",
+          "process.exit(0)",
+          "// the end",
+        ].join("\n"),
+      ),
+    ])
+    expect(out.moved.length).toBe(1)
+    expect(out.logic.length).toBe(2)
+    // The genuine change must remain in logic.
+    expect(out.logic.some((h) => h.file === "src/c.ts" && h.kind === "removed")).toBe(true)
+    expect(out.logic.some((h) => h.file === "src/c.ts" && h.kind === "added")).toBe(true)
   })
 
-  test("HELL-9: empty input ⇒ all buckets empty", () => {
+  test("HELL-9: empty input → all categories empty", () => {
     const out = classifyDiff([])
-    expect(out.moved).toHaveLength(0)
-    expect(out.logic).toHaveLength(0)
-    expect(out.mechanical).toHaveLength(0)
+    expect(out.moved).toEqual([])
+    expect(out.logic).toEqual([])
+    expect(out.mechanical).toEqual([])
   })
 
-  test("HELL-10: N×M > maxPairs ⇒ ALL hunks fallback to logic (no partial detection)", () => {
-    const hunks: DiffHunk[] = []
-    // Create 101 removed × 101 added = 10_201 pairs > default 10_000 cap.
-    for (let i = 0; i < 101; i++) {
-      hunks.push(mkRemoved(`r${i}.ts`, 1, SAMPLE_FUNC))
-      hunks.push(mkAdded(`a${i}.ts`, 1, SAMPLE_FUNC))
+  test("HELL-10: pair-product > maxPairs cap → no detection, everything → logic", () => {
+    // Build 11 × 11 = 121 pair product, cap at 100 ⇒ skip detection.
+    const removed: DiffHunk[] = []
+    const added: DiffHunk[] = []
+    for (let i = 0; i < 11; i += 1) {
+      removed.push(mk(`src/r${i}.ts`, 1, "removed", FIVE_LINE_BLOCK))
+      added.push(mk(`src/a${i}.ts`, 1, "added", FIVE_LINE_BLOCK))
     }
-    const out = classifyDiff(hunks)
-    expect(out.moved).toHaveLength(0)
-    expect(out.logic.length).toBe(hunks.length)
+    const out = classifyDiff([...removed, ...added], { maxPairs: 100 })
+    expect(out.moved.length).toBe(0)
+    expect(out.logic.length).toBe(22)
   })
 
-  test("HELL-11: best-similarity-first greedy lock — highest-sim pair wins, others stay logic", () => {
-    const exact = SAMPLE_FUNC
-    const close = `${SAMPLE_FUNC}\n// minor change`
-    const r1 = mkRemoved("src/a.ts", 1, exact)
-    const a1 = mkAdded("src/b.ts", 1, exact) // perfect match → wins
-    const a2 = mkAdded("src/c.ts", 1, close) // close match → loses to a1
-    const out = classifyDiff([r1, a1, a2])
-    expect(out.moved).toHaveLength(1)
+  test("HELL-11: highest-similarity wins under multi-match — 1:1 mapping enforced", () => {
+    // r1 matches both a1 (sim=1) and a2 (sim≈0.86). r1 must pair with a1.
+    // a2 then has no remaining `-` partner above threshold ⇒ a2 → logic.
+    const base = FIVE_LINE_BLOCK
+    const slightDiff = [
+      "function alpha(input) {",
+      "  const result = doWork(input)",
+      "  if (result.ok) return result.value",
+      "  throw new Error(result.reason)",
+      "  // appended line nine ten eleven", // adds new tokens → sim<1
+    ].join("\n")
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", base), // r0
+      mk("src/b.ts", 20, "added", base), // a0 — perfect pair
+      mk("src/c.ts", 30, "added", slightDiff), // a1 — lower-similarity tempter
+    ])
+    expect(out.moved.length).toBe(1)
     expect(out.moved[0]?.toFile).toBe("src/b.ts")
-    expect(out.logic).toHaveLength(1)
-    expect(out.logic[0]?.file).toBe("src/c.ts")
+    expect(out.moved[0]?.similarity).toBe(1)
+    // The tempter must NOT have stolen the match.
+    expect(out.logic.some((h) => h.file === "src/c.ts")).toBe(true)
   })
 
-  test("HELL-12: similarity exactly at threshold (0.85) ⇒ accepted (>=)", () => {
-    // Build a body whose similarity to its modified counterpart is exactly ≥ 0.85.
-    const r = mkRemoved("src/a.ts", 1, SAMPLE_FUNC)
-    const a = mkAdded("src/b.ts", 1, SAMPLE_FUNC)
-    const sim = bodySimilarity(r.body, a.body)
-    expect(sim).toBeGreaterThanOrEqual(0.85)
-    const out = classifyDiff([r, a], { minSimilarity: 0.85 })
-    expect(out.moved).toHaveLength(1)
+  test("HELL-12: similarity strictly below threshold is rejected", () => {
+    // Use a custom threshold of 0.99 and a tiny perturbation that drops sim.
+    const removed = FIVE_LINE_BLOCK
+    const added = `${FIVE_LINE_BLOCK}\n  console.log("extra one two three four five six seven eight nine ten")`
+    const out = classifyDiff(
+      [mk("src/a.ts", 10, "removed", removed), mk("src/b.ts", 20, "added", added)],
+      { minSimilarity: 0.99 },
+    )
+    expect(out.moved.length).toBe(0)
+    expect(out.logic.length).toBe(2)
   })
 
-  test("HELL-13: multi-file 3-pair simultaneous move", () => {
-    const FN1 =
-      "export const a = (x: number) => x * 2\nconst b = a(3)\nconst c = a(4)\nconst d = a(5)\nconst e = a(6)"
-    const FN2 =
-      "export const f = (y: string) => y.toUpperCase()\nconst g = f('hi')\nconst h = f('hey')\nconst i = f('yo')\nconst j = f('lol')"
-    const FN3 =
-      "export const k = (z: boolean) => !z\nconst l = k(true)\nconst m = k(false)\nconst n = k(true)\nconst o = k(false)"
-    const hunks: DiffHunk[] = [
-      mkRemoved("src/old1.ts", 1, FN1),
-      mkAdded("src/new1.ts", 1, FN1),
-      mkRemoved("src/old2.ts", 1, FN2),
-      mkAdded("src/new2.ts", 1, FN2),
-      mkRemoved("src/old3.ts", 1, FN3),
-      mkAdded("src/new3.ts", 1, FN3),
-    ]
+  test("HELL-13: three independent moves across three file-pairs", () => {
+    const b1 = FIVE_LINE_BLOCK
+    const b2 = [
+      "class Beta {",
+      "  constructor(opts) { this.opts = opts }",
+      "  run() { return this.opts.handler() }",
+      "  stop() { return this.opts.cleanup() }",
+      "}",
+    ].join("\n")
+    const b3 = [
+      "const gamma = async (url) => {",
+      "  const res = await fetch(url)",
+      "  if (!res.ok) throw new Error(res.statusText)",
+      "  return res.json()",
+      "}",
+    ].join("\n")
+    const out = classifyDiff([
+      mk("src/a1.ts", 1, "removed", b1),
+      mk("src/a2.ts", 1, "removed", b2),
+      mk("src/a3.ts", 1, "removed", b3),
+      mk("src/b1.ts", 1, "added", b1),
+      mk("src/b2.ts", 1, "added", b2),
+      mk("src/b3.ts", 1, "added", b3),
+    ])
+    expect(out.moved.length).toBe(3)
+    expect(out.logic.length).toBe(0)
+    const pairs = out.moved.map((m) => `${m.fromFile}→${m.toFile}`).sort()
+    expect(pairs).toEqual(["src/a1.ts→src/b1.ts", "src/a2.ts→src/b2.ts", "src/a3.ts→src/b3.ts"])
+  })
+
+  test("HELL-14: identical structure with one identifier renamed — documents Jaccard behavior", () => {
+    // SHORT 6-line block with one identifier renamed (3 occurrences out of
+    // ~18 word-tokens). Jaccard ≈ 0.71 — BELOW the default 0.85 floor.
+    // Documenting this as a known limitation of pure-Jaccard on tiny blocks
+    // with high-impact renames: the algorithm trades recall for precision
+    // here, by design.
+    const removed = [
+      "function compute(input) {",
+      "  const tally = aggregate(input)",
+      "  const rate = tally.total / tally.count",
+      "  log(`rate=` + rate)",
+      "  return rate",
+      "}",
+    ].join("\n")
+    // Rename ONLY `tally` → `summary` (3 occurrences).
+    const added = removed.replace(/tally/g, "summary")
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", removed),
+      mk("src/b.ts", 20, "added", added),
+    ])
+    // At default threshold, NOT detected (precision-favored).
+    expect(out.moved.length).toBe(0)
+    expect(out.logic.length).toBe(2)
+    // But lowering the threshold catches it — proves it's a calibration
+    // choice, not an algorithmic miss.
+    const lenient = classifyDiff(
+      [mk("src/a.ts", 10, "removed", removed), mk("src/b.ts", 20, "added", added)],
+      { minSimilarity: 0.7 },
+    )
+    expect(lenient.moved.length).toBe(1)
+    expect(lenient.moved[0]?.similarity).toBeGreaterThan(0.7)
+    expect(lenient.moved[0]?.similarity).toBeLessThan(0.85)
+  })
+
+  test("HELL-15: asymmetric input (only `-` hunks) → everything in logic, moved empty", () => {
+    const out = classifyDiff([
+      mk("src/a.ts", 10, "removed", FIVE_LINE_BLOCK),
+      mk(
+        "src/b.ts",
+        20,
+        "removed",
+        ["const x = 1", "const y = 2", "const z = 3", "const w = 4", "const v = 5"].join("\n"),
+      ),
+    ])
+    expect(out.moved.length).toBe(0)
+    expect(out.logic.length).toBe(2)
+  })
+
+  test("HELL-16: malformed `diff --git` (file path with embedded newline) is rejected safely", () => {
+    // We can't smuggle a literal `\n` through the regex header parser; the
+    // line splits and the second half is dropped. Verify the parser doesn't
+    // throw and recovers on subsequent valid sections.
+    const malformed = [
+      'diff --git a/evil"\nfile.ts b/evil"\nfile.ts',
+      "@@ -1,3 +1,3 @@",
+      "-old",
+      "+new",
+      " ctx",
+    ].join("\n")
+    const goodSection = [
+      "diff --git a/ok.ts b/ok.ts",
+      "--- a/ok.ts",
+      "+++ b/ok.ts",
+      "@@ -10,5 +20,5 @@",
+      "-function alpha(input) {",
+      "-  const result = doWork(input)",
+      "-  if (result.ok) return result.value",
+      "-  throw new Error(result.reason)",
+      "-}",
+      "+function alpha(input) {",
+      "+  const result = doWork(input)",
+      "+  if (result.ok) return result.value",
+      "+  throw new Error(result.reason)",
+      "+}",
+    ].join("\n")
+    const text = `${malformed}\n${goodSection}\n`
+    // Parser must not throw; the good section must be parseable.
+    const hunks = parseUnifiedDiff(text)
+    expect(Array.isArray(hunks)).toBe(true)
     const out = classifyDiff(hunks)
-    expect(out.moved).toHaveLength(3)
-    expect(out.logic).toHaveLength(0)
-  })
-
-  test("HELL-14: single-identifier rename in 6 lines ⇒ DEFAULT 0.85 floor REJECTS; lenient 0.65 accepts (calibration evidence)", () => {
-    const original =
-      "function compute(input: number) {\n  const value = input * 2\n  const offset = value + 10\n  console.log(value, offset)\n  return offset - value\n}"
-    const renamed =
-      "function compute(input: number) {\n  const total = input * 2\n  const offset = total + 10\n  console.log(total, offset)\n  return offset - total\n}"
-    const r = mkRemoved("src/a.ts", 1, original)
-    const a = mkAdded("src/b.ts", 1, renamed)
-    // Default 0.85 floor: reject (precision-favored)
-    const strict = classifyDiff([r, a])
-    expect(strict.moved).toHaveLength(0)
-    // Lenient 0.65: accept (refactor-tolerant override)
-    const lenient = classifyDiff([r, a], { minSimilarity: 0.65 })
-    expect(lenient.moved).toHaveLength(1)
-  })
-
-  test("HELL-15: asymmetric input (only -) ⇒ all logic, moved empty", () => {
-    const r1 = mkRemoved("src/a.ts", 1, SAMPLE_FUNC)
-    const r2 = mkRemoved("src/b.ts", 1, SAMPLE_FUNC)
-    const out = classifyDiff([r1, r2])
-    expect(out.moved).toHaveLength(0)
-    expect(out.logic).toHaveLength(2)
-  })
-
-  test("HELL-16: maxPairs option overrides default", () => {
-    const hunks: DiffHunk[] = [
-      mkRemoved("src/a.ts", 1, SAMPLE_FUNC),
-      mkAdded("src/b.ts", 1, SAMPLE_FUNC),
-    ]
-    // maxPairs=0 ⇒ fallback to all logic
-    const out = classifyDiff(hunks, { maxPairs: 0 })
-    expect(out.moved).toHaveLength(0)
-    expect(out.logic).toHaveLength(2)
+    // The valid section is one moved pair.
+    expect(out.moved.length).toBe(1)
+    expect(out.moved[0]?.fromFile).toBe("ok.ts")
+    expect(out.moved[0]?.toFile).toBe("ok.ts")
   })
 })
 
-describe("ADR-0109 unified-diff parser (hellgate)", () => {
-  test("HELL-17: basic added/removed hunks extracted with file + line numbers", () => {
-    const diff = `diff --git a/src/foo.ts b/src/foo.ts
---- a/src/foo.ts
-+++ b/src/foo.ts
-@@ -10,3 +10,4 @@
- context
--old line
-+new line
-+another new
- context
-`
-    const hunks = parseUnifiedDiff(diff)
-    expect(hunks.length).toBeGreaterThanOrEqual(2)
+describe("parseUnifiedDiff — basic shape coverage (supports hellgate)", () => {
+  test("parses a single added+removed pair", () => {
+    const text = [
+      "diff --git a/src/a.ts b/src/b.ts",
+      "--- a/src/a.ts",
+      "+++ b/src/b.ts",
+      "@@ -10,2 +20,2 @@",
+      "-foo",
+      "-bar",
+      "+foo",
+      "+bar",
+    ].join("\n")
+    const hunks = parseUnifiedDiff(text)
+    expect(hunks.length).toBe(2)
     const removed = hunks.find((h) => h.kind === "removed")
     const added = hunks.find((h) => h.kind === "added")
-    expect(removed?.file).toBe("src/foo.ts")
-    expect(added?.file).toBe("src/foo.ts")
-    expect(removed?.body).toContain("old line")
-    expect(added?.body).toContain("new line")
+    expect(removed?.file).toBe("src/a.ts")
+    expect(removed?.startLine).toBe(10)
+    expect(removed?.endLine).toBe(11)
+    expect(added?.file).toBe("src/b.ts")
+    expect(added?.startLine).toBe(20)
+    expect(added?.endLine).toBe(21)
   })
 
-  test("HELL-18: ANSI escape sequences are stripped before parsing", () => {
-    const ansiDiff = `\x1b[1mdiff --git a/src/x.ts b/src/x.ts\x1b[0m
-\x1b[1m--- a/src/x.ts\x1b[0m
-\x1b[1m+++ b/src/x.ts\x1b[0m
-@@ -1,1 +1,1 @@
-\x1b[31m-old\x1b[0m
-\x1b[32m+new\x1b[0m
-`
-    const hunks = parseUnifiedDiff(ansiDiff)
-    expect(hunks.length).toBeGreaterThanOrEqual(2)
-    const removed = hunks.find((h) => h.kind === "removed")
-    expect(removed?.body).not.toContain("\x1b")
-    expect(removed?.body).toContain("old")
+  test("strips ANSI color escapes from --color-moved output", () => {
+    const ESC = "\x1B"
+    const text = [
+      `${ESC}[1mdiff --git a/x.ts b/x.ts${ESC}[m`,
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1,1 +1,1 @@",
+      `${ESC}[31m-old${ESC}[m`,
+      `${ESC}[32m+new${ESC}[m`,
+    ].join("\n")
+    const hunks = parseUnifiedDiff(text)
+    expect(hunks.length).toBe(2)
+    expect(hunks.find((h) => h.kind === "removed")?.body).toBe("old")
+    expect(hunks.find((h) => h.kind === "added")?.body).toBe("new")
   })
 
-  test("HELL-19: control-character file paths refused (unsafe)", () => {
-    const diff = `diff --git a/src/bad\nfile.ts b/src/badfile.ts
-@@ -1,1 +1,1 @@
--old
-+new
-`
-    const hunks = parseUnifiedDiff(diff)
-    // The malformed file line (with \n in path) is not recognized as a
-    // diff --git line; downstream lines have no current file ⇒ no hunks.
-    expect(hunks.length).toBe(0)
-  })
-})
-
-describe("ADR-0109 building blocks — normalize + tokenize", () => {
-  test("normalizeLines drops blank lines and trims", () => {
-    const out = normalizeLines("  hello  \n\n\n  world  \n")
-    expect(out).toEqual(["hello", "world"])
-  })
-
-  test("tokenize splits on non-word characters, preserves case + duplicates", () => {
-    const out = tokenize("foo bar foo Foo  foo123!")
-    expect(out).toEqual(["foo", "bar", "foo", "Foo", "foo123"])
+  test("handles \\ No newline at end of file marker", () => {
+    const text = [
+      "diff --git a/x.ts b/x.ts",
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "\\ No newline at end of file",
+      "+new",
+    ].join("\n")
+    const hunks = parseUnifiedDiff(text)
+    expect(hunks.length).toBe(2)
   })
 })
