@@ -1,3 +1,4 @@
+import { homedir } from "node:os"
 import * as readline from "node:readline/promises"
 import {
   type AgentConfig,
@@ -208,19 +209,27 @@ export const runReplLoop = async (
  *  test harness (`tests/unit/apps/cli/skills-slash-hellgate.test.ts`) is
  *  unaffected: tests inject a fake readline through `runReplLoop`; the CLI
  *  entry point dispatches to `runReplLoopRaw` instead. */
-export const runReplLoopRaw = async (
-  signal: AbortSignal,
-  turn: (text: string) => Promise<void>,
-  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>,
-): Promise<void> => {
+export interface RunReplLoopRawOptions {
+  readonly signal: AbortSignal
+  readonly turn: (text: string) => Promise<void>
+  readonly slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>
+  /** Meta line painted under the prompt (Codex-style composer). Typical
+   *  content: `provider · model · ~/cwd`. Absent ⇒ no meta row. */
+  readonly meta?: string
+}
+
+export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void> => {
+  const { signal, turn, slashCtx, meta } = opts
   process.stderr.write("\n")
   while (!signal.aborted) {
     let input: string
     try {
       input = (
         await readLine({
-          prompt: "quanta› ",
+          prompt: "› ",
           completer: (line) => slashCompleter(line)[0],
+          describe: describeSlashCommand,
+          ...(meta !== undefined ? { meta } : {}),
           signal,
         })
       ).trim()
@@ -499,11 +508,16 @@ export const runRepl = async (): Promise<void> => {
       await turn(argPrompt)
     } else {
       const skillsCb = buildSkillsCallback(skillsConfig)
-      await runReplLoopRaw(
-        abort.signal,
+      // Codex-style composer meta line: provider · model · ~/cwd.
+      const home = homedir()
+      const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
+      const meta = `${provider} · ${model} · ${shortCwd}`
+      await runReplLoopRaw({
+        signal: abort.signal,
         turn,
-        skillsCb !== undefined ? { skills: skillsCb } : undefined,
-      )
+        ...(skillsCb !== undefined ? { slashCtx: { skills: skillsCb } } : {}),
+        meta,
+      })
     }
   } finally {
     await shutdownMcp()
