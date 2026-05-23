@@ -31,6 +31,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { runtimeConfig } from "@/shared"
+import { runHelpRender } from "./help-render"
 import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
@@ -388,7 +389,21 @@ const reloadSkillsCmd: SlashCommand = {
   run: (args, ctx) => runSkillsRender("/reload-skills", args, ctx, "reloaded:"),
 }
 
+/** `/help` — unified menu (slash inventory + keybinds + ENV knobs).
+ *  Body lives in `./help-render` to keep this file small; the registry
+ *  entry is a 1-liner delegating into `runHelpRender(BUILTINS, …)`. The
+ *  `BUILTINS` reference is captured at call-time so `/help` always reflects
+ *  the LIVE registry (and includes itself — the renderer iterates the
+ *  passed-in array verbatim). */
+const helpCmd: SlashCommand = {
+  name: "/help",
+  describe: "Show all slash commands, keybinds, and ENV knobs",
+  category: "help",
+  run: (args, ctx) => runHelpRender(BUILTINS, args, ctx),
+}
+
 export const BUILTINS: readonly SlashCommand[] = [
+  helpCmd,
   contextCmd,
   usageCmd,
   colorCmd,
