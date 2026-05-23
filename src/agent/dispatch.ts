@@ -14,6 +14,7 @@ import { deny, resultBlock } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
 import { LocalEffectChannel } from "./effect-channel"
+import { decideLocalizePhase } from "./localize-phase-guard"
 import { resolveCollaborationMode } from "./mode"
 import { planStoreToMutator } from "./plan/mutator-adapter"
 import { runPlanExitFlow } from "./plan-exit-flow"
@@ -80,6 +81,34 @@ const consultDedupGate = (call: ToolUseBlock, config: AgentConfig): DispatchResu
     ok: true,
     preview: `dedup-gate-${verdict.regime}`,
   }
+}
+
+/** Localize-phase pre-flight consult (Agentless absorption — Tier 0). Returns
+ *  a deny-style {@link DispatchResult} when the gate decides to block a
+ *  mutating tool in Phase 1, or `null` when the call passes through (gate
+ *  OFF, Phase 2, or non-mutating tool).
+ *
+ *  Default-OFF: when `config.localizePhase` is absent OR `localizePhaseState`
+ *  is absent OR the phase1Turns is not a positive integer, the inner
+ *  {@link decideLocalizePhase} returns `{block:false}` and this function
+ *  returns `null` — single property check + early return, so dispatch is
+ *  byte-identical to the pre-feature path. Placed alongside `consultDedupGate`
+ *  so the dispatch surface has ONE pre-admissibility consult cluster (both
+ *  are state-aware gates that should short-circuit BEFORE burning permission
+ *  / HITL / hook work). */
+const consultLocalizePhase = (call: ToolUseBlock, config: AgentConfig): DispatchResult | null => {
+  const decision = decideLocalizePhase({
+    toolName: call.name,
+    state: config.localizePhaseState,
+    cfg: config.localizePhase,
+  })
+  if (!decision.block) return null
+  // `text` is always present on a block decision (the policy always builds it),
+  // but guard with a fallback so a future refactor that returns `{block:true}`
+  // without a `text` produces a typed deny instead of an undefined-stringifying
+  // tool_result.
+  const reason = decision.text ?? "Localize-phase: edit blocked during Phase 1."
+  return deny(call.id, reason, "localize-phase-blocked")
 }
 
 /** Run one tool call end to end: gates → execute → normalize errors.
@@ -223,6 +252,15 @@ const dispatchToolInner = async (
   // the loop's tool_result pipeline handles it like any other observation.
   const dedupShort = consultDedupGate(call, config)
   if (dedupShort) return dedupShort
+
+  // Localize-phase pre-flight (Agentless absorption — Tier 0). Mirrors the
+  // dedup-gate placement: consulted BEFORE the admissibility gate so a
+  // Phase-1 mutating-tool attempt never burns permission/HITL/hook work.
+  // Default-OFF: when `config.localizePhase` / `localizePhaseState` is unset
+  // or `phase1Turns` is invalid, the gate returns `null` (single property
+  // check + early return → byte-identical dispatch).
+  const localizeShort = consultLocalizePhase(call, config)
+  if (localizeShort) return localizeShort
 
   // S16: populate `shellCommand` from the registry so the permission policy
   // applies HARD_DENY uniformly to ANY tool that exposes a shell-command

@@ -74,6 +74,7 @@ import { backoffDelayMs } from "./retry"
 import {
   buildCloseoutGuard,
   buildEffectiveConfig,
+  buildLocalizePhase,
   buildPersistDeps,
   buildVerifyGuard,
   buildWorkMetricsResources,
@@ -1613,6 +1614,18 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   if (capEnforcer !== undefined && cfg.capEnforcer === undefined) {
     cfg.capEnforcer = capEnforcer
   }
+  // Localize-phase guard (Agentless "localize-first" absorption — Tier 0).
+  // Built ONLY when `cfg.localizePhase.phase1Turns` is a positive integer
+  // (`buildLocalizePhase` validates the active domain). Absent / invalid ⇒
+  // `undefined`, no allocation, the dispatch consult is a single property
+  // check + early return → loop byte-identical for callers without the opt-in.
+  // The state is ATTACHED to `cfg.localizePhaseState` so the sibling dispatch
+  // module can read it through the AgentConfig channel (mirrors the dedupGate
+  // pattern); the loop bumps `state.turn` at the TOP of each turn iteration.
+  const localizePhaseState = buildLocalizePhase(cfg)
+  if (localizePhaseState !== undefined && cfg.localizePhaseState === undefined) {
+    cfg.localizePhaseState = localizePhaseState
+  }
   // Turn-exit guard chain (refactor 2026-05-23): one composed chain replaces
   // the prior `verifyGuardStep` + `closeoutGuardStep` ladder in `applyAction`.
   // Default-OFF byte-identical: when neither `cfg.verifyGuard` is set NOR
@@ -1806,6 +1819,12 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
 
   for (let turn = 1; turn <= cfg.maxTurns; turn++) {
     if (cfg.signal.aborted) return finish("aborted", turn - 1, interruptedCategory("user"))
+    // Localize-phase guard turn-counter bump (Agentless absorption — Tier 0).
+    // The loop's `turn` is 1-indexed; the guard's `state.turn` is 0-indexed
+    // (turn 0 = first turn). Absent state ⇒ no-op, byte-identical loop.
+    if (localizePhaseState !== undefined) {
+      localizePhaseState.turn = turn - 1
+    }
     // RFC may-22 Phase 1: BudgetMeter tick — turn start. Optional-chain ⇒ when
     // `cfg.budgetMeter === undefined` the call is a no-op and the loop is
     // byte-for-byte identical to the pre-RFC path.

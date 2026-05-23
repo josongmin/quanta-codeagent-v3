@@ -173,6 +173,7 @@ export const benchOptIns = (): {
   lspNav: boolean
   subagent: AgentConfig["subagent"] | undefined
   skills: AgentConfig["skills"] | undefined
+  localizePhase: AgentConfig["localizePhase"] | undefined
 } => {
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
@@ -187,7 +188,45 @@ export const benchOptIns = (): {
   // integrity). `changedPaths` is left unset (full inventory).
   const skills: AgentConfig["skills"] | undefined =
     process.env.QUANTA_BENCH_SKILLS === "1" ? {} : undefined
-  return { lspNav, subagent, skills }
+  // Localize-phase (Agentless absorption — Tier 0): bench-only
+  // `QUANTA_BENCH_LOCALIZE_PHASE=<int>`. The value is the number of leading
+  // turns to block mutating tools. Domain: positive integer 1..20 (cap is a
+  // measurement-integrity guard; >20 would force pure-exploration on a
+  // maxTurns=30 SWE-bench run and starve the repair phase). Any other value
+  // (absent, 0, negative, NaN, >20, non-integer) ⇒ `undefined` (guard OFF).
+  // NOT auto-activated for `instance.swebench` — over-correction risk; opt-in
+  // is explicit.
+  const localizePhase = parseLocalizePhaseEnv(process.env.QUANTA_BENCH_LOCALIZE_PHASE)
+  return { lspNav, subagent, skills, localizePhase }
+}
+
+/** Pure parser for the `QUANTA_BENCH_LOCALIZE_PHASE` env var. Exported for
+ *  direct unit testing — keeps the resolver above one-line readable.
+ *
+ *  Domain (ACTIVE):
+ *    - The string parses to a finite integer N in [1, 20] ⇒ `{ phase1Turns: N }`.
+ *
+ *  Domain (INACTIVE, all return `undefined`):
+ *    - absent / empty string
+ *    - non-numeric ("garbage", "1.5", "abc")
+ *    - 0 / negative / NaN / Infinity
+ *    - > 20 (measurement-integrity cap)
+ *
+ *  Closed parser: explicit `Number.isFinite` + `Number.isInteger` checks (no
+ *  `parseInt`-then-coerce that would silently swallow "1abc" as 1). */
+export const parseLocalizePhaseEnv = (
+  raw: string | undefined,
+): AgentConfig["localizePhase"] | undefined => {
+  if (typeof raw !== "string") return undefined
+  if (raw.length === 0) return undefined
+  // Use Number(...) (NOT parseInt) so "1abc" / "1.5" cleanly become NaN /
+  // non-integer and fail the validity check — no partial-parse foot-gun.
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return undefined
+  if (!Number.isInteger(n)) return undefined
+  if (n < 1) return undefined
+  if (n > 20) return undefined
+  return { phase1Turns: n }
 }
 
 export const buildConfig = (
@@ -250,10 +289,11 @@ export const buildConfig = (
     // can hit both before the cap; SWE-bench prioritizes measurement integrity
     // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
     ...(instance.swebench ? { verifyGuard: { mustPass: true, maxTrips: 2 } } : {}),
-    // Bench A/B opt-ins (default-OFF; all three unset ⇒ keys omitted entirely,
+    // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
     // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
     ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
     ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
+    ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
   }
 }
 

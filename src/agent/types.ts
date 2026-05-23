@@ -23,6 +23,7 @@ import type { GlobRule } from "./glob-rules"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { IdeContextProvider } from "./ide-context"
+import type { LocalizePhaseConfig, LocalizePhaseState } from "./localize-phase-guard"
 import type { PlanStore } from "./plan/state"
 import type { PlanExitPort } from "./plan-exit-flow"
 import type { AgentMode } from "./prompt"
@@ -282,6 +283,31 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * SWE-bench instances with `maxTrips:2`.
    */
   verifyGuard?: { maxTrips?: number; mustPass?: boolean }
+  /**
+   * Localize-phase guard (Agentless "localize-first" absorption — Tier 0
+   * safety hardening). When set with a positive integer `phase1Turns`, the
+   * dispatch seam BLOCKS mutating tools (`edit`/`write`/`scripted_replace`)
+   * during the first N turns of the run — the model is forced to use
+   * `read`/`grep`/`glob`/`localize` to pin down file + function FIRST. After
+   * `phase1Turns` turns elapse, the gate becomes a no-op (Phase 2 — repair).
+   *
+   * Absent / `phase1Turns` invalid (undefined, 0, NaN, Infinity, non-integer)
+   * ⇒ guard fully OFF and the loop is byte-identical. Default-OFF (RFC §1.2);
+   * the bench driver opts in via `QUANTA_BENCH_LOCALIZE_PHASE=N`. See
+   * `./localize-phase-guard.ts` for the pure policy + the closed mutating set.
+   */
+  localizePhase?: LocalizePhaseConfig
+  /** Localize-phase state slot — built by `buildLocalizePhase` ONLY when
+   *  `localizePhase.phase1Turns` is a positive integer. The loop bumps
+   *  `state.turn` at the TOP of each turn (0-indexed). Dispatch reads this
+   *  through `consultLocalizePhaseGuard`. Absent ⇒ guard never fires (the
+   *  decision returns `{block:false}`, byte-identical).
+   *
+   *  Carried as an internal slot (not a public knob) so callers cannot
+   *  hand-craft a turn counter that disagrees with the loop's. The field is
+   *  PUBLIC because the dispatch seam is in a sibling module — there is no
+   *  module-private channel between `loop.ts` and `dispatch.ts`. */
+  localizePhaseState?: LocalizePhaseState
   /** Closeout guard (Codex CloseoutLens §4 mirror). Optional, absent ⇒ guard
    *  fully OFF and the loop is byte-identical. When `enabled` true, a single
    *  pre-finish nudge injects the closeout reminder (keep only defended claims,
@@ -645,6 +671,8 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
 export interface SafetyConfig {
   compactionBreaker?: CompactionBreakerOptions
   verifyGuard?: { maxTrips?: number; mustPass?: boolean }
+  localizePhase?: LocalizePhaseConfig
+  localizePhaseState?: LocalizePhaseState
   closeoutGuard?: { enabled?: boolean; fourRule?: boolean }
   dedupGate?: DedupGate
   dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }

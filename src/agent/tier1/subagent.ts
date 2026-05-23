@@ -51,9 +51,16 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
   // re-exposes whichever instance it used as `.registry`. We let it create
   // one and read `.registry` back, then wire the Task* tools against THAT
   // same instance so all three tools observe the same background tasks.
+  // When the surface (CLI lifecycle pills) provided a `taskRegistry` we
+  // thread it in here so the surface keeps a live reference — byte-identical
+  // for the unset path (the conditional `registry` spread is the only
+  // delta and `createAgentTool` defaults to `new TaskRegistry()` when absent).
   const agentTool = createAgentTool({
     runner,
     ...(config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {}),
+    ...(config.subagent.taskRegistry !== undefined
+      ? { registry: config.subagent.taskRegistry }
+      : {}),
   })
   // Bind a NON-undefined local so the cleanup closure doesn't need a non-
   // null assertion on the outer `taskRegistry` (which is typed as optional

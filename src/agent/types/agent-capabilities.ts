@@ -37,6 +37,16 @@ export type { BranchSearchConfig } from "../branch-search"
  */
 export type SubagentBlock = {
   maxDepth?: number
+  /** Optional surface-provided {@link TaskRegistry} injected into the three
+   *  subagent tools (`agent`/`task_output`/`task_stop`). When set, the
+   *  surface KEEPS the reference so it can observe live task counts (e.g.
+   *  CLI lifecycle pills calling `registry.pendingIds().length`). When
+   *  unset, `buildSubagentBlock` mints a fresh internal one — byte-identical
+   *  to today (surface has no visibility, registry is loop-private).
+   *  Read-only consumption: the surface NEVER calls `stop`/`forceStop` on
+   *  the shared instance (host-side cleanup is owned by the loop's cleanup
+   *  hook, ADR-0011). */
+  taskRegistry?: import("../../subagent").TaskRegistry
 }
 
 /**

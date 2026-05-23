@@ -51,6 +51,11 @@ export interface SessionDeps {
   /** ADR-0064 L4 per-turn work-metrics sink. Absent ⇒ the loop allocates no
    *  collector and emits nothing (byte-identical default-OFF). */
   workMetricsSink: AgentConfig["workMetricsSink"] | undefined
+  /** ADR-0037 follow-up queue (surface-owned). When set, the loop polls
+   *  `popReady` at the top of each turn (gated on `pausedReason`). The CLI
+   *  also keeps the reference so lifecycle pills can render queue depth.
+   *  Absent ⇒ no poll, no allocation, byte-identical legacy. */
+  followUpQueue?: AgentConfig["followUpQueue"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -113,5 +118,6 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
     ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
     ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
+    ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
   }
 }

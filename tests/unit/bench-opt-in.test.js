@@ -4,11 +4,12 @@ class StubLLM {
   }
 }
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { benchOptIns, buildConfig } from "../../src/apps/bench/eval/driver";
+import { benchOptIns, buildConfig, parseLocalizePhaseEnv } from "../../src/apps/bench/eval/driver";
 const ENV_KEYS = [
   "QUANTA_BENCH_LSP",
   "QUANTA_BENCH_SUBAGENT",
   "QUANTA_BENCH_SKILLS",
+  "QUANTA_BENCH_LOCALIZE_PHASE",
   "QUANTA_LSP_TOOLS"
 ];
 const snapshot = () => {
@@ -102,6 +103,51 @@ describe("benchOptIns \u2014 env resolver (pure, three independent flags)", () =
     expect(r.subagent).toEqual({});
     expect(r.skills).toEqual({});
   });
+  // \u2500\u2500 Localize-phase (Agentless absorption \u2014 Tier 0) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  test("QUANTA_BENCH_LOCALIZE_PHASE unset \u2192 localizePhase undefined", () => {
+    expect(benchOptIns().localizePhase).toBeUndefined();
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=3 \u2192 localizePhase:{phase1Turns:3}", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "3";
+    expect(benchOptIns().localizePhase).toEqual({ phase1Turns: 3 });
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=0 \u2192 localizePhase undefined (positive integer only)", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "0";
+    expect(benchOptIns().localizePhase).toBeUndefined();
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=21 \u2192 localizePhase undefined (cap is 20)", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "21";
+    expect(benchOptIns().localizePhase).toBeUndefined();
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=garbage \u2192 localizePhase undefined", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "garbage";
+    expect(benchOptIns().localizePhase).toBeUndefined();
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=1.5 \u2192 localizePhase undefined (integer only)", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "1.5";
+    expect(benchOptIns().localizePhase).toBeUndefined();
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=\"1abc\" \u2192 localizePhase undefined (no partial-parse)", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "1abc";
+    expect(benchOptIns().localizePhase).toBeUndefined();
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=-1 \u2192 localizePhase undefined (negative)", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "-1";
+    expect(benchOptIns().localizePhase).toBeUndefined();
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=20 \u2192 localizePhase:{phase1Turns:20} (cap inclusive)", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "20";
+    expect(benchOptIns().localizePhase).toEqual({ phase1Turns: 20 });
+  });
+  test("parseLocalizePhaseEnv pure: empty string \u2192 undefined", () => {
+    expect(parseLocalizePhaseEnv("")).toBeUndefined();
+  });
+  test("parseLocalizePhaseEnv pure: undefined \u2192 undefined", () => {
+    expect(parseLocalizePhaseEnv(undefined)).toBeUndefined();
+  });
+  test("parseLocalizePhaseEnv pure: \"5\" \u2192 {phase1Turns:5}", () => {
+    expect(parseLocalizePhaseEnv("5")).toEqual({ phase1Turns: 5 });
+  });
 });
 const stubStream = {
   emit() {}
@@ -124,11 +170,27 @@ const baseInstance = (swebench) => swebench ? {
 };
 const baseDeps = { llm: new StubLLM, maxTurns: 1, timeoutMs: 5000 };
 describe("buildConfig \u2014 bench opt-ins wired into AgentConfig", () => {
-  test("ALL THREE unset \u2192 config omits `subagent`/`skills` keys (byte-identical to BENCH-INTENTIONAL posture)", () => {
+  test("ALL THREE unset \u2192 config omits `subagent`/`skills`/`localizePhase` keys (byte-identical to BENCH-INTENTIONAL posture)", () => {
     const ac = new AbortController;
     const cfg = buildConfig(baseInstance(false), baseDeps, "/tmp/sb", ac.signal, stubStream);
     expect("subagent" in cfg).toBe(false);
     expect("skills" in cfg).toBe(false);
+    expect("localizePhase" in cfg).toBe(false);
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=2 \u2192 config has `localizePhase:{phase1Turns:2}`", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "2";
+    const ac = new AbortController;
+    const cfg = buildConfig(baseInstance(false), baseDeps, "/tmp/sb", ac.signal, stubStream);
+    expect("localizePhase" in cfg).toBe(true);
+    expect(cfg.localizePhase).toEqual({ phase1Turns: 2 });
+    expect("subagent" in cfg).toBe(false);
+    expect("skills" in cfg).toBe(false);
+  });
+  test("QUANTA_BENCH_LOCALIZE_PHASE=0 \u2192 config omits `localizePhase` (invalid value drops key)", () => {
+    process.env.QUANTA_BENCH_LOCALIZE_PHASE = "0";
+    const ac = new AbortController;
+    const cfg = buildConfig(baseInstance(false), baseDeps, "/tmp/sb", ac.signal, stubStream);
+    expect("localizePhase" in cfg).toBe(false);
   });
   test("QUANTA_BENCH_LSP=1 \u2192 registry expands by exactly the lspNavToolList count", () => {
     const ac = new AbortController;

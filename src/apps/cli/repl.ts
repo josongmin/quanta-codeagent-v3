@@ -9,6 +9,7 @@ import {
   RetryingLLM,
   resolveAgentMode,
 } from "@/agent"
+import { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import {
   buildCostDashboard,
@@ -23,6 +24,7 @@ import { logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
+import { TaskRegistry } from "@/subagent"
 import { composeShellObservers } from "@/tool"
 import { diffPreviewEnabled, renderActionDiff } from "./diff-preview"
 import { loadImageBlock } from "./image-loader"
@@ -48,6 +50,13 @@ import {
   type SessionDeps,
   titleFlag,
 } from "./internal"
+import {
+  createLifecyclePills,
+  isLifecyclePillsEnabled,
+  type LifecyclePills,
+  type McpPillServer,
+  readPillEnvFlags,
+} from "./lifecycle-pills"
 import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { AbortError, readLine } from "./raw-line-reader"
 import { runSessionCommand } from "./session-commands"
@@ -119,6 +128,93 @@ const loadSeedImages = (): ImageBlock[] => {
     logger.error((e as Error).message)
     process.exit(1)
   }
+}
+
+/** Lifecycle pills build-bundle for the CLI surface — pre-creates the
+ *  TaskRegistry / FollowUpQueue handles the surface needs to thread through
+ *  the loop AND keep references to for per-turn polling. Each handle is
+ *  `undefined` when its pill is suppressed (env knob OR pills globally off);
+ *  the receiver passes `undefined` through and downstream wiring stays
+ *  byte-identical (`subagent`/`followUpQueue` fields omitted entirely).
+ *
+ *  Extracted out of `runRepl` so the host stays under biome's cognitive-
+ *  complexity budget — the function is otherwise a straight-line composer of
+ *  the optional handles + pills instance. */
+interface LifecycleBundle {
+  pills: LifecyclePills
+  taskRegistry: TaskRegistry | undefined
+  followUpQueue: FollowUpQueue | undefined
+}
+
+const buildLifecycleBundle = (): LifecycleBundle => {
+  const pillsEnabled = isLifecyclePillsEnabled(process.env, process.stderr.isTTY)
+  const pillFlags = readPillEnvFlags(process.env)
+  // The TaskRegistry is allocated ONLY when subagent + pills are both ON.
+  // The loop receives the same instance through `buildTooling` so all four
+  // subagent tools share it; the CLI holds the handle for `pendingIds()`.
+  const subagentEnabledForPills =
+    pillsEnabled && !pillFlags.hideTasks && process.env.QUANTA_SUBAGENT !== undefined
+  const taskRegistry: TaskRegistry | undefined = subagentEnabledForPills
+    ? new TaskRegistry()
+    : undefined
+  // FollowUpQueue is allocated when pills + follow-up pill are both ON. The
+  // queue is currently producer-less from the CLI; this seam is forward-
+  // compatible with mid-turn user input injection (no behavior change yet).
+  const followUpQueue: FollowUpQueue | undefined =
+    pillsEnabled && !pillFlags.hideFollowUp ? new FollowUpQueue() : undefined
+  const pills: LifecyclePills = createLifecyclePills({
+    enabled: pillsEnabled,
+    hideTasks: pillFlags.hideTasks,
+    hideFollowUp: pillFlags.hideFollowUp,
+    hideMcp: pillFlags.hideMcp,
+  })
+  return { pills, taskRegistry, followUpQueue }
+}
+
+/** Derive the per-server MCP pill state from the bridged tools list. The
+ *  tool name prefix `mcp__<server>__<tool>` (mcp-bridge.ts) is the only
+ *  surface-visible link between a tool and its server — clients are opaque
+ *  (no public getter for the config name). Returns an empty servers list
+ *  when no MCP tools are bridged ⇒ the pill is omitted by the renderer. */
+const deriveMcpPillServers = (mcpTools: ReadonlyArray<{ name: string }>): McpPillServer[] => {
+  const perServer = new Map<string, number>()
+  for (const t of mcpTools) {
+    const m = /^mcp__([^_]+(?:_[^_]+)*)__/.exec(t.name)
+    const serverKey = m?.[1] ?? "unknown"
+    perServer.set(serverKey, (perServer.get(serverKey) ?? 0) + 1)
+  }
+  return [...perServer.entries()].map(([name, toolCount]) => ({
+    name,
+    status: "connected" as const,
+    toolCount,
+  }))
+}
+
+/** Snapshot the CLI-owned subagent + follow-up queue handles into the
+ *  lifecycle pills + flush. Pure helper extracted to keep the `turn()` and
+ *  `onTurnEnd` callsites under biome's cognitive-complexity budget.
+ *
+ *  Reading patterns mirror the spec's data sources:
+ *    - subagent: `taskRegistry.pendingIds().length` (running) +
+ *      `taskRegistry.list().length` (cumulative — running + settled).
+ *    - follow-up: `followUpQueue.size()` (queue depth across all threads).
+ *  Either handle absent ⇒ that pill is omitted (no allocation). `flush()`
+ *  is a no-op when every pill falls below its threshold, so a quiet turn
+ *  leaves no trailing line. */
+const snapshotAndFlushLifecyclePills = (
+  pills: LifecyclePills,
+  taskRegistry: TaskRegistry | undefined,
+  followUpQueue: FollowUpQueue | undefined,
+): void => {
+  if (taskRegistry !== undefined) {
+    const running = taskRegistry.pendingIds().length
+    const total = taskRegistry.list().length
+    pills.update({ subagent: { running, total } })
+  }
+  if (followUpQueue !== undefined) {
+    pills.update({ followUp: { queued: followUpQueue.size() } })
+  }
+  pills.flush()
 }
 
 /** ADR-0064 L4: the default per-turn work-metrics sink. The collector + emit are
@@ -573,6 +669,16 @@ export const runRepl = async (): Promise<void> => {
     gitToolList,
   } = await loadFeatures(slog)
 
+  // Lifecycle pills (subagent / follow-up queue / MCP health). Default-ON
+  // when stderr is a TTY; `QUANTA_LIFECYCLE_PILLS=0|false|off|no` disables
+  // entirely. Per-pill suppression via `QUANTA_PILL_TASKS|FOLLOWUP|MCP=0`.
+  // Non-TTY surfaces (pipes, eval/bench) get an inert instance ⇒ no writes.
+  const {
+    pills: lifecyclePills,
+    taskRegistry: lifecycleTaskRegistry,
+    followUpQueue: lifecycleFollowUpQueue,
+  } = buildLifecycleBundle()
+
   const {
     store,
     embedder,
@@ -583,7 +689,18 @@ export const runRepl = async (): Promise<void> => {
     skillsConfig,
     compactionBreakerConfig,
     verifyGuardConfig,
-  } = buildTooling(mcpTools, lspTools, lspNavTools, gitToolList, slog)
+  } = buildTooling(mcpTools, lspTools, lspNavTools, gitToolList, slog, lifecycleTaskRegistry)
+
+  // Seed the MCP pill from `loadMcpTools`'s live `mcpClients` array — each
+  // surviving entry is a server that started + listed tools ("connected").
+  // We can't observe configured-but-failed servers from here (loadMcpTools
+  // returns only successes), so the pill shows "connected" rows only when
+  // any MCP server is wired. `toolCount` is derived from the `mcp__<server>__`
+  // prefix on the bridged tool names — no MCP-client API access required.
+  if (mcpClients.length > 0) {
+    lifecyclePills.update({ mcp: { servers: deriveMcpPillServers(mcpTools) } })
+  }
+
   // `let` because a resumed session reassigns it before any turn (preserved).
   let sessionId = initialSessionId
 
@@ -770,6 +887,7 @@ export const runRepl = async (): Promise<void> => {
     summarizerLlm: buildSummarizerLlm(provider, abort.signal),
     onShellEvent,
     workMetricsSink,
+    ...(lifecycleFollowUpQueue !== undefined ? { followUpQueue: lifecycleFollowUpQueue } : {}),
   }
   /** Install a stdin keypress listener for the duration of one turn.
    *  Returns a `dispose()` that the caller MUST invoke (try/finally) to
@@ -894,6 +1012,10 @@ export const runRepl = async (): Promise<void> => {
       const summary = turnSummary.render(result.outcome)
       if (summary !== "") process.stderr.write(summary)
       turnSummary.reset()
+      // Lifecycle pills flush — mirrors the interactive `onTurnEnd` branch
+      // so a one-shot `quanta "<prompt>"` invocation also shows the row
+      // (or nothing, when every pill is below its threshold).
+      snapshotAndFlushLifecyclePills(lifecyclePills, lifecycleTaskRegistry, lifecycleFollowUpQueue)
     } catch (e) {
       // A turn-scoped abort is the user's intent; swallow the error and
       // hand control back to the prompt. The outer abort still propagates
@@ -1011,10 +1133,23 @@ export const runRepl = async (): Promise<void> => {
           // Mirror the legacy update of the surface-scoped `history`
           // binding so any downstream surface state remains in sync.
           history = messages
+          // Lifecycle pills snapshot — read the CLI-owned TaskRegistry +
+          // FollowUpQueue handles (the loop wired the SAME instances, so
+          // these counts are the live values just after the turn settled).
+          // `flush()` is a no-op when every pill falls below its threshold
+          // (no subagent activity + empty queue + no MCP) so a quiet
+          // turn leaves no trailing line. Default-OFF surfaces (non-TTY,
+          // QUANTA_LIFECYCLE_PILLS=0) get an inert pills instance ⇒ no write.
+          snapshotAndFlushLifecyclePills(
+            lifecyclePills,
+            lifecycleTaskRegistry,
+            lifecycleFollowUpQueue,
+          )
         },
       })
     }
   } finally {
+    lifecyclePills.dispose()
     await shutdownMcp()
   }
 }

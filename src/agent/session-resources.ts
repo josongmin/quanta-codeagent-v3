@@ -3,6 +3,7 @@ import type { RedactionHit, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
 import { type CloseoutGuardState, createCloseoutGuardState } from "./closeout-guard"
+import { createLocalizePhaseState, type LocalizePhaseState } from "./localize-phase-guard"
 import type { PersistDeps } from "./memory"
 import type { AgentRecorder } from "./metrics"
 import type { AgentConfig, RedactionRollup } from "./types"
@@ -103,6 +104,22 @@ export const buildVerifyGuard = (
   if (config.verifyGuard) out.state = createVerifyGuardState()
   if (needHistory) out.history = []
   return out
+}
+
+/** Localize-phase per-run resource (Agentless absorption — Tier 0). Built
+ *  ONLY when `config.localizePhase.phase1Turns` is a positive integer (the
+ *  ACTIVE configuration domain — anything else means the guard is OFF, see
+ *  `localize-phase-guard.ts#isActivePhase1Turns`). Absent / invalid ⇒
+ *  `undefined` (no allocation, the dispatch consult is a single property
+ *  check + early return → byte-identical loop). The loop bumps `state.turn`
+ *  at the TOP of each turn (0-indexed). Mirrors `buildVerifyGuard`. */
+export const buildLocalizePhase = (config: AgentConfig): LocalizePhaseState | undefined => {
+  const n = config.localizePhase?.phase1Turns
+  if (typeof n !== "number") return undefined
+  if (!Number.isFinite(n)) return undefined
+  if (!Number.isInteger(n)) return undefined
+  if (n < 1) return undefined
+  return createLocalizePhaseState()
 }
 
 /** Closeout reminder per-run resource. Built ONLY when

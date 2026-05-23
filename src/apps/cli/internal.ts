@@ -162,13 +162,20 @@ export const buildMemoryConfig = (
  * registered (loop byte-identical). When set, an optional integer
  * `QUANTA_SUBAGENT_MAX_DEPTH` caps recursion (else the runner's default).
  */
-export const buildSubagentConfig = (): AgentConfig["subagent"] | undefined => {
+export const buildSubagentConfig = (
+  /** Optional surface-provided TaskRegistry. When supplied AND the env flag
+   *  enables subagent, the same instance is threaded into the loop so the
+   *  surface (CLI lifecycle pills) can poll `pendingIds()` per turn.
+   *  Unset ⇒ byte-identical to today (loop mints its own). */
+  taskRegistry?: import("@/subagent").TaskRegistry,
+): AgentConfig["subagent"] | undefined => {
   const enabled = process.env.QUANTA_SUBAGENT !== undefined
   const rawDepth = process.env.QUANTA_SUBAGENT_MAX_DEPTH
   const depth = rawDepth !== undefined ? Number.parseInt(rawDepth, 10) : Number.NaN
   return buildSubagentConfigCore({
     enabled,
     ...(Number.isFinite(depth) ? { maxDepth: depth } : {}),
+    ...(taskRegistry !== undefined ? { taskRegistry } : {}),
   })
 }
 
@@ -544,12 +551,17 @@ export const buildTooling = (
   lspNavTools: Tool[],
   gitToolList: Tool[],
   slog: StructuredLogger,
+  /** Optional surface-provided {@link TaskRegistry} threaded into the
+   *  subagent config so the surface (CLI lifecycle pills) shares the same
+   *  registry instance the loop uses. Unset ⇒ byte-identical to today
+   *  (loop mints internally). */
+  subagentTaskRegistry?: import("@/subagent").TaskRegistry,
 ): Tooling => {
   const store = buildStore()
   const embedder = buildEmbedder(store)
   const sessionId = crypto.randomUUID()
   const memoryConfig = buildMemoryConfig(store)
-  const subagentConfig = buildSubagentConfig()
+  const subagentConfig = buildSubagentConfig(subagentTaskRegistry)
   const skillsConfig = buildSkillsConfig()
   const compactionBreakerConfig = buildCompactionBreakerConfig()
   const verifyGuardConfig = buildVerifyGuardConfig()
