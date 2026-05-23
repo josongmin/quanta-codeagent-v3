@@ -39,6 +39,26 @@ export interface PlanStore {
   ): PlanResult<PlanDelta>
   snapshot(): PlanSnapshot | null
   restore(snap: PlanSnapshot): PlanResult<true>
+  /**
+   * Explicit, caller-driven reset path (ADR-0093 P6 plan-exit-lifecycle).
+   *
+   * Drops the current plan unconditionally:
+   *   - `current()` returns `null` afterward.
+   *   - Internal version counter is reset (next `create()` produces v0 — a
+   *     fresh plan, NOT a continuation of the prior version chain).
+   *   - **Emits no delta.** Clearing is a lifecycle event, not a mutation;
+   *     observers learn of the absence via `current() === null`, not via a
+   *     `PlanDelta`. Subsequent `create()` emits `plan_created` as usual.
+   *   - **Idempotent.** Calling `clear()` on an already-empty store is a no-op.
+   *
+   * Used by `plan-exit-lifecycle.applyPlanExitOutcome` when the operator
+   * rejects the plan via the 3-way exit (ADR-0086). Held snapshots (taken via
+   * `snapshot()` before `clear()`) are unaffected — snapshots are by-value.
+   *
+   * NOT a heuristic-driven path. The store NEVER calls `clear()` itself; only
+   * an external caller (plan-exit flow, host shutdown) may invoke it.
+   */
+  clear(): void
 }
 
 export interface CreateInMemoryPlanStoreOpts {
@@ -149,6 +169,18 @@ export const createInMemoryPlanStore = (opts: CreateInMemoryPlanStoreOpts): Plan
       if (!r.ok) return r
       plan = r.value
       return { ok: true, value: true }
+    },
+    clear: () => {
+      // Drop the plan reference. Next `create()` succeeds from a clean slate
+      // (the `plan !== null` guard in create() no longer trips, and the
+      // reducer produces v0 since version lives on the plan envelope itself
+      // — there is no separate counter to reset).
+      //
+      // Idempotent: if plan is already null, this is a no-op. We do NOT emit
+      // a delta — clearing is a lifecycle event, not a mutation. Observers
+      // that care will see `current() === null` and react accordingly.
+      // Snapshots already returned to callers are unaffected (by-value).
+      plan = null
     },
   }
 }
