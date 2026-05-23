@@ -87,18 +87,27 @@ describe("decideOnAssembled", () => {
     expect(decideOnAssembled("end_turn", textMsg("answer"), rec).do).toBe("proceed")
   })
 
-  // ADR-0076 Gap-1: provider refusal must surface as error, never disguised
-  // as a completed turn (the pre-ADR fall-through bug).
-  test("refusal stop_reason → error with refusal rationale", () => {
+  // ADR-0076 Gap-1 SOTA++: provider refusal surfaces as a typed `refusal`
+  // action carrying the model's visible-text rationale. Pre-SOTA++ this was
+  // a generic `error` (correct but lossy — host could not tell "model
+  // declined" from "loop failed"); the typed surface is distinct and
+  // analytics-stable. See `tests/unit/refusal-handling.test.ts` for the
+  // hell-case battery (empty / multi-block / unicode / tool_use+text mix).
+  test("refusal stop_reason → typed refusal action with rationale", () => {
     const rec = freshRecovery()
     const a = decideOnAssembled("refusal", textMsg("I can't help with that."), rec)
-    expect(a.do).toBe("error")
-    expect(a.do === "error" && a.reason).toContain("refused")
+    expect(a.do).toBe("refusal")
+    expect(a.do === "refusal" && a.rationale).toBe("I can't help with that.")
   })
 
-  test("refusal is error even when the message carries tool blocks", () => {
+  test("refusal stays refusal (not error) even when the message carries tool_use blocks", () => {
     const rec = freshRecovery()
-    expect(decideOnAssembled("refusal", toolMsg("t1"), rec).do).toBe("error")
+    // A refusal that also emitted a tool_use is a model bug; the tool_use is
+    // tombstoned downstream but the refusal action still fires. Rationale is
+    // empty because the message has no `text` block.
+    const a = decideOnAssembled("refusal", toolMsg("t1"), rec)
+    expect(a.do).toBe("refusal")
+    expect(a.do === "refusal" && a.rationale).toBe("")
   })
 
   test("refusal does not consume recovery budget (terminal, not a retry)", () => {

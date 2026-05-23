@@ -232,10 +232,11 @@ const numOr = (v: unknown, fallback: number): number => (typeof v === "number" ?
 const strOr = (v: unknown, fallback: string): string => (typeof v === "string" ? v : fallback)
 
 const mergeUsage = (acc: UsageRollup, obj: Record<string, unknown>): void => {
-  acc.tokensIn += numOr(obj.inputTokens, 0)
-  acc.tokensOut += numOr(obj.outputTokens, 0)
-  acc.cacheRead += numOr(obj.cacheReadTokens, 0)
-  const m = strOr(obj.model, "")
+  const d = (obj.data as Record<string, unknown> | undefined) ?? obj
+  acc.tokensIn += numOr(d.inputTokens, 0)
+  acc.tokensOut += numOr(d.outputTokens, 0)
+  acc.cacheRead += numOr(d.cacheReadTokens, 0)
+  const m = strOr(d.model, "")
   if (m !== "") acc.model = m
 }
 
@@ -278,8 +279,9 @@ const parseAttemptJsonl = (file: string): { usage: UsageRollup; wallMs: number; 
   const usage: UsageRollup = { tokensIn: 0, tokensOut: 0, cacheRead: 0, model: "" }
   let turns = 0
   for (const obj of events) {
-    if (obj.type === "turn_started") turns += 1
-    if (obj.type === "usage") mergeUsage(usage, obj)
+    const k = obj.kind ?? obj.type
+    if (k === "turn_start" || k === "turn_started") turns += 1
+    if (k === "llm_usage" || k === "usage") mergeUsage(usage, obj)
   }
   return { usage, wallMs: wallSpanOf(events), turns }
 }

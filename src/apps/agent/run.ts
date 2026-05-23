@@ -62,6 +62,11 @@ export const exitCodeForOutcome = (outcome: AgentOutcome): number => {
       return 1
     case "error":
       return 1
+    case "refusal":
+      // ADR-0076 Gap-1 SOTA++ — the model declined; the task is NOT done.
+      // Distinct exit code so CI / shell wrappers can tell "model refused"
+      // apart from "loop errored" (1) and "task done" (0).
+      return 3
   }
 }
 

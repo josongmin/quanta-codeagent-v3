@@ -123,7 +123,7 @@ export const emitWorkMetrics = (
   cfg: AgentConfig,
   collector: TurnWorkMetricsCollector | undefined,
   turnId: string | undefined,
-  resultKind: "tools" | "completed" | "aborted" | "error",
+  resultKind: "tools" | "completed" | "aborted" | "error" | "refusal",
 ): void => {
   if (
     cfg.workMetricsSink === undefined ||

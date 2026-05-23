@@ -32,6 +32,10 @@ export type StopReason =
   | "aborted"
   | "error"
   | "budget_exhausted" /* RFC may-22 — BudgetMeter cap hit before completion */
+  | "refusal" /* ADR-0076 Gap-1 SOTA++ — model returned stop_reason=refusal;
+                 `AgentOutcome.refusal.rationale` carries the visible-text
+                 reason. Distinct from `error` so a host can render "model
+                 refused" without inspecting the message stream. */
 
 /**
  * memory_citation provenance surface (ADR-0082). A record is "cited" iff it
@@ -111,4 +115,14 @@ export interface AgentOutcome {
    * envelope. Closed enum keys keep the rollup audit-stable.
    */
   redactions?: ReadonlyArray<RedactionRollup>
+  /**
+   * ADR-0076 Gap-1 SOTA++ — model returned `stop_reason="refusal"`. Present
+   * iff `reason === "refusal"`. `rationale` is the concatenated visible-text
+   * blocks of the final assistant message (thinking / redacted_thinking are
+   * NOT included — those are private reasoning, not the model's SAY). Empty
+   * string when the refusal carried no visible text (rare; surface "Refused
+   * without rationale" at the UI layer). The field is OMITTED for every
+   * non-refusal outcome so byte-identical legacy callers see no new key.
+   */
+  refusal?: { readonly rationale: string }
 }

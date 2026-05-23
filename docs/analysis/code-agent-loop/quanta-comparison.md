@@ -277,7 +277,28 @@
 3. **B12 MCP Tasks+Elicitation** — Claude directMcpHost. quanta 표준 client만. **MID, 1주**.
 4. **C2 identity variant** — 실행모드별. quanta 단일. **MID, 작음**.
 5. **A9 background subagent fork** — Cursor force_background_subagent. quanta 약함. **MID**.
-6. **B11 hook updated_input** — Cursor args 재작성. quanta는 deny만. **LOW**.
+6. ~~**B11 hook updated_input**~~ → **흡수 완료** (2026-05-23, ADR-0113, [hook-args-rewrite-e2e](../../../tests/integration/hook-args-rewrite-e2e.test.ts) deny>updatedInput>pass).
+
+## 2026-05-23 Tier-S 흡수 결과 (5/7 main 정착)
+비교 결과 흡수가치 최상위 7개 중 5개를 SOTA++ TDD + worktree-isolated 병렬로 main에 정착시킴(45 tests pass / 0 fail / tsc 0 errors).
+
+| Tier | 출처 | 기능 / commit / ADR | 영향받은 축 |
+|---|---|---|---|
+| S1 | Codex tree-scoped AGENTS.md | repoRules deeper-wins suffix (`2a34394`, ADR-0098 갱신) | C6 |
+| S2 | Claude Desktop reviewDiff | `git_review_diff` isolated diff-only reviewer (sub-agent depth+1, read/grep/glob registry, REVIEW_NOTICE, isReadOnly, hitlTier:"none") `07b644a` ADR-0112 | A9 / B1 / E7 |
+| S4 | Cursor `updated_input` hook | pre_tool_use args rewrite (precedence: deny > updatedInput > pass) — 구현은 사전 landed, e2e+ADR로 봉인 `085d6ee` ADR-0113 | B11 |
+| S5 | Cursor typed per-failure-mode | bash exit-126 + 'Permission denied' stderr → `{mode:'permission_denied'}`; read ENOENT → `{mode:'not_found',path}` `da2d117` ADR-0114 | D4 |
+| S6 | Codex `request_user_input` 1급 | MUTATING_TOOL_TABLE 등록 + e2e gap-close `c288578` (ADR-0097 확장) | B1 / D10 |
+
+**보류(Phase 2)**:
+- **S3 active_branch_change** — Cursor branch hop 시 컨텍스트 invalidate 신호. worktree 부분 진척(branch-tracker.test.ts만), 재시도 필요.
+- **S7 view_image** — Codex/Anthropic ImageBlock 이미지 입력 도구. rate-limit으로 spawn 무산, vision-tier 통합 작업 별도 트랙.
+
+**워크플로 인시던트**:
+- 5 worktree가 동시에 ADR-0111 채번 충돌 → `git mv` rename + sed 본문 ref 갱신으로 0112/0114 분리 (`b82e346`)
+- 초기 `git add -A`가 worktree dir 16개를 embedded-repo로 잘못 staging → soft reset + restore --staged + `.gitignore`에 `.claude/worktrees/` 추가로 재발 차단
+
+이 흡수로 **B11 hook updated_input / D4 typed failure / C6 repo-rules tree / B1+D10 1급 user-input / A9 review 도구 격리 sub-agent** 다섯 축 해소.
 
 # D. 에이전트 품질 / 탄력성 (말귀·도구·tolerance·자기검증)
 

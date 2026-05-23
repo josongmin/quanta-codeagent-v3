@@ -44,6 +44,10 @@ export type StopCategoryKind =
   | "interrupted"
   | "failed"
   | "needs_user_approval"
+  | "refusal" /* ADR-0076 Gap-1 SOTA++ — model declined via
+                 `stop_reason="refusal"`. Distinct from `failed` (the model
+                 worked correctly — it chose to refuse) and from `completed`
+                 (the task was NOT completed). */
 
 /**
  * Structured stop category.
@@ -103,6 +107,10 @@ export const STOP_REASON_CODE = {
   COMPLETED_EMPTY_EXHAUSTED: "completed.empty_exhausted",
   /** Same-turn malformed-tool retry budget exhausted. */
   COMPLETED_MALFORMED_EXHAUSTED: "completed.malformed_exhausted",
+  /** Model returned `stop_reason="refusal"` (Anthropic refusal / OpenAI
+   *  content-policy stop). The visible-text rationale is surfaced on
+   *  `AgentOutcome.refusal.rationale`. */
+  MODEL_REFUSAL: "model.refusal",
 } as const
 
 export type StopReasonCode = (typeof STOP_REASON_CODE)[keyof typeof STOP_REASON_CODE]
@@ -222,4 +230,14 @@ export const interruptedCategory = (cause: "user" | "system" = "user"): StopCate
   kind: "interrupted",
   reasonCode: cause === "user" ? STOP_REASON_CODE.USER_INTERRUPT : STOP_REASON_CODE.SYSTEM_ABORT,
   hint: cause === "user" ? "User interrupt." : "Run aborted by host.",
+})
+
+/** Stop category for the refusal path (ADR-0076 Gap-1 SOTA++). The host can
+ *  pull the rationale from `AgentOutcome.refusal.rationale`; this category
+ *  is the analytics-stable signal that "the model declined" (distinct from
+ *  any provider/runtime `failed` bucket). */
+export const refusalCategory = (): StopCategory => ({
+  kind: "refusal",
+  reasonCode: STOP_REASON_CODE.MODEL_REFUSAL,
+  hint: "Model declined to continue.",
 })

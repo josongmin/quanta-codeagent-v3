@@ -76,6 +76,13 @@ describe("exitCodeForOutcome — exit code table", () => {
   test("error → 1", () => {
     expect(exitCodeForOutcome(stubOutcome("error"))).toBe(1)
   })
+
+  // ADR-0076 Gap-1 SOTA++ — `refusal` exit code is distinct from `error`(1)
+  // and `completed`(0) so a CI / shell wrapper can tell "model declined" apart
+  // from "loop failed" and "task done".
+  test("refusal → 3", () => {
+    expect(exitCodeForOutcome(stubOutcome("refusal"))).toBe(3)
+  })
 })
 
 describe("runAgentLifecycle — outcome → exit code", () => {

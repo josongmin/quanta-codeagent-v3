@@ -1,26 +1,33 @@
 /**
- * ADR-0076 Gap-1 — `decideOnAssembled` refusal-branch HELL-GATE.
+ * ADR-0076 Gap-1 SOTA++ — `decideOnAssembled` refusal-branch HELL-GATE.
  *
- * Adversarial pinning for the one-line branch landed at `loop.ts:739`:
+ * Adversarial pinning for the typed-refusal branch in `recovery.ts`:
  *
- *   if (stopReason === "refusal") return { do: "error", reason: "Model refused …" }
+ *   if (stopReason === "refusal")
+ *     return { do: "refusal", rationale: extractRefusalRationale(message) }
  *
  * Negative invariants this file pins (matches ADR-0076 §Negative invariants):
  *
- *   NI-1  Refusal MUST surface as `do: "error"` — never `proceed` / `completed`.
- *         The pre-ADR fall-through bug disguised refusals as completed turns.
+ *   NI-1  Refusal MUST surface as `do: "refusal"` — never `proceed` /
+ *         `completed` / `error`. The pre-SOTA++ generic-error contract
+ *         (which itself replaced the pre-ADR fall-through bug) lost the
+ *         "model declined vs loop failed" distinction; SOTA++ restores it.
  *   NI-2  `pause_turn` / `content_filtered` / `guardrail_intervened` stay
  *         UN-BRANCHED until the relevant provider integration ADR lands —
  *         they must `proceed` exactly like every other unrecognized stop.
  *   NI-x  Refusal MUST consume NO recovery budget (outputContinues /
  *         malformedRetries / consecutiveEmpties stay at 0): the branch is
- *         terminal, not a retry — the caller closes the turn with `error`.
+ *         terminal, not a retry — the loop closes the turn with reason
+ *         `refusal` and `AgentOutcome.refusal.rationale = <text>`.
  *   NI-x  Exact match only — `Refusal` / `REFUSAL` / `refused` / `blocked`
  *         MUST fall through to `proceed`. False positives are an attack
  *         vector (a provider quirk that capitalizes the literal would
  *         silently start failing every turn if we case-insensitive-matched).
  *
  * Tests are PURE — no LLM, no IO. They drive `decideOnAssembled` directly.
+ * Rationale-shape coverage (multi-text-block / unicode / very-long / mixed
+ * tool_use+text) lives in `tests/unit/refusal-handling.test.ts` (SOTA++
+ * companion battery).
  */
 import { describe, expect, test } from "bun:test"
 import { decideOnAssembled, freshRecovery } from "@/agent/loop"
@@ -36,14 +43,14 @@ const empty = (): Message => assistant()
 // ─── 1. Refusal × content-shape cross-product ─────────────────────────────
 
 describe("ADR-0076 NI-1 — refusal terminal across every assistant content shape", () => {
-  test("refusal + plain text content ⇒ error (the canonical case)", () => {
+  test("refusal + plain text content ⇒ typed refusal carrying the text (the canonical case)", () => {
     const rec = freshRecovery()
     const a = decideOnAssembled("refusal", textMsg("I can't help with that."), rec)
-    expect(a.do).toBe("error")
-    if (a.do === "error") expect(a.reason).toContain("refused")
+    expect(a.do).toBe("refusal")
+    if (a.do === "refusal") expect(a.rationale).toBe("I can't help with that.")
   })
 
-  test("refusal + tool_use block ⇒ error (tool MUST NOT execute, refusal precedence)", () => {
+  test("refusal + tool_use block ⇒ refusal (tool MUST NOT execute; rationale='' since no text block)", () => {
     // Critical attack vector: provider returns refusal stop_reason but the
     // assembled message also carries a tool_use block. If the branch order
     // were wrong (tool_use checked first), the tool would dispatch despite
@@ -51,25 +58,27 @@ describe("ADR-0076 NI-1 — refusal terminal across every assistant content shap
     // exactly to prevent this.
     const rec = freshRecovery()
     const a = decideOnAssembled("refusal", toolMsg("t1"), rec)
-    expect(a.do).toBe("error")
-    if (a.do === "error") expect(a.reason).toContain("refused")
+    expect(a.do).toBe("refusal")
+    if (a.do === "refusal") expect(a.rationale).toBe("")
   })
 
-  test("refusal + ThinkingBlock content ⇒ error (thinking is NOT carried back as a turn answer)", () => {
+  test("refusal + ThinkingBlock content ⇒ refusal with rationale='' (thinking is NOT a public SAY)", () => {
     const rec = freshRecovery()
     const a = decideOnAssembled("refusal", thinkingMsg("I shouldn't continue."), rec)
-    expect(a.do).toBe("error")
+    expect(a.do).toBe("refusal")
+    if (a.do === "refusal") expect(a.rationale).toBe("")
   })
 
-  test("refusal + empty message content ⇒ error (refusal branch beats the empty-turn branch)", () => {
+  test("refusal + empty message content ⇒ refusal with rationale='' (beats the empty-turn branch)", () => {
     const rec = freshRecovery()
     const a = decideOnAssembled("refusal", empty(), rec)
-    // The branch order in loop.ts:739 places refusal BEFORE the empty-turn
-    // check (loop.ts:771). An empty refusal message must NOT be nudged.
-    expect(a.do).toBe("error")
+    // The branch order in recovery.ts places refusal BEFORE the empty-turn
+    // check. An empty refusal message must NOT be nudged.
+    expect(a.do).toBe("refusal")
+    if (a.do === "refusal") expect(a.rationale).toBe("")
   })
 
-  test("refusal + multi-block (text + tool_use + thinking) ⇒ error (catches every block kind)", () => {
+  test("refusal + multi-block (text + tool_use + thinking) ⇒ refusal carrying ONLY the text block", () => {
     const rec = freshRecovery()
     const msg = assistant(
       { type: "thinking", thinking: "deliberation" },
@@ -77,7 +86,8 @@ describe("ADR-0076 NI-1 — refusal terminal across every assistant content shap
       { type: "tool_use", id: "t1", name: "read", input: {} },
     )
     const a = decideOnAssembled("refusal", msg, rec)
-    expect(a.do).toBe("error")
+    expect(a.do).toBe("refusal")
+    if (a.do === "refusal") expect(a.rationale).toBe("I cannot.")
   })
 })
 
@@ -121,19 +131,23 @@ describe("ADR-0076 — refusal does not consume same-turn recovery budget", () =
 
 // ─── 3. Refusal error message contract (surface parse-ability) ────────────
 
-describe("ADR-0076 — refusal error message rationale (surface contract)", () => {
-  test("error reason contains the keyword `refused` (parse-able by host UIs)", () => {
+describe("ADR-0076 SOTA++ — refusal rationale (surface contract)", () => {
+  test("rationale carries the assistant's visible text verbatim (parse-able by host UIs)", () => {
     const rec = freshRecovery()
-    const a = decideOnAssembled("refusal", textMsg("no"), rec)
-    if (a.do !== "error") throw new Error("expected error")
-    expect(a.reason.toLowerCase()).toContain("refused")
+    const a = decideOnAssembled("refusal", textMsg("I will not help with that."), rec)
+    if (a.do !== "refusal") throw new Error("expected refusal")
+    expect(a.rationale).toBe("I will not help with that.")
   })
 
-  test("error reason mentions `refusal` so a log scanner can trace the cause", () => {
+  test("rationale is empty string when the refusing message had no visible text", () => {
+    // Surface contract: an empty string (NOT `undefined`, NOT absent) means
+    // "refusal carried no rationale" — a host can render a fixed "Refused
+    // without rationale" copy without inspecting `undefined`.
     const rec = freshRecovery()
-    const a = decideOnAssembled("refusal", textMsg("no"), rec)
-    if (a.do !== "error") throw new Error("expected error")
-    expect(a.reason.toLowerCase()).toContain("refusal")
+    const a = decideOnAssembled("refusal", empty(), rec)
+    if (a.do !== "refusal") throw new Error("expected refusal")
+    expect(a.rationale).toBe("")
+    expect(typeof a.rationale).toBe("string")
   })
 })
 
@@ -220,25 +234,25 @@ describe("ADR-0076 NI-2 — `pause_turn` / `content_filtered` / `guardrail_inter
 describe("ADR-0076 — refusal precedence over other branches", () => {
   test("refusal precedence is structural, not budget-driven", () => {
     // Even when the same-turn budget is fully exhausted (would normally route
-    // an empty turn to `completed`), refusal still terminates with `error`.
+    // an empty turn to `completed`), refusal still terminates with `refusal`.
     const rec = freshRecovery()
     rec.consecutiveEmpties = 99
     const a = decideOnAssembled("refusal", empty(), rec)
-    expect(a.do).toBe("error")
+    expect(a.do).toBe("refusal")
   })
 
   test("refusal precedence holds even after a prior `max_tokens` nudge consumed budget", () => {
     const rec = freshRecovery()
     rec.outputContinues = 2
     const a = decideOnAssembled("refusal", textMsg("no"), rec)
-    expect(a.do).toBe("error")
+    expect(a.do).toBe("refusal")
   })
 
   test("refusal precedence holds even after a prior malformed-tool nudge consumed budget", () => {
     const rec = freshRecovery()
     rec.malformedRetries = 1
     const a = decideOnAssembled("refusal", toolMsg("t1"), rec)
-    expect(a.do).toBe("error")
+    expect(a.do).toBe("refusal")
   })
 })
 

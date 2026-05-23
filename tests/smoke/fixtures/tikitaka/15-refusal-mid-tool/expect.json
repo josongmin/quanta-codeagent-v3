@@ -1,5 +1,5 @@
 {
-  "stopReason": "error",
+  "stopReason": "refusal",
   "turns": { "count": { "max": 1 } },
   "toolCalls": {
     "forbidden": ["bash"],

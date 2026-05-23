@@ -52,19 +52,43 @@ export const freshRecovery = (): RecoveryState => ({
 
 /** What the turn driver should do next. `retry_*` re-enters the SAME turn
  *  (no turn increment); `nudge` first appends a meta user message; `compact`
- *  asks for reactive compaction; `backoff` sleeps `delayMs` first. */
+ *  asks for reactive compaction; `backoff` sleeps `delayMs` first.
+ *
+ *  `refusal` is a TERMINAL distinct-from-error outcome (ADR-0076 Gap-1 SOTA++):
+ *  the model returned `stop_reason="refusal"` — the assistant message carries
+ *  the refusal rationale (visible text), so the loop surfaces it as a typed
+ *  outcome rather than collapsing into a generic `error`. Same-turn budgets
+ *  are NOT consumed (terminal, no retry). */
 export type RecoveryAction =
   | { do: "backoff"; attempt: number }
   | { do: "compact" }
   | { do: "nudge"; keepMessage: boolean; text: string; reason: RecoveryReason }
   | { do: "proceed" }
   | { do: "completed" }
+  | { do: "refusal"; rationale: string }
   | { do: "error"; reason: string }
 
 /** True when the assembled turn produced nothing usable: no text, no tool_use
  *  (e.g. an empty completion or a thinking-only block). */
 export const isEmptyTurn = (m: AssembledMessage): boolean =>
   !m.content.some((b) => (b.type === "text" && b.text.trim() !== "") || b.type === "tool_use")
+
+/** Extract the model's VISIBLE refusal rationale from an assembled assistant
+ *  message (ADR-0076 Gap-1 SOTA++). Concatenates only `text` blocks joined by
+ *  a blank line. `thinking` / `redacted_thinking` are NOT exposed (those are
+ *  the model's private reasoning, not its SAY), and `tool_use` blocks are
+ *  ignored — a refusal that emits tool_use is a model bug, but the rationale
+ *  text must still surface for the operator. Whitespace-only output trims to
+ *  "" so a "refusal with no text" reads as empty rather than as blanks. The
+ *  full string is preserved verbatim (no truncation, no escape); callers that
+ *  need a short surface form must clip themselves. */
+export const extractRefusalRationale = (m: AssembledMessage): string => {
+  const parts: string[] = []
+  for (const b of m.content) {
+    if (b.type === "text") parts.push(b.text)
+  }
+  return parts.join("\n\n").trim()
+}
 
 /** Pure policy for a thrown stream error: classify it, consult the SAME-TURN
  *  budget, and decide. Mutates `rec` (consumes a retry slot) only when it
@@ -95,21 +119,17 @@ export const decideOnAssembled = (
   message: AssembledMessage,
   rec: RecoveryState,
 ): RecoveryAction => {
-  // ADR-0076 Gap-1: provider refusal / abnormal non-tool stop. The model
-  // stopped with an explicit refusal (Anthropic `refusal`, OpenAI content-
-  // policy stop). Surface it as an error so the run does NOT report the
-  // refusal text as a normal completion — the pre-ADR fall-through bug routed
-  // every unrecognized stop_reason to `proceed`→`completed`, disguising a
-  // refusal as success. `pause_turn` (server-tool resume) is intentionally
-  // NOT handled: we ship no server-side tools, so it cannot be emitted; adding
-  // a dead branch would be cargo.
+  // ADR-0076 Gap-1 SOTA++: provider refusal / abnormal non-tool stop. The
+  // model stopped with an explicit refusal (Anthropic `refusal`, OpenAI
+  // content-policy stop). Surface as a typed `refusal` action with the
+  // visible-text rationale extracted from the assistant message — the loop
+  // routes this to a `refusal` StopReason + `AgentOutcome.refusal{rationale}`
+  // instead of collapsing into a generic `error`. Terminal: same-turn budgets
+  // are NOT consumed (no retry slot, no nudge — the refusal IS the turn).
+  // `pause_turn` (server-tool resume) is intentionally NOT handled: we ship
+  // no server-side tools, so it cannot be emitted.
   if (stopReason === "refusal") {
-    return {
-      do: "error",
-      reason:
-        "Model refused to continue (stop_reason=refusal); the assistant " +
-        "message carries the refusal rationale, not a completed task.",
-    }
+    return { do: "refusal", rationale: extractRefusalRationale(message) }
   }
   if (stopReason === "max_tokens" && rec.outputContinues < MAX_OUTPUT_CONTINUES) {
     rec.outputContinues += 1

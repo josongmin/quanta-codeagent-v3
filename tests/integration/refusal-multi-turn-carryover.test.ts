@@ -1,17 +1,18 @@
 /**
- * ADR-0076 Gap-1 + Gap-5 — multi-turn refusal carry-over invariant.
+ * ADR-0076 Gap-1 SOTA++ + Gap-5 — multi-turn refusal carry-over invariant.
  *
  * The self-audit found that the existing hell suite covers only SINGLE-TURN
  * refusal scenarios. The production-realistic failure mode is: turn-1 ends
  * with `stop_reason: "refusal"`, the user re-prompts in turn-2, and the next
  * `StreamInput.messages` is sent to the provider. This file pins:
  *
- *   M-1  After a refusal turn, `outcome.messages` MUST NOT contain a
- *        trailing assistant Message — `runStep`'s `error` branch returns
- *        WITHOUT `wm.append`, so the orphan tool_use blocks (if any) are
- *        discarded. This is the multi-turn safety guarantee: a refusal
- *        cannot leave the working memory with unmatched tool_use blocks
- *        that Anthropic would reject on the next request.
+ *   M-1  After a refusal turn, `outcome.messages` MUST contain the
+ *        REFUSING assistant message (SOTA++ — the typed `refusal` action
+ *        appends the final assistant turn so a resume / probe can SEE
+ *        the model's refusal text). What it MUST NOT contain is any
+ *        tool_result block — `runStep`'s refusal branch never dispatches
+ *        the tombstoned tool_use, so Anthropic's "tool_use without
+ *        matching tool_result" rule stays intact on the next request.
  *
  *   M-2  A refusal turn that ALSO emits a tool_use mid-stream produces
  *        ZERO tool dispatches (Gap-5 short-circuit) AND ZERO trailing
@@ -21,9 +22,9 @@
  *        "end_turn" carrying assistant text DOES append to wm (so a normal
  *        completion is unaffected by the Gap-1/5 logic).
  *
- *   M-4  `AgentOutcome.reason === "error"` for a refusal turn AND the
- *        error reason text mentions "refused" — the host UI can branch
- *        on this without parsing the message.
+ *   M-4  `AgentOutcome.reason === "refusal"` for a refusal turn AND
+ *        `outcome.refusal.rationale` carries the visible-text — the host
+ *        UI can branch on the typed surface without parsing any string.
  *
  * Tests use the local ScriptedLLM (same shape as agent-recovery-e2e) so
  * runAgent is exercised end-to-end without a real provider.
@@ -101,26 +102,29 @@ const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise
 }
 
 describe("ADR-0076 — refusal multi-turn carry-over", () => {
-  test("M-1: pure-text refusal does NOT append assistant message to outcome.messages", async () => {
+  test("M-1: pure-text refusal DOES append the refusing assistant message to outcome.messages", async () => {
     const llm = new ScriptedLLM([ev(text("I refuse.", "refusal"))])
     const out = await withTimeout(runAgent(cfg({ llm })), 10_000, "M-1")
-    expect(out.reason).toBe("error")
-    // Refusal terminates via `runStep`'s `action.do === "error"` branch which
-    // returns WITHOUT `wm.append`. So the outcome's `messages` carries only
-    // the initial user prompt — no assistant message.
+    expect(out.reason).toBe("refusal")
+    // SOTA++: the typed-refusal branch appends the final assistant turn so a
+    // resume / probe / forensic surface can SEE the model's refusal text.
+    // (Pre-SOTA++ this branch dropped the message; that lost provenance.)
     const assistantMessages = out.messages.filter((m) => m.role === "assistant")
-    expect(assistantMessages).toEqual([])
+    expect(assistantMessages.length).toBe(1)
+    expect(
+      assistantMessages[0]?.content.some((b) => b.type === "text" && b.text === "I refuse."),
+    ).toBe(true)
   })
 
   test("M-2: tool_use mid-stream + refusal — Gap-5 short-circuit produces zero tool_result blocks", async () => {
     // The stream emits a bash tool_use_end mid-stream, then refuses. Gap-5
     // ensures bash is NEVER dispatched. The outcome history must not have
     // any tool_result block, because Phase 4 collects only dispatched slots
-    // (deferred unsafe slots have no promise) AND runStep's error branch
-    // skips wm.append entirely.
+    // (deferred unsafe slots have no promise) AND the refusal branch never
+    // appends a tool_result-bearing user message.
     const llm = new ScriptedLLM([ev(toolUseThenRefuse("call1", "echo malicious"))])
     const out = await withTimeout(runAgent(cfg({ llm })), 10_000, "M-2")
-    expect(out.reason).toBe("error")
+    expect(out.reason).toBe("refusal")
     const toolResults = out.messages.flatMap((m) =>
       m.role === "user" ? m.content.filter((b) => b.type === "tool_result") : [],
     )
@@ -135,18 +139,19 @@ describe("ADR-0076 — refusal multi-turn carry-over", () => {
     expect(finalAssistant?.content.some((b) => b.type === "text" && b.text === "Done.")).toBe(true)
   })
 
-  test("M-4: refusal error reason mentions 'refused' so host UI can branch", async () => {
+  test("M-4: refusal carries typed `refusal.rationale` so host UI can branch without string-parsing", async () => {
     const llm = new ScriptedLLM([ev(text("Sorry, I won't.", "refusal"))])
     const stream = new RecordingStream()
     const out = await withTimeout(runAgent(cfg({ llm, stream })), 10_000, "M-4")
-    expect(out.reason).toBe("error")
-    // `AgentOutcome.reason` is the closed StopReason enum; the human-readable
-    // "refused" rationale rides on the emitted `error` event (decideOnAssembled
-    // → runStep error branch → emitRecovery / stream.emit({type:"error", ...}).
-    const errEvent = stream.events.find((e) => e.type === "error")
-    expect(errEvent).toBeDefined()
-    if (errEvent === undefined || errEvent.type !== "error") return
-    expect(/refus/i.test(errEvent.message)).toBe(true)
+    expect(out.reason).toBe("refusal")
+    // The typed surface: a host reads `outcome.refusal.rationale` directly
+    // instead of grepping the AgentEvent stream for "refused".
+    expect(out.refusal).toBeDefined()
+    expect(out.refusal?.rationale).toBe("Sorry, I won't.")
+    // And the stream still emits a typed `done` with the matching reason
+    // so passive observers (loggers / metrics sinks) see the same signal.
+    const done = stream.events.find((e) => e.type === "done")
+    expect(done?.type === "done" && done.reason).toBe("refusal")
   })
 
   test("M-5: refusal turn DOES count as a turn (turns >= 1) — terminal but accounted", async () => {
@@ -154,15 +159,11 @@ describe("ADR-0076 — refusal multi-turn carry-over", () => {
     // turn slot IS counted — the model produced an assistant response, even
     // if that response is a refusal. This matches the existing semantic that
     // `turns` increments per logical model interaction; "turn = 0" would
-    // suggest the loop never even started, which is misleading for an error
-    // surfaced via decideOnAssembled.
+    // suggest the loop never even started, which is misleading for a typed
+    // refusal surfaced via decideOnAssembled.
     const llm = new ScriptedLLM([ev(text("Refused.", "refusal"))])
     const out = await withTimeout(runAgent(cfg({ llm })), 10_000, "M-5")
-    expect(out.reason).toBe("error")
-    expect(out.turns).toBeGreaterThanOrEqual(0)
-    // Exact value — locked to current loop semantics; if this changes, the
-    // smoke fixtures expect.json's `turns.count.max: 1` should also be
-    // reviewed for consistency.
-    expect(out.turns).toBeLessThanOrEqual(1)
+    expect(out.reason).toBe("refusal")
+    expect(out.turns).toBe(1)
   })
 })

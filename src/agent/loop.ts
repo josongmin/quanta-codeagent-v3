@@ -52,6 +52,7 @@ import type { SkillGate, SkillTurnOverride, TurnSession, TurnState } from "./tur
 export {
   decideOnAssembled,
   decideOnStreamError,
+  extractRefusalRationale,
   freshRecovery,
   type RecoveryState,
 } from "./recovery"
@@ -87,6 +88,7 @@ import {
   classifyErrorReason,
   completedCategory,
   interruptedCategory,
+  refusalCategory,
   type StopCategory,
 } from "./stop-category"
 import { streamingTurn } from "./streaming-dispatch"
@@ -935,6 +937,11 @@ type TurnResult =
   | { kind: "completed"; message?: AssembledMessage }
   | { kind: "aborted" }
   | { kind: "error"; reason: string }
+  // ADR-0076 Gap-1 SOTA++ — terminal, distinct from `error`. The `rationale`
+  // is the visible-text content of the refusing assistant message; the
+  // outer loop routes this to `finish("refusal", …, {rationale})` so the
+  // AgentOutcome carries a typed `refusal` field for the host.
+  | { kind: "refusal"; rationale: string; message: AssembledMessage }
 
 /**
  * Drive one logical turn to a terminal {@link TurnResult}, performing all
@@ -1104,6 +1111,20 @@ const applyAction = async (
   const { config, guards } = session
   const { wm, breaker, toolChoiceState } = state
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
+  if (action.do === "refusal") {
+    // ADR-0076 Gap-1 SOTA++ — terminal `refusal` action. Append the final
+    // refusing assistant message to working memory so the transcript carries
+    // the visible refusal text (mirrors the `completed` path; otherwise a
+    // resume / probe would not see the refusal in `outcome.messages`). The
+    // `rationale` was extracted by `decideOnAssembled`; we pass the assembled
+    // message along so the outer loop can route to `finish("refusal", …)`.
+    const success = result as StreamSuccess
+    wm.append(success.message)
+    return {
+      done: true,
+      result: { kind: "refusal", rationale: action.rationale, message: success.message },
+    }
+  }
   if (action.do === "backoff") {
     // RFC-0002 §5.2 recovery trace. Pure observation (NullStream swallows it):
     // emitted at the recovery point the loop already reached; the sleep + retry
@@ -1797,6 +1818,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     reason: StopReason,
     turns: number,
     stopCategory?: StopCategory,
+    refusal?: { readonly rationale: string },
   ): Promise<AgentOutcome> => {
     // ADR-0030: clear the active-turn header and reflect the stop reason so a
     // surface can ask "are we still mid-turn? were we interrupted?" after the
@@ -1865,6 +1887,9 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       ...(stopCategory !== undefined ? { stopCategory } : {}),
       ...(memoryCitations.length > 0 ? { memoryCitations } : {}),
       ...(redactions !== undefined ? { redactions } : {}),
+      // ADR-0076 Gap-1 SOTA++ — refusal payload, spread conditionally so a
+      // non-refusal outcome carries NO `refusal` key (byte-identical legacy).
+      ...(refusal !== undefined ? { refusal } : {}),
       // ADR-0077 Plane-B (L4 wire): surface the LAST sampling-request's
       // timing snapshot ONLY when a stream was actually opened (i.e.
       // `streamConsume` ran at least once and overwrote the slot). An
@@ -2060,6 +2085,16 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       // `reason: "error"` stays the authoritative top-level outcome so a
       // surface that only reads it sees byte-identical behavior.
       return finish("error", turn - 1, classifyErrorReason(result.reason))
+    }
+    if (result.kind === "refusal") {
+      // ADR-0076 Gap-1 SOTA++ — model declined via `stop_reason="refusal"`.
+      // The refusing turn DID produce a final assistant message (visible
+      // refusal text), so it counts as work: bump the recorder and report
+      // `turn` (not `turn - 1`) — mirrors the `completed` accounting. The
+      // typed `refusal.rationale` is threaded into the outcome via the
+      // 4th finish() arg.
+      recorder?.turn()
+      return finish("refusal", turn, refusalCategory(), { rationale: result.rationale })
     }
     recorder?.turn()
 
