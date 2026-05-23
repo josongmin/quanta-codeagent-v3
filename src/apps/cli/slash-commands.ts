@@ -277,7 +277,9 @@ const renderSkillRow = (s: SkillRow): string => {
   const desc1 = s.description.split("\n")[0] ?? ""
   const desc = desc1.length > 100 ? `${desc1.slice(0, 97)}...` : desc1
   const pathsTag =
-    s.paths && s.paths.length > 0 ? ` [paths: ${s.paths.slice(0, 3).join(", ")}${s.paths.length > 3 ? "…" : ""}]` : ""
+    s.paths && s.paths.length > 0
+      ? ` [paths: ${s.paths.slice(0, 3).join(", ")}${s.paths.length > 3 ? "…" : ""}]`
+      : ""
   return `  ${s.name.padEnd(24)} ${desc}${pathsTag}\n`
 }
 

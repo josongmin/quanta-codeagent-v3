@@ -16,6 +16,7 @@ import {
 } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
 import { logger } from "@/shared"
+import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { composeShellObservers } from "@/tool"
 import { loadImageBlock } from "./image-loader"
 import {
@@ -23,6 +24,7 @@ import {
   argvPrompt,
   assembleConfig,
   buildLLM,
+  buildSkillsConfig,
   buildStreaming,
   buildSummarizerLlm,
   buildTooling,
@@ -42,7 +44,6 @@ import {
 import { runSessionCommand } from "./session-commands"
 import { persistTurn, switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
-import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { isSlashCommand, runSlashCommand, type SkillRow } from "./slash-commands"
 
 /**
@@ -139,9 +140,7 @@ const buildSkillsCallback = (
       if (s.paths !== undefined) (row as { paths?: readonly string[] }).paths = s.paths
       byName.set(s.name, row)
     }
-    return [...byName.values()].sort((a, b) =>
-      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-    )
+    return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   }
 }
 
@@ -154,6 +153,27 @@ const buildSkillsCallback = (
  *  and are checked BEFORE the slash dispatch so they cannot be hijacked by a
  *  future registered command of the same name. Empty `slashCtx` ⇒ commands
  *  that need session state print "not wired" and exit 0 (default-OFF). */
+/** Try to handle `input` as an in-REPL slash command. Returns true iff the
+ *  input was routed (caller should `continue` the outer loop); false ⇒ the
+ *  caller must send it to the model via `turn(...)`. Extracted from
+ *  `runReplLoop` to keep that function under the biome cognitive-complexity
+ *  budget. `isSlashCommand` rejects paths like `/path/to/x` so legacy
+ *  file-resume tokens still fall through to the agent path. */
+const tryRunReplSlash = async (
+  input: string,
+  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>,
+): Promise<boolean> => {
+  const head = input.split(/\s+/)[0] ?? ""
+  if (!isSlashCommand(head)) return false
+  await runSlashCommand(input, {
+    out: (s) => process.stdout.write(s),
+    err: (s) => process.stderr.write(s),
+    cwd: process.cwd(),
+    ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
+  })
+  return true
+}
+
 export const runReplLoop = async (
   rl: readline.Interface,
   signal: AbortSignal,
@@ -164,20 +184,7 @@ export const runReplLoop = async (
     const input = (await rl.question("\nquanta› ")).trim()
     if (input === "") continue
     if (input === "/exit" || input === "/quit") break
-    // Slash gate: route `/<letter>…` to the slash-command dispatcher BEFORE
-    // sending to the model. `isSlashCommand` rejects paths like `/path/to/x`
-    // so legacy file-resume tokens still fall through (parity with the
-    // pre-REPL shell-entry gate in `index.ts::main`).
-    const head = input.split(/\s+/)[0] ?? ""
-    if (isSlashCommand(head)) {
-      await runSlashCommand(input, {
-        out: (s) => process.stdout.write(s),
-        err: (s) => process.stderr.write(s),
-        cwd: process.cwd(),
-        ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
-      })
-      continue
-    }
+    if (await tryRunReplSlash(input, slashCtx)) continue
     await turn(input)
   }
 }
