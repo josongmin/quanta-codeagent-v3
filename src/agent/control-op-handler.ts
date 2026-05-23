@@ -135,3 +135,12 @@ export const isCancelSubagentOp = (
   sub: Submission,
 ): sub is Submission & { op: { kind: "cancel_subagent"; subagentId: string } } =>
   sub.op.kind === "cancel_subagent"
+
+/** Type guard: this submission envelope carries the `set_mode` op (P3,
+ *  2026-05-23). Mirrors {@link isInterruptOp} / {@link isCancelSubagentOp};
+ *  loop wiring is out of P3 scope — a follow-up will consume this guard. */
+export const isSetModeOp = (
+  sub: Submission,
+): sub is Submission & {
+  op: { kind: "set_mode"; mode: "default" | "plan"; reason?: string }
+} => sub.op.kind === "set_mode"
