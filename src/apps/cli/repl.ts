@@ -11,7 +11,7 @@ import {
   summarizeWorkMetrics,
 } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
-import { runOnce } from "@/runner"
+import { type PromptSource, runInteractive, runOnce } from "@/runner"
 import { logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { composeShellObservers } from "@/tool"
@@ -287,6 +287,90 @@ export const runSlashMain = async (_tok: string): Promise<number> => {
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
   })
 }
+
+/** Render the per-turn cost+cache dashboard to stderr + log a structured
+ *  snapshot. No-op when metrics are off (default). Extracted from the
+ *  in-loop block so each closure stays within the biome cognitive-complexity
+ *  budget. ADR-0085. */
+const renderTurnDashboard = (
+  metrics: { snapshot: () => Parameters<typeof buildCostDashboard>[0] } | undefined,
+  model: string,
+  slog: StructuredLogger,
+): void => {
+  if (!metrics) return
+  const snap = metrics.snapshot()
+  slog.info("metrics.snapshot", { snapshot: snap })
+  process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
+}
+
+/** Print a turn-level error inline + flash the status bar. Used by the
+ *  interactive wrapTurn to keep the REPL alive when a single turn throws.
+ *  Extracted to keep wrapTurn under the biome cognitive-complexity budget. */
+const renderTurnError = (e: unknown, statusBar: StatusBar): void => {
+  const msg = e instanceof Error ? e.message : String(e)
+  process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
+  statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
+}
+
+/** Read one trimmed line from the raw-mode reader. Returns `null` on
+ *  AbortError (the prompt was aborted via `signal`). Other exceptions
+ *  propagate to the caller. Extracted from {@link buildCliPromptSource} to
+ *  keep its `next` closure under the biome cognitive-complexity budget. */
+const readReplLine = async (signal: AbortSignal | undefined): Promise<string | null> => {
+  try {
+    const raw = await readLine({
+      prompt: "› ",
+      completer: (line) => slashCompleter(line)[0],
+      describe: describeSlashCommand,
+      ...(signal !== undefined ? { signal } : {}),
+    })
+    return raw.trim()
+  } catch (e) {
+    if (e instanceof AbortError) return null
+    throw e
+  }
+}
+
+/** Read one REPL line and classify it: `null` ⇒ loop exit, `undefined` ⇒
+ *  caller should keep looping (blank line or in-REPL slash handled here),
+ *  `string` ⇒ forward as the next user prompt. Extracted from the
+ *  `PromptSource.next` closure to keep it under the biome complexity budget. */
+const classifyReplLine = async (
+  signal: AbortSignal | undefined,
+  slashCtx: Partial<{ skills: () => Promise<SkillRow[]> }> | undefined,
+): Promise<string | null | undefined> => {
+  const input = await readReplLine(signal)
+  if (input === null) return null
+  if (input === "/exit" || input === "/quit") return null
+  const handled = input === "" || (await tryRunReplSlash(input, slashCtx))
+  if (handled) {
+    process.stderr.write("\n")
+    return undefined
+  }
+  return input
+}
+
+/** CLI `PromptSource` adapter for the Layer-2 `runInteractive` driver.
+ *  Wraps the raw-mode line reader + resolves `/exit` + in-REPL slash dispatch
+ *  + blank-line behavior inline — the driver only sees clean prompt strings
+ *  (or `null` for loop exit). UI primitives (readline, status bar, Esc-Esc,
+ *  shell-stream painter) stay in apps/cli per RFC 3.1 slice rules.
+ *
+ *  Extracted from `runRepl` so each closure stays under the biome cognitive-
+ *  complexity budget. The trailing `\n` per branch matches the prior
+ *  `runReplLoopRaw` post-line behavior byte-identically. */
+const buildCliPromptSource = (
+  slashCtx: Partial<{ skills: () => Promise<SkillRow[]> }> | undefined,
+): PromptSource => ({
+  next: async (signal) => {
+    while (signal?.aborted !== true) {
+      const next = await classifyReplLine(signal, slashCtx)
+      if (next === undefined) continue
+      return next
+    }
+    return null
+  },
+})
 
 /**
  * Main REPL/one-shot entry: assembles the agent stack, resolves the resume
@@ -608,12 +692,55 @@ export const runRepl = async (): Promise<void> => {
       // Status bar already installed above; just ensure teardown on exit.
       process.once("exit", () => statusBar.teardown())
       const skillsCb = buildSkillsCallback(skillsConfig)
-      // Composer no longer carries a meta row — that info lives on the
-      // bottom status bar now, so the input box stays a single line.
-      await runReplLoopRaw({
+      const slashCtx = skillsCb !== undefined ? { skills: skillsCb } : undefined
+      // Initial blank row matches the prior `runReplLoopRaw` header write so
+      // the very first composer row sits one line below the resume log.
+      process.stderr.write("\n")
+      const cliPromptSource = buildCliPromptSource(slashCtx)
+      // wrapTurn installs the Esc-Esc per-turn cancel + signal composition +
+      // dashboard render + REPL-survives-on-error around each runOnce call.
+      // Mirrors the prior `turn()` closure body byte-identically; lifted into
+      // a hook so the runInteractive driver stays surface-agnostic.
+      //
+      // Byte-identical per-turn output sequence (matches the prior
+      // `runReplLoopRaw` + `turn()` composition):
+      //   install cancel → runOnce → dashboard → dispose cancel → "\n"
+      await runInteractive({
+        deps: sessionDeps,
+        assembleConfig,
+        promptSource: cliPromptSource,
+        history,
+        state,
+        idMeta,
         signal: abort.signal,
-        turn,
-        ...(skillsCb !== undefined ? { slashCtx: { skills: skillsCb } } : {}),
+        seedImages: pendingImages,
+        wrapTurn: async (run) => {
+          const turnAbort = new AbortController()
+          const turnSignal = AbortSignal.any([abort.signal, turnAbort.signal])
+          const cancel = installTurnCancel(turnAbort, statusBar)
+          let result: Awaited<ReturnType<typeof run>> | undefined
+          try {
+            result = await run({ ...sessionDeps, signal: turnSignal })
+            renderTurnDashboard(metrics, model, slog)
+          } catch (e) {
+            // Turn-scoped abort = user intent; swallow + return undefined so
+            // the loop solicits the next prompt without updating history.
+            // Any other error MUST NOT kill the REPL — render it inline.
+            if (!(turnAbort.signal.aborted && !abort.signal.aborted)) {
+              renderTurnError(e, statusBar)
+            }
+            result = undefined
+          } finally {
+            cancel.dispose()
+          }
+          process.stderr.write("\n")
+          return result
+        },
+        onTurnEnd: ({ messages }) => {
+          // Mirror the legacy update of the surface-scoped `history`
+          // binding so any downstream surface state remains in sync.
+          history = messages
+        },
       })
     }
   } finally {

@@ -16,17 +16,19 @@
  *     `@/permission`, `@/session`, `@/shared`, `@/stream`, `@/tool`.
  *   - MUST NOT import from `apps/**` (any surface).
  *
- * Partial-adoption note: `runInteractive` (the REPL-like loop with status
- * bar + Esc-Esc cancel + raw-line-reader) is deliberately NOT in this slice
- * yet — those primitives are surface-specific and stay in `apps/cli/repl.ts`.
- * The first Web/Tauri use case is one-shot REST/IPC, which this `runOnce`
- * covers. The interactive extraction is a follow-up once the surface seams
- * (`promptSource` async-iterable, `confirm` port, status sink) are agreed.
+ * Interactive loop: `runInteractive(input)` drives the same per-turn atom
+ * as `runOnce` in a loop, sourcing each prompt from a `PromptSource` port.
+ * Surface-specific UI primitives (raw-line-reader, status bar, Esc-Esc,
+ * shell-stream painter) stay in `apps/cli/repl.ts` — the surface wraps them
+ * into a `PromptSource` adapter and injects it here.
  */
 
 export type { PersistTurnInput } from "./persist-turn"
 export { persistTurn } from "./persist-turn"
+export type { PromptSource } from "./prompt-source"
 export type { ResolveResumeInput, ResumeResolution } from "./resume-fsm"
 export { defaultUntitled, isPathLikeToken, resolveResume } from "./resume-fsm"
+export type { RunInteractiveInput } from "./run-interactive"
+export { runInteractive } from "./run-interactive"
 export type { OrchestrateDeps, RunOnceInput, RunOnceResult } from "./run-once"
 export { runOnce } from "./run-once"
