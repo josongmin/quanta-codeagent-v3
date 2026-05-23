@@ -29,6 +29,11 @@ import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
 import type { Submission } from "./submission"
 import type {
+  SkillsBlock,
+  SubagentBlock,
+  WorkingStateBlock,
+} from "./types/agent-capabilities"
+import type {
   CompactionBreakerOptions,
   CompactionConfigBlock,
   OnPreCompactCallback,
@@ -58,6 +63,16 @@ export type {
   PreCompactRequestQuery,
 } from "./types/compaction-config"
 export type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
+
+// Re-export the extracted Tier-1 capability option blocks (subagent / skills /
+// workingState — branchSearch already lives in `./branch-search`). The
+// `from "./types"` import contract for every consumer stays byte-identical
+// after this split (T3, T2 follow-up).
+export type {
+  SkillsBlock,
+  SubagentBlock,
+  WorkingStateBlock,
+} from "./types/agent-capabilities"
 
 // AgentConfig `extends` the three cohesion groups defined at the BOTTOM of
 // this file (SafetyConfig / PermissionExtrasConfig / SteeringConfig).
@@ -213,8 +228,10 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `Agent`/`Task`/`TaskOutput`/`TaskStop` tools are NOT registered and the
    * loop is byte-identical. When present the loop builds a `SubagentRunner`
    * (forked `runAgent`, depth+1, filtered registry) and registers the tools.
+   *
+   * See {@link SubagentBlock} for the field-level docs.
    */
-  subagent?: { maxDepth?: number }
+  subagent?: SubagentBlock
   /**
    * Enable the skill system (Tier 1 capability, ADR-0011). Absent ⇒ no skill
    * discovery and the `Skill`/`ToolSearch` tools are NOT registered (loop
@@ -238,8 +255,10 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * (unconditional). `changedPaths` UNSET ⇒ no filter, exact prior behavior
    * (byte-identical). Hosts compute this list however they want (git diff,
    * file watcher, manual hint).
+   *
+   * See {@link SkillsBlock} for the field-level docs.
    */
-  skills?: { dir?: string; changedPaths?: string[] }
+  skills?: SkillsBlock
   /**
    * Compaction circuit-breaker control (Tier 0 safety hardening, ADR-0011). The
    * breaker is ON by default with `DEFAULT_COMPACTION_BREAKER_CAPS` — it only
@@ -278,8 +297,10 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `WorkingState`, plumbs it through `ToolContext.workingState`, registers the
    * `update_working_state` meta-tool, and renders the L3 block in the per-turn
    * reminder (BELOW repo-rules, ABOVE memory hints).
+   *
+   * See {@link WorkingStateBlock} for the field-level docs.
    */
-  workingState?: { enabled: boolean }
+  workingState?: WorkingStateBlock
   /** HITL 4-tier gate (Codex hitl-audit.md absorption). Absent ⇒ legacy
    *  single-tier behavior (byte-identical). When enabled, every dispatch
    *  computes the effective tier and routes through tier-specific gates:
