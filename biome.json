@@ -644,6 +644,21 @@
                       "**/src/apps/**"
                     ],
                     "message": "Surface isolation: @/runner is a Layer-2 surface-AGNOSTIC slice. It must NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench, apps/eval, apps/probe). Surface entries depend on @/runner, never the reverse. ENV/argv/HTTP/IPC parsing belongs in the surface; @/runner takes plain typed config."
+                  },
+                  {
+                    "group": [
+                      "node:readline",
+                      "node:readline/promises",
+                      "node:tty",
+                      "node:repl"
+                    ],
+                    "message": "Surface coupling: @/runner is Layer-2 surface-agnostic. CLI-specific node modules (readline / readline/promises / tty / repl) are terminal-only and belong in apps/cli. Accept a port (PromptSource, InputStream) and let the surface inject the concrete implementation (Node TTY / WebSocket / Tauri command)."
+                  },
+                  {
+                    "group": [
+                      "node:process"
+                    ],
+                    "message": "Surface coupling: named imports from node:process (env, argv, stdin, stdout, stderr, …) are a literal-rename bypass of the @/runner surface-agnostic invariant. process.exit / process.on / process.cwd (via the global) remain allowed because they are not surface-coupled. For env/argv/stdio, the surface entry (apps/cli, apps/web, apps/tauri) parses node:process and passes typed config / a WriteSink port into @/runner."
                   }
                 ]
               }
