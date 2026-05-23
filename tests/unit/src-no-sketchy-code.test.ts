@@ -79,6 +79,8 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — `inheritEnv:true` lets the spawned child see the parent's env directly (used by bench/agent shells); not a feature read.",
       "runtime/sandbox.ts":
         "ENV PROPAGATION — docker sandbox forwards named env vars (a hardcoded ALLOWLIST) to the container; pass-through, not a feature flag.",
+      "subagent/handlers-6.ts":
+        "ENV PROPAGATION — subagent child-process spawn forwards parent env (merged with `input.env`); same posture as runtime/shell.ts and tool/git/runner.ts — pass-through, not a feature read.",
       "apps/cli/shell-stream-painter.ts":
         "NO_COLOR is the cross-tool no-color.org convention read at the TTY paint boundary (alongside stderr.isTTY); a presentation-layer signal, not a validated feature flag — routing it through runtimeConfig would be over-centralization.",
     },
@@ -160,6 +162,61 @@ const RULES: readonly Rule[] = [
     pattern: /(?:Number|parseInt|parseFloat)\s*\([^)]*process\.env/,
     why: "Parsing process.env with raw Number()/parseInt() yields NaN on garbage input, silently disabling caps/limits. Route through the validated parsers in `runtime-config.ts`. (Currently zero violations — keep it so.)",
   },
+  {
+    id: "no-date-now-in-domain",
+    // `Date.now(` / `new Date(` inside domain layers (agent + permission).
+    // Determinism: anything reaching the model-facing prompt or persisted/replayed
+    // output must use an injected clock (`opts.now ?? Date.now`); telemetry
+    // timestamps are infrastructure and excluded by scope.
+    pattern: /\bDate\.now\(|\bnew Date\(/,
+    scope: /^(agent|permission)\//,
+    why: "Domain layers must inject the clock (`opts.now ?? Date.now`) so model-facing/persisted output is replay-stable. See `src/agent/admissibility-gate.ts` / `src/memory/consolidate/writer.ts` for the established pattern.",
+    allowlist: {
+      // BURN-DOWN — every entry below uses Date.now()/new Date() in a way
+      // that currently reaches a deterministic-replay boundary (or is a default
+      // factory the injection pattern delegates to). Each should migrate to
+      // `(opts.now ?? Date.now)()` and drop from this allowlist.
+      "agent/admissibility-gate.ts": "BURN-DOWN: pre-existing decided-at timestamps",
+      "agent/branch-search/isolate.ts": "BURN-DOWN: worktree slug suffix (telemetry-ish, low priority)",
+      "agent/branch-search/propose.ts": "BURN-DOWN: candidate proposal timing",
+      "agent/branch-search/search.ts": "BURN-DOWN: search round timing",
+      "agent/branch-search/verify.ts": "BURN-DOWN: verifier wall-clock",
+      "agent/conversation-action.ts": "BURN-DOWN: action timestamp",
+      "agent/conversation-summary-archive.ts": "BURN-DOWN: archive entry timestamp",
+      "agent/dispatch-dedup.ts": "BURN-DOWN: dedup window default clock",
+      "agent/hitl-tier.ts": "BURN-DOWN: HITL override timestamp",
+      "agent/ide-context.ts": "BURN-DOWN: ide context default clock",
+      "agent/loop.ts": "BURN-DOWN: turnId/startedAt default clock (telemetry — lowest priority)",
+      "agent/memory-tools.ts":
+        "BURN-DOWN: W6 injected clock+uuid; `Date.now` here is the default-factory fallback",
+      "agent/plan-exit-flow.ts": "BURN-DOWN: plan-exit timestamp",
+      "agent/prompt.ts":
+        "BURN-DOWN: W6 injected `todayDateLine(now)`; the literal `new Date` is the default fallback",
+      "agent/repo-rules.ts": "BURN-DOWN: rule freshness timestamp",
+      "agent/side-conversation/run.ts": "BURN-DOWN: side-conversation wall-clock",
+      "agent/steering.ts": "BURN-DOWN: steering timestamp default",
+      "agent/streaming-dispatch.ts": "BURN-DOWN: in-progress indicator timestamp fallback",
+      "agent/subagent-runner.ts": "BURN-DOWN: child run timestamp",
+      "agent/submission.ts": "BURN-DOWN: W6 injected; default-fallback path uses Date.now",
+      "agent/turn-kind.ts": "BURN-DOWN: turn-kind timestamp default",
+      "permission/gate-pattern-wire.ts": "BURN-DOWN: pattern gate decidedAt default",
+      "permission/post-denial.ts": "BURN-DOWN: post-denial timestamp default",
+    },
+  },
+  {
+    id: "no-getDefaultPermissionStore-outside-composition",
+    // `getDefaultPermissionStore(` — the singleton accessor. Use ONLY in
+    // composition roots (apps/) and in the canonical re-export. Internal
+    // code must accept `store: PermissionStore` from the caller.
+    pattern: /\bgetDefaultPermissionStore\s*\(/,
+    why: "Service-locator: the singleton store must be wired at the composition root (`src/apps/**`) — internal `@/permission` callers and the loop must accept an injected `PermissionStore`. The fallback creates hidden coupling and breaks test isolation.",
+    allowlist: {
+      "permission/permission-store.ts": "the canonical definition site",
+      "permission/index.ts": "barrel re-export",
+      "agent/admissibility-gate.ts":
+        "composition-adjacent layer; transitional fallback when AgentConfig doesn't thread a store. Remove once apps wire `AgentConfig.permissionStore` explicitly.",
+    },
+  },
 ]
 
 const isAllowed = (rule: Rule, relativePath: string): boolean =>
@@ -189,6 +246,10 @@ const scanFile = (path: string): readonly Violation[] => {
   const relPath = relative(SRC, path)
   for (const rule of RULES) {
     if (isAllowed(rule, relPath)) continue
+    // Scope: when set, only files whose `relPath` matches the regex are scanned
+    // by this rule. Lets a rule target a single slice (e.g. domain layers)
+    // without polluting its allowlist with every other slice's legitimate uses.
+    if (rule.scope !== undefined && !rule.scope.test(relPath)) continue
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? ""
       const trimmed = line.trim()
