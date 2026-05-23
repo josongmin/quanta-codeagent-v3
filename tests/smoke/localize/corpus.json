@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "R-Phase9 calibration corpus for the `localize` tool. Each entry's `expected_files` was verified to exist on disk at corpus-creation time.",
+  "note": "R-Phase10 calibration corpus for the `localize` tool (expanded from n=14 to n=44 across 8 query classes). Each entry's `expected_files` was verified to exist on disk at corpus-creation time.",
   "entries": [
     {
       "id": "symbol-buildSystemPrompt",
@@ -99,6 +99,228 @@
       "scope": ".",
       "expected_files": ["src/skill/tool-search.ts"],
       "rationale": "src/skill/tool-search.ts implements the ToolSearch skill (lexical scoring over the tool catalog)."
+    },
+
+    {
+      "id": "harness-python-swebench",
+      "query": "swebench python harness fixture loader",
+      "scope": ".",
+      "expected_files": ["src/apps/bench/python-swebench.ts"],
+      "rationale": "src/apps/bench/python-swebench.ts is the TypeScript surface that orchestrates the Python SWE-bench grader. The repo itself has no .py source under src/ — this query probes the harness side that touches Python."
+    },
+    {
+      "id": "harness-corpus-loader",
+      "query": "swebench corpus dataset loader instance picks",
+      "scope": ".",
+      "expected_files": ["src/apps/bench/corpus/loader.ts"],
+      "rationale": "src/apps/bench/corpus/loader.ts loads dataset JSONL records (instance_id + patch) into the bench corpus. Companion to dataset.ts."
+    },
+    {
+      "id": "lsp-pyright-adapter",
+      "query": "Pyright language server adapter",
+      "scope": ".",
+      "expected_files": ["src/lsp/adapters/pyright.ts"],
+      "rationale": "src/lsp/adapters/pyright.ts is the Python LSP adapter; co-lives with the TypeScript adapter under src/lsp/adapters/."
+    },
+    {
+      "id": "lsp-typescript-adapter",
+      "query": "TypeScript LSP adapter for diagnostics",
+      "scope": ".",
+      "expected_files": ["src/lsp/adapters/typescript.ts"],
+      "rationale": "src/lsp/adapters/typescript.ts wraps tsserver as a DiagnosticsProvider / LspNavProvider source."
+    },
+
+    {
+      "id": "error-cannot-find-orchestrate",
+      "query": "Cannot find module @/runner/orchestrate",
+      "scope": ".",
+      "expected_files": ["src/runner/orchestrate/index.ts"],
+      "rationale": "Module-not-found style query; the @/runner/orchestrate alias resolves to src/runner/orchestrate/index.ts (re-exports persistTurn / resolveResume / runOnce)."
+    },
+    {
+      "id": "error-fsjail-escape",
+      "query": "FsJailError thrown when path escapes baseDir",
+      "scope": ".",
+      "expected_files": ["src/storage/service.ts"],
+      "rationale": "FsJailError class is defined in src/storage/service.ts (line 11). Constructed by resolvePath / resolveJailed when a relative path escapes the jail root."
+    },
+    {
+      "id": "error-abortsignal-streamingturn",
+      "query": "TypeError signal is not an AbortSignal at streamingTurn",
+      "scope": ".",
+      "expected_files": ["src/agent/streaming-dispatch.ts"],
+      "rationale": "Paraphrased stack-frame style query. streamingTurn (src/agent/streaming-dispatch.ts:438) threads the AbortSignal through every phase boundary — typical site for AbortSignal-shape errors."
+    },
+    {
+      "id": "error-planexit-invariant",
+      "query": "PlanExitInvariantError raised by buildPlanExit",
+      "scope": ".",
+      "expected_files": ["src/agent/plan-exit.ts"],
+      "rationale": "src/agent/plan-exit.ts defines PlanExitInvariantError (line 50) and buildPlanExit (line 65); the error surfaces when plan-exit invariants are violated."
+    },
+
+    {
+      "id": "cross-streaming-abort-meet",
+      "query": "where streaming dispatch and abort signal meet during agent loop",
+      "scope": ".",
+      "expected_files": [
+        "src/agent/streaming-dispatch.ts",
+        "src/agent/dispatch.ts",
+        "src/agent/loop.ts"
+      ],
+      "rationale": "Three-owner answer: streaming-dispatch.ts streams events under signal, dispatch.ts is the per-tool dispatchTool boundary, loop.ts owns the AbortController plumbing for the outer run."
+    },
+    {
+      "id": "cross-resume-id-vs-path",
+      "query": "session resume id mode vs path mode branching",
+      "scope": ".",
+      "expected_files": ["src/runner/orchestrate/resume-fsm.ts", "src/apps/cli/resume.ts"],
+      "rationale": "Cross-file: resume-fsm.ts is the surface-agnostic FSM (id_mode log lines at :131 / :159); apps/cli/resume.ts is now a thin re-export shim that wires the CLI surface to it. Both are legitimate owners."
+    },
+    {
+      "id": "cross-permission-classifier-policy",
+      "query": "permission classifier and policy evaluator deciding tool actions",
+      "scope": ".",
+      "expected_files": ["src/permission/policy.ts", "src/permission/classifier.ts"],
+      "rationale": "policy.ts exports evaluate / evaluateAuto / hardDenyReason (the rule-based gate); classifier.ts holds the LLM-prompt scaffolding the auto-classifier wraps. Together they form the permission decision pipeline."
+    },
+    {
+      "id": "cross-compaction-retry",
+      "query": "compaction breaker tied to retry classification on long prompts",
+      "scope": ".",
+      "expected_files": ["src/agent/compaction-breaker.ts", "src/agent/retry.ts"],
+      "rationale": "Two-file answer: compaction-breaker.ts decides when repeated compactions warrant aborting; retry.ts's classifyLLMError (prompt_too_long / retryable / fatal) is the signal that fires compaction. Both are legitimate owners of the failure-mode boundary."
+    },
+
+    {
+      "id": "acronym-mcp-config-loader",
+      "query": "MCP server config loader",
+      "scope": ".",
+      "expected_files": ["src/apps/cli/internal.ts"],
+      "rationale": "Surprising owner: readMcpConfig lives in src/apps/cli/internal.ts (line 337), NOT under src/mcp/. The mcp/ module exposes the client + protocol; CLI internal wires config discovery."
+    },
+    {
+      "id": "acronym-jsonl-trajectory-recorder",
+      "query": "JSONL trajectory recorder",
+      "scope": ".",
+      "expected_files": ["src/stream/adapters/jsonl-recorder.ts"],
+      "rationale": "src/stream/adapters/jsonl-recorder.ts defines JsonlRecorder (line 49) — the per-turn JSONL trajectory sink consumed by replay + smoke tests."
+    },
+    {
+      "id": "acronym-otel-span-vocabulary",
+      "query": "OTel span name vocabulary",
+      "scope": ".",
+      "expected_files": ["src/observability/spans.ts"],
+      "rationale": "src/observability/spans.ts exports SPAN_NAMES (line 67) — the canonical OTel span-name registry. Companion to attrs.ts / vocabulary.ts."
+    },
+    {
+      "id": "acronym-lsp-nav-tool",
+      "query": "LSP nav references and definitions tool",
+      "scope": ".",
+      "expected_files": ["src/tool/lsp_nav/index.ts"],
+      "rationale": "src/tool/lsp_nav/index.ts builds the LSP navigation tools (definition / references / hover) over an LspNavProvider."
+    },
+
+    {
+      "id": "disambig-agent-run-loop",
+      "query": "agent run loop",
+      "scope": ".",
+      "expected_files": ["src/agent/loop.ts"],
+      "rationale": "Disambiguation trap: matches loop.ts, repl.ts (REPL is also a 'loop'), and runner/orchestrate/run-once.ts. Canonical owner is src/agent/loop.ts — repl/run-once are surfaces that DRIVE the loop, not the loop body."
+    },
+    {
+      "id": "disambig-config-loader",
+      "query": "config loader",
+      "scope": ".",
+      "expected_files": ["src/apps/cli/dotenv.ts"],
+      "rationale": "Disambiguation trap: many 'config' files exist (config-assemble.ts, runner/assemble/config.ts, internal.ts's readMcpConfig). The most specific 'loader' is src/apps/cli/dotenv.ts (loadEnvFiles — the only file whose JOB is loading a config file from disk)."
+    },
+    {
+      "id": "disambig-auto-classifier",
+      "query": "auto classifier",
+      "scope": ".",
+      "expected_files": ["src/agent/auto-classifier.ts"],
+      "rationale": "Disambiguation trap: src/permission/classifier.ts holds the prompt; src/agent/tier1/auto-classifier.ts is a tier-1 stub; the LLM-backed ClassifierPort that orchestrators actually call is src/agent/auto-classifier.ts."
+    },
+
+    {
+      "id": "edge-short-rg",
+      "query": "rg",
+      "scope": ".",
+      "expected_files": ["src/tool/grep/index.ts"],
+      "rationale": "Edge case — 2-letter query. Tokenizer drops tokens <3 chars, so 'rg' is effectively empty after tokenization. Tests the degraded path: should not crash; ripgrep grep tool is a plausible match by literal-string contains."
+    },
+    {
+      "id": "edge-long-natural-language",
+      "query": "the module responsible for streaming standard output back to the user terminal while preserving ANSI colors and supporting tee to file",
+      "scope": ".",
+      "expected_files": ["src/stream/adapters/stdout.ts"],
+      "rationale": "Edge case — 23-word natural-language query. StdoutStream class (src/stream/adapters/stdout.ts) is the canonical terminal sink. Tests that very long queries don't dilute via low-IDF tokens."
+    },
+    {
+      "id": "edge-non-ascii-korean-mixed",
+      "query": "한국어 conversation memory recall",
+      "scope": ".",
+      "expected_files": ["src/agent/memory.ts"],
+      "rationale": "Edge case — mixed non-ASCII + English. Korean tokens should be safely dropped (or ignored) by the tokenizer; English tokens 'conversation memory recall' should still hit src/agent/memory.ts (recallContext at line 160)."
+    },
+
+    {
+      "id": "control-openai-embedder-class",
+      "query": "OpenAIEmbedder class",
+      "scope": ".",
+      "expected_files": ["src/agent/memory-embedder.ts"],
+      "rationale": "Positive control — unique exported class. `export class OpenAIEmbedder` at src/agent/memory-embedder.ts:49. Should rank @1 once def-pattern boost is active."
+    },
+    {
+      "id": "control-fallback-llm-class",
+      "query": "FallbackLLM class",
+      "scope": ".",
+      "expected_files": ["src/llm/fallback.ts"],
+      "rationale": "Positive control — unique exported class. `export class FallbackLLM` at src/llm/fallback.ts:99."
+    },
+    {
+      "id": "control-retrying-llm-class",
+      "query": "RetryingLLM class",
+      "scope": ".",
+      "expected_files": ["src/agent/retry.ts"],
+      "rationale": "Positive control — unique exported class. `export class RetryingLLM` at src/agent/retry.ts:173."
+    },
+    {
+      "id": "control-jsonl-recorder-class",
+      "query": "JsonlRecorder class",
+      "scope": ".",
+      "expected_files": ["src/stream/adapters/jsonl-recorder.ts"],
+      "rationale": "Positive control — unique exported class. `export class JsonlRecorder implements StreamPort` at src/stream/adapters/jsonl-recorder.ts:49."
+    },
+    {
+      "id": "control-anthropic-adapter-class",
+      "query": "AnthropicAdapter implements LLMPort",
+      "scope": ".",
+      "expected_files": ["src/llm/adapters/anthropic.ts"],
+      "rationale": "Positive control — unique exported class. `export class AnthropicAdapter implements LLMPort` at src/llm/adapters/anthropic.ts:262."
+    },
+
+    {
+      "id": "test-targeted-memory-reopen",
+      "query": "memory adapters test that asserts reopen persistence across sqlite",
+      "scope": ".",
+      "expected_files": ["tests/unit/memory-adapters.test.ts"],
+      "rationale": "Test-file-targeted query. tests/unit/memory-adapters.test.ts has `describe('SqliteStore migration / persistence')` (line 202) + `reopen on same path preserves rows` (line 203). Probes the FrameTier `test: -2` tier — should still rank high when test IS the answer."
+    },
+    {
+      "id": "test-targeted-skill-discover-errors",
+      "query": "skill discover errors hellgate",
+      "scope": ".",
+      "expected_files": ["tests/unit/skill-discover-errors.test.ts"],
+      "rationale": "Test-file-targeted query. The hellgate file for skill-discovery error paths lives at tests/unit/skill-discover-errors.test.ts (companion: skill-discover-size-cap.test.ts)."
+    },
+    {
+      "id": "test-targeted-localize-measure-helpers",
+      "query": "localize measure pure helpers test",
+      "scope": ".",
+      "expected_files": ["tests/unit/localize-measure.test.ts"],
+      "rationale": "Test-file-targeted query. tests/unit/localize-measure.test.ts exercises parseRanking / recallAtK / mrr / aggregate from tests/smoke/localize/measure.ts (the helpers used by THIS very corpus)."
     }
   ]
 }

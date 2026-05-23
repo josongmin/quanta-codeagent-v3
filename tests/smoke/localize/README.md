@@ -26,11 +26,12 @@ first-occurrence-wins), and computes:
 Output is `baseline.json` (schema: see `MeasureReport` in `measure.ts`).
 
 One normalization applied to predictions before scoring: absolute paths are
-relativized to `cwd`, and the two measurement-instrument files
-(`tests/smoke/localize/corpus.json` and `tests/smoke/localize/baseline.json`)
-are dropped from the prediction list — they contain every query verbatim and
-would otherwise top their own rankings, which is contamination, not signal.
-No other re-ranking or filtering is performed.
+relativized to `cwd`, and three measurement-instrument files
+(`tests/smoke/localize/corpus.json`, `tests/smoke/localize/baseline.json`, and
+`tests/smoke/localize/post-r-phase9.json`) are dropped from the prediction list
+— they contain every query verbatim and would otherwise top their own
+rankings, which is contamination, not signal. No other re-ranking or
+filtering is performed.
 
 ## Capture a measurement
 
@@ -52,22 +53,44 @@ jq -r '.queries[] | "\(.id)\t\(.rank_of_first_expected)\t\(."recall@3")"' after.
 
 ## Caveats — read before celebrating any delta
 
-The corpus is small (14 entries). Per-query noise is real — flipping a single
-query from rank 4 → rank 2 swings aggregate `recall@3` by ~7 percentage points.
+The corpus is moderate (44 entries as of R-Phase10, up from the original 14).
+Per-query noise is still real but no longer dominant: with `n = 44`, a binomial
+95% CI on aggregate `recall@K` is roughly `±0.15`, so an aggregate-delta of
+`>0.05` is now statistically meaningful (and `>0.10` is unambiguous). Flipping
+a single query from rank 4 → rank 2 still swings aggregate `recall@3` by
+~2.3 percentage points — within noise — so per-query churn alone is never
+sufficient justification.
+
 **Justification rule for a `localize` PR**: aggregate `recall@3` and `MRR` must
 both improve, AND no individual `recall@3` may drop by more than `0.20` without
 explicit rationale in the PR description.
 
-This is **not** wired into CI. Per-query churn under noise would either gate on
-nothing useful (tolerance too loose) or fail spuriously (tolerance too tight).
-Promote to CI only after the corpus grows past ~50 entries; until then, the
-PR-time justification rule is the gate.
+This is **not** wired into CI yet. With n=44 we are closer to the n≥50
+promotion threshold but not over it; one more expansion round (or a stable
+two-snapshot streak) clears the bar. Until then, the PR-time justification
+rule is the gate.
+
+## Query classes covered (R-Phase10)
+
+The expanded corpus spans 8 deliberately-distinct query classes to keep
+aggregate signal from concentrating in one ranking failure mode:
+
+1. **Symbol** — single unique exported identifier (positive controls).
+2. **Behavioral** — natural-language description of what a module DOES.
+3. **Cross-file / multi-owner** — answer is a 2-3-file set, not a single file.
+4. **Acronym / initialism / domain term** — MCP, JSONL, OTel, LSP.
+5. **Negation / disambiguation traps** — query matches several plausible
+   owners; canonical one is expected (tests def-pattern boost).
+6. **Edge cases** — sub-3-char query, 23-word natural-language, non-ASCII.
+7. **Error / stack-trace style** — paraphrased fault-localization queries.
+8. **Test-file-targeted** — answer is `tests/unit/*.test.ts`, probing the
+   `test: -2` tier penalty.
 
 ## Files
 
-- `corpus.json` — 14-entry hand-labeled query → owner-file ground truth.
-  Every `expected_files` entry was verified to exist on disk at corpus
-  creation.
+- `corpus.json` — 44-entry hand-labeled query → owner-file ground truth
+  (R-Phase10 expansion from the original 14). Every `expected_files` entry
+  was verified to exist on disk at corpus creation.
 - `measure.ts` — bun driver + the four pure helpers (`parseRanking`,
   `recallAtK`, `mrr`, `aggregate`) that `tests/unit/localize-measure.test.ts`
   exercises.

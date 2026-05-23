@@ -37,6 +37,11 @@ import type { ToolEvent } from "../../../src/tool/types"
 const MEASUREMENT_ARTIFACTS = new Set<string>([
   "tests/smoke/localize/corpus.json",
   "tests/smoke/localize/baseline.json",
+  // R-Phase10: the post-R-Phase9 snapshot is preserved as a historical record
+  // and lives in-tree. It contains every corpus id + many src/ path strings in
+  // predicted_top5, which ripgrep would otherwise rank as a top hit for itself.
+  // Same rationale as baseline.json — measurement instrument, not signal.
+  "tests/smoke/localize/post-r-phase9.json",
 ])
 
 // ── Types ────────────────────────────────────────────────────────────────
