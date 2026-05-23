@@ -269,13 +269,31 @@ const waitCmd: SlashCommand = {
   },
 }
 
+/** Grapheme-cluster-aware truncator. Walks {@link Intl.Segmenter}'s grapheme
+ *  boundaries so an emoji / combining-mark / high-plane char near the limit is
+ *  never split (naive `slice(0, max-3) + "..."` can yield half a surrogate pair
+ *  or split a ZWJ sequence). Returns `s` verbatim if `s.length <= max`.
+ *  Reserves 3 chars for the `...` suffix. */
+const truncateGraphemes = (s: string, max: number): string => {
+  if (s.length <= max) return s
+  const limit = max - 3
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+  let acc = ""
+  for (const { segment } of segmenter.segment(s)) {
+    if (acc.length + segment.length > limit) break
+    acc += segment
+  }
+  return `${acc}...`
+}
+
 /** Render an inventory row in the table-paddable form `/skills` and
- *  `/reload-skills` share. Truncates description to one line cap to keep the
- *  REPL output scannable; the model still sees the full text via
- *  `buildSessionFeatures`. */
+ *  `/reload-skills` share. Truncates description to a one-line cap (100 chars
+ *  incl. `...`) so REPL output stays scannable; the model still sees the full
+ *  text via `buildSessionFeatures`. Multi-line ⇒ first line only (no body
+ *  leak). Grapheme-aware truncation (no emoji / surrogate splitting). */
 const renderSkillRow = (s: SkillRow): string => {
   const desc1 = s.description.split("\n")[0] ?? ""
-  const desc = desc1.length > 100 ? `${desc1.slice(0, 97)}...` : desc1
+  const desc = truncateGraphemes(desc1, 100)
   const pathsTag =
     s.paths && s.paths.length > 0
       ? ` [paths: ${s.paths.slice(0, 3).join(", ")}${s.paths.length > 3 ? "…" : ""}]`
@@ -292,42 +310,47 @@ const renderSkills = (ctx: SlashContext, rows: readonly SkillRow[], prefix: stri
   for (const r of rows) ctx.out(renderSkillRow(r))
 }
 
+/** Shared run-body for `/skills` and `/reload-skills`. Both commands take
+ *  ZERO arguments (parity with Codex `forceReloadSkills`); extras error out
+ *  for consistency with the rest of the BUILTINS (`/color foo bar` errors).
+ *  Non-Error rejections from `ctx.skills()` are coerced via `String(e)` so the
+ *  surfaced message never reads "undefined" (truly defensive, not just typed
+ *  defensive). The two commands differ ONLY in the rendered prefix. */
+const runSkillsRender = async (
+  name: string,
+  args: readonly string[],
+  ctx: SlashContext,
+  prefix: string,
+): Promise<number> => {
+  if (args.length > 0) {
+    ctx.err(`${name}: takes no arguments; got ${args.length}\n`)
+    return 1
+  }
+  if (ctx.skills === undefined) {
+    ctx.out(`${name}: not wired in this surface\n`)
+    return 0
+  }
+  try {
+    const rows = await ctx.skills()
+    renderSkills(ctx, rows, prefix)
+    return 0
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    ctx.err(`${name}: discovery failed: ${msg}\n`)
+    return 1
+  }
+}
+
 const skillsCmd: SlashCommand = {
   name: "/skills",
   describe: "List discovered skills (name + description + paths)",
-  async run(_args, ctx) {
-    if (ctx.skills === undefined) {
-      ctx.out("/skills: not wired in this surface\n")
-      return 0
-    }
-    try {
-      const rows = await ctx.skills()
-      renderSkills(ctx, rows, "skills:")
-      return 0
-    } catch (e) {
-      ctx.err(`/skills: discovery failed: ${(e as Error).message}\n`)
-      return 1
-    }
-  },
+  run: (args, ctx) => runSkillsRender("/skills", args, ctx, "skills:"),
 }
 
 const reloadSkillsCmd: SlashCommand = {
   name: "/reload-skills",
   describe: "Re-discover skills from disk and print the result",
-  async run(_args, ctx) {
-    if (ctx.skills === undefined) {
-      ctx.out("/reload-skills: not wired in this surface\n")
-      return 0
-    }
-    try {
-      const rows = await ctx.skills()
-      renderSkills(ctx, rows, "reloaded:")
-      return 0
-    } catch (e) {
-      ctx.err(`/reload-skills: discovery failed: ${(e as Error).message}\n`)
-      return 1
-    }
-  },
+  run: (args, ctx) => runSkillsRender("/reload-skills", args, ctx, "reloaded:"),
 }
 
 export const BUILTINS: readonly SlashCommand[] = [

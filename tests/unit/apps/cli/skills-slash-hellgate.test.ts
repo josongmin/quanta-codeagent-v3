@@ -393,3 +393,136 @@ describe("REPL-inside slash routing: /skills shortcut DOES NOT reach the model",
     expect(turnCalls).toHaveLength(0)
   })
 })
+
+// ── Post-review hardening (critic round 1, 2026-05-23) ──────────────────
+
+describe("/skills + /reload-skills: zero-args contract (parity with Codex forceReloadSkills)", () => {
+  test("/skills with extra arg ⇒ exit 1 + clear error message (no silent ignore)", async () => {
+    const cap: CapturedCtx = { out: "", err: "" }
+    const code = await runSlashCommand(
+      "/skills foo",
+      makeCtx(cap, async () => [{ name: "x", description: "y" }]),
+    )
+    expect(code).toBe(1)
+    expect(cap.err).toContain("takes no arguments")
+    expect(cap.err).toContain("got 1")
+    // The skills callback must NOT have fired (we reject before reading disk).
+    expect(cap.out).not.toContain("skills:")
+  })
+
+  test("/reload-skills with extra args ⇒ exit 1 (consistency)", async () => {
+    const cap: CapturedCtx = { out: "", err: "" }
+    let cbFired = false
+    const code = await runSlashCommand(
+      "/reload-skills foo bar baz",
+      makeCtx(cap, async () => {
+        cbFired = true
+        return []
+      }),
+    )
+    expect(code).toBe(1)
+    expect(cap.err).toContain("takes no arguments")
+    expect(cap.err).toContain("got 3")
+    expect(cbFired).toBe(false)
+  })
+})
+
+describe("/skills: callback non-Error rejection coerced cleanly (no 'undefined' leak)", () => {
+  test("string throw ⇒ err message contains the string verbatim (NOT 'undefined')", async () => {
+    const cap: CapturedCtx = { out: "", err: "" }
+    const code = await runSlashCommand(
+      "/skills",
+      makeCtx(cap, async () => {
+        throw "raw string failure"
+      }),
+    )
+    expect(code).toBe(1)
+    expect(cap.err).toContain("raw string failure")
+    expect(cap.err).not.toContain("undefined")
+  })
+
+  test("number throw ⇒ String() coercion (number reaches the err message)", async () => {
+    const cap: CapturedCtx = { out: "", err: "" }
+    const code = await runSlashCommand(
+      "/skills",
+      makeCtx(cap, async () => {
+        throw 42
+      }),
+    )
+    expect(code).toBe(1)
+    expect(cap.err).toContain("42")
+    expect(cap.err).not.toContain("undefined")
+  })
+
+  test("null throw ⇒ String(null) === 'null' (defensive)", async () => {
+    const cap: CapturedCtx = { out: "", err: "" }
+    const code = await runSlashCommand(
+      "/skills",
+      makeCtx(cap, async () => {
+        throw null
+      }),
+    )
+    expect(code).toBe(1)
+    expect(cap.err).toContain("null")
+  })
+})
+
+describe("/skills: grapheme-aware truncation (no emoji / surrogate splitting)", () => {
+  test("emoji at the truncation boundary is NOT split mid-codepoint", async () => {
+    const cap: CapturedCtx = { out: "", err: "" }
+    // Build a description where the naive `slice(0, 97)` would land in the
+    // middle of a high-plane emoji (length 2 UTF-16 units). The emoji `🦄` is
+    // U+1F984 (surrogate pair). Position emoji so the truncation point lands
+    // INSIDE it.
+    const desc = `${"A".repeat(96)}🦄${"B".repeat(50)}` // length > 100, emoji at index 96-97
+    await runSlashCommand(
+      "/skills",
+      makeCtx(cap, async () => [{ name: "x", description: desc }]),
+    )
+    // Extract just the rendered description (before any [paths:] suffix).
+    // The render line is `  x<padding> <desc>` so we look for "A...A" and
+    // verify NO lone surrogate appears.
+    const match = /  x +([^\n]*)/.exec(cap.out)
+    expect(match).not.toBeNull()
+    const rendered = match?.[1] ?? ""
+    // Lone-surrogate detection: scan for unpaired surrogates.
+    let hasLoneSurrogate = false
+    for (let i = 0; i < rendered.length; i++) {
+      const code = rendered.charCodeAt(i)
+      if (code >= 0xd800 && code <= 0xdbff) {
+        // high surrogate — must be followed by a low surrogate
+        const next = rendered.charCodeAt(i + 1)
+        if (!(next >= 0xdc00 && next <= 0xdfff)) hasLoneSurrogate = true
+        i++ // skip the low surrogate we just verified
+      } else if (code >= 0xdc00 && code <= 0xdfff) {
+        // low surrogate not preceded by a high surrogate
+        hasLoneSurrogate = true
+      }
+    }
+    expect(hasLoneSurrogate).toBe(false)
+    expect(rendered).toContain("...")
+  })
+
+  test("ZWJ family sequence not broken mid-cluster (👨‍👩‍👧‍👦 stays intact or is dropped wholesale)", async () => {
+    const cap: CapturedCtx = { out: "", err: "" }
+    // Family emoji is a ZWJ cluster (multiple codepoints, single grapheme).
+    // Place it near the truncation boundary.
+    const family = "👨‍👩‍👧‍👦" // 11 UTF-16 units = 1 grapheme
+    const desc = `${"A".repeat(95)}${family}${"B".repeat(30)}`
+    await runSlashCommand(
+      "/skills",
+      makeCtx(cap, async () => [{ name: "y", description: desc }]),
+    )
+    const match = /  y +([^\n]*)/.exec(cap.out)
+    expect(match).not.toBeNull()
+    const rendered = match?.[1] ?? ""
+    // If the family cluster appears in the output, it must appear in FULL
+    // (all 4 component glyphs + ZWJs). The renderer either keeps it whole or
+    // drops it entirely — but never a half-cluster.
+    const familyIdx = rendered.indexOf("👨")
+    if (familyIdx >= 0) {
+      // Whole cluster must be present (substring check on the canonical form).
+      expect(rendered).toContain(family)
+    }
+  })
+})
