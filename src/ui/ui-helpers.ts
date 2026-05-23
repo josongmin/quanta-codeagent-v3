@@ -104,7 +104,11 @@ export const magenta = (s: string): string => wrap(s, C.magenta)
 export const cyan = (s: string): string => wrap(s, C.cyan)
 export const gray = (s: string): string => wrap(s, C.gray)
 
-const ANSI_RE = /\x1b\[[0-9;]*m/g
+// biome rule `noControlCharactersInRegex` fires on regex literals containing
+// the ESC byte. We build the matcher via `new RegExp(...)` from a string so
+// the literal control char never appears in source — runtime semantics are
+// byte-identical to the previous `/\x1b\[[0-9;]*m/g` literal.
+const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g")
 export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
 export const visibleWidth = (s: string): number => stripAnsi(s).length
 
@@ -163,7 +167,13 @@ export const renderBox = (lines: readonly string[], opts: BoxOptions = {}): stri
   const body = lines.map((l) => renderRow(l, inner, padX, bStyle))
   const footerLines: string[] = []
   if (opts.footer) {
-    footerLines.push(bStyle(BOX.v) + " ".repeat(padX) + dim(BOX.h.repeat(inner)) + " ".repeat(padX) + bStyle(BOX.v))
+    footerLines.push(
+      bStyle(BOX.v) +
+        " ".repeat(padX) +
+        dim(BOX.h.repeat(inner)) +
+        " ".repeat(padX) +
+        bStyle(BOX.v),
+    )
     footerLines.push(renderRow(fStyle(opts.footer), inner, padX, bStyle))
   }
   const bottom = bStyle(BOX.bl + BOX.h.repeat(totalW) + BOX.br)

@@ -5,4 +5,4 @@
  *  performed by this slice; callers own writing the rendered string
  *  to their own sink. Depends on `@/shared` only — see RFC 3.1 slice
  *  isolation. */
-export * from "./auth-ui"
+export * from "./ui-helpers"
