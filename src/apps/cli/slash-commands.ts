@@ -32,6 +32,8 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { runtimeConfig } from "@/shared"
 import { runHelpRender } from "./help-render"
+import type { IdleMonitor } from "./idle-monitor"
+import { parseSnoozeDuration } from "./idle-monitor"
 import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
 import { permissionCmd } from "./permission-explain"
@@ -59,6 +61,12 @@ export interface SlashContext {
    *  registering the command). Injected by the SURFACE (a future REPL or
    *  session loop) — the 5 Tier-2 commands never read this field. */
   readonly retry?: RetryWithSessionState | undefined
+  /** Cursor-inspired idle/snooze monitor. Wired by the REPL surface so
+   *  `/snooze` and `/resume` mutate the SAME instance the REPL prompt
+   *  source consults to refuse new turns. Absent ⇒ the two commands
+   *  print "not wired in this surface" and exit 0 (default-OFF parity
+   *  for one-shot / shell-entry surfaces). */
+  readonly idle?: IdleMonitor | undefined
   /** Re-discover skills from disk on demand (Codex `forceReloadSkills` parity).
    *  Returns the freshly-discovered set as `{name, description, paths?}` so
    *  `/skills` and `/reload-skills` can render the inventory without coupling
@@ -390,6 +398,62 @@ const reloadSkillsCmd: SlashCommand = {
   run: (args, ctx) => runSkillsRender("/reload-skills", args, ctx, "reloaded:"),
 }
 
+/** `/snooze [duration]` — suspend new turn entry for `duration` (default 5m).
+ *  Accepts `30s`, `5m`, `10m`, `1h`, or a bare millisecond integer; rejects
+ *  zero / negative / unparseable tokens with exit 1. Absent monitor (one-shot
+ *  surfaces) ⇒ prints "not wired" and exits 0 — symmetric with `/skills`. */
+const snoozeCmd: SlashCommand = {
+  name: "/snooze",
+  describe: "Suspend new turns for a duration (default 5m). e.g. /snooze 10m",
+  async run(args, ctx) {
+    if (ctx.idle === undefined) {
+      ctx.out("/snooze: not wired in this surface\n")
+      return 0
+    }
+    if (args.length > 1) {
+      ctx.err("/snooze: expected at most one argument (duration like 5m, 1h)\n")
+      return 1
+    }
+    if (args.length === 0) {
+      ctx.idle.snooze()
+      ctx.out("snoozed (default duration). Use /resume to wake.\n")
+      return 0
+    }
+    const arg = args[0] as string
+    const ms = parseSnoozeDuration(arg)
+    if (ms === null) {
+      ctx.err(`/snooze: invalid duration: ${arg} (use 30s | 5m | 1h | bare ms)\n`)
+      return 1
+    }
+    ctx.idle.snooze(ms)
+    ctx.out(`snoozed for ${arg}. Use /resume to wake.\n`)
+    return 0
+  },
+}
+
+/** `/resume` — cancel an active snooze AND mark the REPL active (clear the
+ *  idle clock). Idempotent — calling it when not snoozed is a no-op and
+ *  prints a friendly message. */
+const resumeCmd: SlashCommand = {
+  name: "/resume",
+  describe: "Cancel an active snooze and resume new turns",
+  async run(args, ctx) {
+    if (ctx.idle === undefined) {
+      ctx.out("/resume: not wired in this surface\n")
+      return 0
+    }
+    if (args.length > 0) {
+      ctx.err("/resume: takes no arguments\n")
+      return 1
+    }
+    const wasSnoozed = ctx.idle.isSnoozed()
+    ctx.idle.unsnooze()
+    ctx.idle.markActive()
+    ctx.out(wasSnoozed ? "resumed.\n" : "(was not snoozed) ready.\n")
+    return 0
+  },
+}
+
 /** `/help` — unified menu (slash inventory + keybinds + ENV knobs).
  *  Body lives in `./help-render` to keep this file small; the registry
  *  entry is a 1-liner delegating into `runHelpRender(BUILTINS, …)`. The
@@ -417,6 +481,8 @@ export const BUILTINS: readonly SlashCommand[] = [
   logoutCmd,
   statusCmd,
   permissionCmd,
+  snoozeCmd,
+  resumeCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

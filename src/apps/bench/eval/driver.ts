@@ -15,7 +15,13 @@
  * Behavior is byte-identical to the pre-decompose `src/apps/bench/runner.ts`;
  * this is a pure structural refactor.
  */
-import { type AgentConfig, buildSystemPrompt, lspNavToolList, runAgent } from "@/agent"
+import {
+  type AgentConfig,
+  type BranchSearchConfig,
+  buildSystemPrompt,
+  lspNavToolList,
+  runAgent,
+} from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -148,19 +154,59 @@ const SWEBENCH_DIRECTIVE = [
  *                          shifts the per-turn reminder.
  *
  * Opt-in flags added (A/B measurement; default-OFF preserves byte-identity):
- *   - QUANTA_BENCH_LSP=1       wire LSP nav tools (OR with QUANTA_LSP_TOOLS=full)
- *   - QUANTA_BENCH_SUBAGENT=1  wire `subagent` AgentConfig block
- *   - QUANTA_BENCH_SKILLS=1    wire `skills` AgentConfig block (bundled-only)
+ *   - QUANTA_BENCH_LSP=1            wire LSP nav tools (OR with QUANTA_LSP_TOOLS=full)
+ *   - QUANTA_BENCH_SUBAGENT=1       wire `subagent` AgentConfig block
+ *   - QUANTA_BENCH_SKILLS=1         wire `skills` AgentConfig block (bundled-only)
+ *   - QUANTA_BENCH_BRANCH_SEARCH=K  wire `branchSearch` AgentConfig block with
+ *                                   `defaultN=K` (Agentless N-best, ADR-0084).
+ *                                   K must be an integer >= 2 (1-best ≡ baseline
+ *                                   ⇒ ignored; non-integer / NaN / negative /
+ *                                   garbage ⇒ ignored). Cost scales ~K× vs
+ *                                   baseline — keep OFF unless measuring N-best.
+ *                                   NOT auto-enabled for `instance.swebench` —
+ *                                   explicit opt-in only (cost discipline).
  *  See {@link benchOptIns} (just below) for the resolver — the BENCH-INTENTIONAL
- *  posture is unchanged when all three are unset. If a future bench mode wants
+ *  posture is unchanged when all four are unset. If a future bench mode wants
  *  any of the other listed knobs, add another opt-in flag — do NOT remove this
  *  comment block without an accompanying measurement-integrity ADR.
  */
 
+/** Per-branch verify budget for bench branch_search (60s — same shape as the
+ *  IDE preset; bench is unattended but each candidate's own `runAgent` carries
+ *  the dominant timeout via `deps.timeoutMs`, this only caps each shell-out
+ *  verifier inside the slice). */
+const BENCH_BRANCH_TIMEOUT_MS = 60_000
+
+/** Parse `QUANTA_BENCH_BRANCH_SEARCH` to a positive integer K>=2. Returns
+ *  `undefined` for every other shape (absent / `"0"` / `"1"` / negative /
+ *  non-integer / NaN / garbage / empty / whitespace) — the gate is *strict*
+ *  by design (K=1 is byte-identical to baseline, so wiring it would only add
+ *  overhead without measurement effect). Exported for direct unit + hellgate.
+ *
+ *  No heuristics: K bounds match the slice's own `tool.ts` zod schema
+ *  (`.min(2).max(8)`). K>8 is rejected here too so a misconfigured env can't
+ *  cause the model to emit a request the tool would reject at runtime. */
+export const parseBenchBranchSearchK = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined
+  // Trim whitespace; empty after trim ⇒ unset.
+  const s = raw.trim()
+  if (s === "") return undefined
+  // Reject if the trimmed string contains any internal whitespace (e.g.
+  // "1 2"), or anything that isn't a leading optional sign + digits.
+  if (!/^-?\d+$/.test(s)) return undefined
+  const n = Number(s)
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
+  // K<2 ⇒ 1-best ≡ baseline; K>8 ⇒ matches slice's hard cap (tool.ts zod
+  // `.min(2).max(8)`). Out-of-range ⇒ ignored (don't silently clamp).
+  if (n < 2 || n > 8) return undefined
+  return n
+}
+
 /** SWE-bench A/B opt-in resolver. EVERY flag default-OFF; an unset env yields
- *  `{ lspNav:false, subagent:undefined, skills:undefined }` and `buildConfig`
- *  is byte-identical to the BENCH-INTENTIONAL posture above. Exported for
- *  direct unit testing — three independent env reads, no cross-coupling.
+ *  `{ lspNav:false, subagent:undefined, skills:undefined, branchSearch:undefined }`
+ *  and `buildConfig` is byte-identical to the BENCH-INTENTIONAL posture above.
+ *  Exported for direct unit testing — four independent env reads, no
+ *  cross-coupling.
  *
  *  Slice-isolation choice: the CLI has cousins (`buildSubagentConfig` /
  *  `buildSkillsConfig` in `src/apps/cli/internal.ts`) but they read DIFFERENT
@@ -174,6 +220,7 @@ export const benchOptIns = (): {
   subagent: AgentConfig["subagent"] | undefined
   skills: AgentConfig["skills"] | undefined
   localizePhase: AgentConfig["localizePhase"] | undefined
+  branchSearch: BranchSearchConfig | undefined
 } => {
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
@@ -197,7 +244,23 @@ export const benchOptIns = (): {
   // NOT auto-activated for `instance.swebench` — over-correction risk; opt-in
   // is explicit.
   const localizePhase = parseLocalizePhaseEnv(process.env.QUANTA_BENCH_LOCALIZE_PHASE)
-  return { lspNav, subagent, skills, localizePhase }
+  // ADR-0084 branch-search (Agentless N-best, K candidates). Strict integer
+  // gate (see parseBenchBranchSearchK); K<2 / non-integer / out-of-range ⇒
+  // undefined (key omitted by buildConfig, byte-identical to baseline).
+  // Verifier kinds: ["tsc"] — the slice's natural fallback. Isolation: "tmpdir"
+  // — bench sandboxes from createSandbox may not be git repos. NOT auto-enabled
+  // for instance.swebench — explicit opt-in only (K× cost discipline).
+  const k = parseBenchBranchSearchK(process.env.QUANTA_BENCH_BRANCH_SEARCH)
+  const branchSearch: BranchSearchConfig | undefined =
+    k !== undefined
+      ? {
+          defaultN: k,
+          defaultVerifierKinds: ["tsc"],
+          timeoutPerBranchMs: BENCH_BRANCH_TIMEOUT_MS,
+          isolation: "tmpdir",
+        }
+      : undefined
+  return { lspNav, subagent, skills, localizePhase, branchSearch }
 }
 
 /** Pure parser for the `QUANTA_BENCH_LOCALIZE_PHASE` env var. Exported for
@@ -294,6 +357,7 @@ export const buildConfig = (
     ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
     ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
     ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
+    ...(opt.branchSearch !== undefined ? { branchSearch: opt.branchSearch } : {}),
   }
 }
 

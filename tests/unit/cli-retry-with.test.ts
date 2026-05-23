@@ -356,6 +356,9 @@ describe("/retry-with — slash dispatch", () => {
       "/login",
       "/logout",
       "/status",
+      "/permission",
+      "/snooze",
+      "/resume",
     ])
   })
 })

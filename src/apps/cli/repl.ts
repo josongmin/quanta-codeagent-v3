@@ -27,6 +27,7 @@ import { TeeStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
 import { composeShellObservers } from "@/tool"
 import { diffPreviewEnabled, renderActionDiff } from "./diff-preview"
+import { createIdleMonitor, type IdleMonitor } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
 import {
   argvImages,
@@ -59,6 +60,7 @@ import {
 } from "./lifecycle-pills"
 import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { AbortError, readLine } from "./raw-line-reader"
+import { createRejectCounter, type RejectCounter } from "./reject-counter"
 import { runSessionCommand } from "./session-commands"
 import { switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
@@ -403,7 +405,7 @@ const installPills = (deps: {
  *  file-resume tokens still fall through to the agent path. */
 const tryRunReplSlash = async (
   input: string,
-  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>,
+  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }>,
 ): Promise<boolean> => {
   const head = input.split(/\s+/)[0] ?? ""
   if (!isSlashCommand(head)) return false
@@ -412,6 +414,7 @@ const tryRunReplSlash = async (
     err: (s) => process.stderr.write(s),
     cwd: process.cwd(),
     ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
+    ...(slashCtx?.idle !== undefined ? { idle: slashCtx.idle } : {}),
   })
   return true
 }
@@ -420,7 +423,7 @@ export const runReplLoop = async (
   rl: readline.Interface,
   signal: AbortSignal,
   turn: (text: string) => Promise<void>,
-  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>,
+  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }>,
 ): Promise<void> => {
   while (!signal.aborted) {
     const input = (await rl.question("\nquanta› ")).trim()
@@ -446,7 +449,7 @@ export const runReplLoop = async (
 export interface RunReplLoopRawOptions {
   readonly signal: AbortSignal
   readonly turn: (text: string) => Promise<void>
-  readonly slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>
+  readonly slashCtx?: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }>
   /** Meta line painted under the prompt (Codex-style composer). Typical
    *  content: `provider · model · ~/cwd`. Absent ⇒ no meta row. */
   readonly meta?: string
@@ -586,7 +589,7 @@ const readReplLine = async (
  *  `PromptSource.next` closure to keep it under the biome complexity budget. */
 const classifyReplLine = async (
   signal: AbortSignal | undefined,
-  slashCtx: Partial<{ skills: () => Promise<SkillRow[]> }> | undefined,
+  slashCtx: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }> | undefined,
   uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): Promise<string | null | undefined> => {
   const input = await readReplLine(signal, uxOpts)
@@ -610,7 +613,7 @@ const classifyReplLine = async (
  *  complexity budget. The trailing `\n` per branch matches the prior
  *  `runReplLoopRaw` post-line behavior byte-identically. */
 const buildCliPromptSource = (
-  slashCtx: Partial<{ skills: () => Promise<SkillRow[]> }> | undefined,
+  slashCtx: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }> | undefined,
   uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): PromptSource => ({
   next: async (signal) => {
@@ -633,6 +636,68 @@ const buildCliPromptSource = (
  * short-circuits (`session` subcommand / `/<slash>` / `--help`) BEFORE
  * delegating here.
  */
+
+/** Wrap an inner CLI {@link PromptSource} with the Cursor-inspired idle /
+ *  snooze gate + reject-counter graceful exit. Extracted from `runRepl` so
+ *  that host stays under biome's cognitive-complexity budget.
+ *
+ *  Order in the `next` loop:
+ *   1. `rejects.shouldAutoExit()` ⇒ return `null` (graceful loop exit —
+ *      the `runRepl` `finally` still shuts MCP and tears down the status
+ *      bar; we do NOT call `process.exit`).
+ *   2. `idle.isSnoozed()` ⇒ paint hint banner; the inner read still fires
+ *      so the user can type `/resume` to wake.
+ *   3. `idle.isIdle()` ⇒ soft hint only (no gate — blocking on idle would
+ *      deadlock since a keystroke IS the wake event).
+ *   4. After a non-null line: if still snoozed, decline + loop back;
+ *      otherwise `idle.markActive()` and return. */
+const wrapPromptSourceWithIdleGate = (args: {
+  readonly inner: PromptSource
+  readonly idle: IdleMonitor
+  readonly rejects: RejectCounter
+  readonly statusBar: StatusBar
+}): PromptSource => {
+  const { inner, idle, rejects, statusBar } = args
+  const paintGateBanners = (): void => {
+    if (idle.isSnoozed()) {
+      statusBar.transient("⏸ snoozed — type /resume to wake", 4000)
+      process.stderr.write("[snoozed — type /resume to wake, or wait for the snooze window]\n")
+      return
+    }
+    if (idle.isIdle()) {
+      statusBar.transient("[idle 60s — auto-paused. type or /resume]", 3000)
+    }
+  }
+  /** One read cycle: returns the next prompt string, `null` for loop exit,
+   *  or `undefined` to signal "retry" (snoozed declined input). Splitting
+   *  this off keeps `next` flat enough for the biome complexity budget. */
+  const readOneGated = async (signal?: AbortSignal): Promise<string | null | undefined> => {
+    if (rejects.shouldAutoExit()) {
+      process.stderr.write("\n[20 consecutive denials — exiting. To re-enable, restart quanta]\n")
+      return null
+    }
+    paintGateBanners()
+    const next = await inner.next(signal)
+    if (next === null) return null
+    if (idle.isSnoozed()) {
+      process.stderr.write("(snoozed — input declined; type /resume to wake)\n")
+      return undefined
+    }
+    idle.markActive()
+    return next
+  }
+  return {
+    next: async (signal) => {
+      while (signal?.aborted !== true) {
+        const out = await readOneGated(signal)
+        if (out === null) return null
+        if (out !== undefined) return out
+      }
+      return null
+    },
+  }
+}
+
 export const runRepl = async (): Promise<void> => {
   const provider = pickProvider()
   const model = env("QUANTA_MODEL", DEFAULT_MODEL[provider])
@@ -648,6 +713,31 @@ export const runRepl = async (): Promise<void> => {
   // (Read/Edit/Bash) operate inside the right tree.
   let cwd = process.cwd()
   const slog = new StructuredLogger()
+
+  // Cursor-inspired idle suppress + reject auto-exit (default-ON).
+  //
+  // QUANTA_IDLE_SUPPRESS=0 ⇒ both mechanisms collapse to no-ops:
+  //   - idle monitor uses `Infinity` thresholds (isIdle/isSnoozed always false)
+  //   - reject counter uses `Infinity` (shouldAutoExit always false)
+  // The `/snooze` and `/resume` slash commands still resolve to the same
+  // monitor instance, so a power user can re-enable the gating mid-run by
+  // calling `/snooze` explicitly (which sets `snoozedUntil`).
+  const idleSuppressOn = env("QUANTA_IDLE_SUPPRESS", "1") !== "0"
+  const idleMsRaw = Number(env("QUANTA_IDLE_MS", "60000"))
+  const snoozeDefaultMsRaw = Number(env("QUANTA_SNOOZE_DEFAULT_MS", "300000"))
+  const rejectLimitRaw = Number(env("QUANTA_REJECT_LIMIT", "20"))
+  const idleMonitor = createIdleMonitor({
+    idleThresholdMs:
+      idleSuppressOn && Number.isFinite(idleMsRaw) ? idleMsRaw : Number.POSITIVE_INFINITY,
+    defaultSnoozeMs:
+      idleSuppressOn && Number.isFinite(snoozeDefaultMsRaw) ? snoozeDefaultMsRaw : 300_000,
+  })
+  const rejectCounter = createRejectCounter({
+    threshold:
+      idleSuppressOn && Number.isFinite(rejectLimitRaw) && rejectLimitRaw > 0
+        ? rejectLimitRaw
+        : Number.POSITIVE_INFINITY,
+  })
 
   let llm: LLMPort
   try {
@@ -742,7 +832,16 @@ export const runRepl = async (): Promise<void> => {
     const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
     try {
       const ans = await adhoc.question(`Allow ${action.tool}? [y/N] `)
-      return ans.trim().toLowerCase() === "y"
+      const accepted = ans.trim().toLowerCase() === "y"
+      // Cursor §4.1: reset on accept, count consecutive denials. The
+      // prompt-source consults `shouldAutoExit()` BEFORE issuing the next
+      // turn, so an exit fires the line AFTER the 20th denial (when the
+      // user would otherwise type another prompt).
+      if (accepted) rejectCounter.recordAccept()
+      else rejectCounter.recordDeny()
+      // Any confirm dialog at all = active user interaction; mark active.
+      idleMonitor.markActive()
+      return accepted
     } finally {
       adhoc.close()
     }
@@ -1058,7 +1157,10 @@ export const runRepl = async (): Promise<void> => {
         statusBar.teardown()
       })
       const skillsCb = buildSkillsCallback(skillsConfig)
-      const slashCtx = skillsCb !== undefined ? { skills: skillsCb } : undefined
+      const slashCtx: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }> = {
+        ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
+        idle: idleMonitor,
+      }
       // Bash-style ↑/↓ history + Ctrl+R reverse-i-search. Default ON
       // (QUANTA_HISTORY=0 to disable). Path/max overridable via env.
       const historyEnabled = env("QUANTA_HISTORY", "1") !== "0"
@@ -1075,9 +1177,15 @@ export const runRepl = async (): Promise<void> => {
       // Initial blank row matches the prior `runReplLoopRaw` header write so
       // the very first composer row sits one line below the resume log.
       process.stderr.write("\n")
-      const cliPromptSource = buildCliPromptSource(slashCtx, {
+      const innerPromptSource = buildCliPromptSource(slashCtx, {
         ...(promptHistory !== undefined ? { promptHistory } : {}),
         multiline: multilineEnabled,
+      })
+      const cliPromptSource = wrapPromptSourceWithIdleGate({
+        inner: innerPromptSource,
+        idle: idleMonitor,
+        rejects: rejectCounter,
+        statusBar,
       })
       // wrapTurn installs the Esc-Esc per-turn cancel + signal composition +
       // dashboard render + REPL-survives-on-error around each runOnce call.
