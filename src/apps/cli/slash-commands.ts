@@ -36,6 +36,7 @@ import type { IdleMonitor } from "./idle-monitor"
 import { parseSnoozeDuration } from "./idle-monitor"
 import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
+import { mcpCmd } from "./mcp-cmd"
 import { isMemorySlashEnabled, memoryCmd } from "./memory-cmd"
 import { permissionCmd } from "./permission-explain"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
@@ -500,6 +501,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   logoutCmd,
   statusCmd,
   permissionCmd,
+  mcpCmd,
   snoozeCmd,
   resumeCmd,
   ...REWIND_COMMANDS,

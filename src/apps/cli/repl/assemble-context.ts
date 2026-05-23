@@ -27,6 +27,7 @@ import {
   type SessionDeps,
 } from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
+import type { McpSurfaceInfo } from "../mcp-cmd"
 import { createRejectCounter, type RejectCounter } from "../reject-counter"
 import { buildShellStreamPainter } from "../shell-stream-painter"
 import { installStatusBar, type StatusBar } from "../status-bar"
@@ -34,6 +35,7 @@ import type { createStatusPills } from "../status-pills"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
 import { buildLifecycleBundle, deriveMcpPillServers } from "./lifecycle-wire"
+import { buildMcpSurfaceInfo } from "./mcp-surface-wire"
 import { buildWorkMetricsSink } from "./metrics-sink"
 import { driveResumeFsm } from "./resume-fsm"
 import { loadSeedImages } from "./seed-images"
@@ -70,6 +72,9 @@ export interface ReplContext {
   readonly idMeta: Awaited<ReturnType<typeof resolveResume>>["idMeta"]
   readonly shutdownMcp: () => Promise<void>
   readonly pills: ReturnType<typeof createStatusPills>
+  /** Snapshot for the `/mcp` slash command. Undefined when no MCP is wired
+   *  in this surface ⇒ `/mcp` prints "not wired in this surface". */
+  readonly mcpSurface: McpSurfaceInfo | undefined
 }
 
 /** Build the idle monitor + reject counter that the prompt-source idle gate
@@ -181,6 +186,7 @@ export const assembleReplContext = async (): Promise<ReplContext> => {
     resume,
     mcpTools,
     mcpClients,
+    mcpConfigs,
     lspTools,
     lspNavTools,
     gitToolList,
@@ -207,6 +213,17 @@ export const assembleReplContext = async (): Promise<ReplContext> => {
   if (mcpClients.length > 0) {
     lifecyclePills.update({ mcp: { servers: deriveMcpPillServers(mcpTools) } })
   }
+
+  // Snapshot the MCP surface for the `/mcp` slash command. The wire honors
+  // `QUANTA_MCP_CONFIG` for the config-path render and gracefully reports
+  // failed servers (configured but absent from `mcpClients`). The snapshot
+  // is `undefined` when nothing is configured ⇒ `/mcp` prints the
+  // "not wired in this surface" fallback (parity with `/skills`).
+  const mcpSurface = buildMcpSurfaceInfo({
+    configs: mcpConfigs,
+    bridgedTools: mcpTools,
+    configPath: process.env.QUANTA_MCP_CONFIG,
+  })
 
   let sessionId = initialSessionId
   const { stream, run } = buildStreaming(observeDir(), slog)
@@ -310,5 +327,6 @@ export const assembleReplContext = async (): Promise<ReplContext> => {
     idMeta,
     shutdownMcp: shutdownMcpAll,
     pills,
+    mcpSurface,
   }
 }

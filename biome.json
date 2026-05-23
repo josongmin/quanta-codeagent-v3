@@ -738,6 +738,8 @@
         "!tests/unit/cli-resume-heuristic.test.ts",
         "!tests/unit/slash-commands.test.ts",
         "!tests/unit/memory-cmd.test.ts",
+        "!tests/unit/mcp-cmd.test.ts",
+        "!tests/unit/mcp-surface-wire.test.ts",
         "!tests/unit/cli-retry-with.test.ts",
         "!tests/unit/shell-exec-observers-surface.test.ts",
         "!tests/unit/cli-image-loader.test.ts",

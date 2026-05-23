@@ -2,11 +2,12 @@ import { type RunInteractiveInput, runInteractive } from "@/runner"
 import type { IdleMonitor } from "../idle-monitor"
 import type { ImageQueue } from "../image-queue"
 import { assembleConfig, env } from "../internal"
+import type { McpSurfaceInfo } from "../mcp-cmd"
 import { createPromptHistory } from "../prompt-history"
 import type { SkillRow } from "../slash-commands"
 import type { ReplContext } from "./assemble-context"
-import { buildImageQueue } from "./image-queue-wire"
 import { wrapPromptSourceWithIdleGate } from "./idle-wire"
+import { buildImageQueue } from "./image-queue-wire"
 import { snapshotAndFlushLifecyclePills } from "./lifecycle-wire"
 import { buildCliPromptSource } from "./prompt-source"
 import { buildSkillsCallback } from "./skills-callback"
@@ -36,12 +37,14 @@ const buildSlashCtx = (
   skills: () => Promise<SkillRow[]>
   idle: IdleMonitor
   imageQueue: ImageQueue
+  mcp: McpSurfaceInfo
 }> => {
   const skillsCb = buildSkillsCallback(ctx.skillsConfig)
   return {
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
     idle: ctx.idleMonitor,
     ...(imageQueue !== undefined ? { imageQueue } : {}),
+    ...(ctx.mcpSurface !== undefined ? { mcp: ctx.mcpSurface } : {}),
   }
 }
 

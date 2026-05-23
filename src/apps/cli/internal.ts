@@ -419,6 +419,11 @@ export interface Features {
   resume: string | undefined
   mcpTools: Tool[]
   mcpClients: McpClient[]
+  /** Raw configs from `QUANTA_MCP_CONFIG` — the SSOT for the `/mcp` slash
+   *  command. `loadMcpTools` drops failed entries from `mcpClients`, so
+   *  this is the only place where the surface can see all configured
+   *  servers (incl. those that failed to spawn). */
+  mcpConfigs: McpServerConfig[]
   lspTools: Tool[]
   /** ADR-0015: LSP nav tools (8). Default-OFF; appended to registry
    *  when `QUANTA_LSP_TOOLS=full`. */
@@ -461,6 +466,7 @@ export const loadFeatures = async (slog: StructuredLogger): Promise<Features> =>
     resume,
     mcpTools,
     mcpClients,
+    mcpConfigs,
     lspTools,
     lspNavTools,
     gitToolList,

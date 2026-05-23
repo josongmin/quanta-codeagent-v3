@@ -357,6 +357,7 @@ describe("/retry-with — slash dispatch", () => {
       "/logout",
       "/status",
       "/permission",
+      "/mcp",
       "/snooze",
       "/resume",
       // Claude Code v1.7196 "rewind + fork" pattern — env-gated by
