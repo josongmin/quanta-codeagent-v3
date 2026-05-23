@@ -176,4 +176,74 @@ describe("renderRepoRulesBlock", () => {
     })
     expect(block).toContain("(from CLAUDE.md)")
   })
+
+  // ADR-0098: when the loader walks more than one directory we surface the
+  // §18.1 verbatim deeper-wins contract into the header so a model that doesn't
+  // read positional priority still sees the rule. Single-layer keeps the
+  // legacy header byte-identical so the cached system-prompt prefix and the
+  // sota-codex-full / prompt-dynamic assertions stay untouched.
+  test("single-layer header is byte-identical to legacy (no deeper-wins suffix)", () => {
+    const block = renderRepoRulesBlock({
+      sourcePath: "/repo/AGENTS.md",
+      entrypoint: "AGENTS.md",
+      body: "rule",
+      loadedAt: 0,
+      layers: [
+        {
+          sourcePath: "/repo/AGENTS.md",
+          entrypoint: "AGENTS.md",
+          body: "rule",
+          relativePath: "./AGENTS.md",
+          depth: 0,
+        },
+      ],
+    })
+    expect(block).toContain("## Repo-local rules (from AGENTS.md)\n")
+    expect(block).not.toContain("override shallower")
+  })
+
+  test("multi-layer header explicitly states deeper-wins (Codex §18.1 verbatim)", () => {
+    const block = renderRepoRulesBlock({
+      sourcePath: "/repo/sub/AGENTS.md",
+      entrypoint: "AGENTS.md",
+      body: "### From ../AGENTS.md\nroot\n\n### From ./AGENTS.md\nsub",
+      loadedAt: 0,
+      layers: [
+        {
+          sourcePath: "/repo/AGENTS.md",
+          entrypoint: "AGENTS.md",
+          body: "root",
+          relativePath: "../AGENTS.md",
+          depth: 1,
+        },
+        {
+          sourcePath: "/repo/sub/AGENTS.md",
+          entrypoint: "AGENTS.md",
+          body: "sub",
+          relativePath: "./AGENTS.md",
+          depth: 0,
+        },
+      ],
+    })
+    expect(block).toContain(
+      "## Repo-local rules (from AGENTS.md; rules from deeper directories override shallower ones)",
+    )
+    expect(block).toContain("root")
+    expect(block).toContain("sub")
+  })
+
+  test("layers undefined ⇒ single-layer header (legacy fixtures stay compatible)", () => {
+    // Older fixtures and hand-built RepoRules literals don't populate the
+    // `layers?` field. We treat the absence as "1 layer" so they render with
+    // the byte-identical legacy header — the integration-level assertions in
+    // prompt-dynamic / sota-codex-full depend on this.
+    const block = renderRepoRulesBlock({
+      sourcePath: "/repo/AGENTS.md",
+      entrypoint: "AGENTS.md",
+      body: "legacy fixture",
+      loadedAt: 0,
+    })
+    expect(block).toContain("## Repo-local rules (from AGENTS.md)\n")
+    expect(block).not.toContain("override shallower")
+  })
 })

@@ -21,9 +21,11 @@ Codex §18.1: "폴더부터 모든 하위 적용, deeper-wins 우선순위, CWD�
 
 ## 결과
 
-- `tests/unit/repo-rules.test.ts` 16 기존 케이스 전부 통과(byte-identical).
+- `tests/unit/repo-rules.test.ts` 16 기존 케이스 전부 통과(byte-identical) + 3 신규 (단일/다층 header, layers-undefined 호환).
 - `tests/unit/repo-rules-tree-hellgate.test.ts` 15 신규 적대 케이스(트리 walk / 혼합 entrypoint / `.git` 경계 / symlink 거부 per-layer / 깊이 cap / 동시성).
+- `tests/integration/agents-md-scope-e2e.test.ts` 3 e2e — runAgent까지 흘러 per-turn reminder에 shallow→deep 본문 + 명시적 deeper-wins notice + 단일 레이어 byte-identical 보존을 검증.
 - `prompt.ts:491` 소비 site 변경 없음(렌더된 body 그대로 주입).
+- `renderRepoRulesBlock` 헤더 확장: 다층(`layers.length > 1`)일 때만 `(from <entrypoint>; rules from deeper directories override shallower ones)`로 §18.1 verbatim 규칙을 명시. 단일 레이어 / `layers` 미설정 fixture는 byte-identical(`(from <entrypoint>)`)로 유지 — sota-codex-full / prompt-dynamic의 기존 단언 + cached system-prompt prefix 무영향.
 
 ## 한계
 

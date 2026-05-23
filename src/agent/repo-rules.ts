@@ -195,6 +195,22 @@ const renderLayerSection = (layer: RepoRulesLayer): string =>
 
 /** Render rules as the per-turn `<system-reminder>` section. The label cites
  *  the entrypoint so the LLM treats it as repo authority, distinct from the
- *  generic memory-hints section that lives downstream. */
-export const renderRepoRulesBlock = (rules: RepoRules): string =>
-  `## Repo-local rules (from ${rules.entrypoint})\n${rules.body.trim()}`
+ *  generic memory-hints section that lives downstream.
+ *
+ *  Single-layer (legacy / pre-tree): byte-identical to the original `(from
+ *  <entrypoint>)` header so existing prompt-dynamic / sota-codex assertions and
+ *  the cached system-prompt prefix stay untouched.
+ *
+ *  Multi-layer (ADR-0098 tree scoping): a parenthetical hint ("rules from
+ *  deeper directories override shallower ones") rides next to the entrypoint
+ *  citation so the LLM doesn't have to infer deeper-wins from positional
+ *  ordering alone. This is the §18.1 verbatim contract surfaced into the
+ *  rendered prompt. */
+export const renderRepoRulesBlock = (rules: RepoRules): string => {
+  const layerCount = rules.layers?.length ?? 1
+  const header =
+    layerCount > 1
+      ? `## Repo-local rules (from ${rules.entrypoint}; rules from deeper directories override shallower ones)`
+      : `## Repo-local rules (from ${rules.entrypoint})`
+  return `${header}\n${rules.body.trim()}`
+}
