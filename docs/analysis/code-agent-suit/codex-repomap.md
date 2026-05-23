@@ -2,7 +2,7 @@
 
 > 경쟁사 흡수용 레포맵. Codex 설치본(`/Applications/Codex.app/Contents/Resources/app.asar` + 동봉 Rust `codex` 바이너리 + `~/.codex/`)을 4라운드 감사해 추출. 엔진은 strip된 Rust 바이너리라 strings로 노출된 심볼/enum/필드명 + on-disk 파일 레이아웃으로 위치 표기. 한 줄 = 기능 → 한다는 일 → `ROOT` `심볼/필드`. `★`=quanta 흡수 우선순위. 위치는 (a) 바이너리 strings/on-disk **app-verified**, 또는 (b) 감사 메모리/리뷰독 **doc-sourced**로 추적되며, 단정 못 하는 곳은 본문에 표기.
 >
-> **2026-05-23 round-5 갱신**: §15 신규(automations cron / inbox / personalization / shell snapshots / node-repl / curated skills / agent identity JWKS), §6/§11/§12/§13 확장(80+ OTel 키, plugin startup_sync 3단 fallback, state_5 SQLite 11 테이블, ParsedCommand·typed error enum). build 26.513.31313은 base 2867과 동일 install 시점(5/16)이지만 strings/state 신호로 더 풍부한 표면이 드러남.
+> **2026-05-23 round-5 갱신**: §15 신규(automations cron / inbox / personalization / shell snapshots / node-repl / curated skills / agent identity JWKS), §16 신규(Browser 6-engine + exportGsuite + 32KB chunked DOMSnapshot), **§17 신규(Git workflow: AGENTS.md scoping + `::git-*` 5-directive emit + default-NO-git + GitHub plugin 4-skill connector/CLI 하이브리드 + 실제 git invocations)**, §18 신규(Computer Use 4-binary + 12 MCP tool + Cloud Tasks + Bedrock Mantle), §6/§11/§12/§13 확장(80+ OTel 키, plugin startup_sync 3단 fallback, state_5 SQLite 11 테이블, ParsedCommand·typed error enum). build 26.513.31313은 base 2867과 동일 install 시점(5/16)이지만 strings/state 신호로 더 풍부한 표면이 드러남.
 
 ## 증거 파일 (Evidence roots)
 - `ENGINE` = `/Applications/Codex.app/Contents/Resources/codex` — codex-rs 메인 바이너리(190MB), strings로 enum/필드/OTel key 노출. Rust 모듈 경로는 strings에 박힌 `core/src/*.rs` panic 위치로 추적
@@ -294,7 +294,70 @@
 - **16 comment-overlay outbound message + Manhattan anchor scorer** — `xl()` name=1000 / nearbyText=500 / title=250 / elementPath=25 점수, rAF retry 2 frames, mouse-navigation button 3/4=back/forward — `ASAR` `comment-preload.js` (doc-sourced)
 - **24 Readonly proxy class** — ReadonlyAttribute / CSSRule / Document / Element / MediaList / Node / Range / Selection / StyleDeclaration / TimeRanges / TokenList / TrackList / ValidityState / VisualViewport ... — DOM 변형 차단 wrapper — `PLUGINS` (doc-sourced)
 
-## 17. Computer Use / Cloud Tasks / Bedrock Mantle
+## 17. Git workflow (3-layer: capability + policy + directive)
+
+### 17.1 AGENTS.md repo-local rule scoping (Codex의 핵심 메커닉)
+- ★ **AGENTS.md = 디렉토리 트리 scope** — 파일 위치 폴더부터 모든 하위 디렉토리에 적용, **더 깊은 AGENTS.md가 우선** (conflict 시) — `ENGINE` base_instructions verbatim (app-verified strings)
+- ★ **"final patch에 touch한 모든 파일은 그 scope의 AGENTS.md 지침을 OBEY해야 함"** — agent invariant — `ENGINE` base_instructions (app-verified)
+- ★ **repo-root + CWD→root 경로의 AGENTS.md는 developer message에 자동 prepend** — re-read 불필요. CWD 밖이나 sub-dir 작업 시만 추가 fetch — `ENGINE` base_instructions (app-verified)
+- **precedence ladder** — direct system/developer/user prompt > deeper-nested AGENTS.md > shallower AGENTS.md — `ENGINE` (app-verified)
+- ★ **`/init` 슬래시 명령으로 AGENTS.md 부트스트랩** — "create an AGENTS.md file with instructions for Codex" — `ENGINE` `/init` (app-verified strings)
+- **`error trying to find AGENTS.md docs:`** — 전용 에러 카테고리 — `ENGINE` (app-verified)
+
+### 17.2 Default-NO-git posture
+- ★ **"Do not `git commit` your changes or create new git branches unless explicitly requested"** — base_instructions의 가장 강한 default-OFF — `ENGINE` (app-verified verbatim)
+- ★ **"NEVER use git" without explicit request** — validation behavior section 강조 — `ENGINE` (doc-sourced, `git-and-branch-management-audit.md`)
+- **`git log` / `git blame`만은 권장** — "Use `git log` and `git blame` to search the history of the codebase if additional context is required" (READ-ONLY history만 권장) — `ENGINE` base_instructions (app-verified)
+
+### 17.3 5-directive emit protocol (성공-후-reporting rail)
+- ★ **`::git-{create-branch | stage | commit | push | create-pr}` closed 5-set** — final response에서만 emit, 실제 mutation 성공 후에만, commentary에서는 X — `ASAR` `::git-*` 5종 (app-verified strings)
+- ★ **`::git-create-pr{isDraft: true|false}` draft PR rail 1급** — draft PR 명시 field — `ASAR` (app-verified)
+- **execution ↔ reporting 분리** — directive는 mutation을 일으키지 않고, 이미 성공한 상태를 app UI에 동기화 — `ENGINE`/`ASAR` (doc-sourced 3-layer model)
+
+### 17.4 Git-specific prohibitions (강한 가드레일)
+- ★ **`git reset --hard` 금지** — destructive `[FACT]` — `ENGINE` developer policy (doc-sourced)
+- ★ **`git checkout --` 금지** — destructive restore — `ENGINE` (doc-sourced)
+- ★ **`git commit --amend` 명시 요청 없으면 금지** — `ENGINE` (doc-sourced)
+- **interactive git (`-i`/`rebase -i`) 회피** — non-interactive 선호 — `ENGINE` (doc-sourced)
+- **사용자의 unrelated 변경 revert 금지** — dirty worktree 보존, P0 — `ENGINE` developer policy (doc-sourced)
+
+### 17.5 Naming conventions (yeet skill verbatim)
+- ★ **Branch: `codex/{description}`** — main/master/default에서 시작할 때 기본 prefix — `PLUGINS` `github/skills/yeet/SKILL.md` (app-verified on-disk)
+- **Commit: `{description}` terse** — 짧은 한 줄 — `PLUGINS` yeet (app-verified)
+- **PR title: `[codex] {description}`** — 전체 diff 요약 — `PLUGINS` yeet (app-verified)
+
+### 17.6 GitHub plugin (4 skills, connector + gh hybrid)
+- ★ **GitHub plugin = connector + CLI 하이브리드** — `interface.capabilities: [Interactive, Write]`, `category: "Coding"`, `apps: { github: { id: "connector_76869538009648d5b282a4bb21c3d157" }}` connector 명시 — `PLUGINS` `.app.json` + `plugin.json` (app-verified)
+- ★ **`yeet` skill (full publish flow)** — 7-step: scope confirm → branch strategy → explicit-path staging → terse commit → relevant checks → `git push -u origin $(git branch --show-current)` → **draft PR via GitHub connector** (gh fallback) — `PLUGINS` yeet/SKILL.md (app-verified verbatim)
+- ★ **`gh-fix-ci` skill** — "connector for PR metadata + patch context, **gh for Actions checks/logs (connector doesn't expose end-to-end)**", `python scripts/inspect_pr_checks.py --repo --pr [--json]` bundled — `PLUGINS` gh-fix-ci/scripts/inspect_pr_checks.py (app-verified on-disk)
+- ★ **`gh-address-comments` skill — thread-aware review** — "connector comment surface is FLAT, **`gh api graphql`** for `reviewThreads / isResolved / isOutdated` + file+line anchors", `scripts/fetch_comments.py` bundled — `PLUGINS` gh-address-comments/scripts/fetch_comments.py (app-verified on-disk)
+- **`github` core skill** — PR 검토 + issue triage 기본 흐름 — `PLUGINS` github/skills/github/SKILL.md (app-verified)
+- **connector ↔ gh CLI 경계 룰** — connector=metadata/PR creation/flat comments, gh=Actions/logs/GraphQL thread state/cross-repo head fork fallback PR — `PLUGINS` (app-verified)
+
+### 17.7 Binary가 실제로 부르는 git invocations
+- ★ **read-only history probe set** — `git rev-parse --git-dir` / `rev-parse HEAD` / `for-each-ref --format=%(refname:short) --contains=HEAD remote` / `--abbrev-ref` — repo 식별 + branch 메타 — `ENGINE` (app-verified strings)
+- ★ **custom log format** — `%H%x1f%ct%x1f%s` (hash + US separator + commit time + subject) — 머신 파싱용 stable delimiter — `ENGINE` (app-verified)
+- ★ **`GIT_OPTIONAL_LOCKS=0` env** — read-only ops에서 lock 우회 (concurrent git 동작 충돌 회피) — `ENGINE` (app-verified)
+- **`--porcelain` status parsing** — machine-readable git status — `ENGINE` (app-verified)
+- **diff flags** — `--no-textconv --no-ext-diff --exclude-standard /dev/null --no-index --` — sanitized diff (textconv/external diff/ignore 우회) — `ENGINE` (app-verified)
+- **`remote -v` / `origin`** — remote URL 식별 — `ENGINE` (app-verified)
+
+### 17.8 Pre-commit hook integration + signing
+- **pre-commit hook script path 동적 발견** — "Retrieve the path to the pre-commit hook script using the `git rev-parse` command. to provide access to the commit-message" — hook 파일을 직접 invoke 안 하고 `git rev-parse --git-path hooks/pre-commit`류로 path 찾음 — `ENGINE` (app-verified comment string)
+- **`--no-verify` 사전 화이트리스트** — `default.rules`에서 `git commit --no-verify` / `git push --no-verify` 명시 allow → pre-commit hook 우회 사전 허가 — `RULES` (doc-sourced, §10 cross-ref)
+
+### 17.9 Git-related state & session metadata
+- ★ **`threads.git_sha + git_branch + git_origin_url`** — 모든 thread row가 시작 시점 git 메타 영구화 — `STATE5` `threads` 테이블 (app-verified, §15.6 cross-ref)
+- ★ **`session_meta.git{commit_hash, branch, repository_url}`** — 세션 JSONL header에 git fingerprint — `SESSIONS` (doc-sourced, §3 cross-ref)
+- **`automations.cwds[]` JSON array of workspace roots** — automation은 git repo 단위로 scope — `LIVE` codex-dev.db (app-verified, §15.1 cross-ref)
+- **`memories/.git/`** — Phase 2 consolidator가 1 commit/batch로 묶음 (atomic snapshot) — `MEMORY` (app-verified, §4 cross-ref)
+
+### 17.10 Slash commands (git-adjacent)
+- ★ **`/review`** — 변경사항 review + issue 발견 (auto-approval review와 같은 backbone일 가능성) — `ENGINE` `/review` slash 명령 (app-verified strings)
+- **`/permissions`** — Codex 허용 액션 선택 (git 권한 게이트 표면) — `ENGINE` (app-verified)
+- **`/status`** — 세션 config (포함: 현재 branch / git state) — `ENGINE` (app-verified)
+
+## 18. Computer Use / Cloud Tasks / Bedrock Mantle
 - ★ **Computer Use 4-binary 구조** — `SkyComputerUseService`(XPC root) + `SkyComputerUseClient.app`(MCP server) + `CUALockScreenGuardian.app` + `Codex Computer Use Installer.app`. NSXPC IPC + Mach bootstrap rendezvous port + `/tmp/com.openai.sky.CUAService/LockScreenLoginAuthorization.sock` — `PLUGINS` `~/.codex/computer-use/Codex Computer Use.app/Contents/` (doc-sourced + on-disk)
 - ★ **Computer Use 12 MCP tool 폐쇄집합** — `activate / click / drag / press_key / type / scroll / screenshot / get_app_state / select_text / set_value / perform_secondary_action / deactivate`. **각 action 후 `get_app_state` 강제 호출**(stale screenshot 추론 차단) — `PLUGINS` computer-use SKILL.md (doc-sourced)
 - **Cloud Tasks 8 sub-cmd** — `codex cloud {diff,exec,list,apply,status,tui}` + `cloudTasksDisabledWithApiKey`(API-key user 차단) + `CODEX_CLOUD_TASKS_BASE_URL`/`_FORCE_INTERNAL` env override — `ENGINE` `codex_cloud_tasks` Rust module (doc-sourced)
@@ -331,6 +394,16 @@
 | **1** | external_agent_config detect/import (Cursor/Claude config interop) | §15.8 |
 | **2** | responses_api iapi/service TTFT/TBT 분해 텔레메트리 | §15.8 |
 | **2** | stage1_outputs 영속 + usage_count(2-Phase 메모리 운영 정보) | §15.6 |
+| **0** | AGENTS.md 디렉토리-트리 scope + nested-deeper-wins precedence | §17.1 |
+| **0** | default-NO-git posture ("Do not git commit … unless explicitly requested") | §17.2 |
+| **0** | `::git-*` 5-directive emit protocol (성공 후만, isDraft 필드) | §17.3 |
+| **0** | git destructive prohibition (`reset --hard`/`checkout --`/amend/interactive 금지) | §17.4 |
+| **1** | `codex/{description}` branch naming + `[codex] {description}` PR title convention | §17.5 |
+| **1** | GitHub plugin 4-skill connector+CLI 하이브리드 (yeet/gh-fix-ci/gh-address-comments) | §17.6 |
+| **1** | `GIT_OPTIONAL_LOCKS=0` + `%H%x1f%ct%x1f%s` custom log format (machine-parsable) | §17.7 |
+| **1** | `gh api graphql` thread-aware review (`reviewThreads/isResolved/isOutdated`) | §17.6 |
+| **2** | `/init` AGENTS.md 부트스트랩 + `/review`/`/permissions`/`/status` 슬래시 명령 | §17.10 |
+| **2** | pre-commit hook path 동적 발견 (`git rev-parse --git-path hooks/pre-commit`) | §17.8 |
 
 ## 부록 B — 따라하면 안 되는 negative invariants (메모리 발췌)
 1. `app-sandbox=false` + `allow-unsigned-executable-memory=true`
