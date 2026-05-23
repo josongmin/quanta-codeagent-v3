@@ -19,7 +19,7 @@ import {
   summarizeWorkMetrics,
 } from "@/observability"
 import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
-import { type PromptSource, runInteractive, runOnce } from "@/runner"
+import { type PromptPayload, type PromptSource, runInteractive, runOnce } from "@/runner"
 import { logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import type { StreamPort } from "@/stream"
@@ -28,7 +28,9 @@ import { TaskRegistry } from "@/subagent"
 import { composeShellObservers } from "@/tool"
 import { diffPreviewEnabled, renderActionDiff } from "./diff-preview"
 import { createIdleMonitor, type IdleMonitor } from "./idle-monitor"
+import { runImageCmd } from "./image-cmd"
 import { loadImageBlock } from "./image-loader"
+import { createImageQueue, type ImageQueue } from "./image-queue"
 import {
   argvImages,
   argvPrompt,
@@ -130,6 +132,20 @@ const loadSeedImages = (): ImageBlock[] => {
     logger.error((e as Error).message)
     process.exit(1)
   }
+}
+
+/** Build the per-REPL multi-modal image queue (ADR-0083 extension). Default-ON
+ *  with cap 5; `QUANTA_IMAGE_QUEUE=0` returns `undefined` so the surface
+ *  short-circuits (`/image …` falls through to the surface-agnostic dispatcher
+ *  which prints "unknown command"). Extracted from `runRepl` so the host stays
+ *  under biome's cognitive-complexity budget. */
+const buildImageQueue = (): ImageQueue | undefined => {
+  const imageQueueEnabled = env("QUANTA_IMAGE_QUEUE", "1") !== "0"
+  if (!imageQueueEnabled) return undefined
+  const raw = Number(env("QUANTA_IMAGE_MAX_QUEUE", "5"))
+  return createImageQueue({
+    maxSize: Number.isFinite(raw) && raw > 0 ? raw : 5,
+  })
 }
 
 /** Lifecycle pills build-bundle for the CLI surface — pre-creates the
@@ -405,10 +421,27 @@ const installPills = (deps: {
  *  file-resume tokens still fall through to the agent path. */
 const tryRunReplSlash = async (
   input: string,
-  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }>,
+  slashCtx?: Partial<{
+    skills: () => Promise<SkillRow[]>
+    idle: IdleMonitor
+    imageQueue: ImageQueue
+  }>,
 ): Promise<boolean> => {
   const head = input.split(/\s+/)[0] ?? ""
   if (!isSlashCommand(head)) return false
+  // ADR-0083 multi-modal: `/image add|list|clear` is in-REPL only (the queue
+  // is REPL-scoped surface state; the global `BUILTINS` table has no session
+  // context). Short-circuit BEFORE delegating to the surface-agnostic
+  // dispatcher so the queue mutation stays inside this surface.
+  if (head === "/image" && slashCtx?.imageQueue !== undefined) {
+    runImageCmd(input, {
+      out: (s) => process.stdout.write(s),
+      err: (s) => process.stderr.write(s),
+      cwd: process.cwd(),
+      queue: slashCtx.imageQueue,
+    })
+    return true
+  }
   await runSlashCommand(input, {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
@@ -423,7 +456,11 @@ export const runReplLoop = async (
   rl: readline.Interface,
   signal: AbortSignal,
   turn: (text: string) => Promise<void>,
-  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }>,
+  slashCtx?: Partial<{
+    skills: () => Promise<SkillRow[]>
+    idle: IdleMonitor
+    imageQueue: ImageQueue
+  }>,
 ): Promise<void> => {
   while (!signal.aborted) {
     const input = (await rl.question("\nquanta› ")).trim()
@@ -449,7 +486,11 @@ export const runReplLoop = async (
 export interface RunReplLoopRawOptions {
   readonly signal: AbortSignal
   readonly turn: (text: string) => Promise<void>
-  readonly slashCtx?: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }>
+  readonly slashCtx?: Partial<{
+    skills: () => Promise<SkillRow[]>
+    idle: IdleMonitor
+    imageQueue: ImageQueue
+  }>
   /** Meta line painted under the prompt (Codex-style composer). Typical
    *  content: `provider · model · ~/cwd`. Absent ⇒ no meta row. */
   readonly meta?: string
@@ -589,7 +630,9 @@ const readReplLine = async (
  *  `PromptSource.next` closure to keep it under the biome complexity budget. */
 const classifyReplLine = async (
   signal: AbortSignal | undefined,
-  slashCtx: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }> | undefined,
+  slashCtx:
+    | Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor; imageQueue: ImageQueue }>
+    | undefined,
   uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): Promise<string | null | undefined> => {
   const input = await readReplLine(signal, uxOpts)
@@ -609,18 +652,33 @@ const classifyReplLine = async (
  *  (or `null` for loop exit). UI primitives (readline, status bar, Esc-Esc,
  *  shell-stream painter) stay in apps/cli per RFC 3.1 slice rules.
  *
+ *  ADR-0083 multi-modal: when `slashCtx.imageQueue` is wired, `next()` drains
+ *  the queue on every accepted prompt and returns the `{ text, images }`
+ *  PromptPayload form so `runInteractive` attaches the images to THAT turn.
+ *  Single-shot: the queue is emptied as a side-effect of `drain()` — the
+ *  user re-queues with `/image add` for the following turn. Empty queue
+ *  ⇒ returns the plain string form (backward-compat / byte-identical).
+ *
  *  Extracted from `runRepl` so each closure stays under the biome cognitive-
  *  complexity budget. The trailing `\n` per branch matches the prior
  *  `runReplLoopRaw` post-line behavior byte-identically. */
 const buildCliPromptSource = (
-  slashCtx: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }> | undefined,
+  slashCtx:
+    | Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor; imageQueue: ImageQueue }>
+    | undefined,
   uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): PromptSource => ({
   next: async (signal) => {
     while (signal?.aborted !== true) {
       const next = await classifyReplLine(signal, slashCtx, uxOpts)
       if (next === undefined) continue
-      return next
+      if (next === null) return null
+      // Drain the per-turn image queue if wired + non-empty. Single-shot:
+      // `drain()` clears the queue as a side-effect so subsequent turns are
+      // text-only unless the user re-queues with another `/image add`.
+      const queued = slashCtx?.imageQueue?.drain() ?? []
+      if (queued.length === 0) return next
+      return { text: next, images: queued.map((e) => e.block) }
     }
     return null
   },
@@ -668,10 +726,12 @@ const wrapPromptSourceWithIdleGate = (args: {
       statusBar.transient("[idle 60s — auto-paused. type or /resume]", 3000)
     }
   }
-  /** One read cycle: returns the next prompt string, `null` for loop exit,
+  /** One read cycle: returns the next prompt payload, `null` for loop exit,
    *  or `undefined` to signal "retry" (snoozed declined input). Splitting
-   *  this off keeps `next` flat enough for the biome complexity budget. */
-  const readOneGated = async (signal?: AbortSignal): Promise<string | null | undefined> => {
+   *  this off keeps `next` flat enough for the biome complexity budget.
+   *  Returns the {@link PromptPayload} verbatim so a multi-modal payload
+   *  (`{ text, images }`) flows through this idle/reject gate unchanged. */
+  const readOneGated = async (signal?: AbortSignal): Promise<PromptPayload | null | undefined> => {
     if (rejects.shouldAutoExit()) {
       process.stderr.write("\n[20 consecutive denials — exiting. To re-enable, restart quanta]\n")
       return null
@@ -1052,7 +1112,6 @@ export const runRepl = async (): Promise<void> => {
   // `installPills` so `runRepl` stays under the biome cognitive-complexity budget.
   const pills = installPills({ statusBar, cwd, planMode, skillsConfig })
 
-
   const turn = async (text: string): Promise<void> => {
     // Per-turn AbortController + composite signal: the LLM stream sees
     // an `AbortSignal.any([outerAbort, turnAbort])`, so EITHER a hard
@@ -1157,9 +1216,19 @@ export const runRepl = async (): Promise<void> => {
         statusBar.teardown()
       })
       const skillsCb = buildSkillsCallback(skillsConfig)
-      const slashCtx: Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor }> = {
+      // ADR-0083 multi-modal: per-REPL image queue. Default-ON; disabled
+      // entirely via `QUANTA_IMAGE_QUEUE=0` so a paranoid surface can keep
+      // the original text-only path (`/image …` then prints unknown
+      // command). Capacity from `QUANTA_IMAGE_MAX_QUEUE` (default 5).
+      const imageQueue: ImageQueue | undefined = buildImageQueue()
+      const slashCtx: Partial<{
+        skills: () => Promise<SkillRow[]>
+        idle: IdleMonitor
+        imageQueue: ImageQueue
+      }> = {
         ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
         idle: idleMonitor,
+        ...(imageQueue !== undefined ? { imageQueue } : {}),
       }
       // Bash-style ↑/↓ history + Ctrl+R reverse-i-search. Default ON
       // (QUANTA_HISTORY=0 to disable). Path/max overridable via env.

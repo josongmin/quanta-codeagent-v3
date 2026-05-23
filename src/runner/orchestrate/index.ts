@@ -25,7 +25,8 @@
 
 export type { PersistTurnInput } from "./persist-turn"
 export { persistTurn } from "./persist-turn"
-export type { PromptSource } from "./prompt-source"
+export type { PromptPayload, PromptSource } from "./prompt-source"
+export { normalizePromptPayload } from "./prompt-source"
 export type { ResolveResumeInput, ResumeResolution } from "./resume-fsm"
 export { defaultUntitled, isPathLikeToken, resolveResume } from "./resume-fsm"
 export type { RunInteractiveInput } from "./run-interactive"

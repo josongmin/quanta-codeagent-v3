@@ -1,7 +1,7 @@
 import type { AgentOutcome } from "@/agent"
 import type { ImageBlock, Message } from "@/llm"
 import type { SessionMeta } from "@/session"
-import type { PromptSource } from "./prompt-source"
+import { normalizePromptPayload, type PromptSource } from "./prompt-source"
 import type { OrchestrateDeps, RunOnceInput } from "./run-once"
 import { runOnce } from "./run-once"
 
@@ -141,10 +141,24 @@ export const runInteractive = async (input: RunInteractiveInput): Promise<void> 
   let pendingImages: ImageBlock[] = input.seedImages ?? []
   try {
     while (!signal.aborted) {
-      const prompt = await promptSource.next(signal)
-      if (prompt === null || signal.aborted) return
+      const payload = await promptSource.next(signal)
+      if (payload === null || signal.aborted) return
+      // Normalize: a surface that returns a plain string is widened into
+      // `{ text, images: [] }` (backward-compat — pre-multi-modal `PromptSource`
+      // implementations keep working byte-identically). A multi-modal surface
+      // returns `{ text, images }`; we MERGE its per-turn images with the
+      // first-turn `pendingImages` carryover so seed images (`--image` argv)
+      // and inline `/image add` queues can coexist on the same turn.
+      const { text: prompt, images: payloadImages } = normalizePromptPayload(payload)
       const seedImages = pendingImages
       pendingImages = []
+      // First turn ⇒ seed + payload; subsequent turns ⇒ payload only.
+      // Argv seed is drained on the first iteration; from there on, every
+      // turn's images come ONLY from the per-call payload (single-shot
+      // queue semantics — the surface is responsible for clearing the
+      // queue after handing it to `next()`).
+      const turnImages: ImageBlock[] =
+        seedImages.length > 0 ? [...seedImages, ...payloadImages] : payloadImages
       const runTurn = async (
         turnDeps: OrchestrateDeps,
       ): Promise<{ outcome: AgentOutcome; messages: Message[] }> =>
@@ -153,7 +167,7 @@ export const runInteractive = async (input: RunInteractiveInput): Promise<void> 
           assembleConfig,
           history,
           prompt,
-          ...(seedImages.length > 0 ? { pendingImages: seedImages } : {}),
+          ...(turnImages.length > 0 ? { pendingImages: turnImages } : {}),
           state,
           idMeta,
         })

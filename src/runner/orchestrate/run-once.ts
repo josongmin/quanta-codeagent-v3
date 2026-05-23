@@ -8,6 +8,7 @@ import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
 import { persistTurn } from "./persist-turn"
+import { normalizePromptPayload, type PromptPayload } from "./prompt-source"
 
 /**
  * Surface-AGNOSTIC one-shot turn orchestration.
@@ -84,10 +85,19 @@ export interface RunOnceInput {
    *  appended to this list before `runAgent` is called. Empty for fresh
    *  one-shot runs; pre-populated when resuming a session. */
   history: Message[]
-  /** The user prompt to run. */
-  prompt: string
+  /** The user prompt to run. Accepts either a plain string (the original
+   *  shape — byte-identical for text-only callers) OR a {@link PromptPayload}
+   *  envelope `{ text, images? }` so a multi-modal surface can attach images
+   *  to THIS turn's user message without a separate `pendingImages` field.
+   *  Internally normalized to `{ text, images }`; `pendingImages` and the
+   *  payload's `images` are CONCATENATED so existing CLI seed-image callers
+   *  (passing `pendingImages` directly) keep working byte-identically. */
+  prompt: PromptPayload
   /** ADR-0083 multi-modal — image blocks to attach to THIS turn's user
-   *  message. Empty by default (text-only, byte-identical to today). */
+   *  message. Empty by default (text-only, byte-identical to today).
+   *  Concatenated with any images carried via {@link prompt} when both are
+   *  supplied (legacy CLI uses this field; multi-modal `PromptSource`
+   *  surfaces use the payload form). */
   pendingImages?: ImageBlock[]
   /** Path-mode transcript save path. Default OFF → no path-mode save. */
   state: string | undefined
@@ -125,11 +135,14 @@ export const runOnce = async (input: RunOnceInput): Promise<RunOnceResult> => {
   const { deps, assembleConfig, history, prompt, pendingImages, state, idMeta, onTurnEnd } = input
   const mcpClients = input.mcpClients ?? []
   try {
-    // ADR-0083: attach seed images to the user turn (byte-identical to
-    // text-only when `pendingImages` is empty/undefined — the spread is
-    // a no-op).
-    const images = pendingImages ?? []
-    const content: ContentBlock[] = [{ type: "text", text: prompt }, ...images]
+    // ADR-0083: normalize the prompt envelope. A plain string widens into
+    // `{ text, images: [] }` — byte-identical when `pendingImages` is also
+    // empty/undefined (the spreads below collapse to no-ops). A structured
+    // payload merges its `images` with any legacy `pendingImages` so a
+    // surface can pass via either path (or both).
+    const { text, images: payloadImages } = normalizePromptPayload(prompt)
+    const images = [...(pendingImages ?? []), ...payloadImages]
+    const content: ContentBlock[] = [{ type: "text", text }, ...images]
     const next = [...history, { role: "user", content } as Message]
     const outcome = await runAgent(assembleConfig(next, deps))
     const messages = outcome.messages
