@@ -59,6 +59,19 @@ import type { ShellExecObserver } from "./shell-exec-types"
  *                           `edit` tools, called BEFORE touching the FS.
  *                           Absent ⇒ no git-write guard (legacy path).
  *
+ *   - `reviewerAgent?`      ADR-0111 git_review_diff isolated reviewer.
+ *                           Provider: dispatch seam wired from the subagent
+ *                           slice (`@/subagent`)'s `SubagentRunner` — the same
+ *                           host port the `agent` tool uses, BUT pre-pinned to
+ *                           a `taskKind:"review"` / read-only `toolFilter`
+ *                           posture by the consumer (the `git_review_diff`
+ *                           tool). Duck-typed `ReviewerRunner` mirror so
+ *                           `@/tool` never imports `@/subagent` (RFC §3.1).
+ *                           Absent ⇒ `git_review_diff` yields a deterministic
+ *                           `ok:false` (reviewer port not attached); the loop
+ *                           remains byte-identical for callers that did not
+ *                           opt into the seam.
+ *
  * Adding a new seam: append a paragraph here, define the mirror type below the
  * interface, and wire it from the agent-side composition root — never from a
  * `@/tool` file.
@@ -127,6 +140,17 @@ export interface ToolContext {
    *  returned string is the opaque reason tag surfaced to the model. Absent ⇒
    *  no git-write guard (byte-identical legacy path). */
   gitWriteGuard?: GitWriteGuard
+  /** ADR-0111 — OPTIONAL isolated-reviewer port. The `git_review_diff` tool
+   *  calls this with a pre-built review prompt (REVIEW notice + diff text +
+   *  caller's focus hint) plus the child's `depth`, `taskKind:"review"`, and
+   *  a read-only `toolFilter`. The seam is duck-typed (structural mirror of
+   *  the subagent slice's `SubagentRunner`) so `@/tool` never imports
+   *  `@/subagent` (slice fence, RFC §3.1). The dispatch seam (composition
+   *  root in `@/agent`) is the only place that knows how to wire the
+   *  concrete `SubagentRunner` here. Absent ⇒ the tool yields an `ok:false`
+   *  with a typed `reviewer_not_attached` message; the loop is byte-
+   *  identical for sessions that did not opt in. */
+  reviewerAgent?: ReviewerRunner
   /** ADR-0093 (draft) — OPTIONAL plan-state mutator. The 4 plan tools
    *  (`create_plan` / `update_todos` / `update_plan` / `remove_todos`) route
    *  every mutation through this duck-typed handle. Duck-typed so `@/tool`
@@ -317,6 +341,45 @@ export type UserInputRequester = (req: {
   choices?: readonly string[]
   multiline?: boolean
 }) => Promise<UserInputOutcome>
+
+/** ADR-0111 — duck-typed mirror of `SubagentRunner` from `@/subagent/types`.
+ *  Kept here so `@/tool` stays slice-isolated from `@/subagent` (RFC §3.1;
+ *  biome enforces). The producer-side `SubagentRunner` carries a larger
+ *  request union; this mirror only types the FIELDS the `git_review_diff`
+ *  tool actually populates. The dispatch seam adapts a concrete
+ *  `SubagentRunner` into this narrower port at wire time.
+ *
+ *  Structural-equivalence convention (same posture as `GitWriteGuard` and
+ *  `WorkingStateHandle`): a future widening of `SubagentRequest` need not
+ *  ripple into this mirror unless the tool starts populating the new field.
+ *  Conversely a renamed/removed field is caught by the consumer-side test
+ *  in `tests/integration/git-review-diff-e2e.test.ts` (which CAN see both
+ *  slices). */
+export interface ReviewerRequest {
+  /** The reviewer-seed prompt: REVIEW notice + diff text + optional focus. */
+  prompt: string
+  /** Recursion depth of this child (parent depth + 1). Root is 0. */
+  depth: number
+  /** Always `"review"` for this seam — read-only critique posture. */
+  taskKind?: "read" | "edit" | "review"
+  /** Tool-name allowlist the child registry is filtered to (read/grep/glob). */
+  toolFilter?: readonly string[]
+  /** Per-request abort signal; chained from the tool's `ctx.signal`. */
+  signal?: AbortSignal
+}
+
+export interface ReviewerResult {
+  ok: boolean
+  /** Final assistant text the child produced — the reviewer's answer. */
+  finalText: string
+  /** Number of model turns the child took. */
+  turns: number
+}
+
+/** Duck-typed reviewer port. The host (`@/agent`) provides the concrete
+ *  implementation by adapting `SubagentRunner` from `@/subagent`. The
+ *  `git_review_diff` tool consumes it through this narrow interface. */
+export type ReviewerRunner = (req: ReviewerRequest) => Promise<ReviewerResult>
 
 /** Duck-typed handle a tool uses to mutate or read the session WorkingState
  *  without importing `@/agent`. The agent loop is the only producer; tools are

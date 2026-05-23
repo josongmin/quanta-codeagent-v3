@@ -21,11 +21,14 @@ import { gitChurnTool } from "./churn"
 import { gitCommitTool } from "./commit"
 import { gitDiffTool } from "./diff"
 import { gitLogTool } from "./log"
+import { gitReviewDiffTool } from "./review-diff"
 import { defaultGitRunner } from "./runner"
 import { gitStatusTool } from "./status"
 import type { GitRunner } from "./types"
 import { gitUpstreamCheckTool } from "./upstream"
 
+// ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
+export { applyBudget, crossedTarget, type GitBudget, resolveMaxCommits } from "./_budget"
 export { gitBlameTool } from "./blame"
 export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { gitBranchSwitchTool } from "./branch-switch"
@@ -33,10 +36,15 @@ export { gitChurnTool, rankChurn } from "./churn"
 export { gitCommitTool } from "./commit"
 export { gitDiffTool } from "./diff"
 export { gitLogTool } from "./log"
+export {
+  type GitReviewDiffInput,
+  gitReviewDiffInputSchema,
+  gitReviewDiffTool,
+  type ReviewFinding,
+  type ReviewReport,
+} from "./review-diff"
 export { buildGitEnv, defaultGitRunner } from "./runner"
 export { gitStatusTool } from "./status"
-// ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
-export { applyBudget, crossedTarget, type GitBudget, resolveMaxCommits } from "./_budget"
 export type {
   GitBlameHeatmapInput,
   GitBlameInput,
@@ -65,6 +73,9 @@ export const gitTools = (runner: GitRunner = defaultGitRunner): Tool[] => [
   gitBlameHeatmapTool(runner) as Tool,
   // Upstream-divergence check (read-only, v0 chat=branch absorption, #5).
   gitUpstreamCheckTool(runner) as Tool,
+  // Isolated diff reviewer (read-only, Claude Desktop `reviewDiff` absorption,
+  // ADR-0111). Sub-agent runner is host-injected via ctx.reviewerAgent.
+  gitReviewDiffTool(runner) as Tool,
   gitCommitTool(runner) as Tool,
   gitBranchSwitchTool(runner) as Tool,
 ]

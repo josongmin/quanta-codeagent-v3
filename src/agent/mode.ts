@@ -146,6 +146,10 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   git_blame_heatmap: null,
   // Read-only upstream-divergence check (v0 chat=branch absorption, #5).
   git_upstream_check: null,
+  // Read-only isolated-reviewer over a git diff (Claude Desktop `reviewDiff`
+  // absorption, ADR-0111). The reviewer sub-agent itself is read-only by the
+  // tool's REVIEWER_TOOL_FILTER; safe in plan mode.
+  git_review_diff: null,
   // Mutating built-ins
   write: "write_filesystem",
   edit: "write_filesystem",
