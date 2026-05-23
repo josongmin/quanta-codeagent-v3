@@ -3,21 +3,37 @@ title: Per-thread queued follow-ups with PausedReason
 section: 1
 subsystem: Follow-up queue (ADR-0037)
 order: 12
-maturity: L3
-status: new
-purpose: Per-thread FIFO follow-up queue with multi-thread isolation and serializable snapshot/restore. 10 explicit PausedReason values — popReady delivers iff pausedReason === null; documented condition per reason; drain at thread close. Standalone — UI integration is a follow-up.
+maturity: L4
+status: stable
+purpose: |
+  Per-thread FIFO follow-up queue with multi-thread isolation and serializable
+  snapshot/restore. 10 explicit PausedReason values — popReady delivers iff
+  pausedReason === null; documented condition per reason; drain at thread close.
+  L4 (2026-05-23): loop가 매 턴 시작 시 pollFollowUpQueue로 popReady를 시도하고
+  paused면 response_queued AgentEvent 발행, ready면 head를 synthesized user Message로
+  wm.append. AgentConfig.followUpQueueSnapshotStore가 wired면 session-start 하이드레이트 +
+  session-end save로 재시작 간 영속.
 evidence:
   code:
     - src/agent/follow-up-queue.ts
+    - src/agent/control-op-handler.ts
+    - src/agent/loop.ts
+    - src/stream/types.ts
   adrs: [37]
   tests:
     unit:
       - tests/unit/follow-up-queue.test.ts
       - tests/unit/paused-reason-enum.test.ts
-    integration: []
+      - tests/unit/agent/control-op-handler-hellgate.test.ts
+    integration:
+      - tests/integration/queued-follow-ups-hell-e2e.test.ts
     contract: []
 knobs: []
-deliberate_hold:
-  reason: UI surface for the queued count + per-thread persistence wiring is deferred (see ADR-0037 §한계).
-  promotion_path: Wire FollowUpQueue snapshot into session-resume; surface queued count to the CLI/UI before the next prompt is sent.
-notes: ''
+deliberate_hold: null
+notes: |
+  L4: queue undefined ⇒ pollFollowUpQueue 즉시 null(byte-identical), paused ⇒
+  response_queued 발행 + null, ready ⇒ head를 synthesized user Message로 반환.
+  response_queued.reason은 ResponseQueuedReason closed union (PausedReason 10개 +
+  2 control-op-pending reasons in control-op-handler). session-resume snapshot
+  hydrate + save도 wired(followUpQueueSnapshotStore optional). UI surface
+  (queued count painter)는 surface-specific이라 호스트 책임.
