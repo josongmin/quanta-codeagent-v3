@@ -1,4 +1,5 @@
 import type { LLMPort, Message, ModelCandidate } from "@/llm"
+import type { ModePolicy } from "./run-mode"
 import type { EmbedderPort, PersistentStorePort, Phase1Port, Stage1StorePort } from "@/memory"
 import type { Metrics, TurnTiming } from "@/observability"
 import type {
@@ -467,7 +468,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   planExitPort?: PlanExitPort
   /**
-   * Structured plan-mode store (ADR-0093 draft). When wired, the dispatch
+   * Structured plan-mode store (ADR-0095 draft). When wired, the dispatch
    * seam adapts this into a `PlanMutator` on every ToolContext and
    * `buildSessionFeatures` registers the 4 plan-mutation tools
    * (create_plan / update_todos / update_plan / remove_todos). Absent ⇒ tools
@@ -476,7 +477,20 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   planStore?: PlanStore
   /**
-   * Operator-side user-input port (ADR-0095 draft, ADR-0086 sister). When
+   * Optional persistence backing for {@link planStore} (ADR-0097 P7).
+   * Mirrors `followUpQueueSnapshotStore` discipline:
+   *   - session-start: load() → planStore.restore(snap) → emit plan_snapshot
+   *   - session-end:   planStore.snapshot() → save(snap)
+   * Errors at either boundary collapse to an `error` AgentEvent — they
+   * MUST NOT crash session-start or block session-end. Absent ⇒ the plan
+   * is session-scoped only (default-OFF byte-identical).
+   */
+  planSnapshotStore?: {
+    load(): Promise<import("./plan/snapshot").PlanSnapshot | null>
+    save(snap: import("./plan/snapshot").PlanSnapshot | null): Promise<void>
+  }
+  /**
+   * Operator-side user-input port (ADR-0097 draft, ADR-0086 sister). When
    * wired, the `request_user_input` tool is registered + dispatched via
    * `ToolContext.requestUserInput`. Absent ⇒ tool NOT registered (default-OFF
    * byte-identical). Surface (CLI / IDE modal / RPC) supplies the
@@ -567,8 +581,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   redaction?: RedactionConfig
   /**
-   * RFC may-22-unified-agent-runtime / Phase 0 — mode policy slot.
-   *
+   * The 12-lever discriminated-union vector for this run (interactive /
+   * headless / batch / ci-bot). Absent ⇒ no mode policy is consulted and the
+   * loop is byte-for-byte identical to the pre-RFC path. Wired by
+   * `apps/agent/assemble.ts`; the LOOP itself does not read this back today,
+   * but mode-preset assemble tests verify the field IS on the config, so this
+   * is a CONSUMED field (not orphan) — its observability IS the contract.
+   */
+  modePolicy?: ModePolicy
+  /**
    * RFC may-22-unified-agent-runtime / Phase 1 — budget meter slot.
    *
    * When present, the loop's tick sites (turn / model_call / tool_call /
@@ -851,4 +872,4 @@ export type TurnContextConfig = Pick<
  *  The loop's tick sites emit through `budgetMeter`; `modePolicy` clamps the
  *  meter caps and parametrizes the dispatch posture; `maxTurns` is the hard
  *  upper bound the loop enforces independently of any meter. */
-export type BudgetConfig = Pick<AgentConfig, "budgetMeter" | "maxTurns">
+export type BudgetConfig = Pick<AgentConfig, "budgetMeter" | "modePolicy" | "maxTurns">

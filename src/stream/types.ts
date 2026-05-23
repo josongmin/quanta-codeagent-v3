@@ -12,7 +12,12 @@
 
 /** Closed taxonomy for a todo's status — mirrors `TodoStatus` in
  *  `@/agent/plan/types.ts`. Closed-union; no other value is valid. */
-export type TodoStatusMirror = "pending" | "in_progress" | "completed" | "cancelled"
+export type TodoStatusMirror =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "blocked"
 
 /** Single todo entry inside a plan — mirrors `TodoReadonly` in
  *  `@/agent/plan/types.ts`. */

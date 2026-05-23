@@ -63,9 +63,11 @@ import {
   cancelSubagent,
   isCancelSubagentOp,
   isInterruptOp,
+  isSetModeOp,
   type ResponseQueuedReason,
 } from "./control-op-handler"
 import { decideAction } from "./conversation-action"
+import { planToStreamMirror } from "./plan/stream-mirror"
 import { threadId as makeThreadId } from "./follow-up-queue"
 import { backoffDelayMs } from "./retry"
 import {
@@ -1424,6 +1426,59 @@ const saveFollowUpQueueSnapshot = async (cfg: AgentConfig): Promise<void> => {
 }
 
 /**
+ * ADR-0095 P7 — restore the structured plan snapshot at session start. Mirror
+ * of {@link restoreFollowUpQueueSnapshot}: when the host wired BOTH
+ * `planStore` AND `planSnapshotStore`, hydrate the store from the saved
+ * snapshot so a fresh process resumes the plan. Errors collapse to an
+ * `error` AgentEvent (no crash on corrupt snapshot — same boundary discipline
+ * as the queue restore). After hydration, emit `plan_snapshot` so a
+ * late-attaching surface paints the restored state.
+ */
+const restorePlanSnapshot = async (cfg: AgentConfig): Promise<void> => {
+  if (!cfg.planStore || !cfg.planSnapshotStore) return
+  try {
+    const snap = await cfg.planSnapshotStore.load()
+    if (snap === null || snap === undefined) return
+    const r = cfg.planStore.restore(snap)
+    if (!r.ok) {
+      cfg.stream.emit({
+        type: "error",
+        message: `planSnapshotStore restore rejected: ${r.error.kind}`,
+      })
+      return
+    }
+    const current = cfg.planStore.current()
+    if (current !== null) {
+      cfg.stream.emit({ type: "plan_snapshot", plan: planToStreamMirror(current) })
+    }
+  } catch (e) {
+    cfg.stream.emit({
+      type: "error",
+      message: `planSnapshotStore.load failed: ${errMessage(e)}`,
+    })
+  }
+}
+
+/**
+ * ADR-0095 P7 — persist the post-session plan snapshot. Mirror of
+ * {@link saveFollowUpQueueSnapshot}: errors must NOT block the outcome.
+ * If `planStore.current() === null` (no plan or plan-exit `rejected` cleared),
+ * we save an empty/null snapshot so the next session starts clean.
+ */
+const savePlanSnapshot = async (cfg: AgentConfig): Promise<void> => {
+  if (!cfg.planStore || !cfg.planSnapshotStore) return
+  try {
+    const snap = cfg.planStore.snapshot()
+    await cfg.planSnapshotStore.save(snap)
+  } catch (e) {
+    cfg.stream.emit({
+      type: "error",
+      message: `planSnapshotStore.save failed: ${errMessage(e)}`,
+    })
+  }
+}
+
+/**
  * L4 control-op cluster (2026-05-23) — Codex `ensureReady()` gate mirror.
  * Observe typed control ops on the submission envelope AFTER `session_start`
  * but BEFORE the main turn loop. Two op kinds drive behavior here:
@@ -1461,6 +1516,25 @@ const handleSubmissionControlOp = (
   if (isCancelSubagentOp(cfg.submission)) {
     const outcome = cancelSubagent(taskRegistry, cfg.submission.op.subagentId)
     emitSubagentCancel(cfg, cfg.submission.op.subagentId, outcome, "submission_op")
+  }
+  // ADR-0095 P7 — `set_mode` op consume. Observation-only at this layer: emit
+  // `mode_changed` so surfaces can repaint; the actual posture change is the
+  // caller's responsibility (the next-turn host wires the new mode into the
+  // following `AgentConfig.mode`/`planMode`). Noop transitions (from === to)
+  // suppress the emit to avoid heartbeat redundancy (Codex `response.in_progress`
+  // discipline mirror). Closed-shape mode union — exhaustive.
+  if (isSetModeOp(cfg.submission)) {
+    const from: "default" | "plan" = cfg.mode === "plan" || cfg.planMode === true ? "plan" : "default"
+    const to = cfg.submission.op.mode
+    if (from !== to) {
+      const reason = cfg.submission.op.reason
+      cfg.stream.emit({
+        type: "mode_changed",
+        from,
+        to,
+        ...(reason !== undefined ? { reason } : {}),
+      })
+    }
   }
   return "continue"
 }
@@ -1871,6 +1945,9 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // L4 control-op cluster (2026-05-23) — follow-up queue snapshot save.
     // Helper-extracted to keep `finish` flat (cognitive-complexity budget).
     await saveFollowUpQueueSnapshot(cfg)
+    // ADR-0095 P7 — plan-mode snapshot save. Same boundary discipline as the
+    // queue save: errors collapse to `error` AgentEvent, never block finish.
+    await savePlanSnapshot(cfg)
     recorder?.stopReason(reason)
     if (cfg.hooks) await cfg.hooks.emit({ type: "session_end", reason, turns })
     stream.emit({ type: "done", reason, turns })
@@ -1912,6 +1989,9 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // L4 control-op cluster (2026-05-23) — follow-up queue snapshot restore.
   // Helper-extracted; see `restoreFollowUpQueueSnapshot` below.
   await restoreFollowUpQueueSnapshot(cfg)
+  // ADR-0095 P7 — plan-mode snapshot restore. Mirror discipline: errors
+  // collapse to `error` AgentEvent, never crash session-start.
+  await restorePlanSnapshot(cfg)
 
   // L4 control-op cluster (2026-05-23) — Codex `ensureReady()` gate mirror.
   // Now that the session is past `session_start` we can OBSERVE typed control

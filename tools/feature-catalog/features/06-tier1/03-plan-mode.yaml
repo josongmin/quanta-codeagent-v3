@@ -26,6 +26,8 @@ evidence:
     - src/agent/plan/snapshot.ts
     - src/agent/plan/state.ts
     - src/agent/plan/mutator-adapter.ts
+    - src/agent/plan/stream-mirror.ts
+    - src/agent/plan-exit-lifecycle.ts
     - src/tool/plan/create-plan.ts
     - src/tool/plan/update-todos.ts
     - src/tool/plan/update-plan.ts
@@ -38,7 +40,9 @@ evidence:
     - src/agent/types.ts
     - src/agent/submission.ts
     - src/agent/control-op-handler.ts
+    - src/agent/loop.ts
     - src/stream/types.ts
+    - src/stream/index.ts
     - src/stream/adapters/jsonl-recorder.ts
     - src/stream/adapters/stdout.ts
   adrs: [95, 96, 97]
@@ -47,6 +51,8 @@ evidence:
       - tests/unit/agent/plan/transitions-hell.test.ts
       - tests/unit/agent/plan/dag-hell.test.ts
       - tests/unit/agent/plan/mutations-hell.test.ts
+      - tests/unit/agent/plan-exit-lifecycle-hell.test.ts
+      - tests/unit/agent/plan-store-clear-hell.test.ts
       - tests/unit/tool/plan/plan-tools-hell.test.ts
       - tests/unit/tool/request-user-input-hell.test.ts
       - tests/unit/stream/plan-events-hell.test.ts
@@ -56,11 +62,16 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  L4 (2026-05-23 SOTA++ 흡수): closed-shape exhaustive switch 전수(transitions 5×5 + 6
-  PlanDelta + 10 PlanMutationError + 6 ResponseQueuedReason + 5 TodoStatus 전부 never
-  default arm). 휴리스틱 0 — string sniffing, fuzzy match, infer 없음. 슬라이스 격리:
-  @/tool은 @/agent/plan을 import 안 함(biome fence + ToolContext duck-typed seam).
-  TodoItem.assignee → ADR-0042 subagent nickname, .verifyHint → ADR-0013 verify-guard
-  연결. plan-exit-three-way(ADR-0086) + dispatch-block(ADR-0036)과 상호운용. snapshot
-  영속화(planSnapshotStore)는 follow-up phase(P6 plan-exit lifecycle 통합과 짝).
-  239 hellgate tests / 571+ expects / 0 fail / tsc 0 / biome 0 errors.
+  L4 (2026-05-23 SOTA++ 흡수, P1-P7 전부 통합): closed-shape exhaustive switch 전수
+  (transitions 5×5 + 6 PlanDelta + 10 PlanMutationError + 6 ResponseQueuedReason +
+  5 TodoStatus 전부 never default arm). 휴리스틱 0 — string sniffing, fuzzy match,
+  infer 없음. 슬라이스 격리: @/tool은 @/agent/plan을 import 안 함(biome fence +
+  ToolContext duck-typed seam). TodoItem.assignee → ADR-0042 subagent nickname,
+  .verifyHint → ADR-0013 verify-guard 연결. plan-exit-three-way(ADR-0086) +
+  dispatch-block(ADR-0036)과 상호운용 — plan-exit-lifecycle router(P6: approved=
+  freeze / rejected=clear / changes_requested=preserve+feedback). P7 snapshot
+  영속화: AgentConfig.planSnapshotStore + loop session-start hydrate(restorePlanSnapshot,
+  errors→error AgentEvent) + session-end save(savePlanSnapshot, follow-up-queue 패턴
+  미러). P7 loop set_mode op 소비 (mode_changed 발행, noop 전환은 redundant heartbeat
+  억제). planToStreamMirror 단일 슬라이스 경계 projector. 299 hellgate tests /
+  719 expects / 0 fail / tsc 0 / biome 0 errors.

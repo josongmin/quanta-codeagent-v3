@@ -12,4 +12,12 @@ export { StdoutStream } from "./adapters/stdout"
 export type { DegradedRecord, TeeStreamOpts } from "./adapters/tee"
 export { TeeStream } from "./adapters/tee"
 export type { StreamPort } from "./ports"
-export type { AgentEvent, RetentionPolicy } from "./types"
+export type {
+  AgentEvent,
+  PlanDeltaKindMirror,
+  PlanDeltaReadonlyMirror,
+  PlanReadonlyMirror,
+  RetentionPolicy,
+  TodoReadonlyMirror,
+  TodoStatusMirror,
+} from "./types"
