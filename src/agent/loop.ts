@@ -10,15 +10,8 @@ import {
   startSpan,
   type TurnTiming,
 } from "@/observability"
-import type { AutoModeClassifier } from "@/permission"
-import {
-  normalizeRedactionConfig,
-  type RedactionHit,
-  type RedactionOrigin,
-  redactSecrets,
-} from "@/security"
+import { normalizeRedactionConfig, type RedactionHit, redactSecrets } from "@/security"
 import { errMessage, LLMError } from "@/shared"
-import { buildGuardChain, metaUser, runGuardChain, type TurnGuard } from "./guards"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import {
@@ -28,8 +21,9 @@ import {
 } from "./conversation-summary-archive"
 import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
-import { type EffortLevel, effortToTokenBudget } from "./effort"
+import { effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
+import { buildGuardChain, metaUser, runGuardChain } from "./guards"
 import { renderIdeContext } from "./ide-context"
 import { persistSession, recallContext } from "./memory"
 import { runMemoryConsolidatorHook } from "./memory-consolidator-hook"
@@ -42,8 +36,14 @@ import {
   freshRecovery,
   type RecoveryAction,
   type RecoveryReason,
-  type RecoveryState,
 } from "./recovery"
+// R2-B P1 — parameter-bundle refactor. `TurnSession` (session-lifetime
+// readonly resources) and `TurnState` (turn-lifetime mutable state) cut
+// `runTurn` from ~20 positional params to 3, `streamConsume` to 4, and
+// `applyAction` to 6. Pure structural change — every body still reads the
+// SAME fields (just via `session.config` / `state.wm` / …), so the
+// default-OFF byte-identical contract is preserved.
+import type { SkillGate, SkillTurnOverride, TurnSession, TurnState } from "./turn-context"
 
 // Backward-compatible re-exports: the stream-error/recovery FSM moved to
 // `./recovery` (SRP decomposition) but historically lived in `loop.ts`.
@@ -91,12 +91,7 @@ import {
 } from "./stop-category"
 import { streamingTurn } from "./streaming-dispatch"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
-import {
-  consumeTurnSignals,
-  createToolChoiceTurnState,
-  resolveToolChoice,
-  type ToolChoiceTurnState,
-} from "./tool-choice"
+import { consumeTurnSignals, createToolChoiceTurnState, resolveToolChoice } from "./tool-choice"
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
@@ -326,27 +321,13 @@ type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } |
  *  resets it. Built only when ≥1 discovered skill declared an allowlist;
  *  absent ⇒ no scoping (loop byte-identical). */
 const SKILL_META_TOOLS = new Set(["Skill", "ToolSearch"])
-/** Author-declared per-skill model/effort override (ADR-0011 §6.2 → L4).
- *  `effort` mirrors `SkillEffort` (`low|medium|high|max|<number>`); a numeric
- *  value is a RAW token budget, a named tier maps via `effortToTokenBudget`.
- *  Carried structurally (no `@/skill` import) — features.ts builds the map from
- *  `skillModelOverride`/`skillEffortOverride`. */
-export interface SkillTurnOverride {
-  model?: string
-  effort?: EffortLevel | number
-}
-interface SkillGate {
-  /** False ⇒ the call must be denied (not in the active skill's allowlist). */
-  allow(name: string): boolean
-  /** Observe a completed dispatch; a successful `Skill` invocation with a
-   *  declared allowlist arms/replaces the active scope, and (independently)
-   *  arms/replaces the active model/effort override. */
-  observe(name: string, input: unknown, ok: boolean): void
-  /** The active skill's model/effort override, or `undefined` when no skill is
-   *  active or the active one declared none. Read once per turn at the stream
-   *  open so the override is turn-scoped to the turns AFTER activation. */
-  activeOverride(): SkillTurnOverride | undefined
-}
+
+// R2-B P1 — `SkillTurnOverride` (and the local-only `SkillGate`) moved into
+// `./turn-context` so the `TurnSession` bundle can reference them without a
+// loop.ts ↔ turn-context.ts value cycle. Re-export `SkillTurnOverride` for
+// backward compat — `features.ts` imports it via `from "./loop"`.
+export type { SkillTurnOverride } from "./turn-context"
+
 /** Build the skill gate when EITHER a tool allowlist OR a model/effort override
  *  is declared by ≥1 discovered skill. Absent both ⇒ `undefined` (loop
  *  byte-identical). The tool-scoping (`allow`) is driven solely by allowlists;
@@ -451,20 +432,15 @@ type StreamDispatchOut = {
  * calls.
  */
 const streamConsume = async (
-  config: AgentConfig,
+  session: TurnSession,
+  state: TurnState,
   messages: Message[],
-  specs: ReturnType<AgentConfig["registry"]["specs"]>,
   system: SystemPromptInput,
-  recorder: AgentRecorder | undefined,
-  classifier: AutoModeClassifier | undefined,
-  skillGate: SkillGate | undefined,
-  toolHistory: ToolHistoryEntry[] | undefined,
-  workingState: WorkingStateSession | undefined,
-  collector: TurnWorkMetricsCollector | undefined,
-  toolChoiceState: ToolChoiceTurnState,
-  onRedaction: (origin: RedactionOrigin, hits: readonly RedactionHit[]) => void,
-  onTurnTiming?: (timing: TurnTiming) => void,
 ): Promise<StreamConsumeResult> => {
+  // R2-B P1: destructure into the same local names the original body used so
+  // every reference below stays byte-identical (config/recorder/classifier/…).
+  const { config, specs, recorder, classifier, skillGate } = session
+  const { toolHistory, workingState, collector, toolChoiceState, onRedaction, onTurnTiming } = state
   // ADR-0079 — resolve the pre-call tool_choice from the loop-owned turn state.
   // `consumeTurnSignals` reads + clears the 1-turn-TTL flags armed by the
   // verify/closeout guards on the PRIOR stream's finish-intent; `resolveToolChoice`
@@ -1117,16 +1093,16 @@ const CONTINUE: Step = { done: false }
 // proceeds byte-for-byte identical to the pre-chain loop.
 
 const applyAction = async (
-  config: AgentConfig,
+  session: TurnSession,
+  state: TurnState,
   action: RecoveryAction,
   result: StreamSuccess | { error: unknown; message: string },
-  wm: WorkingMemory<Message>,
   ctxSystem: SystemPromptInput,
-  breaker: CompactionBreaker | undefined,
   history: readonly ToolHistoryEntry[],
-  guards: readonly TurnGuard[],
-  toolChoiceState: ToolChoiceTurnState,
 ): Promise<Step> => {
+  // R2-B P1: destructure to the same local names the original body used.
+  const { config, guards } = session
+  const { wm, breaker, toolChoiceState } = state
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
   if (action.do === "backoff") {
     // RFC-0002 §5.2 recovery trace. Pure observation (NullStream swallows it):
@@ -1204,26 +1180,15 @@ const applyAction = async (
 }
 
 const runTurn = async (
-  config: AgentConfig,
-  wm: WorkingMemory<Message>,
-  specs: ReturnType<AgentConfig["registry"]["specs"]>,
-  recorder: AgentRecorder | undefined,
-  rec: RecoveryState,
-  breaker: CompactionBreaker | undefined,
-  classifier: AutoModeClassifier | undefined,
-  skillGate: SkillGate | undefined,
-  toolHistory: ToolHistoryEntry[] | undefined,
-  guards: readonly TurnGuard[],
-  activeSkills: { name: string; description: string }[] | undefined,
-  workingState: WorkingStateSession | undefined,
-  collector: TurnWorkMetricsCollector | undefined,
-  archive: ConversationSummaryArchive | undefined,
   turn: number,
-  toolChoiceState: ToolChoiceTurnState,
-  citations: MemoryCitation[],
-  onRedaction: (origin: RedactionOrigin, hits: readonly RedactionHit[]) => void,
-  onTurnTiming: ((timing: TurnTiming) => void) | undefined,
+  session: TurnSession,
+  state: TurnState,
 ): Promise<TurnResult> => {
+  // R2-B P1: destructure to the same local names the original body used so the
+  // body below stays byte-identical (config / wm / recorder / …). Same fields,
+  // same `undefined`s — only the call shape changed.
+  const { config, recorder, activeSkills, archive } = session
+  const { wm, rec, breaker, toolHistory, workingState, citations } = state
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
   for (;;) {
@@ -1242,21 +1207,7 @@ const runTurn = async (
       turn,
       citations,
     )
-    const result = await streamConsume(
-      config,
-      ctx.messages,
-      specs,
-      ctx.system,
-      recorder,
-      classifier,
-      skillGate,
-      toolHistory,
-      workingState,
-      collector,
-      toolChoiceState,
-      onRedaction,
-      onTurnTiming,
-    )
+    const result = await streamConsume(session, state, ctx.messages, ctx.system)
     if ("aborted" in result) return { kind: "aborted" }
 
     const action =
@@ -1265,18 +1216,15 @@ const runTurn = async (
         : decideOnAssembled(result.stopReason, result.message, rec)
 
     const step = await applyAction(
-      config,
+      session,
+      state,
       action,
       result,
-      wm,
       ctx.system,
-      breaker,
       // Audit [LOW]: the guard-OFF path used to allocate a throwaway `[]`
       // EVERY turn (contradicting the byte-identical zero-allocation intent).
       // Reuse one shared frozen empty array when the guard is off.
       toolHistory ?? EMPTY_TOOL_HISTORY,
-      guards,
-      toolChoiceState,
     )
     if (step.done) return step.result
   }
@@ -1827,6 +1775,24 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     lastTurnTiming = timing
   }
 
+  // R2-B P1 — session-lifetime bundle. Configured ONCE here (after every
+  // session resource the helpers might need has been materialized) and passed
+  // unchanged into every `runTurn` call. The bundle is `readonly`, so a helper
+  // cannot accidentally rebind a session field mid-loop. Per-turn mutable
+  // state (`rec`, `wm`, …) lives in the SECOND bundle built inside the for
+  // loop (so `freshRecovery()` runs once per turn — byte-identical to the
+  // pre-bundle path that constructed it positionally on every call).
+  const session: TurnSession = {
+    config: cfg,
+    specs,
+    ...(recorder !== undefined ? { recorder } : {}),
+    ...(classifier !== undefined ? { classifier } : {}),
+    ...(skillGate !== undefined ? { skillGate } : {}),
+    ...(activeSkills !== undefined ? { activeSkills } : {}),
+    ...(summaryArchive !== undefined ? { archive: summaryArchive } : {}),
+    guards: guardChain,
+  }
+
   const finish = async (
     reason: StopReason,
     turns: number,
@@ -2037,27 +2003,24 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // mutates `messages` (canonical history) in place.
     let result: TurnResult
     try {
-      result = await runTurn(
-        cfg,
+      // R2-B P1 — per-turn state bundle. `freshRecovery()` is constructed here
+      // so each turn enters runTurn with a clean counter (byte-identical to the
+      // pre-bundle positional call). All other fields are session-lifetime
+      // handles whose pointers don't change turn-to-turn (just shared by
+      // reference). `workCollector` is per-turn (built above for THIS turn).
+      const state: TurnState = {
         wm,
-        specs,
-        recorder,
-        freshRecovery(),
+        rec: freshRecovery(),
         breaker,
-        classifier,
-        skillGate,
         toolHistory,
-        guardChain,
-        activeSkills,
         workingState,
-        workCollector,
-        summaryArchive,
-        turn,
+        collector: workCollector,
         toolChoiceState,
-        memoryCitations,
-        recordRedaction,
-        recordTurnTiming,
-      )
+        citations: memoryCitations,
+        onRedaction: recordRedaction,
+        onTurnTiming: recordTurnTiming,
+      }
+      result = await runTurn(turn, session, state)
       turnSpanStatus =
         result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"
     } catch (e) {
