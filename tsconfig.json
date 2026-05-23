@@ -64,7 +64,9 @@
       "@/auth": ["./src/auth/index.ts"],
       "@/auth/*": ["./src/auth/*"],
       "@/ui": ["./src/ui/index.ts"],
-      "@/ui/*": ["./src/ui/*"]
+      "@/ui/*": ["./src/ui/*"],
+      "@/runner": ["./src/runner/index.ts"],
+      "@/runner/*": ["./src/runner/*"]
     }
   },
   "include": ["src", "tests", "tools"],

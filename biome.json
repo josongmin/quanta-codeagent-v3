@@ -624,6 +624,36 @@
     },
     {
       "includes": [
+        "**/src/runner/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — Layer-2 @/runner must reach rules via @/agent.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — Layer-2 @/runner does not touch raw patches.",
+                  "@/migration": "Slice isolation (RFC 3.1): @/migration is a one-off translator slice — Layer-2 @/runner does not own session-format translation."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/**",
+                      "**/src/apps/**"
+                    ],
+                    "message": "Surface isolation: @/runner is a Layer-2 surface-AGNOSTIC slice. It must NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench, apps/eval, apps/probe). Surface entries depend on @/runner, never the reverse. ENV/argv/HTTP/IPC parsing belongs in the surface; @/runner takes plain typed config."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
         "src/**",
         "!src/apps/**",
         "!src/llm/**",
@@ -633,6 +663,7 @@
         "!src/stream/**",
         "!src/permission/**",
         "!src/runtime/**",
+        "!src/runner/**",
         "!src/lsp/**",
         "!src/mcp/**",
         "!src/observability/**",
