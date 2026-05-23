@@ -75,6 +75,31 @@ export type SubmissionOp =
   /** Reload host-side user config (e.g. permissions, mode). Acknowledged
    *  as a shape but the loop does not re-read its own config mid-run. */
   | { kind: "reload_user_config" }
+  /** Plan-mode cluster (P3, 2026-05-23): collaboration-mode transition.
+   *  Mirrors {@link CollaborationMode} in `@/agent/mode.ts` — closed 2-mode
+   *  enum (`default`/`plan`). `reason` is OPTIONAL free-form text
+   *  (analytics/UI hint, never used for control flow).
+   *
+   *  Loop wiring is INTENTIONALLY out of scope for P3 (this is the typed
+   *  envelope only). A follow-up will route the op through
+   *  {@link applyDeveloperModeTransition} and emit the matching
+   *  `mode_changed` AgentEvent. */
+  | { kind: "set_mode"; mode: "default" | "plan"; reason?: string }
+
+/** Closed enumeration of {@link SubmissionOp} discriminants. Adding a new
+ *  variant to the union MUST also extend this array — the matching
+ *  `submission-set-mode-hell.test.ts` exhaustive-coverage assertion fails CI
+ *  otherwise. Mirrors `RESPONSE_QUEUED_REASONS` / `ALL_PAUSED_REASONS` in
+ *  shape. Frozen so accidental mutation by a consumer is a hard error. */
+export const ALL_SUBMISSION_OP_KINDS: readonly SubmissionOp["kind"][] = Object.freeze([
+  "user_input",
+  "user_input_with_turn_context",
+  "interrupt",
+  "cancel_subagent",
+  "shutdown",
+  "reload_user_config",
+  "set_mode",
+] as const)
 
 /**
  * Typed submission envelope.
