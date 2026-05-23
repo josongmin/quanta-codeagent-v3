@@ -1,7 +1,14 @@
 import { homedir } from "node:os"
 import { emitKeypressEvents } from "node:readline"
 import * as readline from "node:readline/promises"
-import { type AgentConfig, buildSystemPrompt, RetryingLLM } from "@/agent"
+import {
+  type AgentConfig,
+  buildSystemPrompt,
+  type EffortLevel,
+  parseEffort,
+  RetryingLLM,
+  resolveAgentMode,
+} from "@/agent"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import {
   buildCostDashboard,
@@ -54,6 +61,7 @@ import {
   slashCompleter,
 } from "./slash-commands"
 import { installStatusBar, type StatusBar } from "./status-bar"
+import { createStatusPills, type SandboxMode } from "./status-pills"
 import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
 
 /**
@@ -213,6 +221,45 @@ const buildSkillsCallback = (
     }
     return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   }
+}
+
+/** Build and wire the 4-pill status chrome (workspace / mode+effort / skills /
+ *  sandbox). Extracted from {@link runRepl} so that the per-pill resolution
+ *  logic (planMode→AgentMode, QUANTA_EFFORT, QUANTA_SANDBOX, async skill
+ *  discovery) does not push `runRepl` past the biome cognitive-complexity
+ *  budget. Returns the live {@link StatusPills} handle; caller owns dispose.
+ *
+ *  Default-ON contract: when the underlying TTY is absent, `createStatusPills`
+ *  itself returns a no-op composer (render="" / update=no-op) so callers can
+ *  always call `pills.update(...)` without a TTY check. */
+const installPills = (deps: {
+  statusBar: StatusBar
+  cwd: string
+  planMode: boolean
+  skillsConfig: AgentConfig["skills"] | undefined
+}): ReturnType<typeof createStatusPills> => {
+  const initialAgentMode = resolveAgentMode(undefined, deps.planMode)
+  const initialEffort: EffortLevel | undefined = parseEffort(env("QUANTA_EFFORT", ""))
+  const initialSandbox: SandboxMode = (env("QUANTA_SANDBOX", "default") as SandboxMode) ?? "default"
+  const pills = createStatusPills({
+    statusBar: deps.statusBar,
+    initial: {
+      cwd: deps.cwd,
+      mode: initialAgentMode,
+      ...(initialEffort !== undefined ? { effort: initialEffort } : {}),
+      sandboxMode: initialSandbox,
+    },
+  })
+  // Active-skill inventory — populated opportunistically using the same
+  // discover seam the slash commands use. No skillsConfig ⇒ pill render
+  // skips the slot (composer drops empty/undefined fields).
+  const skillsCbForPills = buildSkillsCallback(deps.skillsConfig)
+  if (skillsCbForPills !== undefined) {
+    void skillsCbForPills()
+      .then((rows) => pills.update({ activeSkills: rows.map((r) => ({ name: r.name })) }))
+      .catch(() => undefined) // best-effort; pills stay empty on discover error
+  }
+  return pills
 }
 
 /** Interactive REPL loop: each line continues the same conversation.
@@ -744,6 +791,13 @@ export const runRepl = async (): Promise<void> => {
     }
   }
 
+  // Status pills (4-pill chrome): workspace / mode+effort / skills / sandbox.
+  // Default-ON when stdout is a TTY; gated by QUANTA_PILLS=0 / individual
+  // QUANTA_PILL_<NAME>=0 envs (see status-pills.ts). Wiring extracted to
+  // `installPills` so `runRepl` stays under the biome cognitive-complexity budget.
+  const pills = installPills({ statusBar, cwd, planMode, skillsConfig })
+
+
   const turn = async (text: string): Promise<void> => {
     // Per-turn AbortController + composite signal: the LLM stream sees
     // an `AbortSignal.any([outerAbort, turnAbort])`, so EITHER a hard
@@ -827,7 +881,12 @@ export const runRepl = async (): Promise<void> => {
       await turn(argPrompt)
     } else {
       // Status bar already installed above; just ensure teardown on exit.
-      process.once("exit", () => statusBar.teardown())
+      // Pills dispose first so any late paint cannot resurrect a stale row
+      // AFTER the scroll region is reset.
+      process.once("exit", () => {
+        pills.dispose()
+        statusBar.teardown()
+      })
       const skillsCb = buildSkillsCallback(skillsConfig)
       const slashCtx = skillsCb !== undefined ? { skills: skillsCb } : undefined
       // Bash-style ↑/↓ history + Ctrl+R reverse-i-search. Default ON
