@@ -35,21 +35,6 @@ export {
 } from "./factory"
 export { fileTreeSummaryTool, inferNextAction } from "./file-tree-summary"
 export type { GhRunner } from "./gh"
-// `read_image` cluster (ADR-0126): tool + composer helper + magic-byte sniffer.
-// The composer is caller-wired (dispatch.ts is NOT modified by this slice) —
-// when the helper is plumbed, `ToolResult.images` flows into the model's
-// tool_result content; absent ⇒ legacy string shape (byte-identical).
-export {
-  composeToolResultContent,
-  MAX_IMAGE_BYTES as READ_IMAGE_MAX_BYTES,
-  type ReadImageInput,
-  readImageInputSchema,
-  readImageTool,
-  sniffMediaType,
-  SUPPORTED_MEDIA_TYPES as READ_IMAGE_SUPPORTED_MEDIA_TYPES,
-  type SupportedMediaType as ReadImageSupportedMediaType,
-  type ToolResultContent,
-} from "./image"
 export { defaultGhRunner, ghTools } from "./gh"
 export type {
   GitBlameInput,
@@ -79,6 +64,21 @@ export {
   rankBlame,
   rankChurn,
 } from "./git"
+// `read_image` cluster (ADR-0126): tool + composer helper + magic-byte sniffer.
+// The composer is caller-wired (dispatch.ts is NOT modified by this slice) —
+// when the helper is plumbed, `ToolResult.images` flows into the model's
+// tool_result content; absent ⇒ legacy string shape (byte-identical).
+export {
+  composeToolResultContent,
+  MAX_IMAGE_BYTES as READ_IMAGE_MAX_BYTES,
+  type ReadImageInput,
+  readImageInputSchema,
+  readImageTool,
+  SUPPORTED_MEDIA_TYPES as READ_IMAGE_SUPPORTED_MEDIA_TYPES,
+  type SupportedMediaType as ReadImageSupportedMediaType,
+  sniffMediaType,
+  type ToolResultContent,
+} from "./image"
 export type {
   LspNavProvider,
   LspNavSession,

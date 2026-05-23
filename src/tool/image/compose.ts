@@ -22,9 +22,7 @@
 import type { ImageBlock } from "@/llm"
 import type { ToolResult } from "../types"
 
-export type ToolResultContent =
-  | string
-  | ReadonlyArray<{ type: "text"; text: string } | ImageBlock>
+export type ToolResultContent = string | ReadonlyArray<{ type: "text"; text: string } | ImageBlock>
 
 export const composeToolResultContent = (result: ToolResult): ToolResultContent => {
   if (result.images === undefined || result.images.length === 0) {

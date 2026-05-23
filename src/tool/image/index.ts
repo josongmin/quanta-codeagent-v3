@@ -4,7 +4,7 @@ export {
   type ReadImageInput,
   readImageInputSchema,
   readImageTool,
-  sniffMediaType,
   SUPPORTED_MEDIA_TYPES,
   type SupportedMediaType,
+  sniffMediaType,
 } from "./read"
