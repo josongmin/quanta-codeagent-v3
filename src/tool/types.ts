@@ -1,4 +1,5 @@
 import type { z } from "zod"
+import type { ImageBlock } from "@/llm"
 import type { SensitivityClass } from "@/security"
 import type { HITLTier } from "@/shared"
 import type { ShellExecObserver } from "./shell-exec-types"
@@ -162,6 +163,17 @@ export interface ToolContext {
    *  tools are NOT registered (default-OFF byte-identical for every
    *  existing session). */
   planMutator?: PlanMutator
+  /** ADR-0121 — OPTIONAL turn correlation id for the auto-checkpoint policy.
+   *  The CheckpointPolicy (`@/agent/checkpoint-policy`) reads this to dedup
+   *  per-(workspace, turn): at most ONE auto-anchor per turn in
+   *  `"pre-destructive"` and `"per-turn"` modes, regardless of how many
+   *  destructive tool calls fire. ABSENT ⇒ per-turn dedup cannot apply —
+   *  per-turn mode safely skips (no spam) and pre-destructive mode anchors on
+   *  every destructive call (no dedup window). Duck-typed so `@/tool` never
+   *  imports `@/agent`; the wrap-helper (`withAutoCheckpoint`) reads it through
+   *  this seam. Default-OFF when the orchestration plane does not set it
+   *  (byte-identical for every legacy caller). */
+  turnId?: string
 }
 
 // ── Plan-mode duck-typed mirror (ADR-0093 draft) ─────────────────────────
@@ -497,6 +509,22 @@ export interface ToolResult {
    *  the existing `output` channel). The dispatch seam reads this ONLY when
    *  `QUANTA_CAP_ENFORCE=1` is set — DEFAULT-OFF. */
   nextAction?: NextAction
+  /** OPTIONAL (ADR-0126): structured image attachments to surface to the model
+   *  via the next user message's tool_result content. The dispatch seam reads
+   *  this field and composes an Anthropic-API tool_result block whose `content`
+   *  is `[{type:"text",text:output}, ...images.map(toImageContentBlock)]`.
+   *  Absent ⇒ tool_result content is the legacy string-only shape
+   *  (byte-identical). Each image is a base64-encoded ImageBlock; caller is
+   *  responsible for size/policy checks UPSTREAM.
+   *
+   *  Slice-fence note: this is the FIRST `ToolResult` field whose type is
+   *  imported from `@/llm`. biome's `@/tool` override does NOT restrict `@/llm`
+   *  (only `@/memory`, `@/stream`, `@/permission`, `@/lsp`, `@/observability`,
+   *  `@/mcp`, `@/patch`, `@/rules`), so this import is structurally allowed —
+   *  but the historical doc on `ToolContext` listed `@/llm` among its `MUST
+   *  NEVER import` set. That copy was a doc drift from a pre-vision posture; the
+   *  authoritative slice fence is the biome override. */
+  images?: ImageBlock[]
 }
 
 /** OPTIONAL (absorb #2 — Cursor `EditResult`/`ShellResult`): the discriminated

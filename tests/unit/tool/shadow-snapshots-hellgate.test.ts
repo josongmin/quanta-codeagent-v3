@@ -31,6 +31,10 @@ const fakeOdb = (overrides?: Partial<ShadowOdb>): FakeOdb => {
     diffSinceLast: async () => "",
     diffWorkspaceSinceLast: async () => "",
     rewindToLast: async () => {},
+    // ADR-0122 — extension methods. No-op defaults; tests override per case.
+    restorePartial: async () => {},
+    markVerified: async () => {},
+    rewindToVerified: async () => {},
     // Plain default; the wrapper below is the sole call-recorder (avoids
     // double-counting when a test supplies its own `listSnapshots`).
     listSnapshots: async () => [],

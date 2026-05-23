@@ -61,6 +61,7 @@ export {
   findProgressAuditSkill,
   findPrReviewCanvasSkill,
   findReviewAndShipSkill,
+  findRewindSkill,
   GET_PR_COMMENTS_SKILL_NAME,
   type GetPrCommentsTrigger,
   LOCALIZE_FAULT_SKILL_NAME,
@@ -77,6 +78,8 @@ export {
   type PrReviewCanvasTrigger,
   REVIEW_AND_SHIP_SKILL_NAME,
   type ReviewAndShipTrigger,
+  REWIND_SKILL_NAME,
+  type RewindTrigger,
   systemSkillsDir,
   triggerBabysit,
   triggerFixMergeConflicts,
@@ -88,6 +91,7 @@ export {
   triggerProgressAudit,
   triggerPrReviewCanvas,
   triggerReviewAndShip,
+  triggerRewind,
 } from "./system-skills"
 export { createToolSearchTool } from "./tool-search"
 export type { ParsedFrontmatter, Skill, SkillEffort } from "./types"

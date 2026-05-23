@@ -107,6 +107,64 @@ export interface ShadowOdb {
    *  `maxBytes`. Returns the number of workspace shadow stores
    *  evicted. Never touches anything outside `<baseDir>/snapshots/`. */
   cleanup(maxBytes: number): Promise<number>
+
+  /** Restore ONLY the given paths from the last-registered snapshot
+   *  (`SHADOW_LAST_REF`). All other files in the worktree are untouched.
+   *
+   *  Path safety: every entry must be REPO-RELATIVE (rejects absolute
+   *  paths and any `..` segment — same posture as `conflict-inspect`).
+   *  A bad path → typed `rewind-failed` ShadowOdbError before any FS or
+   *  git mutation runs. `paths.length === 0` is a no-op (returns
+   *  immediately; NO safety-net ref is created — there is nothing to
+   *  protect).
+   *
+   *  Pre-rewind safety net IS still taken when `paths.length > 0` —
+   *  same flow as `rewindToLast` (full-tree pre-rewind ref, so the user
+   *  can recover even if the partial restore unintentionally clobbered
+   *  unrelated edits the agent forgot were there).
+   *
+   *  Throws `uninitialized` when `SHADOW_LAST_REF` is missing. Honours
+   *  the MERGE_HEAD guard (same as `rewindToLast` unless
+   *  `opts.allowDirtyMerge`). `opts.untracked` is IGNORED — partial
+   *  restore touches only the named files; "untracked" has no analogue
+   *  in that scope.
+   *
+   *  Concurrent calls against the same workspace are serialized by the
+   *  same per-workspace lock that protects `registerHead` /
+   *  `rewindToLast` / `markVerified` / `rewindToVerified`. */
+  restorePartial(
+    workspaceRoot: string,
+    paths: ReadonlyArray<string>,
+    opts?: RewindOptions,
+  ): Promise<void>
+
+  /** Mark the current worktree as "known good" — records the SHA the
+   *  `SHADOW_LAST_REF` currently points at under
+   *  `SHADOW_LAST_VERIFIED_REF`. The caller is responsible for invoking
+   *  this only when their verify gate (typecheck + tests + …) passed;
+   *  this port is the durable anchor surface, not the policy.
+   *
+   *  Idempotent within a turn: a second call simply overwrites the ref
+   *  with the (possibly same, possibly newer) `SHADOW_LAST_REF` SHA.
+   *
+   *  Throws `uninitialized` if `SHADOW_LAST_REF` is missing — caller
+   *  must `registerHead` before they can mark anything as verified.
+   *
+   *  Same per-workspace lock as the other mutating calls. */
+  markVerified(workspaceRoot: string): Promise<void>
+
+  /** Restore tracked files to the last VERIFIED snapshot
+   *  (`SHADOW_LAST_VERIFIED_REF`), NOT the last-registered. Semantics
+   *  are otherwise identical to `rewindToLast`:
+   *    - Pre-rewind safety net captured BEFORE the destructive checkout.
+   *    - `<workspace>/.git/MERGE_HEAD` exists → throws "merge-in-progress"
+   *      unless `opts.allowDirtyMerge === true`.
+   *    - Untracked-file policy per `opts.untracked` (preserve default).
+   *    - `SHADOW_LAST_REF` is NOT advanced — verified is a separate axis.
+   *
+   *  Throws `no-verified-anchor` when `markVerified` was never called
+   *  for this workspace. Same per-workspace lock as siblings. */
+  rewindToVerified(workspaceRoot: string, opts?: RewindOptions): Promise<void>
 }
 
 /** Constructor seam for the default implementation. Every collaborator
@@ -148,11 +206,23 @@ export type ShadowOdbErrorCode =
   | "nested-shadow"
   | "merge-in-progress"
   | "rewind-failed"
+  /** `markVerified` never called for this workspace — `rewindToVerified`
+   *  has no anchor to restore to. The verified ref must be explicitly
+   *  established by the caller (e.g. through the
+   *  `VerifyCheckpointBridge`, ADR-0123) before `rewindToVerified` can
+   *  succeed. */
+  | "no-verified-anchor"
 
 /** Canonical ref name used to advance the snapshot pointer. Hard-coded
  *  so tests + audits can grep for it and so a malicious caller cannot
  *  pass an arbitrary ref name through the public API (HELL-14). */
 export const SHADOW_LAST_REF = "refs/quanta/snapshots/last-registered" as const
+
+/** Canonical ref name for the "last verified" anchor — advanced ONLY when
+ *  the caller invokes `markVerified` (ADR-0122). `rewindToVerified` is the
+ *  consumer. Hard-coded for the same path-traversal / ref-injection
+ *  defense reason as `SHADOW_LAST_REF`. */
+export const SHADOW_LAST_VERIFIED_REF = "refs/quanta/snapshots/last-verified" as const
 
 /** Canonical prefix for safety-net refs created right before `rewindToLast`
  *  performs its destructive checkout. Each rewind appends a UTC-ISO-second

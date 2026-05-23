@@ -1,0 +1,55 @@
+diff --git a/requests/adapters.py b/requests/adapters.py
+index fe22ff45..d097659d 100644
+--- a/requests/adapters.py
++++ b/requests/adapters.py
+@@ -411,7 +411,7 @@ class HTTPAdapter(BaseAdapter):
+ 
+         try:
+             conn = self.get_connection(request.url, proxies)
+-        except LocationValueError as e:
++        except (UnicodeError, LocationValueError) as e:
+             raise InvalidURL(e, request=request)
+ 
+         self.cert_verify(conn, request.url, verify, cert)
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..9bc4485d 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -383,7 +383,13 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         try:
+             scheme, auth, host, port, path, query, fragment = parse_url(url)
+         except LocationParseError as e:
++            # urllib3 raises LocationParseError for invalid hosts (e.g. empty
++            # labels). Normalize to a Requests exception for consistency.
+             raise InvalidURL(*e.args)
++        except UnicodeError:
++            # Some urllib3/idna combinations can raise UnicodeError directly for
++            # invalid host labels. Normalize to InvalidURL.
++            raise InvalidURL('URL has an invalid label.')
+ 
+         if not scheme:
+             error = ("Invalid URL {0!r}: No schema supplied. Perhaps you meant http://{0}?")
+@@ -394,16 +400,19 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         if not host:
+             raise InvalidURL("Invalid URL %r: No host supplied" % url)
+ 
++        if host.startswith((u'.', u'-')):
++            raise InvalidURL('URL has an invalid label.')
++
+         # In general, we want to try IDNA encoding the hostname if the string contains
+         # non-ASCII characters. This allows users to automatically get the correct IDNA
+         # behaviour. For strings containing only ASCII characters, we need to also verify
+         # it doesn't start with a wildcard (*), before allowing the unencoded hostname.
+-        if not unicode_is_ascii(host):
+-            try:
++        try:
++            if not unicode_is_ascii(host):
+                 host = self._get_idna_encoded_host(host)
+-            except UnicodeError:
++            elif host.startswith(u'*'):
+                 raise InvalidURL('URL has an invalid label.')
+-        elif host.startswith(u'*'):
++        except UnicodeError:
+             raise InvalidURL('URL has an invalid label.')
+ 
+         # Carefully reconstruct the network location

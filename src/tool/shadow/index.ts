@@ -1,11 +1,17 @@
-/** Shadow-store tools (ADR-0119) — agent-level (NOT in defaultTools). The
- *  assembly layer registers them ONLY when `AgentConfig.shadowOdb` is set,
+/** Shadow-store tools (ADR-0119 + ADR-0122) — agent-level (NOT in defaultTools).
+ *  The assembly layer registers them ONLY when `AgentConfig.shadowOdb` is set,
  *  mirroring `branch_search` from ADR-0083. */
 import type { ShadowOdb } from "@/storage/shadow-odb"
 import type { Tool } from "../types"
+import { shadowRestorePartialTool } from "./restore-partial"
 import { shadowRewindTool } from "./rewind"
 import { shadowSnapshotsTool } from "./snapshots"
 
+export {
+  type ShadowRestorePartialInput,
+  shadowRestorePartialInputSchema,
+  shadowRestorePartialTool,
+} from "./restore-partial"
 export {
   type ShadowRewindInput,
   shadowRewindInputSchema,
@@ -18,8 +24,11 @@ export {
 } from "./snapshots"
 
 /** Build the shadow tools wired to a `ShadowOdb` port. Order: read-only first
- *  (snapshots), then mutating (rewind) — matches `gitTools` convention. */
+ *  (snapshots), then destructive (restore_partial → rewind). Matches `gitTools`
+ *  convention of read-only-first; `restore_partial` precedes `rewind` because
+ *  it is the more-surgical of the two destructive operations. */
 export const shadowTools = (odb: ShadowOdb): Tool[] => [
   shadowSnapshotsTool(odb) as Tool,
+  shadowRestorePartialTool(odb) as Tool,
   shadowRewindTool(odb) as Tool,
 ]

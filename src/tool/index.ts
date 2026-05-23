@@ -6,6 +6,7 @@ import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
+import { readImageTool } from "./image"
 import { localizeTool } from "./localize"
 import { parseTestFailureTool } from "./parse-test-failure"
 import { makeReadTool, readTool } from "./read"
@@ -34,6 +35,21 @@ export {
 } from "./factory"
 export { fileTreeSummaryTool, inferNextAction } from "./file-tree-summary"
 export type { GhRunner } from "./gh"
+// `read_image` cluster (ADR-0126): tool + composer helper + magic-byte sniffer.
+// The composer is caller-wired (dispatch.ts is NOT modified by this slice) —
+// when the helper is plumbed, `ToolResult.images` flows into the model's
+// tool_result content; absent ⇒ legacy string shape (byte-identical).
+export {
+  composeToolResultContent,
+  MAX_IMAGE_BYTES as READ_IMAGE_MAX_BYTES,
+  type ReadImageInput,
+  readImageInputSchema,
+  readImageTool,
+  sniffMediaType,
+  SUPPORTED_MEDIA_TYPES as READ_IMAGE_SUPPORTED_MEDIA_TYPES,
+  type SupportedMediaType as ReadImageSupportedMediaType,
+  type ToolResultContent,
+} from "./image"
 export { defaultGhRunner, ghTools } from "./gh"
 export type {
   GitBlameInput,
@@ -96,10 +112,16 @@ export { planErrorMessage, planFailure } from "./plan/error-mapping"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
-// Shadow-store tools (ADR-0119). Built only when the assembly seam wires
-// `AgentConfig.shadowOdb`; NOT part of `defaultTools` — see tier1/shadow.ts.
-export type { ShadowRewindInput, ShadowSnapshotsInput } from "./shadow"
+// Shadow-store tools (ADR-0119 + ADR-0122). Built only when the assembly seam
+// wires `AgentConfig.shadowOdb`; NOT part of `defaultTools` — see tier1/shadow.ts.
+export type {
+  ShadowRestorePartialInput,
+  ShadowRewindInput,
+  ShadowSnapshotsInput,
+} from "./shadow"
 export {
+  shadowRestorePartialInputSchema,
+  shadowRestorePartialTool,
   shadowRewindInputSchema,
   shadowRewindTool,
   shadowSnapshotsInputSchema,
@@ -192,6 +214,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => [
   grepTool as Tool,
   globTool as Tool,
   localizeTool as Tool,
+  // ADR-0126: `read_image` — vision-input. Read-only + concurrency-safe;
+  // belongs in the always-on default set. Sessions that never call it are
+  // byte-identical (the composer helper is caller-wired and absent from
+  // dispatch.ts by design — `ToolResult.images` simply rides the OK result
+  // until a future PR plumbs it into the tool_result content).
+  readImageTool as Tool,
   // Fault-localization aids (Codex signal absorption): file_tree_summary for
   // Stage-1 structure, parse_test_failure for Stage-3 log→file:line. Both
   // read-only + concurrency-safe; sessions that never call them are unchanged.

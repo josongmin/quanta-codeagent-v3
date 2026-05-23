@@ -27,6 +27,17 @@ export const shadowRewindInputSchema = z.object({
     .boolean()
     .optional()
     .describe("When true, proceed even if .git/MERGE_HEAD exists. Default false."),
+  // ADR-0122 — which snapshot to restore. `"last"` (default) = the most
+  // recent `registerHead` ref. `"verified"` = the SHADOW_LAST_VERIFIED_REF
+  // (advanced ONLY when caller invokes `markVerified` — typically wired
+  // via the auto-verify checkpoint bridge, ADR-0123). Absent ⇒ "last"
+  // (byte-identical for every existing caller).
+  target: z
+    .enum(["last", "verified"])
+    .optional()
+    .describe(
+      "Snapshot to restore (default 'last'). 'verified' uses the last markVerified anchor.",
+    ),
 })
 export type ShadowRewindInput = z.infer<typeof shadowRewindInputSchema>
 
@@ -79,22 +90,28 @@ export const shadowRewindTool = (odb: ShadowOdb): Tool<ShadowRewindInput> => ({
         ? { allowDirtyMerge: parsed.data.allowDirtyMerge }
         : {}),
     }
+    const target = parsed.data.target ?? "last"
     yield {
       type: "progress",
-      message: "shadow_rewind: capturing safety-net ref + restoring snapshot…",
+      message: `shadow_rewind: capturing safety-net ref + restoring ${target} snapshot…`,
     }
     try {
-      await odb.rewindToLast(ctx.cwd, opts)
+      if (target === "verified") {
+        await odb.rewindToVerified(ctx.cwd, opts)
+      } else {
+        await odb.rewindToLast(ctx.cwd, opts)
+      }
     } catch (e) {
       yield { type: "result", result: { ok: false, output: errorToResult(e) } }
       return
     }
     const policy = parsed.data.untracked ?? "preserve"
+    const label = target === "verified" ? "last verified snapshot" : "last snapshot"
     yield {
       type: "result",
       result: {
         ok: true,
-        output: `Restored tracked files to last snapshot. Untracked policy: ${policy}. Pre-rewind ref saved.`,
+        output: `Restored tracked files to ${label}. Untracked policy: ${policy}. Pre-rewind ref saved.`,
       },
     }
   },

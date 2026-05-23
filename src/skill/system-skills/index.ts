@@ -122,3 +122,6 @@ export {
   REVIEW_AND_SHIP_SKILL_NAME,
   triggerReviewAndShip,
 } from "./review-and-ship"
+// ADR-0122 — /rewind system skill (3-tool shadow-restore decision tree).
+export type { RewindTrigger } from "./rewind"
+export { findRewindSkill, REWIND_SKILL_NAME, triggerRewind } from "./rewind"

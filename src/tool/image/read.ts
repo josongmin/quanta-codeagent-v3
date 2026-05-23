@@ -1,0 +1,253 @@
+/**
+ * `read_image` tool (ADR-0126) — vision-input slice.
+ *
+ * Reads an image file from disk, magic-byte-sniffs the media type, and surfaces
+ * it via `ToolResult.images` so the dispatch seam can compose a structured
+ * tool_result content array (text + image) the model can actually see.
+ *
+ * Slice posture:
+ *   - Imports ONLY: `zod`, `node:fs/promises`, `node:path`, `@/llm` (for the
+ *     `ImageBlock` type), `../types`. NO `@/agent`, `@/permission`,
+ *     `@/storage` (path safety is local — leaf-symlink + size cap + magic-byte).
+ *   - No-throw: every failure mode yields a typed `ok:false` `ToolResult`.
+ *   - exactOptionalPropertyTypes-clean: `images` is added on the OK result
+ *     only; ok:false results never carry the field (the helper composer treats
+ *     absent === empty).
+ *
+ * Security:
+ *   - Leaf-symlink reject (`lstat().isSymbolicLink()`) — prevents the model
+ *     from indirecting through a symlink into a forbidden path.
+ *   - 5 MB cap (Anthropic Messages vision raw-byte ceiling).
+ *   - MIME from magic bytes, NOT extension — a `.png` that's actually JPEG is
+ *     classified by content, and a spoofed extension over non-image bytes is
+ *     rejected as "unsupported or unrecognized media type".
+ */
+
+import { lstat } from "node:fs/promises"
+import path from "node:path"
+import { z } from "zod"
+import type { ImageBlock } from "@/llm"
+import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+
+export const readImageInputSchema = z.object({
+  path: z.string().min(1).describe("Repo-relative or absolute path to the image file"),
+})
+export type ReadImageInput = z.infer<typeof readImageInputSchema>
+
+/** Supported media types — Anthropic Messages API vision support. Hardcoded
+ *  list (NOT extension-only) so a misnamed file (.png that's actually JPEG)
+ *  is detected by magic bytes, not by trusting the path. */
+export const SUPPORTED_MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const
+export type SupportedMediaType = (typeof SUPPORTED_MEDIA_TYPES)[number]
+
+/** Anthropic vision cap — 5 MB raw bytes (before base64). We reject above this
+ *  at the tool boundary; future re-encoding/downsizing belongs in a follow-up. */
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+/** Magic-byte sniff. Returns null when the bytes don't match any supported
+ *  type; the tool emits ok:false in that case (the only typed-content
+ *  invariant — extension is for hints, magic bytes are the SSOT).
+ *
+ *  Signatures:
+ *    PNG  : 89 50 4E 47 0D 0A 1A 0A
+ *    JPEG : FF D8 FF
+ *    GIF  : 47 49 46 38 (then 37 or 39) 61 — "GIF87a" / "GIF89a"
+ *    WEBP : 52 49 46 46 .. .. .. .. 57 45 42 50 — "RIFF" + 4 byte length + "WEBP"
+ */
+export const sniffMediaType = (bytes: Uint8Array): SupportedMediaType | null => {
+  if (bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a) {
+    return "image/png"
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg"
+  }
+  if (
+    bytes.length >= 6 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38 &&
+    (bytes[4] === 0x37 || bytes[4] === 0x39) &&
+    bytes[5] === 0x61
+  ) {
+    return "image/gif"
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp"
+  }
+  return null
+}
+
+/** Resolve repo-relative paths against `cwd`; absolute paths pass through
+ *  (absolute input is explicit user consent — same posture as git_diff).
+ *  Returns the resolved absolute path AND a `withinCwd` flag the caller uses
+ *  to reject `..`-traversal on relative inputs. */
+const resolveImagePath = (
+  raw: string,
+  cwd: string,
+): { abs: string; explicitlyAbsolute: boolean; withinCwd: boolean } => {
+  const explicitlyAbsolute = path.isAbsolute(raw)
+  const abs = explicitlyAbsolute ? path.resolve(raw) : path.resolve(cwd, raw)
+  const resolvedCwd = path.resolve(cwd)
+  const withinCwd = abs === resolvedCwd || abs.startsWith(resolvedCwd + path.sep)
+  return { abs, explicitlyAbsolute, withinCwd }
+}
+
+/** Build the ok:false result for a `not_found`/lstat-failure. We surface the
+ *  raw error code/message in `output` (the model treats it as a typed signal)
+ *  AND attach a typed `failure` so a future router can branch without regex. */
+const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult =>
+  failure === undefined ? { ok: false, output } : { ok: false, output, failure }
+
+export const readImageTool: Tool<ReadImageInput> = {
+  name: "read_image",
+  description:
+    "Read an image file and attach it to the model's view via the next tool_result. " +
+    "Supports PNG, JPEG, WebP, GIF; up to 5 MB.",
+  inputSchema: readImageInputSchema,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+
+  async *execute(input: ReadImageInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const parsed = readImageInputSchema.safeParse(input)
+    if (!parsed.success) {
+      yield {
+        type: "result",
+        result: errResult(`invalid input: ${parsed.error.message}`),
+      }
+      return
+    }
+    if (ctx.signal.aborted) {
+      yield {
+        type: "result",
+        result: errResult("aborted before start"),
+      }
+      return
+    }
+
+    const { abs, explicitlyAbsolute, withinCwd } = resolveImagePath(parsed.data.path, ctx.cwd)
+    if (!explicitlyAbsolute && !withinCwd) {
+      yield {
+        type: "result",
+        result: errResult(`path outside cwd: ${parsed.data.path}`, {
+          mode: "permission_denied",
+          path: parsed.data.path,
+          isReadonly: false,
+        }),
+      }
+      return
+    }
+
+    let stat: Awaited<ReturnType<typeof lstat>>
+    try {
+      stat = await lstat(abs)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // ENOENT → typed not_found; other lstat errors fall through to generic.
+      const isEnoent =
+        typeof e === "object" && e !== null && (e as { code?: unknown }).code === "ENOENT"
+      yield {
+        type: "result",
+        result: errResult(
+          isEnoent ? `File not found: ${parsed.data.path}` : `lstat failed: ${msg}`,
+          isEnoent
+            ? { mode: "not_found", path: parsed.data.path }
+            : { mode: "error", modelVisibleError: msg },
+        ),
+      }
+      return
+    }
+    if (stat.isSymbolicLink()) {
+      yield {
+        type: "result",
+        result: errResult(`symlink not allowed: ${parsed.data.path}`, {
+          mode: "permission_denied",
+          path: parsed.data.path,
+          isReadonly: false,
+        }),
+      }
+      return
+    }
+    if (!stat.isFile()) {
+      yield {
+        type: "result",
+        result: errResult(`not a regular file: ${parsed.data.path}`, {
+          mode: "not_found",
+          path: parsed.data.path,
+        }),
+      }
+      return
+    }
+    if (stat.size > MAX_IMAGE_BYTES) {
+      yield {
+        type: "result",
+        result: errResult(
+          `image too large: ${stat.size} bytes (cap ${MAX_IMAGE_BYTES})`,
+          { mode: "error", modelVisibleError: "image_over_cap" },
+        ),
+      }
+      return
+    }
+
+    let bytes: Uint8Array
+    try {
+      bytes = await Bun.file(abs).bytes()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      yield {
+        type: "result",
+        result: errResult(`read failed: ${msg}`, {
+          mode: "error",
+          modelVisibleError: msg,
+        }),
+      }
+      return
+    }
+
+    const mediaType = sniffMediaType(bytes)
+    if (mediaType === null) {
+      yield {
+        type: "result",
+        result: errResult(
+          `unsupported or unrecognized media type: ${parsed.data.path}`,
+          { mode: "error", modelVisibleError: "unsupported_media_type" },
+        ),
+      }
+      return
+    }
+
+    const data = Buffer.from(bytes).toString("base64")
+    const image: ImageBlock = { type: "image", data, mediaType }
+    yield {
+      type: "result",
+      result: {
+        ok: true,
+        output: `Read image: ${path.basename(abs)} (${mediaType}, ${bytes.length} bytes)`,
+        images: [image],
+      },
+    }
+  },
+}

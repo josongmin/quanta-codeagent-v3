@@ -35,6 +35,7 @@ import { workspaceHash } from "./hash"
 import {
   type RewindOptions,
   SHADOW_LAST_REF,
+  SHADOW_LAST_VERIFIED_REF,
   SHADOW_PRE_REWIND_REF_PREFIX,
   type ShadowInitResult,
   type ShadowOdb,
@@ -239,13 +240,57 @@ const ensureNotNested = async (shadowDir: string, workspaceRoot: string): Promis
 /* refspec safety                                                      */
 /* ------------------------------------------------------------------ */
 
-/** SHADOW_LAST_REF is the only ref we ever write. We additionally
- *  guard against accidental future code paths that build a ref from
- *  user input: the resolver rejects anything that doesn't match the
- *  hard-coded prefix. */
+/** SHADOW_LAST_REF + SHADOW_LAST_VERIFIED_REF are the only refs we ever
+ *  WRITE (the pre-rewind refs are dynamically-named via the
+ *  `SHADOW_PRE_REWIND_REF_PREFIX` + ISO timestamp helper, validated
+ *  inside the rewind flow). We guard against accidental future code
+ *  paths that build a ref from user input: the resolver rejects
+ *  anything that doesn't match the hard-coded ref names. */
 const assertSafeRef = (ref: string): void => {
-  if (ref !== SHADOW_LAST_REF) {
+  if (ref !== SHADOW_LAST_REF && ref !== SHADOW_LAST_VERIFIED_REF) {
     throw new ShadowOdbError("invalid-ref", `refusing non-canonical ref name: ${ref}`)
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* repo-relative path validation                                       */
+/* ------------------------------------------------------------------ */
+
+/** Validate that every entry in `paths` is a REPO-RELATIVE path (rejects
+ *  absolute paths and any `..` segment — same posture as the
+ *  `conflict-inspect` tool). Used by `restorePartial` BEFORE any
+ *  filesystem / git mutation runs so a malicious entry never reaches
+ *  the spawn boundary. Empty strings and `..` segments are explicit
+ *  rejections; `.` (current-dir) is allowed since `git checkout` treats
+ *  it as a no-op pathspec.
+ *
+ *  We do NOT use `path.relative`/`path.resolve` here — those would
+ *  silently normalize `a/../b` to `b` and lose the intent signal.
+ *  The split is on `/` only because `restorePartial`'s contract is
+ *  POSIX-style repo paths (matches git's own pathspec normalization). */
+const assertRepoRelativePaths = (paths: ReadonlyArray<string>): void => {
+  for (const p of paths) {
+    if (p.length === 0) {
+      throw new ShadowOdbError("rewind-failed", "empty path in restorePartial paths")
+    }
+    if (isAbsolute(p)) {
+      throw new ShadowOdbError(
+        "rewind-failed",
+        `restorePartial rejected absolute path: ${JSON.stringify(p)}`,
+      )
+    }
+    // POSIX `/` AND OS-native sep — handle both so a Windows backslash
+    // path can't sneak `..\..\etc` past the POSIX check (defense in
+    // depth; production target is *nix but the rejection is cheap).
+    const segs = p.split(/[/\\]/u)
+    for (const seg of segs) {
+      if (seg === "..") {
+        throw new ShadowOdbError(
+          "rewind-failed",
+          `restorePartial rejected path traversal segment in: ${JSON.stringify(p)}`,
+        )
+      }
+    }
   }
 }
 
@@ -611,6 +656,254 @@ export const defaultShadowOdb = (cfg: ShadowOdbConfig = {}): ShadowOdb => {
           }
         }
         // (9) Do NOT advance SHADOW_LAST_REF — see comment at top.
+      })
+    },
+
+    /* ADR-0122 — `restorePartial`. Path-scoped checkout of named files
+     *  from SHADOW_LAST_REF, leaving every other worktree file untouched.
+     *
+     *  Sequence (mirrors `rewindToLast` with one substitution):
+     *   1. validate workspace path (same posture).
+     *   2. validate path entries (repo-relative, no `..`).
+     *   3. `paths.length === 0` → return without taking a safety net.
+     *   4. ensure shadow init.
+     *   5. SHADOW_LAST_REF must exist → else `uninitialized`.
+     *   6. MERGE_HEAD guard (same as `rewindToLast`; honors allowDirtyMerge).
+     *   7. safety-net pre-rewind ref (FULL-tree, NOT path-scoped — so a user
+     *      who mis-targets the wrong file can still recover unrelated edits).
+     *   8. `git checkout SHADOW_LAST_REF -- <paths...>` — the path-scoped
+     *      counterpart to step (6) of `rewindToLast`'s read-tree+checkout-index
+     *      flow. Fails with `rewind-failed` if any path does not exist in the
+     *      snapshot. */
+    async restorePartial(
+      workspaceRoot: string,
+      paths: ReadonlyArray<string>,
+      opts?: RewindOptions,
+    ): Promise<void> {
+      const canonical = await validateWorkspaceRoot(workspaceRoot)
+      assertRepoRelativePaths(paths)
+      if (paths.length === 0) return
+      const st = resolveState(canonical)
+      await serialize(st, async () => {
+        await initInner(st, canonical)
+        // SHADOW_LAST_REF presence check (uninitialized fires BEFORE
+        // safety net so a never-registered workspace doesn't accumulate
+        // pre-rewind refs as a side effect — same invariant as
+        // rewindToLast's HELL-21).
+        const refCheck = await runShadow(runner, st.gitDir, canonical, [
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          SHADOW_LAST_REF,
+        ])
+        if (refCheck.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "uninitialized",
+            `shadow ODB has no ${SHADOW_LAST_REF} for ${canonical} — call registerHead first`,
+          )
+        }
+        if (opts?.allowDirtyMerge !== true) {
+          const mergeHead = join(canonical, ".git", "MERGE_HEAD")
+          let mergeInProgress = false
+          try {
+            await fs.access(mergeHead)
+            mergeInProgress = true
+          } catch {
+            // ENOENT — no merge in progress.
+          }
+          if (mergeInProgress) {
+            throw new ShadowOdbError(
+              "merge-in-progress",
+              `refusing restorePartial: ${mergeHead} exists (pass allowDirtyMerge:true to override)`,
+            )
+          }
+        }
+        // Safety-net: FULL-tree pre-rewind ref. Same logic as
+        // rewindToLast's safety net so the partial-restore caller has
+        // the same recovery surface (a user who restored the wrong path
+        // can still pull back unrelated edits from this ref).
+        const isoTs = now().toISOString().replace(/\..*$/, "Z").replace(/:/g, "-")
+        const preRewindRef = `${SHADOW_PRE_REWIND_REF_PREFIX}${isoTs}`
+        await runShadowOrThrow(runner, st.gitDir, canonical, ["add", "-A"])
+        await runShadowOrThrow(runner, st.gitDir, canonical, [
+          "commit",
+          "--allow-empty",
+          "--no-gpg-sign",
+          "-m",
+          `pre-rewind-partial ${isoTs}`,
+        ])
+        const headRef = await runShadowOrThrow(runner, st.gitDir, canonical, ["rev-parse", "HEAD"])
+        const preSha = headRef.stdout.trim()
+        if (!/^[0-9a-f]{40}$/.test(preSha)) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `unexpected HEAD SHA from pre-rewind-partial commit: ${preSha}`,
+          )
+        }
+        const empty = "0".repeat(40)
+        const updRef = await runShadow(runner, st.gitDir, canonical, [
+          "update-ref",
+          preRewindRef,
+          preSha,
+          empty,
+        ])
+        if (updRef.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `pre-rewind ref ${preRewindRef} create failed: ${updRef.stderr.trim() || updRef.stdout.trim()}`,
+          )
+        }
+        // Path-scoped checkout. The `--` is the standard pathspec
+        // separator; we route every entry as a single argv so spaces
+        // and quotes never get shell-split.
+        const co = await runShadow(runner, st.gitDir, canonical, [
+          "checkout",
+          SHADOW_LAST_REF,
+          "--",
+          ...paths,
+        ])
+        if (co.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `checkout ${SHADOW_LAST_REF} -- <paths> failed: ${co.stderr.trim() || co.stdout.trim()}`,
+          )
+        }
+      })
+    },
+
+    /* ADR-0122 — `markVerified`. Advances `SHADOW_LAST_VERIFIED_REF`
+     *  to whatever SHADOW_LAST_REF currently points at. Idempotent
+     *  (overwrites prior verified ref with the SAME or NEWER sha).
+     *  Throws `uninitialized` if SHADOW_LAST_REF is missing (caller
+     *  must registerHead first). */
+    async markVerified(workspaceRoot: string): Promise<void> {
+      const canonical = await validateWorkspaceRoot(workspaceRoot)
+      const st = resolveState(canonical)
+      await serialize(st, async () => {
+        await initInner(st, canonical)
+        const r = await runShadow(runner, st.gitDir, canonical, [
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          SHADOW_LAST_REF,
+        ])
+        if (r.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "uninitialized",
+            `shadow ODB has no ${SHADOW_LAST_REF} for ${canonical} — call registerHead first`,
+          )
+        }
+        const sha = r.stdout.trim()
+        if (!/^[0-9a-f]{40}$/.test(sha)) {
+          throw new ShadowOdbError("git-failed", `unexpected SHA from rev-parse: ${sha}`)
+        }
+        assertSafeRef(SHADOW_LAST_VERIFIED_REF)
+        await runShadowOrThrow(runner, st.gitDir, canonical, [
+          "update-ref",
+          SHADOW_LAST_VERIFIED_REF,
+          sha,
+        ])
+      })
+    },
+
+    /* ADR-0122 — `rewindToVerified`. Mirror of `rewindToLast` but
+     *  pointed at SHADOW_LAST_VERIFIED_REF. Throws `no-verified-anchor`
+     *  when `markVerified` was never called. Does NOT advance either
+     *  the registered OR the verified ref. */
+    async rewindToVerified(workspaceRoot: string, opts?: RewindOptions): Promise<void> {
+      const canonical = await validateWorkspaceRoot(workspaceRoot)
+      const st = resolveState(canonical)
+      await serialize(st, async () => {
+        await initInner(st, canonical)
+        // Verified-ref presence check (no-verified-anchor BEFORE safety
+        // net — same invariant as rewindToLast's uninitialized check).
+        const refCheck = await runShadow(runner, st.gitDir, canonical, [
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          SHADOW_LAST_VERIFIED_REF,
+        ])
+        if (refCheck.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "no-verified-anchor",
+            `shadow ODB has no ${SHADOW_LAST_VERIFIED_REF} for ${canonical} — call markVerified first`,
+          )
+        }
+        if (opts?.allowDirtyMerge !== true) {
+          const mergeHead = join(canonical, ".git", "MERGE_HEAD")
+          let mergeInProgress = false
+          try {
+            await fs.access(mergeHead)
+            mergeInProgress = true
+          } catch {
+            // ENOENT — no merge in progress.
+          }
+          if (mergeInProgress) {
+            throw new ShadowOdbError(
+              "merge-in-progress",
+              `refusing rewindToVerified: ${mergeHead} exists (pass allowDirtyMerge:true to override)`,
+            )
+          }
+        }
+        // Safety-net pre-rewind ref. Identical name/flow to rewindToLast.
+        const isoTs = now().toISOString().replace(/\..*$/, "Z").replace(/:/g, "-")
+        const preRewindRef = `${SHADOW_PRE_REWIND_REF_PREFIX}${isoTs}`
+        await runShadowOrThrow(runner, st.gitDir, canonical, ["add", "-A"])
+        await runShadowOrThrow(runner, st.gitDir, canonical, [
+          "commit",
+          "--allow-empty",
+          "--no-gpg-sign",
+          "-m",
+          `pre-rewind-verified ${isoTs}`,
+        ])
+        const headRef = await runShadowOrThrow(runner, st.gitDir, canonical, ["rev-parse", "HEAD"])
+        const preSha = headRef.stdout.trim()
+        if (!/^[0-9a-f]{40}$/.test(preSha)) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `unexpected HEAD SHA from pre-rewind-verified commit: ${preSha}`,
+          )
+        }
+        const empty = "0".repeat(40)
+        const updRef = await runShadow(runner, st.gitDir, canonical, [
+          "update-ref",
+          preRewindRef,
+          preSha,
+          empty,
+        ])
+        if (updRef.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `pre-rewind ref ${preRewindRef} create failed: ${updRef.stderr.trim() || updRef.stdout.trim()}`,
+          )
+        }
+        const rt = await runShadow(runner, st.gitDir, canonical, [
+          "read-tree",
+          "--reset",
+          SHADOW_LAST_VERIFIED_REF,
+        ])
+        if (rt.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `read-tree --reset ${SHADOW_LAST_VERIFIED_REF} failed: ${rt.stderr.trim()}`,
+          )
+        }
+        const ci = await runShadow(runner, st.gitDir, canonical, ["checkout-index", "-a", "-f"])
+        if (ci.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `checkout-index -a -f failed: ${ci.stderr.trim()}`,
+          )
+        }
+        if (opts?.untracked === "discard") {
+          const cl = await runShadow(runner, st.gitDir, canonical, ["clean", "-fd"])
+          if (cl.exitCode !== 0) {
+            throw new ShadowOdbError("rewind-failed", `clean -fd failed: ${cl.stderr.trim()}`)
+          }
+        }
+        // SHADOW_LAST_REF + SHADOW_LAST_VERIFIED_REF are both intentionally
+        // NOT advanced — same reasoning as rewindToLast (worktree now
+        // matches old verified content; both refs still describe truth).
       })
     },
 

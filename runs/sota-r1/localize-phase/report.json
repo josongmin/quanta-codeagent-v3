@@ -1,0 +1,40 @@
+{
+  "timestamp": "2026-05-23T19:07:04.765Z",
+  "model": "gpt-5",
+  "provider": "chatgpt-oauth",
+  "n": 1,
+  "totals": {
+    "total": 2,
+    "resolved": 1,
+    "resolvedPct": 50
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "harness_error": 1
+    },
+    "bySignal": {
+      "empty_patch": 1
+    }
+  },
+  "perInstance": [
+    {
+      "id": "psf__requests-5414",
+      "passed": true,
+      "turns": 31,
+      "patchBytes": 1882
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": false,
+      "turns": 0,
+      "patchBytes": 0,
+      "error": "empty prediction for sympy__sympy-16886",
+      "failure": {
+        "termination": "harness_error",
+        "signals": [
+          "empty_patch"
+        ]
+      }
+    }
+  ]
+}

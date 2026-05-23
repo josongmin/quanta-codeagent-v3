@@ -43,6 +43,10 @@ const fakeOdb = (overrides?: Partial<ShadowOdb>): FakeOdb => {
     // Plain no-op default; the wrapper below is the sole recorder so we
     // never double-count when a test passes its own `rewindToLast` override.
     rewindToLast: async () => {},
+    // ADR-0122 — extension methods. No-op defaults; tests override per case.
+    restorePartial: async () => {},
+    markVerified: async () => {},
+    rewindToVerified: async () => {},
     listSnapshots: async () => [],
     cleanup: async () => 0,
   }

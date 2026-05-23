@@ -15,6 +15,7 @@ import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { CapEnforcer } from "./cap-enforcer"
+import type { CheckpointTriggerMode, DestructivenessOracle } from "./checkpoint-policy"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
@@ -507,6 +508,24 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   shadowOdb?: ShadowOdb
   /**
+   * ADR-0121 auto-checkpoint policy — when set AND `shadowOdb` is also wired,
+   * `wireCheckpointedEffectChannel` wraps the dispatch `EffectChannel` with
+   * `withAutoCheckpoint` so a configurable policy auto-anchors via
+   * `ShadowOdb.registerHead` BEFORE / AFTER tool calls (Cline / Hermes /
+   * Codex / Cursor patterns surfaced as a closed 4-arm enum).
+   *
+   * Default-OFF: absent ⇒ the wrap helper returns the inner channel
+   * unchanged (byte-identical for every legacy caller). Separate from
+   * `shadowOdb` so the storage port and the policy are decoupled — a
+   * caller may set `shadowOdb` for `branch_search` / `shadow_rewind` /
+   * `shadow_snapshots` consumers without auto-checkpointing every tool call.
+   *
+   * `mode` selects the policy (`"off"` | `"pre-destructive"` | `"per-mutating"`
+   *  | `"per-turn"`); `oracle` overrides the default destructiveness oracle
+   *  (which trusts `Tool.isReadOnly()`).
+   */
+  shadowCheckpoint?: { mode: CheckpointTriggerMode; oracle?: DestructivenessOracle }
+  /**
    * ADR-0117 progress surface — when set, `branch-search-runner` wraps the
    * tool's `onTrace` with a side-effecting adapter that calls this callback
    * with a `formatBranchTrace`'d `ProgressLine` per event. Absent ⇒ the
@@ -749,6 +768,7 @@ export type FeaturesConfig = Pick<
   | "subagent"
   | "workingState"
   | "branchSearch"
+  | "shadowCheckpoint"
   | "shadowOdb"
   | "onProgress"
   | "planExitPort"

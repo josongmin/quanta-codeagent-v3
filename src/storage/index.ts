@@ -19,6 +19,7 @@ export type { FileInfo } from "./types"
 export {
   DEFAULT_SHADOW_ODB_MAX_BYTES,
   SHADOW_LAST_REF,
+  SHADOW_LAST_VERIFIED_REF,
   SHADOW_PRE_REWIND_REF_PREFIX,
   ShadowOdbError,
   defaultShadowOdb,
