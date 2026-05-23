@@ -137,6 +137,7 @@ export const gitStatusTool = (runner: GitRunner): Tool<GitStatusInput> => ({
       ["status", "--porcelain=v2", "--branch"],
       ctx.cwd,
       "git status",
+      ctx.signal,
     )
     if (out.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: out.message } }

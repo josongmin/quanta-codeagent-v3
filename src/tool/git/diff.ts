@@ -68,7 +68,7 @@ export const gitDiffTool = (runner: GitRunner): Tool<GitDiffInput> => ({
     }
     yield { type: "progress", message: `git ${args.join(" ")}` }
 
-    const out = await safeRun(runner, args, ctx.cwd, "git diff")
+    const out = await safeRun(runner, args, ctx.cwd, "git diff", ctx.signal)
     if (out.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: out.message } }
       return

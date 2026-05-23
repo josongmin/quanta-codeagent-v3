@@ -15,11 +15,20 @@
  * This closes the "broken integration looks identical to 'tool not
  * installed'" hole that plain `skipIf` leaves open.
  */
+const warned = new Set<string>()
+
 export const requireContract = (name: string, available: boolean): boolean => {
   if (!available && process.env.REQUIRE_CONTRACT) {
     throw new Error(
       `[contract] "${name}" is unavailable but REQUIRE_CONTRACT is set. ` +
         "CI must provision this dependency; failing instead of skipping silently.",
+    )
+  }
+  if (!available && !warned.has(name)) {
+    warned.add(name)
+    console.warn(
+      `[contract] skipping "${name}" — runtime unavailable. ` +
+        "Set REQUIRE_CONTRACT=1 to fail instead of skip.",
     )
   }
   return available

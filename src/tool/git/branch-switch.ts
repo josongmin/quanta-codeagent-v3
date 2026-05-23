@@ -33,17 +33,31 @@ type Step = { ok: true; dirty: boolean } | { ok: false; error: string }
 type Outcome = { ok: true } | { ok: false; error: string }
 
 /** Probe the working tree. Returns either an error message or the dirty flag. */
-const probeWorkingTree = async (runner: GitRunner, cwd: string): Promise<Step> => {
-  const out = await mutate(runner, ["status", "--porcelain"], cwd, "git status")
+const probeWorkingTree = async (
+  runner: GitRunner,
+  cwd: string,
+  signal: AbortSignal | undefined,
+): Promise<Step> => {
+  const out = await mutate(runner, ["status", "--porcelain"], cwd, "git status", signal)
   if (out.kind === "err") return { ok: false, error: out.output }
   return { ok: true, dirty: isDirty(out.stdout) }
 }
 
 /** Stage all + commit wip checkpoint. Hooks run (no `--no-verify`). */
-const runWipCheckpoint = async (runner: GitRunner, cwd: string): Promise<Outcome> => {
-  const addOut = await mutate(runner, ["add", "--", "."], cwd, "git add")
+const runWipCheckpoint = async (
+  runner: GitRunner,
+  cwd: string,
+  signal: AbortSignal | undefined,
+): Promise<Outcome> => {
+  const addOut = await mutate(runner, ["add", "--", "."], cwd, "git add", signal)
   if (addOut.kind === "err") return { ok: false, error: addOut.output }
-  const commitOut = await mutate(runner, ["commit", "-m", autoWipMessage()], cwd, "git commit")
+  const commitOut = await mutate(
+    runner,
+    ["commit", "-m", autoWipMessage()],
+    cwd,
+    "git commit",
+    signal,
+  )
   if (commitOut.kind === "err") return { ok: false, error: commitOut.output }
   return { ok: true }
 }
@@ -53,8 +67,9 @@ const runSwitch = async (
   cwd: string,
   branch: string,
   create: boolean | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<Outcome> => {
-  const out = await mutate(runner, buildSwitchArgs(branch, create), cwd, "git switch")
+  const out = await mutate(runner, buildSwitchArgs(branch, create), cwd, "git switch", signal)
   if (out.kind === "err") return { ok: false, error: out.output }
   return { ok: true }
 }
@@ -82,7 +97,7 @@ export const gitBranchSwitchTool = (runner: GitRunner): Tool<GitBranchSwitchInpu
     const { branch, autoWip, create } = parsed.data
 
     yield { type: "progress", message: "git status --porcelain" }
-    const probe = await probeWorkingTree(runner, ctx.cwd)
+    const probe = await probeWorkingTree(runner, ctx.cwd, ctx.signal)
     if (!probe.ok) {
       yield failResult(probe.error)
       return
@@ -96,7 +111,7 @@ export const gitBranchSwitchTool = (runner: GitRunner): Tool<GitBranchSwitchInpu
 
     if (dirty) {
       yield { type: "progress", message: "git add + commit (wip checkpoint)" }
-      const wip = await runWipCheckpoint(runner, ctx.cwd)
+      const wip = await runWipCheckpoint(runner, ctx.cwd, ctx.signal)
       if (!wip.ok) {
         yield failResult(wip.error)
         return
@@ -104,7 +119,7 @@ export const gitBranchSwitchTool = (runner: GitRunner): Tool<GitBranchSwitchInpu
     }
 
     yield { type: "progress", message: `git switch ${branch}` }
-    const sw = await runSwitch(runner, ctx.cwd, branch, create)
+    const sw = await runSwitch(runner, ctx.cwd, branch, create, ctx.signal)
     if (!sw.ok) {
       yield failResult(sw.error)
       return

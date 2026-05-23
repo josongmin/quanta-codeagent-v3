@@ -75,7 +75,7 @@ export const gitCommitTool = (runner: GitRunner): Tool<GitCommitInput> => ({
     // Stage.
     yield { type: "progress", message: "git add" }
     const addArgs = buildAddArgs(paths)
-    const addOut = await mutate(runner, addArgs, ctx.cwd, "git add")
+    const addOut = await mutate(runner, addArgs, ctx.cwd, "git add", ctx.signal)
     if (addOut.kind === "err") {
       yield { type: "result", result: { ok: false, output: addOut.output } }
       return
@@ -84,7 +84,7 @@ export const gitCommitTool = (runner: GitRunner): Tool<GitCommitInput> => ({
     // Commit. Argv-based — `finalMessage` is one slot, no shell expansion.
     yield { type: "progress", message: "git commit" }
     const commitArgs = ["commit", "-m", finalMessage]
-    const commitOut = await mutate(runner, commitArgs, ctx.cwd, "git commit")
+    const commitOut = await mutate(runner, commitArgs, ctx.cwd, "git commit", ctx.signal)
     if (commitOut.kind === "err") {
       yield { type: "result", result: { ok: false, output: commitOut.output } }
       return

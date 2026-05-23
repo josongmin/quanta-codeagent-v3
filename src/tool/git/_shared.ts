@@ -13,15 +13,19 @@ export type RunOutcome =
 
 /** Invoke the runner, normalizing thrown spawn errors into a tagged result.
  *  This is the only place the catch-and-coerce lives, so each tool's
- *  `execute()` is a flat happy-path → branch on outcome. */
+ *  `execute()` is a flat happy-path → branch on outcome. The optional
+ *  `signal` is forwarded to {@link GitRunner.run} so a cancelled tool call
+ *  kills the spawned `git` immediately instead of waiting on the runner's
+ *  wall-clock timeout. */
 export const safeRun = async (
   runner: GitRunner,
   args: readonly string[],
   cwd: string,
   toolName: string,
+  signal?: AbortSignal,
 ): Promise<RunOutcome> => {
   try {
-    const result = await runner.run(args, cwd)
+    const result = await runner.run(args, cwd, signal)
     return { kind: "ok", result }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -49,8 +53,9 @@ export const mutate = async (
   args: readonly string[],
   cwd: string,
   toolName: string,
+  signal?: AbortSignal,
 ): Promise<MutateOutcome> => {
-  const out = await safeRun(runner, args, cwd, toolName)
+  const out = await safeRun(runner, args, cwd, toolName, signal)
   if (out.kind === "spawn-error") return { kind: "err", output: out.message }
   const r = out.result
   if (r.exitCode !== 0) {

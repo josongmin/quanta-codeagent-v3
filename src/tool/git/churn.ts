@@ -59,7 +59,7 @@ export const gitChurnTool = (runner: GitRunner): Tool<GitChurnInput> => ({
 
     yield { type: "progress", message: `git churn${since ? ` --since=${since}` : " (last 200)"}` }
 
-    const out = await safeRun(runner, args, ctx.cwd, "git churn")
+    const out = await safeRun(runner, args, ctx.cwd, "git churn", ctx.signal)
     if (out.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: out.message } }
       return

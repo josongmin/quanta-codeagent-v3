@@ -9,6 +9,16 @@ const MAX_OUTPUT_CONTINUES = 3
 const MAX_MALFORMED_RETRIES = 1
 const MAX_CONSECUTIVE_EMPTIES = 2
 
+/** Per-kind same-turn recovery budget caps (ADR documented in loop.ts:1557-1560 +
+ *  recovery.ts module header). Frozen so a test asserting a cap mutates with the
+ *  source rather than carrying duplicated magic numbers. */
+export const RECOVERY_CAPS = Object.freeze({
+  streamRetries: MAX_TURN_STREAM_RETRIES,
+  outputContinues: MAX_OUTPUT_CONTINUES,
+  malformedRetries: MAX_MALFORMED_RETRIES,
+  consecutiveEmpties: MAX_CONSECUTIVE_EMPTIES,
+} as const)
+
 /** Assembled-message shape produced by `assembleFromEvents`. Re-exported by
  *  `loop.ts` so existing `@/agent/loop` consumers keep importing it from there. */
 export type AssembledMessage = ReturnType<typeof assembleFromEvents>["message"]

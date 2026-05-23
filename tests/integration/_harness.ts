@@ -174,3 +174,18 @@ export const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): 
     if (timer) clearTimeout(timer)
   }
 }
+
+/** Find the first emitted AgentEvent of a given discriminant `type`. Narrowed
+ *  to the exact union member so callers get typed access to its payload. */
+export const findEvent = <T extends AgentEvent["type"]>(
+  s: RecordingStream,
+  t: T,
+): Extract<AgentEvent, { type: T }> | undefined =>
+  s.events.find((e): e is Extract<AgentEvent, { type: T }> => e.type === t)
+
+/** All emitted AgentEvents of a given discriminant `type`, in emit order. */
+export const eventsOf = <T extends AgentEvent["type"]>(
+  s: RecordingStream,
+  t: T,
+): Extract<AgentEvent, { type: T }>[] =>
+  s.events.filter((e): e is Extract<AgentEvent, { type: T }> => e.type === t)

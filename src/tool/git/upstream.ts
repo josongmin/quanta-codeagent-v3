@@ -55,6 +55,7 @@ export const gitUpstreamCheckTool = (runner: GitRunner): Tool<GitUpstreamCheckIn
       ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
       ctx.cwd,
       "git upstream check",
+      ctx.signal,
     )
     if (upstreamOut.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: upstreamOut.message } }
@@ -83,6 +84,7 @@ export const gitUpstreamCheckTool = (runner: GitRunner): Tool<GitUpstreamCheckIn
       ["rev-parse", "--abbrev-ref", "HEAD"],
       ctx.cwd,
       "git upstream check",
+      ctx.signal,
     )
     const branch =
       branchOut.kind === "ok" && branchOut.result.exitCode === 0
@@ -95,6 +97,7 @@ export const gitUpstreamCheckTool = (runner: GitRunner): Tool<GitUpstreamCheckIn
       ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
       ctx.cwd,
       "git upstream check",
+      ctx.signal,
     )
     if (countOut.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: countOut.message } }

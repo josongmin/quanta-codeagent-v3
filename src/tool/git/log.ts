@@ -50,7 +50,7 @@ export const gitLogTool = (runner: GitRunner): Tool<GitLogInput> => ({
 
     yield { type: "progress", message: `git log -n ${count}${file ? ` -- ${file}` : ""}` }
 
-    const out = await safeRun(runner, args, ctx.cwd, "git log")
+    const out = await safeRun(runner, args, ctx.cwd, "git log", ctx.signal)
     if (out.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: out.message } }
       return

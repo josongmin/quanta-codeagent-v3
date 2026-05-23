@@ -12,6 +12,7 @@
     "agent:ci-bot": "bun run src/apps/agent/index.ts --mode ci-bot",
     "test": "bun test tests/unit tests/integration",
     "test:unit": "bun test tests/unit",
+    "test:fast": "bun test tests/unit/agent tests/unit/llm tests/unit/permission tests/unit/runtime",
     "test:integration": "bun test tests/integration",
     "test:contract": "bun test tests/contract",
     "test:ci": "bun test tests/unit tests/integration tests/contract",

@@ -69,7 +69,15 @@ export class ToolRegistry {
     onProgress?: (message: string) => void,
   ): Promise<ToolResult> {
     const tool = this.tools.get(name)
-    if (!tool) throw new ToolInputError(`Unknown tool: ${name}`)
+    if (!tool) {
+      // Surface the registered surface so the model (and human triage) can spot
+      // a typo without round-tripping through a separate `list_tools` call. The
+      // names are stable identifiers — listing them is cheap and not a leak.
+      const known = [...this.tools.keys()].sort().join(", ")
+      throw new ToolInputError(
+        `Unknown tool: ${name}. Registered tools: ${known || "(none)"}`,
+      )
+    }
 
     const parsed = tool.inputSchema.safeParse(rawInput)
     if (!parsed.success) {

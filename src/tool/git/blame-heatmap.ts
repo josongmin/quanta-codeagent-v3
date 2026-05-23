@@ -71,7 +71,7 @@ export const gitBlameHeatmapTool = (runner: GitRunner): Tool<GitBlameHeatmapInpu
     const region = start_line !== undefined ? ` -L ${start_line},${end_line}` : ""
     yield { type: "progress", message: `git blame heatmap${region} -- ${file}` }
 
-    const out = await safeRun(runner, args, ctx.cwd, "git blame")
+    const out = await safeRun(runner, args, ctx.cwd, "git blame", ctx.signal)
     if (out.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: out.message } }
       return

@@ -37,6 +37,7 @@ import {
   evaluateAuto,
   evaluateStack,
   grantAndCascade,
+  getDefaultPermissionStore,
   type HITLTier,
   hardDenyReason,
   inferReviewKind,
@@ -554,7 +555,11 @@ const runPermissionStack = (
     },
     permission,
     { threadId, hostId, actionSignature, workdir: config.cwd },
-    opts.store !== undefined ? { store: opts.store } : {},
+    // W4 follow-up: evaluateStack now REQUIRES store. This file is the
+    // composition-adjacent layer (called by dispatch), so `getDefaultPermissionStore()`
+    // as a fallback is allowed by the new scanner rule. Long-term: thread
+    // `permissionStore` through `AgentConfig` and remove this fallback.
+    { store: opts.store ?? getDefaultPermissionStore() },
   )
   if (decision.kind === "allow") return "allow"
   if (decision.kind === "deny") {

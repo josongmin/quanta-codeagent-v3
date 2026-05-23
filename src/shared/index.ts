@@ -11,6 +11,7 @@ export {
 } from "./errors"
 export type { LogLevel } from "./logger"
 export { LOG_LEVEL_ORDER, levelEnabled, logger } from "./logger"
+export { omitUndef } from "./optional"
 export type { RunContext } from "./run-context"
 export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
 export {

@@ -22,7 +22,13 @@ export interface GitRunResult {
 }
 
 export interface GitRunner {
-  run(args: readonly string[], cwd: string): Promise<GitRunResult>
+  /** Run `git <args>` in `cwd`. The optional `signal` is propagated so a
+   *  cancelled tool call (loop abort, subagent cancel, side-conversation budget
+   *  exhaustion) actually kills the spawned `git` instead of leaking the
+   *  process for the full {@link defaultGitRunner} timeout. Added optionally to
+   *  preserve the existing fake-runner test surface (callers without a signal
+   *  still type-check and behave identically). */
+  run(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GitRunResult>
 }
 
 // --- git_diff ----------------------------------------------------------------

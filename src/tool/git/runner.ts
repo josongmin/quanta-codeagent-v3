@@ -34,22 +34,38 @@ const buildEnv = (): Record<string, string> => {
 
 /** Default GitRunner — spawns `git <args>` via Bun.spawn under `cwd`, with a
  *  bounded wall-clock and a scrubbed env. Stdout/stderr are read fully before
- *  resolving so callers never see a partial stream. */
+ *  resolving so callers never see a partial stream.
+ *
+ *  When the caller-supplied `signal` aborts (loop cancellation, subagent
+ *  cancel, side-conversation budget exhaustion), the spawned process is killed
+ *  immediately rather than orphaned until the wall-clock timeout fires. The
+ *  abort listener is unhooked in `finally` so an already-completed run never
+ *  leaks a reference into the AbortSignal's listener set. */
 export const defaultGitRunner: GitRunner = {
-  async run(args, cwd): Promise<GitRunResult> {
+  async run(args, cwd, signal): Promise<GitRunResult> {
     const proc = Bun.spawn(["git", ...args], {
       cwd,
       env: buildEnv(),
       stdout: "pipe",
       stderr: "pipe",
     })
-    const timer = setTimeout(() => {
+    const killProc = (): void => {
       try {
         proc.kill()
       } catch {
         // ignore — already exited
       }
-    }, DEFAULT_TIMEOUT_MS)
+    }
+    const timer = setTimeout(killProc, DEFAULT_TIMEOUT_MS)
+    let onAbort: (() => void) | undefined
+    if (signal !== undefined) {
+      if (signal.aborted) {
+        killProc()
+      } else {
+        onAbort = killProc
+        signal.addEventListener("abort", onAbort, { once: true })
+      }
+    }
     try {
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
@@ -59,6 +75,9 @@ export const defaultGitRunner: GitRunner = {
       return { stdout, stderr, exitCode }
     } finally {
       clearTimeout(timer)
+      if (signal !== undefined && onAbort !== undefined) {
+        signal.removeEventListener("abort", onAbort)
+      }
     }
   },
 }

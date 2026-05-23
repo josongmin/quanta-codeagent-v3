@@ -102,7 +102,7 @@ export const gitBlameTool = (runner: GitRunner): Tool<GitBlameInput> => ({
     const args = ["blame", "-L", `${line},${line}`, "--porcelain", "--", file]
     yield { type: "progress", message: `git blame ${file}:${line}` }
 
-    const out = await safeRun(runner, args, ctx.cwd, "git blame")
+    const out = await safeRun(runner, args, ctx.cwd, "git blame", ctx.signal)
     if (out.kind === "spawn-error") {
       yield { type: "result", result: { ok: false, output: out.message } }
       return
