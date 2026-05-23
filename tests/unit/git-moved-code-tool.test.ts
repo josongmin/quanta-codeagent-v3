@@ -50,11 +50,7 @@ class FakeRunner implements GitRunner {
   constructor(
     private readonly result: GitRunResult | ((args: readonly string[]) => GitRunResult),
   ) {}
-  async run(
-    args: readonly string[],
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<GitRunResult> {
+  async run(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GitRunResult> {
     this.calls.push({ args: [...args], cwd, signal })
     return typeof this.result === "function" ? this.result(args) : this.result
   }
@@ -244,7 +240,8 @@ describe("gitMovedCodeTool", () => {
   // 4. headers but no hunks
   test("diff with headers but no hunks → ok:true with no-hunks sentinel", async () => {
     // Headers only — no `@@` lines so `parseUnifiedDiff` returns [].
-    const headers = "diff --git a/foo.ts b/foo.ts\nsimilarity index 100%\nrename from foo.ts\nrename to bar.ts\n"
+    const headers =
+      "diff --git a/foo.ts b/foo.ts\nsimilarity index 100%\nrename from foo.ts\nrename to bar.ts\n"
     const runner = new FakeRunner(okDiff(headers))
     const { result } = await collect(gitMovedCodeTool(runner), {})
     expect(result.ok).toBe(true)

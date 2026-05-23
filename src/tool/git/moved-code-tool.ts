@@ -19,9 +19,9 @@
  * become a `git` option.
  */
 import { z } from "zod"
-import { classifyDiff, type ClassifyOptions, parseUnifiedDiff } from "./moved-code"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
+import { type ClassifyOptions, classifyDiff, parseUnifiedDiff } from "./moved-code"
 import type { GitRunner } from "./types"
 
 const MAX_OUTPUT = 50_000
@@ -56,11 +56,21 @@ export const gitMovedCodeInputSchema = z.object({
     .describe("Minimum Jaccard similarity, 0..1 (default 0.85)"),
   /** Minimum normalized non-blank lines on EACH side of a candidate pair.
    *  Default 5 (matches `ClassifyOptions.minLines` default). */
-  minLines: z.number().int().positive().optional().describe("Min normalized lines per side (default 5)"),
+  minLines: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Min normalized lines per side (default 5)"),
   /** Cap on |removed|×|added| pair-product before detection is skipped.
    *  Default 2000 (more conservative than the classifier's own 10_000 default
    *  because the tool surface trades recall for latency). */
-  maxPairs: z.number().int().positive().optional().describe("Max removed×added pair-product (default 2000)"),
+  maxPairs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Max removed×added pair-product (default 2000)"),
 })
 export type GitMovedCodeInput = z.infer<typeof gitMovedCodeInputSchema>
 
@@ -158,9 +168,7 @@ const formatClassification = (
   },
 ): string => {
   const lines: string[] = []
-  lines.push(
-    `Classified ${totalHunks} hunks (${counts.removed} removed / ${counts.added} added):`,
-  )
+  lines.push(`Classified ${totalHunks} hunks (${counts.removed} removed / ${counts.added} added):`)
   lines.push(`  moved:      ${classification.moved.length} pairs`)
   lines.push(`  logic:      ${classification.logic.length} hunks`)
   lines.push(`  mechanical: ${classification.mechanical.length} hunks`)
@@ -185,8 +193,7 @@ const formatClassification = (
 
 export const gitMovedCodeTool = (runner: GitRunner): Tool<GitMovedCodeInput> => ({
   name: "git_moved_code",
-  description:
-    "Classify hunks in a git diff as moved-vs-logic so reviewers see signal, not noise.",
+  description: "Classify hunks in a git diff as moved-vs-logic so reviewers see signal, not noise.",
   inputSchema: gitMovedCodeInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

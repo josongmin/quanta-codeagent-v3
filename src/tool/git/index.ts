@@ -19,8 +19,10 @@ import { gitBlameHeatmapTool } from "./blame-heatmap"
 import { gitBranchSwitchTool } from "./branch-switch"
 import { gitChurnTool } from "./churn"
 import { gitCommitTool } from "./commit"
+import { gitConflictInspectTool } from "./conflict-inspect"
 import { gitDiffTool } from "./diff"
 import { gitLogTool } from "./log"
+import { gitMovedCodeTool } from "./moved-code-tool"
 import { gitReviewDiffTool } from "./review-diff"
 import { defaultGitRunner } from "./runner"
 import { gitStatusTool } from "./status"
@@ -34,8 +36,18 @@ export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { gitBranchSwitchTool } from "./branch-switch"
 export { gitChurnTool, rankChurn } from "./churn"
 export { gitCommitTool } from "./commit"
+export {
+  type GitConflictInspectInput,
+  gitConflictInspectInputSchema,
+  gitConflictInspectTool,
+} from "./conflict-inspect"
 export { gitDiffTool } from "./diff"
 export { gitLogTool } from "./log"
+export {
+  type GitMovedCodeInput,
+  gitMovedCodeInputSchema,
+  gitMovedCodeTool,
+} from "./moved-code-tool"
 export {
   type GitReviewDiffInput,
   gitReviewDiffInputSchema,
@@ -76,6 +88,12 @@ export const gitTools = (runner: GitRunner = defaultGitRunner): Tool[] => [
   // Isolated diff reviewer (read-only, Claude Desktop `reviewDiff` absorption,
   // ADR-0111). Sub-agent runner is host-injected via ctx.reviewerAgent.
   gitReviewDiffTool(runner) as Tool,
+  // Moved-code classifier (ADR-0109) + conflict inspector (ADR-0111). Both
+  // read-only + concurrency-safe; expose existing pure cores as first-class
+  // tools so `pr-review-canvas` and `fix-merge-conflicts` skills have a typed
+  // surface to call instead of shelling raw git in the prompt.
+  gitMovedCodeTool(runner) as Tool,
+  gitConflictInspectTool(runner) as Tool,
   gitCommitTool(runner) as Tool,
   gitBranchSwitchTool(runner) as Tool,
 ]
