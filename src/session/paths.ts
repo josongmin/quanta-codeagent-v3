@@ -1,6 +1,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { runtimeConfig } from "@/shared"
+import { defaultSessionRootProvider, type SessionRootProvider } from "./root-port"
 
 /**
  * Session-store path resolution.
@@ -9,9 +10,27 @@ import { runtimeConfig } from "@/shared"
  * overrides this wholesale. Validation lives in `runtime-config.ts`; the
  * value is frozen at startup so a test that wants to swap roots per-case
  * calls `__resetRuntimeConfig()` instead of mutating `process.env`.
+ *
+ * Multi-tenant surfaces (Web / Tauri) should NOT use this sync resolver —
+ * they inject a `SessionRootProvider` and call the `*Async` variants below.
+ * `sessionsRoot()` is preserved for byte-identical CLI behavior; removing
+ * it would change every existing call site's path resolution.
  */
 export const sessionsRoot = (): string =>
   runtimeConfig().sessionsDir ?? join(homedir(), ".quanta", "sessions")
+
+/**
+ * Async, provider-aware root resolver. Surface-agnostic seam — the CLI
+ * passes nothing (or the `defaultSessionRootProvider`) and gets exactly
+ * `sessionsRoot()`; Web/Tauri pass a per-tenant provider.
+ *
+ * Byte-identical guarantee: when `provider === undefined`, the resolved
+ * value MUST equal `sessionsRoot()` for any given runtime-config snapshot.
+ * The default provider re-reads `runtimeConfig()` on each call to honor
+ * `__resetRuntimeConfig()` between tests, matching the sync resolver.
+ */
+export const sessionsRootAsync = async (provider?: SessionRootProvider): Promise<string> =>
+  (provider ?? defaultSessionRootProvider).resolve()
 
 /** Thrown by {@link sanitizeId} when an id contains characters that would
  *  escape `sessionsRoot()` or otherwise misbehave as a filesystem name. */
@@ -68,3 +87,20 @@ export const archivedFilePath = (id: string): string =>
   join(sessionsRoot(), "archived", `${sanitizeId(id)}.json`)
 
 export const indexFilePath = (): string => join(sessionsRoot(), "index.jsonl")
+
+/** Provider-aware twin of {@link sessionFilePath}. When `provider` is
+ *  omitted the result is byte-identical to `sessionFilePath(id)`. */
+export const sessionFilePathAsync = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<string> => join(await sessionsRootAsync(provider), `${sanitizeId(id)}.json`)
+
+/** Provider-aware twin of {@link archivedFilePath}. */
+export const archivedFilePathAsync = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<string> => join(await sessionsRootAsync(provider), "archived", `${sanitizeId(id)}.json`)
+
+/** Provider-aware twin of {@link indexFilePath}. */
+export const indexFilePathAsync = async (provider?: SessionRootProvider): Promise<string> =>
+  join(await sessionsRootAsync(provider), "index.jsonl")

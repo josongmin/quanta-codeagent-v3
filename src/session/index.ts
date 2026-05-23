@@ -50,12 +50,18 @@ export {
 export { listSessions, removeFromIndex, upsertMeta } from "./index-store"
 export {
   archivedFilePath,
+  archivedFilePathAsync,
   indexFilePath,
+  indexFilePathAsync,
   SessionIdError,
   sanitizeId,
   sessionFilePath,
+  sessionFilePathAsync,
   sessionsRoot,
+  sessionsRootAsync,
 } from "./paths"
+export type { SessionRootProvider } from "./root-port"
+export { defaultSessionRootProvider, staticSessionRootProvider } from "./root-port"
 export {
   appendEnvelope,
   archiveSession,
@@ -67,6 +73,7 @@ export {
   rewindToMessage,
   saveSessionById,
   sessionEnvelopePath,
+  sessionEnvelopePathAsync,
   unarchiveSession,
 } from "./store"
 export type { SavedSession, SavePayload, SessionMeta } from "./types"

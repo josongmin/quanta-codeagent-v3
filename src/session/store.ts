@@ -7,8 +7,32 @@ import { fileExists, readFile, writeFile } from "@/storage"
 import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
 import { listSessions, removeFromIndex, upsertMeta } from "./index-store"
-import { archivedFilePath, sessionFilePath, sessionsRoot } from "./paths"
+import {
+  archivedFilePath,
+  archivedFilePathAsync,
+  sessionFilePath,
+  sessionFilePathAsync,
+  sessionsRoot,
+  sessionsRootAsync,
+} from "./paths"
+import type { SessionRootProvider } from "./root-port"
 import { type SavedSession, type SavePayload, SESSION_VERSION, type SessionMeta } from "./types"
+
+/** Resolve `<root>/<id>.json` honoring an optional provider. When no
+ *  provider is passed, the resolved path is byte-identical to
+ *  `sessionFilePath(id)` (legacy sync resolver). */
+const resolveSessionFilePath = (
+  id: string,
+  provider: SessionRootProvider | undefined,
+): Promise<string> | string =>
+  provider === undefined ? sessionFilePath(id) : sessionFilePathAsync(id, provider)
+
+/** Resolve `<root>/archived/<id>.json` honoring an optional provider. */
+const resolveArchivedFilePath = (
+  id: string,
+  provider: SessionRootProvider | undefined,
+): Promise<string> | string =>
+  provider === undefined ? archivedFilePath(id) : archivedFilePathAsync(id, provider)
 
 /**
  * Id-addressable session store — the per-file half. Each id maps to exactly
@@ -175,9 +199,15 @@ const removeFileIfExists = async (path: string): Promise<void> => {
   }
 }
 
-export const saveSessionById = async (meta: SessionMeta, payload: SavePayload): Promise<void> => {
+export const saveSessionById = async (
+  meta: SessionMeta,
+  payload: SavePayload,
+  provider?: SessionRootProvider,
+): Promise<void> => {
   const touched: SessionMeta = { ...meta, lastTouched: Date.now() }
-  const path = touched.archived ? archivedFilePath(touched.id) : sessionFilePath(touched.id)
+  const path = touched.archived
+    ? await resolveArchivedFilePath(touched.id, provider)
+    : await resolveSessionFilePath(touched.id, provider)
   const saved: SavedSession = {
     version: SESSION_VERSION,
     meta: touched,
@@ -213,13 +243,16 @@ const reconcileIndexFromMeta = async (meta: SessionMeta): Promise<void> => {
   await upsertMeta(meta)
 }
 
-export const loadSessionById = async (id: string): Promise<SavedSession | undefined> => {
-  const active = await readSavedSession(sessionFilePath(id))
+export const loadSessionById = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<SavedSession | undefined> => {
+  const active = await readSavedSession(await resolveSessionFilePath(id, provider))
   if (active !== undefined) {
     await reconcileIndexFromMeta(active.meta)
     return active
   }
-  const archived = await readSavedSession(archivedFilePath(id))
+  const archived = await readSavedSession(await resolveArchivedFilePath(id, provider))
   if (archived !== undefined) await reconcileIndexFromMeta(archived.meta)
   return archived
 }
@@ -329,15 +362,28 @@ export const deleteSession = async (id: string): Promise<void> => {
  *  snapshot JSON at `<sessionsRoot>/<id>.jsonl`. */
 export const sessionEnvelopePath = (id: string): string => join(sessionsRoot(), `${id}.jsonl`)
 
+/** Provider-aware twin of {@link sessionEnvelopePath}. Multi-tenant
+ *  surfaces resolve through their injected {@link SessionRootProvider};
+ *  passing `undefined` is byte-identical to the sync resolver. */
+export const sessionEnvelopePathAsync = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<string> => join(await sessionsRootAsync(provider), `${id}.jsonl`)
+
 /** Append-only seam for the JSONL envelope log (ADR-0034). Existing
  *  snapshot-based methods (saveSessionById/loadSessionById/…) are NOT
  *  affected — this is an additive rail. */
 export const appendEnvelope = async (
   sessionId: string,
   record: SessionEnvelopeRecord,
+  provider?: SessionRootProvider,
 ): Promise<void> => {
   const line = encodeSessionLine(record)
-  await appendSessionLine(sessionEnvelopePath(sessionId), line)
+  const path =
+    provider === undefined
+      ? sessionEnvelopePath(sessionId)
+      : await sessionEnvelopePathAsync(sessionId, provider)
+  await appendSessionLine(path, line)
 }
 
 /**
