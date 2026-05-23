@@ -13,6 +13,12 @@ import {
   sessionFilePath,
   unarchiveSession,
 } from "@/session"
+import {
+  applyListPipeline,
+  buildSessionListEntries,
+  renderSessionList,
+  type SessionListOptions,
+} from "./list-tui"
 
 /**
  * `quanta session …` subcommand dispatcher.
@@ -35,6 +41,22 @@ import {
  * subcommand fails fast with an explicit error (so a misconfigured embedding
  * cannot silently skip the migration step).
  */
+/** Typed config the CLI/Web/Tauri surface hands the `list` subcommand.
+ *  All fields are optional — the runner slice never reads `process.env`
+ *  or `process.stdout.isTTY` itself (architecture guard, RFC may-22 §X).
+ *  The surface entry (apps/cli/session-commands.ts) resolves these from
+ *  the host runtime and passes them in. */
+export interface SessionListEnv {
+  /** Default format when no explicit `--format` / `--legacy` flag is
+   *  given. Surface should pick `"rich"` for interactive TTY, `"plain"`
+   *  for pipes/redirects/tests. */
+  defaultFormat?: "rich" | "plain"
+  /** Default cap for the rich-format `--last <N>` window when the flag
+   *  is absent. Plain format stays uncapped. Defaults to 10 inside the
+   *  dispatcher when this field is undefined. */
+  defaultMaxN?: number
+}
+
 export interface SessionCommandDeps {
   out: (s: string) => void
   err: (s: string) => void
@@ -48,23 +70,10 @@ export interface SessionCommandDeps {
    *  reach into `@/migration` (forbidden by the runner slice's biome rule).
    *  Receives the args AFTER `import` and the full deps for io. */
   importHandler?: (args: string[], deps: SessionCommandDeps) => Promise<number>
-}
-
-/** Truncate to `n` characters, appending an ellipsis when shortened. */
-const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
-
-/** Format a `lastTouched` timestamp as a coarse relative string. */
-const relativeTime = (ts: number): string => {
-  const delta = Date.now() - ts
-  if (delta < 0) return "now"
-  const s = Math.floor(delta / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h`
-  const d = Math.floor(h / 24)
-  return `${d}d`
+  /** Surface-injected env for the `list` subcommand TUI. When absent the
+   *  dispatcher falls back to safe defaults (plain format, cap=10) — so
+   *  callers that never set this keep the byte-identical legacy output. */
+  listEnv?: SessionListEnv
 }
 
 /** Render a single message's content as a single line of joined text. */
@@ -89,6 +98,9 @@ const usage = (): string =>
     "",
     "Commands:",
     "  ls [--archived] [--json] [--ids]    list sessions",
+    "     [--format <rich|plain>] [--legacy]",
+    "     [--cwd <substr>] [--branch <name>]",
+    "     [--last <N>] [--sort <recent|title|size>]",
     "  show <id> [--json]                  print transcript (or full JSON)",
     "  rename <id> <new-title>             rename a session",
     "  archive <id>                        archive a session",
@@ -153,8 +165,74 @@ const checkUnknownArgs = (
 /** Standardized error preamble: `session <verb>: <reason>`. */
 const errLine = (verb: string, reason: string): string => `session ${verb}: ${reason}\n`
 
+/** Resolve the effective render format from flags + surface-injected env.
+ *  Priority: `--legacy` > `--format <v>` > `listEnv.defaultFormat` >
+ *  `"plain"` (safe default so a non-CLI surface that forgets to wire
+ *  TTY detection still produces parseable output).
+ *
+ *  The runner slice does NOT read `process.env` / `process.stdout.isTTY`
+ *  itself — the surface entry (apps/cli/session-commands.ts) maps those
+ *  into `SessionListEnv` and injects via `deps.listEnv`. */
+const pickFormat = (args: string[], env: SessionListEnv | undefined): "rich" | "plain" => {
+  if (hasFlag(args, "--legacy")) return "plain"
+  const formatFlag = readValueFlag(args, "--format")
+  if (formatFlag === "plain" || formatFlag === "rich") return formatFlag
+  return env?.defaultFormat ?? "plain"
+}
+
+/** Parse + validate the `--sort` flag. Throws when invalid so the dispatcher
+ *  surfaces a clean `session ls: …` error line. Returns `undefined` when
+ *  the flag is absent (signal to use the default). */
+const pickSortBy = (args: string[]): SessionListOptions["sortBy"] => {
+  const sortRaw = readValueFlag(args, "--sort")
+  if (sortRaw === undefined) return undefined
+  if (sortRaw === "title" || sortRaw === "size" || sortRaw === "recent") return sortRaw
+  throw new Error(`invalid --sort value: ${sortRaw} (expected recent|title|size)`)
+}
+
+/** Emit the legacy empty-state line + the `--archived` hint when the
+ *  active list is empty but archived sessions exist. Extracted from
+ *  `cmdLs` to keep its cyclomatic complexity below the biome ceiling. */
+const emitEmptyStateHint = async (
+  deps: SessionCommandDeps,
+  includeArchived: boolean,
+): Promise<void> => {
+  if (!includeArchived) {
+    const all = await listSessions({ includeArchived: true })
+    if (all.length > 0) {
+      deps.out("(no sessions) (use --archived to see archived)\n")
+      return
+    }
+  }
+  deps.out("(no sessions)\n")
+}
+
+/** Parse `--last <N>`; falls back to the default cap when absent in rich
+ *  format (plain format stays uncapped — pipeline-friendly). The default
+ *  cap is taken from the surface-injected `listEnv.defaultMaxN` so the
+ *  runner slice never reads env directly (architecture guard). */
+const pickLastN = (
+  args: string[],
+  format: "rich" | "plain",
+  env: SessionListEnv | undefined,
+): { lastN?: number; error?: string } => {
+  const lastRaw = readValueFlag(args, "--last")
+  if (typeof lastRaw === "string") {
+    const n = Number.parseInt(lastRaw, 10)
+    if (!Number.isFinite(n) || n <= 0) return { error: `invalid --last value: ${lastRaw}` }
+    return { lastN: n }
+  }
+  if (format !== "rich") return {}
+  return { lastN: env?.defaultMaxN ?? 10 }
+}
+
 const cmdLs = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
-  const unknown = checkUnknownArgs(args, 0, ["--archived", "--json", "--ids"], [])
+  const unknown = checkUnknownArgs(
+    args,
+    0,
+    ["--archived", "--json", "--ids", "--legacy"],
+    ["--format", "--cwd", "--branch", "--last", "--sort"],
+  )
   if (unknown !== undefined) {
     deps.err(errLine("ls", `unexpected argument: ${unknown}`))
     return 1
@@ -162,9 +240,12 @@ const cmdLs = async (args: string[], deps: SessionCommandDeps): Promise<number> 
   const includeArchived = hasFlag(args, "--archived")
   const json = hasFlag(args, "--json")
   const idsOnly = hasFlag(args, "--ids")
+  // ── Existing fast paths preserved BYTE-IDENTICAL ─────────────────────
+  // `--json` and `--ids` short-circuit so tooling that parses our output
+  // (CI scripts, the existing test suite, pipelines) is untouched. Only
+  // the human-facing table is wrapped in the new TUI renderer.
   const sessions = await listSessions({ includeArchived })
   if (idsOnly) {
-    // MEDIUM-7: one id per line, no header, no other columns — pipeline-friendly.
     for (const m of sessions) deps.out(`${m.id}\n`)
     return 0
   }
@@ -172,24 +253,45 @@ const cmdLs = async (args: string[], deps: SessionCommandDeps): Promise<number> 
     deps.out(`${JSON.stringify(sessions, null, 2)}\n`)
     return 0
   }
+
+  // ── Empty-state hints preserved ───────────────────────────────────────
   if (sessions.length === 0) {
-    // LOW: when active list is empty but archived sessions exist, hint at --archived.
-    if (!includeArchived) {
-      const all = await listSessions({ includeArchived: true })
-      if (all.length > 0) {
-        deps.out("(no sessions) (use --archived to see archived)\n")
-        return 0
-      }
-    }
-    deps.out("(no sessions)\n")
+    await emitEmptyStateHint(deps, includeArchived)
     return 0
   }
-  const header = `${"ID".padEnd(38)}  ${"TITLE".padEnd(24)}  ${"CWD".padEnd(40)}  ${"LAST".padEnd(6)}  ARCH\n`
-  deps.out(header)
-  for (const m of sessions) {
-    const row = `${truncate(m.id, 38).padEnd(38)}  ${truncate(m.title, 24).padEnd(24)}  ${truncate(m.cwd, 40).padEnd(40)}  ${relativeTime(m.lastTouched).padEnd(6)}  ${m.archived ? "yes" : "no"}\n`
-    deps.out(row)
+
+  // ── Resolve options ───────────────────────────────────────────────────
+  const format = pickFormat(args, deps.listEnv)
+  const filterCwd = readValueFlag(args, "--cwd")
+  const filterBranch = readValueFlag(args, "--branch")
+  const sortBy = pickSortBy(args)
+  const last = pickLastN(args, format, deps.listEnv)
+  if (last.error !== undefined) {
+    deps.err(errLine("ls", last.error))
+    return 1
   }
+
+  const opts: SessionListOptions = {
+    format,
+    showArchived: includeArchived,
+    ...(filterCwd !== undefined ? { filterCwd } : {}),
+    ...(filterBranch !== undefined ? { filterBranch } : {}),
+    ...(last.lastN !== undefined ? { lastN: last.lastN } : {}),
+    ...(sortBy !== undefined ? { sortBy } : {}),
+  }
+
+  // ── Build entries + render ────────────────────────────────────────────
+  const entries = await buildSessionListEntries(sessions, {
+    withTokenEstimates: format === "rich",
+  })
+  const filtered = applyListPipeline(entries, opts)
+  if (filtered.length === 0) {
+    // Filters narrowed everything out — print a helpful empty line so the
+    // operator knows the filter is the cause (not an actual empty store).
+    deps.out("(no matching sessions)\n")
+    return 0
+  }
+  deps.out(renderSessionList(filtered, opts))
   return 0
 }
 

@@ -27,6 +27,7 @@ import {
   runSessionCommand as runSessionCommandInner,
   type SessionCommandDeps,
 } from "@/runner/session-ops"
+import { runtimeConfig } from "@/shared"
 
 export type { SessionCommandDeps } from "@/runner/session-ops"
 
@@ -115,15 +116,49 @@ const cliImportHandler = async (args: string[], deps: SessionCommandDeps): Promi
   return 0
 }
 
+/** Resolve the CLI surface's defaults for `session list` from validated
+ *  runtime config + TTY. Lives here (apps/cli) so the surface-agnostic
+ *  `@/runner/session-ops` slice never reads env directly (architecture
+ *  guard, RFC may-22 §X — Layer-2 takes typed config only).
+ *
+ *   - `QUANTA_SESSION_LIST_FORMAT=plain|rich` pins the format (power-user
+ *      override + test seam — callers that pipe through tee/less rarely
+ *      want ANSI escapes even on a real TTY).
+ *   - `QUANTA_SESSION_LIST_MAX=<N>` caps the rich-format default window.
+ *   - Else `defaultFormat = "rich"` when stdout is a TTY, `"plain"`
+ *      otherwise (pipelines + tests stay byte-identical).
+ *
+ *  Env validation lives in `@/shared#runtimeConfig` (per the
+ *  anti-regression scan: feature sites never read process.env directly).
+ *  TTY detection is a presentation-layer signal that doesn't fit
+ *  runtimeConfig — it's read at the surface boundary like the existing
+ *  `apps/cli/shell-stream-painter.ts` does for `process.stderr.isTTY`. */
+const resolveCliListEnv = (): SessionCommandDeps["listEnv"] => {
+  const cfg = runtimeConfig()
+  const defaultFormat: "rich" | "plain" =
+    cfg.sessionListFormat ?? (process.stdout.isTTY === true ? "rich" : "plain")
+  return cfg.sessionListMax !== undefined
+    ? { defaultFormat, defaultMaxN: cfg.sessionListMax }
+    : { defaultFormat }
+}
+
 /** CLI `quanta session …` entry point — preserves the prior signature so
  *  every existing caller (`repl.ts`, unit + integration tests) keeps working
  *  with no edits. We inject `cliImportHandler` here so `import` continues to
- *  function on the CLI surface. */
+ *  function on the CLI surface, and `resolveCliListEnv()` so the new rich-TUI
+ *  list defaults pick up env/TTY without leaking into the runner slice. */
 export const runSessionCommand = async (
   args: string[],
   deps: SessionCommandDeps,
-): Promise<number> =>
-  runSessionCommandInner(args, {
+): Promise<number> => {
+  const listEnv = deps.listEnv ?? resolveCliListEnv()
+  const importHandler = deps.importHandler ?? cliImportHandler
+  // `exactOptionalPropertyTypes: true` forbids `listEnv: undefined` from
+  // surviving a spread — assign only when defined.
+  const next: SessionCommandDeps = {
     ...deps,
-    importHandler: deps.importHandler ?? cliImportHandler,
-  })
+    importHandler,
+    ...(listEnv !== undefined ? { listEnv } : {}),
+  }
+  return runSessionCommandInner(args, next)
+}

@@ -89,6 +89,15 @@ const parseStringList = (raw: string | undefined): readonly string[] => {
   return Object.freeze(parts)
 }
 
+const parseSessionListFormat = (raw: string | undefined): "rich" | "plain" | undefined => {
+  if (raw === undefined || raw.length === 0) return undefined
+  if (raw === "rich" || raw === "plain") return raw
+  stderrWarn(
+    `ignoring unknown QUANTA_SESSION_LIST_FORMAT="${raw}" — valid: rich|plain — falling back to TTY auto-detect`,
+  )
+  return undefined
+}
+
 const parseSwebenchCacheLevel = (raw: string | undefined): SwebenchCacheLevel => {
   if (raw === undefined) return "env"
   if (SWEBENCH_CACHE_LEVEL_SET.has(raw)) return raw as SwebenchCacheLevel
@@ -207,6 +216,15 @@ export interface RuntimeConfig {
   /** Last-reported token count (`QUANTA_LAST_TOKENS`). Surfaced by the
    *  `/context` slash command. Absent ⇒ the command omits the line. */
   readonly lastTokens: string | undefined
+  /** `quanta session list` default format pin (`QUANTA_SESSION_LIST_FORMAT`).
+   *  `plain` keeps the byte-identical legacy table (back-compat + pipelines);
+   *  `rich` opts into the Codex-inspired TUI on a real TTY. Absent ⇒ the CLI
+   *  surface picks `rich` when `process.stdout.isTTY`, else `plain`. */
+  readonly sessionListFormat: "rich" | "plain" | undefined
+  /** `quanta session list` default cap (`QUANTA_SESSION_LIST_MAX`). Applies
+   *  only to the rich format (plain stays uncapped). Absent ⇒ the dispatcher
+   *  defaults to 10. */
+  readonly sessionListMax: number | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -256,6 +274,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     runId: stringOrUndef(env["QUANTA_RUN_ID"]),
     prefsHome: stringOrUndef(env["QUANTA_PREFS_HOME"]),
     lastTokens: stringOrUndef(env["QUANTA_LAST_TOKENS"]),
+    sessionListFormat: parseSessionListFormat(env["QUANTA_SESSION_LIST_FORMAT"]),
+    sessionListMax: parsePositiveInt(env["QUANTA_SESSION_LIST_MAX"], "QUANTA_SESSION_LIST_MAX"),
   })
 }
 
