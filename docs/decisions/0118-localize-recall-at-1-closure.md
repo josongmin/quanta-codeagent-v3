@@ -34,11 +34,13 @@ Four measurement frames isolate algorithm-delta from corpus-delta:
 | Pre-R-Phase9 (baseline) | 14 | 0.000 | 0.214 | 0.286 | 0.124 |
 | Post-R-Phase9 (algorithm only) | 14 | 0.000 | 0.536 | 0.643 | 0.303 |
 | Post-R-Phase10 on old corpus (algorithm-delta isolation) | 14 | **0.286** | **0.571** | **0.786** | **0.499** |
-| Post-R-Phase10 on new corpus (new authoritative baseline) | 44 | 0.295 | 0.591 | 0.689 | 0.466 |
+| Post-R-Phase10 on new corpus (new authoritative baseline) | 44 | 0.295 | 0.591 | 0.667 | 0.465 |
 
 **Algorithm delta (row 2 → row 3, same n=14 corpus)**: recall@1 **0.000 → 0.286** (+0.286 — surgical closure of the targeted failure mode), recall@3 0.536 → 0.571 (+0.035), recall@5 0.643 → 0.786 (+0.143), MRR 0.303 → 0.499 (+0.196). The recall@1 jump is the headline: the two patches (sibling-`.js` penalty + extended `VENDORED_RE`) hit precisely the failure modes ADR-0115 §"Remaining gaps" #1 and #2 named.
 
-**New authoritative baseline (row 4)**: corpus expanded from 14 to 44 queries across 8 new query classes (multi-language, error-stack-trace, cross-file, acronym, negation-trap, edge, positive-control, test-file-targeted). Numbers are consistent with row 3 (r@1=0.295 vs 0.286; MRR=0.466 vs 0.499) — meaning the algorithm-delta generalizes beyond the original 14. recall@5 is slightly lower on the larger corpus (0.689 vs 0.786) because the broader query set includes harder classes (NOT_FOUND positives, cross-file multi-owner) — the right ground-truth for R-Phase11+ to diff against.
+**New authoritative baseline (row 4)**: corpus expanded from 14 to 44 queries across 8 new query classes (multi-language, error-stack-trace, cross-file, acronym, negation-trap, edge, positive-control, test-file-targeted). Numbers consistent with row 3 (r@1=0.295 vs 0.286; MRR=0.465 vs 0.499) — meaning the algorithm-delta generalizes beyond the original 14. recall@5 is lower on the larger corpus (0.667 vs 0.786) because the broader query set includes harder classes (NOT_FOUND positives, cross-file multi-owner) — the right ground-truth for R-Phase11+ to diff against.
+
+**Measurement-instrument hygiene**: `tests/smoke/localize/measure.ts`'s `MEASUREMENT_ARTIFACTS` exclusion set was extended in this round to additionally drop `post-r-phase10.json` and `post-r-phase10-old-corpus.json` — without this fix, those snapshot files (which contain corpus ids + path strings) would self-rank as top hits for the corpus's own queries. Same instrument-contamination rationale Agent B documented for `post-r-phase9.json` in R-Phase9.
 
 The third row isolates the **algorithm delta** (same 14-query corpus as R-Phase9, only algorithm changed). The fourth row is the **new authoritative baseline** for R-Phase11+ to diff against (Agent B's expanded n≥40 corpus, current algorithm). The two rows answer different questions: row 3 says "did the patch do what it claims", row 4 says "where do we stand now".
 

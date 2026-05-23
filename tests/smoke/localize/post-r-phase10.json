@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "cwd": "/Users/songmin/quanta-codeagent-v3",
-  "git_sha": "d75d978",
+  "git_sha": "d7fb85f",
   "queries": [
     {
       "id": "symbol-buildSystemPrompt",
@@ -98,10 +98,10 @@
       "id": "test-file-query-memory",
       "predicted_top5": [
         "tools/feature-catalog/migrate-from-md.ts",
+        "src/agent/admissibility-gate.ts",
         "src/agent/prompt-sections.ts",
         "src/agent/prompt.ts",
-        "src/agent/run-mode/clamp.ts",
-        "src/agent/verify-signal.ts"
+        "src/apps/cli/internal.ts"
       ],
       "rank_of_first_expected": 0,
       "recall@1": 0,
@@ -128,13 +128,13 @@
         "docs/10.feature-catalog.md",
         "docs/ARCHITECTURE.md",
         "docs/decisions/0115-localize-signal-hardening.md",
-        "src/storage/index.ts",
-        "src/storage/service.ts"
+        "docs/decisions/0118-localize-recall-at-1-closure.md",
+        "src/storage/index.ts"
       ],
-      "rank_of_first_expected": 5,
+      "rank_of_first_expected": 6,
       "recall@1": 0,
       "recall@3": 0,
-      "recall@5": 1
+      "recall@5": 0
     },
     {
       "id": "behavioral-openai-adapter",
@@ -170,8 +170,8 @@
         "src/tool/localize/index.ts",
         "src/skill/system-skills/localize-fault/index.ts",
         "docs/analysis/code-agent-loop/quanta-comparison.md",
-        "docs/decisions/0115-localize-signal-hardening.md",
-        "docs/tool-authoring.md"
+        "docs/decisions/0118-localize-recall-at-1-closure.md",
+        "docs/decisions/0115-localize-signal-hardening.md"
       ],
       "rank_of_first_expected": 1,
       "recall@1": 1,
@@ -419,8 +419,8 @@
         "src/skill/system-skills/loop-on-ci/index.ts",
         "src/skill/system-skills/loop-on-ci/index.ts.my-backup",
         "src/apps/bench/corpus/failure-classifier.ts",
-        "src/agent/prompt-rules/pr-agent.ts",
-        "src/agent/run-mode/types.ts"
+        "src/apps/eval/index.ts",
+        "src/subagent/handlers-6.ts"
       ],
       "rank_of_first_expected": 0,
       "recall@1": 0,
@@ -594,7 +594,7 @@
         "predictions.jsonl",
         "tests/smoke/localize/measure.ts",
         "docs/decisions/0115-localize-signal-hardening.md",
-        "tests/smoke/localize/README.md"
+        "docs/decisions/0118-localize-recall-at-1-closure.md"
       ],
       "rank_of_first_expected": 1,
       "recall@1": 1,
@@ -605,8 +605,8 @@
   "aggregate": {
     "recall@1": 0.29545454545454547,
     "recall@3": 0.5909090909090909,
-    "recall@5": 0.6893939393939393,
-    "MRR": 0.46578282828282824,
+    "recall@5": 0.6666666666666666,
+    "MRR": 0.46502525252525245,
     "n": 44
   }
 }

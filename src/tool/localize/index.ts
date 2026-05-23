@@ -212,11 +212,17 @@ const scoreHit = (
       }
   }
   s += TIER_PENALTY[tier]
-  if (JS_SIBLING_EXT_RE.test(hit.file)) {
-    const stem = stemOf(hit.file)
-    if (stem !== undefined && tsStems.has(stem)) s += JS_SIBLING_PENALTY
-  }
+  s += siblingJsPenalty(hit.file, tsStems)
   return s
+}
+
+/** R-Phase10: −10 when a `.js`/`.cjs`/`.mjs`/`.jsx` has a sibling `.ts`/`.tsx`/
+ *  `.mts`/`.cts` with the same full-path stem (stale compiled artifact). Extracted
+ *  from `scoreHit` to keep that function under the biome complexity budget. */
+const siblingJsPenalty = (file: string, tsStems: Set<string>): number => {
+  if (!JS_SIBLING_EXT_RE.test(file)) return 0
+  const stem = stemOf(file)
+  return stem !== undefined && tsStems.has(stem) ? JS_SIBLING_PENALTY : 0
 }
 
 /** Render ranked hits grouped by file, in score order, capped at `max`. */

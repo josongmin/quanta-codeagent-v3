@@ -42,6 +42,10 @@ const MEASUREMENT_ARTIFACTS = new Set<string>([
   // predicted_top5, which ripgrep would otherwise rank as a top hit for itself.
   // Same rationale as baseline.json — measurement instrument, not signal.
   "tests/smoke/localize/post-r-phase9.json",
+  // R-Phase10 measurement snapshots — same instrument-contamination
+  // rationale (they contain corpus ids + path strings that would self-rank).
+  "tests/smoke/localize/post-r-phase10-old-corpus.json",
+  "tests/smoke/localize/post-r-phase10.json",
 ])
 
 // ── Types ────────────────────────────────────────────────────────────────
