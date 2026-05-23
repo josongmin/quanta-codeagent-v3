@@ -1,23 +1,66 @@
 id: plan-mode
-title: 미흡수
+title: Plan-mode 구조화 메타도구 + state-machine (SOTA++ ADR-0093 draft)
 section: 6
-subsystem: Mode enum (ADR-0018)
+subsystem: Plan-mode 구조화 (Cursor todoModel + Codex plan_delta + Claude ExitPlanMode 합성, ADR-0093 draft)
 order: 3
-maturity: L1
-status: hold
-purpose: 'Plan-mode structured 메타도구(Codex update_plan/create_plan/request_user_input 동급) — 미흡수. dispatch-seam mutating 차단은 별개로 done(ADR-0036 plan-mode-dispatch-block L3, ADR-0063/0086 plan-exit 3-way L3); 여기서 미흡수인 건 plan state-machine을 모델이 직접 갱신/분기하는 structured-choice 도구.'
+maturity: L4
+status: new
+purpose: |
+  ROI-무관 SOTA++ 흡수 — Cursor maximalist 도구셋(create_plan/update_todos) + Codex 이벤트
+  관측(plan_delta/plan_snapshot) + Claude 승인 ergonomics(plan-exit-three-way, 별개 L4)를
+  합쳐 세 모델 모두 능가하는 구조화 plan-state-machine. 5-state TodoStatus 닫힌 enum +
+  25-cell transition matrix(Cursor의 UNSPECIFIED 거부). CAS-versioned Plan envelope
+  (낙관 동시성, 세 모델 다 부재). DAG dependency validator(자기참조·dangling·사이클 거부 +
+  100노드 perf <50ms gate, 세 모델 다 부재). PlanStore port + ToolContext duck-typed
+  PlanMutator seam(@/tool↛@/agent/plan 슬라이스 격리, biome enforce). 4 model-callable
+  도구(create_plan / update_todos / update_plan / remove_todos) + 운영자 port
+  request_user_input(ADR-0095 자매). 6 AgentEvent 변형(plan_created/_updated/_snapshot/
+  _user_input_*/mode_changed) + Submission set_mode op + isSetModeOp 가드. 부재 시
+  default-OFF byte-identical.
 evidence:
-  code: []
+  code:
+    - src/agent/plan/types.ts
+    - src/agent/plan/transitions.ts
+    - src/agent/plan/dag.ts
+    - src/agent/plan/mutations.ts
+    - src/agent/plan/snapshot.ts
+    - src/agent/plan/state.ts
+    - src/agent/plan/mutator-adapter.ts
+    - src/tool/plan/create-plan.ts
+    - src/tool/plan/update-todos.ts
+    - src/tool/plan/update-plan.ts
+    - src/tool/plan/remove-todos.ts
+    - src/tool/plan/error-mapping.ts
+    - src/tool/plan/schemas.ts
+    - src/tool/request-user-input.ts
+    - src/agent/dispatch.ts
+    - src/agent/features.ts
+    - src/agent/types.ts
+    - src/agent/submission.ts
+    - src/agent/control-op-handler.ts
+    - src/stream/types.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/stream/adapters/stdout.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/agent/plan/transitions-hell.test.ts
+      - tests/unit/agent/plan/dag-hell.test.ts
+      - tests/unit/agent/plan/mutations-hell.test.ts
+      - tests/unit/tool/plan/plan-tools-hell.test.ts
+      - tests/unit/tool/request-user-input-hell.test.ts
+      - tests/unit/stream/plan-events-hell.test.ts
+      - tests/unit/agent/submission-set-mode-hell.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    DONE(별개 feature): dispatch 차단 = ADR-0036(plan-mode-dispatch-block L3),
-    plan-exit 3-way = ADR-0063/0086(L3). 여기 미흡수 = Codex update_plan/
-    create_plan/request_user_input 류의 structured plan-state-machine + structured
-    -choice 도구(모델이 plan을 직접 갱신/분기). CLI 환경 ROI 낮아 의식적 보류, 별도 ADR 후보.
-notes: ''
+deliberate_hold: null
+notes: |
+  L4 (2026-05-23 SOTA++ 흡수): closed-shape exhaustive switch 전수(transitions 5×5 + 6
+  PlanDelta + 10 PlanMutationError + 6 ResponseQueuedReason + 5 TodoStatus 전부 never
+  default arm). 휴리스틱 0 — string sniffing, fuzzy match, infer 없음. 슬라이스 격리:
+  @/tool은 @/agent/plan을 import 안 함(biome fence + ToolContext duck-typed seam).
+  TodoItem.assignee → ADR-0042 subagent nickname, .verifyHint → ADR-0013 verify-guard
+  연결. plan-exit-three-way(ADR-0086) + dispatch-block(ADR-0036)과 상호운용. snapshot
+  영속화(planSnapshotStore)는 follow-up phase(P6 plan-exit lifecycle 통합과 짝).
+  239 hellgate tests / 571+ expects / 0 fail / tsc 0 / biome 0 errors.

@@ -49,7 +49,13 @@
  */
 
 import { AutoModeClassifier } from "@/permission"
-import { createUpdateWorkingStateTool, requestPlanExitTool, type Tool } from "@/tool"
+import {
+  buildPlanTools,
+  createUpdateWorkingStateTool,
+  requestPlanExitTool,
+  requestUserInputTool,
+  type Tool,
+} from "@/tool"
 import type { Skill } from "../skill"
 import {
   createSkillTool,
@@ -337,6 +343,22 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // the tool is not in the registry and the loop is byte-identical.
   if (config.planExitPort !== undefined) {
     extraTools.push(requestPlanExitTool() as Tool)
+  }
+
+  // ADR-0093 (draft): register the 4 plan-mutation tools ONLY when
+  // AgentConfig.planStore is wired. The dispatch seam adapts the store into
+  // ctx.planMutator at every dispatch; absent ⇒ tools NOT in registry +
+  // legacy plan-posture flow byte-identical. The 4 tools are all
+  // concurrency-safe (sync mutator) and read-only:false.
+  if (config.planStore !== undefined) {
+    for (const t of buildPlanTools()) extraTools.push(t as Tool)
+  }
+
+  // ADR-0095 (draft, ADR-0086 sister): register `request_user_input` ONLY
+  // when a userInputPort is wired. The dispatch seam builds
+  // ctx.requestUserInput from the port; absent ⇒ tool NOT in registry.
+  if (config.userInputPort !== undefined) {
+    extraTools.push(requestUserInputTool() as Tool)
   }
 
   return {

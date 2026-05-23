@@ -10,7 +10,7 @@ import type {
 import type { RedactionConfig, RedactionKind, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
-import type { ShellExecObserver, ToolRegistry } from "@/tool"
+import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
 import type { BranchSearchConfig } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
@@ -22,10 +22,10 @@ import type { GlobRule } from "./glob-rules"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { IdeContextProvider } from "./ide-context"
+import type { PlanStore } from "./plan/state"
 import type { PlanExitPort } from "./plan-exit-flow"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
-import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
 import type { StopCategory } from "./stop-category"
 import type { Submission } from "./submission"
@@ -467,6 +467,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   planExitPort?: PlanExitPort
   /**
+   * Structured plan-mode store (ADR-0093 draft). When wired, the dispatch
+   * seam adapts this into a `PlanMutator` on every ToolContext and
+   * `buildSessionFeatures` registers the 4 plan-mutation tools
+   * (create_plan / update_todos / update_plan / remove_todos). Absent ⇒ tools
+   * NOT registered; plan posture (ADR-0036) still works without structured
+   * mutation (byte-identical legacy). Persistence via {@link planSnapshotStore}.
+   */
+  planStore?: PlanStore
+  /**
+   * Operator-side user-input port (ADR-0095 draft, ADR-0086 sister). When
+   * wired, the `request_user_input` tool is registered + dispatched via
+   * `ToolContext.requestUserInput`. Absent ⇒ tool NOT registered (default-OFF
+   * byte-identical). Surface (CLI / IDE modal / RPC) supplies the
+   * answer/cancelled decision asynchronously.
+   */
+  userInputPort?: UserInputRequester
+  /**
    * Per-turn work-metrics sink (ADR-0064). Absent ⇒ the loop instantiates no
    * collector and emits nothing (byte-identical default-OFF). Present ⇒ one
    * collector per turn; `emit(metrics, { turnId })` at turn end.
@@ -552,14 +569,6 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
   /**
    * RFC may-22-unified-agent-runtime / Phase 0 — mode policy slot.
    *
-   * The 12-lever discriminated-union vector for this run (interactive /
-   * headless / batch / ci-bot). Absent ⇒ no mode policy is consulted and the
-   * loop is byte-for-byte identical to the pre-RFC path (default-OFF
-   * RFC §1.2 / byte-identical contract). Wired by `apps/agent/assemble.ts`
-   * (Phase 4); the loop itself never reads this directly today.
-   */
-  modePolicy?: ModePolicy
-  /**
    * RFC may-22-unified-agent-runtime / Phase 1 — budget meter slot.
    *
    * When present, the loop's tick sites (turn / model_call / tool_call /
@@ -842,4 +851,4 @@ export type TurnContextConfig = Pick<
  *  The loop's tick sites emit through `budgetMeter`; `modePolicy` clamps the
  *  meter caps and parametrizes the dispatch posture; `maxTurns` is the hard
  *  upper bound the loop enforces independently of any meter. */
-export type BudgetConfig = Pick<AgentConfig, "budgetMeter" | "modePolicy" | "maxTurns">
+export type BudgetConfig = Pick<AgentConfig, "budgetMeter" | "maxTurns">

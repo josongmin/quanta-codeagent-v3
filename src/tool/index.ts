@@ -33,6 +33,8 @@ export {
   validateToolOutput,
 } from "./factory"
 export { fileTreeSummaryTool } from "./file-tree-summary"
+export type { GhRunner } from "./gh"
+export { defaultGhRunner, ghTools } from "./gh"
 export type {
   GitBlameInput,
   GitBranchSwitchInput,
@@ -81,8 +83,17 @@ export {
   parseTestFailure,
   parseTestFailureTool,
 } from "./parse-test-failure"
+export {
+  buildPlanTools,
+  createPlanTool,
+  removeTodosTool,
+  updatePlanTool,
+  updateTodosTool,
+} from "./plan"
+export { planErrorMessage, planFailure } from "./plan/error-mapping"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
+export { requestUserInputTool } from "./request-user-input"
 export { composeShellObservers, noopShellObserver } from "./shell-exec-observers"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
 export type {
@@ -91,9 +102,16 @@ export type {
   DeferredToolResult,
   GitWriteGuard,
   HITLTier,
+  PlanDeltaKind,
   PlanExitRequester,
   PlanExitToolDecision,
   PlanExitToolOutcome,
+  PlanMutationErrorCode,
+  PlanMutationResult,
+  PlanMutator,
+  PlanMutatorNewTodo,
+  PlanMutatorTodoPatch,
+  PlanReadonlyView,
   Tool,
   ToolContext,
   ToolEvent,
@@ -101,6 +119,8 @@ export type {
   ToolResult,
   ToolResultEvidence,
   ToolSpec,
+  UserInputOutcome,
+  UserInputRequester,
   WorkingStateHandle,
   WorkingStatePatch,
   WorkingStateSnapshot,

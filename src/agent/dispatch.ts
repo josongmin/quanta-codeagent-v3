@@ -14,6 +14,7 @@ import { deny, resultBlock } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
 import { resolveCollaborationMode } from "./mode"
+import { planStoreToMutator } from "./plan/mutator-adapter"
 import { runPlanExitFlow } from "./plan-exit-flow"
 import type { AgentConfig } from "./types"
 
@@ -280,6 +281,16 @@ const dispatchToolInner = async (
     // which only allocates events when this is present (`exactOptionalProperty
     // Types` honoured — never `onShellEvent: undefined`).
     ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
+    // ADR-0093 (draft) — PlanStore→PlanMutator adapter. Built fresh per
+    // dispatch so the slice fence (@/tool never imports @/agent/plan) stays
+    // intact: dispatch is in @/agent and is the only allowed translator.
+    // Absent ⇒ 4 plan tools graceful-fail at ok:false (default-OFF).
+    ...(config.planStore !== undefined
+      ? { planMutator: planStoreToMutator(config.planStore) }
+      : {}),
+    // ADR-0095 (draft) — operator-side user-input requester. Surface
+    // (CLI / IDE modal / RPC) supplies the answer/cancelled decision.
+    ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
   }
   const out = await execute(effectiveCall, config, ctx, onProgress)
   if (config.hooks) {
