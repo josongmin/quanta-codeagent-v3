@@ -8,13 +8,64 @@ const RED = "\x1b[31m"
 const GREEN = "\x1b[32m"
 const RESET = "\x1b[0m"
 
+/** Optional hook that rewrites the assistant text stream as it goes to
+ *  stdout. The CLI surface injects an inline markdown highlighter
+ *  (`src/apps/cli/markdown-painter.ts`) when stdout is a TTY and the env
+ *  knobs allow it; non-CLI surfaces (recorders, Web) leave it undefined so
+ *  the byte stream is verbatim (RFC §1.2 default-OFF byte-identical). */
+export interface AssistantTextPainter {
+  /** Rewrite a single delta. Returning the input unchanged is a valid
+   *  no-op. The painter may buffer (return empty) when it is awaiting more
+   *  bytes to disambiguate a markdown token. */
+  write(delta: string): string
+  /** Drain any pending buffer at turn-end (called from the `tool_call` /
+   *  `done` / non-text-event branches). Implementations that don't buffer
+   *  may return the empty string. */
+  flush(): string
+}
+
+export interface StdoutStreamOptions {
+  /** When supplied AND `assistant_text` arrives, every delta is funneled
+   *  through `painter.write(...)` before being written to stdout. Other
+   *  event types call `painter.flush()` first so any pending partial line
+   *  is emitted before the boundary marker. */
+  readonly painter?: AssistantTextPainter
+}
+
 /** Human-readable stdout renderer. Assistant text streams inline; tool
  *  activity and lifecycle render as dim status lines. */
 export class StdoutStream implements StreamPort {
   private inText = false
+  private readonly painter: AssistantTextPainter | undefined
+
+  constructor(opts: StdoutStreamOptions = {}) {
+    this.painter = opts.painter
+  }
+
+  /** Drain the markdown painter buffer (if wired) immediately before
+   *  emitting a non-text boundary marker — otherwise a partial header at
+   *  end-of-turn would be silently dropped. Hoisted out of `emit` to keep
+   *  its cognitive complexity under the biome budget. */
+  private drainPainterTail(): void {
+    if (this.painter === undefined) return
+    const tail = this.painter.flush()
+    if (tail !== "") process.stdout.write(tail)
+  }
+
+  /** Write a single `assistant_text` delta — redacted, then routed through
+   *  the markdown painter when wired (byte-identical pass-through when
+   *  not). Hoisted out of `emit` so the switch case stays a single
+   *  statement (keeps `emit`'s cognitive complexity under the budget). */
+  private writeAssistantText(delta: string): void {
+    const safe = redactStr(delta)
+    const out = this.painter !== undefined ? this.painter.write(safe) : safe
+    if (out !== "") process.stdout.write(out)
+    this.inText = true
+  }
 
   emit(event: AgentEvent): void {
     if (event.type !== "assistant_text" && this.inText) {
+      this.drainPainterTail()
       process.stdout.write("\n")
       this.inText = false
     }
@@ -28,8 +79,10 @@ export class StdoutStream implements StreamPort {
         break
       case "assistant_text":
         // S4: a secret pasted into model output must not hit the terminal.
-        process.stdout.write(redactStr(event.delta))
-        this.inText = true
+        // ADR: inline markdown highlighter — when wired, route the delta
+        // through the painter's streaming FSM. When absent, write the
+        // delta verbatim (byte-identical to the pre-painter path).
+        this.writeAssistantText(event.delta)
         break
       case "tool_call":
         process.stdout.write(

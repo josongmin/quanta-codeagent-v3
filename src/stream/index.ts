@@ -8,6 +8,7 @@ export {
   JsonlRecorderRetentionBusyError,
 } from "./adapters/jsonl-retention"
 export { SseStream } from "./adapters/sse"
+export type { AssistantTextPainter, StdoutStreamOptions } from "./adapters/stdout"
 export { StdoutStream } from "./adapters/stdout"
 export type { DegradedRecord, TeeStreamOpts } from "./adapters/tee"
 export { TeeStream } from "./adapters/tee"

@@ -1,7 +1,13 @@
 import { join } from "node:path"
 import type { StructuredLogger } from "@/observability"
 import type { RunContext } from "@/shared"
-import { JsonlRecorder, StdoutStream, type StreamPort, TeeStream } from "@/stream"
+import {
+  type AssistantTextPainter,
+  JsonlRecorder,
+  StdoutStream,
+  type StreamPort,
+  TeeStream,
+} from "@/stream"
 
 /**
  * Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
@@ -23,6 +29,11 @@ export interface StreamingAssembleInput {
    *  prefer to mint it inside this builder (the default) and read the value
    *  back from the returned `RunContext`. */
   runId?: string | undefined
+  /** Optional assistant-text painter (e.g. inline markdown highlighter).
+   *  When absent, the StdoutStream writes deltas verbatim — byte-identical
+   *  to the pre-painter path. Surfaces that paint (CLI) inject it here;
+   *  recorders / Web surfaces leave it undefined. */
+  painter?: AssistantTextPainter | undefined
 }
 
 export interface StreamingResult {
@@ -31,7 +42,9 @@ export interface StreamingResult {
 }
 
 export const buildStreamingCore = (input: StreamingAssembleInput): StreamingResult => {
-  const stream: StreamPort = new StdoutStream()
+  const stream: StreamPort = new StdoutStream(
+    input.painter !== undefined ? { painter: input.painter } : {},
+  )
   if (!input.observeDir) return { stream, run: undefined }
   const runId = input.runId ?? crypto.randomUUID()
   const run: RunContext = { runId }

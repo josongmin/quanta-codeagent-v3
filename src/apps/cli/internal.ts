@@ -30,9 +30,10 @@ import {
   type Provider as RunnerProvider,
 } from "@/runner/assemble"
 import { logger, type RunContext } from "@/shared"
-import type { StreamPort } from "@/stream"
+import type { AssistantTextPainter, StreamPort } from "@/stream"
 import { gitTools, type Tool } from "@/tool"
 import type { Tooling } from "./config-assemble"
+import { createMarkdownPainter } from "./markdown-painter"
 import { isPathLikeToken } from "./resume"
 
 /**
@@ -462,12 +463,45 @@ export const loadFeatures = async (slog: StructuredLogger): Promise<Features> =>
 /** Observability wiring (RFC-0002 §5.4/§8). Default OFF → byte-identical to
  *  today (plain StdoutStream, no RunContext). When `observe` is set: a runId
  *  tags a RunContext and the stdout stream is fanned out to a JsonlRecorder.
- *  Thin wrapper over the surface-agnostic `buildStreamingCore`. */
+ *  Thin wrapper over the surface-agnostic `buildStreamingCore`.
+ *
+ *  ADR (inline markdown highlighter): when the CLI surface has both a TTY
+ *  stdout AND the env knobs allow colour (NO_COLOR unset, QUANTA_MD_HIGHLIGHT
+ *  !== "0", QUANTA_MD_MODE !== "off"), an `AssistantTextPainter` is built and
+ *  threaded into `StdoutStream` so headers / code fences / inline-code spans
+ *  paint with ANSI escapes. With the painter ABSENT (any of the gates fail)
+ *  the byte stream is verbatim — same as before this feature. */
 export const buildStreaming = (
   observe: string | undefined,
   slog: StructuredLogger,
-): { stream: StreamPort; run: RunContext | undefined } =>
-  buildStreamingCore({ ...(observe !== undefined ? { observeDir: observe } : {}), slog })
+): { stream: StreamPort; run: RunContext | undefined } => {
+  const painter = buildCliMarkdownPainter()
+  return buildStreamingCore({
+    ...(observe !== undefined ? { observeDir: observe } : {}),
+    ...(painter !== undefined ? { painter } : {}),
+    slog,
+  })
+}
+
+/** Build the assistant-text markdown painter for this CLI process, or
+ *  return undefined when any default-OFF gate fails. Gates (all must pass):
+ *   - `process.stdout.isTTY === true` (a pipe stays plain).
+ *   - `process.env.NO_COLOR` unset / empty (https://no-color.org).
+ *   - `process.env.QUANTA_MD_HIGHLIGHT !== "0"` (kill-switch).
+ *   - `process.env.QUANTA_MD_MODE` not `"off"`.
+ *  Extracted to a named helper so `buildStreaming` stays a thin assembler
+ *  and the gating logic is straightforward to unit-test. */
+const buildCliMarkdownPainter = (): AssistantTextPainter | undefined => {
+  if ((process.stdout as { isTTY?: boolean }).isTTY !== true) return undefined
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "") return undefined
+  if (process.env.QUANTA_MD_HIGHLIGHT === "0") return undefined
+  const mode = process.env.QUANTA_MD_MODE
+  if (mode === "off") return undefined
+  return createMarkdownPainter({
+    enabled: true,
+    mode: mode === "aggressive" ? "aggressive" : "conservative",
+  })
+}
 
 /** Compose the LLM stack: bounded retry (inner-most), optional same-turn
  *  provider fallback (outer), and — only in `auto` mode — attach the
