@@ -8,36 +8,31 @@
  * facade.
  */
 
-import {
-  getDefaultPermissionStore,
-  type PermissionStore,
-  type ThreadPermission,
-} from "./permission-store"
+import type { PermissionStore, ThreadPermission } from "./permission-store"
 
 export type { ThreadPermission } from "./permission-store"
 
 /** Read the per-thread override (if any). `undefined` ⇒ caller falls back
- *  to the per-host axis (next in precedence). */
+ *  to the per-host axis (next in precedence). `store` is REQUIRED — the
+ *  composition root injects (no service-locator fallback). */
 export const getThreadPermission = (
   threadId: string,
-  store: PermissionStore = getDefaultPermissionStore(),
+  store: PermissionStore,
 ): ThreadPermission | undefined => store.getThread(threadId)
 
-/** Set the per-thread override. Mutating call — schedules a debounced flush. */
+/** Set the per-thread override. Mutating call — schedules a debounced flush.
+ *  `store` is REQUIRED. */
 export const setThreadPermission = (
   threadId: string,
   perm: ThreadPermission,
-  store: PermissionStore = getDefaultPermissionStore(),
+  store: PermissionStore,
 ): void => {
   store.setThread(threadId, perm)
 }
 
 /** Remove the per-thread override. The thread reverts to the per-host /
- *  global precedence chain. */
-export const clearThreadPermission = (
-  threadId: string,
-  store: PermissionStore = getDefaultPermissionStore(),
-): void => {
+ *  global precedence chain. `store` is REQUIRED. */
+export const clearThreadPermission = (threadId: string, store: PermissionStore): void => {
   store.clearThread(threadId)
 }
 

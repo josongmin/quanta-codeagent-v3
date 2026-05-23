@@ -54,7 +54,7 @@ import type { AgentConfig, BranchSearchConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
 import type { PermissionContext } from "@/permission"
 import { StdoutStream, type StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
   type AssembleRequest,
   assembleAgentConfig,
@@ -81,8 +81,13 @@ const buildIdeBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "b
   // safe fallback for a headless smoke of the ide assembly.
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
   const permission: PermissionContext = req.base.permission ?? { mode: "default" }
+  // DIP factory call; the IDE host injects its own registry in production. The
+  // fallback has no preset-specific fs/diagnostics ports (IDE's LSP diagnostics
+  // arrive via the host-injected registry, not via the default factory).
   const registry =
-    req.base.registry instanceof ToolRegistry ? req.base.registry : new ToolRegistry(defaultTools)
+    req.base.registry instanceof ToolRegistry
+      ? req.base.registry
+      : new ToolRegistry(buildDefaultTools())
   return {
     ...req.base,
     llm: req.base.llm,

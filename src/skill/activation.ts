@@ -68,12 +68,30 @@ const matchFull = (tokens: GlobTok[], s: string): boolean => {
     }
   }
   function step(ti: number, si: number): boolean {
-    if (ti === T) return si === L
-    const tok = tokens[ti] as GlobTok
-    if (tok.k === "lit") return si < L && s[si] === tok.c && go(ti + 1, si + 1)
-    if (tok.k === "one") return si < L && s[si] !== "/" && go(ti + 1, si + 1)
-    if (tok.k === "seg") return star(ti, si, false)
-    return star(ti, si, true) // any
+    // ITERATIVELY consume any run of lit/one tokens before recursing. R2 fix:
+    // a tail-recursive `go(ti+1, si+1)` per literal grew the call stack one
+    // frame per character, so a 4000-char literal-only glob (within the cap)
+    // could throw RangeError on Node's ~7K-frame default. The iterative skip
+    // bounds recursion depth by the number of seg/any tokens instead, which
+    // is far smaller than total token count for realistic globs.
+    let i = ti
+    let j = si
+    while (i < T) {
+      const tok = tokens[i] as GlobTok
+      if (tok.k === "lit") {
+        if (j >= L || s[j] !== tok.c) return false
+        i++
+        j++
+      } else if (tok.k === "one") {
+        if (j >= L || s[j] === "/") return false
+        i++
+        j++
+      } else break
+    }
+    if (i === T) return j === L
+    const tok = tokens[i] as GlobTok
+    if (tok.k === "seg") return star(i, j, false)
+    return star(i, j, true) // any
   }
   function go(ti: number, si: number): boolean {
     const key = ti * (L + 1) + si
@@ -102,6 +120,14 @@ const ANY_SLASH: GlobTok[] = [{ k: "any" }, { k: "lit", c: "/" }]
 export const MAX_GLOB_LEN = 4096
 export const MAX_PATH_LEN = 8192
 
+/** Combined work-budget cap: T·L (tokens × path length). The per-axis caps above
+ *  bound the WORST corner individually, but their *product* still drives matcher
+ *  cost — a 4 KiB glob × 8 KiB path is 33M memo cells and the audit measured
+ *  ~50 s on hardware. 2²⁰ ≈ 1 M is generous for any realistic glob/path pair
+ *  (e.g. T=10, L=8000 = 80k ≪ 1M) and bounds matcher wall-clock to the low ms
+ *  range. Over-cap pairs short-circuit to no-match (same safe failure mode). */
+export const MAX_GLOB_WORK = 1 << 20
+
 /**
  * True if `path` matches any of the gitignore-style `patterns`. Pure helper:
  * it is exported for a host to call; nothing in this slice calls it.
@@ -118,11 +144,19 @@ export const MAX_PATH_LEN = 8192
  * matcher's O(T·L) state-space.
  */
 export const matchesAnyGlob = (path: string, patterns: string[]): boolean => {
-  const norm = path.replace(/\\/g, "/").replace(/^\.?\//, "")
+  // R2 fix: require the dot in the strip regex so an ABSOLUTE path like
+  // "/etc/passwd" is NOT silently relativized to "etc/passwd" (the prior
+  // `^\.?\/` made the dot optional and silently stripped the leading `/`,
+  // which would let `paths: ["etc/**"]` match `/etc/passwd`). `+` strips any
+  // run of `./` prefixes (`././x` ⇒ `x`).
+  const norm = path.replace(/\\/g, "/").replace(/^(\.\/)+/, "")
   if (norm.length > MAX_PATH_LEN) return false
   return patterns.some((p) => {
     const glob = p.trim()
     if (glob.length === 0 || glob.length > MAX_GLOB_LEN) return false
+    // Combined T·L work-budget — even within per-axis caps, the product can
+    // still pin CPU on a crafted pair (audit measured ~50s at 4K × 8K).
+    if (glob.length * norm.length > MAX_GLOB_WORK) return false
     const tokens = tokenize(glob)
     if (glob.includes("/")) return matchFull(tokens, norm)
     return matchFull(tokens, norm) || matchFull([...ANY_SLASH, ...tokens], norm)

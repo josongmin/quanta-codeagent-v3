@@ -20,12 +20,7 @@
  * store's own debounced flush.
  */
 
-import {
-  computeActionSignature,
-  type DenialRecord,
-  getDefaultPermissionStore,
-  type PermissionStore,
-} from "./permission-store"
+import { computeActionSignature, type DenialRecord, type PermissionStore } from "./permission-store"
 
 export type { DenialRecord } from "./permission-store"
 export { computeActionSignature } from "./permission-store"
@@ -46,14 +41,15 @@ export interface PostDenialAction {
 }
 
 /** Record a fresh denial. Resets any prior `seenRiskAt`/`userOverrideAt` for
- *  the same `(threadId, actionSignature)` — re-denying is a new event. */
+ *  the same `(threadId, actionSignature)` — re-denying is a new event.
+ *  `store` is REQUIRED — composition root injects (no service-locator fallback). */
 export const recordDenial = (
   action: PostDenialAction,
   reason: string,
-  opts: { clock?: PostDenialClock; store?: PermissionStore } = {},
+  opts: { clock?: PostDenialClock; store: PermissionStore },
 ): string => {
   const clock = opts.clock ?? defaultClock
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
   const actionSignature = computeActionSignature({
     tool: action.tool,
     workdir: action.workdir,
@@ -70,13 +66,13 @@ export const recordDenial = (
 
 /** Mark that the user has seen the concrete risk explanation. No-op when
  *  no prior denial exists (defensive — UI should not call this for an
- *  action that was never denied). */
+ *  action that was never denied). `store` is REQUIRED. */
 export const recordRiskSeen = (
   action: PostDenialAction,
-  opts: { clock?: PostDenialClock; store?: PermissionStore } = {},
+  opts: { clock?: PostDenialClock; store: PermissionStore },
 ): string => {
   const clock = opts.clock ?? defaultClock
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
   const actionSignature = computeActionSignature({
     tool: action.tool,
     workdir: action.workdir,
@@ -87,13 +83,14 @@ export const recordRiskSeen = (
 }
 
 /** Mark that the user has explicitly re-approved this action AFTER seeing
- *  the risk. The store enforces sequence ordering via timestamps. */
+ *  the risk. The store enforces sequence ordering via timestamps.
+ *  `store` is REQUIRED. */
 export const recordUserOverride = (
   action: PostDenialAction,
-  opts: { clock?: PostDenialClock; store?: PermissionStore } = {},
+  opts: { clock?: PostDenialClock; store: PermissionStore },
 ): string => {
   const clock = opts.clock ?? defaultClock
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
   const actionSignature = computeActionSignature({
     tool: action.tool,
     workdir: action.workdir,
@@ -105,12 +102,12 @@ export const recordUserOverride = (
 
 /** True when the override sequence is complete AND properly ordered for the
  *  (threadId, action) pair. Used by the admissibility-gate as the highest-
- *  precedence allow signal. */
+ *  precedence allow signal. `store` is REQUIRED. */
 export const hasPostDenialOverride = (
   action: PostDenialAction,
-  opts: { store?: PermissionStore } = {},
+  opts: { store: PermissionStore },
 ): boolean => {
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
   const actionSignature = computeActionSignature({
     tool: action.tool,
     workdir: action.workdir,
@@ -120,12 +117,12 @@ export const hasPostDenialOverride = (
 }
 
 /** Inspect the raw denial record (debug/audit/UI surfaces — e.g. the CLI
- *  status command). */
+ *  status command). `store` is REQUIRED. */
 export const getDenialRecord = (
   action: PostDenialAction,
-  opts: { store?: PermissionStore } = {},
+  opts: { store: PermissionStore },
 ): DenialRecord | undefined => {
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
   const actionSignature = computeActionSignature({
     tool: action.tool,
     workdir: action.workdir,
@@ -136,12 +133,12 @@ export const getDenialRecord = (
 
 /** Clear the override sequence (e.g. when the action's structural fingerprint
  *  changes — tool renamed, args canonicalization differs). The CLI exposes
- *  this for operators who need to reset state. */
+ *  this for operators who need to reset state. `store` is REQUIRED. */
 export const clearDenialRecord = (
   action: PostDenialAction,
-  opts: { store?: PermissionStore } = {},
+  opts: { store: PermissionStore },
 ): void => {
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
   const actionSignature = computeActionSignature({
     tool: action.tool,
     workdir: action.workdir,

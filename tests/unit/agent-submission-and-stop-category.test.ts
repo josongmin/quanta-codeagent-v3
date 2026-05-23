@@ -132,7 +132,12 @@ describe("Spec A3 — Submission op envelope wires through runAgent", () => {
     expect(allText).toContain("legacy-seed")
   })
 
-  test("control-op submission (interrupt) does NOT seed history — falls back to messages", async () => {
+  test("control-op submission (interrupt) is now BEHAVIORAL (L4) — aborts before any LLM call", async () => {
+    // L3 → L4 promotion (2026-05-23): the `interrupt` op was previously
+    // accepted-and-ignored (the loop fell back to `messages` and completed
+    // normally). L4 wires it to a typed `interrupted` event + immediate
+    // `aborted` outcome. This test asserts the new contract: no LLM call,
+    // no completion, structured `interrupted` stop category.
     const llm = new FakeLLM([completedScript()])
     const stream = new RecordingStream()
     const registry = new ToolRegistry(defaultTools)
@@ -141,14 +146,14 @@ describe("Spec A3 — Submission op envelope wires through runAgent", () => {
       messages: [userMsg("legacy-still-wins")],
       submission: { id: "i-1", op: { kind: "interrupt" } },
     })
-    expect(outcome.reason).toBe("completed")
-    const firstInput = llm.seen[0]
-    if (!firstInput) throw new Error("unreachable")
-    const allText = firstInput.messages
-      .flatMap((m) => m.content.filter((b) => b.type === "text"))
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("\n")
-    expect(allText).toContain("legacy-still-wins")
+    expect(outcome.reason).toBe("aborted")
+    expect(outcome.turns).toBe(0)
+    expect(outcome.stopCategory?.kind).toBe("interrupted")
+    // No LLM call opened — the interrupt unwinds pre-loop.
+    expect(llm.seen.length).toBe(0)
+    // Typed `interrupted` event was emitted (L4 observability surface).
+    const ev = stream.events.find((e) => e.type === "interrupted")
+    expect(ev).toBeDefined()
   })
 })
 

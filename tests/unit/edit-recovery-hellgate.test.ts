@@ -11,9 +11,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   applyPatch,
-  type FileSystemPort,
-  parsePatch,
   PatchApplyError,
+  type PatchFileSystemPort,
+  parsePatch,
 } from "../../src/patch/index.js"
 import { applyFuzzyEdit } from "../../src/tool/edit/fuzzy"
 import { classifyMismatch, formatStrategyHint } from "../../src/tool/edit/strategy-hint"
@@ -75,7 +75,7 @@ describe("E2 hellgate — ambiguous match (old_string appears 2+ times)", () => 
 })
 
 // ── V4A `*** Move to:` rename+edit must be ATOMIC ───────────────────────────
-class MemFs implements FileSystemPort {
+class MemFs implements PatchFileSystemPort {
   private files = new Map<string, string>()
   constructor(seed: Record<string, string> = {}) {
     for (const [k, v] of Object.entries(seed)) this.files.set(k, v)

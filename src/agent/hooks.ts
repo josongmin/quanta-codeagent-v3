@@ -39,7 +39,7 @@ export type HookEvent =
   | { type: "session_start"; sessionId: string }
   | { type: "session_end"; reason: string; turns: number }
   | { type: "pre_tool_use"; name: string; input: unknown }
-  | { type: "post_tool_use"; name: string; ok: boolean; output: string }
+  | { type: "post_tool_use"; name: string; input: unknown; ok: boolean; output: string }
   | { type: "turn_start"; turn: number }
 
 export type HookEventType = HookEvent["type"]

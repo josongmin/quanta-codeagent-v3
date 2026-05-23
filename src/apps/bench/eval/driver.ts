@@ -19,7 +19,7 @@ import { buildSystemPrompt, lspNavToolList, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type { evaluateWithPythonSwebench, PySwebenchOpts } from "../python-swebench"
 import type { Instance, InstanceResult } from "../types"
@@ -165,7 +165,9 @@ const buildConfig = (
   // tools emit a clean `ok:false` — registration is harmless without a server.
   // Default-OFF preserves byte-identical bench behavior.
   const lspNavTools = process.env.QUANTA_LSP_TOOLS === "full" ? lspNavToolList() : []
-  const registry = new ToolRegistry([...defaultTools, ...lspNavTools])
+  // DIP factory: bench driver runs against the default port surface; the
+  // per-instance sandbox is enforced by cwd, not by injected fs ports.
+  const registry = new ToolRegistry([...buildDefaultTools(), ...lspNavTools])
   const permission: PermissionContext = { mode: "acceptEdits" }
   const base = `${instance.problemStatement}\n\nWork inside ${sandbox}. When done, stop.`
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the

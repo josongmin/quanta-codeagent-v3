@@ -8,6 +8,7 @@
  */
 export * from "./constants"
 export { runPhase1 } from "./phase1"
+export { LlmPhase2Port } from "./phase2-llm"
 export { ensureConsolidateSchema } from "./schema"
 export { Stage1Store } from "./store"
 export type {
@@ -18,6 +19,7 @@ export type {
   Phase2Input,
   Phase2Outcome,
   Phase2Port,
+  Phase2Summarizer,
   Stage1Output,
   Stage1StorePort,
   WatermarkState,

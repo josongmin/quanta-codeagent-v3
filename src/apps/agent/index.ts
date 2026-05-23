@@ -28,7 +28,7 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
 import { type AgentArgs, AgentArgsError, formatHelp, parseAgentArgs } from "./cli-args"
 import type { RunOutcome } from "./run"
@@ -73,7 +73,10 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
   }
   return {
     llm,
-    registry: new ToolRegistry(defaultTools),
+    // DIP: route through the factory (no app-specific ports at this baseline
+    // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
+    // byte-identical to the `defaultTools` singleton.
+    registry: new ToolRegistry(buildDefaultTools()),
     stream,
     permission: { mode: "acceptEdits" },
     messages: [],

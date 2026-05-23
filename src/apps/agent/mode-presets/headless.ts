@@ -28,7 +28,7 @@ import type { Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { logger } from "@/shared"
 import { StdoutStream, type StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
   type AssembleRequest,
   assembleAgentConfig,
@@ -48,8 +48,11 @@ const buildHeadlessBase = (
   const cwd = req.base.cwd ?? process.cwd()
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
   const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
+  // DIP factory call; headless has no preset-specific fs/diagnostics ports.
   const registry =
-    req.base.registry instanceof ToolRegistry ? req.base.registry : new ToolRegistry(defaultTools)
+    req.base.registry instanceof ToolRegistry
+      ? req.base.registry
+      : new ToolRegistry(buildDefaultTools())
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: prompt }] }]
   return {
     ...req.base,

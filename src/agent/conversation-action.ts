@@ -347,3 +347,32 @@ const decideControl = (
   }
   return { kind: "accepted_control", action }
 }
+
+/**
+ * L4 wiring seam — `ConversationActionPort` (2026-05-23).
+ *
+ * The loop consults this port ONCE per turn at the top of the body, BEFORE
+ * the next LLM stream opens. The surface returns the next pending typed
+ * action (a synchronous pull — the surface owns its own queue / debounce
+ * policy) or `undefined` when nothing is pending.
+ *
+ *   - Pull semantics (not push): the loop drives the cadence, identical to
+ *     `cfg.steerBarrier` / `cfg.signal.aborted` — no separate event-loop
+ *     thread, no race between push-emit and turn-entry snapshot.
+ *   - Synchronous: the port is `() => ConversationAction | undefined`. The
+ *     surface may build the action from an async source (TUI keystroke /
+ *     websocket frame) but commits the snapshot the loop reads here.
+ *   - At-most-once: each non-undefined return is consumed exactly once. The
+ *     surface is responsible for NOT re-returning the same action on the
+ *     next call.
+ *
+ * Default-OFF: when the field is absent the loop never reads it (byte-
+ * identical legacy). Wired via `AgentConfig.conversationActionPort`.
+ */
+export interface ConversationActionPort {
+  /** Return the next pending action OR `undefined` when nothing is pending.
+   *  Pure-synchronous; never throws (a programming-error surface throw at the
+   *  port boundary collapses to "no action" — the loop emits an `error`
+   *  AgentEvent so a probe can still see the failure). */
+  next(): ConversationAction | undefined
+}

@@ -58,6 +58,51 @@ export type AgentEvent =
       cacheReadTokens?: number
       model: string
     }
+  // ADR control-op cluster (L3→L4 promotion 2026-05-23): back-pressure
+  // signal. Emitted when the loop encountered a control-op or follow-up
+  // dequeue request and DEFERRED it because the thread is paused or the
+  // submission/action is not yet ready. Mirrors Codex's
+  // `response.queued` event variant. Closed `reason` enum (additive). A
+  // surface paints "queued — waiting on user approval" / "queued — rate
+  // limited" without re-classifying error/recovery emits. NullStream
+  // swallows it (default-OFF byte-identical). Adding a new reason MUST
+  // extend `RESPONSE_QUEUED_REASONS` in `@/agent/follow-up-queue` or the
+  // matching control-op handler — never inline a literal.
+  | {
+      type: "response_queued"
+      /** Closed reason: matches the {@link PausedReason} taxonomy from
+       *  `@/agent/follow-up-queue` extended with the two control-op-
+       *  pending reasons documented in the handler. The value is a
+       *  string-literal-union encoded as a plain string here to avoid an
+       *  import cycle (stream → agent); the agent layer asserts the
+       *  literal at the emit site. */
+      reason: string
+      /** Optional human hint (analytics / UI). Never used for control flow. */
+      hint?: string
+    }
+  // ADR control-op cluster (L3→L4 promotion 2026-05-23): submission /
+  // conversation-action interrupt observed. Fired BEFORE the loop unwinds
+  // to its `aborted` finish path so a surface knows "the abort came from
+  // a typed control-op, not a raw signal trip". Closed `source` enum.
+  | {
+      type: "interrupted"
+      source: "submission_interrupt" | "conversation_action_cancel"
+      /** Optional human reason (verbatim from `cancel.reason` when the
+       *  source is `conversation_action_cancel`). */
+      reason?: string
+    }
+  // ADR control-op cluster (L3→L4 promotion 2026-05-23): a typed
+  // cancel_subagent op was routed to the subagent registry. `outcome`
+  // mirrors `TaskRegistry.forceStop` return values plus an
+  // `unknown_subagent` for the case where the registry has no record of
+  // the id. The parent turn KEEPS running — this is observation only, not
+  // a finish trigger.
+  | {
+      type: "subagent_cancel"
+      subagentId: string
+      outcome: "stopped" | "not_found" | "registry_absent"
+      source: "submission_op" | "conversation_action"
+    }
   | { type: "done"; reason: string; turns: number }
 
 /**

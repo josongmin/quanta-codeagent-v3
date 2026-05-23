@@ -10,13 +10,14 @@ import type {
 import type { RedactionConfig, RedactionKind, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
-import type { ToolRegistry } from "@/tool"
-import type { ShellExecObserver } from "@/tool/shell-exec-types"
+import type { ShellExecObserver, ToolRegistry } from "@/tool"
 import type { BranchSearchConfig } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { CompactionBreakerCaps } from "./compaction-breaker"
 import type { ConfirmDecision } from "./confirm-decision"
+import type { ConversationActionPort } from "./conversation-action"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
+import type { FollowUpQueue, PausedReason } from "./follow-up-queue"
 import type { GlobRule } from "./glob-rules"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
@@ -77,6 +78,13 @@ export type PreCompactDecision = "approve" | "defer_one_turn" | "force_now"
 // Declaration-merging keeps every field shape byte-identical to consumers;
 // the inheritance documents the grouping and lets each subsystem take a
 // narrow slice as its parameter type (audit #1).
+/**
+ * Subsystem consumers SHOULD take a narrow `Pick<AgentConfig, ...>` rather than
+ * the full bag — see `RecoveryConfig`, `MemoryConfig`, `FeaturesConfig`,
+ * `TurnContextConfig`, `BudgetConfig`, `AdmissibilityGateConfig` below.
+ * Adding a new field here without an associated narrow Pick is an SRP
+ * regression.
+ */
 export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, SteeringConfig {
   llm: LLMPort
   registry: ToolRegistry
@@ -561,6 +569,60 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `ModePolicy.budgetCaps`); the loop only emits ticks.
    */
   budgetMeter?: BudgetMeter
+  /**
+   * L4 wiring — control-op cluster (2026-05-23). Typed mid-turn
+   * {@link ConversationActionPort} the loop polls at the TOP of each turn
+   * (before `cfg.steerBarrier`, before the LLM stream opens). Absent ⇒ no
+   * poll, no decision, byte-identical legacy. Present ⇒ exactly one
+   * `port.next()` call per turn; non-undefined returns drive a single
+   * `decideAction()` decision with the same caller-supplied clock the rest
+   * of the loop uses.
+   *
+   * `accepted_injection` ⇒ pushed onto `wm` as a user message (same path as
+   * `steerBarrier`), the turn continues. `accepted_control + cancel` ⇒
+   * loop finishes with `aborted`. `accepted_control + cancel_subagent` ⇒
+   * routed to `features.taskRegistry?.forceStop` (parent KEEPS running).
+   * `rejected` ⇒ emit an observability event + skip; the turn proceeds.
+   */
+  conversationActionPort?: ConversationActionPort
+  /**
+   * L4 wiring — control-op cluster (2026-05-23). Per-thread queued follow-
+   * ups (ADR-0037). When set, the loop calls
+   * `followUpQueue.popReady(threadId, pausedReason(threadId))` at the TOP
+   * of each turn (after steerBarrier, before the conversation-action
+   * poll), and when a ready follow-up is returned its `content` is
+   * appended to `wm` as the next user-turn seed. The thread id is the
+   * session id ({@link AgentConfig.sessionId}) by default.
+   *
+   * Absent ⇒ no poll, no allocation, byte-identical legacy. Persistence
+   * across restarts: callers wire {@link followUpQueueSnapshotStore} (also
+   * default-OFF) to read/restore + write the queue snapshot at session
+   * boundaries.
+   */
+  followUpQueue?: FollowUpQueue
+  /**
+   * L4 wiring — control-op cluster (2026-05-23). Per-thread paused-reason
+   * inspector (ADR-0037). When set, the loop calls this BEFORE each
+   * `followUpQueue.popReady` so the queue knows whether the thread is
+   * paused (null ⇒ ready; non-null ⇒ deferred with a `response_queued`
+   * AgentEvent emitted). Absent ⇒ the loop passes `null` to popReady
+   * (always ready when set without a reason source).
+   */
+  pausedReason?: (threadId: string) => PausedReason | null
+  /**
+   * L4 wiring — control-op cluster (2026-05-23). Optional snapshot store
+   * for the follow-up queue. When set, the loop calls
+   * `snapshotStore.save(queue.toSnapshot())` at session-end (alongside
+   * `persistSession`) AND calls `snapshotStore.load()` at session-start
+   * (before the first turn) to restore queued follow-ups across restarts.
+   * Absent ⇒ no save/restore, queue is process-scoped only.
+   */
+  followUpQueueSnapshotStore?: {
+    /** Synchronous OR Promise — the loop awaits both. Throws/rejects are
+     *  caught at the boundary and surface as an `error` AgentEvent. */
+    load(): Promise<ReturnType<FollowUpQueue["toSnapshot"]> | undefined>
+    save(snapshot: ReturnType<FollowUpQueue["toSnapshot"]>): Promise<void>
+  }
 }
 
 /**
@@ -721,3 +783,63 @@ export type AdmissibilityGateConfig = Pick<
   | "sessionId"
   | "trustScope"
 >
+
+/** Narrow contract for the loop's recovery seam (recovery.ts decisions +
+ *  reactive compaction surface). Recovery itself uses internal SAME-TURN
+ *  budget constants; the loop wires the decision into the actual transcript /
+ *  compaction path via `llm`, `stream`, `signal`, and the `compaction` block
+ *  (summarizer + thresholds). `compactionBreaker` short-circuits pathological
+ *  compaction thrash. ISP slice for the recovery / compaction co-operators. */
+export type RecoveryConfig = Pick<
+  AgentConfig,
+  "llm" | "stream" | "signal" | "compaction" | "compactionBreaker" | "onPreCompact"
+>
+
+/** Narrow contract for the long-term memory subsystem (RFC §6.3; memory.ts /
+ *  memory-distill.ts / memory-consolidate.ts seams). Recall + persist + distill
+ *  read `store` / `embedder` / `memory` knobs; `sessionId` tags persisted
+ *  records; `llm` powers distill + consolidate. Absent fields ⇒ the subsystem
+ *  degrades exactly as it does on the full `AgentConfig`. */
+export type MemoryConfig = Pick<AgentConfig, "store" | "embedder" | "memory" | "sessionId" | "llm">
+
+/** Narrow contract for `buildSessionFeatures` (features.ts). Turns the
+ *  optional Tier-1 toggles into wired services (skills inventory, subagent
+ *  runner, working-state, branch-search tool, plan-exit). Reads `registry` +
+ *  `llm` + `permission` for the per-feature wiring, plus the feature
+ *  toggles themselves. */
+export type FeaturesConfig = Pick<
+  AgentConfig,
+  | "registry"
+  | "llm"
+  | "permission"
+  | "skills"
+  | "subagent"
+  | "workingState"
+  | "branchSearch"
+  | "planExitPort"
+  | "modelCandidates"
+>
+
+/** Narrow contract for per-turn prompt / context assembly (the loop's
+ *  reminder-builder + IDE-context snapshot + redaction-config consult). These
+ *  are the fields read at the TOP of each turn to compose what the model
+ *  sees, distinct from the recovery / dispatch fields read inside the turn. */
+export type TurnContextConfig = Pick<
+  AgentConfig,
+  | "cwd"
+  | "system"
+  | "mode"
+  | "planMode"
+  | "repoRules"
+  | "globRules"
+  | "ideContextProvider"
+  | "redaction"
+  | "run"
+  | "sessionId"
+>
+
+/** Narrow contract for the budget / mode-policy slot (RFC may-22 Phase 0/1).
+ *  The loop's tick sites emit through `budgetMeter`; `modePolicy` clamps the
+ *  meter caps and parametrizes the dispatch posture; `maxTurns` is the hard
+ *  upper bound the loop enforces independently of any meter. */
+export type BudgetConfig = Pick<AgentConfig, "budgetMeter" | "modePolicy" | "maxTurns">

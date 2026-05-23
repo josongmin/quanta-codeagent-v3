@@ -60,10 +60,13 @@ export interface ApplyResult {
 }
 
 /**
+ * Patch-specific FS port (read/write/delete/rename/exists). The general FS port
+ * is `@/storage`'s `FileSystemPort` — DIFFERENT shape, different name on purpose.
+ *
  * Injected port for filesystem side-effects. Keeps `applier` pure-functional
  * w.r.t. the host filesystem so it can be unit-tested in-memory.
  */
-export interface FileSystemPort {
+export interface PatchFileSystemPort {
   readFile(path: string): Promise<string>
   writeFile(path: string, content: string): Promise<void>
   deleteFile(path: string): Promise<void>

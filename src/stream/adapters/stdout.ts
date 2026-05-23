@@ -78,6 +78,15 @@ export class StdoutStream implements StreamPort {
         // statement (keeps `emit`'s cognitive complexity under the budget).
         process.stdout.write(renderInProgress(event))
         break
+      case "response_queued":
+        process.stdout.write(renderResponseQueued(event))
+        break
+      case "interrupted":
+        process.stdout.write(renderInterrupted(event))
+        break
+      case "subagent_cancel":
+        process.stdout.write(renderSubagentCancel(event))
+        break
       case "usage":
         process.stdout.write(
           `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,
@@ -96,6 +105,29 @@ export class StdoutStream implements StreamPort {
     }
   }
 }
+
+/** ADR control-op cluster (L3→L4 promotion 2026-05-23): back-pressure
+ *  one-line dim status. PausedReason taxonomy (model_streaming /
+ *  awaiting_approval / network_retry / ...) + control_op_pending. Extracted
+ *  from `emit` so the switch case stays a single statement (keeps `emit`'s
+ *  cognitive complexity under the budget). */
+const renderResponseQueued = (event: Extract<AgentEvent, { type: "response_queued" }>): string => {
+  const hint = event.hint !== undefined && event.hint !== "" ? `: ${oneLine(event.hint)}` : ""
+  return `${DIM}⏸ queued (${event.reason})${hint}${RESET}\n`
+}
+
+/** ADR control-op cluster: typed-interrupt observation. `reason` is the
+ *  verbatim cancel reason from `conversation_action_cancel` (redacted). */
+const renderInterrupted = (event: Extract<AgentEvent, { type: "interrupted" }>): string => {
+  const reason =
+    event.reason !== undefined && event.reason !== "" ? `: ${oneLine(redactStr(event.reason))}` : ""
+  return `${DIM}⛔ interrupted (${event.source})${reason}${RESET}\n`
+}
+
+/** ADR control-op cluster: subagent cancel routing observation. Parent KEEPS
+ *  running — this is not a finish trigger. */
+const renderSubagentCancel = (event: Extract<AgentEvent, { type: "subagent_cancel" }>): string =>
+  `${DIM}✂ subagent ${event.subagentId} (${event.outcome}, via ${event.source})${RESET}\n`
 
 /** ADR-0048: render the `in_progress` heartbeat one-liner, appending the
  *  optional percentage + status when the provider carried them. Extracted from

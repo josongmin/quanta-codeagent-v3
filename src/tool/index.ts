@@ -108,6 +108,11 @@ export type {
 export { createUpdateWorkingStateTool } from "./update-working-state"
 
 /**
+ * STRUCTURAL CONTRACT: composition roots (`src/apps/**`) MUST call
+ * `buildDefaultTools(ports)` and NOT import the eager `defaultTools` singleton
+ * directly — the singleton is retained ONLY as a test / back-compat default.
+ * The factory is the DIP seam: every port flows in here.
+ *
  * Injectable ports for the default tool set (DIP). The composition root can
  * substitute any port; every field is OPTIONAL and falls back to the same
  * default the standalone exports use, so `buildDefaultTools()` (no args) is

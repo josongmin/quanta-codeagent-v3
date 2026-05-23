@@ -56,6 +56,17 @@ export {
   type RecoveryState,
 } from "./recovery"
 
+// L4 control-op cluster (2026-05-23): submission interrupt + cancel_subagent
+// + conversation-action behavioral wiring + queued-follow-up popReady.
+import {
+  type CancelSubagentOutcome,
+  cancelSubagent,
+  isCancelSubagentOp,
+  isInterruptOp,
+  type ResponseQueuedReason,
+} from "./control-op-handler"
+import { decideAction } from "./conversation-action"
+import { threadId as makeThreadId } from "./follow-up-queue"
 import { backoffDelayMs } from "./retry"
 import {
   buildCloseoutGuard,
@@ -199,6 +210,71 @@ const configuredModel = (llm: AgentConfig["llm"]): string => {
  *  contract are untouched. */
 const emitLlmRequest = (config: AgentConfig): void => {
   config.stream.emit({ type: "llm_request", model: configuredModel(config.llm) })
+}
+
+/**
+ * L4 control-op cluster (2026-05-23) — emit a `subagent_cancel` AgentEvent
+ * with the registry-routing outcome. Pure observation; the parent turn keeps
+ * running regardless of `outcome`. Outcomes are 1:1 mapped to the AgentEvent
+ * field set (`stopped|not_found|registry_absent`).
+ */
+const emitSubagentCancel = (
+  config: AgentConfig,
+  subagentId: string,
+  outcome: CancelSubagentOutcome,
+  source: "submission_op" | "conversation_action",
+): void => {
+  config.stream.emit({
+    type: "subagent_cancel",
+    subagentId,
+    outcome:
+      outcome === "registry_absent"
+        ? "registry_absent"
+        : outcome === "stopped"
+          ? "stopped"
+          : "not_found",
+    source,
+  })
+}
+
+/**
+ * L4 control-op cluster (2026-05-23) — emit a `response_queued` AgentEvent
+ * with a closed `reason` literal from {@link ResponseQueuedReason}. Pure
+ * observation; the loop's decision to defer (and the next action it takes)
+ * is independent of this emit. The literal is read from a constant array
+ * at the call site so adding a reason flushes out every emit site at
+ * compile time.
+ */
+const emitResponseQueued = (
+  config: AgentConfig,
+  reason: ResponseQueuedReason,
+  hint?: string,
+): void => {
+  config.stream.emit({
+    type: "response_queued",
+    reason,
+    ...(hint !== undefined ? { hint } : {}),
+  })
+}
+
+/**
+ * L4 control-op cluster (2026-05-23) — emit a typed `interrupted` AgentEvent
+ * BEFORE the loop's `finish("aborted", ...)` return. Lets a surface (jsonl
+ * recorder / TUI) render "submission interrupt" vs "raw signal abort"
+ * distinctly without re-classifying error/recovery emits. `reason` is the
+ * verbatim cancel reason from a `conversation_action_cancel`, optional and
+ * absent for the submission-op source.
+ */
+const emitInterrupted = (
+  config: AgentConfig,
+  source: "submission_interrupt" | "conversation_action_cancel",
+  reason?: string,
+): void => {
+  config.stream.emit({
+    type: "interrupted",
+    source,
+    ...(reason !== undefined ? { reason } : {}),
+  })
 }
 
 /** RFC may-22 Phase 1: BudgetMeter tick helper for tool dispatch. Folds the
@@ -1291,6 +1367,270 @@ const runTurn = async (
 // actual tool-execution surface so the span open / close stays adjacent to
 // the call sites that produce its status.)
 
+/**
+ * L4 control-op cluster (2026-05-23) — restore the follow-up queue snapshot
+ * at session start. When the host wired BOTH `followUpQueue` AND
+ * `followUpQueueSnapshotStore`, hydrate the queue from the snapshot so a
+ * fresh process resumes pending follow-ups. Errors at the boundary collapse
+ * to an `error` AgentEvent + the queue stays at its caller-supplied state
+ * (no exception propagates — session-start must NOT crash on a corrupt
+ * snapshot). Extracted to keep `runAgentInner` under the complexity budget.
+ */
+const restoreFollowUpQueueSnapshot = async (cfg: AgentConfig): Promise<void> => {
+  if (!cfg.followUpQueue || !cfg.followUpQueueSnapshotStore) return
+  try {
+    const snap = await cfg.followUpQueueSnapshotStore.load()
+    if (snap === undefined) return
+    // Walk the snapshot and enqueue each entry verbatim — the caller already
+    // pointed `cfg.followUpQueue` at theirs (which we MUST honor; replacing
+    // it would lose the reference the surface uses to enqueue new follow-ups).
+    for (const t of snap.threads) {
+      const tid = makeThreadId(t.threadId)
+      for (const e of t.entries) {
+        cfg.followUpQueue.enqueue(tid, {
+          content: e.content,
+          submittedAt: e.submittedAt,
+          submittedTurnId: e.submittedTurnId,
+          metadata: e.metadata,
+        })
+      }
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    cfg.stream.emit({
+      type: "error",
+      message: `followUpQueueSnapshotStore.load failed: ${message}`,
+    })
+  }
+}
+
+/**
+ * L4 control-op cluster (2026-05-23) — persist the post-session queue state
+ * so a new process resumes pending follow-ups. Errors at the boundary
+ * collapse to an `error` AgentEvent — they must NOT block the outcome (the
+ * session is already finishing).
+ */
+const saveFollowUpQueueSnapshot = async (cfg: AgentConfig): Promise<void> => {
+  if (!cfg.followUpQueue || !cfg.followUpQueueSnapshotStore) return
+  try {
+    await cfg.followUpQueueSnapshotStore.save(cfg.followUpQueue.toSnapshot())
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    cfg.stream.emit({
+      type: "error",
+      message: `followUpQueueSnapshotStore.save failed: ${message}`,
+    })
+  }
+}
+
+/**
+ * L4 control-op cluster (2026-05-23) — Codex `ensureReady()` gate mirror.
+ * Observe typed control ops on the submission envelope AFTER `session_start`
+ * but BEFORE the main turn loop. Two op kinds drive behavior here:
+ *
+ *   - `interrupt`        ⇒ emit `interrupted{source:submission_interrupt}`
+ *                          + return `"aborted"` so the caller short-circuits
+ *                          via `finish("aborted", 0, ...)`. The op's optional
+ *                          `turnId` is informational — there IS no active
+ *                          turn yet (we haven't entered the for-loop), so
+ *                          the standard interrupt path collapses to "no
+ *                          work, aborted".
+ *   - `cancel_subagent`  ⇒ route to `cancelSubagent()` (which consults
+ *                          `taskRegistry?.forceStop`); emit
+ *                          `subagent_cancel{source:submission_op}` with the
+ *                          routing outcome. Parent session CONTINUES into
+ *                          the regular turn loop — cancelling a child is
+ *                          NOT a parent-finish trigger (the headline
+ *                          ADR-0011 contract). With no `cfg.subagent` the
+ *                          outcome is `registry_absent` (still observed).
+ *   - `shutdown` / `reload_user_config` / `user_input*` ⇒ no L4 behavior
+ *                          is wired here (shutdown ⇒ the loop's normal
+ *                          finish path; reload ⇒ deferred to a future
+ *                          round; user_input ⇒ already seeded by the
+ *                          submission adapter above).
+ */
+const handleSubmissionControlOp = (
+  cfg: AgentConfig,
+  taskRegistry: { forceStop(id: string): boolean } | undefined,
+): "aborted" | "continue" => {
+  if (!cfg.submission) return "continue"
+  if (isInterruptOp(cfg.submission)) {
+    emitInterrupted(cfg, "submission_interrupt")
+    return "aborted"
+  }
+  if (isCancelSubagentOp(cfg.submission)) {
+    const outcome = cancelSubagent(taskRegistry, cfg.submission.op.subagentId)
+    emitSubagentCancel(cfg, cfg.submission.op.subagentId, outcome, "submission_op")
+  }
+  return "continue"
+}
+
+/**
+ * L4 control-op cluster (2026-05-23) — poll the typed
+ * {@link FollowUpQueue} (ADR-0037) at the top of each turn. Three outcomes:
+ *
+ *   - queue unset                         ⇒ returns `null` (no-op).
+ *   - thread paused                       ⇒ returns `null` AND emits
+ *                                          `response_queued{reason}` so
+ *                                          the surface can paint the
+ *                                          back-pressure.
+ *   - queue empty                         ⇒ returns `null` (no-op).
+ *   - thread ready + head non-empty       ⇒ returns the head's content as
+ *                                          a synthesized `user` Message
+ *                                          (loop appends it to `wm`).
+ *
+ * Pure except for `popReady` mutation (the queue) and the optional
+ * `response_queued` emit. Extracted from the loop body to keep
+ * `runAgentInner` flat AND to make the seam unit-testable. Default-OFF: any
+ * caller without a queue sees an immediate `null` return — zero cost.
+ */
+const pollFollowUpQueue = (cfg: AgentConfig, sessionId: string): Message | null => {
+  const queue = cfg.followUpQueue
+  if (queue === undefined) return null
+  const tid = makeThreadId(sessionId)
+  // Caller-supplied paused-reason inspector. Absent ⇒ null (always ready
+  // when the queue is wired without a reason source — explicit by design).
+  const reason = cfg.pausedReason?.(sessionId) ?? null
+  if (reason !== null) {
+    // Pause: emit a back-pressure event with the same closed reason
+    // taxonomy the queue uses; do NOT pop. The follow-up stays at the
+    // head, surfacing on the next ready turn.
+    emitResponseQueued(cfg, reason)
+    return null
+  }
+  const popped = queue.popReady(tid, null)
+  if (popped === null) return null
+  // Synthesize a user-turn Message from the ready follow-up's content. One
+  // user message per dequeue — multi-line content is the surface's choice
+  // (the queue stores `content: string` verbatim).
+  return {
+    role: "user",
+    content: [{ type: "text", text: popped.ready.content }],
+  }
+}
+
+/**
+ * Outcome of the L4 conversation-action poll (2026-05-23). Closed 4-way
+ * union; the loop branches on `kind`:
+ *
+ *   - `none`           ⇒ port returned undefined OR is unset; no action.
+ *   - `injection`      ⇒ accepted_injection from `decideAction`; the loop
+ *                        pushes `message` onto `wm` (mirrors steerBarrier).
+ *   - `finish_aborted` ⇒ accepted_control + cancel; the loop unwinds via
+ *                        `finish("aborted", ...)`. `reason` is the cancel
+ *                        action's verbatim reason string (observability).
+ *   - `continue`       ⇒ accepted_control + cancel_subagent / summarize /
+ *                        resume OR rejected; the loop continues unchanged.
+ *
+ * `cancel_subagent` is routed inside the helper (via the shared
+ * `cancelSubagent()` from `./control-op-handler`) and emits a
+ * `subagent_cancel` AgentEvent — the loop just sees `continue`.
+ */
+type ConversationActionPollOutcome =
+  | { kind: "none" }
+  | { kind: "injection"; message: Message }
+  | { kind: "finish_aborted"; reason: string }
+  | { kind: "continue" }
+
+/**
+ * L4 control-op cluster (2026-05-23) — poll the typed
+ * {@link ConversationActionPort} (ADR-0071) at turn entry. Drives behavior
+ * for the four accepted_control kinds (cancel / cancel_subagent / summarize
+ * / resume) plus the accepted_injection (user_message) path.
+ *
+ * Reads `cfg.activeTurnRef.current` for the active turn state — the loop
+ * sets this immediately above the poll site, so currentTurn is non-null and
+ * isInterrupted is false. With no `activeTurnRef` wired the helper returns
+ * `none` (the action layer requires an `ActiveTurnState`).
+ *
+ * Errors at the port boundary collapse to `none` + an `error` AgentEvent —
+ * a bug in a host-supplied port must NOT crash the turn loop.
+ */
+const pollConversationAction = async (
+  cfg: AgentConfig,
+  taskRegistry: { forceStop(id: string): boolean } | undefined,
+): Promise<ConversationActionPollOutcome> => {
+  const port = cfg.conversationActionPort
+  if (port === undefined) return { kind: "none" }
+  // Surface-supplied port — never trust it to be infallible.
+  let action: ReturnType<typeof port.next>
+  try {
+    action = port.next()
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    cfg.stream.emit({ type: "error", message: `conversationActionPort.next failed: ${message}` })
+    return { kind: "none" }
+  }
+  if (action === undefined) return { kind: "none" }
+  if (cfg.activeTurnRef === undefined) {
+    // The action layer requires an ActiveTurnState — surface that as an
+    // observability event but don't crash the turn. Reasonable behavior:
+    // the surface only set `conversationActionPort` without
+    // `activeTurnRef` — programming error in wiring.
+    cfg.stream.emit({
+      type: "error",
+      message: "conversationActionPort requires activeTurnRef to be wired",
+    })
+    return { kind: "none" }
+  }
+  // Reuse the loop's existing per-turn clock. `decideAction` is the same
+  // pure function the unit tests exercise — same caller-supplied `now`,
+  // same closed outcome union.
+  const outcome = decideAction(
+    action,
+    cfg.activeTurnRef.current,
+    { maxInputBytes: 64 * 1024 },
+    Date.now(),
+  )
+  if (outcome.kind === "rejected") {
+    // Emit observability only; the turn continues.
+    cfg.stream.emit({
+      type: "error",
+      message: `conversation_action rejected: ${outcome.reason}`,
+    })
+    return { kind: "continue" }
+  }
+  if (outcome.kind === "accepted_injection") {
+    return {
+      kind: "injection",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: outcome.injection.content }],
+      },
+    }
+  }
+  // accepted_control — branch on the action kind for behavior.
+  const act = outcome.action
+  if (act.kind === "cancel") {
+    emitInterrupted(cfg, "conversation_action_cancel", act.reason)
+    return { kind: "finish_aborted", reason: act.reason }
+  }
+  if (act.kind === "cancel_subagent") {
+    const result = cancelSubagent(taskRegistry, act.subagentId)
+    emitSubagentCancel(cfg, act.subagentId, result, "conversation_action")
+    // unknown_subagent (registry has no record) ⇒ also emit an error event
+    // shaped like an `error` AgentEvent (tool_result error semantics —
+    // distinct from the registry-absent case where the host never wired
+    // subagents at all). The turn continues regardless.
+    if (result === "not_found") {
+      cfg.stream.emit({
+        type: "error",
+        message: `cancel_subagent: unknown subagent id ${act.subagentId}`,
+      })
+    }
+    return { kind: "continue" }
+  }
+  // summarize / resume — no L4 behavior wired here yet; emit observability
+  // and continue. The action layer already validated state-shape so the
+  // surface knows it was accepted; future rounds will wire the behavior.
+  cfg.stream.emit({
+    type: "recovery",
+    reason: "conversation_action_noop",
+    detail: act.kind,
+  })
+  return { kind: "continue" }
+}
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // Codex 10-step span tree — root `session_loop` span. Wraps the WHOLE
   // session body in a try/finally so the span always closes, even on a
@@ -1528,6 +1868,9 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       const message = e instanceof Error ? e.message : String(e)
       stream.emit({ type: "error", message: `subagent cleanup failed: ${message}` })
     }
+    // L4 control-op cluster (2026-05-23) — follow-up queue snapshot save.
+    // Helper-extracted to keep `finish` flat (cognitive-complexity budget).
+    await saveFollowUpQueueSnapshot(cfg)
     recorder?.stopReason(reason)
     if (cfg.hooks) await cfg.hooks.emit({ type: "session_end", reason, turns })
     stream.emit({ type: "done", reason, turns })
@@ -1566,6 +1909,21 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
 
   if (cfg.hooks) await cfg.hooks.emit({ type: "session_start", sessionId })
 
+  // L4 control-op cluster (2026-05-23) — follow-up queue snapshot restore.
+  // Helper-extracted; see `restoreFollowUpQueueSnapshot` below.
+  await restoreFollowUpQueueSnapshot(cfg)
+
+  // L4 control-op cluster (2026-05-23) — Codex `ensureReady()` gate mirror.
+  // Now that the session is past `session_start` we can OBSERVE typed control
+  // ops on the submission envelope. Helper-extracted to keep `runAgentInner`
+  // under the cognitive-complexity budget; see `handleSubmissionControlOp`
+  // below. Returns `aborted` when the submission carries an `interrupt` op
+  // so the caller short-circuits into `finish`.
+  const subOutcome = handleSubmissionControlOp(cfg, features.taskRegistry)
+  if (subOutcome === "aborted") {
+    return finish("aborted", 0, interruptedCategory("user"))
+  }
+
   for (let turn = 1; turn <= cfg.maxTurns; turn++) {
     if (cfg.signal.aborted) return finish("aborted", turn - 1, interruptedCategory("user"))
     // RFC may-22 Phase 1: BudgetMeter tick — turn start. Optional-chain ⇒ when
@@ -1599,6 +1957,36 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         isInterrupted: false,
       }
     }
+
+    // L4 control-op cluster (2026-05-23) — queued-follow-ups (ADR-0037) +
+    // typed ConversationAction (ADR-0071) consumption.
+    //
+    // Ordering:
+    //   1. Follow-up queue popReady (after steerBarrier, before
+    //      conversation-action): a queued follow-up is the OLDEST pending
+    //      input, so it seeds the next turn first. A non-null pausedReason
+    //      defers the pop and emits `response_queued{reason}` so the
+    //      surface can paint the back-pressure.
+    //   2. Conversation-action port poll: a typed action may inject a
+    //      user_message OR control the turn (cancel / cancel_subagent /
+    //      summarize / resume). The decision uses the activeTurnRef state
+    //      we just set (currentTurn non-null, isInterrupted false).
+    //
+    // Both are default-OFF (the absence of `followUpQueue` /
+    // `conversationActionPort` skips the entire block; byte-identical).
+    const followUpResult = pollFollowUpQueue(cfg, sessionId)
+    if (followUpResult !== null) wm.append(followUpResult)
+    const conversationActionOutcome = await pollConversationAction(cfg, features.taskRegistry)
+    if (conversationActionOutcome.kind === "finish_aborted") {
+      // accepted_control + cancel ⇒ unwind the parent turn (matches
+      // submission interrupt semantics). turn-1 because the for-loop's
+      // turn counter is 1-based; we have not yet consumed THIS turn.
+      return finish("aborted", turn - 1, interruptedCategory("user"))
+    }
+    if (conversationActionOutcome.kind === "injection") {
+      wm.append(conversationActionOutcome.message)
+    }
+
     // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Pre-T3 this
     // was computed-and-discarded (`void stampTurn(...)`) so the caller's
     // `config.run` was never observed by downstream code. T3 reads the

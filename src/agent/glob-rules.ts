@@ -50,6 +50,16 @@ export const MAX_RULE_BYTES = 16 * 1024
  *  the model (and auditor) can see the truncation. */
 export const MAX_RENDER_BYTES = 64 * 1024
 
+/** Cap on the NUMBER of rule files loaded from disk. The render-bytes cap above
+ *  bounds total output size, but `selectGlobRules` still does N rules × K paths
+ *  matchesAnyGlob calls every turn. The audit measured a 10000-rule directory
+ *  causing ~56s `selectGlobRules` per turn when globs no-match-exhaust — the
+ *  render cap is useless if the loop freezes before reaching the renderer. 256
+ *  covers any realistic repo (a real `.cursor/rules` directory ships at most a
+ *  few dozen files); above that, additional files are silently dropped so a
+ *  hostile repo (or a misconfigured one) can't pin CPU per turn. */
+export const MAX_RULE_FILES = 256
+
 /** A discovered file-scoped rule. */
 export interface GlobRule {
   /** Absolute path the rule was loaded from. */
@@ -100,10 +110,18 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
       trimmed.length > MAX_RULE_BYTES
         ? `${trimmed.slice(0, MAX_RULE_BYTES)}\n\n[truncated: ${trimmed.length} bytes total]`
         : trimmed
+    // YAML fold-scalar guard: the dependency-free parser does not implement
+    // `>` / `|` folding — a YAML-shaped multiline description like
+    //   description: >
+    //     line one
+    //     line two
+    // arrives with `description === ">"` (just the indicator) and the
+    // continuation lines silently dropped. Treat a bare fold-indicator as
+    // absent rather than rendering the literal `>` as authority surface.
+    const rawDesc =
+      typeof data.description === "string" ? data.description.trim() : ""
     const description =
-      typeof data.description === "string" && data.description.trim().length > 0
-        ? data.description.trim()
-        : undefined
+      rawDesc.length > 0 && rawDesc !== ">" && rawDesc !== "|" ? rawDesc : undefined
     return {
       sourcePath: path,
       ...(description !== undefined ? { description } : {}),
@@ -120,11 +138,15 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
 /** Load every file-scoped rule under `cwd`'s rule directories. Returns `[]`
  *  when no rule directory exists or none parse — the byte-identical no-op.
  *  Files are loaded in a deterministic order (dir priority, then sorted name)
- *  so the rendered block is stable across runs. Read ONCE per session by
- *  convention (the loop snapshots the result; selection is per-turn). */
+ *  so the rendered block is stable across runs. Stops after {@link
+ *  MAX_RULE_FILES} successfully-loaded rules — the per-turn `selectGlobRules`
+ *  cost is O(N rules × K paths) and an unbounded N is the DoS-via-rule-count
+ *  vector the audit measured (10k rules ⇒ ~56s/turn). Read ONCE per session
+ *  by convention (the loop snapshots the result; selection is per-turn). */
 export const loadGlobRules = async (cwd: string): Promise<GlobRule[]> => {
   const rules: GlobRule[] = []
   for (const dir of GLOB_RULE_DIRS) {
+    if (rules.length >= MAX_RULE_FILES) break
     const abs = join(cwd, dir)
     let names: string[]
     try {
@@ -133,6 +155,7 @@ export const loadGlobRules = async (cwd: string): Promise<GlobRule[]> => {
       continue // directory absent ⇒ skip
     }
     for (const name of [...names].sort()) {
+      if (rules.length >= MAX_RULE_FILES) break
       if (!RULE_EXTENSIONS.some((ext) => name.endsWith(ext))) continue
       const rule = await tryLoadRule(join(abs, name))
       if (rule) rules.push(rule)

@@ -1,7 +1,7 @@
 // V4A apply_patch — AST → filesystem side effects.
 //
 // `applyPatch(patch, fs)` is pure w.r.t. the host filesystem: all I/O goes
-// through the injected `FileSystemPort`. Pre-flight validates every op so
+// through the injected `PatchFileSystemPort`. Pre-flight validates every op so
 // failure throws BEFORE any write — within a single op a multi-step failure
 // (Update + Move to) cannot leave a half-applied state.
 //
@@ -16,16 +16,16 @@
 
 import {
   type ApplyResult,
-  type FileSystemPort,
   type Hunk,
   type Patch,
   PatchAnchorNotFoundError,
   PatchApplyError,
+  type PatchFileSystemPort,
   type PatchOp,
 } from "./types.js"
 
 /** Apply a parsed V4A patch via the injected filesystem port. */
-export async function applyPatch(patch: Patch, fs: FileSystemPort): Promise<ApplyResult> {
+export async function applyPatch(patch: Patch, fs: PatchFileSystemPort): Promise<ApplyResult> {
   const result: ApplyResult = {
     filesAdded: [],
     filesDeleted: [],
@@ -41,7 +41,7 @@ export async function applyPatch(patch: Patch, fs: FileSystemPort): Promise<Appl
 }
 
 /** Dispatch one op. Each branch is responsible for full pre-flight validation. */
-async function applyOp(op: PatchOp, fs: FileSystemPort, result: ApplyResult): Promise<void> {
+async function applyOp(op: PatchOp, fs: PatchFileSystemPort, result: ApplyResult): Promise<void> {
   switch (op.kind) {
     case "add":
       await applyAdd(op, fs, result)
@@ -57,7 +57,7 @@ async function applyOp(op: PatchOp, fs: FileSystemPort, result: ApplyResult): Pr
 
 async function applyAdd(
   op: Extract<PatchOp, { kind: "add" }>,
-  fs: FileSystemPort,
+  fs: PatchFileSystemPort,
   result: ApplyResult,
 ): Promise<void> {
   if (await fs.exists(op.path)) {
@@ -74,7 +74,7 @@ async function applyAdd(
 
 async function applyDelete(
   op: Extract<PatchOp, { kind: "delete" }>,
-  fs: FileSystemPort,
+  fs: PatchFileSystemPort,
   result: ApplyResult,
 ): Promise<void> {
   if (!(await fs.exists(op.path))) {
@@ -86,7 +86,7 @@ async function applyDelete(
 
 async function applyUpdate(
   op: Extract<PatchOp, { kind: "update" }>,
-  fs: FileSystemPort,
+  fs: PatchFileSystemPort,
   result: ApplyResult,
 ): Promise<void> {
   if (!(await fs.exists(op.path))) {

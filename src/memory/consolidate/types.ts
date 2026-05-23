@@ -118,6 +118,53 @@ export interface Phase2Input {
   readonly now: () => number
 }
 
+/**
+ * `Phase2Summarizer` — the minimal LLM-callback shape `LlmPhase2Port`
+ * needs. Defined here so `src/memory/consolidate/phase2-llm.ts` never
+ * imports `@/llm` (RFC §3.1 slice isolation; biome's override-includes
+ * matcher has historically dropped the `paths` form on `src/memory/**`
+ * — see biome.json comment — so we enforce this STRUCTURALLY in addition
+ * to lexically).
+ *
+ * The composition root (apps layer) supplies the wrapper:
+ *
+ *     // apps/agent/index.ts or apps/cli/internal.ts
+ *     const phase2Summarize: Phase2Summarizer = async ({ system, userText }) => {
+ *       const events: StreamEvent[] = []
+ *       let tokensUsed: number | undefined
+ *       for await (const ev of llm.stream({
+ *         system,
+ *         messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
+ *         tools: [],
+ *       })) {
+ *         events.push(ev)
+ *         if (ev.type === "usage" && typeof ev.usage?.totalTokens === "number") {
+ *           tokensUsed = ev.usage.totalTokens
+ *         }
+ *       }
+ *       const { message } = assembleFromEvents(events)
+ *       const text = (Array.isArray(message.content) ? message.content : [])
+ *         .map((b) => (b.type === "text" ? b.text : ""))
+ *         .join("")
+ *       return { text, tokensUsed }
+ *     }
+ *
+ *     const phase2Port = new LlmPhase2Port(phase2Summarize)
+ *
+ * Errors raised by the summarizer are wrapped as
+ * `Phase2ConsolidateError` by `LlmPhase2Port`.
+ */
+export interface Phase2Summarizer {
+  (args: { system: string; userText: string }): Promise<{
+    /** Full assistant text — `LlmPhase2Port` parses the triple-section
+     *  envelope (`<MEMORY_MD>…</MEMORY_MD>` etc.) out of this string. */
+    text: string
+    /** Optional total-tokens reading for OTel
+     *  (`quanta.memory.phase2.tokens_used`). */
+    tokensUsed?: number
+  }>
+}
+
 /** Phase 2 port — wraps the LLM consolidator. Same shape as Phase 1's
  *  for symmetry; a different (cheaper) model is typical (ADR-0011
  *  `summarizerLlm` pattern). */

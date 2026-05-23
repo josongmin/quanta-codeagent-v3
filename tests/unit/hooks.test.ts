@@ -45,7 +45,13 @@ describe("HookBus", () => {
     bus.on("post_tool_use", () => {
       reached = true
     })
-    const result = await bus.emit({ type: "post_tool_use", name: "read", ok: true, output: "x" })
+    const result = await bus.emit({
+      type: "post_tool_use",
+      name: "read",
+      input: {},
+      ok: true,
+      output: "x",
+    })
     expect(result.deny).toBeNull()
     expect(reached).toBe(true)
     expect(lines).toHaveLength(1)

@@ -2,6 +2,29 @@
 
 운영 reference. ADR/RFC 아님 — 실측 동작과 코드 경로를 한 문서에 묶어 디버깅·온보딩·세션간 컨텍스트 보존용으로 쓴다. 어휘는 Codex App agent-loop 문서에서 빌렸지만, 명세는 전부 v3 실제 구현(`src/agent/loop.ts`, `src/agent/dispatch.ts`, `src/tool/*`, `src/permission/policy.ts`)을 따른다. 충돌 시 코드가 truth.
 
+## 0. Loop at a glance
+
+가장 빠른 멘탈 모델. 세부는 §1 이후. 화살표는 turn 단위 제어 흐름이며, 모든 화살표의 코드 anchor는 §3 lifecycle 표에서 확인할 수 있다.
+
+```mermaid
+flowchart TD
+  Start([runAgent]) --> Compact{compactIfNeeded?}
+  Compact -->|yes| DoCompact[proactive compaction] --> Stream
+  Compact -->|no| Stream[LLM stream turn]
+  Stream --> Assembled[assembleFromEvents]
+  Assembled --> Decide{decideOnAssembled}
+  Decide -->|tool_use| Gate[admissibility-gate]
+  Decide -->|max_tokens| Nudge[continue nudge ≤3] --> Stream
+  Decide -->|malformed| Reissue[re-issue ≤1] --> Stream
+  Decide -->|completed| Verify{verifyGuard}
+  Verify -->|block| Force[VERIFY_FORCE_MESSAGE] --> Stream
+  Verify -->|ok| Finish([finish])
+  Gate -->|allow| Dispatch[streamingTurn] --> NextTurn[turn++] --> Stream
+  Gate -->|deny| DenyReason[steer/HARD_DENY] --> Stream
+```
+
+Anchors: `runAgent` ⇒ `src/agent/loop.ts`. `decideOnAssembled` ⇒ `loop.ts:530`. admissibility-gate SSOT ⇒ ADR-0026 (`docs/decisions/0026-admissibility-gate-ssot.md`). verify-before-finish ⇒ ADR-0013.
+
 ## 1. v3 loop boundary map
 
 runtime은 **기계적 invariant**(스키마/permission/capture/스트림 dispatch)만 책임지고, 판단(어떤 tool을 어떤 순서로, 결과를 어떻게 해석)은 전부 LLM이 진다. 분리는 RFC §1.2 anti-bloat의 직접 귀결.

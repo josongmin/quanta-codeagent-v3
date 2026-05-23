@@ -3,6 +3,56 @@ import type { SensitivityClass } from "@/security"
 import type { HITLTier } from "@/shared"
 import type { ShellExecObserver } from "./shell-exec-types"
 
+/**
+ * Execution context handed to every `Tool.execute(input, ctx)` call.
+ *
+ * The mandatory pair (`cwd`, `signal`) is the runtime contract every tool can
+ * rely on. EVERY OTHER FIELD is an OPTIONAL, DUCK-TYPED SEAM through which the
+ * agent slice (or another slice) injects a service into the tool slice WITHOUT
+ * `@/tool` importing the providing slice — this is the slice-isolation
+ * discipline `biome` enforces structurally (see RFC 3.1). A future reviewer
+ * MUST preserve the duck-typing direction: types here may MIRROR a producer
+ * structurally, but `@/tool` must NEVER `import type` from `@/agent`,
+ * `@/permission`, `@/subagent`, `@/llm`, etc.
+ *
+ * SEAM REGISTRY (keep in sync when a seam is added/renamed/removed):
+ *
+ *   - `depth?`              ADR-0011 subagent slice. Provider: dispatch seam
+ *                           from `AgentConfig.depth` (composition root in
+ *                           `@/agent/agent-loop`). Consumer: `@/subagent`
+ *                           depth gate. Absent ⇒ treated as 0.
+ *
+ *   - `workingState?`       Codex memory L3 absorption. Provider: agent loop
+ *                           when `AgentConfig.workingState` is set (composition
+ *                           root in `@/agent/working-state`). Consumer: the
+ *                           `update_working_state` meta-tool. Mirror type:
+ *                           `WorkingStateHandle` (declared below).
+ *                           Absent ⇒ working-state feature is OFF.
+ *
+ *   - `onShellEvent?`       PR-5 / ADR-0081 shell event mirror. Provider:
+ *                           dispatch seam wired from agent transport
+ *                           (`@/agent/shell-event-bus`). Consumer: shell-class
+ *                           tools (`bash` today). Typed via the CLOSED
+ *                           `ShellExecObserver` union — adding a variant is a
+ *                           compile error at every exhaustive switch.
+ *                           Absent ⇒ no events, byte-identical buffered path.
+ *
+ *   - `requestPlanExit?`    ADR-0086 plan-exit. Provider: dispatch seam built
+ *                           from `AgentConfig.planExitPort` (composition root
+ *                           in `@/agent/plan-exit`), wrapping `runPlanExitFlow`.
+ *                           Consumer: the `request_plan_exit` tool.
+ *                           Absent ⇒ tool is not registered.
+ *
+ *   - `gitWriteGuard?`      ADR-0091 git-write protection. Provider: dispatch
+ *                           seam wired from `@/permission/git-write-guard`
+ *                           (`gitWriteProtectReason`). Consumer: `write` /
+ *                           `edit` tools, called BEFORE touching the FS.
+ *                           Absent ⇒ no git-write guard (legacy path).
+ *
+ * Adding a new seam: append a paragraph here, define the mirror type below the
+ * interface, and wire it from the agent-side composition root — never from a
+ * `@/tool` file.
+ */
 export interface ToolContext {
   cwd: string
   signal: AbortSignal
@@ -239,60 +289,57 @@ export type { HITLTier }
  * `ToolEvent`s; `isConcurrencySafe(input)` lets the dispatcher batch pure
  * reads to run in parallel while keeping side-effecting calls serialized.
  *
- * MEMBER MAP (ISP — every optional member is read by a real production seam,
- * so none may be removed without breaking that consumer; this is documentation
- * of WHICH seam, not a delete list):
+ * `Tool<I, O>` is the intersection of FOUR concerns (Interface-Segregation
+ * grouping — structural guardrail for ISP):
  *
- *   Core (always set):       name / description / inputSchema / isReadOnly /
- *                            isConcurrencySafe / execute.
- *   Security hooks (set by   `hitlTier` → permission HITL gate;
- *   built-in tools today):   `extractShellCommand` → registry.extractShellCommand
- *                            (bash); `classifySource` → dispatch redaction
- *                            (read). These are the members built-ins actually
- *                            populate; `defineTool` exposes all three as
- *                            first-class spec passthroughs.
- *   Result-shape hooks       `outputSchema` → registry.run via
- *   (absorb #1, wired but    enforceOutputSchema (also subagent task-tools);
- *   no built-in sets yet):   `toModelOutput` → registry.run compact rendering.
- *   Streaming/deferred       `onInputStart`/`onInputDelta`/`onInputAvailable`
- *   (absorb #1, wired but    → @/agent/tool-input-streaming + streaming-dispatch;
- *   no built-in sets yet):   `supportsDeferredResults` → @/tool/deferred. These
- *                            are speculative for built-ins but load-bearing for
- *                            their seams — keep, do not delete.
+ *   1. {@link ToolCore}            — required surface, always set.
+ *   2. {@link ToolSecurityHooks}   — optional permission / sensitivity hooks
+ *                                    populated by built-in tools today.
+ *   3. {@link ToolResultShape}     — optional result-shape contract
+ *                                    (structured payload + model rendering +
+ *                                    deferred-results opt-in).
+ *   4. {@link ToolStreamingInput}  — optional streaming-input callbacks
+ *                                    mirroring LLM `tool_use_*` events.
+ *
+ * Every member of groups 2–4 is OPTIONAL on `Tool` (the `Partial<…>`s below
+ * preserve the previous flat shape), so all existing readers — `registry.run`,
+ * `registry.extractShellCommand`, `factory.enforceOutputSchema` /
+ * `renderToolOutput` / `driveStreamingInput`, the permission gate's
+ * `inferToolTier`, and the dispatch redaction layer — keep working unchanged.
+ *
+ * Grouping is the structural guardrail: a future "dead optional" sticks out
+ * because it has no consumer in its group. Do NOT add a scanner rule.
  */
-export interface Tool<I = unknown, O = unknown> {
+export type Tool<I = unknown, O = unknown> = ToolCore<I> &
+  Partial<ToolSecurityHooks<I>> &
+  Partial<ToolResultShape<O>> &
+  Partial<ToolStreamingInput<I>>
+
+/**
+ * Required surface every tool implements. The dispatch/registry seams call
+ * `execute`, `isReadOnly`, and `isConcurrencySafe` on EVERY tool — no
+ * `?.` access, no `!== undefined` guards. New tools start here.
+ */
+export interface ToolCore<I = unknown> {
   name: string
   description: string
   inputSchema: z.ZodType<I>
-  /** OPTIONAL (absorb #1): schema for the tool's STRUCTURED result
-   *  (`ToolResult.structured`). When present, the dispatch seam validates the
-   *  structured payload via {@link validateToolOutput}; a mismatch is surfaced
-   *  as an `ok:false` ToolResult instructing the model to retry — never thrown
-   *  past the loop. Absent ⇒ no structured-output contract (byte-identical). */
-  outputSchema?: z.ZodType<O>
-  /** OPTIONAL (absorb #1): produce a COMPACT, model-facing rendering of a
-   *  result, distinct from the richer UI/`output` text, to save tokens. When
-   *  absent the dispatch seam uses `result.output` as today (byte-identical). */
-  toModelOutput?(result: ToolResult): string
-  /** OPTIONAL (absorb #1): when `true`, this tool may return a deferred result
-   *  (a `{type:"deferred"}` event or `ToolResult.deferred`) that a
-   *  `DeferredResultRegistry` resolves later. Absent/false ⇒ synchronous only. */
-  supportsDeferredResults?: boolean
-  /** OPTIONAL (absorb #1): streaming-input callbacks, mirroring the LLM
-   *  `tool_use_start` / `tool_use_delta` / `tool_use_end` events. The dispatch
-   *  seam invokes these as the tool-call arguments stream in, BEFORE `execute`.
-   *  All three are individually optional and side-effecting only (the parsed
-   *  input is still passed to `execute`). Drive them in tests/dispatch via
-   *  {@link driveStreamingInput}. */
-  onInputStart?(): void
-  onInputDelta?(delta: string): void
-  onInputAvailable?(input: I): void
   isReadOnly(): boolean
   /** True ⇒ this call has no observable interaction with any other call and
    *  may run concurrently with other concurrency-safe calls. */
   isConcurrencySafe(input: I): boolean
   execute(input: I, ctx: ToolContext): AsyncIterable<ToolEvent>
-  /** OPTIONAL: input-dependent HITL tier (Codex hitl-audit.md absorption).
+}
+
+/**
+ * Optional security / sensitivity hooks. Built-in tools populate these today
+ * (`hitlTier` — 10 tools; `extractShellCommand` — `bash`; `classifySource` —
+ * `bash`, `read`). Each is consumed by a real seam in `@/permission` (`policy`
+ * — `inferToolTier`), `@/tool/registry` (`extractShellCommand`), or the
+ * dispatch redaction layer (`classifySource`).
+ */
+export interface ToolSecurityHooks<I = unknown> {
+  /** Input-dependent HITL tier (Codex hitl-audit.md absorption).
    *  When omitted, the dispatch gate infers tier from `isReadOnly()`:
    *  `true ⇒ "none"` (reversible, harmless), `false ⇒ "always-confirm"`
    *  (fail-closed secure-by-default, see `inferToolTier` in
@@ -302,19 +349,19 @@ export interface Tool<I = unknown, O = unknown> {
    *  tier varies per-input (`bash` — `git push` is always-confirm, `ls` is
    *  pre-approval-ok) provide their own classifier here. Only consulted
    *  when the HITL gate is explicitly enabled in `AgentConfig.hitl`. */
-  hitlTier?(input: I): HITLTier
-  /** S16: OPTIONAL. When a tool accepts a raw shell command string, it
-   *  implements this to expose the command for HARD_DENY evaluation. The
-   *  permission policy gates ANY tool whose `extractShellCommand` returns a
-   *  non-null value through the same dangerous-pattern denylist as `bash` —
-   *  so a sibling shell tool (a future `shell`/`exec`/MCP `run` tool, a
-   *  typo'd `Bash`, etc.) cannot silently slip past the gate that previously
-   *  only matched `action.tool === "bash"`. Tools whose input is not a shell
-   *  string omit the method entirely. */
-  extractShellCommand?(input: I): string | null
-  /** PR-2 self-audit fix (ADR-0078): OPTIONAL structural declaration of the
-   *  tool result's source sensitivity class for the secret-redaction gate.
-   *  Mirrors the {@link extractShellCommand} pattern — tools that touch a
+  hitlTier(input: I): HITLTier
+  /** S16: when a tool accepts a raw shell command string, it implements this
+   *  to expose the command for HARD_DENY evaluation. The permission policy
+   *  gates ANY tool whose `extractShellCommand` returns a non-null value
+   *  through the same dangerous-pattern denylist as `bash` — so a sibling
+   *  shell tool (a future `shell`/`exec`/MCP `run` tool, a typo'd `Bash`,
+   *  etc.) cannot silently slip past the gate that previously only matched
+   *  `action.tool === "bash"`. Tools whose input is not a shell string omit
+   *  the method entirely. */
+  extractShellCommand(input: I): string | null
+  /** PR-2 self-audit fix (ADR-0078): structural declaration of the tool
+   *  result's source sensitivity class for the secret-redaction gate.
+   *  Mirrors the `extractShellCommand` pattern — tools that touch a
    *  filesystem path or run a shell command DECLARE their classifier here,
    *  rather than the dispatch seam guessing from `tool.name` / argument-field
    *  names. Returning `"secret"` causes the dispatch redaction layer to
@@ -328,7 +375,48 @@ export interface Tool<I = unknown, O = unknown> {
    *  whose name wasn't `"Read"/"read"/"view_file"/"open_file"/"Bash"/...`.
    *  Declaration-based posture: a custom tool that adds a new file/command
    *  surface explicitly opts in by implementing this method. */
-  classifySource?(input: I): SensitivityClass | null
+  classifySource(input: I): SensitivityClass | null
+}
+
+/**
+ * Optional result-shape contract (absorb #1). Wired into the registry/factory
+ * seams but no built-in tool sets these today — they exist so a custom or
+ * subagent-side tool can opt in WITHOUT changing dispatch. Removing one would
+ * break its seam, NOT just its callers.
+ *
+ *   - `outputSchema`           → `factory.enforceOutputSchema` +
+ *                                `registry.run` (also `@/subagent/tools-6`).
+ *   - `toModelOutput`          → `factory.renderToolOutput` + `registry.run`.
+ *   - `supportsDeferredResults` → `@/tool/deferred` registry + dispatch.
+ */
+export interface ToolResultShape<O = unknown> {
+  /** Schema for the tool's STRUCTURED result (`ToolResult.structured`). When
+   *  present, the dispatch seam validates the structured payload via
+   *  {@link validateToolOutput}; a mismatch is surfaced as an `ok:false`
+   *  ToolResult instructing the model to retry — never thrown past the loop.
+   *  Absent ⇒ no structured-output contract (byte-identical). */
+  outputSchema: z.ZodType<O>
+  /** Produce a COMPACT, model-facing rendering of a result, distinct from the
+   *  richer UI/`output` text, to save tokens. When absent the dispatch seam
+   *  uses `result.output` as today (byte-identical). */
+  toModelOutput(result: ToolResult): string
+  /** When `true`, this tool may return a deferred result (a `{type:"deferred"}`
+   *  event or `ToolResult.deferred`) that a `DeferredResultRegistry` resolves
+   *  later. Absent/false ⇒ synchronous only. */
+  supportsDeferredResults: boolean
+}
+
+/**
+ * Optional streaming-input callbacks (absorb #1). Mirror of the LLM
+ * `tool_use_start` / `tool_use_delta` / `tool_use_end` events. Wired into
+ * `factory.driveStreamingInput` + `@/agent/tool-input-streaming`, but no
+ * built-in tool sets these today. All three are individually optional and
+ * side-effecting only — the parsed input is still passed to `execute`.
+ */
+export interface ToolStreamingInput<I = unknown> {
+  onInputStart(): void
+  onInputDelta(delta: string): void
+  onInputAvailable(input: I): void
 }
 
 /** Provider-agnostic schema the agent forwards to the LLM.

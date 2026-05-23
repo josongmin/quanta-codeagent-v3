@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { readFile, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { applyPatch, type FileSystemPort, parsePatch } from "../../../src/patch/index.js"
+import { applyPatch, type PatchFileSystemPort, parsePatch } from "../../../src/patch/index.js"
 
 // ---------------------------------------------------------------------------
 // Real-filesystem integration: drives applyPatch with a thin Node fs adapter
@@ -13,7 +13,7 @@ import { applyPatch, type FileSystemPort, parsePatch } from "../../../src/patch/
 const root = mkdtempSync(join(tmpdir(), "v4a-int-"))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-class NodeFs implements FileSystemPort {
+class NodeFs implements PatchFileSystemPort {
   constructor(private readonly root: string) {}
 
   private resolve(p: string): string {

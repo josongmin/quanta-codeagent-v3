@@ -15,6 +15,20 @@ bun run dev "src/shared/types.ts 읽고 요약해줘"
 
 CLI가 `.env.dev` → `.env.local` → `.env` 순으로 로드(먼저 값이 우선, 실 환경변수가 최상위).
 
+## Reading order
+
+First-time / returning-after-months:
+
+1. **Run it** — see §빠른시작 above (1 min).
+2. **Architecture** — [rfc/0001-architecture.md](rfc/0001-architecture.md) §1, §3.
+3. **Operational reference** — [docs/runbooks/agent-loop-reference.md](docs/runbooks/agent-loop-reference.md) — loop boundary map, trust ladder, recovery enum. (Use this for debugging / context recovery after a break.)
+4. **Contract specification** — [docs/analysis/code-agent-loop/quanta-comparison.md](docs/analysis/code-agent-loop/quanta-comparison.md) — every "quanta wins X" claim maps to a `bun test <hellgate>` proof (see §실행 가능한 증거 인덱스).
+5. **Test suite** — `tests/` layout (`unit/`, `integration/`, `contract/`, `smoke/`) — tier taxonomy in ADR-0003 ([docs/decisions/0003-test-pyramid.md](docs/decisions/0003-test-pyramid.md)); inner-loop commands in §스크립트 below.
+6. **ADRs** — [docs/decisions/README.md](docs/decisions/README.md) — 99+ records, indexed by number and slice.
+7. **Test naming** — [docs/test-naming.md](docs/test-naming.md) — `*-hellgate` vs `*-hell-e2e` vs `*-e2e` convention.
+8. **Adding a tool** — [docs/tool-authoring.md](docs/tool-authoring.md) — canonical `defineTool` template + registration steps.
+9. **Feature catalog** — `bun fc list` (see [AGENTS.md](AGENTS.md) for the workflow).
+
 옵션 환경변수:
 
 - `ANTHROPIC_API_KEY` 또는 `OPENAI_API_KEY` (둘 중 하나 필수)

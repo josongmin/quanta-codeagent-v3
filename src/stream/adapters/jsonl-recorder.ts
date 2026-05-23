@@ -233,6 +233,13 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   // heartbeat payload (timestamp + optional message/progress) rides in `data`
   // via `dataOf`, tagged `reason:"in_progress"` so it stays greppable.
   in_progress: "recovery",
+  // ADR control-op cluster (L3→L4 promotion 2026-05-23): back-pressure +
+  // typed-interrupt + subagent-cancel ride the existing `recovery` family
+  // — they are same-turn observation points, not new top-level trajectory
+  // kinds. Greppable via `reason` discriminant in `data`.
+  response_queued: "recovery",
+  interrupted: "recovery",
+  subagent_cancel: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -303,6 +310,12 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
         ...(e.cacheReadTokens !== undefined ? { cacheReadTokens: e.cacheReadTokens } : {}),
         costUsd: null,
       }
+    case "response_queued":
+      return controlOpQueuedData(e)
+    case "interrupted":
+      return controlOpInterruptedData(e)
+    case "subagent_cancel":
+      return controlOpSubagentData(e)
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:
@@ -324,6 +337,40 @@ const inProgressData = (
   timestamp: e.timestamp,
   ...(e.message !== undefined ? { message: e.message } : {}),
   ...(e.progress !== undefined ? { progress: e.progress } : {}),
+})
+
+/** ADR control-op cluster (L3→L4 promotion 2026-05-23): back-pressure event
+ *  payload. `reason` discriminator matches the canonical PausedReason
+ *  taxonomy (extended with `control_op_pending`/`safety_review` per
+ *  `@/agent/control-op-handler`). Extracted from `dataOf` to keep its switch
+ *  case a single statement (cognitive-complexity budget). */
+const controlOpQueuedData = (
+  e: Extract<AgentEvent, { type: "response_queued" }>,
+): Record<string, unknown> => ({
+  reason: "response_queued",
+  pauseReason: e.reason,
+  ...(e.hint !== undefined ? { hint: e.hint } : {}),
+})
+
+/** ADR control-op cluster: typed-interrupt observation payload. `reason`
+ *  field doubles as discriminator + verbatim cancel reason carrier. */
+const controlOpInterruptedData = (
+  e: Extract<AgentEvent, { type: "interrupted" }>,
+): Record<string, unknown> => ({
+  reason: "interrupted",
+  source: e.source,
+  ...(e.reason !== undefined ? { detail: e.reason } : {}),
+})
+
+/** ADR control-op cluster: subagent cancel routing result. Parent turn
+ *  KEEPS running — this is observation only, not a finish trigger. */
+const controlOpSubagentData = (
+  e: Extract<AgentEvent, { type: "subagent_cancel" }>,
+): Record<string, unknown> => ({
+  reason: "subagent_cancel",
+  subagentId: e.subagentId,
+  outcome: e.outcome,
+  source: e.source,
 })
 
 /** Deterministic span/parent for an event given the active turn span. */

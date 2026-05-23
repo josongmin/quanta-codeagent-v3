@@ -34,7 +34,7 @@ import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { logger, runtimeConfig } from "@/shared"
 import type { StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
   loadCorpus as defaultLoadCorpus,
   type Prediction,
@@ -65,8 +65,13 @@ const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budge
   const stream: StreamPort = req.base.stream
   // batch must use `auto` permission per the matrix (`narrow#assertBatch`).
   const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
+  // DIP factory call; batch's real registry is built per-instance by the bench
+  // driver (with its own fs/diagnostics ports as added). This stub is only for
+  // matrix validation in `assembleAgentConfig`.
   const registry =
-    req.base.registry instanceof ToolRegistry ? req.base.registry : new ToolRegistry(defaultTools)
+    req.base.registry instanceof ToolRegistry
+      ? req.base.registry
+      : new ToolRegistry(buildDefaultTools())
   return {
     ...req.base,
     llm,

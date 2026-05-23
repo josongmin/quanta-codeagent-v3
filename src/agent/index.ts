@@ -47,6 +47,7 @@ export {
   loadGlobRules,
   MAX_RENDER_BYTES,
   MAX_RULE_BYTES,
+  MAX_RULE_FILES,
   renderGlobRulesBlock,
   selectGlobRules,
 } from "./glob-rules"
@@ -139,6 +140,7 @@ export {
   type RepoRules,
   renderRepoRulesBlock,
 } from "./repo-rules"
+export { RECOVERY_CAPS } from "./recovery"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
 export {
   type AgentMode as RunMode,
@@ -224,6 +226,19 @@ export type {
   StopReason,
 } from "./types"
 export { embedUntrusted, escapeBoundary } from "./untrusted"
+export {
+  createVerifyGuardState,
+  decideVerifyGuard,
+  VERIFY_FORCE_MESSAGE,
+  type VerifyGuardState,
+} from "./verify-guard"
+export {
+  isTestLikeCommand,
+  matchVerifyCommand,
+  TEST_LIKE_RE,
+  VERIFY_MATCHERS,
+  type VerifyMatcher,
+} from "./verify-signal"
 export { TurnWorkMetricsCollector, type WorkMetricsSink } from "./work-metrics-collector"
 export {
   type Blocker,

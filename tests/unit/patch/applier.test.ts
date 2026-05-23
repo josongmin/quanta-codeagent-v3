@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import {
   applyPatch,
-  type FileSystemPort,
   PatchAnchorNotFoundError,
   PatchApplyError,
+  type PatchFileSystemPort,
   parsePatch,
 } from "../../../src/patch/index.js"
 
 // ---------------------------------------------------------------------------
-// In-memory FileSystemPort — pure, deterministic test double.
+// In-memory PatchFileSystemPort — pure, deterministic test double.
 // ---------------------------------------------------------------------------
 
-class MemFs implements FileSystemPort {
+class MemFs implements PatchFileSystemPort {
   private files = new Map<string, string>()
 
   constructor(seed: Record<string, string> = {}) {

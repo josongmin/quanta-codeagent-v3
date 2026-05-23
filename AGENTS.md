@@ -48,6 +48,9 @@ NOT import each other directly — Biome `noRestrictedImports` enforces this.
 App slices (`src/apps/cli`, `src/apps/bench`, `src/apps/probe`) may cross
 freely but cannot be imported from outside their own slice.
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the slice fence and
+ports/adapters contract.
+
 ## When you edit features
 
 1. Edit the relevant YAML under `tools/feature-catalog/features/`.

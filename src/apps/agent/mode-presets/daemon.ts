@@ -54,7 +54,7 @@ import type { AgentConfig, BranchSearchConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
 import type { PermissionContext } from "@/permission"
 import { StdoutStream, type StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
   type AssembleRequest,
   assembleAgentConfig,
@@ -81,8 +81,11 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
   // No human ⇒ auto/acceptEdits within the allowlist (network/gitWrite levers
   // enforce the boundary; permission just clears in-scope edits).
   const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
+  // DIP factory call; daemon has no preset-specific fs/diagnostics ports.
   const registry =
-    req.base.registry instanceof ToolRegistry ? req.base.registry : new ToolRegistry(defaultTools)
+    req.base.registry instanceof ToolRegistry
+      ? req.base.registry
+      : new ToolRegistry(buildDefaultTools())
   return {
     ...req.base,
     llm: req.base.llm,

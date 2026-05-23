@@ -2,7 +2,6 @@ import { type AutoModeClassifier, CLASSIFIER_SYSTEM_PROMPT } from "./classifier"
 import { hostAllowsMutation } from "./per-host-mode"
 import { threadAllowsMutation } from "./per-thread-store"
 import type { PermissionReader } from "./permission-store"
-import { getDefaultPermissionStore } from "./permission-store"
 import { HARD_DENY, HARD_DENY_RULES, type HardDenyRule } from "./policy-rules"
 import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from "./types"
 
@@ -205,10 +204,15 @@ export interface PermissionStackContext {
 }
 
 export interface EvaluateStackOptions {
-  /** Override the store (test isolation). Defaults to the process singleton.
-   *  Narrowed to {@link PermissionReader} — `evaluateStack` only reads
-   *  (ISP, refactor #3); the concrete `PermissionStore` still satisfies it. */
-  store?: PermissionReader
+  /** Caller-injected store (composition-root supplies). Narrowed to
+   *  {@link PermissionReader} — `evaluateStack` only reads (ISP, refactor #3);
+   *  the concrete `PermissionStore` still satisfies it.
+   *
+   *  REQUIRED: removed the service-locator fallback. The composition root
+   *  (apps/*) MUST pass an explicit store; tests already inject via
+   *  `createPermissionStore({filePath})`. The singleton stays available via
+   *  `getDefaultPermissionStore()` for the composition path only. */
+  store: PermissionReader
 }
 
 /** Synchronous precedence-aware permission resolver. Returns the same
@@ -220,7 +224,7 @@ export const evaluateStack = (
   action: ToolAction,
   ctx: PermissionContext,
   stack: PermissionStackContext,
-  opts: EvaluateStackOptions = {},
+  opts: EvaluateStackOptions,
 ): PermissionDecision => {
   // HARD_DENY ALWAYS wins — even read-only actions can't reach a shell-
   // equivalent path that hits the denylist (defensive: `isReadOnly=true`
@@ -230,7 +234,7 @@ export const evaluateStack = (
 
   if (action.isReadOnly) return { kind: "allow" }
 
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
 
   // 2. Post-denial user override — explicit re-approval after seeing risk
   //    overrides any rule below. The store enforces the timestamp ordering

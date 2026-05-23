@@ -29,7 +29,7 @@ import type { AgentConfig } from "@/agent"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { runRepl } from "../../cli/repl"
 import {
   type AssembleRequest,
@@ -47,10 +47,13 @@ const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budge
   const llm: LLMPort = req.base.llm
   const stream: StreamPort = req.base.stream
   const permission: PermissionContext = req.base.permission ?? { mode: "default" }
+  // DIP: factory call (no preset-specific ports — interactive's real registry
+  // is owned by `runRepl` further down the stack). Byte-identical to the prior
+  // `defaultTools` singleton.
   const registry =
     req.base.registry !== undefined && req.base.registry instanceof ToolRegistry
       ? req.base.registry
-      : new ToolRegistry(defaultTools)
+      : new ToolRegistry(buildDefaultTools())
   return {
     ...req.base,
     llm,

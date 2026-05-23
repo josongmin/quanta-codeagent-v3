@@ -1,10 +1,10 @@
 // V4A apply_patch tool wrapper — Slice 4 (Wave C).
 //
-// Bridges the pure `@/patch` slice (parser + applier + FileSystemPort) to the
-// agent's tool surface. Owns:
+// Bridges the pure `@/patch` slice (parser + applier + PatchFileSystemPort) to
+// the agent's tool surface. Owns:
 //
 //   1. `FsJailFileSystemPort` — a thin ADAPTER that satisfies `@/patch`'s
-//      storage-agnostic `FileSystemPort` by routing every path through
+//      storage-agnostic `PatchFileSystemPort` by routing every path through
 //      `@/storage`'s ONE jail (`resolveJailed` → the same `enforceJail`
 //      chokepoint that read/write/edit use). There is no second jail anymore:
 //      a sandbox-escape bug now has exactly ONE place to hide. Storage raises
@@ -28,7 +28,7 @@
 import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { z } from "zod"
-import { type ApplyResult, applyPatch, type FileSystemPort, parsePatch } from "@/patch"
+import { type ApplyResult, applyPatch, type PatchFileSystemPort, parsePatch } from "@/patch"
 import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "./types"
 
@@ -69,7 +69,7 @@ interface PortOptions {
 }
 
 /**
- * ADAPTER that satisfies `@/patch`'s storage-agnostic {@link FileSystemPort}
+ * ADAPTER that satisfies `@/patch`'s storage-agnostic {@link PatchFileSystemPort}
  * by routing every path through `@/storage`'s ONE jail. There is no second
  * jail implementation here — {@link FsJailFileSystemPort.assertInside}
  * delegates the entire boundary decision to `@/storage.resolveJailed`, which
@@ -90,7 +90,7 @@ interface PortOptions {
  * re-resolves through `resolveJailed` immediately before the syscall, so a
  * swap between check and use forces another `realpath`.
  */
-export class FsJailFileSystemPort implements FileSystemPort {
+export class FsJailFileSystemPort implements PatchFileSystemPort {
   private readonly jailRoot: string
   private readonly fs: NodeFsLike
 

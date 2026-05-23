@@ -98,6 +98,23 @@ export interface Submission {
 export const SUBMISSION_LEGACY_ID_PREFIX = "legacy-"
 
 /**
+ * Optional injection point for the synthesized submission `id` (ADR-0078
+ * determinism leak — the id is PERSISTED into the JSONL envelope and any
+ * trajectory store, so a non-deterministic id breaks the byte-identical
+ * replay invariant). Both fields default to the host crypto/clock; replay
+ * supplies deterministic ones. Pattern: `opts.now ?? Date.now` (cf.
+ * `src/agent/admissibility-gate.ts`, `src/memory/consolidate/writer.ts`).
+ */
+export interface SubmissionFromMessagesOpts {
+  /** UUID source for the primary id path (preferred when present). Falls back
+   *  to the `now`/Date.now base36 timestamp when neither `crypto.randomUUID`
+   *  nor this is available. Defaults to `crypto.randomUUID`. */
+  uuid?: () => string
+  /** Clock source for the fallback id path. Defaults to {@link Date.now}. */
+  now?: () => number
+}
+
+/**
  * Lift a legacy `messages` seed into a typed {@link Submission}.
  *
  * Contract:
@@ -111,18 +128,26 @@ export const SUBMISSION_LEGACY_ID_PREFIX = "legacy-"
  *   - Returns `undefined` when `messages` is empty OR the last message is
  *     not a user turn. The loop falls back to the legacy path on
  *     `undefined`, so this is a safe no-op (byte-identical).
+ *   - `opts.uuid` / `opts.now` are optional injection ports for replay /
+ *     unit tests; defaults yield the legacy byte-identical id shape.
  */
 export const submissionFromMessages = (
   messages: Message[],
   trace?: RunContext,
+  opts: SubmissionFromMessagesOpts = {},
 ): Submission | undefined => {
   if (messages.length === 0) return undefined
   const last = messages[messages.length - 1]
   if (!last || last.role !== "user") return undefined
-  const id =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? `${SUBMISSION_LEGACY_ID_PREFIX}${crypto.randomUUID()}`
-      : `${SUBMISSION_LEGACY_ID_PREFIX}${Date.now().toString(36)}`
+  const uuidFn =
+    opts.uuid ??
+    (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? () => crypto.randomUUID()
+      : undefined)
+  const nowFn = opts.now ?? Date.now
+  const id = uuidFn
+    ? `${SUBMISSION_LEGACY_ID_PREFIX}${uuidFn()}`
+    : `${SUBMISSION_LEGACY_ID_PREFIX}${nowFn().toString(36)}`
   const op: SubmissionOp = { kind: "user_input", items: last.content }
   return trace !== undefined ? { id, op, trace } : { id, op }
 }

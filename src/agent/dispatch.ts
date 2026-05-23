@@ -286,6 +286,10 @@ const dispatchToolInner = async (
     await config.hooks.emit({
       type: "post_tool_use",
       name: effectiveCall.name,
+      // R2 fix: forward the EXECUTED input so audit/observability hooks have
+      // pre/post symmetry. The pre hook saw `effectiveCall.input` (possibly
+      // rewritten); post sees the same value — what the tool actually ran with.
+      input: effectiveCall.input,
       ok: out.ok,
       output: out.preview,
     })

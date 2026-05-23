@@ -30,7 +30,7 @@ import type { PermissionContext, PermissionMode, ToolAction } from "@/permission
 import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
 import { logger, type RunContext } from "@/shared"
 import { JsonlRecorder, StdoutStream, type StreamPort, TeeStream } from "@/stream"
-import { defaultTools, gitTools, type Tool, ToolRegistry } from "@/tool"
+import { buildDefaultTools, gitTools, type Tool, ToolRegistry } from "@/tool"
 import type { Tooling } from "./config-assemble"
 import { isPathLikeToken } from "./resume"
 
@@ -555,8 +555,12 @@ export const buildTooling = (
   // → lsp-nav (8 new tools, opt-in) → git (4 new tools, opt-in). All trailing
   // groups are empty arrays when their knobs are unset, so the registry is
   // byte-identical to today when no absorption knob is set.
+  // DIP seam (`buildDefaultTools`): no app-specific fs/diagnostics ports here —
+  // the real LSP diagnostics provider arrives via the appended `lspTools` array
+  // (tool-level swap), and the read/write/edit tools use the default
+  // FileSystemPort. Identical to the prior `defaultTools` literal.
   const registry = new ToolRegistry([
-    ...defaultTools,
+    ...buildDefaultTools(),
     ...mcpTools,
     ...memTools,
     ...lspTools,

@@ -27,7 +27,7 @@ import type { PermissionContext } from "@/permission"
 import { logger, type RunContext } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder, TeeStream } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import type { TokenUsage } from "../storage/schema"
 import { type EvalMeta, writeMeta } from "../trajectory/meta"
 import type { Scenario } from "./scenario"
@@ -208,7 +208,10 @@ export const runScenario = async (scenario: Scenario, opts: RunOpts): Promise<Ru
     try {
       const outcome = await runAgent({
         llm: opts.llm,
-        registry: new ToolRegistry(defaultTools),
+        // DIP factory: synthetic scenarios run against the default port surface;
+        // sandbox confinement comes from the tmp-dir cwd + `forbidden` matcher,
+        // not from substituting fs ports here.
+        registry: new ToolRegistry(buildDefaultTools()),
         stream,
         permission,
         messages,

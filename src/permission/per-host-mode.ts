@@ -16,11 +16,7 @@
 
 import { hostname, userInfo } from "node:os"
 import { runtimeConfig } from "@/shared/runtime-config"
-import {
-  getDefaultPermissionStore,
-  type HostAgentMode,
-  type PermissionStore,
-} from "./permission-store"
+import type { HostAgentMode, PermissionStore } from "./permission-store"
 
 export type { HostAgentMode } from "./permission-store"
 
@@ -61,23 +57,18 @@ export const resolveHostId = (env?: ResolveHostIdEnv): string => {
   return "localhost"
 }
 
-export const getHostMode = (
-  hostId: string,
-  store: PermissionStore = getDefaultPermissionStore(),
-): HostAgentMode | undefined => store.getHost(hostId)
+/** `store` is REQUIRED — the composition root injects (no service-locator
+ *  fallback). */
+export const getHostMode = (hostId: string, store: PermissionStore): HostAgentMode | undefined =>
+  store.getHost(hostId)
 
-export const setHostMode = (
-  hostId: string,
-  mode: HostAgentMode,
-  store: PermissionStore = getDefaultPermissionStore(),
-): void => {
+/** `store` is REQUIRED. */
+export const setHostMode = (hostId: string, mode: HostAgentMode, store: PermissionStore): void => {
   store.setHost(hostId, mode)
 }
 
-export const clearHostMode = (
-  hostId: string,
-  store: PermissionStore = getDefaultPermissionStore(),
-): void => {
+/** `store` is REQUIRED. */
+export const clearHostMode = (hostId: string, store: PermissionStore): void => {
   store.clearHost(hostId)
 }
 

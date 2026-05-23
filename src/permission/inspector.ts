@@ -29,7 +29,6 @@ import { threadAllowsMutation } from "./per-thread-store"
 import {
   computeActionSignature,
   type DenialRecord,
-  getDefaultPermissionStore,
   type HostAgentMode,
   type PermissionStore,
   type ThreadPermission,
@@ -81,22 +80,25 @@ export interface PermissionInspector {
 }
 
 export interface CreatePermissionInspectorOptions {
-  /** Override the store (test ergonomics). Defaults to the process singleton. */
-  store?: PermissionStore
+  /** Caller-injected store. REQUIRED — composition root supplies. (Tests
+   *  already inject via `createPermissionStore({filePath})`; the singleton
+   *  remains available via `getDefaultPermissionStore()` for the composition
+   *  path only.) */
+  store: PermissionStore
 }
 
 /**
- * Build an inspector bound to a store. Production callers pass nothing and
- * get the singleton; tests pass an isolated store.
+ * Build an inspector bound to a store. The composition root (apps/*) must
+ * pass an explicit store; tests pass an isolated store.
  *
  * The returned inspector is stateless — every method reads the store at
  * call time, so a UI poll loop sees fresh data without rebuilding the
  * inspector.
  */
 export const getPermissionInspector = (
-  opts: CreatePermissionInspectorOptions = {},
+  opts: CreatePermissionInspectorOptions,
 ): PermissionInspector => {
-  const store = opts.store ?? getDefaultPermissionStore()
+  const store = opts.store
 
   const listThreadPermissions = (): ReadonlyMap<string, ThreadPermission> => store.listThreads()
   const listHostModes = (): ReadonlyMap<string, HostAgentMode> => store.listHosts()

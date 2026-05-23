@@ -19,6 +19,18 @@ import type { Tool, ToolContext, ToolEvent } from "@/tool"
 export interface MemoryToolsDeps {
   store: PersistentStorePort
   embedder?: EmbedderPort
+  /** Injected clock so replay / unit tests get deterministic
+   *  `mem:tool:<base36ts>:<uuid8>` ids AND `createdAt` values that get
+   *  PERSISTED into the durable store (which the LLM then reads back in a
+   *  future session — model-facing through the store, ADR-0078 leak). Defaults
+   *  to {@link Date.now}; production output byte-identical for the current
+   *  moment. Pattern: `opts.now ?? Date.now` (cf. agent/admissibility-gate.ts,
+   *  memory/consolidate/writer.ts). */
+  now?: () => number
+  /** Injected uuid source for the same persisted-id determinism. Only the
+   *  first 8 chars are used in the id, so any unique string per call works.
+   *  Defaults to {@link crypto.randomUUID}. */
+  uuid?: () => string
 }
 
 /** Embed `text`, returning the vector only if it is the expected dimension. */
@@ -79,6 +91,12 @@ type UpdateInput = z.infer<typeof updateSchema>
 
 /** Build the three self-edit memory tools bound to a store (+ optional embedder). */
 export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
+  // ADR-0078 determinism leak: `id` and `createdAt` are PERSISTED into the
+  // store the LLM reads back next session. Default-bind to Date.now /
+  // crypto.randomUUID so production output is byte-identical; replay/test
+  // callers supply deterministic ones via `deps.now` / `deps.uuid`.
+  const now = deps.now ?? Date.now
+  const uuid = deps.uuid ?? (() => crypto.randomUUID())
   const memorySearch: Tool<SearchInput> = {
     name: "memory_search",
     description:
@@ -125,7 +143,8 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
     async *execute(input: WriteInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       try {
         const kind: MemoryKind = input.kind ?? "observation"
-        const id = `mem:tool:${Date.now().toString(36)}:${crypto.randomUUID().slice(0, 8)}`
+        const ts = now()
+        const id = `mem:tool:${ts.toString(36)}:${uuid().slice(0, 8)}`
         const entry: MemoryEntry = {
           id,
           kind,
@@ -133,7 +152,7 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
           text: input.text,
           tags: input.tags ?? [],
           importance: input.importance ?? 0.6,
-          createdAt: Date.now(),
+          createdAt: ts,
         }
         const embedding = await tryEmbed(deps.embedder, input.text)
         if (embedding) entry.embedding = embedding

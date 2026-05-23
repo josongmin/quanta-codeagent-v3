@@ -35,7 +35,7 @@ import type { PermissionContext } from "@/permission"
 import { logger, type RunContext } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder, TeeStream } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { DEFAULT_RUNS_DIR, makeRunId, ResultStore } from "../storage"
 import { leafById } from "../taxonomy"
 import type { UseCaseId, Verdict } from "../types"
@@ -215,7 +215,10 @@ export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => 
     try {
       const outcome = await runAgent({
         llm: opts.llm,
-        registry: new ToolRegistry(defaultTools),
+        // DIP factory: trajectory replay runs against the SAME default port
+        // surface as production (no replay-specific fs/diagnostics ports),
+        // byte-identical to the prior singleton.
+        registry: new ToolRegistry(buildDefaultTools()),
         stream,
         permission,
         messages,

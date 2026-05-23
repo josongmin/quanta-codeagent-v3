@@ -5,5 +5,5 @@
 
 export { applyPatch } from "./applier.js"
 export { parsePatch } from "./parser.js"
-export type { ApplyResult, Change, FileSystemPort, Hunk, Patch, PatchOp } from "./types.js"
+export type { ApplyResult, Change, Hunk, Patch, PatchFileSystemPort, PatchOp } from "./types.js"
 export { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "./types.js"

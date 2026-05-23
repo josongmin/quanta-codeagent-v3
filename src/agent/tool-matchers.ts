@@ -40,12 +40,27 @@ export const AGENT_TOOLS_MATCHER: readonly string[] = [
 
 /** Evaluate a matcher against a tool name. An absent matcher is the "match
  *  everything" identity — preserving byte-identical semantics for legacy
- *  callers that registered without an `options.matcher`. */
+ *  callers that registered without an `options.matcher`.
+ *
+ *  Hardening: a function-shaped matcher that THROWS is treated as a no-match
+ *  (returns `false`) rather than propagating. Without this, a single buggy
+ *  matcher closure poisons the entire `pre_tool_use` emit — the throw escapes
+ *  `runHandler`'s try/catch (matchTool is called BEFORE `runHandler`), bubbles
+ *  through `runAdmissibilityGate`, and is normalized as a generic dispatch
+ *  error by dispatchTool. That silently disables every other (correct) hook
+ *  on the call and swallows the per-handler isolation guarantee. Returning
+ *  `false` keeps the rest of the chain firing. */
 export const matchTool = (matcher: ToolMatcher | undefined, name: string): boolean => {
   if (matcher === undefined) return true
   if (typeof matcher === "string") return matcher === name
   if (Array.isArray(matcher)) return matcher.includes(name)
   if (matcher instanceof RegExp) return matcher.test(name)
-  if (typeof matcher === "function") return Boolean(matcher(name))
+  if (typeof matcher === "function") {
+    try {
+      return Boolean(matcher(name))
+    } catch {
+      return false
+    }
+  }
   return false
 }

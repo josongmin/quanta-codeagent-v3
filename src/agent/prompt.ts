@@ -372,6 +372,12 @@ export interface TurnContextInput {
    *  as a distinct cache breakpoint so changes here only invalidate the tail.
    *  Absent ⇒ legacy single-block prefix (byte-identical). */
   userAppend?: string
+  /** Injected clock so replay / unit tests get a deterministic
+   *  `Today's date is YYYY-MM-DD.` line in the per-turn dynamic block.
+   *  Defaults to {@link Date.now} (production behavior byte-identical for the
+   *  current moment). Same `opts.now ?? Date.now` pattern as
+   *  `src/agent/admissibility-gate.ts` and `src/memory/consolidate/writer.ts`. */
+  now?: () => number
 }
 
 export interface TurnContext {
@@ -460,6 +466,16 @@ const renderActiveSkillsBlock = (
  */
 export const escapeReminderBoundary = (s: string): string => escapeBoundary("system-reminder", s)
 
+/** ADR-0078 determinism leak (date): the per-turn block is model-facing — every
+ *  turn embeds today's date, which makes the assembled prompt drift day-by-day
+ *  and breaks the byte-identical replay invariant. Default `Date.now` keeps
+ *  production output unchanged for the current moment; replay / unit tests pin
+ *  the moment via the injected `now` source. Pattern: `opts.now ?? Date.now`
+ *  (cf. agent/admissibility-gate.ts, memory/consolidate/writer.ts). Extracted
+ *  out of buildDynamicContext so its cognitive complexity is unchanged. */
+const todayDateLine = (now?: () => number): string =>
+  `Today's date is ${new Date((now ?? Date.now)()).toISOString().slice(0, 10)}.`
+
 /** Build the per-turn dynamic context — date, cwd, mode notice, repo rules,
  *  working state, memory — as a single block of text, or `undefined` when there
  *  is nothing to say. Order matters: repo-local rules ride ABOVE working state
@@ -467,10 +483,7 @@ export const escapeReminderBoundary = (s: string): string => escapeBoundary("sys
  *  trust ladder). Working state is the in-session L3 scratchpad: anchored to
  *  THIS task, so it sits between repo authority and generic memory hints. */
 const buildDynamicContext = (input: TurnContextInput): string | undefined => {
-  const parts: string[] = [
-    `Today's date is ${new Date().toISOString().slice(0, 10)}.`,
-    `Working directory: ${input.cwd}`,
-  ]
+  const parts: string[] = [todayDateLine(input.now), `Working directory: ${input.cwd}`]
   // SSOT mode precedence (ADR-0018): prompt + dispatch share resolveAgentMode
   // so the per-turn notice and the dispatch admissibility gate never disagree.
   const notice = modeNotice(resolveAgentMode(input.mode, input.planMode))

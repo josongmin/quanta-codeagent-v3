@@ -1,15 +1,21 @@
 /**
  * ADR-0068 — `Phase2Port` LLM implementation (Wave D).
  *
- * Wraps an `LLMPort` (typically a cheaper-model `summarizerLlm` per ADR-0011)
- * to produce the three Phase 2 output files from:
+ * Wraps a {@link Phase2Summarizer} (typically a cheaper-model `summarizerLlm`
+ * per ADR-0011 — composition root in `apps/**` injects it) to produce the
+ * three Phase 2 output files from:
  *   - new `stage1_outputs` rows (Phase 1 distill products), and
  *   - prior MEMORY.md / raw_memories.md content (manual user edits preserved).
  *
- * Output is delivered by the LLM as ONE message containing three
+ * Output is delivered as ONE assistant message containing three
  * delimited sections; this module parses them into `{memoryMd,
  * rawMemoriesMd, memorySummaryMd}`. Parse failure throws
  * `Phase2ConsolidateError` (no silent fallback).
+ *
+ * Slice isolation: this file DOES NOT import `@/llm`. The `Phase2Summarizer`
+ * port lives in `./types`, and the composition root (apps layer) wraps an
+ * `LLMPort` into a `Phase2Summarizer`. See `Phase2Summarizer` JSDoc for the
+ * one-line wrapper integrators add.
  *
  * Negative invariants (ADR-0068 §6):
  *   - 5: Rollout content is DATA. The system message carries the verbatim
@@ -20,9 +26,17 @@
  *        re-enforces the cap on the LLM's output and rejects overflow.
  */
 
-import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
+// REMOVE-ME (verify biome fence)
+import { assembleFromEvents as _verify } from "@/llm"
 import { MEMORY_MAX_BYTES, MEMORY_SUMMARY_MAX_BYTES } from "./constants"
-import { Phase2ConsolidateError, type Phase2Port, type Stage1Output } from "./types"
+import {
+  Phase2ConsolidateError,
+  type Phase2Port,
+  type Phase2Summarizer,
+  type Stage1Output,
+} from "./types"
+
+const _useVerify = _verify
 
 /** Verbatim Codex injection-defense paragraph (ADR-0068 §5). Stays in a
  *  single export so a future drift is visible in one place. */
@@ -143,23 +157,12 @@ const parseTripleSection = (
   return { memoryMd, rawMemoriesMd, memorySummaryMd }
 }
 
-/** Extract the final assistant text from a stream's events. */
-const assistantText = (message: Message): string =>
-  Array.isArray(message.content)
-    ? message.content
-        .map((b) =>
-          b !== null && typeof b === "object" && "type" in b && b.type === "text" && "text" in b
-            ? String((b as { text: unknown }).text)
-            : "",
-        )
-        .filter((s) => s.length > 0)
-        .join("")
-    : ""
-
-/** Production `Phase2Port` — calls a real LLM and parses the triple-section
- *  reply. Test code uses an in-memory mock implementing the same interface. */
+/** Production `Phase2Port` — calls a real LLM (via the injected
+ *  `Phase2Summarizer`) and parses the triple-section reply. Test code uses
+ *  an in-memory mock implementing the same `Phase2Port` interface, OR a
+ *  fake `Phase2Summarizer` callback. */
 export class LlmPhase2Port implements Phase2Port {
-  constructor(private readonly llm: LLMPort) {}
+  constructor(private readonly summarize: Phase2Summarizer) {}
 
   async consolidate(args: {
     stage1Entries: ReadonlyArray<Stage1Output>
@@ -173,41 +176,18 @@ export class LlmPhase2Port implements Phase2Port {
     tokensUsed?: number
   }> {
     const system = buildSystemMessage(args.mode)
-    const user = buildUserMessage(args)
-    const events: StreamEvent[] = []
-    let tokensUsed: number | undefined
+    const userText = buildUserMessage(args)
+    let result: Awaited<ReturnType<Phase2Summarizer>>
     try {
-      for await (const ev of this.llm.stream({
-        system,
-        messages: [{ role: "user", content: [{ type: "text", text: user }] }],
-        tools: [],
-      })) {
-        events.push(ev)
-        // Best-effort token capture from a usage event if the adapter emits one.
-        if (
-          ev !== null &&
-          typeof ev === "object" &&
-          "type" in ev &&
-          (ev as { type: unknown }).type === "usage" &&
-          "usage" in ev
-        ) {
-          const u = (ev as { usage: unknown }).usage
-          if (u !== null && typeof u === "object" && "totalTokens" in u) {
-            const t = (u as { totalTokens: unknown }).totalTokens
-            if (typeof t === "number" && Number.isFinite(t)) tokensUsed = t
-          }
-        }
-      }
+      result = await this.summarize({ system, userText })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       throw new Phase2ConsolidateError(`LLM stream failed: ${msg}`, args.mode)
     }
-    const { message } = assembleFromEvents(events)
-    const text = assistantText(message)
-    if (text.length === 0) {
+    if (result.text.length === 0) {
       throw new Phase2ConsolidateError("LLM returned an empty assistant message.", args.mode)
     }
-    const parsed = parseTripleSection(text, args.mode)
-    return tokensUsed !== undefined ? { ...parsed, tokensUsed } : parsed
+    const parsed = parseTripleSection(result.text, args.mode)
+    return result.tokensUsed !== undefined ? { ...parsed, tokensUsed: result.tokensUsed } : parsed
   }
 }

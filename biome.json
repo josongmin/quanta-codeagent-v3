@@ -47,7 +47,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/llm/**"],
+      "includes": ["**/src/llm/**"],
       "linter": {
         "rules": {
           "style": {
@@ -72,7 +72,7 @@
       }
     },
     {
-      "includes": ["src/tool/**"],
+      "includes": ["**/src/tool/**"],
       "linter": {
         "rules": {
           "style": {
@@ -94,7 +94,7 @@
       }
     },
     {
-      "includes": ["src/memory/**"],
+      "includes": ["**/src/memory/**"],
       "linter": {
         "rules": {
           "style": {
@@ -117,7 +117,7 @@
       }
     },
     {
-      "includes": ["src/storage/**"],
+      "includes": ["**/src/storage/**"],
       "linter": {
         "rules": {
           "style": {
@@ -142,7 +142,7 @@
       }
     },
     {
-      "includes": ["src/stream/**"],
+      "includes": ["**/src/stream/**"],
       "linter": {
         "rules": {
           "style": {
@@ -167,7 +167,7 @@
       }
     },
     {
-      "includes": ["src/permission/**"],
+      "includes": ["**/src/permission/**"],
       "linter": {
         "rules": {
           "style": {
@@ -192,7 +192,7 @@
       }
     },
     {
-      "includes": ["src/runtime/**"],
+      "includes": ["**/src/runtime/**"],
       "linter": {
         "rules": {
           "style": {
@@ -216,7 +216,7 @@
       }
     },
     {
-      "includes": ["src/lsp/**"],
+      "includes": ["**/src/lsp/**"],
       "linter": {
         "rules": {
           "style": {
@@ -241,7 +241,7 @@
       }
     },
     {
-      "includes": ["src/mcp/**"],
+      "includes": ["**/src/mcp/**"],
       "linter": {
         "rules": {
           "style": {
@@ -267,7 +267,7 @@
       }
     },
     {
-      "includes": ["src/observability/**"],
+      "includes": ["**/src/observability/**"],
       "linter": {
         "rules": {
           "style": {
@@ -292,7 +292,7 @@
       }
     },
     {
-      "includes": ["src/subagent/**"],
+      "includes": ["**/src/subagent/**"],
       "linter": {
         "rules": {
           "style": {
@@ -318,7 +318,7 @@
       }
     },
     {
-      "includes": ["src/skill/**"],
+      "includes": ["**/src/skill/**"],
       "linter": {
         "rules": {
           "style": {
@@ -344,7 +344,7 @@
       }
     },
     {
-      "includes": ["src/session/**"],
+      "includes": ["**/src/session/**"],
       "linter": {
         "rules": {
           "style": {
@@ -371,7 +371,7 @@
       }
     },
     {
-      "includes": ["src/migration/**"],
+      "includes": ["**/src/migration/**"],
       "linter": {
         "rules": {
           "style": {
