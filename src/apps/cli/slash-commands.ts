@@ -54,6 +54,29 @@ export interface SlashContext {
    *  registering the command). Injected by the SURFACE (a future REPL or
    *  session loop) — the 5 Tier-2 commands never read this field. */
   readonly retry?: RetryWithSessionState | undefined
+  /** Re-discover skills from disk on demand (Codex `forceReloadSkills` parity).
+   *  Returns the freshly-discovered set as `{name, description, paths?}` so
+   *  `/skills` and `/reload-skills` can render the inventory without coupling
+   *  to `@/skill` types (slice isolation — slash-commands is `apps/cli`).
+   *
+   *  IMPORTANT — our loop already re-runs `discoverSkills` per turn (every
+   *  `runAgent` calls `buildSessionFeatures` which calls `discoverSkills`),
+   *  so the model-facing inventory auto-refreshes between user prompts. This
+   *  callback exists for USER VISIBILITY: confirm a freshly-edited SKILL.md is
+   *  picked up BEFORE submitting the next prompt. The callback is surface-only
+   *  (no LLM call) so it is safe to register without a session. Absent ⇒ the
+   *  commands print "skills surface not wired in this surface" and exit 0. */
+  readonly skills?: (() => Promise<SkillRow[]>) | undefined
+}
+
+/** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
+ *  enforcement-relevant fields of a skill without importing `@/skill` types
+ *  (slice discipline). `paths` is preserved exactly so `/skills` can paint the
+ *  conditional-activation glob list verbatim. */
+export interface SkillRow {
+  readonly name: string
+  readonly description: string
+  readonly paths?: readonly string[]
 }
 
 export interface SlashCommand {
@@ -246,6 +269,65 @@ const waitCmd: SlashCommand = {
   },
 }
 
+/** Render an inventory row in the table-paddable form `/skills` and
+ *  `/reload-skills` share. Truncates description to one line cap to keep the
+ *  REPL output scannable; the model still sees the full text via
+ *  `buildSessionFeatures`. */
+const renderSkillRow = (s: SkillRow): string => {
+  const desc1 = s.description.split("\n")[0] ?? ""
+  const desc = desc1.length > 100 ? `${desc1.slice(0, 97)}...` : desc1
+  const pathsTag =
+    s.paths && s.paths.length > 0 ? ` [paths: ${s.paths.slice(0, 3).join(", ")}${s.paths.length > 3 ? "…" : ""}]` : ""
+  return `  ${s.name.padEnd(24)} ${desc}${pathsTag}\n`
+}
+
+const renderSkills = (ctx: SlashContext, rows: readonly SkillRow[], prefix: string): void => {
+  if (rows.length === 0) {
+    ctx.out(`${prefix} (0 skills found)\n`)
+    return
+  }
+  ctx.out(`${prefix} ${rows.length} skill${rows.length === 1 ? "" : "s"}:\n`)
+  for (const r of rows) ctx.out(renderSkillRow(r))
+}
+
+const skillsCmd: SlashCommand = {
+  name: "/skills",
+  describe: "List discovered skills (name + description + paths)",
+  async run(_args, ctx) {
+    if (ctx.skills === undefined) {
+      ctx.out("/skills: not wired in this surface\n")
+      return 0
+    }
+    try {
+      const rows = await ctx.skills()
+      renderSkills(ctx, rows, "skills:")
+      return 0
+    } catch (e) {
+      ctx.err(`/skills: discovery failed: ${(e as Error).message}\n`)
+      return 1
+    }
+  },
+}
+
+const reloadSkillsCmd: SlashCommand = {
+  name: "/reload-skills",
+  describe: "Re-discover skills from disk and print the result",
+  async run(_args, ctx) {
+    if (ctx.skills === undefined) {
+      ctx.out("/reload-skills: not wired in this surface\n")
+      return 0
+    }
+    try {
+      const rows = await ctx.skills()
+      renderSkills(ctx, rows, "reloaded:")
+      return 0
+    } catch (e) {
+      ctx.err(`/reload-skills: discovery failed: ${(e as Error).message}\n`)
+      return 1
+    }
+  },
+}
+
 export const BUILTINS: readonly SlashCommand[] = [
   contextCmd,
   usageCmd,
@@ -253,6 +335,8 @@ export const BUILTINS: readonly SlashCommand[] = [
   navigateCmd,
   waitCmd,
   retryWithCmd,
+  skillsCmd,
+  reloadSkillsCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

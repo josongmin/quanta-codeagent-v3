@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * ADR-0068 — read-side helpers (Wave D integration glue).
  *
@@ -44,7 +45,7 @@ export const loadMemorySummary = async (
     // ENOENT is the legacy path — distinguish from real IO errors.
     if (isENoEnt(e)) return undefined
     if (e instanceof MemoryWriteError) throw e
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     throw new MemoryWriteError(`Failed to read memory_summary.md: ${msg}`, paths.memorySummaryMd)
   }
 }

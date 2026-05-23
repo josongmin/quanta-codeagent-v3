@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * ADR-0068 Wave A — Phase 1 per-thread distillation orchestrator.
  *
@@ -65,7 +66,7 @@ export const runPhase1 = async (
   try {
     distilled = await port.distill({ rolloutMessages: input.rolloutMessages })
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     const wrapped = new Phase1DistillError(message, input.threadId)
     if (e instanceof Error) {
       // Preserve original stack for triage. Set via property so we don't

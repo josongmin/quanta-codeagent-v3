@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { LLMPort } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { DEFAULT_RUNS_DIR, makeRunId, ResultStore } from "../storage"
 import type { UseCaseId, Verdict } from "../types"
 import { type JudgeVerdict, judge as runJudge } from "./judge"
@@ -121,7 +121,7 @@ export const runSynthetic = async (opts: SyntheticRunOpts): Promise<SyntheticSum
     } catch (e) {
       logger.warn("eval.synthetic: scenario parse failed", {
         file: f,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
       continue
     }
@@ -167,7 +167,7 @@ export const runSynthetic = async (opts: SyntheticRunOpts): Promise<SyntheticSum
     } catch (e) {
       logger.warn("eval.synthetic: scenario run failed", {
         file: f,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
       counts.error += 1
       await store.append(runId, {

@@ -42,7 +42,8 @@ import {
 import { runSessionCommand } from "./session-commands"
 import { persistTurn, switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
-import { runSlashCommand } from "./slash-commands"
+import { discoverSkills, discoverSystemSkills } from "@/skill"
+import { isSlashCommand, runSlashCommand, type SkillRow } from "./slash-commands"
 
 /**
  * CLI REPL + main-orchestration body.
@@ -108,16 +109,75 @@ const buildWorkMetricsSink = (enabled: boolean): AgentConfig["workMetricsSink"] 
     ? { emit: (m): void => void process.stderr.write(`work: ${summarizeWorkMetrics(m)}\n`) }
     : undefined
 
-/** Interactive REPL loop: each line continues the same conversation. */
+/** Build the `ctx.skills` callback the slash commands `/skills` and
+ *  `/reload-skills` consume. Returns the freshly-discovered set as
+ *  `{name, description, paths?}` rows — mirrors what `buildSessionFeatures`
+ *  feeds the model, so the user-visible list and the model-visible inventory
+ *  cannot drift. Surface-only: no LLM call, just disk scan + bundled merge.
+ *  Absent skills config ⇒ `undefined` so the slash commands print "not wired".
+ *
+ *  NOTE: our loop already re-runs `discoverSkills` per `runAgent` call (i.e.
+ *  per user turn), so newly-added SKILL.md files reach the model on the next
+ *  prompt automatically. These slash commands exist for USER VISIBILITY —
+ *  confirming the disk state BEFORE submitting the next prompt. */
+const buildSkillsCallback = (
+  skillsConfig: AgentConfig["skills"] | undefined,
+): (() => Promise<SkillRow[]>) | undefined => {
+  if (skillsConfig === undefined) return undefined
+  return async (): Promise<SkillRow[]> => {
+    const userSkills = skillsConfig.dir !== undefined ? await discoverSkills(skillsConfig.dir) : []
+    const systemSkills = await discoverSystemSkills()
+    // Same precedence as buildSessionFeatures: system wins on name collision.
+    const byName = new Map<string, SkillRow>()
+    for (const s of userSkills) {
+      const row: SkillRow = { name: s.name, description: s.description }
+      if (s.paths !== undefined) (row as { paths?: readonly string[] }).paths = s.paths
+      byName.set(s.name, row)
+    }
+    for (const s of systemSkills) {
+      const row: SkillRow = { name: s.name, description: s.description }
+      if (s.paths !== undefined) (row as { paths?: readonly string[] }).paths = s.paths
+      byName.set(s.name, row)
+    }
+    return [...byName.values()].sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    )
+  }
+}
+
+/** Interactive REPL loop: each line continues the same conversation.
+ *
+ *  Slash commands routed in-REPL (Codex `forceReloadSkills` parity for
+ *  `/skills` and `/reload-skills`): when the user types `/<letter>…`,
+ *  short-circuit to {@link runSlashCommand} with `slashCtx` instead of sending
+ *  it to the model. `/exit` / `/quit` keep their existing meaning (loop break)
+ *  and are checked BEFORE the slash dispatch so they cannot be hijacked by a
+ *  future registered command of the same name. Empty `slashCtx` ⇒ commands
+ *  that need session state print "not wired" and exit 0 (default-OFF). */
 export const runReplLoop = async (
   rl: readline.Interface,
   signal: AbortSignal,
   turn: (text: string) => Promise<void>,
+  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>,
 ): Promise<void> => {
   while (!signal.aborted) {
     const input = (await rl.question("\nquanta› ")).trim()
     if (input === "") continue
     if (input === "/exit" || input === "/quit") break
+    // Slash gate: route `/<letter>…` to the slash-command dispatcher BEFORE
+    // sending to the model. `isSlashCommand` rejects paths like `/path/to/x`
+    // so legacy file-resume tokens still fall through (parity with the
+    // pre-REPL shell-entry gate in `index.ts::main`).
+    const head = input.split(/\s+/)[0] ?? ""
+    if (isSlashCommand(head)) {
+      await runSlashCommand(input, {
+        out: (s) => process.stdout.write(s),
+        err: (s) => process.stderr.write(s),
+        cwd: process.cwd(),
+        ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
+      })
+      continue
+    }
     await turn(input)
   }
 }
@@ -145,10 +205,16 @@ export const runSessionMain = async (): Promise<number> => {
  *  is one decision (`isSlashCommand`) plus one dispatch (`runSlashCommand`)
  *  and reads cleanly as its own helper. Tier-2 absorption #2-1. */
 export const runSlashMain = async (_tok: string): Promise<number> => {
+  // Shell-entry gate (`quanta /skills`): build the skills callback ad-hoc from
+  // env (no session). Mirrors what the REPL passes via slashCtx so `/skills`
+  // behaves identically across both surfaces (shell one-shot vs in-REPL line).
+  const skillsCfg = buildSkillsConfig()
+  const skillsCb = buildSkillsCallback(skillsCfg)
   return runSlashCommand(process.argv.slice(2).join(" "), {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
     cwd: process.cwd(),
+    ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
   })
 }
 
@@ -359,7 +425,13 @@ export const runRepl = async (): Promise<void> => {
     if (argPrompt) {
       await turn(argPrompt)
     } else {
-      await runReplLoop(rl, abort.signal, turn)
+      const skillsCb = buildSkillsCallback(skillsConfig)
+      await runReplLoop(
+        rl,
+        abort.signal,
+        turn,
+        skillsCb !== undefined ? { skills: skillsCb } : undefined,
+      )
     }
     rl.close()
   } finally {

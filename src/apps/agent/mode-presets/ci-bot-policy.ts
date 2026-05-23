@@ -15,11 +15,12 @@
  * This file is the SINGLE place that knows ci-bot's concrete wiring. New
  * lever implementations land here (e.g. when ci-bot adds a webhook hook).
  */
-import { defaultGitRunner, gitTools } from "@/tool"
-import { defaultGhRunner, ghTools, type GhRunner } from "@/tool/gh"
-import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
+
 import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "@/permission/branch-only"
+import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { Tool } from "@/tool"
+import { defaultGitRunner, gitTools } from "@/tool"
+import { defaultGhRunner, type GhRunner, ghTools } from "@/tool/gh"
 
 /** CI-scoped env var allowlist. Excludes user secrets (OPENAI_API_KEY etc).
  *  Includes only what `gh` and the test runners need. */
@@ -90,7 +91,10 @@ const dedupe = (a: readonly string[], b: readonly string[]): readonly string[] =
 export const buildCiBotWiring = (opts: CiBotPresetOptions = {}): CiBotWiring => {
   const allowlist = dedupe(CI_BOT_DEFAULT_ALLOWLIST, opts.extraAllowedHosts ?? [])
   const branches = dedupe(DEFAULT_PROTECTED_BRANCHES, opts.extraProtectedBranches ?? [])
-  const tools: Tool[] = [...gitTools(defaultGitRunner), ...ghTools(opts.ghRunner ?? defaultGhRunner)]
+  const tools: Tool[] = [
+    ...gitTools(defaultGitRunner),
+    ...ghTools(opts.ghRunner ?? defaultGhRunner),
+  ]
 
   return Object.freeze({
     tools,

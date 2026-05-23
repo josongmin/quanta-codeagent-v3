@@ -145,7 +145,10 @@ export const canonicalizeArgs = (args: unknown): string => {
   const seen = new WeakSet<object>()
   const normalize = (v: unknown): unknown => {
     if (typeof v === "string") {
-      return v.trim().replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ")
+      return v
+        .trim()
+        .replace(/\r\n/g, "\n")
+        .replace(/[ \t]+/g, " ")
     }
     if (v === null || typeof v !== "object") return v
     if (seen.has(v as object)) return "[cycle]"

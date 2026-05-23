@@ -17,7 +17,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { LLMPort, Message } from "@/llm"
 import { assembleFromEvents } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { allLeaves, leafById } from "../taxonomy"
 import type { UseCaseId } from "../types"
 import { parseScenario, SCENARIO_SCHEMA_VERSION, type Scenario } from "./scenario"
@@ -145,7 +145,7 @@ const safeParseOne = (
   try {
     scenario = parseScenario(raw)
   } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+    return { ok: false, reason: errMessage(e) }
   }
   const extra = validateExtra(scenario, maxFileBytes)
   if (!extra.ok) return { ok: false, reason: extra.reason }
@@ -182,7 +182,7 @@ export const generateScenarios = async (opts: GenerateOpts): Promise<GenerateRes
   } catch (e) {
     return {
       accepted: [],
-      rejected: [{ reason: `JSON parse: ${e instanceof Error ? e.message : String(e)}`, raw }],
+      rejected: [{ reason: `JSON parse: ${errMessage(e)}`, raw }],
     }
   }
   if (!Array.isArray(arr)) {

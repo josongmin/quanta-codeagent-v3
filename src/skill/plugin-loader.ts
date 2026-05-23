@@ -15,6 +15,7 @@
 import type { Dirent } from "node:fs"
 import { readdir, readFile, stat } from "node:fs/promises"
 import { basename, join } from "node:path"
+import { errMessage } from "@/shared"
 import {
   MCPRootSchema,
   type MCPServerSpec,
@@ -77,13 +78,13 @@ const readJson = async (
     if (code === "ENOENT") {
       return { ok: false, err: new PluginManifestError(`not found: ${path}`, "missing", path) }
     }
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return { ok: false, err: new PluginManifestError(`io error at ${path}: ${msg}`, "io", path) }
   }
   try {
     return { ok: true, value: JSON.parse(raw) as unknown }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       ok: false,
       err: new PluginManifestError(`malformed JSON at ${path}: ${msg}`, "json", path),

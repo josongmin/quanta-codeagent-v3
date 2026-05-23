@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { isAbsolute, relative } from "node:path"
+import { errMessage } from "@/shared"
 import { escapeBoundary } from "./untrusted"
 
 /**
@@ -568,11 +569,7 @@ export class FileSystemIdeContextProvider implements IdeContextProvider {
     try {
       parsed = JSON.parse(raw)
     } catch (e) {
-      throw new Error(
-        `ide-context: JSON parse failed at ${this.contextFile}: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      )
+      throw new Error(`ide-context: JSON parse failed at ${this.contextFile}: ${errMessage(e)}`)
     }
     const snap = parseIdeContextJson(parsed)
     const relative = toRelativeSnapshot(this.cwd, snap)

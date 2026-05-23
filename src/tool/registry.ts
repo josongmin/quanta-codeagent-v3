@@ -74,9 +74,7 @@ export class ToolRegistry {
       // a typo without round-tripping through a separate `list_tools` call. The
       // names are stable identifiers — listing them is cheap and not a leak.
       const known = [...this.tools.keys()].sort().join(", ")
-      throw new ToolInputError(
-        `Unknown tool: ${name}. Registered tools: ${known || "(none)"}`,
-      )
+      throw new ToolInputError(`Unknown tool: ${name}. Registered tools: ${known || "(none)"}`)
     }
 
     const parsed = tool.inputSchema.safeParse(rawInput)

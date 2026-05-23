@@ -7,7 +7,7 @@
  * per-agent JSONL. Replay / fixture promotion stays the job of Tier 1/3.
  */
 import type { LLMPort } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { runScenario } from "../../synthetic/runner"
 import type { Scenario } from "../../synthetic/scenario"
 import type { AgentAdapter, CompareRunResult } from "../adapter"
@@ -48,7 +48,7 @@ export class QuantaAdapter implements AgentAdapter {
         ...(exitOk ? {} : { failureReason: `stopReason=${r.stopReason}` }),
       }
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e)
+      const reason = errMessage(e)
       logger.warn("compare.quanta: runOne failed", { reason })
       return {
         agent: this.name,

@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { errMessage } from "@/shared"
+
 /**
  * `bun run eval <subcommand>` — Tier 0–4 verification harness.
  *
@@ -347,6 +349,6 @@ const main = async (): Promise<number> => {
 main()
   .then((code) => process.exit(code))
   .catch((e) => {
-    logger.error("eval: fatal", { error: e instanceof Error ? e.message : String(e) })
+    logger.error("eval: fatal", { error: errMessage(e) })
     process.exit(1)
   })

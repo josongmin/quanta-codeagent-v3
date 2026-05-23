@@ -2,7 +2,7 @@ import { rename, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import type { Message } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
 import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
@@ -141,7 +141,7 @@ const readSavedSession = async (path: string): Promise<SavedSession | undefined>
   } catch (e) {
     logger.warn("session: read failed", {
       path,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
     return undefined
   }
@@ -151,7 +151,7 @@ const readSavedSession = async (path: string): Promise<SavedSession | undefined>
   } catch (e) {
     logger.warn("session: malformed JSON — refusing to load", {
       path,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
     return undefined
   }

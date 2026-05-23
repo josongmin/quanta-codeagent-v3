@@ -24,7 +24,7 @@ import { buildSystemPrompt, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import { costUsd } from "@/observability/pricing"
 import type { PermissionContext } from "@/permission"
-import { logger, type RunContext } from "@/shared"
+import { errMessage, logger, type RunContext } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -117,7 +117,7 @@ const safeRm = async (path: string): Promise<void> => {
   } catch (e) {
     logger.warn("eval.synthetic: sandbox cleanup failed", {
       path,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
   }
 }

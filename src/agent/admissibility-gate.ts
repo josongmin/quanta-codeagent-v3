@@ -36,8 +36,8 @@ import {
   evaluate,
   evaluateAuto,
   evaluateStack,
-  grantAndCascade,
   getDefaultPermissionStore,
+  grantAndCascade,
   type HITLTier,
   hardDenyReason,
   inferReviewKind,
@@ -56,6 +56,7 @@ import {
   type ToolActionKeyed,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
+import { errMessage } from "@/shared"
 import {
   buildDenySteerMessage,
   type ConfirmDecision,
@@ -370,7 +371,7 @@ const emitHandoffEvent = (
     // The deny path must remain stable even when a host listener throws.
     // We swallow + warn via stderr — observability lives on the gate's
     // canonical return path, not on this notification seam.
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     process.stderr.write(`[quanta] hitl: onHandoff threw: ${msg}\n`)
   }
 }
@@ -463,7 +464,7 @@ const runAlwaysConfirmBranch = async (
   try {
     decision = normalizeConfirm(await config.onConfirm(action))
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     return deny(
       call.id,
       `Confirmation handler failed for ${call.name} (always-confirm tier): ${message}`,
@@ -667,7 +668,7 @@ const resolveAskBranch = async (
     try {
       decision = normalizeConfirm(await config.onConfirm(action))
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errMessage(e)
       return deny(call.id, `Confirmation handler failed: ${message}`, "error")
     }
   }

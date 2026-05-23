@@ -21,7 +21,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, extname, join } from "node:path"
-import { isTrajectoryEvent, logger, type TrajectoryEvent } from "@/shared"
+import { errMessage, isTrajectoryEvent, logger, type TrajectoryEvent } from "@/shared"
 import { type EvalMeta, type MetaReadResult, readMetaResult } from "./meta"
 
 /** A loaded session view, built from a single JSONL file + its sibling meta. */
@@ -61,7 +61,7 @@ export const loadSession = (path: string): SessionView => {
       logger.warn("eval.trajectory: skip malformed JSONL line", {
         file: path,
         linePreview: line.slice(0, 120),
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
       continue
     }
@@ -107,7 +107,7 @@ export const listSessions = (dir: string): readonly string[] => {
       // the rest of the listing still proceeds.
       logger.warn("eval.trajectory: stat failed during listing", {
         file: full,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
     }
   }

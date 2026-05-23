@@ -32,7 +32,7 @@ import { basename, join } from "node:path"
 import { buildSystemPrompt, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { logger, type RunContext } from "@/shared"
+import { errMessage, logger, type RunContext } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -104,7 +104,7 @@ const safeRm = async (path: string): Promise<void> => {
   } catch (e) {
     logger.warn("eval.replay: sandbox cleanup failed", {
       path,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
   }
 }
@@ -154,13 +154,7 @@ export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => 
   try {
     original = loadSession(opts.fixture)
   } catch (e) {
-    const r = skippedResult(
-      runId,
-      fixtureId,
-      start,
-      `load_failed: ${e instanceof Error ? e.message : String(e)}`,
-      0,
-    )
+    const r = skippedResult(runId, fixtureId, start, `load_failed: ${errMessage(e)}`, 0)
     await persistResult(store, runId, opts.fixture, r)
     return r
   }
@@ -230,7 +224,7 @@ export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => 
       replayTurns = outcome.turns
       if (outcome.reason === "error") runError = "runAgent reported error"
     } catch (e) {
-      runError = e instanceof Error ? e.message : String(e)
+      runError = errMessage(e)
     } finally {
       clearTimeout(timer)
     }

@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * Parallel candidate proposal for speculative branch search (ADR-0084).
  *
@@ -91,7 +92,7 @@ const oneCandidate = async (
       })
       .catch((e) => ({
         kind: "failed" as const,
-        reason: e instanceof Error ? e.message : String(e),
+        reason: errMessage(e),
       }))
     const outcome = await Promise.race([run, timeout])
     if (outcome.kind === "completed") {

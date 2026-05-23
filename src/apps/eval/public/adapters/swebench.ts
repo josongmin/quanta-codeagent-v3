@@ -15,7 +15,7 @@
  * `rfc/0003-eval-architecture.md` §5.
  */
 import { existsSync, readFileSync } from "node:fs"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { makeRunId, ResultStore } from "../../storage"
 import type { Verdict } from "../../types"
 import { findMapping } from "../mapping"
@@ -92,7 +92,7 @@ export const runSwebenchAdapter = async (
   } catch (e) {
     logger.warn("eval.public.swebench: malformed report", {
       reportPath,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
     // Same posture as missing report: don't fabricate an empty run summary.
     return { runId, total: 0, counts, durationMs: Date.now() - start }

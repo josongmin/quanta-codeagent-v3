@@ -134,7 +134,10 @@ export const ghPrViewTool = (runner: GhRunner = defaultGhRunner): Tool<PrViewInp
     yield { type: "progress", message: `gh pr view #${input.pr}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
-      yield { type: "result", result: { ok: false, output: `gh pr view failed: ${r.stderr.slice(0, 500)}` } }
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr view failed: ${r.stderr.slice(0, 500)}` },
+      }
       return
     }
     yield { type: "result", result: { ok: true, output: r.stdout.trim() } }
@@ -162,7 +165,10 @@ export const ghIssueViewTool = (runner: GhRunner = defaultGhRunner): Tool<IssueV
     yield { type: "progress", message: `gh issue view #${input.issue}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
-      yield { type: "result", result: { ok: false, output: `gh issue view failed: ${r.stderr.slice(0, 500)}` } }
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh issue view failed: ${r.stderr.slice(0, 500)}` },
+      }
       return
     }
     yield { type: "result", result: { ok: true, output: r.stdout.trim() } }
@@ -190,7 +196,10 @@ export const ghCheckStatusTool = (runner: GhRunner = defaultGhRunner): Tool<Chec
     yield { type: "progress", message: `gh pr checks #${input.pr}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
-      yield { type: "result", result: { ok: false, output: `gh pr checks failed: ${r.stderr.slice(0, 500)}` } }
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr checks failed: ${r.stderr.slice(0, 500)}` },
+      }
       return
     }
     yield { type: "result", result: { ok: true, output: r.stdout.trim() } }
@@ -223,7 +232,10 @@ export const ghPrCommentTool = (runner: GhRunner = defaultGhRunner): Tool<PrComm
     yield { type: "progress", message: `gh pr comment #${input.pr}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
-      yield { type: "result", result: { ok: false, output: `gh pr comment failed: ${r.stderr.slice(0, 500)}` } }
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr comment failed: ${r.stderr.slice(0, 500)}` },
+      }
       return
     }
     yield { type: "result", result: { ok: true, output: r.stdout.trim() || "comment posted" } }
@@ -264,7 +276,10 @@ export const ghPrCreateTool = (runner: GhRunner = defaultGhRunner): Tool<PrCreat
     yield { type: "progress", message: `gh pr create ${input.head} → ${input.base}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS * 2)
     if (r.code !== 0) {
-      yield { type: "result", result: { ok: false, output: `gh pr create failed: ${r.stderr.slice(0, 500)}` } }
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr create failed: ${r.stderr.slice(0, 500)}` },
+      }
       return
     }
     yield { type: "result", result: { ok: true, output: r.stdout.trim() } }
@@ -272,7 +287,10 @@ export const ghPrCreateTool = (runner: GhRunner = defaultGhRunner): Tool<PrCreat
 })
 
 const prListSchema = z.object({
-  state: z.enum(["open", "closed", "merged", "all"]).optional().describe("Filter state (default open)"),
+  state: z
+    .enum(["open", "closed", "merged", "all"])
+    .optional()
+    .describe("Filter state (default open)"),
   limit: z.number().int().positive().optional().describe("Max results (default 20)"),
 })
 type PrListInput = z.infer<typeof prListSchema>
@@ -298,7 +316,10 @@ export const ghPrListTool = (runner: GhRunner = defaultGhRunner): Tool<PrListInp
     yield { type: "progress", message: `gh pr list state=${input.state ?? "open"}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {
-      yield { type: "result", result: { ok: false, output: `gh pr list failed: ${r.stderr.slice(0, 500)}` } }
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr list failed: ${r.stderr.slice(0, 500)}` },
+      }
       return
     }
     yield { type: "result", result: { ok: true, output: r.stdout.trim() } }

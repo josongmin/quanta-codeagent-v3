@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * JSONL append-only store for `EvalRecord`. One file per run id keeps tier
  * runs isolated and trivially diff-able. Reads scan a directory and stream
@@ -89,7 +90,7 @@ export class ResultStore {
     const next = prev.then(write).catch((e) => {
       logger.warn("eval.store: append failed", {
         runId,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
     })
     this.writeTails.set(runId, next)
@@ -145,7 +146,7 @@ export class ResultStore {
     } catch (e) {
       logger.warn("eval.store: read failed", {
         file,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
       return
     }
@@ -165,7 +166,7 @@ export class ResultStore {
         logger.warn("eval.store: skip malformed line", {
           file,
           linePreview: line.slice(0, 120),
-          error: e instanceof Error ? e.message : String(e),
+          error: errMessage(e),
         })
         continue
       }

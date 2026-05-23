@@ -86,7 +86,9 @@ interface DockerImageJson {
 /** Query the local daemon for SWE-bench images via
  *  `docker images --format '{{json .}}'`. Failure (daemon down, parse error)
  *  ⇒ []. NEVER throws. Non-swebench images are filtered out. */
-export const listSwebenchImages = async (opts: { spawn?: DockerSpawn } = {}): Promise<ImageInfo[]> => {
+export const listSwebenchImages = async (
+  opts: { spawn?: DockerSpawn } = {},
+): Promise<ImageInfo[]> => {
   const spawn = opts.spawn ?? defaultDockerSpawn
   const r = await spawn(["images", "--format", "{{json .}}"])
   if (r.code !== 0) return []
@@ -134,7 +136,11 @@ const archTag = (): string => (hostArch() === "arm64" ? "arm64" : "x86_64")
 
 /** True iff the env image for `repoSlug` (e.g. "django_1776_django") at the
  *  given arch is present locally. arch defaults to the host's swebench tag. */
-export const hasEnvImage = (images: ImageInfo[], repoSlug: string, arch: string = archTag()): boolean => {
+export const hasEnvImage = (
+  images: ImageInfo[],
+  repoSlug: string,
+  arch: string = archTag(),
+): boolean => {
   const needle = `sweb.env.${arch}.${repoSlug}`
   return images.some((img) => img.tier === "env" && img.repository.startsWith(needle))
 }

@@ -2,6 +2,7 @@ export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export type { LLMErrorKind, LLMProvider } from "./errors"
 export {
+  errMessage,
   LLMError,
   PermissionDeniedError,
   QuantaError,

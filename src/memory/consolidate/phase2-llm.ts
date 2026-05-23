@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * ADR-0068 — `Phase2Port` LLM implementation (Wave D).
  *
@@ -181,7 +182,7 @@ export class LlmPhase2Port implements Phase2Port {
     try {
       result = await this.summarize({ system, userText })
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       throw new Phase2ConsolidateError(`LLM stream failed: ${msg}`, args.mode)
     }
     if (result.text.length === 0) {

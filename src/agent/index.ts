@@ -134,13 +134,13 @@ export {
 } from "./plan-exit"
 export type { AgentMode, TurnContext, TurnContextInput } from "./prompt"
 export { buildSystemPrompt, buildTurnContext } from "./prompt"
+export { RECOVERY_CAPS } from "./recovery"
 export {
   loadRepoRules,
   REPO_RULE_CANDIDATES,
   type RepoRules,
   renderRepoRulesBlock,
 } from "./repo-rules"
-export { RECOVERY_CAPS } from "./recovery"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
 export {
   type AgentMode as RunMode,

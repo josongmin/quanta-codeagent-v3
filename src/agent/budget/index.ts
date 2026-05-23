@@ -6,15 +6,6 @@
  * `./types.ts`, `./meter.ts`, `./events.ts`.
  */
 
-export type {
-  BudgetCaps,
-  BudgetDials,
-  BudgetExhaustion,
-  BudgetExhaustionPolicy,
-  BudgetUsage,
-  TickKind,
-} from "./types"
-
 export {
   asDials,
   type BudgetClampEvent,
@@ -24,5 +15,12 @@ export {
   isBudgetEvent,
   makeClampEvent,
 } from "./events"
-
 export { BudgetMeter, type BudgetMeterOptions } from "./meter"
+export type {
+  BudgetCaps,
+  BudgetDials,
+  BudgetExhaustion,
+  BudgetExhaustionPolicy,
+  BudgetUsage,
+  TickKind,
+} from "./types"

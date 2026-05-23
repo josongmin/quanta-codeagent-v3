@@ -17,7 +17,7 @@ import {
   type RedactionOrigin,
   redactSecrets,
 } from "@/security"
-import { LLMError } from "@/shared"
+import { errMessage, LLMError } from "@/shared"
 import { type CloseoutGuardState, decideCloseoutGuard } from "./closeout-guard"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
@@ -770,7 +770,7 @@ const resolveMemoryContext = async (
     )
     return block ?? undefined
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     config.stream.emit({ type: "error", message: `memory recall failed: ${message}` })
     return undefined
   }
@@ -865,7 +865,7 @@ const maybeCompact = async (
         : {}),
     })
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     config.stream.emit({
       type: "error",
       message: `proactive compaction failed: ${message}`,
@@ -992,7 +992,7 @@ const injectIdeContext = async (
   } catch (e) {
     config.stream.emit({
       type: "error",
-      message: `ide-context provider failed: ${e instanceof Error ? e.message : String(e)}`,
+      message: `ide-context provider failed: ${errMessage(e)}`,
     })
     return ctx
   }
@@ -1396,7 +1396,7 @@ const restoreFollowUpQueueSnapshot = async (cfg: AgentConfig): Promise<void> => 
       }
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     cfg.stream.emit({
       type: "error",
       message: `followUpQueueSnapshotStore.load failed: ${message}`,
@@ -1415,7 +1415,7 @@ const saveFollowUpQueueSnapshot = async (cfg: AgentConfig): Promise<void> => {
   try {
     await cfg.followUpQueueSnapshotStore.save(cfg.followUpQueue.toSnapshot())
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     cfg.stream.emit({
       type: "error",
       message: `followUpQueueSnapshotStore.save failed: ${message}`,
@@ -1557,7 +1557,7 @@ const pollConversationAction = async (
   try {
     action = port.next()
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     cfg.stream.emit({ type: "error", message: `conversationActionPort.next failed: ${message}` })
     return { kind: "none" }
   }
@@ -1865,7 +1865,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     try {
       await features.cleanup?.()
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errMessage(e)
       stream.emit({ type: "error", message: `subagent cleanup failed: ${message}` })
     }
     // L4 control-op cluster (2026-05-23) — follow-up queue snapshot save.

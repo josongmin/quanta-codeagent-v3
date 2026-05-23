@@ -16,6 +16,7 @@
  */
 import type { LLMPort, Message } from "@/llm"
 import { assembleFromEvents } from "@/llm"
+import { errMessage } from "@/shared"
 import type { RubricItem, Scenario } from "./scenario"
 
 export interface JudgeInput {
@@ -130,11 +131,7 @@ export const judge = async (input: JudgeInput, opts: JudgeOpts): Promise<JudgeVe
       events.push(e)
     }
   } catch (e) {
-    return errVerdict(
-      input.scenario.rubric,
-      "",
-      `llm stream: ${e instanceof Error ? e.message : String(e)}`,
-    )
+    return errVerdict(input.scenario.rubric, "", `llm stream: ${errMessage(e)}`)
   }
   const { message } = assembleFromEvents(events)
   const raw = message.content
@@ -151,7 +148,7 @@ const parseVerdict = (raw: string, rubric: readonly RubricItem[]): JudgeVerdict 
   try {
     obj = JSON.parse(block)
   } catch (e) {
-    return errVerdict(rubric, raw, `JSON parse: ${e instanceof Error ? e.message : String(e)}`)
+    return errVerdict(rubric, raw, `JSON parse: ${errMessage(e)}`)
   }
   if (typeof obj !== "object" || obj === null) {
     return errVerdict(rubric, raw, "response is not an object")

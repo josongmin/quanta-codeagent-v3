@@ -103,8 +103,7 @@ const patterns: ReadonlyArray<Pattern> = [
   // an entire enclosing file by accident.
   {
     kind: "gcp_service_account_key",
-    regex:
-      /\{[^{}]*?"type"\s*:\s*"service_account"[^{}]*?"private_key"\s*:\s*"[^"]+"[^{}]*?\}/g,
+    regex: /\{[^{}]*?"type"\s*:\s*"service_account"[^{}]*?"private_key"\s*:\s*"[^"]+"[^{}]*?\}/g,
   },
   // AWS access key id — exact-shape `AKIA` / `ASIA` / `AROA` / `AIDA` + 16 base32.
   {
@@ -188,7 +187,7 @@ const patterns: ReadonlyArray<Pattern> = [
   {
     kind: "generic_api_key_assignment",
     regex:
-      /\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|auth[_-]?token|private[_-]?token)["']?\s*[=:]\s*["']?[A-Za-z0-9_\-]{20,}["']?/gi,
+      /\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|auth[_-]?token|private[_-]?token)["']?\s*[=:]\s*["']?[A-Za-z0-9_-]{20,}["']?/gi,
   },
 ]
 

@@ -25,6 +25,7 @@
  * It does NOT import `@/agent`; the recursive runner is injected.
  */
 import type { Subprocess } from "bun"
+import { errMessage } from "@/shared"
 import type { TaskOwnerToken, TaskRegistry } from "./registry"
 import type {
   CloseAgentInput,
@@ -181,7 +182,7 @@ export const handleExecCommand = async (
       ...(env !== undefined ? { env } : {}),
     }) as Subprocess<"pipe", "pipe", "pipe">
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return errExec(`Failed to spawn command: ${msg}`, "spawn_error")
   }
 
@@ -278,7 +279,7 @@ export const handleWriteStdin = async (
     stdin.write(bytes)
     await stdin.flush()
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return errWrite(`Failed to write to PTY pid ${input.pid}: ${msg}`, "write_failed")
   }
   return { kind: "success", bytesWritten: bytes.byteLength }
@@ -334,7 +335,7 @@ export const handleSpawnAgent = async (
   void deps
     .runner(req)
     .then((r) => deps.registry.complete(taskId, r))
-    .catch((e: unknown) => deps.registry.fail(taskId, e instanceof Error ? e.message : String(e)))
+    .catch((e: unknown) => deps.registry.fail(taskId, errMessage(e)))
 
   return { kind: "success", agentId: taskId, ownerToken }
 }

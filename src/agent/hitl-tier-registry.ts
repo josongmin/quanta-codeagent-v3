@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * ADR-0047 — HITL tier annotation registry.
  *
@@ -123,7 +124,7 @@ const loadOverridesFromDisk = (): readonly HitlAnnotation[] => {
     // ENOENT is the common case — the operator simply hasn't written one.
     // Don't warn for missing files; only warn for permission / IO errors.
     if (code !== "ENOENT") {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       stderrWarn(`failed to read ${path}: ${msg} — falling back to built-in annotations`)
     }
     return Object.freeze([])
@@ -133,7 +134,7 @@ const loadOverridesFromDisk = (): readonly HitlAnnotation[] => {
   try {
     parsed = JSON.parse(raw)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     stderrWarn(`malformed JSON in ${path}: ${msg} — falling back to built-in annotations`)
     return Object.freeze([])
   }

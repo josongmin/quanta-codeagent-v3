@@ -16,6 +16,7 @@
  *     silently swallow.
  */
 import { open } from "node:fs/promises"
+import { errMessage } from "@/shared"
 import { err, ok, type Result } from "@/shared/types"
 import { type SessionEnvelopeRecord, SessionEnvelopeRecordSchema } from "./envelope"
 
@@ -111,7 +112,7 @@ export const decodeSessionLine = (
   try {
     parsed = JSON.parse(raw)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return err(new EnvelopeDecodeError("parse_json", `invalid JSON: ${msg}`, line))
   }
   const v = SessionEnvelopeRecordSchema.safeParse(parsed)

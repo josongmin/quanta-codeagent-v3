@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { TaskRegistry } from "./registry"
 import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
@@ -209,7 +210,7 @@ const launchBackground = (
   void opts
     .runner(signaledReq)
     .then((r) => registry.complete(taskId, r))
-    .catch((e: unknown) => registry.fail(taskId, e instanceof Error ? e.message : String(e)))
+    .catch((e: unknown) => registry.fail(taskId, errMessage(e)))
   return {
     type: "result",
     result: {
@@ -351,7 +352,7 @@ export const createAgentTool = (
         const r = await opts.runner(req)
         yield { type: "result", result: { ok: r.ok, output: summarize(r) } }
       } catch (e: unknown) {
-        yield deny(`Subagent error: ${e instanceof Error ? e.message : String(e)}`)
+        yield deny(`Subagent error: ${errMessage(e)}`)
       }
     },
   }

@@ -22,6 +22,7 @@
  */
 import type { LLMPort, Message } from "@/llm"
 import { assembleFromEvents } from "@/llm"
+import { errMessage } from "@/shared"
 import type { UseCaseId } from "../types"
 import { allLeaves, formatLeafLine, leafById } from "./index"
 
@@ -101,7 +102,7 @@ const parse = (raw: string, maxAlt: number): ClassifyResult => {
   try {
     obj = JSON.parse(block) as RawShape
   } catch (e) {
-    return errResult(raw, `JSON parse: ${e instanceof Error ? e.message : String(e)}`)
+    return errResult(raw, `JSON parse: ${errMessage(e)}`)
   }
   // Model may legitimately reply `{"id": null}` — that's the "none of the
   // above" path and is NOT an error.
@@ -137,7 +138,7 @@ export const classifyQuery = async (query: string, opts: ClassifyOpts): Promise<
       events.push(e)
     }
   } catch (e) {
-    return errResult("", `llm stream: ${e instanceof Error ? e.message : String(e)}`)
+    return errResult("", `llm stream: ${errMessage(e)}`)
   }
   const { message } = assembleFromEvents(events)
   const text = message.content

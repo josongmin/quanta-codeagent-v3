@@ -154,16 +154,14 @@ export interface Phase2Input {
  * Errors raised by the summarizer are wrapped as
  * `Phase2ConsolidateError` by `LlmPhase2Port`.
  */
-export interface Phase2Summarizer {
-  (args: { system: string; userText: string }): Promise<{
-    /** Full assistant text — `LlmPhase2Port` parses the triple-section
-     *  envelope (`<MEMORY_MD>…</MEMORY_MD>` etc.) out of this string. */
-    text: string
-    /** Optional total-tokens reading for OTel
-     *  (`quanta.memory.phase2.tokens_used`). */
-    tokensUsed?: number
-  }>
-}
+export type Phase2Summarizer = (args: { system: string; userText: string }) => Promise<{
+  /** Full assistant text — `LlmPhase2Port` parses the triple-section
+   *  envelope (`<MEMORY_MD>…</MEMORY_MD>` etc.) out of this string. */
+  text: string
+  /** Optional total-tokens reading for OTel
+   *  (`quanta.memory.phase2.tokens_used`). */
+  tokensUsed?: number
+}>
 
 /** Phase 2 port — wraps the LLM consolidator. Same shape as Phase 1's
  *  for symmetry; a different (cheaper) model is typical (ADR-0011

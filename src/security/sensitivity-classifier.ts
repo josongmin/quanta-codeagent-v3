@@ -82,7 +82,13 @@ export const classifyPath = (absolutePath: string, home: string): SensitivityCla
     if (bn === "known_hosts" || bn.endsWith(".pub") || bn === "config") {
       // known_hosts is public by design; `.pub` is public-key; `config` is
       // non-secret host preferences. Drop to default classification below.
-    } else if (bn.startsWith("id_") || bn.endsWith("_rsa") || bn.endsWith("_dsa") || bn.endsWith("_ecdsa") || bn.endsWith("_ed25519")) {
+    } else if (
+      bn.startsWith("id_") ||
+      bn.endsWith("_rsa") ||
+      bn.endsWith("_dsa") ||
+      bn.endsWith("_ecdsa") ||
+      bn.endsWith("_ed25519")
+    ) {
       return "secret"
     }
   }
@@ -106,11 +112,7 @@ export const classifyPath = (absolutePath: string, home: string): SensitivityCla
   if (p.includes("/.aws/sso/cache/")) return "secret"
 
   // Internal (non-secret) home config / cache.
-  if (
-    p.includes("/.config/") ||
-    p.includes("/.cache/") ||
-    p.includes("/.local/share/")
-  ) {
+  if (p.includes("/.config/") || p.includes("/.cache/") || p.includes("/.local/share/")) {
     return "internal"
   }
 
@@ -254,10 +256,7 @@ export const classifyCommandShape = (cmd: string): SensitivityClass => {
   if (head === "gcloud") {
     const t1 = tokens[1]
     const t2 = tokens[2]
-    if (
-      t1 === "auth" &&
-      (t2 === "print-access-token" || t2 === "print-identity-token")
-    ) {
+    if (t1 === "auth" && (t2 === "print-access-token" || t2 === "print-identity-token")) {
       return "secret"
     }
   }

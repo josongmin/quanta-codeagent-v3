@@ -10,7 +10,7 @@
  * was the prior approach and it is intentionally removed.
  */
 import type { LLMPort } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { makeRunId, ResultStore } from "../storage"
 import { classifyQuery } from "../taxonomy"
 import type { Verdict } from "../types"
@@ -81,7 +81,7 @@ export const classifyTrajectories = async (
     } catch (e) {
       logger.warn("eval.trajectory: load failed", {
         file: f,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
       noMeta += 1
       continue

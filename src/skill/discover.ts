@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
+import { errMessage } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
 import { checkSkillSize } from "./skill-size"
 import type { Skill, SkillEffort } from "./types"
@@ -96,7 +97,7 @@ const readNestedSkill = async (dir: string, name: string): Promise<Skill | null>
     // reaching here means the read itself failed (permissions / transient IO),
     // NOT the normal "no SKILL.md, not a skill dir" case. Make it observable
     // then continue discovery past this entry.
-    unreadableWarning(skillFile, e instanceof Error ? e.message : String(e))
+    unreadableWarning(skillFile, errMessage(e))
     return null
   }
 }
@@ -118,7 +119,7 @@ const readFlatSkill = async (dir: string, fileName: string): Promise<Skill | nul
     // `checkSkillSize` already stat-confirmed the file; a failure here is a
     // genuine read error (permissions / transient IO), not "not a skill".
     // Make it observable then continue discovery past this entry.
-    unreadableWarning(file, e instanceof Error ? e.message : String(e))
+    unreadableWarning(file, errMessage(e))
     return null
   }
 }

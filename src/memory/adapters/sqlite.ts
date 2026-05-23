@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite"
+import { errMessage } from "@/shared"
 import type { PersistentStorePort } from "../ports"
 import { rankEntries } from "../ranking"
 import {
@@ -157,7 +158,7 @@ export class SqliteStore implements PersistentStorePort {
         $session_id: n.sessionId ?? null,
       })
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errMessage(e)
       return Promise.reject(new Error(`SqliteStore.save(${n.id}) failed: ${message}`))
     }
     return Promise.resolve()

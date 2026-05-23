@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * Tier 0 — static audit entry. `bun run eval audit` runs every taxonomy leaf
  * through `auditOne`, appends per-leaf findings to the store, and writes a
@@ -54,7 +55,7 @@ export const runAudit = async (opts: AuditRunOpts = {}): Promise<AuditRunResult>
       f = auditOne(l.id, cfg)
     } catch (e) {
       auditErrors += 1
-      const reason = e instanceof Error ? e.message : String(e)
+      const reason = errMessage(e)
       logger.warn("eval.audit: auditOne threw", { usecase: l.id, error: reason })
       f = { usecase: l.id, coverage: "tbd", evidence: [], note: `audit error: ${reason}` }
     }

@@ -15,7 +15,11 @@ import { type DockerSpawn, listSwebenchImages } from "./images"
 
 /** Local Spawn type (same shape as python-swebench's; declared here to avoid a
  *  cross-file import cycle between prepare.ts and python-swebench.ts). */
-export type Spawn = (argv: string[], cwd: string, timeoutMs: number) => Promise<{
+export type Spawn = (
+  argv: string[],
+  cwd: string,
+  timeoutMs: number,
+) => Promise<{
   code: number
   stdout: string
   stderr: string
@@ -140,9 +144,7 @@ export const prepareImages = async (opts: PrepareImagesOpts): Promise<PrepareIma
   // Warm-pool signal: how many env images already exist locally.
   let preexistingEnvImages = 0
   try {
-    const images = await listSwebenchImages(
-      opts.dockerSpawn ? { spawn: opts.dockerSpawn } : {},
-    )
+    const images = await listSwebenchImages(opts.dockerSpawn ? { spawn: opts.dockerSpawn } : {})
     preexistingEnvImages = images.filter((i) => i.tier === "env").length
   } catch {
     preexistingEnvImages = 0
@@ -183,7 +185,12 @@ export const prepareImages = async (opts: PrepareImagesOpts): Promise<PrepareIma
 
   try {
     const r = await spawn(argv, ".", opts.timeoutMs ?? 1800000)
-    const log = [`cmd: ${argv.join(" ")}`, `exit: ${r.code}`, `stdout(tail): ${tail(r.stdout)}`, `stderr(tail): ${tail(r.stderr)}`].join("\n")
+    const log = [
+      `cmd: ${argv.join(" ")}`,
+      `exit: ${r.code}`,
+      `stdout(tail): ${tail(r.stdout)}`,
+      `stderr(tail): ${tail(r.stderr)}`,
+    ].join("\n")
     return { ok: r.code === 0, preexistingEnvImages, log }
   } catch (e) {
     return {

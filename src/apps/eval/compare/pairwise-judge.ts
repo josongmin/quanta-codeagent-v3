@@ -13,7 +13,7 @@
  */
 import type { LLMPort, Message } from "@/llm"
 import { assembleFromEvents } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { Scenario } from "../synthetic/scenario"
 import type { CompareRunResult } from "./adapter"
 
@@ -110,7 +110,7 @@ const parsePairwise = (raw: string): { raw: RawVerdict; note: string } => {
     return {
       raw: {
         kind: "parse_failed",
-        reason: `JSON parse: ${e instanceof Error ? e.message : String(e)}`,
+        reason: `JSON parse: ${errMessage(e)}`,
       },
       note: "",
     }
@@ -144,7 +144,7 @@ const ask = async (
     return {
       raw: {
         kind: "parse_failed",
-        reason: `llm stream: ${e instanceof Error ? e.message : String(e)}`,
+        reason: `llm stream: ${errMessage(e)}`,
       },
       note: "",
     }

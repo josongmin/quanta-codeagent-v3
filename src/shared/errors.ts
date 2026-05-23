@@ -124,7 +124,7 @@ export class LLMError extends QuantaError {
    *  NEVER off the `message` string. */
   static fromSdkError(provider: LLMProvider, e: unknown, prefix?: string): LLMError {
     if (e instanceof LLMError) return e
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     const statusCode = extractStatus(e)
     const providerCode = extractProviderCode(e)
     const kind = classify(statusCode, e, message)
@@ -202,3 +202,14 @@ const classify = (status: number | undefined, e: unknown, _msg: string): LLMErro
 
 export const toError = (e: unknown): Error =>
   e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))
+
+/**
+ * Extract a message string from any thrown value with EXACTLY the semantics
+ * of the inline `errMessage(e)` pattern (which
+ * was duplicated across 18+ files). Distinct from {@link toError}, which
+ * constructs an Error and JSON-stringifies non-Error / non-string bodies
+ * (a richer log policy that produces `'{"k":1}'` instead of
+ * `"[object Object]"`); kept separate so the legacy call sites stay
+ * byte-identical when they switch to this helper.
+ */
+export const errMessage = (e: unknown): string => errMessage(e)

@@ -27,6 +27,7 @@ import {
   runPhase1,
   type Stage1StorePort,
 } from "@/memory"
+import { errMessage } from "@/shared"
 
 /** Outcome of a session-end consolidator attempt. Mirrors `Phase1Outcome`
  *  shape but adds the structured-skip arms the hook itself can produce
@@ -149,7 +150,7 @@ const runMemoryConsolidatorHookInner = async (
     if (e instanceof Phase1DistillError) {
       return { kind: "error", message: `Phase1DistillError: ${e.message}` }
     }
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     return { kind: "error", message }
   }
   if (outcome.kind === "skipped") {

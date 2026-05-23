@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import { FsJailError, fileExists, readFile, writeFile } from "@/storage"
 import type { Tool, ToolContext, ToolEvent, ToolFailure } from "./types"
 
@@ -129,7 +130,7 @@ export const applyScriptedReplace = (
     const body = input.isRegex === true ? input.pattern : escapeForRegex(input.pattern)
     regex = new RegExp(body, "g")
   } catch (e) {
-    const reason = e instanceof Error ? e.message : String(e)
+    const reason = errMessage(e)
     return { ok: false, message: `invalid regex: ${reason}`, failureKind: "rejected" }
   }
   const cap = input.count ?? Number.POSITIVE_INFINITY

@@ -36,8 +36,9 @@ export interface BudgetMeterOptions {
   now?: () => number
   /** Cost estimator: given current input/output/reasoning tokens, return USD.
    *  Pure function — meter never embeds a price table. Default returns 0. */
-  estimateCostUsd?: (usage: Pick<BudgetUsage,
-    "inputTokens" | "outputTokens" | "reasoningTokens">) => number
+  estimateCostUsd?: (
+    usage: Pick<BudgetUsage, "inputTokens" | "outputTokens" | "reasoningTokens">,
+  ) => number
 }
 
 /** Default no-op cost estimator (callers wire their own pricing table). */
@@ -48,8 +49,9 @@ export class BudgetMeter {
   readonly caps: BudgetCaps
   readonly exhaustion: BudgetExhaustionPolicy
   private readonly clock: () => number
-  private readonly costFn: (usage: Pick<BudgetUsage,
-    "inputTokens" | "outputTokens" | "reasoningTokens">) => number
+  private readonly costFn: (
+    usage: Pick<BudgetUsage, "inputTokens" | "outputTokens" | "reasoningTokens">,
+  ) => number
   private readonly startedAtMs: number
 
   // Counters — pure ints; mutation is the meter's only state.

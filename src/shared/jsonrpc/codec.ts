@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * JSON-RPC 2.0 codec — encode/decode helpers that return `Result`.
  *
@@ -167,7 +168,7 @@ const parseJson = (input: string): Result<unknown, JsonRpcCodecError> => {
   try {
     return ok(JSON.parse(input) as unknown)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return err(new JsonRpcCodecError("parse_json", `invalid JSON: ${msg}`))
   }
 }

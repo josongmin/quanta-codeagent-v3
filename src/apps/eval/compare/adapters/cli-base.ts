@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve, sep } from "node:path"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { Scenario } from "../../synthetic/scenario"
 import type { AgentAdapter, CompareRunResult } from "../adapter"
 
@@ -71,7 +71,7 @@ const safeRm = async (path: string): Promise<void> => {
   } catch (e) {
     logger.warn("compare.cli: sandbox cleanup failed", {
       path,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
   }
 }
@@ -108,7 +108,7 @@ export class CliAgentAdapter implements AgentAdapter {
         reason: `exit=${r.status} stderr=${(r.stderr ?? "").slice(0, STDERR_TAIL_BYTES)}`,
       }
     } catch (e) {
-      return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+      return { ok: false, reason: errMessage(e) }
     }
   }
 
@@ -149,7 +149,7 @@ export class CliAgentAdapter implements AgentAdapter {
             }),
       }
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e)
+      const reason = errMessage(e)
       return {
         agent: this.name,
         transcript: "",
@@ -236,7 +236,7 @@ const spawnCaptured = (
       } catch (e) {
         logger.warn("compare.cli: stdin write threw", {
           bin,
-          error: e instanceof Error ? e.message : String(e),
+          error: errMessage(e),
         })
       }
     }

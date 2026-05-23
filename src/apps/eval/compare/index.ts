@@ -12,7 +12,7 @@
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import type { LLMPort } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { makeRunId, ResultStore } from "../storage"
 import { loadScenarioFile, type Scenario } from "../synthetic/scenario"
 import type { UseCaseId, Verdict } from "../types"
@@ -100,7 +100,7 @@ const resolveScenario = (root: string, usecase: UseCaseId, scenarioId: string): 
   } catch (e) {
     logger.warn("eval.compare: scenario parse failed", {
       file,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
     return null
   }

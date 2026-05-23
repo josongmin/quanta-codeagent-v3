@@ -16,6 +16,7 @@
  * promotion of a real session). Reader: `trajectory/source.ts`.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { errMessage } from "@/shared"
 
 export const EVAL_META_SCHEMA = 1 as const
 
@@ -62,7 +63,7 @@ export const readMetaResult = (jsonlPath: string): MetaReadResult => {
   try {
     raw = JSON.parse(readFileSync(p, "utf8"))
   } catch (e) {
-    return { kind: "malformed", error: `JSON parse: ${e instanceof Error ? e.message : String(e)}` }
+    return { kind: "malformed", error: `JSON parse: ${errMessage(e)}` }
   }
   if (typeof raw !== "object" || raw === null) {
     return { kind: "malformed", error: "sidecar root is not an object" }

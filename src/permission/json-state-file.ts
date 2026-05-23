@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * Generic JSON-state-file persistence engine (ADR-0046, extracted from
  * permission-store.ts #3).
@@ -55,7 +56,7 @@ const stderrWarn = (msg: string): void => {
 const swallowWriteRejection =
   (filePath: string) =>
   (e: unknown): void => {
-    const message = e instanceof Error ? e.message : String(e)
+    const message = errMessage(e)
     stderrWarn(`flush failed (${filePath}): ${message}`)
   }
 
@@ -203,7 +204,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
       // the next 3-way merge diffs against what we actually persisted.
       baseline = merged
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errMessage(e)
       stderrWarn(`flush failed (${filePath}): ${message}`)
       // Best-effort cleanup: remove a partial `.tmp` so the next write
       // starts from a clean slate (no orphan-tmp accumulation).
@@ -303,7 +304,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code
       if (code === "ENOENT") return null
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errMessage(e)
       stderrWarn(`load failed (${filePath}): ${message} — starting empty`)
       return null
     }
@@ -316,7 +317,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     try {
       parsed = JSON.parse(raw)
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errMessage(e)
       stderrWarn(`state file corrupt JSON (${filePath}): ${message} — starting empty`)
       await quarantine("corrupt", raw)
       return null

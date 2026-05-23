@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type { Producer, RunContext, TrajectoryKind } from "@/shared"
-import { assertNever, logger, makeEvent, toError } from "@/shared"
+import { assertNever, errMessage, logger, makeEvent, toError } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 import type { DegradedRecord } from "./tee"
@@ -158,7 +158,7 @@ export class JsonlRecorder implements StreamPort {
         reason,
         target: this.target,
         droppedEvents: this.dropped,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
     }
   }

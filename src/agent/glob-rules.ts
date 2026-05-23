@@ -118,8 +118,7 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
     // arrives with `description === ">"` (just the indicator) and the
     // continuation lines silently dropped. Treat a bare fold-indicator as
     // absent rather than rendering the literal `>` as authority surface.
-    const rawDesc =
-      typeof data.description === "string" ? data.description.trim() : ""
+    const rawDesc = typeof data.description === "string" ? data.description.trim() : ""
     const description =
       rawDesc.length > 0 && rawDesc !== ">" && rawDesc !== "|" ? rawDesc : undefined
     return {

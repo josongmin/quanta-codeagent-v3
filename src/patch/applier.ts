@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 // V4A apply_patch — AST → filesystem side effects.
 //
 // `applyPatch(patch, fs)` is pure w.r.t. the host filesystem: all I/O goes
@@ -124,7 +125,7 @@ async function applyUpdate(
     } catch (e) {
       // Best-effort rollback of the destination so we don't leave a duplicate.
       // We rethrow the original error with full context — NOT swallowed.
-      const detail = e instanceof Error ? e.message : String(e)
+      const detail = errMessage(e)
       throw new PatchApplyError(
         `Move-edit partial failure: wrote '${op.moveTo}' but could not delete '${op.path}': ${detail}`,
         op.path,

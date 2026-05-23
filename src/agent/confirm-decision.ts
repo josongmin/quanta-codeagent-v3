@@ -144,10 +144,7 @@ export const READONLY_DENY_STEER_NOTE =
  * performs), never inferred from text/heuristics. `false` / `undefined` ⇒ steer
  * is returned verbatim (byte-identical for every existing caller).
  */
-export const buildDenySteerMessage = (
-  d: ConfirmDecision,
-  isReadonly?: boolean,
-): string | null => {
+export const buildDenySteerMessage = (d: ConfirmDecision, isReadonly?: boolean): string | null => {
   if (d.decision !== "deny_and_steer") return null
   if (typeof d.steer !== "string" || d.steer.trim().length === 0) {
     throw new ConfirmDecisionError("steer", "deny_and_steer requires a non-empty steer")

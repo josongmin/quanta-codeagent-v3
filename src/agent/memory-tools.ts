@@ -7,6 +7,7 @@ import {
   type MemoryQuery,
   type PersistentStorePort,
 } from "@/memory"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
 /**
@@ -47,7 +48,7 @@ const tryEmbed = async (
   }
 }
 
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+const errMsg = (e: unknown): string => errMessage(e)
 
 const searchSchema = z.object({
   query: z.string().describe("Free-text query; semantic when an embedder is configured."),
