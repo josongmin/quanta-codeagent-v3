@@ -271,6 +271,33 @@ describe("/rewind dispatch", () => {
     expect(cap.err).toContain("no git port wired")
   })
 
+  test("--restore-files with port but session has no gitSha ⇒ no-op note (no port invocation)", async () => {
+    await seed("s-rfile-no-sha") // no gitSha
+    const { rewindCommands } = await importCmds()
+    const cmd = rewindCommands[0]
+    if (cmd === undefined) throw new Error("expected /rewind")
+    let stashCalled = false
+    const fakePort = {
+      async stash(_cwd: string) {
+        stashCalled = true
+        return undefined
+      },
+      async resetHard(_cwd: string) {
+        throw new Error("should not be called")
+      },
+    }
+    const state: RewindSlashState = {
+      sessionId: "s-rfile-no-sha",
+      env: { QUANTA_REWIND: "1", QUANTA_REWIND_GIT: "1" },
+      git: fakePort,
+    }
+    const cap = buildCtx(state)
+    const code = await cmd.run(["m0", "--yes", "--restore-files"], cap.ctx)
+    expect(code).toBe(0)
+    expect(stashCalled).toBe(false)
+    expect(cap.out).toContain("no gitSha")
+  })
+
   test("ambiguous prefix ⇒ exit 1 with clear error", async () => {
     // Seed with two ids that share a prefix.
     const messages: Message[] = [

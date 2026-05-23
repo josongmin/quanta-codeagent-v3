@@ -63,6 +63,8 @@ import {
 import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { AbortError, readLine } from "./raw-line-reader"
 import { createRejectCounter, type RejectCounter } from "./reject-counter"
+import type { RewindSlashState } from "./rewind-cmd"
+import { createCliRewindGitPort, isCliRewindGitEnabled } from "./rewind-git"
 import { buildRuleInventory, isRulePillEnabled } from "./rule-indicator"
 import { runSessionCommand } from "./session-commands"
 import { switchToSessionCwd } from "./session-io"
@@ -98,6 +100,38 @@ import {
  * `./session-io`, `./session-commands`, `./slash-commands`). No cross-app
  * imports (no `apps/bench`, no `apps/agent`).
  */
+
+/** Shared REPL-side slash-context state. Threaded through `tryRunReplSlash`
+ *  → `runSlashCommand`. Each field is independently optional:
+ *
+ *    - `skills` ⇒ `/skills`, `/reload-skills` see the live registry.
+ *    - `idle` / `imageQueue` ⇒ surface-local mutables.
+ *    - `rewindSession` ⇒ `/rewind` and `/fork` find an active session id
+ *      (and, when `QUANTA_REWIND_GIT=1`, an injected real-git port for
+ *      `--restore-files`). Absent ⇒ those commands print "no active session"
+ *      and exit 1 — never silently no-op. */
+type ReplSlashCtx = Partial<{
+  skills: () => Promise<SkillRow[]>
+  idle: IdleMonitor
+  imageQueue: ImageQueue
+  rewindSession: RewindSlashState
+}>
+
+/** Claude A1 rewind/fork: bind `/rewind` and `/fork` to the live session id.
+ *  `--restore-files` additionally needs a real-git port wired in; gated on
+ *  `QUANTA_REWIND_GIT=1` (default OFF — destructive). The slash command
+ *  STILL re-checks the env knob before invoking the port (belt-and-
+ *  suspenders), so toggling the env without restart is safe: port present +
+ *  env=0 ⇒ refused with a clear message. Absent session id ⇒ `undefined`
+ *  ⇒ the commands print "no active session" and exit 1 (never silent). */
+const buildRewindSlashState = (
+  sessionId: string | undefined,
+  cwd: string,
+): RewindSlashState | undefined => {
+  if (typeof sessionId !== "string" || sessionId.length === 0) return undefined
+  const git = isCliRewindGitEnabled(process.env) ? createCliRewindGitPort({ cwd }) : undefined
+  return { sessionId, ...(git !== undefined ? { git } : {}) }
+}
 
 /** MEDIUM-10: top-level usage block. Printed when the user passes `--help` or
  *  `-h` BEFORE any prompt forwarding logic so a typo doesn't become an LLM
@@ -437,14 +471,7 @@ const installPills = (deps: {
  *  `runReplLoop` to keep that function under the biome cognitive-complexity
  *  budget. `isSlashCommand` rejects paths like `/path/to/x` so legacy
  *  file-resume tokens still fall through to the agent path. */
-const tryRunReplSlash = async (
-  input: string,
-  slashCtx?: Partial<{
-    skills: () => Promise<SkillRow[]>
-    idle: IdleMonitor
-    imageQueue: ImageQueue
-  }>,
-): Promise<boolean> => {
+const tryRunReplSlash = async (input: string, slashCtx?: ReplSlashCtx): Promise<boolean> => {
   const head = input.split(/\s+/)[0] ?? ""
   if (!isSlashCommand(head)) return false
   // ADR-0083 multi-modal: `/image add|list|clear` is in-REPL only (the queue
@@ -466,6 +493,7 @@ const tryRunReplSlash = async (
     cwd: process.cwd(),
     ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
     ...(slashCtx?.idle !== undefined ? { idle: slashCtx.idle } : {}),
+    ...(slashCtx?.rewindSession !== undefined ? { rewindSession: slashCtx.rewindSession } : {}),
   })
   return true
 }
@@ -474,11 +502,7 @@ export const runReplLoop = async (
   rl: readline.Interface,
   signal: AbortSignal,
   turn: (text: string) => Promise<void>,
-  slashCtx?: Partial<{
-    skills: () => Promise<SkillRow[]>
-    idle: IdleMonitor
-    imageQueue: ImageQueue
-  }>,
+  slashCtx?: ReplSlashCtx,
 ): Promise<void> => {
   while (!signal.aborted) {
     const input = (await rl.question("\nquanta› ")).trim()
@@ -504,11 +528,7 @@ export const runReplLoop = async (
 export interface RunReplLoopRawOptions {
   readonly signal: AbortSignal
   readonly turn: (text: string) => Promise<void>
-  readonly slashCtx?: Partial<{
-    skills: () => Promise<SkillRow[]>
-    idle: IdleMonitor
-    imageQueue: ImageQueue
-  }>
+  readonly slashCtx?: ReplSlashCtx
   /** Meta line painted under the prompt (Codex-style composer). Typical
    *  content: `provider · model · ~/cwd`. Absent ⇒ no meta row. */
   readonly meta?: string
@@ -648,9 +668,7 @@ const readReplLine = async (
  *  `PromptSource.next` closure to keep it under the biome complexity budget. */
 const classifyReplLine = async (
   signal: AbortSignal | undefined,
-  slashCtx:
-    | Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor; imageQueue: ImageQueue }>
-    | undefined,
+  slashCtx: ReplSlashCtx | undefined,
   uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): Promise<string | null | undefined> => {
   const input = await readReplLine(signal, uxOpts)
@@ -681,9 +699,7 @@ const classifyReplLine = async (
  *  complexity budget. The trailing `\n` per branch matches the prior
  *  `runReplLoopRaw` post-line behavior byte-identically. */
 const buildCliPromptSource = (
-  slashCtx:
-    | Partial<{ skills: () => Promise<SkillRow[]>; idle: IdleMonitor; imageQueue: ImageQueue }>
-    | undefined,
+  slashCtx: ReplSlashCtx | undefined,
   uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): PromptSource => ({
   next: async (signal) => {
@@ -1239,14 +1255,12 @@ export const runRepl = async (): Promise<void> => {
       // the original text-only path (`/image …` then prints unknown
       // command). Capacity from `QUANTA_IMAGE_MAX_QUEUE` (default 5).
       const imageQueue: ImageQueue | undefined = buildImageQueue()
-      const slashCtx: Partial<{
-        skills: () => Promise<SkillRow[]>
-        idle: IdleMonitor
-        imageQueue: ImageQueue
-      }> = {
+      const rewindState = buildRewindSlashState(sessionId, cwd)
+      const slashCtx: ReplSlashCtx = {
         ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
         idle: idleMonitor,
         ...(imageQueue !== undefined ? { imageQueue } : {}),
+        ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
       }
       // Bash-style ↑/↓ history + Ctrl+R reverse-i-search. Default ON
       // (QUANTA_HISTORY=0 to disable). Path/max overridable via env.
