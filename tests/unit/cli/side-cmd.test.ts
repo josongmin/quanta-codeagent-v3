@@ -249,4 +249,41 @@ describe("/side slash command", () => {
     const names = mod.BUILTINS.map((c) => c.name)
     expect(names).toContain("/side")
   })
+
+  test("footer renders the side-chat's actual token tally (not 0/0)", async () => {
+    // Wire a fake LLM that yields a `usage` event with non-zero counts. The
+    // tally tee inside `runSideChat` sums these into the result, and the
+    // footer renders `N tok`. Without the wiring, this would render `0 tok`.
+    const abort = new AbortController()
+    const state: SideChatSessionState = {
+      deps: stubDeps(abort.signal),
+      assembleConfig: (messages: Message[], deps: OrchestrateDeps): AgentConfig => ({
+        llm: {
+          async *stream() {
+            yield { type: "text_delta", delta: "answer" }
+            yield { type: "usage", inputTokens: 11, outputTokens: 22, model: "test" }
+            yield { type: "message_stop", stop_reason: "end_turn" }
+          },
+        } as never,
+        registry: deps.registry,
+        stream: deps.stream,
+        permission: deps.permission,
+        messages,
+        system: deps.system,
+        cwd: deps.cwd,
+        maxTurns: deps.maxTurns,
+        signal: deps.signal,
+        onConfirm: deps.onConfirm,
+      }),
+      messages: [],
+      signal: abort.signal,
+    }
+    const { ctx, stdout } = makeCtx({ side: state })
+    const rc = await sideCmd.run(["q"], ctx)
+    expect(rc).toBe(0)
+    const out = stdout.join("")
+    // 11 + 22 = 33 — the footer sums input/output for the `tok` segment.
+    expect(out).toContain("33 tok")
+    expect(out).not.toContain("0 tok")
+  })
 })

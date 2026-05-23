@@ -503,3 +503,178 @@ describe("extractAnswerText", () => {
     expect(extractAnswerText(outcome)).toBe("Hello world.")
   })
 })
+
+/**
+ * Usage-tally hellgate — the `usage` AgentEvent → SideChatResult.{input,output}
+ * Tokens wiring.
+ *
+ * Contract pinned here:
+ *   - Each per-turn `usage` event sums into the tally (delta-across-emits,
+ *     matching `AgentRecorder.tokensUsed`'s counter.inc behavior). The
+ *     turn-summary "last-wins" doc applies WITHIN one stream — the provider
+ *     emits one cumulative `usage` at end-of-stream — but `runAgent` runs
+ *     multiple streams (one per turn), each with its OWN end-of-stream usage.
+ *     Summing is the contract that aligns with the main-session recorder.
+ *   - No `usage` event ⇒ both totals stay 0 (default-OFF behavior preserved).
+ *   - The main session's stream port receives EVERY event verbatim — the tee
+ *     never swallows. Main `metrics` / `workMetricsSink` are still dropped
+ *     (isolation invariant I5).
+ *   - Side-chat usage does NOT leak into main metrics — the dropped fields
+ *     are asserted (already covered by the "isolated deps view" test above,
+ *     re-checked here with the usage path actually exercised).
+ */
+
+/** An LLM stub whose stream yields a configurable sequence of StreamEvents.
+ *  Lets a test push `usage` events with specific token counts. */
+type StubLlmEvent =
+  | { type: "text_delta"; delta: string }
+  | {
+      type: "usage"
+      inputTokens: number
+      outputTokens: number
+      model?: string
+    }
+  | { type: "message_stop"; stop_reason: string }
+
+/** Build an assembleConfig whose fake LLM yields the given event sequence and
+ *  ALSO captures the deps view + the upstream stream port. */
+const makeUsageAssembler = (
+  cap: CaptureSlot,
+  events: StubLlmEvent[],
+): ((m: Message[], d: OrchestrateDeps) => AgentConfig) => {
+  return (messages, deps) => {
+    cap.messagesSeen = messages
+    cap.depsSeen = deps
+    const config: AgentConfig = {
+      llm: {
+        async *stream() {
+          for (const ev of events) {
+            yield ev
+          }
+        },
+      } as never,
+      registry: deps.registry,
+      stream: deps.stream,
+      permission: deps.permission,
+      messages,
+      system: deps.system,
+      cwd: deps.cwd,
+      maxTurns: deps.maxTurns,
+      signal: deps.signal,
+      onConfirm: deps.onConfirm,
+    }
+    cap.configSeen = config
+    return config
+  }
+}
+
+describe("runSideChat — usage tally wiring", () => {
+  test("single usage event ⇒ result carries that turn's tokens", async () => {
+    const cap: CaptureSlot = {}
+    const abort = new AbortController()
+    const result = await runSideChat({
+      prompt: "q",
+      deps: stubDeps(abort.signal),
+      assembleConfig: makeUsageAssembler(cap, [
+        { type: "text_delta", delta: "answer" },
+        { type: "usage", inputTokens: 42, outputTokens: 17, model: "test" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ]),
+      mainHistory: [],
+      signal: abort.signal,
+    })
+    expect(result.inputTokens).toBe(42)
+    expect(result.outputTokens).toBe(17)
+  })
+
+  test("multiple usage events sum (per-turn delta-across-emits)", async () => {
+    // Simulates two turns each emitting their OWN end-of-stream `usage`.
+    // The test injects them in ONE stream (the loop's outermost stream-emit
+    // contract is identical), proving the tee sums rather than last-wins.
+    const cap: CaptureSlot = {}
+    const abort = new AbortController()
+    const result = await runSideChat({
+      prompt: "q",
+      deps: stubDeps(abort.signal),
+      assembleConfig: makeUsageAssembler(cap, [
+        { type: "text_delta", delta: "step1 " },
+        { type: "usage", inputTokens: 100, outputTokens: 50, model: "test" },
+        { type: "text_delta", delta: "step2" },
+        { type: "usage", inputTokens: 30, outputTokens: 20, model: "test" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ]),
+      mainHistory: [],
+      signal: abort.signal,
+    })
+    expect(result.inputTokens).toBe(130)
+    expect(result.outputTokens).toBe(70)
+  })
+
+  test("no usage event ⇒ both counters fallback to 0", async () => {
+    const cap: CaptureSlot = {}
+    const abort = new AbortController()
+    const result = await runSideChat({
+      prompt: "q",
+      deps: stubDeps(abort.signal),
+      assembleConfig: makeUsageAssembler(cap, [
+        { type: "text_delta", delta: "answer" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ]),
+      mainHistory: [],
+      signal: abort.signal,
+    })
+    expect(result.inputTokens).toBe(0)
+    expect(result.outputTokens).toBe(0)
+  })
+
+  test("upstream stream port receives EVERY event (tee forwards verbatim)", async () => {
+    // The tally is a SIDE EFFECT — the upstream main-session stream port
+    // (captured here on `stubDeps`) must observe the `usage` event AS WELL,
+    // so a future logger/jsonl recorder can render side-chat usage too.
+    const emitted: { type: string }[] = []
+    const upstream = { emit: (e: { type: string }) => emitted.push(e) }
+    const abort = new AbortController()
+    const baseDeps = stubDeps(abort.signal)
+    const depsWithLogger: OrchestrateDeps = { ...baseDeps, stream: upstream as never }
+    const cap: CaptureSlot = {}
+    await runSideChat({
+      prompt: "q",
+      deps: depsWithLogger,
+      assembleConfig: makeUsageAssembler(cap, [
+        { type: "text_delta", delta: "x" },
+        { type: "usage", inputTokens: 7, outputTokens: 3, model: "test" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ]),
+      mainHistory: [],
+      signal: abort.signal,
+    })
+    // The upstream port saw the usage event (verbatim) — the tee did not
+    // swallow it.
+    const usageSeen = emitted.find((e) => e.type === "usage")
+    expect(usageSeen).toBeDefined()
+  })
+
+  test("main-session metrics still dropped even when usage is observed (I5)", async () => {
+    // Even with a `usage` event flowing, the side-chat's `metrics`/`run`/
+    // `workMetricsSink` MUST stay undefined on the isolated deps view — the
+    // tally is reported on the result, NOT folded into a main-session sink.
+    const cap: CaptureSlot = {}
+    const abort = new AbortController()
+    await runSideChat({
+      prompt: "q",
+      deps: stubDeps(abort.signal),
+      assembleConfig: makeUsageAssembler(cap, [
+        { type: "usage", inputTokens: 9, outputTokens: 4, model: "test" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ]),
+      mainHistory: [],
+      signal: abort.signal,
+    })
+    const sideDeps = cap.depsSeen
+    expect(sideDeps).toBeDefined()
+    if (sideDeps === undefined) throw new Error("unreachable")
+    expect(sideDeps.metrics).toBeUndefined()
+    expect(sideDeps.run).toBeUndefined()
+    expect(sideDeps.workMetricsSink).toBeUndefined()
+  })
+})

@@ -41,8 +41,11 @@
  *       so a side-chat cannot consume an unbounded budget.
  *
  *   I5. Cost accounting (input/output tokens) is RETURNED on the result for
- *       the caller to surface SEPARATELY — the loop never folds it into the
- *       main session's tally because no main store/metrics is wired.
+ *       the caller to surface SEPARATELY — a stream-port tee inside
+ *       {@link runSideChat} sums `usage` AgentEvents emitted by the isolated
+ *       loop. The main session's `metrics`/`store`/`workMetricsSink` are
+ *       dropped from the isolated deps view, so the tally never folds into
+ *       the main session's totals.
  *
  * ## Defaults
  *
@@ -60,6 +63,7 @@
 
 import { type AgentOutcome, runAgent } from "@/agent"
 import type { Message } from "@/llm"
+import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, ToolRegistry } from "@/tool"
 import type { OrchestrateDeps } from "./run-once"
 
@@ -178,10 +182,19 @@ export interface SideChatResult {
    *  an assistant text block (e.g. max_turns with only tool calls). */
   readonly answerText: string
   /** Input tokens consumed by the side-chat (sum across its internal turns).
-   *  Accounted SEPARATELY from the main session — the caller is responsible
-   *  for any cost dashboard rendering. */
+   *  Computed by a stream-port tee that observes every `usage` AgentEvent the
+   *  isolated `runAgent` emits — each per-turn end-of-stream `usage` carries
+   *  THAT turn's totals, so summing yields the run's total (matches the
+   *  recorder's `tokensUsed` `counter.inc` contract). Zero when the run
+   *  emitted no `usage` events (e.g. a doubles-only test LLM, an abort
+   *  before any stream completed, …).
+   *
+   *  Accounted SEPARATELY from the main session — the main `metrics`
+   *  collaborator is dropped from the isolated deps view (see invariant I5).
+   *  The caller renders this token count on its own UI (e.g. side-cmd
+   *  footer) without folding it into a main-session tally. */
   readonly inputTokens: number
-  /** Output tokens produced by the side-chat. */
+  /** Output tokens produced by the side-chat — see {@link inputTokens}. */
   readonly outputTokens: number
   /** Number of tools the side-chat had access to (post-filter). Surfaced so
    *  the UI can render `· N tools ·`. */
@@ -267,17 +280,48 @@ export const extractAnswerText = (outcome: AgentOutcome): string => {
   return ""
 }
 
+/** Mutable per-run accumulator for token usage observed on a side-chat's
+ *  stream. Treated as a value record handed to {@link createUsageTallyStream}
+ *  by reference — the stream mutates it in place; the caller reads it after
+ *  `runAgent` returns. NOT exported: the surface only sees the totals on the
+ *  {@link SideChatResult}. */
+interface UsageTally {
+  inputTokens: number
+  outputTokens: number
+}
+
 /**
- * Sum token usage across an agent's messages. The streaming `usage` events
- * are NOT preserved on `AgentOutcome`, so we have no per-turn counter from
- * the loop alone. The caller's surface can plug in its own per-stream
- * accounting (e.g. via `OrchestrateDeps.metrics`); for the default path we
- * return zeros — the orientation-correct invariant (cost accounted
- * SEPARATELY) is preserved because the value is never added to the main
- * session's tally. A future PR can wire a stream-observer port into
- * `runSideChat` for richer accounting.
+ * Build a {@link StreamPort} that tees `usage` AgentEvents into a tally while
+ * forwarding EVERY event verbatim to the upstream port (`source`). The
+ * provider/adapter emits ONE `usage` event at the end of EACH model stream
+ * (i.e. one per turn of the agent loop) carrying THAT turn's totals; summing
+ * across emits yields the run's total tokens.
+ *
+ * Why sum (delta-across-emits), not last-wins:
+ *   - Within a single stream the provider emits one cumulative `usage` event
+ *     at end-of-stream (see `src/llm/adapters/shared.ts::buildUsageEvent`);
+ *     `turn-summary` therefore treats it as "last wins" for a single turn.
+ *   - Across multiple turns inside `runAgent`, each turn is a SEPARATE stream
+ *     that emits its OWN end-of-stream usage carrying THAT turn's tokens.
+ *     `AgentRecorder.tokensUsed` (in `src/agent/metrics.ts`) accumulates via
+ *     `counter.inc(input/output)` — i.e. it SUMS. We mirror that contract
+ *     here so the side-chat result agrees with what a recorder would report
+ *     for the same isolated run.
+ *
+ * The tee NEVER mutates `tally` for non-`usage` events and never swallows an
+ * event — forwarding to the source port is unconditional. Missing token
+ * fields on the `usage` event (theoretically `undefined` via narrow types)
+ * are coerced to 0 via `?? 0` so a malformed emit cannot poison the totals.
  */
-const NO_USAGE = { inputTokens: 0, outputTokens: 0 } as const
+const createUsageTallyStream = (source: StreamPort, tally: UsageTally): StreamPort => ({
+  emit(event: AgentEvent): void {
+    if (event.type === "usage") {
+      tally.inputTokens += event.inputTokens ?? 0
+      tally.outputTokens += event.outputTokens ?? 0
+    }
+    source.emit(event)
+  },
+})
 
 /**
  * Generate a synthetic sessionId for the side-chat — namespaced under the
@@ -310,15 +354,28 @@ export const runSideChat = async (input: SideChatInput): Promise<SideChatResult>
   }
   const messages: Message[] = [...inherited, userTurn]
 
+  // Per-run token tally. Mutated by the tee port on every `usage` event the
+  // isolated `runAgent` emits. The main session's stream port still receives
+  // EVERY event verbatim (the tee forwards unconditionally) so the surface's
+  // logger/jsonl-recorder can paint side-chat usage alongside main usage if
+  // it wants to — the tally below is just the side-chat's OWN total, surfaced
+  // on the {@link SideChatResult} for the caller to render separately.
+  const tally: UsageTally = { inputTokens: 0, outputTokens: 0 }
+  const tallyStream: StreamPort = createUsageTallyStream(input.deps.stream, tally)
+
   // Build an ISOLATED deps view: same LLM/stream/permission/system, FILTERED
   // registry, NO store/sessionId of the main session, NO metrics/run/memory.
   // `signal`/`maxTurns` are replaced with our caps. The `onConfirm` of the
   // main session is preserved so a user-confirm prompt (if any tool requests
   // one) still routes through the same UX — but in practice the default
   // read-only allowlist contains no tools that fire `onConfirm`.
+  //
+  // `stream` is the TEE so we observe usage; the underlying main stream port
+  // still sees every event (forwarded unchanged).
   const isolatedDeps: OrchestrateDeps = {
     ...input.deps,
     registry: filteredRegistry,
+    stream: tallyStream,
     maxTurns,
     signal: input.signal,
     store: undefined,
@@ -342,8 +399,8 @@ export const runSideChat = async (input: SideChatInput): Promise<SideChatResult>
   return {
     outcome,
     answerText: extractAnswerText(outcome),
-    inputTokens: NO_USAGE.inputTokens,
-    outputTokens: NO_USAGE.outputTokens,
+    inputTokens: tally.inputTokens,
+    outputTokens: tally.outputTokens,
     toolsAvailable: filteredRegistry.specs().length,
   }
 }
