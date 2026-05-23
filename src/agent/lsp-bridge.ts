@@ -73,11 +73,13 @@ const specFor = (filePath: string): ServerSpec | null => {
  *  hung binary must NOT delay the whole session. */
 const LSP_AVAILABILITY_TIMEOUT_MS = 5_000
 
-const availabilityCache = new Map<string, boolean>()
-const isAvailable = async (bin: string): Promise<boolean> => {
-  const cached = availabilityCache.get(bin)
-  if (cached !== undefined) return cached
-  let ok = false
+// Cache the in-flight PROBE PROMISE, not the resolved bool. Concurrent
+// `isAvailable(bin)` callers (multiple LSP-backed tools initializing at once)
+// then share ONE `bin --version` subprocess instead of each racing a cache miss
+// and spawning a duplicate. The probe never rejects (errors resolve to `false`),
+// so a cached promise is always a settled, reusable result.
+const availabilityCache = new Map<string, Promise<boolean>>()
+const probeAvailable = async (bin: string): Promise<boolean> => {
   try {
     const proc = Bun.spawn([bin, "--version"], { stdout: "pipe", stderr: "pipe" })
     const exit = await Promise.race([
@@ -93,12 +95,17 @@ const isAvailable = async (bin: string): Promise<boolean> => {
     // await is post-kill so it resolves promptly; `.catch` keeps it defensive.
     await proc.exited.catch(() => undefined)
     // Non-zero `--version` still proves the binary resolves; -1 = our timeout.
-    ok = exit !== -1
+    return exit !== -1
   } catch {
-    ok = false
+    return false
   }
-  availabilityCache.set(bin, ok)
-  return ok
+}
+const isAvailable = (bin: string): Promise<boolean> => {
+  const cached = availabilityCache.get(bin)
+  if (cached !== undefined) return cached
+  const probe = probeAvailable(bin)
+  availabilityCache.set(bin, probe)
+  return probe
 }
 
 /** The real provider: extension → server, with graceful unavailability. */

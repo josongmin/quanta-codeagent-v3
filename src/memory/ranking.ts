@@ -53,18 +53,19 @@ const FRESHNESS_WEIGHT: Record<FreshnessBucket, number> = {
 
 const lc = (s: string): string => s.toLowerCase()
 
-/** True when `query.tags` is set and the entry shares ≥1 tag (case-insensitive). */
-const tagsOverlap = (e: NormalizedEntry, queryTags: readonly string[]): boolean => {
-  const want = new Set(queryTags.map(lc))
-  return e.tags.some((t) => want.has(lc(t)))
-}
-
 /**
  * Hard filters. `query.text` is NO LONGER a hard filter (it only scores) —
  * this removes the old paraphrase-kills-recall bug. `query.tags` IS still a
- * hard filter (≥1 tag overlap required when provided).
+ * hard filter (≥1 tag overlap required when provided); `want` is the query's
+ * precomputed lower-cased tag set (built once by the caller — see
+ * {@link tagWantSet} — so the filter does not rebuild it per candidate).
  */
-const passesFilters = (e: NormalizedEntry, query: MemoryQuery, now: number): boolean => {
+const passesFilters = (
+  e: NormalizedEntry,
+  query: MemoryQuery,
+  now: number,
+  want: ReadonlySet<string>,
+): boolean => {
   if (e.supersededBy && !query.includeSuperseded) return false
   if (query.kinds && query.kinds.length > 0 && !query.kinds.includes(e.kind)) {
     return false
@@ -72,7 +73,7 @@ const passesFilters = (e: NormalizedEntry, query: MemoryQuery, now: number): boo
   if (query.tiers && query.tiers.length > 0 && !query.tiers.includes(e.tier)) {
     return false
   }
-  if (query.tags && query.tags.length > 0 && !tagsOverlap(e, query.tags)) {
+  if (want.size > 0 && !e.tags.some((t) => want.has(lc(t)))) {
     return false
   }
   if (
@@ -111,19 +112,33 @@ const textScore = (e: NormalizedEntry, query: MemoryQuery): number => {
   return hay === needle ? W_TEXT + W_TEXT_EXACT : W_TEXT
 }
 
-/** Tag-overlap contribution: W_TAG per shared (case-insensitive) tag. */
-const tagScore = (e: NormalizedEntry, query: MemoryQuery): number => {
-  if (!query.tags || query.tags.length === 0) return 0
-  const want = new Set(query.tags.map(lc))
-  const overlap = new Set(e.tags.map(lc).filter((t) => want.has(t)))
-  return overlap.size * W_TAG
+/** Lower-cased query-tag set. Depends ONLY on the query, so `rankEntries`
+ *  builds it ONCE and threads it to every candidate's `tagScore` — building a
+ *  fresh Set per candidate (recall runs every turn over 100+ candidates) was
+ *  pure waste. */
+const tagWantSet = (query: MemoryQuery): ReadonlySet<string> => new Set((query.tags ?? []).map(lc))
+
+/** Tag-overlap contribution: W_TAG per shared (case-insensitive) tag. `want` is
+ *  the precomputed query-tag set (see {@link tagWantSet}); counts overlap with
+ *  no intermediate Set allocation. */
+const tagScore = (e: NormalizedEntry, want: ReadonlySet<string>): number => {
+  if (want.size === 0) return 0
+  let overlap = 0
+  for (const t of e.tags) if (want.has(lc(t))) overlap++
+  return overlap * W_TAG
 }
 
-/** Weighted-sum relevance score for an entry that passed the filters. */
-const scoreOf = (e: NormalizedEntry, query: MemoryQuery, now: number): number =>
+/** Weighted-sum relevance score for an entry that passed the filters. `want` is
+ *  the query's precomputed tag set (caller hoists it out of the candidate loop). */
+const scoreOf = (
+  e: NormalizedEntry,
+  query: MemoryQuery,
+  now: number,
+  want: ReadonlySet<string>,
+): number =>
   vectorScore(e, query) +
   textScore(e, query) +
-  tagScore(e, query) +
+  tagScore(e, want) +
   FRESHNESS_WEIGHT[bucketOf(now - e.createdAt)] +
   e.importance * W_IMPORTANCE +
   Math.min(Math.log1p(e.accessCount), ACCESS_CAP) +
@@ -141,7 +156,7 @@ export const scoreEntry = (
   entry: MemoryEntry,
   query: MemoryQuery,
   now: number = Date.now(),
-): number => scoreOf(normalizeEntry(entry), query, now)
+): number => scoreOf(normalizeEntry(entry), query, now, tagWantSet(query))
 
 /**
  * Filter + rank a candidate list. Pure and deterministic. Operates on
@@ -157,10 +172,12 @@ export const rankEntries = (
   const limit = query.limit ?? DEFAULT_RECALL_LIMIT
   if (limit <= 0) return []
 
+  // Build the query-tag set ONCE (it is candidate-independent), then score.
+  const want = tagWantSet(query)
   const scored = candidates
     .map(normalizeEntry)
-    .filter((e) => passesFilters(e, query, now))
-    .map((entry) => ({ entry, score: scoreOf(entry, query, now) }))
+    .filter((e) => passesFilters(e, query, now, want))
+    .map((entry) => ({ entry, score: scoreOf(entry, query, now, want) }))
 
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score

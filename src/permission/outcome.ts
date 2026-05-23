@@ -38,7 +38,10 @@ export class OutcomeInvariantError extends Error {
   readonly reviewer: ReviewerTier
   readonly outcome: ApprovalOutcome
   constructor(reviewer: ReviewerTier, outcome: ApprovalOutcome, detail: string) {
-    super(`OutcomeInvariantError: reviewer=${reviewer} outcome=${outcome} — ${detail}`)
+    super(
+      `OutcomeInvariantError [ADR-0029]: reviewer=${reviewer} outcome=${outcome} — ${detail}. ` +
+        `A reviewer tier produced an outcome it may not own — see docs/decisions/0029-reviewer-three-tier.md.`,
+    )
     this.name = "OutcomeInvariantError"
     this.reviewer = reviewer
     this.outcome = outcome

@@ -107,15 +107,21 @@ export const findBoundary = (messages: Message[], keepTurns: number): number => 
   // there is no retained message to orphan, so `messages[idx]` must NOT be
   // dereferenced (it is `undefined` → TypeError). An empty suffix is already
   // self-consistent, so the walk is a no-op there.
+  // Seed the suffix's tool_use ids ONCE for the initial suffix [idx, end), then
+  // accumulate incrementally as the boundary walks earlier — each message's
+  // ids are added at most once, making the whole walk O(n) instead of the
+  // O(n²) of rebuilding the set on every backward step.
+  const suffixIds = new Set<string>()
+  for (let i = idx; i < messages.length; i++) {
+    for (const id of toolUseIds(messages[i] as Message)) suffixIds.add(id)
+  }
   while (idx > 0 && idx < messages.length) {
-    const suffixIds = new Set<string>()
-    for (let i = idx; i < messages.length; i++) {
-      for (const id of toolUseIds(messages[i] as Message)) suffixIds.add(id)
-    }
     const head = messages[idx] as Message
     const orphaned = toolResultRefs(head).some((ref) => !suffixIds.has(ref))
     if (!orphaned) break
     idx--
+    // The message now at `idx` just joined the suffix — fold in its tool_use ids.
+    for (const id of toolUseIds(messages[idx] as Message)) suffixIds.add(id)
   }
   return idx
 }
