@@ -44,7 +44,7 @@ afterEach(() => {
     rmSync(tmp, { recursive: true, force: true });
 });
 describe("BUILTINS table", () => {
-    test("registers the documented builtins in order (/help + 5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status + /snooze + /resume)", () => {
+    test("registers the documented builtins in order (/help + 5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status + /permission + /snooze + /resume + /rules)", () => {
         expect(BUILTINS.map((c) => c.name)).toEqual([
             "/help",
             "/context",
@@ -58,8 +58,10 @@ describe("BUILTINS table", () => {
             "/login",
             "/logout",
             "/status",
+            "/permission",
             "/snooze",
             "/resume",
+            "/rules",
         ]);
     });
 });

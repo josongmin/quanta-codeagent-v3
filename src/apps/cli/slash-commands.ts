@@ -39,6 +39,7 @@ import { logoutCmd } from "./logout-cmd"
 import { permissionCmd } from "./permission-explain"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
+import { rulesCmd } from "./rules-cmd"
 import { sideCmd, type SideChatSessionState } from "./side-cmd"
 import { statusCmd } from "./status-cmd"
 
@@ -498,6 +499,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   resumeCmd,
   ...REWIND_COMMANDS,
   sideCmd,
+  rulesCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

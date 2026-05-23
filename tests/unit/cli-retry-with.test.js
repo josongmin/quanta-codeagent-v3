@@ -316,7 +316,11 @@ describe("/retry-with \u2014 slash dispatch", () => {
       "/reload-skills",
       "/login",
       "/logout",
-      "/status"
+      "/status",
+      "/permission",
+      "/snooze",
+      "/resume",
+      "/rules",
     ]);
   });
 });

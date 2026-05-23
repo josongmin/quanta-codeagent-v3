@@ -59,6 +59,7 @@ const RULES = [
             "runtime/sandbox.ts": "ENV PROPAGATION — docker sandbox forwards named env vars (a hardcoded ALLOWLIST) to the container; pass-through, not a feature flag.",
             "subagent/handlers-6.ts": "ENV PROPAGATION — subagent child-process spawn forwards parent env (merged with `input.env`); same posture as runtime/shell.ts and tool/git/runner.ts — pass-through, not a feature read.",
             "apps/cli/shell-stream-painter.ts": "NO_COLOR is the cross-tool no-color.org convention read at the TTY paint boundary (alongside stderr.isTTY); a presentation-layer signal, not a validated feature flag — routing it through runtimeConfig would be over-centralization.",
+            "apps/cli/rule-indicator.ts": "Surface-only rule indicator (read-only mirror of repo-rules/glob-rules loaders). Same DI fallback posture as status-pills.ts — `opts.env ?? process.env` at the composition root, tests inject explicit env. Not a feature read of a runtimeConfig-validated knob.",
         },
     },
     {

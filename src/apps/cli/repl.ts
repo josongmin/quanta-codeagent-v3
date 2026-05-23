@@ -63,6 +63,7 @@ import {
 import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { AbortError, readLine } from "./raw-line-reader"
 import { createRejectCounter, type RejectCounter } from "./reject-counter"
+import { buildRuleInventory, isRulePillEnabled } from "./rule-indicator"
 import { runSessionCommand } from "./session-commands"
 import { switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
@@ -400,6 +401,23 @@ const installPills = (deps: {
     void skillsCbForPills()
       .then((rows) => pills.update({ activeSkills: rows.map((r) => ({ name: r.name })) }))
       .catch(() => undefined) // best-effort; pills stay empty on discover error
+  }
+  // Rule indicator — best-effort fs walk shadowing the agent loop's loaders.
+  // Off-loop and cached for the REPL session; the loop's own load is
+  // unchanged, so the prompt body stays byte-identical (read-only mirror).
+  // `isRulePillEnabled()` defaults to `process.env` internally — keep the
+  // env read INSIDE rule-indicator.ts (which is allowlisted) rather than
+  // duplicating it at the call site.
+  if (isRulePillEnabled()) {
+    void buildRuleInventory({ cwd: deps.cwd })
+      .then((inv) => {
+        if (inv.totalCount > 0) {
+          pills.update({
+            rules: { activeCount: inv.activeCount, totalCount: inv.totalCount },
+          })
+        }
+      })
+      .catch(() => undefined)
   }
   return pills
 }

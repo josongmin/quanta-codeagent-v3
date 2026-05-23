@@ -96,6 +96,8 @@ const RULES: readonly Rule[] = [
         "CLI sub-command entry (ADR-0094). Same DI fallback posture as login-cmd.ts.",
       "apps/cli/logout-cmd.ts":
         "CLI sub-command entry (ADR-0094). Same DI fallback posture as login-cmd.ts.",
+      "apps/cli/rule-indicator.ts":
+        "Surface-only rule indicator (read-only mirror of repo-rules/glob-rules loaders). Same DI fallback posture as status-pills.ts — `opts.env ?? process.env` at the composition root, tests inject explicit env. Not a feature read of a runtimeConfig-validated knob.",
     },
   },
   {

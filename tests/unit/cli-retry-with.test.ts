@@ -364,6 +364,8 @@ describe("/retry-with — slash dispatch", () => {
       // the var unset → both registered.
       "/rewind",
       "/fork",
+      "/side",
+      "/rules",
     ])
   })
 })

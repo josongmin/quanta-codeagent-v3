@@ -51,6 +51,14 @@ const FG_GREEN = `${ESC}32m`
 /** Sandbox enum mirrors catalog ADR-0012. `"default"` = no wire yet ⇒ hide. */
 export type SandboxMode = "read-only" | "workspace" | "danger" | "default"
 
+/** Rule-indicator snapshot — `activeCount/totalCount` of `AGENTS.md` /
+ *  `CLAUDE.md` / `.quanta/rules/*` / `.cursor/rules/*` files discovered
+ *  for the session. Composer suppresses the pill when both are 0. */
+export interface RulesPillState {
+  activeCount: number
+  totalCount: number
+}
+
 /** Active state the pill composer paints. All fields optional so partial
  *  updates (e.g. only `mode` changed) don't need a re-spread of the others. */
 export interface StatusPillsState {
@@ -59,6 +67,7 @@ export interface StatusPillsState {
   effort?: EffortLevel
   activeSkills?: { name: string; description?: string }[]
   sandboxMode?: SandboxMode
+  rules?: RulesPillState
 }
 
 export interface StatusPills {
@@ -90,6 +99,7 @@ export const PILL_ENV_VARS = [
   "QUANTA_PILL_MODE",
   "QUANTA_PILL_SKILLS",
   "QUANTA_PILL_SANDBOX",
+  "QUANTA_PILL_RULES",
 ] as const
 
 /** Strip ANSI escapes — exposed for the test only. */
@@ -135,6 +145,14 @@ const formatSkills = (skills: { name: string }[] | undefined): string => {
   return `${DIM}${FG_GREEN}[skills: ${names}]${RESET}`
 }
 
+/** Rules pill. `undefined` or zero total ⇒ "" (no rule files discovered).
+ *  Format: `[rules: <active>/<total> matched]` (dim cyan to match the
+ *  workspace pill colour family — repo-local UI). */
+const formatRules = (rules: RulesPillState | undefined): string => {
+  if (rules === undefined || rules.totalCount <= 0) return ""
+  return `${DIM}${FG_CYAN}[rules: ${rules.activeCount}/${rules.totalCount} matched]${RESET}`
+}
+
 /** Sandbox badge. `default` ⇒ "" (no wire yet — catalog ADR-0012 placeholder). */
 const formatSandbox = (mode: SandboxMode | undefined): string => {
   if (mode === undefined || mode === "default") return ""
@@ -150,6 +168,7 @@ interface PillFlags {
   mode: boolean
   skills: boolean
   sandbox: boolean
+  rules: boolean
 }
 
 const readFlags = (
@@ -163,7 +182,15 @@ const readFlags = (
   //   3. non-TTY ⇒ always OFF (irrespective of env, irrespective of override:
   //      we honour the override only when TTY is positive — never paint ANSI
   //      to a non-TTY sink).
-  if (!tty) return { enabled: false, workspace: false, mode: false, skills: false, sandbox: false }
+  if (!tty)
+    return {
+      enabled: false,
+      workspace: false,
+      mode: false,
+      skills: false,
+      sandbox: false,
+      rules: false,
+    }
   const master = enabledOverride ?? envFlag(env.QUANTA_PILLS, true)
   return {
     enabled: master,
@@ -171,6 +198,7 @@ const readFlags = (
     mode: envFlag(env.QUANTA_PILL_MODE, true),
     skills: envFlag(env.QUANTA_PILL_SKILLS, true),
     sandbox: envFlag(env.QUANTA_PILL_SANDBOX, true),
+    rules: envFlag(env.QUANTA_PILL_RULES, true),
   }
 }
 
@@ -198,6 +226,7 @@ const composeLine = (state: StatusPillsState, flags: PillFlags): string => {
     pushIfNotEmpty(center, formatEffort(state.effort))
   }
   if (flags.skills) pushIfNotEmpty(center, formatSkills(state.activeSkills))
+  if (flags.rules) pushIfNotEmpty(center, formatRules(state.rules))
   if (flags.sandbox) pushIfNotEmpty(right, formatSandbox(state.sandboxMode))
 
   // Layout: LEFT [3sp] CENTER [3sp] RIGHT — separators dropped when a side
