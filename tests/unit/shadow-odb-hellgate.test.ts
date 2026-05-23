@@ -22,9 +22,12 @@
 
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  existsSync,
   promises as fs,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -36,6 +39,7 @@ import {
   defaultShadowOdb,
   evictLru,
   SHADOW_LAST_REF,
+  SHADOW_PRE_REWIND_REF_PREFIX,
   ShadowOdbError,
   workspaceHash,
 } from "@/storage"
@@ -329,16 +333,290 @@ describe("concurrency (HELL-11)", () => {
 })
 
 /* ------------------------------------------------------------------ */
-/* HELL-13: rewindToLast is a typed not-implemented trap                */
+/* HELL-20..26: rewindToLast + listSnapshots (ADR-0118)                 */
 /* ------------------------------------------------------------------ */
 
-describe("rewindToLast (HELL-13)", () => {
-  test("HELL-13: rewindToLast throws ShadowOdbError(not-implemented)", async () => {
-    const base = mkTmp("base-rewind")
-    const ws = makeWorkspace("rewind")
+/** Read the shadow store's view of `relPath` at `ref` and return the
+ *  textual contents. Used to assert the pre-rewind ref captured the
+ *  state we expected. */
+const readShadowFile = async (shadowDir: string, ref: string, relPath: string): Promise<string> => {
+  const r = await defaultGitRunner.run(
+    [`--git-dir=${join(shadowDir, ".git")}`, "show", `${ref}:${relPath}`],
+    shadowDir,
+  )
+  expect(r.exitCode).toBe(0)
+  return r.stdout
+}
+
+/** Regex for valid pre-rewind ref names. Colons in the ISO timestamp are
+ *  replaced with `-` (git refuses colons in ref names), so the format is
+ *  `yyyy-mm-ddThh-mm-ssZ`. */
+const PRE_REWIND_REF_RE =
+  /^refs\/quanta\/snapshots\/pre-rewind-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/
+
+describe("rewindToLast — happy paths (HELL-20)", () => {
+  test("HELL-20: tracked file modified after snapshot ⇒ rewind restores content", async () => {
+    const base = mkTmp("base-rewind-20")
+    const ws = makeWorkspace("rw-20")
     const odb = defaultShadowOdb({ baseDir: base })
     await odb.registerHead(ws)
-    await expectShadowError(() => odb.rewindToLast(ws), "not-implemented")
+    // Mutate the tracked file post-snapshot.
+    writeFileSync(join(ws, "seed.txt"), "seed\nMUTATED-AFTER\n", "utf8")
+    await odb.rewindToLast(ws)
+    const restored = readFileSync(join(ws, "seed.txt"), "utf8")
+    expect(restored).toBe("seed\n")
+  })
+
+  test("HELL-20b: tracked file deleted post-snapshot ⇒ rewind re-creates it", async () => {
+    const base = mkTmp("base-rewind-20b")
+    const ws = makeWorkspace("rw-20b")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    // Delete the only tracked file.
+    rmSync(join(ws, "seed.txt"))
+    expect(existsSync(join(ws, "seed.txt"))).toBe(false)
+    await odb.rewindToLast(ws)
+    expect(existsSync(join(ws, "seed.txt"))).toBe(true)
+    expect(readFileSync(join(ws, "seed.txt"), "utf8")).toBe("seed\n")
+  })
+
+  test("HELL-20c: untracked file with default untracked:preserve ⇒ remains after rewind", async () => {
+    const base = mkTmp("base-rewind-20c")
+    const ws = makeWorkspace("rw-20c")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    // Add untracked (from shadow's POV) file AFTER the snapshot.
+    writeFileSync(join(ws, "untracked.txt"), "post-snapshot stray\n", "utf8")
+    await odb.rewindToLast(ws)
+    expect(existsSync(join(ws, "untracked.txt"))).toBe(true)
+    expect(readFileSync(join(ws, "untracked.txt"), "utf8")).toBe("post-snapshot stray\n")
+  })
+
+  test("HELL-20d: untracked file with opts={untracked:'discard'} ⇒ removed after rewind", async () => {
+    const base = mkTmp("base-rewind-20d")
+    const ws = makeWorkspace("rw-20d")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    writeFileSync(join(ws, "untracked.txt"), "should be cleaned\n", "utf8")
+    await odb.rewindToLast(ws, { untracked: "discard" })
+    expect(existsSync(join(ws, "untracked.txt"))).toBe(false)
+    // Tracked seed survives.
+    expect(existsSync(join(ws, "seed.txt"))).toBe(true)
+  })
+})
+
+describe("rewindToLast — guards (HELL-21..23)", () => {
+  test("HELL-21: no anchor (init only) ⇒ uninitialized; worktree unchanged", async () => {
+    const base = mkTmp("base-rewind-21")
+    const ws = makeWorkspace("rw-21")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.init(ws) // init but NEVER registerHead
+    // Pre-call worktree fingerprint.
+    const before = readFileSync(join(ws, "seed.txt"), "utf8")
+    await expectShadowError(() => odb.rewindToLast(ws), "uninitialized")
+    // Worktree must be untouched.
+    expect(readFileSync(join(ws, "seed.txt"), "utf8")).toBe(before)
+    // And no pre-rewind ref should have been created (the safety net
+    // runs AFTER the uninitialized check).
+    const snaps = await odb.listSnapshots(ws)
+    expect(snaps.length).toBe(0)
+  })
+
+  test("HELL-22: MERGE_HEAD exists ⇒ merge-in-progress; worktree + refs unchanged", async () => {
+    const base = mkTmp("base-rewind-22")
+    const ws = makeWorkspace("rw-22")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    // Simulate a half-finished merge in the USER's workspace .git.
+    mkdirSync(join(ws, ".git"), { recursive: true })
+    writeFileSync(join(ws, ".git", "MERGE_HEAD"), "deadbeef\n", "utf8")
+    writeFileSync(join(ws, "seed.txt"), "seed\nPOST\n", "utf8")
+    await expectShadowError(() => odb.rewindToLast(ws), "merge-in-progress")
+    // Worktree untouched.
+    expect(readFileSync(join(ws, "seed.txt"), "utf8")).toBe("seed\nPOST\n")
+    // No pre-rewind ref must have been created — guard fires BEFORE the
+    // safety-net commit.
+    const snaps = await odb.listSnapshots(ws)
+    for (const s of snaps) {
+      expect(s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX)).toBe(false)
+    }
+  })
+
+  test("HELL-22b: MERGE_HEAD + allowDirtyMerge:true ⇒ rewind succeeds", async () => {
+    const base = mkTmp("base-rewind-22b")
+    const ws = makeWorkspace("rw-22b")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    mkdirSync(join(ws, ".git"), { recursive: true })
+    writeFileSync(join(ws, ".git", "MERGE_HEAD"), "deadbeef\n", "utf8")
+    writeFileSync(join(ws, "seed.txt"), "seed\nBYPASS\n", "utf8")
+    await odb.rewindToLast(ws, { allowDirtyMerge: true })
+    expect(readFileSync(join(ws, "seed.txt"), "utf8")).toBe("seed\n")
+  })
+
+  test("HELL-23: symlinked workspaceRoot ⇒ symlink-in-path", async () => {
+    const base = mkTmp("base-rewind-23")
+    const real = makeWorkspace("rw-23-real")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(real)
+    const linkParent = mkTmp("rw-23-linkparent")
+    const linkPath = join(linkParent, "link-to-ws")
+    symlinkSync(real, linkPath)
+    await expectShadowError(() => odb.rewindToLast(linkPath), "symlink-in-path")
+  })
+
+  test("HELL-23b: relative workspaceRoot ⇒ relative-path", async () => {
+    const base = mkTmp("base-rewind-23b")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await expectShadowError(() => odb.rewindToLast("./relative"), "relative-path")
+    await expectShadowError(() => odb.rewindToLast(""), "relative-path")
+  })
+})
+
+describe("rewindToLast — safety net (HELL-24)", () => {
+  test("HELL-24: exactly one pre-rewind ref created, name format matches spec", async () => {
+    const base = mkTmp("base-rewind-24")
+    const ws = makeWorkspace("rw-24")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    // Before the rewind, no pre-rewind refs.
+    const snapsBefore = await odb.listSnapshots(ws)
+    for (const s of snapsBefore) {
+      expect(s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX)).toBe(false)
+    }
+    writeFileSync(join(ws, "seed.txt"), "seed\nABOUT-TO-LOSE\n", "utf8")
+    await odb.rewindToLast(ws)
+    const snapsAfter = await odb.listSnapshots(ws)
+    const preRewinds = snapsAfter.filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
+    expect(preRewinds.length).toBe(1)
+    expect(preRewinds[0]!.ref).toMatch(PRE_REWIND_REF_RE)
+  })
+
+  test("HELL-24b: two rewinds with 1s gap ⇒ two distinct pre-rewind refs", async () => {
+    const base = mkTmp("base-rewind-24b")
+    const ws = makeWorkspace("rw-24b")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    writeFileSync(join(ws, "seed.txt"), "seed\nM1\n", "utf8")
+    await odb.rewindToLast(ws)
+    // Sleep > 1s so the next ISO-second suffix is distinct.
+    await new Promise((r) => setTimeout(r, 1100))
+    writeFileSync(join(ws, "seed.txt"), "seed\nM2\n", "utf8")
+    await odb.rewindToLast(ws)
+    const snaps = await odb.listSnapshots(ws)
+    const preRewinds = snaps.filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
+    expect(preRewinds.length).toBe(2)
+    const refs = new Set(preRewinds.map((s) => s.ref))
+    expect(refs.size).toBe(2) // distinct
+    for (const ref of refs) expect(ref).toMatch(PRE_REWIND_REF_RE)
+  })
+
+  test("HELL-24c: pre-rewind ref captures pre-rewind worktree; SHADOW_LAST_REF captures snapshot", async () => {
+    const base = mkTmp("base-rewind-24c")
+    const ws = makeWorkspace("rw-24c")
+    const odb = defaultShadowOdb({ baseDir: base })
+    // Write known content X, snapshot it.
+    writeFileSync(join(ws, "A.txt"), "X\n", "utf8")
+    await odb.registerHead(ws)
+    // Mutate to Y.
+    writeFileSync(join(ws, "A.txt"), "Y\n", "utf8")
+    const { shadowDir } = await odb.init(ws)
+    await odb.rewindToLast(ws)
+    // (a) worktree A == X (restored).
+    expect(readFileSync(join(ws, "A.txt"), "utf8")).toBe("X\n")
+    // (b) pre-rewind ref's A == Y (captured before destruction).
+    const snaps = await odb.listSnapshots(ws)
+    const pr = snaps.find((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
+    expect(pr).toBeDefined()
+    const captured = await readShadowFile(shadowDir, pr!.ref, "A.txt")
+    expect(captured).toBe("Y\n")
+  })
+})
+
+describe("rewindToLast — concurrent same-ISO-second collision (HELL-25)", () => {
+  test("HELL-25: two rewinds at identical ISO second ⇒ second one throws rewind-failed (no silent overwrite)", async () => {
+    const base = mkTmp("base-rewind-25")
+    const ws = makeWorkspace("rw-25")
+    // Fixed clock: every call returns the SAME instant ⇒ both rewinds
+    // compute the same pre-rewind suffix. The second update-ref must
+    // fail (create-only semantics), not silently overwrite.
+    const fixed = new Date("2026-05-24T03:14:15.000Z")
+    const odb = defaultShadowOdb({ baseDir: base, now: () => fixed })
+    await odb.registerHead(ws)
+    writeFileSync(join(ws, "seed.txt"), "seed\nFIRST\n", "utf8")
+    await odb.rewindToLast(ws)
+    // Second rewind at the same instant must surface as rewind-failed.
+    writeFileSync(join(ws, "seed.txt"), "seed\nSECOND\n", "utf8")
+    await expectShadowError(() => odb.rewindToLast(ws), "rewind-failed")
+    // Only ONE pre-rewind ref exists — the second never overwrote the first.
+    const snaps = await odb.listSnapshots(ws)
+    const preRewinds = snaps.filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
+    expect(preRewinds.length).toBe(1)
+  })
+})
+
+describe("listSnapshots (HELL-26)", () => {
+  test("HELL-26: 0 snapshots (init only, no registerHead) ⇒ empty array", async () => {
+    const base = mkTmp("base-list-26")
+    const ws = makeWorkspace("ls-26")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.init(ws)
+    const snaps = await odb.listSnapshots(ws)
+    expect(snaps).toEqual([])
+  })
+
+  test("HELL-26b: registerHead → 1 entry; rewindToLast → 2 entries newest-first", async () => {
+    const base = mkTmp("base-list-26b")
+    const ws = makeWorkspace("ls-26b")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(ws)
+    const after1 = await odb.listSnapshots(ws)
+    expect(after1.length).toBe(1)
+    expect(after1[0]!.ref).toBe(SHADOW_LAST_REF)
+    expect(after1[0]!.sha).toMatch(/^[0-9a-f]{40}$/)
+    // Wait 1s so the pre-rewind commit's committer time is strictly
+    // greater than the registerHead commit's — newest-first ordering
+    // becomes provably deterministic.
+    await new Promise((r) => setTimeout(r, 1100))
+    writeFileSync(join(ws, "seed.txt"), "seed\nMUT\n", "utf8")
+    await odb.rewindToLast(ws)
+    const after2 = await odb.listSnapshots(ws)
+    expect(after2.length).toBe(2)
+    // Newest first: pre-rewind ref's committerdate >= SHADOW_LAST_REF's.
+    expect(after2[0]!.timestampSec).toBeGreaterThanOrEqual(after2[1]!.timestampSec)
+    const refs = after2.map((s) => s.ref).sort()
+    expect(refs).toContain(SHADOW_LAST_REF)
+    const pre = after2.find((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
+    expect(pre).toBeDefined()
+  })
+
+  test("HELL-26c: corrupted for-each-ref output ⇒ git-failed with bad line in message", async () => {
+    const base = mkTmp("base-list-26c")
+    const ws = makeWorkspace("ls-26c")
+    // Fake runner: pass-through to real git EXCEPT for for-each-ref,
+    // which returns one well-formed line plus one garbage line.
+    const passthrough = defaultGitRunner
+    const corrupting: GitRunner = {
+      async run(args, cwd, signal) {
+        // Detect the for-each-ref call by scanning argv (it's preceded by
+        // the --git-dir / --work-tree flags so positional index isn't 0).
+        if (args.some((a) => a === "for-each-ref")) {
+          return {
+            stdout:
+              "refs/quanta/snapshots/last-registered|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|1700000000\nGARBAGE-NO-PIPES\n",
+            stderr: "",
+            exitCode: 0,
+          }
+        }
+        return signal === undefined
+          ? await passthrough.run(args, cwd)
+          : await passthrough.run(args, cwd, signal)
+      },
+    }
+    const odb = defaultShadowOdb({ baseDir: base, runner: corrupting })
+    await odb.init(ws)
+    const err = await expectShadowError(() => odb.listSnapshots(ws), "git-failed")
+    expect(err.message).toContain("GARBAGE-NO-PIPES")
   })
 })
 
@@ -435,5 +713,67 @@ describe("isolation across workspaces", () => {
     const b = await odb.init(ws2)
     expect(a.shadowDir).not.toBe(b.shadowDir)
     expect(a.workspaceHash).not.toBe(b.workspaceHash)
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/* HELL-16..19: diffWorkspaceSinceLast (ADR-0116 anchor seam)          */
+/* ------------------------------------------------------------------ */
+
+describe("diffWorkspaceSinceLast (HELL-16, HELL-17, HELL-18, HELL-19)", () => {
+  test("HELL-16: anchor on A, diff against sibling workspace B with an edit", async () => {
+    const base = mkTmp("base-diff-ws-16")
+    const wsA = makeWorkspace("ws-a-16")
+    // Sibling workspace B with the same seed.txt content + a mutation. The
+    // anchor was taken on A; the diff is computed against B's working tree.
+    const wsB = makeWorkspace("ws-b-16")
+    writeFileSync(join(wsB, "seed.txt"), "seed\nB-EDIT\n", "utf8")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(wsA)
+    const diff = await odb.diffWorkspaceSinceLast(wsA, wsB)
+    expect(diff).toContain("seed.txt")
+    expect(diff).toContain("B-EDIT")
+    expect(diff).toContain("--- a/seed.txt")
+    expect(diff).toContain("+++ b/seed.txt")
+  })
+
+  test("HELL-16b: zero divergence — diff against the anchor workspace itself ⇒ empty", async () => {
+    const base = mkTmp("base-diff-ws-16b")
+    const wsA = makeWorkspace("ws-a-16b")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(wsA)
+    const diff = await odb.diffWorkspaceSinceLast(wsA, wsA)
+    expect(diff).toBe("")
+  })
+
+  test("HELL-17: diffWorkspaceSinceLast without prior registerHead ⇒ uninitialized", async () => {
+    const base = mkTmp("base-diff-ws-17")
+    const wsA = makeWorkspace("ws-a-17")
+    const wsB = makeWorkspace("ws-b-17")
+    const odb = defaultShadowOdb({ baseDir: base })
+    // init only — never registerHead.
+    await odb.init(wsA)
+    await expectShadowError(() => odb.diffWorkspaceSinceLast(wsA, wsB), "uninitialized")
+  })
+
+  test("HELL-18: leaf-symlink rejection on comparisonWorkspace", async () => {
+    const base = mkTmp("base-diff-ws-18")
+    const wsA = makeWorkspace("ws-a-18")
+    const real = makeWorkspace("real-target-18")
+    const linkParent = mkTmp("link-parent-18")
+    const linkPath = join(linkParent, "link-to-ws")
+    symlinkSync(real, linkPath)
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(wsA)
+    await expectShadowError(() => odb.diffWorkspaceSinceLast(wsA, linkPath), "symlink-in-path")
+  })
+
+  test("HELL-19: relative comparisonWorkspace rejected", async () => {
+    const base = mkTmp("base-diff-ws-19")
+    const wsA = makeWorkspace("ws-a-19")
+    const odb = defaultShadowOdb({ baseDir: base })
+    await odb.registerHead(wsA)
+    await expectShadowError(() => odb.diffWorkspaceSinceLast(wsA, "./relative-ws"), "relative-path")
+    await expectShadowError(() => odb.diffWorkspaceSinceLast(wsA, ""), "relative-path")
   })
 })

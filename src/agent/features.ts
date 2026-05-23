@@ -59,6 +59,7 @@ import {
   buildClassifierBlock,
   buildPlanExitBlock,
   buildPlanMutationBlock,
+  buildShadowBlock,
   buildSkillBlock,
   buildSubagentBlock,
   buildUserInputBlock,
@@ -141,6 +142,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // --- Branch search block (ADR-0083) -------------------------------------
   const branchTool = buildBranchSearchBlock(config)
   if (branchTool !== undefined) extraTools.push(branchTool)
+
+  // ADR-0119 — shadow store tools (default-OFF: empty array when shadowOdb absent)
+  extraTools.push(...buildShadowBlock(config))
 
   // --- Skill block (ADR-0011) ---------------------------------------------
   const skill = await buildSkillBlock(config)

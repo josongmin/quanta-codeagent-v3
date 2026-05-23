@@ -11,8 +11,9 @@
 import { z } from "zod"
 import type { LLMPort, ModelCandidate } from "@/llm"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import type { BranchSearchAnchor } from "./anchor"
 import type { RunCandidate } from "./propose"
-import { argmaxSelector, makeScorer } from "./score"
+import { makeScorer, minimalChangeSelector } from "./score"
 import { runBranchSearch } from "./search"
 import { buildSeeds } from "./seed"
 import type {
@@ -28,6 +29,7 @@ import {
   type DiagnosePort,
   lintVerifier,
   lspDiagVerifier,
+  patchSizeVerifier,
   testVerifier,
   tscVerifier,
 } from "./verify"
@@ -50,6 +52,12 @@ export interface BranchSearchToolDeps {
   readonly testPattern?: string
   /** OTel + sidecar trace sink. */
   readonly onTrace?: (e: BranchTraceEvent) => void
+  /** ADR-0116 anchor seam — when wired, the orchestrator captures a Shadow
+   *  ODB snapshot of the parent workspace BEFORE candidates fork, then
+   *  measures per-candidate delta from that snapshot. Absent ⇒ no anchor
+   *  registration, no measurement, byte-identical legacy behaviour
+   *  (`delta` OMITTED on every emitted `BranchCandidate`). */
+  readonly anchor?: BranchSearchAnchor
 }
 
 const inputSchema = z.object({
@@ -61,6 +69,11 @@ const inputSchema = z.object({
     .max(8)
     .optional()
     .describe("Candidate count (default: config.defaultN)"),
+  // NOTE: `patch_size` is intentionally absent from this enum — it is an
+  // internal / auto-wired kind appended in `execute` when an anchor is
+  // present. Keeping it off the LLM-visible surface preserves a tight
+  // input contract (the model picks correctness verifiers; minimal-change
+  // bias is the host's opt-in via ADR-0116 / ADR-0117).
   verifier_kinds: z
     .array(z.enum(["tsc", "test", "lint", "lsp_diag"]))
     .optional()
@@ -68,26 +81,38 @@ const inputSchema = z.object({
 })
 type Input = z.infer<typeof inputSchema>
 
+/** Build a single verifier for one kind, given deps. Returns `undefined`
+ *  when the kind is unavailable (e.g. `lsp_diag` without a `diagnose` port —
+ *  graceful drop, not an error). Extracted so `buildVerifier` stays a
+ *  thin loop and biome cognitive-complexity doesn't trip on the switch. */
+const verifierForKind = (
+  k: Exclude<VerifierKind, "llm_judge">,
+  deps: BranchSearchToolDeps,
+): Verifier | undefined => {
+  const timeoutMs = deps.config.timeoutPerBranchMs
+  if (k === "tsc") return tscVerifier({ timeoutMs })
+  if (k === "test")
+    return testVerifier({ timeoutMs, ...(deps.testPattern ? { pattern: deps.testPattern } : {}) })
+  if (k === "lint") return lintVerifier({ timeoutMs })
+  if (k === "lsp_diag")
+    return deps.diagnose !== undefined ? lspDiagVerifier(deps.diagnose) : undefined
+  if (k === "patch_size") return patchSizeVerifier()
+  return undefined
+}
+
 /** Map requested verifier kinds → concrete verifier pipeline. `lsp_diag` is
  *  silently dropped when no `diagnose` port is wired (graceful — the model
- *  shouldn't fail because the host didn't supply LSP). */
+ *  shouldn't fail because the host didn't supply LSP). `patch_size` is
+ *  allowed here as an INTERNAL kind (auto-appended in `execute` when an
+ *  anchor is wired); `llm_judge` stays excluded (separate seam). */
 const buildVerifier = (
-  kinds: ReadonlyArray<Exclude<VerifierKind, "patch_size" | "llm_judge">>,
+  kinds: ReadonlyArray<Exclude<VerifierKind, "llm_judge">>,
   deps: BranchSearchToolDeps,
 ): Verifier => {
   const vs: Verifier[] = []
   for (const k of kinds) {
-    if (k === "tsc") vs.push(tscVerifier({ timeoutMs: deps.config.timeoutPerBranchMs }))
-    else if (k === "test")
-      vs.push(
-        testVerifier({
-          timeoutMs: deps.config.timeoutPerBranchMs,
-          ...(deps.testPattern ? { pattern: deps.testPattern } : {}),
-        }),
-      )
-    else if (k === "lint") vs.push(lintVerifier({ timeoutMs: deps.config.timeoutPerBranchMs }))
-    else if (k === "lsp_diag" && deps.diagnose !== undefined)
-      vs.push(lspDiagVerifier(deps.diagnose))
+    const v = verifierForKind(k, deps)
+    if (v !== undefined) vs.push(v)
   }
   // Always at least tsc — an empty pipeline would score every candidate 0.
   if (vs.length === 0) vs.push(tscVerifier({ timeoutMs: deps.config.timeoutPerBranchMs }))
@@ -120,10 +145,21 @@ export const branchSearchTool = (deps: BranchSearchToolDeps): Tool<Input> => ({
     const n = input.n ?? deps.config.defaultN
     yield { type: "progress", message: `branch_search: spawning ${n} candidates` }
 
-    const kinds = (input.verifier_kinds ?? deps.config.defaultVerifierKinds).filter(
-      (k): k is Exclude<VerifierKind, "patch_size" | "llm_judge"> =>
-        k === "tsc" || k === "test" || k === "lint" || k === "lsp_diag",
+    const requested = (input.verifier_kinds ?? deps.config.defaultVerifierKinds).filter(
+      (k): k is Exclude<VerifierKind, "llm_judge"> =>
+        k === "tsc" || k === "test" || k === "lint" || k === "lsp_diag" || k === "patch_size",
     )
+    // Auto-append `patch_size` when an anchor is wired so the per-candidate
+    // delta produced by `shadowOdbAnchor` actually FLOWS into selection.
+    // `patch_size` is intentionally absent from the input enum (kept off the
+    // LLM surface — the model doesn't request it; it appears automatically
+    // when the host opts into the anchor). Dedup preserves the original
+    // ordering when callers already requested it explicitly.
+    const kinds: Array<Exclude<VerifierKind, "llm_judge">> = [...requested]
+    if (deps.anchor !== undefined && !kinds.includes("patch_size")) kinds.push("patch_size")
+    // Default selector wraps argmax with minimal-change tiebreak: when two or
+    // more candidates tie on `score.total`, prefer the smallest `delta`
+    // (added+removed). Pure tiebreak — single-winner cases are unchanged.
     const result = await runBranchSearch({
       N: n,
       seeds: buildSeeds(n, deps.modelCandidates ?? []),
@@ -132,10 +168,11 @@ export const branchSearchTool = (deps: BranchSearchToolDeps): Tool<Input> => ({
       timeoutPerBranchMs: deps.config.timeoutPerBranchMs,
       verifier: buildVerifier(kinds, deps),
       scorer: makeScorer(deps.config.weights),
-      selector: argmaxSelector,
+      selector: minimalChangeSelector(),
       isolator: deps.buildIsolator(),
       runCandidate: deps.runCandidate,
       ...(deps.onTrace ? { onTrace: deps.onTrace } : {}),
+      ...(deps.anchor ? { anchor: deps.anchor } : {}),
     })
 
     yield {

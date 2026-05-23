@@ -55,13 +55,50 @@ export interface ShadowOdb {
    *  Throws if `init`/`registerHead` was never called for this workspace. */
   diffSinceLast(workspaceRoot: string): Promise<string>
 
-  /** Restore the working tree to the last registered snapshot.
+  /** Unified diff between `quanta/snapshots/last-registered` (anchored on
+   *  `anchorWorkspace`) and the working tree at `comparisonWorkspace` —
+   *  i.e. compare a CANDIDATE workspace against the snapshot we captured
+   *  on a DIFFERENT workspace. Empty string when there is no divergence.
+   *  Throws `ShadowOdbError("uninitialized")` when `registerHead` was
+   *  never called for `anchorWorkspace`.
    *
-   *  DESTRUCTIVE — overwrites unsaved user work. Intentionally
-   *  unimplemented in Phase 1: we want to ship the *capture* side first
-   *  and let the destructive restore land in a follow-up ADR with its
-   *  own permission/HITL gate (HELL-13). */
-  rewindToLast(workspaceRoot: string): Promise<void>
+   *  Both paths obey the same path-safety invariants as `init` /
+   *  `registerHead` (absolute + non-symlink-leaf). Implementation
+   *  re-points `--work-tree=<comparisonWorkspace>` at the candidate
+   *  while keeping `--git-dir=<shadowDir>/.git` on the anchor's shadow
+   *  store. Used by ADR-0116 branch-search delta measurement. */
+  diffWorkspaceSinceLast(anchorWorkspace: string, comparisonWorkspace: string): Promise<string>
+
+  /** Restore tracked files in `workspaceRoot` to the state captured by the
+   *  last `registerHead` call.
+   *
+   *  SAFETY NET: BEFORE the destructive checkout, this method captures the
+   *  CURRENT worktree state to a brand-new ref under
+   *  `SHADOW_PRE_REWIND_REF_PREFIX` with a UTC-ISO-second timestamp suffix.
+   *  Recovery is then: `git --git-dir=<shadow>/.git checkout-index -a -f`
+   *  against that ref. The pre-rewind ref is NEVER overwritten — successive
+   *  rewinds add new refs.
+   *
+   *  Semantics:
+   *    - Tracked file MODIFIED since snapshot → restored to snapshot content.
+   *    - File DELETED from worktree since snapshot → re-created.
+   *    - File ADDED to worktree since snapshot (= untracked from shadow's
+   *      POV) → policy per `opts.untracked` (preserve default).
+   *    - `<workspace>/.git/MERGE_HEAD` exists → throws "merge-in-progress"
+   *      unless `opts.allowDirtyMerge === true`.
+   *    - SHADOW_LAST_REF missing → throws "uninitialized".
+   *    - Workspace must be absolute + non-symlink-leaf (same as init/
+   *      registerHead).
+   *
+   *  Concurrent calls against the same workspace are serialized by the same
+   *  per-workspace lock that protects `registerHead` (the lock is shared so
+   *  registerHead can't race with rewindToLast). */
+  rewindToLast(workspaceRoot: string, opts?: RewindOptions): Promise<void>
+
+  /** Enumerate ALL refs under `refs/quanta/snapshots/` for this workspace's
+   *  shadow store. Returns newest-first by committer date. Empty array when
+   *  no refs exist (init never called, or store deleted). */
+  listSnapshots(workspaceRoot: string): Promise<readonly SnapshotMetadata[]>
 
   /** Best-effort LRU eviction across all per-workspace shadow dirs.
    *
@@ -109,11 +146,46 @@ export type ShadowOdbErrorCode =
   | "invalid-ref"
   | "not-implemented"
   | "nested-shadow"
+  | "merge-in-progress"
+  | "rewind-failed"
 
 /** Canonical ref name used to advance the snapshot pointer. Hard-coded
  *  so tests + audits can grep for it and so a malicious caller cannot
  *  pass an arbitrary ref name through the public API (HELL-14). */
 export const SHADOW_LAST_REF = "refs/quanta/snapshots/last-registered" as const
+
+/** Canonical prefix for safety-net refs created right before `rewindToLast`
+ *  performs its destructive checkout. Each rewind appends a UTC-ISO-second
+ *  timestamp suffix (with `:` replaced by `-` because git refuses colons
+ *  in ref names) so successive rewinds NEVER overwrite each other's
+ *  recovery point — `git for-each-ref` can list them all. Example:
+ *  `refs/quanta/snapshots/pre-rewind-2026-05-24T03-14-15Z`.
+ *  Hard-coded for the same reason `SHADOW_LAST_REF` is hard-coded
+ *  (path traversal / ref injection defense). */
+export const SHADOW_PRE_REWIND_REF_PREFIX = "refs/quanta/snapshots/pre-rewind-" as const
+
+/** Options for `rewindToLast`. All fields optional; absent uses safest default. */
+export interface RewindOptions {
+  /** Treatment of files that exist in the worktree but NOT in the snapshot.
+   *  - `"preserve"` (default): leave untracked files alone — safest.
+   *  - `"discard"`: `git clean -fd` after the checkout to fully match snapshot. */
+  readonly untracked?: "preserve" | "discard"
+  /** When `true`, proceed even if `<workspace>/.git/MERGE_HEAD` exists.
+   *  Default `false` — a half-finished merge is almost always something the
+   *  user wants to resolve, not blow away. */
+  readonly allowDirtyMerge?: boolean
+}
+
+/** One snapshot ref's metadata. Sorted newest-first by `listSnapshots`. */
+export interface SnapshotMetadata {
+  /** Full ref name, e.g. `refs/quanta/snapshots/last-registered` or
+   *  `refs/quanta/snapshots/pre-rewind-2026-05-24T03-14-15Z`. */
+  readonly ref: string
+  /** 40-hex commit sha the ref points at. */
+  readonly sha: string
+  /** Unix epoch seconds — git's committerdate:unix for the ref's target. */
+  readonly timestampSec: number
+}
 
 /** Default cap for `cleanup`. 1 GiB — large enough for hundreds of
  *  workspace snapshots, small enough that an idle laptop reclaims

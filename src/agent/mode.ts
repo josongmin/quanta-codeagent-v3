@@ -150,6 +150,10 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // absorption, ADR-0111). The reviewer sub-agent itself is read-only by the
   // tool's REVIEWER_TOOL_FILTER; safe in plan mode.
   git_review_diff: null,
+  // Read-only moved-code classifier (ADR-0109) + conflict inspector (ADR-0111).
+  // Pure analysis over a diff / conflict-marked tree; both safe in plan mode.
+  git_moved_code: null,
+  git_conflict_inspect: null,
   // Mutating built-ins
   write: "write_filesystem",
   edit: "write_filesystem",
@@ -159,14 +163,13 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   apply_patch: "write_filesystem",
   bash: "bash_mutating",
   update_working_state: "working_state_write",
-  // Tier-S6 / ADR-0097 — Codex `request_user_input` 1급 도구 흡수. Read-only
-  // (FS/shell touch 없음 — 호스트 port를 통한 운영자 입력만). plan-mode에서도
-  // 허용: 모델이 결정을 추론할 수 없을 때 운영자에게 질문하는 surface. 도구는
-  // 자체적으로 HITL("none" tier via `isReadOnly: true` → `inferToolTier`)이므로
-  // gate는 그대로 통과한다. dispatch-seam guard의 read-only fast-path가
-  // 이미 통과시키지만, MUTATING_TOOL_TABLE의 명시적 엔트리는 belt-and-
-  // suspenders: 어떤 새 호출자가 `assertNotMutatingInPlanMode`를 직접 부르더라도
-  // `UnknownToolError`로 거절되지 않도록 한다.
+  // ADR-0097 — `request_user_input` 는 port-gated 조건부 등록 (features.ts:
+  // `userInputPort` 가 wired 될 때만 registry 에 inject). 그러나 표 엔트리는
+  // PERMANENT: 어떤 호스트가 직접 도구를 등록해도 `isMutatingTool` 이
+  // `UnknownToolError` 를 던지면 plan-mode dispatch 가 깨짐 (도구 자체는
+  // 호스트 port 를 통한 운영자 입력만 — FS/shell touch 없으니 read-only).
+  // Cross-check (mode-mutating-table.test.ts) 는 `requestUserInputTool()` 를
+  // `allTools` 에 명시적으로 포함시켜 drift 를 검출함.
   request_user_input: null,
   // Mutating git built-ins (ADR-0053, Claude Desktop 1.7196.3
   // `commitWipForBranchSwitch` absorption). git_commit creates a commit;

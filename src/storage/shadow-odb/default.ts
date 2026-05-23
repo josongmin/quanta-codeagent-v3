@@ -33,11 +33,14 @@ import { defaultGitRunner, type GitRunner, type GitRunResult } from "@/tool/git"
 import { evictLru } from "./cleanup"
 import { workspaceHash } from "./hash"
 import {
+  type RewindOptions,
   SHADOW_LAST_REF,
+  SHADOW_PRE_REWIND_REF_PREFIX,
   type ShadowInitResult,
   type ShadowOdb,
   type ShadowOdbConfig,
   ShadowOdbError,
+  type SnapshotMetadata,
 } from "./types"
 
 /* ------------------------------------------------------------------ */
@@ -430,14 +433,226 @@ export const defaultShadowOdb = (cfg: ShadowOdbConfig = {}): ShadowOdb => {
       return r.stdout
     },
 
-    async rewindToLast(_workspaceRoot: string): Promise<void> {
-      // Intentionally unimplemented — see ADR-0108. Surfacing as
-      // `not-implemented` (not generic Error) so callers can branch
-      // cleanly when the follow-up ADR ships.
-      throw new ShadowOdbError(
-        "not-implemented",
-        "rewindToLast is not yet implemented — destructive op gated on a follow-up ADR",
-      )
+    async diffWorkspaceSinceLast(
+      anchorWorkspace: string,
+      comparisonWorkspace: string,
+    ): Promise<string> {
+      // Validate BOTH paths up front. Identical symlink-leaf / relative-
+      // path rejection as `diffSinceLast` — we never want a malicious
+      // comparison path to slip past path safety just because the anchor
+      // already cleared it (HELL-18/19).
+      const anchorCanonical = await validateWorkspaceRoot(anchorWorkspace)
+      const comparisonCanonical = await validateWorkspaceRoot(comparisonWorkspace)
+      const st = resolveState(anchorCanonical)
+      // The shadow store lives under the ANCHOR workspace's hash. The
+      // ref must exist on THAT store — comparison workspace contributes
+      // only the working tree pointer (`--work-tree=...`).
+      const refCheck = await runShadow(runner, st.gitDir, comparisonCanonical, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        SHADOW_LAST_REF,
+      ])
+      if (refCheck.exitCode !== 0) {
+        throw new ShadowOdbError(
+          "uninitialized",
+          `shadow ODB has no ${SHADOW_LAST_REF} for anchor ${anchorCanonical} — call registerHead first`,
+        )
+      }
+      // git diff exit codes: 0 = no diff, 1 = differences found. Both are
+      // success for our purposes; anything else (e.g. 128) is fatal.
+      const r = await runShadow(runner, st.gitDir, comparisonCanonical, [
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        SHADOW_LAST_REF,
+      ])
+      if (r.exitCode !== 0 && r.exitCode !== 1) {
+        throw new ShadowOdbError(
+          "git-failed",
+          `shadow git diff (workspace) exited ${r.exitCode}: ${r.stderr.trim()}`,
+        )
+      }
+      return r.stdout
+    },
+
+    async rewindToLast(workspaceRoot: string, opts?: RewindOptions): Promise<void> {
+      // Order is deliberate (ADR-0118):
+      // 1. path-safety (same as init/registerHead)
+      // 2. ensure shadow store init
+      // 3. SHADOW_LAST_REF must exist (else nothing to rewind to)
+      // 4. MERGE_HEAD guard (refuse on half-finished merges)
+      // 5. SAFETY NET: snapshot current worktree to a NEW pre-rewind ref
+      //    BEFORE we touch the worktree. update-ref uses the empty-oid
+      //    sentinel ("create-only") so successive rewinds within the same
+      //    ISO-second second fail with a typed error instead of silently
+      //    overwriting the recovery point.
+      // 6. read-tree --reset (NO -u) updates the INDEX to SHADOW_LAST_REF
+      //    without touching the worktree — needed because the safety-net
+      //    `git add -A` just put post-snapshot untracked files into the
+      //    index, and `-u` would delete them from the worktree to match
+      //    the new tree (violating `untracked:preserve`).
+      // 7. checkout-index -a -f writes every tracked-in-snapshot file
+      //    back to the worktree (restoring modifications + re-creating
+      //    deletions). Files NOT in the new index (post-snapshot adds)
+      //    are untouched — that's how `preserve` is honoured.
+      // 8. opts.untracked === "discard" → git clean -fd to remove
+      //    files that exist in the worktree but not in the snapshot.
+      // 9. SHADOW_LAST_REF is INTENTIONALLY NOT advanced. After rewind
+      //    the worktree state == old SHADOW_LAST_REF content, so the ref
+      //    still correctly describes the worktree.
+      const canonical = await validateWorkspaceRoot(workspaceRoot)
+      const st = resolveState(canonical)
+      await serialize(st, async () => {
+        await initInner(st, canonical)
+        // (3) SHADOW_LAST_REF must exist.
+        const refCheck = await runShadow(runner, st.gitDir, canonical, [
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          SHADOW_LAST_REF,
+        ])
+        if (refCheck.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "uninitialized",
+            `shadow ODB has no ${SHADOW_LAST_REF} for ${canonical} — call registerHead first`,
+          )
+        }
+        // (4) MERGE_HEAD guard.
+        if (opts?.allowDirtyMerge !== true) {
+          const mergeHead = join(canonical, ".git", "MERGE_HEAD")
+          let mergeInProgress = false
+          try {
+            await fs.access(mergeHead)
+            mergeInProgress = true
+          } catch {
+            // ENOENT — no merge in progress, fall through.
+          }
+          if (mergeInProgress) {
+            throw new ShadowOdbError(
+              "merge-in-progress",
+              `refusing rewind: ${mergeHead} exists (pass allowDirtyMerge:true to override)`,
+            )
+          }
+        }
+        // (5) SAFETY NET — capture current worktree state to a fresh ref.
+        //     ISO-second timestamp with `:` replaced by `-` because git
+        //     refuses colons in ref names (`refusing to update ref with
+        //     bad name`). The suffix is still strictly monotonic in time
+        //     (yyyy-mm-ddThh-mm-ssZ) and remains 1-second-resolution.
+        const isoTs = now().toISOString().replace(/\..*$/, "Z").replace(/:/g, "-")
+        const preRewindRef = `${SHADOW_PRE_REWIND_REF_PREFIX}${isoTs}`
+        // Stage current worktree to the shadow index.
+        await runShadowOrThrow(runner, st.gitDir, canonical, ["add", "-A"])
+        // Commit (allow-empty so a "no change since last register" rewind
+        // still produces a recovery SHA distinct from SHADOW_LAST_REF).
+        await runShadowOrThrow(runner, st.gitDir, canonical, [
+          "commit",
+          "--allow-empty",
+          "--no-gpg-sign",
+          "-m",
+          `pre-rewind ${isoTs}`,
+        ])
+        const headRef = await runShadowOrThrow(runner, st.gitDir, canonical, ["rev-parse", "HEAD"])
+        const preSha = headRef.stdout.trim()
+        if (!/^[0-9a-f]{40}$/.test(preSha)) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `unexpected HEAD SHA from pre-rewind commit: ${preSha}`,
+          )
+        }
+        // Create-only ref update: third arg "0000…" (40 zeros = empty-oid
+        // sentinel) tells git to fail if the ref ALREADY exists. This is
+        // the same-ISO-second collision policy (HELL-25): two concurrent
+        // rewinds that compute the same suffix → the second one fails
+        // with a typed `rewind-failed` rather than silently clobbering
+        // the first one's safety net.
+        const empty = "0".repeat(40)
+        const updRef = await runShadow(runner, st.gitDir, canonical, [
+          "update-ref",
+          preRewindRef,
+          preSha,
+          empty,
+        ])
+        if (updRef.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `pre-rewind ref ${preRewindRef} create failed: ${updRef.stderr.trim() || updRef.stdout.trim()}`,
+          )
+        }
+        // (6) Reset INDEX to SHADOW_LAST_REF (without `-u`: see header).
+        const rt = await runShadow(runner, st.gitDir, canonical, [
+          "read-tree",
+          "--reset",
+          SHADOW_LAST_REF,
+        ])
+        if (rt.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `read-tree --reset ${SHADOW_LAST_REF} failed: ${rt.stderr.trim()}`,
+          )
+        }
+        // (7) checkout-index writes every tracked-in-snapshot file to
+        //     the worktree (overwriting mods + recreating deletions).
+        //     Files NOT in the new index (= post-snapshot adds) are
+        //     untouched ⇒ `untracked:preserve` default holds.
+        const ci = await runShadow(runner, st.gitDir, canonical, ["checkout-index", "-a", "-f"])
+        if (ci.exitCode !== 0) {
+          throw new ShadowOdbError(
+            "rewind-failed",
+            `checkout-index -a -f failed: ${ci.stderr.trim()}`,
+          )
+        }
+        // (8) Optionally discard untracked files.
+        if (opts?.untracked === "discard") {
+          const cl = await runShadow(runner, st.gitDir, canonical, ["clean", "-fd"])
+          if (cl.exitCode !== 0) {
+            throw new ShadowOdbError("rewind-failed", `clean -fd failed: ${cl.stderr.trim()}`)
+          }
+        }
+        // (9) Do NOT advance SHADOW_LAST_REF — see comment at top.
+      })
+    },
+
+    async listSnapshots(workspaceRoot: string): Promise<readonly SnapshotMetadata[]> {
+      const canonical = await validateWorkspaceRoot(workspaceRoot)
+      const st = resolveState(canonical)
+      // Ensure shadow init exists so for-each-ref doesn't ENOENT on the
+      // git dir. ensureInit is idempotent and serialized — same chain as
+      // registerHead so a concurrent rewind can't yank the store mid-scan.
+      await serialize(st, () => initInner(st, canonical))
+      const args = [
+        "for-each-ref",
+        "--format=%(refname)|%(objectname)|%(committerdate:unix)",
+        "refs/quanta/snapshots/",
+        "--sort=-committerdate",
+      ]
+      const r = await runShadow(runner, st.gitDir, canonical, args)
+      if (r.exitCode !== 0) {
+        throw new ShadowOdbError(
+          "git-failed",
+          `for-each-ref exited ${r.exitCode}: ${r.stderr.trim()}`,
+        )
+      }
+      const out: SnapshotMetadata[] = []
+      for (const raw of r.stdout.split("\n")) {
+        const line = raw.trim()
+        if (line.length === 0) continue
+        const parts = line.split("|")
+        if (parts.length !== 3) {
+          throw new ShadowOdbError("git-failed", `unparseable for-each-ref line: ${raw}`)
+        }
+        const [ref, sha, tsStr] = parts as [string, string, string]
+        if (ref.length === 0 || !/^[0-9a-f]{40}$/.test(sha)) {
+          throw new ShadowOdbError("git-failed", `unparseable for-each-ref line: ${raw}`)
+        }
+        const ts = Number(tsStr)
+        if (!Number.isFinite(ts)) {
+          throw new ShadowOdbError("git-failed", `unparseable for-each-ref line: ${raw}`)
+        }
+        out.push({ ref, sha, timestampSec: ts })
+      }
+      return out
     },
 
     async cleanup(maxBytes: number): Promise<number> {

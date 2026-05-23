@@ -125,6 +125,28 @@ const tickToolDispatch = (config: AgentConfig, name: string): void => {
   if (name === "test_runner") config.budgetMeter?.tick("test_run")
 }
 
+/** Back-patch the {@link ToolHistoryEntry} pushed at `onToolStart` with the
+ *  dispatched outcome (`ok` + redacted `output`) so the verify-guard mustPass
+ *  branch can read them. Matches by call id; with `toolHistory` absent (the
+ *  default-OFF path) this is a one-line no-op. Pure; extracted from the
+ *  dispatch callback so its cognitive complexity stays under biome's cap. */
+const patchHistoryOutcome = (
+  toolHistory: { id?: string; ok?: boolean; output?: string }[] | undefined,
+  callId: string,
+  outcome: { ok: boolean; preview: string },
+): void => {
+  if (!toolHistory) return
+  for (let i = toolHistory.length - 1; i >= 0; i--) {
+    const slot = toolHistory[i]
+    if (slot !== undefined && slot.id === callId) {
+      slot.ok = outcome.ok
+      // ADR-0078: outcome.preview is already redaction-applied.
+      slot.output = outcome.preview
+      return
+    }
+  }
+}
+
 /** Recoverable deny when a tool is outside the active skill's allowlist. */
 const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut => ({
   block: {
@@ -199,6 +221,12 @@ export const createStreamDispatcher = (
       // no `@/tool` import is needed here.
       collector?.recordToolCall(call.name, out)
       collector?.recordRead(call.name, out.preview)
+      // mustPass verify-guard outcome-gate (ADR-0011 extension): back-patch
+      // the ToolHistoryEntry pushed at `onToolStart` so the gate can read
+      // ok/output. Default-OFF byte-identical: `toolHistory` is undefined
+      // when no guard is wired and the helper short-circuits at its first
+      // line. See {@link patchHistoryOutcome}.
+      patchHistoryOutcome(toolHistory, call.id, out)
       // RFC-0002 §5.2 enriched tool_result. CONTRACT with Group E: the
       // dispatch result exposes these EXACT optional field names
       // (`durationMs:number`, `stderrTail:string`, `exitCode:number`,
@@ -255,8 +283,14 @@ export const createStreamDispatcher = (
         "command" in call.input
           ? (call.input as { command: unknown }).command
           : undefined
+      // ADR-0011 mustPass extension: carry `id` so the dispatch callback can
+      // back-patch `ok` + `output` onto THIS exact slot after the async
+      // dispatch resolves (verify-guard outcome-gate reads them). `arg` stays
+      // bash-only (exactOptionalPropertyTypes — omitted, never undefined).
       toolHistory.push(
-        typeof command === "string" ? { name: call.name, arg: command } : { name: call.name },
+        typeof command === "string"
+          ? { name: call.name, arg: command, id: call.id }
+          : { name: call.name, id: call.id },
       )
     }
   }

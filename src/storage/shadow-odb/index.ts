@@ -8,13 +8,16 @@ export { evictLru } from "./cleanup"
 export { defaultShadowOdb } from "./default"
 export { workspaceHash } from "./hash"
 export type {
+  RewindOptions,
   ShadowInitResult,
   ShadowOdb,
   ShadowOdbConfig,
   ShadowOdbErrorCode,
+  SnapshotMetadata,
 } from "./types"
 export {
   DEFAULT_SHADOW_ODB_MAX_BYTES,
   SHADOW_LAST_REF,
+  SHADOW_PRE_REWIND_REF_PREFIX,
   ShadowOdbError,
 } from "./types"

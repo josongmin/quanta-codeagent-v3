@@ -96,6 +96,16 @@ export { planErrorMessage, planFailure } from "./plan/error-mapping"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
+// Shadow-store tools (ADR-0119). Built only when the assembly seam wires
+// `AgentConfig.shadowOdb`; NOT part of `defaultTools` — see tier1/shadow.ts.
+export type { ShadowRewindInput, ShadowSnapshotsInput } from "./shadow"
+export {
+  shadowRewindInputSchema,
+  shadowRewindTool,
+  shadowSnapshotsInputSchema,
+  shadowSnapshotsTool,
+  shadowTools,
+} from "./shadow"
 export { composeShellObservers, noopShellObserver } from "./shell-exec-observers"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
 export type {

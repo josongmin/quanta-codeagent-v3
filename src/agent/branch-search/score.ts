@@ -80,3 +80,43 @@ export const argmaxSelector: Selector = (scored) => {
   })
   return (sorted[0] as { cand: BranchCandidate; score: CandidateScore }).cand
 }
+
+const deltaSize = (c: BranchCandidate): number =>
+  c.delta === undefined ? Number.POSITIVE_INFINITY : c.delta.addedLines + c.delta.removedLines
+
+/** Stable tied-candidate comparator used by `minimalChangeSelector`. Guards
+ *  against `+Inf - +Inf = NaN` (which would produce a non-total ordering)
+ *  by treating equal deltas — including both `+Inf` — as "no preference",
+ *  then falling through to: baseWinner first → lexicographic id. Pure. */
+const compareTied =
+  (baseWinnerId: string) =>
+  (
+    a: { cand: BranchCandidate; score: CandidateScore },
+    b: { cand: BranchCandidate; score: CandidateScore },
+  ): number => {
+    const da = deltaSize(a.cand)
+    const db = deltaSize(b.cand)
+    if (da !== db) return da - db
+    if (a.cand.id === baseWinnerId) return -1
+    if (b.cand.id === baseWinnerId) return 1
+    return a.cand.id < b.cand.id ? -1 : a.cand.id > b.cand.id ? 1 : 0
+  }
+
+/** Tiebreak selector — wraps a base selector (default `argmaxSelector`).
+ *  When the base winner has ties within `epsilon` of its total, picks the
+ *  candidate with smallest total `delta` (addedLines + removedLines).
+ *  Missing delta = treated as +Infinity (loses to any candidate with a
+ *  delta). Pure, deterministic. */
+export const minimalChangeSelector =
+  (base: Selector = argmaxSelector, epsilon = 1e-6): Selector =>
+  (scored) => {
+    if (scored.length === 0) throw new Error("minimalChangeSelector: empty scored")
+    const baseWinner = base(scored)
+    const baseEntry = scored.find((s) => s.cand.id === baseWinner.id)
+    if (baseEntry === undefined) return baseWinner
+    const baseTotal = baseEntry.score.total
+    const tied = scored.filter((s) => Math.abs(s.score.total - baseTotal) < epsilon)
+    if (tied.length <= 1) return baseWinner
+    const sorted = [...tied].sort(compareTied(baseWinner.id))
+    return (sorted[0] as { cand: BranchCandidate; score: CandidateScore }).cand
+  }

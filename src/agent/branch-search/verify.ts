@@ -124,6 +124,50 @@ export const lspDiagVerifier =
     ]
   }
 
+/** Patch-size verifier — emits a single `patch_size` PENALTY signal using
+ *  `cand.delta` produced upstream by `shadowOdbAnchor`. The magnitude is
+ *  log-scale-normalized total-changed-lines so a 10-line patch scores ~0.34,
+ *  a 100-line patch scores ~0.67, and a 1000-line patch saturates at 1.0
+ *  (the cap). When `cand.delta` is OMITTED (no anchor wired), the verifier
+ *  emits magnitude 0 — penalty contribution is zero, so the candidate's
+ *  reward is unaffected (byte-identical-when-absent invariant).
+ *
+ *  `pass` is ALWAYS true — patch size is a quality axis, not a gate. */
+export const patchSizeVerifier =
+  (opts?: { clock?: Clock }): Verifier =>
+  async (cand) => {
+    const clock = opts?.clock ?? wallClock
+    const t0 = clock()
+    if (cand.delta === undefined) {
+      return [
+        {
+          kind: "patch_size",
+          pass: true,
+          magnitude: 0,
+          detail: "no-delta",
+          durationMs: Math.max(0, clock() - t0),
+        },
+      ]
+    }
+    const { addedLines, removedLines, changedFiles } = cand.delta
+    const total = addedLines + removedLines
+    // Domain note: log10(1+total)/3 is calibrated so the typical "small patch"
+    // (1–20 lines) lives in [0, 0.4], "medium" (20–200) in [0.4, 0.75], "large"
+    // (200+) approaches 1. The /3 divisor saturates at ~1000 lines, matching
+    // the empirical observation that patches >1000 lines are uniformly bad.
+    const magnitude = Math.min(1, Math.log10(1 + total) / 3)
+    const filesLabel = `${changedFiles} file${changedFiles === 1 ? "" : "s"}`
+    return [
+      {
+        kind: "patch_size",
+        pass: true,
+        magnitude,
+        detail: `+${addedLines}/-${removedLines}, ${filesLabel}`,
+        durationMs: Math.max(0, clock() - t0),
+      },
+    ]
+  }
+
 /** Compose verifiers — run in PARALLEL, concatenate signals. A verifier that
  *  THROWS becomes a failed signal (counts against the candidate) rather than
  *  failing the whole pipeline (`Promise.allSettled`). */

@@ -9,9 +9,10 @@ import type {
 } from "@/permission"
 import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"
+import type { ShadowOdb } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
-import type { BranchSearchConfig } from "./branch-search"
+import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
@@ -28,11 +29,7 @@ import type { RepoRules } from "./repo-rules"
 import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
 import type { Submission } from "./submission"
-import type {
-  SkillsBlock,
-  SubagentBlock,
-  WorkingStateBlock,
-} from "./types/agent-capabilities"
+import type { SkillsBlock, SubagentBlock, WorkingStateBlock } from "./types/agent-capabilities"
 import type {
   CompactionBreakerOptions,
   CompactionConfigBlock,
@@ -42,6 +39,15 @@ import type {
 import type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
 import type { WorkMetricsSink } from "./work-metrics-collector"
 
+// Re-export the extracted Tier-1 capability option blocks (subagent / skills /
+// workingState — branchSearch already lives in `./branch-search`). The
+// `from "./types"` import contract for every consumer stays byte-identical
+// after this split (T3, T2 follow-up).
+export type {
+  SkillsBlock,
+  SubagentBlock,
+  WorkingStateBlock,
+} from "./types/agent-capabilities"
 // Outcome surface re-exported from ./types/agent-outcome (cohesion split,
 // byte-identical). Keeps the `from "./types"` import contract unchanged for
 // the 132 consumer files that depend on these names being on this module.
@@ -51,7 +57,6 @@ export type {
   RedactionRollup,
   StopReason,
 } from "./types/agent-outcome"
-
 // Re-export the extracted memory + compaction config types so that every
 // existing consumer reading them via `from "./types"` (or the `@/agent`
 // barrel) keeps working byte-for-byte after this split.
@@ -63,16 +68,6 @@ export type {
   PreCompactRequestQuery,
 } from "./types/compaction-config"
 export type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
-
-// Re-export the extracted Tier-1 capability option blocks (subagent / skills /
-// workingState — branchSearch already lives in `./branch-search`). The
-// `from "./types"` import contract for every consumer stays byte-identical
-// after this split (T3, T2 follow-up).
-export type {
-  SkillsBlock,
-  SubagentBlock,
-  WorkingStateBlock,
-} from "./types/agent-capabilities"
 
 // AgentConfig `extends` the three cohesion groups defined at the BOTTOM of
 // this file (SafetyConfig / PermissionExtrasConfig / SteeringConfig).
@@ -275,8 +270,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * turn (up to `maxTrips`, default 1 — capped to avoid infinite forcing;
    * lowered from 2 in ADR-0013 변경 이력 per the negative empirical from
    * ADR-0014 — bench callers may still explicitly override).
+   *
+   * `mustPass:true` (default `false`) extends the guard with the SOTA outcome-
+   * gate: when set, a finish attempt is ALSO blocked when the most-recent
+   * verify call after the latest edit FAILED (dispatch `ok:false` OR the
+   * captured output contains an explicit per-ecosystem failure marker). Closes
+   * the "ran pytest → ok:false → declared done" loophole observed in
+   * skills/subagent-ON sanity runs. Aider / Agentless / SWE-agent all run an
+   * outcome-gate of this shape; quanta's bench driver enables it for real
+   * SWE-bench instances with `maxTrips:2`.
    */
-  verifyGuard?: { maxTrips?: number }
+  verifyGuard?: { maxTrips?: number; mustPass?: boolean }
   /** Closeout guard (Codex CloseoutLens §4 mirror). Optional, absent ⇒ guard
    *  fully OFF and the loop is byte-identical. When `enabled` true, a single
    *  pre-finish nudge injects the closeout reminder (keep only defended claims,
@@ -465,6 +469,26 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   branchSearch?: BranchSearchConfig
   /**
+   * ADR-0116 Shadow git ODB seam (ADR-0108 keystone). When set AND
+   * `branchSearch` is also wired, `buildBranchSearchTool` constructs a
+   * `BranchSearchAnchor` from `shadowOdbAnchor(shadowOdb, cwd)` and threads
+   * it into `runBranchSearch` so each candidate gets a quantified
+   * `delta` from the parent workspace snapshot. Absent ⇒ anchor not built,
+   * branch-search emits candidates with `delta` OMITTED (byte-identical to
+   * pre-ADR-0116). Top-level (not nested under `branchSearch`) because
+   * future consumers (review/rewind) will also read this slot.
+   */
+  shadowOdb?: ShadowOdb
+  /**
+   * ADR-0117 progress surface — when set, `branch-search-runner` wraps the
+   * tool's `onTrace` with a side-effecting adapter that calls this callback
+   * with a `formatBranchTrace`'d `ProgressLine` per event. Absent ⇒ the
+   * adapter is not installed, byte-identical to pre-ADR-0117 behaviour.
+   * Best-effort: a throwing callback never crashes the search (the adapter
+   * try/catches around it, matching the OTel sink contract).
+   */
+  onProgress?: (line: ProgressLine) => void
+  /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`
    * (`user_input` / `user_input_with_turn_context` only — other op variants
@@ -598,7 +622,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
 /** Safety / guard knobs. Each member is default-OFF when absent. */
 export interface SafetyConfig {
   compactionBreaker?: CompactionBreakerOptions
-  verifyGuard?: { maxTrips?: number }
+  verifyGuard?: { maxTrips?: number; mustPass?: boolean }
   closeoutGuard?: { enabled?: boolean; fourRule?: boolean }
   dedupGate?: DedupGate
   dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }
@@ -675,6 +699,8 @@ export type FeaturesConfig = Pick<
   | "subagent"
   | "workingState"
   | "branchSearch"
+  | "shadowOdb"
+  | "onProgress"
   | "planExitPort"
   | "modelCandidates"
 >

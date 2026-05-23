@@ -118,3 +118,100 @@ export const isTestLikeCommand = (cmd: string): boolean => matchVerifyCommand(cm
  * consumers/tests import this symbol.
  */
 export const TEST_LIKE_RE = new RegExp(VERIFY_MATCHERS.map((m) => m.pattern.source).join("|"), "i")
+
+// ─── Outcome parser (mustPass mode) ────────────────────────────────────────
+//
+// The presence-only verify-guard answers "did a verify-like call RUN?". The
+// mustPass mode asks the harder question — "did it PASS?". This second-pass
+// recognizer scans the captured stdout/stderr preview for EXPLICIT failure
+// markers per ecosystem. Soundness contract mirrors the presence registry:
+//   - false POSITIVE here (declaring pass as fail) ⇒ over-blocking ⇒ wastes
+//     turns. Mitigated by anchoring matchers and using explicit failure
+//     tokens only (no broad keyword like "Error" alone).
+//   - false NEGATIVE here (declaring fail as pass) ⇒ the guard is DEFEATED
+//     exactly like the case mustPass was designed to close. Mitigated by
+//     covering each major ecosystem's recognizable failure summary line.
+//
+// Conservative posture: an EMPTY output ⇒ false (no signal, do not override
+// the dispatch `ok` field). Any matcher firing ⇒ true (output overrides ok).
+// This honors the "no heuristics — clear signal only" project policy.
+
+/** One ecosystem's failure-line recognizer. Stable `id` for telemetry. */
+export interface OutcomeFailureMatcher {
+  readonly id: string
+  readonly ecosystem: string
+  /** Anchored regex matching an EXPLICIT failure summary or marker. */
+  readonly pattern: RegExp
+}
+
+/**
+ * Output-side failure registry. Each pattern targets a specific test-runner's
+ * canonical failure summary, NOT a generic "error" keyword (which would over-
+ * fire). Multiline (`m`) flag where the marker is line-anchored.
+ */
+export const OUTCOME_FAILURE_MATCHERS: readonly OutcomeFailureMatcher[] = [
+  // pytest: `===== 3 failed in 0.42s =====` / `===== 1 failed, 2 passed =====`
+  // also `FAILED tests/test_x.py::test_y` line per failing test.
+  {
+    id: "pytest-summary",
+    ecosystem: "python",
+    pattern: /^=+\s+\d+\s+failed(?:[, ]|\s+in\s)/m,
+  },
+  { id: "pytest-failed-line", ecosystem: "python", pattern: /^FAILED\s+\S/m },
+  // pytest short-form summary line: `3 failed, 2 passed in 1.23s`
+  {
+    id: "pytest-short",
+    ecosystem: "python",
+    pattern: /^\d+\s+failed(?:[, ]|\s+in\s)/m,
+  },
+  // python unittest: `FAILED (failures=2)` / `FAILED (errors=1, failures=0)`
+  { id: "unittest", ecosystem: "python", pattern: /^FAILED\s*\(/m },
+  // jest/vitest: `Tests:       3 failed, 5 passed, 8 total`
+  { id: "jest-vitest", ecosystem: "js", pattern: /^Tests:.*\b\d+\s+failed/m },
+  // jest/vitest per-file: `FAIL  tests/foo.test.ts`
+  { id: "jest-vitest-fail", ecosystem: "js", pattern: /^FAIL\s+\S/m },
+  // mocha: `5 failing`
+  { id: "mocha", ecosystem: "js", pattern: /^\s*\d+\s+failing\b/m },
+  // go test: `--- FAIL: TestFoo` / final `FAIL\tpkg/path`
+  { id: "go-fail-marker", ecosystem: "go", pattern: /^---\s+FAIL:/m },
+  { id: "go-fail-summary", ecosystem: "go", pattern: /^FAIL\b/m },
+  // cargo test: `test result: FAILED. 1 passed; 2 failed; ...`
+  { id: "cargo", ecosystem: "rust", pattern: /^test result:\s*FAILED\b/m },
+  // rspec: `Failures:` + final `5 failures` summary
+  { id: "rspec", ecosystem: "ruby", pattern: /^\d+\s+examples?,\s+\d+\s+failures?/m },
+  // phpunit: `FAILURES! Tests: 5, Assertions: 12, Failures: 3.`
+  { id: "phpunit", ecosystem: "php", pattern: /^FAILURES!/m },
+  // dotnet test: `Failed!  - Failed:    3, Passed: ...`
+  { id: "dotnet", ecosystem: "dotnet", pattern: /^Failed!\s+-\s+Failed:/m },
+  // make / generic: `make: *** [target] Error N`
+  { id: "make-error", ecosystem: "generic", pattern: /\bmake(?:\[\d+\])?:\s+\*{3}\s/m },
+]
+
+/**
+ * True iff the captured tool output contains an EXPLICIT, ecosystem-specific
+ * failure marker — meaning a verify ran but DID NOT pass. Pure: no I/O, no
+ * mutation, no clock. The first/second args mirror history-entry shape
+ * (`name`, `arg`) but are NOT used for routing today: the registry is
+ * ecosystem-agnostic on the output side because all failure summaries are
+ * distinct enough to recognize without knowing which command produced them.
+ * Kept in the signature for forward compatibility (a future per-ecosystem
+ * dispatch table would key off `arg`).
+ *
+ * Conservative contract:
+ *   - Empty output ⇒ false (no signal, defer to dispatch `ok`).
+ *   - No matcher fires ⇒ false (cannot prove failure ⇒ do not over-block).
+ *   - Any matcher fires ⇒ true (we have an explicit failure signal).
+ *
+ * Order of registry irrelevant to correctness (logical OR).
+ */
+export const isVerifyOutputFailing = (
+  _name: string,
+  _arg: string | undefined,
+  output: string,
+): boolean => {
+  if (typeof output !== "string" || output.length === 0) return false
+  for (const m of OUTCOME_FAILURE_MATCHERS) {
+    if (m.pattern.test(output)) return true
+  }
+  return false
+}

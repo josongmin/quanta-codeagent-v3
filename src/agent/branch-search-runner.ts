@@ -12,9 +12,13 @@
 
 import type { Tool } from "@/tool"
 import {
+  type BranchSearchAnchor,
+  type BranchTraceEvent,
   branchSearchTool,
+  formatBranchTrace,
   type Isolator,
   type RunCandidate,
+  shadowOdbAnchor,
   tmpdirIsolator,
   worktreeIsolator,
 } from "./branch-search"
@@ -52,17 +56,51 @@ export const buildBranchIsolator = (config: AgentConfig): Isolator =>
     ? worktreeIsolator({ repoRoot: config.cwd })
     : tmpdirIsolator({ srcDir: config.cwd })
 
+/** ADR-0116 — build the optional `BranchSearchAnchor` for a session. Returns
+ *  `undefined` when `AgentConfig.shadowOdb` is unset (default-OFF: anchor not
+ *  threaded into the tool, branch-search emits candidates with `delta`
+ *  OMITTED — byte-identical to pre-ADR-0116). When set, anchors at the
+ *  PARENT cwd (NOT the candidate workspace — the candidates fork FROM here). */
+const buildBranchSearchAnchor = (config: AgentConfig): BranchSearchAnchor | undefined => {
+  if (config.shadowOdb === undefined) return undefined
+  return shadowOdbAnchor(config.shadowOdb, config.cwd)
+}
+
+/** ADR-0117 — when `config.onProgress` is wired, build an `onTrace` adapter
+ *  that formats each event and fans it out to the host's progress callback.
+ *  Absent ⇒ returns `undefined` so the tool's `onTrace` slot stays unset
+ *  (byte-identical to pre-ADR-0117). A throwing host callback is swallowed
+ *  per-event (matches the OTel sink contract — observability must never
+ *  fail the search). */
+const buildBranchProgressTrace = (
+  config: AgentConfig,
+): ((e: BranchTraceEvent) => void) | undefined => {
+  const onProgress = config.onProgress
+  if (onProgress === undefined) return undefined
+  return (event: BranchTraceEvent) => {
+    try {
+      onProgress(formatBranchTrace(event))
+    } catch {
+      /* host progress callback must never break the search */
+    }
+  }
+}
+
 /** Construct the `branch_search` tool for a session, or `undefined` when
  *  `config.branchSearch` is unset (default-OFF — caller skips registration).
  *  `buildSessionFeatures` pushes the returned tool into `extraTools`. */
 export const buildBranchSearchTool = (config: AgentConfig): Tool | undefined => {
   const bs = config.branchSearch
   if (bs === undefined) return undefined
+  const anchor = buildBranchSearchAnchor(config)
+  const onTrace = buildBranchProgressTrace(config)
   return branchSearchTool({
     config: bs,
     runCandidate: bindBranchRunCandidate(config),
     buildIsolator: () => buildBranchIsolator(config),
     baseLlm: config.llm,
     ...(config.modelCandidates ? { modelCandidates: config.modelCandidates } : {}),
+    ...(anchor ? { anchor } : {}),
+    ...(onTrace ? { onTrace } : {}),
   }) as Tool
 }

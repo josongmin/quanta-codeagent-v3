@@ -35,6 +35,7 @@ import {
   gitTools,
   lspNavTools,
   nullLspNavProvider,
+  requestUserInputTool,
 } from "@/tool"
 
 /* ────────────────────────────── env baseline ─────────────────────────────── */
@@ -66,6 +67,12 @@ const ALL_REGISTERED_TOOL_NAMES = (() => {
   for (const t of gitTools()) names.add(t.name)
   for (const t of lspNavTools(nullLspNavProvider)) names.add(t.name)
   names.add(createUpdateWorkingStateTool(undefined).name)
+  // ADR-0097 — `request_user_input` is registered conditionally (only when
+  // `AgentConfig.userInputPort` is wired in `features.ts`), so it never
+  // shows up in `defaultTools`. Its MUTATING_TOOL_TABLE entry is permanent
+  // (any host that wires the port must NOT trip `UnknownToolError`); we
+  // include it here so the cross-check stays in sync with that contract.
+  names.add(requestUserInputTool().name)
   return [...names].sort()
 })()
 

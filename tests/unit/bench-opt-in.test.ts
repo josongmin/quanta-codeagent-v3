@@ -245,7 +245,9 @@ describe("buildConfig — bench opt-ins wired into AgentConfig", () => {
     expect(cfg.skills).toEqual({})
     // verifyGuard still wired by the swebench branch (orthogonal — not touched
     // by these flags); pinned here to lock that the new opts don't drop it.
-    expect(cfg.verifyGuard).toEqual({})
+    // mustPass+maxTrips:2 (ADR-0011 outcome-gate extension) — pins the bench
+    // shape so a regression that strips the SOTA mustPass branch fails here.
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2 })
     // Nav tools present — registry expands relative to the all-unset baseline.
     const ac2 = new AbortController()
     const savedLsp = process.env.QUANTA_BENCH_LSP

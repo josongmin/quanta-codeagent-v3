@@ -87,8 +87,18 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "git_blame_heatmap",
   "git_churn",
   "git_upstream_check",
+  // ADR-0109 + ADR-0111 git-skill-bundle: 3 new read-only git tools — also
+  // safe in a side-conversation (pure analysis surfaces, no FS mutation).
+  "git_review_diff",
+  "git_moved_code",
+  "git_conflict_inspect",
   "file_tree_summary",
   "parse_test_failure",
+  // ADR-0097 — `request_user_input` is read-only and operator-facing. Listed
+  // here so the side-conv allowlist stays in 1-1 correspondence with the
+  // planModeMutatingTable read-only set (the drift detector at
+  // `tests/unit/side-conversation.test.ts` enforces equality).
+  "request_user_input",
 ])
 
 // ===========================================================================

@@ -240,11 +240,16 @@ export const buildConfig = (
     // Verify-guard (ADR-0013): observed bench failure — agent edits a
     // source file then declares "done" with 0 verification → wrong fix ships.
     // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
-    // byte-identical). Absent ⇒ guard OFF, loop unchanged. Pass `{}` so the
-    // current `DEFAULT_MAX_TRIPS` (1) applies; the prior explicit `2` produced
-    // the negative empirical that motivated ADR-0013's default reduction —
-    // inheriting the default makes the lesson actually apply on the bench path.
-    ...(instance.swebench ? { verifyGuard: {} } : {}),
+    // byte-identical). Absent ⇒ guard OFF, loop unchanged.
+    //
+    // mustPass (outcome-gate) extension — sanity runs with skills/subagent ON
+    // showed the model can call `test_runner`, receive `ok:false`, and STILL
+    // declare "done"; the presence-only guard accepts the call as "verified"
+    // because it ran. mustPass = ALSO require the verify to PASS. maxTrips=2
+    // gives one budget slot per branch (presence + must-pass) so a single run
+    // can hit both before the cap; SWE-bench prioritizes measurement integrity
+    // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
+    ...(instance.swebench ? { verifyGuard: { mustPass: true, maxTrips: 2 } } : {}),
     // Bench A/B opt-ins (default-OFF; all three unset ⇒ keys omitted entirely,
     // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
     ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),

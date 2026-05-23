@@ -13,6 +13,7 @@
  */
 
 import type { LLMPort, ModelCandidate } from "@/llm"
+import type { BranchSearchAnchor, DeltaMeasurement } from "./anchor"
 
 export interface BranchSeed {
   /** Sampling temperature override. `undefined` ⇒ inherit parent config. */
@@ -35,6 +36,11 @@ export interface BranchCandidate {
   readonly outcome:
     | { kind: "completed"; turns: number; llmSelfConfidence?: number }
     | { kind: "failed"; reason: string }
+  /** ADR-0116 delta-from-anchor (Shadow ODB). Set by the orchestrator when a
+   *  `BranchSearchAnchor` is wired AND this candidate completed AND the
+   *  anchor returned a non-null measurement. OMITTED otherwise (never set
+   *  to `undefined` — exactOptionalPropertyTypes). */
+  readonly delta?: DeltaMeasurement
 }
 
 /** Closed set of verifier kinds — adding one is a compile error at the scorer. */
@@ -73,6 +79,7 @@ export type BranchTraceEvent =
   | { kind: "candidate-finished"; id: string; turns: number; durationMs: number }
   | { kind: "candidate-failed"; id: string; reason: string }
   | { kind: "candidate-scored"; id: string; total: number; signals: ReadonlyArray<VerifierSignal> }
+  | { kind: "candidate-delta"; id: string; delta: DeltaMeasurement }
   | { kind: "winner-selected"; winnerId: string; total: number }
 
 export interface BranchSearchRequest {
@@ -86,6 +93,12 @@ export interface BranchSearchRequest {
   readonly selector: Selector
   readonly isolator: Isolator
   readonly onTrace?: (e: BranchTraceEvent) => void
+  /** ADR-0116 anchor seam — pluggable "register a starting point + measure
+   *  per-candidate delta from it" port. Absent ⇒ no anchor; orchestrator
+   *  byte-identical to pre-ADR-0116 behaviour (`delta` OMITTED on every
+   *  candidate). Wired by `branch-search-runner` when
+   *  `AgentConfig.shadowOdb` is set. */
+  readonly anchor?: BranchSearchAnchor
 }
 
 export interface BranchSearchResult {

@@ -19,14 +19,17 @@ export type { FileInfo } from "./types"
 export {
   DEFAULT_SHADOW_ODB_MAX_BYTES,
   SHADOW_LAST_REF,
+  SHADOW_PRE_REWIND_REF_PREFIX,
   ShadowOdbError,
   defaultShadowOdb,
   evictLru,
   workspaceHash,
 } from "./shadow-odb"
 export type {
+  RewindOptions,
   ShadowInitResult,
   ShadowOdb,
   ShadowOdbConfig,
   ShadowOdbErrorCode,
+  SnapshotMetadata,
 } from "./shadow-odb"

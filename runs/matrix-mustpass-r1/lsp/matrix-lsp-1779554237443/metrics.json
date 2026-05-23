@@ -1,0 +1,32 @@
+{
+  "runId": "matrix-lsp-1779554237443",
+  "pricingVersion": "pricing.v2",
+  "snapshot": {
+    "counters": {
+      "instances": 2,
+      "degraded": 0,
+      "inputTokens": 425043,
+      "outputTokens": 3510,
+      "passed": 1
+    },
+    "gauges": {},
+    "timers": {
+      "turns": {
+        "count": 2,
+        "min": 9,
+        "max": 21,
+        "mean": 15,
+        "p50": 9,
+        "p95": 21
+      },
+      "durationMs": {
+        "count": 2,
+        "min": 255234,
+        "max": 340367,
+        "mean": 297800.5,
+        "p50": 255234,
+        "p95": 340367
+      }
+    }
+  }
+}

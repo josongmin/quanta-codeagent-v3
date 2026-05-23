@@ -16,6 +16,7 @@
  * so it is fully unit-testable with fakes and composes per-mode.
  */
 
+import type { BranchSearchAnchor, DeltaMeasurement } from "./anchor"
 import { parallelPropose, type RunCandidate } from "./propose"
 import type {
   BranchCandidate,
@@ -74,6 +75,22 @@ export const runBranchSearch = async (
   if (req.N > 8) throw new Error(`runBranchSearch: N capped at 8 (got ${req.N})`)
   const startedAt = Date.now()
 
+  // ADR-0116: anchor registration runs BEFORE parallelPropose so the snapshot
+  // captures the workspace state the candidates fork from. Failure surfaces
+  // as a `candidate-failed` trace under the synthetic id "anchor" — we reuse
+  // the existing variant rather than expand the trace union for a single
+  // start-failure case. The search proceeds regardless (fail-open: no
+  // anchor ⇒ no delta measurement on any candidate).
+  let anchorReady = false
+  if (req.anchor !== undefined) {
+    const start = await req.anchor.registerStart()
+    if (start.ok) {
+      anchorReady = true
+    } else {
+      safeTrace(req.onTrace, { kind: "candidate-failed", id: "anchor", reason: start.reason })
+    }
+  }
+
   const { candidates, cleanups } = await parallelPropose({
     N: req.N,
     seeds: req.seeds,
@@ -93,7 +110,7 @@ export const runBranchSearch = async (
     // a custom one may reject. A rejected candidate folds to FAILED_SCORE so it
     // simply loses, never poisons the batch or the selection.
     const settled = await Promise.allSettled(candidates.map((c) => scoreCandidate(c, req)))
-    const allScored = settled.map((s, i) => {
+    const scoredRaw = settled.map((s, i) => {
       if (s.status === "fulfilled") return s.value
       // `candidates` and `settled` are index-aligned (allSettled preserves
       // order), so `cand` is always defined.
@@ -101,6 +118,27 @@ export const runBranchSearch = async (
       safeTrace(req.onTrace, { kind: "candidate-scored", id: cand.id, total: 0, signals: [] })
       return { cand, score: FAILED_SCORE }
     })
+    // ADR-0116 per-candidate delta attach. Only completed candidates are
+    // measured (a failed run has no meaningful workspace state). On a
+    // non-null measurement we produce a NEW BranchCandidate with `delta`
+    // condition-spread in (exactOptionalPropertyTypes — never set to
+    // undefined). On null OR no anchor, the candidate passes through
+    // unchanged so `"delta" in cand === false` (byte-identical to the
+    // pre-ADR-0116 shape).
+    const anchor: BranchSearchAnchor | undefined = anchorReady ? req.anchor : undefined
+    const allScored = await Promise.all(
+      scoredRaw.map(async (entry) => {
+        if (anchor === undefined) return entry
+        if (entry.cand.outcome.kind !== "completed") return entry
+        const delta: DeltaMeasurement | null = await anchor.measureDelta(entry.cand.workspace)
+        if (delta === null) return entry
+        safeTrace(req.onTrace, { kind: "candidate-delta", id: entry.cand.id, delta })
+        // Condition-spread `delta` onto a NEW candidate; never mutate the
+        // input (it is `readonly`-typed and shared with the trace events).
+        const withDelta: BranchCandidate = { ...entry.cand, delta }
+        return { cand: withDelta, score: entry.score }
+      }),
+    )
     const winner = req.selector(allScored)
     const winnerScore = allScored.find((s) => s.cand.id === winner.id)?.score ?? FAILED_SCORE
     safeTrace(req.onTrace, {

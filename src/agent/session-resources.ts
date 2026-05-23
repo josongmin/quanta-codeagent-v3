@@ -16,8 +16,30 @@ import { TurnWorkMetricsCollector } from "./work-metrics-collector"
  *  verification when its command string matches a test/repro regex — so the
  *  loop MUST carry the bash command string here (it previously pushed only the
  *  name, leaving `arg` always undefined). `arg` is conditionally set for `bash`
- *  ONLY (exactOptionalPropertyTypes: omitted, never `arg: undefined`). */
-export type ToolHistoryEntry = { name: string; arg?: string }
+ *  ONLY (exactOptionalPropertyTypes: omitted, never `arg: undefined`).
+ *
+ *  ── mustPass (outcome-gate) extension ──────────────────────────────────────
+ *  Presence-only verify-guard (`mustPass:false`) only checks "did a verify-like
+ *  call run after the edit?". When the bench `mustPass:true` knob is on, the
+ *  guard ALSO consults `ok` and `output` to confirm the verify actually
+ *  PASSED — otherwise the model can run `pytest` → see `ok:false` → declare
+ *  "done" and the guard would let it. `id` is the dispatch call id used to
+ *  back-patch the outcome after async dispatch (the push-on-start path leaves
+ *  ok/output absent and the dispatch-resolved path fills them in by id).
+ *  ALL of (`id` / `ok` / `output`) are exactOptional: omitted when unknown
+ *  (legacy push-only-on-start path), NEVER set to `undefined`. */
+export type ToolHistoryEntry = {
+  name: string
+  arg?: string
+  /** Tool call id for backward-patching outcome after async dispatch. */
+  id?: string
+  /** Outcome (after dispatch resolves). Absent ⇒ still running or legacy path. */
+  ok?: boolean
+  /** Stdout/stderr preview (already redaction-applied). verify-guard mustPass
+   *  scans this for explicit failure markers per ecosystem. Empty/absent ⇒
+   *  conservative pass (no override). */
+  output?: string
+}
 
 /** Pure construction of the persistence dependency bag from config. Mirrors
  *  the conditional-spread semantics required by `exactOptionalPropertyTypes`

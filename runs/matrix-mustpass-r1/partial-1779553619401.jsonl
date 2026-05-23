@@ -1,0 +1,8 @@
+{"condition":"baseline","pickId":"psf__requests-5414","verdict":"fail","turns":25,"tokensIn":285452,"tokensOut":1699,"cacheRead":0,"wallMs":347868,"costUsd":0}
+{"condition":"baseline","pickId":"sympy__sympy-16886","verdict":"pass","turns":7,"tokensIn":62640,"tokensOut":531,"cacheRead":0,"wallMs":235111,"costUsd":0}
+{"condition":"lsp","pickId":"psf__requests-5414","verdict":"fail","turns":21,"tokensIn":334778,"tokensOut":2840,"cacheRead":0,"wallMs":339381,"costUsd":0}
+{"condition":"lsp","pickId":"sympy__sympy-16886","verdict":"pass","turns":9,"tokensIn":90265,"tokensOut":670,"cacheRead":0,"wallMs":253001,"costUsd":0}
+{"condition":"subagent","pickId":"psf__requests-5414","verdict":"fail","turns":15,"tokensIn":220372,"tokensOut":2339,"cacheRead":0,"wallMs":276374,"costUsd":0}
+{"condition":"subagent","pickId":"sympy__sympy-16886","verdict":"fail","turns":8,"tokensIn":78425,"tokensOut":531,"cacheRead":0,"wallMs":113909,"costUsd":0}
+{"condition":"skills","pickId":"psf__requests-5414","verdict":"pass","turns":21,"tokensIn":343499,"tokensOut":2149,"cacheRead":0,"wallMs":269920,"costUsd":0}
+{"condition":"skills","pickId":"sympy__sympy-16886","verdict":"pass","turns":13,"tokensIn":164332,"tokensOut":895,"cacheRead":0,"wallMs":231099,"costUsd":0}

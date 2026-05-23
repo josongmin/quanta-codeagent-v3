@@ -17,12 +17,7 @@
 
 import type { Message } from "@/llm"
 import { decideVerifyGuard, type VerifyGuardState } from "../verify-guard"
-import {
-  type TurnGuard,
-  type TurnGuardContext,
-  type TurnGuardResult,
-  guardBlocked,
-} from "./chain"
+import { guardBlocked, type TurnGuard, type TurnGuardContext, type TurnGuardResult } from "./chain"
 import { isFinishAttempt, metaUser } from "./shared"
 
 /** Build a `TurnGuard` instance backed by the existing per-session
@@ -30,7 +25,7 @@ import { isFinishAttempt, metaUser } from "./shared"
  *  stays state-free (the chain is reusable across turns; state migrates with
  *  the guard instance). */
 export const createVerifyGuard = (args: {
-  cfg: { maxTrips?: number }
+  cfg: { maxTrips?: number; mustPass?: boolean }
   state: VerifyGuardState
 }): TurnGuard => {
   const { cfg, state } = args

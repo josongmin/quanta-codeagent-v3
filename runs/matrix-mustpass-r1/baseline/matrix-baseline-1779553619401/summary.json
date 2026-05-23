@@ -1,0 +1,22 @@
+{
+  "runId": "matrix-baseline-1779553619401",
+  "resolved": 1,
+  "total": 2,
+  "degraded": 0,
+  "instances": [
+    {
+      "id": "psf__requests-5414",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 25,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/matrix-mustpass-r1/baseline/matrix-baseline-1779553619401/psf__requests-5414.0.patch"
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": true,
+      "verdict": "ok",
+      "turns": 7,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/matrix-mustpass-r1/baseline/matrix-baseline-1779553619401/sympy__sympy-16886.0.patch"
+    }
+  ]
+}
