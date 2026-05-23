@@ -17,6 +17,7 @@ import { discoverSkills, discoverSystemSkills } from "@/skill"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { composeShellObservers } from "@/tool"
+import { diffPreviewEnabled, renderActionDiff } from "./diff-preview"
 import { loadImageBlock } from "./image-loader"
 import {
   argvImages,
@@ -536,6 +537,16 @@ export const runRepl = async (): Promise<void> => {
   // permission-confirm prompt opens an ad-hoc readline only when it fires
   // so the two never compete for stdin events.
   const onConfirm = async (action: ToolAction): Promise<boolean> => {
+    // Inline unified-diff preview BEFORE the readline question so the user
+    // sees the proposed change, not just a tool name. Best-effort: any
+    // failure (file missing, binary, parse) returns undefined and we fall
+    // through to the legacy plain prompt — byte-identical to today.
+    // Default-ON when QUANTA_DIFF_PREVIEW is unset + stderr is a TTY;
+    // explicit `QUANTA_DIFF_PREVIEW=0` reverts to plain confirm.
+    if (diffPreviewEnabled()) {
+      const preview = await renderActionDiff(action)
+      if (preview !== undefined) process.stderr.write(`${preview}\n`)
+    }
     const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
     try {
       const ans = await adhoc.question(`Allow ${action.tool}? [y/N] `)
