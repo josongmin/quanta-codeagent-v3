@@ -1,0 +1,612 @@
+{
+  "schemaVersion": 1,
+  "cwd": "/Users/songmin/quanta-codeagent-v3",
+  "git_sha": "d75d978",
+  "queries": [
+    {
+      "id": "symbol-buildSystemPrompt",
+      "predicted_top5": [],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "behavioral-agent-loop",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "docs/10.feature-catalog.md",
+        "tools/feature-catalog/features/09-integration/09-external-agent-import.yaml",
+        "src/agent/loop.ts",
+        "tools/feature-catalog/features/01-agent-loop/response-in-progress.yaml"
+      ],
+      "rank_of_first_expected": 4,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "camelcase-subtoken-compaction-breaker",
+      "predicted_top5": [
+        "src/agent/compaction-breaker.ts",
+        "tools/feature-catalog/features/04-context-management/01-compactionbreaker.yaml",
+        "src/agent/loop.ts",
+        "docs/reviews-claude-agent/compaction-system.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "snake-case-symmetry",
+      "predicted_top5": [
+        "src/agent/verify-signal.ts",
+        "src/tool/bash/index.ts",
+        "src/tool/scripted-replace.ts",
+        "tests/unit/agent/tool-failure-mode.test.ts",
+        "src/tool/parse-test-failure/index.ts"
+      ],
+      "rank_of_first_expected": 5,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "noisy-english-cli-entry",
+      "predicted_top5": [
+        "docs/decisions/0115-localize-signal-hardening.md",
+        "predictions.jsonl",
+        "src/apps/cli/index.ts",
+        "tools/feature-catalog/cli.ts",
+        "docs/reviews-claude-agent/agent-loop-turn-timeline.md"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "vendored-noise-main-index",
+      "predicted_top5": [
+        "src/apps/bench/index.ts",
+        "src/apps/cli/index.ts",
+        "src/apps/eval/index.ts",
+        "src/apps/probe/index.ts",
+        "tools/feature-catalog/cli.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 0.5,
+      "recall@5": 0.5
+    },
+    {
+      "id": "multi-word-repl",
+      "predicted_top5": [
+        "src/apps/cli/repl.ts",
+        "predictions.jsonl",
+        "src/agent/recovery.ts",
+        "src/agent/loop.ts",
+        "src/agent/side-conversation/prompt.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "test-file-query-memory",
+      "predicted_top5": [
+        "tools/feature-catalog/migrate-from-md.ts",
+        "src/agent/prompt-sections.ts",
+        "src/agent/prompt.ts",
+        "src/agent/run-mode/clamp.ts",
+        "src/agent/verify-signal.ts"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "cross-cutting-streaming-dispatch",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/agent/streaming-dispatch.ts",
+        "docs/10.feature-catalog.md",
+        "src/llm/streaming-events.ts",
+        "src/agent/loop.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 0.5,
+      "recall@5": 0.5
+    },
+    {
+      "id": "symbol-resolveJailed",
+      "predicted_top5": [
+        "docs/10.feature-catalog.md",
+        "docs/ARCHITECTURE.md",
+        "docs/decisions/0115-localize-signal-hardening.md",
+        "src/storage/index.ts",
+        "src/storage/service.ts"
+      ],
+      "rank_of_first_expected": 5,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-openai-adapter",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/llm/adapters/openai.ts",
+        "tools/feature-catalog/features/09-integration/94-chatgpt-oauth-provider.yaml",
+        "tests/unit/llm/openai-thinking-hell.test.ts",
+        "tests/unit/llm/openai-thinking.test.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-sqlite-memory",
+      "predicted_top5": [
+        "tools/feature-catalog/features/05-memory/sqlite-persistent-store.yaml",
+        "src/memory/adapters/sqlite.ts",
+        "src/memory/consolidate/store.ts",
+        "docs/10.feature-catalog.md",
+        "predictions.jsonl"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "symbol-localize-tool",
+      "predicted_top5": [
+        "src/tool/localize/index.ts",
+        "src/skill/system-skills/localize-fault/index.ts",
+        "docs/analysis/code-agent-loop/quanta-comparison.md",
+        "docs/decisions/0115-localize-signal-hardening.md",
+        "docs/tool-authoring.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-tool-search-skill",
+      "predicted_top5": [
+        "src/skill/tool-search.ts",
+        "docs/decisions/0022-skill-trigger-tool-routing.md",
+        "docs/reviews-claude-agent/skill-system.md",
+        "src/skill/plugin-loader.ts",
+        "src/tool/parse-test-failure/index.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "harness-python-swebench",
+      "predicted_top5": [
+        "src/apps/bench/python-swebench.ts",
+        "predictions.jsonl",
+        "tools/feature-catalog/features/10-app/01-python-harness-e2e-2026-05-21-l3-l4.yaml",
+        "src/apps/bench/corpus/loader.ts",
+        "src/apps/bench/harness/images.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "harness-corpus-loader",
+      "predicted_top5": [
+        "tools/swebench-matrix.ts",
+        "src/apps/bench/corpus/index.ts",
+        "tests/integration/swebench-smoke-picks.test.ts",
+        "src/apps/bench/python-swebench.ts",
+        "bench-report.json"
+      ],
+      "rank_of_first_expected": 9,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "lsp-pyright-adapter",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/lsp/adapters/pyright.ts",
+        "tests/contract/lsp-pyright.test.ts",
+        "docs/10.feature-catalog.md",
+        "docs/decisions/0024-lsp-nav-surface-expansion.md"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "lsp-typescript-adapter",
+      "predicted_top5": [
+        "src/lsp/adapters/typescript.ts",
+        "docs/decisions/0009-lsp-diagnostics-tool.md",
+        "src/lsp/adapters/base.ts",
+        "tests/contract/lsp-typescript.test.ts",
+        "docs/10.feature-catalog.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "error-cannot-find-orchestrate",
+      "predicted_top5": [
+        "src/runner/orchestrate/index.ts",
+        "src/runner/orchestrate/persist-turn.ts",
+        "src/runner/orchestrate/resume-fsm.ts",
+        "src/runner/orchestrate/run-interactive.ts",
+        "docs/runner/SURFACE_INTEGRATION.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "error-fsjail-escape",
+      "predicted_top5": [
+        "src/storage/service.ts",
+        "predictions.jsonl",
+        "docs/10.feature-catalog.md",
+        "src/agent/prompt.ts",
+        "src/runtime/sandbox.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "error-abortsignal-streamingturn",
+      "predicted_top5": [
+        "docs/reviews-claude-agent/agent-loop-error-predicates.md",
+        "docs/reviews-claude-agent/agent-loop-turn-timeline.md",
+        "src/agent/streaming-dispatch.ts",
+        "docs/reviews-claude-agent/streaming-tool-execution.md",
+        "docs/10.feature-catalog.md"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "error-planexit-invariant",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "docs/plans/wine-agent-design.md",
+        "src/agent/plan-exit.ts",
+        "docs/decisions/0063-plan-exit-three-way.md",
+        "src/agent/plan-exit-flow.ts"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "cross-streaming-abort-meet",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "docs/decisions/0097-request-user-input-port.md",
+        "tests/unit/streaming-dispatch-hellgate.test.ts",
+        "tests/unit/streaming-dispatch.test.ts",
+        "src/agent/streaming-dispatch.ts"
+      ],
+      "rank_of_first_expected": 5,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0.3333333333333333
+    },
+    {
+      "id": "cross-resume-id-vs-path",
+      "predicted_top5": [
+        "docs/reviews-codex-agent/mode-and-plan-process-audit.md",
+        "src/apps/cli/internal.ts",
+        "docs/reviews-codex-agent/may-20-codex-agent-loop.md",
+        "docs/reviews-codex-agent/sandbox-and-approval-audit.md",
+        "docs/reviews-codex-agent/task-management-and-todo-audit.md"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "cross-permission-classifier-policy",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/permission/classifier.ts",
+        "docs/reviews-claude-agent/auto-mode-classifier.md",
+        "tools/feature-catalog/features/03-permission-safety/auto-mode-classifier.yaml",
+        "tests/unit/permission-classifier.test.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 0.5,
+      "recall@5": 0.5
+    },
+    {
+      "id": "cross-compaction-retry",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/agent/compaction-breaker.ts",
+        "tools/feature-catalog/features/04-context-management/01-compactionbreaker.yaml",
+        "src/agent/loop.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 0.5,
+      "recall@5": 0.5
+    },
+    {
+      "id": "acronym-mcp-config-loader",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "docs/decisions/0007-mcp-slice.md",
+        "docs/reviews-claude-agent/mcp-integration.md"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "acronym-jsonl-trajectory-recorder",
+      "predicted_top5": [
+        "src/apps/eval/synthetic/runner.ts",
+        "src/runner/assemble/streaming.ts",
+        "src/stream/adapters/jsonl-recorder.ts",
+        "tools/feature-catalog/features/08-observability/02-jsonlrecorder.yaml",
+        "docs/decisions/0010-observability-trajectory.md"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "acronym-otel-span-vocabulary",
+      "predicted_top5": [
+        "docs/decisions/0032-otel-attribute-vocabulary.md",
+        "docs/decisions/0074-otel-span-tree.md",
+        "tools/feature-catalog/features/08-observability/74-otel-span-tree.yaml",
+        "src/observability/shell-exec-otel.ts",
+        "src/observability/spans.ts"
+      ],
+      "rank_of_first_expected": 5,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "acronym-lsp-nav-tool",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/tool/lsp_nav/index.ts",
+        "docs/decisions/0024-lsp-nav-surface-expansion.md",
+        "tools/feature-catalog/features/09-integration/01-lspport.yaml",
+        "tools/feature-catalog/features/09-integration/02-lspdefinition.yaml"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "disambig-agent-run-loop",
+      "predicted_top5": [
+        "src/skill/system-skills/loop-on-ci/index.ts",
+        "src/skill/system-skills/loop-on-ci/index.ts.my-backup",
+        "src/apps/bench/corpus/failure-classifier.ts",
+        "src/agent/prompt-rules/pr-agent.ts",
+        "src/agent/run-mode/types.ts"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "disambig-config-loader",
+      "predicted_top5": [
+        "src/apps/cli/image-loader.ts",
+        "src/skill/plugin-loader.ts",
+        "biome.json",
+        "docs/10.feature-catalog.md",
+        "docs/analysis/code-agent-loop/cursor-gap-plan.md"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "disambig-auto-classifier",
+      "predicted_top5": [
+        "src/permission/classifier.ts",
+        "docs/reviews-claude-agent/auto-mode-classifier.md",
+        "src/agent/tier1/auto-classifier.ts"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "edge-short-rg",
+      "predicted_top5": [],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "edge-long-natural-language",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "docs/reviews-codex-agent/task-management-and-todo-audit.md",
+        "src/storage/service.ts",
+        "src/agent/branch-search/progress.ts",
+        "docs/reviews-claude-agent/background-daemon-teammate.md"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "edge-non-ascii-korean-mixed",
+      "predicted_top5": [
+        "src/agent/memory.ts",
+        "src/memory/types.ts",
+        "src/agent/side-conversation/prompt.ts",
+        "src/agent/side-conversation/run.ts",
+        "tools/feature-catalog/features/05-memory/01-reminder-memory-recall-routing-hints-only.yaml"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "control-openai-embedder-class",
+      "predicted_top5": [
+        "docs/ARCHITECTURE.md",
+        "src/agent/index.ts",
+        "src/agent/memory-embedder.ts",
+        "src/runner/assemble/store.ts",
+        "tests/unit/memory-embedder.test.ts"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "control-fallback-llm-class",
+      "predicted_top5": [
+        "src/llm/fallback.ts",
+        "src/llm/adapters/chatgpt-oauth.ts",
+        "src/agent/memory-distill.ts",
+        "src/apps/bench/sampler.ts",
+        "tests/integration/fallback-tombstone-e2e.test.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "control-retrying-llm-class",
+      "predicted_top5": [
+        "tools/feature-catalog/features/07-resilience/01-retryingllm.yaml",
+        "docs/reviews-claude-agent/auto-mode-classifier.md",
+        "src/llm/fallback.ts",
+        "src/llm/model-swap.ts",
+        "src/runner/assemble/llm.ts"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "control-jsonl-recorder-class",
+      "predicted_top5": [
+        "src/apps/eval/synthetic/runner.ts",
+        "src/runner/assemble/streaming.ts",
+        "src/stream/adapters/jsonl-recorder.ts",
+        "tools/feature-catalog/features/08-observability/02-jsonlrecorder.yaml",
+        "docs/decisions/0035-jsonl-cumulative-retention.md"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "control-anthropic-adapter-class",
+      "predicted_top5": [
+        "src/llm/adapters/anthropic.ts",
+        "src/llm/adapters/chatgpt-oauth.ts",
+        "src/llm/adapters/openai.ts",
+        "docs/decisions/0002-openai-provider.md",
+        "docs/ARCHITECTURE.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "test-targeted-memory-reopen",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "tests/integration/memory-sqlite.test.ts",
+        "tests/unit/memory-adapters.test.ts",
+        "tools/feature-catalog/features/05-memory/sqlite-persistent-store.yaml",
+        "src/memory/adapters/sqlite.ts"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "test-targeted-skill-discover-errors",
+      "predicted_top5": [
+        "tests/unit/skill-discover-errors.test.ts",
+        "tests/unit/ctk-git-skills-hellgate.test.ts",
+        "tests/unit/ctk-git-skills-router-hellgate.test.ts.from-worktree",
+        "docs/decisions/0102-turn-diff-updated-event.md",
+        "src/skill/discover.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "test-targeted-localize-measure-helpers",
+      "predicted_top5": [
+        "tests/unit/localize-measure.test.ts",
+        "predictions.jsonl",
+        "tests/smoke/localize/measure.ts",
+        "docs/decisions/0115-localize-signal-hardening.md",
+        "tests/smoke/localize/README.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    }
+  ],
+  "aggregate": {
+    "recall@1": 0.29545454545454547,
+    "recall@3": 0.5909090909090909,
+    "recall@5": 0.6893939393939393,
+    "MRR": 0.46578282828282824,
+    "n": 44
+  }
+}

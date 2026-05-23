@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "cwd": "/Users/songmin/quanta-codeagent-v3",
+  "git_sha": "8583131",
+  "queries": [
+    {
+      "id": "symbol-buildSystemPrompt",
+      "predicted_top5": [],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "behavioral-agent-loop",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "docs/10.feature-catalog.md",
+        "tools/feature-catalog/features/09-integration/09-external-agent-import.yaml",
+        "src/agent/loop.ts",
+        "tools/feature-catalog/features/01-agent-loop/response-in-progress.yaml"
+      ],
+      "rank_of_first_expected": 4,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "camelcase-subtoken-compaction-breaker",
+      "predicted_top5": [
+        "src/agent/compaction-breaker.ts",
+        "tools/feature-catalog/features/04-context-management/01-compactionbreaker.yaml",
+        "src/agent/loop.ts",
+        "docs/reviews-claude-agent/compaction-system.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "snake-case-symmetry",
+      "predicted_top5": [
+        "src/agent/verify-signal.ts",
+        "src/tool/bash/index.ts",
+        "src/tool/scripted-replace.ts",
+        "tests/unit/agent/tool-failure-mode.test.ts",
+        "src/tool/parse-test-failure/index.ts"
+      ],
+      "rank_of_first_expected": 5,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "noisy-english-cli-entry",
+      "predicted_top5": [
+        "docs/decisions/0115-localize-signal-hardening.md",
+        "predictions.jsonl",
+        "src/apps/cli/index.ts",
+        "tools/feature-catalog/cli.ts",
+        "docs/reviews-claude-agent/agent-loop-turn-timeline.md"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "vendored-noise-main-index",
+      "predicted_top5": [
+        "src/apps/bench/index.ts",
+        "src/apps/cli/index.ts",
+        "src/apps/eval/index.ts",
+        "src/apps/probe/index.ts",
+        "tools/feature-catalog/cli.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 0.5,
+      "recall@5": 0.5
+    },
+    {
+      "id": "multi-word-repl",
+      "predicted_top5": [
+        "src/apps/cli/repl.ts",
+        "predictions.jsonl",
+        "src/agent/recovery.ts",
+        "src/agent/loop.ts",
+        "src/agent/side-conversation/prompt.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "test-file-query-memory",
+      "predicted_top5": [
+        "tools/feature-catalog/migrate-from-md.ts",
+        "src/agent/admissibility-gate.ts",
+        "src/agent/prompt-sections.ts",
+        "src/agent/prompt.ts",
+        "src/agent/run-mode/clamp.ts"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "cross-cutting-streaming-dispatch",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/agent/streaming-dispatch.ts",
+        "docs/10.feature-catalog.md",
+        "src/llm/streaming-events.ts",
+        "src/agent/loop.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 0.5,
+      "recall@5": 0.5
+    },
+    {
+      "id": "symbol-resolveJailed",
+      "predicted_top5": [
+        "docs/10.feature-catalog.md",
+        "docs/ARCHITECTURE.md",
+        "docs/decisions/0115-localize-signal-hardening.md",
+        "src/storage/index.ts",
+        "src/storage/service.ts"
+      ],
+      "rank_of_first_expected": 5,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-openai-adapter",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/llm/adapters/openai.ts",
+        "tools/feature-catalog/features/09-integration/94-chatgpt-oauth-provider.yaml",
+        "tests/unit/llm/openai-thinking-hell.test.ts",
+        "tests/unit/llm/openai-thinking.test.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-sqlite-memory",
+      "predicted_top5": [
+        "tools/feature-catalog/features/05-memory/sqlite-persistent-store.yaml",
+        "src/memory/adapters/sqlite.ts",
+        "src/memory/consolidate/store.ts",
+        "docs/10.feature-catalog.md",
+        "predictions.jsonl"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "symbol-localize-tool",
+      "predicted_top5": [
+        "src/tool/localize/index.ts",
+        "src/skill/system-skills/localize-fault/index.ts",
+        "docs/analysis/code-agent-loop/quanta-comparison.md",
+        "docs/decisions/0115-localize-signal-hardening.md",
+        "docs/tool-authoring.md"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-tool-search-skill",
+      "predicted_top5": [
+        "src/skill/tool-search.ts",
+        "docs/decisions/0022-skill-trigger-tool-routing.md",
+        "docs/reviews-claude-agent/skill-system.md",
+        "src/skill/plugin-loader.ts",
+        "src/tool/parse-test-failure/index.ts"
+      ],
+      "rank_of_first_expected": 1,
+      "recall@1": 1,
+      "recall@3": 1,
+      "recall@5": 1
+    }
+  ],
+  "aggregate": {
+    "recall@1": 0.2857142857142857,
+    "recall@3": 0.5714285714285714,
+    "recall@5": 0.7857142857142857,
+    "MRR": 0.4988095238095238,
+    "n": 14
+  }
+}
