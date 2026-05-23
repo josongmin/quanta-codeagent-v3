@@ -57,19 +57,18 @@ const AGENT_DIR = join(import.meta.dir, "..", "..", "src", "agent")
  *  for stable comparison; the SCC finder also sorts each component before
  *  emitting it.
  *
- *  Entry 1 — `loop` ring (collapses subagent-runner + branch-search-runner
- *    rings; they share the loop↔features edge). Safe because every cross-
- *    edge symbol (`runAgent`, `createSubagentRunner`, `buildBranchSearch
- *    Tool`, `buildSessionFeatures`) is only called inside function bodies.
- *
- *  Entry 2 — `steering ↔ conversation-action` ring. `conversation-action.ts`
+ *  Entry 1 — `steering ↔ conversation-action` ring. `conversation-action.ts`
  *    imports `steer` / `SteerInputInvalidError` for use inside `decideAction`;
  *    `steering.ts` re-exports the conversation-action surface as a one-stop
- *    barrel. Safe because every reference lives in a function body. */
-const WHITELIST: ReadonlyArray<ReadonlyArray<string>> = [
-  ["branch-search-runner.ts", "features.ts", "loop.ts", "subagent-runner.ts"],
-  ["conversation-action.ts", "steering.ts"],
-]
+ *    barrel. Safe because every reference lives in a function body.
+ *
+ *  NOTE: the historical `{branch-search-runner, features, loop, subagent-
+ *  runner}` SCC was eliminated by splitting `features.ts` into per-subsystem
+ *  builders under `src/agent/tier1/*` (refactor: features → tier1/). Because
+ *  `features.ts` now only imports value-symbols from the `./tier1/` sub-
+ *  directory — which this analysis treats as external nodes — the return
+ *  edges that closed the ring are gone and the SCC dissolved. */
+const WHITELIST: ReadonlyArray<ReadonlyArray<string>> = [["conversation-action.ts", "steering.ts"]]
 
 interface ImportLine {
   /** File the import resolves to (basename + .ts, relative to AGENT_DIR), or

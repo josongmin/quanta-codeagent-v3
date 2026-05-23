@@ -1,17 +1,19 @@
 /**
- * Session-features builder (Tier 1 capability final wiring, ADR-0011).
+ * Session-features composer (Tier 1 capability final wiring, ADR-0011).
  *
- * `buildSessionFeatures` is the single PURE materialization seam the loop calls
- * ONCE at session start to turn the optional `AgentConfig` Tier-1 blocks
- * (`subagent` / `skills` / `permission.mode === "auto"`) into concrete runtime
- * objects: extra tools to merge into the registry, a session-scoped stateful
- * auto-mode classifier, and the shared `TaskRegistry` the subagent tools were
- * wired against.
+ * `buildSessionFeatures` is the single PURE materialization seam the loop
+ * calls ONCE at session start. It turns the optional `AgentConfig` Tier-1
+ * blocks (`subagent` / `branchSearch` / `skills` / `permission.mode === auto`
+ * / `workingState` / `planExitPort` / `planStore` / `userInputPort`) into the
+ * concrete runtime objects the loop consumes.
  *
- * BEHAVIOR-PRESERVING CONTRACT: every branch is gated on an optional config
- * field. With none of them set the result is `{ extraTools: [] }` and the loop
- * is byte-for-byte identical to today (no classifier, no extra tools, no task
- * registry). This module is pure except for `discoverSkills`'s directory IO.
+ * Each block is materialized by a dedicated, per-subsystem builder in
+ * `./tier1/*`. This module is now a thin composer: it calls each builder in
+ * sequence and, when the builder returns a non-`undefined` result, threads it
+ * into the accumulated `SessionFeatures`. Each builder owns its own
+ * default-OFF contract (config block absent ⇒ returns `undefined` ⇒ composer
+ * skips it), keeping the byte-identical guarantee that with NO Tier-1 config
+ * the result is `{ extraTools: [] }` and the loop is identical to today.
  *
  * --- SEAMS THE MAIN THREAD MUST WRITE (NOT done here — out of scope) ---
  *
@@ -48,37 +50,22 @@
  *    unchanged.
  */
 
-import { AutoModeClassifier } from "@/permission"
-import {
-  buildPlanTools,
-  createUpdateWorkingStateTool,
-  requestPlanExitTool,
-  requestUserInputTool,
-  type Tool,
-} from "@/tool"
-import type { Skill } from "../skill"
-import {
-  createSkillTool,
-  createToolSearchTool,
-  discoverSkills,
-  discoverSystemSkills,
-  skillEffortOverride,
-  skillModelOverride,
-  skillsActivatedFor,
-  skillToolAllowlist,
-} from "../skill"
-import {
-  createAgentTool,
-  createTaskOutputTool,
-  createTaskStopTool,
-  type TaskRegistry,
-} from "../subagent"
-import { createAutoClassifierPort } from "./auto-classifier"
-import { buildBranchSearchTool } from "./branch-search-runner"
+import type { AutoModeClassifier } from "@/permission"
+import type { Tool } from "@/tool"
+import type { TaskRegistry } from "../subagent"
 import type { SkillTurnOverride } from "./loop"
-import { createSubagentRunner } from "./subagent-runner"
+import {
+  buildBranchSearchBlock,
+  buildClassifierBlock,
+  buildPlanExitBlock,
+  buildPlanMutationBlock,
+  buildSkillBlock,
+  buildSubagentBlock,
+  buildUserInputBlock,
+  buildWorkingStateBlock,
+} from "./tier1"
 import type { AgentConfig } from "./types"
-import { createWorkingStateSession, type WorkingStateSession } from "./working-state"
+import type { WorkingStateSession } from "./working-state"
 
 /** Materialized Tier-1 subsystems for one session. All fields are
  *  "absent ⇒ feature off"; the loop merges/threads them and otherwise behaves
@@ -135,242 +122,62 @@ export interface SessionFeatures {
 
 /**
  * Build the session's Tier-1 features from `config`. Called ONCE by the loop
- * at session start. Pure except for `discoverSkills` directory IO.
+ * at session start. Pure except for `discoverSkills` directory IO inside the
+ * skill builder.
  *
- * - `config.subagent` ⇒ build a `SubagentRunner` (forked loop, depth+1,
- *   filtered registry), the `agent` tool against a fresh shared `TaskRegistry`,
- *   and the matching `task_output`/`task_stop` tools against the SAME registry
- *   instance (`createAgentTool` returns it as `.registry`). The returned
- *   `taskRegistry` is that exact instance. Also produces a `cleanup()` hook
- *   that aborts + awaits all currently-running background tasks; the loop MUST
- *   invoke this at session end for clean shutdown (NOTE: actual loop wiring is
- *   a follow-up — finalization in `loop.ts` has several paths that need
- *   careful integration, intentionally out of scope here).
- * - `config.skills` ⇒ `discoverSkills(dir)` (missing dir ⇒ `[]` per its
- *   contract) then register `Skill` + `ToolSearch`. The tools are registered
- *   UNCONDITIONALLY whenever `config.skills` is set — even with zero discovered
- *   skills — because (a) the loop's gate is purely `config.skills` presence so
- *   conditional registration would make the tool set depend on filesystem
- *   contents (surprising / non-deterministic for callers), and (b) `ToolSearch`
- *   ranks the live tool catalog and is useful with no skills at all. This
- *   mirrors the skill slice's documented recommended wiring.
- * - `config.permission.mode === "auto"` ⇒ a session `AutoModeClassifier`
- *   wrapping the LLM-backed `createAutoClassifierPort({ llm })`. Any other
- *   mode ⇒ no classifier.
- * - none of the above ⇒ `{ extraTools: [] }`.
+ * COMPOSER CONTRACT: each per-subsystem builder in `./tier1/*` returns either
+ * its materialized block (when the relevant `config` field is set) OR
+ * `undefined` (when the field is absent). The composer threads each returned
+ * block into the accumulated `SessionFeatures` and skips the slot when the
+ * builder returned `undefined`. None of the above ⇒ `{ extraTools: [] }`.
  */
-/** ADR-0011 §6.2 → L4: the per-skill model/effort override entry, or
- *  `undefined` when the skill declares neither (a non-empty `model:` string
- *  AND/OR any defined `effort:`, including numeric 0). Extracted from the
- *  per-skill loop in {@link buildSkillFeatures} so that loop stays a single
- *  branch (keeps the function under the cognitive-complexity budget). */
-const skillOverrideEntry = (s: Skill): SkillTurnOverride | undefined => {
-  const model = skillModelOverride(s)
-  const effort = skillEffortOverride(s)
-  if (model === undefined && effort === undefined) return undefined
-  return {
-    ...(model !== undefined ? { model } : {}),
-    ...(effort !== undefined ? { effort } : {}),
-  }
-}
-
-/** Discover skills + build the `Skill`/`ToolSearch` tools and the declared
- *  tool-allowlist map (ADR-0011). Extracted from
- *  {@link buildSessionFeatures} so that function stays under the cognitive-
- *  complexity budget; pure except `discoverSkills`'s directory IO. */
-const buildSkillFeatures = async (
-  config: AgentConfig,
-  dir: string | undefined,
-): Promise<{
-  tools: Tool[]
-  allowlists: Map<string, string[]> | undefined
-  overrides: Map<string, SkillTurnOverride> | undefined
-  inventory: { name: string; description: string }[]
-}> => {
-  // `dir` OPTIONAL (ADR-0045 follow-up): when omitted, only bundled system
-  // skills load. `discoverSkills` is only called when a user dir is given.
-  const userSkills = dir !== undefined ? await discoverSkills(dir) : []
-  // Bundled system skills (ADR-0045) — version-pinned, ship with the framework.
-  // Merged into the discoverable set so the model can invoke disciplines like
-  // `progress-audit` regardless of whether the user populated their own skills
-  // dir. System skills WIN on a name collision so a user-supplied skill cannot
-  // impersonate / weaken a system one (the `byName` second-pass overrides).
-  const systemSkills = await discoverSystemSkills()
-  const byName = new Map<string, Skill>()
-  for (const s of userSkills) byName.set(s.name, s)
-  for (const s of systemSkills) byName.set(s.name, s)
-  const skills = [...byName.values()].sort((a, b) =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-  )
-  const tools: Tool[] = [
-    // `createSkillTool` ALWAYS receives the full discovered list — a user can
-    // still invoke any skill by name. The `paths:` filter below only narrows
-    // the per-turn SUGGESTION inventory, never the invocable surface (that
-    // would silently strip authority).
-    createSkillTool(skills),
-    createToolSearchTool(() => config.registry.specs()),
-  ]
-  const al = new Map<string, string[]>()
-  // ADR-0011 §6.2 → L4: build the per-skill model/effort override map alongside
-  // the allowlist map. A skill contributes an entry only when it declares
-  // `model:` AND/OR `effort:` (a non-empty model string, or any defined effort
-  // including numeric 0). Skills with neither leave the map untouched, so an
-  // all-advisory-free skill set yields `undefined` and the loop stays
-  // byte-identical.
-  const ov = new Map<string, SkillTurnOverride>()
-  for (const s of skills) {
-    const allow = skillToolAllowlist(s)
-    if (allow) al.set(s.name, allow)
-    const override = skillOverrideEntry(s)
-    if (override) ov.set(s.name, override)
-  }
-  // Plain `{name, description}` shape so the prompt slice never imports
-  // `@/skill` (slice isolation — Codex skills-audit mirror). Built ONCE here
-  // (the loop calls buildSessionFeatures once at session start), then passed
-  // through every turn without re-discovery.
-  //
-  // `paths:` conditional activation (L1→L2 host-driven wiring): when
-  // `config.skills.changedPaths` is set, narrow the suggestion inventory to
-  //   - every skill WITHOUT `paths:` (unconditional — always in the inventory),
-  //   - plus every skill WITH `paths:` whose globs match any changed path
-  //     (via `skillsActivatedFor` — the dedicated helper that already filters
-  //     out unconditional skills).
-  // `changedPaths` unset ⇒ identity, byte-identical with prior behavior —
-  // RFC §1.2 default-OFF. The invocable surface (the `Skill` tool) is NEVER
-  // narrowed — only the per-turn SUGGESTION inventory is filtered.
-  const changedPaths = config.skills?.changedPaths
-  const activated =
-    changedPaths !== undefined && changedPaths.length > 0
-      ? [
-          ...skills.filter((s) => s.paths === undefined || s.paths.length === 0),
-          ...skillsActivatedFor(skills, changedPaths),
-        ]
-      : skills
-  const inventory = activated.map((s) => ({ name: s.name, description: s.description }))
-  return {
-    tools,
-    allowlists: al.size > 0 ? al : undefined,
-    overrides: ov.size > 0 ? ov : undefined,
-    inventory,
-  }
-}
-
 export const buildSessionFeatures = async (config: AgentConfig): Promise<SessionFeatures> => {
   const extraTools: Tool[] = []
-  let taskRegistry: TaskRegistry | undefined
-  let cleanup: (() => Promise<void>) | undefined
-  let classifier: AutoModeClassifier | undefined
-  let skillAllowlists: Map<string, string[]> | undefined
-  let skillOverrides: Map<string, SkillTurnOverride> | undefined
-  let activeSkills: { name: string; description: string }[] | undefined
-  let workingState: WorkingStateSession | undefined
 
   // --- Subagent block -----------------------------------------------------
-  if (config.subagent) {
-    const runner = createSubagentRunner(
-      config,
-      config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {},
-    )
-
-    // `createAgentTool` mints a fresh TaskRegistry when none is passed and
-    // re-exposes whichever instance it used as `.registry`. We let it create
-    // one and read `.registry` back, then wire the Task* tools against THAT
-    // same instance so all three tools observe the same background tasks.
-    const agentTool = createAgentTool({
-      runner,
-      ...(config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {}),
-    })
-    // Bind a NON-undefined local so the cleanup closure doesn't need a non-
-    // null assertion on the outer `taskRegistry` (which is typed as optional
-    // for callers that don't configure subagent).
-    const reg = agentTool.registry
-    taskRegistry = reg
-    extraTools.push(agentTool, createTaskOutputTool(reg), createTaskStopTool(reg))
-    cleanup = async (): Promise<void> => {
-      const ids = reg.pendingIds()
-      if (ids.length === 0) return
-      // S17: host-side cleanup uses `forceStop` — not the token-gated `stop`.
-      // The session owner has the authority to cancel ALL pending tasks at
-      // shutdown regardless of who minted them; per-task owner tokens are
-      // only the LLM-facing capability gate.
-      for (const id of ids) reg.forceStop(id)
-      // Await all settles in parallel. waitForSettle resolves immediately for
-      // already-settled tasks, so this is bounded by the slowest in-flight
-      // runner observing the abort and unwinding.
-      await Promise.all(ids.map((id) => reg.waitForSettle(id)))
-    }
-  }
+  const subagent = buildSubagentBlock(config)
+  if (subagent !== undefined) extraTools.push(...subagent.extraTools)
 
   // --- Branch search block (ADR-0083) -------------------------------------
-  // `config.branchSearch` ⇒ register the `branch_search` N-best tool, with its
-  // `runCandidate` bound to a candidate-scoped `runAgent` fork and the isolator
-  // chosen per `isolation`. ABSENT ⇒ no tool, byte-identical (RFC §1.2).
-  const branchTool = buildBranchSearchTool(config)
-  if (branchTool) extraTools.push(branchTool)
+  const branchTool = buildBranchSearchBlock(config)
+  if (branchTool !== undefined) extraTools.push(branchTool)
 
-  // --- Skill block --------------------------------------------------------
-  // Runs whenever `config.skills` is present — including `skills: {}` (no user
-  // dir), which loads ONLY bundled system skills. Still fully opt-in: ABSENT
-  // ⇒ block skipped, no Skill tool, byte-identical (RFC §1.2).
-  if (config.skills) {
-    const sf = await buildSkillFeatures(config, config.skills.dir)
-    extraTools.push(...sf.tools)
-    skillAllowlists = sf.allowlists
-    skillOverrides = sf.overrides
-    // Inventory is present whenever `config.skills` is set — even an empty
-    // array (no SKILL.md files yet) — so the prompt slice can gate purely on
-    // `length > 0` and stays byte-identical for skill-less sessions.
-    activeSkills = sf.inventory
-  }
+  // --- Skill block (ADR-0011) ---------------------------------------------
+  const skill = await buildSkillBlock(config)
+  if (skill !== undefined) extraTools.push(...skill.tools)
 
-  // --- Auto-mode classifier ----------------------------------------------
-  if (config.permission.mode === "auto") {
-    classifier = new AutoModeClassifier(createAutoClassifierPort({ llm: config.llm }))
-  }
+  // --- Auto-mode classifier -----------------------------------------------
+  const classifier = buildClassifierBlock(config)
 
   // --- Working state (Codex memory L3) -----------------------------------
-  // Build the session-scoped WorkingState handle + register the meta-tool that
-  // mutates it. Absent ⇒ neither resource is allocated, the L3 block is not
-  // rendered, and `update_working_state` is NOT in the registry — the loop is
-  // byte-identical for all callers that do not opt in.
-  if (config.workingState?.enabled === true) {
-    workingState = createWorkingStateSession()
-    extraTools.push(createUpdateWorkingStateTool(workingState) as Tool)
-  }
+  const ws = buildWorkingStateBlock(config)
+  if (ws !== undefined) extraTools.push(ws.tool)
 
-  // ADR-0086: register `request_plan_exit` ONLY when a plan-exit port is wired.
-  // The dispatch seam builds `ctx.requestPlanExit` from the same port; absent ⇒
-  // the tool is not in the registry and the loop is byte-identical.
-  if (config.planExitPort !== undefined) {
-    extraTools.push(requestPlanExitTool() as Tool)
-  }
+  // --- Plan-exit tool (ADR-0086) -----------------------------------------
+  const planExitTool = buildPlanExitBlock(config)
+  if (planExitTool !== undefined) extraTools.push(planExitTool)
 
-  // ADR-0093 (draft): register the 4 plan-mutation tools ONLY when
-  // AgentConfig.planStore is wired. The dispatch seam adapts the store into
-  // ctx.planMutator at every dispatch; absent ⇒ tools NOT in registry +
-  // legacy plan-posture flow byte-identical. The 4 tools are all
-  // concurrency-safe (sync mutator) and read-only:false.
-  if (config.planStore !== undefined) {
-    for (const t of buildPlanTools()) extraTools.push(t as Tool)
-  }
+  // --- Plan-mutation tools (ADR-0093 draft) ------------------------------
+  const planMutationTools = buildPlanMutationBlock(config)
+  if (planMutationTools !== undefined) extraTools.push(...planMutationTools)
 
-  // ADR-0095 (draft, ADR-0086 sister): register `request_user_input` ONLY
-  // when a userInputPort is wired. The dispatch seam builds
-  // ctx.requestUserInput from the port; absent ⇒ tool NOT in registry.
-  if (config.userInputPort !== undefined) {
-    extraTools.push(requestUserInputTool() as Tool)
-  }
+  // --- User-input tool (ADR-0095 draft) ----------------------------------
+  const userInputTool = buildUserInputBlock(config)
+  if (userInputTool !== undefined) extraTools.push(userInputTool)
 
   return {
     extraTools,
     ...optionalFeatureFields({
       classifier,
-      taskRegistry,
-      cleanup,
-      skillAllowlists,
-      skillOverrides,
-      activeSkills,
-      workingState,
+      taskRegistry: subagent?.taskRegistry,
+      cleanup: subagent?.cleanup,
+      skillAllowlists: skill?.allowlists,
+      skillOverrides: skill?.overrides,
+      // Inventory is present whenever `config.skills` is set — even an empty
+      // array (no SKILL.md files yet) — so the prompt slice can gate purely
+      // on `length > 0` and stays byte-identical for skill-less sessions.
+      activeSkills: skill?.inventory,
+      workingState: ws?.handle,
     }),
   }
 }
