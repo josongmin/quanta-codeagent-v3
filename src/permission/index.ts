@@ -29,6 +29,22 @@ export {
   isGitWriteProtected,
 } from "./git-write-guard"
 export type {
+  AxisOutcome,
+  AxisStep,
+  InspectToolMeta,
+  MatchedHardDenyRule,
+  ModePolicyMatrix,
+  ModeVerdict,
+  PermissionAxis,
+  PermissionInspection,
+} from "./inspect"
+export {
+  finalDecisionFor,
+  inspectPermission,
+  listHardDenyRuleDescriptors,
+  PERMISSION_AXES,
+} from "./inspect"
+export type {
   CreatePermissionInspectorOptions,
   InspectAction,
   PermissionInspector,

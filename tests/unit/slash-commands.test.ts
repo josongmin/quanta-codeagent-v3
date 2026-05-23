@@ -63,7 +63,7 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers the documented builtins in order (/help + 5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status)", () => {
+  test("registers the documented builtins in order (/help + 5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status + /permission)", () => {
     expect(BUILTINS.map((c) => c.name)).toEqual([
       "/help",
       "/context",
@@ -77,6 +77,7 @@ describe("BUILTINS table", () => {
       "/login",
       "/logout",
       "/status",
+      "/permission",
     ])
   })
 })

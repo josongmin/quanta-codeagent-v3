@@ -34,6 +34,7 @@ import { runtimeConfig } from "@/shared"
 import { runHelpRender } from "./help-render"
 import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
+import { permissionCmd } from "./permission-explain"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 import { statusCmd } from "./status-cmd"
 
@@ -415,6 +416,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   loginCmd,
   logoutCmd,
   statusCmd,
+  permissionCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(
