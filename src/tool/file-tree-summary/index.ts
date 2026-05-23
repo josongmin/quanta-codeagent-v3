@@ -99,6 +99,10 @@ interface TreeAgg {
   deepRollup: Map<string, number>
   total: number
   truncated: boolean
+  /** Full relative paths of all files that will be emitted by render(), in
+   *  render order (dir-sorted, then file-sorted within dir). This is the
+   *  EXACT set the purpose pass must scan — populated by aggregate(). */
+  renderedFiles: string[]
 }
 
 const aggregate = (files: string[], maxDepth: number, maxFiles: number): TreeAgg => {
@@ -128,18 +132,55 @@ const aggregate = (files: string[], maxDepth: number, maxFiles: number): TreeAgg
     byDir.set(dir, bucket)
     total += 1
   }
-  return { byDir, deepRollup, total, truncated }
+
+  // Build renderedFiles: the exact set render() will emit, in render order
+  // (dirs sorted by byteCompare, files sorted within each dir).
+  const sortedDirs = [...byDir.keys()].sort((a, b) => byteCompare(a, b))
+  const renderedFiles: string[] = []
+  for (const dir of sortedDirs) {
+    const sorted = [...(byDir.get(dir) ?? [])].sort((a, b) => byteCompare(a, b))
+    for (const base of sorted) {
+      renderedFiles.push(dir === "." ? base : `${dir}/${base}`)
+    }
+  }
+
+  return { byDir, deepRollup, total, truncated, renderedFiles }
 }
 
 /** First declaration / docstring / comment line per file is a cheap "purpose"
  *  signal (Codex file-topology). Language-agnostic alternation: a leading
  *  export/def/class/func/interface/type/fn/public/module.exports, OR the first
- *  line/block comment. One ripgrep `-m1` pass extracts the first match per
- *  file. */
-const PURPOSE_RE = String.raw`^\s*(?:export\s|def\s|class\s|func\s|function\s|interface\s|type\s|fn\s|pub\s|public\s|module\.exports|//|#\s|/\*\*?)`
+ *  line/block comment. ripgrep `-m 5` extracts the first 5 matches per file;
+ *  parsePurposeRows picks the first that survives the noise deny-list. */
+const PURPOSE_RE = String.raw`^\s*(?:export\s|def\s|class\s|func\s|function\s|interface\s|type\s|fn\s|pub\s|public\s|module\.exports|//|#|/\*\*?)`
 
-/** Parse `path:line:text` rows from the purpose pass into a `relpath → hint`
- *  map. The hint is the trimmed match line, capped. Exported pure for tests. */
+/** Explicit noise deny-list for purpose hints.
+ *  ONLY literal substring checks and exact-prefix checks — no fuzzy guessing.
+ *  Order is irrelevant; ALL checks are applied. */
+const NOISE_CHECKS: ReadonlyArray<(line: string) => boolean> = [
+  (l) => /copyright/i.test(l),
+  (l) => l.includes("SPDX-License-Identifier"),
+  (l) => /all rights reserved/i.test(l),
+  (l) => l.includes("@license"),
+  (l) => l.includes("eslint-disable"),
+  (l) => l.includes("eslint-enable"),
+  (l) => l.includes("biome-ignore"),
+  (l) => l.includes("@ts-nocheck"),
+  (l) => l.includes("@ts-ignore"),
+  (l) => l.includes("@ts-expect-error"),
+  (l) => l.includes("prettier-ignore"),
+  // "use strict" / "use client" / "use server" with or without semicolon
+  (l) => /^["']use (?:strict|client|server)["'];?$/.test(l),
+  // shebang
+  (l) => l.startsWith("#!"),
+]
+
+/** Returns true when the candidate line is noise and should be skipped. */
+const isNoiseLine = (line: string): boolean => NOISE_CHECKS.some((check) => check(line))
+
+/** Parse `path:line:text` rows from the purpose pass (rg -m 5 output) into a
+ *  `relpath → hint` map. For each file, the first non-noise candidate line
+ *  wins. The hint is the trimmed match line, capped. Exported pure for tests. */
 export const parsePurposeRows = (stdout: string): Map<string, string> => {
   const map = new Map<string, string>()
   for (const row of stdout.split("\n")) {
@@ -147,11 +188,17 @@ export const parsePurposeRows = (stdout: string): Map<string, string> => {
     if (!m) continue
     const file = m[1]
     const text = (m[3] ?? "").trim()
-    if (!file || text.length === 0 || map.has(file)) continue
+    if (!file || text.length === 0) continue
+    // Already settled on a non-noise hint for this file — skip.
+    if (map.has(file)) continue
+    if (isNoiseLine(text)) continue
     map.set(file, text.length > SUMMARY_LEN ? `${text.slice(0, SUMMARY_LEN)}…` : text)
   }
   return map
 }
+
+/** Exported for tests. */
+export { isNoiseLine }
 
 /** Render the aggregate as an indented tree, directories sorted, files sorted
  *  within each directory, per-directory count shown. When `summaries` is
@@ -260,29 +307,35 @@ export const fileTreeSummaryTool: Tool<Input> = {
 
     const agg = aggregate(files, maxDepth, maxFiles)
 
-    // Optional purpose layer: one extra `rg -m1` pass extracting the first
-    // declaration/comment line per file (capped). Failure here degrades to a
-    // structure-only tree — the purpose hint is a bonus, never load-bearing.
+    // Optional purpose layer: one extra `rg -m5` pass extracting up to 5
+    // candidate lines per file so parsePurposeRows can skip noise lines and
+    // return the first surviving non-noise line. Scans EXACTLY the files that
+    // render() will emit (agg.renderedFiles, capped at SUMMARY_FILE_CAP) —
+    // never the entire jailed scope. Failure degrades to structure-only tree.
     let summaries: Map<string, string> | undefined
     if (input.summarize === true) {
       yield { type: "progress", message: "extracting per-file purpose…" }
-      const purposeParts = [
-        "rg",
-        "--no-heading",
-        "--line-number",
-        "--color=never",
-        "-m",
-        "1",
-        "--max-filesize",
-        "1M",
-        "-e",
-        sq(PURPOSE_RE),
-      ]
-      if (jailedPath !== undefined) purposeParts.push(sq(jailedPath))
-      const pr = await runShell(purposeParts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
-      if (pr.exitCode <= 1 && !pr.timedOut) {
-        const rows = pr.stdout.trimEnd().split("\n").slice(0, SUMMARY_FILE_CAP).join("\n")
-        summaries = parsePurposeRows(rows)
+      // Target the exact rendered files, capped.
+      const targetFiles = agg.renderedFiles.slice(0, SUMMARY_FILE_CAP)
+      if (targetFiles.length > 0) {
+        const purposeParts = [
+          "rg",
+          "--no-heading",
+          "--line-number",
+          "--color=never",
+          "-m",
+          "5",
+          "--max-filesize",
+          "1M",
+          "-e",
+          sq(PURPOSE_RE),
+          "--",
+          ...targetFiles.map(sq),
+        ]
+        const pr = await runShell(purposeParts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
+        if (pr.exitCode <= 1 && !pr.timedOut) {
+          summaries = parsePurposeRows(pr.stdout.trimEnd())
+        }
       }
     }
 

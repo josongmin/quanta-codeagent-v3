@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs"
 import { z } from "zod"
 import { runShell } from "@/runtime"
 import { byteCompare } from "@/shared"
@@ -50,29 +49,6 @@ const SUMMARY_FILE_CAP = 200
 /** Truncate a purpose hint so the tree stays scannable. */
 const SUMMARY_LEN = 80
 const sq = (s) => `'${s.replace(/'/g, "'\\''")}'`
-/**
- * Collect jail-validated absolute paths of existing ignore files under
- * `scopeRoot`. Checks, in declared order: .quantaignore, .cursorignore,
- * .cursorindexignore. Jail-escaping symlinks and missing files are silently
- * skipped.
- */
-export const collectIgnoreFiles = (scopeRoot, ctxCwd) => {
-  const names = [".quantaignore", ".cursorignore", ".cursorindexignore"]
-  const result = []
-  for (const name of names) {
-    const candidate = `${scopeRoot}/${name}`
-    try {
-      const jailed = resolveJailed(candidate, ctxCwd)
-      if (existsSync(jailed)) {
-        result.push(jailed)
-      }
-    } catch (e) {
-      if (e instanceof FsJailError) continue
-      throw e
-    }
-  }
-  return result
-}
 /** Count path depth relative to the scope root (number of `/` segments). */
 const depthOf = (rel) => rel.split("/").length - 1
 const aggregate = (files, maxDepth, maxFiles) => {
@@ -101,16 +77,49 @@ const aggregate = (files, maxDepth, maxFiles) => {
     byDir.set(dir, bucket)
     total += 1
   }
-  return { byDir, deepRollup, total, truncated }
+  // Build renderedFiles: the exact set render() will emit, in render order
+  // (dirs sorted by byteCompare, files sorted within each dir).
+  const sortedDirs = [...byDir.keys()].sort((a, b) => byteCompare(a, b))
+  const renderedFiles = []
+  for (const dir of sortedDirs) {
+    const sorted = [...(byDir.get(dir) ?? [])].sort((a, b) => byteCompare(a, b))
+    for (const base of sorted) {
+      renderedFiles.push(dir === "." ? base : `${dir}/${base}`)
+    }
+  }
+  return { byDir, deepRollup, total, truncated, renderedFiles }
 }
 /** First declaration / docstring / comment line per file is a cheap "purpose"
  *  signal (Codex file-topology). Language-agnostic alternation: a leading
  *  export/def/class/func/interface/type/fn/public/module.exports, OR the first
- *  line/block comment. One ripgrep `-m1` pass extracts the first match per
- *  file. */
-const PURPOSE_RE = String.raw`^\s*(?:export\s|def\s|class\s|func\s|function\s|interface\s|type\s|fn\s|pub\s|public\s|module\.exports|//|#\s|/\*\*?)`
-/** Parse `path:line:text` rows from the purpose pass into a `relpath → hint`
- *  map. The hint is the trimmed match line, capped. Exported pure for tests. */
+ *  line/block comment. ripgrep `-m 5` extracts the first 5 matches per file;
+ *  parsePurposeRows picks the first that survives the noise deny-list. */
+const PURPOSE_RE = String.raw`^\s*(?:export\s|def\s|class\s|func\s|function\s|interface\s|type\s|fn\s|pub\s|public\s|module\.exports|//|#|/\*\*?)`
+/** Explicit noise deny-list for purpose hints.
+ *  ONLY literal substring checks and exact-prefix checks — no fuzzy guessing.
+ *  Order is irrelevant; ALL checks are applied. */
+const NOISE_CHECKS = [
+  (l) => /copyright/i.test(l),
+  (l) => l.includes("SPDX-License-Identifier"),
+  (l) => /all rights reserved/i.test(l),
+  (l) => l.includes("@license"),
+  (l) => l.includes("eslint-disable"),
+  (l) => l.includes("eslint-enable"),
+  (l) => l.includes("biome-ignore"),
+  (l) => l.includes("@ts-nocheck"),
+  (l) => l.includes("@ts-ignore"),
+  (l) => l.includes("@ts-expect-error"),
+  (l) => l.includes("prettier-ignore"),
+  // "use strict" / "use client" / "use server" with or without semicolon
+  (l) => /^["']use (?:strict|client|server)["'];?$/.test(l),
+  // shebang
+  (l) => l.startsWith("#!"),
+]
+/** Returns true when the candidate line is noise and should be skipped. */
+export const isNoiseLine = (line) => NOISE_CHECKS.some((check) => check(line))
+/** Parse `path:line:text` rows from the purpose pass (rg -m 5 output) into a
+ *  `relpath → hint` map. For each file, the first non-noise candidate line
+ *  wins. The hint is the trimmed match line, capped. Exported pure for tests. */
 export const parsePurposeRows = (stdout) => {
   const map = new Map()
   for (const row of stdout.split("\n")) {
@@ -118,7 +127,10 @@ export const parsePurposeRows = (stdout) => {
     if (!m) continue
     const file = m[1]
     const text = (m[3] ?? "").trim()
-    if (!file || text.length === 0 || map.has(file)) continue
+    if (!file || text.length === 0) continue
+    // Already settled on a non-noise hint for this file — skip.
+    if (map.has(file)) continue
+    if (isNoiseLine(text)) continue
     map.set(file, text.length > SUMMARY_LEN ? `${text.slice(0, SUMMARY_LEN)}…` : text)
   }
   return map
@@ -191,11 +203,6 @@ export const fileTreeSummaryTool = {
     // the search root. We `cd` into the scope via cwd so the rows are scope-
     // relative; an explicit jailed path is passed as the search root instead.
     const parts = ["rg", "--files", "--color=never"]
-    // Honor .quantaignore / .cursorignore / .cursorindexignore when present.
-    const scopeRoot = jailedPath ?? ctx.cwd
-    for (const ignoreFile of collectIgnoreFiles(scopeRoot, ctx.cwd)) {
-      parts.push("--ignore-file", sq(ignoreFile))
-    }
     if (jailedPath !== undefined) parts.push(sq(jailedPath))
     const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
     if (r.exitCode > 1 || r.timedOut) {
@@ -214,29 +221,35 @@ export const fileTreeSummaryTool = {
       return
     }
     const agg = aggregate(files, maxDepth, maxFiles)
-    // Optional purpose layer: one extra `rg -m1` pass extracting the first
-    // declaration/comment line per file (capped). Failure here degrades to a
-    // structure-only tree — the purpose hint is a bonus, never load-bearing.
+    // Optional purpose layer: one extra `rg -m5` pass extracting up to 5
+    // candidate lines per file so parsePurposeRows can skip noise lines and
+    // return the first surviving non-noise line. Scans EXACTLY the files that
+    // render() will emit (agg.renderedFiles, capped at SUMMARY_FILE_CAP) —
+    // never the entire jailed scope. Failure degrades to structure-only tree.
     let summaries
     if (input.summarize === true) {
       yield { type: "progress", message: "extracting per-file purpose…" }
-      const purposeParts = [
-        "rg",
-        "--no-heading",
-        "--line-number",
-        "--color=never",
-        "-m",
-        "1",
-        "--max-filesize",
-        "1M",
-        "-e",
-        sq(PURPOSE_RE),
-      ]
-      if (jailedPath !== undefined) purposeParts.push(sq(jailedPath))
-      const pr = await runShell(purposeParts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
-      if (pr.exitCode <= 1 && !pr.timedOut) {
-        const rows = pr.stdout.trimEnd().split("\n").slice(0, SUMMARY_FILE_CAP).join("\n")
-        summaries = parsePurposeRows(rows)
+      // Target the exact rendered files, capped.
+      const targetFiles = agg.renderedFiles.slice(0, SUMMARY_FILE_CAP)
+      if (targetFiles.length > 0) {
+        const purposeParts = [
+          "rg",
+          "--no-heading",
+          "--line-number",
+          "--color=never",
+          "-m",
+          "5",
+          "--max-filesize",
+          "1M",
+          "-e",
+          sq(PURPOSE_RE),
+          "--",
+          ...targetFiles.map(sq),
+        ]
+        const pr = await runShell(purposeParts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
+        if (pr.exitCode <= 1 && !pr.timedOut) {
+          summaries = parsePurposeRows(pr.stdout.trimEnd())
+        }
       }
     }
     yield { type: "result", result: { ok: true, output: render(agg, maxFiles, summaries) } }
