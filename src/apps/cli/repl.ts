@@ -14,6 +14,8 @@ import type { PermissionContext, PermissionMode, ToolAction } from "@/permission
 import { type PromptSource, runInteractive, runOnce } from "@/runner"
 import { logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
+import type { StreamPort } from "@/stream"
+import { TeeStream } from "@/stream"
 import { composeShellObservers } from "@/tool"
 import { loadImageBlock } from "./image-loader"
 import {
@@ -50,6 +52,7 @@ import {
   slashCompleter,
 } from "./slash-commands"
 import { installStatusBar, type StatusBar } from "./status-bar"
+import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
 
 /**
  * CLI REPL + main-orchestration body.
@@ -126,6 +129,67 @@ const buildWorkMetricsSink = (enabled: boolean): AgentConfig["workMetricsSink"] 
  *  per user turn), so newly-added SKILL.md files reach the model on the next
  *  prompt automatically. These slash commands exist for USER VISIBILITY —
  *  confirming the disk state BEFORE submitting the next prompt. */
+/** Bridge `AgentEvent`s into the live turn indicator. Implements `StreamPort`
+ *  so it can be teed alongside the existing recorder/stdout port — the
+ *  upstream emit path is unchanged (TeeStream forwards every event to every
+ *  port in order) and the indicator just sips the ones it cares about.
+ *
+ *  Sliced taxonomy (only events that move the indicator state):
+ *    - `assistant_text` / `tool_call` ⇒ `markFirstChunk` (TTFT seam — the
+ *      first emit of either is the moment the model started producing
+ *      something the user can see). Idempotent on the indicator side.
+ *    - `usage` ⇒ `updateUsage` with the cumulative token counts. Cost stays
+ *      OFF for now (no per-model price table is wired at this surface; a
+ *      future round can hand a `costUsd` in).
+ *  Every other event is ignored — the indicator is purely a UX surface, not
+ *  a trajectory recorder. Errors in the indicator are swallowed in place so
+ *  a faulty render can never poison the recorder path. */
+const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
+  emit: (event): void => {
+    try {
+      if (event.type === "assistant_text" || event.type === "tool_call") {
+        ind.markFirstChunk()
+        return
+      }
+      if (event.type === "usage") {
+        ind.updateUsage({
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+        })
+      }
+    } catch {
+      // Intentional: an indicator failure must not surface as an emit error
+      // (TeeStream would otherwise track it as a degraded record).
+    }
+  },
+})
+
+/** Build the (indicator, turnStream) pair for the REPL surface — extracted
+ *  from `runRepl` so the host stays under biome's cognitive-complexity
+ *  budget. Default-OFF byte-identical: when the indicator is disabled
+ *  (non-TTY or `QUANTA_SPINNER=0|false|off|no`) `turnStream === stream`
+ *  verbatim (no tee, no extra fan-out) so the existing recorder + stdout
+ *  port path is byte-identical to the pre-indicator code. `intervalMs`
+ *  is clamped to a finite positive integer; a bad env value (`abc`, `-5`)
+ *  falls back to the 80 ms default. */
+const buildTurnIndicatorAndStream = (
+  statusBar: StatusBar,
+  stream: StreamPort,
+  envSource: NodeJS.ProcessEnv,
+  isTTY: boolean | undefined,
+  intervalEnv: string,
+): { indicator: TurnIndicator; turnStream: StreamPort } => {
+  const enabled = isIndicatorEnabled(envSource, isTTY)
+  const intervalMs = Number(intervalEnv)
+  const indicator = createTurnIndicator({
+    statusBar,
+    enabled,
+    intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 80,
+  })
+  if (!enabled) return { indicator, turnStream: stream }
+  return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator)]) }
+}
+
 const buildSkillsCallback = (
   skillsConfig: AgentConfig["skills"] | undefined,
 ): (() => Promise<SkillRow[]>) | undefined => {
@@ -541,10 +605,40 @@ export const runRepl = async (): Promise<void> => {
   // gated on the SAME `QUANTA_METRICS` knob as the cost dashboard). Metrics OFF
   // ⇒ undefined ⇒ the loop allocates no collector (byte-identical).
   const workMetricsSink = buildWorkMetricsSink(metrics !== undefined)
+
+  // Bottom status bar — vim-style. Painted via scroll-region so it
+  // never gets shoved off-screen by LLM stream output. Default text
+  // shows provider/model/cwd/mode + the cancellation cheatsheet.
+  // (Moved here so the turn-indicator and TeeStream wiring — which both
+  // need the statusBar in hand — can run BEFORE `sessionDeps` captures
+  // the final `turnStream` reference.)
+  const home = homedir()
+  const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
+  const statusDefault = `${provider} · ${model} · ${mode} · ${shortCwd}    Esc Esc · cancel    Ctrl+C · exit`
+  const statusBar = installStatusBar(statusDefault)
+
+  // Live turn indicator (spinner + elapsed + token counter). Default-ON
+  // when stdout is a TTY; explicit `QUANTA_SPINNER=0|false|off|no` flips
+  // it off. Non-TTY surfaces (pipes, redirects, eval/bench harnesses) get
+  // a disabled indicator ⇒ `turnStream === stream` (no tee, byte-identical
+  // recorder/stdout fan-out to the pre-indicator path). See
+  // `buildTurnIndicatorAndStream` for the gate + tee construction.
+  const { indicator: turnIndicator, turnStream } = buildTurnIndicatorAndStream(
+    statusBar,
+    stream,
+    process.env,
+    process.stdout.isTTY,
+    env("QUANTA_SPINNER_INTERVAL_MS", "80"),
+  )
+
   const sessionDeps: SessionDeps = {
     llm: finalLLM,
     registry,
-    stream,
+    // `turnStream` is the indicator-tee'd port when the spinner is enabled
+    // (TTY + QUANTA_SPINNER!=0); otherwise it is the literal `stream` from
+    // `buildStreaming` so the recorder/stdout fan-out is byte-identical to
+    // the pre-indicator path on non-TTY surfaces.
+    stream: turnStream,
     permission,
     system,
     cwd,
@@ -624,14 +718,6 @@ export const runRepl = async (): Promise<void> => {
     }
   }
 
-  // Bottom status bar — vim-style. Painted via scroll-region so it
-  // never gets shoved off-screen by LLM stream output. Default text
-  // shows provider/model/cwd/mode + the cancellation cheatsheet.
-  const home = homedir()
-  const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
-  const statusDefault = `${provider} · ${model} · ${mode} · ${shortCwd}    Esc Esc · cancel    Ctrl+C · exit`
-  const statusBar = installStatusBar(statusDefault)
-
   const turn = async (text: string): Promise<void> => {
     // Per-turn AbortController + composite signal: the LLM stream sees
     // an `AbortSignal.any([outerAbort, turnAbort])`, so EITHER a hard
@@ -640,6 +726,20 @@ export const runRepl = async (): Promise<void> => {
     const turnAbort = new AbortController()
     const turnSignal = AbortSignal.any([abort.signal, turnAbort.signal])
     const cancel = installTurnCancel(turnAbort, statusBar)
+    // Spinner + elapsed + (live) token counter for the duration of THIS
+    // turn. `start()` is a no-op when the indicator is disabled (non-TTY
+    // or QUANTA_SPINNER=0); `stop()` in the `finally` is the SOLE
+    // teardown path, so an abort / error / SIGINT all reach the same
+    // clearTransient call. Wired BEFORE runOnce so the spinner is on
+    // screen at the instant the first LLM byte hits the wire.
+    turnIndicator.start()
+    // An abort during the turn (Esc-Esc / Ctrl+C) is the user's intent —
+    // tear the spinner down immediately so the status bar's default text
+    // is visible the moment the cancel fires (instead of waiting for the
+    // `finally` after runOnce unwinds, which can lag a few hundred ms on
+    // slow-network providers).
+    const onAbortStopIndicator = (): void => turnIndicator.stop()
+    turnSignal.addEventListener("abort", onAbortStopIndicator, { once: true })
 
     try {
       // ADR-0083: attach seed images to the FIRST turn only, then drain so
@@ -674,6 +774,11 @@ export const runRepl = async (): Promise<void> => {
       // A turn-scoped abort is the user's intent; swallow the error and
       // hand control back to the prompt. The outer abort still propagates
       // (the next turn will see `abort.signal.aborted === true` and skip).
+      //
+      // Stop the indicator BEFORE the error transient — `stop()` calls
+      // `clearTransient` which would otherwise wipe the error message a
+      // moment after it was painted.
+      turnIndicator.stop()
       if (turnAbort.signal.aborted && !abort.signal.aborted) return
       // Any other turn-level error MUST NOT kill the REPL — surface it
       // inline + on the status bar, then return so the next prompt fires.
@@ -681,6 +786,12 @@ export const runRepl = async (): Promise<void> => {
       process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
       statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
     } finally {
+      // SOLE indicator teardown on the happy path — idempotent on the
+      // indicator side, so a prior catch-branch `stop()` (or the abort
+      // listener firing) makes this a no-op. Listener cleanup keeps the
+      // turn's AbortSignal from leaking handlers across turns.
+      turnSignal.removeEventListener("abort", onAbortStopIndicator)
+      turnIndicator.stop()
       cancel.dispose()
     }
   }
