@@ -32,3 +32,17 @@ export type { RunInteractiveInput } from "./run-interactive"
 export { runInteractive } from "./run-interactive"
 export type { OrchestrateDeps, RunOnceInput, RunOnceResult } from "./run-once"
 export { runOnce } from "./run-once"
+export type {
+  SideChatContextInheritance,
+  SideChatInput,
+  SideChatResult,
+} from "./side-chat"
+export {
+  buildSideChatHistory,
+  buildSideChatRegistry,
+  extractAnswerText,
+  runSideChat,
+  SIDE_CHAT_DEFAULT_READ_ONLY,
+  SIDE_CHAT_FORBIDDEN,
+  SIDE_CHAT_MAX_TURNS_CAP,
+} from "./side-chat"

@@ -39,6 +39,7 @@ import { logoutCmd } from "./logout-cmd"
 import { permissionCmd } from "./permission-explain"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
+import { sideCmd, type SideChatSessionState } from "./side-cmd"
 import { statusCmd } from "./status-cmd"
 
 export interface SlashContext {
@@ -81,6 +82,11 @@ export interface SlashContext {
    *  (no LLM call) so it is safe to register without a session. Absent ⇒ the
    *  commands print "skills surface not wired in this surface" and exit 0. */
   readonly skills?: (() => Promise<SkillRow[]>) | undefined
+  /** Claude A9 `/side <q>` isolated agent loop. Wired by the REPL surface
+   *  with the live session deps + assembler + (read-only) message reference.
+   *  Absent ⇒ `/side` prints "not wired in this surface" and exits 0
+   *  (default-OFF parity for one-shot / shell-entry surfaces). */
+  readonly side?: SideChatSessionState | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
@@ -491,6 +497,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   snoozeCmd,
   resumeCmd,
   ...REWIND_COMMANDS,
+  sideCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

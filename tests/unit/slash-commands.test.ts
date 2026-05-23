@@ -63,7 +63,7 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers the documented builtins in order (/help + 5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status + /permission + /snooze + /resume + /rewind + /fork)", () => {
+  test("registers the documented builtins in order (15 commands: /help + surface + skills + auth + permission + idle + rewind + fork + side)", () => {
     // `/rewind` + `/fork` are env-gated (QUANTA_REWIND, default "1"). The
     // unit-test environment leaves the var unset → both commands are
     // registered. A separate test in `rewind-cmd.test.ts` covers the
@@ -86,6 +86,7 @@ describe("BUILTINS table", () => {
       "/resume",
       "/rewind",
       "/fork",
+      "/side",
     ])
   })
 })
