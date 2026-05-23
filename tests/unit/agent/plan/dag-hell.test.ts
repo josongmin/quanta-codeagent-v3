@@ -264,6 +264,7 @@ describe("topologicalSort: cycle returns {cycle: [...]}", () => {
     const out = topologicalSort(build([todo("A", ["B"]), todo("B", ["A"])]))
     expect(Array.isArray(out)).toBe(false)
     if (Array.isArray(out)) throw new Error("unreachable")
+    if (!("cycle" in out)) throw new Error("unreachable")
     expect(Array.isArray(out.cycle)).toBe(true)
     expect(out.cycle.length).toBeGreaterThanOrEqual(2)
   })
@@ -272,6 +273,7 @@ describe("topologicalSort: cycle returns {cycle: [...]}", () => {
     // self-dep is rejected by validateDag, but topologicalSort treats it as cycle.
     const out = topologicalSort(build([todo("Loop", ["Loop"])]))
     if (Array.isArray(out)) throw new Error("expected cycle, got array")
+    if (!("cycle" in out)) throw new Error("unreachable")
     expect(out.cycle).toContain("Loop")
   })
 })

@@ -52,6 +52,20 @@ import type { ShellExecObserver } from "./shell-exec-types"
  * Adding a new seam: append a paragraph here, define the mirror type below the
  * interface, and wire it from the agent-side composition root — never from a
  * `@/tool` file.
+ *
+ * STRUCTURAL EQUIVALENCE WITH THE PRODUCER. Closed-union mirrors here
+ * (`GitWriteProtectReason`, `BlockerSurface`) cannot be checked by a
+ * cross-slice `satisfies` clause inside this file — `@/tool` may NOT import
+ * from `@/agent` or `@/permission` (RFC §3.1; biome enforces). Equivalence is
+ * therefore CONVENTION + TWO BACKSTOPS:
+ *   1. The literal-anchor tuples at the bottom of THIS file (`*_MIRROR`) pin
+ *      the in-slice mirror to a constant set — drift between the mirror and
+ *      the anchor is a `tsc` error here.
+ *   2. A consumer-side round-trip test in `tests/unit/` (which CAN see both
+ *      slices) asserts the anchor matches the producer's `ALL_*` array — drift
+ *      between the producer and the mirror is a TEST failure there.
+ * The earlier doc claim that this file held a real cross-slice compile-time
+ * assertion was incorrect; it has been removed.
  */
 export interface ToolContext {
   cwd: string
@@ -93,14 +107,155 @@ export interface ToolContext {
    *  returned string is the opaque reason tag surfaced to the model. Absent ⇒
    *  no git-write guard (byte-identical legacy path). */
   gitWriteGuard?: GitWriteGuard
+  /** ADR-0093 (draft) — OPTIONAL plan-state mutator. The 4 plan tools
+   *  (`create_plan` / `update_todos` / `update_plan` / `remove_todos`) route
+   *  every mutation through this duck-typed handle. Duck-typed so `@/tool`
+   *  never imports `@/agent/plan` (slice isolation, RFC 3.1): the dispatch
+   *  seam adapts `AgentConfig.planStore` into a {@link PlanMutator}.
+   *  Structural mirror of canonical `PlanStore` — every error-code and
+   *  delta-kind is a string literal matching the producer's
+   *  `PlanMutationError["kind"]` / `PlanDeltaKind`. Absent ⇒ the 4 plan
+   *  tools are NOT registered (default-OFF byte-identical for every
+   *  existing session). */
+  planMutator?: PlanMutator
 }
+
+// ── Plan-mode duck-typed mirror (ADR-0093 draft) ─────────────────────────
+
+/** Mirror of `PlanDeltaKind` from `@/agent/plan/types`. Adding a value MUST
+ *  extend the producer's union (compile error there) AND this literal here. */
+export type PlanDeltaKind =
+  | "created"
+  | "todos_added"
+  | "todos_updated"
+  | "todos_removed"
+  | "phases_reordered"
+  | "noop"
+
+/** Mirror of `PlanMutationError["kind"]` from `@/agent/plan/types`. Adding a
+ *  value MUST extend the producer's union AND this literal here. */
+export type PlanMutationErrorCode =
+  | "version_conflict"
+  | "todo_not_found"
+  | "phase_not_found"
+  | "dependency_cycle"
+  | "dependency_unknown"
+  | "self_dependency"
+  | "content_too_long"
+  | "invalid_status_transition"
+  | "duplicate_id"
+  | "empty_plan_create"
+
+/** Mutator-side result. ok-true carries the post-mutation version + delta
+ *  kind + touched ids (the surface needed to re-fetch / animate). ok-false
+ *  carries the typed reason code + human message. NEVER throws. */
+export type PlanMutationResult =
+  | {
+      readonly ok: true
+      readonly version: number
+      readonly deltaKind: PlanDeltaKind
+      readonly touchedIds: readonly string[]
+    }
+  | {
+      readonly ok: false
+      readonly reason: string
+      readonly code: PlanMutationErrorCode
+    }
+
+/** Readonly summary view of the current plan (size signals + meta) — the
+ *  surface tools can poll without dragging the whole plan through the seam.
+ *  Full plan-state lives behind the producer; cross-slice flow stays by-value. */
+export interface PlanReadonlyView {
+  readonly version: number
+  readonly name: string
+  readonly overview: string
+  readonly isProject: boolean
+  readonly todoCount: number
+  readonly phaseCount: number
+}
+
+/** Duck-typed mirror of the producer-side `PlanStore` (`@/agent/plan/state.ts`).
+ *  Tools call `ctx.planMutator?.{create,addTodos,updateTodos,removeTodos,
+ *  updateMeta,reorderPhases}` and consume the typed result. The dispatch seam
+ *  (composition root) builds a concrete `PlanMutator` from `AgentConfig.planStore`
+ *  by adapting the producer's `PlanResult<PlanDelta>` to {@link PlanMutationResult}. */
+/** Mirror NewTodo input shape — zod-compatible (`| undefined` on optionals). */
+export interface PlanMutatorNewTodo {
+  content: string
+  status?: string | undefined
+  dependencies?: readonly string[] | undefined
+  phaseId?: string | undefined
+  assignee?: string | undefined
+  verifyHint?: string | undefined
+}
+
+export interface PlanMutatorTodoPatch {
+  id: string
+  content?: string | undefined
+  status?: string | undefined
+  dependencies?: readonly string[] | undefined
+  phaseId?: string | null | undefined
+  assignee?: string | null | undefined
+  verifyHint?: string | null | undefined
+}
+
+export interface PlanMutator {
+  create(args: {
+    name: string
+    overview: string
+    isProject?: boolean | undefined
+    todos: readonly PlanMutatorNewTodo[]
+    phases?: readonly { name: string; todoIndexes?: readonly number[] | undefined }[] | undefined
+  }): PlanMutationResult
+  addTodos(items: readonly PlanMutatorNewTodo[], expectedVersion: number): PlanMutationResult
+  updateTodos(
+    patches: readonly PlanMutatorTodoPatch[],
+    merge: boolean,
+    expectedVersion: number,
+  ): PlanMutationResult
+  removeTodos(ids: readonly string[], expectedVersion: number): PlanMutationResult
+  updateMeta(
+    args: {
+      name?: string | undefined
+      overview?: string | undefined
+      isProject?: boolean | undefined
+      phaseOrder?: readonly string[] | undefined
+    },
+    expectedVersion: number,
+  ): PlanMutationResult
+  current(): PlanReadonlyView | null
+}
+
+/**
+ * Closed-union mirror of `GitWriteProtectReason` from
+ * `@/permission/git-write-guard` (kept here so `@/tool` stays slice-isolated
+ * from `@/permission` — RFC §3.1; biome enforces the fence). The producer
+ * `gitWriteProtectReason` returns exactly these 5 literals or `null`.
+ *
+ * MIRROR INVARIANT — adding a 6th protect reason requires updating BOTH
+ * `src/permission/git-write-guard.ts` (the producer) AND this declaration. The
+ * `@/tool` slice CANNOT import from `@/permission` to verify structurally, so
+ * the slice fence makes this a manual sync — reviewers MUST check on PR. A
+ * round-trip integration test in `tests/unit/` (consumer side, which CAN see
+ * both slices) catches drift at test time. The `STRUCTURAL_HASH` constant at
+ * the bottom of this file is a literal anchor a future reader can grep for.
+ */
+export type GitWriteProtectReason =
+  | "git_hooks"
+  | "git_hooks_dir"
+  | "git_config"
+  | "git_attributes"
+  | "editor_config"
 
 /** Duck-typed git-write-protection detector injected via {@link ToolContext}.
  *  Structural mirror of `gitWriteProtectReason` from `@/permission/git-write-
  *  guard` (kept here so `@/tool` stays slice-isolated from `@/permission`):
- *  PURE path-pattern matcher, no I/O. Returns an opaque reason tag string when
- *  writing `path` would be a code-execution / policy-escape vector, else null. */
-export type GitWriteGuard = (path: string) => string | null
+ *  PURE path-pattern matcher, no I/O. Returns a closed-union reason tag when
+ *  writing `path` would be a code-execution / policy-escape vector, else null.
+ *  The return type is the closed `GitWriteProtectReason | null` (NOT `string`)
+ *  so a new producer literal becomes a compile error at every exhaustive
+ *  consumer site, instead of widening through this mirror. */
+export type GitWriteGuard = (path: string) => GitWriteProtectReason | null
 
 /** ADR-0086 plan-exit decision — structural mirror of `PlanExitDecision`
  *  (`@/agent/plan-exit`); dispatch bridges the two by value. */
@@ -131,9 +286,16 @@ export interface WorkingStateHandle {
 }
 
 /** Mirror of `BlockerSurface` from `@/agent/working-state` (kept here so
- *  `@/tool` is slice-isolated from `@/agent`). Adding a new surface requires
- *  updating BOTH sides — the compile-time assertion at the bottom of this
- *  file enforces structural equivalence. */
+ *  `@/tool` is slice-isolated from `@/agent`).
+ *
+ *  MIRROR INVARIANT — structural equivalence is CONVENTION-ONLY: the slice
+ *  fence (`@/tool` may NOT import `@/agent`) prevents a cross-slice
+ *  `Equals<>`/`satisfies` compile check inside this file. Adding a new
+ *  surface requires updating BOTH `src/agent/working-state.ts` AND this
+ *  declaration; reviewers MUST verify on PR, and a consumer-side round-trip
+ *  test in `tests/unit/` (which CAN see both slices) catches drift. The
+ *  `STRUCTURAL_HASH` constant at the bottom of this file is a literal
+ *  anchor a future reader can grep for. */
 export type BlockerSurface = "type" | "owner" | "wire" | "test" | "runtime" | "build" | "other"
 
 /** Structural duck-typed mirror of `WorkingState` (kept here so `@/tool` is
@@ -388,21 +550,38 @@ export interface ToolSecurityHooks<I = unknown> {
  *                                `registry.run` (also `@/subagent/tools-6`).
  *   - `toModelOutput`          → `factory.renderToolOutput` + `registry.run`.
  *   - `supportsDeferredResults` → `@/tool/deferred` registry + dispatch.
+ *
+ * @deprecated AS A GROUP — every field on this interface is currently set by
+ * ZERO production tools (the subagent's external `outputSchema` use is the
+ * only live consumer surface). The dispatch/factory wiring is retained because
+ * deleting it risks breaking that external use; new built-in tools SHOULD NOT
+ * opt in. Prefer: (a) put structured payloads in the `output` text directly,
+ * (b) keep result rendering inside the tool (`result.output` IS the model-
+ * facing text), (c) use the orchestrator's polling for long-running work
+ * rather than an in-band deferred handle. If you genuinely need one of these,
+ * file an ADR — the audit decision is to NOT delete (would break the seam,
+ * not just callers) but also NOT to grow new use.
  */
 export interface ToolResultShape<O = unknown> {
-  /** Schema for the tool's STRUCTURED result (`ToolResult.structured`). When
-   *  present, the dispatch seam validates the structured payload via
-   *  {@link validateToolOutput}; a mismatch is surfaced as an `ok:false`
-   *  ToolResult instructing the model to retry — never thrown past the loop.
-   *  Absent ⇒ no structured-output contract (byte-identical). */
+  /** @deprecated Schema for the tool's STRUCTURED result
+   *  (`ToolResult.structured`). When present, the dispatch seam validates the
+   *  structured payload via {@link validateToolOutput}; a mismatch is surfaced
+   *  as an `ok:false` ToolResult instructing the model to retry — never thrown
+   *  past the loop. Absent ⇒ no structured-output contract (byte-identical).
+   *  No built-in tool sets this today; the subagent's external use is the
+   *  only live consumer. Prefer placing structured data in `output` directly. */
   outputSchema: z.ZodType<O>
-  /** Produce a COMPACT, model-facing rendering of a result, distinct from the
-   *  richer UI/`output` text, to save tokens. When absent the dispatch seam
-   *  uses `result.output` as today (byte-identical). */
+  /** @deprecated Produce a COMPACT, model-facing rendering of a result,
+   *  distinct from the richer UI/`output` text, to save tokens. When absent
+   *  the dispatch seam uses `result.output` as today (byte-identical). No
+   *  built-in tool sets this today; keep rendering inside the tool so
+   *  `result.output` is the single source of model-facing text. */
   toModelOutput(result: ToolResult): string
-  /** When `true`, this tool may return a deferred result (a `{type:"deferred"}`
-   *  event or `ToolResult.deferred`) that a `DeferredResultRegistry` resolves
-   *  later. Absent/false ⇒ synchronous only. */
+  /** @deprecated When `true`, this tool may return a deferred result (a
+   *  `{type:"deferred"}` event or `ToolResult.deferred`) that a
+   *  `DeferredResultRegistry` resolves later. Absent/false ⇒ synchronous only.
+   *  No built-in tool sets this today; prefer the orchestrator's polling over
+   *  in-band deferred handles. */
   supportsDeferredResults: boolean
 }
 
@@ -412,10 +591,22 @@ export interface ToolResultShape<O = unknown> {
  * `factory.driveStreamingInput` + `@/agent/tool-input-streaming`, but no
  * built-in tool sets these today. All three are individually optional and
  * side-effecting only — the parsed input is still passed to `execute`.
+ *
+ * @deprecated AS A GROUP — zero production tools set any of these. The
+ * dispatch wiring is retained for a possible future opt-in (deleting would
+ * break the seam, not just callers), but new built-in tools SHOULD NOT
+ * implement them; let `execute(input, ctx)` receive the parsed input as
+ * today. File an ADR if you have a real streaming-input use case.
  */
 export interface ToolStreamingInput<I = unknown> {
+  /** @deprecated No built-in tool implements this; the parsed input is
+   *  delivered to `execute(input, ctx)` directly. */
   onInputStart(): void
+  /** @deprecated No built-in tool implements this; the parsed input is
+   *  delivered to `execute(input, ctx)` directly. */
   onInputDelta(delta: string): void
+  /** @deprecated No built-in tool implements this; the parsed input is
+   *  delivered to `execute(input, ctx)` directly. */
   onInputAvailable(input: I): void
 }
 
@@ -433,3 +624,64 @@ export interface ToolSpec {
   input_schema: Record<string, unknown>
   aliases?: string[]
 }
+
+/**
+ * SEAM-MIRROR STRUCTURAL HASH (literal anchor; no cross-slice import).
+ *
+ * The `@/tool` slice CANNOT import from `@/agent` or `@/permission` (RFC §3.1
+ * slice fence; biome enforces structurally), so a direct cross-slice
+ * `Equals<>`/`satisfies` compile check is impossible HERE. The closed-union
+ * mirrors above (`GitWriteProtectReason`, `BlockerSurface`) are documented as
+ * convention-only — reviewers verify on PR and a consumer-side round-trip test
+ * in `tests/unit/` (which CAN see both slices) catches drift at test time.
+ *
+ * This `as const` tuple is a literal grep anchor: a future drift in the union
+ * literal MUST be reflected here too, and a consumer-side test asserts the
+ * tuple matches the producer's `ALL_*` array. The `satisfies` clauses below
+ * are pure in-slice checks — they verify the tuple's literal set matches THIS
+ * file's mirror exactly (catches drift between the mirror and the anchor).
+ *
+ * If you add a 6th `GitWriteProtectReason`:
+ *   1. add the literal to the producer (`src/permission/git-write-guard.ts`).
+ *   2. add it to the mirror union above.
+ *   3. add it to this anchor tuple.
+ *   4. extend `ALL_GIT_WRITE_PROTECT_REASONS` in the producer.
+ * Steps 2-3 are local — the satisfies below will fail to compile if you skip
+ * either. Steps 1+4 are caught by the consumer-side round-trip test.
+ */
+export const GIT_WRITE_PROTECT_REASONS_MIRROR = [
+  "git_hooks",
+  "git_hooks_dir",
+  "git_config",
+  "git_attributes",
+  "editor_config",
+] as const satisfies ReadonlyArray<GitWriteProtectReason>
+
+export const BLOCKER_SURFACES_MIRROR = [
+  "type",
+  "owner",
+  "wire",
+  "test",
+  "runtime",
+  "build",
+  "other",
+] as const satisfies ReadonlyArray<BlockerSurface>
+
+// In-slice structural check: every literal in the closed mirror union must
+// appear in the anchor tuple. A `satisfies` on the other direction — every
+// anchor entry is a valid union member — is enforced by the `as const
+// satisfies ReadonlyArray<…>` above. Together they pin the set exactly.
+type _GitWriteProtectReasonAnchorCoversUnion =
+  GitWriteProtectReason extends (typeof GIT_WRITE_PROTECT_REASONS_MIRROR)[number]
+    ? true
+    : { error: "GIT_WRITE_PROTECT_REASONS_MIRROR is missing a union member" }
+type _BlockerSurfaceAnchorCoversUnion =
+  BlockerSurface extends (typeof BLOCKER_SURFACES_MIRROR)[number]
+    ? true
+    : { error: "BLOCKER_SURFACES_MIRROR is missing a union member" }
+// Force evaluation — if either lookup degrades to the error object the
+// assignment fails at `tsc`, producing the message above.
+const _gitWriteProtectReasonAnchorCheck: _GitWriteProtectReasonAnchorCoversUnion = true
+const _blockerSurfaceAnchorCheck: _BlockerSurfaceAnchorCoversUnion = true
+void _gitWriteProtectReasonAnchorCheck
+void _blockerSurfaceAnchorCheck
