@@ -403,6 +403,10 @@ export const runRepl = async (): Promise<void> => {
     cwd,
     initialSessionId: sessionId,
     slog,
+    // CLI surface wires the legacy `session: <id>` log line — keeps
+    // byte-identical output while @/runner stays surface-agnostic
+    // (no @/shared#logger dependency in the resume-fsm core).
+    onSessionMinted: (id) => logger.info(`session: ${id}`),
   })
   // HIGH-5: `--new-session --resume <id>` is ambiguous (which id wins?). The
   // sentinel surfaces from resolveResume; print a clear error + exit 1

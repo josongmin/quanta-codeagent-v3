@@ -2,7 +2,6 @@ import { loadSession } from "@/agent"
 import type { Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
-import { logger } from "@/shared"
 
 /**
  * Session-resume state machine — surface-AGNOSTIC.
@@ -36,6 +35,13 @@ export interface ResolveResumeInput {
   cwd: string
   initialSessionId: string
   slog: StructuredLogger
+  /** Surface-supplied hook fired ONCE when a fresh session id is minted via
+   *  `--new-session`. Lets the CLI surface emit its legacy `session: <id>` log
+   *  line without coupling the runner slice to `@/shared#logger`. Absent ⇒
+   *  silent (Web/Tauri may prefer structured `slog.info` only, which fires
+   *  unconditionally regardless of this hook). Byte-identical default-OFF:
+   *  CLI passes the hook in its shim so the log line is preserved verbatim. */
+  onSessionMinted?: (id: string) => void
 }
 
 /** Resolved session-startup state. `idMeta` is `undefined` when the run is in
@@ -72,7 +78,7 @@ export const defaultUntitled = (now: number): string =>
  *  - `--resume <id-like>`        → V2 id-mode (loadSessionById, idMeta set)
  *  - `--new-session [--title t]` → V2 id-mode (fresh id, stub saved) */
 export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeResolution> => {
-  const { resume, newSession, title, cwd, initialSessionId, slog } = input
+  const { resume, newSession, title, cwd, initialSessionId, slog, onSessionMinted } = input
   // HIGH-5: `--new-session --resume <id>` previously silently ignored
   // `--new-session` because the `if (resume !== undefined)` branch returned
   // first. Reject the combination up front so the caller can exit 1 with a
@@ -149,7 +155,7 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
       archived: false,
     }
     await saveSessionById(idMeta, { reason: "fresh", turns: 0, messages: [] })
-    logger.info(`session: ${newId}`)
+    onSessionMinted?.(newId)
     slog.info("session.id_mode.on", {
       id: idMeta.id,
       title: idMeta.title,
