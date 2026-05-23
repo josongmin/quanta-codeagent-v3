@@ -1,6 +1,12 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
@@ -22,7 +28,9 @@
       "complexity": {
         "noExcessiveCognitiveComplexity": {
           "level": "warn",
-          "options": { "maxAllowedComplexity": 15 }
+          "options": {
+            "maxAllowedComplexity": 15
+          }
         }
       }
     }
@@ -43,11 +51,19 @@
     }
   },
   "files": {
-    "includes": ["**", "!node_modules", "!dist", "!**/*.d.ts", "!tests/smoke/fixtures"]
+    "includes": [
+      "**",
+      "!node_modules",
+      "!dist",
+      "!**/*.d.ts",
+      "!tests/smoke/fixtures"
+    ]
   },
   "overrides": [
     {
-      "includes": ["**/src/llm/**"],
+      "includes": [
+        "**/src/llm/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -63,8 +79,21 @@
                   "@/permission": "Slice isolation (RFC 3.1): only @/agent may cross slices",
                   "@/runtime": "Slice isolation (RFC 3.1): only @/agent may cross slices",
                   "@/lsp": "Slice isolation (RFC 3.1): only @/agent may cross slices",
-                  "@/observability": "Slice isolation (RFC 3.1): only @/agent may cross slices"
-                }
+                  "@/observability": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -72,7 +101,9 @@
       }
     },
     {
-      "includes": ["**/src/tool/**"],
+      "includes": [
+        "**/src/tool/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -85,8 +116,20 @@
                   "@/stream": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
                   "@/permission": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
                   "@/lsp": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
-                  "@/observability": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared"
-                }
+                  "@/observability": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -94,7 +137,9 @@
       }
     },
     {
-      "includes": ["**/src/memory/**"],
+      "includes": [
+        "**/src/memory/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -108,8 +153,21 @@
                   "@/permission": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
                   "@/lsp": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
                   "@/observability": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
-                  "@/llm": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -117,7 +175,9 @@
       }
     },
     {
-      "includes": ["**/src/storage/**"],
+      "includes": [
+        "**/src/storage/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -133,8 +193,21 @@
                   "@/runtime": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
                   "@/lsp": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
                   "@/observability": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
-                  "@/llm": "Slice isolation (RFC 3.1): @/storage depends on @/shared only"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -142,7 +215,9 @@
       }
     },
     {
-      "includes": ["**/src/stream/**"],
+      "includes": [
+        "**/src/stream/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -158,8 +233,21 @@
                   "@/runtime": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
                   "@/lsp": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
                   "@/observability": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
-                  "@/llm": "Slice isolation (RFC 3.1): @/stream depends on @/shared only"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -167,7 +255,9 @@
       }
     },
     {
-      "includes": ["**/src/permission/**"],
+      "includes": [
+        "**/src/permission/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -183,8 +273,21 @@
                   "@/runtime": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
                   "@/lsp": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
                   "@/observability": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
-                  "@/llm": "Slice isolation (RFC 3.1): @/permission depends on @/shared only"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -192,7 +295,9 @@
       }
     },
     {
-      "includes": ["**/src/runtime/**"],
+      "includes": [
+        "**/src/runtime/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -207,8 +312,21 @@
                   "@/permission": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
                   "@/lsp": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
                   "@/observability": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
-                  "@/llm": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -216,7 +334,9 @@
       }
     },
     {
-      "includes": ["**/src/lsp/**"],
+      "includes": [
+        "**/src/lsp/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -232,8 +352,21 @@
                   "@/permission": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
                   "@/runtime": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
                   "@/observability": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
-                  "@/llm": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -241,7 +374,9 @@
       }
     },
     {
-      "includes": ["**/src/mcp/**"],
+      "includes": [
+        "**/src/mcp/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -258,8 +393,21 @@
                   "@/runtime": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
                   "@/lsp": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
                   "@/observability": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
-                  "@/llm": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -267,7 +415,9 @@
       }
     },
     {
-      "includes": ["**/src/observability/**"],
+      "includes": [
+        "**/src/observability/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -283,8 +433,21 @@
                   "@/permission": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
                   "@/runtime": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
                   "@/lsp": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
-                  "@/llm": "Slice isolation (RFC 3.1): @/observability depends on @/shared only"
-                }
+                  "@/llm": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -292,7 +455,9 @@
       }
     },
     {
-      "includes": ["**/src/subagent/**"],
+      "includes": [
+        "**/src/subagent/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -309,8 +474,21 @@
                   "@/lsp": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
                   "@/observability": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
                   "@/llm": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
-                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles"
-                }
+                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -318,7 +496,9 @@
       }
     },
     {
-      "includes": ["**/src/skill/**"],
+      "includes": [
+        "**/src/skill/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -335,8 +515,21 @@
                   "@/lsp": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
                   "@/observability": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
                   "@/llm": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
-                  "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles"
-                }
+                  "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -344,7 +537,9 @@
       }
     },
     {
-      "includes": ["**/src/session/**"],
+      "includes": [
+        "**/src/session/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -362,8 +557,21 @@
                   "@/lsp": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
                   "@/observability": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
                   "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
-                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles"
-                }
+                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -371,7 +579,9 @@
       }
     },
     {
-      "includes": ["**/src/migration/**"],
+      "includes": [
+        "**/src/migration/**"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -391,8 +601,21 @@
                   "@/observability": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
                   "@/subagent": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
                   "@/skill": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
-                  "@/session": "Slice isolation (ADR-0038): @/migration depends on @/shared only"
-                }
+                  "@/session": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }
@@ -403,6 +626,20 @@
       "includes": [
         "src/**",
         "!src/apps/**",
+        "!src/llm/**",
+        "!src/tool/**",
+        "!src/memory/**",
+        "!src/storage/**",
+        "!src/stream/**",
+        "!src/permission/**",
+        "!src/runtime/**",
+        "!src/lsp/**",
+        "!src/mcp/**",
+        "!src/observability/**",
+        "!src/subagent/**",
+        "!src/skill/**",
+        "!src/session/**",
+        "!src/migration/**",
         "tests/**",
         "!tests/unit/cli-summarizer.test.ts",
         "!tests/unit/cli-session-commands.test.ts",
@@ -419,7 +656,8 @@
         "!tests/integration/session-ux-e2e.test.ts",
         "!tests/integration/session-chaos-and-attack.test.ts",
         "!tests/integration/session-stress-and-concurrent.test.ts",
-        "!tests/integration/cli-export-assembly.test.ts"
+        "!tests/integration/cli-export-assembly.test.ts",
+        "!tests/integration/skills-slash-e2e-hellgate.test.ts"
       ],
       "linter": {
         "rules": {
@@ -429,7 +667,11 @@
               "options": {
                 "patterns": [
                   {
-                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**"
+                    ],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
