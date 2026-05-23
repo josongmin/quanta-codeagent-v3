@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { z } from "zod"
 import { runShell } from "@/runtime"
 import { byteCompare } from "@/shared"
@@ -55,6 +56,37 @@ const SUMMARY_FILE_CAP = 200
 const SUMMARY_LEN = 80
 
 const sq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
+
+/**
+ * Collect jail-validated absolute paths of existing ignore files under
+ * `scopeRoot`. Checks, in declared order:
+ *   1. `.quantaignore`       — quanta's own ignore file
+ *   2. `.cursorignore`       — Cursor compat (do-not-process)
+ *   3. `.cursorindexignore`  — Cursor compat (do-not-index)
+ *
+ * Each candidate is resolved via `resolveJailed(name, jailRoot)` where
+ * `jailRoot` is `ctxCwd`. A symlink pointing outside the jail throws
+ * `FsJailError`, which is caught and silently skipped. Missing files are
+ * silently skipped. Returns only the paths that both pass the jail check AND
+ * exist on disk, preserving declaration order.
+ */
+export const collectIgnoreFiles = (scopeRoot: string, ctxCwd: string): string[] => {
+  const names = [".quantaignore", ".cursorignore", ".cursorindexignore"]
+  const result: string[] = []
+  for (const name of names) {
+    const candidate = `${scopeRoot}/${name}`
+    try {
+      const jailed = resolveJailed(candidate, ctxCwd)
+      if (existsSync(jailed)) {
+        result.push(jailed)
+      }
+    } catch (e) {
+      if (e instanceof FsJailError) continue
+      throw e
+    }
+  }
+  return result
+}
 
 /** Count path depth relative to the scope root (number of `/` segments). */
 const depthOf = (rel: string): number => rel.split("/").length - 1
@@ -198,6 +230,15 @@ export const fileTreeSummaryTool: Tool<Input> = {
     // the search root. We `cd` into the scope via cwd so the rows are scope-
     // relative; an explicit jailed path is passed as the search root instead.
     const parts = ["rg", "--files", "--color=never"]
+    // Honor .quantaignore / .cursorignore / .cursorindexignore when present in
+    // the scope root. Each valid, existing file is appended as --ignore-file
+    // in declaration order. Missing files and jail-escaping symlinks are
+    // silently skipped (invariant: no ignore files → argv byte-identical to
+    // before this change).
+    const scopeRoot = jailedPath ?? ctx.cwd
+    for (const ignoreFile of collectIgnoreFiles(scopeRoot, ctx.cwd)) {
+      parts.push("--ignore-file", sq(ignoreFile))
+    }
     if (jailedPath !== undefined) parts.push(sq(jailedPath))
     const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
 
