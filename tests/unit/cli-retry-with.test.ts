@@ -340,9 +340,11 @@ describe("/retry-with — slash dispatch", () => {
     expect(messages.length).toBe(2)
   })
 
-  test("BUILTINS table now includes /retry-with at the end", async () => {
+  test("BUILTINS table now includes /retry-with (and /help anchors index 0)", async () => {
     const { BUILTINS } = await import("../../src/apps/cli/slash-commands")
     expect(BUILTINS.map((c) => c.name)).toEqual([
+      // `/help` is registered first so it can render the full LIVE table.
+      "/help",
       "/context",
       "/usage",
       "/color",

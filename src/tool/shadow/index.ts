@@ -2,9 +2,9 @@
  *  assembly layer registers them ONLY when `AgentConfig.shadowOdb` is set,
  *  mirroring `branch_search` from ADR-0083. */
 import type { ShadowOdb } from "@/storage/shadow-odb"
+import type { Tool } from "../types"
 import { shadowRewindTool } from "./rewind"
 import { shadowSnapshotsTool } from "./snapshots"
-import type { Tool } from "../types"
 
 export {
   type ShadowRewindInput,

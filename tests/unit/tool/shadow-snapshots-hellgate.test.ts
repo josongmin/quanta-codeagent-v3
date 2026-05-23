@@ -31,10 +31,9 @@ const fakeOdb = (overrides?: Partial<ShadowOdb>): FakeOdb => {
     diffSinceLast: async () => "",
     diffWorkspaceSinceLast: async () => "",
     rewindToLast: async () => {},
-    listSnapshots: async (workspaceRoot: string) => {
-      calls.push({ workspaceRoot })
-      return []
-    },
+    // Plain default; the wrapper below is the sole call-recorder (avoids
+    // double-counting when a test supplies its own `listSnapshots`).
+    listSnapshots: async () => [],
     cleanup: async () => 0,
   }
   const merged: ShadowOdb = { ...base, ...(overrides ?? {}) }

@@ -40,18 +40,16 @@ const fakeOdb = (overrides?: Partial<ShadowOdb>): FakeOdb => {
     registerHead: async () => "sha-1",
     diffSinceLast: async () => "",
     diffWorkspaceSinceLast: async () => "",
-    rewindToLast: async (workspaceRoot: string, opts) => {
-      // Capture argument shape (incl. absent vs explicit-undefined keys).
-      calls.push({
-        workspaceRoot,
-        opts: opts === undefined ? undefined : { ...opts },
-      })
-    },
+    // Plain no-op default; the wrapper below is the sole recorder so we
+    // never double-count when a test passes its own `rewindToLast` override.
+    rewindToLast: async () => {},
     listSnapshots: async () => [],
     cleanup: async () => 0,
   }
   const merged: ShadowOdb = { ...base, ...(overrides ?? {}) }
-  // If overrides replaced rewindToLast, wrap so we still record the call.
+  // Single source of truth for call-recording — wraps whatever rewindToLast
+  // is in effect (default no-op OR a test-supplied override) so callers
+  // never need to remember to push into `calls` themselves.
   const finalRewind = merged.rewindToLast
   merged.rewindToLast = async (workspaceRoot, opts) => {
     calls.push({

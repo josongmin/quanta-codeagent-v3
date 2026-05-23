@@ -14,13 +14,7 @@ import { type ShadowOdb, ShadowOdbError } from "@/storage/shadow-odb"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 export const shadowSnapshotsInputSchema = z.object({
-  limit: z
-    .number()
-    .int()
-    .positive()
-    .max(200)
-    .optional()
-    .describe("Cap on entries (default: all)"),
+  limit: z.number().int().positive().max(200).optional().describe("Cap on entries (default: all)"),
 })
 export type ShadowSnapshotsInput = z.infer<typeof shadowSnapshotsInputSchema>
 
@@ -33,6 +27,24 @@ const truncate = (s: string): string => {
 
 /** Format a unix timestamp as a deterministic UTC ISO string (no ms suffix). */
 const fmtTs = (sec: number): string => new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z")
+
+/** Render a non-empty snapshot list to the model-facing output text. Extracted
+ *  from `execute` so the generator body stays under the cognitive-complexity
+ *  cap (biome `noExcessiveCognitiveComplexity`). */
+const renderSnapshotList = (
+  snaps: readonly { ref: string; sha: string; timestampSec: number }[],
+  limit: number | undefined,
+): string => {
+  const cap = limit ?? snaps.length
+  const shown = snaps.slice(0, cap)
+  const plural = snaps.length === 1 ? "" : "s"
+  const showing = cap < snaps.length ? ` (showing ${cap})` : ""
+  const header = `${snaps.length} snapshot${plural}${showing}:`
+  const lines = shown.map(
+    (s, i) => `  ${i + 1}. ${s.ref}  ${s.sha.slice(0, 12)}  ${fmtTs(s.timestampSec)}`,
+  )
+  return truncate([header, ...lines].join("\n"))
+}
 
 export const shadowSnapshotsTool = (odb: ShadowOdb): Tool<ShadowSnapshotsInput> => ({
   name: "shadow_snapshots",
@@ -70,18 +82,9 @@ export const shadowSnapshotsTool = (odb: ShadowOdb): Tool<ShadowSnapshotsInput> 
       }
       return
     }
-    const cap = parsed.data.limit ?? snaps.length
-    const shown = snaps.slice(0, cap)
-    const header =
-      `${snaps.length} snapshot${snaps.length === 1 ? "" : "s"}` +
-      (cap < snaps.length ? ` (showing ${cap})` : "") +
-      ":"
-    const lines = shown.map(
-      (s, i) => `  ${i + 1}. ${s.ref}  ${s.sha.slice(0, 12)}  ${fmtTs(s.timestampSec)}`,
-    )
     yield {
       type: "result",
-      result: { ok: true, output: truncate([header, ...lines].join("\n")) },
+      result: { ok: true, output: renderSnapshotList(snaps, parsed.data.limit) },
     }
   },
 })
