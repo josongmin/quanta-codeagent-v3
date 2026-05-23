@@ -25,6 +25,7 @@ type MinimalTreeAgg = {
   deepRollup: Map<string, number>
   total: number
   truncated: boolean
+  renderedFiles: string[]
 }
 
 const makeAgg = (overrides: Partial<MinimalTreeAgg> = {}): MinimalTreeAgg => ({
@@ -32,6 +33,7 @@ const makeAgg = (overrides: Partial<MinimalTreeAgg> = {}): MinimalTreeAgg => ({
   deepRollup: new Map(),
   total: 1,
   truncated: false,
+  renderedFiles: ["a.ts"],
   ...overrides,
 })
 
@@ -167,10 +169,13 @@ describe("C. Enforcement OFF (no capEnforcer)", () => {
     // Temporarily ensure env flag is unset
     const prev = process.env.QUANTA_CAP_ENFORCE
     delete process.env.QUANTA_CAP_ENFORCE
+    const { __resetRuntimeConfig } = await import("@/shared/runtime-config")
+    __resetRuntimeConfig()
     const { buildCapEnforcer } = await import("@/agent/cap-enforcer")
     const result = buildCapEnforcer(undefined)
     expect(result).toBeUndefined()
     if (prev !== undefined) process.env.QUANTA_CAP_ENFORCE = prev
+    __resetRuntimeConfig()
   })
 
   test("CAP-C2: CapEnforcer built when capEnforce=true", async () => {
@@ -183,12 +188,15 @@ describe("C. Enforcement OFF (no capEnforcer)", () => {
   test("CAP-C3: CapEnforcer built when QUANTA_CAP_ENFORCE=1 env set", async () => {
     const prev = process.env.QUANTA_CAP_ENFORCE
     process.env.QUANTA_CAP_ENFORCE = "1"
+    const { __resetRuntimeConfig } = await import("@/shared/runtime-config")
+    __resetRuntimeConfig()
     const { buildCapEnforcer, CapEnforcer: CE } = await import("@/agent/cap-enforcer")
     const result = buildCapEnforcer(undefined)
     expect(result).not.toBeUndefined()
     expect(result).toBeInstanceOf(CE)
     if (prev !== undefined) process.env.QUANTA_CAP_ENFORCE = prev
     else delete process.env.QUANTA_CAP_ENFORCE
+    __resetRuntimeConfig()
   })
 })
 

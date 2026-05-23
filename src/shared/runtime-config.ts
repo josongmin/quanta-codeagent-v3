@@ -107,6 +107,10 @@ export interface RuntimeConfig {
   readonly compactTokens: number | undefined
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
+  /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
+   *  Default false — opt-in seam that injects a system-reminder when a tool's
+   *  prior `nextAction` is ignored on the next call against the same target. */
+  readonly capEnforce: boolean
   /** Git SHA stamp for trajectory `producer.gitSha`. Set by the launcher
    *  (CI, dev script). Absent ⇒ field omitted from trajectory events. */
   readonly gitSha: string | undefined
@@ -213,6 +217,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     logLevel: parseLogLevel(env["QUANTA_LOG_LEVEL"]),
     compactTokens: parsePositiveInt(env["QUANTA_COMPACT_TOKENS"], "QUANTA_COMPACT_TOKENS"),
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
+    capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),
     pricingVersion: stringOrUndef(env["QUANTA_PRICING_VERSION"]),
     sessionsDir: stringOrUndef(env["QUANTA_SESSIONS_DIR"]),

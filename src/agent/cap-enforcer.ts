@@ -23,6 +23,7 @@
  * via the `never` default arm.
  */
 
+import { runtimeConfig } from "@/shared/runtime-config"
 import type { NextAction } from "@/tool"
 
 /** Stable key for a (toolName, targetPath) pair. `targetPath` is the
@@ -145,9 +146,11 @@ export class CapEnforcer {
 }
 
 /** Return a CapEnforcer instance when the env flag or config boolean is set,
- *  `undefined` otherwise (DEFAULT-OFF, zero allocation). */
+ *  `undefined` otherwise (DEFAULT-OFF, zero allocation). The env channel is
+ *  read via `runtimeConfig().capEnforce` so garbage values are validated +
+ *  logged at startup (root-cause scanner invariant). */
 export const buildCapEnforcer = (capEnforce?: boolean): CapEnforcer | undefined => {
   if (capEnforce === true) return new CapEnforcer()
-  if (process.env.QUANTA_CAP_ENFORCE === "1") return new CapEnforcer()
+  if (runtimeConfig().capEnforce) return new CapEnforcer()
   return undefined
 }

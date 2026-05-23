@@ -12,6 +12,7 @@ import {
 } from "@/observability"
 import { normalizeRedactionConfig, redactSecrets } from "@/security"
 import { errMessage, LLMError } from "@/shared"
+import { buildCapEnforcer } from "./cap-enforcer"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import {
@@ -19,7 +20,6 @@ import {
   type ConversationSummaryArchive,
   createArchive,
 } from "./conversation-summary-archive"
-import { buildCapEnforcer } from "./cap-enforcer"
 import { DedupGate } from "./dispatch-dedup"
 import { effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
