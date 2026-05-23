@@ -66,7 +66,9 @@
       "@/ui": ["./src/ui/index.ts"],
       "@/ui/*": ["./src/ui/*"],
       "@/runner": ["./src/runner/index.ts"],
-      "@/runner/*": ["./src/runner/*"]
+      "@/runner/*": ["./src/runner/*"],
+      "@/ipc": ["./src/ipc/index.ts"],
+      "@/ipc/*": ["./src/ipc/*"]
     }
   },
   "include": ["src", "tests", "tools"],

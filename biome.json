@@ -624,6 +624,51 @@
     },
     {
       "includes": [
+        "**/src/ipc/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — @/ipc is a surface-agnostic event bridge and must not touch rules.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — @/ipc does not touch raw patches.",
+                  "@/migration": "Slice isolation (RFC 3.1): @/migration is a one-off translator slice — @/ipc does not own session-format translation."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/**",
+                      "**/src/apps/**"
+                    ],
+                    "message": "Surface isolation: @/ipc is a surface-AGNOSTIC event bridge slice. It must NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench, apps/eval, apps/probe). Surface entries depend on @/ipc, never the reverse. ENV/argv/HTTP/IPC parsing belongs in the surface; @/ipc takes plain typed config and injected transports."
+                  },
+                  {
+                    "group": [
+                      "node:readline",
+                      "node:readline/promises",
+                      "node:tty",
+                      "node:repl"
+                    ],
+                    "message": "Surface coupling: @/ipc is surface-agnostic. CLI-specific node modules (readline / readline/promises / tty / repl) are terminal-only and belong in apps/cli. Accept a port (StdioReader / StdioWriter) and let the surface inject the concrete implementation."
+                  },
+                  {
+                    "group": [
+                      "node:process"
+                    ],
+                    "message": "Surface coupling: named imports from node:process (env, argv, stdin, stdout, stderr, …) are a literal-rename bypass of the @/ipc surface-agnostic invariant. process.exit / process.on / process.cwd (via the global) remain allowed because they are not surface-coupled. For env/argv/stdio, the surface entry (apps/cli, apps/web, apps/tauri) parses node:process and passes typed config / StdioReader/Writer ports into @/ipc."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
         "**/src/runner/**"
       ],
       "linter": {
@@ -679,6 +724,7 @@
         "!src/permission/**",
         "!src/runtime/**",
         "!src/runner/**",
+        "!src/ipc/**",
         "!src/lsp/**",
         "!src/mcp/**",
         "!src/observability/**",
