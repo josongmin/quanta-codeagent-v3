@@ -262,6 +262,8 @@ export const toAnthropicToolChoice = (
 export class AnthropicAdapter implements LLMPort {
   private readonly client: Anthropic
   readonly model: string
+  readonly provider = "anthropic"
+  readonly authMode = "Anthropic BYOK"
   private readonly maxTokens: number
   readonly betaHeaders: readonly string[]
   /** T1 stream-hang guard: pinned at construction (env knobs + optional

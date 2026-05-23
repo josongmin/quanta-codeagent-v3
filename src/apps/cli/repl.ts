@@ -19,6 +19,7 @@ import { logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { composeShellObservers } from "@/tool"
 import { loadImageBlock } from "./image-loader"
+import { AbortError, readLine } from "./raw-line-reader"
 import {
   argvImages,
   argvPrompt,
@@ -44,7 +45,13 @@ import {
 import { runSessionCommand } from "./session-commands"
 import { persistTurn, switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
-import { isSlashCommand, runSlashCommand, type SkillRow } from "./slash-commands"
+import {
+  describeSlashCommand,
+  isSlashCommand,
+  runSlashCommand,
+  type SkillRow,
+  slashCompleter,
+} from "./slash-commands"
 
 /**
  * CLI REPL + main-orchestration body.
@@ -189,12 +196,62 @@ export const runReplLoop = async (
   }
 }
 
+/** Production REPL loop with REAL `<Tab>` autocompletion.
+ *
+ *  Bun's `node:readline` polyfill ignores the `completer` option (probe-
+ *  verified 2026-05), so this variant bypasses readline entirely and reads
+ *  lines via raw-mode keypress events through {@link readLine}. Sibling
+ *  prompts (permission confirm) that don't need completion still go through
+ *  an ad-hoc `readline/promises` `question()` — see `runRepl`.
+ *
+ *  Kept separate from {@link runReplLoop} so the existing readline-based
+ *  test harness (`tests/unit/apps/cli/skills-slash-hellgate.test.ts`) is
+ *  unaffected: tests inject a fake readline through `runReplLoop`; the CLI
+ *  entry point dispatches to `runReplLoopRaw` instead. */
+export const runReplLoopRaw = async (
+  signal: AbortSignal,
+  turn: (text: string) => Promise<void>,
+  slashCtx?: Partial<{ skills: () => Promise<SkillRow[]> }>,
+): Promise<void> => {
+  process.stderr.write("\n")
+  while (!signal.aborted) {
+    let input: string
+    try {
+      input = (
+        await readLine({
+          prompt: "quanta› ",
+          completer: (line) => slashCompleter(line)[0],
+          signal,
+        })
+      ).trim()
+    } catch (e) {
+      if (e instanceof AbortError) return
+      throw e
+    }
+    if (input === "") {
+      process.stderr.write("\n")
+      continue
+    }
+    if (input === "/exit" || input === "/quit") break
+    if (await tryRunReplSlash(input, slashCtx)) {
+      process.stderr.write("\n")
+      continue
+    }
+    await turn(input)
+    process.stderr.write("\n")
+  }
+}
+
 /** Route `quanta session …` to the session subcommand dispatcher. Returns the
  *  exit code so the caller can `process.exit(...)`. None of the agent/REPL
  *  wiring runs in this branch — that's how byte-identical default-OFF holds
  *  when no `session` subcommand is given. */
 export const runSessionMain = async (): Promise<number> => {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+    completer: slashCompleter,
+  })
   const code = await runSessionCommand(process.argv.slice(3), {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
@@ -304,10 +361,19 @@ export const runRepl = async (): Promise<void> => {
   const retryingLLM = new RetryingLLM({ inner: llm, signal: abort.signal })
   const finalLLM = composeLLM(retryingLLM, provider, abort.signal, mode, permission, slog)
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+  // No persistent readline.Interface: the REPL prompt now goes through
+  // `runReplLoopRaw` (raw-mode keypress reader with real Tab completion —
+  // Bun's `node:readline` ignores the `completer` option), and the
+  // permission-confirm prompt opens an ad-hoc readline only when it fires
+  // so the two never compete for stdin events.
   const onConfirm = async (action: ToolAction): Promise<boolean> => {
-    const ans = await rl.question(`Allow ${action.tool}? [y/N] `)
-    return ans.trim().toLowerCase() === "y"
+    const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
+    try {
+      const ans = await adhoc.question(`Allow ${action.tool}? [y/N] `)
+      return ans.trim().toLowerCase() === "y"
+    } finally {
+      adhoc.close()
+    }
   }
 
   const argPrompt = argvPrompt()
@@ -433,14 +499,12 @@ export const runRepl = async (): Promise<void> => {
       await turn(argPrompt)
     } else {
       const skillsCb = buildSkillsCallback(skillsConfig)
-      await runReplLoop(
-        rl,
+      await runReplLoopRaw(
         abort.signal,
         turn,
         skillsCb !== undefined ? { skills: skillsCb } : undefined,
       )
     }
-    rl.close()
   } finally {
     await shutdownMcp()
   }

@@ -81,6 +81,10 @@ describe("ide.runMode — config assembly", () => {
     expect(cfgSeen?.branchSearch?.defaultN).toBe(3)
     expect(cfgSeen?.branchSearch?.defaultVerifierKinds).toEqual(["tsc", "lint"])
     expect(cfgSeen?.branchSearch?.isolation).toBe("worktree")
+    // IDE budget is human-near (interactive): 60s per branch. Pin the value so
+    // a refactor of `IDE_BRANCH_TIMEOUT_MS` to a different number cannot
+    // silently change the interactive-mode default.
+    expect(cfgSeen?.branchSearch?.timeoutPerBranchMs).toBe(60_000)
   })
 
   test("caller-supplied branchSearch overrides the ide default", async () => {

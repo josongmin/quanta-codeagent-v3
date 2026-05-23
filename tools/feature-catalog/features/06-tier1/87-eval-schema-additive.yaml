@@ -3,8 +3,8 @@ title: Eval 스키마 additive 필드 (keyed metrics / token·cost / run status�
 section: 6
 subsystem: 로컬 eval 저장 (Cursor EvalTrackingService 흡수, ADR-0087)
 order: 87
-maturity: L3
-status: refined
+maturity: L5
+status: stable
 purpose: |
   Cursor aiserver.v1.EvalTrackingService에서 typed shape 3개만 흡수 — JSONL
   append-only eval 저장(schema.ts, zod 없음 plain TS)에 OPTIONAL·additive 필드 추가.
@@ -24,7 +24,8 @@ evidence:
     unit:
       - tests/unit/eval-schema-additive.test.ts
       - tests/unit/eval-runner-token-cost.test.ts
-    integration: []
+    integration:
+      - tests/integration/eval-additive-hellgate.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
@@ -39,3 +40,7 @@ notes: |
   byte-identical. score?를 교체가 아니라 보강(병존). PAYLOAD_KINDS 디스크리미네이터 불변 →
   result-store.readAll/coverage-matrix narrowing 무회귀. metrics[]는 아직 per-scenario
   manual emit이 없어 runner가 채우지 않음(named-axis 메트릭은 호출자가 향후 채울 seam).
+  L4→L5 (2026-05-23): 실 LLM `bun run eval synthetic` 1회 실행으로 disk artifact
+  evals/runs/20260523-112433-synthetic-065dda76e815.jsonl 생성 — RunSummaryRecord에
+  `status:"finished" + params:{model:"claude-sonnet-4-6"}` 정확히 persist 확인됨.
+  스키마 additive 필드가 mock 게이트뿐 아니라 실 모델 경로에서도 byte-stable로 흐름.

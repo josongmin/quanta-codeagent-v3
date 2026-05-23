@@ -16,8 +16,17 @@
  *
  * No logger — plain console.log/console.error.
  */
-import { access, mkdir, readFile, writeFile } from "node:fs/promises"
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
+import {
+  type AdrRecord,
+  type AuditReport,
+  formatAuditReport,
+  parseAdrStatus,
+  runAudit,
+} from "./audit"
+import { parseDiffNameStatus, runCheckChanged } from "./check-changed"
+import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lint"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
 import {
   type Feature,
@@ -47,6 +56,9 @@ function usage(): never {
       "  add <section> <slug>",
       "  diff               compare current MD with fresh render",
       "  check-evidence     verify evidence files exist",
+      "  audit              4-lens sweep (orphan ADRs / orphan src / empty stubs)",
+      "  lint [--update-baseline]   ratchet on empty stubs + orphan Accepted ADRs",
+      "  check-changed [<base-ref>]  PR-time gate: new src files must be in fc",
     ].join("\n"),
   )
   process.exit(2)
@@ -211,6 +223,147 @@ async function cmdCheckEvidence(): Promise<void> {
   await cmdValidate()
 }
 
+/** True iff this file path counts as a src-tracked .ts file (excludes tests,
+ *  type-only declarations, and barrel re-exports). */
+function isTrackedSrcFile(path: string, basename: string): boolean {
+  if (!path.endsWith(".ts")) return false
+  if (path.endsWith(".test.ts") || path.endsWith(".spec.ts") || path.endsWith(".d.ts")) return false
+  if (basename === "index.ts") return false
+  return true
+}
+
+/** Walk a directory recursively and return repo-relative .ts paths, excluding
+ *  test/spec/d.ts/barrel files. Pure I/O helper for cmdAudit. */
+async function collectSrcFiles(root = "src"): Promise<string[]> {
+  const out: string[] = []
+  async function walk(dir: string): Promise<void> {
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = (await readdir(resolve(ROOT, dir), {
+        withFileTypes: true,
+      })) as unknown as import("node:fs").Dirent[]
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) {
+        await walk(p)
+      } else if (e.isFile() && isTrackedSrcFile(p, e.name)) {
+        out.push(p)
+      }
+    }
+  }
+  await walk(root)
+  return out.sort()
+}
+
+/** Read all ADRs from docs/decisions/ and parse their status fields. */
+async function collectAdrs(dir = "docs/decisions"): Promise<AdrRecord[]> {
+  let entries: string[]
+  try {
+    entries = await readdir(resolve(ROOT, dir))
+  } catch {
+    return []
+  }
+  const out: AdrRecord[] = []
+  for (const name of entries) {
+    const m = /^(\d{4})-.*\.md$/.exec(name)
+    if (!m || m[1] === undefined) continue
+    const number = Number(m[1])
+    if (!Number.isFinite(number)) continue
+    const text = await readFile(resolve(ROOT, dir, name), "utf8")
+    out.push({ number, status: parseAdrStatus(text) })
+  }
+  return out.sort((a, b) => a.number - b.number)
+}
+
+/** Run all three audit lenses by reading the real filesystem. */
+async function buildAuditReport(): Promise<AuditReport> {
+  const [features, srcFiles, adrs] = await Promise.all([
+    loadFeaturesStrict(FEATURES_DIR),
+    collectSrcFiles("src"),
+    collectAdrs("docs/decisions"),
+  ])
+  return runAudit({ features, srcFiles, adrs })
+}
+
+async function cmdAudit(): Promise<void> {
+  const report = await buildAuditReport()
+  console.log(formatAuditReport(report))
+}
+
+async function cmdLint(argv: string[]): Promise<void> {
+  const updateBaseline = argv.includes("--update-baseline")
+  const report = await buildAuditReport()
+
+  if (updateBaseline) {
+    const next = snapshotBaseline(report)
+    await saveFcBaseline(next)
+    console.log(
+      `lint: baseline updated — empty_stubs_max=${next.empty_stubs_max}, ` +
+        `orphan_adrs_grandfathered=[${next.orphan_adrs_grandfathered.join(", ")}]`,
+    )
+    return
+  }
+
+  const baseline = await loadFcBaseline()
+  const result = runLint(report, baseline)
+  for (const w of result.warnings) console.error(`warn: ${w}`)
+  if (!result.ok) {
+    for (const e of result.errors) console.error(`error: ${e}`)
+    console.error(
+      `lint: ${result.errors.length} error(s) — empty stubs=${report.counts.emptyStubs}/${baseline.empty_stubs_max} ` +
+        `orphan Accepted ADRs=${report.counts.orphanAdrs}`,
+    )
+    process.exit(1)
+  }
+  console.log(
+    `lint: ok — empty stubs=${report.counts.emptyStubs}/${baseline.empty_stubs_max} ` +
+      `orphan Accepted ADRs=${report.counts.orphanAdrs} (grandfathered)`,
+  )
+}
+
+async function cmdCheckChanged(argv: string[]): Promise<void> {
+  const base = argv[0] ?? "origin/main"
+  // Use git via the system shell; we don't have a direct git lib and one-shot
+  // child process is sufficient.
+  const proc = Bun.spawnSync(["git", "diff", "--name-status", `${base}...HEAD`], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (proc.exitCode !== 0) {
+    const err = new TextDecoder().decode(proc.stderr)
+    console.error(`check-changed: \`git diff ${base}...HEAD\` failed: ${err.trim()}`)
+    process.exit(1)
+  }
+  const stdout = new TextDecoder().decode(proc.stdout)
+  const diff = parseDiffNameStatus(stdout)
+  const features = await loadFeaturesStrict(FEATURES_DIR)
+  const result = runCheckChanged(diff, features)
+
+  if (result.modifiedUntracked.length > 0) {
+    console.error(
+      `check-changed: ${result.modifiedUntracked.length} modified file(s) not in any fc evidence (informational):`,
+    )
+    for (const p of result.modifiedUntracked) console.error(`  ${p}`)
+  }
+
+  if (!result.ok) {
+    console.error(
+      `check-changed: ${result.addedUntracked.length} ADDED file(s) not in any fc evidence — BLOCK:`,
+    )
+    for (const p of result.addedUntracked) console.error(`  ${p}`)
+    console.error(
+      "Add an fc entry referencing these in `evidence.code`, or extend an existing entry.",
+    )
+    process.exit(1)
+  }
+  console.log(
+    `check-changed: ok — ${diff.length} file(s) in diff, all added src files referenced in fc`,
+  )
+}
+
 // --- Helpers ---------------------------------------------------------------
 
 function pad2(n: number): string {
@@ -308,6 +461,15 @@ async function main(): Promise<void> {
     case "check-evidence":
       await cmdCheckEvidence()
       return
+    case "audit":
+      await cmdAudit()
+      return
+    case "lint":
+      await cmdLint(rest)
+      return
+    case "check-changed":
+      await cmdCheckChanged(rest)
+      return
     case undefined:
     case "-h":
     case "--help":
@@ -329,4 +491,18 @@ if (import.meta.main) {
 
 export type { Feature, LoadedFeature }
 // For tests / programmatic use
-export { cmdAdd, cmdBuild, cmdDiff, cmdList, cmdShow, cmdValidate, main }
+export {
+  buildAuditReport,
+  cmdAdd,
+  cmdAudit,
+  cmdBuild,
+  cmdCheckChanged,
+  cmdDiff,
+  cmdLint,
+  cmdList,
+  cmdShow,
+  cmdValidate,
+  collectAdrs,
+  collectSrcFiles,
+  main,
+}

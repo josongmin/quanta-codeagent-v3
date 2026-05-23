@@ -13,7 +13,6 @@ const ALLOWED_ENV = [
   "PATH",
   "HOME",
   "LANG",
-  "LC_ALL",
   "TZ",
   "TMPDIR",
   // Allow ssh/https auth state if present — read-only ops may consult a
@@ -23,11 +22,48 @@ const ALLOWED_ENV = [
   "GIT_SSH_COMMAND",
 ]
 
-const buildEnv = (): Record<string, string> => {
+/**
+ * Deterministic env overrides for every git invocation (Codex §18.7
+ * absorption — ADR-0105). These are HARD-SET regardless of what the parent
+ * environment has, because:
+ *
+ *  - `GIT_OPTIONAL_LOCKS=0` — git's "optional locks" are advisory locks
+ *    around index reads (e.g. `git status` writes the index to refresh
+ *    stat cache). Concurrent agent reads can lock-contend with a user's
+ *    interactive shell; disabling optional locks makes our reads
+ *    side-effect-free.
+ *  - `GIT_PAGER=cat` / `PAGER=cat` — git defaults to `less` for any
+ *    output > one screenful; in a non-TTY child process this hangs
+ *    waiting for stdin. `cat` is a pass-through.
+ *  - `LC_ALL=C` — locale-independent output. Without this, `git status`
+ *    / `git log` may emit translated messages depending on user locale,
+ *    breaking our parsers.
+ *  - `TERM=dumb` — disable color/escape sequences in git's output, which
+ *    pollute our parsers.
+ *  - `GIT_TERMINAL_PROMPT=0` — never prompt for credentials interactively;
+ *    a missing credential is a clean failure, not a hang.
+ *
+ * Exported (via {@link buildGitEnv}) so the test suite can pin the contract
+ * without spawning a real git process.
+ */
+const DETERMINISTIC_ENV: Readonly<Record<string, string>> = {
+  GIT_OPTIONAL_LOCKS: "0",
+  GIT_PAGER: "cat",
+  PAGER: "cat",
+  LC_ALL: "C",
+  TERM: "dumb",
+  GIT_TERMINAL_PROMPT: "0",
+}
+
+export const buildGitEnv = (): Record<string, string> => {
   const out: Record<string, string> = {}
   for (const k of ALLOWED_ENV) {
     const v = process.env[k]
     if (typeof v === "string") out[k] = v
+  }
+  // Deterministic overrides come LAST so they win over any pass-through.
+  for (const [k, v] of Object.entries(DETERMINISTIC_ENV)) {
+    out[k] = v
   }
   return out
 }
@@ -45,7 +81,7 @@ export const defaultGitRunner: GitRunner = {
   async run(args, cwd, signal): Promise<GitRunResult> {
     const proc = Bun.spawn(["git", ...args], {
       cwd,
-      env: buildEnv(),
+      env: buildGitEnv(),
       stdout: "pipe",
       stderr: "pipe",
     })

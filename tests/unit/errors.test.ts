@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  errMessage,
   LLMError,
   PermissionDeniedError,
   QuantaError,
@@ -116,5 +117,39 @@ describe("toError", () => {
   test("always returns an Error instance", () => {
     expect(toError(undefined)).toBeInstanceOf(Error)
     expect(toError(true)).toBeInstanceOf(Error)
+  })
+})
+
+describe("errMessage", () => {
+  // Pinned: matches the legacy inline pattern `e instanceof Error ? e.message
+  // : String(e)` byte-identically. A regression here would silently change
+  // 70+ migrated call sites' log/error text shape. Includes a regression
+  // guard for the infinite-recursion bug introduced when a sed pass replaced
+  // the function body with `errMessage(e)` and self-resolved against itself.
+  test("Error → e.message (verbatim)", () => {
+    expect(errMessage(new Error("boom"))).toBe("boom")
+    class Custom extends Error {}
+    expect(errMessage(new Custom("sub"))).toBe("sub")
+  })
+
+  test("non-Error → String(e) (NOT JSON-stringify — that is toError's policy)", () => {
+    expect(errMessage("plain")).toBe("plain")
+    expect(errMessage(42)).toBe("42")
+    expect(errMessage(null)).toBe("null")
+    expect(errMessage(undefined)).toBe("undefined")
+    expect(errMessage(true)).toBe("true")
+    // Object stays "[object Object]" — matching legacy String(e) behavior so
+    // call-site migration is byte-identical. (toError would JSON-stringify.)
+    expect(errMessage({ a: 1 })).toBe("[object Object]")
+  })
+
+  test("regression: does NOT recurse on itself (returns synchronously)", () => {
+    // If errMessage were ever `(e) => errMessage(e)` (the sed-self-match bug
+    // that landed once and was hand-fixed) this resolves nothing and the
+    // stack overflows. A passing assertion below proves termination.
+    const start = Date.now()
+    const out = errMessage(new Error("x"))
+    expect(out).toBe("x")
+    expect(Date.now() - start).toBeLessThan(50) // conservative: ms, not seconds
   })
 })

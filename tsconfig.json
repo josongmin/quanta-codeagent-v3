@@ -60,7 +60,9 @@
       "@/patch": ["./src/patch/index.ts"],
       "@/patch/*": ["./src/patch/*"],
       "@/security": ["./src/security/index.ts"],
-      "@/security/*": ["./src/security/*"]
+      "@/security/*": ["./src/security/*"],
+      "@/auth": ["./src/auth/index.ts"],
+      "@/auth/*": ["./src/auth/*"]
     }
   },
   "include": ["src", "tests", "tools"],

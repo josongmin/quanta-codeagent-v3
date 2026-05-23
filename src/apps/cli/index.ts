@@ -1,4 +1,4 @@
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { loadEnvFiles } from "./dotenv"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { isSlashCommand } from "./slash-commands"
@@ -56,7 +56,7 @@ const main = async (): Promise<void> => {
 // trajectory the loop is still finalising. If a rejection actually reaches
 // here it indicates a contract bug somewhere; the log line names it.
 process.on("unhandledRejection", (reason) => {
-  const msg = reason instanceof Error ? reason.message : String(reason)
+  const msg = errMessage(reason)
   logger.error(`unhandled rejection (defense-in-depth): ${msg}`)
 })
 

@@ -1,5 +1,9 @@
+import { existsSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import type { LLMProvider } from "@/shared/errors"
 import { AnthropicAdapter } from "./adapters/anthropic"
+import { ChatGPTOAuthAdapter } from "./adapters/chatgpt-oauth"
 import { OpenAIAdapter } from "./adapters/openai"
 import type { LLMPort } from "./ports"
 
@@ -15,14 +19,21 @@ export type Provider = LLMProvider
 export const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-6",
   openai: "gpt-5-mini",
+  // ChatGPT-OAuth subscription path. The Codex-only `gpt-5-codex` slug is
+  // rejected by chatgpt.com backend ("not supported when using Codex with
+  // a ChatGPT account"), so we default to the flagship `gpt-5` instead —
+  // available on Plus/Pro/Team/Business/Enterprise tiers. Override with
+  // `QUANTA_MODEL=<slug>` (e.g. `gpt-5-pro` on Pro, `o1`, `gpt-4o`).
+  "chatgpt-oauth": "gpt-5",
 }
 
-/** Per-provider env var holding the API key, in the precedence order the call
- *  sites used. Centralized so {@link pickProvider} and {@link createLLM} agree
- *  on what "the key for this provider" means. */
+/** Per-provider env var holding the API key. The `chatgpt-oauth` entry is a
+ *  sentinel — that provider's credential lives on disk (token store), not in
+ *  an env var; `createLLM` short-circuits the env lookup for it. */
 const API_KEY_ENV: Record<Provider, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
+  "chatgpt-oauth": "__CHATGPT_OAUTH_ON_DISK__",
 }
 
 /** Options accepted by {@link createLLM}. The union of everything the three
@@ -63,17 +74,21 @@ export class MissingApiKeyError extends Error {
   }
 }
 
+/** Read-only env shape (forward declaration — full doc lower in the file). */
+type EnvLikeDecl = Record<string, string | undefined>
+
 /** Registry: provider → adapter constructor. Adding a provider = one entry
  *  here (plus the `DEFAULT_MODEL` / `API_KEY_ENV` entries), NOT an if-chain
- *  edit. Each builder receives the resolved key/model and the raw options so it
- *  can pick the knobs its adapter understands (baseURL for OpenAI, betaHeaders
- *  for Anthropic) — unknown knobs are simply ignored, matching the prior
- *  per-site `buildLLM`. */
+ *  edit. Each builder receives the resolved key/model, the raw options, and
+ *  the canonical env source — env is passed through (not read from
+ *  `process.env`) so the SSOT invariant from the file header holds: this
+ *  factory never touches the global env itself. The chatgpt-oauth adapter
+ *  uses env to locate the on-disk token bundle. */
 const ADAPTER_REGISTRY: Record<
   Provider,
-  (apiKey: string, model: string, opts: CreateLLMOptions) => LLMPort
+  (apiKey: string, model: string, opts: CreateLLMOptions, env: EnvLikeDecl) => LLMPort
 > = {
-  openai: (apiKey, model, opts) =>
+  openai: (apiKey, model, opts, _env) =>
     new OpenAIAdapter({
       apiKey,
       model,
@@ -84,7 +99,7 @@ const ADAPTER_REGISTRY: Record<
         : {}),
       ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
     }),
-  anthropic: (apiKey, model, opts) =>
+  anthropic: (apiKey, model, opts, _env) =>
     new AnthropicAdapter({
       apiKey,
       model,
@@ -95,6 +110,13 @@ const ADAPTER_REGISTRY: Record<
         : {}),
       ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
     }),
+  // ChatGPT-OAuth provider (ADR-0094 Phase 2). The api-key argument is unused
+  // — the credential is the on-disk token bundle written by `/login`. `env`
+  // is forwarded so the adapter resolves OAuth config (issuer/sku/originator)
+  // and locates `~/.quanta/auth/chatgpt.json` without reading process.env
+  // directly.
+  "chatgpt-oauth": (_apiKey, model, _opts, env) =>
+    new ChatGPTOAuthAdapter({ model, env }),
 }
 
 /** Read-only view of the env we consult for provider selection / keys. The
@@ -105,14 +127,30 @@ const ADAPTER_REGISTRY: Record<
  *  sites (`cli`/`bench`/`eval`) pass their already-loaded env. */
 export type EnvLike = Record<string, string | undefined>
 
-/** Canonical provider selection — the impl the three call sites duplicated and
- *  then let drift. Precedence: explicit `QUANTA_PROVIDER` (when valid) → first
- *  provider whose key env var is set (anthropic before openai) → `anthropic`.
- *  Validity check uses {@link DEFAULT_MODEL} keys so it stays in lockstep with
- *  the registry. */
+/** Cheap sync probe — does a ChatGPT-OAuth token file exist on disk? Used
+ *  by {@link pickProvider} so a logged-in user gets `chatgpt-oauth` without
+ *  having to set `QUANTA_PROVIDER`. The probe checks file existence only;
+ *  token validity (expiry / signature) is established when the adapter
+ *  actually streams (it refreshes on the fly if needed). */
+const hasChatgptOAuthToken = (env: EnvLike): boolean => {
+  const home = env.QUANTA_PREFS_HOME ?? join(homedir(), ".quanta")
+  return existsSync(join(home, "auth", "chatgpt.json"))
+}
+
+/** Canonical provider selection. Precedence (top wins):
+ *   1. Explicit `QUANTA_PROVIDER` (when it names a registered provider).
+ *   2. ChatGPT-OAuth token on disk — the user ran `/login` so the
+ *      subscription path is their stated intent.
+ *   3. `ANTHROPIC_API_KEY` env (BYOK Anthropic).
+ *   4. `OPENAI_API_KEY` env (BYOK OpenAI).
+ *   5. Fallback default: `anthropic`.
+ *
+ *  Validity check uses {@link DEFAULT_MODEL} keys so the explicit branch
+ *  stays in lockstep with the registry. */
 export const pickProvider = (env: EnvLike): Provider => {
   const explicit = env.QUANTA_PROVIDER
   if (explicit !== undefined && explicit in DEFAULT_MODEL) return explicit as Provider
+  if (hasChatgptOAuthToken(env)) return "chatgpt-oauth"
   if (env.ANTHROPIC_API_KEY !== undefined) return "anthropic"
   if (env.OPENAI_API_KEY !== undefined) return "openai"
   return "anthropic"
@@ -136,6 +174,13 @@ const resolveApiKey = (
  *             baseURL when not passed explicitly. Passed by the composition
  *             root so the factory never reads `process.env` itself. */
 export const createLLM = (provider: Provider, opts: CreateLLMOptions, env: EnvLike): LLMPort => {
+  // ChatGPT-OAuth has no env-var credential — short-circuit the api-key
+  // resolution so MissingApiKeyError never fires for it. The adapter itself
+  // reads the on-disk token bundle when it actually streams.
+  if (provider === "chatgpt-oauth") {
+    const model = opts.model ?? DEFAULT_MODEL[provider]
+    return ADAPTER_REGISTRY[provider]("", model, opts, env)
+  }
   const apiKey = resolveApiKey(provider, opts, env)
   if (apiKey === undefined) throw new MissingApiKeyError(provider)
   const model = opts.model ?? DEFAULT_MODEL[provider]
@@ -147,7 +192,7 @@ export const createLLM = (provider: Provider, opts: CreateLLMOptions, env: EnvLi
       ? { baseURL: env.OPENAI_BASE_URL }
       : {}),
   }
-  return ADAPTER_REGISTRY[provider](apiKey, model, merged)
+  return ADAPTER_REGISTRY[provider](apiKey, model, merged, env)
 }
 
 /** Null-on-missing-key variant of {@link createLLM} for callers (bench, eval)
@@ -158,6 +203,11 @@ export const tryCreateLLM = (
   opts: CreateLLMOptions,
   env: EnvLike,
 ): LLMPort | null => {
+  // ChatGPT-OAuth: env-var key is irrelevant; the credential is on disk.
+  // Phase 1 adapter can't make a wire call, so callers wanting "skip when
+  // no credential" should probe the token store directly (Phase 2 will
+  // surface a cleaner capability handle here).
+  if (provider === "chatgpt-oauth") return createLLM(provider, opts, env)
   if (resolveApiKey(provider, opts, env) === undefined) return null
   return createLLM(provider, opts, env)
 }

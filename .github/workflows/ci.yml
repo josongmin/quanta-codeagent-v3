@@ -44,6 +44,32 @@ jobs:
           fi
       - name: integration
         run: bun test tests/integration
+      - name: feature-catalog — validate + diff + ratchet
+        # Hard-gates on:
+        #   validate     — every evidence file/ADR/test exists
+        #   diff         — docs/10.feature-catalog.md is in sync with YAMLs
+        #   lint         — empty-stub count + orphan Accepted ADRs do not grow
+        # PR-only check-changed gate runs in the `feature-catalog-pr` job below.
+        run: |
+          bun fc validate
+          bun fc diff
+          bun fc lint
+
+  feature-catalog-pr:
+    name: feature-catalog (PR — added src must be in fc)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the merge base to diff against; fetch full history.
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: check-changed (added src files must be in fc evidence.code)
+        run: bun fc check-changed origin/${{ github.event.pull_request.base.ref }}
 
   contract:
     name: contract (docker + language servers)

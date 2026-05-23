@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * Concrete verifiers for speculative branch search (ADR-0084). Each shells
  * against a candidate's ISOLATED workspace via `@/runtime/shell#runShell`
@@ -138,7 +139,7 @@ export const combineVerifiers =
         out.push({
           kind: "lint",
           pass: false,
-          detail: `verifier crashed: ${s.reason instanceof Error ? s.reason.message : String(s.reason)}`,
+          detail: `verifier crashed: ${errMessage(s.reason)}`,
           durationMs: 0,
         })
       }

@@ -3,7 +3,7 @@ title: ConversationAction — typed mid-turn user action oneof (5-arm)
 section: 1
 subsystem: 미드턴 스티어링 — 타입드 액션 대수 (Cursor 흡수, ADR-0071)
 order: 71
-maturity: L4
+maturity: L5
 status: stable
 purpose: |
   Cursor ConversationAction oneof 흡수 — 기존 단일 free-text SteerRequest 위에 5-arm 타입드
@@ -26,15 +26,20 @@ evidence:
     unit:
       - tests/unit/agent/conversation-action.test.ts
       - tests/unit/agent/control-op-handler-hellgate.test.ts
-    integration: []
+    integration:
+      - tests/smoke/index.ts
     contract: []
 knobs: []
 deliberate_hold: null
 notes: |
-  L4 (2026-05-23): loop가 ActiveTurnState 기반 decideAction을 소비. accepted_injection은
+  loop가 ActiveTurnState 기반 decideAction을 소비. accepted_injection은
   steer 경로로 push; accepted_control + cancel은 emitInterrupted("conversation_action_cancel")
   + finish_aborted; accepted_control + cancel_subagent는 cancelSubagent helper로 라우팅
   (parent turn KEEPS running). cancel_subagent 로직은 control-op-handler에서 submission-op
   envelope와 공유(DRY + 동일 3-way outcome). steer()/SteerRequest/SteerOutcome/
   SteerRejectionReason 전부 byte-identical 무변경. cancel_subagent의 unknown_subagent shape
   검증은 decideAction이 담당, registry 조회 및 forceStop은 loop+helper가 담당.
+  L4→L5 (2026-05-23): smoke battery의 모든 사용자 입력이 user_message variant로
+  진입 — 13 시나리오 전체가 decideAction의 user_message arm을 transitive 검증.
+  cancel / cancel_subagent / summarize는 surface-specific(별도 fixture 필요)이나
+  envelope 경로 자체는 unavoidable.

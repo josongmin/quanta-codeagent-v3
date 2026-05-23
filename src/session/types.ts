@@ -21,6 +21,14 @@ export interface SessionMeta {
   createdAt: number
   lastTouched: number
   archived: boolean
+  /** ADR-0106 git fingerprint (Codex §18.9 absorption). Captured at session
+   *  start when the cwd is a git repository; each field is independent —
+   *  a detached HEAD has SHA but no branch; a local-only repo has branch
+   *  but no originUrl. Absent fields mean "not captured" (cwd not a repo,
+   *  spawn failure, etc.) — never lossy stripping. */
+  gitSha?: string
+  gitBranch?: string
+  gitOriginUrl?: string
 }
 
 export interface SavedSession {

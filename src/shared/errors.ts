@@ -65,6 +65,12 @@ export class PermissionDeniedError extends QuantaError {
  *   - `auth`            HTTP 401/403. NEVER retry, NEVER fall back (every provider would fail too).
  *   - `bad_request`     HTTP 400/422 — caller bug. NEVER retry.
  *   - `not_found`       HTTP 404 — model/route missing. NEVER retry.
+ *   - `not_implemented` Adapter is a deliberate stub (e.g. ADR-0094 Phase 1
+ *                       `chatgpt-oauth`). Retry against the SAME provider is
+ *                       hopeless (the stub will throw identically); fall back
+ *                       to the next provider so the chain can still produce
+ *                       output. Distinct from `bad_request` (caller bug) and
+ *                       `auth` (every provider would fail too).
  *   - `stream_corrupt`  SDK shape drift / malformed tool-input JSON. NEVER silent retry.
  *   - `aborted`         AbortSignal fired. NEVER retry; propagate cause.
  *   - `unknown`         Last-resort bucket when no structured signal is available.
@@ -81,13 +87,16 @@ export type LLMErrorKind =
   | "auth"
   | "bad_request"
   | "not_found"
+  | "not_implemented"
   | "stream_corrupt"
   | "aborted"
   | "unknown"
 
 /** Provider id used by the adapter→error classifier. Kept narrow so a typo at
- *  the adapter boundary fails to compile. */
-export type LLMProvider = "anthropic" | "openai"
+ *  the adapter boundary fails to compile. `chatgpt-oauth` (ADR-0094) is the
+ *  subscription-based provider — separate billing line + endpoint from BYOK
+ *  `openai`. */
+export type LLMProvider = "anthropic" | "openai" | "chatgpt-oauth"
 
 /** LLM provider failed (network, auth, rate limit, malformed response).
  *
@@ -205,11 +214,18 @@ export const toError = (e: unknown): Error =>
 
 /**
  * Extract a message string from any thrown value with EXACTLY the semantics
- * of the inline `errMessage(e)` pattern (which
+ * of the inline `e instanceof Error ? e.message : String(e)` pattern (which
  * was duplicated across 18+ files). Distinct from {@link toError}, which
  * constructs an Error and JSON-stringifies non-Error / non-string bodies
  * (a richer log policy that produces `'{"k":1}'` instead of
  * `"[object Object]"`); kept separate so the legacy call sites stay
  * byte-identical when they switch to this helper.
+ *
+ * IMPORTANT — do NOT change the body to `errMessage(e)` (e.g. by an over-eager
+ * find/replace pass). That re-introduces the infinite recursion that ate the
+ * `e instanceof Error ? e.message : String(e)` literal during the 2026-05-23
+ * mass migration. The `tests/unit/errors.test.ts` "regression: does NOT
+ * recurse on itself" case will hang every consumer if it does.
  */
-export const errMessage = (e: unknown): string => errMessage(e)
+export const errMessage = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e)

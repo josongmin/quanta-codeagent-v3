@@ -82,6 +82,10 @@ describe("daemon.runMode — config assembly", () => {
     expect(cfgSeen?.branchSearch?.defaultN).toBe(3)
     expect(cfgSeen?.branchSearch?.defaultVerifierKinds).toEqual(["tsc", "lint", "lsp_diag"])
     expect(cfgSeen?.branchSearch?.isolation).toBe("worktree")
+    // Daemon is autonomous (no human waiting): 90s budget — wider than IDE
+    // (60s) for the diagnostic-rich verifier set. Pin so a refactor of
+    // `DAEMON_BRANCH_TIMEOUT_MS` can't silently shrink it.
+    expect(cfgSeen?.branchSearch?.timeoutPerBranchMs).toBe(90_000)
   })
 
   test("caller-supplied branchSearch overrides the daemon default", async () => {

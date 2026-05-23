@@ -10,6 +10,7 @@ import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { DedupGate } from "./dispatch-dedup"
+import { LocalEffectChannel } from "./effect-channel"
 import { deny, resultBlock } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
@@ -373,43 +374,47 @@ const deriveSourceClass = (
   return { cls, label }
 }
 
-/** Drive the registry, normalizing thrown errors into an error tool_result. */
+/** Drive the registry through the relocatable effect boundary (ADR-0093 M1).
+ *  The {@link LocalEffectChannel} owns the no-throw + duration contract that
+ *  used to live in the inline try/catch below — it normalizes executor
+ *  exceptions into `{ok:false, output:<msg>}` envelopes and measures
+ *  `durationMs` channel-internal, so the orchestration plane here only has
+ *  redaction + DispatchResult shaping to do. Adopting a SandboxEffectChannel /
+ *  RemoteEffectChannel later swaps the channel constructor here ONLY — the
+ *  surrounding redaction / failure / evidence flatten is substrate-agnostic.
+ *
+ *  Byte-identical to the prior inline try/catch: the channel's catch wording
+ *  mirrors the QuantaError/toError(e).message path, and `durationMs` is still
+ *  measured around `registry.run` (channel-entry → executor-return/throw). */
 const execute = async (
   call: ToolUseBlock,
   config: AgentConfig,
   ctx: ToolContext,
   onProgress?: (message: string) => void,
 ): Promise<DispatchResult> => {
-  const startedAt = performance.now()
-  try {
-    const result = await config.registry.run(call.name, call.input, ctx, onProgress)
-    const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
-    const { output, hits } = applyRedaction(result.output, call, config)
-    return {
-      block: resultBlock(call.id, output, !result.ok),
-      ok: result.ok,
-      preview: output,
-      durationMs,
-      ...evidenceOf(result),
-      // absorb #2 (Cursor failure model): surface the tool's typed failure
-      // reason verbatim when it classified one. Omitted when absent so
-      // `exactOptionalPropertyTypes` never sees `undefined` and callers that
-      // do not read `failure` stay byte-identical. `ok`/`block`/`preview`
-      // derivation is unchanged.
-      ...(result.failure !== undefined ? { failure: result.failure } : {}),
-      ...(hits.length > 0 ? { redactionHits: hits } : {}),
-    }
-  } catch (e) {
-    const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
-    const message = e instanceof QuantaError ? e.message : toError(e).message
-    const { output, hits } = applyRedaction(message, call, config)
-    return {
-      block: resultBlock(call.id, output, true),
-      ok: false,
-      preview: output,
-      durationMs,
-      ...(hits.length > 0 ? { redactionHits: hits } : {}),
-    }
+  const channel = new LocalEffectChannel({
+    execute: (c, c2, op) => config.registry.run(c.name, c.input, c2, op),
+  })
+  const { result, durationMs } = await channel.execute({ call, ctx }, onProgress)
+  // The channel collapses BOTH "tool returned ok:false" and "executor threw"
+  // into the same `{ok:false, output:<msg>}` envelope shape — the throw path
+  // simply lacks `failure` and `evidence`. Handling them uniformly here keeps
+  // the DispatchResult shape byte-identical to the prior try-success branch:
+  // `evidenceOf({})` is empty and the typed-failure spread is conditional, so
+  // a normalized-throw result yields exactly the same fields as the old catch.
+  const { output, hits } = applyRedaction(result.output, call, config)
+  return {
+    block: resultBlock(call.id, output, !result.ok),
+    ok: result.ok,
+    preview: output,
+    durationMs,
+    ...evidenceOf(result),
+    // absorb #2 (Cursor failure model): surface the tool's typed failure
+    // reason verbatim when it classified one. Omitted when absent so
+    // `exactOptionalPropertyTypes` never sees `undefined` and callers that
+    // do not read `failure` stay byte-identical.
+    ...(result.failure !== undefined ? { failure: result.failure } : {}),
+    ...(hits.length > 0 ? { redactionHits: hits } : {}),
   }
 }
 

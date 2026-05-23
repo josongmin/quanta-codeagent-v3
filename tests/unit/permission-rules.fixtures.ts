@@ -273,4 +273,165 @@ export const PERMISSION_RULE_FIXTURES: Readonly<Record<string, RuleFixture>> = {
       "tee ./log.txt < input.txt",
     ],
   },
+  // ── ADR-0100 destructive-git rules (Codex §18.4 absorption) ───────────
+  "git-reset-hard": {
+    mustBlock: [
+      "git reset --hard",
+      "git reset --hard HEAD~1",
+      "git reset --hard origin/main",
+      "GIT_DIR=. git reset --hard",
+      "git -C /tmp/repo reset --hard HEAD~5",
+      // Compound forms a model might construct to work around the rule —
+      // chaining with `&&` does not change the substring match.
+      "cd /tmp && git reset --hard",
+    ],
+    mustAllow: [
+      "git reset --soft HEAD~1",
+      "git reset --mixed HEAD~1",
+      "git reset HEAD path/file.ts",
+      "git reset",
+      "git status",
+      // Near-miss: command that mentions `--hard` but not `git reset` —
+      // e.g. a workspace file path that contains the literal substring.
+      "ls docs/reset-hard.md",
+    ],
+  },
+  "git-push-force": {
+    mustBlock: [
+      "git push --force",
+      "git push --force origin main",
+      "git push --force-with-lease origin feature/x",
+      "git push -f origin main",
+      "git push origin main --force",
+    ],
+    mustAllow: [
+      "git push",
+      "git push origin main",
+      "git push --set-upstream origin feature/x",
+      // Documented intentional false-negative: `+main:main` is also a force-
+      // push form via the refspec `+`, but the canonical agent-facing surface
+      // is `--force` / `-f`. A future reviewer can extend the pattern
+      // deliberately if the refspec form starts appearing in real bypasses;
+      // keeping it here as a NEGATIVE pins the current scope.
+      "git push origin +main:main",
+      "git status",
+    ],
+  },
+  "git-checkout-discard": {
+    mustBlock: [
+      "git checkout -- file.txt",
+      "git checkout .",
+      "git checkout -- .",
+      "git checkout HEAD -- src/file.ts",
+      "git checkout main -- packages/x/index.ts",
+      "cd /tmp && git checkout .",
+    ],
+    mustAllow: [
+      "git checkout main",
+      "git checkout -b feature/x",
+      "git checkout -B feature/x main",
+      "git checkout feature/x",
+      "git checkout v1.0.0",
+      "git status",
+      // Near-miss: dot inside a token (no surrounding whitespace before).
+      "git checkout v.1",
+    ],
+  },
+  "git-commit-amend": {
+    mustBlock: [
+      "git commit --amend",
+      "git commit --amend -m 'fix: typo'",
+      "git commit --amend --no-edit",
+      "GIT_EDITOR=true git commit --amend",
+      "git -c user.email=x@y commit --amend",
+    ],
+    mustAllow: [
+      "git commit",
+      "git commit -m 'feat: add foo'",
+      "git commit -am 'fix'",
+      "git commit --message 'fix'",
+      "cat docs/amend-howto.md",
+      "git status",
+    ],
+  },
+  "git-rebase-interactive": {
+    mustBlock: [
+      "git rebase -i",
+      "git rebase -i HEAD~3",
+      "git rebase --interactive main",
+      "git rebase main -i",
+      "GIT_SEQUENCE_EDITOR=true git rebase -i HEAD~3",
+    ],
+    mustAllow: [
+      "git rebase main",
+      "git rebase --abort",
+      "git rebase --continue",
+      "git rebase --skip",
+      "git rebase --onto X Y Z",
+      "git status",
+    ],
+  },
+  "git-clean-force": {
+    mustBlock: [
+      "git clean -f",
+      "git clean -fd",
+      "git clean -fdx",
+      "git clean --force",
+      "git clean -f -d",
+      "git clean -F",
+      "git clean -ndf", // adversarial: -n dry-run together with -f. The rule still matches because the canonical safe form is `-n` alone; combining flags is unusual and worth blocking until a user asks specifically.
+    ],
+    mustAllow: [
+      "git clean -n",
+      "git clean -i",
+      "git clean --dry-run",
+      "git clean -d", // -d alone (without -f) is a no-op; safe to leave matching the engine's other gates rather than HARD_DENY.
+      "git status",
+      "git diff",
+    ],
+  },
+  // ── ADR-0101 push mass-delete (Claude Desktop `push_refused_mass_delete`) ───
+  "git-push-mirror": {
+    mustBlock: [
+      "git push --mirror",
+      "git push --mirror origin",
+      "git push origin --mirror",
+      "GIT_DIR=. git push --mirror upstream",
+    ],
+    mustAllow: [
+      "git push origin main",
+      "git push --set-upstream origin feature",
+      // `--mirror` mentioned without `git push` is not a push at all.
+      "git config remote.origin.mirror false",
+    ],
+  },
+  "git-push-force-with-delete": {
+    mustBlock: [
+      "git push --force --delete origin feature/x",
+      "git push --delete --force origin feature/x",
+      "git push -f -d origin feature/x",
+      "git push -d -f origin feature/x",
+      "git push --force-with-lease --delete origin feature/x",
+    ],
+    mustAllow: [
+      "git push --delete origin feature/x", // single delete without force — handled by HITL always-confirm, not HARD_DENY
+      "git push --force origin main", // force without delete — caught by git-push-force rule, not this one
+      "git push origin main",
+      "git push -d origin feature/x",
+    ],
+  },
+  "git-push-multi-branch-delete": {
+    mustBlock: [
+      "git push origin :feature/a :feature/b :feature/c",
+      "git push upstream :a :b :c :d",
+      // Adversarial: spread across multiple lines doesn't change the substring.
+      "git push origin :stale-1 :stale-2 :stale-3 :stale-4",
+    ],
+    mustAllow: [
+      "git push origin :feature/x", // single delete refspec — let HITL handle
+      "git push origin :a :b", // two deletes is still HITL-tier, not catastrophic
+      "git push origin main feature/x", // pushes without colons
+      "git status",
+    ],
+  },
 }

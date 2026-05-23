@@ -33,8 +33,10 @@ export { gitChurnTool, rankChurn } from "./churn"
 export { gitCommitTool } from "./commit"
 export { gitDiffTool } from "./diff"
 export { gitLogTool } from "./log"
-export { defaultGitRunner } from "./runner"
+export { buildGitEnv, defaultGitRunner } from "./runner"
 export { gitStatusTool } from "./status"
+// ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
+export { applyBudget, crossedTarget, type GitBudget, resolveMaxCommits } from "./_budget"
 export type {
   GitBlameHeatmapInput,
   GitBlameInput,

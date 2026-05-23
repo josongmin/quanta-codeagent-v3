@@ -247,6 +247,9 @@ const prCreateSchema = z.object({
   body: z.string().describe("PR body (markdown allowed)"),
   base: z.string().describe("Base branch (e.g. main)"),
   head: z.string().describe("Head branch — MUST be a feature branch, not protected"),
+  /** ADR-0104: open the PR as a draft (no review requested, no checks
+   *  auto-required). Useful for early CI feedback before opening for review. */
+  draft: z.boolean().optional().describe("Open as draft PR"),
 })
 type PrCreateInput = z.infer<typeof prCreateSchema>
 
@@ -255,7 +258,8 @@ export const ghPrCreateTool = (runner: GhRunner = defaultGhRunner): Tool<PrCreat
   description:
     "Open a new GitHub PR via `gh pr create`. Write — the head branch MUST " +
     "be a feature branch (not main/master/protected). The mode's gitWrite " +
-    "lever is the structural gate; this tool just invokes `gh`.",
+    "lever is the structural gate; this tool just invokes `gh`. Optional " +
+    "`draft:true` opens as a draft PR.",
   inputSchema: prCreateSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
@@ -273,6 +277,7 @@ export const ghPrCreateTool = (runner: GhRunner = defaultGhRunner): Tool<PrCreat
       "--head",
       input.head,
     ]
+    if (input.draft === true) argv.push("--draft")
     yield { type: "progress", message: `gh pr create ${input.head} → ${input.base}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS * 2)
     if (r.code !== 0) {
@@ -283,6 +288,252 @@ export const ghPrCreateTool = (runner: GhRunner = defaultGhRunner): Tool<PrCreat
       return
     }
     yield { type: "result", result: { ok: true, output: r.stdout.trim() } }
+  },
+})
+
+// ── ADR-0103/0104 additions: PR-thread blame + review-diff + auto-merge ──
+
+/**
+ * `gh_pr_blame` — PR review-thread blame (ADR-0103, Cursor
+ * `StreamCodeTour.Blame` absorption).
+ *
+ * `git blame` answers "who last touched this line"; this tool answers
+ * "what did reviewers say about this line" — by anchoring PR review-
+ * thread comments to their file:line targets. Reviewers' authored words
+ * become the blame body, in addition to (not replacing) the committer.
+ */
+
+interface ReviewThreadComment {
+  author?: { login?: string }
+  body?: string
+}
+
+interface ReviewThread {
+  path?: string
+  line?: number | null
+  originalLine?: number | null
+  isResolved?: boolean
+  isOutdated?: boolean
+  comments?: { nodes?: ReviewThreadComment[] }
+}
+
+interface RawPrViewJson {
+  url?: string
+  headRefName?: string
+  baseRefName?: string
+  reviewThreads?: { nodes?: ReviewThread[] } | ReviewThread[]
+}
+
+const PR_BLAME_PROXIMITY_LINES = 5
+
+const extractThreads = (raw: RawPrViewJson): readonly ReviewThread[] => {
+  const rt = raw.reviewThreads
+  if (rt === undefined) return []
+  if (Array.isArray(rt)) return rt
+  return rt.nodes ?? []
+}
+
+const matchesPrBlameFilter = (
+  thread: ReviewThread,
+  fileFilter: string | undefined,
+  lineFilter: number | undefined,
+): boolean => {
+  if (fileFilter !== undefined && thread.path !== fileFilter) return false
+  if (lineFilter !== undefined) {
+    const anchor = thread.line ?? thread.originalLine ?? null
+    if (anchor === null) return false
+    if (Math.abs(anchor - lineFilter) > PR_BLAME_PROXIMITY_LINES) return false
+  }
+  return true
+}
+
+const renderPrBlameThread = (thread: ReviewThread, idx: number): string => {
+  const path = thread.path ?? "(file unknown)"
+  const line = thread.line ?? thread.originalLine ?? "?"
+  const tags: string[] = []
+  if (thread.isResolved === true) tags.push("resolved")
+  if (thread.isOutdated === true) tags.push("outdated")
+  const header = `[${idx + 1}] ${path}:${line}${tags.length > 0 ? ` (${tags.join(", ")})` : ""}`
+  const comments = thread.comments?.nodes ?? []
+  if (comments.length === 0) return `${header}\n  (no comment body)`
+  const lines = comments.map((c) => {
+    const author = c.author?.login ?? "(unknown)"
+    const body = (c.body ?? "").trim().split("\n").join("\n  ")
+    return `  @${author}: ${body}`
+  })
+  return `${header}\n${lines.join("\n")}`
+}
+
+const prBlameSchema = z.object({
+  pr: z.union([z.string(), z.number()]).describe("PR number or URL"),
+  file: z.string().optional().describe("Restrict to comments on this file path"),
+  line: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Restrict to comments anchored within ±5 lines of this line"),
+})
+type PrBlameInput = z.infer<typeof prBlameSchema>
+
+export const ghPrBlameTool = (runner: GhRunner = defaultGhRunner): Tool<PrBlameInput> => ({
+  name: "gh_pr_blame",
+  description:
+    "Anchor PR review-thread comments to file:line — like `git blame`, but with " +
+    "reviewer comments instead of commit hashes. Filters by file path and ±5-line " +
+    "proximity. Read-only.",
+  inputSchema: prBlameSchema,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+  async *execute(input: PrBlameInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const ref = normalizeRef(input.pr)
+    if (ref === undefined) {
+      yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
+      return
+    }
+    const argv = ["gh", "pr", "view", ref, "--json", "url,headRefName,baseRefName,reviewThreads"]
+    yield { type: "progress", message: `gh pr view #${input.pr} (reviewThreads)` }
+    const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
+    if (r.code !== 0) {
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr view failed: ${r.stderr.slice(0, 500)}` },
+      }
+      return
+    }
+    let raw: RawPrViewJson
+    try {
+      raw = JSON.parse(r.stdout) as RawPrViewJson
+    } catch (parseErr) {
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: `gh pr view returned non-JSON: ${(parseErr as Error).message}`,
+        },
+      }
+      return
+    }
+    const threads = extractThreads(raw)
+    const filtered = threads.filter((t) => matchesPrBlameFilter(t, input.file, input.line))
+    if (filtered.length === 0) {
+      const why =
+        input.file !== undefined || input.line !== undefined
+          ? "no review threads match the filter"
+          : "no review threads on this PR"
+      yield { type: "result", result: { ok: true, output: why } }
+      return
+    }
+    const body = filtered.map(renderPrBlameThread).join("\n\n")
+    const header = raw.url ? `PR: ${raw.url}` : `PR: ${ref}`
+    yield { type: "result", result: { ok: true, output: `${header}\n\n${body}` } }
+  },
+})
+
+/** Default cap for `gh_pr_review_diff` — 64 KiB matches the agent-side
+ *  prompt budget. 1 MiB is the hard ceiling (schema). */
+const PR_DIFF_DEFAULT_MAX_BYTES = 64 * 1024
+
+const prReviewDiffSchema = z.object({
+  pr: z.union([z.string(), z.number()]).describe("PR number or URL"),
+  maxBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(1024 * 1024)
+    .optional()
+    .describe("Truncate diff at this many bytes (default 64 KiB, max 1 MiB)"),
+})
+type PrReviewDiffInput = z.infer<typeof prReviewDiffSchema>
+
+export const ghPrReviewDiffTool = (
+  runner: GhRunner = defaultGhRunner,
+): Tool<PrReviewDiffInput> => ({
+  name: "gh_pr_review_diff",
+  description:
+    "Fetch the unified diff for a pull request via `gh pr diff`. Truncates at " +
+    "`maxBytes` (default 64 KiB, max 1 MiB). Read-only.",
+  inputSchema: prReviewDiffSchema,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+  async *execute(input: PrReviewDiffInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const ref = normalizeRef(input.pr)
+    if (ref === undefined) {
+      yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
+      return
+    }
+    const cap = input.maxBytes ?? PR_DIFF_DEFAULT_MAX_BYTES
+    const argv = ["gh", "pr", "diff", ref]
+    yield { type: "progress", message: `gh pr diff #${input.pr}` }
+    const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
+    if (r.code !== 0) {
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr diff failed: ${r.stderr.slice(0, 500)}` },
+      }
+      return
+    }
+    const diff = r.stdout
+    const body =
+      diff.length > cap
+        ? `${diff.slice(0, cap)}\n\n[truncated: ${diff.length} bytes total, showing first ${cap} bytes]`
+        : diff
+    yield { type: "result", result: { ok: true, output: body } }
+  },
+})
+
+const prAutoMergeSchema = z.object({
+  pr: z.union([z.string(), z.number()]).describe("PR number or URL"),
+  method: z
+    .enum(["merge", "squash", "rebase"])
+    .optional()
+    .describe("Merge method: merge (default) | squash | rebase"),
+})
+type PrAutoMergeInput = z.infer<typeof prAutoMergeSchema>
+
+export const ghPrAutoMergeTool = (runner: GhRunner = defaultGhRunner): Tool<PrAutoMergeInput> => ({
+  name: "gh_pr_auto_merge",
+  description:
+    "Enable auto-merge on a pull request — merges when all checks pass. " +
+    "`method`: merge (default) | squash | rebase. Write — the mode's gitWrite " +
+    "lever is the structural gate; this tool just invokes `gh`.",
+  inputSchema: prAutoMergeSchema,
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  async *execute(input: PrAutoMergeInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const ref = normalizeRef(input.pr)
+    if (ref === undefined) {
+      yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
+      return
+    }
+    const argv: string[] = ["gh", "pr", "merge", ref, "--auto"]
+    switch (input.method) {
+      case "squash":
+        argv.push("--squash")
+        break
+      case "rebase":
+        argv.push("--rebase")
+        break
+      default:
+        argv.push("--merge")
+        break
+    }
+    yield {
+      type: "progress",
+      message: `gh pr merge #${input.pr} --auto --${input.method ?? "merge"}`,
+    }
+    const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
+    if (r.code !== 0) {
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr merge failed: ${r.stderr.slice(0, 500)}` },
+      }
+      return
+    }
+    yield {
+      type: "result",
+      result: { ok: true, output: r.stdout.trim() || "auto-merge enabled" },
+    }
   },
 })
 
@@ -326,12 +577,19 @@ export const ghPrListTool = (runner: GhRunner = defaultGhRunner): Tool<PrListInp
   },
 })
 
-/** All 6 gh tools. Pass an injected runner for tests. */
+/** All gh tools (6 RFC may-22 + 3 ADR-0103/0104 = 9). Pass an injected
+ *  runner for tests. Order: read-only first (view/issue/checks/list/blame/
+ *  review_diff), then mutating (comment/create/auto_merge). */
 export const ghTools = (runner: GhRunner = defaultGhRunner): Tool[] => [
   ghPrViewTool(runner) as Tool,
   ghIssueViewTool(runner) as Tool,
   ghCheckStatusTool(runner) as Tool,
+  ghPrListTool(runner) as Tool,
+  // ADR-0103/0104 additions — read-only tools first.
+  ghPrBlameTool(runner) as Tool,
+  ghPrReviewDiffTool(runner) as Tool,
+  // Mutating.
   ghPrCommentTool(runner) as Tool,
   ghPrCreateTool(runner) as Tool,
-  ghPrListTool(runner) as Tool,
+  ghPrAutoMergeTool(runner) as Tool,
 ]

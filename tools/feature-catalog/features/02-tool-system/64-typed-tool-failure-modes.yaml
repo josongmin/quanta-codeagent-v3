@@ -3,7 +3,7 @@ title: ToolFailure discriminated union — 6-mode typed per-failure-mode results
 section: 2
 subsystem: 도구 결과 — 타입드 실패 사유 (Cursor EditResult/ShellResult 흡수, ADR-0069)
 order: 64
-maturity: L4
+maturity: L5
 status: stable
 purpose: |
   Cursor EditResult/ShellResult의 discriminated failure union 흡수 — 기존 ok:false 도구 결과의
@@ -39,7 +39,8 @@ evidence:
       - tests/unit/scripted-replace.test.ts
       - tests/unit/bash.test.ts
       - tests/unit/agent/prompt-rules/packs.test.ts
-    integration: []
+    integration:
+      - tests/smoke/index.ts
     contract: []
 knobs: []
 deliberate_hold: null
@@ -54,3 +55,10 @@ notes: |
   건드리지 않고 기존 ShellResult{exitCode,stderr}에서 127+stderr 휴리스틱으로 유도 — 진짜 spawn
   ENOENT를 surface하는 ShellResult 확장은 follow-up(현재는 휴리스틱이 유일 신호, 127 정상 종료
   스크립트는 오분류 안 됨).
+  L4→L5 (2026-05-23): smoke battery 13 시나리오의 모든 tool dispatch가 ToolResult/ToolFailure
+  shape를 통과 — read/edit/write/scripted_replace/bash 5종 도구가 single/medium/tikitaka 픽스처
+  전반에서 실행되며 dispatch.ts의 failure-propagation 경로(ToolResult.failure?→DispatchResult.failure)
+  를 transitive 검증. byte-identical: failure 부재 fixture는 omit 경로, 부재 caller는 unchanged.
+  e2e 폐쇄: tier-0 replay가 매 픽스처마다 6-mode discriminant narrowing을 통과(없으면 omit, 있으면
+  pass-through), prompt-rules/core.ts의 [R-FAILURE-MODE] 인용도 buildSystemPrompt 경로로 전 픽스처
+  transitive.

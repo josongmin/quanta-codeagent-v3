@@ -37,32 +37,53 @@ export interface StatusDeps {
   readonly nowMs?: () => number
 }
 
+/** Human-readable auth-mode badge — identical to the runtime
+ *  `llm_request` line so the user sees the SAME phrase in `/status` and at
+ *  every model call. Single source of truth → keep these strings in lockstep
+ *  with the adapters' `authMode` property. */
+const AUTH_MODE_LABEL: Record<string, string> = {
+  "chatgpt-oauth": "ChatGPT subscription",
+  openai: "OpenAI BYOK",
+  anthropic: "Anthropic BYOK",
+}
+
+const authBadge = (provider: string): string => {
+  const label = AUTH_MODE_LABEL[provider]
+  return label !== undefined ? ` ${dim("·")} ${cyan(label)}` : ""
+}
+
 const resolveActiveProvider = (
   env: Record<string, string | undefined>,
   hasToken: boolean,
 ): { name: string; styled: string } => {
   const explicit = env.QUANTA_PROVIDER
   if (explicit === "chatgpt-oauth") {
-    if (hasToken) return { name: explicit, styled: cyan(explicit) }
+    if (hasToken) {
+      return { name: explicit, styled: `${cyan(explicit)}${authBadge(explicit)}` }
+    }
     return {
       name: explicit,
       styled: `${cyan(explicit)} ${red("(no token — run /login)")}`,
     }
   }
   if (explicit === "anthropic" || explicit === "openai") {
-    return { name: explicit, styled: cyan(explicit) }
+    return { name: explicit, styled: `${cyan(explicit)}${authBadge(explicit)}` }
   }
-  if (env.ANTHROPIC_API_KEY !== undefined) return { name: "anthropic", styled: cyan("anthropic") }
-  if (env.OPENAI_API_KEY !== undefined) return { name: "openai", styled: cyan("openai") }
+  if (env.ANTHROPIC_API_KEY !== undefined) {
+    return { name: "anthropic", styled: `${cyan("anthropic")}${authBadge("anthropic")}` }
+  }
+  if (env.OPENAI_API_KEY !== undefined) {
+    return { name: "openai", styled: `${cyan("openai")}${authBadge("openai")}` }
+  }
   if (hasToken) {
     return {
       name: "chatgpt-oauth",
-      styled: `${cyan("chatgpt-oauth")} ${dim("(token present — set QUANTA_PROVIDER to activate)")}`,
+      styled: `${cyan("chatgpt-oauth")}${authBadge("chatgpt-oauth")} ${dim("(auto — token on disk)")}`,
     }
   }
   return {
     name: "anthropic",
-    styled: `${cyan("anthropic")} ${dim("(default, no key configured)")}`,
+    styled: `${cyan("anthropic")}${authBadge("anthropic")} ${dim("(default, no key configured)")}`,
   }
 }
 

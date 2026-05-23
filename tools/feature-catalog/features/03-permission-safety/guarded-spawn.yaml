@@ -1,0 +1,30 @@
+id: guarded-spawn
+title: RAII child-process lifecycle guard (runShell / sandbox 공통)
+section: 3
+subsystem: 자식 프로세스 lifecycle 안전망
+order: 85
+maturity: L4
+status: stable
+purpose: |
+  Spawn site (runShell의 observer/buffered path, LocalSandbox.run, DockerSandbox.run)
+  마다 자식 프로세스의 생애를 관리하는 RAII-style guard. WHY: 각 site가 같은 cleanup
+  코드(timeout / abort signal 전파 / stdio drain / kill+await exit / orphan 방지)를
+  ad-hoc 으로 자라게 두면 drift가 생기고 leak 가능성. 본 모듈로 모든 spawn이 단일
+  lifecycle을 거치도록 강제 — try/finally 보다 더 좁은 RAII 패턴(생성 시점에 guard
+  acquire, scope exit 시 guard 자동 release).
+evidence:
+  code:
+    - src/runtime/guarded-spawn.ts
+    - src/runtime/shell.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/runtime/guarded-spawn.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  구조적 cleanup invariant — 새 spawn site가 추가되어도 guard를 거치지 않으면 *lint
+  + 리뷰* 에서 잡힌다는 의도. AbortSignal 전파, orphan 방지, exit code 표준화 모두
+  guard 내부.

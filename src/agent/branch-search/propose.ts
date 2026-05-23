@@ -132,7 +132,7 @@ export const parallelPropose = async (req: ProposeRequest): Promise<ProposeResul
       // `oneCandidate` is contractually no-throw; this only fires if
       // `isolator.acquire` itself rejected. Surface a failed candidate with a
       // no-op cleanup so indices stay aligned.
-      const reason = s?.reason instanceof Error ? s.reason.message : String(s?.reason)
+      const reason = errMessage(s?.reason)
       candidates.push({
         id: `cand-${i}`,
         seed: req.seeds[i] ?? {},

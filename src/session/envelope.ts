@@ -43,6 +43,13 @@ export const SessionMetaRecordSchema = z
     cwd: NonEmptyString,
     cli_version: NonEmptyString,
     model: NonEmptyString,
+    // ADR-0106 git fingerprint (Codex §18.9). Each field is optional —
+    // a detached HEAD has SHA but no branch, a local-only repo has branch
+    // but no origin URL, a non-git cwd has none. Replay / debugging /
+    // reproducibility surfaces consume these when present.
+    git_sha: NonEmptyString.optional(),
+    git_branch: NonEmptyString.optional(),
+    git_origin_url: NonEmptyString.optional(),
   })
   .strict()
 export type SessionMetaRecord = z.infer<typeof SessionMetaRecordSchema>

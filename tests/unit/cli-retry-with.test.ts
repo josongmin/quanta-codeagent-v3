@@ -349,6 +349,11 @@ describe("/retry-with — slash dispatch", () => {
       "/navigate",
       "/wait",
       "/retry-with",
+      "/skills",
+      "/reload-skills",
+      "/login",
+      "/logout",
+      "/status",
     ])
   })
 })

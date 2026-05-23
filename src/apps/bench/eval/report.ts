@@ -14,7 +14,7 @@
  */
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { redactValue } from "@/shared"
+import { errMessage, redactValue } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import {
@@ -39,7 +39,7 @@ export class NullStream implements StreamPort {
  *  outer catch can map it to `verdict:"degraded"` (RFC §3/§8/§12). */
 export class ObservationError extends Error {
   constructor(cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause))
+    super(errMessage(cause))
     this.name = "ObservationError"
   }
 }

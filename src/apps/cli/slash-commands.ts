@@ -31,7 +31,10 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { runtimeConfig } from "@/shared"
+import { loginCmd } from "./login-cmd"
+import { logoutCmd } from "./logout-cmd"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
+import { statusCmd } from "./status-cmd"
 
 export interface SlashContext {
   readonly out: (s: string) => void
@@ -79,10 +82,42 @@ export interface SkillRow {
   readonly paths?: readonly string[]
 }
 
+/** Per-command argument completion candidate. Optional surface used by a
+ *  readline-style completer; kept as an exported type so command authors
+ *  can return strongly-typed hints from their `complete()` without reaching
+ *  into another slice. */
+export interface SlashCompletionHint {
+  readonly value: string
+  readonly kind: "command" | "argument" | "alias"
+  readonly description?: string
+}
+
 export interface SlashCommand {
   readonly name: string
   readonly describe: string
   run(args: readonly string[], ctx: SlashContext): Promise<number>
+  /** Optional palette category — UI surfaces (e.g. a future `/help`) can
+   *  paint commands grouped by this label. Absent ⇒ "other" bucket. Closed
+   *  literal union so a typo at the call site fails to compile. */
+  readonly category?:
+    | "session"
+    | "config"
+    | "skills"
+    | "auth"
+    | "loop"
+    | "help"
+    | "history"
+    | "alias"
+    | "other"
+  /** Optional argument completer for `<Tab>`-driven readline completion.
+   *  `args` = tokens BEFORE the cursor (excluding the partial); `partial`
+   *  = the literal substring being typed. Absent ⇒ no suggestions after
+   *  this command's name. */
+  readonly complete?: (
+    args: readonly string[],
+    partial: string,
+    ctx: SlashContext,
+  ) => readonly SlashCompletionHint[]
 }
 
 const VALID_THEMES = ["auto", "light", "dark", "claude", "none"] as const
@@ -362,11 +397,46 @@ export const BUILTINS: readonly SlashCommand[] = [
   retryWithCmd,
   skillsCmd,
   reloadSkillsCmd,
+  loginCmd,
+  logoutCmd,
+  statusCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(
   BUILTINS.map((c) => [c.name, c]),
 )
+
+/** `/exit` and `/quit` are short-circuited by `runReplLoop` BEFORE the
+ *  BUILTINS dispatch — they aren't `SlashCommand` entries but a user
+ *  pressing <Tab> at the prompt expects them in the completion list. */
+const REPL_VIRTUAL_COMMANDS = ["/exit", "/quit"] as const
+
+/** Lookup the `describe` field for a slash command name. Returns
+ *  `undefined` for unknown names (alias from a future plugin etc.). Used
+ *  by the REPL prompt's command palette to paint the description column
+ *  next to each candidate. */
+export const describeSlashCommand = (name: string): string | undefined => {
+  const cmd = BUILTINS_BY_NAME.get(name)
+  return cmd?.describe
+}
+
+/** Node `readline` completer for the REPL prompt.
+ *
+ *  Behavior (matches Node's expected `(line) => [string[], string]` shape):
+ *   - Empty / non-`/` input ⇒ no candidates (don't pollute the agent prompt).
+ *   - `/` prefix ⇒ candidate list = builtin slash commands + the REPL-virtual
+ *     `/exit`/`/quit` pair, filtered by `startsWith(line)`.
+ *
+ *  Tab on a single match completes the command; on multiple matches the
+ *  reader paints the candidate list — both are stock readline behavior.
+ *  The function is pure (no IO, no globals beyond the BUILTINS table) so the
+ *  REPL can pass it straight to `readline.createInterface({ completer })`. */
+export const slashCompleter = (line: string): [string[], string] => {
+  if (line === "" || line[0] !== "/") return [[], line]
+  const vocab = [...BUILTINS.map((c) => c.name), ...REPL_VIRTUAL_COMMANDS]
+  const matches = vocab.filter((n) => n.startsWith(line)).sort()
+  return [matches, line]
+}
 
 /** Recognise a CLI argv token as a slash-command invocation. `/foo` matches;
  *  `/path/to/file` does NOT (so legacy path-mode resume arguments fall through

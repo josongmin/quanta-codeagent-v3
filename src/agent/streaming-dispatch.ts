@@ -1,4 +1,5 @@
 import { assembleFromEvents, type Message, type StreamEvent } from "@/llm"
+import { errMessage } from "@/shared"
 
 /**
  * Streaming tool-execution engine (streaming latency optimization).
@@ -414,7 +415,7 @@ const collectResultBlocks = async (slots: Slot[]): Promise<ResultBlocks> => {
     }
     const slot = slots[i]
     if (slot === undefined) return
-    const msg = res.reason instanceof Error ? res.reason.message : String(res.reason)
+    const msg = errMessage(res.reason)
     resultBlocks.push(dispatchFailedBlock(slot.call, msg))
   })
   return resultBlocks

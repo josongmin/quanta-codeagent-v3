@@ -1,5 +1,4 @@
 import type { LLMPort, Message, ModelCandidate } from "@/llm"
-import type { ModePolicy } from "./run-mode"
 import type { EmbedderPort, PersistentStorePort, Phase1Port, Stage1StorePort } from "@/memory"
 import type { Metrics, TurnTiming } from "@/observability"
 import type {
@@ -27,6 +26,7 @@ import type { PlanStore } from "./plan/state"
 import type { PlanExitPort } from "./plan-exit-flow"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
+import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
 import type { StopCategory } from "./stop-category"
 import type { Submission } from "./submission"

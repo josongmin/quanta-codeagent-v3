@@ -3,8 +3,8 @@ title: Persona slot — Codex {{ personality }} Handlebars absorption
 section: 1
 subsystem: 시스템 프롬프트 — 페르소나 enum (Codex absorption, ADR-0068 persona)
 order: 70
-maturity: L4
-status: new
+maturity: L5
+status: stable
 purpose: |
   Codex Desktop base_instructions의 `{{ personality }}` Handlebars 슬롯 흡수. 3-arm 닫힌
   enum PersonaKind = default | friendly | pragmatic. `default`는 빈 본문(byte-identical
@@ -21,8 +21,14 @@ evidence:
     unit:
       - tests/unit/agent/persona.test.ts
       - tests/unit/prompt-system.test.ts
-    integration: []
+    integration:
+      - tests/smoke/index.ts
     contract: []
 knobs: [QUANTA_PERSONA]
 deliberate_hold: null
-notes: 'Codex personality_default/friendly/pragmatic 3-element catalog를 1:1 흡수. friendly = collaborative partner ("we"/"let'\''s"); pragmatic = terse engineering register. default-OFF / byte-identical (RFC §1.2).'
+notes: |
+  Codex personality_default/friendly/pragmatic 3-element catalog를 1:1 흡수.
+  friendly = collaborative partner ("we"/"let's"); pragmatic = terse engineering
+  register. default-OFF / byte-identical (RFC §1.2). L4→L5 (2026-05-23): smoke
+  battery 13 시나리오의 buildSystemPrompt가 매 턴 persona slot 경로를 splice —
+  default 페르소나 baked는 모든 fixture가 transitive로 byte-stable 검증.

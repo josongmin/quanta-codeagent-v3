@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { OAuthConfig } from "../../../src/auth/chatgpt-oauth/config"
 import {
-  RefreshCoordinator,
-  TokenExchangeError,
   __resetInflightForTest,
   exchangeCode,
+  RefreshCoordinator,
   refreshToken,
+  TokenExchangeError,
 } from "../../../src/auth/chatgpt-oauth/refresh"
 import type { TokenRecord } from "../../../src/auth/chatgpt-oauth/token-store"
 
@@ -25,7 +25,11 @@ const FIXED_NOW = Date.parse("2026-05-23T00:00:00.000Z")
 const now = () => FIXED_NOW
 
 const toBase64Url = (s: string): string =>
-  Buffer.from(s, "utf8").toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")
+  Buffer.from(s, "utf8")
+    .toString("base64")
+    .replace(/=+$/, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
 
 const fakeIdToken = (planType: string, accountId: string): string => {
   const header = toBase64Url('{"alg":"RS256"}')
@@ -74,8 +78,7 @@ describe("refresh.exchangeCode", () => {
   })
 
   test("missing refresh_token throws shape error", async () => {
-    const fetchImpl = async () =>
-      mockResponse(200, { access_token: "at" })
+    const fetchImpl = async () => mockResponse(200, { access_token: "at" })
     await expect(
       exchangeCode({
         cfg,
@@ -139,8 +142,7 @@ describe("refresh.refreshToken", () => {
   }
 
   test("reuses previous refresh_token when response omits one", async () => {
-    const fetchImpl = async () =>
-      mockResponse(200, { access_token: "at-new", expires_in: 3600 })
+    const fetchImpl = async () => mockResponse(200, { access_token: "at-new", expires_in: 3600 })
     const rec = await refreshToken({ cfg, current: seed, fetchImpl, nowMs: now })
     expect(rec.access_token).toBe("at-new")
     expect(rec.refresh_token).toBe("rt-static")
@@ -224,8 +226,7 @@ describe("refresh.RefreshCoordinator", () => {
 
   test("in-flight slot is released on resolve (no memory leak)", async () => {
     const coord = new RefreshCoordinator()
-    const fetchImpl = async () =>
-      mockResponse(200, { access_token: "at-ok", expires_in: 60 })
+    const fetchImpl = async () => mockResponse(200, { access_token: "at-ok", expires_in: 60 })
     await coord.refresh({ cfg, current: seed, fetchImpl, nowMs: now })
     expect(coord.__sizeForTest()).toBe(0)
   })
@@ -234,9 +235,9 @@ describe("refresh.RefreshCoordinator", () => {
     const coord = new RefreshCoordinator()
     const fetchImpl = async () =>
       mockResponse(400, { error: "invalid_grant", error_description: "revoked" })
-    await expect(
-      coord.refresh({ cfg, current: seed, fetchImpl, nowMs: now }),
-    ).rejects.toThrow(TokenExchangeError)
+    await expect(coord.refresh({ cfg, current: seed, fetchImpl, nowMs: now })).rejects.toThrow(
+      TokenExchangeError,
+    )
     expect(coord.__sizeForTest()).toBe(0)
   })
 

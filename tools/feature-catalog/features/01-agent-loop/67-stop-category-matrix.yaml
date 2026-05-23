@@ -3,8 +3,8 @@ title: StopCategory matrix (3-layer kind/reasonCode/hint) + AgentOutcome.stopCat
 section: 1
 subsystem: 턴 라이프사이클 — 구조적 정지 사유 (Cursor 흡수, ADR-0073)
 order: 67
-maturity: L4
-status: new
+maturity: L5
+status: stable
 purpose: |
   Cursor stop_category 흡수 — 레거시 4-element StopReason을 보완하는 3-layer 구조적 정지
   사유: kind(completed|max_turns|interrupted|failed|needs_user_approval) + 닫힌
@@ -21,11 +21,16 @@ evidence:
     unit:
       - tests/unit/agent/stop-category.test.ts
       - tests/unit/agent-submission-and-stop-category.test.ts
-    integration: []
+    integration:
+      - tests/smoke/index.ts
     contract: []
 knobs: []
 deliberate_hold: null
 notes: |
-  loop 4-경로 배선 완료(L4). needs_user_approval / shell.needs_approval는 admissibility-gate
+  loop 4-경로 배선 완료. needs_user_approval / shell.needs_approval는 admissibility-gate
   seam 예약(미배선), completed-via-exhaustion(empty/malformed) 세분 emit은 follow-up(헬퍼는
   4-sub-kind 지원). 레거시 reason이 authoritative 유지 ⇒ default-OFF byte-identical(RFC §1.2).
+  L4→L5 (2026-05-23): smoke battery 13 시나리오(single/medium/tikitaka) 모든 fixture가
+  loop의 finish() 4-경로 중 하나로 종료하며 AgentOutcome.stopCategory를 거쳐감 — tier-0
+  replay가 매 fixture마다 이 분류기를 transitive 검증. classifyErrorReason은 NEVER throws
+  contract라 모든 error path도 byte-stable로 통과.

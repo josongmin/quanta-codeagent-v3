@@ -1,0 +1,38 @@
+id: glob-rules
+title: Glob-matched + always-applied auto-injected rules (Cursor .mdc parity)
+section: 4
+subsystem: File-scoped rule auto-injection (Cursor `.cursor/rules/*.mdc` absorption)
+order: 50
+maturity: L4
+status: new
+purpose: |
+  Cursor의 4 rule kind 중 2개 (alwaysApply + glob-matched)를 흡수 — 모델이 요청 없이
+  프롬프트에 자동 주입되는 file-scoped 룰. `.cursor/rules/*.mdc` 와 `.quanta/rules/*.mdc`
+  를 frontmatter (`alwaysApply` + `globs`) + body로 파싱, 매 턴 `changedPaths` 와 매칭해
+  per-turn select → prompt block 주입. `repo-rules.ts`(AGENTS.md/CLAUDE.md 전체 매 턴)와는
+  분리: 이 모듈은 多 small 룰 中 *이 턴의 파일들에 해당하는 것만* 골라 토큰 예산 절약.
+  예: "React component conventions" 룰은 `*.tsx` 만지는 턴에만 burn. agent-requestable(lazy
+  body)은 Skill progressive-disclosure로, manual(@-mention)은 user surface로 — 본 모듈
+  scope 밖. config.globRules가 wire되지 않으면 byte-identical (RFC §1.2 default-OFF).
+evidence:
+  code:
+    - src/agent/glob-rules.ts
+    - src/agent/prompt.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/glob-rules.test.ts
+      - tests/unit/glob-rules-hellgate.test.ts
+      - tests/unit/agent/glob-rules.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  2026-05-23 Cursor 흡수 (memory `glob-rules-and-hook-updated-input`). 본 모듈 + 짝
+  feature `hook-updated-input`이 같은 라운드. Cursor parity는 두 종류만 (alwaysApply +
+  globs); minimatch 호환 glob (Skill activation과 동일 `matchesAnyGlob`). frontmatter
+  파서는 Skill과 공유. hellgate test: DoS within caps + abs path + rule count cap +
+  throwing matcher poison + YAML fold (cursor-absorption-r1-r4-hardening 라운드).

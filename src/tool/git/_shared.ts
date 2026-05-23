@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /** Slice-internal helpers shared by the four git tool factories. Kept in a
  *  private file (leading underscore) so external callers continue to consume
  *  the slice through `index.ts` only. */
@@ -28,7 +29,7 @@ export const safeRun = async (
     const result = await runner.run(args, cwd, signal)
     return { kind: "ok", result }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     return { kind: "spawn-error", message: `${toolName} failed: ${msg}` }
   }
 }

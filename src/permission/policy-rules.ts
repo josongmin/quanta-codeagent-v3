@@ -142,6 +142,88 @@ const HARD_DENY_RULES: readonly HardDenyRule[] = [
       "`git --config-env[=…]` sources a config value from an attacker-controlled env var — same blast radius as `-c` injection.",
     pattern: /\bgit\b[\s\S]*?\s--config-env\b/,
   },
+  // --- ADR-0100: destructive-git verbatim ban (Codex §18.4 absorption) ---
+  // The agent must not run history-rewriting or work-destroying git commands
+  // without an EXPLICIT user request. The prompt layer (ADR-0099 / Git posture
+  // section) tells the model not to use these; this catalog is the runtime
+  // backstop for when the prompt is ignored or a user request is twisted into
+  // running them anyway. Each pattern is length-bounded (`[\s\S]{0,500}?`) to
+  // prevent ReDoS on adversarial inputs, matching the existing rule style.
+  {
+    name: "git-reset-hard",
+    description:
+      "`git reset --hard` — overwrites the working tree AND moves HEAD, discarding any uncommitted edits with no recovery path (no entry in `git reflog` for the lost worktree state).",
+    pattern: /\bgit\b[\s\S]{0,500}?\breset\b[\s\S]{0,500}?--hard\b/,
+  },
+  {
+    name: "git-push-force",
+    description:
+      "`git push --force` / `--force-with-lease` / `-f` — rewrites published history on the remote; other clones lose commits or develop divergent histories that require manual recovery.",
+    pattern: /\bgit\b[\s\S]{0,500}?\bpush\b[\s\S]{0,500}?(?:--force(?:-with-lease)?\b|\s-f\b)/,
+  },
+  {
+    name: "git-checkout-discard",
+    description:
+      "`git checkout -- <path>` / `git checkout .` / `git checkout <ref> -- <path>` — restores files from index or a ref, silently overwriting any working-tree edits. No reflog entry for the discarded changes.",
+    pattern: /\bgit\b[\s\S]{0,500}?\bcheckout\b[\s\S]{0,500}?(?:\s--\s|\s\.(?=\s|$)|\s--$)/,
+  },
+  {
+    name: "git-commit-amend",
+    description:
+      "`git commit --amend` — rewrites the previous commit. Safe locally on un-pushed commits, catastrophic on commits other clones already have. The default is to forbid and require an explicit user request.",
+    pattern: /\bgit\b[\s\S]{0,500}?\bcommit\b[\s\S]{0,500}?--amend\b/,
+  },
+  {
+    name: "git-rebase-interactive",
+    description:
+      "`git rebase -i` / `--interactive` — opens an editor for an interactive rebase. In a non-TTY agent context this either hangs waiting for input or proceeds with broken state; either way it is not what the user expects.",
+    pattern: /\bgit\b[\s\S]{0,500}?\brebase\b[\s\S]{0,500}?(?:--interactive\b|\s-i\b)/,
+  },
+  {
+    name: "git-clean-force",
+    description:
+      "`git clean -f` / `--force` — irreversibly deletes untracked files (and with `-d` also untracked directories). No undo. The default is to forbid; the user can invoke their own shell if they truly want it.",
+    // The `(?=[a-zA-Z]*[fF])` lookahead lets `f` appear anywhere in the
+    // grouped-flag arg, so `-fd`, `-df`, `-fdx`, `-Fx` all match — not just
+    // forms where `f` is the last letter. Pinned to `-` + at least one
+    // letter, so `--force` is the alternative literal.
+    pattern:
+      /\bgit\b[\s\S]{0,500}?\bclean\b[\s\S]{0,500}?(?:-(?=[a-zA-Z]*[fF])[a-zA-Z]+\b|--force\b)/,
+  },
+  // --- ADR-0101: push mass-delete guard (Claude Desktop `push_refused_mass_delete`) ---
+  // Claude Desktop's cowork memory sync refuses a push that would mass-delete
+  // remote state. The equivalent in our pre-tool dispatch context is to
+  // recognize the three canonical mass-delete forms on `git push` and block
+  // them outright. Individual `git push --delete <remote> <branch>` for a
+  // single ref stays governed by the existing HITL `always-confirm` tier
+  // (via `GIT_PREFIX` regex in the bash tool) — that surface remains so
+  // users can do routine branch cleanup with one confirmation.
+  {
+    name: "git-push-mirror",
+    description:
+      "`git push --mirror` — pushes ALL refs including deletes, mirroring the local view onto the remote. A bug locally (a deleted branch you didn't mean to delete) becomes a bug on the remote with no undo.",
+    pattern: /\bgit\b[\s\S]{0,500}?\bpush\b[\s\S]{0,500}?--mirror\b/,
+  },
+  {
+    name: "git-push-force-with-delete",
+    description:
+      "`git push --force` combined with `--delete` / `-d` — force-deleting a remote ref. Even one ref makes recovery hard (no reflog on the remote); the combination is treated as catastrophic regardless of count.",
+    // Two flag orderings: `--force` then `--delete`, or `--delete` then
+    // `--force`. The pattern requires BOTH tokens present anywhere in the
+    // span after `push`; short-flag `-f` and `-d` count as their long forms.
+    pattern:
+      /\bgit\b[\s\S]{0,500}?\bpush\b(?=[\s\S]{0,500}?(?:--force(?:-with-lease)?\b|\s-f\b))(?=[\s\S]{0,500}?(?:--delete\b|\s-d\b))/,
+  },
+  {
+    name: "git-push-multi-branch-delete",
+    description:
+      "`git push <remote> :a :b :c …` — three-or-more colon-prefixed refspecs in a single push are interpreted by git as branch deletions on the remote. Bulk deletion of remote branches is treated as catastrophic.",
+    // Three or more occurrences of `\s:<refname>` (whitespace + colon + a
+    // non-trivial name) after `git push`. The refname character class
+    // mirrors git's allowed branch-name alphabet (no `..`, no leading `-`,
+    // no `:` or whitespace — kept conservative).
+    pattern: /\bgit\b[\s\S]{0,500}?\bpush\b(?:[\s\S]{0,500}?\s:[A-Za-z0-9._/+-]+){3,}/,
+  },
   {
     name: "mkfs-format-filesystem",
     description: "`mkfs*` formats a filesystem — irreversible volume wipe.",

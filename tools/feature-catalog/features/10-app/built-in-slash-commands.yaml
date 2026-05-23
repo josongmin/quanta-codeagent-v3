@@ -1,20 +1,20 @@
 id: built-in-slash-commands
-title: Built-in slash commands (5)
+title: Built-in slash commands (10)
 section: 10
 subsystem: CLI surface (ADR-0059)
 order: 7
 maturity: L4
 status: new
-purpose: '/context, /usage, /color, /navigate, /wait — surface-agnostic SlashCommand 레지스트리. isSlashCommand는 /<letter>... 만 매치 ([/path/to/file]는 false). cli/index.ts의 main()이 session subcommand 다음, --help 이전에 short-circuit. LLM 호출 0회. /color & /navigate 는 ~/.quanta/preferences.json 영속화 (QUANTA_PREFS_HOME 테스트 시ams). /wait 캡 = 3600s.'
+purpose: '/context, /usage, /color, /navigate, /wait, /retry-with, /skills, /reload-skills, /login, /status — surface-agnostic SlashCommand 레지스트리. isSlashCommand는 /<letter>... 만 매치 ([/path/to/file]는 false). cli/index.ts의 main()이 session subcommand 다음, --help 이전에 short-circuit. LLM 호출 0회 (/login 제외 — OAuth 브라우저 플로우). /color & /navigate 는 ~/.quanta/preferences.json 영속화 (QUANTA_PREFS_HOME 테스트 시ams). /wait 캡 = 3600s. /login & /status는 ADR-0094 ChatGPT-OAuth provider 와이어업 (자세한 계약은 chatgpt-oauth-provider feature).'
 evidence:
-  code: [src/apps/cli/slash-commands.ts, src/apps/cli/index.ts]
-  adrs: [59]
+  code: [src/apps/cli/slash-commands.ts, src/apps/cli/index.ts, src/apps/cli/login-cmd.ts, src/apps/cli/status-cmd.ts, src/apps/cli/auth-ui.ts]
+  adrs: [59, 94]
   tests:
-    unit: [tests/unit/slash-commands.test.ts]
+    unit: [tests/unit/slash-commands.test.ts, tests/unit/auth/login-status-cmd.test.ts, tests/unit/auth/auth-ui.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_PREFS_HOME]
 deliberate_hold:
   reason: '/context와 /usage는 placeholder — 로프가 per-turn token usage를 공유 sink로 export하기 전까지 wire-up 미완. /usage는 ~/.quanta/usage.jsonl 형식만 정의.'
   promotion_path: 'loop.ts에 usage emit + jsonl appender 추가 → /usage가 real-time 누계 표시'
-notes: 'Tier-2 absorption #2-1. 12-invariant surface-model에 따라 surface 의존 안 함; Tauri / REPL 도 같은 BUILTINS 재사용.'
+notes: 'Tier-2 absorption #2-1. 12-invariant surface-model에 따라 surface 의존 안 함; Tauri / REPL 도 같은 BUILTINS 재사용. 2026-05-23: /login + /status 추가(ChatGPT-OAuth 와이어업, ADR-0094 Phase 1). 5 → 10 명령.'

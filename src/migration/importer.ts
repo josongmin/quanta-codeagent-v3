@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 /**
  * External-agent importer (ADR-0038, Cluster D Feature 4).
  *
@@ -59,7 +60,7 @@ const stageDetect = async (
     emit({
       stage: "detect_finished",
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMessage(err),
     })
     return { ok: false }
   }
@@ -100,7 +101,7 @@ const stageProvider = async (
       stage: "provider_stage_finished",
       ok: false,
       provider,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMessage(err),
     })
     return { ok: false }
   }
@@ -179,7 +180,7 @@ const stageSessionCompletion = async (
           stage: "session_completion_finished",
           ok: false,
           provider,
-          error: `translate ${path}: ${err instanceof Error ? err.message : String(err)}`,
+          error: `translate ${path}: ${errMessage(err)}`,
         })
         return { ok: false }
       }
@@ -199,7 +200,7 @@ const stageSessionCompletion = async (
       stage: "session_completion_finished",
       ok: false,
       provider,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMessage(err),
     })
     return { ok: false }
   }

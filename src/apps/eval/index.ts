@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { errMessage } from "@/shared"
 
 /**
  * `bun run eval <subcommand>` — Tier 0–4 verification harness.
@@ -23,7 +22,7 @@ import { errMessage } from "@/shared"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { runAudit } from "./audit"
 import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
 import { runSwebenchAdapter } from "./public"

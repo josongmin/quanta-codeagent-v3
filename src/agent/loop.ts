@@ -67,8 +67,8 @@ import {
   type ResponseQueuedReason,
 } from "./control-op-handler"
 import { decideAction } from "./conversation-action"
-import { planToStreamMirror } from "./plan/stream-mirror"
 import { threadId as makeThreadId } from "./follow-up-queue"
+import { planToStreamMirror } from "./plan/stream-mirror"
 import { backoffDelayMs } from "./retry"
 import {
   buildCloseoutGuard,
@@ -211,7 +211,12 @@ const configuredModel = (llm: AgentConfig["llm"]): string => {
  *  swallows it, control flow / emit ordering / the default-OFF byte-identical
  *  contract are untouched. */
 const emitLlmRequest = (config: AgentConfig): void => {
-  config.stream.emit({ type: "llm_request", model: configuredModel(config.llm) })
+  config.stream.emit({
+    type: "llm_request",
+    model: configuredModel(config.llm),
+    ...(config.llm.provider !== undefined ? { provider: config.llm.provider } : {}),
+    ...(config.llm.authMode !== undefined ? { authMode: config.llm.authMode } : {}),
+  })
 }
 
 /**
@@ -1524,7 +1529,8 @@ const handleSubmissionControlOp = (
   // suppress the emit to avoid heartbeat redundancy (Codex `response.in_progress`
   // discipline mirror). Closed-shape mode union — exhaustive.
   if (isSetModeOp(cfg.submission)) {
-    const from: "default" | "plan" = cfg.mode === "plan" || cfg.planMode === true ? "plan" : "default"
+    const from: "default" | "plan" =
+      cfg.mode === "plan" || cfg.planMode === true ? "plan" : "default"
     const to = cfg.submission.op.mode
     if (from !== to) {
       const reason = cfg.submission.op.reason

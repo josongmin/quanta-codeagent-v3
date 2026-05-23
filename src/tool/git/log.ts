@@ -2,18 +2,43 @@ import type { Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitLogInput, type GitRunner, gitLogInputSchema } from "./types"
 
+/**
+ * US-separator (`\x1f`, ASCII 31, the "Unit Separator" control char) chosen
+ * deliberately as the field delimiter instead of TAB (`\x09`) — Codex §18.7
+ * absorption (ADR-0105). Commit subjects and author names CAN contain TABs
+ * (rare but legal), which silently breaks a TAB-split parser. `\x1f` is in
+ * the ASCII control-character range that git treats as opaque bytes and
+ * commit messages never legitimately contain. Pin this constant so a future
+ * format-string edit stays in lock-step with {@link formatLine}.
+ */
+const US_SEP = "\x1f"
+
 const formatLine = (raw: string): string | null => {
-  // hash<TAB>author<TAB>iso8601<TAB>subject
-  const parts = raw.split("\t")
+  // hash<US>author<US>iso8601<US>subject
+  const parts = raw.split(US_SEP)
   if (parts.length < 4) return null
   const [hash, author, iso, ...subjectParts] = parts
   if (!hash || !author || !iso) return null
-  const subject = subjectParts.join("\t")
+  // Rejoin subject parts in case it contained a US char (it shouldn't, but
+  // be conservative).
+  const subject = subjectParts.join(US_SEP)
   return `${hash.slice(0, 8)} (${author}, ${iso.slice(0, 10)}) ${subject}`
 }
 
 const buildArgs = (count: number, file: string | undefined): string[] => {
-  const args: string[] = ["log", "--format=%H%x09%an%x09%ai%x09%s", "-n", String(count)]
+  // `--no-textconv --no-ext-diff` add belt-and-suspenders determinism: a
+  // user's `.gitattributes` textconv driver or external diff command MUST
+  // NOT influence the log format. (`git log` doesn't actually use these
+  // by default, but pinning them eliminates a class of "weird output"
+  // surprises if the repo grows attributes-based config.)
+  const args: string[] = [
+    "log",
+    "--no-textconv",
+    "--no-ext-diff",
+    "--format=%H%x1f%an%x1f%ai%x1f%s",
+    "-n",
+    String(count),
+  ]
   if (file) args.push("--follow", "--", file)
   return args
 }

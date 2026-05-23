@@ -3,6 +3,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildLoginCmd } from "../../../src/apps/cli/login-cmd"
+import { buildLogoutCmd } from "../../../src/apps/cli/logout-cmd"
 import { buildStatusCmd } from "../../../src/apps/cli/status-cmd"
 import {
   chatgptTokenPath,
@@ -226,5 +227,79 @@ describe("/status command", () => {
     const cap = makeCtx(dir)
     await cmd.run([], cap.ctx)
     expect(stripAnsi(cap.out)).toContain("expired")
+  })
+})
+
+describe("/logout command", () => {
+  test("rejects any arguments", async () => {
+    const cmd = buildLogoutCmd()
+    const cap = makeCtx(dir)
+    expect(await cmd.run(["foo"], cap.ctx)).toBe(1)
+    expect(cap.err).toContain("takes no arguments")
+  })
+
+  test("absent token → 'not signed in' yellow path + exit 0", async () => {
+    const cmd = buildLogoutCmd({ env: {} })
+    const cap = makeCtx(dir)
+    const exit = await cmd.run([], cap.ctx)
+    expect(exit).toBe(0)
+    expect(stripAnsi(cap.out)).toContain("Not signed in")
+    expect(stripAnsi(cap.out)).toContain("Nothing to delete")
+  })
+
+  test("present token → deletes file + renders 'Signed out' with prior plan", async () => {
+    // Seed a token first via the login happy-path machinery.
+    const seedCmd = buildLoginCmd({
+      env: { QUANTA_OAUTH_CLIENT_ID: "client_x" },
+      opener: (_u) => {
+        // capture & drive below
+      },
+      timeoutMs: 5000,
+    })
+    void seedCmd
+    // Use direct token-store API to avoid running the full OAuth flow here.
+    const { chatgptTokenPath, writeToken } = await import("@/auth/chatgpt-oauth")
+    await writeToken(chatgptTokenPath(dir), {
+      access_token: "at",
+      refresh_token: "rt",
+      expires_at: "2030-01-01T00:00:00.000Z",
+      plan_type: "pro",
+      account_id: "acct-1",
+    })
+
+    const cmd = buildLogoutCmd({ env: {} })
+    const cap = makeCtx(dir)
+    const exit = await cmd.run([], cap.ctx)
+    expect(exit).toBe(0)
+    const out = stripAnsi(cap.out)
+    expect(out).toContain("Signed out")
+    expect(out).toContain("deleted")
+    expect(out).toContain("pro")
+    expect(out).toContain("acct-1")
+
+    // File is actually gone.
+    let exists = true
+    try {
+      await stat(chatgptTokenPath(dir))
+    } catch {
+      exists = false
+    }
+    expect(exists).toBe(false)
+  })
+
+  test("running logout twice is idempotent (second run → not signed in)", async () => {
+    const { chatgptTokenPath, writeToken } = await import("@/auth/chatgpt-oauth")
+    await writeToken(chatgptTokenPath(dir), {
+      access_token: "at",
+      refresh_token: "rt",
+      expires_at: "2030-01-01T00:00:00.000Z",
+    })
+    const cmd = buildLogoutCmd({ env: {} })
+    const first = makeCtx(dir)
+    expect(await cmd.run([], first.ctx)).toBe(0)
+    expect(stripAnsi(first.out)).toContain("Signed out")
+    const second = makeCtx(dir)
+    expect(await cmd.run([], second.ctx)).toBe(0)
+    expect(stripAnsi(second.out)).toContain("Not signed in")
   })
 })

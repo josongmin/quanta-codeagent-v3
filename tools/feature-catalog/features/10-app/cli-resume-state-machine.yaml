@@ -1,0 +1,31 @@
+id: cli-resume-state-machine
+title: CLI `--resume` state machine — path-mode vs id-mode (ADR-0024 split)
+section: 10
+subsystem: Session resume (ADR-0024)
+order: 12
+maturity: L4
+status: stable
+purpose: |
+  `--resume <token>` 해석의 pure state machine — `internal.ts`에서 분리된 ADR-0024
+  split 결과. PATH 모드 (token에 `/` 또는 `\` 포함, 혹은 `.json`으로 끝남) vs ID 모드
+  (opaque session id). PATH 모드는 디스크 경로에서 직접 로드, ID 모드는 `index.jsonl`
+  조회 → 디스크 경로 변환. PURE w.r.t. argv/env: 모든 입력이 명시 파라미터(caller가
+  argv/env accessor 로 미리 풀어서 전달), 본 모듈은 `process.env` 미접근 → unit-
+  testable in isolation. `internal.ts` 가 모든 심볼 재수출 → 기존 importer(index.ts /
+  테스트)는 영향 0. heuristic `isPathLikeToken`: token contains `/` or `\` OR ends in
+  `.json` ⇒ PATH; otherwise ID.
+evidence:
+  code:
+    - src/apps/cli/resume.ts
+  adrs: [24]
+  tests:
+    integration: []
+    unit: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0024 (CLI slice 분해) — `internal.ts` 비대화 fix. 본 모듈은 *어떻게 resume token
+  을 해석할지*; 실제 세션 로드(loadSession / loadSessionById)는 @/session 모듈
+  (session-index-store / quanta-session-subcommands feature). `--state` path는
+  quantastatepath feature 와 직교.

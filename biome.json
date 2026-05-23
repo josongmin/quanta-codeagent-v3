@@ -651,6 +651,7 @@
         "!tests/unit/cli-argv-prompt.test.ts",
         "!tests/unit/cli/**",
         "!tests/unit/apps/cli/**",
+        "!tests/unit/auth/auth-ui.test.ts",
         "!tests/unit/dotenv.test.ts",
         "!tests/unit/env-knob-branches.test.ts",
         "!tests/integration/session-ux-e2e.test.ts",

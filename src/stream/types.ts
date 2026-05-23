@@ -12,12 +12,7 @@
 
 /** Closed taxonomy for a todo's status — mirrors `TodoStatus` in
  *  `@/agent/plan/types.ts`. Closed-union; no other value is valid. */
-export type TodoStatusMirror =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "cancelled"
-  | "blocked"
+export type TodoStatusMirror = "pending" | "in_progress" | "completed" | "cancelled" | "blocked"
 
 /** Single todo entry inside a plan — mirrors `TodoReadonly` in
  *  `@/agent/plan/types.ts`. */
@@ -65,7 +60,20 @@ export type AgentEvent =
   // RFC-0002 §5.2/§9 `llm_request` — emitted immediately BEFORE the model
   // stream so the recorder can pair it (same span) with the trailing
   // `llm_usage`, completing the §11 llm_request↔llm_usage span-pair golden.
-  | { type: "llm_request"; model: string }
+  | {
+      type: "llm_request"
+      model: string
+      /** Optional provider id (`anthropic` / `openai` / `chatgpt-oauth`).
+       *  Absent on legacy callers / tests — the renderer paints just the
+       *  model when missing. Used downstream to distinguish a BYOK
+       *  (API-key) call from a ChatGPT-subscription (OAuth) call so the
+       *  user can see which billing line they're hitting. */
+      provider?: string
+      /** Optional human-readable auth-mode label
+       *  ("ChatGPT subscription" / "OpenAI BYOK" / …). The renderer paints
+       *  this verbatim — keep it short and unambiguous. */
+      authMode?: string
+    }
   | { type: "assistant_text"; delta: string }
   // ADR-0048 in-progress heartbeat — surfaced from a provider's
   // `response.in_progress` event so a UI can paint a "thinking…" indicator.
@@ -201,6 +209,28 @@ export type AgentEvent =
       from: "default" | "plan"
       to: "default" | "plan"
       reason?: string
+    }
+  // ADR-0102 turn-diff cluster (Codex `turn/diff/updated` absorption). Emitted
+  // at turn end when the turn-diff emitter is wired with a `GitRunner` (opt-in
+  // — absent runner ⇒ no event, byte-identical). Carries the cumulative
+  // unified diff between the turn-start SHA snapshot and the current HEAD /
+  // worktree state so a host (UI / replay / session jsonl recorder) sees the
+  // SHAPE of what the turn changed without parsing assistant text. `fromSha`
+  // is the SHA captured at turn start; `toSha` is the SHA at turn end (may
+  // equal `fromSha` when the turn made no commit — in that case the unified
+  // diff still carries working-tree edits). `filesChanged` / `insertions` /
+  // `deletions` mirror `git diff --shortstat` for cheap UI rendering;
+  // `unifiedDiff` is the full body, truncated at the emitter's
+  // `maxUnifiedBytes` with a marker when the diff is huge.
+  | {
+      type: "turn_diff_updated"
+      turn: number
+      fromSha: string
+      toSha: string
+      filesChanged: number
+      insertions: number
+      deletions: number
+      unifiedDiff: string
     }
   | { type: "done"; reason: string; turns: number }
 

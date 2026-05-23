@@ -252,6 +252,11 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   plan_user_input_requested: "recovery",
   plan_user_input_resolved: "recovery",
   mode_changed: "recovery",
+  // ADR-0102 turn-diff cluster: rides the existing `recovery` family for
+  // the same reason as the plan/control-op events (same-turn observation
+  // point, no new TrajectoryKind rippling through redaction). The diff
+  // payload + per-file stats ride in `data` via `dataOf`.
+  turn_diff_updated: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -340,6 +345,20 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
       return planUserInputResolvedData(e)
     case "mode_changed":
       return modeChangedData(e)
+    case "turn_diff_updated":
+      // ADR-0102 turn-diff payload: stats + diff body. `reason:"turn_diff"`
+      // keeps the recovery-kind line greppable apart from real recovery
+      // points (mirrors `in_progress` / `response_queued` etc.).
+      return {
+        reason: "turn_diff",
+        turn: e.turn,
+        fromSha: e.fromSha,
+        toSha: e.toSha,
+        filesChanged: e.filesChanged,
+        insertions: e.insertions,
+        deletions: e.deletions,
+        unifiedDiff: e.unifiedDiff,
+      }
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:

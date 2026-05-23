@@ -12,7 +12,25 @@ bun fc show <id>          # 단일 feature dump (YAML)
 bun fc add 1 my-feature   # 템플릿 스캐폴드
 bun fc diff               # 현 MD vs fresh render (mismatch → exit 1)
 bun fc check-evidence     # evidence 파일이 실제 존재하는지
+bun fc audit              # 4-lens sweep (orphan ADR / orphan src / empty stub)
+bun fc lint               # ratchet: empty stub 카운트 + orphan Accepted ADR 증가 차단
+bun fc lint --update-baseline  # 의식적으로 baseline 갱신 (개선 잠금 또는 의도된 raise)
+bun fc check-changed <ref>     # PR-time: ADDED 된 src/*.ts 가 fc.evidence.code 에 있는지
 ```
+
+## Drift 방지 게이트 (CI)
+
+`validate` / `diff` / `lint` 는 `.github/workflows/ci.yml`의 pyramid 잡에 박혀
+있어 매 push/PR 마다 자동 실행. `check-changed` 는 PR 전용 잡으로 분리됨 — 새
+파일이 fc 에 없으면 머지 차단. baseline은 `baseline.json` 의 `fc:` 서브오브젝트에
+저장되며 `bun fc lint --update-baseline` 로만 변경된다.
+
+### Ratchet 정책
+
+- **empty stub 카운트** — HARD: `baseline.empty_stubs_max` 보다 늘면 CI fail.
+  줄어들면 warn (baseline 잠그라는 알림).
+- **orphan Accepted ADR** — HARD: grandfather list 에 없는 새 orphan 은 CI fail.
+- **orphan src 카운트** — SOFT: 보고만, 차단 안 함 (leaf helpers 자연 증가).
 
 ## 파일 레이아웃
 

@@ -3,8 +3,8 @@ title: Agent-loop branch hardening — refusal / thinking carry-over / deny-and-
 section: 1
 subsystem: 턴 라이프사이클 — branch 가드 (gap analysis, ADR-0076)
 order: 76
-maturity: L4
-status: new
+maturity: L5
+status: stable
 purpose: |
   docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent
   loop의 4개 결함 중 3개 shipped + 1개 deferred. Gap-1 — Provider refusal/abnormal stop:
@@ -72,6 +72,7 @@ evidence:
     integration:
       - tests/integration/admissibility-deny-steer.test.ts
       - tests/integration/admissibility-deny-steer-hell.test.ts
+      - tests/smoke/index.ts
     contract: []
 knobs: []
 deliberate_hold: null

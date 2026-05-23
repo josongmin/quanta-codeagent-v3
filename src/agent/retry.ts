@@ -93,11 +93,16 @@ const RETRYABLE_KINDS: ReadonlySet<string> = new Set([
   "network",
 ])
 
-/** {@link LLMErrorKind} values that unambiguously map to "never retry". */
+/** {@link LLMErrorKind} values that unambiguously map to "never retry".
+ *  `not_implemented` is here because a stub adapter throws identically every
+ *  call — same-provider retry is pure waste. (It IS fallback-eligible: see
+ *  `FALLBACK_KINDS` in `src/llm/fallback.ts`, which lets the chain advance to
+ *  the next provider instead.) */
 const FATAL_KINDS: ReadonlySet<string> = new Set([
   "auth",
   "bad_request",
   "not_found",
+  "not_implemented",
   "stream_corrupt",
   "aborted",
 ])

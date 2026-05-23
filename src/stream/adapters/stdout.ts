@@ -69,9 +69,16 @@ export class StdoutStream implements StreamPort {
       case "error":
         process.stdout.write(`${RED}error: ${redactStr(event.message)}${RESET}\n`)
         break
-      case "llm_request":
-        process.stdout.write(`${DIM}— llm request (${event.model}) —${RESET}\n`)
+      case "llm_request": {
+        // Render an unambiguous auth-mode badge so the user can see at a
+        // glance whether this turn is on a ChatGPT subscription token or
+        // a BYOK API key. ADR-0094 §SOTA — the on-wire path differs
+        // (chatgpt.com/backend-api/codex vs api.openai.com / api.anthropic.com)
+        // and so does the billing line; do not hide that.
+        const badge = event.authMode !== undefined ? ` · ${event.authMode}` : ""
+        process.stdout.write(`${DIM}— llm request (${event.model})${badge} —${RESET}\n`)
         break
+      }
       case "in_progress":
         // ADR-0048: provider "thinking…" heartbeat. The two optional-field
         // branches live in `renderInProgress` so this case stays a single
@@ -112,6 +119,16 @@ export class StdoutStream implements StreamPort {
         break
       case "done":
         process.stdout.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
+        break
+      case "turn_diff_updated":
+        // ADR-0102 turn-diff: one-line dim status summarizing the cumulative
+        // diff. The full unified body is recorded by jsonl-recorder; stdout
+        // surface shows just the shape (turn, sha range, stats) so a user
+        // watching the CLI sees the shape without scrolling through 64 KiB
+        // of diff text.
+        process.stdout.write(
+          `${DIM}— turn ${event.turn} diff: ${event.filesChanged} files, +${event.insertions} -${event.deletions} (${event.fromSha.slice(0, 8)}..${event.toSha.slice(0, 8)}) —${RESET}\n`,
+        )
         break
       default: {
         // Exhaustiveness guard: a new AgentEvent variant must be handled

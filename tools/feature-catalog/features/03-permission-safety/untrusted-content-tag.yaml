@@ -1,0 +1,37 @@
+id: untrusted-content-tag
+title: Untrusted content tag-boundary defang — 단일 강제 path (embedUntrusted)
+section: 3
+subsystem: Prompt-injection 차단 (구조적 invariant)
+order: 70
+maturity: L4
+status: new
+purpose: |
+  Per-turn 프롬프트가 untrusted fragment (파일 경로, IDE selection text, diagnostics,
+  memory aggregate, rule body)를 named tag block 안에 넣을 때 — `<system-reminder>` 나
+  `<ide-context>` — fragment가 LITERAL closer를 포함하면 블록을 조기 종료시켜 trailing
+  payload를 새 system-attributed instruction으로 위장 가능. 동일 공격을 forged OPENER
+  로 반대 방향에서도 수행 가능. 과거에는 블록별 ad-hoc escaper (`escapeReminderBoundary` /
+  `escapeContextBoundary`)가 있었고 새 untrusted 블록이 자기 wrapper escape을 까먹을 수
+  있었음. 본 모듈은 구조적 fix: ALL untrusted fragment는 `embedUntrusted(name, body)` /
+  `escapeBoundary(name, body)`로만 임베드 — 자기 tag boundary + 항상-defang되는
+  `system-reminder` boundary 둘 다 자동 처리. Defang form: `<\tag>` `<\/tag>` (case-
+  insensitive 매치, 원본 casing 보존). 정확한 genuine 토큰만 (ASCII hyphen, real `>`,
+  interior space 0) → evasion variants는 inert. BENIGN invariant: genuine boundary가
+  없으면 byte-identical to input.
+evidence:
+  code:
+    - src/agent/untrusted.ts
+    - src/agent/prompt.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/agent/untrusted-embed.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  구조적 안전 invariant — 새 untrusted 블록을 추가할 때마다 escaping을 *까먹을 수
+  없게* 하는 single chokepoint. 두 legacy helper (escapeReminderBoundary /
+  escapeContextBoundary) 의 superset이자 byte-identical 대체. 명시적 ADR 미부여 —
+  prompt-injection 차단은 cross-cutting safety invariant 다수에 깔려있음.

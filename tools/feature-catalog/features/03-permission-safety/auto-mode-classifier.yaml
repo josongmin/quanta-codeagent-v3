@@ -1,0 +1,32 @@
+id: auto-mode-classifier
+title: LLM-backed permission auto-mode 2-stage ClassifierPort
+section: 3
+subsystem: Permission auto-mode (LLM 분류)
+order: 80
+maturity: L4
+status: new
+purpose: |
+  HITL-AUTO 모드의 LLM 분류기 — 권한 결정을 사람 대신 자동으로 내리는 mode에서
+  "이 action이 safe/dangerous/needs-review 중 어느 카테고리인가" 를 LLM round-trip
+  한 번으로 답함. 2-stage + denial-limit state 는 `permission`의 `AutoModeClassifier`
+  가 orchestration하고, 본 모듈은 stage당 호출되는 *단일 round-trip ClassifierPort*
+  구현(prompt + JSON schema enforcement). Stage gating + denial accumulation은 호출
+  측 책임 — 본 모듈은 pure classifier. LLMPort 주입(테스트 시 scripted, runtime 시
+  실제). default-OFF: auto-mode가 켜지지 않으면 호출 0.
+evidence:
+  code:
+    - src/agent/auto-classifier.ts
+    - src/permission/classifier.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/auto-classifier.test.ts
+    integration:
+      - tests/integration/auto-classifier-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Permission stack의 *마지막 fallback* 레이어 — 명시적 rule, prefix-DSL, 기억된
+  pattern 다 miss하면 auto-mode가 LLM에 묻고, 그 결과는 다시 stack에 cache될 수
+  있음 (rememberPatterns cascade). HITL 4-tier(ADR-0047) "AUTO" tier 의 백엔드.

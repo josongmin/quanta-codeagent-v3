@@ -51,10 +51,13 @@ export interface FallbackLLMOptions {
  *  on `e.message`. Adapters set `LLMError.kind` at the boundary
  *  ({@link LLMError.fromSdkError}); this set is the policy.
  *
- *  - `overloaded`     529-class: this provider is over capacity → try next.
- *  - `server_error`   Non-529 5xx: provider-side bug → try next.
- *  - `network`        Transport failure (ECONNRESET / EPIPE / DNS): peer
- *                     reachability is the issue → another provider may work.
+ *  - `overloaded`       529-class: this provider is over capacity → try next.
+ *  - `server_error`     Non-529 5xx: provider-side bug → try next.
+ *  - `network`          Transport failure (ECONNRESET / EPIPE / DNS): peer
+ *                       reachability is the issue → another provider may work.
+ *  - `not_implemented`  Stub adapter (e.g. ADR-0094 Phase-1 `chatgpt-oauth`):
+ *                       this provider physically cannot serve the turn, but a
+ *                       fully-wired sibling provider can.
  *
  *  Explicitly NOT triggers (every provider would fail identically):
  *  `auth`, `bad_request`, `not_found`, `stream_corrupt`, `aborted`,
@@ -63,6 +66,7 @@ const FALLBACK_KINDS = new Set<import("@/shared").LLMErrorKind>([
   "overloaded",
   "server_error",
   "network",
+  "not_implemented",
 ])
 
 /** True iff `e` is a provider-overload / provider-side failure that warrants

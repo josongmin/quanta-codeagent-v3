@@ -1,0 +1,32 @@
+id: permission-inspector
+title: Permission stack inspector (ADR-0046 follow-up)
+section: 3
+subsystem: Permission stack 시각화 (read-only surface)
+order: 75
+maturity: L4
+status: new
+purpose: |
+  Read-only programmatic surface — given an action, *어떤* permission layer가 *왜*
+  허락/거부했는지 결정 trace 를 반환. `quanta permission inspect <action>` CLI /
+  Tauri dashboard 의 backbone. 8-stage admissibility-gate(ADR-0026 SSOT) 결정을
+  reverse-engineer 하지 않고 *기록된* 결정을 표시 — 평가 자체는 admissibility-gate
+  가 단독, 본 모듈은 그 결과의 시각화. ADR-0029(reviewer 3-tier) post-denial,
+  ADR-0030(mid-turn steering) UI 와 합쳐 사용자가 "왜 이게 막혔는가" 를 한 화면에
+  본다. ADR-0047(HITL 4-tier)와 orthogonal — gate가 어디서 멈췄는지 layer 라벨로
+  반환.
+evidence:
+  code:
+    - src/permission/inspector.ts
+    - src/agent/admissibility-gate.ts
+  adrs: [46]
+  tests:
+    unit:
+      - tests/unit/permission-inspector.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0046 follow-up — 본 모듈은 의도적으로 *read-only*. 평가는 admissibility-gate
+  SSOT(ADR-0026)가 단독, 본 모듈이 결정을 *재계산* 하지 않음. CLI/Tauri 표면 와이어업
+  은 별도 surface track (in-repo는 inspector port만 L4).

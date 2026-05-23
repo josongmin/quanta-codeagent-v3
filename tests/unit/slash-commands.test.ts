@@ -63,7 +63,7 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers the documented builtins in order (5 surface + /retry-with + /skills + /reload-skills)", () => {
+  test("registers the documented builtins in order (5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status)", () => {
     expect(BUILTINS.map((c) => c.name)).toEqual([
       "/context",
       "/usage",
@@ -73,7 +73,59 @@ describe("BUILTINS table", () => {
       "/retry-with",
       "/skills",
       "/reload-skills",
+      "/login",
+      "/logout",
+      "/status",
     ])
+  })
+})
+
+describe("slashCompleter (Tab autocompletion)", () => {
+  // Lazy import — the helper lives next to the registry it's completing.
+  const importCompleter = async () =>
+    (await import("../../src/apps/cli/slash-commands")).slashCompleter
+
+  test("empty input → no candidates (don't pollute the agent prompt)", async () => {
+    const c = await importCompleter()
+    expect(c("")).toEqual([[], ""])
+  })
+
+  test("non-slash input → no candidates", async () => {
+    const c = await importCompleter()
+    expect(c("hello")).toEqual([[], "hello"])
+  })
+
+  test("bare `/` → every builtin + /exit + /quit", async () => {
+    const c = await importCompleter()
+    const [candidates, partial] = c("/")
+    expect(partial).toBe("/")
+    expect(candidates).toContain("/login")
+    expect(candidates).toContain("/logout")
+    expect(candidates).toContain("/status")
+    expect(candidates).toContain("/exit")
+    expect(candidates).toContain("/quit")
+    // Sorted ⇒ deterministic display order.
+    const sorted = [...candidates].sort()
+    expect(candidates).toEqual(sorted)
+  })
+
+  test("`/lo` → /login + /logout only", async () => {
+    const c = await importCompleter()
+    const [candidates] = c("/lo")
+    expect(candidates).toEqual(["/login", "/logout"])
+  })
+
+  test("`/login` → unique match (Tab completes to this exact string)", async () => {
+    const c = await importCompleter()
+    const [candidates, partial] = c("/login")
+    expect(candidates).toEqual(["/login"])
+    expect(partial).toBe("/login")
+  })
+
+  test("unknown slash prefix → empty list", async () => {
+    const c = await importCompleter()
+    const [candidates] = c("/zzz-no-such")
+    expect(candidates).toEqual([])
   })
 })
 

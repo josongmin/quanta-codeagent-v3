@@ -320,6 +320,8 @@ function* processChunk(chunk: RawChunk, st: StreamState): Generator<StreamEvent>
 export class OpenAIAdapter implements LLMPort {
   private readonly client: OpenAI
   readonly model: string
+  readonly provider = "openai"
+  readonly authMode = "OpenAI BYOK"
   private readonly maxTokens: number
   /** T1 stream-hang guard: pinned at construction (env knobs + optional
    *  caller overrides resolved ONCE) and applied to every `stream()` call
