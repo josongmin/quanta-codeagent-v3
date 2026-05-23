@@ -160,7 +160,13 @@ describe("HELLGATE updatedInput — a rewrite cannot bypass an UPSTREAM block", 
       { mode: "default" },
     )
     expect(res.ok).toBe(false)
-    expect(res.preview).toContain("plan")
+    // mode-block deny can surface as either the gate's `${mode}-blocked`
+    // preview (e.g. "plan-blocked") OR the dispatch seam's `"mode-blocked"`
+    // preview, depending on which check fires first; the human-readable
+    // content always names the mode. Assert via content (semantic) — the
+    // hook-never-fires invariant is the actual contract under test.
+    const denyText = `${res.preview} ${res.block.content}`
+    expect(denyText.toLowerCase()).toContain("plan")
     expect(hookFired).toBe(false) // the hook is the LAST gate; a blocked call never reaches it
     expect(sink.received).toEqual([])
   })
