@@ -1,4 +1,4 @@
-# ADR-0111 — `pre_tool_use` hook `updatedInput` (Cursor parity)
+# ADR-0113 — `pre_tool_use` hook `updatedInput` (Cursor parity)
 
 - **Status**: Accepted
 - **Date**: 2026-05-23

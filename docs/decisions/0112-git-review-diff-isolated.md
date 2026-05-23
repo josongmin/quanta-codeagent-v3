@@ -1,4 +1,4 @@
-# ADR-0111: `git_review_diff` — isolated diff reviewer sub-agent (Claude Desktop `reviewDiff` 흡수)
+# ADR-0112: `git_review_diff` — isolated diff reviewer sub-agent (Claude Desktop `reviewDiff` 흡수)
 
 - **상태**: Accepted
 - **날짜**: 2026-05-23

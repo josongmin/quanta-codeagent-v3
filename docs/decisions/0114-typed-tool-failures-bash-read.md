@@ -1,4 +1,4 @@
-# ADR-0111 — Typed tool failures: bash `permission_denied` + read `not_found` (gap closure)
+# ADR-0114 — Typed tool failures: bash `permission_denied` + read `not_found` (gap closure)
 
 **Status:** accepted (2026-05-23)
 **Slice:** `@/tool` (bash + read)
