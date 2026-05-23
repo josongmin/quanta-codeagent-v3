@@ -1,4 +1,8 @@
-# ADR-0118: Refusal `stop_reason` typed surface — Gap-1 SOTA++
+# ADR-0120: Refusal `stop_reason` typed surface — Gap-1 SOTA++
+
+> NOTE: this ADR was initially drafted as #0118 but bumped to #0120 at integration
+> because numbers 0118 (localize-recall + shadow-odb-rewind) and 0119 (shadow-
+> rewind-tool-exposure) were claimed by parallel work landing on main concurrently.
 
 - **상태**: Accepted (구현 + 19 unit hellgate + 7 e2e + 30 cross-file 봉인)
 - **날짜**: 2026-05-23
