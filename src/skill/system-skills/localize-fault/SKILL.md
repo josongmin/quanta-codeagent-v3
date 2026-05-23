@@ -53,7 +53,10 @@ If the user already named the exact file + function, skip to Stage 3.
 Goal: a short ranked list of candidate files. Collect, do not confirm.
 
 1. `localize` with the fault description as the query → ranked `path:line`
-   candidates by term-hit density + filename relevance.
+   candidates by BM25-lite IDF over query subtokens, with frame-tier penalty
+   (`user` > `test` > `vendored`) and a small definition-pattern boost. Pass
+   `verbose:true` to see per-candidate `score` and `tier` — helps
+   disambiguate close runners-up before moving to Stage 2.
 2. If the fault references a symbol/identifier, `grep` for it to see its
    distribution across the tree.
 3. If the fault is a test/build failure, prefer the **failure log** —
@@ -137,3 +140,9 @@ combined with Codex's signal-trust hierarchy
 truth source"). quanta-v3 tool names (`localize` / `lsp_document_symbol` /
 `lsp_references` / `diagnostics` / `test_runner`) replace the paper's generic
 retrieval steps.
+
+R-Phase9 (ADR-0115) replaced the prior flat term-count with BM25-lite IDF
+(Robertson & Zaragoza, 2009) and applied the same `FrameTier` discipline
+R-Phase8 introduced for `parse_test_failure`. The 3-stage funnel itself is
+unchanged — `localize` remains a 5/10 candidate generator; source-text read
+(Stage 2) still owns the proof.
