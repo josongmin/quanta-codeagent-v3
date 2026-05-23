@@ -63,7 +63,11 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers the documented builtins in order (/help + 5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status + /permission + /snooze + /resume)", () => {
+  test("registers the documented builtins in order (/help + 5 surface + /retry-with + /skills + /reload-skills + /login + /logout + /status + /permission + /snooze + /resume + /rewind + /fork)", () => {
+    // `/rewind` + `/fork` are env-gated (QUANTA_REWIND, default "1"). The
+    // unit-test environment leaves the var unset → both commands are
+    // registered. A separate test in `rewind-cmd.test.ts` covers the
+    // disabled (`QUANTA_REWIND=0`) path.
     expect(BUILTINS.map((c) => c.name)).toEqual([
       "/help",
       "/context",
@@ -80,6 +84,8 @@ describe("BUILTINS table", () => {
       "/permission",
       "/snooze",
       "/resume",
+      "/rewind",
+      "/fork",
     ])
   })
 })

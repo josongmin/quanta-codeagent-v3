@@ -60,6 +60,17 @@ export {
   sessionsRoot,
   sessionsRootAsync,
 } from "./paths"
+// Claude-pattern rewind/fork wrappers (typed result shapes + prefix-id +
+// optional git restore). Built on top of `rewindToMessage` + `forkSession`
+// from `./store` — no envelope mutation, no new on-disk shape.
+export type {
+  ForkOptions,
+  ForkResult,
+  RewindGitPort,
+  RewindOptions,
+  RewindResult,
+} from "./rewind"
+export { forkSessionAtMessage, resolveMessageIdPrefix, rewindSession } from "./rewind"
 export type { SessionRootProvider } from "./root-port"
 export { defaultSessionRootProvider, staticSessionRootProvider } from "./root-port"
 export {

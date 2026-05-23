@@ -38,6 +38,7 @@ import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
 import { permissionCmd } from "./permission-explain"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
+import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { statusCmd } from "./status-cmd"
 
 export interface SlashContext {
@@ -467,6 +468,12 @@ const helpCmd: SlashCommand = {
   run: (args, ctx) => runHelpRender(BUILTINS, args, ctx),
 }
 
+// `/rewind` + `/fork` (Claude Code v1.7196 pattern) are env-gated at module
+// load: `QUANTA_REWIND=0` removes them from the registry entirely so they
+// can't be discovered, auto-completed, or accidentally dispatched. Default
+// `"1"` (registered).
+const REWIND_COMMANDS: readonly SlashCommand[] = isRewindEnabled() ? rewindCommands : []
+
 export const BUILTINS: readonly SlashCommand[] = [
   helpCmd,
   contextCmd,
@@ -483,6 +490,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   permissionCmd,
   snoozeCmd,
   resumeCmd,
+  ...REWIND_COMMANDS,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

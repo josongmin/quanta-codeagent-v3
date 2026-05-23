@@ -359,6 +359,11 @@ describe("/retry-with — slash dispatch", () => {
       "/permission",
       "/snooze",
       "/resume",
+      // Claude Code v1.7196 "rewind + fork" pattern — env-gated by
+      // QUANTA_REWIND (default "1") at module load. Unit-test env leaves
+      // the var unset → both registered.
+      "/rewind",
+      "/fork",
     ])
   })
 })
