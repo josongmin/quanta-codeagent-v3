@@ -18,7 +18,7 @@ import {
   redactSecrets,
 } from "@/security"
 import { errMessage, LLMError } from "@/shared"
-import { type CloseoutGuardState, decideCloseoutGuard } from "./closeout-guard"
+import { buildGuardChain, metaUser, runGuardChain, type TurnGuard } from "./guards"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import {
@@ -100,7 +100,6 @@ import {
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
-import { decideVerifyGuard, type VerifyGuardState } from "./verify-guard"
 import type { TurnWorkMetricsCollector } from "./work-metrics-collector"
 import type { WorkingStateSession } from "./working-state"
 
@@ -722,11 +721,9 @@ const streamConsume = async (
 }
 
 /** A short out-of-band user message used to steer the model on a same-turn
- *  retry (output-limit / malformed-tool / empty). Kept terse on purpose. */
-const metaUser = (text: string): Message => ({
-  role: "user",
-  content: [{ type: "text", text }],
-})
+ *  retry (output-limit / malformed-tool / empty). Kept terse on purpose.
+ *  Body moved to `./guards/shared.ts` so the adapters can share it; the
+ *  symbol stays imported here so every call site below is byte-identical. */
 
 /** Recalled long-term memory text for this session, or `undefined` when no
  *  store is configured or nothing relevant is found. The user's last text
@@ -1110,88 +1107,14 @@ const CONTINUE: Step = { done: false }
  *  (`keepMessage:true` so the final assistant turn is preserved, no maxTurns
  *  consumption, recovery emitted) up to `maxTrips`. `config.verifyGuard`
  *  absent ⇒ this is never called (default-OFF, byte-identical). */
-/** True when this decided action is a finish attempt: an exhaustion-completed
- *  (malformed/empty retries spent) OR a proceed turn that produced NO tool_use
- *  (a pure-text "I'm done"). These are exactly the two points the loop accepts
- *  a completion, so they are the points the verify-guard must intercept. */
-const isFinishAttempt = (action: RecoveryAction, message: AssembledMessage): boolean =>
-  action.do === "completed" ||
-  (action.do === "proceed" && !message.content.some((b) => b.type === "tool_use"))
-
-/** If `config.verifyGuard` is set and the model is finishing right after an
- *  unverified edit, mutate `wm` with the kept assistant turn + the forcing
- *  meta-user message and return `CONTINUE` (reusing the SAME nudge machinery:
- *  no maxTurns consumption, recovery emitted). Returns `undefined` to let the
- *  completion proceed unchanged. Guard absent ⇒ never blocks (byte-identical). */
-const verifyGuardStep = (
-  config: AgentConfig,
-  action: RecoveryAction,
-  message: AssembledMessage,
-  wm: WorkingMemory<Message>,
-  history: readonly ToolHistoryEntry[],
-  state: VerifyGuardState | undefined,
-  toolChoiceState: ToolChoiceTurnState,
-): Step | undefined => {
-  if (config.verifyGuard === undefined || state === undefined) return undefined
-  if (!isFinishAttempt(action, message)) return undefined
-  // History already carries the `{name, arg?}` shape R1's policy needs (the
-  // bash command is captured at dispatch in `streamConsume` — see the empirical
-  // 0-trip finding there); pass it straight through, no per-call remap.
-  const verdict = decideVerifyGuard({
-    history,
-    cfg: config.verifyGuard,
-    state,
-  })
-  if (!verdict.block || verdict.text === undefined) return undefined
-  emitRecovery(config, "unverified")
-  // ADR-0079 — arm tool_choice:{kind:"any"} for the FORCED re-entry so the model
-  // is required to call a tool (typically the missing verify). Consumed + cleared
-  // by the next `streamConsume` (1-turn TTL).
-  toolChoiceState.verifyGuardViolated = true
-  wm.append(message)
-  wm.append(metaUser(verdict.text))
-  return CONTINUE
-}
-
-/** Closeout reminder hook (Codex App agent loop doc §4 mirror). v3 has NO
- *  finish-time self-check: at the moment of completion the agent can overclaim
- *  ("verified" when no verification ran, mix fact with inference, ignore the
- *  requested reporting shape). When `config.closeoutGuard?.enabled === true`
- *  and the model is about to finish, convert that completion into the SAME
- *  nudge action the recovery machinery already understands (`keepMessage:true`
- *  so the final assistant turn is preserved, no maxTurns consumption, recovery
- *  emitted) ONCE per run. Ordering: this runs AFTER `verifyGuardStep`, so when
- *  verify also fires it trips FIRST on its triggering finish; closeout fires
- *  the next time the agent attempts to finish AFTER verify is satisfied. Guard
- *  absent or `enabled !== true` ⇒ never blocks (default-OFF, byte-identical). */
-const closeoutGuardStep = (
-  config: AgentConfig,
-  action: RecoveryAction,
-  message: AssembledMessage,
-  wm: WorkingMemory<Message>,
-  history: readonly ToolHistoryEntry[],
-  state: CloseoutGuardState | undefined,
-  toolChoiceState: ToolChoiceTurnState,
-): Step | undefined => {
-  if (config.closeoutGuard === undefined || state === undefined) return undefined
-  if (!isFinishAttempt(action, message)) return undefined
-  // History is duck-typed by `decideCloseoutGuard` as `ReadonlyArray<{name}>` so
-  // the `{name, arg?}` shape the verify-guard already captures flows straight
-  // through with zero remap — a session that called a mutating tool routes to
-  // the Phase 4 four-truth-surface reminder; non-code-mod sessions fall through
-  // to the legacy single/four-rule choice.
-  const verdict = decideCloseoutGuard({ cfg: config.closeoutGuard, state, history })
-  if (!verdict.block || verdict.text === undefined) return undefined
-  emitRecovery(config, "closeout")
-  // ADR-0079 — arm tool_choice:{kind:"none"} for the FORCED re-entry so the model
-  // is FORBIDDEN from emitting any tool_use (it must produce the terminal closeout
-  // text). Consumed + cleared by the next `streamConsume` (1-turn TTL). Ordered
-  // after verify, whose `any` wins the precedence ladder if both co-arm.
-  toolChoiceState.closeoutAttempted = true
-  wm.append(message)
-  wm.append(metaUser(verdict.text))
-  return CONTINUE
-}
+// `isFinishAttempt` moved to `./guards/shared.ts` (re-imported at top so any
+// other call site stays byte-identical). The legacy `verifyGuardStep` +
+// `closeoutGuardStep` bodies are now `createVerifyGuard.decide` +
+// `createCloseoutGuard.decide` in `./guards/`, run through `runGuardChain`
+// from inside `applyAction`. Default-OFF: when neither guard is configured,
+// `buildGuardChain` returns `[]`, `runGuardChain([])` returns `undefined`
+// after a zero-iteration `for…of`, and the completed/nudge/proceed path
+// proceeds byte-for-byte identical to the pre-chain loop.
 
 const applyAction = async (
   config: AgentConfig,
@@ -1201,8 +1124,7 @@ const applyAction = async (
   ctxSystem: SystemPromptInput,
   breaker: CompactionBreaker | undefined,
   history: readonly ToolHistoryEntry[],
-  verifyGuardState: VerifyGuardState | undefined,
-  closeoutGuardState: CloseoutGuardState | undefined,
+  guards: readonly TurnGuard[],
   toolChoiceState: ToolChoiceTurnState,
 ): Promise<Step> => {
   if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
@@ -1239,33 +1161,25 @@ const applyAction = async (
   // and the (already dispatched) tool_result blocks.
   const success = result as StreamSuccess
   const message = success.message
-  // Tier 0 safety hardening: a finish attempt right after an unverified edit is forced
-  // into one more turn. All the branching/decision lives in `verifyGuardStep`
-  // so this hot path stays a single guarded call (default-OFF ⇒ undefined).
-  const guarded = verifyGuardStep(
-    config,
-    action,
-    message,
-    wm,
-    history,
-    verifyGuardState,
-    toolChoiceState,
-  )
-  if (guarded) return guarded
-  // Closeout reminder (§4 mirror): a finish attempt is given one single-shot
-  // closeout nudge per run. Ordered STRICTLY AFTER verify-guard: if verify
-  // already blocked above we never reach here on this turn — closeout fires the
-  // NEXT finish-intent (after verify is satisfied). Default-OFF ⇒ undefined.
-  const closedout = closeoutGuardStep(
-    config,
-    action,
-    message,
-    wm,
-    history,
-    closeoutGuardState,
-    toolChoiceState,
-  )
-  if (closedout) return closedout
+  // Tier 0 safety hardening: a finish attempt right after an unverified edit
+  // is forced into one more turn (`VerifyGuard`); a finish attempt without
+  // any prior unverified edit gets a single-shot closeout reminder
+  // (`CloseoutGuard`). The chain encodes the precedence (verify before
+  // closeout, see `./guards/build.ts`); default-OFF ⇒ the array is empty and
+  // `runGuardChain` returns `undefined` after zero iterations (byte-identical
+  // to the pre-chain loop). The `isFinishAttempt` predicate lives inside each
+  // adapter so non-finish actions short-circuit cheap (no chain allocation).
+  if (guards.length > 0) {
+    const blocked = runGuardChain(guards, {
+      action,
+      message,
+      wm,
+      history,
+      toolChoiceState,
+      emit: (reason) => emitRecovery(config, reason),
+    })
+    if (blocked !== undefined) return CONTINUE
+  }
   if (action.do === "completed") {
     // C5 fix: the completed-via-exhaustion branch (malformed-retry-exhausted /
     // empty-turn-exhausted) previously returned WITHOUT appending the final
@@ -1299,8 +1213,7 @@ const runTurn = async (
   classifier: AutoModeClassifier | undefined,
   skillGate: SkillGate | undefined,
   toolHistory: ToolHistoryEntry[] | undefined,
-  verifyGuardState: VerifyGuardState | undefined,
-  closeoutGuardState: CloseoutGuardState | undefined,
+  guards: readonly TurnGuard[],
   activeSkills: { name: string; description: string }[] | undefined,
   workingState: WorkingStateSession | undefined,
   collector: TurnWorkMetricsCollector | undefined,
@@ -1362,8 +1275,7 @@ const runTurn = async (
       // EVERY turn (contradicting the byte-identical zero-allocation intent).
       // Reuse one shared frozen empty array when the guard is off.
       toolHistory ?? EMPTY_TOOL_HISTORY,
-      verifyGuardState,
-      closeoutGuardState,
+      guards,
       toolChoiceState,
     )
     if (step.done) return step.result
@@ -1853,6 +1765,18 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
+  // Turn-exit guard chain (refactor 2026-05-23): one composed chain replaces
+  // the prior `verifyGuardStep` + `closeoutGuardStep` ladder in `applyAction`.
+  // Default-OFF byte-identical: when neither `cfg.verifyGuard` is set NOR
+  // `cfg.closeoutGuard.enabled === true`, `buildGuardChain` returns `[]` and
+  // `applyAction` short-circuits with `guards.length > 0` (zero allocation,
+  // zero work). Order: VerifyGuard before CloseoutGuard (matches the legacy
+  // ordering — see `./guards/build.ts`).
+  const guardChain = buildGuardChain({
+    config: cfg,
+    verifyGuardState,
+    closeoutGuardState,
+  })
   // ADR-0079 — session-scoped tool_choice turn state. Always constructed (a
   // bare `{verifyGuardViolated:false, closeoutAttempted:false}`); with no guard
   // ever arming a flag, `consumeTurnSignals` always yields `{}` and
@@ -2123,8 +2047,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
         classifier,
         skillGate,
         toolHistory,
-        verifyGuardState,
-        closeoutGuardState,
+        guardChain,
         activeSkills,
         workingState,
         workCollector,
