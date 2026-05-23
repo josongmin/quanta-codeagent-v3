@@ -1,6 +1,6 @@
 # ADR-0115 — Localize tool: SOTA++ signal hardening (BM25-lite + FrameTier + def-boost)
 
-- **Status**: Accepted (R-Phase9, <DATE>)
+- **Status**: Accepted (R-Phase9, 2026-05-24)
 - **Related**: ADR-0084 (speculative branch search — also cites Agentless §3/§4), [[R-Phase7]] (3-stage funnel + Agentless absorption), [[R-Phase8]] (`FrameTier` added to `parse_test_failure`, NOT to `localize` — this ADR closes that gap), `src/skill/system-skills/localize-fault/SKILL.md`, [[no-heuristics-only-validated]]
 - **References**: Agentless (Xia et al., 2024) — file→function→edit funnel + lexical retrieval baseline; BM25 (Robertson & Zaragoza, *The Probabilistic Relevance Framework: BM25 and Beyond*, 2009) — IDF formula; Codex `may-20-codex-signal.md` — signal trust hierarchy (source 10/10 > log 8/9 > rg 5/10) preserved unchanged.
 
@@ -29,13 +29,25 @@ The change is NOT byte-identical for arbitrary queries — rankings shift by des
 
 ## Validation
 
-Agent B's empirical calibration corpus drives this — a 13-entry query set (`tests/smoke/localize/corpus.json`) with hand-labeled gold-standard `file:line` targets, plus `tests/smoke/localize/measure.ts` computing recall@1, recall@3, recall@5, and MRR.
+Agent B's empirical calibration corpus drives this — a 14-entry query set (`tests/smoke/localize/corpus.json`) with hand-labeled gold-standard `file:line` targets, plus `tests/smoke/localize/measure.ts` computing recall@1, recall@3, recall@5, and MRR. Baseline captured pre-merge at `git_sha 808a56b`; post measurement at `git_sha 800fc90` (B's commit, post-A).
 
-Baseline (pre-R-Phase9 on the current main HEAD): `recall@1 = <MEASURED_BASELINE_R1>`, `recall@3 = <MEASURED_BASELINE_R3>`, `recall@5 = <MEASURED_BASELINE_R5>`, `MRR = <MEASURED_BASELINE_MRR>` (n=13).
+Baseline (pre-R-Phase9): `recall@1 = 0.000`, `recall@3 = 0.214`, `recall@5 = 0.286`, `MRR = 0.124` (n=14).
 
-After R-Phase9 (post-Agent-A-merge re-run): `recall@1 = <MEASURED_POST_R1>`, `recall@3 = <MEASURED_POST_R3>`, `recall@5 = <MEASURED_POST_R5>`, `MRR = <MEASURED_POST_MRR>`.
+After R-Phase9 (post-Agent-A-merge re-run): `recall@1 = 0.000`, `recall@3 = 0.536`, `recall@5 = 0.643`, `MRR = 0.303` (n=14).
 
-Acceptance rule: **aggregate must improve** across at least recall@3 and MRR; **per-query recall@3 may not drop by >0.20** without a written rationale (a single query regressing 1.00→0.00 fails the gate; 1.00→0.80 does not). The methodology, gold labels, and per-query deltas are documented in `tests/smoke/localize/README.md`. Pure-helper tests for the measurement script live in `tests/unit/localize-measure.test.ts`.
+Net: **recall@3 +0.322, recall@5 +0.357, MRR +0.179** — the three signals the ADR targets. recall@1 stays at 0.000 in both runs (see "Remaining gaps" below — it is a different failure mode, not addressed by this ADR).
+
+Acceptance rule: **aggregate must improve** across at least recall@3 and MRR; **per-query recall@3 may not drop by >0.20** without a written rationale (a single query regressing 1.00→0.00 fails the gate; 1.00→0.80 does not). The methodology, gold labels, and per-query deltas are documented in `tests/smoke/localize/README.md`. Pure-helper tests for the measurement script live in `tests/unit/localize-measure.test.ts`. Raw post-measurement JSON is committed alongside the baseline as `tests/smoke/localize/post-r-phase9.json` so future ADRs can diff unambiguously.
+
+## Remaining gaps (deferred to a future ADR)
+
+The measured per-query breakdown reveals three concrete failure modes R-Phase9 does NOT address — all of them suppress recall@1 to 0.000 even when the right file is in the top-3:
+
+1. **Stale `.js` compiled siblings in `src/`** — many `src/**/index.ts` source files have a sibling `index.js` (legacy build output, not gitignored, not deleted). ripgrep matches both; on identical scores the `.js` wins the `byteCompare` tie-break (`.js` < `.ts` byte-wise). On 7 of the 14 corpus queries, the `.js` sibling occupies rank 1 with the `.ts` source at rank 2 — recall@1 = 0 even though recall@2 would be 1.0. `classifyFrame` cannot catch this (the files are in `src/`, not `node_modules/`).
+2. **Heavy generated artifacts at the repo root** — `predictions.jsonl` (model output dumps under `runs/`), and to a lesser extent `tools/feature-catalog/**/*.yaml` (catalog data), accrue many term hits because they're large and contain symbol mentions verbatim. They out-rank source on 5 queries.
+3. **Documentation outranking source for well-known symbols** — for `buildSystemPrompt` the feature catalog (`docs/10.feature-catalog.md`) mentions the symbol more times than the source file defines it, so the catalog hits more lines, accrues a higher term-co-occurrence count, and wins. The def-pattern boost partially compensates but isn't enough when source has ONE def-line vs. catalog's many usage-lines.
+
+Each is a separate, evidence-locatable bug. R-Phase10 will tackle them (likely shape: extend `classifyFrame` with `generated` and `derived` tiers — `.js` siblings of an existing `.ts`, `*.jsonl` / `*.yaml` under `runs/` or `tools/feature-catalog/`, `*.md` under `docs/` — with smaller penalties than `vendored` since they're still legitimate hits, just not source-of-truth).
 
 ## Invariants preserved
 
