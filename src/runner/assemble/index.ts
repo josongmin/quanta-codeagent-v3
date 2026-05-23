@@ -18,6 +18,10 @@ export {
   type CompactionBreakerAssembleInput,
   type SummarizerLlmAssembleInput,
 } from "./compaction"
+/** {@link assembleConfig} — pure composer that turns built collaborators +
+ *  message history into the immutable per-turn `AgentConfig`. Distinct from
+ *  the `build*Core` factory family, which each instantiate ONE collaborator;
+ *  see the JSDoc on `assembleConfig` for the "assemble" vs "build" rationale. */
 export {
   assembleConfig,
   compactionDep,

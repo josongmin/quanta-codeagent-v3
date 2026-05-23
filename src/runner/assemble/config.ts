@@ -65,9 +65,25 @@ export const compactionDep = (d: {
   return d.summarizerLlm ? { summarizerLlm: d.summarizerLlm } : {}
 }
 
-/** Assemble the per-turn `AgentConfig`. Every conditional spread is preserved
- *  verbatim — this is a pure relocation so the wired knobs are byte-identical;
- *  it only moves the chain off the surface entry. */
+/**
+ * Compose a per-turn `AgentConfig` from typed dependencies + history.
+ *
+ * **Why "assemble" vs "build"** — the surface-agnostic builder family
+ * (`buildLLMCore`, `buildStoreCore`, `buildMemoryConfigCore`, etc.) each
+ * INSTANTIATE a single collaborator object. `assembleConfig` is different:
+ * it *composes* already-built pieces (passed in via {@link SessionDeps}) plus
+ * the message history into the immutable shape `runAgent` consumes. No new
+ * collaborator is constructed here — it's pure type-safe composition, and
+ * every conditional spread is preserved byte-for-byte from the prior inline
+ * block on the surface entry.
+ *
+ * Inputs are plain typed objects (no `process.env` / `argv` reads). Each
+ * surface (CLI / Web / Tauri) maps its own input source (ENV / HTTP body /
+ * IPC payload) → {@link SessionDeps} first, then calls this.
+ *
+ * @see buildLLMCore, buildStoreCore, buildMemoryConfigCore for the per-
+ *      collaborator factories that produce the inputs to this composer.
+ */
 export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {
   const compaction = compactionDep(d)
   return {
