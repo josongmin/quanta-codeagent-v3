@@ -35,13 +35,15 @@ export type FrameTier = "user" | "test" | "vendored"
 
 const TIER_RANK: Record<FrameTier, number> = { user: 0, test: 1, vendored: 2 }
 
-/** Vendored / third-party / build-output path fragments. A frame whose file
- *  matches any of these is noise for fault localization — the edit goes in
- *  user code, not here. Covers JS (node_modules/.pnp), Python (site-packages/
- *  .venv/dist-packages), Rust (.cargo/target), system libs, and common build
- *  output dirs. */
+/** Vendored / third-party / build-output / generator-noise path fragments. A
+ *  frame whose file matches any of these is noise for fault localization — the
+ *  edit goes in user code, not here. Covers JS (node_modules/.pnp), Python
+ *  (site-packages/.venv/dist-packages), Rust (.cargo/target), system libs,
+ *  common build output dirs, and (R-Phase10) generator/eval output dirs
+ *  (runs/outputs), coverage trees (coverage/.nyc_output), and log dumps —
+ *  these consistently outranked source files in localize per-query data. */
 const VENDORED_RE =
-  /(?:^|\/)(?:node_modules|\.pnp|site-packages|dist-packages|\.venv|venv|\.cargo|vendor|third_party|\.tox|__pycache__)(?:\/)|(?:^|\/)(?:dist|build|out|target\/(?:debug|release))\/|^\/usr\/(?:lib|local\/lib)\//
+  /(?:^|\/)(?:node_modules|\.pnp|site-packages|dist-packages|\.venv|venv|\.cargo|vendor|third_party|\.tox|__pycache__)(?:\/)|(?:^|\/)(?:dist|build|out|target\/(?:debug|release)|runs|outputs|coverage|\.nyc_output|logs)\/|^\/usr\/(?:lib|local\/lib)\//
 
 /** Test-file path/name heuristics across ecosystems. */
 const TEST_FILE_RE =

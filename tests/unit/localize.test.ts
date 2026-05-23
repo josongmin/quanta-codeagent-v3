@@ -211,6 +211,113 @@ describe("localizeTool", () => {
     }
   })
 
+  // --- R-Phase10 ---
+
+  test("sibling-.js penalty: src/x.ts outranks identical-content src/x.js", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      mkdirSync(join(root, "src"))
+      const body = "export const validateToken = (t: string) => t.length > 0\n"
+      writeFileSync(join(root, "src", "auth.ts"), body)
+      writeFileSync(join(root, "src", "auth.js"), body)
+      const { output, ok } = await drive({ query: "validateToken" }, root)
+      expect(ok).toBe(true)
+      const order = fileOrder(output)
+      const tsIdx = order.findIndex((f) => f.endsWith("auth.ts"))
+      const jsIdx = order.findIndex((f) => f.endsWith("auth.js"))
+      expect(tsIdx).toBeGreaterThanOrEqual(0)
+      expect(jsIdx).toBeGreaterThanOrEqual(0)
+      expect(tsIdx).toBeLessThan(jsIdx)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("sibling-.js penalty: NO false trigger across directories (full-path stem)", async () => {
+    // `src/auth.ts` and `other/auth.js` share a basename but live in different
+    // directories — full-path stems (`src/auth` vs `other/auth`) differ, so
+    // the .js MUST NOT be penalized. We compare against a CONTROL run with a
+    // true sibling (`src/auth.js`): the control's .js score must be exactly
+    // 10 less than the no-trigger run's .js score (the only delta is the
+    // sibling penalty firing). Same query, same .js content, same BM25 idf.
+    const triggerRoot = mkdtempSync(join(tmpdir(), "localize-trigger-"))
+    const controlRoot = mkdtempSync(join(tmpdir(), "localize-control-"))
+    try {
+      const body = "validateToken('seed')\n"
+      // Trigger: cross-directory (no sibling) — stem mismatch ⇒ no penalty.
+      mkdirSync(join(triggerRoot, "src"))
+      mkdirSync(join(triggerRoot, "other"))
+      writeFileSync(
+        join(triggerRoot, "src", "auth.ts"),
+        "export const validateToken = (t: string) => t.length > 0\n",
+      )
+      writeFileSync(join(triggerRoot, "other", "auth.js"), body)
+      // Control: same dir (sibling) — stem match ⇒ penalty fires.
+      mkdirSync(join(controlRoot, "src"))
+      writeFileSync(
+        join(controlRoot, "src", "auth.ts"),
+        "export const validateToken = (t: string) => t.length > 0\n",
+      )
+      writeFileSync(join(controlRoot, "src", "auth.js"), body)
+
+      const trigger = await drive({ query: "validateToken", verbose: true }, triggerRoot)
+      const control = await drive({ query: "validateToken", verbose: true }, controlRoot)
+      expect(trigger.ok).toBe(true)
+      expect(control.ok).toBe(true)
+      const scoreOf = (out: string, suffix: string): number => {
+        const row = out.split("\n").find((l) => l.includes(suffix))
+        const m = row?.match(/score=(-?\d+\.\d+)/)
+        return Number(m?.[1])
+      }
+      const triggerJs = scoreOf(trigger.output, "other/auth.js:")
+      const controlJs = scoreOf(control.output, "src/auth.js:")
+      expect(Number.isFinite(triggerJs)).toBe(true)
+      expect(Number.isFinite(controlJs)).toBe(true)
+      // Penalty is exactly −10 when it fires; same .js content + same idf
+      // ⇒ delta is exactly the penalty itself (no other ranking input
+      // changes between the two roots).
+      expect(triggerJs - controlJs).toBeCloseTo(10, 6)
+    } finally {
+      rmSync(triggerRoot, { recursive: true, force: true })
+      rmSync(controlRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("sibling-.jsx penalty: .tsx outranks identical-content .jsx twin", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      mkdirSync(join(root, "src"))
+      const body = "export const validateToken = (t) => t.length > 0\n"
+      writeFileSync(join(root, "src", "auth.tsx"), body)
+      writeFileSync(join(root, "src", "auth.jsx"), body)
+      const { output, ok } = await drive({ query: "validateToken" }, root)
+      expect(ok).toBe(true)
+      const order = fileOrder(output)
+      const tsxIdx = order.findIndex((f) => f.endsWith("auth.tsx"))
+      const jsxIdx = order.findIndex((f) => f.endsWith("auth.jsx"))
+      expect(tsxIdx).toBeGreaterThanOrEqual(0)
+      expect(jsxIdx).toBeGreaterThanOrEqual(0)
+      expect(tsxIdx).toBeLessThan(jsxIdx)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("sibling-.js penalty: no .ts siblings anywhere ⇒ .js NOT penalized", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      writeFileSync(join(root, "auth.js"), "export const validateToken = (t) => t.length > 0\n")
+      const { output, ok } = await drive({ query: "validateToken" }, root)
+      expect(ok).toBe(true)
+      // .js is the only candidate and ranks first — penalty must not have fired
+      // (tsStems is empty because there are zero .ts files in the scope).
+      const order = fileOrder(output)
+      expect(order[0]).toContain("auth.js")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("verbose flag toggles per-row score + tier", async () => {
     const root = mkdtempSync(join(tmpdir(), "localize-"))
     try {

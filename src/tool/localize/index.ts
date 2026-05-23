@@ -26,6 +26,36 @@ const SNIPPET_CAP = 160
  *  user-code matches out of `max_results`. */
 const TIER_PENALTY: Record<FrameTier, number> = { user: 0, test: -2, vendored: -50 }
 
+/** R-Phase10 sibling-`.js`-with-`.ts`-twin penalty. When the scope contains
+ *  both `src/x.ts` and `src/x.js` (a compiled artifact that mirrors the
+ *  source), the `.js` row has identical content / identical BM25 score and
+ *  was winning the byteCompare(file) tie-break (`.js` < `.ts` byte-wise).
+ *  −10 sits between `test: −2` (a test file can still be the real owner on a
+ *  test-of-test query) and `vendored: −50` (a hard bury). 10 is enough to
+ *  flip the tie since the pre-penalty scores match; small enough that a
+ *  `.js`-only project (no `.ts` siblings ever in `tsStems`) sees zero impact
+ *  — the penalty only triggers on detected duplication. The detection is by
+ *  FULL-PATH stem (path without the `.ts/.tsx/.mts/.cts` extension), so
+ *  unrelated co-named files (`src/foo.ts` vs `tests/foo.js`) do NOT match. */
+const JS_SIBLING_PENALTY = -10
+
+/** Set of `.ts`-family extensions whose stems define the "has a source twin"
+ *  signal for the JS-sibling penalty. */
+const TS_EXT_RE = /\.(?:ts|tsx|mts|cts)$/
+
+/** Set of `.js`-family extensions that are CANDIDATES for the sibling
+ *  penalty (only when their stem appears in `tsStems`). */
+const JS_SIBLING_EXT_RE = /\.(?:js|jsx|cjs|mjs)$/
+
+/** Strip a `.ts/.tsx/.mts/.cts` OR `.js/.jsx/.cjs/.mjs` extension and return
+ *  the full-path stem. Same prefix + same stem ⇒ direct siblings in the same
+ *  directory; differing paths produce differing stems even when basenames
+ *  match. Returns `undefined` for files with no matching extension. */
+const stemOf = (file: string): string | undefined => {
+  const m = file.match(/^(.*)\.(?:ts|tsx|mts|cts|js|jsx|cjs|mjs)$/)
+  return m?.[1]
+}
+
 /** Definition-pattern grammar. Matches the line-leading shape of a symbol
  *  definition across JS/TS/Python/Rust/Go/etc.: captures the declared
  *  identifier in group 5. Used to boost definition sites over use sites
@@ -110,16 +140,32 @@ const collectTerm = async (
   return stat
 }
 
-/** Count files in scope via `rg --files`. Used as the BM25 corpus size N. */
-const countScopeFiles = async (ctx: ToolContext, scope: string | undefined): Promise<number> => {
+/** Result of the single `rg --files` corpus scan: BM25 N + the set of
+ *  `.ts/.tsx/.mts/.cts` full-path stems used to detect `.js` siblings.
+ *  Computed in ONE rg subprocess (no extra fork in the hot path). */
+interface ScopeScan {
+  N: number
+  tsStems: Set<string>
+}
+
+/** Single `rg --files` pass that yields both the BM25 corpus size N AND the
+ *  set of `.ts`-family stems for the R-Phase10 sibling-`.js` detection. */
+const scanScope = async (ctx: ToolContext, scope: string | undefined): Promise<ScopeScan> => {
   const parts = ["rg", "--files"]
   if (scope) parts.push(sq(scope))
   const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
-  if (r.exitCode > 1 || r.timedOut) return 0
-  // Count non-empty lines.
+  if (r.exitCode > 1 || r.timedOut) return { N: 0, tsStems: new Set() }
   let n = 0
-  for (const ln of r.stdout.split("\n")) if (ln.length > 0) n++
-  return n
+  const tsStems = new Set<string>()
+  for (const ln of r.stdout.split("\n")) {
+    if (ln.length === 0) continue
+    n++
+    if (TS_EXT_RE.test(ln)) {
+      const stem = stemOf(ln)
+      if (stem !== undefined) tsStems.add(stem)
+    }
+  }
+  return { N: n, tsStems }
 }
 
 /** Standard BM25 IDF, with self-measured noise floor: a saturating term
@@ -136,13 +182,15 @@ const idfFor = (term: string, stats: Map<string, TermStat>, N: number): number =
 /** Score a hit: Σ IDF(t) over distinct terms on the line, plus a path-name
  *  bonus weighted by max(IDF) (so a token appearing in the file path lifts
  *  the hit only when that token is itself discriminating), plus the
- *  definition-site boost, plus the FrameTier penalty. Deterministic. */
+ *  definition-site boost, plus the FrameTier penalty, plus (R-Phase10) the
+ *  sibling-`.js`-with-`.ts`-twin penalty. Deterministic. */
 const scoreHit = (
   hit: Hit,
   tokens: string[],
   stats: Map<string, TermStat>,
   N: number,
   tier: FrameTier,
+  tsStems: Set<string>,
 ): number => {
   let s = 0
   let maxIdf = 0
@@ -164,6 +212,10 @@ const scoreHit = (
       }
   }
   s += TIER_PENALTY[tier]
+  if (JS_SIBLING_EXT_RE.test(hit.file)) {
+    const stem = stemOf(hit.file)
+    if (stem !== undefined && tsStems.has(stem)) s += JS_SIBLING_PENALTY
+  }
   return s
 }
 
@@ -175,11 +227,12 @@ const render = (
   N: number,
   max: number,
   verbose: boolean,
+  tsStems: Set<string>,
 ): string => {
   const ranked = hits
     .map((h) => {
       const tier = classifyFrame(h.file)
-      return { h, tier, score: scoreHit(h, tokens, stats, N, tier) }
+      return { h, tier, score: scoreHit(h, tokens, stats, N, tier, tsStems) }
     })
     .sort((a, b) =>
       b.score !== a.score
@@ -284,10 +337,11 @@ export const localizeTool: Tool<Input> = {
     // (score desc, file bytes, line ASC); insertion order doesn't escape.
     const hits = new Map<string, Hit>()
     const stats = new Map<string, TermStat>()
-    const [N, perTerm] = await Promise.all([
-      countScopeFiles(ctx, scope),
+    const [scan, perTerm] = await Promise.all([
+      scanScope(ctx, scope),
       Promise.all(tokens.map((t) => collectTerm(t, ctx, scope, hits))),
     ])
+    const { N, tsStems } = scan
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i]
       const s = perTerm[i]
@@ -313,7 +367,10 @@ export const localizeTool: Tool<Input> = {
     const verbose = input.verbose ?? false
     yield {
       type: "result",
-      result: { ok: true, output: render([...hits.values()], tokens, stats, N, max, verbose) },
+      result: {
+        ok: true,
+        output: render([...hits.values()], tokens, stats, N, max, verbose, tsStems),
+      },
     }
   },
 }

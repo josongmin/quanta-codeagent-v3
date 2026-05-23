@@ -152,6 +152,29 @@ describe("parseTestFailure — tier classification + ranking (R-Phase8 #1)", () 
     expect(classifyFrame("target/release/build.rs")).toBe("vendored")
     expect(classifyFrame("dist/bundle.js")).toBe("vendored")
   })
+
+  // R-Phase10: generator/eval/coverage/log noise dirs are vendored. These
+  // consistently outranked source files in localize per-query data; treating
+  // them as vendored closes that gap and reuses one regex in both consumers.
+  test("R-Phase10: runs/ generator output classified vendored", () => {
+    expect(classifyFrame("runs/snapshot/x.js")).toBe("vendored")
+  })
+
+  test("R-Phase10: outputs/ eval dir classified vendored", () => {
+    expect(classifyFrame("outputs/eval/foo.json")).toBe("vendored")
+  })
+
+  test("R-Phase10: coverage/ classified vendored", () => {
+    expect(classifyFrame("coverage/lcov.info")).toBe("vendored")
+  })
+
+  test("R-Phase10: .nyc_output/ classified vendored", () => {
+    expect(classifyFrame(".nyc_output/x.json")).toBe("vendored")
+  })
+
+  test("R-Phase10: logs/ classified vendored", () => {
+    expect(classifyFrame("logs/build.log")).toBe("vendored")
+  })
 })
 
 describe("parseTestFailureTool — tool surface", () => {
