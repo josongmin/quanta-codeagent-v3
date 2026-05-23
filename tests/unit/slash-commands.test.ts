@@ -63,11 +63,12 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers the documented builtins (full table with /rewind /fork /side /rules)", () => {
+  test("registers the documented builtins (full table with /rewind /fork /side /rules /memory)", () => {
     // `/rewind` + `/fork` are env-gated (QUANTA_REWIND, default "1"). The
     // unit-test environment leaves the var unset → both commands are
     // registered. A separate test in `rewind-cmd.test.ts` covers the
-    // disabled (`QUANTA_REWIND=0`) path.
+    // disabled (`QUANTA_REWIND=0`) path. `/memory` is gated the same way
+    // (QUANTA_MEMORY_SLASH, default "1") — see `memory-cmd.test.ts`.
     expect(BUILTINS.map((c) => c.name)).toEqual([
       "/help",
       "/context",
@@ -88,6 +89,7 @@ describe("BUILTINS table", () => {
       "/fork",
       "/side",
       "/rules",
+      "/memory",
     ])
   })
 })

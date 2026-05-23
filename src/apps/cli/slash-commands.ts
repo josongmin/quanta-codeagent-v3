@@ -36,11 +36,12 @@ import type { IdleMonitor } from "./idle-monitor"
 import { parseSnoozeDuration } from "./idle-monitor"
 import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
+import { isMemorySlashEnabled, memoryCmd } from "./memory-cmd"
 import { permissionCmd } from "./permission-explain"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { rulesCmd } from "./rules-cmd"
-import { sideCmd, type SideChatSessionState } from "./side-cmd"
+import { type SideChatSessionState, sideCmd } from "./side-cmd"
 import { statusCmd } from "./status-cmd"
 
 export interface SlashContext {
@@ -481,6 +482,10 @@ const helpCmd: SlashCommand = {
 // `"1"` (registered).
 const REWIND_COMMANDS: readonly SlashCommand[] = isRewindEnabled() ? rewindCommands : []
 
+// `/memory` is env-gated the same way: `QUANTA_MEMORY_SLASH=0` removes it
+// from the registry at load time. Default `"1"` (registered).
+const MEMORY_COMMANDS: readonly SlashCommand[] = isMemorySlashEnabled() ? [memoryCmd] : []
+
 export const BUILTINS: readonly SlashCommand[] = [
   helpCmd,
   contextCmd,
@@ -500,6 +505,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   ...REWIND_COMMANDS,
   sideCmd,
   rulesCmd,
+  ...MEMORY_COMMANDS,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

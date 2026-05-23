@@ -366,6 +366,7 @@ describe("/retry-with — slash dispatch", () => {
       "/fork",
       "/side",
       "/rules",
+      "/memory",
     ])
   })
 })
