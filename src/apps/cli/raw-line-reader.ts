@@ -35,6 +35,7 @@
  */
 
 import * as readline from "node:readline"
+import type { PromptHistory } from "./prompt-history"
 
 export interface CandidateDescriptor {
   readonly value: string
@@ -55,6 +56,19 @@ export interface ReadLineOptions {
    *  BG-filled composer band. Typical content: `provider · model · cwd`. */
   readonly meta?: string
   readonly signal?: AbortSignal
+  /** Optional bash-style prompt history. When provided:
+   *    - `↑`/`↓` navigate older/newer entries when the completion menu is
+   *      closed (otherwise they still navigate the menu, byte-identical).
+   *    - `Ctrl+R` enters reverse-i-search mode.
+   *    - `Enter` pushes the submitted line back into history.
+   *  Absent ⇒ all keypress paths byte-identical to the no-history build. */
+  readonly history?: PromptHistory
+  /** Optional heredoc multiline mode. When enabled (`true`), a leading
+   *  `"""` (triple-quote, triple-backtick also accepted) on its own line
+   *  opens a continuation prompt; a single line containing only the same
+   *  fence closes it and submits the joined body (`\n`-separated, fence
+   *  rows excluded). Absent / `false` ⇒ byte-identical, no fence detection. */
+  readonly multiline?: boolean
 }
 
 export class AbortError extends Error {
@@ -152,6 +166,21 @@ interface State {
    *  monotonically per readLine call so subsequent redraws stay inside a
    *  scroll-stable band. */
   reserved: number
+  /** History navigation: saved draft so `next()` past-newest restores what
+   *  the user was typing before pressing `↑`. `null` ⇒ not navigating. */
+  historyDraft: string | null
+  /** Reverse-i-search mode: when active, keystrokes filter the search query
+   *  instead of editing `buf`. The matched history entry is previewed in the
+   *  prompt row; `Enter` commits it into `buf`, `Esc` cancels. */
+  searchMode: boolean
+  searchQuery: string
+  searchMatch: string
+  /** Heredoc multiline: when open, completed lines accumulate here. The
+   *  active row is still `buf`; on fence-close they are joined with `\n`
+   *  and resolved. */
+  heredocOpen: boolean
+  heredocFence: string
+  heredocLines: string[]
 }
 
 const ghostSuffix = (buf: string, candidates: readonly string[]): string => {
@@ -174,7 +203,17 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       selectedIdx: -1,
       listOpen: false,
       reserved: 0,
+      historyDraft: null,
+      searchMode: false,
+      searchQuery: "",
+      searchMatch: "",
+      heredocOpen: false,
+      heredocFence: "",
+      heredocLines: [],
     }
+    // Reset the history cursor at the start of every readLine so `↑` always
+    // pulls the freshest entry first. Default-OFF when `opts.history` absent.
+    opts.history?.reset()
     let settled = false
 
     readline.emitKeypressEvents(stdin)
@@ -232,7 +271,9 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
         const namePadded = c + " ".repeat(Math.max(0, nameW - stringColumns(c)))
         const desc = opts.describe?.(c) ?? ""
         const sel = i === state.selectedIdx
-        const nameStyled = sel ? `${REVERSE}${CYAN}${namePadded}${RESET}` : `${CYAN}${namePadded}${RESET}`
+        const nameStyled = sel
+          ? `${REVERSE}${CYAN}${namePadded}${RESET}`
+          : `${CYAN}${namePadded}${RESET}`
         const descStyled = desc !== "" ? `  ${GRAY}${desc}${RESET}` : ""
         return `${nameStyled}${descStyled}`
       })
@@ -267,18 +308,33 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       out += moveUp(state.reserved)
       // Repaint the prompt line.
       out += CR + ERASE_LINE
-      out += fillBgRow(`${CYAN}${opts.prompt}${RESET}${state.buf}`)
-      // Ghost text (only when list is closed AND cursor at end).
-      if (!state.listOpen && state.cursor === state.buf.length) {
+      if (state.searchMode) {
+        // Reverse-i-search prompt: `(reverse-i-search) 'query': match`
+        const tag = `${GRAY}(reverse-i-search) '${state.searchQuery}':${RESET} `
+        out += fillBgRow(`${tag}${state.searchMatch}`)
+        // Cursor after the query (inside the parens), not after the match —
+        // matches the readline UX so backspace edits the query.
+        const cursorCol = stringColumns(stripAnsi(tag)) + stringColumns(state.searchMatch)
+        out += CR + moveRight(cursorCol)
+        stdout.write(out)
+        return
+      }
+      // Heredoc continuation: dim "… " indicator in the gutter to signal the
+      // user is composing a multiline body.
+      const displayPrompt = state.heredocOpen ? `${DIM}… ${RESET}` : `${CYAN}${opts.prompt}${RESET}`
+      out += fillBgRow(`${displayPrompt}${state.buf}`)
+      // Ghost text (only when list is closed AND cursor at end AND not in heredoc).
+      if (!state.listOpen && !state.heredocOpen && state.cursor === state.buf.length) {
         const ghost = ghostSuffix(state.buf, state.candidates)
         if (ghost !== "") {
           // Repaint with ghost embedded inside the BG row.
           out += CR + ERASE_LINE
-          out += fillBgRow(`${CYAN}${opts.prompt}${RESET}${state.buf}${DIM}${ghost}${RESET}`)
+          out += fillBgRow(`${displayPrompt}${state.buf}${DIM}${ghost}${RESET}`)
         }
       }
       // Cursor back to prompt line, buf cursor col.
-      out += CR + moveRight(promptCols + stringColumns(state.buf.slice(0, state.cursor)))
+      const displayPromptCols = state.heredocOpen ? 2 : promptCols
+      out += CR + moveRight(displayPromptCols + stringColumns(state.buf.slice(0, state.cursor)))
       stdout.write(out)
     }
 
@@ -307,9 +363,19 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       // Cursor is on the prompt line at the buffer cursor column. Wipe the
       // BG-styled prompt and echo it as plain text so subsequent stdout
       // doesn't bleed into the composer's background colour.
-      stdout.write(
-        CR + ERASE_LINE + opts.prompt + state.buf + "\n",
-      )
+      // For a multiline body (heredoc submit) we echo line-by-line with the
+      // continuation indicator on every subsequent row so the transcript
+      // visually matches what the user typed.
+      if (state.buf.includes("\n")) {
+        const lines = state.buf.split("\n")
+        const head = lines[0] ?? ""
+        const tail = lines.slice(1)
+        let echo = `${CR}${ERASE_LINE}${opts.prompt}${head}\n`
+        for (const line of tail) echo += `  ${line}\n`
+        stdout.write(echo)
+        return
+      }
+      stdout.write(CR + ERASE_LINE + opts.prompt + state.buf + "\n")
     }
 
     const settleResolve = (value: string): void => {
@@ -358,6 +424,69 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       return true
     }
 
+    /** Heredoc fence detector. A line is a fence iff it equals (after trim)
+     *  the configured opener `"""` or backtick `'''`. Returns the fence
+     *  string when matched, else `""`. */
+    const HEREDOC_FENCES = ['"""', "'''"]
+    const detectFence = (line: string): string => {
+      const trimmed = line.trim()
+      for (const f of HEREDOC_FENCES) if (trimmed === f) return f
+      return ""
+    }
+
+    /** Replace `buf` with a history-recall entry (or restore the saved draft
+     *  on past-newest). Resets cursor and refreshes candidates so a slash-
+     *  prefixed recalled entry re-opens the menu correctly. */
+    const setBufFromHistory = (next: string | undefined): void => {
+      if (next === undefined) {
+        // past-newest ⇒ restore the draft the user was typing.
+        state.buf = state.historyDraft ?? ""
+        state.historyDraft = null
+      } else {
+        if (state.historyDraft === null) state.historyDraft = state.buf
+        state.buf = next
+      }
+      state.cursor = state.buf.length
+      refreshCandidates()
+    }
+
+    /** Reverse-i-search step: re-run the search with the current query and
+     *  paint the match (or clear it on no-match). Cursor inside the history
+     *  ring is owned by `opts.history.search()` itself. */
+    const stepSearch = (): void => {
+      if (opts.history === undefined) return
+      if (state.searchQuery === "") {
+        state.searchMatch = ""
+        redraw()
+        return
+      }
+      // Always restart the search from the newest entry so query edits do
+      // not strand the cursor — `reset()` then `search(query)`.
+      opts.history.reset()
+      state.searchMatch = opts.history.search(state.searchQuery) ?? ""
+      redraw()
+    }
+
+    const commitSearch = (): boolean => {
+      if (!state.searchMode) return false
+      const pick = state.searchMatch
+      state.searchMode = false
+      state.searchQuery = ""
+      state.searchMatch = ""
+      if (pick !== "") {
+        state.buf = pick
+        state.cursor = state.buf.length
+        refreshCandidates()
+      }
+      return true
+    }
+
+    const cancelSearch = (): void => {
+      state.searchMode = false
+      state.searchQuery = ""
+      state.searchMatch = ""
+    }
+
     const onKey = (str: string | undefined, key: KeyEvent | undefined): void => {
       if (settled) return
       const k = key ?? {}
@@ -367,8 +496,89 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
         return
       }
 
+      // Reverse-i-search has the highest priority (consumes most keys until
+      // resolved or cancelled). Activated by Ctrl+R; deactivated by Enter
+      // (commit), Esc (cancel), or another Ctrl+R (step to next-older match).
+      if (state.searchMode) {
+        if (k.name === "return") {
+          commitSearch()
+          settleResolve(state.buf)
+          return
+        }
+        if (k.name === "escape" || (k.ctrl === true && k.name === "g")) {
+          cancelSearch()
+          redraw()
+          return
+        }
+        if (k.ctrl === true && k.name === "r") {
+          // step backward in the history for the same query
+          state.searchMatch = opts.history?.search(state.searchQuery) ?? state.searchMatch
+          redraw()
+          return
+        }
+        if (k.name === "backspace") {
+          state.searchQuery = state.searchQuery.slice(0, -1)
+          stepSearch()
+          return
+        }
+        if (typeof str === "string" && str.length === 1 && str >= " ") {
+          state.searchQuery += str
+          stepSearch()
+          return
+        }
+        // Ignore other keys inside search mode (no edit, no nav).
+        return
+      }
+
+      if (k.ctrl === true && k.name === "r" && opts.history !== undefined) {
+        state.searchMode = true
+        state.searchQuery = ""
+        state.searchMatch = ""
+        opts.history.reset()
+        redraw()
+        return
+      }
+
       if (k.name === "return") {
         if (state.listOpen && state.selectedIdx >= 0) commitSelected()
+        // Heredoc multiline: a fence line opens/closes the body; a non-fence
+        // line inside the body accumulates and the prompt resets to "… ".
+        if (opts.multiline === true) {
+          const fence = detectFence(state.buf)
+          if (!state.heredocOpen && fence !== "") {
+            // Open heredoc — the fence line itself is NOT included in the body.
+            state.heredocOpen = true
+            state.heredocFence = fence
+            state.heredocLines = []
+            state.buf = ""
+            state.cursor = 0
+            refreshCandidates()
+            redraw()
+            return
+          }
+          if (state.heredocOpen && fence === state.heredocFence) {
+            // Close heredoc — submit the joined body.
+            const body = state.heredocLines.join("\n")
+            state.heredocOpen = false
+            state.heredocFence = ""
+            state.heredocLines = []
+            state.buf = body
+            state.cursor = body.length
+            if (opts.history !== undefined && body !== "") opts.history.push(body)
+            settleResolve(body)
+            return
+          }
+          if (state.heredocOpen) {
+            // Continuation: stash and reset prompt for the next line.
+            state.heredocLines.push(state.buf)
+            state.buf = ""
+            state.cursor = 0
+            refreshCandidates()
+            redraw()
+            return
+          }
+        }
+        if (opts.history !== undefined) opts.history.push(state.buf)
         settleResolve(state.buf)
         return
       }
@@ -398,6 +608,11 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
           const visible = Math.min(state.candidates.length, MAX_VISIBLE_CANDIDATES)
           state.selectedIdx = (state.selectedIdx + 1) % visible
           redraw()
+          return
+        }
+        if (opts.history !== undefined && !state.heredocOpen) {
+          setBufFromHistory(opts.history.next())
+          redraw()
         }
         return
       }
@@ -407,6 +622,14 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
           const visible = Math.min(state.candidates.length, MAX_VISIBLE_CANDIDATES)
           state.selectedIdx = state.selectedIdx <= 0 ? visible - 1 : state.selectedIdx - 1
           redraw()
+          return
+        }
+        if (opts.history !== undefined && !state.heredocOpen) {
+          const prev = opts.history.prev()
+          if (prev !== undefined) {
+            setBufFromHistory(prev)
+            redraw()
+          }
         }
         return
       }
@@ -445,6 +668,10 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
         if (state.cursor > 0) {
           state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor)
           state.cursor -= 1
+          if (state.historyDraft !== null) {
+            state.historyDraft = null
+            opts.history?.reset()
+          }
           refreshCandidates()
           redraw()
         }
@@ -454,6 +681,10 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       if (k.name === "delete") {
         if (state.cursor < state.buf.length) {
           state.buf = state.buf.slice(0, state.cursor) + state.buf.slice(state.cursor + 1)
+          if (state.historyDraft !== null) {
+            state.historyDraft = null
+            opts.history?.reset()
+          }
           refreshCandidates()
           redraw()
         }
@@ -465,6 +696,13 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
         if (str.length === 1 && str < " ") return
         state.buf = state.buf.slice(0, state.cursor) + str + state.buf.slice(state.cursor)
         state.cursor += str.length
+        // Any direct edit invalidates the history navigation context:
+        // the buf no longer represents a recalled entry, so a follow-up `↓`
+        // shouldn't try to restore a stale "draft".
+        if (state.historyDraft !== null) {
+          state.historyDraft = null
+          opts.history?.reset()
+        }
         refreshCandidates()
         redraw()
       }

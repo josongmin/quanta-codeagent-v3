@@ -40,6 +40,7 @@ import {
   type SessionDeps,
   titleFlag,
 } from "./internal"
+import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { AbortError, readLine } from "./raw-line-reader"
 import { runSessionCommand } from "./session-commands"
 import { switchToSessionCwd } from "./session-io"
@@ -277,10 +278,15 @@ export interface RunReplLoopRawOptions {
   /** Meta line painted under the prompt (Codex-style composer). Typical
    *  content: `provider · model · ~/cwd`. Absent ⇒ no meta row. */
   readonly meta?: string
+  /** Optional bash-style prompt history. Default OFF when undefined —
+   *  raw-line-reader stays byte-identical to the no-history path. */
+  readonly history?: PromptHistory
+  /** Heredoc multiline mode. Default OFF; opt-in via QUANTA_MULTILINE. */
+  readonly multiline?: boolean
 }
 
 export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void> => {
-  const { signal, turn, slashCtx, meta } = opts
+  const { signal, turn, slashCtx, meta, history, multiline } = opts
   process.stderr.write("\n")
   while (!signal.aborted) {
     let input: string
@@ -291,6 +297,8 @@ export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void>
           completer: (line) => slashCompleter(line)[0],
           describe: describeSlashCommand,
           ...(meta !== undefined ? { meta } : {}),
+          ...(history !== undefined ? { history } : {}),
+          ...(multiline === true ? { multiline: true } : {}),
           signal,
         })
       ).trim()
@@ -380,13 +388,18 @@ const renderTurnError = (e: unknown, statusBar: StatusBar): void => {
  *  AbortError (the prompt was aborted via `signal`). Other exceptions
  *  propagate to the caller. Extracted from {@link buildCliPromptSource} to
  *  keep its `next` closure under the biome cognitive-complexity budget. */
-const readReplLine = async (signal: AbortSignal | undefined): Promise<string | null> => {
+const readReplLine = async (
+  signal: AbortSignal | undefined,
+  uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
+): Promise<string | null> => {
   try {
     const raw = await readLine({
       prompt: "› ",
       completer: (line) => slashCompleter(line)[0],
       describe: describeSlashCommand,
       ...(signal !== undefined ? { signal } : {}),
+      ...(uxOpts?.promptHistory !== undefined ? { history: uxOpts.promptHistory } : {}),
+      ...(uxOpts?.multiline === true ? { multiline: true } : {}),
     })
     return raw.trim()
   } catch (e) {
@@ -402,8 +415,9 @@ const readReplLine = async (signal: AbortSignal | undefined): Promise<string | n
 const classifyReplLine = async (
   signal: AbortSignal | undefined,
   slashCtx: Partial<{ skills: () => Promise<SkillRow[]> }> | undefined,
+  uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): Promise<string | null | undefined> => {
-  const input = await readReplLine(signal)
+  const input = await readReplLine(signal, uxOpts)
   if (input === null) return null
   if (input === "/exit" || input === "/quit") return null
   const handled = input === "" || (await tryRunReplSlash(input, slashCtx))
@@ -425,10 +439,11 @@ const classifyReplLine = async (
  *  `runReplLoopRaw` post-line behavior byte-identically. */
 const buildCliPromptSource = (
   slashCtx: Partial<{ skills: () => Promise<SkillRow[]> }> | undefined,
+  uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
 ): PromptSource => ({
   next: async (signal) => {
     while (signal?.aborted !== true) {
-      const next = await classifyReplLine(signal, slashCtx)
+      const next = await classifyReplLine(signal, slashCtx, uxOpts)
       if (next === undefined) continue
       return next
     }
@@ -804,10 +819,26 @@ export const runRepl = async (): Promise<void> => {
       process.once("exit", () => statusBar.teardown())
       const skillsCb = buildSkillsCallback(skillsConfig)
       const slashCtx = skillsCb !== undefined ? { skills: skillsCb } : undefined
+      // Bash-style ↑/↓ history + Ctrl+R reverse-i-search. Default ON
+      // (QUANTA_HISTORY=0 to disable). Path/max overridable via env.
+      const historyEnabled = env("QUANTA_HISTORY", "1") !== "0"
+      const historyMax = Math.max(1, Number(env("QUANTA_HISTORY_MAX", "1000")))
+      const historyFile = process.env.QUANTA_HISTORY_FILE
+      const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
+        maxLines: historyMax,
+        ...(historyFile !== undefined ? { filePath: historyFile } : {}),
+      }
+      const promptHistory = historyEnabled ? createPromptHistory(promptHistoryOpts) : undefined
+      // Heredoc multiline (`"""` / `'''` fence). Default ON; OFF when
+      // QUANTA_MULTILINE=0.
+      const multilineEnabled = env("QUANTA_MULTILINE", "1") !== "0"
       // Initial blank row matches the prior `runReplLoopRaw` header write so
       // the very first composer row sits one line below the resume log.
       process.stderr.write("\n")
-      const cliPromptSource = buildCliPromptSource(slashCtx)
+      const cliPromptSource = buildCliPromptSource(slashCtx, {
+        ...(promptHistory !== undefined ? { promptHistory } : {}),
+        multiline: multilineEnabled,
+      })
       // wrapTurn installs the Esc-Esc per-turn cancel + signal composition +
       // dashboard render + REPL-survives-on-error around each runOnce call.
       // Mirrors the prior `turn()` closure body byte-identically; lifted into
