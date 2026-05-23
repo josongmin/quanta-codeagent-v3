@@ -1,5 +1,5 @@
 /**
- * PlanStore.clear() hellgate (ADR-0093 P6).
+ * PlanStore.clear() hellgate (ADR-0095 P6).
  *
  * Pins the lifecycle reset semantics of `createInMemoryPlanStore().clear()`:
  *   - Resets `current()` to `null`.

@@ -1,5 +1,5 @@
 /**
- * Plan-exit lifecycle hellgate (ADR-0093 P6).
+ * Plan-exit lifecycle hellgate (ADR-0095 P6).
  *
  * Pins the pure-functional dispatch in `src/agent/plan-exit-lifecycle.ts`:
  * 3-way `PlanExitOutcome` × 3 `PlanStore` states (no plan / has plan /

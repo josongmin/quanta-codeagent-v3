@@ -1,7 +1,7 @@
 id: plan-mode
-title: Plan-mode 구조화 메타도구 + state-machine (SOTA++ ADR-0093 draft)
+title: Plan-mode 구조화 메타도구 + state-machine (SOTA++ ADR-0095 draft)
 section: 6
-subsystem: Plan-mode 구조화 (Cursor todoModel + Codex plan_delta + Claude ExitPlanMode 합성, ADR-0093 draft)
+subsystem: Plan-mode 구조화 (Cursor todoModel + Codex plan_delta + Claude ExitPlanMode 합성, ADR-0095 draft)
 order: 3
 maturity: L4
 status: new
@@ -14,7 +14,7 @@ purpose: |
   100노드 perf <50ms gate, 세 모델 다 부재). PlanStore port + ToolContext duck-typed
   PlanMutator seam(@/tool↛@/agent/plan 슬라이스 격리, biome enforce). 4 model-callable
   도구(create_plan / update_todos / update_plan / remove_todos) + 운영자 port
-  request_user_input(ADR-0095 자매). 6 AgentEvent 변형(plan_created/_updated/_snapshot/
+  request_user_input(ADR-0097 자매). 6 AgentEvent 변형(plan_created/_updated/_snapshot/
   _user_input_*/mode_changed) + Submission set_mode op + isSetModeOp 가드. 부재 시
   default-OFF byte-identical.
 evidence:
@@ -41,7 +41,7 @@ evidence:
     - src/stream/types.ts
     - src/stream/adapters/jsonl-recorder.ts
     - src/stream/adapters/stdout.ts
-  adrs: []
+  adrs: [95, 96, 97]
   tests:
     unit:
       - tests/unit/agent/plan/transitions-hell.test.ts

@@ -2,7 +2,7 @@ import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent, UserInputOutcome } from "./types"
 
 /**
- * `request_user_input` tool (ADR-0095 draft) — sister tool of
+ * `request_user_input` tool (ADR-0097 draft) — sister tool of
  * `request_plan_exit`. Lets the model ask the operator a question and block on
  * a typed reply when it cannot infer the decision itself. Designed for use
  * inside plan-mode (a missing piece of information that turns the plan into a

@@ -1,5 +1,5 @@
 /**
- * Plan-tool error mapping (ADR-0093 draft).
+ * Plan-tool error mapping (ADR-0095 draft).
  *
  * Converts a {@link PlanMutationErrorCode} from the producer-side mutator
  * into a model-facing reason string + a typed {@link ToolFailure} payload.

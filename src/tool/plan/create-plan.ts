@@ -1,5 +1,5 @@
 /**
- * `create_plan` tool (ADR-0093 draft).
+ * `create_plan` tool (ADR-0095 draft).
  *
  * Creates a new structured plan with todos + optional phases. Routes through
  * the duck-typed {@link ToolContext.planMutator} seam. Registered only when

@@ -1,5 +1,5 @@
 /**
- * Shared zod schemas for the 4 plan-mode tools (ADR-0093 draft). Closed-shape
+ * Shared zod schemas for the 4 plan-mode tools (ADR-0095 draft). Closed-shape
  * input validation at the dispatch boundary. Each tool re-uses these
  * fragments so the inputs the model sees stay consistent across tools.
  */

@@ -1,5 +1,5 @@
 /**
- * Plan-mode SOTA++ data model (ADR-0093 draft, 2026-05-23).
+ * Plan-mode SOTA++ data model (ADR-0095 draft, 2026-05-23).
  *
  * Canonical shapes for the structured plan-state-machine that the four model-
  * callable tools (`create_plan` / `update_todos` / `update_plan` /

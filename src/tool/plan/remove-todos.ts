@@ -1,5 +1,5 @@
 /**
- * `remove_todos` tool (ADR-0093 draft). Atomic batch — if removing any id
+ * `remove_todos` tool (ADR-0095 draft). Atomic batch — if removing any id
  * leaves a dangling dependency, the WHOLE batch is rejected with
  * `dependency_unknown` (no partial removal).
  */

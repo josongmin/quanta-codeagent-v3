@@ -1,5 +1,5 @@
 /**
- * Pure plan-state reducers (ADR-0093 draft).
+ * Pure plan-state reducers (ADR-0095 draft).
  *
  * Every reducer takes a plan + inputs + injected `now`/`idGen` and returns
  * {@link PlanResult}<{@link PlanDelta}>. No state, no I/O, no logger. Side-

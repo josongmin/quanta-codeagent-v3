@@ -1,5 +1,5 @@
 /**
- * Plan-tool hellgate (ADR-0093 draft). Covers all 4 tools (`create_plan` /
+ * Plan-tool hellgate (ADR-0095 draft). Covers all 4 tools (`create_plan` /
  * `update_todos` / `update_plan` / `remove_todos`) for:
  *
  *   - happy path → ok:true output mentions new version.

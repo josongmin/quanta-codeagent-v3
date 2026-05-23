@@ -1,5 +1,5 @@
 /**
- * `update_todos` tool (ADR-0093 draft).
+ * `update_todos` tool (ADR-0095 draft).
  *
  * Patches one or more todos (status / content / deps / phase / assignee /
  * verifyHint) via the {@link ToolContext.planMutator} seam. `merge:true`

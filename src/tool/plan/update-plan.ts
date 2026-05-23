@@ -1,5 +1,5 @@
 /**
- * `update_plan` tool (ADR-0093 draft) — meta-only updates (name, overview,
+ * `update_plan` tool (ADR-0095 draft) — meta-only updates (name, overview,
  * isProject, phase reorder). Does NOT touch todos; use update_todos for that.
  */
 import type { Tool, ToolContext, ToolEvent } from "../types"

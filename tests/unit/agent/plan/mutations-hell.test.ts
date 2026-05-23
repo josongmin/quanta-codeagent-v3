@@ -1,5 +1,5 @@
 /**
- * Mutations hellgate (ADR-0093 draft). Pins every variant of
+ * Mutations hellgate (ADR-0095 draft). Pins every variant of
  * {@link PlanMutationError} to a concrete failing path through one of the
  * 6 reducers in `src/agent/plan/mutations.ts`. Happy paths included so
  * idempotence / pure-output invariants stay green.

@@ -1,5 +1,5 @@
 /**
- * PlanStore → PlanMutator adapter (ADR-0094 draft).
+ * PlanStore → PlanMutator adapter (ADR-0096 draft).
  *
  * The producer-side `PlanStore` returns `PlanResult<PlanDelta>` (rich shape:
  * full Plan snapshot + typed delta). The duck-typed consumer-side

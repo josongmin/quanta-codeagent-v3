@@ -1,5 +1,5 @@
 /**
- * Closed `TodoStatus` transition matrix (ADR-0093 draft, 2026-05-23).
+ * Closed `TodoStatus` transition matrix (ADR-0095 draft, 2026-05-23).
  *
  * Pure module: a frozen lookup table + a pure predicate. The mutations layer
  * (`mutations.ts`) consults `isValidTransition` whenever a {@link TodoPatch}
@@ -28,13 +28,23 @@ import type { TodoStatus } from "./types"
  * What each `TodoStatus` can transition INTO (NOT including self).
  * Terminal statuses (`completed`, `cancelled`) map to empty arrays.
  */
-export const TRANSITION_MATRIX: Readonly<Record<TodoStatus, readonly TodoStatus[]>> = Object.freeze({
-  pending: Object.freeze(["in_progress", "cancelled", "blocked"] as const) as readonly TodoStatus[],
-  in_progress: Object.freeze(["completed", "blocked", "cancelled"] as const) as readonly TodoStatus[],
-  blocked: Object.freeze(["in_progress", "cancelled"] as const) as readonly TodoStatus[],
-  completed: Object.freeze([] as const) as readonly TodoStatus[],
-  cancelled: Object.freeze([] as const) as readonly TodoStatus[],
-})
+export const TRANSITION_MATRIX: Readonly<Record<TodoStatus, readonly TodoStatus[]>> = Object.freeze(
+  {
+    pending: Object.freeze([
+      "in_progress",
+      "cancelled",
+      "blocked",
+    ] as const) as readonly TodoStatus[],
+    in_progress: Object.freeze([
+      "completed",
+      "blocked",
+      "cancelled",
+    ] as const) as readonly TodoStatus[],
+    blocked: Object.freeze(["in_progress", "cancelled"] as const) as readonly TodoStatus[],
+    completed: Object.freeze([] as const) as readonly TodoStatus[],
+    cancelled: Object.freeze([] as const) as readonly TodoStatus[],
+  },
+)
 
 /**
  * Returns true iff `from → to` is legal. Self-transitions are allowed (the

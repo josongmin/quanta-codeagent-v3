@@ -1,5 +1,5 @@
 /**
- * DAG validation for plan dependencies (ADR-0093 draft).
+ * DAG validation for plan dependencies (ADR-0095 draft).
  *
  * Three pure exports operating on a `Readonly<Record<string, TodoItem>>` graph:
  *
@@ -94,7 +94,10 @@ export const findCycle = (
   startId?: string,
 ): readonly string[] | null => findCycleInternal(buildAdjacency(todos), startId)
 
-const findCycleInternal = (adj: AdjacencyView, startId: string | undefined): readonly string[] | null => {
+const findCycleInternal = (
+  adj: AdjacencyView,
+  startId: string | undefined,
+): readonly string[] | null => {
   const colour: Record<string, 0 | 1 | 2> = {} // 0=white, 1=gray, 2=black
   const parent: Record<string, string | undefined> = {}
   let cycleResult: readonly string[] | null = null

@@ -1,5 +1,5 @@
 /**
- * Status-transition matrix hellgate (P1 plan-mode SOTA++, ADR-0093 draft).
+ * Status-transition matrix hellgate (P1 plan-mode SOTA++, ADR-0095 draft).
  *
  * Pins the closed `TodoStatus` transition matrix. Adding a status MUST
  * extend the `TRANSITION_MATRIX` AND every exhaustive switch in this file

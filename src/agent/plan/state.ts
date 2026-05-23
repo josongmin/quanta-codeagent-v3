@@ -7,7 +7,7 @@
  * via `onDelta?` if provided. Errors do not emit (failed mutations are
  * server-side only — surfaces should only render successful state).
  *
- * In-memory only — durability is the host's job (see ADR-0094 PlanStore port
+ * In-memory only — durability is the host's job (see ADR-0096 PlanStore port
  * + AgentConfig.planSnapshotStore).
  */
 
@@ -40,7 +40,7 @@ export interface PlanStore {
   snapshot(): PlanSnapshot | null
   restore(snap: PlanSnapshot): PlanResult<true>
   /**
-   * Explicit, caller-driven reset path (ADR-0093 P6 plan-exit-lifecycle).
+   * Explicit, caller-driven reset path (ADR-0095 P6 plan-exit-lifecycle).
    *
    * Drops the current plan unconditionally:
    *   - `current()` returns `null` afterward.

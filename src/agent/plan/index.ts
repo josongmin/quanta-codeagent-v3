@@ -1,6 +1,6 @@
 /**
  * `@/agent/plan` barrel — public surface of the SOTA++ plan-mode slice
- * (ADR-0093 draft). Keep this surface MINIMAL: cross-slice consumers should
+ * (ADR-0095 draft). Keep this surface MINIMAL: cross-slice consumers should
  * use the duck-typed `ToolContext.planMutator` seam in `@/tool/types.ts`
  * (RFC §3.1 slice isolation; biome `noRestrictedImports` enforces).
  */

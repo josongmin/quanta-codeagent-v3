@@ -1,5 +1,5 @@
 /**
- * Plan snapshot serialization (ADR-0093 draft).
+ * Plan snapshot serialization (ADR-0095 draft).
  *
  * Round-trip identity: `fromSnapshot(toSnapshot(p))` returns a plan
  * structurally equal to `p`. Schema-versioned (`"plan-v1"`) so future

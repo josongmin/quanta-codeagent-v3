@@ -1,5 +1,5 @@
 /**
- * `@/tool/plan` barrel + factory (ADR-0093 draft). Builds the 4-tool array
+ * `@/tool/plan` barrel + factory (ADR-0095 draft). Builds the 4-tool array
  * the dispatch seam registers when `ctx.planMutator` is wired.
  */
 

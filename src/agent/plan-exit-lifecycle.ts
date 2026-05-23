@@ -1,5 +1,5 @@
 /**
- * Plan-exit lifecycle router (ADR-0093 P6, paired with ADR-0086 3-way exit).
+ * Plan-exit lifecycle router (ADR-0095 P6, paired with ADR-0086 3-way exit).
  *
  * Pure-functional dispatch from a {@link PlanExitOutcome} (the 3-way decision
  * the operator made via the {@link PlanExitPort}) to a {@link PlanExitLifecycle}

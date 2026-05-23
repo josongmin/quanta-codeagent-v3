@@ -1,5 +1,5 @@
 /**
- * ADR-0095 (draft) — `request_user_input` tool hell-suite.
+ * ADR-0097 (draft) — `request_user_input` tool hell-suite.
  *
  * Mirrors the `request_plan_exit` contract (ADR-0086 sister tool) and pins:
  *   - graceful absent-port degradation (no throw past the loop),
@@ -57,7 +57,7 @@ const capturingRequester = (
 const tool = requestUserInputTool()
 
 describe("request_user_input — metadata & contract", () => {
-  test("name + description match the ADR-0095 draft surface", () => {
+  test("name + description match the ADR-0097 draft surface", () => {
     expect(tool.name).toBe("request_user_input")
     expect(tool.description).toContain("Ask the operator")
     expect(tool.description).toContain("answer")

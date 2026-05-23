@@ -1,5 +1,5 @@
 /**
- * DAG validation hellgate (P1 plan-mode SOTA++, ADR-0093 draft).
+ * DAG validation hellgate (P1 plan-mode SOTA++, ADR-0095 draft).
  *
  * Pins the dependency graph algorithms:
  *   - `validateDag` — full-plan typed validation (self / dangling / cycle).
