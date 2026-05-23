@@ -1,0 +1,59 @@
+diff --git a/requests/adapters.py b/requests/adapters.py
+index fe22ff45..1db44527 100644
+--- a/requests/adapters.py
++++ b/requests/adapters.py
+@@ -28,6 +28,7 @@ from urllib3.exceptions import ReadTimeoutError
+ from urllib3.exceptions import SSLError as _SSLError
+ from urllib3.exceptions import ResponseError
+ from urllib3.exceptions import LocationValueError
++from urllib3.exceptions import LocationParseError
+ 
+ from .models import Response
+ from .compat import urlparse, basestring
+@@ -413,6 +414,8 @@ class HTTPAdapter(BaseAdapter):
+             conn = self.get_connection(request.url, proxies)
+         except LocationValueError as e:
+             raise InvalidURL(e, request=request)
++        except LocationParseError as e:
++            raise InvalidURL(e, request=request)
+ 
+         self.cert_verify(conn, request.url, verify, cert)
+         url = self.request_url(request, proxies)
+diff --git a/requests/exceptions.py b/requests/exceptions.py
+index 957e31f3..64a0214a 100644
+--- a/requests/exceptions.py
++++ b/requests/exceptions.py
+@@ -7,6 +7,7 @@ requests.exceptions
+ This module contains the set of Requests' exceptions.
+ """
+ from urllib3.exceptions import HTTPError as BaseHTTPError
++from urllib3.exceptions import LocationParseError
+ 
+ from .compat import JSONDecodeError as CompatJSONDecodeError
+ 
+@@ -91,6 +92,10 @@ class InvalidURL(RequestException, ValueError):
+     """The URL provided was somehow invalid."""
+ 
+ 
++# Map urllib3 URL parsing errors to Requests' InvalidURL for consistency.
++LocationParseError = InvalidURL
++
++
+ class InvalidHeader(RequestException, ValueError):
+     """The header value provided was somehow invalid."""
+ 
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..bcb48e22 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -384,6 +384,10 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+             scheme, auth, host, port, path, query, fragment = parse_url(url)
+         except LocationParseError as e:
+             raise InvalidURL(*e.args)
++        except UnicodeError:
++            # urllib3's URL parser may raise UnicodeError (e.g. IDNA failures)
++            # for some invalid hostnames. Normalize to Requests' InvalidURL.
++            raise InvalidURL('URL has an invalid label.')
+ 
+         if not scheme:
+             error = ("Invalid URL {0!r}: No schema supplied. Perhaps you meant http://{0}?")

@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Reverse-engineering corpus (beautified third-party app code, not for commit)
+.extracted_source/
+
 # Build
 dist/
 *.tsbuildinfo
