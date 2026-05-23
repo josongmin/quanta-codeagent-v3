@@ -1,4 +1,4 @@
-import type { LLMPort, Message, StreamEvent, SystemPromptInput, ToolResultBlock } from "@/llm"
+import type { LLMPort, Message, StreamEvent, SystemPromptInput } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import {
   attrs,
@@ -10,7 +10,7 @@ import {
   startSpan,
   type TurnTiming,
 } from "@/observability"
-import { normalizeRedactionConfig, type RedactionHit, redactSecrets } from "@/security"
+import { normalizeRedactionConfig, redactSecrets } from "@/security"
 import { errMessage, LLMError } from "@/shared"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
@@ -19,7 +19,6 @@ import {
   type ConversationSummaryArchive,
   createArchive,
 } from "./conversation-summary-archive"
-import { dispatchTool } from "./dispatch"
 import { DedupGate } from "./dispatch-dedup"
 import { effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
@@ -91,6 +90,11 @@ import {
   refusalCategory,
   type StopCategory,
 } from "./stop-category"
+import {
+  createStreamDispatcher,
+  type FirstTokenCell,
+  type TurnTimingAnchors,
+} from "./stream-callbacks"
 import { streamingTurn } from "./streaming-dispatch"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import { consumeTurnSignals, createToolChoiceTurnState, resolveToolChoice } from "./tool-choice"
@@ -280,17 +284,6 @@ const emitInterrupted = (
   })
 }
 
-/** RFC may-22 Phase 1: BudgetMeter tick helper for tool dispatch. Folds the
- *  bash → shell_command and test_runner → test_run sub-counters into a single
- *  call site so the `streamConsume` dispatch callback's cognitive complexity
- *  doesn't grow. Optional-chain on every read so a meter-less config is
- *  byte-for-byte identical to the pre-RFC path. */
-const tickToolDispatch = (config: AgentConfig, name: string): void => {
-  config.budgetMeter?.tick("tool_call")
-  if (name === "bash") config.budgetMeter?.tick("shell_command")
-  if (name === "test_runner") config.budgetMeter?.tick("test_run")
-}
-
 /** Pass-through wrapper over the model stream that tees `usage` events to the
  *  W-C `emitUsage` bridge (RFC-0002) WITHOUT consuming any other event —
  *  `streamingTurn` has no `onUsage` collaborator, so the bridge lives here so
@@ -396,28 +389,6 @@ const resolveSkillTurnOverride = (
   }
   return { llm }
 }
-/** Recoverable deny when a tool is outside the active skill's allowlist. */
-const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut => ({
-  block: {
-    type: "tool_result",
-    tool_use_id: call.id,
-    content:
-      `Tool "${call.name}" is not in the active skill's permitted tool set. ` +
-      "Use only the tools the skill allows, or invoke a different skill.",
-    is_error: true,
-  } satisfies ToolResultBlock,
-  ok: false,
-  preview: "skill-scoped",
-})
-type StreamDispatchOut = {
-  block: ToolResultBlock
-  ok: boolean
-  preview: string
-  /** ADR-0078 — present on the `dispatchTool` branch (redaction hits for the
-   *  tool_result); absent on the skill-scope-deny branch. Optional so the
-   *  union accessed in the dispatch callback is uniform. */
-  redactionHits?: ReadonlyArray<RedactionHit>
-}
 
 /**
  * Consume one LLM stream WITH interleaved tool execution (streaming tool
@@ -440,9 +411,13 @@ const streamConsume = async (
   system: SystemPromptInput,
 ): Promise<StreamConsumeResult> => {
   // R2-B P1: destructure into the same local names the original body used so
-  // every reference below stays byte-identical (config/recorder/classifier/…).
-  const { config, specs, recorder, classifier, skillGate } = session
-  const { toolHistory, workingState, collector, toolChoiceState, onRedaction, onTurnTiming } = state
+  // every reference below stays byte-identical (config/recorder/skillGate/…).
+  // R2-B P3: `classifier`/`workingState`/`toolHistory`/`onRedaction` are
+  // captured by the dispatch factory (`./stream-callbacks#createStreamDispatcher`)
+  // off the same `session`/`state` bundles, so they're no longer destructured
+  // here — the local references were move-only, with no behavioural change.
+  const { config, specs, recorder, skillGate } = session
+  const { collector, toolChoiceState, onTurnTiming } = state
   // ADR-0079 — resolve the pre-call tool_choice from the loop-owned turn state.
   // `consumeTurnSignals` reads + clears the 1-turn-TTL flags armed by the
   // verify/closeout guards on the PRIOR stream's finish-intent; `resolveToolChoice`
@@ -486,19 +461,23 @@ const streamConsume = async (
   // Tombstone (stream_reset) handling: the engine resets its own
   // `firstChunkSeen` latch so the REPLACEMENT stream's first chunk re-fires
   // `onFirstChunk`. Per ADR-0077 invariant ("FIRST chunk of the REPLACEMENT
-  // stream is the TTFT signal") we OVERWRITE `firstTokenAt` on every fire
-  // — `createTurnTimingCapture.markFirstToken` is by-design idempotent (it
-  // freezes the first stamp), so we capture the anchor directly. Sink
-  // (`onTurnTiming`) is what surfaces the snapshot; absent ⇒ snapshot is
-  // built locally and discarded.
+  // stream is the TTFT signal") the cell is OVERWRITTEN on every fire (the
+  // factory does this directly; `createTurnTimingCapture.markFirstToken` is
+  // by-design idempotent — it freezes the first stamp — so we capture the
+  // anchor directly via the mutable cell). Sink (`onTurnTiming`) is what
+  // surfaces the snapshot; absent ⇒ snapshot is built locally and discarded.
   const requestSentAt = Date.now()
-  let firstTokenAt: number | null = null
-  const markFirstChunk = (): void => {
-    // Each engine fire is a fresh first-chunk event (the engine guarantees
-    // at most one fire per stream, possibly multiple across stream_resets).
-    // OVERWRITE so the REPLACEMENT stream's chunk wins.
-    firstTokenAt = Date.now()
-  }
+  const firstTokenAtCell: FirstTokenCell = { value: undefined }
+  // R2-B P3 — hoist the dispatch closure + 4 stream callbacks into the
+  // `createStreamDispatcher` factory (`./stream-callbacks`). Pure mechanical
+  // extract: every closure body is byte-identical to the prior inline form,
+  // every collaborator (`config`/`recorder`/`classifier`/`skillGate`/
+  // `workingState`/`collector`/`toolHistory`/`onRedaction`) is read off the
+  // SAME `TurnSession`/`TurnState` bundles. The factory captures the TTFT
+  // cell so `onFirstChunk` writes through to this scope (the finally block
+  // below reads `firstTokenAtCell.value` for the TurnTiming snapshot).
+  const anchors: TurnTimingAnchors = { requestSentAt, firstTokenAtCell }
+  const callbacks = createStreamDispatcher(session, state, anchors)
   try {
     const outcome = await streamingTurn({
       events: teeUsage(
@@ -524,123 +503,7 @@ const streamConsume = async (
       // seam is a one-`Map.get` fast-path no-op for tools that declare none,
       // so this is byte-identical for every existing built-in.
       onToolInput: buildToolInputSeam(config.registry),
-      dispatch: async (call) => {
-        const s = recorder?.toolExec()
-        // RFC may-22 Phase 1: BudgetMeter tick — every tool dispatch counts
-        // as one tool_call; bash → shell_command; test_runner → test_run.
-        // Optional chain so absence is byte-identical to pre-RFC.
-        tickToolDispatch(config, call.name)
-        try {
-          // ADR-0011: enforce the active skill's tool allowlist —
-          // an out-of-scope tool is denied as a recoverable tool_result
-          // WITHOUT dispatching it. No gate / no active skill ⇒ unchanged.
-          const out =
-            skillGate && !skillGate.allow(call.name)
-              ? skillScopeDeny(call)
-              : await dispatchTool(
-                  { type: "tool_use", id: call.id, name: call.name, input: call.input },
-                  config,
-                  config.permission,
-                  (message) =>
-                    config.stream.emit({
-                      type: "tool_progress",
-                      id: call.id,
-                      name: call.name,
-                      message,
-                    }),
-                  classifier,
-                  workingState,
-                )
-          // A successful `Skill` invocation (re)arms the scope for next calls.
-          skillGate?.observe(call.name, call.input, out.ok)
-          // ADR-0078 point #1 — fold this tool_result's redaction hits into the
-          // run-scoped rollup (empty/absent ⇒ no-op; disabled ⇒ dispatch never
-          // produced hits).
-          onRedaction("tool_result", out.redactionHits ?? [])
-          // absorb #6: per-turn work-metrics — count the action and, when the
-          // tool is `read`, count returned lines. Collector absent ⇒ no-op
-          // (the sink is unwired). recordRead duck-types the result shape so
-          // no `@/tool` import is needed here.
-          collector?.recordToolCall(call.name, out)
-          collector?.recordRead(call.name, out.preview)
-          // RFC-0002 §5.2 enriched tool_result. CONTRACT with Group E: the
-          // dispatch result exposes these EXACT optional field names
-          // (`durationMs:number`, `stderrTail:string`, `exitCode:number`,
-          // `fullLogPath:string`). Spread whichever are present so this works
-          // the instant E lands and never throws while E is still in flight
-          // (pre-E the fields are simply absent → byte-identical emit). Pure
-          // observation: NullStream swallows it, control flow is untouched.
-          const enriched = out as typeof out & {
-            durationMs?: number
-            stderrTail?: string
-            exitCode?: number
-            fullLogPath?: string
-          }
-          config.stream.emit({
-            type: "tool_result",
-            id: call.id,
-            name: call.name,
-            ok: out.ok,
-            preview: out.preview,
-            ...(enriched.durationMs !== undefined ? { durationMs: enriched.durationMs } : {}),
-            ...(enriched.stderrTail !== undefined ? { stderrTail: enriched.stderrTail } : {}),
-            ...(enriched.exitCode !== undefined ? { exitCode: enriched.exitCode } : {}),
-            ...(enriched.fullLogPath !== undefined ? { fullLogPath: enriched.fullLogPath } : {}),
-          })
-          return out
-        } finally {
-          s?.()
-        }
-      },
-      onTextDelta: (delta) => config.stream.emit({ type: "assistant_text", delta }),
-      onToolStart: (call) => {
-        config.stream.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input })
-        recorder?.toolCall(call.name)
-        // Verify-guard (Tier 0 safety hardening): ordered dispatched tool entries this run.
-        // `toolHistory` is created ONLY when `config.verifyGuard` is set, so
-        // with the guard absent this push never runs (byte-identical).
-        // A real SWE-bench run showed the guard fired 0 times: the agent ran a
-        // noise `bash` (`git status`) after editing and the old policy treated
-        // ANY bash as "verified". R1's tightened policy only counts a `bash`
-        // when its command matches a test/repro regex — so for `bash` we MUST
-        // carry the command string (the bash tool input is `{command:string}`);
-        // without it `arg` is always undefined and every real `pytest`/`python
-        // repro.py` would be (wrongly) treated as non-verify. For non-`bash`
-        // tools `arg` is OMITTED (exactOptionalPropertyTypes — never undefined).
-        if (toolHistory) {
-          const command =
-            call.name === "bash" &&
-            typeof call.input === "object" &&
-            call.input !== null &&
-            "command" in call.input
-              ? (call.input as { command: unknown }).command
-              : undefined
-          toolHistory.push(
-            typeof command === "string" ? { name: call.name, arg: command } : { name: call.name },
-          )
-        }
-      },
-      // ADR-0048 L4 wire: surface the provider's `response.in_progress`
-      // heartbeat as an `in_progress` AgentEvent so a UI can paint a
-      // "thinking…" indicator. The indicator carries a stable receive-side
-      // `timestamp` plus the optional provider-supplied `message`/`progress`;
-      // we forward each present field via the same exact-optional spread the
-      // sibling `tool_result` emit uses. Default-OFF byte-identical: when the
-      // provider never yields the event the seam never fires, and when
-      // `config.stream` is NullStream the emit is a no-op.
-      onInProgress: (indicator) =>
-        config.stream.emit({
-          type: "in_progress",
-          timestamp: indicator.timestamp,
-          ...(indicator.message !== undefined ? { message: indicator.message } : {}),
-          ...(indicator.progress !== undefined ? { progress: indicator.progress } : {}),
-        }),
-      // ADR-0077 Plane-B (L4 wire): fire on the FIRST of
-      // (text_delta | thinking_delta | tool_use_start). The engine gates
-      // the seam (only fires once per stream + re-fires after stream_reset).
-      // Our `markFirstChunk` OVERWRITES so the REPLACEMENT stream's chunk
-      // wins for the surfaced TTFT (honors ADR-0077 tombstone invariant).
-      onFirstChunk: markFirstChunk,
+      ...callbacks,
       signal: config.signal,
     })
     if (outcome.kind === "aborted") {
@@ -667,6 +530,12 @@ const streamConsume = async (
     // for the duration math (mirrors Cursor `hangTtft` which records even
     // on a hung stream so the timeout itself is measurable).
     const streamEndAt = Date.now()
+    // The cell stores `undefined` until the engine fires `onFirstChunk`; the
+    // `TurnTiming.firstTokenAt` contract is `number | null`, so normalize
+    // here. Byte-identical to the prior `let firstTokenAt: number | null = null`
+    // pattern (same `null` surfaced both to TurnTiming and to the latency
+    // math, same `null`→omit-attr behaviour at `endSpan`).
+    const firstTokenAt = firstTokenAtCell.value ?? null
     const firstTokenLatencyMs = firstTokenAt === null ? null : firstTokenAt - requestSentAt
     const totalDurationMs = streamEndAt - requestSentAt
     const timing: TurnTiming = Object.freeze({
