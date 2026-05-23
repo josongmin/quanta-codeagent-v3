@@ -62,7 +62,9 @@
       "@/security": ["./src/security/index.ts"],
       "@/security/*": ["./src/security/*"],
       "@/auth": ["./src/auth/index.ts"],
-      "@/auth/*": ["./src/auth/*"]
+      "@/auth/*": ["./src/auth/*"],
+      "@/ui": ["./src/ui/index.ts"],
+      "@/ui/*": ["./src/ui/*"]
     }
   },
   "include": ["src", "tests", "tools"],

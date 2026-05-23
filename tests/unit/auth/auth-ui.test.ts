@@ -13,7 +13,7 @@ import {
   stripAnsi,
   visibleWidth,
   yellow,
-} from "../../../src/apps/cli/auth-ui"
+} from "../../../src/ui/auth-ui"
 
 afterEach(() => {
   setColorPolicy(null)
