@@ -32,7 +32,7 @@ export {
   renderModelOutput,
   validateToolOutput,
 } from "./factory"
-export { fileTreeSummaryTool } from "./file-tree-summary"
+export { fileTreeSummaryTool, inferNextAction } from "./file-tree-summary"
 export type { GhRunner } from "./gh"
 export { defaultGhRunner, ghTools } from "./gh"
 export type {
@@ -114,6 +114,7 @@ export type {
   DeferredToolResult,
   GitWriteGuard,
   HITLTier,
+  NextAction,
   PlanDeltaKind,
   PlanExitRequester,
   PlanExitToolDecision,

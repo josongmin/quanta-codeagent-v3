@@ -5,7 +5,7 @@
 
 import type { ToolResultBlock } from "@/llm"
 import type { RedactionHit } from "@/security"
-import type { ToolFailure } from "@/tool"
+import type { NextAction, ToolFailure } from "@/tool"
 
 export interface DispatchResult {
   block: ToolResultBlock
@@ -50,4 +50,12 @@ export interface DispatchResult {
    * onto `AgentOutcome.redactions`.
    */
   redactionHits?: ReadonlyArray<RedactionHit>
+  /**
+   * ADR-0062 rule #3 — OPTIONAL structured cap-as-instruction hint forwarded
+   * verbatim from `ToolResult.nextAction`. Omitted when the tool did not emit
+   * one (exactOptionalPropertyTypes: never `undefined`). The dispatch seam
+   * reads this to feed the session `CapEnforcer` tracker. Callers that do not
+   * read it are byte-identical.
+   */
+  nextAction?: NextAction
 }

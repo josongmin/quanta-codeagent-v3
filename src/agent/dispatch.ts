@@ -156,6 +156,20 @@ export const dispatchTool = async (
   }
 }
 
+/** ADR-0062 rule #3 — pure helper: prepend the cap-enforcement reminder to a
+ *  DispatchResult so the model reads the phrasing in the tool_result content.
+ *  Extracted to keep `dispatchToolInner`'s cognitive complexity below biome's
+ *  cap. When `reminder` is empty-string / undefined the result is UNCHANGED
+ *  (byte-identical — this helper is only called when a reminder is present). */
+const prependCapReminder = (out: DispatchResult, reminder: string): DispatchResult => ({
+  ...out,
+  preview: `<system-reminder>\n${reminder}\n</system-reminder>\n\n${out.preview}`,
+  block: {
+    ...out.block,
+    content: `<system-reminder>\n${reminder}\n</system-reminder>\n\n${typeof out.block.content === "string" ? out.block.content : ""}`,
+  },
+})
+
 /** Span-free dispatch body (extracted so the outer wrap keeps a single
  *  control flow). Identical logic to the pre-span path. */
 const dispatchToolInner = async (
@@ -293,7 +307,28 @@ const dispatchToolInner = async (
     // (CLI / IDE modal / RPC) supplies the answer/cancelled decision.
     ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
   }
+  // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
+  // Before executing the tool, check whether the model IGNORED the last
+  // nextAction hint for this (toolName, targetPath) pair. When ignored, emit
+  // a `tool_progress` system-reminder to the stream (so the UI/recorder sees
+  // it) and prepend the reminder text to this result's output (so the model
+  // reads it in the tool_result content). The check is a single Map.get —
+  // zero allocation when absent. capEnforcer absent ⇒ `check` is never
+  // called, byte-identical to the pre-enforcement path.
+  const capReminder = config.capEnforcer?.check(effectiveCall.name, effectiveCall.input)
+  if (capReminder !== undefined) {
+    config.stream.emit({
+      type: "tool_progress",
+      id: effectiveCall.id,
+      name: effectiveCall.name,
+      message: capReminder,
+    })
+  }
   const out = await execute(effectiveCall, config, ctx, onProgress)
+  // When a reminder was generated, prepend it as a `<system-reminder>` block
+  // in the tool result output so the model reads the enforcement hint alongside
+  // the tool output. `prependCapReminder` is extracted to keep complexity low.
+  const finalOut = capReminder !== undefined ? prependCapReminder(out, capReminder) : out
   if (config.hooks) {
     await config.hooks.emit({
       type: "post_tool_use",
@@ -302,11 +337,11 @@ const dispatchToolInner = async (
       // pre/post symmetry. The pre hook saw `effectiveCall.input` (possibly
       // rewritten); post sees the same value — what the tool actually ran with.
       input: effectiveCall.input,
-      ok: out.ok,
-      output: out.preview,
+      ok: finalOut.ok,
+      output: finalOut.preview,
     })
   }
-  return out
+  return finalOut
 }
 
 /** Build the `handle_tool_call` span open-attrs. Status (and durationMs)
@@ -403,6 +438,10 @@ const execute = async (
   // `evidenceOf({})` is empty and the typed-failure spread is conditional, so
   // a normalized-throw result yields exactly the same fields as the old catch.
   const { output, hits } = applyRedaction(result.output, call, config)
+  // ADR-0062 rule #3 — record the nextAction hint in the session tracker so
+  // a subsequent call to the same (tool, path) can be checked. DEFAULT-OFF:
+  // absent enforcer ⇒ optional-chain is a no-op, byte-identical.
+  config.capEnforcer?.record(call.name, call.input, result.nextAction)
   return {
     block: resultBlock(call.id, output, !result.ok),
     ok: result.ok,
@@ -415,6 +454,10 @@ const execute = async (
     // do not read `failure` stay byte-identical.
     ...(result.failure !== undefined ? { failure: result.failure } : {}),
     ...(hits.length > 0 ? { redactionHits: hits } : {}),
+    // ADR-0062 rule #3 — forward the nextAction hint onto the DispatchResult
+    // so consumers (stream emitters, recorders) can observe it. Omitted when
+    // absent (exactOptionalPropertyTypes).
+    ...(result.nextAction !== undefined ? { nextAction: result.nextAction } : {}),
   }
 }
 

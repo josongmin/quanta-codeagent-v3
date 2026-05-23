@@ -3,7 +3,7 @@ import { z } from "zod"
 import { runShell } from "@/runtime"
 import { byteCompare } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { NextAction, Tool, ToolContext, ToolEvent } from "../types"
 
 /**
  * `file_tree_summary` — Stage-1 fault-localization aid (Codex "file topology"
@@ -346,6 +346,48 @@ const fetchRecencyHits = async (cwd: string, signal: AbortSignal): Promise<Map<s
   return new Map()
 }
 
+/**
+ * ADR-0062 rule #3 — pure structural cap detector. Derives the `NextAction`
+ * hint from the STRUCTURAL aggregate signals (`agg.truncated`, `agg.deepRollup`)
+ * WITHOUT inspecting any rendered text. Called once per successful execute();
+ * returns `undefined` when the output was not capped (the common case).
+ *
+ * Precedence: when BOTH signals fire, `increase_max_depth` wins — depth
+ * truncation is the more common bottleneck (rolled-up dirs hide entire
+ * subtrees, while a file-cap only hides the tail of a flat listing).
+ *
+ * PURE — no I/O, no clock, no shell. Fully unit-testable.
+ */
+export const inferNextAction = (
+  agg: TreeAgg,
+  maxDepth: number,
+  maxFiles: number,
+): NextAction | undefined => {
+  const hasDeepRollup = agg.deepRollup.size > 0
+  const hasTruncated = agg.truncated
+
+  if (hasDeepRollup) {
+    const hiddenFiles = [...agg.deepRollup.values()].reduce((sum, n) => sum + n, 0)
+    const suggested = Math.min(maxDepth * 2, 10)
+    return {
+      kind: "increase_max_depth",
+      suggested,
+      reason: `${hiddenFiles} file${hiddenFiles === 1 ? "" : "s"} beyond depth ${maxDepth} — set max_depth to at least ${suggested}`,
+    }
+  }
+
+  if (hasTruncated) {
+    const suggested = maxFiles * 2
+    return {
+      kind: "raise_max_files",
+      suggested,
+      reason: `file cap ${maxFiles} reached — raise max_files to at least ${suggested} or narrow with path`,
+    }
+  }
+
+  return undefined
+}
+
 export const fileTreeSummaryTool: Tool<Input> = {
   name: "file_tree_summary",
   description:
@@ -453,9 +495,14 @@ export const fileTreeSummaryTool: Tool<Input> = {
       }
     }
 
+    const nextAction = inferNextAction(agg, maxDepth, maxFiles)
     yield {
       type: "result",
-      result: { ok: true, output: render(agg, maxFiles, summaries, rank, recencyHits) },
+      result: {
+        ok: true,
+        output: render(agg, maxFiles, summaries, rank, recencyHits),
+        ...(nextAction !== undefined ? { nextAction } : {}),
+      },
     }
   },
 }

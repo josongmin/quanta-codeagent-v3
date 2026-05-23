@@ -19,6 +19,7 @@ import {
   type ConversationSummaryArchive,
   createArchive,
 } from "./conversation-summary-archive"
+import { buildCapEnforcer } from "./cap-enforcer"
 import { DedupGate } from "./dispatch-dedup"
 import { effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
@@ -1603,6 +1604,15 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
+  // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
+  // Built ONLY when `cfg.capEnforce === true` OR `QUANTA_CAP_ENFORCE=1` env
+  // flag is set (checked inside `buildCapEnforcer`). A caller-supplied
+  // `cfg.capEnforcer` (e.g. test injection) is honoured without re-building.
+  // With neither set ⇒ `undefined`, no allocation, dispatch is byte-identical.
+  const capEnforcer = cfg.capEnforcer ?? buildCapEnforcer(cfg.capEnforce)
+  if (capEnforcer !== undefined && cfg.capEnforcer === undefined) {
+    cfg.capEnforcer = capEnforcer
+  }
   // Turn-exit guard chain (refactor 2026-05-23): one composed chain replaces
   // the prior `verifyGuardStep` + `closeoutGuardStep` ladder in `applyAction`.
   // Default-OFF byte-identical: when neither `cfg.verifyGuard` is set NOR

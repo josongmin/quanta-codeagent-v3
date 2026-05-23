@@ -430,6 +430,30 @@ export interface WorkingStatePatch {
   deferredValidation?: { rail: string; reason: string }[] | undefined
 }
 
+/**
+ * ADR-0062 rule #3 — structured cap-as-instruction third channel.
+ *
+ * A tool may return a `nextAction` hint on its successful result when it
+ * detects that its output was capped and the next call MUST apply a
+ * specific change before switching tools. The dispatch seam reads this
+ * and (when `QUANTA_CAP_ENFORCE=1`) enforces the hint by injecting a
+ * `<system-reminder>` when a subsequent call ignores it.
+ *
+ * INVARIANT: `nextAction` is OPTIONAL — tools that omit it are byte-
+ * identical. Only `file_tree_summary` populates it today; adding a
+ * second tool that emits it never changes unrelated callers.
+ *
+ * The union is CLOSED via the `kind` discriminant. Adding a new variant
+ * requires updating every exhaustive switch at consumer sites (the
+ * dispatch seam's enforcement block). The two numeric variants carry a
+ * `suggested` value derived purely from the current parameter × 2,
+ * capped by the tool's own schema max — no heuristics.
+ */
+export type NextAction =
+  | { kind: "increase_max_depth"; suggested: number; reason: string }
+  | { kind: "raise_max_files"; suggested: number; reason: string }
+  | { kind: "narrow_path"; reason: string }
+
 export interface ToolResult {
   ok: boolean
   /** Text returned to the model as the tool_result content. */
@@ -464,6 +488,15 @@ export interface ToolResult {
    *  Tools opt in by populating it on their `ok:false` results; the dispatch
    *  seam surfaces it onto `DispatchResult.failure` unchanged. */
   failure?: ToolFailure
+  /** ADR-0062 rule #3 — OPTIONAL structured cap-as-instruction hint. When a
+   *  tool detects its output was capped (depth rollup or file-count truncation),
+   *  it populates this field so the dispatch seam can enforce the suggestion
+   *  structurally rather than relying solely on the prose in `output`.
+   *
+   *  Tools that do NOT emit it are byte-identical (no allocation, no change to
+   *  the existing `output` channel). The dispatch seam reads this ONLY when
+   *  `QUANTA_CAP_ENFORCE=1` is set — DEFAULT-OFF. */
+  nextAction?: NextAction
 }
 
 /** OPTIONAL (absorb #2 — Cursor `EditResult`/`ShellResult`): the discriminated

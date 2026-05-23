@@ -14,6 +14,7 @@ import type { StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
+import type { CapEnforcer } from "./cap-enforcer"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
@@ -591,6 +592,27 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * (always ready when set without a reason source).
    */
   pausedReason?: (threadId: string) => PausedReason | null
+  /**
+   * ADR-0062 rule #3 — optional session-scoped cap enforcement tracker.
+   * When set (built via `buildCapEnforcer`), the dispatch seam consults this
+   * BEFORE executing a tool call to detect an ignored `nextAction` hint, and
+   * AFTER execution to record a fresh hint from the result.
+   *
+   * DEFAULT-OFF: absent ⇒ no tracking, no reminder, dispatch byte-identical.
+   * Enabled via `QUANTA_CAP_ENFORCE=1` env flag or `capEnforce:true` at
+   * `runAgent` construction time. The `CapEnforcer` is built once per session
+   * by `buildCapEnforcer(config.capEnforce)` and stored here.
+   */
+  capEnforcer?: CapEnforcer
+  /**
+   * ADR-0062 rule #3 — enable cap-as-instruction enforcement for this session.
+   * When `true`, `runAgent` constructs a `CapEnforcer` (unless one was already
+   * supplied via `capEnforcer`) and injects ignored-hint reminders via the
+   * `AgentEvent` stream as `<system-reminder>` ToolEvents. Default: `false`.
+   * Also enabled by the `QUANTA_CAP_ENFORCE=1` environment variable (checked
+   * inside `buildCapEnforcer`).
+   */
+  capEnforce?: boolean
   /**
    * L4 wiring — control-op cluster (2026-05-23). Optional snapshot store
    * for the follow-up queue. When set, the loop calls
