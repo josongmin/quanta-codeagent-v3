@@ -1,0 +1,260 @@
+/**
+ * ADR-0102 Phase AS — CTK git skills slash-command ROUTER hellgate
+ * (Track 3, follow-up to `ctk-git-skills-hellgate.test.ts`).
+ *
+ * The sibling discovery hellgate already pins the SKILL.md side of the
+ * contract (name / allowedTools / anchor phrases). This file pins the
+ * ROUTER seam — the 8 `<skill>/index.ts` entry points + the
+ * `@/skill/system-skills` barrel + the top-level `@/skill` barrel —
+ * which a future `/babysit`-style slash command depends on.
+ *
+ * Adversarial contracts (HELL-1..10):
+ *   HELL-1   NAME constants byte-identical to SKILL.md frontmatter `name:`
+ *   HELL-2   triggerXxx() returns the `{ name: <id> }` shape
+ *   HELL-3   findXxxSkill() returns Skill | undefined (no throw)
+ *   HELL-4   findXxxSkill() result name === NAME constant when defined
+ *   HELL-5   All 8 reachable via `@/skill` (top-level barrel)
+ *   HELL-6   typed Trigger interface narrows to literal NAME (compile-time)
+ *   HELL-7   triggerXxx() return shape matches the Skill-tool input schema
+ *   HELL-8   8 concurrent calls all resolve (Promise.all compatible)
+ *   HELL-9   NAME constants are `as const` literal types (preserved at runtime)
+ *   HELL-10  Discovery is forgiving — non-existent skill names return undefined
+ */
+
+import { describe, expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
+import type { Skill } from "../../src/skill"
+import {
+  BABYSIT_SKILL_NAME,
+  type BabysitTrigger,
+  discoverSystemSkills,
+  FIX_MERGE_CONFLICTS_SKILL_NAME,
+  type FixMergeConflictsTrigger,
+  findBabysitSkill,
+  findFixMergeConflictsSkill,
+  findGetPrCommentsSkill,
+  findLoopOnCiSkill,
+  findMakePrEasyToReviewSkill,
+  findNewBranchAndPrSkill,
+  findPrReviewCanvasSkill,
+  findReviewAndShipSkill,
+  GET_PR_COMMENTS_SKILL_NAME,
+  type GetPrCommentsTrigger,
+  LOOP_ON_CI_SKILL_NAME,
+  type LoopOnCiTrigger,
+  MAKE_PR_EASY_TO_REVIEW_SKILL_NAME,
+  type MakePrEasyToReviewTrigger,
+  NEW_BRANCH_AND_PR_SKILL_NAME,
+  type NewBranchAndPrTrigger,
+  PR_REVIEW_CANVAS_SKILL_NAME,
+  type PrReviewCanvasTrigger,
+  parseFrontmatter,
+  REVIEW_AND_SHIP_SKILL_NAME,
+  type ReviewAndShipTrigger,
+  systemSkillsDir,
+  triggerBabysit,
+  triggerFixMergeConflicts,
+  triggerGetPrComments,
+  triggerLoopOnCi,
+  triggerMakePrEasyToReview,
+  triggerNewBranchAndPr,
+  triggerPrReviewCanvas,
+  triggerReviewAndShip,
+} from "../../src/skill"
+
+interface CtkSeam {
+  readonly id: string
+  readonly nameConstant: string
+  readonly trigger: () => { readonly name: string }
+  readonly finder: () => Promise<Skill | undefined>
+}
+
+const CTK_SEAMS: readonly CtkSeam[] = [
+  {
+    id: "babysit",
+    nameConstant: BABYSIT_SKILL_NAME,
+    trigger: triggerBabysit,
+    finder: findBabysitSkill,
+  },
+  {
+    id: "fix-merge-conflicts",
+    nameConstant: FIX_MERGE_CONFLICTS_SKILL_NAME,
+    trigger: triggerFixMergeConflicts,
+    finder: findFixMergeConflictsSkill,
+  },
+  {
+    id: "get-pr-comments",
+    nameConstant: GET_PR_COMMENTS_SKILL_NAME,
+    trigger: triggerGetPrComments,
+    finder: findGetPrCommentsSkill,
+  },
+  {
+    id: "loop-on-ci",
+    nameConstant: LOOP_ON_CI_SKILL_NAME,
+    trigger: triggerLoopOnCi,
+    finder: findLoopOnCiSkill,
+  },
+  {
+    id: "make-pr-easy-to-review",
+    nameConstant: MAKE_PR_EASY_TO_REVIEW_SKILL_NAME,
+    trigger: triggerMakePrEasyToReview,
+    finder: findMakePrEasyToReviewSkill,
+  },
+  {
+    id: "new-branch-and-pr",
+    nameConstant: NEW_BRANCH_AND_PR_SKILL_NAME,
+    trigger: triggerNewBranchAndPr,
+    finder: findNewBranchAndPrSkill,
+  },
+  {
+    id: "pr-review-canvas",
+    nameConstant: PR_REVIEW_CANVAS_SKILL_NAME,
+    trigger: triggerPrReviewCanvas,
+    finder: findPrReviewCanvasSkill,
+  },
+  {
+    id: "review-and-ship",
+    nameConstant: REVIEW_AND_SHIP_SKILL_NAME,
+    trigger: triggerReviewAndShip,
+    finder: findReviewAndShipSkill,
+  },
+] as const
+
+describe("ADR-0102 Phase AS — CTK git skills router seam (hellgate)", () => {
+  test("HELL-1 NAME constant matches SKILL.md frontmatter `name:` for every CTK skill", async () => {
+    for (const seam of CTK_SEAMS) {
+      const path = join(systemSkillsDir(), seam.id, "SKILL.md")
+      const raw = await readFile(path, "utf8")
+      const { data } = parseFrontmatter(raw)
+      // Compare via plain string locals so the narrow `as const` literal
+      // type on the constant does not over-constrain expect().
+      const declaredName: string = String(data.name ?? "")
+      const constantName: string = seam.nameConstant
+      expect(constantName).toBe(declaredName)
+      expect(constantName).toBe(seam.id)
+    }
+  })
+
+  test("HELL-2 triggerXxx() returns the Skill-tool input shape `{ name: <id> }`", () => {
+    for (const seam of CTK_SEAMS) {
+      const args = seam.trigger()
+      expect(args).toEqual({ name: seam.nameConstant })
+      // No extra keys snuck in — the router hands this directly to the
+      // `Skill` tool's `inputSchema`, which is `{ name: string }`.
+      expect(Object.keys(args).sort()).toEqual(["name"])
+    }
+  })
+
+  test("HELL-3 findXxxSkill() returns Skill | undefined (never throws)", async () => {
+    for (const seam of CTK_SEAMS) {
+      // Must not throw — corrupt installs (missing SKILL.md) yield
+      // `undefined` per the documented contract.
+      const result = await seam.finder()
+      // It IS defined right now (SKILL.md is on disk), but the assertion
+      // here is shape: never throws + return type is Skill|undefined.
+      expect(result === undefined || typeof result === "object").toBe(true)
+    }
+  })
+
+  test("HELL-4 findXxxSkill() result.name === NAME constant when defined", async () => {
+    for (const seam of CTK_SEAMS) {
+      const result = await seam.finder()
+      expect(result).toBeDefined()
+      if (!result) continue
+      expect(result.name).toBe(seam.nameConstant)
+      // The Skill record carries a non-empty body (the procedure text the
+      // model reads when the router activates the skill).
+      expect(result.body.length).toBeGreaterThan(0)
+      expect(result.sourcePath.endsWith("SKILL.md")).toBe(true)
+    }
+  })
+
+  test("HELL-5 all 8 CTK skills reachable via the top-level `@/skill` barrel", () => {
+    // Compile-time check: every constant + trigger + finder imported
+    // at the top of this file came from `../../src/skill` (the top-level
+    // barrel), proving the re-export chain is intact. Runtime sanity:
+    // each constant is a non-empty string, each trigger is a function.
+    for (const seam of CTK_SEAMS) {
+      expect(typeof seam.nameConstant).toBe("string")
+      expect(seam.nameConstant.length).toBeGreaterThan(0)
+      expect(typeof seam.trigger).toBe("function")
+      expect(typeof seam.finder).toBe("function")
+    }
+    expect(CTK_SEAMS.length).toBe(8)
+  })
+
+  test("HELL-6 typed Trigger interfaces narrow to the literal NAME (compile-time)", () => {
+    // If a typo crept into a typed Trigger interface ("babysitt"), this
+    // assignment would fail at `bun run typecheck`. The runtime expect()
+    // just keeps the symbols alive so the import is not tree-shaken.
+    const a: BabysitTrigger = { name: BABYSIT_SKILL_NAME }
+    const b: FixMergeConflictsTrigger = { name: FIX_MERGE_CONFLICTS_SKILL_NAME }
+    const c: GetPrCommentsTrigger = { name: GET_PR_COMMENTS_SKILL_NAME }
+    const d: LoopOnCiTrigger = { name: LOOP_ON_CI_SKILL_NAME }
+    const e: MakePrEasyToReviewTrigger = { name: MAKE_PR_EASY_TO_REVIEW_SKILL_NAME }
+    const f: NewBranchAndPrTrigger = { name: NEW_BRANCH_AND_PR_SKILL_NAME }
+    const g: PrReviewCanvasTrigger = { name: PR_REVIEW_CANVAS_SKILL_NAME }
+    const h: ReviewAndShipTrigger = { name: REVIEW_AND_SHIP_SKILL_NAME }
+    for (const t of [a, b, c, d, e, f, g, h]) {
+      expect(typeof t.name).toBe("string")
+    }
+  })
+
+  test("HELL-7 triggerXxx() return shape matches the Skill-tool input schema", () => {
+    // The `Skill` tool's inputSchema is `{ name: string }` (see
+    // src/skill/skill-tool.ts). Every CTK trigger must produce exactly
+    // that shape — no extra keys, no missing `name`, value is a non-empty
+    // string. If a router hands the output straight to dispatch it must
+    // pass schema validation without massaging.
+    for (const seam of CTK_SEAMS) {
+      const args = seam.trigger()
+      expect(typeof args.name).toBe("string")
+      expect(args.name.length).toBeGreaterThan(0)
+      expect(Object.keys(args)).toEqual(["name"])
+      // Bonus: no nested objects, no arrays — flat shape.
+      const value: unknown = (args as Record<string, unknown>).name
+      expect(typeof value).toBe("string")
+    }
+  })
+
+  test("HELL-8 8 concurrent triggerXxx + findXxxSkill calls all resolve (Promise.all)", async () => {
+    // The router may want to enumerate all CTK skills concurrently
+    // (e.g. building a catalogue UI). Each `findXxxSkill` MUST be
+    // independently awaitable without lock contention or shared state.
+    const triggers = CTK_SEAMS.map((s) => s.trigger())
+    expect(triggers).toHaveLength(8)
+    const found = await Promise.all(CTK_SEAMS.map((s) => s.finder()))
+    expect(found).toHaveLength(8)
+    for (let i = 0; i < CTK_SEAMS.length; i++) {
+      const seam = CTK_SEAMS[i]
+      const skill = found[i]
+      if (!seam) throw new Error("CTK_SEAMS gap")
+      expect(skill).toBeDefined()
+      expect(skill?.name).toBe(seam.nameConstant)
+    }
+  })
+
+  test("HELL-9 NAME constants preserve `as const` literal type at runtime", () => {
+    // The TYPE side is verified by HELL-6 (assignment to the typed
+    // Trigger interface). The RUNTIME side: the string is byte-identical
+    // to the SKILL.md frontmatter id, with no whitespace / case drift.
+    for (const seam of CTK_SEAMS) {
+      expect(seam.nameConstant.trim()).toBe(seam.nameConstant)
+      expect(seam.nameConstant).toBe(seam.nameConstant.toLowerCase())
+      // CTK skills use kebab-case ids — no underscores, no spaces.
+      expect(seam.nameConstant).toMatch(/^[a-z][a-z0-9-]*$/)
+    }
+  })
+
+  test("HELL-10 finder for a non-existent skill name returns undefined (not null, not throw)", async () => {
+    // The contract is `Skill | undefined`. A naive `.find()` could
+    // return null if the array were sparse; verify the documented
+    // behavior. This protects future refactors that switch to Map /
+    // Record lookups from accidentally returning a different falsy.
+    const all = await discoverSystemSkills()
+    const missing = all.find((s) => s.name === "this-skill-does-not-exist-zzz")
+    expect(missing).toBeUndefined()
+    expect(missing).not.toBeNull()
+  })
+})

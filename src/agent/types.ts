@@ -1,11 +1,6 @@
 import type { LLMPort, Message, ModelCandidate } from "@/llm"
-<<<<<<< HEAD
-import type { EmbedderPort, PersistentStorePort, Phase1Port, Stage1StorePort } from "@/memory"
-import type { Metrics } from "@/observability"
-=======
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
-import type { Metrics, TurnTiming } from "@/observability"
->>>>>>> 9c06d9c (refactor(agent/types): split memory + compaction config blocks (byte-identical))
+import type { Metrics } from "@/observability"
 import type {
   PatternGrantStore,
   PermissionContext,
@@ -42,7 +37,6 @@ import type {
 import type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
 import type { WorkMetricsSink } from "./work-metrics-collector"
 
-<<<<<<< HEAD
 // Outcome surface re-exported from ./types/agent-outcome (cohesion split,
 // byte-identical). Keeps the `from "./types"` import contract unchanged for
 // the 132 consumer files that depend on these names being on this module.
@@ -53,48 +47,6 @@ export type {
   StopReason,
 } from "./types/agent-outcome"
 
-/**
- * Cursor-style pre-compact HITL query payload (ADR-0075). Built by the loop at
- * the moment a proactive compaction is about to fire and passed to
- * `AgentConfig.onPreCompact`. Fields are POST-decision proposals — `proposedKeep`
- * is the keepRecentTurns that will be used, `proposedSummaryTokens` is a
- * heuristic estimate based on the summarizable prefix size (so a UI can warn
- * "this will summarize ~12k tokens of history").
- *
- * `turnId` is the canonical turn identifier (the loop already stamps
- * `RunContext.turn` per turn; the query uses a stringified form to stay
- * stable across an eventual id-shape change). When no `RunContext` is wired,
- * the loop synthesizes a deterministic `t<n>` id from the turn counter so the
- * surface always sees a string.
- */
-export interface PreCompactRequestQuery {
-  /** Stable identifier for the turn whose top is firing the compaction. */
-  turnId: string
-  /** Estimated tokens of the current transcript (chars/4 heuristic) — the
-   *  signal that crossed the threshold. */
-  currentTokens: number
-  /** The configured / resolved threshold that was crossed. */
-  threshold: number
-  /** keepRecentTurns proposed by the loop — typically the configured value. */
-  proposedKeep: number
-  /** Heuristic estimate of how much transcript will be folded into the
-   *  summary, in tokens — i.e. the size of the SUMMARIZABLE PREFIX (not the
-   *  size of the produced summary, which is typically a fraction of this).
-   *  Surfaced for UI prompts like "this will summarize up to ~Nk tokens of
-   *  history". Not used by the loop. */
-  proposedSummaryTokens: number
-}
-
-/**
- * User decision returned from `AgentConfig.onPreCompact`:
- *   - `"approve"` — proceed with this compaction normally;
- *   - `"defer_one_turn"` — skip the compaction this turn; re-evaluate next turn;
- *   - `"force_now"` — proceed (same loop effect as `approve`) but with an
- *     explicit "user forced" marker that downstream emit/log layers may surface
- *     differently. The loop itself treats `force_now` and `approve` identically.
- */
-export type PreCompactDecision = "approve" | "defer_one_turn" | "force_now"
-=======
 // Re-export the extracted memory + compaction config types so that every
 // existing consumer reading them via `from "./types"` (or the `@/agent`
 // barrel) keeps working byte-for-byte after this split.
@@ -106,7 +58,6 @@ export type {
   PreCompactRequestQuery,
 } from "./types/compaction-config"
 export type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
->>>>>>> 9c06d9c (refactor(agent/types): split memory + compaction config blocks (byte-identical))
 
 // AgentConfig `extends` the three cohesion groups defined at the BOTTOM of
 // this file (SafetyConfig / PermissionExtrasConfig / SteeringConfig).
