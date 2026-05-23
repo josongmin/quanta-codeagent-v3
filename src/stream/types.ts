@@ -1,3 +1,57 @@
+/**
+ * Cross-slice mirror — keep in sync with @/agent/plan/types.ts; adding fields
+ * there MUST also add here. RFC §3.1 slice isolation forbids the import.
+ *
+ * Plan + PlanDelta are the host-facing observation shapes for the plan-mode
+ * P3 events (`plan_created` / `plan_updated` / `plan_snapshot`). They are
+ * STRUCTURALLY identical to the agent-slice types (same field names + same
+ * shapes); we duplicate them here so the stream slice does not back-reference
+ * the agent slice (slice isolation invariant). A future P4 cluster that lands
+ * `@/agent/plan/types.ts` MUST re-shape both sites in lock-step.
+ */
+
+/** Closed taxonomy for a todo's status — mirrors `TodoStatus` in
+ *  `@/agent/plan/types.ts`. Closed-union; no other value is valid. */
+export type TodoStatusMirror = "pending" | "in_progress" | "completed" | "cancelled"
+
+/** Single todo entry inside a plan — mirrors `TodoReadonly` in
+ *  `@/agent/plan/types.ts`. */
+export interface TodoReadonlyMirror {
+  readonly id: string
+  readonly title: string
+  readonly status: TodoStatusMirror
+}
+
+/** Read-only plan snapshot — mirrors `PlanReadonly` in
+ *  `@/agent/plan/types.ts`. Carried by `plan_created` and `plan_snapshot`. */
+export interface PlanReadonlyMirror {
+  readonly id: string
+  readonly name: string
+  readonly version: number
+  readonly todos: readonly TodoReadonlyMirror[]
+}
+
+/** Closed taxonomy for plan-delta kinds — mirrors `PlanDeltaKind` in
+ *  `@/agent/plan/types.ts`. Closed-union; a new kind must extend both sites. */
+export type PlanDeltaKindMirror =
+  | "todo_added"
+  | "todo_removed"
+  | "todo_status_changed"
+  | "todo_renamed"
+  | "plan_renamed"
+
+/** Read-only plan-delta — mirrors `PlanDeltaReadonly` in
+ *  `@/agent/plan/types.ts`. Carried by `plan_updated`. */
+export interface PlanDeltaReadonlyMirror {
+  readonly kind: PlanDeltaKindMirror
+  readonly todoId?: string
+  readonly todoTitle?: string
+  readonly fromStatus?: TodoStatusMirror
+  readonly toStatus?: TodoStatusMirror
+  readonly fromName?: string
+  readonly toName?: string
+}
+
 export type AgentEvent =
   // RFC-0002 §5.2 `session_start` — emitted once at run start so the trajectory
   // has a head marker (recorder maps it to kind:"session_start").
@@ -102,6 +156,46 @@ export type AgentEvent =
       subagentId: string
       outcome: "stopped" | "not_found" | "registry_absent"
       source: "submission_op" | "conversation_action"
+    }
+  // Plan-mode cluster (P3, 2026-05-23): plan created / updated / late-attach
+  // snapshot. Carries the structural mirror of @/agent/plan/types.ts (see top
+  // of file). NullStream swallows by virtue of the closed AgentEvent union; a
+  // surface that does not implement these branches falls through the
+  // exhaustive switch's `never` default (compile-time hellgate). All three
+  // map to the `recovery` trajectory family in jsonl-recorder with a
+  // discriminating `reason` field — same posture as `response_queued` /
+  // `interrupted` / `subagent_cancel`.
+  | { type: "plan_created"; plan: PlanReadonlyMirror }
+  | { type: "plan_updated"; delta: PlanDeltaReadonlyMirror; version: number }
+  | { type: "plan_snapshot"; plan: PlanReadonlyMirror }
+  // Plan-mode cluster (P3): user-input checkpoint. `plan_user_input_requested`
+  // fires when the plan flow pauses to ask a user a clarifying question
+  // (e.g., "approve this plan?"); `plan_user_input_resolved` fires when the
+  // host answers (or cancels). `choices` is OPTIONAL: when present the host
+  // SHOULD constrain the response to one of them; when absent the answer is
+  // free-form text. `decision: "cancelled"` carries no `text`.
+  | {
+      type: "plan_user_input_requested"
+      promptId: string
+      prompt: string
+      choices?: readonly string[]
+    }
+  | {
+      type: "plan_user_input_resolved"
+      promptId: string
+      decision: "answer" | "cancelled"
+      text?: string
+    }
+  // Plan-mode cluster (P3): collaboration-mode transition. Closed 2-mode
+  // enum mirrors `CollaborationMode` in `@/agent/mode.ts`. `reason` is
+  // optional human/analytics hint (free-form string; never used for control
+  // flow). Equal-mode transitions are still emitted so a host that wants to
+  // log "developer message reaffirmed plan mode" sees the event.
+  | {
+      type: "mode_changed"
+      from: "default" | "plan"
+      to: "default" | "plan"
+      reason?: string
     }
   | { type: "done"; reason: string; turns: number }
 

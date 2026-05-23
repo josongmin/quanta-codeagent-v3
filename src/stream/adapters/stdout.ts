@@ -87,6 +87,24 @@ export class StdoutStream implements StreamPort {
       case "subagent_cancel":
         process.stdout.write(renderSubagentCancel(event))
         break
+      case "plan_created":
+        process.stdout.write(renderPlanCreated(event))
+        break
+      case "plan_updated":
+        process.stdout.write(renderPlanUpdated(event))
+        break
+      case "plan_snapshot":
+        process.stdout.write(renderPlanSnapshot(event))
+        break
+      case "plan_user_input_requested":
+        process.stdout.write(renderPlanUserInputRequested(event))
+        break
+      case "plan_user_input_resolved":
+        process.stdout.write(renderPlanUserInputResolved(event))
+        break
+      case "mode_changed":
+        process.stdout.write(renderModeChanged(event))
+        break
       case "usage":
         process.stdout.write(
           `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,
@@ -137,6 +155,60 @@ const renderInProgress = (event: Extract<AgentEvent, { type: "in_progress" }>): 
   const msg =
     event.message !== undefined && event.message !== "" ? `: ${oneLine(event.message)}` : ""
   return `${DIM}… thinking${pct}${msg}${RESET}\n`
+}
+
+/** Plan-mode cluster (P3): plan_created one-liner. Format pin —
+ *  `plan_created` discriminant token is greppable; `name` is quoted; todo
+ *  count rendered last. */
+const renderPlanCreated = (event: Extract<AgentEvent, { type: "plan_created" }>): string => {
+  const count = event.plan.todos.length
+  return `${DIM}📋 plan_created "${oneLine(redactStr(event.plan.name))}" (${count} todos)${RESET}\n`
+}
+
+/** Plan-mode cluster (P3): plan_updated one-liner. Format pin —
+ *  `plan_updated` discriminant token + version + delta kind. */
+const renderPlanUpdated = (event: Extract<AgentEvent, { type: "plan_updated" }>): string => {
+  const title =
+    event.delta.todoTitle !== undefined && event.delta.todoTitle !== ""
+      ? ` "${oneLine(redactStr(event.delta.todoTitle))}"`
+      : ""
+  return `${DIM}📋 plan_updated v${event.version} ${event.delta.kind}${title}${RESET}\n`
+}
+
+/** Plan-mode cluster (P3): plan_snapshot one-liner. Format pin —
+ *  `plan_snapshot` discriminant token + name + todo count. */
+const renderPlanSnapshot = (event: Extract<AgentEvent, { type: "plan_snapshot" }>): string => {
+  const count = event.plan.todos.length
+  return `${DIM}📋 plan_snapshot "${oneLine(redactStr(event.plan.name))}" (${count} todos)${RESET}\n`
+}
+
+/** Plan-mode cluster (P3): plan_user_input_requested one-liner. The
+ *  `plan_user_input_requested` discriminant token is greppable. Choices
+ *  rendered as a small `[a|b|c]` suffix when present. */
+const renderPlanUserInputRequested = (
+  event: Extract<AgentEvent, { type: "plan_user_input_requested" }>,
+): string => {
+  const choices =
+    event.choices !== undefined && event.choices.length > 0
+      ? ` [${event.choices.map((c) => oneLine(redactStr(c))).join("|")}]`
+      : ""
+  return `${DIM}❓ plan_user_input_requested "${oneLine(redactStr(event.prompt))}"${choices}${RESET}\n`
+}
+
+/** Plan-mode cluster (P3): plan_user_input_resolved one-liner. */
+const renderPlanUserInputResolved = (
+  event: Extract<AgentEvent, { type: "plan_user_input_resolved" }>,
+): string => {
+  const text =
+    event.text !== undefined && event.text !== "" ? `: "${oneLine(redactStr(event.text))}"` : ""
+  return `${DIM}✓ plan_user_input_resolved (${event.decision})${text}${RESET}\n`
+}
+
+/** Plan-mode cluster (P3): mode_changed one-liner. */
+const renderModeChanged = (event: Extract<AgentEvent, { type: "mode_changed" }>): string => {
+  const reason =
+    event.reason !== undefined && event.reason !== "" ? `: ${oneLine(redactStr(event.reason))}` : ""
+  return `${DIM}↻ mode_changed ${event.from} → ${event.to}${reason}${RESET}\n`
 }
 
 /** Mask secrets in a free-text string via the single-source @/shared scrub.

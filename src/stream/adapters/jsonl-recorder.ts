@@ -240,6 +240,18 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   response_queued: "recovery",
   interrupted: "recovery",
   subagent_cancel: "recovery",
+  // Plan-mode cluster (P3, 2026-05-23): plan-lifecycle + user-input
+  // checkpoint + mode-transition events all ride the existing `recovery`
+  // family — same rationale as `response_queued` / `interrupted` /
+  // `subagent_cancel` (same-turn observation point, no new TrajectoryKind
+  // rippling through redaction/probe code paths). Greppable via the
+  // discriminating `reason` field added in `dataOf`.
+  plan_created: "recovery",
+  plan_updated: "recovery",
+  plan_snapshot: "recovery",
+  plan_user_input_requested: "recovery",
+  plan_user_input_resolved: "recovery",
+  mode_changed: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -316,6 +328,18 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
       return controlOpInterruptedData(e)
     case "subagent_cancel":
       return controlOpSubagentData(e)
+    case "plan_created":
+      return planCreatedData(e)
+    case "plan_updated":
+      return planUpdatedData(e)
+    case "plan_snapshot":
+      return planSnapshotData(e)
+    case "plan_user_input_requested":
+      return planUserInputRequestedData(e)
+    case "plan_user_input_resolved":
+      return planUserInputResolvedData(e)
+    case "mode_changed":
+      return modeChangedData(e)
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:
@@ -371,6 +395,98 @@ const controlOpSubagentData = (
   subagentId: e.subagentId,
   outcome: e.outcome,
   source: e.source,
+})
+
+/** Plan-mode cluster (P3): plan_created payload. Inline the plan as a plain
+ *  JSON object so consumers can rebuild a `PlanReadonlyMirror` without
+ *  re-importing the type. `reason:"plan_created"` matches the recovery-family
+ *  discriminator pattern used by response_queued/interrupted/subagent_cancel. */
+const planCreatedData = (
+  e: Extract<AgentEvent, { type: "plan_created" }>,
+): Record<string, unknown> => ({
+  reason: "plan_created",
+  plan: planToJson(e.plan),
+})
+
+/** Plan-mode cluster (P3): plan_updated payload. `version` is the monotonic
+ *  plan version after the delta has been applied (so a consumer can detect
+ *  out-of-order deliveries by comparing against the previous `plan_updated` /
+ *  `plan_snapshot`). */
+const planUpdatedData = (
+  e: Extract<AgentEvent, { type: "plan_updated" }>,
+): Record<string, unknown> => ({
+  reason: "plan_updated",
+  version: e.version,
+  delta: deltaToJson(e.delta),
+})
+
+/** Plan-mode cluster (P3): plan_snapshot payload (late-attach surface). Same
+ *  shape as plan_created; the `reason` discriminator is what tells the two
+ *  apart. */
+const planSnapshotData = (
+  e: Extract<AgentEvent, { type: "plan_snapshot" }>,
+): Record<string, unknown> => ({
+  reason: "plan_snapshot",
+  plan: planToJson(e.plan),
+})
+
+/** Plan-mode cluster (P3): user-input request. Emit `choices` only when
+ *  provided (exactOptionalPropertyTypes-safe). */
+const planUserInputRequestedData = (
+  e: Extract<AgentEvent, { type: "plan_user_input_requested" }>,
+): Record<string, unknown> => ({
+  reason: "plan_user_input_requested",
+  promptId: e.promptId,
+  prompt: e.prompt,
+  ...(e.choices !== undefined ? { choices: [...e.choices] } : {}),
+})
+
+/** Plan-mode cluster (P3): user-input resolved. `text` is emitted only when
+ *  present (a `"cancelled"` decision carries no text). */
+const planUserInputResolvedData = (
+  e: Extract<AgentEvent, { type: "plan_user_input_resolved" }>,
+): Record<string, unknown> => ({
+  reason: "plan_user_input_resolved",
+  promptId: e.promptId,
+  decision: e.decision,
+  ...(e.text !== undefined ? { text: e.text } : {}),
+})
+
+/** Plan-mode cluster (P3): collaboration-mode transition. `reason` is emitted
+ *  only when present. */
+const modeChangedData = (
+  e: Extract<AgentEvent, { type: "mode_changed" }>,
+): Record<string, unknown> => ({
+  reason: "mode_changed",
+  from: e.from,
+  to: e.to,
+  ...(e.reason !== undefined ? { transitionReason: e.reason } : {}),
+})
+
+/** Project a PlanReadonlyMirror to a plain JSON object. Pure — no clock, no
+ *  IO. Used by `plan_created` and `plan_snapshot` payloads. */
+const planToJson = (
+  plan: Extract<AgentEvent, { type: "plan_created" }>["plan"],
+): Record<string, unknown> => ({
+  id: plan.id,
+  name: plan.name,
+  version: plan.version,
+  todos: plan.todos.map((t) => ({ id: t.id, title: t.title, status: t.status })),
+})
+
+/** Project a PlanDeltaReadonlyMirror to a plain JSON object. Conditional-set
+ *  on every optional field so absent fields don't leak as `undefined` into
+ *  the JSON line. */
+const deltaToJson = (
+  delta: Extract<AgentEvent, { type: "plan_updated" }>["delta"],
+): Record<string, unknown> => ({
+  kind: delta.kind,
+  ...(delta.todoId !== undefined ? { todoId: delta.todoId } : {}),
+  ...(delta.todoTitle !== undefined ? { todoTitle: delta.todoTitle } : {}),
+  ...(delta.fromStatus !== undefined ? { fromStatus: delta.fromStatus } : {}),
+  ...(delta.toStatus !== undefined ? { toStatus: delta.toStatus } : {}),
+  ...(delta.fromName !== undefined ? { fromName: delta.fromName } : {}),
+  ...(delta.toName !== undefined ? { toName: delta.toName } : {}),
 })
 
 /** Deterministic span/parent for an event given the active turn span. */
