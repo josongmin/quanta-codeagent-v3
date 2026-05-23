@@ -14,6 +14,7 @@ import {
   gitTools,
   lspNavTools,
   nullLspNavProvider,
+  requestUserInputTool,
 } from "@/tool"
 
 describe("mode mutating-table cross-check (ADR-0036)", () => {
@@ -22,6 +23,10 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     ...gitTools().map((t) => t.name),
     ...lspNavTools(nullLspNavProvider).map((t) => t.name),
     createUpdateWorkingStateTool(undefined).name,
+    // ADR-0097 (Tier-S6) — `request_user_input` is registered conditionally
+    // (only when `AgentConfig.userInputPort` is wired). Its MUTATING_TOOL_TABLE
+    // entry (read-only / `null` kind) must still satisfy the cross-check.
+    requestUserInputTool().name,
   ]
 
   test("every registered tool name has an entry in the mutating table", () => {
@@ -69,6 +74,9 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     expect(table.scripted_replace).toBe("write_filesystem")
     expect(table.bash).toBe("bash_mutating")
     expect(table.update_working_state).toBe("working_state_write")
+    // ADR-0097 — `request_user_input` is read-only (host-port elicitation only;
+    // no FS / shell touch). Tier resolves to "none" via `isReadOnly: true`.
+    expect(table.request_user_input).toBeNull()
     expect(table.read).toBeNull()
     expect(table.grep).toBeNull()
     expect(table.glob).toBeNull()

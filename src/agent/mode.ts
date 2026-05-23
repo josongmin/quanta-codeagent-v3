@@ -155,6 +155,15 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   apply_patch: "write_filesystem",
   bash: "bash_mutating",
   update_working_state: "working_state_write",
+  // Tier-S6 / ADR-0097 — Codex `request_user_input` 1급 도구 흡수. Read-only
+  // (FS/shell touch 없음 — 호스트 port를 통한 운영자 입력만). plan-mode에서도
+  // 허용: 모델이 결정을 추론할 수 없을 때 운영자에게 질문하는 surface. 도구는
+  // 자체적으로 HITL("none" tier via `isReadOnly: true` → `inferToolTier`)이므로
+  // gate는 그대로 통과한다. dispatch-seam guard의 read-only fast-path가
+  // 이미 통과시키지만, MUTATING_TOOL_TABLE의 명시적 엔트리는 belt-and-
+  // suspenders: 어떤 새 호출자가 `assertNotMutatingInPlanMode`를 직접 부르더라도
+  // `UnknownToolError`로 거절되지 않도록 한다.
+  request_user_input: null,
   // Mutating git built-ins (ADR-0053, Claude Desktop 1.7196.3
   // `commitWipForBranchSwitch` absorption). git_commit creates a commit;
   // git_branch_switch may write a wip checkpoint + change HEAD. Both block
