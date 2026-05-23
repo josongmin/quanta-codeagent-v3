@@ -63,6 +63,12 @@ import {
 import { installStatusBar, type StatusBar } from "./status-bar"
 import { createStatusPills, type SandboxMode } from "./status-pills"
 import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
+import {
+  createTurnSummary,
+  isTurnSummaryEnabled,
+  isTurnSummaryVerbose,
+  type TurnSummaryCollector,
+} from "./turn-summary"
 
 /**
  * CLI REPL + main-orchestration body.
@@ -173,6 +179,28 @@ const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
     }
   },
 })
+
+/** Build the turn-summary collector + tee-wrap the upstream stream. Default-ON
+ *  for TTY surfaces (auto-OFF on pipes/redirects) so the operator sees a
+ *  per-turn signal box (tools / verify-guard / compaction / memory / recovery)
+ *  WITHOUT opting in. Explicit `QUANTA_TURN_SUMMARY=0|false|off|no` reverts to
+ *  the pre-summary code path (`{collector: disabled, stream}` ⇒ the renderer
+ *  returns `""` and we write nothing).
+ *
+ *  Byte-identical: when the collector is disabled the returned `stream`
+ *  reference is the literal input — no TeeStream allocated, no extra fan-out,
+ *  so the existing recorder/stdout/indicator port path is identical to today's. */
+const buildTurnSummaryAndStream = (
+  stream: StreamPort,
+  envSource: NodeJS.ProcessEnv,
+  isTTY: boolean | undefined,
+): { collector: TurnSummaryCollector; stream: StreamPort } => {
+  const enabled = isTurnSummaryEnabled(envSource, isTTY)
+  const verbose = isTurnSummaryVerbose(envSource)
+  const collector = createTurnSummary({ enabled, verbose })
+  if (!enabled) return { collector, stream }
+  return { collector, stream: new TeeStream([stream, collector.asStreamPort()]) }
+}
 
 /** Build the (indicator, turnStream) pair for the REPL surface — extracted
  *  from `runRepl` so the host stays under biome's cognitive-complexity
@@ -690,6 +718,16 @@ export const runRepl = async (): Promise<void> => {
   const statusDefault = `${provider} · ${model} · ${mode} · ${shortCwd}    Esc Esc · cancel    Ctrl+C · exit`
   const statusBar = installStatusBar(statusDefault)
 
+  // Per-turn signal collector (tools / verify-guard / compaction / memory /
+  // recovery). Tees the upstream `stream` BEFORE the indicator tee so both
+  // surfaces observe the SAME event order. Default-ON for TTY ⇒ the panel is
+  // rendered at turn end; non-TTY or `QUANTA_TURN_SUMMARY=0` ⇒ no tee + the
+  // renderer returns `""` so the post-dashboard stderr write is a no-op.
+  const { collector: turnSummary, stream: summaryStream } = buildTurnSummaryAndStream(
+    stream,
+    process.env,
+    process.stdout.isTTY,
+  )
   // Live turn indicator (spinner + elapsed + token counter). Default-ON
   // when stdout is a TTY; explicit `QUANTA_SPINNER=0|false|off|no` flips
   // it off. Non-TTY surfaces (pipes, redirects, eval/bench harnesses) get
@@ -698,7 +736,7 @@ export const runRepl = async (): Promise<void> => {
   // `buildTurnIndicatorAndStream` for the gate + tee construction.
   const { indicator: turnIndicator, turnStream } = buildTurnIndicatorAndStream(
     statusBar,
-    stream,
+    summaryStream,
     process.env,
     process.stdout.isTTY,
     env("QUANTA_SPINNER_INTERVAL_MS", "80"),
@@ -850,6 +888,12 @@ export const runRepl = async (): Promise<void> => {
         // operator a human-readable cost/latency/cache summary inline.
         process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
       }
+      // Turn-summary panel — rendered AFTER the cost dashboard so the two
+      // sit together at turn end. Returns "" when no signal fired or when
+      // the collector is disabled, so this is a no-op on non-TTY / opt-out.
+      const summary = turnSummary.render(result.outcome)
+      if (summary !== "") process.stderr.write(summary)
+      turnSummary.reset()
     } catch (e) {
       // A turn-scoped abort is the user's intent; swallow the error and
       // hand control back to the prompt. The outer abort still propagates
@@ -873,6 +917,10 @@ export const runRepl = async (): Promise<void> => {
       turnSignal.removeEventListener("abort", onAbortStopIndicator)
       turnIndicator.stop()
       cancel.dispose()
+      // Reset turn-summary counters here as well so an error/abort path
+      // doesn't leak signals into the next turn (the happy path resets
+      // immediately after render — this is the safety net).
+      turnSummary.reset()
     }
   }
 
@@ -934,6 +982,13 @@ export const runRepl = async (): Promise<void> => {
           try {
             result = await run({ ...sessionDeps, signal: turnSignal })
             renderTurnDashboard(metrics, model, slog)
+            // Turn-summary panel — rendered AFTER the cost dashboard so the
+            // two sit together at turn end. Returns "" when no signal fired
+            // OR when the collector is disabled; in both cases this is a
+            // no-op (byte-identical to the pre-summary code path).
+            const summary = turnSummary.render(result.outcome)
+            if (summary !== "") process.stderr.write(summary)
+            turnSummary.reset()
           } catch (e) {
             // Turn-scoped abort = user intent; swallow + return undefined so
             // the loop solicits the next prompt without updating history.
@@ -944,6 +999,10 @@ export const runRepl = async (): Promise<void> => {
             result = undefined
           } finally {
             cancel.dispose()
+            // Safety-net reset for the error/abort path (the happy path
+            // resets immediately after render). Idempotent on a fresh
+            // collector ⇒ harmless to call twice.
+            turnSummary.reset()
           }
           process.stderr.write("\n")
           return result
