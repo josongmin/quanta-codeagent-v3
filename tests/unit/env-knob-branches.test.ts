@@ -19,6 +19,9 @@
  *   QUANTA_SKILLS_DIR, OPENAI_API_KEY / ANTHROPIC_API_KEY auto-detect.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   buildMemoryConfig,
   buildSkillsConfig,
@@ -48,6 +51,11 @@ const ENV_KEYS = [
   "QUANTA_VERIFY_GUARD_MAX_TRIPS",
   "QUANTA_SKILLS_DIR",
   "QUANTA_SKILLS",
+  // ADR-0094 (ChatGPT-OAuth provider) — `pickProvider` probes
+  // `$QUANTA_PREFS_HOME/auth/chatgpt.json`. Point it at a fresh temp dir
+  // for every test so a real `/login` token on the host machine does not
+  // leak into `chatgpt-oauth` selection.
+  "QUANTA_PREFS_HOME",
 ] as const
 
 const snapshot = (): Map<string, string | undefined> => {
@@ -64,11 +72,24 @@ const restore = (m: Map<string, string | undefined>): void => {
 }
 
 let saved: Map<string, string | undefined>
+let prefsHome: string | null = null
 beforeEach(() => {
   saved = snapshot()
   for (const k of ENV_KEYS) delete process.env[k]
+  // Isolate the chatgpt-oauth token probe: point `QUANTA_PREFS_HOME` at a
+  // fresh empty dir so `pickProvider` never sees a stray on-disk token.
+  prefsHome = mkdtempSync(join(tmpdir(), "env-knob-prefs-"))
+  process.env.QUANTA_PREFS_HOME = prefsHome
 })
 afterEach(() => {
+  if (prefsHome !== null) {
+    try {
+      rmSync(prefsHome, { recursive: true, force: true })
+    } catch {
+      // best-effort cleanup
+    }
+    prefsHome = null
+  }
   restore(saved)
 })
 

@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { errMessage } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
-import { checkSkillSize } from "./skill-size"
+import { checkSkillSize, MAX_SKILL_SIZE_BYTES } from "./skill-size"
 import type { Skill, SkillEffort } from "./types"
 
 /** Coerce a frontmatter value to a string[] (single scalar → one-element list). */
@@ -66,8 +66,13 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
  *  `@/skill` is a leaf slice (no `@/observability` import allowed by Biome
  *  boundaries) so `console.warn` is the only sanctioned sink here. */
 const tooLargeWarning = (path: string, size: number): void => {
+  // Include raw byte cap alongside the human-readable "30 MB" label so log
+  // consumers (and unit tests) can correlate the message with
+  // `MAX_SKILL_SIZE_BYTES` without re-parsing the prose.
   // biome-ignore lint/suspicious/noConsole: leaf slice cannot import a structured logger
-  console.warn(`[skill] skipped ${path}: ${size} bytes exceeds the 30 MB cap`)
+  console.warn(
+    `[skill] skipped ${path}: ${size} bytes exceeds the 30 MB cap (${MAX_SKILL_SIZE_BYTES} bytes)`,
+  )
 }
 
 /** Warn when a candidate file passed the size check (so it exists & is in

@@ -86,6 +86,12 @@ const statusToKind = (status: number): LLMErrorKind => {
   return "unknown"
 }
 
+/** Refresh the access token if it expires within this many ms — a 1-minute
+ *  cushion absorbs clock skew between the client and the OAuth issuer and
+ *  the latency budget of an in-flight streaming request, so a token that
+ *  passes the check here is guaranteed valid through the wire call. */
+const TOKEN_REFRESH_SKEW_MS = 60_000
+
 export class ChatGPTOAuthAdapter implements LLMPort {
   readonly model: string
   /** Pinned provider id for the pre-stream `llm_request` marker. */
@@ -114,7 +120,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         { kind: "auth", provider: "chatgpt-oauth" },
       )
     }
-    if (!isExpired(rec, this.nowMs(), 60_000)) return rec
+    if (!isExpired(rec, this.nowMs(), TOKEN_REFRESH_SKEW_MS)) return rec
     const cfg = resolveOAuthConfig(this.env)
     try {
       const next = await refreshToken({

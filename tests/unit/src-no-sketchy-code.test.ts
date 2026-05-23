@@ -40,6 +40,11 @@ interface Rule {
   pattern: RegExp
   why: string
   allowlist?: Record<string, string>
+  /** Optional file-path predicate — when set, the rule only applies to files
+   *  whose `relPath` (relative to `src/`) matches. Lets a rule target a single
+   *  slice (e.g. `agent/`, `permission/`) without polluting `allowlist` with
+   *  every other slice's legitimate uses. */
+  scope?: RegExp
 }
 
 const RULES: readonly Rule[] = [
@@ -83,6 +88,14 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — subagent child-process spawn forwards parent env (merged with `input.env`); same posture as runtime/shell.ts and tool/git/runner.ts — pass-through, not a feature read.",
       "apps/cli/shell-stream-painter.ts":
         "NO_COLOR is the cross-tool no-color.org convention read at the TTY paint boundary (alongside stderr.isTTY); a presentation-layer signal, not a validated feature flag — routing it through runtimeConfig would be over-centralization.",
+      "apps/cli/auth-ui.ts":
+        "Same NO_COLOR / FORCE_COLOR presentation read as shell-stream-painter.ts — TTY paint boundary for the /login UI; not a feature flag.",
+      "apps/cli/login-cmd.ts":
+        "CLI sub-command entry (ADR-0094 ChatGPT-OAuth). Same posture as apps/cli/internal.ts — `deps.env ?? process.env` is the DI fallback at the composition root; downstream `auth/` modules accept env explicitly.",
+      "apps/cli/status-cmd.ts":
+        "CLI sub-command entry (ADR-0094). Same DI fallback posture as login-cmd.ts.",
+      "apps/cli/logout-cmd.ts":
+        "CLI sub-command entry (ADR-0094). Same DI fallback posture as login-cmd.ts.",
     },
   },
   {

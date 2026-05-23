@@ -11,6 +11,7 @@
  * + AgentConfig.planSnapshotStore).
  */
 
+import { randomBytes } from "node:crypto"
 import {
   addTodos as addTodosReducer,
   createPlan as createPlanReducer,
@@ -68,12 +69,15 @@ export interface CreateInMemoryPlanStoreOpts {
 }
 
 /** Default id generator: monotonic counter + random suffix. Sufficient for
- *  test determinism (injectable) AND prod uniqueness (random suffix). */
+ *  test determinism (injectable) AND prod uniqueness (random suffix).
+ *  `randomBytes(3)` yields 24 bits ≈ 16M-distinct suffixes per counter slot —
+ *  plenty for plan-todo ids and immune to `Math.random`'s shared parallel
+ *  state (see tests/unit/src-no-sketchy-code.test.ts `no-math-random`). */
 const defaultIdGen = (): (() => string) => {
   let counter = 0
   return () => {
     counter += 1
-    return `t-${counter.toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    return `t-${counter.toString(36)}-${randomBytes(3).toString("hex")}`
   }
 }
 

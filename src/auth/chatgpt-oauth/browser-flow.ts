@@ -221,8 +221,12 @@ export const runBrowserFlow = async (
   // No-op catch attached up front so a synchronous reject (state-mismatch /
   // user-cancel paths) isn't transiently classified as an unhandled
   // rejection between `pending.reject()` and `Promise.race(...)` attaching
-  // its own handler one microtask later.
-  codePromise.catch(() => {})
+  // its own handler one microtask later. The real error surfaces via
+  // `Promise.race(...)` below — this handler is purely an unhandled-rejection
+  // suppressant, not an error sink.
+  codePromise.catch((_unhandled: unknown) => {
+    /* see comment above */
+  })
 
   try {
     if (opts.opener) opts.opener(url)

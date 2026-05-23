@@ -38,17 +38,23 @@ const runOnce = async <I>(
 }
 
 describe("ghTools registry", () => {
-  test("ghTools() returns 6 tools", () => {
+  test("ghTools() returns 9 tools", () => {
+    // ADR-0103 (gh_pr_blame) + ADR-0104 (gh_pr_review_diff, gh_pr_auto_merge)
+    // expanded the registry from the original 6 to 9 typed tools. Read tools
+    // come first, then mutating tools (matches index.ts order).
     const tools = ghTools()
-    expect(tools.length).toBe(6)
+    expect(tools.length).toBe(9)
     const names = tools.map((t) => t.name)
     expect(names).toEqual([
       "gh_pr_view",
       "gh_issue_view",
       "gh_check_status",
+      "gh_pr_list",
+      "gh_pr_blame",
+      "gh_pr_review_diff",
       "gh_pr_comment",
       "gh_pr_create",
-      "gh_pr_list",
+      "gh_pr_auto_merge",
     ])
   })
 

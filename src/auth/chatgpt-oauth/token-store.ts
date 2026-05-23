@@ -95,10 +95,15 @@ export const deleteToken = async (path: string): Promise<void> => {
  *  now (default 30s — so we don't race a token that's about to expire
  *  mid-flight). Unparseable timestamp ⇒ treat as expired (force relogin
  *  rather than risk a 401 mid-stream). */
+/** Default clock-skew cushion for {@link isExpired}: a 30-second window
+ *  conservative enough to absorb client/issuer clock drift and the latency
+ *  budget of an in-flight refresh without forcing premature relogin. */
+export const DEFAULT_EXPIRY_SKEW_MS = 30_000
+
 export const isExpired = (
   t: Pick<TokenRecord, "expires_at">,
   nowMs: number,
-  skewMs = 30_000,
+  skewMs = DEFAULT_EXPIRY_SKEW_MS,
 ): boolean => {
   const exp = Date.parse(t.expires_at)
   if (Number.isNaN(exp)) return true

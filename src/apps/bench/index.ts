@@ -610,7 +610,13 @@ const main = async (): Promise<void> => {
   await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs }, obs)
 }
 
-main().catch((e) => {
-  logger.error(`bench fatal: ${(e as Error).message}`)
-  process.exit(1)
-})
+// Gate the top-level `main()` so importing this module (e.g. from
+// `tests/unit/bench-write-artifacts.test.ts` for `writeArtifacts`) does NOT
+// trigger the CLI entry point. Bun sets `import.meta.main` only for the file
+// the runtime started from; unit tests start from `bun test` and never match.
+if (import.meta.main) {
+  main().catch((e) => {
+    logger.error(`bench fatal: ${(e as Error).message}`)
+    process.exit(1)
+  })
+}

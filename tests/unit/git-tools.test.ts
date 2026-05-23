@@ -234,7 +234,16 @@ describe("gitLogTool", () => {
   test("default argv uses n=10", async () => {
     const runner = new FakeRunner(okResult(""))
     await collect(gitLogTool(runner), {})
-    expect(runner.calls[0]?.args).toEqual(["log", "--format=%H%x09%an%x09%ai%x09%s", "-n", "10"])
+    // ADR-0105 (Codex §18.7): US-separator format + --no-textconv/--no-ext-diff
+    // for deterministic machine-parseable output. See src/tool/git/log.ts.
+    expect(runner.calls[0]?.args).toEqual([
+      "log",
+      "--no-textconv",
+      "--no-ext-diff",
+      "--format=%H%x1f%an%x1f%ai%x1f%s",
+      "-n",
+      "10",
+    ])
   })
 
   test("respects n + adds --follow for file", async () => {
@@ -242,7 +251,9 @@ describe("gitLogTool", () => {
     await collect(gitLogTool(runner), { n: 3, file: "src/foo.ts" })
     expect(runner.calls[0]?.args).toEqual([
       "log",
-      "--format=%H%x09%an%x09%ai%x09%s",
+      "--no-textconv",
+      "--no-ext-diff",
+      "--format=%H%x1f%an%x1f%ai%x1f%s",
       "-n",
       "3",
       "--follow",
@@ -252,9 +263,11 @@ describe("gitLogTool", () => {
   })
 
   test("formats commits as hash8 (author, date) subject", async () => {
+    // ADR-0105: stdout fields delimited by US (0x1f) instead of TAB.
+    const US = "\x1f"
     const stdout = [
-      "0123456789abcdef0123456789abcdef01234567\tAlice\t2024-01-02 03:04:05 +0000\tinitial",
-      "fedcba9876543210fedcba9876543210fedcba98\tBob\t2024-02-03 04:05:06 +0000\tfix bug",
+      `0123456789abcdef0123456789abcdef01234567${US}Alice${US}2024-01-02 03:04:05 +0000${US}initial`,
+      `fedcba9876543210fedcba9876543210fedcba98${US}Bob${US}2024-02-03 04:05:06 +0000${US}fix bug`,
       "",
     ].join("\n")
     const { result } = await collect(gitLogTool(new FakeRunner(okResult(stdout))), {})
