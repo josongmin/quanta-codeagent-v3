@@ -15,7 +15,7 @@
  * Behavior is byte-identical to the pre-decompose `src/apps/bench/runner.ts`;
  * this is a pure structural refactor.
  */
-import { buildSystemPrompt, lspNavToolList, runAgent } from "@/agent"
+import { type AgentConfig, buildSystemPrompt, lspNavToolList, runAgent } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -147,11 +147,50 @@ const SWEBENCH_DIRECTIVE = [
  *   - `skills`           — skill discovery + active-skills block likewise
  *                          shifts the per-turn reminder.
  *
- * If a future bench mode wants any of these, add an opt-in flag — do NOT
- * remove this comment block without an accompanying measurement-integrity
- * ADR.
+ * Opt-in flags added (A/B measurement; default-OFF preserves byte-identity):
+ *   - QUANTA_BENCH_LSP=1       wire LSP nav tools (OR with QUANTA_LSP_TOOLS=full)
+ *   - QUANTA_BENCH_SUBAGENT=1  wire `subagent` AgentConfig block
+ *   - QUANTA_BENCH_SKILLS=1    wire `skills` AgentConfig block (bundled-only)
+ *  See {@link benchOptIns} (just below) for the resolver — the BENCH-INTENTIONAL
+ *  posture is unchanged when all three are unset. If a future bench mode wants
+ *  any of the other listed knobs, add another opt-in flag — do NOT remove this
+ *  comment block without an accompanying measurement-integrity ADR.
  */
-const buildConfig = (
+
+/** SWE-bench A/B opt-in resolver. EVERY flag default-OFF; an unset env yields
+ *  `{ lspNav:false, subagent:undefined, skills:undefined }` and `buildConfig`
+ *  is byte-identical to the BENCH-INTENTIONAL posture above. Exported for
+ *  direct unit testing — three independent env reads, no cross-coupling.
+ *
+ *  Slice-isolation choice: the CLI has cousins (`buildSubagentConfig` /
+ *  `buildSkillsConfig` in `src/apps/cli/internal.ts`) but they read DIFFERENT
+ *  env keys (`QUANTA_SUBAGENT` / `QUANTA_SKILLS_DIR` + a `--skills` argv
+ *  check). Bench needs its OWN bench-only gate so a `QUANTA_SUBAGENT=1`
+ *  exported in a dev shell does NOT silently leak into measurement runs.
+ *  Inline duplication is intentional: ~3 lines per builder, isolated test
+ *  surface, no `apps/bench → apps/cli` import dependency. */
+export const benchOptIns = (): {
+  lspNav: boolean
+  subagent: AgentConfig["subagent"] | undefined
+  skills: AgentConfig["skills"] | undefined
+} => {
+  // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
+  // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
+  const lspNav = process.env.QUANTA_LSP_TOOLS === "full" || process.env.QUANTA_BENCH_LSP === "1"
+  // Subagent: bench-only `QUANTA_BENCH_SUBAGENT=1`. Empty block ⇒ runner default
+  // applies (no per-bench maxDepth tuning — keep the surface minimal until a
+  // measured reason appears).
+  const subagent: AgentConfig["subagent"] | undefined =
+    process.env.QUANTA_BENCH_SUBAGENT === "1" ? {} : undefined
+  // Skills: bench-only `QUANTA_BENCH_SKILLS=1`. Empty block ⇒ bundled system
+  // skills ONLY (ADR-0045) — bench never points at a user dir (measurement
+  // integrity). `changedPaths` is left unset (full inventory).
+  const skills: AgentConfig["skills"] | undefined =
+    process.env.QUANTA_BENCH_SKILLS === "1" ? {} : undefined
+  return { lspNav, subagent, skills }
+}
+
+export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
   sandbox: string,
@@ -159,12 +198,14 @@ const buildConfig = (
   stream: StreamPort,
   seedMsg?: string,
 ) => {
-  // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI).
-  // When the language-server binary (`pyright-langserver` / `typescript-
-  // language-server`) is absent the per-call probe in `lsp-bridge` makes the
-  // tools emit a clean `ok:false` — registration is harmless without a server.
-  // Default-OFF preserves byte-identical bench behavior.
-  const lspNavTools = process.env.QUANTA_LSP_TOOLS === "full" ? lspNavToolList() : []
+  // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI) OR
+  // the bench-only `QUANTA_BENCH_LSP=1`. When the language-server binary
+  // (`pyright-langserver` / `typescript-language-server`) is absent the
+  // per-call probe in `lsp-bridge` makes the tools emit a clean `ok:false` —
+  // registration is harmless without a server. Default-OFF preserves
+  // byte-identical bench behavior.
+  const opt = benchOptIns()
+  const lspNavTools = opt.lspNav ? lspNavToolList() : []
   // DIP factory: bench driver runs against the default port surface; the
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
   const registry = new ToolRegistry([...buildDefaultTools(), ...lspNavTools])
@@ -204,6 +245,10 @@ const buildConfig = (
     // the negative empirical that motivated ADR-0013's default reduction —
     // inheriting the default makes the lesson actually apply on the bench path.
     ...(instance.swebench ? { verifyGuard: {} } : {}),
+    // Bench A/B opt-ins (default-OFF; all three unset ⇒ keys omitted entirely,
+    // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
+    ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
+    ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
   }
 }
 

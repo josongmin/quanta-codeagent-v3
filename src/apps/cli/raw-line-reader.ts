@@ -123,14 +123,23 @@ const termWidth = (): number => {
   return typeof w === "number" && w > 0 ? w : 80
 }
 
-/** Fill an ANSI-coloured "row" out to the full terminal width. The
- *  content already contains foreground colour sequences; we just need to
- *  cover the residual columns with the same background so the box looks
- *  contiguous. */
+/** Fill an ANSI-coloured "row" out to the full terminal width.
+ *
+ *  IMPORTANT: `\x1b[0m` (full RESET) clears the background colour too —
+ *  if a caller embeds `${RESET}` inside `content` the BG box visibly
+ *  ends there (observed: short BG strip behind `›` + cursor, rest of
+ *  the line plain black). We pre-process `content` to rewrite every
+ *  full-RESET into a foreground-only reset (`\x1b[39;22m` — default fg
+ *  + bold/dim off, BG untouched) so the band stays contiguous all the
+ *  way to the terminal edge. */
+const RESET_KEEP_BG = `${ESC}39;22m`
+const FULL_RESET_RE = /\x1b\[0m/g
+
 const fillBgRow = (content: string): string => {
-  const cols = stringColumns(stripAnsi(content))
+  const safe = content.replace(FULL_RESET_RE, RESET_KEEP_BG)
+  const cols = stringColumns(stripAnsi(safe))
   const pad = Math.max(0, termWidth() - cols)
-  return `${BG}${content}${" ".repeat(pad)}${BG_END}`
+  return `${BG}${safe}${" ".repeat(pad)}${BG_END}`
 }
 
 interface State {

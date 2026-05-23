@@ -288,7 +288,7 @@ isValidCursorPredictionCase(n) {
 
 ★ **가장 영리한 4개** (REVERTING_USER_CHANGE / SUGGESTING_RECENTLY_REJECTED_EDIT / Bad Case 1 / LINT_OVERLAP): "사용자 의도 거역 + 자기 자신 반복" 패턴 명시적 차단. quanta reflect-gate(ADR-0098)에 provider-backed 패턴 차용 가능.
 
-## 7. `cppConfig` server-pushed 13 필드 ✅ (server controls everything)
+## 7. `cppConfig` server-pushed 13+ 필드 ✅ (server controls everything)
 
 클라 설정은 단 **2개** (§14), 나머지 동작은 전부 서버가 매 turn push:
 
@@ -297,12 +297,12 @@ cppConfig?: {
   isOn: boolean                                          // kill-switch
   shouldLetUserEnableCppEvenIfNotPro: boolean            // free-tier toggle
   maxNumberOfClearedSuggestionsSinceLastAccept: number   // §4.1 임계 (default 20)
-  heuristics: Heuristic[]                                // §6의 9개 toggle
+  heuristics: Heuristic[]                                // §6의 활성 heuristic Set
   isGhostText: boolean                                   // ghost vs inline
-  isFusedCursorPredictionModel: boolean                  // fused 모델 (§9) 활성
-  mergeBehavior: ...                                     // 다중 제안 머지 정책
-  importPredictionConfig: ...                            // import 자동 제안 별도 정책
-  recentlyRejectedEditThresholds: ...                    // §6 #9의 임계
+  isFusedCursorPredictionModel: boolean                  // fused 모델 (§13) 활성
+  mergeBehavior: MergeBehavior                           // 다중 제안 머지 정책 (enum 값 미식별)
+  importPredictionConfig: { pythonEnabled: boolean, ... } // import 자동 제안 (Python 확인됨)
+  recentlyRejectedEditThresholds: { softRejectThreshold: number, ... }  // §6 #9 임계
   excludeRecentlyViewedFilesPatterns: string[]           // RVF에서 제외할 glob
   shouldFetchRvfText: boolean                            // RVF 텍스트 fetch 여부
   enableRvfTracking: boolean                             // Related Visible Files 추적
@@ -310,9 +310,57 @@ cppConfig?: {
 }
 ```
 
-★ **`enableRvfTracking` + `excludeRecentlyViewedFilesPatterns`**: 사용자가 *최근 본 파일* 추적 → Tab 컨텍스트에 추가. 이게 "내 코드베이스를 아는 것 같다"의 *Tab*-측 정체.
+★ **`enableRvfTracking` + `excludeRecentlyViewedFilesPatterns`**: 사용자가 *최근 본 파일* 추적 → Tab 컨텍스트에 추가. "내 코드베이스를 아는 것 같다"의 *Tab*-측 정체.
 
-★ **서버 push 패턴**: 클라 release 안 해도 임계/heuristic/모델 즉시 swap. quanta 흡수: per-session config dynamic override.
+### 7.1 ★ **60s polling reload** ✅
+```js
+async fastPeriodicallyReloadCppConfig() {
+  Date.now() - this.lastReloadConfigTimestamp > 1e3*60        // 60초 임계
+    && (
+      await this.loadCppConfigIncludingHandlingProAccess(),
+      this.debouncer.setDebouncingDurations(this.getNewDebounceDurations()),  // ★ debounce 재설정
+      this._importPredictionService.handleNewImportPredictionConfig()
+    )
+}
+
+async loadCppConfigIncludingHandlingProAccess() {
+  this.lastReloadConfigTimestamp = Date.now()
+  await this.keepCppModelStateUpdated()
+  const t = await (await this.aiClient()).cppConfig(new urc({
+    supportsCpt: !0,                          // ★ CPT 지원 클라가 알림
+    model: this.persistentStorage().cppModel ?? ""
+  }))
+  this._applyConfig(t)
+  this._cursorCredsService.setGeoCppBackendUrl(t.geoCppBackendUrl)
+}
+```
+- **매 60초마다 서버 `cppConfig` 재조회** → 모든 임계/heuristic/모델 push 갱신.
+- `supportsCpt: true` = 클라가 **CPT (Cursor Prediction Tab) 지원함을 알림** → 서버가 그에 맞는 config 푸시.
+- `geoCppBackendUrl` 서버 응답에 포함 → 지역별 endpoint 동적 라우팅(api3/api4.cursor.sh 변경 가능).
+- `debouncer.setDebouncingDurations(getNewDebounceDurations())` — **debounce ms도 매 reload 시 갱신** (§7.2).
+
+### 7.2 ★ **2-tier debouncer**: client=25ms + total=60ms ✅ **verbatim**
+```js
+getNewDebounceDurations() {
+  const e = this._reactiveStorageService.applicationUserPersistentStorage.cppConfig
+  if (e === void 0) return { clientDebounceDuration: j$C, totalDebounceDuration: K$C }
+  // ↑ defaults j$C=25, K$C=60  ✅ verbatim 확정
+  // ...else cppConfig에서 값 사용
+}
+
+setDebouncingDurations({ clientDebounceDuration: n, totalDebounceDuration: e }) {
+  // 두 임계로 debounce
+}
+```
+
+★ **정확한 default ms** ✅:
+- `j$C = 25` → **`clientDebounceDuration = 25ms`** (클라-only 디바운스: keystroke 후 25ms 안 새 keystroke 오면 reset)
+- `K$C = 60` → **`totalDebounceDuration = 60ms`** (전체: 25ms client + ~35ms network 여유 ≈)
+- 둘 다 `cppConfig`로 server push 가능 (60s polling 갱신, §7.1)
+
+★ **놀랍게 짧음**: 보통 IDE autocomplete는 200-500ms 쓰는데 Cursor는 **25ms / 60ms**. 사용자 perceptive latency 극단 최소화. 모델 inference latency를 *streaming* + cache warming(double-issue)으로 가린다.
+
+★ **서버 push 패턴**: 클라 release 안 해도 임계/heuristic/모델/debounce/endpoint 즉시 swap. quanta 흡수: per-session config dynamic override.
 
 ## 8. Ghost text 렌더 ✅ (Monaco widget)
 
@@ -353,18 +401,32 @@ generateChunkedStreamingFollowupSuggestion(e, t, i, r, s, o, a) {
 
 Partial accept setting: `cursor.cpp.enablePartialAccepts` (§14).
 
-## 10. ControlToken — BiDi mid-stream 제어 ✅
+## 10. ControlToken — 새 요청 시작 신호 (BiDi 아님) ✅
 
 ```
 StreamCppRequest.ControlToken enum:
-  COMPLETE = 0   // 정상
+  COMPLETE = 0   // 정상 (default)
   QUIET = 1      // ghost 안 보이게 (사용자 거부 직후?)
   LOUD = 2       // force show
   OP = 3         // operation 진행중 (사용자 방금 키 누름, 잠깐 대기)
 ```
-클라가 stream 중간에 server에 보내는 신호. ServerStream만으로는 안 되고 BiDi 변종 필요 (StreamHoldCpp일 가능성).
+**정정**: `StreamHoldCpp` = ServerStreaming (BiDi 아님). 클라가 stream 중간에 mid-stream으로 send 못 함. **ControlToken은 *다음 요청 시작 시* `StreamCppRequest`에 동봉**:
+- 사용자가 ghost reject → 다음 typing이 새 요청 시작 → 그 요청에 `controlToken: QUIET` 동봉 → 서버가 quiet 모드로 다음 ghost 생성
+- 즉 mid-stream BiDi feedback이 아니라 **next-request-payload-flag** 패턴
 
-★ quanta streaming-dispatch에 mid-stream user 신호 채널 추가 시 reference (steering.ts BiDi 확장).
+★ quanta streaming-dispatch에 mid-request user 신호 채널 추가 시 reference. BiDi 필요 없음 — 다음 요청 payload에 flag만 동봉.
+
+## 10.1 `CursorPredictionSource` enum 5값 ✅ verbatim (fused 모델 trigger source)
+```
+{no:0, name:"CURSOR_PREDICTION_SOURCE_UNSPECIFIED"}
+{no:1, name:"CURSOR_PREDICTION_SOURCE_ALWAYS_ON"}      // 사용자 setting "항상 켜기"
+{no:2, name:"CURSOR_PREDICTION_SOURCE_ACCEPT"}         // 직전 accept 후 next 위치 예측 (chain UX)
+{no:3, name:"CURSOR_PREDICTION_SOURCE_UNDO"}           // undo 시 (역방향 trajectory)
+{no:4, name:"CURSOR_PREDICTION_SOURCE_EDITOR_CHANGE"}  // 편집 변경 시
+```
+fused 모델 활성 시 어떤 trigger source인지 동봉. `ACCEPT` source = "Tab Tab Tab" chain의 시그너처.
+
+★ `Heuristic` 2값 클레임은 이 enum과 혼동했던 것 — `CursorPredictionConfigResponse.Heuristic`은 별도이고 추출 못 함(미해소). 위 5값은 **source enum**.
 
 ## 11. Telemetry ✅
 
@@ -378,6 +440,12 @@ StreamCppRequest.ControlToken enum:
   ```
   매 ghost lifecycle마다 emit.
 - **`markCppForEval`** — 사용자 "Report Good"/"Report Bad" 클릭 (UI verbatim). 명시 신호 → server-side eval set 등록.
+  ```js
+  // UI handler verbatim:
+  case "Report Good": t.reportGenerationFeedback(e, HGe.THUMBS_UP); break
+  case "Report Bad":  t.reportGenerationFeedback(e, HGe.THUMBS_DOWN); break
+  ```
+  `HGe` enum 2값: `THUMBS_UP`/`THUMBS_DOWN`. `reportGenerationFeedback(generationId, thumb)`로 단일 진입점.
 - **`AddTabRequestToEval`** — 별도 evaluation pool 적재 (자동/수동).
 
 `cppEventLogger` — 메인 클래스 보유 logger.
@@ -564,22 +632,64 @@ await provider.recordRejectedEdit({ relativePath, modelValue: rejectedOutput, re
 | `isValidCursorPredictionCase` body | ⚠️ **부분** | Bad Case 1 verbatim ("if predicted line in accepted cpp range → reject"), Bad Case 2/3은 truncated |
 | `j6e` provider command enum | ✅ **존재 확인** | 최소 2값: `IsRevertingToRecentModel`, `IsSuggestingRecentlyRejectedEdit`. 전수는 추가 grep 필요 |
 
-### 라운드 3+ 미해소 (다음 dig 우선순위)
-| 항목 | 상태 | 다음 액션 |
+### 라운드 3 (이번 — 거의 모두 해소)
+| 항목 | 상태 | 결과 |
 |---|---|---|
-| `mergeBehavior` enum 값 | ❓ | 다른 표기 grep (`MergeBehavior` 클래스 정의) |
-| `CursorPredictionConfigResponse.Heuristic` 2값 | ❓ | 별도 prefix 시도 (`CPHeuristic`/`CursorPredictionHeuristic`/...) |
-| `MarkCppForEval` vs `AddTabRequestToEval` Request 비교 | ⚠️ | 둘 다 별도 Request — 의미 차이 ★ Mark=사용자 명시("Report Good/Bad"), Add=자동 evaluation pool (≈) |
-| 정확한 debounce ms | ❓ | 함수 body 안, minified 미식별. runtime instrumentation 필요 (Cursor 띄우고 console 측정) |
-| `Bad Case 2/3...` (isValidCursorPredictionCase) | ❓ | 전체 함수 body 추출 (현재는 첫 분기만) |
 | `j6e` 전체 provider command 종류 | ✅ **해소** | **10 commands verbatim** (§6.4): Ack/CompileGlobalDiffTrajectories/FormatDiffHistory/GetModelValue/InitModel/IsRevertingToRecentModel/IsSuggestingRecentlyRejectedEdit/RecordRejectedEdit/SetEnableCppIncludeUnchangedLines/SetEnableCppWhitespaceDiffHistoryMode |
-| `everythingProviderService.onlyLocalProvider` 구조 | ❓ | 다른 provider도 있는지 (`onlyServerProvider`?) |
-| `isFusedCursorPredictionModel` 활성 시 response 스키마 변화 | ⚠️ | `cursor_prediction_target` 필드 추가, but 다른 차이는? |
-| RVF (Recently Viewed Files) LRU 알고리즘 + size cap | ❓ | `recentlyViewedFiles[A-Za-z]*` 함수들 본체 |
-| `clearAndResetAllCppSuggestions` 발화 조건 | ⚠️ | 함수 호출처 grep |
-| `ControlToken` LOUD/QUIET/OP 정확한 사용처 | ❓ | 클라가 언제 어떻게 보내나 |
+| `CursorPredictionSource` enum | ✅ **해소** | 5값 verbatim (§10.1): UNSPECIFIED/ALWAYS_ON/ACCEPT/UNDO/EDITOR_CHANGE — 이전 "Heuristic 2값" 클레임은 source enum과 혼동 |
+| `debouncer` 패턴 (2-tier) | ✅ **해소** | `clientDebounceDuration` + `totalDebounceDuration` 2-tier (§7.2), default `j$C`/`K$C` constants, cppConfig push로 변경 |
+| `cppConfig` polling | ✅ **해소** | **60초마다 `fastPeriodicallyReloadCppConfig`** (§7.1), `cppConfig` RPC + `geoCppBackendUrl` dynamic |
+| `supportsCpt:!0` 의미 | ✅ **해소** | 클라가 CPT(Cursor Prediction Tab) 지원 알림. 서버가 그에 맞는 config push |
+| `ControlToken` BiDi vs unary | ✅ **해소** (정정) | BiDi 아님, **next-request-payload flag** (§10) — `StreamHoldCpp`도 ServerStream |
+| RecordCppFateRequest 첫 필드 | ✅ **해소** | `request_id` (scalar string, no:1). 매 request 단위 fate 추적 |
+| AddTabRequestToEvalRequest 첫 필드 | ✅ **해소** | `request_id` (scalar string, no:1) |
+| `StreamCppRequest` 첫 필드 | ✅ **해소** | `current_file` (kind:"message", T:WD) — 29 필드 중 첫 번째 |
+| `importPredictionConfig` 필드 | ⚠️ **부분** | `pythonEnabled` 1개만 식별 — 다른 언어 필드(`tsEnabled`/`rustEnabled`) 가능 |
 
-→ **구현 시 우선 dig**: 기능에 critical인 #1/#2/#3/#5/#6/#8 (mergeBehavior, RVF LRU, j6e 전체, Bad Case 2+, isFused 차이, ControlToken 사용처). #4(debounce ms)는 runtime 측정으로.
+### 라운드 4 (이번 — 마지막 정밀)
+| 항목 | 상태 | 결과 |
+|---|---|---|
+| `j$C` / `K$C` debounce defaults ms | ✅ **해소** | **`j$C=25, K$C=60`** verbatim (§7.2) — client 25ms / total 60ms 극단 짧음 |
+| `HGe` Report Good/Bad enum | ✅ **해소** | THUMBS_UP / THUMBS_DOWN 2값 + `reportGenerationFeedback(genId, thumb)` 단일 진입점 (§11) |
+| `everythingProviderService` API | ✅ **해소** | `onlyLocalProvider` (메인) + `registerEverythingProvider` / `registerEverythingProviderAllLocal` / `unregisterEverythingProvider*` / `waitForEverythingProvider` / `waitForCommandEverythingProvider` / `provider` getter / `onDidChangeCommandProvider` — provider는 named가 **onlyLocalProvider 1개**만 |
+| `importPredictionConfig` 다른 필드 | ✅ **부분해소** | `pythonEnabled` + `cppAutoImportEnabled` + `importPredictionEnabled` + `isCursorPredictionEnabled` (4 toggle 패턴) |
+
+### 라운드 5+ 미해소 (낮은 우선순위, refinement)
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| `mergeBehavior` enum 값 verbatim | ❓ | `MergeBehavior` 클래스 / `MERGE_BEHAVIOR_*` 0 hit — 별도 minified 표기 / 다른 namespace 가능 |
+| `Bad Case 2/3...` (isValidCursorPredictionCase) | ❓ | 함수 body truncate된 채로만 보임 — minified bracket-balance 복잡, 실행 trace로 추출 가능 |
+| RVF LRU size cap | ❓ | `recentlyViewedFiles.length`/`slice` 호출 보임, 정확한 cap 상수 미식별 — runtime 측정 가능 |
+| `MarkCppForEvalRequest` body | ❓ | typeName 위 batch에 0 hit — `MarkCppForEval` 자체가 더 새로운 minified 이름 가능 |
+| `CursorPredictionConfigResponse.Heuristic` (source와 별개 enum) | ❓ | source enum은 §10.1 확정, 별도 Heuristic enum 존재 여부 unclear |
+| `clearAndResetAllCppSuggestions` 발화 조건 전수 | ⚠️ | snooze 시작 + 큰 컨텍스트 변경 (앞에 본 것). 더 많은 호출처 있을 수 있음 |
+| `CompileGlobalDiffTrajectories` 결과 schema | ❓ | trajectory 객체 shape 미식별 |
+
+→ **구현 시작에 필요한 정보는 모두 해소**. 위 미해소는 *implementation refinement* 용 (필요 시 runtime instrumentation).
+
+## 20. 구현 시 핵심 reference summary
+
+quanta `EditHistoryProvider` 구현 시 **이 페이지만 보면 충분**:
+
+| 무엇 | doc 위치 | 정확 값 (verbatim) |
+|---|---|---|
+| 10 trigger sources | §3 | uL.{Unknown,LineChange,Typing,OptionHold,LinterErrors,ParameterHints,CursorPrediction,ManualTrigger,EditorChange,LspSuggestions} |
+| 2 client suppression gates | §4 | reject>20 / idle≥60_000ms |
+| 카운터 리셋 3 path | §4.1 | constructor / clearAndResetAllCppSuggestions / clearSuggestions(after accept) |
+| Snooze 5분 persistent | §5 | setTimeout 300_000ms + persistStorage("cppEnabled",false) |
+| **9 heuristic 2 enum 분리** | §6.1/6.2 | FBt 7값(0-6) + 별도 enum 3값(LINT_OVERLAP/LOTS_OF_ADDED_TEXT/LINES_MISMATCH) |
+| Heuristic 적용 알고리즘 | §6.3 | `cppConfig.heuristics.includes(FBt.X)` → `everythingProvider.onlyLocalProvider.runCommand(j6e.IsX, {relativePath, modelValue, ...thresholds})` async per-line |
+| **10 provider commands (j6e)** | §6.4 | Ack/CompileGlobalDiffTrajectories/FormatDiffHistory/GetModelValue/InitModel/IsRevertingToRecentModel/IsSuggestingRecentlyRejectedEdit/RecordRejectedEdit/SetEnableCppIncludeUnchangedLines/SetEnableCppWhitespaceDiffHistoryMode |
+| cppConfig 13+ 필드 + **60s polling** | §7/7.1 | fastPeriodicallyReloadCppConfig 60_000ms threshold |
+| **2-tier debouncer 정확 ms** | §7.2 | **clientDebounceDuration=25ms (j$C), totalDebounceDuration=60ms (K$C)** |
+| importPrediction 4 toggle | §7 | pythonEnabled / cppAutoImportEnabled / importPredictionEnabled / isCursorPredictionEnabled |
+| 4 ControlToken (next-request flag) | §10 | COMPLETE/QUIET/LOUD/OP — BiDi 아님, 다음 요청 payload flag |
+| 5 CursorPredictionSource | §10.1 | UNSPECIFIED/ALWAYS_ON/ACCEPT/UNDO/EDITOR_CHANGE |
+| 4 CppFate values | §11 | UNSPECIFIED/ACCEPT/PARTIAL_ACCEPT/REJECT |
+| 2 HGe ThumbsUp/Down | §11 | THUMBS_UP/THUMBS_DOWN — `reportGenerationFeedback(genId, thumb)` 단일 진입점 |
+| everythingProviderService API | §17.4 | onlyLocalProvider (메인) + register/unregister + waitForProvider + onDidChangeCommandProvider |
+| **EditHistoryProvider 인터페이스 (10 메서드)** | **§17.4** | **TypeScript verbatim — 그대로 구현 가능** |
+| 9 흡수 패턴 + LOC 추정 | §17.1/17.2 | Top tier 6개 (전부 ML 인프라 0) + Medium tier 5개 |
 
 다음 라운드 dig 시 위 명시.
 

@@ -1,0 +1,247 @@
+import { describe, expect, test } from "bun:test";
+import { streamingTurn } from "@/agent/streaming-dispatch";
+import { assembleFromEvents } from "@/llm";
+/** Async generator over a fixed event list. `onEmit` fires AFTER each event is
+ *  yielded so a test can record interleaving (e.g. assert a dispatch started
+ *  before the stream finished). */
+async function* gen(events, onEmit) {
+    for (let i = 0; i < events.length; i++) {
+        const ev = events[i];
+        yield ev;
+        onEmit?.(ev, i);
+        // Yield to the microtask queue so any in-flight dispatch scheduled by the
+        // consumer can make progress between stream events (models the real gap).
+        await Promise.resolve();
+    }
+}
+const toolUse = (id, name, input) => [
+    { type: "tool_use_start", id, name },
+    { type: "tool_use_end", id, input },
+];
+const block = (id, content, isError = false) => ({
+    block: {
+        type: "tool_result",
+        tool_use_id: id,
+        content,
+        ...(isError ? { is_error: true } : {}),
+    },
+    ok: !isError,
+    preview: content,
+});
+/** A dispatch mock that records start/end ordering into `log`. `safe` decides
+ *  which tool names are concurrency-safe. */
+const makeHarness = (safeNames) => {
+    const log = [];
+    const isConcurrencySafe = (name) => safeNames.includes(name);
+    const dispatch = async (call) => {
+        log.push(`start:${call.id}`);
+        // A real (timer) gap so an early-started call is still in flight while the
+        // stream keeps producing events / starting siblings — models true overlap.
+        await new Promise((r) => setTimeout(r, 10));
+        log.push(`end:${call.id}`);
+        return block(call.id, `out-${call.id}`);
+    };
+    return { log, isConcurrencySafe, dispatch };
+};
+describe("streamingTurn", () => {
+    test("zero tools degrades byte-identical to assembleFromEvents", async () => {
+        const events = [
+            { type: "text_delta", delta: "Hel" },
+            { type: "text_delta", delta: "lo" },
+            { type: "message_stop", stop_reason: "end_turn" },
+        ];
+        const deltas = [];
+        const res = await streamingTurn({
+            events: gen(events),
+            isConcurrencySafe: () => true,
+            dispatch: async () => block("x", "x"),
+            onTextDelta: (d) => deltas.push(d),
+        });
+        expect(res.kind).toBe("assembled");
+        if (res.kind !== "assembled")
+            return;
+        const expected = assembleFromEvents(events);
+        expect(res.message).toEqual(expected.message);
+        expect(res.stopReason).toBe(expected.stopReason);
+        expect(res.resultBlocks).toEqual([]);
+        expect(deltas).toEqual(["Hel", "lo"]);
+    });
+    test("all-safe calls overlap: dispatch starts BEFORE the stream ends", async () => {
+        const { log, isConcurrencySafe, dispatch } = makeHarness(["read"]);
+        const events = [
+            ...toolUse("t1", "read", { p: "a" }),
+            { type: "text_delta", delta: "thinking more..." },
+            ...toolUse("t2", "read", { p: "b" }),
+            { type: "text_delta", delta: "done" },
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        const res = await streamingTurn({
+            events: gen(events, (ev) => log.push(`ev:${ev.type}`)),
+            isConcurrencySafe,
+            dispatch,
+        });
+        expect(res.kind).toBe("assembled");
+        // t1 must have STARTED before the stream's message_stop event was emitted.
+        const t1Start = log.indexOf("start:t1");
+        const msgStop = log.indexOf("ev:message_stop");
+        expect(t1Start).toBeGreaterThanOrEqual(0);
+        expect(t1Start).toBeLessThan(msgStop);
+        // Both safe calls overlapped (both started before either ended).
+        const s1 = log.indexOf("start:t1");
+        const s2 = log.indexOf("start:t2");
+        const e1 = log.indexOf("end:t1");
+        expect(s2).toBeLessThan(e1);
+        expect(s1).toBeLessThan(s2);
+    });
+    test("unsafe call is a head-of-line barrier (not started while stream open)", async () => {
+        const { log, isConcurrencySafe, dispatch } = makeHarness(["read"]);
+        const events = [
+            ...toolUse("w1", "write", { p: "a" }),
+            { type: "text_delta", delta: "more" },
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        await streamingTurn({
+            events: gen(events, (ev) => log.push(`ev:${ev.type}`)),
+            isConcurrencySafe,
+            dispatch,
+        });
+        // The unsafe write must NOT start until AFTER message_stop is seen.
+        const w1Start = log.indexOf("start:w1");
+        const msgStop = log.indexOf("ev:message_stop");
+        expect(w1Start).toBeGreaterThan(msgStop);
+    });
+    test("safe call AFTER an unsafe barrier is deferred (no overlap)", async () => {
+        const { log, isConcurrencySafe, dispatch } = makeHarness(["read"]);
+        const events = [
+            ...toolUse("w1", "write", { p: "a" }),
+            ...toolUse("r1", "read", { p: "b" }),
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        await streamingTurn({
+            events: gen(events, (ev) => log.push(`ev:${ev.type}`)),
+            isConcurrencySafe,
+            dispatch,
+        });
+        const msgStop = log.indexOf("ev:message_stop");
+        // Neither the barrier nor the trailing safe call starts during the stream;
+        // and they run serially in order (w1 fully done before r1 starts).
+        expect(log.indexOf("start:w1")).toBeGreaterThan(msgStop);
+        expect(log.indexOf("start:r1")).toBeGreaterThan(msgStop);
+        expect(log.indexOf("end:w1")).toBeLessThan(log.indexOf("start:r1"));
+    });
+    test("mixed order preserved in resultBlocks (model call order)", async () => {
+        const { isConcurrencySafe, dispatch } = makeHarness(["read"]);
+        const events = [
+            ...toolUse("r1", "read", { p: "a" }),
+            ...toolUse("w1", "write", { p: "b" }),
+            ...toolUse("r2", "read", { p: "c" }),
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch });
+        expect(res.kind).toBe("assembled");
+        if (res.kind !== "assembled")
+            return;
+        expect(res.resultBlocks.map((b) => (b.type === "tool_result" ? b.tool_use_id : ""))).toEqual([
+            "r1",
+            "w1",
+            "r2",
+        ]);
+    });
+    test("stream_reset discards in-flight + returns only post-reset turn", async () => {
+        const started = [];
+        const isConcurrencySafe = () => true;
+        const dispatch = async (call) => {
+            started.push(call.id);
+            return block(call.id, `out-${call.id}`);
+        };
+        const events = [
+            ...toolUse("dead1", "read", { p: "x" }),
+            { type: "text_delta", delta: "garbage from dead provider" },
+            { type: "stream_reset" },
+            { type: "text_delta", delta: "fresh" },
+            ...toolUse("live1", "read", { p: "y" }),
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch });
+        expect(res.kind).toBe("assembled");
+        if (res.kind !== "assembled")
+            return;
+        // Only the post-reset message survives.
+        expect(res.message.content).toEqual([
+            { type: "text", text: "fresh", phase: "commentary" },
+            { type: "tool_use", id: "live1", name: "read", input: { p: "y" } },
+        ]);
+        expect(res.resultBlocks.map((b) => (b.type === "tool_result" ? b.tool_use_id : ""))).toEqual([
+            "live1",
+        ]);
+        // The dead partial's call may have started (speculative) but its result is
+        // discarded; the surviving result set is post-reset only.
+        expect(started).toContain("live1");
+    });
+    test("abort between phases yields {kind:'aborted'}", async () => {
+        const ctrl = new AbortController();
+        const isConcurrencySafe = () => false;
+        const dispatch = async (call) => block(call.id, "x");
+        const events = [
+            ...toolUse("w1", "write", { p: "a" }),
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        // Abort as soon as the first event is emitted.
+        const res = await streamingTurn({
+            events: gen(events, () => ctrl.abort()),
+            isConcurrencySafe,
+            dispatch,
+            signal: ctrl.signal,
+        });
+        expect(res.kind).toBe("aborted");
+    });
+    test("pre-aborted signal short-circuits to aborted", async () => {
+        const ctrl = new AbortController();
+        ctrl.abort();
+        const res = await streamingTurn({
+            events: gen([
+                ...toolUse("r1", "read", {}),
+                { type: "message_stop", stop_reason: "tool_use" },
+            ]),
+            isConcurrencySafe: () => true,
+            dispatch: async (c) => block(c.id, "x"),
+            signal: ctrl.signal,
+        });
+        expect(res.kind).toBe("aborted");
+    });
+    test("error tool_result is still ordered correctly", async () => {
+        const isConcurrencySafe = (name) => name === "read";
+        const dispatch = async (call) => call.id === "bad" ? block(call.id, "boom", true) : block(call.id, "ok");
+        const events = [
+            ...toolUse("r1", "read", { p: "a" }),
+            ...toolUse("bad", "write", { p: "b" }),
+            ...toolUse("r2", "read", { p: "c" }),
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch });
+        expect(res.kind).toBe("assembled");
+        if (res.kind !== "assembled")
+            return;
+        expect(res.resultBlocks).toEqual([
+            { type: "tool_result", tool_use_id: "r1", content: "ok" },
+            { type: "tool_result", tool_use_id: "bad", content: "boom", is_error: true },
+            { type: "tool_result", tool_use_id: "r2", content: "ok" },
+        ]);
+    });
+    test("onToolStart fires once per call", async () => {
+        const { isConcurrencySafe, dispatch } = makeHarness(["read"]);
+        const starts = [];
+        const events = [
+            ...toolUse("r1", "read", {}),
+            ...toolUse("w1", "write", {}),
+            { type: "message_stop", stop_reason: "tool_use" },
+        ];
+        await streamingTurn({
+            events: gen(events),
+            isConcurrencySafe,
+            dispatch,
+            onToolStart: (c) => starts.push(c.id),
+        });
+        expect(starts.sort()).toEqual(["r1", "w1"]);
+    });
+});

@@ -1,0 +1,58 @@
+import { errMessage, logger } from "@/shared";
+import { loadEnvFiles } from "./dotenv";
+import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl";
+import { isSlashCommand } from "./slash-commands";
+loadEnvFiles([".env.dev", ".env.local", ".env"]);
+// Phase-3 split (RFC may-22-unified-agent-runtime §3): pure structural
+// refactor with ZERO behavior change for existing CLI users. `index.ts` now
+// owns only the argv-routing short-circuits (`session` subcommand, built-in
+// `/<slash>` commands, top-level `--help`) — the REPL loop, agent assembly,
+// resume state machine and per-turn save plumbing live in `./repl` (delegated
+// via `runRepl()`) and `./session-io`.
+//
+// Earlier history: ADR-0024 (export-gap closure) moved pure-ish CLI helpers
+// to `./internal` so unit tests could import them directly. This phase
+// completes that split by moving the orchestration body itself out of the
+// entrypoint, leaving `index.ts` as the assembly orchestrator only.
+const main = async () => {
+    // Early route: `quanta session …` is fully handled by the subcommand
+    // dispatcher and never touches the agent loop / REPL wiring below.
+    if (process.argv[2] === "session") {
+        const code = await runSessionMain();
+        process.exit(code);
+    }
+    // Tier-2 absorption #2-1: built-in slash commands short-circuit BEFORE any
+    // LLM / session plumbing. The gate matches only `/<letter>...` so legacy
+    // path-mode resume arguments and bare `--flag` invocations still fall
+    // through to the agent / REPL path.
+    const slashTok = process.argv[2];
+    if (slashTok !== undefined && isSlashCommand(slashTok)) {
+        process.exit(await runSlashMain(slashTok));
+    }
+    // MEDIUM-10: top-level `--help` / `-h` BEFORE any LLM/REPL wiring so a help
+    // request never becomes a prompt. Routed only when the help flag appears in
+    // the bare argv (no `session` subcommand involved — handled above).
+    const rawArgs = process.argv.slice(2);
+    if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
+        process.stdout.write(topLevelUsage());
+        process.exit(0);
+    }
+    // Delegate to the REPL/one-shot orchestrator. All agent assembly, resume
+    // state machine, interactive loop and per-turn save plumbing lives there.
+    await runRepl();
+};
+// R-Phase4 P3-1: defense-in-depth handler for promise rejections that escape
+// the agent loop's `try/catch` boundaries (background MCP cleanup, off-loop
+// timers, fire-and-forget logger flushes, etc.). Logs to stderr via the shared
+// logger so the operator sees a single diagnostic line; deliberately does NOT
+// exit — the loop owns process lifetime, and exiting here would lose any
+// trajectory the loop is still finalising. If a rejection actually reaches
+// here it indicates a contract bug somewhere; the log line names it.
+process.on("unhandledRejection", (reason) => {
+    const msg = errMessage(reason);
+    logger.error(`unhandled rejection (defense-in-depth): ${msg}`);
+});
+main().catch((e) => {
+    logger.error(`fatal: ${e.message}`);
+    process.exit(1);
+});

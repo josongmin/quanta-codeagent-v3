@@ -1,0 +1,273 @@
+/**
+ * Bench Python harness e2e — REAL spawn pipeline, stub `python` binary.
+ *
+ * ── Why this sits at L4 (integration), not contract ───────────────────────
+ * The contract tier exercises the REAL `swebench.harness.run_evaluation`
+ * grader inside Docker (heavy, gated, polite-skip). The unit + bench-eval
+ * tiers cover the pure logic and the `spawn`/`probe` injection seam with JS
+ * fakes.
+ *
+ * THIS suite sits between them: it leaves `evaluateWithPythonSwebench`'s
+ * default `defaultSpawn` (= real `Bun.spawn`) in place and substitutes the
+ * `python` interpreter itself with a bash script on `PATH`. The result is a
+ * full FS + child-process + argv + env + report-file pipeline driven by
+ * production code paths — the exact e2e wire the JS-fake tests cannot reach.
+ *
+ * A regression that, e.g., (a) flipped the argv order so `--predictions_path`
+ * was dropped, (b) stopped passing the work dir as cwd, or (c) silently
+ * swallowed harness exit codes WOULD FAIL HERE — and only here, since the
+ * unit-level fake spawn doesn't see real argv reaching a real process.
+ *
+ * ── Stub binary contract ───────────────────────────────────────────────────
+ * The stub bash script handles BOTH probe and run modes the module emits:
+ *
+ *  - `python -c "import swebench"`        → exit 0 (or 1, scripted).
+ *  - `python -m swebench.harness.run_evaluation \
+ *       --predictions_path P --run_id R --instance_ids I … `
+ *       → record every argv element (RS-separated) into `$ARGV_LOG`
+ *         (an env var the test points at a file outside the harness's
+ *         tmp `work` dir, which is `rm -rf`'d immediately after the call),
+ *         then emit a report JSON shaped like the upstream harness
+ *         (`{ "resolved_ids": [...] }`) into the harness's cwd (= `work`),
+ *         and `exit 0` (or scripted code / hang / malformed body).
+ *
+ * The stub is created in a per-test tmpdir, made executable, and the test's
+ * `process.env.PATH` is prepended with that dir so `Bun.spawn(["python", …])`
+ * resolves to it. `process.env.PATH` is restored in `afterEach` so nothing
+ * leaks across tests (and across other suites — bun runs tests in one proc).
+ *
+ * No real Python, no Docker, no network. Cleaned up in `afterEach`.
+ */
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { evaluateWithPythonSwebench } from "../../src/apps/bench/python-swebench";
+const RS = "\x1e";
+const mkInstance = (id, over = {}, opts = {}) => {
+    const base = {
+        id,
+        repoPath: "/tmp/does-not-matter",
+        problemStatement: "fix it",
+        testCmd: "true",
+        ...(opts.noSwebench
+            ? {}
+            : {
+                swebench: { instanceId: id, repo: "demo/demo", baseCommit: "0".repeat(40) },
+            }),
+    };
+    return { ...base, ...over };
+};
+describe("bench python harness e2e — stub `python` binary on PATH", () => {
+    let dir;
+    let argvLog;
+    let savedPath;
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), "pyharness-e2e-"));
+        argvLog = join(dir, "argv.log");
+        savedPath = process.env.PATH;
+        // Prepend our stub dir so `python` (and `python3`) resolve to our script.
+        process.env.PATH = `${dir}:${savedPath ?? ""}`;
+    });
+    afterEach(() => {
+        // Restore PATH BEFORE rm — never leak the stub PATH into other suites.
+        if (savedPath === undefined)
+            delete process.env.PATH;
+        else
+            process.env.PATH = savedPath;
+        delete process.env.QUANTA_HARNESS_ARGV_LOG;
+        delete process.env.QUANTA_HARNESS_REPORT_BODY;
+        delete process.env.QUANTA_HARNESS_SLEEP_S;
+        delete process.env.QUANTA_HARNESS_EXIT;
+        delete process.env.QUANTA_HARNESS_IMPORT_OK;
+        rmSync(dir, { recursive: true, force: true });
+    });
+    /**
+     * Write a `python` shell script to `${dir}/python` (and a `python3` symlink-
+     * by-copy) that:
+     *  - handles `-c "import swebench"` per `QUANTA_HARNESS_IMPORT_OK`
+     *  - handles `-m swebench.harness.run_evaluation ...` by recording argv to
+     *    `$QUANTA_HARNESS_ARGV_LOG` (RS-separated) and writing the JSON in
+     *    `$QUANTA_HARNESS_REPORT_BODY` to `report.json` in cwd, then either
+     *    sleeping (`$QUANTA_HARNESS_SLEEP_S`) or exiting with
+     *    `$QUANTA_HARNESS_EXIT` (default 0).
+     */
+    const writeStub = () => {
+        const stubPath = join(dir, "python");
+        // `exec sleep` PID-replace trick (same as docker-sandbox-e2e): SIGTERM
+        // reaches sleep directly so timeoutMs cancellation is observable.
+        const lines = [
+            "#!/usr/bin/env bash",
+            "set -u",
+            // Probe path: `python -c "import swebench"`.
+            `if [ "$1" = "-c" ]; then`,
+            `  if [ "\${QUANTA_HARNESS_IMPORT_OK:-1}" = "1" ]; then exit 0; else exit 1; fi`,
+            "fi",
+            // Run path: `python -m swebench.harness.run_evaluation ...`.
+            `if [ "$1" = "-m" ] && [ "$2" = "swebench.harness.run_evaluation" ]; then`,
+            `  if [ -n "\${QUANTA_HARNESS_ARGV_LOG:-}" ]; then`,
+            `    printf '%s\\x1e' "$0" >> "$QUANTA_HARNESS_ARGV_LOG"`,
+            `    for arg in "$@"; do printf '%s\\x1e' "$arg" >> "$QUANTA_HARNESS_ARGV_LOG"; done`,
+            "  fi",
+            // Write the report JSON into the harness cwd (= work dir). The body
+            // is ALWAYS set by the test (bash default-value with `{...}` is fragile
+            // — `${VAR:-X}` brace-matching can append a stray `}` when VAR is set),
+            // so we simply require the env var.
+            `  printf '%s' "$QUANTA_HARNESS_REPORT_BODY" > report.json`,
+            `  if [ -n "\${QUANTA_HARNESS_SLEEP_S:-}" ]; then exec sleep "$QUANTA_HARNESS_SLEEP_S"; fi`,
+            `  exit "\${QUANTA_HARNESS_EXIT:-0}"`,
+            "fi",
+            // Anything else (defensive): exit 0.
+            "exit 0",
+        ];
+        writeFileSync(stubPath, lines.join("\n"));
+        chmodSync(stubPath, 0o755);
+        // python3 — same script, copied (PYTHONS = ["python", "python3"]).
+        const stubPath3 = join(dir, "python3");
+        writeFileSync(stubPath3, lines.join("\n"));
+        chmodSync(stubPath3, 0o755);
+    };
+    const readArgv = () => {
+        const raw = readFileSync(argvLog, "utf8");
+        return raw.split(RS).filter((s) => s.length > 0);
+    };
+    // (a) happy path — stub reports the id resolved.
+    test("(a) happy path: stub returns resolved_ids:[id] → resolved:true via real spawn", async () => {
+        writeStub();
+        process.env.QUANTA_HARNESS_ARGV_LOG = argvLog;
+        process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-1"] });
+        const r = await evaluateWithPythonSwebench(mkInstance("case-1"), "diff --git a/x b/x\n--- a/x\n+++ b/x\n");
+        expect(r.resolved).toBe(true);
+        expect(r.log).toContain("case-1");
+        expect(r.log).toContain("exit: 0");
+        expect(r.log).toContain('resolved_ids: ["case-1"]');
+    });
+    // (b) failure path — stub returns empty resolved_ids.
+    test("(b) failure path: stub returns empty resolved_ids → resolved:false", async () => {
+        writeStub();
+        process.env.QUANTA_HARNESS_ARGV_LOG = argvLog;
+        process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: [] });
+        const r = await evaluateWithPythonSwebench(mkInstance("case-2"), "diff --git a/x b/x\n--- a/x\n+++ b/x\n");
+        expect(r.resolved).toBe(false);
+        expect(r.log).toContain("exit: 0");
+        expect(r.log).toContain("resolved_ids: []");
+    });
+    // (c) argv contract — exact argv reaches the real subprocess.
+    test("(c) argv contract: -m swebench.harness.run_evaluation with --predictions_path/--instance_ids/--run_id", async () => {
+        writeStub();
+        process.env.QUANTA_HARNESS_ARGV_LOG = argvLog;
+        process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-c"] });
+        // Inject an explicit HarnessConfig to pin the argv contract independent
+        // of runtime-config defaults (which now flow from env via
+        // resolveHarnessConfig — `cache_level=env clean=false workers=4 namespace=none`
+        // are the SOTA defaults; the OLD `none/True/1` is still reachable via env
+        // override but we don't depend on it here).
+        await evaluateWithPythonSwebench(mkInstance("case-c"), "diff --git a/x b/x\n--- a/x\n+++ b/x\n", {
+            datasetName: "princeton-nlp/SWE-bench_Lite",
+            harnessConfig: {
+                cacheLevel: "env",
+                clean: false,
+                maxWorkers: 4,
+                namespace: "none",
+                forceRebuild: false,
+            },
+        });
+        const argv = readArgv();
+        // argv[0] is the stub binary path ($0). We expect the rest to match the
+        // documented contract exactly.
+        expect(argv[1]).toBe("-m");
+        expect(argv[2]).toBe("swebench.harness.run_evaluation");
+        const i = (flag) => argv.indexOf(flag);
+        expect(i("--predictions_path")).toBeGreaterThan(-1);
+        // The predictions file path must point at a real JSONL produced by the
+        // module (we cannot read it back — harness cwd was rm -rf'd — but the
+        // arg must at minimum end in `predictions.jsonl`).
+        expect(argv[i("--predictions_path") + 1]).toMatch(/predictions\.jsonl$/);
+        expect(i("--run_id")).toBeGreaterThan(-1);
+        expect(argv[i("--run_id") + 1] ?? "").toMatch(/^quanta-case-c-\d+$/);
+        expect(i("--instance_ids")).toBeGreaterThan(-1);
+        expect(argv[i("--instance_ids") + 1]).toBe("case-c");
+        expect(i("--max_workers")).toBeGreaterThan(-1);
+        expect(argv[i("--max_workers") + 1]).toBe("4");
+        expect(i("--cache_level")).toBeGreaterThan(-1);
+        expect(argv[i("--cache_level") + 1]).toBe("env");
+        expect(i("--clean")).toBeGreaterThan(-1);
+        expect(argv[i("--clean") + 1]).toBe("False");
+        expect(i("--namespace")).toBeGreaterThan(-1);
+        expect(argv[i("--namespace") + 1]).toBe("none");
+        // --force_rebuild absent unless explicitly enabled (default off)
+        expect(i("--force_rebuild")).toBe(-1);
+        expect(i("--dataset_name")).toBeGreaterThan(-1);
+        expect(argv[i("--dataset_name") + 1]).toBe("princeton-nlp/SWE-bench_Lite");
+    });
+    // (d) malformed report — never throws; resolved:false with log.
+    test("(d) malformed report.json → resolved:false, never throws (graceful skip)", async () => {
+        writeStub();
+        process.env.QUANTA_HARNESS_ARGV_LOG = argvLog;
+        // Intentionally broken JSON the tolerant reader will skip.
+        process.env.QUANTA_HARNESS_REPORT_BODY = "{not valid json";
+        const r = await evaluateWithPythonSwebench(mkInstance("case-d"), "diff --git a/x b/x\n--- a/x\n+++ b/x\n");
+        expect(r.resolved).toBe(false);
+        // Module's log uses resolved_ids: [] when the only report file is
+        // unparseable — proves tolerance, not crash.
+        expect(r.log).toContain("resolved_ids: []");
+    });
+    // (e) timeout — stub hangs; opts.timeoutMs fires.
+    test("(e) timeout: stub hangs, opts.timeoutMs kills the real child", async () => {
+        writeStub();
+        process.env.QUANTA_HARNESS_ARGV_LOG = argvLog;
+        process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-e"] });
+        // exec sleep 3 — the PID-replace trick means SIGTERM lands on sleep.
+        process.env.QUANTA_HARNESS_SLEEP_S = "3";
+        const start = Date.now();
+        const r = await evaluateWithPythonSwebench(mkInstance("case-e"), "diff --git a/x b/x\n--- a/x\n+++ b/x\n", { timeoutMs: 250 });
+        const elapsed = Date.now() - start;
+        // Killed well before the 3s the stub would otherwise sleep. Even though
+        // the stub already wrote report.json before exec sleep, the timeout MUST
+        // fire to unblock the caller — that is the seam under test.
+        expect(elapsed).toBeLessThan(2500);
+        // Whether `resolved` is true or false is incidental (depends on whether
+        // the stub managed to flush report.json before the kill). The contract
+        // we lock in here is "no hang, no throw, returns a structured result".
+        expect(typeof r.resolved).toBe("boolean");
+        expect(typeof r.log).toBe("string");
+    }, 10000);
+    // (f) probe negative — `import swebench` exits 1 → unavailable path; no
+    //     run-mode invocation happens (proves probe wiring through real spawn).
+    test("(f) probe fails (import swebench exit 1) → unavailable, run-mode never spawned", async () => {
+        writeStub();
+        process.env.QUANTA_HARNESS_ARGV_LOG = argvLog;
+        process.env.QUANTA_HARNESS_IMPORT_OK = "0";
+        const r = await evaluateWithPythonSwebench(mkInstance("case-f"), "diff --git a/x b/x\n--- a/x\n+++ b/x\n");
+        expect(r.resolved).toBe(false);
+        expect(r.log).toContain("unavailable");
+        // The stub records argv ONLY on -m runs. Probe-only calls never write.
+        let probeOnly = true;
+        try {
+            const argv = readArgv();
+            // If any argv was recorded, it must have only come from the probe
+            // (and our stub does NOT log probe). So a non-empty file is a bug.
+            probeOnly = argv.length === 0;
+        }
+        catch {
+            // ENOENT — log never written, which is the expected case.
+        }
+        expect(probeOnly).toBe(true);
+    });
+    // (g) non-swebench instance — short-circuits before any spawn.
+    test("(g) non-swebench instance → resolved:false, harness never invoked", async () => {
+        writeStub();
+        process.env.QUANTA_HARNESS_ARGV_LOG = argvLog;
+        const r = await evaluateWithPythonSwebench(mkInstance("case-g", {}, { noSwebench: true }), "diff --git a/x b/x\n--- a/x\n+++ b/x\n");
+        expect(r.resolved).toBe(false);
+        expect(r.log).toContain("no swebench metadata");
+        let argvWritten = true;
+        try {
+            readArgv();
+        }
+        catch {
+            argvWritten = false;
+        }
+        expect(argvWritten).toBe(false);
+    });
+});

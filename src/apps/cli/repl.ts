@@ -1,4 +1,5 @@
 import { homedir } from "node:os"
+import { emitKeypressEvents } from "node:readline"
 import * as readline from "node:readline/promises"
 import {
   type AgentConfig,
@@ -21,6 +22,7 @@ import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { composeShellObservers } from "@/tool"
 import { loadImageBlock } from "./image-loader"
 import { AbortError, readLine } from "./raw-line-reader"
+import { installStatusBar, type StatusBar } from "./status-bar"
 import {
   argvImages,
   argvPrompt,
@@ -481,25 +483,111 @@ export const runRepl = async (): Promise<void> => {
     onShellEvent,
     workMetricsSink,
   }
-  const session = (messages: Message[]): Promise<AgentOutcome> =>
-    runAgent(assembleConfig(messages, sessionDeps))
+  /** Install a stdin keypress listener for the duration of one turn.
+   *  Returns a `dispose()` that the caller MUST invoke (try/finally) to
+   *  restore the previous terminal state. Two cancellation gestures:
+   *
+   *    - **Ctrl+C** ⇒ hard exit (outer `abort.abort()`).
+   *    - **Esc (twice within 2 s)** ⇒ soft cancel of the current turn
+   *      via `turnAbort.abort()`. The first Esc paints a hint; the
+   *      second within the window triggers the abort.
+   *
+   *  Raw mode is REQUIRED for keypress events to fire while the LLM
+   *  streams (terminal would otherwise line-buffer input). On non-TTY
+   *  stdin we no-op — there's no interactive cancellation to wire up. */
+  const installTurnCancel = (
+    turnAbort: AbortController,
+    status: StatusBar,
+  ): { dispose: () => void } => {
+    const stdin = process.stdin
+    if (stdin.isTTY !== true) return { dispose: (): void => undefined }
+    let escCount = 0
+    let lastEsc = 0
+    const ESC_WINDOW_MS = 2000
+    type Key = { name?: string; ctrl?: boolean }
+    const onKey = (_str: string | undefined, key: Key | undefined): void => {
+      if (key === undefined) return
+      if (key.ctrl === true && key.name === "c") {
+        status.transient("⛔ interrupted — exiting…", 1500)
+        abort.abort()
+        return
+      }
+      if (key.name !== "escape") {
+        escCount = 0
+        return
+      }
+      const now = Date.now()
+      if (escCount === 1 && now - lastEsc < ESC_WINDOW_MS) {
+        status.transient("⛔ turn cancelled", 1500)
+        turnAbort.abort()
+        escCount = 0
+        return
+      }
+      escCount = 1
+      lastEsc = now
+      status.transient("Press Esc again within 2s to cancel · Ctrl+C to exit", ESC_WINDOW_MS)
+    }
+    emitKeypressEvents(stdin)
+    const wasRaw = stdin.isRaw ?? false
+    stdin.setRawMode(true)
+    stdin.resume()
+    stdin.on("keypress", onKey)
+    return {
+      dispose: (): void => {
+        stdin.removeListener("keypress", onKey)
+        stdin.setRawMode(wasRaw)
+        stdin.pause()
+      },
+    }
+  }
+
+  // Bottom status bar — vim-style. Painted via scroll-region so it
+  // never gets shoved off-screen by LLM stream output. Default text
+  // shows provider/model/cwd/mode + the cancellation cheatsheet.
+  const home = homedir()
+  const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
+  const statusDefault = `${provider} · ${model} · ${mode} · ${shortCwd}    Esc Esc · cancel    Ctrl+C · exit`
+  const statusBar = installStatusBar(statusDefault)
 
   const turn = async (text: string): Promise<void> => {
-    // ADR-0083: attach seed images to the FIRST turn only, then drain so
-    // subsequent REPL lines are text-only (byte-identical when no --image).
-    const content: ContentBlock[] = [{ type: "text", text }, ...pendingImages]
-    pendingImages = []
-    history.push({ role: "user", content })
-    const outcome = await session(history)
-    history = outcome.messages
-    await persistTurn({ state, idMeta, sessionId, messages: history, outcome })
-    if (metrics) {
-      const snap = metrics.snapshot()
-      slog.info("metrics.snapshot", { snapshot: snap })
-      // ADR-0085: render the cost & cache dashboard to stderr after each turn
-      // when metrics are enabled — keeps the structured log AND gives the
-      // operator a human-readable cost/latency/cache summary inline.
-      process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
+    // Per-turn AbortController + composite signal: the LLM stream sees
+    // an `AbortSignal.any([outerAbort, turnAbort])`, so EITHER a hard
+    // exit (Ctrl+C / SIGINT) OR a soft per-turn cancel (Esc Esc) tears
+    // it down without poisoning subsequent turns.
+    const turnAbort = new AbortController()
+    const turnSignal = AbortSignal.any([abort.signal, turnAbort.signal])
+    const cancel = installTurnCancel(turnAbort, statusBar)
+
+    try {
+      // ADR-0083: attach seed images to the FIRST turn only, then drain so
+      // subsequent REPL lines are text-only (byte-identical when no --image).
+      const content: ContentBlock[] = [{ type: "text", text }, ...pendingImages]
+      pendingImages = []
+      history.push({ role: "user", content })
+      const turnDeps = { ...sessionDeps, signal: turnSignal }
+      const outcome = await runAgent(assembleConfig(history, turnDeps))
+      history = outcome.messages
+      await persistTurn({ state, idMeta, sessionId, messages: history, outcome })
+      if (metrics) {
+        const snap = metrics.snapshot()
+        slog.info("metrics.snapshot", { snapshot: snap })
+        // ADR-0085: render the cost & cache dashboard to stderr after each turn
+        // when metrics are enabled — keeps the structured log AND gives the
+        // operator a human-readable cost/latency/cache summary inline.
+        process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
+      }
+    } catch (e) {
+      // A turn-scoped abort is the user's intent; swallow the error and
+      // hand control back to the prompt. The outer abort still propagates
+      // (the next turn will see `abort.signal.aborted === true` and skip).
+      if (turnAbort.signal.aborted && !abort.signal.aborted) return
+      // Any other turn-level error MUST NOT kill the REPL — surface it
+      // inline + on the status bar, then return so the next prompt fires.
+      const msg = e instanceof Error ? e.message : String(e)
+      process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
+      statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
+    } finally {
+      cancel.dispose()
     }
   }
 
@@ -507,16 +595,15 @@ export const runRepl = async (): Promise<void> => {
     if (argPrompt) {
       await turn(argPrompt)
     } else {
+      // Status bar already installed above; just ensure teardown on exit.
+      process.once("exit", () => statusBar.teardown())
       const skillsCb = buildSkillsCallback(skillsConfig)
-      // Codex-style composer meta line: provider · model · ~/cwd.
-      const home = homedir()
-      const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
-      const meta = `${provider} · ${model} · ${shortCwd}`
+      // Composer no longer carries a meta row — that info lives on the
+      // bottom status bar now, so the input box stays a single line.
       await runReplLoopRaw({
         signal: abort.signal,
         turn,
         ...(skillsCb !== undefined ? { slashCtx: { skills: skillsCb } } : {}),
-        meta,
       })
     }
   } finally {

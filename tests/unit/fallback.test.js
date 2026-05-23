@@ -1,0 +1,218 @@
+import { describe, expect, test } from "bun:test";
+import { assembleFromEvents, FallbackLLM, isFallbackTrigger } from "@/llm";
+import { LLMError } from "@/shared";
+class ScriptedLLM {
+    step;
+    calls = 0;
+    constructor(step) {
+        this.step = step;
+    }
+    async *stream() {
+        this.calls += 1;
+        if (this.step.kind === "ok") {
+            for (const ev of this.step.events)
+                yield ev;
+            return;
+        }
+        if (this.step.kind === "yieldThenThrow") {
+            for (const ev of this.step.events)
+                yield ev;
+            throw this.step.error;
+        }
+        throw this.step.error;
+    }
+}
+// S1: typed LLMError. Tests construct errors with their classification
+// explicit via `kind`; the old "message-string contains '529'" path was the
+// regex-routing surface we structurally removed.
+const overload = () => new LLMError("overloaded_error", { kind: "overloaded", statusCode: 529 });
+const status529 = () => new LLMError("HTTP 529", { kind: "overloaded", statusCode: 529 });
+const collect = async (it) => {
+    const out = [];
+    for await (const ev of it)
+        out.push(ev);
+    return out;
+};
+const text = (t) => ({ type: "text_delta", delta: t });
+const stop = () => ({ type: "message_stop", stop_reason: "end_turn" });
+describe("isFallbackTrigger classification", () => {
+    test("trigger: structured `overloaded` / `server_error` / `network` kinds", () => {
+        expect(isFallbackTrigger(status529())).toBe(true);
+        expect(isFallbackTrigger(new LLMError("503", { kind: "server_error" }))).toBe(true);
+        expect(isFallbackTrigger(new LLMError("ECONNRESET", { kind: "network" }))).toBe(true);
+        // fromSdkError classifies real provider shapes:
+        expect(isFallbackTrigger(LLMError.fromSdkError("anthropic", { status: 529 }))).toBe(true);
+        expect(isFallbackTrigger(LLMError.fromSdkError("openai", { status: 502 }))).toBe(true);
+    });
+    test("non-trigger: auth/client/shape errors are rethrown immediately", () => {
+        expect(isFallbackTrigger(new LLMError("auth", { kind: "auth" }))).toBe(false);
+        expect(isFallbackTrigger(new LLMError("bad request", { kind: "bad_request" }))).toBe(false);
+        expect(isFallbackTrigger(new LLMError("not found", { kind: "not_found" }))).toBe(false);
+        expect(isFallbackTrigger(new LLMError("stream corrupt", { kind: "stream_corrupt" }))).toBe(false);
+        // fromSdkError on 401:
+        expect(isFallbackTrigger(LLMError.fromSdkError("openai", { status: 401 }))).toBe(false);
+    });
+    test("non-trigger: rate_limit is same-turn retry, NOT a provider swap", () => {
+        expect(isFallbackTrigger(new LLMError("429", { kind: "rate_limit" }))).toBe(false);
+    });
+    test("non-LLMError is never a trigger", () => {
+        expect(isFallbackTrigger(new Error("529 overloaded"))).toBe(false);
+        expect(isFallbackTrigger("529")).toBe(false);
+    });
+});
+describe("FallbackLLM", () => {
+    test("primary succeeds → no fallback used, no stream_reset", async () => {
+        const primary = new ScriptedLLM({ kind: "ok", events: [text("hi"), stop()] });
+        const fb = new ScriptedLLM({ kind: "ok", events: [text("nope")] });
+        const llm = new FallbackLLM({ providers: [primary, fb] });
+        const events = await collect(llm.stream({ messages: [], tools: [] }));
+        expect(events).toEqual([text("hi"), stop()]);
+        expect(primary.calls).toBe(1);
+        expect(fb.calls).toBe(0);
+    });
+    test("pre-yield swap is transparent (NO stream_reset)", async () => {
+        const primary = new ScriptedLLM({ kind: "throw", error: status529() });
+        const fb = new ScriptedLLM({ kind: "ok", events: [text("from-fb"), stop()] });
+        const llm = new FallbackLLM({ providers: [primary, fb] });
+        const events = await collect(llm.stream({ messages: [], tools: [] }));
+        expect(events).toEqual([text("from-fb"), stop()]);
+        expect(events.some((e) => e.type === "stream_reset")).toBe(false);
+        expect(primary.calls).toBe(1);
+        expect(fb.calls).toBe(1);
+        // assembled message is just the fallback content
+        expect(assembleFromEvents(events).message).toEqual({
+            role: "assistant",
+            content: [{ type: "text", text: "from-fb", phase: "final_answer" }],
+        });
+    });
+    test("post-yield swap emits stream_reset then fallback content; assemble keeps only fallback", async () => {
+        const primary = new ScriptedLLM({
+            kind: "yieldThenThrow",
+            events: [text("DEAD-partial")],
+            error: overload(),
+        });
+        const fb = new ScriptedLLM({
+            kind: "ok",
+            events: [text("clean "), text("fallback"), stop()],
+        });
+        const llm = new FallbackLLM({ providers: [primary, fb] });
+        const events = await collect(llm.stream({ messages: [], tools: [] }));
+        expect(events).toEqual([
+            text("DEAD-partial"),
+            { type: "stream_reset" },
+            text("clean "),
+            text("fallback"),
+            stop(),
+        ]);
+        // assembleFromEvents must drop the dead partial entirely.
+        const { message } = assembleFromEvents(events);
+        expect(message).toEqual({
+            role: "assistant",
+            content: [{ type: "text", text: "clean fallback", phase: "final_answer" }],
+        });
+    });
+    test("only one stream_reset is emitted across multiple post-yield swaps", async () => {
+        const p1 = new ScriptedLLM({
+            kind: "yieldThenThrow",
+            events: [text("dead1")],
+            error: overload(),
+        });
+        const p2 = new ScriptedLLM({ kind: "throw", error: status529() });
+        const p3 = new ScriptedLLM({ kind: "ok", events: [text("final"), stop()] });
+        const llm = new FallbackLLM({ providers: [p1, p2, p3] });
+        const events = await collect(llm.stream({ messages: [], tools: [] }));
+        expect(events).toEqual([text("dead1"), { type: "stream_reset" }, text("final"), stop()]);
+        expect(events.filter((e) => e.type === "stream_reset")).toHaveLength(1);
+        expect(assembleFromEvents(events).message.content).toEqual([
+            { type: "text", text: "final", phase: "final_answer" },
+        ]);
+    });
+    test("all providers fail with trigger → rethrows the LAST error", async () => {
+        const lastErr = new LLMError("529 overloaded (last)");
+        const p1 = new ScriptedLLM({ kind: "throw", error: overload() });
+        const p2 = new ScriptedLLM({ kind: "throw", error: lastErr });
+        const llm = new FallbackLLM({ providers: [p1, p2] });
+        await expect(collect(llm.stream({ messages: [], tools: [] }))).rejects.toBe(lastErr);
+        expect(p1.calls).toBe(1);
+        expect(p2.calls).toBe(1);
+    });
+    test("non-fallback error → rethrown immediately, no further provider tried", async () => {
+        const p1 = new ScriptedLLM({ kind: "throw", error: new LLMError("401 invalid api key") });
+        const p2 = new ScriptedLLM({ kind: "ok", events: [text("never")] });
+        const llm = new FallbackLLM({ providers: [p1, p2] });
+        await expect(collect(llm.stream({ messages: [], tools: [] }))).rejects.toThrow("401");
+        expect(p1.calls).toBe(1);
+        expect(p2.calls).toBe(0);
+    });
+    test("mid-stream non-fallback error → rethrown, no stream_reset / no swap", async () => {
+        const p1 = new ScriptedLLM({
+            kind: "yieldThenThrow",
+            events: [text("partial")],
+            error: new LLMError("malformed response"),
+        });
+        const p2 = new ScriptedLLM({ kind: "ok", events: [text("never")] });
+        const llm = new FallbackLLM({ providers: [p1, p2] });
+        await expect(collect(llm.stream({ messages: [], tools: [] }))).rejects.toThrow("malformed");
+        expect(p2.calls).toBe(0);
+    });
+    test("abort before primary attempt → throws, nothing streamed", async () => {
+        const ac = new AbortController();
+        ac.abort();
+        const p1 = new ScriptedLLM({ kind: "ok", events: [text("x")] });
+        const llm = new FallbackLLM({ providers: [p1], signal: ac.signal });
+        await expect(collect(llm.stream({ messages: [], tools: [] }))).rejects.toThrow("aborted");
+        expect(p1.calls).toBe(0);
+    });
+    test("abort respected before the fallback attempt", async () => {
+        const ac = new AbortController();
+        const p1 = new ScriptedLLM({ kind: "throw", error: status529() });
+        const p2 = new ScriptedLLM({ kind: "ok", events: [text("never")] });
+        // Custom trigger that aborts as a side effect, simulating user interrupt
+        // between the primary failure and the fallback attempt.
+        const llm = new FallbackLLM({
+            providers: [p1, p2],
+            signal: ac.signal,
+            isFallbackTrigger: (e) => {
+                ac.abort();
+                return isFallbackTrigger(e);
+            },
+        });
+        await expect(collect(llm.stream({ messages: [], tools: [] }))).rejects.toThrow("aborted");
+        expect(p1.calls).toBe(1);
+        expect(p2.calls).toBe(0);
+    });
+    test("empty provider list is rejected at construction", () => {
+        expect(() => new FallbackLLM({ providers: [] })).toThrow("at least one provider");
+    });
+    test("custom isFallbackTrigger override is honored", async () => {
+        const sentinel = new LLMError("teapot-418");
+        const p1 = new ScriptedLLM({ kind: "throw", error: sentinel });
+        const p2 = new ScriptedLLM({ kind: "ok", events: [text("ok"), stop()] });
+        const llm = new FallbackLLM({
+            providers: [p1, p2],
+            isFallbackTrigger: (e) => e === sentinel,
+        });
+        const events = await collect(llm.stream({ messages: [], tools: [] }));
+        expect(events).toEqual([text("ok"), stop()]);
+        expect(p2.calls).toBe(1);
+    });
+});
+describe("FallbackLLM — LLMPort.model", () => {
+    class ModeledLLM {
+        model;
+        constructor(model) {
+            this.model = model;
+        }
+        async *stream() { }
+    }
+    test(".model returns the PRIMARY (index 0) provider's model", () => {
+        const llm = new FallbackLLM({
+            providers: [new ModeledLLM("claude-opus-4-7"), new ModeledLLM("gpt-4o")],
+        });
+        expect(llm.model).toBe("claude-opus-4-7");
+    });
+    test(".model is undefined when the primary omits model", () => {
+        const llm = new FallbackLLM({ providers: [new ScriptedLLM({ kind: "ok", events: [] })] });
+        expect(llm.model).toBeUndefined();
+    });
+});

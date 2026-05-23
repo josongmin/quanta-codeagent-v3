@@ -64,6 +64,23 @@ export const systemSkillsDir = (): string => {
  */
 export const discoverSystemSkills = async (): Promise<Skill[]> => discoverSkills(systemSkillsDir())
 
+// CTK git skills cluster (ADR-0102 absorption batch — Track 3 router).
+// Each per-skill index.ts mirrors the progress-audit/localize-fault pattern:
+// NAME constant + Trigger interface + triggerXxx() + findXxxSkill().
+export type { BabysitTrigger } from "./babysit"
+export { BABYSIT_SKILL_NAME, findBabysitSkill, triggerBabysit } from "./babysit"
+export type { FixMergeConflictsTrigger } from "./fix-merge-conflicts"
+export {
+  FIX_MERGE_CONFLICTS_SKILL_NAME,
+  findFixMergeConflictsSkill,
+  triggerFixMergeConflicts,
+} from "./fix-merge-conflicts"
+export type { GetPrCommentsTrigger } from "./get-pr-comments"
+export {
+  findGetPrCommentsSkill,
+  GET_PR_COMMENTS_SKILL_NAME,
+  triggerGetPrComments,
+} from "./get-pr-comments"
 export type { LocalizeFaultTrigger } from "./localize-fault"
 // Per-skill wiring seams. Re-exported here so external callers (a slash-
 // router, a planner UI, ADR-0045 §wiring) import from
@@ -73,9 +90,35 @@ export {
   LOCALIZE_FAULT_SKILL_NAME,
   triggerLocalizeFault,
 } from "./localize-fault"
+export type { LoopOnCiTrigger } from "./loop-on-ci"
+export { findLoopOnCiSkill, LOOP_ON_CI_SKILL_NAME, triggerLoopOnCi } from "./loop-on-ci"
+export type { MakePrEasyToReviewTrigger } from "./make-pr-easy-to-review"
+export {
+  findMakePrEasyToReviewSkill,
+  MAKE_PR_EASY_TO_REVIEW_SKILL_NAME,
+  triggerMakePrEasyToReview,
+} from "./make-pr-easy-to-review"
+export type { NewBranchAndPrTrigger } from "./new-branch-and-pr"
+export {
+  findNewBranchAndPrSkill,
+  NEW_BRANCH_AND_PR_SKILL_NAME,
+  triggerNewBranchAndPr,
+} from "./new-branch-and-pr"
+export type { PrReviewCanvasTrigger } from "./pr-review-canvas"
+export {
+  findPrReviewCanvasSkill,
+  PR_REVIEW_CANVAS_SKILL_NAME,
+  triggerPrReviewCanvas,
+} from "./pr-review-canvas"
 export type { ProgressAuditTrigger } from "./progress-audit"
 export {
   findProgressAuditSkill,
   PROGRESS_AUDIT_SKILL_NAME,
   triggerProgressAudit,
 } from "./progress-audit"
+export type { ReviewAndShipTrigger } from "./review-and-ship"
+export {
+  findReviewAndShipSkill,
+  REVIEW_AND_SHIP_SKILL_NAME,
+  triggerReviewAndShip,
+} from "./review-and-ship"

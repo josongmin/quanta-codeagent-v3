@@ -759,6 +759,158 @@ codex-rs는 `handle_responses` → handler 체인 (FACT, OTel). 실측 레코드
 
 ---
 
+## V. Codex CLI 특화 발견 (★ live `~/.codex/` 직접 파싱, 2026-05-22)
+
+§H-§U는 주로 codex-rs/Desktop 분석이고 이 절은 **이 머신의 실제 Codex CLI 설치본**에서 발굴. claude.md §7과 동일 깊이의 CLI-side artifact 인벤토리.
+
+### V.1 `~/.codex/config.toml` (실측 verbatim) — CLI 설정 SSOT
+```toml
+model = "gpt-5.4-mini"
+model_reasoning_effort = "xhigh"          # ★ low/medium/high 외 "xhigh" 존재 (docs 미언급)
+approvals_reviewer = "user"
+plan_mode_reasoning_effort = "high"       # ★ Plan 모드 reasoning effort 따로 설정 가능
+personality = "pragmatic"
+
+[marketplaces.openai-bundled]              # ★ marketplace 시스템
+last_updated = "2026-05-21T12:36:00Z"
+source_type = "local"
+source = "/Users/songmin/.codex/.tmp/bundled-marketplaces/openai-bundled"
+
+[marketplaces.openai-primary-runtime]
+source = "~/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+
+[projects."/Users/songmin/Documents/.../semantica-codegraph-v2"]   # ★ per-project trust
+trust_level = "trusted"
+[projects."/Users/songmin"]
+trust_level = "untrusted"
+
+[notice]
+"hide_gpt-5.1-codex-max_migration_prompt" = true
+hide_full_access_warning = true
+hide_rate_limit_model_nudge = true
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4                              # ★ TUI 모델 사용가능 안내 표시 N회 카운터
+
+[features]                                  # feature flags
+```
+
+★ 발견:
+- **`xhigh`** reasoning effort 등급 (docs `low/medium/high` 3종만 언급, 실제로는 4종)
+- **`plan_mode_reasoning_effort`** — Plan vs 기본 모드 effort 분리 (v3 미보유)
+- **`[projects.<absPath>] trust_level`** — 디렉토리 기반 신뢰 등록부 (trusted/untrusted)
+- **`[marketplaces.*]`** — plugin/skill 외부 소스 시스템 (bundled vs primary-runtime)
+- **`[notice] hide_*`** — UX prompt suppression flags
+
+### V.2 `~/.codex/` 디렉토리 풀 인벤토리 (실측)
+```
+state_5.sqlite              124MB   ← agent_jobs + agent_job_items + thread_goals
+                                       + thread_dynamic_tools + stage1_outputs
+logs_2.sqlite               16.7GB  ← observability DB (★ WAL 14.5GB 별도)
+session_index.jsonl         939KB   ← 세션 빠른 검색용
+history.jsonl               669KB   ← 사용자 입력 히스토리
+models_cache.json           231KB   ← {fetched_at, etag, client_version, models[7]}
+                                       서버푸시 model 카탈로그 + ETag 캐시
+.codex-global-state.json    126KB   ← 글로벌 UI 상태
+memories/                           ← long-term memory store
+  ├ MEMORY.md                       — 메인 메모리 인덱스 (Claude CLAUDE.md 등가)
+  ├ raw_memories.md                 — 원시 memory log
+  ├ memory_summary.md
+  ├ rollout_summaries/              — 세션별 요약
+  ├ extensions/
+  └ skills/                         — skill-bound memory
+skills/                             ← 실측 5개 (briefing/chronicle/rr/rr2/ss)
+rules/default.rules                 ← 1060 prefix_rule (default-deny)
+plugins/                            ← plugin 설치본
+shell_snapshots/                    ← ★ 14+개 셸 환경 스냅샷 (.sh)
+  019e4f58-d16b-….1779447681388272000.sh   (sessionId.nanos)
+                                    → fork/resume 시 cwd/env/aliases 복원용
+automations/                        ← heartbeat/cron (state_5.sqlite agent_jobs와 짝)
+browser/                            ← browser-use 설정
+computer-use/Codex Computer Use.app ← ★ Computer Use가 별도 Mac app (Mach-O 분리)
+pets/                               ← Hardware Buddy BLE pet
+transcription-history.jsonl         ← ★ voice 입력 히스토리 (Codex Voice)
+node_repl/                          ← Node REPL 실행 기록
+sqlite/                             ← 별도 sqlite (자동화 separate?)
+vendor_imports/                     ← 외부 의존성 import
+log/                                ← 일반 로그
+cache/                              ← 임시 캐시
+.tmp/                               ← bundled-marketplaces + 임시
+```
+
+### V.3 SKILL.md frontmatter 실측 (claude.md §7.13 대응, Codex 버전)
+실제 `~/.codex/skills/ss/SKILL.md` verbatim:
+```yaml
+---
+name: ss
+description: Strict Semantica execution skill for `/ss [task]`. Re-read repo
+  agent rules and Codex rules first, drive the task step by step to completion,
+  track `prev / curr / next / visited`, batch verification late, forbid
+  heuristics and fallbacks, and report both fine-grained code progress and
+  separate closeout-gate progress on every handoff.
+argument-hint: "[task]"                   # ★ slash 인자 힌트 (CC에 없음)
+user-invocable: true                       # ★ /ss 직접 호출 가능
+allowed-tools:                             # ★ per-skill 도구 화이트리스트
+  - Read
+  - Grep
+---
+```
+실측 5 skill: `briefing` (세션 요약/CTO report) · `chronicle` (★ 화면 시청 + 수시간 history) · `rr` (review) · `rr2` (review-and-repair P0-P1) · `ss` (strict execution)
+
+★ **chronicle skill** = "Allows you to view the user's **screen** as well as several **hours of history**" — Codex가 화면 녹화 + agent 노출. claude.md `chrome-in-chrome` skill의 카운터파트.
+
+### V.4 `state_5.sqlite` 테이블 (claude.md §7.10 hard_deny 대응, Codex 버전)
+```
+agent_jobs / agent_job_items     ← automation/cron jobs (heartbeat/cron)
+thread_goals                     ← thread별 사용자 목표 추적
+thread_dynamic_tools             ← thread별 동적 도구 (marketplace 흡수)
+stage1_outputs                   ← stage1 처리 결과 (compaction 전?)
+_sqlx_migrations                 ← Rust sqlx migration
+```
+★ `thread_goals`/`thread_dynamic_tools`는 codex.md §H에 미언급 — **per-thread state 정밀**.
+
+### V.5 `models_cache.json` ETag 시스템
+```jsonc
+{
+  "fetched_at": "<ts>",
+  "etag": "<server etag>",        // 서버가 model 카탈로그 변경 시 ETag로 invalidation
+  "client_version": "<ver>",
+  "models": [ /* 7 entries */ ]   // gpt-5.4 / gpt-5.4-mini / gpt-5-codex / 등
+}
+```
+→ claude.md `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` 환경변수와 대조: **Codex는 ETag로 서버푸시 카탈로그**, Claude는 환경변수 (서버에서 model_id 해석).
+
+### V.6 `transcription-history.jsonl` — Voice 입력 (★ 발견)
+실측 2,346 bytes — 사용자가 음성으로 입력한 텍스트 history. **Codex Voice 활성 흔적**. CLI도 voice 입력 지원 (codex-feature-catalog #1 "voice" 항목 확인).
+
+### V.7 shell_snapshots/ — 셸 환경 스냅샷 (★ 핵심 발견)
+**14+개 `.sh` 파일, 명명 = `{sessionId}.{nanos}.sh`**. fork/resume/체크포인트 시점 cwd/env/aliases/PATH/PS1 스냅샷. → claude.md `worktree handoff` (§7.14)의 셸 버전. **각 세션의 정확한 실행 환경을 재현 가능**.
+
+### V.8 `[features]` flag table (config.toml)
+실측은 비어있으나 섹션은 존재 — opt-in feature toggle용 (Anthropic `anthropic-beta` 헤더의 CLI 측 등가).
+
+### V.9 v3 흡수 갭 (CLI-side 신규)
+| Codex CLI 기능 | v3 상태 |
+|---|---|
+| **xhigh reasoning effort** | v3 effort 3종 only (low/medium/high) — 흡수 가능 |
+| **plan_mode_reasoning_effort 분리** | v3는 mode별 effort 통합 — 분리 흡수 가치 |
+| **per-project trust_level** | v3 permission stack(ADR-0046) per-host에 가까움 — 디렉토리 기반은 별개 |
+| **marketplace 시스템** | v3 skill/plugin 로컬만 — 외부 마켓 미보유 (의도적 미흡수?) |
+| **shell_snapshots/** | v3 미보유 — fork/resume 환경 복원 갭 |
+| **transcription-history (voice)** | v3 미보유 — voice 입력 갭 (Phase 2+) |
+| **models_cache.json ETag** | v3 model_id 하드코딩 — 서버푸시 카탈로그 갭 |
+| **thread_goals / thread_dynamic_tools 테이블** | v3는 session 단위 — per-thread 정밀도 갭 |
+| **[notice] UX suppression** | v3는 stderr 1회 warn만 — 사용자 선호 저장 갭 |
+
+### V.10 기깔나는 CLI-only 기능 Top 5
+1. **shell_snapshots/** — fork/resume 시 정확한 셸 환경 복원 (cwd/env/aliases). 다른 시스템에 없음.
+2. **per-project trust_level in config.toml** — 디렉토리 기반 trust scope, 매번 묻지 않음.
+3. **plan_mode_reasoning_effort 분리** — Plan 모드는 reasoning 더, 실행은 빠르게.
+4. **chronicle skill (화면 시청 + 수시간 history)** — 사용자 모호 발화 해소용.
+5. **marketplace 시스템 + thread_dynamic_tools 테이블** — 외부 도구를 thread 단위로 동적 등재.
+
+---
+
 ## 정정 로그 (forensic docs → live 실측)
 - `sandbox_policy`: string → **`{type:…}` 객체**
 - `function_call_output`: `{call_id,status,content}` → **`{call_id,output}`**
