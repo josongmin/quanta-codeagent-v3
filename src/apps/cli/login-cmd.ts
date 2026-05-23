@@ -209,11 +209,18 @@ export const buildLoginCmd = (deps: LoginDeps = {}): SlashCommand => ({
 
     ctx.out(renderFlowStart(cfg))
 
+    // SIGINT escape hatch: the browser flow otherwise blocks for up to 10 min
+    // and the REPL's interrupt handler can't reach inside the await. A local
+    // controller wired to a SIGINT handler lets Ctrl+C unstick the flow.
+    const ac = new AbortController()
+    const sigintHandler = (): void => ac.abort()
+    process.once("SIGINT", sigintHandler)
     try {
       const flowOpts = {
         cfg,
         ...(deps.opener !== undefined ? { opener: deps.opener } : {}),
         ...(deps.timeoutMs !== undefined ? { timeoutMs: deps.timeoutMs } : {}),
+        signal: ac.signal,
       }
       const flow = await runBrowserFlow(flowOpts)
       ctx.out(`${dim("→ exchanging authorization code for tokens…")}\n`)
@@ -249,6 +256,8 @@ export const buildLoginCmd = (deps: LoginDeps = {}): SlashCommand => ({
     } catch (e) {
       ctx.err(buildErrorRender(e))
       return 1
+    } finally {
+      process.removeListener("SIGINT", sigintHandler)
     }
   },
 })

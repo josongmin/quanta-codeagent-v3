@@ -1,0 +1,29 @@
+{
+  "runId": "matrix-skills-1779543015139",
+  "pricingVersion": "pricing.v2",
+  "snapshot": {
+    "counters": {
+      "instances": 2,
+      "degraded": 0
+    },
+    "gauges": {},
+    "timers": {
+      "turns": {
+        "count": 2,
+        "min": 0,
+        "max": 0,
+        "mean": 0,
+        "p50": 0,
+        "p95": 0
+      },
+      "durationMs": {
+        "count": 2,
+        "min": 2389,
+        "max": 4589,
+        "mean": 3489,
+        "p50": 2389,
+        "p95": 4589
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "runId": "matrix-subagent-1779542933775",
+  "pricingVersion": "pricing.v2",
+  "snapshot": {
+    "counters": {
+      "instances": 2,
+      "degraded": 0
+    },
+    "gauges": {},
+    "timers": {
+      "turns": {
+        "count": 2,
+        "min": 0,
+        "max": 0,
+        "mean": 0,
+        "p50": 0,
+        "p95": 0
+      },
+      "durationMs": {
+        "count": 2,
+        "min": 1422,
+        "max": 5400,
+        "mean": 3411,
+        "p50": 1422,
+        "p95": 5400
+      }
+    }
+  }
+}

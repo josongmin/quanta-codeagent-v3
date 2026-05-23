@@ -104,6 +104,9 @@ export interface RunBrowserFlowOptions {
   readonly opener?: (url: string) => void
   /** Override the timeout (default 10 min). */
   readonly timeoutMs?: number
+  /** Abort signal — when aborted, rejects the in-flight wait with a
+   *  `user_cancel` BrowserFlowError so callers can unstick a hung login. */
+  readonly signal?: AbortSignal
 }
 
 interface PendingState {
@@ -251,11 +254,30 @@ export const runBrowserFlow = async (
     )
   })
 
+  let abortListener: (() => void) | null = null
+  const abortPromise = new Promise<never>((_, reject) => {
+    const sig = opts.signal
+    if (sig === undefined) return
+    if (sig.aborted) {
+      reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
+      return
+    }
+    abortListener = () =>
+      reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
+    sig.addEventListener("abort", abortListener, { once: true })
+  })
+  abortPromise.catch((_unhandled: unknown) => {
+    /* see codePromise comment — unhandled-rejection suppressant only. */
+  })
+
   try {
-    const code = await Promise.race([codePromise, timeoutPromise])
+    const code = await Promise.race([codePromise, timeoutPromise, abortPromise])
     return { code, verifier, redirectUri }
   } finally {
     if (timer !== null) clearTimeout(timer)
+    if (abortListener !== null && opts.signal !== undefined) {
+      opts.signal.removeEventListener("abort", abortListener)
+    }
     server.close()
   }
 }

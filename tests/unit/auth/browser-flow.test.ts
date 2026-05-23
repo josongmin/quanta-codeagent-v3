@@ -118,6 +118,32 @@ describe("runBrowserFlow", () => {
     const result = await flow
     expect(result).toMatchObject({ name: "BrowserFlowError", reason: "timeout" })
   })
+
+  test("aborts immediately when caller signal fires", async () => {
+    const ac = new AbortController()
+    const flow = runBrowserFlow({
+      cfg,
+      opener: captureOpener,
+      timeoutMs: 60000,
+      signal: ac.signal,
+    }).catch((e: Error) => e)
+    await new Promise((r) => setTimeout(r, 10))
+    ac.abort()
+    const result = await flow
+    expect(result).toMatchObject({ name: "BrowserFlowError", reason: "user_cancel" })
+  })
+
+  test("rejects synchronously when signal is already aborted", async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const result = await runBrowserFlow({
+      cfg,
+      opener: captureOpener,
+      timeoutMs: 60000,
+      signal: ac.signal,
+    }).catch((e: Error) => e)
+    expect(result).toMatchObject({ name: "BrowserFlowError", reason: "user_cancel" })
+  })
 })
 
 describe("runBrowserFlow port handling", () => {

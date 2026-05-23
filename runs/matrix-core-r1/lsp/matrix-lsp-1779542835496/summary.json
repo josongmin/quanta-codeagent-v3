@@ -1,0 +1,22 @@
+{
+  "runId": "matrix-lsp-1779542835496",
+  "resolved": 0,
+  "total": 2,
+  "degraded": 0,
+  "instances": [
+    {
+      "id": "psf__requests-5414",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 0,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/matrix-core-r1/lsp/matrix-lsp-1779542835496/psf__requests-5414.0.patch"
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 0,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/matrix-core-r1/lsp/matrix-lsp-1779542835496/sympy__sympy-16886.0.patch"
+    }
+  ]
+}

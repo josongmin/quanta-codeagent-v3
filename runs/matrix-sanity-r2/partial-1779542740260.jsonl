@@ -1,0 +1,2 @@
+{"condition":"all","pickId":"psf__requests-5414","verdict":"fail","turns":0,"tokensIn":0,"tokensOut":0,"cacheRead":0,"wallMs":546,"costUsd":0}
+{"condition":"all","pickId":"sympy__sympy-16886","verdict":"fail","turns":0,"tokensIn":0,"tokensOut":0,"cacheRead":0,"wallMs":511,"costUsd":0}
