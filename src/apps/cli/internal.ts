@@ -1,36 +1,37 @@
-import { join } from "node:path"
 import {
   type AgentConfig,
-  buildSystemPrompt,
-  CachingEmbedder,
-  createAutoClassifierPort,
   loadMcpTools,
-  loadSession,
   lspDiagnosticsTool,
   lspNavToolList,
-  memoryTools,
-  OpenAIEmbedder,
   type PersonaKind,
-  RetryingLLM,
   resolvePersona,
 } from "@/agent"
-import {
-  createLLM,
-  DEFAULT_MODEL,
-  FallbackLLM,
-  type Provider as LLMFactoryProvider,
-  type LLMPort,
-  type Message,
-  pickProvider as pickProviderFactory,
-} from "@/llm"
+import type { LLMPort } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
-import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
 import { Metrics, type StructuredLogger } from "@/observability"
-import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
-import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
+import type { PermissionContext, PermissionMode } from "@/permission"
+import {
+  buildCompactionBreakerConfigCore,
+  buildEmbedderCore,
+  buildLLMCore,
+  buildMemoryConfigCore,
+  buildSkillsConfigCore,
+  buildStoreCore,
+  buildStreamingCore,
+  buildSubagentConfigCore,
+  buildSummarizerLlmCore,
+  buildToolingCore,
+  buildVerifyGuardConfigCore,
+  composeLLMCore,
+  DEFAULT_MODEL,
+  parseFallbackModels,
+  parseRecallTiers,
+  pickProviderCore,
+  type Provider as RunnerProvider,
+} from "@/runner/assemble"
 import { logger, type RunContext } from "@/shared"
-import { JsonlRecorder, StdoutStream, type StreamPort, TeeStream } from "@/stream"
-import { buildDefaultTools, gitTools, type Tool, ToolRegistry } from "@/tool"
+import type { StreamPort } from "@/stream"
+import { gitTools, type Tool } from "@/tool"
 import type { Tooling } from "./config-assemble"
 import { isPathLikeToken } from "./resume"
 
@@ -42,36 +43,44 @@ import { isPathLikeToken } from "./resume"
  * instead of re-implementing them locally. This module is CLI-internal:
  * other slices (`@/agent`, `@/skill`, …) MUST NOT import from
  * `src/apps/cli/**` — enforced by Biome `noRestrictedImports` overrides.
+ *
+ * Layer-2 split (RFC §3.1 → `@/runner/assemble`): the SURFACE-AGNOSTIC
+ * builders (LLM / store / embedder / memory / subagent / skills / compaction /
+ * verify / tooling / streaming / per-turn AgentConfig) now live in
+ * `@/runner/assemble/*` and read NO env. This module keeps the CLI-specific
+ * envelope: it parses `process.env` + `process.argv` and delegates the actual
+ * build to the surface-agnostic cores. Export NAMES and SIGNATURES are
+ * unchanged so 132+ existing consumers (repl.ts, index.ts, unit tests) are
+ * unaffected.
  */
 
 export const env = (k: string, fallback: string): string => process.env[k] ?? fallback
 
-/** Provider union — re-exported from the `@/llm` factory (the single source of
- *  truth). Kept as a CLI-local name so existing importers (`index.ts`, tests)
- *  are unaffected. */
-export type Provider = LLMFactoryProvider
+/** Provider union — re-exported from the `@/runner/assemble` factory (the
+ *  single source of truth via `@/llm`). Kept as a CLI-local name so existing
+ *  importers (`index.ts`, tests) are unaffected. */
+export type Provider = RunnerProvider
 
-/** Provider selection. Thin wrapper over the `@/llm` factory's `pickProvider`,
- *  passing live `process.env` so the CLI honors a `QUANTA_PROVIDER` /
+/** Provider selection. Thin wrapper that passes live `process.env` to the
+ *  surface-agnostic `pickProviderCore` so the CLI honors a `QUANTA_PROVIDER` /
  *  key-presence change without a config-freeze round-trip (matches the
  *  pre-factory behavior the unit tests pin). */
-export const pickProvider = (): Provider => pickProviderFactory(process.env)
+export const pickProvider = (): Provider => pickProviderCore({ env: process.env })
 
 /** ADR-0068 persona slot — resolve `QUANTA_PERSONA` once at REPL start.
  *  Absent ⇒ `"default"` (the explicit choice). Unknown value ⇒ named
  *  `PersonaInvalidError` throw (no silent fallback per ADR-0067 §C). */
 export const pickPersona = (): PersonaKind => resolvePersona(process.env)
 
-/** Build the main LLM adapter via the `@/llm` factory. Preserves the prior
- *  contract: a missing provider key throws (the cli aborts loudly). The factory
- *  resolves the api key + `OPENAI_BASE_URL` from the env we pass. */
+/** Build the main LLM adapter via the surface-agnostic core. Preserves the
+ *  prior contract byte-for-byte: a missing provider key throws (the cli aborts
+ *  loudly), the factory resolves the api key + `OPENAI_BASE_URL` from the env
+ *  we pass. */
 export const buildLLM = (provider: Provider, model: string): LLMPort =>
-  createLLM(provider, { model }, process.env)
+  buildLLMCore({ provider, model, env: process.env })
 
-/** Default model id per provider — re-exported from the `@/llm` factory (the
- *  single source of truth the three app entry points used to each duplicate).
- *  Kept exported from `internal.ts` so `index.ts` / tests importing it from
- *  here are unaffected. */
+/** Default model id per provider — re-exported from the runner barrel (the
+ *  single source of truth the three app entry points used to each duplicate). */
 export { DEFAULT_MODEL }
 
 /**
@@ -91,14 +100,13 @@ export { DEFAULT_MODEL }
  *   QUANTA_MEMORY_RECALL_TIERS comma list of episodic,semantic →
  *                              memory.recallTiers (invalid/empty ⇒ omitted)
  */
-export const buildStore = (): PersistentStorePort | undefined => {
-  const kind = process.env.QUANTA_MEMORY
-  if (kind === "sqlite") {
-    return new SqliteStore(process.env.QUANTA_MEMORY_PATH ?? ".quanta/memory.sqlite")
-  }
-  if (kind === "memory") return new InMemoryStore()
-  return undefined
-}
+export const buildStore = (): ReturnType<typeof buildStoreCore> =>
+  buildStoreCore({
+    ...(process.env.QUANTA_MEMORY !== undefined ? { kind: process.env.QUANTA_MEMORY } : {}),
+    ...(process.env.QUANTA_MEMORY_PATH !== undefined
+      ? { path: process.env.QUANTA_MEMORY_PATH }
+      : {}),
+  })
 
 /**
  * Build the semantic embedder from env. Default OFF so lexical-only recall is
@@ -107,55 +115,43 @@ export const buildStore = (): PersistentStorePort | undefined => {
  * `buildLLM`). Absent ⇒ pure lexical/tag/freshness recall, zero behavior
  * change vs today.
  */
-export const buildEmbedder = (store: PersistentStorePort | undefined): EmbedderPort | undefined => {
-  if (!store) return undefined
-  if (process.env.QUANTA_MEMORY_EMBED === "off") return undefined
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return undefined
-  return new CachingEmbedder(
-    new OpenAIEmbedder({
-      apiKey,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-      ...(process.env.QUANTA_MEMORY_EMBED_MODEL
-        ? { model: process.env.QUANTA_MEMORY_EMBED_MODEL }
-        : {}),
-    }),
-  )
-}
+export const buildEmbedder = (
+  store: ReturnType<typeof buildStoreCore>,
+): ReturnType<typeof buildEmbedderCore> =>
+  buildEmbedderCore({
+    store,
+    disabled: process.env.QUANTA_MEMORY_EMBED === "off",
+    ...(process.env.OPENAI_API_KEY !== undefined ? { apiKey: process.env.OPENAI_API_KEY } : {}),
+    ...(process.env.OPENAI_BASE_URL !== undefined ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+    ...(process.env.QUANTA_MEMORY_EMBED_MODEL !== undefined
+      ? { model: process.env.QUANTA_MEMORY_EMBED_MODEL }
+      : {}),
+  })
+
+/** Re-export the pure helper so existing tests
+ *  (`tests/unit/env-knob-branches.test.ts`) keep resolving it from
+ *  `./internal`. */
+export { parseRecallTiers }
 
 /**
  * Build the `memory` tuning block from env. Returns `undefined` when there is
  * no store AND no flag set, so the config key is omitted entirely and current
  * behavior is preserved exactly (respecting `exactOptionalPropertyTypes`).
  */
-/** Parse `QUANTA_MEMORY_RECALL_TIERS` → dedup'd valid tiers, or undefined. */
-export const parseRecallTiers = (
-  raw: string | undefined,
-): ("episodic" | "semantic")[] | undefined => {
-  if (raw === undefined) return undefined
-  const seen = new Set<"episodic" | "semantic">()
-  for (const part of raw.split(",")) {
-    const t = part.trim().toLowerCase()
-    if (t === "episodic" || t === "semantic") seen.add(t)
-  }
-  return seen.size > 0 ? [...seen] : undefined
-}
-
 export const buildMemoryConfig = (
-  store: PersistentStorePort | undefined,
+  store: ReturnType<typeof buildStoreCore>,
 ): AgentConfig["memory"] | undefined => {
   const rawLimit = process.env.QUANTA_MEMORY_RECALL_LIMIT
   const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : Number.NaN
   const recallTiers = parseRecallTiers(process.env.QUANTA_MEMORY_RECALL_TIERS)
-  const block = {
+  return buildMemoryConfigCore({
+    store,
     ...(Number.isFinite(limit) ? { recallLimit: limit } : {}),
     ...(process.env.QUANTA_MEMORY_DISTILL === "off" ? { distill: false } : {}),
     ...(process.env.QUANTA_MEMORY_CONSOLIDATE === "off" ? { consolidate: false } : {}),
     ...(process.env.QUANTA_MEMORY_SELF_EDIT === "off" ? { selfEditTools: false } : {}),
     ...(recallTiers ? { recallTiers } : {}),
-  }
-  if (!store && Object.keys(block).length === 0) return undefined
-  return block
+  })
 }
 
 /**
@@ -166,10 +162,13 @@ export const buildMemoryConfig = (
  * `QUANTA_SUBAGENT_MAX_DEPTH` caps recursion (else the runner's default).
  */
 export const buildSubagentConfig = (): AgentConfig["subagent"] | undefined => {
-  if (process.env.QUANTA_SUBAGENT === undefined) return undefined
+  const enabled = process.env.QUANTA_SUBAGENT !== undefined
   const rawDepth = process.env.QUANTA_SUBAGENT_MAX_DEPTH
   const depth = rawDepth !== undefined ? Number.parseInt(rawDepth, 10) : Number.NaN
-  return Number.isFinite(depth) ? { maxDepth: depth } : {}
+  return buildSubagentConfigCore({
+    enabled,
+    ...(Number.isFinite(depth) ? { maxDepth: depth } : {}),
+  })
 }
 
 /**
@@ -180,10 +179,13 @@ export const buildSubagentConfig = (): AgentConfig["subagent"] | undefined => {
  * forcing one more turn up to `QUANTA_VERIFY_GUARD_MAX_TRIPS` (else default 2).
  */
 export const buildVerifyGuardConfig = (): AgentConfig["verifyGuard"] | undefined => {
-  if (process.env.QUANTA_VERIFY_GUARD === undefined) return undefined
+  const enabled = process.env.QUANTA_VERIFY_GUARD !== undefined
   const raw = process.env.QUANTA_VERIFY_GUARD_MAX_TRIPS
   const trips = raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN
-  return Number.isFinite(trips) ? { maxTrips: trips } : {}
+  return buildVerifyGuardConfigCore({
+    enabled,
+    ...(Number.isFinite(trips) ? { maxTrips: trips } : {}),
+  })
 }
 
 /**
@@ -200,9 +202,10 @@ export const buildVerifyGuardConfig = (): AgentConfig["verifyGuard"] | undefined
  */
 export const buildSkillsConfig = (): AgentConfig["skills"] | undefined => {
   const dir = process.env.QUANTA_SKILLS_DIR
-  if (dir) return { dir }
-  if (process.env.QUANTA_SKILLS === "1" || hasArg("--skills")) return {}
-  return undefined
+  return buildSkillsConfigCore({
+    ...(dir !== undefined ? { dir } : {}),
+    enabled: process.env.QUANTA_SKILLS === "1" || hasArg("--skills"),
+  })
 }
 
 /**
@@ -216,22 +219,17 @@ export const buildSkillsConfig = (): AgentConfig["skills"] | undefined => {
  * `maxNoProgressProactive`.
  */
 export const buildCompactionBreakerConfig = (): AgentConfig["compactionBreaker"] | undefined => {
-  const disabled = process.env.QUANTA_COMPACT_BREAKER === "off"
   const intEnv = (k: string): number => {
     const raw = process.env[k]
     return raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN
   }
   const reactiveMax = intEnv("QUANTA_COMPACT_BREAKER_REACTIVE_MAX")
   const proactiveMax = intEnv("QUANTA_COMPACT_BREAKER_PROACTIVE_MAX")
-  const caps = {
-    ...(Number.isFinite(reactiveMax) ? { maxConsecutiveReactive: reactiveMax } : {}),
-    ...(Number.isFinite(proactiveMax) ? { maxNoProgressProactive: proactiveMax } : {}),
-  }
-  const block = {
-    ...(disabled ? { disabled: true } : {}),
-    ...(Object.keys(caps).length > 0 ? { caps } : {}),
-  }
-  return Object.keys(block).length > 0 ? block : undefined
+  return buildCompactionBreakerConfigCore({
+    ...(process.env.QUANTA_COMPACT_BREAKER === "off" ? { disabled: true } : {}),
+    ...(Number.isFinite(reactiveMax) ? { reactiveMax } : {}),
+    ...(Number.isFinite(proactiveMax) ? { proactiveMax } : {}),
+  })
 }
 
 /**
@@ -244,12 +242,16 @@ export const buildCompactionBreakerConfig = (): AgentConfig["compactionBreaker"]
 export const buildSummarizerLlm = (
   mainProvider: Provider,
   signal: AbortSignal,
-): LLMPort | undefined => {
-  const model = process.env.QUANTA_COMPACT_MODEL
-  if (model === undefined || model.trim() === "") return undefined
-  const provider = (process.env.QUANTA_COMPACT_PROVIDER ?? mainProvider) as Provider
-  return new RetryingLLM({ inner: buildLLM(provider, model.trim()), signal })
-}
+): LLMPort | undefined =>
+  buildSummarizerLlmCore({
+    mainProvider,
+    signal,
+    model: process.env.QUANTA_COMPACT_MODEL,
+    ...(process.env.QUANTA_COMPACT_PROVIDER !== undefined
+      ? { provider: process.env.QUANTA_COMPACT_PROVIDER as Provider }
+      : {}),
+    env: process.env,
+  })
 
 /**
  * Resolve the fallback-provider model ids from `QUANTA_MODEL_FALLBACK`.
@@ -257,14 +259,7 @@ export const buildSummarizerLlm = (
  * today (no `FallbackLLM` wrap). Comma-separated model ids; a bare flag
  * value with no usable id (e.g. `1`) yields `[]` ⇒ no wrap.
  */
-export const fallbackModels = (): string[] => {
-  const raw = process.env.QUANTA_MODEL_FALLBACK
-  if (raw === undefined) return []
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s !== "1")
-}
+export const fallbackModels = (): string[] => parseFallbackModels(process.env.QUANTA_MODEL_FALLBACK)
 
 export const hasArg = (flag: string): boolean => process.argv.slice(2).includes(flag)
 
@@ -467,25 +462,18 @@ export const loadFeatures = async (slog: StructuredLogger): Promise<Features> =>
 /** Observability wiring (RFC-0002 §5.4/§8). Default OFF → byte-identical to
  *  today (plain StdoutStream, no RunContext). When `observe` is set: a runId
  *  tags a RunContext and the stdout stream is fanned out to a JsonlRecorder.
- *  Pure extraction of the inline block — same effects, same logging. */
+ *  Thin wrapper over the surface-agnostic `buildStreamingCore`. */
 export const buildStreaming = (
   observe: string | undefined,
   slog: StructuredLogger,
-): { stream: StreamPort; run: RunContext | undefined } => {
-  const stream: StreamPort = new StdoutStream()
-  if (!observe) return { stream, run: undefined }
-  const runId = crypto.randomUUID()
-  const run: RunContext = { runId }
-  const recorder = new JsonlRecorder(join(observe, runId, "session.jsonl"), { ctx: run })
-  slog.info("observe.on", { dir: observe, runId })
-  return { stream: new TeeStream([stream, recorder]), run }
-}
+): { stream: StreamPort; run: RunContext | undefined } =>
+  buildStreamingCore({ ...(observe !== undefined ? { observeDir: observe } : {}), slog })
 
 /** Compose the LLM stack: bounded retry (inner-most), optional same-turn
  *  provider fallback (outer), and — only in `auto` mode — attach the
  *  LLM-backed permission classifier to `permission`. Default OFF for both
  *  fallback and classifier ⇒ `finalLLM === retryingLLM` and `permission`
- *  untouched, byte-identical to today. Pure extraction of the inline block. */
+ *  untouched, byte-identical to today. Thin wrapper over `composeLLMCore`. */
 export const composeLLM = (
   retryingLLM: LLMPort,
   provider: Provider,
@@ -493,29 +481,29 @@ export const composeLLM = (
   mode: PermissionMode,
   permission: PermissionContext,
   slog: StructuredLogger,
-): LLMPort => {
-  const fbModels = fallbackModels()
-  let finalLLM: LLMPort = retryingLLM
-  if (fbModels.length > 0) {
-    const fallbackStacks = fbModels.map(
-      (m) => new RetryingLLM({ inner: buildLLM(provider, m), signal }),
-    )
-    finalLLM = new FallbackLLM({ providers: [retryingLLM, ...fallbackStacks], signal })
-    slog.info("llm.fallback.on", { models: fbModels })
-  }
-  if (mode === "auto") {
-    permission.classify = createAutoClassifierPort({ llm: finalLLM })
-    slog.info("permission.auto.on")
-  }
-  return finalLLM
-}
+): LLMPort =>
+  composeLLMCore({
+    retryingLLM,
+    provider,
+    signal,
+    mode,
+    permission,
+    slog,
+    fallbackModelIds: fallbackModels(),
+    env: process.env,
+  })
 
 // ── Split: `SessionDeps`, `compactionDep`, `assembleConfig`, `Tooling` live in
-//    `./config-assemble` (PURE composition, no env reads). Re-exported below so
+//    `@/runner/assemble` (PURE composition, no env reads). Re-exported below so
 //    importers (`index.ts`, tests) are unaffected.
 export type { SessionDeps, Tooling } from "./config-assemble"
 export { assembleConfig, compactionDep } from "./config-assemble"
 
+/** Build the per-run tooling: resolve every env-driven default-OFF knob, then
+ *  delegate the actual registry + config aggregation to the surface-agnostic
+ *  `buildToolingCore`. The shim is the CLI-specific envelope (it owns the env
+ *  reads, the `crypto.randomUUID()` mint, and the `logger.info` sink — none of
+ *  which are surface-agnostic). */
 export const buildTooling = (
   mcpTools: Tool[],
   lspTools: Tool[],
@@ -526,58 +514,30 @@ export const buildTooling = (
   const store = buildStore()
   const embedder = buildEmbedder(store)
   const sessionId = crypto.randomUUID()
-  if (store) {
-    logger.info(
-      `memory on (kind=${process.env.QUANTA_MEMORY}, embed=${embedder ? "on" : "off"}, session=${sessionId})`,
-    )
-  }
   const memoryConfig = buildMemoryConfig(store)
-  // Tier 0/1 absorption knobs — all default OFF, each omitted from the
-  // AgentConfig entirely when its env knob is unset (exactOptionalPropertyTypes
-  // friendly), so unset-all ⇒ AgentConfig byte-identical to before.
   const subagentConfig = buildSubagentConfig()
   const skillsConfig = buildSkillsConfig()
   const compactionBreakerConfig = buildCompactionBreakerConfig()
   const verifyGuardConfig = buildVerifyGuardConfig()
-  if (subagentConfig) slog.info("subagent.on", subagentConfig)
-  if (skillsConfig) slog.info("skills.on", skillsConfig)
-  if (compactionBreakerConfig) slog.info("compaction.breaker.config", compactionBreakerConfig)
-  if (verifyGuardConfig) slog.info("verify.guard.on", verifyGuardConfig)
-  // Self-edit memory tools: only when a store exists and `memory.selfEditTools`
-  // is not opted out (single knob: QUANTA_MEMORY_SELF_EDIT). With no store the
-  // registry is byte-identical to before (nothing appended).
-  const memTools: Tool[] =
-    store && memoryConfig?.selfEditTools !== false
-      ? memoryTools({ store, ...(embedder ? { embedder } : {}) })
-      : []
-  // Tool merge order (last-write-wins via ToolRegistry's Map): defaultTools →
-  // mcp → memory → lsp-diagnostics (swaps the no-op diagnostics in defaultTools)
-  // → lsp-nav (8 new tools, opt-in) → git (4 new tools, opt-in). All trailing
-  // groups are empty arrays when their knobs are unset, so the registry is
-  // byte-identical to today when no absorption knob is set.
-  // DIP seam (`buildDefaultTools`): no app-specific fs/diagnostics ports here —
-  // the real LSP diagnostics provider arrives via the appended `lspTools` array
-  // (tool-level swap), and the read/write/edit tools use the default
-  // FileSystemPort. Identical to the prior `defaultTools` literal.
-  const registry = new ToolRegistry([
-    ...buildDefaultTools(),
-    ...mcpTools,
-    ...memTools,
-    ...lspTools,
-    ...lspNavTools,
-    ...gitToolList,
-  ])
-  return {
+  return buildToolingCore({
     store,
     embedder,
     sessionId,
-    registry,
     memoryConfig,
     subagentConfig,
     skillsConfig,
     compactionBreakerConfig,
     verifyGuardConfig,
-  }
+    mcpTools,
+    lspTools,
+    lspNavTools,
+    gitToolList,
+    slog,
+    ...(process.env.QUANTA_MEMORY !== undefined
+      ? { memoryKindLabel: process.env.QUANTA_MEMORY }
+      : {}),
+    onMemoryReady: (line) => logger.info(line),
+  })
 }
 
 export type { ResolveResumeInput, ResumeResolution } from "./resume"

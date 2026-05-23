@@ -20,4 +20,8 @@
  *   - Public re-exports go through this barrel so consumers depend on the
  *     slice contract, not internal file paths.
  */
-export {}
+// `assemble/` is the first populated sub-slice (the others — orchestrate/,
+// session-ops/ — remain scaffolds for later phases). The barrel re-exports
+// the public assemble factories so consumers depend on `@/runner` (the slice
+// contract), not internal file paths.
+export * from "./assemble"
