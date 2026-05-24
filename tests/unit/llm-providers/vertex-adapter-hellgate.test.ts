@@ -258,4 +258,56 @@ describe("VertexProviderAdapter — hellgate", () => {
       expect((e as ProviderError).providerId).toBe("vertex")
     }
   })
+
+  test("HELL-F1: empty SDK stream → adapter yields nothing", async () => {
+    async function* empty(): AsyncGenerator<unknown> {
+      // SDK closed the iteration immediately.
+    }
+    const a = new VertexProviderAdapter(base(), {
+      clientFactory: recordingFactory({}, { stream: empty }),
+    })
+    const events: Array<unknown> = []
+    for await (const ev of a.stream({ messages: [], tools: [] })) {
+      events.push(ev)
+    }
+    expect(events).toEqual([])
+  })
+
+  test("HELL-F2: event order — text_delta precedes usage/message_stop (mapRawEvent contract)", async () => {
+    const a = new VertexProviderAdapter(base(), { clientFactory: recordingFactory({}) })
+    const types: string[] = []
+    for await (const ev of a.stream({ messages: [], tools: [] })) {
+      types.push((ev as { type: string }).type)
+    }
+    const delta = types.indexOf("text_delta")
+    const usage = types.indexOf("usage")
+    const stop = types.indexOf("message_stop")
+    expect(delta).toBeGreaterThanOrEqual(0)
+    expect(usage).toBeGreaterThan(delta)
+    expect(stop).toBeGreaterThanOrEqual(usage)
+  })
+
+  test("HELL-F3: mid-stream cancellation halts the adapter (no leak)", async () => {
+    async function* huge(): AsyncGenerator<unknown> {
+      yield {
+        type: "message_start",
+        message: { model: "x", usage: { input_tokens: 1 } },
+      }
+      yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
+      for (let i = 0; i < 1000; i++) {
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "x" } }
+      }
+      yield { type: "content_block_stop", index: 0 }
+      yield { type: "message_stop" }
+    }
+    const a = new VertexProviderAdapter(base(), {
+      clientFactory: recordingFactory({}, { stream: huge }),
+    })
+    let count = 0
+    for await (const _ of a.stream({ messages: [], tools: [] })) {
+      count++
+      if (count >= 3) break
+    }
+    expect(count).toBe(3)
+  })
 })

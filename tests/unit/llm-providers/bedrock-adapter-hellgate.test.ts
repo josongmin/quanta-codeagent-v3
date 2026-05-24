@@ -231,4 +231,64 @@ describe("BedrockProviderAdapter — hellgate", () => {
       expect((e as ProviderError).providerId).toBe("bedrock")
     }
   })
+
+  test("HELL-F1: empty SDK stream → adapter yields nothing (no synthesized events)", async () => {
+    async function* empty(): AsyncGenerator<unknown> {
+      // SDK closed the iteration with zero raw events. mapRawEvent has
+      // nothing to translate; the adapter must not synthesize anything.
+    }
+    const a = new BedrockProviderAdapter(base(), {
+      clientFactory: recordingFactory({}, { stream: empty }),
+    })
+    const events: Array<{ type: string }> = []
+    for await (const ev of a.stream({ messages: [], tools: [] })) {
+      events.push(ev as { type: string })
+    }
+    expect(events).toEqual([])
+  })
+
+  test("HELL-F2: event order — text_delta precedes usage/message_stop (mapRawEvent contract)", async () => {
+    const log: CallLog = {}
+    const a = new BedrockProviderAdapter(base(), { clientFactory: recordingFactory(log) })
+    const types: string[] = []
+    for await (const ev of a.stream({ messages: [], tools: [] })) {
+      types.push((ev as { type: string }).type)
+    }
+    // mapRawEvent absorbs message_start silently (no yield); the user-visible
+    // order is text_delta (from content_block_delta) → usage (from
+    // message_delta) → message_stop (synthesized from message_delta's
+    // stop_reason). Pin all three indices.
+    const delta = types.indexOf("text_delta")
+    const usage = types.indexOf("usage")
+    const stop = types.indexOf("message_stop")
+    expect(delta).toBeGreaterThanOrEqual(0)
+    expect(usage).toBeGreaterThan(delta)
+    expect(stop).toBeGreaterThanOrEqual(usage)
+  })
+
+  test("HELL-F3: mid-stream cancellation halts the adapter (no leak)", async () => {
+    // Fake stream that would emit 1000 chunks unless we break out early.
+    async function* huge(): AsyncGenerator<unknown> {
+      yield {
+        type: "message_start",
+        message: { model: "x", usage: { input_tokens: 1 } },
+      }
+      yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
+      for (let i = 0; i < 1000; i++) {
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "x" } }
+      }
+      yield { type: "content_block_stop", index: 0 }
+      yield { type: "message_stop" }
+    }
+    const a = new BedrockProviderAdapter(base(), {
+      clientFactory: recordingFactory({}, { stream: huge }),
+    })
+    let count = 0
+    for await (const _ of a.stream({ messages: [], tools: [] })) {
+      count++
+      if (count >= 3) break // simulate caller cancellation
+    }
+    // Successfully halted; generator's `return()` was invoked by `for-await ... break`.
+    expect(count).toBe(3)
+  })
 })

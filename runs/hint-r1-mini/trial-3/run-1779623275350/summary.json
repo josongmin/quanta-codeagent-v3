@@ -1,0 +1,48 @@
+{
+  "runId": "run-1779623275350",
+  "resolved": 0,
+  "total": 6,
+  "degraded": 0,
+  "instances": [
+    {
+      "id": "psf__requests-5414",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 16,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/hint-r1-mini/trial-3/run-1779623275350/psf__requests-5414.0.patch"
+    },
+    {
+      "id": "pallets__flask-5014",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 18,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/hint-r1-mini/trial-3/run-1779623275350/pallets__flask-5014.0.patch"
+    },
+    {
+      "id": "pylint-dev__pylint-4970",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 0
+    },
+    {
+      "id": "pytest-dev__pytest-7982",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 15,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/hint-r1-mini/trial-3/run-1779623275350/pytest-dev__pytest-7982.0.patch"
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 12,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/hint-r1-mini/trial-3/run-1779623275350/sympy__sympy-16886.0.patch"
+    },
+    {
+      "id": "sympy__sympy-13480",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 0
+    }
+  ]
+}
