@@ -1,0 +1,36 @@
+id: otel-sink
+title: OTel MeterProvider-backed metric sink
+section: 8
+subsystem: metrics export (ADR-0144)
+order: 113
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:opentelemetry", "surface:observability", "tier:adapter"]
+purpose: |
+  Closed-port `MetricSink` adapter wrapping `@opentelemetry/api` MeterProvider.
+  Maps our 3-arm MetricKind (counter/histogram/gauge) to OTel instruments
+  (Counter/Histogram/UpDownCounter) with lazy per-(name, kind) caching. Gauge
+  emulation = UpDownCounter + per-(name, labelsKey) prev-value delta
+  (ObservableGauge rejected — would couple sink→registry). Structural typing
+  for OtelMeterProvider keeps the slice plane-clean (no runtime `@opentelemetry/api`
+  dep until caller wires).
+evidence:
+  code:
+    - src/observability/metrics/otel-sink.ts
+  adrs: [154]
+  tests:
+    unit:
+      - tests/unit/observability-metrics-otel-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF (caller-built MeterProvider DI). instrument-kind lock on first use
+  per name → typed warn + drop on collision (`MetricsError("name-mismatch-kind")`
+  reserved for future strict mode).

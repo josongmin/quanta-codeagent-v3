@@ -1,0 +1,36 @@
+id: lsp-atomic-workspace-edit
+title: LSP applyWorkspaceEdit 2-phase atomicity (+ EXDEV fallback)
+section: 9
+subsystem: LSP expansion (ADR-0141)
+order: 204
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:lsp", "tier:adapter"]
+purpose: |
+  3-phase atomic commit for cross-file LSP workspace edits (rename refactor,
+  source code-action apply). Phase 0 cleanup of stale tmps from prior crash →
+  Phase 1 write all targets to `.quanta-tmp-<sessionId>-<rand>` siblings →
+  Phase 2 atomic rename to originals. EXDEV (cross-FS) fallback uses
+  copyFile + unlink to keep target visibility atomic-from-reader's-POV.
+  Phase-2 partial failure does NOT auto-rollback (would require backup-original
+  doubling disk); surfaces typed error + remaining tmp count for caller recovery.
+evidence:
+  code:
+    - src/lsp/adapters/base.ts
+  adrs: [152, 156]
+  tests:
+    unit:
+      - tests/unit/lsp-applyworkspaceedit-atomicity-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sibling refactor (atomicFileWriteStrategy) extracts the 2-phase logic into a
+  pluggable strategy port; default impl matches the inline version. EXDEV branch
+  lives in atomicFileWriteStrategy + copyFile seam exposed on LspClient.

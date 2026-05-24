@@ -30,7 +30,9 @@ import { parseDiffNameStatus, runCheckChanged } from "./check-changed"
 import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lint"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
 import {
+  computeAxisScores,
   computeGrade,
+  computeJudgment,
   type Feature,
   type LoadedFeature,
   loadFeaturesStrict,
@@ -64,6 +66,8 @@ function usage(): never {
       "  grade [<letter>]            evidence-completeness scorecard (A-F)",
       "  stale                       flag entries where source newer than yaml >7d",
       "  query label:X owner:Y ...   filter by label/owner/section/maturity/depends/grade/ui/monitoring/mode/configurable",
+      "  judge [--min=L4] [--section=N] [--verbose] [--overclaimed]",
+      "                              4-axis composite (monitoring/hellgate/wiring/structure) → solid/thin/overclaimed verdict",
       "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
       "  graph [--section N] [--id X] [--depth N]   emit DOT dependency DAG to stdout",
     ].join("\n"),
@@ -844,6 +848,103 @@ async function cmdStale(_argv: string[]): Promise<void> {
   console.log(`\nstale: ${staleCount} feature(s) (source newer than yaml by >7d)`)
 }
 
+// SOTA Tier-4 — multi-axis composite judge for L4+ features.
+//
+// Per user request: factor monitoring + hellgate + callsite-integration +
+// modularization into the maturity verdict so registered-but-unwired L4
+// features are visible. Reports per-feature axis breakdown + verdict.
+async function cmdJudge(argv: string[]): Promise<void> {
+  const features = await loadFeaturesStrict(FEATURES_DIR)
+  // Parse flags
+  const verbose = argv.includes("--verbose") || argv.includes("-v")
+  const onlyOverclaimed = argv.includes("--overclaimed")
+  const minMaturity = (argv.find((a) => a.startsWith("--min="))?.slice(6) ?? "L4") as
+    | "L1"
+    | "L2"
+    | "L3"
+    | "L4"
+    | "L5"
+  const sectionFilter = argv.find((a) => a.startsWith("--section="))
+  const sectionN = sectionFilter ? Number(sectionFilter.slice(10)) : undefined
+
+  const matLevels = ["L1", "L2", "L3", "L4", "L5"] as const
+  const minIdx = matLevels.indexOf(minMaturity)
+
+  const verdictCounts: Record<string, number> = {
+    solid: 0,
+    thin: 0,
+    overclaimed: 0,
+    appropriate: 0,
+    "deliberate-hold": 0,
+  }
+  const compositeCounts: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 }
+  const overclaimedRows: Array<{
+    id: string
+    section: number
+    maturity: string
+    composite: string
+    axes: { mon: number; hell: number; wire: number; struct: number; total: number }
+  }> = []
+
+  for (const { feature } of features) {
+    const fIdx = matLevels.indexOf(feature.maturity)
+    if (fIdx < minIdx) continue
+    if (sectionN !== undefined && feature.section !== sectionN) continue
+    const j = computeJudgment(feature)
+    verdictCounts[j.verdict] = (verdictCounts[j.verdict] ?? 0) + 1
+    compositeCounts[j.composite] = (compositeCounts[j.composite] ?? 0) + 1
+    if (j.verdict === "overclaimed" || (verbose && j.verdict === "thin")) {
+      overclaimedRows.push({
+        id: feature.id,
+        section: feature.section,
+        maturity: feature.maturity,
+        composite: j.composite,
+        axes: {
+          mon: j.axes.monitoring,
+          hell: j.axes.hellgate,
+          wire: j.axes.wiring,
+          struct: j.axes.structure,
+          total: j.axes.total,
+        },
+      })
+    }
+  }
+
+  console.log(
+    `4-axis composite judgment for maturity >= ${minMaturity}${
+      sectionN !== undefined ? ` (section ${sectionN})` : ""
+    }`,
+  )
+  console.log("")
+  console.log("Composite letter distribution (0..12 total → A/B/C/D/F):")
+  for (const g of ["A", "B", "C", "D", "F"]) {
+    const n = compositeCounts[g] ?? 0
+    console.log(`  ${g}  ${String(n).padStart(4)}`)
+  }
+  console.log("")
+  console.log("Verdict distribution:")
+  for (const v of ["solid", "thin", "overclaimed", "appropriate", "deliberate-hold"]) {
+    const n = verdictCounts[v] ?? 0
+    console.log(`  ${v.padEnd(18)} ${String(n).padStart(4)}`)
+  }
+  if (overclaimedRows.length > 0) {
+    console.log("")
+    console.log(
+      `${onlyOverclaimed ? "Overclaimed" : verbose ? "Thin + Overclaimed" : "Overclaimed"} features (axes: mon/hell/wire/struct = total):`,
+    )
+    console.log("  id\tsection\tmaturity\tcomposite\tmon\thell\twire\tstruct\ttotal")
+    for (const r of overclaimedRows) {
+      console.log(
+        `  ${r.id}\ts${r.section}\t${r.maturity}\t${r.composite}\t${r.axes.mon}\t${r.axes.hell}\t${r.axes.wire}\t${r.axes.struct}\t${r.axes.total}`,
+      )
+    }
+  }
+  console.log("")
+  console.log(
+    "axis legend: mon=monitoring(0..3) hell=hellgate-test-count(0..3) wire=callsite-integration(0..3) struct=modularization(0..3)",
+  )
+}
+
 async function cmdQuery(argv: string[]): Promise<void> {
   const filters: Array<(f: Feature) => boolean> = []
   for (const a of argv) {
@@ -940,6 +1041,9 @@ async function main(): Promise<void> {
       return
     case "grade":
       await cmdGrade(rest)
+      return
+    case "judge":
+      await cmdJudge(rest)
       return
     case "stale":
       await cmdStale(rest)
