@@ -1,0 +1,47 @@
+id: oauth-dynamic-registration
+title: OAuth dynamic client registration — RFC 7591 (ADR-0160 W7 Phase C)
+section: 9
+subsystem: Connectors / OAuth (ADR-0160)
+order: 62
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core"]
+purpose: |
+  `registerOAuthClient(endpoint, metadata, fetchPort)` — RFC 7591 dynamic
+  client registration. POSTs `client_metadata` (redirect_uris + optional
+  client_name / token_endpoint_auth_method / grant_types / response_types /
+  scope) as `application/json`, parses typed `OAuthClientRegistration`
+  response (`clientId` required; `clientSecret`, `registrationAccessToken`,
+  `registrationClientUri` optional). Stable error arm via
+  `OAuthRegistrationError`: `registration-rejected` (4xx) /
+  `registration-malformed` (non-object/non-JSON, including arrays) /
+  `missing-client-id` (empty or absent) / `network-failed`. Hellgate verifies
+  request body shape end-to-end (content-type header + redirect_uris +
+  optional fields wired correctly).
+evidence:
+  code:
+    - src/connectors/oauth-registration.ts
+    - src/connectors/types.ts
+  adrs: [160]
+  tests:
+    unit:
+      - tests/unit/oauth-registration-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Phase 1 (2026-05-25). 흡수 출처: Cursor RFC 7591 dynamic client registration
+  (memory R4). What this is NOT: full OAuth flow (authorize/redirect/exchange
+  — separate follow-up). Hellgate seals 10 adversarial cases including
+  Array-body rejection (typeof [] === 'object' edge case that bypasses naive
+  shape checks). Used by future code paths that need to register a fresh
+  client with a discovered registration_endpoint (Phase C composes Discovery
+  → Registration → Token Exchange).

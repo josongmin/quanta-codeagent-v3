@@ -1,0 +1,43 @@
+id: oauth-dynamic-discovery
+title: OAuth endpoint discovery — RFC 8414 well-known + OIDC fallback (ADR-0160 W7 Phase C)
+section: 9
+subsystem: Connectors / OAuth (ADR-0160)
+order: 61
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core"]
+purpose: |
+  `discoverOAuthEndpoints(issuer, fetchPort)` — RFC 8414 §3 well-known
+  authorization-server discovery + OIDC openid-configuration fallback on 404.
+  Returns typed `OAuthEndpoints` with `authorizeEndpoint` / `tokenEndpoint` /
+  optional `registrationEndpoint`. Stable error arm via `OAuthDiscoveryError`:
+  `well-known-404` / `well-known-malformed` / `missing-required-field` /
+  `network-failed` — callers branch on `code` without string parse. Trailing
+  slash in issuer URL normalized at entry (no double slash). Non-404 non-OK
+  short-circuits (no fallback) — 5xx should not trigger OIDC probe. Pure DI:
+  only `FetchPort` injected, no `globalThis.fetch` import.
+evidence:
+  code:
+    - src/connectors/oauth-discovery.ts
+    - src/connectors/types.ts
+  adrs: [160]
+  tests:
+    unit:
+      - tests/unit/oauth-discovery-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Phase 1 (2026-05-25). 흡수 출처: Cursor RFC 8414 well-known discovery + OIDC
+  fallback (memory R4). What this is NOT: authorize/redirect/token-exchange flow
+  (separate follow-up — `src/auth/chatgpt-oauth/` pattern generalized later).
+  Hellgate seals 11 adversarial cases. Compatible with RFC 8414 §3.1 (issuer
+  normalization), RFC 8414 §3.3 (404 → OIDC fallback).
