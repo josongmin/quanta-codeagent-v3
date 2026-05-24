@@ -166,23 +166,64 @@ export function checkR2NoEmittedJs(js: readonly TestFile[]): Violation[] {
 const SRC_IMPORT_RE = /from\s+["'](@\/[^"']+|(?:\.\.\/)+src\/[^"']+|\.\.\/\.\.\/src\/[^"']+)["']/
 const SRC_IMPORT_BARE_RE = /from\s+["'](?:\.\.?\/)+(?:src\/[^"']+)["']/
 
+// R3 exemption: meta/architecture path prefix.
+// Rule 5 ("does not grep source code unless testing source-transform/lint
+// rule") explicitly carves out tests that LINT or SCAN source rather than
+// import it. The path prefixes below are the canonical homes for such tests,
+// the same allowlist R5 already honors (`_arch/`, `architecture/`).
+// Adding `meta/` covers `tests/meta/*` (e.g. no-test-js-artifacts scanner).
+const R3_META_PATH_RE = /(^|\/)(?:_arch|architecture|meta|_harness|_parity)\//
+
+// R3 exemption: filename signals meta-test status.
+// Literal substring match (lower-case). Each pattern documented inline.
+//   - `scanner`              : source/AST scanners (no src import; they walk fs)
+//   - `slice-boundary`       : slice-boundary linters (filesystem layout assertions)
+//   - `boundary`             : superset of `slice-boundary` for non-slice arch tests
+//   - `import-cycle`         : Tarjan SCC scanners over src/ (read files, don't import)
+//   - `arch-gen`             : auto-generator tests that exercise tools/arch-gen
+//   - `no-test-js-artifacts` : filesystem walker that bans .test.js emission
+//   - `-lint`                : test-as-lint rules (suffix form)
+const R3_META_FILENAME_PATTERNS = [
+  "scanner",
+  "slice-boundary",
+  "boundary",
+  "import-cycle",
+  "arch-gen",
+  "no-test-js-artifacts",
+  "-lint",
+] as const
+
+// R3 exemption: explicit opt-in comment anywhere in the file. Mirrors the
+// `// source-grep allowed` escape hatch R5 uses — an authored signal that the
+// file deliberately does not import src/. Two synonyms accepted.
+const R3_OPT_IN_RE = /\/\/\s*(?:architecture-test|meta-test)\b/
+
+function isR3MetaExempt(path: string, text: string): boolean {
+  if (R3_META_PATH_RE.test(path)) return true
+  const lowerName = basename(path).toLowerCase()
+  for (const pat of R3_META_FILENAME_PATTERNS) {
+    if (lowerName.includes(pat)) return true
+  }
+  if (R3_OPT_IN_RE.test(text)) return true
+  return false
+}
+
 /**
  * R3 — "Calls actual unit under test."
  * Objective signal: at least one `import { ... } from "@/..."` or
  * `from "../../src/..."` (or any deeper relative ascent into `src/`). A test
  * that imports nothing from src/ is, by definition, not exercising real
  * units (it's testing fixtures or pure stdlib — likely vacuous).
+ *
+ * Meta/architecture/lint tests are exempt (see `isR3MetaExempt`): per rule 5
+ * they intentionally scan source instead of importing it, so requiring a
+ * src-import would be a false positive.
  */
 export function checkR3UnitImport(ts: readonly TestFile[]): Violation[] {
   const violations: Violation[] = []
   for (const f of ts) {
     if (SRC_IMPORT_RE.test(f.text) || SRC_IMPORT_BARE_RE.test(f.text)) continue
-    // _arch / architecture tests may legitimately not import src — they
-    // operate on filesystem layout. Allow if the file lives under _arch/ or
-    // architecture/.
-    if (/(^|\/)(?:_arch|architecture)\//.test(f.path)) continue
-    // _harness and integration harness shim files don't need src imports.
-    if (/(^|\/)(?:_harness|_parity)\//.test(f.path)) continue
+    if (isR3MetaExempt(f.path, f.text)) continue
     violations.push({
       file: f.path,
       line: 1,

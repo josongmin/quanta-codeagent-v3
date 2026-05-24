@@ -34,7 +34,6 @@ export {
   normalizeConfirm,
   READONLY_DENY_STEER_NOTE,
 } from "./confirm-decision"
-export { lruConversationCheckpointStore } from "./conversation-checkpoint-lru"
 export {
   appendSummary,
   archivedTokens,

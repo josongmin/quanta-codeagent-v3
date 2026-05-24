@@ -1,8 +1,12 @@
 # ADR-0185: File-write — swap self-rolled atomic temp+rename for `write-file-atomic`
 
-- Status: Accepted (sibling adapter; ADR-0155 self-impl is KEPT for zero-dep
-  callers and as the reference for `warning: "non-atomic-fallback"` EXDEV
-  surfacing — both adapters ship side-by-side under the same port)
+- Status: Superseded — the `atomicLibFileWriteStrategy` sibling adapter
+  shipped with 0 src callers (only its own hellgate test imported it) and
+  was deleted 2026-05-25; see ADR-0195 (dead-sibling-cleanup). The
+  ADR-0155 self-impl `atomicFileWriteStrategy` stays as the sole atomic-
+  write strategy under the `FileWriteStrategy` port. The ambient
+  `write-file-atomic.d.ts` declaration was also removed (no remaining
+  consumer).
 - Date: 2026-05-25
 - Related: ADR-0152 (LSP atomic write — original temp+rename mechanics),
   ADR-0155 (`FileWriteStrategy` port + sequential/atomic adapters), ADR-0143

@@ -19,7 +19,6 @@ export {
   type CsvRow,
   parseCsv,
 } from "./csv-parse"
-export { parseCsvLib } from "./csv-parse-lib"
 export {
   CSV_READ_DEFAULT_MAX_ROWS,
   CSV_READ_MAX_OUTPUT,

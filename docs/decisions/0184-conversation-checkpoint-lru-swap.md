@@ -1,6 +1,11 @@
 # ADR-0184: Conversation checkpoint store — swap self-rolled Map+LRU for `lru-cache`
 
-- Status: Accepted (sibling adapter; the self-rolled Map impl stays on disk)
+- Status: Superseded — the `lruConversationCheckpointStore` sibling adapter
+  shipped with 0 src callers (only its own hellgate test imported it) and
+  was deleted 2026-05-25; see ADR-0195 (dead-sibling-cleanup). The Map-based
+  `defaultConversationCheckpointStore` from ADR-0124 stays as the sole
+  implementation. The `_parity/checkpoint-parity.ts` helper from this slice
+  remains — it is still exercised by the self-impl hellgate.
 - Date: 2026-05-25
 - Related: ADR-0124 (conversation-checkpoint, original self-impl), ADR-0166
   (subagent conversation replay — consumer of this store)

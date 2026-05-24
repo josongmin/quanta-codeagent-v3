@@ -1,8 +1,12 @@
 # ADR-0192: Shell — swap self-rolled `Bun.spawn` runner for `execa`
 
-- Status: Accepted (sibling adapter; the self-impl `runShell` stays for
-  zero-dep callers and for the `onShellEvent` typed-event stream that execa
-  does not surface natively)
+- Status: Superseded — the `shell-execa` sibling adapter shipped with 0 src
+  callers (only its own hellgate test imported it) and was deleted
+  2026-05-25; see ADR-0195 (dead-sibling-cleanup). The self-impl `runShell`
+  stays as it always was — the only path actually consumed by every caller.
+  An undocumented orphan sibling, `src/storage/fs-jail-lib.ts` (which
+  referenced this ADR in its docstring but had no ADR of its own), was
+  deleted in the same sweep.
 - Date: 2026-05-25
 - Related: ADR-0006 (runtime-sandbox foundation + env allowlist), ADR-0081
   (PR-5 typed shell output events — STAYS on the self-impl), ADR-0175

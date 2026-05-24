@@ -1,8 +1,12 @@
 # ADR-0177: CSV parser — swap self-rolled tokenizer for `csv-parse@6.x`
 
-- Status: Accepted (supersedes the INTERNALS of ADR-0133's `csv-parse.ts`
-  for new callers — the public {`CsvParseResult`, `csv_read` tool} surface
-  stays byte-identical; self-impl kept as the zero-dep default for back-compat)
+- Status: Superseded — the `csv-parse-lib` sibling adapter shipped with 0
+  src callers (only its own hellgate test imported it) and was deleted
+  2026-05-25; see ADR-0195 (dead-sibling-cleanup). The self-impl
+  `parseCsv` from ADR-0133 stays as the sole CSV parser. A future
+  full-migration ADR may re-attempt the swap, but the half-swap (sibling
+  shipped without flipping `csv_read` to call it) was bloat without
+  benefit.
 - Date: 2026-05-25
 - Related: ADR-0133 / ADR-0147 (document slice — original `csv_read` +
   pure `parseCsv`), ADR-0172 (the same "외부 거 써" pattern applied to
