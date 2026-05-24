@@ -1,0 +1,44 @@
+id: dotenv-loader-first-wins
+title: .env loader — first-wins, no-override, `export ` strip, no-deps
+section: 10
+subsystem: CLI / agent entry — env file loader
+order: 60
+maturity: L5
+status: stable
+purpose: |
+  Tiny no-dependency `.env` loader (`loadEnvFiles(files)`). Both CLI
+  surfaces (`src/apps/cli/index.ts` and `src/apps/agent/index.ts`)
+  invoke it with the same precedence chain — `[".env.dev",
+  ".env.local", ".env"]` — at process start, BEFORE any module reads
+  `process.env`. Three deliberate semantics:
+  (1) NO-OVERRIDE — a key already set in the real environment wins;
+  the file is only consulted for unset keys, so a CI / shell-exported
+  override is never silently masked by a stale repo `.env`.
+  (2) FIRST-WINS across files — earlier files in the array shadow
+  later ones (`.env.dev` > `.env.local` > `.env`), matching the real
+  precedence: the more-specific override wins.
+  (3) `export ` prefix is stripped so a file that doubles as a shell
+  `source` works unchanged (`export FOO=bar` parses key `FOO`, not
+  `export FOO`). Quotes (single/double) on values are stripped; blank
+  lines and `#` comments are skipped. Zero runtime dependency on the
+  `dotenv` npm package — the parser is ~30 LOC and lives in-tree.
+evidence:
+  code:
+    - src/apps/cli/dotenv.ts
+    - src/apps/cli/index.ts
+    - src/apps/agent/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/dotenv.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  The loader is intentionally non-recursive (no `${VAR}`
+  interpolation), no multi-line values, no `.env.example`
+  cross-checking — its job is to bootstrap `QUANTA_PROVIDER` /
+  `*_API_KEY` early enough that the LLM factory and OAuth seam can
+  read them at construction time. Richer parsing is deliberately
+  declined; if a user needs a fancier loader they can pre-export.
