@@ -5,10 +5,10 @@ subsystem: Conversation-level rollback primitive (ShadowOdb 대화 face)
 order: 31
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core]
 purpose: |
@@ -28,10 +28,13 @@ evidence:
   tests:
     unit:
       - tests/unit/conversation-checkpoint-hellgate.test.ts
+      - tests/unit/checkpoint-policy-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: 'Pure store primitive — no current consumer (loop NEVER instantiates). Awaits /rewind slash command or auto-recovery hook to opt-in via defaultConversationCheckpointStore(). Plane-clean (zero coupling to loop/recovery/session-resources/permission).'
+  promotion_path: 'Wire a consumer (e.g. /rewind, message-rewind UI, or post-tool-failure auto-checkpoint hook); add integration test asserting loop ↔ store seam; add observability event on record/restore.'
 notes: |
   Default-OFF — loop 은 본 store 를 instantiate 하지 않는다. 미래의 `/rewind` slash
   command / auto-recovery hook 이 `defaultConversationCheckpointStore()` 로 opt-in.

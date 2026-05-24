@@ -5,19 +5,18 @@ subsystem: 시스템 프롬프트+캐시 prefix
 order: 5
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 purpose: 'Codex anti-signal 7개 흡수 (): absence-from-grep / nice-file-name / passing-shape-snapshot / quick-fix-exists / one-green-command / old-handoff-note / visual-looks-okay — cache prefix byte-stability 100-call 보존'
 evidence:
-  code:
-    - src/agent/prompt.ts
+  code: [src/agent/prompt.ts, src/agent/prompt-sections.ts]
   adrs: [27]
   tests:
-    unit: []
+    unit: [tests/unit/prompt-system.test.ts, tests/unit/prompt-rules-snapshot.test.ts]
     integration: []
     contract: []
 knobs: []

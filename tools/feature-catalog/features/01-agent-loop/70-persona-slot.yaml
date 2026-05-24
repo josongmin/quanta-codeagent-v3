@@ -5,12 +5,12 @@ subsystem: 시스템 프롬프트 — 페르소나 enum (Codex absorption, ADR-0
 order: 70
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
 config_refs:
-  env: []
+  env: [QUANTA_PERSONA]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: |
@@ -23,9 +23,7 @@ purpose: |
   buildSystemPrompt(_cwd?, { persona }) seam으로 1회 resolve 후 베이스 프롬프트에 베이크
   (mid-session 전환은 v1 범위 밖 — prefix-cache re-prefill 회피).
 evidence:
-  code:
-    - src/agent/persona.ts
-    - src/agent/prompt.ts
+  code: [src/agent/persona.ts, src/agent/prompt.ts, src/apps/cli/internal.ts, src/apps/cli/repl.ts, src/apps/cli/repl/assemble-context.ts]
   adrs: [68]
   tests:
     unit:

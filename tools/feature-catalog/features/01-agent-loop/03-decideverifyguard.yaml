@@ -8,18 +8,16 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: 순수정책 decideVerifyGuard
 evidence:
-  code:
-    - src/agent/verify-guard.ts
-    - src/agent/guards/verify-guard.ts
+  code: [src/agent/verify-guard.ts, src/agent/guards/verify-guard.ts]
   adrs: [13]
   tests:
-    unit: []
-    integration: []
+    unit: [tests/unit/verify-guard.test.ts, tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]
+    integration: [tests/integration/verify-guard-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

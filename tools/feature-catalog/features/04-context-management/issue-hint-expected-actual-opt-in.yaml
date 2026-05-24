@@ -5,7 +5,7 @@ subsystem: 이슈 텍스트 localization 힌트 (Agentless 흡수)
 order: 61
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
@@ -32,13 +32,12 @@ evidence:
     - src/agent/issue-hint/extract-expected-actual.ts
     - src/agent/issue-hint/compose.ts
     - src/agent/issue-hint/index.ts
-    - src/apps/bench/eval/driver.ts
   adrs: []
   tests:
     unit:
       - tests/unit/issue-hint/extract-expected-actual.test.ts
-      - tests/unit/issue-hint-hellgate.test.ts
-      - tests/unit/issue-hint-verbatim-hellgate.test.ts
+      - tests/unit/issue-hint-agentless-hellgate.test.ts
+      - tests/unit/bench-issue-hint-agentless-wiring.test.ts
     integration: []
     contract: []
 knobs:

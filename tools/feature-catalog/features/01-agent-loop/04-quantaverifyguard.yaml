@@ -5,7 +5,7 @@ subsystem: Verify-guard (Tier 0) · ADR-0013
 order: 4
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
@@ -15,14 +15,11 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: / (기본 OFF)
 evidence:
-  code:
-    - src/runner/assemble/verify.ts
-    - src/agent/verify-guard.ts
-    - src/apps/cli/internal.ts
+  code: [src/apps/cli/internal.ts, src/runner/assemble/verify.ts, src/agent/verify-guard.ts]
   adrs: [13]
   tests:
-    unit: []
-    integration: []
+    unit: [tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]
+    integration: [tests/integration/verify-guard-e2e.test.ts, tests/integration/verify-guard-forces-any.test.ts]
     contract: []
 knobs: [QUANTA_VERIFY_GUARD, QUANTA_VERIFY_GUARD_MAX_TRIPS]
 deliberate_hold: null

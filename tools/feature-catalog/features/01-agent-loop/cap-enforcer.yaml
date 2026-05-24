@@ -5,7 +5,7 @@ subsystem: 도구 hint 강제 (ADR-0062 rule #3)
 order: 90
 maturity: L4
 status: refined
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
@@ -25,7 +25,9 @@ purpose: |
 evidence:
   code:
     - src/agent/cap-enforcer.ts
-    - src/shared/runtime-config.ts
+    - src/agent/dispatch.ts
+    - src/agent/types.ts
+    - src/agent/loop.ts
   adrs: [62]
   tests:
     unit:

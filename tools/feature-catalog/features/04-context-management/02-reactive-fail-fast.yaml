@@ -5,20 +5,18 @@ subsystem: 압축(LLM 요약)
 order: 2
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: reactive fail-fast
 evidence:
-  code:
-    - src/agent/compaction.ts
-    - src/agent/compaction-breaker.ts
+  code: [src/agent/compaction.ts, src/agent/compaction-breaker.ts, src/agent/loop.ts, src/runner/assemble/compaction.ts]
   adrs: []
   tests:
-    unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
+    unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts, tests/unit/compaction-precompact.test.ts]
     integration: []
     contract: []
 knobs: []

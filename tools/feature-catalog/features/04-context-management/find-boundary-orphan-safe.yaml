@@ -5,10 +5,10 @@ subsystem: 압축 boundary 계산 — Anthropic unpaired tool_result 거부 회�
 order: 21
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |
@@ -23,10 +23,12 @@ purpose: |
 evidence:
   code:
     - src/agent/compaction.ts
+    - src/agent/loop.ts
   adrs: []
   tests:
     unit:
       - tests/unit/compaction.test.ts
+      - tests/unit/compaction-precompact.test.ts
     integration: []
     contract: []
 knobs: []

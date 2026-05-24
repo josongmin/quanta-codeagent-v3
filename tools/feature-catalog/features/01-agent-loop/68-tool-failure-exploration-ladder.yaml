@@ -5,7 +5,7 @@ subsystem: 시스템 프롬프트 — 도구 실패 회복 + 분석 multi-step (
 order: 68
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
@@ -20,11 +20,10 @@ purpose: |
   (file_tree_summary→glob→ls→read ladder) / 분석 태스크는 ORIENT→NARROW→CONFIRM 3-step
   multi-tool BY DEFAULT / narrow를 사용자에게 위임 금지 / FS-jail은 absolute path 단일 해법.
 evidence:
-  code:
-    - src/agent/prompt.ts
+  code: [src/agent/prompt.ts, src/agent/prompt-sections.ts]
   adrs: [62]
   tests:
-    unit: [tests/unit/prompt-system.test.ts]
+    unit: [tests/unit/prompt-system.test.ts, tests/unit/agent/tool-failure-mode.test.ts]
     integration: []
     contract: []
 knobs: []

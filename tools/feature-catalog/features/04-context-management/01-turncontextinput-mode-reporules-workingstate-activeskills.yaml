@@ -5,21 +5,18 @@ subsystem: TurnContext 1급 필드 (ADR-0015)
 order: 1
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 purpose: TurnContextInput.{mode, repoRules, workingState, activeSkills} 모두 optional — 미설정 ⇒ 해당 reminder 블록 미렌더.
 evidence:
-  code:
-    - src/agent/prompt.ts
-    - src/agent/working-state.ts
-    - src/agent/repo-rules.ts
+  code: [src/agent/turn-context.ts, src/agent/types.ts, src/agent/prompt-sections.ts, src/agent/prompt.ts]
   adrs: [15]
   tests:
-    unit: []
+    unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/agent/prompt-sections.test.ts]
     integration: []
     contract: []
 knobs: []

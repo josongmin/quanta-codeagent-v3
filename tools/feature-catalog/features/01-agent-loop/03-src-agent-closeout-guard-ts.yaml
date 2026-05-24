@@ -5,21 +5,22 @@ subsystem: Closeout 4-rule (ADR-0017)
 order: 3
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'
 evidence:
-  code:
-    - src/agent/closeout-guard.ts
+  code: [src/agent/closeout-guard.ts, src/agent/guards/closeout-guard.ts, src/agent/prompt.ts, src/agent/loop.ts]
   adrs: [17]
   tests:
     unit:
       - tests/unit/closeout-guard.test.ts
-    integration: []
+      - tests/unit/code-mod-closeout.test.ts
+      - tests/unit/wire-audit-closeout-hellgate.test.ts
+    integration: [tests/integration/closeout-forces-none.test.ts, tests/integration/fallback-x-verify-closeout-hell-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

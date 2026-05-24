@@ -5,10 +5,10 @@ subsystem: Surface-agnostic prompt provider port (Layer-2 runner)
 order: 60
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |
@@ -26,6 +26,7 @@ evidence:
     - src/runner/orchestrate/run-interactive.ts
     - src/runner/orchestrate/run-once.ts
     - src/runner/orchestrate/index.ts
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:

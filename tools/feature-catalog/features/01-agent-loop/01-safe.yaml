@@ -5,16 +5,15 @@ subsystem: 스트리밍 도구 실행
 order: 1
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: safe 도구 스트림 중 즉시 디스패치, 순서보존, head-of-line 배리어
 evidence:
-  code:
-    - src/agent/streaming-dispatch.ts
+  code: [src/agent/streaming-dispatch.ts, src/agent/dispatch.ts, src/agent/loop.ts, src/agent/stream-callbacks.ts, src/agent/tool-input-streaming.ts]
   adrs: []
   tests:
     unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts, tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts]

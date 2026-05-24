@@ -5,7 +5,7 @@ subsystem: Token estimator — 압축 threshold 게이트 입력
 order: 22
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
@@ -26,11 +26,12 @@ purpose: |
 evidence:
   code:
     - src/agent/compaction.ts
-    - src/apps/cli/help-render.ts
+    - src/shared/runtime-config.ts
   adrs: [83]
   tests:
     unit:
       - tests/unit/compaction.test.ts
+      - tests/unit/compaction-precompact.test.ts
     integration: []
     contract: []
 knobs:

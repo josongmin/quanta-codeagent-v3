@@ -5,7 +5,7 @@ subsystem: Session paths — id validation (hard-fail on escape attempts)
 order: 51
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
@@ -30,11 +30,13 @@ evidence:
   code:
     - src/session/paths.ts
     - src/session/root-port.ts
-    - src/shared/runtime-config.ts
+    - src/session/store.ts
+    - src/session/index.ts
   adrs: []
   tests:
     unit:
       - tests/unit/session-paths.test.ts
+      - tests/unit/cross-workspace-isolation-hellgate.test.ts
     integration: []
     contract: []
 knobs:

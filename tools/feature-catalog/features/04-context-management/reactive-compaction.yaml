@@ -5,7 +5,7 @@ subsystem: 압축 — reactive (proactive 보다 더 강한 squeeze)
 order: 20
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: integrated
@@ -24,10 +24,14 @@ purpose: |
 evidence:
   code:
     - src/agent/compaction.ts
+    - src/agent/compaction-breaker.ts
+    - src/agent/loop.ts
   adrs: []
   tests:
     unit:
       - tests/unit/compaction.test.ts
+      - tests/unit/compaction-breaker.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

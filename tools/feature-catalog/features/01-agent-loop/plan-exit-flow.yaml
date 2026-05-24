@@ -5,10 +5,10 @@ subsystem: Plan-exit lifecycle 흐름 (ADR-0062 absorb #3)
 order: 62
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [plan-mode]
@@ -25,11 +25,13 @@ evidence:
   code:
     - src/agent/plan-exit-flow.ts
     - src/agent/plan-exit.ts
+    - src/agent/dispatch.ts
   adrs: [62, 86]
   tests:
     unit:
       - tests/unit/plan-exit-flow.test.ts
       - tests/unit/plan-exit.test.ts
+      - tests/unit/agent/plan-exit-lifecycle-hell.test.ts
     integration: []
     contract: []
 knobs: []

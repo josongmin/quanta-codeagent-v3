@@ -5,10 +5,10 @@ subsystem: Per-turn dynamic 결정성 — date leak 봉합
 order: 13
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |
@@ -21,10 +21,12 @@ purpose: |
 evidence:
   code:
     - src/agent/prompt.ts
+    - src/agent/turn-context.ts
   adrs: [78]
   tests:
     unit:
       - tests/unit/prompt-dynamic.test.ts
+      - tests/unit/prompt-system.test.ts
     integration: []
     contract: []
 knobs: []

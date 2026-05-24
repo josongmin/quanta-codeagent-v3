@@ -5,7 +5,7 @@ subsystem: 4-section system prompt 렌더러 (Claude Desktop systemPromptSection
 order: 11
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
@@ -23,11 +23,13 @@ purpose: |
 evidence:
   code:
     - src/agent/prompt-sections.ts
+    - src/agent/prompt.ts
   adrs: [51, 68]
   tests:
     unit:
       - tests/unit/agent/prompt-sections.test.ts
       - tests/unit/prompt-sections-hellgate.test.ts
+      - tests/unit/prompt-dynamic.test.ts
     integration: []
     contract: []
 knobs: []

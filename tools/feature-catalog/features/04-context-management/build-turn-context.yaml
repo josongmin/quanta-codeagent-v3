@@ -5,7 +5,7 @@ subsystem: 시스템 prompt + per-turn reminder 합성 (ADR-0003 cache prefix)
 order: 10
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
@@ -24,13 +24,15 @@ evidence:
   code:
     - src/agent/prompt.ts
     - src/agent/prompt-sections.ts
+    - src/agent/turn-context.ts
+    - src/agent/repo-rules.ts
   adrs: [3, 51, 68]
   tests:
     unit:
       - tests/unit/prompt-system.test.ts
       - tests/unit/prompt-dynamic.test.ts
-      - tests/unit/agent/prompt-sections.test.ts
       - tests/unit/prompt-sections-hellgate.test.ts
+      - tests/unit/agent/prompt-sections.test.ts
     integration: []
     contract: []
 knobs: []

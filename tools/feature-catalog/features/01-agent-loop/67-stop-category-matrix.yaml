@@ -5,10 +5,10 @@ subsystem: 턴 라이프사이클 — 구조적 정지 사유 (Cursor 흡수, AD
 order: 67
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core, tier:core]
 purpose: |
@@ -21,8 +21,7 @@ purpose: |
   loop의 finish()가 4-경로(aborted/error/completed/max_turns)에서 stopCategory 부착.
   AgentOutcome.stopCategory 옵셔널 add-on, 부재 callers byte-identical.
 evidence:
-  code:
-    - src/agent/stop-category.ts
+  code: [src/agent/stop-category.ts, src/agent/loop.ts, src/agent/types.ts]
   adrs: [73]
   tests:
     unit:

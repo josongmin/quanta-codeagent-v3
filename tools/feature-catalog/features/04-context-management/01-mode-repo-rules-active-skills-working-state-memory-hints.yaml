@@ -5,22 +5,19 @@ subsystem: Reminder block 순서 (ADR-0023)
 order: 1
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, tier:1]
 depends_on: [glob-rules]
 purpose: 'Reminder block 순서 (buildDynamicContext): today-date+cwd → mode-notice → repo-rules → glob-rules(.cursor/.quanta per-turn select) → active-skills → working-state → memory-hints → hook injectAfterSystem tail. 통합 e2e가 순서 invariant를 pin.'
 evidence:
-  code:
-    - src/agent/prompt-sections.ts
-    - src/agent/prompt.ts
-    - src/agent/repo-rules.ts
+  code: [src/agent/prompt-sections.ts, src/agent/prompt.ts, src/agent/repo-rules.ts, src/agent/mode.ts, src/agent/turn-context.ts]
   adrs: []
   tests:
-    unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/agent/prompt-sections.test.ts]
+    unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/repo-rules-tree-hellgate.test.ts]
     integration: [tests/integration/sota-codex-full.test.ts]
     contract: []
 knobs: []

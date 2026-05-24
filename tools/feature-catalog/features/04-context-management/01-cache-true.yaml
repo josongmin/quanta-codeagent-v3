@@ -5,7 +5,7 @@ subsystem: 시스템 프롬프트+캐시 prefix
 order: 1
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
@@ -13,12 +13,10 @@ owners: ["@songmin"]
 labels: [surface:core]
 purpose: byte-static 단일 cache:true 블록, 동적은 trailing <system-reminder>
 evidence:
-  code:
-    - src/agent/prompt.ts
-    - src/agent/prompt-sections.ts
+  code: [src/agent/prompt.ts, src/agent/prompt-sections.ts, src/llm/adapters/anthropic.ts]
   adrs: []
   tests:
-    unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/agent/prompt-sections.test.ts]
+    unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/anthropic-cache.test.ts, tests/unit/anthropic-cache-control-blocks.test.ts]
     integration: []
     contract: []
 knobs: []

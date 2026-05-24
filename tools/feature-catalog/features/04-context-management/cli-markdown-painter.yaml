@@ -28,6 +28,7 @@ evidence:
   code:
     - src/apps/cli/markdown-painter.ts
     - src/apps/cli/internal.ts
+    - src/stream/adapters/stdout.ts
   adrs: []
   tests:
     unit:

@@ -5,7 +5,7 @@ subsystem: Cursor 흡수 — context history 1급 surface (ADR-0075)
 order: 30
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
@@ -24,10 +24,13 @@ purpose: |
 evidence:
   code:
     - src/agent/conversation-summary-archive.ts
+    - src/agent/loop.ts
+    - src/agent/compaction.ts
   adrs: [75]
   tests:
     unit:
       - tests/unit/conversation-summary-archive.test.ts
+      - tests/unit/compaction-archive-loop.test.ts
     integration: []
     contract: []
 knobs: []

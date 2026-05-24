@@ -5,7 +5,7 @@ subsystem: 압축(LLM 요약)
 order: 3
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
@@ -13,14 +13,12 @@ config_refs:
   env: [QUANTA_COMPACT_TOKENS]
 owners: ["@songmin"]
 labels: [surface:core]
-purpose: 'TODO: review from migration'
+purpose: 'QUANTA_COMPACT_TOKENS env knob — proactive compaction token threshold; parsed by runtime-config + consumed by compaction loop.'
 evidence:
-  code:
-    - src/agent/compaction.ts
-    - src/shared/runtime-config.ts
+  code: [src/agent/compaction.ts, src/shared/runtime-config.ts, src/runner/assemble/compaction.ts, src/apps/cli/internal.ts]
   adrs: []
   tests:
-    unit: [tests/unit/compaction.test.ts]
+    unit: [tests/unit/compaction.test.ts, tests/unit/compaction-precompact.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_COMPACT_TOKENS]

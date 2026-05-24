@@ -5,10 +5,10 @@ subsystem: AgentMode → per-turn notice (resolveAgentMode SSOT)
 order: 14
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 purpose: |
@@ -24,11 +24,13 @@ evidence:
   code:
     - src/agent/prompt.ts
     - src/agent/mode.ts
+    - src/agent/turn-context.ts
+    - src/agent/prompt-sections.ts
   adrs: [18]
   tests:
     unit:
       - tests/unit/prompt-dynamic.test.ts
-      - tests/unit/mode.test.ts
+      - tests/unit/prompt-sections-hellgate.test.ts
     integration:
       - tests/integration/sota-codex-full.test.ts
     contract: []

@@ -5,7 +5,7 @@ subsystem: System prompt git policy (ADR-0099)
 order: 99
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
@@ -21,10 +21,12 @@ purpose: |
 evidence:
   code:
     - src/agent/prompt.ts
+    - src/agent/prompt-sections.ts
   adrs: [99]
   tests:
     unit:
       - tests/unit/git-posture-prompt-hellgate.test.ts
+      - tests/unit/prompt-rules-snapshot.test.ts
     integration: []
     contract: []
 knobs: []

@@ -5,20 +5,19 @@ subsystem: 스트리밍 도구 실행
 order: 2
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: stream_reset tombstone
 evidence:
-  code:
-    - src/agent/streaming-dispatch.ts
+  code: [src/agent/streaming-dispatch.ts, src/llm/fallback.ts, src/llm/model-swap.ts, src/llm/assemble.ts, src/llm/types.ts]
   adrs: []
   tests:
-    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/fallback-empty-tombstone.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts, tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts]
-    integration: [tests/integration/streaming-dispatch-in-progress-e2e.test.ts, tests/integration/streaming-dispatch-rejection-e2e.test.ts]
+    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts, tests/unit/fallback-empty-tombstone.test.ts, tests/unit/fallback-hellgate.test.ts]
+    integration: []
     contract: []
 knobs: []
 deliberate_hold: null
