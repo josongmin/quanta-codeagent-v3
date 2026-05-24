@@ -18,6 +18,42 @@
  *   6. Threads below `MIN_TURN_THRESHOLD` turns are skipped.
  */
 
+/**
+ * ADR-0131 — 4-state memory outcome enum (per-Stage1 entry).
+ *
+ * Replaces free-form percentage scoring with a fixed-set enum to prevent
+ * inflation ("80% done" hallucinations). Adopted from Codex memory corpus
+ * (R4+R6 analysis of /.extracted_source/userdata/codex/memories) where the
+ * production distribution is approximately:
+ *
+ *   partial   ~75%   ← dominant; safe default; narrow lane open
+ *   success   ~15%   ← only when claim has file:line/SHA evidence anchor
+ *   uncertain ~10%   ← claim made, not yet verified ([[no-heuristics-only-validated]])
+ *   fail       ~1%   ← proof contradicts; gates promotion to phase2 (Phase C below)
+ *
+ * The ordering of {@link MEMORY_OUTCOMES} mirrors that frequency so any
+ * "first valid" enumeration converges on the safe inflation-resistant
+ * default. The enum is fixed-set (validated signal, not a heuristic
+ * threshold) per [[no-heuristics-only-validated]].
+ */
+export type MemoryOutcome = "partial" | "success" | "uncertain" | "fail"
+
+/**
+ * Canonical enumeration of {@link MemoryOutcome} values in frequency-descending
+ * order (Codex production distribution: partial > success > uncertain > fail).
+ *
+ * Iteration order matters for any "pick first defaulted" logic and for the
+ * Phase 2 promotion gate (ADR-0131 §3) which uses this tuple as the
+ * authoritative allow-list (rejecting 'fail' regardless of score).
+ */
+export const MEMORY_OUTCOMES = ["partial", "success", "uncertain", "fail"] as const
+
+/** Runtime type guard for an unknown value being a valid {@link MemoryOutcome}.
+ *  Safe at trust boundaries (SQLite rows, JSON blobs, frontmatter parses).
+ *  Mirrors the `isStage1Row` pattern in {@link store.ts}. */
+export const isMemoryOutcome = (v: unknown): v is MemoryOutcome =>
+  typeof v === "string" && (MEMORY_OUTCOMES as readonly string[]).includes(v)
+
 /** Per-thread Phase 1 distillation result. Mirrors Codex
  *  `stage1_outputs` row (thread_id PK + rolling fields). */
 export interface Stage1Output {
@@ -51,6 +87,30 @@ export interface Stage1Output {
   /** Cumulative usage count — high counts are anchor rows; Phase 2
    *  preserves them across rolling distill. */
   readonly usageCount: number
+  /**
+   * ADR-0131 — optional 4-state outcome enum (NEW Wave-W1 field).
+   *
+   * Absent/null for legacy rows (backward compatible — every existing
+   * Phase 1 path is unchanged; consumers MUST treat undefined as "not
+   * declared", NOT as a synonym for 'partial'). When present, Phase 2
+   * promotion gate (`phase2-promotion.ts`) reads this and refuses to
+   * promote rows whose outcome is 'fail'.
+   *
+   * Validated signal per [[no-heuristics-only-validated]]: enum is a
+   * closed 4-set; no scoring, no thresholds.
+   */
+  readonly outcome?: MemoryOutcome
+  /**
+   * ADR-0131 — optional evidence anchor for {@link Stage1Output.outcome}.
+   *
+   * Required to be `file:line`, URL, or commit SHA when {@link outcome}
+   * is `'success'` (lint enforces; not a schema constraint). May be
+   * null/undefined when outcome is absent or when it is `partial` /
+   * `uncertain` / `fail`. Promotion gate uses presence-or-absence as a
+   * score contributor (not the evidence's content — content quality is
+   * a manual review concern).
+   */
+  readonly outcomeEvidence?: string | null
 }
 
 /** Disk paths for the user-home memory dir. */

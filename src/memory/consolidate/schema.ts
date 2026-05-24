@@ -51,6 +51,33 @@ export const ensureConsolidateSchema = (db: Database): void => {
       ON stage1_outputs(source_updated_at DESC, thread_id DESC)
   `)
 
+  // ADR-0131 — additive migration: 4-state outcome enum + evidence anchor.
+  //
+  // We MUST NOT re-run `ALTER TABLE … ADD COLUMN` on an existing-column DB:
+  // SQLite errors with "duplicate column name" and aborts the txn. Older
+  // SQLite builds (pre-3.35.0) lack `ADD COLUMN IF NOT EXISTS`, so we
+  // emulate idempotency by probing `pragma_table_info`. Each ADD runs in
+  // its OWN exec() so a manual partial-prior-migration (e.g. only `outcome`
+  // added) heals on the next boot without an "extra column" abort.
+  const hasColumn = (name: string): boolean => {
+    const row = db
+      .query("SELECT 1 AS n FROM pragma_table_info('stage1_outputs') WHERE name = ?")
+      .get(name) as { n: number } | null
+    return row !== null
+  }
+  if (!hasColumn("outcome")) {
+    db.exec("ALTER TABLE stage1_outputs ADD COLUMN outcome TEXT")
+  }
+  if (!hasColumn("outcome_evidence")) {
+    db.exec("ALTER TABLE stage1_outputs ADD COLUMN outcome_evidence TEXT")
+  }
+  // Index on outcome — Phase 2 promotion gate filters by outcome != 'fail'
+  // and a covering index keeps that filter cheap on large stage1 corpora.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_stage1_outputs_outcome
+      ON stage1_outputs(outcome)
+  `)
+
   // consolidate_watermark — singleton row keyed at id=1. The CHECK
   // constraint enforces exactly-one-row semantics at the schema level
   // (no application-layer race window for "two watermark rows" bug).

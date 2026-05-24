@@ -21,7 +21,13 @@
  */
 import type { Database } from "bun:sqlite"
 import { ensureConsolidateSchema } from "./schema"
-import type { Stage1Output, Stage1StorePort, WatermarkState } from "./types"
+import {
+  isMemoryOutcome,
+  type MemoryOutcome,
+  type Stage1Output,
+  type Stage1StorePort,
+  type WatermarkState,
+} from "./types"
 
 /** Raw row shape as stored on disk. INTEGER columns surface as `number`
  *  through `bun:sqlite`; NULL columns are `null`. */
@@ -36,6 +42,10 @@ interface Stage1Row {
   selected_for_phase2_source_updated_at: number | null
   last_usage: number | null
   usage_count: number
+  /** ADR-0131 — NULL on legacy rows; one of {@link MEMORY_OUTCOMES} on new rows. */
+  outcome: string | null
+  /** ADR-0131 — NULL on legacy rows; free-form evidence anchor when present. */
+  outcome_evidence: string | null
 }
 
 /** Minimal runtime shape-check for a `stage1_outputs` row before casting. Guards
@@ -47,6 +57,7 @@ const isStage1Row = (r: unknown): r is Stage1Row => {
   if (typeof r !== "object" || r === null) return false
   const o = r as Record<string, unknown>
   const isNumOrNull = (v: unknown): boolean => v === null || typeof v === "number"
+  const isStrOrNull = (v: unknown): boolean => v === null || typeof v === "string"
   return (
     typeof o.thread_id === "string" &&
     typeof o.rollout_slug === "string" &&
@@ -57,7 +68,15 @@ const isStage1Row = (r: unknown): r is Stage1Row => {
     typeof o.selected_for_phase2 === "number" &&
     isNumOrNull(o.selected_for_phase2_source_updated_at) &&
     isNumOrNull(o.last_usage) &&
-    typeof o.usage_count === "number"
+    typeof o.usage_count === "number" &&
+    // ADR-0131 — outcome columns are nullable + string (additive migration).
+    // `pragma_table_info` adds them on construction; rows written by older
+    // code paths surface as NULL. Both NULL and any string pass the shape
+    // check; semantic validation (string ∈ MEMORY_OUTCOMES) happens in the
+    // row→domain mapper so a corrupt non-enum string raises loudly rather
+    // than silently propagating an invalid `outcome` downstream.
+    isStrOrNull(o.outcome) &&
+    isStrOrNull(o.outcome_evidence)
   )
 }
 
@@ -97,11 +116,13 @@ export class Stage1Store implements Stage1StorePort {
       INSERT INTO stage1_outputs (
         thread_id, rollout_slug, rollout_summary, raw_memory,
         preference_signals, source_updated_at, selected_for_phase2,
-        selected_for_phase2_source_updated_at, last_usage, usage_count
+        selected_for_phase2_source_updated_at, last_usage, usage_count,
+        outcome, outcome_evidence
       ) VALUES (
         $thread_id, $rollout_slug, $rollout_summary, $raw_memory,
         $preference_signals, $source_updated_at, $selected_for_phase2,
-        $selected_for_phase2_source_updated_at, $last_usage, $usage_count
+        $selected_for_phase2_source_updated_at, $last_usage, $usage_count,
+        $outcome, $outcome_evidence
       )
       ON CONFLICT(thread_id) DO UPDATE SET
         rollout_slug = excluded.rollout_slug,
@@ -112,7 +133,9 @@ export class Stage1Store implements Stage1StorePort {
         selected_for_phase2 = excluded.selected_for_phase2,
         selected_for_phase2_source_updated_at = excluded.selected_for_phase2_source_updated_at,
         last_usage = excluded.last_usage,
-        usage_count = excluded.usage_count
+        usage_count = excluded.usage_count,
+        outcome = excluded.outcome,
+        outcome_evidence = excluded.outcome_evidence
     `)
 
     // ORDER BY mirrors the (source_updated_at DESC, thread_id DESC)
@@ -147,6 +170,15 @@ export class Stage1Store implements Stage1StorePort {
   }
 
   upsert(out: Stage1Output): Promise<void> {
+    // ADR-0131 — outcome / outcomeEvidence are optional on the domain type
+    // (Wave-W1 additive). Coerce `undefined` to `null` here so the SQLite
+    // bind never sees an absent key (bun:sqlite throws BindError on missing
+    // named params). The semantic "not declared" sentinel is NULL on disk;
+    // the row→domain mapper restores it to `undefined` to match the type.
+    const outcomeBind: string | null =
+      out.outcome === undefined || out.outcome === null ? null : out.outcome
+    const outcomeEvidenceBind: string | null =
+      out.outcomeEvidence === undefined || out.outcomeEvidence === null ? null : out.outcomeEvidence
     this.upsertStmt.run({
       $thread_id: out.threadId,
       $rollout_slug: out.rolloutSlug,
@@ -161,6 +193,8 @@ export class Stage1Store implements Stage1StorePort {
       $selected_for_phase2_source_updated_at: out.selectedForPhase2SourceUpdatedAt,
       $last_usage: out.lastUsage,
       $usage_count: out.usageCount,
+      $outcome: outcomeBind,
+      $outcome_evidence: outcomeEvidenceBind,
     })
     return Promise.resolve()
   }
@@ -240,7 +274,14 @@ const rowToStage1Output = (row: Stage1Row): Stage1Output => {
     }
     signals.push(v)
   }
-  return {
+  // ADR-0131 — semantically validate the outcome column. NULL = legacy row
+  // (omit the field entirely so consumers see `undefined` and treat it as
+  // "not declared", per the JSDoc contract on Stage1Output.outcome). A non-
+  // NULL string MUST be a member of MEMORY_OUTCOMES; anything else is a
+  // hand-edited / corrupt DB and we propagate loudly rather than silently
+  // emit garbage (same "loud signal" principle as preference_signals JSON
+  // parse below).
+  const base: Stage1Output = {
     threadId: row.thread_id,
     rolloutSlug: row.rollout_slug,
     rolloutSummary: row.rollout_summary,
@@ -251,5 +292,26 @@ const rowToStage1Output = (row: Stage1Row): Stage1Output => {
     selectedForPhase2SourceUpdatedAt: row.selected_for_phase2_source_updated_at,
     lastUsage: row.last_usage,
     usageCount: row.usage_count,
+  }
+  if (row.outcome === null && row.outcome_evidence === null) return base
+  // exactOptionalPropertyTypes: build a fresh object with the optional keys
+  // ONLY when they were materially present on disk. `undefined` would be a
+  // type error (and a semantic lie — the column was NULL, not "explicitly
+  // undefined").
+  let outcome: MemoryOutcome | undefined
+  if (row.outcome !== null) {
+    if (!isMemoryOutcome(row.outcome)) {
+      throw new Error(
+        `stage1_outputs.outcome for thread '${row.thread_id}' is not a valid MemoryOutcome: ${JSON.stringify(
+          row.outcome,
+        )}`,
+      )
+    }
+    outcome = row.outcome
+  }
+  return {
+    ...base,
+    ...(outcome !== undefined ? { outcome } : {}),
+    ...(row.outcome_evidence !== null ? { outcomeEvidence: row.outcome_evidence } : {}),
   }
 }
