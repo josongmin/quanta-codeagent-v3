@@ -10,62 +10,62 @@
  * runtime only fires when the composition root calls `start()`.
  */
 
-// Types
-export type {
-  Frequency,
-  WeekdayDay,
-  Weekday,
-  RRule,
-  RRuleParseError,
-  RRuleParseErrorCode,
-  AutomationStatus,
-  Automation,
-  AutomationStorePort,
-  ClockPort,
-  EnvPort,
-  ModelAvailabilityPort,
-  AgentLoopPort,
-  SchedulerEvent,
-  SchedulerSinkPort,
-} from "./types"
-
-export {
-  ALL_FREQUENCIES,
-  ALL_WEEKDAYS,
-  ALL_AUTOMATION_STATUSES,
-  AutomationStoreError,
-} from "./types"
-
-// Parser
-export { parseRRule, serializeRRule } from "./rrule-parser"
-export type { RRuleParseResult } from "./rrule-parser"
-
-// Weekday
-export {
-  parseWeekday,
-  serializeWeekday,
-  nthWeekdayOfMonth,
-  allOccurrencesInMonth,
-  daysInUtcMonth,
-} from "./weekday"
-
-// Evaluator
-export { computeNextFire, iterateFires } from "./next-fire"
-
+export type { CreateAutomationInput } from "./automation"
 // Automation lifecycle
 export {
   createAutomation,
-  transitionStatus,
-  recordFire,
-  markError,
   isFireEligible,
+  markError,
+  recordFire,
+  transitionStatus,
 } from "./automation"
-export type { CreateAutomationInput } from "./automation"
-
-// JSONL store
-export { defaultJsonlAutomationStore } from "./store-jsonl"
-export type { JsonlAutomationStoreOpts } from "./store-jsonl"
-
+export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
 // Model reroute
 export { chooseModel } from "./model-reroute"
-export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
+// Evaluator
+export { computeNextFire, iterateFires } from "./next-fire"
+export type { RRuleParseResult } from "./rrule-parser"
+// Parser
+export { parseRRule, serializeRRule } from "./rrule-parser"
+export type { SchedulerRuntime, SchedulerRuntimeOpts } from "./runtime"
+// Runtime
+export {
+  createSchedulerRuntime,
+  DEFAULT_TICK_INTERVAL_MS,
+  SCHEDULER_ENV_FLAG,
+} from "./runtime"
+export type { JsonlAutomationStoreOpts } from "./store-jsonl"
+// JSONL store
+export { defaultJsonlAutomationStore } from "./store-jsonl"
+// Types
+export type {
+  AgentLoopPort,
+  Automation,
+  AutomationStatus,
+  AutomationStorePort,
+  ClockPort,
+  EnvPort,
+  Frequency,
+  ModelAvailabilityPort,
+  RRule,
+  RRuleParseError,
+  RRuleParseErrorCode,
+  SchedulerEvent,
+  SchedulerSinkPort,
+  Weekday,
+  WeekdayDay,
+} from "./types"
+export {
+  ALL_AUTOMATION_STATUSES,
+  ALL_FREQUENCIES,
+  ALL_WEEKDAYS,
+  AutomationStoreError,
+} from "./types"
+// Weekday
+export {
+  allOccurrencesInMonth,
+  daysInUtcMonth,
+  nthWeekdayOfMonth,
+  parseWeekday,
+  serializeWeekday,
+} from "./weekday"
