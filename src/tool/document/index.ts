@@ -48,8 +48,8 @@ export {
   pdfReadTool,
   type ReadPdfInput,
   readPdfInputSchema,
-  sniffPdfMagic,
   type SupportedDocumentMediaType,
+  sniffPdfMagic,
 } from "./pdf-read"
 export {
   XLSX_READ_DEFERRAL_MESSAGE,

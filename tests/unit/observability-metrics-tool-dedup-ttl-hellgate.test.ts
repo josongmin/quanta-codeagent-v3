@@ -9,7 +9,7 @@ import {
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "@/tool"
 
 /**
- * Per-tool TTL hellgate (ADR-0178 — follow-up to ADR-0176).
+ * Per-tool TTL hellgate (ADR-0179 — follow-up to ADR-0176).
  *
  * Pins the contract that `defaultToolCallCache({ perToolTtlMs })` resolves
  * TTL by tool-name at SET time, falls through to the global `ttlMs` for
@@ -32,10 +32,7 @@ const fakeCtx = (cwd = "/wd"): ToolContext => ({
 })
 
 const fakeTool = (
-  overrides: {
-    name?: string
-    callLog?: { count: number }
-  } = {},
+  overrides: { name?: string; callLog?: { count: number } } = {},
 ): Tool<FakeInput> => {
   const log = overrides.callLog
   return {

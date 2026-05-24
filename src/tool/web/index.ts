@@ -4,8 +4,10 @@
  *   - `web_fetch` (always-on, no provider — fetches HTTPS URLs and returns
  *     HTML→Markdown). Tool factory exported as `webFetchTool({fetcher?})`
  *     so the production caller binds `globalThis.fetch` and tests inject a
- *     fake. Pure HTML→Markdown helper `htmlToMarkdown` re-exported for
- *     hellgate testing without spinning up a fake fetcher.
+ *     fake. Pure HTML→Markdown helper `htmlToMarkdown` (now turndown-backed,
+ *     ADR-0183) re-exported for hellgate testing without spinning up a fake
+ *     fetcher; configured `turndown` singleton exposed so callers can
+ *     register custom rules (e.g. code-fence language hints, table plugin).
  *   - `web_search` (provider-gated — closed-port DI). Tool factory
  *     `webSearchTool(provider?)` returns a tool that gracefully degrades to
  *     ok:false "no provider wired" when `provider` is undefined, so the
@@ -18,8 +20,8 @@
  *  web-search.ts` (caller-wired through `AgentConfig.webSearch.provider`).
  */
 
+export { htmlToMarkdown, turndown } from "./html-to-markdown"
 export {
-  htmlToMarkdown,
   WEB_FETCH_DEFAULT_MAX_BYTES,
   WEB_FETCH_MAX_BYTES_CEILING,
   WEB_FETCH_MAX_OUTPUT,

@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import type { FollowUp, PlanQueueStore } from "@/agent/plan-queue"
-import { defaultPlanQueueStore } from "@/agent/plan-queue"
 import {
   alwaysCancelPolicy,
   alwaysQueuePolicy,
@@ -9,6 +7,8 @@ import {
   type InterruptionPolicy,
   type MidTurnInput,
 } from "@/agent/mid-turn-interruption"
+import type { FollowUp, PlanQueueStore } from "@/agent/plan-queue"
+import { defaultPlanQueueStore } from "@/agent/plan-queue"
 
 /**
  * Mid-turn interruption — hellgate (ADR-0177).
@@ -99,12 +99,12 @@ describe("mid-turn — B. always-* stocks", () => {
 
   test("HELL-5: alwaysQueue → action=queue regardless of mode", () => {
     expect(alwaysQueuePolicy.decide(mkInput("a", { mode: "queue" }), ctx).action).toBe("queue")
-    expect(
-      alwaysQueuePolicy.decide(mkInput("a", { mode: "cancel-and-replace" }), ctx).action,
-    ).toBe("queue")
-    expect(
-      alwaysQueuePolicy.decide(mkInput("a", { mode: "cancel-and-amend" }), ctx).action,
-    ).toBe("queue")
+    expect(alwaysQueuePolicy.decide(mkInput("a", { mode: "cancel-and-replace" }), ctx).action).toBe(
+      "queue",
+    )
+    expect(alwaysQueuePolicy.decide(mkInput("a", { mode: "cancel-and-amend" }), ctx).action).toBe(
+      "queue",
+    )
   })
 
   test("HELL-6: alwaysCancel → action=cancel regardless of mode", () => {
@@ -112,9 +112,9 @@ describe("mid-turn — B. always-* stocks", () => {
     expect(
       alwaysCancelPolicy.decide(mkInput("a", { mode: "cancel-and-replace" }), ctx).action,
     ).toBe("cancel")
-    expect(
-      alwaysCancelPolicy.decide(mkInput("a", { mode: "cancel-and-amend" }), ctx).action,
-    ).toBe("cancel")
+    expect(alwaysCancelPolicy.decide(mkInput("a", { mode: "cancel-and-amend" }), ctx).action).toBe(
+      "cancel",
+    )
   })
 })
 

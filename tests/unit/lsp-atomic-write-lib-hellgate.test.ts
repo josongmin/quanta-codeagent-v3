@@ -1,5 +1,5 @@
 /**
- * Hellgate — ADR-0178 `atomicLibFileWriteStrategy` (write-file-atomic swap).
+ * Hellgate — ADR-0185 `atomicLibFileWriteStrategy` (write-file-atomic swap).
  *
  * Parity battery for the npm-lib-backed sibling of ADR-0155
  * `atomicFileWriteStrategy`. The public `FileWriteStrategy` port stays
@@ -40,7 +40,7 @@ const filesIn = async (dir: string): Promise<string[]> => readdir(dir).catch(() 
 /* Hellgate                                                            */
 /* ------------------------------------------------------------------ */
 
-describe("atomicLibFileWriteStrategy (ADR-0178)", () => {
+describe("atomicLibFileWriteStrategy (ADR-0185)", () => {
   test("LIB-1: happy — 3 files all ok; final content matches input bytes", async () => {
     const dir = await mkTmp()
     try {

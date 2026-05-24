@@ -1,5 +1,5 @@
 /**
- * Conversation checkpoint store — lru-cache adapter (ADR-0177).
+ * Conversation checkpoint store — lru-cache adapter (ADR-0184).
  *
  * Sibling of `./conversation-checkpoint.ts`. Same public interface
  * (`ConversationCheckpointStore`, `ConversationSnapshot`,

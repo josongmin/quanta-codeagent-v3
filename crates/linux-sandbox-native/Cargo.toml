@@ -2,22 +2,27 @@
 name = "linux-sandbox-native"
 version = "0.1.0"
 edition = "2021"
-description = "Native Linux Landlock + seccomp binding for quanta OS sandbox (ADR-0175)"
+description = "Native Linux Landlock + seccomp binding for quanta OS sandbox (ADR-0175 / ADR-0176)"
 license = "MIT OR Apache-2.0"
 
 [lib]
 crate-type = ["cdylib"]
 
+# napi-rs v2 is the only napi crate currently published on crates.io (v3 is
+# pre-release only). Cargo.lock pinned us to v2 at scaffold time; the
+# `napi = "3"` text in the scaffold draft was overly optimistic and never
+# actually resolved against crates.io. ADR-0176 §Build verification.
 [dependencies]
-napi = { version = "3", default-features = false, features = ["napi6"] }
-napi-derive = "3"
+napi = { version = "2", default-features = false, features = ["napi6"] }
+napi-derive = "2"
+
+# Landlock + seccompiler are Linux-only crates. Gating via
+# `target.'cfg(target_os = "linux")'.dependencies` keeps cargo check green
+# on darwin / windows developer hosts (rust-analyzer in IDE) while the
+# real impl bodies are themselves `#[cfg(target_os = "linux")]`.
+[target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 seccompiler = "0.5"
 
 [build-dependencies]
-napi-build = "3"
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = "symbols"
+napi-build = "2"

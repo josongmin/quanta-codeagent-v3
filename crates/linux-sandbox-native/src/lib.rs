@@ -1,36 +1,44 @@
-//! `linux-sandbox-native` — napi-rs binding surface for quanta's in-process
-//! Linux Landlock + seccomp OS sandbox (ADR-0175, Phase 3).
+//! `linux-sandbox-native` — napi-rs binding for quanta's in-process Linux
+//! Landlock + seccomp OS sandbox (ADR-0175 scaffold, ADR-0176 Phase 3.1
+//! real impl).
 //!
-//! This file is the **scaffold** of the napi-rs API surface. The TypeScript
-//! adapter (`src/runtime/os-sandbox/landlock-native.ts`) loads
-//! `@quanta/linux-sandbox-native` lazily; this crate provides the entry
-//! points it expects. The actual landlock + seccomp + fork-exec wire is
-//! deferred to Phase 3.1 (see ADR-0175 §Phase 3.1 deferral) — function
-//! bodies here are `todo!()` / stub returns that compile-check the ABI shape
-//! without performing any kernel calls.
+//! ## Layout
 //!
-//! Industry pattern mirror:
-//!   - Codex `codex-linux-sandbox` (in-process landlock crate) — same shape.
-//!   - Cursor `cursorsandbox` (separate Rust binary, no napi) — alternative
-//!     we explicitly didn't take; see ADR-0175 §Alternatives rejected.
-//!
-//! ## Surface
-//!
-//! Two `#[napi]` entry points (kept minimal so the TS adapter dictates the
-//! contract):
+//! Two `#[napi]` entry points (the contract for the TypeScript adapter in
+//! `src/runtime/os-sandbox/landlock-native.ts`):
 //!
 //!   - `spawn_sandboxed(spec, policy) -> NapiSpawnResult`
-//!   - `availability() -> String` (JSON `{ available, kernelVersion, abiSupported, reason? }`)
+//!   - `availability() -> String` (JSON envelope)
 //!
 //! Three `#[napi(object)]` value types matching the TS `SandboxPolicy` /
-//! `SandboxedSpawnSpec` / `SandboxedSpawnResult` types, with napi-rs
-//! convention: camelCase JS → snake_case Rust. The TS adapter maps between
-//! the two with a single `mapPolicyToNapi()` helper.
+//! `SandboxedSpawnSpec` / `SandboxedSpawnResult` types. napi-rs converts
+//! snake_case Rust ↔ camelCase JS automatically.
+//!
+//! ## Platform gating
+//!
+//! `landlock` + `seccompiler` are Linux-only crates (Cargo.toml gates them
+//! by `cfg(target_os = "linux")`). The real spawn / restrict logic lives
+//! in `policy` + `seccomp` modules that are themselves
+//! `#![cfg(target_os = "linux")]`. On non-Linux hosts the napi exports
+//! still compile but return typed "unavailable" results — this is the
+//! IDE-friendly path (rust-analyzer on macOS doesn't choke) and also
+//! exactly what we want at runtime if the per-triple npm artifact is
+//! installed on a non-Linux host by mistake.
+//!
+//! ## Codex parity
+//!
+//! The fork-exec → child applies seccomp → landlock `restrict_self()` →
+//! `execve()` pipeline is byte-identical to Codex `codex-linux-sandbox`.
+//! Seccomp is applied BEFORE landlock because landlock leaves the syscall
+//! table intact while seccomp can fail-fast on namespace-escape attempts
+//! before the landlock fence even loads.
 
 use napi_derive::napi;
 use std::collections::HashMap;
 
+#[cfg(target_os = "linux")]
 pub mod policy;
+#[cfg(target_os = "linux")]
 pub mod seccomp;
 
 /// Typed sandbox policy ferried across the napi boundary.
@@ -86,39 +94,166 @@ pub struct NapiSpawnResult {
     pub degrade_reason: Option<String>,
 }
 
+/// Plain-Rust mirror of `NapiSandboxPolicy` that is `Clone + Send + 'static`.
+///
+/// `#[napi(object)]` doesn't derive `Clone`; `Command::pre_exec` requires
+/// the closure (and its captures) to be `Send + 'static`. We snapshot the
+/// napi struct into this local mirror at the top of `spawn_sandboxed` and
+/// pass it into the pre_exec closure.
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+struct LocalPolicy {
+    profile: String,
+    workspace: String,
+    extra_read_paths: Vec<String>,
+    extra_write_paths: Vec<String>,
+    allow_network: Option<bool>,
+}
+
+#[cfg(target_os = "linux")]
+impl LocalPolicy {
+    fn from_napi(p: &NapiSandboxPolicy) -> Self {
+        Self {
+            profile: p.profile.clone(),
+            workspace: p.workspace.clone(),
+            extra_read_paths: p.extra_read_paths.clone(),
+            extra_write_paths: p.extra_write_paths.clone(),
+            allow_network: p.allow_network,
+        }
+    }
+
+    /// Re-hydrate a `NapiSandboxPolicy` view for `policy::compile_ruleset`,
+    /// which expects the napi shape. Cheap — only shared by the child's
+    /// `pre_exec` once per spawn.
+    fn as_napi(&self) -> NapiSandboxPolicy {
+        NapiSandboxPolicy {
+            profile: self.profile.clone(),
+            workspace: self.workspace.clone(),
+            extra_read_paths: self.extra_read_paths.clone(),
+            extra_write_paths: self.extra_write_paths.clone(),
+            allow_network: self.allow_network,
+            timeout_ms: None,
+            memory_mb: None,
+        }
+    }
+}
+
 /// Spawn `spec.command` inside a Landlock + seccomp fence compiled from
 /// `policy`.
 ///
-/// Phase 3 (this commit) — **scaffold body**. Returns a typed
-/// `unavailable` result so the TS adapter can degrade to the Phase 2
-/// external-binary wrapper (bwrap / landlock-cli) without any wire
-/// disruption. Phase 3.1 will replace the body with:
+/// Pipeline (matches Codex `codex-linux-sandbox`):
 ///
-///   1. `policy::compile_ruleset(&policy)` → landlock `Ruleset`.
-///   2. `seccomp::build_filter(&policy)` → seccompiler `BpfProgram`.
-///   3. `fork()` child.
-///   4. In child: apply landlock ruleset (post-exec ABI restriction),
-///      install seccomp filter, then `execve(command)`.
-///   5. In parent: `wait()`, capture stdout/stderr via pipe pair, return.
+///   1. Validate inputs (non-empty argv, supported profile).
+///   2. `Command::new(argv[0]).args(argv[1..]).current_dir(cwd).env(...)`.
+///   3. Install a `pre_exec` hook that, in the **child** after fork but
+///      BEFORE `execve()`:
+///         a. Applies the seccomp filter (lax in Phase 3.1; see seccomp.rs
+///            for the rationale).
+///         b. Compiles + applies the landlock ruleset.
+///   4. `Command::output()` runs the child, captures stdout/stderr, waits.
 ///
-/// Cancellation: the TS adapter remembers the child PID and `kill(SIGTERM)`s
-/// it when its `AbortSignal` fires.
+/// Cancellation: the TS adapter does not pass AbortSignal here (napi
+/// boundary). The adapter manages cancellation by killing the child via
+/// the OS PID it gets back through the spawn handle. In this synchronous
+/// `Command::output()` path the cancellation is therefore the host
+/// process's responsibility (`kill(pid, SIGTERM)`); a future async napi
+/// surface can expose the PID directly.
 #[napi]
+#[cfg(target_os = "linux")]
+pub fn spawn_sandboxed(
+    spec: NapiSandboxedSpawnSpec,
+    policy: NapiSandboxPolicy,
+) -> napi::Result<NapiSpawnResult> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    // Validate argv first — empty argv is a TS-adapter bug; surface a
+    // typed result rather than letting `Command::new("")` panic.
+    if spec.command.is_empty() {
+        return Ok(NapiSpawnResult {
+            exit_code: 127,
+            stdout: String::new(),
+            stderr: String::from("spawn_sandboxed: empty command vector"),
+            sandbox_applied: false,
+            degrade_reason: Some(String::from("empty-command")),
+        });
+    }
+
+    // Snapshot policy for the move into pre_exec.
+    let local_policy = LocalPolicy::from_napi(&policy);
+
+    let mut cmd = Command::new(&spec.command[0]);
+    if spec.command.len() > 1 {
+        cmd.args(&spec.command[1..]);
+    }
+    cmd.current_dir(&spec.cwd);
+    if let Some(env) = &spec.env {
+        cmd.env_clear();
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+    }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    // SAFETY: `pre_exec` runs after `fork()` returns 0 (child) but before
+    // `execve()`. The closure runs in a single-threaded address space
+    // (only the calling thread survives the fork) so no synchronization
+    // primitives are required. We avoid allocator pressure here — the
+    // closure does small `String` work via the typed error path but no
+    // heavy allocation. landlock and seccomp APIs are async-signal-safe in
+    // their hot path (they ultimately call `syscall(...)` directly).
+    unsafe {
+        cmd.pre_exec(move || {
+            // Phase 3.1: apply seccomp first (lax mode — empty rule table,
+            // Allow default) then landlock. Both error paths convert to
+            // `io::Error` so the child fails before `execve()` and the
+            // parent sees a typed spawn failure.
+            seccomp::build_and_apply().map_err(std::io::Error::other)?;
+
+            // Re-hydrate napi shape inside the child and compile fresh —
+            // landlock file descriptors must be opened in the child's
+            // address space.
+            let napi_view = local_policy.as_napi();
+            let ruleset = policy::compile_ruleset(&napi_view).map_err(std::io::Error::other)?;
+            policy::apply_ruleset(ruleset).map_err(std::io::Error::other)?;
+            Ok(())
+        });
+    }
+
+    match cmd.output() {
+        Ok(output) => Ok(NapiSpawnResult {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            sandbox_applied: true,
+            degrade_reason: None,
+        }),
+        Err(e) => Ok(NapiSpawnResult {
+            exit_code: 127,
+            stdout: String::new(),
+            stderr: format!("spawn_sandboxed: {e}"),
+            sandbox_applied: false,
+            degrade_reason: Some(String::from("spawn-failed")),
+        }),
+    }
+}
+
+/// Non-Linux fallback: emit a typed "unavailable" result so the per-triple
+/// npm artifact, if accidentally installed on darwin / windows, still
+/// composes with the TS fallback chain. `default.ts` Linux branch is the
+/// only production caller; this exists for IDE compile only.
+#[napi]
+#[cfg(not(target_os = "linux"))]
 pub fn spawn_sandboxed(
     _spec: NapiSandboxedSpawnSpec,
     _policy: NapiSandboxPolicy,
 ) -> napi::Result<NapiSpawnResult> {
-    // Scaffold: surface "not yet implemented" via the typed result so the
-    // TS adapter can fall through to the Phase 2 path without throwing.
-    // Phase 3.1 replaces this with the real fork/landlock/seccomp/exec wire.
     Ok(NapiSpawnResult {
         exit_code: 127,
         stdout: String::new(),
-        stderr: String::from(
-            "linux-sandbox-native: scaffold body — Phase 3.1 impl pending (see ADR-0175)",
-        ),
+        stderr: String::from("linux-sandbox-native: not supported on this platform"),
         sandbox_applied: false,
-        degrade_reason: Some(String::from("native-impl-pending")),
+        degrade_reason: Some(String::from("platform-unsupported")),
     })
 }
 
@@ -129,12 +264,58 @@ pub fn spawn_sandboxed(
 /// Shape:
 ///   `{ "available": bool, "kernelVersion": string, "abiSupported": number, "reason"?: string }`
 ///
-/// Phase 3 scaffold returns `available: false` with a typed reason so the
-/// fallback chain still kicks in. Phase 3.1 wires this to
-/// `landlock::ABI::new_current()` + `/proc/sys/kernel/osrelease` read.
+/// Linux path: probes ABI via `policy::probe_abi()` (builds a trivial
+/// ruleset and inspects negotiation) and reads `/proc/sys/kernel/osrelease`
+/// for the kernel version string. Errors at any step degrade to
+/// `available: false` with a typed reason — the TS adapter never sees an
+/// exception.
 #[napi]
+#[cfg(target_os = "linux")]
+pub fn availability() -> napi::Result<String> {
+    let abi = policy::probe_abi();
+    let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let json = if abi > 0 {
+        format!(
+            r#"{{"available":true,"kernelVersion":"{}","abiSupported":{}}}"#,
+            escape_json(&kernel),
+            abi
+        )
+    } else {
+        format!(
+            r#"{{"available":false,"kernelVersion":"{}","abiSupported":0,"reason":"landlock-abi-zero"}}"#,
+            escape_json(&kernel)
+        )
+    };
+    Ok(json)
+}
+
+/// Non-Linux availability: always `available: false` with a typed reason.
+#[napi]
+#[cfg(not(target_os = "linux"))]
 pub fn availability() -> napi::Result<String> {
     Ok(String::from(
-        r#"{"available":false,"kernelVersion":"","abiSupported":0,"reason":"native-impl-pending"}"#,
+        r#"{"available":false,"kernelVersion":"","abiSupported":0,"reason":"platform-unsupported"}"#,
     ))
+}
+
+/// Minimal JSON string escaper for the availability envelope. We don't
+/// pull a JSON crate just for this — kernel version strings only contain
+/// ASCII alnum + `.`/`-`/`_` in practice, but defensively escape `"` and
+/// `\` to keep the envelope parseable.
+#[cfg(target_os = "linux")]
+fn escape_json(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' | '\r' | '\t' => {}
+            c if (c as u32) < 0x20 => {}
+            c => out.push(c),
+        }
+    }
+    out
 }

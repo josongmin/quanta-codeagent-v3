@@ -1,5 +1,5 @@
 /**
- * HTML → Markdown converter (ADR-0176) — `turndown@7.2.4`-backed
+ * HTML → Markdown converter (ADR-0183) — `turndown@7.2.4`-backed
  * implementation that replaces the 9-stage inline pipeline previously in
  * `fetch.ts`. Same public contract: `htmlToMarkdown(html)` returns a
  * trimmed markdown string with no triple-newline runs.

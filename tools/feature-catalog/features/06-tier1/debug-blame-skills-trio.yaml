@@ -1,0 +1,95 @@
+id: debug-blame-skills-trio
+title: debug/blame 시스템 스킬 트리오 — debug-trace / explain-stack-trace / blame-section (ADR-0176)
+section: 6
+subsystem: 스킬 — 번들 시스템 스킬 (debugging + code archaeology, Cursor CTK §⑧ 패턴 흡수)
+order: 176
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cursor"]
+depends_on: [git-log-search-skill]
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
+purpose: |
+  세 개의 워크플로 형태 시스템 스킬을 한 번에 흡수 — 모두 prompt-only,
+  새 도구 추가 없음, 사용자가 query를 좁히며 반복 iterate 하는 narrative
+  워크플로.
+
+  1. **debug-trace** — "이거 크래시 났어 / 이 에러 조사해 줘". `parse_test_failure`
+     도구로 raw error text 먼저 결정적 parse → 각 frame을 `Read`로 열어보고 →
+     caller frame vs root-cause frame 구분 → `file:line + 한 줄 원인 + 한 줄
+     fix` 형태 ranked hypothesis 생성. fix는 적용하지 않음 (그건 `debug-error`
+     의 일). allowedTools: `[Bash, Read, Grep, parse_test_failure,
+     file_tree_summary]`.
+
+  2. **explain-stack-trace** — "이 stack trace 설명해 줘 / 이 에러가 뭐 말하는
+     거야". 순수 read-only narrative 스킬. `parse_test_failure` parse →
+     exception class 의미 (언어 ecosystem별) 식별 → bottom-up walk (크래시
+     난 곳 → outer caller → user-code 경계) → 한 paragraph plain-English
+     summary. **fix 제안 절대 안 함** — `debug-trace`로 handoff 문장으로
+     마무리. allowedTools: `[Read, Grep, parse_test_failure]`.
+
+  3. **blame-section** — "이 섹션 누가 썼어? / 이 라인들 git blame". 기존
+     `git_blame_heatmap` 도구의 `start_line`/`end_line` 범위 형태 (ADR-0096)을
+     wrap. 결과를 author + commit 별로 grouping → top-3 author + 라인 수 →
+     ≥2 specific commit SHA 인용 (most-touched + most-recent) → ORIGINAL
+     author (pickaxe `git log -S` / `-L:funcname:file`) vs RECENT editor
+     (default git blame answer) 명확 구분. allowedTools: `[Bash, Read,
+     git_blame, git_blame_heatmap]`.
+
+  Research grounding: Cursor는 `blame_by_file_path`를 atomic tool로 노출하지만
+  workflow-shaped 작업 (`pr-review-canvas`, `make-pr-easy-to-review`,
+  `fix-merge-conflicts`, `babysit`, `loop-on-ci`)은 CTK 스킬에 두고 `gh`/`git`
+  shell + Read 로 실행한다 (`docs/analysis/경쟁사리뷰/code-agent-loop/cursor-git.md`
+  §⑧). 세 스킬 모두 같은 패턴 — exploratory crash 조사 / 섹션 ownership
+  탐색은 narrative iteration이 필요한 workflow.
+
+  세 스킬 모두 sibling ADR-0173 git-log-search 와 동일한 seam (NAME constant +
+  Trigger interface + triggerXxx() + findXxxSkill())을 노출하므로 slash router
+  (`/debug-trace`, `/explain-stack-trace`, `/blame-section`)가 router-agnostic
+  하게 wire 가능.
+evidence:
+  code:
+    - src/skill/system-skills/debug-trace/SKILL.md
+    - src/skill/system-skills/debug-trace/index.ts
+    - src/skill/system-skills/explain-stack-trace/SKILL.md
+    - src/skill/system-skills/explain-stack-trace/index.ts
+    - src/skill/system-skills/blame-section/SKILL.md
+    - src/skill/system-skills/blame-section/index.ts
+    - src/skill/system-skills/index.ts
+    - src/skill/index.ts
+  adrs: [176]
+  tests:
+    unit:
+      - tests/unit/system-skills-new-trio-hellgate.test.ts
+      - tests/unit/system-skills-git-log-search-hellgate.test.ts
+      - tests/unit/skill-git-bundle.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF — system-skill slice 일반 정책: description 매칭 또는 명시
+  invoke만 활성. System-wins-on-collision 보호 (user-supplied "debug-trace"
+  스킬이 shadow 못 함). HELL-3에서 body가 P0 rules에 cite한 specific tool
+  name (parse_test_failure / git_blame_heatmap / start_line / end_line / Read)을
+  verbatim 검사 — drift 차단.
+
+  Tool 형태로 만들지 않은 이유: (1) crash 조사는 사용자가 어떤 frame을 먼저
+  열지 / sibling을 grep할지 / STOP 시점을 골라야 함 (atomic tool 계약 바깥),
+  (2) blame-section의 original vs recent author는 사용자 의도에 따라 pickaxe
+  돌릴지 결정 — atomic tool은 always-run 강제, (3) explain-stack-trace의
+  "fix 제안 안 함" 계약은 모드 flag로는 silently bypass 가능 → 별도 스킬
+  형태가 contract enforceable. CTK git bundle (ADR-0111) 과 engineering-task
+  bundle (ADR-0134)와는 audience 다름 (workflow=PR/CI vs engineering=새 코드
+  vs 본 트리오=조사/탐색).
+
+  Composability: debug-trace는 narrative-only 요청을 explain-stack-trace로
+  defer, reproduce+patch 요청을 debug-error (ADR-0134)로 defer. explain-stack
+  -trace는 사용자가 fix를 원할 가능성 있을 때 "for an actionable hypothesis,
+  invoke `debug-trace`" 문장으로 마무리. Cross-skill handoff는 각 스킬 계약의
+  first-class — implicit이 아님.

@@ -1,4 +1,4 @@
-# ADR-0178: Conversation checkpoint store — swap self-rolled Map+LRU for `lru-cache`
+# ADR-0184: Conversation checkpoint store — swap self-rolled Map+LRU for `lru-cache`
 
 - Status: Accepted (sibling adapter; the self-rolled Map impl stays on disk)
 - Date: 2026-05-25

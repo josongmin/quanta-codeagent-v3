@@ -7,7 +7,7 @@ import { lruConversationCheckpointStore } from "@/agent/conversation-checkpoint-
 import type { Message } from "@/llm"
 
 /**
- * ConversationCheckpointStore — lru-cache-backed hellgate (ADR-0177).
+ * ConversationCheckpointStore — lru-cache-backed hellgate (ADR-0184).
  *
  * Mirror of `tests/unit/conversation-checkpoint-hellgate.test.ts`. Same 23
  * cases (renumbered LRU-* to disambiguate in test output) targeting the

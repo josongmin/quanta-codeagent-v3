@@ -1,5 +1,5 @@
 /**
- * Hellgate — `htmlToMarkdown` turndown-backed converter (ADR-0176).
+ * Hellgate — `htmlToMarkdown` turndown-backed converter (ADR-0183).
  *
  * Mirrors the "E. HTML→Markdown" suite in `web-fetch-hellgate.test.ts`
  * but probes the turndown swap directly: every case asserts a property
@@ -61,10 +61,14 @@ describe("turndown-backed htmlToMarkdown — C. code emphasis lists", () => {
     expect(out).toContain("multi")
     expect(out).toContain("line")
   })
-  test("8. <ul><li>a</li><li>b</li></ul> → '- a\\n- b'", () => {
+  test("8. <ul><li>a</li><li>b</li></ul> → bullet list with '-' marker", () => {
+    // turndown emits `-   a` (3-space padding between marker and content)
+    // rather than `- a`. Both satisfy the CommonMark bullet-list shape;
+    // we assert the marker + content presence rather than a literal byte
+    // sequence so a future turndown release tweak doesn't break us.
     const out = htmlToMarkdown("<ul><li>a</li><li>b</li></ul>")
-    expect(out).toContain("- a")
-    expect(out).toContain("- b")
+    expect(out).toMatch(/^-\s+a$/m)
+    expect(out).toMatch(/^-\s+b$/m)
   })
   test("9. <strong>bold</strong> + <em>it</em> → '**bold**' + '_it_'", () => {
     const out = htmlToMarkdown("<strong>bold</strong> <em>it</em>")

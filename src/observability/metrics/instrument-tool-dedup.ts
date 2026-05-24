@@ -107,7 +107,7 @@ export interface ToolCallCache {
   /** Lookup; `null` = miss (including stale/expired). */
   get(key: string): ToolResult | null
   /** Store result. TTL / eviction is implementation-defined.
-   *  `toolName` is optional for back-compat (legacy callers); ADR-0178's
+   *  `toolName` is optional for back-compat (legacy callers); ADR-0179's
    *  per-tool TTL only takes effect when callers pass it. The
    *  `instrumentToolWithDedup` wrap always passes `tool.name`. */
   set(key: string, result: ToolResult, toolName?: string): void
@@ -203,7 +203,7 @@ export const instrumentToolWithDedup = <I>(
         // Cache success AND failure — both are "this exact input produced this
         // exact result"; caller has the predicate to opt out for tools where
         // caching ok:false is wrong (see ADR).
-        // ADR-0178: pass `tool.name` so the cache can apply per-tool TTL.
+        // ADR-0179: pass `tool.name` so the cache can apply per-tool TTL.
         cache.set(key, terminal, tool.name)
       }
     },
@@ -218,13 +218,200 @@ export interface DefaultCacheOpts {
   /** Per-entry TTL in ms. Default 30_000 (30s). Past TTL ⇒ `get` returns `null`
    *  AND drops the entry inline (no separate sweeper). */
   readonly ttlMs?: number
+  /**
+   * ADR-0179: per-tool TTL override. Tool name → TTL ms.
+   *
+   * Falls through to the global `ttlMs` for tools not listed.
+   * Setting an entry to `0` ⇒ never cache (every `get` is a miss; `set`
+   *   stores nothing). This is the "always-stale" sentinel used to keep
+   *   the `set` path total without a separate "skip" branch in the wrap.
+   *
+   * Inspired by Cursor's 4-tier freshness model (`cursor-localization.md`
+   * — recent_edits overlay 0s / Rust debounce event-driven / 60s server
+   * reconciliation / handshake ground truth) which proves staleness
+   * tolerance is data-class specific; per-TOOL TTL is the call-level analog
+   * (read vs grep vs bash).
+   */
+  readonly perToolTtlMs?: Readonly<Record<string, number>>
   /** Clock injection for tests. Default `Date.now`. */
   readonly now?: () => number
+  /**
+   * ADR-0183: when true, compare caller's `perToolTtlMs` to the audited
+   * `RECOMMENDED_PER_TOOL_TTL_MS` preset AT CONSTRUCTION TIME and emit a
+   * drift signal per divergent tool. Operator-facing log (via `onDriftWarn`)
+   * + machine-facing counter (`tool.dedup.config_drift.total{tool, kind}`).
+   *
+   * Default false — comparison cost is zero and behavior is byte-identical
+   * to ADR-0179 when omitted. Modeled after the operator-vs-machine split
+   * of ADR-0169 (skipped-warning) + ADR-0175 (wired-gauge).
+   *
+   * Research grounding: Cursor's `FastRepoInitHandshakeV2` returns a per-
+   * codebase status (`UP_TO_DATE` / `OUT_OF_SYNC` / `EMPTY`) at every
+   * `doUpdate` cycle (cursor-localization.md §17.6) — a typed signal of
+   * config-vs-state drift the caller can act on. Per-tool TTL drift is the
+   * construction-time analog.
+   */
+  readonly checkRecommendedDrift?: boolean
+  /** Operator-facing warn sink. Called ONCE with a combined message listing
+   *  every drift (mirrors `ObservabilityOpts.warn` from ADR-0169). Default
+   *  is a no-op — drift detection without a sink is metric-only. */
+  readonly onDriftWarn?: (msg: string) => void
+  /** Metric registry for the drift counter. When `checkRecommendedDrift` is
+   *  true but `metrics` is absent, drift detection still fires the
+   *  `onDriftWarn` log (graceful degradation: operator signal beats machine
+   *  signal when only one is wired). */
+  readonly metrics?: MetricsRegistry
 }
+
+// ── Drift kinds (closed enum) ────────────────────────────────────────────
+
+/** ADR-0183: drift between caller `perToolTtlMs` and `RECOMMENDED_PER_TOOL_TTL_MS`. */
+export type PerToolTtlDriftKind =
+  | "too-permissive"
+  | "too-restrictive"
+  | "missing"
+  | "unknown-tool"
+
+interface PerToolTtlDrift {
+  readonly tool: string
+  readonly kind: PerToolTtlDriftKind
+}
+
+/**
+ * Compute the set of drifts between a caller's `perToolTtlMs` map and the
+ * RECOMMENDED preset. Pure / total: union the keys, classify each.
+ *
+ *   - caller > preset           → "too-permissive" (caching MORE than recommended;
+ *                                  staleness risk grows with the delta)
+ *   - caller < preset           → "too-restrictive" (caching LESS than recommended;
+ *                                  cost-optimization missed; 0 < N also lands here)
+ *   - preset has, caller lacks  → "missing" (caller falls through to global ttlMs
+ *                                  which may or may not match preset)
+ *   - caller has, preset lacks  → "unknown-tool" (custom tool — informational)
+ *   - exact match               → no drift, skipped
+ */
+const computePerToolTtlDrifts = (
+  caller: Readonly<Record<string, number>> | undefined,
+  preset: Readonly<Record<string, number>>,
+): ReadonlyArray<PerToolTtlDrift> => {
+  const out: PerToolTtlDrift[] = []
+  const presetKeys = Object.keys(preset)
+  const callerKeys = caller === undefined ? [] : Object.keys(caller)
+  const union = new Set<string>([...presetKeys, ...callerKeys])
+  // Deterministic order for the combined message and counter emit.
+  const ordered = [...union].sort()
+  for (const tool of ordered) {
+    const presetVal = preset[tool]
+    const callerVal = caller === undefined ? undefined : caller[tool]
+    if (presetVal === undefined && callerVal !== undefined) {
+      out.push({ tool, kind: "unknown-tool" })
+      continue
+    }
+    if (presetVal !== undefined && callerVal === undefined) {
+      out.push({ tool, kind: "missing" })
+      continue
+    }
+    // Both defined: classify by delta.
+    if (presetVal !== undefined && callerVal !== undefined && presetVal !== callerVal) {
+      out.push({
+        tool,
+        kind: callerVal > presetVal ? "too-permissive" : "too-restrictive",
+      })
+    }
+  }
+  return out
+}
+
+const groupDriftsByKind = (
+  drifts: ReadonlyArray<PerToolTtlDrift>,
+): Record<PerToolTtlDriftKind, string[]> => {
+  const groups: Record<PerToolTtlDriftKind, string[]> = {
+    "too-permissive": [],
+    "too-restrictive": [],
+    missing: [],
+    "unknown-tool": [],
+  }
+  for (const d of drifts) groups[d.kind].push(d.tool)
+  return groups
+}
+
+const formatDriftMessage = (drifts: ReadonlyArray<PerToolTtlDrift>): string => {
+  const g = groupDriftsByKind(drifts)
+  const parts: string[] = []
+  if (g["too-permissive"].length > 0) parts.push(`too-permissive=[${g["too-permissive"].join(",")}]`)
+  if (g["too-restrictive"].length > 0)
+    parts.push(`too-restrictive=[${g["too-restrictive"].join(",")}]`)
+  if (g.missing.length > 0) parts.push(`missing=[${g.missing.join(",")}]`)
+  if (g["unknown-tool"].length > 0) parts.push(`unknown=[${g["unknown-tool"].join(",")}]`)
+  return (
+    `[tool-dedup] ${drifts.length} drift(s) vs RECOMMENDED: ${parts.join(" ")}. ` +
+    `Set 'checkRecommendedDrift:false' to silence or update perToolTtlMs to match.`
+  )
+}
+
+const safeDriftSink = (fn: () => void): void => {
+  try {
+    fn()
+  } catch {
+    /* drift observability must not break cache construction */
+  }
+}
+
+const reportPerToolTtlDrifts = (
+  drifts: ReadonlyArray<PerToolTtlDrift>,
+  opts: DefaultCacheOpts,
+): void => {
+  if (drifts.length === 0) return
+  const metrics = opts.metrics
+  if (metrics !== undefined) {
+    for (const d of drifts) {
+      safeDriftSink(() =>
+        metrics.increment("tool.dedup.config_drift.total", 1, { tool: d.tool, kind: d.kind }),
+      )
+    }
+  }
+  const warn = opts.onDriftWarn
+  if (warn !== undefined) {
+    safeDriftSink(() => warn(formatDriftMessage(drifts)))
+  }
+}
+
+/**
+ * Recommended per-tool TTL starting preset (ADR-0179).
+ *
+ * Conservative defaults — callers can override. Tools NOT listed fall through
+ * to the global `ttlMs` (default 30s in `defaultToolCallCache`).
+ *
+ * Rationale per entry:
+ *   - `read` 60s     — file content rarely changes within one human-loop turn
+ *                      if no `write` was issued (Cursor's recent_edits 0s
+ *                      overlay handles the FAST path; we let cold reads live).
+ *   - `grep`/`glob` 30s — search results can shift with any write; matches the
+ *                          original global default.
+ *   - `git_status`/`git_diff` 5s — working tree mutates frequently.
+ *   - `git_log` 60s — history is append-only modulo rebase.
+ *   - `web_fetch`/`web_search` 0 — content lives outside our control; never
+ *                                   cache by default (operator opts in).
+ *   - `bash` 0 — we don't know what the command did (clock/network/state);
+ *                caching is unsound by default.
+ */
+export const RECOMMENDED_PER_TOOL_TTL_MS: Readonly<Record<string, number>> = Object.freeze({
+  read: 60_000,
+  grep: 30_000,
+  glob: 30_000,
+  git_status: 5_000,
+  git_diff: 5_000,
+  git_log: 60_000,
+  web_fetch: 0,
+  web_search: 0,
+  bash: 0,
+})
 
 interface Entry {
   readonly result: ToolResult
-  readonly storedAt: number
+  /** Absolute expiry timestamp resolved at SET time, so per-tool TTL is
+   *  honored even though `get` no longer sees the tool name. */
+  readonly expiresAt: number
 }
 
 /**
@@ -232,13 +419,32 @@ interface Entry {
  * gives us LRU for free. TTL is per-entry; expired entries are dropped lazily
  * on lookup.
  *
+ * Per-tool TTL (ADR-0179) is resolved at SET time so the cheap `get` path stays
+ * tool-agnostic. A `0` TTL means "never cache" — the entry is simply not stored
+ * (any prior entry for that key is also dropped to keep semantics monotone).
+ *
  * No I/O, no clock side-channels (the clock is injected via `opts.now`).
  */
 export const defaultToolCallCache = (opts: DefaultCacheOpts = {}): ToolCallCache => {
   const maxEntries = opts.maxEntries ?? 200
   const ttlMs = opts.ttlMs ?? 30_000
+  const perToolTtlMs = opts.perToolTtlMs
   const now = opts.now ?? (() => Date.now())
   const store = new Map<string, Entry>()
+
+  // ADR-0183: construction-time drift detection vs the RECOMMENDED preset.
+  // Default-OFF — `checkRecommendedDrift` absent means zero comparison cost
+  // and behavior byte-identical to ADR-0179.
+  if (opts.checkRecommendedDrift === true) {
+    const drifts = computePerToolTtlDrifts(perToolTtlMs, RECOMMENDED_PER_TOOL_TTL_MS)
+    reportPerToolTtlDrifts(drifts, opts)
+  }
+
+  const resolveTtl = (toolName: string | undefined): number => {
+    if (toolName === undefined || perToolTtlMs === undefined) return ttlMs
+    const override = perToolTtlMs[toolName]
+    return override === undefined ? ttlMs : override
+  }
 
   return {
     computeKey(toolName, input, ctx) {
@@ -253,7 +459,10 @@ export const defaultToolCallCache = (opts: DefaultCacheOpts = {}): ToolCallCache
     get(key) {
       const e = store.get(key)
       if (!e) return null
-      if (now() - e.storedAt > ttlMs) {
+      // Boundary preserved from ADR-0176: strictly past expiry expires; entry
+      // at exactly `now() === expiresAt` is still considered alive (the
+      // original `now() - storedAt > ttlMs` semantics with TTL added at SET).
+      if (now() > e.expiresAt) {
         store.delete(key)
         return null
       }
@@ -262,10 +471,17 @@ export const defaultToolCallCache = (opts: DefaultCacheOpts = {}): ToolCallCache
       store.set(key, e)
       return e.result
     },
-    set(key, result) {
+    set(key, result, toolName) {
+      const ttl = resolveTtl(toolName)
+      // ADR-0179: TTL === 0 means "never cache" — store nothing.
+      if (ttl === 0) {
+        // Also drop any stale prior entry so the next get is unambiguously miss.
+        if (store.has(key)) store.delete(key)
+        return
+      }
       // If the key exists, delete first so re-insertion lands at the tail.
       if (store.has(key)) store.delete(key)
-      store.set(key, { result, storedAt: now() })
+      store.set(key, { result, expiresAt: now() + ttl })
       // Evict from the HEAD of insertion order (oldest) while over cap.
       while (store.size > maxEntries) {
         const firstKey = store.keys().next().value
