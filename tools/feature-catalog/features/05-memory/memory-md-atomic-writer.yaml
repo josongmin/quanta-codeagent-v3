@@ -1,0 +1,50 @@
+id: memory-md-atomic-writer
+title: MEMORY.md 3-file atomic writer + git-tracked commit (ADR-0068 Wave B)
+section: 5
+subsystem: Phase 2 consolidator — on-disk 3-file writer
+order: 71
+maturity: L4
+status: stable
+purpose: |
+  Owns the on-disk side of the Phase 2 cross-session consolidator. Three
+  user-visible markdown files (MEMORY.md / raw_memories.md /
+  memory_summary.md) under `~/.quanta/memory/` are produced atomically via
+  a temp-then-rename dance: all three temp files are written in Phase A,
+  then three POSIX-atomic renames in Phase B, then (when git is enabled)
+  Phase C commits the change so durable history exists. A Phase A throw
+  best-effort unlinks any already-written temp files; a Phase B rename
+  failure surfaces the original throw; a Phase C git failure becomes a
+  hard MemoryWriteError so the watermark is not advanced (operator must
+  resolve a rejecting pre-commit hook). Size caps are pre-checked BEFORE
+  any temp file is written so a violating payload never partially lands.
+  raw_memories.md is unbounded by design.
+evidence:
+  code:
+    - src/memory/consolidate/writer.ts
+    - src/memory/consolidate/reader.ts
+    - src/memory/consolidate/paths.ts
+    - src/memory/consolidate/git.ts
+    - src/memory/consolidate/constants.ts
+  adrs: [68]
+  tests:
+    unit:
+      - tests/unit/memory/consolidate-writer.test.ts
+    integration:
+      - tests/integration/consolidate-phase2-end-to-end.test.ts
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    NodeFsLike is a port — every fs primitive is injectable so unit tests
+    do not touch disk. No silent truncation: cap violations throw
+    MemoryWriteError before any temp write. No fallback path on commit
+    failure — surfacing the error is the contract.
+  promotion_path: |
+    Wave-level changes (new file in the tree, alternate transport) require
+    an ADR-0068 follow-up. The writer is otherwise self-contained.
+notes: |
+  Directory is created with restrictive mode (chmod 0700) on first use.
+  Reader sibling (`reader.ts`) surfaces `memory_summary.md` for the
+  4-section prompt preset — absent file ⇒ legacy byte-identical preset.
+  `04-codex-2-phase-consolidator` is the broader orchestration entry; this
+  entry isolates the atomicity primitive.

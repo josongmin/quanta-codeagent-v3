@@ -1,0 +1,45 @@
+id: memory-distill-redaction-fence
+title: Memory distill input fence — redactSecrets before LLM sees transcript
+section: 5
+subsystem: 장기 메모리 — distill input boundary
+order: 73
+maturity: L4
+status: stable
+purpose: |
+  Third application point of the content-plane redaction invariant — the
+  transcript handed to the LLM distiller (`distillSession`) is run through
+  `redactSecrets({origin:"memory_distill"})` BEFORE the LLM sees a single
+  byte. Pairs with the two other application points (tool_result inbound,
+  envelope JSONL outbound). Without this fence, a session transcript that
+  contained a leaked secret in a tool output would persist (in distilled
+  form) into long-term memory — the very surface designed to outlive the
+  session. Hits are surfaced to the loop via `onRedactionHits` so the
+  AgentOutcome.redactions[] aggregate sees the distill-origin counts and
+  silent redaction is impossible.
+evidence:
+  code:
+    - src/agent/memory-distill.ts
+    - src/agent/memory.ts
+    - src/security/redaction.ts
+  adrs: [78]
+  tests:
+    unit: []
+    integration:
+      - tests/integration/redaction-three-application-points.test.ts
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    The fence is not configurable — it is the structural invariant that
+    makes the redaction-content-plane entry honest about its three
+    application points (tool_result / envelope_jsonl / memory_distill).
+    Disabling the entire redactor at startup (with acknowledgedRisk) bypasses
+    all three uniformly; there is no per-point opt-out.
+  promotion_path: |
+    A new content-plane consumer (e.g. an outbound webhook surface) would
+    extend the redactor with a fourth application point + ADR follow-up.
+notes: |
+  Origin tag `memory_distill` is observable in audit / outcome.redactions so
+  operators can see which fence absorbed which kinds of hits. The redactor
+  itself is generic — see `secret-redaction-content-plane` for the
+  Layer 1 / Layer 2 structure (no internals duplicated here).

@@ -1,0 +1,35 @@
+id: working-memory-buffer
+title: WorkingMemory — in-session message buffer (RFC §6.3 L1)
+section: 5
+subsystem: 작업 메모리 — in-session 버퍼 (non-persisted)
+order: 11
+maturity: L4
+status: stable
+purpose: |
+  L1 in-session message buffer used by the agent loop to hold the live turn
+  transcript. Distinct from L2 long-term memory: working memory is never
+  persisted to a store and is dropped on session end. Generic over the
+  message shape (`WorkingMemory<M>`) so the agent layer can bind it to the
+  full @/llm `Message` type while the memory slice stays free of an @/llm
+  import — the llm `Message` is structurally assignable to the slice's
+  minimal `StoredMessage` shape. Surface: append / snapshot (shallow copy
+  read view) / clear / replace / tokenEstimate. Shallow-copy snapshot is
+  intentional: messages are treated as structurally immutable across the
+  loop, so a defensive deep-copy on every read would be wasted work.
+evidence:
+  code:
+    - src/memory/working.ts
+    - src/memory/types.ts
+    - src/memory/index.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Intentionally distinct from `WorkingState.snapshot` (agent/working-state.ts)
+  which DOES deep-copy because its payload is host-mutated. tokenEstimate is
+  the same chars/4 heuristic used elsewhere in the loop for compaction
+  triggers — not a real tokenizer.

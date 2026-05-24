@@ -1,0 +1,54 @@
+id: consolidator-session-hook
+title: Session-end consolidator hook — runMemoryConsolidatorHook (no-throw L4 wire)
+section: 5
+subsystem: 장기 메모리 — Phase 1 session-end wire (ADR-0068 Wave D)
+order: 72
+maturity: L4
+status: stable
+purpose: |
+  Pure wiring around `runPhase1`. Converts the agent's session-end signal +
+  host-injected `Phase1Port` / `Stage1StorePort` + final AgentOutcome into
+  a `Phase1Input`, invokes the consolidator, and turns the result into a
+  structured outcome (`distilled` / `skipped` / `error`). NO-THROW
+  contract: every internal failure path (missing port, missing store,
+  missing thread id, port throw, store throw) is caught and surfaced via
+  the injected log callback + an `error` AgentEvent so the
+  session-finishing path is never derailed. Default-OFF: absent host
+  configuration ⇒ zero allocation (hook is not invoked). Fires ONLY when
+  `spanStatus === "ok"` — failed sessions skip distillation; the
+  forceSummarization flag does NOT override this (force is "distill on a
+  successful run" intent, not a failure salvage). SOTA Cursor mirror —
+  forceSummarization=true fires the consolidator's enabled arm without an
+  explicit host opt-in (the per-thread MIN_TURN_THRESHOLD floor still
+  applies).
+evidence:
+  code:
+    - src/agent/memory-consolidator-hook.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+  adrs: [68]
+  tests:
+    unit:
+      - tests/unit/memory-consolidator-hook-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - AgentConfig.memoryConsolidator.enabled — host opt-in (default-OFF; absent ⇒ no hook)
+  - AgentConfig.memoryConsolidator.forceSummarization — Cursor-style override of memoryMode
+  - AgentConfig.memoryConsolidator.port — Phase1Port injection
+  - AgentConfig.memoryConsolidator.store — Stage1StorePort injection
+  - AgentConfig.memoryConsolidator.threadId — required for stage1 row key
+deliberate_hold:
+  reason: |
+    Phase 2 (cross-session synthesizer) is NOT triggered from the
+    session-end hook — Phase 2 is threshold / explicit-trigger driven, not
+    cron. The host runs it on its own schedule. A Phase-2 host trigger
+    (CLI command / cron / per-N-Phase1s) is a separate follow-up.
+  promotion_path: |
+    Add a host-side scheduler that invokes the Phase 2 entry on its own
+    cadence — not in `runAgent`.
+notes: |
+  Pairs with `04-codex-2-phase-consolidator` (broader orchestration entry)
+  and `memory-md-atomic-writer` (Phase 2 disk side). Distinct because
+  Phase 1 wire-up has its own contract (no-throw, default-OFF) that
+  applies to the agent loop boundary, not the consolidator internals.

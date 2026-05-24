@@ -1,0 +1,39 @@
+id: phase1-stage1-store
+title: Stage1Store — per-thread distill rows + consolidate_watermark (ADR-0068 Wave A)
+section: 5
+subsystem: Phase 1 SQLite adapter — additive over recall store
+order: 70
+maturity: L4
+status: stable
+purpose: |
+  SQLite-backed `Stage1StorePort` implementation owning the
+  `stage1_outputs` + `consolidate_watermark` tables that record per-thread
+  Phase 1 distill outputs and the Phase 2 selection watermark. Additive
+  schema: does NOT touch the legacy `memories` recall table, so existing
+  recall + eviction are byte-identical to pre-Wave-A. Patterns mirrored
+  from the recall sqlite adapter (prepared statements built once in the
+  constructor and reused; row mappers as pure functions; sqlite errors
+  propagate rather than swallow). Watermark conflicts (concurrent Phase 2
+  runs racing on the same store) surface as `WatermarkConflictError` so
+  the orchestrator can decide whether to retry or abort. Connection mode
+  is journal_mode=WAL when the same DB is shared with the recall store;
+  standalone test instances inherit `:memory:` in-process locking.
+evidence:
+  code:
+    - src/memory/consolidate/store.ts
+    - src/memory/consolidate/schema.ts
+    - src/memory/consolidate/types.ts
+    - src/memory/index.ts
+  adrs: [68]
+  tests:
+    unit:
+      - tests/unit/memory/consolidate-store.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Phase 1 upserts from disjoint `thread_id`s are independent rows and never
+  conflict. WatermarkConflictError is the only race surface — by design,
+  not a bug. Pairs with `consolidator-session-hook` (Phase 1 wire) and
+  `memory-md-atomic-writer` (Phase 2 disk side).
