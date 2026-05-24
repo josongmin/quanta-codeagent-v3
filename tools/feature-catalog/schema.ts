@@ -25,7 +25,7 @@ export const FeatureSchema = z.object({
   evidence: z
     .object({
       code: z.array(z.string()).default([]),
-      adrs: z.array(z.number().int()).default([]),
+      adrs: z.array(z.union([z.number().int(), z.string()])).default([]),
       tests: z
         .object({
           unit: z.array(z.string()).default([]),
@@ -35,7 +35,19 @@ export const FeatureSchema = z.object({
         .default({ unit: [], integration: [], contract: [] }),
     })
     .default({ code: [], adrs: [], tests: { unit: [], integration: [], contract: [] } }),
-  knobs: z.array(z.string()).default([]),
+  knobs: z
+    .array(
+      z.union([
+        z.string(),
+        z.object({
+          name: z.string(),
+          where: z.string().optional(),
+          default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+          purpose: z.string().optional(),
+        }),
+      ]),
+    )
+    .default([]),
   deliberate_hold: z
     .object({
       reason: z.string(),

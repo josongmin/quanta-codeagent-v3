@@ -82,6 +82,12 @@ async function collectFeatureEvidenceErrors(feature: Feature, path: string): Pro
     }
   }
   for (const adr of feature.evidence.adrs) {
+    if (typeof adr === "string" && adr.includes("/")) {
+      if (!(await pathExists(adr))) {
+        errors.push(`${rel(path)}: missing ADR path "${adr}"`)
+      }
+      continue
+    }
     const padded = String(adr).padStart(4, "0")
     if (!(await adrExists(padded))) {
       errors.push(`${rel(path)}: missing ADR-${adr} (docs/decisions/${padded}-*.md)`)
