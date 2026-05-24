@@ -328,8 +328,7 @@ const buildV2Envelope = (
   // covers `{session, sidecar}` only (NOT exporterMeta / annotations /
   // exportedAt) so the digest is stable across re-exports of the same
   // logical body and reproducible by a verifier.
-  const digest =
-    opts.withDigest === true ? computeBodyDigest(cloned, sidecar) : undefined
+  const digest = opts.withDigest === true ? computeBodyDigest(cloned, sidecar) : undefined
 
   // exactOptional: build the envelope key-by-key, omitting undefined keys.
   const out: {
