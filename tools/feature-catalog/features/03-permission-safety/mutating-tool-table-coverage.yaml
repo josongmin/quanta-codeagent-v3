@@ -12,7 +12,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched, tier:1, slice:S2]
-purpose: >-
+purpose: |
   Closes the silent drift between MUTATING_TOOL_TABLE and the caller-wire tool
   registry. Twelve previously-missing entries (gh_pr_comment/create/auto_merge,
   memory_write/update, branch_search, task_stop, request_plan_exit, agent,
@@ -29,7 +29,7 @@ evidence:
     - src/agent/mode.ts
     - src/subagent/agent-tool.ts
   adrs:
-    - docs/decisions/0036-plan-vs-default-collaboration-mode.md
+    - docs/decisions/0036-plan-mode-dispatch-seam-block.md
   tests:
     unit:
       - tests/unit/mode-mutating-table-coverage-hellgate.test.ts
@@ -39,7 +39,7 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: >-
+notes: |
   S2 slice. Read-only entries (gh_pr_view/list/blame/review_diff, gh_issue_view,
   gh_check_status, memory_search, task_output) added in the same change so the
   cross-check covers BOTH directions of drift. callerWireToolNames in the
