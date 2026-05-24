@@ -80,7 +80,9 @@
       "@/connectors": ["./src/connectors/index.ts"],
       "@/connectors/*": ["./src/connectors/*"],
       "@/retrieval": ["./src/retrieval/index.ts"],
-      "@/retrieval/*": ["./src/retrieval/*"]
+      "@/retrieval/*": ["./src/retrieval/*"],
+      "@/media": ["./src/media/index.ts"],
+      "@/media/*": ["./src/media/*"]
     }
   },
   "include": ["src", "tests", "tools"],
