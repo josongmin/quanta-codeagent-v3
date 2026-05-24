@@ -14,7 +14,10 @@ labels: ["surface:core", "tier:1"]
 configurable: n-a
 purpose: review/audit 모드 — dispatch에서 mutating 차단 + 프롬프트에 REVIEW_NOTICE/AUDIT_NOTICE 주입. 별도 도구 없음.
 evidence:
-  code: []
+  code:
+    - src/agent/mode.ts
+    - src/agent/dispatch-seam-guard.ts
+    - src/agent/prompt.ts
   adrs: [18]
   tests:
     unit: []

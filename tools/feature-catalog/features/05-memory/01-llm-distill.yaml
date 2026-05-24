@@ -21,7 +21,10 @@ purpose: |
   memory-dedup-planner / memory-eviction-planner / consolidator-session-hook
   / codex-2-phase-consolidator로 분리.
 evidence:
-  code: []
+  code:
+    - src/agent/memory-distill.ts
+    - src/agent/memory-consolidate.ts
+    - src/agent/memory-consolidator-hook.ts
   adrs: [8]
   tests:
     unit: []

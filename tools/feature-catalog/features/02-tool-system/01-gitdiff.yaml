@@ -16,7 +16,12 @@ labels: [absorbed:codex, surface:cli]
 configurable: n-a
 purpose: git_diff/git_status/git_log/git_blame — read-only·concurrency-safe·GitRunner 주입, mutating은 bash 잔류
 evidence:
-  code: []
+  code:
+    - src/tool/git/diff.ts
+    - src/tool/git/status.ts
+    - src/tool/git/log.ts
+    - src/tool/git/blame.ts
+    - src/tool/git/runner.ts
   adrs: [25]
   tests:
     unit: []

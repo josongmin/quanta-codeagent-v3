@@ -14,7 +14,10 @@ labels: ["surface:core"]
 configurable: n-a
 purpose: tier+kind, 하이브리드 회상, tier 가중
 evidence:
-  code: []
+  code:
+    - src/memory/types.ts
+    - src/memory/ranking.ts
+    - src/agent/memory.ts
   adrs: [8]
   tests:
     unit: []

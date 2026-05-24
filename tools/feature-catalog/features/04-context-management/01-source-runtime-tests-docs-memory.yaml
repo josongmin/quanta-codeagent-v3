@@ -14,7 +14,10 @@ labels: [absorbed:codex, surface:core]
 configurable: n-a
 purpose: 8-layer 정책 인덱스 + FACT/INFERENCE/UNKNOWN claim ladder + 트러스트 ladder + 5축 예산 + 정직성 4 rule + 8 task-kind reporting shape + VerificationCloseout scaffold. buildSystemPrompt에 정적 박힘 — 캐시 prefix byte-stable 보존
 evidence:
-  code: []
+  code:
+    - src/agent/prompt.ts
+    - src/agent/prompt-sections.ts
+    - src/agent/prompt-rules/core.ts
   adrs: [16]
   tests:
     unit: []

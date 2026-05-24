@@ -3,7 +3,7 @@ title: Biome 슬라이스격리
 section: 10
 subsystem: 아키텍처 정책
 order: 1
-maturity: L5
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -22,4 +22,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: ''
+notes: 'L3: meta-policy entry — concrete enforcement lives in biome.json + slice-boundary tests rather than a single source module. Downgraded from L5 because evidence.code cannot point at a load-bearing implementation file.'

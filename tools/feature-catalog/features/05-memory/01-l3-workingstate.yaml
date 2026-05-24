@@ -14,7 +14,9 @@ labels: ["surface:core", "absorbed:codex"]
 configurable: n-a
 purpose: Codex 5-layer 명명 정렬 — L1 system/cache prefix · L2 turn context · L3 WorkingState · L4 long-term store · L5 artifact files. 명명만 정합
 evidence:
-  code: []
+  code:
+    - src/agent/working-state.ts
+    - src/tool/update-working-state.ts
   adrs: [21]
   tests:
     unit: []

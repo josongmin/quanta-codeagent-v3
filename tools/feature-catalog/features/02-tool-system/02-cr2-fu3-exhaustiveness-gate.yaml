@@ -14,7 +14,9 @@ labels: [absorbed:codex, surface:cli]
 configurable: n-a
 purpose: CR2 + FU3 exhaustiveness gate — 구조적 EditMismatchKind = "not-found" | "ambiguous" | "fuzzy-no-confident" 리터럴 union + Record<EditMismatchKind, NextStrategy> exhaustiveness 컴파일 게이트. out-of-process [edit-mismatch:<kind>] 마커로 producer/consumer간 통신 — substring sniff 제거.
 evidence:
-  code: []
+  code:
+    - src/tool/edit/strategy-hint.ts
+    - src/tool/edit/exact.ts
   adrs: [19]
   tests:
     unit: []

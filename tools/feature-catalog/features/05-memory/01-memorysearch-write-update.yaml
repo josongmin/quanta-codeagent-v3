@@ -14,7 +14,9 @@ labels: ["surface:core"]
 configurable: n-a
 purpose: self-edit memory_search/write/update, lexical graceful degrade
 evidence:
-  code: []
+  code:
+    - src/agent/memory-tools.ts
+    - src/agent/memory.ts
   adrs: [8]
   tests:
     unit: []

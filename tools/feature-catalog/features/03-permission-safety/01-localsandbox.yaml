@@ -14,7 +14,9 @@ labels: [surface:cli, security-touched]
 configurable: n-a
 purpose: LocalSandbox
 evidence:
-  code: []
+  code:
+    - src/runtime/sandbox.ts
+    - src/runtime/index.ts
   adrs: [6]
   tests:
     unit: []

@@ -14,7 +14,11 @@ labels: ["surface:cli"]
 configurable: n-a
 purpose: '읽기 전용, NON-authoritative inspector — JSONL trajectory 파일 또는 run-dir을 인자로 받아 timeline / failed / slow / cost 4 view 렌더. 4 모듈: parse.ts, triage.ts, render.ts, index.ts(CLI entry).'
 evidence:
-  code: []
+  code:
+    - src/apps/probe/index.ts
+    - src/apps/probe/parse.ts
+    - src/apps/probe/triage.ts
+    - src/apps/probe/render.ts
   adrs: [10]
   tests:
     unit: []

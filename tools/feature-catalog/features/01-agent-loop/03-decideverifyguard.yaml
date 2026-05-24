@@ -14,7 +14,9 @@ labels: [surface:core, tier:core]
 configurable: n-a
 purpose: 순수정책 decideVerifyGuard
 evidence:
-  code: []
+  code:
+    - src/agent/verify-guard.ts
+    - src/agent/guards/verify-guard.ts
   adrs: [13]
   tests:
     unit: []

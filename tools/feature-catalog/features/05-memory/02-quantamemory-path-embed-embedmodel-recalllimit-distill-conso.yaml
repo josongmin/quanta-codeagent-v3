@@ -24,7 +24,10 @@ purpose: |
   knob 카탈로그 reference — 구체 동작은 각 sub-feature (codex-2-phase-
   consolidator / embedder-port / memory-self-edit-tools 등)가 담는다.
 evidence:
-  code: []
+  code:
+    - src/apps/cli/internal.ts
+    - src/runner/assemble/memory.ts
+    - src/memory/consolidate/paths.ts
   adrs: [8]
   tests:
     unit: []
