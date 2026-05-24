@@ -1,4 +1,4 @@
-# ADR-0136: Token budget ledger — typed BudgetBreach primitive over per-model pricing
+# ADR-0138: Token budget ledger — typed BudgetBreach primitive over per-model pricing
 
 - **상태**: Accepted
 - **날짜**: 2026-05-24
