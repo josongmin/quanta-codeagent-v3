@@ -1,0 +1,30 @@
+id: eval-taxonomy-doc-sync
+title: eval taxonomy doc-sync — code → markdown one-way renderer
+section: 10
+subsystem: eval 앱 — 분류 체계 view generator
+order: 83
+maturity: L3
+status: stable
+purpose: |
+  `TAXONOMY` 배열을 `docs/analysis/may-21-coding-agent-query-usecase.md` §1
+  포맷(major별 `중분류 | 소분류 | 트리거 | 커버 | 담당 | 검증` 테이블)으로
+  렌더. SINGLE DIRECTION: code → doc. Markdown을 손으로 편집하면 unit test가
+  drift를 못 잡으므로 명시적으로 generated view로 격하 — leaf 추가/이름변경은
+  `usecases.ts` 편집 후 doc-sync 재실행이 표준 워크플로우. `escapeCell`이
+  `|` escape + `\n` → space로 cell-safe 변환. `empiricalShare`는 column header
+  옆에 percentage로 렌더. 의도적으로 작고 dep-free.
+evidence:
+  code:
+    - src/apps/eval/taxonomy/doc-sync.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  rendered output에 `TBD | (empty) | (empty)` cells 들어가는 건 의도 — 운영자
+  채우라는 plain prompt. Curated cells (담당 컴포넌트·검증 수단)은 doc-sync가
+  덮어쓰지 않게 향후 round-trip path 추가 시 주의. taxonomy 갱신 이후
+  re-render 자동화는 별도 hook seam (현재 manual).

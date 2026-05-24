@@ -1,0 +1,41 @@
+id: eval-trajectory-meta-source
+title: eval Tier 3 — meta sidecar + JSONL session loader (no-heuristic policy)
+section: 10
+subsystem: eval 앱 — Tier 3 fixture I/O
+order: 87
+maturity: L4
+status: stable
+purpose: |
+  Tier 3 trajectory 실측 데이터 I/O 레이어. `EvalMeta` 사이드카
+  (`<jsonl>.meta.json`)가 "어떤 prompt가 이 trajectory를 만들었나"의 권위
+  source — JSONL body에서 prompt를 inferring하는 heuristic은 의도적으로 거부
+  (assistant_text 델타에서 user prompt 복원은 unreliable). `JsonlRecorder`는
+  shared producer라 trajectory 포맷에 prompt 필드 추가 못 함 (RFC-0002 §5.2).
+  `loadSession`이 read-only로 events + turns + meta를 `SessionView`로 묶음.
+  `MetaReadResult` discriminated union으로 `missing` vs `malformed` 구분 —
+  운영자가 "아직 안 적었나" vs "잘못 적었나" 식별 가능. `producersOf` helper로
+  recorder identity별 grouping. Malformed JSONL line은 LOG + COUNT (silent skip
+  금지) — fixture 부패는 numeric signal로 surface. `freezeFixture`가 real
+  session을 `fixtures/<usecase>/<id>.jsonl`로 promote하면서 meta sidecar 동행 —
+  meta도 inline prompt도 없으면 null 반환 (strict refusal).
+evidence:
+  code:
+    - src/apps/eval/trajectory/meta.ts
+    - src/apps/eval/trajectory/source.ts
+    - src/apps/eval/trajectory/freeze.ts
+    - src/apps/eval/trajectory/classifier.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-meta-sidecar.test.ts
+      - tests/unit/eval-freeze.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Umbrella [eval-five-tier]는 replay만 cover — 이 항목이 fixture 라이프사이클
+  (read + load + freeze + classify) + no-heuristic 정책을 명시적으로 잠금.
+  Filesystem race (readdir → stat에서 vanish)는 per-file 보호. classifier는
+  meta가 null이면 `usecase:"unclassified"` + confidence 0으로 기록해 backfill
+  가능하게 — replay와 동일 contract.
