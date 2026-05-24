@@ -90,7 +90,7 @@ describe("encodeSessionLine", () => {
     // Pin the canonical encoding so any change to key ordering / quoting
     // shows up as a deliberate test update.
     expect(line).toBe(
-      `{"cli_version":"0.1.0","cwd":"/tmp","model":"gpt-5","schema_version":1,"session_id":"s-1","started_at":"2026-05-21T00:00:00.000Z","type":"session_meta"}\n`,
+      `{"cli_version":"0.1.0","cwd":"/tmp","model":"gpt-5","schema_version":2,"session_id":"s-1","started_at":"2026-05-21T00:00:00.000Z","type":"session_meta"}\n`,
     )
   })
 
