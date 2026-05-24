@@ -103,6 +103,28 @@ export {
   lspNavTools,
   nullLspNavProvider,
 } from "./lsp_nav"
+// MCP tasks tools (ADR-0196). Caller-wired: registered only when the apps
+// layer wires a `TasksHandle`; not part of `defaultTools`. Mirrors the
+// `shadow*` / `branch_search` pattern — default-OFF + byte-identical.
+export {
+  type CancelTaskInput,
+  cancelMcpTaskTool,
+  cancelTaskInputSchema,
+  type GetTaskInput,
+  getMcpTaskTool,
+  getTaskInputSchema,
+  type ListTasksInput,
+  listMcpTasksTool,
+  listTasksInputSchema,
+  mcpTasksTools,
+  type TasksCancelResult,
+  type TasksHandle,
+  type TasksListOutcome,
+  type TasksListPage,
+  type TasksTaskInfo,
+  type TasksTaskResult,
+  type TasksTaskState,
+} from "./mcp_tasks"
 export {
   classifyFrame,
   type FailureFrame,

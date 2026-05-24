@@ -26,6 +26,7 @@ import { loadEnvFiles } from "../cli/dotenv"
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
+import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -46,6 +47,13 @@ import type { RunOutcome } from "./run"
  *  surface (this file) projects ENV → typed input. */
 const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
   env.QUANTA_RETRIEVAL_HYBRID === "1"
+
+/** ADR-0196 — pick the MCP capability negotiator from env. `QUANTA_MCP_CAPS=full`
+ *  swaps to {@link fullNegotiator} which advertises `{tools, sampling,
+ *  elicitation, tasks}`. Any other value (including absent) yields the
+ *  byte-identical `{}` default. Single canonical knob; no aliases. */
+export const pickMcpNegotiator = (env: NodeJS.ProcessEnv): CapabilityNegotiator =>
+  env.QUANTA_MCP_CAPS === "full" ? fullNegotiator() : defaultNegotiator
 
 /** Build the retrieval stack at the composition root. Default-OFF: when the
  *  env knob is absent or not exactly "1", returns `undefined` and every

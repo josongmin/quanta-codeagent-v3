@@ -1,5 +1,6 @@
 import type { Subprocess } from "bun"
 import { logger, QuantaError } from "@/shared"
+import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
 import { encodeMessage, isResponse, type JsonRpcMessage, LineReader } from "./jsonrpc"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 
@@ -90,6 +91,7 @@ const buildEnv = (configEnv?: Record<string, string>): Record<string, string> =>
 export class McpClient {
   private readonly config: McpServerConfig
   private readonly requestTimeoutMs: number
+  private readonly negotiator: CapabilityNegotiator
 
   private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
   private readonly reader = new LineReader()
@@ -100,9 +102,14 @@ export class McpClient {
   private stopped = false
   private exited = false
 
-  constructor(config: McpServerConfig) {
+  /** `negotiator` is OPTIONAL (ADR-0196): omitting it preserves the
+   *  pre-ADR behavior (`capabilities: {}`) — byte-identical for every
+   *  existing caller. The composition root injects `fullNegotiator()` when
+   *  `QUANTA_MCP_CAPS=full` is set. */
+  constructor(config: McpServerConfig, opts?: { negotiator?: CapabilityNegotiator }) {
     this.config = config
     this.requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
+    this.negotiator = opts?.negotiator ?? defaultNegotiator
   }
 
   async start(): Promise<void> {
@@ -124,7 +131,7 @@ export class McpClient {
     await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       clientInfo: CLIENT_INFO,
-      capabilities: {},
+      capabilities: this.negotiator.compile(),
     })
     this.notify("notifications/initialized", {})
   }
