@@ -25,38 +25,12 @@
  * line number so authors can find the offending line in the raw SKILL.md.
  */
 import { z } from "zod"
-import { SKILL_INSTALL_STATES, SKILL_SCOPES } from "./types"
 
 export const SkillCategorySchema = z.enum(["skill", "extension"])
 export type SkillCategory = z.infer<typeof SkillCategorySchema>
 
 export const SkillStabilitySchema = z.enum(["experimental", "stable", "deprecated"])
 export type SkillStability = z.infer<typeof SkillStabilitySchema>
-
-/** ADR-0134 — scope enum mirrored for frontmatter parsing. The runtime SSOT
- *  (closed union + literals array) lives in `./types.ts`; here we just
- *  re-narrow it into a Zod enum so the strict schema rejects unknown scope
- *  tokens at the same loud-failure point as every other field. */
-export const SkillScopeSchema = z.enum(
-  SKILL_SCOPES as readonly [string, ...string[]] as readonly [
-    "builtIn",
-    "system",
-    "admin",
-    "team",
-    "repo",
-    "user",
-    "personal",
-  ],
-)
-
-/** ADR-0134 — install state enum mirrored for frontmatter parsing. */
-export const SkillInstallStateSchema = z.enum(
-  SKILL_INSTALL_STATES as readonly [string, ...string[]] as readonly [
-    "required",
-    "recommended",
-    "optional",
-  ],
-)
 
 export const SkillFrontmatterSchema = z
   .object({
@@ -69,34 +43,8 @@ export const SkillFrontmatterSchema = z
     allowedTools: z.array(z.string().min(1)),
     category: SkillCategorySchema,
     stability: SkillStabilitySchema,
-    // ADR-0134 — all optional; absent values fall to discovery-time inference
-    // (scope from sourcePath, installState ⇒ undefined unless admin scope).
-    scope: SkillScopeSchema.optional(),
-    installState: SkillInstallStateSchema.optional(),
-    adminInstalledBy: z.string().min(1).optional(),
   })
   .strict()
-  .superRefine((v, ctx) => {
-    // Admin scope MUST be "required" — Codex parity (admin install policy is
-    // non-negotiable by definition). Authors can omit installState entirely
-    // (we backfill to "required") or set it to "required" explicitly, but
-    // declaring "recommended"/"optional" on admin scope is a contradiction.
-    if (v.scope === "admin" && v.installState !== undefined && v.installState !== "required") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "admin scope requires installState='required' (or omit it)",
-        path: ["installState"],
-      })
-    }
-    // adminInstalledBy only makes sense when scope === "admin".
-    if (v.adminInstalledBy !== undefined && v.scope !== "admin") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "adminInstalledBy is only valid when scope='admin'",
-        path: ["adminInstalledBy"],
-      })
-    }
-  })
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>
 
 export class FrontmatterParseError extends Error {
@@ -353,13 +301,5 @@ export const parseSkillMarkdown = (
       error: new FrontmatterParseError(`field '${path}': ${msg}`, 1),
     }
   }
-  // ADR-0134 backfill: admin scope without explicit installState ⇒ "required".
-  // This is the loud half of the superRefine guard above (which rejects
-  // contradictory values) — together they make admin scope ⇒ required an
-  // invariant the registry can rely on without re-checking.
-  const fm =
-    parsed.data.scope === "admin" && parsed.data.installState === undefined
-      ? { ...parsed.data, installState: "required" as const }
-      : parsed.data
-  return { ok: true, value: { frontmatter: fm, body: split.body } }
+  return { ok: true, value: { frontmatter: parsed.data, body: split.body } }
 }

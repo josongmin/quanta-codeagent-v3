@@ -112,18 +112,4 @@ export {
   triggerRewind,
 } from "./system-skills"
 export { createToolSearchTool } from "./tool-search"
-export {
-  isSkillInstallState,
-  isSkillScope,
-  SKILL_INSTALL_STATES,
-  SKILL_SCOPES,
-  SKILL_SCOPES_PRECEDENCE_DESC,
-  skillScope,
-} from "./types"
-export type {
-  ParsedFrontmatter,
-  Skill,
-  SkillEffort,
-  SkillInstallState,
-  SkillScope,
-} from "./types"
+export type { ParsedFrontmatter, Skill, SkillEffort } from "./types"
