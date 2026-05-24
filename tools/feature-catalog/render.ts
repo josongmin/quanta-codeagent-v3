@@ -9,7 +9,7 @@ import type { Dirent } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { Feature, LoadedFeature, Maturity } from "./schema"
-import { SECTION_NAMES } from "./schema"
+import { computeGrade, SECTION_NAMES } from "./schema"
 
 export interface Baseline {
   pass: number
@@ -68,9 +68,12 @@ export function renderCatalog(input: RenderInput): string {
       lastSubsystem = feature.subsystem
       const summary = buildEvidenceSummary(feature)
       const purpose = oneLine(feature.purpose)
-      const core = summary ? `${purpose} · ${summary}` : purpose
+      const base = summary ? `${purpose} · ${summary}` : purpose
+      const meta = buildMetaLines(feature)
+      const core = meta ? `${escapeCell(base)}<br>${meta}` : escapeCell(base)
+      const grade = computeGrade(feature)
       out.push(
-        `| ${escapeCell(subsystem)} | ${escapeCell(feature.title)} | **${feature.maturity}** | ${escapeCell(core)} |`,
+        `| ${escapeCell(subsystem)} | ${escapeCell(feature.title)} | **${feature.maturity}** \`[${grade}]\` | ${core} |`,
       )
     }
     out.push("")
@@ -187,6 +190,27 @@ function sortWithinSection(entries: LoadedFeature[]): LoadedFeature[] {
     if (f.order !== g.order) return f.order - g.order
     return f.id < g.id ? -1 : f.id > g.id ? 1 : 0
   })
+}
+
+/** Build the trailing metadata block (소유자 / Labels / 의존) for a feature.
+ *  Returns "" when all three are empty so the renderer can skip the `<br>` join.
+ *  Each non-empty field becomes one `<br>`-separated line inside the `핵심` cell.
+ *  Defensive against pre-Tier-1 fixtures that omit the new array fields. */
+export function buildMetaLines(feature: Feature): string {
+  const lines: string[] = []
+  const owners = feature.owners ?? []
+  const labels = feature.labels ?? []
+  const dependsOn = feature.depends_on ?? []
+  if (owners.length > 0) {
+    lines.push(`**소유자**: ${owners.map(escapeCell).join(", ")}`)
+  }
+  if (labels.length > 0) {
+    lines.push(`**Labels**: ${labels.map(escapeCell).join(" · ")}`)
+  }
+  if (dependsOn.length > 0) {
+    lines.push(`**의존**: ${dependsOn.map(escapeCell).join(", ")}`)
+  }
+  return lines.join("<br>")
 }
 
 export function buildEvidenceSummary(feature: Feature): string {
