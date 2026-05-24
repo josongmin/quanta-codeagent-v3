@@ -73,8 +73,8 @@
       "@/git/*": ["./src/git/*"],
       "@/reactor": ["./src/reactor/index.ts"],
       "@/reactor/*": ["./src/reactor/*"],
-      "@/retrieval": ["./src/retrieval/index.ts"],
-      "@/retrieval/*": ["./src/retrieval/*"]
+      "@/connectors": ["./src/connectors/index.ts"],
+      "@/connectors/*": ["./src/connectors/*"]
     }
   },
   "include": ["src", "tests", "tools"],
