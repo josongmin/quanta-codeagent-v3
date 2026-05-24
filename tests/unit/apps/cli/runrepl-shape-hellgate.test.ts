@@ -2,63 +2,68 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
-/**
- * Slice-C (T2 rewrite): `runRepl` is the thin orchestrator over 6 helpers
- * in `src/apps/cli/repl/`. The PRIOR shape hellgate was source-sniffing
- * (LOC count, `let` count, ban on substrings like `const turn = …`,
- * regex on `try { … } finally { … }`). Those assertions would fail on
- * cosmetic refactors that preserve behavior AND pass on regressions that
- * preserve the file shape — both directions of false signal.
- *
- * What we KEEP (rewritten):
- *
- *   - The module-graph contract: the 6 helper modules exist on disk and
- *     `repl.ts` imports each one. This IS a real architectural invariant
- *     (the catalog claims a 6-helper decomposition); asserting the import
- *     existence locks the decomposition without sniffing helper bodies.
- *   - `runRepl` is exported as an `AsyncFunction` (callable contract).
- *
- * What we DROP (source-sniff anti-patterns):
- *
- *   - `runRepl` body ≤ 50 LOC               — line count is not behavior
- *   - `runRepl` body has no `let`           — declaration form is not behavior
- *   - `const turn = async (text:` is absent — substring ban is grep-rule
- *   - `const installTurnCancel = (` absent  — substring ban is grep-rule
- *   - `try { … } finally { … }` regex       — control-flow shape is not behavior
- *
- * REGRESSION SCENARIOS this rewritten test STILL catches:
- *
- *   - Renaming `session-setup.ts` to `setup.ts` without updating the
- *     barrel ⇒ `repl.ts imports BOTH …` test fails (import path moved).
- *   - Accidentally deleting `turn-runner.ts` ⇒ `helpers exist on disk`
- *     fails (readFileSync throws).
- *   - Refactoring `runRepl` from `async () => …` to `function runRepl()`
- *     returning a Promise ⇒ `AsyncFunction` test fails.
- *
- * The PRIOR test would also have caught the rename and the delete; what
- * it ADDED was a refactoring tax (every cosmetic edit risked tripping
- * a substring assertion). That cost is removed.
- *
- * NOTE on production-code coverage: A true behavioral exercise of `runRepl`
- * (booting `setupSession` with a fake env and asserting the loop dispatches
- * one-shot vs interactive) requires injecting BOTH `setupSession` AND
- * `runSessionLoop` as deps — they are presently top-level module imports.
- * Adding a `runRepl(deps)` overload is beyond this slice's scope. The
- * session-setup-hellgate + session-loop-hellgate siblings cover the two
- * halves at unit grain via direct port calls.
- */
+// Slice-C: lock the runRepl SHAPE so a future round can't silently re-grow
+// the GodFunction. These assertions are intentionally TEXTUAL (string scans
+// over the source file) so any structural regression surfaces immediately
+// in CI rather than years later when a reviewer notices the file size.
 
 const replPath = resolve(__dirname, "../../../../src/apps/cli/repl.ts")
 const replSrc = readFileSync(replPath, "utf8")
 
-describe("runRepl — thin orchestrator (module-graph contract)", () => {
-  test("runRepl is exported and is an AsyncFunction", async () => {
-    const mod = await import("../../../../src/apps/cli/repl")
-    expect(typeof mod.runRepl).toBe("function")
-    expect(mod.runRepl.constructor.name).toBe("AsyncFunction")
+/** Extract the body of `export const runRepl = async (): Promise<void> => {`
+ *  through its terminating top-level `}` (matching brace via depth count). */
+const extractRunReplBody = (): string => {
+  const start = replSrc.indexOf("export const runRepl = async (): Promise<void> => {")
+  if (start === -1) throw new Error("runRepl not found in repl.ts")
+  let depth = 0
+  let i = start
+  for (; i < replSrc.length; i++) {
+    const ch = replSrc[i]
+    if (ch === "{") depth++
+    else if (ch === "}") {
+      depth--
+      if (depth === 0) return replSrc.slice(start, i + 1)
+    }
+  }
+  throw new Error("runRepl body never closed")
+}
+
+const runReplBody = extractRunReplBody()
+
+describe("runRepl — Slice-C shape contract", () => {
+  test("runRepl ≤ 50 LOC (spec target — thin orchestrator)", () => {
+    const lines = runReplBody.split("\n").length
+    expect(lines).toBeLessThanOrEqual(50)
   })
 
-  test("the 6 helpers exist on disk at the expected module paths", () => {
+  test("runRepl body has NO `let` declarations — god-state replaced by SessionState record", () => {
+    // The `let` ban is for the body of `runRepl` itself; the SessionState
+    // record handles all surface state. Other helpers (composeTurnSinks,
+    // createSurfaceState) own their own scoped `let`s if needed.
+    expect(runReplBody).not.toMatch(/^\s*let\s+/m)
+  })
+
+  test("runRepl body calls EVERY one of the 3 spec orchestration helpers", () => {
+    // The orchestration funnel: setupSession ➜ runSessionLoop.
+    // composePromptPipeline + runOneTurn + installTurnCancel live INSIDE
+    // session-loop / turn-runner, so runRepl doesn't reference them directly.
+    expect(runReplBody).toContain("setupSession(")
+    expect(runReplBody).toContain("runSessionLoop(")
+  })
+
+  test("runRepl body has NO inline `turn` closure (DRY win — runOneTurn replaces it)", () => {
+    // The prior 1568-LOC monolith had `const turn = async (text: string) =>`.
+    // After Slice-C, that closure is gone; runOneTurn (in turn-runner.ts)
+    // is the single per-turn wrapper for BOTH paths.
+    expect(runReplBody).not.toContain("const turn = async (text:")
+    expect(runReplBody).not.toContain("const wrapTurn =")
+  })
+
+  test("runRepl body has NO inline installTurnCancel definition (relocated to helper)", () => {
+    expect(runReplBody).not.toContain("const installTurnCancel = (")
+  })
+
+  test("the 6 helpers exist on disk as expected module paths", () => {
     const helpers = [
       "../../../../src/apps/cli/repl/turn-runner.ts",
       "../../../../src/apps/cli/repl/turn-cancel-install.ts",
@@ -75,9 +80,6 @@ describe("runRepl — thin orchestrator (module-graph contract)", () => {
   })
 
   test("repl.ts imports BOTH setupSession AND runSessionLoop from the slice dir", () => {
-    // This is the LEGITIMATE structural assertion: the barrel must import
-    // each top-level helper. The catalog claim "6-helper decomposition is
-    // wired" is true iff these imports are present.
     expect(replSrc).toMatch(/from "\.\/repl\/session-setup"/)
     expect(replSrc).toMatch(/from "\.\/repl\/session-loop"/)
   })
@@ -106,11 +108,15 @@ describe("runRepl — thin orchestrator (module-graph contract)", () => {
     expect(loopSrc).toMatch(/from "\.\/session-state"/)
   })
 
-  test("prompt-pipeline.ts is referenced from session-loop.ts (prompt-source factory)", () => {
-    const loopSrc = readFileSync(
-      resolve(__dirname, "../../../../src/apps/cli/repl/session-loop.ts"),
-      "utf8",
-    )
-    expect(loopSrc).toMatch(/from "\.\/prompt-pipeline"/)
+  test("runRepl wires the lifecyclePills.dispose + shutdownMcp shutdown in `finally`", () => {
+    // Decompose into named source-pin assertions so a regression that drops
+    // the dispose() / shutdownMcp() call from the finally block fails the
+    // exact named invariant rather than a generic substring contains.
+    const disposeWired = runReplBody.includes("setup.lifecyclePills.dispose()")
+    const shutdownWired = runReplBody.includes("setup.shutdownMcp()")
+    expect(disposeWired).toBe(true)
+    expect(shutdownWired).toBe(true)
+    // Both must be inside the `try { ... } finally { ... }` envelope.
+    expect(runReplBody).toMatch(/try\s*\{[\s\S]+\}\s*finally\s*\{/)
   })
 })

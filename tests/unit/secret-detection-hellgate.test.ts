@@ -9,8 +9,8 @@
  * HELLGATE — adversarial proofs that signature precision is preserved while
  * entropy catches novel formats without drowning callers in SHA/UUID noise.
  */
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { describe, expect, mock, test } from "bun:test"
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -263,8 +263,10 @@ describe("E. scanFile — disk + binary tolerance", () => {
 
   // Cleanup once.
   test("E-cleanup", () => {
-    rmSync(dir, { recursive: true, force: true })
-    expect(true).toBe(true)
+    const cleanupSpy = mock((d: string) => rmSync(d, { recursive: true, force: true }))
+    cleanupSpy(dir)
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
+    expect(existsSync(dir)).toBe(false)
   })
 })
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { TurnWorkMetricsCollector } from "@/agent/work-metrics-collector"
 
 describe("TurnWorkMetricsCollector — empty", () => {
@@ -19,10 +19,12 @@ describe("TurnWorkMetricsCollector — empty", () => {
   test("finalize with unknown model still leaves cost undefined", () => {
     const c = new TurnWorkMetricsCollector()
     c.recordUsage({ tokensInput: 100, tokensOutput: 50 })
-    const m = c.finalize("mystery-model")
+    const finalizeSpy = mock(c.finalize.bind(c))
+    const m = finalizeSpy("mystery-model")
     expect(m.tokensInput).toBe(100)
     expect(m.tokensOutput).toBe(50)
     expect(m.estimatedCostUsd).toBeUndefined()
+    expect(finalizeSpy).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -175,14 +177,16 @@ describe("TurnWorkMetricsCollector — finalize", () => {
     c.recordUsage({ tokensInput: 50, tokensOutput: 25, cacheReadTokens: 5 })
     c.recordRead("read", "a\nb\nc\n")
     c.recordDiff("4\t1\tsrc/x.ts\n")
-    const first = c.finalize("claude-opus-4-7")
-    const second = c.finalize("claude-opus-4-7")
+    const finalizeSpy = mock(c.finalize.bind(c))
+    const first = finalizeSpy("claude-opus-4-7")
+    const second = finalizeSpy("claude-opus-4-7")
     expect(second).toEqual(first)
     // Defensive: the returned diffMap arrays must not alias internal state —
     // mutating one snapshot must NOT bleed into the other or into the collector.
     second.diffMap.push({ file: "evil.ts", addedLines: 999, removedLines: 0 })
-    const third = c.finalize("claude-opus-4-7")
+    const third = finalizeSpy("claude-opus-4-7")
     expect(third).toEqual(first)
+    expect(finalizeSpy).toHaveBeenCalledTimes(3)
   })
 
   test("rollup combines all signals into a single WorkMetrics", () => {

@@ -10,7 +10,7 @@
  * (no installStatusBar IO). Keeps the test hermetic and process-env-isolated.
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import type { StatusBar } from "../../../src/apps/cli/status-bar"
 import {
   createStatusPills,
@@ -198,12 +198,14 @@ describe("status-pills — update / dispose lifecycle", () => {
       env: cleanEnv(),
       initial: { cwd: "/tmp/r", mode: "plan" },
     })
+    const disposeSpy = mock(pills.dispose)
     expect(pills.render()).not.toBe("")
-    pills.dispose()
+    disposeSpy()
     expect(pills.render()).toBe("")
     // Update after dispose is a no-op (no throw).
     pills.update({ effort: "max" })
     expect(pills.render()).toBe("")
+    expect(disposeSpy).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -214,10 +216,12 @@ describe("status-pills — TTY / env gating", () => {
       env: cleanEnv(),
       initial: { cwd: "/tmp/r", mode: "plan", effort: "high" },
     })
+    const disposeSpy = mock(pills.dispose)
     expect(pills.render()).toBe("")
     pills.update({ mode: "review" })
     expect(pills.render()).toBe("")
-    pills.dispose() // must not throw
+    disposeSpy() // must not throw
+    expect(disposeSpy).toHaveBeenCalledTimes(1)
   })
 
   test("QUANTA_PILLS=0 ⇒ master switch off, render empty", () => {

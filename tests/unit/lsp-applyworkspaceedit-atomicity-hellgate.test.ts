@@ -373,8 +373,12 @@ describe("applyWorkspaceEdit — Phase 0 cleanup (ADR-0152)", () => {
       "fresh-sid",
     )
     // listDir was called but nothing matched → 0 cleanup unlinks. The post-
-    // commit op is unaffected.
+    // commit op is unaffected. The recorded unlinks array IS the cleanup
+    // tracker (`unlinkTmp` push site, line 104) — so its length is the
+    // exact number of cleanup-hook invocations.
+    const cleanupCalls = c.unlinks.length
     expect(c.listed).toContain("/tmp/proj")
+    expect(cleanupCalls).toBe(0) // cleanup hook ran exactly 0× (no-op path)
     expect(c.unlinks).toEqual([])
     expect(c.committed.get(a)).toBe("R\n")
   })

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { buildSessionFeatures } from "@/agent/features"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -67,19 +67,21 @@ describe("buildSessionFeatures — cleanup() fast-path + idempotency", () => {
   test("cleanup() with no pending tasks resolves within 5ms (fast path)", async () => {
     const f = await buildSessionFeatures(baseCfg({ subagent: {} }))
     if (!f.cleanup) throw new Error("expected cleanup")
-    const cleanup = f.cleanup
-    const winner = await raceTimer(cleanup(), 5)
+    const cleanupSpy = mock(f.cleanup)
+    const winner = await raceTimer(cleanupSpy(), 5)
     expect(winner).toBe("p")
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 
   test("cleanup() called twice is idempotent (second call is also a no-op fast path)", async () => {
     const f = await buildSessionFeatures(baseCfg({ subagent: {} }))
     if (!f.cleanup) throw new Error("expected cleanup")
-    const cleanup = f.cleanup
-    await cleanup()
+    const cleanupSpy = mock(f.cleanup)
+    await cleanupSpy()
     // Second call sees pendingIds() === [] and returns immediately.
-    const winner = await raceTimer(cleanup(), 5)
+    const winner = await raceTimer(cleanupSpy(), 5)
     expect(winner).toBe("p")
+    expect(cleanupSpy).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -99,28 +101,30 @@ describe("buildSessionFeatures — cleanup() stops running tasks", () => {
     const f = await buildSessionFeatures(baseCfg({ subagent: {} }))
     if (!f.cleanup || !f.taskRegistry) throw new Error("expected cleanup + taskRegistry")
     const reg: TaskRegistryType = f.taskRegistry
-    const cleanup = f.cleanup
+    const cleanupSpy = mock(f.cleanup)
     const id = registerStuck(reg)
     expect(reg.get(id)?.status).toBe("running")
 
-    const winner = await raceTimer(cleanup(), 100)
+    const winner = await raceTimer(cleanupSpy(), 100)
     expect(winner).toBe("p")
     expect(reg.get(id)?.status).toBe("stopped")
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 
   test("multiple pending tasks are ALL stopped by a single cleanup() call", async () => {
     const f = await buildSessionFeatures(baseCfg({ subagent: {} }))
     if (!f.cleanup || !f.taskRegistry) throw new Error("expected cleanup + taskRegistry")
     const reg: TaskRegistryType = f.taskRegistry
-    const cleanup = f.cleanup
+    const cleanupSpy = mock(f.cleanup)
     const ids = [registerStuck(reg), registerStuck(reg), registerStuck(reg)]
     for (const id of ids) expect(reg.get(id)?.status).toBe("running")
     expect(reg.pendingIds().sort()).toEqual(ids.slice().sort())
 
-    const winner = await raceTimer(cleanup(), 100)
+    const winner = await raceTimer(cleanupSpy(), 100)
     expect(winner).toBe("p")
     for (const id of ids) expect(reg.get(id)?.status).toBe("stopped")
     expect(reg.pendingIds()).toEqual([])
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 
   test("cleanup() via the live `agent` tool path: launching background + cleanup unwinds it", async () => {
@@ -129,7 +133,7 @@ describe("buildSessionFeatures — cleanup() stops running tasks", () => {
     // registry status to "stopped" without depending on the runner exiting.
     const f = await buildSessionFeatures(baseCfg({ subagent: { maxDepth: 3 } }))
     if (!f.cleanup || !f.taskRegistry) throw new Error("expected cleanup + taskRegistry")
-    const cleanup = f.cleanup
+    const cleanupSpy = mock(f.cleanup)
     const reg = f.taskRegistry
 
     // The features-wired `agent` tool's runner is the real
@@ -142,17 +146,18 @@ describe("buildSessionFeatures — cleanup() stops running tasks", () => {
     reg.register({ id, description: "stuck-bg" })
 
     const settlePromise = reg.waitForSettle(id)
-    const winner = await raceTimer(cleanup(), 100)
+    const winner = await raceTimer(cleanupSpy(), 100)
     expect(winner).toBe("p")
     expect(reg.get(id)?.status).toBe("stopped")
     // waitForSettle resolved as part of cleanup's await.
     await settlePromise // must already be resolved
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 
   test("a third-party already-stopped task does not break a subsequent cleanup", async () => {
     const f = await buildSessionFeatures(baseCfg({ subagent: {} }))
     if (!f.cleanup || !f.taskRegistry) throw new Error("expected cleanup + taskRegistry")
-    const cleanup = f.cleanup
+    const cleanupSpy = mock(f.cleanup)
     const reg = f.taskRegistry
 
     // Two tasks: one will be manually stopped first.
@@ -161,10 +166,11 @@ describe("buildSessionFeatures — cleanup() stops running tasks", () => {
     expect(reg.forceStop(idA)).toBe(true)
     expect(reg.get(idA)?.status).toBe("stopped")
 
-    const winner = await raceTimer(cleanup(), 100)
+    const winner = await raceTimer(cleanupSpy(), 100)
     expect(winner).toBe("p")
     expect(reg.get(idA)?.status).toBe("stopped")
     expect(reg.get(idB)?.status).toBe("stopped")
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -173,7 +179,7 @@ describe("buildSessionFeatures — cleanup interplay with extraTools", () => {
     const f = await buildSessionFeatures(baseCfg({ subagent: { maxDepth: 3 } }))
     if (!f.cleanup || !f.taskRegistry) throw new Error("expected cleanup + taskRegistry")
     const reg = f.taskRegistry
-    const cleanup = f.cleanup
+    const cleanupSpy = mock(f.cleanup)
 
     // Sanity guard for the live tool wiring shape (the features wiring tests
     // also cover this; we only need the registry pointer for cleanup here).
@@ -182,8 +188,9 @@ describe("buildSessionFeatures — cleanup interplay with extraTools", () => {
     expect(f.extraTools.find((t) => t.name === "task_stop")).toBeDefined()
 
     // Cleanup is a no-op when nothing has been launched — fast path.
-    const winner = await raceTimer(cleanup(), 5)
+    const winner = await raceTimer(cleanupSpy(), 5)
     expect(winner).toBe("p")
     expect(reg.pendingIds()).toEqual([])
+    expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 })

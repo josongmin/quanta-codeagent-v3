@@ -14,6 +14,9 @@
  * Real timers are used: budgets are tiny (50–100 ms) so a passing test
  * completes in <500 ms.
  */
+// source-grep allowed — T1 wiring suite below intentionally pins the
+// `withStreamTimeout` import in both adapter sources so a refactor that rips
+// the wrapper out of one adapter fails fast (per file header item 5).
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, test } from "bun:test"

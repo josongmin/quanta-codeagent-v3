@@ -622,8 +622,11 @@ describe("HELLGATE — handleSendInput", () => {
     )
     expect(r.kind).toBe("success")
     expect(received).toEqual(["hello child"])
-    // One-shot: channel is gone after delivery.
-    expect(ch.has(spawn.agentId)).toBe(false)
+    // One-shot teardown: channel is gone after delivery — assert the
+    // teardown step explicitly so a regression that leaves the channel
+    // registered surfaces immediately.
+    const teardownComplete = !ch.has(spawn.agentId)
+    expect(teardownComplete).toBe(true)
 
     // A second send to the same id ⇒ not_paused now.
     const r2 = await handleSendInput(

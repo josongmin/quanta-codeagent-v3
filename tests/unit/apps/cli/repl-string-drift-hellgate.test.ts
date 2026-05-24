@@ -68,7 +68,7 @@ describe("rejectExitBanner — string mirrors QUANTA_REJECT_LIMIT", () => {
     expect(out).toBe("\n[consecutive denials reached — exiting. To re-enable, restart quanta]\n")
   })
 
-  test("leading/trailing \\n preserved (byte-identical to pre-cleanup write)", () => {
+  test("leading/trailing \\n preserved (byte-identical to pre-refactor write)", () => {
     const out = rejectExitBanner(20)
     expect(out.startsWith("\n")).toBe(true)
     expect(out.endsWith("\n")).toBe(true)

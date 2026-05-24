@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { defaultMetricsRegistry } from "@/observability/metrics/index"
 import { instrumentShadowOdb } from "@/observability/metrics/instrument-shadow"
 import { instrumentTool, instrumentTools } from "@/observability/metrics/instrument-tool"
@@ -95,11 +95,13 @@ describe("instrumentShadowOdb", () => {
 
   test("init / listSnapshots / cleanup → no metrics (read-mostly, low value to track)", async () => {
     const m = defaultMetricsRegistry()
-    const o = instrumentShadowOdb(fakeShadow(), m)
+    const cleanupSpy = mock(async (_n: number) => 0)
+    const o = instrumentShadowOdb(fakeShadow({ cleanup: cleanupSpy }), m)
     await o.init("/ws")
     await o.listSnapshots("/ws")
     await o.cleanup(1000)
-    expect(m.snapshot().length).toBe(0)
+    expect(cleanupSpy).toHaveBeenCalledTimes(1) // cleanup hook fired
+    expect(m.snapshot().length).toBe(0) // and yet no metric was emitted
   })
 
   test("registerHead throws → counter still incremented (it counts ATTEMPTS) + duration still observed (finally)", async () => {

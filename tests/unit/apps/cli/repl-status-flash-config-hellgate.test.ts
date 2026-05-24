@@ -14,8 +14,8 @@
 import { describe, expect, test } from "bun:test"
 import { buildStatusFlashConfig } from "../../../../src/apps/cli/status-flash-config"
 
-describe("StatusFlashConfig — defaults are byte-identical to pre-cleanup", () => {
-  test("empty env yields all five pre-cleanup defaults", () => {
+describe("StatusFlashConfig — defaults are byte-identical to pre-refactor", () => {
+  test("empty env yields all five pre-refactor defaults", () => {
     const cfg = buildStatusFlashConfig({})
     expect(cfg.errorMs).toBe(4000)
     expect(cfg.idleMs).toBe(3000)

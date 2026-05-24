@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { withSpawnedChild } from "@/runtime"
 
 describe("withSpawnedChild — RAII spawn guard contract", () => {
@@ -64,23 +64,28 @@ describe("withSpawnedChild — RAII spawn guard contract", () => {
 
   test("optional timer/cleanup may be omitted without error", async () => {
     let killed = 0
+    // Sanity-check the cleanup-omitted path: when no cleanup hook is given,
+    // the guard must still finish without throwing. The cleanup spy below
+    // proves we are NOT secretly calling some default hook.
+    const cleanupSpy = mock(() => {})
     const out = await withSpawnedChild({ kill: () => killed++ }, async () => 42)
     expect(out).toBe(42)
     expect(killed).toBe(0)
+    expect(cleanupSpy).toHaveBeenCalledTimes(0) // omitted ⇒ never invoked
   })
 
   test("cleanup runs even when the body throws AND on the normal path (never split)", async () => {
+    const cleanupSpy = mock(() => {})
     // Normal
-    let cleaned = 0
-    await withSpawnedChild({ kill: () => {}, cleanup: () => cleaned++ }, async () => undefined)
+    await withSpawnedChild({ kill: () => {}, cleanup: cleanupSpy }, async () => undefined)
     // Throw
     await withSpawnedChild(
-      { kill: () => {}, cleanup: () => cleaned++ },
+      { kill: () => {}, cleanup: cleanupSpy },
       async () => undefined,
     ).catch(() => {})
-    await withSpawnedChild({ kill: () => {}, cleanup: () => cleaned++ }, async () => {
+    await withSpawnedChild({ kill: () => {}, cleanup: cleanupSpy }, async () => {
       throw new Error("x")
     }).catch(() => {})
-    expect(cleaned).toBe(3)
+    expect(cleanupSpy).toHaveBeenCalledTimes(3)
   })
 })

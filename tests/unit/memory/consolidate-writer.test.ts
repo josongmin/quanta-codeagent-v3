@@ -6,7 +6,7 @@
  * every call.  The real ChildProcessGitPort is exercised in the
  * integration test (consolidate-phase2-end-to-end.test.ts).
  */
-import { beforeEach, describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, mock, test } from "bun:test"
 import {
   MEMORY_DIR_MODE,
   MEMORY_MAX_BYTES,
@@ -461,16 +461,20 @@ describe("MemoryWriter.writeAtomic failure recovery", () => {
         map.set(p, c)
       }
     })()
-    fsHarness.fs.unlink = async (_p) => {
+    const cleanupSpy = mock(async (_p: string) => {
       const e = new Error("ENOENT: already gone") as Error & { code?: string }
       e.code = "ENOENT"
       throw e
-    }
+    })
+    fsHarness.fs.unlink = cleanupSpy
     const { port } = makeRecordingGit()
     const err = (await makeWriter(fsHarness.fs, port)
       .writeAtomic(goodContent)
       .catch((e: unknown) => e)) as MemoryWriteError
     expect(err.message).toContain("original-write-fail")
+    // Cleanup hook (unlink) DID run on the first temp — and its ENOENT was
+    // swallowed so the original-write-fail propagated instead.
+    expect(cleanupSpy).toHaveBeenCalled()
   })
 })
 
