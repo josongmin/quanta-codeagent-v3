@@ -1,5 +1,5 @@
 import type { z } from "zod"
-import type { ImageBlock } from "@/llm"
+import type { DocumentBlock, ImageBlock } from "@/llm"
 import type { SensitivityClass } from "@/security"
 import type { HITLTier } from "@/shared"
 import type { ShellExecObserver } from "./shell-exec-types"
@@ -525,6 +525,17 @@ export interface ToolResult {
    *  NEVER import` set. That copy was a doc drift from a pre-vision posture; the
    *  authoritative slice fence is the biome override. */
   images?: ImageBlock[]
+  /** OPTIONAL (ADR-0137): structured document attachments to surface to the
+   *  model via the next user message's tool_result content. Sibling of
+   *  {@link images}: dispatch's `composeToolResultContent` appends these AFTER
+   *  any image blocks so the composed `[text, ...images, ...documents]` array
+   *  preserves both modalities in the order the tool produced. Today the only
+   *  supported media type is `application/pdf` (Anthropic native document
+   *  block — see ADR-0137). Absent ⇒ no document attachments (byte-identical).
+   *  Each document is base64-encoded; caller is responsible for size / policy
+   *  checks UPSTREAM (the `pdf_read` tool enforces the 32 MB Anthropic API cap
+   *  + magic-byte sniff at its boundary). */
+  documents?: DocumentBlock[]
 }
 
 /** OPTIONAL (absorb #2 — Cursor `EditResult`/`ShellResult`): the discriminated

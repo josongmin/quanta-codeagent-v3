@@ -116,7 +116,7 @@ describe("prepareIssueHint — async hint computation", () => {
       "regex",
       { llm: new StubLLM() },
     )
-    expect(hint).toContain("## Issue Hints (auto-extracted)")
+    expect(hint).toContain("## Issue evidence (verbatim)")
     expect(hint).toContain("requests/models.py")
     expect(hint).toContain("UnicodeError")
   })
@@ -167,7 +167,7 @@ describe("prepareIssueHint — async hint computation", () => {
       },
     )
     // Regex fallback kicked in.
-    expect(hint).toContain("## Issue Hints (auto-extracted)")
+    expect(hint).toContain("## Issue evidence (verbatim)")
     expect(hint).toContain("requests/models.py")
   })
 
@@ -185,7 +185,7 @@ describe("prepareIssueHint — async hint computation", () => {
         localize: fakeLocalize,
       },
     )
-    expect(hint).toContain("## Issue Hints (auto-extracted)")
+    expect(hint).toContain("## Issue evidence (verbatim)")
   })
 
   test("mode=agentless + timeout → regex fallback", async () => {
@@ -207,7 +207,7 @@ describe("prepareIssueHint — async hint computation", () => {
         timeoutMs: 20, // trip well before slowLocalize resolves
       },
     )
-    expect(hint).toContain("## Issue Hints (auto-extracted)")
+    expect(hint).toContain("## Issue evidence (verbatim)")
     expect(hint).not.toContain("Agentless localization")
   })
 
@@ -316,6 +316,6 @@ describe("3-path byte-identity proof", () => {
       localize: fakeLocalize,
     })
     expect(hint).toContain("Agentless localization")
-    expect(hint).not.toContain("auto-extracted")
+    expect(hint).not.toContain("Issue evidence (verbatim)")
   })
 })

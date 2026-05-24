@@ -40,13 +40,33 @@ describe("extractCodeFences — triple-backtick blocks", () => {
     expect(extractCodeFences(text)).toEqual(["A"])
   })
 
-  test("fence body capped at 4 KiB", () => {
+  test("fence body capped at 4 KiB via head+tail compression", () => {
     const big = "x".repeat(8 * 1024)
     const text = `\`\`\`\n${big}\n\`\`\``
     const out = extractCodeFences(text)
     expect(out.length).toBe(1)
     // Each capped to 4 KiB
     expect((out[0] ?? "").length).toBeLessThanOrEqual(4 * 1024)
+  })
+
+  test("fence body head+tail compression preserves the last lines (exception-line policy)", () => {
+    // Build many short lines so the tail-collection finds non-empty lines
+    // each well under the cap. Total body > 4KB triggers compression; the
+    // FINAL line carries the unique marker that MUST survive.
+    const filler: string[] = []
+    for (let i = 0; i < 1000; i++) filler.push(`filler ${i} some padding XYZ`)
+    const finalLine = "RAISES UNIQUE_MARKER_HERE: this is the final line"
+    const body = `${filler.join("\n")}\n${finalLine}`
+    const text = `\`\`\`\n${body}\n\`\`\``
+    const out = extractCodeFences(text)
+    expect(out.length).toBe(1)
+    const got = out[0] ?? ""
+    // Final line preserved (exception-line policy)
+    expect(got).toContain("UNIQUE_MARKER_HERE")
+    // Ellipsis marker present (proves compression fired)
+    expect(got).toContain("…")
+    // Total under cap
+    expect(got.length).toBeLessThanOrEqual(4 * 1024)
   })
 
   test("regex state isolation across calls", () => {

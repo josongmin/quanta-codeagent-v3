@@ -43,6 +43,13 @@ export const estimateTokens = (messages: Message[]): number => {
  *  without letting a large attachment explode it. */
 const IMAGE_CHAR_ESTIMATE = 6000
 
+/** Rough context-token footprint of a PDF document, in chars (ADR-0137).
+ *  ~3k tokens baseline (4 chars per token convention used by `estimateTokens`).
+ *  Conservative "small document" estimate — multi-page PDFs cost more on the
+ *  provider side, but a finer-grained estimate would require parsing the PDF
+ *  (which `pdf_read` intentionally does NOT do; Claude handles it natively). */
+const DOCUMENT_CHAR_ESTIMATE = 12000
+
 const blockChars = (b: ContentBlock): number => {
   switch (b.type) {
     case "text":
@@ -55,6 +62,15 @@ const blockChars = (b: ContentBlock): number => {
       return b.content.length
     case "image":
       return IMAGE_CHAR_ESTIMATE
+    case "document":
+      // ADR-0137 — PDF document attachments. Tokens are provider-side OCR /
+      // page-parse, NOT raw bytes. Anthropic charges ~1.5k-3k tokens per page;
+      // base64 byte length is NOT a faithful proxy. Use a fixed estimate of
+      // ~3k tokens (`estimateTokens` divides by 4) per document attachment —
+      // enough to nudge compaction without exploding the threshold on a small
+      // multi-page PDF. Page count is unknown without parsing, so this is the
+      // conservative "small document" baseline.
+      return DOCUMENT_CHAR_ESTIMATE
     default: {
       // ContentBlock is a closed union — `_exhaustive` pins it at build time so
       // a new variant fails tsc here instead of silently returning `undefined`
@@ -144,6 +160,8 @@ const renderBlock = (b: ContentBlock): string => {
       return `(tool_result) ${b.content}`
     case "image":
       return `(image ${b.mediaType})`
+    case "document":
+      return `(document ${b.mediaType})`
   }
 }
 

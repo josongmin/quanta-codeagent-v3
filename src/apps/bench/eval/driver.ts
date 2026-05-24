@@ -250,6 +250,11 @@ export const benchOptIns = (): {
    *  remains for back-compat with the wiring tests; `issueHintMode` is the
    *  forward-looking field used by `prepareIssueHint`. */
   issueHintMode: IssueHintMode
+  /** Opt-in toggle for the expected/actual extractor. Default false; only
+   *  true when `QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL=1|on`. Independent
+   *  of `issueHintMode` — can be set even when the parent gate is off (in
+   *  which case it has no effect because no hint runs at all). */
+  issueHintExpectedActual: boolean
 } => {
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
@@ -289,9 +294,14 @@ export const benchOptIns = (): {
           isolation: "tmpdir",
         }
       : undefined
-  // Issue-text hint injection (Agentless paper, localization +5pp). Strict
-  // accept-list:
-  //   - `1` / `on`         ⇒ regex extractor (legacy, pre-feature behavior)
+  // Issue-text hint injection (Agentless paper, localization +5pp).
+  //
+  // Verbatim-evidence policy (post-upgrade): when on, the `regex` mode emits
+  // VERBATIM extracted evidence (code fence bodies, traceback blocks, errors
+  // with `: message` tails, refs) rather than count-summaries. The flag
+  // accept-list itself is unchanged.
+  //
+  //   - `1` / `on`         ⇒ regex extractor (verbatim-evidence format)
   //   - `agentless`        ⇒ LLM-driven Stage-1 localization (Agentless paper)
   //   - anything else      ⇒ off (default OFF preserves byte-identical
   //                              measurement until explicit opt-in)
@@ -301,7 +311,21 @@ export const benchOptIns = (): {
   // Back-compat: the old `issueHint` boolean stays true for BOTH `regex` and
   // `agentless` modes (anything that produces a non-empty hint block).
   const issueHint = issueHintMode !== "off"
-  return { lspNav, subagent, skills, localizePhase, branchSearch, issueHint, issueHintMode }
+  // Expected/Actual extraction is gated SEPARATELY (false-positive-prone in
+  // prose). Default-OFF even when parent issueHint is enabled. Accept-list:
+  // `1` / `on` only.
+  const eaRaw = process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL
+  const issueHintExpectedActual = eaRaw === "1" || eaRaw === "on"
+  return {
+    lspNav,
+    subagent,
+    skills,
+    localizePhase,
+    branchSearch,
+    issueHint,
+    issueHintMode,
+    issueHintExpectedActual,
+  }
 }
 
 /** Pure parser for the `QUANTA_BENCH_LOCALIZE_PHASE` env var. Exported for
@@ -495,11 +519,14 @@ export const prepareIssueHint = async (
   deps: PrepareIssueHintDeps,
 ): Promise<string> => {
   if (mode === "off") return ""
+  const opt = benchOptIns()
+  const extractOpts = { withExpectedActual: opt.issueHintExpectedActual }
   if (mode === "regex") {
-    return composeIssueHint(extractIssueHint(instance.problemStatement))
+    return composeIssueHint(extractIssueHint(instance.problemStatement, extractOpts))
   }
   // mode === "agentless"
-  const regexFallback = (): string => composeIssueHint(extractIssueHint(instance.problemStatement))
+  const regexFallback = (): string =>
+    composeIssueHint(extractIssueHint(instance.problemStatement, extractOpts))
   // Empty problem statement ⇒ regex also yields "" ⇒ byte-identical.
   if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
     return regexFallback()
@@ -580,7 +607,11 @@ export const buildConfig = (
     precomputedHint !== undefined
       ? precomputedHint
       : opt.issueHintMode === "regex"
-        ? composeIssueHint(extractIssueHint(instance.problemStatement))
+        ? composeIssueHint(
+            extractIssueHint(instance.problemStatement, {
+              withExpectedActual: opt.issueHintExpectedActual,
+            }),
+          )
         : ""
   const hintedBase = hint !== "" ? `${hint}\n\n${baseText}` : baseText
   const text = seedMsg !== undefined && seedMsg !== "" ? `${hintedBase}\n\n${seedMsg}` : hintedBase

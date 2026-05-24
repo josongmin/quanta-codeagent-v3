@@ -14,22 +14,28 @@ R1–R6 6-round, 30-병렬 agent 탐색으로 `.extracted_source/` (Cursor 3.2.1
 
 `.extracted_source/` 흡수를 **3 tier × 4 theme = 12 wave**로 패키징.
 
-### Wave priority matrix
+### Wave priority matrix (post-2026-05-24 verification)
 
-| Wave | Theme | ADR # | 흡수 형태 | 우선순위 |
-|---|---|---|---|---|
-| **W1** | Memory hygiene seam | **0131** | 4-state outcome enum + preference phrase grammar + stage1→phase2 pipeline | P0 (즉시) |
-| **W2** | Autonomous reactor | **0132** | SIMULATED_MSG_REASON + cloud-agent branch snapshot 사다리 | P0 (paradigm shift) |
-| **W3** | Hook bidirectional RPC | **0133** | 6-hook Request/Response paired + prompt_hook injection | P0 (기존 hook 자연스러운 superset) |
-| **W4** | Skill 7-scope tiering | **0134** | builtIn/system/admin/team/repo/user/personal + 10% phase2 promotion | P1 (enterprise 진출) |
-| **W5** | Permission + sandbox 2-layer | **0135** | permission_profile + file_system_sandbox_policy + 4-pillar permission | P1 (security primitive) |
-| W6 | Retrieval SOTA stack | (TBD) | BM25 + 13 reranker (LULEA/UMEA proprietary) + 4 token bucket re-chunk + commit embedding | P1 |
-| W7 | Connectors REST API | (TBD) | `/aip/connectors` dynamic registry + OAuth discovery + per-host availability | P2 |
-| W8 | Scheduled agent | (TBD) | RRULE + Weekday nth-occurrence + thread destination + model reroute | P2 |
-| W9 | Composer UX completeness | (TBD) | 45+ key (attachment 4 / mention 3 / cloud-error 4-tier / contextWindow 4) | P2 |
-| W10 | Typed proto RPC migration | (TBD) | agent.v1 726 + aiserver.v1 3207 baseline → v3 IPC protobuf-fy | P3 (큰 작업, 가치 큼) |
-| W11 | Plugin process isolation | (TBD) | DXT UtilityProcess.fork + MessageChannelMain (Claude pattern) | P3 (desktop 진출 시) |
-| W12 | Misc multi-cloud + OAuth lock | (TBD) | Bedrock/Vertex/Foundry/Mantle + Redis OAuth refresh lock + mid-session GitHub token rotate | P3 (enterprise 후) |
+| Wave | Theme | ADR # | 흡수 형태 | 우선순위 | 코드 검증 결과 |
+|---|---|---|---|---|---|
+| **W1** | Memory hygiene seam | **0131** | 4-state outcome enum + preference phrase grammar + stage1→phase2 pipeline | P0 (즉시) | PARTIALLY-NEEDED (ADR-0068 Wave A foundation HIT, outcome enum + 10% gate 추가) |
+| **W2** | Autonomous reactor | **0132** | SIMULATED_MSG_REASON + cloud-agent branch snapshot 사다리 | P0 (paradigm shift) | **FULLY-NEEDED** (0%, `src/reactor/` 미존재) |
+| **W3** | Hook bidirectional RPC | **0133** | 6-hook Request/Response paired + prompt_hook injection | P0 (기존 hook 자연스러운 superset) | **FULLY-NEEDED** (현 5-event 단방향) |
+| **W4** | Skill 7-scope tiering | **0134** | builtIn/system/admin/team/repo/user/personal + 10% phase2 promotion | P1 (enterprise 진출) | **FULLY-NEEDED** (현 implicit 2-tier) |
+| **W5** | Permission + sandbox 2-layer | **0135** | permission_profile + file_system_sandbox_policy + 4-pillar permission | P1 (security primitive) | PARTIALLY-NEEDED (PermissionStack ADR-0046 HIT, layer/pillar/scope 추가) |
+| W6 | Retrieval SOTA stack | (TBD) | reranker + 4 token bucket re-chunk + commit embedding + 8-vendor LLM (BM25 + hybrid 이미 있음) | P2 (downgrade) | PARTIALLY-NEEDED (BM25 + hybrid HIT, reranker/chunk/commit MISS) |
+| W7 | Connectors REST API | (TBD) | `/aip/connectors` dynamic registry + OAuth discovery + per-host availability | P2 | **FULLY-NEEDED** (현 MCP는 static stdio) |
+| W8 | Scheduled agent | (TBD) | RRULE + Weekday nth-occurrence + thread destination + model reroute | P2 | **FULLY-NEEDED** (현 one-shot background only) |
+| ~~W9~~ | ~~Composer UX completeness~~ | — | — | **REDUNDANT for CLI surface** | CLI surface가 attachment/dropdown/card UI 차단. wire layer만 의미 있음 — 그건 W3 (hook RPC) 안에서 자연 해결. **Drop from active backlog** |
+| ~~W10~~ | ~~Typed proto RPC migration~~ | — | — | **REDUNDANT** | 우리 typed-envelope (`quanta.ipc.v1` + discriminated union + zod + deterministic encoding)이 이미 protobuf 동등 superset. **Drop from active backlog**, ADR-0023 + R7 ADR-0072 ([[may-21-codex-r7-sota-plus-plus]])으로 cover됨 |
+| W11 | Plugin process isolation | (TBD) | DXT UtilityProcess.fork + MessageChannelMain (Claude pattern) | P3 (desktop 진출 시) | PARTIALLY-NEEDED (escalatingKill 2s grace HIT, UtilityProcess/MessageChannel 0%) |
+| W12 | Misc multi-cloud + OAuth lock | (TBD) | Bedrock/Vertex/Foundry/Mantle + Redis OAuth refresh lock + mid-session GitHub token rotate | P3 (enterprise 후) | unverified (별도 round) |
+
+**검증 후 갱신 (2026-05-24)**:
+- W6 retrieval downgrade P1 → P2 (BM25 foundation 이미 우수, marginal stack)
+- W9 / W10 모두 **REDUNDANT** — drop from active backlog (이유는 위 표)
+- 활성 backlog: W6 W7 W8 W11 W12 = 5 (was 7)
+- ADR 0131 / 0135 PARTIALLY-NEEDED — scope 축소 가능 (foundation 안 다시 짤 필요 없음)
 
 ### 즉시 ADR proposal (이 roadmap과 함께)
 

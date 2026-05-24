@@ -39,16 +39,16 @@ describe("extractIssueHint — SWE-bench picks.jsonl corpus (loose contract)", (
   for (const pick of picks) {
     test(`${pick.instance_id}: extraction is well-typed and never throws`, () => {
       const hint = extractIssueHint(pick.problem_statement)
-      // Loose contract: extraction never throws AND every field is a defined
-      // array (not undefined). Exact extracted set is NOT pinned because some
-      // SWE-bench issue bodies are very short and conservative extractors
-      // (correctly) yield empty hints — pinning a minimum here would lock in
-      // false positives.
+      // Loose contract: extraction never throws AND every mandatory field is
+      // a defined array (not undefined). expectedActual is optional and
+      // OMITTED when not opted in.
       expect(Array.isArray(hint.files)).toBe(true)
       expect(Array.isArray(hint.symbols)).toBe(true)
       expect(Array.isArray(hint.errors)).toBe(true)
       expect(Array.isArray(hint.codeFences)).toBe(true)
+      expect(Array.isArray(hint.tracebacks)).toBe(true)
       expect(Array.isArray(hint.tracebackPaths)).toBe(true)
+      expect(Array.isArray(hint.refs)).toBe(true)
 
       // Print summary for human-visible test output (logged via expect message).
       const summary = [
@@ -56,7 +56,9 @@ describe("extractIssueHint — SWE-bench picks.jsonl corpus (loose contract)", (
         `symbols=${hint.symbols.length} (${hint.symbols.slice(0, 3).join(", ")})`,
         `errors=${hint.errors.length} (${hint.errors.slice(0, 3).join(", ")})`,
         `codeFences=${hint.codeFences.length}`,
+        `tracebacks=${hint.tracebacks.length}`,
         `tracebackPaths=${hint.tracebackPaths.length} (${hint.tracebackPaths.slice(0, 2).join(", ")})`,
+        `refs=${hint.refs.length} (${hint.refs.slice(0, 3).join(", ")})`,
       ].join(" | ")
       // biome-ignore lint/suspicious/noConsole: test-time visibility of per-instance extraction
       console.log(`[${pick.instance_id}] ${summary}`)
@@ -91,6 +93,29 @@ describe("extractIssueHint — SWE-bench picks.jsonl corpus (loose contract)", (
     // would have steered it right).
     expect(hint.files).toContain("requests/models.py")
     expect(hint.errors).toContain("UnicodeError")
+  })
+
+  test("requests-5414: VERBATIM reproduction code body extracted", () => {
+    const target = picks.find((p) => p.instance_id === "psf__requests-5414")
+    expect(target).toBeDefined()
+    if (!target) return
+    const hint = extractIssueHint(target.problem_statement)
+    // Verbatim policy: the `requests.get("http://.example.com")` reproduction
+    // body must appear verbatim in codeFences (no summary).
+    expect(hint.codeFences.length).toBeGreaterThan(0)
+    const hasRepro = hint.codeFences.some(
+      (body) =>
+        body.includes("import requests") && body.includes('requests.get("http://.example.com")'),
+    )
+    expect(hasRepro).toBe(true)
+  })
+
+  test("requests-5414: PR ref #774 extracted", () => {
+    const target = picks.find((p) => p.instance_id === "psf__requests-5414")
+    expect(target).toBeDefined()
+    if (!target) return
+    const hint = extractIssueHint(target.problem_statement)
+    expect(hint.refs).toContain("#774")
   })
 
   test("pytest-7982: symlink / pathlib issue mentions the file", () => {

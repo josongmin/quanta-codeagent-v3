@@ -1,16 +1,18 @@
 /**
  * File-path extraction from issue text.
  *
- * Conservative posture (no heuristics): we only accept a path when its shape
- * is unambiguously a path — at least one slash AND a recognized extension. The
- * "models.py alone" case is intentionally rejected here because it's too
- * ambiguous (could be any module name on any project); traceback parsing in
- * `extract-code.ts` picks those up via its own stricter context.
+ * Verbatim-evidence policy (per user spec): the extension whitelist is the
+ * sole filter — a bare module name like `models.py` IS accepted (previously
+ * we required a slash, but that intentionally drops the most common form in
+ * Python issue bodies: "the bug is in models.py").
  *
  * Two-pass design:
- *   1. **Primary** regex catches plain paths like `requests/models.py` or
- *      `src/_pytest/pathlib.py:42` — anchored at a non-path boundary so we
- *      don't accidentally consume the URL prefix of a markdown link.
+ *   1. **Primary** regex catches tokens matching `<name>.<ext>` where the
+ *      base name is a valid identifier-ish token (letters / digits / `_` /
+ *      `.` / `+` / `-`) and the extension is in the whitelist. Slashes
+ *      between path segments accepted (but NOT required). Anchored at a
+ *      non-path boundary so we don't accidentally consume the URL prefix of
+ *      a markdown link.
  *   2. **URL** regex picks up paths embedded inside GitHub-style permalinks
  *      `…/blob/<sha>/<path>…#L<line>` (very common in issue bodies). Anchored
  *      with a leading slash so plain `src/agent/foo.ts` text is NOT
@@ -32,12 +34,14 @@ import { stripAnsi } from "./normalize"
 
 /** Extension alternation — longer alternatives placed FIRST so `.json` is not
  *  partially captured as `.js`. Order matters in JS regex alternation. */
-const EXT_ALT = "yaml|yml|toml|json|tsx|ts|jsx|js|hpp|cpp|java|sql|rs|rb|sh|py|go|md|c|h"
+const EXT_ALT = "yaml|yml|toml|json|tsx|ts|jsx|js|hpp|cpp|java|sql|rs|rb|sh|py|go|md|c|h|php"
 
-/** Primary path: starts at a non-path boundary, contains ≥1 slash, ends at a
- *  recognized extension. */
+/** Primary path: starts at a non-path boundary, optional `<segment>/`
+ *  prefixes (zero or more — slash NO LONGER required), ends at a recognized
+ *  extension. Base segment must start with an alpha-or-underscore so we don't
+ *  accept `.py` from " .py" or numbers-only names. */
 const PATH_RE = new RegExp(
-  `(?<=^|[^\\w/.+-])([A-Za-z_][\\w.+-]*(?:\\/[\\w.+-]+)+\\.(?:${EXT_ALT}))(?::\\d+(?::\\d+)?)?\\b`,
+  `(?<=^|[^\\w/.+-])((?:[\\w.+-]+\\/)*[A-Za-z_][\\w.+-]*\\.(?:${EXT_ALT}))(?::\\d+(?::\\d+)?)?\\b`,
   "g",
 )
 
@@ -60,6 +64,9 @@ const acceptPath = (raw: string | undefined, found: Set<string>): void => {
   if (raw.length === 0 || raw.length > MAX_LEN) return
   const head = raw.split("/")[0] ?? ""
   if (RESERVED.has(head)) return
+  // Also defend against `__proto__.py` (no slash, still a pollution-shape).
+  const base = head.split(".")[0] ?? ""
+  if (RESERVED.has(base)) return
   found.add(raw)
 }
 

@@ -32,6 +32,7 @@ export {
 } from "./streaming-events"
 export type {
   ContentBlock,
+  DocumentBlock,
   ImageBlock,
   Message,
   StreamEvent,

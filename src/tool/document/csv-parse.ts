@@ -238,6 +238,39 @@ const tokenize = (
   return { rows: st.rows, diagnostics }
 }
 
+/** Build the empty-result shape used both for empty input AND for a non-empty
+ *  input that tokenized to zero rows. The seed diagnostics from the tokenizer
+ *  (if any) are prefixed; the `empty-input` diagnostic always closes. */
+const emptyResult = (seed: ReadonlyArray<CsvParseDiagnostic>, message: string): CsvParseResult =>
+  Object.freeze({
+    headers: null,
+    rows: Object.freeze([]),
+    diagnostics: Object.freeze([...seed, { kind: "empty-input" as const, line: 1, message }]),
+  })
+
+/** Assemble the final data rows + ragged-row diagnostics. Pure. */
+const assembleRows = (
+  rawRows: ReadonlyArray<RowBuf>,
+  dataStart: number,
+  expectedCols: number,
+): { rows: CsvRow[]; raggedDiagnostics: CsvParseDiagnostic[] } => {
+  const rows: CsvRow[] = []
+  const raggedDiagnostics: CsvParseDiagnostic[] = []
+  for (let r = dataStart; r < rawRows.length; r++) {
+    const rb = rawRows[r]
+    if (!rb) continue
+    if (rb.cells.length !== expectedCols) {
+      raggedDiagnostics.push({
+        kind: "ragged-row",
+        line: rb.lineNumber,
+        message: `ragged row at line ${rb.lineNumber}: ${rb.cells.length} cells (expected ${expectedCols})`,
+      })
+    }
+    rows.push(freezeRow(rb))
+  }
+  return { rows, raggedDiagnostics }
+}
+
 /** Parse a CSV / TSV string into typed rows + diagnostics.
  *
  *  Pure. Never throws on malformed input (only on a non-string argument —
@@ -255,34 +288,12 @@ export const parseCsv = (source: string, opts: CsvParseOpts = {}): CsvParseResul
   const noHeader = opts.noHeader === true
 
   if (source.length === 0) {
-    return Object.freeze({
-      headers: null,
-      rows: Object.freeze([]),
-      diagnostics: Object.freeze([
-        {
-          kind: "empty-input" as const,
-          line: 1,
-          message: "empty input — no rows parsed",
-        },
-      ]),
-    })
+    return emptyResult([], "empty input — no rows parsed")
   }
 
   const { rows: rawRows, diagnostics } = tokenize(source, delimiter)
-
   if (rawRows.length === 0) {
-    return Object.freeze({
-      headers: null,
-      rows: Object.freeze([]),
-      diagnostics: Object.freeze([
-        ...diagnostics,
-        {
-          kind: "empty-input" as const,
-          line: 1,
-          message: "no rows after tokenization",
-        },
-      ]),
-    })
+    return emptyResult(diagnostics, "no rows after tokenization")
   }
 
   let headers: ReadonlyArray<string> | null = null
@@ -296,26 +307,11 @@ export const parseCsv = (source: string, opts: CsvParseOpts = {}): CsvParseResul
   }
 
   const expectedCols = headers !== null ? headers.length : (rawRows[0]?.cells.length ?? 0)
-
-  const rows: CsvRow[] = []
-  const allDiagnostics: CsvParseDiagnostic[] = [...diagnostics]
-
-  for (let r = dataStart; r < rawRows.length; r++) {
-    const rb = rawRows[r]
-    if (!rb) continue
-    if (rb.cells.length !== expectedCols) {
-      allDiagnostics.push({
-        kind: "ragged-row",
-        line: rb.lineNumber,
-        message: `ragged row at line ${rb.lineNumber}: ${rb.cells.length} cells (expected ${expectedCols})`,
-      })
-    }
-    rows.push(freezeRow(rb))
-  }
+  const { rows, raggedDiagnostics } = assembleRows(rawRows, dataStart, expectedCols)
 
   return Object.freeze({
     headers,
     rows: Object.freeze(rows),
-    diagnostics: Object.freeze(allDiagnostics),
+    diagnostics: Object.freeze([...diagnostics, ...raggedDiagnostics]),
   })
 }

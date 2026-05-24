@@ -19,6 +19,7 @@ import type { Instance } from "../../src/apps/bench/types"
 
 const ENV_KEYS = [
   "QUANTA_BENCH_ISSUE_HINT",
+  "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL",
   "QUANTA_BENCH_LSP",
   "QUANTA_BENCH_SUBAGENT",
   "QUANTA_BENCH_SKILLS",
@@ -119,6 +120,35 @@ describe("benchOptIns — issueHint flag", () => {
     expect(r.subagent).toBeUndefined()
     expect(r.skills).toBeUndefined()
   })
+
+  test("issueHintExpectedActual unset → false (default OFF)", () => {
+    expect(benchOptIns().issueHintExpectedActual).toBe(false)
+  })
+
+  test("issueHintExpectedActual '=1' → true", () => {
+    process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
+    expect(benchOptIns().issueHintExpectedActual).toBe(true)
+  })
+
+  test("issueHintExpectedActual '=on' → true", () => {
+    process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "on"
+    expect(benchOptIns().issueHintExpectedActual).toBe(true)
+  })
+
+  test("issueHintExpectedActual strict accept-list (off / true / yes / 0 → false)", () => {
+    for (const v of ["off", "true", "yes", "0", "", "TRUE"]) {
+      process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = v
+      expect(benchOptIns().issueHintExpectedActual).toBe(false)
+    }
+  })
+
+  test("issueHintExpectedActual independent of parent issueHintMode", () => {
+    // E/A flag set, parent unset — still resolves true (no-effect, but value
+    // reflected correctly).
+    process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
+    expect(benchOptIns().issueHintExpectedActual).toBe(true)
+    expect(benchOptIns().issueHintMode).toBe("off")
+  })
 })
 
 describe("buildConfig — issue-hint prepend wiring", () => {
@@ -138,7 +168,7 @@ describe("buildConfig — issue-hint prepend wiring", () => {
     const cfg = buildConfig(customInstance(RICH_ISSUE), baseDeps, "/tmp/sb", ac.signal, stubStream)
     const text = getUserText(cfg)
     expect(text.startsWith(RICH_ISSUE)).toBe(true)
-    expect(text).not.toContain("Issue Hints (auto-extracted)")
+    expect(text).not.toContain("Issue evidence (verbatim)")
     // Exact contract for custom-corpus default
     expect(text).toBe(`${RICH_ISSUE}\n\nWork inside /tmp/sb. When done, stop.`)
   })
@@ -150,19 +180,22 @@ describe("buildConfig — issue-hint prepend wiring", () => {
     expect(getUserText(cfg)).toBe(`${RICH_ISSUE}\n\nWork inside /tmp/sb. When done, stop.`)
   })
 
-  test("flag '1' + non-empty extraction → hint prepended, format verified", () => {
+  test("flag '1' + non-empty extraction → verbatim-evidence hint prepended", () => {
     process.env.QUANTA_BENCH_ISSUE_HINT = "1"
     const ac = new AbortController()
     const cfg = buildConfig(customInstance(RICH_ISSUE), baseDeps, "/tmp/sb", ac.signal, stubStream)
     const text = getUserText(cfg)
-    // Header on first line
-    expect(text.startsWith("## Issue Hints (auto-extracted)")).toBe(true)
+    // New verbatim-evidence header on first line
+    expect(text.startsWith("## Issue evidence (verbatim)")).toBe(true)
     // Calibration line BEFORE the problem statement
     expect(text).toContain("Use these as starting points but verify with your own tools.")
     // Hint AND original problem still present
     expect(text).toContain(RICH_ISSUE)
     expect(text).toContain("requests/models.py")
     expect(text).toContain("UnicodeError")
+    // VERBATIM code fence body re-emitted under Reproduction code section
+    expect(text).toContain("### Reproduction code")
+    expect(text).toContain("requests.get('http://.example.com')")
     // Separator: hint block + "\n\n" + baseText
     expect(text).toContain("\n\nGetting http://.example.com raises UnicodeError")
   })
@@ -172,7 +205,7 @@ describe("buildConfig — issue-hint prepend wiring", () => {
     const ac = new AbortController()
     const cfg = buildConfig(customInstance(""), baseDeps, "/tmp/sb", ac.signal, stubStream)
     const text = getUserText(cfg)
-    expect(text).not.toContain("Issue Hints (auto-extracted)")
+    expect(text).not.toContain("Issue evidence (verbatim)")
     expect(text).toBe("\n\nWork inside /tmp/sb. When done, stop.")
   })
 
@@ -183,7 +216,7 @@ describe("buildConfig — issue-hint prepend wiring", () => {
     const ac = new AbortController()
     const cfg = buildConfig(customInstance(plain), baseDeps, "/tmp/sb", ac.signal, stubStream)
     const text = getUserText(cfg)
-    expect(text).not.toContain("Issue Hints (auto-extracted)")
+    expect(text).not.toContain("Issue evidence (verbatim)")
     expect(text).toBe(`${plain}\n\nWork inside /tmp/sb. When done, stop.`)
   })
 
@@ -199,7 +232,7 @@ describe("buildConfig — issue-hint prepend wiring", () => {
     )
     const text = getUserText(cfg)
     // All three components present in order: hint → problem → directive
-    const idxHint = text.indexOf("## Issue Hints (auto-extracted)")
+    const idxHint = text.indexOf("## Issue evidence (verbatim)")
     const idxProblem = text.indexOf("Getting http://.example.com")
     const idxDirective = text.indexOf("automated grader")
     expect(idxHint).toBeGreaterThanOrEqual(0)
@@ -214,8 +247,39 @@ describe("buildConfig — issue-hint prepend wiring", () => {
     const cfg = buildConfig(swebenchInstance(plain), baseDeps, "/tmp/sb", ac.signal, stubStream)
     const text = getUserText(cfg)
     // No hint header. Starts with the problem statement.
-    expect(text).not.toContain("Issue Hints (auto-extracted)")
+    expect(text).not.toContain("Issue evidence (verbatim)")
     expect(text.startsWith(plain)).toBe(true)
     expect(text).toContain("automated grader")
+  })
+
+  test("expected/actual opt-in gate: default OFF — no E/A section emitted", () => {
+    process.env.QUANTA_BENCH_ISSUE_HINT = "1"
+    // QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL deliberately unset
+    const issue = "We expected good results but got bad ones. Should work but doesn't."
+    const ac = new AbortController()
+    const cfg = buildConfig(customInstance(issue), baseDeps, "/tmp/sb", ac.signal, stubStream)
+    const text = getUserText(cfg)
+    expect(text).not.toContain("Expected/Actual phrases")
+  })
+
+  test("expected/actual opt-in gate: '=1' — E/A section emitted when matches found", () => {
+    process.env.QUANTA_BENCH_ISSUE_HINT = "1"
+    process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
+    const issue = "We expected the function to return 1. Got 2 instead. Likely src/foo.py is wrong."
+    const ac = new AbortController()
+    const cfg = buildConfig(customInstance(issue), baseDeps, "/tmp/sb", ac.signal, stubStream)
+    const text = getUserText(cfg)
+    expect(text).toContain("Expected/Actual phrases")
+  })
+
+  test("expected/actual opt-in gate: parent OFF + E/A '=1' → no hint at all", () => {
+    // Parent gate off ⇒ no hint runs, regardless of E/A toggle.
+    process.env.QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL = "1"
+    const issue = "We expected good results but got bad ones."
+    const ac = new AbortController()
+    const cfg = buildConfig(customInstance(issue), baseDeps, "/tmp/sb", ac.signal, stubStream)
+    const text = getUserText(cfg)
+    expect(text).not.toContain("Issue evidence (verbatim)")
+    expect(text).not.toContain("Expected/Actual phrases")
   })
 })

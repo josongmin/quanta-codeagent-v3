@@ -12,7 +12,32 @@ export interface Message {
   id?: string
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | ImageBlock
+export type ContentBlock =
+  | TextBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ThinkingBlock
+  | ImageBlock
+  | DocumentBlock
+
+/** Native-document input (ADR-0137). Mirrors `ImageBlock` in shape and lifecycle:
+ *  appears ONLY on the input/user side of a conversation (the model never streams
+ *  a document back). Consumed by Anthropic Messages via
+ *  `{type:"document", source:{type:"base64", media_type:"application/pdf", data}}`
+ *  — Claude reads the PDF natively (vision + text) without a client-side
+ *  extraction lib. Default-OFF byte-identical: a message / tool_result with no
+ *  `DocumentBlock` is wired exactly as before. Providers that cannot transport
+ *  documents on the wire (OpenAI today) MUST drop or text-flatten this block
+ *  rather than crash. */
+export interface DocumentBlock {
+  type: "document"
+  /** Base64-encoded document bytes, NO `data:` URI prefix. */
+  data: string
+  /** IANA media type — `application/pdf` today (the only type Anthropic accepts
+   *  as a native document block). Future types (e.g. `text/plain`,
+   *  `text/markdown`) will be added as the API surface widens. */
+  mediaType: string
+}
 
 /** Multi-modal image input (ADR-0083). Appears ONLY on the input/user side of
  *  a conversation — the model never streams an image back, so assemblers that
@@ -64,14 +89,15 @@ export interface ToolResultBlock {
    *  ALWAYS populate `content` so legacy consumers (compaction, distill,
    *  rewind, migration normalization, OpenAI flatten) keep working. */
   content: string
-  /** ADR-0126 — OPTIONAL structured content mirroring Anthropic Messages API
-   *  `tool_result.content`. Populated ONLY when a tool's `ToolResult.images`
-   *  is non-empty: dispatch's `composeToolResultContent` builds the array
-   *  `[{type:"text",text:output}, ...ImageBlock]`. Absent ⇒ adapters use
-   *  `content` (byte-identical to the pre-feature path). Provider adapters
-   *  that cannot carry image parts in tool-result messages (OpenAI chat /
-   *  Responses) drop this field and fall back to `content`. */
-  contentBlocks?: ReadonlyArray<{ type: "text"; text: string } | ImageBlock>
+  /** ADR-0126 / ADR-0137 — OPTIONAL structured content mirroring Anthropic
+   *  Messages API `tool_result.content`. Populated when a tool's
+   *  `ToolResult.images` or `ToolResult.documents` is non-empty: dispatch's
+   *  `composeToolResultContent` builds the array
+   *  `[{type:"text",text:output}, ...ImageBlock, ...DocumentBlock]`. Absent ⇒
+   *  adapters use `content` (byte-identical to the pre-feature path). Provider
+   *  adapters that cannot carry image / document parts in tool-result messages
+   *  (OpenAI chat / Responses) drop this field and fall back to `content`. */
+  contentBlocks?: ReadonlyArray<{ type: "text"; text: string } | ImageBlock | DocumentBlock>
   is_error?: boolean
 }
 

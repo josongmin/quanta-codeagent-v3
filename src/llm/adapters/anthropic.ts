@@ -168,6 +168,20 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
           data: block.data,
         },
       } satisfies Anthropic.ContentBlockParam
+    case "document":
+      // ADR-0137 native document block: Anthropic Messages API base64 document
+      // source (PDF only today). The SDK's ContentBlockParam union accepts
+      // `application/pdf` as the media type via the document block param. The
+      // `pdf_read` tool magic-byte-sniffs `%PDF-` BEFORE attaching, so any
+      // block reaching this arm is byte-verified upstream.
+      return {
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: block.mediaType as "application/pdf",
+          data: block.data,
+        },
+      } satisfies Anthropic.ContentBlockParam
     default: {
       // Exhaustiveness pin: a future `ContentBlock` variant must come back
       // here and decide its Anthropic mapping consciously — silent drop is

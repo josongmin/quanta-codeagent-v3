@@ -40,7 +40,9 @@ describe("issue-hint hellgate — adversarial inputs (25+ cases)", () => {
       symbols: [],
       errors: [],
       codeFences: [],
+      tracebacks: [],
       tracebackPaths: [],
+      refs: [],
     })
   })
 
@@ -55,7 +57,9 @@ describe("issue-hint hellgate — adversarial inputs (25+ cases)", () => {
       symbols: [],
       errors: [],
       codeFences: [],
+      tracebacks: [],
       tracebackPaths: [],
+      refs: [],
     })
   })
 
@@ -122,7 +126,9 @@ describe("issue-hint hellgate — adversarial inputs (25+ cases)", () => {
       symbols: [],
       errors: [],
       codeFences: [],
+      tracebacks: [],
       tracebackPaths: [],
+      refs: [],
     })
   })
 
@@ -233,12 +239,16 @@ describe("issue-hint hellgate — adversarial inputs (25+ cases)", () => {
   test("h24: object-shape sanity — returned object is a plain shape (own keys only)", () => {
     const h = extractIssueHint("def foo():")
     expect(Object.getPrototypeOf(h)).toBe(Object.prototype)
+    // expectedActual is OPTIONAL — omitted when extraction not opted-in or
+    // when no matches found. The seven mandatory keys MUST always be present.
     expect(Object.keys(h).sort()).toEqual([
       "codeFences",
       "errors",
       "files",
+      "refs",
       "symbols",
       "tracebackPaths",
+      "tracebacks",
     ])
   })
 

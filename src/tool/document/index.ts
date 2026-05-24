@@ -1,10 +1,12 @@
 /**
- * Document tool slice barrel (ADR-0133 — text-format structured-data tools).
+ * Document tool slice barrel (ADR-0133 / ADR-0137 — structured-data + native-
+ * document tools).
  *
- * Exports two tools (`csv_read`, `ndjson_read`) and their pure parsers.
- * Registration is DEFERRED — exported here but NOT added to `defaultTools`
- * until the `MUTATING_TOOL_TABLE` (sibling-touched) absorbs the new entries.
- * Same posture as `read_image` (ADR-0126) and `web_fetch`/`web_search`
+ * Exports five tools (`csv_read`, `ndjson_read`, `yaml_read`, `pdf_read`,
+ * `xlsx_read` stub) and their pure parsers. Registration is DEFERRED —
+ * exported here but NOT added to `defaultTools` until the
+ * `MUTATING_TOOL_TABLE` (sibling-touched) absorbs the new entries. Same
+ * posture as `read_image` (ADR-0126) and `web_fetch` / `web_search`
  * (ADR-0127).
  */
 
@@ -39,3 +41,26 @@ export {
   ndjsonReadInputSchema,
   ndjsonReadTool,
 } from "./ndjson-read"
+export {
+  MAX_PDF_BYTES,
+  PDF_MEDIA_TYPE,
+  pdfReadTool,
+  type ReadPdfInput,
+  readPdfInputSchema,
+  sniffPdfMagic,
+  type SupportedDocumentMediaType,
+} from "./pdf-read"
+export {
+  XLSX_READ_DEFERRAL_MESSAGE,
+  type XlsxReadInput,
+  xlsxReadInputSchema,
+  xlsxReadTool,
+} from "./xlsx-read"
+export {
+  YAML_READ_DEFAULT_MAX_KEYS,
+  YAML_READ_MAX_KEYS_CEILING,
+  YAML_READ_MAX_OUTPUT,
+  type YamlReadInput,
+  yamlReadInputSchema,
+  yamlReadTool,
+} from "./yaml-read"

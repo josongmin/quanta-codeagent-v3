@@ -63,6 +63,36 @@ describe("extractErrors — exception/warning type names", () => {
     expect(extractErrors(text)).toEqual(["UnicodeError"])
   })
 
+  test("verbatim message body retained when colon-suffix present", () => {
+    const text = "got UnicodeError: encoding with 'idna' codec failed"
+    expect(extractErrors(text)).toEqual(["UnicodeError: encoding with 'idna' codec failed"])
+  })
+
+  test("both bare and message-bearing forms can co-exist (sorted)", () => {
+    // Same TYPE with and without a message body deduplicates to distinct
+    // entries — both forms carry information for the model.
+    const text = "raises UnicodeError sometimes; specifically UnicodeError: bad codec name"
+    const out = extractErrors(text)
+    expect(out).toContain("UnicodeError")
+    expect(out).toContain("UnicodeError: bad codec name")
+  })
+
+  test("message tail length-capped at 256 chars", () => {
+    const big = "x".repeat(500)
+    const text = `TypeError: ${big}`
+    const out = extractErrors(text)
+    expect(out.length).toBe(1)
+    const entry = out[0] ?? ""
+    // Type prefix + colon-space (2) + capped body
+    expect(entry.length).toBeLessThanOrEqual(2 + "TypeError".length + 256)
+    expect(entry.startsWith("TypeError: ")).toBe(true)
+  })
+
+  test("message stops at newline (next line is NOT part of the error)", () => {
+    const text = "TypeError: bad arg\nNext line is unrelated text"
+    expect(extractErrors(text)).toEqual(["TypeError: bad arg"])
+  })
+
   test("InvalidURL pattern (Url not Error suffix) NOT captured by this extractor", () => {
     // `InvalidURL` doesn't end in Error/Exception/Warning — by design, it
     // surfaces via `extractSymbols` (backtick fence) instead.

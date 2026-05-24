@@ -92,6 +92,7 @@ const writeSessionFile = async (path: string, body: string): Promise<void> => {
 //   - ThinkingBlock.signature   (Anthropic carry-back — missing ⇒ 400 on resume)
 //   - ThinkingBlock.redacted    (encrypted reasoning preservation)
 //   - ImageBlock                (ADR-0083 multimodal input)
+//   - DocumentBlock             (ADR-0137 native-PDF document input)
 const textBlockSchema = z.object({
   type: z.literal("text"),
   text: z.string(),
@@ -120,12 +121,18 @@ const imageBlockSchema = z.object({
   data: z.string(),
   mediaType: z.string(),
 })
+const documentBlockSchema = z.object({
+  type: z.literal("document"),
+  data: z.string(),
+  mediaType: z.string(),
+})
 const contentBlockSchema = z.discriminatedUnion("type", [
   textBlockSchema,
   toolUseBlockSchema,
   toolResultBlockSchema,
   thinkingBlockSchema,
   imageBlockSchema,
+  documentBlockSchema,
 ])
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),

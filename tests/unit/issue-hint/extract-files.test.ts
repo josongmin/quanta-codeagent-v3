@@ -36,9 +36,15 @@ describe("extractFiles — conservative path extraction", () => {
     expect(out).toEqual(["lib/foo.ts"])
   })
 
-  test("bare module name (no slash) is REJECTED — too ambiguous", () => {
-    // Conservative-by-design: `models.py` alone could be anywhere.
-    expect(extractFiles("the bug is in models.py")).toEqual([])
+  test("bare module name (no slash) is ACCEPTED — extension is the filter", () => {
+    // Spec update (verbatim-evidence policy): the extension whitelist is the
+    // sole filter. Authors commonly write "the bug is in models.py" without
+    // a path prefix; previously we dropped these.
+    expect(extractFiles("the bug is in models.py")).toEqual(["models.py"])
+  })
+
+  test("bare module name with extension picked up across languages", () => {
+    expect(extractFiles("see foo.ts and bar.go and baz.rs")).toEqual(["bar.go", "baz.rs", "foo.ts"])
   })
 
   test("multiple languages recognized", () => {
