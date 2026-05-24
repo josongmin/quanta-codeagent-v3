@@ -9,8 +9,8 @@
  *     instanceof-check or string-discriminate.
  */
 import { describe, expect, test } from "bun:test"
-import { ProviderError } from "@/llm/providers/provider-port"
 import type { ProviderErrorCode, ProviderId } from "@/llm/providers/provider-port"
+import { ProviderError } from "@/llm/providers/provider-port"
 
 describe("ProviderError — hellgate", () => {
   test("HELL-A1: name is the stable class tag", () => {

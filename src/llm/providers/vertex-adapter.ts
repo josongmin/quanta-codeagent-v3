@@ -1,26 +1,38 @@
 /**
- * ADR-0139 — `vertex` transport adapter (Google Cloud Vertex AI).
+ * ADR-0139 — `vertex` transport adapter (Google Cloud Vertex AI). Phase 2: REAL.
  *
  * Anthropic ships `@anthropic-ai/vertex-sdk` exporting `AnthropicVertex`, the
  * Vertex-routed sibling of the public `Anthropic` client. Wire grammar is
  * identical; the difference is the URL path
  * (`projects/{gcpProjectId}/locations/{gcpLocation}/...`) and the auth source
- * (Google bearer token instead of `x-api-key`).
- *
- * Phase 1 posture (same as `bedrock-adapter.ts`): the adapter constructs FINE
- * without the Vertex SDK present, but `stream()` throws {@link ProviderError}
- * with code `provider-missing-dependency` so the caller gets a clear
- * "install @anthropic-ai/vertex-sdk" message rather than a cryptic
- * `MODULE_NOT_FOUND`. When the SDK is installed (Phase 2 or downstream-fork)
- * the dynamic import resolves and the adapter delegates verbatim.
+ * (Google bearer token instead of `x-api-key`). ADR-0151 graduates this
+ * adapter from typed-stub to real wire: on first `stream()` call we lazy-load
+ * the SDK, construct an `AnthropicVertex` client, open
+ * `client.messages.create({stream:true})`, and decode the raw stream through
+ * the shared `mapRawEvent` (same SSE grammar — Vertex just substitutes the
+ * transport).
  *
  * Vertex requires BOTH `gcpProjectId` AND `gcpLocation` to synthesize the URL;
  * either missing ⇒ `auth-failed` (`provider-misconfigured`) at construction
  * time so the typed-fail surfaces at factory wiring, not at first wire call.
  *
- * Plane-clean: imports the port + `@/llm` types only. No `@/agent`.
+ * GCP auth precedence (lowest → highest):
+ *   1. ADC — `GOOGLE_APPLICATION_CREDENTIALS` or workload identity (SDK
+ *      resolves via `google-auth-library` when no token is supplied).
+ *   2. Explicit `gcpAccessToken` in `ProviderAuth` (wins over ADC).
+ *
+ * Plane-clean: imports the port + `@/llm` siblings only. No `@/agent`.
  */
 
+import { LLMError } from "@/shared/errors"
+import {
+  mapRawEvent,
+  type OpenSlots,
+  type RawEvent,
+  toAnthropicToolChoice,
+} from "../adapters/anthropic"
+import { resolveAdapterStreamTimeouts } from "../adapters/shared"
+import { withStreamTimeout } from "../stream-timeout"
 import type { StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
 import { ProviderError } from "./provider-port"
@@ -33,7 +45,10 @@ interface VertexClientOptions {
 
 interface VertexClientLike {
   messages: {
-    create(params: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown>
+    create(
+      params: Record<string, unknown>,
+      options?: { signal?: AbortSignal },
+    ): Promise<AsyncIterable<RawEvent>>
   }
 }
 
@@ -46,14 +61,24 @@ interface VertexSdkModule {
   default?: VertexClientCtor
 }
 
+/** DI seam — tests inject a synthetic client. Same discipline as Bedrock. */
+export type VertexClientFactory = (options: VertexClientOptions) => VertexClientLike
+
+export interface VertexAdapterOptions {
+  clientFactory?: VertexClientFactory
+}
+
 export class VertexProviderAdapter implements LlmProvider {
   readonly providerId: ProviderId = "vertex"
   readonly provider = "anthropic"
   readonly authMode = "GCP Vertex"
   readonly model: string
   private readonly clientOptions: VertexClientOptions
+  private readonly maxTokens: number
+  private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
+  private readonly clientFactory: VertexClientFactory | undefined
 
-  constructor(config: ProviderConfig) {
+  constructor(config: ProviderConfig, options: VertexAdapterOptions = {}) {
     if (config.providerId !== "vertex") {
       throw new ProviderError(
         "provider-misconfigured",
@@ -82,21 +107,26 @@ export class VertexProviderAdapter implements LlmProvider {
       )
     }
     this.model = config.model
+    this.maxTokens = config.maxTokens ?? 8192
+    this.streamTimeoutMs = resolveAdapterStreamTimeouts({
+      ...(config.streamFirstChunkMs !== undefined
+        ? { streamFirstChunkMs: config.streamFirstChunkMs }
+        : {}),
+      ...(config.streamIdleMs !== undefined ? { streamIdleMs: config.streamIdleMs } : {}),
+    })
     const opts: VertexClientOptions = { projectId, region: location }
-    // `gcpAccessToken` is optional — when absent, the SDK resolves via
-    // `google-auth-library` (Application Default Credentials).
     if (config.auth.gcpAccessToken !== undefined) opts.accessToken = config.auth.gcpAccessToken
     this.clientOptions = opts
+    if (options.clientFactory !== undefined) this.clientFactory = options.clientFactory
   }
 
   /** Lazy SDK resolve — same discipline as `BedrockProviderAdapter`. */
   private async resolveClient(): Promise<VertexClientLike> {
+    if (this.clientFactory !== undefined) return this.clientFactory(this.clientOptions)
     let mod: VertexSdkModule
     try {
-      // @ts-expect-error — optional peer dep, intentionally NOT in package.json.
-      // Resolution succeeds only when the host install adds the SDK explicitly;
-      // absence is caught and translated to ProviderError("provider-missing-dependency").
-      mod = (await import("@anthropic-ai/vertex-sdk")) as VertexSdkModule
+      // Two-step cast — same rationale as the Bedrock adapter.
+      mod = (await import("@anthropic-ai/vertex-sdk")) as unknown as VertexSdkModule
     } catch (cause) {
       throw new ProviderError(
         "provider-missing-dependency",
@@ -112,23 +142,64 @@ export class VertexProviderAdapter implements LlmProvider {
         { providerId: "vertex" },
       )
     }
-    return new Ctor(this.clientOptions)
+    try {
+      return new Ctor(this.clientOptions)
+    } catch (e) {
+      throw new ProviderError(
+        "provider-misconfigured",
+        `Vertex client construction failed (auth-failed): ${(e as Error).message}`,
+        { cause: e, providerId: "vertex" },
+      )
+    }
   }
 
-  // Phase 1 always throws ProviderError before the first yield. The async-generator
-  // signature must remain to satisfy LlmProvider. Phase 2 wiring (Vertex
-  // messages.create + mapRawEvent) lands the real yields.
-  // biome-ignore lint/correctness/useYield: Phase-1 throw-only stub; see comment above.
-  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
-    // Resolve the client lazily; throws ProviderError if the SDK is missing.
-    // Phase 2 work: wire `input` → Vertex messages.create and re-decode the
-    // raw events through the existing `mapRawEvent`. For Phase 1 we surface
-    // the dependency error eagerly so callers get a clear actionable message.
-    await this.resolveClient()
-    throw new ProviderError(
-      "provider-unsupported",
-      "Vertex stream() wiring is Phase 2 — adapter constructed but not yet wired",
-      { providerId: "vertex" },
-    )
+  private async openRawStream(
+    client: VertexClientLike,
+    input: StreamInput,
+  ): Promise<AsyncIterable<RawEvent>> {
+    const toolNames = input.tools.map((t) => t.name)
+    const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
+    try {
+      return await client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          stream: true,
+          ...(input.system ? { system: input.system } : {}),
+          ...(input.thinking ? { thinking: input.thinking } : {}),
+          messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
+          tools: input.tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema,
+          })),
+          ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      )
+    } catch (e) {
+      if (e instanceof ProviderError) throw e
+      throw LLMError.fromSdkError("anthropic", e)
+    }
+  }
+
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    const client = await this.resolveClient()
+    const raw = await this.openRawStream(client, input)
+    const guarded = withStreamTimeout(raw, {
+      firstChunkMs: this.streamTimeoutMs.firstChunkMs,
+      idleMs: this.streamTimeoutMs.idleMs,
+      provider: "anthropic",
+      ...(input.signal ? { signal: input.signal } : {}),
+    })
+    const open: OpenSlots = new Map()
+    try {
+      for await (const ev of guarded) {
+        yield* mapRawEvent(ev, open, { model: this.model })
+      }
+    } catch (e) {
+      if (e instanceof ProviderError) throw e
+      throw LLMError.fromSdkError("anthropic", e, "Vertex stream error")
+    }
   }
 }

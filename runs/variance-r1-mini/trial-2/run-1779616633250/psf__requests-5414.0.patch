@@ -1,0 +1,20 @@
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..0c041555 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -394,6 +394,15 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         if not host:
+             raise InvalidURL("Invalid URL %r: No host supplied" % url)
+ 
++        # Validate host labels (no empty labels, no labels longer than 63 octets).
++        # This handles cases like ".example.com" or "example..com" early and
++        # raises InvalidURL rather than allowing downstream libraries to raise
++        # lower-level exceptions (e.g. idna/urllib3 errors).
++        labels = host.split('.')
++        for label in labels:
++            if label == '' or len(label) > 63:
++                raise InvalidURL('URL has an invalid label.')
++
+         # In general, we want to try IDNA encoding the hostname if the string contains
+         # non-ASCII characters. This allows users to automatically get the correct IDNA
+         # behaviour. For strings containing only ASCII characters, we need to also verify

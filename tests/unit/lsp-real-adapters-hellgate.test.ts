@@ -46,11 +46,19 @@ type Replier = (req: SentRequest) => Reply | Promise<Reply>
 
 class FakeLspClient extends LspClient {
   readonly sent: Sent[] = []
+  /** All Phase-1 tmp writes (path = tmp, not original). */
   readonly writes: { path: string; text: string }[] = []
+  /** All Phase-2 commits (tmp → original rename). */
+  readonly renames: { from: string; to: string }[] = []
+  /** All tmp unlinks (Phase 0 cleanup + Phase 1 rollback). */
+  readonly unlinks: string[] = []
   private replier: Replier = () => ({ result: null })
   /** Map of path → on-disk text the fake serves to `readFileText`. */
   private files = new Map<string, string>()
   private writeShouldThrow: ((path: string) => Error | null) | null = null
+  private renameShouldThrow: ((from: string, to: string) => Error | null) | null = null
+  /** Pre-seeded directory entries the Phase 0 cleanup scan will see. */
+  private dirEntries = new Map<string, string[]>()
 
   constructor(options: LspClientOptions = {}) {
     const spec: LspClientSpec = {
@@ -68,6 +76,30 @@ class FakeLspClient extends LspClient {
   }
   setWriteThrow(fn: (path: string) => Error | null): void {
     this.writeShouldThrow = fn
+  }
+  setRenameThrow(fn: (from: string, to: string) => Error | null): void {
+    this.renameShouldThrow = fn
+  }
+  setDirEntries(dir: string, entries: string[]): void {
+    this.dirEntries.set(dir, entries)
+  }
+  /** Snapshot of post-commit on-disk state: target → final text. Mirrors what
+   *  the real FS would have after Phase 2 rename. Tests assert on this. */
+  get committed(): Map<string, string> {
+    const out = new Map<string, string>()
+    for (const r of this.renames) {
+      const tmpWrite = this.writes.find((w) => w.path === r.from)
+      if (tmpWrite) out.set(r.to, tmpWrite.text)
+    }
+    return out
+  }
+  /** Tmp files prepared in Phase 1 but never renamed (still on disk). */
+  get pendingTmps(): string[] {
+    const renamed = new Set(this.renames.map((r) => r.from))
+    const unlinked = new Set(this.unlinks)
+    return this.writes
+      .map((w) => w.path)
+      .filter((p) => !renamed.has(p) && !unlinked.has(p))
   }
 
   override async start(): Promise<void> {
@@ -98,6 +130,24 @@ class FakeLspClient extends LspClient {
     }
     this.writes.push({ path: filePath, text })
     return Promise.resolve(text.length)
+  }
+
+  protected override renameFile(from: string, to: string): Promise<void> {
+    if (this.renameShouldThrow) {
+      const err = this.renameShouldThrow(from, to)
+      if (err) return Promise.reject(err)
+    }
+    this.renames.push({ from, to })
+    return Promise.resolve()
+  }
+
+  protected override unlinkTmp(filePath: string): Promise<void> {
+    this.unlinks.push(filePath)
+    return Promise.resolve()
+  }
+
+  protected override listDir(dir: string): Promise<string[]> {
+    return Promise.resolve(this.dirEntries.get(dir) ?? [])
   }
 }
 
@@ -330,8 +380,8 @@ describe("LspClient.requestSignatureHelp (ADR-0143)", () => {
 /* D. applyWorkspaceEdit                                              */
 /* ------------------------------------------------------------------ */
 
-describe("LspClient.applyWorkspaceEdit (ADR-0143)", () => {
-  test("HELL-D1: multi-file edit → all files written with patched text", async () => {
+describe("LspClient.applyWorkspaceEdit (ADR-0143 + ADR-0152 atomicity)", () => {
+  test("HELL-D1: multi-file edit → all targets committed via tmp+rename", async () => {
     const c = new FakeLspClient()
     const a = "/tmp/proj/a.ts"
     const b = "/tmp/proj/b.ts"
@@ -349,18 +399,23 @@ describe("LspClient.applyWorkspaceEdit (ADR-0143)", () => {
         },
       ],
     })
+    // ADR-0152: writes go to tmp first, then rename → original.
     expect(c.writes).toHaveLength(2)
-    expect(c.writes[0]).toEqual({ path: a, text: "HELLO world\n" })
-    expect(c.writes[1]).toEqual({ path: b, text: "foo BAZ\n" })
+    expect(c.renames).toHaveLength(2)
+    expect(c.committed.get(a)).toBe("HELLO world\n")
+    expect(c.committed.get(b)).toBe("foo BAZ\n")
+    expect(c.pendingTmps).toEqual([])
   })
 
-  test("HELL-D2: write failure on a later file throws; earlier files already written", async () => {
+  test("HELL-D2: Phase 1 failure on later file → NO original touched, all tmps rolled back", async () => {
     const c = new FakeLspClient()
     const a = "/tmp/proj/a.ts"
     const b = "/tmp/proj/b.ts"
     c.setFile(a, "alpha\n")
     c.setFile(b, "beta\n")
-    c.setWriteThrow((p) => (p === b ? new Error("disk full") : null))
+    // ADR-0152 semantics: failure during Phase 1 prepare on file b ⇒ a's tmp
+    // is unlinked, NO rename happens, originals remain pristine.
+    c.setWriteThrow((p) => (p.startsWith(b) ? new Error("disk full") : null))
     await expect(
       c.applyWorkspaceEdit({
         changes: [
@@ -375,10 +430,11 @@ describe("LspClient.applyWorkspaceEdit (ADR-0143)", () => {
         ],
       }),
     ).rejects.toThrow(/disk full/)
-    // First file is on disk (per-file atomicity caveat — v2 follow-up for
-    // 2-phase temp+rename across the whole edit).
-    expect(c.writes).toHaveLength(1)
-    expect(c.writes[0]?.path).toBe(a)
+    expect(c.renames).toHaveLength(0)
+    expect(c.committed.size).toBe(0)
+    // a's tmp was written then rolled back (unlinked); b never made it.
+    expect(c.pendingTmps).toEqual([])
+    expect(c.unlinks.length).toBeGreaterThanOrEqual(1)
   })
 
   test("HELL-D3: multi-edit single file applies in reverse offset order (no clobber)", async () => {
@@ -396,7 +452,7 @@ describe("LspClient.applyWorkspaceEdit (ADR-0143)", () => {
         },
       ],
     })
-    expect(c.writes[0]?.text).toBe("aBcdeFgh\n")
+    expect(c.committed.get(a)).toBe("aBcdeFgh\n")
   })
 
   test("HELL-D4: documentChanges variant is normalized to changes", async () => {
@@ -425,7 +481,7 @@ describe("LspClient.applyWorkspaceEdit (ADR-0143)", () => {
     expect(edit).toBeDefined()
     if (!edit) return
     await c.applyWorkspaceEdit(edit)
-    expect(c.writes[0]?.text).toBe("new\n")
+    expect(c.committed.get(a)).toBe("new\n")
   })
 })
 
@@ -470,7 +526,8 @@ describe("DefaultCodeActionAdapter (ADR-0143 wiring)", () => {
         },
       ],
     })
-    expect(c.writes[0]?.text).toBe("ABCDE\n")
+    // ADR-0152: write lands on tmp; commit lands on original.
+    expect(c.committed.get(a)).toBe("ABCDE\n")
   })
 })
 

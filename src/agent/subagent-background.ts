@@ -119,6 +119,20 @@ export interface BackgroundSubagentScheduler {
   /** Drop terminal (completed | failed | cancelled) handles older than
    *  `maxAgeMs`. Running handles are NEVER pruned. Returns drop count. */
   prune(maxAgeMs: number): number
+  /** Serialize ALL handles (running + completed + cancelled + failed) for
+   *  cross-restart persistence. Returns JSON string. The `abortCtrl` and
+   *  in-flight `promise` are non-serializable and OMITTED — `hydrate` reborn
+   *  "running" entries as `failed` with `errorMessage="lost across restart"`. */
+  serialize(): string
+  /** Hydrate from a prior `serialize()` output. Running handles whose runner
+   *  was lost become `failed` with `errorMessage="lost across restart"` since
+   *  the Promise object cannot be reconstructed. Returns count restored.
+   *  On parse failure or wrong shape returns 0 (NO-THROW). */
+  hydrate(json: string): number
+  /** Auto-prune on hydrate — drop terminal entries older than `maxAgeMs` at
+   *  hydrate time, and running entries whose `startedAt` is older than
+   *  `maxAgeMs`. Returns {restored, pruned}. NO-THROW on garbage input. */
+  hydrateWithPrune(json: string, maxAgeMs: number): { restored: number; pruned: number }
 }
 
 export interface BackgroundSubagentSchedulerOpts {
@@ -134,6 +148,13 @@ export interface BackgroundSubagentSchedulerOpts {
   readonly now?: () => number
   /** Injected id generator; default `randomBytes(8).toString("hex")`. */
   readonly idGen?: () => string
+  /** Auto-hydrate from this JSON string at construction (ADR-0153). When set,
+   *  the scheduler is populated from prior state BEFORE the constructor
+   *  returns. Voice-match ADR-0124's `restoreFrom`. */
+  readonly hydrateFrom?: string
+  /** When auto-hydrating, drop entries older than this (ms). Triggers
+   *  `hydrateWithPrune` instead of `hydrate`. Absent ⇒ no auto-prune. */
+  readonly hydrateMaxAgeMs?: number
 }
 
 /** Typed error class — exposes a closed `code` union the caller can branch
@@ -221,6 +242,122 @@ const specToRequest = (spec: SubagentSpec, signal: AbortSignal): SubagentRequest
   // underlying runner grows model-swap support. We keep them in the spec for
   // observability via `list()` without forcing the slice to grow new fields.
   return withTurns
+}
+
+/** Internal: on-the-wire shape of one persisted handle (ADR-0153). The
+ *  `result.status` may be `running` — those entries reborn as `failed` with
+ *  `errorMessage="lost across restart"` on hydrate because the Promise object
+ *  cannot be reconstructed (the runner has no way to resume a torn-down
+ *  process's in-flight work). */
+interface SerializedHandle {
+  readonly id: SubagentHandleId
+  readonly spec: SubagentSpec
+  readonly result: {
+    readonly status: SubagentStatus
+    readonly outputSummary: string
+    readonly outputDetail?: string
+    readonly errorMessage?: string
+    readonly startedAt: number
+    readonly endedAt?: number
+    readonly turns: number
+  }
+}
+
+interface SerializedScheduler {
+  readonly v: 1
+  readonly handles: ReadonlyArray<SerializedHandle>
+}
+
+/** Honest message for handles whose runner was torn down by a process
+ *  restart — they were `running` on `serialize()` and cannot be resumed. */
+const LOST_ACROSS_RESTART = "lost across restart"
+
+/** Safe JSON.parse — returns `undefined` on failure (caller branches). */
+const safeJsonParse = (s: string): unknown => {
+  try {
+    return JSON.parse(s)
+  } catch {
+    return undefined
+  }
+}
+
+/** Project an `Entry.result` to its serialized JSON shape. Optional fields
+ *  OMITTED when absent (exactOptionalPropertyTypes). */
+const serializeResult = (r: Entry["result"]): SerializedHandle["result"] => {
+  const base = {
+    status: r.status,
+    outputSummary: r.outputSummary,
+    startedAt: r.startedAt,
+    turns: r.turns,
+  }
+  return {
+    ...base,
+    ...(r.outputDetail !== undefined ? { outputDetail: r.outputDetail } : {}),
+    ...(r.errorMessage !== undefined ? { errorMessage: r.errorMessage } : {}),
+    ...(r.endedAt !== undefined ? { endedAt: r.endedAt } : {}),
+  }
+}
+
+/** Narrow one of the 4 valid status arms; `undefined` on miss. */
+const parseStatus = (s: unknown): SubagentStatus | undefined => {
+  if (s === "running" || s === "completed" || s === "failed" || s === "cancelled") return s
+  return undefined
+}
+
+/** Rebuild a `SubagentSpec` with only present optional fields (exactOptional). */
+const parseSpec = (raw: unknown): SubagentSpec | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const r = raw as Partial<SubagentSpec>
+  if (typeof r.task !== "string") return undefined
+  return {
+    task: r.task,
+    ...(typeof r.modelOverride === "string" ? { modelOverride: r.modelOverride } : {}),
+    ...(typeof r.maxTurns === "number" ? { maxTurns: r.maxTurns } : {}),
+    ...(typeof r.workspace === "string" ? { workspace: r.workspace } : {}),
+    ...(typeof r.metadata === "object" && r.metadata !== null ? { metadata: r.metadata } : {}),
+  }
+}
+
+/** Rebuild a `SerializedHandle["result"]` with only present optional fields. */
+const parseSerializedResult = (raw: unknown): SerializedHandle["result"] | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const res = raw as Partial<SerializedHandle["result"]>
+  const status = parseStatus(res.status)
+  if (status === undefined) return undefined
+  if (typeof res.outputSummary !== "string") return undefined
+  if (typeof res.startedAt !== "number") return undefined
+  if (typeof res.turns !== "number") return undefined
+  return {
+    status,
+    outputSummary: res.outputSummary,
+    startedAt: res.startedAt,
+    turns: res.turns,
+    ...(typeof res.outputDetail === "string" ? { outputDetail: res.outputDetail } : {}),
+    ...(typeof res.errorMessage === "string" ? { errorMessage: res.errorMessage } : {}),
+    ...(typeof res.endedAt === "number" ? { endedAt: res.endedAt } : {}),
+  }
+}
+
+/** Type-narrow one raw element from a hydrated payload. Returns
+ *  `undefined` on shape mismatch (caller skips). */
+const parseHandle = (raw: unknown): SerializedHandle | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const r = raw as Partial<SerializedHandle>
+  if (typeof r.id !== "string") return undefined
+  const spec = parseSpec(r.spec)
+  if (spec === undefined) return undefined
+  const result = parseSerializedResult(r.result)
+  if (result === undefined) return undefined
+  return { id: r.id, spec, result }
+}
+
+/** Validate the outer payload shape; return the `handles` array on success. */
+const validateSerializedPayload = (parsed: unknown): ReadonlyArray<unknown> | undefined => {
+  if (typeof parsed !== "object" || parsed === null) return undefined
+  const obj = parsed as Partial<SerializedScheduler>
+  if (obj.v !== 1) return undefined
+  if (!Array.isArray(obj.handles)) return undefined
+  return obj.handles
 }
 
 export const defaultBackgroundSubagentScheduler = (
@@ -321,6 +458,15 @@ export const defaultBackgroundSubagentScheduler = (
         evictIfOver()
       }
     })()
+  }
+
+  // Auto-hydrate at construction (ADR-0153). When `opts.hydrateFrom` is
+  // present, populate `store` BEFORE the scheduler is handed to the caller —
+  // matches the voice of ADR-0124's `restoreFrom` opt. The choice between
+  // `hydrate` and `hydrateWithPrune` is purely whether `hydrateMaxAgeMs`
+  // was also supplied.
+  if (opts.hydrateFrom !== undefined) {
+    restoreHandles(opts.hydrateFrom, store, now, opts.hydrateMaxAgeMs)
   }
 
   return {
@@ -448,5 +594,107 @@ export const defaultBackgroundSubagentScheduler = (
       }
       return removed
     },
+
+    serialize() {
+      // Snapshot every handle — running entries' result.status stays
+      // "running" so hydrate can detect them and reborn as failed.
+      const handles: SerializedHandle[] = []
+      for (const [id, e] of store.entries()) {
+        handles.push({ id, spec: e.spec, result: serializeResult(e.result) })
+      }
+      const payload: SerializedScheduler = { v: 1, handles }
+      return JSON.stringify(payload)
+    },
+
+    hydrate(json) {
+      return restoreHandles(json, store, now, undefined)
+    },
+
+    hydrateWithPrune(json, maxAgeMs) {
+      // Pre-parse so we can count {pruned} BEFORE the surviving entries
+      // are restored — pruned = total parseable handles minus survivors.
+      const parsed = safeJsonParse(json)
+      if (parsed === undefined) return { restored: 0, pruned: 0 }
+      const rawHandles = validateSerializedPayload(parsed)
+      if (rawHandles === undefined) return { restored: 0, pruned: 0 }
+      let totalValid = 0
+      for (const raw of rawHandles) {
+        if (parseHandle(raw) !== undefined) totalValid += 1
+      }
+      const restored = restoreHandles(json, store, now, maxAgeMs)
+      const pruned = Math.max(0, totalValid - restored)
+      return { restored, pruned }
+    },
   }
+}
+
+/** Compare a handle's age-reference timestamp against threshold. Returns
+ *  true when the handle PASSES the age filter (= should be restored). */
+const passesAgeFilter = (h: SerializedHandle, threshold: number | undefined): boolean => {
+  if (threshold === undefined) return true
+  const cutoffRef =
+    h.result.status === "running" ? h.result.startedAt : (h.result.endedAt ?? h.result.startedAt)
+  return cutoffRef >= threshold
+}
+
+/** Build an `Entry.result` from a parsed handle. Running entries reborn as
+ *  `failed` + `errorMessage="lost across restart"` (Promise object cannot
+ *  be reconstructed across a process restart). */
+const resurrectResult = (h: SerializedHandle, tNow: number): Entry["result"] => {
+  if (h.result.status === "running") {
+    return {
+      status: "failed",
+      outputSummary: "(failed) lost across restart",
+      errorMessage: LOST_ACROSS_RESTART,
+      startedAt: h.result.startedAt,
+      endedAt: tNow,
+      turns: h.result.turns,
+    }
+  }
+  return {
+    status: h.result.status,
+    outputSummary: h.result.outputSummary,
+    startedAt: h.result.startedAt,
+    turns: h.result.turns,
+    ...(h.result.outputDetail !== undefined ? { outputDetail: h.result.outputDetail } : {}),
+    ...(h.result.errorMessage !== undefined ? { errorMessage: h.result.errorMessage } : {}),
+    ...(h.result.endedAt !== undefined ? { endedAt: h.result.endedAt } : {}),
+  }
+}
+
+/** Wrap a parsed handle as a runner-less `Entry`. abortCtrl is a fresh stub
+ *  (signal never observed); promise is already-resolved (no runner attached). */
+const handleToEntry = (h: SerializedHandle, tNow: number): Entry => ({
+  id: h.id,
+  spec: h.spec,
+  abortCtrl: new AbortController(),
+  promise: Promise.resolve(),
+  result: resurrectResult(h, tNow),
+})
+
+/** Worker for `hydrate` / `hydrateWithPrune`. Restores entries from `json`
+ *  into `store`, optionally filtering by `maxAgeMs` (relative to `now()`).
+ *  Running entries reborn as `failed` with `errorMessage="lost across
+ *  restart"`. Returns count restored. NO-THROW on garbage input. */
+const restoreHandles = (
+  json: string,
+  store: Map<SubagentHandleId, Entry>,
+  now: () => number,
+  maxAgeMs: number | undefined,
+): number => {
+  const parsed = safeJsonParse(json)
+  if (parsed === undefined) return 0
+  const rawHandles = validateSerializedPayload(parsed)
+  if (rawHandles === undefined) return 0
+  const tNow = now()
+  const threshold = maxAgeMs !== undefined ? tNow - Math.max(0, maxAgeMs) : undefined
+  let restored = 0
+  for (const raw of rawHandles) {
+    const h = parseHandle(raw)
+    if (h === undefined) continue
+    if (!passesAgeFilter(h, threshold)) continue
+    store.set(h.id, handleToEntry(h, tNow))
+    restored += 1
+  }
+  return restored
 }

@@ -1,18 +1,22 @@
 /**
- * ★ CONTRACT — ADR-0139 §vertex-adapter:
+ * ★ CONTRACT — ADR-0139 / ADR-0151 §vertex-adapter:
  *   - providerId === "vertex".
  *   - Construction requires BOTH `gcpProjectId` AND `gcpLocation`; either
  *     missing → ProviderError("provider-misconfigured") with "auth-failed"
- *     in the message (closed ProviderErrorCode union; auth failure is modeled
- *     under `provider-misconfigured`).
+ *     in the message.
  *   - Wrong providerId → ProviderError("provider-misconfigured").
- *   - stream() lazily imports @anthropic-ai/vertex-sdk; absent ⇒
- *     ProviderError("provider-missing-dependency").
+ *   - stream() opens `client.messages.create({stream:true})` and translates
+ *     raw SDK events to our StreamEvent shape via shared `mapRawEvent`.
+ *   - projectId + region + (optional) accessToken flow into SDK constructor.
+ *   - Abort signal forwarded into `messages.create({signal})`.
+ *   - SDK throws on create() → LLMError via fromSdkError("anthropic", e).
+ *     ProviderError instances pass through untouched.
  */
 import { describe, expect, test } from "bun:test"
 import type { ProviderConfig } from "@/llm/providers/provider-port"
 import { ProviderError } from "@/llm/providers/provider-port"
-import { VertexProviderAdapter } from "@/llm/providers/vertex-adapter"
+import { type VertexClientFactory, VertexProviderAdapter } from "@/llm/providers/vertex-adapter"
+import { LLMError } from "@/shared/errors"
 
 const base = (over: Partial<ProviderConfig> = {}): ProviderConfig => ({
   providerId: "vertex",
@@ -20,6 +24,46 @@ const base = (over: Partial<ProviderConfig> = {}): ProviderConfig => ({
   auth: { gcpProjectId: "my-proj", gcpLocation: "us-east5" },
   ...over,
 })
+
+async function* fakeStream(): AsyncGenerator<unknown> {
+  yield {
+    type: "message_start",
+    message: { model: "claude-sonnet-4@20250514", usage: { input_tokens: 11 } },
+  }
+  yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
+  yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } }
+  yield { type: "content_block_stop", index: 0 }
+  yield { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 2 } }
+  yield { type: "message_stop" }
+}
+
+interface CallLog {
+  params?: Record<string, unknown>
+  signal?: AbortSignal
+  clientOptions?: Record<string, unknown>
+}
+
+const recordingFactory = (
+  log: CallLog,
+  override?: {
+    stream?: () => AsyncIterable<unknown>
+    throwOnCreate?: unknown
+  },
+): VertexClientFactory => {
+  return (opts) => {
+    log.clientOptions = { ...opts }
+    return {
+      messages: {
+        async create(params, options) {
+          log.params = params
+          if (options?.signal !== undefined) log.signal = options.signal
+          if (override?.throwOnCreate !== undefined) throw override.throwOnCreate
+          return (override?.stream ?? fakeStream)() as AsyncIterable<never>
+        },
+      },
+    }
+  }
+}
 
 describe("VertexProviderAdapter — hellgate", () => {
   test("HELL-A1: providerId surface fixed to 'vertex'", () => {
@@ -51,8 +95,7 @@ describe("VertexProviderAdapter — hellgate", () => {
 
   test("HELL-A5: constructs without access token (ADC fallback)", () => {
     expect(
-      () =>
-        new VertexProviderAdapter(base({ auth: { gcpProjectId: "p", gcpLocation: "l" } })),
+      () => new VertexProviderAdapter(base({ auth: { gcpProjectId: "p", gcpLocation: "l" } })),
     ).not.toThrow()
   })
 
@@ -111,23 +154,108 @@ describe("VertexProviderAdapter — hellgate", () => {
   })
 
   test("HELL-C1: stream() returns an AsyncIterable", () => {
-    const a = new VertexProviderAdapter(base())
+    const a = new VertexProviderAdapter(base(), { clientFactory: recordingFactory({}) })
     const iter = a.stream({ messages: [], tools: [] })
     expect(typeof (iter as AsyncIterable<unknown>)[Symbol.asyncIterator]).toBe("function")
   })
 
-  test("HELL-C2: first iteration throws provider-missing-dependency (SDK absent in Phase 1)", async () => {
-    const a = new VertexProviderAdapter(base())
+  test("HELL-C2: stream emits StreamEvent shape (text_delta + usage + message_stop)", async () => {
+    const log: CallLog = {}
+    const a = new VertexProviderAdapter(base(), { clientFactory: recordingFactory(log) })
+    const events: Array<{ type: string }> = []
+    for await (const ev of a.stream({ messages: [], tools: [] })) {
+      events.push(ev as { type: string })
+    }
+    const types = events.map((e) => e.type)
+    expect(types).toContain("text_delta")
+    expect(types).toContain("usage")
+    expect(types).toContain("message_stop")
+  })
+
+  test("HELL-C3: projectId + region flow into SDK client constructor", async () => {
+    const log: CallLog = {}
+    const a = new VertexProviderAdapter(
+      base({
+        auth: { gcpProjectId: "p1", gcpLocation: "us-central1", gcpAccessToken: "ya29.tok" },
+      }),
+      { clientFactory: recordingFactory(log) },
+    )
+    for await (const _ of a.stream({ messages: [], tools: [] })) {
+      // ignore
+    }
+    expect(log.clientOptions).toEqual({
+      projectId: "p1",
+      region: "us-central1",
+      accessToken: "ya29.tok",
+    })
+  })
+
+  test("HELL-C4: ADC path — no accessToken supplied means none forwarded", async () => {
+    const log: CallLog = {}
+    const a = new VertexProviderAdapter(
+      base({ auth: { gcpProjectId: "p", gcpLocation: "us-east5" } }),
+      { clientFactory: recordingFactory(log) },
+    )
+    for await (const _ of a.stream({ messages: [], tools: [] })) {
+      // ignore
+    }
+    expect(log.clientOptions).toEqual({ projectId: "p", region: "us-east5" })
+  })
+
+  test("HELL-D1: abort signal is forwarded to messages.create()", async () => {
+    const log: CallLog = {}
+    const a = new VertexProviderAdapter(base(), { clientFactory: recordingFactory(log) })
+    const ctl = new AbortController()
+    for await (const _ of a.stream({ messages: [], tools: [], signal: ctl.signal })) {
+      // ignore
+    }
+    expect(log.signal).toBe(ctl.signal)
+  })
+
+  test("HELL-D2: stream params include model + max_tokens + stream:true", async () => {
+    const log: CallLog = {}
+    const a = new VertexProviderAdapter(base({ maxTokens: 4321 }), {
+      clientFactory: recordingFactory(log),
+    })
+    for await (const _ of a.stream({ messages: [], tools: [] })) {
+      // ignore
+    }
+    expect(log.params?.model).toBe("claude-sonnet-4@20250514")
+    expect(log.params?.max_tokens).toBe(4321)
+    expect(log.params?.stream).toBe(true)
+  })
+
+  test("HELL-E1: SDK throw on create() is mapped to LLMError", async () => {
+    const a = new VertexProviderAdapter(base(), {
+      clientFactory: recordingFactory({}, { throwOnCreate: new Error("boom") }),
+    })
     try {
-      for await (const _ev of a.stream({ messages: [], tools: [] })) {
+      for await (const _ of a.stream({ messages: [], tools: [] })) {
+        throw new Error("should not yield")
+      }
+      throw new Error("should not complete cleanly")
+    } catch (e) {
+      expect(e).toBeInstanceOf(LLMError)
+    }
+  })
+
+  test("HELL-E2: ProviderError from factory passes through untouched", async () => {
+    const a = new VertexProviderAdapter(base(), {
+      clientFactory: () => {
+        throw new ProviderError("provider-missing-dependency", "fake", {
+          providerId: "vertex",
+        })
+      },
+    })
+    try {
+      for await (const _ of a.stream({ messages: [], tools: [] })) {
         throw new Error("should not yield")
       }
       throw new Error("should not complete cleanly")
     } catch (e) {
       expect(e).toBeInstanceOf(ProviderError)
-      const err = e as ProviderError
-      expect(err.code).toBe("provider-missing-dependency")
-      expect(err.providerId).toBe("vertex")
+      expect((e as ProviderError).code).toBe("provider-missing-dependency")
+      expect((e as ProviderError).providerId).toBe("vertex")
     }
   })
 })

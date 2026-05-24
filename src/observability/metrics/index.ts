@@ -11,6 +11,16 @@ export { consoleMetricsSink } from "./console-sink"
 export { defaultMetricsRegistry, type InMemoryRegistryOpts } from "./in-memory-registry"
 export { jsonlMetricsSink } from "./jsonl-sink"
 export {
+  type OtelAttributes,
+  type OtelCounter,
+  type OtelHistogram,
+  type OtelMeter,
+  type OtelMeterProvider,
+  type OtelSinkOpts,
+  type OtelUpDownCounter,
+  otelMetricsSink,
+} from "./otel-sink"
+export {
   type MetricKind,
   type MetricSample,
   type MetricSink,

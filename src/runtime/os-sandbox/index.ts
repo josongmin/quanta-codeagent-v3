@@ -1,5 +1,11 @@
+export { compileBubblewrapArgs } from "./bubblewrap"
 export { defaultOsSandbox } from "./default"
-export { isLandlockAvailable, spawnViaLandlock } from "./landlock"
+export {
+  isBubblewrapAvailable,
+  isLandlockAvailable,
+  spawnViaBubblewrap,
+  spawnViaLandlock,
+} from "./landlock"
 export { compileSeatbeltProfile } from "./seatbelt"
 export type {
   OsSandbox,

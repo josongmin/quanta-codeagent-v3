@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process"
-import { spawnViaLandlock } from "./landlock"
+import { isBubblewrapAvailable, spawnViaBubblewrap } from "./landlock"
 import { compileSeatbeltProfile } from "./seatbelt"
 import type {
   OsSandbox,
@@ -71,9 +71,17 @@ const spawnImpl = async (args: {
     return runSeatbelt({ sandboxExec, profile, spec, spawner })
   }
 
-  // Linux: Phase 1 stub.
+  // Linux: Phase 2 = bubblewrap shell-out (ADR-0150). When `bwrap` is on
+  // PATH, run under bubblewrap (sandboxApplied=true). When missing, degrade
+  // honestly with an actionable install hint.
   if (platform === "linux") {
-    return spawnViaLandlock(spec, policy, spawner)
+    if (await isBubblewrapAvailable(which)) {
+      return spawnViaBubblewrap(spec, policy, spawner)
+    }
+    return passthrough(spec, spawner, {
+      sandboxApplied: false,
+      degradeReason: "linux-bwrap-missing — install bubblewrap (apt/dnf/pacman)",
+    })
   }
 
   // Other platforms (win32, etc.): passthrough + reason.
@@ -166,9 +174,15 @@ const availabilityImpl = async (args: {
     }
   }
   if (platform === "linux") {
+    const bw = await which("bwrap")
+    if (bw !== null) {
+      return { backend: "bubblewrap", warnings: [] }
+    }
     return {
       backend: "passthrough",
-      warnings: ["linux: landlock+seccomp is Phase 2 — degraded to passthrough"],
+      warnings: [
+        "linux: install bubblewrap for sandbox (apt/dnf/pacman) — degraded to passthrough",
+      ],
     }
   }
   return {

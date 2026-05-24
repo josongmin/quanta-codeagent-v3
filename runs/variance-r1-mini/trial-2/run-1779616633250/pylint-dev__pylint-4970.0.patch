@@ -1,0 +1,52 @@
+diff --git a/pylint/checkers/similar.py b/pylint/checkers/similar.py
+index c65b1c893..1b31a8162 100644
+--- a/pylint/checkers/similar.py
++++ b/pylint/checkers/similar.py
+@@ -793,6 +793,9 @@ class SimilarChecker(BaseChecker, Similar, MapReduceMixin):
+             ignore_signatures=self.config.ignore_signatures,
+         )
+         self.stats = None
++        # when min_lines is 0 or negative, disable the similarity checker
++        # Treating 0 as "disabled" aligns with other linters' semantics.
++        self.enabled = self.min_lines > 0
+ 
+     def set_option(self, optname, value, action=None, optdict=None):
+         """method called to set an option (registered in the options list)
+@@ -802,6 +805,8 @@ class SimilarChecker(BaseChecker, Similar, MapReduceMixin):
+         BaseChecker.set_option(self, optname, value, action, optdict)
+         if optname == "min-similarity-lines":
+             self.min_lines = self.config.min_similarity_lines
++            # update enabled flag whenever the option changes
++            self.enabled = self.min_lines > 0
+         elif optname == "ignore-comments":
+             self.ignore_comments = self.config.ignore_comments
+         elif optname == "ignore-docstrings":
+@@ -817,6 +822,8 @@ class SimilarChecker(BaseChecker, Similar, MapReduceMixin):
+         self.stats = self.linter.add_stats(
+             nb_duplicated_lines=0, percent_duplicated_lines=0
+         )
++        # compute enabled state at opening time (options should be set)
++        self.enabled = self.min_lines > 0
+ 
+     def process_module(self, node):
+         """process a module
+@@ -825,11 +832,19 @@ class SimilarChecker(BaseChecker, Similar, MapReduceMixin):
+ 
+         stream must implement the readlines method
+         """
++        # If disabled (min-similarity-lines <= 0) do nothing
++        if not getattr(self, "enabled", True):
++            return
++
+         with node.stream() as stream:
+             self.append_stream(self.linter.current_name, stream, node.file_encoding)
+ 
+     def close(self):
+         """compute and display similarities on closing (i.e. end of parsing)"""
++        # If disabled, skip computation and reporting
++        if not getattr(self, "enabled", True):
++            return
++
+         total = sum(len(lineset) for lineset in self.linesets)
+         duplicated = 0
+         stats = self.stats

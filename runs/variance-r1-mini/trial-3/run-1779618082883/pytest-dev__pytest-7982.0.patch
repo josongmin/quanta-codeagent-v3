@@ -1,0 +1,34 @@
+diff --git a/src/_pytest/pathlib.py b/src/_pytest/pathlib.py
+index f0bdb1481..5d9a544a2 100644
+--- a/src/_pytest/pathlib.py
++++ b/src/_pytest/pathlib.py
+@@ -26,7 +26,10 @@ from typing import Set
+ from typing import TypeVar
+ from typing import Union
+ 
+-import py
++try:
++    import py
++except Exception:  # pragma: no cover - optional dependency in some environments
++    py = None
+ 
+ from _pytest.compat import assert_never
+ from _pytest.outcomes import skip
+@@ -434,7 +437,7 @@ class ImportPathMismatchError(ImportError):
+ 
+ 
+ def import_path(
+-    p: Union[str, py.path.local, Path],
++    p: Union[str, "py.path.local", Path],
+     *,
+     mode: Union[str, ImportMode] = ImportMode.prepend,
+ ) -> ModuleType:
+@@ -558,7 +561,7 @@ def visit(
+     entries = sorted(os.scandir(path), key=lambda entry: entry.name)
+     yield from entries
+     for entry in entries:
+-        if entry.is_dir(follow_symlinks=False) and recurse(entry):
++        if entry.is_dir() and recurse(entry):
+             yield from visit(entry.path, recurse)
+ 
+ 

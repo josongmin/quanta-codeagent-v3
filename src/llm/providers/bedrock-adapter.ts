@@ -1,23 +1,33 @@
 /**
- * ADR-0139 — `bedrock` transport adapter (AWS Bedrock).
+ * ADR-0139 — `bedrock` transport adapter (AWS Bedrock).  Phase 2: REAL stream.
  *
  * Anthropic ships a separate npm package (`@anthropic-ai/bedrock-sdk`) that
  * re-exports an `AnthropicBedrock` class with the same Messages API surface
  * as the public `Anthropic` client, but routed through Bedrock's signed-V4
- * endpoint. The package is NOT a transitive dep of `@anthropic-ai/sdk` —
- * enterprise installs add it explicitly.
+ * endpoint. ADR-0151 graduates this adapter from typed-stub to real wire: when
+ * the optional SDK is present we open `client.messages.create({stream:true})`
+ * and translate the raw stream verbatim through the existing `mapRawEvent`
+ * decoder shared with `@/llm/adapters/anthropic.ts` (single source of truth
+ * for the Messages SSE grammar — Bedrock just substitutes the transport).
  *
- * Phase 1 posture (this file): the adapter constructs FINE without the
- * Bedrock SDK present, but `stream()` throws {@link ProviderError} with code
- * `provider-missing-dependency` so the caller gets a clear "install
- * @anthropic-ai/bedrock-sdk" message rather than a cryptic `MODULE_NOT_FOUND`.
- * When the SDK is installed (Phase 2 work or downstream-fork) the dynamic
- * import resolves and the adapter delegates verbatim — wire shape identical
- * to the `default` adapter (same JSON, different transport).
+ * Default-OFF: the legacy `@/llm/factory` path still wraps `Anthropic`
+ * directly. Callers must explicitly choose `providerId="bedrock"` (env var
+ * `ANTHROPIC_BEDROCK_BASE_URL` triggers the registry, or pass the id at the
+ * resolver). The SDK is treated as OPTIONAL: a missing install still throws a
+ * typed `provider-missing-dependency` instead of `MODULE_NOT_FOUND`.
  *
- * Plane-clean: imports the port + `@/llm` types only. No `@/agent`.
+ * Plane-clean: imports the port + `@/llm` siblings only. No `@/agent`.
  */
 
+import { LLMError } from "@/shared/errors"
+import {
+  mapRawEvent,
+  type OpenSlots,
+  type RawEvent,
+  toAnthropicToolChoice,
+} from "../adapters/anthropic"
+import { resolveAdapterStreamTimeouts } from "../adapters/shared"
+import { withStreamTimeout } from "../stream-timeout"
 import type { StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
 import { ProviderError } from "./provider-port"
@@ -29,9 +39,15 @@ interface BedrockClientOptions {
   awsRegion?: string
 }
 
+/** Minimal structural view of `AnthropicBedrock` we depend on. Narrowed to the
+ *  single method we call so the adapter survives SDK churn — same discipline
+ *  as {@link RawEvent} in the public-API adapter. */
 interface BedrockClientLike {
   messages: {
-    create(params: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown>
+    create(
+      params: Record<string, unknown>,
+      options?: { signal?: AbortSignal },
+    ): Promise<AsyncIterable<RawEvent>>
   }
 }
 
@@ -44,14 +60,27 @@ interface BedrockSdkModule {
   default?: BedrockClientCtor
 }
 
+/** DI seam — tests inject a synthetic client (no network, no AWS creds).
+ *  Production code leaves it absent so the lazy SDK import is the live path. */
+export type BedrockClientFactory = (options: BedrockClientOptions) => BedrockClientLike
+
+export interface BedrockAdapterOptions {
+  /** Test-only DI seam. When supplied, the lazy SDK import is bypassed and the
+   *  given factory is invoked instead. Production callers omit this. */
+  clientFactory?: BedrockClientFactory
+}
+
 export class BedrockProviderAdapter implements LlmProvider {
   readonly providerId: ProviderId = "bedrock"
   readonly provider = "anthropic"
   readonly authMode = "AWS Bedrock"
   readonly model: string
   private readonly clientOptions: BedrockClientOptions
+  private readonly maxTokens: number
+  private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
+  private readonly clientFactory: BedrockClientFactory | undefined
 
-  constructor(config: ProviderConfig) {
+  constructor(config: ProviderConfig, options: BedrockAdapterOptions = {}) {
     if (config.providerId !== "bedrock") {
       throw new ProviderError(
         "provider-misconfigured",
@@ -60,10 +89,17 @@ export class BedrockProviderAdapter implements LlmProvider {
       )
     }
     this.model = config.model
+    this.maxTokens = config.maxTokens ?? 8192
+    this.streamTimeoutMs = resolveAdapterStreamTimeouts({
+      ...(config.streamFirstChunkMs !== undefined
+        ? { streamFirstChunkMs: config.streamFirstChunkMs }
+        : {}),
+      ...(config.streamIdleMs !== undefined ? { streamIdleMs: config.streamIdleMs } : {}),
+    })
     // Static AWS credentials are OPTIONAL — when all four fields are absent
     // the underlying SDK falls back to the default credential chain (env
-    // vars, EC2 IMDS, ECS IRSA, SSO profile, …). Forwarding `undefined`
-    // explicitly is fine because the SDK treats it as "use the default".
+    // vars, EC2 IMDS, ECS IRSA, SSO profile, …). Forwarding a field only
+    // when explicitly supplied keeps exactOptional honest.
     const opts: BedrockClientOptions = {}
     if (config.auth.awsAccessKeyId !== undefined) opts.awsAccessKey = config.auth.awsAccessKeyId
     if (config.auth.awsSecretAccessKey !== undefined)
@@ -72,6 +108,7 @@ export class BedrockProviderAdapter implements LlmProvider {
       opts.awsSessionToken = config.auth.awsSessionToken
     if (config.auth.awsRegion !== undefined) opts.awsRegion = config.auth.awsRegion
     this.clientOptions = opts
+    if (options.clientFactory !== undefined) this.clientFactory = options.clientFactory
   }
 
   /** Lazy SDK resolve. Dynamic import keeps the package OPTIONAL — the main
@@ -80,12 +117,14 @@ export class BedrockProviderAdapter implements LlmProvider {
    *  Awaited inside `stream()` so the cost is paid on first use, not at
    *  module load. */
   private async resolveClient(): Promise<BedrockClientLike> {
+    if (this.clientFactory !== undefined) return this.clientFactory(this.clientOptions)
     let mod: BedrockSdkModule
     try {
-      // @ts-expect-error — optional peer dep, intentionally NOT in package.json.
-      // Resolution succeeds only when the host install adds the SDK explicitly;
-      // absence is caught and translated to ProviderError("provider-missing-dependency").
-      mod = (await import("@anthropic-ai/bedrock-sdk")) as BedrockSdkModule
+      // Two-step cast (`as unknown as`) — the SDK's exported `messages.create`
+      // signature is far richer than our narrowed `BedrockClientLike` view, so
+      // TS rejects the direct narrow as "neither type sufficiently overlaps".
+      // Going via `unknown` documents the intentional surface narrowing.
+      mod = (await import("@anthropic-ai/bedrock-sdk")) as unknown as BedrockSdkModule
     } catch (cause) {
       throw new ProviderError(
         "provider-missing-dependency",
@@ -101,26 +140,72 @@ export class BedrockProviderAdapter implements LlmProvider {
         { providerId: "bedrock" },
       )
     }
-    return new Ctor(this.clientOptions)
+    try {
+      return new Ctor(this.clientOptions)
+    } catch (e) {
+      // Construction itself can throw on bad credentials shape — surface as
+      // typed misconfigured rather than leak the SDK-internal error.
+      throw new ProviderError(
+        "provider-misconfigured",
+        `Bedrock client construction failed (auth-failed): ${(e as Error).message}`,
+        { cause: e, providerId: "bedrock" },
+      )
+    }
   }
 
-  // Phase 1 always throws ProviderError before the first yield. The async-generator
-  // signature must remain to satisfy LlmProvider. Phase 2 wiring (Bedrock
-  // messages.create + mapRawEvent) lands the real yields.
-  // biome-ignore lint/correctness/useYield: Phase-1 throw-only stub; see comment above.
-  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
-    // Resolve the client lazily; throws ProviderError if the SDK is missing.
-    // Phase 2 work: wire `input` → Bedrock messages.create and re-decode the
-    // raw events through the existing `mapRawEvent` (same SSE shape as the
-    // public Anthropic transport). For Phase 1 we surface the dependency
-    // error eagerly so callers get a clear actionable message rather than a
-    // half-streamed silence.
-    await this.resolveClient()
-    // Reachable only when the SDK is present — Phase 2 wiring lives here.
-    throw new ProviderError(
-      "provider-unsupported",
-      "Bedrock stream() wiring is Phase 2 — adapter constructed but not yet wired",
-      { providerId: "bedrock" },
-    )
+  /** Open the underlying Bedrock messages stream. Mirrors `anthropic.ts`'s
+   *  `openRawStream` — same request shape, same toolChoice resolution, same
+   *  LLMError translation — except the transport is Bedrock-signed. */
+  private async openRawStream(
+    client: BedrockClientLike,
+    input: StreamInput,
+  ): Promise<AsyncIterable<RawEvent>> {
+    const toolNames = input.tools.map((t) => t.name)
+    const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
+    try {
+      return await client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          stream: true,
+          ...(input.system ? { system: input.system } : {}),
+          ...(input.thinking ? { thinking: input.thinking } : {}),
+          messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
+          tools: input.tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema,
+          })),
+          ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      )
+    } catch (e) {
+      // ProviderError (e.g. from a DI factory that wants to surface "missing
+      // dependency" eagerly) MUST pass through untouched so the loop's
+      // classifier can branch on `.code`. Everything else is a wire error.
+      if (e instanceof ProviderError) throw e
+      throw LLMError.fromSdkError("anthropic", e)
+    }
+  }
+
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    const client = await this.resolveClient()
+    const raw = await this.openRawStream(client, input)
+    const guarded = withStreamTimeout(raw, {
+      firstChunkMs: this.streamTimeoutMs.firstChunkMs,
+      idleMs: this.streamTimeoutMs.idleMs,
+      provider: "anthropic",
+      ...(input.signal ? { signal: input.signal } : {}),
+    })
+    const open: OpenSlots = new Map()
+    try {
+      for await (const ev of guarded) {
+        yield* mapRawEvent(ev, open, { model: this.model })
+      }
+    } catch (e) {
+      if (e instanceof ProviderError) throw e
+      throw LLMError.fromSdkError("anthropic", e, "Bedrock stream error")
+    }
   }
 }

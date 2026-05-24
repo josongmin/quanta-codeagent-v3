@@ -1,3 +1,6 @@
+import { randomBytes } from "node:crypto"
+import { readdir, rename, unlink } from "node:fs/promises"
+import { basename, dirname } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { Subprocess } from "bun"
 import { logger } from "@/shared"
@@ -763,22 +766,91 @@ export class LspClient implements LspPort {
     return raw.signatures.map(mapSignature)
   }
 
-  /** Apply a workspace edit by writing each document's accumulated text to
-   *  disk via `Bun.write`. Behaviour:
-   *    1. Resolve each `file://` URI to an absolute path.
-   *    2. Read the current on-disk text.
-   *    3. Apply the LSP edits in reverse order (LSP guarantees no overlap; the
-   *       reverse order means earlier edits don't shift later offsets).
-   *    4. Write the patched text back.
-   *  Files are processed sequentially — if a later file fails, earlier files
-   *  may already be on disk. Atomicity beyond per-file is an intentional v2
-   *  follow-up (temp+rename + 2-phase). */
-  async applyWorkspaceEdit(edit: CodeActionWorkspaceEdit | RenameWorkspaceEdit): Promise<void> {
-    for (const doc of edit.changes) {
-      const path = fileURLToPath(doc.uri)
-      const original = await this.readFileText(path)
-      const patched = applyEditsToText(original, doc.edits)
-      await this.writeFileText(path, patched)
+  /** Apply a workspace edit using 2-phase temp+rename atomic commit (ADR-0152,
+   *  upgrade of ADR-0143 per-file sequential write).
+   *
+   *  Phases (per call):
+   *    0. **Cleanup** — best-effort scan of each target dir for leftover
+   *       `<original>.quanta-tmp-<sessionId>-*` files from prior failed runs;
+   *       silently unlinked. Scoped by `sessionId`, so concurrent sessions
+   *       don't clobber each other.
+   *    1. **Prepare** — for every doc, compute patched text and write to a
+   *       sibling tmp file `<original>.quanta-tmp-<sessionId>-<rand>`
+   *       (`<rand>` = 4 hex bytes, prevents same-session same-file collisions).
+   *       If ANY prepare fails, all already-written tmps are unlinked and the
+   *       originating error re-thrown. Originals are NEVER touched in Phase 1.
+   *    2. **Commit** — `fs.rename(tmp, target)` per doc. POSIX rename is atomic
+   *       on the same filesystem (Linux/macOS); same-FS is the steady-state
+   *       assumption (LSP edits hit workspace files which live with their tmps).
+   *
+   *  Failure model:
+   *    - Phase 1 fails ⇒ NO original modified, NO tmp remains.
+   *    - Phase 2 fails on file K of N ⇒ files 1..K-1 are committed, file K's
+   *      tmp + remaining unrenamed tmps stay on disk under `.quanta-tmp-…`
+   *      suffix. Caller can recover via dir scan; we surface a typed error
+   *      naming the failed path. Cross-FS rename (EXDEV) is the most likely
+   *      Phase 2 cause — that's a follow-up (copy+delete fallback).
+   *
+   *  Concurrency: the random hex suffix means two parallel calls editing the
+   *  same file under the same `sessionId` get distinct tmps; neither clobbers
+   *  the other's prepare buffer. Default `sessionId` is per-call random, so
+   *  callers that don't pass one are naturally isolated. */
+  async applyWorkspaceEdit(
+    edit: CodeActionWorkspaceEdit | RenameWorkspaceEdit,
+    sessionId: string = randomBytes(8).toString("hex"),
+  ): Promise<void> {
+    // Resolve URIs to paths once; reuse across all 3 phases.
+    const resolved = edit.changes.map((doc) => ({
+      path: fileURLToPath(doc.uri),
+      edits: doc.edits,
+    }))
+
+    // --- Phase 0 — best-effort cleanup of leftover tmps from prior runs ---
+    // Scoped by sessionId so a concurrent session's in-flight tmps survive.
+    // Errors here are intentionally swallowed: a stale-tmp scan must NEVER
+    // block a legitimate edit (e.g. dir missing → caller will fail in Phase 1
+    // with a clearer error than "couldn't list dir for cleanup").
+    const cleanupDirs = new Set(resolved.map((d) => dirname(d.path)))
+    for (const dir of cleanupDirs) {
+      await this.cleanupStaleTmps(dir, sessionId)
+    }
+
+    // --- Phase 1 — prepare: write all tmps before touching any original. ---
+    const prepared: { tmp: string; target: string }[] = []
+    try {
+      for (const { path, edits } of resolved) {
+        const original = await this.readFileText(path)
+        const patched = applyEditsToText(original, edits)
+        const tmp = `${path}.quanta-tmp-${sessionId}-${randomBytes(4).toString("hex")}`
+        await this.writeFileText(tmp, patched)
+        prepared.push({ tmp, target: path })
+      }
+    } catch (e) {
+      // Phase 1 failure ⇒ unlink every tmp we wrote so far; no original touched.
+      for (const { tmp } of prepared) {
+        await this.unlinkTmp(tmp).catch(() => undefined)
+      }
+      throw e
+    }
+
+    // --- Phase 2 — commit: atomic rename per file (same-FS POSIX). ---
+    // If rename K fails: files 1..K-1 are committed; K and later tmps remain
+    // on disk under `.quanta-tmp-<sessionId>-*`. Caller can scan + recover.
+    for (let i = 0; i < prepared.length; i++) {
+      const entry = prepared[i]
+      if (!entry) continue
+      try {
+        await this.renameFile(entry.tmp, entry.target)
+      } catch (e) {
+        const remaining = prepared.length - i
+        const err = new Error(
+          `LSP applyWorkspaceEdit Phase 2 (commit) failed on "${entry.target}" ` +
+            `(${i}/${prepared.length} files renamed, ${remaining} tmp file(s) remain): ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        throw err
+      }
     }
   }
 
@@ -786,6 +858,43 @@ export class LspClient implements LspPort {
    *  call without touching the FS — mirrors {@link readFileText}. */
   protected writeFileText(filePath: string, text: string): Promise<unknown> {
     return Bun.write(filePath, text)
+  }
+
+  /** Atomic-rename seam (Phase 2 commit). Protected so tests can capture or
+   *  fail-inject without touching the FS. POSIX `rename(2)` is atomic on the
+   *  same filesystem; cross-FS surfaces as `EXDEV` which we re-throw. */
+  protected renameFile(from: string, to: string): Promise<void> {
+    return rename(from, to)
+  }
+
+  /** Tmp-unlink seam (Phase 1 rollback + Phase 0 cleanup). Protected for
+   *  tests; default delegates to `fs.unlink`. */
+  protected unlinkTmp(filePath: string): Promise<void> {
+    return unlink(filePath)
+  }
+
+  /** Directory-scan seam for Phase 0 cleanup. Returns the basenames in `dir`,
+   *  or `[]` if the dir is missing / unreadable (silent — Phase 0 is best-
+   *  effort and must not block legitimate edits). */
+  protected listDir(dir: string): Promise<string[]> {
+    return readdir(dir).catch(() => [])
+  }
+
+  /** Best-effort sweep of `<dir>` for leftover tmps from prior `sessionId`
+   *  runs. Pattern: any entry matching `*.quanta-tmp-<sessionId>-*` is
+   *  unlinked. Errors per-entry are swallowed (file may already be gone or
+   *  owned by another process). */
+  private async cleanupStaleTmps(dir: string, sessionId: string): Promise<void> {
+    const entries = await this.listDir(dir)
+    const marker = `.quanta-tmp-${sessionId}-`
+    for (const name of entries) {
+      // Match the marker anywhere after the original-filename portion. The
+      // suffix is always `<original>.quanta-tmp-<sessionId>-<hex>` so we look
+      // for the marker substring; presence ⇒ this is our tmp.
+      if (!name.includes(marker)) continue
+      const full = `${dir}/${basename(name)}`
+      await this.unlinkTmp(full).catch(() => undefined)
+    }
   }
 
   async stop(): Promise<void> {

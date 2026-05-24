@@ -48,7 +48,7 @@ export interface SandboxedSpawnSpec {
   readonly signal?: AbortSignal
 }
 
-export type SandboxBackend = "seatbelt" | "landlock+seccomp" | "passthrough"
+export type SandboxBackend = "seatbelt" | "bubblewrap" | "landlock+seccomp" | "passthrough"
 
 export interface SandboxedSpawnResult {
   readonly exitCode: number

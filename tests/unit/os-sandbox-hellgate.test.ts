@@ -153,13 +153,14 @@ describe("B. defaultOsSandbox.spawn — runtime dispatch", () => {
     expect(r.degradeReason).toBe("sandbox-exec-missing")
   })
 
-  test("HELL-B11: linux → Phase 1 degraded passthrough", async () => {
+  test("HELL-B11: linux + bwrap missing → Phase 2 degraded passthrough", async () => {
+    // whichOk only resolves sandbox-exec; bwrap is not found → degrade.
     const { spawner, calls } = makeSpawner()
     const sb = defaultOsSandbox({ spawner, platform: "linux", which: whichOk })
     const r = await sb.spawn({ command: ["x"], cwd: "/ws" }, POLICY_WW)
     expect((calls[0] as SpawnCall).argv).toEqual(["x"])
     expect(r.sandboxApplied).toBe(false)
-    expect(r.degradeReason).toBe("landlock-not-implemented")
+    expect((r.degradeReason as string).startsWith("linux-bwrap-missing")).toBe(true)
   })
 
   test("HELL-B12: spawner throws → exitCode 127 + stderr describes failure", async () => {
@@ -203,12 +204,12 @@ describe("C. defaultOsSandbox.availability — backend detection", () => {
     expect(av.warnings).toEqual([])
   })
 
-  test("HELL-C16: linux → backend=passthrough + Phase-2 warning", async () => {
+  test("HELL-C16: linux + bwrap missing → backend=passthrough + install-bubblewrap warning", async () => {
     const sb = defaultOsSandbox({ platform: "linux", which: whichOk })
     const av = await sb.availability()
     expect(av.backend).toBe("passthrough")
     expect(av.warnings.length).toBe(1)
-    expect((av.warnings[0] as string).includes("Phase 2")).toBe(true)
+    expect((av.warnings[0] as string).includes("install bubblewrap")).toBe(true)
   })
 
   test("HELL-C17: win32 → backend=passthrough + unsupported warning", async () => {

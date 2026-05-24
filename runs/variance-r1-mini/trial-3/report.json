@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-05-24T10:42:57.144Z",
+  "model": "gpt-5-mini",
+  "provider": "openai",
+  "n": 1,
+  "totals": {
+    "total": 6,
+    "resolved": 5,
+    "resolvedPct": 83
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "harness_error": 1
+    },
+    "bySignal": {}
+  },
+  "perInstance": [
+    {
+      "id": "psf__requests-5414",
+      "passed": true,
+      "turns": 15,
+      "patchBytes": 1035
+    },
+    {
+      "id": "pallets__flask-5014",
+      "passed": true,
+      "turns": 20,
+      "patchBytes": 435
+    },
+    {
+      "id": "pylint-dev__pylint-4970",
+      "passed": false,
+      "turns": 7,
+      "patchBytes": 982,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-pylint-dev__pylint-4970-O87686/predictions.jsonl --run_id quanta-pylint-dev__pylint-4970-1779618582881 --instance_ids pylint-dev__pylint-4970 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 0\nresolved_ids: []\nstdout(tail): Running 1 instances...",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-7982",
+      "passed": true,
+      "turns": 20,
+      "patchBytes": 1032
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": true,
+      "turns": 17,
+      "patchBytes": 2243
+    },
+    {
+      "id": "sympy__sympy-13480",
+      "passed": true,
+      "turns": 23,
+      "patchBytes": 3707
+    }
+  ]
+}
