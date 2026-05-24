@@ -1,0 +1,38 @@
+id: assemble-streaming-core
+title: buildStreamingCore — StdoutStream + observe-dir JsonlRecorder TeeStream
+section: 6
+subsystem: runner/assemble — streaming
+order: 235
+maturity: L4
+status: new
+purpose: |
+  Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
+  Default OFF: no `observeDir` ⇒ plain `StdoutStream` + no `RunContext`
+  (byte-identical to today). When `observeDir` is set:
+  (1) Mint a `runId` (caller-supplied OR `crypto.randomUUID()` when absent)
+      so cross-process surfaces can correlate events with the same id they
+      already minted off-thread.
+  (2) Construct `RunContext = { runId }` and tag a `JsonlRecorder` writing
+      to `join(observeDir, runId, "session.jsonl")` with `{ ctx: run }`.
+  (3) Fan-out: return `TeeStream([stdoutStream, recorder])` so events hit
+      both human surface AND the JSONL on-disk record.
+  (4) Emits `observe.on { dir, runId }` structured log.
+  Optional `painter` (e.g. inline markdown highlighter) is injected into the
+  `StdoutStream` only when present — when absent, deltas write verbatim
+  (byte-identical to the pre-painter path). CLI injects; recorders / Web
+  surfaces leave it undefined.
+evidence:
+  code:
+    - src/runner/assemble/streaming.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pure relocation of the prior `internal.ts#buildStreaming` block — same
+  effects, same logging keys. `TeeStream` is the fan-out primitive — caller
+  cannot inject additional sinks here, but a Web/Tauri surface can compose
+  its own tee on top of the returned `stream`.

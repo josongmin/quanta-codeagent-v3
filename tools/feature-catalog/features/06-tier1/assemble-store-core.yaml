@@ -1,0 +1,34 @@
+id: assemble-store-core
+title: buildStoreCore + buildEmbedderCore — surface-agnostic memory store/embedder factories
+section: 6
+subsystem: runner/assemble — store + embedder
+order: 232
+maturity: L4
+status: new
+purpose: |
+  Two surface-agnostic factories that produce the long-term memory store and
+  the semantic embedder, both default-OFF (plain runs unchanged):
+  (1) `buildStoreCore` — three states by `kind`: `"sqlite"` → on-disk
+      `SqliteStore` (path or default `.quanta/memory.sqlite`), `"memory"` →
+      volatile `InMemoryStore`, anything else (incl. undefined) → no store.
+      The surface (CLI / Web / Tauri) maps its own input → `kind` once.
+  (2) `buildEmbedderCore` — THREE-gate enable contract: a store exists AND
+      `disabled !== true` AND an `apiKey` is provided. ANY gate failing
+      ⇒ `undefined` (preserves the prior env-driven gates
+      `QUANTA_MEMORY_EMBED=off` / `OPENAI_API_KEY` presence). When enabled,
+      wraps `OpenAIEmbedder` in `CachingEmbedder`; `baseURL` and `model`
+      overrides are conditionally spread (`exactOptionalPropertyTypes`).
+evidence:
+  code:
+    - src/runner/assemble/store.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Embedder gate is intentionally ANDed with store presence so semantic recall
+  without a persistent store is impossible — prevents a confusing config
+  where embeddings compute but nothing persists them.

@@ -1,0 +1,44 @@
+id: tier1-skill-block
+title: buildSkillBlock — skill discovery + tool registration + override maps + paths-filtered inventory
+section: 6
+subsystem: Tier-1 builder (skill block)
+order: 220
+maturity: L4
+status: new
+purpose: |
+  Per-subsystem Tier-1 builder that materializes the entire SKILL block off a
+  single `config.skills` config field, returning `undefined` for byte-identical
+  default-OFF (RFC §1.2). Substantial logic, not plumbing:
+  (1) Discovers user skills (from `config.skills.dir`, optional) AND bundled
+      system skills (`discoverSystemSkills`), merging with a NAME-collision
+      precedence rule: system skills WIN over user-supplied skills so a user
+      cannot impersonate / weaken a system one.
+  (2) Registers the `Skill` and `ToolSearch` tools — the `Skill` tool ALWAYS
+      receives the full discovered list (invocable surface never narrows).
+  (3) Builds two per-skill maps (only when at least one skill contributes):
+      author-declared `tools:` allowlist map + `{model?, effort?}` override map.
+      Local helper `skillOverrideEntry` keeps the per-skill loop a single
+      branch (cognitive-complexity budget).
+  (4) Emits the per-turn SUGGESTION inventory (`{name, description}` shape so
+      the prompt slice never imports `@/skill`). When `changedPaths` is set:
+      narrows to unconditional skills + paths-matched skills via
+      `skillsActivatedFor` — invocable surface is NEVER filtered, only the
+      suggestion inventory.
+evidence:
+  code:
+    - src/agent/tier1/skill.ts
+  adrs: [11, 45]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice-isolation: the inventory shape is plain `{name, description}` so the
+  prompt slice never imports `@/skill`. Built ONCE at session start (via
+  `buildSessionFeatures`), passed through every turn without re-discovery.
+  Sub-feature of `agent-features-tier1` umbrella, individuated because the
+  builder is 136 LOC of distinct logic (merge precedence + dual-map build +
+  paths-conditional inventory narrowing) versus the umbrella's other plumbing
+  builders (most <30 LOC).

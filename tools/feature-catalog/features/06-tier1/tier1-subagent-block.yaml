@@ -1,0 +1,42 @@
+id: tier1-subagent-block
+title: buildSubagentBlock — shared TaskRegistry trio + force-stop cleanup
+section: 6
+subsystem: Tier-1 builder (subagent block)
+order: 221
+maturity: L4
+status: new
+purpose: |
+  Per-subsystem Tier-1 builder that materializes the SUBAGENT block — the
+  `agent` / `task_output` / `task_stop` tool trio plus the cleanup hook —
+  off a single `config.subagent` field. Returns `undefined` when absent for
+  byte-identical default-OFF (RFC §1.2). Distinct from plumbing:
+  (1) Mints a `SubagentRunner` via `createSubagentRunner(config, {maxDepth})`
+      with optional `maxDepth` from `config.subagent.maxDepth`.
+  (2) Wires all THREE tools against the SAME `TaskRegistry` instance —
+      `createAgentTool` mints (or accepts via `config.subagent.taskRegistry`)
+      a registry and re-exposes it as `.registry`, which is then threaded
+      into `createTaskOutputTool` and `createTaskStopTool` so all three tools
+      observe / mutate the same background-task store.
+  (3) Returns a `cleanup` hook that, on session shutdown, queries
+      `reg.pendingIds()` and force-stops every in-flight task. Uses
+      `forceStop` (not the token-gated `stop`) because the session owner has
+      authority over all pending tasks regardless of who minted them — S17
+      invariant. Awaits all `waitForSettle()` in parallel; idempotent for the
+      empty-pending case.
+evidence:
+  code:
+    - src/agent/tier1/subagent.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sibling of `background-subagent` (130) and `subagent-background-wire` (140):
+  this one is the FOREGROUND trio; those land the BACKGROUND tools. Surface
+  (CLI lifecycle pills) can pass its own `TaskRegistry` so it keeps a live
+  reference for pendingIds() rendering; default mints a fresh one with
+  byte-identical behaviour. Cleanup-via-forceStop is the host-side authority
+  contract — distinct from the LLM-facing token-gated `stop` tool.
