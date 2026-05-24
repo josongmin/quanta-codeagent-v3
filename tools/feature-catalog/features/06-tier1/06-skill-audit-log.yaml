@@ -1,0 +1,28 @@
+id: skill-audit-log
+title: Skill install audit log — append-only JSONL (ADR-0134 §3)
+section: 6
+subsystem: 스킬 — audit trail
+order: 15
+maturity: L4
+status: new
+purpose: 'Append-only JSONL at `<repo>/.quanta/audit/skill-install.log`. 6 event type (admin_install / admin_remove / admin_attempt_disable / banned_install_blocked / policy_load / policy_violation). 각 line은 {ts (ISO 8601), seq (process-monotonic), event, skillName, admin?, user?, scope?, note?}. closed-port: `AuditClock`.now() + `AuditWriter`.append() 모두 injectable. `memoryAuditWriter()` 는 unit test 전용 — `lines: string[]` public buffer. immutability invariant: 절대 delete/rewrite 안 함 (compliance surface). 추가 migration helper `migrateClaudeSkillsToQuanta({homeDir, apply})` 는 dry-run default + conflict skip-not-overwrite.'
+evidence:
+  code:
+    - src/skill/audit-log.ts
+    - src/skill/migration.ts
+  adrs: [134]
+  tests:
+    unit:
+      - tests/unit/skill-admin-enforcement.test.ts
+      - tests/unit/skill-migration.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: auditClock
+    default: 'Date.now'
+    semantics: 'unit test 에서 fixed clock 주입'
+  - name: auditWriter
+    default: 'nodeAuditWriter (fs)'
+    semantics: 'memoryAuditWriter 로 fs 없이 line 단언'
+deliberate_hold: null
+notes: 'V2 deferred: log rotation (외부 host out-of-band 처리), signature-pinned audit (V3 supply chain).'

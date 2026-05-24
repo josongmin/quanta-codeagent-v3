@@ -54,9 +54,8 @@ const writeSkill = async (dir: string, body: string): Promise<void> => {
 
 describe("SkillScope enum", () => {
   test("contains exactly 7 scope values", () => {
-    expect([...SKILL_SCOPES].sort()).toEqual(
-      ["admin", "builtIn", "personal", "repo", "system", "team", "user"].sort(),
-    )
+    const expected: string[] = ["admin", "builtIn", "personal", "repo", "system", "team", "user"]
+    expect([...SKILL_SCOPES].sort() as string[]).toEqual(expected.sort())
   })
 
   test("isSkillScope accepts every literal", () => {

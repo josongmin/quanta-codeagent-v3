@@ -1,0 +1,27 @@
+id: skill-admin-enforcement
+title: Skill admin enforcement — org-policy.json + install decision (ADR-0134 §3)
+section: 6
+subsystem: 스킬 — admin scope enforcement
+order: 14
+maturity: L4
+status: new
+purpose: '`<orgConfigDir>/org-policy.json` strict Zod schema (requiredSkills/bannedSkills/auditRequired/org). `loadAdminPolicy({orgConfigDir, readPolicyFile})` 는 closed-port (test seam). 부재 ⇒ policy:null = admin scope 비활성 (ADR §3). 순수 결정 함수 `decideInstall(attempt, policy) → {allowed, reason, auditEvent}` — 4 outcome (install admin/non-admin, disable, remove). 매트릭스: admin scope install + no policy ⇒ DENY ("admin scope disabled"); banned install + non-admin ⇒ DENY + banned_install_blocked; admin-required skill disable ⇒ DENY + admin_attempt_disable. cross-field invariant (required ∩ banned = ∅) loud failure.'
+evidence:
+  code:
+    - src/skill/admin-policy.ts
+    - src/skill/install-enforcement.ts
+  adrs: [134]
+  tests:
+    unit:
+      - tests/unit/skill-admin-enforcement.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: orgConfigDir
+    default: '$QUANTA_ORG_CONFIG_DIR or null'
+    semantics: 'admin scope 활성 위치. null ⇒ admin scope 비활성'
+  - name: auditRequired
+    default: false
+    semantics: 'true ⇒ 모든 admin 행위 + blocked attempt audit 강제'
+deliberate_hold: null
+notes: 'install CLI (`quanta skill install <name> --scope=<scope>`) 는 V2. 본 슬라이스는 결정 함수만 — host 통합 후속.'

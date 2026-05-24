@@ -18,14 +18,7 @@ export type SkillEffort = "low" | "medium" | "high" | "max" | number
  * the type level. Runtime guard {@link isSkillScope} is provided for boundary
  * validation (frontmatter, CLI argv).
  */
-export type SkillScope =
-  | "builtIn"
-  | "system"
-  | "admin"
-  | "team"
-  | "repo"
-  | "user"
-  | "personal"
+export type SkillScope = "builtIn" | "system" | "admin" | "team" | "repo" | "user" | "personal"
 
 /** All scope literals — single source of truth for Zod / CLI / docs. */
 export const SKILL_SCOPES: readonly SkillScope[] = [

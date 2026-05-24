@@ -35,8 +35,55 @@
  *      Declaring `paths:` has no runtime effect until a host does this.
  */
 export { MAX_GLOB_LEN, MAX_PATH_LEN, matchesAnyGlob, skillsActivatedFor } from "./activation"
+export type { AdminPolicy, LoadedAdminPolicy } from "./admin-policy"
+// ADR-0134 Phase C — admin policy + audit log + install enforcement.
+export {
+  AdminPolicySchema,
+  loadAdminPolicy,
+  parseAdminPolicy,
+  validateAdminPolicy,
+} from "./admin-policy"
+export type {
+  AuditClock,
+  AuditEntry,
+  AuditEvent,
+  AuditWriter,
+  MemoryAuditWriter,
+} from "./audit-log"
+export {
+  appendAuditEntry,
+  auditLogPathFor,
+  buildAuditEntry,
+  memoryAuditWriter,
+  nodeAuditWriter,
+  resetAuditSeqForTesting,
+  systemAuditClock,
+} from "./audit-log"
 export { discoverSkills } from "./discover"
 export { parseFrontmatter } from "./frontmatter"
+export type { InstallAttempt, InstallDecision } from "./install-enforcement"
+export {
+  bannedSkillNames,
+  decideInstall,
+  requiredAdminSkillNames,
+} from "./install-enforcement"
+export type {
+  MigrationEntry,
+  MigrationFs,
+  MigrationOptions,
+  MigrationReport,
+} from "./migration"
+// ADR-0134 Phase D — pre-0134 ~/.claude/skills/ migration helper.
+export { migrateClaudeSkillsToQuanta, nodeMigrationFs } from "./migration"
+export type {
+  SkillRegistry,
+  SkillRegistryCollision,
+  SkillRegistryEntry,
+  SkillRegistryOptions,
+  SkillSource,
+  SkillSourceInputs,
+} from "./registry"
+export { buildSkillRegistry, defaultSkillSources } from "./registry"
 export {
   createSkillTool,
   scopingNote,
@@ -112,6 +159,13 @@ export {
   triggerRewind,
 } from "./system-skills"
 export { createToolSearchTool } from "./tool-search"
+export type {
+  ParsedFrontmatter,
+  Skill,
+  SkillEffort,
+  SkillInstallState,
+  SkillScope,
+} from "./types"
 export {
   isSkillInstallState,
   isSkillScope,
@@ -119,11 +173,4 @@ export {
   SKILL_SCOPES,
   SKILL_SCOPES_PRECEDENCE_DESC,
   skillScope,
-} from "./types"
-export type {
-  ParsedFrontmatter,
-  Skill,
-  SkillEffort,
-  SkillInstallState,
-  SkillScope,
 } from "./types"

@@ -61,6 +61,35 @@ const inferScopeFromPath = (sourcePath: string): SkillScope => {
   return "builtIn"
 }
 
+/** ADR-0134 — resolve scope: explicit frontmatter wins, else path-infer. */
+const resolveScope = (data: Record<string, string | string[]>, sourcePath: string): SkillScope => {
+  const declared = asScalar(data.scope)
+  if (declared !== undefined && isSkillScope(declared)) return declared
+  return inferScopeFromPath(sourcePath)
+}
+
+/** ADR-0134 — resolve installState: explicit > admin-scope backfill > undefined.
+ *  Mirrors the strict parser's invariant (admin ⇒ "required") so the registry
+ *  sees consistent shape from either parse path. */
+const resolveInstallState = (
+  data: Record<string, string | string[]>,
+  scope: SkillScope,
+): SkillInstallState | undefined => {
+  const declared = asScalar(data.installState ?? data.install_state)
+  const explicit = declared !== undefined && isSkillInstallState(declared) ? declared : undefined
+  if (scope === "admin") return "required"
+  return explicit
+}
+
+/** ADR-0134 — resolve adminInstalledBy: admin scope only. */
+const resolveAdminInstalledBy = (
+  data: Record<string, string | string[]>,
+  scope: SkillScope,
+): string | null | undefined => {
+  if (scope !== "admin") return undefined
+  return asScalar(data.adminInstalledBy ?? data.admin_installed_by) ?? null
+}
+
 /** Build a {@link Skill} from a file's raw contents. */
 const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
   const { data, body } = parseFrontmatter(raw)
@@ -72,29 +101,9 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
       ?.trim() ??
     ""
 
-  // ADR-0134 — frontmatter wins over path inference. Unknown scope tokens are
-  // dropped silently (the strict parser is the loud path; this lenient parser
-  // is best-effort metadata).
-  const declaredScope = asScalar(data.scope)
-  const scope: SkillScope =
-    declaredScope !== undefined && isSkillScope(declaredScope)
-      ? declaredScope
-      : inferScopeFromPath(sourcePath)
-
-  const declaredInstallState = asScalar(data.installState ?? data.install_state)
-  let installState: SkillInstallState | undefined =
-    declaredInstallState !== undefined && isSkillInstallState(declaredInstallState)
-      ? declaredInstallState
-      : undefined
-  // Admin scope ⇒ installState pinned to "required" (same invariant the strict
-  // parser enforces; we mirror it for the lenient path so the registry sees a
-  // consistent shape regardless of which parser ran).
-  if (scope === "admin" && installState !== "required") installState = "required"
-
-  const adminInstalledBy =
-    scope === "admin"
-      ? (asScalar(data.adminInstalledBy ?? data.admin_installed_by) ?? null)
-      : undefined
+  const scope = resolveScope(data, sourcePath)
+  const installState = resolveInstallState(data, scope)
+  const adminInstalledBy = resolveAdminInstalledBy(data, scope)
 
   const skill: Skill = {
     name: asScalar(data.name) ?? name,

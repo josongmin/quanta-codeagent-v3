@@ -1,0 +1,26 @@
+id: skill-registry-precedence
+title: Skill registry — 7-source discovery + precedence resolver (ADR-0134 §1)
+section: 6
+subsystem: 스킬 — registry + lookup
+order: 13
+maturity: L4
+status: new
+purpose: '`buildSkillRegistry({ repoRoot, homeDir, orgConfigDir, systemSkillsDir })` — 7-source 병렬 discovery 후 고정 precedence (admin > repo > team > user > personal > system > builtIn) 적용. 같은 name 충돌 시 winner + overriddenScopes[] 기록 → `lookup(name): {skill, winnerScope, overriddenScopes}` + `bySope(scope): Skill[]`. Legacy ~/.claude/skills/ fallback은 ~/.quanta/skills/ 비었을 때만 발화 (default ON, `legacyClaudeSkillsFallback: false` 로 disable). source dir 없으면 silent skip (no crash).'
+evidence:
+  code:
+    - src/skill/registry.ts
+  adrs: [134]
+  tests:
+    unit:
+      - tests/unit/skill-registry-precedence.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: legacyClaudeSkillsFallback
+    default: true
+    semantics: '~/.quanta/skills/ 비었을 때 ~/.claude/skills/ 로 fallback'
+  - name: extraSkills
+    default: '[]'
+    semantics: 'in-code builtIn 스킬 직접 주입 (host-supplied)'
+deliberate_hold: null
+notes: 'No cache layer at registry — 24h TTL은 host adapter가 wrap. registry는 snapshot (deterministic given inputs).'
