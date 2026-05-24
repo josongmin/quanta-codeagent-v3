@@ -13,6 +13,19 @@ entry point — read it before adding tests.
 | contract | `tests/contract/` | 3 | env-gated (real Docker / language servers) | PR/main with `test:contract` | depends on host |
 | smoke | `tests/smoke/` | 26 | replay (Tier-0) + live (Tier-1) | `smoke` / `smoke:live` | ~seconds (replay) |
 | eval | `src/apps/bench/` | n/a | non-deterministic (real LLM) | nightly / `eval` label, non-blocking | minutes–hours |
+| meta | `tests/meta/` | 1 | filesystem-only (hellgate) | every push/PR (bundled with `test:unit`) | sub-second |
+
+### Artifact-purge policy
+
+Only `.test.ts` sources are tracked. Any `.test.js` under `tests/` is a stale
+TypeScript-emit artifact (root-cause: legacy build step / worktree pollution)
+and causes double execution at test time. Enforcement is two-layer:
+
+1. Every test script (`test`, `test:unit`, `test:fast`, …) is prefixed with
+   `bun run test:clean-js` which `find tests -name '*.test.js' -delete`s
+   before the run. Manual cleanup: `bun run test:clean-js`.
+2. `tests/meta/no-test-js-artifacts-hellgate.test.ts` walks the tree and fails
+   CI if any `.test.js` survives.
 
 `bun test` (and `npm test`) covers **unit + integration only** — the
 deterministic gate. Contract and eval are explicitly separated to keep the
