@@ -1,0 +1,52 @@
+id: reactor-trigger-source
+title: ADR-0132 reactor TriggerSourcePort (CI + PR-comment adapters)
+section: 9
+subsystem: Reactor / proactive wake (ADR-0132)
+order: 132
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PROACTIVE_REACTOR]
+owners: ["@songmin"]
+labels: ["surface:cli", "surface:ipc"]
+purpose: |
+  Closed-port trigger sources that turn external signals into typed
+  `ProactiveTrigger` records. Two adapters land in this slice:
+    - `createCiTriggerSource` — polls `gh pr checks --json`; emits a
+      `ci_completion` trigger ONLY when gh exited 0 AND at least one row's
+      status is COMPLETED AND the row hasn't been seen before (per-source
+      `SeenRunsStore`, capped at 1024 entries).
+    - `createPrCommentTriggerSource` — polls
+      `gh api repos/<owner>/<repo>/issues/<n>/comments?since=<watermark>`;
+      emits a `pr_comment` trigger per strictly-newer comment, advancing the
+      watermark to the max stamp before returning.
+  Every trigger carries a `TriggerEvidence` anchor (`url|sha|log_path`) so the
+  agent's next turn always has a verifiable pointer to the external signal.
+  `gh` non-zero exit / spawn failure / non-JSON stdout collapse to an empty
+  trigger array — a single bad poll never crashes the watcher.
+evidence:
+  code:
+    - src/reactor/types.ts
+    - src/reactor/trigger-source-ci.ts
+    - src/reactor/trigger-source-pr-comment.ts
+    - src/reactor/index.ts
+  adrs: [132]
+  tests:
+    unit:
+      - tests/unit/reactor-trigger-source.test.ts
+    integration:
+      - tests/integration/reactor-babysit-end-to-end.test.ts
+    contract: []
+knobs: [QUANTA_PROACTIVE_REACTOR]
+deliberate_hold: null
+notes: |
+  Build/test watchers (`build_completion` / `diff_ready` / `test_pass`) are
+  declared in the `TriggerReason` union but not implemented in this batch —
+  the union shape ratchets the audit-suffix contract while leaving room for
+  V2 sources. PR-comment watermark store is in-memory by default; production
+  cron driver should bind a file-backed impl for at-most-once semantics
+  across restarts.

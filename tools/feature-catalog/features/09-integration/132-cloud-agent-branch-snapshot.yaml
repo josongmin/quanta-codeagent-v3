@@ -1,0 +1,52 @@
+id: cloud-agent-branch-snapshot
+title: ADR-0132 cloud-agent branch snapshot (force-with-lease only)
+section: 9
+subsystem: Reactor / proactive wake (ADR-0132)
+order: 132
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+purpose: |
+  `snapshotDirtyToCloudBranch` packages a dirty working tree onto a brand-new
+  `quanta/cloud-agent-<YYYYMMDDhhmmss>-<rand6>` branch and pushes it with
+  `--force-with-lease` (NEVER `--force`). 10-step ballet behind a single
+  closed `GitProcessPort`:
+    1. rev-parse --git-dir            (not-a-repo guard)
+    2. symbolic-ref --quiet HEAD      (detached-head guard)
+    3. status --porcelain             (no-dirty-changes guard)
+    4. diff HEAD --numstat            (500MB diff-too-large cap)
+    5. branch <name> HEAD             (snapshot branch)
+    6. stash push -u -m <named>       (working tree)
+    7. checkout <branch>              (switch)
+    8. stash pop / add -A / commit    (apply + record)
+    9. push --force-with-lease        (lease-protected; stale-info rejection
+                                       is a distinct error kind)
+   10. checkout <original>            (best-effort restore)
+  File lock (`.quanta/cloud-snapshot.lock`) prevents two concurrent snapshots
+  from racing the working tree. Every mid-flight failure unwinds (checkout
+  --force + stash pop + branch -D) before propagating a discriminated
+  `SnapshotError`. Branch prefix isolation keeps cleanup zero-residue:
+  `git branch -D quanta/cloud-agent-*`.
+evidence:
+  code:
+    - src/git/cloud-branch-snapshot.ts
+    - src/git/index.ts
+  adrs: [132]
+  tests:
+    unit:
+      - tests/unit/git-cloud-branch-snapshot.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  HARD_DENY policy-rule scope is the bash tool's command-string surface;
+  argv-only `GitProcessPort.run(["git", ...])` is the intended bypass for
+  first-class git tools (same seam `git_commit` / `git_branch_switch` use).
+  The diff-size estimator uses an UPPER-bound (`bytes_per_line = 200`) so a
+  borderline case fails the guard rather than silently exceeding the cap.
