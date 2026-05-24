@@ -26,10 +26,12 @@ import type { StreamEvent, StreamInput } from "./types"
  * It lives in the `@/llm` slice because it only touches `@/llm` (`LLMPort`,
  * `StreamEvent`, `StreamInput`) + `@/shared` (`QuantaError`) — both legal here.
  *
- * TODO(absorb #7): wire SubmitRetryBotMessage equivalent into loop/CLI
- *   (a `/retry-with <model>` command resolving via {@link resolveRetryModel}
- *   then re-streaming via {@link streamWithModel}, replacing the prior
- *   assistant message keyed by `Message.id`).
+ * Wiring: `/retry-with <model>` lives in `src/apps/cli/retry-with.ts` and is
+ * registered into the slash-command builtins (`src/apps/cli/slash-commands.ts`).
+ * It resolves via {@link resolveRetryModel} then re-streams via
+ * {@link streamWithModel}, replacing the prior assistant message keyed by
+ * `Message.id`. Direct importers of this module (loop / tests) can still call
+ * the pure functions without going through the CLI seam.
  */
 
 /** One selectable model: a stable id paired with the port that streams it. */

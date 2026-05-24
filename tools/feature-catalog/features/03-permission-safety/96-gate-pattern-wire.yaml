@@ -43,5 +43,21 @@ evidence:
       - tests/integration/remember-patterns-cascade-hell.test.ts
     contract: []
 knobs: []
-deliberate_hold: null
-notes: 'Hardens v0 cascade with the two additional guards (zero-pattern + dangerous) before the coverage check; partial coverage always falls through to the reviewer.'
+deliberate_hold:
+  reason: |
+    `grantAndCascade`의 dispatch-cascade 후속 와이어링은 모델-facing pending-
+    permission surface가 아직 노출되지 않아 보류 — 모듈은 `pending` queue를
+    optional로 받아 결과 ids를 반환만 함 (gate-pattern-wire.ts L120-126
+    deliberate hold). 핵심 `autoPassByPatterns` 술어는 admissibility-gate에
+    완전 배선됨.
+  promotion_path: |
+    61-permission-remember-patterns의 promotion path와 묶임 — 모델 surface가
+    rememberPatterns를 출력하면 dispatch-cascade가 닫힘.
+notes: |
+  Hardens v0 cascade with the two additional guards (zero-pattern + dangerous)
+  before the coverage check; partial coverage always falls through to the
+  reviewer.
+
+  deferred-wire: source has TODO acknowledging gap — `grantAndCascade`의
+  cascade 결과를 dispatch가 직접 소비하는 사이클은 모델 schema 의존으로
+  보류. `autoPassByPatterns` 단방향 short-circuit만 stable wired.

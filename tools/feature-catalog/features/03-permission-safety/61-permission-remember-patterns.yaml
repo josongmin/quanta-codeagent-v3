@@ -3,8 +3,8 @@ title: rememberPatterns — 권한 패턴 학습 + cascade 자동해소
 section: 3
 subsystem: 권한 학습 (v0.dev 흡수, ADR-0061)
 order: 61
-maturity: L4
-status: stable
+maturity: L3
+status: refined
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
@@ -52,12 +52,26 @@ evidence:
       - tests/integration/remember-patterns-cascade-hell.test.ts
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    모델-facing schema 미배선 — `rememberPatterns` / `isMaybeDangerous`는
+    dispatch seam이 action에 plumb만 하고, LLM tool/schema 계약에는 아직
+    노출되지 않음 (src/agent/admissibility-gate.ts의 acknowledged TODO,
+    src/permission/gate-pattern-wire.ts `grantAndCascade` deliberate hold).
+    coverage-gated cascade는 동작하지만 모델이 자가 제안할 수 없음.
+  promotion_path: |
+    1) Tool 계약에 rememberPatterns/isMaybeDangerous output 필드 추가
+       (defineTool out-schema 확장, ADR-0060 path).
+    2) 모델이 채워 보낸 값을 admissibility action surface로 통과.
+    3) end-to-end cascade test (모델 제안 → store grant → 두 번째 호출
+       auto-pass) 추가 후 L4 재승격.
 notes: |
   user_approved_for_session(ADR-0029)이 actionKey 단위 기억의 씨앗 — rememberPatterns는 그 위에
-  패턴-단위 cascade를 얹음. L4 promotion에서 출처를 명확히 한 LearningSource enum까지 추가해
-  trajectory 소비자가 "왜 자동허용됐는가"를 exhaustive switch로 분기 가능.
+  패턴-단위 cascade를 얹음. LearningSource enum까지 추가해 trajectory 소비자가
+  "왜 자동허용됐는가"를 exhaustive switch로 분기 가능.
+
+  deferred-wire: source has TODO acknowledging gap — 모델 surface가 미배선이라
+  자가 제안 cascade 사이클이 닫히지 않음. L3로 honest-demote (2026-05-25 audit).
 
   Out-of-scope follow-ups: ML 분류기 v2(현재는 deterministic prefix-token sniffer;
-  알려진 위험 플래그 over-fit 우려), 모델 surface(rememberPatterns/isMaybeDangerous를 모델
-  계약에 노출하는 schema 필드 — 현재는 dispatch seam이 action에 plumb만 함).
+  알려진 위험 플래그 over-fit 우려).

@@ -12,9 +12,11 @@
  *   - `changes_requested`  ⇒ the operator wants revisions; the agent STAYS in
  *                            plan posture and revises. `feedback` is REQUIRED.
  *
- * Standalone-callable. NOT wired into the loop — that is out of scope for this
- * cluster.
- * TODO(absorb #3): wire plan-exit gate into loop/side-conversation.
+ * Standalone-callable. The orchestrator wrapper `runPlanExitFlow`
+ * (`./plan-exit-flow.ts`) IS wired into the dispatch seam (`./dispatch.ts`)
+ * through the `request-plan-exit` tool gated on `AgentConfig.planExitPort`.
+ * Side-conversation does NOT consume the flow yet — see `side-conversation/
+ * run.ts` for the structural blocker (no in-band plan-complete signal).
  *
  * Style mirrors `@/permission/outcome.ts`: the builder enforces invariants and
  * throws a named `QuantaError` subclass on violation — no silent normalization,

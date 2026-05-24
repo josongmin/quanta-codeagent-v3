@@ -9,9 +9,10 @@ const MAX_OUTPUT_CONTINUES = 3
 const MAX_MALFORMED_RETRIES = 1
 const MAX_CONSECUTIVE_EMPTIES = 2
 
-/** Per-kind same-turn recovery budget caps (ADR documented in loop.ts:1557-1560 +
- *  recovery.ts module header). Frozen so a test asserting a cap mutates with the
- *  source rather than carrying duplicated magic numbers. */
+/** Per-kind same-turn recovery budget caps (ADR documented in this module
+ *  header + the conversation_action_noop branch of loop.ts). Frozen so a test
+ *  asserting a cap mutates with the source rather than carrying duplicated
+ *  magic numbers. */
 export const RECOVERY_CAPS = Object.freeze({
   streamRetries: MAX_TURN_STREAM_RETRIES,
   outputContinues: MAX_OUTPUT_CONTINUES,

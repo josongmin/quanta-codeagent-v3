@@ -304,20 +304,16 @@ export const filterSideConversationTools = (tools: readonly ToolSchema[]): ToolS
  * slash-command, or another agent — handles routing the answer back to
  * whatever surface asked for it.
  *
- * TODO(absorb #3 cont.): wire plan-exit-flow into side-conversation at
- * `runSideConversation` AFTER the assembled answer is produced and BEFORE
- * the return, IFF the assembled `stopReason`/answer carries a "plan
- * complete" signal AND the caller injected a `planExitPort`. The current
- * shape — one-shot read-only LLM call with no tool-loop and no in-band
- * "plan complete" marker — does not give us a structurally clean observation
- * point: the side-conv is model→model, not user-decision, and its result
- * is already returned to the CALLER, who is the natural site to consult the
- * port. The pure orchestrator (`./plan-exit-flow.ts`) ships standalone and
- * importable; the missing piece is a side-conv-emitted plan-complete signal
- * (e.g. a structured tag in the assistant text, or a sentinel stop reason)
- * that the runner can pattern-match on without changing the prompt's
- * byte-identical invariant. Until that signal exists, callers (loop /
- * CLI / IDE) import `runPlanExitFlow` directly.
+ * Deliberate hold (absorb #3 cont.): plan-exit-flow is NOT consumed here.
+ * The side-conv is model→model with no tool-loop and no in-band "plan
+ * complete" marker, so there is no structurally clean observation point at
+ * which to invoke the port. The CALLER of `runSideConversation` is the
+ * natural site to consult `planExitPort` — and it already does, via
+ * `runPlanExitFlow` imported directly (dispatch.ts wiring). Promotion path:
+ * introduce a side-conv-emitted plan-complete signal (structured tag in the
+ * assistant text, or a sentinel stop reason) that this runner can pattern-
+ * match on without perturbing the prompt's byte-identical invariant. Until
+ * then this comment is the contract.
  */
 /** Validate effort + budgets up-front. Throws on violation. Pure. */
 const checkPreflight = (

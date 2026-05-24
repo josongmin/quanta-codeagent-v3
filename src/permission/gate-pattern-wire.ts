@@ -30,7 +30,9 @@ import type { ApprovalDecision } from "./types"
 
 /** Inputs to {@link autoPassByPatterns}. All optional fields are read with
  *  defensive guards so callers can pass through whatever the action surface
- *  has (the model-facing schema is still pending — see ADR-0061 §TODO). */
+ *  has (the model-facing schema that would populate these fields is the
+ *  documented out-of-scope follow-up of ADR-0061; the dispatch seam plumbs
+ *  whatever the action object carries). */
 export interface AutoPassInput {
   /** Patterns the action declares it would be satisfied by. Absent / empty
    *  ⇒ never auto-pass (per rule 1). */
@@ -120,9 +122,11 @@ export const autoPassByPatterns = (
  *  surface is still TODO (ADR-0061); a caller that only wants the grant side-
  *  effect can omit it.
  *
- *  TODO(absorb #2): wire this into a real dispatch cascade once the model
- *  surface exposes pending permissions — the returned ids are currently a
- *  pure value for the caller to act on (e.g. re-evaluate queued tool calls).
+ *  Deliberate hold (absorb #2): wiring this into a real dispatch cascade is
+ *  gated on the model surface exposing pending permissions — until that
+ *  schema lands, the returned ids are a pure value the caller may act on
+ *  (e.g. re-evaluate queued tool calls). See 61-permission-remember-patterns
+ *  catalog `deliberate_hold` for the promotion path.
  */
 export const grantAndCascade = (
   store: PatternGrantStore,

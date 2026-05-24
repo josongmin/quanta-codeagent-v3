@@ -85,10 +85,13 @@ export interface AdmissibilityAction {
    *
    * Absent ⇒ never auto-passed (legacy path, byte-identical).
    *
-   * TODO(absorb #2): expose `rememberPatterns` / `isMaybeDangerous` in the
-   * model-facing tool/schema surface so a future ADR can promote them onto
-   * the model contract. For now, the dispatch seam plumbs whatever the action
-   * carries; there is no model surface populating these yet.
+   * Deliberate hold (absorb #2): the model-facing tool/schema surface does
+   * not yet expose `rememberPatterns` / `isMaybeDangerous` — promotion path
+   * is documented under catalog `61-permission-remember-patterns`'s
+   * `deliberate_hold`. The dispatch seam plumbs whatever the action carries;
+   * no in-source model surface populates these today, so the auto-pass path
+   * only fires when an out-of-band caller (host, test, or future ADR-0060
+   * out-schema extension) sets them.
    */
   rememberPatterns?: readonly string[] | undefined
   /**

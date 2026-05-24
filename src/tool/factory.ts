@@ -133,8 +133,12 @@ export type StreamingInputStep =
  * tool that implements none of them is a no-op. Returns the accumulated raw
  * delta string (the partial-JSON buffer the dispatch seam would parse).
  *
- * TODO(absorb #1): wire into streaming-dispatch so live `tool_use_start` /
- * `tool_use_delta` / `tool_use_end` events drive these callbacks directly.
+ * Test/replay driver only. Live `tool_use_start` / `tool_use_delta` /
+ * `tool_use_end` events drive the per-tool callbacks through the
+ * `StreamingTurnArgs.onToolInput` seam in `@/agent/streaming-dispatch.ts`
+ * (default-OFF when no seam is wired). This function is the pure equivalent
+ * the seam consumes — keeping it standalone lets tests exercise the callback
+ * surface without spinning up a streaming dispatch.
  */
 export const driveStreamingInput = <I, O>(
   tool: Tool<I, O>,
