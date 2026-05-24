@@ -9,8 +9,8 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]
 configurable: static
-owners: ["@songmin"]
-labels: ["surface:cli", "absorbed:cursor"]
+owners: ['@songmin']
+labels: [surface:cli, absorbed:cursor]
 purpose: |
   Vim-style fixed bottom status bar implemented via ANSI DECSTBM
   (`CSI <top>;<bottom>r`). The terminal's scroll region is constrained to
@@ -28,7 +28,7 @@ evidence:
     - src/apps/cli/status-bar.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/cli/status-pills.test.ts, tests/unit/cli/turn-indicator.test.ts]
     integration: []
     contract: []
 knobs: []

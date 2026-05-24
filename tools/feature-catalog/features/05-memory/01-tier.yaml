@@ -9,8 +9,8 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
-labels: ["surface:core"]
+owners: ['@songmin']
+labels: [surface:core]
 purpose: tier+kind, 하이브리드 회상, tier 가중
 evidence:
   code:
@@ -20,6 +20,7 @@ evidence:
   adrs: [8]
   tests:
     unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/dedup.test.ts", "tests/unit/eviction.test.ts", "tests/unit/memory-adapters.test.ts", "tests/unit/memory-hellgate.test.ts", "tests/unit/memory-telemetry-port-hellgate.test.ts", "tests/unit/memory.test.ts", "tests/unit/ranking.test.ts"]
+    unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/dedup.test.ts, tests/unit/eviction.test.ts, tests/unit/memory-adapters.test.ts, tests/unit/memory-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

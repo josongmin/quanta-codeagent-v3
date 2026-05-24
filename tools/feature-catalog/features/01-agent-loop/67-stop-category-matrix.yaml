@@ -21,7 +21,10 @@ purpose: |
   loop의 finish()가 4-경로(aborted/error/completed/max_turns)에서 stopCategory 부착.
   AgentOutcome.stopCategory 옵셔널 add-on, 부재 callers byte-identical.
 evidence:
-  code: [src/agent/stop-category.ts, src/agent/loop.ts, src/agent/types.ts]
+  code:
+    - src/agent/stop-category.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
   adrs: [73]
   tests:
     unit:

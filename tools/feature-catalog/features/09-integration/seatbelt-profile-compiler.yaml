@@ -4,13 +4,14 @@ section: 9
 subsystem: runtime/os-sandbox — macOS profile compilation
 order: 41
 maturity: L2
+maturity: L3
 status: new
 ui_surfaces: [n-a]
 monitoring: integrated
 modes: [n-a]
 configurable: partial
-owners: ["@songmin"]
-labels: ["surface:core", "absorbed:codex"]
+owners: ['@songmin']
+labels: [surface:core, absorbed:codex]
 depends_on: [landlock-degraded-passthrough]
 purpose: |
   Pure compiler from a `SandboxPolicy` to a Seatbelt (SBPL) profile text

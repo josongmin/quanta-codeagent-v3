@@ -9,11 +9,11 @@ ui_surfaces: [n-a]
 monitoring: integrated
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin"]
-labels: ["surface:core", "observability-primitive"]
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
 depends_on: [work-metrics]
 config_refs:
-  env: ["QUANTA_LOG_LEVEL"]
+  env: [QUANTA_LOG_LEVEL]
 purpose: |
   Dependency-free in-process metrics registry that backs every downstream
   observability surface — the AgentRecorder, the shell-exec OTel observer,
@@ -32,6 +32,7 @@ evidence:
   adrs: []
   tests:
     unit: ["tests/unit/cost-dashboard.test.ts"]
+    unit: [tests/unit/cost-dashboard.test.ts, tests/unit/next-action-cap-enforce.test.ts]
     integration: []
     contract: []
 knobs: []

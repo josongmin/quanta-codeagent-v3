@@ -4,19 +4,19 @@ section: 6
 subsystem: surface-agnostic 오케스트레이션 드라이버
 order: 114
 maturity: L2
+maturity: L3
 status: new
 ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
-labels: ["surface:core", "tier:1"]
+owners: ['@songmin']
+labels: [surface:core, tier:1]
 purpose: |
   `apps/cli/repl.ts::runRepl` 의 argv-prompt 분기를 surface-agnostic 한 한 줄
   진입점으로 추출. "history append → runAgent → persistTurn → onTurnEnd →
   finally mcp shutdown" 의 5-단계 시퀀스를 단일 `runOnce(input)` 함수로 묶어
   CLI argv-prompt / Web HTTP POST / Tauri IPC 가 모두 동일 경로를 공유한다.
-
   주요 입력 (`RunOnceInput`):
     - `deps: OrchestrateDeps` — 미리 만들어진 collaborators 번들 (llm/registry/
       stream/permission/system/cwd/maxTurns/signal/onConfirm/store/embedder/...)
@@ -27,7 +27,6 @@ purpose: |
     - `pendingImages?: ImageBlock[]` — ADR-0083 multi-modal seam (legacy CLI 호환)
     - `state` / `idMeta` — path-mode / id-mode 저장 게이트 (둘 다 default OFF)
     - `onTurnEnd?` / `mcpClients?` — 옵셔널 surface hook
-
   BYTE-IDENTICAL 불변식: 모든 default-OFF 게이트 (store/metrics/run/mcpClients/
   onTurnEnd) 가 prior inline shape 그대로 보존. `runAgent` + `persistTurn` 호출
   순서 + finally MCP shutdown 순서 모두 verbatim.
@@ -35,7 +34,7 @@ evidence:
   code:
     - src/runner/orchestrate/run-once.ts
     - src/runner/orchestrate/index.ts
-  adrs: []
+  adrs: [83]
   tests:
     unit: []
     integration: []

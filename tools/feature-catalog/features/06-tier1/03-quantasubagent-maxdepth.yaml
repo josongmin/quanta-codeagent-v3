@@ -3,16 +3,16 @@ title: QUANTA_SUBAGENT[_MAX_DEPTH]
 section: 6
 subsystem: 서브에이전트
 order: 3
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH"]
-owners: ["@songmin"]
-labels: ["surface:core", "tier:1"]
+  env: [QUANTA_SUBAGENT, QUANTA_SUBAGENT_MAX_DEPTH]
+owners: ['@songmin']
+labels: [surface:core, tier:1]
 purpose: |
   서브에이전트 기본-OFF 게이트 + git worktree 격리 + 재귀 한도 (`_MAX_DEPTH`,
   default 3). CLI surface는 `QUANTA_SUBAGENT` 세트로 enable, `QUANTA_SUBAGENT_MAX_DEPTH`
@@ -29,12 +29,8 @@ evidence:
     - src/apps/cli/internal.ts
   adrs: []
   tests:
-    unit:
-      - tests/unit/subagent-runner.test.ts
-      - tests/unit/subagent-6-tools-hellgate.test.ts
-    integration:
-      - tests/integration/subagent-features-wiring.test.ts
-      - tests/integration/subagent-cleanup-e2e.test.ts
+    unit: [tests/unit/subagent-runner.test.ts, tests/unit/subagent-6-tools-hellgate.test.ts]
+    integration: [tests/integration/subagent-features-wiring.test.ts, tests/integration/subagent-cleanup-e2e.test.ts]
     contract: []
 knobs: [QUANTA_SUBAGENT, QUANTA_SUBAGENT_MAX_DEPTH]
 deliberate_hold: null

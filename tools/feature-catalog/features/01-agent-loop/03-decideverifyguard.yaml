@@ -13,7 +13,9 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: 순수정책 decideVerifyGuard
 evidence:
-  code: [src/agent/verify-guard.ts, src/agent/guards/verify-guard.ts]
+  code:
+    - src/agent/verify-guard.ts
+    - src/agent/guards/verify-guard.ts
   adrs: [13]
   tests:
     unit: [tests/unit/verify-guard.test.ts, tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]

@@ -4,13 +4,14 @@ section: 9
 subsystem: IPC byte shuttle — 4 transport implementations
 order: 35
 maturity: L2
+maturity: L3
 status: new
 ui_surfaces: [api]
 monitoring: partial
 modes: [n-a]
 configurable: planned
-owners: ["@songmin"]
-labels: ["surface:ipc"]
+owners: ['@songmin']
+labels: [surface:ipc]
 purpose: |
   Four `BridgeTransport` implementations behind one closed shape so the
   EventBridge stays transport-agnostic. (1) `in-memory` — test fixture
@@ -37,7 +38,7 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold:
-  reason: 'uds + websocket are skeleton-only (path resolver + adapter shape) pending follow-up wiring PR; in-memory + stdio are production.'
+  reason: uds + websocket are skeleton-only (path resolver + adapter shape) pending follow-up wiring PR; in-memory + stdio are production.
   promotion_path: 'uds: implement node:net listen/connect/accept + reuse stdio framing → integration test. websocket: pick ws lib (uWebSockets vs ws) → real server impl → integration test → L5.'
 notes: |
   Wire framing is the SAME line-delimited JSON across stdio + uds so multiplex

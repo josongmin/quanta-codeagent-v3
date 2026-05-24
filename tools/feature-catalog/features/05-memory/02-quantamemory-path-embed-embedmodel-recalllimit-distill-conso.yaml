@@ -11,8 +11,8 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_MEMORY]
-owners: ["@songmin", "team-memory"]
-labels: ["surface:core", "absorbed:codex"]
+owners: ['@songmin', team-memory]
+labels: [surface:core, absorbed:codex]
 depends_on: [memory-self-edit-tools, embedder-port]
 purpose: |
   메모리 서브시스템 surface knob 집합 `QUANTA_MEMORY_*` (PATH / EMBED /
@@ -32,6 +32,8 @@ evidence:
   tests:
     unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts"]
     integration: ["tests/integration/cli-export-assembly.test.ts", "tests/integration/session-ux-e2e.test.ts"]
+    unit: [tests/unit/cli-argv-prompt.test.ts, tests/unit/cli-resume-heuristic.test.ts, tests/unit/cli-summarizer.test.ts, tests/unit/env-knob-branches.test.ts]
+    integration: [tests/integration/cli-export-assembly.test.ts, tests/integration/session-ux-e2e.test.ts]
     contract: []
 knobs: [QUANTA_MEMORY]
 deliberate_hold: null

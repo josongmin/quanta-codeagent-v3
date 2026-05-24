@@ -9,8 +9,8 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin", "team-memory"]
-labels: ["surface:core", "absorbed:codex"]
+owners: ['@songmin', team-memory]
+labels: [surface:core, absorbed:codex]
 depends_on: [codex-2-phase-consolidator, consolidator-session-hook, memory-eviction-planner, memory-dedup-planner]
 purpose: |
   세션 종료 시 LLM distill (provider 미주입 / 호출 실패 시 휴리스틱 폴백),
@@ -27,6 +27,7 @@ evidence:
   adrs: [8]
   tests:
     unit: ["tests/unit/memory-consolidate.test.ts", "tests/unit/memory-consolidator-hook-hellgate.test.ts", "tests/unit/memory-distill-redaction-hellgate.test.ts", "tests/unit/memory-distill.test.ts", "tests/unit/memory-phase2-wire-hellgate.test.ts"]
+    unit: [tests/unit/memory-consolidate.test.ts, tests/unit/memory-consolidator-hook-hellgate.test.ts, tests/unit/memory-distill-redaction-hellgate.test.ts, tests/unit/memory-distill.test.ts, tests/unit/memory-phase2-wire-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

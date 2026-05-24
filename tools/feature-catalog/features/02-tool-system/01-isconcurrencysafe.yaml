@@ -3,16 +3,16 @@ title: isConcurrencySafe
 section: 2
 subsystem: 디스패치/배칭
 order: 1
-maturity: L5
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:cli]
 config_refs:
-  env: ["QUANTA_CAP_ENFORCE"]
+  env: [QUANTA_CAP_ENFORCE]
 purpose: per-input isConcurrencySafe 동시성 배칭
 evidence:
   code:

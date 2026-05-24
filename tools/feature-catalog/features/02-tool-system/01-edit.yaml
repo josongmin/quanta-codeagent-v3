@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [absorbed:codex, surface:cli]
 purpose: 'edit 도구 실패 시 Strategy hint: suffix 자동 추가 — nextStrategy: scripted_replace | read_then_patch | ambiguous, exit semantics 미변경.'
 evidence:
@@ -18,6 +18,7 @@ evidence:
   adrs: [19]
   tests:
     unit: ["tests/unit/edit-recovery-hellgate.test.ts", "tests/unit/edit-strategy-hint.test.ts"]
+    unit: [tests/unit/edit-recovery-hellgate.test.ts, tests/unit/edit-strategy-hint.test.ts]
     integration: []
     contract: []
 knobs: []

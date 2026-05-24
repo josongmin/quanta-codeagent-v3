@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [absorbed:codex, surface:cli]
 purpose: CR2 + FU3 exhaustiveness gate — 구조적 EditMismatchKind = "not-found" | "ambiguous" | "fuzzy-no-confident" 리터럴 union + Record<EditMismatchKind, NextStrategy> exhaustiveness 컴파일 게이트. out-of-process [edit-mismatch:<kind>] 마커로 producer/consumer간 통신 — substring sniff 제거.
 evidence:
@@ -19,6 +19,7 @@ evidence:
   adrs: [19]
   tests:
     unit: ["tests/unit/edit-recovery-hellgate.test.ts", "tests/unit/edit-strategy-hint.test.ts", "tests/unit/edit.test.ts"]
+    unit: [tests/unit/edit-recovery-hellgate.test.ts, tests/unit/edit-strategy-hint.test.ts, tests/unit/edit.test.ts]
     integration: []
     contract: []
 knobs: []

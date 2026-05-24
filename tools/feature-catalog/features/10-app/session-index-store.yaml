@@ -9,11 +9,11 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
-owners: ["@songmin"]
-labels: ["surface:cli"]
+owners: ['@songmin']
+labels: [surface:cli]
 depends_on: [quanta-session-subcommands]
 config_refs:
-  env: ["QUANTA_SESSIONS_DIR"]
+  env: [QUANTA_SESSIONS_DIR]
 purpose: |
   `index.jsonl` 는 세션의 lightweight 디렉토리 — 라인당 1 JSON SessionMeta(세션 id /
   생성 시각 / 라벨 등). 매 upsert 마다 전체 파일 재기록(per-writer tmp + atomic rename).
@@ -32,6 +32,8 @@ evidence:
   tests:
     unit: ["tests/unit/git-observability-wiring-hellgate.test.ts"]
     integration: ["tests/integration/git-observability-composite.test.ts"]
+    unit: [tests/unit/git-observability-wiring-hellgate.test.ts, tests/unit/next-action-cap-enforce.test.ts]
+    integration: [tests/integration/git-observability-composite.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

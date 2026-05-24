@@ -3,13 +3,13 @@ title: Prompt-rules per-mode pack registry + mode dispatch
 section: 1
 subsystem: 도구사용 규칙 팩 (run-mode SSOT)
 order: 215
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:core, tier:core]
 purpose: |
   6 verbatim CORE_RULES (R-ENV / R-STOP-ENV / R-SEARCH-FIRST / R-READ-FAILURE

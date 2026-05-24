@@ -11,8 +11,8 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_LOG_LEVEL]
-owners: ["@songmin"]
-labels: ["surface:core", "observability-primitive"]
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
 depends_on: [runtime-config-ssot]
 purpose: |
   JSON-per-line logger for machine-consumable observability — distinct from
@@ -34,10 +34,10 @@ evidence:
   adrs: []
   tests:
     unit: ["tests/unit/cost-dashboard.test.ts"]
+    unit: [tests/unit/cost-dashboard.test.ts, tests/unit/next-action-cap-enforce.test.ts]
     integration: []
     contract: []
-knobs:
-  - QUANTA_LOG_LEVEL
+knobs: [QUANTA_LOG_LEVEL]
 deliberate_hold: null
 notes: |
   Two-logger architecture is deliberate: the shared one emits a tiny

@@ -3,13 +3,13 @@ title: HARD_DENY 선행 / readonly short-circuit
 section: 3
 subsystem: Auto-mode LLM 분류기
 order: 2
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: static
-owners: ["@songmin", "team-safety"]
+owners: ['@songmin', team-safety]
 labels: [surface:cli, security-touched]
 purpose: HARD_DENY 선행 / readonly short-circuit
 evidence:

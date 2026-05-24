@@ -9,13 +9,13 @@ ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:cli]
 purpose: 45 tests
 evidence:
   code:
     - src/tool/git/index.ts
-  adrs: []
+  adrs: [25]
   tests:
     unit: [tests/unit/git-tools.test.ts, tests/unit/git-tools-hellgate.test.ts]
     integration: []

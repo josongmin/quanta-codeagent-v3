@@ -3,7 +3,7 @@ title: AgentRecorder
 section: 8
 subsystem: 메트릭
 order: 1
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
@@ -11,8 +11,8 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_METRICS]
-owners: ["@songmin"]
-labels: ["surface:core", "observability-primitive"]
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
 purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
 evidence:
   code:

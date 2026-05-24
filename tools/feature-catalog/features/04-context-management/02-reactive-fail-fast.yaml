@@ -3,17 +3,21 @@ title: reactive fail-fast
 section: 4
 subsystem: 압축(LLM 요약)
 order: 2
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:core]
 purpose: reactive fail-fast
 evidence:
-  code: [src/agent/compaction.ts, src/agent/compaction-breaker.ts, src/agent/loop.ts, src/runner/assemble/compaction.ts]
+  code:
+    - src/agent/compaction.ts
+    - src/agent/compaction-breaker.ts
+    - src/agent/loop.ts
+    - src/runner/assemble/compaction.ts
   adrs: []
   tests:
     unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts, tests/unit/compaction-precompact.test.ts]

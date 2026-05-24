@@ -15,7 +15,10 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: / (기본 OFF)
 evidence:
-  code: [src/apps/cli/internal.ts, src/runner/assemble/verify.ts, src/agent/verify-guard.ts]
+  code:
+    - src/apps/cli/internal.ts
+    - src/runner/assemble/verify.ts
+    - src/agent/verify-guard.ts
   adrs: [13]
   tests:
     unit: [tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]

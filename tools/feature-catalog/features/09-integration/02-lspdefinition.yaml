@@ -11,8 +11,8 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_LSP_TOOLS]
-owners: ["@songmin"]
-labels: ["surface:ipc"]
+owners: ['@songmin']
+labels: [surface:ipc]
 purpose: 8 도구 lsp_definition/_references/_hover/_type_definition/_implementation/_document_symbol/_workspace_symbol/_rename_preview — 1-based human coords, nullLspNavProvider 기본, structural mirror 타입으로 slice 격리
 evidence:
   code:
@@ -20,7 +20,7 @@ evidence:
     - src/tool/lsp_nav/types.ts
     - src/lsp/index.ts
     - src/apps/cli/internal.ts
-  adrs: []
+  adrs: [24]
   tests:
     unit: [tests/unit/lsp-nav-tools.test.ts, tests/unit/lsp-nav-definition.test.js, tests/unit/lsp-nav-references.test.js, tests/unit/lsp-nav-rename-preview.test.ts]
     integration: []

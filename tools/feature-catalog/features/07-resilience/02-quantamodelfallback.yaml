@@ -3,7 +3,7 @@ title: QUANTA_MODEL_FALLBACK
 section: 7
 subsystem: 모델 Fallback (Tier 0)
 order: 2
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -11,8 +11,8 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_MODEL_FALLBACK]
-owners: ["@songmin"]
-labels: ["surface:core", "resilience-primitive"]
+owners: ['@songmin']
+labels: [surface:core, resilience-primitive]
 purpose: ', retry-inner/fallback-outer'
 evidence:
   code:

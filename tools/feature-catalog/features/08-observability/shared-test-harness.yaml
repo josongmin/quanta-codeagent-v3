@@ -9,8 +9,8 @@ ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: static
-owners: ["@songmin"]
-labels: ["surface:core", "observability-primitive"]
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
 purpose: |
   `tests/integration/_harness.ts` 는 100+ 테스트 파일이 공유하는 단일-출처
   테스트 더블 묶음이다. `tests/unit/_harness.ts` 는 한 줄 re-export 로
@@ -42,8 +42,8 @@ evidence:
     - tests/unit/_harness.ts
   adrs: [3]
   tests:
-    unit: []
-    integration: []
+    unit: [tests/unit/_harness.ts]
+    integration: [tests/integration/abort-mid-recovery-hell-e2e.test.ts, tests/integration/agent-features.test.ts, tests/integration/agent-loop.test.ts, tests/integration/agent-metrics-e2e.test.ts, tests/integration/agents-md-scope-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

@@ -13,7 +13,11 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 purpose: TurnContextInput.{mode, repoRules, workingState, activeSkills} 모두 optional — 미설정 ⇒ 해당 reminder 블록 미렌더.
 evidence:
-  code: [src/agent/turn-context.ts, src/agent/types.ts, src/agent/prompt-sections.ts, src/agent/prompt.ts]
+  code:
+    - src/agent/turn-context.ts
+    - src/agent/types.ts
+    - src/agent/prompt-sections.ts
+    - src/agent/prompt.ts
   adrs: [15]
   tests:
     unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/agent/prompt-sections.test.ts]

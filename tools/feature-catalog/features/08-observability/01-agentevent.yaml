@@ -3,14 +3,14 @@ title: AgentEvent
 section: 8
 subsystem: 이벤트/Trajectory (RFC-0002)
 order: 1
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin"]
-labels: ["surface:core", "observability-primitive"]
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
 depends_on: [work-metrics]
 purpose: |
   `AgentEvent` discriminated union — the surface-facing event stream the agent loop

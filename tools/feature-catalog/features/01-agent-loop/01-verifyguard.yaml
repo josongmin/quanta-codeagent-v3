@@ -15,7 +15,12 @@ config_refs:
   env: ["QUANTA_VERIFY_GUARD", "QUANTA_VERIFY_GUARD_MAX_TRIPS"]
 purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.
 evidence:
-  code: [src/agent/verify-guard.ts, src/agent/guards/verify-guard.ts, src/apps/bench/eval/driver.ts, src/apps/cli/internal.ts, src/runner/assemble/verify.ts]
+  code:
+    - src/agent/verify-guard.ts
+    - src/agent/guards/verify-guard.ts
+    - src/apps/bench/eval/driver.ts
+    - src/apps/cli/internal.ts
+    - src/runner/assemble/verify.ts
   adrs: [13]
   tests:
     unit: [tests/unit/verify-guard.test.ts, tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]

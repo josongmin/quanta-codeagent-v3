@@ -3,16 +3,16 @@ title: QUANTA_SKILLS_DIR
 section: 6
 subsystem: 스킬 — `Skill` 도구
 order: 1
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_SKILLS_DIR"]
-owners: ["@songmin"]
-labels: ["surface:core", "tier:1"]
+  env: [QUANTA_SKILLS_DIR]
+owners: ['@songmin']
+labels: [surface:core, tier:1]
 purpose: |
   frontmatter 발견 → 본문 컨텍스트 주입. CLI surface는 `QUANTA_SKILLS_DIR`
   세트 시 `buildSkillsConfigCore` → `buildSkillBlock` → `discoverSkills` 흐름으로
@@ -32,13 +32,8 @@ evidence:
     - src/apps/cli/internal.ts
   adrs: []
   tests:
-    unit:
-      - tests/unit/skill.test.ts
-      - tests/unit/skill-frontmatter-parse.test.ts
-      - tests/unit/skill-discover-errors.test.ts
-      - tests/unit/skill-discover-size-cap.test.ts
-    integration:
-      - tests/integration/skill-paths-activation-e2e.test.ts
+    unit: [tests/unit/skill.test.ts, tests/unit/skill-frontmatter-parse.test.ts, tests/unit/skill-discover-errors.test.ts, tests/unit/skill-discover-size-cap.test.ts]
+    integration: [tests/integration/skill-paths-activation-e2e.test.ts]
     contract: []
 knobs: [QUANTA_SKILLS_DIR]
 deliberate_hold: null

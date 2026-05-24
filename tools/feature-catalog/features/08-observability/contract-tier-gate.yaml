@@ -4,13 +4,14 @@ section: 8
 subsystem: 4-tier 테스트 (unit · integration · contract · smoke) — RFC §10.3 / ADR-0003
 order: 80
 maturity: L2
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin"]
-labels: ["surface:core", "observability-primitive"]
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
 purpose: |
   Contract-tier 테스트는 실제 외부 프로세스(Docker daemon, typescript-/pyright-
   language-server)와 통신하므로 환경 가용성이 다르다. `tests/contract/_guard.ts`
@@ -31,9 +32,8 @@ evidence:
   tests:
     unit: []
     integration: []
-    contract: []
-knobs:
-  - REQUIRE_CONTRACT
+    contract: [tests/contract/sandbox-docker.test.ts, tests/contract/lsp-typescript.test.ts, tests/contract/lsp-pyright.test.ts]
+knobs: [REQUIRE_CONTRACT]
 deliberate_hold: null
 notes: |
   Probe pattern: 각 contract 파일은 모듈 로드 시 한 번만 `--version`

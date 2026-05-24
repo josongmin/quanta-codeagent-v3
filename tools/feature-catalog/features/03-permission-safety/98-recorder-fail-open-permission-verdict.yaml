@@ -4,12 +4,13 @@ section: 3
 subsystem: Permission slice telemetry — "observability bugs MUST NOT abort a permission decision"
 order: 98
 maturity: L2
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 modes: [n-a]
 configurable: static
-owners: ["@songmin", "team-safety"]
+owners: ['@songmin', team-safety]
 labels: [absorbed:codex, surface:cli, security-touched, held-promotion]
 purpose: |
   Negative invariant: a thrown PermissionRecorder cannot deny an otherwise-
@@ -34,8 +35,8 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold:
-  reason: 'No knob inverts this — the swallow is structural. A "loud emit" mode would couple verdict to telemetry health, defeating the invariant.'
-  promotion_path: 'N/A — invariant is the goal state.'
+  reason: No knob inverts this — the swallow is structural. A "loud emit" mode would couple verdict to telemetry health, defeating the invariant.
+  promotion_path: N/A — invariant is the goal state.
 notes: |
   Mirrors the same fail-open posture documented for `@/observability/spans.ts`.
   Slice rule: this module imports NOTHING beyond TypeScript built-ins (RFC 3.1

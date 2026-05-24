@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: static
-owners: ["@songmin", "team-safety"]
+owners: ['@songmin', team-safety]
 labels: [surface:cli, security-touched]
 purpose: LocalSandbox
 evidence:
@@ -21,6 +21,9 @@ evidence:
     unit: ["tests/unit/cli-session-commands.test.ts", "tests/unit/cli/os-sandbox-default-byte-identical-hellgate.test.ts", "tests/unit/cli/os-sandbox-wire-hellgate.test.ts", "tests/unit/runtime/guarded-spawn.test.ts", "tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts", "tests/unit/sandbox-buildargv.test.ts", "tests/unit/sandbox.test.ts", "tests/unit/session-security-regression.test.ts", "tests/unit/shell-disclaim.test.ts", "tests/unit/shell.test.ts", "tests/unit/tool/shell-exec-events-abort.test.ts", "tests/unit/tool/shell-exec-events-byte-identical.test.ts", "tests/unit/tool/shell-exec-events-stderr.test.ts", "tests/unit/tool/shell-exec-events.test.ts"]
     integration: ["tests/integration/docker-sandbox-e2e.test.ts", "tests/integration/docker-sandbox-runagent-e2e.test.ts", "tests/integration/session-chaos-and-attack.test.ts", "tests/integration/session-cli-subprocess.test.ts", "tests/integration/session-stress-and-concurrent.test.ts", "tests/integration/session-ux-e2e.test.ts"]
     contract: ["tests/contract/sandbox-docker.test.ts"]
+    unit: [tests/unit/shell-disclaim.test.ts]
+    integration: []
+    contract: []
 knobs: []
 deliberate_hold: null
 notes: ''

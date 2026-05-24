@@ -3,7 +3,7 @@ title: CompactionBreaker
 section: 4
 subsystem: 압축 circuit-breaker (Tier 0)
 order: 1
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
@@ -11,11 +11,16 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_COMPACT_BREAKER, QUANTA_COMPACT_BREAKER_REACTIVE_MAX, QUANTA_COMPACT_BREAKER_PROACTIVE_MAX]
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:core]
 purpose: CompactionBreaker 4-사이트, thrash abort [_*]
 evidence:
-  code: [src/agent/compaction-breaker.ts, src/agent/compaction.ts, src/agent/loop.ts, src/runner/assemble/compaction.ts, src/apps/cli/internal.ts]
+  code:
+    - src/agent/compaction-breaker.ts
+    - src/agent/compaction.ts
+    - src/agent/loop.ts
+    - src/runner/assemble/compaction.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]

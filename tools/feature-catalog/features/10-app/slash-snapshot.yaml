@@ -9,8 +9,8 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]
 configurable: static
-owners: ["@songmin"]
-labels: ["surface:cli"]
+owners: ['@songmin']
+labels: [surface:cli]
 purpose: |
   CLI surface over the `ShadowOdb` port + the three `shadow_*` tools
   (ADR-0122, Hermes Agent `/rollback` parity). Lets the operator browse,
@@ -18,13 +18,13 @@ purpose: |
   the model. Sub-commands:
     - `/snapshot`                — list snapshots newest-first (numbered,
                                    sha + ISO timestamp) via `listSnapshots`.
-    - `/snapshot <N>`            — rewind to snapshot #N (1-based ordinal).
+    - `/snapshot <N>`            — rewind to snapshot
                                    Routes through the `shadow_rewind` tool
                                    body which is HITL `always-confirm` — the
                                    surface shows a confirmation line; re-run
                                    with `--yes` to commit (mirrors `/rewind`
                                    confirmation protocol).
-    - `/snapshot <N> <file>`     — restore ONLY `<file>` from snapshot #N
+    - `/snapshot <N> <file>`     — restore ONLY `<file>` from snapshot
                                    via `shadow_restore_partial`.
   Pure surface — never calls a snapshot APIs directly except through the
   tool body (so HITL gating + audit trail are unified with model-driven
@@ -35,6 +35,7 @@ evidence:
   adrs: [122]
   tests:
     unit: ["tests/unit/cli-rewind-slash-hellgate.test.ts"]
+    unit: [tests/unit/cli-rewind-slash-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

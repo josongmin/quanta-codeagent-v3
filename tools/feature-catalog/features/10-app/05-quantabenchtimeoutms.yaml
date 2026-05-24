@@ -4,6 +4,7 @@ section: 10
 subsystem: 벤치
 order: 5
 maturity: L2
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -11,8 +12,8 @@ modes: [headless, batch]
 configurable: integrated
 config_refs:
   env: [QUANTA_BENCH_TIMEOUT_MS]
-owners: ["@songmin"]
-labels: ["surface:bench"]
+owners: ['@songmin']
+labels: [surface:bench]
 purpose: 'Bench 실행 노브: —'
 evidence:
   code:
@@ -20,7 +21,7 @@ evidence:
     - src/shared/runtime-config.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/next-action-cap-enforce.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_BENCH_TIMEOUT_MS]

@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:cli]
 config_refs:
   env: []
@@ -21,12 +21,9 @@ evidence:
     - src/agent/dispatch-types.ts
     - src/agent/confirm-decision.ts
     - src/agent/hitl-tier-registry.ts
-  adrs: []
+  adrs: [26]
   tests:
-    unit:
-      - tests/unit/hitl-tier-dispatch.test.ts
-      - tests/unit/admissibility-gate.test.ts
-      - tests/unit/admissibility-hellgate.test.ts
+    unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts, tests/unit/admissibility-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

@@ -9,8 +9,8 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin", "team-memory"]
-labels: ["surface:core"]
+owners: ['@songmin', team-memory]
+labels: [surface:core]
 purpose: 동적 reminder의 memory recall 블록에 "routing hints only — not proof" 라벨 prefix — L3/L4 회상의 인식론적 지위 명시
 evidence:
   code:
@@ -19,6 +19,7 @@ evidence:
   adrs: [21]
   tests:
     unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/agent/untrusted-embed.test.ts", "tests/unit/hook-paired-rpc-integration.test.ts", "tests/unit/memory.test.ts", "tests/unit/prompt-escape-hellgate.test.ts", "tests/unit/prompt-escape.test.ts", "tests/unit/prompt-rules-snapshot.test.ts"]
+    unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/agent/untrusted-embed.test.ts, tests/unit/hook-paired-rpc-integration.test.ts, tests/unit/memory.test.ts, tests/unit/prompt-escape-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

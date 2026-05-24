@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
-telemetry_keys: ["quanta.hitl"]
+telemetry_keys: [quanta.hitl]
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:cli, tier:1]
 config_refs:
   env: []
@@ -19,7 +19,7 @@ evidence:
   code:
     - src/permission/policy.ts
     - src/agent/admissibility-gate.ts
-  adrs: []
+  adrs: [27]
   tests:
     unit: [tests/unit/admissibility-gate.test.ts]
     integration: [tests/integration/policy-injection.test.ts, tests/integration/reminder-injection-through-loop-hell-e2e.test.ts]

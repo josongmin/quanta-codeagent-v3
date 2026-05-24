@@ -11,8 +11,8 @@ modes: [headless, batch]
 configurable: integrated
 config_refs:
   env: [QUANTA_SWEBENCH_PYTHON_BIN]
-owners: ["@songmin"]
-labels: ["surface:bench"]
+owners: ['@songmin']
+labels: [surface:bench]
 depends_on: [bench-python-swebench]
 purpose: |
   Thin shell shim that satisfies the bench harness's
@@ -33,9 +33,10 @@ evidence:
   tests:
     unit: []
     integration: ["tests/integration/bench-eval.test.ts", "tests/integration/bench-python-harness-e2e.test.ts"]
+    unit: [tests/unit/next-action-cap-enforce.test.ts]
+    integration: [tests/integration/bench-eval.test.ts, tests/integration/bench-python-harness-e2e.test.ts]
     contract: []
-knobs:
-  - QUANTA_SWEBENCH_PYTHON_BIN
+knobs: [QUANTA_SWEBENCH_PYTHON_BIN]
 deliberate_hold: null
 notes: |
   Why a shell shim instead of inline `uvx` spawn: keeps the harness

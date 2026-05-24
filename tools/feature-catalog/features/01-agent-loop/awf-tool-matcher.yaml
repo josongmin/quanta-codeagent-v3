@@ -13,7 +13,10 @@ owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core, tier:1]
 purpose: 'HookBus.on(type, handler, options?: { matcher? }) — Claude Desktop 1.7196.3의 AWF_GUARDED_TOOLS_MATCHER (FS 7 tools) + Task matcher 2-channel 패턴. ToolMatcher = string | string[] | RegExp | (name) => boolean. matcher 없으면 모든 도구 (legacy parity). pre_tool_use/post_tool_use 만 적용; 기타 이벤트는 matcher 무시. FS_TOOLS_MATCHER / AGENT_TOOLS_MATCHER constant 제공.'
 evidence:
-  code: [src/agent/tool-matchers.ts, src/agent/hooks.ts, src/agent/dispatch.ts]
+  code:
+    - src/agent/tool-matchers.ts
+    - src/agent/hooks.ts
+    - src/agent/dispatch.ts
   adrs: [55]
   tests:
     unit: [tests/unit/tool-matchers.test.ts, tests/unit/hooks.test.ts, tests/unit/hooks-matcher.test.ts, tests/unit/hooks-new-events-hellgate.test.ts]

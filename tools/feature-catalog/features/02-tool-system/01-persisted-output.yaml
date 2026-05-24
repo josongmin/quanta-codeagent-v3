@@ -3,16 +3,16 @@ title: <persisted-output>
 section: 2
 subsystem: 결과 cap + disk-spill (Tier 0)
 order: 1
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:cli]
 config_refs:
-  env: ["QUANTA_TOOL_OUTPUT_MAX", "QUANTA_TOOL_OUTPUT_SPILL_KEEP"]
+  env: [QUANTA_TOOL_OUTPUT_MAX, QUANTA_TOOL_OUTPUT_SPILL_KEEP]
 purpose: <persisted-output> 스필 + GC
 evidence:
   code:

@@ -9,8 +9,8 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin", "team-memory"]
-labels: ["surface:core"]
+owners: ['@songmin', team-memory]
+labels: [surface:core]
 purpose: self-edit memory_search/write/update, lexical graceful degrade
 evidence:
   code:
@@ -19,6 +19,7 @@ evidence:
   adrs: [8]
   tests:
     unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/memory-tools.test.ts", "tests/unit/memory.test.ts"]
+    unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/memory-tools.test.ts, tests/unit/memory.test.ts]
     integration: []
     contract: []
 knobs: []

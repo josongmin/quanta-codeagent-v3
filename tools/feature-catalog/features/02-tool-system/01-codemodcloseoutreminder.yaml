@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [absorbed:codex, surface:cli]
 purpose: CODE_MOD_CLOSEOUT_REMINDER + isCodeModificationSession(history) 감지. closeout-guard에서 단발 주입, 모듈 순수성 보존
 evidence:
@@ -20,6 +20,8 @@ evidence:
   tests:
     unit: ["tests/unit/agent/guard-chain.test.ts", "tests/unit/closeout-guard.test.ts", "tests/unit/code-mod-closeout.test.ts"]
     integration: ["tests/integration/sota-codex-full.test.ts"]
+    unit: [tests/unit/agent/guard-chain.test.ts, tests/unit/closeout-guard.test.ts, tests/unit/code-mod-closeout.test.ts]
+    integration: [tests/integration/sota-codex-full.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

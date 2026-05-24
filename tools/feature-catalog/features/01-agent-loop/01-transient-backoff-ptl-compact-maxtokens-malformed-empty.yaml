@@ -3,17 +3,17 @@ title: transient backoff / PTL→compact / max_tokens / malformed / empty
 section: 1
 subsystem: Same-turn 복구
 order: 1
-maturity: L5
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
-telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
+telemetry_keys: [gen_ai.response.time_to_first_token_ms, quanta.conversation.id]
 modes: [n-a]
 configurable: static
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:core, tier:core]
 config_refs:
-  env: ["QUANTA_CAP_ENFORCE"]
+  env: [QUANTA_CAP_ENFORCE]
 purpose: transient backoff / PTL→compact / max_tokens / malformed / empty
 evidence:
   code:

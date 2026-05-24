@@ -3,17 +3,20 @@ title: 강화 "Trust and inputs"
 section: 4
 subsystem: 시스템 프롬프트+캐시 prefix
 order: 2
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
-owners: ["@songmin"]
+owners: ['@songmin']
 labels: [surface:core]
 purpose: 강화 "Trust and inputs"
 evidence:
-  code: [src/agent/prompt.ts, src/agent/untrusted.ts, src/agent/prompt-sections.ts]
+  code:
+    - src/agent/prompt.ts
+    - src/agent/untrusted.ts
+    - src/agent/prompt-sections.ts
   adrs: []
   tests:
     unit: [tests/unit/prompt-system.test.ts, tests/unit/agent/untrusted-embed.test.ts, tests/unit/prompt-rules-snapshot.test.ts]
