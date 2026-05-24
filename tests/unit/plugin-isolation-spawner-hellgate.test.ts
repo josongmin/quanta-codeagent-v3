@@ -73,9 +73,9 @@ describe("ADR-0162 spawner hellgate — A. Validation", () => {
   const spawner = createBunSpawner()
 
   test("rejects unicode in serviceName", async () => {
-    await expect(
-      spawner.spawn({ entry: BUN, serviceName: "héllo" }),
-    ).rejects.toBeInstanceOf(IsolatedSpawnError)
+    await expect(spawner.spawn({ entry: BUN, serviceName: "héllo" })).rejects.toBeInstanceOf(
+      IsolatedSpawnError,
+    )
   })
 
   test("rejects empty entry", async () => {
@@ -91,9 +91,9 @@ describe("ADR-0162 spawner hellgate — A. Validation", () => {
 
   test("rejects too-long serviceName", async () => {
     const longName = "a".repeat(65)
-    await expect(
-      spawner.spawn({ entry: BUN, serviceName: longName }),
-    ).rejects.toBeInstanceOf(IsolatedSpawnError)
+    await expect(spawner.spawn({ entry: BUN, serviceName: longName })).rejects.toBeInstanceOf(
+      IsolatedSpawnError,
+    )
   })
 
   test("rejects when entry does not exist", async () => {

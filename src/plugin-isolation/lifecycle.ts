@@ -58,20 +58,11 @@ export const DEFAULT_LIFECYCLE_POLICY: LifecyclePolicy = {
   heartbeatMissThreshold: 2,
 }
 
-export type LifecycleState =
-  | "starting"
-  | "running"
-  | "restarting"
-  | "dead"
-  | "stopped"
-  | "idle"
+export type LifecycleState = "starting" | "running" | "restarting" | "dead" | "stopped" | "idle"
 
 export class LifecycleError extends QuantaError {
   readonly kind: "exceeded-restart-budget" | "stopped" | "spawn-failed"
-  constructor(
-    kind: "exceeded-restart-budget" | "stopped" | "spawn-failed",
-    message: string,
-  ) {
+  constructor(kind: "exceeded-restart-budget" | "stopped" | "spawn-failed", message: string) {
     super("plugin-lifecycle", message)
     this.kind = kind
   }

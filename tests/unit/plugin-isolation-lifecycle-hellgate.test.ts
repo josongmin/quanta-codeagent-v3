@@ -24,7 +24,11 @@ import type {
   LifecycleOpts,
   SpawnOpts,
 } from "@/plugin-isolation"
-import { HEARTBEAT_PONG_METHOD, LifecycleError, PluginLifecycleManager } from "@/plugin-isolation"
+import {
+  HEARTBEAT_PONG_METHOD,
+  type LifecycleError,
+  PluginLifecycleManager,
+} from "@/plugin-isolation"
 
 interface StubProcessControl {
   readonly process: IsolatedProcess
@@ -114,9 +118,14 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 describe("ADR-0162 PluginLifecycleManager — A. Restart budget", () => {
   test("happy restart within budget transitions back to running", async () => {
     const s = makeStubSpawner()
-    let now = 1000
+    const now = 1000
     const opts: LifecycleOpts = {
-      policy: { maxRestarts: 3, restartWindowMs: 60_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 3,
+        restartWindowMs: 60_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
       clock: () => now,
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
@@ -133,9 +142,14 @@ describe("ADR-0162 PluginLifecycleManager — A. Restart budget", () => {
 
   test("budget exceeded → state=dead, no further restart", async () => {
     const s = makeStubSpawner()
-    let now = 1000
+    const now = 1000
     const opts: LifecycleOpts = {
-      policy: { maxRestarts: 2, restartWindowMs: 60_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 2,
+        restartWindowMs: 60_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
       clock: () => now,
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
@@ -158,7 +172,12 @@ describe("ADR-0162 PluginLifecycleManager — A. Restart budget", () => {
     const s = makeStubSpawner()
     let now = 1000
     const opts: LifecycleOpts = {
-      policy: { maxRestarts: 1, restartWindowMs: 1_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 1,
+        restartWindowMs: 1_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
       clock: () => now,
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
@@ -181,7 +200,12 @@ describe("ADR-0162 PluginLifecycleManager — A. Restart budget", () => {
   test("stop() after dead is safe + idempotent", async () => {
     const s = makeStubSpawner()
     const opts: LifecycleOpts = {
-      policy: { maxRestarts: 1, restartWindowMs: 60_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 1,
+        restartWindowMs: 60_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
     await lc.start()
@@ -297,7 +321,12 @@ describe("ADR-0162 PluginLifecycleManager — C. stop()", () => {
   test("stop() during running awaits child reaping + transitions to stopped", async () => {
     const s = makeStubSpawner()
     const opts: LifecycleOpts = {
-      policy: { maxRestarts: 3, restartWindowMs: 60_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 3,
+        restartWindowMs: 60_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
     await lc.start()
@@ -308,7 +337,12 @@ describe("ADR-0162 PluginLifecycleManager — C. stop()", () => {
   test("stop() during restarting prevents the next spawn from becoming active", async () => {
     const s = makeStubSpawner()
     const opts: LifecycleOpts = {
-      policy: { maxRestarts: 3, restartWindowMs: 60_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 3,
+        restartWindowMs: 60_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
     await lc.start()
@@ -325,7 +359,12 @@ describe("ADR-0162 PluginLifecycleManager — C. stop()", () => {
   test("stop() is idempotent + start() after stop rejects", async () => {
     const s = makeStubSpawner()
     const opts: LifecycleOpts = {
-      policy: { maxRestarts: 3, restartWindowMs: 60_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 3,
+        restartWindowMs: 60_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
     await lc.start()
@@ -346,7 +385,12 @@ describe("ADR-0162 PluginLifecycleManager — D. Initial spawn failure", () => {
     const s = makeStubSpawner()
     s.failNext(new Error("spawn-boom"))
     const lc = new PluginLifecycleManager(s.port, noopFactory, {
-      policy: { maxRestarts: 3, restartWindowMs: 60_000, heartbeatIntervalMs: 0, heartbeatMissThreshold: 2 },
+      policy: {
+        maxRestarts: 3,
+        restartWindowMs: 60_000,
+        heartbeatIntervalMs: 0,
+        heartbeatMissThreshold: 2,
+      },
     })
     let caught: LifecycleError | null = null
     try {

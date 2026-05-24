@@ -21,7 +21,7 @@
 
 import { describe, expect, test } from "bun:test"
 import type { IsolatedProcess } from "@/plugin-isolation"
-import { DEFAULT_CALL_TIMEOUT_MS, PluginHost, PluginHostError } from "@/plugin-isolation"
+import { DEFAULT_CALL_TIMEOUT_MS, PluginHost, type PluginHostError } from "@/plugin-isolation"
 
 interface FakeProcessControl {
   readonly process: IsolatedProcess

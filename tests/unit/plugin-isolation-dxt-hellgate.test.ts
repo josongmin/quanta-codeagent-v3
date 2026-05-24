@@ -19,12 +19,8 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type {
-  IsolatedProcess,
-  IsolatedProcessSpawnerPort,
-  SpawnOpts,
-} from "@/plugin-isolation"
-import { DxtError, launchDxt, MAX_DXT_MANIFEST_BYTES, validateDxt } from "@/plugin-isolation"
+import type { IsolatedProcess, IsolatedProcessSpawnerPort, SpawnOpts } from "@/plugin-isolation"
+import { type DxtError, launchDxt, MAX_DXT_MANIFEST_BYTES, validateDxt } from "@/plugin-isolation"
 
 const tmp = async (): Promise<{ dir: string; cleanup: () => Promise<void> }> => {
   const dir = await mkdtemp(join(tmpdir(), "dxt-hellgate-"))
@@ -126,11 +122,7 @@ describe("ADR-0162 DXT hellgate — A. validateDxt input errors", () => {
     const t = await tmp()
     try {
       const path = join(t.dir, "extra.json")
-      await writeFile(
-        path,
-        JSON.stringify({ ...validManifest(), surprise: "field" }),
-        "utf8",
-      )
+      await writeFile(path, JSON.stringify({ ...validManifest(), surprise: "field" }), "utf8")
       let caught: DxtError | null = null
       try {
         await validateDxt(path)
@@ -170,11 +162,7 @@ describe("ADR-0162 DXT hellgate — B. Entry resolution", () => {
     const t = await tmp()
     try {
       const path = join(t.dir, "manifest.json")
-      await writeFile(
-        path,
-        JSON.stringify({ ...validManifest(), entry: "../etc/passwd" }),
-        "utf8",
-      )
+      await writeFile(path, JSON.stringify({ ...validManifest(), entry: "../etc/passwd" }), "utf8")
       let caught: DxtError | null = null
       try {
         await launchDxt(path, stubSpawner().port)
@@ -191,11 +179,7 @@ describe("ADR-0162 DXT hellgate — B. Entry resolution", () => {
     const t = await tmp()
     try {
       const path = join(t.dir, "manifest.json")
-      await writeFile(
-        path,
-        JSON.stringify({ ...validManifest(), entry: "/bin/echo" }),
-        "utf8",
-      )
+      await writeFile(path, JSON.stringify({ ...validManifest(), entry: "/bin/echo" }), "utf8")
       let caught: DxtError | null = null
       try {
         await launchDxt(path, stubSpawner().port)
@@ -306,11 +290,7 @@ describe("ADR-0162 DXT hellgate — D. Field bounds", () => {
     const t = await tmp()
     try {
       const path = join(t.dir, "manifest.json")
-      await writeFile(
-        path,
-        JSON.stringify({ ...validManifest(), serviceName: "héllo" }),
-        "utf8",
-      )
+      await writeFile(path, JSON.stringify({ ...validManifest(), serviceName: "héllo" }), "utf8")
       let caught: DxtError | null = null
       try {
         await validateDxt(path)
