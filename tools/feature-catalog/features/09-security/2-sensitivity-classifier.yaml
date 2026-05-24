@@ -1,0 +1,33 @@
+id: sensitivity-classifier
+title: sensitivity classifier — Layer 1 of secret-redaction (ADR-0078)
+section: 9
+subsystem: 보안 — source-class 분류 (Layer 1, ADR-0078)
+order: 2
+maturity: L4
+status: stable
+purpose: |
+  Layer 1 of the content-plane secret-redaction invariant. Maps a file path
+  OR a shell-command shape to a closed-enum `SensitivityClass`
+  (`public` / `internal` / `secret`). NEITHER layer is heuristic — paths
+  match against an EXPLICIT list of dotfiles / config locations; commands
+  match on the FIRST TOKEN + a structural arg shape (no fuzzy keyword
+  search of the whole command line). `"secret"` is the strongest signal:
+  the redaction layer replaces the entire tool output with a single
+  `[REDACTED:source_class_secret]` placeholder BEFORE running format-regex
+  matching. This is structural — these paths and commands can ONLY produce
+  secrets — so the raw bytes never touch the model context, the JSONL
+  envelope, or the memory distill input. Path normalization expands `~`
+  against the supplied home and uses a single-pass canonical form (callers
+  pass absolute paths).
+evidence:
+  code:
+    - src/security/sensitivity-classifier.ts
+  adrs: [78]
+  tests:
+    unit: []
+    integration:
+      - tests/integration/redaction-three-application-points.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'SECURITY: this entry references the classifier shape only. Specific path / token lists are NOT mirrored here (they live in the source slice; duplicating in catalog yamls would create a parallel SoT that can drift).'

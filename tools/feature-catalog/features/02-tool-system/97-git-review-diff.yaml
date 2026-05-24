@@ -1,0 +1,32 @@
+id: git-review-diff
+title: git_review_diff — isolated reviewer-subagent over base...head diff
+section: 2
+subsystem: 도구 — git review (Claude Desktop reviewDiff 흡수, ADR-0111)
+order: 97
+maturity: L4
+status: new
+purpose: |
+  Extracts `git diff base...head` (default `origin/main...HEAD`) and hands it
+  to an ISOLATED sub-agent reviewer (depth+1, read-only tool registry filtered
+  to `{read, grep, glob}`, REVIEW-mode seed prompt). The main session's
+  conversation history is NOT mutated — the reviewer's findings come back as
+  a single tool result so the loop's context window is unaffected. Posture:
+  READ-ONLY, CONCURRENCY-SAFE, hitlTier "none". Slice isolation — the
+  sub-agent runner is INJECTED via `ToolContext.reviewerAgent` (duck-typed
+  mirror of `SubagentRunner` from `@/subagent`); `@/tool/git` never imports
+  `@/subagent`. Absent reviewer port ⇒ deterministic `ok:false` (no throw,
+  no crash). Diff is truncated at 50 KB with a clear marker to keep the
+  reviewer useful inside a single context window.
+evidence:
+  code:
+    - src/tool/git/review-diff.ts
+  adrs: [111]
+  tests:
+    unit:
+      - tests/unit/tool/git-review-diff.test.ts
+    integration:
+      - tests/integration/git-review-diff-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'REVIEW_NOTICE is a slice-isolated copy of the `@/agent/prompt` REVIEW_NOTICE constant (same wording, slice rule prohibits cross-import).'

@@ -1,0 +1,42 @@
+id: trust-scope-store-persistent
+title: trust-scope persistent grant store — cascade + TTL (L3→L4 promotion)
+section: 3
+subsystem: 권한 영속화 — trust-scope (Claude Desktop 흡수)
+order: 94
+maturity: L4
+status: stable
+purpose: |
+  L3→L4 promotion of `trust-scope-wire-up`. File-backed persistent grant
+  store consulted by the admissibility gate to short-circuit the legacy
+  ask-flow when a previously-approved structurally-equivalent action is
+  repeated within the grant's scope. The file lives under `~/.quanta` by
+  default and is path-overridable for tests / per-host installs (encrypted-at-
+  rest via OS keyring is a follow-up). Per-record shape: `tool` + `scope`
+  (`always_allow` / `project` / `workspace` / `session` / `once_only` /
+  `deny` — deny is persisted but treated as ask-skip-negative; the gate
+  MUST NOT route around an explicit deny) + optional `actionKey` (finer
+  match e.g. `bash|git status`) + optional `commandPattern` (leading-token
+  sequence, Cursor-style ClassifiedCommand `suggested_allowlist_entry`).
+  Cascade: exact → command-pattern → project → global, most-specific wins.
+  TTL: 2-hour grant freshness ceiling per Claude Desktop posture. Slice
+  discipline (RFC §1.2 + biome boundaries): pure `node:` stdlib + the
+  in-memory `TrustScopeRegistry` interface from `./trust-scope` — the
+  admissibility gate continues to type-import the registry interface only;
+  the persistent impl is wired by the caller.
+evidence:
+  code:
+    - src/permission/trust-scope-store.ts
+    - src/permission/trust-scope.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/permission/trust-scope-store-hell.test.ts
+    integration:
+      - tests/integration/trust-scope-e2e.test.ts
+      - tests/integration/trust-scope-persistent-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'OS-keyring encryption-at-rest is a follow-up — the on-disk file is plaintext today (acceptable for the local-dev posture; remote / multi-tenant introduces a different trust model).'
+  promotion_path: 'Wire keyring port when a hosted-agent or multi-tenant scenario lands.'
+notes: 'Wire-up only treats `hasGrant(...) === true` as ask-skip; deny routes through the legacy / explicit deny path.'

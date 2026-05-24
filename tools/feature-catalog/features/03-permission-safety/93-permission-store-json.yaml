@@ -1,0 +1,44 @@
+id: permission-store-json
+title: permission state store — atomic JSON-state-file persistence engine (ADR-0046)
+section: 3
+subsystem: 권한 영속화 (per-thread + per-host + denial ledger)
+order: 93
+maturity: L4
+status: stable
+purpose: |
+  File-backed JSON store for per-thread permissions, per-host agent modes,
+  and post-denial precedence records. Single file at
+  `~/.quanta/permission-state.json` (overridable via
+  `QUANTA_PERMISSION_STATE`, both env vars read via `runtimeConfig()` — the
+  one legitimate `process.env` owner). Composition root
+  (`createPermissionStore`) owns ONE live `MutableState` + ONE
+  `JsonStateFile` persistence engine and layers three thin domain modules
+  over them: `createThreadStore` / `createHostStore` / denied-actions ledger.
+  The persistence helper owns the file-side machinery independent of WHAT
+  is stored: atomic write (`.tmp.<pid>.<rand>` + `rename`), debounced flush
+  (one rename per debounce window), write serialization
+  (`enqueueWrite` burst-collapse — no torn rename), quarantine sidecars
+  (`.corrupt` / `.unsupported-vN`), load→parse→validate with soft-fail to
+  empty state, and a `reset()` test seam. Failure model (preserved
+  verbatim): missing file ⇒ cold-start empty (no warning); corrupt JSON ⇒
+  start empty + `.corrupt` sidecar (never crash). Slice rule: pure
+  `node:` stdlib only — NO `@/storage`, NO `@/memory` (kept at minimum
+  dependency surface per biome `noRestrictedImports`).
+evidence:
+  code:
+    - src/permission/permission-store.ts
+    - src/permission/json-state-file.ts
+    - src/permission/per-thread-store.ts
+    - src/permission/per-host-mode.ts
+    - src/permission/post-denial.ts
+  adrs: [46]
+  tests:
+    unit:
+      - tests/unit/permission-store-hardening.test.ts
+      - tests/unit/permission-per-thread.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_PERMISSION_STATE — override file path (default ~/.quanta/permission-state.json)
+deliberate_hold: null
+notes: 'No SQLite, no transactions — bounded state (small N per kind) makes RMW + debounced flush correct. JsonStateFile is generic by design (the state DOMAIN lives in the caller, the helper is parameterised by emptyState/serialize/parse).'

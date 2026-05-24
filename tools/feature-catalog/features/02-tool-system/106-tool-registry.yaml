@@ -1,0 +1,39 @@
+id: tool-registry
+title: ToolRegistry — schema + isReadOnly + output-schema + spill capping
+section: 2
+subsystem: 도구 — registry (factory / output cap / spill / output-schema)
+order: 106
+maturity: L4
+status: stable
+purpose: |
+  Central per-loop registry composing every built-in and ported tool into the
+  surface the dispatch seam consumes. Owns: `has` / `get` lookups, `specs()`
+  enumeration (schemas advertised to the model with zod-to-JSON-schema
+  projection), `isReadOnly` per-tool read of the contract, post-execute
+  `enforceOutputSchema` (when a tool declared `outputSchema` via `defineTool`;
+  mismatch ⇒ ok:false with retry-directive instead of throwing), and final
+  `capToolOutput` (oversized output spilled to disk via `output-spill.ts` and
+  replaced with a `<persisted-output>` placeholder mirroring CC's
+  `replaceOversizedResults`). Single chokepoint for tool input/output
+  normalization: zod input errors collapse to `ToolInputError`, execution
+  errors collapse to `ToolExecutionError`, both surfaced as typed
+  `ToolFailure` discriminants so the loop branches on KIND not regex.
+evidence:
+  code:
+    - src/tool/registry.ts
+    - src/tool/factory.ts
+    - src/tool/output-spill.ts
+    - src/tool/deferred.ts
+    - src/tool/schema.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/output-spill.test.ts
+      - tests/unit/tool-factory.test.ts
+      - tests/unit/tool-output-schema-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_TOOL_OUTPUT_MAX — per-tool output char cap before spill (default 200 000)
+deliberate_hold: null
+notes: '`output-spill.ts` writes to `.quanta/tool-output/<uuid>.txt` and prunes to `DEFAULT_SPILL_KEEP` recent files. `deferred.ts` is the in-memory typed seam — there is deliberately no async scheduler today; the contract can be exercised in isolation and a real scheduler can adopt it later without changing the type surface.'

@@ -1,0 +1,40 @@
+id: web-fetch-search
+title: web_fetch + web_search — HTTPS read-only + provider-gated search (ADR-0127)
+section: 2
+subsystem: 도구 — web (ADR-0127)
+order: 102
+maturity: L4
+status: new
+purpose: |
+  Two read-only web tools delivered as a single slice. (1) `web_fetch` —
+  fetch an HTTPS URL and return the body (HTML→Markdown); always-on, no
+  provider required, factory binds globalThis.fetch unless a fake fetcher
+  is injected for tests. Security: TLS-required (non-`https:` protocols
+  rejected at URL-parse boundary, same posture as Claude Code WebFetch);
+  static SSRF deny-list of 9 ranges covering loopback / RFC1918 private /
+  link-local / IPv6 loopback / ULA (literal-host match, NO DNS resolution
+  today); every failure mode yields a typed `ok:false` (schema / abort /
+  SSRF deny / network / non-2xx / oversize / binary content-type) — never
+  throws past the loop. (2) `web_search` — provider-gated via the closed
+  `WebSearchProvider` port injected by the composition root
+  (`AgentConfig.webSearch.provider`); gracefully degrades to a typed
+  `ok:false` when absent. Output is a ranked numbered list (title / url /
+  snippet, snippet capped at 200 chars). Neither tool is in `defaultTools`
+  today (mirrors `read_image` / `shadow*` caller-wired posture).
+evidence:
+  code:
+    - src/tool/web/index.ts
+    - src/tool/web/fetch.ts
+    - src/tool/web/search.ts
+  adrs: [127]
+  tests:
+    unit:
+      - tests/unit/tool/web-fetch-hellgate.test.ts
+      - tests/unit/tool/web-search-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'DNS-resolution-aware SSRF verification is a future ADR — today the deny is literal-host only (matches Claude Code WebFetch parity).'
+  promotion_path: 'Add DNS resolve + post-resolve range check when a follow-up ADR justifies the additional latency.'
+notes: 'Slice posture (RFC §3.1): both files import ONLY `zod` + `../types`. NO `@/agent`, `@/permission`, `@/storage`, `@/memory`, `@/stream`, `@/lsp`, `@/observability`.'

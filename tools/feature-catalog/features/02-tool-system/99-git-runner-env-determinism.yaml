@@ -1,0 +1,34 @@
+id: git-runner-env-determinism
+title: git runner — env-allowlist + deterministic overrides + bounded wall-clock
+section: 2
+subsystem: 도구 — git runner (Codex §18.7 흡수, ADR-0105)
+order: 99
+maturity: L4
+status: stable
+purpose: |
+  Single env-scrubbed spawn boundary for every `git` invocation in the slice.
+  (1) ALLOWED_ENV — minimal parent-env subset (PATH/HOME/LANG/TZ/TMPDIR + ssh
+  auth keys) so credentials and arbitrary code-exec env (LD_PRELOAD,
+  PYTHON*PATH, NODE_OPTIONS, GIT_*) cannot reach the child. (2) Deterministic
+  HARD-SET overrides regardless of parent env: `GIT_OPTIONAL_LOCKS=0` (read
+  operations skip advisory index-locks so concurrent agent reads don't
+  contend with the operator's interactive shell), `GIT_PAGER=cat` /
+  `PAGER=cat` (defeats the `less` hang in non-TTY children), `LC_ALL=C`
+  (locale-independent output so parsers don't break on translated messages).
+  (3) Bounded wall-clock — default 30 s timeout per invocation kills hung
+  filesystems before a stray child can outlive the tool call. Mirrors the
+  spirit of `@/runtime`'s default allowlist but is copied here to keep
+  `@/tool/git` slice-isolated (it MUST NOT depend on `@/runtime`).
+evidence:
+  code:
+    - src/tool/git/runner.ts
+    - src/tool/git/_shared.ts
+  adrs: [105]
+  tests:
+    unit:
+      - tests/unit/git-env-and-budget-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'safeRun() in _shared.ts is the only place catch-and-coerce of spawn errors lives — each tool execute() is a flat happy-path + branch-on-outcome.'

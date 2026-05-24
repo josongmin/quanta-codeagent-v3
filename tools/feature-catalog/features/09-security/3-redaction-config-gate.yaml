@@ -1,0 +1,38 @@
+id: redaction-config-gate
+title: redaction opt-out gate — startup-fail when disabled without ack (ADR-0078)
+section: 9
+subsystem: 보안 — redaction 설정 게이트 (ADR-0078)
+order: 3
+maturity: L4
+status: stable
+purpose: |
+  Default-ON gate that enforces the secret-redaction invariant. Disabling at
+  the host level requires an explicit `acknowledgedRisk` string — a non-empty
+  value the caller authored, surfaced in transcripts and audit so "redaction
+  is off" is never invisible. `normalizeRedactionConfig` returns a frozen
+  normalized config OR throws `RedactionConfigError` at startup if the
+  caller asked for `disabled: true` without acknowledging risk. The loop
+  calls this ONCE at startup so a misconfigured host fails fast — never
+  mid-turn. Per-turn behaviour when disabled: a `<system-reminder>` banner
+  is injected so the operator sees the live opt-out state on every loop
+  step. The frozen `NormalizedRedactionConfig` carries the `enabled` flag,
+  the `acknowledgedRisk` string (when present), and the structural
+  `whitelist: ReadonlyArray<RegExp>` (used by callers to override
+  specific fixture tokens). The `secret-redaction-content-plane` entry
+  describes the actual masking pass; this entry describes the opt-out gate
+  alone.
+evidence:
+  code:
+    - src/security/redaction-config.ts
+  adrs: [78]
+  tests:
+    unit: []
+    integration:
+      - tests/integration/redaction-three-application-points.test.ts
+    contract: []
+knobs:
+  - AgentConfig.redaction.disabled — explicit opt-out, requires acknowledgedRisk
+  - AgentConfig.redaction.acknowledgedRisk — non-empty string when disabled
+  - AgentConfig.redaction.whitelist — structural RegExp overrides (e.g. fixture tokens)
+deliberate_hold: null
+notes: 'Startup-throw avoids the "redaction silently off because misconfigured" failure mode that a runtime soft-warn would risk.'

@@ -1,0 +1,37 @@
+id: gate-pattern-wire
+title: pattern-grant auto-pass — admissibility-gate cascade (ADR-0061 wire-up)
+section: 3
+subsystem: 권한 — rememberPatterns cascade (ADR-0061 hardening)
+order: 96
+maturity: L4
+status: stable
+purpose: |
+  Pure module the admissibility-gate calls into to decide whether a pending
+  action's `rememberPatterns` are ALREADY fully covered by the session's
+  `PatternGrantStore` and therefore can be auto-passed with a synthetic
+  `config_allowed` decision WITHOUT invoking the reviewer port. Dedicated
+  module so the gate stays minimal (one small call site + a synthesized
+  decision) and a single audit point owns the hardening rules: (1) ZERO-
+  pattern guard — `rememberPatterns.length === 0` ⇒ NEVER auto-pass (a
+  request without remembered patterns must be explicitly granted; mirrors
+  v0.dev's `length>0` guard inside `autoResolvable`); (2) dangerous gate —
+  `isMaybeDangerous === true` ⇒ NEVER auto-pass unless the caller opts in
+  via `allowDangerous: true` (hardening over v0, which had no dangerous gate
+  on the cascade); (3) coverage — every pattern in `rememberPatterns` MUST
+  be granted in `store`; partial coverage falls through. Slice rules: lives
+  in `@/permission`; imports only `./remember-patterns` (for
+  `PatternGrantStore`) and `./outcome` (for `buildDecision`); NEVER reaches
+  into `@/agent` or `@/llm`.
+evidence:
+  code:
+    - src/permission/gate-pattern-wire.ts
+    - src/permission/remember-patterns.ts
+  adrs: [61]
+  tests:
+    unit: []
+    integration:
+      - tests/integration/remember-patterns-cascade-hell.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Hardens v0 cascade with the two additional guards (zero-pattern + dangerous) before the coverage check; partial coverage always falls through to the reviewer.'

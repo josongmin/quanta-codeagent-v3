@@ -1,0 +1,35 @@
+id: request-user-input-tool
+title: request_user_input — model-driven HITL question with typed outcome (ADR-0097)
+section: 2
+subsystem: 도구 — request_user_input (ADR-0097 draft)
+order: 103
+maturity: L4
+status: new
+purpose: |
+  Sister tool of `request_plan_exit`. Lets the model ask the operator a
+  question and block on a typed reply when it cannot infer the decision
+  itself. Designed for use inside plan-mode (a missing piece of information
+  that would turn the plan into a gamble) but registered globally so any
+  sub-agent can reach for it. Dispatch routes through
+  `ToolContext.requestUserInput` (built from `AgentConfig.userInputPort`);
+  the requester resolves with a CLOSED 2-arm `UserInputOutcome`: `answer`
+  (text becomes `ToolResult.output`) or `cancelled` (yields a typed `rejected`
+  failure with `reason: "user_cancelled"` so the model branches on the KIND,
+  not regex-matched output text). Absent port ⇒ graceful `ok:false` (mode
+  `error`); never throws past the loop. Read-only (no FS / shell) +
+  concurrency-UNSAFE (blocks on operator decision; must never overlap other
+  work). The closed-union discipline is structural — a future 3rd arm is a
+  compile error at the `switch (outcome.decision)` `never` default.
+evidence:
+  code:
+    - src/tool/request-user-input.ts
+  adrs: [97]
+  tests:
+    unit:
+      - tests/unit/tool/request-user-input-hell.test.ts
+    integration:
+      - tests/integration/request-user-input-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'No heuristic / string-tag fallthrough on the outcome union.'

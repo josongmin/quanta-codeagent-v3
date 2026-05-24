@@ -1,0 +1,33 @@
+id: branch-only-guard
+title: branch-only git-write guard — ci-bot mode protected-branch propositional check
+section: 3
+subsystem: 권한 — git-write 모드 게이트 (RFC may-22 ci-bot mode)
+order: 95
+maturity: L4
+status: stable
+purpose: |
+  Propositional check on a shell command — is this operation forbidden by the
+  `gitWrite: { kind: "branch-only"; protectedBranches: string[] }` lever?
+  Four forbidden ci-bot operations: (1) any `git push` whose refspec targets
+  a protected branch; (2) any `git commit` while HEAD is on a protected
+  branch; (3) any `git merge` / `git rebase` onto a protected branch;
+  (4) any `git reset --hard` to a protected-branch ref. Default protected
+  branches: `main`, `master`, `develop`, `production`. Signal:
+  command-string properties (split + token match) — no counts, no
+  thresholds. Returns `{allowed: true} | {allowed: false, reason}`. Pure
+  module — no FS, no shell — so it is unit-testable in isolation and the
+  per-mode wiring (`apps/agent` mode presets) is the only place that
+  decides WHEN to consult it.
+evidence:
+  code:
+    - src/permission/branch-only.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/permission/branch-only.test.ts
+      - tests/unit/apps/agent/mode-presets/ci-bot.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Operator can override the default protected-branch list per mode policy.'

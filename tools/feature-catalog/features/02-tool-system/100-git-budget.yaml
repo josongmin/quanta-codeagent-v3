@@ -1,0 +1,36 @@
+id: git-budget
+title: GitBudget — 5-knob wall-time / commit-count / output-size cap (ADR-0107)
+section: 2
+subsystem: 도구 — git budget (Cursor captureGitHistory 흡수)
+order: 100
+maturity: L4
+status: stable
+purpose: |
+  Closed-port typed budget interface + pure `applyBudget` helper that derives
+  an AbortSignal carrying a deadline for long-running git invocations. Five
+  knobs mirror the upstream `CaptureBudget` struct verbatim so a future port
+  of the gix-snapshot RefStore→Commit→PackTree→PackBlob→Pack stage machine
+  has a 1:1 contract surface: (1) `maxCommits` — enforced via `-n` at call
+  sites (`git_log`, `git_churn`); (2) `maxWallTimeMs` — enforced via a fused
+  AbortSignal that kills the spawned git process when deadline fires;
+  (3) `maxOutputBytes` — enforced via post-spawn output cap; (4)
+  `targetDurationMs` — telemetry-only today (no hard enforcement); (5)
+  `consecutiveOverBudget` — multi-run counter tracked by the caller. The
+  last two are forward-compat type slots that MUST stay in the interface so
+  future wiring does not require a type bump. Tools accept an OPTIONAL
+  `budget` arg — absent ⇒ no signal derivation, byte-identical contract
+  with pre-budget callers.
+evidence:
+  code:
+    - src/tool/git/_budget.ts
+  adrs: [107]
+  tests:
+    unit:
+      - tests/unit/git-env-and-budget-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'targetDurationMs / consecutiveOverBudget enforcement is forward-compat — caller-tracked today, no loop-level breaker.'
+  promotion_path: 'Future: wire consecutiveOverBudget into a typed breaker once a multi-run aggregator slice exists.'
+notes: 'Wired across git_log / git_churn / git_blame_heatmap / git_upstream_check.'
