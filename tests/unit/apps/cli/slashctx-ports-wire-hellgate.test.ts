@@ -333,24 +333,82 @@ describe("/side: side-chat port wire", () => {
     expect(cap.out).toContain("isolated agent loop")
   })
 
-  test("PRESENT side state passes through dispatch (header painted before runSideChat)", async () => {
-    // We don't have a runnable LLM stack here; the dispatch will reach the
-    // `runSideChat` invocation and throw. What we DO assert is that the
-    // header (`- /side -`) lands BEFORE the throw — proving the dispatch
-    // crossed the "not wired" branch into the real codepath.
-    const cap: CapturedCtx = { out: "", err: "" }
-    const fakeState: SideChatSessionState = {
-      // Minimal shape — runSideChat will trip on missing pieces; we only
-      // need the dispatch to enter the real branch.
-      deps: { signal: new AbortController().signal } as never,
-      assembleConfig: (() => ({})) as never,
-      messages: [],
-      signal: new AbortController().signal,
+  test("PRESENT side state ENTERS real branch — assembleConfig spy called with the prompt", async () => {
+    // T3 strengthening — REGRESSION CLASS CAUGHT: the prior test used a
+    // structurally-invalid fake state (`deps: { signal: ... } as never`),
+    // swallowed every throw via `.catch(() => undefined)`, and only
+    // asserted the header line — which is painted BEFORE the real branch
+    // runs, so a regression that short-circuited dispatch entirely (e.g.
+    // changed `if (state === undefined)` to `if (true)`) would still
+    // print the header and pass. We rewrite to verify dispatch ACTUALLY
+    // enters `runSideChat` by spying on the closures the runner consults
+    // and asserting they fire with the user-supplied prompt.
+    //
+    // SEAM NOTE: `runSideChat` calls `input.deps.registry.specs()` /
+    // `.get(name)` BEFORE `assembleConfig`. We supply a tiny in-memory
+    // registry so dispatch crosses that boundary. We make assembleConfig
+    // throw a tagged error to (a) prove it was called, (b) prove it
+    // received the prompt-bearing message list, (c) short-circuit before
+    // `runAgent` (which has heavy unrelated deps).
+    let assembleCalls = 0
+    let assembledMessages: readonly { role: string; content: unknown }[] = []
+    let assembledIsolatedDeps: { signal?: AbortSignal; metrics?: unknown } | undefined
+    const SENTINEL = "SLICE-T3-ASSEMBLE-REACHED"
+    const fakeRegistry = {
+      get: (_name: string) => undefined,
+      specs: () => [],
+      list: () => [],
+      has: () => false,
     }
-    const ctx: SlashContext = { ...makeBase(cap), side: fakeState }
-    await runSlashCommand("/side hello", ctx).catch(() => undefined)
-    // Header line is painted via `ctx.out` BEFORE runSideChat runs.
-    expect(cap.out).toContain("- /side - hello")
+    const cap: CapturedCtx = { ...makeBase({ out: "", err: "" }) } as unknown as CapturedCtx
+    const out: string[] = []
+    const err: string[] = []
+    const ctx: SlashContext = {
+      out: (s) => out.push(s),
+      err: (s) => err.push(s),
+      cwd: "/tmp",
+      side: {
+        // We need a `deps` shape with `registry`/`stream` that runSideChat
+        // can survive into `assembleConfig`. Everything else is undefined.
+        deps: {
+          registry: fakeRegistry,
+          stream: { emit: () => undefined },
+          signal: new AbortController().signal,
+        } as never,
+        assembleConfig: ((messages: { role: string; content: unknown }[], deps: never) => {
+          assembleCalls++
+          assembledMessages = messages
+          assembledIsolatedDeps = deps as { signal?: AbortSignal; metrics?: unknown }
+          throw new Error(SENTINEL)
+        }) as never,
+        messages: [],
+        signal: new AbortController().signal,
+      } satisfies SideChatSessionState,
+    }
+    const code = await runSlashCommand("/side hello world", ctx)
+    // The thrown SENTINEL is caught by /side's catch arm and rendered to err
+    // (exit 1). That proves: dispatch entered the real branch AND the
+    // surface error path correctly handles a runSideChat throw.
+    expect(code).toBe(1)
+    expect(err.join("")).toContain(SENTINEL)
+    // Header still painted (positive control — kept from prior test).
+    expect(out.join("")).toContain("- /side - hello world")
+    // CRITICAL — proves real branch was actually engaged. assembleConfig
+    // is called EXACTLY ONCE by runSideChat after building the message
+    // list with the prompt as the final user turn.
+    expect(assembleCalls).toBe(1)
+    expect(assembledMessages.length).toBeGreaterThanOrEqual(1)
+    const lastMsg = assembledMessages[assembledMessages.length - 1]
+    expect(lastMsg?.role).toBe("user")
+    // The prompt MUST appear inside the assembled message content. Shape:
+    // `{ role: "user", content: [{ type: "text", text: "hello world" }] }`.
+    const lastContent = lastMsg?.content as ReadonlyArray<{ type: string; text?: string }>
+    expect(Array.isArray(lastContent)).toBe(true)
+    expect(lastContent[0]?.text).toBe("hello world")
+    // Isolated deps view should have `metrics === undefined` per the
+    // runSideChat contract (main metrics is stripped from side-chat).
+    expect(assembledIsolatedDeps?.metrics).toBeUndefined()
+    void cap // not used; defined to preserve previous closure binding.
   })
 
   test("/side --inherit=invalid ⇒ exit 1 even when port present", async () => {

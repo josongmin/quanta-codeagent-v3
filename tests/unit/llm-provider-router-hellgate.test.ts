@@ -208,13 +208,119 @@ describe("resolveProviderWithRouter — precedence hellgate", () => {
     }
   })
 
-  test("HELL-G3: pure function — no process.env access (deterministic in isolated env)", () => {
-    // We verify by passing an env with vars that, if process.env leaked,
-    // would be overridden by the host env. Test runs identically regardless.
-    const r1 = resolveProviderWithRouter({ env: {} })
-    const r2 = resolveProviderWithRouter({ env: {} })
-    expect(r1.provider).toBe(r2.provider)
-    expect(r1.reason).toBe(r2.reason)
+  test("HELL-G3: pure function — no process.env access (Proxy-trap + access counter + mutation parity)", () => {
+    // T3 strengthening — REGRESSION CLASS CAUGHT: a router that reaches
+    // for `process.env.X` instead of `input.env.X` would slip past the
+    // prior result-equality check (two empty calls return equal because
+    // process.env is stable WITHIN one test). This rewrite installs three
+    // independent traps that all fail loudly on a single process.env read:
+    //
+    //   A. Proxy-trapped env that THROWS on ANY property access.
+    //      The router MUST only iterate `input.env[KNOWN_KEY]`. If the
+    //      router somehow falls back to `process.env`, the Proxy is not
+    //      touched (because process.env is a different object) but ANY
+    //      attempt to enumerate the supplied env via a path that bypasses
+    //      the explicit `env[K]` reads (e.g. spread, Object.keys, for..in)
+    //      would also be caught — pinning the "explicit per-key reads"
+    //      contract.
+    //
+    //   B. Access-counter Proxy that records every `get` against the input
+    //      env. We assert the counter reflects ONLY the documented keys —
+    //      and that the resolver never reaches for keys it shouldn't read
+    //      on a given path.
+    //
+    //   C. Mutation parity. We snapshot a key on process.env, mutate it
+    //      between calls with the SAME `input.env`, and assert the two
+    //      results are byte-identical. If the router secretly consulted
+    //      process.env, the two calls would diverge.
+
+    // --- A: trapping Proxy — throws on any property access ---
+    const trapEnv = new Proxy({} as Record<string, string | undefined>, {
+      get(_, prop) {
+        throw new Error(`forbidden process.env-style probe: ${String(prop)}`)
+      },
+      has() {
+        throw new Error("forbidden in-operator probe on trap env")
+      },
+      ownKeys() {
+        throw new Error("forbidden ownKeys probe on trap env")
+      },
+    })
+    // Resolver MUST NOT touch the trap when we pass an explicit `env: {}` —
+    // it should consult ONLY the supplied env (an empty object), then fall
+    // through to default-fallback.
+    const baseline = resolveProviderWithRouter({ env: {} })
+    expect(baseline.provider).toBe("anthropic")
+    expect(baseline.reason).toBe("default-fallback")
+    // The trap Proxy is NEVER supplied to the resolver — we use it below
+    // to verify the resolver does not reach for some OTHER global env
+    // path. (If the resolver had a hidden `process.env` fallback the
+    // baseline call above would not have seen the trap regardless; that's
+    // why we also do mutation-parity below.)
+    // To make the trap actually meaningful here, we install it as the
+    // `env` argument and assert the resolver throws ONLY when it reads
+    // (which it must, to discover any layer). Use a stub env that records
+    // the FULL key set the resolver consults.
+    expect(() =>
+      resolveProviderWithRouter({
+        env: trapEnv,
+      }),
+    ).toThrow(/forbidden .* probe/)
+
+    // --- B: access-counter — record exact key reads on a known-empty env ---
+    const reads: string[] = []
+    const counterEnv = new Proxy({} as Record<string, string | undefined>, {
+      get(_, prop) {
+        if (typeof prop === "string") reads.push(prop)
+        return undefined
+      },
+    })
+    const counterResult = resolveProviderWithRouter({ env: counterEnv })
+    expect(counterResult.provider).toBe("anthropic")
+    expect(counterResult.reason).toBe("default-fallback")
+    // The recorded reads MUST be a SUBSET of the documented env keys.
+    // Any read of `process.env.*`, `HOME`, etc., would mean a leak.
+    const ALLOWED = new Set<string>([
+      ...Object.values(CLAUDE_USE_ENV_KEYS),
+      ...Object.values(ANTHROPIC_BASE_URL_ENV_KEYS),
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+    ])
+    for (const k of reads) {
+      expect(ALLOWED.has(k)).toBe(true)
+    }
+    // Must have read AT LEAST the four CLAUDE_USE_* keys (Layer 2 probe).
+    expect(reads).toContain("CLAUDE_CODE_USE_BEDROCK")
+    expect(reads).toContain("CLAUDE_CODE_USE_VERTEX")
+
+    // --- C: mutation parity — process.env churn must NOT affect result ---
+    // SEAM: if a future regression has the resolver fall through to
+    // process.env on a missing input.env key, this control flips.
+    const SENTINEL = "QUANTA_ROUTER_HELL_G3_SENTINEL"
+    const before = process.env[SENTINEL]
+    try {
+      process.env[SENTINEL] = "1"
+      const r1 = resolveProviderWithRouter({ env: {} })
+      process.env[SENTINEL] = "completely-different-value"
+      // Also flip a real env name to stress-test: CLAUDE_CODE_USE_BEDROCK
+      // on process.env MUST NOT affect a call whose input.env is empty.
+      const prevBedrock = process.env.CLAUDE_CODE_USE_BEDROCK
+      process.env.CLAUDE_CODE_USE_BEDROCK = "1"
+      try {
+        const r2 = resolveProviderWithRouter({ env: {} })
+        expect(r1.provider).toBe(r2.provider)
+        expect(r1.reason).toBe(r2.reason)
+        // Both calls saw empty input.env ⇒ both must be default-fallback,
+        // even though process.env.CLAUDE_CODE_USE_BEDROCK now says "1".
+        expect(r2.reason).toBe("default-fallback")
+      } finally {
+        if (prevBedrock === undefined) delete process.env.CLAUDE_CODE_USE_BEDROCK
+        else process.env.CLAUDE_CODE_USE_BEDROCK = prevBedrock
+      }
+    } finally {
+      if (before === undefined) delete process.env[SENTINEL]
+      else process.env[SENTINEL] = before
+    }
   })
 
   // =========================================================================

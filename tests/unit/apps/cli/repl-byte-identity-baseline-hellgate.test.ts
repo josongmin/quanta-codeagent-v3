@@ -75,9 +75,12 @@ const baseDeps = <R>(body: (signal: AbortSignal) => Promise<R>) => ({
 
 describe("repl byte-identity baseline — 5 scenarios", () => {
   test("scenario 1: empty session (body returns immediately, no metrics, no summary) — ZERO stderr writes", async () => {
-    await runOneTurn(baseDeps(async () => ({ messages: [], outcome: { id: "x" } })), {
-      onAfterResult: () => undefined,
-    })
+    await runOneTurn(
+      baseDeps(async () => ({ messages: [], outcome: { id: "x" } })),
+      {
+        onAfterResult: () => undefined,
+      },
+    )
     expect(writes).toEqual([])
   })
 
@@ -86,11 +89,14 @@ describe("repl byte-identity baseline — 5 scenarios", () => {
     // (default-OFF byte-identical). Mirror that: onAfterResult is the host
     // sink; with no host writes, no stderr lines should appear.
     let onAfterCalled = false
-    await runOneTurn(baseDeps(async () => ({ messages: [{ role: "user", content: "hi" }] })), {
-      onAfterResult: () => {
-        onAfterCalled = true
+    await runOneTurn(
+      baseDeps(async () => ({ messages: [{ role: "user", content: "hi" }] })),
+      {
+        onAfterResult: () => {
+          onAfterCalled = true
+        },
       },
-    })
+    )
     expect(onAfterCalled).toBe(true)
     expect(writes).toEqual([])
   })
@@ -127,19 +133,37 @@ describe("repl byte-identity baseline — 5 scenarios", () => {
     expect(writes).toEqual([])
   })
 
-  test("scenario 5: idle (no input / immediate exit) — runOneTurn is never called; no writes", async () => {
-    // The idle path lives in prompt-pipeline.ts, not the turn runner. The
-    // byte-identity baseline asserts that when no turn fires, no per-turn
-    // writes leak from the runner module.
+  test("scenario 5: idle (body returns immediately with empty messages) — ZERO stderr writes from runner", async () => {
+    // T3 strengthening — REGRESSION CLASS CAUGHT: the prior version of
+    // this test did NOT call `runOneTurn` at all (it just asserted
+    // `writes` was empty, which is trivially true since `beforeEach`
+    // resets it). A regression that made `runOneTurn` write a banner on
+    // EVERY call would still pass.
+    //
+    // We rewrite to actually invoke the unit with the idle-equivalent
+    // body (immediately resolves with empty messages, mirroring what
+    // prompt-pipeline.ts would supply on a no-input turn) and verify
+    // the runner emits ZERO stderr writes.
+    const out = await runOneTurn(
+      baseDeps(async () => ({ messages: [] })),
+      {
+        onAfterResult: () => undefined,
+      },
+    )
+    expect(out.result).toEqual({ messages: [] })
+    expect(out.turnAborted).toBe(false)
     expect(writes).toEqual([])
   })
 
   test("write sequence is DETERMINISTIC across two identical runs (re-run stability)", async () => {
     const runOnce = async (): Promise<string[]> => {
       writes = []
-      await runOneTurn(baseDeps(async () => ({ messages: [] })), {
-        onAfterResult: () => undefined,
-      })
+      await runOneTurn(
+        baseDeps(async () => ({ messages: [] })),
+        {
+          onAfterResult: () => undefined,
+        },
+      )
       return [...writes]
     }
     const a = await runOnce()
