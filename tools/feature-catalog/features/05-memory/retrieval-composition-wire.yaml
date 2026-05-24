@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, ci-bot, ide, daemon]
-configurable: env-gated
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "adr:0159", "wire"]
 depends_on:
