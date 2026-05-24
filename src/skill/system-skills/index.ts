@@ -73,10 +73,26 @@ export type { AddTestsTrigger } from "./add-tests"
 export { ADD_TESTS_SKILL_NAME, findAddTestsSkill, triggerAddTests } from "./add-tests"
 export type { BabysitTrigger } from "./babysit"
 export { BABYSIT_SKILL_NAME, findBabysitSkill, triggerBabysit } from "./babysit"
+// Debug/blame skills trio (ADR-0176 sibling to git-log-search 0173) —
+// alphabetical: blame-section / debug-trace / explain-stack-trace.
+export type { BlameSectionTrigger } from "./blame-section"
+export {
+  BLAME_SECTION_SKILL_NAME,
+  findBlameSectionSkill,
+  triggerBlameSection,
+} from "./blame-section"
 export type { DebugErrorTrigger } from "./debug-error"
 export { DEBUG_ERROR_SKILL_NAME, findDebugErrorSkill, triggerDebugError } from "./debug-error"
+export type { DebugTraceTrigger } from "./debug-trace"
+export { DEBUG_TRACE_SKILL_NAME, findDebugTraceSkill, triggerDebugTrace } from "./debug-trace"
 export type { ExplainCodeTrigger } from "./explain-code"
 export { EXPLAIN_CODE_SKILL_NAME, findExplainCodeSkill, triggerExplainCode } from "./explain-code"
+export type { ExplainStackTraceTrigger } from "./explain-stack-trace"
+export {
+  EXPLAIN_STACK_TRACE_SKILL_NAME,
+  findExplainStackTraceSkill,
+  triggerExplainStackTrace,
+} from "./explain-stack-trace"
 export type { ExtractFunctionTrigger } from "./extract-function"
 export {
   EXTRACT_FUNCTION_SKILL_NAME,

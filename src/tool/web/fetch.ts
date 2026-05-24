@@ -30,16 +30,21 @@
  *     `application/pdf` (and other non-text content-types) yield ok:false
  *     with the hint to use a dedicated tool.
  *
- * The HTML→Markdown converter is a small inline implementation (zero new
- * deps). It strips `<script>`/`<style>` blocks, converts headings / links /
- * inline code / paragraph + line breaks, decodes the 5 base entities, and
- * collapses 3+ consecutive newlines to 2. It is exported (`htmlToMarkdown`)
- * so the hellgate suite can test the pure conversion fn without spinning up
- * a fake fetcher.
+ * The HTML→Markdown converter lives in a sibling module
+ * (`./html-to-markdown`) backed by the `turndown` library (ADR-0176).
+ * Re-exported here as `htmlToMarkdown` so external callers and the legacy
+ * hellgate import path stay byte-stable.
  */
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import { htmlToMarkdown } from "./html-to-markdown"
+
+// Re-export so the legacy import path (`./fetch` → `htmlToMarkdown`)
+// continues to resolve. The barrel `./index.ts` re-exports from
+// `./html-to-markdown` directly; this keeps `./fetch` itself stable for
+// any callers that bypass the barrel.
+export { htmlToMarkdown }
 
 /** Default cap on the fetched body size (bytes). The model rarely needs
  *  more than ~50 KB of an HTML page, but we let small docs (RFCs, large
@@ -252,75 +257,6 @@ const readCappedBody = async (
     offset += c.byteLength
   }
   return { bytes: out, truncated }
-}
-
-/** Decode a small set of the most common HTML entities. Not exhaustive —
- *  numeric (`&#39;`) and the 5 named entities cover virtually all model-
- *  facing text. A future enhancement can grow this; we deliberately keep
- *  it small and dep-free. */
-const decodeEntities = (s: string): string =>
-  s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, " ")
-
-/**
- * Minimal inline HTML→Markdown converter. Zero new deps (a 3rd-party
- * library would be a slice-fence cost we don't need).
- *
- * Pipeline (order matters):
- *   1. Strip `<script>…</script>` and `<style>…</style>` blocks ENTIRELY
- *      (including their text content — that's the whole point of stripping).
- *   2. Convert `<h1..6>` to `#…######` headings.
- *   3. Convert `<a href="X">Y</a>` to `[Y](X)`.
- *   4. Convert `<code>X</code>` to `` `X` ``.
- *   5. Convert `<br>` / `<br/>` and `</p>` to newlines.
- *   6. Strip all remaining tags.
- *   7. Decode the 5 base HTML entities.
- *   8. Collapse 3+ consecutive newlines to exactly 2.
- *   9. Trim leading / trailing whitespace.
- *
- * Exported for hellgate testing without spinning up a fake fetcher.
- */
-export const htmlToMarkdown = (html: string): string => {
-  let s = html
-  // 1. strip scripts/styles
-  s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-  s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-  // 2. headings — h1 → '# ', h2 → '## ', etc.
-  s = s.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, lvl: string, inner: string) => {
-    const hashes = "#".repeat(Number(lvl))
-    return `\n\n${hashes} ${inner.replace(/<[^>]+>/g, "").trim()}\n\n`
-  })
-  // 3. links — capture href and inner text
-  s = s.replace(
-    /<a\b[^>]*href\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
-    (_m, href: string, text: string) => {
-      const t = text.replace(/<[^>]+>/g, "").trim()
-      return `[${t}](${href})`
-    },
-  )
-  // 4. inline code
-  s = s.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner: string) => {
-    return `\`${inner.replace(/<[^>]+>/g, "")}\``
-  })
-  // 5. paragraph + line breaks
-  s = s.replace(/<br\s*\/?\s*>/gi, "\n")
-  s = s.replace(/<\/p>/gi, "\n\n")
-  s = s.replace(/<\/div>/gi, "\n")
-  s = s.replace(/<\/li>/gi, "\n")
-  // 6. strip remaining tags
-  s = s.replace(/<[^>]+>/g, "")
-  // 7. decode entities
-  s = decodeEntities(s)
-  // 8. collapse 3+ newlines → 2
-  s = s.replace(/\n{3,}/g, "\n\n")
-  // 9. trim
-  return s.trim()
 }
 
 /** Truncate output to `WEB_FETCH_MAX_OUTPUT`, with a suffix the model can

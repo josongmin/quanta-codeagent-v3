@@ -1,49 +1,74 @@
-//! seccomp BPF filter compile layer: `NapiSandboxPolicy` → seccompiler filter.
+//! seccomp BPF filter compile layer.
 //!
-//! **Scaffold** (ADR-0175 Phase 3). Function bodies are `unimplemented!()`.
-//! Mirrors Codex `codex-linux-sandbox` seccomp denylist (`socket`,
-//! `connect`, `accept`, `bind`, `listen`, `ptrace`, `mount`, `umount2`,
-//! `unshare`, `setns`, `clone3` with NEWNS/NEWNET/NEWUSER, ...).
+//! ADR-0176 Phase 3.1 **lax-mode wire**.
 //!
-//! ## Filter shape (Phase 3.1 target)
+//! Phase 3.1 ships a **lax** filter that allows all syscalls. The wire
+//! (compile → BpfProgram → `prctl(PR_SET_NO_NEW_PRIVS) + PR_SET_SECCOMP`)
+//! is installed and the child runs through it, but the filter table is
+//! empty — every syscall hits `mismatch_action: Allow`.
 //!
-//! Default action: `Allow`. Per-syscall actions:
-//!   - Network family (`socket`/`connect`/`accept`/`bind`/`listen`/
-//!     `sendto`/`recvfrom`/`sendmsg`/`recvmsg`) → `Errno(EACCES)` when
-//!     policy denies network.
-//!   - Privilege-escalation (`ptrace`/`process_vm_*`/`mount`/`umount2`/
-//!     `pivot_root`/`chroot`) → `Errno(EPERM)` unconditionally.
-//!   - Namespace manipulation (`unshare`/`setns`/`clone3` with NEWNS|
-//!     NEWNET|NEWUSER flag bits) → `Errno(EPERM)`.
+//! Why lax in Phase 3.1?
+//!   - Getting a strict default-deny syscall allowlist right is its own
+//!     design round (Codex's `codex-linux-sandbox` filter is ~80 syscalls
+//!     and each entry has been tuned against the long tail of libc
+//!     behaviour). Shipping the wire first means Phase 3.2 can swap the
+//!     filter table in without touching the spawn pipeline.
+//!   - Landlock alone covers filesystem + (with ABI v4+) network policy.
+//!     The syscall-level deny adds defense-in-depth against namespace
+//!     escape (`unshare`, `setns`, `clone3` with NEWNS|NEWNET|NEWUSER)
+//!     and ptrace — important but orthogonal to the Phase 3.1 ship goal.
+//!   - The lax filter still installs `PR_SET_NO_NEW_PRIVS=1` via the
+//!     seccompiler `apply_filter` path, which itself blocks setuid binary
+//!     execution — a meaningful non-zero baseline.
 //!
-//! Architecture: filter compiled for `target_arch` (x86_64 / aarch64);
-//! `seccompiler::compile_filter` handles arch-specific syscall numbers.
-//!
-//! Phase 3.1 deferral: actual filter table + arg-matching for `clone3`
-//! flags moves here as a `static FILTER_DENY_NET: Filter = ...`.
+//! Phase 3.2 will replace this with a per-policy strict filter; the
+//! exported `build_and_apply()` signature is stable so the spawn pipeline
+//! doesn't change.
 
-use crate::NapiSandboxPolicy;
+#![cfg(target_os = "linux")]
 
-/// Compiled seccomp BPF program placeholder.
+use seccompiler::{apply_filter, BpfProgram, SeccompAction, SeccompFilter, TargetArch};
+use std::collections::BTreeMap;
+
+/// Compile a lax seccomp filter and apply it to the current thread.
 ///
-/// Phase 3.1 swaps this for `seccompiler::BpfProgram` (raw BPF instruction
-/// vector ready for `prctl(PR_SET_SECCOMP, ...)`).
-pub struct CompiledFilter;
+/// Returns a typed error string on any seccompiler failure. The caller is
+/// `lib.rs::spawn_sandboxed` which converts to `io::Error` for the
+/// `pre_exec` hook. Must run in the child AFTER fork, BEFORE landlock
+/// `restrict_self()` and BEFORE `execve()`.
+pub fn build_and_apply() -> Result<(), String> {
+    // Pick the host architecture's syscall numbering. seccompiler 0.5
+    // supports x86_64 / aarch64 / riscv64. The cdylib is shipped per
+    // target triple by napi-rs, so cfg-gating is correct here (every
+    // built artifact picks exactly one).
+    let target = if cfg!(target_arch = "x86_64") {
+        TargetArch::x86_64
+    } else if cfg!(target_arch = "aarch64") {
+        TargetArch::aarch64
+    } else {
+        // Unsupported arch — fall through with no filter applied. Caller
+        // sees the typed error and degrades to passthrough.
+        return Err(format!(
+            "seccomp: unsupported target_arch {}",
+            std::env::consts::ARCH
+        ));
+    };
 
-/// Compile `policy` to a seccomp BPF program.
-///
-/// Scaffold: returns `unimplemented!()`. Phase 3.1:
-///   1. Build a `seccompiler::SeccompFilter` with `Allow` default.
-///   2. Add per-syscall rules per the table in this module's docs.
-///   3. `filter.try_into()` → `BpfProgram`.
-pub fn build_filter(_policy: &NapiSandboxPolicy) -> Result<CompiledFilter, String> {
-    unimplemented!("seccomp::build_filter — Phase 3.1 (see ADR-0175)")
-}
+    // Empty rule table + Allow default = lax mode. Match action is also
+    // Allow but unused (no rules can match).
+    let filter = SeccompFilter::new(
+        BTreeMap::new(),
+        SeccompAction::Allow,
+        SeccompAction::Allow,
+        target,
+    )
+    .map_err(|e| format!("seccomp filter new: {e}"))?;
 
-/// Apply a compiled BPF program to the CURRENT thread (post-fork / pre-exec).
-///
-/// Scaffold: `unimplemented!()`. Phase 3.1 calls
-/// `seccompiler::apply_filter(&program)`.
-pub fn apply_filter(_filter: &CompiledFilter) -> Result<(), String> {
-    unimplemented!("seccomp::apply_filter — Phase 3.1 (see ADR-0175)")
+    let program: BpfProgram = filter
+        .try_into()
+        .map_err(|e| format!("seccomp compile: {e}"))?;
+
+    apply_filter(&program).map_err(|e| format!("seccomp apply: {e}"))?;
+
+    Ok(())
 }

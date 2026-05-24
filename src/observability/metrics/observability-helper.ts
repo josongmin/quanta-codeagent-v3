@@ -35,6 +35,7 @@ import type { BackgroundSubagentScheduler } from "@/agent/subagent-background"
 import type { LlmProvider } from "@/llm/providers"
 import type { ShadowOdb } from "@/storage/shadow-odb"
 import type { Tool } from "@/tool"
+import { buildHealthSnapshot, writeHealthSnapshot } from "./health-snapshot"
 import { instrumentLlmProvider, instrumentSubagentScheduler } from "./instrument"
 import { instrumentBudgetLedger } from "./instrument-budget"
 import { type InstrumentableLspClient, instrumentLspClient } from "./instrument-lsp"
@@ -91,6 +92,14 @@ export interface ObservabilityOpts {
    *  machine-facing (PromQL-grepable wiring health). Different concerns;
    *  do not couple. */
   readonly emitWiredGauge?: boolean
+  /** ADR-0177: when set, write a JSON health snapshot to this path at
+   *  helper construction time. Absolute paths are used verbatim; relative
+   *  paths are anchored to `${os.homedir()}/.quanta/`. Pass `true` to use
+   *  the default `${os.homedir()}/.quanta/health.json`. Default = no write
+   *  (byte-identical to ADR-0172 baseline). Errors are swallowed and routed
+   *  to `opts.warn` (or `console.warn`) — the snapshot is operator
+   *  convenience, never a hot-path failure mode. */
+  readonly healthSnapshotPath?: string | true
 }
 
 export interface InstrumentedBag {
@@ -189,5 +198,50 @@ export const withFullObservability = (
       }
     }
   }
+  if (opts.healthSnapshotPath !== undefined) {
+    // ADR-0177: write a JSON health snapshot mirroring the wired-gauge state.
+    // Sync helper signature is preserved — the write is fire-and-forget
+    // (construction-time, not hot path) so existing call sites need not
+    // become async. Errors are swallowed and routed to the warn sink.
+    // The in-flight promise is exposed via `lastHealthSnapshotInFlight()`
+    // so tests (and any caller who cares) can await completion deterministically.
+    try {
+      const snap = buildHealthSnapshot(
+        out,
+        opts.skippedExpected ? { skippedExpected: opts.skippedExpected } : {},
+      )
+      const pathOpt = opts.healthSnapshotPath === true ? undefined : opts.healthSnapshotPath
+      const writeOpts = pathOpt !== undefined ? { path: pathOpt } : {}
+      const warn = opts.warn
+      lastInFlight = writeHealthSnapshot(snap, writeOpts).catch((err: unknown) => {
+        const msg = `[observability] health snapshot write failed: ${err instanceof Error ? err.message : String(err)}`
+        if (warn !== undefined) {
+          warn(msg)
+        } else {
+          // biome-ignore lint/suspicious/noConsole: documented default sink (ADR-0177)
+          console.warn(msg)
+        }
+        return ""
+      })
+    } catch (err) {
+      const msg = `[observability] health snapshot build failed: ${err instanceof Error ? err.message : String(err)}`
+      if (opts.warn !== undefined) {
+        opts.warn(msg)
+      } else {
+        // biome-ignore lint/suspicious/noConsole: documented default sink (ADR-0177)
+        console.warn(msg)
+      }
+    }
+  }
   return out
 }
+
+/** ADR-0177 test seam: the in-flight health-snapshot write promise from the
+ *  most recent `withFullObservability(... healthSnapshotPath ...)` call, or
+ *  `undefined` if none has fired. Production code SHOULD NOT depend on this —
+ *  it exists so tests (and operator scripts that want construction-time
+ *  confirmation) can `await lastHealthSnapshotInFlight()` before reading the
+ *  file back. Resolves to the final path on success or `""` on swallowed
+ *  failure. */
+let lastInFlight: Promise<string> | undefined
+export const lastHealthSnapshotInFlight = (): Promise<string> | undefined => lastInFlight

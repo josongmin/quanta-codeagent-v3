@@ -106,8 +106,11 @@ export interface ToolCallCache {
   computeKey(toolName: string, input: unknown, ctx: ToolContext): string
   /** Lookup; `null` = miss (including stale/expired). */
   get(key: string): ToolResult | null
-  /** Store result. TTL / eviction is implementation-defined. */
-  set(key: string, result: ToolResult): void
+  /** Store result. TTL / eviction is implementation-defined.
+   *  `toolName` is optional for back-compat (legacy callers); ADR-0178's
+   *  per-tool TTL only takes effect when callers pass it. The
+   *  `instrumentToolWithDedup` wrap always passes `tool.name`. */
+  set(key: string, result: ToolResult, toolName?: string): void
   /** Drop all entries. Used by the default impl on demand + tests. */
   clear(): void
 }
@@ -200,7 +203,8 @@ export const instrumentToolWithDedup = <I>(
         // Cache success AND failure — both are "this exact input produced this
         // exact result"; caller has the predicate to opt out for tools where
         // caching ok:false is wrong (see ADR).
-        cache.set(key, terminal)
+        // ADR-0178: pass `tool.name` so the cache can apply per-tool TTL.
+        cache.set(key, terminal, tool.name)
       }
     },
   }
