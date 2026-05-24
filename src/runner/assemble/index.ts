@@ -53,6 +53,13 @@ export {
 } from "./retrieval"
 export { rankWithRetrievalStack } from "./retrieval-memory-bridge"
 export {
+  type LexicalHit,
+  type LocalizeHybridInput,
+  lexicalHitsToCandidates,
+  lexicalHitToCandidate,
+  runLocalizeHybrid,
+} from "./retrieval-localize-bridge"
+export {
   buildSkillsConfigCore,
   type SkillsConfigAssembleInput,
 } from "./skill"
