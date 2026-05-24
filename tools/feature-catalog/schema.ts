@@ -12,25 +12,12 @@ import { parseYaml } from "./yaml"
 
 export const Maturity = z.enum(["L1", "L2", "L3", "L4", "L5"])
 export const Status = z.enum(["stable", "new", "refined", "hold", "deprecated"])
-export const LifecycleStage = z.enum([
-  "proposed",
-  "active",
-  "deprecated",
-  "sunset",
-  "removed",
-])
+export const LifecycleStage = z.enum(["proposed", "active", "deprecated", "sunset", "removed"])
 
 // SOTA Tier-3 — integration tracking axes.
 export const UiSurface = z.enum(["cli", "web", "ide", "tauri", "api", "none", "n-a"])
 export const IntegrationStatus = z.enum(["integrated", "partial", "planned", "none", "n-a"])
-export const ConfigStatus = z.enum([
-  "integrated",
-  "partial",
-  "planned",
-  "static",
-  "none",
-  "n-a",
-])
+export const ConfigStatus = z.enum(["integrated", "partial", "planned", "static", "none", "n-a"])
 export const RunMode = z.enum([
   "interactive",
   "headless",
@@ -170,7 +157,7 @@ export function computeAxisScores(f: Feature): AxisScores {
     ...f.evidence.tests.contract,
   ]
   const hellCount = allTests.filter((t) => t.includes("hellgate")).length
-  const hellgate = (Math.min(hellCount, 3) as 0 | 1 | 2 | 3)
+  const hellgate = Math.min(hellCount, 3) as 0 | 1 | 2 | 3
 
   // wiring
   const hasCli = f.ui_surfaces.includes("cli")
@@ -361,6 +348,90 @@ export async function loadFeatures(
     loaded.push({ feature: result.data, path })
   }
   return loaded
+}
+
+// --- SOTA structural invariants -------------------------------------------
+//
+// `validateInvariants` runs MEASURABLE, FACT-BASED structural checks across
+// loaded features. By default these are *advisory* — surfaced as warnings via
+// `cmdValidate`. Pass `--strict` to `bun fc validate` to promote warnings to
+// fail. Each invariant is a closed predicate over the validated `Feature`
+// type (no I/O, no heuristics, no thresholds invented without evidence).
+//
+// Invariants:
+//   1. labels-uniqueness  — at most one `surface:X` label and at most one
+//      `tier:X` label per feature (multiple values for the same axis is a
+//      modeling bug — the axis is single-valued by definition).
+//   2. l4-owners-non-empty — features at maturity L4 must have at least one
+//      owner. L5 already requires this via the gates; this extends the same
+//      ownership invariant to L4 (the operational tier).
+//   3. deliberate-hold-vs-progressing-status — `deliberate_hold != null`
+//      contradicts a *progressing* status. We narrow "progressing" to
+//      `refined` only (intentionally weaker than `stable`, which is widely
+//      used as the default literal across the catalog and is not a fact-
+//      based contradiction by itself).
+//   4. lifecycle-vs-maturity — `lifecycle_stage == "deprecated"` cannot
+//      co-exist with `maturity == "L5"` (deprecated means scheduled for
+//      removal; L5 means polished operational tier — these are mutually
+//      exclusive by definition).
+export interface InvariantViolation {
+  readonly invariant: string
+  readonly featureId: string
+  readonly path: string
+  readonly message: string
+}
+
+export function validateInvariants(features: readonly LoadedFeature[]): InvariantViolation[] {
+  const violations: InvariantViolation[] = []
+  for (const { feature, path } of features) {
+    // Invariant 1: labels uniqueness (surface:*, tier:*).
+    const surfaceLabels = feature.labels.filter((l) => l.startsWith("surface:"))
+    const tierLabels = feature.labels.filter((l) => l.startsWith("tier:"))
+    if (surfaceLabels.length > 1) {
+      violations.push({
+        invariant: "labels-uniqueness",
+        featureId: feature.id,
+        path,
+        message: `multiple surface:* labels: [${surfaceLabels.join(", ")}] (single-valued axis)`,
+      })
+    }
+    if (tierLabels.length > 1) {
+      violations.push({
+        invariant: "labels-uniqueness",
+        featureId: feature.id,
+        path,
+        message: `multiple tier:* labels: [${tierLabels.join(", ")}] (single-valued axis)`,
+      })
+    }
+    // Invariant 2: L4 owners non-empty (extends L5 gate).
+    if (feature.maturity === "L4" && feature.owners.length === 0) {
+      violations.push({
+        invariant: "l4-owners-non-empty",
+        featureId: feature.id,
+        path,
+        message: "maturity=L4 requires owners.length >= 1",
+      })
+    }
+    // Invariant 3: deliberate_hold contradicts status=refined.
+    if (feature.deliberate_hold !== null && feature.status === "refined") {
+      violations.push({
+        invariant: "deliberate-hold-vs-progressing-status",
+        featureId: feature.id,
+        path,
+        message: "deliberate_hold set but status=refined (contradicts progress)",
+      })
+    }
+    // Invariant 4: lifecycle=deprecated cannot be maturity=L5.
+    if (feature.lifecycle_stage === "deprecated" && feature.maturity === "L5") {
+      violations.push({
+        invariant: "lifecycle-vs-maturity",
+        featureId: feature.id,
+        path,
+        message: "lifecycle_stage=deprecated cannot be maturity=L5",
+      })
+    }
+  }
+  return violations
 }
 
 /**

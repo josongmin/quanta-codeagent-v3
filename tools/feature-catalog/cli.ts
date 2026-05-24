@@ -38,6 +38,7 @@ import {
   loadFeaturesStrict,
   SECTION_NAMES,
   SECTION_SLUGS,
+  validateInvariants,
 } from "./schema"
 import { parseYaml, stringifyYaml } from "./yaml"
 
@@ -54,7 +55,7 @@ function usage(): never {
       "",
       "commands:",
       "  build              render docs/10.feature-catalog.md",
-      "  validate           schema + cross-feature + evidence checks",
+      "  validate [--strict]  schema + cross-feature + evidence + structural invariants",
       "  list [--maturity X] [--status X] [--section N]",
       "  show <id>",
       "  add <section> <slug>",
@@ -121,18 +122,44 @@ async function collectMissingTests(
   }
 }
 
-async function cmdValidate(): Promise<void> {
+async function cmdValidate(argv: string[] = []): Promise<void> {
+  const strict = argv.includes("--strict")
+  for (const a of argv) {
+    if (a !== "--strict") {
+      console.error(`validate: unknown arg "${a}"`)
+      process.exit(2)
+    }
+  }
   const features = await loadFeaturesStrict(FEATURES_DIR)
   const errors: string[] = []
   for (const { feature, path } of features) {
     errors.push(...(await collectFeatureEvidenceErrors(feature, path)))
   }
+  // Structural invariants (advisory by default; promoted to errors via --strict).
+  const invariantViolations = validateInvariants(features)
+  const invariantLines = invariantViolations.map(
+    (v) => `${rel(v.path)}: [${v.invariant}] ${v.message}`,
+  )
+  if (strict) {
+    errors.push(...invariantLines)
+  } else {
+    for (const line of invariantLines) console.error(`warn: ${line}`)
+  }
   if (errors.length > 0) {
     for (const e of errors) console.error(e)
-    console.error(`validate: ${errors.length} error(s)`)
+    console.error(
+      `validate: ${errors.length} error(s)` +
+        (strict
+          ? ` (--strict; includes ${invariantViolations.length} invariant violation(s))`
+          : ""),
+    )
     process.exit(1)
   }
-  console.log(`validate: ${features.length} feature(s), all evidence resolved`)
+  const invSuffix =
+    invariantViolations.length > 0
+      ? ` (${invariantViolations.length} invariant warning(s); pass --strict to fail)`
+      : ""
+  console.log(`validate: ${features.length} feature(s), all evidence resolved${invSuffix}`)
 }
 
 interface ListFilters {
@@ -235,9 +262,9 @@ async function cmdDiff(): Promise<void> {
   process.exit(1)
 }
 
-async function cmdCheckEvidence(): Promise<void> {
+async function cmdCheckEvidence(argv: string[] = []): Promise<void> {
   // Same as validate, but kept as a separate command for parity with the spec.
-  await cmdValidate()
+  await cmdValidate(argv)
 }
 
 /** True iff this file path counts as a src-tracked .ts file (excludes tests,
@@ -1013,7 +1040,7 @@ async function main(): Promise<void> {
       await cmdBuild()
       return
     case "validate":
-      await cmdValidate()
+      await cmdValidate(rest)
       return
     case "list":
       await cmdList(rest)
@@ -1028,7 +1055,7 @@ async function main(): Promise<void> {
       await cmdDiff()
       return
     case "check-evidence":
-      await cmdCheckEvidence()
+      await cmdCheckEvidence(rest)
       return
     case "audit":
       await cmdAudit()
