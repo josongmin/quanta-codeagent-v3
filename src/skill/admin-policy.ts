@@ -12,15 +12,22 @@
  * (admin scope is effectively disabled) — see ADR §3 "org policy 없으면
  * admin scope 비활성".
  *
- * Closed-port: this module takes a `readPolicyFile` callback so unit tests
- * never touch the real fs. The default exported helper {@link
- * loadAdminPolicy} uses node:fs/promises but is a one-liner adapter — the
- * core logic ({@link parseAdminPolicy}) is pure.
+ * Closed-port (P1 cleanup): this module is PURE — it takes a `readPolicyFile`
+ * callback for the one side-effect (fs read). The default node:fs/promises
+ * reader lives in {@link ./admin-policy-loader-fs} (`defaultAdminPolicyReader`)
+ * and is lazy-imported so this domain module has NO direct dependency on
+ * `node:fs/promises`. Unit tests inject a reader directly; production callers
+ * omit it and `loadAdminPolicy` resolves the default via the adapter file.
+ * Core logic ({@link parseAdminPolicy}, {@link validateAdminPolicy}) is pure.
  */
 
-import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
+import type { AdminPolicyReader } from "./admin-policy-loader-fs"
+
+// Re-export the port type so callers can construct a typed reader without
+// reaching into the adapter file directly (one canonical import surface).
+export type { AdminPolicyReader } from "./admin-policy-loader-fs"
 
 /** ADR-0134 §3 — admin org-policy.json schema. Strict mode (no extras). */
 export const AdminPolicySchema = z
@@ -87,14 +94,23 @@ export const validateAdminPolicy = (
  */
 export const loadAdminPolicy = async (opts: {
   orgConfigDir: string | null | undefined
-  /** Test seam: override the fs reader. Default uses node:fs/promises. */
-  readPolicyFile?: (path: string) => Promise<string | null>
+  /**
+   * Closed-port reader. Default resolves via `./admin-policy-loader-fs` (lazy-
+   * imported so this domain module has no static node:fs/promises dependency).
+   * Unit tests inject directly; production callers omit and get the fs adapter.
+   */
+  readPolicyFile?: AdminPolicyReader
 }): Promise<LoadedAdminPolicy> => {
   if (opts.orgConfigDir === null || opts.orgConfigDir === undefined) {
     return { policy: null, sourcePath: null }
   }
   const path = join(opts.orgConfigDir, "org-policy.json")
-  const reader = opts.readPolicyFile ?? defaultReadPolicyFile
+  // Lazy-import the fs adapter ONLY when no reader was injected — keeps this
+  // domain module's static graph free of node:fs/promises. The dynamic import
+  // is cached by the module system after the first call, so subsequent loads
+  // pay no additional cost (single Map lookup).
+  const reader: AdminPolicyReader =
+    opts.readPolicyFile ?? (await import("./admin-policy-loader-fs")).defaultAdminPolicyReader
   const raw = await reader(path)
   if (raw === null) return { policy: null, sourcePath: null }
   const parsed = parseAdminPolicy(raw)
@@ -102,14 +118,4 @@ export const loadAdminPolicy = async (opts: {
   const checked = validateAdminPolicy(parsed.value)
   if (!checked.ok) throw new Error(`org-policy.json: ${checked.error}`)
   return { policy: parsed.value, sourcePath: path }
-}
-
-/** Default fs reader — returns null on ENOENT, rethrows on other errors. */
-const defaultReadPolicyFile = async (path: string): Promise<string | null> => {
-  try {
-    return await readFile(path, "utf8")
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null
-    throw e
-  }
 }

@@ -35,7 +35,7 @@
  *      Declaring `paths:` has no runtime effect until a host does this.
  */
 export { MAX_GLOB_LEN, MAX_PATH_LEN, matchesAnyGlob, skillsActivatedFor } from "./activation"
-export type { AdminPolicy, LoadedAdminPolicy } from "./admin-policy"
+export type { AdminPolicy, AdminPolicyReader, LoadedAdminPolicy } from "./admin-policy"
 // ADR-0134 Phase C — admin policy + audit log + install enforcement.
 export {
   AdminPolicySchema,
@@ -43,6 +43,13 @@ export {
   parseAdminPolicy,
   validateAdminPolicy,
 } from "./admin-policy"
+// P1 cleanup — adapter for the fs port. `admin-policy.ts` lazy-imports the
+// default reader so hosts that want a custom (e.g. in-memory) reader can
+// substitute one without touching the domain module.
+export {
+  createFsAdminPolicyReader,
+  defaultAdminPolicyReader,
+} from "./admin-policy-loader-fs"
 export type {
   AuditClock,
   AuditEntry,
