@@ -17,7 +17,8 @@ evidence:
     - src/agent/prompt.ts
   adrs: [99]
   tests:
-    unit: []
+    unit:
+      - tests/unit/git-posture-prompt-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

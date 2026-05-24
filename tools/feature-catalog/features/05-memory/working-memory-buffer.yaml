@@ -23,7 +23,8 @@ evidence:
     - src/memory/index.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/working-loop.test.ts
     integration: []
     contract: []
 knobs: []

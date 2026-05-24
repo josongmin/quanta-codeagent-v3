@@ -10,7 +10,8 @@ evidence:
   code: []
   adrs: [9, 24]
   tests:
-    unit: []
+    unit:
+      - tests/unit/diagnostics.test.ts
     integration: [tests/integration/lsp-diagnostics-e2e.test.ts]
     contract: []
 knobs: [QUANTA_LSP]

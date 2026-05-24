@@ -26,7 +26,8 @@ evidence:
     - src/agent/issue-hint/index.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/issue-hint/extract-expected-actual.test.ts
     integration: []
     contract: []
 knobs:

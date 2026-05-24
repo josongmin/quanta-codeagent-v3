@@ -22,7 +22,9 @@ evidence:
     - src/agent/branch-search-runner.ts
   adrs: [117]
   tests:
-    unit: []
+    unit:
+      - tests/unit/branch-search-minimal-change-hellgate.test.ts
+      - tests/unit/branch-search-progress.test.ts
     integration: []
     contract: []
 knobs: []

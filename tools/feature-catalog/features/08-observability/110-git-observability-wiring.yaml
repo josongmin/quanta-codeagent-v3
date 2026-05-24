@@ -19,7 +19,8 @@ evidence:
     - src/agent/git-observability/turn-diff-emit.ts
   adrs: [110, 125]
   tests:
-    unit: []
+    unit:
+      - tests/unit/git-observability-wiring-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

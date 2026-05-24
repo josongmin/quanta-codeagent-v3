@@ -20,7 +20,8 @@ evidence:
     - src/agent/branch-search-runner.ts
   adrs: [116]
   tests:
-    unit: []
+    unit:
+      - tests/unit/branch-search-anchor-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

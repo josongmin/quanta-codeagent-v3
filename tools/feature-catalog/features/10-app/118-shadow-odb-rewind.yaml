@@ -20,7 +20,8 @@ evidence:
     - src/storage/shadow-odb/index.ts
   adrs: [118]
   tests:
-    unit: []
+    unit:
+      - tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

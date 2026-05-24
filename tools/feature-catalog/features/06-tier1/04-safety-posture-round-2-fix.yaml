@@ -10,7 +10,8 @@ evidence:
   code: [src/agent/subagent-runner.ts]
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/subagent-runner.test.ts
     integration: []
     contract: []
 knobs: []

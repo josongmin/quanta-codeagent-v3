@@ -16,7 +16,8 @@ evidence:
     - src/agent/plan-queue.ts
   adrs: [128]
   tests:
-    unit: []
+    unit:
+      - tests/unit/plan-queue-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

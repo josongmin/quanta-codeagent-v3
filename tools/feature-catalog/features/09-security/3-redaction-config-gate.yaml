@@ -26,7 +26,8 @@ evidence:
     - src/security/redaction-config.ts
   adrs: [78]
   tests:
-    unit: []
+    unit:
+      - tests/unit/security/redaction-config.test.ts
     integration:
       - tests/integration/redaction-three-application-points.test.ts
     contract: []

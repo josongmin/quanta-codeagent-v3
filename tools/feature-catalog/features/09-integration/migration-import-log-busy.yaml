@@ -23,7 +23,8 @@ evidence:
     - src/migration/types.ts
   adrs: [38]
   tests:
-    unit: []
+    unit:
+      - tests/unit/migration-persistence.test.ts
     integration: []
     contract: []
 knobs: []

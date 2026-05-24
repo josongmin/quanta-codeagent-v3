@@ -22,7 +22,8 @@ evidence:
     - src/shared/jsonrpc/channel-naming.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/jsonrpc-channel-naming.test.ts
     integration: []
     contract: []
 knobs: []

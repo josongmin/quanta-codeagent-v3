@@ -22,7 +22,8 @@ evidence:
     - src/agent/plan/transitions.ts
   adrs: [95]
   tests:
-    unit: []
+    unit:
+      - tests/unit/agent/plan/transitions-hell.test.ts
     integration: []
     contract: []
 knobs: []

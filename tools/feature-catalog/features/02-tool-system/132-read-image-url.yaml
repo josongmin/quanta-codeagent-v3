@@ -16,7 +16,8 @@ evidence:
     - src/tool/image/from-url.ts
   adrs: [132]
   tests:
-    unit: []
+    unit:
+      - tests/unit/tool/read-image-url-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

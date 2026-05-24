@@ -25,7 +25,9 @@ evidence:
     - src/shared/jsonrpc/envelope.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/jsonrpc-codec.test.ts
+      - tests/unit/jsonrpc-envelope.test.ts
     integration: []
     contract: []
 knobs: []

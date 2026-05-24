@@ -23,8 +23,10 @@ evidence:
     - src/agent/side-conversation/dispatch.ts
   adrs: [49]
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/side-conversation.test.ts
+    integration:
+      - tests/integration/side-conversation-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

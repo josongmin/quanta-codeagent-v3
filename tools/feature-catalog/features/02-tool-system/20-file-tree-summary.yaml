@@ -15,8 +15,12 @@ evidence:
     - src/tool/file-tree-summary/index.ts
   adrs: []
   tests:
-    unit: []
-    integration: [tests/integration/file-tree-summary.test.ts]
+    unit:
+      - tests/unit/file-tree-summary-purpose.test.ts
+      - tests/unit/file-tree-summary-rank.test.ts
+    integration:
+      - tests/integration/file-tree-summary.test.ts
+      - tests/integration/file-tree-summary-rank.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

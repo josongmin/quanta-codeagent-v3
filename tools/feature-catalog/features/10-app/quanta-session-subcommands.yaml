@@ -22,7 +22,8 @@ evidence:
     - src/session/paths.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/cli-session-commands.test.ts
     integration: []
     contract: []
 knobs: []

@@ -24,7 +24,8 @@ evidence:
     - tools/swebench-matrix.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/swebench-matrix.test.ts
     integration: []
     contract: []
 knobs:

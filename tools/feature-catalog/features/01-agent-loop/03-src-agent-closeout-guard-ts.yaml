@@ -10,7 +10,8 @@ evidence:
   code: [src/agent/closeout-guard.ts]
   adrs: [17]
   tests:
-    unit: []
+    unit:
+      - tests/unit/closeout-guard.test.ts
     integration: []
     contract: []
 knobs: []

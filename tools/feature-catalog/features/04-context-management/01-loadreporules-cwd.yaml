@@ -10,7 +10,9 @@ evidence:
   code: [src/agent/repo-rules.ts]
   adrs: [15]
   tests:
-    unit: []
+    unit:
+      - tests/unit/repo-rules.test.ts
+      - tests/unit/repo-rules-tree-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

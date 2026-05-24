@@ -20,8 +20,12 @@ evidence:
     - src/agent/stop-category.ts
   adrs: [120]
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/refusal-handling.test.ts
+      - tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts
+    integration:
+      - tests/integration/agent-refusal-e2e.test.ts
+      - tests/integration/refusal-multi-turn-carryover.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

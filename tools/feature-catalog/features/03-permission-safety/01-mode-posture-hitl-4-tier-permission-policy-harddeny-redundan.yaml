@@ -10,7 +10,8 @@ evidence:
   code: [src/agent/admissibility-gate.ts]
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/admissibility-gate.test.ts
     integration: []
     contract: []
 knobs: []

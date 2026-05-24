@@ -29,7 +29,10 @@ evidence:
     - src/llm/adapters/openai.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/anthropic.test.ts
+      - tests/unit/openai-adapter.test.ts
+      - tests/unit/openai.test.ts
     integration: []
     contract: []
 knobs:

@@ -28,7 +28,10 @@ evidence:
     - src/permission/remember-patterns.ts
   adrs: [61]
   tests:
-    unit: []
+    unit:
+      - tests/unit/permission-gate-pattern-wire.test.ts
+      - tests/unit/permission-remember-patterns.test.ts
+      - tests/unit/permission/remember-patterns-classifier-hell.test.ts
     integration:
       - tests/integration/remember-patterns-cascade-hell.test.ts
     contract: []

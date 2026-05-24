@@ -17,7 +17,10 @@ evidence:
     - src/agent/hooks.ts
   adrs: [113]
   tests:
-    unit: []
+    unit:
+      - tests/unit/hooks-updated-input.test.ts
+      - tests/unit/hooks-updated-input-hellgate.test.ts
+      - tests/unit/agent/hook-updated-input.test.ts
     integration: []
     contract: []
 knobs: []

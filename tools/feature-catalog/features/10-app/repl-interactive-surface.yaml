@@ -23,7 +23,9 @@ evidence:
     - src/apps/cli/image-loader.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/cli-image-loader.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs: []

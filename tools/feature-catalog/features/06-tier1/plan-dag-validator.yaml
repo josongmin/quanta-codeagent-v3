@@ -23,7 +23,8 @@ evidence:
     - src/agent/plan/dag.ts
   adrs: [95]
   tests:
-    unit: []
+    unit:
+      - tests/unit/agent/plan/dag-hell.test.ts
     integration: []
     contract: []
 knobs: []

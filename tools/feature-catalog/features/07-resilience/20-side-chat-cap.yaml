@@ -22,7 +22,8 @@ evidence:
     - src/runner/orchestrate/side-chat.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/runner/side-chat.test.ts
     integration: []
     contract: []
 knobs: []

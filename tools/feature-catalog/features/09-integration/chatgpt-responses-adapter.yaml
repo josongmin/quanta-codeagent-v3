@@ -26,7 +26,10 @@ evidence:
     - src/auth/chatgpt-oauth/token-store.ts
   adrs: [94]
   tests:
-    unit: []
+    unit:
+      - tests/unit/auth/chatgpt-oauth-adapter.test.ts
+      - tests/unit/auth/refresh.test.ts
+      - tests/unit/auth/token-store.test.ts
     integration: []
     contract: []
 knobs: []

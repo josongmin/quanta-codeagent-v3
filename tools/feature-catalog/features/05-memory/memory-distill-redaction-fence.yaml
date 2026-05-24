@@ -23,7 +23,9 @@ evidence:
     - src/security/redaction.ts
   adrs: [78]
   tests:
-    unit: []
+    unit:
+      - tests/unit/memory-distill-redaction-hellgate.test.ts
+      - tests/unit/memory-distill.test.ts
     integration:
       - tests/integration/redaction-three-application-points.test.ts
     contract: []

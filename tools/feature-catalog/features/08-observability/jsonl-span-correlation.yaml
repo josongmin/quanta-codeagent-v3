@@ -27,7 +27,9 @@ evidence:
     - src/shared/trajectory.ts
   adrs: [2]
   tests:
-    unit: []
+    unit:
+      - tests/unit/jsonl-recorder.test.ts
+      - tests/unit/jsonl-recorder-retention.test.ts
     integration: []
     contract: []
 knobs: []

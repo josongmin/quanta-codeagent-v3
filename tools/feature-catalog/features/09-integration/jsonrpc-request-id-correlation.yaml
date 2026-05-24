@@ -24,7 +24,8 @@ evidence:
     - src/shared/jsonrpc/correlation.ts
   adrs: [23]
   tests:
-    unit: []
+    unit:
+      - tests/unit/jsonrpc-correlation.test.ts
     integration: []
     contract: []
 knobs: []

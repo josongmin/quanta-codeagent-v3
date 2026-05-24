@@ -24,7 +24,8 @@ evidence:
     - src/security/sensitivity-classifier.ts
   adrs: [78]
   tests:
-    unit: []
+    unit:
+      - tests/unit/security/sensitivity-classifier.test.ts
     integration:
       - tests/integration/redaction-three-application-points.test.ts
     contract: []

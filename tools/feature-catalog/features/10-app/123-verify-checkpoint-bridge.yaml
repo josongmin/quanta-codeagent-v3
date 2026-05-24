@@ -16,7 +16,8 @@ evidence:
     - src/agent/verify-checkpoint-bridge.ts
   adrs: [123]
   tests:
-    unit: []
+    unit:
+      - tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

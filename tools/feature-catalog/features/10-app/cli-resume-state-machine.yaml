@@ -21,8 +21,10 @@ evidence:
     - src/apps/cli/resume.ts
   adrs: [24]
   tests:
-    integration: []
-    unit: []
+    integration:
+      - tests/integration/resume-e2e.test.ts
+    unit:
+      - tests/unit/cli-resume-heuristic.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

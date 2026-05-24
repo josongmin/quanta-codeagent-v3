@@ -19,8 +19,11 @@ evidence:
     - src/tool/types.ts
   adrs: [126]
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/tool/read-image-hellgate.test.ts
+      - tests/unit/tool/image-read-fsjail-unify-hellgate.test.ts
+    integration:
+      - tests/integration/dispatch-image-roundtrip-hellgate.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

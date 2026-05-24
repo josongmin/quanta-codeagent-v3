@@ -20,7 +20,8 @@ evidence:
     - src/agent/types.ts
   adrs: [121]
   tests:
-    unit: []
+    unit:
+      - tests/unit/checkpoint-policy-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

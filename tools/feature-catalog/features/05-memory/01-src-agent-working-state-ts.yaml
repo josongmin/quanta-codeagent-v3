@@ -10,7 +10,10 @@ evidence:
   code: [src/agent/working-state.ts]
   adrs: [21]
   tests:
-    unit: []
+    unit:
+      - tests/unit/working-state.test.ts
+      - tests/unit/working-state-panel.test.ts
+      - tests/unit/update-working-state.test.ts
     integration: []
     contract: []
 knobs: []

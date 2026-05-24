@@ -27,6 +27,7 @@ evidence:
     unit: []
     integration:
       - tests/integration/migration-claude-code-translator.test.ts
+      - tests/integration/migration-claude-code-fixture.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
