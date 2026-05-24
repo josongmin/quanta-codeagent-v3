@@ -27,6 +27,8 @@ import { lstat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import type { ImageBlock } from "@/llm"
+import { FsJailError } from "@/storage"
+import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
 export const readImageInputSchema = z.object({
@@ -96,21 +98,6 @@ export const sniffMediaType = (bytes: Uint8Array): SupportedMediaType | null => 
     return "image/webp"
   }
   return null
-}
-
-/** Resolve repo-relative paths against `cwd`; absolute paths pass through
- *  (absolute input is explicit user consent — same posture as git_diff).
- *  Returns the resolved absolute path AND a `withinCwd` flag the caller uses
- *  to reject `..`-traversal on relative inputs. */
-const resolveImagePath = (
-  raw: string,
-  cwd: string,
-): { abs: string; explicitlyAbsolute: boolean; withinCwd: boolean } => {
-  const explicitlyAbsolute = path.isAbsolute(raw)
-  const abs = explicitlyAbsolute ? path.resolve(raw) : path.resolve(cwd, raw)
-  const resolvedCwd = path.resolve(cwd)
-  const withinCwd = abs === resolvedCwd || abs.startsWith(resolvedCwd + path.sep)
-  return { abs, explicitlyAbsolute, withinCwd }
 }
 
 /** Build the ok:false result for a `not_found`/lstat-failure. We surface the
@@ -207,8 +194,11 @@ const decodePhase = async (
   return { kind: "ok", bytes, mediaType }
 }
 
-/** Pre-flight (schema parse + abort + path resolve). Returns either an early
- *  ToolResult or the validated input shape. */
+/** Pre-flight (schema parse + abort + path resolve via unified FS jail).
+ *  Path safety is delegated to {@link resolveJailedDoc} (Slice S7) — the
+ *  canonical `@/storage/service`-backed chokepoint. The catch-and-translate
+ *  here preserves the historical "path outside cwd: …" message + typed
+ *  `permission_denied` failure so existing hellgate tests stay green. */
 const preflight = (
   input: ReadImageInput,
   ctx: ToolContext,
@@ -220,16 +210,21 @@ const preflight = (
   if (ctx.signal.aborted) {
     return { kind: "fail", result: errResult("aborted before start") }
   }
-  const { abs, explicitlyAbsolute, withinCwd } = resolveImagePath(parsed.data.path, ctx.cwd)
-  if (!explicitlyAbsolute && !withinCwd) {
-    return {
-      kind: "fail",
-      result: errResult(`path outside cwd: ${parsed.data.path}`, {
-        mode: "permission_denied",
-        path: parsed.data.path,
-        isReadonly: false,
-      }),
+  let abs: string
+  try {
+    abs = resolveJailedDoc(ctx.cwd, parsed.data.path, "image")
+  } catch (e) {
+    if (e instanceof FsJailError) {
+      return {
+        kind: "fail",
+        result: errResult(`path outside cwd: ${parsed.data.path}`, {
+          mode: "permission_denied",
+          path: parsed.data.path,
+          isReadonly: false,
+        }),
+      }
     }
+    throw e
   }
   return { kind: "ok", abs, visiblePath: parsed.data.path }
 }

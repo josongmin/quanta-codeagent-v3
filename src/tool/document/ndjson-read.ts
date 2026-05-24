@@ -7,8 +7,9 @@
  */
 
 import { lstat } from "node:fs/promises"
-import path from "node:path"
 import { z } from "zod"
+import { FsJailError } from "@/storage"
+import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { parseNdjson } from "./ndjson-parse"
 
@@ -38,17 +39,11 @@ const truncate = (s: string): string => {
 const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult =>
   failure === undefined ? { ok: false, output } : { ok: false, output, failure }
 
-const resolveNdjsonPath = (
-  raw: string,
-  cwd: string,
-): { abs: string; explicitlyAbsolute: boolean; withinCwd: boolean } => {
-  const explicitlyAbsolute = path.isAbsolute(raw)
-  const abs = explicitlyAbsolute ? path.resolve(raw) : path.resolve(cwd, raw)
-  const resolvedCwd = path.resolve(cwd)
-  const withinCwd = abs === resolvedCwd || abs.startsWith(resolvedCwd + path.sep)
-  return { abs, explicitlyAbsolute, withinCwd }
-}
-
+/** Pre-flight (schema parse + abort + path resolve via unified FS jail).
+ *  Path safety is delegated to {@link resolveJailedDoc} (Slice S7) — see
+ *  `src/tool/_shared/resolve-jailed-doc.ts` for rationale. The catch-and-
+ *  translate preserves the historical "path outside cwd: …" message + typed
+ *  `permission_denied` failure so existing hellgate tests stay green. */
 const preflight = (
   input: NdjsonReadInput,
   ctx: ToolContext,
@@ -60,16 +55,21 @@ const preflight = (
   if (ctx.signal.aborted) {
     return { kind: "fail", result: errResult("aborted before start") }
   }
-  const { abs, explicitlyAbsolute, withinCwd } = resolveNdjsonPath(parsed.data.path, ctx.cwd)
-  if (!explicitlyAbsolute && !withinCwd) {
-    return {
-      kind: "fail",
-      result: errResult(`path outside cwd: ${parsed.data.path}`, {
-        mode: "permission_denied",
-        path: parsed.data.path,
-        isReadonly: false,
-      }),
+  let abs: string
+  try {
+    abs = resolveJailedDoc(ctx.cwd, parsed.data.path, "ndjson")
+  } catch (e) {
+    if (e instanceof FsJailError) {
+      return {
+        kind: "fail",
+        result: errResult(`path outside cwd: ${parsed.data.path}`, {
+          mode: "permission_denied",
+          path: parsed.data.path,
+          isReadonly: false,
+        }),
+      }
     }
+    throw e
   }
   return { kind: "ok", abs, visiblePath: parsed.data.path }
 }
