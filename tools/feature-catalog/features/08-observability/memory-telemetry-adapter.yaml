@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:adapter", "absorbed:opentelemetry"]
 depends_on: [memory-telemetry-port, otel-sink]
-configurable: static
 purpose: |
   Production binding of `MemoryTelemetryPort` (from @/memory) onto the
   typed `MetricsRegistry` port (from @/observability/metrics). Lives in

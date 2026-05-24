@@ -4,7 +4,6 @@ section: 4
 subsystem: 시스템 프롬프트+캐시 prefix
 order: 3
 maturity: L3
-maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a

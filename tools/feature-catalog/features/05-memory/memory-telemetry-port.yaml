@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "tier:port", "absorbed:opentelemetry", "security-touched"]
 depends_on: [memory-distill-redaction-fence]
-configurable: static
 purpose: |
   Structural port that lets the @/memory slice emit phase1 (per-thread
   distill), phase2 (global consolidator), and recall (rank) telemetry

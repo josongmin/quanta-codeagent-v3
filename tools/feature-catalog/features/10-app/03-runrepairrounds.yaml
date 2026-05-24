@@ -4,7 +4,6 @@ section: 10
 subsystem: 벤치
 order: 3
 maturity: L3
-maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a

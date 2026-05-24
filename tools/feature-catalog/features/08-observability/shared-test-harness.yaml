@@ -4,7 +4,6 @@ section: 8
 subsystem: 테스트 인프라 (LLM·StreamPort 더블 + AgentConfig 빌더 단일 출처)
 order: 75
 maturity: L2
-maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial

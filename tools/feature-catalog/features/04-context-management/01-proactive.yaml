@@ -4,7 +4,6 @@ section: 4
 subsystem: 압축(LLM 요약)
 order: 1
 maturity: L3
-maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
