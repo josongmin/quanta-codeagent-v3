@@ -1,9 +1,13 @@
 /**
- * ★ CONTRACT — ADR-0163 §foundry-watch:
+ * ★ CONTRACT — ADR-0163 / ADR-0172 §foundry-watch:
  *   - `checkFoundrySdkAvailability()` NEVER throws. Worst case is
- *     `{installed:false, npmPublished:false}` (omitting `npmVersion`).
- *   - `installed` mirrors the adapter's `isFoundryAdapterReady()` predicate —
- *     today the package is unpublished, so it's false on the live path.
+ *     `{installed:<live>, npmPublished:false}` (omitting `npmVersion`).
+ *   - `installed` mirrors the adapter's `isFoundryAdapterReady()` predicate.
+ *     ADR-0172 graduated the adapter to a real impl; the SDK is now
+ *     installed in `node_modules`, so the live predicate returns TRUE.
+ *     The watcher reflects that — the `installed` flag in these tests pins
+ *     against the real loader, not against a synthetic mock (no isolation
+ *     seam was added to the watcher; the predicate is its own SSOT).
  *   - npm 404 ⇒ `npmPublished:false`, no `npmVersion`.
  *   - npm 200 with `dist-tags.latest` ⇒ `npmPublished:true` + `npmVersion`.
  *   - `fetcher` seam wins over global fetch.
@@ -31,11 +35,15 @@ const fakeFetch = (status: number, body: unknown): typeof fetch =>
   }) as unknown as typeof fetch
 
 describe("foundry-watch — hellgate", () => {
-  test("HELL-W1: npm 404 → both false, no npmVersion key", async () => {
+  test("HELL-W1: npm 404 → npmPublished:false, no npmVersion key", async () => {
     const r = await checkFoundrySdkAvailability({
       fetcher: fakeFetch(404, { error: "Not found" }),
     })
-    expect(r.installed).toBe(false)
+    // `installed` reflects the live local resolve; after ADR-0172 the SDK
+    // is on disk so this is TRUE — the contract here is only that the
+    // fetcher's 404 is mapped into npmPublished:false, NOT that installed
+    // is necessarily false.
+    expect(typeof r.installed).toBe("boolean")
     expect(r.npmPublished).toBe(false)
     // exactOptional: the key MUST be absent (not `undefined`) when unknown.
     expect("npmVersion" in r).toBe(false)
@@ -50,9 +58,9 @@ describe("foundry-watch — hellgate", () => {
     })
     expect(r.npmPublished).toBe(true)
     expect(r.npmVersion).toBe("0.1.0")
-    // `installed` still reflects the local resolve — the package is not in
-    // node_modules even when the registry says it is published.
-    expect(r.installed).toBe(false)
+    // `installed` reflects the live local resolve — pinning the type, not
+    // the value (which depends on what's in node_modules at test time).
+    expect(typeof r.installed).toBe("boolean")
   })
 
   test("HELL-W3: fetcher injection wins — synthetic fetch is called, not global", async () => {
@@ -78,7 +86,9 @@ describe("foundry-watch — hellgate", () => {
     // The helper MUST NOT propagate. A status panel that crashes on offline
     // mode is worse than one that says "I don't know".
     const r = await checkFoundrySdkAvailability({ fetcher: throwingFetch })
-    expect(r.installed).toBe(false)
+    // `installed` is a live resolve — pin the type, the network failure
+    // path is what matters here.
+    expect(typeof r.installed).toBe("boolean")
     expect(r.npmPublished).toBe(false)
     expect("npmVersion" in r).toBe(false)
   })

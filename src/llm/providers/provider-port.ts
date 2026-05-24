@@ -53,10 +53,19 @@ export type ProviderId = "default" | "bedrock" | "vertex" | "foundry" | "mantle"
  * - `gcpAccessToken`      `vertex` transport — optional explicit bearer. Omit
  *                         to let `google-auth-library` resolve from ADC
  *                         (Application Default Credentials).
- * - `azureEndpoint` / `azureApiKey`
- *                         `foundry` transport — Phase 1 stub only; recorded
- *                         here so the Phase 2 wiring is a pure adapter
- *                         change with no port-shape churn.
+ * - `azureEndpoint` / `azureApiKey` / `azureResource` / `azureADTokenProvider`
+ *                         `foundry` transport (ADR-0172 graduates from stub
+ *                         to real stream). `azureResource` is the Foundry
+ *                         resource NAME ("acme" in
+ *                         "https://acme.services.ai.azure.com") — SDK
+ *                         synthesises the full URL. `azureEndpoint` is the
+ *                         FULL baseURL override; supplying BOTH ⇒ typed
+ *                         `provider-misconfigured` (SDK mutually exclusive).
+ *                         `azureADTokenProvider` is a caller-supplied async
+ *                         fn that returns a fresh Entra (formerly AAD)
+ *                         bearer; SDK invokes it on every request so callers
+ *                         can refresh from MSAL / DefaultAzureCredential
+ *                         without touching this slot.
  */
 export interface ProviderAuth {
   readonly apiKey?: string
@@ -69,6 +78,8 @@ export interface ProviderAuth {
   readonly gcpAccessToken?: string
   readonly azureEndpoint?: string
   readonly azureApiKey?: string
+  readonly azureResource?: string
+  readonly azureADTokenProvider?: () => Promise<string>
 }
 
 /**

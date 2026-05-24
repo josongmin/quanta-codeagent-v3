@@ -1,0 +1,38 @@
+{
+  "name": "@quanta/linux-sandbox-native",
+  "version": "0.1.0",
+  "description": "Native Linux Landlock + seccomp binding for quanta OS sandbox (ADR-0175 Phase 3)",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": ["index.js", "index.d.ts"],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 20"
+  },
+  "napi": {
+    "name": "linux-sandbox-native",
+    "triples": {
+      "defaults": false,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  },
+  "optionalDependencies": {
+    "@quanta/linux-sandbox-native-linux-x64-gnu": "0.1.0",
+    "@quanta/linux-sandbox-native-linux-x64-musl": "0.1.0",
+    "@quanta/linux-sandbox-native-linux-arm64-gnu": "0.1.0",
+    "@quanta/linux-sandbox-native-linux-arm64-musl": "0.1.0"
+  }
+}

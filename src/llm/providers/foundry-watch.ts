@@ -1,11 +1,18 @@
 /**
- * ADR-0163 — Foundry SDK availability watcher.
+ * ADR-0163 / ADR-0172 — Foundry SDK availability watcher.
  *
- * Pairs with {@link FoundryProviderAdapter}: that file scaffolds the typed
- * not-yet-shipped adapter for the (currently unpublished)
- * `@anthropic-ai/foundry-sdk`; THIS file answers the operational question
- * "has it shipped yet?" without forcing the caller to manually
- * `curl registry.npmjs.org`.
+ * SDK published 2025-11-18 (`@anthropic-ai/foundry-sdk@0.2.3`). ADR-0172
+ * graduates the adapter to a real stream; THIS file's role shifts from
+ * "has it shipped yet?" to "is the published surface drifting from what
+ * our adapter was validated against?". The mechanics (npm registry GET +
+ * local install probe) are unchanged; what changed is the OPERATIONAL
+ * meaning of the result — `npmPublished:true` is now the steady state,
+ * and a `npmVersion` drift away from {@link KNOWN_PUBLISHED_VERSION}
+ * (re-exported below) tells ops "validate before bumping".
+ *
+ * Pairs with {@link FoundryProviderAdapter}: that file owns the lazy
+ * SDK importer + the readiness predicate; THIS file's `installed` flag
+ * mirrors that predicate so they cannot diverge.
  *
  * Two signals, returned as a single struct:
  *
@@ -31,12 +38,20 @@
  * single seam used by tests to substitute a synthetic fetch.
  */
 
-import { FOUNDRY_SDK_NPM_URL, FOUNDRY_SDK_PACKAGE, isFoundryAdapterReady } from "./foundry-adapter"
+import {
+  FOUNDRY_SDK_NPM_URL,
+  FOUNDRY_SDK_PACKAGE,
+  isFoundryAdapterReady,
+  KNOWN_PUBLISHED_VERSION,
+} from "./foundry-adapter"
 
 /** Public coordinates re-exported so a single import gives the caller both
  *  the watch surface AND the canonical URL it watches against. Same SSOT
- *  discipline as `PROVIDER_ENV_KEYS` in the registry. */
-export { FOUNDRY_SDK_NPM_URL, FOUNDRY_SDK_PACKAGE }
+ *  discipline as `PROVIDER_ENV_KEYS` in the registry. {@link KNOWN_PUBLISHED_VERSION}
+ *  is the SDK version this adapter was validated against (ADR-0172); a
+ *  status panel may compare it against the live `dist-tags.latest` to flag
+ *  drift for ops review (the watcher itself never blocks on a mismatch). */
+export { FOUNDRY_SDK_NPM_URL, FOUNDRY_SDK_PACKAGE, KNOWN_PUBLISHED_VERSION }
 
 /**
  * Result of an availability check. Optional `npmVersion` follows

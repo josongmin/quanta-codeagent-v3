@@ -1,0 +1,25 @@
+diff --git a/pylint/checkers/similar.py b/pylint/checkers/similar.py
+index c65b1c893..421a8ff3d 100644
+--- a/pylint/checkers/similar.py
++++ b/pylint/checkers/similar.py
+@@ -393,7 +393,19 @@ class Similar:
+         self._display_sims(self._compute_sims())
+ 
+     def _compute_sims(self) -> List[Tuple[int, Set[LinesChunkLimits_T]]]:
+-        """compute similarities in appended files"""
++        """compute similarities in appended files
++
++        If min_lines is set to 0 or a negative value the similarity check is
++        considered disabled and no similarities are reported. This mirrors the
++        common linter behaviour where setting a numeric threshold to 0 disables
++        the corresponding check.
++        """
++        # Disable similarity checking when the configured minimum number of
++        # similar lines is non-positive. Previously a value of 0 produced
++        # spurious matches because 0-line chunks all hashed to the same value.
++        if self.min_lines <= 0:
++            return []
++
+         no_duplicates: Dict[int, List[Set[LinesChunkLimits_T]]] = defaultdict(list)
+ 
+         for commonality in self._iter_sims():

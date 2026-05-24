@@ -21,6 +21,12 @@
  * port help operators catch silent unwired-slice drift (e.g. someone added
  * a new bag key but forgot to wire it at composition root). Default behavior
  * is byte-identical to ADR-0161 when `warnOnSkipped` is absent.
+ *
+ * ADR-0172: opt-in `emitWiredGauge` flag emits one `observability.wired.total`
+ * gauge per bag key with `{slice: <key>}` label and value `1` (wired) or `0`
+ * (unwired). Machine-readable counterpart to ADR-0169's operator-facing log:
+ * the log reminds humans during startup; the gauge feeds PromQL alerts and
+ * dashboards. Default `false` — byte-identical when absent (no gauge emit).
  */
 
 import type { BudgetLedger } from "@/agent/budget-ledger"
@@ -70,6 +76,21 @@ export interface ObservabilityOpts {
   readonly skippedExpected?: ReadonlySet<keyof ObservabilityBag>
   /** Inject the warning sink (default: console.warn). */
   readonly warn?: (msg: string) => void
+  /** ADR-0172: when true, emit one gauge per `ObservabilityBag` key with
+   *  value `1` (wired) or `0` (unwired) under metric name
+   *  `observability.wired.total` with label `{slice: <key>}`. Operators
+   *  query via PromQL (`observability_wired_total{slice="llmProvider"} == 0`
+   *  → alert; `sum(observability_wired_total) by(slice) == 0` for any
+   *  required slice). Default `false` — silent (byte-identical to today,
+   *  no gauge emission).
+   *
+   *  Semantics: the gauge ALWAYS reflects truth — `skippedExpected` only
+   *  silences the operator-facing warning log; an "intentionally skipped"
+   *  slice still emits `observability.wired.total{slice=X} = 0`. The
+   *  warning is operator-facing (sticky reminder), the gauge is
+   *  machine-facing (PromQL-grepable wiring health). Different concerns;
+   *  do not couple. */
+  readonly emitWiredGauge?: boolean
 }
 
 export interface InstrumentedBag {
@@ -149,6 +170,22 @@ export const withFullObservability = (
       } else {
         // biome-ignore lint/suspicious/noConsole: documented default sink (ADR-0169)
         console.warn(msg)
+      }
+    }
+  }
+  if (opts.emitWiredGauge === true) {
+    // ADR-0172: emit one gauge per bag key. Value = 1 when wrapped output is
+    // defined (slice was wired), 0 otherwise. Gauge name is the meta-metric
+    // `observability.wired.total` regardless of `opts.prefixes` (prefixes
+    // scope per-subsystem metrics; this gauge is about the helper itself).
+    // Sink failures are swallowed per-key so one broken gauge does not block
+    // the remaining 6 — `metrics.gauge` is documented no-throw on the
+    // in-memory registry, but a custom adapter may throw; we defend here.
+    for (const k of ALL_BAG_KEYS) {
+      try {
+        m.gauge("observability.wired.total", out[k] === undefined ? 0 : 1, { slice: k })
+      } catch {
+        // continue — other slices still get their gauge.
       }
     }
   }

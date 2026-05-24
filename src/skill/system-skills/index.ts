@@ -95,6 +95,12 @@ export {
   GET_PR_COMMENTS_SKILL_NAME,
   triggerGetPrComments,
 } from "./get-pr-comments"
+export type { GitLogSearchTrigger } from "./git-log-search"
+export {
+  findGitLogSearchSkill,
+  GIT_LOG_SEARCH_SKILL_NAME,
+  triggerGitLogSearch,
+} from "./git-log-search"
 export type { LocalizeFaultTrigger } from "./localize-fault"
 // Per-skill wiring seams. Re-exported here so external callers (a slash-
 // router, a planner UI, ADR-0045 §wiring) import from

@@ -1,4 +1,9 @@
 import { spawn as nodeSpawn } from "node:child_process"
+import {
+  detectNativeLandlock,
+  type NativeLandlockConfig,
+  nativeLandlockOsSandbox,
+} from "./landlock-native"
 import { isBubblewrapAvailable, spawnViaBubblewrap } from "./landlock"
 import { compileSeatbeltProfile } from "./seatbelt"
 import type {
@@ -16,17 +21,17 @@ import type {
  * to inject a fake in tests; production wires the real Bun-spawn-compatible
  * default below.
  */
-export const defaultOsSandbox = (cfg: OsSandboxConfig = {}): OsSandbox => {
+export const defaultOsSandbox = (cfg: NativeLandlockConfig = {}): OsSandbox => {
   const platform: NodeJS.Platform = cfg.platform ?? process.platform
   const spawner: Spawner = cfg.spawner ?? defaultSpawner
   const which = cfg.which ?? defaultWhich
 
   return {
     async spawn(spec, policy) {
-      return spawnImpl({ spec, policy, platform, spawner, which })
+      return spawnImpl({ spec, policy, platform, spawner, which, nativeCfg: cfg })
     },
     async availability() {
-      return availabilityImpl({ platform, which })
+      return availabilityImpl({ platform, which, nativeCfg: cfg })
     },
   }
 }
@@ -41,8 +46,9 @@ const spawnImpl = async (args: {
   platform: NodeJS.Platform
   spawner: Spawner
   which: (b: string) => Promise<string | null>
+  nativeCfg: NativeLandlockConfig
 }): Promise<SandboxedSpawnResult> => {
-  const { spec, policy, platform, spawner, which } = args
+  const { spec, policy, platform, spawner, which, nativeCfg } = args
 
   // off / danger-full-access: pass-through verbatim. sandboxApplied=false,
   // NO degradeReason (because the caller explicitly asked for no sandbox).
@@ -71,10 +77,23 @@ const spawnImpl = async (args: {
     return runSeatbelt({ sandboxExec, profile, spec, spawner })
   }
 
-  // Linux: Phase 2 = bubblewrap shell-out (ADR-0150). When `bwrap` is on
-  // PATH, run under bubblewrap (sandboxApplied=true). When missing, degrade
-  // honestly with an actionable install hint.
+  // Linux fallback chain (ADR-0175 — Phase 3 native landlock on top of
+  // Phase 2 bwrap fallback):
+  //   1. nativeLandlockOsSandbox — when @quanta/linux-sandbox-native is
+  //      loaded AND the kernel supports Landlock (probe via
+  //      detectNativeLandlock).
+  //   2. spawnViaBubblewrap (ADR-0150) — when `bwrap` is on PATH.
+  //   3. degraded passthrough with an actionable install hint.
+  //
+  // The native probe is a no-op when the package isn't installed (returns
+  // null synchronously after a typed JSON parse), so non-Linux hosts and
+  // Linux hosts without the optional dep both flow through to the Phase 2
+  // path without any spurious throws.
   if (platform === "linux") {
+    const native = await detectNativeLandlock(nativeCfg)
+    if (native !== null) {
+      return nativeLandlockOsSandbox(nativeCfg).spawn(spec, policy)
+    }
     if (await isBubblewrapAvailable(which)) {
       return spawnViaBubblewrap(spec, policy, spawner)
     }
@@ -163,8 +182,9 @@ const passthrough = async (
 const availabilityImpl = async (args: {
   platform: NodeJS.Platform
   which: (b: string) => Promise<string | null>
+  nativeCfg: NativeLandlockConfig
 }): Promise<SandboxAvailability> => {
-  const { platform, which } = args
+  const { platform, which, nativeCfg } = args
   if (platform === "darwin") {
     const sb = await which("sandbox-exec")
     if (sb !== null) return { backend: "seatbelt", warnings: [] }
@@ -174,6 +194,13 @@ const availabilityImpl = async (args: {
     }
   }
   if (platform === "linux") {
+    // Tier 1: native landlock (ADR-0175). When the napi binding loads + the
+    // kernel reports a usable Landlock ABI, this wins over bubblewrap.
+    const native = await detectNativeLandlock(nativeCfg)
+    if (native !== null) {
+      return { backend: "landlock+seccomp", warnings: [] }
+    }
+    // Tier 2: bubblewrap (ADR-0150).
     const bw = await which("bwrap")
     if (bw !== null) {
       return { backend: "bubblewrap", warnings: [] }

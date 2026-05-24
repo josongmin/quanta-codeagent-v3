@@ -48,8 +48,20 @@ import type {
   PersistedSubagentStatus,
   PersistentSchedulerStore,
 } from "../subagent-persistence-store"
+import {
+  defaultIdempotencyClassifier,
+  type IdempotencyClassifier,
+} from "./idempotency"
 import type { ResumeDecision, ResumePolicy } from "./policy"
 import { buildReplaySpec, type ReplayContext, type ReplayPolicy } from "./replay"
+import type { ToolHistoryStore } from "./tool-history"
+import {
+  defaultToolReplayPolicy,
+  replayToolHistory,
+  type ShadowCommitRestorer,
+  type ToolReplayOutcome,
+  type ToolReplayPolicy,
+} from "./tool-replay"
 
 /** Per-handle outcome of one resume sweep. One entry per `"interrupted"`
  *  handle in store order. */
@@ -77,6 +89,14 @@ export interface ResumeOutcome {
    *  trail records the skip reason). ABSENT when `opts.replay` was not
    *  wired (= Phase 2 byte-identical path). */
   readonly replayMetadata?: Readonly<Record<string, string>>
+  /** OPTIONAL (ADR-0174 Phase 3) — tool-history replay outcomes. PRESENT when
+   *  the caller wired `opts.toolReplay.store`; ONE outcome per persisted
+   *  {@link ToolCallRecord} in append order. ABSENT when no tool-history
+   *  wire was supplied (= Phase 2.5 byte-identical). An empty array is
+   *  surfaced (NOT omitted) when the wire was present and the handle had
+   *  zero recorded tool calls — distinguishes "wired but nothing to replay"
+   *  from "wire was off". */
+  readonly toolReplays?: ReadonlyArray<ToolReplayOutcome>
 }
 
 export interface ResumerOpts {
@@ -108,6 +128,26 @@ export interface ResumerOpts {
     readonly context: ReplayContext
     /** Policy — passed verbatim. The 3 stock policies live in `./replay`. */
     readonly policy: ReplayPolicy
+  }
+  /** OPTIONAL (ADR-0174 Phase 3) — tool-history replay wiring. When ABSENT,
+   *  the orchestrator is BYTE-IDENTICAL to Phase 2.5 (no `toolReplays` on
+   *  the outcome). When PRESENT, `replayToolHistory` runs BEFORE the new
+   *  fork starts processing (so the cached tool outputs + shadow restore
+   *  are in place when the re-fork's first turn fires). `classifier` and
+   *  `policy` default to {@link defaultIdempotencyClassifier} +
+   *  {@link defaultToolReplayPolicy} when omitted. NO-THROW — any error
+   *  during replay is captured as a `halt` outcome and the resume
+   *  proceeds. */
+  readonly toolReplay?: {
+    /** Persistent tool-history store. Required when this wire is present. */
+    readonly store: ToolHistoryStore
+    /** Idempotency classifier. Default: {@link defaultIdempotencyClassifier}. */
+    readonly classifier?: IdempotencyClassifier
+    /** Replay policy. Default: {@link defaultToolReplayPolicy}. */
+    readonly policy?: ToolReplayPolicy
+    /** Optional shadow-commit restorer. Mutating-recoverable hits HALT when
+     *  absent (cannot restore workspace state). */
+    readonly shadowOdb?: ShadowCommitRestorer
   }
 }
 
@@ -197,6 +237,7 @@ const applyResume = async (
   store: PersistentSchedulerStore,
   tNow: number,
   replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },
+  toolReplay?: ResumerOpts["toolReplay"],
 ): Promise<ResumeOutcome> => {
   // 1) OPTIONAL replay seed — NO-THROW composer.
   let seedMessages: ReadonlyArray<Message> = []
@@ -205,6 +246,43 @@ const applyResume = async (
     const replayed = await buildReplaySpec(handle, replay.context, replay.policy)
     seedMessages = replayed.seedMessages
     replayMetadata = replayed.replayMetadata
+  }
+
+  // 1b) OPTIONAL tool-history replay — runs BEFORE fork so workspace state +
+  //     cached outputs are ready when the re-fork's first turn fires.
+  //     NO-THROW: orchestrator captures errors as `halt` outcomes per record;
+  //     store-list-throw collapses to a synthetic single halt entry so the
+  //     main resume STILL proceeds (Phase 2.5 fault-tolerance posture).
+  let toolReplays: ReadonlyArray<ToolReplayOutcome> | undefined
+  if (toolReplay !== undefined) {
+    const classifier = toolReplay.classifier ?? defaultIdempotencyClassifier()
+    const policy = toolReplay.policy ?? defaultToolReplayPolicy()
+    const workspace = handle.workspace ?? handle.spec.workspace ?? ""
+    try {
+      const records = await toolReplay.store.list(handle.id)
+      toolReplays = await replayToolHistory({
+        records,
+        classifier,
+        policy,
+        workspace,
+        ...(toolReplay.shadowOdb !== undefined ? { shadowOdb: toolReplay.shadowOdb } : {}),
+      })
+    } catch (e) {
+      // Store-list itself threw — surface as a single halt outcome so the
+      // audit trail records WHY no per-call replays ran. Main resume still
+      // proceeds (the new fork starts fresh; the cached outputs are simply
+      // unavailable).
+      toolReplays = [
+        {
+          toolUseId: "(store-list)",
+          toolName: "(store-list)",
+          decision: {
+            action: "halt",
+            reason: `tool-history store.list threw: ${errMsg(e)}`,
+          },
+        },
+      ]
+    }
   }
 
   // 2) Build the resumed spec — replayMetadata is merged into spec.metadata
@@ -219,6 +297,7 @@ const applyResume = async (
       errorMessage: `scheduler.fork: ${errMsg(e)}`,
       ...(seedMessages.length > 0 ? { seedMessages } : {}),
       ...(replayMetadata !== undefined ? { replayMetadata } : {}),
+      ...(toolReplays !== undefined ? { toolReplays } : {}),
     }
   }
   try {
@@ -231,6 +310,7 @@ const applyResume = async (
       errorMessage: `store.save: ${errMsg(e)}`,
       ...(seedMessages.length > 0 ? { seedMessages } : {}),
       ...(replayMetadata !== undefined ? { replayMetadata } : {}),
+      ...(toolReplays !== undefined ? { toolReplays } : {}),
     }
   }
   return {
@@ -239,6 +319,7 @@ const applyResume = async (
     newId,
     ...(seedMessages.length > 0 ? { seedMessages } : {}),
     ...(replayMetadata !== undefined ? { replayMetadata } : {}),
+    ...(toolReplays !== undefined ? { toolReplays } : {}),
   }
 }
 
@@ -268,10 +349,11 @@ const applyDecision = (
   store: PersistentSchedulerStore,
   tNow: number,
   replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },
+  toolReplay?: ResumerOpts["toolReplay"],
 ): Promise<ResumeOutcome> => {
   switch (decision.action) {
     case "resume":
-      return applyResume(handle, decision, scheduler, store, tNow, replay)
+      return applyResume(handle, decision, scheduler, store, tNow, replay, toolReplay)
     case "mark-failed":
       return applyMarkFailed(handle, decision, store, tNow)
     case "skip":
@@ -289,6 +371,7 @@ export const resumeInterruptedHandles = async (
   const { scheduler, store, policy, workspace } = opts
   const now = opts.now ?? Date.now
   const replay = opts.replay
+  const toolReplay = opts.toolReplay
 
   // `store.list` failure bubbles — it indicates the persistence layer itself
   // is unreachable; the caller decides whether to retry / surface to user.
@@ -312,7 +395,9 @@ export const resumeInterruptedHandles = async (
       })
       continue
     }
-    outcomes.push(await applyDecision(handle, decision, scheduler, store, now(), replay))
+    outcomes.push(
+      await applyDecision(handle, decision, scheduler, store, now(), replay, toolReplay),
+    )
   }
   return outcomes
 }

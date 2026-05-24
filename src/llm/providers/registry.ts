@@ -1,13 +1,19 @@
 /**
- * ADR-0139 — provider registry. Pure resolution: `(explicit?, env?) → ProviderId`
- * + `(id → factory)` mapping. No I/O, no SDK touches at module load.
+ * ADR-0139 / ADR-0172 — provider registry. Pure resolution:
+ * `(explicit?, env?) → ProviderId` + `(id → factory)` mapping. No I/O, no
+ * SDK touches at module load.
  *
  * Selection precedence (deterministic, byte-stable):
  *
  *   1. Explicit `id` arg (caller wins).
  *   2. `ANTHROPIC_BEDROCK_BASE_URL` → `bedrock`.
  *   3. `ANTHROPIC_VERTEX_BASE_URL`  → `vertex`.
- *   4. `ANTHROPIC_FOUNDRY_BASE_URL` → `foundry`.
+ *   4. `ANTHROPIC_FOUNDRY_BASE_URL` OR `ANTHROPIC_FOUNDRY_RESOURCE` OR
+ *      `QUANTA_USE_FOUNDRY=1` OR `CLAUDE_CODE_USE_FOUNDRY=1` → `foundry`.
+ *      The Foundry signal expanded in ADR-0172 — the SDK accepts EITHER a
+ *      `resource` name (synthesises the URL) or a full `baseURL`, so either
+ *      env triggers selection. The two `*_USE_*` boolean switches are the
+ *      Claude-CLI mirror; `QUANTA_USE_FOUNDRY` is the quanta-native spelling.
  *   5. Fallback → `default` (= public `api.anthropic.com`).
  *
  * Unknown ids do NOT throw at `resolveProvider()` time — instead we return a
@@ -48,11 +54,29 @@ const FACTORIES: Record<ProviderId, ProviderFactory> = {
 }
 
 /** Env-var keys watched by the resolver. Exported so callers wiring CLI flags
- *  can surface the canonical names in `--help` output without re-typing them. */
+ *  can surface the canonical names in `--help` output without re-typing them.
+ *  `foundry` retains `ANTHROPIC_FOUNDRY_BASE_URL` as its canonical key (the
+ *  ADR-0139 contract); ADR-0172 adds three OPTIONAL extras read by
+ *  {@link FOUNDRY_EXTRA_ENV_KEYS} below so the precedence ladder accepts both
+ *  resource-style and boolean-switch operator conventions. */
 export const PROVIDER_ENV_KEYS = {
   bedrock: "ANTHROPIC_BEDROCK_BASE_URL",
   vertex: "ANTHROPIC_VERTEX_BASE_URL",
   foundry: "ANTHROPIC_FOUNDRY_BASE_URL",
+} as const
+
+/** Additional env signals that select `foundry` (ADR-0172). Any of these,
+ *  set non-empty (or truthy for the `*_USE_*` flags), routes to Foundry —
+ *  same precedence layer as `ANTHROPIC_FOUNDRY_BASE_URL`. Kept separate from
+ *  {@link PROVIDER_ENV_KEYS} so the type stays a 1:1 transport→key map for
+ *  consumers that iterate it. */
+export const FOUNDRY_EXTRA_ENV_KEYS = {
+  /** Resource-name auth path — SDK synthesises the URL from this. */
+  resource: "ANTHROPIC_FOUNDRY_RESOURCE",
+  /** quanta-native boolean switch. */
+  quantaUse: "QUANTA_USE_FOUNDRY",
+  /** Claude-CLI mirror — Refugee path; same value space ("1" / "true" / "yes"). */
+  claudeUse: "CLAUDE_CODE_USE_FOUNDRY",
 } as const
 
 /** Resolution result. The `factory` is always callable (unknown id ⇒ lazy-throw
@@ -109,8 +133,31 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
   if (vertexUrl !== undefined && vertexUrl.length > 0) {
     return { id: "vertex", factory: FACTORIES.vertex }
   }
+  // Foundry signal — ADR-0172 expanded from one URL key to four. Any of:
+  //   - `ANTHROPIC_FOUNDRY_BASE_URL`     non-empty  (ADR-0139 legacy)
+  //   - `ANTHROPIC_FOUNDRY_RESOURCE`     non-empty  (SDK resource-name path)
+  //   - `QUANTA_USE_FOUNDRY`             truthy     (quanta-native switch)
+  //   - `CLAUDE_CODE_USE_FOUNDRY`        truthy     (Claude-CLI mirror)
+  // routes to Foundry. The boolean switches use the SAME truthy grammar as
+  // `provider-router.ts` (the only SSOT lives there, but the rule is
+  // identical: trimmed, lowercased, in {"1","true","yes"}). We do NOT import
+  // `provider-router` here — the registry stays a leaf module — so the
+  // grammar is repeated locally with a JSDoc cross-reference.
+  const isFoundryUseTruthy = (v: string | undefined): boolean => {
+    if (v === undefined) return false
+    const t = v.trim().toLowerCase()
+    return t === "1" || t === "true" || t === "yes"
+  }
   const foundryUrl = env[PROVIDER_ENV_KEYS.foundry]
-  if (foundryUrl !== undefined && foundryUrl.length > 0) {
+  const foundryResource = env[FOUNDRY_EXTRA_ENV_KEYS.resource]
+  const foundryQuantaUse = env[FOUNDRY_EXTRA_ENV_KEYS.quantaUse]
+  const foundryClaudeUse = env[FOUNDRY_EXTRA_ENV_KEYS.claudeUse]
+  if (
+    (foundryUrl !== undefined && foundryUrl.length > 0) ||
+    (foundryResource !== undefined && foundryResource.length > 0) ||
+    isFoundryUseTruthy(foundryQuantaUse) ||
+    isFoundryUseTruthy(foundryClaudeUse)
+  ) {
     return { id: "foundry", factory: FACTORIES.foundry }
   }
 

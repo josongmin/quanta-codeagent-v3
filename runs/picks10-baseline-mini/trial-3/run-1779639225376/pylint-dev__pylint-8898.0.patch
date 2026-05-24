@@ -1,0 +1,72 @@
+diff --git a/pylint/utils/utils.py b/pylint/utils/utils.py
+index fa7f7b92f..679385a1b 100644
+--- a/pylint/utils/utils.py
++++ b/pylint/utils/utils.py
+@@ -23,7 +23,7 @@ import textwrap
+ import tokenize
+ import warnings
+ from collections.abc import Sequence
+-from io import BufferedReader, BytesIO
++from io import BufferedReader, BytesIO, StringIO
+ from typing import (
+     TYPE_CHECKING,
+     Any,
+@@ -213,12 +213,18 @@ def _splitstrip(string: str, sep: str = ",") -> list[str]:
+     """Return a list of stripped string by splitting the string given as
+     argument on `sep` (',' by default), empty strings are discarded.
+ 
++    This handles quoted fields so commas inside single or double quoted
++    values are not considered separators. Surrounding quotes are removed
++    from each field.
++
+     >>> _splitstrip('a, b, c   ,  4,,')
+     ['a', 'b', 'c', '4']
+     >>> _splitstrip('a')
+     ['a']
+     >>> _splitstrip('a,\nb,\nc,')
+     ['a', 'b', 'c']
++    >>> _splitstrip('"(foo{1,3})"')
++    ['(foo{1,3})']
+ 
+     :type string: str or unicode
+     :param string: a csv line
+@@ -229,7 +235,38 @@ def _splitstrip(string: str, sep: str = ",") -> list[str]:
+     :rtype: str or unicode
+     :return: the unquoted string (or the input string if it wasn't quoted)
+     """
+-    return [word.strip() for word in string.split(sep) if word.strip()]
++    if not string:
++        return []
++    parts: list[str] = []
++    current: list[str] = []
++    in_quote = False
++    quote_char = ""
++    for ch in string:
++        if ch in ('"', "'"):
++            # Toggle entering/exiting a quoted section. We do not support
++            # escape sequences here; config values are expected to quote the
++            # whole field if they contain separators (e.g. "(foo{1,3})").
++            if not in_quote:
++                in_quote = True
++                quote_char = ch
++                current.append(ch)
++                continue
++            if ch == quote_char:
++                in_quote = False
++                quote_char = ""
++                current.append(ch)
++                continue
++        if ch == sep and not in_quote:
++            token = ''.join(current).strip()
++            if token:
++                parts.append(_unquote(token))
++            current = []
++        else:
++            current.append(ch)
++    token = ''.join(current).strip()
++    if token:
++        parts.append(_unquote(token))
++    return parts
+ 
+ 
+ def _unquote(string: str) -> str:

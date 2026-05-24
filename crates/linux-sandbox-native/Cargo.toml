@@ -1,0 +1,23 @@
+[package]
+name = "linux-sandbox-native"
+version = "0.1.0"
+edition = "2021"
+description = "Native Linux Landlock + seccomp binding for quanta OS sandbox (ADR-0175)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi6"] }
+napi-derive = "3"
+landlock = "0.4"
+seccompiler = "0.5"
+
+[build-dependencies]
+napi-build = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
