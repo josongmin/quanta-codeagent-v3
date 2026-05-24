@@ -29,7 +29,8 @@ evidence:
     - src/agent/branch-search/seed.ts
   adrs: [84]
   tests:
-    unit: []
+    unit:
+      - tests/unit/branch-search.test.ts
     integration: []
     contract: []
 knobs: []

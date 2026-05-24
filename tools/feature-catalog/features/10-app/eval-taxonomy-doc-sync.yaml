@@ -3,7 +3,7 @@ title: eval taxonomy doc-sync — code → markdown one-way renderer
 section: 10
 subsystem: eval 앱 — 분류 체계 view generator
 order: 83
-maturity: L2
+maturity: L1
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
@@ -36,4 +36,5 @@ notes: |
   덮어쓰지 않게 향후 round-trip path 추가 시 주의. taxonomy 갱신 이후
   re-render 자동화는 별도 hook seam (현재 manual).
 
-  L3→L2: no test imports evidence.code paths
+  L3→L2→L1: no test imports `doc-sync.ts` (renderTaxonomyMarkdown). The
+  sibling taxonomy test covers TAXONOMY structure only.

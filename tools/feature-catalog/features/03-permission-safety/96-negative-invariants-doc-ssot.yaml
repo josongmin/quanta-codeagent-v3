@@ -3,7 +3,7 @@ title: ADR-0044 negative invariants — single doc SSOT for 12 deliberately-not-
 section: 3
 subsystem: Negative-space ADR — "we do not do X" trust-model declarations
 order: 96
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

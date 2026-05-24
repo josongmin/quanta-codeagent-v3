@@ -30,7 +30,8 @@ evidence:
     - src/permission/recorder.ts
   adrs: [46, 32, 29]
   tests:
-    unit: []
+    unit:
+      - tests/unit/permission-otel-emit-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

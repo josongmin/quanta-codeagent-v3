@@ -13,10 +13,14 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: Biome 슬라이스격리(0001) / 4-tier 테스트(0003) / LoC예산 철회(0011·0012)
 evidence:
-  code: []
+  code:
+    - biome.json
   adrs: [1, 3, 11, 12]
   tests:
-    unit: []
+    unit:
+      - tests/unit/agent-slice-boundary.test.ts
+      - tests/unit/tool-slice-boundary.test.ts
+      - tests/unit/runner-slice-boundary.test.ts
     integration: []
     contract: []
 knobs: []

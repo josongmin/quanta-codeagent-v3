@@ -29,7 +29,8 @@ evidence:
     - src/agent/run-mode/clamp.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/agent/run-mode/clamp.test.ts
     integration: []
     contract: []
 knobs: []

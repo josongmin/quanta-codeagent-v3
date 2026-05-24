@@ -3,7 +3,7 @@ title: agent SCC guard — Tarjan + module-top-level usage 차단 (deadlock 봉�
 section: 10
 subsystem: 아키텍처 정책 (architecture invariants — 정적 deadlock guard)
 order: 26
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -33,9 +33,9 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  L3: guard implementation lives inline in tests/unit/agent-import-cycle.test.ts
-  (no separate production module) — downgraded from L4 because evidence.code has
-  no src/ path. Edge classification: `import type {…}` / `export type {…}` 는
+  L2: guard implementation lives inline in tests/unit/agent-import-cycle.test.ts
+  (no separate production module) — downgraded from L4 → L3 → L2 because
+  evidence.code has no src/ path and only 1 evidence file exists. Edge classification: `import type {…}` / `export type {…}` 는
   type-only 로 erased, cycle detection 제외. `import { type Foo }` mixed 는 보수적으로
   value-edge. 하위 디렉토리 import (`./tier1/...`, `./branch-search/...`) 는 external
   node 로 분리해 top-level files 간 cycle 에 영향 없음. 현재 whitelist 는
