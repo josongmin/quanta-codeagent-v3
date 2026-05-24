@@ -1,0 +1,49 @@
+id: scheduler-weekday-nth
+title: ADR-0161 Weekday nth-occurrence DSL (+1MO … -5FR)
+section: 9
+subsystem: Scheduler / scheduled agent (ADR-0161)
+order: 161
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs: {}
+owners: ["@songmin"]
+labels: ["surface:cli", "surface:ipc"]
+purpose: |
+  `parseWeekday` / `serializeWeekday` / `nthWeekdayOfMonth` /
+  `allOccurrencesInMonth` implement the RFC 5545 BYDAY ordinal grammar
+  Codex's `automation-schedule-BpeIuMts.js` uses for "2nd Monday of every
+  month" (`+2MO`) / "last Friday" (`-1FR`) style automations.
+
+  Strict ordinal range: `+1..+5` and `-5..-1`. Zero ordinal (`+0MO`),
+  out-of-range (`+6MO`), and unknown weekday tokens are rejected
+  (returning `undefined` — caller skips). `nthWeekdayOfMonth(year, month,
+  day, nth)` returns `undefined` when the requested occurrence does NOT
+  exist in that month (e.g. 5th Monday of Feb 2026 — only 4 Mondays);
+  callers (the evaluator) skip to the next month.
+
+  All computation is UTC — the caller surface owns local-time/DST display
+  conversion. DST irrelevance is asserted in hellgate tests.
+evidence:
+  code:
+    - src/scheduler/weekday.ts
+    - src/scheduler/types.ts
+    - src/scheduler/index.ts
+  adrs: [161]
+  tests:
+    unit:
+      - tests/unit/scheduler-weekday.test.ts
+      - tests/unit/scheduler-weekday-nth-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  RFC 5545 §3.3.10 documents `BYDAY` ordinal as MUST NOT be zero — we
+  enforce + test. The Codex `Weekday` class observed in
+  `.extracted_source/codex/.vite/build/automation-schedule-BpeIuMts.js`
+  (per [[extracted-source-novel-findings-2026-05-24]] line 741) uses the
+  same `+nMO` syntax; this slice is the verified-pattern absorption.

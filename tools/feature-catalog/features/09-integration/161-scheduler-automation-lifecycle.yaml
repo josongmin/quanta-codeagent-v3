@@ -1,0 +1,56 @@
+id: scheduler-automation-lifecycle
+title: ADR-0161 Automation 4-arm lifecycle + JSONL store
+section: 9
+subsystem: Scheduler / scheduled agent (ADR-0161)
+order: 161
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  paths:
+    - "~/.quanta/scheduler/<workspaceHash>/automations.jsonl (default)"
+owners: ["@songmin"]
+labels: ["surface:cli", "surface:ipc"]
+purpose: |
+  4-arm closed lifecycle (`active` / `paused` / `deleted` / `error`) +
+  pure transition helpers (`createAutomation` / `transitionStatus` /
+  `recordFire` / `markError` / `isFireEligible`) + file-backed JSONL
+  append-only store.
+
+  Layout mirrors shadow-odb (ADR-0108) and subagent-persistence
+  (ADR-0158): `<baseDir>/<workspaceHash>/automations.jsonl` where
+  `workspaceHash` is `SHA-256(workspace).slice(0, 16)`. Last line per id
+  wins; corrupt single line is silently skipped (a single bad line never
+  breaks `load`). `delete` writes a `status: "deleted"` tombstone which
+  `load` filters out — re-create needs a fresh id.
+
+  `error` is the 4th arm Codex's 3-arm (active/paused/deleted) lacks:
+  set by the runtime when `chooseModel` returned `all-unavailable`, with
+  `lastErrorMessage` capturing the cause. Operator-driven recovery
+  (pause → fix → resume).
+evidence:
+  code:
+    - src/scheduler/types.ts
+    - src/scheduler/automation.ts
+    - src/scheduler/store-jsonl.ts
+    - src/scheduler/index.ts
+  adrs: [161, 158, 108]
+  tests:
+    unit:
+      - tests/unit/scheduler-automation.test.ts
+      - tests/unit/scheduler-automation-store-hellgate.test.ts
+    integration:
+      - tests/integration/scheduler-reactor-end-to-end.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Single-file JSONL (vs ADR-0158's per-handle) chosen because automations
+  are tens not thousands; one `readFile` is more debuggable. `appendFile`
+  append-only crash-safety matches Codex `archived_sessions/*.jsonl`
+  guarantee — torn last line at worst loses the in-flight transition.
+  `save` is the only port that throws (`AutomationStoreError("io-failed")`
+  on EACCES) — `load` / `delete` are NO-THROW per port contract.

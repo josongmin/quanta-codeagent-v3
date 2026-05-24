@@ -1,0 +1,55 @@
+id: scheduler-model-reroute
+title: ADR-0161 Model reroute (preference + fallback chain)
+section: 9
+subsystem: Scheduler / scheduled agent (ADR-0161)
+order: 161
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs: {}
+owners: ["@songmin"]
+labels: ["surface:cli", "surface:ipc"]
+purpose: |
+  `chooseModel({preference, fallbacks, availability})` probes
+  `[preference, ...fallbacks]` in order against the injected
+  `ModelAvailabilityPort` and returns the first available model OR
+  `"all-unavailable"` (with `chosen: preference` so the caller preserves
+  intent in the error path).
+
+  Three closed reason arms:
+    - `"preference-available"` — preference probed OK.
+    - `"fallback"` (+ `fallbackIndex`) — preference unavail, Nth fallback OK.
+    - `"all-unavailable"` — chain exhausted; runtime transitions automation
+       to `error`.
+
+  Probe deduplication: a model appearing in both preference and fallbacks
+  is probed exactly once. A throwing `isAvailable` is treated as
+  unavailable — no exception leak. Empty preference is the "no choice"
+  sentinel returning `all-unavailable` without probing.
+
+  This mirrors Codex `localConversation.modelRerouted.*` warning channel
+  ([[extracted-source-novel-findings-2026-05-24]] line 415): when a
+  preferred model is unavailable, fallback chain probed in order + a
+  warning recorded naming which fallback was used.
+evidence:
+  code:
+    - src/scheduler/model-reroute.ts
+    - src/scheduler/types.ts
+    - src/scheduler/index.ts
+  adrs: [161]
+  tests:
+    unit:
+      - tests/unit/scheduler-model-reroute-hellgate.test.ts
+    integration:
+      - tests/integration/scheduler-reactor-end-to-end.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Auto-retry on transient model failure is deferred — `chooseModel`
+  treats probe-fail as final (one shot per tick). Retry policy
+  (exponential backoff / circuit breaker) is a sibling concern; this
+  module is pure decision logic.
