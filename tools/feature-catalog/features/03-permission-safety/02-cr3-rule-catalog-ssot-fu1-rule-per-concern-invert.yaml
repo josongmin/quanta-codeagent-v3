@@ -5,7 +5,7 @@ subsystem: HARD_DENY (경로무관 하드닝)
 order: 2
 maturity: L5
 status: stable
-purpose: CR3 rule-catalog SSOT + FU1 rule-per-concern invert — HardDenyRule[] 16개 명명 객체. 이전 RegExp[]에서 인버트 — 신규 17번째 룰 추가 시 positive+negative 케이스 미작성 ⇒ 빌드 fail-closed.
+purpose: CR3 rule-catalog SSOT + FU1 rule-per-concern invert — HardDenyRule[] 명명 객체 카탈로그 (이전 RegExp[] 평면 배열에서 인버트). 신규 룰 추가 시 positive+negative 단언 미작성 ⇒ 빌드 fail-closed (rule-level unit이 매 entry 단위로 mustBlock/mustAllow 케이스 강제 + 이름 unique 불변식 검사).
 evidence:
   code: []
   adrs: []

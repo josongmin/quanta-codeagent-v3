@@ -5,7 +5,7 @@ subsystem: Reminder block 순서 (ADR-0023)
 order: 1
 maturity: L5
 status: stable
-purpose: mode → repo-rules → active-skills → working-state → memory-hints . 통합 e2e 6 테스트()로 pin
+purpose: 'Reminder block 순서 (buildDynamicContext): today-date+cwd → mode-notice → repo-rules → glob-rules(.cursor/.quanta per-turn select) → active-skills → working-state → memory-hints → hook injectAfterSystem tail. 통합 e2e가 순서 invariant를 pin.'
 evidence:
   code: []
   adrs: []

@@ -10,7 +10,7 @@ purpose: |
   half in `policy-rules.ts`). Owns `evaluate` / `evaluateAuto` /
   `evaluateStack` / `inferToolTier` / `hardDenyReason` — the four call surfaces
   the admissibility gate composes per-action. Pipeline: (1) HARD_DENY
-  deny-by-default 9-rule baseline runs first (description-only surfacing of
+  deny-by-default baseline runs first (description-only surfacing of
   matched rules — verbatim patterns are NEVER exposed past the slice to
   defeat jailbreak-crafter enumeration); (2) inferred HITL tier overlays
   (`inferToolTier` secure-by-default fallback per ADR-0070); (3)

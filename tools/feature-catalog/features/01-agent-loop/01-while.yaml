@@ -5,7 +5,7 @@ subsystem: 턴 상태머신
 order: 1
 maturity: L5
 status: stable
-purpose: 단일 while 루프, FSM weight 없음
+purpose: 단일 turn 루프 (`for (let turn = 1; turn <= cfg.maxTurns; turn++)` in loop.ts), FSM weight 없음 — 각 턴 = 1 LLM 스트림 + 도구 디스패치, transient backoff retry는 maxTurns 카운터 소비하지 않음.
 evidence:
   code: []
   adrs: []

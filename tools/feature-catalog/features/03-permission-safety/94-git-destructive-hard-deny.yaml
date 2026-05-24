@@ -6,13 +6,13 @@ order: 94
 maturity: L4
 status: stable
 purpose: |
-  HARD_DENY_RULES extension adding workflow-destructive git patterns that
-  prompt-level posture (ADR-0099) cannot guarantee. Covers reset --hard,
-  push --force / --force-with-lease / -f, mutating checkout discard
-  (`checkout -- <path>` / `checkout .` / `checkout <ref> -- <path>`), plus
-  push mass-delete variants (`push --mirror`, `push --force --delete`,
-  multi-refspec colon-delete `:a :b :c …`). Static argv pattern matchers run
-  before tool dispatch; deny is fail-closed regardless of HITL tier.
+  HARD_DENY_RULES extension covering workflow-destructive git argv shapes
+  that prompt-level posture (ADR-0099) cannot guarantee — forced-history
+  rewrites, mutating discard variants, and push mass-delete shapes. Static
+  argv pattern matchers run before tool dispatch; deny is fail-closed
+  regardless of HITL tier. Verbatim patterns live in `policy-rules.ts` and
+  are surfaced description-only past the slice (rule-name + human description,
+  never the regex source).
 evidence:
   code:
     - src/permission/policy-rules.ts
@@ -25,6 +25,6 @@ knobs: []
 deliberate_hold: null
 notes: |
   Two-layer composition with ADR-0099 (prompt) and ADR-0091 (`.git/{hooks,config}`
-  write deny). The push mass-delete trio absorbs Claude Desktop's
-  `push_refused_mass_delete` semantics without needing a memory sync channel —
-  static argv matchers at the dispatch seam suffice.
+  write deny). Push mass-delete coverage absorbs Claude Desktop's
+  `push_refused_mass_delete` semantics without a memory sync channel — static
+  argv matchers at the dispatch seam suffice.
