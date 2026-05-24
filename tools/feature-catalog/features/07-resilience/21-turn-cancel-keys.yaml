@@ -23,10 +23,7 @@ purpose: |
   AgentLoop의 dual signal contract와 정확히 일치.
 evidence:
   code:
-    - src/apps/cli/repl/turn-cancel.ts
     - src/apps/cli/repl.ts
-    - src/apps/cli/repl/interactive-driver.ts
-    - src/apps/cli/repl/oneshot-driver.ts
     - src/runner/orchestrate/run-interactive.ts
   adrs: []
   tests:

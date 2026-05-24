@@ -30,7 +30,6 @@ evidence:
   code:
     - src/apps/cli/session-io.ts
     - src/apps/cli/repl.ts
-    - src/apps/cli/repl/resume-fsm.ts
   adrs: []
   tests:
     unit: []

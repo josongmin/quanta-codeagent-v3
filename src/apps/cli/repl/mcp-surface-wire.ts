@@ -1,3 +1,11 @@
+// SEAM ONLY — no current consumer in `src/apps/cli/repl.ts` (the live God-class
+//   inlines its own MCP-pill derivation; this translator is preserved for the
+//   future SOLID re-split so the surface→`/mcp` snapshot doesn't have to be
+//   re-extracted). Exercised by `tests/unit/mcp-surface-wire.test.ts` so the
+//   contract stays load-bearing; once a future slice replaces `repl.ts` with
+//   `repl/assemble-context.ts` again, this file becomes the wire.
+//   See `tools/feature-catalog/features/10-app/repl-orphan-resolution.yaml`.
+
 /** Build the `/mcp` slash command's data surface from the live CLI MCP wiring.
  *
  *  The CLI is the only place that sees the raw `McpServerConfig[]`, the

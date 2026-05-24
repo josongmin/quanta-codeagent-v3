@@ -38,9 +38,7 @@ purpose: |
   complexity overflow) or in the loop's anonymous closures (untestable).
 evidence:
   code:
-    - src/apps/cli/repl/prompt-source.ts
-    - src/apps/cli/repl/readline-loop.ts
-    - src/apps/cli/repl/interactive-driver.ts
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:

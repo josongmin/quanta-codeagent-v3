@@ -26,7 +26,7 @@ evidence:
     - package.json
     - src/apps/cli/index.ts
     - src/skill/system-skills/index.ts
-    - src/apps/cli/repl/status-pills-wire.ts
+    - src/apps/cli/repl.ts
     - src/apps/cli/internal.ts
     - src/apps/cli/sandbox-wire.ts
   adrs: [45]

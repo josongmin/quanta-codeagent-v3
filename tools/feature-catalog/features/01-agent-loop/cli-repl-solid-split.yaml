@@ -1,9 +1,9 @@
 id: cli-repl-solid-split
-title: CLI REPL GodClass → SOLID 21-module split (byte-identical)
+title: CLI REPL GodClass → SOLID split (abandoned in-place; orphan tree pruned)
 section: 1
-subsystem: CLI surface 구조 회복 (R7/R8 follow-up)
+subsystem: CLI surface (R7/R8 follow-up — deferred to next SOLID restore round)
 order: 200
-maturity: L4
+maturity: L2
 status: refined
 ui_surfaces: [cli]
 monitoring: partial
@@ -12,57 +12,38 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 config_refs:
-  env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_MCP_CONFIG", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
   env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_MCP_CONFIG", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
 purpose: |
-  `src/apps/cli/repl.ts` (1.3K LOC GodClass — runRepl 의 cognitive complexity 33+)
-  를 21 개의 single-responsibility 모듈로 분해해 SRP/OCP/cognitive-budget 회복.
-  Barrel-as-host 패턴: 기존 `repl.ts` 는 export 시그니처를 그대로 보존하면서 추출된
-  helper 들을 in-line 소비 (외부 consumer 0 변화).
+  **Status truth-up (Slice B, 2026-05-25):** the 21-module split landed at
+  commit `acb8d187` was NEVER wired into `src/apps/cli/repl.ts`. Verified by
+  grep: zero importers in src/ or tests/ for any `./repl/*` path other than
+  the standalone `mcp-surface-wire.ts` translator. `repl.ts` re-inlined every
+  extracted helper (loadSeedImages / buildImageQueue / buildLifecycleBundle /
+  deriveMcpPillServers / snapshotAndFlushLifecyclePills / buildWorkMetricsSink
+  / buildIndicatorPort / buildTurnSummaryAndStream / buildTurnIndicatorAndStream
+  / buildSkillsCallback / installPills / tryRunReplSlash / renderTurnDashboard /
+  renderTurnError / readReplLine / classifyReplLine / buildCliPromptSource /
+  wrapPromptSourceWithIdleGate / installTurnCancel / topLevelUsage /
+  runSessionMain / runSlashMain) so the orphan tree was pure dead code
+  duplicating the live God-class.
 
-  추출 카테고리 (21):
-    Driver/Loop (5): run-repl / readline-loop / interactive-driver / oneshot-driver / session-router
-    Lifecycle/Wire (6): lifecycle-wire / status-pills-wire / idle-wire / turn-indicator-wire
-                       / turn-summary-wire / mcp-surface-wire
-    Per-turn (4): turn-cancel / turn-render / metrics-sink / image-queue-wire
-    Adapter (3): prompt-source / skills-callback / resume-fsm
-    Bootstrap (3): assemble-context / seed-images / usage
+  **Action:** 20 of 21 orphan modules deleted (~1437 LOC). One survives
+  (`mcp-surface-wire.ts`) as a marked seam: it has the only independent unit
+  test (`tests/unit/mcp-surface-wire.test.ts`) and is the future wire when
+  `repl.ts` is finally re-split. See sibling feature
+  `repl-orphan-resolution` for the full per-module decision matrix.
 
-  cognitive-complexity 회복: runRepl 33 → 3 (helper 마다 1 책임). 21 모듈 평균 ~70
-  LOC, 최대 332 (assemble-context, agent assembly 만 담당). Tests + consumer
-  signature 완전 보존 — `import { runRepl, runReplLoop, runReplLoopRaw, runSessionMain,
-  runSlashMain } from "@/apps/cli/repl"` 가 byte-identical 그대로 작동.
-
-  Slice discipline: 모든 추출 모듈은 `@/apps/cli/repl/` 내부에서만 sibling import +
-  apps/cli 형제 + `@/agent`|`@/llm`|`@/observability`|`@/permission`|`@/runner`|
-  `@/shared`|`@/stream` 로 한정. 다른 apps (`apps/bench`/`apps/agent`) 와의 cross-app
-  의존 0.
+  **Deferred work:** the SOLID restore (re-extract runRepl helpers and have
+  `repl.ts` import them instead of inlining) is deliberately held until a
+  follow-up slice can both delete repl.ts duplicates AND update repl.ts in
+  one atomic refactor. Splitting the work as commit acb8d187 did (extract
+  WITHOUT migrate) created the dead code we just pruned.
 evidence:
   code:
     - src/apps/cli/repl.ts
-    - src/apps/cli/repl/run-repl.ts
-    - src/apps/cli/repl/readline-loop.ts
-    - src/apps/cli/repl/interactive-driver.ts
-    - src/apps/cli/repl/oneshot-driver.ts
-    - src/apps/cli/repl/session-router.ts
-    - src/apps/cli/repl/lifecycle-wire.ts
-    - src/apps/cli/repl/status-pills-wire.ts
-    - src/apps/cli/repl/idle-wire.ts
-    - src/apps/cli/repl/turn-indicator-wire.ts
-    - src/apps/cli/repl/turn-summary-wire.ts
     - src/apps/cli/repl/mcp-surface-wire.ts
-    - src/apps/cli/repl/turn-cancel.ts
-    - src/apps/cli/repl/turn-render.ts
-    - src/apps/cli/repl/metrics-sink.ts
-    - src/apps/cli/repl/image-queue-wire.ts
-    - src/apps/cli/repl/prompt-source.ts
-    - src/apps/cli/repl/skills-callback.ts
-    - src/apps/cli/repl/resume-fsm.ts
-    - src/apps/cli/repl/assemble-context.ts
-    - src/apps/cli/repl/seed-images.ts
-    - src/apps/cli/repl/usage.ts
-    - src/apps/cli/diff-preview.ts
     - src/apps/cli/internal.ts
+    - src/apps/cli/diff-preview.ts
     - src/apps/cli/status-pills.ts
   adrs: []
   tests:
@@ -70,11 +51,12 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    SOLID restore deferred to a future slice that can atomically delete the
+    repl.ts inlined duplicates AND re-extract them. Splitting extract+migrate
+    is what produced the orphan tree pruned in Slice B (2026-05-25).
 notes: |
-  R7 base 분해 referent: worktree `acb8d18` ("refactor(cli/repl): split GodClass
-  into SOLID modules v2") — repl.ts 1296 → 36 + 19 신규 모듈 (byte-identical 전체
-  분해). 현 main 은 R8 wire(lifecycle pills / multi-modal images / rule indicator
-  / MCP slash) 누적으로 helper 가 21 개로 늘어났고 host 가 1364 LOC 로 다시 부풀
-  었지만 추출 패턴은 동일 (각 helper 가 단일 책임 단일 추출). 차후 라운드에서
-  acb8d18 패턴 적용해 host 를 ~40 LOC 로 재축소 가능 (SOLID restore #2).
+  Pre-prune snapshot: 21 modules / 1556 LOC at `src/apps/cli/repl/`. Post-prune:
+  1 module / 119 LOC. Net delta: −20 files / −1437 LOC. Companion truth-up
+  yaml: `tools/feature-catalog/features/10-app/repl-orphan-resolution.yaml`.

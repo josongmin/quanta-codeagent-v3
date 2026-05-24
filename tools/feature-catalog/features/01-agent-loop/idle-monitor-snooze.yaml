@@ -23,7 +23,6 @@ evidence:
   code:
     - src/apps/cli/idle-monitor.ts
     - src/apps/cli/reject-counter.ts
-    - src/apps/cli/repl/assemble-context.ts
     - src/apps/cli/repl.ts
   adrs: []
   tests:

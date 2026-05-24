@@ -34,7 +34,7 @@ evidence:
   code:
     - src/apps/cli/help-render.ts
     - src/apps/cli/slash-commands.ts
-    - src/apps/cli/repl/prompt-source.ts
+    - src/apps/cli/repl.ts
     - src/apps/eval/index.ts
     - src/apps/cli/internal.ts
     - src/shared/runtime-config.ts

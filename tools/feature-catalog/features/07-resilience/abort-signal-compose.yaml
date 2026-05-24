@@ -33,8 +33,6 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/repl.ts
-    - src/apps/cli/repl/oneshot-driver.ts
-    - src/apps/cli/repl/interactive-driver.ts
     - src/agent/subagent-runner.ts
     - src/runner/orchestrate/run-interactive.ts
     - src/apps/cli/diff-preview.ts
