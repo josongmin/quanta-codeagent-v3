@@ -14,6 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [anthropic-beta-and-skill-size-cap]
+configurable: static
 purpose: |
   Walk `QUANTA_SKILLS_DIR` (or per-project skills/) and emit `Skill[]` —
   reads each candidate's frontmatter via the lenient `parseFrontmatter`,

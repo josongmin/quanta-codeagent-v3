@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_PERMISSION_STATE]
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_HOME", "QUANTA_PERMISSION_STATE"]
 purpose: |
   File-backed JSON store for per-thread permissions, per-host agent modes,
   and post-denial precedence records. Single file at

@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [glob-rules]
+configurable: static
 purpose: |
   `buildTurnContext(input)` → `{system: SystemBlock[], messages: Message[]}` 한 호출로
   static system prefix(`buildSystemPrompt` 또는 caller 주입)와 per-turn dynamic 블록을

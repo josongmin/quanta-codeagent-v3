@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ATTRS"]
 purpose: |
   v0.dev 권한 학습 흡수 — 모델이 필요 권한을 직접 제안(suggestedPermissions)하고 위험을
   자가표시(isMaybeDangerous). "패턴 허용" 1회 → 대기 중인 모든 다른 tool 요청을 재평가해

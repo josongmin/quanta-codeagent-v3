@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
+configurable: n-a
 purpose: |
   Two `Isolator` port implementations for the speculative branch search.
   `tmpdirIsolator` uses `mkdtemp` + `cp -r` excluding `.git` and

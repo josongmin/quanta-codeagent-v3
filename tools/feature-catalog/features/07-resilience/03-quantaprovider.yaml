@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_PROVIDER, QUANTA_MODEL]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+configurable: n-a
 purpose: |
   Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는
   OpenAI-호환 endpoint) 중 활성 백엔드를 고르고, `QUANTA_MODEL`로 모델 id를

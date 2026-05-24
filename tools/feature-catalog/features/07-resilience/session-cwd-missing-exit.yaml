@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+configurable: n-a
 purpose: |
   HIGH-4 fail-loud guard for the resume path. When `--resume <id>` lands on
   a session whose recorded cwd no longer exists on disk (worktree removed

@@ -11,6 +11,9 @@ modes: [interactive]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_LIFECYCLE_PILLS", "QUANTA_MAX_TURNS", "QUANTA_MCP_CONFIG", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_PILL_", "QUANTA_PILL_TASKS", "QUANTA_REJECT_LIMIT", "QUANTA_REWIND_GIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT", "QUANTA_TURN_SUMMARY"]
 purpose: |
   `src/apps/cli/repl.ts` (1.3K LOC GodClass — runRepl 의 cognitive complexity 33+)
   를 21 개의 single-responsibility 모듈로 분해해 SRP/OCP/cognitive-budget 회복.

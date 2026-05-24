@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:1]
+configurable: n-a
 purpose: |
   `src/agent/features.ts` (393 LOC of SessionFeatures 합성 GodFn) 을 9 개
   per-subsystem builder + composer 로 분해. 각 builder 는 ONE optional config

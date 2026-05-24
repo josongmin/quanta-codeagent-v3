@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, tier:1]
 depends_on: [glob-rules]
+configurable: static
 purpose: 'Reminder block 순서 (buildDynamicContext): today-date+cwd → mode-notice → repo-rules → glob-rules(.cursor/.quanta per-turn select) → active-skills → working-state → memory-hints → hook injectAfterSystem tail. 통합 e2e가 순서 invariant를 pin.'
 evidence:
   code: [src/agent/prompt-sections.ts, src/agent/prompt.ts, src/agent/repo-rules.ts]

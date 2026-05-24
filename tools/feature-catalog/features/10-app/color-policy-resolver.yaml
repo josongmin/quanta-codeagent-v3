@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: static
 purpose: |
   Encapsulates the ANSI color-policy cache so multiple surfaces (CLI, REPL,
   Tauri renderer, parallel test harness) can keep isolated state instead of

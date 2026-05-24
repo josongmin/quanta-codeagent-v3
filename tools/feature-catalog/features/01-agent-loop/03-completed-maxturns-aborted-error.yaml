@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
 purpose: 종료사유 completed|max_turns|aborted|error, AbortSignal 협조취소
 evidence:
   code: [src/agent/stop-category.ts, src/agent/loop.ts]

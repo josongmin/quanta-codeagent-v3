@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_PERMISSION]
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: n-a
 purpose: default|acceptEdits|bypass|auto , onConfirm 콜백
 evidence:
   code: [src/permission/index.ts, src/permission/policy.ts, src/permission/per-thread-store.ts]

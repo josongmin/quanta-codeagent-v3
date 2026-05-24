@@ -12,6 +12,9 @@ modes: [interactive, headless]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ATTRS"]
 purpose: |
   `quanta.hitl.tier_resolved` + `registry_escalated` + `handoff_emitted` 3개
   키가 vocabulary 에 있고 helper 도 있었지만 zero call-site 였던 갭을

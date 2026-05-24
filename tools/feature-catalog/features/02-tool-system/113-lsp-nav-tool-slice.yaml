@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [diagnostics-tool, lsp-bridge]
+configurable: n-a
 purpose: |
   Eight navigation tools fronted by an injected `LspNavProvider` (same
   slice-isolation pattern as `diagnostics` — `@/tool` MUST NOT import

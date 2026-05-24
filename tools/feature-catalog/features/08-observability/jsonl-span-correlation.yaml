@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 depends_on: [otel-span-tree]
+configurable: static
 purpose: |
   Deterministic span-id derivation inside the JsonlRecorder so the
   recorded trajectory is golden-testable with no randomness. The scheme:

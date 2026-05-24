@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe]
+configurable: static
 purpose: |
   Claude Desktop 1.7196.3의 commitWipForBranchSwitch 패턴 흡수 — git push/commit/checkout을
   bash 통과 + always-confirm 일괄 게이팅하던 구조에서 도구 단위로 1급화. (1) git_commit({

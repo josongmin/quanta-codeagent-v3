@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+configurable: static
 purpose: |
   `agent` 도구(=Task) — 부모 loop가 자식 runAgent를 fork해 sub-thread로
   실행. 부모는 자식의 `task_output` 채널을 통해 progress를 받고,

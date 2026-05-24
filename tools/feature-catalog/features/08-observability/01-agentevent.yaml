@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [work-metrics]
+configurable: n-a
 purpose: |
   `AgentEvent` discriminated union — the surface-facing event stream the agent loop
   emits per turn (turn_start / assistant_text / tool_call / tool_progress /

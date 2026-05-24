@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [memorysearch-write-update, codex-2-phase-consolidator]
+configurable: static
 purpose: |
   Three first-class agent tools letting the model search, write, and
   revise its own durable memory mid-session. Plane-clean — imports only

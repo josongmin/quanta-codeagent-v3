@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_BENCH_BRANCH_SEARCH", "QUANTA_BENCH_ISSUE_HINT", "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_BENCH_LSP", "QUANTA_BENCH_REPRO_TEST", "QUANTA_BENCH_SKILLS", "QUANTA_BENCH_SUBAGENT", "QUANTA_LSP_TOOLS", "QUANTA_SKILLS_DIR", "QUANTA_SUBAGENT", "QUANTA_SWEBENCH_PYTHON"]
 purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.
 evidence:
   code: [src/apps/bench/eval/driver.ts]

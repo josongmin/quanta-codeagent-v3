@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_PROVIDER", "QUANTA_SANDBOX"]
 purpose: |
   Tiny no-dependency `.env` loader (`loadEnvFiles(files)`). Both CLI
   surfaces (`src/apps/cli/index.ts` and `src/apps/agent/index.ts`)

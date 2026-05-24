@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: n-a
 purpose: |
   Pure fan-out `StreamPort`. Forwards every `AgentEvent` to every wrapped
   port in order. In NON-STRICT mode (default — product / session) one

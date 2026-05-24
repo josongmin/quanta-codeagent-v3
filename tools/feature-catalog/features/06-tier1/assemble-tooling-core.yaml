@@ -12,6 +12,9 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [assemble-config]
+configurable: partial
+config_refs:
+  env: ["QUANTA_MEMORY"]
 purpose: |
   Surface-agnostic assembly of the per-run `ToolRegistry` + the aggregated
   `Tooling` record. Substantial logic beyond plumbing:

@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_ADDENDUM]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ADDENDUM"]
 purpose: |
   Three frozen constants implementing the byte-identical prompt invariant
   for the side-conversation seam. `SIDE_CONVERSATION_PROMPT_BASE` is the

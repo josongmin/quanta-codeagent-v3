@@ -11,6 +11,9 @@ modes: [interactive]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_COST_PANEL", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]
 purpose: |
   R10 extends the `SlashContext` interface in `src/apps/cli/slash-commands.ts`
   with FIVE optional surface ports — one per R10 panel that needs live session

@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli]
 depends_on: [typed-tool-failure-modes, bash-tool-hitl-tier, edit-fuzzy-ladder, test-runner-tool, diagnostics-tool]
+configurable: static
 purpose: |
   Aggregate L5 marker for the primitive tool family covering 9 core tools —
   read, write, edit, bash, grep, glob, localize, diagnostics, test_runner.

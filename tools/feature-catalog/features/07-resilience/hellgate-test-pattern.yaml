@@ -12,6 +12,9 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code", "absorbed:agentless"]
 depends_on: [git-write-protection, shadow-odb-rewind, subagent-6-tools]
+configurable: partial
+config_refs:
+  env: ["QUANTA_FS_JAIL"]
 purpose: |
   "이김(quanta-wins)" 또는 "절대 깨면 안 되는" 축을 적대적(adversarial)
   케이스로 봉인하는 테스트 패턴. 일반 unit test와 분리된 `*-hellgate.test.ts`

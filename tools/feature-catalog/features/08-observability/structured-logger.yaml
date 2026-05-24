@@ -14,6 +14,9 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [runtime-config-ssot]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_LOG_LEVEL"]
 purpose: |
   JSON-per-line logger for machine-consumable observability — distinct from
   `@/shared`'s human-shaped `logger`. Emits one `JSON.stringify(LogRecord)`

@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "held-promotion"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_MEMORY_SUBDIR"]
 purpose: |
   Owns the on-disk side of the Phase 2 cross-session consolidator. Three
   user-visible markdown files (MEMORY.md / raw_memories.md /

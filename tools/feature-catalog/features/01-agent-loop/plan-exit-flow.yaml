@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [plan-mode]
+configurable: n-a
 purpose: |
   Plan-exit three-way (approved/rejected/changes_requested)의 셋 평면을 잇는 pure async
   orchestrator. 이미 shipped된 3개 조각 — plan-exit decision (62-plan-exit-three-way),

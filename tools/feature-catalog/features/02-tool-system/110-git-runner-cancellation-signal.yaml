@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [git-runner-env-determinism, git-budget]
+configurable: static
 purpose: |
   Distinct axis from the runner's wall-clock timeout (ADR-0105) and from
   `GitBudget`'s deadline (ADR-0107): an optional caller-supplied `AbortSignal`

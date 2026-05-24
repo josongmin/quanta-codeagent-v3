@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_METRICS]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: static
 purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
 evidence:
   code: [src/agent/metrics.ts, src/observability/metrics.ts, src/observability/metrics/in-memory-registry.ts]

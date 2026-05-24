@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [worktree-fork-primitive]
+configurable: static
 purpose: |
   Runtime HOF that runs `fn` inside a throwaway git worktree at
   `<repoRoot>/.claude/worktrees/agent-<id>` on branch `worktree-<id>` and

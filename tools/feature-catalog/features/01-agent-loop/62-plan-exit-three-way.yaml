@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:core, tier:core]
+configurable: n-a
 purpose: |
   v0.dev PlanModeExit{Approve,Reject,RequestChanges} 흡수 — plan 모드 종료를 기존
   2-way(approve/reject)에서 3-way로 확장. changes_requested는 feedback 필수(빌더가

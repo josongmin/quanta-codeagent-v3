@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
 purpose: |
   In-process HookBus — 9 이벤트(session_start / session_end / turn_start /
   pre_tool_use / post_tool_use / **post_tool_use_failure** / **pre_compact** /

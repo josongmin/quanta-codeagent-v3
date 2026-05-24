@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:tooling"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_VERIFY_GUARD"]
 purpose: |
   Feature catalog의 단일 진실 원천 (SSOT) 도구. 모든 feature는
   `tools/feature-catalog/features/<section>/*.yaml` 한 파일로 표현되고,

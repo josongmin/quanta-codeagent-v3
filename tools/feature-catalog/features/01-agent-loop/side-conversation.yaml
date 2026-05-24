@@ -13,6 +13,9 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:claude-code, surface:core, tier:1]
 depends_on: [plan-mode]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ADDENDUM", "QUANTA_ATTRS"]
 purpose: Lightweight read-only sub-thread that runs alongside the main agent loop without disrupting it. Codex `codex.thread.side` absorption (build 2867 round-4 §G). Verbatim Codex base prompt pinned by `toBe`-literal test; quanta-specific sticky-taint addendum concatenated after a stable delimiter. Tool allowlist EQUALS the planModeMutatingTable read-only complement (drift fails CI). Effort cap is type+runtime double-gated against `as any` and JSON.parse bypass. Token budgets (8192/4096 default) enforced on both directions, with explicit error. Cancellation propagates from parent via AbortSignal. OTel emits `quanta.thread.side=true` + `quanta.thread.kind="side"` + parent_id. Dispatch router (`dispatchSideConversation`) is the public UI/CLI seam — host injects LLM resolver and abort signal; parent agent loop is never touched.
 evidence:
   code:

@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_LSP_TOOLS"]
 purpose: |
   Agent 슬라이스가 LSP 어댑터(TypescriptAdapter / PyrightAdapter)와 만나는 단일
   bridge — 파일 확장자 → adapter 라우팅 + lsp-nav 도구(definition/references/hover/

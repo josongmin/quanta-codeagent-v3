@@ -14,6 +14,9 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [prompt-source-payload-widening]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MULTILINE"]
 purpose: |
   REPL surface가 소유하는 in-memory FIFO. 사용자가 `/image add <path>` 슬래시로
   `ImageBlock` (base64 + mediaType, `loadImageBlock`이 검증한)을 큐에 enqueue,

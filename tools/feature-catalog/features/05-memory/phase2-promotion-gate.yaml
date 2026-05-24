@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
+configurable: static
 purpose: |
   Codex production stat 10% promotion rate를 selectForPhase2Promotion(entries,
   {sampleRate?}) 로 흡수. PURE function — clock/RNG/I/O 없음, deterministic.

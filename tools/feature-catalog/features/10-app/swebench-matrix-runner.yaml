@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_BENCH_LSP, QUANTA_BENCH_SUBAGENT, QUANTA_BENCH_SKILLS]
 owners: ["@songmin"]
 labels: ["surface:bench"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_BENCH_", "QUANTA_BENCH_LSP", "QUANTA_BENCH_SKILLS", "QUANTA_BENCH_SUBAGENT", "QUANTA_OBSERVE_DIR", "QUANTA_RUN_ID", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PYTHON"]
 purpose: |
   `bun run tools/swebench-matrix.ts` — SWE-bench-shape 데이터셋(기본
   `tests/smoke/swebench/picks.jsonl`)을 3축 ON/OFF 조건 매트릭스로 sweep

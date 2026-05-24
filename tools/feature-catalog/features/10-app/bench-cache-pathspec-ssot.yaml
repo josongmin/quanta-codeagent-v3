@@ -12,6 +12,9 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [2026-05-21]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]
 purpose: |
   Single source of truth for build/cache-shaped path exclusions across
   the bench harness. The bench runner previously captured patches with

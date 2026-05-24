@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ADDENDUM", "QUANTA_PILL_RULES", "QUANTA_RULE_INDICATOR"]
 purpose: |
   Repo가 ship하는 운영 contract (canonical 커맨드 경로, fail-closed posture,
   patch discipline, "no heuristics" 등)를 top-level 마크다운(`AGENTS.md`,

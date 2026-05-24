@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
+configurable: integrated
 purpose: |
   Proactive `compactIfNeeded` 가 `DEFAULT_KEEP_TURNS=6` 으로 부드럽게 줄이는 반면,
   `reactiveCompact` 는 loop 이 이미 "prompt is too long" API 에러를 맞은 뒤 호출되는

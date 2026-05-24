@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: static
 purpose: |
   Single source of truth for the append-only JSONL trajectory (RFC-0002 §5.2).
   Declares `TRAJECTORY_SCHEMA = "quanta.trajectory.v1"`, the 17-element

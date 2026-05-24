@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [subagent-background-wire, background-subagent]
+configurable: n-a
 purpose: |
   Per-subsystem Tier-1 builder that materializes the SUBAGENT block — the
   `agent` / `task_output` / `task_stop` tool trio plus the cleanup hook —

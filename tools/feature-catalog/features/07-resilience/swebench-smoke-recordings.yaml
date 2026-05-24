@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "held-promotion"]
 depends_on: [swebench-smoke-baseline]
+configurable: n-a
 purpose: |
   `swebench-smoke-baseline` 의 6 frozen instance 를 실제 에이전트로 한 번
   돌려 얻은 patch 결과 (`predictions.jsonl`) + 사람-검토용 메타데이터

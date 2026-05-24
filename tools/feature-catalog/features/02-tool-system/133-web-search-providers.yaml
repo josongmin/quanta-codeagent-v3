@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: partial
+config_refs:
+  env: ["QUANTA_WEB_SEARCH_DUCKDUCKGO"]
 purpose: |
   ADR-0127 landed the `web_search` tool + `WebSearchProvider` closed port but
   shipped zero concrete impls — production behavior was `ok:false "no

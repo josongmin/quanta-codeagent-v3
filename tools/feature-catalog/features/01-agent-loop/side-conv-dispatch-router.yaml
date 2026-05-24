@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
+configurable: n-a
 purpose: |
   UI/CLI/RPC-facing seam decoupling external callers from the executor's
   `SideConversationOptions` shape. Callers describe WHAT they want via

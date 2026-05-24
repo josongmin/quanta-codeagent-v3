@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: static
 purpose: |
   `errMessage(e)` 의 self-recursion 회귀 fix — 2026-05-23 mass migration 이
   over-eager find/replace 로 본문을 `errMessage(e)` 로 바꿔 무한 재귀 → 모든

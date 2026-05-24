@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: n-a
 purpose: |
   Caller seam that lets verify-pass events advance the Shadow ODB
   markVerified ref. Keeps mechanism (markVerified port from ADR-0122) and

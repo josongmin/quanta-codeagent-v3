@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: n-a
 purpose: |
   Composition-root helpers that wire the deferred halves of ADR-0102
   (turn_diff_updated event emit) and ADR-0106 (SessionMeta git fingerprint).

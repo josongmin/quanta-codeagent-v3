@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:cli, held-promotion]
+configurable: static
 purpose: |
   Closed-port typed budget interface + pure `applyBudget` helper that derives
   an AbortSignal carrying a deadline for long-running git invocations. Five

@@ -14,6 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [quantamcpconfig]
+configurable: static
 purpose: |
   QUANTA_MCP_CONFIG 노브를 넘어선 실제 capability — McpClient(stdio JSON-RPC 2.0:
   initialize/tools-list/tools-call/shutdown + per-request 타임아웃)와 mcp-bridge가

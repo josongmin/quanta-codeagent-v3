@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_LLM_PROVIDER", "QUANTA_MODEL", "QUANTA_SMOKE_LIVE", "QUANTA_SMOKE_MODEL"]
 purpose: |
   실제 agent loop + 실제 도구를 돌리되 LLM은 녹화된 trajectory를 replay
   (tier-0, deterministic, $0)하거나 옵트인 live(tier-1) 호출하는 end-to-end

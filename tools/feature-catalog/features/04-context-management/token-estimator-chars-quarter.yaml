@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_COMPACT_TOKENS]
 owners: ["@songmin"]
 labels: [surface:core]
+configurable: integrated
 purpose: |
   Threshold 게이트(`compactIfNeeded` / reactive drop-ratio guard) 입력으로 사용되는
   `estimateTokens(messages)` 휴리스틱. `blockChars` 는 ContentBlock 변종별로 분기 —

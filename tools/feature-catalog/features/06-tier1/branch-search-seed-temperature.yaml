@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
+configurable: n-a
 purpose: |
   `buildSeeds(N, base, modelCandidates?)` — builds N `BranchSeed` records
   for parallel candidate proposal. Implements TWO Agentless techniques:

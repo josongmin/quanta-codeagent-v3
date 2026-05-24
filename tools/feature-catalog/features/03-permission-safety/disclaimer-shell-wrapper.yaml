@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:claude-code, surface:cli, security-touched]
+configurable: static
 purpose: 'SandboxPolicy.disclaimShell?: boolean — true 시 LocalSandbox / DockerSandbox 가 bash -lc 대신 bash --noprofile --norc -c 사용 (zsh -f, sh -c 도 지원). macOS POSIX_SPAWN_SETDISCLAIM 의 functional approximation — 사용자 ~/.bashrc / ~/.zshrc 의 코드가 에이전트 shell 호출에서 실행되지 않음 (kernel-level entitlement 격리는 아님, 명시).'
 evidence:
   code: [src/runtime/shell-disclaim.ts, src/runtime/sandbox.ts]

@@ -11,6 +11,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: n-a
 purpose: |
   CLI surface that wires `resolveRetryModel` + `streamWithModel`
   (`src/llm/model-swap.ts`, ADR-0065) into a session-time slash command:

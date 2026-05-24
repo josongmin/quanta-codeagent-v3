@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: static
 purpose: |
   Per-turn 프롬프트가 untrusted fragment (파일 경로, IDE selection text, diagnostics,
   memory aggregate, rule body)를 named tag block 안에 넣을 때 — `<system-reminder>` 나

@@ -12,6 +12,9 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:repl"]
 depends_on: [cli-repl-solid-split]
+configurable: partial
+config_refs:
+  env: ["QUANTA_MCP_CONFIG"]
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because
   this module is the ONLY translator between live CLI MCP wiring

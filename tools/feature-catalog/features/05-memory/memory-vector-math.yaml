@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
+configurable: n-a
 purpose: |
   Pure vector math + (de)serialization for semantic recall. Zero deps:
   a Float32 little-endian buffer is the on-disk form (the SQLite

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_SKILLS_DIR]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+configurable: n-a
 purpose: frontmatter 발견 → 본문 컨텍스트 주입
 evidence:
   code: [src/skill/discover.ts, src/skill/skill-tool.ts, src/agent/tier1/skill.ts]

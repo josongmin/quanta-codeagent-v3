@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
 purpose: |
   v0.dev createProviderToolFactoryWithOutputSchema 흡수 — Tool에 4개 OPTIONAL 능력
   추가: outputSchema(결과 Zod 검증, 불일치 시 ok:false retry-지시), toModelOutput(모델용

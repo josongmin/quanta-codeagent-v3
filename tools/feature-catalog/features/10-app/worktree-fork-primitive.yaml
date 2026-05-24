@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [quanta-session-subcommands]
+configurable: n-a
 purpose: |
   Persistent (NOT auto-removed) git worktree primitive used by top-level
   conversation fork. Creates `<repoRoot>/.quanta/worktrees/<safeId>` on

@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER", "QUANTA_MODEL_FALLBACK"]
 purpose: |
   RetryingLLM (`src/agent/retry.ts`) — LLMPort 데코레이터. transient pre-stream
   실패(network/server_error/overloaded/rate_limit)에만 bounded backoff로

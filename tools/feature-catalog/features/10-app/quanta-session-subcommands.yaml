@@ -12,6 +12,9 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex", "absorbed:claude-code"]
 depends_on: [quantastatepath]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SESSIONS_DIR", "QUANTA_SESSION_LIST_FORMAT", "QUANTA_SESSION_LIST_MAX"]
 purpose: |
   `quanta session …` subcommand dispatcher — 세션 라이프사이클의 모든 mutating /
   read-only 연산을 한 surface에 모음. 10 subcommand: ls / show / rename / archive /

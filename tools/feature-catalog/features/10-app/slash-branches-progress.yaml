@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_BRANCH_SEARCH_PROGRESS]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_BRANCH_SEARCH_PROGRESS", "QUANTA_COST_PANEL", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]
 purpose: |
   Live progress visualization for catalog 대6 speculative branch search
   (ADR-0084 / Agentless N-best verifier-prover). Without a sticky indicator the

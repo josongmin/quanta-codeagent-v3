@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [prefix-rule-dsl]
+configurable: n-a
 purpose: |
   Deterministic longest-prefix-match over a single rule set. (1) Normalise
   by stripping LEADING whitespace ONLY — trailing whitespace and internal

@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-md-frontmatter]
+configurable: static
 purpose: |
   `SkillFrontmatter.category` is the SSOT for whether an entry is auto-
   triggerable by the model (`skill`) or system-level only (`extension`).

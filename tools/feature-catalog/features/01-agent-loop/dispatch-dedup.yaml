@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]
 purpose: |
   Bench Type F("Verify-Loop Stuck on Env") 구조적 fix — 동일 (tool name + canonical
   args) 호출이 sliding window 안에서 중복으로 들어오면 dispatch 전에 차단하고 synthetic

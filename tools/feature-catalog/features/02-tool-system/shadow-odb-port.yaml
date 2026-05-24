@@ -12,6 +12,9 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:cli]
 depends_on: [shadow-tools-trio, slash-snapshot]
+configurable: partial
+config_refs:
+  env: ["QUANTA_SHADOW_ODB_MAX_BYTES"]
 purpose: |
   Closed-port contract for a separate git ObjectDB rooted at
   `<baseDir>/snapshots/<workspaceHash>/.git` — point-in-time worktree snapshots

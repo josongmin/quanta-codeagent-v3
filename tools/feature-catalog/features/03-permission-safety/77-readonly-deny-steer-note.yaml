@@ -13,6 +13,9 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [turn-timing-anchors, llm-assemble, phase-ttft-readonly-trio]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ATTRS"]
 purpose: |
   Plane-C of the `phase-ttft-readonly-trio` umbrella (ADR-0077) — the
   control-plane sibling of Plane-A (phase marker, surfaced via

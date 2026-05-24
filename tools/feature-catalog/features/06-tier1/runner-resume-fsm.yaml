@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [cli-resume-state-machine]
+configurable: n-a
 purpose: |
   `--resume <token>` / `--new-session` startup state 결정을 surface 무관 슬라이스로
   격리. argv/env 직접 읽기 ZERO — 모든 입력이 `ResolveResumeInput` 으로 명시되어

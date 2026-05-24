@@ -13,6 +13,9 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]
 depends_on: [agent-loop-branch-hardening, refusal-stop-reason, llm-assemble]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ATTRS"]
 purpose: |
   Gap-4 of the `agent-loop-branch-hardening` umbrella (ADR-0076). Adds a
   third verb to host confirmation — beyond `allow` / `deny`, the host can

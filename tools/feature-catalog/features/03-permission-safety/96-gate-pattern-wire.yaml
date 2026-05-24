@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+configurable: static
 purpose: |
   Pure module the admissibility-gate calls into to decide whether a pending
   action's `rememberPatterns` are ALREADY fully covered by the session's

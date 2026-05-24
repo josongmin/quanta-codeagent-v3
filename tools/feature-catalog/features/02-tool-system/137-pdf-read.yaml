@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: partial
+config_refs:
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   PDF reader that ships ZERO client-side text-extraction dependency. Every
   other modern agent (Cursor / Codex / Cline) pulls `pdf-parse` / `pdfjs`

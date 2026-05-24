@@ -11,6 +11,7 @@ modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
+configurable: static
 purpose: |
   `bun run eval generate --usecase ID [--count N]` — 주어진 `UseCaseId`로
   N개의 fully-formed `Scenario` JSON을 LLM으로 생성해 `scenarios/<usecase>/`에

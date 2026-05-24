@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: n-a
 purpose: |
   Records the three wall-clock anchors that pin down a single LLM-stream
   turn: `requestSentAt` (adapter stamps immediately before the POST),

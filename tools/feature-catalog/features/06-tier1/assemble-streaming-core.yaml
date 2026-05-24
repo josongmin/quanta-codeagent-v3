@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_OBSERVE_DIR"]
 purpose: |
   Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
   Default OFF: no `observeDir` ⇒ plain `StdoutStream` + no `RunContext`

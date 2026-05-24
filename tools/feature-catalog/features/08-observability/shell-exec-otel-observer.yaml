@@ -13,6 +13,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 depends_on: [cost-cache-dashboard, work-metrics]
+configurable: n-a
 purpose: |
   OTel-bound observer for the ADR-0081 shell exec events. Fans the typed
   stream (start / stdout / stderr / exit / aborted) into the existing

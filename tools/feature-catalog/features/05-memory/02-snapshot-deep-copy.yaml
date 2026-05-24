@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core"]
+configurable: n-a
 purpose: "snapshot() deep-copy (R3-P1): JSDoc \"read-only snapshot\" 거짓말 회수. 내부 배열 + 항목 객체 모두 clone → 호출자가 받은 snapshot에 in-place 변경 시도 ⇒ session state 무영향."
 evidence:
   code: []

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
+configurable: integrated
 purpose: |
   `findBoundary(messages, keepTurns)` 는 압축에서 가장 미묘한 invariant 를 보존한다 —
   Anthropic 은 suffix 안에 `tool_result` 가 있는데 짝지어진 `tool_use` 가 summarized

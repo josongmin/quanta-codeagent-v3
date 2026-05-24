@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ATTRS"]
 purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행위 보존 추출)
 evidence:
   code: [src/agent/admissibility-gate.ts]

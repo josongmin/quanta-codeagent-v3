@@ -12,6 +12,9 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:repl", "absorbed:codex"]
 depends_on: [cli-repl-solid-split]
+configurable: partial
+config_refs:
+  env: ["QUANTA_MULTILINE"]
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because
   this module implements the `runner.PromptSource` port for the CLI surface and

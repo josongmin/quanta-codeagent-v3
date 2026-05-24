@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [plan-mode-dispatch-block]
+configurable: static
 purpose: |
   ADR-0036 (Cluster D Feature 1) — `ToolRegistry.run()` 직전에 호출되는
   pure 함수로, 활성 collaboration mode (default / plan) 하에서 해당 tool 호출이

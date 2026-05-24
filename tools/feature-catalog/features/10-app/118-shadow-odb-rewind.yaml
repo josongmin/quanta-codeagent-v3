@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_SHADOW_ODB_MAX_BYTES"]
 purpose: |
   Closes the deliberate "not-implemented" trap from ADR-0108 by implementing
   rewindToLast (destructive workspace restore to last snapshot) plus a safety

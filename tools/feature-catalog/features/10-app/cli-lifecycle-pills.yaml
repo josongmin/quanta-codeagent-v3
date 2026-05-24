@@ -14,6 +14,9 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [queued-follow-ups, cli-status-pills]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_LIFECYCLE_PILLS", "QUANTA_PILL_", "QUANTA_PILL_FOLLOWUP", "QUANTA_PILL_MCP", "QUANTA_PILL_TASKS"]
 purpose: |
   Top-line status-pills(`cli-status-pills`)과 직교한 3개 lifecycle pill:
   (1) `subagent` (활성 sub-agent 개수 + worker nickname),

@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [metrics-registry]
+configurable: n-a
 purpose: |
   Closed-port metrics primitive: `MetricsRegistry` + `MetricSink` pair
   with three KIND-committed shapes (counter / histogram / gauge) and a

@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_SWEBENCH_CORPUS_ROOT, QUANTA_SWEBENCH_PYTHON]
 owners: ["@songmin"]
 labels: ["surface:bench"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SWEBENCH_CORPUS_ROOT", "QUANTA_SWEBENCH_PYTHON"]
 purpose: |
   Adapter that turns a `QUANTA_SWEBENCH_CORPUS_ROOT` directory into an
   `Instance[]` for the bench runner. Detects TWO layouts and degrades

@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [probe-failure-triage]
+configurable: static
 purpose: |
   Classifies an `InstanceResult` for the operator console + `bench-report
   .json`. Two-axis schema (covering + non-exclusive):

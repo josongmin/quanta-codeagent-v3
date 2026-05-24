@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: static
 purpose: |
   Promotion-path closer for ADR-0141: replaces the three `not-implemented`
   default adapters (code-action / format / signature-help) with real

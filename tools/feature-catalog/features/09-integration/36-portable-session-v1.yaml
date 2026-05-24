@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
+configurable: static
 purpose: |
   Portable session schema v1 (snake_case wire) for round-tripping a saved
   session across surfaces. `exportSession(sessionId)` writes

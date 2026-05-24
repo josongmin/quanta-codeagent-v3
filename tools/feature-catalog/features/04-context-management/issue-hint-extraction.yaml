@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core]
+configurable: partial
+config_refs:
+  env: ["QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL"]
 purpose: |
   Pure deterministic extractors that scan an issue/problem-statement string
   and surface a structured `IssueHint` (files, errors, code fences,

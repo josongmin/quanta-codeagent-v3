@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+configurable: n-a
 purpose: |
   `apps/cli/repl.ts::runRepl` 의 argv-prompt 분기를 surface-agnostic 한 한 줄
   진입점으로 추출. "history append → runAgent → persistTurn → onTurnEnd →

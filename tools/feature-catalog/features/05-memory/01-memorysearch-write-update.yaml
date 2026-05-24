@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
+configurable: n-a
 purpose: self-edit memory_search/write/update, lexical graceful degrade
 evidence:
   code: []

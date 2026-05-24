@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: n-a
 purpose: |
   Byte-stable string comparator for deterministic ordering. Unlike
   `String.prototype.localeCompare`, the result does NOT depend on the

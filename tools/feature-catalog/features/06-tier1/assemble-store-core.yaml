@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_MEMORY_EMBED]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_MEMORY", "QUANTA_MEMORY_EMBED", "QUANTA_MEMORY_EMBED_MODEL"]
 purpose: |
   Two surface-agnostic factories that produce the long-term memory store and
   the semantic embedder, both default-OFF (plain runs unchanged):

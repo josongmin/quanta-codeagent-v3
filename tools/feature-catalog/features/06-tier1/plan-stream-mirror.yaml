@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [plan-mode]
+configurable: n-a
 purpose: |
   Single coercion site from canonical `Plan` to the minimalist
   `PlanReadonlyMirror` / `TodoReadonlyMirror` shapes the `@/stream` slice

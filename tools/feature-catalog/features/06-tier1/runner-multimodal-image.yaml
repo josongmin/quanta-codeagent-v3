@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_IMAGE_QUEUE, QUANTA_IMAGE_MAX_QUEUE]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "held-promotion"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE"]
 purpose: |
   PromptSource 포트의 PromptPayload 타입을 backward-compat하게 widening — 기존
   string 페이로드 코드 경로는 무변경, 새 코드는 `{ text, images[] }` 구조를 받을 수

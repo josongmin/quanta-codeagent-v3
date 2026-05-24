@@ -11,6 +11,9 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: HITLTier = hand-off-required | always-confirm | pre-approval-ok | none. Tool.hitlTier?(input) duck-typed mirror in @/tool/types; bashHitlTier로 curl/wget/gh api/git push/git fetch ...
 evidence:
   code: [src/agent/hitl-tier.ts, src/agent/hitl-tier-registry.ts, src/tool/types.ts]

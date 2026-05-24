@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_MCP_VERBOSE]
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_COST_PANEL", "QUANTA_MCP_CONFIG", "QUANTA_MCP_VERBOSE", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]
 purpose: |
   Read-only MCP runtime explorer. Four subcommands: `/mcp` (list servers + tool
   count + status), `/mcp tools` (every bridged tool across all servers),

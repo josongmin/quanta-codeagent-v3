@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
+configurable: static
 purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'
 evidence:
   code: [src/agent/closeout-guard.ts]

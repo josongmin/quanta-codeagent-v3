@@ -12,6 +12,9 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [engineering-skills-bundle]
+configurable: partial
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
 purpose: |
   ADR-0102 Phase AS absorption batch — 8 highest-ROI Cursor CTK git-task
   prompts shipped as bundled system skills. Each skill is SKILL.md (frontmatter

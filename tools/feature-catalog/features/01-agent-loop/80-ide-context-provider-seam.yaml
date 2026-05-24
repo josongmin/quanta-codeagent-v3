@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, tier:1]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |
   IDE host (VS Code extension, MCP IDE bridge 등) 가 turn-by-turn 에디터 상태를
   모델에 보낼 수 있는 단일 진입점. 신규 `src/agent/ide-context.ts` 의 닫힌 shape

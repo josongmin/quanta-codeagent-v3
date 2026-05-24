@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
 depends_on: [git-read-trio]
+configurable: static
 purpose: |
   Mirrors the `git diff`/`git log` leading-dash defense in the gh slice for the
   POSITIONAL PR/issue identifier argument to `gh <pr|issue|pr_checks> <id>`. A

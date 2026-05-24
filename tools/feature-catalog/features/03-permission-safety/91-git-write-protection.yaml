@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:cursor, surface:cli, security-touched]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ATTRS"]
 purpose: |
   Cursor cursorsandbox의 Seatbelt write-deny-regex를 surface-agnostic 정적 detector로
   흡수 — .git/hooks·.git/config·.vscode write는 곧 임의 코드 실행(git/에디터가 auto-run)

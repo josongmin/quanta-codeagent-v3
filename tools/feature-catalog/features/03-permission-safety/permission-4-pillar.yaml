@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+configurable: static
 purpose: |
   **Codex `Permission.{approval, network, sandbox, control.managed}` 4-pillar 흡수.**
   v1에서는 approval / sandbox / control 3-pillar 정도였고 network는 명시적 분리

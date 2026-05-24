@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "security-touched", "held-promotion"]
 depends_on: [memory-distill-redaction-fence]
+configurable: n-a
 purpose: |
   Abstracted redaction seam at the consolidator boundary: `consolidator.redact?:
   (s:string) => string` on `ConsolidatorHookInput`. Each rollout message's

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]
+configurable: n-a
 purpose: |
   Expands the Codex-absorbed ADR-0015 read-only LSP nav surface
   (8 nav tools) with 4 mutating + signature-help capabilities the

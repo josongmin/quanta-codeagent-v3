@@ -14,6 +14,9 @@ config_refs:
   env: [QUANTA_MAX_TURNS]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
 purpose: maxTurns
 evidence:
   code: [src/agent/loop.ts]

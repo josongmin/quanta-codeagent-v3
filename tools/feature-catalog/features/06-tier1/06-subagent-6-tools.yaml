@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
+configurable: static
 purpose: |
   Codex 통계 흡수: exec_command 75% + write_stdin 24% 지배. 6 tool
   contract-only (input/output Zod strict + success/error discriminator).

@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_MEMORY_SUBDIR"]
 purpose: |
   Codex memory model의 2-phase distill+consolidator 흡수 — 기존 SOTA++ hybrid recall
   (ADR-0008, embedding+lexical+tag+freshness+tier+reinforcement)이 메우지 못한 두 구조적

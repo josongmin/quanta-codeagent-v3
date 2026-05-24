@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: static
 purpose: |
   First-class YAML reader closing the de-facto config-file gap left by
   ADR-0133's csv/ndjson slice. Single pure-TS dep (`yaml@2.x`, ~50 KB),

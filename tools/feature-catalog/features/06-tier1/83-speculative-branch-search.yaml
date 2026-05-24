@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor", "absorbed:agentless"]
+configurable: n-a
 purpose: |
   하드 edit를 N개 후보로 격리 워크스페이스에서 병렬 시도 → 닫힌 Verifier 포트(tsc/test/
   lint/lsp_diag)로 채점 → 순수 Scorer 가중합 + Selector argmax로 winner 선택. 메인 루프는

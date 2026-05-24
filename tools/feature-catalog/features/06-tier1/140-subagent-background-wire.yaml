@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |
   Caller-wire closure for ADR-0130 — adds AgentConfig.subagentBackground
   typed slot + FeaturesConfig Pick + buildSessionFeatures composer step

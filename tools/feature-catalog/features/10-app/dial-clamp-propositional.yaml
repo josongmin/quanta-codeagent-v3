@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: static
 purpose: |
   Pure function `clampDials(dials, caps, onClamp?)` — for each of 16 dial
   fields, returns `min(requested, cap)` when both present; emits a

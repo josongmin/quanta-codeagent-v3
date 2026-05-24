@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
+configurable: static
 purpose: |
   gh CLI tool that maps PR review-thread comments onto file:line anchors —
   one step beyond commit blame ("who last touched this line" → "what did

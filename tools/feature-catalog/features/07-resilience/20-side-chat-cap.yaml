@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_SIDE_"]
 purpose: |
   사용자의 lookup 질문("어디서 X 정의됨?", "test 커맨드?")을 메인 대화의 history/
   working-state/cost에 섞지 않고 격리된 mini agent loop으로 처리. 5-invariant 락-인:

@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_DIFF_MAX_BYTES, QUANTA_DIFF_MAX_LINES, QUANTA_DIFF_PREVIEW]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_DIFF_MAX_BYTES", "QUANTA_DIFF_MAX_LINES", "QUANTA_DIFF_PREVIEW"]
 purpose: |
   4개 변경-도구(`write` / `edit` / `apply_patch` / `scripted_replace`) 분기를
   단일 `renderActionDiff()`로 통일 — before/after 텍스트 페어를 line-LCS

@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_SWEBENCH_PYTHON]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "held-promotion"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_LLM_PROVIDER", "QUANTA_MODEL", "QUANTA_SWEBENCH_PYTHON"]
 purpose: |
   `princeton-nlp/SWE-bench_Verified`에서 결정적·저비용·신뢰성 기준으로 6개
   instance를 frozen하여 회귀 reference로 사용 (capability sweep 아님, smoke

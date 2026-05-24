@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: integrated
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
 evidence:
   code: [src/tool/registry.ts, src/tool/factory.ts]

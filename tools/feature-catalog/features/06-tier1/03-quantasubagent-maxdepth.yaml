@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_SUBAGENT]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH"]
 purpose: git worktree 격리 [_MAX_DEPTH]
 evidence:
   code: [src/runner/assemble/subagent.ts, src/agent/subagent-runner.ts, src/subagent/agent-tool.ts]

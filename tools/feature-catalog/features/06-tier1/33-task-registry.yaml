@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [subagent-6-tools]
+configurable: static
 purpose: |
   In-memory registry of background subagent tasks (v2's `taskRegistry` shape).
   Agent tool registers a task here when launched in background mode and

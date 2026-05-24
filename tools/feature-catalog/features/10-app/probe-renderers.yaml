@@ -11,6 +11,7 @@ modes: [headless, batch]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: n-a
 purpose: |
   Pure renderers — events in, strings out. No color, no I/O (RFC-0002 §7
   Phase 1 = plain text, no TUI per RFC §14). Multiple views from the same

@@ -12,6 +12,9 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [tool-output-schema-factory, tool-search]
+configurable: partial
+config_refs:
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   Typed seam for tools that need to return a provisional placeholder plus a
   `DeferredHandle`, with the final `ToolResult` produced out-of-band and parked

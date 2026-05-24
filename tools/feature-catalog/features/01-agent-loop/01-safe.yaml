@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+configurable: n-a
 purpose: safe 도구 스트림 중 즉시 디스패치, 순서보존, head-of-line 배리어
 evidence:
   code: [src/agent/streaming-dispatch.ts]

@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_SANDBOX"]
 purpose: |
   R-Phase4 P3-1 defense-in-depth handler for promise rejections that escape
   the agent loop's `try/catch` boundaries (background MCP cleanup, off-loop

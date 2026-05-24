@@ -14,6 +14,9 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [chatgpt-oauth-provider]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_COST_PANEL", "QUANTA_MEMORY_SLASH", "QUANTA_OAUTH_CLIENT_ID", "QUANTA_PREFS_HOME", "QUANTA_PROVIDER", "QUANTA_REWIND", "QUANTA_SANDBOX"]
 purpose: '/context, /usage, /color, /navigate, /wait, /retry-with, /skills, /reload-skills, /login, /status — surface-agnostic SlashCommand 레지스트리. isSlashCommand는 /<letter>... 만 매치 ([/path/to/file]는 false). cli/index.ts의 main()이 session subcommand 다음, --help 이전에 short-circuit. LLM 호출 0회 (/login 제외 — OAuth 브라우저 플로우). /color & /navigate 는 ~/.quanta/preferences.json 영속화 (QUANTA_PREFS_HOME 테스트 시ams). /wait 캡 = 3600s. /login & /status는 ADR-0094 ChatGPT-OAuth provider 와이어업 (자세한 계약은 chatgpt-oauth-provider feature).'
 evidence:
   code: [src/apps/cli/slash-commands.ts, src/apps/cli/index.ts, src/apps/cli/login-cmd.ts, src/apps/cli/status-cmd.ts, src/apps/cli/auth-ui.ts]

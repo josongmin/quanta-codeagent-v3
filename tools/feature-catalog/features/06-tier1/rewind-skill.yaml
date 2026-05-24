@@ -12,6 +12,9 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 depends_on: [snapshot-slash-cmd]
+configurable: partial
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
 purpose: |
   사용자가 "rewind" / "undo" / "rollback" / "go back" / "revert changes"라고
   말할 때 워크스페이스를 이전 shadow snapshot으로 복원하는 시스템 스킬.

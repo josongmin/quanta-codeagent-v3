@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
+configurable: n-a
 purpose: LocalSandbox
 evidence:
   code: []

@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_BENCH_REPRO_TEST]
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_BENCH_REPRO_TEST"]
 purpose: |
   Agentless paper §3.3.1 absorption: drive the LLM K times to synthesise
   self-contained Python repro scripts that print one of three sentinels

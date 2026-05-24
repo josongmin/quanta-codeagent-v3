@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: n-a
 purpose: |
   Correlation context threaded through an agent run (RFC-0002 §5.1). Carries
   `runId` (required) + optional `instanceId` / `attempt` / `turn` / `toolUseId`

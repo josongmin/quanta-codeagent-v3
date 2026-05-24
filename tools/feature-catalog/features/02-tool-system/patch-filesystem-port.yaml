@@ -13,6 +13,9 @@ configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [apply-patch-v4a]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_ATTRS", "QUANTA_FS_JAIL"]
 purpose: |
   Patch-specific FS port (read / write / delete / rename / exists) injected
   into the V4A `applyPatch` so the applier stays pure-functional w.r.t. the

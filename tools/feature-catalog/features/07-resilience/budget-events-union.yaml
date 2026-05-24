@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [stop-category-matrix]
+configurable: n-a
 purpose: |
   Discriminated-union event shapes for trajectory recording. BudgetTickEvent
   (kind + delta + cumulative observed after tick) emitted at every meter

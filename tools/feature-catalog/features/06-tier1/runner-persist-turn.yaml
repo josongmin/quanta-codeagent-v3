@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_STATE_PATH]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_STATE_PATH"]
 purpose: |
   CLI REPL `turn` 클로저의 inline save 블록을 surface 무관 슬라이스로 verbatim
   추출. 두 개의 독립 default-OFF 저장 경로를 하나의 진입점으로 묶는다:

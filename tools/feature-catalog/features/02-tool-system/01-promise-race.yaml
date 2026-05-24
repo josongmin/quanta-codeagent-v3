@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
+configurable: static
 purpose: '이전 sync regex를 Promise.race로 감싸 setTimeout 타임아웃 시도 → event loop pinned, setTimeout never fires . 회수: 진짜 ReDoS 방어는 applyScriptedReplace의 (1) literal-only fallback + length cap heuristic, (2) FS-jail · count cap뿐.'
 evidence:
   code: [src/tool/scripted-replace.ts]

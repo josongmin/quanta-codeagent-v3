@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [outcome-exit-code-table]
+configurable: integrated
 purpose: |
   Corpus-level exit-code aggregator for batch mode. `computeExitCode(results)`
   returns 0 iff EVERY instance resolved cleanly (passed AND verdict NOT in

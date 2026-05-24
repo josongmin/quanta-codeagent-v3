@@ -12,6 +12,9 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [work-metrics]
+configurable: partial
+config_refs:
+  env: ["QUANTA_LOG_LEVEL"]
 purpose: |
   Dependency-free in-process metrics registry that backs every downstream
   observability surface — the AgentRecorder, the shell-exec OTel observer,

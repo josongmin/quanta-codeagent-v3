@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
+configurable: static
 purpose: |
   Extracts `git diff base...head` (default `origin/main...HEAD`) and hands it
   to an ISOLATED sub-agent reviewer (depth+1, read-only tool registry filtered

@@ -11,6 +11,9 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+configurable: partial
+config_refs:
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   read_image tool that loads a local image, verifies the format via a magic-
   byte SSOT (cannot be spoofed by extension), and surfaces the image through

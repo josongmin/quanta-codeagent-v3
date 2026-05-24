@@ -12,6 +12,9 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+configurable: partial
+config_refs:
+  env: ["QUANTA_ATTRS"]
 purpose: |
   `llm/*` adapter 가 계산한 `estimatedCostUsd` + `input_tokens` /
   `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`

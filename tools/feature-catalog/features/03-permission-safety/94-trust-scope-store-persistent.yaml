@@ -12,6 +12,7 @@ configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:claude-code, surface:cli, security-touched, held-promotion]
 depends_on: [trust-scope-wire-up]
+configurable: static
 purpose: |
   L3→L4 promotion of `trust-scope-wire-up`. File-backed persistent grant
   store consulted by the admissibility gate to short-circuit the legacy

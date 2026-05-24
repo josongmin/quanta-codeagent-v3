@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_SWEBENCH_DATASET, QUANTA_SWEBENCH_RUN_ID]
 owners: ["@songmin"]
 labels: ["surface:bench"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SWEBENCH_CACHE_LEVEL", "QUANTA_SWEBENCH_CLEAN", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_PYTHON_BIN"]
 purpose: |
   The documented swebench-seam, now real. Given a `swebench.verified`
   Instance and the unified diff the agent produced, writes an official

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
+configurable: static
 purpose: |
   Codex-pattern channel-triple generator. Every async method has THREE
   related channel names derived from a single base — `channelTriple("agent.run")`

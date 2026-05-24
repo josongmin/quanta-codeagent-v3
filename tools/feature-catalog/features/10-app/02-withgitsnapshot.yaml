@@ -13,6 +13,9 @@ config_refs:
   env: [QUANTA_REPAIR_ROUNDS]
 owners: ["@songmin"]
 labels: ["surface:cli"]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_BENCH_TIMEOUT_MS", "QUANTA_MODEL", "QUANTA_OBSERVE_DIR", "QUANTA_PROVIDER", "QUANTA_REPAIR_ROUNDS", "QUANTA_RUN_ID", "QUANTA_SWEBENCH_CACHE_LEVEL", "QUANTA_SWEBENCH_CLEAN", "QUANTA_SWEBENCH_CORPUS_ROOT", "QUANTA_SWEBENCH_DATASET", "QUANTA_SWEBENCH_DATASET_NAME", "QUANTA_SWEBENCH_FORCE_REBUILD", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PYTHON", "QUANTA_SWEBENCH_PYTHON_BIN", "QUANTA_SWEBENCH_REPO_BASE_URL"]
 purpose: '외부 repair 라운드 : 에이전트 자신의 verify cmd 재실행으로 라운드별 게이팅, hidden 필드 미참조 — 단일 withGitSnapshot/continue-from-patched-tree. 실측 2/5(40%) vs 3/5 baseline — negative delta, opt-in 권장 --repair-rounds <int> / ()'
 evidence:
   code: [src/apps/bench/index.ts]

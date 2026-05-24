@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe, lsp-bridge]
+configurable: n-a
 purpose: |
   Surfaces language-server errors/warnings for one file. Slice isolation
   (RFC §3.1, biome-enforced): `@/tool` MUST NOT import `@/lsp` — so this file

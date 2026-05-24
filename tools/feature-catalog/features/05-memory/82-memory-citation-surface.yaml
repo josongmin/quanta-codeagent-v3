@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "held-promotion"]
+configurable: n-a
 purpose: |
   Surface "which record was placed in this run's prompt window, where, with what
   score". Provenance signal (placement = citation), NOT a heuristic scan of the
