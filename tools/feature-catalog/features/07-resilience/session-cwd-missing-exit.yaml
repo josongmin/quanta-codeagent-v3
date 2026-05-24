@@ -1,0 +1,40 @@
+id: session-cwd-missing-exit
+title: switchToSessionCwd — fail-loud exit(1) on missing worktree on resume
+section: 7
+subsystem: 세션 재개 가드 — cwd 부재 진단
+order: 27
+maturity: L3
+status: stable
+purpose: |
+  HIGH-4 fail-loud guard for the resume path. When `--resume <id>` lands on
+  a session whose recorded cwd no longer exists on disk (worktree removed
+  since save / external rm -rf), `switchToSessionCwd` logs a clear
+  diagnostic ("Session cwd missing: <path>. The worktree may have been
+  removed.") and exits 1 BEFORE the SessionDeps capture chains a stale cwd.
+  Without this guard the next `process.cwd()` read silently anchors the
+  session to the LAUNCH directory — every subsequent tool call routes there,
+  scrambling the user's actual project state. Same-cwd short-circuit (target
+  === current) is a no-op and returns current verbatim (most common path:
+  resume in the same cwd). Live chdir on the changed path uses
+  `process.chdir(target)` + reads back `process.cwd()` to capture the
+  canonical (symlink-resolved) form. Distinct from generic argv-error exit
+  (EX_USAGE=64): this is a STATE-of-disk failure, not a usage failure, so it
+  uses the generic-error code (1).
+evidence:
+  code:
+    - src/apps/cli/session-io.ts
+  adrs: []
+  tests:
+    unit: []
+    integration:
+      - tests/integration/session-cli-subprocess.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `existsSync` is a deliberate (synchronous) probe — this runs once at
+  resume boundary BEFORE any agent loop is started, so the sync FS hit is
+  one-shot and the failure-fast property is more important than the
+  microsecond. The slog observability emits a `session.cwd.switched`
+  structured event on the success path (from→to) so a triage can correlate
+  the chdir with any subsequent tool calls.

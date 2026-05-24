@@ -1,0 +1,40 @@
+id: interactive-abort-error-mapping
+title: interactive runMode AbortError / ABORT_ERR → exit 130 boundary
+section: 7
+subsystem: Interactive 모드 abort → POSIX boundary
+order: 26
+maturity: L4
+status: stable
+purpose: |
+  The interactive mode-preset wraps `runRepl()` in a try/catch that converts
+  a thrown abort (either `err.name === "AbortError"` OR `err.code ===
+  "ABORT_ERR"` — Node's two flavors of the same condition) into a clean
+  `{ exitCode: 130 }` return. `runRepl` owns its own SIGINT wiring and may
+  call `process.exit` directly on a fatal; the wrapper exists so a FUTURE
+  caller that prefers graceful return codes over `process.exit` still gets
+  the canonical SIGINT exit-code (128+SIGINT=2). Two-name match is load-
+  bearing: Bun's AbortController throws an Error with `name: "AbortError"`,
+  while Node's internal abort path uses `code: "ABORT_ERR"` — checking BOTH
+  catches the cross-runtime drift. Non-abort throws rethrow unchanged so the
+  outer dispatcher sees the real fatal. Audit-R2 fix: a prior shape used a
+  bespoke `error ? 1 : 0` collapse that mapped `budget_exhausted` /
+  `max_turns` / `aborted` all to 0 — now `exitCodeForOutcome` is the single
+  source of truth for the hermetic-test seam, and this catch is the LIVE-
+  REPL boundary.
+evidence:
+  code:
+    - src/apps/agent/mode-presets/interactive.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/agent/mode-presets/interactive.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Hermetic test path (when `req.seams?.runAgent` is set) bypasses this catch
+  entirely and routes through `exitCodeForOutcome(outcome)` directly. Live
+  REPL path uses this catch because `runRepl` does NOT return a structured
+  AgentOutcome — it either resolves (clean exit → 0) or throws an abort
+  (interrupted → 130). The two paths agree on the {0, 130} boundary.

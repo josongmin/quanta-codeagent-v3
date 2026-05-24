@@ -1,0 +1,45 @@
+id: abort-signal-compose
+title: AbortSignal.any compose + chainedSignal — framework-level dual-signal hierarchy
+section: 7
+subsystem: 취소 신호 합성 (turn vs surface vs subagent)
+order: 23
+maturity: L4
+status: stable
+purpose: |
+  Framework-level cancellation-composition primitive: `AbortSignal.any([outer,
+  turn])` fuses two independent controllers (surface-level outer abort
+  driven by Ctrl+C, per-turn `turnAbort` driven by Esc-Esc) into a single
+  derived signal that aborts when EITHER input aborts. The legacy alternative
+  (manually wiring `addEventListener("abort", …, { once: true })` between two
+  controllers) is the prior shape — `AbortSignal.any` replaces it across the
+  agent runtime so all five callers share identical semantics: REPL turn
+  loop, oneshot driver, interactive driver, and `chainedSignal(parent, extra)`
+  in subagent-runner (parent + per-task TaskRegistry signal). `chainedSignal`
+  is the no-allocation fast-path — returns `parent` directly when `extra` is
+  absent so the no-subagent-cancellation path stays allocation-free.
+  Distinct from `turn-cancel-keys` (which owns the REPL keypress wiring
+  ITSELF) and from `git-runner-cancellation-signal` (which is per-tool
+  forwarding into the git child process).
+evidence:
+  code:
+    - src/apps/cli/repl.ts
+    - src/apps/cli/repl/oneshot-driver.ts
+    - src/apps/cli/repl/interactive-driver.ts
+    - src/agent/subagent-runner.ts
+    - src/runner/orchestrate/run-interactive.ts
+  adrs: []
+  tests:
+    unit: []
+    integration:
+      - tests/integration/subagent-cancellation-e2e.test.ts
+      - tests/integration/agent-abort.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Already-aborted inputs to `AbortSignal.any` produce an already-aborted
+  result — the contract relies on this so a Ctrl+C arriving BEFORE a turn
+  starts still cancels the next turn. The fast-path branch in `chainedSignal`
+  is load-bearing: the legacy non-subagent runs MUST share the parent's
+  signal directly (no fresh signal allocation per turn) to keep the no-extra
+  path byte-identical to the pre-subagent shape.
