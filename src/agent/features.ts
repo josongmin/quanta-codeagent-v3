@@ -56,6 +56,7 @@ import type { TaskRegistry } from "../subagent"
 import type { SkillTurnOverride } from "./loop"
 import {
   buildBranchSearchBlock,
+  buildBudgetBlock,
   buildClassifierBlock,
   buildPlanExitBlock,
   buildPlanMutationBlock,
@@ -149,6 +150,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0140 — background-subagent tools (default-OFF: empty when subagentBackground absent)
   extraTools.push(...buildSubagentBgBlock(config))
+
+  // ADR-0136 — budget_status tool (default-OFF: empty array when budgetLedger absent)
+  extraTools.push(...buildBudgetBlock(config))
 
   // --- Skill block (ADR-0011) ---------------------------------------------
   const skill = await buildSkillBlock(config)

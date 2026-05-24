@@ -145,6 +145,57 @@ for f in docs/decisions/*.md; do head -1 "$f"; done
 | 0096 | ContextProvider — pluggable retrieval/memory/snapshot plane (Context plane keystone) | arch |
 | 0097 | PhaseGate state machine implementation (ADR-0088 design → code) | permission |
 | 0098 | Lint-grounded reflect gate — pure baseline impl (ADR-0089 design → code) | agent |
+| 0099 | Git posture — default fail-closed (Codex §18.2/§18.4/§18.5 흡수) | prompt |
+| 0100 | Destructive git HARD_DENY 6룰 (런타임 backstop) | permission |
+| 0101 | Push mass-delete guard 3룰 (Claude Desktop `push_refused_mass_delete` 흡수) | permission |
+| 0102 | `turn_diff_updated` stream event + emitter (Codex `turn/diff/updated` 흡수) | observability |
+| 0103 | `gh_pr_blame` — PR review-thread blame (Cursor `StreamCodeTour.Blame` 흡수) | tool |
+| 0104 | `gh_pr_review_diff` / `gh_pr_auto_merge` / `gh_pr_create.draft` (Claude Desktop PR IPC 흡수) | tool |
+| 0105 | Git env determinism + US-separator log format (Codex §18.7 흡수) | tool |
+| 0106 | SessionMeta git fingerprint (Codex §18.9 흡수) | observability |
+| 0107 | `GitBudget` 5-knob capture budget (Cursor `captureGitHistory` 흡수) | tool |
+| 0108 | Shadow git ODB foundation — 사용자 `.git` 비침습 스냅샷 인프라 | tool |
+| 0109 | Moved-code detector + classifier — PR-review canvas §2 "moved" 카테고리 | tool |
+| 0110 | Git observability wiring helpers (opt-in seam for ADR-0102/0106) | observability |
+| 0111 | CTK git-skill bundle (8 system skills, Cursor cursor-team-kit absorption) | skill |
+| 0112 | `git_review_diff` — isolated diff reviewer sub-agent (Claude Desktop `reviewDiff` 흡수) | tool |
+| 0113 | `pre_tool_use` hook `updatedInput` (Cursor parity) | agent |
+| 0114 | Typed tool failures: bash `permission_denied` + read `not_found` (gap closure) | tool |
+| 0115 | Localize tool: SOTA++ signal hardening (BM25-lite + FrameTier + def-boost) | skill |
+| 0116 | Branch-search ↔ Shadow ODB 앵커 시밍 — 최초 wiring | agent |
+| 0117 | Branch-search minimal-change bias + CLI progress surface | agent |
+| 0118 | Shadow ODB `rewindToLast` — 파괴적 복원 + 자동 안전망 | tool |
+| 0119 | `shadow_rewind` + `shadow_snapshots` 첫-class agent tool 노출 | tool |
+| 0120 | Refusal `stop_reason` typed surface — Gap-1 SOTA++ | agent |
+| 0121 | Auto-checkpoint policy for the shadow git ODB | tool |
+| 0122 | ShadowOdb rewind extensions — per-file restore + verified anchor + /rewind skill | tool |
+| 0123 | Verify-checkpoint bridge — opt-in markVerified caller seam | agent |
+| 0124 | Conversation checkpoint store — primitive for the missing rollback half | agent |
+| 0125 | Turn-diff wiring consolidation + integration proof | observability |
+| 0126 | `read_image` 도구 + ToolResult.images 필드 + 컴포저 헬퍼 | tool |
+| 0127 | `web_fetch` + `web_search` tool slice (web 가용성 갭 봉합) | tool |
+| 0128 | Plan-queue helper — Codex mid-turn follow-up queue as a typed primitive | agent |
+| 0129 | Localize: closing the recall@1 gap (sibling-`.js` penalty + VENDORED_RE for generator dirs) | skill |
+| 0130 | Extracted-source absorption roadmap (R1–R6 → ADR 후보 catalog) — **Proposed** (roadmap only) | meta |
+| 0131 | Memory hygiene: 4-state outcome enum + preference phrase grammar + 10% phase2 promotion | memory |
+| 0132 | Autonomous proactive reactor: SIMULATED_MSG_REASON + cloud-agent branch snapshot 사다리 — **Proposed** | modes |
+| 0133 | Hook bidirectional Request/Response RPC paired (6 lifecycle events + prompt_hook injection) | agent |
+| 0134 | Skill 7-scope tiering (builtIn / system / admin / team / repo / user / personal) — **Proposed** | skill |
+| 0135 | Permission profile + file_system_sandbox_policy 2-layer + 4-pillar Permission — **Proposed** | permission |
+| 0136 | OS-level sandbox helper — Cursor `cursorsandbox` + Codex Seatbelt 흡수 | runtime |
+| 0137 | Document readers extensions — YAML / PDF (native attachment) / XLSX (stub) | tool |
+| 0138 | Token budget ledger — typed BudgetBreach primitive over per-model pricing | observability |
+| 0139 | LLM provider fork — Anthropic 전송 4갈래 (default/bedrock/vertex/foundry) 헥사고날 포트 | llm |
+| 0140 | ADR-0140 — Background-subagent caller wire — ADR-0145 (renumbered from ADR-0130) helper를 loop에 노출 | agent |
+| 0141 | ADR-0141 — LSP 4-tool 확장 — code-action / rename-apply / format / signature-help | tool |
+| 0142 | ADR-0142 — Wire finalization — web-search env factory + document-tools default registration | tool |
+| 0143 | ADR-0143 — LSP default-adapter 실배선 — code-action / format / signature-help / applyWorkspaceEdit | tool |
+| 0144 | ADR-0144 — Observability metrics — typed counter/histogram/gauge primitive over `AgentEvent` trace stream | observability |
+| 0145 | Background subagent scheduler — Cursor `force_background_subagent` 흡수 (renumbered from ADR-0130) | agent |
+| 0146 | `read_image_url` 도구 — URL → vision 파이프라인 (renumbered from ADR-0132) | tool |
+| 0147 | `csv_read` + `ndjson_read` document tool slice (renumbered from ADR-0133) | tool |
+| 0148 | Web search provider concrete impls — Brave primary + DuckDuckGo fallback (renumbered from sibling ADR-0133) | tool |
+| 0149 | Engineering-task skill bundle — 4 system skills: debug / test / explain / refactor (renumbered from ADR-0134) | skill |
 
 ## Status notes
 
@@ -152,3 +203,16 @@ for f in docs/decisions/*.md; do head -1 "$f"; done
 - ADR-0043 and 0044 are marked "잠정 번호 (provisional number)" in their files; treat as ratified pending a future cleanup pass.
 - ADR-0097 and 0098 are **implementations** of design ADRs 0088 and 0089 respectively — read the design ADR first.
 - ADR-0094 is the **structural keystone** for the 5-plane architecture; 0093/0095/0096 specialize one plane each.
+- **Proposed** entries (0130, 0132, 0134, 0135) are roadmap/spec ADRs whose implementation work has not landed; they describe future absorption rounds rather than shipped surface.
+
+## Collision audit trail
+
+History of intentional or accidental ADR-number collisions and their reconciliation. New collisions land here when the round closes.
+
+| Collision | Original (kept) | Renumbered (ours) | Round |
+|---|---|---|---|
+| 0068 | `0068-codex-2-phase-memory-consolidator.md` | `0068-persona-slot.md` (deferred — both still ship live in `main`; see "Known collisions" notice above) | 2026-05-21 |
+| 0130 | `0130-extracted-source-absorption-roadmap.md` (user roadmap) | `0145-background-subagent.md` | 2026-05-24 |
+| 0132 | `0132-autonomous-proactive-reactor.md` (user) | `0146-read-image-url.md` | 2026-05-24 |
+| 0133 | `0133-hook-bidirectional-rpc.md` (user) | `0147-document-tools.md`, `0148-web-search-providers.md` | 2026-05-24 |
+| 0134 | `0134-skill-scope-tiering.md` (user) | `0149-engineering-skills-bundle.md` | 2026-05-24 |

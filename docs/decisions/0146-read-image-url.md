@@ -1,4 +1,6 @@
-# ADR-0132: `read_image_url` 도구 — URL → vision 파이프라인 (read_image + web_fetch 합성)
+# ADR-0146: `read_image_url` 도구 — URL → vision 파이프라인 (read_image + web_fetch 합성)
+
+> **Renumbered 2026-05-24** from ADR-0132 due to collision with `0132-autonomous-proactive-reactor.md`. User entry kept the original number; this slice moved to 0146.
 
 - **상태**: Accepted
 - **날짜**: 2026-05-24

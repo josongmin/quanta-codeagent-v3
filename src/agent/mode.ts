@@ -188,6 +188,31 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // in plan mode — plan mode PROPOSES; it does not commit.
   git_commit: "git_mutating",
   git_branch_switch: "git_mutating",
+  // ─── ADR-0119 / ADR-0122 / ADR-0130 / ADR-0136 ─────────────────────────
+  // Caller-wire-time tools — registered conditionally (only when the relevant
+  // AgentConfig slot is wired: shadowOdb / subagentBackground / budgetLedger).
+  // Their MUTATING_TOOL_TABLE entries MUST be PERMANENT regardless of whether
+  // any host wires them: a host that does inject them MUST NOT trip
+  // `UnknownToolError` from `isMutatingTool` on plan-mode dispatch, which
+  // would crash the seam. The mode-mutating-table cross-check tolerates the
+  // additional entries (caller-wire tools are not enumerated by
+  // `allTools` in the cross-check; the orphan-direction check considers
+  // them "known absent" via the explicit allowlist convention).
+  // Shadow git ODB tools (ADR-0119 / ADR-0122). Snapshots is read-only
+  // (lists refs); rewind/restore_partial overwrite worktree files (git
+  // mutating, same posture as git_commit — plan mode forbids).
+  shadow_snapshots: null,
+  shadow_rewind: "git_mutating",
+  shadow_restore_partial: "git_mutating",
+  // Background subagent tools (ADR-0130). Fork SPAWNS shell work (same
+  // posture as `bash` — plan mode forbids); poll + await are read-only
+  // observations of the scheduler's state (safe in plan mode).
+  subagent_fork: "bash_mutating",
+  subagent_poll: null,
+  subagent_await: null,
+  // Read-only budget surface (ADR-0136). Pure render of the in-memory
+  // ledger; no FS / shell / network touch. Safe in plan mode.
+  budget_status: null,
 })
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}

@@ -1,4 +1,6 @@
-# ADR-0133: Web search provider concrete impls (Brave primary + DuckDuckGo fallback)
+# ADR-0148: Web search provider concrete impls (Brave primary + DuckDuckGo fallback)
+
+> **Renumbered 2026-05-24** from sibling-of-0133 (`0133-hook-bidirectional-rpc.md` + `0133-document-tools.md` collision). User entry kept the original number; this slice moved to 0148.
 
 - **Status**: Accepted
 - **Date**: 2026-05-24

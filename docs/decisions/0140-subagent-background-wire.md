@@ -1,7 +1,9 @@
-# ADR-0140: Background-subagent caller wire — ADR-0130 helper를 loop에 노출
+# ADR-0140: Background-subagent caller wire — ADR-0145 (renumbered from ADR-0130) helper를 loop에 노출
+
+> **Note 2026-05-24**: This ADR's "ADR-0130" sibling has been renumbered to ADR-0145 (collision with `0130-extracted-source-absorption-roadmap.md`). All "ADR-0130" mentions below refer to the now-ADR-0145 background-subagent helper landing.
 
 - **상태**: Accepted (2026-05-24)
-- **관련 ADRs**: ADR-0130 (background subagent helper — sibling helper-only landing), ADR-0119 (`shadow_rewind` 첫-class tool 노출 — 동일한 caller-wire 패턴 적용 1차 사례), ADR-0125 (turn-diff wiring consolidation — deferred-wire family 통과 의례), ADR-0083 (branch-search default-OFF gate — 미러 패턴), ADR-0011 (legacy sequential subagent)
+- **관련 ADRs**: ADR-0145 (background subagent helper — sibling helper-only landing; renumbered from ADR-0130), ADR-0119 (`shadow_rewind` 첫-class tool 노출 — 동일한 caller-wire 패턴 적용 1차 사례), ADR-0125 (turn-diff wiring consolidation — deferred-wire family 통과 의례), ADR-0083 (branch-search default-OFF gate — 미러 패턴), ADR-0011 (legacy sequential subagent)
 - **참조**:
   - `src/agent/types.ts` — `AgentConfig.subagentBackground?: { readonly scheduler }` slot + `FeaturesConfig` Pick 갱신
   - `src/agent/tier1/index.ts` — `buildSubagentBgBlock` 배럴 (ADR-0130에서 이미 추가)

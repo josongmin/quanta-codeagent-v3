@@ -1,4 +1,6 @@
-# ADR-0133: `csv_read` + `ndjson_read` document tool slice (text-format structured-data gap closure)
+# ADR-0147: `csv_read` + `ndjson_read` document tool slice (text-format structured-data gap closure)
+
+> **Renumbered 2026-05-24** from ADR-0133 due to collision with `0133-hook-bidirectional-rpc.md`. User entry kept the original number; this slice moved to 0147.
 
 - **상태**: Accepted
 - **날짜**: 2026-05-24

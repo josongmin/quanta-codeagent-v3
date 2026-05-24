@@ -9,12 +9,22 @@ import {
   requestUserInputTool
 } from "@/tool";
 describe("mode mutating-table cross-check (ADR-0036)", () => {
+  const callerWireToolNames = [
+    "shadow_snapshots",
+    "shadow_rewind",
+    "shadow_restore_partial",
+    "subagent_fork",
+    "subagent_poll",
+    "subagent_await",
+    "budget_status"
+  ];
   const allTools = [
     ...defaultTools.map((t) => t.name),
     ...gitTools().map((t) => t.name),
     ...lspNavTools(nullLspNavProvider).map((t) => t.name),
     createUpdateWorkingStateTool(undefined).name,
-    requestUserInputTool().name
+    requestUserInputTool().name,
+    ...callerWireToolNames
   ];
   test("every registered tool name has an entry in the mutating table", () => {
     const table = planModeMutatingTable();

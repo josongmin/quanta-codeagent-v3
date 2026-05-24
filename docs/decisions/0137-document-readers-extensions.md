@@ -2,12 +2,12 @@
 
 - **상태**: Accepted (yaml + pdf shipped; xlsx deferred to ADR-0138 deps decision)
 - **날짜**: 2026-05-24
-- **관련**: ADR-0126 (read_image — typed-attachment via ToolResult.images; magic-byte SSOT precedent), ADR-0133 (document slice — csv + ndjson sibling)
+- **관련**: ADR-0126 (read_image — typed-attachment via ToolResult.images; magic-byte SSOT precedent), ADR-0147 (document slice — csv + ndjson sibling; renumbered from ADR-0133)
 - **참조**: `src/tool/document/{yaml-read,pdf-read,xlsx-read}.ts`, `tests/unit/tool/{yaml,pdf,xlsx}-read-hellgate.test.ts`
 
 ## 맥락
 
-ADR-0133이 text-format 구조화 데이터(`csv_read` / `ndjson_read`)를 봉인했다. 남은 큰 gap:
+ADR-0147 (renumbered from ADR-0133)이 text-format 구조화 데이터(`csv_read` / `ndjson_read`)를 봉인했다. 남은 큰 gap:
 1. **YAML** — config 파일의 de-facto 표준. 단순 dep 추가로 해결.
 2. **PDF** — 비텍스트 + 텍스트 혼합. 모든 SOTA가 client-side text 추출 lib(`pdf-parse`/`pdfjs`)에 의존하지만 **Anthropic API는 native document content-block 지원**(claude-3.5+). lib 없이 base64 PDF를 그대로 attachment로 보내면 모델이 vision+text+form 모두 native 처리.
 3. **XLSX** — 큰 dep(SheetJS ~10MB native binding) 필요. deps decision deferred.
@@ -106,7 +106,7 @@ ToolResult {
 
 - **ADR-0138**: xlsx deps 결정 (SheetJS vs exceljs vs custom OOXML vs deferred indefinitely).
 - **defaults 등록**: 3 도구 모두 `buildDefaultTools()` + `MUTATING_TOOL_TABLE` 추가 (atomic, mode-mutating-table 갱신 동시).
-- **`read_pdf_url`**: web_fetch + pdf_read 결합 (ADR-0132 read_image_url 패턴 mirror).
+- **`read_pdf_url`**: web_fetch + pdf_read 결합 (ADR-0146 read_image_url 패턴 mirror; renumbered from ADR-0132).
 - **OCR scanned PDFs**: native attachment이 이미 처리하지만 explicit OCR mode 옵션.
 - **Multi-page PDF page-range**: 큰 PDF에서 특정 페이지만 attach.
 - **YAML multi-document** (`---` 구분 stream): 현재 첫 document만 파싱; multi-doc 지원은 follow-up.

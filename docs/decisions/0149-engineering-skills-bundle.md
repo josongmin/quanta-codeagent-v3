@@ -1,4 +1,6 @@
-# ADR-0134: Engineering-task skill bundle (4 system skills — debug / test / explain / refactor)
+# ADR-0149: Engineering-task skill bundle (4 system skills — debug / test / explain / refactor)
+
+> **Renumbered 2026-05-24** from ADR-0134 due to collision with `0134-skill-scope-tiering.md`. User entry kept the original number; this slice moved to 0149.
 
 - **상태**: Accepted
 - **날짜**: 2026-05-24

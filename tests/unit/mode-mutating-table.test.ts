@@ -18,6 +18,21 @@ import {
 } from "@/tool"
 
 describe("mode mutating-table cross-check (ADR-0036)", () => {
+  // Caller-wire tools: registered ONLY when the relevant AgentConfig slot is
+  // wired (ADR-0119/0122 shadow*, ADR-0130 subagent_*, ADR-0136 budget_status).
+  // Their MUTATING_TOOL_TABLE entries are PERMANENT so plan-mode dispatch
+  // cannot trip `UnknownToolError` on hosts that wire them. Cross-check
+  // includes them by NAME so the orphan check tolerates the entries without
+  // forcing every caller-wire factory to be reachable from this test.
+  const callerWireToolNames = [
+    "shadow_snapshots",
+    "shadow_rewind",
+    "shadow_restore_partial",
+    "subagent_fork",
+    "subagent_poll",
+    "subagent_await",
+    "budget_status",
+  ]
   const allTools = [
     ...defaultTools.map((t) => t.name),
     ...gitTools().map((t) => t.name),
@@ -27,6 +42,7 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     // (only when `AgentConfig.userInputPort` is wired). Its MUTATING_TOOL_TABLE
     // entry (read-only / `null` kind) must still satisfy the cross-check.
     requestUserInputTool().name,
+    ...callerWireToolNames,
   ]
 
   test("every registered tool name has an entry in the mutating table", () => {

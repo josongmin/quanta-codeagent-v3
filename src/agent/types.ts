@@ -1,4 +1,6 @@
 import type { LLMPort, Message, ModelCandidate } from "@/llm"
+import type { LlmProvider } from "@/llm/providers"
+import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } from "@/lsp"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
 import type {
@@ -7,6 +9,7 @@ import type {
   ToolAction,
   TrustScopeRegistry,
 } from "@/permission"
+import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"
 import type { ShadowOdb } from "@/storage"
@@ -15,10 +18,12 @@ import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool
 import type { WebSearchProvider } from "@/tool/web"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
+import type { BudgetLedger } from "./budget-ledger"
 import type { CapEnforcer } from "./cap-enforcer"
 import type { CheckpointTriggerMode, DestructivenessOracle } from "./checkpoint-policy"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
+import type { ConversationCheckpointStore } from "./conversation-checkpoint"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { FollowUpQueue, PausedReason } from "./follow-up-queue"
 import type { GlobRule } from "./glob-rules"
@@ -754,6 +759,54 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
   subagentPendingPrompt?: {
     push: (entry: import("./hooks").HookPromptInject) => unknown
   }
+  /**
+   * ADR-0136 budget-ledger slot — token × pricing → $$ + soft/hard breach
+   * events at session/daily scope. When set, `buildBudgetBlock` registers the
+   * `budget_status` tool wired against this ledger. Absent ⇒ the tool is NOT
+   * registered (default-OFF, byte-identical for every legacy caller — RFC
+   * §1.2). Top-level (not nested) so future consumers (mid-turn cost
+   * surfacing, post-turn telemetry exporter) can read this slot directly.
+   */
+  budgetLedger?: BudgetLedger
+  /**
+   * ADR-0124 conversation-checkpoint slot (helper-only). When set, callers
+   * (apps/agent bootstrap, future `/rewind` slash command, future
+   * auto-recovery hook) record/restore the `messages[]` history through this
+   * store. Absent ⇒ no checkpoint store; the loop is byte-identical (no field
+   * exists on AgentConfig in absent state under exactOptional). NOT consumed
+   * by the loop itself today — slot exists for caller-side composition.
+   */
+  conversationCheckpoint?: { store: ConversationCheckpointStore }
+  /**
+   * ADR-0143 OS-sandbox port slot (helper-only). When set, future
+   * shell/exec consumers wire through this port (Seatbelt on macOS / Landlock
+   * on Linux). Absent ⇒ the consumers fall back to the legacy unsandboxed
+   * spawner (byte-identical default-OFF). NOT consumed by the loop itself
+   * today — slot exists for caller-side composition.
+   */
+  osSandbox?: OsSandbox
+  /**
+   * ADR-0139 LLM-provider port slot (helper-only). When set, future
+   * factory-resolving consumers (BYO-key / Bedrock / Vertex / Foundry routes)
+   * consult this port instead of the legacy `@/llm/factory` direct path.
+   * Absent ⇒ the legacy path is byte-identical. NOT consumed by the loop
+   * itself today — slot exists for caller-side composition.
+   */
+  llmProvider?: LlmProvider
+  /**
+   * ADR-0141 LSP sibling ports slot. Closed-port DI for the four LSP
+   * sub-surfaces (code-action / format / signature-help / rename-apply). When
+   * wired, future tools that need these surfaces consume them through this
+   * slot. Absent ⇒ the consumers fall back to their null adapters or skip
+   * registration entirely (byte-identical default-OFF). Caller-wire of these
+   * tools to `extraTools` is a separate ADR; for now just the slot.
+   */
+  lspPorts?: {
+    readonly codeAction?: CodeActionPort
+    readonly format?: FormatPort
+    readonly signatureHelp?: SignatureHelpPort
+    readonly renameApply?: RenameApplyPort
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -858,6 +911,17 @@ export type FeaturesConfig = Pick<
   | "modelCandidates"
   | "planQueue"
   | "webSearch"
+  // ─── P0/P1 wire-audit closeout (new slots reachable from features.ts) ───
+  // `budgetLedger` is consumed TODAY (builds `budget_status` tool).
+  // The remaining 6 are helper-only slots: their presence on the FeaturesConfig
+  // Pick documents that future caller-wire-time consumers in features.ts will
+  // read them, and keeps the Pick union from drifting away from AgentConfig.
+  | "budgetLedger"
+  | "conversationCheckpoint"
+  | "llmProvider"
+  | "lspPorts"
+  | "metrics"
+  | "osSandbox"
 >
 
 /** Narrow contract for per-turn prompt / context assembly (the loop's

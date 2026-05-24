@@ -136,6 +136,30 @@ export {
 } from "./shadow"
 export { composeShellObservers, noopShellObserver } from "./shell-exec-observers"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
+// Background subagent tools (ADR-0130). Caller-wire: registered only when
+// `AgentConfig.subagentBackground` is set; not part of `defaultTools`. The
+// `subagentBgTools(scheduler)` factory + per-tool exports + duck-typed port
+// are re-exported here so composition roots can wire without reaching into
+// the slice directory.
+export type {
+  BackgroundSubagentSchedulerPort,
+  SubagentAwaitInput,
+  SubagentBgHandleId,
+  SubagentBgResult,
+  SubagentBgSpec,
+  SubagentBgStatus,
+  SubagentForkInput,
+  SubagentPollInput,
+} from "./subagent-bg"
+export {
+  subagentAwaitInputSchema,
+  subagentAwaitTool,
+  subagentBgTools,
+  subagentForkInputSchema,
+  subagentForkTool,
+  subagentPollInputSchema,
+  subagentPollTool,
+} from "./subagent-bg"
 export type {
   BlockerSurface,
   DeferredHandle,

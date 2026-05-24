@@ -1,7 +1,7 @@
 # ADR-0142: Wire finalization — web-search env factory + document-tools default registration
 
 - **상태**: Accepted (2026-05-24)
-- **관련 ADRs**: ADR-0127 (`web_search` closed-port + `AgentConfig.webSearch.provider` slot), ADR-0133 (Brave / DuckDuckGo provider impls + 5 document/structured-data tools), ADR-0137 (yaml/pdf/xlsx extensions of ADR-0133), ADR-0119 (default-OFF + atomic-table-update pattern — voice/structure mirror)
+- **관련 ADRs**: ADR-0127 (`web_search` closed-port + `AgentConfig.webSearch.provider` slot), ADR-0147 / ADR-0148 (csv/ndjson document tools + Brave / DuckDuckGo provider impls — both renumbered from ADR-0133 collision), ADR-0137 (yaml/pdf/xlsx extensions of ADR-0147), ADR-0119 (default-OFF + atomic-table-update pattern — voice/structure mirror)
 - **참조**:
   - `src/tool/web/providers/from-env.ts` — 신규 env-var → `WebSearchProvider` 팩토리
   - `src/tool/web/providers/index.ts` — barrel 한 줄 추가
@@ -58,7 +58,7 @@ export const providerFromEnv = (
    pdf_read: null,
    xlsx_read: null,
    ```
-2. **`src/tool/index.ts` `buildDefaultTools()`** — 5 tool factory append (`readImageTool` / `webFetchTool()` 패턴 미러). Import 5 줄을 `./document` barrel 에서. 알파벳 정렬 대신 ADR-0133/0137 그룹으로 묶음 — 주석으로 의도 표시.
+2. **`src/tool/index.ts` `buildDefaultTools()`** — 5 tool factory append (`readImageTool` / `webFetchTool()` 패턴 미러). Import 5 줄을 `./document` barrel 에서. 알파벳 정렬 대신 ADR-0147/0137 그룹으로 묶음 (ADR-0147 renumbered from ADR-0133) — 주석으로 의도 표시.
 
 두 leg 가 atomic 하게 land 되어 `mode-mutating-table.test.ts` cross-check 가 한 번도 깨지지 않음.
 

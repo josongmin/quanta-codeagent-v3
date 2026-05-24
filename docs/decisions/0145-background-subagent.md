@@ -1,4 +1,6 @@
-# ADR-0130: Background subagent scheduler — Cursor `force_background_subagent` 흡수
+# ADR-0145: Background subagent scheduler — Cursor `force_background_subagent` 흡수
+
+> **Renumbered 2026-05-24** from ADR-0130 due to collision with `0130-extracted-source-absorption-roadmap.md`. User roadmap kept the original number; this slice moved to 0145. Historical cross-refs in `src/`/`tests/` may still read "ADR-130".
 
 - **상태**: Accepted
 - **날짜**: 2026-05-24
