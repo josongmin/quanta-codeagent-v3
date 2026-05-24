@@ -65,3 +65,7 @@ export type { CreateAutomationInput } from "./automation"
 // JSONL store
 export { defaultJsonlAutomationStore } from "./store-jsonl"
 export type { JsonlAutomationStoreOpts } from "./store-jsonl"
+
+// Model reroute
+export { chooseModel } from "./model-reroute"
+export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
