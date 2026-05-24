@@ -1,0 +1,53 @@
+id: repro-test-slice
+title: Repro-test pipeline — Agentless §3.3.1 generate / execute / select
+section: 10
+subsystem: 벤치 — reproduction-test 합의 투표
+order: 130
+maturity: L4
+status: stable
+purpose: |
+  Agentless paper §3.3.1 absorption: drive the LLM K times to synthesise
+  self-contained Python repro scripts that print one of three sentinels
+  (`Issue reproduced` / `Issue resolved` / `Other issues`), execute each
+  candidate against the ORIGINAL repo (pre-patch) via a `ReproExecPort`,
+  classify the stdout, then select the winning candidate by MAJORITY VOTE
+  over the normalised source of those that reproduced. Bench driver wires
+  it behind a default-OFF env gate (`QUANTA_BENCH_REPRO_TEST=K`) so when
+  the flag is unset measurement is byte-identical.
+
+  Paper deviations recorded honestly: K default 5 (paper 40), temperature
+  uses the provider's default (LLMPort has no temperature knob — K
+  independent calls give K independent samples for sampling providers; a
+  deterministic test double yields unanimous majority). Markdown fences
+  stripped (` ```python `, ` ``` `). Normalisation collapses arbitrary
+  `def test_<x>()` names, runs of whitespace, comments and docstrings so
+  superficial paraphrase doesn't fork the group key. Tie-break: first
+  appearance wins (deterministic given input order).
+evidence:
+  code:
+    - src/agent/repro-test/index.ts
+    - src/agent/repro-test/generate.ts
+    - src/agent/repro-test/execute.ts
+    - src/agent/repro-test/select.ts
+    - src/agent/repro-test/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/repro-test/generate.test.ts
+      - tests/unit/repro-test/execute.test.ts
+      - tests/unit/repro-test/select.test.ts
+      - tests/unit/repro-test/integration.test.ts
+      - tests/unit/repro-test-hellgate.test.ts
+      - tests/unit/bench-repro-test-wiring.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_BENCH_REPRO_TEST
+deliberate_hold: null
+notes: |
+  Slice posture: generator has NO I/O beyond LLMPort; executor takes
+  ReproExecPort + ReproWriteFilePort so Python execution stays injectable
+  (production wires `python3 <script>` against the original repo cwd).
+  Selector is pure. AbortSignal honoured between samples — a triggered
+  abort returns whatever was collected so far; select.ts is happy to
+  operate on fewer samples.

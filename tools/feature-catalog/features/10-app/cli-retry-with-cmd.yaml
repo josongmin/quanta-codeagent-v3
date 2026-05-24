@@ -1,0 +1,48 @@
+id: cli-retry-with-cmd
+title: /retry-with — session-time model-swap slash command (ADR-0065 wire-up)
+section: 10
+subsystem: 앱 — model-swap retry CLI surface
+order: 135
+maturity: L4
+status: stable
+purpose: |
+  CLI surface that wires `resolveRetryModel` + `streamWithModel`
+  (`src/llm/model-swap.ts`, ADR-0065) into a session-time slash command:
+
+    /retry-with               → escalate to the NEXT candidate after the
+                                current model in the configured ordered list.
+    /retry-with <model-id>    → request that specific candidate;
+                                `NoAlternateModelError` if unknown or
+                                identical to the current model.
+
+  On a successful resolve we DROP the most-recent assistant message from
+  the transcript (keyed by `Message.id`) and re-stream the prior turn
+  against the chosen candidate via `streamWithModel`. The leading
+  `stream_reset` tombstone propagates so any consumer that had
+  accumulated the prior partial MUST discard it and assemble fresh from
+  the new stream (semantics documented on `StreamEvent.stream_reset`).
+
+  Default-OFF posture: without an injected `RetryWithSessionState` on
+  the `SlashContext`, the command prints "no model candidates
+  configured" and is a no-op — byte-identical to NOT registering the
+  command at all. NEVER silently succeeds when unconfigured.
+evidence:
+  code:
+    - src/apps/cli/retry-with.ts
+  adrs: [65]
+  tests:
+    unit:
+      - tests/unit/cli-retry-with.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion to `65-model-swap-retry.yaml` which catalogs the pure
+  policy (resolveRetryModel / streamWithModel). This entry is the
+  CLI wiring — re-streaming + transcript surgery + stream_reset
+  tombstone propagation — that the policy alone does not perform.
+  ADR-0059's "slash dispatch MUST NOT invoke the LLM" invariant
+  applies to the surface-only Tier-2 set; `/retry-with` is a
+  session-time command (needs the live transcript) and is excluded
+  from that invariant by design.

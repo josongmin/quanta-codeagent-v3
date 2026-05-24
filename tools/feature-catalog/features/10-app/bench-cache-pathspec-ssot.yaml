@@ -1,0 +1,46 @@
+id: bench-cache-pathspec-ssot
+title: Bench cache-shaped pathspec SSOT — patch-sanitizer prune-at-source
+section: 10
+subsystem: 벤치 — patch sanitizer 거시 룰
+order: 132
+maturity: L4
+status: stable
+purpose: |
+  Single source of truth for build/cache-shaped path exclusions across
+  the bench harness. The bench runner previously captured patches with
+  `git diff --cached` and filtered TEST paths in `sourceOnlyDiff`, but
+  build/cache pollution (`outputs/`, `__pycache__/`, `.claude/worktrees/`,
+  …) was caught only AFTER the fact by the failure classifier — and only
+  when the *entire* patch was cache-shaped. A mixed source+cache patch
+  (real django run, 2026-05-21) shipped to the grader and aborted at
+  turns=0.
+
+  T2 fix: exclude these paths AT the git layer using pathspec
+  `:(exclude,top)…` magic so a leaked `outputs/.../worktree` gitlink
+  never enters the index diff in the first place. `top` makes the
+  pathspec repo-rooted (not cwd-relative) so the exclusion holds
+  regardless of the bench's chdir. After T2 the classifier's
+  `dirty_cache_leak` signal becomes an INVARIANT ALARM — if it ever
+  fires in normal operation the contract was violated upstream.
+
+  Mirror discipline: `CACHE_PATH_RE` is derived from the same list and
+  imported by `failure-classifier.ts`. The list MUST mirror the
+  classifier's prior local regex exactly plus `.claude/worktrees/`
+  (the missing entry that caused the django leak). NEVER widen with
+  speculative entries.
+evidence:
+  code:
+    - src/apps/bench/corpus/cache-pathspecs.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/bench-patch-prune.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Read by the patch sanitizer when building the pathspec arg list for
+  `git diff --cached -- :(exclude,top)<path> ...` invocations; read by
+  the failure-classifier to derive its post-hoc `dirty_cache_leak`
+  signal regex. Two consumers, one SSOT.
