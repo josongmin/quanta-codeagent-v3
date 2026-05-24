@@ -592,15 +592,12 @@ describe("Plane 4 — Control / Security", () => {
     expect(typeof sb.availability).toBe("function")
   })
 
-  test("P4-22: compileLinuxSandboxArgv('workspace-write','bubblewrap') contains --bind for the workspace", () => {
-    const argv = compileLinuxSandboxArgv(
-      { profile: "workspace-write" },
-      "/workspace/abc",
-      "bubblewrap",
-    )
+  test("P4-22: compileBubblewrapArgs(profile='workspace-write') emits --bind for the workspace", () => {
+    const argv = compileBubblewrapArgs({ profile: "workspace-write" }, "/workspace/abc")
+    expect(argv).not.toBeNull()
     // bubblewrap MUST emit `--bind <ws> <ws>` to grant write access to the
     // workspace path; the test asserts both the bind verb and the path.
-    const joined = argv.join(" ")
+    const joined = (argv ?? []).join(" ")
     expect(joined).toContain("--bind")
     expect(joined).toContain("/workspace/abc")
   })
