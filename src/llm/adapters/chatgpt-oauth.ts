@@ -496,8 +496,14 @@ async function* parseSSE(
     let json: unknown
     try {
       json = JSON.parse(sseEv.data)
-    } catch {
-      continue
+    } catch (e) {
+      // Wire-level corruption: a `data:` frame whose body is not valid JSON
+      // is unrecoverable for this stream. Other adapters route comparable
+      // SDK-thrown wire errors through `LLMError.fromSdkError` so the typed
+      // `.kind`/`.statusCode` flow is uniform across providers. Do the same
+      // here instead of silently swallowing the frame (and risking dropped
+      // tool calls / silent truncation of the response).
+      throw LLMError.fromSdkError("chatgpt-oauth", e, "chatgpt-oauth SSE parse error")
     }
     if (!isObject(json)) continue
     const ev = json as ResponsesEvent
@@ -542,11 +548,22 @@ async function* parseSSE(
       const id = ev.item.call_id ?? ev.item.id ?? ""
       const slot = toolCalls.get(id)
       const raw = ev.item.arguments ?? slot?.args ?? "{}"
-      let input: unknown = {}
+      let input: unknown
       try {
         input = JSON.parse(raw)
-      } catch {
-        input = {}
+      } catch (e) {
+        // Corrupt tool-call arguments: the model said it wanted to invoke a
+        // tool but the accumulated JSON body is malformed. Silently
+        // defaulting to `{}` previously caused the tool to run with empty
+        // input (or against its schema's defaults), masking real provider
+        // wire bugs. Route through `LLMError.fromSdkError` so retry /
+        // fallback see a typed kind — same contract as the openai /
+        // anthropic adapters use for their parse failures.
+        throw LLMError.fromSdkError(
+          "chatgpt-oauth",
+          e,
+          "chatgpt-oauth tool_use arguments parse error",
+        )
       }
       yield { type: "tool_use_end", id, input }
       toolCalls.delete(id)

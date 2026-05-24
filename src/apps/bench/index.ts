@@ -184,6 +184,34 @@ const printSummary = (summary: BenchSummary): void => {
  *  only when `QUANTA_SWEBENCH_PYTHON=1` and the harness is importable. */
 type RunCfg = Parameters<typeof runInstance>[1]
 
+/** Injectable exit. Mirrors `apps/agent/index.ts` MainDeps so unit tests can
+ *  observe early-exit codes without forking the process. Defaults to
+ *  `process.exit` when callers don't provide one. Returns `never` so call
+ *  sites can chain `exit(N); return` (a no-op injected exit still falls
+ *  through to the `return`, matching agent/index.ts semantics). */
+export type ExitFn = (code: number) => never
+const defaultExitFn: ExitFn = (code: number): never => {
+  process.exit(code)
+}
+
+/** Module-private exit binding set by `runMain` at entry. Helpers (resolveLLM /
+ *  runDatasetMode / runCustomCorpusMode / maybeRunDatasetMode) read this
+ *  instead of calling `process.exit` directly so a single injection point
+ *  reaches every site without growing every helper's signature. */
+let exitFn: ExitFn = defaultExitFn
+
+/** Test seam — restore the default `process.exit`-backed exit binding between
+ *  tests so an injected no-op from one test doesn't leak into the next. */
+export const __resetBenchExitForTest = (): void => {
+  exitFn = defaultExitFn
+}
+
+/** `runMain` deps. `argv` is read straight from `process.argv` today; the
+ *  injection seam is here so future tests can pin it without forking. */
+export interface MainDeps {
+  exit?: ExitFn
+}
+
 /**
  * Run-level observe handle (RFC §8). Resolved ONCE from `--observe-dir` /
  * `QUANTA_OBSERVE_DIR`; undefined ⇒ default-OFF, byte-identical behavior.
@@ -333,7 +361,8 @@ const runDatasetMode = async (
     logger.info(
       `No usable tasks parsed from "${datasetFile}". Expecting official SWE-bench JSONL. Nothing to run.`,
     )
-    process.exit(0)
+    exitFn(0)
+    return
   }
   // `--instance <substr>` filters by instance id before the limit slice.
   const instanceFilter = argValue("--instance")
@@ -350,7 +379,8 @@ const runDatasetMode = async (
   // `--prepare-images`: warm the Docker image pool for the selected instances
   // then EXIT — no LLM, no agent. Exits BEFORE any LLM/agent work below.
   if (argFlag("--prepare-images")) {
-    process.exit(await runPrepareImages(selected.map((t) => t.instanceId)))
+    exitFn(await runPrepareImages(selected.map((t) => t.instanceId)))
+    return
   }
 
   // Official-dataset path MUST wire the Python harness too (the custom-corpus
@@ -426,8 +456,11 @@ const finalizeObserve = async (
 }
 
 /** Resolve provider/model/LLM; exits 0 with guidance when the key is absent
- *  (shared by both modes). `noun` tailors the message. */
-const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLMPort } => {
+ *  (shared by both modes). `noun` tailors the message. The exit is routed
+ *  through the injectable `exitFn`; in production this is `process.exit`
+ *  (truly `never`) so the post-exit code is unreachable. A test that injects
+ *  a no-op exit gets `null` back and the caller bails. */
+const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLMPort } | null => {
   const provider = pickProvider(process.env)
   // `--model` > `QUANTA_MODEL` > canonical DEFAULT_MODEL[provider] (the factory
   // fills the default when `model` is omitted). Provider pick, key lookup, and
@@ -438,7 +471,8 @@ const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLM
     logger.info(
       `Found ${noun} but no API key for provider "${provider}". Set ANTHROPIC_API_KEY or OPENAI_API_KEY to run. Exiting.`,
     )
-    process.exit(0)
+    exitFn(0)
+    return null
   }
   const model = modelArg ?? DEFAULT_MODEL[provider]
   return { provider, model, llm }
@@ -461,9 +495,12 @@ const maybeRunDatasetMode = async (
     logger.info(
       `No SWE-bench dataset at "${datasetFile}". Pass --swebench <dataset.jsonl> or set QUANTA_SWEBENCH_DATASET. Nothing to run.`,
     )
-    process.exit(0)
+    exitFn(0)
+    return true
   }
-  const { provider, model, llm } = resolveLLM("a dataset")
+  const resolved = resolveLLM("a dataset")
+  if (resolved === null) return true
+  const { provider, model, llm } = resolved
   await runDatasetMode(
     datasetFile,
     llm,
@@ -528,18 +565,22 @@ const runCustomCorpusMode = async (
       pythonHarness,
     })
     for (const line of formatDryRunPlan(plan)) logger.info(line)
-    process.exit(0)
+    exitFn(0)
+    return
   }
 
   if (all.length === 0) {
     logger.info(
       `No corpus found at "${cfg.corpusRoot || "(unset)"}". Set QUANTA_SWEBENCH_CORPUS_ROOT or pass --corpus <dir>. Nothing to run.`,
     )
-    process.exit(0)
+    exitFn(0)
+    return
   }
   const instances = cfg.limit === null ? all : all.slice(0, cfg.limit)
 
-  const { provider, model, llm } = resolveLLM(`${instances.length} instance(s)`)
+  const resolved = resolveLLM(`${instances.length} instance(s)`)
+  if (resolved === null) return
+  const { provider, model, llm } = resolved
   const pythonSwebench = await buildPythonSwebench()
   logger.info(
     `bench: ${instances.length} instance(s), provider=${provider}, model=${model}, n=${cfg.n}`,
@@ -570,7 +611,18 @@ const runCustomCorpusMode = async (
  *  `QUANTA_BENCH_TIMEOUT_MS` runtime-config field (`cfg.benchTimeoutMs`). */
 const DEFAULT_BENCH_TIMEOUT_MS = 120_000
 
-const main = async (): Promise<void> => {
+/**
+ * Test seam — `runMain` accepts an injectable `exit` so unit tests can
+ * observe early-exit codes without forking the process. The injection
+ * targets the module-private `exitFn` so every nested helper site (4 modes
+ * × 7 sites) routes through the same indirection without growing every
+ * signature. Defaults to `process.exit` so the CLI entry below is
+ * byte-identical to the prior shape.
+ *
+ * Mirrors `apps/agent/index.ts`'s `runMain(deps: MainDeps)` pattern.
+ */
+export const runMain = async (deps: MainDeps = {}): Promise<void> => {
+  exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
 
   const corpusRoot = argValue("--corpus") ?? process.env.QUANTA_SWEBENCH_CORPUS_ROOT ?? ""
@@ -610,13 +662,15 @@ const main = async (): Promise<void> => {
   await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs }, obs)
 }
 
-// Gate the top-level `main()` so importing this module (e.g. from
+// Gate the top-level `runMain()` so importing this module (e.g. from
 // `tests/unit/bench-write-artifacts.test.ts` for `writeArtifacts`) does NOT
 // trigger the CLI entry point. Bun sets `import.meta.main` only for the file
 // the runtime started from; unit tests start from `bun test` and never match.
 if (import.meta.main) {
-  main().catch((e) => {
+  runMain().catch((e) => {
     logger.error(`bench fatal: ${(e as Error).message}`)
-    process.exit(1)
+    // Top-level fatal still goes through the injectable exit binding so a
+    // test that started the CLI with a no-op exit observes the failing code.
+    exitFn(1)
   })
 }

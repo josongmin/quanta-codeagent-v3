@@ -6,6 +6,16 @@
  * bench child can never inherit `OPENAI_API_KEY`/tokens — that is what makes
  * the trajectory's `envPolicyVersion` stamp truthful (C9). Apps may import
  * slices (RFC §3.1); reusing scrubEnv keeps ONE env policy, not a fork.
+ *
+ * Why `bash -c` here (and why this is safe in this module): the eval shell
+ * has to honour test-suite scripts that depend on shell features (pipes,
+ * redirections, `&&`/`||`, env interpolation) baked into the SWE-bench
+ * `testCmd`/`installCmd` strings. The dataset/corpus that produces these
+ * strings is trusted (project-controlled fixture material, not LLM output)
+ * and they have always been executed as shell scripts. The strict argv-only
+ * sibling {@link execArgv} is used for git pathspec invocations where shell
+ * word-splitting would corrupt the `:(exclude,top)…` magic. LLM-controlled
+ * inputs MUST flow through the agent's `bash` tool, NOT through this helper.
  */
 import { scrubEnv } from "@/runtime"
 
@@ -21,6 +31,12 @@ export interface ExecResult {
  * locale/TMPDIR preserved so git/bun/node still work) — the parent's secrets
  * (`OPENAI_API_KEY`/tokens) are NEVER inherited. This makes the `sandbox`
  * trajectory event's `envPolicyVersion` claim true.
+ *
+ * `cmd` is interpreted as a shell script (see module-level docstring on why
+ * shell features are required for SWE-bench `testCmd`/`installCmd` strings).
+ * Callers MUST only pass strings sourced from trusted dataset/corpus material
+ * — never LLM- or user-controlled text. For trusted argv-form invocations
+ * (git pathspec, etc.) use {@link execArgv} instead.
  */
 export const exec = async (cmd: string, cwd: string, timeoutMs: number): Promise<ExecResult> => {
   const proc = Bun.spawn(["bash", "-c", cmd], {
