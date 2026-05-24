@@ -1,6 +1,6 @@
-# ADR-0118 — Localize: closing the recall@1 gap (sibling-`.js` penalty + `VENDORED_RE` for generator dirs)
+# ADR-0129 — Localize: closing the recall@1 gap (sibling-`.js` penalty + `VENDORED_RE` for generator dirs)
 
-> NOTE: this ADR was initially drafted as #0116 but bumped to #0118 at integration because numbers 0116 and 0117 were claimed by parallel branch-search work landing on main concurrently.
+> NOTE on numbering: drafted as #0116; bumped to #0118 at first integration (0116/0117 taken by parallel branch-search ADRs); bumped again to #0129 when a second collision surfaced with `0118-shadow-odb-rewind.md` landing from a parallel branch concurrently. Numbers 0119–0128 were claimed by other parallel work during the same integration window. Content is unchanged across the three numberings.
 
 - **Status**: Accepted (R-Phase10, 2026-05-24)
 - **Related**: ADR-0115 (R-Phase9 — this ADR closes its §"Remaining gaps" #1 and #2), [[R-Phase8]] (`FrameTier` introduction on `parse_test_failure`), [[R-Phase9]] (BM25-lite + FrameTier-aware `localize`), [[no-heuristics-only-validated]]
