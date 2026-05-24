@@ -5,6 +5,8 @@ subsystem: Unified Agent Runtime — Phase 4 entry
 order: 50
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   `parseAgentArgs(readonly string[])` — pure argv → typed `AgentArgs`
   discriminated by `mode` (`interactive | headless | batch | ci-bot |

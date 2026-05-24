@@ -5,6 +5,8 @@ subsystem: Bench harness — sampling layer
 order: 40
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Pure module that runs N independent agent trajectories against a single
   bench instance and picks one — without leaking sampling concerns into

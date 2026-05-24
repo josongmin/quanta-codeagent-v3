@@ -5,6 +5,8 @@ subsystem: shared — typed-union safety primitive
 order: 97
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Exhaustiveness guard for `switch` / `if-else` chains over a closed
   union / enum. Placing `assertNever(x, label)` in the `default` branch

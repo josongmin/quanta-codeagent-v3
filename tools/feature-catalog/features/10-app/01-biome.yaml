@@ -5,6 +5,8 @@ subsystem: 아키텍처 정책
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: Biome 슬라이스격리(0001) / 4-tier 테스트(0003) / LoC예산 철회(0011·0012)
 evidence:
   code: []

@@ -5,6 +5,8 @@ subsystem: 회귀 스모크 (recorded tier-0 + opt-in tier-1 live + LLM-judge)
 order: 55
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   실제 agent loop + 실제 도구를 돌리되 LLM은 녹화된 trajectory를 replay
   (tier-0, deterministic, $0)하거나 옵트인 live(tier-1) 호출하는 end-to-end

@@ -5,6 +5,8 @@ subsystem: 메타 도구 (YAML SSOT → docs/10.feature-catalog.md auto-render)
 order: 50
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:tooling"]
 purpose: |
   Feature catalog의 단일 진실 원천 (SSOT) 도구. 모든 feature는
   `tools/feature-catalog/features/<section>/*.yaml` 한 파일로 표현되고,

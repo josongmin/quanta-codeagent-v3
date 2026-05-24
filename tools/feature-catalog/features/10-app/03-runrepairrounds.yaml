@@ -5,6 +5,8 @@ subsystem: 벤치
 order: 3
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Pure-policy bench-repair loop SSOT: `runRepairRounds` orchestrates N rounds of
   (apply → `validate` → `buildRepairContext` → re-prompt) inside ONE sandbox so

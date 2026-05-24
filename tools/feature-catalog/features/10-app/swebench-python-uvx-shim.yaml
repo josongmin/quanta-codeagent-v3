@@ -5,6 +5,8 @@ subsystem: Bench harness — install-free python entry
 order: 80
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Thin shell shim that satisfies the bench harness's
   `QUANTA_SWEBENCH_PYTHON_BIN` contract without polluting the user's

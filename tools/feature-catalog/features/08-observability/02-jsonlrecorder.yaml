@@ -5,6 +5,8 @@ subsystem: 이벤트/Trajectory (RFC-0002)
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `JsonlRecorder` — append-only JSON-Lines sink for the trajectory event stream.
   One AgentEvent ⇒ one JSON object per line (newline-framed, never partial)

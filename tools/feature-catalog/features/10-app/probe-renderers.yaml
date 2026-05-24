@@ -5,6 +5,8 @@ subsystem: Probe (trajectory inspector) — view layer
 order: 33
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Pure renderers — events in, strings out. No color, no I/O (RFC-0002 §7
   Phase 1 = plain text, no TUI per RFC §14). Multiple views from the same

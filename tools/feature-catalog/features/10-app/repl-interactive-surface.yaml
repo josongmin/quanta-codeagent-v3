@@ -5,6 +5,8 @@ subsystem: CLI REPL surface
 order: 13
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:repl", "absorbed:codex"]
 purpose: |
   `quanta` (인자 없는) 호출 시 진입하는 readline 기반 인터랙티브 REPL — 연속 대화,
   per-turn agent run, /skills / /reload-skills / /retry-with / /login / /status 등

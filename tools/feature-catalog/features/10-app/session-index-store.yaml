@@ -5,6 +5,8 @@ subsystem: Session 영속 — directory of sessions
 order: 11
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   `index.jsonl` 는 세션의 lightweight 디렉토리 — 라인당 1 JSON SessionMeta(세션 id /
   생성 시각 / 라벨 등). 매 upsert 마다 전체 파일 재기록(per-writer tmp + atomic rename).

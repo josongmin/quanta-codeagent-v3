@@ -5,6 +5,8 @@ subsystem: LSP integration (may-20 Codex absorption)
 order: 12
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: |
   Agent 슬라이스가 LSP 어댑터(TypescriptAdapter / PyrightAdapter)와 만나는 단일
   bridge — 파일 확장자 → adapter 라우팅 + lsp-nav 도구(definition/references/hover/

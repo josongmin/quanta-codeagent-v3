@@ -5,6 +5,8 @@ subsystem: surface-agnostic session ops
 order: 121
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   `quanta session <subcommand>` 의 dispatcher 를 surface-agnostic 슬라이스로
   격리. 8 개 서브커맨드 (`list` / `show` / `delete` / `rename` / `archive` /

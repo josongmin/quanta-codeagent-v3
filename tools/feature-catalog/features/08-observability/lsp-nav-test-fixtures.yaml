@@ -5,6 +5,8 @@ subsystem: 테스트 인프라 (lsp_nav per-tool 슬라이스 공유 fixture)
 order: 77
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `tests/unit/lsp-nav-fixtures.ts` 는 lsp_nav 9 개 per-tool 테스트 슬라이스
   (definition · type-definition · references · implementation · hover ·

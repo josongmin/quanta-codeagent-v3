@@ -5,6 +5,8 @@ subsystem: 환경 변수 — single owner + validate-once snapshot
 order: 85
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   The SINGLE place that touches `process.env`. Two recurring failure modes
   motivated it: (1) silent garbage acceptance — `process.env.QUANTA_LOG_LEVEL

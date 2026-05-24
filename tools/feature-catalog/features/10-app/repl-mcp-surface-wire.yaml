@@ -5,6 +5,8 @@ subsystem: CLI REPL surface — /mcp slash data wire
 order: 14
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:repl"]
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because
   this module is the ONLY translator between live CLI MCP wiring

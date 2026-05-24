@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — per-turn 시계 캡처 + TTFT 가드
 order: 81
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Records the three wall-clock anchors that pin down a single LLM-stream
   turn: `requestSentAt` (adapter stamps immediately before the POST),

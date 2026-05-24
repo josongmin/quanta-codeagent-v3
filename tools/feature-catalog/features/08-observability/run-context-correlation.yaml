@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — span correlation
 order: 10
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Correlation context threaded through an agent run (RFC-0002 §5.1). Carries
   `runId` (required) + optional `instanceId` / `attempt` / `turn` / `toolUseId`

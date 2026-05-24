@@ -5,6 +5,8 @@ subsystem: Stream adapters — fan-out
 order: 50
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Pure fan-out `StreamPort`. Forwards every `AgentEvent` to every wrapped
   port in order. In NON-STRICT mode (default — product / session) one

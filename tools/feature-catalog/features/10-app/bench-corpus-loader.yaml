@@ -5,6 +5,8 @@ subsystem: 벤치 — corpus 어댑터
 order: 131
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Adapter that turns a `QUANTA_SWEBENCH_CORPUS_ROOT` directory into an
   `Instance[]` for the bench runner. Detects TWO layouts and degrades

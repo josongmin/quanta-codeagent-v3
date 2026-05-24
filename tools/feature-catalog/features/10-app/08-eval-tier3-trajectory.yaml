@@ -5,6 +5,8 @@ subsystem: eval 앱 Tier-3 — 실세션 trajectory (RFC-0003)
 order: 83
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Tier-3 of the 5-tier eval stack (umbrella: `eval-five-tier`). Operates on
   REAL session transcripts (not synthetic, not public bench) — `source.ts`

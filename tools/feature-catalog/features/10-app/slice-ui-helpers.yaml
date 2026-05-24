@@ -5,6 +5,8 @@ subsystem: Surface-agnostic Layer-2 (RFC may-22)
 order: 22
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   `src/ui/ui-helpers.ts` (구 `auth-ui.ts` 에서 이관 + 슬라이스화) — 순수 string/ANSI/
   box-drawing primitives. 어떤 표면 (CLI / REPL / 임베디드 browser / Tauri renderer) 도

@@ -5,6 +5,8 @@ subsystem: Git observability wiring (ADR-0110)
 order: 111
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Stateful per-session adapter orchestrating the
   `captureTurnStart / computeTurnDiff / buildTurnDiffEvent` trio from

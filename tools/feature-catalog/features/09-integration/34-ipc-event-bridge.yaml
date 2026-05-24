@@ -5,6 +5,8 @@ subsystem: IPC core — typed envelope + transport injection
 order: 34
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: |
   Surface-agnostic event bridge connecting multiple surfaces (CLI / Web /
   Tauri / future remote-control daemons) to a single logical agent session.

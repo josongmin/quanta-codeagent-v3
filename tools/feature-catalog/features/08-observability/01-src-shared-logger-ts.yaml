@@ -5,6 +5,8 @@ subsystem: 운영 진단 노브
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: / 임계값 threshold — line-based stderr writer + level filter. Bench/observe 실행 식별자 }) — trajectory/report 메타데이터 상관키.
 evidence:
   code: [src/observability/logger.ts, src/shared/logger.ts]

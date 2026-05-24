@@ -5,6 +5,8 @@ subsystem: 아키텍처 정책
 order: 2
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: Cross-slice 타입-레벨 mirror 단언 (FU4) — HITLTier 및 BlockerSurface 양쪽 union 형 일치를 AssertEqual<A,B> 타입-레벨 항등식으로 컴파일 게이트. — 한 쪽만 union 추가/변경 시 tsc --noEmit fail-closed.
 evidence:
   code: [src/permission/types.ts, src/agent/hitl-tier.ts, src/agent/working-state.ts, src/tool/types.ts]

@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — quanta.permission.* 어휘 활성화
 order: 90
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 purpose: |
   ADR-0029 reviewer 3-tier + ADR-0046 stack-axis + post-denial vocabulary
   (`quanta.permission.*` 12 키)가 vocabulary.ts에 선언만 있고 실제 emit

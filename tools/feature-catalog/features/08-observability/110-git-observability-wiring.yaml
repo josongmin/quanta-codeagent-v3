@@ -5,6 +5,8 @@ subsystem: Wiring helpers for git observability (ADR-0110/0125)
 order: 110
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Composition-root helpers that wire the deferred halves of ADR-0102
   (turn_diff_updated event emit) and ADR-0106 (SessionMeta git fingerprint).

@@ -5,6 +5,8 @@ subsystem: Shadow ODB rewind primitive (ADR-0118)
 order: 118
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Closes the deliberate "not-implemented" trap from ADR-0108 by implementing
   rewindToLast (destructive workspace restore to last snapshot) plus a safety

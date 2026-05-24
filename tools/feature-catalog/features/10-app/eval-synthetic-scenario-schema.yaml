@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 1 fixture format
 order: 84
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Tier 1 합성 시나리오 schema (`scenarios/<usecase-id>/<scenario-id>.json`).
   Schema version 1, additive — 새 optional 필드 추가는 backward-compat,

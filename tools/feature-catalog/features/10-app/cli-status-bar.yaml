@@ -5,6 +5,8 @@ subsystem: CLI chrome — fixed status row
 order: 25
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:cursor"]
 purpose: |
   Vim-style fixed bottom status bar implemented via ANSI DECSTBM
   (`CSI <top>;<bottom>r`). The terminal's scroll region is constrained to

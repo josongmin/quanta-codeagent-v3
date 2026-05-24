@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 0 static coverage
 order: 80
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Tier 0 정적 감사 내부 — 손-큐레이트된 grep 룰 테이블이 `UseCaseId` → 토큰을
   매핑하고, `auditOne`이 rg(우선) 또는 portable BSD/GNU `grep -F -Z` 폴백으로

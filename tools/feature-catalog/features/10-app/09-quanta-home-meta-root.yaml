@@ -5,6 +5,8 @@ subsystem: 앱 홈 디렉터리 (cross-cutting path SSOT)
 order: 9
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Single env override that relocates every Quanta-owned persistent path —
   permission-state, bench corpus/artifacts, prefs fallback parent, and other

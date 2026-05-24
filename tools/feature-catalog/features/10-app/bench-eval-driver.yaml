@@ -5,6 +5,8 @@ subsystem: Bench harness — per-instance orchestration
 order: 41
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Top-level orchestration for a SINGLE SWE-bench-style instance. The ONLY
   place that ties the eval sub-slice together:

@@ -5,6 +5,8 @@ subsystem: LSP nav 확장 (ADR-0024)
 order: 3
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit
 evidence:
   code: [src/lsp/adapters/jsonrpc.ts, src/tool/lsp_nav/index.ts, src/tool/lsp_nav/formatters.ts]

@@ -5,6 +5,8 @@ subsystem: CLI
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: 'CLI 헬퍼 export 폐쇄 — 분리: 모든 pure-ish helper (buildLLM/DEFAULT_MODEL/buildStore/buildEmbedder/parseRecallTiers/buildMemoryConfig/buildSubagentConfig/buildVerifyGuardConfig/buildSkillsConfig/buildCompactionBreakerConfig/buildSummarizerLlm/fallbackModels/hasArg/statePath/resumePath/observeDir/planEnabled/lspEnabled/lspNavEnabled/gitToolsEnabled/readMcpConfig/argvPrompt/loadFeatures/buildStreaming/compo'
 evidence:
   code: [src/apps/cli/internal.ts]

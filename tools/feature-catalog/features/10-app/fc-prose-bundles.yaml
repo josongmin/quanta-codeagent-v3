@@ -5,6 +5,8 @@ subsystem: feature-catalog 메타 도구 (rendered MD 의 non-YAML 섹션 SSOT)
 order: 53
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:tooling", "absorbed:codex"]
 purpose: |
   Rendered `docs/10.feature-catalog.md` 의 두 가지 비-YAML 섹션 — (a)
   intro/머리말 (성숙도 5단계 척도, RFC/ADR refs, slice-isolation 원칙),

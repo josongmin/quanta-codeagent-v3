@@ -5,6 +5,8 @@ subsystem: REPL panels (R10)
 order: 29
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   R10 extends the `SlashContext` interface in `src/apps/cli/slash-commands.ts`
   with FIVE optional surface ports — one per R10 panel that needs live session

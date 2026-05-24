@@ -5,6 +5,8 @@ subsystem: feature-catalog 메타 도구 (drift 차단)
 order: 51
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:tooling"]
 purpose: |
   `bun fc check-changed <base-ref>` — PR diff 를 git name-status 로 읽어
   ADDED 된 `src/**/*.ts` 파일이 어떤 fc YAML 의 `evidence.code` 에도 등장

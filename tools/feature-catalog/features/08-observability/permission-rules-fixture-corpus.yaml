@@ -5,6 +5,8 @@ subsystem: 테스트 인프라 (HARD_DENY 적대 케이스 코퍼스 + 양방향
 order: 76
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `tests/unit/permission-rules.fixtures.ts` 는 `src/permission/policy.ts`
   의 `HARD_DENY_RULES` 카탈로그를 적대(mustBlock) + 회피-방지(mustAllow)

@@ -5,6 +5,8 @@ subsystem: 테스트 인프라 (LLM·StreamPort 더블 + AgentConfig 빌더 단�
 order: 75
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `tests/integration/_harness.ts` 는 100+ 테스트 파일이 공유하는 단일-출처
   테스트 더블 묶음이다. `tests/unit/_harness.ts` 는 한 줄 re-export 로

@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 3 분류 primitive
 order: 82
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Pure classification primitive `(LLMPort, query) → ClassifyResult`. System
   prompt가 모든 leaf id + label + 대표 example을 enumerate하고, 모델은 단일

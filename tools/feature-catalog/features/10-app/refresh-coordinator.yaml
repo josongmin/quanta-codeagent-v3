@@ -5,6 +5,8 @@ subsystem: ChatGPT-OAuth provider (ADR-0094 Phase 1)
 order: 95
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:codex"]
 purpose: |
   Coordinates concurrent refresh_token exchanges so multiple callers sharing the
   same (issuer, clientId, refresh_token) tuple await one in-flight Promise

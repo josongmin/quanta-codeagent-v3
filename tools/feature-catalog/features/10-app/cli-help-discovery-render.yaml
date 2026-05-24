@@ -5,6 +5,8 @@ subsystem: CLI surface — help renderer discovery layer
 order: 24
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   기존 `cli-slash-help` 의 dynamic BUILTINS 인벤토리 위에 3개 P0
   discovery 갭 봉합:

@@ -5,6 +5,8 @@ subsystem: REPL panels (R10)
 order: 28
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:codex"]
 purpose: |
   Codex 5-axis post-denial precedence stack inspector. Sub-commands:
   `/permission` (short summary — mode + tier counts + 5-axis legend),

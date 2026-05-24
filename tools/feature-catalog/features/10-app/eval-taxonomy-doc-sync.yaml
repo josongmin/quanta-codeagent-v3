@@ -5,6 +5,8 @@ subsystem: eval 앱 — 분류 체계 view generator
 order: 83
 maturity: L3
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   `TAXONOMY` 배열을 `docs/analysis/may-21-coding-agent-query-usecase.md` §1
   포맷(major별 `중분류 | 소분류 | 트리거 | 커버 | 담당 | 검증` 테이블)으로

@@ -5,6 +5,8 @@ subsystem: CLI surface — help renderer
 order: 23
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   `/help` 통합 메뉴 렌더러 — pure `renderHelp(BUILTINS)` 함수로 unit-testable.
   inventory 구성:

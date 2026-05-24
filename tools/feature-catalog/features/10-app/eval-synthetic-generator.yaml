@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 1 fixture authoring
 order: 85
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   `bun run eval generate --usecase ID [--count N]` — 주어진 `UseCaseId`로
   N개의 fully-formed `Scenario` JSON을 LLM으로 생성해 `scenarios/<usecase>/`에

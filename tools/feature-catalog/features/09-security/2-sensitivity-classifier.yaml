@@ -5,6 +5,8 @@ subsystem: 보안 — source-class 분류 (Layer 1, ADR-0078)
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: ["surface:core", "security-touched"]
 purpose: |
   Layer 1 of the content-plane secret-redaction invariant. Maps a file path
   OR a shell-command shape to a closed-enum `SensitivityClass`

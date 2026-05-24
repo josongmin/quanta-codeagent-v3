@@ -5,6 +5,8 @@ subsystem: Stream adapters — SSE wire format
 order: 51
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   Serializes every `AgentEvent` as a spec-correct Server-Sent Events frame:
   one `id:` line (per-frame monotonic counter), one `event:` line (the

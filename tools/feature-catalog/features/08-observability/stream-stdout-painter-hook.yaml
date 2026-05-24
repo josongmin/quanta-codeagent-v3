@@ -5,6 +5,8 @@ subsystem: stream/adapters — human-readable stdout renderer
 order: 80
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Human-readable `StreamPort` adapter that renders `AgentEvent` to
   stdout: assistant text inline, tool calls / progress / results /

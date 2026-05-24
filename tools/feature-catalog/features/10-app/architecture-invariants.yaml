@@ -5,6 +5,8 @@ subsystem: Surface-agnostic Layer-2 (RFC may-22)
 order: 25
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   4 신규 슬라이스 (@/runner, @/ipc, @/ui, @/auth) × 10 invariants = 20+ enforced guard.
   정적 (biome.json `src/runner/**` + `src/ipc/**` override) + 런타임 (slice-boundary test)

@@ -5,6 +5,8 @@ subsystem: Unified Agent Runtime — 모드 매트릭스 dial 보정 (RFC may-22
 order: 7
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Pure function `clampDials(dials, caps, onClamp?)` — for each of 16 dial
   fields, returns `min(requested, cap)` when both present; emits a

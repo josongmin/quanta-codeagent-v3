@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 3 replay 비교
 order: 88
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   두 `TrajectoryEvent` 스트림을 PROJECTION 기반으로 비교 (raw equality 아님).
   설계 결정 (each = contract):

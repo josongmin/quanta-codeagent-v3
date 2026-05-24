@@ -5,6 +5,8 @@ subsystem: 로깅 — JSON-shaped sink (shared logger와 분리)
 order: 84
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   JSON-per-line logger for machine-consumable observability — distinct from
   `@/shared`'s human-shaped `logger`. Emits one `JSON.stringify(LogRecord)`

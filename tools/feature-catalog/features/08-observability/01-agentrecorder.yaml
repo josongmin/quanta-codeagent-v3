@@ -5,6 +5,8 @@ subsystem: 메트릭
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
 evidence:
   code: [src/agent/metrics.ts, src/observability/metrics.ts, src/observability/metrics/in-memory-registry.ts]

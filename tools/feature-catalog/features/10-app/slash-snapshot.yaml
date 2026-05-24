@@ -5,6 +5,8 @@ subsystem: REPL panels (R10) — shadow-store UX
 order: 27
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   CLI surface over the `ShadowOdb` port + the three `shadow_*` tools
   (ADR-0122, Hermes Agent `/rollback` parity). Lets the operator browse,

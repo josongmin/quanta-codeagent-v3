@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — append-only event schema
 order: 9
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Single source of truth for the append-only JSONL trajectory (RFC-0002 §5.2).
   Declares `TRAJECTORY_SCHEMA = "quanta.trajectory.v1"`, the 17-element

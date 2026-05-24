@@ -5,6 +5,8 @@ subsystem: 알고리즘 calibration (no-heuristics-only-validated 원칙)
 order: 85
 maturity: L3
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `src/tool/localize/` 의 ranking 알고리즘 변경이 실제로 도움이 됐는가를
   "vibes" 가 아닌 데이터로 답하기 위한 empirical calibration. unit-test

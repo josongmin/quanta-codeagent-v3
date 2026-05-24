@@ -5,6 +5,8 @@ subsystem: Session persistence — surface-agnostic rooting (Audit-W blocker #2)
 order: 13
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Inverts the legacy process-wide `sessionsRoot()` resolver so multi-tenant
   surfaces (Web / Tauri daemon) can supply per-tenant rooting strategies

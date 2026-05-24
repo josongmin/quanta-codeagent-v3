@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — quanta.patch.* 어휘 활성화
 order: 93
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 purpose: |
   `quanta.patch.op` (`add | update | delete | move`) + `quanta.patch.
   fuzzy_match_tier` (`exact | whitespace | fuzzy`) + `fuzzy_matched`

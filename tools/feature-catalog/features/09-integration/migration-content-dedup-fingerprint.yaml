@@ -5,6 +5,8 @@ subsystem: migration — dedup fingerprint (ADR-0038)
 order: 46
 maturity: L2
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   Content-addressed fingerprint of a session transcript file so a re-run
   does not re-import an unchanged session. `contentSha256(jsonlPath)` is

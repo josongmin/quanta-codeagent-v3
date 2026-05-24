@@ -5,6 +5,8 @@ subsystem: Bench harness — image / arch
 order: 45
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Host arch detection (`hostArch`) + Docker image warm-pool query
   (`images.ts`). Why: SWE-bench's upstream default namespace (`swebench`)

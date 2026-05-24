@@ -5,6 +5,8 @@ subsystem: stream/adapters/jsonl-recorder — span-id derivation
 order: 98
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 purpose: |
   Deterministic span-id derivation inside the JsonlRecorder so the
   recorded trajectory is golden-testable with no randomness. The scheme:

@@ -5,6 +5,8 @@ subsystem: Session resume (ADR-0024)
 order: 12
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   `--resume <token>` 해석의 pure state machine — 실구현은 surface-agnostic Layer-2
   슬라이스 `@/runner/orchestrate/resume-fsm` 으로 재배치됐고, `src/apps/cli/resume.ts`

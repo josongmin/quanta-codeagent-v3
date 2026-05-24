@@ -5,6 +5,8 @@ subsystem: migration — `external_agent_session_imports.json`
 order: 45
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   Persistence for the external-agent import log, mirroring Codex's
   `external_agent_session_imports.json`. Default path is

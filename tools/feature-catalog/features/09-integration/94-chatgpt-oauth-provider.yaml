@@ -5,6 +5,8 @@ subsystem: Auth provider (ADR-0094)
 order: 11
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   ChatGPT Plus/Pro/Team 구독 계정으로 모델 호출 — BYOK(OPENAI_API_KEY) 없이 OAuth 토큰을
   사용해 `https://chatgpt.com/backend-api/codex/responses`로 호출. BYOK provider와 형제로

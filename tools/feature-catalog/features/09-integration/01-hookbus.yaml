@@ -5,6 +5,8 @@ subsystem: Hooks (RFC §13 + Cursor absorption + ADR-0133)
 order: 1
 maturity: L4
 status: refined
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: |
   In-process HookBus — 9 이벤트(session_start / session_end / turn_start /
   pre_tool_use / post_tool_use / **post_tool_use_failure** / **pre_compact** /

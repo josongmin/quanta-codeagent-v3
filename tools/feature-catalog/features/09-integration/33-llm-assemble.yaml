@@ -5,6 +5,8 @@ subsystem: LLM stream assembly
 order: 33
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   Single SSOT for folding a `StreamEvent` iterator into one `AssembledTurn`
   ({message, stopReason}). Three explicit fold rules: (1) `text_delta`

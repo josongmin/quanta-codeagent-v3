@@ -5,6 +5,8 @@ subsystem: Unified Agent Runtime — Phase 4 wiring
 order: 51
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   SINGLE wiring point for `ModePolicy + BudgetMeter + BudgetCaps`.
   RFC may-22-unified-agent-runtime / Phase 4. Apps that want a unified

@@ -5,6 +5,8 @@ subsystem: IPC byte shuttle — 4 transport implementations
 order: 35
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: |
   Four `BridgeTransport` implementations behind one closed shape so the
   EventBridge stays transport-agnostic. (1) `in-memory` — test fixture

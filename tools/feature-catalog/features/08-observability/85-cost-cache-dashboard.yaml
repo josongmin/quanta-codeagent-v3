@@ -5,6 +5,8 @@ subsystem: 비용·캐시 가시화 (ADR-0085)
 order: 85
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:claude-code"]
 purpose: |
   MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·
   turns·toolCalls(byTool)·stopReasons·latency(p50/p95)·shell rollup 집계. 새 수집 0

@@ -5,6 +5,8 @@ subsystem: MCP (ADR-0007) — stdio 클라이언트 + tool→Tool 어댑터
 order: 10
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: |
   QUANTA_MCP_CONFIG 노브를 넘어선 실제 capability — McpClient(stdio JSON-RPC 2.0:
   initialize/tools-list/tools-call/shutdown + per-request 타임아웃)와 mcp-bridge가

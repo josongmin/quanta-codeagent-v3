@@ -5,6 +5,8 @@ subsystem: 비용 회계 / 정량 가드
 order: 95
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `costUsd(model, ...)`의 model 인자는 untrusted 외부 문자열. 가격 TABLE이 평범한
   object literal이면 `TABLE["constructor"]` / `["toString"]` / `["__proto__"]` /

@@ -5,6 +5,8 @@ subsystem: 4-tier 테스트 (unit · integration · contract · smoke) — RFC �
 order: 80
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Contract-tier 테스트는 실제 외부 프로세스(Docker daemon, typescript-/pyright-
   language-server)와 통신하므로 환경 가용성이 다르다. `tests/contract/_guard.ts`

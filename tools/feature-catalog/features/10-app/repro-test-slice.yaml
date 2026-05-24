@@ -5,6 +5,8 @@ subsystem: 벤치 — reproduction-test 합의 투표
 order: 130
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Agentless paper §3.3.1 absorption: drive the LLM K times to synthesise
   self-contained Python repro scripts that print one of three sentinels

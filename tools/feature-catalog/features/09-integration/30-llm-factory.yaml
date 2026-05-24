@@ -5,6 +5,8 @@ subsystem: LLM provider seam — single source of truth
 order: 30
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   `createLLM(provider, opts)` is the one factory the three app entry points
   (cli/bench/eval) call instead of duplicating `new AnthropicAdapter / new

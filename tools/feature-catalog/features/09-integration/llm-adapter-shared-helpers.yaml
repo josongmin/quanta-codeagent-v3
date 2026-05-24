@@ -5,6 +5,8 @@ subsystem: llm/adapters/shared — Anthropic + OpenAI common frame
 order: 39
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   The Anthropic and OpenAI adapters previously duplicated ~90% of three
   frames; this module factors them as plain functions (composition over

@@ -5,6 +5,8 @@ subsystem: Bench harness — post-run diagnosis
 order: 42
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Classifies an `InstanceResult` for the operator console + `bench-report
   .json`. Two-axis schema (covering + non-exclusive):

@@ -5,6 +5,8 @@ subsystem: runtime/os-sandbox — Linux backend (phase 1)
 order: 42
 maturity: L2
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
 purpose: |
   Linux Landlock + seccomp implementation, deliberately phase-1. A
   production wire on Linux would need either a native binding

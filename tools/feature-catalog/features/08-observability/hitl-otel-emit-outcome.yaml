@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — quanta.hitl.* 어휘 활성화
 order: 92
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 purpose: |
   `quanta.hitl.tier_resolved` + `registry_escalated` + `handoff_emitted` 3개
   키가 vocabulary 에 있고 helper 도 있었지만 zero call-site 였던 갭을

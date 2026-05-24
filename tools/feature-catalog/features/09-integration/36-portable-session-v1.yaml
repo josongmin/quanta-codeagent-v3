@@ -5,6 +5,8 @@ subsystem: IPC session round-trip (Claude A11 absorption)
 order: 36
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   Portable session schema v1 (snake_case wire) for round-tripping a saved
   session across surfaces. `exportSession(sessionId)` writes

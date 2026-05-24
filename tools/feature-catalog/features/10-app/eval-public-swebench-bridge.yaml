@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 2 외부 벤치 wiring
 order: 90
 maturity: L3
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Tier 2는 의도적으로 THIN BRIDGE — `apps/bench/`의 기존 harness가 생산한
   `bench-report.json`을 읽어서 eval store가 이해하는 `PublicPayload`로 번역.

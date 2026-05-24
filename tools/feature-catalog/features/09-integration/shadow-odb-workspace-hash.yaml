@@ -5,6 +5,8 @@ subsystem: storage/shadow-odb — deterministic on-disk layout
 order: 43
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   Deterministic SHA-256 hash of a normalized absolute workspace path,
   truncated to the first 16 hex characters (64 bits). The result is the

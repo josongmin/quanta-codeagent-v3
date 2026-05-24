@@ -5,6 +5,8 @@ subsystem: LSP — TypeScript / JavaScript adapter
 order: 15
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: |
   Per-language adapter on top of `LspClient` base for
   `typescript-language-server` over stdio. Two contributions only — the rest

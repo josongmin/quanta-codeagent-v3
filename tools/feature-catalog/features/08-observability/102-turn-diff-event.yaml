@@ -5,6 +5,8 @@ subsystem: Turn-end structured diff channel (ADR-0102)
 order: 102
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   AgentEvent union variant `turn_diff_updated` plus the emitter module that
   computes per-turn cumulative unified diff. captureTurnStart records workspace

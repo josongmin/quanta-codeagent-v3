@@ -5,6 +5,8 @@ subsystem: shared/jsonrpc — request-id correlation
 order: 38
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:ipc", "absorbed:codex"]
 purpose: |
   Branded `RequestId` type plus a deterministic, seedable id generator for
   JSON-RPC correlation. No `Math.random()` and no `Date.now()` feed id

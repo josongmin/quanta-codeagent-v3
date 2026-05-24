@@ -5,6 +5,8 @@ subsystem: runtime/os-sandbox — closed port + platform dispatch
 order: 40
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
 purpose: |
   Closed-port DI surface `OsSandbox { spawn, availability }` and its
   production default `defaultOsSandbox(cfg)`. Picks the right backend

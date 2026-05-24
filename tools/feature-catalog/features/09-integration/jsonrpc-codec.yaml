@@ -5,6 +5,8 @@ subsystem: shared/jsonrpc — byte shuttle for IPC + MCP + LSP
 order: 36
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:ipc", "absorbed:codex"]
 purpose: |
   encode / decode helpers for JSON-RPC 2.0 frames (request / notification /
   success-response / error-response / Codex-style explicit timeout). Decoders

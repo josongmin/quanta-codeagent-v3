@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — 토큰 사용량 / status line (Claude Desktop ge
 order: 54
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Claude Desktop 1.7196.3의 getContextUsage IPC sidebar 노출 흡수 — v3는 estimateTokens / provider
   usage StreamEvent로 내부 계산 중이었으나 어떤 surface도 user-facing 표시 없음. (1)

@@ -5,6 +5,8 @@ subsystem: CLI distribution
 order: 81
 maturity: L3
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   `bun run build` produces a single self-contained executable at
   `dist/agent` via `bun build --compile --minify src/apps/cli/index.ts`.

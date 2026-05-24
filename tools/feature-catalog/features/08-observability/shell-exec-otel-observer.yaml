@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — runShell typed stream fan-out
 order: 80
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 purpose: |
   OTel-bound observer for the ADR-0081 shell exec events. Fans the typed
   stream (start / stdout / stderr / exit / aborted) into the existing

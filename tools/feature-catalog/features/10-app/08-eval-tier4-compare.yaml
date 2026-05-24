@@ -5,6 +5,8 @@ subsystem: eval 앱 Tier-4 — pairwise compare (RFC-0003)
 order: 84
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
 purpose: |
   Tier-4 of the 5-tier eval stack (umbrella: `eval-five-tier`). The only
   tier that runs TWO agents on the same prompt and asks an LLM judge to

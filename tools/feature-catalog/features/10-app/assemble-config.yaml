@@ -5,6 +5,8 @@ subsystem: Runner assembly layer (ADR-0024 split)
 order: 12
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Pure type-safe composer that turns already-built collaborators
   (`SessionDeps`: llm / registry / stream / permission / store / embedder /

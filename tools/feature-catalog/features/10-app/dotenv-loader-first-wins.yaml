@@ -5,6 +5,8 @@ subsystem: CLI / agent entry — env file loader
 order: 60
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Tiny no-dependency `.env` loader (`loadEnvFiles(files)`). Both CLI
   surfaces (`src/apps/cli/index.ts` and `src/apps/agent/index.ts`)

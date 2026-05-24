@@ -5,6 +5,8 @@ subsystem: Hook bus (ADR-0113)
 order: 113
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: |
   Third return shape on pre_tool_use hooks (beyond allow / deny): an
   updatedInput payload that REWRITES the tool's arguments before dispatch.

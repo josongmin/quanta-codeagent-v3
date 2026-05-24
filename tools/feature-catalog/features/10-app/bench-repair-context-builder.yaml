@@ -5,6 +5,8 @@ subsystem: 벤치 — repair round (RFC §16)
 order: 133
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Pure seed-message builder for the b2 repair-round orchestrator (RFC §16,
   ADR-0014). Given the running cumulative diff and the latest validator

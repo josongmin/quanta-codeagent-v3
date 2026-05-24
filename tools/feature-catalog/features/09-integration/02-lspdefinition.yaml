@@ -5,6 +5,8 @@ subsystem: LSP nav 확장 (ADR-0024)
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:ipc"]
 purpose: 8 도구 lsp_definition/_references/_hover/_type_definition/_implementation/_document_symbol/_workspace_symbol/_rename_preview — 1-based human coords, nullLspNavProvider 기본, structural mirror 타입으로 slice 격리
 evidence:
   code: [src/tool/lsp_nav/index.ts, src/tool/lsp_nav/types.ts, src/lsp/index.ts]

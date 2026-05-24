@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 1 채점기
 order: 86
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Scenario rubric + 캡쳐된 transcript를 받아 judge LLM에 per-item pass/fail을
   요청, weighted score(default weight=1) 계산. ERROR SURFACE CONTRACT

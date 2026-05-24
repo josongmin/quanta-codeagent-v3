@@ -5,6 +5,8 @@ subsystem: LLM resilience — silence-hang guard
 order: 31
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   AsyncIterable decorator wrapping a raw provider stream and racing each
   `next()` against two independent deadlines — `firstChunkMs` (default 60s,

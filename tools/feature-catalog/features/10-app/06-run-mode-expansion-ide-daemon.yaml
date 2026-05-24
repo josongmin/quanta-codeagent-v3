@@ -5,6 +5,8 @@ subsystem: Unified Agent Runtime — 모드 매트릭스 (RFC may-22)
 order: 6
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   RFC may-22 4-mode(interactive/headless/batch/ci-bot) × 12-lever ModePolicy
   매트릭스에 2개 surface 셀 추가. ide = 에디터 임베디드(VS Code/Tauri):

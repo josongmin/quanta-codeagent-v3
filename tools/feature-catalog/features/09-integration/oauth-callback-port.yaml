@@ -5,6 +5,8 @@ subsystem: Auth provider seam (ADR-0094 surface-agnostic)
 order: 12
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: |
   ChatGPT-OAuth 콜백 수신을 surface-agnostic port로 추상화 — `OAuthCallbackProvider`
   인터페이스는 redirect_uri 빌드 + 콜백 대기(promise) + state 검증을 한 계약으로 본다.

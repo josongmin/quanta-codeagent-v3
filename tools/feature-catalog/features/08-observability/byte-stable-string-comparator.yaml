@@ -5,6 +5,8 @@ subsystem: shared — deterministic ordering primitive
 order: 96
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Byte-stable string comparator for deterministic ordering. Unlike
   `String.prototype.localeCompare`, the result does NOT depend on the

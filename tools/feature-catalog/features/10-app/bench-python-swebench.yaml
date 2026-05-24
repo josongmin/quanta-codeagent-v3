@@ -5,6 +5,8 @@ subsystem: Bench harness — official-grader integration
 order: 43
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   The documented swebench-seam, now real. Given a `swebench.verified`
   Instance and the unified diff the agent produced, writes an official

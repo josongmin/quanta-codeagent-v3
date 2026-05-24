@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — gen_ai.usage.* + quanta.work.cost_usd 활성화
 order: 91
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `llm/*` adapter 가 계산한 `estimatedCostUsd` + `input_tokens` /
   `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`

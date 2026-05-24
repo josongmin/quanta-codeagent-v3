@@ -5,6 +5,8 @@ subsystem: Bench harness — trajectory append adapter
 order: 46
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Bench is the producer of *non-agent* trajectory evidence: `sandbox`
   events, `patch_generated`, `verify` (pre/post-verify outcomes). The

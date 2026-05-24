@@ -5,6 +5,8 @@ subsystem: REPL panels (R10)
 order: 22
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli"]
 purpose: |
   Surface-only renderer for catalog 대5 L4 `WorkingState` — the per-session L3
   scratchpad (owner shortlist, hypothesis, blockers, next steps, deferred

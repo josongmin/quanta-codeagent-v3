@@ -5,6 +5,8 @@ subsystem: 이벤트/Trajectory (RFC-0002)
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   `AgentEvent` discriminated union — the surface-facing event stream the agent loop
   emits per turn (turn_start / assistant_text / tool_call / tool_progress /

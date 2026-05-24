@@ -5,6 +5,8 @@ subsystem: eval 앱 — 저장 레이어
 order: 89
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Tier-agnostic JSONL store. 한 runId당 하나의 파일 (`<dir>/<runId>.jsonl`) —
   tier 간 isolation + 단순 diff. Schema validation은 `schema.ts`, aggregation은

@@ -5,6 +5,8 @@ subsystem: REPL panels (R10)
 order: 27
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:codex", "absorbed:cursor"]
 purpose: |
   Codex `repo-local-rule-ingestion-audit.md` (AGENTS.md pattern) inspired
   surface for the CLI: surfaces the COUNT + IDENTITY of repo-local rule files

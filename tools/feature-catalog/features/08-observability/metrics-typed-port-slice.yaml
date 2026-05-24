@@ -5,6 +5,8 @@ subsystem: 텔레메트리 — 첫 번째 클래스 metric primitive (closed-por
 order: 112
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
 purpose: |
   Closed-port metrics primitive: `MetricsRegistry` + `MetricSink` pair
   with three KIND-committed shapes (counter / histogram / gauge) and a

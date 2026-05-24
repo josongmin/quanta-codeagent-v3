@@ -5,6 +5,8 @@ subsystem: eval 앱 — Tier 4 A/B 판정
 order: 91
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   Tier 4 compare의 채점기 — 두 transcript + scenario rubric → ONE winner
   (또는 tie). BIAS MITIGATION (standard): judge를 두 번 호출 (forward + swapped)

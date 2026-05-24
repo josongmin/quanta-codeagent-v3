@@ -5,6 +5,8 @@ subsystem: LSP — stdio Content-Length framing
 order: 13
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:ipc", "absorbed:codex"]
 purpose: |
   Wire-level codec behind `lsp-bridge` and `lspport`. LSP framing is NOT MCP's
   newline-delimited shape: every message is a JSON body preceded by an HTTP-

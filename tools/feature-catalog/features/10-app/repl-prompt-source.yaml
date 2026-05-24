@@ -5,6 +5,8 @@ subsystem: CLI REPL surface — prompt source adapter
 order: 15
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:repl", "absorbed:codex"]
 purpose: |
   Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because
   this module implements the `runner.PromptSource` port for the CLI surface and

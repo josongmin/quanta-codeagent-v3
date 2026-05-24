@@ -5,6 +5,8 @@ subsystem: 보안 — 아웃바운드 호스트 게이트 (ci-bot mode lever)
 order: 4
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: ["surface:core", "security-touched"]
 purpose: |
   Pure propositional check answering "is this URL/host on the allowlist?"
   for the ci-bot mode network lever (`network: { kind: "allowlist"; hosts:

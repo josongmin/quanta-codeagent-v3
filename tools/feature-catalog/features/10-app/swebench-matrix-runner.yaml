@@ -5,6 +5,8 @@ subsystem: 벤치 메타-도구 (env-overlay composer, never mutates bench)
 order: 70
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:bench"]
 purpose: |
   `bun run tools/swebench-matrix.ts` — SWE-bench-shape 데이터셋(기본
   `tests/smoke/swebench/picks.jsonl`)을 3축 ON/OFF 조건 매트릭스로 sweep

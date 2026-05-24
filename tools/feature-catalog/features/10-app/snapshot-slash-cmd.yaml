@@ -5,6 +5,8 @@ subsystem: CLI slash command (shadow_* tools UX, Hermes Agent /rollback parity)
 order: 56
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:claude-code"]
 purpose: |
   ShadowOdb 포트 + 3개 `shadow_*` 도구를 CLI에 surface하여 사용자가 모델을
   거치지 않고 워크스페이스 스냅샷을 browse/preview/restore 할 수 있게 하는
