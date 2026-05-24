@@ -154,6 +154,9 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // Pure analysis over a diff / conflict-marked tree; both safe in plan mode.
   git_moved_code: null,
   git_conflict_inspect: null,
+  // Read-only vision + web (ADR-0126 / ADR-0127). Both safe in plan mode.
+  read_image: null,
+  web_fetch: null,
   // Mutating built-ins
   write: "write_filesystem",
   edit: "write_filesystem",

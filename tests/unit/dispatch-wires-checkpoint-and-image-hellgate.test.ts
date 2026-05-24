@@ -76,9 +76,7 @@ const config = (registry: ToolRegistry, over: Partial<AgentConfig> = {}): AgentC
 /** Hand-rolled fake `ShadowOdb`. Only `registerHead` is wired (the only method
  *  the wrap touches on the anchor path). Every other method throws — an
  *  accidental call would surface loudly in the wired tests. */
-const makeFakeOdb = (
-  over: { registerHead?: ShadowOdb["registerHead"] } = {},
-): ShadowOdb => {
+const makeFakeOdb = (over: { registerHead?: ShadowOdb["registerHead"] } = {}): ShadowOdb => {
   const ni = (name: string) => async (): Promise<never> => {
     throw new Error(`fake odb: ${name} not implemented`)
   }
@@ -116,6 +114,7 @@ describe("HELL-1: default → byte-identical", () => {
     const odb = makeFakeOdb({
       registerHead: async () => {
         registerHeadCalls += 1
+        return "head-sha-fake"
       },
     })
     void odb // odb intentionally NOT attached to config
@@ -140,6 +139,7 @@ describe("HELL-2: shadowCheckpoint + destructive call ⇒ wire kicks in", () => 
       registerHead: async (workspace: string) => {
         registerHeadCalls += 1
         lastWorkspace = workspace
+        return "head-sha-fake"
       },
     })
     const tool = makeTool("mutate", false, { ok: true, output: "wrote" })
@@ -229,7 +229,11 @@ describe("HELL-6: end-to-end ⇒ block carries the ImageBlock in correct shape",
       output: "captured screen",
       images: [img],
     })
-    const res = await dispatchTool(call("screencap", {}, "c-e2e"), config(new ToolRegistry([tool])), perm)
+    const res = await dispatchTool(
+      call("screencap", {}, "c-e2e"),
+      config(new ToolRegistry([tool])),
+      perm,
+    )
     expect(res.ok).toBe(true)
     expect(res.block.type).toBe("tool_result")
     expect(res.block.tool_use_id).toBe("c-e2e")

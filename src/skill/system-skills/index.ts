@@ -67,8 +67,22 @@ export const discoverSystemSkills = async (): Promise<Skill[]> => discoverSkills
 // CTK git skills cluster (ADR-0102 absorption batch — Track 3 router).
 // Each per-skill index.ts mirrors the progress-audit/localize-fault pattern:
 // NAME constant + Trigger interface + triggerXxx() + findXxxSkill().
+// ADR-0134 — engineering-task skills bundle (debug-error / add-tests /
+// explain-code / extract-function). Alphabetical insertion below.
+export type { AddTestsTrigger } from "./add-tests"
+export { ADD_TESTS_SKILL_NAME, findAddTestsSkill, triggerAddTests } from "./add-tests"
 export type { BabysitTrigger } from "./babysit"
 export { BABYSIT_SKILL_NAME, findBabysitSkill, triggerBabysit } from "./babysit"
+export type { DebugErrorTrigger } from "./debug-error"
+export { DEBUG_ERROR_SKILL_NAME, findDebugErrorSkill, triggerDebugError } from "./debug-error"
+export type { ExplainCodeTrigger } from "./explain-code"
+export { EXPLAIN_CODE_SKILL_NAME, findExplainCodeSkill, triggerExplainCode } from "./explain-code"
+export type { ExtractFunctionTrigger } from "./extract-function"
+export {
+  EXTRACT_FUNCTION_SKILL_NAME,
+  findExtractFunctionSkill,
+  triggerExtractFunction,
+} from "./extract-function"
 export type { FixMergeConflictsTrigger } from "./fix-merge-conflicts"
 export {
   FIX_MERGE_CONFLICTS_SKILL_NAME,

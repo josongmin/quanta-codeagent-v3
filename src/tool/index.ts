@@ -6,12 +6,14 @@ import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
+import { readImageTool } from "./image"
 import { localizeTool } from "./localize"
 import { parseTestFailureTool } from "./parse-test-failure"
 import { makeReadTool, readTool } from "./read"
 import { scriptedReplaceTool } from "./scripted-replace"
 import { testRunnerTool } from "./test-runner"
 import type { Tool } from "./types"
+import { webFetchTool } from "./web"
 import { makeWriteTool, writeTool } from "./write"
 
 export { applyPatchTool, FsJailViolationError } from "./apply-patch"
@@ -245,6 +247,10 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => [
   parseTestFailureTool as Tool,
   testRunnerTool as Tool,
   diagnosticsTool(ports.diagnostics ?? nullDiagnosticsProvider) as Tool,
+  // ADR-0126: vision input. Read-only + concurrency-safe; safe in defaults.
+  readImageTool as Tool,
+  // ADR-0127: web fetch (SSRF denylist + size cap inside). Read-only + concurrency-safe.
+  webFetchTool() as Tool,
 ]
 
 /**
