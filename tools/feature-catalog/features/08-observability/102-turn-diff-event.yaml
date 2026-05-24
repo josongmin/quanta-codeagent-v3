@@ -3,7 +3,7 @@ title: turn_diff_updated stream event + emitter
 section: 8
 subsystem: Turn-end structured diff channel (ADR-0102)
 order: 102
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   AgentEvent union variant `turn_diff_updated` plus the emitter module that

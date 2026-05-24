@@ -3,7 +3,7 @@ title: switchToSessionCwd — fail-loud exit(1) on missing worktree on resume
 section: 7
 subsystem: 세션 재개 가드 — cwd 부재 진단
 order: 27
-maturity: L3
+maturity: L4
 status: stable
 purpose: |
   HIGH-4 fail-loud guard for the resume path. When `--resume <id>` lands on

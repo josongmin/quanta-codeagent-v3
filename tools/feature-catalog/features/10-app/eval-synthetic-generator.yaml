@@ -3,7 +3,7 @@ title: eval Tier 1 — LLM-driven synthetic scenario generator (strict validatio
 section: 10
 subsystem: eval 앱 — Tier 1 fixture authoring
 order: 85
-maturity: L3
+maturity: L4
 status: stable
 purpose: |
   `bun run eval generate --usecase ID [--count N]` — 주어진 `UseCaseId`로

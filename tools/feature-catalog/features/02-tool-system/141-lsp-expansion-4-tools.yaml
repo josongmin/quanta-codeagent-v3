@@ -3,7 +3,7 @@ title: LSP 4-tool expansion — code-action / rename-apply / format / signature-
 section: 2
 subsystem: LSP mutating + signature-help tools (ADR-0141)
 order: 141
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   Expands the Codex-absorbed ADR-0015 read-only LSP nav surface

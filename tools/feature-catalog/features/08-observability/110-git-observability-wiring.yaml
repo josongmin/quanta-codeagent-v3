@@ -3,7 +3,7 @@ title: Git observability composite — session fingerprint + turn-diff emit help
 section: 8
 subsystem: Wiring helpers for git observability (ADR-0110/0125)
 order: 110
-maturity: L3
+maturity: L4
 status: new
 purpose: |
   Composition-root helpers that wire the deferred halves of ADR-0102

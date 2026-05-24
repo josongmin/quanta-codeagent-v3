@@ -3,7 +3,7 @@ title: process.on(unhandledRejection) defense-in-depth — log, never exit
 section: 7
 subsystem: 프로세스-수준 안전망 (apps/cli)
 order: 24
-maturity: L3
+maturity: L4
 status: stable
 purpose: |
   R-Phase4 P3-1 defense-in-depth handler for promise rejections that escape
