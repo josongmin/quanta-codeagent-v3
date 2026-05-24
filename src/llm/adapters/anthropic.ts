@@ -98,7 +98,31 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
       return {
         type: "tool_result",
         tool_use_id: block.tool_use_id,
-        content: block.content,
+        // ADR-0126: when the dispatch seam attached `contentBlocks` (image-
+        // bearing tool result), send the structured array on the wire so the
+        // model actually sees the image. Our `ImageBlock` (`{data, mediaType}`)
+        // maps to the SDK's `ImageBlockParam` (`source: {type:"base64",
+        // media_type, data}`). Text parts pass through as `TextBlockParam`.
+        // Absent ⇒ legacy string `content` (byte-identical pre-feature).
+        content:
+          block.contentBlocks !== undefined
+            ? block.contentBlocks.map((p) =>
+                p.type === "text"
+                  ? ({ type: "text", text: p.text } satisfies Anthropic.TextBlockParam)
+                  : ({
+                      type: "image",
+                      source: {
+                        type: "base64",
+                        media_type: p.mediaType as
+                          | "image/jpeg"
+                          | "image/png"
+                          | "image/gif"
+                          | "image/webp",
+                        data: p.data,
+                      },
+                    } satisfies Anthropic.ImageBlockParam),
+              )
+            : block.content,
         ...(block.is_error ? { is_error: true } : {}),
       }
     case "thinking": {

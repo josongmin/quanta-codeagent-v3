@@ -8,7 +8,9 @@ import {
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
+import { composeToolResultContent } from "@/tool/image/compose"
 import { runAdmissibilityGate } from "./admissibility-gate"
+import { wireCheckpointedEffectChannel } from "./checkpoint-wiring"
 import { DedupGate } from "./dispatch-dedup"
 import { deny, resultBlock } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
@@ -465,9 +467,19 @@ const execute = async (
   ctx: ToolContext,
   onProgress?: (message: string) => void,
 ): Promise<DispatchResult> => {
-  const channel = new LocalEffectChannel({
+  const localChannel = new LocalEffectChannel({
     execute: (c, c2, op) => config.registry.run(c.name, c.input, c2, op),
   })
+  // ADR-0121 wire: when `config.shadowCheckpoint` is configured AND
+  // `config.shadowOdb` is wired (and mode !== "off"), wrap with the auto-
+  // checkpoint policy. Otherwise this returns `localChannel` UNCHANGED → the
+  // entire dispatch path is byte-identical for any caller that did not opt
+  // into ADR-0121. `resolveTool` delegates to the registry's `get` so the
+  // policy's destructiveness oracle classifies the call via the same registry
+  // the executor consults.
+  const channel = wireCheckpointedEffectChannel(localChannel, config, (name) =>
+    config.registry.get(name),
+  )
   const { result, durationMs } = await channel.execute({ call, ctx }, onProgress)
   // The channel collapses BOTH "tool returned ok:false" and "executor threw"
   // into the same `{ok:false, output:<msg>}` envelope shape — the throw path
@@ -480,8 +492,18 @@ const execute = async (
   // a subsequent call to the same (tool, path) can be checked. DEFAULT-OFF:
   // absent enforcer ⇒ optional-chain is a no-op, byte-identical.
   config.capEnforcer?.record(call.name, call.input, result.nextAction)
+  // ADR-0126 wire: ask the composer whether this tool result needs the
+  // structured `contentBlocks` form (only when `result.images` is non-empty).
+  // The composer returns the legacy STRING when no images are attached, in
+  // which case we omit `contentBlocks` and the tool_result block is
+  // byte-identical to the pre-feature path. The `output` text inside the
+  // composed array is the POST-REDACTION string, so secret-redaction keeps
+  // firing on every code path (image bytes are opaque base64 attachments
+  // the tool's own policy gates upstream).
+  const composed = composeToolResultContent({ ...result, output })
+  const contentBlocks = typeof composed === "string" ? undefined : composed
   return {
-    block: resultBlock(call.id, output, !result.ok),
+    block: resultBlock(call.id, output, !result.ok, contentBlocks),
     ok: result.ok,
     preview: output,
     durationMs,

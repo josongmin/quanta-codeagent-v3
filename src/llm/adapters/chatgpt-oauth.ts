@@ -352,6 +352,10 @@ const messageToItems = (m: Message): ResponsesInputItem[] => {
         arguments: JSON.stringify(b.input ?? {}),
       })
     } else if (b.type === "tool_result") {
+      // ADR-0126: `b.contentBlocks` (when present) carries image attachments.
+      // The Responses API `function_call_output.output` field is string-only
+      // — use the legacy `b.content` view; structured form ignored at this
+      // surface (vision input would ride elsewhere). Byte-identical.
       items.push({
         type: "function_call_output",
         call_id: b.tool_use_id,

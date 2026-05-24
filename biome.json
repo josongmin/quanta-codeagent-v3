@@ -51,19 +51,11 @@
     }
   },
   "files": {
-    "includes": [
-      "**",
-      "!node_modules",
-      "!dist",
-      "!**/*.d.ts",
-      "!tests/smoke/fixtures"
-    ]
+    "includes": ["**", "!node_modules", "!dist", "!**/*.d.ts", "!tests/smoke/fixtures"]
   },
   "overrides": [
     {
-      "includes": [
-        "**/src/llm/**"
-      ],
+      "includes": ["**/src/llm/**"],
       "linter": {
         "rules": {
           "style": {
@@ -86,11 +78,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -101,9 +89,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/tool/**"
-      ],
+      "includes": ["**/src/tool/**"],
       "linter": {
         "rules": {
           "style": {
@@ -122,11 +108,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -137,9 +119,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/memory/**"
-      ],
+      "includes": ["**/src/memory/**"],
       "linter": {
         "rules": {
           "style": {
@@ -160,11 +140,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -175,9 +151,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/storage/**"
-      ],
+      "includes": ["**/src/storage/**"],
       "linter": {
         "rules": {
           "style": {
@@ -200,11 +174,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -215,9 +185,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/stream/**"
-      ],
+      "includes": ["**/src/stream/**"],
       "linter": {
         "rules": {
           "style": {
@@ -240,11 +208,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -255,9 +219,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/permission/**"
-      ],
+      "includes": ["**/src/permission/**"],
       "linter": {
         "rules": {
           "style": {
@@ -280,11 +242,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -295,9 +253,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/runtime/**"
-      ],
+      "includes": ["**/src/runtime/**"],
       "linter": {
         "rules": {
           "style": {
@@ -319,11 +275,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -334,9 +286,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/lsp/**"
-      ],
+      "includes": ["**/src/lsp/**"],
       "linter": {
         "rules": {
           "style": {
@@ -359,11 +309,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -374,9 +320,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/mcp/**"
-      ],
+      "includes": ["**/src/mcp/**"],
       "linter": {
         "rules": {
           "style": {
@@ -400,11 +344,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -415,9 +355,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/observability/**"
-      ],
+      "includes": ["**/src/observability/**"],
       "linter": {
         "rules": {
           "style": {
@@ -440,11 +378,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -455,9 +389,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/subagent/**"
-      ],
+      "includes": ["**/src/subagent/**"],
       "linter": {
         "rules": {
           "style": {
@@ -481,11 +413,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -496,9 +424,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/skill/**"
-      ],
+      "includes": ["**/src/skill/**"],
       "linter": {
         "rules": {
           "style": {
@@ -522,11 +448,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -537,9 +459,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/session/**"
-      ],
+      "includes": ["**/src/session/**"],
       "linter": {
         "rules": {
           "style": {
@@ -564,11 +484,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -579,9 +495,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/migration/**"
-      ],
+      "includes": ["**/src/migration/**"],
       "linter": {
         "rules": {
           "style": {
@@ -608,11 +522,7 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
@@ -623,9 +533,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/ipc/**"
-      ],
+      "includes": ["**/src/ipc/**"],
       "linter": {
         "rules": {
           "style": {
@@ -639,25 +547,15 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/**",
-                      "**/src/apps/**"
-                    ],
+                    "group": ["**/apps/**", "**/src/apps/**"],
                     "message": "Surface isolation: @/ipc is a surface-AGNOSTIC event bridge slice. It must NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench, apps/eval, apps/probe). Surface entries depend on @/ipc, never the reverse. ENV/argv/HTTP/IPC parsing belongs in the surface; @/ipc takes plain typed config and injected transports."
                   },
                   {
-                    "group": [
-                      "node:readline",
-                      "node:readline/promises",
-                      "node:tty",
-                      "node:repl"
-                    ],
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
                     "message": "Surface coupling: @/ipc is surface-agnostic. CLI-specific node modules (readline / readline/promises / tty / repl) are terminal-only and belong in apps/cli. Accept a port (StdioReader / StdioWriter) and let the surface inject the concrete implementation."
                   },
                   {
-                    "group": [
-                      "node:process"
-                    ],
+                    "group": ["node:process"],
                     "message": "Surface coupling: named imports from node:process (env, argv, stdin, stdout, stderr, …) are a literal-rename bypass of the @/ipc surface-agnostic invariant. process.exit / process.on / process.cwd (via the global) remain allowed because they are not surface-coupled. For env/argv/stdio, the surface entry (apps/cli, apps/web, apps/tauri) parses node:process and passes typed config / StdioReader/Writer ports into @/ipc."
                   }
                 ]
@@ -668,9 +566,7 @@
       }
     },
     {
-      "includes": [
-        "**/src/runner/**"
-      ],
+      "includes": ["**/src/runner/**"],
       "linter": {
         "rules": {
           "style": {
@@ -684,25 +580,15 @@
                 },
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/**",
-                      "**/src/apps/**"
-                    ],
+                    "group": ["**/apps/**", "**/src/apps/**"],
                     "message": "Surface isolation: @/runner is a Layer-2 surface-AGNOSTIC slice. It must NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench, apps/eval, apps/probe). Surface entries depend on @/runner, never the reverse. ENV/argv/HTTP/IPC parsing belongs in the surface; @/runner takes plain typed config."
                   },
                   {
-                    "group": [
-                      "node:readline",
-                      "node:readline/promises",
-                      "node:tty",
-                      "node:repl"
-                    ],
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
                     "message": "Surface coupling: @/runner is Layer-2 surface-agnostic. CLI-specific node modules (readline / readline/promises / tty / repl) are terminal-only and belong in apps/cli. Accept a port (PromptSource, InputStream) and let the surface inject the concrete implementation (Node TTY / WebSocket / Tauri command)."
                   },
                   {
-                    "group": [
-                      "node:process"
-                    ],
+                    "group": ["node:process"],
                     "message": "Surface coupling: named imports from node:process (env, argv, stdin, stdout, stderr, …) are a literal-rename bypass of the @/runner surface-agnostic invariant. process.exit / process.on / process.cwd (via the global) remain allowed because they are not surface-coupled. For env/argv/stdio, the surface entry (apps/cli, apps/web, apps/tauri) parses node:process and passes typed config / a WriteSink port into @/runner."
                   }
                 ]
@@ -741,6 +627,7 @@
         "!tests/unit/mcp-cmd.test.ts",
         "!tests/unit/mcp-surface-wire.test.ts",
         "!tests/unit/cli-retry-with.test.ts",
+        "!tests/unit/cli-rewind-slash-hellgate.test.ts",
         "!tests/unit/shell-exec-observers-surface.test.ts",
         "!tests/unit/cli-image-loader.test.ts",
         "!tests/unit/cli-argv-prompt.test.ts",
@@ -763,11 +650,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "**/apps/cli",
-                      "**/apps/cli/*",
-                      "**/apps/cli/**"
-                    ],
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]

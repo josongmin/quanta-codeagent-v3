@@ -14,6 +14,7 @@
 
 import type { CloseoutGuardState } from "../closeout-guard"
 import type { AgentConfig } from "../types"
+import { defaultVerifyCheckpointBridge } from "../verify-checkpoint-bridge"
 import type { VerifyGuardState } from "../verify-guard"
 import type { TurnGuard } from "./chain"
 import { createCloseoutGuard } from "./closeout-guard"
@@ -29,7 +30,25 @@ export const buildGuardChain = (args: {
   // VerifyGuard: only when BOTH config + per-session state are present (the
   // legacy step skipped on either-undefined, so we mirror that gate here).
   if (config.verifyGuard !== undefined && verifyGuardState !== undefined) {
-    out.push(createVerifyGuard({ cfg: config.verifyGuard, state: verifyGuardState }))
+    // ADR-0123 — verify-checkpoint bridge wiring. Build + inject ONLY when
+    // `config.shadowOdb` is present so the default-OFF path is provably
+    // byte-identical (no bridge construction, no `onVerifySuccess` invocation,
+    // no `void`-elided promise). When `shadowOdb` IS wired, every cleared
+    // finish-attempt advances the shadow-ODB anchor for `config.cwd`.
+    const verifyCheckpoint =
+      config.shadowOdb !== undefined
+        ? {
+            bridge: defaultVerifyCheckpointBridge(config.shadowOdb),
+            cwd: config.cwd,
+          }
+        : undefined
+    out.push(
+      createVerifyGuard({
+        cfg: config.verifyGuard,
+        state: verifyGuardState,
+        ...(verifyCheckpoint !== undefined ? { verifyCheckpoint } : {}),
+      }),
+    )
   }
   // CloseoutGuard: only when `cfg.closeoutGuard.enabled === true` AND state
   // present. `buildCloseoutGuard` already gates state creation on

@@ -16,6 +16,7 @@
  */
 
 import type { Message } from "@/llm"
+import type { VerifyCheckpointBridge } from "../verify-checkpoint-bridge"
 import { decideVerifyGuard, type VerifyGuardState } from "../verify-guard"
 import { guardBlocked, type TurnGuard, type TurnGuardContext, type TurnGuardResult } from "./chain"
 import { isFinishAttempt, metaUser } from "./shared"
@@ -23,12 +24,20 @@ import { isFinishAttempt, metaUser } from "./shared"
 /** Build a `TurnGuard` instance backed by the existing per-session
  *  `VerifyGuardState`. The closure holds `state` + `cfg` so the chain itself
  *  stays state-free (the chain is reusable across turns; state migrates with
- *  the guard instance). */
+ *  the guard instance).
+ *
+ *  ADR-0123 — optional `verifyCheckpoint` seam fires `onVerifySuccess(cwd)`
+ *  EXACTLY when a finish attempt clears the verify policy (Cursor's
+ *  `markVerifiedV2` pattern: anchor advances only on verified state). Absent
+ *  ⇒ no invocation (byte-identical to pre-ADR). NO-AWAIT: the bridge is
+ *  no-throw and observability-grade, so fire-and-forget keeps the guard
+ *  adapter synchronous (matches the chain `decide` contract). */
 export const createVerifyGuard = (args: {
   cfg: { maxTrips?: number; mustPass?: boolean }
   state: VerifyGuardState
+  verifyCheckpoint?: { bridge: VerifyCheckpointBridge; cwd: string }
 }): TurnGuard => {
-  const { cfg, state } = args
+  const { cfg, state, verifyCheckpoint } = args
   return {
     name: "verify",
     decide: (ctx: TurnGuardContext): TurnGuardResult | undefined => {
@@ -39,7 +48,17 @@ export const createVerifyGuard = (args: {
         cfg,
         state,
       })
-      if (!verdict.block || verdict.text === undefined) return undefined
+      if (!verdict.block || verdict.text === undefined) {
+        // PASS path: a finish attempt cleared the verify policy. Fire the
+        // checkpoint bridge so the shadow-ODB anchor advances to HEAD for
+        // this workspace. NO-AWAIT (bridge is no-throw); the fire-and-forget
+        // promise is intentional — the verify gate must not change shape on
+        // a slow `git update-ref`.
+        if (verifyCheckpoint !== undefined) {
+          void verifyCheckpoint.bridge.onVerifySuccess(verifyCheckpoint.cwd)
+        }
+        return undefined
+      }
       ctx.emit("unverified")
       // ADR-0079 — arm tool_choice:{kind:"any"} for the FORCED re-entry.
       ctx.toolChoiceState.verifyGuardViolated = true

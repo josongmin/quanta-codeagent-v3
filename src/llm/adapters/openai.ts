@@ -153,6 +153,11 @@ export const userParams = (blocks: ContentBlock[]): ChatParam[] => {
   }
   for (const b of blocks) {
     if (b.type === "tool_result") {
+      // ADR-0126: `contentBlocks` (when present) carries the structured
+      // array form for image-bearing tool results. OpenAI's `role:"tool"`
+      // message content is string-only — we ALWAYS use `b.content` (the
+      // legacy text view) here; the structured form is ignored on this
+      // surface. Byte-identical to the pre-feature path.
       params.push({ role: "tool", tool_call_id: b.tool_use_id, content: b.content })
     }
   }

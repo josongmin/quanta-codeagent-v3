@@ -539,6 +539,29 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   shadowCheckpoint?: { mode: CheckpointTriggerMode; oracle?: DestructivenessOracle }
   /**
+   * ADR-0125 turn-diff loop wiring — opt-in trigger for the
+   * {@link wireGitObservability} composite (ADR-0110). When `enabled === true`
+   * the loop constructs a per-session `TurnDiffSession` (via
+   * `wireGitObservability({runner: defaultGitRunner, cwd, signal})`) and
+   * calls `startTurn(turnIndex)` just before each turn's body, then
+   * `endTurn(turnIndex)` after the turn span closes — emitting any returned
+   * `turn_diff_updated` AgentEvent onto the loop's stream.
+   *
+   * Default-OFF: absent or `enabled !== true` ⇒ the loop allocates no
+   * session, performs no `startTurn`/`endTurn` calls, and is byte-identical
+   * to the pre-wire path (RFC §1.2). Explicit opt-in (not auto-enabled when
+   * `shadowOdb` is wired) so a caller that wires the storage port for
+   * `branch_search` / rewind consumers does NOT pay the per-turn `git
+   * rev-parse` + `git diff` cost without asking.
+   *
+   * `session` (test-injection seam): when supplied, the loop uses this
+   * caller-built `TurnDiffSession` verbatim instead of constructing one from
+   * `defaultGitRunner`. Mirrors the `dedupGate`/`capEnforcer` patterns —
+   * production code never sets it; tests inject a fake-runner-backed
+   * session to assert wiring without spawning `git`.
+   */
+  gitObservability?: { enabled: boolean; session?: import("./git-observability").TurnDiffSession }
+  /**
    * ADR-0117 progress surface — when set, `branch-search-runner` wraps the
    * tool's `onTrace` with a side-effecting adapter that calls this callback
    * with a `formatBranchTrace`'d `ProgressLine` per event. Absent ⇒ the

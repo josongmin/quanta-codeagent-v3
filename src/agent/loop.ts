@@ -12,6 +12,7 @@ import {
 } from "@/observability"
 import { normalizeRedactionConfig, redactSecrets } from "@/security"
 import { errMessage, LLMError } from "@/shared"
+import { defaultGitRunner } from "@/tool/git"
 import { buildCapEnforcer } from "./cap-enforcer"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
@@ -23,6 +24,11 @@ import {
 import { DedupGate } from "./dispatch-dedup"
 import { effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
+// ADR-0125 turn-diff loop wiring (default-OFF). Opt-in via
+// `config.gitObservability.enabled === true`. Constructs a per-session
+// `TurnDiffSession` from the composite helper and calls startTurn/endTurn at
+// the per-turn boundary so a host sees the SHAPE of what each turn changed.
+import { type TurnDiffSession, wireGitObservability } from "./git-observability"
 import { buildGuardChain, metaUser, runGuardChain } from "./guards"
 import { renderIdeContext } from "./ide-context"
 import { persistSession, recallContext } from "./memory"
@@ -1649,6 +1655,22 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     lastTurnTiming = timing
   }
 
+  // ADR-0125 turn-diff loop wiring — opt-in trigger: only when
+  // `cfg.gitObservability?.enabled === true`. Explicit (not auto-enabled when
+  // `shadowOdb` is wired) so a caller that wired the storage port for
+  // `branch_search` / rewind consumers does NOT pay the per-turn `git
+  // rev-parse` + `git diff` cost without asking. Absent / disabled ⇒
+  // `turnDiffSession` stays `undefined`, no allocation, no `git` spawn, no
+  // emit — byte-identical to the pre-wire path. A caller-supplied `session`
+  // (test-injection seam, mirrors `dedupGate`) is honored verbatim so unit
+  // tests can spy on `startTurn`/`endTurn` without spawning `git`.
+  const turnDiffSession: TurnDiffSession | undefined =
+    cfg.gitObservability?.enabled === true
+      ? (cfg.gitObservability.session ??
+        wireGitObservability({ runner: defaultGitRunner, cwd: cfg.cwd, signal: cfg.signal })
+          .turnDiff)
+      : undefined
+
   // R2-B P1 — session-lifetime bundle. Configured ONCE here (after every
   // session resource the helpers might need has been materialized) and passed
   // unchanged into every `runTurn` call. The bundle is `readonly`, so a helper
@@ -1882,6 +1904,13 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     const turnId = cfg.activeTurnRef?.current.currentTurn?.turnId ?? crypto.randomUUID()
     const turnSpan: Span = startSpan(SPAN_NAMES.turn, turnSpanAttrs(turnId))
     let turnSpanStatus: "ok" | "error" | "aborted" = "ok"
+    // ADR-0125 turn-diff loop wiring — snapshot the turn-start anchor SHA
+    // BEFORE the turn body runs. Absent session ⇒ no-op, no `git rev-parse`
+    // spawn, byte-identical. Awaited so a slow git call serializes with the
+    // body (the emitter is already best-effort: a null anchor at endTurn just
+    // returns null). Uses the loop's 1-indexed `turn` directly as the turn
+    // index (the emitter treats it as an opaque key per session).
+    if (turnDiffSession !== undefined) await turnDiffSession.startTurn(turn)
     // Recovery counters are per-turn: SAME-TURN retries share & exhaust these,
     // a fresh turn starts clean. runTurn owns the SEAM (buildTurnContext) and
     // mutates `messages` (canonical history) in place.
@@ -1916,6 +1945,21 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       throw e
     }
     endSpan(turnSpan, turnSpanStatus, attrs({}))
+
+    // ADR-0125 turn-diff loop wiring — compute the cumulative diff between the
+    // turn-start anchor and the current HEAD/worktree, emit it onto the loop's
+    // stream if non-null. Absent session / no anchor / no changes / git
+    // failures ⇒ `endTurn` returns null and nothing is emitted (best-effort,
+    // never throws). Fires for EVERY turn the loop reached (including the
+    // terminal aborted/error/refusal/completed turns) so a host UI sees the
+    // final turn's diff before the loop returns. Position: after `endSpan` so
+    // the turn span closes before the diff emit lands, AND before
+    // `emitWorkMetrics` so a host that watches both events sees the diff
+    // FIRST (matches the recorder-first emission convention).
+    if (turnDiffSession !== undefined) {
+      const diffEvent = await turnDiffSession.endTurn(turn)
+      if (diffEvent !== null) stream.emit(diffEvent)
+    }
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
     // at turn-top, so a turn that immediately aborted/errored BEFORE producing

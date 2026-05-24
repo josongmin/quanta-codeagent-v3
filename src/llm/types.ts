@@ -56,7 +56,22 @@ export interface ToolUseBlock {
 export interface ToolResultBlock {
   type: "tool_result"
   tool_use_id: string
+  /** Legacy plain-text view of the tool result — byte-identical for every
+   *  caller that does not emit image attachments. When `contentBlocks` is
+   *  present, the Anthropic API consumes the array form on the wire while
+   *  this string remains the canonical preview / log / OpenAI-tool-message
+   *  surface (where image parts are not transportable). Callers should
+   *  ALWAYS populate `content` so legacy consumers (compaction, distill,
+   *  rewind, migration normalization, OpenAI flatten) keep working. */
   content: string
+  /** ADR-0126 — OPTIONAL structured content mirroring Anthropic Messages API
+   *  `tool_result.content`. Populated ONLY when a tool's `ToolResult.images`
+   *  is non-empty: dispatch's `composeToolResultContent` builds the array
+   *  `[{type:"text",text:output}, ...ImageBlock]`. Absent ⇒ adapters use
+   *  `content` (byte-identical to the pre-feature path). Provider adapters
+   *  that cannot carry image parts in tool-result messages (OpenAI chat /
+   *  Responses) drop this field and fall back to `content`. */
+  contentBlocks?: ReadonlyArray<{ type: "text"; text: string } | ImageBlock>
   is_error?: boolean
 }
 

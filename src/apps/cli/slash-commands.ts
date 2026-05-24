@@ -30,8 +30,13 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import type { Plan } from "@/agent/plan/types"
 import { runtimeConfig } from "@/shared"
+import { formatBranchesPanel } from "./branch-search-progress"
 import { runHelpRender } from "./help-render"
+// R10 panels (history exports its own cmd; the rest are defined below
+// because their bodies live next to their renderers in the same slice).
+import { historyCmd } from "./history-cmd"
 import type { IdleMonitor } from "./idle-monitor"
 import { parseSnoozeDuration } from "./idle-monitor"
 import { loginCmd } from "./login-cmd"
@@ -39,18 +44,14 @@ import { logoutCmd } from "./logout-cmd"
 import { mcpCmd } from "./mcp-cmd"
 import { isMemorySlashEnabled, memoryCmd } from "./memory-cmd"
 import { permissionCmd } from "./permission-explain"
+import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "./plan-panel"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { rulesCmd } from "./rules-cmd"
 import { type SideChatSessionState, sideCmd } from "./side-cmd"
+import { snapshotCmd } from "./snapshot-cmd"
 import { statusCmd } from "./status-cmd"
-// R10 panels (history exports its own cmd; the rest are defined below
-// because their bodies live next to their renderers in the same slice).
-import { historyCmd } from "./history-cmd"
-import { formatBranchesPanel } from "./branch-search-progress"
 import { renderWorkingStatePanel } from "./working-state-panel"
-import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "./plan-panel"
-import type { Plan } from "@/agent/plan/types"
 
 export interface SlashContext {
   readonly out: (s: string) => void
@@ -102,15 +103,11 @@ export interface SlashContext {
   /** R10 G (plan-panel) — read-only plan-store snapshot accessor. */
   readonly planSnapshot?: (() => import("@/agent/plan/types").Plan | null) | undefined
   /** R10 H (working-state-panel) — read-only WorkingState snapshot. */
-  readonly workingState?:
-    | (() => import("@/agent").WorkingState | undefined)
-    | undefined
+  readonly workingState?: (() => import("@/agent").WorkingState | undefined) | undefined
   /** R10 I (history-cmd) — recent turns + tool-call breadcrumb. */
   readonly history?: import("./history-cmd").HistorySessionState | undefined
   /** R10 L (branch-search-progress) — N-best candidate tracker snapshot. */
-  readonly branchSearch?:
-    | (() => import("./branch-search-progress").BranchProgressState)
-    | undefined
+  readonly branchSearch?: (() => import("./branch-search-progress").BranchProgressState) | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
@@ -633,6 +630,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   resumeCmd,
   ...REWIND_COMMANDS,
   sideCmd,
+  snapshotCmd,
   rulesCmd,
   ...MEMORY_COMMANDS,
   // R10 panel commands — wired via `SlashContext.{cost,planSnapshot,workingState,history,branchSearch}`.
