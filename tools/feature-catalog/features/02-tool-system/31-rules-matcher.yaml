@@ -1,0 +1,42 @@
+id: rules-matcher
+title: Prefix-rule matcher — longest-prefix-match + ASCII-space word boundary
+section: 2
+subsystem: 권한 룰 — deterministic 매칭 알고리즘
+order: 31
+maturity: L4
+status: stable
+purpose: |
+  Deterministic longest-prefix-match over a single rule set. (1) Normalise
+  by stripping LEADING whitespace ONLY — trailing whitespace and internal
+  spacing are preserved so a rule cannot be bypassed by appending spaces
+  (e.g. `git commit -m "msg "` matches as written). (2) Sort rules by
+  prefix length DESCENDING; stable order preserved for equal-length
+  prefixes via original index — matcher is a total deterministic function
+  of (command, rules). (3) For each rule (longest first) accept iff
+  `command === rule.prefix` OR `command.startsWith(rule.prefix) AND
+  command[rule.prefix.length] === ASCII 0x20`. The space-boundary check
+  is what prevents `git` from matching `github` — rule prefix must end at
+  a word boundary as shells interpret unquoted args (tabs NOT honoured as
+  separators because shells don't either in unquoted form). (4) Return
+  first match; otherwise `{kind:"no_match"}`. `no_match` is NOT an error —
+  the admissibility-gate (ADR-0031) decides whether to default-deny or
+  fall through.
+evidence:
+  code:
+    - src/rules/matcher.ts
+    - src/rules/types.ts
+  adrs: [31]
+  tests:
+    unit:
+      - tests/unit/rules/matcher.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Layer precedence NOT applied here — `RulesStore` (`src/rules/store.ts`)
+  composes 3 layers (project > user > system). Higher-precedence layer
+  ALWAYS wins even with shorter prefix — intentional so a project override
+  of `git push` beats a system rule for `git push --force`. Companion of
+  `prefix-rule-dsl` (the grammar + DSL absorption) which the parser produces
+  the `Rule[]` the matcher consumes.

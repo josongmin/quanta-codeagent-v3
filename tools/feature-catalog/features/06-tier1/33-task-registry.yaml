@@ -1,0 +1,42 @@
+id: task-registry
+title: TaskRegistry — background subagent registry + capability tokens + LRU
+section: 6
+subsystem: 서브에이전트 — background task lifecycle + capability gating
+order: 33
+maturity: L4
+status: stable
+purpose: |
+  In-memory registry of background subagent tasks (v2's `taskRegistry` shape).
+  Agent tool registers a task here when launched in background mode and
+  resolves it when the forked runner settles; `task_output` / `task_stop`
+  observe and cancel by id. Three seams: (1) `register()` returns the
+  per-task `AbortController` — callers MUST plumb its `.signal` into the
+  runner's request via `SubagentRequest.signal` so `stop(id)` actually
+  unwinds the child (historical bug class fixed). (2) S17 capability
+  token — `register()` returns an unforgeable `TaskOwnerToken` (128-bit
+  `crypto.randomUUID()`) alongside the task id; the spawner stashes the
+  token and surrenders it back to `stop(id, ownerToken)`. Without matching
+  token, `stop()` REFUSES — a sibling subagent that learns another's `id`
+  cannot DoS-cancel it. (3) LRU eviction — `maxRetained` cap (default 256)
+  applies to SETTLED records only; running tasks never evict, never count
+  toward the cap. Oldest-by-`endedAt` settled records evict first. Lives
+  for the process — not persisted.
+evidence:
+  code:
+    - src/subagent/registry.ts
+    - src/subagent/task-tools.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/task-registry.test.ts
+      - tests/unit/task-registry-lru.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `TaskOwnerToken` is a branded string type — cannot be forged at compile
+  time without the brand constructor. Companion of `subagent-6-tools` (which
+  describes the 6 standard contract tools); this entry is the registry the
+  task-tool subset reads/writes. `task_output` blocking timeout default 30s,
+  caller-overridable via `timeout_ms`.

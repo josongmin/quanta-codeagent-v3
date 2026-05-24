@@ -1,0 +1,37 @@
+id: plugin-loader
+title: loadPluginManifest + discoverPlugins — `.quanta-plugin/plugin.json` loader
+section: 6
+subsystem: 플러그인 — 매니페스트 로더 + 트리 디스커버리
+order: 32
+maturity: L4
+status: stable
+purpose: |
+  Two contracts behind the plugin manifest. (1) `loadPluginManifest(pluginDir)`
+  reads + validates a single plugin root: FAILS LOUDLY when the manifest
+  is missing, JSON-malformed, or Zod-invalid — no auto-fix, no defaulting,
+  no swallowed errors (Cluster E hard rule). Returns the manifest + optional
+  first-listed MCP server (when `.mcp.json` is present + has ≥1 server)
+  + `PluginSkillEntry[]` (each entry's `<dir>/skills/<name>/SKILL.md` path —
+  manifest loader does NOT parse the frontmatter; that's `skill-frontmatter`).
+  (2) `discoverPlugins(rootDir)` walks the tree returning every directory
+  containing `<dir>/.quanta-plugin/plugin.json`. Depth CAPPED at 4 to
+  prevent runaway scans on large monorepos / node_modules. Slice contract:
+  loader may touch the filesystem + import `./plugin-manifest`; MUST NOT
+  import other slices (Biome enforces).
+evidence:
+  code:
+    - src/skill/plugin-loader.ts
+    - src/skill/plugin-manifest.ts
+  adrs: [39]
+  tests:
+    unit:
+      - tests/unit/plugin-loader.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Cluster E / F13, ADR-0039. Companion of `plugin-manifest` catalog entry
+  (which describes the manifest schema). This entry is the LOADER + tree
+  WALKER. `PluginSkillEntry` is intentionally inert (path only) — couples
+  plugin-time and skill-time concerns minimally.

@@ -1,0 +1,41 @@
+id: llm-factory
+title: createLLM provider factory + DEFAULT_MODEL registry (OCP)
+section: 9
+subsystem: LLM provider seam — single source of truth
+order: 30
+maturity: L4
+status: stable
+purpose: |
+  `createLLM(provider, opts)` is the one factory the three app entry points
+  (cli/bench/eval) call instead of duplicating `new AnthropicAdapter / new
+  OpenAIAdapter / new ChatGPTOAuthAdapter`. The `Provider` type re-exports
+  `LLMProvider` from `@/shared/errors` so the error taxonomy and the factory
+  cannot drift. `DEFAULT_MODEL` and `API_KEY_ENV` are per-provider tables
+  (OCP — adding a provider means extending these tables + one registry entry,
+  never editing an if-chain). chatgpt-oauth API_KEY_ENV is a sentinel
+  (`__CHATGPT_OAUTH_ON_DISK__`) — the credential lives in the on-disk token
+  store, the factory short-circuits the env lookup. Stream-hang overrides
+  (`streamFirstChunkMs` / `streamIdleMs`) and `betaHeaders` flow through the
+  factory so wiring sites never reach past it.
+evidence:
+  code:
+    - src/llm/factory.ts
+    - src/llm/ports.ts
+    - src/llm/index.ts
+    - src/llm/adapters/shared.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - OPENAI_BASE_URL
+deliberate_hold: null
+notes: |
+  L4: 3 adapters wired (anthropic / openai / chatgpt-oauth). Companion fallback /
+  swap features (`fallbackllm`, `retryingllm`, `model-swap-retry`) wrap the
+  factory output — none of them re-implement provider selection. Adding a 4th
+  provider = 1 adapter file + 1 DEFAULT_MODEL row + 1 API_KEY_ENV row + extend
+  `LLMProvider` union.

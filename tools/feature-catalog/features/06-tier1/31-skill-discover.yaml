@@ -1,0 +1,43 @@
+id: skill-discover
+title: discoverSkills — frontmatter + size-cap-guarded skill enumeration
+section: 6
+subsystem: 스킬 — discovery + size guard
+order: 31
+maturity: L4
+status: stable
+purpose: |
+  Walk `QUANTA_SKILLS_DIR` (or per-project skills/) and emit `Skill[]` —
+  reads each candidate's frontmatter via the lenient `parseFrontmatter`,
+  coerces `allowedTools` / `effort` / scalar fields, falls back to first
+  non-blank body line for description if not in frontmatter. Size guard
+  precedes parse: `checkSkillSize` returns a discriminated `{ok:true,size}`
+  vs `{ok:false, reason:"too-large"|"stat-failed", path, size}` — too-large
+  is fail-closed (skip + user-actionable log) NOT truncate-and-load (a
+  SKILL.md whose frontmatter parses but whose body is cut mid-instruction
+  yields a skill the agent BELIEVES is enabled with broken instructions).
+  stat-failed is bucketed separately so a host can log filesystem noise
+  differently from user-actionable too-large. Discovery proceeds with the
+  rest of the directory on any single-file failure.
+evidence:
+  code:
+    - src/skill/discover.ts
+    - src/skill/skill-size.ts
+    - src/skill/frontmatter.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/skill-discover-errors.test.ts
+      - tests/unit/skill-discover-size-cap.test.ts
+      - tests/unit/skill-size.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_SKILLS_DIR
+deliberate_hold: null
+notes: |
+  Size cap 30 MB (`MAX_SKILL_SIZE_BYTES`) absorbed from Claude Desktop 1.7196.3
+  ("Skill file is too large. Maximum size is 30 MB."). Companion of
+  `anthropic-beta-and-skill-size-cap` (which is the consolidated user-facing
+  knob) — this entry documents the discovery-time enforcement seam. Lenient
+  parser intentional here (vs strict `skill-frontmatter` for tool whitelist
+  schema): discovery tolerates non-standard skill markdown.

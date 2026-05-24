@@ -1,0 +1,46 @@
+id: mcp-client-jsonrpc
+title: McpClient — line-framed JSON-RPC 2.0 + typed McpError + output cap
+section: 2
+subsystem: MCP — stdio JSON-RPC 2.0 codec + client
+order: 32
+maturity: L4
+status: stable
+purpose: |
+  Wire-level details behind `mcp-tool-bridge`. (1) Newline-delimited
+  JSON-RPC 2.0 codec — MCP framing is NOT LSP `Content-Length`; every
+  message is a single line of UTF-8 JSON terminated by `\n`, no embedded
+  raw newlines. `LineReader` owns a byte buffer + only emits a message
+  once a full `\n`-terminated line arrives (server may flush several
+  messages in one chunk OR split one message across chunks). Closed
+  `JsonRpcMessage` discriminated union — response (by `id`) vs
+  notification/request (by `method`). (2) `McpClient` — protocol version
+  `"2025-06-18"`, `CLIENT_INFO` { name:"quanta", version:"0.1.0" },
+  default request timeout 30s, four lifecycle methods (`initialize` /
+  `tools/list` / `tools/call` / `shutdown`). (3) `McpError` typed
+  failure (extends `QuantaError`, code: "mcp") — stable code lets callers
+  branch without string matching. (4) `MAX_RESULT_CHARS = 200_000` —
+  max chars of joined tool-result text we hand back from `callTool` to
+  prevent a malicious/buggy MCP server returning a huge text blob from
+  flowing unbounded into memory + model prompt (DoS guard). Mirrors the
+  repo-wide tool-output cap (`@/tool` `DEFAULT_TOOL_OUTPUT_MAX`) but
+  duplicated as a local constant because `@/mcp` may not import `@/tool`
+  (slice isolation, RFC §3.1). Sub-cap results returned byte-identical.
+evidence:
+  code:
+    - src/mcp/client.ts
+    - src/mcp/jsonrpc.ts
+    - src/mcp/types.ts
+  adrs: [7]
+  tests:
+    unit:
+      - tests/unit/mcp-jsonrpc.test.ts
+      - tests/unit/mcp-client-errors.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion of `mcp-tool-bridge` (the bridge that adapts MCP tools to
+  agent registry) + `jsonrpc-envelope` (the JSON-RPC 2.0 + timeout-channel
+  envelope ADR-0033). This entry zooms into the framing + DoS cap +
+  typed-error invariants — the bridge entry covers high-level capability.

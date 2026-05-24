@@ -1,0 +1,40 @@
+id: portable-session-v1
+title: PortableSessionV1 export/import — surface round-trip schema
+section: 9
+subsystem: IPC session round-trip (Claude A11 absorption)
+order: 36
+maturity: L4
+status: new
+purpose: |
+  Portable session schema v1 (snake_case wire) for round-tripping a saved
+  session across surfaces. `exportSession(sessionId)` writes
+  `{schema, version, meta, reason, messages}` — meta is intentionally tiny
+  (id, title, cwd, timestamps, archived, git_{sha,branch,origin_url})
+  so the wire schema stays stable while `@/session` evolves (NOT slice-
+  internal storage details: file paths, index cache state, retention
+  markers). `importSession(blob, opts)` validates strictly — a malformed
+  blob is REJECTED with a typed `ImportError` over a closed
+  `ImportErrorKind` union (not_an_object / schema_mismatch /
+  version_unsupported / meta_invalid / messages_invalid); no coercion.
+  Default: mint a FRESH `crypto.randomUUID()` id + fresh `createdAt` so
+  the import is a visible new session, not a collision with an in-flight
+  one. `titlePrefix` opt-in (e.g. `"[imported] "`).
+  `PORTABLE_SESSION_VERSION = 1` — a future v2 bump MUST add migration
+  code in `session-import.ts`.
+evidence:
+  code:
+    - src/ipc/session-export.ts
+    - src/ipc/session-import.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/ipc/session-export-import.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Mirrors Claude Code A11's `importCliSession` direction (Web imports the CLI's
+  session). Read-only on storage from the exporter side. `ImportErrorKind` is a
+  string-discriminant for cross-process serialization (kind value stable across
+  TS/JS process boundary).

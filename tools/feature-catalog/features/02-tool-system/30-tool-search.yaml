@@ -1,0 +1,35 @@
+id: tool-search
+title: ToolSearch — deferred-tool catalog ranked search + select:<name> lookup
+section: 2
+subsystem: 도구 카탈로그 — deferred-tool search seam
+order: 30
+maturity: L4
+status: new
+purpose: |
+  Deferred-tool catalog search exposed as a Tool. Two modes: (1) `select:<name>
+  [,<name>...]` direct lookup by name — restores schema for explicit deferred
+  tools; (2) keyword search ranked by token overlap against tool name + first-
+  line description ("tagline") + body. Tokenizer honours camelCase / snake_case
+  / kebab-case / dot / `mcp__` separators on BOTH catalog identifiers AND user
+  queries, restoring lexical symmetry the original whitespace-only split
+  lacked (so `"lspDocumentSymbol"` matches `lsp_document_symbol` and vice
+  versa). First-line matches score higher than matches deep in the body.
+  `max_results` defaults to 5. Returns the schema definitions (kebab JSON
+  shape) so caller can immediately invoke the matched tools.
+evidence:
+  code:
+    - src/skill/tool-search.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/tool-search.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Lives in `@/skill` because it's the lookup half of the same catalog the
+  skill activation system uses. Tagline boundary = first newline OR first
+  sentence-terminating punctuation followed by whitespace/end (`. ` / `? ` /
+  `! ` / trailing `.`); description with no break treats the whole text as
+  the tagline + empty body.
