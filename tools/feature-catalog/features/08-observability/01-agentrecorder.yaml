@@ -7,6 +7,7 @@ maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
+telemetry_keys: ["gen_ai.usage.input_tokens"]
 modes: [n-a]
 configurable: integrated
 config_refs:

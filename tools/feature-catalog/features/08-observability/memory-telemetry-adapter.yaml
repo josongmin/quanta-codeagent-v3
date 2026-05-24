@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
+telemetry_keys: ["quanta.memory.phase", "quanta.memory.recall.hits", "quanta.memory.recall.scanned", "quanta.memory.recall.latency_ms"]
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]

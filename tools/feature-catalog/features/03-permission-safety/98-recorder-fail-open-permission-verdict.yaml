@@ -7,6 +7,7 @@ maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
+telemetry_keys: ["quanta.permission.stack.source", "quanta.permission.decided_by"]
 modes: [n-a]
 configurable: static
 owners: ['@songmin', team-safety]

@@ -7,6 +7,7 @@ maturity: L4
 status: new
 ui_surfaces: [n-a]
 monitoring: integrated
+telemetry_keys: ["quanta.memory.phase", "quanta.thread.id", "quanta.conversation.id", "quanta.conversation.session_id", "quanta.conversation.started_at"]
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]

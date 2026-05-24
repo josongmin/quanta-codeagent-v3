@@ -7,6 +7,7 @@ maturity: L4
 status: new
 ui_surfaces: [n-a]
 monitoring: integrated
+telemetry_keys: ["quanta.conversation.id", "quanta.turn.id", "quanta.tool.call.status", "quanta.thread.id", "quanta.turn.kind"]
 modes: [n-a]
 configurable: integrated
 config_refs:
