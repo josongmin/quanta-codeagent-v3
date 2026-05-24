@@ -31,14 +31,6 @@ afterAll(async () => {
   await rm(ROOT, { recursive: true, force: true })
 })
 
-const writeFileAt = async (rel: string, body: string): Promise<string> => {
-  const abs = join(ROOT, rel)
-  const dir = abs.slice(0, abs.lastIndexOf("/"))
-  await mkdir(dir, { recursive: true })
-  await writeFile(abs, body, "utf8")
-  return abs
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // A. scanAdrs — 5 cases
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,8 +118,8 @@ describe("B. scanSlices", () => {
       " * Slice for the foo subsystem (ADR-0042, ADR-0050).",
       " * Provides typed ports.",
       " */",
-      "export { Foo } from \"./foo\"",
-      "export type { FooOpts } from \"./types\"",
+      'export { Foo } from "./foo"',
+      'export type { FooOpts } from "./types"',
     ].join("\n")
     await mkdir(join(root, "src/foo"), { recursive: true })
     await mkdir(join(root, "tests"), { recursive: true })
@@ -187,9 +179,9 @@ describe("B. scanSlices", () => {
       "/** Multi barrel. */",
       'export { A, B as C } from "./a"',
       'export type { D, E } from "./d"',
-      'export const F = 1',
-      'export function G() {}',
-      'export class H {}',
+      "export const F = 1",
+      "export function G() {}",
+      "export class H {}",
       'export * as ns from "./ns"',
     ].join("\n")
     const exports = extractExports(text)
@@ -247,26 +239,17 @@ describe("C. render", () => {
     expect(idx0010).toBeLessThan(idx0050)
   })
 
-  test("[C-13] plane clustering: title 'metric/telemetry' → observability", () => {
-    const md = render(
-      [
-        {
-          number: "0001",
-          title: "Wired-gauge metric for skill",
-          date: "2026-05-20",
-          status: "Accepted",
-          related: [],
-          slicePaths: [],
-          plane: undefined,
-          filename: "0001.md",
-        },
-      ],
-      [],
-      { today: "2026-05-25" },
-    )
+  test("[C-13] plane clustering: title 'metric/telemetry' → observability (heuristic + render integration)", () => {
+    // Seal both edges: parseAdr's keyword heuristic AND render's grouping.
+    const text =
+      "# ADR-0301: Wired-gauge metric for skill\n- **상태**: Accepted\n- **날짜**: 2026-05-20\n"
+    const parsed = parseAdr("0301-x.md", text)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.adr.plane).toBe("observability")
+    const md = render([parsed.adr], [], { today: "2026-05-25" })
     const obsHeader = md.indexOf("### Observability / Telemetry")
     expect(obsHeader).toBeGreaterThan(-1)
-    // The ADR title must appear AFTER the observability header.
     const adrLine = md.indexOf("Wired-gauge metric for skill")
     expect(adrLine).toBeGreaterThan(obsHeader)
   })
@@ -369,10 +352,7 @@ describe("D. main / CLI", () => {
       join(docs, "0001-a.md"),
       "# ADR-0001: First\n- **상태**: Accepted\n- **날짜**: 2026-05-24\n",
     )
-    await writeFile(
-      join(src, "alpha/index.ts"),
-      "/** Alpha slice. */\nexport const ALPHA = 1\n",
-    )
+    await writeFile(join(src, "alpha/index.ts"), "/** Alpha slice. */\nexport const ALPHA = 1\n")
     const out = join(root, "ARCH.generated.md")
     const r = await runGenerator({
       output: out,

@@ -152,60 +152,61 @@ export interface ScanSlicesOpts {
   readonly testsDir?: string
 }
 
-export const scanSlices = async (opts: ScanSlicesOpts = {}): Promise<ReadonlyArray<SliceSummary>> => {
-  const rootSrc = path.isAbsolute(opts.rootSrc ?? DEFAULT_SRC)
-    ? (opts.rootSrc ?? DEFAULT_SRC)
-    : path.resolve(opts.rootSrc ?? DEFAULT_SRC)
-  const testsDir = path.isAbsolute(opts.testsDir ?? DEFAULT_TESTS)
-    ? (opts.testsDir ?? DEFAULT_TESTS)
-    : path.resolve(opts.testsDir ?? DEFAULT_TESTS)
+const resolveAbsPath = (p: string | undefined, fallback: string): string => {
+  const v = p ?? fallback
+  return path.isAbsolute(v) ? v : path.resolve(v)
+}
 
-  let sliceNames: ReadonlyArray<string>
+const safeReaddir = async (abs: string): Promise<ReadonlyArray<string>> => {
   try {
-    sliceNames = await readdir(rootSrc)
+    return await readdir(abs)
   } catch {
     return []
   }
-  let testFiles: ReadonlyArray<string>
+}
+
+const buildSliceSummary = async (
+  slice: string,
+  rootSrc: string,
+  testFiles: ReadonlyArray<string>,
+  testsDir: string,
+): Promise<SliceSummary | null> => {
+  const sliceAbs = path.join(rootSrc, slice)
   try {
-    testFiles = await readdir(testsDir)
+    const st = await stat(sliceAbs)
+    if (!st.isDirectory()) return null
   } catch {
-    testFiles = []
+    return null
   }
+  let text: string
+  try {
+    text = await readFile(path.join(sliceAbs, "index.ts"), "utf8")
+  } catch {
+    return null
+  }
+  const testFile = findTestFile(slice, testFiles, testsDir)
+  return {
+    slicePath: `src/${slice}`,
+    purpose: extractPurpose(text) || NO_DESCRIPTION,
+    publicExports: extractExports(text),
+    adrReferences: extractAdrReferences(text),
+    ...(testFile === undefined ? {} : { testFile }),
+  }
+}
+
+export const scanSlices = async (
+  opts: ScanSlicesOpts = {},
+): Promise<ReadonlyArray<SliceSummary>> => {
+  const rootSrc = resolveAbsPath(opts.rootSrc, DEFAULT_SRC)
+  const testsDir = resolveAbsPath(opts.testsDir, DEFAULT_TESTS)
+  const sliceNames = await safeReaddir(rootSrc)
+  const testFiles = await safeReaddir(testsDir)
 
   const out: SliceSummary[] = []
   for (const slice of sliceNames) {
     if (slice.startsWith(".")) continue
-    const sliceAbs = path.join(rootSrc, slice)
-    let s
-    try {
-      s = await stat(sliceAbs)
-    } catch {
-      continue
-    }
-    if (!s.isDirectory()) continue
-    const indexPath = path.join(sliceAbs, "index.ts")
-    let text: string
-    try {
-      text = await readFile(indexPath, "utf8")
-    } catch {
-      // Slice without barrel — skip (apps/* doesn't have index.ts; that's intentional).
-      continue
-    }
-
-    const purpose = extractPurpose(text) || NO_DESCRIPTION
-    const publicExports = extractExports(text)
-    const adrReferences = extractAdrReferences(text)
-    const testFile = findTestFile(slice, testFiles, testsDir)
-
-    out.push({
-      slicePath: `src/${slice}`,
-      purpose,
-      publicExports,
-      adrReferences,
-      ...(testFile === undefined ? {} : { testFile }),
-    })
+    const summary = await buildSliceSummary(slice, rootSrc, testFiles, testsDir)
+    if (summary !== null) out.push(summary)
   }
-
   return out.sort((a, b) => a.slicePath.localeCompare(b.slicePath))
 }

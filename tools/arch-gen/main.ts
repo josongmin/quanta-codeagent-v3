@@ -40,33 +40,34 @@ const todayIso = (): string => {
   return `${y}-${m}-${day}`
 }
 
+const FLAG_ALIASES: Readonly<Record<string, keyof CliArgs>> = {
+  "--output": "output",
+  "-o": "output",
+  "--docs": "docsDir",
+  "--src": "srcDir",
+  "--tests": "testsDir",
+  "--today": "today",
+}
+
 export const parseArgs = (argv: ReadonlyArray<string>): CliArgs => {
-  let output = DEFAULT_OUTPUT
-  let docsDir = DEFAULT_DOCS
-  let srcDir = DEFAULT_SRC
-  let testsDir = DEFAULT_TESTS
-  let today = todayIso()
+  const result: { -readonly [K in keyof CliArgs]: CliArgs[K] } = {
+    output: DEFAULT_OUTPUT,
+    docsDir: DEFAULT_DOCS,
+    srcDir: DEFAULT_SRC,
+    testsDir: DEFAULT_TESTS,
+    today: todayIso(),
+  }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = argv[i + 1]
-    if ((a === "--output" || a === "-o") && next) {
-      output = next
-      i += 1
-    } else if (a === "--docs" && next) {
-      docsDir = next
-      i += 1
-    } else if (a === "--src" && next) {
-      srcDir = next
-      i += 1
-    } else if (a === "--tests" && next) {
-      testsDir = next
-      i += 1
-    } else if (a === "--today" && next) {
-      today = next
+    if (!a || !next) continue
+    const key = FLAG_ALIASES[a]
+    if (key) {
+      result[key] = next
       i += 1
     }
   }
-  return { output, docsDir, srcDir, testsDir, today }
+  return result
 }
 
 export const runGenerator = async (

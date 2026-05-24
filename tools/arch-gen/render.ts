@@ -54,8 +54,7 @@ const groupAdrsByPlane = (
 }
 
 /** Build a relative link to `docs/decisions/<filename>` from a markdown line. */
-const adrLink = (adr: AdrSummary): string =>
-  `[ADR-${adr.number}](./decisions/${adr.filename})`
+const adrLink = (adr: AdrSummary): string => `[ADR-${adr.number}](./decisions/${adr.filename})`
 
 const renderAdrLine = (adr: AdrSummary): string => {
   const related =
@@ -117,81 +116,93 @@ const DEPENDENCY_GRAPH_BLOCK = [
   "```",
 ].join("\n")
 
+const renderSlicesSection = (slices: ReadonlyArray<SliceSummary>): ReadonlyArray<string> => {
+  const out: string[] = [`## Slices (${slices.length} total)`, ""]
+  if (slices.length === 0) {
+    out.push("_(no slices discovered — `src/<slice>/index.ts` barrel missing)_", "")
+    return out
+  }
+  for (const s of slices) out.push(renderSliceLine(s))
+  return out
+}
+
+const renderAdrCatalogue = (
+  adrs: ReadonlyArray<AdrSummary>,
+  distinct: number,
+): ReadonlyArray<string> => {
+  const grouped = groupAdrsByPlane(adrs)
+  const out: string[] = [
+    `## ADR catalogue by plane (${adrs.length} entries, ${distinct} distinct numbers)`,
+    "",
+  ]
+  for (const plane of PLANE_ORDER) {
+    const bucket = grouped.get(plane) ?? []
+    if (bucket.length === 0) continue
+    const sorted = [...bucket].sort((a, b) => {
+      if (a.number !== b.number) return a.number.localeCompare(b.number)
+      return a.filename.localeCompare(b.filename)
+    })
+    out.push(`### ${PLANE_HEADINGS[plane]} (${sorted.length})`, "")
+    for (const adr of sorted) out.push(renderAdrLine(adr))
+    out.push("")
+  }
+  return out
+}
+
+const renderTimelineSection = (adrs: ReadonlyArray<AdrSummary>): ReadonlyArray<string> => {
+  const timeline = groupAdrsByDate(adrs)
+  const out: string[] = ["## ADR Timeline", ""]
+  if (timeline.length === 0) {
+    out.push("_(no dated ADRs)_", "")
+    return out
+  }
+  for (const day of timeline) {
+    out.push(`### ${day.date}`, "")
+    for (const adr of day.adrs) {
+      out.push(`- ${adrLink(adr)} ${adr.title} _(${adr.status})_`)
+    }
+    out.push("")
+  }
+  return out
+}
+
+const renderFooterSection = (
+  adrs: ReadonlyArray<AdrSummary>,
+  slices: ReadonlyArray<SliceSummary>,
+  distinct: number,
+  opts: RenderOpts,
+): ReadonlyArray<string> => {
+  const out: string[] = [
+    "## Catalog parity",
+    "",
+    `- Total ADR files: ${adrs.length}`,
+    `- Distinct ADR numbers: ${distinct}`,
+    `- ADR collisions: ${adrs.length - distinct}`,
+    `- Total slices: ${slices.length}`,
+  ]
+  if (opts.hellgateCount !== undefined) {
+    out.push(`- Hellgate test files referenced: ${opts.hellgateCount}`)
+  }
+  out.push("", `> Footer auto-emitted ${opts.today}. Re-run \`bun tools/arch-gen/main.ts\` to regenerate.`, "")
+  return out
+}
+
 export const render = (
   adrs: ReadonlyArray<AdrSummary>,
   slices: ReadonlyArray<SliceSummary>,
   opts: RenderOpts,
 ): string => {
   const distinct = opts.distinctAdrCount ?? new Set(adrs.map((a) => a.number)).size
-  const grouped = groupAdrsByPlane(adrs);
-  const timeline = groupAdrsByDate(adrs);
-
-  const lines: string[] = []
-  lines.push(`# Quanta — Architecture (Generated)`)
-  lines.push("")
-  lines.push(
+  const lines: string[] = [
+    "# Quanta — Architecture (Generated)",
+    "",
     `> Auto-generated from \`tools/arch-gen\` on **${opts.today}** by walking \`docs/decisions/\` + \`src/**\`. Edit the source — re-run \`bun tools/arch-gen/main.ts\` to refresh. The hand-curated companion lives at \`docs/ARCHITECTURE.md\`.`,
-  )
-  lines.push("")
-  lines.push(`## Slices (${slices.length} total)`)
-  lines.push("")
-  if (slices.length === 0) {
-    lines.push("_(no slices discovered — `src/<slice>/index.ts` barrel missing)_")
-    lines.push("")
-  } else {
-    for (const s of slices) {
-      lines.push(renderSliceLine(s))
-    }
-  }
-
-  lines.push(`## ADR catalogue by plane (${adrs.length} entries, ${distinct} distinct numbers)`)
-  lines.push("")
-  for (const plane of PLANE_ORDER) {
-    const bucket = grouped.get(plane) ?? []
-    if (bucket.length === 0) continue
-    lines.push(`### ${PLANE_HEADINGS[plane]} (${bucket.length})`)
-    lines.push("")
-    for (const adr of bucket) {
-      lines.push(renderAdrLine(adr))
-    }
-    lines.push("")
-  }
-
-  lines.push(`## ADR Timeline`)
-  lines.push("")
-  if (timeline.length === 0) {
-    lines.push("_(no dated ADRs)_")
-    lines.push("")
-  } else {
-    for (const day of timeline) {
-      lines.push(`### ${day.date}`)
-      lines.push("")
-      for (const adr of day.adrs) {
-        lines.push(`- ${adrLink(adr)} ${adr.title} _(${adr.status})_`)
-      }
-      lines.push("")
-    }
-  }
-
-  lines.push(`## Dependency Graph (plane summary)`)
-  lines.push("")
-  lines.push(DEPENDENCY_GRAPH_BLOCK)
-  lines.push("")
-
-  lines.push(`## Catalog parity`)
-  lines.push("")
-  lines.push(`- Total ADR files: ${adrs.length}`)
-  lines.push(`- Distinct ADR numbers: ${distinct}`)
-  lines.push(`- ADR collisions: ${adrs.length - distinct}`)
-  lines.push(`- Total slices: ${slices.length}`)
-  if (opts.hellgateCount !== undefined) {
-    lines.push(`- Hellgate test files referenced: ${opts.hellgateCount}`)
-  }
-  lines.push("")
-  lines.push(
-    `> Footer auto-emitted ${opts.today}. Re-run \`bun tools/arch-gen/main.ts\` to regenerate.`,
-  )
-  lines.push("")
-
+    "",
+  ]
+  lines.push(...renderSlicesSection(slices))
+  lines.push(...renderAdrCatalogue(adrs, distinct))
+  lines.push(...renderTimelineSection(adrs))
+  lines.push("## Dependency Graph (plane summary)", "", DEPENDENCY_GRAPH_BLOCK, "")
+  lines.push(...renderFooterSection(adrs, slices, distinct, opts))
   return lines.join("\n")
 }

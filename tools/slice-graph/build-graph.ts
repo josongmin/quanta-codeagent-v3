@@ -143,59 +143,75 @@ export interface BuildGraphOpts {
   readonly roots?: ReadonlyArray<string>
 }
 
+interface GraphAcc {
+  readonly sliceSet: Set<string>
+  readonly edgeCounts: Map<string, { from: string; to: string; count: number }>
+  readonly sources: { file: string; from: string; to: string; spec: string }[]
+}
+
+const recordSpec = (acc: GraphAcc, file: string, fromSlice: string, spec: string): void => {
+  const toSlice = sliceOfSpec(spec)
+  if (toSlice === null) return
+  acc.sliceSet.add(toSlice)
+  if (toSlice !== fromSlice) {
+    const key = `${fromSlice}->${toSlice}`
+    const prev = acc.edgeCounts.get(key)
+    if (prev === undefined) {
+      acc.edgeCounts.set(key, { from: fromSlice, to: toSlice, count: 1 })
+    } else {
+      prev.count += 1
+    }
+  }
+  acc.sources.push({ file, from: fromSlice, to: toSlice, spec })
+}
+
+const processFile = async (acc: GraphAcc, file: string, absRoot: string): Promise<void> => {
+  const fromSlice = sliceOfFile(file, absRoot)
+  if (fromSlice === null) return
+  acc.sliceSet.add(fromSlice)
+  let content: string
+  try {
+    content = await readFile(file, "utf8")
+  } catch {
+    return
+  }
+  const specs = extractSpecifiers(content)
+  for (const spec of specs) {
+    recordSpec(acc, file, fromSlice, spec)
+  }
+}
+
 export const buildSliceGraph = async (opts?: BuildGraphOpts): Promise<SliceGraph> => {
   const roots = opts?.roots && opts.roots.length > 0 ? opts.roots : [DEFAULT_ROOT]
-  const sliceSet = new Set<string>()
-  const edgeCounts = new Map<string, { from: string; to: string; count: number }>()
-  const sources: { file: string; from: string; to: string; spec: string }[] = []
+  const acc: GraphAcc = {
+    sliceSet: new Set<string>(),
+    edgeCounts: new Map(),
+    sources: [],
+  }
 
   for (const root of roots) {
     const absRoot = resolve(root)
     const files = await walk(absRoot)
     for (const file of files) {
-      const fromSlice = sliceOfFile(file, absRoot)
-      if (fromSlice === null) continue
-      sliceSet.add(fromSlice)
-
-      let content: string
-      try {
-        content = await readFile(file, "utf8")
-      } catch {
-        continue
-      }
-      const specs = extractSpecifiers(content)
-      for (const spec of specs) {
-        const toSlice = sliceOfSpec(spec)
-        if (toSlice === null) continue
-        if (toSlice === fromSlice) continue
-        sliceSet.add(toSlice)
-        const key = `${fromSlice}->${toSlice}`
-        const prev = edgeCounts.get(key)
-        if (prev === undefined) {
-          edgeCounts.set(key, { from: fromSlice, to: toSlice, count: 1 })
-        } else {
-          prev.count += 1
-        }
-        sources.push({ file, from: fromSlice, to: toSlice, spec })
-      }
+      await processFile(acc, file, absRoot)
     }
   }
 
   const edges: SliceGraphEdge[] = []
-  for (const value of edgeCounts.values()) {
+  for (const value of acc.edgeCounts.values()) {
     edges.push({ from: value.from, to: value.to, count: value.count })
   }
   edges.sort((a, b) =>
     a.from === b.from ? a.to.localeCompare(b.to) : a.from.localeCompare(b.from),
   )
 
-  const slices = [...sliceSet].sort()
+  const slices = [...acc.sliceSet].sort()
 
   return {
     slices,
     edges,
     violations: [],
-    sources,
+    sources: acc.sources,
   }
 }
 

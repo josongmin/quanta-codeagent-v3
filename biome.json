@@ -882,6 +882,119 @@
       }
     },
     {
+      "includes": ["**/src/agent/subagent-resume/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): subagent-resume is a helper primitive; it cannot import the orchestration loop. Inject the seam instead.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): subagent-resume cannot reach @/agent/dispatch — dispatch consumes the resume primitive, not the reverse."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/src/agent/conversation-checkpoint.ts",
+        "**/src/agent/conversation-checkpoint-lru.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): conversation-checkpoint is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): conversation-checkpoint cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/plan-queue.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): plan-queue is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): plan-queue cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/budget-ledger.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): budget-ledger is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): budget-ledger cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/streaming-cancellation/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): streaming-cancellation is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): streaming-cancellation cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/mcp/skybridge/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@/agent", "@/agent/*", "@/agent/**"],
+                    "message": "Plane-clean (ADR-0190): @/mcp/skybridge is a transport-adjacent primitive — it must not reach into @/agent. The assembly sits in @/agent, never the reverse."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": [
         "src/apps/eval/index.ts",
         "src/apps/eval/index.js",

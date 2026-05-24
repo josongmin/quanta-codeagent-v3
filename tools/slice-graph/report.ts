@@ -11,7 +11,7 @@
  *   bun tools/slice-graph/report.ts --markdown # Markdown summary
  */
 
-import { type SliceGraph, buildSliceGraph } from "./build-graph"
+import { buildSliceGraph, type SliceGraph } from "./build-graph"
 import { type SliceGraphViolation, validateGraph } from "./validate"
 
 export type ReportFormat = "console" | "dot" | "markdown"

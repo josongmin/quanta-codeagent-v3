@@ -1,3 +1,5 @@
+// SIBLING: an execa-backed alternative lives in `src/runtime/shell-execa.ts`
+// (ADR-0192). Self-impl below stays for zero-dep callers + `onShellEvent`.
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { scrubEnv } from "./sandbox"
 import { getShellSandbox } from "./shell-sandbox-holder"

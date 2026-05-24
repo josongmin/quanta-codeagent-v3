@@ -17,7 +17,7 @@
  */
 
 import { relative, resolve } from "node:path"
-import { type SliceGraph, type SliceGraphViolation, buildSliceGraph } from "./build-graph"
+import { buildSliceGraph, type SliceGraph, type SliceGraphViolation } from "./build-graph"
 
 export type { SliceGraphViolation }
 
@@ -103,7 +103,8 @@ export const SLICE_RULES: ReadonlyArray<ForbiddenEdge> = [
   {
     from: "agent/streaming-cancellation",
     to: ["agent/loop", "agent/dispatch"],
-    reason: "Streaming-cancellation primitive is a helper; cannot depend on loop/dispatch (plane-clean)",
+    reason:
+      "Streaming-cancellation primitive is a helper; cannot depend on loop/dispatch (plane-clean)",
   },
 ]
 
@@ -156,6 +157,37 @@ export interface ValidateOpts {
   readonly rules?: ReadonlyArray<ForbiddenEdge>
 }
 
+interface MatchCtx {
+  readonly src: { file: string; from: string; to: string; spec: string }
+  readonly rule: ForbiddenEdge
+  readonly seen: Set<string>
+  readonly out: SliceGraphViolation[]
+}
+
+const tryMatchRuleDest = (ctx: MatchCtx, dest: string): void => {
+  if (!specMatchesDest(ctx.src.spec, dest)) return
+  const key = `${ctx.src.file}::${ctx.rule.from}->${dest}`
+  if (ctx.seen.has(key)) return
+  ctx.seen.add(key)
+  ctx.out.push({
+    file: ctx.src.file,
+    from: ctx.rule.from,
+    to: dest,
+    reason: ctx.rule.reason,
+  })
+}
+
+const sourceMatchesRule = (
+  src: { file: string; from: string },
+  ruleSlice: string,
+  ruleSub: string | null,
+  srcRoots: ReadonlyArray<string>,
+): boolean => {
+  if (src.from !== ruleSlice) return false
+  if (ruleSub === null) return true
+  return fileMatchesSubSlice(src.file, ruleSlice, ruleSub, srcRoots)
+}
+
 export const validateGraph = (
   graph: SliceGraph,
   opts?: ValidateOpts,
@@ -169,25 +201,9 @@ export const validateGraph = (
   for (const rule of rules) {
     const { slice: ruleSlice, sub: ruleSub } = splitSlash(rule.from)
     for (const src of graph.sources) {
-      // Top-level "from" must match.
-      if (src.from !== ruleSlice) continue
-      // If the rule is sub-slice on the "from" side, the source file
-      // must live under that sub-path.
-      if (ruleSub !== null && !fileMatchesSubSlice(src.file, ruleSlice, ruleSub, srcRoots)) {
-        continue
-      }
-      for (const dest of rule.to) {
-        if (!specMatchesDest(src.spec, dest)) continue
-        const key = `${src.file}::${rule.from}->${dest}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        out.push({
-          file: src.file,
-          from: rule.from,
-          to: dest,
-          reason: rule.reason,
-        })
-      }
+      if (!sourceMatchesRule(src, ruleSlice, ruleSub, srcRoots)) continue
+      const ctx: MatchCtx = { src, rule, seen, out }
+      for (const dest of rule.to) tryMatchRuleDest(ctx, dest)
     }
   }
 

@@ -10,6 +10,16 @@
  * policy.profile.
  */
 
+export {
+  detectNativeAppleVz,
+  mapPolicyToNapi as mapPolicyToNapiVz,
+  type NapiMcpVmPolicy,
+  type NapiVmSpawnResult,
+  type NapiVmSpawnSpec,
+  type NativeAppleVzBinding,
+  type NativeAppleVzConfig,
+  nativeAppleVzSandbox,
+} from "./applevz-native"
 export { containerMcpSandbox } from "./container"
 export { microvmMcpSandbox } from "./microvm"
 export { passthroughMcpSandbox } from "./passthrough"

@@ -11,12 +11,7 @@
 import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
 
-export type AdrPlane =
-  | "domain"
-  | "application"
-  | "infrastructure"
-  | "observability"
-  | "security"
+export type AdrPlane = "domain" | "application" | "infrastructure" | "observability" | "security"
 
 export interface AdrSummary {
   readonly number: string
@@ -34,62 +29,63 @@ export interface ScanAdrsResult {
   readonly skipped: ReadonlyArray<{ readonly filename: string; readonly reason: string }>
 }
 
-const TITLE_RE = /^#\s+ADR-(\d{3,4})\s*:\s*(.+?)\s*$/m
+// Title accepts `:` or em-dash `—` (or hyphen `-`) between number + title.
+// Also tolerates a parenthetical between number and separator
+// e.g. `# ADR-0043 (잠정 번호) — desktop reference`.
+const TITLE_RE = /^#\s+ADR-(\d{3,4})(?:\s*\([^)]*\))?\s*[:—-]\s*(.+?)\s*$/m
 // Allow either bullet (`- **Status**`) OR plain (`**Status**`) opening.
 const STATUS_RE = /^(?:-\s*)?\*\*(?:Status|상태|status)\*\*\s*:\s*(.+?)\s*$/im
+// Fallback for section-style: `## Status\nAccepted (date)` — handled separately.
+const STATUS_SECTION_RE = /^##\s+(?:Status|상태)\s*$\s*([^\n]+)/im
 const DATE_RE = /^(?:-\s*)?\*\*(?:Date|날짜|date)\*\*\s*:\s*(.+?)\s*$/im
+// `## Status\nAccepted (2026-05-21)` — pull date out of the inline form.
+const DATE_INLINE_RE = /\((\d{4}-\d{2}-\d{2})\)/
 const RELATED_RE = /^(?:-\s*)?\*\*(?:Related|관련|related)\*\*\s*:\s*(.+?)\s*$/im
 const REFERENCE_RE = /^(?:-\s*)?\*\*(?:참조|References?|references?)\*\*\s*:\s*(.+?)\s*$/im
 const PLANE_RE = /^(?:-\s*)?\*\*plane\*\*\s*:\s*(.+?)\s*$/im
 const ADR_REF_RE = /ADR-?(\d{3,4})/g
 const SLICE_PATH_RE = /`([^`]+)`/g
 
+const PLANE_KEYWORDS: ReadonlyArray<{ readonly plane: AdrPlane; readonly re: RegExp }> = [
+  {
+    plane: "security",
+    re: /\b(sandbox|seccomp|landlock|seatbelt|jail|permission|pii|redact|secret|policy|trust|allowlist|deny)\b/,
+  },
+  {
+    plane: "observability",
+    re: /\b(metric|telemetry|otel|trace|span|log|observab|health|dashboard|cost|gauge|counter|coverage|monitor)\b/,
+  },
+  {
+    plane: "infrastructure",
+    re: /\b(adapter|provider|bedrock|vertex|foundry|sdk|backend|wrap|swap|lib|impl|native|rust|crate|http|sqlite|redis)\b/,
+  },
+  {
+    plane: "application",
+    re: /\b(agent|orchestrat|dispatch|loop|reactor|scheduler|plan|hitl|memory|consolidat|subagent|skill|hook|composition)\b/,
+  },
+  {
+    plane: "domain",
+    re: /\b(port|type|schema|invariant|contract|dsl|isolation|slice|domain|grammar)\b/,
+  },
+]
+
+const VALID_PLANES: ReadonlySet<string> = new Set([
+  "domain",
+  "application",
+  "infrastructure",
+  "observability",
+  "security",
+])
+
 /** Cluster a title into a plane via keyword heuristic. */
 const inferPlane = (title: string, explicit?: string): AdrPlane | undefined => {
   if (explicit) {
     const norm = explicit.toLowerCase().trim()
-    if (
-      norm === "domain" ||
-      norm === "application" ||
-      norm === "infrastructure" ||
-      norm === "observability" ||
-      norm === "security"
-    ) {
-      return norm
-    }
+    if (VALID_PLANES.has(norm)) return norm as AdrPlane
   }
   const t = title.toLowerCase()
-  // Order matters: most-specific first.
-  if (
-    /\b(sandbox|seccomp|landlock|seatbelt|jail|permission|pii|redact|secret|policy|trust|allowlist|deny)\b/.test(
-      t,
-    )
-  ) {
-    return "security"
-  }
-  if (
-    /\b(metric|telemetry|otel|trace|span|log|observab|health|dashboard|cost|gauge|counter|coverage|monitor)\b/.test(
-      t,
-    )
-  ) {
-    return "observability"
-  }
-  if (
-    /\b(adapter|provider|bedrock|vertex|foundry|sdk|backend|wrap|swap|lib|impl|native|rust|crate|http|sqlite|redis)\b/.test(
-      t,
-    )
-  ) {
-    return "infrastructure"
-  }
-  if (
-    /\b(agent|orchestrat|dispatch|loop|reactor|scheduler|plan|hitl|memory|consolidat|subagent|skill|hook|composition)\b/.test(
-      t,
-    )
-  ) {
-    return "application"
-  }
-  if (/\b(port|type|schema|invariant|contract|dsl|isolation|slice|domain|grammar)\b/.test(t)) {
-    return "domain"
+  for (const { plane, re } of PLANE_KEYWORDS) {
+    if (re.test(t)) return plane
   }
   return undefined
 }
@@ -119,6 +115,31 @@ const extractRelated = (s: string): ReadonlyArray<string> => {
   return Array.from(new Set(out))
 }
 
+/**
+ * Resolve `(status, date)` from the various ADR header formats:
+ *   - `- **상태**: Accepted` / `- **Status**: Accepted`
+ *   - `## Status\nAccepted (2026-05-21)` (section form, ADR-0067 style)
+ * Date may come from the bullet form or be embedded inline.
+ */
+const resolveStatusAndDate = (
+  text: string,
+  statusMatch: RegExpExecArray | null,
+  dateMatch: RegExpExecArray | null,
+): { readonly status: string; readonly date: string } => {
+  const bulletDate = dateMatch?.[1]?.trim() ?? ""
+  if (statusMatch?.[1]) {
+    return { status: statusMatch[1].trim(), date: bulletDate }
+  }
+  const sectionMatch = STATUS_SECTION_RE.exec(text)
+  if (sectionMatch?.[1]) {
+    const inline = sectionMatch[1].trim()
+    const dateInline = DATE_INLINE_RE.exec(inline)
+    const status = inline.replace(/\s*\([^)]*\)\s*$/, "").trim() || "Unknown"
+    return { status, date: dateInline?.[1] ?? bulletDate }
+  }
+  return { status: "Unknown", date: bulletDate }
+}
+
 /** Parse a single ADR file. Returns `null` if malformed (caller logs skip). */
 export const parseAdr = (
   filename: string,
@@ -136,17 +157,22 @@ export const parseAdr = (
   const relatedMatch = RELATED_RE.exec(text)
   const referenceMatch = REFERENCE_RE.exec(text)
   const planeMatch = PLANE_RE.exec(text)
-
-  const status = statusMatch?.[1]?.trim() ?? "Unknown"
-  const date = dateMatch?.[1]?.trim() ?? ""
+  const { status, date } = resolveStatusAndDate(text, statusMatch, dateMatch)
   const related = relatedMatch?.[1] ? extractRelated(relatedMatch[1]) : []
   const slicePaths = referenceMatch?.[1] ? extractSlicePaths(referenceMatch[1]) : []
   const plane = inferPlane(title, planeMatch?.[1])
 
-  return {
-    ok: true,
-    adr: { number, title, date, status, related, slicePaths, plane, filename },
+  const adr: AdrSummary = {
+    number,
+    title,
+    date,
+    status,
+    related,
+    slicePaths,
+    filename,
+    ...(plane === undefined ? {} : { plane }),
   }
+  return { ok: true, adr }
 }
 
 const DEFAULT_DIR = "docs/decisions"

@@ -20,6 +20,7 @@ export {
   scrubEnv,
 } from "./sandbox"
 export { runShell } from "./shell"
+export { runShellExeca } from "./shell-execa"
 export {
   __resetShellSandbox,
   getShellSandbox,

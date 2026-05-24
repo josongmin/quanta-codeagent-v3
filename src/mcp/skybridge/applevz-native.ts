@@ -134,7 +134,7 @@ const dynamicLoadBinding = async (): Promise<NativeAppleVzBinding | null> => {
     // only on darwin hosts where the install succeeded. The ts-ignore is
     // deliberate: the package may not be in node_modules (install opt-out
     // case), in which case the import throws and we degrade to null.
-    // @ts-ignore — optional dep, may not be installed
+    // @ts-expect-error — optional dep, may not be installed
     const mod: unknown = await import("@quanta/darwin-vz-helper")
     if (mod === null || typeof mod !== "object") return null
     const m = mod as Record<string, unknown>
@@ -197,24 +197,26 @@ export const detectNativeAppleVz = async (
  *  `workspace` is taken from `spec.cwd` (mirrors landlock-native), with a
  *  documented fallback to "/" when cwd is omitted. Phase 3.4 may tighten
  *  this — but the scaffold path must remain composable. */
-export const mapPolicyToNapi = (
-  policy: McpSandboxPolicy,
-  workspace: string,
-): NapiMcpVmPolicy => ({
-  profile: policy.profile,
-  workspace,
-  ...(policy.allowNetwork !== undefined ? { allowNetwork: policy.allowNetwork } : {}),
-  networkAllowlist:
-    policy.networkAllowlist !== undefined ? [...policy.networkAllowlist] : [],
-  hostReadAllowlist:
-    policy.hostReadAllowlist !== undefined ? [...policy.hostReadAllowlist] : [],
-  hostWriteAllowlist:
-    policy.hostWriteAllowlist !== undefined ? [...policy.hostWriteAllowlist] : [],
-  ...(policy.memoryMb !== undefined ? { memoryMb: policy.memoryMb } : {}),
-  ...(policy.cpuCount !== undefined ? { cpuCount: policy.cpuCount } : {}),
-  ...(policy.maxRuntimeMs !== undefined ? { maxRuntimeMs: policy.maxRuntimeMs } : {}),
-  ...(policy.bootImagePath !== undefined ? { bootImagePath: policy.bootImagePath } : {}),
-})
+export const mapPolicyToNapi = (policy: McpSandboxPolicy, workspace: string): NapiMcpVmPolicy => {
+  // `allowNetwork` is derived from the presence of a non-empty
+  // `networkAllowlist`. The TS policy does NOT carry an explicit boolean
+  // — empty/absent allowlist = deny-all (matches Phase 2 Lima behaviour).
+  // Phase 3.4 may add an explicit override field if a use case appears.
+  const allowNetwork = policy.networkAllowlist !== undefined && policy.networkAllowlist.length > 0
+  return {
+    profile: policy.profile,
+    workspace,
+    ...(allowNetwork ? { allowNetwork: true } : {}),
+    networkAllowlist: policy.networkAllowlist !== undefined ? [...policy.networkAllowlist] : [],
+    hostReadAllowlist: policy.hostReadAllowlist !== undefined ? [...policy.hostReadAllowlist] : [],
+    hostWriteAllowlist:
+      policy.hostWriteAllowlist !== undefined ? [...policy.hostWriteAllowlist] : [],
+    ...(policy.memoryMb !== undefined ? { memoryMb: policy.memoryMb } : {}),
+    ...(policy.cpuCount !== undefined ? { cpuCount: policy.cpuCount } : {}),
+    ...(policy.maxRuntimeMs !== undefined ? { maxRuntimeMs: policy.maxRuntimeMs } : {}),
+    ...(policy.bootImagePath !== undefined ? { bootImagePath: policy.bootImagePath } : {}),
+  }
+}
 
 const mapSpecToNapi = (spec: McpServerSpec): NapiVmSpawnSpec => ({
   mcpId: spec.id,
@@ -280,7 +282,7 @@ export const nativeAppleVzSandbox = (cfg?: NativeAppleVzConfig): McpSandbox => {
       if (policy.profile === "container") {
         throw new McpSandboxError(
           "policy-rejected",
-          'darwin-vz: container profile not supported by Apple Virtualization (use Lima fallback or container adapter)',
+          "darwin-vz: container profile not supported by Apple Virtualization (use Lima fallback or container adapter)",
         )
       }
 
@@ -338,9 +340,7 @@ export const nativeAppleVzSandbox = (cfg?: NativeAppleVzConfig): McpSandbox => {
         if (info === null || !info.available) {
           return {
             backend: "passthrough",
-            warnings: [
-              `darwin-vz-unavailable${info?.reason ? `: ${info.reason}` : ""}`,
-            ],
+            warnings: [`darwin-vz-unavailable${info?.reason ? `: ${info.reason}` : ""}`],
           }
         }
         return { backend: "microvm", warnings: [] }
