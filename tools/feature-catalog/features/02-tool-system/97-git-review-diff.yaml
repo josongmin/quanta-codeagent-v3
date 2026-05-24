@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
+depends_on: [gitdiff, git-read-trio, git-runner-cancellation-signal, git-branch-name-schema-guard, git-mutating-tools]
 purpose: |
   Extracts `git diff base...head` (default `origin/main...HEAD`) and hands it
   to an ISOLATED sub-agent reviewer (depth+1, read-only tool registry filtered

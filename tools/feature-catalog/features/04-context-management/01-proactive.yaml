@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [plan-mode, response-in-progress, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, effort-5-tier]
 config_refs:
   env: [QUANTA_COMPACT_TOKENS, QUANTA_COMPACT_MODEL, QUANTA_COMPACT_PROVIDER]
 purpose: proactive(임계) + reactive(PTL) + orphan-safe 경계

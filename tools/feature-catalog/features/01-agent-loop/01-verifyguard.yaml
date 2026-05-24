@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [assemble-config, bench-eval-driver, bench-repair-context-builder, runner-assemble-builders, cli-export-2026-05-21-l2-l3]
 config_refs:
   env: ["QUANTA_VERIFY_GUARD", "QUANTA_VERIFY_GUARD_MAX_TRIPS"]
 purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.

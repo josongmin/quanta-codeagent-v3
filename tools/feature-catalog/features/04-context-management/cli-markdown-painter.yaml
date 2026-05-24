@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_MD_HIGHLIGHT, QUANTA_MD_MODE]
 owners: ["@songmin"]
 labels: [surface:core]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 purpose: |
   assistant 텍스트 스트림(델타 청크)을 라인 단위 유한상태머신으로 흘려
   inline ANSI 컬러를 입히는 painter. 상태: header(`#`+`##`+`###`) /

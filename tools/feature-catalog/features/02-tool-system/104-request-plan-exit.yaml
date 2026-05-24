@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion, tier:1]
+depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
 purpose: |
   Model-driven exit from plan mode mirroring Claude Code's `ExitPlanMode`.
   When the agent has assembled a plan and is ready to act, it calls this

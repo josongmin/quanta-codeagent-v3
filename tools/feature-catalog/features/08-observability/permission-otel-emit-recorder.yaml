@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+depends_on: [permission-store-json, per-host-agent-mode, per-thread-permissions, post-denial-precedence, quanta-home-meta-root]
 config_refs:
   env: []
 purpose: |

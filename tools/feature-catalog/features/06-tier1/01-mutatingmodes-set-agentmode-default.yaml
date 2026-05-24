@@ -14,6 +14,7 @@ config_refs:
   cli: ["--plan"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [assemble-config, auto-approval-reviewer, branch-only-guard, default-acceptedits-bypass-auto, git-c]
 purpose: |
   AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을
   positive set(`MUTATING_MODES = Set<AgentMode>(["default"])`)으로 표현하는

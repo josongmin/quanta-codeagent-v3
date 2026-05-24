@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
 purpose: 강화 "Trust and inputs"
 evidence:
   code:

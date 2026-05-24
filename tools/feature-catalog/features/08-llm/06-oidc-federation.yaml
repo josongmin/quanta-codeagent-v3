@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "auth", "federation", "k8s", "adr-0163"]
-depends_on: []
+depends_on: [llm-multicloud-provider-router]
 config_refs:
   env:
     - ANTHROPIC_IDENTITY_TOKEN_FILE

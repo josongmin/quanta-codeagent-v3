@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
+depends_on: [ctk-git-skills-bundle, git-log-search-skill, localize-signal-hardening, progress-audit-skill, rewind-skill]
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
 purpose: |

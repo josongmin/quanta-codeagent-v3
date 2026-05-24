@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: planned
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]
+depends_on: [document-image-fsjail-unify, document-tools-csv-ndjson, pdf-read-tool, cross-slice-mirror, deferred-tool-registry]
 purpose: |
   Tool-surface seal for `xlsx_read` so callers can depend on the name,
   inputSchema, and READ-ONLY metadata even though `execute()` currently

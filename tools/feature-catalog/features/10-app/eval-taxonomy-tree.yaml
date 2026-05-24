@@ -11,6 +11,7 @@ modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
+depends_on: [eval-taxonomy-classifier]
 purpose: |
   `docs/analysis/may-21-coding-agent-query-usecase.md` §1과 1:1 미러링된
   in-code 분류 트리. ID 스킴은 `<major>.<mid>.<leaf>` kebab-case로 stable

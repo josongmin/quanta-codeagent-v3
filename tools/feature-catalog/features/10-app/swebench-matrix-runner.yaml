@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_BENCH_LSP, QUANTA_BENCH_SUBAGENT, QUANTA_BENCH_SKILLS]
 owners: ["@songmin"]
 labels: ["surface:bench"]
+depends_on: [llm-cost-emit-sink, memory-telemetry-adapter, otel-span-tree]
 purpose: |
   `bun run tools/swebench-matrix.ts` — SWE-bench-shape 데이터셋(기본
   `tests/smoke/swebench/picks.jsonl`)을 3축 ON/OFF 조건 매트릭스로 sweep

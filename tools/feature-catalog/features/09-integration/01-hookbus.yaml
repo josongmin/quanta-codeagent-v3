@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+depends_on: [secret-redaction-content-plane, agent-loop-branch-hardening, plan-mode, response-in-progress, mode-repo-rules-active-skills-working-state-memory-hints]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: |

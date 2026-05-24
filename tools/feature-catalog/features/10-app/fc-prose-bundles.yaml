@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:tooling", "absorbed:codex"]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 config_refs:
   env: ["QUANTA_GIT_SHA", "QUANTA_GIT_TOOLS", "QUANTA_MEMORY_PATH", "QUANTA_PRICING_VERSION", "QUANTA_SESSIONS_DIR", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR", "QUANTA_TOOL_OUTPUT_SPILL_KEEP"]
 purpose: |

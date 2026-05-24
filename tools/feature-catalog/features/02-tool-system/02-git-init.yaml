@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [gitdiff, git-read-trio, git-branch-name-schema-guard, git-log-us-separator, git-mutating-tools]
 purpose: 45 tests
 evidence:
   code:

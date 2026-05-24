@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core, resilience-primitive]
+depends_on: [runner-assemble-builders, assemble-config, fallback-kinds-policy, llm-factory, model-swap-retry]
 config_refs:
   env: [QUANTA_COMPACT_BREAKER, QUANTA_COMPACT_BREAKER_PROACTIVE_MAX, QUANTA_COMPACT_BREAKER_REACTIVE_MAX, QUANTA_COMPACT_MODEL, QUANTA_COMPACT_PROVIDER, QUANTA_MODEL_FALLBACK]
 purpose: |

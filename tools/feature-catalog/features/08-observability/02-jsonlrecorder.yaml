@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_OBSERVE_DIR]
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
+depends_on: [agentevent, assemble-config, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
 purpose: |
   `JsonlRecorder` — append-only JSON-Lines sink for the trajectory event stream.
   One AgentEvent ⇒ one JSON object per line (newline-framed, never partial)

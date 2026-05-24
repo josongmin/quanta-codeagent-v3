@@ -11,6 +11,7 @@ modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "discipline:cleanup", "no-heuristics"]
+depends_on: [repl-interactive-surface, multimodal-image-input, shell-output-delta-streaming, slashctx-6-ports-wire-completion, abort-signal-compose]
 purpose: |
   Closes 7 audit findings on `src/apps/cli/repl.ts` without splitting the
   larger God-class:

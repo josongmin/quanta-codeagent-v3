@@ -14,6 +14,7 @@ config_refs:
   env: [QUANTA_LOG_LEVEL, QUANTA_RUN_ID]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+depends_on: [runtime-config-ssot, assert-never-exhaustiveness, bench-best-of-n-sampler, bench-corpus-loader, bench-observe-non-agent-evidence]
 purpose: / 임계값 threshold — line-based stderr writer + level filter. Bench/observe 실행 식별자 }) — trajectory/report 메타데이터 상관키.
 evidence:
   code:

@@ -11,6 +11,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
 config_refs:
   env: [QUANTA_SANDBOX]
 purpose: bun run dev|start, .env 로드, 전 SOTA++ 노브 default OFF

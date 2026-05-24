@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:core, tier:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
 purpose: 종료사유 completed|max_turns|aborted|error, AbortSignal 협조취소

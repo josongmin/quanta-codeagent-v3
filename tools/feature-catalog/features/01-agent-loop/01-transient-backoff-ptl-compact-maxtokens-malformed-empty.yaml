@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core, tier:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, retry-error-classification, src-agent-working-state-ts]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
 purpose: transient backoff / PTL→compact / max_tokens / malformed / empty

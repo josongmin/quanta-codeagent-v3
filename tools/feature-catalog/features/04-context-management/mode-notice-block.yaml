@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, codex-2-phase-consolidator, durable-state-belongs-in-workspace-files, fallback-kinds-policy]
 purpose: |
   PLAN/REVIEW/AUDIT 모드 별 verbatim 본문을 `PLAN_NOTICE` / `REVIEW_NOTICE` /
   `AUDIT_NOTICE` 상수로 고정하고, `modeNotice(mode)` 가 mode → notice text 매핑

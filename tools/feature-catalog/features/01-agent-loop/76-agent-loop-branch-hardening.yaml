@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [agent-types-split, fallback-kinds-policy, llm-factory, model-swap-retry, plan-mode]
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
 purpose: |

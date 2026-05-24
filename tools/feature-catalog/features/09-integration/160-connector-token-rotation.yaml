@@ -13,6 +13,7 @@ config_refs:
   env: []
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [connector-availability-probe, connectors-rest-registry, oauth-dynamic-discovery, oauth-dynamic-registration]
 purpose: |
   `createTokenRotator({tokenStore, clockPort})` — per-connector token rotation
   layer. `rotate(connectorId, refresh)` runs the caller-supplied refresh

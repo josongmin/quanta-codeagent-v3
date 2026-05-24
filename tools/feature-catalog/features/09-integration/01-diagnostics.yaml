@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_LSP]
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 purpose: "TS/Pyright → diagnostics 도구 . runAgent e2e(, 4 tests): fake DiagnosticsProvider 주입 → ScriptedLLM이 diagnostics tool_use → (a) errors+warnings → ok:false + 1-based 좌표 포맷 + session.stop() 호출 / (b) clean file → ok:true + \"no diagnostics\" / (c) null provider → 우아하게 ok:false + \"no language server\" / (d) session.diagnostics() throw → ok:false + stop() 여전히 호출."
 evidence:
   code:

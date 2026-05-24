@@ -13,6 +13,7 @@ config_refs:
   env: []
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
+depends_on: [side-conv-dispatch-router, side-conversation-seam, fallback-kinds-policy, llm-factory, model-swap-retry]
 purpose: |
   Three frozen constants implementing the byte-identical prompt invariant
   for the side-conversation seam. `SIDE_CONVERSATION_PROMPT_BASE` is the

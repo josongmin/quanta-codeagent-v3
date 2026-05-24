@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_PROACTIVE_REACTOR]
 owners: ["@songmin"]
 labels: ["surface:cli", "surface:ipc"]
+depends_on: [reactor-trigger-source]
 purpose: |
   `injectSimulatedTurn` hands a `ProactiveTrigger` to a closed
   `AgentLoopPort` after THREE hard guards (evaluated in order; the order

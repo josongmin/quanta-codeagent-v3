@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_MEMORY_LIST_MAX, QUANTA_MEMORY_SLASH]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
+depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, slash-permission-inspect, slash-working-state-panel]
 purpose: |
   Browse / recall / delete the durable memory store from the REPL. Subcommand-
   style surface: `/memory` (recent 10 by recency), `/memory list [--tier=…]`

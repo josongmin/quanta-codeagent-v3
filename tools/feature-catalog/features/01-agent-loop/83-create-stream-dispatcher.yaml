@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:core, tier:core]
+depends_on: [secret-redaction-content-plane, plan-mode, turncontextinput-mode-reporules-workingstate-activeskills, durable-state-belongs-in-workspace-files, safe]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
 purpose: |

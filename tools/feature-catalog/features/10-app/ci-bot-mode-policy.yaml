@@ -11,6 +11,7 @@ modes: [ci-bot]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [isregex-true, promise-race, wire-finalization, agent-cli-args-parser, agent-config-assembler]
 purpose: |
   Bridges the data-only `MODE_PRESETS["ci-bot"]` into a runnable
   `AgentConfig`. RFC may-22 Phase 5. Concrete policy for the ci-bot

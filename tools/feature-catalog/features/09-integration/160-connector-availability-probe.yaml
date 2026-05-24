@@ -13,6 +13,7 @@ config_refs:
   env: []
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [connector-token-rotation, connectors-rest-registry, oauth-dynamic-discovery, oauth-dynamic-registration]
 purpose: |
   `createAvailabilityProber({fetchPort, dnsPort, clockPort, lruSize?,
   lruTtlMs?, headTimeoutMs?})` — per-host availability probe with LRU cache.

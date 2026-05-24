@@ -13,6 +13,7 @@ config_refs:
   env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [skill-registry-precedence, quantaskillsdir, skill-admin-enforcement, skill-audit-log, skill-discover]
 purpose: |
   Codex의 7-scope skill registry 패턴 흡수 (R4 발견). 닫힌 union `SkillScope` (7 value) +
   `SkillInstallState` (required/recommended/optional) + 고정 precedence `admin > repo > team >

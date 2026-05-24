@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+depends_on: [session-git-fingerprint, git-branch-name-schema-guard, git-runner-cancellation-signal, session-index-store, turn-diff-emit-session]
 purpose: |
   Composition-root helpers that wire the deferred halves of ADR-0102
   (turn_diff_updated event emit) and ADR-0106 (SessionMeta git fingerprint).

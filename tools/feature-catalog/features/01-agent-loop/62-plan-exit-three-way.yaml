@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:core, tier:core]
+depends_on: [agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, plan-mode-dispatch-block, secret-redaction-content-plane]
 purpose: |
   v0.dev PlanModeExit{Approve,Reject,RequestChanges} 흡수 — plan 모드 종료를 기존
   2-way(approve/reject)에서 3-way로 확장. changes_requested는 feedback 필수(빌더가

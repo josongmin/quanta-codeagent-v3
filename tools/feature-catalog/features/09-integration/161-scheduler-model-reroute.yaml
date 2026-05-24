@@ -12,6 +12,7 @@ configurable: integrated
 
 owners: ["@songmin"]
 labels: ["surface:cli", "surface:ipc"]
+depends_on: [scheduler-automation-lifecycle, scheduler-rrule, scheduler-runtime, scheduler-weekday-nth]
 purpose: |
   `chooseModel({preference, fallbacks, availability})` probes
   `[preference, ...fallbacks]` in order against the injected

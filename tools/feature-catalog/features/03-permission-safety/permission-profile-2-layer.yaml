@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+depends_on: [permission-scope-4-tier, permission-4-pillar, special-path-resolver]
 configurable: static
 purpose: |
   **Codex `turn_context.permission_profile.file_system` + `file_system_sandbox_policy`

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
+depends_on: [bash-timeout-cap, sandbox-policy, escalating-kill, disclaimer-shell-wrapper, dockersandbox]
 purpose: |
   Spawn site (runShell의 observer/buffered path, LocalSandbox.run, DockerSandbox.run)
   마다 자식 프로세스의 생애를 관리하는 RAII-style guard. WHY: 각 site가 같은 cleanup

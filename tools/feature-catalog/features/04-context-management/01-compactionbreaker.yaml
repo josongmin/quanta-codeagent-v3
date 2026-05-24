@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_COMPACT_BREAKER, QUANTA_COMPACT_BREAKER_REACTIVE_MAX, QUANTA_COMPACT_BREAKER_PROACTIVE_MAX]
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [plan-mode, response-in-progress, runner-assemble-builders, effort-5-tier, fallback-kinds-policy]
 purpose: CompactionBreaker 4-사이트, thrash abort [_*]
 evidence:
   code:

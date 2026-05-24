@@ -13,6 +13,7 @@ config_refs:
   env: []
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [llm-adapter-bedrock, llm-adapter-foundry, llm-adapter-mantle, llm-adapter-vertex, llm-stream-timeout]
 purpose: |
   Hexagonal port that separates Anthropic vendor (wire grammar) from
   transport (api.anthropic.com vs AWS Bedrock vs GCP Vertex vs Azure

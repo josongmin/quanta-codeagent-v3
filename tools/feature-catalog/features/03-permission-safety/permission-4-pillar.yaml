@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+depends_on: [permission-policy-engine, permission-store-json, harddeny-readonly-short-circuit, per-host-agent-mode, per-thread-permissions]
 configurable: static
 purpose: |
   **Codex `Permission.{approval, network, sandbox, control.managed}` 4-pillar 흡수.**

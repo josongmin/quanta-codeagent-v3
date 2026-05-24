@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core]
+depends_on: [bench-eval-driver, bench-repair-context-builder, runrepairrounds, bench-eval-env-prep, bench-python-swebench]
 config_refs:
   env: ["QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL"]
 purpose: |

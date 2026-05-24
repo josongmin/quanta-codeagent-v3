@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: |

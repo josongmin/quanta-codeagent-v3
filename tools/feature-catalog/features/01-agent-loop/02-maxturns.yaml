@@ -14,6 +14,7 @@ config_refs:
   env: [QUANTA_MAX_TURNS]
 owners: ['@songmin']
 labels: [surface:core, tier:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
 purpose: maxTurns
 evidence:
   code:

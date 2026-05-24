@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [agent-types-split, plan-mode, secret-redaction-content-plane, agent-loop-branch-hardening, response-in-progress]
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |

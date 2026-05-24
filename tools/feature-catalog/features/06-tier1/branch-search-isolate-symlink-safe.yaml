@@ -11,6 +11,7 @@ modes: [interactive, headless]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
+depends_on: [speculative-branch-search, branch-search-verifier-suite, branch-search-pure-scorer, branch-search-minimal-change, branch-search-progress]
 purpose: |
   Two `Isolator` port implementations for the speculative branch search.
   `tmpdirIsolator` uses `mkdtemp` + `cp -r` excluding `.git` and

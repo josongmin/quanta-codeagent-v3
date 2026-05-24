@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [fallback-kinds-policy, image-vision-tools, llm-factory, model-swap-retry, response-in-progress]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: |

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
+depends_on: [skill-admin-enforcement, skill-audit-log, skill-7-scope-tiering, skill-registry-precedence, quantaskillsdir]
 purpose: |
   `.quanta-plugin/plugin.json` (strict Zod) + 옵셔널 `.mcp.json` + `skills/<name>/SKILL.md`
   3-surface 레이아웃. Codex `.codex-plugin/` 패턴을 v3 path 명으로 흡수 (RFC §1.6). loader는

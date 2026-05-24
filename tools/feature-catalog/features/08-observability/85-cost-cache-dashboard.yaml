@@ -14,6 +14,7 @@ config_refs:
   env: [QUANTA_METRICS]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:claude-code"]
+depends_on: [repl-code-smell-cleanup, runner-assemble-builders, cli-export-2026-05-21-l2-l3, plan-mode, repl-interactive-surface]
 purpose: |
   MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·
   turns·toolCalls(byTool)·stopReasons·latency(p50/p95)·shell rollup 집계. 새 수집 0

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_MODEL]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 purpose: |
   Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는
   OpenAI-호환 endpoint) 중 활성 백엔드를 고르고, `QUANTA_MODEL`로 모델 id를

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [tool-choice-orthogonal-gate, conversation-checkpoint, fallback-kinds-policy, guard-chain, llm-factory]
 purpose: 순수정책 decideVerifyGuard
 evidence:
   code:

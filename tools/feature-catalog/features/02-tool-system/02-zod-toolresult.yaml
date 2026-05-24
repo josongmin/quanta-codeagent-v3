@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, spill-evidence-fulllogpath-round-5]
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
 evidence:
   code:

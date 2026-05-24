@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [model-swap-retry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, fallback-kinds-policy]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
 purpose: per-input isConcurrencySafe 동시성 배칭

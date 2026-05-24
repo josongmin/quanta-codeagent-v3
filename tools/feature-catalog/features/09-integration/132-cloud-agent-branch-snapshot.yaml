@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [conflict-parser-lib]
 purpose: |
   `snapshotDirtyToCloudBranch` packages a dirty working tree onto a brand-new
   `quanta/cloud-agent-<YYYYMMDDhhmmss>-<rand6>` branch and pushes it with

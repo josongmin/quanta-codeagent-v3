@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [llm-distill, memory-dedup-planner, memory-self-edit-tools, working-memory-buffer, codex-2-phase-consolidator]
 purpose: tier+kind, 하이브리드 회상, tier 가중
 evidence:
   code:

@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "adr:0159"]
-depends_on: []
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
 purpose: |
   Closed-by-default registry for second-stage rerankers over any candidate
   list (BM25 hits / embedding hits / external sources). The RerankPort port

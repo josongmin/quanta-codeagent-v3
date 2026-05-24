@@ -12,6 +12,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched, tier:1, slice:S2]
+depends_on: [agent, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
 purpose: |
   Closes the silent drift between MUTATING_TOOL_TABLE and the caller-wire tool
   registry. Twelve previously-missing entries (gh_pr_comment/create/auto_merge,

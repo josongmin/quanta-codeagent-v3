@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
+depends_on: [chatgpt-oauth-provider, slice-auth-chatgpt-oauth, token-store-atomic, chatgpt-responses-adapter]
 purpose: |
   Coordinates concurrent refresh_token exchanges so multiple callers sharing the
   same (issuer, clientId, refresh_token) tuple await one in-flight Promise

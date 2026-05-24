@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_SPINNER]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [cli-status-bar]
 purpose: |
   LLM 대기 중 spinner + elapsed seconds + live token counter(input/output 누적) 표시.
   StreamPort tee 패턴으로 구현 — streaming-dispatch 본체 무수정, 새 StreamPort 어댑터가

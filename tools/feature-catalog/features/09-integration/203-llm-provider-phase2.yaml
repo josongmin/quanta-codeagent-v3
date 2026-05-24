@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:anthropic-sdk", "surface:llm", "tier:adapter"]
+depends_on: [llm-stream-timeout, agent-loop-branch-hardening, fallback-kinds-policy, llm-adapter-bedrock, llm-adapter-foundry]
 purpose: |
   Real streaming impls for Bedrock + Vertex adapters via `@anthropic-ai/bedrock-sdk`
   + `@anthropic-ai/vertex-sdk` (Phase 1 was typed-throw stubs). DI `clientFactory`

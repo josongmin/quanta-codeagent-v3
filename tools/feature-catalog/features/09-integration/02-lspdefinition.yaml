@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_LSP_TOOLS]
 owners: ['@songmin']
 labels: [surface:ipc]
+depends_on: [lsp-expansion-4-tools, assemble-config, lsp-bridge, lsp-nav-tool-slice, lsp-real-adapters]
 purpose: 8 도구 lsp_definition/_references/_hover/_type_definition/_implementation/_document_symbol/_workspace_symbol/_rename_preview — 1-based human coords, nullLspNavProvider 기본, structural mirror 타입으로 slice 격리
 evidence:
   code:

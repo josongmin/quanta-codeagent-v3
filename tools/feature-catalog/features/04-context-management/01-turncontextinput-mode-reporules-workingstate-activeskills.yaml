@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
+depends_on: [agent-types-split, mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, codex-2-phase-consolidator, fallback-kinds-policy]
 purpose: TurnContextInput.{mode, repoRules, workingState, activeSkills} 모두 optional — 미설정 ⇒ 해당 reminder 블록 미렌더.
 evidence:
   code:

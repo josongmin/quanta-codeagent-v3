@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:wrap"]
+depends_on: [instrument-wrap, metrics-typed-port-slice, otel-sink, budget-ledger, instrument-shadow-tool-routing]
 purpose: |
   Final closeout for 24-metric recipe coverage: 3 additional typed wraps
   (PlanQueueStore enqueue/drain/clear; BudgetLedger record + breach surfacing;

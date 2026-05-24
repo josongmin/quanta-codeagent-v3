@@ -11,6 +11,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
+depends_on: [speculative-branch-search, branch-search-isolate-symlink-safe, branch-search-pure-scorer, branch-search-progress, branch-search-minimal-change]
 purpose: |
   Concrete `Verifier` implementations bound to `@/runtime/shell#runShell`
   (env-scrubbed, timeout-bounded). Each verifier is READ-ONLY w.r.t. the

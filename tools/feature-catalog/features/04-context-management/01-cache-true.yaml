@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [fallback-kinds-policy, llm-factory, llm-stream-timeout, mode-repo-rules-active-skills-working-state-memory-hints, model-swap-retry]
 purpose: byte-static 단일 cache:true 블록, 동적은 trailing <system-reminder>
 evidence:
   code:

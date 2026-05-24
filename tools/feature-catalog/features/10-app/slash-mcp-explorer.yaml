@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_MCP_VERBOSE]
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, slash-permission-inspect, slash-working-state-panel]
 purpose: |
   Read-only MCP runtime explorer. Four subcommands: `/mcp` (list servers + tool
   count + status), `/mcp tools` (every bridged tool across all servers),

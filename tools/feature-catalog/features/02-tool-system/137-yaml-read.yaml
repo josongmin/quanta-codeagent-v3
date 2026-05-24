@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [document-image-fsjail-unify, document-tools-csv-ndjson, fsjailerror, pdf-read-tool, cross-slice-mirror]
 purpose: |
   First-class YAML reader closing the de-facto config-file gap left by
   ADR-0133's csv/ndjson slice. Single pure-TS dep (`yaml@2.x`, ~50 KB),

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_PROACTIVE_REACTOR]
 owners: ["@songmin"]
 labels: ["surface:cli", "surface:ipc"]
+depends_on: [reactor-self-wake]
 purpose: |
   Closed-port trigger sources that turn external signals into typed
   `ProactiveTrigger` records. Two adapters land in this slice:

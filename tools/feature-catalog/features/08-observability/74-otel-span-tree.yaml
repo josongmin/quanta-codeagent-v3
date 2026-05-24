@@ -14,6 +14,7 @@ config_refs:
   env: []
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+depends_on: [secret-redaction-content-plane, plan-mode, agent-loop-branch-hardening, phase-ttft-readonly-trio, work-metrics]
 purpose: 'Codex 10-step OTel span tree 흡수 — core 4 stage. SDK-free `SpanSink` seam (`src/observability/spans.ts`): `onStart`/`onEnd` 2-method interface + module-level mutable sink (기본 null). sink 부재 ⇒ 공유 frozen NOOP_SPAN sentinel (0 alloc / 0 branch) → loop hot-path byte-identical (RFC §1.2). `startSpan`/`endSpan`은 try/finally 패턴 + monotonic `performance.now()` durationMs; sink throw는 catch+swallow (observability 버그가 loop abort 금지). SPAN_NAMES는 Codex literal verbatim — `session_loop`/`session_task.turn`/`run_sampling_request`/`handle_tool_call`. 4-step wrap: runAgent→runAgentInner (session_loop outermost) / turn loop (turn, SAME-TURN retry는 같은 span) / streamConsume (run_sampling_request, retry마다 새 span) / dispatch.ts (handle_tool_call, gate-deny 이전 open). 모든 attr은 QUANTA_ATTRS/attrs() 경유 — raw quanta.* 리터럴 0, vocabulary-orphan scan green.'
 evidence:
   code:

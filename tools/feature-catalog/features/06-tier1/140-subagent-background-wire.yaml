@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
+depends_on: [agent-features-tier1, agent-types-split, plan-mode, glob-rules, ide-context-provider-seam]
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |

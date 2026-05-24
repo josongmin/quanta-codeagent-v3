@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, durable-state-belongs-in-workspace-files, mode-notice-block, plan-mode]
 purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'
 evidence:
   code:

@@ -14,6 +14,7 @@ config_refs:
   cli: ["--observe-dir"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [runner-assemble-builders, assemble-config, runner-resume-fsm, assemble-compaction-core, assemble-llm-core]
 purpose: |
   Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
   Default OFF: no `observeDir` ⇒ plain `StdoutStream` + no `RunContext`

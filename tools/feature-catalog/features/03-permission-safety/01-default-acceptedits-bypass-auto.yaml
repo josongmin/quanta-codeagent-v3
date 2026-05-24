@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_PERMISSION]
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [permission-store-json, per-host-agent-mode, per-thread-permissions, permission-policy-engine, post-denial-precedence]
 purpose: default|acceptEdits|bypass|auto , onConfirm 콜백
 evidence:
   code:

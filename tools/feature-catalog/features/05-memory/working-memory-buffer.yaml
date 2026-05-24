@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
+depends_on: [memory-vector-math, memory-dedup-planner, memory-eviction-planner, sqlite-persistent-store, embedder-port]
 purpose: |
   L1 in-session message buffer used by the agent loop to hold the live turn
   transcript. Distinct from L2 long-term memory: working memory is never

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_CAP_ENFORCE]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [agent-types-split, secret-redaction-content-plane, plan-mode, agent-loop-branch-hardening, ide-context-provider-seam]
 purpose: |
   Session-scoped state machine that detects when the model IGNORES a tool's
   `NextAction` hint by re-calling the same `toolName:targetPath` without

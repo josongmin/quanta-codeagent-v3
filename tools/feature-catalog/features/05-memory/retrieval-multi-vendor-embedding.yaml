@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "adr:0159"]
-depends_on: []
+depends_on: [retrieval-rerank-registry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
 purpose: |
   Generic seam over every embedding provider. Each concrete adapter
   lives in src/retrieval/embedders/<vendor>.ts and implements

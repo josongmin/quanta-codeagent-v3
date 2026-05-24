@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+depends_on: [permission-store-json, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert, git-destructive-hard-deny, per-host-agent-mode, per-thread-permissions]
 purpose: |
   **Codex `automaticApprovalReview.actionSummary` 흡수.** 매 N (default 10) 연속
   auto-approval 마다 사용자에게 review prompt — "이 정책 OK?" 확인. 사용자가

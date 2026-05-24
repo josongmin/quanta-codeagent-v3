@@ -13,6 +13,7 @@ config_refs:
   env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER", "QUANTA_MEMORY", "QUANTA_MEMORY_CONSOLIDATE", "QUANTA_MEMORY_DISTILL", "QUANTA_MEMORY_EMBED", "QUANTA_MEMORY_EMBED_MODEL", "QUANTA_MEMORY_RECALL_LIMIT", "QUANTA_MEMORY_RECALL_TIERS", "QUANTA_MEMORY_SELF_EDIT", "QUANTA_MODEL_FALLBACK", "QUANTA_OBSERVE_DIR", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR", "QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH", "QUANTA_VERIFY_GUARD", "QUANTA_VERIFY_GUARD_MAX_TRIPS"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [effort-5-tier, repo-rules-tree, assemble-config, assemble-llm-core, assemble-compaction-core]
 purpose: |
   `apps/cli/internal.ts#buildTooling` 의 단일 GodFn (env 읽기 + collaborator
   생성 + 레지스트리 와이어링 한 곳) 을 9 개 per-subsystem builder + 1 composer

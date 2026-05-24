@@ -11,6 +11,7 @@ modes: [ci-bot]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: ["surface:core", "security-touched"]
+depends_on: [sandbox-policy, bash-timeout-cap, escalating-kill, os-sandbox-wire, guarded-spawn]
 purpose: |
   Pure propositional check answering "is this URL/host on the allowlist?"
   for the ci-bot mode network lever (`network: { kind: "allowlist"; hosts:

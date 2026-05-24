@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
+depends_on: [git-runner-cancellation-signal, assert-never-exhaustiveness, byte-stable-string-comparator, cross-slice-mirror, deferred-tool-registry]
 purpose: |
   최근 윈도우 내 변경 빈도로 파일을 랭킹하는 git tool (churn 핫스팟). 자주 바뀌는
   파일에 버그가 불균형하게 모인다는 Stage-1 fault-localization 신호. gitTools()에

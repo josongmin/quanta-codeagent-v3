@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+depends_on: [review-kind-matrix, reviewer-3tier, cross-slice-mirror, permission-remember-patterns]
 purpose: |
   Pure module the admissibility-gate calls into to decide whether a pending
   action's `rememberPatterns` are ALREADY fully covered by the session's

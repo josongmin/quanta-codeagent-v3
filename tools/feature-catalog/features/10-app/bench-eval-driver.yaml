@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_BENCH_TIMEOUT_MS]
 owners: ["@songmin"]
 labels: ["surface:bench"]
+depends_on: [bench-eval-env-prep, bench-repair-context-builder, bench-corpus-loader, bench-python-swebench, runrepairrounds]
 purpose: |
   Top-level orchestration for a SINGLE SWE-bench-style instance. The ONLY
   place that ties the eval sub-slice together:

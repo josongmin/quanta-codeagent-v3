@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
+depends_on: [sandbox-policy, assert-never-exhaustiveness, byte-stable-string-comparator, cross-slice-mirror, deferred-tool-registry]
 purpose: |
   `bash` 도구는 단일 shell 실행 별로 (1) `timeout_ms` (default 120000) wall-
   clock budget — 초과 시 escalatingKill로 SIGTERM→SIGKILL 후 `timedOut`

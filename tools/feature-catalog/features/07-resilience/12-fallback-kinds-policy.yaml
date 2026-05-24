@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+depends_on: [streamreset, agent-loop-branch-hardening, response-in-progress, llm-assemble, llm-factory]
 purpose: |
   Provider 교체를 trigger하는 LLMErrorKind 집합을 정책으로 박음 —
   `overloaded`(529), `server_error`(non-529 5xx), `network`(ECONNRESET/EPIPE/

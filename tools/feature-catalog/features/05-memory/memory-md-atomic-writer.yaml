@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "held-promotion"]
+depends_on: [memory-fence-cleanup, memory-outcome-enum, phase1-stage1-store, phase2-promotion-gate, codex-2-phase-consolidator]
 config_refs:
   env: []
 purpose: |

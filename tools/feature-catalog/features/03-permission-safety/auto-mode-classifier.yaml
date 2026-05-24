@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
+depends_on: [auto-approval-reviewer, branch-only-guard, default-acceptedits-bypass-auto, fallback-kinds-policy, git-c]
 purpose: |
   HITL-AUTO 모드의 LLM 분류기 — 권한 결정을 사람 대신 자동으로 내리는 mode에서
   "이 action이 safe/dangerous/needs-review 중 어느 카테고리인가" 를 LLM round-trip

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_MODEL_FALLBACK]
 owners: ['@songmin']
 labels: [surface:core, resilience-primitive]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, fallback-kinds-policy]
 purpose: ', retry-inner/fallback-outer'
 evidence:
   code:

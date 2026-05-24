@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_COST_PANEL]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
+depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, idle-monitor-snooze, slash-permission-inspect]
 purpose: |
   Sticky cumulative session-spend dashboard surfaced via `/cost` — Claude SOTA
   inspired (Claude Code's `costPanel` 누적 spend ticker). Complements the existing

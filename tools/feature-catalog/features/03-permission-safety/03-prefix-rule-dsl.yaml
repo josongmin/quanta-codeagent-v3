@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:claude-code, surface:cli, default-off]
+depends_on: [rules-matcher]
 purpose: 'Codex `~/.codex/rules/default.rules` (1060 prefix rules, allow only) 흡수 + 3축 확장: (a) action enum allow|deny|ask (Codex는 allow만), (b) 3-layer precedence project > user > system (project 짧은 prefix가 system 긴 prefix override), (c) noMatchPolicy=fallthrough|deny opt-in. matcher는 longest-prefix + space-boundary (탭은 boundary 아님 — 휴리스틱 회피). parser는 충돌 액션 시 RuleParseError(lineNumber) — silent dedupe는 동일 action만.'
 evidence:
   code:

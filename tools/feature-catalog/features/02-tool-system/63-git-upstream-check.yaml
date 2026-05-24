@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_GIT_TOOLS]
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+depends_on: [gitdiff, git-read-trio, git-runner-cancellation-signal, git-branch-name-schema-guard, git-mutating-tools]
 purpose: |
   v0.dev chat=branch upstreamChanges 흡수 — fetch 없이(네트워크·index 무변경) 이미
   가져온 remote-tracking ref 대비 ahead/behind를 보고. rev-parse @{upstream}로 upstream

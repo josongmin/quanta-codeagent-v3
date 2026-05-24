@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [shadow-odb-port, shadow-odb-workspace-hash, shadow-odb-lru-cleanup, git-init, git-review-diff]
 config_refs:
   env: []
 purpose: |

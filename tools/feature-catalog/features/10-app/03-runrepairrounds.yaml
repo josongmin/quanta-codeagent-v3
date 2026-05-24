@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [bench-repair-context-builder]
 purpose: |
   Pure-policy bench-repair loop SSOT: `runRepairRounds` orchestrates N rounds of
   (apply → `validate` → `buildRepairContext` → re-prompt) inside ONE sandbox so

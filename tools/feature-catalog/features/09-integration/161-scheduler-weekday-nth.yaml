@@ -12,6 +12,7 @@ configurable: integrated
 
 owners: ["@songmin"]
 labels: ["surface:cli", "surface:ipc"]
+depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-rrule, scheduler-runtime]
 purpose: |
   `parseWeekday` / `serializeWeekday` / `nthWeekdayOfMonth` /
   `allOccurrencesInMonth` implement the RFC 5545 BYDAY ordinal grammar

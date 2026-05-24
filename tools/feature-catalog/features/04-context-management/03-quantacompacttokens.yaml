@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_COMPACT_TOKENS]
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [runner-assemble-builders, assemble-config, fallback-kinds-policy, llm-factory, model-swap-retry]
 purpose: QUANTA_COMPACT_TOKENS env knob — proactive compaction token threshold; parsed by runtime-config + consumed by compaction loop.
 evidence:
   code:

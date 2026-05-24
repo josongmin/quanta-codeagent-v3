@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [runner-assemble-builders, prompt-source-payload-widening, effort-5-tier, fallback-kinds-policy, llm-factory]
 config_refs:
   env: []
 purpose: |

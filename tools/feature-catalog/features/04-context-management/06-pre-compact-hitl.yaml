@@ -12,6 +12,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core, default-off]
+depends_on: [plan-mode, agent-types-split, response-in-progress, secret-redaction-content-plane, agentevent]
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: 압축 직전 호스트에 HITL 질의 (approve/defer/force) + ConversationSummaryArchive 슬라이딩 윈도우 + context_compacted AgentEvent 마커

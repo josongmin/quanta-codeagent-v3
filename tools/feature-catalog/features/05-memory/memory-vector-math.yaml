@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
+depends_on: [memory-dedup-planner, embedder-port, memory-eviction-planner, tier, sqlite-persistent-store]
 purpose: |
   Pure vector math + (de)serialization for semantic recall. Zero deps:
   a Float32 little-endian buffer is the on-disk form (the SQLite

@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot, secret-redaction-content-plane]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: |

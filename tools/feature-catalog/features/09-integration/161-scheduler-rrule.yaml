@@ -12,6 +12,7 @@ configurable: integrated
 
 owners: ["@songmin"]
 labels: ["surface:cli", "surface:ipc"]
+depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-runtime, scheduler-weekday-nth]
 purpose: |
   `parseRRule(s)` / `serializeRRule(rule)` implement a strict RFC 5545
   §3.3.10 BASIC RECUR rule subset (`FREQ=DAILY|WEEKLY|MONTHLY` + optional

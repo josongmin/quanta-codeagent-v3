@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core, default-off, tier:core]
+depends_on: [branch-search-isolate-symlink-safe, branch-search-pure-scorer, branch-search-verifier-suite, shadow-odb-port, shadow-odb-rewind]
 purpose: |
   Two leaf modules that complete the speculative branch-search slice.
   (1) `BranchSearchAnchor` — closed port wiring the Shadow git ODB

@@ -14,6 +14,7 @@ config_refs:
   cli: ["--plan"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [agent-dispatch-core, agent-loop-branch-hardening, secret-redaction-content-plane, 183-safety-net-green, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan]
 purpose: |
   review/audit 모드 — dispatch에서 mutating 차단 + 프롬프트에 REVIEW_NOTICE/AUDIT_NOTICE 주입.
   별도 도구 없음. runAgent e2e 5 tests: plan/review/audit 각각 mutating tool dispatch 차단

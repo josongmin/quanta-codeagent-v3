@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [tool-choice-orthogonal-gate]
 purpose: '검증 인정: test_runner 항상 / bash는 test·repro 휴리스틱 매칭 시만(평범 셸 불인정)'
 evidence:
   code:

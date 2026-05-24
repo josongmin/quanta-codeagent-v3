@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core, tier:core]
+depends_on: [secret-redaction-content-plane, agent-loop-branch-hardening, plan-mode, phase-ttft-readonly-trio, response-in-progress]
 purpose: safe 도구 스트림 중 즉시 디스패치, 순서보존, head-of-line 배리어
 evidence:
   code:

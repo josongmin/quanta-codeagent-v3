@@ -11,6 +11,7 @@ modes: [interactive, headless]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [effort-5-tier, repo-rules-tree, agent-config-assembler, assert-never-exhaustiveness, batch-aggregate-exit-code]
 purpose: |
   `parseAgentArgs(readonly string[])` — pure argv → typed `AgentArgs`
   discriminated by `mode` (`interactive | headless | batch | ci-bot |

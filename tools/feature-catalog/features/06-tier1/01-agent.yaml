@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_SUBAGENT, QUANTA_SUBAGENT_MAX_DEPTH]
 owners: ['@songmin']
 labels: [surface:core, tier:1]
+depends_on: [agent-tool-shape, subagent-6-tools, quantasubagent-maxdepth, task-registry, tier1-subagent-block]
 purpose: |
   `agent` 도구(=Task) — 부모 loop가 자식 runAgent를 fork해 sub-thread로
   실행. 부모는 자식의 `task_output` 채널을 통해 progress를 받고,

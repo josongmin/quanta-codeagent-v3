@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
+depends_on: [cross-slice-mirror, codex-2-phase-consolidator, durable-state-belongs-in-workspace-files, glob-rules, l3-workingstate]
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
 evidence:
   code:

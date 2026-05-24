@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-memory"]
 labels: [surface:core]
+depends_on: [memory-vector-math, sqlite-persistent-store, codex-2-phase-consolidator, memory-dedup-planner, memory-eviction-planner]
 config_refs:
   env: []
 purpose: |

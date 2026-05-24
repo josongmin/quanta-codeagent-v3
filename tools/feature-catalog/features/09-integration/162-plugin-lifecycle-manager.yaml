@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc", "surface:core"]
+depends_on: [plugin-isolated-spawner, plugin-host-wrapper, plugin-dxt-loader, assert-never-exhaustiveness, byte-stable-string-comparator]
 config_refs:
   env: []
 purpose: |

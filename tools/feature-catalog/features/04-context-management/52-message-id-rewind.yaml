@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core]
+depends_on: [session-index-store, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runner-session-ops]
 config_refs:
   env: ["QUANTA_SESSION_LIST_FORMAT", "QUANTA_SESSION_LIST_MAX"]
 purpose: |

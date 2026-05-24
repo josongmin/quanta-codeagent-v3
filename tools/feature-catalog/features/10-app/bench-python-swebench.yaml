@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_SWEBENCH_DATASET]
 owners: ["@songmin"]
 labels: ["surface:bench"]
+depends_on: [bench-corpus-loader, assert-never-exhaustiveness, bench-observe-non-agent-evidence, byte-stable-string-comparator, errors-helper-fix]
 purpose: |
   The documented swebench-seam, now real. Given a `swebench.verified`
   Instance and the unified diff the agent produced, writes an official

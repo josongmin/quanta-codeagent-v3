@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [session-jsonl-envelope, session-root-provider-port, session-sanitize-id, byte-stable-string-comparator, assert-never-exhaustiveness]
 purpose: |
   `quanta session <subcommand>` 의 dispatcher 를 surface-agnostic 슬라이스로
   격리. 8 개 서브커맨드 (`list` / `show` / `delete` / `rename` / `archive` /

@@ -13,6 +13,7 @@ config_refs:
   env: []
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [connector-availability-probe, connector-token-rotation, connectors-rest-registry, oauth-dynamic-discovery]
 purpose: |
   `registerOAuthClient(endpoint, metadata, fetchPort)` — RFC 7591 dynamic
   client registration. POSTs `client_metadata` (redirect_uris + optional

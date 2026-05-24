@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [skill-admin-enforcement, skill-audit-log, skill-7-scope-tiering, skill-registry-precedence, assemble-config]
 purpose: |
   Deferred-tool catalog search exposed as a Tool. Two modes: (1) `select:<name>
   [,<name>...]` direct lookup by name — restores schema for explicit deferred

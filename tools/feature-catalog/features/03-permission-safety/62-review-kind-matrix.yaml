@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, absorbed:cursor, surface:cli]
+depends_on: [reviewer-3tier, 183-safety-net-green, agent-loop-branch-hardening, cross-slice-mirror, agent-dispatch-core]
 config_refs:
   env: []
 purpose: |

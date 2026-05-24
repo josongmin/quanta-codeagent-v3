@@ -14,6 +14,7 @@ config_refs:
   env: [QUANTA_METRICS]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+depends_on: [runner-assemble-builders, plan-mode, assemble-config, repl-code-smell-cleanup, assemble-compaction-core]
 purpose: |
   v0.dev workMetrics 흡수 — turn별 diffMap(파일당 +추가/-삭제 줄), agentActions,
   linesRead, 토큰 in/out + estimatedCostUsd를 순수 집계. parseNumstat(git diff

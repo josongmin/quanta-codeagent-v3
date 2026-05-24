@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [plan-mode, secret-redaction-content-plane, codex-2-phase-consolidator, durable-state-belongs-in-workspace-files, ide-context-provider-seam]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: 'model/effort 스코핑 — 읽기 seam(skillModelOverride/skillEffortOverride)에 더해 loop 하니스에서 ENFORCE(L4, ADR-0011 §6.2). features.ts가 skill별 {model?,effort?} override 맵을 빌드하고, SkillGate가 활성 skill의 override를 추적(Skill 호출마다 재무장; override 없는 sibling skill은 클리어), streamConsume이 stream-open 시점에 적용 — config.modelCandidates에서 id로 LLM 포트 swap + effortToTokenBudget로 thinking budget 캡(숫자 effort=raw budget). 상속 우선순위: skill > session config > default. Additive/default-OFF: override 없는 skill은 무변경, 미지의 model id/후보 레지스트리 부재 시 config.llm 그대로(advisory degrade) → stream 호출 byte-identical.'

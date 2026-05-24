@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+depends_on: [permission-store-json, per-thread-permissions, agent-loop-branch-hardening, post-denial-precedence, quanta-home-meta-root]
 purpose: |
   **Host-level default** — hostId(SSH_CONNECTION 기반 결정론적 식별자,
   부재 시 localhost) 단위로 full-access / read-only / custom 기본값을 잡는다.

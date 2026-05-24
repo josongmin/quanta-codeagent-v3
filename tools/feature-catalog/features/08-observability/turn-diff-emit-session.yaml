@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
+depends_on: [turn-diff-event, agentevent, git-branch-name-schema-guard, git-runner-cancellation-signal, jsonl-cumulative-retention]
 purpose: |
   Stateful per-session adapter orchestrating the
   `captureTurnStart / computeTurnDiff / buildTurnDiffEvent` trio from

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code"]
+depends_on: [assemble-config, prompt-source-payload-widening, runner-run-interactive, model-swap-retry, runner-persist-turn]
 config_refs:
   env: []
 purpose: |

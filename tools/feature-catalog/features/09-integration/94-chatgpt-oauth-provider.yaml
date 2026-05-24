@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_OAUTH_ISSUER, QUANTA_OAUTH_CLIENT_ID, QUANTA_CHATGPT_API_BASE, QUANTA_OAUTH_SKU, QUANTA_OAUTH_ORIGINATOR]
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [slice-auth-chatgpt-oauth, refresh-coordinator, token-store-atomic, built-in-slash-commands, slashctx-6-ports-wire-completion]
 purpose: |
   ChatGPT Plus/Pro/Team 구독 계정으로 모델 호출 — BYOK(OPENAI_API_KEY) 없이 OAuth 토큰을
   사용해 `https://chatgpt.com/backend-api/codex/responses`로 호출. BYOK provider와 형제로

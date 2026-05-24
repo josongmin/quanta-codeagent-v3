@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [secret-redaction-content-plane, plan-mode, durable-state-belongs-in-workspace-files, response-in-progress, retry-error-classification]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: |

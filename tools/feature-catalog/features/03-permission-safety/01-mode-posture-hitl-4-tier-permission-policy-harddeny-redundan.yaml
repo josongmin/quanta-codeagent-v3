@@ -12,6 +12,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched, tier:1]
+depends_on: [agent-dispatch-core, agent-loop-branch-hardening, secret-redaction-content-plane, 183-safety-net-green, deny-and-steer-verb]
 config_refs:
   env: []
 purpose: '단일 함수 runAdmissibilityGate로 추출 — 순서: mode-posture → HITL 4-tier → permission policy → pre_tool_use hook. dispatch.ts는 thin caller.'

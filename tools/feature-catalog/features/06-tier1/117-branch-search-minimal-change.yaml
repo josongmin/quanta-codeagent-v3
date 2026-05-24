@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
+depends_on: [speculative-branch-search, branch-search-verifier-suite, branch-search-pure-scorer, branch-search-isolate-symlink-safe, agent-loop-branch-hardening]
 purpose: |
   Verifier and selector that bias the speculative branch search toward
   smaller patches. patchSizeVerifier attaches a patch_size signal to each

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:agent", "tier:1"]
+depends_on: [background-subagent, agent, agent-tool-shape, bounded, quantasubagent-maxdepth]
 purpose: |
   BackgroundSubagentScheduler serialize / hydrate / hydrateWithPrune primitives
   + auto-restore-on-construction (`hydrateFrom` opt). Running entries whose

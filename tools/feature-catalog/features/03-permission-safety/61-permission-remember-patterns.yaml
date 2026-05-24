@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+depends_on: [183-safety-net-green, agent-loop-branch-hardening, reviewer-3tier, agent-dispatch-core, cross-slice-mirror]
 config_refs:
   env: []
 purpose: |

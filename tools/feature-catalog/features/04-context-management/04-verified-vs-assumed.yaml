@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [fallback-kinds-policy, llm-factory, model-swap-retry, response-in-progress, mode-repo-rules-active-skills-working-state-memory-hints]
 purpose: 압축 프롬프트 verified-vs-assumed 강화
 evidence:
   code:

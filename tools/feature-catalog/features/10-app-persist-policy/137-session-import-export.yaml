@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:session", "tier:adapter"]
+depends_on: [session-git-fingerprint, session-index-store]
 purpose: |
   Versioned wire-stable `SessionExportEnvelope` (v1) + pure serialize/import
   primitives + FS adapter helpers. Carries SavedSession + optional sidecar

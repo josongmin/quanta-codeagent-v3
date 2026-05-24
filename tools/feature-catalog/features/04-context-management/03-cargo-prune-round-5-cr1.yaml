@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
 purpose: Cargo prune — buildSystemPrompt에서 compaction-note 단락 제거, OWASP block을 한 줄로 압축. 캐시 prefix byte-stable 보존하면서 토큰 비용 감소.
 evidence:
   code:

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_LOG_LEVEL, QUANTA_SESSIONS_DIR, QUANTA_FS_JAIL]
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
+depends_on: [src-shared-logger-ts, agent-loop-branch-hardening, agent-types-split, anthropic-beta-and-skill-size-cap, bench-best-of-n-sampler]
 purpose: |
   The SINGLE place that touches `process.env`. Two recurring failure modes
   motivated it: (1) silent garbage acceptance — `process.env.QUANTA_LOG_LEVEL

@@ -11,6 +11,7 @@ modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
 purpose: |
   Reads a `TrajectoryEvent[]` and returns a HYPOTHESIS describing the
   likely failure class:

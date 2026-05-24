@@ -12,6 +12,7 @@ modes: [daemon, ide]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [ipc-event-bridge, ipc-transports, portable-session-v1, session-jsonl-envelope, session-root-provider-port]
 purpose: |
   `src/ipc/` — Claude A11 deep-dive 흡수 (importCliSession + logCliEvent pattern). 두
   컨트랙트: (1) `EventBridge` — typed `BridgePayload` 위 publish/subscribe + loopback 로컬

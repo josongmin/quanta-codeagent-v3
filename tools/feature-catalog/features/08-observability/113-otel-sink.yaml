@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:opentelemetry", "surface:observability", "tier:adapter"]
+depends_on: [metrics-typed-port-slice, agentrecorder, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
 purpose: |
   Closed-port `MetricSink` adapter wrapping `@opentelemetry/api` MeterProvider.
   Maps our 3-arm MetricKind (counter/histogram/gauge) to OTel instruments

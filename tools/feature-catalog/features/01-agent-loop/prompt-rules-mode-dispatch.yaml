@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:core, tier:core]
+depends_on: [typed-tool-failure-modes, branch-only-guard, mode-matrix-narrow-assert, run-mode-expansion-ide-daemon]
 purpose: |
   6 verbatim CORE_RULES (R-ENV / R-STOP-ENV / R-SEARCH-FIRST / R-READ-FAILURE
   / R-NO-THRASH / R-NO-SHIM / R-FAILURE-MODE) + 4 mode-specific packs

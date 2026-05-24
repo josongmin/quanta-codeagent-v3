@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+depends_on: [apply-patch-v4a, patch-filesystem-port, assert-never-exhaustiveness, built-in-slash-commands, byte-stable-string-comparator]
 config_refs:
   env: ["QUANTA_FS_JAIL"]
 purpose: |

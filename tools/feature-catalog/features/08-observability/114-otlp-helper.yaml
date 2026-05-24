@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:opentelemetry", "surface:observability", "tier:adapter"]
+depends_on: [otel-sink, metrics-typed-port-slice]
 purpose: |
   Factory helpers that lazily dynamic-import `@opentelemetry/sdk-metrics` +
   `@opentelemetry/exporter-metrics-otlp-http` + `@opentelemetry/exporter-prometheus`,

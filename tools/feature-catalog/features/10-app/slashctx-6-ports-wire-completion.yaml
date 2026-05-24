@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_COST_PANEL, QUANTA_BRANCH_SEARCH_PROGRESS, QUANTA_PLAN_STORE]
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:2"]
+depends_on: [model-swap-retry, repl-interactive-surface, built-in-slash-commands, plan-mode, repl-code-smell-cleanup]
 purpose: |
   Closes the Tier-2 SlashContext deferred-wire gap by threading 5 of the 6 R10
   surface ports from the REPL composer (`runRepl`) onto the live

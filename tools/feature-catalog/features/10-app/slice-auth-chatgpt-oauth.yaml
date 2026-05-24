@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_OAUTH_CLIENT_ID]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
+depends_on: [chatgpt-oauth-provider, refresh-coordinator, oauth-callback-provider, token-store-atomic, chatgpt-responses-adapter]
 purpose: |
   `src/auth/chatgpt-oauth/` 8 파일 — ChatGPT OAuth provider seam (ADR-0094 Phase 1).
   ChatGPT 구독 자격으로 모델 호출하는 토대. 컴포넌트: `pkce.ts` (S256 challenge/verifier

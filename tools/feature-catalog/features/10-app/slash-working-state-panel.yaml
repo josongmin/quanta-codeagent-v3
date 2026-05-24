@@ -11,6 +11,7 @@ modes: [interactive]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, agent-loop-branch-hardening, llm-error-taxonomy]
 config_refs:
   env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
 purpose: |

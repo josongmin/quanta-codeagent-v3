@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [shadow-odb-port, shadow-odb-rewind, shadow-odb-workspace-hash]
 purpose: |
   Caller seam that lets verify-pass events advance the Shadow ODB
   markVerified ref. Keeps mechanism (markVerified port from ADR-0122) and

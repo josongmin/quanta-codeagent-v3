@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
+depends_on: [model-swap-retry, fallback-kinds-policy, llm-factory, response-in-progress, assemble-compaction-core]
 config_refs:
   env: []
 purpose: |

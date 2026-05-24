@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_SCHEDULER]
 owners: ["@songmin"]
 labels: ["surface:cli", "surface:ipc"]
+depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-rrule, scheduler-weekday-nth]
 purpose: |
   `createSchedulerRuntime({store, availability, clock, env, agentLoop,
   workspace, sink?, tickIntervalMs?})` composes all the scheduler ports

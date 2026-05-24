@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [assert-never-exhaustiveness, auto-approval-reviewer, branch-only-guard, byte-stable-string-comparator, default-acceptedits-bypass-auto]
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: Cross-slice 타입-레벨 mirror 단언 (FU4) — HITLTier 및 BlockerSurface 양쪽 union 형 일치를 AssertEqual<A,B> 타입-레벨 항등식으로 컴파일 게이트. — 한 쪽만 union 추가/변경 시 tsc --noEmit fail-closed.

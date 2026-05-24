@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:claude-code, surface:cli]
+depends_on: [git-branch-name-schema-guard, git-runner-cancellation-signal, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
 purpose: |
   Single env-scrubbed spawn boundary for every `git` invocation in the slice.
   (1) ALLOWED_ENV — minimal parent-env subset (PATH/HOME/LANG/TZ/TMPDIR + ssh

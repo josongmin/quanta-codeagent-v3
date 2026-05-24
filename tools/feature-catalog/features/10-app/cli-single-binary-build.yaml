@@ -11,6 +11,7 @@ modes: [interactive, headless]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [ctk-git-skills-bundle, engineering-skills-bundle, repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion]
 config_refs:
   env: ["QUANTA_SANDBOX", "QUANTA_SKILLS_DIR"]
 purpose: |

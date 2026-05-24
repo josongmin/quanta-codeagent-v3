@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+depends_on: [work-metrics, hitl-otel-emit-outcome, metrics-registry, otel-attribute-vocab, phase-ttft-readonly-trio]
 config_refs:
   env: []
 purpose: |

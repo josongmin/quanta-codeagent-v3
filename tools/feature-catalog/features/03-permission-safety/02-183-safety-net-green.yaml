@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [agent-dispatch-core, agent-loop-branch-hardening, secret-redaction-content-plane, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, deny-and-steer-verb]
 config_refs:
   env: []
 purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행위 보존 추출)

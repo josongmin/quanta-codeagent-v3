@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_BENCH_TIMEOUT_MS]
 owners: ['@songmin']
 labels: [surface:bench]
+depends_on: [bench-corpus-loader, bench-observe-non-agent-evidence, assert-never-exhaustiveness, bench-best-of-n-sampler, byte-stable-string-comparator]
 purpose: 'Bench 실행 노브: —'
 evidence:
   code:

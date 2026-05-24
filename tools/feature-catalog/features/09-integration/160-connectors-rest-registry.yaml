@@ -13,6 +13,7 @@ config_refs:
   env: []
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [connector-availability-probe, connector-token-rotation, oauth-dynamic-discovery, oauth-dynamic-registration]
 purpose: |
   Dynamic connector catalog backed by `GET {baseUrl}/connectors`. Replaces the
   hand-curated static stdio MCP list with a server-driven registry. 24h

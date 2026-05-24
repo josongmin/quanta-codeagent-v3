@@ -12,6 +12,7 @@ modes: [interactive, headless]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+depends_on: [183-safety-net-green, agent-loop-branch-hardening, agent-dispatch-core, deny-and-steer-verb, hitl-4-tier-gate]
 config_refs:
   env: []
 purpose: |

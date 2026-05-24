@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin', team-memory]
 labels: [surface:core]
+depends_on: [codex-2-phase-consolidator, llm-distill, memory-self-edit-tools, memory-summary-aggregate-coalesce, phase1-stage1-store]
 purpose: self-edit memory_search/write/update, lexical graceful degrade
 evidence:
   code:

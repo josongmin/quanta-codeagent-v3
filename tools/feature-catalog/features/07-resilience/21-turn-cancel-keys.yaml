@@ -11,6 +11,7 @@ modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
 purpose: |
   CLI REPL의 cancellation 2-tier gesture wiring: (1) **Ctrl+C** → outer
   AbortController.abort() (hard exit, surface-scoped) + transient "interrupted"

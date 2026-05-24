@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_BRANCH_SEARCH_PROGRESS]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
+depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, idle-monitor-snooze, slash-permission-inspect]
 purpose: |
   Live progress visualization for catalog 대6 speculative branch search
   (ADR-0084 / Agentless N-best verifier-prover). Without a sticky indicator the

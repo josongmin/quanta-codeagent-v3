@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+depends_on: [agentevent, git-branch-name-schema-guard, git-runner-cancellation-signal, jsonl-cumulative-retention, plan-mode]
 purpose: |
   AgentEvent union variant `turn_diff_updated` plus the emitter module that
   computes per-turn cumulative unified diff. captureTurnStart records workspace

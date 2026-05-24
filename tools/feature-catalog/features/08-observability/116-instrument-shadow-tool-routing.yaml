@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:wrap"]
+depends_on: [metrics-typed-port-slice, otel-sink, isregex-true, promise-race, shadow-odb-port]
 purpose: |
   Closes 24-metric recipe coverage gap from ADR-0159: ShadowOdb 5-method wrap
   (`shadow.checkpoint.*` / `shadow.rewind.*{target}` / `shadow.diff.*{kind}` /

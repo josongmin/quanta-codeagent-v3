@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_MCP_CONFIG]
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+depends_on: [assemble-config, mcp-client-jsonrpc, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine]
 purpose: 'stdio JSON-RPC + passthrough 도구 브리지 . runAgent e2e(, 3 tests): 모의 MCP 서버를 .mjs 서브프로세스로 spawn → loadMcpTools로 브리지 → ScriptedLLM이 mcp__mock__alpha/boom tool_use 발사 → 풀 runAgent → tool_result event → 루프 continue + 두 번째 LLM 호출.'
 evidence:
   code:

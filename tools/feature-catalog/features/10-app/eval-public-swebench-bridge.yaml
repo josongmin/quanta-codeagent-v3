@@ -11,6 +11,7 @@ modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, eval-storage-result-store, runtime-config-ssot]
 purpose: |
   Tier 2는 의도적으로 THIN BRIDGE — `apps/bench/`의 기존 harness가 생산한
   `bench-report.json`을 읽어서 eval store가 이해하는 `PublicPayload`로 번역.

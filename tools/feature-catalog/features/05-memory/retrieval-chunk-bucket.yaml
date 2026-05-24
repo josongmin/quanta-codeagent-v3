@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "adr:0159"]
-depends_on: []
+depends_on: [retrieval-rerank-registry]
 purpose: |
   Split a long text into fixed-size token chunks with sliding-window
   overlap so downstream context windows can ingest big documents without

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [skill-7-scope-tiering, quantaskillsdir, skill-admin-enforcement, skill-audit-log, skill-discover]
 purpose: |
   `buildSkillRegistry({ repoRoot, homeDir, orgConfigDir, systemSkillsDir })` — 7-source 병렬
   discovery 후 고정 precedence (admin > repo > team > user > personal > system > builtIn) 적용.

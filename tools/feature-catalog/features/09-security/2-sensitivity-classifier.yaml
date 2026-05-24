@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin", "team-safety"]
 labels: ["surface:core", "security-touched"]
+depends_on: [secret-redaction-content-plane, redaction-config-gate, agent-dispatch-core, agent-loop-branch-hardening, distill-redaction-port]
 purpose: |
   Layer 1 of the content-plane secret-redaction invariant. Maps a file path
   OR a shell-command shape to a closed-enum `SensitivityClass`

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [183-safety-net-green, agent-loop-branch-hardening, per-thread-permissions, permission-store-json, agent-dispatch-core]
 config_refs:
   env: []
 purpose: |

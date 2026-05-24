@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [session-jsonl-envelope, session-root-provider-port, session-sanitize-id, fallback-kinds-policy, llm-factory]
 purpose: |
   Portable session schema v1 (snake_case wire) for round-tripping a saved
   session across surfaces. `exportSession(sessionId)` writes

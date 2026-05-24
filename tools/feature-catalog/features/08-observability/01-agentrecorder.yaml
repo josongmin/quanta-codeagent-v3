@@ -14,6 +14,7 @@ config_refs:
   env: [QUANTA_METRICS]
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
 evidence:
   code:

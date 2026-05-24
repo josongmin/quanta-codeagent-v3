@@ -11,6 +11,7 @@ modes: [interactive]
 configurable: static
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [shadow-odb-port, shadow-odb-rewind, shadow-odb-workspace-hash, built-in-slash-commands, chatgpt-oauth-provider]
 purpose: |
   CLI surface over the `ShadowOdb` port + the three `shadow_*` tools
   (ADR-0122, Hermes Agent `/rollback` parity). Lets the operator browse,

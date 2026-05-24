@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+depends_on: [lsp-client-base, lsp-expansion-4-tools, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
 purpose: 'LspPort에 8 RPC 추가: definition/references/hover/typeDefinition/implementation/documentSymbol/workspaceSymbol/prepareRename. capability 부재는 null로 graceful surface'
 evidence:
   code:

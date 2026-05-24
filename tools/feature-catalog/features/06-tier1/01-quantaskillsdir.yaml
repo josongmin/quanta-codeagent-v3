@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_SKILLS_DIR]
 owners: ['@songmin']
 labels: [surface:core, tier:1]
+depends_on: [skill-7-scope-tiering, skill-registry-precedence, skill-admin-enforcement, skill-audit-log, skill-md-frontmatter]
 purpose: |
   frontmatter 발견 → 본문 컨텍스트 주입. CLI surface는 `QUANTA_SKILLS_DIR`
   세트 시 `buildSkillsConfigCore` → `buildSkillBlock` → `discoverSkills` 흐름으로

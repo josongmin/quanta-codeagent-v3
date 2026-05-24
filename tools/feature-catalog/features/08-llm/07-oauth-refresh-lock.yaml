@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "auth", "oauth", "distributed-lock", "adr-0163"]
-depends_on: []
+depends_on: [github-token-rotation, oidc-federation]
 config_refs:
   env: []
 purpose: |

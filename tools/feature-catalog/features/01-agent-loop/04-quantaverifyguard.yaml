@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_VERIFY_GUARD, QUANTA_VERIFY_GUARD_MAX_TRIPS]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
 purpose: / (기본 OFF)
 evidence:
   code:

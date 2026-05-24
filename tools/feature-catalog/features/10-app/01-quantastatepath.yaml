@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_RESUME, QUANTA_STATE_PATH]
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [runner-resume-fsm, assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine]
 purpose: '/--state, /--resume. CLI 리주메 lifecycle e2e(, 7 tests): 실 runAgent → saveSession → loadSession → 새 runAgent 라운드트립으로 (a) 사전 assistant 텍스트가 두 번째 StreamInput.messages에 도달, (b) tool_use/tool_result 쌍이 boundary 보존, (c) 손상 파일 → loadSession null → fresh start no-throw, (d) 다단계 A→save→B→save→C 누적 transcript, (e) sessionId boundary 안정성, (f) StreamPort per-run 격리(공유 누수 없음).'
 evidence:
   code:

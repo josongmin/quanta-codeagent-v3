@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_IDLE_SUPPRESS, QUANTA_IDLE_MS, QUANTA_SNOOZE_DEFAULT_MS, QUANTA_REJECT_LIMIT]
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, tier:core]
+depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
 purpose: |
   Cursor 3.2 §4.1/§4.2/§5 패턴 흡수: idle-monitor + snooze + reject-counter. 60초 무입력
   시 자동 suppress(추가 LLM 호출 정지), /snooze 슬래시로 5분 동안 알림/턴 진행 일시정지

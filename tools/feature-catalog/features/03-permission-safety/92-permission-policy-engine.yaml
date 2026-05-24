@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [permission-store-json, per-host-agent-mode, per-thread-permissions, post-denial-precedence, quanta-home-meta-root]
 purpose: |
   The RESOLVER ENGINE half of the permission policy (SRP split with the data
   half in `policy-rules.ts`). Owns `evaluate` / `evaluateAuto` /

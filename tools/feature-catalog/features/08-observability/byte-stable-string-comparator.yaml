@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core, observability-primitive]
+depends_on: [errors-helper-fix, runtime-config-ssot, assert-never-exhaustiveness, session-jsonl-envelope, session-root-provider-port]
 purpose: |
   Byte-stable string comparator for deterministic ordering. Unlike
   `String.prototype.localeCompare`, the result does NOT depend on the

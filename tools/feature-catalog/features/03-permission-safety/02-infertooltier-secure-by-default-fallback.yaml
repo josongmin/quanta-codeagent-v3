@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, default-off]
+depends_on: [assert-never-exhaustiveness, auto-approval-reviewer, branch-only-guard, byte-stable-string-comparator, default-acceptedits-bypass-auto]
 purpose: "inferToolTier secure-by-default fallback (R3-P1): 도구의 hitlTier?(input) 미선언 시 read-only ⇒ \"none\", mutating ⇒ \"always-confirm\". 기본 도구 write/edit/test_runner/scripted_replace는 pre-approval-ok 명시 opt-in."
 evidence:
   code:

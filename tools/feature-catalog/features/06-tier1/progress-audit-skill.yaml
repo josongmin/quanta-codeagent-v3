@@ -13,6 +13,7 @@ config_refs:
   env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
+depends_on: [ctk-git-skills-bundle, engineering-skills-bundle, skill-7-scope-tiering, skill-registry-precedence, skill-admin-enforcement]
 purpose: |
   사용자가 "진행률"/"코드 레벨로만"/"P0/P1/P2"/"문서는 보지 말고"라고 묻거나 검증을 요구할 때, agent가
   코드 증거 대신 plan/README/RFC를 1순위 evidence로 끌어다 쓰는 패턴을 시스템적으로 차단. 이 skill이

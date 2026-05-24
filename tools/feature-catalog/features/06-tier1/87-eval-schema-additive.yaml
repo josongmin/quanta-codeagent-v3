@@ -11,6 +11,7 @@ modes: [headless, batch]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
+depends_on: [eval-synthetic-generator, eval-synthetic-judge, eval-synthetic-scenario-schema, eval-tier1-synthetic, assert-never-exhaustiveness]
 purpose: |
   Cursor aiserver.v1.EvalTrackingService에서 typed shape 3개만 흡수 — JSONL
   append-only eval 저장(schema.ts, zod 없음 plain TS)에 OPTIONAL·additive 필드 추가.

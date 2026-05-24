@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ['@songmin']
 labels: [surface:cli]
+depends_on: [tool-registry, spill-evidence-fulllogpath-round-5, tool-output-schema-factory, assert-never-exhaustiveness, byte-stable-string-comparator]
 config_refs:
   env: [QUANTA_TOOL_OUTPUT_MAX, QUANTA_TOOL_OUTPUT_SPILL_KEEP]
 purpose: <persisted-output> 스필 + GC

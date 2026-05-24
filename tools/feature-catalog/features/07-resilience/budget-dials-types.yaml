@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ['@songmin']
 labels: [surface:core, resilience-primitive]
+depends_on: [budget-events-union, budget-meter]
 purpose: |
   16-field BudgetDials shape (maxTurns / maxWallClockMs / maxModelCalls /
   maxToolCalls / maxShellCommands / maxTestRuns / maxInputTokens / maxOutput

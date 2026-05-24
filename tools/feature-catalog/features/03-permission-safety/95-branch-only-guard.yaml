@@ -11,6 +11,7 @@ modes: [ci-bot]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [permission-store-json, git-destructive-hard-deny, permission-inspect-5axis, permission-scope-4-tier, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert]
 purpose: |
   Propositional check on a shell command — is this operation forbidden by the
   `gitWrite: { kind: "branch-only"; protectedBranches: string[] }` lever?

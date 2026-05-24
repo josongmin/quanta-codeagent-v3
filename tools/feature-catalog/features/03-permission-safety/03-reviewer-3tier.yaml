@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
+depends_on: [review-kind-matrix, permission-store-json, permission-otel-emit-recorder, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert, git-destructive-hard-deny]
 purpose: 'ReviewerTier (user|auto_review|guardian_subagent) × ApprovalOutcome 8-state (not_needed/config_allowed/guardian_approved|denied/user_approved|approved_for_session|denied|aborted). HITLTier(ADR-0020)와 직교 축 — HITL=위험 형태, Reviewer=결정자. invariant matrix는 `auto_review` deny 금지 + `guardian` user-only outcome 금지를 explicit literal set으로 enforce. sticky precedence: user_aborted > guardian_denied > user_denied (DenialPrecedenceConflictError로 silent winner 금지).'
 evidence:
   code:

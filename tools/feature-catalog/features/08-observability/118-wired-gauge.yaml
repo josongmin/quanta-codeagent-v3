@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:helper"]
+depends_on: [instrument-wrap, instrument-extra-and-helper, instrument-shadow-tool-routing, background-subagent, budget-ledger]
 purpose: |
   Opt-in `emitWiredGauge` flag on `withFullObservability` emits one
   `observability.wired.total{slice}` gauge per `ObservabilityBag` key (7 total)

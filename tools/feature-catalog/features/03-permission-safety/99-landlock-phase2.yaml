@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:cursor", "surface:runtime", "tier:adapter"]
+depends_on: [landlock-degraded-passthrough, seatbelt-profile-compiler, os-sandbox-port-router, sandbox-policy, os-sandbox-wire]
 purpose: |
   Linux OS-level sandbox via `bwrap` (bubblewrap) shell-out. Phase 1 stub
   (ADR-0136) replaced with real Linux backend matching the macOS Seatbelt
