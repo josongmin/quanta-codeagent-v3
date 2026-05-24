@@ -1,0 +1,36 @@
+id: agent-import-cycle-guard
+title: agent SCC guard — Tarjan + module-top-level usage 차단 (deadlock 봉합)
+section: 10
+subsystem: 아키텍처 정책 (architecture invariants — 정적 deadlock guard)
+order: 26
+maturity: L4
+status: stable
+purpose: |
+  `src/agent/*.ts` 의 value-level import cycle 은 의도적으로 허용 (cross-edge 값이
+  function-body 안에서만 평가됨). 그러나 누군가가 cycle-edge 의 imported symbol 을
+  module-top-level (동기, 함수 밖) 에서 호출하면 ESM circular init 의 TDZ deadlock
+  으로 변환된다. 본 가드는 Tarjan SCC 알고리즘으로 `src/agent/*.ts` 의 value-import
+  그래프에서 모든 size≥2 SCC 를 추출하고 (a) 알려진 whitelist 와 정확히 일치하지
+  않으면 fail (양방향 drift: 새 cycle / refactor 후 stale whitelist 동시 차단),
+  (b) whitelisted SCC 의 ring edge 중 어떤 imported value 라도 module-top-level
+  에서 사용되면 fail. 결과적으로 cycle 자체는 허용하되 deadlock 조건을 정적으로
+  봉합 — 런타임에 발견하면 silent hang 이고, 본 가드는 file:line + offending symbol
+  로 즉시 진단한다.
+evidence:
+  code: []
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/agent-import-cycle.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Edge classification: `import type {…}` / `export type {…}` 는 type-only 로 erased,
+  cycle detection 제외. `import { type Foo }` mixed 는 보수적으로 value-edge. 하위
+  디렉토리 import (`./tier1/...`, `./branch-search/...`) 는 external node 로 분리해
+  top-level files 간 cycle 에 영향 없음. 현재 whitelist 는 `{conversation-action.ts,
+  steering.ts}` 1개 (과거 `{features, loop, subagent-runner, branch-search-runner}`
+  4-element SCC 는 `features.ts` → `./tier1/*` 분리 refactor 로 해체됨). architecture-
+  invariants 의 4 boundary test 와 함께 정적 enforcement 의 마지막 한 축.
