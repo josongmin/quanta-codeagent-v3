@@ -62,6 +62,13 @@ export interface SessionDeps {
    *  (byte-identical default-OFF — the loop's plan-hydrate/persist helpers
    *  no-op when `planStore` is undefined). */
   planStore?: AgentConfig["planStore"]
+  /** ADR-0159 retrieval-stack wire — built by `buildRetrievalStackCore`.
+   *  Absent ⇒ omitted from AgentConfig entirely (byte-identical default-OFF:
+   *  consumers' bridge functions return identity behavior when the slot is
+   *  undefined). The agent loop itself NEVER reads this slot — only the
+   *  bridge consumers (`rankWithRetrievalStack` / `runLocalizeHybrid` /
+   *  future hybrid_localize tool) do. */
+  retrievalStack?: AgentConfig["retrievalStack"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -126,5 +133,6 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
     ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
     ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
+    ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
   }
 }

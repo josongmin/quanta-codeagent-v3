@@ -26,12 +26,47 @@ import { loadEnvFiles } from "../cli/dotenv"
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
+import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
 import { type AgentArgs, AgentArgsError, formatHelp, parseAgentArgs } from "./cli-args"
 import type { RunOutcome } from "./run"
+
+/** Resolve the retrieval-stack opt-in flag from the composition-root env view.
+ *  Single canonical knob — `QUANTA_RETRIEVAL_HYBRID="1"` enables; any other
+ *  value (incl. absent / `"0"` / `"true"` — explicit "1" only) ⇒ disabled.
+ *  Strict-equals to "1" so a typo like "true" is treated as off (loud
+ *  silent-default avoidance: the operator either set the canonical value or
+ *  they did not).
+ *
+ *  ENV-touchpoint discipline: this is the ONLY retrieval-related env read in
+ *  the entire codebase. `@/runner/assemble/retrieval.ts` is env-free; the
+ *  surface (this file) projects ENV → typed input. */
+const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
+  env["QUANTA_RETRIEVAL_HYBRID"] === "1"
+
+/** Build the retrieval stack at the composition root. Default-OFF: when the
+ *  env knob is absent or not exactly "1", returns `undefined` and every
+ *  legacy caller is byte-identical (no allocation, no registry).
+ *
+ *  Returns `undefined` on builder failure (e.g. an unknown reranker kind
+ *  surfaces as a `RetrievalError`); we LOG and continue rather than crashing
+ *  the surface entry — the loop is fully functional without the stack, and
+ *  blocking startup on a misconfigured optional knob is wrong. */
+const buildRetrievalStackFromEnv = (env: NodeJS.ProcessEnv): RetrievalStack | undefined => {
+  if (!isRetrievalHybridEnabled(env)) return undefined
+  try {
+    return buildRetrievalStackCore({ enabled: true })
+  } catch (e) {
+    logger.warn(
+      `retrieval-stack disabled (build failed): ${(e as Error).message}. ` +
+        `set QUANTA_RETRIEVAL_HYBRID=1 with a registered reranker to re-enable.`,
+    )
+    return undefined
+  }
+}
 
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
  *  individual fields (e.g. ci-bot replaces `registry` with the restricted
@@ -71,6 +106,7 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
       }
     },
   }
+  const retrievalStack = buildRetrievalStackFromEnv(env)
   return {
     llm,
     // DIP: route through the factory (no app-specific ports at this baseline
@@ -84,6 +120,11 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     cwd: process.cwd(),
     maxTurns: p.dials?.maxTurns ?? 30,
     signal: new AbortController().signal,
+    // ADR-0159 wire: when the operator opted in (QUANTA_RETRIEVAL_HYBRID=1),
+    // hand the surface-built stack to every mode runner via the shared base.
+    // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
+    // `undefined` literal on the config) and the loop is byte-identical.
+    ...(retrievalStack !== undefined ? { retrievalStack } : {}),
   } as AssembleRequest["base"]
 }
 
