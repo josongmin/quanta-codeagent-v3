@@ -6,7 +6,7 @@ order: 3
 maturity: L5
 status: stable
 ui_surfaces: [n-a]
-monitoring: integrated
+monitoring: partial
 telemetry_keys: [quanta.hitl.tier_resolved]
 modes: [interactive, headless]
 configurable: integrated

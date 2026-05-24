@@ -6,7 +6,8 @@ order: 21
 maturity: L4
 status: stable
 ui_surfaces: [cli, api]
-monitoring: n-a
+monitoring: partial
+telemetry_keys: ["quanta.ipc.v1", "quanta.session.portable"]
 modes: [daemon, ide]
 configurable: static
 owners: ["@songmin"]

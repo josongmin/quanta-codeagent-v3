@@ -6,7 +6,8 @@ order: 206
 maturity: L5
 status: new
 ui_surfaces: [n-a]
-monitoring: n-a
+monitoring: integrated
+telemetry_keys: ["quanta.hitl", "quanta.tool.call.status"]
 modes: [n-a]
 configurable: static
 owners: ["@songmin"]

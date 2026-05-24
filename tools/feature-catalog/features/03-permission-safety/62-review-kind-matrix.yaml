@@ -6,7 +6,8 @@ order: 62
 maturity: L4
 status: stable
 ui_surfaces: [n-a]
-monitoring: n-a
+monitoring: partial
+telemetry_keys: ["quanta.hitl"]
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]

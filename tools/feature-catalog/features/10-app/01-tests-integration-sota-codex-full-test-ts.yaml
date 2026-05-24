@@ -6,7 +6,8 @@ order: 1
 maturity: L5
 status: stable
 ui_surfaces: [n-a]
-monitoring: n-a
+monitoring: integrated
+telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
 modes: [n-a]
 configurable: static
 owners: ["@songmin"]

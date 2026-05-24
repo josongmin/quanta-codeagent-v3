@@ -6,7 +6,8 @@ order: 14
 maturity: L4
 status: stable
 ui_surfaces: [n-a]
-monitoring: n-a
+monitoring: partial
+telemetry_keys: ["quanta.memory.phase2.tokens_used"]
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
