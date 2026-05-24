@@ -1,0 +1,47 @@
+id: localize-calibration-corpus
+title: localize 도구 calibration — recall@K / MRR 측정 코퍼스 (regression CI 아님)
+section: 8
+subsystem: 알고리즘 calibration (no-heuristics-only-validated 원칙)
+order: 85
+maturity: L3
+status: stable
+purpose: |
+  `src/tool/localize/` 의 ranking 알고리즘 변경이 실제로 도움이 됐는가를
+  "vibes" 가 아닌 데이터로 답하기 위한 empirical calibration. unit-test
+  게이트 밖에 의도적으로 둠 — calibration ≠ regression CI. `corpus.json`
+  의 각 query 에 대해 `localizeTool({max_results: 20})` 을 구동하고 결과를
+  파싱해 per-query recall@K(K=1,3,5) + MRR + aggregate(arithmetic mean)
+  를 계산, `baseline.json` 으로 출력 (스키마: `MeasureReport` in `measure.ts`).
+  필수 정규화: 절대경로 → cwd-relative, 그리고 측정-도구 자체 파일들
+  (`corpus.json`, `baseline.json`, `post-r-phase{9,10*}.json`)은 predictions
+  에서 drop — 자신의 query 토큰을 verbatim 포함해 self-rank 하는 instrument
+  contamination 이지 signal 이 아님. 그 외 re-rank/filter 는 없음. `git_sha`
+  필드가 measurement 를 트리에 고정 → 두 스냅샷 unambiguous diff. Pure
+  helper(`parseRanking`/`recallAtK`/`mrr`/`aggregate`)는 export 되어
+  `tests/unit/localize-measure.test.ts` 가 ripgrep spawn 없이 측정 로직
+  자체를 검증 가능 (`import.meta.main` 가드).
+evidence:
+  code:
+    - tests/smoke/localize/measure.ts
+    - tests/smoke/localize/corpus.json
+    - tests/smoke/localize/baseline.json
+    - tests/smoke/localize/README.md
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    L3 (calibration tooling 자체는 stable, but L4 promotion 은 corpus
+    크기 + 통계적 의미를 더 단단히 — 현재 n=44 로 binomial 95% CI 가
+    ≈±0.15, aggregate delta >0.05 가 의미 있는 단계).
+  promotion_path: |
+    corpus 100+ 항목 + per-subsystem 분할 + `tests/unit/localize-measure.test.ts`
+    가 baseline drift 회기 게이트(threshold 명시) 와이어링.
+notes: |
+  Discipline 출처: memory `no-heuristics-only-validated`. Snapshot 히스토리
+  (`post-r-phase9.json`/`post-r-phase10*.json`)는 R-Phase ranking 알고리즘
+  변경 전후를 보존 — 측정 instrument 자체이므로 drop-list 에 포함. 미래
+  변경자가 baseline diff 만 보고도 algo regress 를 잡을 수 있게 in-tree 유지.

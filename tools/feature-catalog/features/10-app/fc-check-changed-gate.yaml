@@ -1,0 +1,32 @@
+id: fc-check-changed-gate
+title: fc check-changed — PR-time gate (new src/*.ts 는 fc evidence 등록 필수)
+section: 10
+subsystem: feature-catalog 메타 도구 (drift 차단)
+order: 51
+maturity: L5
+status: stable
+purpose: |
+  `bun fc check-changed <base-ref>` — PR diff 를 git name-status 로 읽어
+  ADDED 된 `src/**/*.ts` 파일이 어떤 fc YAML 의 `evidence.code` 에도 등장
+  하지 않으면 fail. Modified 파일은 정보용 경고만(BLOCK 안 함) — 헬퍼는
+  부모 feature 와 같이 변경되는 게 합법. 동기: catalog drift 의 정규
+  source 는 *새 코드가 fc 등록 없이 land 하는 것* 이다. Leaf 수정은 무해
+  하지만 standalone 신규 파일이 feature 의 은신처. 면제 패턴(EXEMPT):
+  `*.test.ts` / `index.ts` (barrel) / type-only 모듈 / workspaces 잔여.
+  Pure decision logic (`runCheckChanged`/`parseDiffNameStatus`)는 모듈
+  분리되어 CI 가 git diff 만 invoke 하고 검증은 unit-test 가능.
+evidence:
+  code:
+    - tools/feature-catalog/check-changed.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/feature-catalog-check-changed.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  feature-catalog-tool 의 자식 surface — top-level `feature-catalog-tool`
+  은 전체 CLI 를 묶고 본 entry 는 PR-gate 단일 커맨드를 단일-책임으로
+  분리 기록. Exit 0 = ok / 1 = added 파일이 evidence 에 없음.
