@@ -51,6 +51,7 @@ export {
   type RetrievalAssembleInput,
   type RetrievalStack,
 } from "./retrieval"
+export { rankWithRetrievalStack } from "./retrieval-memory-bridge"
 export {
   buildSkillsConfigCore,
   type SkillsConfigAssembleInput,
