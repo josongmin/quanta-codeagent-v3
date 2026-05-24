@@ -13,3 +13,9 @@ export type {
   Spawner,
 } from "./types"
 export { OsSandboxError } from "./types"
+export {
+  DEFAULT_SANDBOX_EXEC_PATH,
+  type WrappedShellArgv,
+  type WrapShellArgvConfig,
+  wrapShellArgv,
+} from "./wrap-argv"

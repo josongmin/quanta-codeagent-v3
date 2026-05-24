@@ -1,9 +1,18 @@
 import { errMessage, logger } from "@/shared"
 import { loadEnvFiles } from "./dotenv"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
+import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
+
+// S1 — OS sandbox wire-up. Reads `QUANTA_SANDBOX` ONCE at boot (after dotenv
+// load so `.env.local` overrides are honored). Default-OFF: when unset /
+// "default" / "off" / "" the slot stays uninstalled and `runShell` is byte-
+// identical to pre-S1. Degraded slots (linux Phase-1 stub, missing
+// sandbox-exec) surface a one-line stderr warning so the operator notices
+// BEFORE the first sandboxed command runs.
+installCliSandbox()
 
 // Phase-3 split (RFC may-22-unified-agent-runtime §3): pure structural
 // refactor with ZERO behavior change for existing CLI users. `index.ts` now

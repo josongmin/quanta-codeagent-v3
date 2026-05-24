@@ -1,5 +1,6 @@
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { scrubEnv } from "./sandbox"
+import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -47,7 +48,18 @@ export const runShell = async (
   const env =
     options.inheritEnv === true ? (process.env as Record<string, string | undefined>) : scrubEnv()
 
-  const proc = Bun.spawn(["bash", "-lc", command], {
+  // S1 — OS sandbox wire-up. Default-OFF: when the CLI surface did not
+  // install a slot (via `installShellSandbox`), `getShellSandbox()` returns
+  // `undefined` and `argv` is the legacy `["bash","-lc",cmd]` byte-for-byte.
+  // When installed, the slot wraps the argv with `sandbox-exec -p '<SBPL>'`
+  // (macOS) / passthrough+degradeReason (linux Phase-1 stub). The SBPL profile
+  // text only flows INTO the spawn argv; it is never echoed back to the tool
+  // result (anti-leak invariant: error messages must not leak Seatbelt
+  // internals).
+  const baseArgv: ReadonlyArray<string> = ["bash", "-lc", command]
+  const slot = getShellSandbox()
+  const argv = slot !== undefined ? slot.wrap(baseArgv, cwd).argv : [...baseArgv]
+  const proc = Bun.spawn(argv, {
     cwd,
     env,
     stdout: "pipe",
