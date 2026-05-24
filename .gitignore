@@ -7,6 +7,28 @@ node_modules/
 # Build
 dist/
 *.tsbuildinfo
+**/*.js.map
+
+# TypeScript/Bun side-by-side emit (.ts is source of truth)
+src/**/*.js
+!src/ui/auth-ui.js
+tests/**/*.js
+tools/**/*.js
+
+# Rust / native addon build
+**/target/
+*.rlib
+*.rmeta
+
+# Bench / eval run artifacts (local-only; not SSOT)
+logs/
+runs/
+evals/runs/
+bench-report*.json
+bench-*.json
+predictions*.jsonl
+gpt-5.*.json
+gold.*.json
 
 # Environment (keep examples tracked)
 .env

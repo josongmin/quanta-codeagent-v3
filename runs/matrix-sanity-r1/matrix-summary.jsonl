@@ -1,4 +1,0 @@
-{"condition":"baseline","pickId":"psf__requests-5414","verdict":"pass","turns":17,"tokensIn":0,"tokensOut":0,"cacheRead":0,"wallMs":119592,"costUsd":0}
-{"condition":"baseline","pickId":"sympy__sympy-16886","verdict":"pass","turns":8,"tokensIn":0,"tokensOut":0,"cacheRead":0,"wallMs":35993,"costUsd":0}
-{"condition":"all","pickId":"psf__requests-5414","verdict":"pass","turns":20,"tokensIn":0,"tokensOut":0,"cacheRead":0,"wallMs":119906,"costUsd":0}
-{"condition":"all","pickId":"sympy__sympy-16886","verdict":"pass","turns":9,"tokensIn":0,"tokensOut":0,"cacheRead":0,"wallMs":27853,"costUsd":0}

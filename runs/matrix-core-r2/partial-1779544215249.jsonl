@@ -1,6 +1,0 @@
-{"condition":"lsp","pickId":"psf__requests-5414","verdict":"fail","turns":23,"tokensIn":308634,"tokensOut":2129,"cacheRead":0,"wallMs":358355,"costUsd":0}
-{"condition":"lsp","pickId":"sympy__sympy-16886","verdict":"pass","turns":10,"tokensIn":107479,"tokensOut":822,"cacheRead":0,"wallMs":327458,"costUsd":0}
-{"condition":"subagent","pickId":"psf__requests-5414","verdict":"fail","turns":10,"tokensIn":109900,"tokensOut":1303,"cacheRead":0,"wallMs":388431,"costUsd":0}
-{"condition":"subagent","pickId":"sympy__sympy-16886","verdict":"pass","turns":8,"tokensIn":82019,"tokensOut":773,"cacheRead":0,"wallMs":389850,"costUsd":0}
-{"condition":"skills","pickId":"psf__requests-5414","verdict":"fail","turns":7,"tokensIn":80548,"tokensOut":1136,"cacheRead":0,"wallMs":296497,"costUsd":0}
-{"condition":"skills","pickId":"sympy__sympy-16886","verdict":"pass","turns":8,"tokensIn":91087,"tokensOut":740,"cacheRead":0,"wallMs":274278,"costUsd":0}
