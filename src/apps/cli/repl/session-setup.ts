@@ -29,6 +29,7 @@ import {
   loadFeatures,
   newSessionFlag,
   observeDir,
+  pickIdentity,
   pickPersona,
   pickProvider,
   resolveResume,
@@ -361,7 +362,15 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     )
   }
 
-  const system = buildSystemPrompt(cwd, { persona: pickPersona() })
+  // ADR-0198 identity slot — default-OFF: `pickIdentity()` returns
+  // `undefined` unless `QUANTA_IDENTITY=1` is set, so the rendered prompt
+  // stays byte-identical to the pre-ADR base prompt for every existing
+  // caller. When opted in, identity rides BEFORE persona (see prompt.ts).
+  const identity = pickIdentity()
+  const system = buildSystemPrompt(cwd, {
+    persona: pickPersona(),
+    ...(identity !== undefined ? { identity } : {}),
+  })
   const onShellEvent = composeShellEvent(metrics)
   const workMetricsSink = deps.buildWorkMetricsSink(metrics !== undefined)
 

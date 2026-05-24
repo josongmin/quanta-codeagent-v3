@@ -25,6 +25,8 @@ import { loadEnvFiles } from "../cli/dotenv"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
+import { buildSystemPrompt } from "@/agent"
+import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
@@ -34,6 +36,19 @@ import { buildDefaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
 import { type AgentArgs, AgentArgsError, formatHelp, parseAgentArgs } from "./cli-args"
 import type { RunOutcome } from "./run"
+
+/** ADR-0198 identity slot — resolve the per-mode identity from the
+ *  composition-root env view. Default-OFF: returns `undefined` unless
+ *  `QUANTA_IDENTITY=1`. When opted in, `QUANTA_IDENTITY_MODE` selects the
+ *  posture (default / plan / review / audit / onboarding); absent ⇒
+ *  `"default"`. The single canonical env touchpoint for identity wiring
+ *  in the unified-agent surface; mode-presets read `req.base.system` and
+ *  never touch the env themselves. */
+const resolveIdentityFromEnv = (env: NodeJS.ProcessEnv): readonly string[] | undefined => {
+  if (env.QUANTA_IDENTITY !== "1") return undefined
+  const raw = env.QUANTA_IDENTITY_MODE ?? "default"
+  return defaultIdentityProvider().identityFor(raw as IdentityMode)
+}
 
 /** Resolve the retrieval-stack opt-in flag from the composition-root env view.
  *  Single canonical knob — `QUANTA_RETRIEVAL_HYBRID="1"` enables; any other
@@ -115,6 +130,14 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     },
   }
   const retrievalStack = buildRetrievalStackFromEnv(env)
+  // ADR-0198 identity slot — when opted in via QUANTA_IDENTITY=1, prebuild
+  // the system prompt HERE so every mode-preset (headless / ide / daemon /
+  // batch / ci-bot / interactive) sees the identity-baked prompt via
+  // `req.base.system`. Default-OFF: identity is `undefined` ⇒ system is the
+  // empty-string sentinel and each preset's `req.base.system ?? buildSystemPrompt(cwd)`
+  // path runs unchanged (byte-identical).
+  const identity = resolveIdentityFromEnv(env)
+  const system = identity !== undefined ? buildSystemPrompt(process.cwd(), { identity }) : ""
   return {
     llm,
     // DIP: route through the factory (no app-specific ports at this baseline
@@ -124,7 +147,7 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     stream,
     permission: { mode: "acceptEdits" },
     messages: [],
-    system: "",
+    system,
     cwd: process.cwd(),
     maxTurns: p.dials?.maxTurns ?? 30,
     signal: new AbortController().signal,

@@ -6,6 +6,7 @@ import {
   type PersonaKind,
   resolvePersona,
 } from "@/agent"
+import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import type { LLMPort } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
 import { Metrics, type StructuredLogger } from "@/observability"
@@ -72,6 +73,21 @@ export const pickProvider = (): Provider => pickProviderCore({ env: process.env 
  *  Absent ⇒ `"default"` (the explicit choice). Unknown value ⇒ named
  *  `PersonaInvalidError` throw (no silent fallback per ADR-0067 §C). */
 export const pickPersona = (): PersonaKind => resolvePersona(process.env)
+
+/** ADR-0198 identity slot — resolve the per-mode identity lines for the
+ *  current REPL posture. Default-OFF: when `QUANTA_IDENTITY` is unset (or
+ *  not the literal "1") we return `undefined` so `buildSystemPrompt`'s
+ *  identity slot is empty and the rendered prompt is byte-identical to the
+ *  pre-ADR base prompt. When opted in, the value of `QUANTA_IDENTITY_MODE`
+ *  selects the posture (default / plan / review / audit / onboarding);
+ *  absent ⇒ `"default"`. Unknown ⇒ falls through to the provider's typed
+ *  unknown-mode fallback line (no throw, no silent default to "default"
+ *  — the operator's typo is surfaced via the prompt itself). */
+export const pickIdentity = (): readonly string[] | undefined => {
+  if (process.env.QUANTA_IDENTITY !== "1") return undefined
+  const raw = process.env.QUANTA_IDENTITY_MODE ?? "default"
+  return defaultIdentityProvider().identityFor(raw as IdentityMode)
+}
 
 /** Build the main LLM adapter via the surface-agnostic core. Preserves the
  *  prior contract byte-for-byte: a missing provider key throws (the cli aborts

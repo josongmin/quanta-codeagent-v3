@@ -1,5 +1,6 @@
 import type { Message, SystemBlock } from "@/llm"
 import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
+import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
 import { BODY_AFTER_PERSONA, BODY_AFTER_PROMPT_PACK, INTRO_LINES } from "./prompt-body"
@@ -38,10 +39,23 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  *  loop is migrated to {@link buildTurnContext}. */
 export const buildSystemPrompt = (
   _cwd?: string,
-  opts?: { persona?: PersonaKind; promptPack?: PromptPackMode },
+  opts?: {
+    persona?: PersonaKind
+    promptPack?: PromptPackMode
+    /** ADR-0198 identity slot — per-mode identity lines spliced BEFORE the
+     *  persona slot. Absent / empty array ⇒ no lines, byte-identical to the
+     *  pre-ADR base prompt; the slot's contract is "1..=3 single-line
+     *  strings", validated at build time. */
+    identity?: readonly string[]
+  },
 ): string =>
   [
     ...INTRO_LINES,
+    // ADR-0198 identity slot — rides BETWEEN the intro and persona so the
+    // model sees "who you are in this mode" before "how you talk". When the
+    // caller supplies no identity (or an empty array) we emit nothing and
+    // the rendered prompt is byte-identical to the pre-ADR base prompt.
+    ...identityLines(opts?.identity),
     // ADR-0068 persona slot — `default` (or absent) ⇒ no extra lines,
     // byte-identical to the pre-ADR base prompt; `friendly`/`pragmatic`
     // splice the persona body + a blank-line separator before Policy stack.
@@ -54,6 +68,17 @@ export const buildSystemPrompt = (
     ...(opts?.promptPack !== undefined ? renderPackByMode(opts.promptPack) : renderToolUseRules()),
     ...BODY_AFTER_PROMPT_PACK,
   ].join("\n")
+
+/** Spread helper for the identity slot — returns the lines to splice
+ *  BETWEEN the intro section and the persona slot. Absent / empty array ⇒
+ *  empty result (no lines, no extra newlines) so the rendered prompt is
+ *  byte-identical to the pre-ADR base prompt. Non-empty ⇒ validated lines
+ *  followed by ONE blank-line separator (same shape as the persona slot
+ *  uses to keep section spacing consistent). */
+const identityLines = (identity: readonly string[] | undefined): readonly string[] => {
+  if (identity === undefined || identity.length === 0) return []
+  return [...assertValidIdentityLines(identity), ""]
+}
 
 /** Agent interaction mode (Codex `mode-and-plan-process-audit.md` mirror). The
  *  mode controls tool availability and the shape of the per-turn reminder;
