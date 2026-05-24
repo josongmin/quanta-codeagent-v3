@@ -11,6 +11,12 @@
 export { wirePromptCacheToBudget } from "./budget-bridge"
 export { defaultPromptCacheObserver } from "./default"
 export {
+  DEFAULT_PROMPT_CACHE_PRICING,
+  FALLBACK_PRICING_MODEL,
+  type PromptCachePricing,
+  SAFE_ZERO_PRICING,
+} from "./default-pricing"
+export {
   type CacheBreakpointAttribution,
   type CacheHitEvent,
   type CacheModelRollup,

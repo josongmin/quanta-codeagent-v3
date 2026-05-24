@@ -5,7 +5,7 @@
  *     HTML→Markdown). Tool factory exported as `webFetchTool({fetcher?})`
  *     so the production caller binds `globalThis.fetch` and tests inject a
  *     fake. Pure HTML→Markdown helper `htmlToMarkdown` (now turndown-backed,
- *     ADR-0183) re-exported for hellgate testing without spinning up a fake
+ *     ADR-0186) re-exported for hellgate testing without spinning up a fake
  *     fetcher; configured `turndown` singleton exposed so callers can
  *     register custom rules (e.g. code-fence language hints, table plugin).
  *   - `web_search` (provider-gated — closed-port DI). Tool factory

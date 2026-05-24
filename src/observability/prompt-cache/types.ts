@@ -61,7 +61,7 @@
  *      the caller — the clock is for the LRU's eviction signal only.
  */
 
-import type { MetricSink } from "@/observability/metrics"
+import type { MetricSink } from "@/observability/metrics/port"
 import { QuantaError } from "@/shared"
 
 /** One usage observation from a model stream end. Caller forwards these as

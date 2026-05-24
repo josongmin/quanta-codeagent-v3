@@ -21,14 +21,7 @@
  * cost when the user hasn't opted in.
  */
 
-import type {
-  Span,
-  SpanAttributes,
-  SpanContext,
-  SpanKind,
-  SpanStatusCode,
-  Tracer,
-} from "./port"
+import type { Span, SpanAttributes, SpanContext, SpanKind, SpanStatusCode, Tracer } from "./port"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Hex ID generation (W3C: 32-hex traceId / 16-hex spanId, both lowercase)

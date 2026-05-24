@@ -19,7 +19,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { defaultBudgetLedger } from "@/agent/budget-ledger"
-import type { MetricSample, MetricSink } from "@/observability/metrics"
+import type { MetricSample, MetricSink } from "@/observability/metrics/port"
 import {
   type CacheHitEvent,
   defaultPromptCacheObserver,

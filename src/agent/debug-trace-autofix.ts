@@ -137,9 +137,7 @@ const validateInput = (p: Omit<BugFixProposal, "id" | "capturedAt">): void => {
  * entry is simply removed. There is no parallel "history" view (would be a
  * Phase 2 follow-up if review-after-apply audit is wanted).
  */
-export const defaultBugFixProposalQueue = (
-  opts?: BugFixProposalQueueOpts,
-): BugFixProposalQueue => {
+export const defaultBugFixProposalQueue = (opts?: BugFixProposalQueueOpts): BugFixProposalQueue => {
   const maxEntries = Math.max(1, opts?.maxEntries ?? DEFAULT_MAX_ENTRIES)
   const now = opts?.now ?? Date.now
   const idGen = opts?.idGen ?? defaultIdGen

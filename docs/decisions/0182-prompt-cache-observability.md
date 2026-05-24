@@ -3,7 +3,7 @@
 - **상태**: Accepted
 - **날짜**: 2026-05-25
 - **관련**: ADR-0138 (budget-ledger — sibling primitive; this round adds cache-specific observability via type-only bridge), ADR-0144 (metrics — used as MetricSink for gauge/counter emit)
-- **참조**: `src/observability/prompt-cache/{port,default,budget-bridge,index}.ts`, `tests/unit/prompt-cache-observability-hellgate.test.ts`
+- **참조**: `src/observability/prompt-cache/{types,default,default-pricing,budget-bridge,index}.ts`, `src/tool/prompt_cache_status.ts`, `tests/unit/prompt-cache-observability-hellgate.test.ts`, `tests/unit/prompt-cache-tracker-hellgate.test.ts`
 
 ## 맥락
 
@@ -47,6 +47,44 @@ const wirePromptCacheToBudget: (obs, ledger) => () => void   // deregister fn
 
 Labels: `{model, session}`. Sink throw 시 record는 정상 return (no-throw 계약).
 
+### Default pricing table (`default-pricing.ts`)
+
+Extracted from `default.ts` into a sibling file so the observer slice carries
+its own first-class pricing primitive (mirrors the budget-ledger sibling
+without coupling at the module-graph layer):
+
+| model              | input  | output | cache_create   | cache_read    |
+|--------------------|--------|--------|----------------|---------------|
+| claude-opus-4-7    | $15.00 | $75.00 | $18.75 (1.25×) | $1.50 (0.10×) |
+| claude-sonnet-4-6  |  $3.00 | $15.00 |  $3.75 (1.25×) | $0.30 (0.10×) |
+| claude-haiku-4-5   |  $1.00 |  $5.00 |  $1.25 (1.25×) | $0.10 (0.10×) |
+
+Fallback: unknown model → `claude-sonnet-4-6` rates with a one-shot `logger.warn`
+(safe-LOUD; mirrors ADR-0138 clause #4). `outputPerM` is carried for completeness
+(future per-model cost-breakdown tool may read it) — today only `inputPerM` and
+`cacheReadPerM` are consumed by the hit-rate / savings math.
+
+### Tool surface (`prompt_cache_status`)
+
+`src/tool/prompt_cache_status.ts` exposes the observer to the agent as a
+read-only, concurrency-safe Tool. Two factories:
+
+- `promptCacheStatusTool(observer)` — composition root constructs with the
+  wired `PromptCacheObserver`. Renders a formatted text report (lifetime
+  header + per-session list sorted by savings + per-breakpoint section +
+  formula footnote). Optional `sessionId` narrows to one session; optional
+  `topN` (default 10) caps the per-session list.
+- `promptCacheStatusUnwiredTool()` — symmetrical placeholder when no observer
+  is attached; yields `ok:false` with typed `failure: { mode: "rejected",
+  reason: "observer_not_attached" }`. Lets composition roots register the
+  tool surface unconditionally if desired (otherwise: omit when unwired).
+
+Caller-wired (NOT in `buildDefaultTools`) — sessions that never construct
+either factory see byte-identical behavior. The tool DOES NOT compute
+"actual cost" from raw token counts (the per-model pricing lives in the
+observer's closure, not on the snapshot); the operator pairs this tool with
+`/cost` (ADR-0138 budget-ledger) for the dual axis.
+
 ### budget-bridge (type-only coupling)
 
 `wirePromptCacheToBudget(observer, ledger)`이 observer.record를 wrap해서 매번 `ledger.record(toUsageEvent(event))`도 호출. **observer 자체는 ledger를 import 안 함** — module graph 안 결합. 슬라이스의 plane-cleanness 유지.
@@ -57,7 +95,9 @@ Deregister 반환 함수로 wiring 끊을 수 있음. Validation-error parity: o
 
 `metricsSink` absent → snapshot-only (call site는 직접 `observer.snapshot()` query). `wirePromptCacheToBudget` 미호출 → ledger 독립. Observer 자체를 인스턴스화 안 하면 budget-ledger만으로 기존 토큰 회계 동작 byte-identical.
 
-## Hellgate (24 cases)
+## Hellgate (24 observer + 20 tracker/tool = 44 cases total)
+
+### Observer-internal battery (`prompt-cache-observability-hellgate.test.ts`, 24 cases)
 
 - **A. record + snapshot 8**: 단일/다중 event / 다중 model / hitRate denom=0 / cost savings Sonnet 1M cache_read → ~$2.70 / perSession aggregation / 음수 토큰 throw / 알 수 없는 model fallback
 - **B. attributeBreakpoint 4**: 단일 hit / 다중 breakpoint / tokenSpan 누적 / 빈 상태 OMITTED (exactOptional)
@@ -66,7 +106,14 @@ Deregister 반환 함수로 wiring 끊을 수 있음. Validation-error parity: o
 - **E. budget-bridge 5**: wire + record → ledger.record / no wire → ledger 0 / deregister → 이후 0 / negative-tokens parity / sink 부재시도 wire 작동
 - **F. determinism 2**: 같은 input → 같은 snapshot / clock injection이 sample.at에 사용
 
-24 pass / 0 fail.
+### Tracker + tool surface battery (`prompt-cache-tracker-hellgate.test.ts`, 20 cases)
+
+- **A. record + metrics math 8**: regular-only / cache_read-only / mixed / multi-event monotonic / multi-session isolation / unknown model fallback / zero-token / 1 B-token overflow guard
+- **B. Sink integration 3**: sink absent / sink wired emits 4 / sink throws → no-throw collapse
+- **C. LRU + reset 2**: maxEvents=10 + 15 events → aggregates monotonic / reset() rebuilds from zero
+- **D. Tool surface 6 (16+sub)**: metadata (read-only, concurrency-safe) on both factories / execute lifetime header + savings line + breakpoint section + footnote / sessionId drill-down / missing-session helpful note / unwired branch typed rejection / pre-aborted signal → typed rejected
+
+44 pass / 0 fail. 164 expects.
 
 ## Alternatives rejected
 
@@ -94,3 +141,6 @@ Deregister 반환 함수로 wiring 끊을 수 있음. Validation-error parity: o
 - **Per-skill cache attribution**: skill 호출 시점에 breakpoint span 자동 집계
 - **Cross-session warm-cache analysis**: TTL window 안 다른 session에서 caching benefit 추정
 - **alarm wiring**: hit rate가 threshold 아래로 떨어지면 metric sink 통해 alert
+- **Cost-anomaly alert**: 10 연속 turn에서 `cache_creation > 30% × input` 감지 시 metric sink 통해 alert (Anthropic misconfig 시그널)
+- **Auto-call after each turn**: 의도적 NON-GOAL — 에이전트가 호출 시점을 결정 (operator-visible 운영 도구이지 turn-internal 텔레메트리가 아님)
+- **`outputPerM` consumer**: 향후 per-model 전체 cost 브레이크다운 도구가 `default-pricing.ts`의 `outputPerM`을 읽을 수 있음 (오늘은 hit-rate / savings만 사용)

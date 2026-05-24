@@ -1,0 +1,58 @@
+id: tool-dedup-drift-detector
+title: Per-tool TTL drift detector — config-vs-RECOMMENDED preset divergence as typed signal
+section: 8
+subsystem: 텔레메트리 — tool-dedup config drift surface (ADR-0183)
+order: 119
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: ["tool.dedup.config_drift.total"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:observability", "tier:wrap", "absorbed:cursor"]
+depends_on: [metrics-registry, metrics-typed-port-slice]
+config_refs:
+  env: []
+purpose: |
+  ADR-0183 박은 construction-time drift detector. `defaultToolCallCache({
+  checkRecommendedDrift: true })` 가 caller 의 `perToolTtlMs` 와 audited
+  `RECOMMENDED_PER_TOOL_TTL_MS` preset (ADR-0179) 를 비교, 4-arm closed
+  enum `PerToolTtlDriftKind` (`too-permissive` / `too-restrictive` /
+  `missing` / `unknown-tool`) 으로 분류, **operator-facing log** (`onDriftWarn`
+  1회 호출, kind별 grouped combined message) + **machine-facing counter**
+  (`tool.dedup.config_drift.total{tool, kind}` per drift) 두 채널로 emit.
+  Research grounding: Cursor `FastRepoInitHandshakeV2` 의 per-codebase
+  `UP_TO_DATE`/`OUT_OF_SYNC`/`EMPTY` typed verdict (cursor-localization.md
+  §17.6) — repo drift detection을 per-tool TTL config drift detection
+  으로 transposition. ADR-0169 (skipped-warning) + ADR-0175 (wired-gauge)
+  의 dual-audience split을 본 ADR이 세 번째로 적용.
+  **Default-OFF**: `checkRecommendedDrift` 미지정 → byte-identical to
+  ADR-0179 (zero comparison cost, 0 counter, 0 warn). **Graceful degradation**:
+  `metrics` 만 있으면 counter only, `onDriftWarn` 만 있으면 warn only,
+  둘 다 있으면 두 채널 다. **No-throw invariant**: throwing registry/sink가
+  cache construction을 깨면 안 됨.
+evidence:
+  code:
+    - src/observability/metrics/instrument-tool-dedup.ts
+  adrs: [179, 169, 175, 183]
+  tests:
+    unit:
+      - tests/unit/observability-metrics-instrument-tool-dedup-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - 'DefaultCacheOpts.checkRecommendedDrift?: boolean — opt-in flag (default false)'
+  - 'DefaultCacheOpts.onDriftWarn?: (msg: string) => void — operator log sink (default noop)'
+  - 'DefaultCacheOpts.metrics?: MetricsRegistry — counter registry (graceful when undefined)'
+deliberate_hold: null
+notes: |
+  Closed-port enum: adding a 5th `PerToolTtlDriftKind` requires ADR amendment
+  + exhaustive switch update at every consumer site. Combined message format
+  pinned: `[tool-dedup] N drift(s) vs RECOMMENDED: <kind=[tools]>... Set
+  'checkRecommendedDrift:false' to silence or update perToolTtlMs to match.`
+  Empty kind groups omitted from message. Per-tool 0 (never-cache) vs preset > 0
+  classified as `too-restrictive` (HELL-DRIFT-11 pins). Follow-ups: drift gauge
+  (point-in-time view), periodic re-check (hot-reload config), severity threshold
+  (sub-X% diff treated as noise), `unknownToolAllow` whitelist.

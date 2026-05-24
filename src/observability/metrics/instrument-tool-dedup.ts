@@ -266,11 +266,7 @@ export interface DefaultCacheOpts {
 // ── Drift kinds (closed enum) ────────────────────────────────────────────
 
 /** ADR-0183: drift between caller `perToolTtlMs` and `RECOMMENDED_PER_TOOL_TTL_MS`. */
-export type PerToolTtlDriftKind =
-  | "too-permissive"
-  | "too-restrictive"
-  | "missing"
-  | "unknown-tool"
+export type PerToolTtlDriftKind = "too-permissive" | "too-restrictive" | "missing" | "unknown-tool"
 
 interface PerToolTtlDrift {
   readonly tool: string
@@ -290,6 +286,17 @@ interface PerToolTtlDrift {
  *   - caller has, preset lacks  → "unknown-tool" (custom tool — informational)
  *   - exact match               → no drift, skipped
  */
+const classifyOnePerToolTtl = (
+  presetVal: number | undefined,
+  callerVal: number | undefined,
+): PerToolTtlDriftKind | null => {
+  if (presetVal === undefined && callerVal !== undefined) return "unknown-tool"
+  if (presetVal !== undefined && callerVal === undefined) return "missing"
+  if (presetVal === undefined || callerVal === undefined) return null
+  if (presetVal === callerVal) return null
+  return callerVal > presetVal ? "too-permissive" : "too-restrictive"
+}
+
 const computePerToolTtlDrifts = (
   caller: Readonly<Record<string, number>> | undefined,
   preset: Readonly<Record<string, number>>,
@@ -303,21 +310,8 @@ const computePerToolTtlDrifts = (
   for (const tool of ordered) {
     const presetVal = preset[tool]
     const callerVal = caller === undefined ? undefined : caller[tool]
-    if (presetVal === undefined && callerVal !== undefined) {
-      out.push({ tool, kind: "unknown-tool" })
-      continue
-    }
-    if (presetVal !== undefined && callerVal === undefined) {
-      out.push({ tool, kind: "missing" })
-      continue
-    }
-    // Both defined: classify by delta.
-    if (presetVal !== undefined && callerVal !== undefined && presetVal !== callerVal) {
-      out.push({
-        tool,
-        kind: callerVal > presetVal ? "too-permissive" : "too-restrictive",
-      })
-    }
+    const kind = classifyOnePerToolTtl(presetVal, callerVal)
+    if (kind !== null) out.push({ tool, kind })
   }
   return out
 }
@@ -338,7 +332,8 @@ const groupDriftsByKind = (
 const formatDriftMessage = (drifts: ReadonlyArray<PerToolTtlDrift>): string => {
   const g = groupDriftsByKind(drifts)
   const parts: string[] = []
-  if (g["too-permissive"].length > 0) parts.push(`too-permissive=[${g["too-permissive"].join(",")}]`)
+  if (g["too-permissive"].length > 0)
+    parts.push(`too-permissive=[${g["too-permissive"].join(",")}]`)
   if (g["too-restrictive"].length > 0)
     parts.push(`too-restrictive=[${g["too-restrictive"].join(",")}]`)
   if (g.missing.length > 0) parts.push(`missing=[${g.missing.join(",")}]`)

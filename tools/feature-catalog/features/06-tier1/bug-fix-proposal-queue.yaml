@@ -1,0 +1,103 @@
+id: bug-fix-proposal-queue
+title: Bug-fix proposal queue — debug-trace 자동수정 루프 Phase 1 (ADR-0186)
+section: 6
+subsystem: 에이전트 — 진단 후속 (debug-trace skill 흡수 자식 슬라이스)
+order: 186
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cursor"]
+depends_on: [debug-blame-skills-trio]
+config_refs:
+  env: []
+purpose: |
+  순수 in-memory capture-and-list primitive. `debug-trace` skill (ADR-0181)이
+  생성하는 `{file:line, hypothesis, proposed-fix}` ranked envelope를 typed
+  큐에 담아 caller(slash router / planner UI / test rig)가 HUMAN 검토용으로
+  drain 할 수 있게 한다.
+
+  **CRITICAL invariant**: 이 큐는 소스 코드를 절대 수정하지 않는다 —
+  capture-and-list primitive ONLY. Auto-apply는 별도 슬라이스 (Phase 2)로
+  deferred — 세 가지 안전 설계 (verify-guard wire / shadow rewind anchor
+  ADR-0118 / retry budget cap)가 묶여야 안전한데, 그 셋을 묶는 건 이 primitive
+  의 계약을 흐린다.
+
+  Research grounding: `docs/analysis/경쟁사리뷰/code-agent-loop/cursor.md` —
+  Cursor의 "autonomous-feeling" fix 경로는 (a) LSP code action lightbulb
+  (USER가 클릭), (b) PR Bugbot 코멘트 (USER가 어떤 걸 action 할지 결정).
+  `babysit` skill prose도 *"Carefully validate issues reported by Bugbot
+  and only take action on those that are valid"* 명시. Devin류 autonomous
+  fix loop도 PR 제안에서 끝나지 직접 push 안 함. 보수적 자세 = 업계 표준.
+
+  ## 표면 (BugFixProposalQueue interface)
+
+  - `capture(p)` — `Omit<BugFixProposal, "id" | "capturedAt">` → id 반환.
+    필수 필드 누락 시 `BugFixProposalError` throw (programmer-bug only).
+  - `list()` — `ReadonlyArray<BugFixProposal>` newest first. 반환 array는
+    `Object.freeze`로 봉인 (callers가 borrowed reference로 corrupt 못 함).
+  - `resolve(id)` — boolean (idempotent — 두 번째 호출은 false). 절대 throw 안 함.
+  - `clear()` — 전부 drop.
+
+  Opts: `maxEntries` (default 50, min 1), `now` (default `Date.now`),
+  `idGen` (default `bf-<8hex>` from `node:crypto.randomBytes(4)`).
+
+  ## Plane-clean imports
+
+  `src/agent/debug-trace-autofix.ts`는 `node:crypto` 하나만 import.
+  `@/observability` / `@/tool` / `@/llm` / `@/agent/loop` 전부 차단 — 진짜
+  leaf primitive. 소스 수정 경로 없음이 import boundary로 강제됨.
+evidence:
+  code:
+    - src/agent/debug-trace-autofix.ts
+  adrs: [186]
+  tests:
+    unit:
+      - tests/unit/agent-debug-trace-autofix-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: maxEntries
+    default: 50
+    note: LRU cap; capture가 초과 시 oldest 자동 drop. min 1 clamp.
+  - name: now
+    default: Date.now
+    note: Inject 시 deterministic capturedAt. Tests에서 핀.
+  - name: idGen
+    default: "bf-<8hex>"
+    note: Inject 시 deterministic id sequence (테스트 byte-identity 보장).
+deliberate_hold: null
+notes: |
+  Default-OFF — 아무도 wire 안 함. `debug-trace` skill은 hypothesis를 model
+  output text로 계속 render (기존 동작 무변). future caller (slash router
+  `/bug-fix-proposals`, planner UI panel, test rig)가 큐를 construct + skill
+  invocation context에 inject로 opt-in.
+
+  ## Phase 2 분리 이유 (세 가지 안전 piece)
+
+  1. **verify-guard wire** — failing scenario를 patch 전후로 실제 run +
+     nearest existing test (regression detect). 단순 "다음 turn에 test 도구
+     호출"이 아니라 patch boundary에 묶인 verify event.
+  2. **shadow rewind anchor** (ADR-0118) — 각 시도 직전 `ShadowOdb` snapshot,
+     regression 발견 시 byte-precise rollback.
+  3. **retry budget cap** — 동일 에러에 대해 N개 (default 3) hypothesis까지만
+     시도; budget 소진 시 큐로 fallback (= 이 슬라이스로 회귀).
+
+  세 piece 모두 이 코드베이스에 미해결 문제 아니지만, 묶으면 1 primitive가
+  audit 너무 큼. 따로 ADR (Phase 2 slice) + 따로 hellgate.
+
+  ## Hellgate 13 cases summary
+
+  A. capture (4) — id 포맷, 주입 clock, hypothesis 순서 보존, 필수필드 validation
+  B. list (3) — newest first, empty array, FROZEN array (pop/push throw)
+  C. resolve (3) — known true, unknown false, idempotent
+  D. LRU (2) — cap=3+4captures eviction (evicted id resolve=false),
+               injected idGen verbatim
+  E. determinism (1) — same captures + same clock + same idGen → byte-identical list()
+  + clear() smoke
+
+  Verification: `bun test tests/unit/agent-debug-trace-autofix-hellgate.test.ts`
+  → 14 pass / 0 fail / 41 expect() calls.

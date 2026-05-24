@@ -12,8 +12,14 @@
  * See `./types.ts` for the contract narrative.
  */
 
-import type { MetricSink } from "@/observability/metrics"
+import type { MetricSink } from "@/observability/metrics/port"
 import { logger } from "@/shared"
+import {
+  DEFAULT_PROMPT_CACHE_PRICING,
+  FALLBACK_PRICING_MODEL,
+  type PromptCachePricing,
+  SAFE_ZERO_PRICING,
+} from "./default-pricing"
 import type {
   CacheBreakpointAttribution,
   CacheHitEvent,
@@ -24,21 +30,27 @@ import type {
 } from "./types"
 import { PromptCacheError } from "./types"
 
-/** Default pricing — mirrors ADR-0138 `DEFAULT_MODEL_PRICING`'s cache-bearing
- *  entries. Kept INDEPENDENTLY from the budget-ledger so the observer can be
- *  imported without coupling to `@/agent/*` (the budget-bridge wires the two
- *  primitives at the surface layer, not at the module-graph layer). */
-const DEFAULT_CACHE_PRICING: Readonly<
-  Record<string, { inputPerM: number; cacheReadPerM: number; cacheWritePerM: number }>
-> = Object.freeze({
-  "claude-opus-4-7": { inputPerM: 15, cacheReadPerM: 1.5, cacheWritePerM: 18.75 },
-  "claude-sonnet-4-6": { inputPerM: 3, cacheReadPerM: 0.3, cacheWritePerM: 3.75 },
-  "claude-haiku-4-5": { inputPerM: 1, cacheReadPerM: 0.1, cacheWritePerM: 1.25 },
-})
-
-/** Picked deliberately as the safe middle ground (mirrors ADR-0138). */
-const FALLBACK_PRICING_KEY = "claude-sonnet-4-6"
+/** LRU ring default cap; the observer's aggregates remain monotonic across
+ *  evictions (contract #5). */
 const DEFAULT_MAX_EVENTS = 1000
+
+/** PromptCacheObserverOpts.pricing uses a slimmer shape (no outputPerM —
+ *  the observer doesn't read it). Project the bundled full table to that
+ *  shape so the existing options API is unchanged. */
+type ObserverPricing = { inputPerM: number; cacheReadPerM: number; cacheWritePerM: number }
+const toObserverPricing = (p: PromptCachePricing): ObserverPricing => ({
+  inputPerM: p.inputPerM,
+  cacheReadPerM: p.cacheReadPerM,
+  cacheWritePerM: p.cacheCreationPerM,
+})
+const BUNDLED_OBSERVER_PRICING: Readonly<Record<string, ObserverPricing>> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(DEFAULT_PROMPT_CACHE_PRICING).map(([k, v]) => [k, toObserverPricing(v)]),
+  ),
+)
+const BUNDLED_FALLBACK: ObserverPricing = toObserverPricing(
+  DEFAULT_PROMPT_CACHE_PRICING[FALLBACK_PRICING_MODEL] ?? SAFE_ZERO_PRICING,
+)
 
 /** Internal: mutable per-(model | session) accumulator. */
 interface RollupAcc {
@@ -83,7 +95,10 @@ const computeSavingsUsd = (
 }
 
 /** No-throw sink dispatch (contract #4 in types.ts). */
-const safeSend = (sink: MetricSink | undefined, sample: Parameters<MetricSink["send"]>[0]): void => {
+const safeSend = (
+  sink: MetricSink | undefined,
+  sample: Parameters<MetricSink["send"]>[0],
+): void => {
   if (sink === undefined) return
   try {
     sink.send(sample)
@@ -114,14 +129,11 @@ const validateEvent = (event: CacheHitEvent): void => {
 export const defaultPromptCacheObserver = (
   opts: PromptCacheObserverOpts = {},
 ): PromptCacheObserver => {
-  const pricing: Record<string, { inputPerM: number; cacheReadPerM: number; cacheWritePerM: number }> =
-    { ...DEFAULT_CACHE_PRICING, ...(opts.pricing ?? {}) }
-  const fallback =
-    pricing[FALLBACK_PRICING_KEY] ?? DEFAULT_CACHE_PRICING[FALLBACK_PRICING_KEY] ?? {
-      inputPerM: 0,
-      cacheReadPerM: 0,
-      cacheWritePerM: 0,
-    }
+  const pricing: Record<string, ObserverPricing> = {
+    ...BUNDLED_OBSERVER_PRICING,
+    ...(opts.pricing ?? {}),
+  }
+  const fallback = pricing[FALLBACK_PRICING_MODEL] ?? BUNDLED_FALLBACK
   const sink = opts.metricsSink
   const maxEvents = Math.max(1, Math.floor(opts.maxEvents ?? DEFAULT_MAX_EVENTS))
   const now = opts.now ?? Date.now
@@ -153,7 +165,7 @@ export const defaultPromptCacheObserver = (
     if (!warnedUnknownModels.has(model)) {
       warnedUnknownModels.add(model)
       logger.warn(
-        `prompt-cache: unknown model "${model}", falling back to ${FALLBACK_PRICING_KEY} pricing`,
+        `prompt-cache: unknown model "${model}", falling back to ${FALLBACK_PRICING_MODEL} pricing`,
       )
     }
     return fallback
@@ -221,9 +233,7 @@ export const defaultPromptCacheObserver = (
   const freezeBreakpoint = (b: CacheBreakpointAttribution): CacheBreakpointAttribution =>
     Object.freeze({ ...b })
 
-  const buildPerModelMap = (
-    src: Map<string, RollupAcc>,
-  ): ReadonlyMap<string, CacheModelRollup> => {
+  const buildPerModelMap = (src: Map<string, RollupAcc>): ReadonlyMap<string, CacheModelRollup> => {
     const out = new Map<string, CacheModelRollup>()
     for (const [k, v] of src.entries()) out.set(k, freezeRollup(v))
     return out
@@ -233,10 +243,7 @@ export const defaultPromptCacheObserver = (
    *  breakdown filtered to this session's events. perSession is empty in
    *  the nested snapshot (recursion stops at depth 1 — a session contains
    *  no further session scope). */
-  const buildSessionSnapshot = (
-    sessionId: string,
-    rollup: RollupAcc,
-  ): CachePerformanceSnapshot => {
+  const buildSessionSnapshot = (sessionId: string, rollup: RollupAcc): CachePerformanceSnapshot => {
     const sessionPerModel = new Map<string, RollupAcc>()
     for (const [k, v] of perSessionModel.entries()) {
       const [s, m] = k.split("\x00", 2) as [string, string]

@@ -1,4 +1,4 @@
-# ADR-0183: HTML → Markdown — swap inline 9-stage pipeline for `turndown`
+# ADR-0186: HTML → Markdown — swap inline 9-stage pipeline for `turndown`
 
 - Status: Accepted (supersedes the inline `htmlToMarkdown` in
   `src/tool/web/fetch.ts`)

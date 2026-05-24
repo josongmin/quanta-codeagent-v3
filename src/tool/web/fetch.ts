@@ -31,7 +31,7 @@
  *     with the hint to use a dedicated tool.
  *
  * The HTML→Markdown converter lives in a sibling module
- * (`./html-to-markdown`) backed by the `turndown` library (ADR-0183).
+ * (`./html-to-markdown`) backed by the `turndown` library (ADR-0186).
  * Re-exported here as `htmlToMarkdown` so external callers and the legacy
  * hellgate import path stay byte-stable.
  */

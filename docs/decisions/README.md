@@ -216,5 +216,7 @@ History of intentional or accidental ADR-number collisions and their reconciliat
 | 0132 | `0132-autonomous-proactive-reactor.md` (user) | `0146-read-image-url.md` | 2026-05-24 |
 | 0133 | `0133-hook-bidirectional-rpc.md` (user) | `0147-document-tools.md`, `0148-web-search-providers.md` | 2026-05-24 |
 | 0134 | `0134-skill-scope-tiering.md` (user) | `0149-engineering-skills-bundle.md` | 2026-05-24 |
-| 0176 | `0176-tool-call-dedup.md` (user) | `0183-html-to-markdown-turndown-swap.md` | 2026-05-25 |
+| 0176 | `0176-tool-call-dedup.md` (user) | `0186-html-to-markdown-turndown-swap.md` (initially picked 0183 but bumped — `0183-streaming-cancellation.md` already held by user sibling) | 2026-05-25 |
 | 0178 | `0178-mid-turn-interruption.md` (user) | `0184-conversation-checkpoint-lru-swap.md`, `0185-file-write-atomic-lib-swap.md` | 2026-05-25 |
+| 0183 | `0183-streaming-cancellation.md` (user) | `0187-health-snapshot-watcher.md`, `0189-tool-dedup-drift.md` | 2026-05-25 |
+| 0186 | `0186-distributed-tracing.md` (user), `0186-html-to-markdown-turndown-swap.md` (ours, earlier) | `0188-bug-fix-proposal-queue.md` | 2026-05-25 |
