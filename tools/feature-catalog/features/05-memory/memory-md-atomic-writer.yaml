@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "held-promotion"]
 depends_on: [memory-fence-cleanup, memory-outcome-enum, phase1-stage1-store, phase2-promotion-gate, codex-2-phase-consolidator]
 config_refs:

@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_TURN_SUMMARY, QUANTA_TURN_SUMMARY_VERBOSE]
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core", "held-promotion"]
 depends_on: [memory-citation-surface, cli-turn-summary]
 purpose: |

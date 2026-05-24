@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: [quanta.memory.phase]
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [consolidator-session-hook, memory-md-atomic-writer]
 purpose: |

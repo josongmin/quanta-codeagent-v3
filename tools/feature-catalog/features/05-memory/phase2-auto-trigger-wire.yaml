@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core", "held-promotion"]
 depends_on: [consolidator-session-hook, memory-md-atomic-writer]
 config_refs:

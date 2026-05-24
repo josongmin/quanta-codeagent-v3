@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [memorysearch-write-update, codex-2-phase-consolidator]
 purpose: |

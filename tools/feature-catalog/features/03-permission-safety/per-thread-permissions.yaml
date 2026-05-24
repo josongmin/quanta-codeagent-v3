@@ -12,7 +12,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [agent-types-split, permission-store-json, agent-loop-branch-hardening, per-host-agent-mode, plan-mode]
 purpose: |

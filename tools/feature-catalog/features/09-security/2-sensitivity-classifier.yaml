@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: [quanta.thread.id, quanta.thread.kind, quanta.tool.call.status]
 modes: [n-a]
 configurable: partial
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: ["surface:core", "security-touched"]
 depends_on: [secret-redaction-content-plane, redaction-config-gate, agent-dispatch-core, agent-loop-branch-hardening, distill-redaction-port]
 purpose: |

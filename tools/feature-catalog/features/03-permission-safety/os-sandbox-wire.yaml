@@ -10,7 +10,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_SANDBOX]
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [sandbox-policy, seatbelt-profile-compiler, landlock-degraded-passthrough, os-sandbox-port-router, landlock-phase2]
 purpose: |

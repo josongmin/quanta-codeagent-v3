@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, codex-2-phase-consolidator, cross-slice-mirror, fallback-kinds-policy]
 purpose: 시스템 프롬프트에 "Durable state belongs in workspace files" 단락 — 메모리 = routing hint, 영속 사실 = 작업공간 파일로 분리. cache prefix byte-stable

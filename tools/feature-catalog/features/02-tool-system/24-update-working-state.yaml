@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
 purpose: |

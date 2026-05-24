@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [memory-dedup-planner, embedder-port, memory-eviction-planner, tier, sqlite-persistent-store]
 purpose: |

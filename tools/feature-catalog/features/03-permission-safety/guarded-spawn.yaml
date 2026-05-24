@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [bash-timeout-cap, sandbox-policy, escalating-kill, disclaimer-shell-wrapper, dockersandbox]
 purpose: |

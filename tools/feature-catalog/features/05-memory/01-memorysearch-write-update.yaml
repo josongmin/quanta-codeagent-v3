@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
-owners: ['@songmin', team-memory]
+owners: ['@songmin']
 labels: [surface:core]
 depends_on: [codex-2-phase-consolidator, llm-distill, memory-self-edit-tools, memory-summary-aggregate-coalesce, phase1-stage1-store]
 purpose: self-edit memory_search/write/update, lexical graceful degrade

@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core", "adr:0159"]
 depends_on: [retrieval-rerank-registry, retrieval-multi-vendor-embedding]
 purpose: |

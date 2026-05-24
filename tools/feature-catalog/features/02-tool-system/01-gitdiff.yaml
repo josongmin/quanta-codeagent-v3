@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_GIT_TOOLS]
-owners: ['@songmin', team-tools]
+owners: ['@songmin']
 labels: [absorbed:codex, surface:cli]
 depends_on: [git-runner-cancellation-signal, git-branch-name-schema-guard, assemble-config, cross-slice-mirror, deferred-tool-registry]
 purpose: git_diff/git_status/git_log/git_blame — read-only·concurrency-safe·GitRunner 주입, mutating은 bash 잔류

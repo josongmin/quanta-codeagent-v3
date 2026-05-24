@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: ["quanta.hitl", "quanta.tool.call.status"]
 modes: [interactive, headless]
 configurable: integrated
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [surface:cli, security-touched, tier:1]
 depends_on: [agent-dispatch-core, agent-loop-branch-hardening, secret-redaction-content-plane, 183-safety-net-green, deny-and-steer-verb]
 config_refs:

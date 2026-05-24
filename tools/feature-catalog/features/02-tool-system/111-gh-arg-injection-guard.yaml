@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [git-read-trio]
 purpose: |

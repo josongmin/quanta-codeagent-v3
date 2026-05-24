@@ -10,7 +10,7 @@ monitoring: n-a
 telemetry_keys: ["quanta.hitl"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:cli, security-touched]
 depends_on: [183-safety-net-green, agent-loop-branch-hardening, agent-dispatch-core, deny-and-steer-verb, hitl-4-tier-gate]
 config_refs:

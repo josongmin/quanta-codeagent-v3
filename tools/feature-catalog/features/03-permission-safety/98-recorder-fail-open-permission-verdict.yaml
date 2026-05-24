@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: ["quanta.permission.stack.source", "quanta.permission.decided_by"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
-owners: ['@songmin', team-safety]
+owners: ['@songmin']
 labels: [absorbed:codex, surface:cli, security-touched, held-promotion]
 purpose: |
   Negative invariant: a thrown PermissionRecorder cannot deny an otherwise-

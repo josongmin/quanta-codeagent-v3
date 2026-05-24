@@ -11,7 +11,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_WEB_SEARCH_DUCKDUCKGO]
-owners: ["@songmin", "team-tools"]
+owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [read-write-edit, typed-tool-failure-modes, tool-output-schema-factory, fsjailerror, git-review-diff]
 purpose: |

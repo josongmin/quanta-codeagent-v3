@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor", "held-promotion"]
 depends_on: [memory-md-atomic-writer]
 config_refs:

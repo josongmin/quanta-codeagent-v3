@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: static
-owners: ['@songmin', team-safety]
+owners: ['@songmin']
 labels: [surface:cli, security-touched]
 purpose: HARD_DENY 선행 / readonly short-circuit
 evidence:

@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
-owners: ['@songmin', team-memory]
+owners: ['@songmin']
 labels: [surface:core, absorbed:codex]
 depends_on: [codex-2-phase-consolidator, consolidator-session-hook, memory-eviction-planner, memory-dedup-planner]
 purpose: |

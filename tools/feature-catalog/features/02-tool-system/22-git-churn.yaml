@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
-owners: ["@songmin", "team-tools"]
+owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [git-runner-cancellation-signal, assert-never-exhaustiveness, byte-stable-string-comparator, cross-slice-mirror, deferred-tool-registry]
 purpose: |

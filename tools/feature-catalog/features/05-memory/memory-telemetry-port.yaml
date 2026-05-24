@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core", "tier:port", "absorbed:opentelemetry", "security-touched"]
 depends_on: [memory-distill-redaction-fence]
 purpose: |

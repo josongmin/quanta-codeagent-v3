@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: [quanta.tool.call.status]
 modes: [n-a]
 configurable: static
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli, security-touched]
 depends_on: [typed-tool-failure-modes, agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, read-image]
 config_refs:

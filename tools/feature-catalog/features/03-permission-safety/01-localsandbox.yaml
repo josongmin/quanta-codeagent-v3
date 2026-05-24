@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: static
-owners: ['@songmin', team-safety]
+owners: ['@songmin']
 labels: [surface:cli, security-touched]
 depends_on: [sandbox-policy, bash-timeout-cap, escalating-kill, guarded-spawn, os-sandbox-wire]
 purpose: LocalSandbox

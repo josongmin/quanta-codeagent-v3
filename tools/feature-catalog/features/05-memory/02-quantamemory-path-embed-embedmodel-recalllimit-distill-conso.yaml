@@ -11,7 +11,7 @@ modes: [interactive]
 configurable: integrated
 config_refs:
   env: [QUANTA_MEMORY]
-owners: ['@songmin', team-memory]
+owners: ['@songmin']
 labels: [surface:core, absorbed:codex]
 depends_on: [memory-self-edit-tools, embedder-port]
 purpose: |

@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: ["quanta.tool.call.status"]
 modes: [interactive, headless]
 configurable: integrated
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [surface:cli, security-touched, tier:1, slice:S2]
 depends_on: [agent, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
 purpose: |

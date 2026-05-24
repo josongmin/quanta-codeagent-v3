@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:cli, security-touched, held-promotion]
 depends_on: [trust-scope-wire-up]
 purpose: |

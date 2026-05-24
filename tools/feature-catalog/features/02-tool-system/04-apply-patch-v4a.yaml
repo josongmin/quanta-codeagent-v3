@@ -10,7 +10,7 @@ monitoring: integrated
 telemetry_keys: ["quanta.patch", "quanta.patch.fuzzy_match_tier", "quanta.patch.fuzzy_matched", "quanta.patch.op"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
-owners: ["@songmin", "team-tools"]
+owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [patch-v4a-otel-emit, patch-filesystem-port, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
 config_refs:

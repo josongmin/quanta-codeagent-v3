@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
-owners: ["@songmin", "team-memory"]
+owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [memory-vector-math, memory-dedup-planner, memory-eviction-planner, sqlite-persistent-store, embedder-port]
 purpose: |

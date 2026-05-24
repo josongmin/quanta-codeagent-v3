@@ -9,7 +9,7 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: static
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [permission-policy-engine, permission-store-json, harddeny-readonly-short-circuit, per-host-agent-mode, per-thread-permissions]
 purpose: |

@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 config_refs:
   env: [QUANTA_PERMISSION_STATE]
-owners: ["@songmin", "team-safety"]
+owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 depends_on: [per-host-agent-mode, per-thread-permissions, post-denial-precedence, quanta-home-meta-root, runtime-config-ssot]
 purpose: |
