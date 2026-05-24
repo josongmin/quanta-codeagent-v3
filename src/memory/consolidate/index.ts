@@ -7,13 +7,25 @@
  * Wave C (writer), and Wave D (session-end wiring) ride this barrel.
  */
 export * from "./constants"
+export {
+  type PreferenceSignal,
+  parsePreferenceSignal,
+} from "./grammar"
+// ADR-0131 — preference phrase grammar + memory frontmatter lint + Phase 2
+// promotion gate. All Wave-W1 additions are default-OFF (call-site opt-in).
+export { type LintIssue, type LintReport, lintMemoryFrontmatter } from "./lint"
 export { runPhase1 } from "./phase1"
 export { runPhase2 } from "./phase2"
 export { LlmPhase2Port } from "./phase2-llm"
+export {
+  type SelectForPhase2PromotionOpts,
+  selectForPhase2Promotion,
+} from "./phase2-promotion"
 export { ensureConsolidateSchema } from "./schema"
 export { Stage1Store } from "./store"
 export type {
   MemoryDirPaths,
+  MemoryOutcome,
   Phase1Input,
   Phase1Outcome,
   Phase1Port,
@@ -26,6 +38,8 @@ export type {
   WatermarkState,
 } from "./types"
 export {
+  isMemoryOutcome,
+  MEMORY_OUTCOMES,
   MemoryWriteError,
   Phase1DistillError,
   Phase2ConsolidateError,
