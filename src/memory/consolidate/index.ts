@@ -8,6 +8,7 @@
  */
 export * from "./constants"
 export { runPhase1 } from "./phase1"
+export { runPhase2 } from "./phase2"
 export { LlmPhase2Port } from "./phase2-llm"
 export { ensureConsolidateSchema } from "./schema"
 export { Stage1Store } from "./store"
@@ -31,3 +32,10 @@ export {
   RolloutTaintedError,
   WatermarkConflictError,
 } from "./types"
+export type {
+  MemoryWriteContent,
+  MemoryWriteResult,
+  MemoryWriterOptions,
+  NodeFsLike,
+} from "./writer"
+export { MemoryWriter } from "./writer"

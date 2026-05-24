@@ -27,8 +27,6 @@ import { errMessage } from "@/shared"
  *        re-enforces the cap on the LLM's output and rejects overflow.
  */
 
-// REMOVE-ME (verify biome fence)
-import { assembleFromEvents as _verify } from "@/llm"
 import { MEMORY_MAX_BYTES, MEMORY_SUMMARY_MAX_BYTES } from "./constants"
 import {
   Phase2ConsolidateError,
@@ -36,8 +34,6 @@ import {
   type Phase2Summarizer,
   type Stage1Output,
 } from "./types"
-
-const _useVerify = _verify
 
 /** Verbatim Codex injection-defense paragraph (ADR-0068 §5). Stays in a
  *  single export so a future drift is visible in one place. */

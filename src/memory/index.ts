@@ -4,14 +4,24 @@ export { SqliteStore } from "./adapters/sqlite"
  *  D session-end hook in `@/agent` wires `runPhase1` through these ports so
  *  the loop never reaches into `consolidate/*` internals (RFC §3.1 layering). */
 export {
+  MemoryWriteError,
+  MemoryWriter,
   Phase1DistillError,
   type Phase1Input,
   type Phase1Outcome,
   type Phase1Port,
+  Phase2ConsolidateError,
+  type Phase2Input,
+  type Phase2Outcome,
+  type Phase2Port,
+  type Phase2Summarizer,
   runPhase1,
+  runPhase2,
   type Stage1Output,
   Stage1Store,
   type Stage1StorePort,
+  WatermarkConflictError,
+  type WatermarkState,
 } from "./consolidate"
 /** Phase-2 consolidated `memory_summary.md` hard byte cap. Re-exported through
  *  the `@/memory` barrel so consumers (e.g. `@/agent/prompt-sections`) need not
@@ -19,6 +29,8 @@ export {
 export {
   MEMORY_SUMMARY_MAX_BYTES,
   MIN_TURN_THRESHOLD as MEMORY_CONSOLIDATE_MIN_TURNS,
+  PHASE2_AUTO_TRIGGER_MAX_AGE_MS,
+  PHASE2_AUTO_TRIGGER_PENDING,
 } from "./consolidate/constants"
 export {
   DEFAULT_DUPE_THRESHOLDS,

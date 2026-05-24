@@ -1,0 +1,60 @@
+id: phase2-auto-trigger-wire
+title: Phase 2 session-start auto-trigger — runMemoryPhase2AutoTrigger (non-blocking)
+section: 5
+subsystem: 장기 메모리 — Phase 2 session-start wire (ADR-0068 Wave B + Slice S9 Part B)
+order: 73
+maturity: L4
+status: stable
+purpose: |
+  Mirror of the session-end Phase 1 hook for the Phase 2 cross-session
+  synthesizer. Reads Stage1 watermark + pending count from the injected
+  `Stage1StorePort` at session-start; if `pending ≥ PHASE2_AUTO_TRIGGER_PENDING`
+  OR `age_ms ≥ PHASE2_AUTO_TRIGGER_MAX_AGE_MS` (and pending > 0), schedules
+  `runPhase2(...)` as a fire-and-forget microtask so the session-start
+  completes before the LLM call even begins. Pending-count branch wins when
+  both fire to keep the trigger reason deterministic. NO-THROW contract:
+  store errors surface as `error` outcomes; background `runPhase2`
+  rejections surface via the log callback only (no unhandled rejection).
+  In-flight guard (WeakSet keyed by writer) keeps concurrent session-starts
+  from double-firing while a prior run is still in flight. DEFAULT-OFF:
+  absent `phase2` block ⇒ zero allocation, byte-identical to today.
+evidence:
+  code:
+    - src/agent/memory-consolidator-hook.ts
+    - src/memory/consolidate/phase2.ts
+    - src/memory/consolidate/constants.ts
+    - src/memory/index.ts
+  adrs: [68]
+  tests:
+    unit:
+      - tests/unit/memory-phase2-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - phase2.enabled — host opt-in (default-OFF; absent ⇒ skip phase2_disabled)
+  - phase2.port — Phase2Port (wraps cheaper summarizer LLM per ADR-0011)
+  - phase2.store — Stage1StorePort (countSince / getWatermark / fetchSince)
+  - phase2.writer — MemoryWriter (3-file atomic + git commit)
+  - phase2.existingContent — pre-read on-disk MEMORY.md/raw/summary (caller fetches)
+  - phase2.mode — "INIT" | "incremental" (default incremental)
+  - PHASE2_AUTO_TRIGGER_PENDING (constant, 5 rows) — pending-count threshold
+  - PHASE2_AUTO_TRIGGER_MAX_AGE_MS (constant, 48h) — age threshold
+deliberate_hold:
+  reason: |
+    The hook itself is a pure orchestration seam — wiring the actual call
+    site into `runAgent` is the host's job (loop.ts owner). This lets the
+    Web/Tauri surface call it from its own session-start path with
+    different timing semantics (e.g. background tick vs first-prompt).
+  promotion_path: |
+    Host surface (CLI / Web / Tauri) calls `runMemoryPhase2AutoTrigger`
+    once per session start with a resolved phase2 block. The CLI surface
+    needs a `Phase2Summarizer` wrapper around its LLM adapter (see
+    `Phase2Summarizer` JSDoc in `src/memory/consolidate/types.ts` for the
+    one-line wire) + a `MemoryWriter` built from `node:fs/promises`.
+notes: |
+  Pairs with `consolidator-session-hook` (Phase 1 session-end) and
+  `memory-md-atomic-writer` (Phase 2 disk side). Anti-leak invariant:
+  the outcome surface is `{kind, reason}` only — NEVER carries memoryMd /
+  rawMemoriesMd / memorySummaryMd / score bytes. Verified by hellgate
+  test "anti-leak invariants: memory score / content NEVER appears in
+  the structured outcome".

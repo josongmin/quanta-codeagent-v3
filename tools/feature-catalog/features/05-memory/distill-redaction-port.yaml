@@ -1,0 +1,50 @@
+id: distill-redaction-port
+title: Consolidator distill-input redaction port — abstracted seam for Phase 1 LLM
+section: 5
+subsystem: 장기 메모리 — distill input port (Slice S9 Part C)
+order: 74
+maturity: L4
+status: stable
+purpose: |
+  Abstracted redaction seam at the consolidator boundary: `consolidator.redact?:
+  (s:string) => string` on `ConsolidatorHookInput`. Each rollout message's
+  string-leaf content (and each `{type:"text"}` block inside structured
+  arrays) is run through the redactor BEFORE `runPhase1` receives it. The
+  port is intentionally opaque — pattern internals (RedactionKind,
+  RedactionHit, regex tables, placeholders) NEVER cross this seam, so a
+  refactor of `redactSecrets` internals does not force a memory-layer
+  change. Default (omitted) ⇒ identity, byte-identical to prior behavior.
+  This is a SECOND fence in addition to the existing `memory-distill.ts`
+  redaction-three-points fence: the consolidator path (ADR-0068 Phase 1)
+  reaches its LLM through a separate codepath and needed its own seam.
+evidence:
+  code:
+    - src/agent/memory-consolidator-hook.ts
+    - src/security/redaction.ts
+    - src/security/index.ts
+  adrs: [68, 78]
+  tests:
+    unit:
+      - tests/unit/memory-distill-redaction-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - "ConsolidatorHookInput.consolidator.redact — host-injected (s:string) => string (default omitted ⇒ identity)"
+deliberate_hold:
+  reason: |
+    The default IS identity (default-OFF byte-identical). Hosts that care
+    about long-term memory hygiene wire `(s) => redactSecrets(s,
+    {origin:"memory_distill"}).text`. The default does not auto-wire
+    `redactSecrets` so a host that wants a custom redactor (organization
+    DLP, etc.) is not surprised.
+  promotion_path: |
+    The CLI surface should wire the real redactor by default once the
+    consolidator block is constructed (CLI is in user WIP — wiring is a
+    follow-up to this slice).
+notes: |
+  Anti-leak invariant: the redaction port surface is `(s: string) =>
+  string` — NOT a richer shape exposing `RedactionKind` / `RedactionHit`
+  / patterns. Verified by hellgate test "anti-leak invariant: redaction
+  port surface exposes NO pattern internals" which asserts the
+  consolidator-hook module exports zero pattern symbols. Pairs with
+  `memory-distill-redaction-fence` (the older `memory-distill.ts` path).
