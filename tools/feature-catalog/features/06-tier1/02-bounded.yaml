@@ -5,7 +5,13 @@ subsystem: 서브에이전트
 order: 2
 maturity: L4
 status: stable
-purpose: bounded 다단계 재귀
+purpose: |
+  서브에이전트 다단계 재귀를 `maxDepth` (default 3)로 hard-bound. 자식 호출
+  마다 `req.depth = parentDepth + 1`이 전파되고, `req.depth > maxDepth`인
+  spawn 시도는 throw가 아니라 recoverable `deny` tool_result로 부모에게
+  반환된다 — 모델이 다른 경로로 회복할 수 있도록 함. 이 guard는 belt-
+  and-braces가 아니라 LOAD-BEARING 재귀 한계 (다른 모든 자식 dispatch가
+  이 한도를 통과해야 함).
 evidence:
   code: []
   adrs: []

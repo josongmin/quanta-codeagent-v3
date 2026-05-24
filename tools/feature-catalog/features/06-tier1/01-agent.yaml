@@ -5,7 +5,13 @@ subsystem: 서브에이전트
 order: 1
 maturity: L4
 status: stable
-purpose: agent(=Task) 실 runAgent fork, task_output/task_stop+TaskRegistry
+purpose: |
+  `agent` 도구(=Task) — 부모 loop가 자식 runAgent를 fork해 sub-thread로
+  실행. 부모는 자식의 `task_output` 채널을 통해 progress를 받고,
+  `task_stop`으로 force-cancel을 보낼 수 있다. 활성 자식은 `TaskRegistry`
+  에 등록되어 lifecycle / cancellation routing이 한 곳에 모인다. 부모
+  safety-posture (mode / verifyGuard / closeoutGuard / hitl)는
+  `buildChildConfig`가 자식 config에 옵셔널 spread로 전파한다.
 evidence:
   code: []
   adrs: []

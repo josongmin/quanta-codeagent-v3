@@ -5,7 +5,13 @@ subsystem: 스킬 — `Skill` 도구
 order: 2
 maturity: L4
 status: stable
-purpose: tool-scoping 강제
+purpose: |
+  활성 스킬의 `allowedTools` 프론트매터를 LOAD-BEARING 권한 경계로 강제 —
+  스킬이 활성화된 동안 그 set에 없는 도구는 호출이 차단된다 (deny
+  message는 위반 도구명 + 허용 목록을 명시해 모델이 다른 경로로 회복
+  가능). `allowedTools: []` 는 NO tools allowed를 의미하며 빈 array가
+  default fail-open으로 해석되지 않는다. positive-set 표현이므로 신규
+  도구는 명시적으로 enroll되지 않으면 자동 BLOCK.
 evidence:
   code: []
   adrs: []

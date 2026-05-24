@@ -5,7 +5,14 @@ subsystem: Mode enum (ADR-0018)
 order: 1
 maturity: L5
 status: stable
-purpose: 'AgentMode = default | plan | review | audit. MUTATING_MODES = Set<AgentMode> 인버스 : mutating-allowed positive set으로 표현 → 미지/신규 mode 런타임 값은 자동 BLOCK.'
+purpose: |
+  AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을
+  positive set(`MUTATING_MODES = Set<AgentMode>(["default"])`)으로 표현하는
+  인버스 디자인. read-only-set 인버스였다면 신규로 추가되는 mode가 자동으로
+  write access를 받는 silent-broaden 위험이 있음. 본 표현 하에서는 알려지지
+  않은(미지/신규) 런타임 mode 값은 admissibility-gate에서 mutating tool
+  dispatch가 자동 BLOCK된다. `--plan` 등 surface flag는 deprecated alias로
+  backward-compat 처리.
 evidence:
   code: [src/agent/mode.ts, src/agent/plan.ts]
   adrs: []

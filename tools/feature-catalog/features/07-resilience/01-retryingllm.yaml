@@ -5,7 +5,14 @@ subsystem: Retry
 order: 1
 maturity: L5
 status: stable
-purpose: RetryingLLM pre-stream만 backoff, mid-stream rethrow, PTL→compact 라우팅
+purpose: |
+  RetryingLLM (`src/agent/retry.ts`) — LLMPort 데코레이터. transient pre-stream
+  실패(network/server_error/overloaded/rate_limit)에만 bounded backoff로
+  재시도하고, 일단 stream이 시작된 후의 에러는 partial output 회수 + rethrow
+  (mid-stream replay 금지로 trajectory 결정성 보존). prompt-too-long(PTL)은
+  retry 대신 상위 compact 경로로 라우팅(같은 connection을 더 키워서 풀 수
+  있는 에러가 아님). RECOVERY_CAPS(turn-level)과 직교 — 본 데코레이터는
+  *connection* 단계 retry, recovery는 *turn* 단계 시도 횟수.
 evidence:
   code: []
   adrs: []

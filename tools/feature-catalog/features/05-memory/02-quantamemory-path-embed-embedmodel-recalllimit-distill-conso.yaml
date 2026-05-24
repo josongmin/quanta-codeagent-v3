@@ -5,7 +5,14 @@ subsystem: 도구/노브
 order: 2
 maturity: L4
 status: stable
-purpose: '[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SELF_EDIT/_RECALL_TIERS]'
+purpose: |
+  메모리 서브시스템 surface knob 집합 `QUANTA_MEMORY_*` (PATH / EMBED /
+  EMBED_MODEL / RECALL_LIMIT / DISTILL / CONSOLIDATE / SELF_EDIT /
+  RECALL_TIERS). 각각 store 위치, 임베딩 어댑터, 임베딩 모델 식별자,
+  recall 결과 cap, 세션 종료 distill, 2-phase consolidator, self-edit 도구
+  활성화, recall tier 선택을 host-injectable seam으로 노출. 본 entry는
+  knob 카탈로그 reference — 구체 동작은 각 sub-feature (codex-2-phase-
+  consolidator / embedder-port / memory-self-edit-tools 등)가 담는다.
 evidence:
   code: []
   adrs: [8]

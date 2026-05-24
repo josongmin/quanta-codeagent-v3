@@ -5,7 +5,13 @@ subsystem: 모델 Fallback (Tier 0)
 order: 3
 maturity: L5
 status: stable
-purpose: '이중 provider Anthropic+OpenAI / (). 인증 prerequisite: ANTHROPIC_API_KEY / OPENAI_API_KEY , OPENAI_BASE_URL.'
+purpose: |
+  Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는
+  OpenAI-호환 endpoint) 중 활성 백엔드를 고르고, `QUANTA_MODEL`로 모델 id를
+  지정. 인증 prerequisite: 활성 provider에 따라 `ANTHROPIC_API_KEY` 혹은
+  `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`). CLI 진입점은 `.env` 자동
+  로드로 위 변수를 process.env에 hydrate (`src/apps/cli/dotenv.ts` —
+  first-wins, 실제 환경 변수를 절대 override하지 않음).
 evidence:
   code: [src/apps/cli/dotenv.ts]
   adrs: [2]

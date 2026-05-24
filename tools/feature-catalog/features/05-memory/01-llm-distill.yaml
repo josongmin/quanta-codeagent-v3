@@ -5,7 +5,13 @@ subsystem: 자동 지식처리
 order: 1
 maturity: L4
 status: stable
-purpose: 세션종료 LLM distill(휴리스틱 폴백), dedup→LLM 중재, eviction+decay
+purpose: |
+  세션 종료 시 LLM distill (provider 미주입 / 호출 실패 시 휴리스틱 폴백),
+  pre-save dedup 후보 발견 시 LLM이 merge/supersede 중재, 정주기 eviction
+  + age 기반 importance decay로 long-term store가 한도 안에서 유지되도록
+  하는 자동 지식 처리 축. 본 entry는 큰 그림 reference — 구체 모듈은
+  memory-dedup-planner / memory-eviction-planner / consolidator-session-hook
+  / codex-2-phase-consolidator로 분리.
 evidence:
   code: []
   adrs: [8]
