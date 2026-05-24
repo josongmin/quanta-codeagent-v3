@@ -1,0 +1,50 @@
+id: shared-test-harness
+title: shared test harness — ScriptedLLM / FakeLLM / RecordingStream / cfg / findEvent SSOT
+section: 8
+subsystem: 테스트 인프라 (LLM·StreamPort 더블 + AgentConfig 빌더 단일 출처)
+order: 75
+maturity: L5
+status: stable
+purpose: |
+  `tests/integration/_harness.ts` 는 137 테스트 파일이 공유하는 단일-출처
+  테스트 더블 묶음이다. `tests/unit/_harness.ts` 는 한 줄 re-export 로
+  unit 슬라이스에도 같은 심볼을 노출 — "ScriptedLLM/FakeLLM/RecordingStream
+  을 테스트 파일 안에서 로컬 정의하지 말 것" 이라는 invariant 를 강제한다.
+  제공 primitives:
+   - `ScriptedLLM` — `Step[]` (`ev` / `thr`) 스크립트로 turn 별 events 또는
+     throw 를 replay; `inputs` / `seenMessages` / `calls` 노출 (PTL·재시도
+     검증용). 스크립트가 소진되면 마지막 step 을 반복 (defensive).
+   - `FakeLLM` — "한 호출에 한 script" 단순 더블; 기본 `text("ok")` end-turn
+     스크립트로 ceremony 없는 인스턴스화 (`new FakeLLM()`) 가능.
+   - `RecordingStream` / `NullStream` 별칭 — `StreamPort` double, 모든
+     `AgentEvent` 를 `events[]` 로 캡처.
+   - `cfg(over)` / `baseConfig(over)` — `AgentConfig` 빌더; bypass 권한 +
+     tmp cwd + 5-turn cap + acceptEdits 권한 + 기본 user message 로 ceremony
+     제거. `baseConfig` 는 `llm` 기본값까지 채워 reminder-tail 류 테스트가
+     LLM identity 신경 안 써도 되게 한다.
+   - 이벤트/턴 헬퍼: `text` · `toolUse` · `multiToolUse` · `turnScript` ·
+     `findEvent<T>` · `eventsOf<T>` — 모두 `AgentEvent["type"]` 디스크리미넌트
+     기반 타입 좁힘으로 payload 에 typed 접근. inline
+     `events.find(e => e.type === ...)` 안티패턴을 회피.
+   - `withTimeout(p, ms, label)` — 매달림이 "느린 테스트" 가 아니라 "루프
+     버그" 임을 단언하는 hard guard; 86 파일이 직접 사용 중.
+  하나의 SSOT 가 깨지면 137 테스트가 동시에 발견 — drift hazard 제거가
+  핵심 가치.
+evidence:
+  code:
+    - tests/integration/_harness.ts
+    - tests/unit/_harness.ts
+  adrs: [3]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Re-export 패턴은 의도적: 슬라이스(unit·integration)는 다른 디렉토리에
+  살지만 더블의 정의는 한 파일에서만 산다. README 의 "Import the harness
+  from `./_harness`, never redefine `ScriptedLLM` / `FakeLLM` /
+  `RecordingStream` / `cfg` locally" 규칙이 이 invariant 의 사회적 강제,
+  파일 1 개 SSOT 가 기술적 강제. `withTimeout` 사용량(86) 이 harness 의
+  spread (~63% of consumers) 를 보여준다.
