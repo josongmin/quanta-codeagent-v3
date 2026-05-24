@@ -14,8 +14,8 @@
  * never infer comments from titles or notifications; the JSON is the truth.
  */
 
-import type { ClockPort, ProactiveTrigger, TriggerSourcePort } from "./types"
 import type { GhCliPort, GhCliResult } from "./trigger-source-ci"
+import type { ClockPort, ProactiveTrigger, TriggerSourcePort } from "./types"
 
 /**
  * Watermark store — a tiny KV. Production binds a file-backed impl
@@ -54,9 +54,7 @@ interface GhCommentRow {
   readonly updated_at?: string
 }
 
-export const createPrCommentTriggerSource = (
-  opts: PrCommentTriggerOpts,
-): TriggerSourcePort => {
+export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): TriggerSourcePort => {
   return {
     async poll(pollOpts): Promise<readonly ProactiveTrigger[]> {
       const signal = pollOpts?.signal
@@ -66,8 +64,7 @@ export const createPrCommentTriggerSource = (
       // entire comment history at first sight (a fresh process should react
       // only to NEW activity).
       const existing = await opts.watermarkStore.load(opts.watermarkKey)
-      const watermark =
-        existing ?? new Date(opts.clockPort.now()).toISOString()
+      const watermark = existing ?? new Date(opts.clockPort.now()).toISOString()
       if (existing === undefined) {
         // Seed and short-circuit: nothing is "newer than now".
         await opts.watermarkStore.save(opts.watermarkKey, watermark)
@@ -76,12 +73,7 @@ export const createPrCommentTriggerSource = (
       if (signal !== undefined && signal.aborted) return []
 
       const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?since=${encodeURIComponent(watermark)}`
-      const res = await safeRun(
-        opts.ghCliPort,
-        ["api", path],
-        opts.repoCwd,
-        signal,
-      )
+      const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
       if (res === undefined || res.exitCode !== 0) return []
       if (signal !== undefined && signal.aborted) return []
 

@@ -7,17 +7,10 @@
  */
 
 export type {
-  AgentLoopPort,
-  ClockPort,
-  EnvPort,
-  LastTurnOutcome,
-  ProactiveTrigger,
-  ReactorSelfWakeEvent,
-  TriggerEvidence,
-  TriggerReason,
-  TriggerSourcePort,
-} from "./types"
-export { ALL_TRIGGER_REASONS } from "./types"
+  SelfWakeOpts,
+  SelfWakeResult,
+} from "./self-wake"
+export { injectSimulatedTurn, QUIET_WINDOW_MS, REACTOR_ENV_FLAG } from "./self-wake"
 
 export type {
   CiTriggerOpts,
@@ -35,9 +28,15 @@ export {
   createInMemoryWatermarkStore,
   createPrCommentTriggerSource,
 } from "./trigger-source-pr-comment"
-
 export type {
-  SelfWakeOpts,
-  SelfWakeResult,
-} from "./self-wake"
-export { injectSimulatedTurn, QUIET_WINDOW_MS, REACTOR_ENV_FLAG } from "./self-wake"
+  AgentLoopPort,
+  ClockPort,
+  EnvPort,
+  LastTurnOutcome,
+  ProactiveTrigger,
+  ReactorSelfWakeEvent,
+  TriggerEvidence,
+  TriggerReason,
+  TriggerSourcePort,
+} from "./types"
+export { ALL_TRIGGER_REASONS } from "./types"

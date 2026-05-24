@@ -48,11 +48,7 @@ import { randomUUID } from "node:crypto"
  * died unexpectedly) — same contract as `defaultGitRunner`.
  */
 export interface GitProcessPort {
-  run(
-    args: readonly string[],
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<GitProcessResult>
+  run(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GitProcessResult>
 }
 
 export interface GitProcessResult {
@@ -158,9 +154,7 @@ const FORCE_WITH_LEASE_REJECTED_MARKER = "stale info"
  * is restored (best-effort) to its pre-call branch + stash state before the
  * error propagates.
  */
-export const snapshotDirtyToCloudBranch = async (
-  opts: SnapshotOpts,
-): Promise<SnapshotResult> => {
+export const snapshotDirtyToCloudBranch = async (opts: SnapshotOpts): Promise<SnapshotResult> => {
   const branchPrefix = opts.branchPrefix ?? DEFAULT_BRANCH_PREFIX
   const pushRemote = opts.pushRemote ?? DEFAULT_PUSH_REMOTE
   const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH
@@ -197,11 +191,7 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
 
   // 1. Confirm we're inside a git repo. `git rev-parse --git-dir` is the
   //    cheapest non-mutating probe.
-  const inside = await opts.gitPort.run(
-    ["rev-parse", "--git-dir"],
-    opts.repoCwd,
-    opts.abortSignal,
-  )
+  const inside = await opts.gitPort.run(["rev-parse", "--git-dir"], opts.repoCwd, opts.abortSignal)
   if (inside.exitCode !== 0) {
     throw new SnapshotErrorThrown({
       kind: "not-a-repo",
@@ -230,11 +220,7 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
   //    per dirty entry (parseable, locale-independent — we set `LC_ALL=C` in
   //    the runner). Empty stdout ⇒ nothing to snapshot.
   checkAbort(opts.abortSignal, "status")
-  const status = await opts.gitPort.run(
-    ["status", "--porcelain"],
-    opts.repoCwd,
-    opts.abortSignal,
-  )
+  const status = await opts.gitPort.run(["status", "--porcelain"], opts.repoCwd, opts.abortSignal)
   if (status.exitCode !== 0) {
     throw new SnapshotErrorThrown({
       kind: "git-failed",
@@ -317,28 +303,17 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
     checkAbort(opts.abortSignal, "add")
     await runOrFail(opts, ["add", "-A"], "add")
     checkAbort(opts.abortSignal, "commit")
-    await runOrFail(
-      opts,
-      ["commit", "-m", "snapshot for cloud agent"],
-      "commit",
-    )
+    await runOrFail(opts, ["commit", "-m", "snapshot for cloud agent"], "commit")
     checkAbort(opts.abortSignal, "push")
     const pushRes = await opts.gitPort.run(
-      [
-        "push",
-        opts.pushRemote,
-        branchName,
-        "--force-with-lease",
-      ],
+      ["push", opts.pushRemote, branchName, "--force-with-lease"],
       opts.repoCwd,
       opts.abortSignal,
     )
     if (pushRes.exitCode !== 0) {
       // Distinguish a lease-protect rejection from a generic push failure so
       // the caller can re-poll vs surface to the user.
-      if (
-        pushRes.stderr.toLowerCase().includes(FORCE_WITH_LEASE_REJECTED_MARKER)
-      ) {
+      if (pushRes.stderr.toLowerCase().includes(FORCE_WITH_LEASE_REJECTED_MARKER)) {
         throw new SnapshotErrorThrown({
           kind: "force-with-lease-rejected",
           stderr: pushRes.stderr,
@@ -352,11 +327,7 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
       })
     }
     checkAbort(opts.abortSignal, "rev-parse-sha")
-    const shaRes = await opts.gitPort.run(
-      ["rev-parse", "HEAD"],
-      opts.repoCwd,
-      opts.abortSignal,
-    )
+    const shaRes = await opts.gitPort.run(["rev-parse", "HEAD"], opts.repoCwd, opts.abortSignal)
     if (shaRes.exitCode !== 0) {
       throw new SnapshotErrorThrown({
         kind: "git-failed",
@@ -370,11 +341,7 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
     // Success: return the agent to the original branch BEFORE returning so
     // callers don't need to remember to unwind on the happy path. Errors
     // here are best-effort (the snapshot succeeded; restore is hygiene).
-    await opts.gitPort.run(
-      ["checkout", normalizeRef(originalRef)],
-      opts.repoCwd,
-      opts.abortSignal,
-    )
+    await opts.gitPort.run(["checkout", normalizeRef(originalRef)], opts.repoCwd, opts.abortSignal)
 
     return { branch: branchName, sha }
   } catch (e) {
@@ -425,31 +392,27 @@ const makeUnwinder = (
   return async () => {
     const original = normalizeRef(originalRef)
     // 1. Get back to the original branch.
-    await opts.gitPort.run(
-      ["checkout", "--force", original],
-      opts.repoCwd,
-      undefined, // Unwind ignores the abort signal — we ALWAYS try to restore.
-    ).catch(() => {
-      /* swallow */
-    })
+    await opts.gitPort
+      .run(
+        ["checkout", "--force", original],
+        opts.repoCwd,
+        undefined, // Unwind ignores the abort signal — we ALWAYS try to restore.
+      )
+      .catch(() => {
+        /* swallow */
+      })
     // 2. Try to find and pop the matching stash entry by name.
     try {
-      const list = await opts.gitPort.run(
-        ["stash", "list"],
-        opts.repoCwd,
-        undefined,
-      )
+      const list = await opts.gitPort.run(["stash", "list"], opts.repoCwd, undefined)
       if (list.exitCode === 0) {
         const needle = `quanta-cloud-snapshot:${branchName}`
         const stashIdx = findStashIndex(list.stdout, needle)
         if (stashIdx !== undefined) {
-          await opts.gitPort.run(
-            ["stash", "pop", `stash@{${stashIdx}}`],
-            opts.repoCwd,
-            undefined,
-          ).catch(() => {
-            /* swallow */
-          })
+          await opts.gitPort
+            .run(["stash", "pop", `stash@{${stashIdx}}`], opts.repoCwd, undefined)
+            .catch(() => {
+              /* swallow */
+            })
         }
       }
     } catch {
@@ -460,15 +423,8 @@ const makeUnwinder = (
   }
 }
 
-const bestEffortDeleteBranch = async (
-  opts: ResolvedOpts,
-  branchName: string,
-): Promise<void> => {
-  await opts.gitPort.run(
-    ["branch", "-D", branchName],
-    opts.repoCwd,
-    undefined,
-  ).catch(() => {
+const bestEffortDeleteBranch = async (opts: ResolvedOpts, branchName: string): Promise<void> => {
+  await opts.gitPort.run(["branch", "-D", branchName], opts.repoCwd, undefined).catch(() => {
     /* swallow */
   })
 }

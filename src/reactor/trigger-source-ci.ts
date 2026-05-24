@@ -26,11 +26,7 @@ import type { ClockPort, ProactiveTrigger, TriggerSourcePort } from "./types"
  *  method, args + cwd + signal). Production binds a `Bun.spawn` wrapper in
  *  the composition root; tests pass canned JSON. */
 export interface GhCliPort {
-  run(
-    args: readonly string[],
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<GhCliResult>
+  run(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GhCliResult>
 }
 
 export interface GhCliResult {

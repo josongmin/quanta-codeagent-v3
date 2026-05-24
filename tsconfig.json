@@ -68,7 +68,11 @@
       "@/runner": ["./src/runner/index.ts"],
       "@/runner/*": ["./src/runner/*"],
       "@/ipc": ["./src/ipc/index.ts"],
-      "@/ipc/*": ["./src/ipc/*"]
+      "@/ipc/*": ["./src/ipc/*"],
+      "@/git": ["./src/git/index.ts"],
+      "@/git/*": ["./src/git/*"],
+      "@/reactor": ["./src/reactor/index.ts"],
+      "@/reactor/*": ["./src/reactor/*"]
     }
   },
   "include": ["src", "tests", "tools"],

@@ -64,13 +64,23 @@ const fail = (stderr: string, exitCode = 1): GitProcessResult => ({
 /** Canned happy-path response set — covers every git invocation the snapshot
  *  performs in order. */
 const happyResponses = (sha = "deadbeefcafef00d") => [
-  { match: (a: readonly string[]) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
+  {
+    match: (a: readonly string[]) => a[0] === "rev-parse" && a[1] === "--git-dir",
+    result: ok(".git"),
+  },
   { match: (a: readonly string[]) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
   { match: (a: readonly string[]) => a[0] === "status", result: ok(" M file.ts") },
-  { match: (a: readonly string[]) => a[0] === "diff" && a.includes("--numstat"), result: ok("1\t2\tfile.ts") },
+  {
+    match: (a: readonly string[]) => a[0] === "diff" && a.includes("--numstat"),
+    result: ok("1\t2\tfile.ts"),
+  },
   { match: (a: readonly string[]) => a[0] === "branch" && a[1] !== "-D", result: ok() },
   { match: (a: readonly string[]) => a[0] === "stash" && a[1] === "push", result: ok() },
-  { match: (a: readonly string[]) => a[0] === "checkout" && a[1] !== "--force" && !a.includes("main"), result: ok() },
+  {
+    match: (a: readonly string[]) =>
+      a[0] === "checkout" && a[1] !== "--force" && !a.includes("main"),
+    result: ok(),
+  },
   { match: (a: readonly string[]) => a[0] === "stash" && a[1] === "pop", result: ok() },
   { match: (a: readonly string[]) => a[0] === "add", result: ok() },
   { match: (a: readonly string[]) => a[0] === "commit", result: ok() },
@@ -221,7 +231,10 @@ describe("ADR-0132 Phase B — guards + error paths", () => {
       { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
       { match: (a) => a[0] === "status", result: ok(" M big.ts") },
       // 5_000_000 lines * 200 B = 1GB — over the 500MB cap.
-      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("5000000\t0\tbig.ts") },
+      {
+        match: (a) => a[0] === "diff" && a.includes("--numstat"),
+        result: ok("5000000\t0\tbig.ts"),
+      },
     ])
     const lock = createInMemoryFileLock()
     try {
@@ -371,7 +384,10 @@ describe("ADR-0132 Phase B — guards + error paths", () => {
         },
       },
       { match: (a) => a[0] === "checkout" && a[1] === "--force", result: ok() },
-      { match: (a) => a[0] === "stash" && a[1] === "list", result: ok("stash@{0}: On main: quanta-cloud-snapshot:quanta/cloud-agent-X") },
+      {
+        match: (a) => a[0] === "stash" && a[1] === "list",
+        result: ok("stash@{0}: On main: quanta-cloud-snapshot:quanta/cloud-agent-X"),
+      },
       { match: (a) => a[0] === "stash" && a[1] === "pop", result: ok() },
       { match: (a) => a[0] === "branch" && a[1] === "-D", result: ok() },
     ])

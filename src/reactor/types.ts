@@ -133,10 +133,7 @@ export interface ClockPort {
  * has been ACCEPTED into the queue (NOT once the loop has processed it).
  */
 export interface AgentLoopPort {
-  enqueueUserMessage(
-    message: string,
-    opts?: { signal?: AbortSignal },
-  ): Promise<void>
+  enqueueUserMessage(message: string, opts?: { signal?: AbortSignal }): Promise<void>
 }
 
 /**

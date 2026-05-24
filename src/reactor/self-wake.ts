@@ -71,9 +71,7 @@ export interface SelfWakeResult {
  * {@link WatermarkStore}). Double-wake is annoying but not destructive; the
  * loop's existing dispatch-dedup will collapse identical content.
  */
-export const injectSimulatedTurn = async (
-  opts: SelfWakeOpts,
-): Promise<SelfWakeResult> => {
+export const injectSimulatedTurn = async (opts: SelfWakeOpts): Promise<SelfWakeResult> => {
   const now = opts.clockPort.now()
   // Guard 1 — env. Cheapest check first so a default-OFF process never even
   // reads the clock.

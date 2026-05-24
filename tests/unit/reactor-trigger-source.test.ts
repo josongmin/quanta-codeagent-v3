@@ -9,11 +9,11 @@
 import { describe, expect, test } from "bun:test"
 import {
   ALL_TRIGGER_REASONS,
+  type ClockPort,
   createCiTriggerSource,
   createInMemorySeenRuns,
   createInMemoryWatermarkStore,
   createPrCommentTriggerSource,
-  type ClockPort,
   type GhCliPort,
   type GhCliResult,
   type SeenRunsStore,
