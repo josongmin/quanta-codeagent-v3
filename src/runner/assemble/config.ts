@@ -56,6 +56,12 @@ export interface SessionDeps {
    *  also keeps the reference so lifecycle pills can render queue depth.
    *  Absent ⇒ no poll, no allocation, byte-identical legacy. */
   followUpQueue?: AgentConfig["followUpQueue"]
+  /** S3 slashctx-port wire: surface-owned `PlanStore` reference. Threaded into
+   *  `AgentConfig.planStore` so the agent's plan tools mutate the SAME store the
+   *  surface reads from `/plan`. Absent ⇒ field omitted from `AgentConfig`
+   *  (byte-identical default-OFF — the loop's plan-hydrate/persist helpers
+   *  no-op when `planStore` is undefined). */
+  planStore?: AgentConfig["planStore"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -119,5 +125,6 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
     ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
     ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
+    ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
   }
 }

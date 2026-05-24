@@ -10,10 +10,12 @@ import {
   resolveAgentMode,
 } from "@/agent"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
+import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import {
   buildCostDashboard,
   buildShellOtelObserver,
+  GEN_AI_ATTRS,
   renderDashboardText,
   StructuredLogger,
   summarizeWorkMetrics,
@@ -26,7 +28,14 @@ import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
 import { composeShellObservers } from "@/tool"
+import {
+  type BranchProgressTracker,
+  createBranchProgressTracker,
+  isBranchProgressEnabled,
+} from "./branch-search-progress"
+import { type CostPanel, createCostPanel, isCostPanelEnabled } from "./cost-panel"
 import { diffPreviewEnabled, renderActionDiff } from "./diff-preview"
+import type { HistorySessionState } from "./history-cmd"
 import { createIdleMonitor, type IdleMonitor } from "./idle-monitor"
 import { runImageCmd } from "./image-cmd"
 import { loadImageBlock } from "./image-loader"
@@ -69,6 +78,7 @@ import { buildRuleInventory, isRulePillEnabled } from "./rule-indicator"
 import { runSessionCommand } from "./session-commands"
 import { switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
+import type { SideChatSessionState } from "./side-cmd"
 import {
   describeSlashCommand,
   isSlashCommand,
@@ -109,12 +119,25 @@ import {
  *    - `rewindSession` ⇒ `/rewind` and `/fork` find an active session id
  *      (and, when `QUANTA_REWIND_GIT=1`, an injected real-git port for
  *      `--restore-files`). Absent ⇒ those commands print "no active session"
- *      and exit 1 — never silently no-op. */
+ *      and exit 1 — never silently no-op.
+ *    - `cost` / `planSnapshot` / `history` / `branchSearch` / `side` ⇒
+ *      S3 port wire-up. Each adapter is OPTIONAL — when its env/dep gate is
+ *      off the field is OMITTED from `ReplSlashCtx` so the slash command
+ *      keeps its existing "not wired" output (byte-identical default-OFF). */
 type ReplSlashCtx = Partial<{
   skills: () => Promise<SkillRow[]>
   idle: IdleMonitor
   imageQueue: ImageQueue
   rewindSession: RewindSlashState
+  cost: () => string
+  planSnapshot: () => import("@/agent/plan/types").Plan | null
+  history: HistorySessionState
+  branchSearch: () => import("./branch-search-progress").BranchProgressState
+  /** `/side` SessionState FACTORY — built fresh on each invocation so the
+   *  `messages` value reflects the LIVE transcript (the surface-scoped
+   *  `history: Message[]` binding is reassigned per turn). Stored as a
+   *  callback rather than a value to avoid stale snapshots. */
+  side: () => SideChatSessionState
 }>
 
 /** Claude A1 rewind/fork: bind `/rewind` and `/fork` to the live session id.
@@ -282,6 +305,146 @@ const buildWorkMetricsSink = (enabled: boolean): AgentConfig["workMetricsSink"] 
   enabled
     ? { emit: (m): void => void process.stderr.write(`work: ${summarizeWorkMetrics(m)}\n`) }
     : undefined
+
+/** S3 cost-panel adapter — built ONCE at REPL setup. Returns `undefined` when
+ *  the gate refuses (non-TTY / `QUANTA_COST_PANEL=0`) so the surface omits the
+ *  `cost` field from {@link ReplSlashCtx} and `/cost` keeps printing "not wired".
+ *  When built, the caller folds per-turn metric DELTAS via
+ *  {@link foldCostPanelDelta} and exposes `panel.renderDetailed` to the slash
+ *  command. The metrics counters are CUMULATIVE across the session — we track
+ *  the previous snapshot and feed only the delta into `incrementTurn`. */
+const buildCostPanelOrUndefined = (
+  envSource: NodeJS.ProcessEnv,
+  isTTY: boolean | undefined,
+  model: string,
+): CostPanel | undefined => {
+  if (!isCostPanelEnabled(envSource, isTTY)) return undefined
+  return createCostPanel({ enabled: true, model })
+}
+
+/** Track per-turn token deltas from cumulative `metrics.snapshot()` counters
+ *  and fold into the {@link CostPanel}. Mutates `prev` in place so the
+ *  caller-owned baseline keeps the running totals between turns. No-op on
+ *  non-positive deltas (defensive against counter resets / dropped snapshots
+ *  — never reports a negative usage). */
+interface CostPanelDeltaBaseline {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+}
+/** Conditional cost-panel fold — wraps the two presence checks (panel built,
+ *  metrics wired) into ONE call site so the per-turn closure stays inside the
+ *  biome cognitive-complexity budget. No-op when either is absent. */
+const foldCostPanelIfWired = (
+  panel: CostPanel | undefined,
+  metrics: { snapshot: () => { counters: Record<string, number> } } | undefined,
+  prev: CostPanelDeltaBaseline,
+): void => {
+  if (panel === undefined || metrics === undefined) return
+  foldCostPanelDelta(panel, metrics.snapshot(), prev)
+}
+
+const foldCostPanelDelta = (
+  panel: CostPanel,
+  snap: { counters: Record<string, number> },
+  prev: CostPanelDeltaBaseline,
+): void => {
+  const curIn = snap.counters[GEN_AI_ATTRS.usage.inputTokens] ?? 0
+  const curOut = snap.counters[GEN_AI_ATTRS.usage.outputTokens] ?? 0
+  const curCache = snap.counters[GEN_AI_ATTRS.usage.cacheReadInputTokens] ?? 0
+  const dIn = Math.max(0, curIn - prev.inputTokens)
+  const dOut = Math.max(0, curOut - prev.outputTokens)
+  const dCache = Math.max(0, curCache - prev.cacheReadTokens)
+  prev.inputTokens = curIn
+  prev.outputTokens = curOut
+  prev.cacheReadTokens = curCache
+  panel.incrementTurn({ inputTokens: dIn, outputTokens: dOut, cacheReadTokens: dCache })
+}
+
+/** S3 branch-search progress tracker — built ONCE per session. Returns
+ *  `undefined` when the env/TTY gate refuses so the `/branches` slash command
+ *  keeps its existing "not wired" output (byte-identical). The tracker itself
+ *  is empty-state until a search ingests events; the `/branches` panel prints
+ *  "(no branch search recorded yet)" until that happens. */
+const buildBranchProgressOrUndefined = (
+  envSource: NodeJS.ProcessEnv,
+  isTTY: boolean | undefined,
+): BranchProgressTracker | undefined => {
+  if (!isBranchProgressEnabled(envSource, isTTY)) return undefined
+  return createBranchProgressTracker()
+}
+
+/** S3 plan-store wire — default-OFF. The `/plan` slash command prints
+ *  "not wired" unless `QUANTA_PLAN_STORE=1` is set (opt-in). When opt-in,
+ *  we mint an in-memory `PlanStore` and thread it through `SessionDeps` so
+ *  the agent's plan tools mutate the SAME store the surface reads from. */
+const buildPlanStoreOrUndefined = (envSource: NodeJS.ProcessEnv): PlanStore | undefined => {
+  const knob = envSource.QUANTA_PLAN_STORE
+  if (knob === undefined) return undefined
+  const norm = knob.trim().toLowerCase()
+  if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
+    return undefined
+  }
+  return createInMemoryPlanStore({ now: Date.now })
+}
+
+/** S3 slashctx-port composer. Folds the 9 optional/required REPL-side
+ *  adapters into a single {@link ReplSlashCtx} literal — extracted from
+ *  `runRepl` so the host stays inside the biome cognitive-complexity budget
+ *  (each conditional spread is one decision). Default-OFF per port:
+ *  absent adapter ⇒ field omitted ⇒ the slash command keeps its existing
+ *  "not wired in this surface" output. */
+interface BuildReplSlashCtxArgs {
+  skillsCb: (() => Promise<SkillRow[]>) | undefined
+  idleMonitor: IdleMonitor
+  imageQueue: ImageQueue | undefined
+  rewindState: RewindSlashState | undefined
+  costPanel: CostPanel | undefined
+  planStore: PlanStore | undefined
+  branchProgress: BranchProgressTracker | undefined
+  /** Returns the LIVE `Message[]` ref (the REPL re-binds `history` per turn,
+   *  so the slash adapters need a getter — not a captured value). */
+  getHistory: () => readonly Message[]
+  sessionDeps: SessionDeps
+  abortSignal: AbortSignal
+}
+const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
+  const {
+    skillsCb,
+    idleMonitor,
+    imageQueue,
+    rewindState,
+    costPanel,
+    planStore,
+    branchProgress,
+    getHistory,
+    sessionDeps,
+    abortSignal,
+  } = args
+  return {
+    ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
+    idle: idleMonitor,
+    ...(imageQueue !== undefined ? { imageQueue } : {}),
+    ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
+    ...(costPanel !== undefined ? { cost: () => costPanel.renderDetailed() } : {}),
+    ...(planStore !== undefined
+      ? { planSnapshot: (): import("@/agent/plan/types").Plan | null => planStore.current() }
+      : {}),
+    ...(branchProgress !== undefined ? { branchSearch: () => branchProgress.snapshot() } : {}),
+    // /history is ALWAYS wired in the REPL — the live transcript is the source
+    // of truth; a one-shot or shell-entry surface that wants the "not wired"
+    // path would omit this field by NOT calling this composer.
+    history: { messages: getHistory },
+    // /side is ALWAYS wired — built fresh on each invocation so `messages`
+    // reflects the LIVE transcript at call-time.
+    side: (): SideChatSessionState => ({
+      deps: sessionDeps,
+      assembleConfig,
+      messages: getHistory(),
+      signal: abortSignal,
+    }),
+  }
+}
 
 /** Build the `ctx.skills` callback the slash commands `/skills` and
  *  `/reload-skills` consume. Returns the freshly-discovered set as
@@ -494,6 +657,14 @@ const tryRunReplSlash = async (input: string, slashCtx?: ReplSlashCtx): Promise<
     ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
     ...(slashCtx?.idle !== undefined ? { idle: slashCtx.idle } : {}),
     ...(slashCtx?.rewindSession !== undefined ? { rewindSession: slashCtx.rewindSession } : {}),
+    // S3 slashctx-port wire — each field omitted entirely when the surface
+    // did not build the adapter, so the slash command keeps its existing
+    // "not wired" output (byte-identical default-OFF, no crash).
+    ...(slashCtx?.cost !== undefined ? { cost: slashCtx.cost } : {}),
+    ...(slashCtx?.planSnapshot !== undefined ? { planSnapshot: slashCtx.planSnapshot } : {}),
+    ...(slashCtx?.history !== undefined ? { history: slashCtx.history } : {}),
+    ...(slashCtx?.branchSearch !== undefined ? { branchSearch: slashCtx.branchSearch } : {}),
+    ...(slashCtx?.side !== undefined ? { side: slashCtx.side() } : {}),
   })
   return true
 }
@@ -1052,6 +1223,20 @@ export const runRepl = async (): Promise<void> => {
     env("QUANTA_SPINNER_INTERVAL_MS", "80"),
   )
 
+  // S3 port adapters — built ONCE per session, threaded through `slashCtx`
+  // (and, for planStore, also through `SessionDeps` so the agent's plan tools
+  // mutate the SAME store the surface renders). Each adapter is optional: a
+  // disabled gate returns `undefined` so the slash command keeps printing
+  // "not wired" (byte-identical default-OFF).
+  const costPanel = buildCostPanelOrUndefined(process.env, process.stdout.isTTY, model)
+  const costDeltaPrev: CostPanelDeltaBaseline = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+  }
+  const branchProgress = buildBranchProgressOrUndefined(process.env, process.stdout.isTTY)
+  const planStore = buildPlanStoreOrUndefined(process.env)
+
   const sessionDeps: SessionDeps = {
     llm: finalLLM,
     registry,
@@ -1081,6 +1266,7 @@ export const runRepl = async (): Promise<void> => {
     onShellEvent,
     workMetricsSink,
     ...(lifecycleFollowUpQueue !== undefined ? { followUpQueue: lifecycleFollowUpQueue } : {}),
+    ...(planStore !== undefined ? { planStore } : {}),
   }
   /** Install a stdin keypress listener for the duration of one turn.
    *  Returns a `dispose()` that the caller MUST invoke (try/finally) to
@@ -1197,6 +1383,9 @@ export const runRepl = async (): Promise<void> => {
         // when metrics are enabled — keeps the structured log AND gives the
         // operator a human-readable cost/latency/cache summary inline.
         process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
+        // S3: fold the per-turn token delta into the cost panel (cumulative
+        // session-wide totals — distinct from the per-turn dashboard above).
+        foldCostPanelIfWired(costPanel, metrics, costDeltaPrev)
       }
       // Turn-summary panel — rendered AFTER the cost dashboard so the two
       // sit together at turn end. Returns "" when no signal fired or when
@@ -1256,12 +1445,23 @@ export const runRepl = async (): Promise<void> => {
       // command). Capacity from `QUANTA_IMAGE_MAX_QUEUE` (default 5).
       const imageQueue: ImageQueue | undefined = buildImageQueue()
       const rewindState = buildRewindSlashState(sessionId, cwd)
-      const slashCtx: ReplSlashCtx = {
-        ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
-        idle: idleMonitor,
-        ...(imageQueue !== undefined ? { imageQueue } : {}),
-        ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
-      }
+      // S3 — assemble the slashCtx from the per-port adapters via a single
+      // helper so `runRepl` stays inside the biome cognitive-complexity
+      // budget (each `...(x !== undefined ? { x } : {})` spread is a decision
+      // that biome counts; pushing the 8-entry block into a helper drops
+      // ~8 from the host).
+      const slashCtx: ReplSlashCtx = buildReplSlashCtx({
+        skillsCb,
+        idleMonitor,
+        imageQueue,
+        rewindState,
+        costPanel,
+        planStore,
+        branchProgress,
+        getHistory: () => history,
+        sessionDeps,
+        abortSignal: abort.signal,
+      })
       // Bash-style ↑/↓ history + Ctrl+R reverse-i-search. Default ON
       // (QUANTA_HISTORY=0 to disable). Path/max overridable via env.
       const historyEnabled = env("QUANTA_HISTORY", "1") !== "0"
@@ -1313,6 +1513,10 @@ export const runRepl = async (): Promise<void> => {
           try {
             result = await run({ ...sessionDeps, signal: turnSignal })
             renderTurnDashboard(metrics, model, slog)
+            // S3: fold the per-turn token delta into the cost panel so
+            // `/cost` reflects the cumulative session totals. No-op when
+            // metrics or costPanel are disabled (byte-identical default-OFF).
+            foldCostPanelIfWired(costPanel, metrics, costDeltaPrev)
             // Turn-summary panel — rendered AFTER the cost dashboard so the
             // two sit together at turn end. Returns "" when no signal fired
             // OR when the collector is disabled; in both cases this is a
