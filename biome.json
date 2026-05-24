@@ -18,7 +18,7 @@
       },
       "suspicious": {
         "noExplicitAny": "error",
-        "noConsole": "warn"
+        "noConsole": "error"
       },
       "style": {
         "noNonNullAssertion": "warn",
@@ -594,6 +594,274 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/auth/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/auth is a leaf slice — only @/llm and @/agent reach into it.",
+                  "@/llm": "Slice isolation (S4): @/auth is below @/llm; the dependency direction is llm → auth, never auth → llm.",
+                  "@/tool": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/mcp": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/auth does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/rules/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/rules is the rule store — only @/agent reaches in.",
+                  "@/permission": "Slice isolation (S4): @/rules is below @/permission; the dependency direction is permission → rules, never the reverse.",
+                  "@/tool": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/mcp": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/rules does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/security/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/security is a redaction port below @/tool and @/agent.",
+                  "@/tool": "Slice isolation (S4): @/security is below @/tool; the dependency direction is tool → security, never the reverse.",
+                  "@/mcp": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/security does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/patch/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent — dependency goes the other way.",
+                  "@/tool": "Slice isolation (S4): @/patch is below @/tool/apply-patch; the dependency direction is tool → patch, never the reverse.",
+                  "@/mcp": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool — not for @/patch.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/patch does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/git/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/git is below @/tool/git — dependency direction is tool → git, never the reverse.",
+                  "@/tool": "Slice isolation (S4): @/git is below @/tool; the dependency direction is tool → git, never the reverse.",
+                  "@/mcp": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/git does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/ui/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/ui is surface-agnostic UI primitives — dependency direction is surface (apps/*) → ui, never the reverse.",
+                  "@/llm": "Slice isolation (S4): @/ui must not pull LLM/tool/agent code; it is surface-agnostic display primitives only.",
+                  "@/tool": "Slice isolation (S4): @/ui must not pull LLM/tool/agent code; it is surface-agnostic display primitives only.",
+                  "@/mcp": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/ui does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/shared/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/shared is THE leaf — pure utilities only. Every other @/* slice depends on it; no upward imports allowed.",
+                  "@/tool": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/llm": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/mcp": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/memory": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/storage": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/stream": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/permission": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/runtime": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/lsp": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/observability": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/session": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/subagent": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/skill": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/auth": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/security": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/patch": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/rules": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/migration": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/ui": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/git": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/runner": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/ipc": "Slice isolation (S4): @/shared is the leaf — pure utilities only."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/apps/eval/index.ts",
+        "src/apps/eval/index.js",
+        "tests/smoke/swebench/select.ts",
+        "tests/smoke/swebench/select.js",
+        "tests/integration/plan-mode-stress-100k-ops.test.ts",
+        "tests/integration/plan-mode-stress-100k-ops.test.js",
+        "tests/contract/_guard.ts",
+        "tests/contract/_guard.js",
+        "tests/unit/round4-hardening.test.ts",
+        "tests/unit/round4-hardening.test.js",
+        "tests/unit/skill-discover-size-cap.test.ts",
+        "tests/unit/skill-discover-size-cap.test.js"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "warn"
           }
         }
       }
