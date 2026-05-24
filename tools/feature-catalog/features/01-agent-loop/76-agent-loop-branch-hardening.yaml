@@ -79,10 +79,18 @@ evidence:
       - tests/unit/llm/anthropic-thinking-hell.test.ts
       - tests/unit/llm/openai-thinking-hell.test.ts
       - tests/unit/agent/confirm-decision-hell.test.ts
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/anthropic.test.ts
+      - tests/unit/openai.test.ts
+      - tests/unit/streaming-dispatch-hellgate.test.ts
+      - tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts
+      - tests/unit/streaming-dispatch.test.ts
     integration:
       - tests/integration/admissibility-deny-steer.test.ts
       - tests/integration/admissibility-deny-steer-hell.test.ts
       - tests/smoke/index.ts
+      - tests/integration/streaming-dispatch-in-progress-e2e.test.ts
+      - tests/integration/streaming-dispatch-rejection-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

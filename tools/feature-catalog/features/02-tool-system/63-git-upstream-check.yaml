@@ -25,7 +25,7 @@ evidence:
   code: [src/tool/git/upstream.ts, src/tool/git/index.ts, src/agent/mode.ts]
   adrs: [64]
   tests:
-    unit: [tests/unit/git-upstream-check.test.ts]
+    unit: [tests/unit/git-upstream-check.test.ts, tests/unit/mode.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_GIT_TOOLS]

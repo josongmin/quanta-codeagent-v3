@@ -19,7 +19,7 @@ evidence:
     - src/skill/activation.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/features.test.ts]
     integration: [tests/integration/skill-paths-activation-e2e.test.ts]
     contract: []
 knobs: []

@@ -30,7 +30,7 @@ evidence:
     - src/apps/cli/repl.ts
   adrs: [83]
   tests:
-    unit: [tests/unit/llm-image-block.test.ts, tests/unit/cli-image-loader.test.ts]
+    unit: [tests/unit/llm-image-block.test.ts, tests/unit/cli-image-loader.test.ts, tests/unit/anthropic.test.ts, tests/unit/openai.test.ts]
     integration: []
     contract: []
 knobs: []

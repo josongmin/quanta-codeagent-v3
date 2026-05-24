@@ -60,7 +60,14 @@ evidence:
       - tests/unit/observability/turn-timing.test.ts
       - tests/unit/agent/readonly-deny-steer.test.ts
       - tests/unit/phase-ttft-readonly-trio-hellgate.test.ts
-    integration: []
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/agent/confirm-decision-hell.test.ts
+      - tests/unit/agent/confirm-decision.test.ts
+      - tests/unit/observability/vocabulary.test.ts
+      - tests/unit/streaming-dispatch-hellgate.test.ts
+      - tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts
+      - tests/unit/streaming-dispatch.test.ts
+    integration: [tests/integration/streaming-dispatch-in-progress-e2e.test.ts, tests/integration/streaming-dispatch-rejection-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

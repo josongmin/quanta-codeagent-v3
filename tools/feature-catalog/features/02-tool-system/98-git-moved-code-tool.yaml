@@ -36,6 +36,7 @@ evidence:
   tests:
     unit:
       - tests/unit/git-moved-code-tool.test.ts
+      - tests/unit/moved-code-detector-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

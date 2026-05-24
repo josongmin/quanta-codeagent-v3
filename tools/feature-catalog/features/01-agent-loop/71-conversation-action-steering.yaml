@@ -36,6 +36,7 @@ evidence:
     unit:
       - tests/unit/agent/conversation-action.test.ts
       - tests/unit/agent/control-op-handler-hellgate.test.ts
+      - tests/unit/agent/steering.test.ts
     integration:
       - tests/smoke/index.ts
     contract: []

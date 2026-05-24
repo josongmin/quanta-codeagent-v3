@@ -41,6 +41,7 @@ evidence:
     unit:
       - tests/unit/plan-mode-dispatch-block-hellgate.test.ts
       - tests/unit/mode-plan-block.test.ts
+      - tests/unit/mode.test.ts
     integration:
       - tests/integration/plan-mode-dispatch-hell-e2e.test.ts
     contract: []

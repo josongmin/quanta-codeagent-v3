@@ -37,6 +37,7 @@ evidence:
   tests:
     unit:
       - tests/unit/memory-cmd.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs:

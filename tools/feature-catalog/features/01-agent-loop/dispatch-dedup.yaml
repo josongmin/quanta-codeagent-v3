@@ -32,6 +32,7 @@ evidence:
     unit:
       - tests/unit/dispatch-dedup.test.ts
       - tests/unit/dedup.test.ts
+      - tests/unit/dispatch.test.ts
     integration:
       - tests/smoke/index.ts
     contract: []

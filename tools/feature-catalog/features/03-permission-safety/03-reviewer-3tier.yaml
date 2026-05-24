@@ -24,6 +24,7 @@ evidence:
     unit:
       - tests/unit/permission/outcome.test.ts
       - tests/unit/permission/reviewer.test.ts
+      - tests/unit/permission.test.ts
     integration: []
     contract: []
 knobs: []

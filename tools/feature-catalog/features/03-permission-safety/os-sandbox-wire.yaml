@@ -49,6 +49,9 @@ evidence:
     unit:
       - tests/unit/cli/os-sandbox-wire-hellgate.test.ts
       - tests/unit/cli/os-sandbox-default-byte-identical-hellgate.test.ts
+      - tests/unit/bash.test.ts
+      - tests/unit/os-sandbox-bubblewrap-hellgate.test.ts
+      - tests/unit/os-sandbox-hellgate.test.ts
     integration: []
     contract: []
 knobs:

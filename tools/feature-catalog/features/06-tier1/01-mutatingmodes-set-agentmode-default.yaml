@@ -26,7 +26,7 @@ evidence:
   code: [src/agent/mode.ts, src/agent/plan.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/mode.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_PLAN]

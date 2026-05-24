@@ -37,6 +37,7 @@ evidence:
   tests:
     unit:
       - tests/unit/memory/consolidate-store.test.ts
+      - tests/unit/memory.test.ts
     integration: []
     contract: []
 knobs: []

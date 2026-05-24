@@ -20,7 +20,7 @@ evidence:
   code: [src/agent/stop-category.ts, src/agent/loop.ts]
   adrs: []
   tests:
-    unit: [tests/unit/agent-submission-and-stop-category.test.ts]
+    unit: [tests/unit/agent-submission-and-stop-category.test.ts, tests/unit/agent/stop-category.test.ts]
     integration: []
     contract: []
 knobs: []

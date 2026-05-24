@@ -28,7 +28,7 @@ evidence:
   tests:
     unit:
       - tests/unit/git-observability-wiring-hellgate.test.ts
-    integration: []
+    integration: [tests/integration/git-observability-composite.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

@@ -37,7 +37,10 @@ evidence:
       - tests/unit/tool-factory.test.ts
       - tests/unit/tool-factory-l3-wire.test.ts
       - tests/unit/tool-output-schema-hellgate.test.ts
-    integration: []
+      - tests/unit/streaming-dispatch-hellgate.test.ts
+      - tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts
+      - tests/unit/streaming-dispatch.test.ts
+    integration: [tests/integration/streaming-dispatch-in-progress-e2e.test.ts, tests/integration/streaming-dispatch-rejection-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

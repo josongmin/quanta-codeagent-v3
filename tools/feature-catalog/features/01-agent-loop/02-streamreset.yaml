@@ -17,8 +17,8 @@ evidence:
   code: [src/agent/streaming-dispatch.ts]
   adrs: []
   tests:
-    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/fallback-empty-tombstone.test.ts]
-    integration: []
+    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/fallback-empty-tombstone.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts, tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts]
+    integration: [tests/integration/streaming-dispatch-in-progress-e2e.test.ts, tests/integration/streaming-dispatch-rejection-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

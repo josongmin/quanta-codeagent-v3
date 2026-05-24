@@ -34,6 +34,7 @@ evidence:
   tests:
     unit:
       - tests/unit/memory-distill-redaction-hellgate.test.ts
+      - tests/unit/memory-consolidator-hook-hellgate.test.ts
     integration: []
     contract: []
 knobs:

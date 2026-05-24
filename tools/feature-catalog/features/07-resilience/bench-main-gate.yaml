@@ -31,8 +31,8 @@ evidence:
     - tools/swebench-matrix.ts
   adrs: []
   tests:
-    unit: []
-    integration: []
+    unit: [tests/unit/probe.test.ts]
+    integration: [tests/integration/probe.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

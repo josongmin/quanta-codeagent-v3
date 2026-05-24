@@ -30,6 +30,8 @@ evidence:
   tests:
     unit:
       - tests/unit/subagent-persistence-hellgate.test.ts
+      - tests/unit/subagent-background-hellgate.test.ts
+      - tests/unit/subagent-background-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

@@ -32,7 +32,7 @@ evidence:
   code: [src/observability/work-metrics.ts, src/observability/vocabulary.ts, src/observability/attrs.ts, src/agent/work-metrics-collector.ts, src/agent/session-resources.ts, src/apps/cli/repl.ts, src/apps/cli/config-assemble.ts]
   adrs: [65]
   tests:
-    unit: [tests/unit/work-metrics.test.ts, tests/unit/work-metrics-collector.test.ts]
+    unit: [tests/unit/work-metrics.test.ts, tests/unit/work-metrics-collector.test.ts, tests/unit/observability/attrs.test.ts, tests/unit/observability/vocabulary.test.ts]
     integration: [tests/integration/loop-work-metrics-sink.test.ts]
     contract: []
 knobs: [QUANTA_METRICS]

@@ -20,7 +20,7 @@ evidence:
   code: [src/agent/admissibility-gate.ts, src/agent/dispatch-helpers.ts, src/agent/dispatch-types.ts, src/agent/dispatch.ts]
   adrs: []
   tests:
-    unit: [tests/unit/hitl-tier-dispatch.test.ts]
+    unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts, tests/unit/dispatch.test.ts]
     integration: []
     contract: []
 knobs: []

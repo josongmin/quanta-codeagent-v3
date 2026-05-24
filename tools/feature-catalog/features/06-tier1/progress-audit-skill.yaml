@@ -29,6 +29,7 @@ evidence:
     unit:
       - tests/unit/skill-progress-audit.test.ts
       - tests/unit/features.test.ts
+      - tests/unit/skill.test.ts
     integration:
       - tests/integration/skill-progress-audit-discovery.test.ts
     contract: []

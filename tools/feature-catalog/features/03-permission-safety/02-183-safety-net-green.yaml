@@ -19,7 +19,7 @@ evidence:
   code: [src/agent/admissibility-gate.ts]
   adrs: []
   tests:
-    unit: [tests/unit/hitl-tier-dispatch.test.ts]
+    unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts]
     integration: []
     contract: []
 knobs: []

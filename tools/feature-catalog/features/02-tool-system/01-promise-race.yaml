@@ -18,7 +18,7 @@ evidence:
   code: [src/tool/scripted-replace.ts]
   adrs: []
   tests:
-    unit: [tests/unit/hard-deny-redos-bound.test.ts]
+    unit: [tests/unit/hard-deny-redos-bound.test.ts, tests/unit/scripted-replace.test.ts]
     integration: []
     contract: []
 knobs: []

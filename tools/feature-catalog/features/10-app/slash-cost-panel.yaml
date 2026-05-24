@@ -37,6 +37,7 @@ evidence:
   tests:
     unit:
       - tests/unit/cli/cost-panel.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs:

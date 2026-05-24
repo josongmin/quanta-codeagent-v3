@@ -18,7 +18,7 @@ evidence:
   code: [src/agent/prompt-sections.ts, src/agent/prompt.ts, src/agent/repo-rules.ts]
   adrs: []
   tests:
-    unit: [tests/unit/prompt-sections-hellgate.test.ts]
+    unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/agent/prompt-sections.test.ts]
     integration: [tests/integration/sota-codex-full.test.ts]
     contract: []
 knobs: []

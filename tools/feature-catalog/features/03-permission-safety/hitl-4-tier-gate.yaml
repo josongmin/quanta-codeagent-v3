@@ -28,6 +28,7 @@ evidence:
     unit:
       - tests/unit/hitl-tier-registry.test.ts
       - tests/unit/hitl-tier-gate.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/hitl-tier-dispatch-e2e.test.ts
     contract: []

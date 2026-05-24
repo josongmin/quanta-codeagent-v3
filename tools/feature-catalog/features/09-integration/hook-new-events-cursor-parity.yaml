@@ -46,6 +46,7 @@ evidence:
       - tests/unit/hooks-new-events-hellgate.test.ts
       - tests/unit/hook-bus-bidirectional.test.ts
       - tests/unit/hook-bidirectional-hellgate.test.ts
+      - tests/unit/subagent-runner.test.ts
     integration: []
     contract: []
 knobs: []

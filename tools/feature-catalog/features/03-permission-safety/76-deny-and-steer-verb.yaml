@@ -41,6 +41,7 @@ evidence:
     unit:
       - tests/unit/agent/confirm-decision.test.ts
       - tests/unit/agent/confirm-decision-hell.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/admissibility-deny-steer.test.ts
       - tests/integration/admissibility-deny-steer-hell.test.ts

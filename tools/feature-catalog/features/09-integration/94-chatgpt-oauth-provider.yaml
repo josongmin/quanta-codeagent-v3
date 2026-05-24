@@ -59,6 +59,7 @@ evidence:
       - tests/unit/auth/login-status-cmd.test.ts
       - tests/unit/auth/auth-ui.test.ts
       - tests/unit/auth/chatgpt-oauth-adapter.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs:

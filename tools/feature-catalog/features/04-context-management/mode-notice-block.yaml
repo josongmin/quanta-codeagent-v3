@@ -29,6 +29,7 @@ evidence:
   tests:
     unit:
       - tests/unit/prompt-dynamic.test.ts
+      - tests/unit/mode.test.ts
     integration:
       - tests/integration/sota-codex-full.test.ts
     contract: []

@@ -69,6 +69,11 @@ evidence:
       - tests/unit/tool/request-user-input-hell.test.ts
       - tests/unit/stream/plan-events-hell.test.ts
       - tests/unit/agent/submission-set-mode-hell.test.ts
+      - tests/unit/agent/control-op-handler-hellgate.test.ts
+      - tests/unit/agent/submission.test.ts
+      - tests/unit/dispatch.test.ts
+      - tests/unit/features.test.ts
+      - tests/unit/jsonl-recorder.test.ts
     integration: []
     contract: []
 knobs: []

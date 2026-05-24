@@ -20,7 +20,7 @@ evidence:
   code: [src/skill/skill-tool.ts, src/agent/features.ts, src/agent/loop.ts]
   adrs: []
   tests:
-    unit: [tests/unit/skill-overrides.test.ts]
+    unit: [tests/unit/skill-overrides.test.ts, tests/unit/features.test.ts]
     integration: [tests/integration/loop-skill-override.test.ts]
     contract: []
 knobs: []

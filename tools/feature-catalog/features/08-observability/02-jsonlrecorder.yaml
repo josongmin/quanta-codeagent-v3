@@ -26,7 +26,7 @@ evidence:
   code: [src/stream/adapters/jsonl-recorder.ts, src/stream/adapters/tee.ts, src/stream/adapters/jsonl-retention.ts]
   adrs: []
   tests:
-    unit: [tests/unit/jsonl-recorder.test.ts, tests/unit/jsonl-recorder-retention.test.ts]
+    unit: [tests/unit/jsonl-recorder.test.ts, tests/unit/jsonl-recorder-retention.test.ts, tests/unit/tee.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_OBSERVE_DIR]

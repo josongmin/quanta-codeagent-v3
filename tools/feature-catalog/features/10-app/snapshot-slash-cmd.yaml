@@ -33,7 +33,7 @@ evidence:
     - src/apps/cli/slash-commands.ts
   adrs: [122]
   tests:
-    unit: []
+    unit: [tests/unit/slash-commands.test.ts]
     integration: []
     contract: []
 knobs: []

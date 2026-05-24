@@ -34,6 +34,8 @@ evidence:
   tests:
     unit:
       - tests/unit/hitl-otel-emit-hellgate.test.ts
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/observability/spans.test.ts
     integration: []
     contract: []
 knobs: []

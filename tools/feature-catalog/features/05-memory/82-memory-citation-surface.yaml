@@ -33,6 +33,8 @@ evidence:
   tests:
     unit:
       - tests/unit/agent/memory-citation-accumulator.test.ts
+      - tests/unit/memory.test.ts
+      - tests/unit/ranking.test.ts
     integration:
       - tests/integration/memory-citation-end-to-end.test.ts
     contract: []

@@ -20,8 +20,8 @@ evidence:
   code: [src/permission/types.ts, src/agent/hitl-tier.ts, src/agent/working-state.ts, src/tool/types.ts]
   adrs: []
   tests:
-    unit: [tests/unit/cross-slice-mirrors.test.ts]
-    integration: []
+    unit: [tests/unit/cross-slice-mirrors.test.ts, tests/unit/hitl-tier-gate.test.ts]
+    integration: [tests/integration/hitl-tier-dispatch-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

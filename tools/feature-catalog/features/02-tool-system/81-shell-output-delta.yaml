@@ -41,6 +41,7 @@ evidence:
       - tests/unit/tool/shell-exec-events-byte-identical.test.ts
       - tests/unit/dispatch-shell-observer-forward.test.ts
       - tests/unit/shell-exec-observers-surface.test.ts
+      - tests/unit/bash.test.ts
     integration: []
     contract: []
 knobs:

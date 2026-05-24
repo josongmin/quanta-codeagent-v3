@@ -30,6 +30,8 @@ evidence:
     unit:
       - tests/unit/prompt-system.test.ts
       - tests/unit/prompt-dynamic.test.ts
+      - tests/unit/agent/prompt-sections.test.ts
+      - tests/unit/prompt-sections-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

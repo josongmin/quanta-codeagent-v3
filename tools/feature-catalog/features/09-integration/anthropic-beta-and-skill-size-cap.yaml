@@ -19,7 +19,7 @@ evidence:
   code: [src/llm/adapters/anthropic.ts, src/skill/skill-size.ts, src/skill/discover.ts]
   adrs: [58]
   tests:
-    unit: [tests/unit/skill-size.test.ts]
+    unit: [tests/unit/skill-size.test.ts, tests/unit/anthropic.test.ts]
     integration: []
     contract: []
 knobs: []

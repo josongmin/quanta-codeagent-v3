@@ -40,7 +40,7 @@ evidence:
     - src/runner/orchestrate/run-interactive.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/subagent-runner.test.ts]
     integration:
       - tests/integration/subagent-cancellation-e2e.test.ts
       - tests/integration/agent-abort.test.ts

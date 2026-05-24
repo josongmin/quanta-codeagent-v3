@@ -29,6 +29,7 @@ evidence:
   tests:
     unit:
       - tests/unit/sqlite-save-error.test.ts
+      - tests/unit/ranking.test.ts
     integration:
       - tests/integration/memory-sqlite.test.ts
     contract: []

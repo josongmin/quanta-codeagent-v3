@@ -57,6 +57,7 @@ evidence:
       - tests/unit/dispatch.test.ts
       - tests/unit/dispatch-shell-observer-forward.test.ts
       - tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration: []
     contract: []
 knobs: []

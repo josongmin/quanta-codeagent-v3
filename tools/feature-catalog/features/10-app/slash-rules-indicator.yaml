@@ -41,6 +41,7 @@ evidence:
     unit:
       - tests/unit/cli/rule-indicator.test.ts
       - tests/unit/cli/rules-cmd.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs:

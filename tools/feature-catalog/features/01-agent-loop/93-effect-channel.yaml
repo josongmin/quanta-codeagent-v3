@@ -33,6 +33,7 @@ evidence:
     unit:
       - tests/unit/agent/effect-channel.test.ts
       - tests/unit/smoke-battery.test.ts
+      - tests/unit/dispatch.test.ts
     integration:
       - tests/smoke/index.ts
     contract: []

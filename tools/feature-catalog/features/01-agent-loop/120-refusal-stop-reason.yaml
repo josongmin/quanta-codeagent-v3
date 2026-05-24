@@ -33,6 +33,7 @@ evidence:
     unit:
       - tests/unit/refusal-handling.test.ts
       - tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts
+      - tests/unit/agent/stop-category.test.ts
     integration:
       - tests/integration/agent-refusal-e2e.test.ts
       - tests/integration/refusal-multi-turn-carryover.test.ts

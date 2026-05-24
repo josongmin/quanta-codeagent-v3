@@ -28,6 +28,8 @@ evidence:
       - tests/unit/mode-plan-block.test.ts
       - tests/unit/mode-transition.test.ts
       - tests/unit/plan-mode-dispatch-block-hellgate.test.ts
+      - tests/unit/dispatch.test.ts
+      - tests/unit/mode.test.ts
     integration: []
     contract: []
 knobs: []

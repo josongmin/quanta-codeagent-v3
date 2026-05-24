@@ -37,7 +37,8 @@ evidence:
   tests:
     unit:
       - tests/unit/patch-v4a-otel-emit-hellgate.test.ts
-    integration: []
+      - tests/unit/tool/apply-patch.test.ts
+    integration: [tests/integration/apply-patch-tool.test.ts]
     contract: []
 knobs:
   - 'applyPatch(patch, fs, observer?) — optional in-process PatchObserver (default omitted)'

@@ -48,6 +48,7 @@ evidence:
     unit:
       - tests/unit/permission/trust-scope-wire.test.ts
       - tests/unit/permission/trust-scope-store-hell.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/trust-scope-e2e.test.ts
       - tests/integration/trust-scope-persistent-e2e.test.ts

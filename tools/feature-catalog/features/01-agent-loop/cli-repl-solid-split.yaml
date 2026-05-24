@@ -64,7 +64,7 @@ evidence:
     - src/apps/cli/repl/usage.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/mcp-surface-wire.test.ts]
     integration: []
     contract: []
 knobs: []

@@ -36,7 +36,7 @@ evidence:
     unit:
       - tests/unit/skill-vs-extension.test.ts
       - tests/unit/skill-frontmatter-parse.test.ts
-    integration: []
+    integration: [tests/integration/skill-frontmatter-hell-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

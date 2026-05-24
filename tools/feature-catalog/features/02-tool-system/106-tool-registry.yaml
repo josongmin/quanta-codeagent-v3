@@ -44,6 +44,7 @@ evidence:
       - tests/unit/output-spill.test.ts
       - tests/unit/tool-factory.test.ts
       - tests/unit/tool-output-schema-hellgate.test.ts
+      - tests/unit/schema.test.ts
     integration: []
     contract: []
 knobs:

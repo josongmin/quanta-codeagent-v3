@@ -37,8 +37,10 @@ evidence:
   tests:
     unit:
       - tests/unit/patch/applier.test.ts
+      - tests/unit/tool/apply-patch.test.ts
     integration:
       - tests/unit/patch/integration.test.ts
+      - tests/integration/apply-patch-tool.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

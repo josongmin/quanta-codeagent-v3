@@ -15,7 +15,8 @@ evidence:
   tests:
     unit:
       - tests/unit/skill-scope-types.test.ts
-    integration: []
+      - tests/unit/skill-frontmatter-parse.test.ts
+    integration: [tests/integration/skill-frontmatter-hell-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

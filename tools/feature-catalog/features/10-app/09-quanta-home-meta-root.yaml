@@ -37,7 +37,7 @@ evidence:
     - src/apps/cli/help-render.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/cli/help-render-discovery-hellgate.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_HOME]

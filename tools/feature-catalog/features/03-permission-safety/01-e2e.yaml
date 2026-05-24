@@ -20,7 +20,7 @@ evidence:
   code: [src/permission/policy.ts, src/agent/admissibility-gate.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/admissibility-gate.test.ts]
     integration: [tests/integration/policy-injection.test.ts, tests/integration/reminder-injection-through-loop-hell-e2e.test.ts]
     contract: []
 knobs: []

@@ -47,6 +47,7 @@ evidence:
     unit:
       - tests/unit/permission-remember-patterns.test.ts
       - tests/unit/permission/remember-patterns-classifier-hell.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/remember-patterns-cascade-hell.test.ts
     contract: []

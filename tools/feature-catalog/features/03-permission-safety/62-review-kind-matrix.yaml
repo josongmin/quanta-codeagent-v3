@@ -59,6 +59,7 @@ evidence:
     unit:
       - tests/unit/permission/review-kind.test.ts
       - tests/unit/permission/review-kind-inference.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/review-kind-gate-hell.test.ts
     contract: []

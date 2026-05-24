@@ -41,6 +41,7 @@ evidence:
   tests:
     unit:
       - tests/unit/permission-otel-emit-hellgate.test.ts
+      - tests/unit/observability/attrs.test.ts
     integration: []
     contract: []
 knobs:

@@ -41,6 +41,9 @@ evidence:
     unit:
       - tests/unit/permission/git-write-guard.test.ts
       - tests/unit/git-write-protection-wired.test.ts
+      - tests/unit/dispatch.test.ts
+      - tests/unit/edit.test.ts
+      - tests/unit/write.test.ts
     integration:
       - tests/integration/git-write-protection-hellgate.test.ts
     contract: []

@@ -44,6 +44,7 @@ evidence:
     unit:
       - tests/unit/tool/web-search-from-env-hellgate.test.ts
       - tests/unit/document-tools-defaults-registration-hellgate.test.ts
+      - tests/unit/mode.test.ts
     integration: []
     contract: []
 knobs: []

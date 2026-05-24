@@ -30,6 +30,7 @@ evidence:
   tests:
     unit:
       - tests/unit/plan-exit-flow.test.ts
+      - tests/unit/plan-exit.test.ts
     integration: []
     contract: []
 knobs: []

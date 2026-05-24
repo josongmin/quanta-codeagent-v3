@@ -43,6 +43,7 @@ evidence:
       - tests/unit/working-state-panel.test.ts
       - tests/unit/history-cmd.test.ts
       - tests/unit/branch-search-progress.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs: []

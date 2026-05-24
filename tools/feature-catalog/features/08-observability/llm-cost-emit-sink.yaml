@@ -37,6 +37,7 @@ evidence:
   tests:
     unit:
       - tests/unit/llm-cost-emit-hellgate.test.ts
+      - tests/unit/observability.test.ts
     integration: []
     contract: []
 knobs: []

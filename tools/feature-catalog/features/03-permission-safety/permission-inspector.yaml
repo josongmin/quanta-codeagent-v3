@@ -31,6 +31,7 @@ evidence:
   tests:
     unit:
       - tests/unit/permission-inspector.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration: []
     contract: []
 knobs: []

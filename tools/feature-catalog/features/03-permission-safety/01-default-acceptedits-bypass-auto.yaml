@@ -19,7 +19,7 @@ evidence:
   code: [src/permission/index.ts, src/permission/policy.ts, src/permission/per-thread-store.ts]
   adrs: []
   tests:
-    unit: [tests/unit/permission-classifier.test.ts]
+    unit: [tests/unit/permission-classifier.test.ts, tests/unit/permission.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_PERMISSION]

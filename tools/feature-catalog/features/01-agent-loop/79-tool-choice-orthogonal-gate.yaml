@@ -56,9 +56,20 @@ evidence:
     unit:
       - tests/unit/agent/tool-choice-resolve.test.ts
       - tests/unit/llm/tool-choice-adapter.test.ts
+      - tests/unit/anthropic.test.ts
+      - tests/unit/closeout-guard.test.ts
+      - tests/unit/openai.test.ts
+      - tests/unit/verify-guard-hellgate.test.ts
+      - tests/unit/verify-guard-must-pass-hellgate.test.ts
+      - tests/unit/verify-guard-must-pass.test.ts
+      - tests/unit/verify-guard.test.ts
+      - tests/unit/verify-signal-outcome.test.ts
+      - tests/unit/verify-signal.test.ts
     integration:
       - tests/integration/verify-guard-forces-any.test.ts
       - tests/integration/closeout-forces-none.test.ts
+      - tests/integration/verify-guard-e2e.test.ts
+      - tests/integration/verify-guard-hellgate-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

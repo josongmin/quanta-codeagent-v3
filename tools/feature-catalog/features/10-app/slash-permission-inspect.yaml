@@ -39,6 +39,7 @@ evidence:
     unit:
       - tests/unit/permission/inspect.test.ts
       - tests/unit/cli/permission-explain.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs: []

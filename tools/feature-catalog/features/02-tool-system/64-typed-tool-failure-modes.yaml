@@ -49,6 +49,7 @@ evidence:
       - tests/unit/scripted-replace.test.ts
       - tests/unit/bash.test.ts
       - tests/unit/agent/prompt-rules/packs.test.ts
+      - tests/unit/dispatch.test.ts
     integration:
       - tests/smoke/index.ts
     contract: []

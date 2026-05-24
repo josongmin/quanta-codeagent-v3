@@ -17,8 +17,8 @@ evidence:
   code: [src/agent/hitl-tier.ts, src/agent/hitl-tier-registry.ts]
   adrs: []
   tests:
-    unit: [tests/unit/hitl-tier-classifier.test.ts, tests/unit/hitl-tier-dispatch.test.ts]
-    integration: []
+    unit: [tests/unit/hitl-tier-classifier.test.ts, tests/unit/hitl-tier-dispatch.test.ts, tests/unit/hitl-tier-gate.test.ts, tests/unit/hitl-tier-registry.test.ts]
+    integration: [tests/integration/hitl-tier-dispatch-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

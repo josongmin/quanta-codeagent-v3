@@ -20,7 +20,7 @@ evidence:
   code: [src/tool/types.ts, src/agent/dispatch.ts, src/subagent/agent-tool.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/dispatch.test.ts]
     integration: []
     contract: []
 knobs: []

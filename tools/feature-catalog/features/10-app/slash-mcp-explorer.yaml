@@ -42,6 +42,7 @@ evidence:
     unit:
       - tests/unit/mcp-cmd.test.ts
       - tests/unit/mcp-surface-wire.test.ts
+      - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
 knobs:

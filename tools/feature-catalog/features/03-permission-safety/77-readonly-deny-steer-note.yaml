@@ -38,6 +38,9 @@ evidence:
   tests:
     unit:
       - tests/unit/agent/readonly-deny-steer.test.ts
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/agent/confirm-decision-hell.test.ts
+      - tests/unit/agent/confirm-decision.test.ts
     integration: []
     contract: []
 knobs: []

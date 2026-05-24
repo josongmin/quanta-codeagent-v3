@@ -22,7 +22,7 @@ evidence:
     unit:
       - tests/unit/agent-role-policy.test.ts
       - tests/unit/nicknames.test.ts
-    integration: []
+    integration: [tests/integration/nicknames-hell-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold:

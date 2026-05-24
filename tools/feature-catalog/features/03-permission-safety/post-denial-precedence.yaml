@@ -40,6 +40,7 @@ evidence:
     unit:
       - tests/unit/permission-post-denial.test.ts
       - tests/unit/permission-per-thread.test.ts
+      - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/permission-stack-gate-e2e.test.ts
     contract: []

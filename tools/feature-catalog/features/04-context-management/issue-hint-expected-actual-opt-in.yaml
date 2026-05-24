@@ -39,6 +39,8 @@ evidence:
   tests:
     unit:
       - tests/unit/issue-hint/extract-expected-actual.test.ts
+      - tests/unit/issue-hint-hellgate.test.ts
+      - tests/unit/issue-hint-verbatim-hellgate.test.ts
     integration: []
     contract: []
 knobs:

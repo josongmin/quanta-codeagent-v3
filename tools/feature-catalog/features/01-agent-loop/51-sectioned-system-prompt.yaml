@@ -29,7 +29,7 @@ evidence:
     - src/agent/prompt.ts
   adrs: [4, 51]
   tests:
-    unit: [tests/unit/agent/prompt-sections.test.ts]
+    unit: [tests/unit/agent/prompt-sections.test.ts, tests/unit/prompt-sections-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

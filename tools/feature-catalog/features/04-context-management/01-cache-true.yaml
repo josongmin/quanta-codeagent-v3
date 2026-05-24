@@ -17,7 +17,7 @@ evidence:
   code: [src/agent/prompt.ts, src/agent/prompt-sections.ts]
   adrs: []
   tests:
-    unit: [tests/unit/prompt-sections-hellgate.test.ts]
+    unit: [tests/unit/prompt-sections-hellgate.test.ts, tests/unit/agent/prompt-sections.test.ts]
     integration: []
     contract: []
 knobs: []
