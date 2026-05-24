@@ -5,6 +5,12 @@ export {
   renderDashboardMarkdown,
   renderDashboardText,
 } from "./cost-dashboard"
+export {
+  buildLlmCostMetricsSink,
+  emitLlmCostToOtel,
+  type LlmCostLabels,
+  type LlmCostSink,
+} from "./llm-cost-emit"
 export { log, StructuredLogger } from "./logger"
 export { Metrics, metrics } from "./metrics"
 export { costUsd, PRICING_VERSION, type Provider, providerOf } from "./pricing"
