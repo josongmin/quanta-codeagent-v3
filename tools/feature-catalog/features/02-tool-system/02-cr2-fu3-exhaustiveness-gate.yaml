@@ -3,7 +3,7 @@ title: CR2 + FU3 exhaustiveness gate
 section: 2
 subsystem: Edit-strategy state machine (ADR-0019)
 order: 2
-maturity: L5
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial

@@ -3,7 +3,7 @@ title: '`assertNever` — compile-time + runtime exhaustiveness guard'
 section: 8
 subsystem: shared — typed-union safety primitive
 order: 97
-maturity: L5
+maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: partial

@@ -4,6 +4,7 @@ section: 1
 subsystem: Same-turn 복구
 order: 1
 maturity: L3
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated

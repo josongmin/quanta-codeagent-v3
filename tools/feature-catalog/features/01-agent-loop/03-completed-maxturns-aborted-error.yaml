@@ -4,6 +4,7 @@ section: 1
 subsystem: 턴 상태머신
 order: 3
 maturity: L3
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated

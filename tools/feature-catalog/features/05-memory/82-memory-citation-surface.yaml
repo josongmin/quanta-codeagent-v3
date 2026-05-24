@@ -3,7 +3,7 @@ title: memory_citation provenance surface (ADR-0082)
 section: 5
 subsystem: L2 long-term memory recall provenance
 order: 82
-maturity: L5
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial

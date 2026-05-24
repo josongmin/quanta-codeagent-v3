@@ -3,7 +3,7 @@ title: TurnSession / TurnState parameter bundles (R2-B P1, 20→3 args)
 section: 1
 subsystem: Loop helper signatures (parameter bundling refactor)
 order: 81
-maturity: L5
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated

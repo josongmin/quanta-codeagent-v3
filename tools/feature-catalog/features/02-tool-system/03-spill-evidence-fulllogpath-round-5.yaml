@@ -4,6 +4,7 @@ section: 2
 subsystem: 결과 cap + disk-spill (Tier 0)
 order: 3
 maturity: L3
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial

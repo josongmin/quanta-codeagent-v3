@@ -3,7 +3,7 @@ title: 단언 단위 + 183 통합 safety net 그대로 green
 section: 3
 subsystem: Admissibility-gate SSOT (ADR-0026)
 order: 2
-maturity: L5
+maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: partial

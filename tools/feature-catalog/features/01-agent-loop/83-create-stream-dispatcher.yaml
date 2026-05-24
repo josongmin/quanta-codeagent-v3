@@ -3,7 +3,7 @@ title: createStreamDispatcher factory (P3, byte-identical extraction)
 section: 1
 subsystem: Stream dispatch callbacks (loop ↔ streamingTurn seam)
 order: 83
-maturity: L5
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated

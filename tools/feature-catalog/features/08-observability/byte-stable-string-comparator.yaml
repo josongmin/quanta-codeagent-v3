@@ -3,7 +3,7 @@ title: '`byteCompare` — locale-independent string ordering'
 section: 8
 subsystem: shared — deterministic ordering primitive
 order: 96
-maturity: L5
+maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: partial
