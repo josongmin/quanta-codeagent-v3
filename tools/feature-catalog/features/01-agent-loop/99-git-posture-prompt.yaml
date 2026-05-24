@@ -1,0 +1,29 @@
+id: git-posture-prompt
+title: System-prompt git posture (default fail-closed)
+section: 1
+subsystem: System prompt git policy (ADR-0099)
+order: 99
+maturity: L4
+status: stable
+purpose: |
+  System-prompt section that establishes default-NO mutation posture for git in
+  the model's instructions. Free read-only inspection (status/log/diff/blame/
+  show/grep/ls-files) is allowed; commit/push/branch/merge/rebase/cherry-pick/
+  reset/restore/mutating-checkout/stash/tag require explicit user request.
+  Pairs with runtime HARD_DENY rules so prompt + runtime form complementary
+  layers (prompt steers the model; rules backstop deviation).
+evidence:
+  code:
+    - src/agent/prompt.ts
+  adrs: [99]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sectioned prompt assembly already exists; ADR-0099 adds a named section with
+  verbatim ban lists pulled from external code-agent reference materials. The
+  prompt is one half of the two-layer defense — ADR-0100 adds the runtime
+  HARD_DENY backstop.

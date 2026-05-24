@@ -1,0 +1,31 @@
+id: localize-signal-hardening
+title: Localize tool — BM25-lite + FrameTier + def-boost + recall@1 polish
+section: 6
+subsystem: Fault localization signal layer (ADR-0115/0129)
+order: 115
+maturity: L4
+status: stable
+purpose: |
+  Stage-1 candidate generator in the file→function→edit funnel. Replaces flat
+  term-count scoring with BM25-lite IDF weighting (rare term outranks common
+  one), shared camelCase / snake / kebab / mcp__ subtoken split mirrored from
+  the tool-search side, and FrameTier penalty so vendored / generator-dir
+  frames cannot outrank user source for the same hit count. R-Phase10 closes
+  the recall@1 gap by penalizing stale .js sibling artifacts that mirror .ts
+  source and by extending VENDORED_RE to common generator-output directories
+  (runs, outputs, coverage, .nyc_output, logs).
+evidence:
+  code:
+    - src/skill/system-skills/localize-fault/index.ts
+  adrs: [115, 129]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Symmetry with parse_test_failure (R-Phase8 FrameTier introduction). Ranker
+  changes only affect ordering of candidates already gathered — no new I/O.
+  Per the validated-signal discipline, ranker weights are anchored to BM25 IDF
+  rather than ad-hoc thresholds.

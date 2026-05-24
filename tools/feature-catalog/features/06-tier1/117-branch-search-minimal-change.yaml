@@ -1,0 +1,33 @@
+id: branch-search-minimal-change
+title: Branch-search minimal-change bias + progress surface
+section: 6
+subsystem: Speculative branch search ranking (ADR-0117)
+order: 117
+maturity: L4
+status: stable
+purpose: |
+  Verifier and selector that bias the speculative branch search toward
+  smaller patches. patchSizeVerifier attaches a patch_size signal to each
+  candidate using the per-candidate delta from ADR-0116; minimalChangeSelector
+  uses that signal as a tie-breaker (then primary ordering when verifier
+  scores tie). A plane-clean progress formatter feeds an opt-in onProgress
+  adapter so CLIs can stream branch-search traces without coupling the
+  orchestrator to a renderer.
+evidence:
+  code:
+    - src/agent/branch-search/verify.ts
+    - src/agent/branch-search/score.ts
+    - src/agent/branch-search/progress.ts
+    - src/agent/branch-search/tool.ts
+    - src/agent/branch-search-runner.ts
+  adrs: [117]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Selector change is byte-identical when no candidate ties — only re-orders
+  ties. AgentConfig.onProgress is a top-level opt-in slot; absent host yields
+  the legacy silent path.

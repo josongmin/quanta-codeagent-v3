@@ -1,0 +1,31 @@
+id: shadow-odb-rewind
+title: Shadow ODB rewindToLast — destructive restore + auto safety net
+section: 10
+subsystem: Shadow ODB rewind primitive (ADR-0118)
+order: 118
+maturity: L4
+status: stable
+purpose: |
+  Closes the deliberate "not-implemented" trap from ADR-0108 by implementing
+  rewindToLast (destructive workspace restore to last snapshot) plus a safety
+  net: before rewind, the current workspace state is captured under a
+  pre-rewind ref so the user can recover from accidental rewind. Adds
+  RewindOptions / SnapshotMetadata types, listSnapshots inspector, and typed
+  error codes (merge-in-progress, rewind-failed). Refuses to rewind across an
+  in-progress merge.
+evidence:
+  code:
+    - src/storage/shadow-odb/types.ts
+    - src/storage/shadow-odb/default.ts
+    - src/storage/shadow-odb/index.ts
+  adrs: [118]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  The pre-rewind ref prefix is a typed constant so consumers can list / prune
+  recovery snapshots. Surface for the agent-facing rewind tool is registered
+  separately under the shadow-tools trio (ADR-0119).

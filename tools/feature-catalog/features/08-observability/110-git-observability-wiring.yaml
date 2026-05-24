@@ -1,0 +1,31 @@
+id: git-observability-wiring
+title: Git observability composite — session fingerprint + turn-diff emit helpers
+section: 8
+subsystem: Wiring helpers for git observability (ADR-0110/0125)
+order: 110
+maturity: L3
+status: new
+purpose: |
+  Composition-root helpers that wire the deferred halves of ADR-0102
+  (turn_diff_updated event emit) and ADR-0106 (SessionMeta git fingerprint).
+  Part A populates session metadata (sha / branch / origin URL) at session
+  open; Part B emits the turn-diff event at turn close. Barrel exports both
+  through a single composite so a host wires git observability in one line.
+  ADR-0125 catalogs the wiring recipe + integration proof against real git.
+evidence:
+  code:
+    - src/agent/git-observability/index.ts
+    - src/agent/git-observability/session-fingerprint.ts
+    - src/agent/git-observability/turn-diff-emit.ts
+  adrs: [110, 125]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Helpers ship default-OFF; loop wiring deferred because src/agent/loop.ts was
+  in-flight on a parallel auth track at the time. Integration test in
+  tests/integration/git-observability-composite.test.ts grounds the recipe
+  against real git without depending on loop wiring.

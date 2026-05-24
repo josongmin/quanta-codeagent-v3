@@ -1,0 +1,32 @@
+id: auto-checkpoint-policy
+title: Shadow ODB auto-checkpoint policy
+section: 10
+subsystem: Shadow ODB anchor policy (ADR-0121)
+order: 121
+maturity: L4
+status: stable
+purpose: |
+  Policy module that decides when the Shadow ODB should auto-register a head
+  snapshot without an explicit caller. Closed enum of trigger conditions, a
+  DI oracle (so policy is testable without real storage), per-(workspace, turn)
+  dedup so multi-tool turns produce a single checkpoint, and a withAutoCheckpoint
+  wrap helper that turns any action into a checkpointed action. Composition-
+  root wiring helper exposes the policy default-OFF so unwired hosts remain
+  byte-identical.
+evidence:
+  code:
+    - src/agent/checkpoint-policy.ts
+    - src/agent/checkpoint-wiring.ts
+    - src/agent/types.ts
+  adrs: [121]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ToolContext.turnId is the per-turn dedup key — added as a soft-typed field so
+  callers without turn ids still get behavior (no checkpoint dedup, single
+  checkpoint per call). Policy mirrors external reference patterns: opt-in,
+  pre-destructive, one-per-turn ceiling.

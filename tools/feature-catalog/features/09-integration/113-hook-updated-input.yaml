@@ -1,0 +1,28 @@
+id: hook-updated-input
+title: pre_tool_use hook updatedInput rewrite channel
+section: 9
+subsystem: Hook bus (ADR-0113)
+order: 113
+maturity: L4
+status: stable
+purpose: |
+  Third return shape on pre_tool_use hooks (beyond allow / deny): an
+  updatedInput payload that REWRITES the tool's arguments before dispatch.
+  Enables policy-driven argument normalization (destructive-flag rewrite),
+  workspace-relative path canonicalization, and secret redaction at the tool
+  boundary. Composes with the deny channel — handlers can rewrite OR deny but
+  the two channels remain orthogonal in the type union.
+evidence:
+  code:
+    - src/agent/hooks.ts
+  adrs: [113]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Cursor-parity hook surface. The rewrite happens after permission check so
+  argument normalization cannot be used to escape policy. The closed return
+  shape keeps host hooks type-checked end-to-end.

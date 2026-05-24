@@ -1,0 +1,29 @@
+id: background-subagent
+title: Background subagent scheduler
+section: 6
+subsystem: Subagent background execution (ADR-0130)
+order: 130
+maturity: L4
+status: stable
+purpose: |
+  Scheduler that runs a subagent fork in the background so the parent loop
+  continues turn-taking while the subagent works. Pairs with a wait/await
+  tool the parent uses to collect the background result when it's ready.
+  Bridges the Tier-1 subagent surface with the background execution semantics
+  industry leaders ship as force_background_subagent + subagent_await.
+evidence:
+  code:
+    - src/agent/subagent-background.ts
+    - src/agent/tier1/subagent-bg.ts
+    - src/tool/subagent-bg/index.ts
+  adrs: [130]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF; explicit opt-in by the parent at spawn time. Shares the
+  SubagentRunner port surface from earlier Tier-1 absorption so the existing
+  taskKind / toolFilter / forbiddenSurfaces gating still applies.

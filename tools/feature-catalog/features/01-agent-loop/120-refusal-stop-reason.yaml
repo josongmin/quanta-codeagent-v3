@@ -1,0 +1,31 @@
+id: refusal-stop-reason
+title: Refusal stop_reason typed surface
+section: 1
+subsystem: Stop-category surface (ADR-0120)
+order: 120
+maturity: L4
+status: stable
+purpose: |
+  Replaces the lossy generic-error supersession of provider-side refusals
+  with a typed StopReason variant. extractRefusalRationale lifts the rationale
+  from the provider envelope; recovery.decideOnAssembled emits a
+  refusal action; the loop finishes with kind="refusal" and AgentOutcome
+  carries the rationale. Hosts can now distinguish "model declined" from
+  "loop failed" and surface the rationale to the user.
+evidence:
+  code:
+    - src/agent/recovery.ts
+    - src/agent/loop.ts
+    - src/agent/types/agent-outcome.ts
+    - src/agent/stop-category.ts
+  adrs: [120]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Supersedes ADR-0076 Gap-1 (which wrapped refusal as a generic error). The
+  closed StopCategory union from ADR-0073 gains the refusal kind so existing
+  exhaustiveness gates catch missing arms.
