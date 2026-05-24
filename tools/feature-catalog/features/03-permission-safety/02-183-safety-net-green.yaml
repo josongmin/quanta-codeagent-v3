@@ -15,7 +15,8 @@ config_refs:
   env: []
 purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행위 보존 추출)
 evidence:
-  code: [src/agent/admissibility-gate.ts]
+  code:
+    - src/agent/admissibility-gate.ts
   adrs: []
   tests:
     unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts]

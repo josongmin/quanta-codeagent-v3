@@ -13,7 +13,8 @@ owners: ["@songmin"]
 labels: [surface:core]
 purpose: proactive(임계) + reactive(PTL) + orphan-safe 경계
 evidence:
-  code: [src/agent/compaction.ts]
+  code:
+    - src/agent/compaction.ts
   adrs: []
   tests:
     unit: [tests/unit/compaction-summarizer.test.ts, tests/unit/compaction-precompact.test.ts, tests/unit/compaction-archive-loop.test.ts]

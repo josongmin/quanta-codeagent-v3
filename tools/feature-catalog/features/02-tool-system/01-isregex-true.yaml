@@ -13,7 +13,8 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 purpose: 신규 default 도구. 리터럴 기본 / isRegex:true 정규식 / count 캡 / FS-jail / atomic write.
 evidence:
-  code: [src/tool/scripted-replace.ts]
+  code:
+    - src/tool/scripted-replace.ts
   adrs: [19]
   tests:
     unit: [tests/unit/scripted-replace.test.ts]

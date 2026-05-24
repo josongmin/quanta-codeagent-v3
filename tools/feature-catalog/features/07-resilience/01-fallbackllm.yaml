@@ -21,7 +21,8 @@ purpose: |
   swap 대신 partial output에 tombstone을 남기고 stream을 종료한다
   (trajectory 결정성 보존, mid-stream replay 금지).
 evidence:
-  code: [src/llm/fallback.ts]
+  code:
+    - src/llm/fallback.ts
   adrs: []
   tests:
     unit: [tests/unit/fallback.test.ts, tests/unit/fallback-hellgate.test.ts, tests/unit/fallback-empty-tombstone.test.ts]

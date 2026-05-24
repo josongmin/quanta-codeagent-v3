@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { defaultCoverageReporter, type CoverageReport } from "@/observability/coverage"
+import { type CoverageReport, defaultCoverageReporter } from "@/observability/coverage"
 import type { MetricSample, MetricSink } from "@/observability/metrics/index"
 
 const mkReport = (totals: {
@@ -20,12 +20,14 @@ const mkReport = (totals: {
   generatedAt: 0,
 })
 
-const mkReportWithFiles = (files: Array<{
-  file: string
-  linesPercent: number
-  branchesPercent: number
-  statementsPercent: number
-}>): CoverageReport => ({
+const mkReportWithFiles = (
+  files: Array<{
+    file: string
+    linesPercent: number
+    branchesPercent: number
+    statementsPercent: number
+  }>,
+): CoverageReport => ({
   files: files.map((f) => ({
     file: f.file,
     lineCount: 100,

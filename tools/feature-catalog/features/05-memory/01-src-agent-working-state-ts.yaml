@@ -13,7 +13,8 @@ owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
 evidence:
-  code: [src/agent/working-state.ts]
+  code:
+    - src/agent/working-state.ts
   adrs: [21]
   tests:
     unit:

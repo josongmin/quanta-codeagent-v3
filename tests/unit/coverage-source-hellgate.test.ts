@@ -13,10 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  CoverageError,
-  defaultV8CoverageSource,
-} from "@/observability/coverage"
+import { CoverageError, defaultV8CoverageSource } from "@/observability/coverage"
 
 let workDir = ""
 let sourceDir = ""
@@ -34,7 +31,10 @@ afterEach(async () => {
 /** Build a V8 coverage doc for the supplied script entries + write it to
  *  `workDir/coverage.json`. Returns the path. */
 const writeV8 = async (
-  scripts: Array<{ url: string; functions: Array<{ ranges: Array<{ startOffset: number; endOffset: number; count: number }> }> }>,
+  scripts: Array<{
+    url: string
+    functions: Array<{ ranges: Array<{ startOffset: number; endOffset: number; count: number }> }>
+  }>,
 ): Promise<string> => {
   const doc = { result: scripts.map((s, i) => ({ scriptId: String(i + 1), ...s })) }
   const p = join(workDir, "coverage.json")
@@ -267,9 +267,7 @@ describe("coverage / B. branch heuristic", () => {
   })
 
   test("HELL-12: `if (x) {} else {}` → 2 branches", async () => {
-    const count = await runBranchCount(
-      "function f(x){ if (x) { return 1 } else { return 0 } }\n",
-    )
+    const count = await runBranchCount("function f(x){ if (x) { return 1 } else { return 0 } }\n")
     expect(count).toBe(2)
   })
 

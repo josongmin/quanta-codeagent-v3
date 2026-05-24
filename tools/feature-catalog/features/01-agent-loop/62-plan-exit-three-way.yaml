@@ -17,7 +17,8 @@ purpose: |
   강제, 위반 시 throw)이며 agent가 plan을 수정하고 plan posture 유지(planExitStaysInPlan).
   approve만 mutation 허용(planExitAllowsMutation), reject는 plan 폐기 후 종료.
 evidence:
-  code: [src/agent/plan-exit.ts]
+  code:
+    - src/agent/plan-exit.ts
   adrs: [63, 86]
   tests:
     unit: [tests/unit/plan-exit.test.ts]

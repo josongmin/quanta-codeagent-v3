@@ -13,7 +13,9 @@ owners: ["@songmin"]
 labels: [surface:cli]
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
 evidence:
-  code: [src/tool/registry.ts, src/tool/factory.ts]
+  code:
+    - src/tool/registry.ts
+    - src/tool/factory.ts
   adrs: []
   tests:
     unit: [tests/unit/tool-output-schema-hellgate.test.ts]

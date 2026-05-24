@@ -16,9 +16,9 @@ config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: 단일 turn 루프 (`for (let turn = 1; turn <= cfg.maxTurns; turn++)` in loop.ts), FSM weight 없음 — 각 턴 = 1 LLM 스트림 + 도구 디스패치, transient backoff retry는 maxTurns 카운터 소비하지 않음.
 evidence:
-  code: [src/agent/loop.ts, src/observability/turn-timing.ts]
   code:
     - src/agent/loop.ts
+    - src/observability/turn-timing.ts
     - src/shared/runtime-config.ts
   adrs: []
   tests:

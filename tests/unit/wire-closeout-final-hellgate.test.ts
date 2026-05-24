@@ -39,8 +39,7 @@ import { isMutatingTool, planModeMutatingTable } from "@/agent/mode"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import * as toolBarrel from "@/tool"
-import { buildDefaultTools, ToolRegistry } from "@/tool"
-import { readImageUrlTool, type WebSearchProvider } from "@/tool"
+import { buildDefaultTools, readImageUrlTool, ToolRegistry, type WebSearchProvider } from "@/tool"
 import * as imageBarrel from "@/tool/image"
 
 // Inert LLM stub — features composer never streams.
@@ -68,10 +67,7 @@ const cfg = (over: Partial<AgentConfig> = {}): AgentConfig =>
   }) as AgentConfig
 
 const fakeWebSearchProvider: WebSearchProvider = {
-  // biome-ignore lint/suspicious/useAwait: fake — no IO
-  async search() {
-    return []
-  },
+  search: () => Promise.resolve([]),
 }
 
 // ────────────────────────────────────────────────────────────────────────────

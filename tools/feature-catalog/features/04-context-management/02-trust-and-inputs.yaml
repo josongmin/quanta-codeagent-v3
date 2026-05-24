@@ -13,7 +13,9 @@ owners: ["@songmin"]
 labels: [surface:core]
 purpose: 강화 "Trust and inputs"
 evidence:
-  code: [src/agent/prompt.ts, src/agent/untrusted.ts]
+  code:
+    - src/agent/prompt.ts
+    - src/agent/untrusted.ts
   adrs: []
   tests:
     unit: []

@@ -15,7 +15,9 @@ owners: ["@songmin"]
 labels: [surface:core]
 purpose: 'TODO: review from migration'
 evidence:
-  code: [src/agent/compaction.ts, src/shared/runtime-config.ts]
+  code:
+    - src/agent/compaction.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit: [tests/unit/compaction.test.ts]

@@ -13,7 +13,8 @@ owners: ["@songmin"]
 labels: [surface:cli]
 purpose: 45 tests
 evidence:
-  code: [src/tool/git/index.ts]
+  code:
+    - src/tool/git/index.ts
   adrs: []
   tests:
     unit: [tests/unit/git-tools.test.ts, tests/unit/git-tools-hellgate.test.ts]

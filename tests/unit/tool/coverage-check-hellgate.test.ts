@@ -55,7 +55,9 @@ const buildCovJson = async (opts: {
       {
         scriptId: "1",
         url: `file://${srcFile}`,
-        functions: [{ ranges: [{ startOffset: 0, endOffset: src.length, count: opts.covered ? 1 : 0 }] }],
+        functions: [
+          { ranges: [{ startOffset: 0, endOffset: src.length, count: opts.covered ? 1 : 0 }] },
+        ],
       },
     ],
   }

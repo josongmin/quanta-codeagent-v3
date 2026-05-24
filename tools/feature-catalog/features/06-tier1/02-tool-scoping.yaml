@@ -19,7 +19,9 @@ purpose: |
   default fail-open으로 해석되지 않는다. positive-set 표현이므로 신규
   도구는 명시적으로 enroll되지 않으면 자동 BLOCK.
 evidence:
-  code: [src/skill/skill-tool.ts, src/agent/tier1/skill.ts]
+  code:
+    - src/skill/skill-tool.ts
+    - src/agent/tier1/skill.ts
   adrs: []
   tests:
     unit: [tests/unit/skill.test.ts]

@@ -21,7 +21,8 @@ purpose: |
   no silent fallback / no test skipping / no shortcut hacks. 4 섹션은 buildSystemPrompt() 출력의
   고정 위치에 삽입되어 모든 persona/effort tier에서 합성 보장.
 evidence:
-  code: [src/agent/prompt.ts]
+  code:
+    - src/agent/prompt.ts
   adrs: [67]
   tests:
     unit: [tests/unit/prompt-system.test.ts]

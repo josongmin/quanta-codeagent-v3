@@ -16,10 +16,10 @@ config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: nudge/completed 전 디스패치된 read-only 결과 폐기
 evidence:
-  code: [src/agent/streaming-dispatch.ts, src/agent/loop.ts, src/observability/turn-timing.ts]
   code:
     - src/agent/streaming-dispatch.ts
     - src/agent/loop.ts
+    - src/observability/turn-timing.ts
     - src/shared/runtime-config.ts
   adrs: []
   tests:

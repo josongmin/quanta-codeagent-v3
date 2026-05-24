@@ -23,7 +23,9 @@ purpose: |
   buildSystemPrompt(_cwd?, { persona }) seam으로 1회 resolve 후 베이스 프롬프트에 베이크
   (mid-session 전환은 v1 범위 밖 — prefix-cache re-prefill 회피).
 evidence:
-  code: [src/agent/persona.ts, src/agent/prompt.ts]
+  code:
+    - src/agent/persona.ts
+    - src/agent/prompt.ts
   adrs: [68]
   tests:
     unit:

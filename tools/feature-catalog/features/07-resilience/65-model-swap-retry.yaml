@@ -18,7 +18,8 @@ purpose: |
   NoAlternateModelError), streamWithModel(leading stream_reset 후 선택 port로 재스트림).
   기존 RetryingLLM(동일 모델 transient)·FallbackLLM(provider 사망)과 명확히 구분.
 evidence:
-  code: [src/llm/model-swap.ts]
+  code:
+    - src/llm/model-swap.ts
   adrs: [66]
   tests:
     unit: [tests/unit/model-swap-retry.test.ts]

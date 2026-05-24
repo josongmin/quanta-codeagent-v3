@@ -16,7 +16,11 @@ config_refs:
   env: []
 purpose: '단일 함수 runAdmissibilityGate로 추출 — 순서: mode-posture → HITL 4-tier → permission policy → pre_tool_use hook. dispatch.ts는 thin caller.'
 evidence:
-  code: [src/agent/admissibility-gate.ts, src/agent/dispatch-helpers.ts, src/agent/dispatch-types.ts, src/agent/dispatch.ts]
+  code:
+    - src/agent/admissibility-gate.ts
+    - src/agent/dispatch-helpers.ts
+    - src/agent/dispatch-types.ts
+    - src/agent/dispatch.ts
   adrs: []
   tests:
     unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts, tests/unit/dispatch.test.ts]

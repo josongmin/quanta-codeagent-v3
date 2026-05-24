@@ -21,7 +21,10 @@ purpose: |
   Definition lives in `src/stream/types.ts`; consumed by every transport adapter
   (SSE/JSONL/tee) and by the trajectory translator.
 evidence:
-  code: [src/stream/types.ts, src/stream/ports.ts, src/agent/turn-context.ts]
+  code:
+    - src/stream/types.ts
+    - src/stream/ports.ts
+    - src/agent/turn-context.ts
   adrs: []
   tests:
     unit: [tests/unit/observability.test.ts]

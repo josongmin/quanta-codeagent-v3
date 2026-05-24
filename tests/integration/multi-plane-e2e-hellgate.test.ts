@@ -53,7 +53,7 @@ import type { AgentConfig } from "@/agent/types"
 import { defaultVerifyCheckpointBridge } from "@/agent/verify-checkpoint-bridge"
 import { defaultBudgetLedger } from "@/agent/budget-ledger"
 import type { LLMPort, Message, ToolUseBlock } from "@/llm"
-import { foundryProviderAdapter } from "@/llm/providers/foundry-adapter"
+import { FoundryProviderAdapter } from "@/llm/providers/foundry-adapter"
 import { passthroughMcpSandbox } from "@/mcp/skybridge/passthrough"
 import { resolveMcpSandbox } from "@/mcp/skybridge/registry"
 import {
@@ -71,10 +71,8 @@ import {
   otelMetricsSink,
 } from "@/observability/metrics/index"
 import { type PermissionContext } from "@/permission"
-import {
-  compileLinuxSandboxArgv,
-  defaultOsSandbox,
-} from "@/runtime/os-sandbox"
+import { defaultOsSandbox } from "@/runtime/os-sandbox"
+import { compileBubblewrapArgs } from "@/runtime/os-sandbox/bubblewrap"
 import type { ShadowOdb } from "@/storage/shadow-odb"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { ToolRegistry } from "@/tool"
@@ -608,7 +606,7 @@ describe("Plane 4 — Control / Security", () => {
   })
 
   test("P4-23: Foundry adapter throws 'provider-unsupported' when SDK absent", async () => {
-    const provider = foundryProviderAdapter({
+    const provider = new FoundryProviderAdapter({
       providerId: "foundry",
       model: "claude-sonnet-4-6",
       auth: { mode: "Azure AI Foundry" } as never,
@@ -629,12 +627,11 @@ describe("Plane 4 — Control / Security", () => {
     expect(threw).toBeDefined()
     const msg = threw instanceof Error ? threw.message : String(threw)
     expect(msg.length).toBeGreaterThan(0)
-    // Codes differ by sub-path (provider-unsupported / provider-missing-dependency
-    // / provider-misconfigured). The test asserts SOME failure surfaced; the
-    // typed-code per-arm split is the responsibility of the adapter's own
-    // hellgate. We pin the prose-level signal that this is a typed provider-
-    // selection failure (not an untyped throw).
-    expect(/provider|foundry/i.test(msg)).toBe(true)
+    // The Phase-1 stub throws ProviderError("provider-unsupported"). The test
+    // asserts a typed provider-selection failure surfaced (not an untyped
+    // throw); the typed-code per-arm split is sealed in the adapter's own
+    // hellgate.
+    expect(/provider|foundry|unsupported/i.test(msg)).toBe(true)
   })
 })
 

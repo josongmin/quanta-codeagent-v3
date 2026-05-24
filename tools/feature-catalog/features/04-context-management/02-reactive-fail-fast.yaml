@@ -13,7 +13,9 @@ owners: ["@songmin"]
 labels: [surface:core]
 purpose: reactive fail-fast
 evidence:
-  code: [src/agent/compaction.ts, src/agent/compaction-breaker.ts]
+  code:
+    - src/agent/compaction.ts
+    - src/agent/compaction-breaker.ts
   adrs: []
   tests:
     unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]

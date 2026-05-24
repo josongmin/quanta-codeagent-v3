@@ -13,7 +13,9 @@ owners: ["@songmin"]
 labels: [surface:cli]
 purpose: verbatim 위협프롬프트, 2-stage+1h캐시, denial-limit 3/20, AFK sticky
 evidence:
-  code: [src/permission/classifier.ts, src/agent/auto-classifier.ts]
+  code:
+    - src/permission/classifier.ts
+    - src/agent/auto-classifier.ts
   adrs: []
   tests:
     unit: [tests/unit/permission-classifier.test.ts, tests/unit/auto-classifier.test.ts]

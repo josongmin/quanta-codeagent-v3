@@ -16,10 +16,10 @@ config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: transient backoff / PTL→compact / max_tokens / malformed / empty
 evidence:
-  code: [src/agent/recovery.ts, src/agent/loop.ts, src/observability/turn-timing.ts]
   code:
     - src/agent/recovery.ts
     - src/agent/loop.ts
+    - src/observability/turn-timing.ts
     - src/shared/runtime-config.ts
   adrs: []
   tests:

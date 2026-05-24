@@ -13,7 +13,8 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 purpose: 'edit 도구 실패 시 Strategy hint: suffix 자동 추가 — nextStrategy: scripted_replace | read_then_patch | ambiguous, exit semantics 미변경.'
 evidence:
-  code: [src/tool/edit/strategy-hint.ts]
+  code:
+    - src/tool/edit/strategy-hint.ts
   adrs: [19]
   tests:
     unit: []

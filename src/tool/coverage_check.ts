@@ -115,7 +115,9 @@ const renderReport = (report: CoverageReport, verdict: CoverageVerdict): string 
 const preflight = async (
   input: unknown,
   ctx: ToolContext,
-): Promise<{ kind: "fail"; result: ToolResult } | { kind: "ok"; abs: string; parsed: CoverageCheckInput }> => {
+): Promise<
+  { kind: "fail"; result: ToolResult } | { kind: "ok"; abs: string; parsed: CoverageCheckInput }
+> => {
   const parsed = coverageCheckInputSchema.safeParse(input)
   if (!parsed.success) {
     return { kind: "fail", result: errResult(`invalid input: ${parsed.error.message}`) }

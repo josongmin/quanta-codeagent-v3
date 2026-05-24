@@ -15,7 +15,9 @@ owners: ["@songmin"]
 labels: [surface:cli]
 purpose: (200k) / _SPILL_KEEP(50), sub-cap byte-identical
 evidence:
-  code: [src/tool/output-spill.ts, src/shared/runtime-config.ts]
+  code:
+    - src/tool/output-spill.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit: [tests/unit/output-spill.test.ts]

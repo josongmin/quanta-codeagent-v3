@@ -15,7 +15,10 @@ owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: ', retry-inner/fallback-outer'
 evidence:
-  code: [src/runner/assemble/llm.ts, src/apps/cli/internal.ts, src/llm/fallback.ts]
+  code:
+    - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
+    - src/llm/fallback.ts
   adrs: []
   tests:
     unit: [tests/unit/fallback.test.ts]

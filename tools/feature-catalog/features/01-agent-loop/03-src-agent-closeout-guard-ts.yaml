@@ -13,7 +13,8 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'
 evidence:
-  code: [src/agent/closeout-guard.ts]
+  code:
+    - src/agent/closeout-guard.ts
   adrs: [17]
   tests:
     unit:
