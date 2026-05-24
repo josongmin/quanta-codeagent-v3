@@ -160,6 +160,31 @@ export type {
   WorkingStateSnapshot,
 } from "./types"
 export { createUpdateWorkingStateTool } from "./update-working-state"
+// `web_*` cluster (ADR-0127): `web_fetch` (always-on, factory binds
+// globalThis.fetch unless a fake fetcher is injected) + `web_search`
+// (provider-gated — closed-port DI via AgentConfig.webSearch.provider; the
+// builder lives in src/agent/tier1/web-search.ts). Neither is part of
+// `defaultTools` today — see ADR-0127 §"Default-OFF" for the registration
+// posture (mirrors `read_image` / `shadow*` caller-wired pattern).
+export {
+  htmlToMarkdown,
+  WEB_FETCH_DEFAULT_MAX_BYTES,
+  WEB_FETCH_MAX_BYTES_CEILING,
+  WEB_FETCH_MAX_OUTPUT,
+  WEB_SEARCH_DEFAULT_LIMIT,
+  WEB_SEARCH_MAX_LIMIT,
+  WEB_SEARCH_QUERY_MAX,
+  WEB_SEARCH_SNIPPET_MAX,
+  type WebFetchInput,
+  type WebFetchOptions,
+  type WebSearchHit,
+  type WebSearchInput,
+  type WebSearchProvider,
+  webFetchInputSchema,
+  webFetchTool,
+  webSearchInputSchema,
+  webSearchTool,
+} from "./web"
 
 /**
  * STRUCTURAL CONTRACT: composition roots (`src/apps/**`) MUST call

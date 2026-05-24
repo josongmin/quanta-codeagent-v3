@@ -12,6 +12,7 @@ import type { RunContext } from "@/shared"
 import type { ShadowOdb } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
+import type { WebSearchProvider } from "@/tool/web"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { CapEnforcer } from "./cap-enforcer"
@@ -27,6 +28,7 @@ import type { IdeContextProvider } from "./ide-context"
 import type { LocalizePhaseConfig, LocalizePhaseState } from "./localize-phase-guard"
 import type { PlanStore } from "./plan/state"
 import type { PlanExitPort } from "./plan-exit-flow"
+import type { PlanQueueStore } from "./plan-queue"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
 import type { ModePolicy } from "./run-mode"
@@ -428,6 +430,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   planExitPort?: PlanExitPort
   /**
+   * Plan-queue helper (ADR-0128). Pure in-memory queue of follow-up user
+   * inputs captured WHILE a turn is in progress, replayed at turn
+   * boundary. Codex's unique `queued-follow-ups` pattern. Helper-only —
+   * default-OFF; nothing in the loop instantiates this slot today. Future
+   * consumer wiring (mode.ts mid-turn-steering, CLI typed-while-running)
+   * is a separate ADR. Sibling to `followUpQueue` (ADR-0037) which is the
+   * WIRED follow-up queue; this slot is the SOTA++ typed-shape primitive
+   * for future surfaces.
+   */
+  planQueue?: { store: PlanQueueStore }
+  /**
    * Structured plan-mode store (ADR-0095 draft). When wired, the dispatch
    * seam adapts this into a `PlanMutator` on every ToolContext and
    * `buildSessionFeatures` registers the 4 plan-mutation tools
@@ -672,6 +685,21 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     load(): Promise<ReturnType<FollowUpQueue["toSnapshot"]> | undefined>
     save(snapshot: ReturnType<FollowUpQueue["toSnapshot"]>): Promise<void>
   }
+  /**
+   * ADR-0127 web tool slice — operator-wired `WebSearchProvider` (Brave /
+   * DuckDuckGo / SerpAPI / etc.). When set, `buildSessionFeatures` (via
+   * `buildWebSearchBlock`) registers the `web_search` tool bound to this
+   * provider. Absent ⇒ `web_search` is NOT registered (default-OFF,
+   * byte-identical for every legacy caller — RFC §1.2).
+   *
+   * Concrete providers live OUTSIDE the `@/tool` slice (no built-in default)
+   * — shipping a default would lock the user into a specific search backend
+   * + a specific API-key surface. The composition root owns the wire.
+   *
+   * Top-level (not nested) so future consumers (e.g. a citation surface
+   * that wants to inspect query history) can read this slot directly.
+   */
+  webSearch?: { provider: WebSearchProvider }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -773,6 +801,8 @@ export type FeaturesConfig = Pick<
   | "onProgress"
   | "planExitPort"
   | "modelCandidates"
+  | "planQueue"
+  | "webSearch"
 >
 
 /** Narrow contract for per-turn prompt / context assembly (the loop's

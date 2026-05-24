@@ -1,0 +1,24 @@
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..45fe627b 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -353,8 +353,8 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+ 
+         try:
+             host = idna.encode(host, uts46=True).decode('utf-8')
+-        except idna.IDNAError:
+-            raise UnicodeError
++        except idna.IDNAError as e:
++            raise UnicodeError(str(e))
+         return host
+ 
+     def prepare_url(self, url, params):
+@@ -403,7 +403,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+                 host = self._get_idna_encoded_host(host)
+             except UnicodeError:
+                 raise InvalidURL('URL has an invalid label.')
+-        elif host.startswith(u'*'):
++        elif host.startswith(u'*') or host.startswith(u'.'):
+             raise InvalidURL('URL has an invalid label.')
+ 
+         # Carefully reconstruct the network location

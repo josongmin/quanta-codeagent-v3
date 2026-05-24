@@ -1,0 +1,42 @@
+diff --git a/requests/adapters.py b/requests/adapters.py
+index fe22ff45..84502af6 100644
+--- a/requests/adapters.py
++++ b/requests/adapters.py
+@@ -28,6 +28,7 @@ from urllib3.exceptions import ReadTimeoutError
+ from urllib3.exceptions import SSLError as _SSLError
+ from urllib3.exceptions import ResponseError
+ from urllib3.exceptions import LocationValueError
++from urllib3.exceptions import LocationParseError
+ 
+ from .models import Response
+ from .compat import urlparse, basestring
+@@ -499,6 +500,8 @@ class HTTPAdapter(BaseAdapter):
+ 
+         except (ProtocolError, socket.error) as err:
+             raise ConnectionError(err, request=request)
++        except LocationParseError as e:
++            raise InvalidURL('URL has an invalid label.')
+ 
+         except MaxRetryError as e:
+             if isinstance(e.reason, ConnectTimeoutError):
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..fbee3a71 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -398,12 +398,12 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         # non-ASCII characters. This allows users to automatically get the correct IDNA
+         # behaviour. For strings containing only ASCII characters, we need to also verify
+         # it doesn't start with a wildcard (*), before allowing the unencoded hostname.
+-        if not unicode_is_ascii(host):
+-            try:
++        try:
++            if not unicode_is_ascii(host):
+                 host = self._get_idna_encoded_host(host)
+-            except UnicodeError:
++            elif host.startswith(u'*'):
+                 raise InvalidURL('URL has an invalid label.')
+-        elif host.startswith(u'*'):
++        except UnicodeError:
+             raise InvalidURL('URL has an invalid label.')
+ 
+         # Carefully reconstruct the network location
