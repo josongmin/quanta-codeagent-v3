@@ -5,6 +5,10 @@ subsystem: Negative-space ADR — "we do not do X" trust-model declarations
 order: 96
 maturity: L3
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, held-promotion]
 depends_on: [migration-importer-credential-read-ban, runtime-config-ssot, web-fetch-search, persona-slot]

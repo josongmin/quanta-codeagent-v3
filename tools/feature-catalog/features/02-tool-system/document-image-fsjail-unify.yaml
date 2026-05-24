@@ -5,6 +5,12 @@ subsystem: 도구 — FS-jail unification (Slice S7)
 order: 111
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_FS_JAIL]
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: 스킬 — 번들 시스템 스킬 (shadow-store rewind UX, LLM path)
 order: 122
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 depends_on: [snapshot-slash-cmd]

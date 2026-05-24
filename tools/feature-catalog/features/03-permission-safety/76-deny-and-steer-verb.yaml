@@ -5,6 +5,10 @@ subsystem: 권한 게이트 — 3-verb ConfirmDecision (Gap-4 of ADR-0076)
 order: 76
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]
 depends_on: [agent-loop-branch-hardening, refusal-stop-reason, llm-assemble]

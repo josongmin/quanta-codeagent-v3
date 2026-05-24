@@ -5,6 +5,10 @@ subsystem: stream/adapters — human-readable stdout renderer
 order: 80
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

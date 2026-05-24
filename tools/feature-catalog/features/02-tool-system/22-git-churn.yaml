@@ -5,6 +5,10 @@ subsystem: Git 1급 도구 (ADR-0025) — fault-localization 신호
 order: 22
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

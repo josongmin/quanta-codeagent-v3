@@ -5,6 +5,10 @@ subsystem: Git 1급 도구 (ADR-0025/0105) — 머신 파싱 안전 format
 order: 24
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

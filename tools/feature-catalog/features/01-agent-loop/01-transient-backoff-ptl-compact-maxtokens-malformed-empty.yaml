@@ -5,6 +5,10 @@ subsystem: Same-turn 복구
 order: 1
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: transient backoff / PTL→compact / max_tokens / malformed / empty

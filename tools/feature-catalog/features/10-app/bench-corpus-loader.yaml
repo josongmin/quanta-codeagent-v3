@@ -5,6 +5,12 @@ subsystem: 벤치 — corpus 어댑터
 order: 131
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SWEBENCH_CORPUS_ROOT, QUANTA_SWEBENCH_PYTHON]
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: |

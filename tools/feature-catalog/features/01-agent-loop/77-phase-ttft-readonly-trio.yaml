@@ -5,6 +5,11 @@ subsystem: 턴 라이프사이클 — 3-plane 구조적 신호 (ADR-0077)
 order: 77
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: [gen_ai.response.time_to_first_token_ms]
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: LSP mutating + signature-help tools (ADR-0141)
 order: 141
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]
 purpose: |

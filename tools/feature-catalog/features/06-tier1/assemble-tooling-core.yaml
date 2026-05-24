@@ -5,6 +5,10 @@ subsystem: runner/assemble — tooling core
 order: 231
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [assemble-config]

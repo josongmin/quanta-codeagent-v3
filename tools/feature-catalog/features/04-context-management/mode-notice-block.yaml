@@ -5,6 +5,10 @@ subsystem: AgentMode → per-turn notice (resolveAgentMode SSOT)
 order: 14
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 purpose: |

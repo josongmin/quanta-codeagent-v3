@@ -5,6 +5,10 @@ subsystem: 권한 게이트 — readonly-aware deny-steer (Plane-C of ADR-0077 t
 order: 78
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [turn-timing-anchors, llm-assemble, phase-ttft-readonly-trio]

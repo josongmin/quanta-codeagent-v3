@@ -5,6 +5,10 @@ subsystem: Verify-guard (Tier 0) · ADR-0013
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.

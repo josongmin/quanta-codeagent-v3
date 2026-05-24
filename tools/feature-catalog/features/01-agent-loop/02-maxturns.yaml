@@ -5,6 +5,12 @@ subsystem: 턴 상태머신
 order: 2
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MAX_TURNS]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: maxTurns

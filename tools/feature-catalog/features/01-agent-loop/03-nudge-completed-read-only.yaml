@@ -5,6 +5,10 @@ subsystem: 스트리밍 도구 실행
 order: 3
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: nudge/completed 전 디스패치된 read-only 결과 폐기

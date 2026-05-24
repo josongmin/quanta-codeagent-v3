@@ -5,6 +5,10 @@ subsystem: 서브에이전트 — 표준 도구 계약
 order: 12
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
 purpose: |

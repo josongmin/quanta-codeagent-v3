@@ -5,6 +5,12 @@ subsystem: 운영 진단 노브
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_LOG_LEVEL, QUANTA_RUN_ID]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: / 임계값 threshold — line-based stderr writer + level filter. Bench/observe 실행 식별자 }) — trajectory/report 메타데이터 상관키.

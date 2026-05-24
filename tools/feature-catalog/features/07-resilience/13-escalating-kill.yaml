@@ -5,6 +5,10 @@ subsystem: 자식 프로세스 lifecycle (runtime)
 order: 13
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
 purpose: |

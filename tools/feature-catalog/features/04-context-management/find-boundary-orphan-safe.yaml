@@ -5,6 +5,10 @@ subsystem: 압축 boundary 계산 — Anthropic unpaired tool_result 거부 회�
 order: 21
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |

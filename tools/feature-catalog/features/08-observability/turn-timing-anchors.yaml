@@ -5,6 +5,11 @@ subsystem: 텔레메트리 — per-turn 시계 캡처 + TTFT 가드
 order: 81
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: [gen_ai.usage]
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

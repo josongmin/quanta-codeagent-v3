@@ -5,6 +5,10 @@ subsystem: 사이드 챗 격리 루프 (Claude Code A9 흡수)
 order: 111
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 purpose: |

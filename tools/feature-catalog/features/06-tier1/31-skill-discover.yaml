@@ -5,6 +5,12 @@ subsystem: 스킬 — discovery + size guard
 order: 31
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SKILLS_DIR]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [anthropic-beta-and-skill-size-cap]

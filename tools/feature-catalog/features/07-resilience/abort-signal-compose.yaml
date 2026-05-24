@@ -5,6 +5,10 @@ subsystem: 취소 신호 합성 (turn vs surface vs subagent)
 order: 23
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [git-runner-cancellation-signal, turn-cancel-keys]

@@ -5,6 +5,12 @@ subsystem: 권한 모드
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PERMISSION]
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: default|acceptEdits|bypass|auto , onConfirm 콜백

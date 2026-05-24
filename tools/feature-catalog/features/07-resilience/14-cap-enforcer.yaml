@@ -5,6 +5,12 @@ subsystem: Tool-cap 강제 (3rd channel)
 order: 14
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_CAP_ENFORCE]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [dispatch-dedup]

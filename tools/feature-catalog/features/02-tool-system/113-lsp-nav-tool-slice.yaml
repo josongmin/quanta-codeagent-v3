@@ -5,6 +5,10 @@ subsystem: 코어 read-only 도구 — language-server navigation
 order: 113
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [diagnostics-tool, lsp-bridge]

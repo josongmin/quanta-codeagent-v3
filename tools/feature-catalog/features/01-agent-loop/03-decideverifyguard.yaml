@@ -5,6 +5,10 @@ subsystem: Verify-guard (Tier 0) · ADR-0013
 order: 3
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: 순수정책 decideVerifyGuard

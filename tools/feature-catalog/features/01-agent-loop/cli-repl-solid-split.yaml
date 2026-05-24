@@ -5,6 +5,10 @@ subsystem: CLI surface 구조 회복 (R7/R8 follow-up)
 order: 200
 maturity: L4
 status: refined
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: |

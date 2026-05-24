@@ -5,6 +5,12 @@ subsystem: CLI chrome — lifecycle indicator pills
 order: 22
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_LIFECYCLE_PILLS, QUANTA_PILL_TASKS, QUANTA_PILL_FOLLOWUP, QUANTA_PILL_MCP]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [queued-follow-ups, cli-status-pills]

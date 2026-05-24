@@ -5,6 +5,10 @@ subsystem: Git observability wiring (ADR-0110)
 order: 111
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: 자가 편집 메모리 도구 (RFC §6.3 long-term memory)
 order: 10
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [memorysearch-write-update, codex-2-phase-consolidator]

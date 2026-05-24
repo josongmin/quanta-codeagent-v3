@@ -5,6 +5,10 @@ subsystem: 계층형 시맨틱
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core"]
 purpose: tier+kind, 하이브리드 회상, tier 가중

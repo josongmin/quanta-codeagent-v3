@@ -5,6 +5,10 @@ subsystem: 권한 — git-write 모드 게이트 (RFC may-22 ci-bot mode)
 order: 95
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [ci-bot]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |

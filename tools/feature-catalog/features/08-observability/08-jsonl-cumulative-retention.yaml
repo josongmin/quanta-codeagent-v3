@@ -5,6 +5,10 @@ subsystem: 관측성 (RFC-0002 / ADR-0035)
 order: 9
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 purpose: jsonl trajectory 파일의 cumulative-bytes sliding-window retention + atomic rewrite + 명시적 busy error

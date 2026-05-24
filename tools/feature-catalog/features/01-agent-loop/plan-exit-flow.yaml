@@ -5,6 +5,10 @@ subsystem: Plan-exit lifecycle 흐름 (ADR-0062 absorb #3)
 order: 62
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [plan-mode]

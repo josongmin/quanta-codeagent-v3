@@ -5,6 +5,10 @@ subsystem: Active-skills per-turn block — body 는 lazy, catalogue 만 reminde
 order: 15
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 purpose: |

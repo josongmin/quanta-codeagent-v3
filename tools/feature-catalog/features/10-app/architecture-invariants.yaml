@@ -5,6 +5,10 @@ subsystem: Surface-agnostic Layer-2 (RFC may-22)
 order: 25
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

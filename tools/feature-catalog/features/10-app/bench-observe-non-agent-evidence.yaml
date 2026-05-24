@@ -5,6 +5,10 @@ subsystem: Bench harness — trajectory append adapter
 order: 46
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: Unified Agent Runtime — Phase 4 wiring
 order: 51
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

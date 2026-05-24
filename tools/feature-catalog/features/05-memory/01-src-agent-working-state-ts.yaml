@@ -5,6 +5,10 @@ subsystem: L3 WorkingState (ADR-0021)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .

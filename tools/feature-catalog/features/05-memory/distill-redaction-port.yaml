@@ -5,6 +5,10 @@ subsystem: 장기 메모리 — distill input port (Slice S9 Part C)
 order: 74
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "security-touched", "held-promotion"]
 depends_on: [memory-distill-redaction-fence]

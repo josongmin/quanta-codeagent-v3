@@ -5,6 +5,10 @@ subsystem: 스트리밍 도구 실행
 order: 2
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: stream_reset tombstone

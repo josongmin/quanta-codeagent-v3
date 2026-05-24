@@ -5,6 +5,10 @@ subsystem: '`ToolResult.evidence` 타입 필드 (FU2)'
 order: 1
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: 'evidence?: ToolResultEvidence — 이전 duck-typed extra-prop smuggling을 타입 surface로 대체. stdErr vs stderr casing drift가 더 이상 tsc를 못 빠져나감.'

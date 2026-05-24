@@ -5,6 +5,10 @@ subsystem: Migration translator (Claude Code 흡수, ADR-0038)
 order: 11
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude-code"]
 depends_on: [external-agent-import, portable-session-v1]

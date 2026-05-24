@@ -5,6 +5,10 @@ subsystem: eval 앱 Tier-1 — 합성 시나리오 (RFC-0003)
 order: 82
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-schema-additive, eval-five-tier]

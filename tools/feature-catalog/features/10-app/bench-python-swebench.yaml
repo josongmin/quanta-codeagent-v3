@@ -5,6 +5,12 @@ subsystem: Bench harness — official-grader integration
 order: 43
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SWEBENCH_DATASET, QUANTA_SWEBENCH_RUN_ID]
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: |

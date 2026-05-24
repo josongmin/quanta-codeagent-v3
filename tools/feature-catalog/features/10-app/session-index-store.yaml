@@ -5,6 +5,10 @@ subsystem: Session 영속 — directory of sessions
 order: 11
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [quanta-session-subcommands]

@@ -5,6 +5,12 @@ subsystem: CLI surface — assistant-text stream coloring
 order: 71
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MD_HIGHLIGHT, QUANTA_MD_MODE]
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |

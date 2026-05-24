@@ -5,6 +5,10 @@ subsystem: Runtime backstop for git posture (ADR-0100/0101)
 order: 94
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |

@@ -5,6 +5,12 @@ subsystem: 벤치 메타-도구 (env-overlay composer, never mutates bench)
 order: 70
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_LSP, QUANTA_BENCH_SUBAGENT, QUANTA_BENCH_SKILLS]
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: Cursor 흡수 — context history 1급 surface (ADR-0075)
 order: 30
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core]
 purpose: |

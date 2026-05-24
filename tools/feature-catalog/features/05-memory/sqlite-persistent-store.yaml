@@ -5,6 +5,10 @@ subsystem: Persistent memory (SQLite)
 order: 50
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
 purpose: |

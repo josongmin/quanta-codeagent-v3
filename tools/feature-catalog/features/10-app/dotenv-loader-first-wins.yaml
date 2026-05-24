@@ -5,6 +5,10 @@ subsystem: CLI / agent entry — env file loader
 order: 60
 maturity: L5
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

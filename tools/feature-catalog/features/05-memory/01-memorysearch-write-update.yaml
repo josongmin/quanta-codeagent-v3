@@ -5,6 +5,10 @@ subsystem: 도구/노브
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: self-edit memory_search/write/update, lexical graceful degrade

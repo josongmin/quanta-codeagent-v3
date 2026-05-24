@@ -5,6 +5,10 @@ subsystem: 시스템 prompt + per-turn reminder 합성 (ADR-0003 cache prefix)
 order: 10
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [glob-rules]

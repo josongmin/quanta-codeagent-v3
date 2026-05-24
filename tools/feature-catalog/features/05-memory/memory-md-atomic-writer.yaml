@@ -5,6 +5,10 @@ subsystem: Phase 2 consolidator — on-disk 3-file writer
 order: 71
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "held-promotion"]
 purpose: |

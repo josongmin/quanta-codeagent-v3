@@ -5,6 +5,10 @@ subsystem: REPL panels (R10)
 order: 21
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [plan-mode]

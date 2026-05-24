@@ -5,6 +5,12 @@ subsystem: Bench harness — per-instance orchestration
 order: 41
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_TIMEOUT_MS]
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: |

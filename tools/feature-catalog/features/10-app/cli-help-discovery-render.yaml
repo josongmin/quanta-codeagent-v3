@@ -5,6 +5,10 @@ subsystem: CLI surface — help renderer discovery layer
 order: 24
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [cli-slash-help]

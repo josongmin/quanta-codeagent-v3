@@ -5,6 +5,12 @@ subsystem: REPL 입력 UX (history/multiline)
 order: 114
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_HISTORY, QUANTA_HISTORY_FILE, QUANTA_HISTORY_MAX, QUANTA_MULTILINE]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

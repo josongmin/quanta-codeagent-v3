@@ -5,6 +5,10 @@ subsystem: Mode enum (ADR-0018)
 order: 2
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: review/audit 모드 — dispatch에서 mutating 차단 + 프롬프트에 REVIEW_NOTICE/AUDIT_NOTICE 주입. 별도 도구 없음.

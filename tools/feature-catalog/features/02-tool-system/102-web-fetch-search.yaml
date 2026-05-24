@@ -5,6 +5,10 @@ subsystem: 도구 — web (ADR-0127)
 order: 102
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, security-touched, held-promotion]
 purpose: |

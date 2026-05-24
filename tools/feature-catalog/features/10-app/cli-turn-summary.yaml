@@ -5,6 +5,12 @@ subsystem: CLI chrome — turn-end summary panel
 order: 21
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_TURN_SUMMARY, QUANTA_TURN_SUMMARY_VERBOSE]
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [memory-recall-citation]

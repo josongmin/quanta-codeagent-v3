@@ -5,6 +5,10 @@ subsystem: LLM wire — SSE + WebSocket envelope decoder (ADR-0048)
 order: 32
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [response-in-progress]

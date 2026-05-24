@@ -5,6 +5,10 @@ subsystem: 자식 프로세스 lifecycle 안전망
 order: 85
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
 purpose: |

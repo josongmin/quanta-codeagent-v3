@@ -5,6 +5,10 @@ subsystem: 도구 — read-only git surface
 order: 24
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
 depends_on: [git-upstream-check]

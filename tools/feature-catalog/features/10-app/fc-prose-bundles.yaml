@@ -5,6 +5,10 @@ subsystem: feature-catalog 메타 도구 (rendered MD 의 non-YAML 섹션 SSOT)
 order: 53
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:tooling", "absorbed:codex"]
 purpose: |

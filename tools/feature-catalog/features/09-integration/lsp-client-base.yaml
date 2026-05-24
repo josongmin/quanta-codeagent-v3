@@ -5,6 +5,10 @@ subsystem: LSP — base client implementation of LspPort
 order: 14
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-typescript-adapter, lsp-pyright-adapter, lsp-bridge]

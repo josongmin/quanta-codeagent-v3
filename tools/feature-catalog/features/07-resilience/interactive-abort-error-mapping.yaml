@@ -5,6 +5,10 @@ subsystem: Interactive 모드 abort → POSIX boundary
 order: 26
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |

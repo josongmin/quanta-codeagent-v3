@@ -5,6 +5,10 @@ subsystem: 스킬 — 카테고리 분류 + tool whitelist
 order: 30
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-md-frontmatter]

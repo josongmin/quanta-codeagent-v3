@@ -5,6 +5,10 @@ subsystem: 시스템 프롬프트+캐시 prefix
 order: 4
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: 압축 프롬프트 verified-vs-assumed 강화

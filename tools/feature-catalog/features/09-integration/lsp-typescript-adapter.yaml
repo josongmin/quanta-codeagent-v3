@@ -5,6 +5,10 @@ subsystem: LSP — TypeScript / JavaScript adapter
 order: 15
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-pyright-adapter, lsp-client-base]

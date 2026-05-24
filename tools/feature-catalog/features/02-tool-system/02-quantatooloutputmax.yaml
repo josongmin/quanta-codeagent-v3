@@ -5,6 +5,12 @@ subsystem: 결과 cap + disk-spill (Tier 0)
 order: 2
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_TOOL_OUTPUT_MAX]
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: (200k) / _SPILL_KEEP(50), sub-cap byte-identical

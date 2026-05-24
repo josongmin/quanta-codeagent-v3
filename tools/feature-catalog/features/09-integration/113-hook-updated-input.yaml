@@ -5,6 +5,10 @@ subsystem: Hook bus (ADR-0113)
 order: 113
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 purpose: |

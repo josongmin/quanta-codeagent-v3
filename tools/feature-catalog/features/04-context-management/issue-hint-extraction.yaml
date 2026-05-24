@@ -5,6 +5,10 @@ subsystem: 이슈 텍스트 localization 힌트 (Agentless 흡수)
 order: 60
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core]
 purpose: |

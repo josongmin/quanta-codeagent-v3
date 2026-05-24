@@ -5,6 +5,10 @@ subsystem: LSP integration (may-20 Codex absorption)
 order: 12
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 purpose: |

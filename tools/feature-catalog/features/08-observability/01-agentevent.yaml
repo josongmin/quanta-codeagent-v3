@@ -5,6 +5,10 @@ subsystem: 이벤트/Trajectory (RFC-0002)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [work-metrics]

@@ -5,6 +5,10 @@ subsystem: 코어 루프 dispatch seam
 order: 206
 maturity: L5
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [effect-channel, plan-mode]

@@ -5,6 +5,10 @@ subsystem: 턴 라이프사이클 — host→agent 타입드 입력 (Codex 흡�
 order: 66
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: |

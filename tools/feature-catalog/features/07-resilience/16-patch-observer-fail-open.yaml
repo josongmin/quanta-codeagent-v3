@@ -5,6 +5,10 @@ subsystem: V4A apply-pipeline boundary discipline
 order: 16
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "held-promotion"]
 depends_on: [recorder-fail-open-permission-verdict]

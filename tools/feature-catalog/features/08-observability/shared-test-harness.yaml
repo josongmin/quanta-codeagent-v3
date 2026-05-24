@@ -5,6 +5,10 @@ subsystem: 테스트 인프라 (LLM·StreamPort 더블 + AgentConfig 빌더 단�
 order: 75
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

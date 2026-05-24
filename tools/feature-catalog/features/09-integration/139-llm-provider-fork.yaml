@@ -5,6 +5,12 @@ subsystem: LLM transport — vendor/transport separation
 order: 139
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_ANTHROPIC_PROVIDER]
 owners: ["@songmin"]
 labels: ["surface:core"]
 purpose: |

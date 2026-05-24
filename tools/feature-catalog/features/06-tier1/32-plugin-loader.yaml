@@ -5,6 +5,10 @@ subsystem: 플러그인 — 매니페스트 로더 + 트리 디스커버리
 order: 32
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [plugin-manifest]

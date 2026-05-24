@@ -5,6 +5,10 @@ subsystem: 도구사용 규칙 팩 (run-mode SSOT)
 order: 215
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

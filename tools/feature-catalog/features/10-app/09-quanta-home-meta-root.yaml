@@ -5,6 +5,12 @@ subsystem: 앱 홈 디렉터리 (cross-cutting path SSOT)
 order: 9
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_HOME, QUANTA_PREFS_HOME, QUANTA_BENCH_HOME]
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [post-denial-precedence, per-host-agent-mode, runtime-config-ssot, per-thread-permissions]

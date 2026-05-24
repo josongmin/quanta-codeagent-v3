@@ -5,6 +5,10 @@ subsystem: 도구 — git review (Claude Desktop reviewDiff 흡수, ADR-0111)
 order: 97
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
 purpose: |

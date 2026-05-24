@@ -5,6 +5,10 @@ subsystem: 보안 — source-class 분류 (Layer 1, ADR-0078)
 order: 2
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
 owners: ["@songmin", "team-safety"]
 labels: ["surface:core", "security-touched"]
 purpose: |

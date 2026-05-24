@@ -5,6 +5,12 @@ subsystem: LSP diagnostics (ADR-0009)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_LSP]
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 purpose: "TS/Pyright → diagnostics 도구 . runAgent e2e(, 4 tests): fake DiagnosticsProvider 주입 → ScriptedLLM이 diagnostics tool_use → (a) errors+warnings → ok:false + 1-based 좌표 포맷 + session.stop() 호출 / (b) clean file → ok:true + \"no diagnostics\" / (c) null provider → 우아하게 ok:false + \"no language server\" / (d) session.diagnostics() throw → ok:false + stop() 여전히 호출."

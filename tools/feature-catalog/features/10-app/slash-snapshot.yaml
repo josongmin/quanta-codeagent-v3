@@ -5,6 +5,10 @@ subsystem: REPL panels (R10) — shadow-store UX
 order: 27
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

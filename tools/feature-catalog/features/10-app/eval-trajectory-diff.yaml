@@ -5,6 +5,10 @@ subsystem: eval 앱 — Tier 3 replay 비교
 order: 88
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: |

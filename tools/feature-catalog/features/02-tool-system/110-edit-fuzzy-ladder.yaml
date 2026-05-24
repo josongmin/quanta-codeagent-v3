@@ -5,6 +5,10 @@ subsystem: 코어 mutating 도구 — edit string-replacement matching
 order: 110
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

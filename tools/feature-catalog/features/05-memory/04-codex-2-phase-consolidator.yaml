@@ -5,6 +5,10 @@ subsystem: 장기 메모리 — LLM 합성 distill (Codex 흡수, ADR-0068)
 order: 4
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
 purpose: |

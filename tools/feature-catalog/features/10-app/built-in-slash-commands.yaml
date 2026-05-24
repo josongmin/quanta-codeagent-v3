@@ -5,6 +5,12 @@ subsystem: CLI surface (ADR-0059)
 order: 7
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PREFS_HOME]
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [chatgpt-oauth-provider]

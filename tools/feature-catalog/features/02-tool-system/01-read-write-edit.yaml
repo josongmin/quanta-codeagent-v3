@@ -5,6 +5,10 @@ subsystem: 코어 도구 9종
 order: 1
 maturity: L5
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli]
 depends_on: [typed-tool-failure-modes, bash-tool-hitl-tier, edit-fuzzy-ladder, test-runner-tool, diagnostics-tool]

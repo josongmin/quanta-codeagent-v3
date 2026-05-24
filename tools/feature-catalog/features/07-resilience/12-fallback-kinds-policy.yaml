@@ -5,6 +5,10 @@ subsystem: 모델 Fallback (Tier 0)
 order: 12
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |

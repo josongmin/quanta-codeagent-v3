@@ -5,6 +5,10 @@ subsystem: 권한 룰 — deterministic 매칭 알고리즘
 order: 31
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [prefix-rule-dsl]

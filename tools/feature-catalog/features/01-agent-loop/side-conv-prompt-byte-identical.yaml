@@ -5,6 +5,12 @@ subsystem: Side-conversation (ADR-0049)
 order: 21
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_ADDENDUM]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: |

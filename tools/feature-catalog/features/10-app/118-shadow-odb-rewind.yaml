@@ -5,6 +5,10 @@ subsystem: Shadow ODB rewind primitive (ADR-0118)
 order: 118
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

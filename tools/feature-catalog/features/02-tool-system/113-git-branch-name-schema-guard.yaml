@@ -5,6 +5,10 @@ subsystem: 도구 — git_branch_switch input hardening
 order: 113
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |

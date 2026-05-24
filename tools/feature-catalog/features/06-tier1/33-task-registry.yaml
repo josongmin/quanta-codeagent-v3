@@ -5,6 +5,10 @@ subsystem: 서브에이전트 — background task lifecycle + capability gating
 order: 33
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [subagent-6-tools]

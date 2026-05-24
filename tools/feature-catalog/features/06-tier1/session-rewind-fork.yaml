@@ -5,6 +5,12 @@ subsystem: 세션 되감기/포크 (Claude Code A1 흡수)
 order: 110
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_REWIND, QUANTA_REWIND_GIT]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: 도구 — git budget (Cursor captureGitHistory 흡수)
 order: 100
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:cli, held-promotion]
 purpose: |

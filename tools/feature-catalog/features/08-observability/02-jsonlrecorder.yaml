@@ -5,6 +5,12 @@ subsystem: 이벤트/Trajectory (RFC-0002)
 order: 2
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_OBSERVE_DIR]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

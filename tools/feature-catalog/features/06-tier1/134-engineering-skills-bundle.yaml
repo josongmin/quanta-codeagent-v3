@@ -5,6 +5,10 @@ subsystem: 스킬 — 번들 시스템 스킬 (engineering-task slice, CTK 흡�
 order: 134
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
 purpose: |

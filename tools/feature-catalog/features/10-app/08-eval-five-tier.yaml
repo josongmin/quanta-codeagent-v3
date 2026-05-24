@@ -5,6 +5,10 @@ subsystem: eval 앱 (RFC-0003) — 로컬 품질 검증 스택
 order: 8
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
 depends_on: [eval-schema-additive, 2026-05-21]

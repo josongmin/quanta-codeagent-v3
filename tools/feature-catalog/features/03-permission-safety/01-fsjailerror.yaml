@@ -5,6 +5,12 @@ subsystem: FS jail (`src/storage/service.ts`)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_FS_JAIL]
 owners: ["@songmin"]
 labels: [surface:cli, security-touched, default-off]
 purpose: FsJailError — assertPathInWorkspace/assertPathInsideBaseDir로 baseDir 밖 경로 escape 차단. state.ts 같은 no-baseDir 콜러는 pre-jail back-compat 유지 옵트아웃, cross-repo 작업).

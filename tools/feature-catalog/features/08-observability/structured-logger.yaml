@@ -5,6 +5,12 @@ subsystem: 로깅 — JSON-shaped sink (shared logger와 분리)
 order: 84
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_LOG_LEVEL]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [runtime-config-ssot]

@@ -5,6 +5,10 @@ subsystem: Bench harness — post-run diagnosis
 order: 42
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [probe-failure-triage]

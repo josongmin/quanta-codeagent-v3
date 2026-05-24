@@ -5,6 +5,10 @@ subsystem: runtime/os-sandbox — macOS profile compilation
 order: 41
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [landlock-degraded-passthrough]

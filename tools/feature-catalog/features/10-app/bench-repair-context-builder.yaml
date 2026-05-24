@@ -5,6 +5,10 @@ subsystem: 벤치 — repair round (RFC §16)
 order: 133
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [runrepairrounds]

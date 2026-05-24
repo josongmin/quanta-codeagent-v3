@@ -5,6 +5,12 @@ subsystem: CLI surface — pre/post action preview
 order: 70
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_DIFF_MAX_BYTES, QUANTA_DIFF_MAX_LINES, QUANTA_DIFF_PREVIEW]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 purpose: |

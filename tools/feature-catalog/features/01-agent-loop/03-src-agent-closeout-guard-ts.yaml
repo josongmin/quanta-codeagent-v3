@@ -5,6 +5,10 @@ subsystem: Closeout 4-rule (ADR-0017)
 order: 3
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'

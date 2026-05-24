@@ -5,6 +5,10 @@ subsystem: runner/assemble — compaction
 order: 234
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [compactionbreaker]

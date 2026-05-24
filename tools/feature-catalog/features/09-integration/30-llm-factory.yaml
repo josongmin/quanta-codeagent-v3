@@ -5,6 +5,10 @@ subsystem: LLM provider seam — single source of truth
 order: 30
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [model-swap-retry]

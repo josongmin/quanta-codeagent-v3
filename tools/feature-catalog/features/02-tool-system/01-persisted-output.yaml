@@ -5,6 +5,10 @@ subsystem: 결과 cap + disk-spill (Tier 0)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: <persisted-output> 스필 + GC

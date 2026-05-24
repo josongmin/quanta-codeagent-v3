@@ -5,6 +5,10 @@ subsystem: Distilled memory aggregate를 4-section session_ctx 에 prepend
 order: 12
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-memory"]
 labels: [surface:core]
 purpose: |

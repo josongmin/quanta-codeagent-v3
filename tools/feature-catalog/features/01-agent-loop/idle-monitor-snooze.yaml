@@ -5,6 +5,12 @@ subsystem: 유휴/거부 모니터 (Cursor 3.2 §4.1/§4.2/§5 흡수)
 order: 113
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_IDLE_SUPPRESS, QUANTA_IDLE_MS, QUANTA_SNOOZE_DEFAULT_MS, QUANTA_REJECT_LIMIT]
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, tier:core]
 purpose: |

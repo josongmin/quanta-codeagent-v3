@@ -5,6 +5,10 @@ subsystem: 시스템 프롬프트 — 어휘 차폐 / user-intent / 검증 클�
 order: 69
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: |

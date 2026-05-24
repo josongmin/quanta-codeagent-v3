@@ -5,6 +5,10 @@ subsystem: Unified Agent Runtime — 모드 매트릭스 (RFC may-22)
 order: 6
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [ide, daemon]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

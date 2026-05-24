@@ -5,6 +5,10 @@ subsystem: Bench harness — Type-F structural fix
 order: 44
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: |

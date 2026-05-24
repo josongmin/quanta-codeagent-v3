@@ -5,6 +5,10 @@ subsystem: Loop 안정성 — duplicate tool-call 단락
 order: 51
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

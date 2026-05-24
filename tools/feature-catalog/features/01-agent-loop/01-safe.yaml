@@ -5,6 +5,10 @@ subsystem: 스트리밍 도구 실행
 order: 1
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: safe 도구 스트림 중 즉시 디스패치, 순서보존, head-of-line 배리어

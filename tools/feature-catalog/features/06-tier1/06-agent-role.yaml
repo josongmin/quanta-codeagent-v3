@@ -5,6 +5,10 @@ subsystem: 서브에이전트 — 역할 + 닉네임
 order: 13
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "held-promotion"]
 purpose: 'Codex 통계 흡수 — explorer 42% (read-only wide-scope) / none 28% (parent 상속) / worker 16% (mutator narrow). POLICY_TABLE 명시적 (role × ToolKind) — 신규 ToolKind 추가는 빌드 fail. + 39 maestro nickname pool (15 conductors + 24 composers, ASCII ≤12 char). FNV-1a 32-bit deterministic seed→name. nextSequentialNickname 풀 exhaustion 시 null (no reuse, no fallback).'

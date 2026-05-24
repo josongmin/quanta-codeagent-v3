@@ -5,6 +5,10 @@ subsystem: 코어 루프 SOLID 회복
 order: 205
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

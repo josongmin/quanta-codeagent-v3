@@ -5,6 +5,12 @@ subsystem: Verify-guard (Tier 0) · ADR-0013
 order: 4
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_VERIFY_GUARD, QUANTA_VERIFY_GUARD_MAX_TRIPS]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: / (기본 OFF)

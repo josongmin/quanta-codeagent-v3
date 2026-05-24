@@ -5,6 +5,10 @@ subsystem: IPC byte shuttle — 4 transport implementations
 order: 35
 maturity: L4
 status: new
+ui_surfaces: [api]
+monitoring: partial
+modes: [n-a]
+configurable: planned
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 purpose: |

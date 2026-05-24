@@ -5,6 +5,10 @@ subsystem: LSP nav 확장 (ADR-0024)
 order: 3
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit

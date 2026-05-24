@@ -5,6 +5,10 @@ subsystem: 도구 — git conflict 평면화 (fix-merge-conflicts skill 지원)
 order: 96
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, tier:1]
 purpose: |

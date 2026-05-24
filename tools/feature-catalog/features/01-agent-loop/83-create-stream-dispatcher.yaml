@@ -5,6 +5,10 @@ subsystem: Stream dispatch callbacks (loop ↔ streamingTurn seam)
 order: 83
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

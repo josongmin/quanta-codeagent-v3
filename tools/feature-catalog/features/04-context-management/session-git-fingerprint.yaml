@@ -5,6 +5,10 @@ subsystem: Session 메타데이터 — 재현성 fingerprint (ADR-0106)
 order: 50
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: [session-jsonl-envelope]

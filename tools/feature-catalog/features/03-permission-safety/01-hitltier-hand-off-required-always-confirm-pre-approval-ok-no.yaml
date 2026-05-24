@@ -5,6 +5,10 @@ subsystem: HITL 4-tier (ADR-0020)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 purpose: HITLTier = hand-off-required | always-confirm | pre-approval-ok | none. Tool.hitlTier?(input) duck-typed mirror in @/tool/types; bashHitlTier로 curl/wget/gh api/git push/git fetch ...

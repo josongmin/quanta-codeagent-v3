@@ -5,6 +5,12 @@ subsystem: 작업 투명성 (v0.dev 흡수, ADR-0065)
 order: 64
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_METRICS]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

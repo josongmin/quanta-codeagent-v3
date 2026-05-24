@@ -5,6 +5,12 @@ subsystem: runner/assemble — store + embedder
 order: 232
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MEMORY_EMBED]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: |

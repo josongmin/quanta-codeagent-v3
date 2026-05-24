@@ -5,6 +5,10 @@ subsystem: 투기적 분기 탐색 (Agentless 흡수, ADR-0084)
 order: 83
 maturity: L4
 status: refined
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor", "absorbed:agentless"]
 purpose: |

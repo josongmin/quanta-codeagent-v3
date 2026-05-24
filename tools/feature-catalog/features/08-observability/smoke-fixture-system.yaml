@@ -5,6 +5,10 @@ subsystem: 회귀 스모크 (recorded tier-0 + opt-in tier-1 live + LLM-judge)
 order: 55
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

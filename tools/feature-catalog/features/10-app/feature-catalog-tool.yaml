@@ -5,6 +5,10 @@ subsystem: 메타 도구 (YAML SSOT → docs/10.feature-catalog.md auto-render)
 order: 50
 maturity: L5
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:tooling"]
 purpose: |

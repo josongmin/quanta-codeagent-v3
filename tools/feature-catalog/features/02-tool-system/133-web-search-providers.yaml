@@ -5,6 +5,10 @@ subsystem: 도구 — web search (concrete WebSearchProvider impls)
 order: 134
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |

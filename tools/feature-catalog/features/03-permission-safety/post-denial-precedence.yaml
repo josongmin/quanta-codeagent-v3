@@ -5,6 +5,12 @@ subsystem: 권한 스택 (ADR-0046)
 order: 12
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

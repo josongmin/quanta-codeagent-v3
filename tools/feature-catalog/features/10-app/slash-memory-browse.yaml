@@ -5,6 +5,12 @@ subsystem: REPL panels (R10)
 order: 25
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MEMORY_LIST_MAX, QUANTA_MEMORY_SLASH]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
 purpose: |

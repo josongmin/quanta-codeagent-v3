@@ -5,6 +5,10 @@ subsystem: Reminder block 순서 (ADR-0023)
 order: 1
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, tier:1]
 depends_on: [glob-rules]

@@ -5,6 +5,11 @@ subsystem: Side-conversation (ADR-0049)
 order: 20
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: [quanta.thread.side, quanta.thread.kind]
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:claude-code, surface:core, tier:1]
 depends_on: [plan-mode]

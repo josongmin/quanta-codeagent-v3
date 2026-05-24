@@ -5,6 +5,12 @@ subsystem: Bench harness — install-free python entry
 order: 80
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SWEBENCH_PYTHON_BIN]
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [bench-python-swebench]

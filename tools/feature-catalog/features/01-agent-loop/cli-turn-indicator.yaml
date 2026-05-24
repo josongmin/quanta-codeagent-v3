@@ -5,6 +5,12 @@ subsystem: CLI turn indicator (StreamPort tee)
 order: 115
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SPINNER]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

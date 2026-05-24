@@ -5,6 +5,11 @@ subsystem: 텔레메트리 — quanta.patch.* 어휘 활성화
 order: 93
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: [quanta.patch, quanta.patch.op]
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 purpose: |

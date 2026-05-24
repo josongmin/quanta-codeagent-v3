@@ -5,6 +5,12 @@ subsystem: 도구 — registry (factory / output cap / spill / output-schema)
 order: 106
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_TOOL_OUTPUT_MAX]
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [persisted-output]

@@ -5,6 +5,10 @@ subsystem: Speculative branch search seeding (Agentless §3.1 + §4.2, ADR-0084)
 order: 85
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |

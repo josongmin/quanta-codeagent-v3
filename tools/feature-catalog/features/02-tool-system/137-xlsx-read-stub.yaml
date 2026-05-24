@@ -5,6 +5,10 @@ subsystem: 도구 — document (XLSX surface placeholder; impl deferred)
 order: 137
 maturity: L2
 status: hold
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: planned
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]
 purpose: |

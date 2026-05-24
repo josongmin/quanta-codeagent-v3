@@ -5,6 +5,10 @@ subsystem: LSP — stdio Content-Length framing
 order: 13
 maturity: L4
 status: stable
+ui_surfaces: [api]
+monitoring: integrated
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [mcp-client-jsonrpc, jsonrpc-envelope, lsp-bridge]

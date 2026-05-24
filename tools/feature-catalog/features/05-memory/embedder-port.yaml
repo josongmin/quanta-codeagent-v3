@@ -5,6 +5,10 @@ subsystem: 장기 메모리 — embedding provider seam
 order: 51
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 depends_on: [sqlite-persistent-store, memory-dedup-planner]

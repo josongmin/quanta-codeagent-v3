@@ -5,6 +5,10 @@ subsystem: Phase 1 SQLite adapter — additive over recall store
 order: 70
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 depends_on: [consolidator-session-hook, memory-md-atomic-writer]

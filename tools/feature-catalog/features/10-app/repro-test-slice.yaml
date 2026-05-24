@@ -5,6 +5,12 @@ subsystem: 벤치 — reproduction-test 합의 투표
 order: 130
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_REPRO_TEST]
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: 도구 — gh CLI security (positional-arg flag-injection guard)
 order: 111
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
 depends_on: [git-read-trio]

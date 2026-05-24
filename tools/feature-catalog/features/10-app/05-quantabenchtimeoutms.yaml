@@ -5,6 +5,12 @@ subsystem: 벤치
 order: 5
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_TIMEOUT_MS]
 owners: ["@songmin"]
 labels: ["surface:bench"]
 purpose: 'Bench 실행 노브: —'

@@ -5,6 +5,10 @@ subsystem: LSP nav 확장 (ADR-0024)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 purpose: 'LspPort에 8 RPC 추가: definition/references/hover/typeDefinition/implementation/documentSymbol/workspaceSymbol/prepareRename. capability 부재는 null로 graceful surface'

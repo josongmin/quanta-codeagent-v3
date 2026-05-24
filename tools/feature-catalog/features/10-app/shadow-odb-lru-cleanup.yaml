@@ -5,6 +5,10 @@ subsystem: Shadow git ODB — disk-budget cleanup
 order: 50
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [shadow-tools-trio, snapshot-slash-cmd, slash-snapshot]

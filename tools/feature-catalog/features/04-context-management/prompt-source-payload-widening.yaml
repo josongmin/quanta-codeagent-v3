@@ -5,6 +5,10 @@ subsystem: Surface-agnostic prompt provider port (Layer-2 runner)
 order: 60
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |

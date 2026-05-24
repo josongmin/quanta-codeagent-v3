@@ -5,6 +5,10 @@ subsystem: 도구 시스템 — shell exec 이벤트 스트림 (PR-5, ADR-0081)
 order: 81
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |

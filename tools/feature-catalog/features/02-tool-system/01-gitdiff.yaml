@@ -5,6 +5,12 @@ subsystem: Git 1급 도구 (ADR-0025)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_GIT_TOOLS]
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
 purpose: git_diff/git_status/git_log/git_blame — read-only·concurrency-safe·GitRunner 주입, mutating은 bash 잔류

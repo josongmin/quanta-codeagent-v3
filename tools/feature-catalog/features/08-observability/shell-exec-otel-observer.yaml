@@ -5,6 +5,11 @@ subsystem: 텔레메트리 — runShell typed stream fan-out
 order: 80
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: [shell.exec.runs, shell.exec.exits, shell.exec.aborts]
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 depends_on: [cost-cache-dashboard, work-metrics]

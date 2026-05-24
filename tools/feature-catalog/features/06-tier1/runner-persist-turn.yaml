@@ -5,6 +5,12 @@ subsystem: surface-agnostic 오케스트레이션 드라이버
 order: 116
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_STATE_PATH]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: |

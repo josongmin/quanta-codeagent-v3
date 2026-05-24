@@ -5,6 +5,10 @@ subsystem: Fault localization signal layer (ADR-0115/0129)
 order: 115
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [tool-search]

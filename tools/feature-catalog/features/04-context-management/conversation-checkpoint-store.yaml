@@ -5,6 +5,10 @@ subsystem: Conversation-level rollback primitive (ShadowOdb 대화 face)
 order: 31
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core]
 purpose: |

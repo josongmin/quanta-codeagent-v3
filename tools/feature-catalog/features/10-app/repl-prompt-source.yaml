@@ -5,6 +5,10 @@ subsystem: CLI REPL surface — prompt source adapter
 order: 15
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:repl", "absorbed:codex"]
 depends_on: [cli-repl-solid-split]

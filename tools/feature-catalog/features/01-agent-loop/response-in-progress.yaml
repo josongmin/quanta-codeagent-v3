@@ -5,6 +5,10 @@ subsystem: Streaming envelope (ADR-0048)
 order: 48
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, default-off, tier:core]
 purpose: Ingest OpenAI Responses API v2 `response.in_progress` event so UI can show 'thinking' indicator without dropping events. Closes Codex Desktop build 2867 forward-compat gap (Codex silent-drops this event). Provides SSE/WS wire-level parser (parseSseFrame / splitSseFrames / decodeSseEvent / decodeWsEvent) with fragmented-frame, CRLF, multi-line data, BOM, rate-limited unknown-event handling. Adds StreamEvent variant `response_in_progress` (assembler skips it — non-cumulative heartbeat) and an additive `onInProgress` seam on streaming-dispatch (`InProgressIndicator { kind, message?, progress?, timestamp }`). L4 wire (ADR-0048): the agent loop now passes `onInProgress` into its `streamingTurn(...)` call and emits a new `in_progress` AgentEvent (`{ timestamp, message?, progress? }`) on `config.stream`; StdoutStream renders it as a "thinking…" line and JsonlRecorder maps it onto the `recovery` TrajectoryKind (tagged `reason:"in_progress"`). Default-OFF byte-identical — the provider must yield the event AND a non-null stream must be wired for it to surface.

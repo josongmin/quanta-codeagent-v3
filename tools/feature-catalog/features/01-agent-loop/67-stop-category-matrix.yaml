@@ -5,6 +5,10 @@ subsystem: 턴 라이프사이클 — 구조적 정지 사유 (Cursor 흡수, AD
 order: 67
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core, tier:core]
 purpose: |

@@ -5,6 +5,11 @@ subsystem: 텔레메트리 — gen_ai.usage.* + quanta.work.cost_usd 활성화
 order: 91
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: [gen_ai.usage, quanta.work.cost_usd]
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

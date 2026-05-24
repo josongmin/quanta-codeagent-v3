@@ -5,6 +5,10 @@ subsystem: Repo-local 운영 contract injection (Codex repo-local-rule-ingestion
 order: 98
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

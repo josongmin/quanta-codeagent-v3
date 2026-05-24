@@ -5,6 +5,10 @@ subsystem: 벤치
 order: 3
 maturity: L5
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

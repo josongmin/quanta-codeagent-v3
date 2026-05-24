@@ -5,6 +5,10 @@ subsystem: 세션 영속 — message 단위 rewind (Claude Desktop 1.7196.3 pari
 order: 52
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core]
 purpose: |

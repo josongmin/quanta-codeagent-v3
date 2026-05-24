@@ -5,6 +5,10 @@ subsystem: 작업 메모리 — in-session 버퍼 (non-persisted)
 order: 11
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: |

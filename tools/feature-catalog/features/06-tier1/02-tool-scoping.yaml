@@ -5,6 +5,10 @@ subsystem: 스킬 — `Skill` 도구
 order: 2
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: |

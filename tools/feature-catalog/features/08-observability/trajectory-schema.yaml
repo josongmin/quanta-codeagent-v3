@@ -5,6 +5,11 @@ subsystem: 텔레메트리 — append-only event schema
 order: 9
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: [quanta.trajectory.v1]
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

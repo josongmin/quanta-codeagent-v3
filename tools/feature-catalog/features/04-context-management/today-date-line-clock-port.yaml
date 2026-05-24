@@ -5,6 +5,10 @@ subsystem: Per-turn dynamic 결정성 — date leak 봉합
 order: 13
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |

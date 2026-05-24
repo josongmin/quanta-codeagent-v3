@@ -5,6 +5,10 @@ subsystem: HITL 게이트 — 무엇을 리뷰하는가 축 (Cursor 흡수, ADR-
 order: 62
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, absorbed:cursor, surface:cli]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: 회귀 스모크 (gpt-5 baseline 녹화, official harness offline cer
 order: 65
 maturity: L3
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "held-promotion"]
 depends_on: [swebench-smoke-baseline]

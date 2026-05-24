@@ -5,6 +5,10 @@ subsystem: migration — `external_agent_session_imports.json`
 order: 45
 maturity: L4
 status: new
+ui_surfaces: [api]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [migration-content-dedup-fingerprint]

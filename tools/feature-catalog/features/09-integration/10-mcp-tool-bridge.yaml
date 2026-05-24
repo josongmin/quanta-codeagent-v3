@@ -5,6 +5,12 @@ subsystem: MCP (ADR-0007) — stdio 클라이언트 + tool→Tool 어댑터
 order: 10
 maturity: L4
 status: stable
+ui_surfaces: [api]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MCP_CONFIG]
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [quantamcpconfig]

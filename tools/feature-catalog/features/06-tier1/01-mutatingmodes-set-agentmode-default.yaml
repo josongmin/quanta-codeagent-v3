@@ -5,6 +5,12 @@ subsystem: Mode enum (ADR-0018)
 order: 1
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PLAN]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: |

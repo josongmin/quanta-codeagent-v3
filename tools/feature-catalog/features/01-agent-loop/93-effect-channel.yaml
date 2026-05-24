@@ -5,6 +5,10 @@ subsystem: Effect boundary (ADR-0093)
 order: 93
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

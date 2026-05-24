@@ -5,6 +5,10 @@ subsystem: Plan-mode 구조화 (ADR-0096)
 order: 98
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [plan-mode]

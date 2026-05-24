@@ -5,6 +5,11 @@ subsystem: IPC core — typed envelope + transport injection
 order: 34
 maturity: L4
 status: new
+ui_surfaces: [api]
+monitoring: partial
+telemetry_keys: [quanta.ipc.v1]
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [portable-session-v1, slice-ipc-bridge]

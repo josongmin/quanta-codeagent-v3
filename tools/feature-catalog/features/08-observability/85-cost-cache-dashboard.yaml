@@ -5,6 +5,12 @@ subsystem: 비용·캐시 가시화 (ADR-0085)
 order: 85
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_METRICS]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:claude-code"]
 purpose: |

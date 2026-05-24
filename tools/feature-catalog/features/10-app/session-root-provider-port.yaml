@@ -5,6 +5,10 @@ subsystem: Session persistence — surface-agnostic rooting (Audit-W blocker #2)
 order: 13
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

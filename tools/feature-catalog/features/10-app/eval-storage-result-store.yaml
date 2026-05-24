@@ -5,6 +5,10 @@ subsystem: eval 앱 — 저장 레이어
 order: 89
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-schema-additive, eval-five-tier]

@@ -5,6 +5,10 @@ subsystem: Prompt-injection 차단 (구조적 invariant)
 order: 70
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |

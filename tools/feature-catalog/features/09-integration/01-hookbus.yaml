@@ -5,6 +5,10 @@ subsystem: Hooks (RFC §13 + Cursor absorption + ADR-0133)
 order: 1
 maturity: L4
 status: refined
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 purpose: |

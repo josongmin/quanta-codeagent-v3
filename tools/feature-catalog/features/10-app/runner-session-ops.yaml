@@ -5,6 +5,10 @@ subsystem: surface-agnostic session ops
 order: 121
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |

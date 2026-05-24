@@ -5,6 +5,10 @@ subsystem: LLM 에러 분류 — boundary-once
 order: 11
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [llm-not-implemented-kind, errors-helper-fix]

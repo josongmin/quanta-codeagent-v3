@@ -5,6 +5,10 @@ subsystem: feature-catalog 메타 도구 (ratchet + 검증 베이스라인)
 order: 52
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:tooling"]
 purpose: |

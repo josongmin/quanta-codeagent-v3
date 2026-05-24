@@ -5,6 +5,10 @@ subsystem: 장기 메모리 — eviction 정책 (adapter-shared)
 order: 60
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 depends_on: [memory-dedup-planner]

@@ -5,6 +5,10 @@ subsystem: 보안 — redaction 설정 게이트 (ADR-0078)
 order: 3
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: ["surface:core", "security-touched"]
 depends_on: [secret-redaction-content-plane]

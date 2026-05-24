@@ -5,6 +5,10 @@ subsystem: 서브에이전트
 order: 4
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: Safety-posture 전파 — buildChildConfig가 부모의 mode/verifyGuard/closeoutGuard/hitl를 옵셔널 spread로 자식에 전파. 이전엔 자식이 default mode로 붕괴 가능 → review-posture 부모가 mutating 자식을 spawn할 위험.

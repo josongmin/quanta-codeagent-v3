@@ -5,6 +5,10 @@ subsystem: Permission stack 시각화 (read-only surface)
 order: 75
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |

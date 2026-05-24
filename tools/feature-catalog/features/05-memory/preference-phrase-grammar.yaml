@@ -5,6 +5,10 @@ subsystem: 장기 메모리 — preference signal grammar (Codex 흡수, ADR-013
 order: 13
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
 purpose: |

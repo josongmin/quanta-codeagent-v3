@@ -5,6 +5,10 @@ subsystem: memory — pure vector primitives
 order: 52
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: |

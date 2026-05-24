@@ -5,6 +5,10 @@ subsystem: Side-conversation (ADR-0049 R5)
 order: 22
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: |

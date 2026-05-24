@@ -5,6 +5,10 @@ subsystem: 권한 영속화 — trust-scope (Claude Desktop 흡수)
 order: 94
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:claude-code, surface:cli, security-touched, held-promotion]
 depends_on: [trust-scope-wire-up]

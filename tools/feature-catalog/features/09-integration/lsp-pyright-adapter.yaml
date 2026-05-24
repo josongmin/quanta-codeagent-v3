@@ -5,6 +5,10 @@ subsystem: LSP — Python adapter
 order: 16
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-typescript-adapter]

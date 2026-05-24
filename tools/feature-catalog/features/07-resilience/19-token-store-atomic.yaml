@@ -5,6 +5,10 @@ subsystem: Auth resilience (ChatGPT-OAuth)
 order: 19
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:codex"]
 purpose: |

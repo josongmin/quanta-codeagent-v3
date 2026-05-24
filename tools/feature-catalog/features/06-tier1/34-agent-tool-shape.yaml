@@ -5,6 +5,12 @@ subsystem: 서브에이전트 — agent tool input contract (Codex Round-3 absor
 order: 34
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SUBAGENT_MAX_DEPTH]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
 depends_on: [subagent-6-tools, task-registry]

@@ -5,6 +5,12 @@ subsystem: 압축(LLM 요약)
 order: 3
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_COMPACT_TOKENS]
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: 'TODO: review from migration'

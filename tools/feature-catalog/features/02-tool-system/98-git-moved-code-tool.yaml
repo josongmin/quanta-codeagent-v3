@@ -5,6 +5,10 @@ subsystem: 도구 — git moved-code (ADR-0109)
 order: 98
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

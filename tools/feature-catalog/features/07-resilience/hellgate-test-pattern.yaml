@@ -5,6 +5,10 @@ subsystem: 회귀 봉인 testing infra (quanta-wins 축의 적대 케이스 seal
 order: 70
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code", "absorbed:agentless"]
 depends_on: [git-write-protection, shadow-odb-rewind, subagent-6-tools]

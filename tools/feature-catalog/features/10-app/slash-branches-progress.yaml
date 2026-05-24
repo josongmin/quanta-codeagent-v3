@@ -5,6 +5,12 @@ subsystem: REPL panels (R10)
 order: 24
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BRANCH_SEARCH_PROGRESS]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 purpose: |

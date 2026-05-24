@@ -5,6 +5,10 @@ subsystem: Stop-category surface (ADR-0120)
 order: 120
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 purpose: |

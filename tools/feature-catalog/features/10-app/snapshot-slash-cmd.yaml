@@ -5,6 +5,10 @@ subsystem: CLI slash command (shadow_* tools UX, Hermes Agent /rollback parity)
 order: 56
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
 purpose: |

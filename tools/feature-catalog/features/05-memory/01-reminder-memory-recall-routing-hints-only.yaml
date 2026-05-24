@@ -5,6 +5,10 @@ subsystem: Memory-hints 라벨 (ADR-0021)
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: 동적 reminder의 memory recall 블록에 "routing hints only — not proof" 라벨 prefix — L3/L4 회상의 인식론적 지위 명시

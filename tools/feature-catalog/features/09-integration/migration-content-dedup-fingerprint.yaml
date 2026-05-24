@@ -5,6 +5,10 @@ subsystem: migration — dedup fingerprint (ADR-0038)
 order: 46
 maturity: L2
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [migration-import-log-busy]

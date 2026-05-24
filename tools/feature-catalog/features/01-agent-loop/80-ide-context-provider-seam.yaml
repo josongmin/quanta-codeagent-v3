@@ -5,6 +5,10 @@ subsystem: 턴 라이프사이클 — host→agent IDE 신호 (Tier-1 IDE host e
 order: 80
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, tier:1]
 purpose: |

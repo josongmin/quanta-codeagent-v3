@@ -5,6 +5,10 @@ subsystem: 런타임 — git worktree 격리 primitive
 order: 136
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [worktree-fork-primitive]

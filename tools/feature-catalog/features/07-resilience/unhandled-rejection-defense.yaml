@@ -5,6 +5,10 @@ subsystem: 프로세스-수준 안전망 (apps/cli)
 order: 24
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |

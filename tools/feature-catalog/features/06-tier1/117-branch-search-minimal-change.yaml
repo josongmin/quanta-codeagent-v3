@@ -5,6 +5,10 @@ subsystem: Speculative branch search ranking (ADR-0117)
 order: 117
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |

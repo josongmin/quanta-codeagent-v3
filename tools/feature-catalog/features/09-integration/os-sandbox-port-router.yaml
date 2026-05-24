@@ -5,6 +5,10 @@ subsystem: runtime/os-sandbox — closed port + platform dispatch
 order: 40
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [landlock-degraded-passthrough, seatbelt-profile-compiler]

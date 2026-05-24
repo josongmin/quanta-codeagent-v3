@@ -5,6 +5,10 @@ subsystem: 메타도구 — working-state 관리 (Codex memory L3, ADR-0021)
 order: 24
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

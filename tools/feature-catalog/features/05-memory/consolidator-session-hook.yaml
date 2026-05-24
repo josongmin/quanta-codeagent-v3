@@ -5,6 +5,10 @@ subsystem: 장기 메모리 — Phase 1 session-end wire (ADR-0068 Wave D)
 order: 72
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor", "held-promotion"]
 depends_on: [memory-md-atomic-writer]

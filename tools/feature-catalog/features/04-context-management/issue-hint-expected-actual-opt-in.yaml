@@ -5,6 +5,12 @@ subsystem: 이슈 텍스트 localization 힌트 (Agentless 흡수)
 order: 61
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL, QUANTA_BENCH_ISSUE_HINT]
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core, default-off]
 purpose: |

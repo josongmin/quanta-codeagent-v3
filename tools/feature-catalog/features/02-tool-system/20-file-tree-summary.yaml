@@ -5,6 +5,10 @@ subsystem: Fault-localization aids (Codex signal 흡수) — Stage-1 file topolo
 order: 20
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

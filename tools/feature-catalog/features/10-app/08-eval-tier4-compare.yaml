@@ -5,6 +5,11 @@ subsystem: eval 앱 Tier-4 — pairwise compare (RFC-0003)
 order: 84
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+telemetry_keys: [quanta.ts]
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
 depends_on: [eval-five-tier]

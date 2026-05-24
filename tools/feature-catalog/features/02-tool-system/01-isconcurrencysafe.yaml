@@ -5,6 +5,10 @@ subsystem: 디스패치/배칭
 order: 1
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: per-input isConcurrencySafe 동시성 배칭

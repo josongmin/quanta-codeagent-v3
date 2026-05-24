@@ -5,6 +5,10 @@ subsystem: Permission slice telemetry — "observability bugs MUST NOT abort a p
 order: 98
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched, held-promotion]
 purpose: |

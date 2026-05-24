@@ -5,6 +5,10 @@ subsystem: 코어 mutating 도구 — test suite execution
 order: 111
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe]

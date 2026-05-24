@@ -5,6 +5,10 @@ subsystem: Auth provider seam (ADR-0094 surface-agnostic)
 order: 12
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [chatgpt-oauth-provider]

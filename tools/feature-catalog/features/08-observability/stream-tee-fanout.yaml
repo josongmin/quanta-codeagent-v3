@@ -5,6 +5,10 @@ subsystem: Stream adapters — fan-out
 order: 50
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

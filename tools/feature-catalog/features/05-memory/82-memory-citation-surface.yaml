@@ -5,6 +5,10 @@ subsystem: L2 long-term memory recall provenance
 order: 82
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "held-promotion"]
 purpose: |

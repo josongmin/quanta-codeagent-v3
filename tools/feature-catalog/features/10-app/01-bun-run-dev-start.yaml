@@ -5,6 +5,10 @@ subsystem: CLI
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: bun run dev|start, .env 로드, 전 SOTA++ 노브 default OFF

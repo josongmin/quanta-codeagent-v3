@@ -5,6 +5,10 @@ subsystem: shared/jsonrpc — request-id correlation
 order: 38
 maturity: L4
 status: new
+ui_surfaces: [api]
+monitoring: integrated
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [jsonrpc-codec]

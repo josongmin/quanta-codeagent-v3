@@ -5,6 +5,12 @@ subsystem: llm/adapters/shared — Anthropic + OpenAI common frame
 order: 39
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_LLM_STREAM_FIRST_CHUNK_MS, QUANTA_LLM_STREAM_IDLE_MS]
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-stream-timeout, llm-error-taxonomy]

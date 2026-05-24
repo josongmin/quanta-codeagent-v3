@@ -5,6 +5,10 @@ subsystem: LLM resilience — silence-hang guard
 order: 31
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-factory]

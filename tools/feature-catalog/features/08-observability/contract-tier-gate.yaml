@@ -5,6 +5,10 @@ subsystem: 4-tier 테스트 (unit · integration · contract · smoke) — RFC �
 order: 80
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

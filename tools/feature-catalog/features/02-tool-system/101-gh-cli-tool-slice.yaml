@@ -5,6 +5,10 @@ subsystem: 도구 — GitHub CLI (RFC may-22 ci-bot mode)
 order: 101
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [ci-bot]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |

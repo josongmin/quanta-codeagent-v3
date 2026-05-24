@@ -5,6 +5,10 @@ subsystem: 텔레메트리 — 첫 번째 클래스 metric primitive (closed-por
 order: 112
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [metrics-registry]

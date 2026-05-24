@@ -5,6 +5,10 @@ subsystem: 스킬 — `Skill` 도구
 order: 6
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: 'Skill 트리거 규칙 () — session start 시 inventory cache , per-turn reminder에 ## Active skills 블록 + 4 rule(explicit $name mention OR description match → mandatory / multi-skill minimal covering / progressive disclosure: per-turn은 {name, description} 만). first-line description only.'

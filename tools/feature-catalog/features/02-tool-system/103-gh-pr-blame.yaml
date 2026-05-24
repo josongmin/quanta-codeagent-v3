@@ -5,6 +5,10 @@ subsystem: GitHub PR tools (ADR-0103)
 order: 103
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
 purpose: |

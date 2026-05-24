@@ -5,6 +5,12 @@ subsystem: L2 long-term memory — user-visible recall provenance (ADR-0082 cons
 order: 83
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_TURN_SUMMARY, QUANTA_TURN_SUMMARY_VERBOSE]
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "held-promotion"]
 depends_on: [memory-citation-surface, cli-turn-summary]

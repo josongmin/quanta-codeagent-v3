@@ -5,6 +5,10 @@ subsystem: llm/adapters — ChatGPT subscription wire (ADR-0094 Phase 2)
 order: 40
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [chatgpt-oauth-provider, token-store-atomic, refresh-coordinator]

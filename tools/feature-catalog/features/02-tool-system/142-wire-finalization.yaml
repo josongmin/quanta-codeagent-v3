@@ -5,6 +5,12 @@ subsystem: caller-wire 마감 (ADR-0142)
 order: 142
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_WEB_SEARCH_DUCKDUCKGO]
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
 purpose: |

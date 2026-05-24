@@ -5,6 +5,10 @@ subsystem: Shell-exec 정책 (Sandbox)
 order: 15
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
 purpose: |

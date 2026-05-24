@@ -5,6 +5,10 @@ subsystem: 진입점 격리 / 테스트 안전
 order: 90
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |

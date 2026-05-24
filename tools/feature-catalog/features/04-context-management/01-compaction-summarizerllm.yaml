@@ -5,6 +5,12 @@ subsystem: 전용 요약 모델
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_COMPACT_MODEL]
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: compaction.summarizerLlm 양 사이트 ?? config.llm /_PROVIDER

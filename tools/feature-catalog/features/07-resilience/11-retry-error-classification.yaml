@@ -5,6 +5,10 @@ subsystem: 에러 분류 (Retry policy)
 order: 11
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: feature-catalog 메타 도구 (drift 차단)
 order: 51
 maturity: L5
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:tooling"]
 depends_on: [feature-catalog-tool]

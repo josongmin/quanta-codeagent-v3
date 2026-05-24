@@ -5,6 +5,10 @@ subsystem: Plan-mode 구조화 (Cursor todoModel + Codex plan_delta + Claude Exi
 order: 3
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor"]
 depends_on: [plan-exit-three-way]

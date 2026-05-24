@@ -5,6 +5,11 @@ subsystem: 텔레메트리 — 토큰 사용량 / status line (Claude Desktop ge
 order: 54
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [gen_ai.usage]
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

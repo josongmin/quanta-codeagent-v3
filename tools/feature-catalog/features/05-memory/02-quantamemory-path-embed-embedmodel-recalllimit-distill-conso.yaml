@@ -5,6 +5,12 @@ subsystem: 도구/노브
 order: 2
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MEMORY]
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [memory-self-edit-tools, embedder-port]

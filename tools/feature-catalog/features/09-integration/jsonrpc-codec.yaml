@@ -5,6 +5,10 @@ subsystem: shared/jsonrpc — byte shuttle for IPC + MCP + LSP
 order: 36
 maturity: L4
 status: new
+ui_surfaces: [api]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [jsonrpc-request-id-correlation, jsonrpc-envelope]

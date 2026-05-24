@@ -5,6 +5,10 @@ subsystem: 텔레메트리 — process-local counter/timer SSOT
 order: 83
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 depends_on: [work-metrics]

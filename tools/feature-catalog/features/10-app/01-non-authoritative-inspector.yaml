@@ -5,6 +5,10 @@ subsystem: Probe (trajectory inspector) — `src/apps/probe/**` · `bun run prob
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: '읽기 전용, NON-authoritative inspector — JSONL trajectory 파일 또는 run-dir을 인자로 받아 timeline / failed / slow / cost 4 view 렌더. 4 모듈: parse.ts, triage.ts, render.ts, index.ts(CLI entry).'

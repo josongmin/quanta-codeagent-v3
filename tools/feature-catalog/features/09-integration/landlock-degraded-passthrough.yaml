@@ -5,6 +5,10 @@ subsystem: runtime/os-sandbox — Linux backend (phase 1)
 order: 42
 maturity: L2
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [seatbelt-profile-compiler]

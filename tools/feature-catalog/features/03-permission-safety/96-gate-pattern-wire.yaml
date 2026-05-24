@@ -5,6 +5,10 @@ subsystem: 권한 — rememberPatterns cascade (ADR-0061 hardening)
 order: 96
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
 purpose: |

@@ -5,6 +5,10 @@ subsystem: CLI chrome — fixed status row
 order: 25
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:cursor"]
 purpose: |

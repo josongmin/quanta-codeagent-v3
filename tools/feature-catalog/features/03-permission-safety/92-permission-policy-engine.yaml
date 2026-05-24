@@ -5,6 +5,10 @@ subsystem: 권한 정책 엔진 (HARD_DENY baseline + tier overlay 결합)
 order: 92
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |

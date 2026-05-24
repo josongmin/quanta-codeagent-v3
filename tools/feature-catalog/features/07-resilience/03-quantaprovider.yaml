@@ -5,6 +5,12 @@ subsystem: 모델 Fallback (Tier 0)
 order: 3
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PROVIDER, QUANTA_MODEL]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |

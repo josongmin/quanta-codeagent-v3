@@ -5,6 +5,10 @@ subsystem: Fault-localization aids — Stage-2 ranked symbol search
 order: 114
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [localize-calibration-corpus]

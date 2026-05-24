@@ -5,6 +5,10 @@ subsystem: storage/shadow-odb — deterministic on-disk layout
 order: 43
 maturity: L4
 status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [shadow-odb-lru-cleanup]

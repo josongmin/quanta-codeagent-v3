@@ -5,6 +5,12 @@ subsystem: 회귀 스모크 (SWE-bench Verified subset, gpt-5 baseline, arm64 Do
 order: 60
 maturity: L3
 status: new
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SWEBENCH_PYTHON]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "held-promotion"]
 purpose: |

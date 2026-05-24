@@ -5,6 +5,10 @@ subsystem: 비용 회계 / 정량 가드
 order: 95
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
 purpose: |

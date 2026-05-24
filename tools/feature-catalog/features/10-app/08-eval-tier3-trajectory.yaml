@@ -5,6 +5,10 @@ subsystem: eval 앱 Tier-3 — 실세션 trajectory (RFC-0003)
 order: 83
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-five-tier]

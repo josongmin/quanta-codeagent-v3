@@ -5,6 +5,10 @@ subsystem: 도구 — shadow store (ADR-0119 + ADR-0122)
 order: 95
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:cli, security-touched]
 purpose: |

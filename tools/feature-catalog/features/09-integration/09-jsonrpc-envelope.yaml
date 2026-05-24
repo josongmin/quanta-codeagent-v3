@@ -5,6 +5,10 @@ subsystem: Shared / JSON-RPC
 order: 9
 maturity: L4
 status: new
+ui_surfaces: [api]
+monitoring: partial
+modes: [n-a]
+configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 purpose: 'JSON-RPC 2.0 strict envelope (`jsonrpc:"2.0"` literal, id ∈ string|number|null, response = result XOR error) + Codex-style channel triple (`{name}-request/-response/-timeout`) + 명시적 timeout (code -32000 + data.kind="timeout") + deterministic monotonic RequestId generator. standalone `@/shared/jsonrpc` 모듈, mcp/lsp 통합은 후속 ADR로 deferred.'

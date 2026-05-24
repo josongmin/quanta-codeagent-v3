@@ -5,6 +5,12 @@ subsystem: CLI multi-modal entry point (REPL surface)
 order: 14
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_IMAGE_MAX_QUEUE, QUANTA_IMAGE_QUEUE]
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [prompt-source-payload-widening]

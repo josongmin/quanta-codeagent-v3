@@ -5,6 +5,10 @@ subsystem: 런타임 샌드박스
 order: 1
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
 purpose: LocalSandbox

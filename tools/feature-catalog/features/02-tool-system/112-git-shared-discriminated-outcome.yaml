@@ -5,6 +5,10 @@ subsystem: 도구 — git slice internal boundary helpers
 order: 112
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |

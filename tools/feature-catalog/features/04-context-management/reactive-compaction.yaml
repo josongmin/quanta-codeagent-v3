@@ -5,6 +5,10 @@ subsystem: 압축 — reactive (proactive 보다 더 강한 squeeze)
 order: 20
 maturity: L4
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
 purpose: |

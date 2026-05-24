@@ -5,6 +5,10 @@ subsystem: 도구 — git merge-conflict parser (cursor-git §⑧ fix-merge-conf
 order: 93
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli, default-off, tier:1]
 depends_on: [git-conflict-inspect]

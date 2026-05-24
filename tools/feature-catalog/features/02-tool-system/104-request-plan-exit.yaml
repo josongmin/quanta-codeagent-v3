@@ -5,6 +5,10 @@ subsystem: 도구 — request_plan_exit (ADR-0086)
 order: 104
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion, tier:1]
 purpose: |

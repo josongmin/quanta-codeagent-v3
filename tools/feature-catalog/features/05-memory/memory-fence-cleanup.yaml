@@ -5,6 +5,10 @@ subsystem: 장기 메모리 — slice boundary hygiene (Slice S9 Part A)
 order: 75
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "held-promotion"]
 purpose: |

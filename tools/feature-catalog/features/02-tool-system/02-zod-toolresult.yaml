@@ -5,6 +5,10 @@ subsystem: 디스패치/배칭
 order: 2
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result

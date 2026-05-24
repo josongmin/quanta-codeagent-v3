@@ -5,6 +5,10 @@ subsystem: 도구 — git mutating 1급화 (Claude Desktop commitWipForBranchSwi
 order: 53
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe]

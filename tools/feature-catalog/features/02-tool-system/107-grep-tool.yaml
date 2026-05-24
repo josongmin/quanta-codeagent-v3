@@ -5,6 +5,10 @@ subsystem: 코어 read-only 도구 — content search (ripgrep front)
 order: 107
 maturity: L4
 status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [isconcurrencysafe]

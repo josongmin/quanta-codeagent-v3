@@ -5,6 +5,10 @@ subsystem: Runner assembly layer (ADR-0024 split)
 order: 12
 maturity: L5
 status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |
