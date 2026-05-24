@@ -296,14 +296,24 @@ const emitInterrupted = (
 /** Pass-through wrapper over the model stream that tees `usage` events to the
  *  W-C `emitUsage` bridge (RFC-0002) WITHOUT consuming any other event —
  *  `streamingTurn` has no `onUsage` collaborator, so the bridge lives here so
- *  token/usage recording is preserved verbatim under streaming tool exec. */
+ *  token/usage recording is preserved verbatim under streaming tool exec.
+ *
+ *  ADR-0200: optional idle/total stream watchdog. When the host wires a
+ *  non-no-op `streamWatchdog` AND a `streamTimeoutPolicy`, the source is
+ *  wrapped — otherwise we yield the source verbatim (byte-identical). The
+ *  watchdog uses the loop's existing `config.signal` so an external cancel
+ *  surfaces as a typed `StreamAbortError` on the next iteration. */
 async function* teeUsage(
   config: AgentConfig,
   src: AsyncIterable<StreamEvent>,
   recorder: AgentRecorder | undefined,
   collector: TurnWorkMetricsCollector | undefined,
 ): AsyncIterable<StreamEvent> {
-  for await (const ev of src) {
+  const guarded =
+    config.streamWatchdog !== undefined && config.streamTimeoutPolicy !== undefined
+      ? config.streamWatchdog.wrap(src, config.streamTimeoutPolicy, config.signal)
+      : src
+  for await (const ev of guarded) {
     if (ev.type === "usage") emitUsage(config, ev, recorder, collector)
     yield ev
   }

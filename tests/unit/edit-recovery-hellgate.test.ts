@@ -106,6 +106,39 @@ class MemFs implements PatchFileSystemPort {
   }
 }
 
+class PartialRenameFailureFs implements PatchFileSystemPort {
+  private files = new Map<string, string>()
+
+  constructor(seed: Record<string, string> = {}) {
+    for (const [k, v] of Object.entries(seed)) this.files.set(k, v)
+  }
+
+  async readFile(path: string): Promise<string> {
+    const v = this.files.get(path)
+    if (v === undefined) throw new Error(`MemFs: no such file '${path}'`)
+    return v
+  }
+  async writeFile(path: string, content: string): Promise<void> {
+    this.files.set(path, content)
+  }
+  async deleteFile(path: string): Promise<void> {
+    if (!this.files.has(path)) throw new Error(`MemFs: cannot delete missing '${path}'`)
+    this.files.delete(path)
+  }
+  async renameFile(from: string, to: string): Promise<void> {
+    const v = this.files.get(from)
+    if (v === undefined) throw new Error(`MemFs: cannot rename missing '${from}'`)
+    this.files.set(to, v)
+    throw new Error(`MemFs: injected source-delete failure '${from}' -> '${to}'`)
+  }
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path)
+  }
+  snapshot(): Record<string, string> {
+    return Object.fromEntries(this.files.entries())
+  }
+}
+
 describe("E2 hellgate — V4A `*** Move to:` rename+edit atomicity", () => {
   test("an INVALID edit portion ⇒ the rename does NOT half-apply (source kept, dest absent)", async () => {
     const fs = new MemFs({ "src/app.py": "def greet():\n    print('Hi')\n" })
@@ -162,5 +195,21 @@ describe("E2 hellgate — V4A `*** Move to:` rename+edit atomicity", () => {
     await expect(applyPatch(parsePatch(text), fs)).rejects.toBeInstanceOf(PatchApplyError)
     // Both files untouched — no half-apply.
     expect(fs.snapshot()).toEqual({ "src/app.py": "x\n", "src/main.py": "occupied\n" })
+  })
+
+  test("a partial rename failure removes the leaked destination and keeps the source", async () => {
+    const fs = new PartialRenameFailureFs({ "src/app.py": "def greet():\n    print('Hi')\n" })
+    const text = [
+      "*** Begin Patch",
+      "*** Update File: src/app.py",
+      "*** Move to: src/main.py",
+      "@@ def greet():",
+      "-    print('Hi')",
+      "+    print('Hello, world!')",
+      "*** End Patch",
+    ].join("\n")
+
+    await expect(applyPatch(parsePatch(text), fs)).rejects.toBeInstanceOf(PatchApplyError)
+    expect(fs.snapshot()).toEqual({ "src/app.py": "def greet():\n    print('Hi')\n" })
   })
 })

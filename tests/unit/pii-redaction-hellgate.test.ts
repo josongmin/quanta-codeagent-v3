@@ -234,24 +234,23 @@ describe("C. redactText splicing", () => {
     expect(out.includes("[IPV4]")).toBe(true)
   })
 
-  test("C4 — overlapping ranges resolved (longest wins)", () => {
-    // 9-digit run that ALSO matches passport-us (9 bare digits) — but no
-    // overlapping kind here. We synthesise an overlap by enabling both
-    // drivers-license-us (loose superset) AND passport: same span, different
-    // kind boundary. Use a string that both patterns would hit.
-    // Construct: "A12345678" — drivers-license (1 letter + 8 digits) matches;
-    // 9 bare digits inside don't (the leading letter breaks word boundary).
-    // Instead test: equal-length tie picks lower index.
+  test("C4 — overlapping phone spans keep the longer international match", () => {
     const s = compositePiiScanner()
-    const findings = s.scanText("A12345678")
-    // drivers-license-us should match (A + 8 digits = 9 chars total).
-    expect(findings.length).toBeLessThanOrEqual(1)
-    if (findings.length === 1) {
-      expect(findings[0]?.kind).toBe("drivers-license-us")
-    }
+    const findings = s.scanText("call +1 415 555 1234 now")
+    expect(findings).toHaveLength(1)
+    expect(findings[0]?.kind).toBe("phone-international")
+    expect(findings[0]?.raw).toBe("+1 415 555 1234")
   })
 
-  test("C5 — placeholder length differs from raw; positions correct for downstream", () => {
+  test("C5 — exact-span ties preserve earlier pattern discovery order", () => {
+    const s = compositePiiScanner()
+    const findings = s.scanText("wire GB821234567890 now")
+    expect(findings).toHaveLength(1)
+    expect(findings[0]?.kind).toBe("iban")
+    expect(s.redactText("wire GB821234567890 now")).toBe("wire [IBAN] now")
+  })
+
+  test("C6 — placeholder length differs from raw; positions correct for downstream", () => {
     // Two emails — second one's raw start is past first email's end. After
     // splice, the output preserves the literal sequence between them.
     const s = compositePiiScanner()

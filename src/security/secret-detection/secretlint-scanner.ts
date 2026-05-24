@@ -160,9 +160,28 @@ interface ScanContext {
   readonly allow: ReadonlySet<string>
   readonly kinds: ReadonlySet<SecretKind> | null
   readonly config: SecretLintCoreConfig
+  readonly isGcpServiceAccountJson: boolean
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+const isGcpServiceAccountJson = (text: string): boolean => {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (!isRecord(parsed)) return false
+    return (
+      parsed.type === "service_account" &&
+      typeof parsed.private_key_id === "string" &&
+      typeof parsed.private_key === "string"
+    )
+  } catch {
+    return false
+  }
 }
 
 const buildContext = (
+  text: string,
   file: string | undefined,
   opts: SecretlintScannerOpts,
 ): ScanContext => ({
@@ -171,6 +190,7 @@ const buildContext = (
   allow: new Set(opts.allowlist ?? []),
   kinds: opts.kinds && opts.kinds.length > 0 ? new Set(opts.kinds) : null,
   config: opts.config ?? DEFAULT_SECRETLINT_CONFIG,
+  isGcpServiceAccountJson: isGcpServiceAccountJson(text),
 })
 
 const sliceMatched = (text: string, range: readonly [number, number]): string => {
@@ -186,7 +206,12 @@ const messageToFinding = (
 ): SecretFinding | null => {
   const matched = sliceMatched(text, m.range)
   if (ctx.allow.has(matched)) return null
-  const kind = translate(m)
+  const kind =
+    ctx.isGcpServiceAccountJson &&
+    m.ruleId === "@secretlint/secretlint-rule-privatekey" &&
+    m.messageId === "PrivateKey"
+      ? "gcp-service-account"
+      : translate(m)
   if (ctx.kinds !== null && !ctx.kinds.has(kind)) return null
   // secretlint columns are 0-based per its types; our port is 1-based to
   // match `cat -n` / editor convention (see locate() in pattern-scanner.ts).
@@ -225,21 +250,13 @@ const runSecretlint = async (
  * call (no shared mutable state) so callers may hold per-context configs and
  * tests can run in parallel.
  *
- * Async surface: `scanText` returns `Promise<SecretFinding[]>` because the
- * underlying `lintSource` is async. The port's `scanText` signature is
- * `SecretFinding[]` (sync) — we deliberately keep this adapter on a promise
- * for honesty about the underlying I/O, and `index.ts` documents the seam
- * choice. Callers that need a strict sync `SecretScanner` should reach for
- * `patternScanner` / `compositeSecretScanner`.
+ * Public seam: both `scanText` and `scanFile` are async across every adapter.
+ * The zero-dep scanners resolve immediately after local CPU work; secretlint
+ * does real async linting under the same contract.
  */
-export const secretlintScanner = (
-  opts: SecretlintScannerOpts = {},
-): {
-  scanText(text: string, scanOpts?: { file?: string }): Promise<SecretFinding[]>
-  scanFile(path: string): Promise<SecretFinding[]>
-} => ({
+export const secretlintScanner = (opts: SecretlintScannerOpts = {}): SecretScanner => ({
   async scanText(text, scanOpts) {
-    return runSecretlint(text, buildContext(scanOpts?.file, opts))
+    return runSecretlint(text, buildContext(text, scanOpts?.file, opts))
   },
   async scanFile(path) {
     let text: string
@@ -251,6 +268,6 @@ export const secretlintScanner = (
       // stray PDF in the staging area.
       return []
     }
-    return runSecretlint(text, buildContext(path, opts))
+    return runSecretlint(text, buildContext(text, path, opts))
   },
 })

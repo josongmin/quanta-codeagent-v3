@@ -22,9 +22,10 @@ import type { StreamEvent } from "@/llm"
 const fakeLlmProvider = (overrides: Partial<LlmProvider> = {}): LlmProvider =>
   ({
     providerId: "anthropic-public",
+    model: "claude-sonnet-4-6",
     async *stream() {
       yield { type: "text_delta", delta: "ok" } as never
-      yield { type: "message_stop" } as never
+      yield { type: "message_stop", stop_reason: "end_turn" } as never
     },
     ...overrides,
   }) as unknown as LlmProvider
@@ -60,6 +61,19 @@ describe("instrumentLlmProvider", () => {
     const total = m.snapshot().find((s) => s.name === "llm.provider.stream.total")
     expect(total?.value).toBe(1)
     expect(total?.labels.provider).toBe("anthropic-public")
+    expect(total?.labels.model).toBe("claude-sonnet-4-6")
+  })
+
+  test("HELL-LLM-1A: stream.total falls back to unknown model label", async () => {
+    const m = defaultMetricsRegistry()
+    const modelLess = fakeLlmProvider() as LlmProvider & { model?: string }
+    delete modelLess.model
+    const p = instrumentLlmProvider(modelLess, m)
+    for await (const _ of p.stream({} as never)) {
+      /* drain */
+    }
+    const total = m.snapshot().find((s) => s.name === "llm.provider.stream.total")
+    expect(total?.labels.model).toBe("unknown")
   })
 
   test("HELL-LLM-2: TTFT histogram observed on first event", async () => {
@@ -82,6 +96,7 @@ describe("instrumentLlmProvider", () => {
     const dur = m.snapshot().find((s) => s.name === "llm.provider.stream.duration_ms")
     expect(dur).toBeDefined()
     expect(dur?.labels.provider).toBe("anthropic-public")
+    expect(dur?.labels.stop_reason).toBe("end_turn")
   })
 
   test("HELL-LLM-4: failure increments stream.failures.total on throw", async () => {
@@ -104,6 +119,8 @@ describe("instrumentLlmProvider", () => {
     const f = m.snapshot().find((s) => s.name === "llm.provider.stream.failures.total")
     expect(f?.value).toBe(1)
     expect(f?.labels.code).toBe("stream-failed")
+    const dur = m.snapshot().find((s) => s.name === "llm.provider.stream.duration_ms")
+    expect(dur?.labels.stop_reason).toBe("error")
   })
 
   test("HELL-LLM-5: providerId preserved verbatim on wrapped port", () => {
@@ -226,5 +243,21 @@ describe("withCallCounter (generic proxy)", () => {
       methods: ["call"],
     })
     expect(wrapped.call()).toBe("ok")
+  })
+})
+
+describe("defaultMetricsRegistry bounded histograms", () => {
+  test("HELL-REG-1: compaction keeps exact count+sum and whole-history percentile shape", () => {
+    const m = defaultMetricsRegistry({ histogramMaxObservations: 5 })
+    for (let i = 1; i <= 1000; i += 1) m.observe("latency_ms", i)
+    const row = m.snapshot().find((s) => s.name === "latency_ms")
+    expect(row?.count).toBe(1000)
+    expect(row?.value).toBe(500500)
+    expect(row?.p50).toBeGreaterThan(300)
+    expect(row?.p50).toBeLessThan(700)
+    expect(row?.p95).toBeGreaterThan(800)
+    expect(row?.p95).toBeLessThan(1000)
+    expect(row?.p99).toBeGreaterThan(900)
+    expect(row?.p99).toBeLessThanOrEqual(1000)
   })
 })

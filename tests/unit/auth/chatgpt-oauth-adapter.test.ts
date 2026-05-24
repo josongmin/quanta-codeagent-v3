@@ -320,6 +320,35 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     expect((ends[0] as { input: unknown }).input).toEqual({ cmd: "ls" })
   })
 
+  test("malformed function-call arguments fail closed as typed stream_corrupt", async () => {
+    await seedToken()
+    const fetchImpl = async (url: string): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5-codex", is_default: true }])
+      }
+      return sseResponse([
+        'data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_bad","name":"bash"}}\n\n',
+        'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_bad","arguments":"{\\"cmd\\":"}}\n\n',
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5-codex",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+    let caught: unknown
+    try {
+      for await (const _ of a.stream(emptyStreamInput())) void _
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(LLMError)
+    expect((caught as LLMError).kind).toBe("stream_corrupt")
+    expect((caught as LLMError).provider).toBe("chatgpt-oauth")
+    expect((caught as LLMError).cause).toBeInstanceOf(SyntaxError)
+  })
+
   test("HTTP 401 on /responses → typed auth LLMError (never retried, never fell back)", async () => {
     await seedToken()
     const seenUrls: string[] = []

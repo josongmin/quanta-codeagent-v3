@@ -103,6 +103,9 @@ export interface OtelSinkOpts {
   readonly meterName?: string
   /** Optional version (passed to `getMeter(name, version)`). */
   readonly meterVersion?: string
+  /** Optional warn sink for kind-mismatch sample drops. Slice purity
+   *  (ADR-0144): no `console.*` default — caller injects or it's silent. */
+  readonly warn?: (msg: string) => void
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -199,13 +202,14 @@ export const otelMetricsSink = (opts: OtelSinkOpts): MetricSink => {
    *  one-name-one-kind (ADR-0144 #2); we only reach here if a caller bypasses
    *  the registry. No-throw per ADR-0144 #3. */
   const warnKindLock = (sample: MetricSample, lockedTo: CachedInstrument["kind"]): void => {
+    const warn = opts.warn
+    if (warn === undefined) return
     try {
-      // biome-ignore lint/suspicious/noConsole: structured warn is intentional for sink misuse
-      console.warn(
+      warn(
         `[otel-metrics-sink] dropping sample: name "${sample.name}" locked to kind "${lockedTo}", got "${sample.kind}"`,
       )
     } catch {
-      // Even console.warn can throw in exotic runtimes — swallow.
+      // warn sink can throw in exotic runtimes — swallow.
     }
   }
 

@@ -58,9 +58,11 @@ export const compositeSecretScanner = (opts: SecretScannerOpts = {}): SecretScan
   const entropy = entropyScanner(opts)
   const max = opts.maxFindings ?? DEFAULT_MAX_FINDINGS
   return {
-    scanText(text, scanOpts) {
-      const pf = pattern.scanText(text, scanOpts)
-      const ef = entropy.scanText(text, scanOpts)
+    async scanText(text, scanOpts) {
+      const [pf, ef] = await Promise.all([
+        pattern.scanText(text, scanOpts),
+        entropy.scanText(text, scanOpts),
+      ])
       return merge(pf, ef, max)
     },
     async scanFile(path) {
@@ -72,8 +74,10 @@ export const compositeSecretScanner = (opts: SecretScannerOpts = {}): SecretScan
       } catch {
         return []
       }
-      const pf = pattern.scanText(text, { file: path })
-      const ef = entropy.scanText(text, { file: path })
+      const [pf, ef] = await Promise.all([
+        pattern.scanText(text, { file: path }),
+        entropy.scanText(text, { file: path }),
+      ])
       return merge(pf, ef, max)
     },
   }

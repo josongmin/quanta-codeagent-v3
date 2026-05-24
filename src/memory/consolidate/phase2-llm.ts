@@ -1,4 +1,5 @@
 import { errMessage } from "@/shared"
+import { isAbortError } from "./abort"
 /**
  * ADR-0068 — `Phase2Port` LLM implementation (Wave D).
  *
@@ -166,6 +167,7 @@ export class LlmPhase2Port implements Phase2Port {
     existingMemoryMd: string | null
     existingRawMemoriesMd: string | null
     mode: "INIT" | "incremental"
+    signal?: AbortSignal
   }): Promise<{
     memoryMd: string
     rawMemoriesMd: string
@@ -176,8 +178,9 @@ export class LlmPhase2Port implements Phase2Port {
     const userText = buildUserMessage(args)
     let result: Awaited<ReturnType<Phase2Summarizer>>
     try {
-      result = await this.summarize({ system, userText })
+      result = await this.summarize({ system, userText, signal: args.signal })
     } catch (e) {
+      if (isAbortError(e)) throw e
       const msg = errMessage(e)
       throw new Phase2ConsolidateError(`LLM stream failed: ${msg}`, args.mode)
     }

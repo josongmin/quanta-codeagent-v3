@@ -33,6 +33,7 @@ import {
 import { LLMError } from "@/shared"
 import type { LLMErrorKind } from "@/shared/errors"
 import type { LLMPort } from "../ports"
+import { parseToolInputOrThrow } from "./shared"
 import type { Message, StreamEvent, StreamInput, SystemPromptInput, ToolSchema } from "../types"
 
 const RESPONSES_PATH = "/responses"
@@ -548,23 +549,7 @@ async function* parseSSE(
       const id = ev.item.call_id ?? ev.item.id ?? ""
       const slot = toolCalls.get(id)
       const raw = ev.item.arguments ?? slot?.args ?? "{}"
-      let input: unknown
-      try {
-        input = JSON.parse(raw)
-      } catch (e) {
-        // Corrupt tool-call arguments: the model said it wanted to invoke a
-        // tool but the accumulated JSON body is malformed. Silently
-        // defaulting to `{}` previously caused the tool to run with empty
-        // input (or against its schema's defaults), masking real provider
-        // wire bugs. Route through `LLMError.fromSdkError` so retry /
-        // fallback see a typed kind — same contract as the openai /
-        // anthropic adapters use for their parse failures.
-        throw LLMError.fromSdkError(
-          "chatgpt-oauth",
-          e,
-          "chatgpt-oauth tool_use arguments parse error",
-        )
-      }
+      const input = parseToolInputOrThrow(raw, id, "chatgpt-oauth", "with-cause")
       yield { type: "tool_use_end", id, input }
       toolCalls.delete(id)
       continue

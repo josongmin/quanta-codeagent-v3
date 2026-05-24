@@ -32,7 +32,6 @@ import {
   runMemoryPhase2AutoTrigger,
 } from "@/agent/memory-consolidator-hook"
 import {
-  type MemoryDirPaths,
   type MemoryWriter,
   PHASE2_AUTO_TRIGGER_MAX_AGE_MS,
   PHASE2_AUTO_TRIGGER_PENDING,
@@ -139,7 +138,7 @@ const makeWriter = (
   opts: { writeAtomicDelayMs?: number; writeAtomicThrows?: boolean } = {},
 ): MemoryWriter & { writeCalls: number } => {
   let writeCalls = 0
-  const paths: MemoryDirPaths = {
+  const paths = {
     root: "/tmp/memwriter-fake",
     memoryMd: "/tmp/memwriter-fake/MEMORY.md",
     rawMemoriesMd: "/tmp/memwriter-fake/raw_memories.md",

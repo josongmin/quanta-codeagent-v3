@@ -8,7 +8,7 @@ import {
 // Stub LLM port — never called; just satisfies the type slot.
 const stubLlm: LLMPort = {
   // biome-ignore lint/suspicious/noExplicitAny: stub port for type slot only
-  generate: (() => {
+  stream: (() => {
     throw new Error("not used in shape tests")
   }) as any,
 }
@@ -47,8 +47,8 @@ describe("session-state", () => {
   })
 
   test("history patch replaces array — does not mutate prior", () => {
-    const msg1: Message = { role: "user", content: "first" }
-    const msg2: Message = { role: "user", content: "second" }
+    const msg1: Message = { role: "user", content: [{ type: "text", text: "first" }] }
+    const msg2: Message = { role: "user", content: [{ type: "text", text: "second" }] }
     const prev = baseState({ history: [msg1] })
     const next = updateSessionState(prev, { history: [msg1, msg2] })
     expect(prev.history.length).toBe(1) // prior untouched
@@ -60,7 +60,8 @@ describe("session-state", () => {
   test("pendingImages patch — empty array drains, full array seeds", () => {
     const img: ImageBlock = {
       type: "image",
-      source: { kind: "base64", mediaType: "image/png", data: "AAA=" },
+      data: "AAA=",
+      mediaType: "image/png",
     }
     const prev = baseState({ pendingImages: [img] })
     const drained = updateSessionState(prev, { pendingImages: [] })

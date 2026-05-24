@@ -91,6 +91,34 @@ describe("lsp_definition", () => {
     expect(result.output).toBe("lsp_definition failed: server died")
     expect(trace.stopped).toBe(true)
   })
+
+  test("mid-flight abort is forwarded to the session", async () => {
+    const ac = new AbortController()
+    const trace = emptyTrace()
+    const t = findTool(
+      "lsp_definition",
+      fakeProvider(
+        {
+          definition: async (_fp, _p, signal) => {
+            trace.signal = signal
+            await new Promise<void>((_, reject) => {
+              signal?.addEventListener("abort", () => reject(new Error("aborted mid-request")), {
+                once: true,
+              })
+            })
+            return []
+          },
+        },
+        trace,
+      ),
+    )
+    const pending = run(t, { path: "a.ts", line: 1, character: 1 }, ac.signal)
+    setTimeout(() => ac.abort(), 10)
+    const { result } = await pending
+    expect(trace.signal).toBe(ac.signal)
+    expect(result.ok).toBe(false)
+    expect(result.output).toBe("lsp_definition failed: aborted mid-request")
+  })
 })
 
 /* ------------------------------------------------------------------ */

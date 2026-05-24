@@ -27,7 +27,7 @@ import {
 
 const c = (
   id: string,
-  text: string,
+  text = id,
   score = 0,
   source: RetrievalCandidate["source"] = "bm25",
 ): RetrievalCandidate => ({ id, text, score, source })

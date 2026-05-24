@@ -126,8 +126,7 @@ const ALL_BAG_KEYS: ReadonlyArray<keyof ObservabilityBag> = [
 
 const resolveQuantaVersion = (override?: string): string => {
   if (override !== undefined && override !== "") return override
-  const env = process.env.QUANTA_VERSION
-  return env !== undefined && env !== "" ? env : "unknown"
+  return "unknown"
 }
 
 /** Build the snapshot from an InstrumentedBag (or any bag-shaped object where

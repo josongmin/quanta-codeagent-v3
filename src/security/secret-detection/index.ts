@@ -8,8 +8,8 @@
  *     `secretlint` library (vendor-maintained rules for AWS/Anthropic/OpenAI/
  *     GCP/GitHub/Slack/Stripe/PEM + a dozen more). Async surface.
  *   - {@link patternScanner} / {@link entropyScanner} /
- *     {@link compositeSecretScanner} — zero-dep fallbacks kept for back-compat
- *     and sync callers. Same port shape, narrower catalog.
+ *     {@link compositeSecretScanner} — zero-dep fallbacks that keep the same
+ *     awaitable port shape with a narrower catalog.
  */
 export { compositeSecretScanner } from "./composite-scanner"
 export { entropyScanner, shannonEntropyBits } from "./entropy-scanner"
@@ -26,6 +26,7 @@ export {
   mask,
   type SecretFinding,
   type SecretKind,
+  type SecretScanTextOpts,
   type SecretScanner,
   type SecretScannerOpts,
 } from "./port"

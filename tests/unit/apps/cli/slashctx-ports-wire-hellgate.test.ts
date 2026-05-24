@@ -176,7 +176,6 @@ describe("/state: workingState port wire", () => {
       ...makeBase(cap),
       workingState: () => ({
         ownerShortlist: [],
-        hypothesis: undefined,
         blockers: [{ surface: "type" as const, what: "Missing import" }],
         nextStepQueue: [],
         deferredValidation: [],
@@ -270,7 +269,7 @@ describe("/branches: branchSearch port wire", () => {
     const cap: CapturedCtx = { out: "", err: "" }
     // Build a state with at least one candidate by ingesting an event.
     const tracker = createBranchProgressTracker()
-    tracker.ingest({ kind: "candidate-started", id: "cand-1" })
+    tracker.ingest({ kind: "candidate-started", id: "cand-1", seed: {} })
     const ctx: SlashContext = { ...makeBase(cap), branchSearch: () => tracker.snapshot() }
     const code = await runSlashCommand("/branches", ctx)
     expect(code).toBe(0)

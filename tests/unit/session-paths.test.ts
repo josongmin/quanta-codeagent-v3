@@ -6,6 +6,7 @@ import {
   indexFilePath,
   SessionIdError,
   sanitizeId,
+  sessionEnvelopePath,
   sessionFilePath,
   sessionsRoot,
 } from "@/session"
@@ -54,6 +55,12 @@ describe("session paths", () => {
     process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
     __resetRuntimeConfig()
     expect(indexFilePath()).toBe("/tmp/s/index.jsonl")
+  })
+
+  test("sessionEnvelopePath returns <root>/<id>.jsonl", () => {
+    process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
+    __resetRuntimeConfig()
+    expect(sessionEnvelopePath("abc")).toBe("/tmp/s/abc.jsonl")
   })
 
   test("paths use the runtime-config snapshot (frozen at startup; reset for tests)", () => {
@@ -108,11 +115,12 @@ describe("session paths", () => {
       expect(() => sanitizeId("a".repeat(129))).toThrow(SessionIdError)
     })
 
-    test("sessionFilePath / archivedFilePath route through sanitizeId", () => {
+    test("sessionFilePath / archivedFilePath / sessionEnvelopePath route through sanitizeId", () => {
       process.env.QUANTA_SESSIONS_DIR = "/tmp/s"
       __resetRuntimeConfig()
       expect(() => sessionFilePath("../escape")).toThrow(SessionIdError)
       expect(() => archivedFilePath("../escape")).toThrow(SessionIdError)
+      expect(() => sessionEnvelopePath("../escape")).toThrow(SessionIdError)
     })
   })
 })

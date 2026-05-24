@@ -48,52 +48,47 @@ const luhnFilter = (findings: PiiFinding[]): PiiFinding[] => {
 /**
  * Resolve overlapping ranges. For any pair of findings whose spans intersect,
  * the longer one wins; ties broken by lower `start`. Implementation is
- * O(n log n) sort + O(n^2) intersection — fine for the small-N output of a
- * regex pass over a single message; if a future caller streams MB-scale
- * input we can switch to a sweep-line.
+ * O(n log n) sort + O(n) sweep: once kept findings are start-sorted and
+ * non-overlapping, a new candidate can only overlap the current kept tail.
+ * Exact-span ties preserve original pattern discovery order.
  *
  * Returns findings in start-ASC order (stable for downstream consumers /
  * tests). `redactText` re-sorts to start-DESC for splicing.
  */
 const dedupOverlaps = (findings: PiiFinding[]): PiiFinding[] => {
-  // Sort by (start ASC, length DESC, kind ASC) so deterministic "lower index
-  // wins, longer wins" is achieved by the keep-first walk below.
-  const sorted = [...findings].sort((a, b) => {
-    if (a.start !== b.start) return a.start - b.start
-    const la = a.end - a.start
-    const lb = b.end - b.start
-    if (la !== lb) return lb - la
-    return a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0
-  })
+  const sorted = findings
+    .map((finding, index) => ({ finding, index }))
+    .sort((a, b) => {
+      if (a.finding.start !== b.finding.start) {
+        return a.finding.start - b.finding.start
+      }
+      const la = a.finding.end - a.finding.start
+      const lb = b.finding.end - b.finding.start
+      if (la !== lb) return lb - la
+      return a.index - b.index
+    })
   const kept: PiiFinding[] = []
-  for (const f of sorted) {
-    let dropped = false
-    for (let i = 0; i < kept.length; i++) {
-      const k = kept[i]
-      if (k === undefined) continue
-      const overlap = f.start < k.end && k.start < f.end
-      if (!overlap) continue
-      const flen = f.end - f.start
-      const klen = k.end - k.start
-      if (flen > klen) {
-        // f is longer — replace the kept one.
-        kept[i] = f
-        dropped = true
-        break
-      }
-      if (flen < klen) {
-        // f is shorter — discard.
-        dropped = true
-        break
-      }
-      // Equal length: lower start wins. Since sorted by start ASC, k was
-      // inserted first → k.start ≤ f.start → k wins, drop f.
-      dropped = true
-      break
+  let current: PiiFinding | undefined
+  for (const { finding } of sorted) {
+    if (current === undefined) {
+      current = finding
+      continue
     }
-    if (!dropped) kept.push(f)
+    if (finding.start >= current.end) {
+      kept.push(current)
+      current = finding
+      continue
+    }
+    const flen = finding.end - finding.start
+    const clen = current.end - current.start
+    if (flen > clen) {
+      current = finding
+    }
   }
-  return kept.sort((a, b) => a.start - b.start)
+  if (current !== undefined) {
+    kept.push(current)
+  }
+  return kept
 }
 
 /**

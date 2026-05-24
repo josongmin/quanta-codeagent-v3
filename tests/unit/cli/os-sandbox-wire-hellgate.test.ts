@@ -8,8 +8,8 @@
  *   - throw on an unknown profile (must log + degrade to passthrough)
  *   - mis-prefix the spawn argv on macOS (must be
  *     `[sandbox-exec, "-p", <SBPL>, "bash", "-lc", cmd]`)
- *   - claim sandbox-applied on Linux (Phase-1 stub MUST report
- *     `degradeReason:"landlock-not-implemented"`)
+ *   - silently drop Linux sandboxing instead of routing through the
+ *     available backend wrapper (`bwrap` / `landlock-cli`)
  *   - omit `degradeReason` when the operator asked for sandboxing but the
  *     backend wasn't usable
  *
@@ -172,35 +172,48 @@ describe("B. wrap — macOS sandbox-exec prefix", () => {
 })
 
 /* ================================================================== */
-/*  C. wrap behaviour — Linux Phase-1 stub                             */
+/*  C. wrap behaviour — Linux backend routing                          */
 /* ================================================================== */
 
-describe("C. wrap — Linux Landlock stub", () => {
-  test('HELL-C1: linux + read-only → passthrough + degradeReason="landlock-not-implemented"', () => {
-    const out = wrapShellArgv(
-      ["bash", "-lc", ":"],
-      "/ws",
-      { profile: "read-only" },
-      {
-        platform: "linux",
-      },
-    )
-    expect(out.sandboxApplied).toBe(false)
-    expect(out.degradeReason).toBe("landlock-not-implemented")
-    expect(out.argv).toEqual(["bash", "-lc", ":"])
+describe("C. wrap — Linux backend routing", () => {
+  test("HELL-C1: linux + bwrap available → slot prefixes argv with bwrap wrapper", async () => {
+    const slot = buildCliOsSandbox(envOf({ QUANTA_SANDBOX: "read-only" }), {
+      platform: "linux",
+      which: async (binary) => (binary === "bwrap" ? "/usr/bin/bwrap" : null),
+    })
+    expect(slot).toBeDefined()
+    const out = await slot!.wrap(["bash", "-lc", ":"], "/ws")
+    expect(out.sandboxApplied).toBe(true)
+    expect(out.degradeReason).toBeUndefined()
+    expect(out.argv[0]).toBe("bwrap")
+    expect(out.argv.includes("--unshare-net")).toBe(true)
+    expect(out.argv.slice(-4)).toEqual(["--", "bash", "-lc", ":"])
   })
 
-  test("HELL-C2: linux + workspace-write → same degraded passthrough", () => {
-    const out = wrapShellArgv(
-      ["bash", "-lc", ":"],
-      "/ws",
-      { profile: "workspace-write" },
-      {
-        platform: "linux",
-      },
-    )
+  test("HELL-C2: linux + landlock-cli fallback → slot prefixes argv and surfaces partial network degrade", async () => {
+    const slot = buildCliOsSandbox(envOf({ QUANTA_SANDBOX: "workspace-write" }), {
+      platform: "linux",
+      which: async (binary) => (binary === "landlock-cli" ? "/usr/bin/landlock-cli" : null),
+    })
+    expect(slot).toBeDefined()
+    const out = await slot!.wrap(["bash", "-lc", ":"], "/ws")
+    expect(out.sandboxApplied).toBe(true)
+    expect(out.degradeReason).toBe("landlock-network-policy-not-enforced")
+    expect(out.argv[0]).toBe("landlock-cli")
+    expect(out.argv.includes("--network-deferred")).toBe(false)
+    expect(out.argv.slice(-4)).toEqual(["--", "bash", "-lc", ":"])
+  })
+
+  test("HELL-C3: linux + no backend → passthrough + actionable degradeReason", async () => {
+    const slot = buildCliOsSandbox(envOf({ QUANTA_SANDBOX: "workspace-write" }), {
+      platform: "linux",
+      which: async () => null,
+    })
+    expect(slot).toBeDefined()
+    const out = await slot!.wrap(["bash", "-lc", ":"], "/ws")
     expect(out.sandboxApplied).toBe(false)
-    expect(out.degradeReason).toBe("landlock-not-implemented")
+    expect((out.degradeReason as string).startsWith("linux-bwrap-missing")).toBe(true)
+    expect(out.argv).toEqual(["bash", "-lc", ":"])
   })
 })
 

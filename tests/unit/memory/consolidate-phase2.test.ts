@@ -388,6 +388,20 @@ describe("runPhase2 error propagation", () => {
     expect(err).toBe(orig)
   })
 
+  test("port throws AbortError → rethrows unchanged", async () => {
+    const log = makeLog()
+    const aborted = new Error("cancelled")
+    aborted.name = "AbortError"
+    const err = await runPhase2(
+      baseInput({ signal: new AbortController().signal }),
+      makePort({ throws: aborted }, log),
+      makeStore(emptyWatermark, log),
+      makeWriter(log),
+    ).catch((e: unknown) => e)
+    expect(err).toBe(aborted)
+    expect(log.writeAtomic).toBe(0)
+  })
+
   test("memoryMd cap exceeded → Phase2ConsolidateError before writer", async () => {
     const log = makeLog()
     const oversize = "x".repeat(MEMORY_MAX_BYTES + 1)
@@ -505,6 +519,27 @@ describe("runPhase2 argument plumbing", () => {
     expect(c.existingMemoryMd).toBe("PRIOR")
     expect(c.existingRawMemoriesMd).toBe("RAW-PRIOR")
     expect(c.mode).toBe("INIT")
+  })
+
+  test("port.consolidate receives caller signal verbatim", async () => {
+    const log = makeLog()
+    const ac = new AbortController()
+    let captured: Parameters<Phase2Port["consolidate"]>[0] | null = null
+    const port: Phase2Port = {
+      async consolidate(args) {
+        log.consolidate++
+        log.order.push("consolidate")
+        captured = args
+        return goodPortOut
+      },
+    }
+    await runPhase2(
+      baseInput({ signal: ac.signal }),
+      port,
+      makeStore(emptyWatermark, log),
+      makeWriter(log),
+    )
+    expect(captured?.signal).toBe(ac.signal)
   })
 
   test("writer.writeAtomic receives the LLM-produced content verbatim", async () => {

@@ -3,7 +3,7 @@
  *
  * Sections:
  *  A. JSONL store (6)
- *  B. Recording adapter (5)
+ *  B. Recording adapter (7)
  *  C. Replay adapter (6)
  *  D. Hash stability (3)
  */
@@ -18,6 +18,7 @@ import {
   defaultHashRequest,
   jsonlReplayStore,
   type RecordedInteraction,
+  type ReplayStore,
   recordingLlmPort,
   ReplayMissError,
   replayLlmPort,
@@ -166,7 +167,7 @@ describe("A. jsonlReplayStore", () => {
 })
 
 // ---------------------------------------------------------------------------
-// B. Recording adapter (5)
+// B. Recording adapter (7)
 // ---------------------------------------------------------------------------
 
 describe("B. recordingLlmPort", () => {
@@ -201,7 +202,57 @@ describe("B. recordingLlmPort", () => {
     expect(loaded[0]?.metadata.partial).toBeUndefined()
   })
 
-  test("9. inner.stream throws → partial events still recorded", async () => {
+  test("9. success path ignores sidecar append failure", async () => {
+    let appendCalls = 0
+    const failingStore: ReplayStore = {
+      append: async () => {
+        appendCalls += 1
+        throw new Error("cassette disk full")
+      },
+      match: async () => null,
+      load: async () => [],
+      save: async () => {},
+      reset: () => {},
+    }
+    const events: StreamEvent[] = [
+      { type: "text_delta", delta: "live" },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ]
+    const port = recordingLlmPort({ inner: stubInner(events), store: failingStore })
+    expect(await drain(port.stream(req("hi")))).toEqual(events)
+    expect(appendCalls).toBe(1)
+  })
+
+  test("10. append failure does not mask the original stream error", async () => {
+    let appendCalls = 0
+    const failingStore: ReplayStore = {
+      append: async () => {
+        appendCalls += 1
+        throw new Error("cassette disk full")
+      },
+      match: async () => null,
+      load: async () => [],
+      save: async () => {},
+      reset: () => {},
+    }
+    const events: StreamEvent[] = [
+      { type: "text_delta", delta: "p1" },
+      { type: "text_delta", delta: "p2" },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ]
+    const port = recordingLlmPort({ inner: stubInner(events, { throwAt: 2 }), store: failingStore })
+    let thrown: unknown = null
+    try {
+      await drain(port.stream(req("partial")))
+    } catch (err) {
+      thrown = err
+    }
+    expect(appendCalls).toBe(1)
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain("boom at 2")
+  })
+
+  test("11. inner.stream throws → partial events still recorded", async () => {
     const events: StreamEvent[] = [
       { type: "text_delta", delta: "p1" },
       { type: "text_delta", delta: "p2" },
@@ -222,7 +273,7 @@ describe("B. recordingLlmPort", () => {
     expect(loaded[0]?.metadata.error).toContain("boom at 2")
   })
 
-  test("10. PII scrubber applied before append", async () => {
+  test("12. PII scrubber applied before append", async () => {
     const events: StreamEvent[] = [{ type: "text_delta", delta: "secret: abc123" }]
     const port = recordingLlmPort({
       inner: stubInner(events),
@@ -242,7 +293,7 @@ describe("B. recordingLlmPort", () => {
     })
   })
 
-  test("11. multiple calls produce multiple appends", async () => {
+  test("13. multiple calls produce multiple appends", async () => {
     const port = recordingLlmPort({
       inner: stubInner([{ type: "message_stop", stop_reason: "end_turn" }]),
       store,

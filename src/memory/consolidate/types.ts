@@ -138,11 +138,16 @@ export interface Phase1Input {
   readonly memoryMode: "enabled" | "disabled"
   /** Injected clock — Date.now() in production, fixed in tests. */
   readonly now: () => number
+  /** Optional cancellation from the caller. Absent preserves legacy behavior. */
+  readonly signal?: AbortSignal
 }
 
 /** Phase 1 port — wraps an LLM call to distill a rollout. Mockable. */
 export interface Phase1Port {
-  distill(args: { rolloutMessages: ReadonlyArray<{ role: string; content: unknown }> }): Promise<{
+  distill(args: {
+    rolloutMessages: ReadonlyArray<{ role: string; content: unknown }>
+    signal?: AbortSignal
+  }): Promise<{
     rolloutSummary: string
     rawMemory: string
     preferenceSignals: ReadonlyArray<string>
@@ -176,6 +181,8 @@ export interface Phase2Input {
   /** ms epoch — last successful Phase 2. null on first run. */
   readonly lastSuccessWatermark: number | null
   readonly now: () => number
+  /** Optional cancellation from the caller. Absent preserves legacy behavior. */
+  readonly signal?: AbortSignal
 }
 
 /**
@@ -189,13 +196,14 @@ export interface Phase2Input {
  * The composition root (apps layer) supplies the wrapper:
  *
  *     // apps/agent/index.ts or apps/cli/internal.ts
- *     const phase2Summarize: Phase2Summarizer = async ({ system, userText }) => {
+ *     const phase2Summarize: Phase2Summarizer = async ({ system, userText, signal }) => {
  *       const events: StreamEvent[] = []
  *       let tokensUsed: number | undefined
  *       for await (const ev of llm.stream({
  *         system,
  *         messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
  *         tools: [],
+ *         signal,
  *       })) {
  *         events.push(ev)
  *         if (ev.type === "usage" && typeof ev.usage?.totalTokens === "number") {
@@ -211,10 +219,15 @@ export interface Phase2Input {
  *
  *     const phase2Port = new LlmPhase2Port(phase2Summarize)
  *
- * Errors raised by the summarizer are wrapped as
- * `Phase2ConsolidateError` by `LlmPhase2Port`.
+ * Generic failures raised by the summarizer are wrapped as
+ * `Phase2ConsolidateError` by `LlmPhase2Port`. Abort-like failures are
+ * propagated unchanged so callers can distinguish cancellation.
  */
-export type Phase2Summarizer = (args: { system: string; userText: string }) => Promise<{
+export type Phase2Summarizer = (args: {
+  system: string
+  userText: string
+  signal?: AbortSignal
+}) => Promise<{
   /** Full assistant text — `LlmPhase2Port` parses the triple-section
    *  envelope (`<MEMORY_MD>…</MEMORY_MD>` etc.) out of this string. */
   text: string
@@ -232,6 +245,7 @@ export interface Phase2Port {
     existingMemoryMd: string | null
     existingRawMemoriesMd: string | null
     mode: "INIT" | "incremental"
+    signal?: AbortSignal
   }): Promise<{
     /** Must not exceed `MEMORY_MAX_BYTES`; caller enforces. */
     memoryMd: string

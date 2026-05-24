@@ -1,16 +1,17 @@
 /**
- * ADR-0183 hellgate — periodic re-emit + SIGHUP hot-reload watcher around
+ * ADR-0187 hellgate — periodic re-emit + SIGHUP hot-reload watcher around
  * ADR-0180's health-snapshot file. ADR-0180 writes once at construction;
  * this round adds interval, signal, and manual re-emit.
  *
- * 12-case coverage:
+ * 14-case coverage:
  *   A. Interval-based emit (3 cases)
  *   B. SIGHUP-driven emit (3 cases)
  *   C. emitNow contract (3 cases)
  *   D. stop semantics (2 cases)
  *   E. Fresh bag every tick (1 case)
+ *   F. Preserved build opts + overlap serialization (2 cases)
  *
- * SOTA reference (cited in ADR-0183):
+ * SOTA reference (cited in ADR-0187):
  *   - systemd `notify` socket — file-based health update on heartbeat.
  *   - Kubernetes livenessProbe `periodSeconds: 30` — default-interval choice.
  *   - Cursor 3-tier drift defense (event + interval + handshake) — multi-channel
@@ -66,6 +67,10 @@ const makeSignalCapture = (): {
   }
 }
 
+const flushTurn = async (): Promise<void> => {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+
 // Captured interval helper. Returns hooks so tests can manually fire the
 // interval callback (no real timers — deterministic).
 const makeIntervalCapture = (): {
@@ -94,7 +99,7 @@ const makeIntervalCapture = (): {
 /* A. Interval-based emit                                                     */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0183 interval-based emit", () => {
+describe("ADR-0187 interval-based emit", () => {
   let dir: string
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "quanta-snap-watcher-A-"))
@@ -107,6 +112,10 @@ describe("ADR-0183 interval-based emit", () => {
     const iv = makeIntervalCapture()
     const sig = makeSignalCapture()
     const writes: { path: string; len: number }[] = []
+    let resolveWrite!: () => void
+    const wrote = new Promise<void>((resolve) => {
+      resolveWrite = resolve
+    })
     const h = startHealthSnapshotWatcher({
       getBag: emptyBag,
       intervalMs: 1000,
@@ -116,9 +125,12 @@ describe("ADR-0183 interval-based emit", () => {
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
       snapshot: {
-        path: join(dir, "health.json"),
-        writeFile: async (p, c) => {
-          writes.push({ path: p, len: c.length })
+        write: {
+          path: join(dir, "health.json"),
+          writeFile: async (p, c) => {
+            writes.push({ path: p, len: c.length })
+            resolveWrite()
+          },
         },
       },
     })
@@ -126,8 +138,7 @@ describe("ADR-0183 interval-based emit", () => {
     expect(iv.intervals[0]?.ms).toBe(1000)
     // Firing the interval callback triggers emit.
     iv.intervals[0]?.handler()
-    // Allow microtask drain (emitNow returns a promise via void).
-    await new Promise<void>((r) => setTimeout(r, 5))
+    await wrote
     expect(writes.length).toBe(1)
     h.stop()
   })
@@ -139,7 +150,7 @@ describe("ADR-0183 interval-based emit", () => {
       hotReloadOnSighup: false,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { path: join(dir, "health.json"), writeFile: async () => undefined },
+      snapshot: { write: { path: join(dir, "health.json"), writeFile: async () => undefined } },
     })
     expect(iv.intervals.length).toBe(1)
     expect(iv.intervals[0]?.ms).toBe(30_000)
@@ -154,7 +165,7 @@ describe("ADR-0183 interval-based emit", () => {
       hotReloadOnSighup: false,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { path: join(dir, "health.json"), writeFile: async () => undefined },
+      snapshot: { write: { path: join(dir, "health.json"), writeFile: async () => undefined } },
     })
     expect(iv.cleared.length).toBe(0)
     h.stop()
@@ -167,7 +178,7 @@ describe("ADR-0183 interval-based emit", () => {
 /* B. SIGHUP-driven emit                                                      */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0183 SIGHUP-driven emit", () => {
+describe("ADR-0187 SIGHUP-driven emit", () => {
   let dir: string
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "quanta-snap-watcher-B-"))
@@ -186,7 +197,7 @@ describe("ADR-0183 SIGHUP-driven emit", () => {
       offSignal: sig.offSignal,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { path: join(dir, "health.json"), writeFile: async () => undefined },
+      snapshot: { write: { path: join(dir, "health.json"), writeFile: async () => undefined } },
     })
     expect(sig.registered.length).toBe(1)
     expect(sig.registered[0]?.sig).toBe("SIGHUP")
@@ -197,6 +208,10 @@ describe("ADR-0183 SIGHUP-driven emit", () => {
     const sig = makeSignalCapture()
     const iv = makeIntervalCapture()
     const writes: { path: string; len: number }[] = []
+    let resolveWrite!: () => void
+    const wrote = new Promise<void>((resolve) => {
+      resolveWrite = resolve
+    })
     const h = startHealthSnapshotWatcher({
       getBag: emptyBag,
       intervalMs: -1,
@@ -205,14 +220,17 @@ describe("ADR-0183 SIGHUP-driven emit", () => {
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
       snapshot: {
-        path: join(dir, "health.json"),
-        writeFile: async (p, c) => {
-          writes.push({ path: p, len: c.length })
+        write: {
+          path: join(dir, "health.json"),
+          writeFile: async (p, c) => {
+            writes.push({ path: p, len: c.length })
+            resolveWrite()
+          },
         },
       },
     })
     sig.registered[0]?.handler()
-    await new Promise<void>((r) => setTimeout(r, 5))
+    await wrote
     expect(writes.length).toBe(1)
     expect(writes[0]?.path).toBe(join(dir, "health.json"))
     h.stop()
@@ -230,7 +248,7 @@ describe("ADR-0183 SIGHUP-driven emit", () => {
       offSignal: sig.offSignal,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { path: join(dir, "health.json"), writeFile: async () => undefined },
+      snapshot: { write: { path: join(dir, "health.json"), writeFile: async () => undefined } },
     })
     expect(sig.registered.length).toBe(0)
     h.stop()
@@ -242,7 +260,7 @@ describe("ADR-0183 SIGHUP-driven emit", () => {
 /* C. emitNow contract                                                        */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0183 emitNow contract", () => {
+describe("ADR-0187 emitNow contract", () => {
   let dir: string
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "quanta-snap-watcher-C-"))
@@ -260,7 +278,7 @@ describe("ADR-0183 emitNow contract", () => {
       hotReloadOnSighup: false,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { path: target },
+      snapshot: { write: { path: target } },
     })
     await h.emitNow()
     const parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
@@ -282,13 +300,15 @@ describe("ADR-0183 emitNow contract", () => {
       clearInterval: iv.clearInterval,
       warn: (m) => warnings.push(m),
       snapshot: {
-        path: join(dir, "health.json"),
-        writeFile: async () => {
-          calls.push(Date.now())
-          if (throwNext) {
-            throwNext = false
-            throw new Error("simulated EIO")
-          }
+        write: {
+          path: join(dir, "health.json"),
+          writeFile: async () => {
+            calls.push(Date.now())
+            if (throwNext) {
+              throwNext = false
+              throw new Error("simulated EIO")
+            }
+          },
         },
       },
     })
@@ -313,10 +333,12 @@ describe("ADR-0183 emitNow contract", () => {
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
       snapshot: {
-        path: join(dir, "health.json"),
-        writeFile: async () => {
-          await new Promise<void>((r) => setTimeout(r, 20))
-          events.push("write-done")
+        write: {
+          path: join(dir, "health.json"),
+          writeFile: async () => {
+            await new Promise<void>((r) => setTimeout(r, 20))
+            events.push("write-done")
+          },
         },
       },
     })
@@ -333,7 +355,7 @@ describe("ADR-0183 emitNow contract", () => {
 /* D. stop semantics                                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0183 stop semantics", () => {
+describe("ADR-0187 stop semantics", () => {
   let dir: string
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "quanta-snap-watcher-D-"))
@@ -352,7 +374,7 @@ describe("ADR-0183 stop semantics", () => {
       offSignal: sig.offSignal,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { path: join(dir, "health.json"), writeFile: async () => undefined },
+      snapshot: { write: { path: join(dir, "health.json"), writeFile: async () => undefined } },
     })
     h.stop()
     h.stop() // second call must not throw
@@ -371,9 +393,11 @@ describe("ADR-0183 stop semantics", () => {
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
       snapshot: {
-        path: join(dir, "health.json"),
-        writeFile: async (p, c) => {
-          writes.push({ path: p, len: c.length })
+        write: {
+          path: join(dir, "health.json"),
+          writeFile: async (p, c) => {
+            writes.push({ path: p, len: c.length })
+          },
         },
       },
     })
@@ -388,7 +412,7 @@ describe("ADR-0183 stop semantics", () => {
 /* E. Fresh bag every tick                                                    */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0183 fresh bag every tick", () => {
+describe("ADR-0187 fresh bag every tick", () => {
   let dir: string
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "quanta-snap-watcher-E-"))
@@ -413,7 +437,7 @@ describe("ADR-0183 fresh bag every tick", () => {
       hotReloadOnSighup: false,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { path: target },
+      snapshot: { write: { path: target } },
     })
     // First emit: empty.
     await h.emitNow()
@@ -427,6 +451,108 @@ describe("ADR-0183 fresh bag every tick", () => {
     expect(parsed.summary.wiredCount).toBe(1)
     const pq = parsed.slices.find((s) => s.slice === "planQueue")
     expect(pq?.wired).toBe(true)
+    h.stop()
+  })
+})
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* F. Preserved build opts + overlap serialization                            */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+describe("ADR-0187 preserved build opts + overlap serialization", () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "quanta-snap-watcher-F-"))
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  })
+
+  test("[13] repeated refresh preserves snapshot.build opts", async () => {
+    const iv = makeIntervalCapture()
+    const target = join(dir, "health.json")
+    let tick = 0
+    const h = startHealthSnapshotWatcher({
+      getBag: emptyBag,
+      intervalMs: 1000,
+      hotReloadOnSighup: false,
+      setInterval: iv.setInterval,
+      clearInterval: iv.clearInterval,
+      snapshot: {
+        build: {
+          skippedExpected: new Set<keyof ObservabilityBag>(["lspClient"]),
+          quantaVersion: "watcher-version",
+          now: () => 1_700_000_000_100 + tick++,
+        },
+        write: { path: target },
+      },
+    })
+    await h.emitNow()
+    let parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
+    expect(parsed.quantaVersion).toBe("watcher-version")
+    expect(parsed.writtenAt).toBe(1_700_000_000_100)
+    expect(parsed.slices.find((s) => s.slice === "lspClient")?.note).toBe("skipped intentionally")
+
+    iv.intervals[0]?.handler()
+    await flushTurn()
+
+    parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
+    expect(parsed.quantaVersion).toBe("watcher-version")
+    expect(parsed.writtenAt).toBe(1_700_000_000_101)
+    expect(parsed.slices.find((s) => s.slice === "lspClient")?.note).toBe("skipped intentionally")
+    h.stop()
+  })
+
+  test("[14] overlapping triggers serialize writes and collapse to one follow-up emit", async () => {
+    const iv = makeIntervalCapture()
+    const sig = makeSignalCapture()
+    let writes = 0
+    let activeWrites = 0
+    let maxActiveWrites = 0
+    const releases: Array<() => void> = []
+    const h = startHealthSnapshotWatcher({
+      getBag: emptyBag,
+      intervalMs: 1000,
+      onSignal: sig.onSignal,
+      offSignal: sig.offSignal,
+      setInterval: iv.setInterval,
+      clearInterval: iv.clearInterval,
+      snapshot: {
+        write: {
+          path: join(dir, "health.json"),
+          writeFile: async () => {
+            writes += 1
+            activeWrites += 1
+            maxActiveWrites = Math.max(maxActiveWrites, activeWrites)
+            await new Promise<void>((resolve) => {
+              releases.push(resolve)
+            })
+            activeWrites -= 1
+          },
+        },
+      },
+    })
+
+    const first = h.emitNow()
+    expect(activeWrites).toBe(1)
+
+    const second = h.emitNow()
+    iv.intervals[0]?.handler()
+    sig.registered[0]?.handler()
+    expect(writes).toBe(1)
+    expect(maxActiveWrites).toBe(1)
+
+    releases.shift()?.()
+    await flushTurn()
+    expect(writes).toBe(2)
+    expect(activeWrites).toBe(1)
+    expect(maxActiveWrites).toBe(1)
+
+    releases.shift()?.()
+    await Promise.all([first, second])
+    expect(writes).toBe(2)
+    expect(activeWrites).toBe(0)
+    expect(maxActiveWrites).toBe(1)
     h.stop()
   })
 })

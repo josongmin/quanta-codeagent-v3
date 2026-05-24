@@ -213,4 +213,18 @@ describe("rechunk", () => {
     for (const ch of med) expect(ch.length).toBeLessThanOrEqual(2400)
     for (const ch of lg) expect(ch.length).toBeLessThanOrEqual(4000)
   })
+
+  test("repeated-content cache suppresses duplicate tokenizer calls on adversarial repeated input", () => {
+    const counts = new Map<string, number>()
+    const tok: TokenizerPort = {
+      count(text) {
+        counts.set(text, (counts.get(text) ?? 0) + 1)
+        return text.length
+      },
+    }
+    rechunk("a".repeat(4000), { bucket: "small-600", tokenizer: tok })
+    const duplicates = [...counts.values()].filter((n) => n > 1)
+    expect(duplicates).toEqual([])
+    expect(counts.size).toBeGreaterThan(1)
+  })
 })

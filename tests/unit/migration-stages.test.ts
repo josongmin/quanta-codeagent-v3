@@ -55,8 +55,8 @@ describe("runImport stage sequencing (ADR-0038)", () => {
     await seedClaude(3, true)
     const { sink, events } = collectEvents()
     const r = await runImport("claude_code", { homeDir: home }, sink)
-    expect(r.sessionsImported).toBe(3)
-    expect(r.skillsImported).toBe(2)
+    expect(r.sessionsTranslated).toBe(3)
+    expect(r.skillsCounted).toBe(2)
     expect(r.errors).toEqual([])
     const stages: ImportStage[] = events.map((e) => e.stage)
     expect(stages).toEqual([
@@ -83,17 +83,17 @@ describe("runImport stage sequencing (ADR-0038)", () => {
     await seedClaude(0, false)
     const { sink, events } = collectEvents()
     const r = await runImport("claude_code", { homeDir: home }, sink)
-    expect(r.sessionsImported).toBe(0)
-    expect(r.skillsImported).toBe(0)
+    expect(r.sessionsTranslated).toBe(0)
+    expect(r.skillsCounted).toBe(0)
     expect(events).toHaveLength(4)
     expect(events.every((e) => e.ok)).toBe(true)
   })
 
-  test("includeSkills:false ⇒ skillsImported is 0 even if skills/ exists", async () => {
+  test("includeSkills:false ⇒ skillsCounted is 0 even if skills/ exists", async () => {
     await seedClaude(1, true)
     const { sink } = collectEvents()
     const r = await runImport("claude_code", { homeDir: home, includeSkills: false }, sink)
-    expect(r.skillsImported).toBe(0)
+    expect(r.skillsCounted).toBe(0)
   })
 
   test("provider='unknown' ⇒ throws UnknownProviderRejectedError (no silent path)", async () => {

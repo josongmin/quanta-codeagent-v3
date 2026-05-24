@@ -127,8 +127,8 @@ describe("hell-1: full Claude Code fixture — strict 4-event sequence + exact c
 
     // Exact counts.
     expect(result.provider).toBe("claude_code")
-    expect(result.sessionsImported).toBe(3)
-    expect(result.skillsImported).toBe(2)
+    expect(result.sessionsTranslated).toBe(3)
+    expect(result.skillsCounted).toBe(2)
     expect(result.errors).toEqual([])
 
     // detect_finished payload shape.
@@ -150,16 +150,16 @@ describe("hell-1: full Claude Code fixture — strict 4-event sequence + exact c
     // session_completion_finished payload shape.
     const sc = events[2]
     if (sc?.stage === "session_completion_finished" && sc.ok) {
-      expect(sc.sessionsImported).toBe(3)
-      expect(sc.skillsImported).toBe(2)
+      expect(sc.sessionsTranslated).toBe(3)
+      expect(sc.skillsCounted).toBe(2)
     } else {
       throw new Error("expected session_completion_finished ok:true")
     }
     // import_finished payload shape.
     const fin = events[3]
     if (fin?.stage === "import_finished" && fin.ok) {
-      expect(fin.result.sessionsImported).toBe(3)
-      expect(fin.result.skillsImported).toBe(2)
+      expect(fin.result.sessionsTranslated).toBe(3)
+      expect(fin.result.skillsCounted).toBe(2)
     } else {
       throw new Error("expected import_finished ok:true")
     }
@@ -213,8 +213,8 @@ describe("hell-2: session_completion_finished failure halts the lifecycle", () =
       throw new Error("expected session_completion_finished ok:false")
     }
     expect(result.errors).toEqual(["session_completion_finished failed"])
-    expect(result.sessionsImported).toBe(0)
-    expect(result.skillsImported).toBe(0)
+    expect(result.sessionsTranslated).toBe(0)
+    expect(result.skillsCounted).toBe(0)
   })
 })
 
@@ -477,7 +477,7 @@ describe("hell-7: import → appendEnvelope (Cluster B seam) → applyRetention"
       { homeDir: home, includeSkills: false },
       (e) => events.push(e),
     )
-    expect(importResult.sessionsImported).toBe(4)
+    expect(importResult.sessionsTranslated).toBe(4)
     expect(events.every((e) => e.ok)).toBe(true)
 
     // 2. Materialize 110 envelope records (>= 100) into the v3 jsonl rail

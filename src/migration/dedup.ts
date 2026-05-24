@@ -1,22 +1,14 @@
 /**
- * Import dedup (ADR-0038, L4 promotion).
+ * Import dedup primitives (ADR-0038, L4 promotion).
  *
- * Provides a content-addressed fingerprint of a session transcript file so a
- * re-run does not re-import an unchanged session. The hash is the SHA-256 of
- * the raw file bytes (not the parsed Messages) — cheapest correct primitive,
- * and stable across translator changes for the same source bytes.
- *
- * NOTE (follow-up): `wasAlreadyImported` is a CONSERVATIVE STUB. The current
- * `ImportLogEntry` shape (timestamp/provider/stage/ok/detail) does not carry
- * the `(sourceId, sha256)` tuple, so we cannot yet answer the dedup question
- * from the persisted log. It returns `false` (never-deduped) so behavior is
- * import-everything, matching today's semantics. Promotion path: extend
- * `ImportLogEntry` with `sourceId` + `contentSha256`, then match here.
+ * Today the slice only exposes the content-hash primitive. The persisted
+ * import log still records one append-only summary row per run
+ * (`timestamp/provider/stage/ok/detail`), so it cannot answer a per-session
+ * dedup query without growing new structured fields. Until that schema exists,
+ * we deliberately DO NOT expose a public `wasAlreadyImported(...)` surface.
  */
 
 import { readFile } from "node:fs/promises"
-import { loadImportLog } from "./persistence"
-import type { ExternalAgentProvider } from "./types"
 
 /** SHA-256 (hex) of a file's raw bytes. Real implementation — used to
  *  fingerprint a session transcript for dedup + change detection. */
@@ -26,22 +18,4 @@ export const contentSha256 = async (jsonlPath: string): Promise<string> => {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
-}
-
-/** Whether a session with the given `(sourceId, sha256)` has already been
- *  imported for this project root. CONSERVATIVE STUB: returns `false` because
- *  the persisted `ImportLogEntry` does not yet carry the tuple (see module
- *  doc + follow-up). The log is still loaded so the call validates the log is
- *  readable and so the wiring is in place for when the entry shape grows. */
-export const wasAlreadyImported = async (
-  homeDir: string,
-  _projectRoot: string,
-  _sourceId: string,
-  _sha256: string,
-  _provider?: ExternalAgentProvider,
-): Promise<boolean> => {
-  // Touch the log so a malformed log surfaces here (and the dedup wiring is
-  // exercised), but the tuple match is not yet representable — see follow-up.
-  await loadImportLog(homeDir).catch(() => ({ version: 1 as const, entries: [] }))
-  return false
 }

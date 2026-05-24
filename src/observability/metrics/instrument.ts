@@ -69,6 +69,7 @@ export const instrumentLlmProvider = (
       )
       const t0 = now()
       let firstEventAt: number | null = null
+      let stopReason = "unknown"
       try {
         for await (const ev of provider.stream(input)) {
           if (firstEventAt === null) {
@@ -77,9 +78,13 @@ export const instrumentLlmProvider = (
               metrics.observe(`${prefix}.stream.ttft_ms`, firstEventAt! - t0, { provider: provLabel }),
             )
           }
+          if (ev.type === "message_stop") {
+            stopReason = typeof ev.stop_reason === "string" && ev.stop_reason.length > 0 ? ev.stop_reason : "unknown"
+          }
           yield ev
         }
       } catch (e) {
+        stopReason = "error"
         const code = e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : "unknown"
         safe(metrics, () =>
           metrics.increment(`${prefix}.stream.failures.total`, 1, { provider: provLabel, code }),
@@ -87,7 +92,10 @@ export const instrumentLlmProvider = (
         throw e
       } finally {
         safe(metrics, () =>
-          metrics.observe(`${prefix}.stream.duration_ms`, now() - t0, { provider: provLabel }),
+          metrics.observe(`${prefix}.stream.duration_ms`, now() - t0, {
+            provider: provLabel,
+            stop_reason: stopReason,
+          }),
         )
       }
     },

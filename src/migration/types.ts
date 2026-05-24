@@ -73,8 +73,8 @@ export type ImportEvent =
       readonly stage: "session_completion_finished"
       readonly ok: true
       readonly provider: ExternalAgentProvider
-      readonly sessionsImported: number
-      readonly skillsImported: number
+      readonly sessionsTranslated: number
+      readonly skillsCounted: number
     }
   | {
       readonly stage: "session_completion_finished"
@@ -96,8 +96,8 @@ export type ImportEvent =
 /** Final import result returned by `runImport`. */
 export interface ImportResult {
   readonly provider: ExternalAgentProvider
-  readonly sessionsImported: number
-  readonly skillsImported: number
+  readonly sessionsTranslated: number
+  readonly skillsCounted: number
   readonly errors: readonly string[]
 }
 

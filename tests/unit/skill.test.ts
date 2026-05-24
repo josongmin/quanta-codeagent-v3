@@ -146,6 +146,48 @@ describe("discoverSkills", () => {
   test("missing dir ⇒ []", async () => {
     expect(await discoverSkills(join(tmpdir(), "does-not-exist-xyz"))).toEqual([])
   })
+
+  test("strict allowedTools drives runtime allowlist without a legacy tools mirror", async () => {
+    const dir = await tmpDir("skills-strict-")
+
+    await mkdir(join(dir, "strict"))
+    await writeFile(
+      join(dir, "strict", "SKILL.md"),
+      [
+        "---",
+        "name: strict",
+        "description: strict skill",
+        "userInvocable: true",
+        'allowedTools: ["Read", "Bash"]',
+        "category: skill",
+        "stability: stable",
+        "---",
+        "strict body",
+      ].join("\n"),
+    )
+
+    await mkdir(join(dir, "sealed"))
+    await writeFile(
+      join(dir, "sealed", "SKILL.md"),
+      [
+        "---",
+        "name: sealed",
+        "description: sealed skill",
+        "userInvocable: true",
+        "allowedTools: []",
+        "category: skill",
+        "stability: stable",
+        "---",
+        "sealed body",
+      ].join("\n"),
+    )
+
+    const skills = await discoverSkills(dir)
+    const strict = skills.find((s) => s.name === "strict")
+    const sealed = skills.find((s) => s.name === "sealed")
+    expect(strict?.tools).toEqual(["Read", "Bash"])
+    expect(sealed?.tools).toEqual([])
+  })
 })
 
 describe("createSkillTool", () => {
@@ -188,9 +230,10 @@ describe("createSkillTool", () => {
     expect(skillToolAllowlist(skills[0] as Skill)).toEqual(["Bash"])
     // No declared tools ⇒ undefined (nothing to enforce).
     expect(skillToolAllowlist(skills[1] as Skill)).toBeUndefined()
+    // Explicitly-declared empty allowlist is meaningful: no tools permitted.
     expect(
       skillToolAllowlist({ name: "x", description: "", body: "", tools: [], sourcePath: "p" }),
-    ).toBeUndefined()
+    ).toEqual([])
   })
 
   test("tolerates a leading slash and reports unknown skills", async () => {

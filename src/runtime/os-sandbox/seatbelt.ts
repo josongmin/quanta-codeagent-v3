@@ -1,3 +1,4 @@
+import { applyStrictKnobs, isDefaultStrict, type StrictKnobs } from "./seatbelt/strict-policy"
 import type { SandboxPolicy } from "./types"
 
 /**
@@ -42,7 +43,11 @@ import type { SandboxPolicy } from "./types"
  *    realistic paths don't contain them; cheap insurance against an
  *    attacker-controlled workspace argument.
  */
-export const compileSeatbeltProfile = (policy: SandboxPolicy, workspace: string): string | null => {
+export const compileSeatbeltProfile = (
+  policy: SandboxPolicy,
+  workspace: string,
+  opts?: StrictKnobs,
+): string | null => {
   if (policy.profile === "off" || policy.profile === "danger-full-access") {
     return null
   }
@@ -113,7 +118,9 @@ export const compileSeatbeltProfile = (policy: SandboxPolicy, workspace: string)
   // Network.
   lines.push(allowNetwork ? "(allow network*)" : "(deny network*)")
 
-  return `${lines.join("\n")}\n`
+  const baseline = `${lines.join("\n")}\n`
+  if (isDefaultStrict(opts)) return baseline
+  return applyStrictKnobs(baseline, opts as StrictKnobs)
 }
 
 /** Escape `"` and `\` for inclusion in an SBPL string literal. */

@@ -174,12 +174,8 @@ export const withFullObservability = (
     )
     if (actuallySkipped.length > 0) {
       const msg = `[observability] withFullObservability: ${actuallySkipped.length} slice(s) unwired and not in skippedExpected: ${actuallySkipped.join(", ")}. Set 'skippedExpected' to silence intentional skips.`
-      if (opts.warn !== undefined) {
-        opts.warn(msg)
-      } else {
-        // biome-ignore lint/suspicious/noConsole: documented default sink (ADR-0169)
-        console.warn(msg)
-      }
+      // Slice invariant (ADR-0144): no console.* in @/observability. Caller injects warn sink; absent ⇒ silent.
+      opts.warn?.(msg)
     }
   }
   if (opts.emitWiredGauge === true) {
@@ -215,22 +211,14 @@ export const withFullObservability = (
       const warn = opts.warn
       lastInFlight = writeHealthSnapshot(snap, writeOpts).catch((err: unknown) => {
         const msg = `[observability] health snapshot write failed: ${err instanceof Error ? err.message : String(err)}`
-        if (warn !== undefined) {
-          warn(msg)
-        } else {
-          // biome-ignore lint/suspicious/noConsole: documented default sink (ADR-0177)
-          console.warn(msg)
-        }
+        // Slice invariant: warn opt only; no console.* fallback.
+        warn?.(msg)
         return ""
       })
     } catch (err) {
       const msg = `[observability] health snapshot build failed: ${err instanceof Error ? err.message : String(err)}`
-      if (opts.warn !== undefined) {
-        opts.warn(msg)
-      } else {
-        // biome-ignore lint/suspicious/noConsole: documented default sink (ADR-0177)
-        console.warn(msg)
-      }
+      // Slice invariant: warn opt only; no console.* fallback.
+      opts.warn?.(msg)
     }
   }
   return out

@@ -79,8 +79,12 @@ export interface SecretScannerOpts {
  * a tool is about to apply) OR a real file (a pre-commit hook walking the
  * staged tree).
  */
+export interface SecretScanTextOpts {
+  readonly file?: string
+}
+
 export interface SecretScanner {
-  scanText(text: string, opts?: { file?: string }): SecretFinding[]
+  scanText(text: string, opts?: SecretScanTextOpts): Promise<SecretFinding[]>
   scanFile(path: string): Promise<SecretFinding[]>
 }
 

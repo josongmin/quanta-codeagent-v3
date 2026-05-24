@@ -125,6 +125,21 @@ describe("@/ipc session export/import", () => {
     expect("git_origin_url" in (portable?.meta ?? {})).toBe(false)
   })
 
+  test("export: git-fingerprint fields survive the real session store round-trip", async () => {
+    await saveSessionById(
+      mkMeta({
+        gitSha: "deadbeef",
+        gitBranch: "main",
+        gitOriginUrl: "git@github.com:x/y.git",
+      }),
+      { reason: "x", turns: 0, messages: [] },
+    )
+    const portable = await exportSession("src-1")
+    expect(portable?.meta.git_sha).toBe("deadbeef")
+    expect(portable?.meta.git_branch).toBe("main")
+    expect(portable?.meta.git_origin_url).toBe("git@github.com:x/y.git")
+  })
+
   /* -------------------------- import ---------------------------- */
 
   test("import: mints fresh id by default", async () => {
@@ -202,6 +217,35 @@ describe("@/ipc session export/import", () => {
     }
     const newMeta = await importSession(portable, { newId: "imp-3" })
     expect(newMeta.archived).toBe(false)
+  })
+
+  test("import: git-fingerprint fields persist onto the imported session meta", async () => {
+    const portable: PortableSessionV1 = {
+      schema: "quanta.session.portable",
+      version: PORTABLE_SESSION_VERSION,
+      meta: {
+        id: "src-1",
+        title: "t",
+        cwd: "/tmp/x",
+        created_at: 1,
+        last_touched: 2,
+        archived: false,
+        git_sha: "cafefeed",
+        git_branch: "feat/import",
+        git_origin_url: "git@github.com:x/y.git",
+      },
+      reason: "x",
+      turns: 0,
+      messages: [],
+    }
+    const newMeta = await importSession(portable, { newId: "imp-git" })
+    expect(newMeta.gitSha).toBe("cafefeed")
+    expect(newMeta.gitBranch).toBe("feat/import")
+    expect(newMeta.gitOriginUrl).toBe("git@github.com:x/y.git")
+    const loaded = await loadSessionById("imp-git")
+    expect(loaded?.meta.gitSha).toBe("cafefeed")
+    expect(loaded?.meta.gitBranch).toBe("feat/import")
+    expect(loaded?.meta.gitOriginUrl).toBe("git@github.com:x/y.git")
   })
 
   /* -------------------------- schema --------------------------- */

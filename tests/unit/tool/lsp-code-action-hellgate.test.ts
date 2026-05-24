@@ -36,29 +36,32 @@ interface FakePort extends CodeActionPort {
     kind?: CodeActionKind
   }[]
   readonly applyCalls: CodeActionWorkspaceEdit[]
+  readonly resolveSignals: Array<AbortSignal | undefined>
 }
 
 const fakePort = (overrides?: Partial<CodeActionPort>): FakePort => {
   const resolveCalls: FakePort["resolveCalls"] = []
   const applyCalls: FakePort["applyCalls"] = []
+  const resolveSignals: FakePort["resolveSignals"] = []
   const base: CodeActionPort = {
     resolveCodeActions: async () => [],
     applyEdit: async () => {},
   }
   const merged: CodeActionPort = { ...base, ...(overrides ?? {}) }
   const realResolve = merged.resolveCodeActions
-  merged.resolveCodeActions = async (file, line, col, kind) => {
+  merged.resolveCodeActions = async (file, line, col, kind, signal) => {
     resolveCalls.push(
       kind === undefined ? { file, line, col } : { file, line, col, kind },
     )
-    return realResolve(file, line, col, kind)
+    resolveSignals.push(signal)
+    return realResolve(file, line, col, kind, signal)
   }
   const realApply = merged.applyEdit
   merged.applyEdit = async (edit) => {
     applyCalls.push(edit)
     return realApply(edit)
   }
-  return Object.assign(merged, { resolveCalls, applyCalls }) as FakePort
+  return Object.assign(merged, { resolveCalls, applyCalls, resolveSignals }) as FakePort
 }
 
 const ctx = (signal?: AbortSignal): ToolContext => ({
@@ -201,6 +204,17 @@ describe("lsp_code_action — port conversion", () => {
       character: 1,
     })
     expect("kind" in (port.resolveCalls[0] ?? {})).toBe(false)
+  })
+
+  test("HELL-C10: tool forwards ctx.signal to resolveCodeActions", async () => {
+    const ac = new AbortController()
+    const port = fakePort()
+    await collect(
+      lspCodeActionTool(port),
+      { path: "src/x.ts", line: 1, character: 1 },
+      ctx(ac.signal),
+    )
+    expect(port.resolveSignals[0]).toBe(ac.signal)
   })
 })
 

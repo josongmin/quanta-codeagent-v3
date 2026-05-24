@@ -33,9 +33,10 @@ import type { Tool, ToolContext, ToolEvent } from "@/tool"
 const fakeLlmHappy = (): LlmProvider =>
   ({
     providerId: "anthropic-public",
+    model: "claude-sonnet-4-6",
     async *stream() {
       yield { type: "text_delta", delta: "hi" } as never
-      yield { type: "message_stop" } as never
+      yield { type: "message_stop", stop_reason: "end_turn" } as never
     },
   }) as unknown as LlmProvider
 
@@ -69,6 +70,9 @@ describe("E2E instrumentation coverage", () => {
     for (const n of required) {
       expect(names).toContain(n)
     }
+    const total = m.snapshot().find((s) => s.name === "llm.provider.stream.total")
+    expect(total?.labels.provider).toBe("anthropic-public")
+    expect(total?.labels.model).toBe("claude-sonnet-4-6")
   })
 
   test("instrument wrappers are byte-identical when metrics ports record-fail", async () => {
@@ -112,6 +116,27 @@ describe("E2E instrumentation coverage", () => {
     await baseScheduler.await(id)
     // No wrap → registry stays empty (byte-identical default-OFF)
     expect(m.snapshot().length).toBe(0)
+  })
+
+  test("bounded histogram compaction keeps instrumented llm histograms queryable", async () => {
+    let t = 0
+    const m = defaultMetricsRegistry({ histogramMaxObservations: 5 })
+    const llm = instrumentLlmProvider(fakeLlmHappy(), m, {
+      now: () => (t += 5),
+    })
+
+    for (let i = 0; i < 50; i += 1) {
+      for await (const _ of llm.stream({} as never)) {
+        /* drain */
+      }
+    }
+
+    const ttft = m.snapshot().find((s) => s.name === "llm.provider.stream.ttft_ms")
+    const duration = m.snapshot().find((s) => s.name === "llm.provider.stream.duration_ms")
+    expect(ttft?.count).toBe(50)
+    expect(ttft?.p50).toBe(5)
+    expect(duration?.count).toBe(50)
+    expect(duration?.p50).toBe(10)
   })
 })
 

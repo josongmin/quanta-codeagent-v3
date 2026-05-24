@@ -96,6 +96,7 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "state",
       "mcpClients",
       "mcpTools",
+      "mcpSurface",
       "skillsConfig",
       "lifecyclePills",
       "lifecycleTaskRegistry",
@@ -116,9 +117,9 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "argPrompt",
       "shutdownMcp",
     ]
-    // 32 named bindings — assert presence to detect accidental drops.
-    expect(keys).toHaveLength(32)
-    expect(new Set(keys).size).toBe(32)
+    // 33 named bindings — assert presence to detect accidental drops.
+    expect(keys).toHaveLength(33)
+    expect(new Set(keys).size).toBe(33)
   })
 })
 
@@ -401,6 +402,45 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     const { deps, probe } = makeStubDeps()
     await setupSession(deps)
     expect(probe.deriveMcpPillServersCalls).toBeGreaterThanOrEqual(1)
+  })
+
+  test("builds mcpSurface from configs + bridged tools + QUANTA_MCP_CONFIG", async () => {
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    const prev = process.env.QUANTA_MCP_CONFIG
+    process.env.QUANTA_MCP_CONFIG = "/tmp/quanta-mcp.json"
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      loadFeatures: async () => ({
+        planMode: false,
+        metrics: undefined,
+        state: undefined,
+        resume: undefined,
+        mcpTools: [
+          {
+            name: "mcp__fs__read_file",
+            description: "read file",
+          } as never,
+        ],
+        mcpClients: [],
+        mcpConfigs: [{ name: "fs", command: ["bun", "fs.ts"] }],
+        lspTools: [],
+        lspNavTools: [],
+        gitToolList: [],
+      }),
+    }))
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps } = makeStubDeps()
+    try {
+      const result = await setupSession(deps)
+      expect(result.mcpSurface?.configPath).toBe("/tmp/quanta-mcp.json")
+      expect(result.mcpSurface?.servers.map((s) => `${s.name}:${s.status}`)).toEqual([
+        "fs:connected",
+      ])
+      expect(result.mcpSurface?.servers[0]?.tools.map((t) => t.name)).toEqual(["read_file"])
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_MCP_CONFIG
+      else process.env.QUANTA_MCP_CONFIG = prev
+    }
   })
 
   test("setupSession.shutdownMcp resolves cleanly when no clients are registered", async () => {

@@ -6,6 +6,7 @@ export {
   spawnViaBubblewrap,
   spawnViaLandlock,
 } from "./landlock"
+export { compileLandlockCliArgs, LANDLOCK_CLI_NETWORK_DEFERRED_MARKER } from "./landlock-cli"
 export {
   detectNativeLandlock,
   mapPolicyToNapi,
@@ -22,8 +23,15 @@ export {
   type LinuxSandboxBackend,
   linuxOsSandbox,
 } from "./linux"
-export { compileLandlockCliArgs, LANDLOCK_CLI_NETWORK_DEFERRED_MARKER } from "./landlock-cli"
 export { compileSeatbeltProfile } from "./seatbelt"
+export {
+  diffProfiles,
+  formatDiff,
+  type ProfileDiffEntry,
+  type ProfileDiffResult,
+} from "./seatbelt/profile-diff"
+export { applyStrictKnobs, isDefaultStrict, type StrictKnobs } from "./seatbelt/strict-policy"
+export { renderVerbatim, type VerbatimArm } from "./seatbelt/verbatim-profile"
 export type {
   OsSandbox,
   OsSandboxConfig,

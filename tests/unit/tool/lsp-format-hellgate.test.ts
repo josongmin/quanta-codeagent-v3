@@ -17,18 +17,21 @@ import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 interface FakePort extends FormatPort {
   readonly calls: { file: string; range?: FormatRange }[]
+  readonly signals: Array<AbortSignal | undefined>
 }
 
 const fakePort = (overrides?: Partial<FormatPort>): FakePort => {
   const calls: FakePort["calls"] = []
+  const signals: FakePort["signals"] = []
   const base: FormatPort = { format: async () => [] }
   const merged: FormatPort = { ...base, ...(overrides ?? {}) }
   const real = merged.format
-  merged.format = async (file, range) => {
+  merged.format = async (file, range, signal) => {
     calls.push(range === undefined ? { file } : { file, range })
-    return real(file, range)
+    signals.push(signal)
+    return real(file, range, signal)
   }
-  return Object.assign(merged, { calls }) as FakePort
+  return Object.assign(merged, { calls, signals }) as FakePort
 }
 
 const ctx = (signal?: AbortSignal): ToolContext => ({
@@ -131,6 +134,13 @@ describe("lsp_format — port conversion", () => {
       start: { line: 1, character: 2 },
       end: { line: 4, character: 0 },
     })
+  })
+
+  test("HELL-C9: tool forwards ctx.signal to the port", async () => {
+    const ac = new AbortController()
+    const port = fakePort()
+    await collect(lspFormatTool(port), { path: "x.ts" }, ctx(ac.signal))
+    expect(port.signals[0]).toBe(ac.signal)
   })
 })
 

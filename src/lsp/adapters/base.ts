@@ -238,6 +238,7 @@ interface PendingRequest {
   reject: (reason: Error) => void
   timer: ReturnType<typeof setTimeout>
   method: string
+  detachAbort?: () => void
 }
 
 const SEVERITY: Record<number, DiagnosticSeverity> = {
@@ -245,6 +246,16 @@ const SEVERITY: Record<number, DiagnosticSeverity> = {
   2: "warning",
   3: "information",
   4: "hint",
+}
+
+const abortError = (context: string): Error => {
+  const e = new Error(`${context} aborted`)
+  e.name = "AbortError"
+  return e
+}
+
+const throwIfAborted = (signal: AbortSignal | undefined, context: string): void => {
+  if (signal?.aborted) throw abortError(context)
 }
 
 const toPos = (p: { line: number; character: number }): Pos => ({
@@ -566,7 +577,8 @@ export class LspClient implements LspPort {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
   }
 
-  async start(): Promise<void> {
+  async start(signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal, "LSP start")
     if (this.proc) return
     this.proc = Bun.spawn(this.command, {
       cwd: this.cwd,
@@ -577,24 +589,36 @@ export class LspClient implements LspPort {
     this.readPump = this.pumpStdout()
     this.watchExit()
 
-    const init = (await this.sendRequest("initialize", {
-      processId: process.pid,
-      clientInfo: { name: "quanta-codeagent", version: "0.1.0" },
-      rootUri: pathToFileURL(this.cwd).href,
-      capabilities: {
-        textDocument: {
-          publishDiagnostics: { relatedInformation: false },
-          synchronization: { didSave: false, dynamicRegistration: false },
-        },
-      },
-    })) as InitializeResult
-    if (init.serverInfo) {
-      this.serverInfo = {
-        name: init.serverInfo.name,
-        ...(init.serverInfo.version !== undefined ? { version: init.serverInfo.version } : {}),
-      }
+    const onAbort = () => {
+      void this.stop().catch(() => undefined)
     }
-    this.sendNotification("initialized", {})
+    signal?.addEventListener("abort", onAbort, { once: true })
+    try {
+      const init = (await this.sendRequest(
+        "initialize",
+        {
+          processId: process.pid,
+          clientInfo: { name: "quanta-codeagent", version: "0.1.0" },
+          rootUri: pathToFileURL(this.cwd).href,
+          capabilities: {
+            textDocument: {
+              publishDiagnostics: { relatedInformation: false },
+              synchronization: { didSave: false, dynamicRegistration: false },
+            },
+          },
+        },
+        signal,
+      )) as InitializeResult
+      if (init.serverInfo) {
+        this.serverInfo = {
+          name: init.serverInfo.name,
+          ...(init.serverInfo.version !== undefined ? { version: init.serverInfo.version } : {}),
+        }
+      }
+      this.sendNotification("initialized", {})
+    } finally {
+      signal?.removeEventListener("abort", onAbort)
+    }
   }
 
   async diagnostics(filePath: string): Promise<Diagnostic[]> {
@@ -623,51 +647,60 @@ export class LspClient implements LspPort {
   // Errors other than "unsupported" (timeout, transport) propagate to the
   // caller — the tool layer decides whether to degrade.
 
-  async definition(filePath: string, pos: Pos): Promise<Location[] | null> {
-    return this.navLocations(filePath, "textDocument/definition", pos)
+  async definition(filePath: string, pos: Pos, signal?: AbortSignal): Promise<Location[] | null> {
+    return this.navLocations(filePath, "textDocument/definition", pos, signal)
   }
 
   async references(
     filePath: string,
     pos: Pos,
     includeDeclaration: boolean,
+    signal?: AbortSignal,
   ): Promise<Location[] | null> {
-    const uri = await this.ensureOpen(filePath)
+    const uri = await this.ensureOpen(filePath, signal)
     const raw = await this.callOrNullOnUnsupported("textDocument/references", {
       textDocument: { uri },
       position: pos,
       context: { includeDeclaration },
-    })
+    }, signal)
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw)) return null
     return (raw as RawLocation[]).map(toLocation)
   }
 
-  async hover(filePath: string, pos: Pos): Promise<Hover | null> {
-    const uri = await this.ensureOpen(filePath)
+  async hover(filePath: string, pos: Pos, signal?: AbortSignal): Promise<Hover | null> {
+    const uri = await this.ensureOpen(filePath, signal)
     const raw = await this.callOrNullOnUnsupported("textDocument/hover", {
       textDocument: { uri },
       position: pos,
-    })
+    }, signal)
     if (raw === null || raw === undefined) return null
     const h = raw as RawHover
     const contents = flattenHoverContents(h.contents)
     return h.range !== undefined ? { contents, range: toRange(h.range) } : { contents }
   }
 
-  async typeDefinition(filePath: string, pos: Pos): Promise<Location[] | null> {
-    return this.navLocations(filePath, "textDocument/typeDefinition", pos)
+  async typeDefinition(
+    filePath: string,
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<Location[] | null> {
+    return this.navLocations(filePath, "textDocument/typeDefinition", pos, signal)
   }
 
-  async implementation(filePath: string, pos: Pos): Promise<Location[] | null> {
-    return this.navLocations(filePath, "textDocument/implementation", pos)
+  async implementation(
+    filePath: string,
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<Location[] | null> {
+    return this.navLocations(filePath, "textDocument/implementation", pos, signal)
   }
 
-  async documentSymbol(filePath: string): Promise<SymbolInfo[] | null> {
-    const uri = await this.ensureOpen(filePath)
+  async documentSymbol(filePath: string, signal?: AbortSignal): Promise<SymbolInfo[] | null> {
+    const uri = await this.ensureOpen(filePath, signal)
     const raw = (await this.callOrNullOnUnsupported("textDocument/documentSymbol", {
       textDocument: { uri },
-    })) as RawDocumentSymbolResult | undefined
+    }, signal)) as RawDocumentSymbolResult | undefined
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw) || raw.length === 0) return []
     if (isSymbolInformationList(raw)) return raw.map((s) => mapSymbolInformation(s))
@@ -676,22 +709,26 @@ export class LspClient implements LspPort {
     return out
   }
 
-  async workspaceSymbol(query: string): Promise<SymbolInfo[] | null> {
+  async workspaceSymbol(query: string, signal?: AbortSignal): Promise<SymbolInfo[] | null> {
     const raw = (await this.callOrNullOnUnsupported("workspace/symbol", {
       query,
-    })) as RawWorkspaceSymbolResult | undefined
+    }, signal)) as RawWorkspaceSymbolResult | undefined
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw)) return null
     if (raw.length === 0) return []
     return raw.map(mapWorkspaceSymbolEntry)
   }
 
-  async prepareRename(filePath: string, pos: Pos): Promise<RenamePreview | null> {
-    const uri = await this.ensureOpen(filePath)
+  async prepareRename(
+    filePath: string,
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<RenamePreview | null> {
+    const uri = await this.ensureOpen(filePath, signal)
     const raw = (await this.callOrNullOnUnsupported("textDocument/prepareRename", {
       textDocument: { uri },
       position: pos,
-    })) as RawPrepareRenameResult | undefined
+    }, signal)) as RawPrepareRenameResult | undefined
     if (raw === null || raw === undefined) return null
     if (isRawRange(raw)) return { range: toRange(raw), placeholder: "" }
     if (raw.defaultBehavior === true) return null
@@ -715,15 +752,16 @@ export class LspClient implements LspPort {
     line: number,
     col: number,
     kind?: "quickfix" | "refactor" | "source" | "all",
+    signal?: AbortSignal,
   ): Promise<readonly CodeAction[] | null> {
-    const uri = await this.ensureOpen(file)
+    const uri = await this.ensureOpen(file, signal)
     const filter = codeActionFilterFor(kind)
     const params = {
       textDocument: { uri },
       range: pointRange(line, col),
       context: filter === undefined ? { diagnostics: [] } : { diagnostics: [], only: filter },
     }
-    const raw = (await this.callOrNullOnUnsupported("textDocument/codeAction", params)) as
+    const raw = (await this.callOrNullOnUnsupported("textDocument/codeAction", params, signal)) as
       | RawCodeActionResult
       | undefined
     if (raw === null || raw === undefined) return null
@@ -736,15 +774,16 @@ export class LspClient implements LspPort {
   async requestFormatting(
     file: string,
     range?: FormatRange,
+    signal?: AbortSignal,
   ): Promise<readonly FormatTextEdit[] | null> {
-    const uri = await this.ensureOpen(file)
+    const uri = await this.ensureOpen(file, signal)
     const method = range === undefined ? "textDocument/formatting" : "textDocument/rangeFormatting"
     const baseParams = {
       textDocument: { uri },
       options: { tabSize: 2, insertSpaces: true },
     }
     const params = range === undefined ? baseParams : { ...baseParams, range: toRawRange(range) }
-    const raw = (await this.callOrNullOnUnsupported(method, params)) as RawTextEdit[] | null
+    const raw = (await this.callOrNullOnUnsupported(method, params, signal)) as RawTextEdit[] | null
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw)) return null
     return raw.map(toFormatTextEdit)
@@ -755,12 +794,13 @@ export class LspClient implements LspPort {
     file: string,
     line: number,
     col: number,
+    signal?: AbortSignal,
   ): Promise<readonly SignatureInfo[] | null> {
-    const uri = await this.ensureOpen(file)
+    const uri = await this.ensureOpen(file, signal)
     const raw = (await this.callOrNullOnUnsupported("textDocument/signatureHelp", {
       textDocument: { uri },
       position: { line, character: col },
-    })) as RawSignatureHelpResult | undefined
+    }, signal)) as RawSignatureHelpResult | undefined
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw.signatures)) return []
     return raw.signatures.map(mapSignature)
@@ -798,7 +838,9 @@ export class LspClient implements LspPort {
   async applyWorkspaceEdit(
     edit: CodeActionWorkspaceEdit | RenameWorkspaceEdit,
     sessionId: string = randomBytes(8).toString("hex"),
+    signal?: AbortSignal,
   ): Promise<void> {
+    throwIfAborted(signal, "LSP applyWorkspaceEdit")
     // Resolve URIs to paths once; reuse across all 3 phases.
     const resolved = edit.changes.map((doc) => ({
       path: fileURLToPath(doc.uri),
@@ -812,6 +854,7 @@ export class LspClient implements LspPort {
     // with a clearer error than "couldn't list dir for cleanup").
     const cleanupDirs = new Set(resolved.map((d) => dirname(d.path)))
     for (const dir of cleanupDirs) {
+      throwIfAborted(signal, "LSP applyWorkspaceEdit")
       await this.cleanupStaleTmps(dir, sessionId)
     }
 
@@ -819,6 +862,7 @@ export class LspClient implements LspPort {
     const prepared: { tmp: string; target: string }[] = []
     try {
       for (const { path, edits } of resolved) {
+        throwIfAborted(signal, "LSP applyWorkspaceEdit")
         const original = await this.readFileText(path)
         const patched = applyEditsToText(original, edits)
         const tmp = `${path}.quanta-tmp-${sessionId}-${randomBytes(4).toString("hex")}`
@@ -839,6 +883,7 @@ export class LspClient implements LspPort {
     for (let i = 0; i < prepared.length; i++) {
       const entry = prepared[i]
       if (!entry) continue
+      throwIfAborted(signal, "LSP applyWorkspaceEdit")
       try {
         await this.renameFile(entry.tmp, entry.target)
       } catch (e) {
@@ -968,7 +1013,7 @@ export class LspClient implements LspPort {
    *  implementation correlates by id, bounds the wait by `requestTimeoutMs`,
    *  and rejects with {@link LspRequestError} when the server returns an
    *  error (so callers can inspect the JSON-RPC code). */
-  protected sendRequest(method: string, params: unknown): Promise<unknown> {
+  protected sendRequest(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     const id = this.nextId++
     const payload =
       params === undefined ? { jsonrpc: "2.0", id, method } : { jsonrpc: "2.0", id, method, params }
@@ -982,11 +1027,28 @@ export class LspClient implements LspPort {
         reject(new Error(`LSP request "${method}" issued after server stopped/exited`))
         return
       }
+      if (signal?.aborted) {
+        reject(abortError(`LSP request "${method}"`))
+        return
+      }
       const timer = setTimeout(() => {
-        this.pending.delete(id)
+        if (!this.pending.delete(id)) return
+        entry.detachAbort?.()
         reject(new Error(`LSP request "${method}" timed out after ${this.requestTimeoutMs}ms`))
       }, this.requestTimeoutMs)
-      this.pending.set(id, { resolve, reject, timer, method })
+      const entry: PendingRequest = { resolve, reject, timer, method }
+      if (signal) {
+        const onAbort = () => {
+          if (!this.pending.delete(id)) return
+          clearTimeout(timer)
+          entry.detachAbort?.()
+          this.sendNotification("$/cancelRequest", { id })
+          reject(abortError(`LSP request "${method}"`))
+        }
+        signal.addEventListener("abort", onAbort, { once: true })
+        entry.detachAbort = () => signal.removeEventListener("abort", onAbort)
+      }
+      this.pending.set(id, entry)
       this.send(payload)
     })
   }
@@ -1007,10 +1069,12 @@ export class LspClient implements LspPort {
 
   /** Idempotent `textDocument/didOpen`. The URI is added to {@link opened}
    *  on first call so subsequent nav RPCs on the same file skip the open. */
-  private async ensureOpen(filePath: string): Promise<string> {
+  private async ensureOpen(filePath: string, signal?: AbortSignal): Promise<string> {
+    throwIfAborted(signal, `LSP didOpen "${filePath}"`)
     const uri = pathToFileURL(filePath).href
     if (this.opened.has(uri)) return uri
     const text = await this.readFileText(filePath)
+    throwIfAborted(signal, `LSP didOpen "${filePath}"`)
     this.sendNotification("textDocument/didOpen", {
       textDocument: { uri, languageId: this.spec.languageIdFor(filePath), version: 1, text },
     })
@@ -1021,9 +1085,13 @@ export class LspClient implements LspPort {
   /** Issue a request and convert "method not supported" errors to a `null`
    *  result. Other errors (timeout, transport, malformed params caught by the
    *  server with a non-unsupported code) are re-thrown. */
-  private async callOrNullOnUnsupported(method: string, params: unknown): Promise<unknown> {
+  private async callOrNullOnUnsupported(
+    method: string,
+    params: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     try {
-      return await this.sendRequest(method, params)
+      return await this.sendRequest(method, params, signal)
     } catch (e) {
       if (isUnsupportedError(e)) return null
       throw e
@@ -1037,12 +1105,13 @@ export class LspClient implements LspPort {
     filePath: string,
     method: string,
     pos: Pos,
+    signal?: AbortSignal,
   ): Promise<Location[] | null> {
-    const uri = await this.ensureOpen(filePath)
+    const uri = await this.ensureOpen(filePath, signal)
     const raw = (await this.callOrNullOnUnsupported(method, {
       textDocument: { uri },
       position: pos,
-    })) as RawDefinitionResult | undefined
+    }, signal)) as RawDefinitionResult | undefined
     if (raw === null || raw === undefined) return null
     if (Array.isArray(raw)) {
       if (raw.length === 0) return []
@@ -1091,6 +1160,7 @@ export class LspClient implements LspPort {
     if (!entry) return
     this.pending.delete(id)
     clearTimeout(entry.timer)
+    entry.detachAbort?.()
     if (msg.error) {
       entry.reject(new LspRequestError(entry.method, msg.error))
     } else {
@@ -1127,6 +1197,7 @@ export class LspClient implements LspPort {
   private failAllPending(reason: Error): void {
     for (const [, entry] of this.pending) {
       clearTimeout(entry.timer)
+      entry.detachAbort?.()
       entry.reject(reason)
     }
     this.pending.clear()

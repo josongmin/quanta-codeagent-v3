@@ -121,7 +121,9 @@ const detectRuntimeVersion = (): string => {
  *  should treat it as read-only — pass directly to `otlpHttpMetricSink({
  *  resourceAttrs })`. */
 export const buildOtelResourceAttrs = (opts?: ResourceAutoOpts): Record<string, string> => {
-  const env: Readonly<Record<string, string | undefined>> = opts?.env ?? process.env
+  // Slice invariant (ADR-0144): no process.env reads. Caller passes plain env.
+  // Empty default = caller must inject; tests use {}.
+  const env: Readonly<Record<string, string | undefined>> = opts?.env ?? {}
   const hostnameFn = opts?.hostnameFn ?? osHostname
   const pidFn = opts?.pidFn ?? (() => process.pid)
 

@@ -22,8 +22,8 @@
  */
 
 import { compileBubblewrapArgs } from "./bubblewrap"
-import { compileLandlockCliArgs, LANDLOCK_CLI_NETWORK_DEFERRED_MARKER } from "./landlock-cli"
 import { spawnViaBubblewrap } from "./landlock"
+import { compileLandlockCliArgs, LANDLOCK_CLI_NETWORK_DEFERRED_MARKER } from "./landlock-cli"
 import type {
   OsSandbox,
   OsSandboxConfig,
@@ -163,9 +163,7 @@ export const linuxOsSandbox = (cfg?: OsSandboxConfig): OsSandbox => {
           stdout: r.stdout,
           stderr: r.stderr,
           sandboxApplied: true,
-          ...(networkDeferred
-            ? { degradeReason: "landlock-network-policy-not-enforced" }
-            : {}),
+          ...(networkDeferred ? { degradeReason: "landlock-network-policy-not-enforced" } : {}),
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)

@@ -134,9 +134,7 @@ export type AnySessionExportEnvelope = SessionExportEnvelope | SessionExportEnve
  * Auto-populated into v2 envelopes when caller does not pass `capabilities`.
  */
 const DEFAULT_V2_CAPABILITIES: ReadonlyArray<string> = [
-  "images",
-  "documents",
-  "shadow-odb",
+  "conversation-checkpoint",
   "plan-queue",
   "budget-ledger",
 ]
@@ -167,8 +165,8 @@ export interface SessionExportOpts {
    *  Ignored when `emitV2` is falsy. */
   readonly withDigest?: boolean
   /** v2-only: capability list. Defaults to {@link DEFAULT_V2_CAPABILITIES}
-   *  (the well-known sidecar slots quanta supports today). Ignored when
-   *  `emitV2` is falsy. */
+   *  (the well-known exportable sidecar slots this envelope can actually
+   *  carry today). Ignored when `emitV2` is falsy. */
   readonly capabilities?: ReadonlyArray<string>
 }
 

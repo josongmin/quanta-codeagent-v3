@@ -1,10 +1,10 @@
 import { spawn as nodeSpawn } from "node:child_process"
+import { isBubblewrapAvailable, spawnViaBubblewrap } from "./landlock"
 import {
   detectNativeLandlock,
   type NativeLandlockConfig,
   nativeLandlockOsSandbox,
 } from "./landlock-native"
-import { isBubblewrapAvailable, spawnViaBubblewrap } from "./landlock"
 import { compileSeatbeltProfile } from "./seatbelt"
 import type {
   OsSandbox,

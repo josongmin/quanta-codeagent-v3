@@ -136,4 +136,25 @@ describe("V4A integration — real filesystem", () => {
     expect(readFileSync(join(dir, "a.py"), "utf8")).toBe("value = 1\n")
     expect(readFileSync(join(dir, "b.py"), "utf8")).toBe("already-here\n")
   })
+
+  test("a later planning failure leaves earlier logical ops absent on the real filesystem", async () => {
+    const dir = tmpDir("e2e-full-call-atomic")
+    writeFileSync(join(dir, "stable.txt"), "alpha\n")
+    const fs = new NodeFs(dir)
+    const text = [
+      "*** Begin Patch",
+      "*** Add File: new.txt",
+      "+created",
+      "*** Update File: stable.txt",
+      "@@",
+      "-missing",
+      "+MISSING",
+      "*** End Patch",
+    ].join("\n")
+
+    await expect(applyPatch(parsePatch(text), fs)).rejects.toThrow(/Patch anchor not found/)
+
+    expect(existsSync(join(dir, "new.txt"))).toBe(false)
+    expect(readFileSync(join(dir, "stable.txt"), "utf8")).toBe("alpha\n")
+  })
 })

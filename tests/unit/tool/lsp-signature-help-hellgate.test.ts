@@ -17,18 +17,21 @@ import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 interface FakePort extends SignatureHelpPort {
   readonly calls: { file: string; line: number; col: number }[]
+  readonly signals: Array<AbortSignal | undefined>
 }
 
 const fakePort = (overrides?: Partial<SignatureHelpPort>): FakePort => {
   const calls: FakePort["calls"] = []
+  const signals: FakePort["signals"] = []
   const base: SignatureHelpPort = { signatureHelp: async () => [] }
   const merged: SignatureHelpPort = { ...base, ...(overrides ?? {}) }
   const real = merged.signatureHelp
-  merged.signatureHelp = async (file, line, col) => {
+  merged.signatureHelp = async (file, line, col, signal) => {
     calls.push({ file, line, col })
-    return real(file, line, col)
+    signals.push(signal)
+    return real(file, line, col, signal)
   }
-  return Object.assign(merged, { calls }) as FakePort
+  return Object.assign(merged, { calls, signals }) as FakePort
 }
 
 const ctx = (signal?: AbortSignal): ToolContext => ({
@@ -123,6 +126,17 @@ describe("lsp_signature_help — port conversion", () => {
       character: 12,
     })
     expect(port.calls[0]).toEqual({ file: "src/x.ts", line: 8, col: 11 })
+  })
+
+  test("HELL-C7: tool forwards ctx.signal to signatureHelp", async () => {
+    const ac = new AbortController()
+    const port = fakePort()
+    await collect(
+      lspSignatureHelpTool(port),
+      { path: "src/x.ts", line: 1, character: 1 },
+      ctx(ac.signal),
+    )
+    expect(port.signals[0]).toBe(ac.signal)
   })
 })
 

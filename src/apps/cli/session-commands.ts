@@ -7,8 +7,8 @@
  * `@/migration` (biome rule, ADR-0038/runner-slice §): the migration-translator
  * is a one-off surface concern, not a Layer-2 orchestration concern.
  *
- * This shim wires the CLI-side migration handler (`runImport` + import-log
- * append) into the runner via `deps.importHandler` so consumers (`repl.ts`,
+ * This shim wires the CLI-side migration handler (`runImport` + append-only
+ * import-log write) into the runner via `deps.importHandler` so consumers (`repl.ts`,
  * the CLI-scoped unit + integration tests) keep their existing
  * `runSessionCommand(args, deps)` contract — byte-identical default-OFF.
  *
@@ -91,16 +91,16 @@ const cliImportHandler = async (args: string[], deps: SessionCommandDeps): Promi
   )
 
   const ok = result.errors.length === 0
-  // Record the run in the persisted import log (best-effort; a busy-lock or
-  // write error is surfaced but does not change the import's own exit code,
-  // which reflects whether the translation succeeded).
+  // Record the translation audit in the persisted import log (best-effort; a
+  // busy-lock or write error is surfaced but does not change the command's
+  // own exit code, which reflects whether the translation scan succeeded).
   try {
     await appendImportLog(home, {
       timestamp: new Date().toISOString(),
       provider: result.provider,
       stage: "import_finished",
       ok,
-      detail: `sessions=${result.sessionsImported}, skills=${result.skillsImported}`,
+      detail: `translated_sessions=${result.sessionsTranslated}, counted_skills=${result.skillsCounted}, persisted_sessions=0`,
     })
   } catch (e) {
     deps.err(`session import: warning: failed to write import log: ${(e as Error).message}\n`)
@@ -111,7 +111,7 @@ const cliImportHandler = async (args: string[], deps: SessionCommandDeps): Promi
     return 1
   }
   deps.out(
-    `imported ${result.provider}: ${result.sessionsImported} session(s), ${result.skillsImported} skill(s)\n`,
+    `translated ${result.provider}: ${result.sessionsTranslated} session transcript(s), ${result.skillsCounted} skill file(s); no local sessions persisted\n`,
   )
   return 0
 }

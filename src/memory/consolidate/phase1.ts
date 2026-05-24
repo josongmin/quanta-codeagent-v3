@@ -28,6 +28,7 @@ import { errMessage } from "@/shared"
  *     and behavior is byte-identical to the legacy code path.
  */
 import type { MemoryTelemetryPort, Phase1OutcomeKind } from "../telemetry-port"
+import { isAbortError } from "./abort"
 import { MIN_TURN_THRESHOLD } from "./constants"
 import {
   Phase1DistillError,
@@ -98,8 +99,15 @@ export const runPhase1 = async (
   // chained via `Error.cause` so operators retain the stack.
   let distilled: Awaited<ReturnType<Phase1Port["distill"]>>
   try {
-    distilled = await port.distill({ rolloutMessages: input.rolloutMessages })
+    distilled = await port.distill({
+      rolloutMessages: input.rolloutMessages,
+      signal: input.signal,
+    })
   } catch (e) {
+    if (isAbortError(e)) {
+      emit("error")
+      throw e
+    }
     const message = errMessage(e)
     const wrapped = new Phase1DistillError(message, input.threadId)
     if (e instanceof Error) {

@@ -54,7 +54,11 @@ class FakeLspClient extends LspClient {
     return
   }
 
-  protected override sendRequest(method: string, params: unknown): Promise<unknown> {
+  protected override sendRequest(
+    method: string,
+    params: unknown,
+    _signal?: AbortSignal,
+  ): Promise<unknown> {
     const req: SentRequest = { kind: "request", method, params }
     this.sent.push(req)
     return Promise.resolve(this.replier(req)).then((reply) => {

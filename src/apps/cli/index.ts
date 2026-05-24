@@ -6,14 +6,6 @@ import { isSlashCommand } from "./slash-commands"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
-// S1 — OS sandbox wire-up. Reads `QUANTA_SANDBOX` ONCE at boot (after dotenv
-// load so `.env.local` overrides are honored). Default-OFF: when unset /
-// "default" / "off" / "" the slot stays uninstalled and `runShell` is byte-
-// identical to pre-S1. Degraded slots (linux Phase-1 stub, missing
-// sandbox-exec) surface a one-line stderr warning so the operator notices
-// BEFORE the first sandboxed command runs.
-installCliSandbox()
-
 // Phase-3 split (RFC may-22-unified-agent-runtime §3): pure structural
 // refactor with ZERO behavior change for existing CLI users. `index.ts` now
 // owns only the argv-routing short-circuits (`session` subcommand, built-in
@@ -27,6 +19,13 @@ installCliSandbox()
 // entrypoint, leaving `index.ts` as the assembly orchestrator only.
 
 const main = async (): Promise<void> => {
+  // S1 — OS sandbox wire-up. Reads `QUANTA_SANDBOX` ONCE at boot (after
+  // dotenv load so `.env.local` overrides are honored). Default-OFF: when
+  // unset / "default" / "off" / "" the slot stays uninstalled and
+  // `runShell` is byte-identical to pre-S1. Degraded backends surface a
+  // one-line stderr warning before the first sandboxed command runs.
+  await installCliSandbox()
+
   // Early route: `quanta session …` is fully handled by the subcommand
   // dispatcher and never touches the agent loop / REPL wiring below.
   if (process.argv[2] === "session") {

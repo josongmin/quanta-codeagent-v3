@@ -27,88 +27,90 @@ const HIGH_ENTROPY_40 = "k7AjP9xN2qLm8Bv4XzCw6FrYtUiOpHsLeR3aDfGh"
 const ANOTHER_HIGH_ENTROPY = "q9zXbR7tYwP3mN5jK1vF4hLcDgAuOiEsMpHaQrBz"
 
 describe("A. pattern scanner — signature precision", () => {
-  test("A1 — AWS access key id detected as aws-access-key, high confidence", () => {
+  test("A1 — AWS access key id detected as aws-access-key, high confidence", async () => {
     const s = patternScanner()
-    const findings = s.scanText("aws_key = AKIAIOSFODNN7EXAMPLE blah")
+    const findings = await s.scanText("aws_key = AKIAIOSFODNN7EXAMPLE blah")
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("aws-access-key")
     expect(findings[0]?.confidence).toBe("high")
     expect(findings[0]?.preview).toBe("AKIA***MPLE")
   })
 
-  test("A2 — OpenAI sk- key (48 chars) detected", () => {
+  test("A2 — OpenAI sk- key (48 chars) detected", async () => {
     const key = `sk-${"A".repeat(48)}`
-    const findings = patternScanner().scanText(`KEY=${key}`)
+    const findings = await patternScanner().scanText(`KEY=${key}`)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("openai-api-key")
   })
 
-  test("A3 — Anthropic sk-ant- key detected as anthropic-api-key (not openai)", () => {
+  test("A3 — Anthropic sk-ant- key detected as anthropic-api-key (not openai)", async () => {
     const key = `sk-ant-${"X".repeat(93)}`
-    const findings = patternScanner().scanText(`KEY=${key}`)
+    const findings = await patternScanner().scanText(`KEY=${key}`)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("anthropic-api-key")
   })
 
-  test("A4 — GitHub PAT (ghp_) detected", () => {
+  test("A4 — GitHub PAT (ghp_) detected", async () => {
     const key = `ghp_${"a".repeat(36)}`
-    const findings = patternScanner().scanText(`GH=${key}`)
+    const findings = await patternScanner().scanText(`GH=${key}`)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("github-token")
   })
 
-  test("A5 — Google API key (AIza...) detected", () => {
+  test("A5 — Google API key (AIza...) detected", async () => {
     const key = `AIza${"B".repeat(35)}`
-    const findings = patternScanner().scanText(`GCP=${key}`)
+    const findings = await patternScanner().scanText(`GCP=${key}`)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("google-api-key")
   })
 
-  test("A6 — GCP service-account JSON snippet detected", () => {
+  test("A6 — GCP service-account JSON snippet detected", async () => {
     const json = `{"type":"service_account","project_id":"x","private_key_id":"abc"}`
-    const findings = patternScanner().scanText(json)
+    const findings = await patternScanner().scanText(json)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("gcp-service-account")
   })
 
-  test("A7 — Slack bot token (xoxb-) detected", () => {
-    const findings = patternScanner().scanText("token: xoxb-1234567890-abcdefghij")
+  test("A7 — Slack bot token (xoxb-) detected", async () => {
+    const findings = await patternScanner().scanText("token: xoxb-1234567890-abcdefghij")
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("slack-token")
   })
 
-  test("A8 — Stripe sk_live_ key detected", () => {
+  test("A8 — Stripe sk_live_ key detected", async () => {
     const key = `sk_live_${"a".repeat(24)}`
-    const findings = patternScanner().scanText(`STRIPE=${key}`)
+    const findings = await patternScanner().scanText(`STRIPE=${key}`)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("stripe-key")
   })
 
-  test("A9 — RSA private-key block detected", () => {
+  test("A9 — RSA private-key block detected", async () => {
     const block =
       "-----BEGIN RSA PRIVATE KEY-----\nMIIB...content...\n-----END RSA PRIVATE KEY-----"
-    const findings = patternScanner().scanText(block)
+    const findings = await patternScanner().scanText(block)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("private-key-block")
   })
 
-  test("A10 — plain English word 'password' NOT detected (no FP on words)", () => {
-    const findings = patternScanner().scanText("the password is secret and the key is unknown")
+  test("A10 — plain English word 'password' NOT detected (no FP on words)", async () => {
+    const findings = await patternScanner().scanText(
+      "the password is secret and the key is unknown",
+    )
     expect(findings).toEqual([])
   })
 
-  test("A11 — empty / no-match text returns empty array", () => {
-    expect(patternScanner().scanText("")).toEqual([])
-    expect(patternScanner().scanText("hello world, normal text only")).toEqual([])
+  test("A11 — empty / no-match text returns empty array", async () => {
+    expect(await patternScanner().scanText("")).toEqual([])
+    expect(await patternScanner().scanText("hello world, normal text only")).toEqual([])
   })
 
-  test("A12 — multiple secrets in one blob → multiple findings", () => {
+  test("A12 — multiple secrets in one blob → multiple findings", async () => {
     const text = [
       "aws=AKIAIOSFODNN7EXAMPLE",
       `gh=ghp_${"a".repeat(36)}`,
       `goog=AIza${"B".repeat(35)}`,
     ].join("\n")
-    const findings = patternScanner().scanText(text)
+    const findings = await patternScanner().scanText(text)
     expect(findings.length).toBe(3)
     const kinds = findings.map((f) => f.kind).sort()
     expect(kinds).toEqual(["aws-access-key", "github-token", "google-api-key"])
@@ -131,59 +133,64 @@ describe("B. mask helper", () => {
 })
 
 describe("C. entropy scanner", () => {
-  test("C16 — high-entropy base64-shaped token (40 chars) → generic-high-entropy / medium", () => {
-    const findings = entropyScanner().scanText(`key=${HIGH_ENTROPY_40} end`)
+  test("C16 — high-entropy base64-shaped token (40 chars) → generic-high-entropy / medium", async () => {
+    const findings = await entropyScanner().scanText(`key=${HIGH_ENTROPY_40} end`)
     expect(findings.length).toBe(1)
     expect(findings[0]?.kind).toBe("generic-high-entropy")
     expect(findings[0]?.confidence).toBe("medium")
     expect(findings[0]?.entropyBits).toBeGreaterThan(DEFAULT_ENTROPY_THRESHOLD_BITS_PER_CHAR)
   })
 
-  test("C17 — hex SHA256 (64 hex chars) is SKIPPED (structural pattern)", () => {
+  test("C17 — hex SHA256 (64 hex chars) is SKIPPED (structural pattern)", async () => {
     const sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    const findings = entropyScanner().scanText(`hash: ${sha}`)
+    const findings = await entropyScanner().scanText(`hash: ${sha}`)
     expect(findings).toEqual([])
   })
 
-  test("C18 — canonical UUID is SKIPPED", () => {
-    const findings = entropyScanner().scanText("id=550e8400-e29b-41d4-a716-446655440000")
+  test("C18 — canonical UUID is SKIPPED", async () => {
+    const findings = await entropyScanner().scanText("id=550e8400-e29b-41d4-a716-446655440000")
     expect(findings).toEqual([])
   })
 
-  test("C19 — below threshold (English-y text) → no finding", () => {
+  test("C19 — below threshold (English-y text) → no finding", async () => {
     // Note: minSecretLength=20 already filters short words; we need a 20+ char
     // low-entropy string. Repeated chars give very low entropy.
-    const findings = entropyScanner().scanText(`val=${"abcabcabcabcabcabcabc"} end`)
+    const findings = await entropyScanner().scanText(`val=${"abcabcabcabcabcabcabc"} end`)
     expect(findings.find((f) => f.kind === "generic-high-entropy")).toBeUndefined()
   })
 
-  test("C20 — token below minSecretLength → no finding", () => {
-    const findings = entropyScanner().scanText("short=k7Aj")
+  test("C20 — token below minSecretLength → no finding", async () => {
+    const findings = await entropyScanner().scanText("short=k7Aj")
     expect(findings).toEqual([])
   })
 
-  test("C21 — entropyThreshold override respected (raise it so 40-char b64 is dropped)", () => {
-    const findings = entropyScanner({ entropyThreshold: 10 }).scanText(`k=${HIGH_ENTROPY_40}`)
+  test("C21 — entropyThreshold override respected (raise it so 40-char b64 is dropped)", async () => {
+    const findings = await entropyScanner({ entropyThreshold: 10 }).scanText(
+      `k=${HIGH_ENTROPY_40}`,
+    )
     expect(findings).toEqual([])
   })
 
-  test("C22 — minSecretLength override respected (lower → catches shorter tokens)", () => {
+  test("C22 — minSecretLength override respected (lower → catches shorter tokens)", async () => {
     // 12-char high-entropy token. Default minSecretLength=20 → ignored.
     // Lowered to 10 → caught (entropy ≈ 3.58 b/c clears a lowered threshold).
     const tok = "k7AjP9xN2qLm"
     const text = `key=${tok} end`
-    const def = entropyScanner().scanText(text)
+    const def = await entropyScanner().scanText(text)
     expect(def).toEqual([])
-    const lowered = entropyScanner({ minSecretLength: 10, entropyThreshold: 3.0 }).scanText(text)
+    const lowered = await entropyScanner({
+      minSecretLength: 10,
+      entropyThreshold: 3.0,
+    }).scanText(text)
     expect(lowered.length).toBe(1)
     expect(lowered[0]?.kind).toBe("generic-high-entropy")
   })
 })
 
 describe("D. composite — pattern wins over entropy", () => {
-  test("D23 — AWS key alone → only aws-access-key (entropy dedup'd)", () => {
+  test("D23 — AWS key alone → only aws-access-key (entropy dedup'd)", async () => {
     const text = "AKIAIOSFODNN7EXAMPLE"
-    const findings = compositeSecretScanner().scanText(text)
+    const findings = await compositeSecretScanner().scanText(text)
     // Pattern hits at (line=1, col=1); entropy would also hit the same token
     // at the same cell. Dedup keeps the pattern finding.
     const aws = findings.filter((f) => f.kind === "aws-access-key")
@@ -194,17 +201,17 @@ describe("D. composite — pattern wins over entropy", () => {
     expect(sameCell.length).toBe(1)
   })
 
-  test("D24 — both adapters match same token → pattern wins (high confidence)", () => {
+  test("D24 — both adapters match same token → pattern wins (high confidence)", async () => {
     // GitHub PAT shape is also high-entropy. Composite must keep "high".
     const key = `ghp_${"a".repeat(36)}`
-    const findings = compositeSecretScanner().scanText(key)
+    const findings = await compositeSecretScanner().scanText(key)
     const same = findings.filter((f) => f.line === 1 && f.column === 1)
     expect(same.length).toBe(1)
     expect(same[0]?.kind).toBe("github-token")
     expect(same[0]?.confidence).toBe("high")
   })
 
-  test("D25 — pattern on L1, entropy on L5 → BOTH findings preserved", () => {
+  test("D25 — pattern on L1, entropy on L5 → BOTH findings preserved", async () => {
     const text = [
       "AKIAIOSFODNN7EXAMPLE",
       "noise line 2",
@@ -212,15 +219,15 @@ describe("D. composite — pattern wins over entropy", () => {
       "noise line 4",
       `freshToken=${ANOTHER_HIGH_ENTROPY}`,
     ].join("\n")
-    const findings = compositeSecretScanner().scanText(text)
+    const findings = await compositeSecretScanner().scanText(text)
     const kinds = new Set(findings.map((f) => f.kind))
     expect(kinds.has("aws-access-key")).toBe(true)
     expect(kinds.has("generic-high-entropy")).toBe(true)
   })
 
-  test("D26 — allowlist drops match (entropy + pattern paths)", () => {
+  test("D26 — allowlist drops match (entropy + pattern paths)", async () => {
     const key = `ghp_${"a".repeat(36)}`
-    const findings = compositeSecretScanner({ allowlist: [key] }).scanText(`KEY=${key}`)
+    const findings = await compositeSecretScanner({ allowlist: [key] }).scanText(`KEY=${key}`)
     expect(findings.filter((f) => f.kind === "github-token")).toEqual([])
     expect(findings.filter((f) => f.kind === "generic-high-entropy")).toEqual([])
   })
@@ -271,21 +278,21 @@ describe("E. scanFile — disk + binary tolerance", () => {
 })
 
 describe("F. maxFindings cap + Shannon helper sanity", () => {
-  test("F31 — 200 GitHub tokens + maxFindings=10 → exactly 10 returned (truncated)", () => {
+  test("F31 — 200 GitHub tokens + maxFindings=10 → exactly 10 returned (truncated)", async () => {
     const tok = (i: number) => `ghp_${"a".repeat(35)}${i % 10}`
     const text = Array.from({ length: 200 }, (_, i) => `KEY${i}=${tok(i)}`).join("\n")
-    const findings = patternScanner({ maxFindings: 10 }).scanText(text)
+    const findings = await patternScanner({ maxFindings: 10 }).scanText(text)
     expect(findings.length).toBe(10)
     expect(findings.every((f) => f.kind === "github-token")).toBe(true)
   })
 
-  test("F32 — default cap honored when not overridden", () => {
+  test("F32 — default cap honored when not overridden", async () => {
     const tok = (i: number) => `ghp_${"a".repeat(35)}${i % 10}`
     const text = Array.from(
       { length: DEFAULT_MAX_FINDINGS + 50 },
       (_, i) => `K${i}=${tok(i)}`,
     ).join("\n")
-    const findings = patternScanner().scanText(text)
+    const findings = await patternScanner().scanText(text)
     expect(findings.length).toBe(DEFAULT_MAX_FINDINGS)
   })
 

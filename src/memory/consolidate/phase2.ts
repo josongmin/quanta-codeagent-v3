@@ -40,6 +40,7 @@
  *        observed facts, decisions, and user preferences."
  */
 import type { MemoryTelemetryPort, Phase2OutcomeKind } from "../telemetry-port"
+import { isAbortError } from "./abort"
 import { MEMORY_MAX_BYTES, MEMORY_SUMMARY_MAX_BYTES } from "./constants"
 import {
   Phase2ConsolidateError,
@@ -113,9 +114,11 @@ export const runPhase2 = async (
       existingMemoryMd: input.existingMemoryMd,
       existingRawMemoriesMd: input.existingRawMemoriesMd,
       mode: input.mode,
+      signal: input.signal,
     })
   } catch (err) {
     emit("error")
+    if (isAbortError(err)) throw err
     if (err instanceof Phase2ConsolidateError) throw err
     throw new Phase2ConsolidateError(
       `Phase2Port.consolidate threw: ${(err as Error).message}`,

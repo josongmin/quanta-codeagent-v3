@@ -140,7 +140,7 @@ describe('D. runShell with profile="off" slot → same exit shape as uninstalled
     installShellSandbox({
       policy: { profile: "off" },
       config: {},
-      wrap: (argv) => ({ argv: [...argv], sandboxApplied: false }),
+      wrap: async (argv) => ({ argv: [...argv], sandboxApplied: false }),
     })
     const r = await runShell("echo hi")
     expect(r.exitCode).toBe(0)
@@ -152,7 +152,7 @@ describe('D. runShell with profile="off" slot → same exit shape as uninstalled
     installShellSandbox({
       policy: { profile: "off" },
       config: {},
-      wrap: (argv) => ({ argv: [...argv], sandboxApplied: false }),
+      wrap: async (argv) => ({ argv: [...argv], sandboxApplied: false }),
     })
     const r = await runShell("false")
     expect(r.exitCode).toBe(1)

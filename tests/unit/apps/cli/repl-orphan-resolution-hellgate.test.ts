@@ -4,20 +4,19 @@
  * Seal the decision matrix recorded in
  * `tools/feature-catalog/features/10-app/repl-orphan-resolution.yaml`:
  *
- *   - 20 orphan modules under `src/apps/cli/repl/` were deleted because each
- *     was either a verbatim duplicate of a helper already inlined in
- *     `src/apps/cli/repl.ts` (the live God-class) or a composer that called
- *     only those duplicates. These tests pin that the paths no longer resolve.
+ *   - The legacy duplicate modules listed below stay deleted. Newer
+ *     `src/apps/cli/repl/*.ts` split owners may exist; this gate only pins
+ *     that the specific dead paths do not come back.
  *
  *   - `src/apps/cli/repl/mcp-surface-wire.ts` was KEPT as a seam: it is the
- *     only orphan with an independent unit test AND it covers a contract
- *     `repl.ts` does NOT duplicate (`/mcp` slash-command surface translator).
+ *     only orphan with an independent unit test AND it remains the dedicated
+ *     `/mcp` surface translator now consumed by the live `repl.ts` wire.
  *     These tests pin the seam comment, the documented export surface, and
  *     the load-bearing behavior (configured-but-failed server reporting).
  *
  *   - The live `repl.ts` exports (`runRepl` / `runSessionMain` /
  *     `runSlashMain` / `topLevelUsage`) MUST stay byte-identical default-OFF
- *     so deleting the orphan tree did not regress the live REPL surface.
+ *     so deleting the legacy duplicates did not regress the live REPL surface.
  *
  * If a future slice re-introduces any of the deleted paths, these assertions
  * fail loudly so the SOLID restore is done with `repl.ts` in the same commit.
@@ -79,14 +78,14 @@ describe("repl orphan resolution — deleted modules", () => {
     }
   })
 
-  test("repl/ directory contains only mcp-surface-wire.ts as a TS source", () => {
+  test("repl/ directory still includes mcp-surface-wire.ts among the live split modules", () => {
     // Defensive: enumerate via fs to be a real listing check, not a path probe.
     const fs = require("node:fs") as typeof import("node:fs")
     const entries = fs
       .readdirSync(REPL_DIR)
       .filter((n) => n.endsWith(".ts"))
       .sort()
-    expect(entries).toEqual(["mcp-surface-wire.ts"])
+    expect(entries).toContain("mcp-surface-wire.ts")
   })
 
   test("dynamic import of any deleted module rejects (path does not resolve)", async () => {
@@ -111,7 +110,7 @@ describe("repl orphan resolution — KEEP_AS_SEAM (mcp-surface-wire.ts)", () => 
     expect(existsSync(p)).toBe(true)
     const src = readFileSync(p, "utf8")
     expect(src).toContain("SEAM ONLY")
-    expect(src).toContain("no current consumer")
+    expect(src).toContain("live REPL consumes this translator")
   })
 
   test("exports `buildMcpSurfaceInfo` as a callable function", () => {

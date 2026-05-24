@@ -156,6 +156,24 @@ describe("multi-vendor embedding hellgate", () => {
     expect(out).toEqual([[1], [2], [3], [4], [1]])
   })
 
+  test("openai: caller AbortSignal is forwarded to every HTTP batch", async () => {
+    const received: Array<AbortSignal | undefined> = []
+    const ac = new AbortController()
+    const e = createOpenAIEmbedder({
+      apiKey: "k",
+      batchSize: 2,
+      http: {
+        async embeddingsCreate(body, opts) {
+          received.push(opts?.signal)
+          return { data: body.input.map((s) => ({ embedding: [s.length] })) }
+        },
+      },
+    })
+    await e.embed(["a", "bb", "ccc"], { signal: ac.signal })
+    expect(received).toHaveLength(2)
+    expect(received.every((signal) => signal === ac.signal)).toBe(true)
+  })
+
   test("voyage: batchSize=3 over 7 inputs → 3 batch calls, last has 1 item", async () => {
     const calls: string[][] = []
     const e = createVoyageEmbedder({
@@ -166,6 +184,29 @@ describe("multi-vendor embedding hellgate", () => {
     await e.embed(["a", "b", "c", "d", "e", "f", "g"])
     expect(calls.length).toBe(3)
     expect(calls[2]?.length).toBe(1)
+  })
+
+  test("voyage: pre-aborted signal short-circuits before HTTP and stays AbortError", async () => {
+    let called = false
+    const ac = new AbortController()
+    ac.abort("stop now")
+    const e = createVoyageEmbedder({
+      apiKey: "k",
+      http: {
+        async embeddingsCreate() {
+          called = true
+          return { data: [] }
+        },
+      },
+    })
+    let caught: unknown
+    try {
+      await e.embed(["x"], { signal: ac.signal })
+    } catch (err) {
+      caught = err
+    }
+    expect(called).toBe(false)
+    expect((caught as Error | undefined)?.name).toBe("AbortError")
   })
 
   // =========================================================================

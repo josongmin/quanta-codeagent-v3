@@ -227,6 +227,20 @@ describe("runPhase1 — happy path (distilled outcome)", () => {
     expect(received).toBe(msgs)
   })
 
+  test("port.distill receives caller signal verbatim", async () => {
+    const ac = new AbortController()
+    let received: AbortSignal | undefined
+    const capturePort: Phase1Port = {
+      distill: async (args) => {
+        received = args.signal
+        return { rolloutSummary: "s", rawMemory: "r", preferenceSignals: [] }
+      },
+    }
+    const store = new Stage1Store(new Database(":memory:"))
+    await runPhase1(baseInput({ signal: ac.signal }), capturePort, store)
+    expect(received).toBe(ac.signal)
+  })
+
   test("happy-path row is queryable via fetchSince(null) on the real store", async () => {
     const store = new Stage1Store(new Database(":memory:"))
     await runPhase1(baseInput(), okPort, store)
@@ -321,6 +335,21 @@ describe("runPhase1 — error propagation (no silent catch)", () => {
     await expect(runPhase1(baseInput(), failingPort, port)).rejects.toBeInstanceOf(
       Phase1DistillError,
     )
+  })
+
+  test("AbortError from port.distill propagates unchanged", async () => {
+    const aborted = new Error("cancelled by caller")
+    aborted.name = "AbortError"
+    const failingPort: Phase1Port = {
+      distill: async () => {
+        throw aborted
+      },
+    }
+    const { port, upserts } = makeRecordingStore()
+    const caught = await runPhase1(baseInput({ signal: new AbortController().signal }), failingPort, port)
+      .catch((err: unknown) => err)
+    expect(caught).toBe(aborted)
+    expect(upserts).toHaveLength(0)
   })
 
   test("store.upsert throws → original error propagates (not wrapped)", async () => {

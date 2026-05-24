@@ -119,6 +119,28 @@ describe("permission-store — schema versioning", () => {
     await s.load()
     expect(s.snapshot().perThread).toEqual({})
   })
+
+  test("malformed nested state ⇒ quarantine to .corrupt sidecar + start empty", async () => {
+    const filePath = join(tmp, "malformed-state.json")
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        perThread: {
+          t1: {
+            approvalPolicy: "never",
+            approvalsReviewer: "agent",
+            sandboxPolicy: { type: "workspace-write", writableRoots: [42] },
+          },
+        },
+      }),
+      "utf8",
+    )
+    const s = createPermissionStore({ filePath, debounceMs: 0 })
+    await s.load()
+    expect(s.snapshot().perThread).toEqual({})
+    await access(`${filePath}.corrupt`)
+  })
 })
 
 describe("actionSignature — adversarial inputs", () => {
@@ -385,6 +407,40 @@ describe("permission-store — multi-process read-reconcile-MERGE (clobber fix)"
     // And B's own unrelated mutation also landed (merge, not clobber).
     const hosts = (parsed as unknown as { perHost: Record<string, string> }).perHost
     expect(hosts["h-b"]).toBe("read-only")
+  })
+
+  test("stale writer sees merged grants and denials immediately after its own flush", async () => {
+    const filePath = join(tmp, "merge-live-readers.json")
+    const a = createPermissionStore({ filePath, debounceMs: 0 })
+    const b = createPermissionStore({ filePath, debounceMs: 0 })
+    await a.load()
+    await b.load()
+    const sig = computeActionSignature({
+      tool: "edit",
+      workdir: "/repo",
+      args: { path: "x" },
+    })
+    a.setThread("t-merged", {
+      approvalPolicy: "never",
+      approvalsReviewer: "agent",
+      sandboxPolicy: { type: "danger-full-access" },
+    })
+    a.recordDenial({ threadId: "t1", actionSignature: sig, deniedAt: 100, deniedReason: "deny" })
+    a.recordRiskSeen("t1", sig, 110)
+    a.recordUserOverride("t1", sig, 120)
+    await a.flush()
+
+    expect(b.getThread("t-merged")).toBeUndefined()
+    expect(b.getDenial("t1", sig)).toBeUndefined()
+    expect(b.hasPostDenialOverride("t1", sig)).toBe(false)
+
+    b.setHost("h-local", "read-only")
+    await b.flush()
+
+    expect(b.getThread("t-merged")?.approvalPolicy).toBe("never")
+    expect(b.getHost("h-local")).toBe("read-only")
+    expect(b.getDenial("t1", sig)?.deniedAt).toBe(100)
+    expect(b.hasPostDenialOverride("t1", sig)).toBe(true)
   })
 
   test("a peer's denial is NOT resurrected-as-stale: a NEWER denial generation supersedes", async () => {

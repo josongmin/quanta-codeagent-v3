@@ -137,6 +137,24 @@ describe("commit-embedder hellgate", () => {
     expect(ce.cacheSize()).toBe(0)
   })
 
+  test("recent threads caller signal through to embed port", async () => {
+    const ac = new AbortController()
+    let observed: AbortSignal | undefined
+    const ce = createCommitEmbedder({
+      git: makeGit([note("a"), note("b")]),
+      embed: {
+        vendor: "openai",
+        model: "x",
+        async embed(texts, opts) {
+          observed = opts?.signal
+          return texts.map((text) => [text.length])
+        },
+      },
+    })
+    await ce.recent({ limit: 2, cwd: "/", signal: ac.signal })
+    expect(observed).toBe(ac.signal)
+  })
+
   test("embedder returning fewer vectors than asked → missing slots default to []", async () => {
     const truncated = makeEmbed((_t) => [[1]])
     const ce = createCommitEmbedder({

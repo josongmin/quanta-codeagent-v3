@@ -5,7 +5,7 @@
  * agent` (and the migration slice's own tests) may import from this index.
  */
 
-export { contentSha256, wasAlreadyImported } from "./dedup"
+export { contentSha256 } from "./dedup"
 export { detectExternalAgents, detectorContracts } from "./detector"
 export { type RunImportOptions, runImport, UnknownProviderRejectedError } from "./importer"
 export {

@@ -136,10 +136,9 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
   test("imageQueue present — `.drain` is NOT called when the pipeline early-exits via rejects", async () => {
     const drainMock = mock(() => [])
     const queue: ImageQueue = {
-      add: () => ({ ok: true as const, entry: { id: "x", block: { type: "image", source: { kind: "base64", mediaType: "image/png", data: "AAA=" } }, addedAt: 0 } }),
+      add: () => ({ kind: "ok" }),
       list: () => [],
-      remove: () => false,
-      clear: () => 0,
+      clear: () => undefined,
       drain: drainMock,
       size: () => 0,
     }

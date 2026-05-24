@@ -272,11 +272,15 @@ describe("HELL-6: lsp format port with signal fired mid-request → adapter prop
   test("fake FormatPort whose format() awaits a deferred + watches signal → tool surfaces ok:false", async () => {
     const ctrl = new AbortController()
     const fakePort: FormatPort = {
-      format: async (_file: string, _range?: FormatRange): Promise<readonly TextEdit[] | null> => {
+      format: async (
+        _file: string,
+        _range?: FormatRange,
+        signal?: AbortSignal,
+      ): Promise<readonly TextEdit[] | null> => {
         // Await a signal-aborted promise — this is the slot where a real LSP
         // adapter would await `jsonrpc.request(...)` with an AbortSignal.
         await new Promise<void>((_, reject) => {
-          ctrl.signal.addEventListener("abort", () => reject(new Error("aborted mid-request")), {
+          signal?.addEventListener("abort", () => reject(new Error("aborted mid-request")), {
             once: true,
           })
         })

@@ -7,15 +7,19 @@ import type { Tool, ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { lspNavTools } from "@/tool/lsp_nav"
 import type { LspNavProvider, LspNavSession, NavLocation, NavPos } from "@/tool/lsp_nav/types"
 
-export const ctx = (): ToolContext => ({ cwd: "/repo", signal: new AbortController().signal })
+export const ctx = (signal?: AbortSignal): ToolContext => ({
+  cwd: "/repo",
+  signal: signal ?? new AbortController().signal,
+})
 
 export const run = async <I>(
   tool: Tool<I>,
   input: I,
+  signal?: AbortSignal,
 ): Promise<{ progress: string[]; result: ToolResult }> => {
   const progress: string[] = []
   let result: ToolResult | undefined
-  for await (const ev of tool.execute(input, ctx()) as AsyncIterable<ToolEvent>) {
+  for await (const ev of tool.execute(input, ctx(signal)) as AsyncIterable<ToolEvent>) {
     if (ev.type === "progress") progress.push(ev.message)
     else result = ev.result
   }
@@ -38,6 +42,7 @@ export interface Trace {
   filePath?: string
   query?: string
   includeDeclaration?: boolean
+  signal?: AbortSignal
 }
 
 export const loc = (path: string, line: number, character: number): NavLocation => ({
@@ -54,43 +59,51 @@ export const fakeProvider = (overrides: Partial<LspNavSession>, trace: Trace): L
   open: async (filePath: string, cwd: string) => {
     trace.opened = { filePath, cwd }
     const session: LspNavSession = {
-      definition: async (fp, p) => {
+      definition: async (fp, p, signal) => {
         trace.filePath = fp
         trace.pos = p
+        trace.signal = signal
         return []
       },
-      references: async (fp, p, inc) => {
+      references: async (fp, p, inc, signal) => {
         trace.filePath = fp
         trace.pos = p
         trace.includeDeclaration = inc
+        trace.signal = signal
         return []
       },
-      hover: async (fp, p) => {
+      hover: async (fp, p, signal) => {
         trace.filePath = fp
         trace.pos = p
+        trace.signal = signal
         return null
       },
-      typeDefinition: async (fp, p) => {
+      typeDefinition: async (fp, p, signal) => {
         trace.filePath = fp
         trace.pos = p
+        trace.signal = signal
         return []
       },
-      implementation: async (fp, p) => {
+      implementation: async (fp, p, signal) => {
         trace.filePath = fp
         trace.pos = p
+        trace.signal = signal
         return []
       },
-      documentSymbol: async (fp) => {
+      documentSymbol: async (fp, signal) => {
         trace.filePath = fp
+        trace.signal = signal
         return []
       },
-      workspaceSymbol: async (q) => {
+      workspaceSymbol: async (q, signal) => {
         trace.query = q
+        trace.signal = signal
         return []
       },
-      prepareRename: async (fp, p) => {
+      prepareRename: async (fp, p, signal) => {
         trace.filePath = fp
         trace.pos = p
+        trace.signal = signal
         return null
       },
       stop: async () => {

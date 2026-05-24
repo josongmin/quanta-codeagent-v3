@@ -4,6 +4,7 @@ import {
   PatchAnchorNotFoundError,
   PatchApplyError,
   type PatchFileSystemPort,
+  type PatchObservation,
   parsePatch,
 } from "../../../src/patch/index.js"
 
@@ -12,7 +13,7 @@ import {
 // ---------------------------------------------------------------------------
 
 class MemFs implements PatchFileSystemPort {
-  private files = new Map<string, string>()
+  protected readonly files = new Map<string, string>()
 
   constructor(seed: Record<string, string> = {}) {
     for (const [k, v] of Object.entries(seed)) this.files.set(k, v)
@@ -42,6 +43,22 @@ class MemFs implements PatchFileSystemPort {
 
   snapshot(): Record<string, string> {
     return Object.fromEntries(this.files.entries())
+  }
+}
+
+class DeleteFailureFs extends MemFs {
+  constructor(
+    seed: Record<string, string>,
+    private readonly failingPath: string,
+  ) {
+    super(seed)
+  }
+
+  override async deleteFile(path: string): Promise<void> {
+    if (path === this.failingPath) {
+      throw new Error(`MemFs: injected delete failure '${path}'`)
+    }
+    await super.deleteFile(path)
   }
 }
 
@@ -318,6 +335,56 @@ describe("applyPatch — Move to", () => {
     await expect(applyPatch(parsePatch(text), fs)).rejects.toBeInstanceOf(PatchApplyError)
     // Source untouched.
     expect(fs.snapshot()["src/app.py"]).toBe("x\n")
+  })
+})
+
+describe("applyPatch — full-call atomicity", () => {
+  test("successful calls emit observer events only after commit, in patch order", async () => {
+    const fs = new MemFs({ "a.txt": "line\n" })
+    const text = [
+      "*** Begin Patch",
+      "*** Add File: b.txt",
+      "+created",
+      "*** Update File: a.txt",
+      "@@",
+      "-line",
+      "+LINE",
+      "*** End Patch",
+    ].join("\n")
+    const events: PatchObservation[] = []
+
+    const r = await applyPatch(parsePatch(text), fs, (event) => {
+      events.push(event)
+    })
+
+    expect(r.filesAdded).toEqual(["b.txt"])
+    expect(r.filesUpdated).toEqual(["a.txt"])
+    expect(events).toEqual([
+      { op: "add" },
+      { op: "update", fuzzyMatchTier: "exact" },
+      { op: "update" },
+    ])
+  })
+
+  test("a later commit failure rolls back earlier ops and emits no observer events", async () => {
+    const fs = new DeleteFailureFs({ "locked.txt": "locked\n" }, "locked.txt")
+    const text = [
+      "*** Begin Patch",
+      "*** Add File: new.txt",
+      "+created",
+      "*** Delete File: locked.txt",
+      "*** End Patch",
+    ].join("\n")
+    const events: PatchObservation[] = []
+
+    await expect(
+      applyPatch(parsePatch(text), fs, (event) => {
+        events.push(event)
+      }),
+    ).rejects.toThrow(/injected delete failure/)
+
+    expect(fs.snapshot()).toEqual({ "locked.txt": "locked\n" })
+    expect(events).toEqual([])
   })
 })
 

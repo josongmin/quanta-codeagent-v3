@@ -102,7 +102,7 @@ describe("ADR-0189: per-tool TTL drift detector", () => {
       const warnMsgs: string[] = []
       defaultToolCallCache({
         checkRecommendedDrift: true,
-        perToolTtlMs: { read: RECOMMENDED_PER_TOOL_TTL_MS.read }, // only `read` set
+        perToolTtlMs: { read: RECOMMENDED_PER_TOOL_TTL_MS.read! }, // only `read` set
         metrics,
         onDriftWarn: (m) => warnMsgs.push(m),
       })

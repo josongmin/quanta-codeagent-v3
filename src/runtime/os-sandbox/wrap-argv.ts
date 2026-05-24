@@ -9,10 +9,12 @@ import type { SandboxPolicy } from "./types"
  * `argv` is ALWAYS a complete spawnable argv. Callers swap their original
  * `["bash", "-lc", cmd]` for `result.argv` without further branching.
  *
- * `degradeReason` is present iff `sandboxApplied === false` AND the caller
- * explicitly asked for sandboxing (profile !== "off" && profile !==
- * "danger-full-access"). Stable opaque tags ONLY — never echo a Seatbelt
- * profile body or libsandbox internals to the operator (anti-leak invariant).
+ * `degradeReason` is present when the requested sandbox could not be fully
+ * enforced. That includes full passthrough degradation
+ * (`sandboxApplied === false`) and partial-enforcement cases where a wrapper
+ * still ran but a capability gap remained. Stable opaque tags ONLY — never
+ * echo a Seatbelt profile body or libsandbox internals to the operator
+ * (anti-leak invariant).
  */
 export interface WrappedShellArgv {
   readonly argv: string[]

@@ -157,10 +157,11 @@ async function* openOrEmitUnavailable(
   provider: LspNavProvider,
   abs: string,
   cwd: string,
+  signal: AbortSignal,
 ): AsyncGenerator<ToolEvent, LspNavSession | null, undefined> {
   let session: LspNavSession | null
   try {
-    session = await provider.open(abs, cwd)
+    session = await provider.open(abs, cwd, signal)
   } catch (e) {
     yield {
       type: "result",
@@ -189,13 +190,14 @@ async function* runSession<R>(
   toolName: string,
   session: LspNavSession,
   progressPath: string,
-  call: (s: LspNavSession) => Promise<R>,
+  signal: AbortSignal,
+  call: (s: LspNavSession, signal: AbortSignal) => Promise<R>,
   format: (r: R) => string,
   successOnNonEmpty?: (r: R) => boolean,
 ): AsyncGenerator<ToolEvent, void, undefined> {
   yield { type: "progress", message: `analyzing ${progressPath}` }
   try {
-    const payload = await call(session)
+    const payload = await call(session, signal)
     const ok = successOnNonEmpty ? successOnNonEmpty(payload) : true
     yield { type: "result", result: { ok, output: format(payload) } }
   } catch (e) {
@@ -214,7 +216,13 @@ async function* runSession<R>(
 const positionTool = <I extends PositionInput>(
   name: string,
   inputSchema: z.ZodType<I>,
-  call: (s: LspNavSession, fp: string, pos: NavPos, input: I) => Promise<unknown>,
+  call: (
+    s: LspNavSession,
+    fp: string,
+    pos: NavPos,
+    input: I,
+    signal: AbortSignal,
+  ) => Promise<unknown>,
   format: (input: I, abs: string, result: never) => string,
   provider: LspNavProvider,
 ): Tool<I> => ({
@@ -224,15 +232,20 @@ const positionTool = <I extends PositionInput>(
   isReadOnly: () => true,
   isConcurrencySafe: () => false,
   async *execute(input: I, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    if (ctx.signal.aborted) {
+      yield { type: "result", result: { ok: false, output: "aborted before start" } }
+      return
+    }
     const abs = yield* absOrEmitJail(input, ctx)
     if (abs === null) return
-    const session = yield* openOrEmitUnavailable(name, provider, abs, ctx.cwd)
+    const session = yield* openOrEmitUnavailable(name, provider, abs, ctx.cwd, ctx.signal)
     if (!session) return
     yield* runSession(
       name,
       session,
       input.path,
-      (s) => call(s, abs, toNavPos(input.line, input.character), input),
+      ctx.signal,
+      (s, signal) => call(s, abs, toNavPos(input.line, input.character), input, signal),
       (r) => format(input, abs, r as never),
     )
   },
@@ -254,7 +267,7 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const definition = positionTool<PositionInput>(
     "lsp_definition",
     positionSchema,
-    (s, fp, pos) => s.definition(fp, pos),
+    (s, fp, pos, _input, signal) => s.definition(fp, pos, signal),
     (_input, _abs, locs: NavLocation[] | null) => formatLocations("definition", locs),
     provider,
   )
@@ -272,16 +285,27 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     async *execute(input: ReferencesInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      if (ctx.signal.aborted) {
+        yield { type: "result", result: { ok: false, output: "aborted before start" } }
+        return
+      }
       const abs = yield* absOrEmitJail(input, ctx)
       if (abs === null) return
-      const session = yield* openOrEmitUnavailable("lsp_references", provider, abs, ctx.cwd)
+      const session = yield* openOrEmitUnavailable(
+        "lsp_references",
+        provider,
+        abs,
+        ctx.cwd,
+        ctx.signal,
+      )
       if (!session) return
       const inc = input.includeDeclaration ?? true
       yield* runSession(
         "lsp_references",
         session,
         input.path,
-        (s) => s.references(abs, toNavPos(input.line, input.character), inc),
+        ctx.signal,
+        (s, signal) => s.references(abs, toNavPos(input.line, input.character), inc, signal),
         (r: NavLocation[] | null) => formatLocations("references", r),
       )
     },
@@ -290,7 +314,7 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const hover = positionTool<PositionInput>(
     "lsp_hover",
     positionSchema,
-    (s, fp, pos) => s.hover(fp, pos),
+    (s, fp, pos, _input, signal) => s.hover(fp, pos, signal),
     (input, _abs, hov: NavHover | null) =>
       formatHover(input.path, input.line, input.character, hov),
     provider,
@@ -299,7 +323,7 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const typeDefinition = positionTool<PositionInput>(
     "lsp_type_definition",
     positionSchema,
-    (s, fp, pos) => s.typeDefinition(fp, pos),
+    (s, fp, pos, _input, signal) => s.typeDefinition(fp, pos, signal),
     (_input, _abs, locs: NavLocation[] | null) => formatLocations("typeDefinition", locs),
     provider,
   )
@@ -307,7 +331,7 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const implementation = positionTool<PositionInput>(
     "lsp_implementation",
     positionSchema,
-    (s, fp, pos) => s.implementation(fp, pos),
+    (s, fp, pos, _input, signal) => s.implementation(fp, pos, signal),
     (_input, _abs, locs: NavLocation[] | null) => formatLocations("implementation", locs),
     provider,
   )
@@ -324,15 +348,26 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     async *execute(input: DocumentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      if (ctx.signal.aborted) {
+        yield { type: "result", result: { ok: false, output: "aborted before start" } }
+        return
+      }
       const abs = yield* absOrEmitJail(input, ctx)
       if (abs === null) return
-      const session = yield* openOrEmitUnavailable("lsp_document_symbol", provider, abs, ctx.cwd)
+      const session = yield* openOrEmitUnavailable(
+        "lsp_document_symbol",
+        provider,
+        abs,
+        ctx.cwd,
+        ctx.signal,
+      )
       if (!session) return
       yield* runSession(
         "lsp_document_symbol",
         session,
         input.path,
-        (s) => s.documentSymbol(abs),
+        ctx.signal,
+        (s, signal) => s.documentSymbol(abs, signal),
         (r: NavSymbolInfo[] | null) => formatSymbols(`document ${input.path}`, r),
       )
     },
@@ -352,15 +387,26 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     async *execute(input: WorkspaceInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      if (ctx.signal.aborted) {
+        yield { type: "result", result: { ok: false, output: "aborted before start" } }
+        return
+      }
       const abs = yield* absOrEmitJail(input, ctx)
       if (abs === null) return
-      const session = yield* openOrEmitUnavailable("lsp_workspace_symbol", provider, abs, ctx.cwd)
+      const session = yield* openOrEmitUnavailable(
+        "lsp_workspace_symbol",
+        provider,
+        abs,
+        ctx.cwd,
+        ctx.signal,
+      )
       if (!session) return
       yield* runSession(
         "lsp_workspace_symbol",
         session,
         input.path,
-        (s) => s.workspaceSymbol(input.query),
+        ctx.signal,
+        (s, signal) => s.workspaceSymbol(input.query, signal),
         (r: NavSymbolInfo[] | null) => formatSymbols(`workspace '${input.query}'`, r),
       )
     },
@@ -369,7 +415,7 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
   const renamePreview = positionTool<PositionInput>(
     "lsp_rename_preview",
     positionSchema,
-    (s, fp, pos) => s.prepareRename(fp, pos),
+    (s, fp, pos, _input, signal) => s.prepareRename(fp, pos, signal),
     (input, _abs, preview: NavRenamePreview | null) =>
       formatRenamePreview(input.path, input.line, input.character, preview),
     provider,

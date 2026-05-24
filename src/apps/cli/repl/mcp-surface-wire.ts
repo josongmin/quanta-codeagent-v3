@@ -1,9 +1,8 @@
-// SEAM ONLY — no current consumer in `src/apps/cli/repl.ts` (the live God-class
-//   inlines its own MCP-pill derivation; this translator is preserved for the
-//   future SOLID re-split so the surface→`/mcp` snapshot doesn't have to be
-//   re-extracted). Exercised by `tests/unit/mcp-surface-wire.test.ts` so the
-//   contract stays load-bearing; once a future slice replaces `repl.ts` with
-//   `repl/assemble-context.ts` again, this file becomes the wire.
+// SEAM ONLY — the live REPL consumes this translator to wire `SlashContext.mcp`
+//   without inlining `/mcp` snapshot assembly into `repl.ts`. Exercised by
+//   `tests/unit/mcp-surface-wire.test.ts` so the contract stays load-bearing;
+//   a future SOLID re-split can keep calling this seam instead of rebuilding
+//   the surface projection ad hoc.
 //   See `tools/feature-catalog/features/10-app/repl-orphan-resolution.yaml`.
 
 /** Build the `/mcp` slash command's data surface from the live CLI MCP wiring.

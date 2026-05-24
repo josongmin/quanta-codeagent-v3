@@ -10,6 +10,7 @@ import { listSessions, removeFromIndex, upsertMeta } from "./index-store"
 import {
   archivedFilePath,
   archivedFilePathAsync,
+  sanitizeId,
   sessionFilePath,
   sessionFilePathAsync,
   sessionsRoot,
@@ -151,6 +152,9 @@ const sessionMetaSchema = z.object({
   createdAt: z.number().finite(),
   lastTouched: z.number().finite(),
   archived: z.boolean(),
+  gitSha: z.string().min(1).optional(),
+  gitBranch: z.string().min(1).optional(),
+  gitOriginUrl: z.string().min(1).optional(),
 })
 const savedSessionSchema = z.object({
   version: z.literal(SESSION_VERSION),
@@ -223,7 +227,7 @@ export const saveSessionById = async (
     messages: payload.messages,
   }
   await writeSessionFile(path, JSON.stringify(saved))
-  await upsertMeta(touched)
+  await upsertMeta(touched, provider)
 }
 
 /** Reconcile the lightweight index with a session's on-disk meta. The per-id
@@ -235,19 +239,25 @@ export const saveSessionById = async (
  *  is bounded (one session, only when divergent) and idempotent — the common
  *  case (index already matches) does NOT write, so steady-state behavior is
  *  byte-identical. */
-const reconcileIndexFromMeta = async (meta: SessionMeta): Promise<void> => {
-  const known = (await listSessions({ includeArchived: true })).find((m) => m.id === meta.id)
+const reconcileIndexFromMeta = async (
+  meta: SessionMeta,
+  provider?: SessionRootProvider,
+): Promise<void> => {
+  const known = (await listSessions({ includeArchived: true }, provider)).find((m) => m.id === meta.id)
   if (
     known !== undefined &&
     known.title === meta.title &&
     known.cwd === meta.cwd &&
     known.createdAt === meta.createdAt &&
     known.lastTouched === meta.lastTouched &&
-    known.archived === meta.archived
+    known.archived === meta.archived &&
+    known.gitSha === meta.gitSha &&
+    known.gitBranch === meta.gitBranch &&
+    known.gitOriginUrl === meta.gitOriginUrl
   ) {
     return // index already agrees — no write
   }
-  await upsertMeta(meta)
+  await upsertMeta(meta, provider)
 }
 
 export const loadSessionById = async (
@@ -256,17 +266,17 @@ export const loadSessionById = async (
 ): Promise<SavedSession | undefined> => {
   const active = await readSavedSession(await resolveSessionFilePath(id, provider))
   if (active !== undefined) {
-    await reconcileIndexFromMeta(active.meta)
+    await reconcileIndexFromMeta(active.meta, provider)
     return active
   }
   const archived = await readSavedSession(await resolveArchivedFilePath(id, provider))
-  if (archived !== undefined) await reconcileIndexFromMeta(archived.meta)
+  if (archived !== undefined) await reconcileIndexFromMeta(archived.meta, provider)
   return archived
 }
 
-export const archiveSession = async (id: string): Promise<void> => {
-  const activePath = sessionFilePath(id)
-  const archivedPath = archivedFilePath(id)
+export const archiveSession = async (id: string, provider?: SessionRootProvider): Promise<void> => {
+  const activePath = await resolveSessionFilePath(id, provider)
+  const archivedPath = await resolveArchivedFilePath(id, provider)
   // Idempotency: if it's already archived (active file gone, archived present
   // — or simply already-marked), do nothing.
   const activeExists = await fileExists(activePath)
@@ -278,7 +288,7 @@ export const archiveSession = async (id: string): Promise<void> => {
     const nextMeta: SessionMeta = { ...existing.meta, archived: true, lastTouched: Date.now() }
     const updated: SavedSession = { ...existing, meta: nextMeta }
     await writeSessionFile(archivedPath, JSON.stringify(updated))
-    await upsertMeta(nextMeta)
+    await upsertMeta(nextMeta, provider)
     return
   }
   const existing = await readSavedSession(activePath)
@@ -287,12 +297,15 @@ export const archiveSession = async (id: string): Promise<void> => {
   const updated: SavedSession = { ...existing, meta: nextMeta }
   await writeSessionFile(archivedPath, JSON.stringify(updated))
   await removeFileIfExists(activePath)
-  await upsertMeta(nextMeta)
+  await upsertMeta(nextMeta, provider)
 }
 
-export const unarchiveSession = async (id: string): Promise<void> => {
-  const activePath = sessionFilePath(id)
-  const archivedPath = archivedFilePath(id)
+export const unarchiveSession = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<void> => {
+  const activePath = await resolveSessionFilePath(id, provider)
+  const archivedPath = await resolveArchivedFilePath(id, provider)
   const archivedExists = await fileExists(archivedPath)
   if (!archivedExists) {
     // Possibly already active — reconcile the flag if needed.
@@ -302,7 +315,7 @@ export const unarchiveSession = async (id: string): Promise<void> => {
     const nextMeta: SessionMeta = { ...existing.meta, archived: false, lastTouched: Date.now() }
     const updated: SavedSession = { ...existing, meta: nextMeta }
     await writeSessionFile(activePath, JSON.stringify(updated))
-    await upsertMeta(nextMeta)
+    await upsertMeta(nextMeta, provider)
     return
   }
   const existing = await readSavedSession(archivedPath)
@@ -311,24 +324,31 @@ export const unarchiveSession = async (id: string): Promise<void> => {
   const updated: SavedSession = { ...existing, meta: nextMeta }
   await writeSessionFile(activePath, JSON.stringify(updated))
   await removeFileIfExists(archivedPath)
-  await upsertMeta(nextMeta)
+  await upsertMeta(nextMeta, provider)
 }
 
-export const renameSession = async (id: string, title: string): Promise<void> => {
-  const existing = await loadSessionById(id)
+export const renameSession = async (
+  id: string,
+  title: string,
+  provider?: SessionRootProvider,
+): Promise<void> => {
+  const existing = await loadSessionById(id, provider)
   if (existing === undefined) return
   const nextMeta: SessionMeta = { ...existing.meta, title, lastTouched: Date.now() }
-  const path = nextMeta.archived ? archivedFilePath(id) : sessionFilePath(id)
+  const path = nextMeta.archived
+    ? await resolveArchivedFilePath(id, provider)
+    : await resolveSessionFilePath(id, provider)
   const updated: SavedSession = { ...existing, meta: nextMeta }
   await writeSessionFile(path, JSON.stringify(updated))
-  await upsertMeta(nextMeta)
+  await upsertMeta(nextMeta, provider)
 }
 
 export const forkSession = async (
   id: string,
   opts?: { newId?: string; title?: string; cwd?: string },
+  provider?: SessionRootProvider,
 ): Promise<string> => {
-  const source = await loadSessionById(id)
+  const source = await loadSessionById(id, provider)
   if (source === undefined) {
     throw new Error(`forkSession: source session not found: ${id}`)
   }
@@ -354,20 +374,21 @@ export const forkSession = async (
     turns: source.turns,
     messages: messagesCopy,
   }
-  await writeSessionFile(sessionFilePath(newId), JSON.stringify(saved))
-  await upsertMeta(newMeta)
+  await writeSessionFile(await resolveSessionFilePath(newId, provider), JSON.stringify(saved))
+  await upsertMeta(newMeta, provider)
   return newId
 }
 
-export const deleteSession = async (id: string): Promise<void> => {
-  await removeFileIfExists(sessionFilePath(id))
-  await removeFileIfExists(archivedFilePath(id))
-  await removeFromIndex(id)
+export const deleteSession = async (id: string, provider?: SessionRootProvider): Promise<void> => {
+  await removeFileIfExists(await resolveSessionFilePath(id, provider))
+  await removeFileIfExists(await resolveArchivedFilePath(id, provider))
+  await removeFromIndex(id, provider)
 }
 
 /** Path of the per-session JSONL event log (ADR-0034). Lives next to the
  *  snapshot JSON at `<sessionsRoot>/<id>.jsonl`. */
-export const sessionEnvelopePath = (id: string): string => join(sessionsRoot(), `${id}.jsonl`)
+export const sessionEnvelopePath = (id: string): string =>
+  join(sessionsRoot(), `${sanitizeId(id)}.jsonl`)
 
 /** Provider-aware twin of {@link sessionEnvelopePath}. Multi-tenant
  *  surfaces resolve through their injected {@link SessionRootProvider};
@@ -375,7 +396,7 @@ export const sessionEnvelopePath = (id: string): string => join(sessionsRoot(), 
 export const sessionEnvelopePathAsync = async (
   id: string,
   provider?: SessionRootProvider,
-): Promise<string> => join(await sessionsRootAsync(provider), `${id}.jsonl`)
+): Promise<string> => join(await sessionsRootAsync(provider), `${sanitizeId(id)}.jsonl`)
 
 /** Append-only seam for the JSONL envelope log (ADR-0034). Existing
  *  snapshot-based methods (saveSessionById/loadSessionById/…) are NOT
@@ -430,8 +451,9 @@ export const assignMessageIds = (
 export const rewindToMessage = async (
   sessionId: string,
   msgId: string,
+  provider?: SessionRootProvider,
 ): Promise<{ removed: number }> => {
-  const existing = await loadSessionById(sessionId)
+  const existing = await loadSessionById(sessionId, provider)
   if (existing === undefined) return { removed: 0 }
   if (existing.messages.length === 0) return { removed: 0 }
   const idx = existing.messages.findIndex((m) => m.id === msgId)
@@ -445,8 +467,10 @@ export const rewindToMessage = async (
     meta: nextMeta,
     messages: truncated,
   }
-  const path = nextMeta.archived ? archivedFilePath(sessionId) : sessionFilePath(sessionId)
+  const path = nextMeta.archived
+    ? await resolveArchivedFilePath(sessionId, provider)
+    : await resolveSessionFilePath(sessionId, provider)
   await writeSessionFile(path, JSON.stringify(updated))
-  await upsertMeta(nextMeta)
+  await upsertMeta(nextMeta, provider)
   return { removed }
 }

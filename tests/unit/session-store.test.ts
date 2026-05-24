@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Message } from "@/llm"
 import {
+  appendEnvelope,
   archivedFilePath,
   archiveSession,
   deleteSession,
@@ -11,10 +12,14 @@ import {
   listSessions,
   loadSessionById,
   renameSession,
+  rewindToMessage,
   type SavePayload,
+  SESSION_ENVELOPE_VERSION,
+  SessionIdError,
   type SessionMeta,
   saveSessionById,
   sessionFilePath,
+  staticSessionRootProvider,
   unarchiveSession,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
@@ -404,5 +409,130 @@ describe("session store — index reconcile on load", () => {
     const loaded = await loadSessionById("heal-1")
     expect(loaded?.meta.title).toBe("Healed")
     expect((await listSessions()).some((m) => m.id === "heal-1")).toBe(true)
+  })
+})
+
+describe("session store — git/provider regressions", () => {
+  let dir: string
+  let envSnapshot: NodeJS.ProcessEnv
+
+  beforeEach(() => {
+    envSnapshot = { ...process.env }
+    dir = mkdtempSync(join(tmpdir(), "session-provider-"))
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    for (const key of Object.keys(process.env)) {
+      if (!(key in envSnapshot)) delete process.env[key]
+    }
+    Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
+  })
+
+  test("save/load + index preserve git fingerprint fields", async () => {
+    const meta: SessionMeta = {
+      id: "git-rt",
+      title: "git",
+      cwd: "/tmp/work",
+      createdAt: 1,
+      lastTouched: 1,
+      archived: false,
+      gitSha: "deadbeef",
+      gitBranch: "feat/session-root",
+      gitOriginUrl: "git@github.com:acme/quanta.git",
+    }
+    await saveSessionById(meta, mkPayload())
+
+    const loaded = await loadSessionById("git-rt")
+    expect(loaded?.meta.gitSha).toBe("deadbeef")
+    expect(loaded?.meta.gitBranch).toBe("feat/session-root")
+    expect(loaded?.meta.gitOriginUrl).toBe("git@github.com:acme/quanta.git")
+
+    const indexed = (await listSessions({ includeArchived: true })).find((m) => m.id === "git-rt")
+    expect(indexed?.gitSha).toBe("deadbeef")
+    expect(indexed?.gitBranch).toBe("feat/session-root")
+    expect(indexed?.gitOriginUrl).toBe("git@github.com:acme/quanta.git")
+  })
+
+  test("appendEnvelope rejects traversal ids on the JSONL rail", async () => {
+    await expect(
+      appendEnvelope("../escape", {
+        type: "event_msg",
+        schema_version: SESSION_ENVELOPE_VERSION,
+        ts: new Date(0).toISOString(),
+        turn_id: "t-1",
+        kind: "token_count",
+        input_tokens: 1,
+        output_tokens: 2,
+      }),
+    ).rejects.toThrow(SessionIdError)
+  })
+
+  test("provider-aware mutators and index ops stay inside the injected root", async () => {
+    const provider = staticSessionRootProvider(join(dir, "tenant-root"))
+    const meta: SessionMeta = {
+      id: "tenant-1",
+      title: "tenant title",
+      cwd: "/tmp/work",
+      createdAt: 1,
+      lastTouched: 1,
+      archived: false,
+      gitBranch: "feat/tenant",
+    }
+    await saveSessionById(meta, mkPayload(), provider)
+
+    expect(await loadSessionById("tenant-1")).toBeUndefined()
+    expect((await listSessions()).map((m) => m.id)).not.toContain("tenant-1")
+    expect((await listSessions(undefined, provider)).map((m) => m.id)).toContain("tenant-1")
+
+    await renameSession("tenant-1", "renamed", provider)
+    await archiveSession("tenant-1", provider)
+    expect((await listSessions(undefined, provider)).map((m) => m.id)).not.toContain("tenant-1")
+    expect((await listSessions({ includeArchived: true }, provider)).map((m) => m.id)).toContain(
+      "tenant-1",
+    )
+
+    await unarchiveSession("tenant-1", provider)
+    const reloaded = await loadSessionById("tenant-1", provider)
+    expect(reloaded?.meta.title).toBe("renamed")
+    expect(reloaded?.meta.gitBranch).toBe("feat/tenant")
+
+    await deleteSession("tenant-1", provider)
+    expect(await loadSessionById("tenant-1", provider)).toBeUndefined()
+    expect((await listSessions({ includeArchived: true }, provider)).map((m) => m.id)).not.toContain(
+      "tenant-1",
+    )
+  })
+
+  test("rewindToMessage honors provider-scoped storage", async () => {
+    const provider = staticSessionRootProvider(join(dir, "tenant-rewind"))
+    await saveSessionById(
+      {
+        id: "tenant-rw",
+        title: "rewind",
+        cwd: "/tmp/work",
+        createdAt: 1,
+        lastTouched: 1,
+        archived: false,
+      },
+      {
+        reason: "completed",
+        turns: 2,
+        messages: [
+          { id: "m0", role: "user", content: [{ type: "text", text: "0" }] },
+          { id: "m1", role: "assistant", content: [{ type: "text", text: "1" }] },
+          { id: "m2", role: "user", content: [{ type: "text", text: "2" }] },
+        ],
+      },
+      provider,
+    )
+
+    const result = await rewindToMessage("tenant-rw", "m1", provider)
+    expect(result).toEqual({ removed: 1 })
+    expect(await loadSessionById("tenant-rw")).toBeUndefined()
+    expect((await loadSessionById("tenant-rw", provider))?.messages.map((m) => m.id)).toEqual(["m0", "m1"])
   })
 })

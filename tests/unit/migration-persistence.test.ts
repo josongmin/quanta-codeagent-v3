@@ -29,7 +29,7 @@ describe("import log persistence (ADR-0038)", () => {
       provider: "claude_code",
       stage: "import_finished",
       ok: true,
-      detail: "imported 3 sessions",
+      detail: "translated_sessions=3, counted_skills=0, persisted_sessions=0",
     })
     await appendImportLog(home, {
       timestamp: "2026-01-02T00:00:00.000Z",
@@ -102,5 +102,11 @@ describe("import log persistence (ADR-0038)", () => {
     })
     const log = await loadImportLog(home)
     expect(log.entries).toHaveLength(2)
+  })
+
+  test("public migration surface does not export an unsupported dedup query", async () => {
+    const migration = await import("@/migration")
+    expect("contentSha256" in migration).toBe(true)
+    expect("wasAlreadyImported" in migration).toBe(false)
   })
 })

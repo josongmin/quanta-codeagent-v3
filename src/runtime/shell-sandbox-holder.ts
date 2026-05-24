@@ -5,7 +5,8 @@ import type { WrappedShellArgv, WrapShellArgvConfig } from "./os-sandbox/wrap-ar
  * S1 (OS Sandbox actual wire-up). A SINGLE module-level slot holding the
  * argv-wrapper the CLI surface installs at boot. `runShell` consults this slot
  * (via {@link getShellSandbox}) to decide whether to wrap the spawned argv
- * with `sandbox-exec` (macOS) / pass-through (linux Phase-1 stub).
+ * with the active OS backend (`sandbox-exec` on macOS, `bwrap` /
+ * `landlock-cli` on Linux, or honest passthrough degradation).
  *
  * Why a module slot and not `ToolContext` plumbing: the central `ToolContext`
  * build site lives in `src/agent/dispatch.ts` — a WIP hot-zone file the S1
@@ -25,9 +26,8 @@ import type { WrappedShellArgv, WrapShellArgvConfig } from "./os-sandbox/wrap-ar
  *     tool's `execute` body is invoked. The sandbox wraps the spawn, NOT the
  *     pre-execution gate — defense-in-depth, not substitute.
  *   - On degradation, the WARNING surfaces via the CLI's startup banner; the
- *     bash tool itself does NOT echo Seatbelt profile internals into its
- *     stderr / output (the wrapped argv carries the SBPL text, but it never
- *     appears in the tool result — only the spawn argv consumes it).
+ *     bash tool itself does NOT echo policy/profile internals into its stderr
+ *     / output.
  */
 export interface ShellSandboxSlot {
   /** Active policy chosen at startup (frozen for the run). */
@@ -35,9 +35,9 @@ export interface ShellSandboxSlot {
   /** Wrapper-config passed through to {@link wrapShellArgv}. Tests inject
    *  `platform` + `sandboxExecPath` to drive branches deterministically. */
   readonly config: WrapShellArgvConfig
-  /** Pure argv-wrap function — closed over `policy` + `config`. Callers
-   *  invoke `wrap(argv, cwd)` and get back `{argv,sandboxApplied,degradeReason}`. */
-  readonly wrap: (argv: ReadonlyArray<string>, cwd: string) => WrappedShellArgv
+  /** Async argv-wrap function — Linux may need a one-time backend probe
+   *  before it can assemble the wrapped argv. */
+  readonly wrap: (argv: ReadonlyArray<string>, cwd: string) => Promise<WrappedShellArgv>
 }
 
 let installed: ShellSandboxSlot | undefined

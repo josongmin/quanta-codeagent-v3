@@ -66,8 +66,9 @@ export interface MetricsRegistry {
    *  (a poisoned caller value cannot poison the registry). */
   increment(name: string, delta?: number, labels?: Record<string, string>): void
   /** Record a histogram observation. Non-finite `value` silently coerced to
-   *  0. Observations are retained in insertion order; percentiles are
-   *  computed on `snapshot()` (nearest-rank, see in-memory adapter). */
+   *  0. The default in-memory adapter keeps exact observations only up to a
+   *  bounded cap, then compacts percentile state so long-lived processes keep
+   *  exact count/sum without unbounded histogram memory growth. */
   observe(name: string, value: number, labels?: Record<string, string>): void
   /** Set a gauge to `value`. Latest-write-wins per (name, labels). Non-finite
    *  `value` silently coerced to 0. */

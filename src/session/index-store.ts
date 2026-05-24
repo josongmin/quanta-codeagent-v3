@@ -1,6 +1,7 @@
 import { rename, unlink } from "node:fs/promises"
 import { fileExists, readFile, writeFile } from "@/storage"
-import { indexFilePath } from "./paths"
+import { indexFilePath, indexFilePathAsync } from "./paths"
+import type { SessionRootProvider } from "./root-port"
 import type { SessionMeta } from "./types"
 
 /**
@@ -27,8 +28,7 @@ import type { SessionMeta } from "./types"
 /** Parse `index.jsonl` to a `Map<id, meta>`. Corrupt / wrong-shape lines are
  * skipped silently — the index is a derived cache; the per-session JSON files
  * are the source of truth. Missing file → empty map. */
-const readIndexMap = async (): Promise<Map<string, SessionMeta>> => {
-  const path = indexFilePath()
+const readIndexMap = async (path: string): Promise<Map<string, SessionMeta>> => {
   const out = new Map<string, SessionMeta>()
   try {
     if (!(await fileExists(path))) return out
@@ -63,8 +63,7 @@ const readIndexMap = async (): Promise<Map<string, SessionMeta>> => {
  *  POSIX-atomic so a crash mid-write never leaves a partial / torn
  *  `index.jsonl`, and concurrent writers don't ENOENT each other (each owns
  *  its own staging file). */
-const writeIndexMap = async (map: Map<string, SessionMeta>): Promise<void> => {
-  const path = indexFilePath()
+const writeIndexMap = async (path: string, map: Map<string, SessionMeta>): Promise<void> => {
   const ids = [...map.keys()].sort()
   const lines = ids.map((id) => JSON.stringify(map.get(id))).join("\n")
   const body = lines === "" ? "" : `${lines}\n`
@@ -83,13 +82,14 @@ const writeIndexMap = async (map: Map<string, SessionMeta>): Promise<void> => {
  *  `upsertMeta`/`removeFromIndex` from the same process never interleave
  *  their read+write windows. Promise-chain mutex pattern: cheap (single
  *  promise reference), fair (FIFO), and naturally drains when idle. */
-let indexMutex: Promise<unknown> = Promise.resolve()
-const withIndexMutex = async <T>(fn: () => Promise<T>): Promise<T> => {
-  const prev = indexMutex
+const indexMutexes = new Map<string, Promise<unknown>>()
+const withIndexMutex = async <T>(path: string, fn: () => Promise<T>): Promise<T> => {
+  const prev = indexMutexes.get(path) ?? Promise.resolve()
   let release!: () => void
-  indexMutex = new Promise<void>((resolve) => {
+  const next = new Promise<void>((resolve) => {
     release = resolve
   })
+  indexMutexes.set(path, next)
   try {
     await prev
   } catch {
@@ -99,28 +99,39 @@ const withIndexMutex = async <T>(fn: () => Promise<T>): Promise<T> => {
     return await fn()
   } finally {
     release()
+    if (indexMutexes.get(path) === next) indexMutexes.delete(path)
   }
 }
 
-export const upsertMeta = async (meta: SessionMeta): Promise<void> =>
-  withIndexMutex(async () => {
-    const map = await readIndexMap()
-    map.set(meta.id, meta)
-    await writeIndexMap(map)
-  })
+const resolveIndexPath = async (provider?: SessionRootProvider): Promise<string> =>
+  provider === undefined ? indexFilePath() : await indexFilePathAsync(provider)
 
-export const removeFromIndex = async (id: string): Promise<void> =>
-  withIndexMutex(async () => {
-    const map = await readIndexMap()
+export const upsertMeta = async (
+  meta: SessionMeta,
+  provider?: SessionRootProvider,
+): Promise<void> => {
+  const path = await resolveIndexPath(provider)
+  return withIndexMutex(path, async () => {
+    const map = await readIndexMap(path)
+    map.set(meta.id, meta)
+    await writeIndexMap(path, map)
+  })
+}
+
+export const removeFromIndex = async (id: string, provider?: SessionRootProvider): Promise<void> => {
+  const path = await resolveIndexPath(provider)
+  return withIndexMutex(path, async () => {
+    const map = await readIndexMap(path)
     if (!map.has(id)) return
     map.delete(id)
-    await writeIndexMap(map)
+    await writeIndexMap(path, map)
   })
+}
 
 export const listSessions = async (opts?: {
   includeArchived?: boolean
-}): Promise<SessionMeta[]> => {
-  const map = await readIndexMap()
+}, provider?: SessionRootProvider): Promise<SessionMeta[]> => {
+  const map = await readIndexMap(await resolveIndexPath(provider))
   const includeArchived = opts?.includeArchived === true
   const out: SessionMeta[] = []
   for (const meta of map.values()) {

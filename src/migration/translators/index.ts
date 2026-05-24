@@ -5,7 +5,8 @@
  * the first real implementation; cursor/aider are stub translators that
  * return `[]` until their on-disk transcript formats are absorbed (tracked as
  * a follow-up — the importer treats an empty translation as a zero-message
- * session, NOT a halt, so a stub provider imports cleanly with count 0).
+ * session, NOT a halt, so a stub provider's translation scan still completes
+ * successfully for each transcript file).
  */
 
 import type { Message } from "@/llm"

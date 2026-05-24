@@ -51,14 +51,13 @@ export const runShell = async (
   // S1 — OS sandbox wire-up. Default-OFF: when the CLI surface did not
   // install a slot (via `installShellSandbox`), `getShellSandbox()` returns
   // `undefined` and `argv` is the legacy `["bash","-lc",cmd]` byte-for-byte.
-  // When installed, the slot wraps the argv with `sandbox-exec -p '<SBPL>'`
-  // (macOS) / passthrough+degradeReason (linux Phase-1 stub). The SBPL profile
-  // text only flows INTO the spawn argv; it is never echoed back to the tool
-  // result (anti-leak invariant: error messages must not leak Seatbelt
-  // internals).
+  // When installed, the slot wraps the argv with the active OS backend
+  // (`sandbox-exec`, `bwrap`, `landlock-cli`) or an honest degraded
+  // passthrough. Policy internals only flow INTO the spawn argv; they are
+  // never echoed back to the tool result.
   const baseArgv: ReadonlyArray<string> = ["bash", "-lc", command]
   const slot = getShellSandbox()
-  const argv = slot !== undefined ? slot.wrap(baseArgv, cwd).argv : [...baseArgv]
+  const argv = slot !== undefined ? (await slot.wrap(baseArgv, cwd)).argv : [...baseArgv]
   const proc = Bun.spawn(argv, {
     cwd,
     env,

@@ -173,7 +173,7 @@ const scanTextWithPatterns = (
  * and callers can hold per-context configurations.
  */
 export const patternScanner = (opts: SecretScannerOpts = {}): SecretScanner => ({
-  scanText(text, scanOpts) {
+  async scanText(text, scanOpts) {
     return scanTextWithPatterns(text, scanOpts?.file, opts)
   },
   async scanFile(path) {

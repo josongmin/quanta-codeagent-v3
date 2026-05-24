@@ -6,6 +6,7 @@ import {
   indexFilePath,
   listSessions,
   removeFromIndex,
+  staticSessionRootProvider,
   type SessionMeta,
   upsertMeta,
 } from "@/session"
@@ -138,5 +139,63 @@ describe("session index-store", () => {
     await upsertMeta(mkMeta({ id: "c", lastTouched: 300 }))
     const list = await listSessions()
     expect(list.map((m) => m.id)).toEqual(["c", "b"])
+  })
+})
+
+describe("session index-store — provider/git regressions", () => {
+  let dir: string
+  let envSnapshot: NodeJS.ProcessEnv
+
+  beforeEach(() => {
+    envSnapshot = { ...process.env }
+    dir = mkdtempSync(join(tmpdir(), "session-index-reg-"))
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    for (const key of Object.keys(process.env)) {
+      if (!(key in envSnapshot)) delete process.env[key]
+    }
+    Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
+  })
+
+  test("optional git fingerprint fields round-trip through index.jsonl", async () => {
+    const meta: SessionMeta = {
+      id: "git-index",
+      title: "git",
+      cwd: "/tmp",
+      createdAt: 1,
+      lastTouched: 1,
+      archived: false,
+      gitSha: "cafefeed",
+      gitBranch: "feat/index",
+      gitOriginUrl: "https://github.com/acme/quanta.git",
+    }
+    await upsertMeta(meta)
+    expect(await listSessions({ includeArchived: true })).toEqual([meta])
+  })
+
+  test("provider-aware index ops isolate tenant roots from the default index", async () => {
+    const provider = staticSessionRootProvider(join(dir, "tenant-index"))
+    await upsertMeta(
+      {
+        id: "tenant-a",
+        title: "tenant",
+        cwd: "/tmp",
+        createdAt: 1,
+        lastTouched: 900,
+        archived: false,
+      },
+      provider,
+    )
+
+    expect(await listSessions()).toEqual([])
+    expect((await listSessions(undefined, provider)).map((m) => m.id)).toEqual(["tenant-a"])
+
+    await removeFromIndex("tenant-a", provider)
+    expect(await listSessions(undefined, provider)).toEqual([])
   })
 })

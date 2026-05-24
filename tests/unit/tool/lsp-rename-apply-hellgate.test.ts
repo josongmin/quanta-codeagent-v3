@@ -20,27 +20,33 @@ import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 interface FakePort extends RenameApplyPort {
   readonly computeCalls: { file: string; line: number; col: number; newName: string }[]
   readonly applyCalls: RenameWorkspaceEdit[]
+  readonly computeSignals: Array<AbortSignal | undefined>
+  readonly applySignals: Array<AbortSignal | undefined>
 }
 
 const fakePort = (overrides?: Partial<RenameApplyPort>): FakePort => {
   const computeCalls: FakePort["computeCalls"] = []
   const applyCalls: FakePort["applyCalls"] = []
+  const computeSignals: FakePort["computeSignals"] = []
+  const applySignals: FakePort["applySignals"] = []
   const base: RenameApplyPort = {
     computeRename: async () => ({ changes: [] }),
     applyEdit: async () => {},
   }
   const merged: RenameApplyPort = { ...base, ...(overrides ?? {}) }
   const realCompute = merged.computeRename
-  merged.computeRename = async (file, line, col, newName) => {
+  merged.computeRename = async (file, line, col, newName, signal) => {
     computeCalls.push({ file, line, col, newName })
-    return realCompute(file, line, col, newName)
+    computeSignals.push(signal)
+    return realCompute(file, line, col, newName, signal)
   }
   const realApply = merged.applyEdit
-  merged.applyEdit = async (edit) => {
+  merged.applyEdit = async (edit, signal) => {
     applyCalls.push(edit)
-    return realApply(edit)
+    applySignals.push(signal)
+    return realApply(edit, signal)
   }
-  return Object.assign(merged, { computeCalls, applyCalls }) as FakePort
+  return Object.assign(merged, { computeCalls, applyCalls, computeSignals, applySignals }) as FakePort
 }
 
 const ctx = (signal?: AbortSignal): ToolContext => ({
@@ -175,6 +181,17 @@ describe("lsp_rename_apply — port conversion", () => {
       newName: "newSymbol",
     })
   })
+
+  test("HELL-C9: tool forwards ctx.signal to computeRename", async () => {
+    const ac = new AbortController()
+    const port = fakePort({ computeRename: async () => edit(1) })
+    await collect(
+      lspRenameApplyTool(port),
+      { path: "src/x.ts", line: 1, character: 1, newName: "newSymbol" },
+      ctx(ac.signal),
+    )
+    expect(port.computeSignals[0]).toBe(ac.signal)
+  })
 })
 
 /* ------------------------------------------------------------------ */
@@ -220,6 +237,7 @@ describe("lsp_rename_apply — apply branches", () => {
     expect(r.ok).toBe(true)
     expect(port.applyCalls).toHaveLength(1)
     expect(port.applyCalls[0]).toBe(e)
+    expect(port.applySignals[0]).toBeDefined()
     expect(r.output).toContain("Renamed symbol at x.ts:1:1 to 'Bar'")
     expect(r.output).toContain("Applied 6 edits across 2 files")
   })

@@ -53,6 +53,8 @@ const makePort = (): CapturingPort => {
 
 const makeStore = (): Stage1Store => new Stage1Store(new Database(":memory:"))
 
+const textContent = (text: string): Message["content"] => [{ type: "text", text }]
+
 const baseInput = (
   messages: ReadonlyArray<Message>,
   consolidatorOverrides: {
@@ -87,28 +89,28 @@ const baseInput = (
 describe("memory-distill-redaction-hellgate — identity / absent (default-OFF)", () => {
   test("redact omitted ⇒ Phase1 sees byte-identical content", async () => {
     const port = makePort()
-    const msg: Message = { role: "user", content: "hello world" }
+    const msg: Message = { role: "user", content: textContent("hello world") }
     const out = await runMemoryConsolidatorHook(baseInput([msg], {}, port))
     expect(out.kind).toBe("distilled")
     expect(port.calls).toBe(1)
-    expect(port.lastSeen[0]?.content).toBe("hello world")
+    expect(port.lastSeen[0]?.content).toEqual(textContent("hello world"))
   })
 
   test("identity redactor (s ⇒ s) preserves the original (default-OFF)", async () => {
     const port = makePort()
-    const msg: Message = { role: "user", content: "preserved-payload-XYZ" }
+    const msg: Message = { role: "user", content: textContent("preserved-payload-XYZ") }
     const out = await runMemoryConsolidatorHook(baseInput([msg], { redact: (s) => s }, port))
     expect(out.kind).toBe("distilled")
-    expect(port.lastSeen[0]?.content).toBe("preserved-payload-XYZ")
+    expect(port.lastSeen[0]?.content).toEqual(textContent("preserved-payload-XYZ"))
   })
 })
 
 describe("memory-distill-redaction-hellgate — custom redactor", () => {
   test("upper-case stub ⇒ Phase1 sees redactor's output", async () => {
     const port = makePort()
-    const msg: Message = { role: "user", content: "lowercase content" }
+    const msg: Message = { role: "user", content: textContent("lowercase content") }
     await runMemoryConsolidatorHook(baseInput([msg], { redact: (s) => s.toUpperCase() }, port))
-    expect(port.lastSeen[0]?.content).toBe("LOWERCASE CONTENT")
+    expect(port.lastSeen[0]?.content).toEqual(textContent("LOWERCASE CONTENT"))
   })
 
   test("redactor invoked exactly ONCE per text segment", async () => {
@@ -119,9 +121,9 @@ describe("memory-distill-redaction-hellgate — custom redactor", () => {
       return s
     }
     const msgs: Message[] = [
-      { role: "user", content: "a" },
-      { role: "assistant", content: "b" },
-      { role: "user", content: "c" },
+      { role: "user", content: textContent("a") },
+      { role: "assistant", content: textContent("b") },
+      { role: "user", content: textContent("c") },
     ]
     await runMemoryConsolidatorHook(baseInput(msgs, { redact }, port))
     expect(calls).toBe(3)
@@ -131,14 +133,14 @@ describe("memory-distill-redaction-hellgate — custom redactor", () => {
 describe("memory-distill-redaction-hellgate — structured (block-array) content", () => {
   test("each text block redacted; non-text blocks preserved", async () => {
     const port = makePort()
-    const blocks = [
+    const blocks: Message["content"] = [
       { type: "text", text: "alpha" },
       { type: "tool_use", id: "tu_1", name: "Read", input: { p: "/x" } },
       { type: "text", text: "beta" },
     ]
     const msg: Message = {
       role: "user",
-      content: blocks as unknown as Message["content"],
+      content: blocks,
     }
     await runMemoryConsolidatorHook(baseInput([msg], { redact: (s) => `[R]${s}` }, port))
     const seen = port.lastSeen[0]?.content as unknown[]
@@ -155,11 +157,11 @@ describe("memory-distill-redaction-hellgate — real `redactSecrets` wire (anti-
     const RAW_KEY = "AKIAIOSFODNN7EXAMPLE"
     const msg: Message = {
       role: "user",
-      content: `the deploy uses ${RAW_KEY} please rotate it`,
+      content: textContent(`the deploy uses ${RAW_KEY} please rotate it`),
     }
     const redact = (s: string): string => redactSecrets(s, { origin: "memory_distill" }).text
     await runMemoryConsolidatorHook(baseInput([msg], { redact }, port))
-    const seen = String(port.lastSeen[0]?.content ?? "")
+    const seen = JSON.stringify(port.lastSeen[0]?.content ?? [])
     // Raw secret MUST NOT reach the LLM-facing surface.
     expect(seen).not.toContain(RAW_KEY)
     // Placeholder shape is the seam's CONTRACT (kind label is opaque to
@@ -189,8 +191,8 @@ describe("memory-distill-redaction-hellgate — anti-leak: stored row contains n
     const port = makePort()
     const RAW_KEY = "AKIAIOSFODNN7EXAMPLE"
     const msgs: Message[] = [
-      { role: "user", content: `env=AWS_ACCESS_KEY_ID=${RAW_KEY}` },
-      { role: "assistant", content: "ok will rotate" },
+      { role: "user", content: textContent(`env=AWS_ACCESS_KEY_ID=${RAW_KEY}`) },
+      { role: "assistant", content: textContent("ok will rotate") },
     ]
     const redact = (s: string): string => redactSecrets(s, { origin: "memory_distill" }).text
     await runMemoryConsolidatorHook(baseInput(msgs, { redact }, port))
@@ -208,8 +210,8 @@ describe("memory-distill-redaction-hellgate — anti-leak: stored row contains n
     // real redactor (above), it does not. So the seam is load-bearing.
     const port = makePort()
     const RAW_KEY = "AKIAIOSFODNN7EXAMPLE"
-    const msg: Message = { role: "user", content: `env=${RAW_KEY}` }
+    const msg: Message = { role: "user", content: textContent(`env=${RAW_KEY}`) }
     await runMemoryConsolidatorHook(baseInput([msg], { redact: (s) => s }, port))
-    expect(String(port.lastSeen[0]?.content)).toContain(RAW_KEY)
+    expect(JSON.stringify(port.lastSeen[0]?.content)).toContain(RAW_KEY)
   })
 })

@@ -191,7 +191,7 @@ const scanTextForEntropy = (
 }
 
 export const entropyScanner = (opts: SecretScannerOpts = {}): SecretScanner => ({
-  scanText(text, scanOpts) {
+  async scanText(text, scanOpts) {
     return scanTextForEntropy(text, scanOpts?.file, opts)
   },
   async scanFile(path) {

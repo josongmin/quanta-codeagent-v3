@@ -41,7 +41,7 @@ afterEach(async () => {
 })
 
 describe("e2e: claude_code fixture import (ADR-0038)", () => {
-  test("emits 4 lifecycle events + final ImportResult with non-zero counts", async () => {
+  test("emits 4 lifecycle events + final ImportResult with non-zero translated/countable counts", async () => {
     const events: ImportEvent[] = []
     const result = await runImport("claude_code", { homeDir: home }, (e) => events.push(e))
 
@@ -56,8 +56,8 @@ describe("e2e: claude_code fixture import (ADR-0038)", () => {
 
     expect(result.provider).toBe("claude_code")
     // Two project directories under projects/.
-    expect(result.sessionsImported).toBe(2)
-    expect(result.skillsImported).toBe(3)
+    expect(result.sessionsTranslated).toBe(2)
+    expect(result.skillsCounted).toBe(3)
     expect(result.errors).toEqual([])
   })
 
@@ -70,11 +70,13 @@ describe("e2e: claude_code fixture import (ADR-0038)", () => {
       provider: result.provider,
       stage: "import_finished",
       ok: true,
-      detail: `s=${result.sessionsImported}, k=${result.skillsImported}`,
+      detail: `translated_sessions=${result.sessionsTranslated}, counted_skills=${result.skillsCounted}, persisted_sessions=0`,
     })
     const log = await loadImportLog(home)
     expect(log.entries).toHaveLength(1)
-    expect(log.entries[0]?.detail).toBe("s=2, k=3")
+    expect(log.entries[0]?.detail).toBe(
+      "translated_sessions=2, counted_skills=3, persisted_sessions=0",
+    )
     expect(log.entries[0]?.ok).toBe(true)
   })
 

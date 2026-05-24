@@ -428,13 +428,13 @@ class IntegrationLspClient extends LspClient {
 }
 
 describe("LspClient.applyWorkspaceEdit — strategy DI (ADR-0155)", () => {
-  test("ATOMW-D13: no strategy injection → atomic default (commits via temp+rename)", async () => {
+  test("ATOMW-D13: atomic default commits via temp+rename and resolves void", async () => {
     const dir = await mkTmp()
     try {
       const a = join(dir, "a.ts")
       await writeFile(a, "hello\n")
       const c = new IntegrationLspClient(fakeSpec, {})
-      const outcomes = await c.applyWorkspaceEdit({
+      const outcome = await c.applyWorkspaceEdit({
         changes: [
           {
             uri: pathToFileURL(a).href,
@@ -442,8 +442,7 @@ describe("LspClient.applyWorkspaceEdit — strategy DI (ADR-0155)", () => {
           },
         ],
       })
-      expect(outcomes).toHaveLength(1)
-      expect(outcomes[0]?.kind).toBe("ok")
+      expect(outcome).toBeUndefined()
       expect(await readFile(a, "utf8")).toBe("HELLO\n")
       // No temp leftover — default is atomic, both phases succeeded.
       const left = (await filesIn(dir)).filter((n) => n.includes(".quanta-tmp"))
@@ -453,26 +452,28 @@ describe("LspClient.applyWorkspaceEdit — strategy DI (ADR-0155)", () => {
     }
   })
 
-  test("ATOMW-D14: sequentialFileWriteStrategy injected → writes go directly to target (no temp)", async () => {
+  test("ATOMW-D14: explicit sessionId scopes stale-tmp cleanup before commit", async () => {
     const dir = await mkTmp()
     try {
       const a = join(dir, "a.ts")
+      const stale = `${a}.quanta-tmp-fixed-old`
       await writeFile(a, "hello\n")
-      const c = new IntegrationLspClient(fakeSpec, {
-        fileWriteStrategy: sequentialFileWriteStrategy(),
-      })
-      const outcomes = await c.applyWorkspaceEdit({
-        changes: [
-          {
-            uri: pathToFileURL(a).href,
-            edits: [{ range: range(0, 0, 0, 5), newText: "WORLD" }],
-          },
-        ],
-      })
-      expect(outcomes).toHaveLength(1)
-      expect(outcomes[0]?.kind).toBe("ok")
+      await writeFile(stale, "stale\n")
+      const c = new IntegrationLspClient(fakeSpec, {})
+      const outcome = await c.applyWorkspaceEdit(
+        {
+          changes: [
+            {
+              uri: pathToFileURL(a).href,
+              edits: [{ range: range(0, 0, 0, 5), newText: "WORLD" }],
+            },
+          ],
+        },
+        "fixed",
+      )
+      expect(outcome).toBeUndefined()
       expect(await readFile(a, "utf8")).toBe("WORLD\n")
-      // Sequential writes don't produce temp files at all.
+      expect((await filesIn(dir)).includes("a.ts.quanta-tmp-fixed-old")).toBe(false)
       const tempLeft = (await filesIn(dir)).filter((n) => n.includes(".quanta-tmp"))
       expect(tempLeft).toEqual([])
     } finally {
@@ -480,34 +481,30 @@ describe("LspClient.applyWorkspaceEdit — strategy DI (ADR-0155)", () => {
     }
   })
 
-  test("ATOMW-D15: applyWorkspaceEdit propagates outcomes (no throw) on per-file failure", async () => {
+  test("ATOMW-D15: applyWorkspaceEdit propagates commit failure by throwing and leaving original intact", async () => {
     const dir = await mkTmp()
     try {
       const a = join(dir, "a.ts")
       await writeFile(a, "AAA\n")
-      // Inject a bespoke strategy that fails the only entry. The client MUST
-      // surface this as a `failed` outcome (not throw) — that's the new contract.
-      const stub = {
-        name: "stub-fail",
-        applyBatch: async (_batch: ReadonlyArray<FileWriteBatch>) =>
-          [{ kind: "failed" as const, path: a, reason: "stub: forced failure" }] as const,
+      class CommitFailingLspClient extends IntegrationLspClient {
+        protected override async renameFile(_from: string, _to: string): Promise<void> {
+          throw new Error("stub: forced failure")
+        }
       }
-      const c = new IntegrationLspClient(fakeSpec, { fileWriteStrategy: stub })
-      const outcomes = await c.applyWorkspaceEdit({
-        changes: [
-          {
-            uri: pathToFileURL(a).href,
-            edits: [{ range: range(0, 0, 0, 3), newText: "BBB" }],
-          },
-        ],
-      })
-      expect(outcomes).toHaveLength(1)
-      expect(outcomes[0]?.kind).toBe("failed")
-      if (outcomes[0]?.kind === "failed") {
-        expect(outcomes[0].reason).toContain("stub: forced failure")
-      }
-      // Original untouched (the stub never actually wrote).
+      const c = new CommitFailingLspClient(fakeSpec, {})
+      await expect(
+        c.applyWorkspaceEdit({
+          changes: [
+            {
+              uri: pathToFileURL(a).href,
+              edits: [{ range: range(0, 0, 0, 3), newText: "BBB" }],
+            },
+          ],
+        }),
+      ).rejects.toThrow("stub: forced failure")
       expect(await readFile(a, "utf8")).toBe("AAA\n")
+      const tmpLeft = (await filesIn(dir)).filter((n) => n.includes(".quanta-tmp"))
+      expect(tmpLeft).toHaveLength(1)
     } finally {
       await cleanup(dir)
     }

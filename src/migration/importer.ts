@@ -153,20 +153,20 @@ const countSkills = async (root: string, includeSkills: boolean): Promise<number
  *  (others). Halt-on-error: the FIRST translation failure emits
  *  `session_completion_finished {ok:false}` and returns. A successfully
  *  translated session is counted regardless of message count (a zero-message
- *  but well-formed transcript still imports). Skills counting via the
+ *  but well-formed transcript still translates). Skills counting via the
  *  `skills/` subdir is preserved unchanged. */
 const stageSessionCompletion = async (
   root: string,
   provider: Exclude<ExternalAgentProvider, "unknown">,
   includeSkills: boolean,
   emit: ImportEventSink,
-): Promise<{ ok: true; sessionsImported: number; skillsImported: number } | { ok: false }> => {
+): Promise<{ ok: true; sessionsTranslated: number; skillsCounted: number } | { ok: false }> => {
   try {
     const sessionsDir = provider === "claude_code" ? join(root, "projects") : join(root, "sessions")
     const jsonlPaths = await collectJsonlPaths(sessionsDir)
     const translator = translatorFor(provider)
 
-    let sessionsImported = 0
+    let sessionsTranslated = 0
     for (const path of jsonlPaths) {
       try {
         // Translation result (Message[]) is intentionally not persisted here —
@@ -174,7 +174,7 @@ const stageSessionCompletion = async (
         // tally it; persistence into v3 sessions is the follow-up. A throw is
         // a halt-on-error condition.
         await translator.translateFromFile(path, provider)
-        sessionsImported++
+        sessionsTranslated++
       } catch (err) {
         emit({
           stage: "session_completion_finished",
@@ -186,15 +186,15 @@ const stageSessionCompletion = async (
       }
     }
 
-    const skillsImported = await countSkills(root, includeSkills)
+    const skillsCounted = await countSkills(root, includeSkills)
     emit({
       stage: "session_completion_finished",
       ok: true,
       provider,
-      sessionsImported,
-      skillsImported,
+      sessionsTranslated,
+      skillsCounted,
     })
-    return { ok: true, sessionsImported, skillsImported }
+    return { ok: true, sessionsTranslated, skillsCounted }
   } catch (err) {
     emit({
       stage: "session_completion_finished",
@@ -221,8 +221,8 @@ export const runImport = async (
   if (!det.ok) {
     const r: ImportResult = {
       provider,
-      sessionsImported: 0,
-      skillsImported: 0,
+      sessionsTranslated: 0,
+      skillsCounted: 0,
       errors: ["detect_finished failed"],
     }
     emit({ stage: "import_finished", ok: false, error: "detect_finished failed" })
@@ -233,8 +233,8 @@ export const runImport = async (
   if (!ps.ok) {
     const r: ImportResult = {
       provider,
-      sessionsImported: 0,
-      skillsImported: 0,
+      sessionsTranslated: 0,
+      skillsCounted: 0,
       errors: ["provider_stage_finished failed"],
     }
     emit({
@@ -249,8 +249,8 @@ export const runImport = async (
   if (!sc.ok) {
     const r: ImportResult = {
       provider,
-      sessionsImported: 0,
-      skillsImported: 0,
+      sessionsTranslated: 0,
+      skillsCounted: 0,
       errors: ["session_completion_finished failed"],
     }
     emit({
@@ -263,8 +263,8 @@ export const runImport = async (
 
   const result: ImportResult = {
     provider,
-    sessionsImported: sc.sessionsImported,
-    skillsImported: sc.skillsImported,
+    sessionsTranslated: sc.sessionsTranslated,
+    skillsCounted: sc.skillsCounted,
     errors: [],
   }
   emit({ stage: "import_finished", ok: true, result })

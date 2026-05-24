@@ -81,6 +81,7 @@ import {
  *      (and, when `QUANTA_REWIND_GIT=1`, an injected real-git port for
  *      `--restore-files`). Absent ⇒ those commands print "no active session"
  *      and exit 1 — never silently no-op.
+ *    - `mcp` ⇒ `/mcp` sees the live config/tool snapshot when MCP is wired.
  *    - `cost` / `planSnapshot` / `history` / `branchSearch` / `side` ⇒
  *      S3 port wire-up. Each adapter is OPTIONAL — when its env/dep gate is
  *      off the field is OMITTED from `ReplSlashCtx` so the slash command
@@ -90,6 +91,7 @@ type ReplSlashCtx = Partial<{
   idle: IdleMonitor
   imageQueue: ImageQueue
   rewindSession: RewindSlashState
+  mcp: import("./mcp-cmd").McpSurfaceInfo
   cost: () => string
   planSnapshot: () => import("@/agent/plan/types").Plan | null
   history: HistorySessionState
@@ -346,6 +348,7 @@ interface BuildReplSlashCtxArgs {
   idleMonitor: IdleMonitor
   imageQueue: ImageQueue | undefined
   rewindState: RewindSlashState | undefined
+  mcpSurface: import("./mcp-cmd").McpSurfaceInfo | undefined
   costPanel: CostPanel | undefined
   planStore: PlanStore | undefined
   branchProgress: BranchProgressTracker | undefined
@@ -361,6 +364,7 @@ const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
     idleMonitor,
     imageQueue,
     rewindState,
+    mcpSurface,
     costPanel,
     planStore,
     branchProgress,
@@ -373,6 +377,7 @@ const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
     idle: idleMonitor,
     ...(imageQueue !== undefined ? { imageQueue } : {}),
     ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
+    ...(mcpSurface !== undefined ? { mcp: mcpSurface } : {}),
     ...(costPanel !== undefined ? { cost: () => costPanel.renderDetailed() } : {}),
     ...(planStore !== undefined
       ? { planSnapshot: (): import("@/agent/plan/types").Plan | null => planStore.current() }
@@ -604,6 +609,7 @@ const tryRunReplSlash = async (input: string, slashCtx?: ReplSlashCtx): Promise<
     ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
     ...(slashCtx?.idle !== undefined ? { idle: slashCtx.idle } : {}),
     ...(slashCtx?.rewindSession !== undefined ? { rewindSession: slashCtx.rewindSession } : {}),
+    ...(slashCtx?.mcp !== undefined ? { mcp: slashCtx.mcp } : {}),
     // S3 slashctx-port wire — each field omitted entirely when the surface
     // did not build the adapter, so the slash command keeps its existing
     // "not wired" output (byte-identical default-OFF, no crash).
@@ -851,6 +857,7 @@ const composeSurfaceSlashCtx = (
     idleMonitor: setup.idleMonitor,
     imageQueue: state.imageQueue,
     rewindState: state.rewindState,
+    mcpSurface: setup.mcpSurface,
     costPanel: setup.costPanel,
     planStore: setup.planStore,
     branchProgress: setup.branchProgress,

@@ -832,6 +832,26 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly embedding?: EmbeddingPort
     readonly commitEmbedder?: CommitEmbedder
   }
+  /**
+   * ADR-0200 stream idle/total timeout watchdog slot. When BOTH this and
+   * {@link streamTimeoutPolicy} are set, the loop wraps each LLM stream
+   * with `streamWatchdog.wrap(src, policy, signal)` so hung providers
+   * surface as a typed `StreamIdleError`/`StreamTotalError`/`StreamAbortError`
+   * instead of parking the turn forever.
+   *
+   * Default-OFF: either slot absent ⇒ the loop yields the raw source
+   * verbatim (byte-identical for every legacy caller). The composition
+   * root MAY default this to `noOpWatchdog()` so dynamic enablement is a
+   * pure policy swap; the loop tolerates either no-op-with-no-policy or
+   * undefined.
+   */
+  streamWatchdog?: import("./stream-timeout").StreamWatchdog
+  /**
+   * ADR-0200 stream timeout policy. Holds `idleMs` / `totalMs` / `action`
+   * and (optionally) a `SnoozeController` instance owned by the CLI repl.
+   * Consumed only when {@link streamWatchdog} is also set.
+   */
+  streamTimeoutPolicy?: import("./stream-timeout").TimeoutPolicy
 }
 
 // ─────────────────────────────────────────────────────────────────────────

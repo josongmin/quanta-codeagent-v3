@@ -4,7 +4,7 @@
  * Part 1 — unit-style translator fixtures: user+assistant parse, metadata
  * skip, tool_use+tool_result mapping, empty → [], metadata-only → [].
  * Part 2 — e2e: a fake `~/.claude/projects/<slug>/<id>.jsonl` + `auth.json`
- * in a tmp home, run detector + runImport, assert ok + sessionsImported>0.
+ * in a tmp home, run detector + runImport, assert ok + sessionsTranslated>0.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -188,7 +188,7 @@ describe("contentSha256 (ADR-0038 L4)", () => {
 })
 
 describe("e2e: detect + runImport translates real sessions (ADR-0038 L4)", () => {
-  test("fake ~/.claude with two jsonl sessions → ok + sessionsImported > 0", async () => {
+  test("fake ~/.claude with two jsonl sessions → ok + sessionsTranslated > 0", async () => {
     await mkdir(join(home, ".claude/projects/-Users-x-repo"), { recursive: true })
     await writeFile(join(home, ".claude/auth.json"), JSON.stringify({ token: "t" }), "utf8")
     await writeFile(
@@ -209,7 +209,7 @@ describe("e2e: detect + runImport translates real sessions (ADR-0038 L4)", () =>
     const result = await runImport("claude_code", { homeDir: home }, (e) => events.push(e))
     expect(result.errors).toEqual([])
     expect(result.provider).toBe("claude_code")
-    expect(result.sessionsImported).toBe(2)
+    expect(result.sessionsTranslated).toBe(2)
     const last = events[events.length - 1]
     expect(last?.stage).toBe("import_finished")
     expect(last?.ok).toBe(true)

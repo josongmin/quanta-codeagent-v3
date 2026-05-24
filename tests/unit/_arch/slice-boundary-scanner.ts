@@ -238,7 +238,12 @@ const scanNodeProcessNamedImports = (src: string): Array<{ line: number; hit: st
 /** Register the standard architecture-guard battery for one slice config. */
 export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void => {
   const dir = sliceDir(config.slice)
-  const deny = new Set(config.denyImports)
+  // Strip self-imports from deny-list: a slice referencing its own files via
+  // `@/<slice>/X` is intra-slice (not a peer-library crossing). PEER_LIBRARY_DENY
+  // lists every slice for cross-slice isolation; this filter makes self-import
+  // intent universal without per-slice config maintenance.
+  const selfPrefix = `@/${config.slice}`
+  const deny = new Set(config.denyImports.filter((d) => d !== selfPrefix))
   const stdioAllow = new Set(config.stdioAllowFiles ?? [])
   const envAllow = new Set(config.envAllowFiles ?? [])
   const consoleAllow = new Set(config.consoleAllowFiles ?? [])
