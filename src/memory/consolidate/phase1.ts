@@ -17,7 +17,17 @@ import { errMessage } from "@/shared"
  *     re-thrown; never swallowed, never null-returned.
  *   - `store.upsert` throws → propagated as-is; the store layer surfaces
  *     SQLite errors with its own context.
+ *
+ * Telemetry (S6-Memory, optional):
+ *   - When `telemetry` is provided, exactly one {@link Phase1TelemetryEvent}
+ *     is emitted per call — on the success path, the skip path, AND every
+ *     thrown-error path (the throw is re-raised AFTER emission). Only
+ *     counts + latency + outcome enum cross the seam; entry text and Stage1
+ *     payload never do (see telemetry-port.ts anti-leak invariant).
+ *   - Default-OFF: when `telemetry` is undefined, no record call is made
+ *     and behavior is byte-identical to the legacy code path.
  */
+import type { MemoryTelemetryPort, Phase1OutcomeKind } from "../telemetry-port"
 import { MIN_TURN_THRESHOLD } from "./constants"
 import {
   Phase1DistillError,
@@ -32,27 +42,51 @@ export const runPhase1 = async (
   input: Phase1Input,
   port: Phase1Port,
   store: Stage1StorePort,
+  telemetry?: MemoryTelemetryPort,
 ): Promise<Phase1Outcome> => {
+  // Capture entry time so EVERY exit branch (skip / success / throw) reports
+  // a real latency. `input.now()` is the SSOT clock so tests can pin this.
+  const enteredAt = input.now()
+  // Helper: emit telemetry safely. Sink failure must never derail the
+  // consolidator — implementations are no-throw per port contract, but we
+  // belt-and-braces the try/catch so a misbehaving custom sink still cannot
+  // crash the session-end hook.
+  const emit = (outcome: Phase1OutcomeKind): void => {
+    if (!telemetry) return
+    try {
+      telemetry.recordPhase1({
+        outcome,
+        turnsConsumed: input.turnCount,
+        latencyMs: input.now() - enteredAt,
+      })
+    } catch {
+      /* swallow — see contract */
+    }
+  }
   // ── Skip conditions (deterministic order; tests assert each branch) ──
   //
   // 1. thread_id empty — PRIMARY KEY violation would explode in the
   //    store; surface a structured skip instead of a sqlite throw.
   if (input.threadId === "") {
+    emit("skipped")
     return { kind: "skipped", reason: "thread_id_empty" }
   }
   // 2. memory_mode disabled — Phase 1 is opt-in (DEFAULT_MEMORY_MODE).
   //    Cheapest skip; saves an LLM call when the feature is off.
   if (input.memoryMode !== "enabled") {
+    emit("skipped")
     return { kind: "skipped", reason: "memory_mode_disabled" }
   }
   // 3. no messages — rollout is empty (sessions that never made a real
   //    turn); LLM has nothing to distill.
   if (input.rolloutMessages.length === 0) {
+    emit("skipped")
     return { kind: "skipped", reason: "no_messages" }
   }
   // 4. turns below threshold — short conversations are LLM-call cost
   //    without distillable signal (Codex parity, MIN_TURN_THRESHOLD).
   if (input.turnCount < MIN_TURN_THRESHOLD) {
+    emit("skipped")
     return { kind: "skipped", reason: "turns_below_threshold" }
   }
 
@@ -73,6 +107,7 @@ export const runPhase1 = async (
       // change the constructor signature in types.ts.
       ;(wrapped as Error & { cause?: unknown }).cause = e
     }
+    emit("error")
     throw wrapped
   }
 
@@ -100,9 +135,17 @@ export const runPhase1 = async (
 
   // `store.upsert` throws → propagate. Caller (Wave D session-end hook)
   // emits an OTel span around `runPhase1` and records the exception via
-  // MEMORY_PHASE1_OUTCOME_KEY = "error" attribute.
-  await store.upsert(stage1)
+  // MEMORY_PHASE1_OUTCOME_KEY = "error" attribute. Telemetry emits 'error'
+  // on the upsert-throw path so the OTel counter still bumps when the LLM
+  // succeeded but disk failed.
+  try {
+    await store.upsert(stage1)
+  } catch (e) {
+    emit("error")
+    throw e
+  }
 
+  emit("stored")
   return {
     kind: "distilled",
     stage1,

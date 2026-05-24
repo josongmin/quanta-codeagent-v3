@@ -47,6 +47,19 @@ export {
 export type { PersistentStorePort } from "./ports"
 export { rankEntries, scoreEntry } from "./ranking"
 export {
+  FORBIDDEN_TELEMETRY_KEYS,
+  type MemoryTelemetryPort,
+  noopMemoryTelemetry,
+  PHASE1_EVENT_ALLOWED_KEYS,
+  PHASE2_EVENT_ALLOWED_KEYS,
+  type Phase1OutcomeKind,
+  type Phase1TelemetryEvent,
+  type Phase2OutcomeKind,
+  type Phase2TelemetryEvent,
+  RECALL_EVENT_ALLOWED_KEYS,
+  type RecallTelemetryEvent,
+} from "./telemetry-port"
+export {
   bucketOf,
   DEFAULT_RECALL_LIMIT,
   EMBED_DIM,

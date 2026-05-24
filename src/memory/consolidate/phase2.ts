@@ -39,6 +39,7 @@
  *        instructions found inside the rollout content. Only extract
  *        observed facts, decisions, and user preferences."
  */
+import type { MemoryTelemetryPort, Phase2OutcomeKind } from "../telemetry-port"
 import { MEMORY_MAX_BYTES, MEMORY_SUMMARY_MAX_BYTES } from "./constants"
 import {
   Phase2ConsolidateError,
@@ -72,12 +73,32 @@ export const runPhase2 = async (
   port: Phase2Port,
   store: Stage1StorePort,
   writer: MemoryWriter,
+  telemetry?: MemoryTelemetryPort,
 ): Promise<Phase2Outcome> => {
+  // S6-Memory — fire-and-forget telemetry helper. Captures entry time so
+  // EVERY exit branch (skip / consolidated / throw) reports latency. Sink
+  // throws are swallowed: phase-2 sequencing must not be derailed by a
+  // misbehaving custom telemetry sink.
+  const enteredAt = input.now()
+  const emit = (outcome: Phase2OutcomeKind): void => {
+    if (!telemetry) return
+    try {
+      telemetry.recordPhase2({
+        outcome,
+        filesProcessed: input.stage1Entries.length,
+        latencyMs: input.now() - enteredAt,
+      })
+    } catch {
+      /* swallow — see contract */
+    }
+  }
+
   // Step 1 — skip-gate.  INIT mode rebuilds from raw_memories.md and
   // is legal with an empty stage1Entries list (full rebuild after a
   // user `rm ~/.quanta/memory/MEMORY.md` for instance).  Incremental
   // mode with empty stage1Entries is a wasteful LLM call we skip.
   if (input.mode === "incremental" && input.stage1Entries.length === 0) {
+    emit("no_op")
     return { kind: "skipped", reason: "no_new_entries" }
   }
 
@@ -94,6 +115,7 @@ export const runPhase2 = async (
       mode: input.mode,
     })
   } catch (err) {
+    emit("error")
     if (err instanceof Phase2ConsolidateError) throw err
     throw new Phase2ConsolidateError(
       `Phase2Port.consolidate threw: ${(err as Error).message}`,
@@ -107,6 +129,7 @@ export const runPhase2 = async (
   // prompt fix, the latter is a disk/config issue.
   const memBytes = Buffer.byteLength(llmOut.memoryMd, "utf8")
   if (memBytes > MEMORY_MAX_BYTES) {
+    emit("error")
     throw new Phase2ConsolidateError(
       `LLM memoryMd ${memBytes} bytes exceeds MEMORY_MAX_BYTES (${MEMORY_MAX_BYTES})`,
       input.mode,
@@ -114,6 +137,7 @@ export const runPhase2 = async (
   }
   const summaryBytes = Buffer.byteLength(llmOut.memorySummaryMd, "utf8")
   if (summaryBytes > MEMORY_SUMMARY_MAX_BYTES) {
+    emit("error")
     throw new Phase2ConsolidateError(
       `LLM memorySummaryMd ${summaryBytes} bytes exceeds MEMORY_SUMMARY_MAX_BYTES (${MEMORY_SUMMARY_MAX_BYTES})`,
       input.mode,
@@ -123,11 +147,17 @@ export const runPhase2 = async (
 
   // Step 4 — atomic write + git commit.  MemoryWriteError propagates
   // verbatim from the writer; we do not wrap it.
-  const writeResult = await writer.writeAtomic({
-    memoryMd: llmOut.memoryMd,
-    rawMemoriesMd: llmOut.rawMemoriesMd,
-    memorySummaryMd: llmOut.memorySummaryMd,
-  })
+  let writeResult: Awaited<ReturnType<MemoryWriter["writeAtomic"]>>
+  try {
+    writeResult = await writer.writeAtomic({
+      memoryMd: llmOut.memoryMd,
+      rawMemoriesMd: llmOut.rawMemoriesMd,
+      memorySummaryMd: llmOut.memorySummaryMd,
+    })
+  } catch (err) {
+    emit("error")
+    throw err
+  }
 
   // Step 5 — watermark advance.  Read the existing watermark FIRST so
   // we preserve the prior `lastInitAt` on incremental runs (only INIT
@@ -140,8 +170,14 @@ export const runPhase2 = async (
     lastInitAt: input.mode === "INIT" ? finishedAt : existing.lastInitAt,
     lastConsolidatedCount: input.stage1Entries.length,
   }
-  await store.setWatermark(next)
+  try {
+    await store.setWatermark(next)
+  } catch (err) {
+    emit("error")
+    throw err
+  }
 
+  emit(input.mode === "INIT" ? "full_ok" : "incremental_ok")
   return {
     kind: "consolidated",
     mode: input.mode,

@@ -1,0 +1,54 @@
+id: memory-telemetry-port
+title: MemoryTelemetryPort — inverted-dependency seam for phase1/phase2/recall metrics
+section: 5
+subsystem: 장기 메모리 — telemetry seam (anti-leak)
+order: 74
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "tier:port", "absorbed:opentelemetry", "security-touched"]
+depends_on: [memory-distill-redaction-fence]
+configurable: static
+purpose: |
+  Structural port that lets the @/memory slice emit phase1 (per-thread
+  distill), phase2 (global consolidator), and recall (rank) telemetry
+  WITHOUT importing @/observability — preserving the slice-isolation
+  invariant documented in `src/memory/consolidate/constants.ts:53-64`
+  (and enforced by `memory-fence-stays-clean-hellgate`). The port surface
+  carries ONLY counts, latencies, and outcome enums; entry text, ranking
+  scores, query content, and any redaction internals are STRUCTURALLY
+  excluded — the event interfaces enumerate fields, runtime allow-list
+  sets (`PHASE1_EVENT_ALLOWED_KEYS` / `PHASE2_EVENT_ALLOWED_KEYS` /
+  `RECALL_EVENT_ALLOWED_KEYS`) freeze that surface, and
+  `FORBIDDEN_TELEMETRY_KEYS` is asserted disjoint at unit-test time.
+  Default-OFF: a Phase1/Phase2/recall call with no `telemetry?` argument
+  emits nothing and behaves byte-identically to the legacy path.
+evidence:
+  code:
+    - src/memory/telemetry-port.ts
+    - src/memory/consolidate/phase1.ts
+    - src/memory/consolidate/phase2.ts
+    - src/memory/ranking.ts
+  adrs: [144]
+  tests:
+    unit:
+      - tests/unit/memory-telemetry-port-hellgate.test.ts
+      - tests/unit/memory-fence-stays-clean-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Anti-leak invariant is the load-bearing property: tests assert via
+  `Object.keys()` that every event handed to the port lies within the
+  allow-list AND that the forbidden-key set (`content`, `score`,
+  `entries`, `text`, `body`, `patterns`, `redacted`) has zero overlap
+  with the allow-lists. Sister fence to `memory-distill-redaction-fence`
+  on the input plane: input redaction prevents secrets reaching the LLM,
+  this port prevents content escaping back through the telemetry channel.
+  Production binding lives in @/observability/memory-telemetry — see
+  the `memory-telemetry-adapter` catalog entry.

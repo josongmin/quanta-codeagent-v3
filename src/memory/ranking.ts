@@ -5,6 +5,7 @@
 // recall is robust to paraphrase — a text miss no longer kills a vector hit.
 // Lexical / tag / freshness / importance / access reinforcement refine within.
 
+import type { MemoryTelemetryPort } from "./telemetry-port"
 import {
   bucketOf,
   DEFAULT_RECALL_LIMIT,
@@ -163,14 +164,39 @@ export const scoreEntry = (
  * normalized entries. Sort: score desc, then importance desc, then updatedAt
  * desc, then createdAt desc, then id desc (total + deterministic). `now` is
  * injectable for deterministic tests.
+ *
+ * Telemetry (S6-Memory, optional): when `telemetry` is provided, emits a
+ * single {@link RecallTelemetryEvent} on the way out carrying ONLY
+ * `{hits, totalScanned, latencyMs}` — entry text, per-entry score, query
+ * text, and the ranked list itself NEVER cross this seam. With `telemetry`
+ * undefined, the rank path is byte-identical to the legacy behavior.
  */
 export const rankEntries = (
   candidates: readonly MemoryEntry[],
   query: MemoryQuery,
   now: number = Date.now(),
+  telemetry?: MemoryTelemetryPort,
 ): NormalizedEntry[] => {
+  // performance.now() vs Date.now(): the latency value is a duration, NOT a
+  // wall-clock — `performance.now()` is monotonic and avoids the `now`
+  // injection coupling (callers pin `now` for deterministic scoring but
+  // wall-clock during the same call is still real).
+  const startMs = performance.now()
   const limit = query.limit ?? DEFAULT_RECALL_LIMIT
-  if (limit <= 0) return []
+  if (limit <= 0) {
+    if (telemetry) {
+      try {
+        telemetry.recordRecall({
+          hits: 0,
+          totalScanned: candidates.length,
+          latencyMs: performance.now() - startMs,
+        })
+      } catch {
+        /* swallow */
+      }
+    }
+    return []
+  }
 
   // Build the query-tag set ONCE (it is candidate-independent), then score.
   const want = tagWantSet(query)
@@ -193,5 +219,17 @@ export const rankEntries = (
     return b.entry.id < a.entry.id ? -1 : b.entry.id > a.entry.id ? 1 : 0
   })
 
-  return scored.slice(0, limit).map((s) => s.entry)
+  const result = scored.slice(0, limit).map((s) => s.entry)
+  if (telemetry) {
+    try {
+      telemetry.recordRecall({
+        hits: result.length,
+        totalScanned: candidates.length,
+        latencyMs: performance.now() - startMs,
+      })
+    } catch {
+      /* swallow */
+    }
+  }
+  return result
 }

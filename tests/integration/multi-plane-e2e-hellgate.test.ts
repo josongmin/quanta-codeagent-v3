@@ -34,11 +34,10 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { defaultBudgetLedger } from "@/agent/budget-ledger"
 import { defaultCheckpointPolicy, withAutoCheckpoint } from "@/agent/checkpoint-policy"
 import { wireCheckpointedEffectChannel } from "@/agent/checkpoint-wiring"
-import {
-  defaultConversationCheckpointStore,
-} from "@/agent/conversation-checkpoint"
+import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import {
   type EffectChannel,
   LocalEffectChannel,
@@ -51,40 +50,34 @@ import { defaultPlanQueueStore } from "@/agent/plan-queue"
 import { defaultBackgroundSubagentScheduler } from "@/agent/subagent-background"
 import type { AgentConfig } from "@/agent/types"
 import { defaultVerifyCheckpointBridge } from "@/agent/verify-checkpoint-bridge"
-import { defaultBudgetLedger } from "@/agent/budget-ledger"
 import type { LLMPort, Message, ToolUseBlock } from "@/llm"
 import { FoundryProviderAdapter } from "@/llm/providers/foundry-adapter"
 import { passthroughMcpSandbox } from "@/mcp/skybridge/passthrough"
 import { resolveMcpSandbox } from "@/mcp/skybridge/registry"
-import {
-  type OtelAttributes,
-  type OtelCounter,
-  type OtelHistogram,
-  type OtelMeter,
-  type OtelMeterProvider,
-  type OtelUpDownCounter,
-} from "@/observability/metrics/otel-sink"
 import {
   consoleMetricsSink,
   defaultMetricsRegistry,
   jsonlMetricsSink,
   otelMetricsSink,
 } from "@/observability/metrics/index"
-import { type PermissionContext } from "@/permission"
+import type {
+  OtelAttributes,
+  OtelCounter,
+  OtelHistogram,
+  OtelMeter,
+  OtelMeterProvider,
+  OtelUpDownCounter,
+} from "@/observability/metrics/otel-sink"
+import type { PermissionContext } from "@/permission"
 import { defaultOsSandbox } from "@/runtime/os-sandbox"
 import { compileBubblewrapArgs } from "@/runtime/os-sandbox/bubblewrap"
 import type { ShadowOdb } from "@/storage/shadow-odb"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { ToolRegistry } from "@/tool"
-import {
-  csvReadTool,
-  ndjsonReadTool,
-  pdfReadTool,
-  yamlReadTool,
-} from "@/tool/document"
+import { csvReadTool, ndjsonReadTool, pdfReadTool, yamlReadTool } from "@/tool/document"
+import type { GitRunner, GitRunResult } from "@/tool/git/types"
 import { composeToolResultContent, readImageTool } from "@/tool/image"
 import { webFetchTool } from "@/tool/web"
-import type { GitRunner, GitRunResult } from "@/tool/git/types"
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Helpers + minimal-config harness (mirrors the precedent test)              */
@@ -131,11 +124,9 @@ const makeUniqueDir = async (prefix: string): Promise<string> => {
 const makeFakeOdb = (
   over: { registerHead?: ShadowOdb["registerHead"]; markVerified?: ShadowOdb["markVerified"] } = {},
 ): ShadowOdb => {
-  const ni =
-    (name: string) =>
-    async (): Promise<never> => {
-      throw new Error(`fake odb: ${name} not implemented`)
-    }
+  const ni = (name: string) => async (): Promise<never> => {
+    throw new Error(`fake odb: ${name} not implemented`)
+  }
   return {
     init: ni("init") as ShadowOdb["init"],
     registerHead: over.registerHead ?? (ni("registerHead") as ShadowOdb["registerHead"]),
@@ -208,8 +199,7 @@ const PDF_BYTES = new TextEncoder().encode(
 describe("Plane 1 — Orchestration", () => {
   test("P1-1: branchSearch + subagentBackground + planQueue all wired → extraTools includes ALL", async () => {
     const scheduler = defaultBackgroundSubagentScheduler({
-      runner: async () =>
-        ({ ok: true, output: "child", turns: 1, finalText: "child" }) as never,
+      runner: async () => ({ ok: true, output: "child", turns: 1, finalText: "child" }) as never,
     })
     // branchSearch needs only a `BranchSearchConfig` shape — the tier-1 builder
     // is responsible for guarding on the absence of the LLM/verifier wires.
@@ -327,9 +317,7 @@ describe("Plane 2 — Effect", () => {
     } as ToolResult)
     expect(Array.isArray(composed)).toBe(true)
     if (Array.isArray(composed)) {
-      const hasImage = composed.some(
-        (b) => "type" in b && (b as { type: string }).type === "image",
-      )
+      const hasImage = composed.some((b) => "type" in b && (b as { type: string }).type === "image")
       expect(hasImage).toBe(true)
     }
   })
@@ -456,10 +444,7 @@ describe("Plane 2 — Effect", () => {
   test("P2-13: ndjsonReadTool with real tmpdir file → ok:true parsed", async () => {
     const dir = await makeUniqueDir("plane2-ndjson")
     try {
-      await writeFile(
-        path.join(dir, "log.ndjson"),
-        `{"a":1}\n{"a":2}\n{"a":3}\n`,
-      )
+      await writeFile(path.join(dir, "log.ndjson"), `{"a":1}\n{"a":2}\n{"a":3}\n`)
       let last: ToolResult | undefined
       for await (const ev of ndjsonReadTool.execute(
         { path: "log.ndjson" } as never,
@@ -718,10 +703,7 @@ describe("Cross-plane composition", () => {
     const odb = makeFakeOdb({ registerHead: async () => "head-sha" })
     const ledger = defaultBudgetLedger()
     const metrics = defaultMetricsRegistry()
-    const baseRegistry = new ToolRegistry([
-      readImageTool as Tool,
-      webFetchTool() as Tool,
-    ])
+    const baseRegistry = new ToolRegistry([readImageTool as Tool, webFetchTool() as Tool])
     const features = await buildSessionFeatures(
       makeMinimalConfig({
         registry: baseRegistry,
@@ -746,8 +728,7 @@ describe("Cross-plane composition", () => {
 
   test("X-29: pipeline + subagentBackground.scheduler → schedule survives composition", async () => {
     const scheduler = defaultBackgroundSubagentScheduler({
-      runner: async () =>
-        ({ ok: true, output: "done", turns: 1, finalText: "done" }) as never,
+      runner: async () => ({ ok: true, output: "done", turns: 1, finalText: "done" }) as never,
     })
     const features = await buildSessionFeatures(
       makeMinimalConfig({
