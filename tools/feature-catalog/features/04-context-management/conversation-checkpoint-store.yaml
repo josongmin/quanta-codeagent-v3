@@ -1,0 +1,33 @@
+id: conversation-checkpoint-store
+title: ConversationCheckpointStore — pure in-memory messages snapshot/restore (ADR-0124)
+section: 4
+subsystem: Conversation-level rollback primitive (ShadowOdb 대화 face)
+order: 31
+maturity: L4
+status: new
+purpose: |
+  대화-레벨 rollback primitive — `ShadowOdb`(파일 face) 의 대화 face. Hermes Agent
+  `/rollback` + Cline "Restore Files & Task" 가 file rollback 위에 conversation
+  rollback 도 함께 제공하는 패턴. v3 는 ADR-0118 로 file rollback 은 있었지만 대화 face
+  가 빠져있었다 — 본 모듈이 그 빠진 절반. 6-rule contract: (1) pure store(in-memory,
+  no I/O); (2) no-throw on public surface(programmer-bug 예외); (3)
+  exactOptionalPropertyTypes — optional `now` 는 absent or 정의, 절대 `undefined`
+  필드; (4) array-level immutability(`Object.freeze(messages.slice())`,
+  Message 객체 deep-freeze 는 의도적 미적용); (5) LRU eviction at `maxEntries=50`
+  default; (6) 동일 id 재기록은 REPLACE + takenAt 갱신(중복 X).
+evidence:
+  code:
+    - src/agent/conversation-checkpoint.ts
+  adrs: [124]
+  tests:
+    unit:
+      - tests/unit/conversation-checkpoint-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF — loop 은 본 store 를 instantiate 하지 않는다. 미래의 `/rewind` slash
+  command / auto-recovery hook 이 `defaultConversationCheckpointStore()` 로 opt-in.
+  `@/agent/loop` / `@/agent/recovery` / `@/agent/session-resources` / `@/permission`
+  의존 0(plane-clean — 그들이 consumer 이지 collaborator 가 아님).
