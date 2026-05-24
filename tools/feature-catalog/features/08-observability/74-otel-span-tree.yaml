@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["quanta.conversation.id", "quanta.turn.id", "quanta.tool.call.status", "quanta.thread.id", "quanta.turn.kind"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: []

@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.patch", "quanta.patch.fuzzy_match_tier", "quanta.patch.fuzzy_matched", "quanta.patch.op"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]

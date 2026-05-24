@@ -7,7 +7,7 @@ maturity: L5
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:tooling"]

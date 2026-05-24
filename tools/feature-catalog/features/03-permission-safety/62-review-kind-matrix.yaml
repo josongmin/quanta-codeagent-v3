@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 telemetry_keys: ["quanta.hitl"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, absorbed:cursor, surface:cli]

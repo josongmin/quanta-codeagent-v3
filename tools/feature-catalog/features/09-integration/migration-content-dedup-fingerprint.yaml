@@ -7,7 +7,7 @@ maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]

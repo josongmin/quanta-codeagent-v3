@@ -6,7 +6,7 @@ maturity: L4
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_SANDBOX]

@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 telemetry_keys: ["quanta.local"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]

@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["shell.exec.stdout.chunks", "shell.exec.stderr.chunks", "shell.exec.stdout.bytes", "shell.exec.stderr.bytes"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli]

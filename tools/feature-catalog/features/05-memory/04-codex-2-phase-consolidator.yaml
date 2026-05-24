@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["quanta.conversation.id"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]

@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["quanta.memory.phase", "quanta.memory.recall.hits", "quanta.memory.recall.scanned", "quanta.memory.recall.latency_ms"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:adapter", "absorbed:opentelemetry"]

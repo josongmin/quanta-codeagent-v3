@@ -7,7 +7,7 @@ maturity: L4
 status: new
 ui_surfaces: [none]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]

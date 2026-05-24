@@ -7,7 +7,7 @@ maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]

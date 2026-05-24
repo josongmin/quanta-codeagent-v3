@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: []
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_LOG_LEVEL]

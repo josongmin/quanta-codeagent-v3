@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.memory.phase", "quanta.thread.id", "quanta.thread.kind", "quanta.conversation.id", "quanta.conversation.session_id"]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_METRICS]

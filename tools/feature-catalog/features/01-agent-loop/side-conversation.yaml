@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: [quanta.thread.side, quanta.thread.kind]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:claude-code, surface:core, tier:1]

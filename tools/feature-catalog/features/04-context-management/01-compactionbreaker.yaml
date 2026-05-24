@@ -7,7 +7,7 @@ maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_COMPACT_BREAKER, QUANTA_COMPACT_BREAKER_REACTIVE_MAX, QUANTA_COMPACT_BREAKER_PROACTIVE_MAX]

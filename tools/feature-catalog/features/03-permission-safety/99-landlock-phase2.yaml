@@ -7,7 +7,7 @@ maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: partial
 owners: ["@songmin"]
 labels: ["absorbed:cursor", "surface:runtime", "tier:adapter"]

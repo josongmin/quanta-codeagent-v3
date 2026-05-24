@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: [gen_ai.usage, quanta.work.cost_usd]
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]

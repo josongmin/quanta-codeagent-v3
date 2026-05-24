@@ -7,7 +7,7 @@ maturity: L4
 status: new
 ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
   env: [QUANTA_OAUTH_ISSUER, QUANTA_OAUTH_CLIENT_ID, QUANTA_CHATGPT_API_BASE, QUANTA_OAUTH_SKU, QUANTA_OAUTH_ORIGINATOR]

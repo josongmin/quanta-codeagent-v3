@@ -7,7 +7,7 @@ maturity: L2
 status: hold
 ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: planned
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]

@@ -7,7 +7,7 @@ maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [batch]
 configurable: integrated
 owners: ['@songmin']
 labels: [surface:cli]
