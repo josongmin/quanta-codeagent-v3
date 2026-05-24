@@ -381,17 +381,19 @@ export class AnthropicAdapter implements LLMPort {
     // silently-hung stream now throws a structured `stream_corrupt` LLMError
     // (message includes "timeout") that the agent loop's `classifyLLMError`
     // routes through the existing same-turn retry path (RETRYABLE_MARKERS
-    // hit). On timeout the wrapper also cancels the upstream fetch via its
-    // own AbortController so no orphan request is left holding the socket.
+    // hit). On timeout or early consumer stop the wrapper finalizes the raw
+    // SDK stream and aborts its exposed upstream cancellation surface, so no
+    // orphan request is left holding the socket.
     const guarded = withStreamTimeout(raw, {
       firstChunkMs: this.streamTimeoutMs.firstChunkMs,
       idleMs: this.streamTimeoutMs.idleMs,
       provider: "anthropic",
       // Compose the caller's signal into the wrapper: when it fires, the
-      // wrapper aborts its OWN internal controller and tears down the timeout
-      // race cleanly. This handles the post-create() streaming phase (the SDK
-      // signal above handles the create()/TTFT phase). Absent ⇒ wrapper still
-      // self-aborts on its own timeouts (byte-identical).
+      // wrapper aborts the raw SDK stream's own upstream cancellation surface
+      // and tears down the timeout race cleanly. This handles the post-create()
+      // streaming phase (the SDK signal above handles the create()/TTFT
+      // phase). Absent ⇒ wrapper still self-aborts on its own timeouts
+      // (byte-identical).
       ...(input.signal ? { signal: input.signal } : {}),
     })
 

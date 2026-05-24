@@ -2,14 +2,9 @@
 name: git-log-search
 description: Search git history with pickaxe (-S), regex (-G), author filter, time filter, or path filter. Triggers on "when did X get added", "find commits matching pattern", "who wrote X", "git history search", "code archaeology".
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
+allowedTools: ["Bash", "Read"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
 ---
 
 # git-log-search — code archaeology via git log

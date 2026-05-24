@@ -41,7 +41,9 @@ const randChars = (n: number, alpha: string): string => {
 }
 
 const AWS_ACCESS_KEY = `AKIA${randChars(16, A_ALNUM)}`
-const AWS_SECRET_LINE = `AWS_SECRET_ACCESS_KEY=${randChars(40, B64 + "=")}`
+// Deterministic 40-char value that secretlint's AWS secret-key rule accepts
+// while avoiding the built-in ignored fixture token.
+const AWS_SECRET_LINE = "AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"
 const OPENAI_KEY = `sk-svcacct-${randChars(74, URL_SAFE)}T3BlbkFJ${randChars(74, URL_SAFE)}`
 const ANTHROPIC_KEY = `sk-ant-api03-${randChars(106, URL_SAFE)}AA`
 const GITHUB_PAT = `ghp_${randChars(36, ALNUM)}`
@@ -103,12 +105,10 @@ describe("B. translation table — secretlint rule → SecretKind", () => {
   })
 
   test("B7 — GCP service-account JSON → kind=gcp-service-account", async () => {
-    // GCP rule (see preset source) only fires for sources whose ext is
-    // `.json` or `.p12`. scanFile uses the path's extension naturally, so
-    // we test against an actual file with a .json suffix.
     const dir = mkdtempSync(join(tmpdir(), "secretlint-gcp-test-"))
     try {
-      const fakePem = `-----BEGIN PRIVATE KEY-----\\nMI${randChars(200, B64)}=\\n-----END PRIVATE KEY-----`
+      const pemBody = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".repeat(4)
+      const fakePem = `-----BEGIN PRIVATE KEY-----\\nMI${pemBody.slice(0, 200)}=\\n-----END PRIVATE KEY-----`
       const gcpJson = `{"type":"service_account","project_id":"x","private_key_id":"a1b2c3","private_key":"${fakePem}","client_email":"x@y.iam.gserviceaccount.com","client_id":"123","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"https://www.googleapis.com/robot/v1/metadata/x509/x"}`
       const p = join(dir, "service-account.json")
       writeFileSync(p, gcpJson)
@@ -159,9 +159,7 @@ describe("B. translation table — secretlint rule → SecretKind", () => {
     // AND a contrived "unknown vendor" text that won't trigger anything.
     // The negative case + the high-confidence positive together prove the
     // translate branch isn't a no-op.
-    const findings = await secretlintScanner().scanText(
-      `stripe=sk_live_${randChars(50, ALNUM)}`,
-    )
+    const findings = await secretlintScanner().scanText(`stripe=sk_live_${randChars(50, ALNUM)}`)
     const stripe = findings.find((f) => f.kind === "stripe-key")
     expect(stripe).toBeDefined()
     expect(stripe?.confidence).toBe("high")
@@ -205,8 +203,8 @@ describe("D. defaults sanity", () => {
         ? top.rules.find((r) => r.id === "@secretlint/secretlint-rule-aws")
         : undefined
     expect(inner).toBeDefined()
-    expect(
-      (inner?.options as { enableIDScanRule?: boolean } | undefined)?.enableIDScanRule,
-    ).toBe(true)
+    expect((inner?.options as { enableIDScanRule?: boolean } | undefined)?.enableIDScanRule).toBe(
+      true,
+    )
   })
 })

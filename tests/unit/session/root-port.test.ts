@@ -4,18 +4,27 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   archivedFilePathAsync,
+  archiveSession,
+  deleteSession,
   defaultSessionRootProvider,
+  forkSession,
   indexFilePathAsync,
+  listSessions,
   loadSessionById,
+  renameSession,
+  rewindToMessage,
+  SessionIdError,
   type SavePayload,
   type SessionMeta,
   saveSessionById,
+  sessionEnvelopePath,
   sessionEnvelopePathAsync,
   sessionFilePath,
   sessionFilePathAsync,
   sessionsRoot,
   sessionsRootAsync,
   staticSessionRootProvider,
+  unarchiveSession,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 
@@ -88,6 +97,14 @@ describe("SessionRootProvider", () => {
       expect(await archivedFilePathAsync("s1", provider)).toBe("/srv/tenant/abc/archived/s1.json")
       expect(await indexFilePathAsync(provider)).toBe("/srv/tenant/abc/index.jsonl")
       expect(await sessionEnvelopePathAsync("s1", provider)).toBe("/srv/tenant/abc/s1.jsonl")
+    })
+
+    test("JSONL path helpers reject traversal ids with the same guard as snapshot paths", async () => {
+      const provider = staticSessionRootProvider("/srv/tenant/abc")
+      expect(() => sessionEnvelopePath("../escape")).toThrow(SessionIdError)
+      await expect(sessionEnvelopePathAsync("../escape", provider)).rejects.toBeInstanceOf(
+        SessionIdError,
+      )
     })
 
     test("a custom inline provider can do async work (e.g. IPC stub)", async () => {
@@ -189,6 +206,60 @@ describe("SessionRootProvider", () => {
       // even though both live on the same OS, the resolver scopes them apart.
       const leaked = await loadSessionById("tenant-only")
       expect(leaked).toBeUndefined()
+    })
+
+    test("provider-aware mutators keep files and index entries inside the tenant root", async () => {
+      const provider = staticSessionRootProvider(tenantA)
+      const defaultDir = process.env.QUANTA_SESSIONS_DIR
+      expect(defaultDir).toBeDefined()
+      await saveSessionById(
+        {
+          id: "mut-1",
+          title: "tenant-title",
+          cwd: "/work",
+          createdAt: 1,
+          lastTouched: 1,
+          archived: false,
+          gitSha: "cafefeed",
+        },
+        {
+          reason: "completed",
+          turns: 2,
+          messages: [
+            { role: "user", content: [{ type: "text", text: "a" }], id: "m0" },
+            { role: "assistant", content: [{ type: "text", text: "b" }], id: "m1" },
+            { role: "user", content: [{ type: "text", text: "c" }], id: "m2" },
+          ],
+        },
+        provider,
+      )
+
+      await renameSession("mut-1", "tenant-renamed", provider)
+      await rewindToMessage("mut-1", "m1", provider)
+      const forkedId = await forkSession("mut-1", { newId: "mut-fork" }, provider)
+      expect(forkedId).toBe("mut-fork")
+      await archiveSession("mut-1", provider)
+      await unarchiveSession("mut-1", provider)
+
+      const tenantList = await listSessions({ includeArchived: true }, provider)
+      expect(tenantList.map((m) => m.id).sort()).toEqual(["mut-1", "mut-fork"])
+      const defaultList = await listSessions({ includeArchived: true })
+      expect(defaultList.map((m) => m.id)).not.toContain("mut-1")
+      expect(defaultList.map((m) => m.id)).not.toContain("mut-fork")
+
+      const tenantSession = await loadSessionById("mut-1", provider)
+      expect(tenantSession?.meta.title).toBe("tenant-renamed")
+      expect(tenantSession?.meta.gitSha).toBe("cafefeed")
+      expect(tenantSession?.messages.map((m) => m.id)).toEqual(["m0", "m1"])
+      if (defaultDir !== undefined) {
+        expect(existsSync(join(defaultDir, "mut-1.json"))).toBe(false)
+        expect(existsSync(join(defaultDir, "mut-fork.json"))).toBe(false)
+      }
+
+      await deleteSession("mut-fork", provider)
+      await deleteSession("mut-1", provider)
+      expect(await loadSessionById("mut-fork", provider)).toBeUndefined()
+      expect(await loadSessionById("mut-1", provider)).toBeUndefined()
     })
   })
 })

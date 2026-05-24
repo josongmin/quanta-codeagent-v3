@@ -208,28 +208,46 @@ const isBinaryContentType = (ct: string): boolean => {
 
 /** Stream the response body with a hard byte cap. Returns the accumulated
  *  bytes (truncated at `maxBytes`) and a `truncated` flag for the caller to
- *  surface in `output`. We use the response's reader so we don't buffer the
- *  whole body just to chop the tail. */
+ *  surface in `output`, or `kind:"aborted"` when `signal` fires mid-read.
+ *  Abort is a failure, not a successful truncated response. We use the
+ *  response's reader so we don't buffer the whole body just to chop the tail. */
 const readCappedBody = async (
   res: Response,
   maxBytes: number,
   signal: AbortSignal,
-): Promise<{ bytes: Uint8Array; truncated: boolean }> => {
+): Promise<
+  | { kind: "ok"; bytes: Uint8Array; truncated: boolean }
+  | { kind: "aborted" }
+> => {
   const reader = res.body?.getReader()
   if (reader === undefined) {
     // Body-less response (HEAD-like) — return empty.
-    return { bytes: new Uint8Array(0), truncated: false }
+    return { kind: "ok", bytes: new Uint8Array(0), truncated: false }
   }
   const chunks: Uint8Array[] = []
   let total = 0
   let truncated = false
+  let aborted = signal.aborted
+  const onAbort = (): void => {
+    aborted = true
+    void reader.cancel().catch(() => {
+      // best-effort
+    })
+  }
+  if (!aborted) signal.addEventListener("abort", onAbort, { once: true })
   try {
+    if (aborted) return { kind: "aborted" }
     while (true) {
-      if (signal.aborted) {
-        truncated = true
-        break
+      if (aborted) return { kind: "aborted" }
+      let step: ReadableStreamReadResult<Uint8Array>
+      try {
+        step = await reader.read()
+      } catch (e) {
+        if (aborted || signal.aborted) return { kind: "aborted" }
+        throw e
       }
-      const { done, value } = await reader.read()
+      if (aborted || signal.aborted) return { kind: "aborted" }
+      const { done, value } = step
       if (done) break
       if (value === undefined) continue
       const remaining = maxBytes - total
@@ -243,6 +261,7 @@ const readCappedBody = async (
       total += value.byteLength
     }
   } finally {
+    signal.removeEventListener("abort", onAbort)
     try {
       await reader.cancel()
     } catch {
@@ -256,7 +275,7 @@ const readCappedBody = async (
     out.set(c, offset)
     offset += c.byteLength
   }
-  return { bytes: out, truncated }
+  return { kind: "ok", bytes: out, truncated }
 }
 
 /** Truncate output to `WEB_FETCH_MAX_OUTPUT`, with a suffix the model can
@@ -358,7 +377,9 @@ const decodeBodyPhase = async (
   | { kind: "fail"; result: ToolResult }
   | { kind: "ok"; bytes: Uint8Array; body: string; truncated: boolean }
 > => {
-  let bodyOut: { bytes: Uint8Array; truncated: boolean }
+  let bodyOut:
+    | { kind: "ok"; bytes: Uint8Array; truncated: boolean }
+    | { kind: "aborted" }
   try {
     bodyOut = await readCappedBody(res, maxBytes, signal)
   } catch (e) {
@@ -368,6 +389,15 @@ const decodeBodyPhase = async (
       result: errResult(`body read failed: ${msg}`, {
         mode: "error",
         modelVisibleError: msg,
+      }),
+    }
+  }
+  if (bodyOut.kind === "aborted") {
+    return {
+      kind: "fail",
+      result: errResult("aborted during body read", {
+        mode: "rejected",
+        reason: "aborted",
       }),
     }
   }

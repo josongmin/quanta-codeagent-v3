@@ -15,18 +15,18 @@ export { compositeSecretScanner } from "./composite-scanner"
 export { entropyScanner, shannonEntropyBits } from "./entropy-scanner"
 export { patternScanner } from "./pattern-scanner"
 export {
-  DEFAULT_SECRETLINT_CONFIG,
-  secretlintScanner,
-  type SecretlintScannerOpts,
-} from "./secretlint-scanner"
-export {
   DEFAULT_ENTROPY_THRESHOLD_BITS_PER_CHAR,
   DEFAULT_MAX_FINDINGS,
   DEFAULT_MIN_SECRET_LENGTH,
   mask,
   type SecretFinding,
   type SecretKind,
-  type SecretScanTextOpts,
   type SecretScanner,
   type SecretScannerOpts,
+  type SecretScanTextOpts,
 } from "./port"
+export {
+  DEFAULT_SECRETLINT_CONFIG,
+  type SecretlintScannerOpts,
+  secretlintScanner,
+} from "./secretlint-scanner"

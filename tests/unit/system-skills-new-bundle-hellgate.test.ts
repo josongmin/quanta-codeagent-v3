@@ -97,12 +97,7 @@ describe("ADR-0134 — engineering-task skills bundle (hellgate)", () => {
         `[${skill.dir}] allowedTools must be non-empty`,
       ).toBeGreaterThan(0)
 
-      // Mirror invariant: discoverSkills() reads `tools:` for runtime
-      // enforcement; the system-skill convention bundles both fields.
-      expect(
-        Array.isArray(data.tools),
-        `[${skill.dir}] tools must be a list (lenient mirror)`,
-      ).toBe(true)
+      expect(data.tools, `[${skill.dir}] must not ship a legacy tools mirror`).toBeUndefined()
 
       // parseFrontmatter is lenient and returns scalars as strings (the
       // strict 6-field parser in `skill-frontmatter.ts` is the one that
@@ -115,6 +110,7 @@ describe("ADR-0134 — engineering-task skills bundle (hellgate)", () => {
   // ---- HELL-2/4/6/8: per-skill router descriptor ----
   for (const skill of BUNDLE) {
     test(`HELL-${skill.dir}-router: NAME constant + trigger() + find() all wire to "${skill.dir}"`, async () => {
+      const { data } = readSkill(skill.dir)
       // NAME mirrors SKILL.md kebab id.
       expect(skill.name).toBe(skill.dir)
 
@@ -126,6 +122,7 @@ describe("ADR-0134 — engineering-task skills bundle (hellgate)", () => {
       const found = await skill.find()
       expect(found, `[${skill.dir}] findXxxSkill() must resolve`).toBeDefined()
       expect(found?.name).toBe(skill.name)
+      expect(found?.tools).toEqual(data.allowedTools as string[])
       expect((found?.body ?? "").length, `[${skill.dir}] body must be non-empty`).toBeGreaterThan(0)
     })
   }

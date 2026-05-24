@@ -26,8 +26,13 @@ export interface CodeActionLspClient {
     line: number,
     col: number,
     kind?: "quickfix" | "refactor" | "source" | "all",
+    signal?: AbortSignal,
   ): Promise<readonly CodeAction[] | null>
-  applyWorkspaceEdit(edit: CodeActionWorkspaceEdit): Promise<void>
+  applyWorkspaceEdit(
+    edit: CodeActionWorkspaceEdit,
+    sessionId?: string,
+    signal?: AbortSignal,
+  ): Promise<void>
 }
 
 /** Map a port-level `CodeActionKind` (9-value union, dotted form) to the
@@ -53,12 +58,13 @@ export class DefaultCodeActionAdapter implements CodeActionPort {
     line: number,
     col: number,
     kind?: CodeActionKind,
+    signal?: AbortSignal,
   ): Promise<readonly CodeAction[] | null> {
     const filter = toClientFilter(kind)
     const actions =
       filter === undefined
-        ? await this.client.requestCodeActions(file, line, col)
-        : await this.client.requestCodeActions(file, line, col, filter)
+        ? await this.client.requestCodeActions(file, line, col, undefined, signal)
+        : await this.client.requestCodeActions(file, line, col, filter, signal)
     if (actions === null) return null
     // When the caller asked for a specific port-level kind, narrow further
     // — the wire filter is prefix-coarse (e.g. `"refactor"` covers
@@ -67,7 +73,7 @@ export class DefaultCodeActionAdapter implements CodeActionPort {
     return actions.filter((a) => a.kind === kind)
   }
 
-  async applyEdit(edit: CodeActionWorkspaceEdit): Promise<void> {
-    await this.client.applyWorkspaceEdit(edit)
+  async applyEdit(edit: CodeActionWorkspaceEdit, signal?: AbortSignal): Promise<void> {
+    await this.client.applyWorkspaceEdit(edit, undefined, signal)
   }
 }

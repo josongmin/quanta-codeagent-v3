@@ -241,7 +241,7 @@ export const persistentBackgroundSubagentScheduler = async (
       return id
     },
 
-    poll(id): SubagentResult | null {
+    poll(id): HydratedSubagentResult | null {
       const live = inner.poll(id)
       if (live !== null) return live
       const interrupted = interruptedById.get(id)
@@ -251,7 +251,7 @@ export const persistentBackgroundSubagentScheduler = async (
       return null
     },
 
-    async await(id, awaitOpts): Promise<SubagentResult | null> {
+    async await(id, awaitOpts): Promise<HydratedSubagentResult | null> {
       const live = inner.poll(id)
       if (live !== null) return inner.await(id, awaitOpts)
       const interrupted = interruptedById.get(id)
@@ -275,14 +275,14 @@ export const persistentBackgroundSubagentScheduler = async (
 
     list(): ReadonlyArray<{
       id: SubagentHandleId
-      result: SubagentResult
+      result: HydratedSubagentResult
       spec: SubagentSpec
     }> {
       const liveEntries = inner.list()
       const liveIds = new Set(liveEntries.map((e) => e.id))
       const merged: Array<{
         id: SubagentHandleId
-        result: SubagentResult
+        result: HydratedSubagentResult
         spec: SubagentSpec
         startedAt: number
       }> = []

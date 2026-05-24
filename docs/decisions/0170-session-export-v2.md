@@ -49,7 +49,7 @@ type AnySessionExportEnvelope = SessionExportEnvelope | SessionExportEnvelopeV2
 - `emitV2?: boolean` — `true` 면 v2 envelope 반환. 부재 / `false` 면 v1 (byte-identical).
 - `annotations?: Record<string, string>` — v2 only, envelope 에 그대로 통과.
 - `withDigest?: boolean` — v2 only, `true` 면 sha256(`{session, sidecar}`) 을 envelope 에 첨부.
-- `capabilities?: string[]` — v2 only, 부재 시 `DEFAULT_V2_CAPABILITIES` (`["images","documents","shadow-odb","plan-queue","budget-ledger"]`) 자동 채움.
+- `capabilities?: string[]` — v2 only, 부재 시 `DEFAULT_V2_CAPABILITIES` (`["conversation-checkpoint","plan-queue","budget-ledger"]`) 자동 채움.
 
 오버로드 시그니처로 `emitV2: true` 리터럴을 넘긴 호출자는 `SessionExportEnvelopeV2` 를 직접 받는다. `exportSessionToJson` 도 동일 옵션을 honor.
 

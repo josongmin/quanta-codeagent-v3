@@ -2,16 +2,9 @@
 name: new-branch-and-pr
 description: End-to-end ship for a NEW change — create a branch, stage the diff, commit with a clear message, push, open a PR. Triggers on "create a PR", "ship this", "open a pull request", "make a new branch and PR".
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Edit
+allowedTools: ["Bash", "Read", "Edit"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Edit
 ---
 
 # Branch + commit + push + PR (end-to-end ship)

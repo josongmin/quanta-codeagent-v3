@@ -52,6 +52,35 @@ export interface ChunkBucketOptions {
  *  input length) from looping forever — we still cap chunk size by chars. */
 const CHAR_GROW_CAP = 4096
 
+/** Bounded per-call memoization for `tokenizer.count`. The coordinate cache
+ *  removes repeated span counts inside one search path; the content cache
+ *  suppresses re-counting identical repeated substrings across chunks. */
+const TOKEN_COUNT_CACHE_MAX = 1024
+
+type CountRange = (start: number, end: number) => number
+
+const buildCountRange = (text: string, tok: TokenizerPort): CountRange => {
+  const spanCache = new Map<string, number>()
+  const contentCache = new Map<string, number>()
+  return (start: number, end: number): number => {
+    const spanKey = `${start}:${end}`
+    const spanHit = spanCache.get(spanKey)
+    if (spanHit !== undefined) return spanHit
+    const slice = text.slice(start, end)
+    const contentHit = contentCache.get(slice)
+    if (contentHit !== undefined) {
+      spanCache.set(spanKey, contentHit)
+      return contentHit
+    }
+    const counted = tok.count(slice)
+    spanCache.set(spanKey, counted)
+    if (contentCache.size < TOKEN_COUNT_CACHE_MAX) {
+      contentCache.set(slice, counted)
+    }
+    return counted
+  }
+}
+
 /** Walk `text` until the prefix length first exceeds `target` tokens, using
  *  exponential growth + binary refinement. Returns the LARGEST prefix whose
  *  token count is `<= target`. */
@@ -59,7 +88,7 @@ const longestPrefixWithinBudget = (
   text: string,
   start: number,
   target: number,
-  tok: TokenizerPort,
+  countRange: CountRange,
 ): number => {
   if (start >= text.length) return start
   if (target <= 0) return start
@@ -67,19 +96,19 @@ const longestPrefixWithinBudget = (
   let lo = start
   let hi = Math.min(text.length, start + 1)
   let step = 1
-  while (hi < text.length && tok.count(text.slice(start, hi)) <= target) {
+  while (hi < text.length && countRange(start, hi) <= target) {
     lo = hi
     step = Math.min(step * 2, CHAR_GROW_CAP)
     hi = Math.min(text.length, hi + step)
   }
   // If the entire remainder fits, return end.
-  if (hi >= text.length && tok.count(text.slice(start, hi)) <= target) {
+  if (hi >= text.length && countRange(start, hi) <= target) {
     return text.length
   }
   // Binary refine in [lo, hi].
   while (lo + 1 < hi) {
     const mid = (lo + hi) >> 1
-    if (tok.count(text.slice(start, mid)) <= target) {
+    if (countRange(start, mid) <= target) {
       lo = mid
     } else {
       hi = mid
@@ -92,11 +121,10 @@ const longestPrefixWithinBudget = (
  *  OR we hit `start`. Returns the smallest position whose suffix is at most
  *  that many tokens long (so the next chunk starts at that position). */
 const overlapStartPos = (
-  text: string,
   end: number,
   start: number,
   overlapTokens: number,
-  tok: TokenizerPort,
+  countRange: CountRange,
 ): number => {
   if (overlapTokens <= 0) return end
   // Binary search the start position in [start, end] s.t. tokens(text[pos..end]) ≈ overlapTokens.
@@ -104,7 +132,7 @@ const overlapStartPos = (
   let hi = end
   while (lo + 1 < hi) {
     const mid = (lo + hi) >> 1
-    const t = tok.count(text.slice(mid, end))
+    const t = countRange(mid, end)
     if (t >= overlapTokens) {
       lo = mid
     } else {
@@ -144,9 +172,9 @@ const stepOnce = (
   pos: number,
   budget: number,
   overlapTokens: number,
-  tok: TokenizerPort,
+  countRange: CountRange,
 ): { chunk: string; next: number; atEnd: boolean } => {
-  const end = longestPrefixWithinBudget(text, pos, budget, tok)
+  const end = longestPrefixWithinBudget(text, pos, budget, countRange)
   if (end <= pos) {
     // Tokenizer says even one char exceeds budget — emit a 1-char chunk
     // to make forward progress; the caller's tokenizer is broken but we
@@ -155,7 +183,7 @@ const stepOnce = (
   }
   const chunk = text.slice(pos, end)
   if (end >= text.length) return { chunk, next: end, atEnd: true }
-  const nextStart = overlapStartPos(text, end, pos, overlapTokens, tok)
+  const nextStart = overlapStartPos(end, pos, overlapTokens, countRange)
   const next = nextStart > pos ? nextStart : pos + 1
   return { chunk, next, atEnd: false }
 }
@@ -174,7 +202,8 @@ export const rechunk = (text: string, opts: ChunkBucketOptions): readonly string
   if (opts.bucket === "identity") return [text]
   const { budget, ratio } = validateOptions(opts)
   if (text.length === 0) return []
-  const total = opts.tokenizer.count(text)
+  const countRange = buildCountRange(text, opts.tokenizer)
+  const total = countRange(0, text.length)
   if (total <= budget) return [text]
   const overlapTokens = Math.max(0, Math.floor(budget * ratio))
   const chunks: string[] = []
@@ -184,7 +213,7 @@ export const rechunk = (text: string, opts: ChunkBucketOptions): readonly string
     if (guard-- <= 0) {
       throw new RetrievalError("chunk-bucket loop guard exceeded — tokenizer likely degenerate")
     }
-    const step = stepOnce(text, pos, budget, overlapTokens, opts.tokenizer)
+    const step = stepOnce(text, pos, budget, overlapTokens, countRange)
     chunks.push(step.chunk)
     if (step.atEnd) break
     pos = step.next

@@ -2,18 +2,9 @@
 name: rewind
 description: Restore workspace to a previously captured shadow snapshot. Triggers on "rewind", "undo", "rollback", "go back", "revert changes".
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - shadow_snapshots
-  - shadow_rewind
-  - shadow_restore_partial
+allowedTools: ["Bash", "Read", "shadow_snapshots", "shadow_rewind", "shadow_restore_partial"]
 category: skill
 stability: stable
-tools:
-  - shadow_snapshots
-  - shadow_rewind
-  - shadow_restore_partial
 ---
 
 # rewind — snapshot restoration

@@ -484,6 +484,8 @@ describe("session store — git/provider regressions", () => {
     }
     await saveSessionById(meta, mkPayload(), provider)
 
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
     expect(await loadSessionById("tenant-1")).toBeUndefined()
     expect((await listSessions()).map((m) => m.id)).not.toContain("tenant-1")
     expect((await listSessions(undefined, provider)).map((m) => m.id)).toContain("tenant-1")
@@ -530,6 +532,8 @@ describe("session store — git/provider regressions", () => {
       provider,
     )
 
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
     const result = await rewindToMessage("tenant-rw", "m1", provider)
     expect(result).toEqual({ removed: 1 })
     expect(await loadSessionById("tenant-rw")).toBeUndefined()

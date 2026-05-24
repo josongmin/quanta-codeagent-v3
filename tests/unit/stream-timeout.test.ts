@@ -7,8 +7,9 @@
  *     loop's `RETRYABLE_MARKERS` checks for so retry engages).
  *  2. Yield-one-then-hang silence → same error class with "idle" + "timeout".
  *  3. Yields-within-budget → passes through verbatim, no throw.
- *  4. On timeout the wrapper's internal AbortController fires so the upstream
- *     SDK fetch is cancelled (probe asserts `.signal.aborted`).
+ *  4. On timeout the wrapper aborts the RAW stream's upstream cancellation
+ *     handle (`.controller` / `.abort()`), so the provider request is really
+ *     torn down instead of only flipping a disconnected local controller.
  *  5. Both adapters import the wrapper (source-level grep).
  *
  * Real timers are used: budgets are tiny (50–100 ms) so a passing test
@@ -41,7 +42,6 @@ function makeStubStream<T>(opts: {
   return {
     [Symbol.asyncIterator](): AsyncIterator<T> {
       let i = 0
-      let firstYielded = false
       return {
         async next(): Promise<IteratorResult<T>> {
           if (i === 0 && opts.delayBeforeFirstMs !== undefined) {
@@ -59,7 +59,6 @@ function makeStubStream<T>(opts: {
             return { value: undefined as unknown as T, done: true }
           }
           const v = opts.chunks[i++] as T
-          firstYielded = true
           return { value: v, done: false }
         },
       }
@@ -67,10 +66,22 @@ function makeStubStream<T>(opts: {
   }
 }
 
+function makeControllerBackedStream<T>(opts: {
+  chunks: T[]
+  hangAfter?: boolean
+  delayBeforeFirstMs?: number
+  delayBetweenMs?: number
+}): AsyncIterable<T> & { controller: AbortController } {
+  const base = makeStubStream(opts)
+  const controller = new AbortController()
+  return {
+    controller,
+    [Symbol.asyncIterator]: base[Symbol.asyncIterator].bind(base),
+  }
+}
+
 describe("withStreamTimeout — first-chunk deadline", () => {
   test("stream that yields nothing throws stream_corrupt with 'first-chunk' message", async () => {
-    // Stream never yields and never ends: only the first-chunk deadline can
-    // resolve the race. With firstChunkMs=50 we expect a throw in ~50 ms.
     const stub = makeStubStream<number>({ chunks: [], hangAfter: true })
     const wrapped = withStreamTimeout(stub, {
       firstChunkMs: 50,
@@ -81,10 +92,7 @@ describe("withStreamTimeout — first-chunk deadline", () => {
     let caught: unknown
     const t0 = Date.now()
     try {
-      // eslint-disable-next-line no-restricted-syntax
-      for await (const _ of wrapped) {
-        // unreachable
-      }
+      for await (const _ of wrapped) void _
     } catch (e) {
       caught = e
     }
@@ -95,21 +103,14 @@ describe("withStreamTimeout — first-chunk deadline", () => {
     expect(err.kind).toBe("stream_corrupt")
     expect(err.provider).toBe("openai")
     expect(err.message).toContain("first-chunk")
-    // Message must contain "timeout" so the loop's RETRYABLE_MARKERS hits and
-    // `classifyLLMError` returns "retryable" (existing same-turn retry path).
     expect(err.message.toLowerCase()).toContain("timeout")
-    // Should fire near the deadline, not after the wall-clock budget for the
-    // FOREVER-hung promise (which would mean the race didn't work).
     expect(elapsed).toBeLessThan(500)
-    // `cause` records WHICH timeout fired (diagnostic surfacing).
     expect((err.cause as Error | undefined)?.message ?? "").toContain("first-chunk")
   })
 })
 
 describe("withStreamTimeout — inter-chunk idle deadline", () => {
   test("yield one then hang forever throws stream_corrupt with 'idle' message", async () => {
-    // One chunk lands fast, then the stream hangs. firstChunk deadline is
-    // generous so it MUST be the idle deadline that fires.
     const stub = makeStubStream<string>({ chunks: ["a"], hangAfter: true })
     const wrapped = withStreamTimeout(stub, {
       firstChunkMs: 5_000,
@@ -161,7 +162,7 @@ describe("withStreamTimeout — within-budget passthrough", () => {
     })
     const wrapped = withStreamTimeout(stub, {
       firstChunkMs: 500,
-      idleMs: 500, // generous vs the 30 ms between chunks
+      idleMs: 500,
       provider: "anthropic",
     })
     const got: string[] = []
@@ -171,44 +172,39 @@ describe("withStreamTimeout — within-budget passthrough", () => {
 })
 
 describe("withStreamTimeoutProbed — abort propagation", () => {
-  test("on first-chunk timeout the internal controller signal is aborted", async () => {
-    const stub = makeStubStream<number>({ chunks: [], hangAfter: true })
-    let controller: AbortController | undefined
+  test("on first-chunk timeout the raw stream controller signal is aborted", async () => {
+    const stub = makeControllerBackedStream<number>({ chunks: [], hangAfter: true })
+    let probedHandle:
+      | {
+          readonly signal?: AbortSignal
+        }
+      | null = null
     const wrapped = withStreamTimeoutProbed(stub, {
       firstChunkMs: 40,
       idleMs: 9_999_000,
       provider: "openai",
-      onController: (c) => {
-        controller = c
+      onAbortHandle: (handle) => {
+        probedHandle = handle
       },
     })
 
     let threw = false
     try {
-      // eslint-disable-next-line no-restricted-syntax
-      for await (const _ of wrapped) {
-        // unreachable
-      }
+      for await (const _ of wrapped) void _
     } catch {
       threw = true
     }
     expect(threw).toBe(true)
-    expect(controller).toBeDefined()
-    // The wrapper must have aborted the upstream-cancellation signal so the
-    // SDK fetch is torn down (no orphan request).
-    expect(controller?.signal.aborted).toBe(true)
+    expect(probedHandle?.signal).toBe(stub.controller.signal)
+    expect(stub.controller.signal.aborted).toBe(true)
   })
 
-  test("on idle timeout the internal controller signal is aborted", async () => {
-    const stub = makeStubStream<string>({ chunks: ["only-one"], hangAfter: true })
-    let controller: AbortController | undefined
+  test("on idle timeout the raw stream controller signal is aborted", async () => {
+    const stub = makeControllerBackedStream<string>({ chunks: ["only-one"], hangAfter: true })
     const wrapped = withStreamTimeoutProbed(stub, {
       firstChunkMs: 5_000,
       idleMs: 40,
       provider: "anthropic",
-      onController: (c) => {
-        controller = c
-      },
     })
 
     let threw = false
@@ -220,43 +216,91 @@ describe("withStreamTimeoutProbed — abort propagation", () => {
     }
     expect(threw).toBe(true)
     expect(got).toEqual(["only-one"])
-    expect(controller?.signal.aborted).toBe(true)
+    expect(stub.controller.signal.aborted).toBe(true)
   })
 
-  test("caller-supplied signal abort propagates to the internal controller", async () => {
-    // Long-running stream that would otherwise keep yielding; the external
-    // signal trips, the internal controller MUST mirror that abort so the SDK
-    // fetch tears down too.
-    const stub = makeStubStream<number>({
+  test("caller-supplied signal abort propagates to the raw stream controller", async () => {
+    const stub = makeControllerBackedStream<number>({
       chunks: [1, 2, 3],
       delayBetweenMs: 100,
     })
     const caller = new AbortController()
-    let internal: AbortController | undefined
     const wrapped = withStreamTimeoutProbed(stub, {
       firstChunkMs: 5_000,
       idleMs: 5_000,
       provider: "openai",
       signal: caller.signal,
-      onController: (c) => {
-        internal = c
-      },
     })
 
     setTimeout(() => caller.abort(new Error("user cancelled")), 50)
 
     try {
       for await (const _v of wrapped) {
-        // consume until silently interrupted; the stub will keep yielding,
-        // so we break ourselves once internal aborts.
-        if (internal?.signal.aborted) break
+        if (stub.controller.signal.aborted) break
       }
     } catch {
       // intentional
     }
-    // give the event loop one tick for the addEventListener handler.
     await new Promise<void>((r) => setTimeout(r, 60))
-    expect(internal?.signal.aborted).toBe(true)
+    expect(stub.controller.signal.aborted).toBe(true)
+  })
+
+  test("on timeout the wrapper calls rawStream.abort() when no controller is exposed", async () => {
+    const base = makeStubStream<number>({ chunks: [], hangAfter: true })
+    let abortCalls = 0
+    const stub: AsyncIterable<number> & { abort(reason?: unknown): void } = {
+      abort: () => {
+        abortCalls += 1
+      },
+      [Symbol.asyncIterator]: base[Symbol.asyncIterator].bind(base),
+    }
+    const wrapped = withStreamTimeout(stub, {
+      firstChunkMs: 40,
+      idleMs: 9_999_000,
+      provider: "openai",
+    })
+
+    let threw = false
+    try {
+      for await (const _ of wrapped) void _
+    } catch {
+      threw = true
+    }
+
+    expect(threw).toBe(true)
+    expect(abortCalls).toBeGreaterThanOrEqual(1)
+  })
+
+  test("breaking the wrapped stream finalizes the upstream iterator", async () => {
+    let returnCalls = 0
+    const stub: AsyncIterable<number> = {
+      [Symbol.asyncIterator](): AsyncIterator<number> {
+        let i = 0
+        return {
+          async next() {
+            if (i >= 3) return { value: undefined as unknown as number, done: true }
+            i += 1
+            return { value: i, done: false }
+          },
+          async return(value?: number) {
+            returnCalls += 1
+            return { value, done: true }
+          },
+        }
+      },
+    }
+    const wrapped = withStreamTimeout(stub, {
+      firstChunkMs: 5_000,
+      idleMs: 5_000,
+      provider: "openai",
+    })
+
+    for await (const value of wrapped) {
+      expect(value).toBe(1)
+      break
+    }
+
+    expect(returnCalls).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -276,7 +320,6 @@ describe("resolveStreamTimeoutMs — precedence", () => {
       firstChunkMs: 1_000,
       idleMs: 2_000,
     })
-    // Partial override merges with env / default for the missing side.
     expect(resolveStreamTimeoutMs(5_000, undefined, { idleMs: 2_000 })).toEqual({
       firstChunkMs: 5_000,
       idleMs: 2_000,
@@ -290,9 +333,6 @@ describe("resolveStreamTimeoutMs — precedence", () => {
 })
 
 describe("T1 wiring — both adapters use withStreamTimeout", () => {
-  // Source-level pin: if a future refactor accidentally rips the wrapper out
-  // of one adapter, this test fails fast. This is the integration contract:
-  // the user explicitly called out that wiring only ONE adapter is a fail.
   const root = resolve(__dirname, "../..")
 
   test("openai adapter imports + applies withStreamTimeout", () => {
@@ -307,29 +347,15 @@ describe("T1 wiring — both adapters use withStreamTimeout", () => {
     expect(src).toContain('provider: "anthropic"')
   })
 
-  // Caller-cancellation threading (source-level pin): each adapter MUST forward
-  // the incoming StreamInput.signal in TWO places — into the SDK request
-  // options (aborts create()/TTFT) AND into the withStreamTimeout wrapper
-  // (composes with the timeout controller, aborts the post-create() stream).
-  // If a refactor drops either, an in-flight model stream stops aborting on
-  // user cancel and the socket hangs — the exact bug this fix closes. The
-  // source-level assertion is the right granularity: the adapters construct a
-  // real SDK client internally (no injection seam), so a behavioural mock would
-  // require inventing one; the wrapper's own caller-signal→controller
-  // propagation is already proven behaviourally above.
   test("openai adapter forwards input.signal to SDK options AND timeout wrapper", () => {
     const src = readFileSync(resolve(root, "src/llm/adapters/openai.ts"), "utf8")
-    // SDK request options: second arg to chat.completions.create.
     expect(src).toContain("input.signal ? { signal: input.signal } : undefined")
-    // Timeout wrapper composition.
     expect(src).toContain("...(input.signal ? { signal: input.signal } : {})")
   })
 
   test("anthropic adapter forwards input.signal to SDK options AND timeout wrapper", () => {
     const src = readFileSync(resolve(root, "src/llm/adapters/anthropic.ts"), "utf8")
-    // SDK request options: second arg to messages.create.
     expect(src).toContain("input.signal ? { signal: input.signal } : undefined")
-    // Timeout wrapper composition.
     expect(src).toContain("...(input.signal ? { signal: input.signal } : {})")
   })
 })

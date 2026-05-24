@@ -165,6 +165,7 @@ const buildSetup = (
     state: undefined as never,
     mcpClients: [],
     mcpTools: [],
+    mcpSurface: undefined,
     skillsConfig: undefined as never,
     lifecyclePills: stubPills(),
     lifecycleTaskRegistry: undefined,

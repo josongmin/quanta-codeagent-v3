@@ -82,6 +82,37 @@ class FakeLspClient extends LspClient {
   }
 }
 
+class AbortProbeClient extends LspClient {
+  readonly notifications: Array<{ method: string; params: unknown }> = []
+
+  constructor(options: LspClientOptions = {}) {
+    const spec: LspClientSpec = {
+      defaultCommand: ["unused"],
+      languageIdFor: () => "typescript",
+    }
+    super(spec, options)
+  }
+
+  async issue(method: string, signal?: AbortSignal): Promise<unknown> {
+    return this.sendRequest(method, { probe: true }, signal)
+  }
+
+  installTransport(stdin: { write: (chunk: string) => unknown }): void {
+    const self = this as unknown as {
+      proc: { stdin?: { write: (chunk: string) => unknown } } | null
+    }
+    self.proc = { stdin }
+  }
+
+  override async start(): Promise<void> {
+    return
+  }
+
+  protected override sendNotification(method: string, params: unknown): void {
+    this.notifications.push({ method, params })
+  }
+}
+
 /** The base `callOrNullOnUnsupported` uses `instanceof LspRequestError` to
  *  decide whether to translate a JSON-RPC error into a `null` result. The
  *  fake's `sendRequest` therefore rejects with the same class — anything
@@ -164,6 +195,21 @@ describe("LspClient nav RPC — definition / typeDefinition / implementation", (
     ])
     const requests = c.sent.filter((s) => s.kind === "request")
     expect(requests[requests.length - 1]?.method).toBe("textDocument/implementation")
+  })
+})
+
+describe("LspClient request cancellation plumbing", () => {
+  test("aborting a pending request rejects and emits $/cancelRequest", async () => {
+    const c = new AbortProbeClient()
+    c.installTransport({ write: () => undefined })
+    const ac = new AbortController()
+    const pending = c.issue("textDocument/hover", ac.signal)
+    ac.abort()
+    await expect(pending).rejects.toThrow(/aborted/)
+    expect(c.notifications).toContainEqual({
+      method: "$/cancelRequest",
+      params: { id: 1 },
+    })
   })
 })
 
@@ -518,6 +564,17 @@ class RealSendLspClient extends LspClient {
   callSendRequest(method: string, params: unknown): Promise<unknown> {
     return this.sendRequest(method, params)
   }
+  installTransport(stdin: { write: (chunk: string) => unknown } | undefined): void {
+    const self = this as unknown as {
+      started: boolean
+      proc: { stdin?: { write: (chunk: string) => unknown } } | null
+    }
+    self.started = true
+    self.proc = stdin ? { stdin } : {}
+  }
+  pendingCount(): number {
+    return (this as unknown as { pending: Map<number, unknown> }).pending.size
+  }
 }
 
 describe("LspClient lifecycle — sendRequest after stop/exit (base.ts guard)", () => {
@@ -534,11 +591,32 @@ describe("LspClient lifecycle — sendRequest after stop/exit (base.ts guard)", 
 
   test("the `shutdown` method is exempt from the guard (stop() issues it post-stop)", async () => {
     // shutdown after stop must NOT be rejected by the guard — it would instead
-    // register a pending entry and (with no proc) settle via the timeout path.
-    // We only assert the guard does not short-circuit it with the stop/exit
-    // rejection message.
+    // reach the transport layer. Missing transport is now rejected eagerly, so
+    // we assert it bypasses the stop/exit guard and fails as a transport error.
     const c = new RealSendLspClient()
     await c.stop()
-    await expect(c.callSendRequest("shutdown", null)).rejects.toThrow(/timed out/)
+    await expect(c.callSendRequest("shutdown", null)).rejects.toThrow(/stdin closed/)
+  })
+
+  test("missing stdin rejects immediately and clears the pending slot", async () => {
+    const c = new RealSendLspClient()
+    c.installTransport(undefined)
+    const started = Date.now()
+    await expect(c.callSendRequest("textDocument/definition", {})).rejects.toThrow(/stdin closed/)
+    expect(Date.now() - started).toBeLessThan(200)
+    expect(c.pendingCount()).toBe(0)
+  })
+
+  test("stdin.write throw rejects immediately and clears the pending slot", async () => {
+    const c = new RealSendLspClient()
+    c.installTransport({
+      write: () => {
+        throw new Error("kaboom")
+      },
+    })
+    const started = Date.now()
+    await expect(c.callSendRequest("textDocument/definition", {})).rejects.toThrow(/kaboom/)
+    expect(Date.now() - started).toBeLessThan(200)
+    expect(c.pendingCount()).toBe(0)
   })
 })

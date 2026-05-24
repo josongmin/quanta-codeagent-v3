@@ -15,13 +15,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { z } from "zod"
 import { runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { classifyCommandShape } from "@/security"
 import { defaultTools, ToolRegistry } from "@/tool"
+import type { Tool } from "@/tool/types"
 import { baseConfig, FakeLLM, RecordingStream, text, toolUse } from "./_harness"
 
 const FAKE_SECRET = "AKIAIOSFODNN7EXAMPLE"
@@ -40,10 +43,7 @@ describe("ADR-0078 — three application points", () => {
     // regex must do the work.
     const file = join(dir, "data.txt")
     writeFileSync(file, `prefix\nkey=${FAKE_SECRET}\nsuffix`)
-    const llm = new FakeLLM([
-      toolUse("c1", "read", { path: file }),
-      text("done"),
-    ])
+    const llm = new FakeLLM([toolUse("c1", "read", { path: file }), text("done")])
     const stream = new RecordingStream()
     const registry = new ToolRegistry(defaultTools)
     const outcome = await runAgent(
@@ -77,10 +77,7 @@ describe("ADR-0078 — three application points", () => {
   test("point 1: source-class secret path (.env) replaces entire tool output", async () => {
     const envFile = join(dir, ".env")
     writeFileSync(envFile, `STRIPE=sk_live_${"X".repeat(32)}\nDEBUG=true`)
-    const llm = new FakeLLM([
-      toolUse("c1", "read", { path: envFile }),
-      text("done"),
-    ])
+    const llm = new FakeLLM([toolUse("c1", "read", { path: envFile }), text("done")])
     const stream = new RecordingStream()
     const registry = new ToolRegistry(defaultTools)
     const outcome = await runAgent(
@@ -109,6 +106,53 @@ describe("ADR-0078 — three application points", () => {
     expect(rollup?.count ?? 0).toBeGreaterThan(0)
   })
 
+  test("point 1: command-shape secret read glob (~/.env*) replaces entire tool output", async () => {
+    const bashStub: Tool<{ command: string }> = {
+      name: "bash",
+      description: "test bash stub",
+      inputSchema: z.object({ command: z.string() }),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      extractShellCommand: (input) => input.command,
+      classifySource: (input) => classifyCommandShape(input.command),
+      async *execute() {
+        yield {
+          type: "result",
+          result: {
+            ok: true,
+            output: "AWS_SECRET_ACCESS_KEY=plain-test-secret\nDEBUG=true",
+          },
+        }
+      },
+    }
+    const llm = new FakeLLM([toolUse("c1", "bash", { command: "cat ~/.env*" }), text("done")])
+    const stream = new RecordingStream()
+    const outcome = await runAgent(
+      baseConfig({
+        llm,
+        registry: new ToolRegistry([bashStub]),
+        stream,
+        cwd: dir,
+        permission: { mode: "acceptEdits" } as PermissionContext,
+        system: "test",
+      }),
+    )
+
+    expect(outcome.reason).toBe("completed")
+    const toolResults = stream.events.filter((e) => e.type === "tool_result")
+    const previewText = toolResults
+      .map((e) => (e.type === "tool_result" ? e.preview : ""))
+      .join("\n")
+    expect(previewText).toContain("[REDACTED:source_class_secret]")
+    expect(previewText).toContain("cat ~/.env*")
+    expect(previewText).not.toContain("AWS_SECRET_ACCESS_KEY=plain-test-secret")
+    expect(previewText).not.toContain("DEBUG=true")
+    const rollup = outcome.redactions?.find(
+      (r) => r.origin === "tool_result" && r.kind === "source_class_secret",
+    )
+    expect(rollup?.count ?? 0).toBeGreaterThan(0)
+  })
+
   test("point 3: memory_distill input is redacted before the distill LLM call", async () => {
     // Single LLM that serves both the main turn AND the distill turn at
     // session end. We capture every `stream()` input so we can inspect
@@ -119,9 +163,7 @@ describe("ADR-0078 — three application points", () => {
       calls = 0
       async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
         const collected = input.messages
-          .flatMap((m: Message) =>
-            m.content.map((b) => (b.type === "text" ? b.text : "")),
-          )
+          .flatMap((m: Message) => m.content.map((b) => (b.type === "text" ? b.text : "")))
           .join("\n")
         seen.push(collected)
         this.calls += 1
@@ -197,16 +239,7 @@ describe("ADR-0078 — three application points", () => {
         return null
       },
     }
-    const distillLLM: LLMPort = {
-      model: "fake-distill",
-      async *stream(): AsyncIterable<StreamEvent> {
-        yield { type: "text_delta", delta: "[]" }
-        yield { type: "message_stop", stop_reason: "end_turn" }
-      },
-    }
-    const fakeMainLLM = new FakeLLM([
-      text(`The token is sk-ant-${"X".repeat(40)} btw.`),
-    ])
+    const fakeMainLLM = new FakeLLM([text(`The token is sk-ant-${"X".repeat(40)} btw.`)])
     const outcome = await runAgent(
       baseConfig({
         llm: fakeMainLLM,

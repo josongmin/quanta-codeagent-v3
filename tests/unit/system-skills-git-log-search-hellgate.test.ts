@@ -44,14 +44,11 @@ describe("ADR-0172 — git-log-search system skill (hellgate)", () => {
     expect((data.description as string).length).toBeGreaterThan(40)
     // userInvocable: true (strict parser accepts lowercase "true" string)
     expect(String(data.userInvocable).toLowerCase()).toBe("true")
-    // allowedTools / tools — both Bash + Read present (lenient parser yields
-    // a string[] for list-shape frontmatter).
+    // Strict allowlist metadata is the on-disk SSOT.
     const allowedTools = (data.allowedTools ?? []) as string[]
-    const tools = (data.tools ?? []) as string[]
     expect(allowedTools).toContain("Bash")
     expect(allowedTools).toContain("Read")
-    expect(tools).toContain("Bash")
-    expect(tools).toContain("Read")
+    expect(data.tools).toBeUndefined()
     // category / stability — same shape as siblings
     expect(data.category).toBe("skill")
     expect(data.stability).toBe("stable")
@@ -84,6 +81,7 @@ describe("ADR-0172 — git-log-search system skill (hellgate)", () => {
     expect(found).toBeDefined()
     expect(found?.name).toBe("git-log-search")
     expect(found?.scope).toBe("system")
+    expect(found?.tools).toEqual(["Bash", "Read"])
     expect((found?.body ?? "").length).toBeGreaterThan(0)
     // Also reachable via the top-level discovery (no silent omission from barrel).
     const all = await discoverSystemSkills()

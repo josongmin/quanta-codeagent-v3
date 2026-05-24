@@ -279,18 +279,6 @@ describe("BedrockProviderAdapter — hellgate", () => {
     // and assert that the upstream produced FEWER than 50 chunks (proves
     // back-pressure is honored end-to-end).
     //
-    // PRODUCTION GAP NOTED — current `withStreamTimeout` wraps the raw
-    // iter in a Promise.race(iter.next(), timeoutPromise) loop. When the
-    // outer `for-await…break` invokes the generator's return(), the
-    // pending `iter.next()` promise still resolves naturally — but the
-    // generator's finally only removes a listener; it does NOT call
-    // `iter.return?.()` on the upstream raw iter. Result: the raw iter
-    // is never finalized (SDK socket can linger). We do NOT assert
-    // `returnCalled >= 1` here because that would fail on current
-    // production — but we KEEP the spy fields wired so a future
-    // production fix can flip the assertion to ">= 1" trivially.
-    // See src/llm/stream-timeout.ts:158 (`finally` only removes
-    // listener) — fix is to also `await iter.return?.(undefined)`.
     let returnCalled = 0
     let throwCalled = 0
     let yieldedFromUpstream = 0
@@ -374,12 +362,9 @@ describe("BedrockProviderAdapter — hellgate", () => {
     expect(yieldedFromUpstream).toBeLessThan(50)
     // throwCalled MUST be 0: a clean consumer cancel is not a throw.
     expect(throwCalled).toBe(0)
-    // returnCalled — captured for visibility. Currently 0 due to the
-    // `withStreamTimeout` gap noted above. When that gap is fixed, the
-    // following assertion should be uncommented and the soft check
-    // removed:
-    //   expect(returnCalled).toBeGreaterThanOrEqual(1)
-    expect(returnCalled).toBeGreaterThanOrEqual(0)
+    // Early consumer stop MUST finalize the upstream iterator so the
+    // provider stream cannot linger after the caller has stopped reading.
+    expect(returnCalled).toBeGreaterThanOrEqual(1)
   })
 
   test("HELL-F4: signal abort during stream — caller signal forwarded + production halts (no leak)", async () => {
@@ -387,13 +372,6 @@ describe("BedrockProviderAdapter — hellgate", () => {
     // signal mid-stream, production MUST stop consuming the upstream.
     // This is the cancellation-via-signal variant of HELL-F3.
     //
-    // PRODUCTION GAP NOTED — same as F3: current production does not
-    // call `iter.return()` on the upstream. We verify what production
-    // DOES guarantee: the caller's AbortSignal is forwarded to the SDK
-    // (via withStreamTimeout's controller), so a well-behaved SDK
-    // observes the abort and stops. With our spy SDK (no signal
-    // observation), we instead check that no more chunks were drained
-    // after the consumer break — proving back-pressure end-to-end.
     let returnCalled = 0
     let yieldedAfterAbort = 0
     let aborted = false
@@ -479,8 +457,9 @@ describe("BedrockProviderAdapter — hellgate", () => {
     // from upstream (back-pressure). yieldedAfterAbort counts items
     // produced AFTER the abort flag was raised inside the loop.
     expect(yieldedAfterAbort).toBeLessThan(5)
-    // returnCalled captured for visibility — see HELL-F3 production gap.
-    expect(returnCalled).toBeGreaterThanOrEqual(0)
+    // Signal-driven cancellation plus consumer break still finalizes the raw
+    // iterator, so a provider stream cannot linger after cancellation.
+    expect(returnCalled).toBeGreaterThanOrEqual(1)
     void a // silence "declared but unused" if any
   })
 })

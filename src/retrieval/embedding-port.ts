@@ -31,7 +31,10 @@ export interface EmbeddingPort {
    * text at the same index. No padding / trimming — adapters return the
    * vector their provider produced.
    */
-  embed(texts: readonly string[]): Promise<readonly (readonly number[])[]>
+  embed(
+    texts: readonly string[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<readonly (readonly number[])[]>
 }
 
 /** Common options every vendor adapter accepts. Concrete adapters may add

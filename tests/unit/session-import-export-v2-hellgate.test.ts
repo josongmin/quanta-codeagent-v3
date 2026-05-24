@@ -88,12 +88,15 @@ const importOpts = (over: Partial<SessionImportOpts> = {}): SessionImportOpts =>
 // A. EXPORT v2 (4)
 // ────────────────────────────────────────────────────────────────────────────
 describe("session-import-export-v2 / A. export v2", () => {
-  test("HELL-V2-1: emitV2:true → version===2, trace id is 16-hex, capabilities array", () => {
+  test("HELL-V2-1: emitV2:true → version===2, trace id is 16-hex, default capabilities match real sidecar slots", () => {
     const env = exportSession(savedSessionOf(), exportOptsV2())
     expect(env.version).toBe(2)
     expect(env.exporterMeta.exportTraceId).toMatch(/^[0-9a-f]{16}$/)
-    expect(Array.isArray(env.exporterMeta.capabilities)).toBe(true)
-    expect(env.exporterMeta.capabilities.length).toBeGreaterThan(0)
+    expect(env.exporterMeta.capabilities).toEqual([
+      "conversation-checkpoint",
+      "plan-queue",
+      "budget-ledger",
+    ])
   })
 
   test("HELL-V2-2: annotations passed through to envelope as-is", () => {

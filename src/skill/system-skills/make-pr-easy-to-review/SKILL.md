@@ -2,18 +2,9 @@
 name: make-pr-easy-to-review
 description: Audit and clean up a PR before review — noisy commits, stale description, unrelated files, mixed mechanical+logic changes. Triggers on "clean up this PR", "make this PR easier to review", "tidy commits", or before opening for review.
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
+allowedTools: ["Bash", "Read", "Grep", "Edit"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
 ---
 
 # Pre-review PR cleanup

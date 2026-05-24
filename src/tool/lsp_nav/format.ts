@@ -35,7 +35,11 @@ export interface FormatPortTextEdit {
 }
 
 export interface FormatPort {
-  format(file: string, range?: FormatPortRange): Promise<readonly FormatPortTextEdit[] | null>
+  format(
+    file: string,
+    range?: FormatPortRange,
+    signal?: AbortSignal,
+  ): Promise<readonly FormatPortTextEdit[] | null>
 }
 
 // ── Input schema ────────────────────────────────────────────────────────────
@@ -99,12 +103,16 @@ export const lspFormatTool = (port: FormatPort): Tool<LspFormatInput> => ({
       const r = parsed.data.range
       // exactOptionalPropertyTypes — only pass `range` when present.
       if (r === undefined) {
-        edits = await port.format(parsed.data.path)
+        edits = await port.format(parsed.data.path, undefined, ctx.signal)
       } else {
-        edits = await port.format(parsed.data.path, {
-          start: { line: r.startLine - 1, character: r.startCharacter - 1 },
-          end: { line: r.endLine - 1, character: r.endCharacter - 1 },
-        })
+        edits = await port.format(
+          parsed.data.path,
+          {
+            start: { line: r.startLine - 1, character: r.startCharacter - 1 },
+            end: { line: r.endLine - 1, character: r.endCharacter - 1 },
+          },
+          ctx.signal,
+        )
       }
     } catch (e) {
       yield {

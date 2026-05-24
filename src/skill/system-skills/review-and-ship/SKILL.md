@@ -2,18 +2,9 @@
 name: review-and-ship
 description: Complete ship loop — review the change, run tests, commit, push, open PR. Triggers on "review and ship", "test then PR", "verify and merge", or when a user has staged changes and wants to ship them.
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
+allowedTools: ["Bash", "Read", "Grep", "Edit"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
 ---
 
 # Review + test + commit + PR (combined ship)

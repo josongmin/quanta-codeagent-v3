@@ -11,7 +11,7 @@
  *   C. withFullObservability integration (2 cases)
  *   D. byte-identical determinism (1 case)
  *
- * SOTA reference (cited in ADR-0177):
+ * SOTA reference (cited in ADR-0180):
  *   - K8s pod liveness probe `exec.command: ["cat","~/.quanta/health.json"]`
  *   - systemd notify socket — file-based health surfaces are universal
  *   No SOTA agent (Claude Desktop / Cursor / Codex) writes a JSON health

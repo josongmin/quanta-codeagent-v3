@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { type AdmissibilityWaveAOptions, runAdmissibilityGate } from "@/agent/admissibility-gate"
 import {
+  type ApprovalDecision,
   OutcomeInvariantError,
   ReviewerUnavailableError,
-  type DenialMemory,
-  type PermissionContext,
-  type ToolActionKeyed,
+  type ReviewerPort,
 } from "@/permission"
-import { RulesStore } from "@/rules"
 import { ToolRegistry } from "@/tool"
 import {
   actionOf,
@@ -520,4 +518,3 @@ describe("Wave A: rule 'ask' escalates to ReviewerPort", () => {
 })
 
 // ─── 5. Sticky priorDenials precedence ────────────────────────────────────
-

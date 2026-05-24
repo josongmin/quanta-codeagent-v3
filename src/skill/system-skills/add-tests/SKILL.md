@@ -2,22 +2,9 @@
 name: add-tests
 description: Author new tests for a function / module by reading the target, enumerating edge cases, matching project conventions, and running the tests before declaring done. Triggers on "add tests", "write tests for", "test coverage for", "what should I test in".
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
-  - test_runner
-  - file_tree_summary
+allowedTools: ["Bash", "Read", "Grep", "Edit", "test_runner", "file_tree_summary"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
-  - test_runner
-  - file_tree_summary
 ---
 
 # add-tests — evidence-first test authoring

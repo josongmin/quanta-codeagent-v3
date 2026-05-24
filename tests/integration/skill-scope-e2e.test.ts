@@ -15,7 +15,9 @@
  *  (b) the `Skill` / `ToolSearch` meta-tools are always permitted even under
  *      an active scope.
  *  (c) a skill that declares NO `tools:` imposes no restriction.
- *  (d) control: with no skills configured there is no gate at all.
+ *  (d) a strict `allowedTools: []` skill denies every ordinary tool, even if
+ *      a stale legacy `tools:` mirror tries to widen it.
+ *  (e) control: with no skills configured there is no gate at all.
  *
  * Deterministic: scripted fake LLM, no network, temp skill dirs cleaned up.
  * Mirrors the fake-LLM harness in tests/integration/agent-features.test.ts.
@@ -268,7 +270,65 @@ describe("skill tool-scoping enforcement (e2e)", () => {
     expect(denied).toHaveLength(0)
   })
 
-  // (d): control — no skills configured at all ⇒ no gate, behavior unchanged.
+  test("strict empty allowedTools denies all ordinary tools and does not fall back to legacy tools", async () => {
+    await mkdir(join(dir, "sealed"), { recursive: true })
+    await writeFile(
+      join(dir, "sealed", "SKILL.md"),
+      [
+        "---",
+        "name: sealed",
+        "description: no tools allowed",
+        "userInvocable: true",
+        "allowedTools: []",
+        'tools: ["Read"]',
+        "category: skill",
+        "stability: stable",
+        "---",
+        "Use no tools.",
+      ].join("\n"),
+    )
+
+    const counts: Record<string, number> = {}
+    const registry = new ToolRegistry([
+      countingTool("Read", counts),
+      countingTool("danger", counts),
+    ])
+
+    const llm = new FakeLLM([
+      toolUseScript("s1", "Skill", { name: "sealed" }),
+      toolUseScript("t1", "ToolSearch", { query: "select:Read" }),
+      toolUseScript("d1", "danger", {}),
+      toolUseScript("r1", "Read", {}),
+      textScript("done"),
+    ])
+    const stream = new RecordingStream()
+
+    const outcome = await runAgent({
+      ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }),
+      skills: { dir },
+    })
+
+    expect(outcome.reason).toBe("completed")
+    expect(counts.danger).toBeUndefined()
+    expect(counts.Read).toBeUndefined()
+
+    const results = allToolResults(outcome)
+    const denied = results.filter(
+      (b) =>
+        b.type === "tool_result" &&
+        (b.tool_use_id === "d1" || b.tool_use_id === "r1") &&
+        b.content.includes(SCOPE_MSG),
+    )
+    expect(denied).toHaveLength(2)
+
+    const tsResult = results.find((b) => b.type === "tool_result" && b.tool_use_id === "t1")
+    expect(tsResult).toBeDefined()
+    if (tsResult?.type === "tool_result") {
+      expect(tsResult.is_error ?? false).toBe(false)
+    }
+  })
+
+  // (e): control — no skills configured at all ⇒ no gate, behavior unchanged.
   test("control: no skills configured ⇒ no gate, tools run unrestricted", async () => {
     const counts: Record<string, number> = {}
     const registry = new ToolRegistry([

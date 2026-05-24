@@ -302,4 +302,44 @@ describe("F. abort", () => {
     expect(r.output).toContain("aborted before start")
     expect(fetchCalls).toBe(0)
   })
+
+  test("22. mid-stream abort → ok:false rejected(aborted), not a truncated success", async () => {
+    let abortObservedByFetch = false
+    const fetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          await new Promise<void>((resolve) => {
+            if (init?.signal?.aborted) {
+              abortObservedByFetch = true
+              resolve()
+              return
+            }
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                abortObservedByFetch = true
+                resolve()
+              },
+              { once: true },
+            )
+          })
+          controller.close()
+        },
+      })
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      })
+    }) as unknown as typeof fetch
+
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 20)
+    const r = await collect({ url: "https://example.com/slow" }, fetcher, ctx(ac.signal))
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("aborted during body read")
+    expect(r.failure?.mode).toBe("rejected")
+    if (r.failure?.mode === "rejected") expect(r.failure.reason).toBe("aborted")
+    expect(r.output).not.toContain("body truncated to cap")
+    expect(abortObservedByFetch).toBe(true)
+  })
 })

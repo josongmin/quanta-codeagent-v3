@@ -29,6 +29,7 @@ export interface SignatureHelpPort {
     file: string,
     line: number,
     col: number,
+    signal?: AbortSignal,
   ): Promise<readonly SignatureHelpPortInfo[] | null>
 }
 
@@ -95,6 +96,7 @@ export const lspSignatureHelpTool = (port: SignatureHelpPort): Tool<LspSignature
         parsed.data.path,
         parsed.data.line - 1,
         parsed.data.character - 1,
+        ctx.signal,
       )
     } catch (e) {
       yield {

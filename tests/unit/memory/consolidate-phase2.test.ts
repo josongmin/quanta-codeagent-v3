@@ -230,7 +230,7 @@ describe("runPhase2 happy path", () => {
 
   test("durationMs uses input.now() before and after", async () => {
     const log = makeLog()
-    const times = [100, 250]
+    const times = [100, 250, 400]
     const res = await runPhase2(
       baseInput({ now: () => times.shift() ?? 999 }),
       makePort({ ok: goodPortOut }, log),

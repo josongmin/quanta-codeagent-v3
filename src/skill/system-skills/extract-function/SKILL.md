@@ -2,20 +2,9 @@
 name: extract-function
 description: Extract a code block into a named function — survey callers first, name for intent, verify no regression. Triggers on "extract this into a function", "refactor to function", "pull this out", "DRY this up".
 userInvocable: true
-allowedTools:
-  - Read
-  - Grep
-  - Edit
-  - lsp_references
-  - scripted_replace
+allowedTools: ["Read", "Grep", "Edit", "lsp_references", "scripted_replace"]
 category: skill
 stability: stable
-tools:
-  - Read
-  - Grep
-  - Edit
-  - lsp_references
-  - scripted_replace
 ---
 
 # extract-function — caller-aware, intent-named refactor

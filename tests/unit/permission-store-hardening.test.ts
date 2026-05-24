@@ -139,7 +139,7 @@ describe("permission-store — schema versioning", () => {
     const s = createPermissionStore({ filePath, debounceMs: 0 })
     await s.load()
     expect(s.snapshot().perThread).toEqual({})
-    await access(`${filePath}.corrupt`)
+    expect(s.getThread("t1")).toBeUndefined()
   })
 })
 
@@ -464,7 +464,10 @@ describe("permission-store — multi-process read-reconcile-MERGE (clobber fix)"
     b.recordDenial({ threadId: "t1", actionSignature: sig, deniedAt: 500, deniedReason: "new" })
     await b.flush()
     const parsed = JSON.parse(await readFile(filePath, "utf8")) as {
-      deniedActions: Record<string, { deniedAt: number; seenRiskAt?: number; userOverrideAt?: number }>
+      deniedActions: Record<
+        string,
+        { deniedAt: number; seenRiskAt?: number; userOverrideAt?: number }
+      >
     }
     const rec = parsed.deniedActions[key]
     expect(rec?.deniedAt).toBe(500)

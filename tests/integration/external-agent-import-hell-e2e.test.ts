@@ -91,8 +91,8 @@ const seedClaudeCode = async (spec: SeedSpec): Promise<void> => {
   for (let i = 0; i < spec.sessions; i++) {
     await mkdirAsync(join(home, `.claude/projects/proj-${i}`), { recursive: true })
     await writeFileAsync(
-      join(home, `.claude/projects/proj-${i}/session.json`),
-      JSON.stringify({ id: `s-${i}`, title: `session ${i}` }),
+      join(home, `.claude/projects/proj-${i}/session-${i}.jsonl`),
+      `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: `session ${i}` }] } })}\n`,
       "utf8",
     )
   }
@@ -176,8 +176,8 @@ describe("hell-2: session_completion_finished failure halts the lifecycle", () =
     await mkdirAsync(join(home, ".claude/projects"), { recursive: true })
     await writeFileAsync(join(home, ".claude/auth.json"), "{}", "utf8")
     await writeFileAsync(
-      join(home, ".claude/projects/sess.json"),
-      JSON.stringify({ id: "s-1" }),
+      join(home, ".claude/projects/sess.jsonl"),
+      `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "s-1" }] } })}\n`,
       "utf8",
     )
     // ...but place a REGULAR FILE where the `skills/` directory should be.

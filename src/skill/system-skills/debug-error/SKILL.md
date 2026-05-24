@@ -2,24 +2,9 @@
 name: debug-error
 description: Diagnose a failing test, exception, or stack trace by READING evidence before patching. Triggers on "debug this error", "what does this error mean", "fix this stack trace", "why is this failing", or any pasted exception / red CI log.
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
-  - parse_test_failure
-  - git_log
-  - git_blame
+allowedTools: ["Bash", "Read", "Grep", "Edit", "parse_test_failure", "git_log", "git_blame"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
-  - parse_test_failure
-  - git_log
-  - git_blame
 ---
 
 # debug-error — evidence-first error diagnosis

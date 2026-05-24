@@ -330,7 +330,7 @@ type StreamSuccess = {
 type StreamConsumeResult = StreamSuccess | { error: unknown; message: string } | { aborted: true }
 
 /** Skill tool-scoping ENFORCEMENT (ADR-0011). Once a skill that
- *  declared a `tools:` allowlist is invoked, subsequent tool calls are
+ *  declared a tool allowlist is invoked, subsequent tool calls are
  *  restricted to that allowlist (+ the skill meta-tools) until another skill
  *  resets it. Built only when ≥1 discovered skill declared an allowlist;
  *  absent ⇒ no scoping (loop byte-identical). */

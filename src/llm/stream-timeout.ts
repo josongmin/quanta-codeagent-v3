@@ -24,12 +24,11 @@
  * backoff). We deliberately reuse `stream_corrupt` rather than mint a new
  * kind: invariant compatibility with all downstream policy.
  *
- * Abort wiring: the wrapper owns an {@link AbortController}. When EITHER
- * timeout fires we call `controller.abort()` so the upstream SDK `fetch`
- * (which observes the same signal we forward) cancels the underlying HTTP
- * request — no orphan connection holding the socket open. The caller's
- * own signal is composed in: aborting it ALSO aborts the inner controller
- * so the SDK fetch teardown is identical regardless of which side trips.
+ * Abort wiring: the wrapper resolves the raw stream's OWN upstream abort
+ * surface (`.controller.abort()` first, `.abort()` second) and uses that
+ * instead of a disconnected local controller. On timeout or caller abort we
+ * tear down the real provider request, and on early consumer stop we also
+ * finalize the raw iterator via `iter.return?.()`.
  *
  * Pure decorator: zero behavioural change on a stream that yields within
  * budget (each `for await` step passes through verbatim). Only the
@@ -46,9 +45,8 @@ export interface StreamTimeoutOptions {
   /** Provider id, threaded into the thrown {@link LLMError} so downstream
    *  routing/triage sees a faithful `provider`. */
   readonly provider: LLMProvider
-  /** Caller's abort signal. When it fires, the wrapper's internal controller
-   *  is aborted too so the upstream SDK fetch is cancelled. Optional — when
-   *  absent the wrapper still aborts on its own timeouts. */
+  /** Caller's abort signal. When it fires, the wrapper aborts the raw
+   *  provider stream's own upstream cancellation surface too. */
   readonly signal?: AbortSignal
   /** Injectable for deterministic tests. Defaults to real timers. */
   readonly setTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>
@@ -80,14 +78,52 @@ const buildTimeoutError = (reason: TimeoutReason, ms: number, provider: LLMProvi
   })
 }
 
-/**
- * Wrap a raw stream with first-chunk and inter-chunk idle deadlines.
- * The returned `AsyncIterable` is single-use (matches the SDK's own
- * single-shot stream semantics — never re-iterate a model response).
- */
-export const withStreamTimeout = <T>(
+export interface StreamTimeoutAbortHandle {
+  abort(reason?: unknown): void
+  readonly signal?: AbortSignal
+}
+
+const isAbortSignalLike = (value: unknown): value is AbortSignal =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { aborted?: unknown }).aborted === "boolean"
+
+const isAbortControllerLike = (
+  value: unknown,
+): value is { abort(reason?: unknown): void; readonly signal: AbortSignal } =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { abort?: unknown }).abort === "function" &&
+  isAbortSignalLike((value as { signal?: unknown }).signal)
+
+const resolveAbortHandle = <T>(raw: AsyncIterable<T>): StreamTimeoutAbortHandle | null => {
+  const maybeAbortable = raw as { controller?: unknown; abort?: unknown }
+  if (isAbortControllerLike(maybeAbortable.controller)) {
+    return {
+      abort: (reason?: unknown) => maybeAbortable.controller.abort(reason),
+      signal: maybeAbortable.controller.signal,
+    }
+  }
+  if (typeof maybeAbortable.abort === "function") {
+    return { abort: maybeAbortable.abort.bind(raw) as (reason?: unknown) => void }
+  }
+  return null
+}
+
+const abortHandle = (handle: StreamTimeoutAbortHandle | null, reason?: unknown): void => {
+  if (handle === null) return
+  try {
+    handle.abort(reason)
+  } catch {
+    // Best-effort teardown only: never let provider-specific abort-surface
+    // quirks mask the primary timeout or cancellation path.
+  }
+}
+
+const buildWrappedStream = <T>(
   raw: AsyncIterable<T>,
   opts: StreamTimeoutOptions,
+  probe?: StreamTimeoutProbe,
 ): AsyncIterable<T> => {
   const setTimer = opts.setTimer ?? ((cb, ms) => setTimeout(cb, ms))
   const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h))
@@ -95,17 +131,17 @@ export const withStreamTimeout = <T>(
   return {
     async *[Symbol.asyncIterator](): AsyncIterator<T> {
       const iter = raw[Symbol.asyncIterator]()
-      // Internal controller. Aborting it tears down the upstream SDK fetch
-      // (the SDK observes this via the same signal contract the SDK clients
-      // expose). The caller's signal is forwarded: when they abort, we also
-      // abort our controller so the SDK teardown is symmetric.
-      const controller = new AbortController()
+      const upstreamAbort = resolveAbortHandle(raw)
+      probe?.onAbortHandle?.(upstreamAbort)
+      let upstreamClosed = false
+      let finishedNaturally = false
+
       const onCallerAbort = (): void => {
-        if (!controller.signal.aborted) controller.abort(opts.signal?.reason)
+        abortHandle(upstreamAbort, opts.signal?.reason)
       }
       if (opts.signal) {
         if (opts.signal.aborted) {
-          controller.abort(opts.signal.reason)
+          abortHandle(upstreamAbort, opts.signal.reason)
         } else {
           opts.signal.addEventListener("abort", onCallerAbort, { once: true })
         }
@@ -114,13 +150,6 @@ export const withStreamTimeout = <T>(
       let isFirst = true
       try {
         for (;;) {
-          // Two competing promises:
-          //   next  — the SDK's next chunk (or end-of-stream)
-          //   guard — a deadline timer; resolves to a synthetic "timed out"
-          //
-          // Promise.race resolves to whichever fires first. On the timeout
-          // path we call `controller.abort()` so the SDK fetch is cancelled
-          // (no orphan request) and then throw the structured LLMError.
           const ms = isFirst ? opts.firstChunkMs : opts.idleMs
           const reason: TimeoutReason = isFirst ? "first-chunk" : "idle"
 
@@ -128,7 +157,6 @@ export const withStreamTimeout = <T>(
           const timeoutPromise = new Promise<{ readonly timedOut: true }>((resolve) => {
             timerHandle = setTimer(() => resolve({ timedOut: true as const }), ms)
           })
-
           const nextPromise = iter.next().then((r) => ({ timedOut: false as const, r }))
 
           // eslint-disable-next-line no-await-in-loop
@@ -136,31 +164,51 @@ export const withStreamTimeout = <T>(
           if (timerHandle !== undefined) clearTimer(timerHandle)
 
           if (winner.timedOut) {
-            // Tear down the upstream first so the SDK's fetch returns and any
-            // pending socket is released — THEN throw. Try to call the inner
-            // iterator's `return` too so the SDK can clean up any state it
-            // attached to the iterator.
-            if (!controller.signal.aborted) controller.abort()
+            const error = buildTimeoutError(reason, ms, opts.provider)
+            abortHandle(upstreamAbort, error)
             try {
               await iter.return?.(undefined)
+              upstreamClosed = true
             } catch {
               // Best-effort cleanup; never let a teardown error mask the
               // primary timeout that the caller actually needs to see.
             }
-            throw buildTimeoutError(reason, ms, opts.provider)
+            throw error
           }
 
           const r = winner.r
-          if (r.done) return
+          if (r.done) {
+            finishedNaturally = true
+            return
+          }
           isFirst = false
           yield r.value
         }
       } finally {
         if (opts.signal) opts.signal.removeEventListener("abort", onCallerAbort)
+        if (!finishedNaturally && !upstreamClosed) {
+          abortHandle(upstreamAbort, opts.signal?.reason)
+          try {
+            await iter.return?.(undefined)
+          } catch {
+            // Best-effort finalization only: consumer cancellation should not
+            // surface a second teardown error after the stream is already done.
+          }
+        }
       }
     },
   }
 }
+
+/**
+ * Wrap a raw stream with first-chunk and inter-chunk idle deadlines.
+ * The returned `AsyncIterable` is single-use (matches the SDK's own
+ * single-shot stream semantics — never re-iterate a model response).
+ */
+export const withStreamTimeout = <T>(
+  raw: AsyncIterable<T>,
+  opts: StreamTimeoutOptions,
+): AsyncIterable<T> => buildWrappedStream(raw, opts)
 
 /** Resolve effective options for an adapter: caller overrides win, env knobs
  *  next, defaults last. Read ONCE at adapter construction (T1 contract). */
@@ -173,77 +221,19 @@ export const resolveStreamTimeoutMs = (
   idleMs: override?.idleMs ?? envIdleMs ?? DEFAULT_IDLE_MS,
 })
 
-/** Test seam: build the wrapper's internal {@link AbortController} so a unit
- *  test can verify the abort propagates when a timeout fires. We could expose
- *  the controller via the result object, but a callback keeps the
- *  AsyncIterable surface clean. */
+/** Test seam: surface the resolved upstream abort handle so a unit test can
+ *  verify timeout / caller-abort paths tear down the REAL provider stream,
+ *  not a disconnected local controller. */
 export interface StreamTimeoutProbe {
-  /** Called with the internal controller on FIRST `next()` — before any
-   *  timeout race runs. Tests use this to assert `.signal.aborted` after a
-   *  forced timeout. */
-  onController?: (c: AbortController) => void
+  /** Called on FIRST `next()` with the resolved upstream abort handle, or
+   *  `null` when the raw stream exposes no abort surface. */
+  onAbortHandle?: (handle: StreamTimeoutAbortHandle | null) => void
 }
 
-/** Variant of {@link withStreamTimeout} that also surfaces the internal
- *  controller via a probe callback. Production code uses the plain export;
- *  tests use this. Behaviour is otherwise identical. */
+/** Variant of {@link withStreamTimeout} that also surfaces the resolved
+ *  upstream abort handle via a probe callback. Production code uses the plain
+ *  export; tests use this. Behaviour is otherwise identical. */
 export const withStreamTimeoutProbed = <T>(
   raw: AsyncIterable<T>,
   opts: StreamTimeoutOptions & StreamTimeoutProbe,
-): AsyncIterable<T> => {
-  const setTimer = opts.setTimer ?? ((cb, ms) => setTimeout(cb, ms))
-  const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h))
-
-  return {
-    async *[Symbol.asyncIterator](): AsyncIterator<T> {
-      const iter = raw[Symbol.asyncIterator]()
-      const controller = new AbortController()
-      opts.onController?.(controller)
-      const onCallerAbort = (): void => {
-        if (!controller.signal.aborted) controller.abort(opts.signal?.reason)
-      }
-      if (opts.signal) {
-        if (opts.signal.aborted) {
-          controller.abort(opts.signal.reason)
-        } else {
-          opts.signal.addEventListener("abort", onCallerAbort, { once: true })
-        }
-      }
-
-      let isFirst = true
-      try {
-        for (;;) {
-          const ms = isFirst ? opts.firstChunkMs : opts.idleMs
-          const reason: TimeoutReason = isFirst ? "first-chunk" : "idle"
-
-          let timerHandle: ReturnType<typeof setTimeout> | undefined
-          const timeoutPromise = new Promise<{ readonly timedOut: true }>((resolve) => {
-            timerHandle = setTimer(() => resolve({ timedOut: true as const }), ms)
-          })
-          const nextPromise = iter.next().then((r) => ({ timedOut: false as const, r }))
-
-          // eslint-disable-next-line no-await-in-loop
-          const winner = await Promise.race([nextPromise, timeoutPromise])
-          if (timerHandle !== undefined) clearTimer(timerHandle)
-
-          if (winner.timedOut) {
-            if (!controller.signal.aborted) controller.abort()
-            try {
-              await iter.return?.(undefined)
-            } catch {
-              // best-effort
-            }
-            throw buildTimeoutError(reason, ms, opts.provider)
-          }
-
-          const r = winner.r
-          if (r.done) return
-          isFirst = false
-          yield r.value
-        }
-      } finally {
-        if (opts.signal) opts.signal.removeEventListener("abort", onCallerAbort)
-      }
-    },
-  }
-}
+): AsyncIterable<T> => buildWrappedStream(raw, opts, opts)

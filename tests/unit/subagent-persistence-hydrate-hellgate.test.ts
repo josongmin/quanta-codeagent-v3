@@ -18,6 +18,7 @@ import {
   defaultBackgroundSubagentScheduler,
 } from "@/agent/subagent-background"
 import {
+  type PersistentBackgroundSubagentScheduler,
   type PersistedHandle,
   type PersistentSchedulerStore,
   persistentBackgroundSubagentScheduler,
@@ -315,7 +316,7 @@ describe("B. Save-on-event", () => {
 
 describe("C. Interrupted status", () => {
   const setupInterrupted = async (): Promise<{
-    sched: BackgroundSubagentScheduler
+    sched: PersistentBackgroundSubagentScheduler
     interruptedId: string
     fakes: ReturnType<typeof fakeStore>
   }> => {

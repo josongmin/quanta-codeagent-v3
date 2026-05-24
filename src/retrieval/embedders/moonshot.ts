@@ -18,7 +18,10 @@ export const createMoonshotEmbedder = (opts: MoonshotEmbedderOptions): Embedding
   return {
     vendor: "moonshot",
     model,
-    async embed(_texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+    async embed(
+      _texts: readonly string[],
+      _opts?: { signal?: AbortSignal },
+    ): Promise<readonly (readonly number[])[]> {
       throw new RetrievalError(
         "moonshot embedder not yet wired at runtime (ADR-0159 type-level stub)",
       )

@@ -2,7 +2,7 @@
  * Tier-1 per-subsystem builder: SKILL block (ADR-0011).
  *
  * Discovers user + bundled system skills, registers the `Skill` / `ToolSearch`
- * tools, builds the author-declared `tools:` allowlist map and
+ * tools, builds the author-declared tool-allowlist map and
  * `{model?, effort?}` override map, and emits the per-turn suggestion
  * inventory (filtered by `changedPaths` when host wiring opts in).
  *
@@ -35,8 +35,9 @@ import type { AgentConfig } from "../types"
 export interface SkillBlock {
   /** `[Skill, ToolSearch]` tools to merge into the registry. */
   tools: Tool[]
-  /** Skill name → author-declared `tools:` allowlist, for skills that
-   *  declared a non-empty one. Absent when no skill declared one. */
+  /** Skill name → author-declared tool allowlist, including an explicit
+   *  empty list meaning "no tools permitted". Absent when no skill declared
+   *  any allowlist at all. */
   allowlists: Map<string, string[]> | undefined
   /** Skill name → author-declared `{model?, effort?}` override, for skills
    *  that declared at least one. Absent when no skill declared either. */

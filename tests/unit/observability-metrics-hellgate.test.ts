@@ -4,13 +4,13 @@
  * Closed-port DI primitive: counter / histogram / gauge typed registry with
  * an injected `MetricSink` adapter. Hellgate seals the 6 contract clauses
  * (pure store, name-commits-to-kind, sink no-throw, sanitization, percentile
- * algorithm, label normalization) across 5 sections — 22 cases total.
+ * algorithm, label normalization) across 5 sections — 23 cases total.
  *
  * Sections:
  *   A. registry core (8)
  *   B. sink integration (4)
  *   C. consoleSink + jsonlSink (4)
- *   D. histogram math (4)
+ *   D. histogram math (5)
  *   E. exhaustive edge cases (2)
  */
 
@@ -282,7 +282,7 @@ describe("metrics / C. built-in sinks", () => {
 })
 
 // ────────────────────────────────────────────────────────────────────────────
-// D. HISTOGRAM MATH (4)
+// D. HISTOGRAM MATH (5)
 // ────────────────────────────────────────────────────────────────────────────
 describe("metrics / D. histogram math", () => {
   test("HELL-17: single observation → p50=p95=p99=value, count=1", () => {
@@ -336,6 +336,21 @@ describe("metrics / D. histogram math", () => {
     expect(row?.count).toBe(10)
     // p50 of 1..10 = ceil(0.5*10)=5 → index 4 → value 5
     expect(row?.p50).toBe(5)
+  })
+
+  test("HELL-20.b: bounded histogram compaction keeps exact count/sum with finite percentiles", () => {
+    const r = defaultMetricsRegistry({
+      histogramMaxObservations: 5,
+    })
+    for (let i = 1; i <= 8; i += 1) r.observe("lat", i)
+    const row = r.snapshot()[0]
+    expect(row?.count).toBe(8)
+    expect(row?.value).toBe(36)
+    expect(row?.p50).toBeGreaterThanOrEqual(1)
+    expect(row?.p50).toBeLessThanOrEqual(8)
+    expect(row?.p95).toBeGreaterThanOrEqual(row?.p50 ?? 0)
+    expect(row?.p99).toBeGreaterThanOrEqual(row?.p95 ?? 0)
+    expect(row?.p99).toBeLessThanOrEqual(8)
   })
 })
 

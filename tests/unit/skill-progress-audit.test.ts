@@ -2,12 +2,9 @@
  * Unit coverage for the bundled `progress-audit` system skill (ADR-0045).
  *
  * Four contracts are pinned here:
- *   1. The SKILL.md frontmatter parses correctly through BOTH the lenient
- *      `parseFrontmatter` (which the discoverer uses to populate
- *      `Skill.tools`) AND is REJECTED by the strict `parseSkillMarkdown`
- *      (which is the SSOT shape for category routing per ADR-0040, with
- *      `.strict()` Zod rejecting the extra lenient `tools:` key — see
- *      ADR-0045 §한계 (a)).
+ *   1. The SKILL.md frontmatter is strict-shape clean (`allowedTools` SSOT),
+ *      and discovery projects that metadata onto the runtime allowlist
+ *      surface (`Skill.tools`) the host enforces.
  *   2. The skill BODY contains every P0 critical rule verbatim, IN ORDER,
  *      and each rule appears with its 1-based numbered prefix — these six
  *      rules are the entire reason the skill exists, so drift in the body
@@ -35,7 +32,7 @@ import { parseSkillMarkdown } from "../../src/skill/skill-frontmatter"
 const SKILL_MD = join(systemSkillsDir(), "progress-audit", "SKILL.md")
 
 describe("progress-audit SKILL.md — frontmatter", () => {
-  test("lenient parser extracts name, description, tools allowlist", async () => {
+  test("frontmatter exposes strict allowlist metadata and discovery preserves it at runtime", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
     const { data, body } = parseFrontmatter(raw)
     expect(data.name).toBe("progress-audit")
@@ -46,40 +43,29 @@ describe("progress-audit SKILL.md — frontmatter", () => {
     expect(data.description).toContain("진행률")
     expect(data.description).toContain("코드 레벨로만")
     expect(data.description).toContain("P0/P1/P2")
-    // Lenient `tools:` is the runtime-enforcement seam — must list exactly
-    // the three audit-safe tools (Read/Grep/Bash), in order.
-    expect(data.tools).toEqual(["Read", "Grep", "Bash"])
+    expect(data.allowedTools).toEqual(["Read", "Grep", "Bash"])
+    expect(data.userInvocable).toBe("true")
+    expect(data.category).toBe("skill")
+    expect(data.stability).toBe("stable")
+    const discovered = await findProgressAuditSkill()
+    expect(discovered?.tools).toEqual(data.allowedTools)
     // Body must be non-empty (the procedure section is load-bearing).
     expect(body.length).toBeGreaterThan(500)
   })
 
-  test("strict parseSkillMarkdown rejects (extra `tools:` key) — documents dual-shape state", async () => {
-    // SSOT note: the SKILL.md ships BOTH `tools:` (for the existing host
-    // enforcement path which reads the lenient field) AND the strict
-    // 6-field shape (`userInvocable`/`allowedTools`/`category`/`stability`).
-    // The strict parser uses `.strict()` and rejects unknown keys, so the
-    // SKILL.md does not round-trip through it as-is. This is a known
-    // limitation captured in ADR-0045 §한계 (a): the lenient discoverer is
-    // the SSOT for runtime today; a follow-up may collapse the dual shape.
+  test("strict parseSkillMarkdown accepts the bundled file as-is", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
     const r = parseSkillMarkdown(raw)
-    expect(r.ok).toBe(false)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.frontmatter.allowedTools).toEqual(["Read", "Grep", "Bash"])
   })
 
-  test("dual-shape: lenient parser still reads BOTH `tools:` and `allowedTools:` fields", async () => {
-    // Defence-in-depth: if a future refactor unifies the strict + lenient
-    // parsers, both keys MUST keep working — `tools:` is what
-    // `skillToolAllowlist()` reads today (security-load-bearing), and
-    // `allowedTools:` is the ADR-0040 SSOT shape. If either disappears
-    // silently the security gate stays armed but the SSOT shape drifts.
+  test("lenient parser retains the strict-shape fields without a runtime mirror", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
     const { data } = parseFrontmatter(raw)
-    expect(data.tools).toEqual(["Read", "Grep", "Bash"])
-    // The strict-shape mirror is present in the same file. The lenient
-    // parser keeps it as a parallel array since it doesn't enforce the
-    // strict schema. It MUST be byte-identical to `tools:`.
     expect(data.allowedTools).toEqual(["Read", "Grep", "Bash"])
-    // The other strict-shape SSOT fields are present in the file.
+    expect(data.tools).toBeUndefined()
     expect(data.userInvocable).toBe("true")
     expect(data.category).toBe("skill")
     expect(data.stability).toBe("stable")
@@ -187,7 +173,6 @@ describe("discoverSystemSkills() — bundled discovery", () => {
     const pa = skills.find((s) => s.name === "progress-audit")
     expect(pa).toBeDefined()
     if (!pa) return
-    // tools: is what the host wires into `skillToolAllowlist` for the gate.
     expect(pa.tools).toEqual(["Read", "Grep", "Bash"])
     // Description is the model-facing trigger-match surface.
     expect(pa.description).toContain("진행률")

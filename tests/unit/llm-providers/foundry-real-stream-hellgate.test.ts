@@ -367,13 +367,6 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     // regardless of caller cancellation. The prior test only counted 3
     // chunks and broke; it never proved upstream production stopped.
     //
-    // PRODUCTION GAP NOTED — current `withStreamTimeout` (shared with
-    // bedrock) does NOT call `iter.return?.()` on the upstream raw iter
-    // when the consumer cancels via `for-await…break`. We assert what
-    // production DOES guarantee — upstream production is bounded by
-    // back-pressure — and keep the `returnCalled` spy wired so a future
-    // production fix can flip the assertion to ">= 1" trivially.
-    // See src/llm/stream-timeout.ts:158.
     let returnCalled = 0
     let throwCalled = 0
     let yieldedFromUpstream = 0
@@ -451,18 +444,15 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     expect(yieldedFromUpstream).toBeLessThan(50)
     // Clean cancel ⇒ not a throw.
     expect(throwCalled).toBe(0)
-    // returnCalled — captured for visibility (currently 0, see gap above).
-    // When stream-timeout is fixed, flip to ">= 1".
-    expect(returnCalled).toBeGreaterThanOrEqual(0)
+    // Early consumer stop MUST finalize the upstream iterator so the
+    // provider stream cannot linger after the caller has stopped reading.
+    expect(returnCalled).toBeGreaterThanOrEqual(1)
   })
 
   test("HELL-F3: signal abort during stream — caller signal forwarded + production halts", async () => {
     // T3 strengthening — positive control: signal-abort cancellation path
     // MUST forward the signal to the SDK and bound upstream production.
     //
-    // PRODUCTION GAP NOTED — same `withStreamTimeout` issue: upstream
-    // `iter.return()` is not called. We verify what production DOES
-    // guarantee: caller's signal forwarded, no runaway pump.
     let returnCalled = 0
     let aborted = false
     let yieldedAfterAbort = 0
@@ -542,7 +532,8 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     expect(log.signal).toBe(ctl.signal)
     // After abort, upstream production halts (back-pressure).
     expect(yieldedAfterAbort).toBeLessThan(5)
-    // returnCalled captured for visibility — see HELL-F2 production gap.
-    expect(returnCalled).toBeGreaterThanOrEqual(0)
+    // Signal-driven cancellation plus consumer break still finalizes the raw
+    // iterator, so a provider stream cannot linger after cancellation.
+    expect(returnCalled).toBeGreaterThanOrEqual(1)
   })
 })

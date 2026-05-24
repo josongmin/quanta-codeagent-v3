@@ -21,7 +21,7 @@ PR-review 캔버스 청사진은 변경을 4개 카테고리로 쪼갠다:
 
 ## 결정
 
-순수·결정적·DEFAULT-OFF 클래시파이어를 새 디렉터리에 추가한다. 모든 입출력은 closed type union, I/O 0, sentinel 0.
+순수·결정적 classifier core 를 새 디렉터리에 추가하고, 이를 감싼 `git_moved_code` first-class git tool 을 `gitTools()` 에 등록한다. core 는 여전히 I/O 0 이고, tool surface 가 `git diff` shell + 출력 포맷팅 + bounded cost guard 를 맡는다.
 
 ### 모듈 구조
 
@@ -61,7 +61,7 @@ src/tool/git/moved-code/
 | `DEFAULT_MIN_SIMILARITY` | 0.85 | 위키피디아의 Jaccard duplicate-detection 가이드 + Cursor / clone-detection 도구의 공통 fence value. 0.7 미만 = 무관한 함수가 토큰 공유로 우연 일치, 0.95 초과 = 단일 식별자 rename 도 못 잡음. 0.85 는 양쪽 모두를 피하는 검증된 중간값. |
 | `DEFAULT_MAX_PAIRS` | 10_000 | `|removed| × |added|` 의 product cap. 1000-hunk diff 가 같은 양쪽 1000개씩이면 10^6 pair → tokenize-and-compare 가 cost 폭발. cap 발동 시 검출을 skip 하고 모두 logic 으로 surface (false-negative 가 cost 폭발보다 safe). 100×100 diff 까지는 항상 통과. |
 
-선택 사항으로 `ClassifyOptions { minLines, minSimilarity, maxPairs }` 노출 — 향후 RepoRules / 사용자 config 와이어링은 별도 슬라이스.
+선택 사항으로 `ClassifyOptions { minLines, minSimilarity, maxPairs }` 노출. 추가로 first-class tool `git_moved_code` 는 이 knobs 를 입력으로 받되, `maxPairs` 는 **default 2000 / ceiling 10_000** 으로 bounded 된다. 즉 caller 는 detector 기본 cap 보다 느슨하게 조정할 수 있지만, O(N×M) guard 자체를 임의의 큰 값으로 해제할 수는 없다.
 
 ### Jaccard vs Levenshtein
 
@@ -108,7 +108,7 @@ const { logic, moved, mechanical } = classifyDiff(hunks)
 ## 근거
 
 - **순수·결정적**: I/O 0, 입력 동일 → 출력 동일. 테스트가 stub/mock 불필요 — 직접 데이터로 단언. 향후 RepoRules / 캔버스 렌더러 / agent loop hint 어디에서 호출돼도 동일 동작.
-- **DEFAULT-OFF·ADDITIVE**: 본 슬라이스는 detector만 추가. `git_diff` 도구, agent loop, 어떤 호출부도 무수정. 효과 발생은 후속 wiring (pr-review-canvas skill 의 §2 분류 단계 + 향후 IDE 패널) 에 달림.
+- **ADDITIVE**: pure detector 는 기존 `git_diff` semantics 를 건드리지 않는다. 다만 live code 기준으로는 `gitMovedCodeTool(runner)` 가 `src/tool/git/index.ts` 에 export/registration 되어 있어 `git_moved_code` 라는 별도 read-only tool surface 는 이미 사용 가능하다. 기존 호출부가 자동으로 detector 를 타는 것은 아니고, 해당 tool 을 명시적으로 호출할 때만 효과가 난다.
 - **slice-isolation**: `@/tool/git/moved-code` 가 자기 닫힌 하위 모듈. `git/runner.ts`, `git/_budget.ts`, `git/types.ts` 등 직전 흡수 잠긴 영역 무수정. Cursor / Codex 가 모두 동일한 token-bag 알고리즘을 다중-라이브러리 검증한 점을 근거로 채택 — n=1 휴리스틱 아님.
 
 ## 대안
@@ -121,12 +121,12 @@ const { logic, moved, mechanical } = classifyDiff(hunks)
 ## 결과·트레이드오프
 
 - **얻은 것**: closed-type 분류 contract + 19 hellgate (60 expect) green + biome 0 errors. pr-review-canvas skill 이 §2 카테고리를 *데이터로* 받아 처리할 수 있게 됨. 후속 IDE 패널 / agent 리뷰 슬라이스의 입력 단자 확정.
-- **비용**: 본 슬라이스는 detector 만 추가, **아직 어떤 호출부도 사용 안 함**. pr-review-canvas SKILL.md 본문이 `classifyDiff` 를 참조하도록 wiring 하는 단계는 follow-up.
+- **비용**: `git_moved_code` tool 은 이미 등록되어 있으므로 raw shell 없이 호출 가능하다. 다만 `git_diff`/agent loop/pr-review-canvas 가 detector 를 **자동 실행** 하지는 않는다. 후속 callsite 는 여전히 별도 작업이다.
 - **트레이드오프**: mechanical 분류 비활성 + Jaccard 의 precision-favored default 로 인해 짧은 블록의 single-rename 은 default 임계값에서 잡히지 않음 (HELL-14 가 명시). 이는 의도된 선택이며 옵션으로 overridable.
 
 ## 한계 (LIMITATIONS)
 
-- (a) **DEFAULT-OFF — 미배선**: 본 커밋은 detector + 테스트 + ADR 만 추가. pr-review-canvas SKILL 본문 / agent loop / IDE 패널은 무수정. 효과 발생은 follow-up.
+- (a) **자동 후처리 미배선**: registered tool surface (`git_moved_code`) 는 live 이지만, pr-review-canvas SKILL 본문 / agent loop / IDE 패널이 detector 를 자동 호출하는 wiring 은 여전히 follow-up 이다.
 - (b) **mechanical 카테고리 비활성**: 항상 `[]`. follow-up ADR 에서 우선순위 룰과 함께 활성화 예정.
 - (c) **Jaccard 의 짧은-블록 single-rename 한계**: HELL-14 에 박힘. minLines 5 + minSimilarity 0.85 default 에서는 보수적으로 거절. 옵션 override 가능.
 - (d) **path canonicalization 없음**: parser 는 `git diff` 가 주는 path 를 그대로 보존. `..`/symlink resolve 는 호출부 책임 (이 모듈은 post-diff 분석기, path semantics 의 source-of-truth 아님).
@@ -134,12 +134,14 @@ const { logic, moved, mechanical } = classifyDiff(hunks)
 
 ## 불변식 영향
 
-- **byte-identical default-OFF**: 새 순수 모듈. 호출자 wiring 전까지 모든 기존 경로 불변. 기존 테스트 전부 무수정 통과.
-- **ADDITIVE only**: `src/tool/git/moved-code/` 신규 디렉터리. `git/index.ts` 의 기존 export 무수정 (본 슬라이스에서 wiring 안 함).
+- **기존 도구 semantics 보존**: `git_diff` 등 기존 git tool 동작은 불변. detector 는 pure core 이고, live wiring 은 새 named tool `git_moved_code` 추가로만 노출된다.
+- **ADDITIVE only**: `src/tool/git/moved-code/` pure core + 이를 감싼 `git_moved_code` export/registration 이 추가된다. 기존 tool 이름/계약은 제거되지 않는다.
 - **슬라이스 격리 유지**: detector 는 `@/tool/git/moved-code` 가 소유. 분류 결과는 closed type 으로만 노출. `git/runner.ts` / `git/_budget.ts` / `git/types.ts` 직전 잠긴 영역 무수정.
 
 ## 검증
 
 - `bun test tests/unit/moved-code-detector-hellgate.test.ts` — **19 pass / 0 fail / 60 expect**.
+- `bun test tests/unit/git-moved-code-tool.test.ts` — tool shell / argv discipline / bounded `maxPairs` override+ceiling contract.
+- `bun test tests/unit/git-tools.test.ts` — `gitTools()` registration includes `git_moved_code`.
 - `bunx biome check src/tool/git/moved-code/ tests/unit/moved-code-detector-hellgate.test.ts` — **0 errors, 0 warnings**.
 - `bun run typecheck` — 본 슬라이스 영역 0 errors (전체 4 errors 는 사전존재, 다른 트랙 in-flight: `src/apps/cli/repl.ts` auth, `tests/unit/src-no-sketchy-code.test.ts` scope-track).

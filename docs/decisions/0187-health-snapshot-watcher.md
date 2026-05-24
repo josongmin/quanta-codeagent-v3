@@ -28,7 +28,10 @@ ADR-0180은 `~/.quanta/health.json` 을 **composition-time 1회**만 write한다
 ```ts
 export interface WatcherOpts {
   readonly getBag: () => { readonly [K in keyof ObservabilityBag]: ObservabilityBag[K] | undefined }
-  readonly snapshot?: HealthSnapshotOpts        // forwarded to writeHealthSnapshot
+  readonly snapshot?: {
+    readonly build?: HealthSnapshotBuildOpts    // preserved on EVERY refresh
+    readonly write?: HealthSnapshotWriteOpts    // forwarded on EVERY write
+  }
   readonly intervalMs?: number                  // default 30_000 (K8s liveness norm)
   readonly hotReloadOnSighup?: boolean          // default true
   readonly onSignal?: (sig: "SIGHUP", h: () => void) => void   // test seam
@@ -56,6 +59,11 @@ export const startHealthSnapshotWatcher: (opts: WatcherOpts) => WatcherHandle
 
 **비교**: Cursor 17.2 — `(1) chat-turn overlay + (2) Rust debounce + (3) 60s subtree-walk + (4) handshake`. quanta는 4채널 중 (1) overlay는 file-write 도메인에 의미 없어 빼고(파일은 모델이 안 봄), (2) debounce는 watcher 자체가 light-touch이므로 생략, (3) interval은 채택(30s), (4) handshake는 manual `emitNow()`로 운영자가 RPC로 invoke. 갯수 ↓ 의미 동등.
 
+### build/write 옵션 보존 + single-flight
+
+- watcher는 `snapshot.build` 를 매 refresh에 다시 `buildHealthSnapshot(...)` 에 넘긴다. 따라서 `skippedExpected`, `quantaVersion`, injected `now` 같은 build-time intent가 첫 emit 뒤에 사라지지 않는다.
+- watcher는 internal single-flight pump를 둔다. 동시에 여러 trigger가 들어와도 write는 **항상 1개만 in-flight** 이고, 진행 중에 쌓인 trigger는 **1회 follow-up emit으로 coalesce** 된다. overlap write race나 fixed tmp scratch-file 충돌을 watcher 레벨에서 다시 만들지 않는다.
+
 ### emitNow() 실패 모드
 
 write 실패 시 watcher는 `warn(msg)` 호출 후 **내부 state는 보존**한다. 다음 interval/SIGHUP/manual 호출은 새로운 bag으로 재시도. 스냅샷은 *operator convenience*지 hot-path failure mode가 아니다 — 일시 EROFS/EACCES가 watcher를 죽이면 안 됨. 테스트 [8]이 이 invariant를 봉인.
@@ -72,7 +80,7 @@ ADR-0180의 file 동작은 byte-identical로 유지. watcher는 **caller가 명�
 
 ## Hellgate
 
-`tests/unit/observability-health-snapshot-watcher-hellgate.test.ts` — **12 신규 case**:
+`tests/unit/observability-health-snapshot-watcher-hellgate.test.ts` — **14 신규 case**:
 
 | # | scope | case |
 |---|---|---|
@@ -88,6 +96,8 @@ ADR-0180의 file 동작은 byte-identical로 유지. watcher는 **caller가 명�
 | 10 | D. stop | stop() 두 번 → idempotent (no double-clear) |
 | 11 | D. stop | after stop(), emitNow() still works manually |
 | 12 | E. fresh bag | getBag changes between intervals → snapshot reflects latest state (no stale memoization) |
+| 13 | F. preserved build opts | repeated refresh keeps `snapshot.build` (`skippedExpected`, `quantaVersion`, injected `now`) |
+| 14 | F. overlap serialization | overlapping manual/interval/SIGHUP triggers never overlap writes and collapse to one follow-up emit |
 
 ## Alternatives rejected
 

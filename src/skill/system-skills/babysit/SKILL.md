@@ -2,18 +2,9 @@
 name: babysit
 description: Keep a PR merge-ready by reacting to CI failures and review comments in a loop. Triggers when the user asks to "babysit" a PR, "merge when green", "land this PR", "keep checking until it merges", or shares a PR URL with intent to ship.
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
+allowedTools: ["Bash", "Read", "Grep", "Edit"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
 ---
 
 # PR babysit

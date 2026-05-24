@@ -15,11 +15,12 @@ import {
   systemSkillsDir,
   triggerLocalizeFault,
 } from "../../src/skill"
+import { parseSkillMarkdown } from "../../src/skill/skill-frontmatter"
 
 const SKILL_MD = join(systemSkillsDir(), "localize-fault", "SKILL.md")
 
 describe("localize-fault SKILL.md — frontmatter", () => {
-  test("lenient parser extracts name, description, tools allowlist", async () => {
+  test("frontmatter exposes strict allowlist metadata and discovery preserves it at runtime", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
     const { data, body } = parseFrontmatter(raw)
     expect(data.name).toBe("localize-fault")
@@ -28,8 +29,7 @@ describe("localize-fault SKILL.md — frontmatter", () => {
     expect(data.description).toContain("localize")
     expect(data.description).toContain("어디서 깨지는지")
     expect(data.description).toContain("fault localization")
-    // tools: is the runtime-enforcement seam — the 3-stage tool set.
-    expect(data.tools).toEqual([
+    expect(data.allowedTools).toEqual([
       "localize",
       "read",
       "grep",
@@ -39,13 +39,32 @@ describe("localize-fault SKILL.md — frontmatter", () => {
       "diagnostics",
       "test_runner",
     ])
+    const discovered = await findLocalizeFaultSkill()
+    expect(discovered?.tools).toEqual(data.allowedTools)
     expect(body.length).toBeGreaterThan(500)
   })
 
-  test("dual-shape: allowedTools mirrors tools; strict-shape SSOT fields present", async () => {
+  test("strict parseSkillMarkdown accepts the bundled file as-is", async () => {
+    const raw = await readFile(SKILL_MD, "utf8")
+    const r = parseSkillMarkdown(raw)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.frontmatter.allowedTools).toEqual([
+      "localize",
+      "read",
+      "grep",
+      "glob",
+      "lsp_document_symbol",
+      "lsp_references",
+      "diagnostics",
+      "test_runner",
+    ])
+  })
+
+  test("lenient parser retains strict-shape SSOT fields without a runtime mirror", async () => {
     const raw = await readFile(SKILL_MD, "utf8")
     const { data } = parseFrontmatter(raw)
-    expect(data.allowedTools).toEqual(data.tools)
+    expect(data.tools).toBeUndefined()
     expect(data.userInvocable).toBe("true")
     expect(data.category).toBe("skill")
     expect(data.stability).toBe("stable")

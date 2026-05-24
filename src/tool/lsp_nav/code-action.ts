@@ -70,8 +70,9 @@ export interface CodeActionPort {
     line: number,
     col: number,
     kind?: CodeActionPortKind,
+    signal?: AbortSignal,
   ): Promise<readonly CodeActionPortAction[] | null>
-  applyEdit(edit: CodeActionPortWorkspaceEdit): Promise<void>
+  applyEdit(edit: CodeActionPortWorkspaceEdit, signal?: AbortSignal): Promise<void>
 }
 
 // ── Input schema ────────────────────────────────────────────────────────────
@@ -150,6 +151,7 @@ export const lspCodeActionTool = (port: CodeActionPort): Tool<LspCodeActionInput
         parsed.data.line - 1,
         parsed.data.character - 1,
         parsed.data.kind,
+        ctx.signal,
       )
     } catch (e) {
       yield {

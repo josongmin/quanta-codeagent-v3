@@ -9,18 +9,26 @@ import type { FormatPort, FormatRange, TextEdit } from "../ports/format-port"
 
 /** Subset of `LspClient` consumed by this adapter. */
 export interface FormatLspClient {
-  requestFormatting(file: string, range?: FormatRange): Promise<readonly TextEdit[] | null>
+  requestFormatting(
+    file: string,
+    range?: FormatRange,
+    signal?: AbortSignal,
+  ): Promise<readonly TextEdit[] | null>
 }
 
 export class DefaultFormatAdapter implements FormatPort {
   constructor(private readonly client: FormatLspClient) {}
 
-  async format(file: string, range?: FormatRange): Promise<readonly TextEdit[] | null> {
+  async format(
+    file: string,
+    range?: FormatRange,
+    signal?: AbortSignal,
+  ): Promise<readonly TextEdit[] | null> {
     // Spread the optional `range` so `undefined` stays out of the call site
     // (exactOptionalPropertyTypes). The underlying `LspClient.requestFormatting`
     // distinguishes `undefined` (whole-file) from a real range.
     return range === undefined
-      ? await this.client.requestFormatting(file)
-      : await this.client.requestFormatting(file, range)
+      ? await this.client.requestFormatting(file, undefined, signal)
+      : await this.client.requestFormatting(file, range, signal)
   }
 }

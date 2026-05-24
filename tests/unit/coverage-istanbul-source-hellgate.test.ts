@@ -300,8 +300,13 @@ describe("coverage / C. branchId stability", () => {
     expect(sitesA?.length).toBe(sitesB?.length ?? 0)
     if (sitesA !== undefined && sitesB !== undefined) {
       for (let i = 0; i < sitesA.length; i += 1) {
-        expect(sitesA[i]?.kind).toBe(sitesB[i]?.kind ?? "")
-        expect(sitesA[i]?.pos).toBe(sitesB[i]?.pos ?? -1)
+        const siteA = sitesA[i]
+        const siteB = sitesB[i]
+        expect(siteA).toBeDefined()
+        expect(siteB).toBeDefined()
+        if (siteA === undefined || siteB === undefined) continue
+        expect(siteA.kind).toBe(siteB.kind)
+        expect(siteA.pos).toBe(siteB.pos)
       }
     }
   })

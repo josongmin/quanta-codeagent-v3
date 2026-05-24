@@ -49,8 +49,9 @@ export interface RenameApplyPort {
     line: number,
     col: number,
     newName: string,
+    signal?: AbortSignal,
   ): Promise<RenameApplyPortWorkspaceEdit | null>
-  applyEdit(edit: RenameApplyPortWorkspaceEdit): Promise<void>
+  applyEdit(edit: RenameApplyPortWorkspaceEdit, signal?: AbortSignal): Promise<void>
 }
 
 // ── Input schema ────────────────────────────────────────────────────────────
@@ -118,6 +119,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
         parsed.data.line - 1,
         parsed.data.character - 1,
         parsed.data.newName,
+        ctx.signal,
       )
     } catch (e) {
       yield {
@@ -151,7 +153,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
     }
     yield { type: "progress", message: "lsp_rename_apply: applying workspace edit" }
     try {
-      await port.applyEdit(edit)
+      await port.applyEdit(edit, ctx.signal)
     } catch (e) {
       yield {
         type: "result",

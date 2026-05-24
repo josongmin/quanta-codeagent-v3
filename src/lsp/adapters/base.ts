@@ -1039,9 +1039,7 @@ export class LspClient implements LspPort {
       const entry: PendingRequest = { resolve, reject, timer, method }
       if (signal) {
         const onAbort = () => {
-          if (!this.pending.delete(id)) return
-          clearTimeout(timer)
-          entry.detachAbort?.()
+          if (!this.takePending(id)) return
           this.sendNotification("$/cancelRequest", { id })
           reject(abortError(`LSP request "${method}"`))
         }
@@ -1049,7 +1047,12 @@ export class LspClient implements LspPort {
         entry.detachAbort = () => signal.removeEventListener("abort", onAbort)
       }
       this.pending.set(id, entry)
-      this.send(payload)
+      const sendError = this.send(payload)
+      if (sendError) {
+        const pending = this.takePending(id)
+        if (!pending) return
+        pending.reject(sendError)
+      }
     })
   }
 
@@ -1120,13 +1123,20 @@ export class LspClient implements LspPort {
     return [toLocation(raw)]
   }
 
-  private send(payload: unknown): void {
+  private send(payload: unknown): Error | null {
     const stdin = this.proc?.stdin
-    if (!stdin) return
+    if (!stdin) {
+      const err = new Error("LSP transport unavailable: stdin closed")
+      logger.warn("lsp: failed to write to server stdin", { error: err.message })
+      return err
+    }
     try {
       stdin.write(encodeMessage(payload))
+      return null
     } catch (e) {
-      logger.warn("lsp: failed to write to server stdin", { error: String(e) })
+      const err = e instanceof Error ? e : new Error(String(e))
+      logger.warn("lsp: failed to write to server stdin", { error: err.message })
+      return new Error(`LSP transport write failed: ${err.message}`)
     }
   }
 
@@ -1156,11 +1166,8 @@ export class LspClient implements LspPort {
 
   private resolvePending(msg: JsonRpcResponse): void {
     const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
-    const entry = this.pending.get(id)
+    const entry = this.takePending(id)
     if (!entry) return
-    this.pending.delete(id)
-    clearTimeout(entry.timer)
-    entry.detachAbort?.()
     if (msg.error) {
       entry.reject(new LspRequestError(entry.method, msg.error))
     } else {
@@ -1207,5 +1214,14 @@ export class LspClient implements LspPort {
       for (const w of waiters) w([])
     }
     this.diagnosticsWaiters.clear()
+  }
+
+  private takePending(id: number): PendingRequest | undefined {
+    const entry = this.pending.get(id)
+    if (!entry) return undefined
+    this.pending.delete(id)
+    clearTimeout(entry.timer)
+    entry.detachAbort?.()
+    return entry
   }
 }

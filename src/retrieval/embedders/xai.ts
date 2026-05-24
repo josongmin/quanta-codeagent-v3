@@ -21,7 +21,10 @@ export const createXaiEmbedder = (opts: XaiEmbedderOptions): EmbeddingPort => {
   return {
     vendor: "xai",
     model,
-    async embed(_texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+    async embed(
+      _texts: readonly string[],
+      _opts?: { signal?: AbortSignal },
+    ): Promise<readonly (readonly number[])[]> {
       throw new RetrievalError("xai embedder not yet wired at runtime (ADR-0159 type-level stub)")
     },
   }

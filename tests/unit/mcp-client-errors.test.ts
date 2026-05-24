@@ -19,6 +19,25 @@
 import { describe, expect, test } from "bun:test"
 import { McpClient, McpError } from "@/mcp"
 
+class TransportProbeMcpClient extends McpClient {
+  installTransport(stdin: { write: (chunk: string) => unknown } | undefined): void {
+    const self = this as unknown as {
+      started: boolean
+      stopped: boolean
+      exited: boolean
+      proc: { stdin?: { write: (chunk: string) => unknown } } | null
+    }
+    self.started = true
+    self.stopped = false
+    self.exited = false
+    self.proc = stdin ? { stdin } : {}
+  }
+
+  pendingCount(): number {
+    return (this as unknown as { pending: Map<number, unknown> }).pending.size
+  }
+}
+
 describe("McpClient — empty command rejection (client.ts:93)", () => {
   test("empty command array → start() rejects with McpError, no spawn attempted", async () => {
     const client = new McpClient({ name: "empty-cmd", command: [] })
@@ -91,5 +110,29 @@ describe("McpClient — error class taxonomy", () => {
     expect(e).toBeInstanceOf(Error)
     expect(e).toBeInstanceOf(McpError)
     expect(e.message).toBe("test")
+  })
+})
+
+describe("McpClient — immediate transport failure", () => {
+  test("missing stdin rejects immediately and clears the pending slot", async () => {
+    const client = new TransportProbeMcpClient({ name: "stdin-missing", command: ["/bin/false"] })
+    client.installTransport(undefined)
+    const started = Date.now()
+    await expect(client.listTools()).rejects.toThrow(/stdin closed/)
+    expect(Date.now() - started).toBeLessThan(200)
+    expect(client.pendingCount()).toBe(0)
+  })
+
+  test("stdin.write throw rejects immediately and clears the pending slot", async () => {
+    const client = new TransportProbeMcpClient({ name: "stdin-throw", command: ["/bin/false"] })
+    client.installTransport({
+      write: () => {
+        throw new Error("kaboom")
+      },
+    })
+    const started = Date.now()
+    await expect(client.listTools()).rejects.toThrow(/kaboom/)
+    expect(Date.now() - started).toBeLessThan(200)
+    expect(client.pendingCount()).toBe(0)
   })
 })

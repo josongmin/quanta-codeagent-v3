@@ -25,6 +25,8 @@ import { type ClassifyOptions, classifyDiff, parseUnifiedDiff } from "./moved-co
 import type { GitRunner } from "./types"
 
 const MAX_OUTPUT = 50_000
+const GIT_MOVED_CODE_DEFAULT_MAX_PAIRS = 2_000
+const GIT_MOVED_CODE_MAX_PAIRS_CEILING = 10_000
 
 /** Same rejection sentinel as `gitDiffTool` — see `./diff.ts`. */
 class GitMovedCodeBaseRejected extends Error {
@@ -63,14 +65,18 @@ export const gitMovedCodeInputSchema = z.object({
     .optional()
     .describe("Min normalized lines per side (default 5)"),
   /** Cap on |removed|×|added| pair-product before detection is skipped.
-   *  Default 2000 (more conservative than the classifier's own 10_000 default
-   *  because the tool surface trades recall for latency). */
+   *  Default 2000; ceiling 10_000. The tool stays more conservative than the
+   *  pure classifier by default, but the caller may widen only up to the
+   *  classifier's documented worst-case cap. */
   maxPairs: z
     .number()
     .int()
     .positive()
+    .max(GIT_MOVED_CODE_MAX_PAIRS_CEILING)
     .optional()
-    .describe("Max removed×added pair-product (default 2000)"),
+    .describe(
+      `Max removed×added pair-product (default ${GIT_MOVED_CODE_DEFAULT_MAX_PAIRS}, ceiling ${GIT_MOVED_CODE_MAX_PAIRS_CEILING})`,
+    ),
 })
 export type GitMovedCodeInput = z.infer<typeof gitMovedCodeInputSchema>
 
@@ -98,7 +104,11 @@ const buildOptions = (input: GitMovedCodeInput): ClassifyOptions => {
   const opts: { -readonly [K in keyof ClassifyOptions]: ClassifyOptions[K] } = {}
   if (input.minSimilarity !== undefined) opts.minSimilarity = input.minSimilarity
   if (input.minLines !== undefined) opts.minLines = input.minLines
-  if (input.maxPairs !== undefined) opts.maxPairs = input.maxPairs
+  if (input.maxPairs !== undefined) {
+    opts.maxPairs = Math.min(input.maxPairs, GIT_MOVED_CODE_MAX_PAIRS_CEILING)
+  } else {
+    opts.maxPairs = GIT_MOVED_CODE_DEFAULT_MAX_PAIRS
+  }
   return opts
 }
 

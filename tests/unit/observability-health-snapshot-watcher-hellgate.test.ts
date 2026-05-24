@@ -469,15 +469,12 @@ describe("ADR-0187 preserved build opts + overlap serialization", () => {
   })
 
   test("[13] repeated refresh preserves snapshot.build opts", async () => {
-    const iv = makeIntervalCapture()
     const target = join(dir, "health.json")
     let tick = 0
     const h = startHealthSnapshotWatcher({
       getBag: emptyBag,
       intervalMs: 1000,
       hotReloadOnSighup: false,
-      setInterval: iv.setInterval,
-      clearInterval: iv.clearInterval,
       snapshot: {
         build: {
           skippedExpected: new Set<keyof ObservabilityBag>(["lspClient"]),
@@ -493,8 +490,7 @@ describe("ADR-0187 preserved build opts + overlap serialization", () => {
     expect(parsed.writtenAt).toBe(1_700_000_000_100)
     expect(parsed.slices.find((s) => s.slice === "lspClient")?.note).toBe("skipped intentionally")
 
-    iv.intervals[0]?.handler()
-    await flushTurn()
+    await h.emitNow()
 
     parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
     expect(parsed.quantaVersion).toBe("watcher-version")

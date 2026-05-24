@@ -20,6 +20,7 @@
 | LLM provider (0139/0151) | `llm.provider.stream.total` | counter | `provider`, `model` | stream() 시작 |
 | LLM provider | `llm.provider.stream.ttft_ms` | histogram | `provider` | first event yield |
 | LLM provider | `llm.provider.stream.failures.total` | counter | `provider`, `code` | ProviderError throw |
+| LLM provider | `llm.provider.stream.duration_ms` | histogram | `provider`, `stop_reason` | stream() 종료 |
 | OS sandbox (0136/0150) | `sandbox.spawn.total` | counter | `backend`, `profile` | spawn() entry |
 | OS sandbox | `sandbox.spawn.degraded.total` | counter | `reason` | sandboxApplied=false |
 | LSP code-action (0141/0143) | `lsp.request.total` | counter | `method` | requestCodeActions/Formatting/SignatureHelp |

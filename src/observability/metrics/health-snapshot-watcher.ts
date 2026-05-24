@@ -5,7 +5,7 @@
  * (K8s livenessProbe `periodSeconds: 30`, cron, ad-hoc shell loop) need the
  * file to *track* wiring changes — not freeze at startup.
  *
- * Three-tier drift defense (cited in ADR-0183):
+ * Three-tier drift defense (cited in ADR-0187):
  *   1. **Interval** (default 30s — K8s liveness norm). Catches drift even if
  *      no external trigger fires. systemd `notify` socket parallel: a tiny
  *      well-known file refreshed on heartbeat.
@@ -21,10 +21,10 @@
  *
  * Plane-clean: imports ONLY `./health-snapshot` (builder/writer) and
  * `./observability-helper` (ObservabilityBag *type*). No `node:os` / `node:fs`
- * direct (delegates to the writer injected via `HealthSnapshotOpts.writeFile`
- * or to the default writer inside `writeHealthSnapshot`). Process API access
- * (`process.on("SIGHUP", ...)`, `setInterval`, `clearInterval`) ONLY when the
- * caller does NOT inject the corresponding test seam.
+ * direct (delegates to `WatcherSnapshotOpts.write` / the default writer inside
+ * `writeHealthSnapshot`). Process API access (`process.on("SIGHUP", ...)`,
+ * `setInterval`, `clearInterval`) ONLY when the caller does NOT inject the
+ * corresponding test seam.
  *
  * Default-OFF: the snapshot file's lifecycle is unchanged unless the caller
  * explicitly invokes `startHealthSnapshotWatcher()`. ADR-0180's

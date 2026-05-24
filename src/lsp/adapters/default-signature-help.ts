@@ -12,6 +12,7 @@ export interface SignatureHelpLspClient {
     file: string,
     line: number,
     col: number,
+    signal?: AbortSignal,
   ): Promise<readonly SignatureInfo[] | null>
 }
 
@@ -22,7 +23,8 @@ export class DefaultSignatureHelpAdapter implements SignatureHelpPort {
     file: string,
     line: number,
     col: number,
+    signal?: AbortSignal,
   ): Promise<readonly SignatureInfo[] | null> {
-    return await this.client.requestSignatureHelp(file, line, col)
+    return await this.client.requestSignatureHelp(file, line, col, signal)
   }
 }

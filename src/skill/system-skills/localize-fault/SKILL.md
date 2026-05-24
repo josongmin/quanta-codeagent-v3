@@ -2,26 +2,9 @@
 name: localize-fault
 description: Localize a fault to its edit location using a 3-stage evidence funnel (file → function → line). Triggers on "localize", "find the bug in", "where does X fail", "어디서 깨지는지", "fault localization", repro→fix tasks, and SWE-bench-style "fix this issue" requests. Ranks source text and test/build logs above search hits; never edits before source text confirms the owner.
 userInvocable: true
-allowedTools:
-  - localize
-  - read
-  - grep
-  - glob
-  - lsp_document_symbol
-  - lsp_references
-  - diagnostics
-  - test_runner
+allowedTools: ["localize", "read", "grep", "glob", "lsp_document_symbol", "lsp_references", "diagnostics", "test_runner"]
 category: skill
 stability: stable
-tools:
-  - localize
-  - read
-  - grep
-  - glob
-  - lsp_document_symbol
-  - lsp_references
-  - diagnostics
-  - test_runner
 ---
 
 # 3-stage fault localization (file → function → edit-location)

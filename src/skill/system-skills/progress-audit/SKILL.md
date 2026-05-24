@@ -2,16 +2,9 @@
 name: progress-audit
 description: Audit work-in-progress with code-only evidence. Triggers on "code-only", "코드 레벨로만", "문서는 보지 말고", "진행률", "P0/P1/P2", and explicit verification requests. Outputs success/partial/uncertain with file:line proof; never claims "complete" without verification.
 userInvocable: true
-allowedTools:
-  - Read
-  - Grep
-  - Bash
+allowedTools: ["Read", "Grep", "Bash"]
 category: skill
 stability: stable
-tools:
-  - Read
-  - Grep
-  - Bash
 ---
 
 # Code-only progress audit

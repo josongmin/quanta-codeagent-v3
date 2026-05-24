@@ -82,7 +82,11 @@ class CommitCache {
 
 export interface CommitEmbedder {
   /** Embed recent commits — uses cache for any sha we've seen before. */
-  recent(opts: { limit: number; cwd: string }): Promise<readonly CommitNoteWithEmbedding[]>
+  recent(opts: {
+    limit: number
+    cwd: string
+    signal?: AbortSignal
+  }): Promise<readonly CommitNoteWithEmbedding[]>
   /** Current LRU size — observability. */
   cacheSize(): number
 }
@@ -138,12 +142,12 @@ const writeBack = (
 export const createCommitEmbedder = (opts: CommitEmbedderOptions): CommitEmbedder => {
   const cache = new CommitCache(opts.cacheMax ?? DEFAULT_CACHE_MAX)
   return {
-    async recent({ limit, cwd }): Promise<readonly CommitNoteWithEmbedding[]> {
+    async recent({ limit, cwd, signal }): Promise<readonly CommitNoteWithEmbedding[]> {
       const commits = await opts.git.log({ limit, cwd })
       if (commits.length === 0) return []
       const { out, need } = splitByCache(commits, cache)
       if (need.length > 0) {
-        const fresh = await opts.embed.embed(need.map((n) => n.text))
+        const fresh = await opts.embed.embed(need.map((n) => n.text), { signal })
         writeBack(need, fresh, commits, out, cache)
       }
       const final: CommitNoteWithEmbedding[] = []

@@ -54,7 +54,7 @@ export interface SliceHealth {
 `ObservabilityOpts` 확장:
 
 ```ts
-/** ADR-0177: when set, write a JSON health snapshot at construction time.
+/** ADR-0180: when set, write a JSON health snapshot at construction time.
  *  Absolute path used verbatim; relative path anchored to `${homedir()}/.quanta/`.
  *  `true` = use default `${homedir()}/.quanta/health.json`. Default = no write. */
 readonly healthSnapshotPath?: string | true
@@ -69,7 +69,7 @@ readonly healthSnapshotPath?: string | true
    - 결과 promise는 `lastHealthSnapshotInFlight()` 로 노출 (테스트 deterministic await용).
    - build/write 실패는 `opts.warn` (또는 `console.warn`) 로 swallow — snapshot은 운영자 편의지 hot-path failure 모드가 아니다.
 
-`writeHealthSnapshot` 의 atomic 패턴: `mkdir -p $(dirname)` → tmp 파일 (`${final}.tmp.${pid}`) 작성 → `rename` (POSIX atomic). reader가 partial JSON을 보는 race 불가.
+`writeHealthSnapshot` 의 atomic 패턴: `mkdir -p $(dirname)` → emit별 unique tmp 파일 (`${final}.tmp.${pid}.${ordinal}`) 작성 → `rename` (POSIX atomic). 같은 프로세스의 concurrent write도 scratch path를 공유하지 않는다.
 
 ### skippedExpected → snapshot 의미 (ADR-0172 와 분리)
 
@@ -87,7 +87,7 @@ ADR-0172 의 gauge는 "ground truth"였다 — skippedExpected가 gauge value를
 
 ## Hellgate
 
-`tests/unit/observability-health-snapshot-hellgate.test.ts` — **11 신규 case**:
+`tests/unit/observability-health-snapshot-hellgate.test.ts` — **12 신규 case**:
 
 | # | scope | case |
 |---|---|---|
@@ -99,9 +99,10 @@ ADR-0172 의 gauge는 "ground truth"였다 — skippedExpected가 gauge value를
 | 6 | writeHealthSnapshot | happy path → file readable, parses to HealthSnapshot |
 | 7 | writeHealthSnapshot | atomic — injected writer records 1 call to FINAL path |
 | 8 | writeHealthSnapshot | write failure → HealthSnapshotError("write-failed") |
-| 9 | helper integration | custom absolute path → file written, read back, 7 slices |
-| 10 | helper integration | `true` → default `~/.quanta/health.json` resolved (success-OR-swallow-warn dual accept for CI sandboxing) |
-| 11 | determinism | same bag + injected clock → `JSON.stringify` byte-identical, slice order = ALL_KEYS |
+| 9 | writeHealthSnapshot | concurrent default writes allocate distinct tmp paths before rename |
+| 10 | helper integration | custom absolute path → file written, read back, 7 slices |
+| 11 | helper integration | `true` → default `~/.quanta/health.json` resolved (success-OR-swallow-warn dual accept for CI sandboxing) |
+| 12 | determinism | same bag + injected clock → `JSON.stringify` byte-identical, slice order = ALL_KEYS |
 
 ## Operator query examples
 

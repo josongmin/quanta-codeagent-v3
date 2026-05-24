@@ -14,6 +14,7 @@
  * `openai` package directly (the assembler/caller does).
  */
 import { LLMError } from "@/shared"
+import { isAbortError, throwIfAborted } from "./_abort"
 import type { EmbeddingAdapterOptions, EmbeddingPort } from "../embedding-port"
 
 const DEFAULT_MODEL = "text-embedding-3-small"
@@ -23,7 +24,7 @@ export interface EmbeddingsHttp {
   embeddingsCreate(body: {
     model: string
     input: readonly string[]
-  }): Promise<{ data: { embedding: readonly number[] }[] }>
+  }, opts?: { signal?: AbortSignal }): Promise<{ data: { embedding: readonly number[] }[] }>
 }
 
 export interface OpenAIRetrievalEmbedderOptions extends EmbeddingAdapterOptions {
@@ -43,14 +44,22 @@ export const createOpenAIEmbedder = (opts: OpenAIRetrievalEmbedderOptions): Embe
   return {
     vendor: "openai",
     model,
-    async embed(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+    async embed(
+      texts: readonly string[],
+      callOpts?: { signal?: AbortSignal },
+    ): Promise<readonly (readonly number[])[]> {
       if (texts.length === 0) return []
       const out: (readonly number[])[] = []
       for (const batch of chunkBatches(texts, batchSize)) {
+        throwIfAborted(callOpts?.signal)
         try {
-          const res = await opts.http.embeddingsCreate({ model, input: batch })
+          const res = await opts.http.embeddingsCreate(
+            { model, input: batch },
+            { signal: callOpts?.signal },
+          )
           for (const d of res.data) out.push(d.embedding)
         } catch (e) {
+          if (isAbortError(e)) throw e
           throw new LLMError(`OpenAI retrieval embeddings failed: ${(e as Error).message}`, {
             cause: e,
           })

@@ -64,6 +64,35 @@ process.stdin.on("data", (c) => {
 })
 `
 
+const REPEATED_CURSOR_SERVER = `
+const reply = (m) => process.stdout.write(JSON.stringify(m) + "\\n")
+let buf = ""
+process.stdin.on("data", (c) => {
+  buf += c
+  let nl
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, nl).trim()
+    buf = buf.slice(nl + 1)
+    if (!line) continue
+    const msg = JSON.parse(line)
+    if (msg.method === "initialize") {
+      reply({ jsonrpc: "2.0", id: msg.id, result: {
+        protocolVersion: "2025-06-18",
+        serverInfo: { name: "mock", version: "0.0.1" },
+        capabilities: { tools: {} },
+      } })
+    } else if (msg.method === "notifications/initialized") {
+      // notification: no reply
+    } else if (msg.method === "tools/list") {
+      reply({ jsonrpc: "2.0", id: msg.id, result: {
+        tools: [{ name: "alpha" }],
+        nextCursor: "loop",
+      } })
+    }
+  }
+})
+`
+
 let dir: string
 let serverPath: string
 
@@ -136,5 +165,14 @@ describe("McpClient against a mock MCP server", () => {
     await c.stop()
     await c.stop()
     await expect(c.callTool("alpha", {})).rejects.toThrow(/not running/)
+  })
+
+  it("fails closed on a repeated tools/list cursor instead of looping forever", async () => {
+    const repeatPath = join(dir, "repeat-cursor-server.mjs")
+    await writeFile(repeatPath, REPEATED_CURSOR_SERVER)
+    const c = new McpClient({ name: "repeat-cursor", command: [process.execPath, repeatPath] })
+    await c.start()
+    await expect(c.listTools()).rejects.toThrow(/repeated cursor/)
+    await c.stop()
   })
 })

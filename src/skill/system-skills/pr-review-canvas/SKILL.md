@@ -2,16 +2,9 @@
 name: pr-review-canvas
 description: Review a PR with moved-code detection — separate genuine logic changes from pure code MOVEMENT (function relocated, file renamed) so the reviewer sees signal, not noise. Triggers on "review this PR", "audit this PR", "what changed", "is this safe to merge".
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
+allowedTools: ["Bash", "Read", "Grep"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
 ---
 
 # PR review canvas — moved-code detection

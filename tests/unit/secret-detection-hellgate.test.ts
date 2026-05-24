@@ -20,11 +20,28 @@ import {
   entropyScanner,
   mask,
   patternScanner,
+  type SecretScanner,
+  secretlintScanner,
   shannonEntropyBits,
 } from "@/security/secret-detection"
 
 const HIGH_ENTROPY_40 = "k7AjP9xN2qLm8Bv4XzCw6FrYtUiOpHsLeR3aDfGh"
 const ANOTHER_HIGH_ENTROPY = "q9zXbR7tYwP3mN5jK1vF4hLcDgAuOiEsMpHaQrBz"
+
+describe("0. common port", () => {
+  test("0.1 — every adapter satisfies the same awaitable SecretScanner contract", async () => {
+    const factories: Array<() => SecretScanner> = [
+      patternScanner,
+      entropyScanner,
+      compositeSecretScanner,
+      secretlintScanner,
+    ]
+    for (const createScanner of factories) {
+      const findings = await createScanner().scanText("plain text only")
+      expect(Array.isArray(findings)).toBe(true)
+    }
+  })
+})
 
 describe("A. pattern scanner — signature precision", () => {
   test("A1 — AWS access key id detected as aws-access-key, high confidence", async () => {
@@ -165,9 +182,7 @@ describe("C. entropy scanner", () => {
   })
 
   test("C21 — entropyThreshold override respected (raise it so 40-char b64 is dropped)", async () => {
-    const findings = await entropyScanner({ entropyThreshold: 10 }).scanText(
-      `k=${HIGH_ENTROPY_40}`,
-    )
+    const findings = await entropyScanner({ entropyThreshold: 10 }).scanText(`k=${HIGH_ENTROPY_40}`)
     expect(findings).toEqual([])
   })
 

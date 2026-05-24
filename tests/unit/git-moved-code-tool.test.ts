@@ -26,6 +26,10 @@
  *  13. exactOptionalPropertyTypes: when input has NONE of the threshold knobs,
  *      defaults take effect — a 4-line pair is REJECTED (default minLines=5),
  *      proving the absent inputs didn't slip through as explicit `undefined`s.
+ *  14. Tool-level pair-product guard: default 2000 skips a 45×45 diff, but a
+ *      bounded override (`maxPairs: 10_000`) still allows detection.
+ *  15. Input validation: `maxPairs` above the 10_000 ceiling is rejected, so
+ *      the tool caller cannot disable the O(N×M) guard with an arbitrary cap.
  */
 import { describe, expect, test } from "bun:test"
 import { gitMovedCodeTool } from "@/tool/git/moved-code-tool"
@@ -193,6 +197,38 @@ const hugeLogicDiff = (n: number): string => {
     parts.push("@@ -1 +1 @@")
     parts.push(`-old_unique_token_${i}_no_match_anywhere_xxxxxxxxxxxxxxxx`)
     parts.push(`+new_unique_token_${i}_no_match_anywhere_yyyyyyyyyyyyyyyy`)
+  }
+  parts.push("")
+  return parts.join("\n")
+}
+
+/**
+ * 45 removed hunks + 45 added hunks = pair-product 2025. This is just above
+ * the tool default (2000) but below the bounded override ceiling (10_000),
+ * which lets the test prove both branches without huge fixture cost.
+ */
+const overDefaultButUnderCeilingMovedDiff = (): string => {
+  const body = [
+    "export const tally = (items: number[]): number => {",
+    "  let total = 0",
+    "  for (const x of items) {",
+    "    total += x",
+    "  }",
+    "  return total",
+    "}",
+  ].join("\n")
+  const parts: string[] = []
+  for (let i = 0; i < 45; i += 1) {
+    parts.push(`diff --git a/old_${i}.ts b/old_${i}.ts`)
+    parts.push(`--- a/old_${i}.ts`)
+    parts.push(`+++ b/old_${i}.ts`)
+    parts.push("@@ -1,7 +1,0 @@")
+    for (const line of body.split("\n")) parts.push(`-${line}`)
+    parts.push(`diff --git a/new_${i}.ts b/new_${i}.ts`)
+    parts.push(`--- a/new_${i}.ts`)
+    parts.push(`+++ b/new_${i}.ts`)
+    parts.push("@@ -1,0 +1,7 @@")
+    for (const line of body.split("\n")) parts.push(`+${line}`)
   }
   parts.push("")
   return parts.join("\n")
@@ -371,5 +407,28 @@ describe("gitMovedCodeTool", () => {
     const { result } = await collect(gitMovedCodeTool(runner), { minLines: 3 })
     expect(result.ok).toBe(true)
     expect(result.output).toMatch(/moved:\s+1 pairs/)
+  })
+
+  test("default maxPairs=2000 skips a 45×45 candidate set, bounded maxPairs=10_000 restores detection", async () => {
+    const diff = overDefaultButUnderCeilingMovedDiff()
+
+    const defaultRunner = new FakeRunner(okDiff(diff))
+    const defaultResult = await collect(gitMovedCodeTool(defaultRunner), {})
+    expect(defaultResult.result.ok).toBe(true)
+    expect(defaultResult.result.output).toMatch(/moved:\s+0 pairs/)
+    expect(defaultResult.result.output).toMatch(/logic:\s+90 hunks/)
+
+    const widenedRunner = new FakeRunner(okDiff(diff))
+    const widenedResult = await collect(gitMovedCodeTool(widenedRunner), { maxPairs: 10_000 })
+    expect(widenedResult.result.ok).toBe(true)
+    expect(widenedResult.result.output).toMatch(/moved:\s+45 pairs/)
+    expect(widenedResult.result.output).toMatch(/logic:\s+0 hunks/)
+  })
+
+  test("maxPairs above the 10_000 ceiling fails zod parse → ok:false (no runner call)", async () => {
+    const runner = new ForbiddenRunner()
+    const { result } = await collect(gitMovedCodeTool(runner), { maxPairs: 10_001 })
+    expect(result.ok).toBe(false)
+    expect(result.output).toMatch(/invalid input/i)
   })
 })

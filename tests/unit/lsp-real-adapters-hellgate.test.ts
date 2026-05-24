@@ -533,10 +533,29 @@ describe("DefaultCodeActionAdapter (ADR-0143 wiring)", () => {
     // ADR-0152: write lands on tmp; commit lands on original.
     expect(c.committed.get(a)).toBe("ABCDE\n")
   })
+
+  test("HELL-E4: forwards AbortSignal to both resolve and apply", async () => {
+    const ac = new AbortController()
+    let resolveSignal: AbortSignal | undefined
+    let applySignal: AbortSignal | undefined
+    const adapter = new DefaultCodeActionAdapter({
+      requestCodeActions: async (_file, _line, _col, _kind, signal) => {
+        resolveSignal = signal
+        return []
+      },
+      applyWorkspaceEdit: async (_edit, _sessionId, signal) => {
+        applySignal = signal
+      },
+    })
+    await adapter.resolveCodeActions("x.ts", 0, 0, undefined, ac.signal)
+    await adapter.applyEdit({ changes: [] }, ac.signal)
+    expect(resolveSignal).toBe(ac.signal)
+    expect(applySignal).toBe(ac.signal)
+  })
 })
 
 describe("DefaultFormatAdapter (ADR-0143 wiring)", () => {
-  test("HELL-E4: range absent → adapter calls client without range", async () => {
+  test("HELL-E5: range absent → adapter calls client without range", async () => {
     const c = new FakeLspClient()
     c.setReplier(() => ({ result: [] }))
     const adapter = new DefaultFormatAdapter(c)
@@ -546,7 +565,7 @@ describe("DefaultFormatAdapter (ADR-0143 wiring)", () => {
     expect(methods).not.toContain("textDocument/rangeFormatting")
   })
 
-  test("HELL-E5: range present → adapter calls client with range", async () => {
+  test("HELL-E6: range present → adapter calls client with range", async () => {
     const c = new FakeLspClient()
     c.setReplier(() => ({ result: [] }))
     const adapter = new DefaultFormatAdapter(c)
@@ -554,10 +573,23 @@ describe("DefaultFormatAdapter (ADR-0143 wiring)", () => {
     const methods = c.sent.filter((s) => s.kind === "request").map((s) => s.method)
     expect(methods).toContain("textDocument/rangeFormatting")
   })
+
+  test("HELL-E7: forwards AbortSignal to requestFormatting", async () => {
+    const ac = new AbortController()
+    let seen: AbortSignal | undefined
+    const adapter = new DefaultFormatAdapter({
+      requestFormatting: async (_file, _range, signal) => {
+        seen = signal
+        return []
+      },
+    })
+    await adapter.format("x.ts", undefined, ac.signal)
+    expect(seen).toBe(ac.signal)
+  })
 })
 
 describe("DefaultSignatureHelpAdapter (ADR-0143 wiring)", () => {
-  test("HELL-E6: forwards file/line/col to LspClient + returns mapped signatures", async () => {
+  test("HELL-E8: forwards file/line/col to LspClient + returns mapped signatures", async () => {
     const c = new FakeLspClient()
     c.setReplier(() => ({
       result: { signatures: [{ label: "f()", parameters: [], activeParameter: null }] },
@@ -574,5 +606,18 @@ describe("DefaultSignatureHelpAdapter (ADR-0143 wiring)", () => {
       line: 4,
       character: 9,
     })
+  })
+
+  test("HELL-E9: forwards AbortSignal to requestSignatureHelp", async () => {
+    const ac = new AbortController()
+    let seen: AbortSignal | undefined
+    const adapter = new DefaultSignatureHelpAdapter({
+      requestSignatureHelp: async (_file, _line, _col, signal) => {
+        seen = signal
+        return []
+      },
+    })
+    await adapter.signatureHelp("x.ts", 1, 1, ac.signal)
+    expect(seen).toBe(ac.signal)
   })
 })

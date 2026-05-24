@@ -2,18 +2,9 @@
 name: loop-on-ci
 description: Loop on CI failures — fetch failing-check logs, propose a minimal fix, push, wait for re-run. Triggers on "fix CI", "make CI green", "CI is failing", or after a push whose checks come back red.
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
+allowedTools: ["Bash", "Read", "Grep", "Edit"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
 ---
 
 # CI-failure remediation loop

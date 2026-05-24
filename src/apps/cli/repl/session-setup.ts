@@ -36,7 +36,9 @@ import {
   titleFlag,
 } from "../internal"
 import type { LifecyclePills, McpPillServer } from "../lifecycle-pills"
+import type { McpSurfaceInfo } from "../mcp-cmd"
 import { createRejectCounter, type RejectCounter } from "../reject-counter"
+import { buildMcpSurfaceInfo } from "./mcp-surface-wire"
 import { switchToSessionCwd } from "../session-io"
 import { buildShellStreamPainter } from "../shell-stream-painter"
 import { installStatusBar, type StatusBar } from "../status-bar"
@@ -213,6 +215,7 @@ export interface SessionSetupResult {
   readonly state: Awaited<ReturnType<typeof loadFeatures>>["state"]
   readonly mcpClients: Awaited<ReturnType<typeof loadFeatures>>["mcpClients"]
   readonly mcpTools: Awaited<ReturnType<typeof loadFeatures>>["mcpTools"]
+  readonly mcpSurface: McpSurfaceInfo | undefined
   readonly skillsConfig: ReturnType<typeof buildTooling>["skillsConfig"]
   readonly lifecyclePills: LifecyclePills
   readonly lifecycleTaskRegistry: TaskRegistry | undefined
@@ -280,6 +283,7 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     resume,
     mcpTools,
     mcpClients,
+    mcpConfigs,
     lspTools,
     lspNavTools,
     gitToolList,
@@ -302,6 +306,12 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     compactionBreakerConfig,
     verifyGuardConfig,
   } = buildTooling(mcpTools, lspTools, lspNavTools, gitToolList, slog, lifecycleTaskRegistry)
+
+  const mcpSurface = buildMcpSurfaceInfo({
+    configs: mcpConfigs,
+    bridgedTools: mcpTools,
+    configPath: process.env.QUANTA_MCP_CONFIG,
+  })
 
   if (mcpClients.length > 0) {
     lifecyclePills.update({
@@ -425,6 +435,7 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     state,
     mcpClients,
     mcpTools,
+    mcpSurface,
     skillsConfig,
     lifecyclePills,
     lifecycleTaskRegistry,

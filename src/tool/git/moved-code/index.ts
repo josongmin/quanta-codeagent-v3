@@ -41,6 +41,9 @@ export type {
 
 const DEFAULT_MIN_LINES = 5
 const DEFAULT_MIN_SIMILARITY = 0.85
+// Pure-classifier ceiling. The first-class `git_moved_code` tool wraps this
+// core with a lower default and clamps caller overrides to this same ceiling
+// so the O(N×M) guard cannot be disabled from the tool surface.
 const DEFAULT_MAX_PAIRS = 10_000
 
 interface Prepped {

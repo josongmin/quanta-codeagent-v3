@@ -2,22 +2,9 @@
 name: explain-code
 description: Explain what a function / module / file actually does by READING it, tracing callers, and surfacing history — never from memory or filename. Triggers on "explain this code", "what does X do", "walk me through this", "how does this work".
 userInvocable: true
-allowedTools:
-  - Read
-  - Grep
-  - lsp_definition
-  - lsp_references
-  - git_log
-  - git_blame
+allowedTools: ["Read", "Grep", "lsp_definition", "lsp_references", "git_log", "git_blame"]
 category: skill
 stability: stable
-tools:
-  - Read
-  - Grep
-  - lsp_definition
-  - lsp_references
-  - git_log
-  - git_blame
 ---
 
 # explain-code — read-first, cite-everything explanation

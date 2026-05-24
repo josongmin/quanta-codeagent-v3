@@ -6,6 +6,7 @@ import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 const PROTOCOL_VERSION = "2025-06-18"
 const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+const MAX_TOOLS_LIST_PAGES = 256
 
 /** Max chars of joined tool-result text we hand back from `callTool`. A
  *  malicious/buggy MCP server returning a huge text blob would otherwise flow
@@ -132,13 +133,24 @@ export class McpClient {
     this.ensureReady()
     const tools: McpToolDef[] = []
     let cursor: string | undefined
-    do {
+    const seenCursors = new Set<string>()
+    for (let page = 0; page < MAX_TOOLS_LIST_PAGES; page += 1) {
       const params = cursor === undefined ? {} : { cursor }
       const res = (await this.request("tools/list", params)) as ToolsListResult
       for (const t of res.tools ?? []) tools.push(mapTool(t))
-      cursor = res.nextCursor
-    } while (cursor !== undefined && cursor !== "")
-    return tools
+      const nextCursor = res.nextCursor
+      if (nextCursor === undefined || nextCursor === "") return tools
+      if (seenCursors.has(nextCursor)) {
+        throw new McpError(
+          `mcp server "${this.config.name}" tools/list returned a repeated cursor "${nextCursor}"`,
+        )
+      }
+      seenCursors.add(nextCursor)
+      cursor = nextCursor
+    }
+    throw new McpError(
+      `mcp server "${this.config.name}" tools/list exceeded ${MAX_TOOLS_LIST_PAGES} pages`,
+    )
   }
 
   async callTool(name: string, args: unknown): Promise<McpCallResult> {
@@ -194,7 +206,12 @@ export class McpClient {
         reject(new McpError(`mcp request "${method}" timed out after ${this.requestTimeoutMs}ms`))
       }, this.requestTimeoutMs)
       this.pending.set(id, { resolve, reject, timer })
-      this.send({ jsonrpc: "2.0", id, method, params })
+      const sendError = this.send({ jsonrpc: "2.0", id, method, params })
+      if (sendError) {
+        const pending = this.takePending(id)
+        if (!pending) return
+        pending.reject(sendError)
+      }
     })
   }
 
@@ -202,13 +219,20 @@ export class McpClient {
     this.send({ jsonrpc: "2.0", method, params })
   }
 
-  private send(payload: unknown): void {
+  private send(payload: unknown): Error | null {
     const stdin = this.proc?.stdin
-    if (!stdin) return
+    if (!stdin) {
+      const err = new McpError(`mcp server "${this.config.name}" transport unavailable: stdin closed`)
+      logger.warn("mcp: failed to write to server stdin", { error: err.message })
+      return err
+    }
     try {
       stdin.write(encodeMessage(payload))
+      return null
     } catch (e) {
-      logger.warn("mcp: failed to write to server stdin", { error: String(e) })
+      const msg = e instanceof Error ? e.message : String(e)
+      logger.warn("mcp: failed to write to server stdin", { error: msg })
+      return new McpError(`mcp server "${this.config.name}" transport write failed: ${msg}`)
     }
   }
 
@@ -227,10 +251,8 @@ export class McpClient {
   private dispatch(msg: JsonRpcMessage): void {
     if (!isResponse(msg)) return
     const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
-    const entry = this.pending.get(id)
+    const entry = this.takePending(id)
     if (!entry) return
-    this.pending.delete(id)
-    clearTimeout(entry.timer)
     if (msg.error) {
       entry.reject(new McpError(`mcp error ${msg.error.code}: ${msg.error.message}`))
     } else {
@@ -254,5 +276,13 @@ export class McpClient {
       entry.reject(reason)
     }
     this.pending.clear()
+  }
+
+  private takePending(id: number): PendingRequest | undefined {
+    const entry = this.pending.get(id)
+    if (!entry) return undefined
+    this.pending.delete(id)
+    clearTimeout(entry.timer)
+    return entry
   }
 }

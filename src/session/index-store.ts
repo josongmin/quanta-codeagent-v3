@@ -77,11 +77,11 @@ const writeIndexMap = async (path: string, map: Map<string, SessionMeta>): Promi
   }
 }
 
-/** In-process serialization for read-modify-write index updates. Each call
- *  chains onto the previous one's settled tail so two awaiters of
- *  `upsertMeta`/`removeFromIndex` from the same process never interleave
- *  their read+write windows. Promise-chain mutex pattern: cheap (single
- *  promise reference), fair (FIFO), and naturally drains when idle. */
+/** In-process serialization for read-modify-write index updates. Each root's
+ *  `index.jsonl` gets its own promise-chain mutex so two awaiters of
+ *  `upsertMeta`/`removeFromIndex` targeting the SAME file never interleave
+ *  their read+write windows, while different tenant roots do not block each
+ *  other. The queue drains naturally when the last holder releases. */
 const indexMutexes = new Map<string, Promise<unknown>>()
 const withIndexMutex = async <T>(path: string, fn: () => Promise<T>): Promise<T> => {
   const prev = indexMutexes.get(path) ?? Promise.resolve()

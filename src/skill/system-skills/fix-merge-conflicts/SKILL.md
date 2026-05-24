@@ -2,18 +2,9 @@
 name: fix-merge-conflicts
 description: Resolve merge conflicts with BUILD-VALIDATED output — only declare resolved after the project builds AND tests pass against the merged tree. Triggers on "fix conflicts", "merge conflict", "rebase conflict", "resolve conflicts", or after a failed `git merge` / `git rebase` / `git pull`.
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
+allowedTools: ["Bash", "Read", "Grep", "Edit"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - Edit
 ---
 
 # Build-validated merge-conflict resolution

@@ -192,6 +192,8 @@ describe("session index-store — provider/git regressions", () => {
       provider,
     )
 
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
     expect(await listSessions()).toEqual([])
     expect((await listSessions(undefined, provider)).map((m) => m.id)).toEqual(["tenant-a"])
 

@@ -2,16 +2,9 @@
 name: explain-stack-trace
 description: Pure read-only stack-trace explainer. Parses the trace deterministically via the `parse_test_failure` tool, identifies the exception class semantics in the language ecosystem, walks the trace bottom-up (where it crashed → outer caller → user-code boundary), and renders a single plain-English paragraph. Does NOT propose a fix — defer to `debug-trace` for that. Triggers on "explain this stack", "what does this error mean", "translate this trace".
 userInvocable: true
-allowedTools:
-  - Read
-  - Grep
-  - parse_test_failure
+allowedTools: ["Read", "Grep", "parse_test_failure"]
 category: skill
 stability: stable
-tools:
-  - Read
-  - Grep
-  - parse_test_failure
 ---
 
 # explain-stack-trace — narrative-only trace translator

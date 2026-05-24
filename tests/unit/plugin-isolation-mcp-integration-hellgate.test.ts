@@ -73,6 +73,29 @@ process.stdin.on("data", (c) => {
 })
 `
 
+const REPEATED_CURSOR_SERVER_BODY = `
+process.stdout.write(JSON.stringify({ ready: true }) + "\\n")
+let buf = ""
+const reply = (m) => process.stdout.write(JSON.stringify(m) + "\\n")
+process.stdin.on("data", (c) => {
+  buf += c
+  let nl
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, nl).trim()
+    buf = buf.slice(nl + 1)
+    if (!line) continue
+    const msg = JSON.parse(line)
+    if (msg.method === "initialize") {
+      reply({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2025-06-18", serverInfo: { name: "stub" }, capabilities: {} } })
+    } else if (msg.method === "notifications/initialized") {
+      // noop
+    } else if (msg.method === "tools/list") {
+      reply({ jsonrpc: "2.0", id: msg.id, result: { tools: [{ name: "alpha" }], nextCursor: "loop" } })
+    }
+  }
+})
+`
+
 interface StubControl {
   readonly port: IsolatedProcessSpawnerPort
   readonly calls: SpawnOpts[]
@@ -260,6 +283,21 @@ describe("ADR-0162 IsolatedMcpClient hellgate — D. Real spawn integration", ()
       const res = await client.callTool("boom", {})
       expect(res.ok).toBe(false)
       expect(res.content).toBe("fail")
+      await client.stop()
+    } finally {
+      await t.cleanup()
+    }
+  })
+
+  test("repeated tools/list cursor fails closed instead of looping forever", async () => {
+    const t = await writeServer(REPEATED_CURSOR_SERVER_BODY)
+    try {
+      const client = new IsolatedMcpClient(
+        { name: "svc", command: [BUN, t.path] },
+        { spawnTimeoutMs: 3000 },
+      )
+      await client.start()
+      await expect(client.listTools()).rejects.toThrow(/repeated cursor/)
       await client.stop()
     } finally {
       await t.cleanup()

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
-import { writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Message } from "@/llm"
+import { loadImportLog } from "@/migration"
 import { runShell } from "@/runtime"
 import {
   archivedFilePath,
@@ -395,6 +396,38 @@ describe("runSessionCommand", () => {
     expect(code).toBe(1)
     expect(c.err).toContain("unknown subcommand: bogus")
     expect(c.out).toContain("Usage:")
+  })
+
+  test("import: reports translation-only semantics and preserves append-only log behavior", async () => {
+    const home = mkdtempSync(join(tmpdir(), "cli-import-home-"))
+    cleanups.push(home)
+    await mkdir(join(home, ".claude/projects/proj-a"), { recursive: true })
+    await mkdir(join(home, ".claude/skills"), { recursive: true })
+    await writeFile(join(home, ".claude/auth.json"), JSON.stringify({ token: "t" }), "utf8")
+    await writeFile(
+      join(home, ".claude/projects/proj-a/session-1.jsonl"),
+      `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "one" }] } })}\n`,
+      "utf8",
+    )
+    await writeFile(join(home, ".claude/skills/review.md"), "skill", "utf8")
+
+    const c = captureDeps()
+    const code = await runSessionCommand(["import", "claude_code"], {
+      ...c.deps,
+      homeDir: home,
+    })
+    expect(code).toBe(0)
+    expect(c.out).toContain(
+      "translated claude_code: 1 session transcript(s), 1 skill file(s); no local sessions persisted",
+    )
+    expect(c.err).toBe("")
+    expect(await listSessions({ includeArchived: true })).toHaveLength(0)
+
+    const log = await loadImportLog(home)
+    expect(log.entries).toHaveLength(1)
+    expect(log.entries[0]?.detail).toBe(
+      "translated_sessions=1, counted_skills=1, persisted_sessions=0",
+    )
   })
 
   // MEDIUM-9: `session show --json` emits the full SavedSession.

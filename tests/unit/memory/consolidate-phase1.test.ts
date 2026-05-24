@@ -198,14 +198,14 @@ describe("runPhase1 — happy path (distilled outcome)", () => {
   })
 
   test("durationMs is computed via input.now() subtraction (deterministic)", async () => {
-    // seqClock: first .now() (startedAt) → 1000; second .now()
-    // (sourceUpdatedAt at Stage1Output assembly) → 1100; third .now()
-    // (durationMs end) → 1200 ⇒ duration = 1200 - 1000 = 200.
+    // seqClock: entry latency clock → 1000; startedAt → 1100;
+    // sourceUpdatedAt → 1200; duration end → 1300.
+    // runPhase1 reports duration from startedAt, so 1300 - 1100 = 200.
     const clock = seqClock(1000, 100)
     const store = new Stage1Store(new Database(":memory:"))
     const out = await runPhase1(baseInput({ now: clock }), okPort, store)
     if (out.kind !== "distilled") throw new Error("unreachable")
-    expect(out.stage1.sourceUpdatedAt).toBe(1100)
+    expect(out.stage1.sourceUpdatedAt).toBe(1200)
     expect(out.durationMs).toBe(200)
   })
 
@@ -346,8 +346,11 @@ describe("runPhase1 — error propagation (no silent catch)", () => {
       },
     }
     const { port, upserts } = makeRecordingStore()
-    const caught = await runPhase1(baseInput({ signal: new AbortController().signal }), failingPort, port)
-      .catch((err: unknown) => err)
+    const caught = await runPhase1(
+      baseInput({ signal: new AbortController().signal }),
+      failingPort,
+      port,
+    ).catch((err: unknown) => err)
     expect(caught).toBe(aborted)
     expect(upserts).toHaveLength(0)
   })

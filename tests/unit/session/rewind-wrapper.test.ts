@@ -180,11 +180,7 @@ describe("rewindSession (wrapper)", () => {
   })
 
   test("restoreFiles=true with port + gitSha: stash + reset called once", async () => {
-    // The on-disk SessionMeta schema (zod) does not currently persist `gitSha`
-    // through reload — so we inject a custom loader that returns it directly,
-    // exercising the wrapper's git-restore branch deterministically without
-    // depending on the persistence layer's optional fields.
-    await seed("rs-restore", ["m0", "m1"])
+    await seed("rs-restore", ["m0", "m1"], { gitSha: "cafefeed" })
     let stashCalls = 0
     let resetCalls = 0
     let resetSha: string | undefined
@@ -203,14 +199,6 @@ describe("rewindSession (wrapper)", () => {
       messageId: "m0",
       restoreFiles: true,
       git: port,
-      loader: async (id) => {
-        const s = await loadSessionById(id)
-        if (s === undefined) return undefined
-        return {
-          meta: { ...s.meta, gitSha: "cafefeed" },
-          messages: s.messages,
-        }
-      },
     })
     expect(stashCalls).toBe(1)
     expect(resetCalls).toBe(1)

@@ -281,9 +281,6 @@ export class FollowUpQueue {
    *  it. Version 2 snapshots carry the cap explicitly and become the queue's
    *  new hard ceiling. */
   restoreFromSnapshot(snapshot: FollowUpQueueSnapshotInput): void {
-    if (snapshot.version !== 1 && snapshot.version !== 2) {
-      throw new Error(`Unsupported FollowUpQueueSnapshot version: ${String(snapshot.version)}`)
-    }
     this.map.clear()
     if (snapshot.version === 2) {
       this.maxPerThread = normalizeMaxPerThread(snapshot.maxPerThread)

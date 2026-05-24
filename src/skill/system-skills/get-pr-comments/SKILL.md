@@ -2,14 +2,9 @@
 name: get-pr-comments
 description: Summarize PR review comments with action items, anchored to file:line. Triggers on "summarize PR review", "what does the review say", "what changes were requested", or after sharing a PR URL with review activity.
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
+allowedTools: ["Bash", "Read"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
 ---
 
 # PR review-comment digest

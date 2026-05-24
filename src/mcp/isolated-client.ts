@@ -41,6 +41,7 @@ import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 const PROTOCOL_VERSION = "2025-06-18"
 const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+const MAX_TOOLS_LIST_PAGES = 256
 
 /** Mirror of `client.ts` MAX_RESULT_CHARS — the slice-isolation rule (RFC §3.1)
  *  forbids importing from `@/tool`, so the constant is duplicated locally and
@@ -189,13 +190,32 @@ export class IsolatedMcpClient {
     const host = this.ensureReady()
     const tools: McpToolDef[] = []
     let cursor: string | undefined
-    do {
-      const params = cursor === undefined ? {} : { cursor }
-      const res = (await host.call("tools/list", params)) as ToolsListResult
-      for (const t of res.tools ?? []) tools.push(mapTool(t))
-      cursor = res.nextCursor
-    } while (cursor !== undefined && cursor !== "")
-    return tools
+    const seenCursors = new Set<string>()
+    try {
+      for (let page = 0; page < MAX_TOOLS_LIST_PAGES; page += 1) {
+        const params = cursor === undefined ? {} : { cursor }
+        const res = (await host.call("tools/list", params)) as ToolsListResult
+        for (const t of res.tools ?? []) tools.push(mapTool(t))
+        const nextCursor = res.nextCursor
+        if (nextCursor === undefined || nextCursor === "") return tools
+        if (seenCursors.has(nextCursor)) {
+          throw new IsolatedMcpError(
+            `mcp server "${this.config.name}" tools/list returned a repeated cursor "${nextCursor}"`,
+          )
+        }
+        seenCursors.add(nextCursor)
+        cursor = nextCursor
+      }
+      throw new IsolatedMcpError(
+        `mcp server "${this.config.name}" tools/list exceeded ${MAX_TOOLS_LIST_PAGES} pages`,
+      )
+    } catch (e) {
+      if (e instanceof IsolatedMcpError) throw e
+      if (e instanceof PluginHostError) {
+        throw new IsolatedMcpError(`mcp tools/list failed (${e.kind}): ${e.message}`)
+      }
+      throw e
+    }
   }
 
   async callTool(name: string, args: unknown): Promise<McpCallResult> {

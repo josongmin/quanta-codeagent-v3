@@ -5,7 +5,7 @@
  * (tmp + rename) to `${os.homedir()}/.quanta/health.json` by default, or any
  * caller-supplied absolute path.
  *
- * SOTA reference (cited in ADR-0177):
+ * SOTA reference (cited in ADR-0180):
  * - Kubernetes pod `liveness` probe `exec.command: ["cat","~/.quanta/health.json"]`
  *   + `jq` — file-based health surfaces are universal (no HTTP server, no port
  *   management, no scrape config).
@@ -126,7 +126,8 @@ const ALL_BAG_KEYS: ReadonlyArray<keyof ObservabilityBag> = [
 
 const resolveQuantaVersion = (override?: string): string => {
   if (override !== undefined && override !== "") return override
-  return "unknown"
+  const env = process.env.QUANTA_VERSION
+  return env !== undefined && env !== "" ? env : "unknown"
 }
 
 /** Build the snapshot from an InstrumentedBag (or any bag-shaped object where

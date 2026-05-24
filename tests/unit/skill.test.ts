@@ -188,6 +188,29 @@ describe("discoverSkills", () => {
     expect(strict?.tools).toEqual(["Read", "Bash"])
     expect(sealed?.tools).toEqual([])
   })
+
+  test("malformed strict allowedTools does not silently fall back to legacy tools", async () => {
+    const dir = await tmpDir("skills-invalid-strict-")
+
+    await mkdir(join(dir, "broken"))
+    await writeFile(
+      join(dir, "broken", "SKILL.md"),
+      [
+        "---",
+        "name: broken",
+        "description: malformed strict allowlist",
+        "allowedTools: Read",
+        'tools: ["Bash"]',
+        "---",
+        "broken body",
+      ].join("\n"),
+    )
+
+    const skills = await discoverSkills(dir)
+    expect(skills).toHaveLength(1)
+    expect(skills[0]?.name).toBe("broken")
+    expect(skills[0]?.tools).toBeUndefined()
+  })
 })
 
 describe("createSkillTool", () => {

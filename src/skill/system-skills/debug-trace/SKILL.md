@@ -2,20 +2,9 @@
 name: debug-trace
 description: Orchestrate "this crashed" / "investigate this error" debugging workflows. Parses raw error text deterministically via the `parse_test_failure` tool, reads every cited file:line frame, distinguishes caller vs root-cause frames, and produces a ranked hypothesis with one-line cause + one-line fix. Triggers on "debug this", "investigate crash", "what failed", "trace this error", "stack trace analysis".
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - Grep
-  - parse_test_failure
-  - file_tree_summary
+allowedTools: ["Bash", "Read", "Grep", "parse_test_failure", "file_tree_summary"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - Grep
-  - parse_test_failure
-  - file_tree_summary
 ---
 
 # debug-trace — orchestrate crash/error investigation

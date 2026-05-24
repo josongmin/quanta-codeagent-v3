@@ -2,18 +2,9 @@
 name: blame-section
 description: Multi-line / section-scoped `git blame` workflow. Wraps the existing `git_blame_heatmap` tool's `start_line`/`end_line` range form (ADR-0096), groups by author + commit, surfaces the top-3 authors with line counts, cites at least 2 specific commit SHAs (most-touched + most-recent), and distinguishes ORIGINAL author (first commit to introduce the lines) vs RECENT editor (last commit to modify). Triggers on "blame this section", "who wrote these lines", "section ownership", "line range blame".
 userInvocable: true
-allowedTools:
-  - Bash
-  - Read
-  - git_blame
-  - git_blame_heatmap
+allowedTools: ["Bash", "Read", "git_blame", "git_blame_heatmap"]
 category: skill
 stability: stable
-tools:
-  - Bash
-  - Read
-  - git_blame
-  - git_blame_heatmap
 ---
 
 # blame-section — multi-line ownership over a region

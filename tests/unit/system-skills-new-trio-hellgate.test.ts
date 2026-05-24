@@ -139,15 +139,7 @@ describe("ADR-0176 — debug/blame skills trio (hellgate)", () => {
         expect(allowedTools, `[${spec.dir}] allowedTools must contain ${tool}`).toContain(tool)
       }
 
-      // tools mirror (lenient parser uses `tools:` for runtime enforcement)
-      expect(
-        Array.isArray(data.tools),
-        `[${spec.dir}] tools must be a list (lenient mirror)`,
-      ).toBe(true)
-      const toolsMirror = data.tools as ReadonlyArray<string>
-      for (const tool of spec.expectedAllowedTools) {
-        expect(toolsMirror, `[${spec.dir}] tools mirror must contain ${tool}`).toContain(tool)
-      }
+      expect(data.tools, `[${spec.dir}] must not ship a legacy tools mirror`).toBeUndefined()
 
       // category/stability — same shape as siblings
       expect(data.category, `[${spec.dir}] category must be 'skill'`).toBe("skill")
@@ -170,6 +162,7 @@ describe("ADR-0176 — debug/blame skills trio (hellgate)", () => {
       expect(found, `[${spec.dir}] find${spec.dir}Skill() must resolve`).toBeDefined()
       expect(found?.name).toBe(spec.dir)
       expect(found?.scope).toBe("system")
+      expect(found?.tools).toEqual([...spec.expectedAllowedTools])
       expect((found?.body ?? "").length).toBeGreaterThan(0)
 
       // Reachable via top-level discovery (no silent barrel omission)

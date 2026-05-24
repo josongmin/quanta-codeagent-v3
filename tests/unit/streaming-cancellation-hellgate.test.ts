@@ -174,7 +174,11 @@ describe("D. CleanupHandler orchestration", () => {
     })
     c.cancel("user-abort")
     await c.finalize(null)
-    expect(calledCause).toBe("user-abort")
+    expect(calledCause).not.toBeNull()
+    if (calledCause === null) {
+      throw new Error("cleanup handler did not receive a cancellation cause")
+    }
+    expect(calledCause === "user-abort").toBe(true)
   })
 
   test("HELL-D2: multiple handlers all called", async () => {

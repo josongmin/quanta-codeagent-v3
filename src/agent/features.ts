@@ -96,10 +96,10 @@ export interface SessionFeatures {
    *  before resolving the outcome. */
   cleanup?: () => Promise<void>
   /** Skill tool-scoping ENFORCEMENT data (ADR-0011): skill name →
-   *  author-declared `tools:` allowlist, for skills that declared a non-empty
-   *  one. The loop enforces this (a tool not in the active skill's allowlist
-   *  is denied as a recoverable tool_result). Present only when ≥1 discovered
-   *  skill declares `tools:`; absent ⇒ no scoping (byte-identical). */
+   *  author-declared tool allowlist. An explicit empty list means "deny all
+   *  ordinary tools" while still allowing the meta-tools (`Skill`,
+   *  `ToolSearch`). Present only when ≥1 discovered skill declares an
+   *  allowlist; absent ⇒ no scoping (byte-identical). */
   skillAllowlists?: Map<string, string[]>
   /** Skill model/effort ENFORCEMENT data (ADR-0011 §6.2 → L4): skill name →
    *  author-declared `{model?, effort?}` override, for skills that declared at
