@@ -199,7 +199,7 @@ describe("ADR-0133 — promptHook accumulator", () => {
 })
 
 describe("ADR-0133 — abort short-circuit", () => {
-  test("first abort wins, later handlers do NOT run", async () => {
+  test("first short-circuit return wins, later handlers do NOT run", async () => {
     const bus = new HookBus()
     let secondRan = false
     bus.on("pre_compact", () => ({ abort: { reason: "first" } }))
@@ -216,7 +216,7 @@ describe("ADR-0133 — abort short-circuit", () => {
     expect(secondRan).toBe(false)
   })
 
-  test("abort OMITTED when no handler asked", async () => {
+  test("short-circuit field OMITTED when no handler asked", async () => {
     const bus = new HookBus()
     bus.on("pre_compact", () => undefined)
     const result = await bus.emit({
@@ -227,7 +227,7 @@ describe("ADR-0133 — abort short-circuit", () => {
     expect("abort" in result).toBe(false)
   })
 
-  test("abort on pre_tool_use is surfaced even if a prior handler rewrote", async () => {
+  test("short-circuit on pre_tool_use is surfaced even if a prior handler rewrote", async () => {
     const bus = new HookBus()
     bus.on("pre_tool_use", () => ({ updatedInput: { x: 1 } }))
     bus.on("pre_tool_use", () => ({ abort: { reason: "stop" } }))
@@ -237,7 +237,7 @@ describe("ADR-0133 — abort short-circuit", () => {
     expect(result.updatedInput).toEqual({ x: 1 })
   })
 
-  test("a malformed abort (no reason string) is IGNORED", async () => {
+  test("a malformed short-circuit return (non-string reason) is IGNORED", async () => {
     const bus = new HookBus()
     bus.on("pre_compact", () => ({ abort: { reason: 42 } }) as unknown as undefined)
     bus.on("pre_compact", () => ({ abort: { reason: "good" } }))

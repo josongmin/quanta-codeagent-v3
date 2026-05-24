@@ -199,6 +199,8 @@ describe("A4 — abort fired mid-barrier", () => {
     // No deferred tool AFTER the barrier started once the abort fired.
     expect(started).not.toContain("d2")
     expect(started).not.toContain("d3")
+    // The barrier's side-effect `ctrl.abort()` flipped the signal.
+    expect(ctrl.signal.aborted).toBe(true)
   })
 
   test("pre-aborted signal mid-barrier sequence short-circuits to aborted with zero dispatch", async () => {

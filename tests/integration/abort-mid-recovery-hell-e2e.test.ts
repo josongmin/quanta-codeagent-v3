@@ -142,6 +142,8 @@ describe("HELLGATE — abort mid same-turn backoff", () => {
     expect(calls).toBe(1)
     // No productive turn completed → turns 0.
     expect(out.turns).toBe(0)
+    // The controller's signal IS aborted — the abort propagated all the way.
+    expect(ac.signal.aborted).toBe(true)
   })
 })
 
@@ -192,6 +194,8 @@ describe("HELLGATE — abort mid HOL-barrier drain (real runAgent)", () => {
     expect(dispatched).not.toContain("tail_read")
     // Only one LLM stream call — no second turn after the aborted dispatch turn.
     expect(llm.calls).toBe(1)
+    // Signal IS aborted — the barrier dispatch did flip the controller.
+    expect(ac.signal.aborted).toBe(true)
   })
 })
 
@@ -287,6 +291,8 @@ describe("HELLGATE — abort mid verify-guard forced turn", () => {
     // Exactly 3 streams: edit, git status, finish-attempt. The 4th (forced
     // verify) turn must NOT open.
     expect(calls).toBe(3)
+    // The mid-finish-stream abort flipped the signal.
+    expect(ac.signal.aborted).toBe(true)
   })
 })
 
@@ -294,8 +300,8 @@ describe("HELLGATE — abort mid verify-guard forced turn", () => {
 // 4. CONTROL — the SAME scripts WITHOUT abort complete normally
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("HELLGATE — control: identical scripts WITHOUT abort complete normally", () => {
-  test("backoff script (transient then success) completes — proves case 1 ended by abort, not exhaustion", async () => {
+describe("HELLGATE — control: identical scripts WITHOUT signal flip complete normally", () => {
+  test("backoff script (transient then success) completes — proves case 1 ended by the signal flip, not exhaustion", async () => {
     // Same transient-throw-then-retry shape as case 1, but NO abort: the loop
     // sleeps the backoff and the retry stream succeeds → normal completion.
     const steps: Step[] = [
@@ -314,7 +320,7 @@ describe("HELLGATE — control: identical scripts WITHOUT abort complete normall
     expect(llm.calls).toBe(2)
   })
 
-  test("barrier script ([safe, unsafe, safe]) without abort drains all three tools and completes", async () => {
+  test("barrier script ([safe, unsafe, safe]) under quiescent signal drains all three tools and completes", async () => {
     const dispatched: string[] = []
     const safeRead = stubTool({ name: "safe_read", concurrencySafe: true, dispatched })
     const unsafeWrite = stubTool({ name: "unsafe_write", concurrencySafe: false, dispatched })
@@ -342,7 +348,7 @@ describe("HELLGATE — control: identical scripts WITHOUT abort complete normall
     expect(dispatched).toContain("tail_read")
   })
 
-  test("verify-guard script without abort: edit → git status → finish → guard forces ONE real verify turn → completes", async () => {
+  test("verify-guard script under quiescent signal: edit → git status → finish → guard forces ONE real verify turn → completes", async () => {
     const dispatched: string[] = []
     const editTool = stubTool({ name: "edit", concurrencySafe: false, dispatched })
     const bashTool = defineTool({

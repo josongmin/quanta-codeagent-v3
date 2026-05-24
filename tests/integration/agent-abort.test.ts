@@ -110,6 +110,8 @@ describe("agent abort branches — C7 coverage", () => {
     )
     expect(out.reason).toBe("aborted")
     expect(out.turns).toBe(0)
+    // The controller's signal IS aborted entering the run.
+    expect(ac.signal.aborted).toBe(true)
   })
 
   test("mid-stream abort on the first turn → aborted, turns 0 (no productive turn)", async () => {
@@ -130,6 +132,8 @@ describe("agent abort branches — C7 coverage", () => {
     )
     expect(out.reason).toBe("aborted")
     expect(out.turns).toBe(0)
+    // The mid-stream `ac.abort()` flipped the signal — observable end state.
+    expect(ac.signal.aborted).toBe(true)
   })
 
   test("abort AFTER one productive tool turn → aborted, turns 1 (corrected C11)", async () => {
@@ -172,6 +176,8 @@ describe("agent abort branches — C7 coverage", () => {
       (m) => m.role === "assistant" && m.content.some((b) => b.type === "tool_use"),
     ).length
     expect(toolUses).toBe(1)
+    // The second-turn `ac.abort()` flipped the signal observably.
+    expect(ac.signal.aborted).toBe(true)
   })
 
   test("aborted run still emits the session_start head marker and a done event", async () => {

@@ -410,7 +410,7 @@ describe("recovery e2e — hell cases: budget exhaustion per recovery kind", () 
     expect(out.turns).toBe(1)
   }, 15_000)
 
-  test("hc-compact: PTL → compaction breaker eventually aborts on thrash (3 unproductive)", async () => {
+  test("hc-compact: PTL → compaction breaker eventually stops on thrash (3 unproductive — outcome=error, not signal-driven)", async () => {
     // Force PTL repeatedly. Each compaction returns trivially small content
     // (the script makes it appear no progress was made between PTLs). The
     // breaker's reactive-strikes cap is 3 (DEFAULT_COMPACTION_BREAKER_CAPS).
@@ -636,6 +636,8 @@ describe("recovery e2e — hell cases: recovery + abort interaction", () => {
     expect(out.reason).toBe("aborted")
     // Bounded — never exceeded the streamRetries budget on this path.
     expect(llm.calls).toBeLessThanOrEqual(4)
+    // The controller's signal IS aborted entering the next loop iteration.
+    expect(ac.signal.aborted).toBe(true)
   }, 15_000)
 
   test("hc-abort-during-nudge: 5 recoveries in flight when abort fires → all unwind cleanly", async () => {
@@ -667,6 +669,8 @@ describe("recovery e2e — hell cases: recovery + abort interaction", () => {
       "hc-abort-mid-recovery-stack",
     )
     expect(out.reason).toBe("aborted")
+    // Signal IS aborted — verifies the queueMicrotask abort actually fired.
+    expect(ac.signal.aborted).toBe(true)
   }, 15_000)
 })
 

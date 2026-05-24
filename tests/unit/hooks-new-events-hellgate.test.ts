@@ -84,7 +84,7 @@ describe("S5 — user_prompt_submit", () => {
     expect(result.promptHook?.injectAfterSystem).toBe("remember: be terse")
   })
 
-  test("returning {abort} short-circuits the chain (first wins)", async () => {
+  test("returning a short-circuit value halts the chain (first wins)", async () => {
     const bus = new HookBus()
     let secondRan = false
     bus.on("user_prompt_submit", () => ({ abort: { reason: "policy" } }))
@@ -157,7 +157,7 @@ describe("S5 — pre_compact", () => {
     expect(seen).toEqual([{ count: 32, first: false }])
   })
 
-  test("returning {abort} skips THIS compaction (consumed by compaction.ts bridge)", async () => {
+  test("returning a short-circuit value skips THIS compaction (consumed by compaction.ts bridge)", async () => {
     const bus = new HookBus()
     bus.on("pre_compact", () => ({ abort: { reason: "snapshot in progress" } }))
     const result = await bus.emit({
@@ -168,7 +168,7 @@ describe("S5 — pre_compact", () => {
     expect(result.abort).toEqual({ reason: "snapshot in progress" })
   })
 
-  test("multiple handlers run; abort short-circuits the chain", async () => {
+  test("multiple handlers run; short-circuit return halts the chain", async () => {
     const bus = new HookBus()
     const calls: string[] = []
     bus.on("pre_compact", () => {

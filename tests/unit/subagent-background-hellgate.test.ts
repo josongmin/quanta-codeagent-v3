@@ -14,7 +14,13 @@ import {
 } from "@/agent/subagent-background"
 import type { SubagentResult as SliceResult, SubagentRequest, SubagentRunner } from "@/subagent"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
-import { subagentAwaitTool, subagentForkTool, subagentPollTool } from "@/tool/subagent-bg"
+import {
+  type BackgroundSubagentSchedulerPort,
+  subagentAwaitTool,
+  subagentBgTools,
+  subagentForkTool,
+  subagentPollTool,
+} from "@/tool/subagent-bg"
 
 /** Drive a tool's async generator to its terminal result. */
 const drive = async <I>(
@@ -147,6 +153,8 @@ describe("BackgroundSubagentScheduler — A. core", () => {
     ctrl.abort()
     const snap = await awaitP
     expect(snap?.status).toBe("running")
+    // The await-side controller IS aborted — observable on its signal.
+    expect(ctrl.signal.aborted).toBe(true)
     // Subagent's own signal MUST NOT have fired — await-signal abort != cancel.
     expect(abortObserved()).toBe(false)
     // Cleanup: resolve the runner to avoid leaking the promise.
@@ -155,7 +163,7 @@ describe("BackgroundSubagentScheduler — A. core", () => {
   })
 
   test("HELL-7: cancel running flips status to cancelled; await resolves", async () => {
-    const { runner, abortObserved, resolve } = controlledRunner()
+    const { runner, abortObserved, resolve, captured } = controlledRunner()
     const sched = defaultBackgroundSubagentScheduler({ runner })
     const id = sched.fork({ task: "x" })
     const awaitP = sched.await(id)
@@ -163,6 +171,10 @@ describe("BackgroundSubagentScheduler — A. core", () => {
     expect(ok).toBe(true)
     // Subagent's signal MUST have been aborted.
     expect(abortObserved()).toBe(true)
+    // The runner's request-signal IS now aborted — verifying the abort
+    // propagated to the actual signal handed to the child, not just our
+    // listener bookkeeping.
+    expect(captured.req?.signal?.aborted).toBe(true)
     // Resolve the runner (the abort doesn't auto-reject in our fake).
     resolve({ ok: true, finalText: "(ignored — already cancelled)", turns: 0 })
     const snap = await awaitP
@@ -170,7 +182,7 @@ describe("BackgroundSubagentScheduler — A. core", () => {
     expect(snap?.endedAt).toBeDefined()
   })
 
-  test("HELL-8: cancel unknown id returns false", () => {
+  test("HELL-8: stop call against unknown id returns false (no-op contract, no signal touched)", () => {
     const { runner } = controlledRunner()
     const sched = defaultBackgroundSubagentScheduler({ runner })
     expect(sched.cancel("bg-ghost")).toBe(false)
@@ -364,6 +376,19 @@ describe("background subagent tools — C. tool surface", () => {
     expect(res.output).toContain("quick result body")
     expect(res.output).toContain("turns=2")
   })
+
+  test("HELL-20b: subagent tool port stays fork/poll/await-only", () => {
+    const minimalPort: BackgroundSubagentSchedulerPort = {
+      fork: () => "bg-minimal",
+      poll: () => null,
+      await: async () => null,
+    }
+    expect(subagentBgTools(minimalPort).map((tool) => tool.name)).toEqual([
+      "subagent_fork",
+      "subagent_poll",
+      "subagent_await",
+    ])
+  })
 })
 
 // ─────────────────────────────────────────────────────────────
@@ -404,7 +429,7 @@ describe("BackgroundSubagentScheduler — D. invariants", () => {
     expect(sched.poll(id2)?.startedAt).toBe(9_000)
   })
 
-  test("HELL-23: cancel after completed is idempotent (returns true; no status flip)", async () => {
+  test("HELL-23: stop on a completed task is idempotent (returns true; no status flip)", async () => {
     const { runner, resolve } = controlledRunner()
     const sched = defaultBackgroundSubagentScheduler({ runner })
     const id = sched.fork({ task: "x" })

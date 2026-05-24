@@ -205,6 +205,8 @@ describe("streamingTurn", () => {
       signal: ctrl.signal,
     })
     expect(res.kind).toBe("aborted")
+    // The mid-event `ctrl.abort()` flipped the signal — observable invariant.
+    expect(ctrl.signal.aborted).toBe(true)
   })
 
   test("pre-aborted signal short-circuits to aborted", async () => {

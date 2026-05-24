@@ -314,6 +314,8 @@ describe("E. cancellableStream salvage", () => {
     expect(outcome).not.toBeNull()
     expect(outcome?.cause).toBe("user-abort")
     expect(outcome?.partial?.partialText).toBe("partial")
+    // The controller's signal is latched aborted after cancel.
+    expect(c.signal.aborted).toBe(true)
   })
 
   test("HELL-E7: stream_reset tombstone resets accumulator", async () => {
@@ -344,5 +346,7 @@ describe("E. cancellableStream salvage", () => {
     await consume
     await stream.outcome()
     expect(cleanupRan).toBe(true)
+    // The cancel call latched signal.aborted — propagation invariant.
+    expect(c.signal.aborted).toBe(true)
   })
 })
