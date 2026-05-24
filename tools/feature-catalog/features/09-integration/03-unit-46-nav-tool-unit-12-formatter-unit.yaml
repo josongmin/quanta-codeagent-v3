@@ -20,7 +20,7 @@ evidence:
     - src/tool/lsp_nav/formatters.ts
   adrs: [24]
   tests:
-    unit: [tests/unit/lsp-jsonrpc.test.js, tests/unit/lsp-nav-tools.test.ts, tests/unit/lsp-nav-formatters.test.ts]
+    unit: [tests/unit/lsp-jsonrpc.test.ts, tests/unit/lsp-nav-tools.test.ts, tests/unit/lsp-nav-formatters.test.ts]
     integration: []
     contract: []
 knobs: []
