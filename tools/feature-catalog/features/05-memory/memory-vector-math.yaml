@@ -4,7 +4,7 @@ section: 5
 subsystem: memory — pure vector primitives
 order: 52
 maturity: L4
-status: new
+status: stable
 purpose: |
   Pure vector math + (de)serialization for semantic recall. Zero deps:
   a Float32 little-endian buffer is the on-disk form (the SQLite

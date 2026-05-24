@@ -4,7 +4,7 @@ section: 9
 subsystem: LLM wire — SSE + WebSocket envelope decoder (ADR-0048)
 order: 32
 maturity: L4
-status: new
+status: stable
 purpose: |
   Wire-level decoders for streaming envelopes emerging from OpenAI Responses
   API v2 (HTTP `text/event-stream` + `wss://chatgpt.com/backend-api/codex/

@@ -4,7 +4,7 @@ section: 4
 subsystem: File-scoped rule auto-injection (Cursor `.cursor/rules/*.mdc` absorption)
 order: 50
 maturity: L4
-status: new
+status: stable
 purpose: |
   Cursor의 4 rule kind 중 2개 (alwaysApply + glob-matched)를 흡수 — 모델이 요청 없이
   프롬프트에 자동 주입되는 file-scoped 룰. `.cursor/rules/*.mdc` 와 `.quanta/rules/*.mdc`

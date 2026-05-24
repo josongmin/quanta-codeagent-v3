@@ -4,7 +4,7 @@ section: 10
 subsystem: Surface-agnostic Layer-2 (RFC may-22)
 order: 21
 maturity: L4
-status: new
+status: stable
 purpose: |
   `src/ipc/` — Claude A11 deep-dive 흡수 (importCliSession + logCliEvent pattern). 두
   컨트랙트: (1) `EventBridge` — typed `BridgePayload` 위 publish/subscribe + loopback 로컬
