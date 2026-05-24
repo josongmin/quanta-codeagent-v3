@@ -1,0 +1,42 @@
+id: edit-fuzzy-ladder
+title: applyFuzzyEdit — 3-rung exact→whitespace-flexible→anchored-trim ladder
+section: 2
+subsystem: 코어 mutating 도구 — edit string-replacement matching
+order: 110
+maturity: L4
+status: stable
+purpose: |
+  `edit` tool's fuzzy matcher: 3-rung conservative strategy ladder. (1) exact
+  delegates to `applyExactEdit` (no duplication). (2) whitespace-flexible:
+  per-line trim + internal-run collapse (`\s+` → single space). (3) anchored-
+  trim: per-line end-trim only (preserves internal whitespace). First confident
+  match (unique, or all-match when `replaceAll`) wins. Critical invariant:
+  ambiguous (>1) at any rung STOPS the ladder — a more permissive rung can
+  only be more ambiguous, so trying it would mislead. No-confident-match
+  outcome carries `kind: "fuzzy-no-confident"` for the strategy-hint
+  formatter (see 01-edit / order 1 for the next-step routing). Pure: no I/O,
+  no schema — operates on `(source, oldString, newString, replaceAll)`.
+evidence:
+  code:
+    - src/tool/edit/fuzzy.ts
+    - src/tool/edit/exact.ts
+    - src/tool/edit/index.ts
+  adrs: [19]
+  tests:
+    unit:
+      - tests/unit/fuzzy.test.ts
+      - tests/unit/edit.test.ts
+      - tests/unit/edit-recovery-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `EditOutcome.kind` is the stable failure-class tag (CR2 follow-up) the
+  `strategy-hint.ts` formatter consumes to suggest `nextStrategy:
+  scripted_replace | read_then_patch | ambiguous` (see 01-edit). exact's
+  identical-string + empty-string rejects are NOT carrying `kind` — they are
+  input-validation errors with no routing implication. Splice from bottom
+  preserves earlier indices when applying multiple windows under `replaceAll`.
+  A wrong edit is worse than no edit — the ladder fails clean rather than
+  guess.
