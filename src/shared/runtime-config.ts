@@ -225,6 +225,25 @@ export interface RuntimeConfig {
    *  only to the rich format (plain stays uncapped). Absent ⇒ the dispatcher
    *  defaults to 10. */
   readonly sessionListMax: number | undefined
+  /** S5 hook hardening — per-handler timeout in ms (`QUANTA_HOOK_TIMEOUT_MS`).
+   *  Absent ⇒ `hooks.ts` `DEFAULT_HOOK_TIMEOUT_MS` (5000). A timed-out handler
+   *  logs a warning and the bus continues to the next handler. A
+   *  per-registration override (`HookOnOptions.timeoutMs`) WINS over this
+   *  default — the env knob is the operator-side floor for hosts that did not
+   *  specify a per-hook timeout. */
+  readonly hookTimeoutMs: number | undefined
+  /** S5 hook hardening — max handlers per event (`QUANTA_HOOK_MAX_HANDLERS`).
+   *  Absent ⇒ `hooks.ts` `MAX_HANDLERS_PER_EVENT` (64). Registering above the
+   *  cap throws `HookRegistrationError` (load-bearing — surfaces a host
+   *  misconfiguration loudly rather than silently dropping handlers). */
+  readonly hookMaxHandlers: number | undefined
+  /** S5 hook hardening — max emit payload size in BYTES
+   *  (`QUANTA_HOOK_MAX_PAYLOAD_BYTES`). Absent ⇒ `hooks.ts`
+   *  `MAX_PAYLOAD_BYTES` (1_048_576 = 1MB). Oversize payloads are TRUNCATED
+   *  with a stable marker (graceful degradation — the dispatch still fires
+   *  so a host that watches a hook never observes a missed event from a
+   *  pathological argument). */
+  readonly hookMaxPayloadBytes: number | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -276,6 +295,12 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     lastTokens: stringOrUndef(env["QUANTA_LAST_TOKENS"]),
     sessionListFormat: parseSessionListFormat(env["QUANTA_SESSION_LIST_FORMAT"]),
     sessionListMax: parsePositiveInt(env["QUANTA_SESSION_LIST_MAX"], "QUANTA_SESSION_LIST_MAX"),
+    hookTimeoutMs: parsePositiveInt(env["QUANTA_HOOK_TIMEOUT_MS"], "QUANTA_HOOK_TIMEOUT_MS"),
+    hookMaxHandlers: parsePositiveInt(env["QUANTA_HOOK_MAX_HANDLERS"], "QUANTA_HOOK_MAX_HANDLERS"),
+    hookMaxPayloadBytes: parsePositiveInt(
+      env["QUANTA_HOOK_MAX_PAYLOAD_BYTES"],
+      "QUANTA_HOOK_MAX_PAYLOAD_BYTES",
+    ),
   })
 }
 

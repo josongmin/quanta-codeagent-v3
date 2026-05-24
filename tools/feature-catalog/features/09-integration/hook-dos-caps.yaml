@@ -1,0 +1,45 @@
+id: hook-dos-caps
+title: Hook DoS caps — handlers-per-event + payload bytes (S5 hardening)
+section: 9
+subsystem: Hook bus hardening (S5)
+order: 201
+maturity: L4
+status: stable
+purpose: |
+  Two structural DoS brakes for the HookBus surface. (1) Per-event handler
+  cap (default 64) — registering a 65th handler throws
+  HookRegistrationError; almost always a registration leak (forgotten
+  unsubscribe in a loop / leaked test fixture / malicious third-party
+  module), so we surface it loudly rather than silently dropping. (2)
+  Per-emit payload byte cap (default 1MB) — oversize payloads are TRUNCATED
+  with `...[truncated@hookbus]` markers (graceful degradation, NOT throw).
+  Dispatch still fires so a host watching the event never observes a missed
+  call from a pathological argument. Recursive walk bounded to depth 3 with
+  a per-leaf budget = maxBytes/4. Three-tier precedence for both caps:
+  constructor HookBusOptions > runtimeConfig() env knob > constant default.
+  Anti-leak: the truncation warning logs only the event kind + the cap,
+  NEVER the payload. Truncation does NOT mutate the caller's payload.
+evidence:
+  code:
+    - src/agent/hooks.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/hooks-timeout-cap-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_HOOK_MAX_HANDLERS
+  - QUANTA_HOOK_MAX_PAYLOAD_BYTES
+  - MAX_HANDLERS_PER_EVENT
+  - MAX_PAYLOAD_BYTES
+  - PAYLOAD_TRUNCATE_MARKER
+deliberate_hold: null
+notes: |
+  Handler cap is THROW-on-65th by design (not silent drop) — a silent shave
+  would mask a real leak. Payload cap is TRUNCATE (not throw) by design —
+  dispatch must fire so the host's audit / observability never observes a
+  missed event. Existing hellgate tests that stress 5K handlers opt into a
+  relaxed cap via HookBusOptions.maxHandlers (those tests verify iteration
+  correctness, NOT the cap).

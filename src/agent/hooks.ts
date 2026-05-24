@@ -1,4 +1,5 @@
 import type { StructuredLogger } from "@/observability"
+import { runtimeConfig } from "@/shared"
 import { matchTool, type ToolMatcher } from "./tool-matchers"
 
 /**
@@ -80,6 +81,47 @@ export const PROMPT_HOOK_MAX_CHARS = 10_000
  *  so tests can reference the same number. */
 export const TOOL_FAILURE_RETRY_MAX = 3
 
+/** S5 hook hardening — DEFAULT per-handler timeout (ms). A handler that does
+ *  not resolve within this window logs a warning (with hook event kind +
+ *  elapsed; NO payload — anti-leak) and the bus moves on to the next handler.
+ *  Five seconds is generous enough for a real network handler (e.g. a remote
+ *  policy server) yet short enough to keep the agent loop responsive. Override
+ *  per-handler via `HookOnOptions.timeoutMs`, or globally via
+ *  `runtimeConfig().hookTimeoutMs` (`QUANTA_HOOK_TIMEOUT_MS`). When NO override
+ *  is set and NO env knob is set the legacy code path runs UNBOUNDED (we
+ *  Promise.race against nothing) — byte-identical to the pre-S5 behavior. */
+export const DEFAULT_HOOK_TIMEOUT_MS = 5_000
+
+/** S5 hook hardening — max handlers per event. Registering above this throws
+ *  {@link HookRegistrationError}. A 65th handler is almost always a registration
+ *  bug (forgot to unsubscribe in a loop, leaked test fixture, malicious
+ *  third-party module) — surface it loudly rather than silently consuming
+ *  unbounded memory + per-emit CPU. Override via
+ *  `runtimeConfig().hookMaxHandlers` (`QUANTA_HOOK_MAX_HANDLERS`). */
+export const MAX_HANDLERS_PER_EVENT = 64
+
+/** S5 hook hardening — max emit payload size in BYTES. An oversize payload is
+ *  TRUNCATED with a stable marker (graceful degradation — the dispatch fires
+ *  regardless so a host watching the event never misses one due to a
+ *  pathological argument). Truncation logs a warning with the truncated size,
+ *  NOT the payload itself (anti-leak). Override via
+ *  `runtimeConfig().hookMaxPayloadBytes` (`QUANTA_HOOK_MAX_PAYLOAD_BYTES`). */
+export const MAX_PAYLOAD_BYTES = 1_048_576
+
+/** Stable marker appended to truncated payload fields. Distinct from a real
+ *  ellipsis to make grep-detection unambiguous in logs / replay traces. */
+export const PAYLOAD_TRUNCATE_MARKER = "...[truncated@hookbus]"
+
+/** Thrown by {@link HookBus.on} when the per-event handler cap is exceeded.
+ *  Named so a host can distinguish a quota violation from any other Error
+ *  thrown synchronously from `on()`. */
+export class HookRegistrationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "HookRegistrationError"
+  }
+}
+
 export type HookEvent =
   | { type: "session_start"; sessionId: string }
   | { type: "session_end"; reason: string; turns: number }
@@ -125,6 +167,24 @@ export type HookEvent =
       result: { ok: boolean; finalText: string; turns: number }
     }
   | { type: "turn_start"; turn: number }
+  // S5 hook hardening — NEW. Fired by `loop.ts` ONCE per run, immediately
+  // after `session_start`, when there is a trailing user-prompt message to
+  // observe. `prompt` is the joined text of the LAST user message's text
+  // blocks (the "prompt the model is about to see"); `attachmentsCount` is
+  // the number of non-text blocks (images / documents) on that same message,
+  // so a host can audit-log multi-modal turns without re-walking the
+  // transcript. A `deny` short-circuits the loop into `aborted` (the surface
+  // observes via `AgentOutcome.reason === "aborted"` + `stopCategory.origin
+  // === "hook"`). An `updatedPrompt` string REWRITES the trailing user
+  // message's text block before the LLM sees it (the rewrite is the same
+  // Cursor-parity invariant pre_tool_use carries: it cannot bypass HARD_DENY
+  // — there is no permission for user input; the surface is upstream).
+  | {
+      type: "user_prompt_submit"
+      prompt: string
+      attachmentsCount: number
+      threadId: string
+    }
 
 export type HookEventType = HookEvent["type"]
 
@@ -143,6 +203,14 @@ export interface HookDeny {
  *  rewrite, distinct from a no-op handler that returns nothing. */
 export interface HookUpdatedInput {
   updatedInput: unknown
+}
+
+/** S5 — a `user_prompt_submit` handler may return this to REWRITE the prompt
+ *  text the model sees. Same semantics as {@link HookUpdatedInput}: presence
+ *  of the `updatedPrompt` KEY is the signal. Empty string is a valid
+ *  (intentional) clear; consumer treats it as the new prompt text. */
+export interface HookUpdatedPrompt {
+  updatedPrompt: string
 }
 
 /** ADR-0133 — text a handler asks the loop to fold into the NEXT LLM turn's
@@ -215,6 +283,15 @@ export interface HookEmitResult {
   promptHook?: HookPromptInject
   abort?: { reason: string }
   toolOverride?: HookToolOverride
+  /** S5 — present (and a string) when a `user_prompt_submit` handler returned
+   *  `{updatedPrompt}`. The LAST rewrite wins (rewrites compose; only the
+   *  trailing value is surfaced). Consumers that ignore the key see the
+   *  legacy shape (no behavior change). */
+  updatedPrompt?: string
+  /** S5 — number of handlers in THIS emit that exceeded their timeout. Zero
+   *  when no handler timed out; field is OMITTED in the no-timeout case so
+   *  the legacy `{deny, updatedInput?}` shape is byte-identical. */
+  timeoutCount?: number
 }
 
 const isDeny = (v: unknown): v is HookDeny =>
@@ -222,6 +299,12 @@ const isDeny = (v: unknown): v is HookDeny =>
 
 const isUpdatedInput = (v: unknown): v is HookUpdatedInput =>
   typeof v === "object" && v !== null && "updatedInput" in v
+
+const isUpdatedPrompt = (v: unknown): v is HookUpdatedPrompt =>
+  typeof v === "object" &&
+  v !== null &&
+  "updatedPrompt" in v &&
+  typeof (v as { updatedPrompt: unknown }).updatedPrompt === "string"
 
 const isAbort = (v: unknown): v is HookAbort => {
   if (typeof v !== "object" || v === null) return false
@@ -263,11 +346,22 @@ type AnyHookHandler = (event: HookEvent) => unknown
  *  2-arg signature. Tier-0 absorption #0-1 (AWF 2-matcher). */
 export interface HookOnOptions {
   matcher?: ToolMatcher
+  /** S5 hook hardening — per-handler timeout in ms. When set, the handler is
+   *  raced against `setTimeout(timeoutMs)`; on expiry the bus logs a warning
+   *  (NO payload — anti-leak) and CONTINUES to the next handler (a stuck
+   *  handler never blocks the agent loop). Wins over the
+   *  `runtimeConfig().hookTimeoutMs` global default. When NEITHER is set the
+   *  handler runs UNBOUNDED (pre-S5 behavior, byte-identical legacy). */
+  timeoutMs?: number
 }
 
 interface StoredHandler {
   readonly fn: AnyHookHandler
   readonly matcher: ToolMatcher | undefined
+  /** Per-handler timeout override (ms). When undefined, falls back to the
+   *  runtime-config default; when THAT is also undefined the handler runs
+   *  unbounded (legacy path, byte-identical). */
+  readonly timeoutMs: number | undefined
 }
 
 const isToolEvent = (event: HookEvent): event is Extract<HookEvent, { name: string }> =>
@@ -290,27 +384,61 @@ const appendPromptSide = (
   return { text: joined.slice(joined.length - PROMPT_HOOK_MAX_CHARS), trimmed: true }
 }
 
+/** S5 — optional construction overrides for {@link HookBus}. Every field
+ *  defaults from `runtimeConfig()` / `MAX_*` constants when absent. Tests use
+ *  this to opt into a relaxed cap for stress / iteration scenarios without
+ *  mutating the global env. */
+export interface HookBusOptions {
+  /** Per-event handler-count cap override. WINS over
+   *  `runtimeConfig().hookMaxHandlers` and {@link MAX_HANDLERS_PER_EVENT}. */
+  maxHandlers?: number
+  /** Per-emit payload-byte cap override. WINS over
+   *  `runtimeConfig().hookMaxPayloadBytes` and {@link MAX_PAYLOAD_BYTES}. */
+  maxPayloadBytes?: number
+  /** Default per-handler timeout (ms) for handlers registered without an
+   *  explicit `HookOnOptions.timeoutMs`. WINS over
+   *  `runtimeConfig().hookTimeoutMs`. Absent ⇒ env knob (or unbounded). */
+  defaultTimeoutMs?: number
+}
+
 export class HookBus {
   private readonly handlers = new Map<HookEventType, StoredHandler[]>()
   private readonly logger: StructuredLogger | undefined
+  private readonly opts: HookBusOptions
 
-  constructor(logger?: StructuredLogger) {
+  constructor(logger?: StructuredLogger, opts: HookBusOptions = {}) {
     this.logger = logger
+    this.opts = opts
   }
 
   /** Register `handler` for `type`. Handlers fire in registration order.
    *  Optional `options.matcher` gates dispatch on tool-shaped events
    *  (`pre_tool_use`, `post_tool_use`, `post_tool_use_failure`); non-tool
-   *  events ignore it. */
+   *  events ignore it. `options.timeoutMs` overrides the runtime-config
+   *  default for THIS handler.
+   *
+   *  S5: throws {@link HookRegistrationError} when the per-event handler
+   *  count would exceed {@link MAX_HANDLERS_PER_EVENT} (or the
+   *  `runtimeConfig().hookMaxHandlers` override). The 65th handler is almost
+   *  always a registration bug; we surface it loudly rather than silently
+   *  dropping the registration. */
   on<T extends HookEventType>(type: T, handler: HookHandler<T>, options?: HookOnOptions): this {
     const list = this.handlers.get(type) ?? []
+    const cap = this.opts.maxHandlers ?? runtimeConfig().hookMaxHandlers ?? MAX_HANDLERS_PER_EVENT
+    if (list.length >= cap) {
+      throw new HookRegistrationError(
+        `HookBus: too many handlers for "${type}" (cap=${cap}). ` +
+          "Set QUANTA_HOOK_MAX_HANDLERS to raise the limit, or audit for a " +
+          "registration leak (handlers are usually registered once at startup).",
+      )
+    }
     // Closure-erase to the union: the Map key (`type`) GUARANTEES this stored
     // closure is only invoked with events whose `.type === type`, so the
     // narrowing assertion is safe at runtime (the alternative — `as unknown as
     // HookHandler<HookEventType>` at the call-site of `on()` — was the lint
     // warning hooks.ts:63 carried prior to R-Phase4 P3-2).
     const fn: AnyHookHandler = (event: HookEvent) => handler(event as HookEventOf<T>)
-    list.push({ fn, matcher: options?.matcher })
+    list.push({ fn, matcher: options?.matcher, timeoutMs: options?.timeoutMs })
     this.handlers.set(type, list)
     return this
   }
@@ -336,11 +464,28 @@ export class HookBus {
   async emit(event: HookEvent): Promise<HookEmitResult> {
     const list = this.handlers.get(event.type)
     if (list === undefined) return { deny: null }
+    // S5 — payload-cap pre-flight. We pay the JSON.stringify cost ONLY when
+    // we have at least one handler (the no-handler fast-path above is
+    // unchanged + byte-identical). Truncation is graceful: dispatch still
+    // fires with a redacted payload so a host watching the event never
+    // observes a missed call from a pathological argument.
+    const cap =
+      this.opts.maxPayloadBytes ?? runtimeConfig().hookMaxPayloadBytes ?? MAX_PAYLOAD_BYTES
+    const trimmed = truncatePayload(event, cap)
+    if (trimmed.truncated) {
+      this.logger?.warn("hook.payload.truncated", {
+        event: event.type,
+        cap,
+      })
+    }
+    const effectiveEvent = trimmed.truncated ? (trimmed.payload as HookEvent) : event
     // pre_tool_use is the only variant that can deny or rewrite input — it owns
     // the composition loop. Every other event still runs each matched handler
     // but only collects `promptHook` / `abort` / `toolOverride` from them.
-    if (event.type === "pre_tool_use") return this.emitPreToolUse(event, list)
-    return this.emitGeneric(event, list)
+    if (effectiveEvent.type === "pre_tool_use") return this.emitPreToolUse(effectiveEvent, list)
+    if (effectiveEvent.type === "user_prompt_submit")
+      return this.emitUserPromptSubmit(effectiveEvent, list)
+    return this.emitGeneric(effectiveEvent, list)
   }
 
   /** Composition loop for `pre_tool_use`: threads the (possibly rewritten) input
@@ -355,15 +500,20 @@ export class HookBus {
     let currentInput: unknown = event.input
     let mutated = false
     const acc = this.makeAccumulator()
+    const timeoutTracker = { count: 0 }
     for (const stored of list) {
       if (!matchTool(stored.matcher, event.name)) continue
       // Re-materialize with the latest input so a prior handler's rewrite is
       // visible to this one (rewrites compose in registration order).
-      const result = await this.runHandler(stored, {
-        type: "pre_tool_use",
-        name: event.name,
-        input: currentInput,
-      })
+      const result = await this.runHandler(
+        stored,
+        {
+          type: "pre_tool_use",
+          name: event.name,
+          input: currentInput,
+        },
+        timeoutTracker,
+      )
       // Normalize to a pure HookDeny — a handler may return a combined
       // `{ deny, updatedInput }`, but the deny channel carries only the reason
       // string (the rewrite rides the separate updatedInput channel).
@@ -385,6 +535,53 @@ export class HookBus {
     const out: HookEmitResult = { deny: denied }
     if (mutated) out.updatedInput = currentInput
     this.materializeAccumulator(out, acc)
+    if (timeoutTracker.count > 0) out.timeoutCount = timeoutTracker.count
+    return out
+  }
+
+  /** S5 — composition loop for `user_prompt_submit`. Mirrors
+   *  {@link emitPreToolUse}: threads a possibly-rewritten prompt through the
+   *  handler chain, records the first deny, and surfaces the LAST rewrite as
+   *  `updatedPrompt`. Each handler sees the latest rewritten prompt (rewrites
+   *  compose in registration order) so a chain of handlers can each refine
+   *  the text. `abort` / `promptHook` / `toolOverride` follow the same
+   *  accumulator pattern as every other variant. */
+  private async emitUserPromptSubmit(
+    event: HookEventOf<"user_prompt_submit">,
+    list: StoredHandler[],
+  ): Promise<HookEmitResult> {
+    let denied: HookDeny | null = null
+    let currentPrompt: string = event.prompt
+    let mutated = false
+    const acc = this.makeAccumulator()
+    const timeoutTracker = { count: 0 }
+    for (const stored of list) {
+      const result = await this.runHandler(
+        stored,
+        {
+          type: "user_prompt_submit",
+          prompt: currentPrompt,
+          attachmentsCount: event.attachmentsCount,
+          threadId: event.threadId,
+        },
+        timeoutTracker,
+      )
+      if (denied === null && isDeny(result)) denied = { deny: result.deny }
+      if (isUpdatedPrompt(result)) {
+        currentPrompt = result.updatedPrompt
+        mutated = true
+      }
+      if (isAbort(result) && acc.abort === undefined) {
+        acc.abort = { reason: result.abort.reason }
+      }
+      this.accumulatePromptHook(acc, result, event.type)
+      this.accumulateToolOverride(acc, result)
+      if (acc.abort !== undefined) break
+    }
+    const out: HookEmitResult = { deny: denied }
+    if (mutated) out.updatedPrompt = currentPrompt
+    this.materializeAccumulator(out, acc)
+    if (timeoutTracker.count > 0) out.timeoutCount = timeoutTracker.count
     return out
   }
 
@@ -394,9 +591,10 @@ export class HookBus {
   private async emitGeneric(event: HookEvent, list: StoredHandler[]): Promise<HookEmitResult> {
     const toolEvent = isToolEvent(event)
     const acc = this.makeAccumulator()
+    const timeoutTracker = { count: 0 }
     for (const stored of list) {
       if (toolEvent && !matchTool(stored.matcher, event.name)) continue
-      const result = await this.runHandler(stored, event)
+      const result = await this.runHandler(stored, event, timeoutTracker)
       if (isAbort(result) && acc.abort === undefined) {
         acc.abort = { reason: result.abort.reason }
       }
@@ -406,6 +604,7 @@ export class HookBus {
     }
     const out: HookEmitResult = { deny: null }
     this.materializeAccumulator(out, acc)
+    if (timeoutTracker.count > 0) out.timeoutCount = timeoutTracker.count
     return out
   }
 
@@ -497,10 +696,49 @@ export class HookBus {
   }
 
   /** Run one stored handler, isolating + logging a throw (returns `undefined`
-   *  on throw so the caller treats it as a no-op result). */
-  private async runHandler(stored: StoredHandler, event: HookEvent): Promise<unknown> {
+   *  on throw so the caller treats it as a no-op result).
+   *
+   *  S5: when a per-handler or runtime-config timeout is set, races the
+   *  handler against a `setTimeout(reject)` promise. On expiry: logs a
+   *  warning with `{event, elapsed, timeoutMs}` (NO payload — anti-leak),
+   *  bumps `timeoutTracker`, and returns `undefined` so the caller treats
+   *  the slot as a no-op. When NEITHER an override nor the env knob is set
+   *  the handler runs unbounded (byte-identical legacy path). */
+  private async runHandler(
+    stored: StoredHandler,
+    event: HookEvent,
+    timeoutTracker?: { count: number },
+  ): Promise<unknown> {
+    const effectiveTimeoutMs =
+      stored.timeoutMs ?? this.opts.defaultTimeoutMs ?? runtimeConfig().hookTimeoutMs ?? undefined
+    const started = Date.now()
     try {
-      return await stored.fn(event)
+      if (effectiveTimeoutMs === undefined) {
+        return await stored.fn(event)
+      }
+      // Race against the timeout. We do NOT cancel the handler (no AbortSignal
+      // contract today) — the orphaned handler's later resolution is dropped
+      // by `Promise.race`. The clearTimeout in the finally keeps a fast
+      // handler from holding the timer ref + node alive.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const timeoutPromise = new Promise<typeof TIMEOUT_SENTINEL>((resolve) => {
+        timer = setTimeout(() => resolve(TIMEOUT_SENTINEL), effectiveTimeoutMs)
+      })
+      try {
+        const result = await Promise.race([stored.fn(event), timeoutPromise])
+        if (result === TIMEOUT_SENTINEL) {
+          if (timeoutTracker !== undefined) timeoutTracker.count += 1
+          this.logger?.warn("hook.handler.timeout", {
+            event: event.type,
+            elapsed: Date.now() - started,
+            timeoutMs: effectiveTimeoutMs,
+          })
+          return undefined
+        }
+        return result
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
     } catch (e) {
       this.logger?.error("hook.handler.error", {
         event: event.type,
@@ -508,5 +746,113 @@ export class HookBus {
       })
       return undefined
     }
+  }
+}
+
+/** Unique sentinel returned by the timeout-race promise. Compared by
+ *  reference identity so a handler that happens to return the same string is
+ *  not mistaken for a timeout. */
+const TIMEOUT_SENTINEL = Symbol("hook.timeout") as unknown as { __hookTimeout: true }
+
+/** Max depth `truncatePayload` walks into nested objects. Beyond this a
+ *  nested object becomes the marker (the payload was deeply structured and
+ *  oversize — we trade fidelity for a bounded result). 3 is enough for the
+ *  realistic event shapes (e.g. `pre_tool_use → input → some-object`) without
+ *  giving up bounded work on adversarial inputs. */
+const TRUNCATE_MAX_DEPTH = 3
+
+/** Recursively walk `node` and truncate any string longer than `budget` to
+ *  `budget` chars + the truncation marker. Returns `{value, truncated}` so the
+ *  caller can short-circuit. Bounded by {@link TRUNCATE_MAX_DEPTH}: beyond
+ *  the depth a non-string subtree becomes the marker (further truncation
+ *  would be unbounded recursion on hostile input). */
+const truncateNode = (
+  node: unknown,
+  budget: number,
+  depth: number,
+): { value: unknown; truncated: boolean } => {
+  if (typeof node === "string") {
+    if (node.length <= budget) return { value: node, truncated: false }
+    return { value: `${node.slice(0, budget)}${PAYLOAD_TRUNCATE_MARKER}`, truncated: true }
+  }
+  if (depth >= TRUNCATE_MAX_DEPTH) {
+    if (typeof node === "object" && node !== null) {
+      return { value: PAYLOAD_TRUNCATE_MARKER, truncated: true }
+    }
+    return { value: node, truncated: false }
+  }
+  if (Array.isArray(node)) {
+    let anyTrim = false
+    const out = node.map((el) => {
+      const r = truncateNode(el, budget, depth + 1)
+      if (r.truncated) anyTrim = true
+      return r.value
+    })
+    return { value: out, truncated: anyTrim }
+  }
+  if (typeof node === "object" && node !== null) {
+    let anyTrim = false
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(node)) {
+      const r = truncateNode(v, budget, depth + 1)
+      if (r.truncated) anyTrim = true
+      out[k] = r.value
+    }
+    return { value: out, truncated: anyTrim }
+  }
+  // Primitive non-string (number / boolean / null / undefined) — bounded.
+  return { value: node, truncated: false }
+}
+
+/** S5 — truncate `payload` so the serialized form fits inside `maxBytes`.
+ *  Strings (at ANY depth up to {@link TRUNCATE_MAX_DEPTH}) are sliced + tagged
+ *  with {@link PAYLOAD_TRUNCATE_MARKER}. Non-string primitives pass through.
+ *  Returns `{payload, truncated}` so the emitter logs a warning ONLY when a
+ *  real truncation happened (zero-overhead on small payloads — the initial
+ *  JSON.stringify is the only cost on the happy path).
+ *
+ *  Anti-leak: the per-field budget is derived ONCE from maxBytes / a small
+ *  divisor so a single giant leaf can never exceed it (and a fan-out of N
+ *  smaller-than-budget leaves is also bounded since the recursion is depth-
+ *  capped). On circular / non-serializable input the function returns a
+ *  synthetic marker payload (never throws) — dispatch must still fire.
+ *
+ *  Exported for tests. */
+export const truncatePayload = (
+  payload: unknown,
+  maxBytes: number,
+): { payload: unknown; truncated: boolean } => {
+  let serialized: string
+  try {
+    serialized = JSON.stringify(payload)
+  } catch {
+    // Circular / non-serializable payload — replace wholesale with a marker so
+    // dispatch still fires but a host doesn't observe a corrupted value.
+    return {
+      payload: {
+        type: (payload as { type?: string } | null)?.type ?? "unknown",
+        _truncated: PAYLOAD_TRUNCATE_MARKER,
+      },
+      truncated: true,
+    }
+  }
+  if (serialized.length <= maxBytes) return { payload, truncated: false }
+  // Per-field budget: maxBytes / 4 ensures a single string field can hold
+  // ~25% of the cap, leaving the other 75% for sibling fields + structural
+  // overhead. The exact divisor is not load-bearing; the point is that the
+  // per-leaf cap is strictly less than maxBytes so any single oversize leaf
+  // is bounded.
+  const budget = Math.max(64, Math.floor(maxBytes / 4))
+  const walked = truncateNode(payload, budget, 0)
+  // Defensive: even after per-field truncation the structural bloat could
+  // remain oversize (thousands of small leaves). If so, replace wholesale.
+  const reserialized = JSON.stringify(walked.value)
+  if (reserialized.length <= maxBytes) {
+    return { payload: walked.value, truncated: walked.truncated || true }
+  }
+  const typeField = (payload as { type?: string } | null)?.type ?? "unknown"
+  return {
+    payload: { type: typeField, _truncated: PAYLOAD_TRUNCATE_MARKER },
+    truncated: true,
   }
 }

@@ -1152,6 +1152,85 @@ const runTurn = async (
 // the call sites that produce its status.)
 
 /**
+ * S5 hook hardening — emit `user_prompt_submit` ONCE at session start, when
+ * the seeded buffer ends in a user message (the common path: the surface
+ * appended a fresh prompt before calling runAgent). Honored response
+ * channels:
+ *   - `deny` ⇒ returns the deny reason; the caller short-circuits into
+ *     aborted (the surface observes `AgentOutcome.reason === "aborted"` +
+ *     a `stopCategory.origin === "user"` — same category the existing
+ *     submission-interrupt path produces).
+ *   - `updatedPrompt` (string) ⇒ rewrites the trailing user message's FIRST
+ *     text block in place (the LLM sees only the rewritten text).
+ *
+ * No emission when there is no trailing user message (resume-without-new-
+ * prompt) or when no bus is wired (caller guards that). Returns `null` to
+ * proceed, or the deny reason string when a hook blocked the run.
+ *
+ * Extracted to keep `runAgentInner` under the biome cognitive-complexity
+ * budget.
+ */
+const emitUserPromptSubmitHook = async (
+  cfg: AgentConfig,
+  wm: WorkingMemory<Message>,
+  sessionId: string,
+): Promise<string | null> => {
+  if (cfg.hooks === undefined) return null
+  // Walk backwards for the trailing user message (a typical seed ends in
+  // user; a resume-without-new-prompt seed ends in assistant — we skip).
+  let lastUserIdx = -1
+  for (let i = wm.messages.length - 1; i >= 0; i--) {
+    const m = wm.messages[i]
+    if (m === undefined) continue
+    if (m.role === "user") {
+      lastUserIdx = i
+      break
+    }
+  }
+  if (lastUserIdx < 0) return null
+  const userMsg = wm.messages[lastUserIdx]
+  if (userMsg === undefined) return null
+  // Join all text blocks for the hook view; count non-text as attachments.
+  let promptText = ""
+  let attachmentsCount = 0
+  for (const b of userMsg.content) {
+    if (b.type === "text") {
+      promptText = promptText.length > 0 ? `${promptText}\n${b.text}` : b.text
+    } else {
+      attachmentsCount += 1
+    }
+  }
+  const emit = (await cfg.hooks.emit({
+    type: "user_prompt_submit",
+    prompt: promptText,
+    attachmentsCount,
+    threadId: sessionId,
+  })) ?? { deny: null }
+  if (emit.deny !== null) {
+    return emit.deny.deny
+  }
+  // updatedPrompt rewrites the FIRST text block in place. We do NOT touch
+  // attachments (an image queued for this turn is preserved verbatim).
+  if (typeof emit.updatedPrompt === "string") {
+    const newText = emit.updatedPrompt
+    let rewritten = false
+    const newContent = userMsg.content.map((b) => {
+      if (!rewritten && b.type === "text") {
+        rewritten = true
+        return { ...b, text: newText }
+      }
+      return b
+    })
+    // If the message had NO text block at all, prepend one so the rewrite
+    // is observable (rare path: image-only prompt with a hook that wants to
+    // inject explanatory text).
+    if (!rewritten) newContent.unshift({ type: "text", text: newText })
+    wm.messages[lastUserIdx] = { ...userMsg, content: newContent }
+  }
+  return null
+}
+
+/**
  * L4 control-op cluster (2026-05-23) — restore the follow-up queue snapshot
  * at session start. When the host wired BOTH `followUpQueue` AND
  * `followUpQueueSnapshotStore`, hydrate the queue from the snapshot so a
@@ -1856,6 +1935,22 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   stream.emit({ type: "session_start" })
 
   if (cfg.hooks) await cfg.hooks.emit({ type: "session_start", sessionId })
+
+  // S5 — `user_prompt_submit` (Cursor / Claude Code parity). Emits ONCE per
+  // run if the seeded buffer ends in a user message (the common path: the
+  // surface appended a fresh prompt before calling runAgent). Honored response
+  // channels: `deny` ⇒ short-circuit into aborted; `updatedPrompt` (string)
+  // ⇒ rewrite the trailing user message's text block in place. No emission
+  // when there is no trailing user message (resume-without-new-prompt) or
+  // when no bus is wired (byte-identical legacy path). Helper-extracted to
+  // keep `runAgentInner` under the biome cognitive-complexity budget; see
+  // `emitUserPromptSubmitHook` below.
+  if (cfg.hooks !== undefined) {
+    const denied = await emitUserPromptSubmitHook(cfg, wm, sessionId)
+    if (denied !== null) {
+      return finish("aborted", 0, interruptedCategory("user"))
+    }
+  }
 
   // L4 control-op cluster (2026-05-23) — follow-up queue snapshot restore.
   // Helper-extracted; see `restoreFollowUpQueueSnapshot` below.

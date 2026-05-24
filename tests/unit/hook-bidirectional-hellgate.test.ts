@@ -53,7 +53,9 @@ describe("HELLGATE [ADR-0133] — promptHook DoS bounded by cap", () => {
   })
 
   test("100 handlers each emitting 200-char injects accumulate but cap at PROMPT_HOOK_MAX_CHARS", async () => {
-    const bus = new HookBus()
+    // S5: registration cap raised explicitly — this test stress-checks the
+    // emit chain's bounded promptHook accumulator, NOT the registration cap.
+    const bus = new HookBus(undefined, { maxHandlers: 10_000 })
     for (let i = 0; i < 100; i++) {
       bus.on("post_tool_use", () => ({
         promptHook: { injectBeforeUser: "Y".repeat(200) },
@@ -90,7 +92,9 @@ describe("HELLGATE [ADR-0133] — promptHook DoS bounded by cap", () => {
 
 describe("HELLGATE [ADR-0133] — emit chain is iterative (NO stack blow)", () => {
   test("5K handlers on a single event run without RangeError", async () => {
-    const bus = new HookBus()
+    // S5: registration cap raised explicitly to admit the 5K stress; this
+    // test pins the iterative-emit invariant (no stack blow), NOT the cap.
+    const bus = new HookBus(undefined, { maxHandlers: 10_000 })
     let count = 0
     for (let i = 0; i < 5_000; i++) {
       bus.on("turn_start", () => {
@@ -102,7 +106,7 @@ describe("HELLGATE [ADR-0133] — emit chain is iterative (NO stack blow)", () =
   })
 
   test("5K handlers each emitting a tiny promptHook still cap correctly (no exponential growth)", async () => {
-    const bus = new HookBus()
+    const bus = new HookBus(undefined, { maxHandlers: 10_000 })
     for (let i = 0; i < 5_000; i++) {
       bus.on("turn_start", () => ({ promptHook: { injectAfterSystem: "xx" } }))
     }
