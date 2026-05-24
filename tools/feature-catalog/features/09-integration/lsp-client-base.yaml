@@ -38,14 +38,6 @@ evidence:
   adrs: [15, 24]
   tests:
     unit:
-      - tests/unit/lsp-nav-definition.test.ts
-      - tests/unit/lsp-nav-references.test.ts
-      - tests/unit/lsp-nav-hover.test.ts
-      - tests/unit/lsp-nav-type-definition.test.ts
-      - tests/unit/lsp-nav-implementation.test.ts
-      - tests/unit/lsp-nav-document-symbol.test.ts
-      - tests/unit/lsp-nav-workspace-symbol.test.ts
-      - tests/unit/lsp-nav-rename-preview.test.ts
       - tests/unit/lsp-nav-rpc.test.ts
     integration: []
     contract: []

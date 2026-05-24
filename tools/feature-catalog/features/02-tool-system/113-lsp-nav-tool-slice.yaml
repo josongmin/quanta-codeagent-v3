@@ -35,17 +35,10 @@ evidence:
   adrs: []
   tests:
     unit:
-      - tests/unit/lsp-nav-definition.test.ts
-      - tests/unit/lsp-nav-references.test.ts
-      - tests/unit/lsp-nav-hover.test.ts
-      - tests/unit/lsp-nav-type-definition.test.ts
-      - tests/unit/lsp-nav-implementation.test.ts
-      - tests/unit/lsp-nav-document-symbol.test.ts
-      - tests/unit/lsp-nav-workspace-symbol.test.ts
-      - tests/unit/lsp-nav-rename-preview.test.ts
       - tests/unit/lsp-nav-formatters.test.ts
       - tests/unit/lsp-nav-tools.test.ts
       - tests/unit/lsp-nav-rpc.test.ts
+      - tests/unit/lsp-nav-per-tool.test.ts
     integration: []
     contract: []
 knobs: []

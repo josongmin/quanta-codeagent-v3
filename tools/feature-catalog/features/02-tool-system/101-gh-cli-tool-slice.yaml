@@ -26,10 +26,14 @@ purpose: |
 evidence:
   code:
     - src/tool/gh/index.ts
+    - src/tool/index.ts
+    - src/apps/agent/mode-presets/ci-bot.ts
+    - src/apps/agent/mode-presets/ci-bot-policy.ts
   adrs: []
   tests:
     unit:
       - tests/unit/tool/gh.test.ts
+      - tests/unit/gh-pr-tools-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

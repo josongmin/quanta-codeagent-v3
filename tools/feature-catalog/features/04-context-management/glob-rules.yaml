@@ -36,7 +36,6 @@ evidence:
   adrs: []
   tests:
     unit:
-      - tests/unit/glob-rules.test.ts
       - tests/unit/glob-rules-hellgate.test.ts
       - tests/unit/agent/glob-rules.test.ts
     integration: []

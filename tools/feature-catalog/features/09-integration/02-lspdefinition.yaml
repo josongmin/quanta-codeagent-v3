@@ -23,7 +23,7 @@ evidence:
     - src/apps/cli/internal.ts
   adrs: [24]
   tests:
-    unit: [tests/unit/lsp-nav-tools.test.ts, tests/unit/lsp-nav-definition.test.js, tests/unit/lsp-nav-references.test.js, tests/unit/lsp-nav-rename-preview.test.ts]
+    unit: [tests/unit/lsp-nav-tools.test.ts, tests/unit/lsp-nav-per-tool.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_LSP_TOOLS]

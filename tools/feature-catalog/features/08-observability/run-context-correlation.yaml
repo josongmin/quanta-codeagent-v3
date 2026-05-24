@@ -25,6 +25,9 @@ purpose: |
 evidence:
   code:
     - src/shared/run-context.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+    - src/runner/assemble/config.ts
   adrs: []
   tests:
     unit:

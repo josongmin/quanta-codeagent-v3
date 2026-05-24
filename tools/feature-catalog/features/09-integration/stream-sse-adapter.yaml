@@ -39,6 +39,7 @@ purpose: |
 evidence:
   code:
     - src/stream/adapters/sse.ts
+    - src/stream/index.ts
   adrs: []
   tests:
     unit:

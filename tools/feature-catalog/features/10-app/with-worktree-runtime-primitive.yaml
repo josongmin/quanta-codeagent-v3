@@ -43,6 +43,8 @@ purpose: |
 evidence:
   code:
     - src/runtime/worktree.ts
+    - src/runtime/worktree-fork.ts
+    - src/runtime/index.ts
   adrs: []
   tests:
     unit:

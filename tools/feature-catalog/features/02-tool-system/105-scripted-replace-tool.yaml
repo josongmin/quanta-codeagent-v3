@@ -29,6 +29,9 @@ purpose: |
 evidence:
   code:
     - src/tool/scripted-replace.ts
+    - src/tool/index.ts
+    - src/agent/dispatch-dedup.ts
+    - src/permission/policy.ts
   adrs: []
   tests:
     unit:

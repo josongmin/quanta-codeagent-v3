@@ -26,6 +26,7 @@ purpose: |
 evidence:
   code:
     - src/tool/grep/index.ts
+    - src/tool/index.ts
   adrs: []
   tests:
     unit:

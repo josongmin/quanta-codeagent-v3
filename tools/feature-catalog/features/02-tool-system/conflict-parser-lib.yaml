@@ -32,6 +32,7 @@ purpose: |
 evidence:
   code:
     - src/git/conflict-parser.ts
+    - src/git/index.ts
   adrs: [111]
   tests:
     unit:

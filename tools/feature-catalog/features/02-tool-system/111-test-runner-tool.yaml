@@ -28,6 +28,7 @@ purpose: |
 evidence:
   code:
     - src/tool/test-runner/index.ts
+    - src/tool/index.ts
   adrs: []
   tests:
     unit: []

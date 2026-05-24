@@ -16,6 +16,9 @@ purpose: 45 tests
 evidence:
   code:
     - src/tool/git/index.ts
+    - src/tool/git/runner.ts
+    - src/tool/git/_shared.ts
+    - src/tool/git/types.ts
   adrs: [25]
   tests:
     unit: [tests/unit/git-tools.test.ts, tests/unit/git-tools-hellgate.test.ts]

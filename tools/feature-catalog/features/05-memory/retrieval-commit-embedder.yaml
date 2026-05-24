@@ -30,10 +30,12 @@ purpose: |
 evidence:
   code:
     - src/retrieval/commit-embedder.ts
+    - src/retrieval/index.ts
+    - src/retrieval/types.ts
+    - src/runner/assemble/retrieval.ts
   adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:
-      - tests/unit/retrieval-commit-embedder.test.ts
       - tests/unit/retrieval-commit-embedder-hellgate.test.ts
     integration: []
     contract: []

@@ -30,6 +30,9 @@ purpose: |
 evidence:
   code:
     - src/tool/request-user-input.ts
+    - src/tool/index.ts
+    - src/agent/tier1/user-input.ts
+    - src/agent/dispatch.ts
   adrs: [97]
   tests:
     unit:

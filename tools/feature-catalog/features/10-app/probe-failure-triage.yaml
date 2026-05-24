@@ -31,6 +31,9 @@ purpose: |
 evidence:
   code:
     - src/apps/probe/triage.ts
+    - src/apps/probe/index.ts
+    - src/apps/probe/funnel.ts
+    - src/apps/probe/parse.ts
   adrs: [10]
   tests:
     unit:

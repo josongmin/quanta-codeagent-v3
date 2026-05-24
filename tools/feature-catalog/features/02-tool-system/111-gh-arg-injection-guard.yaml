@@ -31,6 +31,7 @@ purpose: |
 evidence:
   code:
     - src/tool/gh/index.ts
+    - src/tool/index.ts
   adrs: []
   tests:
     unit:

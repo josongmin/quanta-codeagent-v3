@@ -19,9 +19,12 @@ purpose: |
 evidence:
   code:
     - src/tool/git/churn.ts
+    - src/tool/git/index.ts
+    - src/tool/git/runner.ts
+    - src/tool/git/types.ts
   adrs: [25]
   tests:
-    unit: [tests/unit/git-churn-blame-heatmap.test.ts]
+    unit: [tests/unit/git-churn-blame-heatmap.test.ts, tests/unit/git-tools-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

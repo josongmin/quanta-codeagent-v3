@@ -20,6 +20,9 @@ purpose: |
 evidence:
   code:
     - src/tool/file-tree-summary/index.ts
+    - src/tool/index.ts
+    - src/agent/prompt.ts
+    - src/apps/probe/funnel.ts
   adrs: []
   tests:
     unit:

@@ -32,6 +32,9 @@ purpose: |
 evidence:
   code:
     - src/tool/bash/index.ts
+    - src/tool/index.ts
+    - src/agent/hitl-tier-registry.ts
+    - src/permission/policy.ts
   adrs: [78]
   tests:
     unit:

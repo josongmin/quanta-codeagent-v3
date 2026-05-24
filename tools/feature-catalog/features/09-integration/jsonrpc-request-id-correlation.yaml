@@ -29,6 +29,7 @@ purpose: |
 evidence:
   code:
     - src/shared/jsonrpc/correlation.ts
+    - src/shared/jsonrpc/index.ts
   adrs: [23]
   tests:
     unit:

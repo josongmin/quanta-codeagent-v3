@@ -29,6 +29,8 @@ purpose: |
 evidence:
   code:
     - src/lsp/adapters/jsonrpc.ts
+    - src/lsp/adapters/base.ts
+    - src/lsp/index.ts
   adrs: [15]
   tests:
     unit:

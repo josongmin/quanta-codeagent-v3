@@ -40,7 +40,6 @@ evidence:
   tests:
     unit:
       - tests/unit/retrieval-rerank-registry.test.ts
-      - tests/unit/retrieval-rerank-hellgate.test.ts
     integration: []
     contract: []
 knobs:

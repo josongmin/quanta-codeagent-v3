@@ -22,6 +22,9 @@ purpose: |
 evidence:
   code:
     - src/agent/hooks.ts
+    - src/agent/dispatch.ts
+    - src/agent/admissibility-gate.ts
+    - src/agent/tool-matchers.ts
   adrs: [113]
   tests:
     unit:

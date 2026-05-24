@@ -25,6 +25,8 @@ purpose: |
 evidence:
   code:
     - src/agent/recovery.ts
+    - src/agent/loop.ts
+    - src/agent/turn-context.ts
   adrs: []
   tests:
     unit:

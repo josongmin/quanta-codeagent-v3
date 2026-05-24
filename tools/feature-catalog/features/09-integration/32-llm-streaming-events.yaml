@@ -29,6 +29,7 @@ purpose: |
 evidence:
   code:
     - src/llm/streaming-events.ts
+    - src/llm/index.ts
   adrs: [48]
   tests:
     unit:

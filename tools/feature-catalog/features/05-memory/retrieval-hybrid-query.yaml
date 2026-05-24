@@ -28,10 +28,12 @@ purpose: |
 evidence:
   code:
     - src/retrieval/hybrid-query.ts
+    - src/retrieval/index.ts
+    - src/runner/assemble/retrieval-localize-bridge.ts
+    - src/runner/assemble/retrieval.ts
   adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:
-      - tests/unit/retrieval-hybrid-query.test.ts
       - tests/unit/retrieval-hybrid-query-hellgate.test.ts
     integration: []
     contract: []

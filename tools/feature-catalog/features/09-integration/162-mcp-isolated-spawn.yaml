@@ -32,6 +32,9 @@ purpose: |
 evidence:
   code:
     - src/mcp/isolated-client.ts
+    - src/plugin-isolation/index.ts
+    - src/plugin-isolation/bun-spawner.ts
+    - src/plugin-isolation/plugin-host.ts
   adrs:
     - docs/decisions/0162-plugin-process-isolation.md
   tests:

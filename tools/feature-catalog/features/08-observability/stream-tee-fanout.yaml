@@ -35,6 +35,9 @@ purpose: |
 evidence:
   code:
     - src/stream/adapters/tee.ts
+    - src/stream/index.ts
+    - src/runner/assemble/streaming.ts
+    - src/apps/bench/observe.ts
   adrs: []
   tests:
     unit:

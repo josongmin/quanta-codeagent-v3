@@ -21,6 +21,10 @@ purpose: |
 evidence:
   code:
     - src/tool/update-working-state.ts
+    - src/tool/index.ts
+    - src/agent/working-state.ts
+    - src/agent/tier1/working-state.ts
+    - src/apps/cli/working-state-panel.ts
   adrs: [21]
   tests:
     unit: [tests/unit/update-working-state.test.ts]

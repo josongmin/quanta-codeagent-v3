@@ -26,6 +26,8 @@ purpose: |
 evidence:
   code:
     - src/observability/metrics/observability-helper.ts
+    - src/observability/metrics/index.ts
+    - src/observability/metrics/port.ts
   adrs: [172]
   tests:
     unit:

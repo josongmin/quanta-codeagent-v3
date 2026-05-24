@@ -25,7 +25,11 @@ purpose: |
 evidence:
   code:
     - src/agent/compaction-breaker.ts
-  adrs: []
+    - src/agent/types/compaction-config.ts
+    - src/agent/compaction.ts
+    - src/agent/loop.ts
+    - src/agent/index.ts
+  adrs: [11, 75]
   tests:
     unit:
       - tests/unit/compaction-breaker.test.ts

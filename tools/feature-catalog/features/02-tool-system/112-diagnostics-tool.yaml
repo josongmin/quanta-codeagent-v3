@@ -30,6 +30,8 @@ purpose: |
 evidence:
   code:
     - src/tool/diagnostics/index.ts
+    - src/tool/index.ts
+    - src/agent/lsp-bridge.ts
   adrs: []
   tests:
     unit:

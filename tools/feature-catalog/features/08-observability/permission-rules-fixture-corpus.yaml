@@ -35,6 +35,8 @@ purpose: |
 evidence:
   code:
     - tests/unit/permission-rules.fixtures.ts
+    - src/permission/policy.ts
+    - src/permission/policy-rules.ts
   adrs: []
   tests:
     unit:
