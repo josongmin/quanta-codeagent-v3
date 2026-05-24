@@ -1,0 +1,35 @@
+id: lsp-typescript-adapter
+title: TypescriptAdapter — typescript-language-server stdio adapter + JS/TS/JSX/TSX languageId map
+section: 9
+subsystem: LSP — TypeScript / JavaScript adapter
+order: 15
+maturity: L4
+status: stable
+purpose: |
+  Per-language adapter on top of `LspClient` base for
+  `typescript-language-server` over stdio. Two contributions only — the rest
+  is inherited: (1) launch argv default
+  `["typescript-language-server", "--stdio"]` (overridable via adapter
+  options); (2) `languageIdFor(filePath)` which distinguishes `.tsx` →
+  `typescriptreact`, `.jsx` → `javascriptreact`, `.js`/`.mjs`/`.cjs` →
+  `javascript`, default → `typescript`. The JSX/TSX distinction matters:
+  typescript-language-server parses `.tsx` as plain TS without it and
+  silently produces wrong diagnostics.
+evidence:
+  code:
+    - src/lsp/adapters/typescript.ts
+    - src/lsp/adapters/base.ts
+  adrs: [15]
+  tests:
+    unit:
+      - tests/unit/lsp-bridge-probe.test.ts
+      - tests/unit/lsp-nav-tools.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion of `lsp-pyright-adapter` (the symmetric Python case) and
+  `lsp-client-base` (the shared LSP machinery). Adding a new language only
+  needs a new adapter file with these two contributions — no LspPort method
+  needs to be re-implemented per language.

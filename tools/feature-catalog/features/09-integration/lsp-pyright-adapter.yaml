@@ -1,0 +1,32 @@
+id: lsp-pyright-adapter
+title: PyrightAdapter — pyright-langserver stdio adapter (Python)
+section: 9
+subsystem: LSP — Python adapter
+order: 16
+maturity: L4
+status: stable
+purpose: |
+  Per-language adapter on top of `LspClient` base for `pyright-langserver`
+  over stdio. Minimal contribution surface — only the launch argv default
+  `["pyright-langserver", "--stdio"]` (overridable via adapter options) and
+  a constant `languageIdFor: () => "python"`. Every file the adapter sees
+  is Python; no extension switch is needed. All nav RPCs (definition /
+  references / hover / typeDefinition / implementation / documentSymbol /
+  workspaceSymbol / prepareRename), the stdio handshake, and the
+  Content-Length framing are inherited from `LspClient`.
+evidence:
+  code:
+    - src/lsp/adapters/pyright.ts
+    - src/lsp/adapters/base.ts
+  adrs: [15]
+  tests:
+    unit:
+      - tests/unit/lsp-bridge-probe.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Symmetric companion of `lsp-typescript-adapter`. The two adapters together
+  span the languages quanta currently nav-supports; new languages follow
+  the same shape (argv + languageIdFor).
