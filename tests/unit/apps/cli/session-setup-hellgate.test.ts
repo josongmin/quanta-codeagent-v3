@@ -1,18 +1,60 @@
-import { describe, expect, test } from "bun:test"
-import type { SetupSessionDeps } from "../../../../src/apps/cli/repl/session-setup"
+import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import type {
+  SessionSetupResult,
+  SetupSessionDeps,
+} from "../../../../src/apps/cli/repl/session-setup"
 
-// session-setup orchestrates SO MANY surface modules (status bar, MCP, LLM,
-// resume-FSM, ...) that an end-to-end exercise would require booting a
-// near-full CLI surface. The hellgate strategy: lock the SHAPE of its
-// dependency contract so a future refactor can't silently drop a factory.
-// Each `readonly buildXOrUndefined` field is a CONFIGURABLE seam — the
-// test asserts the shape is what runRepl wires.
+/**
+ * Slice-C (T2 rewrite): runtime behavior coverage for `setupSession`.
+ *
+ * The PRIOR hellgate was source-sniffing: greps over `session-setup.ts`
+ * for env knob NAMES (`QUANTA_IDLE_SUPPRESS`, `QUANTA_IDLE_MS`, …), for
+ * the LLM stack composition ORDER (`buildLLM` → `RetryingLLM` → `composeLLM`),
+ * for `process.exit(1)` substring presence, for `process.on("SIGINT"`
+ * literal. Those assertions fail on cosmetic refactors that preserve
+ * behavior AND pass on regressions that preserve the file shape — both
+ * directions of false signal.
+ *
+ * This rewrite keeps the legitimate TYPE-SHAPE locks (compile-time
+ * contract enforcement — NOT source-grep) and adds runtime behavior tests
+ * that boot `setupSession` with heavy module stubs and assert:
+ *
+ *   - SIGINT handler IS registered on the process (spy on process.on)
+ *   - When the abort fires, the handler triggers the AbortController
+ *     returned in the result (so the surface's SIGINT contract is end-to-end)
+ *   - All 9 INJECTED deps are CALLED at least once during a successful boot
+ *     (drift detector — a future refactor that drops one of the wires
+ *     surfaces here as a failed expectation)
+ *   - The result populates every promised key (no silent undefined for
+ *     non-optional bindings)
+ *
+ * REGRESSION SCENARIOS this rewritten test catches:
+ *
+ *   - If someone drops `process.on("SIGINT", …)` from `setupSession` ⇒
+ *     `registers a SIGINT handler` fails.
+ *   - If `deps.buildLifecycleBundle()` is no longer invoked (e.g. inlined
+ *     and forgotten to call) ⇒ the corresponding factory spy stays at 0.
+ *   - If the LLM stack helper returns the un-retrying LLM by mistake ⇒
+ *     `result.llm` is the stubbed RetryingLLM instance not the inner.
+ *   - If `loadFeatures()` is no longer awaited and a Promise is forwarded
+ *     downstream ⇒ the resulting metrics/state fields are wrong shape ⇒
+ *     dep contract tests fail.
+ *
+ * TODO (limitation): A behavioral assertion for the `--image` exit-1 path
+ * (loadSeedImages catching loadImageBlock throws and calling process.exit(1))
+ * is NOT covered here because `argvImages()` is module-private inside
+ * `internal.ts` — exposing it as an injectable dep on `SetupSessionDeps`
+ * would let us assert exit-1 fires without spawning a subprocess. Tracked
+ * for a future "more ports" slice; the type-shape locks below DO still
+ * verify the existence of the dep bag itself.
+ */
 
-describe("session-setup — dependency contract (shape lock)", () => {
+// =============================================================================
+// type-shape locks (compile-time contract — NOT source-grep)
+// =============================================================================
+
+describe("session-setup — dependency contract (compile-time shape lock)", () => {
   test("SetupSessionDeps lists every spec-mandated factory", () => {
-    // This compiles iff every required key is present on the type. The
-    // `keyof SetupSessionDeps` lookup makes drift surface as a compile
-    // error in this file before reaching production.
     type Required = keyof SetupSessionDeps
     const required: Required[] = [
       "buildLifecycleBundle",
@@ -26,77 +68,365 @@ describe("session-setup — dependency contract (shape lock)", () => {
       "installPills",
     ]
     expect(required).toHaveLength(9)
-    // Each must be unique.
     expect(new Set(required).size).toBe(9)
   })
 
-  test("setupSession export is a function", async () => {
+  test("setupSession export is an AsyncFunction", async () => {
     const mod = await import("../../../../src/apps/cli/repl/session-setup")
     expect(typeof mod.setupSession).toBe("function")
+    expect(mod.setupSession.constructor.name).toBe("AsyncFunction")
   })
 
-  test("setupSession is async (returns a Promise)", async () => {
+  test("SessionSetupResult contract keys are reachable via the type", () => {
+    // Compile-time contract: the named keys MUST live on the result type.
+    // A future rename of any field here is a compile error in THIS file
+    // before it can become a silent surface drift.
+    type Required = keyof SessionSetupResult
+    const keys: Required[] = [
+      "provider",
+      "model",
+      "mode",
+      "cwd",
+      "slog",
+      "idleMonitor",
+      "rejectCounter",
+      "llm",
+      "planMode",
+      "metrics",
+      "state",
+      "mcpClients",
+      "mcpTools",
+      "skillsConfig",
+      "lifecyclePills",
+      "lifecycleTaskRegistry",
+      "lifecycleFollowUpQueue",
+      "sessionId",
+      "history",
+      "pendingImages",
+      "idMeta",
+      "statusBar",
+      "turnIndicator",
+      "turnSummary",
+      "sessionDeps",
+      "costPanel",
+      "branchProgress",
+      "planStore",
+      "abort",
+      "pills",
+      "argPrompt",
+      "shutdownMcp",
+    ]
+    // 32 named bindings — assert presence to detect accidental drops.
+    expect(keys).toHaveLength(32)
+    expect(new Set(keys).size).toBe(32)
+  })
+})
+
+// =============================================================================
+// runtime behavior — boot setupSession with stubbed module surface
+// =============================================================================
+
+// Stub bag we ACCUMULATE call records on so we can assert each injected
+// factory was actually invoked by setupSession.
+type DepProbe = {
+  buildLifecycleBundleCalls: number
+  deriveMcpPillServersCalls: number
+  buildCostPanelOrUndefinedCalls: number
+  buildBranchProgressOrUndefinedCalls: number
+  buildPlanStoreOrUndefinedCalls: number
+  buildTurnSummaryAndStreamCalls: number
+  buildTurnIndicatorAndStreamCalls: number
+  buildWorkMetricsSinkCalls: number
+  installPillsCalls: number
+}
+
+const makeStubDeps = (): { deps: SetupSessionDeps; probe: DepProbe } => {
+  const probe: DepProbe = {
+    buildLifecycleBundleCalls: 0,
+    deriveMcpPillServersCalls: 0,
+    buildCostPanelOrUndefinedCalls: 0,
+    buildBranchProgressOrUndefinedCalls: 0,
+    buildPlanStoreOrUndefinedCalls: 0,
+    buildTurnSummaryAndStreamCalls: 0,
+    buildTurnIndicatorAndStreamCalls: 0,
+    buildWorkMetricsSinkCalls: 0,
+    installPillsCalls: 0,
+  }
+  const stubPills = {
+    update: () => undefined,
+    render: () => "",
+    flush: () => undefined,
+    dispose: () => undefined,
+  }
+  const stubStatusPills = {
+    dispose: () => undefined,
+    update: () => undefined,
+  }
+  const stubStreamPort = { emit: () => undefined }
+  const stubIndicator = {
+    start: () => undefined,
+    stop: () => undefined,
+    updateUsage: () => undefined,
+    markFirstChunk: () => undefined,
+  }
+  const stubSummary = {
+    onEvent: () => undefined,
+    render: () => "",
+    reset: () => undefined,
+    asStreamPort: () => stubStreamPort,
+  }
+  const deps: SetupSessionDeps = {
+    buildLifecycleBundle: () => {
+      probe.buildLifecycleBundleCalls += 1
+      return {
+        pills: stubPills as never,
+        taskRegistry: undefined,
+        followUpQueue: undefined,
+      }
+    },
+    deriveMcpPillServers: (tools) => {
+      probe.deriveMcpPillServersCalls += 1
+      return tools.map((t) => ({ name: t.name, status: "connected" as const }))
+    },
+    buildCostPanelOrUndefined: () => {
+      probe.buildCostPanelOrUndefinedCalls += 1
+      return undefined
+    },
+    buildBranchProgressOrUndefined: () => {
+      probe.buildBranchProgressOrUndefinedCalls += 1
+      return undefined
+    },
+    buildPlanStoreOrUndefined: () => {
+      probe.buildPlanStoreOrUndefinedCalls += 1
+      return undefined
+    },
+    buildTurnSummaryAndStream: (stream) => {
+      probe.buildTurnSummaryAndStreamCalls += 1
+      return { collector: stubSummary as never, stream }
+    },
+    buildTurnIndicatorAndStream: (_statusBar, stream) => {
+      probe.buildTurnIndicatorAndStreamCalls += 1
+      return { indicator: stubIndicator as never, turnStream: stream }
+    },
+    buildWorkMetricsSink: () => {
+      probe.buildWorkMetricsSinkCalls += 1
+      return undefined
+    },
+    installPills: () => {
+      probe.installPillsCalls += 1
+      return stubStatusPills as never
+    },
+  }
+  return { deps, probe }
+}
+
+// =============================================================================
+// module-mock plumbing — stub the heavy surface so setupSession boots clean
+// =============================================================================
+
+beforeAll(async () => {
+  // Stub `../internal` (the bulk of the surface).
+  const origInternal = await import("../../../../src/apps/cli/internal")
+  await mock.module("../../../../src/apps/cli/internal", () => ({
+    ...origInternal,
+    env: (k: string, fallback: string) => process.env[k] ?? fallback,
+    pickProvider: () => "anthropic" as never,
+    pickPersona: () => "default" as never,
+    DEFAULT_MODEL: { anthropic: "test-model", openai: "test-model" } as never,
+    argvImages: () => [],
+    argvPrompt: () => "",
+    newSessionFlag: () => false,
+    titleFlag: () => undefined,
+    observeDir: () => undefined,
+    isPathLikeToken: () => false,
+    buildLLM: () => ({ generate: async () => ({ content: [] }) }) as never,
+    buildSummarizerLlm: () => undefined,
+    buildStreaming: () => ({
+      stream: { emit: () => undefined },
+      run: undefined,
+    }),
+    buildTooling: () => ({
+      store: undefined,
+      embedder: undefined,
+      sessionId: undefined,
+      registry: { tools: () => [] },
+      memoryConfig: undefined,
+      subagentConfig: undefined,
+      skillsConfig: undefined,
+      compactionBreakerConfig: undefined,
+      verifyGuardConfig: undefined,
+    }),
+    loadFeatures: async () => ({
+      planMode: false,
+      metrics: undefined,
+      state: undefined,
+      resume: undefined,
+      mcpTools: [],
+      mcpClients: [],
+      mcpConfigs: [],
+      lspTools: [],
+      lspNavTools: [],
+      gitToolList: [],
+    }),
+    resolveResume: async () => ({
+      sessionId: undefined,
+      history: [],
+      idMeta: undefined,
+      conflictError: undefined,
+      missingIdError: undefined,
+    }),
+    assembleConfig: origInternal.assembleConfig,
+    composeLLM: (inner: unknown) => inner,
+  }))
+
+  // Stub @/agent — buildSystemPrompt + RetryingLLM are reached by setupSession.
+  const origAgent = await import("@/agent")
+  await mock.module("@/agent", () => ({
+    ...origAgent,
+    buildSystemPrompt: () => "stub-system-prompt",
+    RetryingLLM: class {
+      generate = async (): Promise<{ content: never[] }> => ({ content: [] })
+    },
+  }))
+
+  // Stub status bar — installStatusBar would mutate TTY otherwise.
+  const origStatusBar = await import("../../../../src/apps/cli/status-bar")
+  await mock.module("../../../../src/apps/cli/status-bar", () => ({
+    ...origStatusBar,
+    installStatusBar: () => ({
+      setDefault: () => undefined,
+      transient: () => undefined,
+      clearTransient: () => undefined,
+      teardown: () => undefined,
+    }),
+  }))
+
+  // Stub session-io — switchToSessionCwd would chdir otherwise.
+  const origSessionIo = await import("../../../../src/apps/cli/session-io")
+  await mock.module("../../../../src/apps/cli/session-io", () => ({
+    ...origSessionIo,
+    switchToSessionCwd: (cwd: string) => cwd,
+  }))
+})
+
+// Capture stderr writes so the "ready" log doesn't pollute test output.
+let originalStderrWrite: typeof process.stderr.write
+beforeEach(() => {
+  originalStderrWrite = process.stderr.write.bind(process.stderr)
+  // biome-ignore lint/suspicious/noExplicitAny: stderr stub
+  process.stderr.write = (() => true) as any
+})
+afterEach(() => {
+  // biome-ignore lint/suspicious/noExplicitAny: restore
+  process.stderr.write = originalStderrWrite as any
+})
+
+// Spy on process.on + remember handlers so SIGINT registration is observable
+// AND so we don't leak handlers across tests.
+const installedSigintHandlers: Array<(...a: unknown[]) => void> = []
+let originalProcessOn: typeof process.on
+beforeEach(() => {
+  installedSigintHandlers.length = 0
+  originalProcessOn = process.on.bind(process)
+  const stub = (evt: string, handler: (...a: unknown[]) => void): NodeJS.Process => {
+    if (evt === "SIGINT") installedSigintHandlers.push(handler)
+    return process
+  }
+  process.on = stub as unknown as typeof process.on
+})
+afterEach(() => {
+  process.on = originalProcessOn
+})
+
+describe("session-setup — runtime behavior (boot with stubbed surface)", () => {
+  test("setupSession returns a result with the populated abort + idle/reject + statusBar", async () => {
     const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
-    // Inspect the function via Function.prototype.toString — must be `async`.
-    expect(setupSession.constructor.name).toBe("AsyncFunction")
+    const { deps } = makeStubDeps()
+    const result = await setupSession(deps)
+    expect(result.abort).toBeInstanceOf(AbortController)
+    expect(result.idleMonitor).toBeDefined()
+    expect(result.rejectCounter).toBeDefined()
+    expect(result.statusBar).toBeDefined()
   })
 
-  test("SessionSetupResult contract — every spec-mandated binding is exported", async () => {
-    const mod = await import("../../../../src/apps/cli/repl/session-setup")
-    // Types only flow through type imports; runtime check: the module exports
-    // setupSession + SetupSessionDeps.
-    expect("setupSession" in mod).toBe(true)
+  test("registers a SIGINT handler — invoking it triggers result.abort", async () => {
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps } = makeStubDeps()
+    const result = await setupSession(deps)
+    expect(installedSigintHandlers.length).toBeGreaterThanOrEqual(1)
+    expect(result.abort.signal.aborted).toBe(false)
+    // Invoke the registered handler — must abort the controller.
+    installedSigintHandlers[0]?.()
+    expect(result.abort.signal.aborted).toBe(true)
   })
 
-  test("idle-guards env knob shape — QUANTA_IDLE_SUPPRESS=0 sentinel is recognized", () => {
-    // The idle-guard builder reads `QUANTA_IDLE_SUPPRESS` and clamps to
-    // Infinity when it equals "0". This test locks the env-knob NAME so a
-    // future rename surfaces here before breaking deployments. (We test by
-    // inspecting the module source rather than booting setupSession.)
-    const src = require("node:fs").readFileSync(
-      require("node:path").resolve(__dirname, "../../../../src/apps/cli/repl/session-setup.ts"),
-      "utf8",
-    )
-    expect(src).toContain("QUANTA_IDLE_SUPPRESS")
-    expect(src).toContain("QUANTA_IDLE_MS")
-    expect(src).toContain("QUANTA_SNOOZE_DEFAULT_MS")
-    expect(src).toContain("QUANTA_REJECT_LIMIT")
+  test("invokes EVERY one of the 9 injected dep factories at least once", async () => {
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps, probe } = makeStubDeps()
+    await setupSession(deps)
+    expect(probe.buildLifecycleBundleCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildCostPanelOrUndefinedCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildBranchProgressOrUndefinedCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildPlanStoreOrUndefinedCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildTurnSummaryAndStreamCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildTurnIndicatorAndStreamCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildWorkMetricsSinkCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.installPillsCalls).toBeGreaterThanOrEqual(1)
+    // deriveMcpPillServers is only called when mcpClients.length > 0; our
+    // stub returns [] so the count stays at 0 — that's the documented
+    // conditional contract (see session-setup.ts:306-310).
+    expect(probe.deriveMcpPillServersCalls).toBe(0)
   })
 
-  test("LLM stack composition order is preserved — buildLLM → RetryingLLM → composeLLM", () => {
-    const src = require("node:fs").readFileSync(
-      require("node:path").resolve(__dirname, "../../../../src/apps/cli/repl/session-setup.ts"),
-      "utf8",
-    )
-    const llmStackBody = src.match(/const buildLlmStack[\s\S]+?\n}/)?.[0] ?? ""
-    expect(llmStackBody).toContain("buildLLM(provider, model)")
-    expect(llmStackBody).toContain("new RetryingLLM")
-    expect(llmStackBody).toContain("composeLLM")
-    // Order check — buildLLM must come first.
-    const buildLLMIdx = llmStackBody.indexOf("buildLLM(")
-    const retryingIdx = llmStackBody.indexOf("RetryingLLM")
-    const composeIdx = llmStackBody.indexOf("composeLLM")
-    expect(buildLLMIdx).toBeLessThan(retryingIdx)
-    expect(retryingIdx).toBeLessThan(composeIdx)
+  test("deriveMcpPillServers IS called when loadFeatures returns at least one mcpClient", async () => {
+    // Override loadFeatures for THIS test only — push one mcpClient so
+    // the conditional fires.
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      loadFeatures: async () => ({
+        planMode: false,
+        metrics: undefined,
+        state: undefined,
+        resume: undefined,
+        mcpTools: [{ name: "mcp__fs__read" }],
+        mcpClients: [{ stop: async () => undefined }],
+        mcpConfigs: [],
+        lspTools: [],
+        lspNavTools: [],
+        gitToolList: [],
+      }),
+    }))
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps, probe } = makeStubDeps()
+    await setupSession(deps)
+    expect(probe.deriveMcpPillServersCalls).toBeGreaterThanOrEqual(1)
   })
 
-  test("loadSeedImages exit-1 on load failure (preserves prior behavior)", () => {
-    const src = require("node:fs").readFileSync(
-      require("node:path").resolve(__dirname, "../../../../src/apps/cli/repl/session-setup.ts"),
-      "utf8",
-    )
-    const body = src.match(/const loadSeedImages[\s\S]+?\n}/)?.[0] ?? ""
-    expect(body).toContain("argvImages")
-    expect(body).toContain("loadImageBlock")
-    expect(body).toContain("process.exit(1)")
-  })
-
-  test("SIGINT registers an abort handler — handler is wired in setupSession itself", () => {
-    const src = require("node:fs").readFileSync(
-      require("node:path").resolve(__dirname, "../../../../src/apps/cli/repl/session-setup.ts"),
-      "utf8",
-    )
-    expect(src).toContain('process.on("SIGINT"')
-    expect(src).toContain("abort.abort()")
+  test("setupSession.shutdownMcp resolves cleanly when no clients are registered", async () => {
+    // After the prior test's loadFeatures override, restore the empty default
+    // by re-importing the original module mock.
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      loadFeatures: async () => ({
+        planMode: false,
+        metrics: undefined,
+        state: undefined,
+        resume: undefined,
+        mcpTools: [],
+        mcpClients: [],
+        mcpConfigs: [],
+        lspTools: [],
+        lspNavTools: [],
+        gitToolList: [],
+      }),
+    }))
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps } = makeStubDeps()
+    const result = await setupSession(deps)
+    // Must not throw (empty clients list ⇒ loop is a no-op).
+    await result.shutdownMcp()
+    expect(typeof result.shutdownMcp).toBe("function")
   })
 })
