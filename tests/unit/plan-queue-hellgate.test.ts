@@ -51,14 +51,15 @@ const input = (
 // ─────────────────────────────────────────────────────────────
 
 describe("PlanQueueStore — A. enqueue happy", () => {
-  test("HELL-1: single enqueue returns id; peek shows 1 entry", () => {
+  test("HELL-1: single enqueue returns {id, collapsed:false}; peek shows 1 entry", () => {
     const s = fresh()
-    const id = s.enqueue(input("t1", "hello"))
-    expect(typeof id).toBe("string")
-    expect(id.length).toBeGreaterThan(0)
+    const r = s.enqueue(input("t1", "hello"))
+    expect(typeof r.id).toBe("string")
+    expect(r.id.length).toBeGreaterThan(0)
+    expect(r.collapsed).toBe(false)
     const queue = s.peek("t1")
     expect(queue).toHaveLength(1)
-    expect(queue[0]?.id).toBe(id)
+    expect(queue[0]?.id).toBe(r.id)
   })
 
   test("HELL-2: enqueue 3 → peek shows 3 in insertion order", () => {
@@ -72,9 +73,9 @@ describe("PlanQueueStore — A. enqueue happy", () => {
 
   test("HELL-3: id format `fu-<thread>-<n>` (incrementing per store)", () => {
     const s = fresh()
-    const id1 = s.enqueue(input("t1", "a"))
-    const id2 = s.enqueue(input("t1", "b"))
-    const id3 = s.enqueue(input("t2", "c"))
+    const id1 = s.enqueue(input("t1", "a")).id
+    const id2 = s.enqueue(input("t1", "b")).id
+    const id3 = s.enqueue(input("t2", "c")).id
     expect(id1).toMatch(/^fu-t1-\d+$/)
     expect(id2).toMatch(/^fu-t1-\d+$/)
     expect(id3).toMatch(/^fu-t2-\d+$/)
@@ -104,16 +105,16 @@ describe("PlanQueueStore — A. enqueue happy", () => {
 describe("PlanQueueStore — B. dedup", () => {
   test("HELL-5: same text + thread enqueued twice → second collapses; peek=1", () => {
     const s = fresh()
-    const id1 = s.enqueue(input("t1", "fix X"))
-    const id2 = s.enqueue(input("t1", "fix X"))
+    const id1 = s.enqueue(input("t1", "fix X")).id
+    const id2 = s.enqueue(input("t1", "fix X")).id
     expect(id2).toBe(id1) // returned existing id
     expect(s.peek("t1")).toHaveLength(1)
   })
 
   test("HELL-6: same text + DIFFERENT thread → both kept (per-thread dedup)", () => {
     const s = fresh()
-    const id1 = s.enqueue(input("t1", "fix X"))
-    const id2 = s.enqueue(input("t2", "fix X"))
+    const id1 = s.enqueue(input("t1", "fix X")).id
+    const id2 = s.enqueue(input("t2", "fix X")).id
     expect(id2).not.toBe(id1)
     expect(s.peek("t1")).toHaveLength(1)
     expect(s.peek("t2")).toHaveLength(1)
@@ -121,15 +122,39 @@ describe("PlanQueueStore — B. dedup", () => {
 
   test("HELL-7: same text but first already drained → second is NEW entry", () => {
     const s = fresh()
-    const id1 = s.enqueue(input("t1", "fix X"))
+    const id1 = s.enqueue(input("t1", "fix X")).id
     const drained = s.drain("t1", 5)
     expect(drained).toHaveLength(1)
     expect(drained[0]?.id).toBe(id1)
     // After drain, peek is empty; re-enqueuing the same text gets a NEW id.
     expect(s.peek("t1")).toHaveLength(0)
-    const id2 = s.enqueue(input("t1", "fix X"))
+    const id2 = s.enqueue(input("t1", "fix X")).id
     expect(id2).not.toBe(id1)
     expect(s.peek("t1")).toHaveLength(1)
+  })
+
+  // ─────────────────────────────────────────────────────────────
+  // ADR-0167 — EnqueueResult.collapsed signal
+  // ─────────────────────────────────────────────────────────────
+
+  test("HELL-NEW-1: 2 sequential enqueue same text → first collapsed:false, second collapsed:true, ids equal", () => {
+    const s = fresh()
+    const r1 = s.enqueue(input("t1", "fix X"))
+    const r2 = s.enqueue(input("t1", "fix X"))
+    expect(r1.collapsed).toBe(false)
+    expect(r2.collapsed).toBe(true)
+    expect(r2.id).toBe(r1.id)
+    // Only ONE live entry.
+    expect(s.peek("t1")).toHaveLength(1)
+  })
+
+  test("HELL-NEW-2: 2 different threads same text → both collapsed:false, distinct ids", () => {
+    const s = fresh()
+    const r1 = s.enqueue(input("t1", "fix X"))
+    const r2 = s.enqueue(input("t2", "fix X"))
+    expect(r1.collapsed).toBe(false)
+    expect(r2.collapsed).toBe(false)
+    expect(r1.id).not.toBe(r2.id)
   })
 })
 

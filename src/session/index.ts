@@ -89,6 +89,25 @@ export type {
   RewindResult,
 } from "./rewind"
 export { forkSessionAtMessage, resolveMessageIdPrefix, rewindSession } from "./rewind"
+// ADR-0157 + ADR-0170: typed import/export envelope (pure serialization port).
+export type {
+  AnySessionExportEnvelope,
+  SessionExportEnvelope,
+  SessionExportEnvelopeV2,
+  SessionExportOpts,
+  SessionImportErrorCode,
+  SessionImportOpts,
+  SessionImportResult,
+} from "./import-export"
+export {
+  exportSession,
+  exportSessionToJson,
+  importSession,
+  importSessionFromJson,
+  SessionImportError,
+} from "./import-export"
+// ADR-0157: FS adapter (Bun.file/Bun.write).
+export { exportSessionToFile, importSessionFromFile } from "./import-export-fs"
 export type { SessionRootProvider } from "./root-port"
 export { defaultSessionRootProvider, staticSessionRootProvider } from "./root-port"
 export {

@@ -1,21 +1,22 @@
 import { describe, expect, test } from "bun:test"
+import type { BudgetLedger, BudgetSnapshot, UsageEvent } from "@/agent/budget-ledger"
+import type { PlanQueueStore } from "@/agent/plan-queue"
 import { defaultMetricsRegistry } from "@/observability/metrics/index"
-import { instrumentPlanQueue } from "@/observability/metrics/instrument-plan-queue"
 import { instrumentBudgetLedger } from "@/observability/metrics/instrument-budget"
 import {
   type InstrumentableLspClient,
   instrumentLspClient,
 } from "@/observability/metrics/instrument-lsp"
+import { instrumentPlanQueue } from "@/observability/metrics/instrument-plan-queue"
 import { withFullObservability } from "@/observability/metrics/observability-helper"
-import type { PlanQueueStore } from "@/agent/plan-queue"
-import type { BudgetLedger, BudgetSnapshot, UsageEvent } from "@/agent/budget-ledger"
 
 // ────────────────────────────────────────────────────────────────────────────
 // PlanQueue
 // ────────────────────────────────────────────────────────────────────────────
 const fakeQueue = (overrides: Partial<PlanQueueStore> = {}): PlanQueueStore =>
   ({
-    enqueue: () => "fu-1",
+    // ADR-0167: enqueue returns {id, collapsed} (not a bare string).
+    enqueue: () => ({ id: "fu-1", collapsed: false }),
     drain: () => [],
     peek: () => [],
     clear: () => 0,
@@ -71,6 +72,55 @@ describe("instrumentPlanQueue", () => {
     q.inspect()
     expect(m.snapshot().filter((s) => s.name === "plan_queue.clear.total").length).toBe(1)
     expect(m.snapshot().filter((s) => s.name.startsWith("plan_queue.peek")).length).toBe(0)
+  })
+
+  // ─────────────────────────────────────────────────────────────
+  // ADR-0167 — enqueue collapse counter
+  // ─────────────────────────────────────────────────────────────
+
+  test("HELL-PQ-NEW-1: collapsed:true → plan_queue.enqueue.collapsed.total increments", () => {
+    const m = defaultMetricsRegistry()
+    const q = instrumentPlanQueue(
+      fakeQueue({ enqueue: () => ({ id: "fu-existing", collapsed: true }) }),
+      m,
+    )
+    q.enqueue({
+      threadId: "t1",
+      text: "dup",
+      source: "user_keystroke",
+      pausedReason: "tool_in_flight",
+      arrivedDuringTurn: 1,
+      urgent: false,
+      metadata: {},
+    } as never)
+    // The collapsed counter fires; the attempt counter also fires.
+    const all = m.snapshot()
+    const collapsedSeries = all.filter((s) => s.name === "plan_queue.enqueue.collapsed.total")
+    expect(collapsedSeries.length).toBeGreaterThan(0)
+    const attemptSeries = all.filter((s) => s.name === "plan_queue.enqueue.total")
+    expect(attemptSeries.length).toBeGreaterThan(0)
+  })
+
+  test("HELL-PQ-NEW-2: collapsed:false → only enqueue.total (no collapsed counter)", () => {
+    const m = defaultMetricsRegistry()
+    const q = instrumentPlanQueue(
+      fakeQueue({ enqueue: () => ({ id: "fu-new", collapsed: false }) }),
+      m,
+    )
+    q.enqueue({
+      threadId: "t1",
+      text: "fresh",
+      source: "user_keystroke",
+      pausedReason: "tool_in_flight",
+      arrivedDuringTurn: 1,
+      urgent: false,
+      metadata: {},
+    } as never)
+    const all = m.snapshot()
+    const collapsedSeries = all.filter((s) => s.name === "plan_queue.enqueue.collapsed.total")
+    expect(collapsedSeries.length).toBe(0)
+    const attemptSeries = all.filter((s) => s.name === "plan_queue.enqueue.total")
+    expect(attemptSeries.length).toBeGreaterThan(0)
   })
 })
 
@@ -210,7 +260,9 @@ describe("instrumentLspClient", () => {
       caught = true
     }
     expect(caught).toBe(true)
-    const c1 = m.snapshot().find((s) => s.name === "lsp.request.total" && s.labels.method === "code_action")
+    const c1 = m
+      .snapshot()
+      .find((s) => s.name === "lsp.request.total" && s.labels.method === "code_action")
     expect(c1?.labels.ok).toBe("false")
   })
 

@@ -77,7 +77,7 @@ describe("HELL-2: PlanQueueStore — same text on 2 thread ids → both kept (pe
       arrivedDuringTurn: 0,
       urgent: false,
       metadata: {},
-    })
+    }).id
     const id2 = store.enqueue({
       threadId: "t2",
       text: "identical",
@@ -86,7 +86,7 @@ describe("HELL-2: PlanQueueStore — same text on 2 thread ids → both kept (pe
       arrivedDuringTurn: 0,
       urgent: false,
       metadata: {},
-    })
+    }).id
     expect(id1).not.toBe(id2)
     expect(store.peek("t1").length).toBe(1)
     expect(store.peek("t2").length).toBe(1)

@@ -314,9 +314,9 @@ describe("HELL-7: conversation-checkpoint.record is SYNCHRONOUS — abort cannot
 /* ================================================================== */
 
 describe("HELL-8: plan-queue.enqueue is SYNCHRONOUS — abort cannot interleave", () => {
-  test("documents N/A: enqueue() returns string id synchronously", () => {
+  test("documents N/A: enqueue() returns {id, collapsed} synchronously", () => {
     const store = defaultPlanQueueStore()
-    const id = store.enqueue({
+    const r = store.enqueue({
       threadId: "t1",
       text: "x",
       source: "user_keystroke",
@@ -325,8 +325,9 @@ describe("HELL-8: plan-queue.enqueue is SYNCHRONOUS — abort cannot interleave"
       urgent: false,
       metadata: {},
     })
-    // enqueue returns a string id (not Promise<string>).
-    expect(typeof id).toBe("string")
-    expect(id).toMatch(/^fu-/)
+    // enqueue returns {id, collapsed} synchronously (not Promise<...>).
+    expect(typeof r.id).toBe("string")
+    expect(r.id).toMatch(/^fu-/)
+    expect(r.collapsed).toBe(false)
   })
 })

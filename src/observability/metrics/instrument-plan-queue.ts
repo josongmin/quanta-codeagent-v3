@@ -1,10 +1,16 @@
 /**
- * PlanQueueStore instrumentation (ADR-0161).
+ * PlanQueueStore instrumentation (ADR-0161 + ADR-0167).
  *
  * Counters:
- *   plan_queue.enqueue.total      labels: source, pausedReason, urgent
- *   plan_queue.drain.total        labels: drained_count_bucket ("0"|"1"|"2-5"|"6+")
+ *   plan_queue.enqueue.total            labels: source, pausedReason, urgent
+ *   plan_queue.enqueue.collapsed.total  (no labels — keep cardinality low)
+ *   plan_queue.drain.total              labels: drained_count_bucket ("0"|"1"|"2-5"|"6+")
  *   plan_queue.clear.total
+ *
+ * ADR-0167: `enqueue.total` fires for every enqueue ATTEMPT (collapsed or
+ * not — it measures attempts, not commits). `enqueue.collapsed.total`
+ * fires only when the call collapsed into an existing live entry. The
+ * collapse rate is therefore `collapsed.total / enqueue.total`.
  *
  * No-throw wrap; slice never imports `@/observability`.
  */
@@ -12,7 +18,7 @@
 import type { FollowUp, PlanQueueStore } from "@/agent/plan-queue"
 import type { MetricsRegistry } from "./port"
 
-const safe = (m: MetricsRegistry, fn: () => void): void => {
+const safe = (_m: MetricsRegistry, fn: () => void): void => {
   try {
     fn()
   } catch {
@@ -43,7 +49,11 @@ export const instrumentPlanQueue = (
           urgent: String(input.urgent),
         }),
       )
-      return store.enqueue(input)
+      const result = store.enqueue(input)
+      if (result.collapsed) {
+        safe(metrics, () => metrics.increment(`${prefix}.enqueue.collapsed.total`))
+      }
+      return result
     },
     drain(threadId, currentTurn): ReadonlyArray<FollowUp> {
       const r = store.drain(threadId, currentTurn)

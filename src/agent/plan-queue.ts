@@ -21,8 +21,8 @@
  * Contract (6):
  *   1. PURE STORE: in-memory only; no I/O, no SQLite. Persistence is follow-up.
  *   2. NO-THROW on the public surface (every method swallows internal errors
- *      and falls back to a safe value — `enqueue` always returns a string,
- *      `drain`/`peek` always return arrays).
+ *      and falls back to a safe value — `enqueue` always returns an
+ *      `EnqueueResult`, `drain`/`peek` always return arrays).
  *   3. exactOptionalPropertyTypes: optional input fields (`label`) are
  *      OMITTED on the stored entry when omitted by the caller — never
  *      `label: undefined`.
@@ -95,13 +95,27 @@ export interface FollowUp {
   readonly label?: string
 }
 
+/** Result of `PlanQueueStore.enqueue`. ADR-0167 — expanded from bare `string`
+ *  so observability wrap can emit a collapse counter (caller could not see
+ *  dedup collapses when only the id was returned). */
+export interface EnqueueResult {
+  /** Assigned id (existing entry's id when collapsed). */
+  readonly id: string
+  /** True when this enqueue collapsed into an existing live entry
+   *  (same threadId + same textHash, both with drainedIntoTurn===null).
+   *  When true, `id` is the existing entry's id. */
+  readonly collapsed: boolean
+}
+
 /** In-memory plan-queue. 5 methods + 1 inspector. */
 export interface PlanQueueStore {
-  /** Enqueue a follow-up. Returns the assigned id. Dedup: identical
+  /** Enqueue a follow-up. Returns `{id, collapsed}`. Dedup: identical
    *  `(threadId, textHash)` within the same paused window collapses
    *  (existing entry's `urgent` is OR-ed in; no second entry created and
-   *  the EXISTING id is returned). */
-  enqueue(input: Omit<FollowUp, "id" | "enqueuedAtMs" | "textHash" | "drainedIntoTurn">): string
+   *  the EXISTING id is returned with `collapsed:true`). */
+  enqueue(
+    input: Omit<FollowUp, "id" | "enqueuedAtMs" | "textHash" | "drainedIntoTurn">,
+  ): EnqueueResult
   /** Drain everything queued for `threadId`, in enqueued order (urgent
    *  first if multiple share the same enqueuedAtMs). Marks each as
    *  `drainedIntoTurn = currentTurn`. Returns the drained list. */
@@ -257,7 +271,7 @@ export const defaultPlanQueueStore = (opts?: PlanQueueStoreOpts): PlanQueueStore
         // OR-in urgent — caller's later "this is actually urgent" should
         // upgrade the existing entry, never downgrade.
         if (input.urgent) existing.urgent = true
-        return existing.id
+        return { id: existing.id, collapsed: true }
       }
 
       counter += 1
@@ -280,7 +294,7 @@ export const defaultPlanQueueStore = (opts?: PlanQueueStoreOpts): PlanQueueStore
       const withLabel: Entry = input.label !== undefined ? { ...entry, label: input.label } : entry
       queue.push(withLabel)
       evictIfOver(queue)
-      return id
+      return { id, collapsed: false }
     },
 
     drain(threadId, currentTurn) {

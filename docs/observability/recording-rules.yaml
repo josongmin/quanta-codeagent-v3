@@ -1,0 +1,181 @@
+# quanta Prometheus recording rules (ADR-0168).
+# Pre-computes the burn-rate fractions used by `docs/observability/alerts-burnrate.yaml`
+# (ADR-0166) and by Grafana panels (grafana-quanta.json) so the alert PromQL is
+# constant-time at evaluation and the same expression is reusable in dashboards
+# without re-typing the rate math.
+#
+# Naming follows the SRE workbook recommendation `level:metric:operation` —
+# here `slo:<sli>:<aggregate>_<window>`.
+#
+# Coverage mirrors alerts-burnrate.yaml (6 SLIs):
+#   1. llm_stream        — 99.0% SLO  → 1%    budget
+#   2. lsp_request       — 99.0% SLO  → 1%    budget
+#   3. tool_call         — 99.0% SLO  → 1%    budget (kept per-tool via by(tool))
+#   4. shadow_checkpoint — 99.99% SLO → 0.01% budget
+#   5. sandbox_spawn     — 99.5% SLO  → 0.5%  budget
+#   6. subagent_fork     — 99.9% SLO  → 0.1%  budget
+#
+# Totals:
+#   - error_rate group: 6 SLIs × 4 windows (5m / 30m / 1h / 6h) = 24 rules
+#   - burn_rate  group: 6 SLIs × 2 windows (1h / 6h)             = 12 rules
+#   - grand total: 36 recording rules.
+
+groups:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. Error-rate (failures / total) per SLI per window
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: quanta.slo.error_rate
+    interval: 30s
+    rules:
+      # ── 1. LLM stream ─────────────────────────────────────────────────────
+      - record: slo:llm_stream:error_rate_5m
+        expr: |
+          sum(rate(llm_provider_stream_failures_total[5m]))
+          / sum(rate(llm_provider_stream_total[5m]))
+      - record: slo:llm_stream:error_rate_30m
+        expr: |
+          sum(rate(llm_provider_stream_failures_total[30m]))
+          / sum(rate(llm_provider_stream_total[30m]))
+      - record: slo:llm_stream:error_rate_1h
+        expr: |
+          sum(rate(llm_provider_stream_failures_total[1h]))
+          / sum(rate(llm_provider_stream_total[1h]))
+      - record: slo:llm_stream:error_rate_6h
+        expr: |
+          sum(rate(llm_provider_stream_failures_total[6h]))
+          / sum(rate(llm_provider_stream_total[6h]))
+
+      # ── 2. LSP request ────────────────────────────────────────────────────
+      - record: slo:lsp_request:error_rate_5m
+        expr: |
+          sum(rate(lsp_request_failures_total[5m]))
+          / sum(rate(lsp_request_total[5m]))
+      - record: slo:lsp_request:error_rate_30m
+        expr: |
+          sum(rate(lsp_request_failures_total[30m]))
+          / sum(rate(lsp_request_total[30m]))
+      - record: slo:lsp_request:error_rate_1h
+        expr: |
+          sum(rate(lsp_request_failures_total[1h]))
+          / sum(rate(lsp_request_total[1h]))
+      - record: slo:lsp_request:error_rate_6h
+        expr: |
+          sum(rate(lsp_request_failures_total[6h]))
+          / sum(rate(lsp_request_total[6h]))
+
+      # ── 3. Tool call (per-tool — preserves `by(tool)` dimension) ──────────
+      - record: slo:tool_call:error_rate_5m
+        expr: |
+          sum by(tool)(rate(tool_call_total{ok="false"}[5m]))
+          / sum by(tool)(rate(tool_call_total[5m]))
+      - record: slo:tool_call:error_rate_30m
+        expr: |
+          sum by(tool)(rate(tool_call_total{ok="false"}[30m]))
+          / sum by(tool)(rate(tool_call_total[30m]))
+      - record: slo:tool_call:error_rate_1h
+        expr: |
+          sum by(tool)(rate(tool_call_total{ok="false"}[1h]))
+          / sum by(tool)(rate(tool_call_total[1h]))
+      - record: slo:tool_call:error_rate_6h
+        expr: |
+          sum by(tool)(rate(tool_call_total{ok="false"}[6h]))
+          / sum by(tool)(rate(tool_call_total[6h]))
+
+      # ── 4. Shadow ODB checkpoint ──────────────────────────────────────────
+      - record: slo:shadow_checkpoint:error_rate_5m
+        expr: |
+          sum(rate(shadow_checkpoint_failures_total[5m]))
+          / sum(rate(shadow_checkpoint_total[5m]))
+      - record: slo:shadow_checkpoint:error_rate_30m
+        expr: |
+          sum(rate(shadow_checkpoint_failures_total[30m]))
+          / sum(rate(shadow_checkpoint_total[30m]))
+      - record: slo:shadow_checkpoint:error_rate_1h
+        expr: |
+          sum(rate(shadow_checkpoint_failures_total[1h]))
+          / sum(rate(shadow_checkpoint_total[1h]))
+      - record: slo:shadow_checkpoint:error_rate_6h
+        expr: |
+          sum(rate(shadow_checkpoint_failures_total[6h]))
+          / sum(rate(shadow_checkpoint_total[6h]))
+
+      # ── 5. Sandbox spawn (degrade rate — degraded / total) ────────────────
+      - record: slo:sandbox_spawn:error_rate_5m
+        expr: |
+          sum(rate(sandbox_spawn_degraded_total[5m]))
+          / sum(rate(sandbox_spawn_total[5m]))
+      - record: slo:sandbox_spawn:error_rate_30m
+        expr: |
+          sum(rate(sandbox_spawn_degraded_total[30m]))
+          / sum(rate(sandbox_spawn_total[30m]))
+      - record: slo:sandbox_spawn:error_rate_1h
+        expr: |
+          sum(rate(sandbox_spawn_degraded_total[1h]))
+          / sum(rate(sandbox_spawn_total[1h]))
+      - record: slo:sandbox_spawn:error_rate_6h
+        expr: |
+          sum(rate(sandbox_spawn_degraded_total[6h]))
+          / sum(rate(sandbox_spawn_total[6h]))
+
+      # ── 6. Subagent fork ──────────────────────────────────────────────────
+      - record: slo:subagent_fork:error_rate_5m
+        expr: |
+          sum(rate(subagent_fork_failures_total[5m]))
+          / sum(rate(subagent_fork_total[5m]))
+      - record: slo:subagent_fork:error_rate_30m
+        expr: |
+          sum(rate(subagent_fork_failures_total[30m]))
+          / sum(rate(subagent_fork_total[30m]))
+      - record: slo:subagent_fork:error_rate_1h
+        expr: |
+          sum(rate(subagent_fork_failures_total[1h]))
+          / sum(rate(subagent_fork_total[1h]))
+      - record: slo:subagent_fork:error_rate_6h
+        expr: |
+          sum(rate(subagent_fork_failures_total[6h]))
+          / sum(rate(subagent_fork_total[6h]))
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. Burn-rate (error_rate / budget) — for direct Grafana plotting
+  #
+  # burn_rate = error_rate / (1 - SLO). Fast-burn alert threshold is 14.4×
+  # the budget (i.e. burn_rate > 14.4); slow-burn is 6×.
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: quanta.slo.burn_rate
+    interval: 30s
+    rules:
+      # ── 1. LLM stream (1% budget) ─────────────────────────────────────────
+      - record: slo:llm_stream:burn_rate_1h
+        expr: slo:llm_stream:error_rate_1h / 0.01
+      - record: slo:llm_stream:burn_rate_6h
+        expr: slo:llm_stream:error_rate_6h / 0.01
+
+      # ── 2. LSP request (1% budget) ────────────────────────────────────────
+      - record: slo:lsp_request:burn_rate_1h
+        expr: slo:lsp_request:error_rate_1h / 0.01
+      - record: slo:lsp_request:burn_rate_6h
+        expr: slo:lsp_request:error_rate_6h / 0.01
+
+      # ── 3. Tool call (1% budget, retains by(tool) ) ───────────────────────
+      - record: slo:tool_call:burn_rate_1h
+        expr: slo:tool_call:error_rate_1h / 0.01
+      - record: slo:tool_call:burn_rate_6h
+        expr: slo:tool_call:error_rate_6h / 0.01
+
+      # ── 4. Shadow ODB checkpoint (0.01% budget) ───────────────────────────
+      - record: slo:shadow_checkpoint:burn_rate_1h
+        expr: slo:shadow_checkpoint:error_rate_1h / 0.0001
+      - record: slo:shadow_checkpoint:burn_rate_6h
+        expr: slo:shadow_checkpoint:error_rate_6h / 0.0001
+
+      # ── 5. Sandbox spawn (0.5% budget) ────────────────────────────────────
+      - record: slo:sandbox_spawn:burn_rate_1h
+        expr: slo:sandbox_spawn:error_rate_1h / 0.005
+      - record: slo:sandbox_spawn:burn_rate_6h
+        expr: slo:sandbox_spawn:error_rate_6h / 0.005
+
+      # ── 6. Subagent fork (0.1% budget) ────────────────────────────────────
+      - record: slo:subagent_fork:burn_rate_1h
+        expr: slo:subagent_fork:error_rate_1h / 0.001
+      - record: slo:subagent_fork:burn_rate_6h
+        expr: slo:subagent_fork:error_rate_6h / 0.001

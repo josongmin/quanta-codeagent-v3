@@ -108,11 +108,14 @@ describe("session-import-export / A. round-trip purity", () => {
 // B. VALIDATION (5)
 // ────────────────────────────────────────────────────────────────────────────
 describe("session-import-export / B. validation", () => {
-  test("HELL-5: version !== 1 throws unsupported-version", () => {
+  test("HELL-5: unknown version throws unsupported-version", () => {
+    // ADR-0170: v1 and v2 are now both supported. Use version=99 to sentinel
+    // an envelope from a hypothetical future build the current importer
+    // cannot understand.
     const env = {
       ...exportSession(savedSessionOf(), exportOpts()),
-      version: 2 as 1,
-    }
+      version: 99,
+    } as unknown as SessionExportEnvelope
     try {
       importSession(env, importOpts())
       expect.unreachable("should have thrown")

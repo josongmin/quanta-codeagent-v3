@@ -191,11 +191,11 @@ describe("B. PlanQueueStore concurrent stress", () => {
 
   test("B8: dedup race — 20 concurrent enqueue same (threadId, textHash) → exactly 1 survives", async () => {
     const store = defaultPlanQueueStore({ maxPerThread: 100 })
-    const ids = await parallel(20, () =>
+    const results = await parallel(20, () =>
       store.enqueue(enqueueInput({ threadId: "t-dedup", text: "identical" })),
     )
     // All 20 ids are the SAME (dedup OR-in returned the EXISTING id).
-    const unique = new Set(ids)
+    const unique = new Set(results.map((r) => r.id))
     expect(unique.size).toBe(1)
     expect(store.peek("t-dedup").length).toBe(1)
   })

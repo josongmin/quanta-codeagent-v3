@@ -37,6 +37,7 @@
  * + store + policy.
  */
 
+import type { Message } from "@/llm"
 import type {
   BackgroundSubagentScheduler,
   SubagentHandleId,
@@ -48,6 +49,7 @@ import type {
   PersistentSchedulerStore,
 } from "../subagent-persistence-store"
 import type { ResumeDecision, ResumePolicy } from "./policy"
+import { buildReplaySpec, type ReplayContext, type ReplayPolicy } from "./replay"
 
 /** Per-handle outcome of one resume sweep. One entry per `"interrupted"`
  *  handle in store order. */
@@ -62,6 +64,19 @@ export interface ResumeOutcome {
   /** Set when applying the decision threw — orchestrator swallowed the
    *  throw and recorded the message; iteration continued. */
   readonly errorMessage?: string
+  /** OPTIONAL (ADR-0166) — `seedMessages` returned by the conversation-replay
+   *  composer for this handle. PRESENT when the caller wired `opts.replay`
+   *  AND `buildReplaySpec` returned a non-empty seed. The orchestrator does
+   *  NOT pass these into the SubagentSpec (port-stable — ADR-0145 surface
+   *  unchanged); they are surfaced HERE so a downstream consumer (e.g. a
+   *  runner that supports conversation-seed init) can pick them up. ABSENT
+   *  on skip-replay. */
+  readonly seedMessages?: ReadonlyArray<Message>
+  /** OPTIONAL — full audit metadata block from `buildReplaySpec`. PRESENT
+   *  whenever `opts.replay` was wired (even on skip-replay, so the audit
+   *  trail records the skip reason). ABSENT when `opts.replay` was not
+   *  wired (= Phase 2 byte-identical path). */
+  readonly replayMetadata?: Readonly<Record<string, string>>
 }
 
 export interface ResumerOpts {
@@ -81,15 +96,35 @@ export interface ResumerOpts {
   readonly workspace: string
   /** Injected clock. Default `Date.now`. */
   readonly now?: () => number
+  /** OPTIONAL (ADR-0166 Phase 2.5) — conversation-seed replay wiring. When
+   *  ABSENT, the orchestrator is BYTE-IDENTICAL to ADR-0159 Phase 2 (fresh
+   *  fork, no replay metadata in outcome). When PRESENT, every `"resume"`
+   *  decision additionally invokes `buildReplaySpec(handle, context, policy)`,
+   *  merges `replayMetadata` into the new spec's `metadata`, and surfaces
+   *  `seedMessages` + `replayMetadata` on the outcome. NO-THROW — the replay
+   *  composer is itself NO-THROW (every failure resolves to "skip-replay"). */
+  readonly replay?: {
+    /** Snapshot store + cap — passed verbatim to `buildReplaySpec`. */
+    readonly context: ReplayContext
+    /** Policy — passed verbatim. The 3 stock policies live in `./replay`. */
+    readonly policy: ReplayPolicy
+  }
 }
 
 /** Build the `SubagentSpec` for the resumed fork. Preserves every spec field
  *  from the old handle AND merges `resumedFrom: oldId` into `metadata`. The
  *  old `metadata` (when present) wins on every key EXCEPT `resumedFrom` — we
- *  always overwrite that with the fresh chain link. */
-const buildResumedSpec = (old: PersistedHandle): SubagentSpec => {
+ *  always overwrite that with the fresh chain link. When `replayMetadata` is
+ *  supplied (ADR-0166), it is ALSO merged (replayPolicy/replayCount/etc.).
+ *  Merge order: old.metadata < replayMetadata < {resumedFrom} — the chain
+ *  link wins, then replay-audit fields, then caller's pre-existing keys. */
+const buildResumedSpec = (
+  old: PersistedHandle,
+  replayMetadata?: Readonly<Record<string, string>>,
+): SubagentSpec => {
   const mergedMetadata: Readonly<Record<string, string>> = {
     ...(old.spec.metadata ?? {}),
+    ...(replayMetadata ?? {}),
     resumedFrom: old.id,
   }
   return {
@@ -145,29 +180,66 @@ const markFailed = (old: PersistedHandle, reason: string, tNow: number): Persist
 /** Extract a stable error message from a caught `unknown` throwable. */
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-/** Apply the `"resume"` branch — fork in the scheduler + flip OLD to
- *  `"resumed"` in the store. Fork-throw → outcome.errorMessage with NO
- *  newId. Save-throw → outcome.errorMessage WITH newId so caller can still
- *  correlate to the live scheduler. */
+/** Apply the `"resume"` branch — optionally consult the replay composer, then
+ *  fork in the scheduler + flip OLD to `"resumed"` in the store.
+ *
+ *  Replay-NO-THROW: `buildReplaySpec` is itself NO-THROW (collapses every
+ *  failure to `"skip-replay"` + audit reason). On skip-replay we omit
+ *  `seedMessages` from the outcome (empty arrays are NOT surfaced) but ALWAYS
+ *  surface `replayMetadata` when `opts.replay` was wired so the audit trail
+ *  records the skip reason. Fork-throw → outcome.errorMessage with NO newId.
+ *  Save-throw → outcome.errorMessage WITH newId so caller can still correlate
+ *  to the live scheduler. */
 const applyResume = async (
   handle: PersistedHandle,
   decision: ResumeDecision,
   scheduler: BackgroundSubagentScheduler,
   store: PersistentSchedulerStore,
   tNow: number,
+  replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },
 ): Promise<ResumeOutcome> => {
+  // 1) OPTIONAL replay seed — NO-THROW composer.
+  let seedMessages: ReadonlyArray<Message> = []
+  let replayMetadata: Readonly<Record<string, string>> | undefined
+  if (replay !== undefined) {
+    const replayed = await buildReplaySpec(handle, replay.context, replay.policy)
+    seedMessages = replayed.seedMessages
+    replayMetadata = replayed.replayMetadata
+  }
+
+  // 2) Build the resumed spec — replayMetadata is merged into spec.metadata
+  //    only when it is present (Phase 2 byte-identical when replay is absent).
   let newId: SubagentHandleId
   try {
-    newId = scheduler.fork(buildResumedSpec(handle))
+    newId = scheduler.fork(buildResumedSpec(handle, replayMetadata))
   } catch (e) {
-    return { id: handle.id, decision, errorMessage: `scheduler.fork: ${errMsg(e)}` }
+    return {
+      id: handle.id,
+      decision,
+      errorMessage: `scheduler.fork: ${errMsg(e)}`,
+      ...(seedMessages.length > 0 ? { seedMessages } : {}),
+      ...(replayMetadata !== undefined ? { replayMetadata } : {}),
+    }
   }
   try {
     await store.save(markResumed(handle, newId, tNow))
   } catch (e) {
-    return { id: handle.id, decision, newId, errorMessage: `store.save: ${errMsg(e)}` }
+    return {
+      id: handle.id,
+      decision,
+      newId,
+      errorMessage: `store.save: ${errMsg(e)}`,
+      ...(seedMessages.length > 0 ? { seedMessages } : {}),
+      ...(replayMetadata !== undefined ? { replayMetadata } : {}),
+    }
   }
-  return { id: handle.id, decision, newId }
+  return {
+    id: handle.id,
+    decision,
+    newId,
+    ...(seedMessages.length > 0 ? { seedMessages } : {}),
+    ...(replayMetadata !== undefined ? { replayMetadata } : {}),
+  }
 }
 
 /** Apply the `"mark-failed"` branch — write a terminal `"failed"` snapshot
@@ -195,10 +267,11 @@ const applyDecision = (
   scheduler: BackgroundSubagentScheduler,
   store: PersistentSchedulerStore,
   tNow: number,
+  replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },
 ): Promise<ResumeOutcome> => {
   switch (decision.action) {
     case "resume":
-      return applyResume(handle, decision, scheduler, store, tNow)
+      return applyResume(handle, decision, scheduler, store, tNow, replay)
     case "mark-failed":
       return applyMarkFailed(handle, decision, store, tNow)
     case "skip":
@@ -215,6 +288,7 @@ export const resumeInterruptedHandles = async (
 ): Promise<ReadonlyArray<ResumeOutcome>> => {
   const { scheduler, store, policy, workspace } = opts
   const now = opts.now ?? Date.now
+  const replay = opts.replay
 
   // `store.list` failure bubbles — it indicates the persistence layer itself
   // is unreachable; the caller decides whether to retry / surface to user.
@@ -238,7 +312,7 @@ export const resumeInterruptedHandles = async (
       })
       continue
     }
-    outcomes.push(await applyDecision(handle, decision, scheduler, store, now()))
+    outcomes.push(await applyDecision(handle, decision, scheduler, store, now(), replay))
   }
   return outcomes
 }

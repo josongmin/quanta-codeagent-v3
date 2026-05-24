@@ -1,0 +1,136 @@
+{
+  "timestamp": "2026-05-24T16:13:44.977Z",
+  "model": "gpt-5-mini",
+  "provider": "openai",
+  "n": 1,
+  "totals": {
+    "total": 9,
+    "resolved": 0,
+    "resolvedPct": 0
+  },
+  "failureBreakdown": {
+    "byTermination": {
+      "harness_error": 10
+    },
+    "bySignal": {
+      "multi_file_drift": 1,
+      "empty_patch": 1
+    }
+  },
+  "perInstance": [
+    {
+      "id": "psf__requests-5414",
+      "passed": false,
+      "turns": 17,
+      "patchBytes": 739,
+      "error": "observation failed (strict): ENOENT: no such file or directory, open '/Users/songmin/quanta-codeagent-v3/runs/picks10-baseline-mini/trial-2/run-1779637140961/psf__requests-5414.0.patch'",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "pallets__flask-5014",
+      "passed": false,
+      "turns": 30,
+      "patchBytes": 436,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-pallets__flask-5014-FDPXFc/predictions.jsonl --run_id quanta-pallets__flask-5014-1779637432398 --instance_ids pallets__flask-5014 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): raceback (most rece",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "sympy__sympy-13480",
+      "passed": false,
+      "turns": 25,
+      "patchBytes": 6657,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-sympy__sympy-13480-26bzB8/predictions.jsonl --run_id quanta-sympy__sympy-13480-1779637660175 --instance_ids sympy__sympy-13480 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): raceback (most recent ",
+      "failure": {
+        "termination": "harness_error",
+        "signals": [
+          "multi_file_drift"
+        ]
+      }
+    },
+    {
+      "id": "pylint-dev__pylint-4970",
+      "passed": false,
+      "turns": 20,
+      "patchBytes": 2124,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-pylint-dev__pylint-4970-ltaWac/predictions.jsonl --run_id quanta-pylint-dev__pylint-4970-1779637895044 --instance_ids pylint-dev__pylint-4970 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): racebac",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-7982",
+      "passed": false,
+      "turns": 16,
+      "patchBytes": 475,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-pytest-dev__pytest-7982-yT675Q/predictions.jsonl --run_id quanta-pytest-dev__pytest-7982-1779638111659 --instance_ids pytest-dev__pytest-7982 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): racebac",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": false,
+      "turns": 14,
+      "patchBytes": 464,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-sympy__sympy-16886-0HyLV2/predictions.jsonl --run_id quanta-sympy__sympy-16886-1779638343999 --instance_ids sympy__sympy-16886 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): raceback (most recent ",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "sphinx-doc__sphinx-8595",
+      "passed": false,
+      "turns": 12,
+      "patchBytes": 1086,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-sphinx-doc__sphinx-8595-1pWiox/predictions.jsonl --run_id quanta-sphinx-doc__sphinx-8595-1779638563525 --instance_ids sphinx-doc__sphinx-8595 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): racebac",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "pylint-dev__pylint-8898",
+      "passed": false,
+      "turns": 14,
+      "patchBytes": 0,
+      "error": "empty prediction for pylint-dev__pylint-8898",
+      "failure": {
+        "termination": "harness_error",
+        "signals": [
+          "empty_patch"
+        ]
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-5787",
+      "passed": false,
+      "turns": 13,
+      "patchBytes": 471,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-pytest-dev__pytest-5787-5Z9Jzg/predictions.jsonl --run_id quanta-pytest-dev__pytest-5787-1779638925028 --instance_ids pytest-dev__pytest-5787 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): racebac",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    },
+    {
+      "id": "sympy__sympy-12489",
+      "passed": false,
+      "turns": 14,
+      "patchBytes": 604,
+      "error": "cmd: /Users/songmin/quanta-codeagent-v3/tools/bin/swebench-python -m swebench.harness.run_evaluation --predictions_path /Users/songmin/Library/quanta-codeagent-v3/bench/work/pyswe-sympy__sympy-12489-5Ym1Us/predictions.jsonl --run_id quanta-sympy__sympy-12489-1779639157881 --instance_ids sympy__sympy-12489 --max_workers 1 --cache_level env --clean False --namespace swebench --dataset_name princeton-nlp/SWE-bench_Verified\nexit: 1\nresolved_ids: []\nstdout(tail): \nstderr(tail): raceback (most recent ",
+      "failure": {
+        "termination": "harness_error",
+        "signals": []
+      }
+    }
+  ]
+}

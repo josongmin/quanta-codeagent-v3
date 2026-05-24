@@ -17,6 +17,17 @@ export {
   type ResumePolicy,
 } from "./policy"
 export {
+  alwaysReplayPolicy,
+  buildReplaySpec,
+  type DefaultReplayPolicyOpts,
+  defaultReplayPolicy,
+  type ReplayContext,
+  type ReplayDecision,
+  type ReplayedSpec,
+  type ReplayPolicy,
+  skipReplayPolicy,
+} from "./replay"
+export {
   type ResumeOutcome,
   type ResumerOpts,
   resumeInterruptedHandles,

@@ -24,8 +24,10 @@ import type { SubagentStatus as BaseSubagentStatus, SubagentSpec } from "../suba
  *  failed, cancelled). Persistence adds **"interrupted"** for handles whose
  *  host process died mid-run — detected on hydration when the persisted
  *  `hostPid` is not alive AND the persisted status was still `"running"`.
- *  Phase 2 may upgrade interrupted → resumed; Phase 1 is read-only honest. */
-export type PersistedSubagentStatus = BaseSubagentStatus | "interrupted"
+ *  Phase 2 (ADR-0159) upgrades interrupted → **"resumed"** when the orchestrator
+ *  re-forks; `outputSummary = "resumed as <newId>"` lets list-readers chain
+ *  forward mechanically (no prose parsing). */
+export type PersistedSubagentStatus = BaseSubagentStatus | "interrupted" | "resumed"
 
 /** What we write to disk for one handle. Mirrors the in-memory snapshot shape
  *  plus serializable persistence-only fields (`hostPid`, `workspace`). With
@@ -58,6 +60,14 @@ export interface PersistedHandle {
   /** Workspace fingerprint at fork time. Helps cross-workspace audit + lets
    *  `list(workspace)` filter by source. ABSENT when caller did not provide. */
   readonly workspace?: string
+  /** OPTIONAL conversation-snapshot id (ADR-0166 Phase 2.5 — conversation-seed
+   *  replay). When set, identifies a {@link ConversationCheckpointStore}
+   *  (ADR-0124) entry recorded just before the host died. The resume
+   *  orchestrator's `buildReplaySpec` consults it to inject `seedMessages` into
+   *  the re-forked spec. ABSENT ⇒ byte-identical to ADR-0159 Phase 2 (fresh
+   *  fork from `spec.task` only). Caller writes it at fork time / turn
+   *  boundary; persistence layer just preserves the string. */
+  readonly conversationSnapshotId?: string
 }
 
 /** Closed port: an external store satisfies this so the hydrating wrapper can

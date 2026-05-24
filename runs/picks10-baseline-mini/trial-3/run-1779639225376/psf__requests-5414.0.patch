@@ -1,0 +1,16 @@
+diff --git a/requests/utils.py b/requests/utils.py
+index 8b2a5f14..3012d1de 100644
+--- a/requests/utils.py
++++ b/requests/utils.py
+@@ -788,6 +788,11 @@ def should_bypass_proxies(url, no_proxy):
+             bypass = proxy_bypass(parsed.hostname)
+         except (TypeError, socket.gaierror):
+             bypass = False
++        except UnicodeError:
++            # Convert IDNA/encoding errors into requests' InvalidURL for
++            # a consistent exception type rather than leaking UnicodeError
++            # (see issue reported for URLs like "http://.example.com").
++            raise InvalidURL('URL has an invalid label.')
+ 
+     if bypass:
+         return True
