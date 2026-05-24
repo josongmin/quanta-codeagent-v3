@@ -112,6 +112,8 @@ Cursor의 finding: 첫 compaction은 warm-up과 다르게 처리. 우리 compact
 4. **abort propagation**: abort_signal은 fetch / tool call 전체 chain wire.
 5. **typed envelope** ([[may-21-codex-r7-sota-plus-plus]]): hook event는 union 확장 — exhaustive switch enforce.
 6. **glob rules 호환** ([[glob-rules-and-hook-updated-input]]): hook과 glob rules 동시 등록 시 hook이 outer wrapper, glob rules 안쪽.
+7. **Permission × hook ordering (P1 cleanup 2026-05-25)**: `pre_tool_use` hook is the LAST pre-execute gate. Permission stack + HARD_DENY + plan-mode + HITL + rules DSL ALL run BEFORE the hook fires. A permission deny ⇒ hook NEVER fires (the operator cannot reach a tool the policy refused). On the admit path, the hook's `updated_input` rewrite is applied **POST-permission** WITHOUT a re-check — see Tradeoffs below for the explicit trust model. Locked by `tests/unit/permission-hook-ordering.test.ts` (14 cases) and documented in `src/agent/dispatch.ts` `dispatchTool` header.
+8. **Post-hook fanout**: `post_tool_use` fires for EVERY tool outcome (audit symmetry). `post_tool_use_failure` fires ONLY on `ok:false` (recovery channel). On a failing tool, `post_tool_use` fires FIRST, then `post_tool_use_failure` — so a failure handler that emits `promptHook` sees the result after post-side processing. A throwing `post_tool_use_failure` handler is caught + reported via the stream `error` channel (dispatch's no-throw contract preserved).
 
 ## Tradeoffs
 
@@ -120,6 +122,7 @@ Cursor의 finding: 첫 compaction은 warm-up과 다르게 처리. 우리 compact
 - **post_tool_use_failure가 retry loop 유발 가능**: hook이 매번 abort 안 하고 prompt_hook으로 "retry"만 inject 시 무한 loop. mitigation: tool retry count tracker (max 3 attempts per call_id).
 - **subagent_start에 prompt_hook 가능 = subagent prompt 수정**: 부모 prompt 정책이 자식에 전파. 일관성 ↑이지만 cross-cut concern. mitigation: subagent 측 frontmatter (allowed-tools)와 충돌 시 frontmatter 우선.
 - **메모리 [[cursor-absorption-r1-r4-hardening]] 7 버그 (특히 throwing matcher poison, YAML fold) 재발 위험**: hook 확장 시 같은 sanitization 적용 필수. mitigation: 기존 hardening test 모두 신규 schema에 재실행.
+- **`pre_tool_use` rewrite는 POST-permission**: a hook returning `{ updated_input }` rewrites the tool args AFTER the permission gates (HARD_DENY / mode policy / HITL / permission stack) evaluated the ORIGINAL input. The rewrite is NOT re-checked. This is INTENTIONAL: a hook is operator-authored local code at the same trust level as the permission config itself; it cannot be reached by the model or by untrusted content. If a deployment wants per-call rewrite verification it must register a SECOND `pre_tool_use` handler that inspects the composed result and returns `{deny}` itself. The trust model is locked by `tests/unit/permission-hook-ordering.test.ts` and the SECURITY note in `src/agent/hooks.ts`.
 
 ## Out of scope (deferred)
 
@@ -137,3 +140,4 @@ Cursor의 finding: 첫 compaction은 warm-up과 다르게 처리. 우리 compact
 - [ ] prompt_hook 누적 10K 한도 lint warning
 - [ ] tool retry count tracker — 3-attempts max 강제
 - [ ] smoke battery 신규 case "hook-bidirectional" 카테고리 5+
+- [x] **Permission × hook ordering lock** (P1 cleanup, 2026-05-25): `tests/unit/permission-hook-ordering.test.ts` (14 tests, all green). Invariants pinned: plan-mode blocks before everything / HARD_DENY skips both / permission deny skips hook / hook deny skips execute + post-hooks / post_tool_use fires by outcome / post_tool_use before post_tool_use_failure / throwing handler isolated / rewrites compose in registration order / concurrent dispatches preserve per-call ordering.

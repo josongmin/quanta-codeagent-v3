@@ -152,6 +152,7 @@ Skill scope ([[0134-skill-scope-tiering]])과 유사하지만 더 단순 (4-tier
 - **special path resolve OS-specific**: macOS `tmpdir` vs Linux `/tmp` 다름. mitigation: 각 OS에 resolver, fallback `os.tmpdir()`.
 - **AutoApprovalReview prompt frequency 0이면 무의미, 너무 잦으면 fatigue**: default 10 trigger, 사용자 설정 가능.
 - **메모리 [[codex-collaboration-mode-pattern]] Plan mode와의 인터랙션**: Plan mode은 dispatch-seam mutating 차단 — 이 ADR의 sandbox/approval과 별도. Plan mode entry 시 모든 mutating tool block, permission check 이전에 차단.
+- **Permission × hook ordering (P1 cleanup 2026-05-25)**: The permission stack runs BEFORE the `pre_tool_use` hook (steps 9 vs 11 in the canonical 13-step dispatch pipeline — see `src/agent/dispatch.ts` `dispatchTool` header). Implications: (a) a permission deny short-circuits BEFORE the hook fires — the hook can never "save" a denied call; (b) a hook returning `{updatedInput}` on an admitted call rewrites the tool args AFTER permission saw the ORIGINAL input, with NO re-permission check on the rewrite (operator-trust model — see ADR-0133 Tradeoffs); (c) HARD_DENY skips BOTH layers; (d) plan-mode mutating block runs even earlier (step 1, dispatch-seam guard). Locked by `tests/unit/permission-hook-ordering.test.ts` (14 cases).
 
 ## Out of scope (deferred)
 
@@ -171,3 +172,4 @@ Skill scope ([[0134-skill-scope-tiering]])과 유사하지만 더 단순 (4-tier
 - [ ] AutoApprovalReview prompt 10 trigger 후 발화 test
 - [ ] [[codex-collaboration-mode-pattern]] Plan mode 진입 시 permission 검사 이전 차단 확인
 - [ ] smoke battery permission 카테고리 byte-identical 회귀 0
+- [x] **Permission × hook ordering** (P1 cleanup 2026-05-25): `tests/unit/permission-hook-ordering.test.ts` 14 tests pin the permission-vs-hook interaction: permission deny precludes hook fire, hook rewrites are post-permission, HARD_DENY skips both layers, plan-mode blocks even earlier.
