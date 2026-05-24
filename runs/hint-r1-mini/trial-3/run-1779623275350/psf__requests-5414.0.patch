@@ -1,0 +1,30 @@
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..bfe0161e 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -384,6 +384,11 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+             scheme, auth, host, port, path, query, fragment = parse_url(url)
+         except LocationParseError as e:
+             raise InvalidURL(*e.args)
++        except UnicodeError:
++            # If the underlying parser raised a UnicodeError (for example when
++            # the idna codec reports an empty or too-long label), surface this
++            # as an InvalidURL with a consistent message.
++            raise InvalidURL('URL has an invalid label.')
+ 
+         if not scheme:
+             error = ("Invalid URL {0!r}: No schema supplied. Perhaps you meant http://{0}?")
+@@ -398,6 +403,13 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         # non-ASCII characters. This allows users to automatically get the correct IDNA
+         # behaviour. For strings containing only ASCII characters, we need to also verify
+         # it doesn't start with a wildcard (*), before allowing the unencoded hostname.
++        #
++        # Additionally, reject hostnames that contain empty labels (e.g. leading/trailing
++        # dots or consecutive dots) as these are invalid (they would cause idna to
++        # raise a UnicodeError later or urllib3 to treat them as a bad location).
++        if any(part == '' for part in host.split('.')):
++            raise InvalidURL('URL has an invalid label.')
++
+         if not unicode_is_ascii(host):
+             try:
+                 host = self._get_idna_encoded_host(host)

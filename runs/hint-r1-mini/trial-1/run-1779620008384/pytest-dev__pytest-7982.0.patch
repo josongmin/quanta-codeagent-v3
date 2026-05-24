@@ -1,0 +1,37 @@
+diff --git a/src/_pytest/pathlib.py b/src/_pytest/pathlib.py
+index f0bdb1481..b96cba069 100644
+--- a/src/_pytest/pathlib.py
++++ b/src/_pytest/pathlib.py
+@@ -558,7 +558,7 @@ def visit(
+     entries = sorted(os.scandir(path), key=lambda entry: entry.name)
+     yield from entries
+     for entry in entries:
+-        if entry.is_dir(follow_symlinks=False) and recurse(entry):
++        if entry.is_dir() and recurse(entry):
+             yield from visit(entry.path, recurse)
+ 
+ 
+diff --git a/tmp_visit_test/link b/tmp_visit_test/link
+new file mode 120000
+index 000000000..be816d518
+--- /dev/null
++++ b/tmp_visit_test/link
+@@ -0,0 +1 @@
++tmp_visit_test/real
+\ No newline at end of file
+diff --git a/tmp_visit_test/real/a.txt b/tmp_visit_test/real/a.txt
+new file mode 100644
+index 000000000..c1b0730e0
+--- /dev/null
++++ b/tmp_visit_test/real/a.txt
+@@ -0,0 +1 @@
++x
+\ No newline at end of file
+diff --git a/tmp_visit_test/real/sub/y.txt b/tmp_visit_test/real/sub/y.txt
+new file mode 100644
+index 000000000..e25f1814e
+--- /dev/null
++++ b/tmp_visit_test/real/sub/y.txt
+@@ -0,0 +1 @@
++y
+\ No newline at end of file

@@ -1,0 +1,46 @@
+id: permission-4-pillar
+title: 4-pillar Permission (approval / network / sandbox / control)
+section: 3
+subsystem: 권한 스택 (ADR-0135)
+order: 21
+maturity: L4
+status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+purpose: |
+  **Codex `Permission.{approval, network, sandbox, control.managed}` 4-pillar 흡수.**
+  v1에서는 approval / sandbox / control 3-pillar 정도였고 network는 명시적 분리
+  되지 않았음. ADR-0135로 network를 별도 pillar로 격상 — 외부 network access는
+  가장 큰 attack surface이므로 별도 channel 필수.
+
+  - **approval** — HITL 4-tier (auto / once / session / always). ADR-0047 그대로 흡수.
+    promptUser=false면 silent fail (background subagent용).
+  - **network** — deny-all / allow-list / allow-all. allow-list 모드에서
+    `allowHosts: ["api.openai.com", ...]` + `perRequestApproval: true` 옵션.
+  - **sandbox** — osSandbox enum (seatbelt/landlock/windows-sandbox/none) +
+    readOnly + workspaceWrite + networkIsolated. [[codex-seatbelt-sandbox-profile]]
+    참조.
+  - **control** — managedBy enum (user/team/admin) + auditRequired. admin 시
+    user override 차단.
+
+  inferApprovalPolicy / inferNetworkPolicy / inferSandboxPolicy / inferControlPolicy
+  helper는 PermissionProfile가 없을 때 strictest default (deny-all network / no
+  osSandbox / readOnly / user-managed)를 반환 — 점진적 migration safe.
+evidence:
+  code:
+    - src/permission/permission-profile.ts
+    - src/permission/policy.ts
+  adrs: [135]
+  tests:
+    unit:
+      - tests/unit/permission-pillars.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  - 4 pillar은 PermissionProfile struct의 별도 field — discriminated union
+    아닌 record 구성. 각 helper는 pure projection이라 합성 cost 0.
+  - network.mode=allow-list with empty allowHosts ≡ deny-all (validation
+    layer 권장 — 후속 ADR에서 결정).
+  - control.managedBy=admin 시 setter API에서 reject (후속 wire-up).
