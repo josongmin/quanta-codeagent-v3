@@ -224,14 +224,92 @@ export const workMetricsAttrs = (m: {
   return attrs(base)
 }
 
-/** Build the attribute bag for a permission-review span (ADR-0029). */
+/**
+ * Build the attribute bag for a permission-review span (ADR-0029) plus the
+ * full ADR-0046 / 0070 stack axes. Every key declared under
+ * {@link QUANTA_ATTRS.permission} is reachable here; the three ADR-0029 fields
+ * remain required so the legacy call signature stays type-compatible. The
+ * remaining keys are optional — omitted ⇒ the attribute is NOT emitted (per
+ * `attrs()` value-omission contract; see vocabulary.ts §AttrValue).
+ *
+ * Security invariants enforced upstream by the call sites (NOT here):
+ *   - `stackSource` / `decidedBy` carry pre-categorized enum values, NEVER
+ *     the matched HARD_DENY regex source.
+ *   - `actionSignature` is the 32-hex hash from `computeActionSignature` —
+ *     already redacted of any raw command text by construction.
+ *   - Raw command strings, env vars, secret payloads NEVER pass through any
+ *     field here.
+ *
+ * This helper itself is a thin pass-through to `attrs()`; the validator's
+ * value-shape rules still apply (no null, no undefined values — pass `undefined`
+ * keys to omit).
+ */
 export const permissionAttrs = (args: {
   reviewerTier: string
   outcome: string
   riskLevel: RiskLevel
-}): Attrs =>
-  attrs({
+  /** ADR-0046 stack axis that produced the verdict. */
+  stackSource?: string
+  /** ADR-0046 stack verdict — allow/deny/ask. */
+  stackVerdict?: string
+  /** 32-hex actionSignature from `computeActionSignature`. */
+  actionSignature?: string
+  /** Permission-slice thread anchor (sessionId at gate time). */
+  threadId?: string
+  /** Host id from `resolveHostId()`. */
+  hostId?: string
+  /** Coarse decision-layer label — `"reviewer" | "stack" | "hitl" | "hook"`. */
+  decidedBy?: string
+}): Attrs => {
+  const base: AttrsInput = {
     [QUANTA_ATTRS.permission.reviewerTier]: args.reviewerTier,
     [QUANTA_ATTRS.permission.outcome]: args.outcome,
     [QUANTA_ATTRS.permission.riskLevel]: args.riskLevel,
-  })
+  }
+  if (args.stackSource !== undefined) {
+    base[QUANTA_ATTRS.permission.stackSource] = args.stackSource
+  }
+  if (args.stackVerdict !== undefined) {
+    base[QUANTA_ATTRS.permission.stackVerdict] = args.stackVerdict
+  }
+  if (args.actionSignature !== undefined) {
+    base[QUANTA_ATTRS.permission.actionSignature] = args.actionSignature
+  }
+  if (args.threadId !== undefined) {
+    base[QUANTA_ATTRS.permission.threadId] = args.threadId
+  }
+  if (args.hostId !== undefined) {
+    base[QUANTA_ATTRS.permission.hostId] = args.hostId
+  }
+  if (args.decidedBy !== undefined) {
+    base[QUANTA_ATTRS.permission.decidedBy] = args.decidedBy
+  }
+  return attrs(base)
+}
+
+/**
+ * Build the attribute bag for a post-denial state-transition event
+ * (ADR-0046). Emitted by the `post-denial` facade at the 3 record* sites so a
+ * dashboard can render the `denied → risk-seen → user-override` funnel.
+ *
+ * Security invariant: callers MUST pass already-hashed `actionSignature` (32-hex
+ * from `computeActionSignature`), NEVER the raw tool args or command text.
+ */
+export const postDenialAttrs = (args: {
+  /** State transition kind. */
+  postDenialEvent: "denied" | "risk-seen" | "user-override"
+  /** 32-hex actionSignature from `computeActionSignature`. */
+  actionSignature: string
+  threadId: string
+  decidedBy?: string
+}): Attrs => {
+  const base: AttrsInput = {
+    [QUANTA_ATTRS.permission.postDenialEvent]: args.postDenialEvent,
+    [QUANTA_ATTRS.permission.actionSignature]: args.actionSignature,
+    [QUANTA_ATTRS.permission.threadId]: args.threadId,
+  }
+  if (args.decidedBy !== undefined) {
+    base[QUANTA_ATTRS.permission.decidedBy] = args.decidedBy
+  }
+  return attrs(base)
+}

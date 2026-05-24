@@ -23,9 +23,11 @@
  *     each other on `outcome`; identical-but-duplicate records are deduped.
  */
 
-import { buildDecision, isAdmissible } from "./outcome"
+import { buildDecision, isAdmissible, isAllowed } from "./outcome"
+import { emitPermissionDecision, type PermissionOutcomeLabel } from "./recorder"
 import type {
   ApprovalDecision,
+  ApprovalOutcome,
   DenialMemory,
   ReviewContext,
   ReviewerPort,
@@ -172,6 +174,38 @@ const validateDecision = (decision: ApprovalDecision): ApprovalDecision =>
     ...(decision.verb !== undefined ? { verb: decision.verb } : {}),
   })
 
+/** Map an 8-state {@link ApprovalOutcome} to one of the four canonical
+ *  decision counter labels for OTel emit. Sticky-precedence replay and
+ *  fresh reviewer decisions BOTH route through this — the counter has
+ *  one row per terminal outcome regardless of provenance.
+ *
+ *  - `user_*` allows where the operator explicitly clicked "approve" map
+ *    to `"trust"` (the operator paid the cognitive cost of consenting).
+ *  - `not_needed` / `config_allowed` / `guardian_approved` map to `"allow"`
+ *    (the gate cleared without operator intervention).
+ *  - All deny / abort outcomes map to `"deny"`. */
+const outcomeToLabel = (outcome: ApprovalOutcome): PermissionOutcomeLabel => {
+  if (outcome === "user_approved" || outcome === "user_approved_for_session") return "trust"
+  if (isAllowed(outcome)) return "allow"
+  return "deny"
+}
+
+/** Emit one reviewer-tier decision through the recorder seam. No-op when
+ *  no recorder is registered. SECURITY: the only attribute values that
+ *  reach the recorder here are categorical (reviewerTier / outcome /
+ *  riskLevel / decidedBy). The `rationale` field is intentionally NOT
+ *  plumbed through — it is free-form text that may quote operator notes
+ *  / model output and is owned by the audit log, not the metric layer. */
+const emitReviewerDecision = (decision: ApprovalDecision): void => {
+  const label = outcomeToLabel(decision.outcome)
+  emitPermissionDecision({
+    outcome: label,
+    reviewerTier: decision.reviewer,
+    riskLevel: decision.riskLevel,
+    decidedBy: "reviewer",
+  })
+}
+
 /** Main entry point. Resolves sticky precedence, then dispatches to the
  *  configured reviewer. Returns a validated `ApprovalDecision`.
  *
@@ -186,7 +220,9 @@ export const reviewAction = async (
 ): Promise<ApprovalDecision> => {
   const sticky = pickStickyDenial(action.actionKey, ctx.priorDenials)
   if (sticky !== null) {
-    return replayDenial(sticky, ctx.decidedAt)
+    const replayed = replayDenial(sticky, ctx.decidedAt)
+    emitReviewerDecision(replayed)
+    return replayed
   }
   assertReviewerAvailable(ctx.configReviewer, port)
   const fresh =
@@ -195,5 +231,7 @@ export const reviewAction = async (
       : ctx.configReviewer === "auto_review"
         ? await port.autoReview(action, ctx)
         : await port.guardianReview(action, ctx)
-  return validateDecision(fresh)
+  const validated = validateDecision(fresh)
+  emitReviewerDecision(validated)
+  return validated
 }

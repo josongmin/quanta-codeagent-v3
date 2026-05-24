@@ -1,4 +1,11 @@
-export { type Attrs, attrs, mergeAttrs, workMetricsAttrs } from "./attrs"
+export {
+  type Attrs,
+  attrs,
+  mergeAttrs,
+  permissionAttrs,
+  postDenialAttrs,
+  workMetricsAttrs,
+} from "./attrs"
 export {
   buildCostDashboard,
   type CostDashboard,

@@ -21,6 +21,7 @@
  */
 
 import { computeActionSignature, type DenialRecord, type PermissionStore } from "./permission-store"
+import { emitPostDenialEvent } from "./recorder"
 
 export type { DenialRecord } from "./permission-store"
 export { computeActionSignature } from "./permission-store"
@@ -61,6 +62,16 @@ export const recordDenial = (
     deniedAt: clock.now(),
     deniedReason: reason,
   })
+  // SECURITY: only the hashed actionSignature + threadId reach the recorder.
+  // `reason` is intentionally NOT plumbed through — it may be a free-form
+  // string from a HARD_DENY rule that quotes the offending command. The
+  // audit log owns reasons; the metric layer owns the funnel transitions.
+  emitPostDenialEvent({
+    event: "denied",
+    actionSignature,
+    threadId: action.threadId,
+    decidedBy: "stack",
+  })
   return actionSignature
 }
 
@@ -79,6 +90,12 @@ export const recordRiskSeen = (
     args: action.args,
   })
   store.recordRiskSeen(action.threadId, actionSignature, clock.now())
+  emitPostDenialEvent({
+    event: "risk-seen",
+    actionSignature,
+    threadId: action.threadId,
+    decidedBy: "stack",
+  })
   return actionSignature
 }
 
@@ -97,6 +114,12 @@ export const recordUserOverride = (
     args: action.args,
   })
   store.recordUserOverride(action.threadId, actionSignature, clock.now())
+  emitPostDenialEvent({
+    event: "user-override",
+    actionSignature,
+    threadId: action.threadId,
+    decidedBy: "stack",
+  })
   return actionSignature
 }
 

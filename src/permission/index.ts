@@ -111,6 +111,21 @@ export {
   recordRiskSeen,
   recordUserOverride,
 } from "./post-denial"
+export {
+  __resetPermissionRecorder,
+  emitPermissionDecision,
+  emitPostDenialEvent,
+  getPermissionRecorder,
+  type PermissionDecidedBy,
+  type PermissionDecisionRecord,
+  type PermissionOutcomeLabel,
+  type PermissionRecorder,
+  type PermissionRiskLevel,
+  type PermissionStackSource,
+  type PostDenialEventKind,
+  type PostDenialEventRecord,
+  setPermissionRecorder,
+} from "./recorder"
 export type { ClassifiedCommand, LearningSource, PendingPermission } from "./remember-patterns"
 export {
   autoResolvable,

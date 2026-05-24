@@ -3,6 +3,12 @@ import { hostAllowsMutation } from "./per-host-mode"
 import { threadAllowsMutation } from "./per-thread-store"
 import type { PermissionReader } from "./permission-store"
 import { HARD_DENY, HARD_DENY_RULES, type HardDenyRule } from "./policy-rules"
+import {
+  emitPermissionDecision,
+  type PermissionOutcomeLabel,
+  type PermissionRiskLevel,
+  type PermissionStackSource,
+} from "./recorder"
 import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from "./types"
 
 /** Exposed for the rule-level unit test (positive + negative case enforcement,
@@ -48,6 +54,95 @@ export const hardDenyReason = (action: ToolAction): string | null => {
 const hardDeny = (action: ToolAction): PermissionDecision | null => {
   const reason = hardDenyReason(action)
   return reason ? { kind: "deny", reason } : null
+}
+
+/* ------------------------------------------------------------------------- *
+ * OTel emit (ADR-0032 vocabulary activation).
+ *
+ * Maps the {@link PermissionDecision.kind} discriminant to the closed
+ * {@link PermissionOutcomeLabel} union exposed to dashboards. `"ask"`
+ * surfaces as `"prompt"` (operator-visible event name); the `"trust"` bucket
+ * is reserved for stack-axis override paths (`evaluateStack`'s post-denial
+ * branch wires it explicitly).
+ *
+ * SECURITY INVARIANT: NEVER pass the matched HARD_DENY regex source through
+ * any attribute. The only categorical fields emitted here are:
+ *   - `outcome`         — the {@link PermissionOutcomeLabel} string.
+ *   - `reviewerTier`    — coarse `"auto_review"` label (this is the synchronous
+ *                         policy path, not a user/guardian review).
+ *   - `riskLevel`       — coarse `"low" | "medium" | "high"` tier.
+ *   - `decidedBy`       — `"stack" | "reviewer" | "hook" | "hitl"` layer.
+ *   - `stackSource`     — pre-defined axis name (NEVER a regex source).
+ *   - `stackVerdict`    — the verdict literal (allow/deny/ask).
+ *
+ * The action's `shellCommand`, the matched HARD_DENY rule name, and the
+ * raw `action.input` are deliberately NOT plumbed through. A dashboard
+ * sees "HARD_DENY hit on tool=bash" — never "rm -rf /".
+ * ------------------------------------------------------------------------- */
+
+const labelFor = (kind: PermissionDecision["kind"]): PermissionOutcomeLabel =>
+  kind === "allow" ? "allow" : kind === "deny" ? "deny" : "prompt"
+
+/** Risk-level heuristic for the synchronous policy path. HARD_DENY ⇒ "high"
+ *  (security boundary); ask ⇒ "medium"; allow ⇒ "low". Coarse on purpose —
+ *  the fine-grained tier comes from the reviewer port when the action escalates. */
+const riskLevelFor = (kind: PermissionDecision["kind"]): PermissionRiskLevel =>
+  kind === "deny" ? "high" : kind === "ask" ? "medium" : "low"
+
+const verdictFor = (kind: PermissionDecision["kind"]): "allow" | "deny" | "ask" => kind
+
+/** Internal helper: emit the decision through the recorder seam IF
+ *  registered. Pass-through return so the caller can keep its terse
+ *  `return emit(d, ...)` form. The `extra` overlay lets stack-axis callers
+ *  supply `actionSignature` / `threadId` / `hostId` without re-typing
+ *  the base fields. */
+const emit = (
+  decision: PermissionDecision,
+  extra: {
+    stackSource: PermissionStackSource
+    actionSignature?: string
+    threadId?: string
+    hostId?: string
+  },
+): PermissionDecision => {
+  const label = labelFor(decision.kind)
+  emitPermissionDecision({
+    outcome: label,
+    reviewerTier: "auto_review",
+    riskLevel: riskLevelFor(decision.kind),
+    decidedBy: "stack",
+    stackVerdict: verdictFor(decision.kind),
+    stackSource: extra.stackSource,
+    ...(extra.actionSignature !== undefined ? { actionSignature: extra.actionSignature } : {}),
+    ...(extra.threadId !== undefined ? { threadId: extra.threadId } : {}),
+    ...(extra.hostId !== undefined ? { hostId: extra.hostId } : {}),
+  })
+  return decision
+}
+
+/** Specialized emit for the post-denial-override allow path. Emits the
+ *  `"trust"` counter label so dashboards distinguish operator-overridden
+ *  allows from baseline allows. */
+const emitTrust = (
+  decision: PermissionDecision,
+  extra: {
+    actionSignature: string
+    threadId: string
+    hostId?: string
+  },
+): PermissionDecision => {
+  emitPermissionDecision({
+    outcome: "trust",
+    reviewerTier: "auto_review",
+    riskLevel: "high", // override implies an action that was previously denied
+    decidedBy: "stack",
+    stackVerdict: "allow",
+    stackSource: "post-denial-override",
+    actionSignature: extra.actionSignature,
+    threadId: extra.threadId,
+    ...(extra.hostId !== undefined ? { hostId: extra.hostId } : {}),
+  })
+  return decision
 }
 
 /* ------------------------------------------------------------------------- *
@@ -106,18 +201,26 @@ export const evaluate = (action: ToolAction, ctx: PermissionContext): Permission
   // to the allow below. This mirrors `evaluateStack`'s ordering (precedence
   // level 1) and the documented "HARD_DENY beats everything" invariant.
   const denied = hardDeny(action)
-  if (denied) return denied
+  if (denied) return emit(denied, { stackSource: "hard-deny" })
 
-  if (action.isReadOnly) return { kind: "allow" }
+  if (action.isReadOnly) return emit({ kind: "allow" }, { stackSource: "read-only-bypass" })
 
-  if (ctx.mode === "bypass" || ctx.mode === "acceptEdits") return { kind: "allow" }
-  if (ctx.mode === "auto") {
-    return {
-      kind: "ask",
-      reason: "auto mode requires the async classifier (use evaluateAuto)",
-    }
+  if (ctx.mode === "bypass" || ctx.mode === "acceptEdits") {
+    return emit({ kind: "allow" }, { stackSource: "global-default" })
   }
-  return { kind: "ask", reason: `${action.tool} modifies state` }
+  if (ctx.mode === "auto") {
+    return emit(
+      {
+        kind: "ask",
+        reason: "auto mode requires the async classifier (use evaluateAuto)",
+      },
+      { stackSource: "global-default" },
+    )
+  }
+  return emit(
+    { kind: "ask", reason: `${action.tool} modifies state` },
+    { stackSource: "global-default" },
+  )
 }
 
 /**
@@ -144,9 +247,9 @@ export const evaluateAuto = async (
   // is a no-op when no `shellCommand` is present, so genuine read-only tools
   // still allow below.
   const denied = hardDeny(action)
-  if (denied) return denied
+  if (denied) return emit(denied, { stackSource: "hard-deny" })
 
-  if (action.isReadOnly) return { kind: "allow" }
+  if (action.isReadOnly) return emit({ kind: "allow" }, { stackSource: "read-only-bypass" })
 
   const decision = await classifier.evaluate({
     tool: action.tool,
@@ -158,10 +261,16 @@ export const evaluateAuto = async (
       : "",
   })
 
-  if (decision.fallback) return { kind: "ask", reason: decision.reason }
-  if (decision.verdict === "allow") return { kind: "allow" }
-  if (decision.verdict === "deny") return { kind: "deny", reason: decision.reason }
-  return { kind: "ask", reason: decision.reason }
+  if (decision.fallback) {
+    return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
+  }
+  if (decision.verdict === "allow") {
+    return emit({ kind: "allow" }, { stackSource: "global-default" })
+  }
+  if (decision.verdict === "deny") {
+    return emit({ kind: "deny", reason: decision.reason }, { stackSource: "global-default" })
+  }
+  return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
 }
 
 /* ------------------------------------------------------------------------- *
@@ -226,47 +335,73 @@ export const evaluateStack = (
   stack: PermissionStackContext,
   opts: EvaluateStackOptions,
 ): PermissionDecision => {
+  // Common axis overlay for every emit below — anchors threadId/hostId/
+  // actionSignature so a dashboard can pivot across all 5 precedence levels
+  // for the same `(threadId, action)`. SECURITY: actionSignature is the
+  // 32-hex hash from `computeActionSignature`; raw args never leave the
+  // caller.
+  const axes = {
+    threadId: stack.threadId,
+    hostId: stack.hostId,
+    actionSignature: stack.actionSignature,
+  }
+
   // HARD_DENY ALWAYS wins — even read-only actions can't reach a shell-
   // equivalent path that hits the denylist (defensive: `isReadOnly=true`
   // for a shell tool would be a registry bug, but the gate fires anyway).
   const denied = hardDeny(action)
-  if (denied) return denied
+  if (denied) return emit(denied, { stackSource: "hard-deny", ...axes })
 
-  if (action.isReadOnly) return { kind: "allow" }
+  if (action.isReadOnly) {
+    return emit({ kind: "allow" }, { stackSource: "read-only-bypass", ...axes })
+  }
 
   const store = opts.store
 
   // 2. Post-denial user override — explicit re-approval after seeing risk
   //    overrides any rule below. The store enforces the timestamp ordering
-  //    invariant (deniedAt ≤ seenRiskAt ≤ userOverrideAt).
+  //    invariant (deniedAt ≤ seenRiskAt ≤ userOverrideAt). Emit the "trust"
+  //    counter label so dashboards distinguish operator-overridden allows
+  //    from baseline allows.
   if (store.hasPostDenialOverride(stack.threadId, stack.actionSignature)) {
-    return { kind: "allow" }
+    return emitTrust(
+      { kind: "allow" },
+      { actionSignature: stack.actionSignature, threadId: stack.threadId, hostId: stack.hostId },
+    )
   }
 
   // 3. Per-thread permission record (highest among rule-based axes).
   const threadPerm = store.getThread(stack.threadId)
   if (threadPerm !== undefined) {
     const writable = threadAllowsMutation(threadPerm, stack.workdir)
-    if (writable) return { kind: "allow" }
-    return {
-      kind: "deny",
-      reason: `Per-thread policy (${threadPerm.sandboxPolicy.type}) refuses ${action.tool} on ${stack.workdir}`,
-    }
+    if (writable) return emit({ kind: "allow" }, { stackSource: "per-thread", ...axes })
+    return emit(
+      {
+        kind: "deny",
+        reason: `Per-thread policy (${threadPerm.sandboxPolicy.type}) refuses ${action.tool} on ${stack.workdir}`,
+      },
+      { stackSource: "per-thread", ...axes },
+    )
   }
 
   // 4. Per-host agent-mode default.
   const hostMode = store.getHost(stack.hostId)
   const hostVerdict = hostAllowsMutation(hostMode)
   if (hostVerdict === false) {
-    return {
-      kind: "deny",
-      reason: `Per-host mode (${hostMode}) refuses ${action.tool} on host ${stack.hostId}`,
-    }
+    return emit(
+      {
+        kind: "deny",
+        reason: `Per-host mode (${hostMode}) refuses ${action.tool} on host ${stack.hostId}`,
+      },
+      { stackSource: "per-host", ...axes },
+    )
   }
   if (hostVerdict === true) {
-    return { kind: "allow" }
+    return emit({ kind: "allow" }, { stackSource: "per-host", ...axes })
   }
 
-  // 5. Fall through to the global default (mode-based evaluate).
+  // 5. Fall through to the global default (mode-based evaluate). The
+  //    base `evaluate` itself emits with `stackSource: "global-default"`
+  //    — DO NOT re-emit here or the counter would double-count.
   return evaluate(action, ctx)
 }
