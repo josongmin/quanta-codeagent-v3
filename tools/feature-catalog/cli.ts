@@ -63,6 +63,7 @@ function usage(): never {
       "  grade [<letter>]            evidence-completeness scorecard (A-F)",
       "  stale                       flag entries where source newer than yaml >7d",
       "  query label:X owner:Y ...   filter by labels/owners/section/maturity/depends/grade",
+      "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
     ].join("\n"),
   )
   process.exit(2)
@@ -334,6 +335,154 @@ async function cmdLint(argv: string[]): Promise<void> {
   )
 }
 
+// --- Maturity-promotion gates ----------------------------------------------
+//
+// Per-tier evidence requirements. Default-OFF (advisory) — `--strict` exits 1
+// if any feature at a given tier (or above) violates its tier's gate. This is
+// a separate audit step from `validate` (validate keeps existing yamls green).
+//
+// Rules:
+//   L2: evidence.code.length >= 1  OR  notes present (e.g. "principle-only").
+//   L3: L2  AND  (tests.unit.length >= 1  OR  tests.integration.length >= 1).
+//   L4: L3  AND  (evidence.adrs.length >= 1  OR  notes present).
+//   L5: L4  AND  owners.length >= 1  AND  deliberate_hold == null.
+
+type GateKey = "L2" | "L3" | "L4" | "L5"
+
+interface GateDef {
+  readonly key: GateKey
+  readonly label: string
+  readonly applies: (m: string) => boolean
+  readonly passes: (f: Feature) => boolean
+}
+
+interface GateOutcome {
+  readonly def: GateDef
+  readonly applicable: number
+  readonly passed: number
+  readonly violators: string[]
+}
+
+function notesPresent(f: Feature): boolean {
+  return typeof f.notes === "string" && f.notes.trim().length > 0
+}
+
+function hasCode(f: Feature): boolean {
+  return f.evidence.code.length >= 1
+}
+
+function hasTests(f: Feature): boolean {
+  return f.evidence.tests.unit.length >= 1 || f.evidence.tests.integration.length >= 1
+}
+
+function hasAdrs(f: Feature): boolean {
+  return f.evidence.adrs.length >= 1
+}
+
+function hasOwners(f: Feature): boolean {
+  // `owners` is not in the zod schema today; a future extension may add it.
+  // Read defensively from the raw object so gates can promote ahead of schema.
+  const raw = (f as unknown as { owners?: unknown }).owners
+  return Array.isArray(raw) && raw.length >= 1
+}
+
+function passesL2(f: Feature): boolean {
+  return hasCode(f) || notesPresent(f)
+}
+
+function passesL3(f: Feature): boolean {
+  return passesL2(f) && hasTests(f)
+}
+
+function passesL4(f: Feature): boolean {
+  return passesL3(f) && (hasAdrs(f) || notesPresent(f))
+}
+
+function passesL5(f: Feature): boolean {
+  return passesL4(f) && hasOwners(f) && f.deliberate_hold === null
+}
+
+const GATES: readonly GateDef[] = [
+  {
+    key: "L2",
+    label: "L2 (needs evidence.code>=1 OR notes)",
+    applies: (m) => m === "L2" || m === "L3" || m === "L4" || m === "L5",
+    passes: passesL2,
+  },
+  {
+    key: "L3",
+    label: "L3 (L2 + tests>=1)",
+    applies: (m) => m === "L3" || m === "L4" || m === "L5",
+    passes: passesL3,
+  },
+  {
+    key: "L4",
+    label: "L4 (L3 + adrs>=1 OR notes)",
+    applies: (m) => m === "L4" || m === "L5",
+    passes: passesL4,
+  },
+  {
+    key: "L5",
+    label: "L5 (L4 + owners>=1 + deliberate_hold==null)",
+    applies: (m) => m === "L5",
+    passes: passesL5,
+  },
+]
+
+/** Pure: compute per-gate outcomes from loaded features. */
+export function runGates(features: readonly LoadedFeature[]): GateOutcome[] {
+  return GATES.map((def) => {
+    const applicable = features.filter(({ feature }) => def.applies(feature.maturity))
+    const violators: string[] = []
+    for (const { feature } of applicable) {
+      if (!def.passes(feature)) violators.push(feature.id)
+    }
+    violators.sort()
+    return {
+      def,
+      applicable: applicable.length,
+      passed: applicable.length - violators.length,
+      violators,
+    }
+  })
+}
+
+async function cmdGates(argv: string[]): Promise<void> {
+  const strict = argv.includes("--strict")
+  for (const a of argv) {
+    if (a !== "--strict") {
+      console.error(`gates: unknown arg "${a}"`)
+      process.exit(2)
+    }
+  }
+  const features = await loadFeaturesStrict(FEATURES_DIR)
+  const outcomes = runGates(features)
+
+  console.log("Maturity promotion gates:")
+  let totalViolations = 0
+  for (const o of outcomes) {
+    const violateCount = o.violators.length
+    totalViolations += violateCount
+    console.log(`  ${o.def.label}: ${o.passed}/${o.applicable} PASS, ${violateCount} VIOLATE`)
+    for (const id of o.violators) {
+      console.log(`    - ${id}`)
+    }
+  }
+
+  if (totalViolations === 0) {
+    console.log(`gates: ok — ${features.length} feature(s), no violations`)
+    return
+  }
+  if (strict) {
+    console.error(`gates: ${totalViolations} violation(s) across ${GATES.length} gate(s) — strict`)
+    process.exit(1)
+  }
+  console.log(
+    `gates: ${totalViolations} advisory violation(s) across ${GATES.length} gate(s) ` +
+      `(pass --strict to fail on these)`,
+  )
+}
+
 async function cmdCheckChanged(argv: string[]): Promise<void> {
   const base = argv[0] ?? "origin/main"
   // Use git via the system shell; we don't have a direct git lib and one-shot
@@ -590,6 +739,9 @@ async function main(): Promise<void> {
     case "query":
       await cmdQuery(rest)
       return
+    case "gates":
+      await cmdGates(rest)
+      return
     case undefined:
     case "-h":
     case "--help":
@@ -618,6 +770,7 @@ export {
   cmdBuild,
   cmdCheckChanged,
   cmdDiff,
+  cmdGates,
   cmdLint,
   cmdList,
   cmdShow,
