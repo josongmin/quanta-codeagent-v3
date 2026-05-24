@@ -1,0 +1,40 @@
+id: web-search-providers
+title: WebSearchProvider concrete impls — Brave + DuckDuckGo (ADR-0133)
+section: 2
+subsystem: 도구 — web search providers (ADR-0133)
+order: 111
+maturity: L4
+status: new
+purpose: |
+  Two concrete implementations of the `WebSearchProvider` closed-port
+  introduced by ADR-0127. Both OPT-IN — neither registers itself; the
+  host composition root wires one into `AgentConfig.webSearch.provider`.
+  (1) `braveSearchProvider({ apiKey, fetcher })` — Brave Search REST API
+  (https://api.search.brave.com/res/v1/web/search). Typed JSON response
+  (no HTML scraping); free tier exists; same backend Anthropic's
+  WebSearch uses. (2) `duckduckgoSearchProvider({ fetcher })` — DuckDuckGo
+  Instant Answer / HTML endpoint, no API key required, anonymous; weaker
+  ranking but zero-config fallback. Both DI-clean: never read `process.env`
+  themselves — keys injected via constructor, `fetcher` injectable for
+  tests. Slice posture: imports ONLY `../search` (the port) — NO `@/agent`,
+  `@/llm`, `@/permission`, `@/storage`, `@/memory`. Pure HTTP, no global
+  state, no singletons.
+evidence:
+  code:
+    - src/tool/web/providers/index.ts
+    - src/tool/web/providers/brave.ts
+    - src/tool/web/providers/duckduckgo.ts
+  adrs: [133]
+  tests:
+    unit:
+      - tests/unit/tool/web-search-providers-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - 'AgentConfig.webSearch.provider — host injects exactly one (or none, leaving web_search degraded)'
+deliberate_hold: null
+notes: |
+  Companion of `web-fetch-search` (the tool slice + port). Why Brave (vs
+  Google / Bing / SerpAPI / scraping): free tier + typed JSON +
+  commercial-friendly TOS + Anthropic-parity. DuckDuckGo is the
+  zero-config fallback.

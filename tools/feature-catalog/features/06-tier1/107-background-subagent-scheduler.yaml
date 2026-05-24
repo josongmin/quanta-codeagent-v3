@@ -1,0 +1,43 @@
+id: background-subagent-scheduler
+title: Background subagent scheduler — fork / poll / await / cancel (ADR-0130)
+section: 6
+subsystem: 서브에이전트 — background detach (Cursor force_background_subagent 흡수)
+order: 107
+maturity: L4
+status: new
+purpose: |
+  Plane-clean scheduler that adds **structural background detach** to the
+  subagent slice. quanta's existing `src/subagent/` slice is sequential —
+  parent's `agent` tool call blocks until child settles. This ADR-0130
+  module exposes 6 seams (`fork` / `poll` / `await` / `cancel` / `list` /
+  `prune`) over a `SubagentRunner` injected by the composition root.
+  `fork(spec)` returns a `SubagentHandleId` immediately and parent loop
+  continues; child runs detached; harvest later via blocking `await(id)`
+  or non-blocking `poll(id)`. 4-arm `SubagentStatus` =
+  `running | completed | failed | cancelled`; terminal transitions are
+  one-way. Cap-exceeded throws typed `SubagentBackgroundError` with code
+  `"cap-exceeded"`; unknown handle throws `"unknown-handle"`. Default
+  `maxConcurrent=3` / `maxRetained=32` (terminal LRU). Wired into
+  `AgentConfig.subagent.backgroundScheduler` via tier-1 helper
+  `src/agent/tier1/subagent-bg.ts` (helper-only deferred-wire idiom —
+  default-OFF if host doesn't construct the runner).
+evidence:
+  code:
+    - src/agent/subagent-background.ts
+    - src/agent/tier1/subagent-bg.ts
+  adrs: [130]
+  tests:
+    unit:
+      - tests/unit/subagent-background-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - 'maxConcurrent (default 3)'
+  - 'maxRetained (default 32, terminal LRU)'
+  - 'now / idGen — test-injectable clock + id source'
+deliberate_hold: null
+notes: |
+  Only modern coding agent with industry-pattern background subagent
+  besides Cursor — Claude Code 2.1 / Codex 0.131 / v0.dev all sequential.
+  Companion of `subagent-bg-tools` (LLM-facing 3 tools wrapping this
+  scheduler via the duck-typed `BackgroundSubagentSchedulerPort`).

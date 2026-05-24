@@ -1,0 +1,52 @@
+id: engineering-skills-bundle
+title: 4 engineering system skills — add-tests / debug-error / explain-code / extract-function (ADR-0134)
+section: 6
+subsystem: 스킬 — Cursor CTK engineering-task absorption (4 skills)
+order: 108
+maturity: L4
+status: new
+purpose: |
+  Four bundled system skills covering the highest-ROI engineering
+  workflows from Cursor's cursor-team-kit (CTK). Each ships as
+  `src/skill/system-skills/<name>/{SKILL.md, index.ts}` and is discovered
+  via `systemSkillsDir()` (independent of user QUANTA_SKILLS_DIR; system
+  wins on name collision — same invariant as `progress-audit-skill`).
+  (1) `add-tests` — author new tests by reading target + enumerating
+  edge cases + matching project conventions + running tests before
+  declaring done. Allowed tools: Bash, Read, Grep, Edit, test_runner.
+  (2) `debug-error` — diagnose failing tests / exceptions / stack
+  traces by READING evidence before patching. Allowed tools: Bash, Read,
+  Grep, Edit, parse_test_failure. (3) `explain-code` — explain what a
+  function / module does by READING it, tracing callers, surfacing
+  history — never from memory or filename. Allowed tools: Read, Grep,
+  lsp_definition, lsp_references, git_log. (4) `extract-function` —
+  extract a code block into a named function with caller survey + intent
+  naming + no-regression check. Allowed tools: Read, Grep, Edit,
+  lsp_references, scripted_replace. Each exposes `<NAME>_SKILL_NAME` +
+  `trigger<Name>()` helper for router-agnostic external wire (slash /
+  planner / IDE shortcut) without re-implementing skill plumbing.
+evidence:
+  code:
+    - src/skill/system-skills/add-tests/SKILL.md
+    - src/skill/system-skills/add-tests/index.ts
+    - src/skill/system-skills/debug-error/SKILL.md
+    - src/skill/system-skills/debug-error/index.ts
+    - src/skill/system-skills/explain-code/SKILL.md
+    - src/skill/system-skills/explain-code/index.ts
+    - src/skill/system-skills/extract-function/SKILL.md
+    - src/skill/system-skills/extract-function/index.ts
+    - src/skill/system-skills/index.ts
+  adrs: [134]
+  tests:
+    unit:
+      - tests/unit/system-skills-new-bundle-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Bundle complement of ADR-0111 (CTK git-skill bundle). Allowed-tool
+  whitelist gate (`skill-vs-extension`) means audit-discipline-style
+  blocking is per-skill — `add-tests` can mutate (Edit allowed) while
+  `explain-code` cannot (Read/Grep/lsp only). Triggers include Korean
+  phrases via SKILL.md description.
