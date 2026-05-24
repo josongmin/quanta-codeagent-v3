@@ -29,9 +29,9 @@ export type { StreamEvent, StreamInput }
 
 /** Canonical transport id. Closed union — adding a transport is a typed
  *  change (one entry here, one factory in the registry, one ADR follow-up).
- *  `default` is the public `api.anthropic.com` path; the other three are the
- *  enterprise data-governance forks. */
-export type ProviderId = "default" | "bedrock" | "vertex" | "foundry"
+ *  `default` is the public `api.anthropic.com` path; the other four are the
+ *  enterprise data-governance forks (`mantle` added in ADR-0163 W12). */
+export type ProviderId = "default" | "bedrock" | "vertex" | "foundry" | "mantle"
 
 /**
  * Provider authentication bundle. Every field is OPTIONAL — each transport

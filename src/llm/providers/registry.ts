@@ -23,6 +23,7 @@
 import { BedrockProviderAdapter } from "./bedrock-adapter"
 import { DefaultProviderAdapter } from "./default-adapter"
 import { FoundryProviderAdapter } from "./foundry-adapter"
+import { MantleProviderAdapter } from "./mantle-adapter"
 import type { LlmProvider, ProviderConfig, ProviderFactory, ProviderId } from "./provider-port"
 import { ProviderError } from "./provider-port"
 import { VertexProviderAdapter } from "./vertex-adapter"
@@ -39,6 +40,11 @@ const FACTORIES: Record<ProviderId, ProviderFactory> = {
   bedrock: (config) => new BedrockProviderAdapter(config),
   vertex: (config) => new VertexProviderAdapter(config),
   foundry: (config) => new FoundryProviderAdapter(config),
+  // ADR-0163 Phase B — Mantle is a Phase-1 stub (throws provider-unsupported
+  // at first stream call). Wired here so the registry's closed-union OCP
+  // discipline is satisfied; Phase 2 swaps the adapter implementation with
+  // zero registry churn.
+  mantle: (config) => new MantleProviderAdapter(config),
 }
 
 /** Env-var keys watched by the resolver. Exported so callers wiring CLI flags
@@ -64,7 +70,7 @@ const unsupportedFactory = (id: string): ProviderFactory => {
   return (_config: ProviderConfig): LlmProvider => {
     throw new ProviderError(
       "provider-unsupported",
-      `Unknown provider id: "${id}" (known: default | bedrock | vertex | foundry)`,
+      `Unknown provider id: "${id}" (known: default | bedrock | vertex | foundry | mantle)`,
     )
   }
 }

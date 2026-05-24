@@ -8,6 +8,7 @@
 export { BedrockProviderAdapter } from "./bedrock-adapter"
 export { DefaultProviderAdapter } from "./default-adapter"
 export { FoundryProviderAdapter } from "./foundry-adapter"
+export { MantleProviderAdapter } from "./mantle-adapter"
 export type {
   LlmProvider,
   ProviderAuth,
