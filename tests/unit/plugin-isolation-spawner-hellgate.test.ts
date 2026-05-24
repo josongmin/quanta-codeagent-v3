@@ -110,7 +110,7 @@ describe("ADR-0162 spawner hellgate — A. Validation", () => {
     expect(caught).not.toBeNull()
     // Either Bun throws synchronously on missing entry (spawn-failed) OR the
     // child exits immediately (spawn-failed via exit-before-first-line).
-    expect(["spawn-failed", "spawn-timeout"]).toContain(caught?.code)
+    expect(["spawn-failed", "spawn-timeout"]).toContain(caught?.code ?? "")
   })
 })
 

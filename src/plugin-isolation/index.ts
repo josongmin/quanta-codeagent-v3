@@ -1,5 +1,7 @@
 /** Plugin process isolation slice (ADR-0162). Barrel. */
 export { createBunSpawner } from "./bun-spawner"
+export type { CallOpts, PluginHostOpts } from "./plugin-host"
+export { DEFAULT_CALL_TIMEOUT_MS, PluginHost, PluginHostError } from "./plugin-host"
 export type {
   IsolatedProcess,
   IsolatedProcessSpawnerPort,
