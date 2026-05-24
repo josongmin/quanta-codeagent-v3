@@ -1,9 +1,16 @@
 import { readdir, readFile } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { basename, join, sep } from "node:path"
 import { errMessage } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
 import { checkSkillSize, MAX_SKILL_SIZE_BYTES } from "./skill-size"
-import type { Skill, SkillEffort } from "./types"
+import {
+  isSkillInstallState,
+  isSkillScope,
+  type Skill,
+  type SkillEffort,
+  type SkillInstallState,
+  type SkillScope,
+} from "./types"
 
 /** Coerce a frontmatter value to a string[] (single scalar → one-element list). */
 const asList = (v: string | string[] | undefined): string[] | undefined => {
@@ -24,6 +31,36 @@ const asEffort = (v: string | string[] | undefined): SkillEffort | undefined => 
 const asScalar = (v: string | string[] | undefined): string | undefined =>
   typeof v === "string" && v.trim() !== "" ? v.trim() : undefined
 
+/**
+ * ADR-0134 — infer skill scope from the load path. The lenient frontmatter
+ * parser accepts an explicit `scope:` field (validated by
+ * {@link isSkillScope}); if it's absent or malformed we fall back to the
+ * canonical path-shape heuristics below. The directory tokens are tested
+ * against the platform-normalized POSIX separator so the inference works on
+ * Windows too.
+ *
+ * Order matters — admin/team/repo/personal/user/system patterns are evaluated
+ * before the conservative "builtIn" default so a path like
+ * `/.../system-skills/.../SKILL.md` resolves to "system" even when the file
+ * also lives inside a user's home directory.
+ */
+const inferScopeFromPath = (sourcePath: string): SkillScope => {
+  // Normalize to POSIX separators so the same heuristics work on Windows.
+  const p = sourcePath.replaceAll(sep, "/")
+  if (p.includes("/admin-skills/")) return "admin"
+  if (p.includes("/.team-skills/")) return "team"
+  if (p.includes("/.quanta/skills/")) return "repo"
+  if (p.includes("/.quanta/personal-skills/")) return "personal"
+  if (p.includes("/.quanta/admin-skills/")) return "admin"
+  // Pre-0134 fallback: ~/.claude/skills/ ⇒ user (auto-migrate target).
+  if (p.includes("/.claude/skills/")) return "user"
+  if (p.includes("/.quanta/user-skills/") || p.includes("/.quanta-user/skills/")) return "user"
+  // Bundled SSOT — src/skill/system-skills/<name>/SKILL.md.
+  if (p.includes("/skill/system-skills/")) return "system"
+  // Anything else (loaded from in-code / unknown layout) ⇒ builtIn.
+  return "builtIn"
+}
+
 /** Build a {@link Skill} from a file's raw contents. */
 const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
   const { data, body } = parseFrontmatter(raw)
@@ -35,11 +72,38 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
       ?.trim() ??
     ""
 
+  // ADR-0134 — frontmatter wins over path inference. Unknown scope tokens are
+  // dropped silently (the strict parser is the loud path; this lenient parser
+  // is best-effort metadata).
+  const declaredScope = asScalar(data.scope)
+  const scope: SkillScope =
+    declaredScope !== undefined && isSkillScope(declaredScope)
+      ? declaredScope
+      : inferScopeFromPath(sourcePath)
+
+  const declaredInstallState = asScalar(data.installState ?? data.install_state)
+  let installState: SkillInstallState | undefined =
+    declaredInstallState !== undefined && isSkillInstallState(declaredInstallState)
+      ? declaredInstallState
+      : undefined
+  // Admin scope ⇒ installState pinned to "required" (same invariant the strict
+  // parser enforces; we mirror it for the lenient path so the registry sees a
+  // consistent shape regardless of which parser ran).
+  if (scope === "admin" && installState !== "required") installState = "required"
+
+  const adminInstalledBy =
+    scope === "admin"
+      ? (asScalar(data.adminInstalledBy ?? data.admin_installed_by) ?? null)
+      : undefined
+
   const skill: Skill = {
     name: asScalar(data.name) ?? name,
     description,
     body,
     sourcePath,
+    scope,
+    ...(installState !== undefined ? { installState } : {}),
+    ...(adminInstalledBy !== undefined ? { adminInstalledBy } : {}),
   }
   const tools = asList(data.tools)
   if (tools) skill.tools = tools
