@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: frontmatter 발견 → 본문 컨텍스트 주입
 evidence:
-  code: []
+  code: [src/skill/discover.ts, src/skill/skill-tool.ts, src/agent/tier1/skill.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/skill.test.ts, tests/unit/skill-frontmatter-parse.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_SKILLS_DIR]

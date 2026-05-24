@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: reactive fail-fast
 evidence:
-  code: []
+  code: [src/agent/compaction.ts, src/agent/compaction-breaker.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

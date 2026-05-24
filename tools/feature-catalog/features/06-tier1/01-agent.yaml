@@ -13,10 +13,10 @@ purpose: |
   safety-posture (mode / verifyGuard / closeoutGuard / hitl)는
   `buildChildConfig`가 자식 config에 옵셔널 spread로 전파한다.
 evidence:
-  code: []
+  code: [src/subagent/agent-tool.ts, src/subagent/task-tools.ts, src/subagent/registry.ts, src/agent/subagent-runner.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/subagent.test.ts, tests/unit/subagent-runner.test.ts]
     integration: []
     contract: []
 knobs: []

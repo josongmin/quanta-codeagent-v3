@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: in-proc counters/p50·p95, AgentRecorder, no PII/network
 evidence:
-  code: []
+  code: [src/agent/metrics.ts, src/observability/metrics.ts, src/observability/metrics/in-memory-registry.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/observability.test.ts, tests/unit/observability-metrics-hellgate.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_METRICS]

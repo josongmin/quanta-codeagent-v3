@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: bun run dev|start, .env 로드, 전 SOTA++ 노브 default OFF
 evidence:
-  code: []
+  code: [src/apps/cli/index.ts, src/apps/cli/dotenv.ts, package.json]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/dotenv.test.ts]
     integration: []
     contract: []
 knobs: []

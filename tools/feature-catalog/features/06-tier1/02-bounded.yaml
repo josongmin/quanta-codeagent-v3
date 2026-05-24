@@ -13,10 +13,10 @@ purpose: |
   and-braces가 아니라 LOAD-BEARING 재귀 한계 (다른 모든 자식 dispatch가
   이 한도를 통과해야 함).
 evidence:
-  code: []
+  code: [src/agent/subagent-runner.ts, src/subagent/agent-tool.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/subagent-runner.test.ts, tests/unit/subagent-6-tools-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

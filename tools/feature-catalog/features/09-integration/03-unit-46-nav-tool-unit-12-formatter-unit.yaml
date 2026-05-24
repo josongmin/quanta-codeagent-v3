@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit
 evidence:
-  code: []
+  code: [src/lsp/adapters/jsonrpc.ts, src/tool/lsp_nav/index.ts, src/tool/lsp_nav/formatters.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/lsp-jsonrpc.test.js, tests/unit/lsp-nav-tools.test.ts, tests/unit/lsp-nav-formatters.test.ts]
     integration: []
     contract: []
 knobs: []

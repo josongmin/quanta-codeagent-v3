@@ -14,10 +14,10 @@ purpose: |
   jsonl-recorder.ts`; lifecycle (open/close) is idempotent so a late event
   after close is a silent no-op instead of a crash.
 evidence:
-  code: []
+  code: [src/stream/adapters/jsonl-recorder.ts, src/stream/adapters/tee.ts, src/stream/adapters/jsonl-retention.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/jsonl-recorder.test.ts, tests/unit/jsonl-recorder-retention.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_OBSERVE_DIR]

@@ -7,7 +7,7 @@ maturity: L4
 status: stable
 purpose: 강화 "Trust and inputs"
 evidence:
-  code: []
+  code: [src/agent/prompt.ts, src/agent/untrusted.ts]
   adrs: []
   tests:
     unit: []

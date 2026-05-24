@@ -15,11 +15,11 @@ purpose: |
   `validator.ts` = validate). Each round is byte-deterministic given identical
   collaborators — the policy itself is pure.
 evidence:
-  code: []
+  code: [src/apps/bench/eval/repair/index.ts, src/apps/bench/eval/repair/validator.ts, src/apps/bench/eval/repair/context.ts]
   adrs: []
   tests:
-    unit: []
-    integration: []
+    unit: [tests/unit/repair-validator.test.ts, tests/unit/repair-context.test.ts]
+    integration: [tests/integration/bench-repair.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null
