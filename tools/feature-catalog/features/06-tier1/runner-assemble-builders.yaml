@@ -1,0 +1,68 @@
+id: runner-assemble-builders
+title: runner/assemble — surface-agnostic per-collaborator builder family
+section: 6
+subsystem: surface-agnostic 오케스트레이션 드라이버
+order: 117
+maturity: L4
+status: new
+purpose: |
+  `apps/cli/internal.ts#buildTooling` 의 단일 GodFn (env 읽기 + collaborator
+  생성 + 레지스트리 와이어링 한 곳) 을 9 개 per-subsystem builder + 1 composer
+  로 분해. 각 builder 는 SRP — 단일 collaborator 또는 단일 config 블록만 책임.
+
+  9 builders + 1 composer (`src/runner/assemble/`):
+    - `llm.ts`        — `buildLLMCore` / `composeLLMCore` / `pickProviderCore`
+                        / `parseFallbackModels` / RetryingLLM + FallbackLLM 합성
+                        + auto-mode classifier port 부착
+    - `store.ts`      — `buildStoreCore` + `buildEmbedderCore` (PersistentStorePort
+                        / EmbedderPort 생성)
+    - `memory.ts`     — `buildMemoryConfigCore` + `parseRecallTiers`
+    - `skill.ts`      — `buildSkillsConfigCore`
+    - `subagent.ts`   — `buildSubagentConfigCore`
+    - `compaction.ts` — `buildCompactionBreakerConfigCore` +
+                        `buildSummarizerLlmCore`
+    - `verify.ts`     — `buildVerifyGuardConfigCore`
+    - `streaming.ts`  — `buildStreamingCore` (StreamPort 생성)
+    - `tooling.ts`    — `buildToolingCore` (위 8 의 결과 + opt-in tool 배열을
+                        `ToolRegistry` 로 와이어링; memory-self-edit gate +
+                        per-config slog.info 보존)
+    - `config.ts`     — `assembleConfig` (collaborators + history → 불변
+                        `AgentConfig` 합성; 조건부 spread 100% byte-identical)
+
+  SLICE INVARIANT: 모든 builder 가 `process.env` / `process.argv` 직접 읽기
+  ZERO — surface 가 자체 ENV/HTTP/IPC 를 typed `*AssembleInput` 으로 1 회
+  매핑 후 호출. 이게 동일 builder 가 Web/Tauri surface 를 fork 없이 백킹할 수
+  있게 하는 핵심. biome `noRestrictedImports` 규칙으로 `apps/**` import
+  강제 차단.
+
+  Composer ("assemble") vs Factory ("build") 명명 구분: build* 는 단일
+  collaborator 를 instantiate, `assembleConfig` 는 이미 만들어진 조각들을
+  type-safe 으로 composing 만. 새 collaborator 추가 비용 일정 (단일 builder
+  + barrel re-export + composer fold).
+evidence:
+  code:
+    - src/runner/assemble/index.ts
+    - src/runner/assemble/llm.ts
+    - src/runner/assemble/store.ts
+    - src/runner/assemble/memory.ts
+    - src/runner/assemble/skill.ts
+    - src/runner/assemble/subagent.ts
+    - src/runner/assemble/compaction.ts
+    - src/runner/assemble/verify.ts
+    - src/runner/assemble/streaming.ts
+    - src/runner/assemble/tooling.ts
+    - src/runner/assemble/config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/assemble.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  CLI shim (`apps/cli/internal.ts` / `config-assemble.ts`) 는 동일 export 이름을
+  re-expose 해서 132+ 기존 consumer 영향 ZERO. byte-identical 게이트: 모든
+  default-OFF (store 없음, fallback 모델 없음, classifier 비활성, …) 시
+  `runOnce` / `runAgent` 가 prior inline 거동과 정확히 동일 path 통과.

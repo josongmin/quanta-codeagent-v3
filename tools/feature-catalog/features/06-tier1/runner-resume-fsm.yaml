@@ -1,0 +1,48 @@
+id: runner-resume-fsm
+title: resolveResume — surface-agnostic session-resume state machine
+section: 6
+subsystem: surface-agnostic 오케스트레이션 드라이버
+order: 115
+maturity: L4
+status: new
+purpose: |
+  `--resume <token>` / `--new-session` startup state 결정을 surface 무관 슬라이스로
+  격리. argv/env 직접 읽기 ZERO — 모든 입력이 `ResolveResumeInput` 으로 명시되어
+  CLI/Web/Tauri 어느 surface 든 자신의 argv/env/HTTP 파서로 1회 변환 후 호출.
+
+  Behavior matrix (FSM 4 분기):
+    - no resume / no new-session             → legacy default (empty history, initialId)
+    - `--resume <path-like>`                 → V1 path-mode (loadSession + slog)
+    - `--resume <id-like>`                   → V2 id-mode (loadSessionById, idMeta set)
+    - `--new-session [--title t]`            → V2 id-mode (mint fresh id + stub save)
+
+  Path-like heuristic (`isPathLikeToken`): `/` 또는 `\` 포함 OR `.json` 끝나면
+  path-mode, 아니면 opaque id 로 id-mode (`loadSessionById` 호출). 결과 envelope
+  (`ResumeResolution`): history / sessionId / idMeta / inIdMode 플래그 +
+  `missingIdError` / `conflictError` sentinel.
+
+  HIGH-5 guardrails:
+    - `--new-session --resume <id>` 동시 지정 → `conflictError` 로 거부 (이전엔
+      silent ignore). 둘 다 명시되면 어느 id 가 winning 인지 모호하기 때문.
+    - `--resume <id>` 가 resolve 실패 → `missingIdError` sentinel → caller exit 1.
+
+  Default title for `--new-session`: compact UTC `YYYY-MM-DD HH:mm` (16 chars)
+  via `defaultUntitled(now)` — 이전 full ISO 보다 친화적.
+evidence:
+  code:
+    - src/runner/orchestrate/resume-fsm.ts
+    - src/runner/orchestrate/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli-resume-heuristic.test.ts
+    integration:
+      - tests/integration/resume-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  이전 위치: `apps/cli/resume.ts` — 재배치 후 CLI 모듈은 re-export shim 으로
+  유지 (132 importer 영향 ZERO). `cli-resume-state-machine` 카탈로그 항목은
+  CLI surface 레벨의 `--resume` 통합 (path-mode vs id-mode split) 를 다루고,
+  본 항목은 그 하부 surface-agnostic FSM 자체.

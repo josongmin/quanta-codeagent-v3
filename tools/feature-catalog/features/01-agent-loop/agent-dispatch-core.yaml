@@ -1,0 +1,58 @@
+id: agent-dispatch-core
+title: dispatch core — tool-call seam (admissibility + result shaping)
+section: 1
+subsystem: 코어 루프 dispatch seam
+order: 206
+maturity: L5
+status: new
+purpose: |
+  `src/agent/dispatch.ts` — `ToolRegistry.run()` 직전/직후 모든 deny/permit
+  결정 + result shaping 을 한 곳에 모은 dispatch seam 의 본체. 코어 루프
+  (`loop.ts`) 는 본 모듈만 호출하면 되도록 6 가지 cross-cutting concerns 가
+  하나의 진입점에서 sequenced:
+
+    1. Admissibility gate (`runAdmissibilityGate`) — gate decision (allow /
+       deny / handoff / plan-blocked / hook-denied / declined) 을 typed 으로
+       반환. dispatch path 가 throws 하지 않고 LLM 에 `tool_result` 로 반사.
+    2. DedupGate — pre-flight (T3 SOTA++ verify-loop stuck fix) 중복 호출 차단.
+    3. Dispatch-seam guard (`checkDispatchAllowed`) — plan-mode mutating
+       차단 (sibling 모듈; deny short-circuit 위치만 본 모듈).
+    4. Image-block composition — `composeToolResultContent` 로 multi-modal
+       반환을 ToolResult.content 와 contentBlocks 양쪽으로 fan-out (ADR-0126).
+    5. Effect-channel wiring (`wireCheckpointedEffectChannel`) — verify
+       checkpoint bridge 와 LocalEffectChannel 연결.
+    6. Plan-exit flow (`runPlanExitFlow`) — plan 탈출 시 3-way exit dispatch.
+    7. Evidence flattening — `ToolResult.evidence` 의 stderrTail/exitCode/
+       fullLogPath 를 `DispatchResult` flat field 로 surface (RFC-0002 §5.2).
+       `STDERR_TAIL_CAP = 4_000` 으로 정확히 per-tool cap (bash/test_runner)
+       과 일치 — 이전 2_000 silent halving 버그 R5 audit C1 에서 fix.
+
+  `dispatch-helpers.ts` (sibling, cycle-safe) 의 `resultBlock` / `deny` /
+  `HANDOFF_SUFFIX` 가 양쪽 (dispatch + admissibility-gate) 에서 같은 ToolResult
+  shape 생성하도록 SSOT.
+
+  Localize-phase guard (`decideLocalizePhase`) + `redactSecrets` (sensitivity-
+  classed) 도 본 모듈에서 호출 — tool_result 가 LLM 에 도달하기 전 마지막 정제.
+evidence:
+  code:
+    - src/agent/dispatch.ts
+    - src/agent/dispatch-helpers.ts
+    - src/agent/dispatch-seam-guard.ts
+    - src/agent/dispatch-types.ts
+    - src/agent/admissibility-gate.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/dispatch.test.ts
+      - tests/unit/dispatch-shell-observer-forward.test.ts
+      - tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Dispatch seam 의 모든 deny/permit 결정이 throws 가 아닌 typed `DispatchResult`
+  로 surface 하는 게 핵심 invariant — `loop.ts` 의 try/catch unwinding 없이
+  LLM 에 `tool_result.is_error=true` 로 자연 반사. evidenceOf 헬퍼는
+  `exactOptionalPropertyTypes` 호환 위해 모든 optional field 를 conditional
+  spread 로만 set.
