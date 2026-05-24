@@ -29,6 +29,7 @@ evidence:
   code:
     - src/agent/stream-callbacks.ts
     - src/agent/loop.ts
+    - src/observability/turn-timing.ts
   adrs: []
   tests:
     unit: []

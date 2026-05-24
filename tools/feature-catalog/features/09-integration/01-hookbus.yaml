@@ -39,6 +39,7 @@ evidence:
     - src/agent/subagent-runner.ts
     - src/agent/loop.ts
     - src/agent/prompt.ts
+    - src/observability/vocabulary.ts
   adrs:
     - docs/decisions/0133-hook-bidirectional-rpc.md
   tests:

@@ -53,6 +53,7 @@ evidence:
     - src/agent/types.ts
     - src/agent/prompt.ts
     - src/agent/loop.ts
+    - src/observability/vocabulary.ts
   adrs: [80]
   tests:
     unit:

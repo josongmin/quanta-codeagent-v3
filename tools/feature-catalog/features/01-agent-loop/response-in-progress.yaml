@@ -27,6 +27,7 @@ evidence:
     - src/stream/types.ts
     - src/stream/adapters/stdout.ts
     - src/stream/adapters/jsonl-recorder.ts
+    - src/observability/vocabulary.ts
   adrs: [48]
   tests:
     unit:

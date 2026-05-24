@@ -30,6 +30,7 @@ evidence:
   code:
     - src/agent/admissibility-gate.ts
     - src/observability/spans.ts
+    - src/observability/vocabulary.ts
   adrs: [20, 32, 47]
   tests:
     unit:

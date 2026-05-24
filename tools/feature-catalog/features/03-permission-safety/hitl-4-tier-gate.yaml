@@ -23,6 +23,7 @@ evidence:
     - src/agent/hitl-tier.ts
     - src/agent/hitl-tier-registry.ts
     - src/agent/admissibility-gate.ts
+    - src/observability/vocabulary.ts
   adrs: [20, 26, 29, 47]
   tests:
     unit:

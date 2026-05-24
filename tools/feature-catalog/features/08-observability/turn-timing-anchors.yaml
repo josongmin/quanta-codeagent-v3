@@ -28,6 +28,7 @@ purpose: |
 evidence:
   code:
     - src/observability/turn-timing.ts
+    - src/observability/vocabulary.ts
   adrs: [77]
   tests:
     unit:

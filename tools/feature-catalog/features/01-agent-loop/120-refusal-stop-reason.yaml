@@ -28,6 +28,7 @@ evidence:
     - src/agent/loop.ts
     - src/agent/types/agent-outcome.ts
     - src/agent/stop-category.ts
+    - src/observability/vocabulary.ts
   adrs: [120]
   tests:
     unit:

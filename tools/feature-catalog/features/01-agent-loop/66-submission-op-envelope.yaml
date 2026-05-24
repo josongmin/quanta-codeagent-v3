@@ -28,6 +28,7 @@ evidence:
     - src/agent/submission.ts
     - src/agent/control-op-handler.ts
     - src/agent/loop.ts
+    - src/observability/vocabulary.ts
   adrs: [72]
   tests:
     unit:

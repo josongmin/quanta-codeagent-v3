@@ -7,7 +7,7 @@ maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
-telemetry_keys: [quanta.ts]
+telemetry_keys: []
 modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]

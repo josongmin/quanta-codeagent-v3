@@ -57,6 +57,7 @@ evidence:
     - src/stream/index.ts
     - src/stream/adapters/jsonl-recorder.ts
     - src/stream/adapters/stdout.ts
+    - src/observability/vocabulary.ts
   adrs: [95, 96, 97]
   tests:
     unit:

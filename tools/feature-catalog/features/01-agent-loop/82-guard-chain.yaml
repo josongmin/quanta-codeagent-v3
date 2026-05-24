@@ -33,6 +33,7 @@ evidence:
     - src/agent/guards/index.ts
     - src/agent/guards/closeout-guard.ts
     - src/agent/loop.ts
+    - src/observability/vocabulary.ts
   adrs: []
   tests:
     unit:

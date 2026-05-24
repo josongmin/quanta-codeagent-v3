@@ -37,6 +37,7 @@ evidence:
     - src/agent/memory-consolidator-hook.ts
     - src/agent/loop.ts
     - src/agent/types.ts
+    - src/observability/vocabulary.ts
   adrs: [68]
   tests:
     unit:

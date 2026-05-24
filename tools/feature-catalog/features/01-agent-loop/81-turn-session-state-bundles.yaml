@@ -30,6 +30,7 @@ evidence:
     - src/agent/turn-context.ts
     - src/agent/loop.ts
     - src/agent/stream-callbacks.ts
+    - src/observability/vocabulary.ts
   adrs: []
   tests:
     unit: []

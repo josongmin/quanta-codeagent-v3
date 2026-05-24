@@ -51,6 +51,7 @@ evidence:
     - src/llm/types.ts
     - src/llm/adapters/anthropic.ts
     - src/llm/adapters/openai.ts
+    - src/observability/vocabulary.ts
   adrs: [79]
   tests:
     unit:
