@@ -1,0 +1,48 @@
+id: retrieval-commit-embedder
+title: Commit embedding — git-aware recall over recent commit messages with LRU cache
+section: 5
+subsystem: retrieval SOTA stack — Axis C (ADR-0159)
+order: 93
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "adr:0159"]
+depends_on: [retrieval-rerank-registry]
+purpose: |
+  Pull recent git commit notes and embed them so a query like "why did
+  we revert X" can recall the deciding commit by semantic similarity to
+  its message body, not just by author / date / sha. Architecture is
+  closed ports:
+    - GitLogPort: the slice does NOT shell out itself — production wires
+      `git log --format` parsing, tests inject a hand-built array
+    - EmbeddingPort: reuses the multi-vendor port from Axis D so the
+      embedder vendor is the caller's choice (openai/voyage/...)
+  In-process LRU cache keyed by sha — the same commit is never
+  re-embedded across queries within the same process. Deterministic
+  eviction (oldest insertion drops). Touch-on-read keeps hot shas alive.
+  Cache poisoning resistance: a malicious embedder returning a different
+  vector for the same sha cannot silently replace a cached entry across
+  cache-hit boundaries (hellgate-proven).
+evidence:
+  code:
+    - src/retrieval/commit-embedder.ts
+  adrs: [159]
+  tests:
+    unit:
+      - tests/unit/retrieval-commit-embedder.test.ts
+      - tests/unit/retrieval-commit-embedder-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - CommitEmbedderOptions.cacheMax — LRU size, default 1024
+  - GitLogPort — caller decides how to walk git history
+  - EmbeddingPort — vendor choice flows from Axis D
+deliberate_hold: null
+notes: |
+  Commit format for embedding is `subject\n\nbody` (or `subject` alone
+  when body is empty) so the same sha always produces the same embedding
+  given a deterministic embedder. CacheMax=0 fully bypasses caching.

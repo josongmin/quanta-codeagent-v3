@@ -1,0 +1,50 @@
+id: retrieval-chunk-bucket
+title: Token-bucket re-chunker — 4 buckets × 10% sliding-window overlap
+section: 5
+subsystem: retrieval SOTA stack — Axis B (ADR-0159)
+order: 92
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "adr:0159"]
+depends_on: []
+purpose: |
+  Split a long text into fixed-size token chunks with sliding-window
+  overlap so downstream context windows can ingest big documents without
+  dropping middle content. 4 buckets:
+    - identity     — no split; emit [text] unchanged
+    - small-600    — 600 tokens
+    - medium-2400  — 2400 tokens
+    - large-4000   — 4000 tokens
+  Default overlap is 10% — the published DPR (Karpukhin et al. 2020) +
+  RAG (Lewis et al. 2020) standard, NOT invented. TokenizerPort is the
+  closed seam (ISP — count() only) — production wires tiktoken / claude
+  bpe / cl100k. Byte-deterministic for a fixed tokenizer. Validation
+  rejects NaN and out-of-range overlapRatio (NaN trap: NaN comparisons
+  return false, so a naive `r < 0 || r >= 1` lets NaN through —
+  Number.isFinite gate closes that hole).
+evidence:
+  code:
+    - src/retrieval/chunk-bucket.ts
+  adrs: [159]
+  tests:
+    unit:
+      - tests/unit/retrieval-chunk-bucket.test.ts
+      - tests/unit/retrieval-chunk-bucket-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - ChunkBucketOptions.bucket — identity / small-600 / medium-2400 / large-4000
+  - ChunkBucketOptions.overlapRatio — sliding-window overlap, default 0.10
+  - ChunkBucketOptions.tokenizer — injected TokenizerPort
+deliberate_hold: null
+notes: |
+  Per-query LEARNED chunk size is intentionally out of scope (negative
+  invariant in ADR-0159 — needs training loop + offline data). Loop guard
+  caps at 1M iterations to defang a degenerate tokenizer that always
+  returns 0 — honest tokenizers + typical doc sizes (≤ ~10 MB) never
+  approach the cap.

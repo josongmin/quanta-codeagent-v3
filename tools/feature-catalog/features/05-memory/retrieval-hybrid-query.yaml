@@ -1,0 +1,49 @@
+id: retrieval-hybrid-query
+title: Hybrid query 3-stage funnel — keywords / embeddings / hybrid with optional final rerank
+section: 5
+subsystem: retrieval SOTA stack — Axis E (ADR-0159)
+order: 95
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "adr:0159"]
+depends_on: [retrieval-rerank-registry, retrieval-multi-vendor-embedding]
+purpose: |
+  Pure orchestration over 4 axes. Stages:
+    1. Run the source(s) the query type asks for
+       - keywords   → BM25 source only
+       - embeddings → embedding source only
+       - hybrid     → both, IN PARALLEL (Promise.all)
+    2. If both ran, fuse with RRF (Cormack 2009 k=60).
+    3. If a final-stage rerank is supplied, run it.
+  Sources are injected callbacks — runHybridQuery does NO I/O itself.
+  Limit is honored at the boundary (after rerank). Hellgate-proven:
+  type=keywords NEVER calls the embedding source (and reverse); hybrid
+  runs sources concurrently (timing test); source / rerank errors
+  propagate (no silent partial result).
+evidence:
+  code:
+    - src/retrieval/hybrid-query.ts
+  adrs: [159]
+  tests:
+    unit:
+      - tests/unit/retrieval-hybrid-query.test.ts
+      - tests/unit/retrieval-hybrid-query-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - HybridQueryInput.type — keywords / embeddings / hybrid
+  - HybridQueryInput.rerank — optional final-stage RerankPort
+  - HybridQueryInput.limit — output cap
+deliberate_hold: null
+notes: |
+  Multi-hop retrieval is intentionally out of scope (negative invariant
+  in ADR-0159) — that needs a planner, which is covered by
+  src/agent/follow-up-queue.ts at a different layer (turn / message),
+  not chunk. The 3-stage funnel composes with localize (foundation BM25)
+  and ranking.ts (foundation hybrid vector + lexical) without modifying
+  either — backward compat 100%.
