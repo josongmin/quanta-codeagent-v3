@@ -1,0 +1,46 @@
+id: slash-rules-indicator
+title: /rules + rule-pill — repo-local rule inventory indicator
+section: 10
+subsystem: REPL panels (R10)
+order: 27
+maturity: L4
+status: new
+purpose: |
+  Codex `repo-local-rule-ingestion-audit.md` (AGENTS.md pattern) inspired
+  surface for the CLI: surfaces the COUNT + IDENTITY of repo-local rule files
+  loaded / matched for the current session (AGENTS.md, CLAUDE.md, file-scoped
+  `.cursor/rules/*.mdc` + `.quanta/rules/*.md`). Without this indicator a user
+  cannot tell WHICH rule files the model is being primed with — the existing
+  loaders (`@/agent/repo-rules`, `@/agent/glob-rules`) read the files invisibly
+  and inject the rendered body into the prompt. Two visible artifacts ride on
+  the inventory: (1) short inline pill `[rules: 3/4 matched]` joining the
+  existing status-pills row (`renderRuleBadge`); (2) boxed list painted by the
+  `/rules` slash command body — three subcommands `/rules` (short summary:
+  pill + matched list), `/rules list` (full inventory: matched + unmatched),
+  `/rules path <pattern>` (simulate which rules would fire for a path).
+evidence:
+  code:
+    - src/apps/cli/rule-indicator.ts
+    - src/apps/cli/rules-cmd.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/rule-indicator.test.ts
+      - tests/unit/cli/rules-cmd.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_RULE_INDICATOR
+  - QUANTA_PILL_RULES
+deliberate_hold: null
+notes: |
+  Slice: `src/apps/cli/*` READ-ONLY against `@/agent`. Calls `loadRepoRules` +
+  `loadGlobRules` + `selectGlobRules` exactly as the loop does — but the loop's
+  outputs are unchanged. No new prompt surface, no new wire to the LLM —
+  purely a UI mirror. Default-ON contract with byte-identical OFF: pill gated
+  by `QUANTA_PILL_RULES` (default `"1"`); master `QUANTA_RULE_INDICATOR=0`
+  short-circuits the inventory builder (returns empty inventory, no disk I/O)
+  so `/rules` paints "(disabled)". Non-TTY surfaces inherit empty pill via
+  `status-pills.ts`. Cost note: composer caches the inventory once-per-session
+  (per-turn would double-stat).

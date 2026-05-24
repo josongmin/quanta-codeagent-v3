@@ -1,0 +1,42 @@
+id: slash-branches-progress
+title: /branches — speculative N-best branch-search progress
+section: 10
+subsystem: REPL panels (R10)
+order: 24
+maturity: L4
+status: new
+purpose: |
+  Live progress visualization for catalog 대6 speculative branch search
+  (ADR-0084 / Agentless N-best verifier-prover). Without a sticky indicator the
+  user sees dead air during the multi-second parallel candidate loop and a
+  single eventual `winner` line. This module reads the TYPED `BranchTraceEvent`
+  stream (raw, NOT the formatted ProgressLine text) and maintains a
+  deterministic state machine over it: per-candidate phase
+  (started|finished|failed|scored|delta), rolling "best so far" = highest score
+  across `candidate-scored` events (ties broken lexicographically by id for
+  determinism — matches the orchestrator's `argmaxSelector` tie-break shape),
+  terminal latch on `winner-selected`. Two render surfaces: `formatStatusLine`
+  (compact single line for the StatusBar transient slot, Codex/Claude
+  `thinking…` parity for the branch-search inner loop) +
+  `formatBranchesPanel` (multi-line scrollback panel for the `/branches`
+  command — last-search inventory with ranks, scores, winner glyph).
+evidence:
+  code:
+    - src/apps/cli/branch-search-progress.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: [84]
+  tests:
+    unit:
+      - tests/unit/branch-search-progress.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_BRANCH_SEARCH_PROGRESS
+deliberate_hold: null
+notes: |
+  Slice: `src/apps/cli` (read-only surface tier). Imports type-only from
+  `@/agent/branch-search` — never the runtime orchestrator. Host wires this
+  module's `ingest` into `AgentConfig.onBranchTrace` (the typed-observer seam
+  added at the same time). Default-OFF: when `isBranchProgressEnabled` returns
+  false (non-TTY OR `QUANTA_BRANCH_SEARCH_PROGRESS=0`) the caller skips ingest
+  and `/branches` prints "not wired" exits 0 — byte-identical to pre-R10.

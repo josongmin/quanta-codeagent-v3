@@ -1,0 +1,43 @@
+id: slash-history
+title: /history — recent turns + tool-call breadcrumb
+section: 10
+subsystem: REPL panels (R10)
+order: 23
+maturity: L4
+status: new
+purpose: |
+  Compact scannable summary of the live session so the operator can answer
+  "what did I just do?" without scrolling. Four subcommands: `/history` (last N
+  turns, one line each with a `✓✓✗` per-turn tool-status microbar);
+  `/history tools` (last N tool calls with per-call OK/FAIL/retry);
+  `/history turn <N>` (drill into one turn — user prompt + the full ordered tool
+  sequence); `/history --last <K>` (cap override). Two data sources, surface
+  picks the most accurate available: REQUIRED `messages: () => readonly Message[]`
+  (drives turn boundaries — every `user` opens a turn; subsequent `assistant`
+  + `tool_result` blocks roll up; tool success read from `ToolResultBlock.is_error`
+  — the AUTHORITATIVE pairing point because the model itself sees this exact
+  value); OPTIONAL `events: () => Promise<readonly HistoryToolEvent[]>` (envelope
+  JSONL projection, USED PURELY for the wall-clock timestamp column — absent ⇒
+  `--:--:--` and exit 0).
+evidence:
+  code:
+    - src/apps/cli/history-cmd.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/history-cmd.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_HISTORY_DEFAULT_N
+deliberate_hold: null
+notes: |
+  Mutation policy: READS only — never writes back to the message array, never
+  rewinds, never archives. `/history` is a viewport on the session-commands'
+  authoritative store; the two never collide. Slice: `src/apps/cli/**`; imports
+  `@/llm` for the `Message` shape type-only so the run-time graph stays
+  untouched. Default-OFF: without `ctx.history` the command prints "history:
+  not wired in this surface" exits 0 (parity with `/side`, `/skills`). Cap
+  resolution: CLI `--last <K>` wins > `QUANTA_HISTORY_DEFAULT_N` env > internal
+  default.
