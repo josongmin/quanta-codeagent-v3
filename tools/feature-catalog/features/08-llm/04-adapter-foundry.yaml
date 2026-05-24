@@ -4,7 +4,7 @@ section: 8
 subsystem: LLM provider seam — cloud transport
 order: 4
 maturity: L2
-status: stub
+status: hold
 ui_surfaces: [n-a]
 monitoring: integrated
 modes: [n-a]

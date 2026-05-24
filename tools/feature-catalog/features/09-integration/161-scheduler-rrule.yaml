@@ -9,7 +9,7 @@ ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: integrated
-config_refs: {}
+
 owners: ["@songmin"]
 labels: ["surface:cli", "surface:ipc"]
 purpose: |
