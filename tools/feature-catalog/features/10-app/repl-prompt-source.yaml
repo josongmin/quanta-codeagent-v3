@@ -1,0 +1,50 @@
+id: repl-prompt-source
+title: REPL `PromptSource` adapter — slash short-circuit + raw-line reader
+section: 10
+subsystem: CLI REPL surface — prompt source adapter
+order: 15
+maturity: L4
+status: stable
+purpose: |
+  Sub-feature of `cli-repl-solid-split` umbrella — separately catalogued because
+  this module implements the `runner.PromptSource` port for the CLI surface and
+  is the in-REPL slash-command short-circuit point that gives `quanta` its
+  Codex `forceReloadSkills` parity for `/skills` / `/reload-skills`.
+
+  Four named exports (each extracted to keep `runReplLoopRaw`'s `next` closure
+  under biome's cognitive-complexity budget):
+    - `tryRunReplSlash(input, slashCtx)` — returns true iff the input was
+      routed in-REPL (caller skips agent turn). `isSlashCommand` rejects paths
+      like `/path/to/x` so legacy file-resume tokens still fall through.
+      Empty `slashCtx` ⇒ commands needing session state print "not wired"
+      and exit 0 (default-OFF).
+    - `readReplLine(signal, uxOpts)` — raw line reader bridge with
+      promptHistory + multiline support; returns null on AbortError.
+    - `classifyReplLine(signal, slashCtx, ...)` — combines read + slash route
+      classification for the loop's `next` closure.
+    - `buildCliPromptSource(...)` — constructs the byte-identical
+      `runReplLoopRaw` post-line behaviour as a reusable `PromptSource`.
+
+  Without this seam the slash routing would either live in `runReplLoop` (cog-
+  complexity overflow) or in the loop's anonymous closures (untestable).
+evidence:
+  code:
+    - src/apps/cli/repl/prompt-source.ts
+    - src/apps/cli/repl/readline-loop.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/cli/skills-slash-hellgate.test.ts
+    integration:
+      - tests/integration/skills-slash-e2e-hellgate.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Carved out of the `cli-repl-solid-split` umbrella because it (a) implements a
+  named adapter pattern (`PromptSource` port from `@/runner`), (b) is the
+  surface for two substantial hellgate batteries (528-LOC unit + 382-LOC
+  integration) explicitly exercising `tryRunReplSlash` routing, and (c) hosts
+  4 distinct exports — not a single-purpose plumbing helper. Other adapter
+  modules in the umbrella (skills-callback / resume-fsm) stay in-umbrella —
+  they are <70 LOC with no independent hellgate test surface.
