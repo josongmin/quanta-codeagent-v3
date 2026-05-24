@@ -63,7 +63,7 @@ function usage(): never {
       "  check-changed [<base-ref>]  PR-time gate: new src files must be in fc",
       "  grade [<letter>]            evidence-completeness scorecard (A-F)",
       "  stale                       flag entries where source newer than yaml >7d",
-      "  query label:X owner:Y ...   filter by labels/owners/section/maturity/depends/grade",
+      "  query label:X owner:Y ...   filter by label/owner/section/maturity/depends/grade/ui/monitoring/mode/configurable",
       "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
       "  graph [--section N] [--id X] [--depth N]   emit DOT dependency DAG to stdout",
     ].join("\n"),
@@ -873,9 +873,21 @@ async function cmdQuery(argv: string[]): Promise<void> {
       case "grade":
         filters.push((f) => computeGrade(f) === v)
         break
+      case "ui":
+        filters.push((f) => f.ui_surfaces.includes(v as never))
+        break
+      case "monitoring":
+        filters.push((f) => f.monitoring === v)
+        break
+      case "mode":
+        filters.push((f) => f.modes.includes(v as never))
+        break
+      case "configurable":
+        filters.push((f) => f.configurable === v)
+        break
       default:
         console.error(
-          `query: unknown filter "${k}" (label/owner/section/maturity/depends/lifecycle/grade)`,
+          `query: unknown filter "${k}" (label/owner/section/maturity/depends/lifecycle/grade/ui/monitoring/mode/configurable)`,
         )
         process.exit(2)
     }

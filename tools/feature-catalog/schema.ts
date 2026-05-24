@@ -20,6 +20,27 @@ export const LifecycleStage = z.enum([
   "removed",
 ])
 
+// SOTA Tier-3 — integration tracking axes.
+export const UiSurface = z.enum(["cli", "web", "ide", "tauri", "api", "none", "n-a"])
+export const IntegrationStatus = z.enum(["integrated", "partial", "planned", "none", "n-a"])
+export const ConfigStatus = z.enum([
+  "integrated",
+  "partial",
+  "planned",
+  "static",
+  "none",
+  "n-a",
+])
+export const RunMode = z.enum([
+  "interactive",
+  "headless",
+  "batch",
+  "daemon",
+  "ide",
+  "ci-bot",
+  "n-a",
+])
+
 export const FeatureSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "kebab-case unique id"),
   title: z.string().min(1),
@@ -35,6 +56,21 @@ export const FeatureSchema = z.object({
   supersedes: z.array(z.string()).default([]),
   superseded_by: z.string().optional(),
   sunset_date: z.string().optional(),
+  // SOTA Tier-3 — 4-axis integration tracking (all optional, defaults to "n-a").
+  ui_surfaces: z.array(UiSurface).default([]),
+  monitoring: IntegrationStatus.default("n-a"),
+  modes: z.array(RunMode).default([]),
+  configurable: ConfigStatus.default("n-a"),
+  telemetry_keys: z.array(z.string()).default([]),
+  config_refs: z
+    .object({
+      env: z.array(z.string()).default([]),
+      runtime: z.array(z.string()).default([]),
+      cli: z.array(z.string()).default([]),
+      prefs: z.array(z.string()).default([]),
+    })
+    .partial()
+    .default({}),
   purpose: z.string().min(1),
   evidence: z
     .object({
