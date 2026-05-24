@@ -176,6 +176,11 @@ export interface CompactInput {
   system: SystemPromptInput
   thresholdTokens?: number
   keepRecentTurns?: number
+  /** ADR-0133 — caller-computed flag (`archive.summaries.length === 0` in
+   *  the loop wire). Forwarded verbatim to {@link preCompactHook}. Absent ⇒
+   *  defaults to `false` (the hook sees a non-first compaction; safer
+   *  default for a host that doesn't yet maintain an archive). */
+  isFirstCompaction?: boolean
   /**
    * Cursor-style pre-compact HITL hook (ADR-0075). When provided, the
    * summarizer is consulted ONLY AFTER `preflight` resolves. The seam stays
@@ -199,6 +204,20 @@ export interface CompactInput {
     proposedKeep: number
     proposedSummaryTokens: number
   }) => Promise<"approve" | "defer_one_turn" | "force_now">
+  /**
+   * ADR-0133 — typed `pre_compact` hook bridge. When wired, the threshold-and-
+   * boundary-passing case fires this BEFORE the preflight (so a hook-side
+   * abort short-circuits cheaper than waking the HITL UI). `isFirstCompaction`
+   * is `true` iff this is the first archive-eligible compaction of the
+   * session (caller computes from its `ConversationSummaryArchive.summaries.
+   * length === 0`). A truthy `abortReason` skips THIS compaction (returns
+   * `{compacted:false}` — same shape the breaker observes as no progress).
+   * Absent ⇒ no extra await, byte-identical legacy fast-path.
+   */
+  preCompactHook?: (q: {
+    messagesToCompact: number
+    isFirstCompaction: boolean
+  }) => Promise<{ abortReason: string | null }>
 }
 
 export type CompactResult =
@@ -367,6 +386,22 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
   }
   const prefix = input.messages.slice(0, boundary)
   const suffix = input.messages.slice(boundary)
+  // ADR-0133 — typed `pre_compact` hook FIRST (cheaper than preflight: no
+  // UI wake, no human-in-the-loop wait). Ordered AFTER threshold + boundary
+  // (a degenerate one-giant-turn never reaches the hook for the same reason
+  // it never reaches preflight: the work would be moot). When the bridge
+  // returns `{abortReason}` truthy, we skip THIS compaction — same
+  // `{compacted:false}` shape preflight's `defer_one_turn` produces, so the
+  // breaker observes it identically.
+  if (input.preCompactHook !== undefined) {
+    const { abortReason } = await input.preCompactHook({
+      messagesToCompact: prefix.length,
+      isFirstCompaction: input.isFirstCompaction === true,
+    })
+    if (abortReason !== null) {
+      return { compacted: false, messages: input.messages }
+    }
+  }
   // ADR-0075 — preflight HITL. Ordered AFTER the cheap threshold + boundary
   // guards so a degenerate "one giant turn" never wakes the host UI for a
   // decision that can't matter (compaction would no-op anyway). The proposed

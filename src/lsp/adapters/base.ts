@@ -1,7 +1,16 @@
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import type { Subprocess } from "bun"
 import { logger } from "@/shared"
 import type { LspPort } from "../ports"
+import type {
+  CodeAction,
+  CodeActionKind,
+  CodeActionTextEdit,
+  CodeActionWorkspaceEdit,
+} from "../ports/code-action-port"
+import type { FormatRange, TextEdit as FormatTextEdit } from "../ports/format-port"
+import type { RenameWorkspaceEdit } from "../ports/rename-apply-port"
+import type { SignatureInfo } from "../ports/signature-help-port"
 import type {
   Diagnostic,
   DiagnosticSeverity,
@@ -118,6 +127,56 @@ interface RawPrepareRenameObject {
 }
 type RawPrepareRenameResult = RawRange | RawPrepareRenameObject | null
 
+/** Raw shapes for the 3 new wire methods (code-action / format / signatureHelp)
+ *  + the WorkspaceEdit `applyEdit` consumes. Kept minimal — narrow only fields
+ *  we map (same posture as the nav RPC raw types). */
+interface RawTextEdit {
+  range: RawRange
+  newText: string
+}
+interface RawCodeAction {
+  title: string
+  kind?: string
+  edit?: RawWorkspaceEdit
+}
+/** Servers may answer `textDocument/codeAction` with the legacy `Command`
+ *  shape (no `edit`). We treat those as `quickfix` with no edit — the model
+ *  surfaces the title but cannot apply automatically. */
+interface RawCommand {
+  title: string
+  command: string
+}
+type RawCodeActionEntry = RawCodeAction | RawCommand
+type RawCodeActionResult = RawCodeActionEntry[] | null
+
+/** LSP `WorkspaceEdit`. v1 reads both `changes` (legacy: map of uri → edits)
+ *  AND `documentChanges` (newer: array of {textDocument, edits}). Resource ops
+ *  (create/rename/delete file) are not surfaced — we ignore them. */
+interface RawWorkspaceEdit {
+  changes?: Record<string, RawTextEdit[]>
+  documentChanges?: RawTextDocumentEdit[]
+}
+interface RawTextDocumentEdit {
+  textDocument: { uri: string; version?: number | null }
+  edits?: RawTextEdit[]
+}
+interface RawParameterInformation {
+  label: string | [number, number]
+  documentation?: string | RawMarkupContent
+}
+interface RawSignatureInformation {
+  label: string
+  documentation?: string | RawMarkupContent
+  parameters?: RawParameterInformation[]
+  activeParameter?: number | null
+}
+interface RawSignatureHelp {
+  signatures?: RawSignatureInformation[]
+  activeSignature?: number | null
+  activeParameter?: number | null
+}
+type RawSignatureHelpResult = RawSignatureHelp | null
+
 /** Detect a "method not supported" JSON-RPC error so the nav RPCs can surface
  *  `null` (capability missing) instead of throwing — per the LspPort contract. */
 const isUnsupportedError = (e: unknown): boolean => {
@@ -210,6 +269,176 @@ const toLocation = (l: RawLocation): Location => ({ uri: l.uri, range: toRange(l
 const toLocationOrLink = (l: RawLocation | RawLocationLink): Location => {
   if ("uri" in l) return toLocation(l)
   return { uri: l.targetUri, range: toRange(l.targetSelectionRange ?? l.targetRange) }
+}
+
+/** Closed set of `CodeActionKind` strings we surface. Anything off-list is
+ *  collapsed to `"other"` (same posture as `SymbolKind`'s `"unknown"`). */
+const KNOWN_CODE_ACTION_KINDS = new Set<string>([
+  "quickfix",
+  "refactor",
+  "refactor.extract",
+  "refactor.inline",
+  "refactor.rewrite",
+  "source",
+  "source.organizeImports",
+  "source.fixAll",
+])
+
+const toCodeActionKind = (k: string | undefined): CodeActionKind => {
+  if (k === undefined) return "quickfix"
+  return KNOWN_CODE_ACTION_KINDS.has(k) ? (k as CodeActionKind) : "other"
+}
+
+/** Type-narrow guard: a `RawCodeAction` carries (at minimum) a `title` and
+ *  may carry an `edit`/`kind`. A `RawCommand` has a `command` string. */
+const isCommandOnly = (e: RawCodeActionEntry): e is RawCommand =>
+  "command" in e && typeof (e as RawCommand).command === "string" && !("edit" in e)
+
+const flattenParameterLabel = (label: string | [number, number], signature: string): string => {
+  if (typeof label === "string") return label
+  // [start, end] offset into the signature's `label` (UTF-16 code units per LSP).
+  return signature.slice(label[0], label[1])
+}
+
+const flattenParameterDoc = (d: string | RawMarkupContent | undefined): string | undefined => {
+  if (d === undefined) return undefined
+  if (typeof d === "string") return d
+  return d.value
+}
+
+const toCodeActionTextEdit = (e: RawTextEdit): CodeActionTextEdit => ({
+  range: toRange(e.range),
+  newText: e.newText,
+})
+
+const toFormatTextEdit = (e: RawTextEdit): FormatTextEdit => ({
+  range: toRange(e.range),
+  newText: e.newText,
+})
+
+/** Normalize the two LSP `WorkspaceEdit` variants into a flat per-document
+ *  changes list. `documentChanges` wins when both are present (LSP spec). */
+const toCodeActionWorkspaceEdit = (raw: RawWorkspaceEdit): CodeActionWorkspaceEdit => {
+  if (raw.documentChanges) {
+    return {
+      changes: raw.documentChanges.map((d) => ({
+        uri: d.textDocument.uri,
+        edits: (d.edits ?? []).map(toCodeActionTextEdit),
+      })),
+    }
+  }
+  if (raw.changes) {
+    return {
+      changes: Object.entries(raw.changes).map(([uri, edits]) => ({
+        uri,
+        edits: edits.map(toCodeActionTextEdit),
+      })),
+    }
+  }
+  return { changes: [] }
+}
+
+const mapCodeAction = (e: RawCodeActionEntry): CodeAction => {
+  if (isCommandOnly(e)) {
+    return { title: e.title, kind: "quickfix" }
+  }
+  const ca = e as RawCodeAction
+  const base: CodeAction = { title: ca.title, kind: toCodeActionKind(ca.kind) }
+  if (ca.edit !== undefined) base.edit = toCodeActionWorkspaceEdit(ca.edit)
+  return base
+}
+
+const mapSignature = (s: RawSignatureInformation): SignatureInfo => {
+  const params = (s.parameters ?? []).map((p) => {
+    const out: { label: string; documentation?: string } = {
+      label: flattenParameterLabel(p.label, s.label),
+    }
+    const doc = flattenParameterDoc(p.documentation)
+    if (doc !== undefined) out.documentation = doc
+    return out
+  })
+  const out: SignatureInfo = {
+    label: s.label,
+    parameters: params,
+  }
+  const doc = flattenParameterDoc(s.documentation)
+  if (doc !== undefined) out.documentation = doc
+  if (s.activeParameter !== undefined) out.activeParameter = s.activeParameter
+  return out
+}
+
+/** LSP `CodeActionKind` filter mapping for `textDocument/codeAction` params.
+ *  "all" omits the filter entirely (server returns every kind). The other
+ *  values are passed as-is (prefix-match per LSP spec). */
+const codeActionFilterFor = (
+  kind: "quickfix" | "refactor" | "source" | "all" | undefined,
+): string[] | undefined => {
+  if (kind === undefined || kind === "all") return undefined
+  return [kind]
+}
+
+/** Half-open zero-width range covering the whole document — sent as the
+ *  `range` argument to `textDocument/codeAction` when the caller asked at a
+ *  single position. We anchor the range at the requested position (not the
+ *  file head) so servers that filter by range respect the cursor. */
+const pointRange = (line: number, col: number): RawRange => ({
+  start: { line, character: col },
+  end: { line, character: col },
+})
+
+/** Convert a Format port `range` (or a `Range` from rangeFormatting wire) to
+ *  the raw LSP shape with `character` keys. */
+const toRawRange = (r: FormatRange): RawRange => ({
+  start: { line: r.start.line, character: r.start.character },
+  end: { line: r.end.line, character: r.end.character },
+})
+
+/** Convert a zero-based (line, character) position to a UTF-16 offset in
+ *  `text`. Handles `\n` only (LSP positions are line+character, no separator
+ *  variant). Character offsets past EOL clamp to the line length — same
+ *  behaviour as VS Code's `TextDocument.offsetAt`. */
+const positionToOffset = (text: string, line: number, character: number): number => {
+  let offset = 0
+  let currentLine = 0
+  for (let i = 0; i < text.length; i++) {
+    if (currentLine === line) {
+      const lineEnd = text.indexOf("\n", i)
+      const max = lineEnd === -1 ? text.length - i : lineEnd - i
+      return offset + Math.min(character, max)
+    }
+    if (text.charCodeAt(i) === 0x0a) {
+      currentLine++
+    }
+    offset++
+  }
+  // Past EOF — clamp to file end.
+  return text.length
+}
+
+/** Apply a list of LSP `TextEdit`s to `text`, returning the patched string.
+ *  Edits MUST NOT overlap (LSP spec); we apply them in reverse start-offset
+ *  order so earlier edits don't shift later ones' offsets. Stable for ties
+ *  (preserves caller-supplied order among edits at the same start position). */
+const applyEditsToText = (
+  text: string,
+  edits: readonly { range: { start: Pos; end: Pos }; newText: string }[],
+): string => {
+  if (edits.length === 0) return text
+  const indexed = edits.map((e, i) => ({
+    e,
+    i,
+    startOff: positionToOffset(text, e.range.start.line, e.range.start.character),
+    endOff: positionToOffset(text, e.range.end.line, e.range.end.character),
+  }))
+  // Sort by start desc; for ties keep the higher original index later (which
+  // we apply first since we're walking the sorted array forward and slicing
+  // from the back — `[...].sort` is stable in V8/JSC).
+  indexed.sort((a, b) => b.startOff - a.startOff || b.i - a.i)
+  let out = text
+  for (const { startOff, endOff, e } of indexed) {
+    out = out.slice(0, startOff) + e.newText + out.slice(endOff)
+  }
+  return out
 }
 
 const isRawRange = (v: RawRange | RawPrepareRenameObject): v is RawRange =>
@@ -465,6 +694,98 @@ export class LspClient implements LspPort {
     if (raw.defaultBehavior === true) return null
     if (raw.range === undefined) return null
     return { range: toRange(raw.range), placeholder: raw.placeholder ?? "" }
+  }
+
+  // --- ADR-0143 — wire methods for the 4 expansion ports -----------------
+  // Each follows the same posture as the nav RPCs above:
+  //   1. lazily open the document
+  //   2. issue the request via `callOrNullOnUnsupported` so "method not
+  //      supported" surfaces as a `null` result instead of throwing
+  //   3. normalize the wire shape to our port types
+  // Errors other than "unsupported" (timeout, transport, internal) propagate.
+
+  /** Send `textDocument/codeAction` and normalize the result. `kind` filters
+   *  the server's reply (LSP prefix-match); `"all"` (or omission) lets every
+   *  kind through. */
+  async requestCodeActions(
+    file: string,
+    line: number,
+    col: number,
+    kind?: "quickfix" | "refactor" | "source" | "all",
+  ): Promise<readonly CodeAction[] | null> {
+    const uri = await this.ensureOpen(file)
+    const filter = codeActionFilterFor(kind)
+    const params = {
+      textDocument: { uri },
+      range: pointRange(line, col),
+      context: filter === undefined ? { diagnostics: [] } : { diagnostics: [], only: filter },
+    }
+    const raw = (await this.callOrNullOnUnsupported("textDocument/codeAction", params)) as
+      | RawCodeActionResult
+      | undefined
+    if (raw === null || raw === undefined) return null
+    if (!Array.isArray(raw)) return null
+    return raw.map(mapCodeAction)
+  }
+
+  /** Send `textDocument/formatting` (no range) or `textDocument/rangeFormatting`
+   *  (range given). Returns the server's edit list, mapped to port shape. */
+  async requestFormatting(
+    file: string,
+    range?: FormatRange,
+  ): Promise<readonly FormatTextEdit[] | null> {
+    const uri = await this.ensureOpen(file)
+    const method = range === undefined ? "textDocument/formatting" : "textDocument/rangeFormatting"
+    const baseParams = {
+      textDocument: { uri },
+      options: { tabSize: 2, insertSpaces: true },
+    }
+    const params = range === undefined ? baseParams : { ...baseParams, range: toRawRange(range) }
+    const raw = (await this.callOrNullOnUnsupported(method, params)) as RawTextEdit[] | null
+    if (raw === null || raw === undefined) return null
+    if (!Array.isArray(raw)) return null
+    return raw.map(toFormatTextEdit)
+  }
+
+  /** Send `textDocument/signatureHelp`. Returns the active overload list. */
+  async requestSignatureHelp(
+    file: string,
+    line: number,
+    col: number,
+  ): Promise<readonly SignatureInfo[] | null> {
+    const uri = await this.ensureOpen(file)
+    const raw = (await this.callOrNullOnUnsupported("textDocument/signatureHelp", {
+      textDocument: { uri },
+      position: { line, character: col },
+    })) as RawSignatureHelpResult | undefined
+    if (raw === null || raw === undefined) return null
+    if (!Array.isArray(raw.signatures)) return []
+    return raw.signatures.map(mapSignature)
+  }
+
+  /** Apply a workspace edit by writing each document's accumulated text to
+   *  disk via `Bun.write`. Behaviour:
+   *    1. Resolve each `file://` URI to an absolute path.
+   *    2. Read the current on-disk text.
+   *    3. Apply the LSP edits in reverse order (LSP guarantees no overlap; the
+   *       reverse order means earlier edits don't shift later offsets).
+   *    4. Write the patched text back.
+   *  Files are processed sequentially — if a later file fails, earlier files
+   *  may already be on disk. Atomicity beyond per-file is an intentional v2
+   *  follow-up (temp+rename + 2-phase). */
+  async applyWorkspaceEdit(edit: CodeActionWorkspaceEdit | RenameWorkspaceEdit): Promise<void> {
+    for (const doc of edit.changes) {
+      const path = fileURLToPath(doc.uri)
+      const original = await this.readFileText(path)
+      const patched = applyEditsToText(original, doc.edits)
+      await this.writeFileText(path, patched)
+    }
+  }
+
+  /** On-disk write seam (Bun.file/write). Protected so tests can capture the
+   *  call without touching the FS — mirrors {@link readFileText}. */
+  protected writeFileText(filePath: string, text: string): Promise<unknown> {
+    return Bun.write(filePath, text)
   }
 
   async stop(): Promise<void> {

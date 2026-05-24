@@ -131,6 +131,15 @@ export interface TurnSession {
   readonly activeSkills?: { name: string; description: string }[]
   readonly archive?: ConversationSummaryArchive
   readonly guards: readonly TurnGuard[]
+  /** ADR-0133 — session-scoped pending list of hook-emitted promptHook
+   *  responses. Pushed by the subagent runner (via
+   *  `cfg.subagentPendingPrompt`) and by the per-turn `turn_start` hook
+   *  emit (loop wires it). Drained by `prepareTurnContext` AFTER a
+   *  successful build so a same-turn retry sees the same injects but the
+   *  NEXT turn starts fresh. Mutable handle (push/splice), so the field is
+   *  not `readonly` on the array itself even though the slot is. Absent ⇒
+   *  no drain, byte-identical legacy. */
+  readonly hookPromptPending?: import("./hooks").HookPromptInject[]
 }
 
 /**

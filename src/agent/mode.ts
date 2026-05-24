@@ -157,6 +157,14 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // Read-only vision + web (ADR-0126 / ADR-0127). Both safe in plan mode.
   read_image: null,
   web_fetch: null,
+  // Read-only document/structured-data tools (ADR-0133/0137). All five are
+  // pure parse-and-render of disk-resident docs — no FS writes, no shell, no
+  // network. Safe in plan mode by construction.
+  csv_read: null,
+  ndjson_read: null,
+  yaml_read: null,
+  pdf_read: null,
+  xlsx_read: null,
   // Mutating built-ins
   write: "write_filesystem",
   edit: "write_filesystem",

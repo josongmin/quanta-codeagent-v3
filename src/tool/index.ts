@@ -2,6 +2,11 @@ import type { FileSystemPort } from "@/storage"
 import { applyPatchTool } from "./apply-patch"
 import { bashTool } from "./bash"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
+// ADR-0142: register document/structured-data read tools into the default
+// fence (the 5 tools were barrel-exported but not in `buildDefaultTools` —
+// the missing leg is the MUTATING_TOOL_TABLE classification, added in the
+// same change). All five are read-only + concurrency-safe.
+import { csvReadTool, ndjsonReadTool, pdfReadTool, xlsxReadTool, yamlReadTool } from "./document"
 import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
@@ -251,6 +256,15 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => [
   readImageTool as Tool,
   // ADR-0127: web fetch (SSRF denylist + size cap inside). Read-only + concurrency-safe.
   webFetchTool() as Tool,
+  // ADR-0133/0137 + ADR-0142 wire: structured-data + native-document readers.
+  // All five are read-only + concurrency-safe (pure parse-and-render of disk
+  // content; no FS writes, no shell, no network). Classified `null` in
+  // MUTATING_TOOL_TABLE in the same change so plan-mode cross-check passes.
+  csvReadTool as Tool,
+  ndjsonReadTool as Tool,
+  yamlReadTool as Tool,
+  pdfReadTool as Tool,
+  xlsxReadTool as Tool,
 ]
 
 /**

@@ -1,0 +1,22 @@
+{
+  "runId": "run-1779611549157",
+  "resolved": 1,
+  "total": 2,
+  "degraded": 0,
+  "instances": [
+    {
+      "id": "psf__requests-5414",
+      "passed": false,
+      "verdict": "ok",
+      "turns": 0,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/repro-r1/baseline/run-1779611549157/psf__requests-5414.0.patch"
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": true,
+      "verdict": "ok",
+      "turns": 8,
+      "patchPath": "/Users/songmin/quanta-codeagent-v3/runs/repro-r1/baseline/run-1779611549157/sympy__sympy-16886.0.patch"
+    }
+  ]
+}

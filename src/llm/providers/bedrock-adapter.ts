@@ -82,6 +82,9 @@ export class BedrockProviderAdapter implements LlmProvider {
   private async resolveClient(): Promise<BedrockClientLike> {
     let mod: BedrockSdkModule
     try {
+      // @ts-expect-error — optional peer dep, intentionally NOT in package.json.
+      // Resolution succeeds only when the host install adds the SDK explicitly;
+      // absence is caught and translated to ProviderError("provider-missing-dependency").
       mod = (await import("@anthropic-ai/bedrock-sdk")) as BedrockSdkModule
     } catch (cause) {
       throw new ProviderError(
@@ -101,7 +104,11 @@ export class BedrockProviderAdapter implements LlmProvider {
     return new Ctor(this.clientOptions)
   }
 
-  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+  // Phase 1 always throws ProviderError before the first yield. The async-generator
+  // signature must remain to satisfy LlmProvider. Phase 2 wiring (Bedrock
+  // messages.create + mapRawEvent) lands the real yields.
+  // biome-ignore lint/correctness/useYield: Phase-1 throw-only stub; see comment above.
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     // Resolve the client lazily; throws ProviderError if the SDK is missing.
     // Phase 2 work: wire `input` → Bedrock messages.create and re-decode the
     // raw events through the existing `mapRawEvent` (same SSE shape as the
@@ -115,12 +122,5 @@ export class BedrockProviderAdapter implements LlmProvider {
       "Bedrock stream() wiring is Phase 2 — adapter constructed but not yet wired",
       { providerId: "bedrock" },
     )
-    // biome-ignore lint/correctness/useYield: ProviderError is thrown above; the
-    // async-generator signature must remain to satisfy LlmProvider — the
-    // yield is unreachable but the function-shape requirement is satisfied
-    // by the throw, not by an actual yield. (Removing the empty body would
-    // make this a regular async function and break the AsyncIterable
-    // contract.)
-    if (input) return
   }
 }

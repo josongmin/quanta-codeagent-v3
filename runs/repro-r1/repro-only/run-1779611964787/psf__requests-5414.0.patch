@@ -1,0 +1,27 @@
+diff --git a/requests/adapters.py b/requests/adapters.py
+index fe22ff45..4d9914e7 100644
+--- a/requests/adapters.py
++++ b/requests/adapters.py
+@@ -500,6 +500,9 @@ class HTTPAdapter(BaseAdapter):
+         except (ProtocolError, socket.error) as err:
+             raise ConnectionError(err, request=request)
+ 
++        except LocationValueError as e:
++            raise InvalidURL(e, request=request)
++
+         except MaxRetryError as e:
+             if isinstance(e.reason, ConnectTimeoutError):
+                 # TODO: Remove this in 3.0.0: see #2811
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..ef5c8a02 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -353,7 +353,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+ 
+         try:
+             host = idna.encode(host, uts46=True).decode('utf-8')
+-        except idna.IDNAError:
++        except (idna.IDNAError, UnicodeError):
+             raise UnicodeError
+         return host
+ 

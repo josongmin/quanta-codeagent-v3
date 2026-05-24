@@ -27,9 +27,16 @@ import {
   buildSystemPrompt,
   composeAgentlessHint,
   composeIssueHint,
+  executeReproTests,
   extractIssueHint,
+  generateReproTests,
   lspNavToolList,
+  type ReproExecPort,
+  type ReproTestConfig,
+  type ReproTestSelection,
+  type ReproWriteFilePort,
   runAgent,
+  selectReproTest,
 } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -39,7 +46,7 @@ import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type { evaluateWithPythonSwebench, PySwebenchOpts } from "../python-swebench"
 import type { Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
-import { exec } from "./exec"
+import { exec, execArgv } from "./exec"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type {
@@ -558,6 +565,195 @@ export const prepareIssueHint = async (
   return composeAgentlessHint(result)
 }
 
+/**
+ * Parse `QUANTA_BENCH_REPRO_TEST` to a positive integer K in [1, 40] (the
+ * paper's upper bound). Returns `undefined` for every other shape (absent /
+ * `"0"` / negative / non-integer / NaN / garbage / empty / whitespace) — the
+ * gate is *strict* by design (K=0 is byte-identical to baseline, so wiring
+ * it would only add overhead without measurement effect).
+ *
+ * Exported for direct unit + hellgate.
+ *
+ * Domain choices:
+ *   - K>=1 — paper's `1` means greedy-only; we accept it (no temperature
+ *     knob in our `LLMPort`, so K=1 is meaningful but the majority-vote
+ *     degenerates).
+ *   - K<=40 — paper cap; >40 is rejected to bound LLM cost.
+ */
+export const parseBenchReproTestK = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined
+  const s = raw.trim()
+  if (s === "") return undefined
+  if (!/^-?\d+$/.test(s)) return undefined
+  const n = Number(s)
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
+  if (n < 1 || n > 40) return undefined
+  return n
+}
+
+export interface PrepareReproTestDeps {
+  /** Bench's main LLM port. Reused (no separate model wiring — adds ~K
+   *  small calls per instance, bounded by `parseBenchReproTestK`). */
+  readonly llm: LLMPort
+  /** Override for the generator. Tests inject a deterministic K-stream;
+   *  production uses {@link generateReproTests}. */
+  readonly generate?: typeof generateReproTests
+  /** Override for the executor. Tests inject a Map-backed mock; production
+   *  wraps `execArgv` + a file-write port. */
+  readonly execute?: typeof executeReproTests
+  /** Override for the selector. Tests can swap to deterministic; production
+   *  uses {@link selectReproTest}. */
+  readonly select?: typeof selectReproTest
+  /** Injected file writer for the candidate scripts. Production wraps
+   *  `Bun.write`; tests inject a Map-backed shim. */
+  readonly writeFile?: ReproWriteFilePort
+  /** Injected exec port. Production: `execArgv` from `./exec.ts`. */
+  readonly exec?: ReproExecPort
+}
+
+/** Per-instance reproduction-script filename written into the sandbox. The
+ *  agent's user message references this exact path. The leading underscore
+ *  is intentional — keeps the script at the top of `ls` so the agent sees
+ *  it without scanning. */
+export const REPRO_FILE_NAME = "reproduce_issue.py"
+
+/** User-message line appended (before the existing base text) when a repro
+ *  test was successfully selected. Verbatim contract — the agent sees this
+ *  exact string. */
+export const REPRO_HINT_MESSAGE = [
+  "A reproduction script has been placed at `reproduce_issue.py` in the sandbox.",
+  "After your fix, run `python reproduce_issue.py` — it must print exactly",
+  '"Issue resolved". If it prints anything else ("Issue reproduced",',
+  '"Other issues", or nothing), your fix is incorrect and you must iterate.',
+].join("\n")
+
+/**
+ * Pre-agent reproduction-test generation + selection + sandbox install.
+ *
+ * Returns the selected test source (to be saved as `reproduce_issue.py`)
+ * and the full selection record. Returns `null` when:
+ *   - K is absent / invalid (env-gate)
+ *   - the instance has no problem statement
+ *   - every sample's outcome was non-"reproduced" (LLM couldn't synthesise
+ *     a working reproducer)
+ *
+ * The function NEVER throws; on internal failure (LLM stream error, exec
+ * exception) the worst outcome is `null` and the agent runs without the
+ * hint — byte-identical to the K=undefined path.
+ */
+export const prepareReproTest = async (
+  instance: Instance,
+  sandbox: string,
+  k: number | undefined,
+  deps: PrepareReproTestDeps,
+): Promise<ReproTestSelection | null> => {
+  if (k === undefined || k < 1) return null
+  if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
+    return null
+  }
+  const config: ReproTestConfig = { samples: k }
+  const generate = deps.generate ?? generateReproTests
+  const execute = deps.execute ?? executeReproTests
+  const select = deps.select ?? selectReproTest
+  const execPort = deps.exec ?? execArgv
+  const writeFile =
+    deps.writeFile ??
+    (async (path: string, content: string): Promise<void> => {
+      await Bun.write(path, content)
+    })
+  let tests: readonly string[]
+  try {
+    tests = await generate({ issue: instance.problemStatement, llm: deps.llm, config })
+  } catch {
+    return null
+  }
+  if (tests.length === 0) return null
+  let samples: Awaited<ReturnType<typeof executeReproTests>>
+  try {
+    samples = await execute({
+      tests,
+      repoRoot: sandbox,
+      exec: execPort,
+      writeFile,
+      config,
+    })
+  } catch {
+    return null
+  }
+  const selection = select(samples)
+  return selection
+}
+
+/**
+ * Wire `prepareReproTest` + `Bun.write` into a single `runInstance` helper.
+ * Default-OFF: when `QUANTA_BENCH_REPRO_TEST` is unset/invalid OR no candidate
+ * reproduces, returns `undefined` — the agent runs without the hint
+ * (byte-identical to the pre-feature path).
+ *
+ * Extracted from `runInstance` to keep its cognitive complexity under the
+ * biome ceiling. The wiring is exactly:
+ *   K = parseBenchReproTestK(env)
+ *   if K invalid ⇒ undefined
+ *   selection = prepareReproTest(K)
+ *   if no selection ⇒ undefined
+ *   write `<sandbox>/reproduce_issue.py` ⇒ on success return REPRO_HINT_MESSAGE
+ *   on disk write failure ⇒ undefined (byte-identical to K-unset)
+ */
+const installReproTestHint = async (
+  instance: Instance,
+  sandbox: string,
+  llm: LLMPort,
+): Promise<string | undefined> => {
+  const reproK = parseBenchReproTestK(process.env.QUANTA_BENCH_REPRO_TEST)
+  if (reproK === undefined) return undefined
+  const selection = await prepareReproTest(instance, sandbox, reproK, { llm })
+  if (selection === null || selection.selected === null) return undefined
+  try {
+    await Bun.write(`${sandbox}/${REPRO_FILE_NAME}`, selection.selected)
+    return REPRO_HINT_MESSAGE
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Pure composer for the repro-hint block placement.
+ *
+ * Agent prompt order (top → bottom):
+ *   <issue-hint>             (optional, default-OFF)
+ *   <REPRO_HINT_MESSAGE>     (optional, default-OFF — this slice)
+ *   <base task>
+ *   <SWEBENCH_DIRECTIVE>     (already inside baseText for swebench instances)
+ *   <seedMsg>                (only on repair rounds ≥1, appended by caller)
+ *
+ * Inputs:
+ *   - `hint`        — issue-hint block (`""` when default-OFF)
+ *   - `hintedBase`  — `hint + "\n\n" + baseText` when hint non-empty; else
+ *                     `baseText`. Caller pre-computes (this preserves the
+ *                     byte-identical pre-feature path when reproHint is "").
+ *   - `baseText`    — the raw base task text (with SWEBENCH_DIRECTIVE).
+ *   - `reproHint`   — the repro directive line, or `undefined` / `""` to skip.
+ *
+ * Returns:
+ *   - `hintedBase` (byte-identical to pre-feature) when reproHint is empty.
+ *   - `${hint}\n\n${reproHint}\n\n${baseText}` when hint present + repro
+ *     present.
+ *   - `${reproHint}\n\n${baseText}` when only repro present.
+ *
+ * Extracted to keep `buildConfig`'s cognitive complexity under the biome
+ * ceiling. Pure — exported for direct unit testing.
+ */
+export const composeWithReproHint = (
+  hint: string,
+  hintedBase: string,
+  baseText: string,
+  reproHint: string | undefined,
+): string => {
+  if (reproHint === undefined || reproHint === "") return hintedBase
+  if (hint !== "") return `${hint}\n\n${reproHint}\n\n${baseText}`
+  return `${reproHint}\n\n${baseText}`
+}
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -577,6 +773,18 @@ export const buildConfig = (
    * that exercise buildConfig directly without async setup pass undefined.
    */
   precomputedHint?: string,
+  /**
+   * Pre-computed reproduction-script hint line (Agentless §3.3.1 absorption).
+   * When provided AND non-empty, the line is prepended to the user message
+   * BELOW any `precomputedHint` block but ABOVE the base task description.
+   * Absent / `""` ⇒ no hint injection (byte-identical to the pre-feature
+   * path).
+   *
+   * Production wiring: `prepareReproTest` selects a candidate before the
+   * agent runs, writes it to `<sandbox>/reproduce_issue.py`, and threads the
+   * verbatim {@link REPRO_HINT_MESSAGE} through here.
+   */
+  reproHint?: string,
 ) => {
   // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI) OR
   // the bench-only `QUANTA_BENCH_LSP=1`. When the language-server binary
@@ -614,7 +822,10 @@ export const buildConfig = (
           )
         : ""
   const hintedBase = hint !== "" ? `${hint}\n\n${baseText}` : baseText
-  const text = seedMsg !== undefined && seedMsg !== "" ? `${hintedBase}\n\n${seedMsg}` : hintedBase
+  // Repro-test hint composition (Agentless §3.3.1). Default-OFF
+  // (undefined / "") ⇒ byte-identical to the pre-feature path.
+  const withRepro = composeWithReproHint(hint, hintedBase, baseText, reproHint)
+  const text = seedMsg !== undefined && seedMsg !== "" ? `${withRepro}\n\n${seedMsg}` : withRepro
   const messages: Message[] = [
     {
       role: "user",
@@ -713,10 +924,11 @@ const runAgentOnce = async (
   seedMsg: string | undefined,
   timeoutMs: number,
   precomputedHint: string | undefined,
+  reproHint: string | undefined,
 ): Promise<RunOnceResult> => {
   const tap = new LastVerifyCmdTap(w.stream)
   const outcome = await runAgent(
-    buildConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint),
+    buildConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint, reproHint),
   )
   // Capture the cumulative diff CURRENTLY in the worktree (without resetting
   // the index): mirrors `withGitSnapshot`'s final diff step. `git` is
@@ -738,6 +950,7 @@ const runAgentPhase = async (
   signal: AbortSignal,
   w: Wiring,
   precomputedHint: string | undefined,
+  reproHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   const patch = await withGitSnapshot(
@@ -747,7 +960,16 @@ const runAgentPhase = async (
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
       const outcome = await runAgent(
-        buildConfig(instance, deps, sandbox, signal, w.stream, undefined, precomputedHint),
+        buildConfig(
+          instance,
+          deps,
+          sandbox,
+          signal,
+          w.stream,
+          undefined,
+          precomputedHint,
+          reproHint,
+        ),
       )
       turns = outcome.turns
     },
@@ -770,6 +992,7 @@ const runRepairPhase = async (
   w: Wiring,
   repair: NonNullable<RunInstanceDeps["repair"]>,
   precomputedHint: string | undefined,
+  reproHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -792,6 +1015,7 @@ const runRepairPhase = async (
             seedMsg,
             deps.timeoutMs,
             precomputedHint,
+            reproHint,
           ),
         validate: repair.validate ?? defaultValidate,
         buildContext: repair.buildContext ?? buildRepairContext,
@@ -876,6 +1100,10 @@ export const runInstance = async (
     const hintMode = benchOptIns().issueHintMode
     const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, { llm: deps.llm })
 
+    // Repro-test (Agentless §3.3.1) — default-OFF; env-gated. See
+    // `installReproTestHint` for details.
+    const reproHint = await installReproTestHint(instance, sandbox, deps.llm)
+
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
     // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
     // ABSENT ⇒ existing single-pass path verbatim (byte-identical: same calls,
@@ -900,8 +1128,9 @@ export const runInstance = async (
             w,
             deps.repair,
             precomputedHint,
+            reproHint,
           )
-        : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint)
+        : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
     const v = await verify(instance, phase.patch, sandbox, deps)
 
     const extra: Partial<InstanceResult> = {}

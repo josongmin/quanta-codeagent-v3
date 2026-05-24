@@ -401,6 +401,23 @@ export interface TurnContextInput {
    *  current moment). Same `opts.now ?? Date.now` pattern as
    *  `src/agent/admissibility-gate.ts` and `src/memory/consolidate/writer.ts`. */
   now?: () => number
+  /** ADR-0133 — accumulated `promptHook` responses from hook handlers that
+   *  fired since the LAST turn-context build (drained by the caller). Each
+   *  entry's `injectAfterSystem` is folded into the dynamic system-reminder
+   *  block (TAIL — closest to the user's input); `injectBeforeUser` is
+   *  rendered as a SEPARATE user-side `<hook-context>` message inserted
+   *  immediately BEFORE the dynamic reminder. The dynamic reminder still
+   *  rides at the tail.
+   *
+   *  Cache discipline: hook injects ride in the per-turn user-side reminder,
+   *  NEVER on the cached static `SystemBlock[]` prefix. A hook that wanted
+   *  to permanently modify the cached prompt would have to flow through
+   *  `system`/`userAppend` (caller-owned). This keeps cache hits stable
+   *  across hook activity.
+   *
+   *  Absent or empty array ⇒ no block, byte-identical to the pre-ADR-0133
+   *  path. */
+  hookPromptInjects?: readonly import("./hooks").HookPromptInject[]
 }
 
 export interface TurnContext {
@@ -499,12 +516,68 @@ export const escapeReminderBoundary = (s: string): string => escapeBoundary("sys
 const todayDateLine = (now?: () => number): string =>
   `Today's date is ${new Date((now ?? Date.now)()).toISOString().slice(0, 10)}.`
 
+/** ADR-0133 — collapse a list of {@link HookPromptInject}s for one side
+ *  (`afterSystem` or `beforeUser`) into a single newline-joined string.
+ *  Returns `undefined` when no entry has the side set (so the caller emits
+ *  no block — byte-identical for the pre-ADR-0133 path). */
+const collectHookPromptSide = (
+  injects: readonly import("./hooks").HookPromptInject[] | undefined,
+  side: "injectAfterSystem" | "injectBeforeUser",
+): string | undefined => {
+  if (injects === undefined || injects.length === 0) return undefined
+  const parts: string[] = []
+  for (const inj of injects) {
+    const text = inj[side]
+    if (typeof text === "string" && text.length > 0) parts.push(text)
+  }
+  return parts.length > 0 ? parts.join("\n") : undefined
+}
+
+/** ADR-0133 — append `## Hook context` + the `injectAfterSystem` text at
+ *  the TAIL of the dynamic context parts array. Extracted from
+ *  {@link buildDynamicContext} to keep its complexity below the biome cap.
+ *  No-op when no inject carries an after-system side. The label exposes
+ *  the source so an audit can see "a hook returned this since the last
+ *  turn". The text uses a simple H2 (not a nested system-reminder) to
+ *  avoid double-wrap inside the outer reminder. */
+const appendHookContextDynamicTail = (
+  parts: string[],
+  injects: readonly import("./hooks").HookPromptInject[] | undefined,
+): void => {
+  const afterSystem = collectHookPromptSide(injects, "injectAfterSystem")
+  if (afterSystem === undefined) return
+  parts.push("", "## Hook context", afterSystem)
+}
+
+/** ADR-0133 — push the `<hook-context>` user-side message when a hook
+ *  returned `injectBeforeUser`. Wrapped via `embedUntrusted` so an inner
+ *  `</hook-context>` is defanged. Extracted from {@link buildTurnContext}
+ *  to keep its complexity below the biome cap. No-op when no injects
+ *  carry a before-user side. */
+const appendHookContextMessage = (
+  messages: Message[],
+  injects: readonly import("./hooks").HookPromptInject[] | undefined,
+): void => {
+  const beforeUser = collectHookPromptSide(injects, "injectBeforeUser")
+  if (beforeUser === undefined) return
+  messages.push({
+    role: "user",
+    content: [{ type: "text", text: embedUntrusted("hook-context", beforeUser) }],
+  })
+}
+
 /** Build the per-turn dynamic context — date, cwd, mode notice, repo rules,
  *  working state, memory — as a single block of text, or `undefined` when there
  *  is nothing to say. Order matters: repo-local rules ride ABOVE working state
  *  (repo authority) which rides ABOVE memory hints (routing hint only — Codex
  *  trust ladder). Working state is the in-session L3 scratchpad: anchored to
- *  THIS task, so it sits between repo authority and generic memory hints. */
+ *  THIS task, so it sits between repo authority and generic memory hints.
+ *
+ *  ADR-0133 — `hookPromptInjects[].injectAfterSystem` is appended at the
+ *  TAIL of the dynamic block (closest to the user message) so a hook's
+ *  freshly-emitted guidance is read last by the model. `injectBeforeUser`
+ *  is NOT folded here — it rides as a separate user-side message in
+ *  {@link buildTurnContext}. */
 const buildDynamicContext = (input: TurnContextInput): string | undefined => {
   const parts: string[] = [todayDateLine(input.now), `Working directory: ${input.cwd}`]
   // SSOT mode precedence (ADR-0018): prompt + dispatch share resolveAgentMode
@@ -532,6 +605,7 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
   // `formatBlock` (src/agent/memory.ts) — append as-is, no double-label.
   const memory = input.memoryContext?.trim()
   if (memory) parts.push("", memory)
+  appendHookContextDynamicTail(parts, input.hookPromptInjects)
   return parts.join("\n")
 }
 
@@ -572,6 +646,7 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
     : [{ type: "text", text: basePrompt, cache: true }]
   const dynamic = buildDynamicContext(input)
   const messages: Message[] = [...input.baseMessages]
+  appendHookContextMessage(messages, input.hookPromptInjects)
   if (dynamic !== undefined) {
     // Route the assembled dynamic block through the canonical untrusted-embed
     // helper: it defangs inner `<system-reminder>` boundaries BEFORE wrapping so

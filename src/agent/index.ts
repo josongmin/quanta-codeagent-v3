@@ -75,13 +75,18 @@ export {
   resolveHitlAnnotation,
 } from "./hitl-tier-registry"
 export {
+  type HookAbort,
   HookBus,
   type HookDeny,
   type HookEmitResult,
   type HookEvent,
   type HookEventType,
   type HookHandler,
+  type HookPromptInject,
+  type HookToolOverride,
   type HookUpdatedInput,
+  PROMPT_HOOK_MAX_CHARS,
+  TOOL_FAILURE_RETRY_MAX,
 } from "./hooks"
 export {
   FileSystemIdeContextProvider,
@@ -169,6 +174,24 @@ export {
   type RepoRules,
   renderRepoRulesBlock,
 } from "./repo-rules"
+export {
+  DEFAULT_SAMPLES as REPRO_TEST_DEFAULT_SAMPLES,
+  DEFAULT_TIMEOUT_MS as REPRO_TEST_DEFAULT_TIMEOUT_MS,
+  type ExecuteReproTestsArgs as ReproExecuteArgs,
+  executeReproTests,
+  generateReproTests,
+  MAX_SAMPLES as REPRO_TEST_MAX_SAMPLES,
+  normaliseReproSource,
+  type ReproExecPort,
+  type ReproTestConfig,
+  type ReproTestOutcome,
+  type ReproTestSample,
+  type ReproTestSelection,
+  type ReproWriteFilePort,
+  selectReproTest,
+  stripMarkdownFences,
+  stripPythonComments,
+} from "./repro-test"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
 export {
   type AgentMode as RunMode,

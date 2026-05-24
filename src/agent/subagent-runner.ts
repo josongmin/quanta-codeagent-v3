@@ -286,22 +286,88 @@ export const createSubagentRunner = (
     const wantsWorktree = req.isolation === "worktree"
     const isolate = wantsWorktree && (await gitProbe(parent.cwd))
 
-    if (isolate) {
-      // id is sanitized by withWorktree's safeId; depth+prompt make it
-      // human-traceable while staying within the worktree-name charset.
-      const id = `sub-d${req.depth}-${Date.now().toString(36)}`
-      const { value } = await wt(id, parent.cwd, async (worktreePath) => {
-        const child = buildChildConfig(parent, req, worktreePath)
-        return run(child)
-      })
-      return toResult(value)
+    // id is sanitized by withWorktree's safeId; depth+prompt make it
+    // human-traceable while staying within the worktree-name charset.
+    const subagentId = `sub-d${req.depth}-${Date.now().toString(36)}`
+
+    // ADR-0133 — fire `subagent_start` on the PARENT's hook bus BEFORE the
+    // child config is built or the worktree is opened. A hook returning
+    // `abort` cancels the spawn entirely. See `emitSubagentStartHook`.
+    const startAbort = await emitSubagentStartHook(parent, { subagentId, req })
+    if (startAbort !== null) {
+      return { ok: false, finalText: startAbort, turns: 0 }
     }
 
-    // No isolation (explicit "none", missing, or worktree requested but the
-    // parent cwd is not a git repo — graceful fallback, never fail). The child
-    // always inherits `parent.cwd` here; the worktree path is only ever the
-    // override in the isolated branch above.
-    const child = buildChildConfig(parent, req, parent.cwd)
-    return toResult(await run(child))
+    const childResult: SubagentResult = isolate
+      ? toResult(
+          (
+            await wt(subagentId, parent.cwd, async (worktreePath) => {
+              const child = buildChildConfig(parent, req, worktreePath)
+              return run(child)
+            })
+          ).value,
+        )
+      : toResult(await run(buildChildConfig(parent, req, parent.cwd)))
+
+    // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
+    await emitSubagentStopHook(parent, { subagentId, result: childResult })
+
+    return childResult
+  }
+}
+
+/** ADR-0133 — emit the `subagent_start` hook on the PARENT's bus. Returns
+ *  `null` to proceed with the spawn, or a synthetic `finalText` string when
+ *  a hook aborted. Extracted from the runner to keep its complexity below
+ *  the biome cap. Children inherit no hook bus (`buildChildConfig` drops
+ *  it on purpose) so this is the only level that can observe the fork
+ *  lifecycle. */
+const emitSubagentStartHook = async (
+  parent: AgentConfig,
+  q: { subagentId: string; req: SubagentRequest },
+): Promise<string | null> => {
+  if (parent.hooks === undefined) return null
+  // Defensive: a test stub may return `undefined` (not a proper
+  // HookEmitResult). Treat that as "no extras".
+  const emit = (await parent.hooks.emit({
+    type: "subagent_start",
+    subagentId: q.subagentId,
+    parentId: parent.run?.runId,
+    taskPrompt: q.req.prompt,
+  })) ?? { deny: null }
+  if (emit.abort !== undefined) {
+    return `subagent_start hook aborted: ${emit.abort.reason}`
+  }
+  // promptHook on subagent_start is queued for the PARENT (it sees it when
+  // control returns). The parent loop reads its own
+  // `subagentPendingPrompt` collector; if the host has not wired one, the
+  // response is dropped silently — a host that wants the channel wires the
+  // collector explicitly. (See `subagentPendingPrompt` in AgentConfig —
+  // ADR-0133 surface extension.)
+  if (emit.promptHook !== undefined) {
+    parent.subagentPendingPrompt?.push(emit.promptHook)
+  }
+  return null
+}
+
+/** ADR-0133 — emit the `subagent_stop` hook on the PARENT's bus. promptHook
+ *  is the only response field honored here; an `abort` on subagent_stop is
+ *  meaningless (the child already finished). */
+const emitSubagentStopHook = async (
+  parent: AgentConfig,
+  q: { subagentId: string; result: SubagentResult },
+): Promise<void> => {
+  if (parent.hooks === undefined) return
+  const emit = (await parent.hooks.emit({
+    type: "subagent_stop",
+    subagentId: q.subagentId,
+    result: {
+      ok: q.result.ok,
+      finalText: q.result.finalText,
+      turns: q.result.turns,
+    },
+  })) ?? { deny: null }
+  if (emit.promptHook !== undefined) {
+    parent.subagentPendingPrompt?.push(emit.promptHook)
   }
 }

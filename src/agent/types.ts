@@ -14,7 +14,6 @@ import type { StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
 import type { WebSearchProvider } from "@/tool/web"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
-import type { BackgroundSubagentScheduler } from "./subagent-background"
 import type { BudgetMeter } from "./budget"
 import type { CapEnforcer } from "./cap-enforcer"
 import type { CheckpointTriggerMode, DestructivenessOracle } from "./checkpoint-policy"
@@ -34,6 +33,7 @@ import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
 import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
+import type { BackgroundSubagentScheduler } from "./subagent-background"
 import type { Submission } from "./submission"
 import type { SkillsBlock, SubagentBlock, WorkingStateBlock } from "./types/agent-capabilities"
 import type {
@@ -540,6 +540,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   shadowCheckpoint?: { mode: CheckpointTriggerMode; oracle?: DestructivenessOracle }
   /**
+   * ADR-0140 background-subagent caller wire (sibling to ADR-0130 helper).
+   * When set, `buildSubagentBgBlock` registers the 3 `subagent_fork` /
+   * `subagent_poll` / `subagent_await` tools bound to this scheduler.
+   * Absent ⇒ tools NOT registered (default-OFF, byte-identical for every
+   * legacy caller — RFC §1.2). Top-level (not nested under `subagent`)
+   * because the background scheduler is INTENT-DISTINCT from the legacy
+   * sequential subagent runner (ADR-0011): a caller may wire one without
+   * the other.
+   */
+  subagentBackground?: { readonly scheduler: BackgroundSubagentScheduler }
+  /**
    * ADR-0125 turn-diff loop wiring — opt-in trigger for the
    * {@link wireGitObservability} composite (ADR-0110). When `enabled === true`
    * the loop constructs a per-session `TurnDiffSession` (via
@@ -724,6 +735,25 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * that wants to inspect query history) can read this slot directly.
    */
   webSearch?: { provider: WebSearchProvider }
+  /**
+   * ADR-0133 — typed pending-promptHook collector for subagent lifecycle
+   * events. When a `subagent_start` / `subagent_stop` hook returns a
+   * `promptHook` response, the subagent runner pushes it here so the
+   * PARENT's next turn-context build can fold it into the system prompt.
+   *
+   * Today this is a simple array-like (push only) so the loop can drain it
+   * once per turn-context build. A host that does NOT want subagent
+   * promptHook responses to influence the parent prompt simply does NOT
+   * wire this — the runner's `?.push(...)` is a no-op (RFC §1.2 default-
+   * OFF, byte-identical).
+   *
+   * Pushed shape: the bare `HookPromptInject` (`{injectAfterSystem?,
+   * injectBeforeUser?}`); the loop folds both sides into the prompt's
+   * after-system / before-user slots.
+   */
+  subagentPendingPrompt?: {
+    push: (entry: import("./hooks").HookPromptInject) => unknown
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -822,6 +852,7 @@ export type FeaturesConfig = Pick<
   | "branchSearch"
   | "shadowCheckpoint"
   | "shadowOdb"
+  | "subagentBackground"
   | "onProgress"
   | "planExitPort"
   | "modelCandidates"

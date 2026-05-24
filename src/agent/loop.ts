@@ -2,11 +2,11 @@ import type { LLMPort, Message, StreamEvent, SystemPromptInput } from "@/llm"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import {
   attrs,
+  createTurnTimingCapture,
   endSpan,
   GEN_AI_ATTRS,
   SPAN_NAMES,
   type Span,
-  createTurnTimingCapture,
   startSpan,
   type TurnTiming,
 } from "@/observability"
@@ -650,6 +650,35 @@ const maybeCompact = async (
   // overruns. RFC §1.2 default-OFF byte-identical preserved — when compaction
   // is unconfigured, the try-catch never runs.
   let result: Awaited<ReturnType<typeof compactIfNeeded>>
+  // ADR-0133 — first-compaction flag derived from the same archive used to
+  // stamp `fromTurnId` below. When `archive` is absent (compaction.archive
+  // not opted in) we conservatively pass `false`: a hook that reacts on
+  // "first compact" needs the archive to be the SSOT for "have we ever
+  // compacted before"; without one we cannot prove first-ness, so don't
+  // claim it.
+  const isFirstCompaction = archive !== undefined && archive.summaries.length === 0
+  // ADR-0133 — bridge the typed `pre_compact` hook event onto the
+  // `compactIfNeeded` preCompactHook contract. Absent `config.hooks` ⇒
+  // OMIT the bridge entirely (compactIfNeeded fast-paths past the extra
+  // await — byte-identical to the pre-ADR-0133 path). When wired, a hook
+  // that returns `{ abort: { reason } }` causes `compactIfNeeded` to skip
+  // THIS compaction (returns `{compacted:false}` — same shape the breaker
+  // observes as no progress).
+  const hooks = config.hooks
+  const preCompactHook =
+    hooks !== undefined
+      ? async (q: {
+          messagesToCompact: number
+          isFirstCompaction: boolean
+        }): Promise<{ abortReason: string | null }> => {
+          const emit = await hooks.emit({
+            type: "pre_compact",
+            messagesToCompact: q.messagesToCompact,
+            isFirstCompaction: q.isFirstCompaction,
+          })
+          return { abortReason: emit.abort?.reason ?? null }
+        }
+      : undefined
   try {
     result = await compactIfNeeded({
       messages: snapshot,
@@ -658,6 +687,7 @@ const maybeCompact = async (
       // model spares the main model on every compaction.
       llm: config.compaction.summarizerLlm ?? config.llm,
       system,
+      isFirstCompaction,
       ...(config.compaction.thresholdTokens !== undefined
         ? { thresholdTokens: config.compaction.thresholdTokens }
         : {}),
@@ -683,6 +713,7 @@ const maybeCompact = async (
               onPreCompact({ turnId, ...q }),
           }
         : {}),
+      ...(preCompactHook !== undefined ? { preCompactHook } : {}),
     })
   } catch (e) {
     const message = errMessage(e)
@@ -867,7 +898,15 @@ const injectRedactionBanner = (
 }
 
 /** Rebuild the per-attempt request context: memory recall, proactive
- *  compaction (mutates `messages` in place), then the buildTurnContext SEAM. */
+ *  compaction (mutates `messages` in place), then the buildTurnContext SEAM.
+ *
+ *  ADR-0133 — `hookPromptInjects` is the per-turn pending list of hook-
+ *  emitted promptHook responses (from `subagent_start` / `subagent_stop` /
+ *  `turn_start` etc. that fired since the LAST prepareTurnContext call). The
+ *  caller (runAgentInner) DRAINS this list AFTER a successful build so a
+ *  same-turn retry (PTL recovery) sees the SAME injects, but the NEXT
+ *  outer turn starts fresh. Empty list / undefined ⇒ no block, byte-
+ *  identical legacy. */
 const prepareTurnContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
@@ -878,6 +917,7 @@ const prepareTurnContext = async (
   archive: ConversationSummaryArchive | undefined,
   turn: number,
   citations: MemoryCitation[],
+  hookPromptInjects: readonly import("./hooks").HookPromptInject[] | undefined,
 ): Promise<ReturnType<typeof buildTurnContext>> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder, citations)
   await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
@@ -905,6 +945,9 @@ const prepareTurnContext = async (
     // rendered reminder (byte-identical for skill-less sessions).
     ...(activeSkills !== undefined ? { activeSkills } : {}),
     ...(wsSnapshot !== undefined ? { workingState: wsSnapshot } : {}),
+    ...(hookPromptInjects !== undefined && hookPromptInjects.length > 0
+      ? { hookPromptInjects }
+      : {}),
   })
   // ADR-0080 — fold the IDE snapshot into the built context (no provider ⇒
   // returned unchanged, byte-identical). ADR-0078 — prepend the redaction-
@@ -1046,8 +1089,22 @@ const runTurn = async (
   // R2-B P1: destructure to the same local names the original body used so the
   // body below stays byte-identical (config / wm / recorder / …). Same fields,
   // same `undefined`s — only the call shape changed.
-  const { config, recorder, activeSkills, archive } = session
+  const { config, recorder, activeSkills, archive, hookPromptPending } = session
   const { wm, rec, breaker, toolHistory, workingState, citations } = state
+  // ADR-0133 — snapshot the pending promptHook list ONCE for this turn so a
+  // same-turn retry sees the SAME injects (a vanishing block mid-PTL would
+  // confuse the model). The session-level array continues to accumulate
+  // injects from subagent_start/_stop fired during THIS turn's dispatch;
+  // those land in the NEXT runTurn's snapshot. Empty / absent ⇒ undefined ⇒
+  // prepareTurnContext omits the field (byte-identical legacy).
+  const turnInjects: readonly import("./hooks").HookPromptInject[] | undefined =
+    hookPromptPending !== undefined && hookPromptPending.length > 0
+      ? [...hookPromptPending]
+      : undefined
+  // Drain immediately after snapshotting so injects are seen ONCE (not
+  // re-injected in every later turn). New pushes from subagent_start/_stop
+  // during THIS turn's dispatch will populate the list for the NEXT turn.
+  if (hookPromptPending !== undefined) hookPromptPending.length = 0
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
   for (;;) {
@@ -1065,6 +1122,7 @@ const runTurn = async (
       archive,
       turn,
       citations,
+      turnInjects,
     )
     const result = await streamConsume(session, state, ctx.messages, ctx.system)
     if ("aborted" in result) return { kind: "aborted" }
@@ -1611,6 +1669,22 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // `resolveToolChoice` always returns `{kind:"auto"}` ⇒ the field is omitted
   // from every `StreamInput` (byte-identical wire payload, default-OFF).
   const toolChoiceState = createToolChoiceTurnState()
+  // ADR-0133 — session-scoped pending list of hook-emitted `promptHook`
+  // responses (from `subagent_start` / `subagent_stop` / `turn_start` /
+  // etc.). The subagent runner pushes to this via the typed
+  // `subagentPendingPrompt` config seam; the per-turn `prepareTurnContext`
+  // drains the list AFTER a successful build so a same-turn retry sees the
+  // same injects but the NEXT turn starts fresh.
+  //
+  // Default-OFF: when `cfg.hooks` is undefined AND no producer (turn_start
+  // hook, runner) ever pushes, the list stays empty and `prepareTurnContext`
+  // omits the field (byte-identical to the pre-ADR-0133 path).
+  const hookPromptPending: import("./hooks").HookPromptInject[] = []
+  if (cfg.subagentPendingPrompt === undefined) {
+    cfg.subagentPendingPrompt = {
+      push: (entry: import("./hooks").HookPromptInject) => hookPromptPending.push(entry),
+    }
+  }
   // ADR-0082 — run-scoped memory_citation accumulator. Append-only: each
   // recall that places records into the prompt window pushes one citation per
   // placed record (via the `recallContext` `onPlaced` seam, threaded through
@@ -1687,6 +1761,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     ...(activeSkills !== undefined ? { activeSkills } : {}),
     ...(summaryArchive !== undefined ? { archive: summaryArchive } : {}),
     guards: guardChain,
+    hookPromptPending,
   }
 
   const finish = async (
@@ -1887,7 +1962,13 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       cfg.run = stamped ?? { runId: sessionId, turn }
     }
     stream.emit({ type: "turn_start", turn })
-    if (cfg.hooks) await cfg.hooks.emit({ type: "turn_start", turn })
+    if (cfg.hooks) {
+      const tsEmit = await cfg.hooks.emit({ type: "turn_start", turn })
+      // ADR-0133 — a `turn_start` hook may return promptHook (e.g. inject a
+      // per-turn checklist). Push into the session-scoped pending list so
+      // runTurn's snapshot folds it into THIS turn's prompt.
+      if (tsEmit.promptHook !== undefined) hookPromptPending.push(tsEmit.promptHook)
+    }
 
     // absorb #6 (ADR-0064): per-turn work-metrics. Both fields are `undefined`
     // when no sink is wired (byte-identical, RFC §1.2). See `buildWorkMetrics`

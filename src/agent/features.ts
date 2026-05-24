@@ -61,6 +61,7 @@ import {
   buildPlanMutationBlock,
   buildShadowBlock,
   buildSkillBlock,
+  buildSubagentBgBlock,
   buildSubagentBlock,
   buildUserInputBlock,
   buildWorkingStateBlock,
@@ -145,6 +146,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0119 — shadow store tools (default-OFF: empty array when shadowOdb absent)
   extraTools.push(...buildShadowBlock(config))
+
+  // ADR-0140 — background-subagent tools (default-OFF: empty when subagentBackground absent)
+  extraTools.push(...buildSubagentBgBlock(config))
 
   // --- Skill block (ADR-0011) ---------------------------------------------
   const skill = await buildSkillBlock(config)

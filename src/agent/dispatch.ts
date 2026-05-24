@@ -370,18 +370,60 @@ const dispatchToolInner = async (
   // the tool output. `prependCapReminder` is extracted to keep complexity low.
   const finalOut = capReminder !== undefined ? prependCapReminder(out, capReminder) : out
   if (config.hooks) {
-    await config.hooks.emit({
-      type: "post_tool_use",
-      name: effectiveCall.name,
-      // R2 fix: forward the EXECUTED input so audit/observability hooks have
-      // pre/post symmetry. The pre hook saw `effectiveCall.input` (possibly
-      // rewritten); post sees the same value — what the tool actually ran with.
-      input: effectiveCall.input,
-      ok: finalOut.ok,
-      output: finalOut.preview,
-    })
+    await emitPostToolUseHooks(config, effectiveCall, finalOut)
   }
   return finalOut
+}
+
+/** ADR-0133 — fire `post_tool_use` (always) + `post_tool_use_failure` (only
+ *  when ok:false). Extracted to keep `dispatchToolInner` under the biome
+ *  complexity cap. Two channels (not one combined) because:
+ *    1. `post_tool_use` is the audit/observability symmetry channel — every
+ *       tool call fires it exactly once, success or failure, so a metrics
+ *       consumer sees the COMPLETE outcome series.
+ *    2. `post_tool_use_failure` is the RECOVERY channel — a host may wire it
+ *       to inject `promptHook` ("the bash exit code 1 is from a missing
+ *       package; suggest installing") that the loop folds into the next
+ *       LLM turn. Audit hooks should NOT pay this cost on success.
+ *  Order: `post_tool_use` FIRST (mirrors today's symmetry), failure SECOND
+ *  (so a failure handler that emits a `promptHook` sees the result after
+ *  post-side processing). Try/catch on the failure emit protects dispatch's
+ *  no-throw contract — a misbehaving failure hook cannot turn a normal tool
+ *  error into a dispatch-level throw. */
+const emitPostToolUseHooks = async (
+  config: AgentConfig,
+  effectiveCall: ToolUseBlock,
+  finalOut: DispatchResult,
+): Promise<void> => {
+  if (!config.hooks) return
+  await config.hooks.emit({
+    type: "post_tool_use",
+    name: effectiveCall.name,
+    // R2 fix: forward the EXECUTED input so audit/observability hooks have
+    // pre/post symmetry. The pre hook saw `effectiveCall.input` (possibly
+    // rewritten); post sees the same value — what the tool actually ran with.
+    input: effectiveCall.input,
+    ok: finalOut.ok,
+    output: finalOut.preview,
+  })
+  if (finalOut.ok) return
+  try {
+    await config.hooks.emit({
+      type: "post_tool_use_failure",
+      name: effectiveCall.name,
+      input: effectiveCall.input,
+      error: finalOut.preview,
+    })
+  } catch (e) {
+    // The HookBus already isolates throwing HANDLERS; this catch is the
+    // belt-and-braces for a future bus implementation that could itself
+    // throw on a malformed event.
+    const message = e instanceof QuantaError ? e.message : toError(e).message
+    config.stream.emit({
+      type: "error",
+      message: `post_tool_use_failure hook threw: ${message}`,
+    })
+  }
 }
 
 /** Build the `handle_tool_call` span open-attrs. Status (and durationMs)

@@ -44,6 +44,52 @@ export type {
   NavSymbolKind,
 } from "./types"
 
+// ── ADR-0141 expansion ────────────────────────────────────────────────────
+// Four new tool slices (code-action / rename-apply / format / signature-help)
+// added in their OWN files; each declares its own duck-typed mirror port to
+// hold the slice fence. Tests import canonical ports from `@/lsp/ports/`.
+export {
+  type CodeActionPort,
+  type CodeActionPortAction,
+  type CodeActionPortDocumentEdit,
+  type CodeActionPortKind,
+  type CodeActionPortPos,
+  type CodeActionPortRange,
+  type CodeActionPortTextEdit,
+  type CodeActionPortWorkspaceEdit,
+  type LspCodeActionInput,
+  lspCodeActionInputSchema,
+  lspCodeActionTool,
+} from "./code-action"
+export {
+  type FormatPort,
+  type FormatPortPos,
+  type FormatPortRange,
+  type FormatPortTextEdit,
+  type LspFormatInput,
+  lspFormatInputSchema,
+  lspFormatTool,
+} from "./format"
+export {
+  type LspRenameApplyInput,
+  lspRenameApplyInputSchema,
+  lspRenameApplyTool,
+  type RenameApplyPort,
+  type RenameApplyPortDocumentEdit,
+  type RenameApplyPortPos,
+  type RenameApplyPortRange,
+  type RenameApplyPortTextEdit,
+  type RenameApplyPortWorkspaceEdit,
+} from "./rename-apply"
+export {
+  type LspSignatureHelpInput,
+  lspSignatureHelpInputSchema,
+  lspSignatureHelpTool,
+  type SignatureHelpPort,
+  type SignatureHelpPortInfo,
+  type SignatureHelpPortParameter,
+} from "./signature-help"
+
 /** Shared 1-based position input — converted to 0-based NavPos internally. */
 const positionSchema = z.object({
   path: z.string().describe("File whose language server should handle the request"),

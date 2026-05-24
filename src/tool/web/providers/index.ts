@@ -22,3 +22,7 @@ export {
   type DuckDuckGoSearchOpts,
   duckduckgoSearchProvider,
 } from "./duckduckgo"
+// ADR-0142 — env-var-driven provider factory. Caller-wired convenience for
+// composition roots that want "Brave if key set, DDG if QUANTA_WEB_SEARCH_DUCKDUCKGO=1,
+// else undefined". Explicit `AgentConfig.webSearch.provider` always wins.
+export { providerFromEnv } from "./from-env"

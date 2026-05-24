@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-05-24T08:51:33.612Z",
+  "model": "gpt-5",
+  "provider": "chatgpt-oauth",
+  "n": 1,
+  "totals": {
+    "total": 2,
+    "resolved": 2,
+    "resolvedPct": 100
+  },
+  "failureBreakdown": {
+    "byTermination": {},
+    "bySignal": {}
+  },
+  "perInstance": [
+    {
+      "id": "psf__requests-5414",
+      "passed": true,
+      "turns": 12,
+      "patchBytes": 989
+    },
+    {
+      "id": "sympy__sympy-16886",
+      "passed": true,
+      "turns": 10,
+      "patchBytes": 464
+    }
+  ]
+}
