@@ -499,7 +499,8 @@ describe("Plane 3 — Context", () => {
       policy: { sessionSoftLimit: 0.001 },
       now: () => 1_700_000_000_000,
     })
-    const breaches = ledger.record({
+    // ADR-0162: record returns {cost, breaches}.
+    const { breaches } = ledger.record({
       model: "claude-sonnet-4-6",
       inputTokens: 1000,
       outputTokens: 1000,

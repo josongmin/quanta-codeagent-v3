@@ -164,36 +164,38 @@ describe("budget-ledger / B. aggregation", () => {
 // C. LIMITS / BREACHES (8)
 // ────────────────────────────────────────────────────────────────────────────
 describe("budget-ledger / C. limits & breaches", () => {
-  test("HELL-11: no policy → record returns empty array; no breaches", () => {
+  test("HELL-11: no policy → record returns empty breaches; cost still surfaced", () => {
     const l = ledgerOf()
-    const breaches = l.record(usageOf({ inputTokens: 100_000_000 })) // $1500
-    expect(breaches).toEqual([])
+    const r = l.record(usageOf({ inputTokens: 100_000_000 })) // $1500
+    expect(r.breaches).toEqual([])
+    // ADR-0162: cost on every return, even when no policy → no breaches.
+    expect(r.cost).toBeCloseTo(1500, 6)
   })
 
   test("HELL-12: sessionSoftLimit crossed → 1 session-soft breach", () => {
     const l = ledgerOf({ policy: { sessionSoftLimit: 10 } })
     // 1M input on opus = $15 > $10 cap
-    const breaches = l.record(usageOf({ inputTokens: 1_000_000 }))
-    expect(breaches).toHaveLength(1)
-    expect(breaches[0]?.kind).toBe("session-soft")
-    expect(breaches[0]?.scope).toBe(SESSION)
-    expect(breaches[0]?.limit).toBe(10)
-    expect(breaches[0]?.observed).toBeCloseTo(15, 6)
+    const r = l.record(usageOf({ inputTokens: 1_000_000 }))
+    expect(r.breaches).toHaveLength(1)
+    expect(r.breaches[0]?.kind).toBe("session-soft")
+    expect(r.breaches[0]?.scope).toBe(SESSION)
+    expect(r.breaches[0]?.limit).toBe(10)
+    expect(r.breaches[0]?.observed).toBeCloseTo(15, 6)
   })
 
   test("HELL-13: sessionHardLimit crossed → 1 session-hard breach", () => {
     const l = ledgerOf({ policy: { sessionHardLimit: 5 } })
-    const breaches = l.record(usageOf({ inputTokens: 1_000_000 })) // $15
-    expect(breaches).toHaveLength(1)
-    expect(breaches[0]?.kind).toBe("session-hard")
+    const r = l.record(usageOf({ inputTokens: 1_000_000 })) // $15
+    expect(r.breaches).toHaveLength(1)
+    expect(r.breaches[0]?.kind).toBe("session-hard")
   })
 
   test("HELL-14: soft + hard both cross in one record → both in array, [soft, hard] order", () => {
     const l = ledgerOf({ policy: { sessionSoftLimit: 5, sessionHardLimit: 10 } })
-    const breaches = l.record(usageOf({ inputTokens: 1_000_000 })) // $15
-    expect(breaches).toHaveLength(2)
-    expect(breaches[0]?.kind).toBe("session-soft")
-    expect(breaches[1]?.kind).toBe("session-hard")
+    const r = l.record(usageOf({ inputTokens: 1_000_000 })) // $15
+    expect(r.breaches).toHaveLength(2)
+    expect(r.breaches[0]?.kind).toBe("session-soft")
+    expect(r.breaches[1]?.kind).toBe("session-hard")
   })
 
   test("HELL-15: same session over-limit keeps recording without re-firing breach", () => {
@@ -201,9 +203,9 @@ describe("budget-ledger / C. limits & breaches", () => {
     const first = l.record(usageOf({ inputTokens: 1_000_000 })) // $15 → fires
     const second = l.record(usageOf({ inputTokens: 1_000_000 })) // $30 → no re-fire
     const third = l.record(usageOf({ inputTokens: 1_000_000 })) // $45 → no re-fire
-    expect(first).toHaveLength(1)
-    expect(second).toEqual([])
-    expect(third).toEqual([])
+    expect(first.breaches).toHaveLength(1)
+    expect(second.breaches).toEqual([])
+    expect(third.breaches).toEqual([])
     // But events accumulate.
     expect(l.snapshot().events).toBe(3)
   })
@@ -212,31 +214,31 @@ describe("budget-ledger / C. limits & breaches", () => {
     const l = ledgerOf({ policy: { sessionSoftLimit: 5 } })
     const a = l.record(usageOf({ sessionId: "s-A", inputTokens: 1_000_000 }))
     const b = l.record(usageOf({ sessionId: "s-B", inputTokens: 1_000_000 }))
-    expect(a).toHaveLength(1)
-    expect(b).toHaveLength(1)
-    expect(a[0]?.scope).toBe("s-A")
-    expect(b[0]?.scope).toBe("s-B")
+    expect(a.breaches).toHaveLength(1)
+    expect(b.breaches).toHaveLength(1)
+    expect(a.breaches[0]?.scope).toBe("s-A")
+    expect(b.breaches[0]?.scope).toBe("s-B")
   })
 
   test("HELL-17: daily soft + hard work analogously", () => {
     const l = ledgerOf({ policy: { dailySoftLimit: 5, dailyHardLimit: 12 } })
     const t = Date.UTC(2026, 4, 24, 12, 0, 0)
-    const breaches = l.record(usageOf({ at: t, inputTokens: 1_000_000 })) // $15
-    expect(breaches).toHaveLength(2)
-    expect(breaches[0]?.kind).toBe("daily-soft")
-    expect(breaches[1]?.kind).toBe("daily-hard")
-    expect(breaches[0]?.scope).toBe("2026-05-24")
+    const r = l.record(usageOf({ at: t, inputTokens: 1_000_000 })) // $15
+    expect(r.breaches).toHaveLength(2)
+    expect(r.breaches[0]?.kind).toBe("daily-soft")
+    expect(r.breaches[1]?.kind).toBe("daily-hard")
+    expect(r.breaches[0]?.scope).toBe("2026-05-24")
   })
 
   test("HELL-18: clear({session}) resets that session's breach memory; can re-fire", () => {
     const l = ledgerOf({ policy: { sessionSoftLimit: 5 } })
     const first = l.record(usageOf({ inputTokens: 1_000_000 })) // fires
-    expect(first).toHaveLength(1)
+    expect(first.breaches).toHaveLength(1)
     const cleared = l.clear({ session: SESSION })
     expect(cleared).toBe(1)
     const refire = l.record(usageOf({ inputTokens: 1_000_000 })) // fires again
-    expect(refire).toHaveLength(1)
-    expect(refire[0]?.kind).toBe("session-soft")
+    expect(refire.breaches).toHaveLength(1)
+    expect(refire.breaches[0]?.kind).toBe("session-soft")
   })
 })
 
@@ -271,7 +273,7 @@ describe("budget-ledger / D. persistence", () => {
     expect(after.perDay.size).toBe(before.perDay.size)
     // Breach memory survives — re-recording over-budget event must NOT re-fire.
     const refire = restored.record(usageOf({ inputTokens: 1_000_000 }))
-    expect(refire).toEqual([])
+    expect(refire.breaches).toEqual([])
   })
 
   test("HELL-21: hydrate(garbage) resets to empty, no throw", () => {
@@ -362,6 +364,47 @@ describe("budget-ledger / F. budget_status tool", () => {
     expect(dayOnly).toContain("By day:")
     expect(dayOnly).not.toContain("By session:")
     expect(dayOnly).not.toContain("By model:")
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// G. RECORD-RESULT COST FIELD (ADR-0162) — per-event cost surfaced on every
+//    return so `instrumentBudgetLedger` can emit `budget.event.cost_usd`.
+// ────────────────────────────────────────────────────────────────────────────
+describe("budget-ledger / G. record-result cost (ADR-0162)", () => {
+  test("HELL-27: record returns {cost, breaches}; cost = pricing × tokens for this event", () => {
+    const l = ledgerOf()
+    const r = l.record(usageOf({ inputTokens: 1_000_000, outputTokens: 1_000_000 }))
+    // opus: 15 (in) + 75 (out) = 90
+    expect(r.cost).toBeCloseTo(90, 6)
+    expect(Array.isArray(r.breaches)).toBe(true)
+  })
+
+  test("HELL-28: cost on a malformed event is 0 (defensive swallow keeps 2-field shape)", () => {
+    const l = ledgerOf()
+    // Cast away typing to simulate a programmer error in a caller.
+    const r = l.record({ inputTokens: 1_000_000 } as unknown as UsageEvent)
+    expect(r.cost).toBe(0)
+    expect(r.breaches).toEqual([])
+  })
+
+  test("HELL-29: cost surfaces per event independent of cumulative snapshot total", () => {
+    const l = ledgerOf()
+    // Pre-load some history so the snapshot.totalCost diverges from per-event cost.
+    l.record(usageOf({ inputTokens: 1_000_000 })) // $15
+    l.record(usageOf({ inputTokens: 1_000_000 })) // $15
+    const next = l.record(usageOf({ outputTokens: 1_000_000 })) // $75
+    expect(next.cost).toBeCloseTo(75, 6)
+    expect(l.snapshot().totalCost).toBeCloseTo(15 + 15 + 75, 6)
+  })
+
+  test("HELL-30: unknown-model event still surfaces a non-zero cost (sonnet fallback)", () => {
+    const l = ledgerOf()
+    const r = l.record(
+      usageOf({ model: "mystery-model-99", inputTokens: 1_000_000, outputTokens: 1_000_000 }),
+    )
+    // Sonnet fallback: 3 (in) + 15 (out) = 18
+    expect(r.cost).toBeCloseTo(18, 6)
   })
 })
 

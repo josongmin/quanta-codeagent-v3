@@ -162,6 +162,9 @@ describe("HELL-3: budget-ledger.record is SYNCHRONOUS — abort cannot interleav
     // surfaces as a test failure.
     const l = defaultBudgetLedger()
     const t0 = Date.now()
+    // ADR-0162: record returns {cost, breaches}; synchronously returned object
+    // (not a Promise). A future refactor that adds `await` would surface as a
+    // failure of either the `breaches` array-check or the wall-clock budget.
     const result = l.record({
       model: "claude-opus-4-7",
       inputTokens: 100,
@@ -170,8 +173,9 @@ describe("HELL-3: budget-ledger.record is SYNCHRONOUS — abort cannot interleav
       at: 1_700_000_000_000,
     })
     const t1 = Date.now()
-    // Synchronous: returned an array (not a Promise).
-    expect(Array.isArray(result)).toBe(true)
+    // Synchronous: breaches is an array (not awaited from a Promise).
+    expect(Array.isArray(result.breaches)).toBe(true)
+    expect(typeof result.cost).toBe("number")
     // Wall-clock should be tiny (<10ms even on a slow CI).
     expect(t1 - t0).toBeLessThan(50)
   })

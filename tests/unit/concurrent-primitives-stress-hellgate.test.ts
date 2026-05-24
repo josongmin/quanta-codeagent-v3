@@ -228,8 +228,9 @@ describe("C. BudgetLedger concurrent stress", () => {
   test("C10: concurrent breach detection → soft breach fires exactly once (debounce holds)", async () => {
     // sessionSoftLimit = $30. Each event = $15. 20 events ⇒ would naively fire 19x.
     const ledger = defaultBudgetLedger({ policy: { sessionSoftLimit: 30 } })
-    const breachCounts = await parallel(20, () => ledger.record(usage()))
-    const softBreaches = breachCounts.flat().filter((b) => b.kind === "session-soft")
+    // ADR-0162: record returns {cost, breaches}; pull breaches per result.
+    const results = await parallel(20, () => ledger.record(usage()))
+    const softBreaches = results.flatMap((r) => r.breaches).filter((b) => b.kind === "session-soft")
     expect(softBreaches.length).toBe(1)
     expect(softBreaches[0]?.kind).toBe("session-soft")
   })

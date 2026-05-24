@@ -79,7 +79,8 @@ describe("instrumentPlanQueue", () => {
 // ────────────────────────────────────────────────────────────────────────────
 const fakeLedger = (overrides: Partial<BudgetLedger> = {}): BudgetLedger =>
   ({
-    record: () => [],
+    // ADR-0162: record returns {cost, breaches}; default fake is 0/[].
+    record: () => ({ cost: 0, breaches: [] }),
     snapshot: () =>
       ({
         totalCost: 0,
@@ -114,10 +115,13 @@ describe("instrumentBudgetLedger", () => {
     const l = instrumentBudgetLedger(
       fakeLedger({
         record: () =>
-          [
-            { kind: "session-soft", limit: 10, observed: 15, scope: "s1" },
-            { kind: "session-hard", limit: 20, observed: 22, scope: "s1" },
-          ] as never,
+          ({
+            cost: 37,
+            breaches: [
+              { kind: "session-soft", limit: 10, observed: 15, scope: "s1" },
+              { kind: "session-hard", limit: 20, observed: 22, scope: "s1" },
+            ],
+          }) as never,
       }),
       m,
     )
@@ -126,6 +130,27 @@ describe("instrumentBudgetLedger", () => {
     expect(breaches.length).toBe(2)
     const kinds = breaches.map((b) => b.labels.kind).sort()
     expect(kinds).toEqual(["session-hard", "session-soft"])
+  })
+
+  test("ADR-0162: record → event.cost_usd histogram with model label", () => {
+    const m = defaultMetricsRegistry()
+    const l = instrumentBudgetLedger(
+      fakeLedger({
+        record: () => ({ cost: 0.42, breaches: [] }) as never,
+      }),
+      m,
+    )
+    l.record({
+      model: "claude-opus-4-7",
+      inputTokens: 1,
+      outputTokens: 1,
+      sessionId: "s1",
+      at: 0,
+    } as UsageEvent)
+    const h = m.snapshot().find((s) => s.name === "budget.event.cost_usd")
+    expect(h).toBeDefined()
+    expect(h?.labels.model).toBe("claude-opus-4-7")
+    // Histogram value: registries vary; assert presence + label, not internal storage.
   })
 
   test("snapshot/clear/serialize/hydrate pass through (no metric)", () => {

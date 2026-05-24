@@ -1,5 +1,5 @@
 /**
- * BudgetLedger instrumentation (ADR-0161).
+ * BudgetLedger instrumentation (ADR-0161 + ADR-0162).
  *
  * Counters:
  *   budget.record.total                  labels: model
@@ -7,11 +7,12 @@
  *
  * Histograms:
  *   budget.event.cost_usd                labels: model
+ *     (ADR-0162: per-event USD cost surfaced via the new 2-field RecordResult)
  *
  * No-throw wrap.
  */
 
-import type { BudgetLedger, BudgetSnapshot, UsageEvent } from "@/agent/budget-ledger"
+import type { BudgetLedger, BudgetSnapshot, RecordResult, UsageEvent } from "@/agent/budget-ledger"
 import type { MetricsRegistry } from "./port"
 
 const safe = (m: MetricsRegistry, fn: () => void): void => {
@@ -34,20 +35,22 @@ export const instrumentBudgetLedger = (
   const prefix = opts?.namePrefix ?? "budget"
 
   return {
-    record(event: UsageEvent) {
+    record(event: UsageEvent): RecordResult {
+      const result = ledger.record(event)
       safe(metrics, () =>
         metrics.increment(`${prefix}.record.total`, 1, { model: event.model }),
       )
-      const breaches = ledger.record(event)
-      // Approximate per-event cost (sum of all token costs) — recompute from snapshot delta.
-      // We can't easily extract per-event cost without access to pricing; observe ledger's
-      // perModel breakdown delta instead.
-      for (const b of breaches) {
+      // ADR-0162: per-event cost histogram. `result.cost` is required on
+      // every return (defensive swallow path emits cost=0).
+      safe(metrics, () =>
+        metrics.observe(`${prefix}.event.cost_usd`, result.cost, { model: event.model }),
+      )
+      for (const b of result.breaches) {
         safe(metrics, () =>
           metrics.increment(`${prefix}.breach.total`, 1, { kind: b.kind, scope: b.scope }),
         )
       }
-      return breaches
+      return result
     },
     snapshot(): BudgetSnapshot {
       return ledger.snapshot()

@@ -114,15 +114,16 @@ describe("HELL-3: BudgetLedger — same model on 2 sessions → independent brea
     const l = defaultBudgetLedger({ policy: { sessionSoftLimit: 20 } })
     // s1 crosses cap → breach fires.
     l.record(usage({ sessionId: "s1" }))
-    const b1 = l.record(usage({ sessionId: "s1" }))
+    // ADR-0162: record returns {cost, breaches}; this test only cares about breaches.
+    const b1 = l.record(usage({ sessionId: "s1" })).breaches
     expect(b1.length).toBe(1)
     expect(b1[0]?.kind).toBe("session-soft")
     expect(b1[0]?.scope).toBe("s1")
     // s2 hasn't crossed yet → no breach.
-    const b2 = l.record(usage({ sessionId: "s2" }))
+    const b2 = l.record(usage({ sessionId: "s2" })).breaches
     expect(b2.length).toBe(0)
     // s2 crosses → its OWN breach fires (independent of s1's).
-    const b3 = l.record(usage({ sessionId: "s2" }))
+    const b3 = l.record(usage({ sessionId: "s2" })).breaches
     expect(b3.length).toBe(1)
     expect(b3[0]?.scope).toBe("s2")
   })

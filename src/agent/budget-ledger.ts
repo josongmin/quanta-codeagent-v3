@@ -19,7 +19,8 @@
  * (apps/agent bootstrap, future dispatch.ts auto-record from stream usage,
  * future surfaces) opt in by constructing `defaultBudgetLedger()` and routing
  * each completion's usage block through `record(...)`. With NO `policy` set,
- * `record` always returns an empty breach array — pure accountant mode.
+ * `record` always returns `{cost, breaches: []}` — pure accountant mode
+ * (cost still observable for the per-event histogram, ADR-0162).
  *
  * Plane-clean: imports ONLY `node:crypto` (for nothing — we do not need an id
  * here; the comment is forward-looking). No `@/agent/loop`, `@/agent/dispatch`,
@@ -30,10 +31,12 @@
  *   1. PURE STORE: in-memory only; 0 I/O, 0 SQLite. Persistence is the
  *      caller's responsibility — we expose `serialize()` / `hydrate()` so the
  *      surface can pipe to disk (e.g. `~/.quanta/budget.json`).
- *   2. NO-THROW on the public surface. `record` always returns an array
- *      (possibly empty); `snapshot` always returns a populated object;
- *      `serialize` always returns a JSON string; `hydrate` swallows garbage
- *      and resets to empty (documented in clause #7).
+ *   2. NO-THROW on the public surface. `record` always returns a
+ *      `{cost, breaches}` object (cost finite & >= 0; breaches possibly
+ *      empty) — see ADR-0162 for the 2-field shape rationale; `snapshot`
+ *      always returns a populated object; `serialize` always returns a
+ *      JSON string; `hydrate` swallows garbage and resets to empty
+ *      (documented in clause #7).
  *   3. exactOptionalPropertyTypes strict — `UsageEvent.turnId`,
  *      `ModelPricing.cacheReadPerM`, `BudgetPolicy.*Limit` are OMITTED on
  *      the wire when absent, never `undefined`.
@@ -153,13 +156,24 @@ export interface BudgetPolicy {
   readonly dailyHardLimit?: number
 }
 
+/** Record-result shape (ADR-0162). `cost` is the USD billed by THIS single
+ *  event (same calculation that flows into perModel aggregation); `breaches`
+ *  is the deterministic-order breach list (0..4 entries). Both are required
+ *  on every call — `cost` is 0 on a malformed event (defensive swallow) and
+ *  `breaches` is `[]` when no policy is configured or no limit was crossed. */
+export interface RecordResult {
+  readonly cost: number
+  readonly breaches: ReadonlyArray<BudgetBreach>
+}
+
 /** Public ledger surface. */
 export interface BudgetLedger {
-  /** Record one usage event. Returns the breaches that fired (0..4) in
-   *  deterministic order: `session-soft`, `session-hard`, `daily-soft`,
-   *  `daily-hard`. Each `(scope, kind)` pair fires AT MOST ONCE (debounce
-   *  per contract #5). */
-  record(event: UsageEvent): ReadonlyArray<BudgetBreach>
+  /** Record one usage event. Returns `{cost, breaches}` (ADR-0162).
+   *  - `cost`: USD billed by this single event (pricing × token counts).
+   *  - `breaches`: 0..4 breaches that fired, in deterministic order:
+   *    `session-soft`, `session-hard`, `daily-soft`, `daily-hard`. Each
+   *    `(scope, kind)` pair fires AT MOST ONCE (debounce per contract #5). */
+  record(event: UsageEvent): RecordResult
   /** Read-only snapshot. */
   snapshot(): BudgetSnapshot
   /** Reset state. With no args: clear EVERYTHING (events + breach memory).
@@ -540,14 +554,22 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
   }
 
   return {
-    record(event) {
+    record(event): RecordResult {
       // Defensive: a malformed event (missing required string fields) is a
       // programmer error in the caller. We swallow rather than throw — the
-      // ledger is observational, not authoritative.
-      if (typeof event?.model !== "string" || typeof event?.sessionId !== "string") return []
+      // ledger is observational, not authoritative. `cost: 0` on swallow
+      // matches the no-op `breaches: []` posture (ADR-0162 contract: the
+      // 2-field shape is REQUIRED on every return, even the swallow path).
+      if (typeof event?.model !== "string" || typeof event?.sessionId !== "string") {
+        return { cost: 0, breaches: [] }
+      }
+      // Compute cost BEFORE pushing so the per-event histogram label is
+      // the event's own model (same pricing resolution path the aggregator
+      // takes, including the safe-LOUD unknown-model fallback).
+      const cost = computeEventCost(event, resolvePricing(event.model)).totalCost
       events.push(event)
       evictIfOver()
-      return checkBreaches(event)
+      return { cost, breaches: checkBreaches(event) }
     },
 
     snapshot() {

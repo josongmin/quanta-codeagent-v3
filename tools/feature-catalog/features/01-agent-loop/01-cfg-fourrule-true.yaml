@@ -13,11 +13,19 @@ owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: cfg.fourRule:true 활성 시 CLOSEOUT_4RULE_REMINDER 단발 주입 — R1 Read-source / R2 Run-verify / R3 Grep-proof / R4 Stale-memory + VerificationCloseout scaffold . 단발, 모듈 순수성 보존 closeoutGuard.fourRule
 evidence:
-  code: [src/agent/closeout-guard.ts, src/agent/guards/closeout-guard.ts, src/agent/types.ts, src/agent/loop.ts]
+  code:
+    - src/agent/closeout-guard.ts
+    - src/agent/guards/closeout-guard.ts
+    - src/agent/types.ts
+    - src/agent/loop.ts
   adrs: [17]
   tests:
-    unit: [tests/unit/closeout-guard.test.ts, tests/unit/code-mod-closeout.test.ts, tests/unit/wire-audit-closeout-hellgate.test.ts]
-    integration: [tests/integration/closeout-forces-none.test.ts]
+    unit:
+      - tests/unit/closeout-guard.test.ts
+      - tests/unit/code-mod-closeout.test.ts
+      - tests/unit/wire-audit-closeout-hellgate.test.ts
+    integration:
+      - tests/integration/closeout-forces-none.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
