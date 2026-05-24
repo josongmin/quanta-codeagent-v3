@@ -1,0 +1,40 @@
+id: assemble-config
+title: assembleConfig — per-turn AgentConfig composer (surface-agnostic)
+section: 10
+subsystem: Runner assembly layer (ADR-0024 split)
+order: 12
+maturity: L5
+status: stable
+purpose: |
+  Pure type-safe composer that turns already-built collaborators
+  (`SessionDeps`: llm / registry / stream / permission / store / embedder /
+  …) + message history into the immutable `AgentConfig` shape `runAgent`
+  consumes. NO env / argv reads — every input is explicit. Naming is
+  deliberate: surface-agnostic builder family (`buildLLMCore` etc.) each
+  INSTANTIATE one collaborator; `assembleConfig` *composes* them. Every
+  conditional default-OFF spread is preserved byte-for-byte from the prior
+  inline block on the CLI entry. Used by `run-once`, `run-interactive`, and
+  `side-chat` orchestrators. Each surface (CLI / Web / Tauri) maps its own
+  input source (ENV / HTTP body / IPC payload) → `SessionDeps` first, then
+  calls this.
+evidence:
+  code:
+    - src/runner/assemble/config.ts
+    - src/runner/assemble/index.ts
+    - src/runner/orchestrate/run-once.ts
+    - src/runner/orchestrate/run-interactive.ts
+    - src/runner/orchestrate/side-chat.ts
+    - src/apps/cli/config-assemble.ts
+  adrs: [24]
+  tests:
+    unit: []
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `apps/cli/config-assemble.ts` is kept as a thin re-export shim so existing
+  importers (`index.ts`, tests) are unaffected. The "assemble" vs "build"
+  separation is documented inline in `config.ts` JSDoc — important reading
+  for new surfaces to understand which factory family to extend.

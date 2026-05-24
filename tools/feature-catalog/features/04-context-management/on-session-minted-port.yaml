@@ -1,0 +1,31 @@
+id: on-session-minted-port
+title: onSessionMinted callback port — resume-fsm surface decoupling (DIP)
+section: 4
+subsystem: Session-resume — surface log seam
+order: 7
+maturity: L4
+status: stable
+purpose: |
+  Surface-supplied hook fired ONCE when a fresh session id is minted via
+  `--new-session` inside the surface-AGNOSTIC `resolveResume` FSM (relocated
+  to `@/runner/orchestrate/resume-fsm.ts`). Lets the CLI surface emit its
+  legacy `session: <id>` log line without coupling the runner slice to
+  `@/shared#logger`. Absent ⇒ silent (Web/Tauri may prefer structured
+  `slog.info` only). Byte-identical default-OFF — CLI shim passes the hook
+  verbatim so the existing log line is preserved.
+evidence:
+  code:
+    - src/runner/orchestrate/resume-fsm.ts
+    - src/apps/cli/repl/resume-fsm.ts
+    - src/apps/cli/repl.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  DIP inversion — the runner slice doesn't know how surfaces want to log
+  the minted id; it just exposes a typed callback the surface owns. One-shot
+  fire (`onSessionMinted?.(newId)` inside the new-session branch).
