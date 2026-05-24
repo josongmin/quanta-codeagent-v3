@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+depends_on: [dispatch-dedup]
 purpose: |
   Tool 호출이 emit하는 `NextAction`(=suggestion to grow `max_depth` /
   `max_files` / narrow `path`)을 모델이 무시하고 같은 (tool, target) 으로 다시

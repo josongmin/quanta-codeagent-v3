@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [llm-stream-timeout, llm-error-taxonomy]
 purpose: |
   The Anthropic and OpenAI adapters previously duplicated ~90% of three
   frames; this module factors them as plain functions (composition over

@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
+depends_on: [codex-2-phase-consolidator, consolidator-session-hook, memory-eviction-planner, memory-dedup-planner]
 purpose: |
   세션 종료 시 LLM distill (provider 미주입 / 호출 실패 시 휴리스틱 폴백),
   pre-save dedup 후보 발견 시 LLM이 merge/supersede 중재, 정주기 eviction

@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [response-in-progress]
 purpose: |
   Wire-level decoders for streaming envelopes emerging from OpenAI Responses
   API v2 (HTTP `text/event-stream` + `wss://chatgpt.com/backend-api/codex/

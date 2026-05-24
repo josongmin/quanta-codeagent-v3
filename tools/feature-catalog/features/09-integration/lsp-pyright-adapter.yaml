@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+depends_on: [lsp-typescript-adapter]
 purpose: |
   Per-language adapter on top of `LspClient` base for `pyright-langserver`
   over stdio. Minimal contribution surface — only the launch argv default

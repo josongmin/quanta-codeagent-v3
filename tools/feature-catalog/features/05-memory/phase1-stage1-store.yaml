@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
+depends_on: [consolidator-session-hook, memory-md-atomic-writer]
 purpose: |
   SQLite-backed `Stage1StorePort` implementation owning the
   `stage1_outputs` + `consolidate_watermark` tables that record per-thread

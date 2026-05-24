@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli, default-off, tier:1]
+depends_on: [git-conflict-inspect]
 purpose: |
   Pure typed-and-tested git merge-conflict parser shared by skills and tools
   that need to programmatically inspect merge conflicts. Input is the entire

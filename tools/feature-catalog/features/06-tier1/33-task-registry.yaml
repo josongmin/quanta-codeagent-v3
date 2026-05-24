@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [subagent-6-tools]
 purpose: |
   In-memory registry of background subagent tasks (v2's `taskRegistry` shape).
   Agent tool registers a task here when launched in background mode and

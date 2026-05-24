@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "security-touched", "held-promotion"]
+depends_on: [secret-redaction-content-plane]
 purpose: |
   Third application point of the content-plane redaction invariant — the
   transcript handed to the LLM distiller (`distillSession`) is run through

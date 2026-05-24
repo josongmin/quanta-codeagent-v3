@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [quanta-session-subcommands]
 purpose: |
   Persistent (NOT auto-removed) git worktree primitive used by top-level
   conversation fork. Creates `<repoRoot>/.quanta/worktrees/<safeId>` on

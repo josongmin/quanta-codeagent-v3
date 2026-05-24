@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
+depends_on: [cost-cache-dashboard, slash-cost-panel, work-metrics]
 purpose: |
   Pure (no network) versioned static price table. Every derived cost event
   stamps `PRICING_VERSION` so historical costs can be re-derived after table

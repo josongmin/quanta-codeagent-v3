@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [prompt-source-payload-widening]
 purpose: |
   REPL surface가 소유하는 in-memory FIFO. 사용자가 `/image add <path>` 슬래시로
   `ImageBlock` (base64 + mediaType, `loadImageBlock`이 검증한)을 큐에 enqueue,

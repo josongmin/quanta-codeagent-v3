@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+depends_on: [lsp-typescript-adapter, lsp-pyright-adapter, lsp-bridge]
 purpose: |
   Concrete implementation of `LspPort` (ADR-0015 / ADR-0024) — the bulk of
   the LSP slice machinery lives here so adapters (TypescriptAdapter,

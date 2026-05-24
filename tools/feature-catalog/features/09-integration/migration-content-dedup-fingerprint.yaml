@@ -7,6 +7,7 @@ maturity: L2
 status: new
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [migration-import-log-busy]
 purpose: |
   Content-addressed fingerprint of a session transcript file so a re-run
   does not re-import an unchanged session. `contentSha256(jsonlPath)` is

@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude-code"]
+depends_on: [external-agent-import, portable-session-v1]
 purpose: |
   `SessionTranslator` adapter that parses a Claude Code session transcript at
   `~/.claude/projects/<slug>/<id>.jsonl` into v3 `Message[]`. Each line is a

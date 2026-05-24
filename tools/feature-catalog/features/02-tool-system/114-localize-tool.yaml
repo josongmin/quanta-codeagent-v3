@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [localize-calibration-corpus]
 purpose: |
   Stage-2 of the 3-stage fault-localization triangle: ranked search for
   symbol/definition lines that match the model's natural-language query,

@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+depends_on: [plugin-manifest]
 purpose: |
   Two contracts behind the plugin manifest. (1) `loadPluginManifest(pluginDir)`
   reads + validates a single plugin root: FAILS LOUDLY when the manifest

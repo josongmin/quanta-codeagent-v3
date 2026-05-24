@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [turn-timing-anchors, llm-assemble, phase-ttft-readonly-trio]
 purpose: |
   Plane-C of the `phase-ttft-readonly-trio` umbrella (ADR-0077) — the
   control-plane sibling of Plane-A (phase marker, surfaced via

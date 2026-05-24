@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
+depends_on: [session-jsonl-envelope]
 purpose: |
   Encode/decode pair for the per-line records that make up the session JSONL
   rail. `encodeSessionLine` emits one JSON object terminated by exactly one

@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+depends_on: [prefix-rule-dsl]
 purpose: |
   Deterministic longest-prefix-match over a single rule set. (1) Normalise
   by stripping LEADING whitespace ONLY — trailing whitespace and internal

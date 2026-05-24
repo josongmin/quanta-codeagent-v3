@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
+depends_on: [landlock-degraded-passthrough, seatbelt-profile-compiler]
 purpose: |
   Closed-port DI surface `OsSandbox { spawn, availability }` and its
   production default `defaultOsSandbox(cfg)`. Picks the right backend

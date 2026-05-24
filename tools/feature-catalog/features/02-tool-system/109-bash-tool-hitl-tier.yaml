@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [typed-tool-failure-modes, shell-output-delta-streaming, isconcurrencysafe]
 purpose: |
   `bash` tool's `hitlTier(input)` returns `"always-confirm"` for network
   egress (curl/wget/`gh api`) and mutating git ops (push/send-pack/fetch/

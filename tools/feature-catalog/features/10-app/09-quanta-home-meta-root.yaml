@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [post-denial-precedence, per-host-agent-mode, runtime-config-ssot, per-thread-permissions]
 purpose: |
   Single env override that relocates every Quanta-owned persistent path —
   permission-state, bench corpus/artifacts, prefs fallback parent, and other

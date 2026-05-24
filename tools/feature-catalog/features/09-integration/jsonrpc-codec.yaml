@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
+depends_on: [jsonrpc-request-id-correlation, jsonrpc-envelope]
 purpose: |
   encode / decode helpers for JSON-RPC 2.0 frames (request / notification /
   success-response / error-response / Codex-style explicit timeout). Decoders

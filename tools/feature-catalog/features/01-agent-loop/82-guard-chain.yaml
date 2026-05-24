@@ -7,6 +7,7 @@ maturity: L5
 status: stable
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [decideverifyguard]
 purpose: |
   verify-guard와 closeout-guard가 SAME 컨트롤 포인트(`applyAction` → "모델이 finish
   하려 한다")에서 SAME 액션 (block finish, append `metaUser(...)` nudge, return

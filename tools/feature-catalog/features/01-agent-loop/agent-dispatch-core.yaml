@@ -7,6 +7,7 @@ maturity: L5
 status: new
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+depends_on: [effect-channel, plan-mode]
 purpose: |
   `src/agent/dispatch.ts` — `ToolRegistry.run()` 직전/직후 모든 deny/permit
   결정 + result shaping 을 한 곳에 모은 dispatch seam 의 본체. 코어 루프

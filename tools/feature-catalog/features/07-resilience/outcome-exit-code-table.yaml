@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+depends_on: [batch-aggregate-exit-code, agent-cli-args-parser]
 purpose: |
   `exitCodeForOutcome(outcome)` is the PURE function that pins the canonical
   AgentOutcome→POSIX exit-code table (the ONLY policy `apps/agent/run.ts` owns):

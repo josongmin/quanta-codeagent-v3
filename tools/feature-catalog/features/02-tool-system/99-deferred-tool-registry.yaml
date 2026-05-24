@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+depends_on: [tool-output-schema-factory, tool-search]
 purpose: |
   Typed seam for tools that need to return a provisional placeholder plus a
   `DeferredHandle`, with the final `ToolResult` produced out-of-band and parked

@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:cli"]
+depends_on: [cli-slash-help]
 purpose: |
   기존 `cli-slash-help` 의 dynamic BUILTINS 인벤토리 위에 3개 P0
   discovery 갭 봉합:

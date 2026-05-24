@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin", "team-safety"]
 labels: ["surface:core", "security-touched"]
+depends_on: [secret-redaction-content-plane]
 purpose: |
   Default-ON gate that enforces the secret-redaction invariant. Disabling at
   the host level requires an explicit `acknowledgedRisk` string — a non-empty

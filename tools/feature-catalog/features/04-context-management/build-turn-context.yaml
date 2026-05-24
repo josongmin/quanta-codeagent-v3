@@ -7,6 +7,7 @@ maturity: L5
 status: stable
 owners: ["@songmin"]
 labels: [surface:core]
+depends_on: [glob-rules]
 purpose: |
   `buildTurnContext(input)` → `{system: SystemBlock[], messages: Message[]}` 한 호출로
   static system prefix(`buildSystemPrompt` 또는 caller 주입)와 per-turn dynamic 블록을

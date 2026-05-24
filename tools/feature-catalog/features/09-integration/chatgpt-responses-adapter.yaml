@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:core"]
+depends_on: [chatgpt-oauth-provider, token-store-atomic, refresh-coordinator]
 purpose: |
   Concrete `LLMPort` that calls `${apiBase}/responses` with the disk-stored
   OAuth bearer instead of an API key. Default `apiBase` is

@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "held-promotion"]
+depends_on: [memory-citation-surface, cli-turn-summary]
 purpose: |
   `AgentOutcome.memoryCitations` (ADR-0082, `memory-citation-surface` feature가
   생성하는 신호)를 사용자에게 가시화하는 첫 consumer — `cli-turn-summary`

@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
+depends_on: [subagent-6-tools, task-registry]
 purpose: |
   Closed input schema for the parent's `agent` tool — six Codex Round-3
   absorption fields beyond `prompt`/`agent_type`/`tools`/`background`/

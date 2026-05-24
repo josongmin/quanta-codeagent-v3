@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
+depends_on: [landlock-degraded-passthrough]
 purpose: |
   Pure compiler from a `SandboxPolicy` to a Seatbelt (SBPL) profile text
   suitable for `sandbox-exec -p '<text>'`. No I/O. Mirrors the Codex

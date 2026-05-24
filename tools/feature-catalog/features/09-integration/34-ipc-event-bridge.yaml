@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+depends_on: [portable-session-v1, slice-ipc-bridge]
 purpose: |
   Surface-agnostic event bridge connecting multiple surfaces (CLI / Web /
   Tauri / future remote-control daemons) to a single logical agent session.

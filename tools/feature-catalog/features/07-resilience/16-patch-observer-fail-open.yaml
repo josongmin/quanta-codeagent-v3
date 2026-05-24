@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "held-promotion"]
+depends_on: [recorder-fail-open-permission-verdict]
 purpose: |
   Negative invariant: a throw from EITHER the in-process user observer OR
   the canonical OTel emitter is caught + swallowed so apply semantics are

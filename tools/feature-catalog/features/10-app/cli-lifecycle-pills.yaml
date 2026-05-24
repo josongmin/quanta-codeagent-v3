@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
+depends_on: [queued-follow-ups, cli-status-pills]
 purpose: |
   Top-line status-pills(`cli-status-pills`)과 직교한 3개 lifecycle pill:
   (1) `subagent` (활성 sub-agent 개수 + worker nickname),

@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
+depends_on: [shadow-tools-trio, task-registry]
 purpose: |
   Three first-class tools wrapping a `BackgroundSubagentSchedulerPort` so the
   parent loop can fork a non-blocking subagent, poll its status without

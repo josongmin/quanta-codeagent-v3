@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:cli]
+depends_on: [shadow-tools-trio, slash-snapshot]
 purpose: |
   Closed-port contract for a separate git ObjectDB rooted at
   `<baseDir>/snapshots/<workspaceHash>/.git` — point-in-time worktree snapshots

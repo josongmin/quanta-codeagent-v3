@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
+depends_on: [mcp-client-jsonrpc, jsonrpc-envelope, lsp-bridge]
 purpose: |
   Wire-level codec behind `lsp-bridge` and `lspport`. LSP framing is NOT MCP's
   newline-delimited shape: every message is a JSON body preceded by an HTTP-

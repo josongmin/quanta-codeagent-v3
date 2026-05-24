@@ -7,6 +7,7 @@ maturity: L4
 status: stable
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
+depends_on: [engineering-skills-bundle]
 purpose: |
   ADR-0102 Phase AS absorption batch — 8 highest-ROI Cursor CTK git-task
   prompts shipped as bundled system skills. Each skill is SKILL.md (frontmatter

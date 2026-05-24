@@ -7,6 +7,7 @@ maturity: L4
 status: new
 owners: ["@songmin"]
 labels: [surface:cli]
+depends_on: [plan-mode]
 purpose: |
   Sister tool of `request_plan_exit`. Lets the model ask the operator a
   question and block on a typed reply when it cannot infer the decision
