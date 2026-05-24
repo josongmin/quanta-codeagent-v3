@@ -1,0 +1,36 @@
+id: subagent-bg-tools-trio
+title: subagent_{fork,poll,await} — background subagent tool trio (ADR-0130)
+section: 2
+subsystem: 도구 — background subagent (Codex 흡수, ADR-0130)
+order: 97
+maturity: L4
+status: new
+purpose: |
+  Three first-class tools wrapping a `BackgroundSubagentSchedulerPort` so the
+  parent loop can fork a non-blocking subagent, poll its status without
+  blocking, then optionally `await` it with timeout. `subagent_fork` is the
+  primary mutator (returns an opaque handle id); `subagent_poll` is a strict
+  read-only status read; `subagent_await` blocks (with optional timeout) for
+  completion. The scheduler is a DUCK-TYPED mirror of
+  `BackgroundSubagentScheduler` from `@/agent/subagent-background` — the tool
+  slice does NOT import `@/agent` (RFC §3.1 slice fence, biome-enforced). The
+  composition root in `@/agent/tier1/subagent-bg` adapts the concrete scheduler
+  into this narrower port at wire time. Default-OFF: tools are not in
+  `defaultTools`; the assembly seam registers them only when a scheduler is
+  wired (mirrors `shadow-tools-trio` and `branch_search` posture).
+evidence:
+  code:
+    - src/tool/subagent-bg/index.ts
+    - src/tool/subagent-bg/fork.ts
+    - src/tool/subagent-bg/poll.ts
+    - src/tool/subagent-bg/await.ts
+    - src/tool/subagent-bg/port.ts
+  adrs: [130]
+  tests:
+    unit:
+      - tests/unit/subagent-background-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Distinct from `task-registry` (the in-loop background subagent runtime + capability tokens). This is the tool-facing surface that lets the model spawn/observe background work.'

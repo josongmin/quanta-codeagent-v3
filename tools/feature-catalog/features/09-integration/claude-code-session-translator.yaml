@@ -1,0 +1,33 @@
+id: claude-code-session-translator
+title: Claude Code session translator (~/.claude/projects/*.jsonl → Message[])
+section: 9
+subsystem: Migration translator (Claude Code 흡수, ADR-0038)
+order: 11
+maturity: L4
+status: stable
+purpose: |
+  `SessionTranslator` adapter that parses a Claude Code session transcript at
+  `~/.claude/projects/<slug>/<id>.jsonl` into v3 `Message[]`. Each line is a
+  JSON object discriminated by `.type`: `user` / `assistant` carry
+  `message: { role, content }` (string or array of `text` / `tool_use` /
+  `tool_result` blocks); everything else (`queue-operation`, `attachment`,
+  `file-history-snapshot`, `ai-title`, `summary`) is bookkeeping and skipped.
+  Defensive by contract: malformed lines (bad JSON, wrong shape, unknown block
+  type) are skipped, never thrown. Messages whose translated content is empty
+  are dropped — they carry no signal and would pollute the transcript. The
+  resulting `Message[]` is feed-compatible with the v3 loop (seed messages /
+  rewind / fork).
+evidence:
+  code:
+    - src/migration/translators/claude-code.ts
+    - src/migration/translators/types.ts
+    - src/migration/translators/index.ts
+  adrs: [38]
+  tests:
+    unit: []
+    integration:
+      - tests/integration/migration-claude-code-translator.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Distinct from `portable-session-v1` (v3-native round-trip schema) and `external-agent-import` (4-stage import lifecycle). This is the per-provider Claude-Code-shape translator that feeds those upstream surfaces.'

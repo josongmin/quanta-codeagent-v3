@@ -1,0 +1,40 @@
+id: glob-dp-matcher
+title: ReDoS-hardened glob DP matcher (skill activation + Cursor rule paths)
+section: 3
+subsystem: 권한·안전 — glob matching (Cursor .mdc / Claude paths: 흡수)
+order: 50
+maturity: L4
+status: stable
+purpose: |
+  Memoized dynamic-programming glob matcher for the constructs Claude Code's
+  `paths:` and Cursor `.cursor/rules` `globs:` use: `**` (any chars incl. `/`,
+  with an optional following `/` convenience), `*` (any run of non-`/`), `?`
+  (one non-`/`), literals. A pattern without a `/` matches a path's basename at
+  any depth (gitignore semantics). NOT regex by design: glob patterns come
+  from attacker-influenceable frontmatter, and the obvious `**`→`.*`
+  translation produces multiple unbounded `.*` quantifiers — a pattern like
+  `**/x/**/x/**/x` compiles to `.*x/.*x/.*x` and catastrophically backtracks
+  (O(nᵏ)) on a long NON-matching path, hanging the whole agent (DoS). JS lacks
+  atomic groups / possessive quantifiers, so the matcher uses a memoized DP
+  instead: every (token, position) pair is decided at most once → hard
+  O(tokens · len²) ceiling with no exponential blowup. Hard caps on inputs:
+  `MAX_GLOB_LEN = 4096`, `MAX_PATH_LEN = 8192`, combined work-budget
+  `MAX_GLOB_WORK = 1 << 20` (tokens × len product). Over-cap inputs
+  short-circuit to no-match (safe failure mode — a malicious oversized
+  glob/path simply never matches). Used by skill activation (paths trigger)
+  and Cursor rule path-matching.
+evidence:
+  code:
+    - src/skill/activation.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/round1-hardening.test.ts
+      - tests/unit/round2-hardening.test.ts
+      - tests/unit/round4-hardening.test.ts
+    integration:
+      - tests/integration/skill-paths-activation-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Distinct from `glob-rules` (the auto-injected rule pipeline that USES this matcher) and `rules-matcher` (longest-prefix matcher for the prefix-rule DSL). This is the underlying ReDoS-hardened glob matcher itself.'

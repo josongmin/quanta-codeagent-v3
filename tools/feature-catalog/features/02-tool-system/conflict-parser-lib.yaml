@@ -1,0 +1,36 @@
+id: conflict-parser-lib
+title: parseConflicts — pure git merge-conflict parser library (ADR-0111)
+section: 2
+subsystem: 도구 — git merge-conflict parser (cursor-git §⑧ fix-merge-conflicts skill 흡수, ADR-0111)
+order: 93
+maturity: L4
+status: new
+purpose: |
+  Pure typed-and-tested git merge-conflict parser shared by skills and tools
+  that need to programmatically inspect merge conflicts. Input is the entire
+  file contents (the agent has already `Read` them); output is the typed
+  `ConflictParseResult` with `ConflictBlock[]` + `ConflictParseDiagnostic[]`.
+  No second I/O, no git binary, no marker-shape ambiguity. Contract:
+  (1) PURE — no I/O, no `Buffer`, no `child_process`, input `string` →
+  output typed result; the parser does NOT consult the filesystem to verify
+  the conflict is real (caller's concern). (2) NO-THROW — malformed conflicts
+  produce a typed `ConflictParseDiagnostic`, NEVER a throw; the ONLY thrown
+  exception is `ConflictParserInputError` (programmer bug — non-string input).
+  (3) `exactOptionalPropertyTypes` — optional fields (`base`, `baseLabel`) are
+  OMITTED, never set to `undefined`. (4) PLANE-CLEAN — imports nothing from
+  `@/agent`, `@/tool`, `@/permission`; only `@/shared` (for `QuantaError`).
+  (5) Segment-anchored markers — a marker is recognised ONLY at column 0.
+  DEFAULT-OFF: nobody in the loop imports this file today; a future
+  `fix-merge-conflicts` skill / git tool opts in by importing `parseConflicts`.
+evidence:
+  code:
+    - src/git/conflict-parser.ts
+  adrs: [111]
+  tests:
+    unit:
+      - tests/unit/git/conflict-parser.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Distinct from `git-conflict-inspect` (the `git_conflict_inspect` model-facing TOOL surface, which has its OWN colocated parseConflicts under `src/tool/git/conflict-parser/`). This entry registers the default-OFF library at `src/git/conflict-parser.ts` — the original ADR-0111 parser intended to be the shared canonical implementation.'
