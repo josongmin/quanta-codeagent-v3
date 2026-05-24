@@ -11,7 +11,6 @@ modes: [ci-bot]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
-configurable: n-a
 purpose: |
   Propositional check on a shell command — is this operation forbidden by the
   `gitWrite: { kind: "branch-only"; protectedBranches: string[] }` lever?

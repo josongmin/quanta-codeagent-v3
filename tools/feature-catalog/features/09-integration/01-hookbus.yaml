@@ -12,7 +12,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
-configurable: integrated
 config_refs:
   env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
 purpose: |
@@ -40,6 +39,7 @@ evidence:
     - src/agent/loop.ts
     - src/agent/prompt.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs:
     - docs/decisions/0133-hook-bidirectional-rpc.md
   tests:

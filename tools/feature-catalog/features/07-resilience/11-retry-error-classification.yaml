@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
-configurable: static
 purpose: |
   `classifyLLMError`는 두 입력 — (1) 메시지 substring 매칭(RETRYABLE_MARKERS:
   429/5xx/timeout/ECONNRESET/overloaded/rate-limit/temporarily/try-again,

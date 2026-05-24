@@ -14,9 +14,6 @@ config_refs:
   env: [QUANTA_HITL_OVERRIDES]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_ATTRS"]
 purpose: 'ADR-0020 HITL 어휘 위에 annotation registry(빌트인 + ~/.quanta/hitl-overrides.json 운영자 override)와 typed HandoffRequiredEvent UI seam을 얹는다. one-way ratchet으로 override는 tier escalate만 가능; hand-off-required는 절대 downgrade되지 않는다. AgentConfig.onHandoff 콜백으로 deny 메시지 파싱 없이 구조화된 이벤트 수신.'
 evidence:
   code:
@@ -24,6 +21,7 @@ evidence:
     - src/agent/hitl-tier-registry.ts
     - src/agent/admissibility-gate.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs: [20, 26, 29, 47]
   tests:
     unit:

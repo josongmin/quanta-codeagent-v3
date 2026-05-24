@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: static
 purpose: |
   `src/ui/ui-helpers.ts` (구 `auth-ui.ts` 에서 이관 + 슬라이스화) — 순수 string/ANSI/
   box-drawing primitives. 어떤 표면 (CLI / REPL / 임베디드 browser / Tauri renderer) 도

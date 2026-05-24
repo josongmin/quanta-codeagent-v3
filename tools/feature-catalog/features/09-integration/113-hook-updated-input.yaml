@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc"]
-configurable: static
 purpose: |
   Third return shape on pre_tool_use hooks (beyond allow / deny): an
   updatedInput payload that REWRITES the tool's arguments before dispatch.

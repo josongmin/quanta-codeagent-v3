@@ -12,8 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:ipc]
 depends_on: [mcp-tool-bridge, jsonrpc-envelope]
-ui_surfaces: [api]
-configurable: static
 purpose: |
   Wire-level details behind `mcp-tool-bridge`. (1) Newline-delimited
   JSON-RPC 2.0 codec — MCP framing is NOT LSP `Content-Length`; every

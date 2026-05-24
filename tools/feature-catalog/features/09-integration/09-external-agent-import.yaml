@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
   env: ["QUANTA_SESSION_LIST_FORMAT", "QUANTA_SESSION_LIST_MAX"]
 purpose: 4-stage import lifecycle (detect_finished / provider_stage_finished / session_completion_finished / import_finished) for Claude Code / Cursor / Aider installations under the user home directory. Strict marker-based detection (no maybe-X heuristics). Halt-on-error semantics — failure of any stage emits import_finished{ok:false} and stops. L4 — stage 3 now TRANSLATES real session transcripts into v3 Message[] via per-provider SessionTranslator (claude_code parses ~/.claude/projects/**/<id>.jsonl: text→TextBlock, tool_use→ToolUseBlock, tool_result→ToolResultBlock; skips queue-operation/attachment/file-history-snapshot/ai-title/summary; drops empty-content messages; defensive on malformed lines), counting successfully-translated sessions; cursor/aider are stub translators returning [] until their formats are absorbed. contentSha256 (sha256 of file bytes) provides the dedup fingerprint. CLI subcommand `quanta session import <claude_code|cursor|aider>` runs the import, prints a summary, and appends to the persisted log. Persisted log at ~/.quanta/external_agent_session_imports.json with sidecar lock — concurrent writers raise ImportLogBusyError. @/migration slice depends on @/shared + @/llm (Message type) only.
@@ -28,6 +26,7 @@ evidence:
     - src/migration/translators/claude-code.ts
     - src/migration/translators/index.ts
     - src/apps/cli/session-commands.ts
+    - src/shared/runtime-config.ts
   adrs: [38]
   tests:
     unit:

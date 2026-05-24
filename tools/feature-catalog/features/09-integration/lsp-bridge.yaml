@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
-ui_surfaces: [ide]
-configurable: partial
 config_refs:
   env: ["QUANTA_LSP_TOOLS"]
 purpose: |
@@ -29,6 +27,7 @@ evidence:
     - src/lsp/adapters/typescript.ts
     - src/lsp/adapters/pyright.ts
     - src/lsp/adapters/jsonrpc.ts
+    - src/apps/cli/internal.ts
   adrs: [15]
   tests:
     unit:

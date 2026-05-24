@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
-configurable: n-a
 purpose: |
   v0.dev SubmitRetryBotMessage{messageId, retryModelId} 흡수 — 특정 turn을 의도적으로
   다른 모델로 재실행(불만족 응답 재시도, opus→max 자동 에스컬레이션). resolveRetryModel

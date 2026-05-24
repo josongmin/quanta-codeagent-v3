@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [bench-python-swebench]
-configurable: integrated
 config_refs:
   env: ["QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PREPARE_FORCE"]
 purpose: |
@@ -32,6 +31,7 @@ evidence:
     - src/apps/bench/harness/images.ts
     - src/apps/bench/harness/prepare.ts
     - src/apps/bench/harness/config.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:

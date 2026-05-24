@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
-configurable: n-a
 purpose: |
   Single SSOT for folding a `StreamEvent` iterator into one `AssembledTurn`
   ({message, stopReason}). Three explicit fold rules: (1) `text_delta`

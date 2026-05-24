@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
-ui_surfaces: [cli, ide]
-configurable: static
 purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit
 evidence:
   code: [src/lsp/adapters/jsonrpc.ts, src/tool/lsp_nav/index.ts, src/tool/lsp_nav/formatters.ts]

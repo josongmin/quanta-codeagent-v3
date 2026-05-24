@@ -13,7 +13,6 @@ config_refs:
   env: [QUANTA_OBSERVE_DIR]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-configurable: static
 purpose: |
   `JsonlRecorder` — append-only JSON-Lines sink for the trajectory event stream.
   One AgentEvent ⇒ one JSON object per line (newline-framed, never partial)
@@ -23,7 +22,11 @@ purpose: |
   jsonl-recorder.ts`; lifecycle (open/close) is idempotent so a late event
   after close is a silent no-op instead of a crash.
 evidence:
-  code: [src/stream/adapters/jsonl-recorder.ts, src/stream/adapters/tee.ts, src/stream/adapters/jsonl-retention.ts]
+  code:
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/stream/adapters/tee.ts
+    - src/stream/adapters/jsonl-retention.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: [tests/unit/jsonl-recorder.test.ts, tests/unit/jsonl-recorder-retention.test.ts, tests/unit/tee.test.ts]

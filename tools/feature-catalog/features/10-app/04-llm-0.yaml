@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: n-a
 purpose: '--dry-run 모드 () — 순수 plan builder: 코퍼스 load + count + per-instance preview, LLM 호출 0. 통합 전 정합성/필터 검증, CI 비용 없음'
 evidence:
   code: [src/apps/bench/dry-run.ts]

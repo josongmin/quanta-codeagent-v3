@@ -12,8 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [quanta-session-subcommands, session-index-store, quantastatepath]
-ui_surfaces: [cli]
-configurable: n-a
 purpose: |
   `--resume <token>` 해석의 pure state machine — 실구현은 surface-agnostic Layer-2
   슬라이스 `@/runner/orchestrate/resume-fsm` 으로 재배치됐고, `src/apps/cli/resume.ts`

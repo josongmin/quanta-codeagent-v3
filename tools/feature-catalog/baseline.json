@@ -30,10 +30,14 @@
     }
   },
   "fc": {
-    "empty_stubs_max": 48,
+    "empty_stubs_max": 1,
     "orphan_adrs_grandfathered": [
-      44
+      112,
+      136,
+      146,
+      158,
+      158
     ],
-    "updated_at": "2026-05-23T11:21:51.908Z"
+    "updated_at": "2026-05-24T14:51:28.927Z"
   }
 }

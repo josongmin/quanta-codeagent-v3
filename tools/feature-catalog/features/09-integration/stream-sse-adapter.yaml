@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
-configurable: n-a
 purpose: |
   Serializes every `AgentEvent` as a spec-correct Server-Sent Events frame:
   one `id:` line (per-frame monotonic counter), one `event:` line (the

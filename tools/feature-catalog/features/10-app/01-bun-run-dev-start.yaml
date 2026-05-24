@@ -11,13 +11,15 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_SANDBOX"]
 purpose: bun run dev|start, .env 로드, 전 SOTA++ 노브 default OFF
 evidence:
-  code: [src/apps/cli/index.ts, src/apps/cli/dotenv.ts, package.json]
+  code:
+    - src/apps/cli/index.ts
+    - src/apps/cli/dotenv.ts
+    - package.json
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit: [tests/unit/dotenv.test.ts]

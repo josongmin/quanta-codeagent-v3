@@ -13,8 +13,6 @@ config_refs:
   env: [QUANTA_MD_HIGHLIGHT, QUANTA_MD_MODE]
 owners: ["@songmin"]
 labels: [surface:core]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   assistant 텍스트 스트림(델타 청크)을 라인 단위 유한상태머신으로 흘려
   inline ANSI 컬러를 입히는 painter. 상태: header(`#`+`##`+`###`) /
@@ -29,6 +27,7 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/markdown-painter.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit:

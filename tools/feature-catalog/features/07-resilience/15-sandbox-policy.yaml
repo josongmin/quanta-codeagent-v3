@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
-configurable: static
 purpose: |
   Single-command 실행에 옵션 필드 5개로 confinement를 선언: `cwdJail`(작업
   디렉토리 jail — 구현체는 escape를 reject MUST), `allowNetwork`(network

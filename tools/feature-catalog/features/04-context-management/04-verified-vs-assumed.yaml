@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
-configurable: integrated
 purpose: 압축 프롬프트 verified-vs-assumed 강화
 evidence:
   code: [src/agent/compaction.ts, src/agent/prompt.ts]

@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 depends_on: [sqlite-persistent-store, memory-dedup-planner]
-configurable: static
 purpose: |
   The memory slice owns the structural EmbedderPort interface (so it stays
   free of any LLM-provider import per slice-isolation), while concrete

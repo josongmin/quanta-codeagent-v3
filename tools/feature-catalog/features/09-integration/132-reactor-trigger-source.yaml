@@ -34,6 +34,7 @@ evidence:
     - src/reactor/trigger-source-ci.ts
     - src/reactor/trigger-source-pr-comment.ts
     - src/reactor/index.ts
+    - src/reactor/self-wake.ts
   adrs: [132]
   tests:
     unit:

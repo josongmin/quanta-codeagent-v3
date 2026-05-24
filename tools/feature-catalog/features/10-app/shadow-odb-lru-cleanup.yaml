@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [shadow-tools-trio, snapshot-slash-cmd, slash-snapshot]
-configurable: static
 purpose: |
   Bounded-disk policy for the shadow git ODB (ADR-0108). Sums the on-disk
   size of each per-workspace shadow directory under

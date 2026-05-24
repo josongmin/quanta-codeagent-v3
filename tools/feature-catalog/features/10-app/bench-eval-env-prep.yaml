@@ -11,7 +11,6 @@ modes: [headless, batch]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:bench"]
-configurable: n-a
 purpose: |
   Per-instance env prep — the structural fix for Type-F (verify-loop
   stuck on env). When the instance carries `setupCmd`, run it INSIDE

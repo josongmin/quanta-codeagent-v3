@@ -14,9 +14,6 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [assemble-store-core]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_MEMORY_CONSOLIDATE", "QUANTA_MEMORY_DISTILL", "QUANTA_MEMORY_RECALL_LIMIT", "QUANTA_MEMORY_RECALL_TIERS", "QUANTA_MEMORY_SELF_EDIT"]
 purpose: |
   Surface-agnostic memory-config assembly. Two distinct helpers:
   (1) `parseRecallTiers` — pure parser for raw
@@ -37,6 +34,7 @@ purpose: |
 evidence:
   code:
     - src/runner/assemble/memory.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: []

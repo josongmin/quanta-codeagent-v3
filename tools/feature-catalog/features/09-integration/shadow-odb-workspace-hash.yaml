@@ -12,7 +12,6 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [shadow-odb-lru-cleanup]
-configurable: static
 purpose: |
   Deterministic SHA-256 hash of a normalized absolute workspace path,
   truncated to the first 16 hex characters (64 bits). The result is the

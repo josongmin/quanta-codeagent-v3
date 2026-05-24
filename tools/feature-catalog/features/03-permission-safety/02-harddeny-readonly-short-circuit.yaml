@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
-configurable: static
 purpose: HARD_DENY 선행 / readonly short-circuit
 evidence:
   code: [src/permission/classifier.ts, src/permission/policy-rules.ts]

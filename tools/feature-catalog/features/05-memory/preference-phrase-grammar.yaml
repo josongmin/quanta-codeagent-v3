@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
-configurable: static
 purpose: |
   Codex memory의 feedback-type 메모리 body 컨벤션 흡수 — 자유형 paraphrase
   대신 4-field 구조화 grammar:

@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
-configurable: n-a
 purpose: |
   Slash-command 표면(`/permission explain <tool>`)을 위한 stateless inspector. 동일
   슬라이스의 `inspector.ts`(store-기반, per-thread "지금 어떻게 결정될까")와 보완:

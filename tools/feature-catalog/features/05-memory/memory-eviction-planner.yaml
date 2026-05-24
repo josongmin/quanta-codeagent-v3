@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 depends_on: [memory-dedup-planner]
-configurable: static
 purpose: |
   Periodic full-store sweep that bounds each memory tier (semantic / episodic),
   prunes ancient superseded rows, and decays long-archived low-value memories.

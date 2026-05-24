@@ -12,7 +12,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
-configurable: static
 purpose: |
   Codex memory corpus(R4+R6) production 분포 (partial 75% / success 15% /
   uncertain 10% / fail 1%)를 4-state fixed-set enum으로 흡수. 기존 memory

@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-configurable: n-a
 purpose: |
   `tests/unit/permission-rules.fixtures.ts` 는 `src/permission/policy.ts`
   의 `HARD_DENY_RULES` 카탈로그를 적대(mustBlock) + 회피-방지(mustAllow)

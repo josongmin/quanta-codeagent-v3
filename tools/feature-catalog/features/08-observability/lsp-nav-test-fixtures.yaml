@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-configurable: static
 purpose: |
   `tests/unit/lsp-nav-fixtures.ts` 는 lsp_nav 9 개 per-tool 테스트 슬라이스
   (definition · type-definition · references · implementation · hover ·

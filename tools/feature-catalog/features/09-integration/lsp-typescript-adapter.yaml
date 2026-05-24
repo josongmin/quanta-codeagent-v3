@@ -12,8 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-pyright-adapter, lsp-client-base]
-ui_surfaces: [ide]
-configurable: static
 purpose: |
   Per-language adapter on top of `LspClient` base for
   `typescript-language-server` over stdio. Two contributions only — the rest

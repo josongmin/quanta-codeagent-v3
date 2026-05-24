@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
@@ -27,6 +25,7 @@ evidence:
     - src/tool/image/compose.ts
     - src/tool/image/index.ts
     - src/tool/types.ts
+    - src/shared/runtime-config.ts
   adrs: [126]
   tests:
     unit:

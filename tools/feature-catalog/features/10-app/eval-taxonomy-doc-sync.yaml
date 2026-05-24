@@ -11,7 +11,6 @@ modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
-configurable: n-a
 purpose: |
   `TAXONOMY` 배열을 `docs/analysis/may-21-coding-agent-query-usecase.md` §1
   포맷(major별 `중분류 | 소분류 | 트리거 | 커버 | 담당 | 검증` 테이블)으로

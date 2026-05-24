@@ -11,10 +11,8 @@ modes: [interactive]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_COST_PANEL", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]
+  env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
 purpose: |
   Surface-only renderer for catalog 대5 L4 `WorkingState` — the per-session L3
   scratchpad (owner shortlist, hypothesis, blockers, next steps, deferred
@@ -30,6 +28,7 @@ evidence:
   code:
     - src/apps/cli/working-state-panel.ts
     - src/apps/cli/slash-commands.ts
+    - src/apps/cli/help-render.ts
   adrs: []
   tests:
     unit:

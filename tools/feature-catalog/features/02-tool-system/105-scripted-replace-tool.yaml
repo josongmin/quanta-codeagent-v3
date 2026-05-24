@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   Codex `tool-routing-and-triggering.md` absorption — "patch is for local +
   stable context; scripted replace is for duplicated blocks, bulk substitution,

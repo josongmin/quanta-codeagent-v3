@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
   env: ["QUANTA_SESSION_LIST_FORMAT", "QUANTA_SESSION_LIST_MAX"]
 purpose: |
@@ -32,6 +30,7 @@ evidence:
     - src/llm/types.ts
     - src/session/store.ts
     - src/apps/cli/session-commands.ts
+    - src/shared/runtime-config.ts
   adrs: [52]
   tests:
     unit: [tests/unit/session/rewind.test.ts]

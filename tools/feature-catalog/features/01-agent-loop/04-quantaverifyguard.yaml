@@ -13,7 +13,6 @@ config_refs:
   env: [QUANTA_VERIFY_GUARD, QUANTA_VERIFY_GUARD_MAX_TRIPS]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-configurable: n-a
 purpose: / (기본 OFF)
 evidence:
   code:

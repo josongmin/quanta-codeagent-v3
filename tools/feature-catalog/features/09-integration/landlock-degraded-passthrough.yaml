@@ -12,7 +12,6 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [seatbelt-profile-compiler]
-configurable: n-a
 purpose: |
   Linux Landlock + seccomp implementation, deliberately phase-1. A
   production wire on Linux would need either a native binding

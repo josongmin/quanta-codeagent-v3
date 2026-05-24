@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_HISTORY_DEFAULT_N]
 owners: ["@songmin"]
 labels: ["surface:cli"]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_COST_PANEL", "QUANTA_HISTORY_DEFAULT_N", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]
 purpose: |
   Compact scannable summary of the live session so the operator can answer
   "what did I just do?" without scrolling. Four subcommands: `/history` (last N

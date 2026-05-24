@@ -11,7 +11,6 @@ modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: n-a
 purpose: |
   Compile-time + runtime defense against cast-corrupted ModePolicy values.
   `narrowMode<M>(mode, policy)` is a TS assertion function — after the call

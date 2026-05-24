@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
-configurable: integrated
 purpose: proactive(임계) + reactive(PTL) + orphan-safe 경계
 evidence:
   code: [src/agent/compaction.ts]

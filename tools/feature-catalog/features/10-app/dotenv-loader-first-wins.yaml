@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
   env: ["QUANTA_PROVIDER", "QUANTA_SANDBOX"]
 purpose: |
@@ -37,6 +35,7 @@ evidence:
     - src/apps/cli/dotenv.ts
     - src/apps/cli/index.ts
     - src/apps/agent/index.ts
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:

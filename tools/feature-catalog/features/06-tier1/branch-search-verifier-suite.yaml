@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
-configurable: n-a
 purpose: |
   Concrete `Verifier` implementations bound to `@/runtime/shell#runShell`
   (env-scrubbed, timeout-bounded). Each verifier is READ-ONLY w.r.t. the

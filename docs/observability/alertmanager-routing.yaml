@@ -1,0 +1,90 @@
+# quanta AlertManager routing config (ADR-0160).
+# Pairs with alerts-quanta.yaml — defines where each severity tier flows.
+# Mount as: /etc/alertmanager/alertmanager.yml
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: "smtp.example.com:587"
+  smtp_from: "alerts@quanta.example"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Receivers (3 tiers)
+# ─────────────────────────────────────────────────────────────────────────────
+receivers:
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - service_key: "<PAGERDUTY_SERVICE_KEY>"
+        severity: "critical"
+        description: "{{ .CommonAnnotations.summary }}"
+        details:
+          description: "{{ .CommonAnnotations.description }}"
+          alertname: "{{ .GroupLabels.alertname }}"
+          team: "{{ .CommonLabels.team }}"
+
+  - name: slack-warning
+    slack_configs:
+      - api_url: "<SLACK_WEBHOOK_URL>"
+        channel: "#agent-alerts"
+        title: "[warn] {{ .GroupLabels.alertname }}"
+        text: |
+          *{{ .CommonAnnotations.summary }}*
+          {{ .CommonAnnotations.description }}
+          Team: {{ .CommonLabels.team }}
+        send_resolved: true
+
+  - name: silent-log
+    webhook_configs:
+      - url: "http://alerts-collector.internal/log"
+        send_resolved: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing tree (severity-first)
+# ─────────────────────────────────────────────────────────────────────────────
+route:
+  receiver: silent-log         # default: log everything
+  group_by: ["alertname", "severity", "team"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # critical → page on-call immediately, repeat every 30m until resolved
+    - matchers:
+        - severity = "critical"
+      receiver: pagerduty-critical
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 30m
+      continue: true              # also fall through (log + page)
+
+    # warning → slack channel, dedupe 1h
+    - matchers:
+        - severity = "warning"
+      receiver: slack-warning
+      group_wait: 1m
+      group_interval: 5m
+      repeat_interval: 1h
+      continue: true
+
+    # budget critical → also CC ops-budget channel
+    - matchers:
+        - alertname =~ "BudgetSessionHardBreach|BudgetDailyHardBreach"
+      receiver: slack-warning
+      continue: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inhibit rules (silence noise)
+# ─────────────────────────────────────────────────────────────────────────────
+inhibit_rules:
+  # If session-hard breach fires, suppress session-soft for the same scope
+  - source_matchers:
+      - alertname = "BudgetSessionHardBreach"
+    target_matchers:
+      - alertname = "BudgetSoftBreachSpike"
+    equal: ["team"]
+
+  # If LlmFailureRateHigh fires, suppress LlmTtftP95High (root cause first)
+  - source_matchers:
+      - alertname = "LlmFailureRateHigh"
+    target_matchers:
+      - alertname = "LlmTtftP95High"

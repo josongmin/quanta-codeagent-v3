@@ -14,9 +14,6 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [runner-assemble-builders, llm-assemble]
-configurable: partial
-config_refs:
-  env: ["QUANTA_MODEL_FALLBACK"]
 purpose: |
   Surface-agnostic LLM assembly family that hides three distinct concerns
   behind typed inputs (no `process.env` / `process.argv` reads — the surface
@@ -37,6 +34,7 @@ purpose: |
 evidence:
   code:
     - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: []

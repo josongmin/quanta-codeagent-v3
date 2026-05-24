@@ -13,9 +13,6 @@ config_refs:
   env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_HOME", "QUANTA_PERMISSION_STATE"]
 purpose: |
   **Host-level default** — hostId(SSH_CONNECTION 기반 결정론적 식별자,
   부재 시 localhost) 단위로 full-access / read-only / custom 기본값을 잡는다.
@@ -31,6 +28,7 @@ evidence:
     - src/permission/per-host-mode.ts
     - src/permission/policy.ts
     - src/agent/admissibility-gate.ts
+    - src/shared/runtime-config.ts
   adrs: [29, 46]
   tests:
     unit:

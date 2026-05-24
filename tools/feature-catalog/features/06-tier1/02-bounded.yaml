@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-configurable: static
 purpose: |
   서브에이전트 다단계 재귀를 `maxDepth` (default 3)로 hard-bound. 자식 호출
   마다 `req.depth = parentDepth + 1`이 전파되고, `req.depth > maxDepth`인

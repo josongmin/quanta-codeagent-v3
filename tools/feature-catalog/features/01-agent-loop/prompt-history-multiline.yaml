@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_HISTORY, QUANTA_HISTORY_FILE, QUANTA_HISTORY_MAX, QUANTA_MULTILINE]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-ui_surfaces: [cli]
-configurable: partial
-config_refs:
-  env: ["QUANTA_HISTORY"]
 purpose: |
   REPL 입력 UX 강화 — bash 스타일 ↑/↓ history navigation + Ctrl+R reverse-i-search +
   heredoc 멀티라인 입력. history는 disk-persistent(파일 경로 env override). multiline은
@@ -27,6 +23,7 @@ evidence:
   code:
     - src/apps/cli/prompt-history.ts
     - src/apps/cli/raw-line-reader.ts
+    - src/apps/cli/history-cmd.ts
     - src/apps/cli/repl.ts
   adrs: []
   tests:

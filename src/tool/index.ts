@@ -11,7 +11,7 @@ import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
-import { readImageTool } from "./image"
+import { readImageTool, readImageUrlTool } from "./image"
 import { localizeTool } from "./localize"
 import { parseTestFailureTool } from "./parse-test-failure"
 import { makeReadTool, readTool } from "./read"
@@ -80,6 +80,9 @@ export {
   type ReadImageInput,
   readImageInputSchema,
   readImageTool,
+  type ReadImageUrlInput,
+  readImageUrlInputSchema,
+  readImageUrlTool,
   SUPPORTED_MEDIA_TYPES as READ_IMAGE_SUPPORTED_MEDIA_TYPES,
   type SupportedMediaType as ReadImageSupportedMediaType,
   sniffMediaType,
@@ -278,6 +281,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => [
   diagnosticsTool(ports.diagnostics ?? nullDiagnosticsProvider) as Tool,
   // ADR-0126: vision input. Read-only + concurrency-safe; safe in defaults.
   readImageTool as Tool,
+  // ADR-0132 / ADR-0146 — vision input from HTTPS URL. Read-only +
+  // concurrency-safe; parallel to `read_image` (FS) and `web_fetch` (HTTP).
+  // Factory binds global `fetch` by default (`readImageUrlTool({fetcher})`
+  // injects a test double); SSRF + 5 MB cap + magic-byte sniffing live inside
+  // the tool. No host-side port to inject ⇒ always-on default-tool slot.
+  readImageUrlTool() as Tool,
   // ADR-0127: web fetch (SSRF denylist + size cap inside). Read-only + concurrency-safe.
   webFetchTool() as Tool,
   // ADR-0133/0137 + ADR-0142 wire: structured-data + native-document readers.

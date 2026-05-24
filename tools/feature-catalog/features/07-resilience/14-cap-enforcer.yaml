@@ -14,9 +14,6 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [dispatch-dedup]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   Tool 호출이 emit하는 `NextAction`(=suggestion to grow `max_depth` /
   `max_files` / narrow `path`)을 모델이 무시하고 같은 (tool, target) 으로 다시
@@ -28,6 +25,7 @@ purpose: |
 evidence:
   code:
     - src/agent/cap-enforcer.ts
+    - src/apps/cli/help-render.ts
   adrs: []
   tests:
     unit:

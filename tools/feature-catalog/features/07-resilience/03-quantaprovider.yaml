@@ -10,11 +10,9 @@ monitoring: n-a
 modes: [n-a]
 configurable: integrated
 config_refs:
-  env: [QUANTA_PROVIDER, QUANTA_MODEL]
+  env: [QUANTA_MODEL]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
-ui_surfaces: [cli]
-configurable: n-a
 purpose: |
   Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는
   OpenAI-호환 endpoint) 중 활성 백엔드를 고르고, `QUANTA_MODEL`로 모델 id를
@@ -23,7 +21,9 @@ purpose: |
   로드로 위 변수를 process.env에 hydrate (`src/apps/cli/dotenv.ts` —
   first-wins, 실제 환경 변수를 절대 override하지 않음).
 evidence:
-  code: [src/apps/cli/dotenv.ts]
+  code:
+    - src/apps/cli/dotenv.ts
+    - src/apps/cli/internal.ts
   adrs: [2]
   tests:
     unit: [tests/unit/dotenv.test.ts]

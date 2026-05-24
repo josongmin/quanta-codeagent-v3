@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: n-a
 purpose: |
   `src/agent/*.ts` 의 value-level import cycle 은 의도적으로 허용 (cross-edge 값이
   function-body 안에서만 평가됨). 그러나 누군가가 cycle-edge 의 imported symbol 을

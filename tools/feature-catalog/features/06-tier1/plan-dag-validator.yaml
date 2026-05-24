@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor"]
 depends_on: [plan-mode]
-configurable: n-a
 purpose: |
   Three pure exports operating on a `Readonly<Record<string, TodoItem>>`
   graph. `validateDag` is the full-plan validator that returns the first

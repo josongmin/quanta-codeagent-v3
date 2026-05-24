@@ -13,9 +13,6 @@ config_refs:
   env: [QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL, QUANTA_BENCH_ISSUE_HINT]
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:core, default-off]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_BENCH_ISSUE_HINT", "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL"]
 purpose: |
   OPT-IN sentence-bounded extractor for inline expected/actual phrasing in
   issue bodies (keywords: expected / expect / actual / actually / got /
@@ -35,6 +32,7 @@ evidence:
     - src/agent/issue-hint/extract-expected-actual.ts
     - src/agent/issue-hint/compose.ts
     - src/agent/issue-hint/index.ts
+    - src/apps/bench/eval/driver.ts
   adrs: []
   tests:
     unit:

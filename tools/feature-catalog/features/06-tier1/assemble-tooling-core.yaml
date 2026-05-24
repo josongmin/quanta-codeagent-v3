@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [assemble-config]
-configurable: partial
 config_refs:
   env: ["QUANTA_MEMORY"]
 purpose: |
@@ -38,6 +37,7 @@ purpose: |
 evidence:
   code:
     - src/runner/assemble/tooling.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: []

@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [compactionbreaker]
-configurable: integrated
 config_refs:
   env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER"]
 purpose: |

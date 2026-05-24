@@ -12,7 +12,6 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [runrepairrounds]
-configurable: static
 purpose: |
   Pure seed-message builder for the b2 repair-round orchestrator (RFC §16,
   ADR-0014). Given the running cumulative diff and the latest validator

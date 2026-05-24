@@ -12,7 +12,6 @@ configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 depends_on: [memory-eviction-planner]
-configurable: static
 purpose: |
   Before saving a new memory entry the store asks: does an equivalent entry
   already exist? Pure planner that surfaces candidate matches via two

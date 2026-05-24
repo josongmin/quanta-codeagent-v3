@@ -12,7 +12,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, absorbed:cursor, surface:cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_ATTRS"]
 purpose: |

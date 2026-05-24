@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
-configurable: n-a
 purpose: 'Codex anti-signal 7개 흡수 (): absence-from-grep / nice-file-name / passing-shape-snapshot / quick-fix-exists / one-green-command / old-handoff-note / visual-looks-okay — cache prefix byte-stability 100-call 보존'
 evidence:
   code:

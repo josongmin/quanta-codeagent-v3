@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [model-swap-retry]
-configurable: integrated
 config_refs:
   env: ["QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS", "QUANTA_MODEL", "QUANTA_PREFS_HOME"]
 purpose: |
@@ -35,6 +34,7 @@ evidence:
     - src/llm/adapters/shared.ts
     - src/shared/runtime-config.ts
     - src/apps/eval/index.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: []

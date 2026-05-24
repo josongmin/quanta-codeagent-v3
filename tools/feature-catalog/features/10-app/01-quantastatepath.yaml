@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_RESUME, QUANTA_STATE_PATH]
 owners: ["@songmin"]
 labels: ["surface:cli"]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER", "QUANTA_GIT_TOOLS", "QUANTA_LSP", "QUANTA_LSP_TOOLS", "QUANTA_MCP_CONFIG", "QUANTA_MD_HIGHLIGHT", "QUANTA_MD_MODE", "QUANTA_MEMORY", "QUANTA_MEMORY_CONSOLIDATE", "QUANTA_MEMORY_DISTILL", "QUANTA_MEMORY_EMBED", "QUANTA_MEMORY_EMBED_MODEL", "QUANTA_MEMORY_PATH", "QUANTA_MEMORY_RECALL_LIMIT", "QUANTA_MEMORY_RECALL_TIERS", "QUANTA_MEMORY_SELF_EDIT", "QUANTA_METRICS", "QUANTA_MODEL_FALLBACK", "QUANTA_OBSERVE_DIR", "QUANTA_PERSONA", "QUANTA_PLAN", "QUANTA_PROVIDER", "QUANTA_RESUME", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR", "QUANTA_STATE_PATH", "QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH", "QUANTA_VERIFY_GUARD", "QUANTA_VERIFY_GUARD_MAX_TRIPS"]
 purpose: '/--state, /--resume. CLI 리주메 lifecycle e2e(, 7 tests): 실 runAgent → saveSession → loadSession → 새 runAgent 라운드트립으로 (a) 사전 assistant 텍스트가 두 번째 StreamInput.messages에 도달, (b) tool_use/tool_result 쌍이 boundary 보존, (c) 손상 파일 → loadSession null → fresh start no-throw, (d) 다단계 A→save→B→save→C 누적 transcript, (e) sessionId boundary 안정성, (f) StreamPort per-run 격리(공유 누수 없음).'
 evidence:
   code: [src/apps/cli/internal.ts, src/apps/cli/resume.ts, src/session/store.ts]

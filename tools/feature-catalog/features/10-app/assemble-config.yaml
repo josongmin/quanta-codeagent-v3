@@ -11,10 +11,8 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
-  env: ["QUANTA_SIDE_"]
+  env: []
 purpose: |
   Pure type-safe composer that turns already-built collaborators
   (`SessionDeps`: llm / registry / stream / permission / store / embedder /

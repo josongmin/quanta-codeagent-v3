@@ -12,9 +12,8 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   Codex `Submission { id; op }` / `Op` discriminated union 흡수. host→agent 입력을
   6-variant 닫힌 union으로 모델링: user_input / user_input_with_turn_context /
@@ -29,6 +28,7 @@ evidence:
     - src/agent/control-op-handler.ts
     - src/agent/loop.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs: [72]
   tests:
     unit:

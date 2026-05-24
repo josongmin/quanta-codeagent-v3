@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: planned
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   Tool-surface seal for `xlsx_read` so callers can depend on the name,
   inputSchema, and READ-ONLY metadata even though `execute()` currently

@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: integrated
 config_refs:
   env: ["QUANTA_MEMORY_PATH", "QUANTA_SESSIONS_DIR"]
 purpose: |
@@ -32,6 +31,8 @@ evidence:
     - src/session/store.ts
     - src/session/paths.ts
     - src/session/index.ts
+    - src/apps/cli/internal.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:

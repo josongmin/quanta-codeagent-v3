@@ -11,7 +11,6 @@ modes: [headless, batch]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:bench"]
-configurable: integrated
 config_refs:
   env: ["QUANTA_BENCH_TIMEOUT_MS", "QUANTA_MODEL", "QUANTA_OBSERVE_DIR", "QUANTA_REPAIR_ROUNDS", "QUANTA_RUN_ID", "QUANTA_SWEBENCH_CACHE_LEVEL", "QUANTA_SWEBENCH_CLEAN", "QUANTA_SWEBENCH_CORPUS_ROOT", "QUANTA_SWEBENCH_DATASET", "QUANTA_SWEBENCH_DATASET_NAME", "QUANTA_SWEBENCH_FORCE_REBUILD", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PYTHON", "QUANTA_SWEBENCH_PYTHON_BIN", "QUANTA_SWEBENCH_REPO_BASE_URL"]
 purpose: |
@@ -32,6 +31,7 @@ evidence:
     - src/apps/bench/sampler.ts
     - src/apps/bench/index.ts
     - src/shared/runtime-config.ts
+    - src/apps/cli/help-render.ts
   adrs: []
   tests:
     unit:

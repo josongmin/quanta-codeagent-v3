@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [2026-05-21]
-configurable: integrated
 config_refs:
   env: ["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]
 purpose: |
@@ -41,6 +40,7 @@ purpose: |
 evidence:
   code:
     - src/apps/bench/corpus/cache-pathspecs.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:

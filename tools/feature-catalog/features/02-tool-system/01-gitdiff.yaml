@@ -13,7 +13,6 @@ config_refs:
   env: [QUANTA_GIT_TOOLS]
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
-configurable: n-a
 purpose: git_diff/git_status/git_log/git_blame — read-only·concurrency-safe·GitRunner 주입, mutating은 bash 잔류
 evidence:
   code:
@@ -22,7 +21,7 @@ evidence:
     - src/tool/git/log.ts
     - src/tool/git/blame.ts
     - src/tool/git/runner.ts
-  code: [src/apps/cli/internal.ts]
+    - src/apps/cli/internal.ts
   adrs: [25]
   tests:
     unit: []

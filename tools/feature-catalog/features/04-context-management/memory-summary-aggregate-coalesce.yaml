@@ -11,9 +11,8 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-memory"]
 labels: [surface:core]
-configurable: partial
 config_refs:
-  env: ["QUANTA_ATTRS"]
+  env: []
 purpose: |
   Phase-2 consolidated `memory_summary.md` 본문을 4-section preset 의 `session_ctx`
   breakpoint 에 prepend 하는 흐름. 별도 breakpoint를 따로 잡지 않고 session-stable

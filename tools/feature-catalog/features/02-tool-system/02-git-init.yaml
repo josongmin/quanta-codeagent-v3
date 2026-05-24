@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
-ui_surfaces: [cli]
-configurable: n-a
 purpose: 45 tests
 evidence:
   code: [src/tool/git/index.ts]

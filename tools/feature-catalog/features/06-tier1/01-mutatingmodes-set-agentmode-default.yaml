@@ -13,7 +13,6 @@ config_refs:
   env: [QUANTA_PLAN]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-configurable: static
 purpose: |
   AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을
   positive set(`MUTATING_MODES = Set<AgentMode>(["default"])`)으로 표현하는
@@ -23,7 +22,10 @@ purpose: |
   dispatch가 자동 BLOCK된다. `--plan` 등 surface flag는 deprecated alias로
   backward-compat 처리.
 evidence:
-  code: [src/agent/mode.ts, src/agent/plan.ts]
+  code:
+    - src/agent/mode.ts
+    - src/agent/plan.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: [tests/unit/mode.test.ts]

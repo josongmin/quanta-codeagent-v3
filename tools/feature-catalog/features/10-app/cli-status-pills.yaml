@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_PILL, QUANTA_PILLS, QUANTA_EFFORT, QUANTA_SANDBOX, QUANTA_PILL_WORKSPACE, QUANTA_PILL_MODE, QUANTA_PILL_SKILLS, QUANTA_PILL_SANDBOX, QUANTA_PILL_RULES]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_PILLS", "QUANTA_PILL_MODE", "QUANTA_PILL_RULES", "QUANTA_PILL_SANDBOX", "QUANTA_PILL_SKILLS", "QUANTA_PILL_WORKSPACE"]
 purpose: |
   CLI chrome top-line "pill" composer — 초기 4-pill (Mode / Workspace /
   Sandbox / Skills) → 5-pill (with Rules) 확장. 각 pill은 개별 OFF 가능
@@ -30,6 +26,7 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/status-pills.ts
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:

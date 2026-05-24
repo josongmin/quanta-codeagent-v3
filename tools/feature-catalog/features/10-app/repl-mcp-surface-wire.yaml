@@ -12,8 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:repl"]
 depends_on: [cli-repl-solid-split]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_MCP_CONFIG"]
 purpose: |
@@ -39,6 +37,7 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/repl/mcp-surface-wire.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit:

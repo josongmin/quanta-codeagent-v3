@@ -14,9 +14,6 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-stream-timeout, llm-error-taxonomy]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
 purpose: |
   The Anthropic and OpenAI adapters previously duplicated ~90% of three
   frames; this module factors them as plain functions (composition over
@@ -39,6 +36,7 @@ evidence:
     - src/llm/adapters/shared.ts
     - src/llm/adapters/anthropic.ts
     - src/llm/adapters/openai.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:

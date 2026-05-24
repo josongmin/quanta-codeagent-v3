@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [quanta-session-subcommands]
-configurable: integrated
 config_refs:
   env: ["QUANTA_SESSIONS_DIR"]
 purpose: |
@@ -28,6 +27,7 @@ evidence:
     - src/session/index-store.ts
     - src/session/paths.ts
     - src/session/types.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit: []

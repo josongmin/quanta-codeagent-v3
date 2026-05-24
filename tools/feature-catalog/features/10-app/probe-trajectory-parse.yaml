@@ -12,7 +12,6 @@ modes: [headless, batch]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: n-a
 purpose: |
   Pure deterministic loader for the trajectory JSONL + bench run-dir
   conventions. Trajectory JSONL is the single source of truth (RFC §3

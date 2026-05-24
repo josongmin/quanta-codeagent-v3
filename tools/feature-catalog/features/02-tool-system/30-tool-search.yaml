@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
-configurable: n-a
 purpose: |
   Deferred-tool catalog search exposed as a Tool. Two modes: (1) `select:<name>
   [,<name>...]` direct lookup by name — restores schema for explicit deferred

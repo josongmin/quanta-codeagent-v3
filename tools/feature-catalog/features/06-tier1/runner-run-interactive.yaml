@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-configurable: n-a
 purpose: |
   REPL 루프를 surface(CLI/Web-Tauri/CLI-embedded browser)에 agnostic하게 분리한 드라이버.
   `PromptSource` 포트로 CLI raw-line-reader / Web WebSocket / Tauri IPC 입력을 통일

@@ -12,7 +12,6 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
 depends_on: [session-jsonl-envelope]
-configurable: static
 purpose: |
   Captures the three-field git fingerprint (HEAD sha / branch / origin URL)
   onto `SessionMeta` so replay / trajectory / reproducibility surfaces know

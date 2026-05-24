@@ -12,8 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [isconcurrencysafe]
-ui_surfaces: [cli]
-configurable: n-a
 purpose: |
   Read-only file enumeration via `Bun.Glob.scan`. Optional `path` (base
   directory) is jail-validated via `@/storage.resolveJailed` BEFORE the scan —

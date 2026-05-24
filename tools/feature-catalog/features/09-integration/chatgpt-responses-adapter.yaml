@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [chatgpt-oauth-provider, token-store-atomic, refresh-coordinator]
-configurable: static
 purpose: |
   Concrete `LLMPort` that calls `${apiBase}/responses` with the disk-stored
   OAuth bearer instead of an API key. Default `apiBase` is

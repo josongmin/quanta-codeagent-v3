@@ -14,9 +14,6 @@ config_refs:
   env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_HOME", "QUANTA_PERMISSION_STATE"]
 purpose: |
   **Explicit re-approval precedence** — guardian/룰이 거부한 동작을 사용자가
   "위험을 본 뒤 명시적 재승인"한 경우에 한해 그 동작에 대해 룰을 override
@@ -35,6 +32,7 @@ evidence:
     - src/permission/post-denial.ts
     - src/permission/policy.ts
     - src/agent/admissibility-gate.ts
+    - src/shared/runtime-config.ts
   adrs: [29, 46]
   tests:
     unit:

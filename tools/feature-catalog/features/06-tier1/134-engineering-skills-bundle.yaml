@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
-configurable: partial
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
 purpose: |
@@ -44,6 +43,7 @@ evidence:
     - src/skill/system-skills/extract-function/SKILL.md
     - src/skill/system-skills/extract-function/index.ts
     - src/skill/system-skills/index.ts
+    - src/apps/cli/internal.ts
   adrs: [149]
   tests:
     unit:

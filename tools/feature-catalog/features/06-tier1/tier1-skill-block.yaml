@@ -12,7 +12,6 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [agent-features-tier1]
-configurable: n-a
 purpose: |
   Per-subsystem Tier-1 builder that materializes the entire SKILL block off a
   single `config.skills` config field, returning `undefined` for byte-identical

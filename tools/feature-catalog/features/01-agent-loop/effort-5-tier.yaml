@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:1]
-configurable: static
 purpose: 'EffortLevel = default | max | high | medium | low — 세션 단위 효력 축. SkillEffort (per-skill, numeric 포함) 와 직교 — numeric skill 값은 axis 투표 안 함, named tier만 vote. parseEffort (case-insensitive env), resolveEffort (skill > session > default), effortToTokenBudget (1024/4096/16384/64000/undefined), createEffortStore factory.'
 evidence:
   code: [src/agent/effort.ts]

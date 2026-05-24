@@ -12,7 +12,6 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [landlock-degraded-passthrough, seatbelt-profile-compiler]
-configurable: n-a
 purpose: |
   Closed-port DI surface `OsSandbox { spawn, availability }` and its
   production default `defaultOsSandbox(cfg)`. Picks the right backend

@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "security-touched"]
 depends_on: [conversation-checkpoint, plan-queue]
-configurable: static
 purpose: |
   Closed-port primitive that hardens the failure mode Cline's `$50 in one
   afternoon` retry-loop incident exposed: no programmatic cross-run budget

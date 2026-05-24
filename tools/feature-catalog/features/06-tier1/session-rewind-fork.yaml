@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_REWIND, QUANTA_REWIND_GIT]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_REWIND", "QUANTA_REWIND_GIT"]
 purpose: |
   Claude Code A1 rewind(messageId)/forkSession 패턴 흡수. Envelope append-only invariant
   유지(원본 jsonl 무수정) — rewind는 새 fork 세션을 만들고 cutoff 이전 메시지만 복사한다.

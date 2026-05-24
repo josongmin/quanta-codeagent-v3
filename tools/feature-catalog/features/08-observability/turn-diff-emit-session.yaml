@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-configurable: n-a
 purpose: |
   Stateful per-session adapter orchestrating the
   `captureTurnStart / computeTurnDiff / buildTurnDiffEvent` trio from

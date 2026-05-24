@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
-configurable: integrated
 config_refs:
   env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER", "QUANTA_MODEL_FALLBACK"]
 purpose: |
@@ -24,6 +23,11 @@ purpose: |
   *connection* 단계 retry, recovery는 *turn* 단계 시도 횟수.
 evidence:
   code: [src/agent/retry.ts, src/runner/assemble/llm.ts, src/runner/assemble/compaction.ts, src/apps/cli/internal.ts]
+  code:
+    - src/agent/retry.ts
+    - src/runner/assemble/llm.ts
+    - src/runner/assemble/compaction.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: [tests/unit/retry.test.ts, tests/unit/model-swap-retry.test.ts]

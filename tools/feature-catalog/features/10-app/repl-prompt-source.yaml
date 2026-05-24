@@ -12,8 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:repl", "absorbed:codex"]
 depends_on: [cli-repl-solid-split]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_MULTILINE"]
 purpose: |
@@ -42,6 +40,7 @@ evidence:
   code:
     - src/apps/cli/repl/prompt-source.ts
     - src/apps/cli/repl/readline-loop.ts
+    - src/apps/cli/repl/interactive-driver.ts
   adrs: []
   tests:
     unit:

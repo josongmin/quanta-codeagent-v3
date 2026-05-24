@@ -12,7 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-factory]
-configurable: static
 purpose: |
   AsyncIterable decorator wrapping a raw provider stream and racing each
   `next()` against two independent deadlines — `firstChunkMs` (default 60s,

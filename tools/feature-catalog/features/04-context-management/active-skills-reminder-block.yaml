@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
-configurable: static
 purpose: |
   Active-skills 카탈로그를 per-turn `<system-reminder>` 안에 `- $name — first-line`
   목록 + 4-rule 트리거 footer 로 렌더한다. Description 의 FIRST LINE 만 사용 —

@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
-configurable: n-a
 purpose: CODE_MOD_CLOSEOUT_REMINDER + isCodeModificationSession(history) 감지. closeout-guard에서 단발 주입, 모듈 순수성 보존
 evidence:
   code:

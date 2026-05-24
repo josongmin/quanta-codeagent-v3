@@ -13,9 +13,6 @@ config_refs:
   env: [QUANTA_CAP_ENFORCE]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   Session-scoped state machine that detects when the model IGNORES a tool's
   `NextAction` hint by re-calling the same `toolName:targetPath` without
@@ -28,6 +25,7 @@ purpose: |
 evidence:
   code:
     - src/agent/cap-enforcer.ts
+    - src/shared/runtime-config.ts
   adrs: [62]
   tests:
     unit:

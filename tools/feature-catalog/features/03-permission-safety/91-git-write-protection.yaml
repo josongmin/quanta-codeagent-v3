@@ -12,8 +12,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:cursor, surface:cli, security-touched]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_ATTRS"]
 purpose: |

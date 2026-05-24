@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-five-tier]
-configurable: static
 purpose: |
   Tier-3 of the 5-tier eval stack (umbrella: `eval-five-tier`). Operates on
   REAL session transcripts (not synthetic, not public bench) — `source.ts`

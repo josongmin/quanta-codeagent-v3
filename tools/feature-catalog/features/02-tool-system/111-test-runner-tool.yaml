@@ -12,8 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   Runs the project's test suite. Explicit `command` arg skips auto-detection;
   otherwise `detectCommand` probes in order: (1) bun if `bun.lockb` OR

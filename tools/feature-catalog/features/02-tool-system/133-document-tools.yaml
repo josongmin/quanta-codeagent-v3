@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   First modern coding agent to ship built-in structured-data tools (Cursor /
   Claude Code / Codex all shell out to cat/awk/jq). Closes 3 silent-corruption

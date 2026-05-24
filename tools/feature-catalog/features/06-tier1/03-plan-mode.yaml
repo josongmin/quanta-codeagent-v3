@@ -13,8 +13,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor"]
 depends_on: [plan-exit-three-way]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
   env: ["QUANTA_ATTRS", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |
@@ -58,6 +56,8 @@ evidence:
     - src/stream/adapters/jsonl-recorder.ts
     - src/stream/adapters/stdout.ts
     - src/observability/vocabulary.ts
+    - src/apps/bench/eval/driver.ts
+    - src/shared/runtime-config.ts
   adrs: [95, 96, 97]
   tests:
     unit:

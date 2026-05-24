@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]
 labels: [surface:cli, security-touched]
-configurable: static
 purpose: HARD_DENY 베이스라인 패턴 모듬 — 시스템-루트 destructive 셸 명령, 인터프리터 파이프 RCE 시나리오, 매스-삭제 sweep, 실행-경로 하이재크 등 path-independent 위험 액션 형태를 description-only 룰로 차단. FP 가드(safe predicate / build-dir whitelist)로 합법 dev 워크플로 보존. 정확한 패턴은 slice 외부로 절대 노출되지 않음 (`policy-rules.ts` 내부에서만 verbatim 보유).
 evidence:
   code: [src/permission/policy-rules.ts]

@@ -12,7 +12,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-configurable: integrated
 config_refs:
   env: ["QUANTA_CAP_ENFORCE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
 purpose: |
@@ -53,6 +52,7 @@ evidence:
     - src/llm/adapters/openai.ts
     - src/observability/vocabulary.ts
     - src/shared/runtime-config.ts
+    - src/apps/cli/help-render.ts
   adrs: [79]
   tests:
     unit:

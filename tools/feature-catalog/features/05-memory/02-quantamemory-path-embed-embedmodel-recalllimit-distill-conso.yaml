@@ -14,7 +14,6 @@ config_refs:
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "absorbed:codex"]
 depends_on: [memory-self-edit-tools, embedder-port]
-configurable: n-a
 purpose: |
   메모리 서브시스템 surface knob 집합 `QUANTA_MEMORY_*` (PATH / EMBED /
   EMBED_MODEL / RECALL_LIMIT / DISTILL / CONSOLIDATE / SELF_EDIT /
@@ -28,7 +27,7 @@ evidence:
     - src/apps/cli/internal.ts
     - src/runner/assemble/memory.ts
     - src/memory/consolidate/paths.ts
-  code: [src/apps/cli/internal.ts]
+    - src/runner/assemble/tooling.ts
   adrs: [8]
   tests:
     unit: []

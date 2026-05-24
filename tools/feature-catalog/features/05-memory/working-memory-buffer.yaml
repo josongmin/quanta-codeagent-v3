@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
-configurable: static
 purpose: |
   L1 in-session message buffer used by the agent loop to hold the live turn
   transcript. Distinct from L2 long-term memory: working memory is never

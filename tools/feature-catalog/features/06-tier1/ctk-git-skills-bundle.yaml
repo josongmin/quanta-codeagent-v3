@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [engineering-skills-bundle]
-configurable: partial
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
 purpose: |
@@ -67,6 +66,7 @@ evidence:
     - src/skill/system-skills/review-and-ship/SKILL.md
     - src/skill/system-skills/review-and-ship/index.ts
     - src/skill/system-skills/index.ts
+    - src/apps/cli/internal.ts
   adrs: [102]
   tests:
     unit:

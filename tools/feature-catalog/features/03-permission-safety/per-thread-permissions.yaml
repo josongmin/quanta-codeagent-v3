@@ -14,9 +14,6 @@ config_refs:
   env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_HOME", "QUANTA_PERMISSION_STATE"]
 purpose: |
   **Thread-level override** — 특정 sessionId(스레드)에 대해 sandboxPolicy +
   approvalPolicy + approvalsReviewer를 명시 지정한다. 한 스레드는 read-only,
@@ -33,6 +30,7 @@ evidence:
     - src/permission/policy.ts
     - src/agent/admissibility-gate.ts
     - src/agent/types.ts
+    - src/shared/runtime-config.ts
   adrs: [29, 46]
   tests:
     unit:

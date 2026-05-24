@@ -11,7 +11,6 @@ modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
-configurable: static
 purpose: |
   Scenario rubric + 캡쳐된 transcript를 받아 judge LLM에 per-item pass/fail을
   요청, weighted score(default weight=1) 계산. ERROR SURFACE CONTRACT

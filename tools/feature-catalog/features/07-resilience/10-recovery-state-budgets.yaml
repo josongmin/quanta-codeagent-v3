@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
-configurable: static
 purpose: |
   Per-turn recovery 4-카운터 캡을 Object.freeze 상수로 SSOT 화. 같은 턴 안의
   pre-stream backoff, output-cap continue, malformed-output retry, consecutive-

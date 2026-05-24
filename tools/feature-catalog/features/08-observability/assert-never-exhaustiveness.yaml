@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-configurable: n-a
 purpose: |
   Exhaustiveness guard for `switch` / `if-else` chains over a closed
   union / enum. Placing `assertNever(x, label)` in the `default` branch

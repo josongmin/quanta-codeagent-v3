@@ -1,0 +1,86 @@
+# quanta agent alert rules (ADR-0158/0159).
+# Format: Prometheus AlertManager rule groups.
+# Severity tiers: critical (page), warning (notify), info (silent log).
+
+groups:
+  - name: quanta.budget
+    rules:
+      - alert: BudgetSessionHardBreach
+        expr: increase(budget_breach_total{kind="session-hard"}[5m]) > 0
+        for: 0m
+        labels: { severity: critical, team: agent-runtime }
+        annotations:
+          summary: "Session hard-limit breach (Cline $50-afternoon class)"
+          description: "Budget ledger fired session-hard breach in last 5m. Investigate runaway-retry / model swap / loop bug."
+
+      - alert: BudgetDailyHardBreach
+        expr: increase(budget_breach_total{kind="daily-hard"}[15m]) > 0
+        for: 0m
+        labels: { severity: critical, team: agent-runtime }
+        annotations:
+          summary: "Daily hard-limit breach"
+          description: "Org or per-tenant daily cap crossed. Trigger soft-shutdown."
+
+      - alert: BudgetSoftBreachSpike
+        expr: sum(rate(budget_breach_total{kind=~"session-soft|daily-soft"}[10m])) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sustained soft-breach rate"
+
+  - name: quanta.llm
+    rules:
+      - alert: LlmFailureRateHigh
+        expr: sum(rate(llm_provider_stream_failures_total[5m])) / sum(rate(llm_provider_stream_total[5m])) > 0.1
+        for: 5m
+        labels: { severity: warning, team: llm }
+        annotations:
+          summary: "LLM stream failure rate >10% (5m)"
+          description: "Check provider status, retry budget, auth credentials."
+
+      - alert: LlmTtftP95High
+        expr: histogram_quantile(0.95, sum by(le)(rate(llm_provider_stream_ttft_ms_bucket[5m]))) > 3000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM TTFT p95 > 3s sustained (5m)"
+
+  - name: quanta.sandbox
+    rules:
+      - alert: SandboxDegradedHigh
+        expr: sum(rate(sandbox_spawn_degraded_total[15m])) / sum(rate(sandbox_spawn_total[15m])) > 0.5
+        for: 15m
+        labels: { severity: warning, team: runtime }
+        annotations:
+          summary: ">50% of sandbox spawns degraded (15m)"
+          description: "Check bubblewrap / sandbox-exec install + policy compile errors."
+
+  - name: quanta.lsp
+    rules:
+      - alert: LspExdevFallbackFrequent
+        expr: sum(increase(lsp_workspace_edit_exdev_total[1h])) > 100
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: ">100 EXDEV fallbacks in 1h"
+          description: "Workspace tmpdir is on a different FS than target. Co-locate for performance."
+
+  - name: quanta.subagent
+    rules:
+      - alert: SubagentPersistRestoreLossSpike
+        expr: sum(increase(subagent_hydrate_restored_total{status="failed",errorMessage="lost across restart"}[1h])) > 5
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: ">5 subagent state losses in 1h"
+          description: "Frequent process restarts; check for crash loop or orchestrator instability."
+
+  - name: quanta.session
+    rules:
+      - alert: SessionImportVersionMismatchSpike
+        expr: sum(rate(session_import_warnings_total{kind="version"}[1h])) > 0.1
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Sustained session-import version mismatch (1h)"
+          description: "Many users importing sessions from older quanta; consider migration helper."

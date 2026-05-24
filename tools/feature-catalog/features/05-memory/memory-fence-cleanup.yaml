@@ -12,7 +12,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "held-promotion"]
-configurable: static
 purpose: |
   Slice S9 Part A — delete the orphan `REMOVE-ME (verify biome fence)`
   stub at `src/memory/consolidate/phase2-llm.ts:30-40`:

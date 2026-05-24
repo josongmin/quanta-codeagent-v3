@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   raw 테스트/빌드 출력에서 file:line 위치를 프레임워크 무관하게 추출하는 default
   tool (pytest/jest/vitest/bun-test/go-test/cargo-test + generic path:line:col).

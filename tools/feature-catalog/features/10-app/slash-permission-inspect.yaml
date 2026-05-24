@@ -11,10 +11,8 @@ modes: [interactive]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_COST_PANEL", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]
+  env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
 purpose: |
   Codex 5-axis post-denial precedence stack inspector. Sub-commands:
   `/permission` (short summary — mode + tier counts + 5-axis legend),
@@ -34,6 +32,7 @@ evidence:
     - src/permission/inspect.ts
     - src/apps/cli/permission-explain.ts
     - src/apps/cli/slash-commands.ts
+    - src/apps/cli/help-render.ts
   adrs: []
   tests:
     unit:

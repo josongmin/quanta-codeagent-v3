@@ -11,12 +11,15 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:claude-code"]
-configurable: integrated
 config_refs:
   env: ["QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
 purpose: 'AnthropicConfig.betaHeaders?: readonly string[] — joined into `anthropic-beta` header at SDK client level (defaultHeaders). Empty / undefined ⇒ byte-identical to today. Skills-2025-10-02 / oauth-2025-04-20 / environments-2025-11-01 채널 게이팅. + MAX_SKILL_SIZE_BYTES = 30 MB hard cap in src/skill/discover.ts — 초과 파일은 console.warn 로그 + skip (discriminated union SkillSizeCheck { ok | reason: "too-large" | "stat-failed" }).'
 evidence:
-  code: [src/llm/adapters/anthropic.ts, src/skill/skill-size.ts, src/skill/discover.ts]
+  code:
+    - src/llm/adapters/anthropic.ts
+    - src/skill/skill-size.ts
+    - src/skill/discover.ts
+    - src/shared/runtime-config.ts
   adrs: [58]
   tests:
     unit: [tests/unit/skill-size.test.ts, tests/unit/anthropic.test.ts]

@@ -13,7 +13,6 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
 depends_on: [effect-channel, plan-mode]
-configurable: partial
 config_refs:
   env: ["QUANTA_ATTRS"]
 purpose: |

@@ -12,9 +12,8 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   `streamingTurn`이 loop의 stream seam에서 소비하는 `StreamCallbacks` 레코드 생성
   로직을 loop.ts inline 본문에서 `stream-callbacks.ts#createStreamDispatcher` 로
@@ -30,6 +29,7 @@ evidence:
     - src/agent/stream-callbacks.ts
     - src/agent/loop.ts
     - src/observability/turn-timing.ts
+    - src/apps/cli/help-render.ts
   adrs: []
   tests:
     unit: []

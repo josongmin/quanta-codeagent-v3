@@ -12,7 +12,6 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [tool-search]
-configurable: static
 purpose: |
   Stage-1 candidate generator in the file→function→edit funnel. Replaces flat
   term-count scoring with BM25-lite IDF weighting (rare term outranks common

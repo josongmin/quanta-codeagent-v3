@@ -12,9 +12,8 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   Replaces the lossy generic-error supersession of provider-side refusals
   with a typed StopReason variant. extractRefusalRationale lifts the rationale
@@ -29,6 +28,7 @@ evidence:
     - src/agent/types/agent-outcome.ts
     - src/agent/stop-category.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs: [120]
   tests:
     unit:

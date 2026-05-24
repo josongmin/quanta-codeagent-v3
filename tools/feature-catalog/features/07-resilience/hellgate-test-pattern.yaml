@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code", "absorbed:agentless"]
 depends_on: [git-write-protection, shadow-odb-rewind, subagent-6-tools]
-configurable: partial
 config_refs:
   env: ["QUANTA_FS_JAIL"]
 purpose: |

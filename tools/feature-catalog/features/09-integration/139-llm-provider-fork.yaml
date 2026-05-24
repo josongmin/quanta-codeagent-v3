@@ -10,10 +10,9 @@ monitoring: partial
 modes: [n-a]
 configurable: integrated
 config_refs:
-  env: [QUANTA_ANTHROPIC_PROVIDER]
+  env: []
 owners: ["@songmin"]
 labels: ["surface:core"]
-configurable: static
 purpose: |
   Hexagonal port that separates Anthropic vendor (wire grammar) from
   transport (api.anthropic.com vs AWS Bedrock vs GCP Vertex vs Azure

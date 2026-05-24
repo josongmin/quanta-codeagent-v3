@@ -13,9 +13,6 @@ config_refs:
   env: [QUANTA_SESSIONS_DIR]
 owners: ["@songmin"]
 labels: [surface:core]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_SESSIONS_DIR"]
 purpose: |
   Hardened id validator enforcing that a session id is safe to use as a single
   filesystem path component under `sessionsRoot()`. Rejects (with typed
@@ -33,6 +30,7 @@ evidence:
   code:
     - src/session/paths.ts
     - src/session/root-port.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:

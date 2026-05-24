@@ -12,8 +12,6 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [lsp-typescript-adapter, lsp-pyright-adapter, lsp-bridge]
-ui_surfaces: [ide]
-configurable: static
 purpose: |
   Concrete implementation of `LspPort` (ADR-0015 / ADR-0024) — the bulk of
   the LSP slice machinery lives here so adapters (TypescriptAdapter,

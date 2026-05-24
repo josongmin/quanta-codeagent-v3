@@ -12,9 +12,8 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   `runTurn`/`streamConsume`/`applyAction`이 17-20 positional parameter로 자란 부채를
   두 readonly 번들로 정리 (R2-B P1). `TurnSession` — session-lifetime resources
@@ -31,6 +30,7 @@ evidence:
     - src/agent/loop.ts
     - src/agent/stream-callbacks.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit: []

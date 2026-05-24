@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
-configurable: static
 purpose: |
   Codex base prompt (L26/L213-214/L217/L471) + Claude Code 1.7196.3 systemPromptSectionCache
   side-by-side 감사로 식별한 4개 갭을 닫음. (1) Internal-vocabulary 차폐 — turn_id / runtime /

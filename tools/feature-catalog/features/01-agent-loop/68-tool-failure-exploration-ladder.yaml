@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:1]
-configurable: static
 purpose: |
   라이브 REPL replay에서 발견한 두 결함을 시스템 프롬프트 규칙으로 봉합 — (1) 단일 도구 cap
   메시지("+292 deeper, increase max_depth", "raise max_files", "result truncated")를 능력

@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   Human-readable `StreamPort` adapter that renders `AgentEvent` to
   stdout: assistant text inline, tool calls / progress / results /

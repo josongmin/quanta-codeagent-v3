@@ -65,6 +65,7 @@ import {
   buildSubagentBgBlock,
   buildSubagentBlock,
   buildUserInputBlock,
+  buildWebSearchBlock,
   buildWorkingStateBlock,
 } from "./tier1"
 import type { AgentConfig } from "./types"
@@ -153,6 +154,10 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0136 — budget_status tool (default-OFF: empty array when budgetLedger absent)
   extraTools.push(...buildBudgetBlock(config))
+
+  // ADR-0127 (Part 3) / ADR-0148 — web_search tool (default-OFF: empty when
+  // `webSearch.provider` absent; concrete provider is operator-owned).
+  extraTools.push(...buildWebSearchBlock(config))
 
   // --- Skill block (ADR-0011) ---------------------------------------------
   const skill = await buildSkillBlock(config)

@@ -12,7 +12,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
-configurable: integrated
 config_refs:
   env: ["QUANTA_ATTRS", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |
@@ -53,6 +52,8 @@ evidence:
     - src/agent/types.ts
     - src/agent/confirm-decision.ts
     - src/agent/admissibility-gate.ts
+    - src/apps/bench/eval/driver.ts
+    - src/shared/runtime-config.ts
   adrs: [77]
   tests:
     unit:

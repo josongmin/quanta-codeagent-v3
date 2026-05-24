@@ -11,10 +11,8 @@ modes: [interactive]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_COST_PANEL", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]
+  env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
 purpose: |
   ShadowOdb 포트 + 3개 `shadow_*` 도구를 CLI에 surface하여 사용자가 모델을
   거치지 않고 워크스페이스 스냅샷을 browse/preview/restore 할 수 있게 하는
@@ -31,6 +29,7 @@ evidence:
   code:
     - src/apps/cli/snapshot-cmd.ts
     - src/apps/cli/slash-commands.ts
+    - src/shared/runtime-config.ts
   adrs: [122]
   tests:
     unit: [tests/unit/slash-commands.test.ts]

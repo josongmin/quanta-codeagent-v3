@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
-configurable: integrated
 config_refs:
   env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |
@@ -30,6 +29,8 @@ evidence:
     - src/agent/tier1/index.ts
     - src/agent/features.ts
     - src/agent/tier1/subagent-bg.ts
+    - src/apps/bench/eval/driver.ts
+    - src/apps/cli/help-render.ts
   adrs: [145, 140]
   tests:
     unit:

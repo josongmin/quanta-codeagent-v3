@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: n-a
 purpose: '통합 테스트: (10 tests) — trajectory JSONL 다양한 변형에 대한 graceful 처리 + view 별 렌더 일관성'
 evidence:
   code:

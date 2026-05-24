@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [llm-not-implemented-kind, errors-helper-fix]
-configurable: static
 purpose: |
   Classify external/SDK errors EXACTLY ONCE at the adapter boundary into a
   closed `LLMErrorKind` union: `overloaded` (529) / `rate_limit` (429) /

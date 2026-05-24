@@ -12,8 +12,6 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [tool-output-schema-factory, tool-search]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
@@ -33,6 +31,7 @@ evidence:
   code:
     - src/tool/deferred.ts
     - src/tool/types.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit: []

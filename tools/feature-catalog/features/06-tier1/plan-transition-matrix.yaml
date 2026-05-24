@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor"]
 depends_on: [plan-mode]
-configurable: n-a
 purpose: |
   Closed `TodoStatus` transition matrix as a frozen lookup table + pure
   predicate. The mutations layer consults `isValidTransition(from, to)`

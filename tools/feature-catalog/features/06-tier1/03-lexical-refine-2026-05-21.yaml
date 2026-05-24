@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: ToolSearch — 어휘 카탈로그 검색(스키마 반환). createToolSearchTool로 매 에이전트 세션에 배선됨(L3). server-side deferral 아님(정직히 기술).
@@ -20,6 +18,7 @@ evidence:
   code:
     - src/skill/tool-search.ts
     - src/tool/types.ts
+    - src/shared/runtime-config.ts
   adrs: [22]
   tests:
     unit: [tests/unit/tool-search.test.ts]

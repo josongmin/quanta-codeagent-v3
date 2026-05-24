@@ -11,8 +11,6 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
-ui_surfaces: [cli]
-configurable: n-a
 purpose: |
   Slash command that destroys the ChatGPT-OAuth token bundle written by
   `/login --chatgpt`. Idempotent: when there is no token to begin with the

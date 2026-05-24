@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_FS_JAIL]
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_FS_JAIL"]
 purpose: |
   Pre-S7, every file-reading tool rolled its own `resolveXxxPath` —
   `resolveImagePath` (`src/tool/image/read.ts`), `resolveCsvPath`

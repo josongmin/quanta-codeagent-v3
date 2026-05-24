@@ -14,10 +14,6 @@ config_refs:
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [persisted-output]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_TOOL_OUTPUT_MAX", "QUANTA_TOOL_OUTPUT_SPILL_KEEP"]
 purpose: |
   Central per-loop registry composing every built-in and ported tool into the
   surface the dispatch seam consumes. Owns: `has` / `get` lookups, `specs()`

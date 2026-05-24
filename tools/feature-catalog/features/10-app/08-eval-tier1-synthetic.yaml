@@ -12,7 +12,6 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-schema-additive, eval-five-tier]
-configurable: static
 purpose: |
   Tier-1 of the 5-tier eval stack (umbrella: `eval-five-tier`). Generates
   synthetic single-turn scenarios from declared `scenarios/` fixtures via

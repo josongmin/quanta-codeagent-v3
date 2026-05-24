@@ -12,8 +12,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
   env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
 purpose: |
@@ -32,6 +30,7 @@ evidence:
     - src/agent/loop.ts
     - src/apps/cli/status-line.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs: [54]
   tests:
     unit:

@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: n-a
 purpose: |
   SINGLE wiring point for `ModePolicy + BudgetMeter + BudgetCaps`.
   RFC may-22-unified-agent-runtime / Phase 4. Apps that want a unified

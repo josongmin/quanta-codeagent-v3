@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli, held-promotion, tier:1]
-ui_surfaces: [cli]
-configurable: n-a
 purpose: |
   Model-driven exit from plan mode mirroring Claude Code's `ExitPlanMode`.
   When the agent has assembled a plan and is ready to act, it calls this

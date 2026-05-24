@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-memory"]
 labels: [absorbed:codex, surface:cli]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   모델이 free-form per-task 스크래치패드(owner shortlist / hypothesis / blockers /
   deferred validation / next-step queue)를 유지하는 메타도구. 각 필드는 delta가 아닌

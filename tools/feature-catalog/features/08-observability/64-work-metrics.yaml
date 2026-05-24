@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_METRICS]
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive"]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_LIFECYCLE_PILLS", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_PILL_", "QUANTA_PILL_TASKS", "QUANTA_REJECT_LIMIT", "QUANTA_REWIND_GIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT", "QUANTA_TURN_SUMMARY"]
 purpose: |
   v0.dev workMetrics 흡수 — turn별 diffMap(파일당 +추가/-삭제 줄), agentActions,
   linesRead, 토큰 in/out + estimatedCostUsd를 순수 집계. parseNumstat(git diff
@@ -29,7 +25,15 @@ purpose: |
   배선 — turn당 `work: <summarizeWorkMetrics(m)>` 한 줄을 cost 대시보드와 같은
   stderr surface로 출력. SessionDeps→assembleConfig로 thread.
 evidence:
-  code: [src/observability/work-metrics.ts, src/observability/vocabulary.ts, src/observability/attrs.ts, src/agent/work-metrics-collector.ts, src/agent/session-resources.ts, src/apps/cli/repl.ts, src/apps/cli/config-assemble.ts]
+  code:
+    - src/observability/work-metrics.ts
+    - src/observability/vocabulary.ts
+    - src/observability/attrs.ts
+    - src/agent/work-metrics-collector.ts
+    - src/agent/session-resources.ts
+    - src/apps/cli/repl.ts
+    - src/apps/cli/config-assemble.ts
+    - src/apps/cli/internal.ts
   adrs: [65]
   tests:
     unit: [tests/unit/work-metrics.test.ts, tests/unit/work-metrics-collector.test.ts, tests/unit/observability/attrs.test.ts, tests/unit/observability/vocabulary.test.ts]

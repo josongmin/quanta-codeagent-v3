@@ -11,8 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
   env: []
 purpose: |

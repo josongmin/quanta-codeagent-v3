@@ -12,8 +12,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
-ui_surfaces: [cli]
-configurable: integrated
 config_refs:
   env: ["QUANTA_ATTRS", "QUANTA_FS_JAIL"]
 purpose: |
@@ -33,6 +31,7 @@ evidence:
     - src/patch/types.ts
     - src/patch/parser.ts
     - src/tool/apply-patch.ts
+    - src/apps/cli/help-render.ts
   adrs: [28, 32]
   tests:
     unit:

@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:core]
-configurable: static
 purpose: 강화 "Trust and inputs"
 evidence:
   code: [src/agent/prompt.ts, src/agent/untrusted.ts]

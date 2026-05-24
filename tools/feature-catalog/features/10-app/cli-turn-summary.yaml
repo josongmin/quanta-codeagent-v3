@@ -14,10 +14,6 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli"]
 depends_on: [memory-recall-citation]
-ui_surfaces: [cli]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_METRICS", "QUANTA_TURN_SUMMARY", "QUANTA_TURN_SUMMARY_VERBOSE"]
 purpose: |
   Turn-end "summary box" panel — 한 턴 종료 시 다음을 한 박스에 모아 출력:
   (1) tools row (도구 호출/결과 카운트 + 실패 카운트),

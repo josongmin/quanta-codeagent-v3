@@ -12,9 +12,8 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
-configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   Per-thread FIFO follow-up queue with multi-thread isolation and serializable
   snapshot/restore. 10 explicit PausedReason values — popReady delivers iff
@@ -30,6 +29,7 @@ evidence:
     - src/agent/loop.ts
     - src/stream/types.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs: [37]
   tests:
     unit:

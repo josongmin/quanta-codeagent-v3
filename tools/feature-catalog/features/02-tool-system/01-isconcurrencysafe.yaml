@@ -11,13 +11,14 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
-ui_surfaces: [cli]
-configurable: partial
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]
 purpose: per-input isConcurrencySafe 동시성 배칭
 evidence:
-  code: [src/tool/types.ts, src/agent/streaming-dispatch.ts]
+  code:
+    - src/tool/types.ts
+    - src/agent/streaming-dispatch.ts
+    - src/apps/cli/help-render.ts
   adrs: []
   tests:
     unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts, tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts]

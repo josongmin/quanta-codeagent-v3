@@ -11,7 +11,6 @@ modes: [interactive, headless]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
-configurable: static
 purpose: |
   `parseAgentArgs(readonly string[])` — pure argv → typed `AgentArgs`
   discriminated by `mode` (`interactive | headless | batch | ci-bot |

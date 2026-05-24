@@ -12,7 +12,6 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [plan-mode]
-configurable: n-a
 purpose: |
   The producer-side `PlanStore` returns `PlanResult<PlanDelta>` (rich
   shape: full Plan snapshot + typed delta). The duck-typed consumer-side

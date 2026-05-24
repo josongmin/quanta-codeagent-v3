@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:codex", "absorbed:cursor"]
-configurable: n-a
 purpose: |
   Cline / Hermes / Codex / Cursor의 auto-checkpoint 패턴을 closed enum 4-arm
   으로 표면화 — `off`(byte-identical 기본) / `per_tool`(모든 tool-use 전,

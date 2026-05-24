@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core, tier:core]
-configurable: static
 purpose: |
   Typed primitive that lets a host accept user input while a turn is in flight
   and dispatch the queued items on the next turn boundary. Captures FollowUp

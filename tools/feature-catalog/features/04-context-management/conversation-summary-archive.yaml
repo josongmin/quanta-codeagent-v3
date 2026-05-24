@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, absorbed:cursor, surface:core]
-configurable: static
 purpose: |
   Cursor compactor 의 `summaries[]` 모방. 각 compaction 직후 `appendSummary` 로
   `ConversationSummaryEntry{fromTurnId, toTurnId, summary, ts, tokens}` 한 entry 를

@@ -12,7 +12,6 @@ configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 depends_on: [snapshot-slash-cmd]
-configurable: partial
 config_refs:
   env: ["QUANTA_SKILLS_DIR"]
 purpose: |
@@ -38,6 +37,7 @@ evidence:
     - src/skill/system-skills/rewind/SKILL.md
     - src/skill/system-skills/rewind/index.ts
     - src/skill/system-skills/index.ts
+    - src/apps/cli/internal.ts
   adrs: [122]
   tests:
     unit:

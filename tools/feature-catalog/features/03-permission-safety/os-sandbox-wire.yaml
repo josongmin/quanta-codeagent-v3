@@ -12,10 +12,6 @@ config_refs:
   env: [QUANTA_SANDBOX]
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
-ui_surfaces: [cli]
-configurable: partial
-config_refs:
-  env: ["QUANTA_SANDBOX"]
 purpose: |
   `defaultOsSandbox()` (macOS Seatbelt + Linux Landlock stub + Windows
   passthrough) is wired into the bash spawn path via a module-level

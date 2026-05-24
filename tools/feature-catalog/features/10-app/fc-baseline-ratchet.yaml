@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:tooling"]
-configurable: n-a
 purpose: |
   `tools/feature-catalog/baseline.json` 단일 SSOT 가 두 가지를 합쳐 저장:
   (1) `fc` 하위 ratchet — empty stubs HARD cap (`empty_stubs_max`) +

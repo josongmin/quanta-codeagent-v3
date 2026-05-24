@@ -13,8 +13,6 @@ config_refs:
   env: [QUANTA_GIT_TOOLS]
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
-ui_surfaces: [cli]
-configurable: static
 purpose: |
   v0.dev chat=branch upstreamChanges 흡수 — fetch 없이(네트워크·index 무변경) 이미
   가져온 remote-tracking ref 대비 ahead/behind를 보고. rev-parse @{upstream}로 upstream
@@ -22,7 +20,11 @@ purpose: |
   카운트, behind>0이면 "upstream has N new commit(s); consider pulling" 액션 노트.
   read-only·concurrency-safe — gitTools() 7번째 read-only 도구.
 evidence:
-  code: [src/tool/git/upstream.ts, src/tool/git/index.ts, src/agent/mode.ts]
+  code:
+    - src/tool/git/upstream.ts
+    - src/tool/git/index.ts
+    - src/agent/mode.ts
+    - src/apps/cli/internal.ts
   adrs: [64]
   tests:
     unit: [tests/unit/git-upstream-check.test.ts, tests/unit/mode.test.ts]

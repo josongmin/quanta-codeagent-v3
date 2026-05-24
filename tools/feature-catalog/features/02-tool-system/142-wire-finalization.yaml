@@ -13,10 +13,6 @@ config_refs:
   env: [QUANTA_WEB_SEARCH_DUCKDUCKGO]
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
-ui_surfaces: [cli]
-configurable: partial
-config_refs:
-  env: ["QUANTA_WEB_SEARCH_DUCKDUCKGO"]
 purpose: |
   Surgical 2-part wire-up closing seams deliberately left open by ADR-0127
   / 0133 / 0137.

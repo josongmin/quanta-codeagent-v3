@@ -11,7 +11,6 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-configurable: n-a
 purpose: 'Tool routing matrix () — 시스템 프롬프트 정적 블록: truth-condition별 도구 매핑(fresh fact→web / local code→grep,read,glob,localize / modify stable→edit / modify unstable→scripted_replace / verify→test_runner,bash / parallel reads→batch / sidecar→Agent / MCP discovery→ToolSearch). cache prefix byte-stable'
 evidence:
   code:

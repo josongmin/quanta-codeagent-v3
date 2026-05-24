@@ -13,10 +13,12 @@ config_refs:
   env: [QUANTA_COMPACT_BREAKER]
 owners: ["@songmin"]
 labels: [surface:core]
-configurable: integrated
 purpose: CompactionBreaker 4-사이트, thrash abort [_*]
 evidence:
-  code: [src/agent/compaction-breaker.ts, src/agent/compaction.ts]
+  code:
+    - src/agent/compaction-breaker.ts
+    - src/agent/compaction.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
