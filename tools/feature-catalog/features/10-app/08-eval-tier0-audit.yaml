@@ -1,0 +1,38 @@
+id: eval-tier0-audit
+title: eval Tier-0 — static taxonomy coverage matrix (grep-mapper / rules)
+section: 10
+subsystem: eval 앱 Tier-0 — 정적 분류 매트릭스 (RFC-0003)
+order: 81
+maturity: L4
+status: stable
+purpose: |
+  Tier-0 of the 5-tier eval stack (umbrella: `eval-five-tier`). Pure static
+  audit — no LLM call, no fixture run. Scans the repo with deterministic
+  grep-rule patterns (`rules.ts`) and a path/symbol mapper (`grep-mapper.ts`)
+  to produce a taxonomy(12 major / ~120 leaf) coverage matrix (`matrix.ts`):
+  for each leaf node, "covered" iff at least one source file matches its
+  declared pattern. Output is rendered into the same JSONL append-only
+  `EvalRecord` envelope as the other tiers so `eval-report` can fold it
+  into the cross-tier markdown. Distinct from Tier-1+ because it answers
+  "do we even claim this capability in source?" before any behaviour test.
+evidence:
+  code:
+    - src/apps/eval/audit/index.ts
+    - src/apps/eval/audit/grep-mapper.ts
+    - src/apps/eval/audit/matrix.ts
+    - src/apps/eval/audit/rules.ts
+    - src/apps/eval/taxonomy
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-audit-matrix.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sub-feature of `eval-five-tier` umbrella — separately catalogued because the
+  audit tier is the only one that runs without any model / fixture, has its
+  own rule DSL (grep patterns + path mapper), and its own coverage-matrix
+  data shape (per-leaf boolean) distinct from synthetic scoring or pairwise
+  judge verdicts.
