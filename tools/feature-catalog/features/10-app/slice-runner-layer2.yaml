@@ -1,0 +1,42 @@
+id: slice-runner-layer2
+title: '`@/runner` 슬라이스 — surface-agnostic Layer-2 오케스트레이션'
+section: 10
+subsystem: Surface-agnostic Layer-2 (RFC may-22)
+order: 20
+maturity: L4
+status: new
+purpose: |
+  `src/runner/` 슬라이스 — CLI/Web/Tauri/Codex/Claude 어느 표면에서도 동일하게 호출 가능한
+  Layer-2 오케스트레이션 모듈. 3 sub-slice 배럴: `assemble/` (8 builder: llm/store/memory/
+  subagent/skill/compaction/verify/tooling/streaming/config) + `orchestrate/` (run-once /
+  run-interactive / resume-fsm / persist-turn / prompt-source / side-chat) + `session-ops/`
+  (list-tui + 도메인 ops). ENV/argv/stdio/console 의존을 표면 진입(apps/cli, apps/web,
+  apps/tauri)으로 밀어내고 본 슬라이스는 typed config + 주입된 port (WriteSink, PromptSource,
+  StdioReader, logger) 로만 동작. byte-identical default-OFF — 어느 표면도 본 슬라이스를
+  강제로 와이어링하지 않으며 기존 흐름은 그대로.
+evidence:
+  code:
+    - src/runner/index.ts
+    - src/runner/assemble/index.ts
+    - src/runner/orchestrate/index.ts
+    - src/runner/session-ops/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/runner-slice-boundary.test.ts
+      - tests/unit/runner/run-interactive-multimodal.test.ts
+      - tests/unit/runner/side-chat.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  10 architecture invariants (런타임 + biome 이중 강제): (1) apps/** import 금지, (2)
+  @/rules/@/patch/@/migration 직접 import 금지, (3) process.env / process.argv read 금지,
+  (4) 모든 sub-slice barrel(index.ts) 존재, (5) raw process.stdin/stdout/stderr 금지
+  (WriteSink/InputStream port 주입), (6) console.* 금지 (@/shared#logger 또는 주입된
+  log port 사용), (7) Bun.env/Bun.argv/Deno.env/Deno.args/import.meta.env 금지, (8)
+  node:readline/readline/promises/tty/repl 금지 (CLI-only), (9) `import { env, argv,
+  stdin } from "node:process"` 명명 import 금지 (literal-rename bypass 차단), (10)
+  tsconfig `@/runner` alias 등록 + biome `src/runner/**` override. 영감: Claude/Codex/
+  Tauri 진출의 surface-agnostic 토대.

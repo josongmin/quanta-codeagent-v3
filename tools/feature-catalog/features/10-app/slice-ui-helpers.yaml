@@ -1,0 +1,36 @@
+id: slice-ui-helpers
+title: '`@/ui` 슬라이스 — surface-agnostic ANSI/box helpers (former auth-ui)'
+section: 10
+subsystem: Surface-agnostic Layer-2 (RFC may-22)
+order: 22
+maturity: L4
+status: new
+purpose: |
+  `src/ui/ui-helpers.ts` (구 `auth-ui.ts` 에서 이관 + 슬라이스화) — 순수 string/ANSI/
+  box-drawing primitives. 어떤 표면 (CLI / REPL / 임베디드 browser / Tauri renderer) 도
+  composition 가능. 본 슬라이스는 I/O 미수행 — 호출자가 렌더된 문자열을 자기 sink 에 쓴다.
+  Public API: `ColorPolicyResolver` (NO_COLOR / FORCE_COLOR / TTY 인지 + cache + 표면별
+  격리 인스턴스 지원) + ANSI color helpers (bold/dim/red/green/yellow/blue/magenta/cyan/
+  gray) + `renderBox` (multi-line + title/footer + ANSI-aware width math) + `humanRel`
+  (grammatical relative time + agoOnly flag) + `kvLine` (dim-padded key-value 정렬) +
+  `statusPill` (`● label` 컬러 dot). 외부 dep 0 — quanta install 잠금 (memory
+  `verify-workflow`) 준수.
+evidence:
+  code:
+    - src/ui/index.ts
+    - src/ui/ui-helpers.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/auth/auth-ui.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice 의존: `@/shared` only — RFC 3.1 slice isolation 준수. 영감: CLI + Web + Tauri
+  공유 가능한 표면-무관 UI primitives. `ColorPolicyResolver` 객체화로 multi-surface 병렬
+  실행 시 색상 상태 leak 차단 (Tauri renderer 가 CLI state 를 오염시키지 못함). ANSI-aware
+  `visibleWidth` 로 boxes 가 mixed-colour 컨텐츠에서도 정렬. `humanRel(agoOnly:true)` 는
+  past-only 필드 (last_refresh, last_seen) 에서 미래 timestamp 가 부조리하게 "in 3h" 로
+  렌더되는 것을 "just now" 로 collapse.

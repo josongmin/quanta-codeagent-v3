@@ -1,0 +1,37 @@
+id: slice-session-root-port
+title: '`@/session` root provider — multi-tenant SessionRootProvider port'
+section: 10
+subsystem: Surface-agnostic Layer-2 (RFC may-22)
+order: 24
+maturity: L4
+status: new
+purpose: |
+  `src/session/root-port.ts` — `SessionRootProvider` port (Audit-W blocker #2). 레거시
+  `sessionsRoot()` 는 process-wide 단일 디렉토리 (`runtimeConfig().sessionsDir ?? ~/.quanta/
+  sessions`) 로 해석 — CLI 표면 (한 OS 사용자가 프로세스 소유) 엔 맞지만 multi-tenant 표면
+  (Web/Tauri 다중 사용자) 에선 cross-tenant data leak 위험. Web daemon 이 user A 의
+  `loadSessionById("abc")` 호출이 user B 의 `<root>/abc.json` 을 읽는 사고 가능. port 는
+  의존성을 invert: 표면 (CLI/Web/Tauri) 이 rooting 전략을 공급, session 슬라이스가 per-call
+  ask. `resolve()` 는 async (Web 가 인증된 요청 off IPC/DB lookup 가능). `defaultSessionRoot
+  Provider` = 레거시 동등 (re-reads `runtimeConfig()` per call) — provider 미주입 시
+  byte-identical. `staticSessionRootProvider(root)` 는 inline constructor — 두 표면이
+  서로 다른 인스턴스 보유 시 isolation 보장.
+evidence:
+  code:
+    - src/session/root-port.ts
+    - src/session/paths.ts
+    - src/session/store.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/session/root-port.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `paths.ts` 의 4 async overloads + `store.ts` 의 provider param 으로 호출 경로 확장.
+  Default behaviour byte-identical — per-tenant injection 은 opt-in. layering: `root-port.ts`
+  는 `@/shared` + Node built-ins 만 import → `@/session` 슬라이스 biome override (allows
+  `@/llm`, `@/storage`, `@/shared`) 준수. Web 멀티테넌트 ready — Phase 2 wiring 시
+  authenticated request → tenant-scoped `staticSessionRootProvider(...)` 주입.
