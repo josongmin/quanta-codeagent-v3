@@ -1,0 +1,46 @@
+id: oauth-callback-provider
+title: OAuth callback provider port — CLI loopback / Tauri deep-link / Web origin
+section: 9
+subsystem: Auth provider seam (ADR-0094 surface-agnostic)
+order: 12
+maturity: L4
+status: new
+purpose: |
+  ChatGPT-OAuth 콜백 수신을 surface-agnostic port로 추상화 — `OAuthCallbackProvider`
+  인터페이스는 redirect_uri 빌드 + 콜백 대기(promise) + state 검증을 한 계약으로 본다.
+  Surface 별 구현:
+  (1) **CLI** — `cli-callback.ts`, `http://localhost:<port>/auth/callback` 로컬
+  loopback (포트 1455→1457 fallback, Codex 호환),
+  (2) **Tauri** — `quanta://oauth/callback` deep-link 등록 (포트 미사용; OS
+  scheme handler),
+  (3) **Web** — SPA route `/oauth/callback` (같은 origin 마운트, 외부 포트 0).
+  Provider 시그니처가 동일하므로 surface 전환 시 OAuth flow 코어 코드 0변경.
+  one-shot semantics — 한 번 resolve/reject 된 핸들은 후속 콜백을 무시.
+  state 검증 실패 ⇒ reject(do not resolve), 호출자가 typed `auth` LLMError로 매핑.
+  `browser-flow-error.ts`는 typed 에러 변환 — surface별 에러 코드를 단일
+  enum으로 정규화 (UNKNOWN_STATE / TIMEOUT / USER_DENIED / NETWORK).
+  Claude SOTA 흡수 포인트: "surface 간 벽 제거" — CLI 전용 OAuth가 Tauri/Web 진출
+  시 재작성 0.
+evidence:
+  code:
+    - src/auth/chatgpt-oauth/callback-port.ts
+    - src/auth/chatgpt-oauth/cli-callback.ts
+    - src/auth/chatgpt-oauth/browser-flow-error.ts
+  adrs: [94]
+  tests:
+    unit:
+      - tests/unit/auth/browser-flow.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Tauri / Web provider 본체는 본 leaf 범위 밖 (Tauri shell + Web SPA가
+    각각의 surface 트랙에서 등록될 때 wire). Port 인터페이스만 먼저 박았다.
+  promotion_path: |
+    Tauri shell 진출 시 `tauri-callback.ts`, Web 진출 시 `web-callback.ts`
+    추가 + factory 등록 — flow 코어(`browser-flow.ts`)는 무변경.
+notes: |
+  ChatGPT-OAuth provider feature(`chatgpt-oauth-provider`)는 BYOK-없는 호출
+  end-to-end를 다루고, 본 leaf 는 콜백 수신 surface seam만 다룬다 (관심사 분리).
+  port 인터페이스 정의가 surface 추가 시 코드 변경량을 0에 수렴시키는 핵심.

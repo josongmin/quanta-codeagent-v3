@@ -1,0 +1,36 @@
+id: cli-markdown-painter
+title: CLI markdown painter — assistant stream inline highlight (line-buffer FSM)
+section: 4
+subsystem: CLI surface — assistant-text stream coloring
+order: 71
+maturity: L4
+status: new
+purpose: |
+  assistant 텍스트 스트림(델타 청크)을 라인 단위 유한상태머신으로 흘려
+  inline ANSI 컬러를 입히는 painter. 상태: header(`#`+`##`+`###`) /
+  code-fence(```` ``` ````) / inline-code(`` ` ``) / bullet(`- ` / `* `).
+  델타 파편화 안전 — 청크가 라인 중간을 잘라도 painter는 line-buffer를
+  들고 있다가 `\n` 도착 시 한 줄을 페인트해 flush. 코드 펜스 안에 들어가면
+  paint 정지(원문 보존), 펜스 종료 시 재개. inline-code는 한 라인 내에서
+  open/close 균형으로 enter/leave.
+  Default-OFF safety: NO_COLOR / non-TTY / 명시 disable(`enabled: false`) /
+  `QUANTA_MD_HIGHLIGHT=0` 중 하나라도 ⇒ pass-through(byte-identical).
+  `QUANTA_MD_MODE`로 paint 모드 세부 선택 (full vs minimal vs off).
+evidence:
+  code:
+    - src/apps/cli/markdown-painter.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/markdown-painter.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_MD_HIGHLIGHT
+  - QUANTA_MD_MODE
+deliberate_hold: null
+notes: |
+  ColorPolicyResolver 통합 (NO_COLOR / FORCE_COLOR / `stdout.isTTY` 우선순위).
+  의도적으로 full CommonMark parser 미사용 — 라인 단위 FSM이 스트리밍 환경에
+  맞다 (parser 전체 재실행을 매 청크마다 못 함). links/tables/blockquotes는
+  현재 paint 대상 아님(필요 시 phase-2).

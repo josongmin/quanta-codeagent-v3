@@ -1,0 +1,42 @@
+id: cli-slash-help
+title: CLI `/help` unified menu — dynamic BUILTINS + keybinds + ENV knobs
+section: 10
+subsystem: CLI surface — help renderer
+order: 23
+maturity: L4
+status: new
+purpose: |
+  `/help` 통합 메뉴 렌더러 — pure `renderHelp(BUILTINS)` 함수로 unit-testable.
+  inventory 구성:
+  (a) **dynamic** — `BUILTINS` 배열을 live 순회해 모든 slash command 자동
+  나열 (수동 동기화 없음; 새 명령 추가 시 자동 노출),
+  (b) **static** — keybinds 표 (`Ctrl-C`/`Ctrl-D`/`Esc`/`Tab` 등 REPL
+  shortcut),
+  (c) **static** — 주요 ENV knob 카탈로그 (`QUANTA_*` 네임스페이스).
+  detail 모드: `/help <name>` ⇒ 단일 명령의 description/usage/example을
+  `renderHelpDetail` 로 출력. 인자 0~1 강제 (`/help foo bar` ⇒ error).
+  unknown command ⇒ error + suggestion 없음 (의도적 — typo는 명확히 fail).
+evidence:
+  code:
+    - src/apps/cli/help-render.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/help-render.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    `/exit` + `/quit`은 `runReplLoop`에서 BUILTINS 진입 *전*에 short-circuit
+    되므로 BUILTINS에는 없지만 사용자는 `/help`에서 보길 기대 — 현재 수동
+    "virtual tail" 로 잡고 있다. 다른 short-circuit 명령이 늘면 동기화 부담.
+  promotion_path: |
+    short-circuit 명령도 SlashCommand 인터페이스로 1차 등록 후
+    `executeImmediately: true` 메타로 분기 → virtual tail 제거.
+notes: |
+  current BUILTINS 인벤토리 (~25-27 commands: helpCmd/context/usage/color/
+  navigate/wait/retry-with/skills/reload-skills/login/logout/status/permission/
+  mcp/snooze/resume + rewind 2 + side + rules + memory + R10 panel 6 — 일부는
+  flag로 conditional). 정확한 개수는 ENV flag에 따라 가변.
