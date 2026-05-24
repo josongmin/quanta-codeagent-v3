@@ -69,12 +69,17 @@ import {
   type McpPillServer,
   readPillEnvFlags,
 } from "./lifecycle-pills"
+import { isPlanStoreEnabled } from "./plan-store-enabled"
 import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { AbortError, readLine } from "./raw-line-reader"
 import { createRejectCounter, type RejectCounter } from "./reject-counter"
+import { idleBanner, rejectExitBanner } from "./repl-banners"
+import { paintBlankLine } from "./repl-paint"
+import { swallowAndLog } from "./repl-silent-catch"
 import type { RewindSlashState } from "./rewind-cmd"
 import { createCliRewindGitPort, isCliRewindGitEnabled } from "./rewind-git"
 import { buildRuleInventory, isRulePillEnabled } from "./rule-indicator"
+import { parseSandboxMode } from "./sandbox-mode-parse"
 import { runSessionCommand } from "./session-commands"
 import { switchToSessionCwd } from "./session-io"
 import { buildShellStreamPainter } from "./shell-stream-painter"
@@ -87,6 +92,7 @@ import {
   slashCompleter,
 } from "./slash-commands"
 import { installStatusBar, type StatusBar } from "./status-bar"
+import { buildStatusFlashConfig, type StatusFlashConfig } from "./status-flash-config"
 import { createStatusPills, type SandboxMode } from "./status-pills"
 import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
 import {
@@ -377,14 +383,15 @@ const buildBranchProgressOrUndefined = (
 /** S3 plan-store wire — default-OFF. The `/plan` slash command prints
  *  "not wired" unless `QUANTA_PLAN_STORE=1` is set (opt-in). When opt-in,
  *  we mint an in-memory `PlanStore` and thread it through `SessionDeps` so
- *  the agent's plan tools mutate the SAME store the surface reads from. */
+ *  the agent's plan tools mutate the SAME store the surface reads from.
+ *
+ *  The opt-IN env predicate lives in `./plan-store-enabled` alongside the
+ *  peer gates (`isCostPanelEnabled`, `isLifecyclePillsEnabled`,
+ *  `isBranchProgressEnabled`) so a future change to the "falsy string"
+ *  family flips ALL surface gates together. Byte-identical to the prior
+ *  inline parser (same `0`/`false`/`off`/`no` family + empty + undefined). */
 const buildPlanStoreOrUndefined = (envSource: NodeJS.ProcessEnv): PlanStore | undefined => {
-  const knob = envSource.QUANTA_PLAN_STORE
-  if (knob === undefined) return undefined
-  const norm = knob.trim().toLowerCase()
-  if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
-    return undefined
-  }
+  if (!isPlanStoreEnabled(envSource)) return undefined
   return createInMemoryPlanStore({ now: Date.now })
 }
 
@@ -472,7 +479,7 @@ const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
  *  Every other event is ignored — the indicator is purely a UX surface, not
  *  a trajectory recorder. Errors in the indicator are swallowed in place so
  *  a faulty render can never poison the recorder path. */
-const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
+const buildIndicatorPort = (ind: TurnIndicator, slog?: StructuredLogger): StreamPort => ({
   emit: (event): void => {
     try {
       if (event.type === "assistant_text" || event.type === "tool_call") {
@@ -485,9 +492,12 @@ const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
           outputTokens: event.outputTokens,
         })
       }
-    } catch {
+    } catch (err) {
       // Intentional: an indicator failure must not surface as an emit error
-      // (TeeStream would otherwise track it as a degraded record).
+      // (TeeStream would otherwise track it as a degraded record). Telemetry
+      // hole sealed by emitting a `warn` line — `swallowAndLog` defensively
+      // wraps the sink so a misbehaving logger cannot escalate.
+      swallowAndLog(slog, "repl.indicator_failure", err)
     }
   },
 })
@@ -528,6 +538,7 @@ const buildTurnIndicatorAndStream = (
   envSource: NodeJS.ProcessEnv,
   isTTY: boolean | undefined,
   intervalEnv: string,
+  slog?: StructuredLogger,
 ): { indicator: TurnIndicator; turnStream: StreamPort } => {
   const enabled = isIndicatorEnabled(envSource, isTTY)
   const intervalMs = Number(intervalEnv)
@@ -537,7 +548,7 @@ const buildTurnIndicatorAndStream = (
     intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 80,
   })
   if (!enabled) return { indicator, turnStream: stream }
-  return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator)]) }
+  return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator, slog)]) }
 }
 
 const buildSkillsCallback = (
@@ -577,10 +588,14 @@ const installPills = (deps: {
   cwd: string
   planMode: boolean
   skillsConfig: AgentConfig["skills"] | undefined
+  slog?: StructuredLogger
 }): ReturnType<typeof createStatusPills> => {
   const initialAgentMode = resolveAgentMode(undefined, deps.planMode)
   const initialEffort: EffortLevel | undefined = parseEffort(env("QUANTA_EFFORT", ""))
-  const initialSandbox: SandboxMode = (env("QUANTA_SANDBOX", "default") as SandboxMode) ?? "default"
+  // Hardened cast: `parseSandboxMode` validates against the canonical union,
+  // so a bogus `QUANTA_SANDBOX=badvalue` no longer propagates as a literal
+  // label into the sandbox pill (silent UI lie). Empty/unset/unknown ⇒ `"default"`.
+  const initialSandbox: SandboxMode = parseSandboxMode(env("QUANTA_SANDBOX", "default"))
   const pills = createStatusPills({
     statusBar: deps.statusBar,
     initial: {
@@ -597,7 +612,9 @@ const installPills = (deps: {
   if (skillsCbForPills !== undefined) {
     void skillsCbForPills()
       .then((rows) => pills.update({ activeSkills: rows.map((r) => ({ name: r.name })) }))
-      .catch(() => undefined) // best-effort; pills stay empty on discover error
+      // best-effort; pills stay empty on discover error. Telemetry hole sealed
+      // by `swallowAndLog` — failure isolation preserved (no rethrow).
+      .catch((err) => swallowAndLog(deps.slog, "repl.skills_callback_failure", err))
   }
   // Rule indicator — best-effort fs walk shadowing the agent loop's loaders.
   // Off-loop and cached for the REPL session; the loop's own load is
@@ -614,7 +631,7 @@ const installPills = (deps: {
           })
         }
       })
-      .catch(() => undefined)
+      .catch((err) => swallowAndLog(deps.slog, "repl.rule_inventory_failure", err))
   }
   return pills
 }
@@ -712,7 +729,9 @@ export interface RunReplLoopRawOptions {
 
 export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void> => {
   const { signal, turn, slashCtx, meta, history, multiline } = opts
-  process.stderr.write("\n")
+  // Initial blank row: matches the prior bare write byte-identically (single
+  // `\n` to stderr) — centralized in `paintBlankLine`.
+  paintBlankLine()
   while (!signal.aborted) {
     let input: string
     try {
@@ -732,16 +751,19 @@ export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void>
       throw e
     }
     if (input === "") {
-      process.stderr.write("\n")
+      // Blank line: paint a separator (byte-identical to the prior write).
+      paintBlankLine()
       continue
     }
     if (input === "/exit" || input === "/quit") break
     if (await tryRunReplSlash(input, slashCtx)) {
-      process.stderr.write("\n")
+      // Slash command handled in-REPL: paint a separator before the next prompt.
+      paintBlankLine()
       continue
     }
     await turn(input)
-    process.stderr.write("\n")
+    // Post-turn separator (byte-identical to the prior write).
+    paintBlankLine()
   }
 }
 
@@ -802,11 +824,15 @@ const renderTurnDashboard = (
 
 /** Print a turn-level error inline + flash the status bar. Used by the
  *  interactive wrapTurn to keep the REPL alive when a single turn throws.
- *  Extracted to keep wrapTurn under the biome cognitive-complexity budget. */
-const renderTurnError = (e: unknown, statusBar: StatusBar): void => {
+ *  Extracted to keep wrapTurn under the biome cognitive-complexity budget.
+ *
+ *  The flash duration + truncate cap come from {@link StatusFlashConfig}
+ *  (env-overrideable via `QUANTA_FLASH_ERROR_MS` / `QUANTA_FLASH_TRUNCATE_CHARS`).
+ *  Defaults preserve the prior 4000 ms linger + 120-char cap byte-identically. */
+const renderTurnError = (e: unknown, statusBar: StatusBar, flash: StatusFlashConfig): void => {
   const msg = e instanceof Error ? e.message : String(e)
   process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
-  statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
+  statusBar.transient(`error: ${msg.slice(0, flash.truncateChars)}`, flash.errorMs)
 }
 
 /** Read one trimmed line from the raw-mode reader. Returns `null` on
@@ -847,7 +873,9 @@ const classifyReplLine = async (
   if (input === "/exit" || input === "/quit") return null
   const handled = input === "" || (await tryRunReplSlash(input, slashCtx))
   if (handled) {
-    process.stderr.write("\n")
+    // Blank / handled slash: paint a separator before the next prompt
+    // (byte-identical to the prior bare write).
+    paintBlankLine()
     return undefined
   }
   return input
@@ -919,16 +947,27 @@ const wrapPromptSourceWithIdleGate = (args: {
   readonly idle: IdleMonitor
   readonly rejects: RejectCounter
   readonly statusBar: StatusBar
+  /** Idle threshold (ms) the {@link IdleMonitor} was built with; interpolated
+   *  INTO the banner copy so the displayed number reflects the actual gate
+   *  (closes "60s" string-drift bug). */
+  readonly idleMs: number
+  /** Reject threshold the {@link RejectCounter} was built with; interpolated
+   *  INTO the exit banner (closes "20 consecutive denials" string-drift bug). */
+  readonly rejectLimit: number
+  /** Flash durations (env-overrideable via the `QUANTA_FLASH_*` family). */
+  readonly flash: StatusFlashConfig
 }): PromptSource => {
-  const { inner, idle, rejects, statusBar } = args
+  const { inner, idle, rejects, statusBar, idleMs, rejectLimit, flash } = args
   const paintGateBanners = (): void => {
     if (idle.isSnoozed()) {
-      statusBar.transient("⏸ snoozed — type /resume to wake", 4000)
+      statusBar.transient("⏸ snoozed — type /resume to wake", flash.errorMs)
       process.stderr.write("[snoozed — type /resume to wake, or wait for the snooze window]\n")
       return
     }
     if (idle.isIdle()) {
-      statusBar.transient("[idle 60s — auto-paused. type or /resume]", 3000)
+      // Banner number now derived from `idleMs` (the same value the monitor
+      // was built with) — no more silent UI lie when QUANTA_IDLE_MS is set.
+      statusBar.transient(idleBanner(idleMs), flash.idleMs)
     }
   }
   /** One read cycle: returns the next prompt payload, `null` for loop exit,
@@ -938,7 +977,9 @@ const wrapPromptSourceWithIdleGate = (args: {
    *  (`{ text, images }`) flows through this idle/reject gate unchanged. */
   const readOneGated = async (signal?: AbortSignal): Promise<PromptPayload | null | undefined> => {
     if (rejects.shouldAutoExit()) {
-      process.stderr.write("\n[20 consecutive denials — exiting. To re-enable, restart quanta]\n")
+      // Banner number now derived from `rejectLimit` (the same value the
+      // counter was built with) — no more silent UI lie on QUANTA_REJECT_LIMIT.
+      process.stderr.write(rejectExitBanner(rejectLimit))
       return null
     }
     paintGateBanners()
@@ -978,6 +1019,11 @@ export const runRepl = async (): Promise<void> => {
   // (Read/Edit/Bash) operate inside the right tree.
   let cwd = process.cwd()
   const slog = new StructuredLogger()
+
+  // UX flash durations (env-overrideable via `QUANTA_FLASH_*` family). Built
+  // ONCE per REPL; defaults are byte-identical to the pre-cleanup magic
+  // numbers (4000/3000/2000/1500/120). See `status-flash-config.ts`.
+  const flash = buildStatusFlashConfig(process.env)
 
   // Cursor-inspired idle suppress + reject auto-exit (default-ON).
   //
@@ -1221,6 +1267,7 @@ export const runRepl = async (): Promise<void> => {
     process.env,
     process.stdout.isTTY,
     env("QUANTA_SPINNER_INTERVAL_MS", "80"),
+    slog,
   )
 
   // S3 port adapters — built ONCE per session, threaded through `slashCtx`
@@ -1288,12 +1335,15 @@ export const runRepl = async (): Promise<void> => {
     if (stdin.isTTY !== true) return { dispose: (): void => undefined }
     let escCount = 0
     let lastEsc = 0
-    const ESC_WINDOW_MS = 2000
+    // Esc-Esc window — env-overrideable via `QUANTA_ESC_WINDOW_MS`.
+    // Default `2000` ms preserves the prior un-env-backed `ESC_WINDOW_MS`
+    // constant byte-identically.
+    const escWindowMs = flash.escWindowMs
     type Key = { name?: string; ctrl?: boolean }
     const onKey = (_str: string | undefined, key: Key | undefined): void => {
       if (key === undefined) return
       if (key.ctrl === true && key.name === "c") {
-        status.transient("⛔ interrupted — exiting…", 1500)
+        status.transient("⛔ interrupted — exiting…", flash.transientMs)
         abort.abort()
         return
       }
@@ -1302,15 +1352,15 @@ export const runRepl = async (): Promise<void> => {
         return
       }
       const now = Date.now()
-      if (escCount === 1 && now - lastEsc < ESC_WINDOW_MS) {
-        status.transient("⛔ turn cancelled", 1500)
+      if (escCount === 1 && now - lastEsc < escWindowMs) {
+        status.transient("⛔ turn cancelled", flash.transientMs)
         turnAbort.abort()
         escCount = 0
         return
       }
       escCount = 1
       lastEsc = now
-      status.transient("Press Esc again within 2s to cancel · Ctrl+C to exit", ESC_WINDOW_MS)
+      status.transient("Press Esc again within 2s to cancel · Ctrl+C to exit", escWindowMs)
     }
     emitKeypressEvents(stdin)
     const wasRaw = stdin.isRaw ?? false
@@ -1330,7 +1380,7 @@ export const runRepl = async (): Promise<void> => {
   // Default-ON when stdout is a TTY; gated by QUANTA_PILLS=0 / individual
   // QUANTA_PILL_<NAME>=0 envs (see status-pills.ts). Wiring extracted to
   // `installPills` so `runRepl` stays under the biome cognitive-complexity budget.
-  const pills = installPills({ statusBar, cwd, planMode, skillsConfig })
+  const pills = installPills({ statusBar, cwd, planMode, skillsConfig, slog })
 
   const turn = async (text: string): Promise<void> => {
     // Per-turn AbortController + composite signal: the LLM stream sees
@@ -1411,7 +1461,10 @@ export const runRepl = async (): Promise<void> => {
       // inline + on the status bar, then return so the next prompt fires.
       const msg = e instanceof Error ? e.message : String(e)
       process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
-      statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
+      // Flash linger + truncate cap from `StatusFlashConfig` — env-overrideable
+      // via `QUANTA_FLASH_ERROR_MS` / `QUANTA_FLASH_TRUNCATE_CHARS`. Defaults
+      // (4000 ms / 120 chars) preserve the prior bytes verbatim.
+      statusBar.transient(`error: ${msg.slice(0, flash.truncateChars)}`, flash.errorMs)
     } finally {
       // SOLE indicator teardown on the happy path — idempotent on the
       // indicator side, so a prior catch-branch `stop()` (or the abort
@@ -1476,17 +1529,28 @@ export const runRepl = async (): Promise<void> => {
       // QUANTA_MULTILINE=0.
       const multilineEnabled = env("QUANTA_MULTILINE", "1") !== "0"
       // Initial blank row matches the prior `runReplLoopRaw` header write so
-      // the very first composer row sits one line below the resume log.
-      process.stderr.write("\n")
+      // the very first composer row sits one line below the resume log
+      // (byte-identical via `paintBlankLine`).
+      paintBlankLine()
       const innerPromptSource = buildCliPromptSource(slashCtx, {
         ...(promptHistory !== undefined ? { promptHistory } : {}),
         multiline: multilineEnabled,
       })
+      // Resolve the effective idle/reject thresholds the gate was built with
+      // so the user-facing banner copy interpolates the SAME numbers (closes
+      // the "60s" / "20 consecutive denials" string-drift bug).
+      const idleMsResolved =
+        idleSuppressOn && Number.isFinite(idleMsRaw) && idleMsRaw > 0 ? idleMsRaw : 60_000
+      const rejectLimitResolved =
+        idleSuppressOn && Number.isFinite(rejectLimitRaw) && rejectLimitRaw > 0 ? rejectLimitRaw : 20
       const cliPromptSource = wrapPromptSourceWithIdleGate({
         inner: innerPromptSource,
         idle: idleMonitor,
         rejects: rejectCounter,
         statusBar,
+        idleMs: idleMsResolved,
+        rejectLimit: rejectLimitResolved,
+        flash,
       })
       // wrapTurn installs the Esc-Esc per-turn cancel + signal composition +
       // dashboard render + REPL-survives-on-error around each runOnce call.
@@ -1529,7 +1593,7 @@ export const runRepl = async (): Promise<void> => {
             // the loop solicits the next prompt without updating history.
             // Any other error MUST NOT kill the REPL — render it inline.
             if (!(turnAbort.signal.aborted && !abort.signal.aborted)) {
-              renderTurnError(e, statusBar)
+              renderTurnError(e, statusBar, flash)
             }
             result = undefined
           } finally {
@@ -1539,7 +1603,8 @@ export const runRepl = async (): Promise<void> => {
             // collector ⇒ harmless to call twice.
             turnSummary.reset()
           }
-          process.stderr.write("\n")
+          // Post-turn separator (byte-identical to the prior bare write).
+          paintBlankLine()
           return result
         },
         onTurnEnd: ({ messages }) => {
