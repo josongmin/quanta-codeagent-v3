@@ -5,8 +5,8 @@ subsystem: metrics export (ADR-0144)
 order: 113
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
@@ -22,10 +22,14 @@ purpose: |
 evidence:
   code:
     - src/observability/metrics/otel-sink.ts
+    - src/observability/metrics/index.ts
+    - src/observability/metrics/otlp-helper.ts
+    - src/observability/metrics/port.ts
   adrs: [154]
   tests:
     unit:
       - tests/unit/observability-metrics-otel-hellgate.test.ts
+      - tests/unit/observability-metrics-otlp-helper-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

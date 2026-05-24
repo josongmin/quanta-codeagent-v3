@@ -39,6 +39,7 @@ evidence:
   tests:
     unit:
       - tests/unit/permission-rules.test.ts
+      - tests/unit/hard-deny-redos-bound.test.ts
     integration: []
     contract: []
 knobs: []

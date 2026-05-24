@@ -6,7 +6,7 @@ order: 88
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
@@ -30,6 +30,10 @@ purpose: |
 evidence:
   code:
     - src/apps/eval/trajectory/diff.ts
+    - src/apps/eval/trajectory/replay.ts
+    - src/apps/eval/trajectory/index.ts
+    - src/apps/eval/trajectory/source.ts
+    - src/apps/eval/trajectory/meta.ts
   adrs: []
   tests:
     unit:

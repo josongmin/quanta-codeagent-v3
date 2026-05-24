@@ -6,7 +6,7 @@ order: 2
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [interactive, headless]
 configurable: static
 owners: ["@songmin"]
@@ -17,6 +17,10 @@ purpose: 'CLI 헬퍼 export 폐쇄 — 분리: 모든 pure-ish helper (buildLLM/
 evidence:
   code:
     - src/apps/cli/internal.ts
+    - src/apps/cli/index.ts
+    - src/apps/cli/config-assemble.ts
+    - src/apps/cli/dotenv.ts
+    - src/apps/cli/history-cmd.ts
   adrs: []
   tests:
     unit: [tests/unit/cli-summarizer.test.ts]

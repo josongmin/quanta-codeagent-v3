@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
 purpose: |
@@ -26,6 +26,8 @@ purpose: |
 evidence:
   code:
     - src/tool/git/review-diff.ts
+    - src/tool/git/index.ts
+    - src/tool/types.ts
   adrs: [111]
   tests:
     unit:

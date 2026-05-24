@@ -5,8 +5,8 @@ subsystem: storage/shadow-odb — deterministic on-disk layout
 order: 43
 maturity: L4
 status: new
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
@@ -29,9 +29,15 @@ purpose: |
 evidence:
   code:
     - src/storage/shadow-odb/hash.ts
+    - src/storage/shadow-odb/default.ts
+    - src/storage/shadow-odb/index.ts
+    - src/storage/shadow-odb/types.ts
+    - src/storage/shadow-odb/cleanup.ts
   adrs: [108]
   tests:
-    unit: []
+    unit:
+      - tests/unit/shadow-odb-hellgate.test.ts
+      - tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

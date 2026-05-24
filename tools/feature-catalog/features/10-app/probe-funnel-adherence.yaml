@@ -6,7 +6,7 @@ order: 30
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
@@ -25,6 +25,10 @@ purpose: |
 evidence:
   code:
     - src/apps/probe/funnel.ts
+    - src/apps/probe/index.ts
+    - src/apps/probe/render.ts
+    - src/apps/probe/parse.ts
+    - src/apps/probe/triage.ts
   adrs: [10]
   tests:
     unit:

@@ -6,9 +6,9 @@ order: 50
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [interactive, headless]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli"]
 purpose: |
@@ -32,6 +32,10 @@ purpose: |
 evidence:
   code:
     - src/apps/agent/cli-args.ts
+    - src/apps/agent/index.ts
+    - src/apps/agent/assemble.ts
+    - src/apps/agent/run.ts
+    - src/apps/agent/mode-presets/headless.ts
   adrs: []
   tests:
     unit:

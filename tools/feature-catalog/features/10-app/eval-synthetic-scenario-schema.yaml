@@ -5,8 +5,8 @@ subsystem: eval 앱 — Tier 1 fixture format
 order: 84
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
@@ -26,6 +26,10 @@ purpose: |
 evidence:
   code:
     - src/apps/eval/synthetic/scenario.ts
+    - src/apps/eval/synthetic/index.ts
+    - src/apps/eval/synthetic/runner.ts
+    - src/apps/eval/synthetic/generator.ts
+    - src/apps/eval/synthetic/judge.ts
   adrs: []
   tests:
     unit:

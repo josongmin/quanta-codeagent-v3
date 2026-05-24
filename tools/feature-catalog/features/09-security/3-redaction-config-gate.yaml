@@ -5,8 +5,8 @@ subsystem: 보안 — redaction 설정 게이트 (ADR-0078)
 order: 3
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin", "team-safety"]
@@ -31,10 +31,14 @@ purpose: |
 evidence:
   code:
     - src/security/redaction-config.ts
+    - src/security/index.ts
+    - src/agent/types.ts
+    - src/agent/loop.ts
   adrs: [78]
   tests:
     unit:
       - tests/unit/security/redaction-config.test.ts
+      - tests/unit/secret-detection-hellgate.test.ts
     integration:
       - tests/integration/redaction-three-application-points.test.ts
     contract: []

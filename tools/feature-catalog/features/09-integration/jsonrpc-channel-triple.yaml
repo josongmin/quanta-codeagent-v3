@@ -5,8 +5,8 @@ subsystem: shared/jsonrpc — channel naming convention
 order: 37
 maturity: L4
 status: new
-ui_surfaces: [api]
-monitoring: n-a
+ui_surfaces: [api, cli]
+monitoring: partial
 modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
@@ -26,6 +26,10 @@ purpose: |
 evidence:
   code:
     - src/shared/jsonrpc/channel-naming.ts
+    - src/shared/jsonrpc/index.ts
+    - src/shared/jsonrpc/envelope.ts
+    - src/shared/jsonrpc/correlation.ts
+    - src/shared/jsonrpc/codec.ts
   adrs: []
   tests:
     unit:

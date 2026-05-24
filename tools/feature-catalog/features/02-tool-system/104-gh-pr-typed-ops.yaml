@@ -22,7 +22,7 @@ evidence:
     - src/tool/gh/index.ts
   adrs: [104]
   tests:
-    unit: []
+    unit: [tests/unit/gh-pr-tools-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

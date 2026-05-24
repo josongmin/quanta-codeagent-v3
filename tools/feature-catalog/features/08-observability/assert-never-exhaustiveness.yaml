@@ -5,7 +5,7 @@ subsystem: shared — typed-union safety primitive
 order: 97
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -23,6 +23,9 @@ purpose: |
 evidence:
   code:
     - src/shared/assert-never.ts
+    - src/shared/index.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/apps/eval/report/coverage-matrix.ts
   adrs: []
   tests:
     unit: []

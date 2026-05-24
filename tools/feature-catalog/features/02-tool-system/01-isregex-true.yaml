@@ -5,16 +5,18 @@ subsystem: '`scripted_replace` 도구 (ADR-0019)'
 order: 1
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
 purpose: 신규 default 도구. 리터럴 기본 / isRegex:true 정규식 / count 캡 / FS-jail / atomic write.
 evidence:
   code:
     - src/tool/scripted-replace.ts
+    - src/tool/index.ts
+    - src/apps/cli/diff-preview.ts
   adrs: [19]
   tests:
     unit: [tests/unit/scripted-replace.test.ts]

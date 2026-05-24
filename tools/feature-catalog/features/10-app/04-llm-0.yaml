@@ -6,7 +6,7 @@ order: 4
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [n-a]
 configurable: static
 owners: ["@songmin"]
@@ -15,6 +15,7 @@ purpose: '--dry-run 모드 () — 순수 plan builder: 코퍼스 load + count + 
 evidence:
   code:
     - src/apps/bench/dry-run.ts
+    - src/apps/bench/index.ts
   adrs: []
   tests:
     unit: []

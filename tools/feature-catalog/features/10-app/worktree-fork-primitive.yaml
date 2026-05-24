@@ -6,7 +6,7 @@ order: 51
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [n-a]
 configurable: static
 owners: ["@songmin"]
@@ -37,6 +37,8 @@ purpose: |
 evidence:
   code:
     - src/runtime/worktree-fork.ts
+    - src/runtime/index.ts
+    - src/runner/session-ops/index.ts
   adrs: []
   tests:
     unit:

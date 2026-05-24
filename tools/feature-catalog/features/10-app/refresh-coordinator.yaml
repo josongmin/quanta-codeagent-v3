@@ -6,7 +6,7 @@ order: 95
 maturity: L4
 status: new
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [n-a]
 configurable: static
 owners: ["@songmin"]
@@ -27,6 +27,10 @@ purpose: |
 evidence:
   code:
     - src/auth/chatgpt-oauth/refresh.ts
+    - src/auth/chatgpt-oauth/index.ts
+    - src/auth/chatgpt-oauth/token-store.ts
+    - src/auth/chatgpt-oauth/config.ts
+    - src/auth/chatgpt-oauth/jwt.ts
   adrs: [94]
   tests:
     unit:

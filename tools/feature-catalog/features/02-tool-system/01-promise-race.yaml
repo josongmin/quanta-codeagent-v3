@@ -5,7 +5,7 @@ subsystem: '`applyScriptedReplaceBounded` 제거 (R3-P1)'
 order: 1
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -15,6 +15,7 @@ purpose: '이전 sync regex를 Promise.race로 감싸 setTimeout 타임아웃 �
 evidence:
   code:
     - src/tool/scripted-replace.ts
+    - src/tool/index.ts
   adrs: []
   tests:
     unit: [tests/unit/hard-deny-redos-bound.test.ts, tests/unit/scripted-replace.test.ts]

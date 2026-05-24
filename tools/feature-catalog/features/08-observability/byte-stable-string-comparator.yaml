@@ -5,7 +5,7 @@ subsystem: shared — deterministic ordering primitive
 order: 96
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -22,6 +22,10 @@ purpose: |
 evidence:
   code:
     - src/shared/byte-compare.ts
+    - src/shared/index.ts
+    - src/runner/session-ops/list-tui.ts
+    - src/apps/bench/corpus/loader.ts
+    - src/tool/localize/index.ts
   adrs: []
   tests:
     unit: []

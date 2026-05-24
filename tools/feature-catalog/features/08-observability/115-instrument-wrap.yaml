@@ -5,8 +5,8 @@ subsystem: metrics export (ADR-0144/0158)
 order: 115
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
@@ -22,10 +22,17 @@ purpose: |
 evidence:
   code:
     - src/observability/metrics/instrument.ts
+    - src/observability/metrics/instrument-tool.ts
+    - src/observability/metrics/instrument-shadow.ts
+    - src/observability/metrics/instrument-budget.ts
+    - src/observability/metrics/instrument-lsp.ts
+    - src/observability/metrics/observability-helper.ts
   adrs: [159]
   tests:
     unit:
       - tests/unit/observability-metrics-instrument-hellgate.test.ts
+      - tests/unit/observability-metrics-instrument-shadow-tool-hellgate.test.ts
+      - tests/unit/observability-metrics-instrument-extra-hellgate.test.ts
     integration:
       - tests/integration/instrumentation-coverage-e2e.test.ts
     contract: []

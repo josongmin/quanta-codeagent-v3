@@ -5,10 +5,10 @@ subsystem: LSP expansion (ADR-0141)
 order: 204
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:lsp", "tier:adapter"]
 purpose: |
@@ -22,10 +22,15 @@ purpose: |
 evidence:
   code:
     - src/lsp/adapters/base.ts
+    - src/lsp/adapters/file-write-strategy.ts
+    - src/lsp/adapters/file-write-atomic.ts
+    - src/lsp/adapters/file-write-sequential.ts
+    - src/lsp/adapters/default-code-action.ts
   adrs: [152, 156]
   tests:
     unit:
       - tests/unit/lsp-applyworkspaceedit-atomicity-hellgate.test.ts
+      - tests/unit/lsp-atomic-write-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

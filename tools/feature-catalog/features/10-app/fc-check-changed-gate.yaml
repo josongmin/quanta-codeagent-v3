@@ -6,9 +6,9 @@ order: 51
 maturity: L5
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:tooling"]
 depends_on: [feature-catalog-tool]
@@ -25,6 +25,10 @@ purpose: |
 evidence:
   code:
     - tools/feature-catalog/check-changed.ts
+    - tools/feature-catalog/cli.ts
+    - tools/feature-catalog/schema.ts
+    - tools/feature-catalog/yaml.ts
+    - tools/feature-catalog/lint.ts
   adrs: []
   tests:
     unit:

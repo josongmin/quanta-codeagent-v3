@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 purpose: |
@@ -25,6 +25,8 @@ purpose: |
 evidence:
   code:
     - src/skill/tool-search.ts
+    - src/skill/index.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit:

@@ -6,7 +6,7 @@ order: 8
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]
@@ -26,9 +26,14 @@ purpose: |
 evidence:
   code:
     - src/agent/run-mode/narrow.ts
+    - src/agent/run-mode/presets.ts
+    - src/agent/run-mode/types.ts
+    - src/agent/run-mode/index.ts
   adrs: [92]
   tests:
-    unit: []
+    unit:
+      - tests/unit/agent/run-mode/narrow.test.ts
+      - tests/unit/mode-mutating-table-coverage-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

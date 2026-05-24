@@ -5,8 +5,8 @@ subsystem: 벤치
 order: 2
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
 configurable: integrated
 config_refs:
@@ -17,6 +17,9 @@ purpose: '외부 repair 라운드 : 에이전트 자신의 verify cmd 재실행�
 evidence:
   code:
     - src/apps/bench/index.ts
+    - src/apps/bench/eval/snapshot.ts
+    - src/apps/bench/eval/driver.ts
+    - src/agent/verify-guard.ts
   adrs: [14]
   tests:
     unit: []

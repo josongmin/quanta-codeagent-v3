@@ -5,8 +5,8 @@ subsystem: LLM resilience — silence-hang guard
 order: 31
 maturity: L4
 status: new
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
@@ -28,6 +28,9 @@ purpose: |
 evidence:
   code:
     - src/llm/stream-timeout.ts
+    - src/llm/factory.ts
+    - src/llm/types.ts
+    - src/llm/adapters/shared.ts
   adrs: []
   tests:
     unit:
