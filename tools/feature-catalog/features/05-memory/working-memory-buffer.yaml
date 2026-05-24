@@ -32,7 +32,7 @@ evidence:
   tests:
     unit:
       - tests/unit/working-loop.test.ts
-      - tests/unit/memory.test.ts
+      - tests/unit/memory-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

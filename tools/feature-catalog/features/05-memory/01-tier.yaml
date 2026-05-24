@@ -20,7 +20,7 @@ evidence:
     - src/agent/memory.ts
   adrs: [8]
   tests:
-    unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/dedup.test.ts", "tests/unit/eviction.test.ts", "tests/unit/memory-adapters.test.ts", "tests/unit/memory-hellgate.test.ts", "tests/unit/memory-telemetry-port-hellgate.test.ts", "tests/unit/memory.test.ts", "tests/unit/ranking.test.ts"]
+    unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/dedup.test.ts", "tests/unit/eviction.test.ts", "tests/unit/memory-adapters.test.ts", "tests/unit/memory-hellgate.test.ts", "tests/unit/memory-telemetry-port-hellgate.test.ts", "tests/unit/memory-hellgate.test.ts", "tests/unit/ranking.test.ts"]
     unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/dedup.test.ts, tests/unit/eviction.test.ts, tests/unit/memory-adapters.test.ts, tests/unit/memory-hellgate.test.ts]
     integration: []
     contract: []

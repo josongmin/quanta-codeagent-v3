@@ -34,7 +34,7 @@ evidence:
   tests:
     unit:
       - tests/unit/localize.test.ts
-      - tests/unit/localize-phase-guard.test.ts
+      - tests/unit/localize-phase-guard-hellgate.test.ts
       - tests/unit/localize-phase-guard-hellgate.test.ts
     integration: []
     contract: []

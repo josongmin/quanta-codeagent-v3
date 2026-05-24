@@ -19,8 +19,8 @@ evidence:
     - src/agent/prompt.ts
   adrs: [21]
   tests:
-    unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/agent/untrusted-embed.test.ts", "tests/unit/hook-paired-rpc-integration.test.ts", "tests/unit/memory.test.ts", "tests/unit/prompt-escape-hellgate.test.ts", "tests/unit/prompt-rules-snapshot.test.ts"]
-    unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/agent/untrusted-embed.test.ts, tests/unit/hook-paired-rpc-integration.test.ts, tests/unit/memory.test.ts, tests/unit/prompt-escape-hellgate.test.ts]
+    unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/agent/untrusted-embed.test.ts", "tests/unit/hook-paired-rpc-integration.test.ts", "tests/unit/memory-hellgate.test.ts", "tests/unit/prompt-escape-hellgate.test.ts", "tests/unit/prompt-rules-snapshot.test.ts"]
+    unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/agent/untrusted-embed.test.ts, tests/unit/hook-paired-rpc-integration.test.ts, tests/unit/memory-hellgate.test.ts, tests/unit/prompt-escape-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

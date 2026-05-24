@@ -33,7 +33,7 @@ evidence:
     unit:
       - tests/unit/prompt-sections-hellgate.test.ts
       - tests/unit/agent/prompt-sections.test.ts
-      - tests/unit/memory.test.ts
+      - tests/unit/memory-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

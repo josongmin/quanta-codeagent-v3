@@ -32,7 +32,7 @@ evidence:
   tests:
     unit:
       - tests/unit/compaction.test.ts
-      - tests/unit/compaction-breaker.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
       - tests/unit/compaction-breaker-hellgate.test.ts
     integration: []
     contract: []

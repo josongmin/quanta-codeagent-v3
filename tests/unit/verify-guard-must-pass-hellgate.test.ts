@@ -16,6 +16,7 @@
  *   This is the FLAGSHIP outcome-gate claim. Every assertion below is the
  *   real `decideVerifyGuard` decision — no helper reimplementation.
  */
+
 import { describe, expect, test } from "bun:test"
 import {
   createVerifyGuardState,
@@ -346,3 +347,7 @@ describe("HELLGATE — synthetic demo of the sanity-observed false-done", () => 
     expect(state2.trips).toBe(0)
   })
 })
+
+/* ------------------------------------------------------------------ */
+/* merged from verify-guard-must-pass.test.ts */
+/* ------------------------------------------------------------------ */

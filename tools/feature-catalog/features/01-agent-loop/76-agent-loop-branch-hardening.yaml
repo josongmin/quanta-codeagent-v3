@@ -72,7 +72,7 @@ evidence:
   adrs: [76]
   tests:
     unit:
-      - tests/unit/recovery.test.ts
+      - tests/unit/recovery-hellgate.test.ts
       - tests/unit/anthropic-thinking-delta.test.ts
       - tests/unit/llm/anthropic-thinking.test.ts
       - tests/unit/llm/openai-thinking.test.ts

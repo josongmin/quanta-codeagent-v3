@@ -24,7 +24,7 @@ evidence:
     - src/runner/assemble/verify.ts
   adrs: [13]
   tests:
-    unit: [tests/unit/verify-guard.test.ts, tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]
+    unit: [tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]
     integration: [tests/integration/verify-guard-e2e.test.ts, tests/integration/verify-guard-hellgate-e2e.test.ts, tests/integration/verify-guard-forces-any.test.ts]
     contract: []
 knobs: []

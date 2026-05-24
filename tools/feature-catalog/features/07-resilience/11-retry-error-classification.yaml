@@ -34,7 +34,7 @@ evidence:
   tests:
     unit:
       - tests/unit/retry.test.ts
-      - tests/unit/recovery.test.ts
+      - tests/unit/recovery-hellgate.test.ts
       - tests/unit/recovery-hellgate.test.ts
     integration: []
     contract: []

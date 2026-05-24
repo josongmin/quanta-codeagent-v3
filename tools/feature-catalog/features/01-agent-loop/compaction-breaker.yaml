@@ -32,7 +32,7 @@ evidence:
   adrs: [11, 75]
   tests:
     unit:
-      - tests/unit/compaction-breaker.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
       - tests/unit/compaction-breaker-hellgate.test.ts
     integration:
       - tests/integration/breaker-e2e.test.ts

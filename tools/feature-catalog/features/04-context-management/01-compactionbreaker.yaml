@@ -24,7 +24,7 @@ evidence:
     - src/apps/cli/internal.ts
   adrs: []
   tests:
-    unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
+    unit: [tests/unit/compaction-breaker-hellgate.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_COMPACT_BREAKER]

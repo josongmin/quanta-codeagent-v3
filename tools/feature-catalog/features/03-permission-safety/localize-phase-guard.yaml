@@ -33,7 +33,7 @@ evidence:
   adrs: []
   tests:
     unit:
-      - tests/unit/localize-phase-guard.test.ts
+      - tests/unit/localize-phase-guard-hellgate.test.ts
       - tests/unit/localize-phase-guard-hellgate.test.ts
       - tests/unit/loop-localize-phase.test.ts
     integration: []

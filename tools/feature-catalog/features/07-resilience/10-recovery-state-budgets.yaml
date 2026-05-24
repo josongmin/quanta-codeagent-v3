@@ -30,7 +30,7 @@ evidence:
   adrs: []
   tests:
     unit:
-      - tests/unit/recovery.test.ts
+      - tests/unit/recovery-hellgate.test.ts
       - tests/unit/recovery-hell.test.ts
       - tests/unit/recovery-hellgate.test.ts
     integration: []

@@ -56,7 +56,7 @@ evidence:
       - tests/unit/memory/consolidate-phase1.test.ts
       - tests/unit/memory/consolidate-phase2.test.ts
       - tests/unit/memory-consolidator-hook-hellgate.test.ts
-      - tests/unit/memory.test.ts
+      - tests/unit/memory-hellgate.test.ts
     integration: [tests/integration/consolidate-phase2-end-to-end.test.ts]
     contract: []
 knobs: []

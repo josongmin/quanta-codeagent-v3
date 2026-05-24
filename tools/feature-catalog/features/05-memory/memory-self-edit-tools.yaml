@@ -42,7 +42,7 @@ evidence:
     unit:
       - tests/unit/memory-tools.test.ts
       - tests/unit/memory-embedder.test.ts
-      - tests/unit/memory.test.ts
+      - tests/unit/memory-hellgate.test.ts
       - tests/unit/memory-consolidate.test.ts
     integration: []
     contract: []

@@ -34,7 +34,7 @@ evidence:
   adrs: ["docs/decisions/0161-scheduled-agent.md"]
   tests:
     unit:
-      - tests/unit/scheduler-rrule-parser.test.ts
+      - tests/unit/scheduler-rrule-parser-hellgate.test.ts
       - tests/unit/scheduler-rrule-parser-hellgate.test.ts
     integration: []
     contract: []

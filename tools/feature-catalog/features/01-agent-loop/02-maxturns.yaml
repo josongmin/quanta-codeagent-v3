@@ -23,9 +23,9 @@ evidence:
     - src/shared/runtime-config.ts
   adrs: []
   tests:
-    unit: ["tests/unit/recovery-hell.test.ts", "tests/unit/recovery-hellgate.test.ts", "tests/unit/recovery.test.ts", "tests/unit/refusal-handling.test.ts", "tests/unit/subagent-runner.test.ts", "tests/unit/subagent-seed-augmentation.test.ts"]
+    unit: ["tests/unit/recovery-hell.test.ts", "tests/unit/recovery-hellgate.test.ts", "tests/unit/recovery-hellgate.test.ts", "tests/unit/refusal-handling.test.ts", "tests/unit/subagent-runner.test.ts", "tests/unit/subagent-seed-augmentation.test.ts"]
     integration: ["tests/integration/multi-plane-e2e-hellgate.test.ts"]
-    unit: [tests/unit/next-action-cap-enforce.test.ts, tests/unit/recovery-hell.test.ts, tests/unit/recovery-hellgate.test.ts, tests/unit/recovery.test.ts, tests/unit/refusal-handling.test.ts]
+    unit: [tests/unit/next-action-cap-enforce.test.ts, tests/unit/recovery-hell.test.ts, tests/unit/recovery-hellgate.test.ts, tests/unit/recovery-hellgate.test.ts, tests/unit/refusal-handling.test.ts]
     integration: [tests/integration/multi-plane-e2e-hellgate.test.ts]
     contract: []
 knobs: [QUANTA_MAX_TURNS]

@@ -64,8 +64,8 @@ evidence:
       - tests/unit/openai.test.ts
       - tests/unit/verify-guard-hellgate.test.ts
       - tests/unit/verify-guard-must-pass-hellgate.test.ts
-      - tests/unit/verify-guard-must-pass.test.ts
-      - tests/unit/verify-guard.test.ts
+      - tests/unit/verify-guard-must-pass-hellgate.test.ts
+      - tests/unit/verify-guard-hellgate.test.ts
       - tests/unit/verify-signal-outcome.test.ts
       - tests/unit/verify-signal.test.ts
     integration:

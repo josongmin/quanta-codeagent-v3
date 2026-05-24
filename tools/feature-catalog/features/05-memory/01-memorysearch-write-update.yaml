@@ -19,8 +19,8 @@ evidence:
     - src/agent/memory.ts
   adrs: [8]
   tests:
-    unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/memory-tools.test.ts", "tests/unit/memory.test.ts"]
-    unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/memory-tools.test.ts, tests/unit/memory.test.ts]
+    unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/memory-tools.test.ts", "tests/unit/memory-hellgate.test.ts"]
+    unit: [tests/unit/agent/memory-citation-accumulator.test.ts, tests/unit/memory-tools.test.ts, tests/unit/memory-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

@@ -38,7 +38,7 @@ evidence:
     unit:
       - tests/unit/memory-phase2-wire-hellgate.test.ts
       - tests/unit/memory-consolidator-hook-hellgate.test.ts
-      - tests/unit/memory.test.ts
+      - tests/unit/memory-hellgate.test.ts
     integration: []
     contract: []
 knobs:
