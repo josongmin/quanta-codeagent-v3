@@ -1,0 +1,34 @@
+id: dial-clamp-propositional
+title: clampDials — propositional dial clamping with operator log
+section: 10
+subsystem: Unified Agent Runtime — 모드 매트릭스 dial 보정 (RFC may-22 §8.3)
+order: 7
+maturity: L4
+status: stable
+purpose: |
+  Pure function `clampDials(dials, caps, onClamp?)` — for each of 16 dial
+  fields, returns `min(requested, cap)` when both present; emits a
+  `[budget-cap]` warn log via `@/shared#logger` for every clamp event
+  (silent clamping is forbidden by the run-mode contract). Defensive
+  normalization: NaN / ±Infinity / negative values are treated as absent
+  rather than clamped to, so a config-poisoned cap can never silently
+  disable a gate (BudgetMeter#tick `>` comparison would otherwise become
+  NaN). Optional `onClamp(BudgetClampEvent)` callback for trajectory
+  emission (independent of the log line). The DIAL_FIELDS tuple is a
+  `satisfies readonly (keyof BudgetDials)[]` — adding a new dial without
+  updating the tuple is a TS error.
+evidence:
+  code:
+    - src/agent/run-mode/clamp.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  NO numerical literals — the comparison is purely `requested > cap` against
+  caller-supplied values. The isValidDial guard mirrors the meter's
+  `Number.isFinite` pattern so a poisoned input is dropped (treated as
+  absent) rather than propagated. Fresh-object output; inputs never mutated.

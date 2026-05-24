@@ -1,0 +1,32 @@
+id: plan-mutator-adapter
+title: PlanStore → PlanMutator adapter — slice-boundary translation
+section: 6
+subsystem: Plan-mode 구조화 (ADR-0096)
+order: 98
+maturity: L4
+status: stable
+purpose: |
+  The producer-side `PlanStore` returns `PlanResult<PlanDelta>` (rich
+  shape: full Plan snapshot + typed delta). The duck-typed consumer-side
+  `PlanMutator` (in `@/tool/types`) returns `PlanMutationResult` (compact
+  shape: version + delta kind + touched ids). This adapter is the ONLY
+  place the two shapes meet — keeps the slice fence intact (`@/tool` never
+  imports `@/agent/plan`; the duck-type seam is what dispatch consumes),
+  and centralizes the by-value translation so a drift between producer
+  and consumer fails at exactly one site. Every mapping is a closed
+  switch with `never` default arm — no heuristics.
+evidence:
+  code:
+    - src/agent/plan/mutator-adapter.ts
+  adrs: [95, 96]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0096 introduces this adapter so the `@/tool` slice can call
+  PlanMutator without importing the canonical plan types. Adding a new
+  PlanDeltaKind / PlanMutationErrorCode in either slice forces a compile
+  error at this site until the mapping is extended.

@@ -1,0 +1,42 @@
+id: prompt-rules-mode-dispatch
+title: Prompt-rules per-mode pack registry + mode dispatch
+section: 1
+subsystem: 도구사용 규칙 팩 (run-mode SSOT)
+order: 215
+maturity: L4
+status: stable
+purpose: |
+  6 verbatim CORE_RULES (R-ENV / R-STOP-ENV / R-SEARCH-FIRST / R-READ-FAILURE
+  / R-NO-THRASH / R-NO-SHIM / R-FAILURE-MODE) + 4 mode-specific packs
+  (assistant / task-runner / benchmark / pr-agent). Stable `[R-…]` IDs are
+  inline in the rendered text so anti-regression tests pin them across
+  text-content drift. `renderPackByMode(mode)` exhaustive switch over
+  `AgentMode` — the 6-mode SSOT `@/agent/run-mode/types` provides the union,
+  so adding a mode is a compile error here until a pack is chosen.
+  Operator-mutable rules are intentionally NOT supported (a host silently
+  dropping R-ENV would be a regression). `renderToolUseRules()` legacy entry
+  returns the assistant pack byte-identical so the cached system-prompt
+  prefix for interactive sessions never shifts. ide/daemon (ADR-0092 C1)
+  reuse assistant/task-runner packs via the promptPack lever.
+evidence:
+  code:
+    - src/agent/prompt-rules/index.ts
+    - src/agent/prompt-rules/core.ts
+    - src/agent/prompt-rules/assistant.ts
+    - src/agent/prompt-rules/task-runner.ts
+    - src/agent/prompt-rules/benchmark.ts
+    - src/agent/prompt-rules/pr-agent.ts
+  adrs: [92]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pure-text slice — no `@/llm`, no `@/tool`, no `@/apps`. R-ENV / R-STOP-ENV
+  ordering is load-bearing (model reads top-down). The 7-rule CORE list is
+  the rename-resistant safety contract; mode packs APPEND additional rules
+  (R-SINGLE-COHERENT / R-NO-EXPLORE-OVER-EDIT / R-SMALL-DIFF / R-EXPLAIN-IN-
+  PR / R-NO-PUSH-MAIN). Re-export of `AgentMode` from the run-mode slice is
+  the SSOT migration site — the pack registry and the matrix can never drift.

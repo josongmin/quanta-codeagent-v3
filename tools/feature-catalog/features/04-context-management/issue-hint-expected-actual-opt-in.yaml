@@ -1,0 +1,38 @@
+id: issue-hint-expected-actual-opt-in
+title: extractExpectedActual — opt-in inline E/A phrase extractor
+section: 4
+subsystem: 이슈 텍스트 localization 힌트 (Agentless 흡수)
+order: 61
+maturity: L4
+status: stable
+purpose: |
+  OPT-IN sentence-bounded extractor for inline expected/actual phrasing in
+  issue bodies (keywords: expected / expect / actual / actually / got /
+  should / but / instead — word-boundary, case-insensitive). Gated by a
+  SEPARATE env (`QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL=1`) beneath the
+  parent `QUANTA_BENCH_ISSUE_HINT` because the pattern is false-positive-
+  prone in prose ("we expected good results from the meeting" — not an
+  issue claim). Default-OFF even when the parent gate is enabled. Boundary
+  policy: prefer sentence terminator (`.` `?` `\n`); fallback 200-char
+  hard cap; leading/trailing whitespace trimmed; matched text otherwise
+  verbatim. Composed via the issue-hint `composeIssueHint` "Expected/
+  Actual phrases" section. NOT a substitute for `## Expected Result` /
+  `## Actual Result` markdown sections — those flow through the unmodified
+  problem statement.
+evidence:
+  code:
+    - src/agent/issue-hint/extract-expected-actual.ts
+    - src/agent/issue-hint/compose.ts
+    - src/agent/issue-hint/index.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs:
+  - 'QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL=1 — enable opt-in E/A extraction (default OFF even when parent gate is ON)'
+deliberate_hold: null
+notes: |
+  ANSI strip via shared `normalize.ts` (paste safety). Two-tier opt-in
+  (parent + child env) is intentional — measurement integrity for the
+  bench-driver baseline must not regress when the gate is unset.

@@ -1,0 +1,33 @@
+id: plan-transition-matrix
+title: TodoStatus 5×5 transition matrix — pure predicate + frozen table
+section: 6
+subsystem: Plan-mode 구조화 (ADR-0095 P1)
+order: 95
+maturity: L4
+status: stable
+purpose: |
+  Closed `TodoStatus` transition matrix as a frozen lookup table + pure
+  predicate. The mutations layer consults `isValidTransition(from, to)`
+  whenever a TodoPatch sets `status`, emitting `PlanMutationError`
+  `invalid_status_transition` on denial. Rules: pending → {in_progress |
+  cancelled | blocked}; in_progress → {completed | blocked | cancelled};
+  blocked → {in_progress | cancelled}; completed and cancelled are
+  TERMINAL (no outgoing edges). Self-transitions always allowed at this
+  layer (no-op status patch is legal). Hand-rolled (not derived from a
+  graph) so adding a future TodoStatus literal forces an explicit decision
+  at every callsite. Distinct from Cursor's UNSPECIFIED-rejecting matrix
+  by being closed-shape exhaustive — never silently degrades.
+evidence:
+  code:
+    - src/agent/plan/transitions.ts
+  adrs: [95]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pure module: frozen table + pure predicate. No state, no I/O, no logger.
+  TRANSITION_MATRIX is `Object.freeze`d and `as const`-typed so a future
+  edit cannot weaken the safety contract at runtime.

@@ -1,0 +1,36 @@
+id: plan-dag-validator
+title: Plan DAG validator — self/dangling/cycle + 100-node perf gate
+section: 6
+subsystem: Plan-mode 구조화 (ADR-0095 P2)
+order: 96
+maturity: L4
+status: stable
+purpose: |
+  Three pure exports operating on a `Readonly<Record<string, TodoItem>>`
+  graph. `validateDag` is the full-plan validator that returns the first
+  failure in PRIORITY ORDER: self_dependency → dependency_unknown →
+  dependency_cycle (typed as `PlanMutationError` via `PlanResult`).
+  `findCycle` runs DFS with tri-state coloring and returns the cycle path
+  (traversal order, not necessarily canonical) or null; optional `startId`
+  narrows the search to a reachable subtree. `topologicalSort` is Kahn-
+  style with deterministic tie-break by lexicographic id, returning ordered
+  ids or `{ cycle: [...] }` on a cyclic graph. Complexity is O(V+E) for
+  all three. A 100-node perf hellgate pins the 50ms ceiling so a quadratic
+  regression fails CI. Distinct from all three of Cursor/Codex/Claude:
+  none of them ship a DAG validator on plan dependencies.
+evidence:
+  code:
+    - src/agent/plan/dag.ts
+  adrs: [95]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice rule: pure module. No clock, no I/O, no logger, no allocation
+  beyond the result. Safe for hot-path mutation pre-flight. Hellgate
+  battery in tests/unit/agent/plan/dag-hell.test.ts covers cycle path
+  return shape, the 100-node 50ms gate, and deterministic toposort
+  tie-break.

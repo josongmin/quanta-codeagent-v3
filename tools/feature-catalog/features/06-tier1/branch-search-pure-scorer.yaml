@@ -1,0 +1,34 @@
+id: branch-search-pure-scorer
+title: Branch-search pure scorer — DEFAULT_WEIGHTS + argmax/minimal-change selectors
+section: 6
+subsystem: Speculative branch search scoring (ADR-0084)
+order: 88
+maturity: L4
+status: stable
+purpose: |
+  Pure scorer + selector. Given verifier signals, fold to a 0..1 total and
+  pick winner. Deterministic for a fixed signal set (non-determinism lives
+  in propose). Frozen `DEFAULT_WEIGHTS`: tsc 0.4 / test 0.4 / lint 0.1 /
+  lsp_diag 0.2 / llm_judge 0.2 / patch_size 0.1. Weights need NOT sum to 1
+  — `scoreWith` normalizes by the weight mass of NON-penalty kinds
+  present, so a candidate with only tsc+test signals scores fairly against
+  one with full signals. `patch_size` is a PENALTY KIND (subtracted,
+  scaled by magnitude) — ADR-0117 minimal-change bias. `makeScorer(over
+  rides?)` factory for per-mode weight tuning. Two selectors: `argmax
+  Selector` picks max total; `minimalChangeSelector` uses patch_size as
+  the tie-breaker (then primary ordering when totals tie).
+evidence:
+  code:
+    - src/agent/branch-search/score.ts
+  adrs: [84, 117]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  No IO, no clock — pure functions all the way down. Magnitude signals
+  clamp to [0, 1]; boolean pass folds to {0, 1}. PENALTY_KINDS is a frozen
+  ReadonlySet so future penalty additions are explicit. Weights override
+  via `makeScorer({ tsc: 0.5 })` partial — missing keys default.

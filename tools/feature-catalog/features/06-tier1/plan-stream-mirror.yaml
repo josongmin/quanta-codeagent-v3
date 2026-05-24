@@ -1,0 +1,33 @@
+id: plan-stream-mirror
+title: planToStreamMirror — single slice-boundary by-value projector
+section: 6
+subsystem: Plan-mode 구조화 (ADR-0095 P7)
+order: 97
+maturity: L4
+status: stable
+purpose: |
+  Single coercion site from canonical `Plan` to the minimalist
+  `PlanReadonlyMirror` / `TodoReadonlyMirror` shapes the `@/stream` slice
+  declares. Cross-slice flow stays by-value (RFC §3.1 — `@/stream` MUST
+  NOT import `@/agent/plan`); biome `noRestrictedImports` enforces the
+  fence. `todoStatusMirror` is a closed switch over canonical `TodoStatus`
+  with `never` default arm — adding a status to canonical forces a compile
+  error here. `id` is a deterministic function of `createdAt` so the
+  mirror has a stable identifier across emits without requiring `Plan` to
+  carry one. Adding a field to the mirror MUST also extend this projector
+  (closed-shape drift gate).
+evidence:
+  code:
+    - src/agent/plan/stream-mirror.ts
+  adrs: [95]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  No heuristics — every mapping is explicit. The mirror happens to use the
+  SAME literals as canonical TodoStatus today; if they ever diverge, the
+  explicit switch is the single edit site. By-value flow keeps the stream
+  slice trivially serializable for JSONL recording.

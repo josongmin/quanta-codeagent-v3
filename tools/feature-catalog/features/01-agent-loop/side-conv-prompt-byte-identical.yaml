@@ -1,0 +1,35 @@
+id: side-conv-prompt-byte-identical
+title: Side-conversation prompt — Codex base + delimiter + quanta addendum
+section: 1
+subsystem: Side-conversation (ADR-0049)
+order: 21
+maturity: L4
+status: stable
+purpose: |
+  Three frozen constants implementing the byte-identical prompt invariant
+  for the side-conversation seam. `SIDE_CONVERSATION_PROMPT_BASE` is the
+  verbatim Codex side-conv prompt (build 2867 round-4 §G) — DO NOT MODIFY;
+  the unit test asserts `toBe(...)` against the exact literal so drift
+  anywhere in the string breaks the byte-identical invariant.
+  `SIDE_CONVERSATION_PROMPT_DELIMITER` is the labelled marker between the
+  Codex half and the quanta addendum; tests assert on it so a future PR
+  cannot drop the delimiter and silently fuse the two halves.
+  `SIDE_CONVERSATION_QUANTA_ADDENDUM` carries 4 sticky-taint mitigation
+  rules (instruction-treating-as-data, read-only-only, on-topic, concise)
+  re-stated because ADR-0027's defense does not extend across thread
+  boundaries automatically. `SIDE_CONVERSATION_PROMPT` is the assembled
+  concatenation — single coercion site (DRY: drift invalidates the test).
+evidence:
+  code:
+    - src/agent/side-conversation/prompt.ts
+  adrs: [49]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice posture: pure constants. No imports, no runtime, no flags. Round-4
+  §G capture pinned to the original Codex Desktop build — mirrored, not
+  forked: we re-state the rules but never edit the upstream half.
