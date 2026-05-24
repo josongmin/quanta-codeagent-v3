@@ -1,0 +1,49 @@
+id: worktree-fork-primitive
+title: Persistent worktree primitive — createPersistentWorktree / removeWorktree
+section: 10
+subsystem: Runtime — worktree lifecycle
+order: 51
+maturity: L4
+status: stable
+purpose: |
+  Persistent (NOT auto-removed) git worktree primitive used by top-level
+  conversation fork. Creates `<repoRoot>/.quanta/worktrees/<safeId>` on
+  branch `fork-<safeId>` (overridable). Distinct from `withWorktree` which
+  is the scoped + auto-clean variant — the persistent flavor lets the
+  caller (CLI `session fork --worktree`) hand the user into the new tree
+  and own lifecycle.
+
+  Security posture:
+    - `safeId` strips `/`, ` `, leading `-`/`.`, length-caps at 48 so the
+      directory name can never be parsed as a CLI flag or a hidden dotfile.
+    - `safeBranch` allows `[A-Za-z0-9._/+-]`, strips leading `-`/`.`,
+      length-cap 64. Empty input throws.
+    - `safeRef` is more permissive (`[A-Za-z0-9._/~^-]`) so `origin/main` /
+      `HEAD~3` / commit SHAs survive — rejects leading `-`, length-cap 200.
+    - Every interpolated token is sanitized BEFORE entering the `git`
+      arg-string; `--` separator + `-B` give belt-and-braces protection.
+    - Bounded retry on TRANSIENT lock contention only (concurrent `session
+      fork` callers race for the repo lock).
+  Removal is idempotent: a missing worktree directory (already gone) is
+  treated as successful no-op via stderr signal sniffing — `git worktree
+  remove --force` does NOT expose a typed exit code for this case.
+evidence:
+  code:
+    - src/runtime/worktree-fork.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/worktree-fork.test.ts
+      - tests/unit/session-security-regression.test.ts
+      - tests/unit/cli-session-commands.test.ts
+    integration:
+      - tests/integration/session-stress-and-concurrent.test.ts
+      - tests/integration/session-chaos-and-attack.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Consumed by `quanta-session-subcommands` (session `fork` verb) — that
+  feature describes the CLI surface; this registers the runtime primitive
+  separately so a future Web/IDE surface can wire it without going through
+  the CLI subcommand entry.

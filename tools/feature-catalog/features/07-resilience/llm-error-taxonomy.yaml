@@ -1,0 +1,47 @@
+id: llm-error-taxonomy
+title: LLMError 11-kind taxonomy + fromSdkError boundary classifier
+section: 7
+subsystem: LLM 에러 분류 — boundary-once
+order: 11
+maturity: L4
+status: stable
+purpose: |
+  Classify external/SDK errors EXACTLY ONCE at the adapter boundary into a
+  closed `LLMErrorKind` union: `overloaded` (529) / `rate_limit` (429) /
+  `server_error` (5xx) / `network` (transport) / `auth` (401/403) /
+  `bad_request` (400/422) / `not_found` (404) / `not_implemented` (deliberate
+  stub) / `stream_corrupt` / `aborted` / `unknown`. `LLMError.fromSdkError`
+  is the ONLY site that touches SDK-specific shape (extracts `status` from
+  direct + `.response.status`, provider code from `.error.type` / `.code` /
+  `.type`, network from Node `code` against an explicit `NETWORK_CODES` set,
+  abort via name=`AbortError`/`TimeoutError`).
+
+  Downstream policy (`src/agent/retry.ts`, `src/llm/fallback.ts`) MUST branch
+  off `kind`/`statusCode` only — NEVER off `message`. The prior "string-
+  substring match on `e.message`" pattern is explicitly killed by this
+  contract. `LLMProvider` is a narrow closed union (`anthropic` / `openai` /
+  `chatgpt-oauth`) so a typo at the adapter boundary fails to compile.
+
+  Cohabits with: `errors-helper-fix` (errMessage recursion guard) +
+  `llm-not-implemented-kind` (one specific kind's retry/fallback wiring).
+  This entry registers the umbrella taxonomy + classifier seam itself.
+evidence:
+  code:
+    - src/shared/errors.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/errors.test.ts
+      - tests/unit/fallback.test.ts
+      - tests/unit/critical-surfaces.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Convention split: THROW (via QuantaError hierarchy) for exceptional /
+  unrecoverable faults; RETURN `Result<T, E>` for EXPECTED domain failures
+  (tool execution + input validation). Adapters classify once; retry +
+  fallback branch on the result. Adding a new kind is a contract change —
+  extend `LLMErrorKind`, the `classify()` switch, AND the FATAL/FALLBACK
+  policy sets atomically.
