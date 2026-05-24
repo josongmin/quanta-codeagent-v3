@@ -90,6 +90,20 @@ export interface SlashContext {
    *  Absent ⇒ `/side` prints "not wired in this surface" and exits 0
    *  (default-OFF parity for one-shot / shell-entry surfaces). */
   readonly side?: SideChatSessionState | undefined
+  /** R10 F (cost-panel) — sticky cumulative cost dashboard render seam. */
+  readonly cost?: (() => string) | undefined
+  /** R10 G (plan-panel) — read-only plan-store snapshot accessor. */
+  readonly planSnapshot?: (() => import("@/agent/plan/types").Plan | null) | undefined
+  /** R10 H (working-state-panel) — read-only WorkingState snapshot. */
+  readonly workingState?:
+    | (() => import("@/agent").WorkingState | undefined)
+    | undefined
+  /** R10 I (history-cmd) — recent turns + tool-call breadcrumb. */
+  readonly history?: import("./history-cmd").HistorySessionState | undefined
+  /** R10 L (branch-search-progress) — N-best candidate tracker snapshot. */
+  readonly branchSearch?:
+    | (() => import("./branch-search-progress").BranchProgressState)
+    | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
