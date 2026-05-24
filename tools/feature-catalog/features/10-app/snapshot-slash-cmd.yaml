@@ -1,0 +1,40 @@
+id: snapshot-slash-cmd
+title: /snapshot — shadow-store snapshot/restore/diff slash command (ADR-0122)
+section: 10
+subsystem: CLI slash command (shadow_* tools UX, Hermes Agent /rollback parity)
+order: 56
+maturity: L4
+status: new
+purpose: |
+  ShadowOdb 포트 + 3개 `shadow_*` 도구를 CLI에 surface하여 사용자가 모델을
+  거치지 않고 워크스페이스 스냅샷을 browse/preview/restore 할 수 있게 하는
+  슬래시 커맨드. 서브커맨드: `/snapshot` (newest-first 리스트, sha+ISO ts) /
+  `/snapshot <N>` (rewind to #N, --yes 확정 게이트) / `/snapshot <N> <file>`
+  (특정 파일만 restore via `shadow_restore_partial`) / `/snapshot diff <N>`
+  (read-only unified diff) / `/snapshot --target=verified <N>`
+  (`rewindToVerified` 사용, `markVerified` 앵커 필요). 모델-페이싱 HITL
+  게이트는 도구 레이어에 있고, 슬래시 surface는 agent loop 밖에서 도는
+  관계로 자체 `--yes` 확인 프롬프트를 둠 (`/rewind --yes` posture 미러).
+  Default-OFF: `ctx.shadowOdb` 부재 시 "shadow store not configured" + exit 0
+  (byte-identical to NOT registering).
+evidence:
+  code:
+    - src/apps/cli/snapshot-cmd.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: [122]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Naming subtlety: 기존 `/rewind`는 세션 transcript 되감기 (Claude Code v1.7196
+  pattern, `rewind-cmd.ts`). 같은 이름 재등록 시 `BUILTINS_BY_NAME` 맵
+  last-write-wins로 silently shadow → 기존 테스트 전부 깨짐. 그래서
+  shadow-store UX는 `/snapshot`으로 등록. "rewind" 키워드 활성화 시 LLM
+  경로의 system skill (`src/skill/system-skills/rewind/`)은 여전히 트리거.
+  슬라이스 컨트랙트: `src/apps/cli/**`에서 `@/storage/shadow-odb`(포트 +
+  타입)를 직접 import하고 `@/tool/shadow`는 import 안 함 — 슬래시 surface를
+  도구 레지스트리 envelope에서 디커플링. 사용자 in-flight WIP — 테스트는
+  아직 미작성, slash-commands.ts 등록만 landed.

@@ -1,0 +1,48 @@
+id: smoke-fixture-system
+title: smoke fixture system — single/medium/tikitaka 15-scenario battery + LLM replay
+section: 8
+subsystem: 회귀 스모크 (recorded tier-0 + opt-in tier-1 live + LLM-judge)
+order: 55
+maturity: L5
+status: stable
+purpose: |
+  실제 agent loop + 실제 도구를 돌리되 LLM은 녹화된 trajectory를 replay
+  (tier-0, deterministic, $0)하거나 옵트인 live(tier-1) 호출하는 end-to-end
+  fixture battery. 15 시나리오 (single 4 / medium 4 / tikitaka 7)로 흔한
+  coding-agent 모양을 커버. `fixtures/<depth>/<NN-name>/`에 seed/ +
+  prompts.jsonl + trajectory.jsonl + expect.json(+ config.json + tags.json).
+  expect.json은 SOTA blend(Inspect AI / promptfoo / Braintrust)
+  declarative assertion (stopReason / turns.count / tool calls / fs diff /
+  judge LLM rubric). `bun run smoke`는 CI 디폴트 tier-0 replay,
+  `bun run smoke:record <id>`로 live 녹화 + expect diff 제안,
+  `bun run smoke:live`/`smoke:report`로 라이브 실행과 커버리지 리포트.
+  battery는 `tests/unit/smoke-battery.test.ts`로 `bun test`에도 편입.
+evidence:
+  code:
+    - tests/smoke/index.ts
+    - tests/smoke/runner.ts
+    - tests/smoke/recorder.ts
+    - tests/smoke/replay-llm.ts
+    - tests/smoke/capture-stream.ts
+    - tests/smoke/expect.ts
+    - tests/smoke/judge.ts
+    - tests/smoke/provider.ts
+    - tests/smoke/record-cli.ts
+    - tests/smoke/report.ts
+    - tests/smoke/types.ts
+    - tests/smoke/fixtures
+    - tests/smoke/README.md
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/smoke-battery.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Depth-tier별 격리: single(1턴) → medium(2-3턴) → tikitaka(4-6턴
+  conversation-context recall). trajectory.jsonl 부재 시 SKIPPED (pending
+  recording) — 미녹화 시나리오가 CI를 망가뜨리지 않는 invariant.
+  `localize/`는 다국어 prompt 처리. recordings 기반 결정성이라 매 PR이
+  loop / tool / harness 회귀를 잡는다 (모델 능력 drift는 잡지 않음).
