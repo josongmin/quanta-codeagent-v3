@@ -7,11 +7,11 @@ maturity: L4
 status: stable
 purpose: '12 시나리오 e2e: bypass-claim/system-tag-smuggle/system-reminder-spoof/authority-claim/plan-bypass/HITL-bypass/hook-deny-spoof/persistent-multi-turn/base64-to-sh/find-delete/git-config-inject + benign control'
 evidence:
-  code: []
+  code: [src/permission/policy.ts, src/agent/admissibility-gate.ts]
   adrs: []
   tests:
     unit: []
-    integration: []
+    integration: [tests/integration/policy-injection.test.ts, tests/integration/reminder-injection-through-loop-hell-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

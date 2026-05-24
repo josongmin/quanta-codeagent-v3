@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: 45 tests
 evidence:
-  code: []
+  code: [src/tool/git/index.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/git-tools.test.ts, tests/unit/git-tools-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

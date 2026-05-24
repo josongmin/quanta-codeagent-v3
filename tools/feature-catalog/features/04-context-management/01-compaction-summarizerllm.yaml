@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: compaction.summarizerLlm 양 사이트 ?? config.llm /_PROVIDER
 evidence:
-  code: []
+  code: [src/runner/assemble/compaction.ts, src/apps/cli/internal.ts, src/agent/compaction.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/compaction-summarizer.test.ts, tests/unit/cli-summarizer.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_COMPACT_MODEL]

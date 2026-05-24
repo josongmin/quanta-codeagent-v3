@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: verbatim 위협프롬프트, 2-stage+1h캐시, denial-limit 3/20, AFK sticky
 evidence:
-  code: []
+  code: [src/permission/classifier.ts, src/agent/auto-classifier.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/permission-classifier.test.ts, tests/unit/auto-classifier.test.ts]
     integration: []
     contract: []
 knobs: []

@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: per-input isConcurrencySafe 동시성 배칭
 evidence:
-  code: []
+  code: [src/tool/types.ts, src/agent/streaming-dispatch.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

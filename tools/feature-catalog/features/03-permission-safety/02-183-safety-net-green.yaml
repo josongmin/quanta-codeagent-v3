@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행위 보존 추출)
 evidence:
-  code: []
+  code: [src/agent/admissibility-gate.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/hitl-tier-dispatch.test.ts]
     integration: []
     contract: []
 knobs: []

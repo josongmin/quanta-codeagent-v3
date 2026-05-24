@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: safe 도구 스트림 중 즉시 디스패치, 순서보존, head-of-line 배리어
 evidence:
-  code: []
+  code: [src/agent/streaming-dispatch.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

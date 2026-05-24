@@ -7,7 +7,7 @@ maturity: L4
 status: stable
 purpose: subagent 깊이 ToolContext.depth 전파
 evidence:
-  code: []
+  code: [src/tool/types.ts, src/agent/dispatch.ts, src/subagent/agent-tool.ts]
   adrs: []
   tests:
     unit: []

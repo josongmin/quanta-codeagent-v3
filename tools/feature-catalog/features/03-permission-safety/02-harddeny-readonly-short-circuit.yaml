@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: HARD_DENY 선행 / readonly short-circuit
 evidence:
-  code: []
+  code: [src/permission/classifier.ts, src/permission/policy-rules.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/permission-classifier.test.ts, tests/unit/permission-rules.test.ts]
     integration: []
     contract: []
 knobs: []

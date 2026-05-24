@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: 종료사유 completed|max_turns|aborted|error, AbortSignal 협조취소
 evidence:
-  code: []
+  code: [src/agent/stop-category.ts, src/agent/loop.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/agent-submission-and-stop-category.test.ts]
     integration: []
     contract: []
 knobs: []

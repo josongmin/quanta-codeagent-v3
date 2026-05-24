@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: 톱레벨; 루프 e2e로 검증, lockstep cli 테스트)
 evidence:
-  code: []
+  code: [src/apps/cli/index.ts, src/apps/cli/internal.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/cli-summarizer.test.ts]
     integration: []
     contract: []
 knobs: []

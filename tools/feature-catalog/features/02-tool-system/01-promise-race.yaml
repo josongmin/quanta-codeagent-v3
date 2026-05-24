@@ -10,7 +10,7 @@ evidence:
   code: [src/tool/scripted-replace.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/hard-deny-redos-bound.test.ts]
     integration: []
     contract: []
 knobs: []

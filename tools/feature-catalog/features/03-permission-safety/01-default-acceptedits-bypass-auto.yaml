@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: default|acceptEdits|bypass|auto , onConfirm 콜백
 evidence:
-  code: []
+  code: [src/permission/index.ts, src/permission/policy.ts, src/permission/per-thread-store.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/permission-classifier.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_PERMISSION]

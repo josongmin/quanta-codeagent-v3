@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: nudge/completed 전 디스패치된 read-only 결과 폐기
 evidence:
-  code: []
+  code: [src/agent/streaming-dispatch.ts, src/agent/loop.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/streaming-dispatch.test.ts]
     integration: []
     contract: []
 knobs: []

@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: proactive(임계) + reactive(PTL) + orphan-safe 경계
 evidence:
-  code: []
+  code: [src/agent/compaction.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/compaction-summarizer.test.ts, tests/unit/compaction-precompact.test.ts, tests/unit/compaction-archive-loop.test.ts]
     integration: []
     contract: []
 knobs: []

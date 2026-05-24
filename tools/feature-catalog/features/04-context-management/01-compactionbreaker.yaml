@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: CompactionBreaker 4-사이트, thrash abort [_*]
 evidence:
-  code: []
+  code: [src/agent/compaction-breaker.ts, src/agent/compaction.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/compaction-breaker.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
     integration: []
     contract: []
 knobs: [QUANTA_COMPACT_BREAKER]

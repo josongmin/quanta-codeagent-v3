@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: "inferToolTier secure-by-default fallback (R3-P1): 도구의 hitlTier?(input) 미선언 시 read-only ⇒ \"none\", mutating ⇒ \"always-confirm\". 기본 도구 write/edit/test_runner/scripted_replace는 pre-approval-ok 명시 opt-in."
 evidence:
-  code: []
+  code: [src/agent/hitl-tier.ts, src/agent/hitl-tier-registry.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/hitl-tier-classifier.test.ts, tests/unit/hitl-tier-dispatch.test.ts]
     integration: []
     contract: []
 knobs: []

@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: 'evidence?: ToolResultEvidence — 이전 duck-typed extra-prop smuggling을 타입 surface로 대체. stdErr vs stderr casing drift가 더 이상 tsc를 못 빠져나감.'
 evidence:
-  code: [src/tool/types.ts]
+  code: [src/tool/types.ts, src/tool/registry.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/tool-output-schema-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

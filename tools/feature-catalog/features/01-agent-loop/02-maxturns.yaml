@@ -7,7 +7,7 @@ maturity: L5
 status: stable
 purpose: maxTurns
 evidence:
-  code: []
+  code: [src/agent/loop.ts]
   adrs: []
   tests:
     unit: []

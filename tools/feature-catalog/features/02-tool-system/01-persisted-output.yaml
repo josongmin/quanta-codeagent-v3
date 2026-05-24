@@ -7,10 +7,10 @@ maturity: L4
 status: stable
 purpose: <persisted-output> 스필 + GC
 evidence:
-  code: []
+  code: [src/tool/output-spill.ts, src/tool/registry.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/output-spill.test.ts]
     integration: []
     contract: []
 knobs: []

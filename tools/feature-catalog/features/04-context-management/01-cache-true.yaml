@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: byte-static 단일 cache:true 블록, 동적은 trailing <system-reminder>
 evidence:
-  code: []
+  code: [src/agent/prompt.ts, src/agent/prompt-sections.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/prompt-sections-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

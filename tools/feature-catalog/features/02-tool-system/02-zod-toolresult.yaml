@@ -7,10 +7,10 @@ maturity: L5
 status: stable
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
 evidence:
-  code: []
+  code: [src/tool/registry.ts, src/tool/factory.ts]
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/tool-output-schema-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []
