@@ -29,6 +29,7 @@ import { parseDiffNameStatus, runCheckChanged } from "./check-changed"
 import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lint"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
 import {
+  computeGrade,
   type Feature,
   type LoadedFeature,
   loadFeaturesStrict,
@@ -59,6 +60,9 @@ function usage(): never {
       "  audit              4-lens sweep (orphan ADRs / orphan src / empty stubs)",
       "  lint [--update-baseline]   ratchet on empty stubs + orphan Accepted ADRs",
       "  check-changed [<base-ref>]  PR-time gate: new src files must be in fc",
+      "  grade [<letter>]            evidence-completeness scorecard (A-F)",
+      "  stale                       flag entries where source newer than yaml >7d",
+      "  query label:X owner:Y ...   filter by labels/owners/section/maturity/depends/grade",
     ].join("\n"),
   )
   process.exit(2)
@@ -439,6 +443,107 @@ function lineDiff(a: string, b: string): string[] {
   return out
 }
 
+// --- SOTA++ Tier-1 commands ------------------------------------------------
+
+async function cmdGrade(argv: string[]): Promise<void> {
+  const features = await loadFeaturesStrict(FEATURES_DIR)
+  const onlyGrade = argv[0]?.replace(/^--?/, "")
+  const counts: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 }
+  const rows: Array<{ id: string; grade: string; section: number; title: string }> = []
+  for (const { feature } of features) {
+    const grade = computeGrade(feature)
+    counts[grade] = (counts[grade] ?? 0) + 1
+    rows.push({ id: feature.id, grade, section: feature.section, title: feature.title })
+  }
+  if (onlyGrade) {
+    for (const r of rows) if (r.grade === onlyGrade) console.log(`${r.grade}\t${r.id}\t${r.title}`)
+    return
+  }
+  console.log("Catalog grade distribution:")
+  for (const g of ["A", "B", "C", "D", "F"]) {
+    const n = counts[g] ?? 0
+    const pct = ((n / features.length) * 100).toFixed(1)
+    console.log(`  ${g}  ${String(n).padStart(4)}  ${pct}%`)
+  }
+  console.log(`  total: ${features.length}`)
+}
+
+async function cmdStale(_argv: string[]): Promise<void> {
+  const { execSync } = await import("node:child_process")
+  const features = await loadFeaturesStrict(FEATURES_DIR)
+  let staleCount = 0
+  for (const { feature, path } of features) {
+    if (feature.evidence.code.length === 0) continue
+    try {
+      const yamlTime = execSync(`git log -1 --format=%ct -- "${path}" 2>/dev/null`, {
+        encoding: "utf8",
+      }).trim()
+      if (!yamlTime) continue
+      const yt = Number(yamlTime)
+      let newestSrc = 0
+      for (const code of feature.evidence.code) {
+        try {
+          const t = execSync(`git log -1 --format=%ct -- "${code}" 2>/dev/null`, {
+            encoding: "utf8",
+          }).trim()
+          if (t) newestSrc = Math.max(newestSrc, Number(t))
+        } catch {}
+      }
+      if (newestSrc > yt + 60 * 60 * 24 * 7) {
+        const days = Math.floor((newestSrc - yt) / (60 * 60 * 24))
+        console.log(`${feature.id}\tstale ${days}d\t${path}`)
+        staleCount++
+      }
+    } catch {}
+  }
+  console.log(`\nstale: ${staleCount} feature(s) (source newer than yaml by >7d)`)
+}
+
+async function cmdQuery(argv: string[]): Promise<void> {
+  const filters: Array<(f: Feature) => boolean> = []
+  for (const a of argv) {
+    const colonIdx = a.indexOf(":")
+    if (colonIdx < 0) continue
+    const k = a.slice(0, colonIdx)
+    const v = a.slice(colonIdx + 1)
+    switch (k) {
+      case "label":
+        filters.push((f) => f.labels.includes(v))
+        break
+      case "owner":
+        filters.push((f) => f.owners.includes(v))
+        break
+      case "section":
+        filters.push((f) => f.section === Number(v))
+        break
+      case "maturity":
+        filters.push((f) => f.maturity === v)
+        break
+      case "depends":
+        filters.push((f) => f.depends_on.includes(v))
+        break
+      case "lifecycle":
+        filters.push((f) => f.lifecycle_stage === v)
+        break
+      case "grade":
+        filters.push((f) => computeGrade(f) === v)
+        break
+      default:
+        console.error(
+          `query: unknown filter "${k}" (label/owner/section/maturity/depends/lifecycle/grade)`,
+        )
+        process.exit(2)
+    }
+  }
+  const features = await loadFeaturesStrict(FEATURES_DIR)
+  const matched = features.filter(({ feature }) => filters.every((fn) => fn(feature)))
+  for (const { feature } of matched) {
+    const grade = computeGrade(feature)
+    console.log(`${grade}\t${feature.id}\t${feature.maturity}\t${feature.title}`)
+  }
+  console.log(`\n${matched.length} of ${features.length} match`)
+}
+
 // --- Entrypoint ------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -475,6 +580,15 @@ async function main(): Promise<void> {
       return
     case "check-changed":
       await cmdCheckChanged(rest)
+      return
+    case "grade":
+      await cmdGrade(rest)
+      return
+    case "stale":
+      await cmdStale(rest)
+      return
+    case "query":
+      await cmdQuery(rest)
       return
     case undefined:
     case "-h":

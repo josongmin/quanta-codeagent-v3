@@ -12,6 +12,13 @@ import { parseYaml } from "./yaml"
 
 export const Maturity = z.enum(["L1", "L2", "L3", "L4", "L5"])
 export const Status = z.enum(["stable", "new", "refined", "hold", "deprecated"])
+export const LifecycleStage = z.enum([
+  "proposed",
+  "active",
+  "deprecated",
+  "sunset",
+  "removed",
+])
 
 export const FeatureSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "kebab-case unique id"),
@@ -21,6 +28,13 @@ export const FeatureSchema = z.object({
   order: z.number().int().default(0),
   maturity: Maturity,
   status: Status.default("stable"),
+  owners: z.array(z.string()).default([]),
+  labels: z.array(z.string()).default([]),
+  depends_on: z.array(z.string()).default([]),
+  lifecycle_stage: LifecycleStage.default("active"),
+  supersedes: z.array(z.string()).default([]),
+  superseded_by: z.string().optional(),
+  sunset_date: z.string().optional(),
   purpose: z.string().min(1),
   evidence: z
     .object({
@@ -61,6 +75,22 @@ export const FeatureSchema = z.object({
 export type Feature = z.infer<typeof FeatureSchema>
 export type Maturity = z.infer<typeof Maturity>
 export type Status = z.infer<typeof Status>
+export type LifecycleStage = z.infer<typeof LifecycleStage>
+
+export function computeGrade(f: Feature): "A" | "B" | "C" | "D" | "F" {
+  const evidenceCount =
+    f.evidence.code.length +
+    f.evidence.tests.unit.length +
+    f.evidence.tests.integration.length +
+    f.evidence.tests.contract.length
+  const hasAdr = f.evidence.adrs.length > 0
+  const hasOwner = f.owners.length > 0
+  if (evidenceCount === 0) return "F"
+  if (evidenceCount === 1) return "D"
+  if (evidenceCount <= 3) return "C"
+  if (evidenceCount <= 5) return hasAdr || hasOwner ? "B" : "C"
+  return hasAdr && hasOwner ? "A" : "B"
+}
 
 /** Canonical section name map (1..10). */
 export const SECTION_NAMES: Readonly<Record<number, string>> = Object.freeze({
