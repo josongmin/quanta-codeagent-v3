@@ -63,7 +63,7 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers the documented builtins (full table with /mcp /rewind /fork /side /rules /memory)", () => {
+  test("registers the documented builtins (full table — R10 panels appended)", () => {
     // `/rewind` + `/fork` are env-gated (QUANTA_REWIND, default "1"). The
     // unit-test environment leaves the var unset → both commands are
     // registered. A separate test in `rewind-cmd.test.ts` covers the
@@ -91,6 +91,12 @@ describe("BUILTINS table", () => {
       "/side",
       "/rules",
       "/memory",
+      "/cost",
+      "/plan",
+      "/state",
+      "/working-state",
+      "/history",
+      "/branches",
     ])
   })
 })

@@ -368,6 +368,12 @@ describe("/retry-with — slash dispatch", () => {
       "/side",
       "/rules",
       "/memory",
+      "/cost",
+      "/plan",
+      "/state",
+      "/working-state",
+      "/history",
+      "/branches",
     ])
   })
 })

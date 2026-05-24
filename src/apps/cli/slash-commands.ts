@@ -44,6 +44,13 @@ import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { rulesCmd } from "./rules-cmd"
 import { type SideChatSessionState, sideCmd } from "./side-cmd"
 import { statusCmd } from "./status-cmd"
+// R10 panels (history exports its own cmd; the rest are defined below
+// because their bodies live next to their renderers in the same slice).
+import { historyCmd } from "./history-cmd"
+import { formatBranchesPanel } from "./branch-search-progress"
+import { renderWorkingStatePanel } from "./working-state-panel"
+import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "./plan-panel"
+import type { Plan } from "@/agent/plan/types"
 
 export interface SlashContext {
   readonly out: (s: string) => void
@@ -478,6 +485,112 @@ const resumeCmd: SlashCommand = {
   },
 }
 
+// R10 panel slash commands — bodies inline so the `BUILTINS` push at the
+// bottom stays a single literal array (the registry contract). Each command
+// returns exit 0 with "not wired in this surface" when its ctx field is
+// absent (parity with /skills/snooze/side — default-OFF safety).
+
+const costCmd: SlashCommand = {
+  name: "/cost",
+  describe: "Show cumulative session cost panel (tokens, duration, $)",
+  category: "session",
+  async run(args, ctx) {
+    if (args.length > 0) {
+      ctx.err("/cost: takes no arguments\n")
+      return 1
+    }
+    if (ctx.cost === undefined) {
+      ctx.out("/cost: not wired in this surface\n")
+      return 0
+    }
+    const body = ctx.cost()
+    if (body === "") {
+      ctx.out("/cost: panel disabled (QUANTA_COST_PANEL=0 or non-TTY)\n")
+      return 0
+    }
+    ctx.out(`${body}\n`)
+    return 0
+  },
+}
+
+const planCmd: SlashCommand = {
+  name: "/plan",
+  describe: "Show the current plan (current step + queue + completed)",
+  category: "session",
+  async run(args, ctx) {
+    if (ctx.planSnapshot === undefined) {
+      ctx.out(`${PLAN_PANEL_NOT_WIRED}\n`)
+      return 0
+    }
+    if (args.length > 1) {
+      ctx.err("/plan: expected at most one argument (use `/plan` or `/plan show`)\n")
+      return 1
+    }
+    const sub = args[0]
+    if (sub !== undefined && sub !== "show") {
+      ctx.err(`/plan: unknown subcommand: ${sub} (use \`/plan\` or \`/plan show\`)\n`)
+      return 1
+    }
+    let plan: Plan | null
+    try {
+      plan = ctx.planSnapshot()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      ctx.err(`/plan: snapshot failed: ${msg}\n`)
+      return 1
+    }
+    writePlanPanel(plan, ctx.out)
+    return 0
+  },
+}
+
+const stateCmd: SlashCommand = {
+  name: "/state",
+  describe: "Show current working state (posture, blockers, next steps, owners)",
+  category: "session",
+  async run(args, ctx) {
+    if (args.length > 0) {
+      ctx.err(`/state: takes no arguments; got ${args.length}\n`)
+      return 1
+    }
+    if (ctx.workingState === undefined) {
+      ctx.out("/state: not wired in this surface\n")
+      return 0
+    }
+    const snap = ctx.workingState()
+    ctx.out(`${renderWorkingStatePanel(snap)}\n`)
+    return 0
+  },
+}
+
+/** `/working-state` — long-form alias for `/state`. Same body so both names
+ *  surface in `/help` (the renderer iterates BUILTINS verbatim). */
+const workingStateCmd: SlashCommand = {
+  name: "/working-state",
+  describe: "Alias for /state",
+  category: "session",
+  run: stateCmd.run,
+}
+
+const branchesCmd: SlashCommand = {
+  name: "/branches",
+  describe: "Show last branch-search N-best leaderboard",
+  category: "loop",
+  async run(args, ctx) {
+    if (args.length > 0) {
+      ctx.err("/branches: takes no arguments\n")
+      return 1
+    }
+    if (ctx.branchSearch === undefined) {
+      ctx.out("/branches: not wired in this surface\n")
+      return 0
+    }
+    const state = ctx.branchSearch()
+    ctx.out(`${formatBranchesPanel(state)}\n`)
+    return 0
+  },
+}
+
 /** `/help` — unified menu (slash inventory + keybinds + ENV knobs).
  *  Body lives in `./help-render` to keep this file small; the registry
  *  entry is a 1-liner delegating into `runHelpRender(BUILTINS, …)`. The
@@ -522,6 +635,13 @@ export const BUILTINS: readonly SlashCommand[] = [
   sideCmd,
   rulesCmd,
   ...MEMORY_COMMANDS,
+  // R10 panel commands — wired via `SlashContext.{cost,planSnapshot,workingState,history,branchSearch}`.
+  costCmd,
+  planCmd,
+  stateCmd,
+  workingStateCmd,
+  historyCmd,
+  branchesCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(
