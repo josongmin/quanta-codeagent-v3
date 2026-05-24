@@ -5,6 +5,8 @@ subsystem: 자동 지식처리
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "absorbed:codex"]
 purpose: |
   세션 종료 시 LLM distill (provider 미주입 / 호출 실패 시 휴리스틱 폴백),
   pre-save dedup 후보 발견 시 LLM이 merge/supersede 중재, 정주기 eviction

@@ -5,6 +5,8 @@ subsystem: 장기 메모리 — Phase 2 session-start wire (ADR-0068 Wave B + Sl
 order: 73
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "held-promotion"]
 purpose: |
   Mirror of the session-end Phase 1 hook for the Phase 2 cross-session
   synthesizer. Reads Stage1 watermark + pending count from the injected

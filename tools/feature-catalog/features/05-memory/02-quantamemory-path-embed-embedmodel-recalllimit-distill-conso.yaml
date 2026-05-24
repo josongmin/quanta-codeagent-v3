@@ -5,6 +5,8 @@ subsystem: 도구/노브
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "absorbed:codex"]
 purpose: |
   메모리 서브시스템 surface knob 집합 `QUANTA_MEMORY_*` (PATH / EMBED /
   EMBED_MODEL / RECALL_LIMIT / DISTILL / CONSOLIDATE / SELF_EDIT /

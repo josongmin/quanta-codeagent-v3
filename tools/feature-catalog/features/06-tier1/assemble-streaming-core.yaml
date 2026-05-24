@@ -5,6 +5,8 @@ subsystem: runner/assemble — streaming
 order: 235
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
   Default OFF: no `observeDir` ⇒ plain `StdoutStream` + no `RunContext`

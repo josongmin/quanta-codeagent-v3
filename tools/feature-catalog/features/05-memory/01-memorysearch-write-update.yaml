@@ -5,6 +5,8 @@ subsystem: 도구/노브
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core"]
 purpose: self-edit memory_search/write/update, lexical graceful degrade
 evidence:
   code: []

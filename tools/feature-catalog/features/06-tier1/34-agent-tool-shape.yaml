@@ -5,6 +5,8 @@ subsystem: 서브에이전트 — agent tool input contract (Codex Round-3 absor
 order: 34
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex"]
 purpose: |
   Closed input schema for the parent's `agent` tool — six Codex Round-3
   absorption fields beyond `prompt`/`agent_type`/`tools`/`background`/

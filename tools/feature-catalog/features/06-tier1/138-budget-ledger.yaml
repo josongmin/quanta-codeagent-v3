@@ -5,6 +5,8 @@ subsystem: tier1 — budget (pure cross-run ledger + read-only tool + tier1 buil
 order: 138
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "security-touched"]
 purpose: |
   Closed-port primitive that hardens the failure mode Cline's `$50 in one
   afternoon` retry-loop incident exposed: no programmatic cross-run budget

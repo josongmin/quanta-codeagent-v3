@@ -5,6 +5,8 @@ subsystem: runner/assemble — compaction
 order: 234
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Two surface-agnostic compaction assemblers (ADR-0011 Tier-0 safety
   hardening + dedicated summarizer model):

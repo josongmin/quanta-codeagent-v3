@@ -5,6 +5,8 @@ subsystem: 진입점 격리 / 테스트 안전
 order: 90
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   CLI entry 모듈은 `if (import.meta.main) { ... }` 가드 뒤에서만 production
   main을 실행한다. Bun은 `import.meta.main`을 *프로세스 진입 파일*에서만 true로

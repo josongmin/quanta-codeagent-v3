@@ -5,6 +5,8 @@ subsystem: 장기 메모리 — slice boundary hygiene (Slice S9 Part A)
 order: 75
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "held-promotion"]
 purpose: |
   Slice S9 Part A — delete the orphan `REMOVE-ME (verify biome fence)`
   stub at `src/memory/consolidate/phase2-llm.ts:30-40`:

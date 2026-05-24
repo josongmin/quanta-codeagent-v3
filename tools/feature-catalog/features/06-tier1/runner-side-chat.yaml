@@ -5,6 +5,8 @@ subsystem: 사이드 챗 격리 루프 (Claude Code A9 흡수)
 order: 111
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 purpose: |
   Claude Code A9 패턴 흡수: 메인 history를 오염시키지 않는 격리 agent loop. /side 슬래시
   + sideChat() 진입점이 별도 SessionWriter로 분기, 메인 envelope는 무수정. 도구는

@@ -5,6 +5,8 @@ subsystem: Plan-mode 구조화 (ADR-0095 P1)
 order: 95
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cursor"]
 purpose: |
   Closed `TodoStatus` transition matrix as a frozen lookup table + pure
   predicate. The mutations layer consults `isValidTransition(from, to)`

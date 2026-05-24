@@ -5,6 +5,8 @@ subsystem: Auth resilience (ChatGPT-OAuth)
 order: 19
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "absorbed:codex"]
 purpose: |
   OAuth refresh-token / access-token on-disk 저장: (1) tmp + rename atomic
   write로 torn JSON 방지, (2) Linux/macOS에서 `mode & 0o077 !== 0`이면

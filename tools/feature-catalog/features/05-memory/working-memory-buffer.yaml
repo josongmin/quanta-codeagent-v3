@@ -5,6 +5,8 @@ subsystem: 작업 메모리 — in-session 버퍼 (non-persisted)
 order: 11
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core"]
 purpose: |
   L1 in-session message buffer used by the agent loop to hold the live turn
   transcript. Distinct from L2 long-term memory: working memory is never

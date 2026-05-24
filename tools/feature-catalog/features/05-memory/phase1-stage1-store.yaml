@@ -5,6 +5,8 @@ subsystem: Phase 1 SQLite adapter — additive over recall store
 order: 70
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core"]
 purpose: |
   SQLite-backed `Stage1StorePort` implementation owning the
   `stage1_outputs` + `consolidate_watermark` tables that record per-thread

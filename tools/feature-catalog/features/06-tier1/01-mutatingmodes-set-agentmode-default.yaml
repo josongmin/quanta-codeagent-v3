@@ -5,6 +5,8 @@ subsystem: Mode enum (ADR-0018)
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을
   positive set(`MUTATING_MODES = Set<AgentMode>(["default"])`)으로 표현하는

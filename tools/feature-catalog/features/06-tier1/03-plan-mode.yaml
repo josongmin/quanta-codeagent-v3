@@ -5,6 +5,8 @@ subsystem: Plan-mode 구조화 (Cursor todoModel + Codex plan_delta + Claude Exi
 order: 3
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor"]
 purpose: |
   ROI-무관 SOTA++ 흡수 — Cursor maximalist 도구셋(create_plan/update_todos) + Codex 이벤트
   관측(plan_delta/plan_snapshot) + Claude 승인 ergonomics(plan-exit-three-way, 별개 L4)를

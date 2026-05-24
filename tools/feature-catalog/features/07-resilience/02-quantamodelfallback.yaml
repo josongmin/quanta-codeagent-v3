@@ -5,6 +5,8 @@ subsystem: 모델 Fallback (Tier 0)
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: ', retry-inner/fallback-outer'
 evidence:
   code: [src/runner/assemble/llm.ts, src/apps/cli/internal.ts, src/llm/fallback.ts]

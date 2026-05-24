@@ -5,6 +5,8 @@ subsystem: 스킬 — `Skill` 도구
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   활성 스킬의 `allowedTools` 프론트매터를 LOAD-BEARING 권한 경계로 강제 —
   스킬이 활성화된 동안 그 set에 없는 도구는 호출이 차단된다 (deny

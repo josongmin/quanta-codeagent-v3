@@ -5,6 +5,8 @@ subsystem: Subagent background execution (ADR-0130)
 order: 130
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cursor"]
 purpose: |
   Scheduler that runs a subagent fork in the background so the parent loop
   continues turn-taking while the subagent works. Pairs with a wait/await

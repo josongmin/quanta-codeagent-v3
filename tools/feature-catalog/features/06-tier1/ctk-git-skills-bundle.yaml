@@ -5,6 +5,8 @@ subsystem: 스킬 — 번들 시스템 스킬 (git-task slice, Cursor CTK Phase 
 order: 102
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cursor"]
 purpose: |
   ADR-0102 Phase AS absorption batch — 8 highest-ROI Cursor CTK git-task
   prompts shipped as bundled system skills. Each skill is SKILL.md (frontmatter

@@ -5,6 +5,8 @@ subsystem: Speculative branch search seeding (Agentless §3.1 + §4.2, ADR-0084)
 order: 85
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |
   `buildSeeds(N, base, modelCandidates?)` — builds N `BranchSeed` records
   for parallel candidate proposal. Implements TWO Agentless techniques:

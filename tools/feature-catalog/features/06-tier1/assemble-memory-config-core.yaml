@@ -5,6 +5,8 @@ subsystem: runner/assemble — memory config
 order: 233
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Surface-agnostic memory-config assembly. Two distinct helpers:
   (1) `parseRecallTiers` — pure parser for raw

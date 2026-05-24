@@ -5,6 +5,8 @@ subsystem: Speculative branch search scoring (ADR-0084)
 order: 88
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |
   Pure scorer + selector. Given verifier signals, fold to a 0..1 total and
   pick winner. Deterministic for a fixed signal set (non-determinism lives

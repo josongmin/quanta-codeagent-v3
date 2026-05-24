@@ -5,6 +5,8 @@ subsystem: 모델 Fallback (Tier 0)
 order: 3
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는
   OpenAI-호환 endpoint) 중 활성 백엔드를 고르고, `QUANTA_MODEL`로 모델 id를

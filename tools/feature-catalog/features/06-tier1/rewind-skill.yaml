@@ -5,6 +5,8 @@ subsystem: 스킬 — 번들 시스템 스킬 (shadow-store rewind UX, LLM path)
 order: 122
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 purpose: |
   사용자가 "rewind" / "undo" / "rollback" / "go back" / "revert changes"라고
   말할 때 워크스페이스를 이전 shadow snapshot으로 복원하는 시스템 스킬.

@@ -5,6 +5,8 @@ subsystem: 예산 / exhaustion 게이트 (RFC may-22 §6)
 order: 52
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   Discriminated-union event shapes for trajectory recording. BudgetTickEvent
   (kind + delta + cumulative observed after tick) emitted at every meter

@@ -5,6 +5,8 @@ subsystem: runner/assemble — store + embedder
 order: 232
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Two surface-agnostic factories that produce the long-term memory store and
   the semantic embedder, both default-OFF (plain runs unchanged):

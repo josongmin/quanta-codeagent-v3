@@ -5,6 +5,8 @@ subsystem: 서브에이전트
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   `agent` 도구(=Task) — 부모 loop가 자식 runAgent를 fork해 sub-thread로
   실행. 부모는 자식의 `task_output` 채널을 통해 progress를 받고,

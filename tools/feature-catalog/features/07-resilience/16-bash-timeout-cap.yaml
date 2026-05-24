@@ -5,6 +5,8 @@ subsystem: Bash 도구 resilience
 order: 16
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "security-touched"]
 purpose: |
   `bash` 도구는 단일 shell 실행 별로 (1) `timeout_ms` (default 120000) wall-
   clock budget — 초과 시 escalatingKill로 SIGTERM→SIGKILL 후 `timedOut`

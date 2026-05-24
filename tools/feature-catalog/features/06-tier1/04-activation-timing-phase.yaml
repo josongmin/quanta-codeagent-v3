@@ -5,6 +5,8 @@ subsystem: Mode enum (ADR-0018)
 order: 4
 maturity: L1
 status: hold
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "held-promotion"]
 purpose: Activation-timing phase 분리 — 현재 트리거 cache는 session-start 1회 + per-turn 라벨 주입만. 시점별 phase machine은 후속 phase로 의식적 보류
 evidence:
   code: []

@@ -5,6 +5,8 @@ subsystem: L3 WorkingState (ADR-0021)
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core"]
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
 evidence:
   code: [src/agent/working-state.ts]

@@ -5,6 +5,8 @@ subsystem: Speculative branch search ranking (ADR-0117)
 order: 117
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |
   Verifier and selector that bias the speculative branch search toward
   smaller patches. patchSizeVerifier attaches a patch_size signal to each

@@ -5,6 +5,8 @@ subsystem: Tier-1 builder (skill block)
 order: 220
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Per-subsystem Tier-1 builder that materializes the entire SKILL block off a
   single `config.skills` config field, returning `undefined` for byte-identical

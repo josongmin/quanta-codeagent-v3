@@ -5,6 +5,8 @@ subsystem: 서브에이전트 — 표준 도구 계약
 order: 12
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex"]
 purpose: |
   Codex 통계 흡수: exec_command 75% + write_stdin 24% 지배. 6 tool
   contract-only (input/output Zod strict + success/error discriminator).

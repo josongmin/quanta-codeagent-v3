@@ -5,6 +5,8 @@ subsystem: 스킬 — `Skill` 도구
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: frontmatter 발견 → 본문 컨텍스트 주입
 evidence:
   code: [src/skill/discover.ts, src/skill/skill-tool.ts, src/agent/tier1/skill.ts]

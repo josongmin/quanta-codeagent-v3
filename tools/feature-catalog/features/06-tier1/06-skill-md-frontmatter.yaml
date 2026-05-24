@@ -5,6 +5,8 @@ subsystem: 스킬 — SKILL.md 분류
 order: 11
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: 'SKILL.md frontmatter 6-필드 strict schema (name/description/userInvocable/allowedTools/category/stability). category로 skill(LLM-callable) vs extension(시스템 전용) 분기. hand-roll YAML splitter — js-yaml 의존 0. empty allowedTools = NO tools (not "all", heuristic 금지). classify + assertAllowedTool host seam.'
 evidence:
   code:

@@ -5,6 +5,8 @@ subsystem: Plan-mode 구조화 (ADR-0095 P2)
 order: 96
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor"]
 purpose: |
   Three pure exports operating on a `Readonly<Record<string, TodoItem>>`
   graph. `validateDag` is the full-plan validator that returns the first

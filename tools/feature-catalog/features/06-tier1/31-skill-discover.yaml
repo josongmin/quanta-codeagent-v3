@@ -5,6 +5,8 @@ subsystem: 스킬 — discovery + size guard
 order: 31
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Walk `QUANTA_SKILLS_DIR` (or per-project skills/) and emit `Skill[]` —
   reads each candidate's frontmatter via the lenient `parseFrontmatter`,

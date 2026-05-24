@@ -5,6 +5,8 @@ subsystem: 사용자 cancellation gesture
 order: 21
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   CLI REPL의 cancellation 2-tier gesture wiring: (1) **Ctrl+C** → outer
   AbortController.abort() (hard exit, surface-scoped) + transient "interrupted"

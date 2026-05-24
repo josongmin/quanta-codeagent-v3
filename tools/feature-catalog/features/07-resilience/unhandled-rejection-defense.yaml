@@ -5,6 +5,8 @@ subsystem: 프로세스-수준 안전망 (apps/cli)
 order: 24
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   R-Phase4 P3-1 defense-in-depth handler for promise rejections that escape
   the agent loop's `try/catch` boundaries (background MCP cleanup, off-loop

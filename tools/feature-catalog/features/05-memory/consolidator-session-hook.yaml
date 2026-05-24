@@ -5,6 +5,8 @@ subsystem: 장기 메모리 — Phase 1 session-end wire (ADR-0068 Wave D)
 order: 72
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "absorbed:codex", "absorbed:cursor", "held-promotion"]
 purpose: |
   Pure wiring around `runPhase1`. Converts the agent's session-end signal +
   host-injected `Phase1Port` / `Stage1StorePort` + final AgentOutcome into

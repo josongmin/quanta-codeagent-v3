@@ -5,6 +5,8 @@ subsystem: 회귀 봉인 testing infra (quanta-wins 축의 적대 케이스 seal
 order: 70
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "absorbed:claude-code", "absorbed:agentless"]
 purpose: |
   "이김(quanta-wins)" 또는 "절대 깨면 안 되는" 축을 적대적(adversarial)
   케이스로 봉인하는 테스트 패턴. 일반 unit test와 분리된 `*-hellgate.test.ts`

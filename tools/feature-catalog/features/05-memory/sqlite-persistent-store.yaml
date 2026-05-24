@@ -5,6 +5,8 @@ subsystem: Persistent memory (SQLite)
 order: 50
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "absorbed:codex"]
 purpose: |
   Long-term 메모리 entries의 disk-backed PersistentStorePort 구현. `bun:sqlite` 사용
   (외부 dep 0, Bun 내장). `rankEntries`(ranking.ts)와 함께 의미 검색 + 시간 기반 fade.

@@ -5,6 +5,8 @@ subsystem: L2 long-term memory — user-visible recall provenance (ADR-0082 cons
 order: 83
 maturity: L4
 status: new
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "held-promotion"]
 purpose: |
   `AgentOutcome.memoryCitations` (ADR-0082, `memory-citation-surface` feature가
   생성하는 신호)를 사용자에게 가시화하는 첫 consumer — `cli-turn-summary`

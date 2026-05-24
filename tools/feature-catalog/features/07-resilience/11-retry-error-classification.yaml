@@ -5,6 +5,8 @@ subsystem: 에러 분류 (Retry policy)
 order: 11
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   `classifyLLMError`는 두 입력 — (1) 메시지 substring 매칭(RETRYABLE_MARKERS:
   429/5xx/timeout/ECONNRESET/overloaded/rate-limit/temporarily/try-again,

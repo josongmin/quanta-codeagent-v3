@@ -5,6 +5,8 @@ subsystem: Speculative branch search verification (ADR-0084)
 order: 87
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |
   Concrete `Verifier` implementations bound to `@/runtime/shell#runShell`
   (env-scrubbed, timeout-bounded). Each verifier is READ-ONLY w.r.t. the

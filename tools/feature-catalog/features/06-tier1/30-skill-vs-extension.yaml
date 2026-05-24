@@ -5,6 +5,8 @@ subsystem: 스킬 — 카테고리 분류 + tool whitelist
 order: 30
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   `SkillFrontmatter.category` is the SSOT for whether an entry is auto-
   triggerable by the model (`skill`) or system-level only (`extension`).

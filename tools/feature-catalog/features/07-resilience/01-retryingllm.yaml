@@ -5,6 +5,8 @@ subsystem: Retry
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   RetryingLLM (`src/agent/retry.ts`) — LLMPort 데코레이터. transient pre-stream
   실패(network/server_error/overloaded/rate_limit)에만 bounded backoff로

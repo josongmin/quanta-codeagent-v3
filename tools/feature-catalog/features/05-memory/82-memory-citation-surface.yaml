@@ -5,6 +5,8 @@ subsystem: L2 long-term memory recall provenance
 order: 82
 maturity: L5
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "absorbed:codex", "held-promotion"]
 purpose: |
   Surface "which record was placed in this run's prompt window, where, with what
   score". Provenance signal (placement = citation), NOT a heuristic scan of the

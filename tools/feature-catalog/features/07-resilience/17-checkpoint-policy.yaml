@@ -5,6 +5,8 @@ subsystem: Shadow ODB 복원 anchor 정책
 order: 17
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "absorbed:codex", "absorbed:cursor"]
 purpose: |
   Cline / Hermes / Codex / Cursor의 auto-checkpoint 패턴을 closed enum 4-arm
   으로 표면화 — `off`(byte-identical 기본) / `per_tool`(모든 tool-use 전,

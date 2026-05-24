@@ -5,6 +5,8 @@ subsystem: 멀티모달 이미지 입력
 order: 112
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "held-promotion"]
 purpose: |
   PromptSource 포트의 PromptPayload 타입을 backward-compat하게 widening — 기존
   string 페이로드 코드 경로는 무변경, 새 코드는 `{ text, images[] }` 구조를 받을 수

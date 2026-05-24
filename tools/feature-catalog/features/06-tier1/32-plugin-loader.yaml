@@ -5,6 +5,8 @@ subsystem: 플러그인 — 매니페스트 로더 + 트리 디스커버리
 order: 32
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Two contracts behind the plugin manifest. (1) `loadPluginManifest(pluginDir)`
   reads + validates a single plugin root: FAILS LOUDLY when the manifest

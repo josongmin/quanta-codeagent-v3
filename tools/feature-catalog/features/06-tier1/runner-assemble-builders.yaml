@@ -5,6 +5,8 @@ subsystem: surface-agnostic 오케스트레이션 드라이버
 order: 117
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   `apps/cli/internal.ts#buildTooling` 의 단일 GodFn (env 읽기 + collaborator
   생성 + 레지스트리 와이어링 한 곳) 을 9 개 per-subsystem builder + 1 composer

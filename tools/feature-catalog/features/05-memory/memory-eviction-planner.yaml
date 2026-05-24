@@ -5,6 +5,8 @@ subsystem: 장기 메모리 — eviction 정책 (adapter-shared)
 order: 60
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core"]
 purpose: |
   Periodic full-store sweep that bounds each memory tier (semantic / episodic),
   prunes ancient superseded rows, and decays long-archived low-value memories.

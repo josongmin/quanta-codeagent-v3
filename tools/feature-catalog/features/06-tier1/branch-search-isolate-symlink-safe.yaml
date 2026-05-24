@@ -5,6 +5,8 @@ subsystem: Speculative branch search isolation (ADR-0084)
 order: 86
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |
   Two `Isolator` port implementations for the speculative branch search.
   `tmpdirIsolator` uses `mkdtemp` + `cp -r` excluding `.git` and

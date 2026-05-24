@@ -5,6 +5,8 @@ subsystem: Interactive 모드 abort → POSIX boundary
 order: 26
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   The interactive mode-preset wraps `runRepl()` in a try/catch that converts
   a thrown abort (either `err.name === "AbortError"` OR `err.code ===

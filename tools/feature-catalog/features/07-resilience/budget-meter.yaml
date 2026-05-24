@@ -5,6 +5,8 @@ subsystem: 예산 / exhaustion 게이트
 order: 50
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   Per-run cumulative 정량 추적(토큰/턴/USD/wall-clock 등)의 pure deterministic state
   machine. NO I/O, NO clock side-effect — wall-clock 샘플링은 caller-supplied `now()`

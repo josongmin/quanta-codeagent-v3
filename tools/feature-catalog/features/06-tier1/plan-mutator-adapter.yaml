@@ -5,6 +5,8 @@ subsystem: Plan-mode 구조화 (ADR-0096)
 order: 98
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   The producer-side `PlanStore` returns `PlanResult<PlanDelta>` (rich
   shape: full Plan snapshot + typed delta). The duck-typed consumer-side

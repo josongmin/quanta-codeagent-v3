@@ -5,6 +5,8 @@ subsystem: 취소 신호 합성 (turn vs surface vs subagent)
 order: 23
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   Framework-level cancellation-composition primitive: `AbortSignal.any([outer,
   turn])` fuses two independent controllers (surface-level outer abort

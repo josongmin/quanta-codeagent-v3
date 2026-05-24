@@ -5,6 +5,8 @@ subsystem: 서브에이전트
 order: 3
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: git worktree 격리 [_MAX_DEPTH]
 evidence:
   code: [src/runner/assemble/subagent.ts, src/agent/subagent-runner.ts, src/subagent/agent-tool.ts]

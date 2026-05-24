@@ -5,6 +5,8 @@ subsystem: 장기 메모리 — embedding provider seam
 order: 51
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core"]
 purpose: |
   The memory slice owns the structural EmbedderPort interface (so it stays
   free of any LLM-provider import per slice-isolation), while concrete

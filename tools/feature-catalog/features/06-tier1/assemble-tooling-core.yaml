@@ -5,6 +5,8 @@ subsystem: runner/assemble — tooling core
 order: 231
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Surface-agnostic assembly of the per-run `ToolRegistry` + the aggregated
   `Tooling` record. Substantial logic beyond plumbing:

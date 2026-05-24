@@ -5,6 +5,8 @@ subsystem: L3 WorkingState (ADR-0021)
 order: 3
 maturity: L5
 status: refined
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: "Per-string 캡 + empty-patch refine (R3/FU5): MAX_STR=500 / MAX_HYPOTHESIS=2000(zod .max()로 10 MB hypothesis-flood 차단). 모든 필드 omitted call → \"omit the tool call instead\" 명시 거절, turn-budget 낭비 방지"
 evidence:
   code: []

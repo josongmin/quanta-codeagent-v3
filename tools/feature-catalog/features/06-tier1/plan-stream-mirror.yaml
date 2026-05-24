@@ -5,6 +5,8 @@ subsystem: Plan-mode 구조화 (ADR-0095 P7)
 order: 97
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Single coercion site from canonical `Plan` to the minimalist
   `PlanReadonlyMirror` / `TodoReadonlyMirror` shapes the `@/stream` slice

@@ -5,6 +5,8 @@ subsystem: 종료 코드 — outcome → POSIX (apps/agent/run.ts)
 order: 22
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   `exitCodeForOutcome(outcome)` is the PURE function that pins the canonical
   AgentOutcome→POSIX exit-code table (the ONLY policy `apps/agent/run.ts` owns):

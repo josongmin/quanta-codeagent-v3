@@ -5,6 +5,8 @@ subsystem: 모델 Fallback (Tier 0)
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   `FallbackLLM` (`src/llm/fallback.ts`) — LLMPort 데코레이터. 우선순위
   순서의 provider 리스트를 받아, 현재 provider가 fallback-trigger 에러

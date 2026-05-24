@@ -5,6 +5,8 @@ subsystem: 장기 메모리 — preference signal grammar (Codex 흡수, ADR-013
 order: 13
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "absorbed:codex"]
 purpose: |
   Codex memory의 feedback-type 메모리 body 컨벤션 흡수 — 자유형 paraphrase
   대신 4-field 구조화 grammar:

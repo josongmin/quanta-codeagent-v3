@@ -5,6 +5,8 @@ subsystem: runner/assemble — LLM core
 order: 230
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Surface-agnostic LLM assembly family that hides three distinct concerns
   behind typed inputs (no `process.env` / `process.argv` reads — the surface

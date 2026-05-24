@@ -5,6 +5,8 @@ subsystem: 자식 프로세스 lifecycle (runtime)
 order: 13
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "security-touched"]
 purpose: |
   `proc.kill()`은 SIGTERM 1발만 보냄 — `trap '' TERM; sleep 30`처럼 TERM을
   무시/트랩하는 자식은 abort/timeout 후에도 살아남아 cancellation을 좌초시킴.

@@ -5,6 +5,8 @@ subsystem: Batch 모드 종료 코드 집계
 order: 25
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
 purpose: |
   Corpus-level exit-code aggregator for batch mode. `computeExitCode(results)`
   returns 0 iff EVERY instance resolved cleanly (passed AND verdict NOT in

@@ -5,6 +5,8 @@ subsystem: 스킬 — `Skill` 도구
 order: 3
 maturity: L4
 status: refined
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: ToolSearch — 어휘 카탈로그 검색(스키마 반환). createToolSearchTool로 매 에이전트 세션에 배선됨(L3). server-side deferral 아님(정직히 기술).
 evidence:
   code:

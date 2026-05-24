@@ -5,6 +5,8 @@ subsystem: Crash / cancel 복원
 order: 18
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "absorbed:claude-code"]
 purpose: |
   Per-message conversation checkpoint — 같은 session 내에서 특정 message id로
   rewind + restart. AgentLoop이 destructive tool dispatch 전후로 checkpoint를

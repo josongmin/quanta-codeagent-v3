@@ -5,6 +5,8 @@ subsystem: 계층형 시맨틱
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core"]
 purpose: tier+kind, 하이브리드 회상, tier 가중
 evidence:
   code: []

@@ -5,6 +5,8 @@ subsystem: Fault localization signal layer (ADR-0115/0129)
 order: 115
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Stage-1 candidate generator in the file→function→edit funnel. Replaces flat
   term-count scoring with BM25-lite IDF weighting (rare term outranks common
