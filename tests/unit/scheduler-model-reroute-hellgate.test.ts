@@ -144,4 +144,185 @@ describe("chooseModel hellgate", () => {
     expect(r.reason).toBe("all-unavailable")
     expect(probed).toBe(false)
   })
+
+  // =========================================================================
+  // ADVERSARIAL — Phase C hellgate hardening (round 3)
+  //
+  // 7+ scenarios that probe circular fallback, special chars, timeout,
+  // concurrent invocation, network 5xx cascade, preference corruption.
+  // Each assertion message names the attack.
+  // =========================================================================
+
+  test("[A1][adversarial] circular fallback chain (A → B → A → B) is NOT loop-forever — dedupe halts", async () => {
+    // Attack: a misconfigured caller hands a circular fallbacks list. The
+    // dedupe-keep invariant MUST collapse to {A,B} and probe each exactly
+    // once. NO infinite loop, NO unbounded probe count.
+    let probes = 0
+    const port: ModelAvailabilityPort = {
+      isAvailable: async (m) => {
+        probes += 1
+        return m === "B" // B is available
+      },
+    }
+    const r = await chooseModel({
+      preference: "A",
+      fallbacks: ["B", "A", "B", "A", "B"],
+      availability: port,
+    })
+    expect(r.chosen).toBe("B")
+    expect(r.reason).toBe("fallback")
+    // A probed once (preference) + B probed once = 2 total, not 6.
+    expect(probes).toBe(2)
+  })
+
+  test("[A2][adversarial] all-unavailable returns EXPLICIT reason, not silent empty/null", async () => {
+    // Attack: a caller that branches on .chosen alone (without checking
+    // .reason) would not know all models are unavailable. The contract is
+    // explicit "all-unavailable" + .chosen = preference (preserve intent).
+    const r = await chooseModel({
+      preference: "gpt-5",
+      fallbacks: ["claude-4", "gpt-4"],
+      availability: portOf([]),
+    })
+    expect(r.reason).toBe("all-unavailable")
+    expect(r.chosen).toBe("gpt-5") // preserves intent — NOT null / "" / undefined
+    expect(r.fallbackIndex).toBeUndefined() // no fallback fired
+  })
+
+  test("[A3][adversarial] model id with control chars (NUL / newline / \\r) passes through verbatim", async () => {
+    // Attack: a corrupt automation file delivers a model id containing
+    // \0 / \n / \r. The reroute MUST NOT munge the id (would corrupt the
+    // downstream wire payload silently); it MUST pass the id verbatim and
+    // let the LLM adapter surface a 400 with the exact bad id visible.
+    const evil = "anth\x00ropic\nclaude-3.5\rsonnet"
+    const r = await chooseModel({
+      preference: evil,
+      fallbacks: [],
+      availability: portOf([evil]),
+    })
+    expect(r.chosen).toBe(evil)
+    expect(r.reason).toBe("preference-available")
+  })
+
+  test("[A4][adversarial] model id with Unicode (emoji + RTL + zalgo) passthrough", async () => {
+    // Attack: an attacker submits a model id with unicode bidi / zero-width
+    // chars trying to spoof telemetry. The reroute MUST be byte-faithful
+    // (no NFC normalization, no width-handling) so the operator's logs
+    // show exactly what was requested.
+    const zalgo = "claude-3.5-🚀-‮sonnet-ž̴̧̢̛̮̗̪̬̦͖̟̬͚̋͊̍̃͠"
+    const r = await chooseModel({
+      preference: zalgo,
+      fallbacks: [],
+      availability: portOf([zalgo]),
+    })
+    expect(r.chosen).toBe(zalgo)
+  })
+
+  test("[A5][adversarial] availability probe that NEVER resolves (timeout simulation) — caller controls timeout", async () => {
+    // Attack: a vendor health endpoint stalls indefinitely. The reroute
+    // itself has no timeout (per design — caller wraps with AbortSignal).
+    // We assert the function awaits the probe; caller's responsibility to
+    // race with a timer. This pins the contract — if a future hardening
+    // adds an internal timeout, this hellgate flips to verify it.
+    const port: ModelAvailabilityPort = {
+      isAvailable: async () => {
+        // Simulate a 1ms-resolve to keep the test fast — the property
+        // we check is "awaits async result" not "ms-precision".
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        return true
+      },
+    }
+    const r = await chooseModel({
+      preference: "slow-model",
+      fallbacks: [],
+      availability: port,
+    })
+    expect(r.chosen).toBe("slow-model")
+    expect(r.reason).toBe("preference-available")
+  })
+
+  test("[A6][adversarial] 100-concurrent chooseModel invocations — no state corruption", async () => {
+    // Attack: a state-leak (module-scoped dedupe set, shared seen-array)
+    // would cause concurrent invocations to interfere. We invoke 100 times
+    // in parallel with overlapping model ids and assert each gets its
+    // own correct answer.
+    const port: ModelAvailabilityPort = {
+      isAvailable: async (m) => m.endsWith("-ok"),
+    }
+    const calls = Array.from({ length: 100 }, async (_, i) => {
+      const r = await chooseModel({
+        preference: `m${i}`,
+        fallbacks: [`m${i}-ok`],
+        availability: port,
+      })
+      return { i, r }
+    })
+    const results = await Promise.all(calls)
+    for (const { i, r } of results) {
+      expect(r.chosen).toBe(`m${i}-ok`)
+      expect(r.reason).toBe("fallback")
+      expect(r.fallbackIndex).toBe(0)
+    }
+  })
+
+  test("[A7][adversarial] availability probe REJECTS with stack-trace-leaking error → swallowed safely", async () => {
+    // Attack: a vendor port throws an Error whose message contains a
+    // bearer token (a common bug — http client errors carry the full
+    // request URL with query-string credentials). The reroute MUST treat
+    // as unavailable and MUST NOT propagate / log the secret.
+    const secret = "Bearer-sk-LEAKY-FROM-PROBE-1234567"
+    const port: ModelAvailabilityPort = {
+      isAvailable: async () => {
+        throw new Error(`401 Unauthorized — ${secret}`)
+      },
+    }
+    const r = await chooseModel({
+      preference: "m1",
+      fallbacks: ["m2"],
+      availability: port,
+    })
+    // Treated as all-unavailable (NO-THROW propagation).
+    expect(r.reason).toBe("all-unavailable")
+    expect(r.chosen).toBe("m1")
+    // No secret in any field of the result — it's a closed structure so
+    // this is verified by the absence of any field that could carry it,
+    // but we assert structurally too.
+    expect(JSON.stringify(r).includes(secret)).toBe(false)
+  })
+
+  test("[A8][adversarial] preference with leading/trailing whitespace is NOT trimmed (byte-faithful)", async () => {
+    // Attack: a corrupted preferences file injects "  gpt-5  ". The
+    // reroute MUST be byte-faithful — trimming would silently match a
+    // legitimate "gpt-5" against the whitespace-decorated id (or vice
+    // versa, masking a real upstream typo). Pass through as-is.
+    const r = await chooseModel({
+      preference: "  gpt-5  ",
+      fallbacks: [],
+      availability: portOf(["gpt-5"]), // NOT the whitespace-padded id
+    })
+    // Padded id is NOT available — drops through to all-unavailable.
+    expect(r.reason).toBe("all-unavailable")
+    expect(r.chosen).toBe("  gpt-5  ") // preserves the corrupted form
+  })
+
+  test("[A9][adversarial] network cascade — all 10 fallbacks throw, NONE silently succeeds", async () => {
+    // Attack: a regional outage takes down every vendor in the fallback
+    // chain. Each probe throws 503. The reroute MUST exhaust the chain
+    // and return all-unavailable — never a silent success / null return.
+    let probeCount = 0
+    const port: ModelAvailabilityPort = {
+      isAvailable: async () => {
+        probeCount += 1
+        throw new Error("503 Service Unavailable")
+      },
+    }
+    const fallbacks = Array.from({ length: 10 }, (_, i) => `m${i}`)
+    const r = await chooseModel({
+      preference: "primary",
+      fallbacks,
+      availability: port,
+    })
+    expect(r.reason).toBe("all-unavailable")
+    expect(probeCount).toBe(11) // 1 preference + 10 fallbacks, every one probed
+  })
 })
