@@ -5,15 +5,15 @@ subsystem: runner/assemble — compaction
 order: 234
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: static
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [compactionbreaker]
-config_refs:
-  env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER"]
 purpose: |
   Two surface-agnostic compaction assemblers (ADR-0011 Tier-0 safety
   hardening + dedicated summarizer model):
@@ -33,11 +33,16 @@ purpose: |
 evidence:
   code:
     - src/runner/assemble/compaction.ts
+    - src/runner/assemble/index.ts
+    - src/runner/index.ts
     - src/apps/cli/internal.ts
   adrs: [11]
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/assemble.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

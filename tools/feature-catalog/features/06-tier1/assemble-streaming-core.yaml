@@ -5,14 +5,15 @@ subsystem: runner/assemble — streaming
 order: 235
 maturity: L4
 status: new
-ui_surfaces: [n-a]
-monitoring: partial
-modes: [n-a]
-configurable: n-a
-owners: ["@songmin"]
-labels: ["surface:core", "tier:1"]
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless]
+configurable: integrated
 config_refs:
   env: ["QUANTA_OBSERVE_DIR"]
+  cli: ["--observe-dir"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
 purpose: |
   Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
   Default OFF: no `observeDir` ⇒ plain `StdoutStream` + no `RunContext`
@@ -32,11 +33,16 @@ purpose: |
 evidence:
   code:
     - src/runner/assemble/streaming.ts
+    - src/runner/assemble/index.ts
+    - src/runner/index.ts
     - src/apps/cli/internal.ts
   adrs: []
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/assemble.test.ts
+      - tests/unit/streaming-dispatch-hellgate.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
@@ -44,4 +50,5 @@ notes: |
   Pure relocation of the prior `internal.ts#buildStreaming` block — same
   effects, same logging keys. `TeeStream` is the fan-out primitive — caller
   cannot inject additional sinks here, but a Web/Tauri surface can compose
-  its own tee on top of the returned `stream`.
+  its own tee on top of the returned `stream`. `slog.info("observe.on")`
+  emits when observeDir set, giving integrated monitoring.

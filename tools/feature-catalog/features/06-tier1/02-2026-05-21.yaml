@@ -5,23 +5,36 @@ subsystem: Mode enum (ADR-0018)
 order: 2
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_PLAN"]
+  cli: ["--plan"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-purpose: review/audit 모드 — dispatch에서 mutating 차단 + 프롬프트에 REVIEW_NOTICE/AUDIT_NOTICE 주입. 별도 도구 없음.
+purpose: |
+  review/audit 모드 — dispatch에서 mutating 차단 + 프롬프트에 REVIEW_NOTICE/AUDIT_NOTICE 주입.
+  별도 도구 없음. runAgent e2e 5 tests: plan/review/audit 각각 mutating tool dispatch 차단
+  (execute() 미도달 검증) → ok:false + 모드명 preview → 루프 completed. default mode 통과
+  control. read-only는 audit에서도 실행 — 루프 layer dispatch 매트릭스 정상화.
 evidence:
   code:
+    - src/agent/admissibility-gate.ts
     - src/agent/mode.ts
-    - src/agent/dispatch-seam-guard.ts
-    - src/agent/prompt.ts
+    - src/agent/plan.ts
+    - src/agent/dispatch.ts
   adrs: [18]
   tests:
-    unit: []
-    integration: [tests/integration/mode-block-e2e.test.ts, tests/integration/mode-block-matrix-e2e.test.ts]
+    unit:
+      - tests/unit/mode-plan-block.test.ts
+      - tests/unit/admissibility-hellgate.test.ts
+    integration:
+      - tests/integration/mode-block-e2e.test.ts
+      - tests/integration/mode-block-matrix-e2e.test.ts
+      - tests/integration/plan-mode-dispatch-hell-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'runAgent e2e(, 5 tests): plan/review/audit 각각 mutating tool dispatch 차단(execute() 미도달 검증) → ok:false + 모드명 preview → 루프 completed, default mode 통과 controle, read-only는 audit에서도 실행 — 루프 layer dispatch …'
+notes: 'runAgent e2e: plan/review/audit 각각 mutating tool dispatch 차단(execute() 미도달 검증) → ok:false + 모드명 preview → 루프 completed, default mode 통과 control, read-only는 audit에서도 실행 — 루프 layer dispatch 매트릭스.'

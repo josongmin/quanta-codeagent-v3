@@ -5,10 +5,10 @@ subsystem: 플러그인 — 매니페스트 로더 + 트리 디스커버리
 order: 32
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [none]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [plugin-manifest]
@@ -29,15 +29,21 @@ evidence:
   code:
     - src/skill/plugin-loader.ts
     - src/skill/plugin-manifest.ts
+    - src/skill/index.ts
   adrs: [39]
   tests:
     unit:
       - tests/unit/plugin-loader.test.ts
       - tests/unit/plugin-manifest-schema.test.ts
-    integration: []
+    integration:
+      - tests/integration/plugin-discovery.test.ts
+      - tests/integration/plugin-discovery-hell-e2e.test.ts
+      - tests/integration/plugin-x-skill-cross-hell-e2e.test.ts
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: 'loader/walker는 production-ready지만 host(CLI/Web) wiring 미장착. discoverPlugins → MCP server registration / skill enrollment 호출 경로 없음.'
+  promotion_path: 'runner/assemble/plugin.ts builder 도입 → buildSessionFeatures fold; discoverPlugins(repoRoot) 결과의 SKILL.md 트리를 skill registry에 inject + .mcp.json 의 MCP server를 ToolRegistry에 register.'
 notes: |
   Cluster E / F13, ADR-0039. Companion of `plugin-manifest` catalog entry
   (which describes the manifest schema). This entry is the LOADER + tree

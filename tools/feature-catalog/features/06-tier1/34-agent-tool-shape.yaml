@@ -5,12 +5,12 @@ subsystem: 서브에이전트 — agent tool input contract (Codex Round-3 absor
 order: 34
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless]
 configurable: integrated
 config_refs:
-  env: [QUANTA_SUBAGENT_MAX_DEPTH]
+  env: ["QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
 depends_on: [subagent-6-tools, task-registry]
@@ -36,7 +36,11 @@ evidence:
   code:
     - src/subagent/agent-tool.ts
     - src/subagent/types.ts
-    - src/apps/cli/internal.ts
+    - src/subagent/index.ts
+    - src/subagent/role.ts
+    - src/subagent/dispatch-6.ts
+    - src/subagent/handlers-6.ts
+    - src/agent/subagent-runner.ts
   adrs: []
   tests:
     unit:
@@ -46,7 +50,11 @@ evidence:
       - tests/unit/subagent-seed-augmentation.test.ts
       - tests/unit/subagent-cancellation.test.ts
       - tests/unit/subagent-runner.test.ts
-    integration: []
+      - tests/unit/subagent-6-tools-hellgate.test.ts
+    integration:
+      - tests/integration/subagent-checkpoint-e2e.test.ts
+      - tests/integration/subagent-continue-from-e2e.test.ts
+      - tests/integration/subagent-seed-augmentation-e2e.test.ts
     contract: []
 knobs:
   - QUANTA_SUBAGENT_MAX_DEPTH

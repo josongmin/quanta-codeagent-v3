@@ -5,22 +5,34 @@ subsystem: 스킬 — SKILL.md 분류
 order: 11
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-purpose: 'SKILL.md frontmatter 6-필드 strict schema (name/description/userInvocable/allowedTools/category/stability). category로 skill(LLM-callable) vs extension(시스템 전용) 분기. hand-roll YAML splitter — js-yaml 의존 0. empty allowedTools = NO tools (not "all", heuristic 금지). classify + assertAllowedTool host seam.'
+purpose: |
+  SKILL.md frontmatter 6-필드 strict schema (name/description/userInvocable/allowedTools/category/stability).
+  category로 skill(LLM-callable) vs extension(시스템 전용) 분기. hand-roll YAML splitter — js-yaml 의존 0.
+  empty allowedTools = NO tools (not "all", heuristic 금지). classify + assertAllowedTool host seam.
+  CLI surface는 `QUANTA_SKILLS_DIR` 활성 시 discoverSkills가 parser를 호출, dispatch가 assertAllowedTool을
+  호출해 권한 경계 강제.
 evidence:
   code:
     - src/skill/skill-frontmatter.ts
     - src/skill/skill-vs-extension.ts
+    - src/skill/frontmatter.ts
+    - src/skill/skill-tool.ts
+    - src/skill/discover.ts
+    - src/skill/index.ts
   adrs: [40]
   tests:
     unit:
       - tests/unit/skill-frontmatter-parse.test.ts
       - tests/unit/skill-vs-extension.test.ts
+      - tests/unit/skill-discover-errors.test.ts
     integration:
       - tests/integration/skill-md-fixtures.test.ts
       - tests/integration/skill-frontmatter-hell-e2e.test.ts

@@ -5,10 +5,10 @@ subsystem: surface-agnostic REPL driver
 order: 113
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: n-a
+modes: [interactive]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 purpose: |
@@ -17,14 +17,20 @@ purpose: |
   추상화 — 동일 luminance loop가 surface별 어댑터만 갈아끼우면 작동. wrapTurn 훅으로
   per-turn 횡단관심사(Esc-Esc cancel + dashboard + REPL-survive on tool error)를 부착
   가능. PromptPayload widening(text+images)을 그대로 받아 multimodal과 호환.
+  CLI surface는 `apps/cli/repl.ts`에서 raw-line-reader PromptSource로 wrapping.
 evidence:
   code:
     - src/runner/orchestrate/run-interactive.ts
     - src/runner/orchestrate/prompt-source.ts
+    - src/runner/orchestrate/index.ts
+    - src/runner/index.ts
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:
       - tests/unit/runner-orchestrate-interactive.test.ts
+      - tests/unit/runner/run-interactive-multimodal.test.ts
+      - tests/unit/runner-slice-boundary.test.ts
     integration: []
     contract: []
 knobs: []

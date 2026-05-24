@@ -5,23 +5,36 @@ subsystem: 스킬 — `Skill` 도구
 order: 6
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-purpose: 'Skill 트리거 규칙 () — session start 시 inventory cache , per-turn reminder에 ## Active skills 블록 + 4 rule(explicit $name mention OR description match → mandatory / multi-skill minimal covering / progressive disclosure: per-turn은 {name, description} 만). first-line description only.'
+purpose: |
+  Skill 트리거 규칙 (ADR-0022) — session start 시 inventory cache, per-turn reminder에
+  `## Active skills` 블록 + 4 rule (explicit $name mention OR description match → mandatory /
+  multi-skill minimal covering / progressive disclosure: per-turn은 {name, description} 만).
+  first-line description only. renderActiveSkillsCatalogue가 prompt 빌더에서 호출되어 cache
+  prefix byte-stable invariant 유지.
 evidence:
   code:
-    - src/skill/skill-tool.ts
     - src/agent/prompt.ts
-    - src/agent/loop.ts
+    - src/agent/features.ts
+    - src/agent/types.ts
+    - src/agent/tier1/skill.ts
+    - src/skill/index.ts
+    - src/skill/skill-tool.ts
   adrs: [22]
   tests:
-    unit: []
+    unit:
+      - tests/unit/skill-trigger-rules.test.ts
+      - tests/unit/prompt-sections-hellgate.test.ts
+      - tests/unit/skill.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
-notes: activeSkills? via TurnContextInput
+notes: activeSkills via TurnContextInput; first-line description only로 cache prefix byte-stability 보존.

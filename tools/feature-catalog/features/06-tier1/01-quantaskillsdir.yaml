@@ -5,25 +5,40 @@ subsystem: 스킬 — `Skill` 도구
 order: 1
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless]
 configurable: integrated
 config_refs:
-  env: [QUANTA_SKILLS_DIR]
+  env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-purpose: frontmatter 발견 → 본문 컨텍스트 주입
+purpose: |
+  frontmatter 발견 → 본문 컨텍스트 주입. CLI surface는 `QUANTA_SKILLS_DIR`
+  세트 시 `buildSkillsConfigCore` → `buildSkillBlock` → `discoverSkills` 흐름으로
+  user-supplied SKILL.md 디렉토리 inventory를 session-start에 캐싱하고 Skill
+  도구를 ToolRegistry에 등록한다. 시스템 번들 skill은 collision-on-name 시 system
+  이 이긴다 (보안 invariant).
 evidence:
   code:
+    - src/skill/index.ts
     - src/skill/discover.ts
     - src/skill/skill-tool.ts
+    - src/skill/skill-frontmatter.ts
+    - src/skill/frontmatter.ts
+    - src/skill/activation.ts
     - src/agent/tier1/skill.ts
+    - src/runner/assemble/skill.ts
     - src/apps/cli/internal.ts
   adrs: []
   tests:
-    unit: [tests/unit/skill.test.ts, tests/unit/skill-frontmatter-parse.test.ts]
-    integration: []
+    unit:
+      - tests/unit/skill.test.ts
+      - tests/unit/skill-frontmatter-parse.test.ts
+      - tests/unit/skill-discover-errors.test.ts
+      - tests/unit/skill-discover-size-cap.test.ts
+    integration:
+      - tests/integration/skill-paths-activation-e2e.test.ts
     contract: []
 knobs: [QUANTA_SKILLS_DIR]
 deliberate_hold: null

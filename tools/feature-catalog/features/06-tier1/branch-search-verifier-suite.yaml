@@ -5,10 +5,10 @@ subsystem: Speculative branch search verification (ADR-0084)
 order: 87
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
-modes: [n-a]
-configurable: static
+modes: [interactive, headless]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |
@@ -26,9 +26,17 @@ purpose: |
 evidence:
   code:
     - src/agent/branch-search/verify.ts
+    - src/agent/branch-search/index.ts
+    - src/agent/branch-search/score.ts
+    - src/agent/branch-search/search.ts
+    - src/agent/branch-search/types.ts
+    - src/agent/branch-search-runner.ts
   adrs: [84, 117]
   tests:
-    unit: []
+    unit:
+      - tests/unit/branch-search.test.ts
+      - tests/unit/branch-search-minimal-change-hellgate.test.ts
+      - tests/unit/bench-branch-search-wiring-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

@@ -5,22 +5,34 @@ subsystem: 스킬 — `Skill` 도구
 order: 5
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-purpose: 'paths: 조건부 활성 — skillsActivatedFor/skillToolAllowlist 호스트 API 노출. AgentConfig.skills.changedPaths?: string[] 옵셔널 필드 — set 시 buildSkillFeatures가 unconditional 스킬 + paths: 매칭 스킬로 per-turn suggestion inventory 구성. buildSessionFeatures → runAgent 실경로에 배선됨(L3), 5 e2e 통과.'
+purpose: |
+  paths: 조건부 활성 — skillsActivatedFor/skillToolAllowlist 호스트 API 노출. AgentConfig.skills.changedPaths?: string[]
+  옵셔널 필드 — set 시 buildSkillFeatures가 unconditional 스킬 + paths: 매칭 스킬로 per-turn suggestion inventory
+  구성. buildSessionFeatures → runAgent 실경로에 배선됨(L3), 5 e2e 통과. CLI surface는 `buildSkillsConfigCore`
+  → `buildSkillBlock` → `buildSessionFeatures` 경유로 활성화.
 evidence:
   code:
     - src/agent/features.ts
+    - src/agent/tier1/skill.ts
     - src/skill/activation.ts
+    - src/skill/index.ts
   adrs: []
   tests:
-    unit: [tests/unit/features.test.ts]
-    integration: [tests/integration/skill-paths-activation-e2e.test.ts]
+    unit:
+      - tests/unit/skill-trigger-rules.test.ts
+      - tests/unit/skill-slice-boundary.test.ts
+    integration:
+      - tests/integration/skill-paths-activation-e2e.test.ts
+      - tests/integration/loop-skill-override.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
-notes: '미설정/빈 배열 ⇒ identity. 핵심 contract: suggestion 좁히기 ≠ authority 제거 — Skill 도구는 항상 전체 스킬을 invocable surface로 유지. e2e(, 5 tests): unset 전체 표시, **/*.ts 매칭 → ts-only+unconditional, **/*.py 매칭 → py-only+uncon…'
+notes: '미설정/빈 배열 ⇒ identity. 핵심 contract: suggestion 좁히기 ≠ authority 제거 — Skill 도구는 항상 전체 스킬을 invocable surface로 유지. e2e(5 tests): unset 전체 표시, **/*.ts 매칭 → ts-only+unconditional, **/*.py 매칭 → py-only+unconditional.'

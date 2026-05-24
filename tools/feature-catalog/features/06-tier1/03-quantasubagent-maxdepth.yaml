@@ -5,26 +5,37 @@ subsystem: 서브에이전트
 order: 3
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless]
 configurable: integrated
 config_refs:
-  env: [QUANTA_SUBAGENT]
+  env: ["QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-purpose: git worktree 격리 [_MAX_DEPTH]
+purpose: |
+  서브에이전트 기본-OFF 게이트 + git worktree 격리 + 재귀 한도 (`_MAX_DEPTH`,
+  default 3). CLI surface는 `QUANTA_SUBAGENT` 세트로 enable, `QUANTA_SUBAGENT_MAX_DEPTH`
+  로 cap override. `buildSubagentConfigCore` 가 env → SubagentConfig 변환, `buildSubagentBlock`
+  이 6 도구 + cleanup hook을 등록.
 evidence:
   code:
     - src/runner/assemble/subagent.ts
+    - src/agent/tier1/subagent.ts
     - src/agent/subagent-runner.ts
     - src/subagent/agent-tool.ts
+    - src/subagent/registry.ts
+    - src/subagent/index.ts
     - src/apps/cli/internal.ts
   adrs: []
   tests:
-    unit: [tests/unit/subagent-runner.test.ts]
-    integration: []
+    unit:
+      - tests/unit/subagent-runner.test.ts
+      - tests/unit/subagent-6-tools-hellgate.test.ts
+    integration:
+      - tests/integration/subagent-features-wiring.test.ts
+      - tests/integration/subagent-cleanup-e2e.test.ts
     contract: []
-knobs: [QUANTA_SUBAGENT]
+knobs: [QUANTA_SUBAGENT, QUANTA_SUBAGENT_MAX_DEPTH]
 deliberate_hold: null
 notes: ''

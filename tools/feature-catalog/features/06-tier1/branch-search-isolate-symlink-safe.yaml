@@ -5,10 +5,10 @@ subsystem: Speculative branch search isolation (ADR-0084)
 order: 86
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: n-a
+modes: [interactive, headless]
+configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:agentless"]
 purpose: |
@@ -26,9 +26,16 @@ purpose: |
 evidence:
   code:
     - src/agent/branch-search/isolate.ts
+    - src/agent/branch-search/index.ts
+    - src/agent/branch-search/types.ts
+    - src/agent/branch-search/tool.ts
+    - src/agent/branch-search/propose.ts
+    - src/agent/branch-search-runner.ts
   adrs: [84]
   tests:
-    unit: []
+    unit:
+      - tests/unit/branch-search.test.ts
+      - tests/unit/bench-branch-search-wiring-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

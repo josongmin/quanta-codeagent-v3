@@ -5,21 +5,29 @@ subsystem: 스킬 — `Skill` 도구
 order: 7
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
-configurable: n-a
+modes: [interactive, headless]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
-purpose: 'Tool routing matrix () — 시스템 프롬프트 정적 블록: truth-condition별 도구 매핑(fresh fact→web / local code→grep,read,glob,localize / modify stable→edit / modify unstable→scripted_replace / verify→test_runner,bash / parallel reads→batch / sidecar→Agent / MCP discovery→ToolSearch). cache prefix byte-stable'
+purpose: |
+  Tool routing matrix (ADR-0022) — 시스템 프롬프트 정적 블록: truth-condition별
+  도구 매핑(fresh fact→web / local code→grep,read,glob,localize / modify stable→edit /
+  modify unstable→scripted_replace / verify→test_runner,bash / parallel reads→batch /
+  sidecar→Agent / MCP discovery→ToolSearch). cache prefix byte-stable.
+  buildSystemPrompt에 hard-wired된 정적 섹션이라 모든 CLI 세션에서 자동 활성.
 evidence:
   code:
     - src/agent/prompt.ts
+    - src/agent/types.ts
+    - src/agent/features.ts
   adrs: [22]
   tests:
-    unit: []
+    unit:
+      - tests/unit/prompt-sections-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
-notes: ''
+notes: '"Tool routing (the truth condition picks the tool, not the keyword):" 블록이 buildSystemPrompt에 정적으로 inserted; cache prefix byte-stable invariant 통과.'

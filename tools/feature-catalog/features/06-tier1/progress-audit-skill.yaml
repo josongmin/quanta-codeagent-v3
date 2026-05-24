@@ -5,15 +5,24 @@ subsystem: 스킬 — 번들 시스템 스킬 (코드 증거 기반 audit discip
 order: 14
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless]
 configurable: integrated
 config_refs:
-  env: [QUANTA_SKILLS_DIR]
+  env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:codex"]
-purpose: '사용자가 "진행률"/"코드 레벨로만"/"P0/P1/P2"/"문서는 보지 말고"라고 묻거나 검증을 요구할 때, agent가 코드 증거 대신 plan/README/RFC를 1순위 evidence로 끌어다 쓰는 패턴을 시스템적으로 차단. 이 skill이 활성화되면 모델은 (1) 모든 주장에 file:line 인용 강제, (2) `rg` hit-only 증거 금지, (3) 검증되지 않은 "완료" 라벨 금지, (4) outcome을 success/partial/uncertain 셋으로만 보고 ("complete" 단어는 출력 금지), (5) audit 동안 mutator(Edit/Write/apply_patch) dispatch 자동 거절(Read/Grep/Bash만 허용). Codex Desktop의 code-only-progress-audit/SKILL.md (6 P0 + 7-step + outcome enum) 흡수. systemSkillsDir() 기반으로 user QUANTA_SKILLS_DIR과 무관하게 자동 발견, name collision에서 system이 user를 이김(보안 invariant). `triggerProgressAudit()` / `PROGRESS_AUDIT_SKILL_NAME` 헬퍼로 외부 slash router가 router-agnostic하게 wire 가능(ADR-0045 §한계 (c)).'
+purpose: |
+  사용자가 "진행률"/"코드 레벨로만"/"P0/P1/P2"/"문서는 보지 말고"라고 묻거나 검증을 요구할 때, agent가
+  코드 증거 대신 plan/README/RFC를 1순위 evidence로 끌어다 쓰는 패턴을 시스템적으로 차단. 이 skill이
+  활성화되면 모델은 (1) 모든 주장에 file:line 인용 강제, (2) `rg` hit-only 증거 금지, (3) 검증되지 않은
+  "완료" 라벨 금지, (4) outcome을 success/partial/uncertain 셋으로만 보고 ("complete" 단어는 출력 금지),
+  (5) audit 동안 mutator(Edit/Write/apply_patch) dispatch 자동 거절(Read/Grep/Bash만 허용). Codex
+  Desktop의 code-only-progress-audit/SKILL.md (6 P0 + 7-step + outcome enum) 흡수.
+  systemSkillsDir() 기반으로 user QUANTA_SKILLS_DIR과 무관하게 자동 발견, name collision에서
+  system이 user를 이김(보안 invariant). `triggerProgressAudit()` / `PROGRESS_AUDIT_SKILL_NAME`
+  헬퍼로 외부 slash router가 router-agnostic하게 wire 가능(ADR-0045 §한계 (c)).
 evidence:
   code:
     - src/skill/system-skills/progress-audit/SKILL.md
@@ -21,13 +30,13 @@ evidence:
     - src/skill/system-skills/index.ts
     - src/skill/index.ts
     - src/agent/features.ts
-    - src/apps/cli/internal.ts
+    - src/agent/tier1/skill.ts
   adrs: [45]
   tests:
     unit:
       - tests/unit/skill-progress-audit.test.ts
       - tests/unit/features.test.ts
-      - tests/unit/skill.test.ts
+      - tests/unit/system-skills-new-bundle-hellgate.test.ts
     integration:
       - tests/integration/skill-progress-audit-discovery.test.ts
     contract: []

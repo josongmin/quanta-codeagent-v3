@@ -5,10 +5,12 @@ subsystem: Tier-1 builder (subagent block)
 order: 221
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless]
 configurable: integrated
+config_refs:
+  env: ["QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [subagent-background-wire, background-subagent]
@@ -33,10 +35,22 @@ purpose: |
 evidence:
   code:
     - src/agent/tier1/subagent.ts
+    - src/agent/tier1/index.ts
+    - src/agent/features.ts
+    - src/subagent/index.ts
+    - src/subagent/registry.ts
+    - src/subagent/agent-tool.ts
+    - src/runner/assemble/subagent.ts
   adrs: []
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/subagent-6-tools-hellgate.test.ts
+      - tests/unit/subagent-background-wire-hellgate.test.ts
+      - tests/unit/subagent-slice-boundary.test.ts
+    integration:
+      - tests/integration/subagent-cleanup-e2e.test.ts
+      - tests/integration/subagent-cleanup-invocation-e2e.test.ts
+      - tests/integration/subagent-features-wiring.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

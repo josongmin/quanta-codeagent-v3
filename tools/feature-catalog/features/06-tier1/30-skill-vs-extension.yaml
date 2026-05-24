@@ -5,10 +5,12 @@ subsystem: 스킬 — 카테고리 분류 + tool whitelist
 order: 30
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive, headless]
 configurable: integrated
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [skill-md-frontmatter]
@@ -30,12 +32,19 @@ evidence:
   code:
     - src/skill/skill-vs-extension.ts
     - src/skill/skill-frontmatter.ts
+    - src/skill/skill-tool.ts
+    - src/skill/discover.ts
+    - src/skill/index.ts
+    - src/agent/tier1/skill.ts
   adrs: [40]
   tests:
     unit:
       - tests/unit/skill-vs-extension.test.ts
       - tests/unit/skill-frontmatter-parse.test.ts
-    integration: [tests/integration/skill-frontmatter-hell-e2e.test.ts]
+      - tests/unit/skill-overrides.test.ts
+    integration:
+      - tests/integration/skill-frontmatter-hell-e2e.test.ts
+      - tests/integration/loop-skill-override.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
