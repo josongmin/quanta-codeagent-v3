@@ -32,6 +32,7 @@ evidence:
     - src/auth/chatgpt-oauth/token-store.ts
     - src/auth/chatgpt-oauth/config.ts
     - src/auth/chatgpt-oauth/jwt.ts
+    - src/auth/chatgpt-oauth/browser-flow.ts
   adrs: [94]
   tests:
     unit:

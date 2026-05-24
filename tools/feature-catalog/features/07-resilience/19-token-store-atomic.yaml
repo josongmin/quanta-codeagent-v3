@@ -26,6 +26,9 @@ evidence:
     - src/auth/chatgpt-oauth/index.ts
     - src/auth/chatgpt-oauth/refresh.ts
     - src/auth/chatgpt-oauth/paths.ts
+    - src/auth/chatgpt-oauth/browser-flow.ts
+    - src/auth/chatgpt-oauth/config.ts
+    - src/auth/chatgpt-oauth/jwt.ts
   adrs: []
   tests:
     unit:

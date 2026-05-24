@@ -35,6 +35,8 @@ evidence:
     - src/apps/eval/trajectory/index.ts
     - src/apps/eval/trajectory/source.ts
     - src/apps/eval/trajectory/meta.ts
+    - src/apps/eval/trajectory/classifier.ts
+    - src/apps/eval/trajectory/freeze.ts
   adrs: []
   tests:
     unit:

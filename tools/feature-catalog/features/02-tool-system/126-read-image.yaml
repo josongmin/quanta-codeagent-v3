@@ -27,6 +27,7 @@ evidence:
     - src/tool/image/index.ts
     - src/tool/types.ts
     - src/shared/runtime-config.ts
+    - src/tool/image/from-url.ts
   adrs: [126]
   tests:
     unit:

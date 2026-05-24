@@ -32,6 +32,7 @@ evidence:
     - src/patch/index.ts
     - src/tool/apply-patch.ts
     - src/shared/runtime-config.ts
+    - src/patch/parser.ts
   adrs: [28]
   tests:
     unit:

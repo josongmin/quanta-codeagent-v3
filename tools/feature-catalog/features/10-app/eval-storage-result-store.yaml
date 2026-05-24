@@ -30,6 +30,7 @@ evidence:
   code:
     - src/apps/eval/storage/result-store.ts
     - src/apps/eval/storage/index.ts
+    - src/apps/eval/storage/schema.ts
   adrs: []
   tests:
     unit:
