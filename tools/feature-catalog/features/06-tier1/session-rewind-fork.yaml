@@ -1,0 +1,37 @@
+id: session-rewind-fork
+title: session rewind + fork (Claude Code A1 pattern)
+section: 6
+subsystem: 세션 되감기/포크 (Claude Code A1 흡수)
+order: 110
+maturity: L4
+status: new
+purpose: |
+  Claude Code A1 rewind(messageId)/forkSession 패턴 흡수. Envelope append-only invariant
+  유지(원본 jsonl 무수정) — rewind는 새 fork 세션을 만들고 cutoff 이전 메시지만 복사한다.
+  CLI surface `/rewind` (대화 cutoff) + `/rewind --git` (working-tree restore 동반,
+  default-OFF). 2-gate 활성화: QUANTA_REWIND env + RewindGitPort 명시 주입(git 복원은
+  파괴적이므로 port 미주입 시 hard-fail). 닫힌 포트 아키텍처 — Clock/SessionReader/
+  SessionWriter/RewindGitPort 전부 주입 → 결정성 유닛테스트.
+evidence:
+  code:
+    - src/session/rewind.ts
+    - src/apps/cli/rewind-cmd.ts
+    - src/apps/cli/rewind-git.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/session/rewind-wrapper.test.ts
+      - tests/unit/cli/rewind-cmd.test.ts
+      - tests/unit/cli/rewind-git.test.ts
+    integration:
+      - tests/integration/session-rewind-e2e.test.ts
+    contract: []
+knobs:
+  - QUANTA_REWIND
+  - QUANTA_REWIND_GIT
+deliberate_hold: null
+notes: |
+  Envelope append-only invariant은 hard rule — rewind는 원본 jsonl을 절대 truncate
+  하지 않고 fork된 새 세션에만 cutoff 적용. git restore는 destructive이므로 두 번째
+  gate(RewindGitPort 명시 주입 + QUANTA_REWIND_GIT)로 default-OFF. messageId 미존재/
+  cutoff-after-tail 시 명시적 에러로 silent no-op 방지.

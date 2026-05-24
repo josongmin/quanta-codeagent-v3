@@ -1,0 +1,32 @@
+id: runner-side-chat
+title: side-chat — isolated agent loop without history pollution (Claude A9)
+section: 6
+subsystem: 사이드 챗 격리 루프 (Claude Code A9 흡수)
+order: 111
+maturity: L4
+status: new
+purpose: |
+  Claude Code A9 패턴 흡수: 메인 history를 오염시키지 않는 격리 agent loop. /side 슬래시
+  + sideChat() 진입점이 별도 SessionWriter로 분기, 메인 envelope는 무수정. 도구는
+  20-tool read-only allowlist + 17-tool forbidden deny-default(쓰기/실행/네트워크 도구는
+  side-chat에서 항상 거부). context 상속 3-mode — none(빈 context) / system(시스템 프롬프트만) /
+  last-turn(직전 turn 컨텍스트까지 전달). usage tally는 메인 turn에 tee로 누적(input/output
+  cumulative token) — 비용 가시성 유지.
+evidence:
+  code:
+    - src/runner/orchestrate/side-chat.ts
+    - src/apps/cli/side-cmd.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/runner/side-chat.test.ts
+      - tests/unit/cli/side-cmd.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Negative invariant — side-chat은 메인 SessionWriter에 절대 write하지 않는다(envelope
+  append-only는 메인 한정). 17-tool forbidden 목록은 deny-default(allowlist에 없으면 거부)
+  로 도구 추가 시 자동 차단. usage tally는 입출력 토큰만 누적, 메인 turn end에 합산해서
+  비용 underreport 방지.

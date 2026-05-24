@@ -1,0 +1,29 @@
+id: runner-run-interactive
+title: runInteractive — surface-agnostic REPL-loop driver
+section: 6
+subsystem: surface-agnostic REPL driver
+order: 113
+maturity: L4
+status: new
+purpose: |
+  REPL 루프를 surface(CLI/Web-Tauri/CLI-embedded browser)에 agnostic하게 분리한 드라이버.
+  `PromptSource` 포트로 CLI raw-line-reader / Web WebSocket / Tauri IPC 입력을 통일
+  추상화 — 동일 luminance loop가 surface별 어댑터만 갈아끼우면 작동. wrapTurn 훅으로
+  per-turn 횡단관심사(Esc-Esc cancel + dashboard + REPL-survive on tool error)를 부착
+  가능. PromptPayload widening(text+images)을 그대로 받아 multimodal과 호환.
+evidence:
+  code:
+    - src/runner/orchestrate/run-interactive.ts
+    - src/runner/orchestrate/prompt-source.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/runner-orchestrate-interactive.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  surface-가용성 ROI 게이팅 금지(memory surface-model). PromptSource는 닫힌 포트 — CLI
+  어댑터(raw-line-reader)는 별 entry로 카탈로그됨. wrapTurn 훅은 default no-op이며,
+  surface별 횡단관심사(Esc-Esc cancel, dashboard, REPL-survive)를 부착하는 seam.

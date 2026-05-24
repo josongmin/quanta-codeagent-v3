@@ -1,0 +1,36 @@
+id: runner-multimodal-image
+title: multimodal image input queue (/image add/list/clear)
+section: 6
+subsystem: 멀티모달 이미지 입력
+order: 112
+maturity: L4
+status: new
+purpose: |
+  PromptSource 포트의 PromptPayload 타입을 backward-compat하게 widening — 기존
+  string 페이로드 코드 경로는 무변경, 새 코드는 `{ text, images[] }` 구조를 받을 수
+  있다. /image add/list/clear 슬래시로 이미지 큐를 누적하고 다음 prompt 송신 시 멀티모달
+  메시지로 합쳐 보낸다. 송신 직후 큐는 auto-clear(single-shot) — 이전 turn 이미지가
+  의도치 않게 다음 turn에 새 나오는 것 방지. 디스크 영속 없음(in-memory). voice는
+  의도적 보류 — 별도 PR.
+evidence:
+  code:
+    - src/runner/orchestrate/prompt-source.ts
+    - src/apps/cli/image-queue.ts
+    - src/apps/cli/image-cmd.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/image-cmd.test.ts
+      - tests/unit/runner/run-interactive-multimodal.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_IMAGE_QUEUE
+  - QUANTA_IMAGE_MAX_QUEUE
+deliberate_hold:
+  reason: voice input은 의도적으로 별도 PR로 분리 — 코어 멀티모달 타입 widening 우선 안착 후 audio 첨부 검토
+  promotion_path: 'PromptPayload audio 슬롯 추가 + ASR port 도입 + 별도 카탈로그 entry'
+notes: |
+  PromptPayload 타입 widening은 backward-compat — 기존 호출자(CLI raw-line-reader 포함)
+  는 무수정 통과. auto-clear(single-shot)는 누적 버그 방지를 위한 hard rule. QUANTA_IMAGE_MAX_QUEUE
+  로 메모리 cap.
