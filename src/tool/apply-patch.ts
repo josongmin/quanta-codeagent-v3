@@ -211,6 +211,10 @@ export const applyPatchTool: Tool<Input> = {
     // the dispatch seam decides how to surface the failure.
     const patch = parsePatch(input.patch)
     const port = new FsJailFileSystemPort({ jailRoot: ctx.cwd })
+    // No observer argument: the patch slice owns OTel emission on its own
+    // (ADR-0028 `quanta.patch.op` + `quanta.patch.fuzzy_match_tier` are wired
+    // inside `applier.ts`, which keeps `@/tool/apply-patch` free of
+    // `@/observability` and respects the `@/tool/**` slice-isolation fence).
     const result = await applyPatch(patch, port)
     yield {
       type: "result",

@@ -202,6 +202,28 @@ export const endSpan = (span: Span, status: SpanStatus, attrs: Attrs): void => {
   }
 }
 
+/** Emit a point-in-time event as an instant span (start + end, `durationMs = 0`,
+ *  `status = "ok"`). Use this when the caller is NOT bracketing a duration but
+ *  needs to publish a labeled attribute bag through the same sink — e.g. the
+ *  admissibility-gate HITL outcome or an `apply_patch` op result. Sinks that
+ *  care about duration can filter on `durationMs === 0`; sinks that don't can
+ *  treat it as a normal closed span.
+ *
+ *  Default-OFF: with no active sink, returns immediately with zero allocation
+ *  (matches the {@link startSpan} / {@link endSpan} sentinel pattern). Throws
+ *  from the sink are caught + swallowed for the same reason as the other
+ *  helpers — observability bugs MUST NOT crash the loop. */
+export const recordAttrs = (name: SpanName, eventAttrs: Attrs): void => {
+  const sink = activeSink
+  if (sink === null) return
+  try {
+    const token = sink.onStart(name, eventAttrs)
+    sink.onEnd(token, name, "ok", 0, eventAttrs)
+  } catch {
+    // Swallow — see startSpan/endSpan for rationale.
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Test seam
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { attrs, QUANTA_ATTRS, recordAttrs, SPAN_NAMES } from "@/observability"
 import { errMessage } from "@/shared"
 // V4A apply_patch — AST → filesystem side effects.
 //
@@ -22,11 +23,74 @@ import {
   PatchAnchorNotFoundError,
   PatchApplyError,
   type PatchFileSystemPort,
+  type PatchObservation,
+  type PatchObserver,
   type PatchOp,
-} from "./types.js"
+} from "./types"
 
-/** Apply a parsed V4A patch via the injected filesystem port. */
-export async function applyPatch(patch: Patch, fs: PatchFileSystemPort): Promise<ApplyResult> {
+/** Internal: the canonical OTel emitter for `quanta.patch.*` keys. Activates
+ *  the ADR-0028 vocabulary (`quanta.patch.op` + `quanta.patch.fuzzy_match_tier`
+ *  + `quanta.patch.fuzzy_matched`). Default-OFF when no span sink is registered
+ *  (`recordAttrs` short-circuits to a zero-allocation no-op). Security
+ *  invariant: only categorical op + tier scalars are emitted — NEVER the
+ *  patch text, anchor strings, hunk content, or file paths. */
+const emitOtel: PatchObserver = (event) => {
+  if ("fuzzyMatchTier" in event) {
+    recordAttrs(
+      SPAN_NAMES.handleToolCall,
+      attrs({
+        [QUANTA_ATTRS.patch.op]: event.op,
+        [QUANTA_ATTRS.patch.fuzzyMatchTier]: event.fuzzyMatchTier,
+        [QUANTA_ATTRS.patch.fuzzyMatched]: event.fuzzyMatchTier !== "exact",
+      }),
+    )
+    return
+  }
+  recordAttrs(SPAN_NAMES.handleToolCall, attrs({ [QUANTA_ATTRS.patch.op]: event.op }))
+}
+
+/** Internal: a guaranteed-no-throw observer wrapper. Production calls pass
+ *  through an optional end-user observer AND the canonical OTel emitter so
+ *  vocabulary keys are always activated. Absent user observer ⇒ OTel emit only.
+ *  A throw from EITHER observer is caught + swallowed so apply semantics are
+ *  independent of telemetry health (mirrors `@/observability/spans.ts`). */
+const wrapObserver = (observer: PatchObserver | undefined): PatchObserver => {
+  if (observer === undefined) {
+    return (event: PatchObservation) => {
+      try {
+        emitOtel(event)
+      } catch {
+        // Telemetry bugs MUST NOT abort the apply pipeline.
+      }
+    }
+  }
+  return (event: PatchObservation) => {
+    try {
+      observer(event)
+    } catch {
+      // User-observer throw must not stop the canonical OTel emit either.
+    }
+    try {
+      emitOtel(event)
+    } catch {
+      // Telemetry bugs MUST NOT abort the apply pipeline.
+    }
+  }
+}
+
+/** Apply a parsed V4A patch via the injected filesystem port. Per-op telemetry
+ *  is emitted to the canonical span sink unconditionally via `recordAttrs`
+ *  (default-OFF when no sink is registered — zero allocation). An optional
+ *  `observer` receives the same event stream for in-process consumers (tests,
+ *  test harnesses); production callers omit it. The observer / emitter NEVER
+ *  receive patch text, file content, hunk lines, or anchor strings — only the
+ *  categorical op (`"add" | "update" | "delete" | "move"`) and (for landed
+ *  update hunks) the fuzzy-match tier (`"exact" | "whitespace"`). */
+export async function applyPatch(
+  patch: Patch,
+  fs: PatchFileSystemPort,
+  observer?: PatchObserver,
+): Promise<ApplyResult> {
   const result: ApplyResult = {
     filesAdded: [],
     filesDeleted: [],
@@ -34,24 +98,32 @@ export async function applyPatch(patch: Patch, fs: PatchFileSystemPort): Promise
     filesMoved: [],
   }
 
+  const emit = wrapObserver(observer)
   for (const op of patch.ops) {
-    await applyOp(op, fs, result)
+    await applyOp(op, fs, result, emit)
   }
 
   return result
 }
 
 /** Dispatch one op. Each branch is responsible for full pre-flight validation. */
-async function applyOp(op: PatchOp, fs: PatchFileSystemPort, result: ApplyResult): Promise<void> {
+async function applyOp(
+  op: PatchOp,
+  fs: PatchFileSystemPort,
+  result: ApplyResult,
+  emit: PatchObserver,
+): Promise<void> {
   switch (op.kind) {
     case "add":
       await applyAdd(op, fs, result)
+      emit({ op: "add" })
       return
     case "delete":
       await applyDelete(op, fs, result)
+      emit({ op: "delete" })
       return
     case "update":
-      await applyUpdate(op, fs, result)
+      await applyUpdate(op, fs, result, emit)
       return
   }
 }
@@ -89,6 +161,7 @@ async function applyUpdate(
   op: Extract<PatchOp, { kind: "update" }>,
   fs: PatchFileSystemPort,
   result: ApplyResult,
+  emit: PatchObserver,
 ): Promise<void> {
   if (!(await fs.exists(op.path))) {
     throw new PatchApplyError("Update File target does not exist", op.path)
@@ -102,10 +175,15 @@ async function applyUpdate(
   // characters) because V4A is line-oriented.
   const { lines: workLines, trailingNewline } = splitLines(original)
 
+  // The op category emitted alongside each hunk's fuzzy tier: a `moveTo`
+  // update becomes the `"move"` category in telemetry so dashboards can
+  // count renames separately from in-place updates.
+  const hunkOp: "update" | "move" = op.moveTo !== undefined ? "move" : "update"
   for (let hunkIdx = 0; hunkIdx < op.hunks.length; hunkIdx++) {
     const hunk = op.hunks[hunkIdx]
     if (hunk === undefined) continue
-    applyHunkInPlace(workLines, hunk, op.path, hunkIdx)
+    const tier = applyHunkInPlace(workLines, hunk, op.path, hunkIdx)
+    emit({ op: hunkOp, fuzzyMatchTier: tier })
   }
 
   const next = joinLines(workLines, trailingNewline)
@@ -132,11 +210,19 @@ async function applyUpdate(
       )
     }
     result.filesMoved.push([op.path, op.moveTo])
+    emit({ op: "move" })
   } else {
     await fs.writeFile(op.path, next)
     result.filesUpdated.push(op.path)
+    emit({ op: "update" })
   }
 }
+
+/** Fuzzy-tier label emitted to telemetry when a hunk lands. Mirrors the
+ *  literal union declared in `vocabulary.ts#QUANTA_ATTRS.patch.fuzzyMatchTier`
+ *  (`"exact" | "whitespace" | "fuzzy"`). The V4A applier currently exposes
+ *  the first two tiers — pure-trimmed equality is reported as `"whitespace"`. */
+type FuzzyTier = "exact" | "whitespace" | "fuzzy"
 
 /**
  * Apply one hunk to a mutable line array.
@@ -144,8 +230,17 @@ async function applyUpdate(
  * Pre-flight: compute `oldBlock` = (context + delete) lines and `newBlock` =
  * (context + insert) lines. Locate `oldBlock` in `workLines`, replace it
  * with `newBlock`. EOF marker constrains the match to end at the file end.
+ *
+ * Returns the {@link FuzzyTier} the locator settled on, so the caller can
+ * forward it to a {@link PatchObserver} without re-deriving from the
+ * grammar (NEVER the matched anchor text — only the tier label).
  */
-function applyHunkInPlace(workLines: string[], hunk: Hunk, path: string, hunkIdx: number): void {
+function applyHunkInPlace(
+  workLines: string[],
+  hunk: Hunk,
+  path: string,
+  hunkIdx: number,
+): FuzzyTier {
   const oldBlock: string[] = []
   const newBlock: string[] = []
 
@@ -175,9 +270,10 @@ function applyHunkInPlace(workLines: string[], hunk: Hunk, path: string, hunkIdx
     )
   }
 
-  const matchIndex = locateBlock(workLines, oldBlock, hunk.endOfFile, path, hunkIdx)
+  const { index, tier } = locateBlock(workLines, oldBlock, hunk.endOfFile, path, hunkIdx)
   // Splice oldBlock.length lines out at matchIndex, splice newBlock in.
-  workLines.splice(matchIndex, oldBlock.length, ...newBlock)
+  workLines.splice(index, oldBlock.length, ...newBlock)
+  return tier
 }
 
 /**
@@ -190,6 +286,9 @@ function applyHunkInPlace(workLines: string[], hunk: Hunk, path: string, hunkIdx
  * of the file; we search only the single candidate position
  * `workLines.length - oldBlock.length`. If that doesn't match (either tier),
  * the anchor is reported missing.
+ *
+ * Returns `{ index, tier }` — `tier` reports which strategy succeeded so the
+ * caller can forward it to telemetry.
  */
 function locateBlock(
   workLines: string[],
@@ -197,11 +296,11 @@ function locateBlock(
   endOfFile: boolean,
   path: string,
   hunkIdx: number,
-): number {
+): { index: number; tier: FuzzyTier } {
   if (endOfFile) return locateEofBlock(workLines, oldBlock, path, hunkIdx)
 
   const exact = locateAtTier(workLines, oldBlock, /*trimmed*/ false, "exact", path, hunkIdx)
-  if (exact !== null) return exact
+  if (exact !== null) return { index: exact, tier: "exact" }
 
   const trimmed = locateAtTier(
     workLines,
@@ -211,7 +310,7 @@ function locateBlock(
     path,
     hunkIdx,
   )
-  if (trimmed !== null) return trimmed
+  if (trimmed !== null) return { index: trimmed, tier: "whitespace" }
 
   throw new PatchAnchorNotFoundError(
     path,
@@ -222,16 +321,16 @@ function locateBlock(
 
 /**
  * EOF-anchored locate: search ONLY the trailing-aligned candidate.
- * Returns the index or throws PatchAnchorNotFoundError.
+ * Returns `{ index, tier }` or throws PatchAnchorNotFoundError.
  */
 function locateEofBlock(
   workLines: string[],
   oldBlock: string[],
   path: string,
   hunkIdx: number,
-): number {
+): { index: number; tier: FuzzyTier } {
   // Empty old block at EOF = pure append.
-  if (oldBlock.length === 0) return workLines.length
+  if (oldBlock.length === 0) return { index: workLines.length, tier: "exact" }
 
   const expected = workLines.length - oldBlock.length
   if (expected < 0) {
@@ -241,8 +340,12 @@ function locateEofBlock(
       `End-of-File hunk is larger (${oldBlock.length} lines) than the file (${workLines.length} lines)`,
     )
   }
-  if (matchesAt(workLines, oldBlock, expected, /*trimmed*/ false)) return expected
-  if (matchesAt(workLines, oldBlock, expected, /*trimmed*/ true)) return expected
+  if (matchesAt(workLines, oldBlock, expected, /*trimmed*/ false)) {
+    return { index: expected, tier: "exact" }
+  }
+  if (matchesAt(workLines, oldBlock, expected, /*trimmed*/ true)) {
+    return { index: expected, tier: "whitespace" }
+  }
   throw new PatchAnchorNotFoundError(
     path,
     hunkIdx,

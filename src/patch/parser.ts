@@ -14,7 +14,7 @@ import {
   type Patch,
   type PatchOp,
   PatchParseError,
-} from "./types.js"
+} from "./types"
 
 /**
  * Parser state — explicit so transitions are checked, not implied.

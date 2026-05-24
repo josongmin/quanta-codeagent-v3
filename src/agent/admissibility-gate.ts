@@ -27,6 +27,7 @@
  * dispatch seam then delegates to it.
  */
 import type { ToolUseBlock } from "@/llm"
+import { attrs, QUANTA_ATTRS, recordAttrs, SPAN_NAMES } from "@/observability"
 import {
   type AutoModeClassifier,
   autoPassByPatterns,
@@ -346,6 +347,30 @@ const resolveHitlTier = (
   return resolveHitlAnnotation(call.name, call.input, baseline)
 }
 
+/** Sanitize the `reason` tag for OTel emission. The agent-internal `reason`
+ *  field on the `HandoffRequiredEvent` carries a categorical prefix plus a
+ *  variable-shape suffix (e.g. `hard-deny:Blocked dangerous command: rm -rf /`
+ *  — the suffix is the human-prose deny message which echoes the offending
+ *  command). For the OTel attribute we strip that prose and keep ONLY the
+ *  categorical kebab prefix, so a dashboard sees `hard-deny`, `registry:<tool>`,
+ *  or `tier:hand-off-required` — never tool input, never user-facing
+ *  copy. This is the canonical security invariant for `quanta.hitl.
+ *  handoff_emitted`. */
+const slugifyHandoffReason = (reason: string): string => {
+  // `registry:<tool>` and `tier:<tier-literal>` are already short categorical
+  // tags from controlled vocabularies — pass through verbatim.
+  if (reason.startsWith("registry:")) return reason
+  if (reason.startsWith("tier:")) return reason
+  // `hard-deny:<prose>` — strip the prose suffix and keep ONLY the category.
+  // Future categories can be added here as `startsWith` arms.
+  if (reason.startsWith("hard-deny:")) return "hard-deny"
+  // Defensive fallback: strip anything past the first `:` so an unknown
+  // category never leaks a prose body. Empty category ⇒ literal "handoff".
+  const colon = reason.indexOf(":")
+  if (colon > 0) return reason.slice(0, colon)
+  return reason.length > 0 ? reason : "handoff"
+}
+
 /** Emit a structured handoff event to the host (RFC §UI integration seam).
  *  Absent callback ⇒ silent no-op (byte-identical legacy behaviour). The
  *  callback is wrapped in a try/catch so a host-side bug never propagates
@@ -356,6 +381,16 @@ const emitHandoffEvent = (
   handoffMessage: string,
   reason: string,
 ): void => {
+  // ADR-0047 vocabulary activation: record the kebab-case handoff tag on the
+  // span sink. The OTel attribute carries the SANITIZED categorical slug
+  // (`hard-deny`, `registry:<tool>`, `tier:hand-off-required`) — NEVER the
+  // prompt text from `handoffMessage` and NEVER the prose suffix from the
+  // deny reason (which can include the offending shell command). Default-OFF
+  // when no sink is registered.
+  recordAttrs(
+    SPAN_NAMES.handleToolCall,
+    attrs({ [QUANTA_ATTRS.hitl.handoffEmitted]: slugifyHandoffReason(reason) }),
+  )
   if (!config.onHandoff) return
   const event: HandoffRequiredEvent = {
     kind: "hitl-handoff",
@@ -510,6 +545,17 @@ const runHitlGate = async (
   }
 
   const { tier, matched } = resolveHitlTier(config, call, action)
+  // ADR-0047 vocabulary activation: emit the resolved tier + the registry-
+  // escalation bit at the canonical decision point. Outcome categories only —
+  // NO prompt text, NO user-facing message body, NO tool input. Default-OFF
+  // when no span sink is wired (zero-allocation no-op).
+  recordAttrs(
+    SPAN_NAMES.handleToolCall,
+    attrs({
+      [QUANTA_ATTRS.hitl.tierResolved]: tier,
+      [QUANTA_ATTRS.hitl.registryEscalated]: matched !== undefined,
+    }),
+  )
   if (tier === "hand-off-required") return buildHandoffDeny(call, config, matched)
   if (tier === "always-confirm") return runAlwaysConfirmBranch(call, config, action, opts)
   if (tier === "none") return null

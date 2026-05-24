@@ -13,6 +13,7 @@ export {
   __resetSpanSink,
   endSpan,
   getSpanSink,
+  recordAttrs,
   SPAN_NAMES,
   type Span,
   type SpanName,

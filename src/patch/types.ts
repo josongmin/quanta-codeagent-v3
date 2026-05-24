@@ -59,6 +59,31 @@ export interface ApplyResult {
   filesMoved: Array<[string, string]>
 }
 
+/** Per-op observation kind for V4A apply-patch telemetry. Carries ONLY the
+ *  categorical op type and the fuzzy-match tier that resolved a hunk —
+ *  NEVER the patch text, file content, hunk lines, or anchor strings. Used by
+ *  the tool layer to emit `quanta.patch.op` + `quanta.patch.fuzzy_match_tier`
+ *  through the canonical span sink without coupling `@/patch` to observability. */
+export type PatchObservation =
+  | {
+      /** ADR-0028 op category emitted to `quanta.patch.op`. `"move"` is the
+       *  rename-edit variant of an `update` op (`moveTo` present); split here
+       *  so dashboards can count renames distinctly from in-place updates. */
+      readonly op: "add" | "delete" | "update" | "move"
+    }
+  | {
+      /** Hunk landed; the tier is the strictest match that succeeded. */
+      readonly op: "update" | "move"
+      /** ADR-0028 fuzzy-match tier emitted to `quanta.patch.fuzzy_match_tier`. */
+      readonly fuzzyMatchTier: "exact" | "whitespace" | "fuzzy"
+    }
+
+/** Optional sink for per-op patch observations. Default-OFF (callers may omit
+ *  the argument; the applier then makes zero calls). Throws from the observer
+ *  are caught + swallowed by the applier so a telemetry bug NEVER changes
+ *  apply semantics. */
+export type PatchObserver = (event: PatchObservation) => void
+
 /**
  * Patch-specific FS port (read/write/delete/rename/exists). The general FS port
  * is `@/storage`'s `FileSystemPort` — DIFFERENT shape, different name on purpose.
