@@ -1,0 +1,37 @@
+id: color-policy-resolver
+title: ColorPolicyResolver (per-surface ANSI color cache)
+section: 10
+subsystem: Surface-agnostic UI helpers (ANSI / box-drawing)
+order: 96
+maturity: L4
+status: new
+purpose: |
+  Encapsulates the ANSI color-policy cache so multiple surfaces (CLI, REPL,
+  Tauri renderer, parallel test harness) can keep isolated state instead of
+  sharing one module-level cell. Resolution order on first use:
+    1. Explicit override via `set(mode)` (test seam).
+    2. `NO_COLOR` env present (https://no-color.org) → off.
+    3. `FORCE_COLOR=1` → on.
+    4. `process.stdout.isTTY` truthy → on, else off.
+  The decision is cached so color state doesn't oscillate within one render.
+  Module-level `setColorPolicy(mode)` + `wrap()` continue to operate against
+  `defaultResolver` (byte-identical to pre-refactor); new callers that need
+  isolation construct their own resolver.
+evidence:
+  code:
+    - src/ui/ui-helpers.ts
+  adrs: [59, 94]
+  tests:
+    unit:
+      - tests/unit/auth/auth-ui.test.ts
+    integration: []
+    contract: []
+knobs: [NO_COLOR, FORCE_COLOR]
+deliberate_hold: null
+notes: |
+  Distinct entry from the surface-agnostic UI helpers slice. ui-helpers.ts is
+  the renamed former `src/apps/cli/auth-ui.ts` (commit fdf1c7c, refactor:
+  rename auth-ui.ts → ui-helpers.ts). The class isolates color-cache state per
+  surface; other helpers (renderBox, kvLine, statusPill, humanRel, expiryColor,
+  stripAnsi/visibleWidth) remain module-level pure functions that consume the
+  default resolver via `wrap()`.
