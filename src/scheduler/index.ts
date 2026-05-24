@@ -51,3 +51,17 @@ export {
 
 // Evaluator
 export { computeNextFire, iterateFires } from "./next-fire"
+
+// Automation lifecycle
+export {
+  createAutomation,
+  transitionStatus,
+  recordFire,
+  markError,
+  isFireEligible,
+} from "./automation"
+export type { CreateAutomationInput } from "./automation"
+
+// JSONL store
+export { defaultJsonlAutomationStore } from "./store-jsonl"
+export type { JsonlAutomationStoreOpts } from "./store-jsonl"

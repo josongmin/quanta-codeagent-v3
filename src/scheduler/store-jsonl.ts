@@ -1,0 +1,303 @@
+/**
+ * ADR-0161 Phase C — JSONL automation store (file-backed, append-only).
+ *
+ * Layout (mirrors shadow-odb / ADR-0158 workspace-hash policy):
+ *
+ *     <baseDir>/<workspaceHash>/automations.jsonl
+ *
+ * Each line is a JSON-encoded {@link Automation} snapshot. ALL transitions
+ * (create / pause / resume / delete / error / fire) append a new line; load
+ * walks the file and the LAST line per `id` wins.
+ *
+ * Why single file (vs ADR-0158 per-handle file):
+ *   - Automations are FEWER than background subagent handles (tens vs
+ *     thousands) — one file is more debuggable.
+ *   - Transactional read is one `readFile` instead of N `readdir + readFile`.
+ *   - last-line-per-id semantics match Codex's `automation-schedule` cache
+ *     refetch.
+ *
+ * NO-THROW contract:
+ *   - load(workspace) on ENOENT → `[]`.
+ *   - load on corrupt single line → that line skipped, others survive.
+ *   - delete(workspace, unknownId) → no-op (no `tombstone` line; just no
+ *     longer in subsequent saves' results). To make delete observable, the
+ *     port writes a sentinel line `{id, status:"deleted", ...}` which the
+ *     load walker recognizes as a tombstone (last-wins).
+ *   - save on EACCES → throws {@link AutomationStoreError}("io-failed").
+ *
+ * Plane-clean: imports `node:fs/promises` + `node:path` + `node:os` +
+ * `node:crypto` + `./types`. Nothing else.
+ */
+
+import { createHash } from "node:crypto"
+import { appendFile, mkdir, readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import {
+  type Automation,
+  type AutomationStatus,
+  type AutomationStorePort,
+  AutomationStoreError,
+  type RRule,
+  type Weekday,
+} from "./types"
+
+/** Length of the hex prefix used as the per-workspace directory name. Matches
+ *  shadow-odb's 16-hex / 64-bit policy (ADR-0108 parity). */
+const WORKSPACE_HASH_PREFIX_LEN = 16
+
+/** SHA-256 of the canonicalized workspace path, first 16 hex chars. */
+const defaultWorkspaceHash = (workspace: string): string => {
+  if (workspace.length === 0) {
+    return "0".repeat(WORKSPACE_HASH_PREFIX_LEN)
+  }
+  const canonical =
+    workspace.endsWith("/") && workspace.length > 1 ? workspace.slice(0, -1) : workspace
+  const h = createHash("sha256")
+  h.update(canonical, "utf8")
+  return h.digest("hex").slice(0, WORKSPACE_HASH_PREFIX_LEN)
+}
+
+export interface JsonlAutomationStoreOpts {
+  /** Base directory. Default `~/.quanta/scheduler/`. */
+  readonly baseDir?: string
+  /** Override hasher (tests only). */
+  readonly workspaceHasher?: (workspace: string) => string
+}
+
+const FILE_NAME = "automations.jsonl"
+
+const resolveBaseDir = (opts: JsonlAutomationStoreOpts | undefined): string => {
+  if (opts?.baseDir !== undefined && opts.baseDir.length > 0) return opts.baseDir
+  return join(homedir(), ".quanta", "scheduler")
+}
+
+/** Per-workspace directory for the given store config. */
+const workspaceDir = (
+  baseDir: string,
+  hasher: (w: string) => string,
+  workspace: string,
+): string => join(baseDir, hasher(workspace))
+
+const automationsFile = (wsDir: string): string => join(wsDir, FILE_NAME)
+
+// ============================================================================
+// JSON validators (each null on shape mismatch — last-line walker skips)
+// ============================================================================
+
+const isStatus = (s: unknown): s is AutomationStatus =>
+  s === "active" || s === "paused" || s === "deleted" || s === "error"
+
+const parseWeekdayRaw = (raw: unknown): Weekday | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const r = raw as Partial<Weekday>
+  if (
+    r.day !== "MO" &&
+    r.day !== "TU" &&
+    r.day !== "WE" &&
+    r.day !== "TH" &&
+    r.day !== "FR" &&
+    r.day !== "SA" &&
+    r.day !== "SU"
+  ) {
+    return undefined
+  }
+  if (r.nth !== undefined && typeof r.nth !== "number") return undefined
+  return r.nth !== undefined ? { day: r.day, nth: r.nth } : { day: r.day }
+}
+
+const parseRRuleRaw = (raw: unknown): RRule | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const r = raw as Partial<RRule>
+  if (r.freq !== "DAILY" && r.freq !== "WEEKLY" && r.freq !== "MONTHLY") return undefined
+  const out: Record<string, unknown> = { freq: r.freq }
+  if (r.interval !== undefined) {
+    if (typeof r.interval !== "number") return undefined
+    out["interval"] = r.interval
+  }
+  if (r.count !== undefined) {
+    if (typeof r.count !== "number") return undefined
+    out["count"] = r.count
+  }
+  if (r.until !== undefined) {
+    if (typeof r.until !== "number") return undefined
+    out["until"] = r.until
+  }
+  if (r.byDay !== undefined) {
+    if (!Array.isArray(r.byDay)) return undefined
+    const parsed: Weekday[] = []
+    for (const w of r.byDay) {
+      const pw = parseWeekdayRaw(w)
+      if (pw === undefined) return undefined
+      parsed.push(pw)
+    }
+    out["byDay"] = parsed
+  }
+  if (r.byMonthDay !== undefined) {
+    if (!Array.isArray(r.byMonthDay)) return undefined
+    if (r.byMonthDay.some((d) => typeof d !== "number")) return undefined
+    out["byMonthDay"] = r.byMonthDay
+  }
+  return out as unknown as RRule
+}
+
+const parseAutomation = (raw: unknown): Automation | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const r = raw as Partial<Automation>
+  if (typeof r.id !== "string") return undefined
+  if (typeof r.title !== "string") return undefined
+  if (typeof r.prompt !== "string") return undefined
+  if (typeof r.modelPreference !== "string") return undefined
+  if (!Array.isArray(r.modelFallbacks)) return undefined
+  if (r.modelFallbacks.some((m) => typeof m !== "string")) return undefined
+  if (typeof r.createdAt !== "number") return undefined
+  if (typeof r.fireCount !== "number") return undefined
+  if (!isStatus(r.status)) return undefined
+  const rule = parseRRuleRaw(r.rule)
+  if (rule === undefined) return undefined
+  // Reconstruct preserving exactOptionalPropertyTypes.
+  const base = {
+    id: r.id,
+    title: r.title,
+    rule,
+    prompt: r.prompt,
+    status: r.status,
+    modelPreference: r.modelPreference,
+    modelFallbacks: r.modelFallbacks as ReadonlyArray<string>,
+    createdAt: r.createdAt,
+    fireCount: r.fireCount,
+  }
+  return {
+    ...base,
+    ...(typeof r.lastFiredAt === "number" ? { lastFiredAt: r.lastFiredAt } : {}),
+    ...(typeof r.lastErrorMessage === "string" ? { lastErrorMessage: r.lastErrorMessage } : {}),
+  }
+}
+
+/** Safe JSON parse — returns `undefined` on failure (caller skips). */
+const safeParse = (line: string): unknown => {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return undefined
+  }
+}
+
+/** Walk a JSONL file's contents and build the last-wins per-id map. Corrupt
+ *  lines silently skipped. */
+const buildLatestMap = (text: string): Map<string, Automation> => {
+  const out = new Map<string, Automation>()
+  const lines = text.split("\n")
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (line.length === 0) continue
+    const parsed = safeParse(line)
+    if (parsed === undefined) continue
+    const a = parseAutomation(parsed)
+    if (a === undefined) continue
+    out.set(a.id, a)
+  }
+  return out
+}
+
+/** Filter out `deleted` automations from the final list — they are tombstones
+ *  the caller (load) does NOT surface. The tombstone line still wins in
+ *  buildLatestMap so a subsequent re-create would need a different id (the
+ *  caller MUST allocate a fresh id for a re-create scenario). */
+const dropDeleted = (m: ReadonlyMap<string, Automation>): ReadonlyArray<Automation> => {
+  const out: Automation[] = []
+  for (const a of m.values()) {
+    if (a.status !== "deleted") out.push(a)
+  }
+  return out
+}
+
+// ============================================================================
+// Public factory
+// ============================================================================
+
+/**
+ * File-backed JSONL automation store. Crash-safe (append-only), workspace-
+ * isolated (sha256-prefix dir), corrupt-line-resilient.
+ */
+export const defaultJsonlAutomationStore = (
+  opts?: JsonlAutomationStoreOpts,
+): AutomationStorePort => {
+  const baseDir = resolveBaseDir(opts)
+  const hasher = opts?.workspaceHasher ?? defaultWorkspaceHash
+
+  const ensureDir = async (workspace: string): Promise<string> => {
+    const dir = workspaceDir(baseDir, hasher, workspace)
+    try {
+      await mkdir(dir, { recursive: true })
+    } catch (e) {
+      throw new AutomationStoreError("io-failed", `mkdir failed: ${stringifyError(e)}`)
+    }
+    return dir
+  }
+
+  return {
+    async load(workspace) {
+      const dir = workspaceDir(baseDir, hasher, workspace)
+      const file = automationsFile(dir)
+      let text: string
+      try {
+        text = await readFile(file, "utf8")
+      } catch (e) {
+        if (isEnoent(e)) return []
+        // Any other read failure: surface as empty list (NO-THROW contract).
+        return []
+      }
+      const map = buildLatestMap(text)
+      return dropDeleted(map)
+    },
+
+    async save(workspace, automation) {
+      const dir = await ensureDir(workspace)
+      const file = automationsFile(dir)
+      const line = `${JSON.stringify(automation)}\n`
+      try {
+        await appendFile(file, line, "utf8")
+      } catch (e) {
+        throw new AutomationStoreError("io-failed", `append failed: ${stringifyError(e)}`)
+      }
+    },
+
+    async delete(workspace, id) {
+      const dir = await ensureDir(workspace)
+      const file = automationsFile(dir)
+      // Tombstone — `status: "deleted"`. Last-wins semantics make this work.
+      // Need to preserve the previous record shape (rule, prompt, ...) so the
+      // parser accepts the line; we read the current load, find the matching
+      // record, copy + mark deleted. If absent, no-op (idempotent).
+      let text: string
+      try {
+        text = await readFile(file, "utf8")
+      } catch (e) {
+        if (isEnoent(e)) return // unknown id, file doesn't exist
+        return
+      }
+      const map = buildLatestMap(text)
+      const found = map.get(id)
+      if (found === undefined) return
+      const tombstone: Automation = { ...found, status: "deleted" }
+      try {
+        await appendFile(file, `${JSON.stringify(tombstone)}\n`, "utf8")
+      } catch {
+        // NO-THROW on delete — losing a tombstone leaves the record visible
+        // but the runtime's fireEligible predicate is on active-only, so
+        // worst case the operator sees a stale entry until next save.
+      }
+    },
+  }
+}
+
+// ============================================================================
+// helpers
+// ============================================================================
+
+const isEnoent = (e: unknown): boolean =>
+  typeof e === "object" && e !== null && (e as { code?: string }).code === "ENOENT"
+
+const stringifyError = (e: unknown): string =>
+  e instanceof Error ? e.message : typeof e === "string" ? e : "unknown"
