@@ -72,7 +72,9 @@
       "@/git": ["./src/git/index.ts"],
       "@/git/*": ["./src/git/*"],
       "@/reactor": ["./src/reactor/index.ts"],
-      "@/reactor/*": ["./src/reactor/*"]
+      "@/reactor/*": ["./src/reactor/*"],
+      "@/retrieval": ["./src/retrieval/index.ts"],
+      "@/retrieval/*": ["./src/retrieval/*"]
     }
   },
   "include": ["src", "tests", "tools"],

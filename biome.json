@@ -805,6 +805,43 @@
       }
     },
     {
+      "includes": ["**/src/retrieval/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (ADR-0159): @/retrieval is a leaf primitive slice — depends on @/shared only. Assemblers in @/agent reach IN, not the reverse.",
+                  "@/tool": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/llm": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only; LLM provider SDKs (openai/voyage/etc.) are loaded as direct node modules from concrete adapter files, never through @/llm.",
+                  "@/mcp": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/memory": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only — ranking lives in @/memory, retrieval primitives live here.",
+                  "@/storage": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/stream": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/permission": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/runtime": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/lsp": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/observability": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/session": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/subagent": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/skill": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/auth": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/security": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/patch": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/rules": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/migration": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/git": "Slice isolation (ADR-0159): @/retrieval defines its own GitLogPort and accepts an injected adapter — it never imports @/git.",
+                  "@/reactor": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/shared/**"],
       "linter": {
         "rules": {
@@ -835,7 +872,8 @@
                   "@/ui": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
                   "@/git": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
                   "@/runner": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
-                  "@/ipc": "Slice isolation (S4): @/shared is the leaf — pure utilities only."
+                  "@/ipc": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/retrieval": "Slice isolation (S4): @/shared is the leaf — pure utilities only."
                 }
               }
             }
