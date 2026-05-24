@@ -1,0 +1,31 @@
+id: network-allowlist
+title: Network allowlist — ci-bot outbound host check
+section: 3
+subsystem: ci-bot 네트워크 정책 (RFC may-22)
+order: 95
+maturity: L4
+status: stable
+purpose: |
+  Propositional outbound host check used by the ci-bot mode policy lever
+  `network: { kind: "allowlist"; hosts: readonly string[] }`. The signal
+  is purely the URL/host string — NO counts, NO thresholds, NO heuristics.
+  Match shape: exact host equality OR a `*.suffix` wildcard for
+  subdomains. Caller decides what to DO with a denial (deny tool call,
+  log, etc.); this module only answers the boolean "is this host
+  allowed?". Default ci-bot allowlist is small and audited:
+  `api.github.com`, `github.com`, `raw.githubusercontent.com` (gh CLI),
+  plus the registry endpoints needed for the tasks ci-bot is expected to
+  run.
+evidence:
+  code:
+    - src/runtime/network-allowlist.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/runtime/network-allowlist.test.ts
+      - tests/unit/apps/agent/ci-bot-preset.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'No DNS resolution — literal-host match only (deliberate; same posture as the `web_fetch` SSRF deny). Companion to the `ci-bot-mode-policy` feature: that wires `network: allowlist`, this is the enforcer.'

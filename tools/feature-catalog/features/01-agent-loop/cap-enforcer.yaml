@@ -1,0 +1,28 @@
+id: cap-enforcer
+title: Cap-as-instruction enforcer — 3rd-channel NextAction adherence
+section: 1
+subsystem: 도구 hint 강제 (ADR-0062 rule #3)
+order: 90
+maturity: L4
+status: refined
+purpose: |
+  Session-scoped state machine that detects when the model IGNORES a tool's
+  `NextAction` hint by re-calling the same `toolName:targetPath` without
+  applying the suggested parameter change. Closed-union over `NextAction.kind`
+  (`increase_max_depth` / `raise_max_files` / `narrow_path`) so a new variant
+  is a tsc-enforced extension. Default-OFF — gated on `QUANTA_CAP_ENFORCE`
+  env (or `AgentConfig.capEnforce`); off ⇒ never instantiated and dispatch is
+  byte-identical. O(1) check + record helpers, no allocation off the happy
+  path.
+evidence:
+  code:
+    - src/agent/cap-enforcer.ts
+  adrs: [62]
+  tests:
+    unit:
+      - tests/unit/next-action-cap-enforce.test.ts
+    integration: []
+    contract: []
+knobs: [QUANTA_CAP_ENFORCE]
+deliberate_hold: null
+notes: 'PURE construction — session-scoped, one instance per `runAgent`. `targetPath` normalised to empty-string when absent so a missing path arg cannot collide with an explicit `""`.'

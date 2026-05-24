@@ -1,0 +1,43 @@
+id: memory-self-edit-tools
+title: memory_search / memory_write / memory_update — self-edit tools (RFC §6.3)
+section: 5
+subsystem: 자가 편집 메모리 도구 (RFC §6.3 long-term memory)
+order: 10
+maturity: L4
+status: stable
+purpose: |
+  Three first-class agent tools letting the model search, write, and
+  revise its own durable memory mid-session. Plane-clean — imports only
+  `@/memory` (ports + types), `@/shared` (errMessage), `@/tool` types,
+  `zod`. NEVER `@/agent`, `@/llm`, `@/permission`. Every `execute` is
+  defensive: any failure yields a single `ok:false` result rather than
+  throwing out of the generator (the dispatcher MUST never see a
+  throw). Supporting modules: `memory-embedder.ts` (concrete
+  `EmbedderPort` impls — OpenAIEmbedder real provider batched +
+  NullEmbedder offline no-op + CachingEmbedder in-proc memoisation;
+  memory slice owns the port but cannot import `@/llm` or `openai`, so
+  concrete providers live here in `@/agent` as the only cross-slice
+  importer), `memory-stats.ts` (locked observability contract surfaced
+  via optional `onStats` observer — `RecallStats` + `PersistStats`
+  emitted once per recall/persist call), `memory-consolidate.ts` (LLM-
+  arbitrated consolidation given a candidate and near-duplicates;
+  decides `insert`/`skip`/`merge`/`supersede` to preserve knowledge
+  without loss; never throws — llm/parse failures fall back to a
+  token-Jaccard heuristic).
+evidence:
+  code:
+    - src/agent/memory-tools.ts
+    - src/agent/memory-embedder.ts
+    - src/agent/memory-stats.ts
+    - src/agent/memory-consolidate.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/memory-tools.test.ts
+      - tests/unit/memory-embedder.test.ts
+      - tests/unit/memory.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Voice-matches RFC §6.3 hybrid-recall (`memorysearch-write-update`) — that registers the recall/persist ORCHESTRATION; this registers the SELF-EDIT TOOL surface + provider plumbing. ADR-0068 cross-session consolidator (`codex-2-phase-consolidator`) is a DIFFERENT mechanism (per-thread distill + global synthesizer); this `memory-consolidate.ts` is the per-call near-duplicate arbiter consulted at memory_write time.'

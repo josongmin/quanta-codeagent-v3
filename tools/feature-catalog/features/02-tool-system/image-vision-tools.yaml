@@ -1,0 +1,37 @@
+id: image-vision-tools
+title: read_image + read_image_url + compose helper — vision pipeline
+section: 2
+subsystem: 도구 — vision input (ADR-0126, ADR-0132)
+order: 83
+maturity: L4
+status: stable
+purpose: |
+  Three modules that compose the vision-input slice. (1) `read_image`
+  (ADR-0126) reads an image file from disk, magic-byte-sniffs the media
+  type (rejecting any byte sequence that doesn't match a supported PNG /
+  JPEG / GIF / WEBP signature), enforces a 5 MB cap (Anthropic Messages
+  vision raw-byte ceiling), and surfaces it via `ToolResult.images`.
+  Security: leaf-symlink reject via `lstat().isSymbolicLink()`. (2)
+  `read_image_url` (ADR-0132) — URL → vision pipeline composing the
+  read_image sniffer + cap with an SSRF denylist mirroring `web_fetch`;
+  https-only, DI fetcher seam for tests. (3) `compose.ts` returns ONE of
+  two shapes: when `result.images` is absent/empty, the LEGACY string
+  (byte-identical to current dispatch path); otherwise a ContentBlock-
+  shaped array `[{type:"text",text:output}, ...images]` that the
+  dispatch seam wires at the model-message boundary.
+evidence:
+  code:
+    - src/tool/image/read.ts
+    - src/tool/image/from-url.ts
+    - src/tool/image/compose.ts
+  adrs: [126, 132]
+  tests:
+    unit:
+      - tests/unit/tool/read-image-hellgate.test.ts
+      - tests/unit/tool/read-image-url-hellgate.test.ts
+      - tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'SSRF denylist is duplicated in `read_image_url` (NOT re-exported from `web/fetch`) — this is EXPLICITLY documented in the ADR as "intentional; future helper consolidation deferred to a separate ADR that exposes `isPrivateOrLoopbackHostname` from a shared layer".'

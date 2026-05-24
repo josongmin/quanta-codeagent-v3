@@ -1,0 +1,33 @@
+id: compaction-breaker
+title: Compaction circuit breaker — rapid-refill + consecutive-failure guard
+section: 1
+subsystem: 컨텍스트 압축 anti-thrash (RFC §8 Phase 2)
+order: 91
+maturity: L4
+status: stable
+purpose: |
+  Pure deterministic state machine that mirrors Claude Code v2's two
+  compaction guards: (1) rapid-refill breaker — when the context refills to
+  the limit and re-compacts with no real headroom gained, abort the turn with
+  reason `rapid_refill_breaker` rather than spin forever on an un-shrinkable
+  prompt; (2) consecutive-failure breaker — proactive compaction that keeps
+  running without freeing tokens is disabled for the rest of the session
+  (Claude Code's `consecutiveFailures >= 3`). Never touches transcript / LLM /
+  clock — the loop feeds before/after token counts + a `noteProgress()` signal
+  on real headway, asks `check()` before next compaction-driven retry. Default
+  caps (3 / 3 / ~15%) track Claude Code constants.
+evidence:
+  code:
+    - src/agent/compaction-breaker.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/compaction-breaker.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
+    integration:
+      - tests/integration/breaker-e2e.test.ts
+      - tests/integration/breaker-x-recovery-hell-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '"No progress" == post-compaction token count did not drop by at least `minProgressRatio` (default ~15%) relative to pre-compaction — the heuristic Claude Code uses: the limiting payload (giant file read / tool output) is still in the retained suffix.'

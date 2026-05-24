@@ -1,0 +1,40 @@
+id: background-subagent
+title: Background subagent — fork/poll/await detached scheduler (ADR-0130)
+section: 6
+subsystem: Tier-1 background subagent (Cursor 흡수, ADR-0130)
+order: 112
+maturity: L4
+status: new
+purpose: |
+  Cursor's `force_background_subagent` + `subagent_await` absorption —
+  the SOLE industry pattern for true detached subagent execution.
+  Claude Code 2.1 / Codex / v0.dev all run subagents sequentially (parent
+  BLOCKS until child returns). quanta's closed-port equivalent: `fork()`
+  returns an opaque handle id immediately and the run proceeds in the
+  background; `await()` (or `poll()`) harvests the result later. Cancel
+  is first-class via per-handle AbortController. Three first-class tools
+  (`subagent_fork` / `subagent_poll` / `subagent_await`) registered by
+  the `tier1/subagent-bg` builder ONLY when `config.subagentBackground` is
+  wired — empty array otherwise so the loop's ToolRegistry stays byte-
+  identical (mirrors `buildShadowBlock` posture). `fork` is HITL tier
+  `pre-approval-ok` (reversible — caller can cancel or ignore the handle).
+  Plane-clean scheduler: imports only `@/subagent` types + `node:crypto`.
+evidence:
+  code:
+    - src/agent/subagent-background.ts
+    - src/agent/tier1/subagent-bg.ts
+    - src/tool/subagent-bg/fork.ts
+    - src/tool/subagent-bg/poll.ts
+    - src/tool/subagent-bg/await.ts
+    - src/tool/subagent-bg/port.ts
+  adrs: [130]
+  tests:
+    unit:
+      - tests/unit/subagent-background-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'Caller-wire is deferred — no surface today calls `defaultBackgroundSubagentScheduler`. Helper-only posture (voice-match ADR-0124 / ADR-0128 / ADR-0125).'
+  promotion_path: 'Wire scheduler at apps/agent bootstrap + add a CLI command to fork a side-task; the three tools surface automatically via the tier-1 builder once the scheduler is supplied.'
+notes: 'DUCK-TYPED config access in the tier-1 builder: `subagentBackground` is read through a narrow structural assertion so this module stays standalone and can land before the caller-wire PR. Multiple awaits on the same id resolve with the same shared in-flight promise — no double work.'

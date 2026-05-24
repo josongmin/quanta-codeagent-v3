@@ -1,0 +1,37 @@
+id: git-read-trio
+title: git_blame / git_diff / git_status — read-only git tools
+section: 2
+subsystem: 도구 — read-only git surface
+order: 24
+maturity: L4
+status: stable
+purpose: |
+  Three first-class read-only git tools sharing the injectable `GitRunner`
+  port (so tests stub `git` without spawning). (1) `git_blame` — porcelain
+  parser for `git blame --porcelain -L <range>`, surfaces hash / author /
+  authorTime / summary / line content. Stderr-pattern recognisers detect
+  "no such path" and "line out of range" and map to typed `ok:false`
+  outcomes rather than throwing. (2) `git_diff` — bounded unified diff
+  with a 50 KB output cap and a hard reject of `base` arguments
+  beginning with `-` (would be parsed as a `git` option rather than a
+  revision); the typed `GitDiffBaseRejected` is caught locally and
+  converted to a deterministic `ok:false`. (3) `git_status` — porcelain
+  v2 parser (XY index/worktree status pair → human note) with branch /
+  ahead / behind / per-file changes. All three are deny-default observable
+  (read-only, no shell escape, hard cap on output).
+evidence:
+  code:
+    - src/tool/git/blame.ts
+    - src/tool/git/diff.ts
+    - src/tool/git/status.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/git-tools.test.ts
+      - tests/unit/git-tools-hellgate.test.ts
+    integration:
+      - tests/integration/git-tools.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Closed-port `GitRunner` is the single seam — every `safeRun` call is mockable in tests. Companion `git_upstream_check` is its own feature (`git-upstream-check`). 50 KB output cap is the same SSOT as `web_fetch` / `read_image` slices.'
