@@ -1,0 +1,51 @@
+id: plugin-host-wrapper
+title: PluginHost — typed JSON-RPC 2.0 wrapper for isolated plugins (ADR-0162)
+section: 9
+subsystem: Plugin isolation (ADR-0162) — protocol-agnostic host layer
+order: 162
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:ipc"]
+config_refs:
+  env: []
+purpose: |
+  Protocol-agnostic JSON-RPC 2.0 wrapper over `IsolatedProcess` (closed port).
+  `call(method, params, {timeoutMs, signal})` → typed Promise, per-call
+  timeout (default 30s), AbortSignal cancel without timer leak, duplicate-id
+  drop (warn), corrupted-envelope drop (NO-THROW), unknown-method
+  notification warn-drop, exception isolation (sibling handlers still fire),
+  fail-all-pending on child exit. `notify` fire-and-forget. `onNotification`
+  returns idempotent unsubscribe.
+  Same wrapper works for Bun spawn today and future Electron
+  `UtilityProcess` adapter (OCP — depends only on IsolatedProcess port).
+  Typed `PluginHostError.kind` 5-arm: call-timeout / call-aborted /
+  process-exited / remote-error / duplicate-id (caller branches without
+  string match).
+evidence:
+  code:
+    - src/plugin-isolation/plugin-host.ts
+    - src/plugin-isolation/index.ts
+  adrs:
+    - docs/decisions/0162-plugin-process-isolation.md
+  tests:
+    unit:
+      - tests/unit/plugin-isolation-host-hellgate.test.ts
+      - tests/unit/plugin-isolation-host.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: DEFAULT_CALL_TIMEOUT_MS
+    where: src/plugin-isolation/plugin-host.ts
+    default: 30_000
+    purpose: per-request JSON-RPC timeout (overridable per-call)
+deliberate_hold: null
+notes: |
+  Why not reuse `src/mcp/client.ts` JSON-RPC code? McpClient owns the MCP
+  protocol grammar (initialize/tools/call). PluginHost is protocol-agnostic
+  — any plugin can speak any method names. The two clients share the wire
+  format (JSON-RPC 2.0) but not the grammar.

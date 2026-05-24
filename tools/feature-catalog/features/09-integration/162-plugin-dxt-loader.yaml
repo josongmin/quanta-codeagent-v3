@@ -1,0 +1,50 @@
+id: plugin-dxt-loader
+title: DXT manifest loader + launchDxt (ADR-0162)
+section: 9
+subsystem: Plugin isolation (ADR-0162) — Claude DXT package loader
+order: 162
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:ipc"]
+config_refs:
+  env: []
+purpose: |
+  Strict Zod schema for `.dxt` manifest (faithful Claude Desktop subset):
+  name (kebab/snake), version, entry (relative-only, path-traversal rejected),
+  serviceName (ASCII ≤64), optional args (≤64) / env (value ≤4096 chars) /
+  allowLoadingUnsignedLibraries. 1MB manifest cap (`MAX_DXT_MANIFEST_BYTES`)
+  pre-checked via stat (DoS bound) before JSON parse.
+  Typed `DxtError.kind` 7-arm: missing / io / manifest-too-large /
+  malformed-json / schema-mismatch / entry-escape / entry-missing.
+  `launchDxt(manifestPath, spawnerPort)` validates manifest → resolves entry
+  against manifest dir (escape guard) → stats entry → spawns through injected
+  IsolatedProcessSpawnerPort → returns PluginHost ready to call/notify.
+  Closed port: spawner injected (no Bun coupling in the loader).
+evidence:
+  code:
+    - src/plugin-isolation/dxt-loader.ts
+    - src/plugin-isolation/index.ts
+  adrs:
+    - docs/decisions/0162-plugin-process-isolation.md
+  tests:
+    unit:
+      - tests/unit/plugin-isolation-dxt-hellgate.test.ts
+      - tests/unit/plugin-isolation-dxt.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: MAX_DXT_MANIFEST_BYTES
+    where: src/plugin-isolation/dxt-loader.ts
+    default: 1_048_576
+    purpose: hard cap (1MB) on manifest size (mirrors @/skill plugin-manifest)
+deliberate_hold: null
+notes: |
+  Distinct from `.quanta-plugin/plugin.json` (ADR-0039) which is our own
+  manifest format. DXT is the upstream Claude Desktop on-disk shape;
+  validateDxt accepts the faithful subset we use to spawn + label.
+  The two coexist — discoverPlugins finds quanta-plugin, launchDxt loads DXT.

@@ -226,13 +226,13 @@ describe("ADR-0162 PluginLifecycleManager — B. Heartbeat", () => {
   test("pong silence beyond deadline triggers child kill (restart cycle)", async () => {
     const s = makeStubSpawner()
     let now = 1000
-    let intervalCb: (() => void) | null = null
+    const cbBox: { current: (() => void) | null } = { current: null }
     const fakeSet = ((cb: () => void) => {
-      intervalCb = cb
+      cbBox.current = cb
       return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>
     }) as typeof setInterval
     const fakeClear = ((_: ReturnType<typeof setInterval>) => {
-      intervalCb = null
+      cbBox.current = null
     }) as typeof clearInterval
     const opts: LifecycleOpts = {
       policy: {
@@ -247,10 +247,10 @@ describe("ADR-0162 PluginLifecycleManager — B. Heartbeat", () => {
     }
     const lc = new PluginLifecycleManager(s.port, noopFactory, opts)
     await lc.start()
-    expect(intervalCb).not.toBeNull()
+    expect(cbBox.current).not.toBeNull()
     // Advance clock past deadline (interval * threshold = 200ms).
     now = 1500
-    intervalCb?.()
+    cbBox.current?.()
     await tick()
     await tick()
     await tick()
@@ -262,13 +262,13 @@ describe("ADR-0162 PluginLifecycleManager — B. Heartbeat", () => {
   test("pong arrival resets liveness (no kill)", async () => {
     const s = makeStubSpawner()
     let now = 1000
-    let intervalCb: (() => void) | null = null
+    const cbBox: { current: (() => void) | null } = { current: null }
     const fakeSet = ((cb: () => void) => {
-      intervalCb = cb
+      cbBox.current = cb
       return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>
     }) as typeof setInterval
     const fakeClear = ((_: ReturnType<typeof setInterval>) => {
-      intervalCb = null
+      cbBox.current = null
     }) as typeof clearInterval
     const opts: LifecycleOpts = {
       policy: {
@@ -288,7 +288,7 @@ describe("ADR-0162 PluginLifecycleManager — B. Heartbeat", () => {
     s.procs[0]?.push({ jsonrpc: "2.0", method: HEARTBEAT_PONG_METHOD })
     await tick()
     now = 1150
-    intervalCb?.()
+    cbBox.current?.()
     await tick()
     expect(s.procs.length).toBe(1) // no restart
     await lc.stop()

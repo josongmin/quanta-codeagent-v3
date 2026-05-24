@@ -75,13 +75,13 @@ describe("ADR-0162 lifecycle happy-path", () => {
     }
     const factory = (): SpawnOpts => ({ entry: "/dummy", serviceName: "svc" })
 
-    let intervalCb: (() => void) | null = null
+    const cbBox: { current: (() => void) | null } = { current: null }
     const fakeSet = ((cb: () => void) => {
-      intervalCb = cb
+      cbBox.current = cb
       return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>
     }) as typeof setInterval
     const fakeClear = (() => {
-      intervalCb = null
+      cbBox.current = null
     }) as typeof clearInterval
 
     const lc = new PluginLifecycleManager(port, factory, {
@@ -95,7 +95,7 @@ describe("ADR-0162 lifecycle happy-path", () => {
       clearIntervalImpl: fakeClear,
     })
     await lc.start()
-    intervalCb?.()
+    cbBox.current?.()
     const procSent = sent[0]
     if (!procSent) throw new Error("expected first proc sent buffer")
     const ping = procSent[0] as { jsonrpc: string; method: string }

@@ -22,16 +22,18 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { IsolatedProcess, IsolatedProcessSpawnerPort, SpawnOpts } from "@/plugin-isolation"
 import {
   IsolatedMcpClient,
   IsolatedMcpError,
   isolatedMcpEnabledFromEnv,
 } from "@/mcp/isolated-client"
+import type { IsolatedProcess, IsolatedProcessSpawnerPort, SpawnOpts } from "@/plugin-isolation"
 
 const BUN = process.execPath
 
-const writeServer = async (body: string): Promise<{ path: string; cleanup: () => Promise<void> }> => {
+const writeServer = async (
+  body: string,
+): Promise<{ path: string; cleanup: () => Promise<void> }> => {
   const dir = await mkdtemp(join(tmpdir(), "iso-mcp-hellgate-"))
   const path = join(dir, "server.mjs")
   await writeFile(path, body, "utf8")

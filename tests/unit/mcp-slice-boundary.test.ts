@@ -92,7 +92,10 @@ const NODE_SURFACE_MODULES = new Set<string>([
 /** Named per-file allowlists for legitimate exceptions (see file headers
  *  for rationale). Each entry MUST be a leaf filename, no regex. */
 const STDIO_ALLOW_FILES = new Set<string>()
-const ENV_ALLOW_FILES = new Set<string>(["client.ts"])
+/** isolated-client.ts reads `MCP_USE_ISOLATED_SPAWN` as the opt-in switch
+ *  (ADR-0162) — must look at process.env directly so the default code path
+ *  (legacy McpClient) stays untouched. */
+const ENV_ALLOW_FILES = new Set<string>(["client.ts", "isolated-client.ts"])
 const CONSOLE_ALLOW_FILES = new Set<string>()
 
 describe(`@/${SLICE} — architecture guard`, () => {
