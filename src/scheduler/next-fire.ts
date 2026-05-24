@@ -24,22 +24,14 @@
  *              days-of-month. Both lists are OR-combined when both present.
  */
 
-import { allOccurrencesInMonth, daysInUtcMonth, nthWeekdayOfMonth } from "./weekday"
 import type { ClockPort, RRule, Weekday, WeekdayDay } from "./types"
+import { allOccurrencesInMonth, daysInUtcMonth, nthWeekdayOfMonth } from "./weekday"
 
 const MS_PER_DAY = 86_400_000
 const MAX_SCAN_DAYS = 366 * 10 // 10 years — defensive cap so we never spin forever.
 const MAX_SCAN_MONTHS = 120 // 10 years.
 
-const WEEKDAY_FROM_JS_INDEX: ReadonlyArray<WeekdayDay> = [
-  "SU",
-  "MO",
-  "TU",
-  "WE",
-  "TH",
-  "FR",
-  "SA",
-]
+const WEEKDAY_FROM_JS_INDEX: ReadonlyArray<WeekdayDay> = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
 
 /**
  * Compute the next fire-at ms. Returns `"never"` when:
@@ -127,7 +119,11 @@ const scanDaily = (rule: RRule, from: number): number | undefined => {
     const dayOfMonth = date.getUTCDate()
     const weekday = WEEKDAY_FROM_JS_INDEX[date.getUTCDay()] as WeekdayDay
     const daysSinceFrom = Math.round((probe - from) / MS_PER_DAY)
-    if (daysSinceFrom % interval === 0 && matchesByDay(rule.byDay, weekday) && matchesByMonthDay(rule.byMonthDay, dayOfMonth)) {
+    if (
+      daysSinceFrom % interval === 0 &&
+      matchesByDay(rule.byDay, weekday) &&
+      matchesByMonthDay(rule.byMonthDay, dayOfMonth)
+    ) {
       return probe
     }
     probe += MS_PER_DAY
@@ -145,9 +141,8 @@ const scanWeekly = (rule: RRule, from: number): number | undefined => {
   const fromDate = new Date(from)
   const fromWeekday = WEEKDAY_FROM_JS_INDEX[fromDate.getUTCDay()] as WeekdayDay
   // The set of weekdays to fire on (filtered by BYDAY; default = same as from).
-  const eligible: ReadonlyArray<WeekdayDay> = rule.byDay !== undefined && rule.byDay.length > 0
-    ? rule.byDay.map((w) => w.day)
-    : [fromWeekday]
+  const eligible: ReadonlyArray<WeekdayDay> =
+    rule.byDay !== undefined && rule.byDay.length > 0 ? rule.byDay.map((w) => w.day) : [fromWeekday]
   // Scan by day; accept when (week-delta % interval === 0) AND weekday in eligible.
   const fromMidnight = startOfUtcDay(from)
   let probe = from + MS_PER_DAY
@@ -177,75 +172,110 @@ const scanWeekly = (rule: RRule, from: number): number | undefined => {
  * Jan 15, Feb 15, Mar 15, … and skips months where that day-of-month doesn't
  * exist (e.g. Feb 30).
  */
+/** Stamp a UTC midnight ms with from's HH:MM:SS, mirroring evaluator's
+ *  contract that the fire time-of-day matches the anchor. */
+const stampTimeOfDay = (midnightUtc: number, fromDate: Date): number => {
+  const d = new Date(midnightUtc)
+  return Date.UTC(
+    d.getUTCFullYear(),
+    d.getUTCMonth(),
+    d.getUTCDate(),
+    fromDate.getUTCHours(),
+    fromDate.getUTCMinutes(),
+    fromDate.getUTCSeconds(),
+  )
+}
+
+const isIntervalAlignedMonth = (
+  fromDate: Date,
+  yr: number,
+  mo: number,
+  interval: number,
+): boolean => {
+  const monthsSinceFrom = (yr - fromDate.getUTCFullYear()) * 12 + (mo - 1 - fromDate.getUTCMonth())
+  return monthsSinceFrom >= 0 && monthsSinceFrom % interval === 0
+}
+
+const advanceMonth = (yr: number, mo: number): { yr: number; mo: number } => {
+  const next = mo + 1
+  return next > 12 ? { yr: yr + 1, mo: 1 } : { yr, mo: next }
+}
+
 const scanMonthly = (rule: RRule, from: number): number | undefined => {
   const interval = Math.max(1, rule.interval ?? 1)
   const fromDate = new Date(from)
-  // Anchor at the from-month; emit candidates ms-greater-than `from`.
   let yr = fromDate.getUTCFullYear()
   let mo = fromDate.getUTCMonth() + 1
   for (let i = 0; i < MAX_SCAN_MONTHS; i += 1) {
-    // Honor INTERVAL — months delta from from-month must be a multiple.
-    const monthsSinceFrom = (yr - fromDate.getUTCFullYear()) * 12 + (mo - 1 - fromDate.getUTCMonth())
-    if (monthsSinceFrom >= 0 && monthsSinceFrom % interval === 0) {
+    if (isIntervalAlignedMonth(fromDate, yr, mo, interval)) {
       const candidates = monthCandidates(rule, yr, mo, fromDate)
       for (const c of candidates) {
-        if (c > from) {
-          // Preserve from's HH:MM:SS in the returned ms.
-          const date = new Date(c)
-          const fire = Date.UTC(
-            date.getUTCFullYear(),
-            date.getUTCMonth(),
-            date.getUTCDate(),
-            fromDate.getUTCHours(),
-            fromDate.getUTCMinutes(),
-            fromDate.getUTCSeconds(),
-          )
-          if (fire > from) return fire
-        }
+        if (c <= from) continue
+        const fire = stampTimeOfDay(c, fromDate)
+        if (fire > from) return fire
       }
     }
-    // Advance to next month.
-    mo += 1
-    if (mo > 12) {
-      mo = 1
-      yr += 1
-    }
+    ;({ yr, mo } = advanceMonth(yr, mo))
   }
   return undefined
 }
 
-/** Build the sorted candidate UTC-midnight ms list for a single month. */
-const monthCandidates = (rule: RRule, year: number, month: number, fromDate: Date): ReadonlyArray<number> => {
+/** Expand BYDAY for a single month — handles both nth-occurrence and
+ *  every-occurrence variants. */
+const expandByDayInMonth = (
+  byDay: ReadonlyArray<{ readonly day: WeekdayDay; readonly nth?: number }>,
+  year: number,
+  month: number,
+): ReadonlyArray<number> => {
   const out: number[] = []
-  // BYDAY expansion.
-  if (rule.byDay !== undefined && rule.byDay.length > 0) {
-    for (const w of rule.byDay) {
-      if (w.nth !== undefined) {
-        const ms = nthWeekdayOfMonth(year, month, w.day, w.nth)
-        if (ms !== undefined) out.push(ms)
-      } else {
-        for (const ms of allOccurrencesInMonth(year, month, w.day)) out.push(ms)
-      }
+  for (const w of byDay) {
+    if (w.nth !== undefined) {
+      const ms = nthWeekdayOfMonth(year, month, w.day, w.nth)
+      if (ms !== undefined) out.push(ms)
+    } else {
+      for (const ms of allOccurrencesInMonth(year, month, w.day)) out.push(ms)
     }
   }
-  // BYMONTHDAY expansion.
-  if (rule.byMonthDay !== undefined && rule.byMonthDay.length > 0) {
-    const lastDay = daysInUtcMonth(year, month)
-    for (const d of rule.byMonthDay) {
-      if (d >= 1 && d <= lastDay) {
-        out.push(Date.UTC(year, month - 1, d))
-      }
-    }
+  return out
+}
+
+/** Expand BYMONTHDAY for a single month — skip days exceeding the month's
+ *  length. */
+const expandByMonthDayInMonth = (
+  byMonthDay: ReadonlyArray<number>,
+  year: number,
+  month: number,
+): ReadonlyArray<number> => {
+  const out: number[] = []
+  const lastDay = daysInUtcMonth(year, month)
+  for (const d of byMonthDay) {
+    if (d >= 1 && d <= lastDay) out.push(Date.UTC(year, month - 1, d))
   }
-  // Default fallback when neither BYDAY nor BYMONTHDAY: use from's day-of-month.
-  if ((rule.byDay === undefined || rule.byDay.length === 0) && (rule.byMonthDay === undefined || rule.byMonthDay.length === 0)) {
+  return out
+}
+
+/** Build the sorted candidate UTC-midnight ms list for a single month. */
+const monthCandidates = (
+  rule: RRule,
+  year: number,
+  month: number,
+  fromDate: Date,
+): ReadonlyArray<number> => {
+  const out: number[] = []
+  const hasByDay = rule.byDay !== undefined && rule.byDay.length > 0
+  const hasByMonthDay = rule.byMonthDay !== undefined && rule.byMonthDay.length > 0
+  if (hasByDay && rule.byDay !== undefined) {
+    out.push(...expandByDayInMonth(rule.byDay, year, month))
+  }
+  if (hasByMonthDay && rule.byMonthDay !== undefined) {
+    out.push(...expandByMonthDayInMonth(rule.byMonthDay, year, month))
+  }
+  if (!hasByDay && !hasByMonthDay) {
     const lastDay = daysInUtcMonth(year, month)
     const d = fromDate.getUTCDate()
     if (d <= lastDay) out.push(Date.UTC(year, month - 1, d))
   }
-  // Dedupe + sort ascending.
-  const uniq = Array.from(new Set(out)).sort((a, b) => a - b)
-  return uniq
+  return Array.from(new Set(out)).sort((a, b) => a - b)
 }
 
 const matchesByDay = (byDay: RRule["byDay"], weekday: WeekdayDay): boolean => {

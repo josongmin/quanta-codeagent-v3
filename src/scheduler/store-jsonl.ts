@@ -36,8 +36,8 @@ import { join } from "node:path"
 import {
   type Automation,
   type AutomationStatus,
-  type AutomationStorePort,
   AutomationStoreError,
+  type AutomationStorePort,
   type RRule,
   type Weekday,
 } from "./types"
@@ -73,11 +73,8 @@ const resolveBaseDir = (opts: JsonlAutomationStoreOpts | undefined): string => {
 }
 
 /** Per-workspace directory for the given store config. */
-const workspaceDir = (
-  baseDir: string,
-  hasher: (w: string) => string,
-  workspace: string,
-): string => join(baseDir, hasher(workspace))
+const workspaceDir = (baseDir: string, hasher: (w: string) => string, workspace: string): string =>
+  join(baseDir, hasher(workspace))
 
 const automationsFile = (wsDir: string): string => join(wsDir, FILE_NAME)
 
@@ -106,39 +103,55 @@ const parseWeekdayRaw = (raw: unknown): Weekday | undefined => {
   return r.nth !== undefined ? { day: r.day, nth: r.nth } : { day: r.day }
 }
 
+/** Optional-number guard: returns `{ ok: true, value? }` distinguishing
+ *  "absent" (omit from output) from "present and number" from "shape error". */
+const optionalNumber = (v: unknown): { ok: true; value?: number } | { ok: false } => {
+  if (v === undefined) return { ok: true }
+  if (typeof v !== "number") return { ok: false }
+  return { ok: true, value: v }
+}
+
+/** Parse a byDay array — `undefined` array OK (omit), invalid weekday → fail. */
+const parseByDayArray = (v: unknown): { ok: true; value?: Weekday[] } | { ok: false } => {
+  if (v === undefined) return { ok: true }
+  if (!Array.isArray(v)) return { ok: false }
+  const parsed: Weekday[] = []
+  for (const w of v) {
+    const pw = parseWeekdayRaw(w)
+    if (pw === undefined) return { ok: false }
+    parsed.push(pw)
+  }
+  return { ok: true, value: parsed }
+}
+
+/** Parse a byMonthDay array — `undefined` OK, must be number array. */
+const parseByMonthDayArray = (v: unknown): { ok: true; value?: number[] } | { ok: false } => {
+  if (v === undefined) return { ok: true }
+  if (!Array.isArray(v)) return { ok: false }
+  if (v.some((d) => typeof d !== "number")) return { ok: false }
+  return { ok: true, value: v as number[] }
+}
+
 const parseRRuleRaw = (raw: unknown): RRule | undefined => {
   if (typeof raw !== "object" || raw === null) return undefined
   const r = raw as Partial<RRule>
   if (r.freq !== "DAILY" && r.freq !== "WEEKLY" && r.freq !== "MONTHLY") return undefined
-  const out: Record<string, unknown> = { freq: r.freq }
-  if (r.interval !== undefined) {
-    if (typeof r.interval !== "number") return undefined
-    out["interval"] = r.interval
+  const interval = optionalNumber(r.interval)
+  const count = optionalNumber(r.count)
+  const until = optionalNumber(r.until)
+  const byDay = parseByDayArray(r.byDay)
+  const byMonthDay = parseByMonthDayArray(r.byMonthDay)
+  if (!interval.ok || !count.ok || !until.ok || !byDay.ok || !byMonthDay.ok) {
+    return undefined
   }
-  if (r.count !== undefined) {
-    if (typeof r.count !== "number") return undefined
-    out["count"] = r.count
+  return {
+    freq: r.freq,
+    ...(interval.value !== undefined ? { interval: interval.value } : {}),
+    ...(count.value !== undefined ? { count: count.value } : {}),
+    ...(until.value !== undefined ? { until: until.value } : {}),
+    ...(byDay.value !== undefined ? { byDay: byDay.value } : {}),
+    ...(byMonthDay.value !== undefined ? { byMonthDay: byMonthDay.value } : {}),
   }
-  if (r.until !== undefined) {
-    if (typeof r.until !== "number") return undefined
-    out["until"] = r.until
-  }
-  if (r.byDay !== undefined) {
-    if (!Array.isArray(r.byDay)) return undefined
-    const parsed: Weekday[] = []
-    for (const w of r.byDay) {
-      const pw = parseWeekdayRaw(w)
-      if (pw === undefined) return undefined
-      parsed.push(pw)
-    }
-    out["byDay"] = parsed
-  }
-  if (r.byMonthDay !== undefined) {
-    if (!Array.isArray(r.byMonthDay)) return undefined
-    if (r.byMonthDay.some((d) => typeof d !== "number")) return undefined
-    out["byMonthDay"] = r.byMonthDay
-  }
-  return out as unknown as RRule
 }
 
 const parseAutomation = (raw: unknown): Automation | undefined => {

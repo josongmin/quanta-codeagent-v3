@@ -36,15 +36,7 @@ export const ALL_FREQUENCIES: ReadonlyArray<Frequency> = ["DAILY", "WEEKLY", "MO
 export type WeekdayDay = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU"
 
 /** All weekdays — closed array for runtime exhaustiveness checks. */
-export const ALL_WEEKDAYS: ReadonlyArray<WeekdayDay> = [
-  "MO",
-  "TU",
-  "WE",
-  "TH",
-  "FR",
-  "SA",
-  "SU",
-]
+export const ALL_WEEKDAYS: ReadonlyArray<WeekdayDay> = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
 
 /**
  * BYDAY entry — `MO` (every Monday) or `+2MO` / `-1FR` (nth-occurrence).

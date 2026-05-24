@@ -6,7 +6,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { allOccurrencesInMonth, nthWeekdayOfMonth, parseWeekday, serializeWeekday } from "@/scheduler/weekday"
+import {
+  allOccurrencesInMonth,
+  nthWeekdayOfMonth,
+  parseWeekday,
+  serializeWeekday,
+} from "@/scheduler/weekday"
 
 describe("parseWeekday / serializeWeekday", () => {
   test("bare weekday", () => {
@@ -29,7 +34,8 @@ describe("parseWeekday / serializeWeekday", () => {
       const tok = `+3${d}`
       const w = parseWeekday(tok)
       expect(w).toEqual({ day: d, nth: 3 })
-      expect(serializeWeekday(w!)).toBe(tok)
+      if (w === undefined) throw new Error(`expected parsed weekday for ${tok}`)
+      expect(serializeWeekday(w)).toBe(tok)
     }
   })
 

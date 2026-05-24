@@ -25,8 +25,8 @@
  *   whitespace).
  */
 
-import { parseWeekday, serializeWeekday } from "./weekday"
 import type { Frequency, RRule, RRuleParseError, Weekday } from "./types"
+import { parseWeekday, serializeWeekday } from "./weekday"
 
 /** Parser entry. Returns a discriminated union — `ok: true` for success,
  *  `ok: false` for any RFC 5545 violation. Never throws. */
@@ -34,106 +34,149 @@ export type RRuleParseResult = (RRule & { readonly ok: true }) | RRuleParseError
 
 /** Parse a RFC 5545 RRULE string. Case-insensitive on KEY tokens; value
  *  tokens normalized to upper case for weekdays. */
-export const parseRRule = (input: string): RRuleParseResult => {
-  if (typeof input !== "string") {
-    return malformed("input is not a string")
-  }
-  const trimmed = input.trim()
-  if (trimmed.length === 0) {
-    return malformed("empty rule")
-  }
-  // Split on `;` — RFC 5545 allows arbitrary order but each KEY appears once.
-  const parts = trimmed.split(";").map((p) => p.trim()).filter((p) => p.length > 0)
-  const seen = new Set<string>()
-  // Accumulator with the parsed pieces; `freq` is the only required field.
-  let freq: Frequency | undefined
-  let interval: number | undefined
-  let count: number | undefined
-  let until: number | undefined
-  let byDay: Weekday[] | undefined
-  let byMonthDay: number[] | undefined
+/** Mutable accumulator for parsed RRULE parts. Filled by per-key handlers
+ *  inside the parse loop; finalized at the end (FREQ presence + COUNT/UNTIL
+ *  exclusion). Kept in this module so the structure is the SSOT. */
+interface Accumulator {
+  freq?: Frequency
+  interval?: number
+  count?: number
+  until?: number
+  byDay?: Weekday[]
+  byMonthDay?: number[]
+}
 
-  for (const part of parts) {
-    const eq = part.indexOf("=")
-    if (eq < 0) return malformed(`segment missing '=' — ${truncate(part)}`)
-    const key = part.slice(0, eq).trim().toUpperCase()
-    const rawValue = part.slice(eq + 1).trim()
-    if (key.length === 0) return malformed(`empty key`)
-    if (seen.has(key)) return malformed(`duplicate key ${key}`)
-    seen.add(key)
-    if (rawValue.length === 0) return malformed(`empty value for ${key}`)
+type SplitResult =
+  | { readonly ok: true; readonly key: string; readonly value: string }
+  | { readonly ok: false; readonly err: RRuleParseError }
 
-    switch (key) {
-      case "FREQ": {
-        const f = parseFreq(rawValue)
-        if (f === undefined) {
-          return {
-            ok: false,
-            code: "unsupported-freq",
-            message: `unsupported FREQ=${truncate(rawValue)}`,
-          }
-        }
-        freq = f
-        break
-      }
-      case "INTERVAL": {
-        const n = parsePositiveInteger(rawValue)
-        if (n === undefined) return malformed(`INTERVAL must be a positive integer — ${truncate(rawValue)}`)
-        interval = n
-        break
-      }
-      case "COUNT": {
-        const n = parsePositiveInteger(rawValue)
-        if (n === undefined) return malformed(`COUNT must be a positive integer — ${truncate(rawValue)}`)
-        count = n
-        break
-      }
-      case "UNTIL": {
-        const ms = parseUntilUtc(rawValue)
-        if (ms === undefined) return malformed(`UNTIL must be YYYYMMDDTHHMMSSZ — ${truncate(rawValue)}`)
-        until = ms
-        break
-      }
-      case "BYDAY": {
-        const items: Weekday[] = []
-        const tokens = rawValue.split(",").map((s) => s.trim())
-        for (const t of tokens) {
-          const w = parseWeekday(t)
-          if (w === undefined) {
-            return { ok: false, code: "invalid-byday", message: `bad BYDAY token ${truncate(t)}` }
-          }
-          items.push(w)
-        }
-        if (items.length === 0) {
-          return { ok: false, code: "invalid-byday", message: "BYDAY had no tokens" }
-        }
-        byDay = items
-        break
-      }
-      case "BYMONTHDAY": {
-        const items: number[] = []
-        const tokens = rawValue.split(",").map((s) => s.trim())
-        for (const t of tokens) {
-          const n = parsePositiveInteger(t)
-          if (n === undefined || n > 31) return malformed(`BYMONTHDAY must be 1..31 — ${truncate(t)}`)
-          items.push(n)
-        }
-        if (items.length === 0) return malformed("BYMONTHDAY had no tokens")
-        byMonthDay = items
-        break
-      }
-      default:
-        return malformed(`unknown key ${truncate(key)}`)
+/** Split one `KEY=value` segment, normalizing the key to upper case. */
+const splitKeyValue = (part: string): SplitResult => {
+  const eq = part.indexOf("=")
+  if (eq < 0) return { ok: false, err: malformed(`segment missing '=' — ${truncate(part)}`) }
+  const key = part.slice(0, eq).trim().toUpperCase()
+  const value = part.slice(eq + 1).trim()
+  if (key.length === 0) return { ok: false, err: malformed(`empty key`) }
+  if (value.length === 0) return { ok: false, err: malformed(`empty value for ${key}`) }
+  return { ok: true, key, value }
+}
+
+/** Apply a single key/value to the accumulator. Returns `undefined` on
+ *  success or a `RRuleParseError` to bubble up. */
+const applyKeyValue = (
+  acc: Accumulator,
+  key: string,
+  value: string,
+): RRuleParseError | undefined => {
+  switch (key) {
+    case "FREQ":
+      return applyFreq(acc, value)
+    case "INTERVAL":
+      return applyInteger(acc, "interval", value)
+    case "COUNT":
+      return applyInteger(acc, "count", value)
+    case "UNTIL":
+      return applyUntil(acc, value)
+    case "BYDAY":
+      return applyByDay(acc, value)
+    case "BYMONTHDAY":
+      return applyByMonthDay(acc, value)
+    default:
+      return malformed(`unknown key ${truncate(key)}`)
+  }
+}
+
+const applyFreq = (acc: Accumulator, value: string): RRuleParseError | undefined => {
+  const f = parseFreq(value)
+  if (f === undefined) {
+    return {
+      ok: false,
+      code: "unsupported-freq",
+      message: `unsupported FREQ=${truncate(value)}`,
     }
   }
+  acc.freq = f
+  return undefined
+}
 
-  if (freq === undefined) return malformed("missing FREQ")
-  if (count !== undefined && until !== undefined) {
+const applyInteger = (
+  acc: Accumulator,
+  field: "interval" | "count",
+  value: string,
+): RRuleParseError | undefined => {
+  const n = parsePositiveInteger(value)
+  if (n === undefined)
+    return malformed(`${field.toUpperCase()} must be a positive integer — ${truncate(value)}`)
+  acc[field] = n
+  return undefined
+}
+
+const applyUntil = (acc: Accumulator, value: string): RRuleParseError | undefined => {
+  const ms = parseUntilUtc(value)
+  if (ms === undefined) return malformed(`UNTIL must be YYYYMMDDTHHMMSSZ — ${truncate(value)}`)
+  acc.until = ms
+  return undefined
+}
+
+const invalidByday = (msg: string): RRuleParseError => ({
+  ok: false,
+  code: "invalid-byday",
+  message: msg,
+})
+
+const applyByDay = (acc: Accumulator, value: string): RRuleParseError | undefined => {
+  const tokens = value.split(",").map((s) => s.trim())
+  if (tokens.length === 0) return invalidByday("BYDAY had no tokens")
+  const items: Weekday[] = []
+  for (const t of tokens) {
+    const w = parseWeekday(t)
+    if (w === undefined) return invalidByday(`bad BYDAY token ${truncate(t)}`)
+    items.push(w)
+  }
+  if (items.length === 0) return invalidByday("BYDAY had no tokens")
+  acc.byDay = items
+  return undefined
+}
+
+const applyByMonthDay = (acc: Accumulator, value: string): RRuleParseError | undefined => {
+  const tokens = value.split(",").map((s) => s.trim())
+  if (tokens.length === 0) return malformed("BYMONTHDAY had no tokens")
+  const items: number[] = []
+  for (const t of tokens) {
+    const n = parsePositiveInteger(t)
+    if (n === undefined || n > 31) return malformed(`BYMONTHDAY must be 1..31 — ${truncate(t)}`)
+    items.push(n)
+  }
+  acc.byMonthDay = items
+  return undefined
+}
+
+/** Walk parts → fill `acc`. Returns the first error, or undefined on
+ *  success. Extracted from `parseRRule` to keep that function under the
+ *  cognitive-complexity threshold. */
+const fillAccumulator = (
+  parts: ReadonlyArray<string>,
+  acc: Accumulator,
+): RRuleParseError | undefined => {
+  const seen = new Set<string>()
+  for (const part of parts) {
+    const split = splitKeyValue(part)
+    if (!split.ok) return split.err
+    if (seen.has(split.key)) return malformed(`duplicate key ${split.key}`)
+    seen.add(split.key)
+    const result = applyKeyValue(acc, split.key, split.value)
+    if (result !== undefined) return result
+  }
+  return undefined
+}
+
+/** Final validation + RRule shape build with omitted optional keys. */
+const finalizeAccumulator = (acc: Accumulator): RRuleParseResult => {
+  if (acc.freq === undefined) return malformed("missing FREQ")
+  if (acc.count !== undefined && acc.until !== undefined) {
     return { ok: false, code: "count-and-until", message: "COUNT and UNTIL are mutually exclusive" }
   }
-
-  // Build the RRule with only present optional keys — exactOptionalPropertyTypes
-  // requires OMIT (not `undefined`-set).
+  const { freq, interval, count, until, byDay, byMonthDay } = acc
   const base = { freq } as { freq: Frequency }
   return {
     ok: true,
@@ -144,6 +187,20 @@ export const parseRRule = (input: string): RRuleParseResult => {
     ...(byDay !== undefined ? { byDay } : {}),
     ...(byMonthDay !== undefined ? { byMonthDay } : {}),
   }
+}
+
+export const parseRRule = (input: string): RRuleParseResult => {
+  if (typeof input !== "string") return malformed("input is not a string")
+  const trimmed = input.trim()
+  if (trimmed.length === 0) return malformed("empty rule")
+  const parts = trimmed
+    .split(";")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+  const acc: Accumulator = {}
+  const err = fillAccumulator(parts, acc)
+  if (err !== undefined) return err
+  return finalizeAccumulator(acc)
 }
 
 /**

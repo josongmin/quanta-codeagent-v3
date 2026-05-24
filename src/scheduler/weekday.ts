@@ -18,8 +18,8 @@
  * any local-time conversion (display layer). This keeps DST out of the core.
  */
 
-import { ALL_WEEKDAYS } from "./types"
 import type { Weekday, WeekdayDay } from "./types"
+import { ALL_WEEKDAYS } from "./types"
 
 /** Parse a single BYDAY token. Returns `undefined` on any RFC violation. */
 export const parseWeekday = (raw: string): Weekday | undefined => {
@@ -61,15 +61,7 @@ export const serializeWeekday = (w: Weekday): string => {
  * UTC weekday lookup. `0` = Sunday … `6` = Saturday (matches `Date.getUTCDay`).
  * The mapping below normalizes to the RFC 5545 `WeekdayDay` tokens.
  */
-const WEEKDAY_FROM_JS_INDEX: ReadonlyArray<WeekdayDay> = [
-  "SU",
-  "MO",
-  "TU",
-  "WE",
-  "TH",
-  "FR",
-  "SA",
-]
+const WEEKDAY_FROM_JS_INDEX: ReadonlyArray<WeekdayDay> = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
 
 const parseDay = (raw: string): WeekdayDay | undefined => {
   for (const d of ALL_WEEKDAYS) if (d === raw) return d

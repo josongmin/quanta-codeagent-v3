@@ -22,11 +22,7 @@ const utc = (y: number, mo: number, d: number, h = 0, mi = 0, s = 0): number =>
 
 describe("computeNextFire hellgate", () => {
   test("[1] UNTIL past → never", () => {
-    const next = computeNextFire(
-      r("FREQ=DAILY;UNTIL=20250101T000000Z"),
-      utc(2026, 5, 10),
-      0,
-    )
+    const next = computeNextFire(r("FREQ=DAILY;UNTIL=20250101T000000Z"), utc(2026, 5, 10), 0)
     expect(next).toBe("never")
   })
 
@@ -48,20 +44,12 @@ describe("computeNextFire hellgate", () => {
   })
 
   test("[5] WEEKLY past UNTIL → never", () => {
-    const next = computeNextFire(
-      r("FREQ=WEEKLY;UNTIL=20260101T000000Z"),
-      utc(2026, 5, 10),
-      0,
-    )
+    const next = computeNextFire(r("FREQ=WEEKLY;UNTIL=20260101T000000Z"), utc(2026, 5, 10), 0)
     expect(next).toBe("never")
   })
 
   test("[6] MONTHLY past UNTIL → never", () => {
-    const next = computeNextFire(
-      r("FREQ=MONTHLY;UNTIL=20260101T000000Z"),
-      utc(2026, 5, 10),
-      0,
-    )
+    const next = computeNextFire(r("FREQ=MONTHLY;UNTIL=20260101T000000Z"), utc(2026, 5, 10), 0)
     expect(next).toBe("never")
   })
 

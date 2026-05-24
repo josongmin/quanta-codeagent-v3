@@ -10,7 +10,7 @@ import { join } from "node:path"
 import { createAutomation, transitionStatus } from "@/scheduler/automation"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import { defaultJsonlAutomationStore } from "@/scheduler/store-jsonl"
-import { AutomationStoreError, type Automation, type RRule } from "@/scheduler/types"
+import { type Automation, AutomationStoreError, type RRule } from "@/scheduler/types"
 
 const ruleOf = (s: string): RRule => {
   const r = parseRRule(s)
@@ -84,9 +84,7 @@ describe("JSONL store hellgate", () => {
     await withTempDir(async (dir) => {
       const store = defaultJsonlAutomationStore({ baseDir: dir })
       await store.save("/w", sample("g"))
-      // save() already appends \n. Add another to simulate trailing blank.
-      const file = join(dir, "wsh-extra")
-      // No-op; the appendFile newline is the trailing newline.
+      // save() already appends \n; verify the line walker still parses cleanly.
       const loaded = await store.load("/w")
       expect(loaded.length).toBe(1)
     })
