@@ -74,7 +74,13 @@
       "@/reactor": ["./src/reactor/index.ts"],
       "@/reactor/*": ["./src/reactor/*"],
       "@/plugin-isolation": ["./src/plugin-isolation/index.ts"],
-      "@/plugin-isolation/*": ["./src/plugin-isolation/*"]
+      "@/plugin-isolation/*": ["./src/plugin-isolation/*"],
+      "@/scheduler": ["./src/scheduler/index.ts"],
+      "@/scheduler/*": ["./src/scheduler/*"],
+      "@/connectors": ["./src/connectors/index.ts"],
+      "@/connectors/*": ["./src/connectors/*"],
+      "@/retrieval": ["./src/retrieval/index.ts"],
+      "@/retrieval/*": ["./src/retrieval/*"]
     }
   },
   "include": ["src", "tests", "tools"],
