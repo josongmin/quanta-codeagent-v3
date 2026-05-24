@@ -40,6 +40,7 @@ import {
   SECTION_SLUGS,
   validateInvariants,
 } from "./schema"
+import { formatTestAuditReport, runTestAuditFromDisk } from "./test-audit"
 import { parseYaml, stringifyYaml } from "./yaml"
 
 const ROOT = process.cwd()
@@ -70,6 +71,7 @@ function usage(): never {
       "  judge [--min=L4] [--section=N] [--verbose] [--overclaimed]",
       "                              4-axis composite (monitoring/hellgate/wiring/structure) → solid/thin/overclaimed verdict",
       "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
+      "  test-audit [--strict] [--max-per-rule N]   12-rule admissibility audit over tests/ (R1-3 + R5 + R8-10 enforced; R4/R6/R7/R11/R12 semantic-only)",
       "  graph [--section N] [--id X] [--depth N]   emit DOT dependency DAG to stdout",
     ].join("\n"),
   )
@@ -1029,6 +1031,36 @@ async function cmdQuery(argv: string[]): Promise<void> {
   console.log(`\n${matched.length} of ${features.length} match`)
 }
 
+// --- test-audit ------------------------------------------------------------
+
+async function cmdTestAudit(argv: string[]): Promise<void> {
+  let strict = false
+  let maxPerRule = 10
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === "--strict") {
+      strict = true
+    } else if (a === "--max-per-rule") {
+      const v = argv[++i]
+      const n = v !== undefined ? Number(v) : Number.NaN
+      if (!Number.isFinite(n) || n < 0) {
+        console.error(`test-audit: --max-per-rule needs a non-negative integer (got "${v}")`)
+        process.exit(2)
+      }
+      maxPerRule = Math.floor(n)
+    } else {
+      console.error(`test-audit: unknown arg "${a}"`)
+      process.exit(2)
+    }
+  }
+  const { report } = await runTestAuditFromDisk(ROOT)
+  console.log(formatTestAuditReport(report, { maxPerRule, showSemantic: true }))
+  if (strict && report.totalViolations > 0) {
+    console.error(`test-audit: ${report.totalViolations} violation(s) — strict`)
+    process.exit(1)
+  }
+}
+
 // --- Entrypoint ------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -1083,6 +1115,9 @@ async function main(): Promise<void> {
       return
     case "graph":
       await cmdGraph(rest)
+      return
+    case "test-audit":
+      await cmdTestAudit(rest)
       return
     case undefined:
     case "-h":
