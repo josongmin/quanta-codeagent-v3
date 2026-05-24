@@ -37,18 +37,12 @@ beforeAll(async () => {
     path.join(workDir, "simple.csv"),
     "name,age,city,country\nAlice,30,NYC,US\nBob,25,LA,US\nCarol,40,Chicago,US\n",
   )
-  await writeFile(
-    path.join(workDir, "data.tsv"),
-    "name\tage\tcity\nAlice\t30\tNYC\nBob\t25\tLA\n",
-  )
+  await writeFile(path.join(workDir, "data.tsv"), "name\tage\tcity\nAlice\t30\tNYC\nBob\t25\tLA\n")
   await writeFile(
     path.join(workDir, "many.csv"),
     `name,age\n${Array.from({ length: 50 }, (_, i) => `R${i},${i}`).join("\n")}\n`,
   )
-  await writeFile(
-    path.join(workDir, "noheader.csv"),
-    "Alice,30\nBob,25\nCarol,40\n",
-  )
+  await writeFile(path.join(workDir, "noheader.csv"), "Alice,30\nBob,25\nCarol,40\n")
 })
 
 afterAll(async () => {
@@ -78,7 +72,7 @@ describe("A. parseCsv pure", () => {
     expect(r.rows[0]?.cells.map((c) => c.raw)).toEqual(["hello, world", "ok"])
     expect(r.diagnostics.length).toBe(0)
   })
-  test("4. escaped quote \"\" inside quoted cell → single \" in output", () => {
+  test('4. escaped quote "" inside quoted cell → single " in output', () => {
     const r = parseCsv('a,b\n"he said ""hi""",ok\n')
     expect(r.rows[0]?.cells[0]?.raw).toBe('he said "hi"')
     expect(r.rows[0]?.cells[1]?.raw).toBe("ok")

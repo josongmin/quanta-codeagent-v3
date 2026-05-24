@@ -34,14 +34,8 @@ const collect = async (input: unknown, c: ToolContext = ctx()): Promise<ToolResu
 
 beforeAll(async () => {
   workDir = await mkdtemp(path.join(tmpdir(), "ndjson-read-hellgate-"))
-  await writeFile(
-    path.join(workDir, "valid.ndjson"),
-    '{"a":1}\n{"b":2}\n{"c":3}\n',
-  )
-  await writeFile(
-    path.join(workDir, "mixed.ndjson"),
-    '{"ok":true}\n{not json\n{"second":"ok"}\n',
-  )
+  await writeFile(path.join(workDir, "valid.ndjson"), '{"a":1}\n{"b":2}\n{"c":3}\n')
+  await writeFile(path.join(workDir, "mixed.ndjson"), '{"ok":true}\n{not json\n{"second":"ok"}\n')
   await writeFile(
     path.join(workDir, "many.ndjson"),
     `${Array.from({ length: 50 }, (_, i) => JSON.stringify({ idx: i })).join("\n")}\n`,

@@ -19,9 +19,9 @@
  * "router NAME === SKILL.md kebab" assertion in case 2/4/6/8.
  */
 
+import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import {
   ADD_TESTS_SKILL_NAME,
   DEBUG_ERROR_SKILL_NAME,
@@ -84,9 +84,14 @@ describe("ADR-0134 — engineering-task skills bundle (hellgate)", () => {
       expect(name, `[${skill.dir}] frontmatter 'name' must match directory`).toBe(skill.dir)
 
       const description = typeof data.description === "string" ? data.description.trim() : ""
-      expect(description.length, `[${skill.dir}] frontmatter must declare 'description'`,).toBeGreaterThan(0)
+      expect(
+        description.length,
+        `[${skill.dir}] frontmatter must declare 'description'`,
+      ).toBeGreaterThan(0)
 
-      expect(Array.isArray(data.allowedTools), `[${skill.dir}] allowedTools must be a list`).toBe(true)
+      expect(Array.isArray(data.allowedTools), `[${skill.dir}] allowedTools must be a list`).toBe(
+        true,
+      )
       expect(
         (data.allowedTools as unknown[]).length,
         `[${skill.dir}] allowedTools must be non-empty`,
@@ -94,9 +99,15 @@ describe("ADR-0134 — engineering-task skills bundle (hellgate)", () => {
 
       // Mirror invariant: discoverSkills() reads `tools:` for runtime
       // enforcement; the system-skill convention bundles both fields.
-      expect(Array.isArray(data.tools), `[${skill.dir}] tools must be a list (lenient mirror)`).toBe(true)
+      expect(
+        Array.isArray(data.tools),
+        `[${skill.dir}] tools must be a list (lenient mirror)`,
+      ).toBe(true)
 
-      expect(data.userInvocable, `[${skill.dir}] must be userInvocable`).toBe(true)
+      // parseFrontmatter is lenient and returns scalars as strings (the
+      // strict 6-field parser in `skill-frontmatter.ts` is the one that
+      // coerces). The on-disk shape just needs to be the literal "true".
+      expect(String(data.userInvocable), `[${skill.dir}] must be userInvocable`).toBe("true")
       expect(data.category, `[${skill.dir}] category must be 'skill'`).toBe("skill")
     })
   }
@@ -143,7 +154,9 @@ describe("ADR-0134 — engineering-task skills bundle (hellgate)", () => {
   test("HELL-11: each SKILL.md body contains '## Procedure' header", () => {
     for (const skill of BUNDLE) {
       const { body } = readSkill(skill.dir)
-      expect(body, `[${skill.dir}] body must contain '## Procedure' header`).toContain("## Procedure")
+      expect(body, `[${skill.dir}] body must contain '## Procedure' header`).toContain(
+        "## Procedure",
+      )
     }
   })
 
@@ -178,7 +191,10 @@ describe("ADR-0134 — engineering-task skills bundle (hellgate)", () => {
     const discovered = await discoverSystemSkills()
     const discoveredNames = new Set(discovered.map((s) => s.name))
     for (const skill of BUNDLE) {
-      expect(discoveredNames.has(skill.name), `[${skill.name}] must appear in discoverSystemSkills()`).toBe(true)
+      expect(
+        discoveredNames.has(skill.name),
+        `[${skill.name}] must appear in discoverSystemSkills()`,
+      ).toBe(true)
     }
 
     // No duplicate names (silent shadow detector).

@@ -112,95 +112,130 @@ const freezeRow = (buf: RowBuf): CsvRow => ({
   lineNumber: buf.lineNumber,
 })
 
+/** Mutable cursor state threaded through the two state-machine handlers.
+ *  Kept as a struct (not destructured args) so the handlers can mutate in
+ *  place without juggling tuples. */
+interface TokenizerState {
+  rows: RowBuf[]
+  cur: RowBuf
+  cellIdx: number
+  line: number
+  /** index advance for the OUTER loop: 0 means just `i++`, 1 means skip the
+   *  next char (CRLF or `""` look-ahead consumed). */
+  skipNext: boolean
+  quoted: boolean
+  openQuoteLine: number
+}
+
+const appendChar = (st: TokenizerState, ch: string): void => {
+  st.cur.cells[st.cellIdx] = (st.cur.cells[st.cellIdx] ?? "") + ch
+}
+
+const closeRow = (st: TokenizerState): void => {
+  st.rows.push(st.cur)
+  st.cur = { cells: [""], lineNumber: st.line + 1 }
+  st.cellIdx = 0
+}
+
+/** Quoted-state handler: process one char while inside a `"…"` cell. */
+const stepQuoted = (st: TokenizerState, source: string, i: number, ch: string): void => {
+  if (ch === '"') {
+    // Look-ahead for escaped quote `""`.
+    if (source[i + 1] === '"') {
+      appendChar(st, '"')
+      st.skipNext = true
+    } else {
+      st.quoted = false
+    }
+    return
+  }
+  if (ch === "\n") {
+    // Embedded newline inside quoted cell — preserve verbatim, advance line.
+    appendChar(st, ch)
+    st.line++
+    return
+  }
+  appendChar(st, ch)
+}
+
+/** Field-state handler: process one char while outside any quoted cell. */
+const stepField = (
+  st: TokenizerState,
+  source: string,
+  i: number,
+  ch: string,
+  delimiter: string,
+): void => {
+  if (ch === '"' && (st.cur.cells[st.cellIdx] ?? "") === "") {
+    st.quoted = true
+    st.openQuoteLine = st.line
+    return
+  }
+  if (ch === delimiter) {
+    st.cellIdx++
+    st.cur.cells.push("")
+    return
+  }
+  if (ch === "\r") {
+    // CRLF — swallow the LF that follows; bare CR is treated as a line break.
+    if (source[i + 1] === "\n") st.skipNext = true
+    closeRow(st)
+    st.line++
+    return
+  }
+  if (ch === "\n") {
+    closeRow(st)
+    st.line++
+    return
+  }
+  appendChar(st, ch)
+}
+
 /** RFC-4180 quote-aware split — returns the rows as `string[][]` plus
  *  per-row source line numbers and any unterminated-quote diagnostics. */
 const tokenize = (
   source: string,
   delimiter: string,
 ): { rows: RowBuf[]; diagnostics: CsvParseDiagnostic[] } => {
-  const rows: RowBuf[] = []
-  const diagnostics: CsvParseDiagnostic[] = []
-  let cur: RowBuf = { cells: [""], lineNumber: 1 }
-  let cellIdx = 0
-  let line = 1
-  let quoted = false
-  let openQuoteLine = 0
-
-  const pushCell = (): void => {
-    cellIdx++
-    cur.cells.push("")
-  }
-
-  const pushRow = (): void => {
-    rows.push(cur)
-    cur = { cells: [""], lineNumber: line }
-    cellIdx = 0
+  const st: TokenizerState = {
+    rows: [],
+    cur: { cells: [""], lineNumber: 1 },
+    cellIdx: 0,
+    line: 1,
+    skipNext: false,
+    quoted: false,
+    openQuoteLine: 0,
   }
 
   for (let i = 0; i < source.length; i++) {
     const ch = source[i] ?? ""
-    if (quoted) {
-      if (ch === '"') {
-        // Look-ahead for escaped quote `""`.
-        if (source[i + 1] === '"') {
-          cur.cells[cellIdx] = (cur.cells[cellIdx] ?? "") + '"'
-          i++
-        } else {
-          quoted = false
-        }
-        continue
-      }
-      // Embedded newline inside quoted cell — preserve verbatim, advance line.
-      if (ch === "\n") {
-        cur.cells[cellIdx] = (cur.cells[cellIdx] ?? "") + ch
-        line++
-        continue
-      }
-      cur.cells[cellIdx] = (cur.cells[cellIdx] ?? "") + ch
-      continue
+    st.skipNext = false
+    if (st.quoted) {
+      stepQuoted(st, source, i, ch)
+    } else {
+      stepField(st, source, i, ch, delimiter)
     }
-    // Not in a quoted cell.
-    if (ch === '"' && (cur.cells[cellIdx] ?? "") === "") {
-      quoted = true
-      openQuoteLine = line
-      continue
-    }
-    if (ch === delimiter) {
-      pushCell()
-      continue
-    }
-    if (ch === "\r") {
-      // CRLF — swallow the LF that follows; bare CR is treated as a line break.
-      if (source[i + 1] === "\n") i++
-      pushRow()
-      line++
-      continue
-    }
-    if (ch === "\n") {
-      pushRow()
-      line++
-      continue
-    }
-    cur.cells[cellIdx] = (cur.cells[cellIdx] ?? "") + ch
+    if (st.skipNext) i++
   }
 
   // Flush the final row if anything is buffered. A trailing newline yields
   // a fresh empty row buffer; we treat a single-empty-cell row at EOF as
   // a non-row (matches `String.split("\n")` semantics for trailing `\n`).
-  const lastCell = cur.cells[cellIdx] ?? ""
-  const hasContent = cur.cells.length > 1 || lastCell !== ""
+  const lastCell = st.cur.cells[st.cellIdx] ?? ""
+  const hasContent = st.cur.cells.length > 1 || lastCell !== ""
   if (hasContent) {
-    rows.push(cur)
+    st.rows.push(st.cur)
   }
 
-  if (quoted) {
+  const diagnostics: CsvParseDiagnostic[] = []
+  if (st.quoted) {
     diagnostics.push({
       kind: "unterminated-quote",
-      line: openQuoteLine,
-      message: `unterminated quoted cell starting at line ${openQuoteLine}`,
+      line: st.openQuoteLine,
+      message: `unterminated quoted cell starting at line ${st.openQuoteLine}`,
     })
   }
-  return { rows, diagnostics }
+  return { rows: st.rows, diagnostics }
 }
 
 /** Parse a CSV / TSV string into typed rows + diagnostics.
@@ -260,8 +295,7 @@ export const parseCsv = (source: string, opts: CsvParseOpts = {}): CsvParseResul
     }
   }
 
-  const expectedCols =
-    headers !== null ? headers.length : (rawRows[0]?.cells.length ?? 0)
+  const expectedCols = headers !== null ? headers.length : (rawRows[0]?.cells.length ?? 0)
 
   const rows: CsvRow[] = []
   const allDiagnostics: CsvParseDiagnostic[] = [...diagnostics]

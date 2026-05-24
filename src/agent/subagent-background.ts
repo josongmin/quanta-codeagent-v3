@@ -48,7 +48,11 @@
  */
 
 import { randomBytes } from "node:crypto"
-import type { SubagentRequest, SubagentResult as SliceRunnerOutcome, SubagentRunner } from "@/subagent"
+import type {
+  SubagentResult as SliceRunnerOutcome,
+  SubagentRequest,
+  SubagentRunner,
+} from "@/subagent"
 
 /** Opaque handle id — `bg-<16hex>`. Stable for the scheduler's lifetime. */
 export type SubagentHandleId = string
@@ -238,22 +242,29 @@ export const defaultBackgroundSubagentScheduler = (
     return n
   }
 
+  /** Find the oldest (insertion-order first) TERMINAL handle in the store,
+   *  or undefined if none. Used by LRU eviction. */
+  const findOldestTerminalKey = (): SubagentHandleId | undefined => {
+    for (const [k, e] of store.entries()) {
+      if (isTerminal(e.result.status)) return k
+    }
+    return undefined
+  }
+
+  /** Count TERMINAL entries — only these count against `maxRetained`. */
+  const countTerminal = (): number => {
+    let n = 0
+    for (const e of store.values()) if (isTerminal(e.result.status)) n += 1
+    return n
+  }
+
   /** LRU drop of TERMINAL entries when the retained cap is exceeded. Running
    *  entries are skipped — they have an in-flight promise the caller may
    *  still await; auto-dropping them would corrupt the await surface. */
   const evictIfOver = (): void => {
-    // Count terminal entries; only those count against `maxRetained`.
-    let terminalCount = 0
-    for (const e of store.values()) if (isTerminal(e.result.status)) terminalCount += 1
+    let terminalCount = countTerminal()
     while (terminalCount > maxRetained) {
-      // First terminal key in insertion order — that's the LRU drop target.
-      let oldestKey: SubagentHandleId | undefined
-      for (const [k, e] of store.entries()) {
-        if (isTerminal(e.result.status)) {
-          oldestKey = k
-          break
-        }
-      }
+      const oldestKey = findOldestTerminalKey()
       if (oldestKey === undefined) break
       store.delete(oldestKey)
       terminalCount -= 1

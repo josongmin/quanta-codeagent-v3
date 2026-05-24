@@ -31,10 +31,7 @@ export const CSV_READ_MAX_OUTPUT = 50_000
 
 export const csvReadInputSchema = z.object({
   path: z.string().min(1).describe("Repo-relative or absolute path to the CSV/TSV file"),
-  delimiter: z
-    .string()
-    .optional()
-    .describe('Field delimiter (default ","). Use "\\t" for TSV.'),
+  delimiter: z.string().optional().describe('Field delimiter (default ","). Use "\\t" for TSV.'),
   noHeader: z
     .boolean()
     .optional()
@@ -45,7 +42,9 @@ export const csvReadInputSchema = z.object({
     .positive()
     .max(CSV_READ_MAX_ROWS_CEILING)
     .optional()
-    .describe(`Max rows to render (default ${CSV_READ_DEFAULT_MAX_ROWS}, ceiling ${CSV_READ_MAX_ROWS_CEILING})`),
+    .describe(
+      `Max rows to render (default ${CSV_READ_DEFAULT_MAX_ROWS}, ceiling ${CSV_READ_MAX_ROWS_CEILING})`,
+    ),
 })
 export type CsvReadInput = z.infer<typeof csvReadInputSchema>
 
