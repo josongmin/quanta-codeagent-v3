@@ -1,0 +1,38 @@
+id: quanta-home-meta-root
+title: QUANTA_HOME — cross-cutting app-home root override
+section: 10
+subsystem: 앱 홈 디렉터리 (cross-cutting path SSOT)
+order: 9
+maturity: L4
+status: stable
+purpose: |
+  Single env override that relocates every Quanta-owned persistent path —
+  permission-state, bench corpus/artifacts, prefs fallback parent, and other
+  feature-site path derivations. NOT owned by any one subsystem: permission-
+  store, bench/corpus/paths, and runtime-config SSOT all consume it. Absent ⇒
+  feature sites compute `~/.quanta` (per ADR-0046 convention). Routed
+  exclusively through `runtimeConfig().quantaHome` — no direct
+  `process.env.QUANTA_HOME` reads outside the SSOT. Distinct from
+  `QUANTA_PREFS_HOME` (prefs-only override) and `QUANTA_BENCH_HOME` (bench-
+  only override); when only `QUANTA_HOME` is set those subsystems derive
+  their roots underneath it.
+evidence:
+  code:
+    - src/shared/runtime-config.ts
+    - src/permission/permission-store.ts
+    - src/apps/bench/corpus/paths.ts
+    - src/apps/cli/help-render.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: [QUANTA_HOME]
+deliberate_hold: null
+notes: |
+  Cross-cutting meta-knob: included for catalog discoverability because no
+  single feature owns it. The runtime-config SSOT (`runtime-config-ssot`)
+  enforces validate-once + frozen-snapshot semantics; consuming features
+  (per-host-agent-mode / post-denial-precedence / per-thread-permissions /
+  bench corpus) reference it in their own `knobs:` list to declare the
+  dependency.
