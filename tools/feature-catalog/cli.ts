@@ -11,6 +11,7 @@
  *   add <section> <slug> — scaffold a template YAML
  *   diff               — compare current MD against fresh render (line diff)
  *   check-evidence     — verify evidence files exist
+ *   graph              — emit DOT dependency DAG (depends_on) to stdout
  *
  * Exit codes: 0=ok, 1=error, 2=usage.
  *
@@ -36,7 +37,7 @@ import {
   SECTION_NAMES,
   SECTION_SLUGS,
 } from "./schema"
-import { stringifyYaml } from "./yaml"
+import { parseYaml, stringifyYaml } from "./yaml"
 
 const ROOT = process.cwd()
 const FEATURES_DIR = "tools/feature-catalog/features"
@@ -64,6 +65,7 @@ function usage(): never {
       "  stale                       flag entries where source newer than yaml >7d",
       "  query label:X owner:Y ...   filter by labels/owners/section/maturity/depends/grade",
       "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
+      "  graph [--section N] [--id X] [--depth N]   emit DOT dependency DAG to stdout",
     ].join("\n"),
   )
   process.exit(2)
@@ -523,6 +525,200 @@ async function cmdCheckChanged(argv: string[]): Promise<void> {
   )
 }
 
+// --- graph -----------------------------------------------------------------
+
+interface GraphFilters {
+  section: number | null
+  id: string | null
+  depth: number | null
+}
+
+/**
+ * Re-read a feature's raw YAML and extract `depends_on:` (a list of feature
+ * ids).  We bypass the zod schema because `depends_on` is not a declared field
+ * yet — the schema would strip it.  Missing / non-list values yield `[]`.
+ */
+async function readDependsOn(path: string): Promise<string[]> {
+  let raw: unknown
+  try {
+    const text = await readFile(path, "utf8")
+    raw = parseYaml(text)
+  } catch {
+    return []
+  }
+  if (!raw || typeof raw !== "object") return []
+  const value = (raw as Record<string, unknown>).depends_on
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item === "string" && item.length > 0) out.push(item)
+  }
+  return out
+}
+
+/** Build adjacency: id -> deps (forward) and id -> dependents (reverse). */
+async function buildDepGraph(
+  features: LoadedFeature[],
+): Promise<{ forward: Map<string, string[]>; reverse: Map<string, string[]> }> {
+  const forward = new Map<string, string[]>()
+  const reverse = new Map<string, string[]>()
+  for (const { feature } of features) {
+    forward.set(feature.id, [])
+    reverse.set(feature.id, [])
+  }
+  for (const { feature, path } of features) {
+    const deps = await readDependsOn(path)
+    forward.set(feature.id, deps)
+    for (const d of deps) {
+      const list = reverse.get(d) ?? []
+      list.push(feature.id)
+      reverse.set(d, list)
+    }
+  }
+  return { forward, reverse }
+}
+
+/** BFS up to `depth` (or unbounded if null) from `start` over `adj`. */
+function bfs(start: string, adj: Map<string, string[]>, depth: number | null): Set<string> {
+  const visited = new Set<string>([start])
+  let frontier: string[] = [start]
+  let d = 0
+  while (frontier.length > 0 && (depth === null || d < depth)) {
+    const next: string[] = []
+    for (const n of frontier) {
+      for (const m of adj.get(n) ?? []) {
+        if (!visited.has(m)) {
+          visited.add(m)
+          next.push(m)
+        }
+      }
+    }
+    frontier = next
+    d++
+  }
+  return visited
+}
+
+/** Escape a string for use as a DOT identifier (quoted). */
+function dotEscape(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+function parseGraphArgs(argv: string[]): GraphFilters {
+  const filters: GraphFilters = { section: null, id: null, depth: null }
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === "--section") {
+      const v = argv[++i]
+      filters.section = v !== undefined ? Number(v) : null
+    } else if (a === "--id") {
+      filters.id = argv[++i] ?? null
+    } else if (a === "--depth") {
+      const v = argv[++i]
+      filters.depth = v !== undefined ? Number(v) : null
+    } else {
+      console.error(`graph: unknown arg "${a}"`)
+      process.exit(2)
+    }
+  }
+  return filters
+}
+
+function computeIncluded(
+  features: LoadedFeature[],
+  filters: GraphFilters,
+  forward: Map<string, string[]>,
+  reverse: Map<string, string[]>,
+): Set<string> {
+  let included = new Set<string>(features.map((f) => f.feature.id))
+  if (filters.id !== null) {
+    if (!included.has(filters.id)) {
+      console.error(`graph: no feature with id "${filters.id}"`)
+      process.exit(1)
+    }
+    const ancestors = bfs(filters.id, reverse, filters.depth) // who depends on me
+    const descendants = bfs(filters.id, forward, filters.depth) // who do I depend on
+    included = new Set<string>([...ancestors, ...descendants])
+  }
+  if (filters.section !== null) {
+    const inSection = new Set<string>(
+      features
+        .filter(({ feature }) => feature.section === filters.section)
+        .map(({ feature }) => feature.id),
+    )
+    included = new Set<string>([...included].filter((id) => inSection.has(id)))
+  }
+  return included
+}
+
+function groupBySection(
+  features: LoadedFeature[],
+  included: Set<string>,
+): Map<number, LoadedFeature[]> {
+  const bySection = new Map<number, LoadedFeature[]>()
+  for (const lf of features) {
+    if (!included.has(lf.feature.id)) continue
+    const list = bySection.get(lf.feature.section) ?? []
+    list.push(lf)
+    bySection.set(lf.feature.section, list)
+  }
+  return bySection
+}
+
+function emitClusters(bySection: Map<number, LoadedFeature[]>): string[] {
+  const lines: string[] = []
+  for (const sec of [...bySection.keys()].sort((a, b) => a - b)) {
+    const slug = SECTION_SLUGS[sec] ?? `section-${sec}`
+    lines.push(`  subgraph cluster_section${sec} {`)
+    lines.push(`    label="${dotEscape(`${pad2(sec)}-${slug}`)}";`)
+    for (const { feature } of bySection.get(sec) ?? []) {
+      lines.push(`    "${dotEscape(feature.id)}";`)
+    }
+    lines.push("  }")
+  }
+  return lines
+}
+
+function emitEdges(
+  features: LoadedFeature[],
+  included: Set<string>,
+  forward: Map<string, string[]>,
+): string[] {
+  const lines: string[] = []
+  for (const { feature } of features) {
+    if (!included.has(feature.id)) continue
+    for (const d of forward.get(feature.id) ?? []) {
+      if (!included.has(d)) continue
+      lines.push(`  "${dotEscape(feature.id)}" -> "${dotEscape(d)}" [label="depends_on"];`)
+    }
+  }
+  return lines
+}
+
+function emitGraphDot(
+  features: LoadedFeature[],
+  included: Set<string>,
+  forward: Map<string, string[]>,
+): string {
+  const bySection = groupBySection(features, included)
+  return [
+    "digraph catalog {",
+    "  rankdir=LR;",
+    "  node [shape=box, style=rounded];",
+    ...emitClusters(bySection),
+    ...emitEdges(features, included, forward),
+    "}",
+  ].join("\n")
+}
+
+async function cmdGraph(argv: string[]): Promise<void> {
+  const filters = parseGraphArgs(argv)
+  const features = await loadFeaturesStrict(FEATURES_DIR)
+  const { forward, reverse } = await buildDepGraph(features)
+  const included = computeIncluded(features, filters, forward, reverse)
+  console.log(emitGraphDot(features, included, forward))
+}
+
 // --- Helpers ---------------------------------------------------------------
 
 function pad2(n: number): string {
@@ -742,6 +938,9 @@ async function main(): Promise<void> {
     case "gates":
       await cmdGates(rest)
       return
+    case "graph":
+      await cmdGraph(rest)
+      return
     case undefined:
     case "-h":
     case "--help":
@@ -771,6 +970,7 @@ export {
   cmdCheckChanged,
   cmdDiff,
   cmdGates,
+  cmdGraph,
   cmdLint,
   cmdList,
   cmdShow,
