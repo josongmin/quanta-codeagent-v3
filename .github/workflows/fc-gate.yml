@@ -1,0 +1,61 @@
+# feature-catalog PR-time gate.
+#
+# Complements the always-on fc steps in `ci.yml` (validate + diff + lint +
+# check-changed). This workflow adds the maturity-promotion-gate audit and
+# scopes triggering to the paths that can change the catalog signal.
+#
+#   validate        — every evidence file/ADR/test exists                   FAIL
+#   check-changed   — new src/*.ts must be referenced by a feature YAML     FAIL
+#   lint            — empty-stub count + orphan Accepted ADRs do not grow   FAIL
+#   gates           — maturity-promotion-gate audit                         WARN
+#
+# Why gates is warn-only: 2 doc-only violations (deliberate_hold) currently
+# stand. We surface them in the GITHUB_STEP_SUMMARY so reviewers can see the
+# count, but we don't block the merge on advisory drift.
+name: feature-catalog gate
+
+on:
+  pull_request:
+    paths:
+      - "tools/feature-catalog/**"
+      - "src/**"
+      - "docs/decisions/**"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fc-gate:
+    name: fc-gate (validate + check-changed + gates audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need merge-base for `fc check-changed` to diff against.
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+
+      - name: fc validate (every evidence file/ADR/test exists)
+        run: bun fc validate
+
+      - name: fc check-changed (PR only — added src must be catalog'd)
+        if: github.event_name == 'pull_request'
+        run: bun fc check-changed origin/${{ github.event.pull_request.base.ref }}
+
+      - name: fc gates (advisory — warn-only, surfaced in step summary)
+        run: |
+          {
+            echo "### feature-catalog maturity-promotion gates"
+            echo ""
+            echo '```'
+            bun fc gates || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: fc lint (empty-stub + orphan-ADR ratchet)
+        run: bun fc lint
