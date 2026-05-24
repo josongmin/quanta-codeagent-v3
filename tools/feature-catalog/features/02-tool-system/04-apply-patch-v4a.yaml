@@ -13,7 +13,7 @@ configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
 config_refs:
-  env: ["QUANTA_ATTRS"]
+  env: []
 purpose: '`*** Begin/End Patch` + `*** Add/Delete/Update File:` + `*** Move to:` (rename+edit atomic) + `@@ <context>` anchor + `*** End of File` 보존. parser는 grammar 위반에 PatchParseError(1-based line) — silent recovery 0. applier는 2-tier(exact → trim) 매칭 + 다중 hit 시 PatchApplyError("ambiguous context") + 0 hit 시 PatchAnchorNotFoundError. Move-to는 pre-flight(source 존재 + dest 미존재) → write + delete-source, intermediate failure는 typed throw.'
 evidence:
   code:

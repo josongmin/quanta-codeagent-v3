@@ -33,6 +33,7 @@ evidence:
     - src/apps/cli/permission-explain.ts
     - src/apps/cli/slash-commands.ts
     - src/apps/cli/help-render.ts
+    - src/llm/factory.ts
   adrs: []
   tests:
     unit:

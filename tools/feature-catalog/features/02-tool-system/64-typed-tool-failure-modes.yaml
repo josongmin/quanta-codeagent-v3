@@ -12,7 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:cli]
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE"]
+  env: ["QUANTA_CAP_ENFORCE"]
 purpose: |
   Cursor EditResult/ShellResult의 discriminated failure union 흡수 — 기존 ok:false 도구 결과의
   output 문자열을 모델이 정규식으로 재파싱하던 부담을 닫힌 enum으로 대체. ToolResult.failure?:

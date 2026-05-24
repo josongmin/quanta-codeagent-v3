@@ -21,6 +21,7 @@ evidence:
     - src/agent/working-state.ts
     - src/tool/types.ts
     - src/apps/cli/help-render.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit: [tests/unit/cross-slice-mirrors.test.ts, tests/unit/hitl-tier-gate.test.ts]

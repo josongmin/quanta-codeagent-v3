@@ -23,6 +23,7 @@ evidence:
     - src/apps/cli/status-cmd.ts
     - src/apps/cli/auth-ui.ts
     - src/apps/cli/help-render.ts
+    - src/llm/factory.ts
   adrs: [59, 94]
   tests:
     unit: [tests/unit/slash-commands.test.ts, tests/unit/auth/login-status-cmd.test.ts, tests/unit/auth/auth-ui.test.ts]

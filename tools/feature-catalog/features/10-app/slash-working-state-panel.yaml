@@ -29,6 +29,7 @@ evidence:
     - src/apps/cli/working-state-panel.ts
     - src/apps/cli/slash-commands.ts
     - src/apps/cli/help-render.ts
+    - src/llm/factory.ts
   adrs: []
   tests:
     unit:

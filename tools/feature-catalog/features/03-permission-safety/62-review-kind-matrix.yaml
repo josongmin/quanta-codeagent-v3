@@ -13,7 +13,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, absorbed:cursor, surface:cli]
 config_refs:
-  env: ["QUANTA_ATTRS"]
+  env: []
 purpose: |
   Cursor approval gate의 타입드 매트릭스 흡수 — quanta 권한 레이어에 "무엇을 리뷰하는가" 축
   추가. HITLTier(ADR-0020 — 행위 risk 형상)와 ReviewerTier(ADR-0029 — 누가 결정)와 직교.

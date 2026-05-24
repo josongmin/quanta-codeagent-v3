@@ -48,6 +48,7 @@ evidence:
     - src/tool/document/pdf-read.ts
     - src/tool/document/yaml-read.ts
     - src/storage/service.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:

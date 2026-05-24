@@ -13,7 +13,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 config_refs:
-  env: ["QUANTA_ATTRS"]
+  env: []
 purpose: |
   ADR-0029 reviewer 3-tier + ADR-0046 stack-axis + post-denial vocabulary
   (`quanta.permission.*` 12 키)가 vocabulary.ts에 선언만 있고 실제 emit

@@ -10,7 +10,7 @@ monitoring: partial
 modes: [n-a]
 configurable: integrated
 config_refs:
-  env: [QUANTA_ADDENDUM]
+  env: []
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core, tier:core]
 purpose: |

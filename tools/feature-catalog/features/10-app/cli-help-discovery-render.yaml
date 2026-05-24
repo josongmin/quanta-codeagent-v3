@@ -37,6 +37,7 @@ evidence:
     - src/apps/cli/repl/prompt-source.ts
     - src/apps/eval/index.ts
     - src/apps/cli/internal.ts
+    - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:

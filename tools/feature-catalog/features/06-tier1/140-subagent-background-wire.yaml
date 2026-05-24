@@ -5,14 +5,14 @@ subsystem: Tier-1 background subagent caller-wire (deferred-wire close)
 order: 140
 maturity: L4
 status: stable
-ui_surfaces: [cli]
+ui_surfaces: [n-a]
 monitoring: n-a
-modes: [interactive, headless]
-configurable: integrated
-config_refs:
-  env: ["QUANTA_SUBAGENT"]
+modes: [n-a]
+configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
+config_refs:
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |
   Caller-wire closure for ADR-0130 — adds AgentConfig.subagentBackground
   typed slot + FeaturesConfig Pick + buildSessionFeatures composer step
@@ -27,18 +27,17 @@ evidence:
   code:
     - src/agent/types.ts
     - src/agent/tier1/index.ts
-    - src/agent/tier1/subagent-bg.ts
-    - src/agent/tier1/subagent.ts
     - src/agent/features.ts
-    - src/subagent/index.ts
-    - src/runner/assemble/subagent.ts
+    - src/agent/tier1/subagent-bg.ts
+    - src/apps/bench/eval/driver.ts
+    - src/apps/cli/help-render.ts
+    - src/shared/runtime-config.ts
   adrs: [145, 140]
   tests:
     unit:
       - tests/unit/subagent-background-wire-hellgate.test.ts
-      - tests/unit/subagent-background-hellgate.test.ts
-    integration:
-      - tests/integration/subagent-fork-e2e.test.ts
+      - tests/unit/features.test.ts
+    integration: []
     contract: []
 knobs: []
 deliberate_hold: null

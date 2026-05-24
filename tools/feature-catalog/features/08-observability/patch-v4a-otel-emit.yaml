@@ -13,7 +13,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_FS_JAIL"]
+  env: ["QUANTA_FS_JAIL"]
 purpose: |
   `quanta.patch.op` (`add | update | delete | move`) + `quanta.patch.
   fuzzy_match_tier` (`exact | whitespace | fuzzy`) + `fuzzy_matched`
@@ -32,6 +32,7 @@ evidence:
     - src/patch/parser.ts
     - src/tool/apply-patch.ts
     - src/apps/cli/help-render.ts
+    - src/shared/runtime-config.ts
   adrs: [28, 32]
   tests:
     unit:
