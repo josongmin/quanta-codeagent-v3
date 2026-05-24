@@ -116,10 +116,12 @@ const overlapStartPos = (
   return lo
 }
 
-/** Validate options + bucket budget. Throws on invalid config. */
+/** Validate options + bucket budget. Throws on invalid config (including NaN,
+ *  which compares false for every relational op and would silently pass a
+ *  naive `ratio < 0 || ratio >= 1` check). */
 const validateOptions = (opts: ChunkBucketOptions): { budget: number; ratio: number } => {
   const ratioRaw = opts.overlapRatio ?? DEFAULT_OVERLAP_RATIO
-  if (ratioRaw < 0 || ratioRaw >= 1) {
+  if (!Number.isFinite(ratioRaw) || ratioRaw < 0 || ratioRaw >= 1) {
     throw new RetrievalError(`overlapRatio out of range [0, 1): ${ratioRaw}`)
   }
   const budget = BUCKET_TOKENS[opts.bucket]
