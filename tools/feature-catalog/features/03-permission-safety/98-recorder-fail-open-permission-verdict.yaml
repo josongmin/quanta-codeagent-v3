@@ -1,0 +1,37 @@
+id: recorder-fail-open-permission-verdict
+title: Permission recorder — observability fail-open invariant (verdict cannot be flipped by emitter throw)
+section: 3
+subsystem: Permission slice telemetry — "observability bugs MUST NOT abort a permission decision"
+order: 98
+maturity: L4
+status: stable
+purpose: |
+  Negative invariant: a thrown PermissionRecorder cannot deny an otherwise-
+  allowable action nor allow an otherwise-denied one. Every emit helper
+  wraps the registered recorder in try/catch and swallows the throw — the
+  gate's verdict is computed BEFORE the emit and the emit is fire-and-forget.
+  Default-OFF guarantee: with no registered recorder, every helper is a
+  zero-allocation no-op (the hot path stays byte-identical to its pre-emit
+  form). Security companion invariant: the slice-local `PermissionDecisionRecord`
+  carries ONLY categorical / pre-hashed primitives (outcome / reviewerTier /
+  riskLevel / pre-categorized stackSource label / 32-hex actionSignature /
+  opaque threadId+hostId) — never raw command text, action.input, rationale,
+  or matched HARD_DENY rule source. A field-by-field audit at every emit
+  site is the structural enforcement.
+evidence:
+  code:
+    - src/permission/recorder.ts
+  adrs: [46, 32, 29]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'No knob inverts this — the swallow is structural. A "loud emit" mode would couple verdict to telemetry health, defeating the invariant.'
+  promotion_path: 'N/A — invariant is the goal state.'
+notes: |
+  Mirrors the same fail-open posture documented for `@/observability/spans.ts`.
+  Slice rule: this module imports NOTHING beyond TypeScript built-ins (RFC 3.1
+  isolation; cross-slice OTel routing happens in an adapter in `@/agent` or
+  the composition root).

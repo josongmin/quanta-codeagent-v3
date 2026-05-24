@@ -1,0 +1,34 @@
+id: patch-observer-fail-open
+title: Patch applier — observer + OTel emitter fail-open (telemetry bugs MUST NOT abort apply)
+section: 7
+subsystem: V4A apply-pipeline boundary discipline
+order: 16
+maturity: L4
+status: stable
+purpose: |
+  Negative invariant: a throw from EITHER the in-process user observer OR
+  the canonical OTel emitter is caught + swallowed so apply semantics are
+  independent of telemetry health. The `wrapObserver` helper executes each
+  emit in its own try/catch — a user-observer throw cannot stop the canonical
+  OTel emit and a telemetry bug cannot abort the apply pipeline. Per-op
+  events ("add"/"update"/"delete"/"move" + fuzzy-match tier "exact"/
+  "whitespace") are categorical only — the observer/emitter NEVER receive
+  patch text, file content, hunk lines, or anchor strings.
+evidence:
+  code:
+    - src/patch/applier.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/patch-v4a-otel-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'No knob inverts this — the swallow is structural. A "loud emit" mode would couple apply success to telemetry health.'
+  promotion_path: 'N/A — invariant is the goal state.'
+notes: |
+  Companion to `recorder-fail-open-permission-verdict` and the same posture
+  documented for `@/observability/spans.ts`. The emitter pair is layered:
+  user observer runs first, then OTel (each in its own try/catch) so vocabulary
+  keys always fire regardless of in-process consumer health.
