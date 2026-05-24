@@ -1,0 +1,61 @@
+id: agent-features-tier1
+title: Tier-1 builders → per-subsystem composer (9 builders SRP split)
+section: 1
+subsystem: 코어 루프 SOLID 회복
+order: 204
+maturity: L4
+status: new
+purpose: |
+  `src/agent/features.ts` (393 LOC of SessionFeatures 합성 GodFn) 을 9 개
+  per-subsystem builder + composer 로 분해. 각 builder 는 ONE optional config
+  block → ONE concrete 런타임 object (or `undefined` 으로 byte-identical
+  default-OFF 보존).
+
+  9 builders (`src/agent/tier1/`):
+    - `auto-classifier`   — buildClassifierBlock
+    - `branch-search`     — buildBranchSearchBlock
+    - `plan-exit`         — buildPlanExitBlock
+    - `plan-mutation`     — buildPlanMutationBlock
+    - `shadow`            — buildShadowBlock
+    - `skill`             — buildSkillBlock (+ SkillBlock type)
+    - `subagent`          — buildSubagentBlock (+ SubagentBlock type)
+    - `user-input`        — buildUserInputBlock
+    - `web-search`        — buildWebSearchBlock
+    - `working-state`     — buildWorkingStateBlock (+ WorkingStateBlock type)
+
+  `features.ts` 393 → ~200 LOC composer: builder 호출 시퀀스 + 결과를
+  `SessionFeatures` shape 으로 fold. composer 는 builder 추가에 대해 closed —
+  새 tier-1 추가는 `tier1/` 신규 모듈 + `index.ts` re-export + features.ts 한 줄
+  composer fold push.
+
+  Edge direction 엄격: `features.ts` 가 `tier1/*` 를 IMPORT;
+  `tier1/*` 는 절대 `features.ts` 를 import 금지. import-cycle guard
+  (`tests/unit/agent-import-cycle.test.ts`) 가 단순한 이유 — `tier1/*` 는
+  하위 디렉토리에 있어 top-level SCC 분석에서 invisible, 그리고 one-way edge
+  이므로 새 cycle 0.
+evidence:
+  code:
+    - src/agent/features.ts
+    - src/agent/tier1/index.ts
+    - src/agent/tier1/auto-classifier.ts
+    - src/agent/tier1/branch-search.ts
+    - src/agent/tier1/plan-exit.ts
+    - src/agent/tier1/plan-mutation.ts
+    - src/agent/tier1/shadow.ts
+    - src/agent/tier1/skill.ts
+    - src/agent/tier1/subagent.ts
+    - src/agent/tier1/user-input.ts
+    - src/agent/tier1/web-search.ts
+    - src/agent/tier1/working-state.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/features.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  SRP per builder — 각 builder 의 config gating / undefined short-circuit / 결과
+  shape 이 단일 모듈에 격리. composer 는 비즈니스 결정 0 (순수 fold). OCP:
+  새 tier-1 추가 코스트 일정 (3-step: 모듈 + barrel + composer push).

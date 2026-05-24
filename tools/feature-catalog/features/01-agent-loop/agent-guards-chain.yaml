@@ -1,0 +1,49 @@
+id: agent-guards-chain
+title: TurnGuard chain (verify + closeout 통합 OCP)
+section: 1
+subsystem: 코어 루프 SOLID 회복
+order: 202
+maturity: L4
+status: new
+purpose: |
+  `verifyGuardStep` + `closeoutGuardStep` 의 ad-hoc 분기 호출을 OCP-friendly
+  TurnGuard chain 으로 통합. 각 guard 는 동일 인터페이스(`{name, run(ctx) →
+  GuardOutcome}`)를 구현하고 array order 가 우선순위 (Verify > Closeout).
+
+  핵심 구조:
+    - `src/agent/guards/index.ts` — 배럴 + chain runner export
+    - `chain.ts`                  — `runGuardChain(guards, ctx)` 순차 실행 +
+                                    short-circuit on emit/stop
+    - `verify-guard.ts`           — 기존 verifyGuardStep wrap (semantics 보존)
+    - `closeout-guard.ts`         — 기존 closeoutGuardStep wrap (semantics 보존)
+    - `shared.ts`                 — 공통 GuardOutcome / GuardContext 타입
+    - `build.ts`                  — config → guard[] composer
+
+  SRP/OCP 회복: 새 guard 추가는 새 모듈 + array push, 기존 코드 0 변경. 우선순위
+  array 순서로 명시 — Verify 가 먼저 (verdict 강한 게이트), Closeout 이 뒤
+  (final nudge). 단일 인터페이스로 guard-level 테스트가 fake context 만으로
+  독립 검증 가능.
+
+  Byte-identical: chain runner 는 이전 두-단계 호출과 동일한 emit 순서 / 동일
+  short-circuit 조건 / 동일 deny payload 유지. 호출 측(loop.ts) 의 두 줄이
+  `runGuardChain(buildGuards(cfg), ctx)` 한 줄로 축소.
+evidence:
+  code:
+    - src/agent/guards/index.ts
+    - src/agent/guards/chain.ts
+    - src/agent/guards/verify-guard.ts
+    - src/agent/guards/closeout-guard.ts
+    - src/agent/guards/shared.ts
+    - src/agent/guards/build.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/agent/guard-chain.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  21 chain tests pass — Verify→Closeout 순서 / single-step shortcut / 빈 chain
+  no-op / chain-builder config gating 모두 hellgate 커버. SRP: 새 guard 추가가
+  기존 guard 수정 0; OCP: chain 합성은 array push.
