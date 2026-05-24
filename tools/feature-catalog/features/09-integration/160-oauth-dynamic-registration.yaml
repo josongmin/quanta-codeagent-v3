@@ -29,7 +29,7 @@ evidence:
   code:
     - src/connectors/oauth-registration.ts
     - src/connectors/types.ts
-  adrs: [160]
+  adrs: ["docs/decisions/0160-connectors-rest-api.md"]
   tests:
     unit:
       - tests/unit/oauth-registration-hellgate.test.ts

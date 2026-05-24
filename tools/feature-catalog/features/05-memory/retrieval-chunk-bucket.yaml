@@ -30,7 +30,7 @@ purpose: |
 evidence:
   code:
     - src/retrieval/chunk-bucket.ts
-  adrs: [159]
+  adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:
       - tests/unit/retrieval-chunk-bucket.test.ts

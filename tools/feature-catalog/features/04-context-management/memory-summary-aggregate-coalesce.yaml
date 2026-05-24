@@ -27,7 +27,7 @@ evidence:
     - src/agent/prompt-sections.ts
     - src/memory/consolidate/constants.ts
     - src/memory/index.ts
-  adrs: [68]
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
   tests:
     unit:
       - tests/unit/prompt-sections-hellgate.test.ts

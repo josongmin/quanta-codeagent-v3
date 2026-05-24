@@ -21,7 +21,7 @@ purpose: |
 evidence:
   code:
     - src/observability/metrics/otlp-helper.ts
-  adrs: [155]
+  adrs: ["docs/decisions/0155-otlp-helper.md"]
   tests:
     unit:
       - tests/unit/observability-metrics-otlp-helper-hellgate.test.ts

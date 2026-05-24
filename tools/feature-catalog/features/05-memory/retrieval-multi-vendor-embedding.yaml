@@ -38,7 +38,7 @@ evidence:
     - src/retrieval/embedders/moonshot.ts
     - src/retrieval/embedders/nvidia.ts
     - src/retrieval/embedders/zai.ts
-  adrs: [159]
+  adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:
       - tests/unit/retrieval-embedding-multi-vendor-hellgate.test.ts

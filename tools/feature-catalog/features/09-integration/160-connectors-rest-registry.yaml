@@ -32,7 +32,7 @@ evidence:
     - src/connectors/rest-registry.ts
     - src/connectors/in-memory-registry.ts
     - src/connectors/index.ts
-  adrs: [160, 130]
+  adrs: ["docs/decisions/0160-connectors-rest-api.md", 130]
   tests:
     unit:
       - tests/unit/connector-registry-rest-hellgate.test.ts

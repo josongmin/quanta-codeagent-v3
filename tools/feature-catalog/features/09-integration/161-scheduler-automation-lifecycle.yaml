@@ -37,7 +37,7 @@ evidence:
     - src/scheduler/automation.ts
     - src/scheduler/store-jsonl.ts
     - src/scheduler/index.ts
-  adrs: [161, 158, 108]
+  adrs: ["docs/decisions/0161-scheduled-agent.md", "docs/decisions/0158-subagent-persistence.md", 108]
   tests:
     unit:
       - tests/unit/scheduler-automation.test.ts

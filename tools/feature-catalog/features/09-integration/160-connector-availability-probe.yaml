@@ -31,7 +31,7 @@ evidence:
     - src/connectors/availability.ts
     - src/connectors/availability-prober.ts
     - src/connectors/types.ts
-  adrs: [160]
+  adrs: ["docs/decisions/0160-connectors-rest-api.md"]
   tests:
     unit:
       - tests/unit/connector-availability-hellgate.test.ts

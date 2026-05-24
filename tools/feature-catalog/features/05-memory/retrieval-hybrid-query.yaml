@@ -28,7 +28,7 @@ purpose: |
 evidence:
   code:
     - src/retrieval/hybrid-query.ts
-  adrs: [159]
+  adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:
       - tests/unit/retrieval-hybrid-query.test.ts

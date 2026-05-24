@@ -36,7 +36,7 @@ evidence:
     - src/retrieval/rerank/bm25-secondary.ts
     - src/retrieval/rerank/tier-aware.ts
     - src/retrieval/rerank/score-fusion-rrf.ts
-  adrs: [159]
+  adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:
       - tests/unit/retrieval-rerank-registry.test.ts

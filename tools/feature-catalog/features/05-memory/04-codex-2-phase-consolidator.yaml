@@ -45,7 +45,7 @@ evidence:
     - src/apps/bench/eval/driver.ts
     - src/shared/runtime-config.ts
     - src/apps/cli/help-render.ts
-  adrs: [68]
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
   tests:
     unit:
       - tests/unit/memory-consolidate.test.ts

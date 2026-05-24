@@ -30,7 +30,7 @@ evidence:
     - src/scheduler/types.ts
     - src/scheduler/rrule-parser.ts
     - src/scheduler/index.ts
-  adrs: [161]
+  adrs: ["docs/decisions/0161-scheduled-agent.md"]
   tests:
     unit:
       - tests/unit/scheduler-rrule-parser.test.ts

@@ -29,7 +29,7 @@ evidence:
     - src/agent/memory-consolidator-hook.ts
     - src/security/redaction.ts
     - src/security/index.ts
-  adrs: [68, 78]
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md", 78]
   tests:
     unit:
       - tests/unit/memory-distill-redaction-hellgate.test.ts

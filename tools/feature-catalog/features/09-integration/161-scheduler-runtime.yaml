@@ -46,7 +46,7 @@ evidence:
     - src/scheduler/runtime.ts
     - src/scheduler/types.ts
     - src/scheduler/index.ts
-  adrs: [161, 132, 145]
+  adrs: ["docs/decisions/0161-scheduled-agent.md", 132, 145]
   tests:
     unit:
       - tests/unit/scheduler-runtime.test.ts

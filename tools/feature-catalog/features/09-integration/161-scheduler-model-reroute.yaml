@@ -39,7 +39,7 @@ evidence:
     - src/scheduler/model-reroute.ts
     - src/scheduler/types.ts
     - src/scheduler/index.ts
-  adrs: [161]
+  adrs: ["docs/decisions/0161-scheduled-agent.md"]
   tests:
     unit:
       - tests/unit/scheduler-model-reroute-hellgate.test.ts

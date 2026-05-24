@@ -23,7 +23,7 @@ evidence:
   code:
     - src/observability/metrics/instrument-shadow.ts
     - src/observability/metrics/instrument-tool.ts
-  adrs: [160]
+  adrs: ["docs/decisions/0160-monitoring-completion.md"]
   tests:
     unit:
       - tests/unit/observability-metrics-instrument-shadow-tool-hellgate.test.ts

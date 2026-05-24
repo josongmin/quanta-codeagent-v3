@@ -32,7 +32,7 @@ evidence:
     - src/memory/consolidate/phase2-llm.js
     - src/memory/consolidate/types.ts
     - biome.json
-  adrs: [68]
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
   tests:
     unit:
       - tests/unit/memory-fence-no-llm-import-hellgate.test.ts

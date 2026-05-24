@@ -39,7 +39,7 @@ evidence:
     - src/observability/vocabulary.ts
     - src/apps/bench/eval/driver.ts
     - src/shared/runtime-config.ts
-  adrs: [68]
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
   tests:
     unit:
       - tests/unit/memory-consolidator-hook-hellgate.test.ts

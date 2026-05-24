@@ -25,7 +25,7 @@ evidence:
     - src/observability/metrics/instrument-budget.ts
     - src/observability/metrics/instrument-lsp.ts
     - src/observability/metrics/observability-helper.ts
-  adrs: [161]
+  adrs: ["docs/decisions/0161-monitoring-full-coverage.md"]
   tests:
     unit:
       - tests/unit/observability-metrics-instrument-extra-hellgate.test.ts

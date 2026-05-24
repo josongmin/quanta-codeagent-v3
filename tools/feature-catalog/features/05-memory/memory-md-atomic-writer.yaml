@@ -33,7 +33,7 @@ evidence:
     - src/memory/consolidate/paths.ts
     - src/memory/consolidate/git.ts
     - src/memory/consolidate/constants.ts
-  adrs: [68]
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
   tests:
     unit:
       - tests/unit/memory/consolidate-writer.test.ts
