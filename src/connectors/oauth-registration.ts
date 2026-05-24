@@ -42,7 +42,7 @@ const toRequestBody = (metadata: OAuthClientMetadata): string => {
 }
 
 const extractRegistration = (doc: unknown): OAuthClientRegistration => {
-  if (typeof doc !== "object" || doc === null) {
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
     throw new OAuthRegistrationError(
       "registration-malformed",
       "registration response is not a JSON object",
