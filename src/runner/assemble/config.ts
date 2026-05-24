@@ -102,6 +102,39 @@ export const compactionDep = (d: {
  * @see buildLLMCore, buildStoreCore, buildMemoryConfigCore for the per-
  *      collaborator factories that produce the inputs to this composer.
  */
+/** Core memory + telemetry + collaboration spreads (Phase 1 of the
+ *  optional-key cohort — split so each helper fits under the biome
+ *  cognitive-complexity cap). Pure. Byte-identical to the inline chain. */
+const buildMemoryAndModeSpreads = (
+  d: SessionDeps,
+  compaction: AgentConfig["compaction"] | undefined,
+): Partial<AgentConfig> => ({
+  // Store/sessionId gated on memory; compaction is now decoupled so a
+  // dedicated summarizer model works without a store. Store-only ⇒
+  // `compaction: {}` exactly as before (byte-identical).
+  ...(d.store ? { store: d.store, sessionId: d.sessionId } : {}),
+  ...(compaction ? { compaction } : {}),
+  ...(d.embedder ? { embedder: d.embedder } : {}),
+  ...(d.memoryConfig ? { memory: d.memoryConfig } : {}),
+  ...(d.planMode ? { planMode: true } : {}),
+  ...(d.metrics ? { metrics: d.metrics } : {}),
+  ...(d.run ? { run: d.run } : {}),
+  ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
+})
+
+/** Capability + observability spreads (Phase 2 of the optional-key
+ *  cohort). Pure. Byte-identical to the inline chain. */
+const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentConfig> => ({
+  ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
+  ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
+  ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
+  ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
+  ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
+  ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
+  ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
+  ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
+})
+
 export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {
   const compaction = compactionDep(d)
   return {
@@ -115,24 +148,7 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     maxTurns: d.maxTurns,
     signal: d.signal,
     onConfirm: d.onConfirm,
-    // Store/sessionId gated on memory; compaction is now decoupled so a
-    // dedicated summarizer model works without a store. Store-only ⇒
-    // `compaction: {}` exactly as before (byte-identical).
-    ...(d.store ? { store: d.store, sessionId: d.sessionId } : {}),
-    ...(compaction ? { compaction } : {}),
-    ...(d.embedder ? { embedder: d.embedder } : {}),
-    ...(d.memoryConfig ? { memory: d.memoryConfig } : {}),
-    ...(d.planMode ? { planMode: true } : {}),
-    ...(d.metrics ? { metrics: d.metrics } : {}),
-    ...(d.run ? { run: d.run } : {}),
-    ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
-    ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
-    ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
-    ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
-    ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
-    ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
-    ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
-    ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
-    ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
+    ...buildMemoryAndModeSpreads(d, compaction),
+    ...buildCapabilityAndObservabilitySpreads(d),
   }
 }

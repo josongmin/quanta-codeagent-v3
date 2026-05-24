@@ -22,8 +22,8 @@ import {
   assembleConfig,
   buildRetrievalStackCore,
   type LexicalHit,
-  rankWithRetrievalStack,
   type RetrievalStack,
+  rankWithRetrievalStack,
   runLocalizeHybrid,
 } from "@/runner/assemble"
 import { baseConfig, FakeLLM, text } from "./_harness"
@@ -34,7 +34,7 @@ describe("ADR-0159 retrieval composition — default-OFF", () => {
   test("config without retrievalStack: AgentConfig has slot omitted entirely", () => {
     const cfg = baseConfig({})
     // exactOptionalPropertyTypes: omitted means the key is NOT present.
-    expect(Object.prototype.hasOwnProperty.call(cfg, "retrievalStack")).toBe(false)
+    expect(Object.hasOwn(cfg, "retrievalStack")).toBe(false)
   })
 
   test("runAgent ignores retrievalStack slot (loop never reads it)", async () => {
@@ -71,69 +71,63 @@ describe("ADR-0159 retrieval composition — surface wire", () => {
   test("assembleConfig threads retrievalStack through SessionDeps", () => {
     const stack = buildRetrievalStackCore({ enabled: true })
     if (stack === undefined) throw new Error("builder must return when enabled=true")
-    const cfg = assembleConfig(
-      [{ role: "user", content: [{ type: "text", text: "go" }] }],
-      {
-        llm: new FakeLLM([text("ok")]),
-        registry: baseConfig().registry,
-        stream: baseConfig().stream,
-        permission: baseConfig().permission,
-        system: "s",
-        cwd: "/tmp",
-        maxTurns: 1,
-        signal: new AbortController().signal,
-        onConfirm: async () => false,
-        store: undefined,
-        sessionId: "sess-1",
-        embedder: undefined,
-        memoryConfig: undefined,
-        planMode: false,
-        metrics: undefined,
-        run: undefined,
-        subagentConfig: undefined,
-        skillsConfig: undefined,
-        compactionBreakerConfig: undefined,
-        verifyGuardConfig: undefined,
-        summarizerLlm: undefined,
-        onShellEvent: undefined,
-        workMetricsSink: undefined,
-        retrievalStack: stack,
-      },
-    )
+    const cfg = assembleConfig([{ role: "user", content: [{ type: "text", text: "go" }] }], {
+      llm: new FakeLLM([text("ok")]),
+      registry: baseConfig().registry,
+      stream: baseConfig().stream,
+      permission: baseConfig().permission,
+      system: "s",
+      cwd: "/tmp",
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      onConfirm: async () => false,
+      store: undefined,
+      sessionId: "sess-1",
+      embedder: undefined,
+      memoryConfig: undefined,
+      planMode: false,
+      metrics: undefined,
+      run: undefined,
+      subagentConfig: undefined,
+      skillsConfig: undefined,
+      compactionBreakerConfig: undefined,
+      verifyGuardConfig: undefined,
+      summarizerLlm: undefined,
+      onShellEvent: undefined,
+      workMetricsSink: undefined,
+      retrievalStack: stack,
+    })
     expect(cfg.retrievalStack).toBe(stack)
   })
 
   test("assembleConfig omits retrievalStack when undefined (default-OFF)", () => {
-    const cfg = assembleConfig(
-      [{ role: "user", content: [{ type: "text", text: "go" }] }],
-      {
-        llm: new FakeLLM([text("ok")]),
-        registry: baseConfig().registry,
-        stream: baseConfig().stream,
-        permission: baseConfig().permission,
-        system: "s",
-        cwd: "/tmp",
-        maxTurns: 1,
-        signal: new AbortController().signal,
-        onConfirm: async () => false,
-        store: undefined,
-        sessionId: "sess-1",
-        embedder: undefined,
-        memoryConfig: undefined,
-        planMode: false,
-        metrics: undefined,
-        run: undefined,
-        subagentConfig: undefined,
-        skillsConfig: undefined,
-        compactionBreakerConfig: undefined,
-        verifyGuardConfig: undefined,
-        summarizerLlm: undefined,
-        onShellEvent: undefined,
-        workMetricsSink: undefined,
-        // retrievalStack omitted ⇒ slot should be entirely absent
-      },
-    )
-    expect(Object.prototype.hasOwnProperty.call(cfg, "retrievalStack")).toBe(false)
+    const cfg = assembleConfig([{ role: "user", content: [{ type: "text", text: "go" }] }], {
+      llm: new FakeLLM([text("ok")]),
+      registry: baseConfig().registry,
+      stream: baseConfig().stream,
+      permission: baseConfig().permission,
+      system: "s",
+      cwd: "/tmp",
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      onConfirm: async () => false,
+      store: undefined,
+      sessionId: "sess-1",
+      embedder: undefined,
+      memoryConfig: undefined,
+      planMode: false,
+      metrics: undefined,
+      run: undefined,
+      subagentConfig: undefined,
+      skillsConfig: undefined,
+      compactionBreakerConfig: undefined,
+      verifyGuardConfig: undefined,
+      summarizerLlm: undefined,
+      onShellEvent: undefined,
+      workMetricsSink: undefined,
+      // retrievalStack omitted ⇒ slot should be entirely absent
+    })
+    expect(Object.hasOwn(cfg, "retrievalStack")).toBe(false)
   })
 })
 
@@ -185,7 +179,7 @@ describe("ADR-0159 retrieval composition — consumer reads slot", () => {
       query: "alpha",
       type: "keywords",
       bm25Source: async () => hits,
-      stack: cfg.retrievalStack,
+      ...(cfg.retrievalStack !== undefined ? { stack: cfg.retrievalStack } : {}),
     })
     expect(rerankCalls).toBe(1)
     expect(out.length).toBe(2)
@@ -230,7 +224,7 @@ describe("ADR-0159 retrieval composition — consumer reads slot", () => {
         { file: "a.ts", line: 1, text: "y" },
         { file: "b.ts", line: 2, text: "y" },
       ],
-      stack: cfg.retrievalStack,
+      ...(cfg.retrievalStack !== undefined ? { stack: cfg.retrievalStack } : {}),
     })
     expect(memCalls).toBe(1)
     expect(locCalls).toBe(1)
@@ -326,6 +320,7 @@ describe("ADR-0159 retrieval composition — slot type contract", () => {
 
   test("bridge consumer accepts the slot type with no cast", async () => {
     const stack = buildRetrievalStackCore({ enabled: true })
+    if (stack === undefined) throw new Error("builder must return when enabled=true")
     const cfg: AgentConfig = baseConfig({ retrievalStack: stack })
     // The bridge function signature ALREADY accepts the slot type — no
     // cast needed. If a future refactor breaks the contract, tsc fails here.

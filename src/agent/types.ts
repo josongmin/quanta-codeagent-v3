@@ -9,12 +9,7 @@ import type {
   ToolAction,
   TrustScopeRegistry,
 } from "@/permission"
-import type {
-  CommitEmbedder,
-  EmbeddingPort,
-  RerankPort,
-  RerankRegistry,
-} from "@/retrieval"
+import type { CommitEmbedder, EmbeddingPort, RerankPort, RerankRegistry } from "@/retrieval"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"

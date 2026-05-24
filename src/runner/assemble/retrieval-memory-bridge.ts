@@ -30,10 +30,7 @@ import type { RetrievalStack } from "./retrieval"
  *  entry's lexical score is folded into `score` and the original `id`/`text`
  *  carry through. Source is `external` because the retrieval stack did not
  *  produce this list — memory ranking did. */
-const toRetrievalCandidate = (
-  entry: NormalizedEntry,
-  baseScore: number,
-): RetrievalCandidate => ({
+const toRetrievalCandidate = (entry: NormalizedEntry, baseScore: number): RetrievalCandidate => ({
   id: entry.id,
   text: entry.text,
   score: baseScore,

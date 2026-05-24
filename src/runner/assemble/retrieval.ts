@@ -44,17 +44,17 @@
  *      the sole consumer when no stack is provided (byte-identical).
  */
 import {
+  type CommitEmbedder,
   createBm25SecondaryReranker,
   createCommitEmbedder,
   createTierAwareReranker,
-  type CommitEmbedder,
   type EmbeddingPort,
   type GitLogPort,
   identityReranker,
-  RerankRegistry,
-  rrfReranker,
   type RerankerKind,
   type RerankPort,
+  RerankRegistry,
+  rrfReranker,
   type TierClassifierPort,
 } from "@/retrieval"
 

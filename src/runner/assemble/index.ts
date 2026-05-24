@@ -51,7 +51,6 @@ export {
   type RetrievalAssembleInput,
   type RetrievalStack,
 } from "./retrieval"
-export { rankWithRetrievalStack } from "./retrieval-memory-bridge"
 export {
   type LexicalHit,
   type LocalizeHybridInput,
@@ -59,6 +58,7 @@ export {
   lexicalHitToCandidate,
   runLocalizeHybrid,
 } from "./retrieval-localize-bridge"
+export { rankWithRetrievalStack } from "./retrieval-memory-bridge"
 export {
   buildSkillsConfigCore,
   type SkillsConfigAssembleInput,

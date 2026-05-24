@@ -24,10 +24,10 @@ import {
   DEFAULT_RETRIEVAL_RERANKER,
   type LexicalHit,
   lexicalHitsToCandidates,
-  rankWithRetrievalStack,
   RETRIEVAL_BUILTIN_RERANKERS,
-  runLocalizeHybrid,
   type RetrievalStack,
+  rankWithRetrievalStack,
+  runLocalizeHybrid,
 } from "@/runner/assemble"
 
 const entry = (id: string, text: string, extra?: Partial<MemoryEntry>): MemoryEntry => ({

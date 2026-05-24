@@ -45,7 +45,7 @@ import type { RunOutcome } from "./run"
  *  the entire codebase. `@/runner/assemble/retrieval.ts` is env-free; the
  *  surface (this file) projects ENV → typed input. */
 const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
-  env["QUANTA_RETRIEVAL_HYBRID"] === "1"
+  env.QUANTA_RETRIEVAL_HYBRID === "1"
 
 /** Build the retrieval stack at the composition root. Default-OFF: when the
  *  env knob is absent or not exactly "1", returns `undefined` and every
