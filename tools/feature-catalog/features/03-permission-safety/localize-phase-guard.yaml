@@ -5,10 +5,10 @@ subsystem: SWE-bench localization 강화 (Agentless 흡수)
 order: 97
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:agentless, surface:cli]
 purpose: |
@@ -24,6 +24,10 @@ purpose: |
 evidence:
   code:
     - src/agent/localize-phase-guard.ts
+    - src/agent/loop.ts
+    - src/agent/session-resources.ts
+    - src/agent/dispatch.ts
+    - src/agent/types.ts
   adrs: []
   tests:
     unit:

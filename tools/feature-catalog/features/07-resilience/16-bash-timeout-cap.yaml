@@ -5,10 +5,10 @@ subsystem: Bash 도구 resilience
 order: 16
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
 purpose: |
@@ -24,10 +24,14 @@ purpose: |
 evidence:
   code:
     - src/tool/bash/index.ts
+    - src/runtime/sandbox.ts
+    - src/runtime/guarded-spawn.ts
+    - src/runtime/shell-sandbox-holder.ts
   adrs: []
   tests:
     unit:
       - tests/unit/bash.test.ts
+      - tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
     integration: []
     contract: []
 knobs: []

@@ -5,10 +5,10 @@ subsystem: Interactive 모드 abort → POSIX boundary
 order: 26
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
-modes: [n-a]
-configurable: static
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive]
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |
@@ -30,10 +30,13 @@ purpose: |
 evidence:
   code:
     - src/apps/agent/mode-presets/interactive.ts
+    - src/apps/agent/run.ts
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:
       - tests/unit/apps/agent/mode-presets/interactive.test.ts
+      - tests/unit/runner-orchestrate-interactive.test.ts
     integration: []
     contract: []
 knobs: []

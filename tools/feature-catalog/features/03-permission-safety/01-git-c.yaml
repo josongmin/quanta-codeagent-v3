@@ -5,7 +5,7 @@ subsystem: HARD_DENY (경로무관 하드닝)
 order: 1
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -15,10 +15,13 @@ purpose: HARD_DENY 베이스라인 패턴 모듬 — 시스템-루트 destructiv
 evidence:
   code:
     - src/permission/policy-rules.ts
+    - src/permission/policy.ts
+    - src/permission/inspect.ts
+    - src/permission/index.ts
   adrs: []
   tests:
     unit: [tests/unit/permission-rules.test.ts, tests/unit/hard-deny-redos-bound.test.ts]
-    integration: []
+    integration: [tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

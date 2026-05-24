@@ -5,10 +5,10 @@ subsystem: 예산 / exhaustion 게이트 (RFC may-22 §6)
 order: 52
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [stop-category-matrix]
@@ -25,9 +25,16 @@ purpose: |
 evidence:
   code:
     - src/agent/budget/events.ts
+    - src/agent/budget/index.ts
+    - src/agent/budget/meter.ts
+    - src/agent/budget/types.ts
+    - src/agent/run-mode/clamp.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/agent/budget/exhaustion.test.ts
+      - tests/unit/agent/budget/meter.test.ts
+      - tests/unit/budget-ledger-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

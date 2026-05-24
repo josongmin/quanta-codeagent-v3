@@ -5,7 +5,7 @@ subsystem: Runtime backstop for git posture (ADR-0100/0101)
 order: 94
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -22,10 +22,16 @@ purpose: |
 evidence:
   code:
     - src/permission/policy-rules.ts
+    - src/permission/policy.ts
+    - src/permission/git-write-guard.ts
+    - src/permission/branch-only.ts
   adrs: [100, 101]
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/git-write-protection-wired.test.ts
+      - tests/unit/permission-rules.test.ts
+    integration:
+      - tests/integration/git-write-protection-hellgate.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

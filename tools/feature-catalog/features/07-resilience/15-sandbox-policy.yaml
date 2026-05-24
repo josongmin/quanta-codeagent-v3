@@ -5,10 +5,10 @@ subsystem: Shell-exec 정책 (Sandbox)
 order: 15
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
 purpose: |
@@ -26,12 +26,17 @@ purpose: |
 evidence:
   code:
     - src/runtime/sandbox.ts
+    - src/runtime/shell-sandbox-holder.ts
+    - src/runtime/guarded-spawn.ts
+    - src/runtime/os-sandbox/index.ts
+    - src/runtime/os-sandbox/types.ts
   adrs: []
   tests:
     unit:
       - tests/unit/sandbox.test.ts
       - tests/unit/sandbox-buildargv.test.ts
       - tests/unit/eval-sandbox-escape.test.ts
+      - tests/unit/os-sandbox-hellgate.test.ts
     integration: []
     contract:
       - tests/contract/sandbox-docker.test.ts

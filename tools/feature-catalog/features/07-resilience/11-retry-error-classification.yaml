@@ -5,10 +5,10 @@ subsystem: 에러 분류 (Retry policy)
 order: 11
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |
@@ -25,10 +25,16 @@ purpose: |
 evidence:
   code:
     - src/agent/retry.ts
+    - src/agent/recovery.ts
+    - src/llm/adapters/openai.ts
+    - src/llm/adapters/anthropic.ts
+    - src/llm/stream-timeout.ts
   adrs: []
   tests:
     unit:
       - tests/unit/retry.test.ts
+      - tests/unit/recovery.test.ts
+      - tests/unit/recovery-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

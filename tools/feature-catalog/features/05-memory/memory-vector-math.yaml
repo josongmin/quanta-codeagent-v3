@@ -5,10 +5,10 @@ subsystem: memory — pure vector primitives
 order: 52
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: |
@@ -26,9 +26,15 @@ purpose: |
 evidence:
   code:
     - src/memory/vector.ts
+    - src/memory/dedup.ts
+    - src/memory/ranking.ts
+    - src/memory/adapters/sqlite.ts
+    - src/memory/adapters/in-memory.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/dedup.test.ts
+      - tests/unit/memory-adapters.test.ts
     integration: []
     contract: []
 knobs: []

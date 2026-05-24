@@ -5,7 +5,7 @@ subsystem: 권한·안전 — glob matching (Cursor .mdc / Claude paths: 흡수)
 order: 50
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -33,12 +33,14 @@ purpose: |
 evidence:
   code:
     - src/skill/activation.ts
+    - src/agent/glob-rules.ts
   adrs: []
   tests:
     unit:
       - tests/unit/round1-hardening.test.ts
       - tests/unit/round2-hardening.test.ts
       - tests/unit/round4-hardening.test.ts
+      - tests/unit/glob-rules-hellgate.test.ts
     integration:
       - tests/integration/skill-paths-activation-e2e.test.ts
     contract: []

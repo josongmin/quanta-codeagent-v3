@@ -5,10 +5,10 @@ subsystem: Auth resilience (ChatGPT-OAuth)
 order: 19
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:codex"]
 purpose: |
@@ -22,6 +22,9 @@ purpose: |
 evidence:
   code:
     - src/auth/chatgpt-oauth/token-store.ts
+    - src/auth/chatgpt-oauth/index.ts
+    - src/auth/chatgpt-oauth/refresh.ts
+    - src/auth/chatgpt-oauth/paths.ts
   adrs: []
   tests:
     unit:

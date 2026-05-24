@@ -5,10 +5,10 @@ subsystem: 세션 재개 가드 — cwd 부재 진단
 order: 27
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |
@@ -29,6 +29,8 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/session-io.ts
+    - src/apps/cli/repl.ts
+    - src/apps/cli/repl/resume-fsm.ts
   adrs: []
   tests:
     unit: []

@@ -5,19 +5,23 @@ subsystem: Artifact-as-memory rail (ADR-0021)
 order: 1
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: static
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: 시스템 프롬프트에 "Durable state belongs in workspace files" 단락 — 메모리 = routing hint, 영속 사실 = 작업공간 파일로 분리. cache prefix byte-stable
 evidence:
   code:
     - src/agent/prompt.ts
+    - src/agent/working-state.ts
+    - src/agent/turn-context.ts
+    - src/memory/working.ts
   adrs: [21]
   tests:
-    unit: []
+    unit:
+      - tests/unit/prompt-sections-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

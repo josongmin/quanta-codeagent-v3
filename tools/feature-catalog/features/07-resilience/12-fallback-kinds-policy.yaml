@@ -5,10 +5,10 @@ subsystem: 모델 Fallback (Tier 0)
 order: 12
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 purpose: |
@@ -23,6 +23,10 @@ purpose: |
 evidence:
   code:
     - src/llm/fallback.ts
+    - src/llm/index.ts
+    - src/llm/types.ts
+    - src/llm/model-swap.ts
+    - src/shared/errors.ts
   adrs: []
   tests:
     unit:

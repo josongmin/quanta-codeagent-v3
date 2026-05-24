@@ -5,9 +5,12 @@ subsystem: 권한 스택 (ADR-0135)
 order: 24
 maturity: L4
 status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [n-a]
+configurable: static
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
-configurable: static
 purpose: |
   **Codex `automaticApprovalReview.actionSummary` 흡수.** 매 N (default 10) 연속
   auto-approval 마다 사용자에게 review prompt — "이 정책 OK?" 확인. 사용자가
@@ -23,6 +26,7 @@ purpose: |
 evidence:
   code:
     - src/permission/auto-approval-review.ts
+    - src/permission/index.ts
   adrs: [135]
   tests:
     unit:

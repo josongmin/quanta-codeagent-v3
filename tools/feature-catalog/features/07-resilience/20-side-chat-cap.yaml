@@ -5,10 +5,10 @@ subsystem: 격리 ephemeral agent loop
 order: 20
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code"]
 config_refs:
@@ -28,6 +28,8 @@ purpose: |
 evidence:
   code:
     - src/runner/orchestrate/side-chat.ts
+    - src/runner/orchestrate/index.ts
+    - src/apps/cli/side-cmd.ts
   adrs: []
   tests:
     unit:

@@ -5,7 +5,7 @@ subsystem: Admissibility-gate SSOT (ADR-0026)
 order: 2
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -17,9 +17,16 @@ purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행�
 evidence:
   code:
     - src/agent/admissibility-gate.ts
+    - src/agent/dispatch.ts
+    - src/agent/dispatch-types.ts
+    - src/agent/confirm-decision.ts
+    - src/agent/hitl-tier-registry.ts
   adrs: []
   tests:
-    unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts]
+    unit:
+      - tests/unit/hitl-tier-dispatch.test.ts
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/admissibility-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

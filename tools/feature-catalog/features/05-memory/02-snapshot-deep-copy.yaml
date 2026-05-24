@@ -5,19 +5,23 @@ subsystem: L3 WorkingState (ADR-0021)
 order: 2
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 purpose: "snapshot() deep-copy (R3-P1): JSDoc \"read-only snapshot\" 거짓말 회수. 내부 배열 + 항목 객체 모두 clone → 호출자가 받은 snapshot에 in-place 변경 시도 ⇒ session state 무영향."
 evidence:
   code:
     - src/agent/working-state.ts
+    - src/agent/tier1/working-state.ts
+    - src/tool/update-working-state.ts
   adrs: [21]
   tests:
-    unit: []
+    unit:
+      - tests/unit/working-state.test.ts
+      - tests/unit/working-state-panel.test.ts
     integration: []
     contract: []
 knobs: []

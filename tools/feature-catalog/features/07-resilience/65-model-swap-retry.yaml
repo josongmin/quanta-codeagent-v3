@@ -5,8 +5,8 @@ subsystem: 복원력 — 모델 교체 (v0.dev 흡수, ADR-0066)
 order: 65
 maturity: L4
 status: refined
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
@@ -20,9 +20,15 @@ purpose: |
 evidence:
   code:
     - src/llm/model-swap.ts
+    - src/llm/index.ts
+    - src/llm/types.ts
+    - src/apps/cli/retry-with.ts
+    - src/apps/cli/slash-commands.ts
   adrs: [66]
   tests:
-    unit: [tests/unit/model-swap-retry.test.ts]
+    unit:
+      - tests/unit/model-swap-retry.test.ts
+      - tests/unit/cli-retry-with.test.ts
     integration: []
     contract: []
 knobs: []

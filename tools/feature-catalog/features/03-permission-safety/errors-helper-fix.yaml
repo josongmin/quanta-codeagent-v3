@@ -5,7 +5,7 @@ subsystem: 공유 error helper hardening
 order: 78
 maturity: L4
 status: refined
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: integrated
@@ -33,6 +33,10 @@ purpose: |
 evidence:
   code:
     - src/shared/errors.ts
+    - src/shared/index.ts
+    - src/agent/loop.ts
+    - src/agent/dispatch.ts
+    - src/runtime/sandbox.ts
   adrs: []
   tests:
     unit:

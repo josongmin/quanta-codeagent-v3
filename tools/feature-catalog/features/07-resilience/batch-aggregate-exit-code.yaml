@@ -5,10 +5,10 @@ subsystem: Batch 모드 종료 코드 집계
 order: 25
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [outcome-exit-code-table]
@@ -26,10 +26,12 @@ purpose: |
 evidence:
   code:
     - src/apps/agent/mode-presets/batch.ts
+    - src/apps/agent/run.ts
   adrs: []
   tests:
     unit:
       - tests/unit/apps/agent/mode-presets/batch.test.ts
+      - tests/unit/apps/agent/run.test.ts
     integration: []
     contract: []
 knobs: []

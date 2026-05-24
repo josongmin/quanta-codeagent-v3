@@ -5,7 +5,7 @@ subsystem: FS jail (`src/storage/service.ts`)
 order: 1
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: integrated
@@ -17,9 +17,16 @@ purpose: FsJailError — assertPathInWorkspace/assertPathInsideBaseDir로 baseDi
 evidence:
   code:
     - src/storage/service.ts
+    - src/storage/index.ts
+    - src/tool/_shared/resolve-jailed-doc.ts
+    - src/tool/read/index.ts
+    - src/tool/write/index.ts
+    - src/tool/edit/index.ts
   adrs: []
   tests:
-    unit: [tests/unit/fs-jail.test.ts]
+    unit:
+      - tests/unit/fs-jail.test.ts
+      - tests/unit/fs-jail-hellgate.test.ts
     integration: [tests/integration/fs-jail-e2e.test.ts]
     contract: []
 knobs: [QUANTA_FS_JAIL]

@@ -5,7 +5,7 @@ subsystem: HARD_DENY (경로무관 하드닝)
 order: 2
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [n-a]
 configurable: static
@@ -15,10 +15,16 @@ purpose: CR3 rule-catalog SSOT + FU1 rule-per-concern invert — HardDenyRule[] 
 evidence:
   code:
     - src/permission/policy-rules.ts
+    - src/permission/policy.ts
+    - src/permission/inspect.ts
+    - src/permission/inspector.ts
   adrs: []
   tests:
-    unit: [tests/unit/permission-rules.test.ts]
-    integration: []
+    unit:
+      - tests/unit/permission-rules.test.ts
+      - tests/unit/hard-deny-redos-bound.test.ts
+    integration:
+      - tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

@@ -5,10 +5,10 @@ subsystem: 종료 코드 — outcome → POSIX (apps/agent/run.ts)
 order: 22
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
 depends_on: [batch-aggregate-exit-code, agent-cli-args-parser]
@@ -29,10 +29,16 @@ purpose: |
 evidence:
   code:
     - src/apps/agent/run.ts
+    - src/apps/agent/mode-presets/interactive.ts
+    - src/apps/agent/mode-presets/headless.ts
+    - src/apps/agent/mode-presets/ci-bot.ts
+    - src/apps/agent/mode-presets/daemon.ts
+    - src/apps/agent/mode-presets/ide.ts
   adrs: []
   tests:
     unit:
       - tests/unit/apps/agent/run.test.ts
+      - tests/unit/outcome-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

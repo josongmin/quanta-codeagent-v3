@@ -5,7 +5,7 @@ subsystem: 권한 — git-write 모드 게이트 (RFC may-22 ci-bot mode)
 order: 95
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: partial
 modes: [ci-bot]
 configurable: static
@@ -27,6 +27,11 @@ purpose: |
 evidence:
   code:
     - src/permission/branch-only.ts
+    - src/permission/index.ts
+    - src/apps/agent/mode-presets/ci-bot.ts
+    - src/apps/agent/mode-presets/ci-bot-policy.ts
+    - src/agent/run-mode/types.ts
+    - src/agent/run-mode/presets.ts
   adrs: []
   tests:
     unit:

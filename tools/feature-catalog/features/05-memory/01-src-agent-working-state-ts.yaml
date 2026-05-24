@@ -5,16 +5,20 @@ subsystem: L3 WorkingState (ADR-0021)
 order: 1
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [cli]
+monitoring: partial
 modes: [n-a]
-configurable: n-a
+configurable: integrated
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core"]
 purpose: — ownerShortlist / hypothesis / blockers / nextStepQueue / deferredValidation. session-scoped in-memory only .
 evidence:
   code:
     - src/agent/working-state.ts
+    - src/tool/update-working-state.ts
+    - src/agent/tier1/working-state.ts
+    - src/agent/prompt.ts
+    - src/agent/turn-context.ts
   adrs: [21]
   tests:
     unit:

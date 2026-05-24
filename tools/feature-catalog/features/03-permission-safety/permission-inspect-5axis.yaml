@@ -6,9 +6,9 @@ order: 76
 maturity: L4
 status: new
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: partial
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin", "team-safety"]
 labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |
@@ -39,6 +39,9 @@ purpose: |
 evidence:
   code:
     - src/permission/inspect.ts
+    - src/permission/inspector.ts
+    - src/permission/policy.ts
+    - src/permission/index.ts
   adrs: [26, 29, 30, 46, 47]
   tests:
     unit:
