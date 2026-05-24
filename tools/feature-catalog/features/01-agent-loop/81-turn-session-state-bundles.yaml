@@ -1,0 +1,35 @@
+id: turn-session-state-bundles
+title: TurnSession / TurnState parameter bundles (R2-B P1, 20→3 args)
+section: 1
+subsystem: Loop helper signatures (parameter bundling refactor)
+order: 81
+maturity: L5
+status: stable
+purpose: |
+  `runTurn`/`streamConsume`/`applyAction`이 17-20 positional parameter로 자란 부채를
+  두 readonly 번들로 정리 (R2-B P1). `TurnSession` — session-lifetime resources
+  (config/specs/recorder/classifier/skillGate/activeSkills/archive/guards), `runAgent`
+  invocation당 ONCE 구성, readonly 로 type boundary에서 재바인딩 차단. `TurnState`
+  — turn-lifetime MUTABLE (wm/rec/breaker/toolHistory/workingState/collector/
+  toolChoiceState/citations/onRedaction/onTurnTiming), 헬퍼가 in-place 변이.
+  Default-OFF byte-identical (RFC §1.2): 모든 optional 필드가 `T | undefined`이라
+  unconfigured session은 prior positional-arg와 동일한 `undefined` carry — type-only
+  refactor, runtime erased, recorder/dispatch contract 무변경.
+evidence:
+  code:
+    - src/agent/turn-context.ts
+    - src/agent/loop.ts
+    - src/agent/stream-callbacks.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  R6 type-widening track. Cycle safety: type-only imports from agent siblings
+  (`./guards`, `./working-state`, …) — agent-import-cycle test가 `import type`을
+  erased로 취급, 새 value edge 없음. `SkillGate` + `SkillTurnOverride` 도 이 모듈로
+  이동 (loop.ts ↔ turn-context.ts 가치 사이클 회피); `loop.ts` re-export 로 기존
+  consumer 임포트 경로 byte-identical.
