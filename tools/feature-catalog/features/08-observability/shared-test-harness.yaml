@@ -6,7 +6,7 @@ order: 75
 maturity: L5
 status: stable
 purpose: |
-  `tests/integration/_harness.ts` 는 137 테스트 파일이 공유하는 단일-출처
+  `tests/integration/_harness.ts` 는 100+ 테스트 파일이 공유하는 단일-출처
   테스트 더블 묶음이다. `tests/unit/_harness.ts` 는 한 줄 re-export 로
   unit 슬라이스에도 같은 심볼을 노출 — "ScriptedLLM/FakeLLM/RecordingStream
   을 테스트 파일 안에서 로컬 정의하지 말 것" 이라는 invariant 를 강제한다.
@@ -28,7 +28,7 @@ purpose: |
      `events.find(e => e.type === ...)` 안티패턴을 회피.
    - `withTimeout(p, ms, label)` — 매달림이 "느린 테스트" 가 아니라 "루프
      버그" 임을 단언하는 hard guard; 86 파일이 직접 사용 중.
-  하나의 SSOT 가 깨지면 137 테스트가 동시에 발견 — drift hazard 제거가
+  하나의 SSOT 가 깨지면 100+ 테스트가 동시에 발견 — drift hazard 제거가
   핵심 가치.
 evidence:
   code:

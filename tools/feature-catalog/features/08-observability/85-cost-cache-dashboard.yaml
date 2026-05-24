@@ -8,8 +8,9 @@ status: stable
 purpose: |
   MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·
   turns·toolCalls(byTool)·stopReasons·latency(p50/p95)·shell rollup 집계. 새 수집 0
-  (AgentRecorder/shell-otel가 채운 counter/timer만 read). 3 renderer: text(터미널)·
-  markdown(PR)·JSON. CLI는 metrics 활성 시 turn 종료마다 stderr로 text 블록 출력.
+  (AgentRecorder/shell-otel가 채운 counter/timer만 read). 2 string renderer
+  (renderDashboardText·renderDashboardMarkdown) + CostDashboard 객체 자체가 JSON form.
+  CLI는 metrics 활성 시 turn 종료마다 stderr로 text 블록 출력.
   cost는 unknown model이면 null(가짜 $0 금지).
 evidence:
   code:
