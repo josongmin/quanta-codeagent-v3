@@ -1,3 +1,8 @@
+// ADR-0135 — Permission profile + file_system_sandbox_policy 2-layer.
+export type { AccessVerdict, CanAccessOpts } from "./access-check"
+export { canAccess } from "./access-check"
+export type { ApprovalRecord, ApprovalReviewer, ApprovalReviewerOpts } from "./auto-approval-review"
+export { createApprovalReviewer } from "./auto-approval-review"
 export type { BranchOnlyVerdict } from "./branch-only"
 export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {
@@ -78,6 +83,33 @@ export {
   threadAllowsMutation,
 } from "./per-thread-store"
 export type {
+  ApprovalMode,
+  ApprovalPolicy,
+  ControlManagedBy,
+  ControlPolicy,
+  FileSystemAccess,
+  FileSystemEntry,
+  FileSystemPath,
+  FileSystemPolicyType,
+  FileSystemSandboxPolicy,
+  NetworkMode,
+  NetworkPolicy,
+  OsSandboxKind,
+  PermissionProfile,
+  PermissionScope,
+  SandboxPolicy as PermissionSandboxPolicy,
+  SpecialPathKind,
+} from "./permission-profile"
+export {
+  DEFAULT_FILE_SYSTEM_SANDBOX_POLICY,
+  DEFAULT_PERMISSION_PROFILE,
+  isPermissionScope,
+  isSpecialPathKind,
+  PERMISSION_SCOPE_PRECEDENCE_DESC,
+  SPECIAL_PATH_KINDS,
+  strongerScope,
+} from "./permission-profile"
+export type {
   CreatePermissionStoreOptions,
   DenialRecord,
   PermissionReader,
@@ -100,6 +132,10 @@ export {
   evaluateAuto,
   evaluateStack,
   hardDenyReason,
+  inferApprovalPolicy,
+  inferControlPolicy,
+  inferNetworkPolicy,
+  inferSandboxPolicy,
   inferToolTier,
 } from "./policy"
 export type { PostDenialAction, PostDenialClock } from "./post-denial"
@@ -156,6 +192,20 @@ export {
   ReviewerUnavailableError,
   reviewAction,
 } from "./reviewer"
+export type {
+  CachedResolver,
+  CwdPort,
+  GitPort,
+  OsFamily,
+  OsPort,
+  ResolveSpecialPathOpts,
+} from "./special-path-resolver"
+export {
+  createCachedResolver,
+  defaultCwdPort,
+  defaultOsPort,
+  resolveSpecialPath,
+} from "./special-path-resolver"
 export {
   createInMemoryTrustScopeRegistry,
   type TrustScope,
@@ -171,6 +221,8 @@ export {
   type PersistentTrustScopeRecord,
   type PersistentTrustScopeRegistry,
 } from "./trust-scope-store"
+export type { EffectiveAccessResult, TwoLayerManager } from "./two-layer-manager"
+export { createTwoLayerManager } from "./two-layer-manager"
 export type {
   ApprovalDecision,
   ApprovalOutcome,
