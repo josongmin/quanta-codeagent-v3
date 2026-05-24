@@ -1,6 +1,13 @@
 import { type AutoModeClassifier, CLASSIFIER_SYSTEM_PROMPT } from "./classifier"
 import { hostAllowsMutation } from "./per-host-mode"
 import { threadAllowsMutation } from "./per-thread-store"
+import type {
+  ControlPolicy,
+  NetworkPolicy,
+  ApprovalPolicy as PermissionApprovalPolicy,
+  PermissionProfile,
+  SandboxPolicy as PermissionSandboxPolicy,
+} from "./permission-profile"
 import type { PermissionReader } from "./permission-store"
 import { HARD_DENY, HARD_DENY_RULES, type HardDenyRule } from "./policy-rules"
 import {
@@ -405,3 +412,54 @@ export const evaluateStack = (
   //    — DO NOT re-emit here or the counter would double-count.
   return evaluate(action, ctx)
 }
+
+/* ------------------------------------------------------------------------- *
+ * ADR-0135 — 4-pillar inference helpers (additive, backward-compat).
+ *
+ * These helpers project a (possibly absent) {@link PermissionProfile} onto
+ * each of the four pillars (approval / network / sandbox / control). When no
+ * profile is supplied, each helper returns the strictest sensible default,
+ * matching {@link DEFAULT_PERMISSION_PROFILE} — so a legacy caller migrating
+ * one helper at a time always lands in a closed-by-default state.
+ *
+ * Wired by the composition root; library slices use the pure helpers and
+ * never reach for IO.
+ * ------------------------------------------------------------------------- */
+
+/** Strictest defaults — match {@link DEFAULT_PERMISSION_PROFILE} field-for-
+ *  field so behavior is uniform whether the caller passes a profile or not. */
+const DEFAULT_APPROVAL: PermissionApprovalPolicy = Object.freeze({
+  mode: "once" as const,
+  promptUser: true,
+})
+
+const DEFAULT_NETWORK: NetworkPolicy = Object.freeze({ mode: "deny-all" as const })
+
+const DEFAULT_SANDBOX: PermissionSandboxPolicy = Object.freeze({
+  osSandbox: "none" as const,
+  readOnly: true,
+  workspaceWrite: false,
+  networkIsolated: true,
+})
+
+const DEFAULT_CONTROL: ControlPolicy = Object.freeze({ auditRequired: false })
+
+/** Project the approval pillar. Absent profile ⇒ strictest defaults. */
+export const inferApprovalPolicy = (profile?: PermissionProfile): PermissionApprovalPolicy =>
+  profile?.approval ?? DEFAULT_APPROVAL
+
+/** Project the network pillar. Absent profile ⇒ `deny-all` (no egress). */
+export const inferNetworkPolicy = (profile?: PermissionProfile): NetworkPolicy =>
+  profile?.network ?? DEFAULT_NETWORK
+
+/** Project the sandbox pillar. The `fallback` argument lets callers seed
+ *  from a legacy single-enum policy when migrating — when the profile lacks
+ *  a sandbox member, the fallback wins over {@link DEFAULT_SANDBOX}. */
+export const inferSandboxPolicy = (
+  profile?: PermissionProfile,
+  fallback?: PermissionSandboxPolicy,
+): PermissionSandboxPolicy => profile?.sandbox ?? fallback ?? DEFAULT_SANDBOX
+
+/** Project the control pillar. Absent profile ⇒ user-managed, audit OFF. */
+export const inferControlPolicy = (profile?: PermissionProfile): ControlPolicy =>
+  profile?.control ?? DEFAULT_CONTROL
