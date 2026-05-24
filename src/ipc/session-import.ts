@@ -60,6 +60,45 @@ export class PortableSessionImportError extends Error {
 const isString = (v: unknown): v is string => typeof v === "string"
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v)
 const isBool = (v: unknown): v is boolean => typeof v === "boolean"
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v)
+
+const isTextPhase = (v: unknown): v is "commentary" | "final_answer" =>
+  v === "commentary" || v === "final_answer"
+
+const isPortableContentBlock = (value: unknown): boolean => {
+  if (!isObject(value) || !isString(value.type)) return false
+  switch (value.type) {
+    case "text":
+      return isString(value.text) && (value.phase === undefined || isTextPhase(value.phase))
+    case "tool_use":
+      return isString(value.id) && isString(value.name)
+    case "tool_result":
+      return (
+        isString(value.tool_use_id) &&
+        isString(value.content) &&
+        (value.is_error === undefined || isBool(value.is_error))
+      )
+    case "thinking":
+      return (
+        isString(value.thinking) &&
+        (value.signature === undefined || isString(value.signature)) &&
+        (value.redacted === undefined || value.redacted === true)
+      )
+    case "image":
+    case "document":
+      return isString(value.data) && isString(value.mediaType)
+    default:
+      return false
+  }
+}
+
+const isPortableMessage = (value: unknown): boolean => {
+  if (!isObject(value)) return false
+  if (value.role !== "user" && value.role !== "assistant") return false
+  if (!Array.isArray(value.content) || !value.content.every(isPortableContentBlock)) return false
+  return value.id === undefined || (isString(value.id) && value.id.length > 0)
+}
 
 const validatePortableMeta = (m: unknown): m is PortableSessionV1["meta"] => {
   if (m === null || typeof m !== "object") return false
@@ -121,10 +160,12 @@ export const parsePortableSession = (value: unknown): PortableSessionV1 => {
       "portable session messages must be an array",
     )
   }
-  // Messages are deliberately not deep-validated here — `@/llm`'s Message
-  // shape evolves; we trust the wire-source to send a compatible shape and
-  // let downstream load-time validation catch true breakage. (The
-  // saveSessionById path serializes back to JSON unchanged.)
+  if (!o.messages.every(isPortableMessage)) {
+    throw new PortableSessionImportError(
+      "messages_invalid",
+      "portable session messages must match the persisted message shape",
+    )
+  }
   return {
     schema: o.schema as "quanta.session.portable",
     version: PORTABLE_SESSION_VERSION,

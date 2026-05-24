@@ -93,6 +93,8 @@ describe("pdf_read — guards", () => {
     try {
       const r = await exec({ path: "../escape.pdf" }, dir)
       expect(r.ok).toBe(false)
+      expect(r.failure?.mode).toBe("permission_denied")
+      expect(r.failure?.isReadonly).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -108,6 +110,8 @@ describe("pdf_read — guards", () => {
       const r = await exec({ path: "link.pdf" }, dir)
       expect(r.ok).toBe(false)
       expect(r.output.toLowerCase()).toMatch(/symlink/)
+      expect(r.failure?.mode).toBe("permission_denied")
+      expect(r.failure?.isReadonly).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

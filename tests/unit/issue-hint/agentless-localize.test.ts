@@ -34,12 +34,32 @@ class ScriptedLLM implements LLMPort {
   }
 }
 
+class EventScriptedLLM implements LLMPort {
+  calls = 0
+  lastInput: StreamInput | undefined
+  constructor(private readonly events: readonly StreamEvent[]) {}
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    this.lastInput = input
+    for (const ev of this.events) yield ev
+  }
+}
+
 class ThrowingLLM implements LLMPort {
   calls = 0
   // biome-ignore lint/correctness/useYield: stream throws before any yield — contract is "LLM raises mid-call"
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     this.calls += 1
     throw new Error("provider down")
+  }
+}
+
+class YieldThenThrowLLM implements LLMPort {
+  calls = 0
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    yield { type: "text_delta", delta: "FILE: requests/models.py\nREASON: partial" }
+    throw new Error("provider down after partial")
   }
 }
 
@@ -215,6 +235,33 @@ describe("agentlessLocalize — full integration with mock LLM", () => {
     const out = await agentlessLocalize("real issue", { ...baseDeps, llm })
     expect(out.files).toEqual([])
     expect(out.rawResponse).toBe("just prose with no FILE: token anywhere")
+  })
+
+  test("stream_reset tombstones dead partial and keeps only fresh text", async () => {
+    const llm = new EventScriptedLLM([
+      { type: "text_delta", delta: "FILE: requests/api.py\nREASON: dead partial\n" },
+      { type: "stream_reset" },
+      { type: "text_delta", delta: "FILE: requests/models.py\n" },
+      { type: "text_delta", delta: "REASON: prepare_url IDNAError handling\n" },
+      { type: "text_delta", delta: "FILE: requests/adapters.py\nREASON: HTTPAdapter URL preparation" },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ])
+    const out = await agentlessLocalize("real issue", { ...baseDeps, llm })
+    expect(out.files).toEqual(["requests/models.py", "requests/adapters.py"])
+    expect(out.rationales).toEqual([
+      "prepare_url IDNAError handling",
+      "HTTPAdapter URL preparation",
+    ])
+    expect(out.rawResponse).toBe(goodResponse)
+  })
+
+  test("mid-stream failure still returns error surface, not partial text", async () => {
+    const llm = new YieldThenThrowLLM()
+    const out = await agentlessLocalize("real issue", { ...baseDeps, llm })
+    expect(out.files).toEqual([])
+    expect(out.rationales).toEqual([])
+    expect(out.rawResponse).toContain("LLM stream failed")
+    expect(out.rawResponse).toContain("provider down after partial")
   })
 
   test("topK=3 with 5-file response → trimmed to 3", async () => {

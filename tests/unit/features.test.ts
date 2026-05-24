@@ -109,6 +109,19 @@ describe("buildSessionFeatures", () => {
     expect(f.taskRegistry).toBeDefined()
   })
 
+  test("planStore wired ⇒ registers current_plan + 4 mutators", async () => {
+    const f = await buildSessionFeatures(
+      cfg({ planStore: {} as NonNullable<AgentConfig["planStore"]> }),
+    )
+    expect(names(f.extraTools)).toEqual([
+      "create_plan",
+      "current_plan",
+      "remove_todos",
+      "update_plan",
+      "update_todos",
+    ])
+  })
+
   test("skills-only over a temp fixture dir ⇒ Skill + ToolSearch tools", async () => {
     const dir = await mkdtemp(join(tmpdir(), "feat-skills-"))
     tmpDirs.push(dir)

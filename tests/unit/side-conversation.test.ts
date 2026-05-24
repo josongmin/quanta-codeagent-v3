@@ -1,7 +1,7 @@
 /**
  * ADR-0049 side-conversation seam unit tests.
  *
- * Covers (15 tests):
+ * Covers (16 tests):
  *   1. byte-identical Codex base prompt
  *   2. delimiter present and stable between base and addendum
  *   3. SIDE_CONVERSATION_PROMPT == base + delimiter + addendum (no other content)
@@ -14,9 +14,10 @@
  *  10. filterSideConversationTools rejects unknown tool
  *  11. runSideConversation returns answer + tokens + duration
  *  12. runSideConversation emits OTel span with thread.side / kind / parent_id
- *  13. runSideConversation aborts when parent signal fires
- *  14. runSideConversation rejects over-budget input
- *  15. runSideConversation rejects over-budget output (post-stream)
+ *  13. runSideConversation aborts when parent signal is already aborted
+ *  14. runSideConversation propagates parent signal into the LLM stream and aborts mid-stream
+ *  15. runSideConversation rejects over-budget input
+ *  16. runSideConversation rejects over-budget output (post-stream)
  */
 
 import { describe, expect, it } from "bun:test"
@@ -52,6 +53,34 @@ class FakeLlm implements LLMPort {
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     this.inputs.push(input)
     for (const e of this.script) yield e
+  }
+}
+
+class AbortAwareLlm implements LLMPort {
+  readonly inputs: StreamInput[] = []
+  readonly model = "fake-side-conv-abort-aware"
+  private startedResolve!: () => void
+  readonly started = new Promise<void>((resolve) => {
+    this.startedResolve = resolve
+  })
+
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.inputs.push(input)
+    this.startedResolve()
+    yield { type: "text_delta", delta: "partial" }
+    await new Promise<never>((_, reject) => {
+      if (input.signal === undefined) {
+        reject(new Error("missing signal"))
+        return
+      }
+      if (input.signal.aborted) {
+        reject(new Error("signal already aborted"))
+        return
+      }
+      input.signal.addEventListener("abort", () => reject(new Error("provider aborted")), {
+        once: true,
+      })
+    })
   }
 }
 
@@ -194,7 +223,7 @@ describe("runSideConversation behavior", () => {
     expect(captured?.["gen_ai.usage.output_tokens"]).toBe(6)
   })
 
-  it("13. aborts when parent signal fires before streaming", async () => {
+  it("13. aborts when parent signal is already aborted before streaming", async () => {
     const llm = new FakeLlm(textAnswer("never-seen"))
     const ac = new AbortController()
     ac.abort()
@@ -210,7 +239,25 @@ describe("runSideConversation behavior", () => {
     expect(llm.inputs.length).toBe(0)
   })
 
-  it("14. rejects over-budget input (pre-stream)", async () => {
+  it("14. passes parent signal into llm.stream and aborts mid-stream", async () => {
+    const llm = new AbortAwareLlm()
+    const ac = new AbortController()
+    const promise = runSideConversation({
+      parentSessionId: "p",
+      question: "q",
+      llm,
+      signal: ac.signal,
+    })
+
+    await llm.started
+    expect(llm.inputs[0]?.signal).toBe(ac.signal)
+
+    ac.abort()
+
+    await expect(promise).rejects.toBeInstanceOf(SideConversationAbortedError)
+  })
+
+  it("15. rejects over-budget input (pre-stream)", async () => {
     const llm = new FakeLlm(textAnswer("ok"))
     // Construct a question larger than the default budget.
     const long = "x".repeat(DEFAULT_SIDE_CONVERSATION_INPUT_TOKEN_BUDGET * 4 + 100)
@@ -224,7 +271,7 @@ describe("runSideConversation behavior", () => {
     expect(llm.inputs.length).toBe(0)
   })
 
-  it("15. rejects over-budget output (post-stream)", async () => {
+  it("16. rejects over-budget output (post-stream)", async () => {
     const llm = new FakeLlm(textAnswer("ok", { inputTokens: 1, outputTokens: 9999 }))
     await expect(
       runSideConversation({

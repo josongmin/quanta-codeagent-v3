@@ -29,6 +29,44 @@
 
 import type { MatchOutcome, Rule } from "./types"
 
+/** Internal fast path for callers that own rule lifecycle and can prepare
+ *  rule order once up-front (e.g. `RulesStore`). Not re-exported from the
+ *  barrel; external callers should keep using `matchCommand()`. */
+export const matchPreparedCommand = (
+  command: string,
+  preparedRules: readonly Rule[],
+): MatchOutcome => {
+  const normalised = stripLeading(command)
+  if (preparedRules.length === 0) {
+    return { kind: "no_match" }
+  }
+
+  for (const rule of preparedRules) {
+    if (matchesPrefix(normalised, rule.prefix)) {
+      return { kind: "matched", rule }
+    }
+  }
+  return { kind: "no_match" }
+}
+
+/** Deterministic longest-prefix order for a rule array. Returns a fresh
+ *  frozen view and never mutates caller-owned arrays. Equal-length ties
+ *  preserve original source order via the input index. */
+export const prepareRulesForMatch = (rules: readonly Rule[]): readonly Rule[] => {
+  if (rules.length < 2) {
+    return rules
+  }
+
+  const indexed = rules.map((rule, index) => ({ rule, index }))
+  indexed.sort((a, b) => {
+    const lenDiff = b.rule.prefix.length - a.rule.prefix.length
+    if (lenDiff !== 0) return lenDiff
+    return a.index - b.index
+  })
+
+  return Object.freeze(indexed.map(({ rule }) => rule))
+}
+
 /**
  * Match a command against a flat rule list. Layer precedence is NOT
  * applied here — that is `RulesStore`'s job. Within one rule set the
@@ -39,29 +77,8 @@ import type { MatchOutcome, Rule } from "./types"
  * @param rules   Rule set to search. May be empty (always `no_match`).
  *                Caller retains ownership; the matcher does not mutate.
  */
-export const matchCommand = (command: string, rules: readonly Rule[]): MatchOutcome => {
-  const normalised = stripLeading(command)
-  if (rules.length === 0) {
-    return { kind: "no_match" }
-  }
-
-  // Sort a copy — never mutate the caller's array. Stable sort with the
-  // original index keeps the result deterministic for equal-length prefixes
-  // (lower original index wins, matching source-order intuition).
-  const indexed = rules.map((rule, index) => ({ rule, index }))
-  indexed.sort((a, b) => {
-    const lenDiff = b.rule.prefix.length - a.rule.prefix.length
-    if (lenDiff !== 0) return lenDiff
-    return a.index - b.index
-  })
-
-  for (const { rule } of indexed) {
-    if (matchesPrefix(normalised, rule.prefix)) {
-      return { kind: "matched", rule }
-    }
-  }
-  return { kind: "no_match" }
-}
+export const matchCommand = (command: string, rules: readonly Rule[]): MatchOutcome =>
+  matchPreparedCommand(command, prepareRulesForMatch(rules))
 
 /** Exact-or-space-bounded prefix match. See module header for invariants. */
 const matchesPrefix = (command: string, prefix: string): boolean => {

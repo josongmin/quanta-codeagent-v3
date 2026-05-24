@@ -18,6 +18,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { isWireEnvelope, parsePortableSession, PORTABLE_SESSION_VERSION, PortableSessionImportError } from "@/ipc"
 import { isFallbackTrigger } from "@/llm"
 import { hardDenyReason } from "@/permission"
 import { __resetRuntimeConfig, LLMError, runtimeConfig } from "@/shared"
@@ -280,6 +281,58 @@ describe("S19 loadSessionById refuses messages that don't shape-check", () => {
       delete process.env["QUANTA_SESSIONS_DIR"]
       __resetRuntimeConfig()
     }
+  })
+})
+
+// ── S20: IPC envelope runtime validation ────────────────────────────────────
+
+describe("S20 isWireEnvelope rejects payload variants missing their required fields", () => {
+  test("permission_request without request.toolName is dropped at the boundary", () => {
+    expect(
+      isWireEnvelope({
+        protocol: "quanta.ipc.v1",
+        source: "cli",
+        sessionId: "sess-1",
+        payload: { type: "permission_request", request: { preview: "ls" } },
+        timestamp: "2026-05-25T00:00:00.000Z",
+      }),
+    ).toBe(false)
+  })
+
+  test("presence without a closed status enum is dropped at the boundary", () => {
+    expect(
+      isWireEnvelope({
+        protocol: "quanta.ipc.v1",
+        source: "web",
+        sessionId: "sess-1",
+        payload: { type: "presence", surface: "web", status: "busy" },
+        timestamp: "2026-05-25T00:00:00.000Z",
+      }),
+    ).toBe(false)
+  })
+})
+
+// ── S21: portable IPC session import validation ─────────────────────────────
+
+describe("S21 parsePortableSession refuses malformed message payloads", () => {
+  test("message entries must match the persisted session message shape", () => {
+    expect(() =>
+      parsePortableSession({
+        schema: "quanta.session.portable",
+        version: PORTABLE_SESSION_VERSION,
+        meta: {
+          id: "src-1",
+          title: "t",
+          cwd: "/tmp/x",
+          created_at: 1,
+          last_touched: 2,
+          archived: false,
+        },
+        reason: "done",
+        turns: 1,
+        messages: [{ role: "user", content: [{ type: "text" }] }],
+      }),
+    ).toThrow(PortableSessionImportError)
   })
 })
 

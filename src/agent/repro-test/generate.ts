@@ -39,7 +39,7 @@
  *     partial result — `select.ts` is happy to operate on fewer samples).
  */
 
-import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
+import type { LLMPort, Message, StreamEvent } from "@/llm"
 import type { ReproTestConfig } from "./types"
 
 /** Default K when the caller doesn't override. Paper uses 40; 5 is our
@@ -135,6 +135,26 @@ const resolveSamples = (raw: number | undefined): number => {
   return n
 }
 
+/** Consume only the text surface we need for the Python source. A
+ *  `stream_reset` tombstones any dead partial so the returned source matches
+ *  the assembled-text behavior without retaining the whole event stream. */
+const collectTextFromStream = async (iter: AsyncIterable<StreamEvent>): Promise<string> => {
+  let raw = ""
+  for await (const ev of iter) {
+    switch (ev.type) {
+      case "stream_reset":
+        raw = ""
+        break
+      case "text_delta":
+        raw += ev.delta
+        break
+      default:
+        break
+    }
+  }
+  return raw
+}
+
 /**
  * Run the LLM `K` times to synthesise K Python repro-test candidates.
  * Returns the raw source strings (markdown-fence stripped). On any per-call
@@ -161,14 +181,7 @@ const generateOne = async (
         ? { messages, system: SYSTEM_MSG, tools: [], signal }
         : { messages, system: SYSTEM_MSG, tools: [] }
     const iter = llm.stream(streamInput)
-    const events: StreamEvent[] = []
-    for await (const ev of iter) events.push(ev)
-    const assembled = assembleFromEvents(events)
-    let raw = ""
-    for (const block of assembled.message.content) {
-      if (block.type === "text") raw += block.text
-    }
-    return stripMarkdownFences(raw)
+    return stripMarkdownFences(await collectTextFromStream(iter))
   } catch {
     // Per-call failure → empty source. The caller's executor will classify
     // an empty source as `"unknown"` (no marker) and `select.ts` will

@@ -12,7 +12,7 @@ import type { PlanMutationErrorCode, ToolFailure } from "../types"
 export const planErrorMessage = (code: PlanMutationErrorCode): string => {
   switch (code) {
     case "version_conflict":
-      return "Plan version is stale. Call current() to read the latest version, then retry with the new expected_version."
+      return "Plan version is stale. Call current_plan to read the latest version, then retry with the new expected_version."
     case "todo_not_found":
       return "Referenced todo id does not exist in the current plan."
     case "phase_not_found":

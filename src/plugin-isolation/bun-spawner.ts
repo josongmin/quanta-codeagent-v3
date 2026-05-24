@@ -48,6 +48,7 @@ const SERVICE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
 const NEWLINE_CHAR = 0x0a
 const NUL_CHAR = 0x00
+const MAX_EARLY_BUFFERED_MESSAGES = 64
 
 const validateOpts = (opts: SpawnOpts): void => {
   if (!SERVICE_NAME_RE.test(opts.serviceName)) {
@@ -128,61 +129,107 @@ const createKillController = (
   return { kill, disarm }
 }
 
-/** Stdout pump: bytes → lines → dispatch. NUL-byte handling: we use the
- *  byte-level newline index to slice lines; any line containing a NUL char is
- *  truncated AT the NUL when decoded (TextDecoder default), but to avoid
- *  silently corrupting downstream JSON we explicitly drop NUL-bearing lines
- *  with a warn. Oversize (>10MB) lines are dropped + warned. */
+/** Stdout pump: bytes → lines → dispatch.
+ *
+ *  Implementation note: line assembly is segment-based, not concat-based.
+ *  A long pre-newline line is buffered once and materialized once at newline,
+ *  avoiding per-chunk O(n^2) copies. Once a line crosses MAX_MESSAGE_BYTES or
+ *  contains a NUL, we drop buffered segments immediately and stay in a
+ *  discard-until-newline mode so memory stays bounded even if the child keeps
+ *  streaming bytes without a newline. */
 const createMessagePump = (
   proc: Subprocess<"pipe", "pipe", "pipe">,
   serviceName: string,
   onLine: (line: string) => void,
 ): { readonly done: Promise<void> } => {
   const decoder = new TextDecoder()
-  let buf: Uint8Array = new Uint8Array(0)
+  const lineSegments: Uint8Array[] = []
+  let lineBytes = 0
+  let dropReason: "oversize" | "nul" | undefined
 
-  const concat = (a: Uint8Array, b: Uint8Array): Uint8Array => {
-    const out = new Uint8Array(a.byteLength + b.byteLength)
-    out.set(a, 0)
-    out.set(b, a.byteLength)
+  const clearLineSegments = (): void => {
+    lineSegments.length = 0
+  }
+
+  const materializeLine = (): Uint8Array => {
+    if (lineSegments.length === 1) return lineSegments[0]!
+    const out = new Uint8Array(lineBytes)
+    let offset = 0
+    for (const segment of lineSegments) {
+      out.set(segment, offset)
+      offset += segment.byteLength
+    }
     return out
   }
 
-  const dispatch = (lineBytes: Uint8Array): void => {
-    if (lineBytes.byteLength === 0) return
-    if (lineBytes.byteLength > MAX_MESSAGE_BYTES) {
+  const resetLine = (): void => {
+    clearLineSegments()
+    lineBytes = 0
+    dropReason = undefined
+  }
+
+  const finalizeLine = (): void => {
+    if (lineBytes === 0) {
+      resetLine()
+      return
+    }
+    if (dropReason === "oversize") {
       logger.warn("plugin-isolation: dropping oversize stdout line", {
         serviceName,
-        bytes: lineBytes.byteLength,
+        bytes: lineBytes,
         cap: MAX_MESSAGE_BYTES,
       })
+      resetLine()
       return
     }
-    if (lineBytes.indexOf(NUL_CHAR) >= 0) {
+    if (dropReason === "nul") {
       logger.warn("plugin-isolation: dropping NUL-bearing stdout line", {
         serviceName,
-        bytes: lineBytes.byteLength,
+        bytes: lineBytes,
       })
+      resetLine()
       return
     }
-    const text = decoder.decode(lineBytes)
+    const text = decoder.decode(materializeLine())
+    resetLine()
     onLine(text)
   }
 
-  const drainBuffered = (): void => {
-    while (true) {
-      const nl = buf.indexOf(NEWLINE_CHAR)
-      if (nl < 0) return
-      dispatch(buf.subarray(0, nl))
-      buf = buf.subarray(nl + 1)
+  const consumeFragment = (fragment: Uint8Array): void => {
+    if (fragment.byteLength === 0) return
+    lineBytes += fragment.byteLength
+    if (dropReason !== undefined) return
+    if (lineBytes > MAX_MESSAGE_BYTES) {
+      dropReason = "oversize"
+      clearLineSegments()
+      return
+    }
+    if (fragment.indexOf(NUL_CHAR) >= 0) {
+      dropReason = "nul"
+      clearLineSegments()
+      return
+    }
+    lineSegments.push(fragment)
+  }
+
+  const consumeChunk = (chunk: Uint8Array): void => {
+    let cursor = 0
+    while (cursor < chunk.byteLength) {
+      const nl = chunk.indexOf(NEWLINE_CHAR, cursor)
+      if (nl < 0) {
+        consumeFragment(chunk.subarray(cursor))
+        return
+      }
+      consumeFragment(chunk.subarray(cursor, nl))
+      finalizeLine()
+      cursor = nl + 1
     }
   }
 
   const pump = async (): Promise<void> => {
     try {
       for await (const chunk of proc.stdout) {
-        buf = concat(buf, chunk)
-        drainBuffered()
+        consumeChunk(chunk)
       }
     } catch (e) {
       logger.debug("plugin-isolation: stdout pump ended with error", {
@@ -239,12 +286,10 @@ const createSendBridge = (
 /** Subscribe registry — handlers run via microtask to keep `send` re-entrant.
  *
  *  BUFFER-UNTIL-FIRST-SUBSCRIBER: messages dispatched before any listener has
- *  registered are queued. The instant the first listener arrives they are
- *  flushed (via microtask, preserving order). This closes the race where the
- *  child emits a payload line so close to the ready sentinel that it arrives
- *  in the SAME pump iteration as the ready, before the user's first call to
- *  `onMessage()` after `await spawn(...)`. Without buffering, the early
- *  payload would be silently lost. */
+ *  registered are queued up to MAX_EARLY_BUFFERED_MESSAGES. The instant the
+ *  first listener arrives they are flushed (via microtask, preserving order).
+ *  This closes the ready→first-subscribe race without allowing an unbounded
+ *  pre-listener queue. When the cap is reached, oldest messages are dropped. */
 interface ListenerRegistry {
   readonly add: (h: (msg: unknown) => void) => () => void
   readonly dispatch: (msg: unknown) => void
@@ -254,6 +299,7 @@ const createListenerRegistry = (): ListenerRegistry => {
   const listeners = new Set<(msg: unknown) => void>()
   const earlyBuffer: unknown[] = []
   let everHadListener = false
+  let warnedEarlyBufferOverflow = false
 
   const fanOut = (msg: unknown): void => {
     const snapshot = Array.from(listeners)
@@ -284,6 +330,15 @@ const createListenerRegistry = (): ListenerRegistry => {
     },
     dispatch: (msg) => {
       if (!everHadListener) {
+        if (earlyBuffer.length === MAX_EARLY_BUFFERED_MESSAGES) {
+          earlyBuffer.shift()
+          if (!warnedEarlyBufferOverflow) {
+            warnedEarlyBufferOverflow = true
+            logger.warn("plugin-isolation: early listener buffer full; dropping oldest message", {
+              cap: MAX_EARLY_BUFFERED_MESSAGES,
+            })
+          }
+        }
         earlyBuffer.push(msg)
         return
       }

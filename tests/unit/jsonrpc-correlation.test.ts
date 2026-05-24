@@ -86,4 +86,9 @@ describe("brandRequestId", () => {
     expect(branded as unknown as number).toBe(999)
     expect(g.peek()).toBe(1 as never)
   })
+
+  test("accepts relayed string ids without changing runtime value", () => {
+    const branded = brandRequestId("rpc-7")
+    expect(branded as unknown as string).toBe("rpc-7")
+  })
 })

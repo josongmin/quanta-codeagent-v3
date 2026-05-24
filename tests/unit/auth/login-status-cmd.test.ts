@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, stat } from "node:fs/promises"
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildLoginCmd } from "../../../src/apps/cli/login-cmd"
@@ -10,6 +10,7 @@ import {
   writeToken,
 } from "../../../src/auth/chatgpt-oauth"
 import type { SlashContext } from "../../../src/apps/cli/slash-commands"
+import type { OAuthCallbackProvider } from "../../../src/auth/chatgpt-oauth"
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "")
 
@@ -35,6 +36,32 @@ const makeCtx = (prefsHome: string): Cap => {
     },
   }
   return cap
+}
+
+const makeControlledProvider = (): {
+  provider: OAuthCallbackProvider
+  succeed(code?: string): void
+} => {
+  let resolveReceived: ((value: { code: string }) => void) | undefined
+  return {
+    provider: {
+      async start(input) {
+        if (input.signal?.aborted) {
+          throw new Error("unexpected pre-abort")
+        }
+        const received = new Promise<{ code: string }>((resolve) => {
+          resolveReceived = resolve
+        })
+        return {
+          redirectUri: "http://localhost:1455/auth/callback",
+          received,
+        }
+      },
+    },
+    succeed(code = "ok-code") {
+      resolveReceived?.({ code })
+    },
+  }
 }
 
 const toBase64Url = (s: string): string =>
@@ -94,11 +121,13 @@ describe("/login command", () => {
 
   test("happy path writes token + renders Signed in box (plus plan → exit 0)", async () => {
     let capturedUrl: string | null = null
+    const controlled = makeControlledProvider()
     const cmd = buildLoginCmd({
       env: { QUANTA_OAUTH_CLIENT_ID: "client_x", QUANTA_PREFS_HOME: dir },
       opener: (u) => {
         capturedUrl = u
       },
+      callbackProvider: controlled.provider,
       fetchImpl: async () => mockTokenResponse("plus"),
       nowMs: () => Date.parse("2026-05-23T00:00:00.000Z"),
       timeoutMs: 5000,
@@ -107,11 +136,7 @@ describe("/login command", () => {
     // Drive the callback once the opener captures the URL.
     const runPromise = cmd.run([], cap.ctx)
     while (capturedUrl === null) await new Promise((r) => setTimeout(r, 5))
-    const u = new URL(capturedUrl)
-    const cb = new URL(u.searchParams.get("redirect_uri") ?? "")
-    cb.searchParams.set("code", "ok-code")
-    cb.searchParams.set("state", u.searchParams.get("state") ?? "")
-    await fetch(cb.toString())
+    controlled.succeed()
     const exit = await runPromise
     expect(exit).toBe(0)
     const out = stripAnsi(cap.out)
@@ -127,11 +152,13 @@ describe("/login command", () => {
 
   test("free plan: token still saved (truth surface) but exit 3 + warn line", async () => {
     let capturedUrl: string | null = null
+    const controlled = makeControlledProvider()
     const cmd = buildLoginCmd({
-      env: { QUANTA_OAUTH_CLIENT_ID: "client_x" },
+      env: { QUANTA_OAUTH_CLIENT_ID: "client_x", QUANTA_PREFS_HOME: dir },
       opener: (u) => {
         capturedUrl = u
       },
+      callbackProvider: controlled.provider,
       fetchImpl: async () => mockTokenResponse("free"),
       nowMs: () => Date.parse("2026-05-23T00:00:00.000Z"),
       timeoutMs: 5000,
@@ -139,14 +166,16 @@ describe("/login command", () => {
     const cap = makeCtx(dir)
     const runPromise = cmd.run([], cap.ctx)
     while (capturedUrl === null) await new Promise((r) => setTimeout(r, 5))
-    const u = new URL(capturedUrl)
-    const cb = new URL(u.searchParams.get("redirect_uri") ?? "")
-    cb.searchParams.set("code", "ok-code")
-    cb.searchParams.set("state", u.searchParams.get("state") ?? "")
-    await fetch(cb.toString())
+    controlled.succeed()
     const exit = await runPromise
     expect(exit).toBe(3)
     expect(stripAnsi(cap.out)).toContain("Free ChatGPT plan does not include API access")
+    const stored = JSON.parse(await readFile(chatgptTokenPath(dir), "utf8")) as {
+      plan_type?: string
+      account_id?: string
+    }
+    expect(stored.plan_type).toBe("free")
+    expect(stored.account_id).toBe("acct-1")
   })
 })
 

@@ -26,6 +26,7 @@ import type {
   BackgroundSubagentScheduler,
   SubagentHandleId,
   SubagentResult,
+  SubagentStatus,
   SubagentSpec,
 } from "../subagent-background"
 import type { PersistedHandle, PersistedSubagentStatus, PersistentSchedulerStore } from "./types"
@@ -46,6 +47,26 @@ export interface HydratingSchedulerOpts {
   /** Test seam: host PID to embed into persisted handles. Default
    *  `process.pid`. */
   readonly hostPid?: () => number
+}
+
+export type HydratedSubagentStatus = SubagentStatus | PersistedSubagentStatus
+
+export interface HydratedSubagentResult extends Omit<SubagentResult, "status"> {
+  readonly status: HydratedSubagentStatus
+}
+
+export interface PersistentBackgroundSubagentScheduler
+  extends Omit<BackgroundSubagentScheduler, "poll" | "await" | "list"> {
+  poll(id: SubagentHandleId): HydratedSubagentResult | null
+  await(
+    id: SubagentHandleId,
+    awaitOpts?: { signal?: AbortSignal },
+  ): Promise<HydratedSubagentResult | null>
+  list(): ReadonlyArray<{
+    id: SubagentHandleId
+    result: HydratedSubagentResult
+    spec: SubagentSpec
+  }>
 }
 
 /** Default liveness probe — `process.kill(pid, 0)` succeeds if the process
@@ -108,12 +129,11 @@ const reclassifyAsInterrupted = (h: PersistedHandle, tNow: number): PersistedHan
  *  field on the returned object; consumers that only know the 4 base arms
  *  see `status === "interrupted"` as an unknown string but the rest of the
  *  fields are present. */
-const persistedToResult = (h: PersistedHandle): SubagentResult => ({
-  // `SubagentResult.status` is typed as 4 base arms; we cast through unknown
-  // because the persistence layer's surface is the 5-arm union and a
-  // consumer expecting only base arms still gets a valid object whose
-  // remaining fields it can read.
-  status: h.status as unknown as SubagentResult["status"],
+const persistedToResult = (h: PersistedHandle): HydratedSubagentResult => ({
+  // Persistence extends the live 4-arm lifecycle with `"interrupted"` and
+  // `"resumed"`. Surface that honestly on the wrapper rather than narrowing
+  // it back to the base scheduler's 4-arm type.
+  status: h.status,
   outputSummary: h.outputSummary,
   startedAt: h.startedAt,
   turns: h.turns,
@@ -128,7 +148,7 @@ const persistedToResult = (h: PersistedHandle): SubagentResult => ({
 
 export const persistentBackgroundSubagentScheduler = async (
   opts: HydratingSchedulerOpts,
-): Promise<BackgroundSubagentScheduler> => {
+): Promise<PersistentBackgroundSubagentScheduler> => {
   const { inner, store, workspace } = opts
   const isProcessAlive = opts.isProcessAlive ?? defaultIsProcessAlive
   const now = opts.now ?? Date.now

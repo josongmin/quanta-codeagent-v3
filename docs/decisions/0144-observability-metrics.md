@@ -32,7 +32,9 @@ quanta 의 observability 평면은 두 surface 를 이미 가지고 있다:
 
 ## 결정
 
-신규 plane-clean 디렉토리 `src/observability/metrics/`:
+신규 디렉토리 `src/observability/metrics/`:
+
+> **Plane discipline (ADR-0193 정정)**: `port.ts` + `jsonl-sink.ts` + `otel-resource.ts` + `health-snapshot.ts` 는 `@/shared` + node 표준만 import 하지만, 이 슬라이스 전체는 plane-clean 이 **아니다**. `instrument-tool.ts` / `instrument-budget.ts` / `instrument-plan-queue.ts` / `instrument-shadow.ts` / `observability-helper.ts` 는 의도적으로 cross-cutting 이다 — 각각 `@/tool` / `@/agent/budget-ledger` / `@/agent/plan-queue` / `@/agent/subagent-background` / `@/storage/shadow-odb` / `@/llm/providers` / `@/llm` 를 type-only 로 reach 한다. observability layer 의 본성이 cross-cutting 이라 plane-clean 봉인은 부적절 — biome 의 `**/src/observability/**` slice 룰은 이미 enforced (위 import 들이 pre-existing noRestrictedImports 위반으로 잡혀 있음; 본 ADR 의 "plane-clean" 표현이 잘못된 것임).
 
 ```ts
 type MetricKind = "counter" | "histogram" | "gauge"

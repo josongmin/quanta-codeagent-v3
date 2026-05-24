@@ -4,7 +4,7 @@ section: 1
 subsystem: 큐드 follow-ups (ADR-0128)
 order: 94
 maturity: L3
-status: refined
+status: hold
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]

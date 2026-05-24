@@ -246,6 +246,47 @@ describe("ADR-0110 wireTurnDiffEmit (hellgate)", () => {
     expect(ev1?.filesChanged).toBe(2)
   })
 
+  test("HELL-11A: endTurn consumes anchor after successful emit", async () => {
+    const runner = makeRunner({
+      "rev-parse HEAD": ok("abc123\n"),
+      "diff abc123": ok("body\n"),
+      "diff --shortstat abc123": ok(" 1 file changed, 1 insertion(+)\n"),
+    })
+    const sess = wireTurnDiffEmit({ runner, cwd: "/tmp/repo" })
+    await sess.startTurn(0)
+    const first = await sess.endTurn(0)
+    const callsAfterFirst = runner.calls.length
+    const second = await sess.endTurn(0)
+    expect(first?.type).toBe("turn_diff_updated")
+    expect(second).toBeNull()
+    expect(runner.calls.length).toBe(callsAfterFirst)
+  })
+
+  test("HELL-11B: endTurn consumes anchor even when diff payload is null", async () => {
+    let headIdx = 0
+    const runner = makeRunner({
+      "diff sha1": ok(""),
+      "diff --shortstat sha1": ok(""),
+      "diff sha2": ok(""),
+      "diff --shortstat sha2": ok(""),
+    })
+    const baseRun = runner.run.bind(runner)
+    runner.run = async (args, cwd, signal) => {
+      if (args.join(" ") === "rev-parse HEAD") {
+        headIdx += 1
+        return ok(`sha${headIdx}\n`)
+      }
+      return baseRun(args, cwd, signal)
+    }
+    const sess = wireTurnDiffEmit({ runner, cwd: "/tmp/repo" })
+    await sess.startTurn(0)
+    expect(await sess.endTurn(0)).toBeNull()
+    expect(headIdx).toBe(2)
+    await sess.startTurn(0)
+    expect(headIdx).toBe(3)
+    expect(await sess.endTurn(0)).toBeNull()
+  })
+
   test("HELL-12: spawn-error on rev-parse ⇒ no anchor; endTurn returns null", async () => {
     const runner = makeRunner({
       "rev-parse HEAD": new Error("ENOENT: git not found"),

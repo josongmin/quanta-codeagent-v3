@@ -1,6 +1,6 @@
 /** `subagent_await` — ADR-0130. Block until a background subagent completes,
  *  with optional timeout. On timeout, returns ok:true with status="running"
- *  so the caller can decide whether to poll again or cancel.
+ *  so the caller can decide whether to poll again later or stop waiting.
  *
  *  Output contract: NEVER throws past the loop. Unknown handle id is mapped
  *  to an `ok:false` ToolResult. Read-only + concurrency-safe (multiple awaits
@@ -9,8 +9,7 @@
  *
  *  Cancellation: the tool's `ctx.signal` is forwarded into the scheduler's
  *  await signal. When `ctx.signal` aborts, the await unblocks but the
- *  underlying subagent is NOT cancelled (separate concerns — caller can
- *  explicitly call subagent_cancel when wired). */
+ *  underlying subagent is NOT cancelled. */
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
@@ -25,7 +24,7 @@ export const subagentAwaitInputSchema = z.object({
     .optional()
     .describe(
       "Optional timeout in ms. When elapsed before the subagent completes, returns ok:true " +
-        "with status='running' so the caller can decide whether to poll again or cancel. " +
+        "with status='running' so the caller can decide whether to poll again later. " +
         "Absent ⇒ wait until completion (or external cancel).",
     ),
 })
@@ -80,7 +79,7 @@ export const subagentAwaitTool = (
   description:
     "Block until a background subagent (subagent_fork handle) completes. Optional " +
     "timeoutMs returns ok:true with status='running' if the deadline passes — the " +
-    "caller can then poll again or cancel. The full transcript/answer is included " +
+    "caller can then poll again later. The full transcript/answer is included " +
     "on terminal status.",
   inputSchema: subagentAwaitInputSchema,
   isReadOnly: () => true,

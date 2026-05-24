@@ -162,11 +162,11 @@ Identical to ADR-0165 / 0170 / 0172 — the `coverage_check` tool stays caller-r
 
 = "first agent surface to ship a per-branch counter native to the TypeScript compiler API + V8 byte-range containment behind a port-substitutable adapter, with an Istanbul-shape emitter + a strict-shape merge primitive — the V8 / AST / c8 / istanbul adapters coexist; the caller picks at composition time."
 
-## Plane-clean check
+## Plane discipline (ADR-0193 정정)
 
-- `src/observability/coverage/istanbul-source.ts` imports ONLY `node:fs/promises`, `node:path`, `typescript`, and the in-slice `./port`. NO `@/agent`, `@/tool`, `@/llm`, `@/permission`.
-- `src/observability/coverage/istanbul-shape-emitter.ts` imports ONLY in-slice `./port` + in-slice `./istanbul-source` (for the `BranchSite` / `PerBranchSidecar` types). NO `node:fs`, NO `typescript` — the emitter is pure shape arithmetic.
-- `src/observability/coverage/merge.ts` imports ONLY the in-slice `./port`. NO `node:fs`, NO `typescript`.
+- `src/observability/coverage/istanbul-source.ts` imports `node:fs/promises`, `node:path`, **`typescript` (3rd-party compiler API)**, and the in-slice `./port`. NO `@/agent`, `@/tool`, `@/llm`, `@/permission` — biome `**/src/observability/**` slice 룰이 enforced. `typescript` 의존이 무거우므로 "plane-clean" 보다는 "compiler-bridge" 가 정확한 라벨이다.
+- `src/observability/coverage/istanbul-shape-emitter.ts` imports ONLY in-slice `./port` + in-slice `./istanbul-source` (for the `BranchSite` / `PerBranchSidecar` types). NO `node:fs`, NO `typescript` — the emitter is pure shape arithmetic (이 sub-file 만은 실제 pure).
+- `src/observability/coverage/merge.ts` imports ONLY the in-slice `./port`. NO `node:fs`, NO `typescript` (이 sub-file 도 pure).
 - Hellgate tests import `bun:test`, `node:fs/promises`, `node:os`, `node:path`, and `@/observability/coverage`. No reach past the public barrel.
 
 ## Follow-up (not closed by this ADR)

@@ -52,6 +52,11 @@ export const MAX_PTY = 32
 /** Soft default for `wait_agent` blocking timeouts. Mirrors `task_output`'s
  *  30s upper bound; callers can override via `timeoutMs`. */
 const DEFAULT_WAIT_AGENT_TIMEOUT_MS = 30_000
+/** Startup grace for `exec_command({pty:true})`: if the child is still alive
+ *  after this window, we attach it into the PTY table and return its pid
+ *  instead of blocking until natural exit. Short-lived commands that exit
+ *  inside the window keep the old fully-buffered synchronous behavior. */
+const PTY_ATTACH_GRACE_MS = 75
 
 /** Per-tool error helpers — guarantees the discriminator + message shape that
  *  matches the frozen contract (`ErrorShape` in tools-6.ts). */
@@ -137,6 +142,59 @@ interface ExecCommandDeps {
   ptyTable?: PtyTable
 }
 
+interface StreamPump {
+  readonly done: Promise<void>
+  snapshot(): string
+  stopCapturing(): string
+}
+
+/** Drain a subprocess pipe continuously so long-lived PTYs cannot deadlock on
+ *  a full stdout/stderr buffer. While capture is enabled we retain bytes for
+ *  the eventual tool result; after an attached PTY returns we discard future
+ *  bytes but keep draining until the child exits. */
+const createStreamPump = (stream: ReadableStream<Uint8Array>): StreamPump => {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let capture = true
+  const done = (async (): Promise<void> => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) return
+        if (capture && value !== undefined && value.byteLength > 0) chunks.push(value)
+      }
+    } catch {
+      // Kill/abort/pipe-close can race the reader; stdout/stderr capture is
+      // best-effort and must not throw past the handler.
+    } finally {
+      reader.releaseLock()
+    }
+  })()
+  const decode = (): string => new TextDecoder("utf-8").decode(concatChunks(chunks))
+  return {
+    done,
+    snapshot: decode,
+    stopCapturing(): string {
+      const text = decode()
+      capture = false
+      chunks.length = 0
+      return text
+    },
+  }
+}
+
+const concatChunks = (chunks: readonly Uint8Array[]): Uint8Array => {
+  let total = 0
+  for (const chunk of chunks) total += chunk.byteLength
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out
+}
+
 /**
  * `exec_command` — spawn a shell command via `Bun.spawn` with piped stdio.
  * When `pty:true` is requested AND the child is still running at return time,
@@ -208,6 +266,51 @@ export const handleExecCommand = async (
   signal?.addEventListener("abort", onAbort, { once: true })
 
   try {
+    if (wantPty && table !== undefined) {
+      const stdoutPump = createStreamPump(proc.stdout as ReadableStream<Uint8Array>)
+      const stderrPump = createStreamPump(proc.stderr as ReadableStream<Uint8Array>)
+      const winner = await Promise.race([
+        (proc.exited as Promise<number>).then(() => "exited" as const),
+        new Promise<"attach">((resolve) => setTimeout(() => resolve("attach"), PTY_ATTACH_GRACE_MS)),
+      ])
+
+      if (winner === "attach" && !timedOut && !aborted) {
+        const stdoutText = stdoutPump.stopCapturing()
+        const stderrText = stderrPump.stopCapturing()
+        table.set(proc.pid, {
+          proc,
+          startedAt: Date.now(),
+          command: input.command,
+          exited: proc.exited as Promise<number>,
+        })
+        void (proc.exited as Promise<number>).finally(() => {
+          table.delete(proc.pid)
+        })
+        return {
+          kind: "success",
+          exitCode: -1,
+          stdout: stdoutText,
+          stderr: stderrText,
+          pid: proc.pid,
+        }
+      }
+
+      const exitCode = await (proc.exited as Promise<number>)
+      await Promise.all([stdoutPump.done, stderrPump.done])
+      if (timedOut) {
+        return errExec(`Command timed out after ${input.timeoutMs}ms`, "timeout")
+      }
+      if (aborted) {
+        return errExec("Command aborted", "abort")
+      }
+      return {
+        kind: "success",
+        exitCode,
+        stdout: stdoutPump.snapshot(),
+        stderr: stderrPump.snapshot(),
+      }
+    }
+
     const [stdoutText, stderrText, exitCode] = await Promise.all([
       new Response(proc.stdout as ReadableStream<Uint8Array>).text(),
       new Response(proc.stderr as ReadableStream<Uint8Array>).text(),
@@ -219,28 +322,6 @@ export const handleExecCommand = async (
     }
     if (aborted) {
       return errExec("Command aborted", "abort")
-    }
-
-    // If pty:true was requested AND the child is somehow still alive at this
-    // point (rare — most short commands exit before we get here), keep the
-    // handle so write_stdin can reach it. NOTE: the Bun.spawn pipe model
-    // means once we've drained stdout we usually already saw exit; this is a
-    // best-effort retain — primarily for long-lived REPLs spawned with `cat`
-    // / `python -i` etc. (their stdin stays open until we close it).
-    if (wantPty && table !== undefined && !proc.killed && proc.exitCode === null) {
-      table.set(proc.pid, {
-        proc,
-        startedAt: Date.now(),
-        command: input.command,
-        exited: proc.exited as Promise<number>,
-      })
-      return {
-        kind: "success",
-        exitCode,
-        stdout: stdoutText,
-        stderr: stderrText,
-        pid: proc.pid,
-      }
     }
 
     return { kind: "success", exitCode, stdout: stdoutText, stderr: stderrText }

@@ -283,6 +283,45 @@ describe("@/runner/orchestrate#runInteractive", () => {
     expect(imagesPerTurn).toEqual([1, 0])
   })
 
+  test("cancelled turn preserves pending images for the retry iteration", async () => {
+    const prompts = ["first", "retry"]
+    let i = 0
+    const ps: PromptSource = {
+      next: async () => (i < prompts.length ? (prompts[i++] ?? null) : null),
+    }
+    const abort = new AbortController()
+    const seed: ImageBlock[] = [{ type: "image", data: "", mediaType: "image/png" }]
+    const imagesPerTurn: number[] = []
+    class ProbeDone extends Error {}
+    let wraps = 0
+    await runInteractive({
+      deps: stubDeps(abort.signal),
+      assembleConfig: (m) => {
+        const last = m.at(-1)
+        const blocks = (last?.content as ContentBlock[] | undefined) ?? []
+        imagesPerTurn.push(blocks.filter((b) => b.type === "image").length)
+        throw new ProbeDone()
+      },
+      promptSource: ps,
+      history: [],
+      state: undefined,
+      idMeta: undefined,
+      signal: abort.signal,
+      seedImages: seed,
+      wrapTurn: async (run) => {
+        wraps += 1
+        if (wraps === 1) return { cancelled: true }
+        try {
+          return await run(stubDeps(abort.signal))
+        } catch (e) {
+          if (e instanceof ProbeDone) return undefined
+          throw e
+        }
+      },
+    })
+    expect(imagesPerTurn).toEqual([1])
+  })
+
   test("mcpClients.stop() fires on loop exit (finally)", async () => {
     const stopCalls: string[] = []
     const ps: PromptSource = { next: async () => null }

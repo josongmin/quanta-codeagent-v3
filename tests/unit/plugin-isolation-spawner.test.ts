@@ -20,9 +20,11 @@ import {
   createBunSpawner,
   DEFAULT_GRACEFUL_KILL_MS,
   DEFAULT_SPAWN_TIMEOUT_MS,
+  MAX_MESSAGE_BYTES,
 } from "@/plugin-isolation"
 
 const BUN = process.execPath
+const EARLY_BUFFER_CAP = 64
 
 const writeScript = async (
   body: string,
@@ -176,6 +178,39 @@ describe("ADR-0162 spawner happy-path", () => {
     }
   })
 
+  test("first subscriber sees a bounded tail when child floods before registration", async () => {
+    const total = EARLY_BUFFER_CAP + 16
+    const body = `
+      process.stdout.write(JSON.stringify({ kind: "ready" }) + "\\n")
+      for (let i = 0; i < ${total}; i++) {
+        process.stdout.write(JSON.stringify({ seq: i }) + "\\n")
+      }
+      setInterval(() => {}, 10000)
+    `
+    const { path, cleanup } = await writeScript(body)
+    try {
+      const handle = await spawner.spawn({
+        entry: BUN,
+        args: [path],
+        serviceName: "early-buf-cap",
+        spawnTimeoutMs: 2000,
+      })
+      await new Promise((r) => setTimeout(r, 100))
+      const got: Array<{ seq: number }> = []
+      handle.onMessage((m) => got.push(m as { seq: number }))
+      const deadline = Date.now() + 1500
+      while (got.length < EARLY_BUFFER_CAP && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      await handle.kill()
+      expect(got).toHaveLength(EARLY_BUFFER_CAP)
+      expect(got[0]).toEqual({ seq: total - EARLY_BUFFER_CAP })
+      expect(got[got.length - 1]).toEqual({ seq: total - 1 })
+    } finally {
+      await cleanup()
+    }
+  })
+
   test("unsubscribe is idempotent + prevents further delivery", async () => {
     const body = `
       process.stdout.write(JSON.stringify({ kind: "ready" }) + "\\n")
@@ -288,6 +323,48 @@ describe("ADR-0162 spawner happy-path", () => {
       }
       await handle.kill()
       expect(got).toEqual([{ kind: "go" }, { echoed: "hi" }])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  test("fragmented oversize stdout line is dropped before newline and later payload still arrives", async () => {
+    const chunkBytes = 256 * 1024
+    const chunks = Math.ceil((MAX_MESSAGE_BYTES + 1024) / chunkBytes)
+    const body = `
+      const chunk = "x".repeat(${chunkBytes})
+      let remaining = ${chunks}
+      const flush = () => {
+        while (remaining > 0) {
+          remaining--
+          if (!process.stdout.write(chunk)) {
+            process.stdout.once("drain", flush)
+            return
+          }
+        }
+        process.stdout.write("\\n")
+        process.stdout.write(JSON.stringify({ kind: "ready" }) + "\\n")
+        process.stdout.write(JSON.stringify({ after: "fragmented-oversize" }) + "\\n")
+        setInterval(() => {}, 10000)
+      }
+      flush()
+    `
+    const { path, cleanup } = await writeScript(body)
+    try {
+      const handle = await spawner.spawn({
+        entry: BUN,
+        args: [path],
+        serviceName: "fragmented-oversize",
+        spawnTimeoutMs: 5000,
+      })
+      const got: unknown[] = []
+      handle.onMessage((m) => got.push(m))
+      const deadline = Date.now() + 1500
+      while (got.length < 1 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      await handle.kill()
+      expect(got).toEqual([{ after: "fragmented-oversize" }])
     } finally {
       await cleanup()
     }

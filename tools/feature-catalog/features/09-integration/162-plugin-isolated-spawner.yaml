@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:ipc", "surface:core"]
+labels: ["surface:ipc"]
 depends_on: [plugin-dxt-loader, plugin-host-wrapper, plugin-lifecycle-manager, assert-never-exhaustiveness, byte-stable-string-comparator]
 config_refs:
   env: []

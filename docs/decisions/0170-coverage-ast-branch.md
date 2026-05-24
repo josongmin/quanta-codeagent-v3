@@ -103,9 +103,9 @@ Identical to ADR-0165 — the `coverage_check` tool stays caller-registered, and
 
 = "first agent surface to ship an AST-precise branch counter native to the TypeScript compiler API behind a port-substitutable adapter — heuristic and AST adapters coexist; the caller picks at composition time."
 
-## Plane-clean check
+## Plane discipline (ADR-0193 정정)
 
-- `src/observability/coverage/ast-source.ts` imports ONLY `node:fs/promises`, `node:path`, `typescript`, and the in-slice `./port`. NO `@/agent`, `@/tool`, `@/llm`, `@/permission`. Verified by biome `noRestrictedImports` override + the import statements at the top of the file.
+- `src/observability/coverage/ast-source.ts` imports `node:fs/promises`, `node:path`, **`typescript` (3rd-party compiler API)**, and the in-slice `./port`. NO `@/agent`, `@/tool`, `@/llm`, `@/permission` — biome `**/src/observability/**` slice 룰이 이를 enforced. `typescript` 3rd-party 의존이 ADR 초안의 "plane-clean" 표현보다 무거우므로, 이 슬라이스를 "compiler-bridge" 로 분류하고 plane-clean 라벨은 적합치 않다.
 - `tests/unit/coverage-ast-source-hellgate.test.ts` imports `bun:test`, `node:fs/promises`, `node:os`, `node:path`, and `@/observability/coverage`. No reaching past the public barrel.
 
 ## Follow-up (not closed by this ADR)

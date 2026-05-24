@@ -5,6 +5,7 @@ subsystem: Hook bus (S5 Cursor parity)
 order: 202
 maturity: L4
 status: stable
+owners: ["@songmin"]
 depends_on: [plan-mode, secret-redaction-content-plane, response-in-progress, codex-2-phase-consolidator, ide-context-provider-seam]
 purpose: |
   Three additional HookEvent variants S5 surfaces (pre_compact +

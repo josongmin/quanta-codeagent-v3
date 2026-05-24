@@ -133,30 +133,36 @@ export interface ClockPort {
  * has been ACCEPTED into the queue (NOT once the loop has processed it).
  */
 export interface AgentLoopPort {
-  enqueueUserMessage(message: string, opts?: { signal?: AbortSignal }): Promise<void>
+  enqueueUserMessage(
+    message: string,
+    opts?: { signal?: AbortSignal; modelOverride?: string },
+  ): Promise<void>
 }
 
 /**
- * Prior-turn outcome — mirrors the (still-being-built) ADR-0131 outcome
- * enum, but defined locally so this slice does not pretend to own the SSOT.
- * When the host wires ADR-0131, it converts to this minimal shape at the
- * composition boundary.
+ * Prior-turn outcome — mirrors ADR-0131's 4-state outcome enum, but defined
+ * locally so this slice does not pretend to own the SSOT. When the host
+ * wires ADR-0131, it converts to this minimal shape at the composition
+ * boundary.
  *
- * Self-wake refuses to inject when `lastTurnOutcome === "fail"` — auto-
- * waking a failed turn risks a runaway loop on a broken state.
+ * Self-wake injects only when the prior outcome is explicit `"success"` or
+ * `"uncertain"`. `partial`, `fail`, and omitted outcome stay closed to avoid
+ * auto-resume on incomplete or contradicted state.
  */
 export type LastTurnOutcome = "success" | "partial" | "uncertain" | "fail"
 
 /**
- * Audit event emitted whenever {@link injectSimulatedTurn} succeeds OR
- * skips. The composition root subscribes via the event bus / stream and
- * exports to telemetry — runaway diagnostic if the count climbs above the
- * ADR-0132 validation budget (≤50/day per workspace).
+ * Audit event emitted whenever {@link injectSimulatedTurn} injects OR rejects
+ * via one of its self-wake guards. Pre-aborted triggers are upstream drops
+ * and intentionally emit no `reactor.self_wake` event. The composition root
+ * subscribes via the event bus / stream and exports to telemetry — runaway
+ * diagnostic if the count climbs above the ADR-0132 validation budget
+ * (≤50/day per workspace).
  */
 export interface ReactorSelfWakeEvent {
   readonly type: "reactor.self_wake"
   readonly outcome: "injected" | "skipped"
-  readonly reason: TriggerReason | "env-off" | "quiet-window" | "prior-fail"
+  readonly reason: TriggerReason | "env-off" | "quiet-window" | "prior-outcome"
   readonly trigger?: {
     readonly reason: TriggerReason
     readonly evidenceKind: TriggerEvidence["kind"]

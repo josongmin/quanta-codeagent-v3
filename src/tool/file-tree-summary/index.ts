@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
+import { relative } from "node:path"
 import { z } from "zod"
 import { runShell } from "@/runtime"
 import { byteCompare } from "@/shared"
@@ -135,6 +136,27 @@ export const parseRecencyHits = (stdout: string): Map<string, number> => {
     }
   }
   return hits
+}
+
+const normalizeGitPath = (path: string): string => path.replaceAll("\\", "/")
+
+const toScopeRelativeGitPath = (repoRelativePath: string, scopePrefix: string): string | null => {
+  if (scopePrefix === "." || scopePrefix.length === 0) return repoRelativePath
+  if (repoRelativePath === scopePrefix) return "."
+  const prefix = `${scopePrefix}/`
+  return repoRelativePath.startsWith(prefix) ? repoRelativePath.slice(prefix.length) : null
+}
+
+const parseScopedRecencyHits = (stdout: string, scopePrefix: string): Map<string, number> => {
+  if (scopePrefix === ".") return parseRecencyHits(stdout)
+  const scopedRows: string[] = []
+  for (const line of stdout.split("\n")) {
+    const repoRelativePath = normalizeGitPath(line.trim())
+    if (repoRelativePath.length === 0) continue
+    const scoped = toScopeRelativeGitPath(repoRelativePath, scopePrefix)
+    if (scoped !== null) scopedRows.push(scoped)
+  }
+  return parseRecencyHits(scopedRows.join("\n"))
 }
 
 /** Comparator: sort directories by rank strategy.
@@ -337,12 +359,24 @@ const render = (
 /** Fetch recency hit-counts via a single git-log call.
  *  Returns an empty map on any failure (non-git dir, no commits, etc.) so
  *  callers silently fall back to alpha ordering. */
-const fetchRecencyHits = async (cwd: string, signal: AbortSignal): Promise<Map<string, number>> => {
+const fetchRecencyHits = async (
+  cwd: string,
+  scopeRoot: string,
+  signal: AbortSignal,
+): Promise<Map<string, number>> => {
+  const top = await runShell("git rev-parse --show-toplevel", { cwd, signal })
+  if (top.exitCode !== 0 || top.timedOut) return new Map()
+  const repoRoot = top.stdout.trim()
+  if (repoRoot.length === 0) return new Map()
+  const relScope = normalizeGitPath(
+    relative(realpathSync.native(repoRoot), realpathSync.native(scopeRoot)),
+  )
+  if (relScope === ".." || relScope.startsWith("../")) return new Map()
   const gr = await runShell("git log --since='30 days ago' --name-only --pretty=format:", {
     cwd,
     signal,
   })
-  if (gr.exitCode === 0 && !gr.timedOut) return parseRecencyHits(gr.stdout)
+  if (gr.exitCode === 0 && !gr.timedOut) return parseScopedRecencyHits(gr.stdout, relScope)
   return new Map()
 }
 
@@ -425,8 +459,8 @@ export const fileTreeSummaryTool: Tool<Input> = {
     yield { type: "progress", message: `summarizing tree (depth ${maxDepth})…` }
 
     // ripgrep --files lists every non-ignored file, one per line, relative to
-    // the search root. We `cd` into the scope via cwd so the rows are scope-
-    // relative; an explicit jailed path is passed as the search root instead.
+    // cwd. When a scope path is provided we `cd` into that scope so the rows
+    // stay scope-relative instead of turning absolute.
     const parts = ["rg", "--files", "--color=never"]
     // Honor .quantaignore / .cursorignore / .cursorindexignore when present in
     // the scope root. Each valid, existing file is appended as --ignore-file
@@ -434,11 +468,11 @@ export const fileTreeSummaryTool: Tool<Input> = {
     // silently skipped (invariant: no ignore files → argv byte-identical to
     // before this change).
     const scopeRoot = jailedPath ?? ctx.cwd
+    const scanCwd = scopeRoot
     for (const ignoreFile of collectIgnoreFiles(scopeRoot, ctx.cwd)) {
       parts.push("--ignore-file", sq(ignoreFile))
     }
-    if (jailedPath !== undefined) parts.push(sq(jailedPath))
-    const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
+    const r = await runShell(parts.join(" "), { cwd: scanCwd, signal: ctx.signal })
 
     if (r.exitCode > 1 || r.timedOut) {
       yield {
@@ -462,7 +496,9 @@ export const fileTreeSummaryTool: Tool<Input> = {
     // Failure (non-git dir, no commits, etc.) silently falls back to "alpha".
     const rank = input.rank ?? "alpha"
     const recencyHits =
-      rank === "recency" ? await fetchRecencyHits(ctx.cwd, ctx.signal) : new Map<string, number>()
+      rank === "recency"
+        ? await fetchRecencyHits(ctx.cwd, scopeRoot, ctx.signal)
+        : new Map<string, number>()
 
     // Optional purpose layer: one extra `rg -m5` pass extracting up to 5
     // candidate lines per file so parsePurposeRows can skip noise lines and
@@ -488,7 +524,7 @@ export const fileTreeSummaryTool: Tool<Input> = {
           "--",
           ...targetFiles.map(sq),
         ]
-        const pr = await runShell(purposeParts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
+        const pr = await runShell(purposeParts.join(" "), { cwd: scanCwd, signal: ctx.signal })
         if (pr.exitCode <= 1 && !pr.timedOut) {
           summaries = parsePurposeRows(pr.stdout.trimEnd())
         }

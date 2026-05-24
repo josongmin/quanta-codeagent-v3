@@ -42,12 +42,30 @@ class VaryingLLM implements LLMPort {
   }
 }
 
+class EventScriptedLLM implements LLMPort {
+  calls = 0
+  constructor(private readonly events: readonly StreamEvent[]) {}
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    for (const ev of this.events) yield ev
+  }
+}
+
 class ThrowingLLM implements LLMPort {
   calls = 0
   // biome-ignore lint/correctness/useYield: stream throws before any yield
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     this.calls += 1
     throw new Error("provider down")
+  }
+}
+
+class YieldThenThrowLLM implements LLMPort {
+  calls = 0
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    yield { type: "text_delta", delta: 'print("partial")' }
+    throw new Error("provider down after partial")
   }
 }
 
@@ -151,11 +169,30 @@ describe("generateReproTests", () => {
     expect(out).toEqual(['print("Issue reproduced")', 'print("Issue reproduced")'])
   })
 
+  test("stream_reset tombstones dead partial within a sample", async () => {
+    const llm = new EventScriptedLLM([
+      { type: "text_delta", delta: 'print("dead")\n' },
+      { type: "stream_reset" },
+      { type: "text_delta", delta: "```python\n" },
+      { type: "text_delta", delta: 'print("Issue reproduced")\n' },
+      { type: "text_delta", delta: "```" },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ])
+    const out = await generateReproTests({ issue: "x", llm, config: { samples: 1 } })
+    expect(out).toEqual(['print("Issue reproduced")'])
+  })
+
   test("per-call LLM exception ⇒ '' for that slot (not a throw)", async () => {
     const llm = new ThrowingLLM()
     const out = await generateReproTests({ issue: "x", llm, config: { samples: 3 } })
     expect(llm.calls).toBe(3)
     expect(out).toEqual(["", "", ""])
+  })
+
+  test("mid-stream failure after partial still yields empty string", async () => {
+    const llm = new YieldThenThrowLLM()
+    const out = await generateReproTests({ issue: "x", llm, config: { samples: 1 } })
+    expect(out).toEqual([""])
   })
 
   test("varying responses preserved in order (5 distinct samples)", async () => {

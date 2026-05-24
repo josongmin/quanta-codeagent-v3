@@ -270,6 +270,12 @@ type MutableCost = {
   cacheWriteTokens: number
 }
 
+type RetainedEvent = {
+  event: UsageEvent
+  cost: MutableCost
+  dayKey: string
+}
+
 const emptyCost = (model: string): MutableCost => ({
   model,
   inputCost: 0,
@@ -322,6 +328,33 @@ const foldInto = (agg: MutableCost, cost: MutableCost): void => {
   agg.cacheReadTokens += cost.cacheReadTokens
   agg.cacheWriteTokens += cost.cacheWriteTokens
 }
+
+const unfoldFrom = (agg: MutableCost, cost: MutableCost): void => {
+  agg.inputCost -= cost.inputCost
+  agg.outputCost -= cost.outputCost
+  agg.cacheReadCost -= cost.cacheReadCost
+  agg.cacheWriteCost -= cost.cacheWriteCost
+  agg.totalCost -= cost.totalCost
+  agg.inputTokens -= cost.inputTokens
+  agg.outputTokens -= cost.outputTokens
+  agg.cacheReadTokens -= cost.cacheReadTokens
+  agg.cacheWriteTokens -= cost.cacheWriteTokens
+}
+
+const AGGREGATE_EPSILON = 1e-12
+
+const isZeroish = (n: number): boolean => Math.abs(n) <= AGGREGATE_EPSILON
+
+const isEmptyAggregate = (agg: MutableCost): boolean =>
+  isZeroish(agg.inputCost) &&
+  isZeroish(agg.outputCost) &&
+  isZeroish(agg.cacheReadCost) &&
+  isZeroish(agg.cacheWriteCost) &&
+  isZeroish(agg.totalCost) &&
+  agg.inputTokens === 0 &&
+  agg.outputTokens === 0 &&
+  agg.cacheReadTokens === 0 &&
+  agg.cacheWriteTokens === 0
 
 /** Freeze a MutableCost into the public read-only shape. */
 const freezeCost = (c: MutableCost): CostBreakdown => Object.freeze({ ...c })
@@ -397,19 +430,16 @@ const rehydrate = (jsonl: string, events: UsageEvent[], fired: Set<string>): voi
 /** Helper: drop events matching the scope filter; evict matching breach
  *  keys so a re-cleared scope can re-fire. Returns the count evicted. */
 const clearScoped = (
-  events: UsageEvent[],
+  events: ReadonlyArray<RetainedEvent>,
   fired: Set<string>,
   scope: { session?: string; day?: string },
-): number => {
-  const matches = (e: UsageEvent): boolean => {
-    if (scope.session !== undefined && e.sessionId === scope.session) return true
-    if (scope.day !== undefined && dayKeyFor(e.at) === scope.day) return true
+): RetainedEvent[] => {
+  const matches = (e: RetainedEvent): boolean => {
+    if (scope.session !== undefined && e.event.sessionId === scope.session) return true
+    if (scope.day !== undefined && e.dayKey === scope.day) return true
     return false
   }
-  const before = events.length
   const survivors = events.filter((e) => !matches(e))
-  events.length = 0
-  for (const e of survivors) events.push(e)
   // Evict matching breach keys.
   for (const key of [...fired]) {
     if (
@@ -424,7 +454,7 @@ const clearScoped = (
       fired.delete(key)
     }
   }
-  return before - survivors.length
+  return survivors
 }
 
 /** Helper: attempt to emit one breach. Pushes onto `breaches` and records the
@@ -462,67 +492,112 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
   // input, we still need a real pricing object.
   const safeFallback: ModelPricing = fallback ?? { inputPerM: 0, outputPerM: 0 }
 
-  // Live event ring (insertion order = chronological by `at`).
-  const events: UsageEvent[] = []
+  // Retained event queue. `start` advances as older entries are evicted; we
+  // compact the prefix opportunistically so record() never pays `shift()`.
+  const events: RetainedEvent[] = []
+  let start = 0
   // Debounce: keys of breaches already fired. `<kind>:<scope>` (e.g.
   // `session-soft:abc-123`).
   const fired = new Set<string>()
+  let totalCost = 0
+  const perModel = new Map<string, MutableCost>()
+  const perSession = new Map<string, MutableCost>()
+  const perDay = new Map<string, MutableCost>()
 
   const resolvePricing = (model: string): ModelPricing => pricing[model] ?? safeFallback
 
-  /** Compute the current scope total for `(sessionId, dayKey)` from the
-   *  retained event slice. We re-fold rather than maintain incremental totals
-   *  so LRU eviction stays correct (per contract #6). */
-  const scopeTotal = (
-    sessionId: string | undefined,
-    day: string | undefined,
-  ): { session: number; daily: number } => {
-    let session = 0
-    let daily = 0
-    for (const e of events) {
-      const cost = computeEventCost(e, resolvePricing(e.model))
-      if (sessionId !== undefined && e.sessionId === sessionId) session += cost.totalCost
-      if (day !== undefined && dayKeyFor(e.at) === day) daily += cost.totalCost
+  const activeLength = (): number => events.length - start
+
+  const ensureBucket = (map: Map<string, MutableCost>, key: string, model: string): MutableCost => {
+    const existing = map.get(key)
+    if (existing !== undefined) return existing
+    const created = emptyCost(model)
+    map.set(key, created)
+    return created
+  }
+
+  const maybeDropBucket = (map: Map<string, MutableCost>, key: string, agg: MutableCost | undefined): void => {
+    if (agg === undefined) return
+    if (isEmptyAggregate(agg)) map.delete(key)
+  }
+
+  const applyEntry = (entry: RetainedEvent): void => {
+    totalCost += entry.cost.totalCost
+    foldInto(ensureBucket(perModel, entry.event.model, entry.event.model), entry.cost)
+    foldInto(ensureBucket(perSession, entry.event.sessionId, entry.event.model), entry.cost)
+    foldInto(ensureBucket(perDay, entry.dayKey, entry.event.model), entry.cost)
+  }
+
+  const removeEntry = (entry: RetainedEvent): void => {
+    totalCost -= entry.cost.totalCost
+    const modelAgg = perModel.get(entry.event.model)
+    if (modelAgg !== undefined) {
+      unfoldFrom(modelAgg, entry.cost)
+      maybeDropBucket(perModel, entry.event.model, modelAgg)
     }
-    return { session, daily }
+    const sessionAgg = perSession.get(entry.event.sessionId)
+    if (sessionAgg !== undefined) {
+      unfoldFrom(sessionAgg, entry.cost)
+      maybeDropBucket(perSession, entry.event.sessionId, sessionAgg)
+    }
+    const dayAgg = perDay.get(entry.dayKey)
+    if (dayAgg !== undefined) {
+      unfoldFrom(dayAgg, entry.cost)
+      maybeDropBucket(perDay, entry.dayKey, dayAgg)
+    }
+  }
+
+  const compactPrefixIfNeeded = (): void => {
+    if (start === 0) return
+    if (start < 1024 && start * 2 < events.length) return
+    events.splice(0, start)
+    start = 0
+  }
+
+  const pushEvent = (event: UsageEvent): MutableCost => {
+    const entry: RetainedEvent = {
+      event,
+      cost: computeEventCost(event, resolvePricing(event.model)),
+      dayKey: dayKeyFor(event.at),
+    }
+    events.push(entry)
+    applyEntry(entry)
+    return entry.cost
+  }
+
+  const resetState = (): void => {
+    events.length = 0
+    start = 0
+    totalCost = 0
+    perModel.clear()
+    perSession.clear()
+    perDay.clear()
   }
 
   /** Build the snapshot's three breakdown maps + total. */
   const buildSnapshot = (): BudgetSnapshot => {
-    const perModel = new Map<string, MutableCost>()
-    const perSession = new Map<string, MutableCost>()
-    const perDay = new Map<string, MutableCost>()
-    let total = 0
-    for (const e of events) {
-      const cost = computeEventCost(e, resolvePricing(e.model))
-      total += cost.totalCost
-      const mAgg = perModel.get(e.model) ?? emptyCost(e.model)
-      foldInto(mAgg, cost)
-      perModel.set(e.model, mAgg)
-      const sAgg = perSession.get(e.sessionId) ?? emptyCost(e.model)
-      foldInto(sAgg, cost)
-      perSession.set(e.sessionId, sAgg)
-      const dKey = dayKeyFor(e.at)
-      const dAgg = perDay.get(dKey) ?? emptyCost(e.model)
-      foldInto(dAgg, cost)
-      perDay.set(dKey, dAgg)
-    }
     const freezeMap = (m: Map<string, MutableCost>): ReadonlyMap<string, CostBreakdown> => {
       const out = new Map<string, CostBreakdown>()
       for (const [k, v] of m.entries()) out.set(k, freezeCost(v))
       return out
     }
     return Object.freeze({
-      totalCost: total,
+      totalCost,
       perModel: freezeMap(perModel),
       perSession: freezeMap(perSession),
       perDay: freezeMap(perDay),
-      events: events.length,
+      events: activeLength(),
     })
   }
 
   const evictIfOver = (): void => {
-    while (events.length > maxEvents) events.shift()
+    while (activeLength() > maxEvents) {
+      const evicted = events[start]
+      if (evicted === undefined) break
+      removeEntry(evicted)
+      start += 1
+    }
+    compactPrefixIfNeeded()
   }
 
   /** Check policy after `event` was recorded; emit at most one breach per
@@ -531,7 +606,8 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
   const checkBreaches = (event: UsageEvent): ReadonlyArray<BudgetBreach> => {
     const breaches: BudgetBreach[] = []
     const day = dayKeyFor(event.at)
-    const { session, daily } = scopeTotal(event.sessionId, day)
+    const session = perSession.get(event.sessionId)?.totalCost ?? 0
+    const daily = perDay.get(day)?.totalCost ?? 0
     tryEmitBreach(
       breaches,
       fired,
@@ -566,8 +642,7 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
       // Compute cost BEFORE pushing so the per-event histogram label is
       // the event's own model (same pricing resolution path the aggregator
       // takes, including the safe-LOUD unknown-model fallback).
-      const cost = computeEventCost(event, resolvePricing(event.model)).totalCost
-      events.push(event)
+      const cost = pushEvent(event).totalCost
       evictIfOver()
       return { cost, breaches: checkBreaches(event) }
     },
@@ -578,18 +653,26 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
 
     clear(scope) {
       if (scope === undefined) {
-        const n = events.length
-        events.length = 0
+        const n = activeLength()
+        resetState()
         fired.clear()
         return n
       }
-      return clearScoped(events, fired, scope)
+      const active = events.slice(start)
+      const survivors = clearScoped(active, fired, scope)
+      const removed = active.length - survivors.length
+      resetState()
+      for (const entry of survivors) {
+        events.push(entry)
+        applyEntry(entry)
+      }
+      return removed
     },
 
     serialize() {
       const payload: SerializedLedger = {
         v: 1,
-        events: events.slice(),
+        events: events.slice(start).map((entry) => entry.event),
         firedBreaches: [...fired],
       }
       return JSON.stringify(payload)
@@ -599,9 +682,13 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
       // Reset to a known state first — even on garbage input, the ledger ends
       // up empty (contract #7). Either we replace with valid data or we end
       // up cleared.
-      events.length = 0
+      resetState()
       fired.clear()
-      rehydrate(jsonl, events, fired)
+      const hydratedEvents: UsageEvent[] = []
+      rehydrate(jsonl, hydratedEvents, fired)
+      for (const event of hydratedEvents) {
+        pushEvent(event)
+      }
       evictIfOver()
     },
   }

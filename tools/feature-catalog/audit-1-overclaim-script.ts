@@ -15,7 +15,15 @@ const judgeOut = execSync("bun run tools/feature-catalog/cli.ts judge --overclai
   encoding: "utf8",
   maxBuffer: 16 << 20,
 });
-const overclaimedIds: { id: string; section: string; maturity: string; composite: string; total: number }[] = [];
+type OverclaimedId = {
+  id: string;
+  section: string;
+  maturity: string;
+  composite: string;
+  total: number;
+};
+
+const overclaimedIds: OverclaimedId[] = [];
 let inTable = false;
 for (const line of judgeOut.split("\n")) {
   if (line.includes("id\tsection\tmaturity\tcomposite")) {
@@ -27,12 +35,15 @@ for (const line of judgeOut.split("\n")) {
   if (line.startsWith("axis legend")) break;
   const parts = line.trim().split(/\s+/);
   if (parts.length < 8) continue;
+  const [id, section, maturity, composite] = parts;
+  const totalRaw = parts[7];
+  if (!(id && section && maturity && composite && totalRaw)) continue;
   overclaimedIds.push({
-    id: parts[0],
-    section: parts[1],
-    maturity: parts[2],
-    composite: parts[3],
-    total: parseInt(parts[7], 10),
+    id,
+    section,
+    maturity,
+    composite,
+    total: parseInt(totalRaw, 10),
   });
 }
 
@@ -50,8 +61,8 @@ walk(FEATURES_DIR);
 
 const yamlById: Record<string, { path: string; raw: string }> = {};
 for (const [p, raw] of Object.entries(yamlByPath)) {
-  const m = raw.match(/^id:\s*(\S+)/m);
-  if (m) yamlById[m[1]] = { path: p, raw };
+  const id = raw.match(/^id:\s*(\S+)/m)?.[1];
+  if (id) yamlById[id] = { path: p, raw };
 }
 
 // helper: parse yaml fields (cheap regex-based — fine for these flat docs)
@@ -59,15 +70,15 @@ function parseYaml(raw: string) {
   const monitoring = (raw.match(/^monitoring:\s*(.+)$/m) || [])[1]?.trim() ?? "n-a";
   const uiSurfacesRaw = (raw.match(/^ui_surfaces:\s*\[(.+?)\]/m) || [])[1] ?? "n-a";
   const uiSurfaces = uiSurfacesRaw.split(",").map((s) => s.trim().replace(/['"]/g, ""));
-  const codeMatch = raw.match(/code:\s*\[(.+?)\]/);
-  const code = codeMatch ? codeMatch[1].split(",").map((s) => s.trim().replace(/['"]/g, "")) : [];
+  const codeRaw = raw.match(/code:\s*\[(.+?)\]/)?.[1];
+  const code = codeRaw ? codeRaw.split(",").map((s) => s.trim().replace(/['"]/g, "")) : [];
   // also handle block-style code (rare)
   const blockCode: string[] = [];
-  const blockMatch = raw.match(/code:\n((?:\s+-\s+.+\n)+)/);
-  if (blockMatch) {
-    for (const ln of blockMatch[1].split("\n")) {
-      const m = ln.match(/^\s+-\s+(.+)$/);
-      if (m) blockCode.push(m[1].trim());
+  const blockBody = raw.match(/code:\n((?:\s+-\s+.+\n)+)/)?.[1];
+  if (blockBody) {
+    for (const ln of blockBody.split("\n")) {
+      const item = ln.match(/^\s+-\s+(.+)$/)?.[1];
+      if (item) blockCode.push(item.trim());
     }
   }
   const allCode = [...code, ...blockCode].filter((s) => s.length > 0 && s !== "n-a");
@@ -77,8 +88,10 @@ function parseYaml(raw: string) {
   const intMatch = raw.match(/integration:\s*\[(.+?)\]/);
   const contractMatch = raw.match(/contract:\s*\[(.+?)\]/);
   const tests: string[] = [];
-  for (const m of [unitMatch, intMatch, contractMatch]) {
-    if (m) tests.push(...m[1].split(",").map((s) => s.trim().replace(/['"]/g, "")).filter(Boolean));
+  for (const match of [unitMatch, intMatch, contractMatch]) {
+    const value = match?.[1];
+    if (!value) continue;
+    tests.push(...value.split(",").map((s) => s.trim().replace(/['"]/g, "")).filter(Boolean));
   }
   return { monitoring, uiSurfaces, code: allCode, tests };
 }
@@ -111,13 +124,14 @@ const SAMPLE = 80;
 const bySection: Record<string, typeof overclaimedIds> = {};
 for (const it of overclaimedIds) (bySection[it.section] ||= []).push(it);
 const sectionKeys = Object.keys(bySection).sort();
-const picked: typeof overclaimedIds = [];
+const picked: OverclaimedId[] = [];
 let i = 0;
 while (picked.length < SAMPLE) {
   let added = 0;
   for (const k of sectionKeys) {
-    if (bySection[k][i]) {
-      picked.push(bySection[k][i]);
+    const candidate = bySection[k]?.[i];
+    if (candidate) {
+      picked.push(candidate);
       added++;
       if (picked.length >= SAMPLE) break;
     }
@@ -147,7 +161,7 @@ for (const it of picked) {
   const yml = yamlById[it.id];
   if (!yml) {
     rows.push({ id: it.id, section: it.section, verdict: "truly-overclaimed", evidence: "no-yaml-found", recommendation: "investigate-orphan-id" });
-    counts["truly-overclaimed"]++;
+    counts["truly-overclaimed"] = (counts["truly-overclaimed"] ?? 0) + 1;
     continue;
   }
   const meta = parseYaml(yml.raw);

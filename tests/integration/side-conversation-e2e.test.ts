@@ -39,18 +39,23 @@ class SideLlm implements LLMPort {
 /** A blocking side-conv LLM that yields nothing until the abort fires. */
 class BlockingLlm implements LLMPort {
   readonly model = "blocking-side"
-  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
-    // Yield-style wait loop honoring the AbortSignal on `input.messages` is
-    // not directly visible; we instead spin on a deferred promise that the
-    // test's abort triggers via the global `signal` plumbed into the stream
-    // (the runner re-checks the parent signal between events).
-    //
-    // To keep this deterministic without depending on signal threading
-    // through the StreamInput, we drop a single empty text event and then
-    // wait long enough that the controller can abort. The runSideConversation
-    // signal check happens on `for await` resumption.
+  readonly inputs: StreamInput[] = []
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.inputs.push(input)
     yield { type: "text_delta", delta: "" }
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise<never>((_, reject) => {
+      if (input.signal === undefined) {
+        reject(new Error("missing signal"))
+        return
+      }
+      if (input.signal.aborted) {
+        reject(new Error("signal already aborted"))
+        return
+      }
+      input.signal.addEventListener("abort", () => reject(new Error("provider aborted")), {
+        once: true,
+      })
+    })
     yield { type: "text_delta", delta: "should-be-discarded" }
     yield { type: "message_stop", stop_reason: "end_turn" }
   }
@@ -104,10 +109,12 @@ describe("side-conversation e2e", () => {
       signal: ac.signal,
     }
 
-    // Kick off the dispatch, then abort while it's mid-stream.
     const promise = dispatchSideConversation({ parentSessionId: "p", question: "long" }, resolver)
-    // Abort slightly before the BlockingLlm's setTimeout returns.
-    setTimeout(() => ac.abort(), 10)
+    await Promise.resolve()
+
+    expect(blockingLlm.inputs[0]?.signal).toBe(ac.signal)
+
+    ac.abort()
 
     await expect(promise).rejects.toBeInstanceOf(SideConversationAbortedError)
   })

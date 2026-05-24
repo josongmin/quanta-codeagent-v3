@@ -1,5 +1,5 @@
 /**
- * Default in-memory PromptCacheObserver (ADR-0179).
+ * Default in-memory PromptCacheObserver (ADR-0182).
  *
  * Pure in-memory book that aggregates `CacheHitEvent`s into per-model /
  * per-session rollups + named-breakpoint attribution, then snapshots with
@@ -30,10 +30,6 @@ import type {
 } from "./types"
 import { PromptCacheError } from "./types"
 
-/** LRU ring default cap; the observer's aggregates remain monotonic across
- *  evictions (contract #5). */
-const DEFAULT_MAX_EVENTS = 1000
-
 /** PromptCacheObserverOpts.pricing uses a slimmer shape (no outputPerM —
  *  the observer doesn't read it). Project the bundled full table to that
  *  shape so the existing options API is unchanged. */
@@ -60,11 +56,21 @@ interface RollupAcc {
   savingsUsd: number
 }
 
+interface SessionAcc {
+  rollup: RollupAcc
+  perModel: Map<string, RollupAcc>
+}
+
 const emptyRollup = (): RollupAcc => ({
   inputTokens: 0,
   cacheCreationTokens: 0,
   cacheReadTokens: 0,
   savingsUsd: 0,
+})
+
+const emptySessionAcc = (): SessionAcc => ({
+  rollup: emptyRollup(),
+  perModel: new Map<string, RollupAcc>(),
 })
 
 /** Hit-rate denominator = input + cache_create. When 0, hitRate = 0
@@ -135,21 +141,16 @@ export const defaultPromptCacheObserver = (
   }
   const fallback = pricing[FALLBACK_PRICING_MODEL] ?? BUNDLED_FALLBACK
   const sink = opts.metricsSink
-  const maxEvents = Math.max(1, Math.floor(opts.maxEvents ?? DEFAULT_MAX_EVENTS))
   const now = opts.now ?? Date.now
   // Track whether we've already warned about each unknown model (don't spam
   // logs on a tight stream).
   const warnedUnknownModels = new Set<string>()
 
-  // Sliding window of recent events (LRU). Aggregates below are MONOTONIC and
-  // not recomputed from the ring — they accumulate across the entire lifetime
-  // (contract #5).
-  const eventRing: CacheHitEvent[] = []
+  // Aggregate-only adapter: retain rollups, not event history. This keeps the
+  // steady-state record path O(1) and makes snapshot cost scale with distinct
+  // state keys rather than lifetime event count.
   const perModel = new Map<string, RollupAcc>()
-  const perSession = new Map<string, RollupAcc>()
-  // Per-session × per-model split: needed because the recursive perSession
-  // snapshot has its OWN perModel breakdown. Key: `session\x00model`.
-  const perSessionModel = new Map<string, RollupAcc>()
+  const perSession = new Map<string, SessionAcc>()
   const breakpoints = new Map<string, CacheBreakpointAttribution>()
 
   // Lifetime totals (computed once on record so snapshot is O(states), not
@@ -171,7 +172,12 @@ export const defaultPromptCacheObserver = (
     return fallback
   }
 
-  const sessionModelKey = (sessionId: string, model: string): string => `${sessionId}\x00${model}`
+  const updateRollupAcc = (rollup: RollupAcc, event: CacheHitEvent, savings: number): void => {
+    rollup.inputTokens += event.inputTokens
+    rollup.cacheCreationTokens += event.cacheCreationTokens
+    rollup.cacheReadTokens += event.cacheReadTokens
+    rollup.savingsUsd += savings
+  }
 
   const updateRollup = (
     map: Map<string, RollupAcc>,
@@ -180,11 +186,16 @@ export const defaultPromptCacheObserver = (
     savings: number,
   ): void => {
     const r = map.get(key) ?? emptyRollup()
-    r.inputTokens += event.inputTokens
-    r.cacheCreationTokens += event.cacheCreationTokens
-    r.cacheReadTokens += event.cacheReadTokens
-    r.savingsUsd += savings
+    updateRollupAcc(r, event, savings)
     map.set(key, r)
+  }
+
+  const getOrCreateSession = (sessionId: string): SessionAcc => {
+    const existing = perSession.get(sessionId)
+    if (existing !== undefined) return existing
+    const created = emptySessionAcc()
+    perSession.set(sessionId, created)
+    return created
   }
 
   const emitMetrics = (event: CacheHitEvent, hitRate: number): void => {
@@ -239,16 +250,11 @@ export const defaultPromptCacheObserver = (
     return out
   }
 
-  /** Build a snapshot for a single session, including its own per-model
-   *  breakdown filtered to this session's events. perSession is empty in
-   *  the nested snapshot (recursion stops at depth 1 — a session contains
-   *  no further session scope). */
-  const buildSessionSnapshot = (sessionId: string, rollup: RollupAcc): CachePerformanceSnapshot => {
-    const sessionPerModel = new Map<string, RollupAcc>()
-    for (const [k, v] of perSessionModel.entries()) {
-      const [s, m] = k.split("\x00", 2) as [string, string]
-      if (s === sessionId) sessionPerModel.set(m, v)
-    }
+  /** Build a snapshot for a single session. The per-model breakdown is stored
+   *  under the session itself so snapshot stays O(session states), not
+   *  O(session_count × global perSessionModel states). */
+  const buildSessionSnapshot = (session: SessionAcc): CachePerformanceSnapshot => {
+    const rollup = session.rollup
     return Object.freeze({
       totalInputTokens: rollup.inputTokens,
       totalCacheCreationTokens: rollup.cacheCreationTokens,
@@ -259,7 +265,7 @@ export const defaultPromptCacheObserver = (
         rollup.cacheReadTokens,
       ),
       costSavingsUsd: rollup.savingsUsd,
-      perModel: buildPerModelMap(sessionPerModel),
+      perModel: buildPerModelMap(session.perModel),
       perSession: new Map<string, CachePerformanceSnapshot>(),
     })
   }
@@ -270,15 +276,13 @@ export const defaultPromptCacheObserver = (
       const p = resolvePricing(event.model)
       const savings = computeSavingsUsd(event.cacheReadTokens, p.inputPerM, p.cacheReadPerM)
 
-      // Push to ring AFTER validation; evict oldest when over cap (aggregates
-      // do NOT shrink, contract #5).
-      eventRing.push(event)
-      while (eventRing.length > maxEvents) eventRing.shift()
-
-      // Update per-model / per-session / per-(session,model) aggregates.
+      // Update per-model / per-session aggregates. Session-local per-model
+      // state is stored under the session to keep snapshot linear in realized
+      // state, not quadratic in sessions × models.
       updateRollup(perModel, event.model, event, savings)
-      updateRollup(perSession, event.sessionId, event, savings)
-      updateRollup(perSessionModel, sessionModelKey(event.sessionId, event.model), event, savings)
+      const session = getOrCreateSession(event.sessionId)
+      updateRollupAcc(session.rollup, event, savings)
+      updateRollup(session.perModel, event.model, event, savings)
 
       // Update lifetime totals.
       totalInputTokens += event.inputTokens
@@ -322,8 +326,8 @@ export const defaultPromptCacheObserver = (
     snapshot(): CachePerformanceSnapshot {
       const perModelFrozen = buildPerModelMap(perModel)
       const perSessionFrozen = new Map<string, CachePerformanceSnapshot>()
-      for (const [sid, r] of perSession.entries()) {
-        perSessionFrozen.set(sid, buildSessionSnapshot(sid, r))
+      for (const [sid, session] of perSession.entries()) {
+        perSessionFrozen.set(sid, buildSessionSnapshot(session))
       }
       const bpFrozen: ReadonlyMap<string, CacheBreakpointAttribution> | undefined =
         breakpoints.size === 0
@@ -351,10 +355,8 @@ export const defaultPromptCacheObserver = (
     },
 
     reset(): void {
-      eventRing.length = 0
       perModel.clear()
       perSession.clear()
-      perSessionModel.clear()
       breakpoints.clear()
       totalInputTokens = 0
       totalCacheCreationTokens = 0

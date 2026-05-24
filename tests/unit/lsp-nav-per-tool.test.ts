@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { nullLspNavProvider } from "@/tool/lsp_nav"
-import type { LspNavProvider } from "@/tool/lsp_nav/types"
-import { emptyTrace, fakeProvider, findTool, loc, run } from "./lsp-nav-fixtures"
-import type { NavSymbolInfo } from "@/tool/lsp_nav/types"
-import { emptyTrace, fakeProvider, findTool, run } from "./lsp-nav-fixtures"
-import type { NavHover } from "@/tool/lsp_nav/types"
-import type { NavRenamePreview } from "@/tool/lsp_nav/types"
 import { pathToFileURL } from "node:url"
+import { nullLspNavProvider } from "@/tool/lsp_nav"
+import type {
+  LspNavProvider,
+  NavHover,
+  NavRenamePreview,
+  NavSymbolInfo,
+} from "@/tool/lsp_nav/types"
+import { emptyTrace, fakeProvider, findTool, loc, run } from "./lsp-nav-fixtures"
 
 describe("lsp_definition", () => {
   test("unavailable: null provider ⇒ ok:false", async () => {

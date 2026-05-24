@@ -85,6 +85,16 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
         await opts.store.append(finalRecord)
       }
 
+      async function commitBestEffort(partial: boolean): Promise<void> {
+        try {
+          await commit(partial)
+        } catch {
+          // Recording is a sidecar after a successful live turn. Never let a
+          // cassette/scrubber failure flip the already-successful stream into
+          // a surfaced LLM failure.
+        }
+      }
+
       async function* iterate(): AsyncIterable<StreamEvent> {
         try {
           for await (const ev of inner) {
@@ -99,7 +109,7 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
           })
           throw writeError
         }
-        await commit(false)
+        await commitBestEffort(false)
       }
 
       return iterate()

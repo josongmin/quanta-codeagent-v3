@@ -33,6 +33,8 @@
  */
 
 import { passthroughMcpSandbox } from "./passthrough"
+import { appleVzMicroVmSandbox } from "./applevz-microvm"
+import { limaMicroVmSandbox } from "./lima-microvm"
 import type { McpSandbox, McpSandboxConfig, McpSandboxPolicy } from "./types"
 
 export interface McpSandboxRegistryConfig extends McpSandboxConfig {
@@ -44,6 +46,11 @@ export interface McpSandboxRegistryConfig extends McpSandboxConfig {
    *  Higher priority than `microvmSandbox` when both are wired AND policy
    *  profile is `microvm`. Omit on non-darwin hosts. (ADR-0190) */
   readonly nativeAppleVzSandbox?: McpSandbox
+}
+
+export interface ResolveMcpSandboxAsyncConfig extends McpSandboxRegistryConfig {
+  /** Probe Apple-VZ then Lima when no microvm adapter is explicitly wired. */
+  readonly autoDetectMicrovm?: boolean
 }
 
 export const resolveMcpSandbox = (
@@ -76,4 +83,42 @@ export const resolveMcpSandbox = (
   }
   // Rule 5: Phase-2/3 profile but unwired → degrade to passthrough.
   return passthroughMcpSandbox(passthroughCfg)
+}
+
+/**
+ * Async registry helper for the microVM auto-detect tier.
+ *
+ * Resolution order when `policy.profile === "microvm"` and
+ * `cfg.autoDetectMicrovm === true`:
+ *   1. Preserve explicitly wired native/external adapters (`resolveMcpSandbox`)
+ *   2. Probe Apple-VZ CLI wrapper
+ *   3. Probe Lima CLI wrapper
+ *   4. Degrade to passthrough
+ *
+ * This keeps the synchronous registry as the stable public picker while
+ * offering an opt-in path for probe-based backend selection.
+ */
+export const resolveMcpSandboxAsync = async (
+  policy: McpSandboxPolicy,
+  cfg: ResolveMcpSandboxAsyncConfig = {},
+): Promise<McpSandbox> => {
+  const resolved = resolveMcpSandbox(policy, cfg)
+  const alreadyWired =
+    cfg.nativeAppleVzSandbox !== undefined ||
+    cfg.microvmSandbox !== undefined ||
+    policy.profile !== "microvm" ||
+    cfg.autoDetectMicrovm !== true
+  if (alreadyWired) return resolved
+
+  const appleVz = appleVzMicroVmSandbox(cfg)
+  if ((await appleVz.availability()).backend === "microvm") {
+    return appleVz
+  }
+
+  const lima = limaMicroVmSandbox(cfg)
+  if ((await lima.availability()).backend === "microvm") {
+    return lima
+  }
+
+  return resolved
 }

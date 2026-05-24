@@ -8,7 +8,10 @@
  */
 
 export {
+  type HydratedSubagentResult,
+  type HydratedSubagentStatus,
   type HydratingSchedulerOpts,
+  type PersistentBackgroundSubagentScheduler,
   persistentBackgroundSubagentScheduler,
 } from "./hydrating-scheduler"
 export { defaultJsonlSchedulerStore, type JsonlStoreOpts } from "./jsonl-store"

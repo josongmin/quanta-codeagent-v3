@@ -5,6 +5,7 @@ subsystem: Architecture enforcement (S4 hardening)
 order: 20
 maturity: L4
 status: new
+owners: ["@songmin"]
 purpose: |
   Each library slice now has a `<slice>-slice-boundary.test.ts` runtime
   guard enforcing 10 invariants (surface isolation, per-slice deny-list,

@@ -1,12 +1,16 @@
 /** `shadow_restore_partial` — ADR-0122 path-scoped counterpart to
- *  `shadow_rewind`. Restores ONLY the named files from a shadow snapshot
- *  (default `"last"`, or `"verified"` when an auto-verify anchor exists),
- *  leaving every other file in the worktree untouched.
+ *  `shadow_rewind`. Restores ONLY the named files from the last registered
+ *  shadow snapshot, leaving every other file in the worktree untouched.
+ *
+ *  `target:"verified"` is intentionally NOT implemented for the path-scoped
+ *  v1 surface. The tool must surface that as an explicit typed
+ *  `not-implemented` error instead of pretending the verified anchor is
+ *  missing.
  *
  *  Output contract: same typed-error mapping as `shadow_rewind` —
  *  every `ShadowOdbError` collapses to an `ok:false` whose `output`
  *  starts with the error code (e.g. `"uninitialized: …"`,
- *  `"no-verified-anchor: …"`, `"rewind-failed: …"`). Non-typed throws
+ *  `"not-implemented: …"`, `"rewind-failed: …"`). Non-typed throws
  *  bubble (programmer-bug convention, mirrors `_shared.safeRun`).
  *
  *  Plane-clean: imports only `@/storage/shadow-odb`, `../types`, `zod`. */
@@ -23,7 +27,7 @@ export const shadowRestorePartialInputSchema = z.object({
   target: z
     .enum(["last", "verified"])
     .optional()
-    .describe("Snapshot to restore from (default 'last')."),
+    .describe("Snapshot selector. 'last' is supported; path-scoped 'verified' restore is reserved but not implemented in v1."),
   allowDirtyMerge: z
     .boolean()
     .optional()
@@ -38,6 +42,14 @@ const errorToResult = (e: unknown): string => {
   return `${e.code}: ${e.message}`
 }
 
+const unsupportedVerifiedRestore = (): ShadowOdbError =>
+  new ShadowOdbError(
+    "not-implemented",
+    "partial restore from 'verified' is not supported in v1 — use shadow_rewind " +
+      "{target:'verified'} for the full-tree path, or omit target for path-scoped restore " +
+      "from the last registered snapshot.",
+  )
+
 /** Render the success output. Truncates the file list at MAX_OUTPUT chars
  *  so a 5000-path call doesn't blow the model context. */
 const renderOk = (count: number, target: "last" | "verified", paths: readonly string[]): string => {
@@ -51,10 +63,11 @@ const renderOk = (count: number, target: "last" | "verified", paths: readonly st
 export const shadowRestorePartialTool = (odb: ShadowOdb): Tool<ShadowRestorePartialInput> => ({
   name: "shadow_restore_partial",
   description:
-    "Restore ONLY the given files from a shadow snapshot (default 'last', or 'verified' when " +
-    "the auto-verify anchor is set). Other files in the worktree are untouched. DESTRUCTIVE on " +
-    "the named files; a pre-rewind ref is auto-created as a safety net (visible via " +
-    "shadow_snapshots). Paths must be repo-relative (no absolute paths, no `..` segments).",
+    "Restore ONLY the given files from the last registered shadow snapshot. Path-scoped " +
+    "target='verified' requests are reserved but return not-implemented in v1. Other files in " +
+    "the worktree are untouched. DESTRUCTIVE on the named files; a pre-rewind ref is auto-created " +
+    "as a safety net (visible via shadow_snapshots). Paths must be repo-relative (no absolute " +
+    "paths, no `..` segments).",
   inputSchema: shadowRestorePartialInputSchema,
   isReadOnly: () => false,
   // Per-workspace lock lives inside shadow-odb; concurrent partial restores
@@ -87,39 +100,18 @@ export const shadowRestorePartialTool = (odb: ShadowOdb): Tool<ShadowRestorePart
         : {}),
     }
     const target = parsed.data.target ?? "last"
+    if (target === "verified") {
+      yield {
+        type: "result",
+        result: { ok: false, output: errorToResult(unsupportedVerifiedRestore()) },
+      }
+      return
+    }
     yield {
       type: "progress",
       message: `shadow_restore_partial: capturing safety-net ref + restoring ${parsed.data.paths.length} path(s) from ${target}…`,
     }
     try {
-      if (target === "verified") {
-        // Partial restore from VERIFIED requires the verified anchor to
-        // exist. The port surfaces this as `no-verified-anchor` via the
-        // verified-ref check — but `restorePartial` itself reads from
-        // SHADOW_LAST_REF, so we route through a verified-check first.
-        // For the v1 surface we restrict `target` semantics to the
-        // SAME-tier check the port does: when callers want verified-tier
-        // PATH restore they go through `rewindToVerified` (full-tree).
-        // Path-scoped verified restore is deferred to a follow-up ADR;
-        // for now we surface a typed `no-verified-anchor` so the model
-        // gets the same code shape it would from rewindToVerified.
-        // Pragma: this branch surfaces a SAME-typed error using the
-        // port's existing rewindToVerified guard semantics (read-only
-        // probe + immediate error if absent) — the port treats it as
-        // a precondition violation, NOT a destructive op, so no safety
-        // net is taken when the guard fires.
-        yield {
-          type: "result",
-          result: {
-            ok: false,
-            output:
-              "no-verified-anchor: partial restore from 'verified' is not supported in v1 — " +
-              "use shadow_rewind {target:'verified'} for the full-tree path, or omit target " +
-              "for path-scoped restore from the last registered snapshot.",
-          },
-        }
-        return
-      }
       await odb.restorePartial(ctx.cwd, parsed.data.paths, opts)
     } catch (e) {
       yield { type: "result", result: { ok: false, output: errorToResult(e) } }

@@ -24,6 +24,9 @@
  * State isolation:
  *   - Each turnIndex carries its own anchor. Different turns never share
  *     state; one turn's `endTurn` does not consume another turn's anchor.
+ *   - `endTurn` consumes its own anchor exactly once, even when diff
+ *     computation returns `null`, so the session state does not grow
+ *     monotonically with completed turns.
  *
  * Best-effort:
  *   - All git failures collapse to `null`. The wiring never throws.
@@ -73,6 +76,7 @@ export const wireTurnDiffEmit = (opts: WireTurnDiffOpts): TurnDiffSession => {
     async endTurn(turnIndex) {
       const fromSha = anchors.get(turnIndex)
       if (fromSha === undefined) return null
+      anchors.delete(turnIndex)
       const payload = await computeTurnDiff({
         runner,
         cwd,

@@ -176,7 +176,9 @@ const processAutomation = async (
   // 4. Enqueue the prompt onto the agent loop. The reactor uses the same
   //    port for `manual_resume` — we reuse the exact seam, not a new trigger.
   try {
-    await opts.agentLoop.enqueueUserMessage(automation.prompt)
+    await opts.agentLoop.enqueueUserMessage(automation.prompt, {
+      modelOverride: chosen.chosen,
+    })
   } catch (e) {
     const msg = `enqueue failed: ${stringifyError(e)}`
     await persistError(automation, msg, opts)

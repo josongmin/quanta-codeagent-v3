@@ -190,6 +190,30 @@ describe("RulesStore — snapshot immutability", () => {
     expect(snapBefore.system).toHaveLength(1)
     expect(snapAfter.system).toHaveLength(2)
   })
+
+  test("match() does not reorder snapshot-visible arrays", () => {
+    const store = new RulesStore()
+    store.loadLayer(
+      "system",
+      ["allow git", "deny git push --force", "allow git push"].join("\n"),
+      "s.rules",
+    )
+
+    const before = store.snapshot()
+    const beforePrefixes = before.system.map((rule) => rule.prefix)
+    expect(beforePrefixes).toEqual(["git", "git push --force", "git push"])
+
+    const outcome = store.match("git push --force origin")
+    expect(outcome.kind).toBe("matched")
+    if (outcome.kind === "matched") {
+      expect(outcome.rule.action).toBe("deny")
+      expect(outcome.rule.prefix).toBe("git push --force")
+    }
+
+    const after = store.snapshot()
+    expect(after.system).toBe(before.system)
+    expect(after.system.map((rule) => rule.prefix)).toEqual(beforePrefixes)
+  })
 })
 
 describe("RulesStore — composite end-to-end", () => {

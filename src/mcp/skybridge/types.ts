@@ -184,6 +184,14 @@ export type SkybridgeSpawner = (
   opts: { readonly cwd?: string; readonly env?: Readonly<Record<string, string>> },
 ) => Promise<SkybridgeSpawnHandle>
 
+export interface SkybridgeRunResult {
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+export type SkybridgeRunner = (argv: ReadonlyArray<string>) => Promise<SkybridgeRunResult>
+
 /**
  * Adapter DI config — injection points for the spawner + platform probe +
  * clock. Production wiring uses default arms; tests pass fakes to assert
@@ -191,6 +199,8 @@ export type SkybridgeSpawner = (
  */
 export interface McpSandboxConfig {
   readonly spawner?: SkybridgeSpawner
+  readonly which?: (binary: string) => Promise<string | null>
+  readonly runner?: SkybridgeRunner
   readonly platform?: NodeJS.Platform
   readonly now?: () => number
 }

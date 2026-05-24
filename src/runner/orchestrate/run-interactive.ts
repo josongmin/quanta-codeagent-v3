@@ -100,8 +100,10 @@ export interface RunInteractiveInput {
    *
    *  Contract:
    *   - The wrapper MUST call `run(turnDeps)` exactly once and return its
-   *     resolution. If it suppresses the call (e.g. swallowed cancellation),
-   *     the loop counts the iteration but does NOT update history.
+   *     resolution. If it suppresses the call, return `undefined`; the loop
+   *     counts the iteration but does NOT update history.
+   *   - Turn-scoped cancellation should return `{cancelled:true}` so the
+   *     driver replays the turn payload (e.g. seed images) on the retry.
    *   - The wrapper is responsible for catch/return on surface-scoped aborts
    *     (e.g. Esc-Esc per-turn cancel). Unhandled throws bubble out of the
    *     driver to the surface's outer try/catch. */
@@ -110,7 +112,11 @@ export interface RunInteractiveInput {
       outcome: AgentOutcome
       messages: Message[]
     }>,
-  ) => Promise<{ outcome: AgentOutcome; messages: Message[] } | undefined>
+  ) => Promise<
+    | { outcome: AgentOutcome; messages: Message[] }
+    | { readonly cancelled: true }
+    | undefined
+  >
   /** Optional MCP clients to stop after the loop exits (mirrors the CLI's
    *  `shutdownMcp` in the `finally` of `runRepl`). Default empty. */
   mcpClients?: Array<{ stop: () => Promise<void> }>
@@ -172,6 +178,10 @@ export const runInteractive = async (input: RunInteractiveInput): Promise<void> 
           idMeta,
         })
       const result = input.wrapTurn ? await input.wrapTurn(runTurn) : await runTurn(deps)
+      if (result && "cancelled" in result) {
+        pendingImages = turnImages
+        continue
+      }
       // wrapTurn may swallow a per-turn cancel (e.g. CLI Esc-Esc); in that
       // case history stays unchanged and the loop solicits the next prompt.
       if (result === undefined) continue

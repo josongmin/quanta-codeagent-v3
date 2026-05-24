@@ -117,7 +117,7 @@ export const PAUSED_REASON_DOCS: Readonly<Record<PausedReason, string>> = Object
 })
 
 /** Serializable snapshot for restart-resume. */
-export interface FollowUpQueueSnapshot {
+interface LegacyFollowUpQueueSnapshot {
   readonly version: 1
   readonly threads: ReadonlyArray<{
     readonly threadId: string
@@ -125,18 +125,78 @@ export interface FollowUpQueueSnapshot {
   }>
 }
 
+export interface FollowUpQueueSnapshot {
+  readonly version: 2
+  readonly maxPerThread: number
+  readonly threads: ReadonlyArray<{
+    readonly threadId: string
+    readonly entries: readonly FollowUp[]
+  }>
+}
+
+export interface FollowUpQueueOptions {
+  readonly maxPerThread?: number
+}
+
+type FollowUpQueueSnapshotInput = FollowUpQueueSnapshot | LegacyFollowUpQueueSnapshot
+
+type ThreadQueueState = {
+  entries: FollowUp[]
+  head: number
+}
+
+export const DEFAULT_FOLLOW_UP_QUEUE_MAX_PER_THREAD = 32
+
+const normalizeMaxPerThread = (value: number | undefined): number => {
+  const normalized = Math.floor(value ?? DEFAULT_FOLLOW_UP_QUEUE_MAX_PER_THREAD)
+  return normalized >= 1 ? normalized : 1
+}
+
 /** Per-thread FIFO queue + multi-thread isolation. In-memory; persistence
  *  is via {@link toSnapshot}/{@link fromSnapshot}. */
 export class FollowUpQueue {
-  private readonly map = new Map<ThreadId, FollowUp[]>()
+  private readonly map = new Map<ThreadId, ThreadQueueState>()
+  private maxPerThread: number
   /** Deterministic id seed — incremented per `enqueue` so ids are stable
    *  across snapshot round-trips when the queue is re-hydrated with the
    *  same submission order. */
   private nextSeq = 0
 
+  constructor(opts?: FollowUpQueueOptions) {
+    this.maxPerThread = normalizeMaxPerThread(opts?.maxPerThread)
+  }
+
   /** Build a deterministic follow-up id from the seq + threadId. */
   static makeId(threadId: ThreadId, seq: number): FollowUpId {
     return `fu-${threadId}-${seq.toString(36).padStart(6, "0")}` as FollowUpId
+  }
+
+  private static liveSize(state: ThreadQueueState): number {
+    return state.entries.length - state.head
+  }
+
+  private static liveEntries(state: ThreadQueueState): FollowUp[] {
+    return state.entries.slice(state.head)
+  }
+
+  private ensureThread(threadId: ThreadId): ThreadQueueState {
+    const existing = this.map.get(threadId)
+    if (existing !== undefined) return existing
+    const created: ThreadQueueState = { entries: [], head: 0 }
+    this.map.set(threadId, created)
+    return created
+  }
+
+  private compactThread(threadId: ThreadId, state: ThreadQueueState): void {
+    if (state.head === 0) return
+    if (state.head >= state.entries.length) {
+      this.map.delete(threadId)
+      return
+    }
+    if (state.head >= state.entries.length / 2) {
+      state.entries = state.entries.slice(state.head)
+      state.head = 0
+    }
   }
 
   enqueue(threadId: ThreadId, partial: Omit<FollowUp, "id">): FollowUp {
@@ -145,16 +205,20 @@ export class FollowUpQueue {
       ...partial,
       id: FollowUpQueue.makeId(threadId, seq),
     }
-    const list = this.map.get(threadId)
-    if (list === undefined) this.map.set(threadId, [fu])
-    else list.push(fu)
+    const state = this.ensureThread(threadId)
+    state.entries.push(fu)
+    const overflow = FollowUpQueue.liveSize(state) - this.maxPerThread
+    if (overflow > 0) {
+      state.head += overflow
+      this.compactThread(threadId, state)
+    }
     return fu
   }
 
   peek(threadId: ThreadId): FollowUp | null {
-    const list = this.map.get(threadId)
-    if (list === undefined || list.length === 0) return null
-    return list[0] ?? null
+    const state = this.map.get(threadId)
+    if (state === undefined) return null
+    return state.entries[state.head] ?? null
   }
 
   /** Pop the head iff `pausedReason === null`. Returns the ready follow-up
@@ -166,32 +230,36 @@ export class FollowUpQueue {
     pausedReason: PausedReason | null,
   ): { ready: FollowUp; remaining: FollowUp[] } | null {
     if (pausedReason !== null) return null
-    const list = this.map.get(threadId)
-    if (list === undefined || list.length === 0) return null
-    const ready = list.shift()
+    const state = this.map.get(threadId)
+    if (state === undefined) return null
+    const ready = state.entries[state.head]
     if (ready === undefined) return null
-    return { ready, remaining: [...list] }
+    state.head += 1
+    const remaining = FollowUpQueue.liveEntries(state)
+    this.compactThread(threadId, state)
+    return { ready, remaining }
   }
 
   /** Drain ALL entries for a thread (used at thread close to surface
    *  unprocessed follow-ups to the operator). */
   drain(threadId: ThreadId): FollowUp[] {
-    const list = this.map.get(threadId)
-    if (list === undefined) return []
+    const state = this.map.get(threadId)
+    if (state === undefined) return []
     this.map.delete(threadId)
-    return list
+    return FollowUpQueue.liveEntries(state)
   }
 
   /** Number of queued follow-ups across all threads (for tests / metrics). */
   size(): number {
     let n = 0
-    for (const list of this.map.values()) n += list.length
+    for (const state of this.map.values()) n += FollowUpQueue.liveSize(state)
     return n
   }
 
   /** Per-thread count (for tests / metrics). */
   sizeFor(threadId: ThreadId): number {
-    return this.map.get(threadId)?.length ?? 0
+    const state = this.map.get(threadId)
+    return state === undefined ? 0 : FollowUpQueue.liveSize(state)
   }
 
   /** Active thread ids — order is insertion order. */
@@ -201,25 +269,28 @@ export class FollowUpQueue {
 
   /** Serialize for persistence. Snapshot is JSON-safe. */
   toSnapshot(): FollowUpQueueSnapshot {
-    const threads = [...this.map.entries()].map(([tid, entries]) => ({
+    const threads = [...this.map.entries()].map(([tid, state]) => ({
       threadId: tid as string,
-      entries: [...entries],
+      entries: FollowUpQueue.liveEntries(state),
     }))
-    return { version: 1, threads }
+    return { version: 2, maxPerThread: this.maxPerThread, threads }
   }
 
-  /** Reconstruct a queue from a snapshot. The seq counter is reset to one
-   *  past the maximum existing seq so post-restore enqueues never collide
-   *  with restored ids. */
-  static fromSnapshot(snapshot: FollowUpQueueSnapshot): FollowUpQueue {
-    if (snapshot.version !== 1) {
+  /** Replace the queue with a snapshot. Version 1 snapshots are restored
+   *  with the queue's current cap because the legacy shape did not persist
+   *  it. Version 2 snapshots carry the cap explicitly and become the queue's
+   *  new hard ceiling. */
+  restoreFromSnapshot(snapshot: FollowUpQueueSnapshotInput): void {
+    if (snapshot.version !== 1 && snapshot.version !== 2) {
       throw new Error(`Unsupported FollowUpQueueSnapshot version: ${String(snapshot.version)}`)
     }
-    const q = new FollowUpQueue()
+    this.map.clear()
+    if (snapshot.version === 2) {
+      this.maxPerThread = normalizeMaxPerThread(snapshot.maxPerThread)
+    }
+    const maxPerThread = this.maxPerThread
     let maxSeq = -1
     for (const t of snapshot.threads) {
-      const tid = t.threadId as ThreadId
-      q.map.set(tid, [...t.entries])
       for (const e of t.entries) {
         const m = /^fu-.+-([0-9a-z]+)$/.exec(e.id)
         if (m !== null) {
@@ -227,8 +298,25 @@ export class FollowUpQueue {
           if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq
         }
       }
+      const kept =
+        t.entries.length > maxPerThread
+          ? t.entries.slice(t.entries.length - maxPerThread)
+          : [...t.entries]
+      if (kept.length === 0) continue
+      this.map.set(t.threadId as ThreadId, {
+        entries: kept,
+        head: 0,
+      })
     }
-    q.nextSeq = maxSeq + 1
+    this.nextSeq = maxSeq + 1
+  }
+
+  /** Reconstruct a queue from a snapshot. The seq counter is reset to one
+   *  past the maximum existing seq so post-restore enqueues never collide
+   *  with restored ids. */
+  static fromSnapshot(snapshot: FollowUpQueueSnapshotInput): FollowUpQueue {
+    const q = new FollowUpQueue()
+    q.restoreFromSnapshot(snapshot)
     return q
   }
 }

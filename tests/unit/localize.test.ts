@@ -92,6 +92,17 @@ describe("localizeTool", () => {
     }
   })
 
+  test("invalid input: overlong query is rejected before rg fan-out", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      const { output, ok } = await drive({ query: "abc ".repeat(1200) }, root)
+      expect(ok).toBe(false)
+      expect(output).toContain("invalid input:")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   // --- R-Phase9 ---
 
   test("camelCase symmetry: `validateUser` matches `validateUserInput`", async () => {
@@ -206,6 +217,18 @@ describe("localizeTool", () => {
       expect(ok).toBe(true)
       const order = fileOrder(output)
       expect(order[0]).toContain("winner.ts")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("invalid input: max_results above cap is rejected", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      writeFileSync(join(root, "winner.ts"), "// uniqsymbolxyz\n")
+      const { output, ok } = await drive({ query: "uniqsymbolxyz", max_results: 201 }, root)
+      expect(ok).toBe(false)
+      expect(output).toContain("invalid input:")
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

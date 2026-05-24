@@ -164,6 +164,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       },
     )
     process.stderr.write("\n")
+    if (out.turnAborted) return { cancelled: true }
     return out.result
   }
 

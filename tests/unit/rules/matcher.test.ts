@@ -71,15 +71,17 @@ describe("matchCommand — longest-prefix-match wins", () => {
     }
   })
 
-  test("equal-length prefixes resolve by source order (lower index wins)", () => {
+  test("equal-length identical prefixes resolve by source order (lower index wins)", () => {
     const rules = [
       makeRule("allow", "git push", 1),
-      // Note: this is a different prefix that happens to be equal length —
-      // we use this to lock stable tie-breaking semantics.
-      makeRule("deny", "npm test", 2),
+      makeRule("deny", "git push", 2),
     ]
-    // Only the first rule matches, so the result is unambiguous.
-    expect(matchCommand("git push origin main", rules).kind).toBe("matched")
+    const outcome = matchCommand("git push origin main", rules)
+    expect(outcome.kind).toBe("matched")
+    if (outcome.kind === "matched") {
+      expect(outcome.rule.action).toBe("allow")
+      expect(outcome.rule.sourceLine).toBe(1)
+    }
   })
 })
 
@@ -138,10 +140,16 @@ describe("matchCommand — input normalisation", () => {
 })
 
 describe("matchCommand — caller-array safety", () => {
-  test("does not mutate the caller's rules array", () => {
-    const rules = [makeRule("allow", "a"), makeRule("deny", "abc"), makeRule("ask", "abcd")]
+  test("does not mutate the caller's rules array across repeated matches", () => {
+    const rules = Object.freeze([
+      makeRule("allow", "a"),
+      makeRule("deny", "abc"),
+      makeRule("ask", "abcd"),
+    ]) as readonly Rule[]
     const before = rules.map((r) => r.prefix)
-    matchCommand("abcdef", rules)
+    const first = matchCommand("abcd z", rules)
+    const second = matchCommand("abcd z", rules)
+    expect(first).toEqual(second)
     expect(rules.map((r) => r.prefix)).toEqual(before)
   })
 })

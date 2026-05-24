@@ -13,14 +13,14 @@ import { makeRunId, ResultStore } from "@/../src/apps/eval/storage"
 describe("eval storage roundtrip", () => {
   test("append then drain then readAll yields the same records", async () => {
     const dir = mkdtempSync(join(tmpdir(), "eval-store-"))
-    const store = new ResultStore({ dir })
+    const store = new ResultStore({ dir, now: () => 1234 })
     const runId = makeRunId("audit", () => 1_700_000_000_000)
-    await store.append(runId, {
+    const first = {
       tier: "audit",
       usecase: "software-quality.debugging.error-message-paste",
       payload: { kind: "audit", coverage: "ok", evidence: ["src/agent/loop.ts"] },
-    })
-    await store.append(runId, {
+    } as const
+    const second = {
       tier: "synthetic",
       usecase: "software-quality.testing.unit-gen",
       payload: {
@@ -32,10 +32,15 @@ describe("eval storage roundtrip", () => {
         toolsUsed: ["Read", "Write", "bash"],
         durationMs: 1234,
       },
-    })
+    } as const
+    await store.append(runId, first)
+    await store.append(runId, second)
     await store.drain()
     const records = [...new ResultStore({ dir }).readAll()]
-    expect(records.length).toBe(2)
+    expect(records).toEqual([
+      { ts: 1234, schema: 1, runId, ...first },
+      { ts: 1234, schema: 1, runId, ...second },
+    ])
     const matrix = buildCoverageMatrix(records)
     const md = renderMatrixMarkdown(matrix)
     expect(md).toContain("software-quality.debugging.error-message-paste")

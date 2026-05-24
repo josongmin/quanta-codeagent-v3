@@ -189,7 +189,7 @@ describe("A. Hydration", () => {
     })
     const polled = sched.poll("bg-running-dead")
     expect(polled).not.toBeNull()
-    expect((polled?.status as unknown as string) ?? "").toBe("interrupted")
+    expect(polled?.status).toBe("interrupted")
     // Reclassify wrote through.
     const updated = f.saved.find((h) => h.id === "bg-running-dead")
     expect(updated).toBeDefined()
@@ -214,7 +214,7 @@ describe("A. Hydration", () => {
       isProcessAlive: () => true, // would say alive — irrelevant when PID missing
     })
     const polled = sched.poll("bg-no-pid")
-    expect((polled?.status as unknown as string) ?? "").toBe("interrupted")
+    expect(polled?.status).toBe("interrupted")
   })
 })
 

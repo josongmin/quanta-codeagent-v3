@@ -180,7 +180,10 @@ export interface ModelAvailabilityPort {
  * the queue (NOT once the loop processed it).
  */
 export interface AgentLoopPort {
-  enqueueUserMessage(message: string, opts?: { signal?: AbortSignal }): Promise<void>
+  enqueueUserMessage(
+    message: string,
+    opts?: { signal?: AbortSignal; modelOverride?: string },
+  ): Promise<void>
 }
 
 /**

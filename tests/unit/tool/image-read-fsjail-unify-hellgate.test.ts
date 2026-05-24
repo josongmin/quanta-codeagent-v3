@@ -115,6 +115,7 @@ describe("A. jail-escape attempts blocked", () => {
     const r = await collect({ path: "/etc/hosts" })
     expect(r.ok).toBe(false)
     expect(r.failure?.mode).toBe("permission_denied")
+    expect(r.failure?.isReadonly).toBe(true)
   })
 
   test("5. symlinked parent directory escaping jail → ok:false", async () => {
@@ -231,11 +232,11 @@ describe("E. abort + schema integration with unified jail", () => {
     expect(r.output).toContain("invalid input")
   })
 
-  test("16. read_image still uses the unified helper (import-graph anti-regression)", async () => {
-    // Source-level: the tool file must import resolveJailedDoc. A future
-    // revert to the per-tool resolveImagePath would drop this symbol.
-    const src = await Bun.file("src/tool/image/read.ts").text()
-    expect(src).toContain("resolveJailedDoc")
-    expect(src).not.toContain("resolveImagePath")
+  test("16. relative + absolute under cwd yield the same image payload", async () => {
+    const rel = await collect({ path: "tiny.png" })
+    const abs = await collect({ path: path.join(workDir, "tiny.png") })
+    expect(rel.ok).toBe(true)
+    expect(abs.ok).toBe(true)
+    expect(rel.images).toEqual(abs.images)
   })
 })

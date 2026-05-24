@@ -1,5 +1,5 @@
 /**
- * Prompt-cache observability — typed port (ADR-0179).
+ * Prompt-cache observability — typed port (ADR-0182).
  *
  * Anthropic Messages API exposes prompt caching via `cache_control:
  * {type: "ephemeral"}` breakpoints on system / user blocks (≤4 breakpoints,
@@ -50,15 +50,14 @@
  *      the wire when absent, never `undefined` (Closed-port plane discipline).
  *   4. SINK NO-THROW: a sink that throws on `send` is wrapped + swallowed; the
  *      observer's own aggregates still update.
- *   5. LRU EVENT CAP: when the retained event ring exceeds `maxEvents`,
- *      OLDEST events drop from the buffer BUT aggregates (perModel /
- *      perSession totals) are MONOTONIC — they do not shrink as events evict.
- *      This is deliberate: a long-running session reflects lifetime totals
- *      from the observer's perspective; the ring is for future "last N
- *      events" panels.
+ *   5. AGGREGATE-ONLY STATE: the default adapter retains monotonic rollups,
+ *      not an event ring. `snapshot()` cost scales with realized rollup state
+ *      (`perModel` + session-local `perModel`) rather than lifetime event
+ *      count. `maxEvents` is retained only for backward-compatible
+ *      construction signatures and is ignored by this adapter.
  *   6. DETERMINISTIC TIME: every wall-clock read goes through the injected
  *      `now()` so tests can pin event timing. `record` accepts `atMs` from
- *      the caller — the clock is for the LRU's eviction signal only.
+ *      the caller — the clock is for sink timestamps only.
  */
 
 import type { MetricSink } from "@/observability/metrics/port"
@@ -125,9 +124,11 @@ export interface CacheModelRollup {
 }
 
 /** Top-level snapshot. `perSession` is a recursive scope (one snapshot per
- *  session, scoped to that session's events). `breakpoints` is OPTIONAL —
- *  omitted (exactOptionalPropertyTypes) when no `attributeBreakpoint` calls
- *  have been made. */
+ *  session, scoped to that session's events). Each session snapshot carries
+ *  its OWN `perModel` rollup so drill-down stays linear in realized state
+ *  instead of rescanning a global `(session,model)` table. `breakpoints` is
+ *  OPTIONAL — omitted (exactOptionalPropertyTypes) when no
+ *  `attributeBreakpoint` calls have been made. */
 export interface CachePerformanceSnapshot {
   readonly totalInputTokens: number
   readonly totalCacheCreationTokens: number
@@ -173,10 +174,10 @@ export interface PromptCacheObserverOpts {
   >
   /** MetricSink (ADR-0144) — emit counters + a hit-rate gauge per record. */
   readonly metricsSink?: MetricSink
-  /** LRU ring cap on retained events. Default 1000. Clamped to >= 1.
-   *  Aggregates DO NOT shrink as events evict (contract #5). */
+  /** Back-compat knob retained for older call sites. The aggregate-only
+   *  default adapter ignores it because it does not retain event history. */
   readonly maxEvents?: number
-  /** Injected clock for the LRU's eviction signal. Default `Date.now`. */
+  /** Injected clock for sink sample timestamps. Default `Date.now`. */
   readonly now?: () => number
 }
 

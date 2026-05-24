@@ -110,7 +110,10 @@ export function isEmptyStub({ evidence }: LoadedFeature["feature"]): boolean {
 function collectReferencedAdrs(features: readonly LoadedFeature[]): ReadonlySet<number> {
   const out = new Set<number>()
   for (const { feature } of features) {
-    for (const n of feature.evidence.adrs) out.add(n)
+    for (const ref of feature.evidence.adrs) {
+      const number = parseAdrReference(ref)
+      if (number !== null) out.add(number)
+    }
   }
   return out
 }
@@ -121,6 +124,16 @@ function collectReferencedSrc(features: readonly LoadedFeature[]): ReadonlySet<s
     for (const p of feature.evidence.code) out.add(p)
   }
   return out
+}
+
+function parseAdrReference(ref: string | number): number | null {
+  if (typeof ref === "number") return Number.isInteger(ref) ? ref : null
+  if (ref.includes("/")) {
+    const pathMatch = /(?:^|\/)(\d+)-[^/]+(?:\.md)?$/.exec(ref)
+    return pathMatch ? Number(pathMatch[1]) : null
+  }
+  const inlineMatch = /(\d+)/.exec(ref)
+  return inlineMatch ? Number(inlineMatch[1]) : null
 }
 
 /** Parse the verbatim status string from an ADR markdown file's front-matter

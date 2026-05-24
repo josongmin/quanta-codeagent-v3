@@ -12,7 +12,7 @@ configurable: integrated
 config_refs:
   env: [QUANTA_PROACTIVE_REACTOR]
 owners: ["@songmin"]
-labels: ["surface:cli", "surface:ipc"]
+labels: ["surface:cli"]
 depends_on: [reactor-self-wake]
 purpose: |
   Closed-port trigger sources that turn external signals into typed

@@ -3,7 +3,7 @@ import { mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { yamlReadTool } from "@/tool/document/yaml-read"
-import type { ToolContext } from "@/tool"
+import type { ToolContext, ToolResult } from "@/tool"
 
 const tool = yamlReadTool
 
@@ -15,10 +15,10 @@ const mkTmp = async (): Promise<string> => {
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
-const exec = async (input: unknown, cwd: string): Promise<{ ok: boolean; output: string }> => {
-  let last: { ok: boolean; output: string } | null = null
+const exec = async (input: unknown, cwd: string): Promise<ToolResult> => {
+  let last: ToolResult | null = null
   for await (const ev of tool.execute(input as never, ctx(cwd))) {
-    if (ev.type === "result") last = { ok: ev.result.ok, output: ev.result.output }
+    if (ev.type === "result") last = ev.result
   }
   return last ?? { ok: false, output: "no result emitted" }
 }
@@ -93,6 +93,8 @@ describe("yaml_read — path safety", () => {
     try {
       const r = await exec({ path: "../escape.yaml" }, dir)
       expect(r.ok).toBe(false)
+      expect(r.failure?.mode).toBe("permission_denied")
+      expect(r.failure?.isReadonly).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -130,6 +132,8 @@ describe("yaml_read — path safety", () => {
       const r = await exec({ path: "link.yaml" }, dir)
       expect(r.ok).toBe(false)
       expect(r.output.toLowerCase()).toMatch(/symlink/)
+      expect(r.failure?.mode).toBe("permission_denied")
+      expect(r.failure?.isReadonly).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

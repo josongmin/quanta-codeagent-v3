@@ -104,6 +104,16 @@ const collect = async (
   return result
 }
 
+const collectEvents = async (
+  tool: ExecutableTool,
+  input: unknown,
+  context: ToolContext = ctx(),
+): Promise<ToolEvent[]> => {
+  const out: ToolEvent[] = []
+  for await (const ev of tool.execute(input, context)) out.push(ev)
+  return out
+}
+
 /* ================================================================== */
 /* A. shadow_rewind target routing (HELL-A1..A4)                       */
 /* ================================================================== */
@@ -175,14 +185,18 @@ describe("shadow_restore_partial — schema + routing + metadata", () => {
     expect("allowDirtyMerge" in (odb.restoreCalls[0]?.opts ?? {})).toBe(false)
   })
 
-  test("HELL-B7: target='verified' (v1) ⇒ ok:false 'no-verified-anchor: ...' (partial-verified deferred)", async () => {
+  test("HELL-B7: target='verified' (v1) ⇒ ok:false 'not-implemented: ...' with no fake progress", async () => {
     const odb = fakeOdb()
     const t = shadowRestorePartialTool(odb)
-    const r = await collect(t, { paths: ["a.ts"], target: "verified" })
-    expect(r.ok).toBe(false)
-    expect(r.output.startsWith("no-verified-anchor:")).toBe(true)
+    const events = await collectEvents(t, { paths: ["a.ts"], target: "verified" })
+    const result = events.find((ev): ev is Extract<ToolEvent, { type: "result" }> => ev.type === "result")
+    expect(result).toBeDefined()
+    expect(result?.result.ok).toBe(false)
+    expect(result?.result.output.startsWith("not-implemented:")).toBe(true)
+    expect(events.some((ev) => ev.type === "progress")).toBe(false)
     // Port NOT called for verified target in v1 — surface is a tool-level
-    // typed error so the user-facing code shape matches rewindToVerified.
+    // typed unsupported error because the path-scoped verified variant is
+    // absent, not because the verified anchor is missing.
     expect(odb.restoreCalls).toHaveLength(0)
   })
 

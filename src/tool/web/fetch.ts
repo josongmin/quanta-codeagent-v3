@@ -176,7 +176,7 @@ const preflight = (
       result: errResult(`SSRF denied: ${url.hostname} — ${deny}`, {
         mode: "permission_denied",
         path: url.hostname,
-        isReadonly: false,
+        isReadonly: true,
       }),
     }
   }

@@ -88,7 +88,7 @@ ToolResult {
 - **Magic-byte SSOT** (PDF spoofing 차단; ADR-0126 pattern).
 - **Path safety**: leaf-symlink reject + `..` 차단 (relative); absolute는 explicit consent (csv_read와 동일 posture).
 - **Size cap**: PDF 32MB (Anthropic 한계). YAML output cap 50KB.
-- **plane-clean**: 3 도구 모두 `@/agent`/`@/permission`/`@/storage` 0 import.
+- **Plane discipline (ADR-0193 정정)**: 3 도구 모두 `@/agent`/`@/permission` 0 import. `@/storage` 는 FS jail chokepoint (`FsJailError` + `resolveJailedDoc` via tool/_shared) 를 위해 의도적으로 reach — `@/tool` 슬라이스 룰 (biome `**/src/tool/**` override) 이 `@/storage`/`@/runtime`/`@/shared` 만 허용하므로 enforced 된 경계 내부. "plane-clean" 으로 봉인하기엔 `@/storage` import 가 있으므로, 정확히는 "tool-slice-clean" (RFC 3.1 의 @/tool 허용 의존성만 사용).
 
 ## SOTA++ 자리매김
 

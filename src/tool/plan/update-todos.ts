@@ -14,7 +14,7 @@ export const updateTodosTool = (): Tool<UpdateTodosInput> => ({
   name: "update_todos",
   description:
     "Patch one or more todos (status, content, deps, phase, assignee, verifyHint). " +
-    "Pass expected_version from the last current()/result. merge:true preserves " +
+    "Pass expected_version from the last current_plan/result. merge:true preserves " +
     "unspecified fields; merge:false clears optional ones.",
   inputSchema: updateTodosSchema,
   isReadOnly: () => false,

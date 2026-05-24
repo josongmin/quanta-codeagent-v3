@@ -56,6 +56,13 @@ describe("parseRecencyHits", () => {
     const hits = parseRecencyHits(stdout)
     expect(hits.get("src")).toBe(2)
   })
+
+  test("scope prefix can be stripped before aggregation", () => {
+    const scoped = ["hot/a.ts", "cold/b.ts"].join("\n")
+    const hits = parseRecencyHits(scoped)
+    expect(hits.get("hot")).toBe(1)
+    expect(hits.get("cold")).toBe(1)
+  })
 })
 
 // ---------------------------------------------------------------------------

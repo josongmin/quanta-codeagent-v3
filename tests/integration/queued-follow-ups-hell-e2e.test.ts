@@ -13,7 +13,7 @@
  *  5. PausedReason enum + PAUSED_REASON_DOCS completeness (per-reason
  *     keyword match + min length).
  *  6. Snapshot vs production-code parity: JSON-safe shape (no Map/Set/
- *     function refs survive a JSON.parse round-trip).
+ *     function refs survive a JSON.parse round-trip, cap included).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -92,7 +92,7 @@ describe("hell-1: 10 PausedReason × 3 threads = 30 assertions", () => {
 
 describe("hell-2: 100 follow-ups across 3 threads — strict FIFO per thread", () => {
   test("deterministic interleaving preserves per-thread submission order", () => {
-    const q = new FollowUpQueue()
+    const q = new FollowUpQueue({ maxPerThread: 128 })
     const t1 = threadId("hell-t1")
     const t2 = threadId("hell-t2")
     const t3 = threadId("hell-t3")
@@ -151,7 +151,7 @@ describe("hell-2: 100 follow-ups across 3 threads — strict FIFO per thread", (
 
 describe("hell-3: snapshot round-trip after partial drain — idempotent", () => {
   test("50 enqueued → pop 10 → snapshot → restore → 40 in same order; re-round-trip is identical", () => {
-    const q = new FollowUpQueue()
+    const q = new FollowUpQueue({ maxPerThread: 128 })
     const tid = threadId("hell-snap")
     const submitted: string[] = []
     for (let i = 0; i < 50; i++) {
@@ -174,7 +174,8 @@ describe("hell-3: snapshot round-trip after partial drain — idempotent", () =>
     const snap1 = q.toSnapshot()
     const serialized = JSON.stringify(snap1)
     const reparsed = JSON.parse(serialized) as typeof snap1
-    expect(reparsed.version).toBe(1)
+    expect(reparsed.version).toBe(2)
+    expect(reparsed.maxPerThread).toBeGreaterThanOrEqual(1)
     const q2 = FollowUpQueue.fromSnapshot(reparsed)
     expect(q2.sizeFor(tid)).toBe(40)
     // Pop the next 40 and verify EXACT submission order match.
@@ -307,8 +308,10 @@ describe("hell-6: toSnapshot is JSON-safe (no Map/Set/function leakage)", () => 
     q.enqueue(t1, baseFu("two", 200))
     q.enqueue(t2, baseFu("three", 300))
     const snap = q.toSnapshot()
-    // Direct shape: version === 1, threads is an array of {threadId, entries}.
-    expect(snap.version).toBe(1)
+    // Direct shape: version === 2, maxPerThread is persisted, and threads is
+    // an array of {threadId, entries}.
+    expect(snap.version).toBe(2)
+    expect(snap.maxPerThread).toBeGreaterThanOrEqual(1)
     expect(Array.isArray(snap.threads)).toBe(true)
     expect(snap.threads).toHaveLength(2)
     // No Map/Set in the snapshot tree.
@@ -337,10 +340,10 @@ describe("hell-6: toSnapshot is JSON-safe (no Map/Set/function leakage)", () => 
     // top-level walker `assertNoFunctionRefs`.
     assertNoFunctionRefs(decoded)
 
-    // Documented keys: top-level = {version, threads}; per-thread =
+    // Documented keys: top-level = {version, maxPerThread, threads}; per-thread =
     // {threadId, entries}; per-entry = {id, content, submittedAt,
     // submittedTurnId, metadata}.
-    expect(Object.keys(decoded).sort()).toEqual(["threads", "version"])
+    expect(Object.keys(decoded).sort()).toEqual(["maxPerThread", "threads", "version"])
     for (const t of decoded.threads) {
       expect(Object.keys(t).sort()).toEqual(["entries", "threadId"])
       for (const e of t.entries) {

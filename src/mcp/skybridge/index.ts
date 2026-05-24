@@ -20,10 +20,17 @@ export {
   type NativeAppleVzConfig,
   nativeAppleVzSandbox,
 } from "./applevz-native"
+export { appleVzMicroVmSandbox, appleVzVmName, detectAppleVz } from "./applevz-microvm"
 export { containerMcpSandbox } from "./container"
+export { compileLimaConfig, detectLima, limaMicroVmSandbox, limaVmName } from "./lima-microvm"
 export { microvmMcpSandbox } from "./microvm"
 export { passthroughMcpSandbox } from "./passthrough"
-export { type McpSandboxRegistryConfig, resolveMcpSandbox } from "./registry"
+export {
+  type McpSandboxRegistryConfig,
+  type ResolveMcpSandboxAsyncConfig,
+  resolveMcpSandbox,
+  resolveMcpSandboxAsync,
+} from "./registry"
 export {
   type McpSandbox,
   type McpSandboxAvailability,
@@ -35,6 +42,8 @@ export {
   type McpSandboxPolicy,
   type McpServerSpec,
   type SkybridgeProfile,
+  type SkybridgeRunner,
+  type SkybridgeRunResult,
   type SkybridgeSpawner,
   type SkybridgeSpawnHandle,
 } from "./types"

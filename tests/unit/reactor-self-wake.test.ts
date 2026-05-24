@@ -1,7 +1,8 @@
 /**
  * ADR-0132 Phase C — `injectSimulatedTurn` (self-wake) coverage.
  *
- * Three hard guards (env / quiet-window / prior-fail) plus the audit-suffix
+ * Three hard guards (env / quiet-window / prior-outcome) plus the
+ * audit-suffix
  * invariant plus the event-emission contract. All closed-port: tests pass
  * fakes for `EnvPort` / `ClockPort` / `AgentLoopPort`, plus a recording
  * sink for `ReactorSelfWakeEvent`.
@@ -203,6 +204,7 @@ describe("ADR-0132 Phase C — quiet-window guard", () => {
       envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
       clockPort: clockAt(now),
       lastUserInputAt: now - QUIET_WINDOW_MS,
+      lastTurnOutcome: "success",
     })
     expect(res.reason).toBe("injected")
     expect(loop.calls.length).toBe(1)
@@ -221,7 +223,7 @@ describe("ADR-0132 Phase C — quiet-window guard", () => {
   })
 })
 
-describe("ADR-0132 Phase C — prior-fail guard", () => {
+describe("ADR-0132 Phase C — prior-outcome guard", () => {
   const now = 10_000_000
 
   const baseEnabledOpts = {
@@ -231,7 +233,7 @@ describe("ADR-0132 Phase C — prior-fail guard", () => {
     lastUserInputAt: 0, // well past the quiet window
   } as const
 
-  test("lastTurnOutcome='fail' ⇒ skipped:prior-fail", async () => {
+  test("lastTurnOutcome='fail' ⇒ skipped:prior-outcome", async () => {
     const loop = recordingAgentLoop()
     const res = await injectSimulatedTurn({
       ...baseEnabledOpts,
@@ -239,7 +241,7 @@ describe("ADR-0132 Phase C — prior-fail guard", () => {
       trigger: makeTrigger(),
       lastTurnOutcome: "fail",
     })
-    expect(res.reason).toBe("prior-fail")
+    expect(res.reason).toBe("prior-outcome")
     expect(loop.calls.length).toBe(0)
   })
 
@@ -255,7 +257,7 @@ describe("ADR-0132 Phase C — prior-fail guard", () => {
     expect(loop.calls.length).toBe(1)
   })
 
-  test("lastTurnOutcome='partial' ⇒ injected (only 'fail' blocks)", async () => {
+  test("lastTurnOutcome='partial' ⇒ skipped:prior-outcome", async () => {
     const loop = recordingAgentLoop()
     const res = await injectSimulatedTurn({
       ...baseEnabledOpts,
@@ -263,7 +265,8 @@ describe("ADR-0132 Phase C — prior-fail guard", () => {
       trigger: makeTrigger(),
       lastTurnOutcome: "partial",
     })
-    expect(res.reason).toBe("injected")
+    expect(res.reason).toBe("prior-outcome")
+    expect(loop.calls.length).toBe(0)
   })
 
   test("lastTurnOutcome='uncertain' ⇒ injected", async () => {
@@ -277,14 +280,15 @@ describe("ADR-0132 Phase C — prior-fail guard", () => {
     expect(res.reason).toBe("injected")
   })
 
-  test("lastTurnOutcome omitted ⇒ treated as success (caller opts INTO fail-protection)", async () => {
+  test("lastTurnOutcome omitted ⇒ skipped:prior-outcome", async () => {
     const loop = recordingAgentLoop()
     const res = await injectSimulatedTurn({
       ...baseEnabledOpts,
       agentLoop: loop.port,
       trigger: makeTrigger(),
     })
-    expect(res.reason).toBe("injected")
+    expect(res.reason).toBe("prior-outcome")
+    expect(loop.calls.length).toBe(0)
   })
 })
 
@@ -305,6 +309,7 @@ describe("ADR-0132 Phase C — simulated-message suffix invariant", () => {
       envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
       clockPort: clockAt(10_000_000),
       lastUserInputAt: 0,
+      lastTurnOutcome: "success",
     })
     expect(loop.calls.length).toBe(1)
     const msg = loop.calls[0]?.message
@@ -351,6 +356,7 @@ describe("ADR-0132 Phase C — event emission contract", () => {
       envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
       clockPort: clockAt(10_000_000),
       lastUserInputAt: 0,
+      lastTurnOutcome: "success",
       onEvent: sink,
     })
     expect(events.length).toBe(1)
@@ -373,6 +379,7 @@ describe("ADR-0132 Phase C — event emission contract", () => {
       envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
       clockPort: clockAt(10_000_000),
       lastUserInputAt: 0,
+      lastTurnOutcome: "success",
     })
     expect(res.reason).toBe("injected")
   })
@@ -386,7 +393,7 @@ describe("ADR-0132 Phase C — event emission contract", () => {
     }> = [
       { label: "env-off", envOff: true, quiet: false },
       { label: "quiet-window", envOff: false, quiet: true },
-      { label: "prior-fail", envOff: false, quiet: false, outcome: "fail" },
+      { label: "prior-outcome", envOff: false, quiet: false, outcome: "partial" },
     ]
     for (const c of cases) {
       const opts: Parameters<typeof injectSimulatedTurn>[0] = {
@@ -413,6 +420,7 @@ describe("ADR-0132 Phase C — event emission contract", () => {
       envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
       clockPort: clockAt(pinnedAt),
       lastUserInputAt: -1_000_000_000,
+      lastTurnOutcome: "success",
       onEvent: sink,
     })
     expect(events[0]?.at).toBe(pinnedAt)
@@ -420,7 +428,7 @@ describe("ADR-0132 Phase C — event emission contract", () => {
 })
 
 describe("ADR-0132 Phase C — abort propagation", () => {
-  test("trigger abortSignal already aborted ⇒ no enqueue, no event", async () => {
+  test("trigger abortSignal already aborted ⇒ reason=aborted, no enqueue, no event", async () => {
     const loop = recordingAgentLoop()
     const { sink, events } = recordingSink()
     const ctrl = new AbortController()
@@ -435,9 +443,27 @@ describe("ADR-0132 Phase C — abort propagation", () => {
       onEvent: sink,
     })
     expect(res.injected).toBe(false)
+    expect(res.reason).toBe("aborted")
     expect(loop.calls.length).toBe(0)
     // Aborted path is upstream — we do NOT emit a skip event for it (the
     // trigger source already knows).
+    expect(events.length).toBe(0)
+  })
+
+  test("aborted trigger wins over env/quiet/prior guards and stays out of self-wake audit", async () => {
+    const { sink, events } = recordingSink()
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const res = await injectSimulatedTurn({
+      trigger: makeTrigger({ abortSignal: ctrl.signal }),
+      agentLoop: recordingAgentLoop().port,
+      envPort: envOf({}),
+      clockPort: clockAt(10_000_000),
+      lastUserInputAt: 10_000_000 - 1,
+      lastTurnOutcome: "fail",
+      onEvent: sink,
+    })
+    expect(res).toEqual({ injected: false, reason: "aborted" })
     expect(events.length).toBe(0)
   })
 
@@ -451,6 +477,7 @@ describe("ADR-0132 Phase C — abort propagation", () => {
       envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
       clockPort: clockAt(10_000_000),
       lastUserInputAt: 0,
+      lastTurnOutcome: "success",
     })
     expect(loop.calls[0]?.signal).toBe(ctrl.signal)
   })
@@ -466,6 +493,7 @@ describe("ADR-0132 Phase C — abort propagation", () => {
         envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
         clockPort: clockAt(10_000_000),
         lastUserInputAt: 0,
+        lastTurnOutcome: "success",
       })
     } catch (e) {
       caught = e
@@ -475,7 +503,7 @@ describe("ADR-0132 Phase C — abort propagation", () => {
 })
 
 describe("ADR-0132 Phase C — guard ordering", () => {
-  test("env-off wins over quiet-window AND prior-fail (cheapest guard first)", async () => {
+  test("env-off wins over quiet-window AND prior-outcome (cheapest guard first)", async () => {
     // All three guards would fire; env-off must be reported.
     const loop = recordingAgentLoop()
     const now = 10_000_000
@@ -485,12 +513,12 @@ describe("ADR-0132 Phase C — guard ordering", () => {
       envPort: envOf({}),
       clockPort: clockAt(now),
       lastUserInputAt: now - 1, // quiet-window would fire
-      lastTurnOutcome: "fail", // prior-fail would fire
+      lastTurnOutcome: "fail", // prior-outcome would fire
     })
     expect(res.reason).toBe("env-off")
   })
 
-  test("quiet-window wins over prior-fail (env on, both other guards fire)", async () => {
+  test("quiet-window wins over prior-outcome (env on, both other guards fire)", async () => {
     const loop = recordingAgentLoop()
     const now = 10_000_000
     const res = await injectSimulatedTurn({
@@ -499,7 +527,7 @@ describe("ADR-0132 Phase C — guard ordering", () => {
       envPort: envOf({ [REACTOR_ENV_FLAG]: "1" }),
       clockPort: clockAt(now),
       lastUserInputAt: now - 1, // quiet-window
-      lastTurnOutcome: "fail", // prior-fail
+      lastTurnOutcome: "fail", // prior-outcome
     })
     expect(res.reason).toBe("quiet-window")
   })

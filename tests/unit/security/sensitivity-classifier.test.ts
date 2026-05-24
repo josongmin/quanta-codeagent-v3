@@ -111,6 +111,13 @@ describe("classifyCommandShape — first-token + arg shape", () => {
     expect(classifyCommandShape("cat ~/.ssh/id_rsa")).toBe("secret")
   })
 
+  test("file readers treat ADR glob forms ~/.env* and ~/.aws/* as secret", () => {
+    expect(classifyCommandShape("cat ~/.env*")).toBe("secret")
+    expect(classifyCommandShape("head /repo/.env*")).toBe("secret")
+    expect(classifyCommandShape("less ~/.aws/*")).toBe("secret")
+    expect(classifyCommandShape("tail -n 1 ~/.env*")).toBe("secret")
+  })
+
   test("cat against a normal file is public", () => {
     expect(classifyCommandShape("cat /repo/src/index.ts")).toBe("public")
     expect(classifyCommandShape("cat README.md")).toBe("public")
@@ -127,6 +134,12 @@ describe("classifyCommandShape — first-token + arg shape", () => {
   test("pagers against a normal file are public", () => {
     expect(classifyCommandShape("head /repo/src/index.ts")).toBe("public")
     expect(classifyCommandShape("less README.md")).toBe("public")
+  })
+
+  test("glob handling stays structural, not fuzzy", () => {
+    expect(classifyCommandShape("cat ~/.envrc")).toBe("public")
+    expect(classifyCommandShape("cat ~/.env-backup")).toBe("public")
+    expect(classifyCommandShape("cat ~/.awsome/*")).toBe("public")
   })
 
   test("password manager CLIs are secret", () => {

@@ -17,6 +17,17 @@ function feature(overrides: Partial<Feature> = {}): Feature {
     order: 0,
     maturity: "L4",
     status: "stable",
+    owners: [],
+    labels: [],
+    depends_on: [],
+    lifecycle_stage: "active",
+    supersedes: [],
+    ui_surfaces: [],
+    monitoring: "n-a",
+    modes: [],
+    configurable: "n-a",
+    telemetry_keys: [],
+    config_refs: {},
     purpose: "x",
     evidence: {
       code: [],
@@ -137,6 +148,29 @@ describe("runAudit — orphan ADRs", () => {
       ],
     }
     expect(runAudit(inputs).orphanAdrs).toEqual([3])
+  })
+
+  test("string ADR references count when they encode the ADR number", () => {
+    const inputs: AuditInputs = {
+      features: [
+        loaded(
+          feature({
+            evidence: {
+              code: [],
+              adrs: ["7", "docs/decisions/0008-sample.md"],
+              tests: { unit: [], integration: [], contract: [] },
+            },
+          }),
+        ),
+      ],
+      srcFiles: [],
+      adrs: [
+        { number: 7, status: "Accepted" },
+        { number: 8, status: "Accepted" },
+        { number: 9, status: "Accepted" },
+      ],
+    }
+    expect(runAudit(inputs).orphanAdrs).toEqual([9])
   })
 
   test("Proposed / Skipped / Reference-only ADRs are NOT considered orphans", () => {

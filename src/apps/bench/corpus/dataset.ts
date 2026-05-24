@@ -194,21 +194,43 @@ export const prepareTaskRepo = async (
 }
 
 /**
- * Adapt a SwebenchTask into a runnable `Instance`. `testCmd` is `"true"`: a
- * deliberate no-op because local grading is impossible without the official
- * Docker harness (see file header). The gradeable signal is the captured
- * `.patch`, exported via `writePredictions`.
+ * Adapt a SwebenchTask into a runnable `Instance`. `testCmd` is auto-synthesized
+ * from `FAIL_TO_PASS` when present (Docker-free local grading via pytest in the
+ * sandbox's own venv — same env_install as Docker, minus image layer). Fallback
+ * to `"true"` when FAIL_TO_PASS is missing/empty so callers that depend on the
+ * historical no-op shape stay byte-identical.
+ *
+ * When `QUANTA_SWEBENCH_PYTHON=1` and the official harness is importable,
+ * `runner.verify()` still routes to the Docker grader (RFC §11) — testCmd is
+ * the FALLBACK path only. With Docker OFF, pytest runs the exact FAIL_TO_PASS
+ * tests in the sandbox; ImportError/test failure surfaces correctly.
  */
+const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
+  const f2p = raw.FAIL_TO_PASS
+  if (typeof f2p !== "string") return "true"
+  let tests: unknown
+  try {
+    tests = JSON.parse(f2p)
+  } catch {
+    return "true"
+  }
+  if (!Array.isArray(tests) || tests.length === 0) return "true"
+  // Shell-escape each test path with single quotes (FAIL_TO_PASS values are
+  // pytest node ids — never contain single quotes in practice; the wrapping
+  // is defense-in-depth).
+  const quoted = tests
+    .filter((t): t is string => typeof t === "string" && t.length > 0)
+    .map((t) => `'${t.replace(/'/g, "'\\''")}'`)
+  if (quoted.length === 0) return "true"
+  // `-x` stops at first failure (cheap signal). `--no-header` reduces noise.
+  return `python -m pytest -x --no-header ${quoted.join(" ")}`
+}
+
 export const toInstance = (task: SwebenchTask, repoPath: string): Instance => ({
   id: task.instanceId,
   repoPath,
   problemStatement: task.problemStatement,
-  // `true` is the no-op LOCAL fallback (real grading is upstream-only). The
-  // `swebench` block makes the produced patch officially gradeable: when
-  // `QUANTA_SWEBENCH_PYTHON=1` and the harness is importable, runner.verify()
-  // routes to the official `swebench.harness.run_evaluation` Docker grader
-  // instead of this no-op (RFC §11 / runner.ts:252).
-  testCmd: "true",
+  testCmd: synthesizeTestCmd(task.raw),
   swebench: {
     instanceId: task.instanceId,
     repo: task.repo,

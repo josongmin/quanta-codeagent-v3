@@ -28,6 +28,58 @@ import type { PlanResult, TodoItem } from "./types"
  *  Built once at the top of each public entry-point. */
 type AdjacencyView = Readonly<Record<string, readonly string[]>>
 
+interface OrderedFrontier {
+  push(id: string): void
+  pop(): string | undefined
+  readonly size: number
+}
+
+const createOrderedFrontier = (seed: readonly string[] = []): OrderedFrontier => {
+  const heap = [...seed]
+  const siftUp = (idx: number): void => {
+    let current = idx
+    while (current > 0) {
+      const parent = Math.floor((current - 1) / 2)
+      if ((heap[parent] ?? "") <= (heap[current] ?? "")) break
+      ;[heap[parent], heap[current]] = [heap[current] ?? "", heap[parent] ?? ""]
+      current = parent
+    }
+  }
+  const siftDown = (idx: number): void => {
+    let current = idx
+    while (true) {
+      const left = current * 2 + 1
+      const right = left + 1
+      let smallest = current
+      if ((heap[left] ?? "\uffff") < (heap[smallest] ?? "\uffff")) smallest = left
+      if ((heap[right] ?? "\uffff") < (heap[smallest] ?? "\uffff")) smallest = right
+      if (smallest === current) break
+      ;[heap[current], heap[smallest]] = [heap[smallest] ?? "", heap[current] ?? ""]
+      current = smallest
+    }
+  }
+  for (let i = Math.floor(heap.length / 2) - 1; i >= 0; i -= 1) siftDown(i)
+  return {
+    push(id: string) {
+      heap.push(id)
+      siftUp(heap.length - 1)
+    },
+    pop() {
+      if (heap.length === 0) return undefined
+      const first = heap[0]
+      const last = heap.pop()
+      if (heap.length > 0 && last !== undefined) {
+        heap[0] = last
+        siftDown(0)
+      }
+      return first
+    },
+    get size() {
+      return heap.length
+    },
+  }
+}
+
 /** Build adjacency from todos. Self-deps are emitted intact so the caller
  *  can detect them BEFORE any cycle walk (priority order matters). */
 const buildAdjacency = (todos: Readonly<Record<string, TodoItem>>): AdjacencyView => {
@@ -168,9 +220,9 @@ const findCycleInternal = (
  * failure (same path shape as {@link findCycle}). Tie-break: lexicographic
  * by id (deterministic regardless of input iteration).
  *
- * Algorithm: Kahn (BFS over in-degree=0 frontier). Stable tie-break by
- * sorting the frontier each pop — O((V+E) log V). Acceptable at our scale
- * (`PLAN_LIMITS.MAX_TODOS = 200`).
+ * Algorithm: Kahn (BFS over in-degree=0 frontier). Stable tie-break by a
+ * lexicographic min-heap frontier, so each enqueue/dequeue is O(log V)
+ * without the `shift()`/linear-insert behaviour of a sorted array.
  */
 export const topologicalSort = (
   todos: Readonly<Record<string, TodoItem>>,
@@ -178,7 +230,7 @@ export const topologicalSort = (
   const ids = Object.keys(todos)
   if (ids.length === 0) return []
   const inDeg: Record<string, number> = {}
-  const out: Record<string, readonly string[]> = {}
+  const out: Record<string, string[]> = {}
   for (const id of ids) {
     inDeg[id] = 0
     out[id] = []
@@ -190,25 +242,20 @@ export const topologicalSort = (
       if (!(dep in inDeg)) continue // dangling — validateDag's job; sort skips
       // Edge: id depends on dep, so dep MUST come first ⇒ edge dep → id.
       inDeg[id] = (inDeg[id] ?? 0) + 1
-      const o = out[dep] ?? []
-      out[dep] = [...o, id]
+      out[dep]?.push(id)
     }
   }
-  // Frontier: in-degree 0, sorted lex.
-  const frontier: string[] = ids.filter((id) => (inDeg[id] ?? 0) === 0).sort()
+  const frontier = createOrderedFrontier(ids.filter((id) => (inDeg[id] ?? 0) === 0))
   const result: string[] = []
-  while (frontier.length > 0) {
-    const next = frontier.shift()
+  while (frontier.size > 0) {
+    const next = frontier.pop()
     if (next === undefined) break
     result.push(next)
     for (const child of out[next] ?? []) {
       const d = (inDeg[child] ?? 1) - 1
       inDeg[child] = d
       if (d === 0) {
-        // Insert into frontier maintaining sort.
-        let i = 0
-        while (i < frontier.length && (frontier[i] ?? "") < child) i += 1
-        frontier.splice(i, 0, child)
+        frontier.push(child)
       }
     }
   }

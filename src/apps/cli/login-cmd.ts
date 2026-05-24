@@ -20,6 +20,7 @@ import {
   type FetchLike,
   isClientIdConfigured,
   isFreePlan,
+  type OAuthCallbackProvider,
   type OAuthConfig,
   resolveOAuthConfig,
   resolveQuantaHome,
@@ -47,6 +48,7 @@ export interface LoginDeps {
   readonly env?: Record<string, string | undefined>
   readonly fetchImpl?: FetchLike
   readonly opener?: (url: string) => void
+  readonly callbackProvider?: OAuthCallbackProvider
   readonly nowMs?: () => number
   /** When set, override the timeout that `runBrowserFlow` would otherwise
    *  use (10 min). Tests pin it to milliseconds to fail fast. */
@@ -219,6 +221,7 @@ export const buildLoginCmd = (deps: LoginDeps = {}): SlashCommand => ({
       const flowOpts = {
         cfg,
         ...(deps.opener !== undefined ? { opener: deps.opener } : {}),
+        ...(deps.callbackProvider !== undefined ? { callbackProvider: deps.callbackProvider } : {}),
         ...(deps.timeoutMs !== undefined ? { timeoutMs: deps.timeoutMs } : {}),
         signal: ac.signal,
       }

@@ -174,7 +174,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   const planExitTool = buildPlanExitBlock(config)
   if (planExitTool !== undefined) extraTools.push(planExitTool)
 
-  // --- Plan-mutation tools (ADR-0093 draft) ------------------------------
+  // --- Structured plan tools (ADR-0093 draft) ----------------------------
   const planMutationTools = buildPlanMutationBlock(config)
   if (planMutationTools !== undefined) extraTools.push(...planMutationTools)
 

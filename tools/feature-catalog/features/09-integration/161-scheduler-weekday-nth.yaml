@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 
 owners: ["@songmin"]
-labels: ["surface:cli", "surface:ipc"]
+labels: ["surface:cli"]
 depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-rrule, scheduler-runtime]
 purpose: |
   `parseWeekday` / `serializeWeekday` / `nthWeekdayOfMonth` /

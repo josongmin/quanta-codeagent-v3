@@ -7,9 +7,9 @@
  *  (`cap-exceeded: …`). Other (unexpected) throws bubble — those are
  *  programmer bugs.
  *
- *  HITL tier: `pre-approval-ok` — the fork is REVERSIBLE because the caller
- *  can `subagent_cancel` (when wired) or simply ignore the handle. The work
- *  is bounded by the scheduler's `maxConcurrent` cap. */
+ *  HITL tier: `pre-approval-ok` — detached work is bounded by the scheduler's
+ *  `maxConcurrent` cap. The current 3-tool surface exposes follow-up reads
+ *  (`subagent_poll` / `subagent_await`) but NOT a cancel tool. */
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"

@@ -10,6 +10,7 @@
 
 import { z } from "zod"
 import type { LLMPort, ModelCandidate } from "@/llm"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import type { BranchSearchAnchor } from "./anchor"
 import type { RunCandidate } from "./propose"
@@ -160,20 +161,34 @@ export const branchSearchTool = (deps: BranchSearchToolDeps): Tool<Input> => ({
     // Default selector wraps argmax with minimal-change tiebreak: when two or
     // more candidates tie on `score.total`, prefer the smallest `delta`
     // (added+removed). Pure tiebreak — single-winner cases are unchanged.
-    const result = await runBranchSearch({
-      N: n,
-      seeds: buildSeeds(n, deps.modelCandidates ?? []),
-      baseLlm: deps.baseLlm,
-      task: input.task_description,
-      timeoutPerBranchMs: deps.config.timeoutPerBranchMs,
-      verifier: buildVerifier(kinds, deps),
-      scorer: makeScorer(deps.config.weights),
-      selector: minimalChangeSelector(),
-      isolator: deps.buildIsolator(),
-      runCandidate: deps.runCandidate,
-      ...(deps.onTrace ? { onTrace: deps.onTrace } : {}),
-      ...(deps.anchor ? { anchor: deps.anchor } : {}),
-    })
+    let result: BranchSearchResult
+    try {
+      result = await runBranchSearch({
+        N: n,
+        seeds: buildSeeds(n, deps.modelCandidates ?? []),
+        baseLlm: deps.baseLlm,
+        task: input.task_description,
+        timeoutPerBranchMs: deps.config.timeoutPerBranchMs,
+        verifier: buildVerifier(kinds, deps),
+        scorer: makeScorer(deps.config.weights),
+        selector: minimalChangeSelector(),
+        isolator: deps.buildIsolator(),
+        runCandidate: deps.runCandidate,
+        ...(deps.onTrace ? { onTrace: deps.onTrace } : {}),
+        ...(deps.anchor ? { anchor: deps.anchor } : {}),
+      })
+    } catch (e) {
+      const msg = `branch_search failed: ${errMessage(e)}`
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: msg,
+          failure: { mode: "error", modelVisibleError: msg },
+        },
+      }
+      return
+    }
 
     yield {
       type: "result",

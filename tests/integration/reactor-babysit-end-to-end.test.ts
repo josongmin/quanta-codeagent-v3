@@ -146,7 +146,7 @@ describe("ADR-0132 Phase D — CI trigger ⇒ self-wake ⇒ agent loop receives 
     expect(triggers).toEqual([])
   })
 
-  test("user abort AFTER trigger but BEFORE inject ⇒ no enqueue, no event", async () => {
+  test("user abort AFTER trigger but BEFORE inject ⇒ reason=aborted, no enqueue, no event", async () => {
     const ci = createCiTriggerSource({
       ghCliPort: oneCompletedRunGh(),
       clockPort: { now: () => 1_700_000_000_000 },
@@ -184,6 +184,7 @@ describe("ADR-0132 Phase D — CI trigger ⇒ self-wake ⇒ agent loop receives 
       onEvent: (e) => events.push(e),
     })
     expect(res.injected).toBe(false)
+    expect(res.reason).toBe("aborted")
     expect(enqueued.length).toBe(0)
     expect(events.length).toBe(0)
   })

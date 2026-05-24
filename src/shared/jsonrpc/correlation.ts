@@ -12,13 +12,16 @@
  * realistic call volume in a session, but we still throw loudly on overflow
  * rather than silently wrapping (which would risk id collisions).
  */
-import type { Id } from "@/shared/types"
+import type { JsonRpcId } from "./envelope"
 
 /** Branded request-id type. `number` because spec §4 allows it and our
- *  default generator produces integers; callers wrapping a string id (e.g.
- *  for MCP) should brand at the call site rather than going through this
- *  generator. */
-export type RequestId = Id<"JsonRpcRequestId">
+ *  default generator produces integers; callers relaying a string id can
+ *  brand it with `brandRequestId(...)` at the boundary instead of going
+ *  through the numeric generator. `null` is excluded because it cannot key
+ *  a correlation table safely. */
+declare const requestIdBrand: unique symbol
+type BrandableRequestId = Exclude<JsonRpcId, null>
+export type RequestId = BrandableRequestId & { readonly [requestIdBrand]: "JsonRpcRequestId" }
 
 export interface RequestIdGenerator {
   /** Mint the next id. Deterministic given the seed; never collides until
@@ -84,4 +87,5 @@ export const nextRequestId = (): RequestId => defaultGenerator.next()
 /** Cast an externally-supplied id (e.g. relayed from a peer) to the branded
  *  type WITHOUT bumping the counter. Use sparingly — the call site is
  *  asserting that the id is unique within its correlation table. */
-export const brandRequestId = (n: number): RequestId => n as unknown as RequestId
+export const brandRequestId = <T extends BrandableRequestId>(id: T): T & RequestId =>
+  id as T & RequestId

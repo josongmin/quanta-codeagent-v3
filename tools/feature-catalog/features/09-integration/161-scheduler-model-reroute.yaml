@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 
 owners: ["@songmin"]
-labels: ["surface:cli", "surface:ipc"]
+labels: ["surface:cli"]
 depends_on: [scheduler-automation-lifecycle, scheduler-rrule, scheduler-runtime, scheduler-weekday-nth]
 purpose: |
   `chooseModel({preference, fallbacks, availability})` probes

@@ -12,7 +12,7 @@ configurable: integrated
 config_refs:
   env: [QUANTA_PROACTIVE_REACTOR]
 owners: ["@songmin"]
-labels: ["surface:cli", "surface:ipc"]
+labels: ["surface:cli"]
 depends_on: [reactor-trigger-source]
 purpose: |
   `injectSimulatedTurn` hands a `ProactiveTrigger` to a closed

@@ -1,7 +1,9 @@
 /**
- * Plan-tool hellgate (ADR-0095 draft). Covers all 4 tools (`create_plan` /
- * `update_todos` / `update_plan` / `remove_todos`) for:
+ * Plan-tool hellgate (ADR-0095 draft). Covers the 5 structured plan tools
+ * (`current_plan` / `create_plan` / `update_todos` / `update_plan` /
+ * `remove_todos`) for:
  *
+ *   - current_plan happy/null/missing-port/throw paths.
  *   - happy path → ok:true output mentions new version.
  *   - ctx.planMutator absent → ok:false + failure.mode === "error".
  *   - mutator throws → caught + ok:false + failure.mode === "error".
@@ -11,6 +13,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import { createPlanTool } from "../../../../src/tool/plan/create-plan"
+import { currentPlanTool } from "../../../../src/tool/plan/current-plan"
+import { buildPlanTools } from "../../../../src/tool/plan/index"
 import { removeTodosTool } from "../../../../src/tool/plan/remove-todos"
 import { updatePlanTool } from "../../../../src/tool/plan/update-plan"
 import { updateTodosTool } from "../../../../src/tool/plan/update-todos"
@@ -60,6 +64,70 @@ const runTool = async <T>(
   for await (const ev of tool.execute(input, ctx)) events.push(ev)
   return events
 }
+
+// ── current_plan ─────────────────────────────────────────────────────────
+
+describe("current_plan", () => {
+  test("happy path: returns latest version + counts", async () => {
+    const evs = await runTool(
+      currentPlanTool(),
+      {},
+      makeCtx(
+        makeMutator({
+          current: () => ({
+            version: 7,
+            name: "plan-a",
+            overview: "ship it",
+            isProject: true,
+            todoCount: 3,
+            phaseCount: 2,
+          }),
+        }),
+      ),
+    )
+    const last = evs[evs.length - 1]
+    expect(last?.type).toBe("result")
+    if (last?.type !== "result") throw new Error()
+    expect(last.result.ok).toBe(true)
+    expect(last.result.output).toContain("v7")
+    expect(last.result.output).toContain("todos: 3")
+    expect(last.result.output).toContain("phases: 2")
+  })
+
+  test("no active plan ⇒ ok:true sentinel", async () => {
+    const evs = await runTool(currentPlanTool(), {}, makeCtx(makeMutator({ current: () => null })))
+    const last = evs[evs.length - 1]
+    if (last?.type !== "result") throw new Error()
+    expect(last.result.ok).toBe(true)
+    expect(last.result.output).toBe("No active plan.")
+  })
+
+  test("planMutator absent ⇒ ok:false + failure.mode==='error'", async () => {
+    const evs = await runTool(currentPlanTool(), {}, makeCtx(undefined))
+    const last = evs[evs.length - 1]
+    if (last?.type !== "result") throw new Error()
+    expect(last.result.ok).toBe(false)
+    expect(last.result.failure?.mode).toBe("error")
+  })
+
+  test("mutator throws ⇒ caught", async () => {
+    const evs = await runTool(
+      currentPlanTool(),
+      {},
+      makeCtx(
+        makeMutator({
+          current: () => {
+            throw new Error("boom")
+          },
+        }),
+      ),
+    )
+    const last = evs[evs.length - 1]
+    if (last?.type !== "result") throw new Error()
+    expect(last.result.ok).toBe(false)
+    expect(last.result.failure?.mode).toBe("error")
+  })
+})
 
 // ── create_plan ─────────────────────────────────────────────────────────
 
@@ -275,19 +343,30 @@ describe("remove_todos", () => {
 // ── tool contract claims (read-only / concurrency) ─────────────────────
 
 describe("tool contract claims", () => {
-  test("read-only:false for all 4 (they mutate)", () => {
+  test("read-only flags pin the split: current_plan read-only, 4 mutators not", () => {
+    expect(currentPlanTool().isReadOnly()).toBe(true)
     expect(createPlanTool().isReadOnly()).toBe(false)
     expect(updateTodosTool().isReadOnly()).toBe(false)
     expect(updatePlanTool().isReadOnly()).toBe(false)
     expect(removeTodosTool().isReadOnly()).toBe(false)
   })
-  test("concurrency-safe:true for all 4 (sync mutator)", () => {
+  test("concurrency-safe:true for all 5 (sync mutator / snapshot read)", () => {
+    expect(currentPlanTool().isConcurrencySafe({})).toBe(true)
     expect(createPlanTool().isConcurrencySafe({ name: "x", overview: "y", todos: [] })).toBe(true)
     expect(
       updateTodosTool().isConcurrencySafe({ patches: [], merge: true, expected_version: 0 }),
     ).toBe(true)
     expect(updatePlanTool().isConcurrencySafe({ expected_version: 0 })).toBe(true)
     expect(removeTodosTool().isConcurrencySafe({ ids: ["x"], expected_version: 0 })).toBe(true)
+  })
+  test("buildPlanTools registers current_plan first, then the 4 mutators", () => {
+    expect(buildPlanTools().map((t) => t.name)).toEqual([
+      "current_plan",
+      "create_plan",
+      "update_todos",
+      "update_plan",
+      "remove_todos",
+    ])
   })
 })
 

@@ -89,7 +89,7 @@ const preflight = (
         result: errResult(`path outside cwd: ${parsed.data.path}`, {
           mode: "permission_denied",
           path: parsed.data.path,
-          isReadonly: false,
+          isReadonly: true,
         }),
       }
     }
@@ -110,7 +110,7 @@ const statPhase = async (
         result: errResult(`symlink not allowed: ${visiblePath}`, {
           mode: "permission_denied",
           path: visiblePath,
-          isReadonly: false,
+          isReadonly: true,
         }),
       }
     }

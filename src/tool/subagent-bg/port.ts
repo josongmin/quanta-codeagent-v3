@@ -2,18 +2,20 @@
  *  `@/agent/subagent-background` (ADR-0130). Kept here so the `@/tool` slice
  *  does NOT import `@/agent` (slice fence, RFC §3.1; biome enforces).
  *
- *  MIRROR INVARIANT — structural equivalence with the producer. The producer
- *  side declares the canonical types; this file mirrors the SURFACE the
- *  three tools actually call (`fork` / `poll` / `await` / `cancel` is NOT
- *  surfaced as a tool, but kept in the mirror for completeness — a future
- *  `subagent_cancel` tool can pick it up without touching the port).
- *  Reviewers MUST keep both sides in sync; a consumer-side round-trip test
- *  in `tests/unit/subagent-background-hellgate.test.ts` asserts the literal
- *  status set matches between sides.
+ *  MIRROR INVARIANT — this file mirrors ONLY the tool-exposed subset of the
+ *  producer: `fork` / `poll` / `await`. The producer's broader scheduler also
+ *  exposes `cancel` / `list` / `prune` / persistence helpers, but the current
+ *  `@/tool/subagent-bg` slice does not surface tools for them. Widen this port
+ *  only when a new tool actually needs that method.
  *
- *  No throw on the SCHEDULER's await/poll/cancel/list/prune surface — that
- *  contract is preserved here exactly. The tools wrap the scheduler's
- *  surface and map any caught failure to `ok:false` ToolResults. */
+ *  Reviewers MUST keep the shared result/status shapes in sync with the
+ *  producer. `tests/unit/subagent-background-hellgate.test.ts` seals both the
+ *  status union and the minimal 3-method tool port.
+ *
+ *  Contract preserved here:
+ *   - `fork()` may throw the producer's typed cap-exceeded error.
+ *   - `poll()` / `await()` are no-throw; the tools map `null` to
+ *     `unknown-handle: ...` ToolResults. */
 
 export type SubagentBgHandleId = string
 
@@ -37,10 +39,8 @@ export interface SubagentBgSpec {
   readonly metadata?: Readonly<Record<string, string>>
 }
 
-/** Narrow scheduler port the 3 tools consume. The producer-side
- *  `BackgroundSubagentScheduler` is a superset — `list` / `cancel` / `prune`
- *  are present on the concrete but the tool surface only consumes
- *  fork/poll/await today. A future tool can extend the port. */
+/** Narrow scheduler port the 3 shipped tools consume. The producer-side
+ *  `BackgroundSubagentScheduler` is a strict superset. */
 export interface BackgroundSubagentSchedulerPort {
   fork(spec: SubagentBgSpec): SubagentBgHandleId
   poll(id: SubagentBgHandleId): SubagentBgResult | null

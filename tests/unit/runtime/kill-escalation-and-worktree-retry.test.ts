@@ -59,20 +59,23 @@ describe("escalatingKill — SIGTERM→SIGKILL escalation", () => {
   })
 
   test("disarm cancels the pending SIGKILL timer (no leak after the child exits)", async () => {
-    // A child that exits on its own; we still arm the grace timer via kill().
-    const proc = Bun.spawn(["bash", "-c", "sleep 30"], {
-      stdout: "ignore",
-      stderr: "ignore",
-    })
+    let resolveExit: ((code: number) => void) | undefined
+    const signals: Array<number | NodeJS.Signals | undefined> = []
+    const proc = {
+      kill(signal?: number | NodeJS.Signals) {
+        signals.push(signal)
+      },
+      exited: new Promise<number>((resolve) => {
+        resolveExit = resolve
+      }),
+    }
     const { kill, disarm } = escalatingKill(proc)
     kill()
+    resolveExit?.(0)
     await proc.exited
-    // disarm() is idempotent and safe after exit; the proc.exited handler also
-    // clears the timer, so this must not throw or double-clear.
-    expect(() => {
-      disarm()
-      disarm()
-    }).not.toThrow()
+    disarm()
+    await Bun.sleep(KILL_GRACE_MS + 50)
+    expect(signals).toEqual([undefined])
   })
 })
 

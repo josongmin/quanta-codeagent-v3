@@ -11,13 +11,13 @@ const schema = z.object({
 type Input = z.infer<typeof schema>
 
 /**
- * The author-declared `tools:` allowlist for a skill, if any. This is the
- * documented enforcement seam: a host that wants to actually sandbox a skill's
- * tool access should read this and apply it to the turn's permission set. The
- * skill slice itself does NOT enforce it.
+ * The author-declared tool allowlist for a skill, if any. Discovery resolves
+ * this from strict `allowedTools:` first, then legacy `tools:` for older
+ * skills. An explicit empty list is significant: it means "no tools allowed"
+ * and must survive into the host enforcement seam.
  */
 export const skillToolAllowlist = (s: Skill): string[] | undefined =>
-  s.tools && s.tools.length > 0 ? s.tools : undefined
+  s.tools !== undefined ? s.tools : undefined
 
 /**
  * Read seam for the author-declared `model:` override on a skill, if any.
@@ -55,7 +55,9 @@ export const skillEffortOverride = (s: Skill): SkillEffort | undefined =>
  */
 export const scopingNote = (s: Skill): string => {
   const parts: string[] = []
-  if (s.tools && s.tools.length > 0) parts.push(`tools: ${s.tools.join(", ")}`)
+  if (s.tools !== undefined) {
+    parts.push(`tools: ${s.tools.length === 0 ? "[]" : s.tools.join(", ")}`)
+  }
   if (s.model) parts.push(`model: ${s.model}`)
   if (s.effort !== undefined) parts.push(`effort: ${String(s.effort)}`)
   return parts.length === 0

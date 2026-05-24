@@ -12,7 +12,7 @@ configurable: integrated
 config_refs:
   env: [QUANTA_SCHEDULER]
 owners: ["@songmin"]
-labels: ["surface:cli", "surface:ipc"]
+labels: ["surface:cli"]
 depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-rrule, scheduler-weekday-nth]
 purpose: |
   `createSchedulerRuntime({store, availability, clock, env, agentLoop,

@@ -11,7 +11,7 @@ export const updatePlanTool = (): Tool<UpdatePlanInput> => ({
   description:
     "Update plan metadata (name, overview, isProject) and/or reorder phases. " +
     "phase_order must list ALL existing phase ids in the new order; partial reorder is rejected. " +
-    "Pass expected_version from the last current()/result.",
+    "Pass expected_version from the last current_plan/result.",
   inputSchema: updatePlanSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => true,

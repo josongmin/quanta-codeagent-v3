@@ -136,6 +136,7 @@ describe("C. SSRF defense", () => {
     expect(r.ok).toBe(false)
     expect(r.output.toLowerCase()).toContain("ssrf")
     expect(r.failure?.mode).toBe("permission_denied")
+    expect(r.failure?.isReadonly).toBe(true)
   })
   test("11. https://10.0.0.5 → ok:false (RFC1918 private)", async () => {
     const r = await collect({ url: "https://10.0.0.5/x" })
@@ -291,8 +292,14 @@ describe("F. abort", () => {
   test("21. pre-aborted signal → ok:false 'aborted before start'", async () => {
     const ac = new AbortController()
     ac.abort()
-    const r = await collect({ url: "https://example.com" }, undefined, ctx(ac.signal))
+    let fetchCalls = 0
+    const fetcher = (async () => {
+      fetchCalls += 1
+      return new Response("unexpected")
+    }) as unknown as typeof fetch
+    const r = await collect({ url: "https://example.com" }, fetcher, ctx(ac.signal))
     expect(r.ok).toBe(false)
-    expect(r.output).toContain("aborted")
+    expect(r.output).toContain("aborted before start")
+    expect(fetchCalls).toBe(0)
   })
 })

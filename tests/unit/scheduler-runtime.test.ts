@@ -60,6 +60,7 @@ interface Fakes {
   readonly setAvailable: (models: ReadonlyArray<string>) => void
   readonly agentLoop: AgentLoopPort
   readonly enqueued: string[]
+  readonly enqueueOpts: Array<{ signal?: AbortSignal; modelOverride?: string } | undefined>
   readonly sink: SchedulerSinkPort
   readonly events: SchedulerEvent[]
 }
@@ -87,9 +88,11 @@ const buildFakes = (initial: ReadonlyArray<Automation> = []): Fakes => {
     isAvailable: async (m) => availableModels.includes(m),
   }
   const enqueued: string[] = []
+  const enqueueOpts: Array<{ signal?: AbortSignal; modelOverride?: string } | undefined> = []
   const agentLoop: AgentLoopPort = {
-    enqueueUserMessage: async (msg) => {
+    enqueueUserMessage: async (msg, opts) => {
       enqueued.push(msg)
+      enqueueOpts.push(opts)
     },
   }
   const events: SchedulerEvent[] = []
@@ -116,6 +119,7 @@ const buildFakes = (initial: ReadonlyArray<Automation> = []): Fakes => {
     },
     agentLoop,
     enqueued,
+    enqueueOpts,
     sink,
     events,
   }
@@ -136,6 +140,7 @@ describe("SchedulerRuntime — tickOnce", () => {
     })
     await rt.tickOnce()
     expect(f.enqueued).toEqual(["run me"])
+    expect(f.enqueueOpts).toEqual([{ modelOverride: "gpt-5" }])
     expect(f.storeContent[0]?.fireCount).toBe(1)
     expect(f.storeContent[0]?.lastFiredAt).toBe(utc(2026, 5, 3))
     expect(f.events.length).toBe(1)
@@ -209,6 +214,7 @@ describe("SchedulerRuntime — tickOnce", () => {
     })
     await rt.tickOnce()
     expect(f.enqueued).toEqual(["run me"])
+    expect(f.enqueueOpts).toEqual([{ modelOverride: "claude-4" }])
     const ev = f.events[0]
     expect(ev?.type).toBe("scheduler.fired")
     if (ev?.type === "scheduler.fired") {

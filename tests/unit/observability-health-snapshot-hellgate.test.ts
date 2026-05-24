@@ -1,13 +1,13 @@
 /**
- * ADR-0177 hellgate — file-based JSON health snapshot. Default-OFF
+ * ADR-0180 hellgate — file-based JSON health snapshot. Default-OFF
  * (`healthSnapshotPath` absent) → byte-identical to ADR-0172 baseline (no I/O,
  * no snapshot file). Opt-in mode writes a versioned envelope mirroring the
  * `observability.wired.total` gauge to `~/.quanta/health.json` (or a custom
  * path) atomically (tmp + rename).
  *
- * 11-case coverage:
+ * 12-case coverage:
  *   A. buildHealthSnapshot — pure (5 cases)
- *   B. writeHealthSnapshot — I/O atomicity + error mapping (3 cases)
+ *   B. writeHealthSnapshot — I/O atomicity + error mapping (4 cases)
  *   C. withFullObservability integration (2 cases)
  *   D. byte-identical determinism (1 case)
  *
@@ -72,7 +72,7 @@ const wiredStub = (): unknown => ({})
 /* A. buildHealthSnapshot — pure                                              */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0177 buildHealthSnapshot — pure", () => {
+describe("ADR-0180 buildHealthSnapshot — pure", () => {
   test("[1] empty bag → 7 slices, all wired=false, summary {wiredCount:0, totalCount:7, ratio:0}", () => {
     const snap = buildHealthSnapshot(emptyBag(), { now: fixedClock })
     expect(snap.version).toBe(1)
@@ -155,7 +155,7 @@ describe("ADR-0177 buildHealthSnapshot — pure", () => {
 /* B. writeHealthSnapshot — I/O                                               */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0177 writeHealthSnapshot — I/O", () => {
+describe("ADR-0180 writeHealthSnapshot — I/O", () => {
   let dir: string
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "quanta-health-snap-"))
@@ -211,13 +211,47 @@ describe("ADR-0177 writeHealthSnapshot — I/O", () => {
     expect((caught as HealthSnapshotError).errorCode).toBe("write-failed")
     expect((caught as Error).message).toContain("disk on fire")
   })
+
+  test("[9] concurrent default writes allocate distinct tmp paths before rename", async () => {
+    const snap = buildHealthSnapshot(emptyBag(), { now: fixedClock })
+    const target = join(dir, "concurrent.json")
+    const tmpWrites: string[] = []
+    const renameCalls: string[] = []
+    let started = 0
+    let releaseBoth!: () => void
+    const release = new Promise<void>((resolve) => {
+      releaseBoth = resolve
+    })
+    const fsOps: NonNullable<NonNullable<Parameters<typeof writeHealthSnapshot>[1]>["fsOps"]> = {
+      mkdir: async () => undefined,
+      writeFile: async (path) => {
+        tmpWrites.push(String(path))
+        started += 1
+        if (started === 2) releaseBoth()
+        await release
+      },
+      rename: async (from) => {
+        renameCalls.push(String(from))
+      },
+    }
+    await Promise.all([
+      writeHealthSnapshot(snap, { path: target, fsOps }),
+      writeHealthSnapshot(snap, { path: target, fsOps }),
+    ])
+    expect(tmpWrites.length).toBe(2)
+    expect(new Set(tmpWrites).size).toBe(2)
+    expect([...renameCalls].sort()).toEqual([...tmpWrites].sort())
+    for (const tmpPath of tmpWrites) {
+      expect(tmpPath.startsWith(`${target}.tmp.${process.pid}.`)).toBe(true)
+    }
+  })
 })
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* C. withFullObservability integration                                       */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0177 withFullObservability integration", () => {
+describe("ADR-0180 withFullObservability integration", () => {
   let dir: string
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "quanta-health-integ-"))
@@ -226,7 +260,7 @@ describe("ADR-0177 withFullObservability integration", () => {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined)
   })
 
-  test("[9] healthSnapshotPath: <absolute custom path> → file written, read it back", async () => {
+  test("[10] healthSnapshotPath: <absolute custom path> → file written, read it back", async () => {
     const m = defaultMetricsRegistry()
     const target = join(dir, "custom-health.json")
     withFullObservability({}, { metrics: m, healthSnapshotPath: target })
@@ -242,7 +276,7 @@ describe("ADR-0177 withFullObservability integration", () => {
     expect(parsed.summary.wiredCount).toBe(0)
   })
 
-  test("[10] healthSnapshotPath: true → default path resolved (write attempted under ~/.quanta/)", async () => {
+  test("[11] healthSnapshotPath: true → default path resolved (write attempted under ~/.quanta/)", async () => {
     // We can't safely write to the real ~/.quanta/health.json in CI, so we
     // verify the in-flight promise resolves successfully AND the resolved
     // path ends with `.quanta/health.json` — proving default-path semantics
@@ -274,8 +308,8 @@ describe("ADR-0177 withFullObservability integration", () => {
 /* D. Determinism                                                             */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-describe("ADR-0177 determinism", () => {
-  test("[11] same bag + injected clock → byte-identical JSON output", () => {
+describe("ADR-0180 determinism", () => {
+  test("[12] same bag + injected clock → byte-identical JSON output", () => {
     const a = buildHealthSnapshot(emptyBag(), { now: fixedClock, quantaVersion: "test-1" })
     const b = buildHealthSnapshot(emptyBag(), { now: fixedClock, quantaVersion: "test-1" })
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))

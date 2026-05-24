@@ -1,5 +1,5 @@
 /**
- * ADR-0183: Periodic re-emit + SIGHUP hot-reload watcher around ADR-0180's
+ * ADR-0187: Periodic re-emit + SIGHUP hot-reload watcher around ADR-0180's
  * file-based health snapshot. ADR-0180 writes once at composition time;
  * operators that scrape `~/.quanta/health.json` over a long-running daemon
  * (K8s livenessProbe `periodSeconds: 30`, cron, ad-hoc shell loop) need the
@@ -33,7 +33,8 @@
 
 import {
   buildHealthSnapshot,
-  type HealthSnapshotOpts,
+  type HealthSnapshotBuildOpts,
+  type HealthSnapshotWriteOpts,
   writeHealthSnapshot,
 } from "./health-snapshot"
 import type { ObservabilityBag } from "./observability-helper"
@@ -51,15 +52,24 @@ export type BagAccessor = () => {
   readonly [K in keyof ObservabilityBag]: ObservabilityBag[K] | undefined
 }
 
+export interface WatcherSnapshotOpts {
+  /** Build-time options reused on EVERY refresh. Without this split, a caller
+   *  could set `skippedExpected` / `quantaVersion` once and then lose them on
+   *  later interval or SIGHUP refreshes. */
+  readonly build?: HealthSnapshotBuildOpts
+  /** Write-time options forwarded to `writeHealthSnapshot` on every refresh. */
+  readonly write?: HealthSnapshotWriteOpts
+}
+
 export interface WatcherOpts {
   /** Source of truth: bag accessor. Watcher polls this every interval +
    *  on SIGHUP + on `emitNow()`. NO memoization — late-bound subsystems
    *  appear in the next snapshot. */
   readonly getBag: BagAccessor
-  /** Snapshot writer options forwarded to `writeHealthSnapshot` (path,
-   *  version, injected writeFile, etc.). When absent the writer's defaults
-   *  apply (`~/.quanta/health.json`). */
-  readonly snapshot?: HealthSnapshotOpts
+  /** Snapshot options reused on every refresh. `build` preserves operator
+   *  intent (`skippedExpected`, version override, injected clock) while
+   *  `write` preserves sink config (`path`, injected writer, fs seams). */
+  readonly snapshot?: WatcherSnapshotOpts
   /** Re-emit interval ms. Default 30_000 (K8s liveness norm). Values <= 0
    *  disable the timer (signal + manual still work) — useful when callers
    *  want SIGHUP-only refresh. */
@@ -105,12 +115,27 @@ export const startHealthSnapshotWatcher = (opts: WatcherOpts): WatcherHandle => 
   const warn = opts.warn ?? ((_: string) => undefined)
   const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS
   const hotReloadOnSighup = opts.hotReloadOnSighup ?? true
+  const snapshotBuild = opts.snapshot?.build
+  const snapshotWrite = opts.snapshot?.write
 
-  const emitNow = async (): Promise<void> => {
+  let requestedGeneration = 0
+  let completedGeneration = 0
+  let pumpInFlight: Promise<void> | null = null
+  const waiters = new Map<number, Array<() => void>>()
+
+  const resolveWaiters = (): void => {
+    for (const [generation, pending] of waiters) {
+      if (generation > completedGeneration) continue
+      waiters.delete(generation)
+      for (const resolve of pending) resolve()
+    }
+  }
+
+  const runEmit = async (): Promise<void> => {
     try {
       const bag = opts.getBag()
-      const snap = buildHealthSnapshot(bag)
-      await writeHealthSnapshot(snap, opts.snapshot)
+      const snap = buildHealthSnapshot(bag, snapshotBuild)
+      await writeHealthSnapshot(snap, snapshotWrite)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       warn(`health-snapshot-watcher: emit failed: ${msg}`)
@@ -120,11 +145,46 @@ export const startHealthSnapshotWatcher = (opts: WatcherOpts): WatcherHandle => 
     }
   }
 
+  const ensurePump = (): void => {
+    if (pumpInFlight !== null) return
+    pumpInFlight = (async () => {
+      try {
+        while (completedGeneration < requestedGeneration) {
+          const generation = requestedGeneration
+          await runEmit()
+          completedGeneration = generation
+          resolveWaiters()
+        }
+      } finally {
+        pumpInFlight = null
+      }
+    })()
+  }
+
+  const requestEmit = (): Promise<void> => {
+    requestedGeneration += 1
+    const targetGeneration = requestedGeneration
+    ensurePump()
+    if (completedGeneration >= targetGeneration) {
+      return Promise.resolve()
+    }
+    return new Promise<void>((resolve) => {
+      const pending = waiters.get(targetGeneration)
+      if (pending !== undefined) {
+        pending.push(resolve)
+      } else {
+        waiters.set(targetGeneration, [resolve])
+      }
+    })
+  }
+
+  const emitNow = async (): Promise<void> => requestEmit()
+
   // Timer wiring (test seam takes precedence over process.setInterval).
   let intervalHandle: unknown = null
   if (intervalMs > 0) {
     const fire = (): void => {
-      void emitNow()
+      void requestEmit()
     }
     intervalHandle =
       opts.setInterval !== undefined
@@ -136,7 +196,7 @@ export const startHealthSnapshotWatcher = (opts: WatcherOpts): WatcherHandle => 
   let sigHandler: (() => void) | null = null
   if (hotReloadOnSighup) {
     sigHandler = (): void => {
-      void emitNow()
+      void requestEmit()
     }
     if (opts.onSignal !== undefined) {
       opts.onSignal("SIGHUP", sigHandler)

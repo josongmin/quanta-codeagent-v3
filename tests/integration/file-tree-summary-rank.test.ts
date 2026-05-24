@@ -64,6 +64,8 @@ beforeAll(() => {
   gitDir = mkdtempSync(join(tmpdir(), "fts-recency-"))
   mkdirSync(join(gitDir, "hot"), { recursive: true })
   mkdirSync(join(gitDir, "cold"), { recursive: true })
+  mkdirSync(join(gitDir, "nested", "hot"), { recursive: true })
+  mkdirSync(join(gitDir, "nested", "cold"), { recursive: true })
 
   writeFileSync(join(gitDir, "hot", "a.ts"), "export const a = 1\n")
   writeFileSync(join(gitDir, "hot", "b.ts"), "export const b = 1\n")
@@ -71,6 +73,10 @@ beforeAll(() => {
   writeFileSync(join(gitDir, "cold", "x.ts"), "export const x = 1\n")
   writeFileSync(join(gitDir, "cold", "y.ts"), "export const y = 1\n")
   writeFileSync(join(gitDir, "cold", "z.ts"), "export const z = 1\n")
+  writeFileSync(join(gitDir, "nested", "hot", "a.ts"), "export const a = 1\n")
+  writeFileSync(join(gitDir, "nested", "hot", "b.ts"), "export const b = 1\n")
+  writeFileSync(join(gitDir, "nested", "cold", "x.ts"), "export const x = 1\n")
+  writeFileSync(join(gitDir, "nested", "cold", "y.ts"), "export const y = 1\n")
 
   try {
     // Initialize git repo and commit all files so git log picks them up
@@ -82,6 +88,7 @@ beforeAll(() => {
     execSync("git commit -qm 'init' --allow-empty", gitOpts)
     // Add another commit modifying only hot/ files to boost recency score
     writeFileSync(join(gitDir, "hot", "a.ts"), "export const a = 2\n")
+    writeFileSync(join(gitDir, "nested", "hot", "a.ts"), "export const a = 2\n")
     execSync("git add .", gitOpts)
     execSync("git commit -qm 'update hot' --allow-empty", gitOpts)
   } catch {
@@ -157,6 +164,14 @@ describe("rank: recency — git repo", () => {
     const posHot = r.output.indexOf("hot/")
     const posCold = r.output.indexOf("cold/")
     // hot/ should appear first because it has more recent activity
+    expect(posHot).toBeLessThan(posCold)
+  })
+
+  test("scoped path keeps recency ordering after prefix stripping", async () => {
+    const r = await run({ rank: "recency", path: "nested" }, gitDir)
+    expect(r.ok).toBe(true)
+    const posHot = r.output.indexOf("hot/")
+    const posCold = r.output.indexOf("cold/")
     expect(posHot).toBeLessThan(posCold)
   })
 })

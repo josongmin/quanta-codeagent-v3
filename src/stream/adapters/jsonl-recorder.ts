@@ -24,6 +24,11 @@ const DEFAULT_MAX_LINES = 100_000
 const FLUSH_BATCH = 16
 const EMPTY_CTX: RunContext = { runId: "unknown" }
 
+interface PendingChunk {
+  readonly body: string
+  readonly lineCount: number
+}
+
 /**
  * Span-correlation scheme (deterministic — golden-testable, no randomness):
  *
@@ -54,12 +59,15 @@ export class JsonlRecorder implements StreamPort {
   private readonly maxLines: number
   private readonly producer: Producer | undefined
   private readonly buf: string[] = []
+  private readonly pending: PendingChunk[] = []
   private seq = 0
   private written = 0
   private turnSpanId = "t#init"
   private closed = false
   private capDone = false
   private dropped = 0
+  private pendingHead = 0
+  private pendingLineCount = 0
 
   constructor(
     private readonly target: string,
@@ -170,19 +178,42 @@ export class JsonlRecorder implements StreamPort {
   }
 
   private flushMaybe(): void {
-    if (this.buf.length >= FLUSH_BATCH) this.flush()
+    if (this.pendingLineCount + this.buf.length >= FLUSH_BATCH) this.flush()
+  }
+
+  private enqueueBufferedChunk(): void {
+    if (this.buf.length === 0) return
+    this.pending.push({ body: this.buf.join(""), lineCount: this.buf.length })
+    this.pendingLineCount += this.buf.length
+    this.buf.length = 0
+  }
+
+  private dropFlushedChunk(): void {
+    const chunk = this.pending[this.pendingHead]
+    if (chunk !== undefined) this.pendingLineCount -= chunk.lineCount
+    this.pendingHead += 1
+    if (this.pendingHead === this.pending.length) {
+      this.pending.length = 0
+      this.pendingHead = 0
+      return
+    }
+    if (this.pendingHead >= 32 && this.pendingHead * 2 >= this.pending.length) {
+      this.pending.splice(0, this.pendingHead)
+      this.pendingHead = 0
+    }
   }
 
   flush(): void {
-    if (this.buf.length === 0) return
-    const chunk = this.buf.join("")
-    // Append FIRST, clear only on success. If `appendFileSync` throws (disk
-    // full / volume gone / EPERM) the buffered lines stay in `this.buf` so a
-    // later `flush()` / `close()` can retry — a write error must never
-    // silently drop already-buffered events. The caller's try/catch
-    // (`record`) turns the throw into a `degrade()` degraded-line + count.
-    appendFileSync(this.target, chunk)
-    this.buf.length = 0
+    this.enqueueBufferedChunk()
+    while (this.pendingHead < this.pending.length) {
+      const chunk = this.pending[this.pendingHead]
+      if (chunk === undefined) return
+      // Materialize each buffered batch once, then retry the same chunk until
+      // it lands. This keeps flush failures retryable without repeatedly
+      // rejoining the entire pending buffer on every attempt.
+      appendFileSync(this.target, chunk.body)
+      this.dropFlushedChunk()
+    }
   }
 
   /** Flush + close. Idempotent. Never throws to the caller: a failed final

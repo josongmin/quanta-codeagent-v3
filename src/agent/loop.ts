@@ -1227,20 +1227,10 @@ const restoreFollowUpQueueSnapshot = async (cfg: AgentConfig): Promise<void> => 
   try {
     const snap = await cfg.followUpQueueSnapshotStore.load()
     if (snap === undefined) return
-    // Walk the snapshot and enqueue each entry verbatim — the caller already
-    // pointed `cfg.followUpQueue` at theirs (which we MUST honor; replacing
-    // it would lose the reference the surface uses to enqueue new follow-ups).
-    for (const t of snap.threads) {
-      const tid = makeThreadId(t.threadId)
-      for (const e of t.entries) {
-        cfg.followUpQueue.enqueue(tid, {
-          content: e.content,
-          submittedAt: e.submittedAt,
-          submittedTurnId: e.submittedTurnId,
-          metadata: e.metadata,
-        })
-      }
-    }
+    // The queue owns restore semantics now (cap, id continuity, legacy
+    // version handling). Keep the caller's queue reference, but delegate the
+    // state replacement to the queue instead of replaying entries manually.
+    cfg.followUpQueue.restoreFromSnapshot(snap)
   } catch (e) {
     const message = errMessage(e)
     cfg.stream.emit({

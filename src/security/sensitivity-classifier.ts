@@ -209,6 +209,28 @@ const FILE_READERS: ReadonlySet<string> = new Set([
   "nl",
 ])
 
+/** Command-only secret-path forms documented by ADR-0078 that may contain
+ *  shell glob tokens rather than a single concrete path. Kept as a CLOSED
+ *  structural set so command-shape classification does not widen into fuzzy
+ *  `.env` / `.aws` substring matching. */
+const isSecretReaderPathArg = (arg: string): boolean => {
+  if (!(arg.startsWith("/") || arg.startsWith("~/") || arg === "~")) return false
+  if (classifyPath(arg, "~") === "secret") return true
+
+  const p = expandHome(arg, "~")
+  const bn = basename(p)
+
+  // `cat ~/.env*` — glob that expands to the explicit `.env*` family from
+  // ADR-0078. Match the glob token itself only; `.envrc` / `.env-backup`
+  // stay public unless they hit another explicit rule.
+  if (bn === ".env*") return true
+
+  // `cat ~/.aws/*` — wildcard read of the AWS credential/config directory.
+  if (p.endsWith("/.aws/*")) return true
+
+  return false
+}
+
 export const classifyCommandShape = (cmd: string): SensitivityClass => {
   const head = firstToken(cmd)
   if (head.length === 0) return "public"
@@ -226,13 +248,7 @@ export const classifyCommandShape = (cmd: string): SensitivityClass => {
     for (let i = 1; i < tokens.length; i++) {
       const arg = tokens[i]!
       if (arg.startsWith("-")) continue
-      // Only treat absolute-/home-relative paths; bare names ("foo.txt")
-      // don't carry enough info to classify.
-      if (arg.startsWith("/") || arg.startsWith("~/") || arg === "~") {
-        // Use a placeholder home that won't accidentally match anything
-        // outside the structural rules above.
-        if (classifyPath(arg, "~") === "secret") return "secret"
-      }
+      if (isSecretReaderPathArg(arg)) return "secret"
     }
   }
 

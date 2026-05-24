@@ -1,5 +1,5 @@
 /**
- * ADR-0177: file-based health snapshot — JSON mirror of the
+ * ADR-0180: file-based health snapshot — JSON mirror of the
  * `observability.wired.total` gauge (ADR-0172) for operators who don't run a
  * Prometheus stack. The snapshot is a versioned envelope written atomically
  * (tmp + rename) to `${os.homedir()}/.quanta/health.json` by default, or any
@@ -24,7 +24,11 @@
  * or written and runtime is byte-identical to ADR-0172 baseline.
  */
 
-import { writeFile as fsWriteFile, mkdir, rename } from "node:fs/promises"
+import {
+  mkdir as fsMkdir,
+  rename as fsRename,
+  writeFile as fsWriteFile,
+} from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
 
@@ -70,21 +74,39 @@ export class HealthSnapshotError extends QuantaError {
   }
 }
 
-export interface HealthSnapshotOpts {
-  /** Where to write. Relative paths are anchored to `${os.homedir()}/.quanta/`.
-   *  Absolute paths are used verbatim. Default `${os.homedir()}/.quanta/health.json`. */
-  readonly path?: string
+export interface HealthSnapshotBuildOpts {
+  /** Slices intentionally absent from the bag: snapshot keeps `wired=false`
+   *  but surfaces operator intent as `note="skipped intentionally"`. */
+  readonly skippedExpected?: ReadonlySet<keyof ObservabilityBag>
   /** Caller version. Default reads from `process.env.QUANTA_VERSION` || "unknown". */
   readonly quantaVersion?: string
   /** Test seam — inject clock (epoch ms). Default `Date.now`. */
   readonly now?: () => number
+}
+
+interface HealthSnapshotFsOps {
+  readonly mkdir: typeof fsMkdir
+  readonly writeFile: typeof fsWriteFile
+  readonly rename: typeof fsRename
+}
+
+export interface HealthSnapshotWriteOpts {
+  /** Where to write. Relative paths are anchored to `${os.homedir()}/.quanta/`.
+   *  Absolute paths are used verbatim. Default `${os.homedir()}/.quanta/health.json`. */
+  readonly path?: string
   /** Test seam — inject writer. Default `node:fs/promises.writeFile` +
    *  `rename`. When provided, the helper still calls it with the atomic
    *  tmp+rename pattern semantics (write tmp first, then rename).
    *  Implementations receive the FINAL path (not the tmp path) and the
    *  full JSON string. */
   readonly writeFile?: (path: string, content: string) => Promise<void>
+  /** Test seam for low-level atomic I/O. Lets hellgates deterministically
+   *  observe tmp-path allocation and overlap behavior without patching
+   *  `node:fs/promises`. Production leaves this unset. */
+  readonly fsOps?: Partial<HealthSnapshotFsOps>
 }
+
+export type HealthSnapshotOpts = HealthSnapshotBuildOpts & HealthSnapshotWriteOpts
 
 /** Stable ordered enumeration of every `ObservabilityBag` key. Hand-maintained;
  *  drift between this tuple and `ObservabilityBag` is caught by the wired-gauge
@@ -113,11 +135,7 @@ const resolveQuantaVersion = (override?: string): string => {
  *  clock access unless `opts.now` is omitted. */
 export const buildHealthSnapshot = (
   bag: { readonly [K in keyof ObservabilityBag]: ObservabilityBag[K] | undefined },
-  opts?: {
-    skippedExpected?: ReadonlySet<keyof ObservabilityBag>
-    quantaVersion?: string
-    now?: () => number
-  },
+  opts?: HealthSnapshotBuildOpts,
 ): HealthSnapshot => {
   const now = opts?.now ?? Date.now
   const expected = opts?.skippedExpected
@@ -161,13 +179,29 @@ const serializeSnapshot = (snap: HealthSnapshot): string => {
   return `${JSON.stringify(snap, null, 2)}\n`
 }
 
+let nextAtomicWriteOrdinal = 0
+
+const nextHealthSnapshotTmpPath = (finalPath: string): string => {
+  const ordinal = nextAtomicWriteOrdinal
+  nextAtomicWriteOrdinal += 1
+  return `${finalPath}.tmp.${process.pid}.${ordinal}`
+}
+
+const resolveFsOps = (overrides?: Partial<HealthSnapshotFsOps>): HealthSnapshotFsOps => ({
+  mkdir: overrides?.mkdir ?? fsMkdir,
+  writeFile: overrides?.writeFile ?? fsWriteFile,
+  rename: overrides?.rename ?? fsRename,
+})
+
 /** Write the snapshot atomically (tmp + rename). Returns the final path on
  *  success, throws `HealthSnapshotError("write-failed", ...)` on any I/O error
  *  bubbling from the underlying writer/rename. Directory is created if absent
- *  (recursive mkdir — no-op when present). */
+ *  (recursive mkdir — no-op when present). Default writer allocates a unique
+ *  tmp path per emit so concurrent writers in the same process never share a
+ *  single `${final}.tmp.${pid}` scratch file. */
 export const writeHealthSnapshot = async (
   snapshot: HealthSnapshot,
-  opts?: HealthSnapshotOpts,
+  opts?: HealthSnapshotWriteOpts,
 ): Promise<string> => {
   const finalPath = resolveSnapshotPath(opts?.path)
   const content = serializeSnapshot(snapshot)
@@ -179,10 +213,11 @@ export const writeHealthSnapshot = async (
       await opts.writeFile(finalPath, content)
       return finalPath
     }
-    await mkdir(dirname(finalPath), { recursive: true })
-    const tmpPath = `${finalPath}.tmp.${process.pid}`
-    await fsWriteFile(tmpPath, content, "utf8")
-    await rename(tmpPath, finalPath)
+    const fsOps = resolveFsOps(opts?.fsOps)
+    await fsOps.mkdir(dirname(finalPath), { recursive: true })
+    const tmpPath = nextHealthSnapshotTmpPath(finalPath)
+    await fsOps.writeFile(tmpPath, content, "utf8")
+    await fsOps.rename(tmpPath, finalPath)
     return finalPath
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

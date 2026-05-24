@@ -3,15 +3,19 @@
  *
  * A pure, dependency-light module that captures "what did this turn cost?" as
  * structured evidence: which files changed and by how many lines, how many
- * agent actions ran, how many lines were read, and the token/USD cost. It is
- * intentionally NOT wired into the live loop yet — see the TODO seam below.
+ * agent actions ran, how many lines were read, and the token/USD cost. The
+ * pure helpers in this file are wired from the agent loop via
+ * `@/agent/work-metrics-collector` + `buildWorkMetricsResources` /
+ * `emitWorkMetrics`; this module itself stays dependency-light and runtime-free.
  *
  * Cost reuses {@link costUsd} from `./pricing` (best-effort: unknown model ⇒
  * `estimatedCostUsd` stays undefined). Everything here is pure and
  * deterministic so it can be unit-tested without a runtime.
  *
- * TODO(absorb #6): emit workMetrics per-turn from loop — fold `accumulateWorkMetrics`
- * into the per-session total and emit `workMetricsAttrs(m)` on turn close.
+ * Remaining gap: per-turn `diffMap` still depends on callers feeding
+ * `git diff --numstat`-style input into the collector. The live loop emits the
+ * per-turn snapshot already; future work can improve diff sourcing without
+ * changing this pure module's API.
  */
 
 import { costUsd } from "./pricing"

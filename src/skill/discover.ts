@@ -31,6 +31,31 @@ const asEffort = (v: string | string[] | undefined): SkillEffort | undefined => 
 const asScalar = (v: string | string[] | undefined): string | undefined =>
   typeof v === "string" && v.trim() !== "" ? v.trim() : undefined
 
+type DeclaredAllowedTools =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | { kind: "declared"; value: string[] }
+
+/**
+ * Runtime SSOT for tool scoping:
+ *   1. strict-style `allowedTools:` when the key is present AND well-formed
+ *   2. legacy lenient `tools:` fallback only when `allowedTools:` is absent
+ *
+ * If `allowedTools:` is present but malformed (scalar / non-string / empty
+ * element), runtime does NOT silently fall back to `tools:`. That would keep
+ * the legacy mirror authoritative and defeat the frontmatter SSOT cutover.
+ */
+const declaredAllowedTools = (
+  v: string | string[] | undefined,
+): DeclaredAllowedTools => {
+  if (v === undefined) return { kind: "absent" }
+  if (!Array.isArray(v)) return { kind: "invalid" }
+  const trimmed = v.map((item) => item.trim())
+  return trimmed.every((item) => item !== "")
+    ? { kind: "declared", value: trimmed }
+    : { kind: "invalid" }
+}
+
 /**
  * ADR-0134 — infer skill scope from the load path. The lenient frontmatter
  * parser accepts an explicit `scope:` field (validated by
@@ -114,8 +139,13 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
     ...(installState !== undefined ? { installState } : {}),
     ...(adminInstalledBy !== undefined ? { adminInstalledBy } : {}),
   }
-  const tools = asList(data.tools)
-  if (tools) skill.tools = tools
+  const strictTools = declaredAllowedTools(data.allowedTools)
+  if (strictTools.kind === "declared") {
+    skill.tools = strictTools.value
+  } else if (strictTools.kind === "absent") {
+    const tools = asList(data.tools)
+    if (tools) skill.tools = tools
+  }
   const model = asScalar(data.model)
   if (model) skill.model = model
   const effort = asEffort(data.effort)

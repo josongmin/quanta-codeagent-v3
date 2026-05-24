@@ -78,10 +78,10 @@ Nothing in the loop auto-instantiates a coverage source. The `coverage_check` to
 
 = "first agent surface with typed per-file coverage feeding the typed metric sink — branch coverage is heuristic (over `if|else|...|&&|||` tokens) with a documented trade-off, audit-grade branch enumeration deferred to a future Istanbul adapter behind the same `CoverageSource` port."
 
-## Plane-clean check
+## Plane discipline (ADR-0193 정정)
 
-- `src/observability/coverage/*` imports only `node:fs/promises`, `node:path`, and `../metrics/port` (sibling sub-slice — same parent `@/observability` plane). NO `@/agent`, `@/tool`, `@/llm`. Verified by biome `noRestrictedImports` override.
-- `src/tool/coverage_check.ts` imports `@/observability/coverage` + `@/storage` (for the FS jail chokepoint `resolveJailedDoc`) + `./types` + `./_shared/resolve-jailed-doc`. NO `@/agent`, `@/permission`.
+- `src/observability/coverage/*` imports `node:fs/promises`, `node:path`, `../metrics/port` (sibling sub-slice — same parent `@/observability` plane), **그리고 `typescript`** (AST-source `ast-source.ts` / `istanbul-source.ts` — V2 follow-up 들이 추가). `@/agent` / `@/tool` / `@/llm` 직접 import 은 없으나 `typescript` 3rd-party 의존이 ADR 초안의 "plane-clean" 표현보다 무겁다는 점을 명시한다. biome `**/src/observability/**` slice 룰은 enforced — `@/agent`/`@/tool`/`@/llm` 류는 차단된다.
+- `src/tool/coverage_check.ts` imports `@/observability/coverage` + `@/storage` (FS jail chokepoint `resolveJailedDoc`) + `./types` + `./_shared/resolve-jailed-doc`. NO `@/agent`, `@/permission`. `@/tool` 슬라이스 룰 (biome `**/src/tool/**` override) 이 enforced.
 
 ## Label cardinality
 

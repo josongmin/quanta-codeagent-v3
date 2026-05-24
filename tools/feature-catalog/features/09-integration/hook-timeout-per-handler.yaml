@@ -5,6 +5,7 @@ subsystem: Hook bus hardening (S5)
 order: 200
 maturity: L4
 status: stable
+owners: ["@songmin"]
 depends_on: [assert-never-exhaustiveness, awf-tool-matcher, byte-stable-string-comparator, errors-helper-fix, llm-cost-emit-sink]
 purpose: |
   Per-handler timeout race for the HookBus emit chain. A stuck handler used to

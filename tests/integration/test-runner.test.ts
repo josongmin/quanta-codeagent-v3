@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { testRunnerTool } from "../../src/tool/test-runner"
@@ -68,6 +68,26 @@ describe("testRunnerTool", () => {
       expect(output).toContain("could not auto-detect")
     } finally {
       rmSync(empty, { recursive: true, force: true })
+    }
+  })
+
+  test("package.json-only repo prefers npm over bun and forwards path after --", async () => {
+    const proj = mkdtempSync(join(tmpdir(), "test-runner-npm-"))
+    try {
+      writeFileSync(
+        join(proj, "package.json"),
+        JSON.stringify({
+          scripts: {
+            test: "node -e \"console.log(process.argv.slice(1).join('|'))\"",
+          },
+        }),
+      )
+      const { progress, output, ok } = await drive({ path: "spec/foo.test.ts" }, proj)
+      expect(ok).toBe(true)
+      expect(progress).toContain("running: npm test -- spec/foo.test.ts")
+      expect(output).toContain("spec/foo.test.ts")
+    } finally {
+      rmSync(proj, { recursive: true, force: true })
     }
   })
 })

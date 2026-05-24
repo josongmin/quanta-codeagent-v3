@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import ts from "typescript"
 
 const REPO_ROOT = join(import.meta.dir, "../../..")
 
@@ -59,22 +60,74 @@ export const listSliceTsFiles = (dir: string, includeBackupArtifacts: boolean): 
 export const stripComments = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
 
+const parseSourceFile = (src: string): ts.SourceFile =>
+  ts.createSourceFile("slice-boundary-scanner.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+
+const lineOf = (sf: ts.SourceFile, pos: number): number =>
+  sf.getLineAndCharacterOfPosition(pos).line + 1
+
+const isPropertyAccessLike = (
+  node: ts.Node,
+): node is ts.PropertyAccessExpression | ts.PropertyAccessChain =>
+  ts.isPropertyAccessExpression(node) || ts.isPropertyAccessChain(node)
+
+const getNodeLabel = (node: ts.Node): string | null => {
+  if (ts.isIdentifier(node)) return node.text
+  if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) {
+    return node.getText()
+  }
+  return null
+}
+
+const matchesMember = (node: ts.Node, objectName: string, propertyName: string): boolean =>
+  isPropertyAccessLike(node) &&
+  getNodeLabel(node.expression) === objectName &&
+  node.name.text === propertyName
+
+const collectAstHits = (
+  src: string,
+  matcher: (node: ts.Node, sf: ts.SourceFile) => string | null,
+): Array<{ line: number; hit: string }> => {
+  const sf = parseSourceFile(src)
+  const out: Array<{ line: number; hit: string }> = []
+  const visit = (node: ts.Node): void => {
+    const hit = matcher(node, sf)
+    if (hit) out.push({ line: lineOf(sf, node.getStart(sf)), hit })
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return out
+}
+
 export const extractImports = (src: string): Array<{ line: number; spec: string }> => {
   const out: Array<{ line: number; spec: string }> = []
-  const stripped = stripComments(src)
-  const lines = stripped.split("\n")
-  const re =
-    /(?:^|\s)(?:import\s[\s\S]*?from\s+|import\s+|export\s[\s\S]*?from\s+)["']([^"']+)["']/g
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ""
-    if (line.length === 0) continue
-    re.lastIndex = 0
-    let m: RegExpExecArray | null
-    // biome-ignore lint/suspicious/noAssignInExpressions: stdlib regex API
-    while ((m = re.exec(line)) !== null) {
-      out.push({ line: i + 1, spec: m[1] ?? "" })
+  const sf = parseSourceFile(src)
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      out.push({
+        line: lineOf(sf, node.getStart(sf)),
+        spec: node.moduleSpecifier.text,
+      })
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length > 0
+    ) {
+      const [firstArg] = node.arguments
+      if (firstArg && ts.isStringLiteralLike(firstArg)) {
+        out.push({
+          line: lineOf(sf, node.getStart(sf)),
+          spec: firstArg.text,
+        })
+      }
     }
+    ts.forEachChild(node, visit)
   }
+  visit(sf)
   return out
 }
 
@@ -111,6 +164,76 @@ const leafName = (sliceDirPath: string, filePath: string): string => {
   const base = relative(sliceDirPath, filePath)
   return base.split("/").pop() ?? base
 }
+
+const scanProcessEnvArgv = (src: string): Array<{ line: number; hit: string }> =>
+  collectAstHits(src, (node) => {
+    if (!isPropertyAccessLike(node)) return null
+    if (!matchesMember(node, "process", "env") && !matchesMember(node, "process", "argv")) {
+      return null
+    }
+    return node.expression.getText() === "process" ? `process.${node.name.text}` : null
+  })
+
+const scanProcessStdio = (src: string): Array<{ line: number; hit: string }> =>
+  collectAstHits(src, (node) => {
+    if (!isPropertyAccessLike(node)) return null
+    if (
+      !matchesMember(node, "process", "stdin") &&
+      !matchesMember(node, "process", "stdout") &&
+      !matchesMember(node, "process", "stderr")
+    ) {
+      return null
+    }
+    return node.expression.getText() === "process" ? `process.${node.name.text}` : null
+  })
+
+const scanConsoleCalls = (src: string): Array<{ line: number; hit: string }> =>
+  collectAstHits(src, (node) => {
+    if (!ts.isCallExpression(node) || !isPropertyAccessLike(node.expression)) return null
+    const callee = node.expression
+    if (getNodeLabel(callee.expression) !== "console") return null
+    const method = callee.name.text
+    if (!["log", "error", "warn", "info", "debug", "dir", "trace"].includes(method)) {
+      return null
+    }
+    return `console.${method}(`
+  })
+
+const scanAltRuntimeEnvArgv = (src: string): Array<{ line: number; hit: string }> =>
+  collectAstHits(src, (node) => {
+    if (!isPropertyAccessLike(node)) return null
+    if (matchesMember(node, "Bun", "env") || matchesMember(node, "Bun", "argv")) {
+      return `Bun.${node.name.text}`
+    }
+    if (matchesMember(node, "Deno", "env") || matchesMember(node, "Deno", "args")) {
+      return `Deno.${node.name.text}`
+    }
+    if (matchesMember(node, "import.meta", "env")) {
+      return "import.meta.env"
+    }
+    if (
+      (node.name.text === "env" || node.name.text === "argv") &&
+      isPropertyAccessLike(node.expression) &&
+      matchesMember(node.expression, "globalThis", "process")
+    ) {
+      return `globalThis.process.${node.name.text}`
+    }
+    return null
+  })
+
+const scanNodeProcessNamedImports = (src: string): Array<{ line: number; hit: string }> =>
+  collectAstHits(src, (node) => {
+    if (!ts.isImportDeclaration(node) || !node.importClause || !node.moduleSpecifier) return null
+    if (
+      !ts.isStringLiteralLike(node.moduleSpecifier) ||
+      node.moduleSpecifier.text !== "node:process"
+    ) {
+      return null
+    }
+    const bindings = node.importClause.namedBindings
+    if (!bindings || !ts.isNamedImports(bindings)) return null
+    return node.getText().replace(/\s+/g, " ").trim()
+  })
 
 /** Register the standard architecture-guard battery for one slice config. */
 export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void => {
@@ -160,11 +283,10 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no file reads process.env or process.argv (must take plain config)", () => {
       const violations: string[] = []
-      const procRe = /\bprocess\.(env|argv)\b/g
       for (const f of files) {
         const leaf = leafName(dir, f)
         if (envAllow.has(leaf)) continue
-        for (const { line, hit } of scanLines(readFileSync(f, "utf8"), procRe)) {
+        for (const { line, hit } of scanProcessEnvArgv(readFileSync(f, "utf8"))) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
@@ -177,11 +299,10 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no file touches process.stdin / process.stdout / process.stderr", () => {
       const violations: string[] = []
-      const stdioRe = /\bprocess\.(stdin|stdout|stderr)\b/g
       for (const f of files) {
         const leaf = leafName(dir, f)
         if (stdioAllow.has(leaf)) continue
-        for (const { line, hit } of scanLines(readFileSync(f, "utf8"), stdioRe)) {
+        for (const { line, hit } of scanProcessStdio(readFileSync(f, "utf8"))) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
@@ -194,14 +315,11 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no file calls console.log / error / warn / info / debug / dir / trace", () => {
       const violations: string[] = []
-      const consoleRe = /\bconsole\.(log|error|warn|info|debug|dir|trace)\s*\(/g
       for (const f of files) {
         const leaf = leafName(dir, f)
         if (consoleAllow.has(leaf)) continue
-        for (const { line, hit } of scanLines(readFileSync(f, "utf8"), consoleRe)) {
-          violations.push(
-            `${relative(dir, f)}:${line}  ${hit.replace(/\s*\($/, "(")}`,
-          )
+        for (const { line, hit } of scanConsoleCalls(readFileSync(f, "utf8"))) {
+          violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
       if (violations.length > 0) {
@@ -211,10 +329,8 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no alt-runtime ENV/argv (Bun / Deno / import.meta.env / globalThis.process.*)", () => {
       const violations: string[] = []
-      const altRe =
-        /\bBun\.(env|argv)\b|\bDeno\.(env\b|args\b)|\bimport\.meta\.env\b|\bglobalThis\.process\.(env|argv)\b/g
       for (const f of files) {
-        for (const { line, hit } of scanLines(readFileSync(f, "utf8"), altRe)) {
+        for (const { line, hit } of scanAltRuntimeEnvArgv(readFileSync(f, "utf8"))) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
@@ -243,18 +359,9 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test('no `node:process` named imports', () => {
       const violations: string[] = []
-      const namedRe = /\bimport\s*(?:type\s*)?\{[^}]*\}\s*from\s+["']node:process["']/g
       for (const f of files) {
-        const src = stripComments(readFileSync(f, "utf8"))
-        const lines = src.split("\n")
-        namedRe.lastIndex = 0
-        let m: RegExpExecArray | null
-        // biome-ignore lint/suspicious/noAssignInExpressions: stdlib regex API
-        while ((m = namedRe.exec(src)) !== null) {
-          const lineNum = src.slice(0, m.index).split("\n").length
-          violations.push(
-            `${relative(dir, f)}:${lineNum}  ${(lines[lineNum - 1] ?? m[0]).trim()}`,
-          )
+        for (const { line, hit } of scanNodeProcessNamedImports(readFileSync(f, "utf8"))) {
+          violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
       if (violations.length > 0) {

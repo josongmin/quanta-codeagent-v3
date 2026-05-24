@@ -1,5 +1,5 @@
 /**
- * Prompt-cache observability barrel (ADR-0179).
+ * Prompt-cache observability barrel (ADR-0182).
  *
  * Re-exports the typed observer port + default in-memory adapter + budget
  * bridge. Surfaces import from `@/observability/prompt-cache`; the parent

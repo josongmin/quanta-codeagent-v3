@@ -182,6 +182,51 @@ describe("HELLGATE — handleExecCommand", () => {
     // Clear the stubs so afterEach can closeAll without touching them.
     for (let i = 0; i < MAX_PTY; i++) table.delete(900_000 + i)
   })
+
+  test("pty:true long-lived command returns a live pid for follow-up write_stdin", async () => {
+    const table = trackPty()
+    const r = await handleExecCommand(
+      { command: "cat", cwd: process.cwd(), timeoutMs: 5000, pty: true },
+      { ptyTable: table },
+    )
+    expect(r.kind).toBe("success")
+    if (r.kind !== "success") return
+    expect(r.pid).toBeGreaterThan(0)
+    expect(r.exitCode).toBe(-1)
+    if (r.pid === undefined) return
+    expect(table.has(r.pid)).toBe(true)
+
+    const write = await handleWriteStdin(
+      { pid: r.pid, data: "attached", appendNewline: true },
+      { ptyTable: table },
+    )
+    expect(write.kind).toBe("success")
+    if (write.kind === "success") expect(write.bytesWritten).toBe(9)
+
+    const slot = table.get(r.pid)
+    expect(slot).toBeDefined()
+    if (slot === undefined) return
+
+    slot.proc.stdin.end()
+    await slot.exited
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(table.has(r.pid)).toBe(false)
+  })
+
+  test("pty:true short-lived command still returns terminal output without a pid", async () => {
+    const table = trackPty()
+    const r = await handleExecCommand(
+      { command: "echo short-lived", cwd: process.cwd(), timeoutMs: 5000, pty: true },
+      { ptyTable: table },
+    )
+    expect(r.kind).toBe("success")
+    if (r.kind === "success") {
+      expect(r.exitCode).toBe(0)
+      expect(r.stdout).toContain("short-lived")
+      expect(r.pid).toBeUndefined()
+    }
+    expect(table.snapshot()).toEqual([])
+  })
 })
 
 // ─── B. handleWriteStdin ───────────────────────────────────────────────────
@@ -255,13 +300,12 @@ describe("HELLGATE — handleWriteStdin", () => {
     await new Response(proc.stdout as ReadableStream<Uint8Array>).text()
 
     const r = await handleWriteStdin({ pid: proc.pid, data: "post-mortem" }, { ptyTable: table })
-    // On a fully-closed pipe Bun's `.write` either throws (we catch) OR
-    // succeeds-then-flush-fails. Either way the handler MUST return success
-    // OR a structured error — never throw past us. (We accept both because
-    // Bun's pipe semantics on the second case can race.)
+    // On a fully-closed pipe the slot may already have been auto-pruned from
+    // the table, or Bun's `.write` may still race a final close. Either way
+    // the handler MUST return a structured result, never throw past us.
     expect(["success", "error"]).toContain(r.kind)
     if (r.kind === "error" && r.cause !== undefined) {
-      expect(["write_failed", "no_stdin"]).toContain(r.cause)
+      expect(["pid_unknown", "write_failed", "no_stdin"]).toContain(r.cause)
     }
   })
 

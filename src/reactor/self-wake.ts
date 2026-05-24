@@ -10,14 +10,16 @@
  *      input. Prevents racing the human (a wake that lands while the user is
  *      mid-typing is confusing UX and re-creates the same runaway shape we
  *      were trying to avoid).
- *   3. PRIOR FAIL — the previous turn's outcome MUST NOT be `"fail"`. Auto-
- *      waking on a broken state is the canonical runaway loop generator.
+ *   3. PRIOR OUTCOME — the previous turn's outcome MUST be `"success"` or
+ *      `"uncertain"`. `partial` / `fail` / absent outcome stay closed to
+ *      avoid resuming on an unfinished or contradicted state.
  *
  * On success: appends a `[reason=<r> evidence=<v>]` suffix to the trigger's
  * `simulatedMessage` and hands it to {@link AgentLoopPort.enqueueUserMessage}.
- * On either path, emits a {@link ReactorSelfWakeEvent} through the optional
- * event sink so the host can wire telemetry (the ADR-0132 validation budget
- * is ≤50/day per workspace; the sink is how the host measures it).
+ * On injected or guard-skipped paths, emits a {@link ReactorSelfWakeEvent}
+ * through the optional event sink so the host can wire telemetry (the
+ * ADR-0132 validation budget is ≤50/day per workspace; the sink is how the
+ * host measures it). Pre-aborted triggers stay outside that audit stream.
  */
 
 import type {
@@ -45,21 +47,22 @@ export interface SelfWakeOpts {
   readonly clockPort: ClockPort
   /** ms since epoch the surface observed the last user input. */
   readonly lastUserInputAt: number
-  /** Prior turn outcome from ADR-0131 (when wired). Absent ⇒ treated as
-   *  `"success"` (the LEAST conservative assumption — host has to opt INTO
-   *  fail-protection by wiring the outcome enum). */
+  /** Prior turn outcome from ADR-0131 (when wired). Absent stays closed:
+   *  auto-wake is allowed only for explicit `"success"` / `"uncertain"`,
+   *  so omitted outcome is treated equivalently to `"partial"`. */
   readonly lastTurnOutcome?: LastTurnOutcome
-  /** Optional audit sink. Called exactly once per `injectSimulatedTurn`
-   *  call regardless of outcome. The sink MUST NOT throw — wrap host code
-   *  that might. */
+  /** Optional audit sink. Called exactly once for each injected or
+   *  guard-skipped self-wake decision. Pre-aborted triggers are dropped
+   *  silently because the trigger source already owns that audit path. The
+   *  sink MUST NOT throw — wrap host code that might. */
   readonly onEvent?: (event: ReactorSelfWakeEvent) => void
 }
 
 export interface SelfWakeResult {
   readonly injected: boolean
   /** Human-readable reason. `"injected"` on success; one of `"env-off"` /
-   *  `"quiet-window"` / `"prior-fail"` on skip. */
-  readonly reason: "injected" | "env-off" | "quiet-window" | "prior-fail"
+   *  `"quiet-window"` / `"prior-outcome"` / `"aborted"` on non-inject. */
+  readonly reason: "injected" | "env-off" | "quiet-window" | "prior-outcome" | "aborted"
 }
 
 /**
@@ -72,6 +75,12 @@ export interface SelfWakeResult {
  * loop's existing dispatch-dedup will collapse identical content.
  */
 export const injectSimulatedTurn = async (opts: SelfWakeOpts): Promise<SelfWakeResult> => {
+  // Abort short-circuit is upstream, not a self-wake guard. A dead trigger
+  // must not emit a misleading skip audit such as "env-off".
+  if (opts.trigger.abortSignal.aborted) {
+    return { injected: false, reason: "aborted" }
+  }
+
   const now = opts.clockPort.now()
   // Guard 1 — env. Cheapest check first so a default-OFF process never even
   // reads the clock.
@@ -84,18 +93,12 @@ export const injectSimulatedTurn = async (opts: SelfWakeOpts): Promise<SelfWakeR
     emitSkip(opts, "quiet-window", now)
     return { injected: false, reason: "quiet-window" }
   }
-  // Guard 3 — prior turn outcome. `undefined` treated as `success` (caller
-  // must wire ADR-0131 outcome to opt into fail-protection).
-  const prior = opts.lastTurnOutcome ?? "success"
-  if (prior === "fail") {
-    emitSkip(opts, "prior-fail", now)
-    return { injected: false, reason: "prior-fail" }
-  }
-  // Abort-signal short-circuit: a trigger whose signal already fired is
-  // dropped silently (no event — the trigger source already knows). We
-  // don't surface this as a separate guard; it's an upstream condition.
-  if (opts.trigger.abortSignal.aborted) {
-    return { injected: false, reason: "env-off" }
+  // Guard 3 — prior turn outcome. Only explicit success/uncertain are
+  // eligible; absent outcome stays closed as ADR-0131's safe-default partial.
+  const prior = opts.lastTurnOutcome ?? "partial"
+  if (prior !== "success" && prior !== "uncertain") {
+    emitSkip(opts, "prior-outcome", now)
+    return { injected: false, reason: "prior-outcome" }
   }
 
   const message = buildSimulatedMessage(opts.trigger)
@@ -132,7 +135,7 @@ export const buildSimulatedMessage = (trigger: ProactiveTrigger): string => {
 
 const emitSkip = (
   opts: SelfWakeOpts,
-  reason: "env-off" | "quiet-window" | "prior-fail",
+  reason: "env-off" | "quiet-window" | "prior-outcome",
   now: number,
 ): void => {
   opts.onEvent?.({

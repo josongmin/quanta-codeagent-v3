@@ -131,8 +131,10 @@ snapshot `<id>.json`과 path-disjoint.
 
 ## 불변식 영향
 
-- **슬라이스 격리 유지**: `@/session`은 `@/storage`와 `@/shared`만 import
-  (Biome 강제). 추가 envelope/encoder 모두 같은 제약 준수.
+- **슬라이스 격리 유지**: `@/session`은 `@/llm`, `@/storage`, `@/shared`만
+  import 가능 (Biome 강제). session snapshot rail이 persisted transcript의
+  `Message` wire-shape를 직접 다루기 때문에 `@/llm` 타입 import는 허용
+  범위 안이며, 추가 envelope/encoder rail은 그 외 slice로 새지 않는다.
 - **RFC/ADR 동기**: ADR-0023(byte-identical)와 본 ADR이 canonical encoding
   으로 align.
 - **신규 npm dep 0**.

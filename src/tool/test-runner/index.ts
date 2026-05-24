@@ -20,16 +20,18 @@ const STDERR_EVIDENCE_CAP = 4_000
 
 const has = async (cwd: string, name: string): Promise<boolean> => fileExists(`${cwd}/${name}`)
 
-/** Read package.json (if any) and report whether it declares a test script. */
-const hasNodeTestScript = async (cwd: string): Promise<boolean> => {
-  if (!(await has(cwd, "package.json"))) return false
+type PackageJsonLike = {
+  scripts?: Record<string, string>
+  packageManager?: string
+}
+
+/** Read package.json (if any). Returns null on absence or parse failure. */
+const readPackageJson = async (cwd: string): Promise<PackageJsonLike | null> => {
+  if (!(await has(cwd, "package.json"))) return null
   try {
-    const pkg = JSON.parse(await readFile(`${cwd}/package.json`)) as {
-      scripts?: Record<string, string>
-    }
-    return typeof pkg.scripts?.test === "string"
+    return JSON.parse(await readFile(`${cwd}/package.json`)) as PackageJsonLike
   } catch {
-    return false
+    return null
   }
 }
 
@@ -40,12 +42,14 @@ const detectCommand = async (
   path: string | undefined,
 ): Promise<string | undefined> => {
   const suffix = path ? ` ${path}` : ""
+  const npmSuffix = path ? ` -- ${path}` : ""
+  const pkg = await readPackageJson(cwd)
   const bunMarker =
     (await has(cwd, "bun.lockb")) ||
     (await has(cwd, "bunfig.toml")) ||
-    (await hasNodeTestScript(cwd))
+    pkg?.packageManager?.toLowerCase().startsWith("bun@") === true
   if (bunMarker) return `bun test${suffix}`
-  if (await has(cwd, "package.json")) return "npm test"
+  if (pkg !== null) return `npm test${npmSuffix}`
   const py =
     (await has(cwd, "pytest.ini")) ||
     (await has(cwd, "pyproject.toml")) ||

@@ -7,7 +7,7 @@
  *   sink absent), and the tool surface (metadata, snapshot rendering,
  *   unwired branch).
  *
- * HELLGATE — 16 adversarial cases:
+ * HELLGATE — 20 adversarial cases:
  *   A. record + metrics math (1-8)
  *      1. single event, all regular input (0 cache) → hitRate=0, savings=0.
  *      2. single event, all cache_read → large savings, hitRate==0 (denom 0)
@@ -22,9 +22,9 @@
  *      9. sink absent → no error, metrics still computable.
  *      10. sink wired → record fires 4 metric.send calls.
  *      11. sink throws → no-throw collapse.
- *   C. LRU + reset (12-13)
- *      12. maxEvents=10, record 15 → aggregates STILL reflect all 15 (the
- *          ring caps events but aggregates are monotonic per contract #5).
+ *   C. Aggregate-only compatibility + reset (12-13)
+ *      12. maxEvents remains a source-compatible no-op on the aggregate-only
+ *          adapter.
  *      13. reset() → all aggregates clear; subsequent record builds anew.
  *   D. Tool surface (14-16)
  *      14. tool metadata (name, read-only, concurrency-safe).
@@ -144,16 +144,18 @@ describe("ADR-0182 — prompt-cache tracker math (A)", () => {
 
   test("[5] multi-session → per-session isolation", () => {
     const o = defaultPromptCacheObserver()
-    o.record(evt({ sessionId: "A", inputTokens: 100, cacheReadTokens: 200 }))
-    o.record(evt({ sessionId: "B", inputTokens: 50, cacheReadTokens: 999 }))
-    o.record(evt({ sessionId: "A", inputTokens: 25 }))
+    o.record(evt({ sessionId: "A", model: "claude-sonnet-4-6", inputTokens: 100, cacheReadTokens: 200 }))
+    o.record(evt({ sessionId: "A", model: "claude-opus-4-7", inputTokens: 25, cacheReadTokens: 50 }))
+    o.record(evt({ sessionId: "B", model: "claude-haiku-4-5", inputTokens: 50, cacheReadTokens: 999 }))
     const s = o.snapshot()
     expect(s.perSession.size).toBe(2)
     expect(s.perSession.get("A")?.totalInputTokens).toBe(125)
-    expect(s.perSession.get("A")?.totalCacheReadTokens).toBe(200)
+    expect(s.perSession.get("A")?.totalCacheReadTokens).toBe(250)
+    expect(s.perSession.get("A")?.perModel.size).toBe(2)
+    expect(s.perSession.get("A")?.perModel.get("claude-opus-4-7")?.cacheReadTokens).toBe(50)
     expect(s.perSession.get("B")?.totalCacheReadTokens).toBe(999)
-    // No cross-contamination on the model breakdown either
-    expect(s.perSession.get("B")?.perModel.get("claude-sonnet-4-6")?.cacheReadTokens).toBe(999)
+    expect(s.perSession.get("B")?.perModel.get("claude-haiku-4-5")?.cacheReadTokens).toBe(999)
+    expect(s.perSession.get("B")?.perModel.get("claude-sonnet-4-6")).toBeUndefined()
   })
 
   test("[6] unknown model → fallback pricing (sonnet rates) applied", () => {
@@ -238,18 +240,29 @@ describe("ADR-0182 — prompt-cache tracker sink (B)", () => {
   })
 })
 
-// ── C. LRU + reset (12-13) ─────────────────────────────────────────────
+// ── C. Aggregate-only compatibility + reset (12-13) ───────────────────
 
-describe("ADR-0182 — prompt-cache tracker LRU + reset (C)", () => {
-  test("[12] maxEvents=10, record 15 → aggregates monotonic (do not shrink)", () => {
-    const o = defaultPromptCacheObserver({ maxEvents: 10 })
-    let sum = 0
+describe("ADR-0182 — prompt-cache tracker aggregate-only + reset (C)", () => {
+  test("[12] maxEvents stays source-compatible but does not change aggregate semantics", () => {
+    const bounded = defaultPromptCacheObserver({ maxEvents: 10 })
+    const unbounded = defaultPromptCacheObserver()
     for (let i = 0; i < 15; i += 1) {
-      o.record(evt({ inputTokens: i + 1 }))
-      sum += i + 1
+      const event = evt({
+        sessionId: i % 2 === 0 ? "even" : "odd",
+        model: i % 3 === 0 ? "claude-sonnet-4-6" : i % 3 === 1 ? "claude-opus-4-7" : "claude-haiku-4-5",
+        inputTokens: i + 1,
+        cacheReadTokens: i,
+      })
+      bounded.record(event)
+      unbounded.record(event)
     }
-    // ring caps at 10 but aggregates reflect all 15 events (contract #5).
-    expect(o.snapshot().totalInputTokens).toBe(sum)
+    const boundedSnap = bounded.snapshot()
+    const unboundedSnap = unbounded.snapshot()
+    expect(boundedSnap.totalInputTokens).toBe(unboundedSnap.totalInputTokens)
+    expect(boundedSnap.totalCacheReadTokens).toBe(unboundedSnap.totalCacheReadTokens)
+    expect(boundedSnap.perSession.get("even")?.perModel.size).toBe(
+      unboundedSnap.perSession.get("even")?.perModel.size,
+    )
   })
 
   test("[13] reset() clears every aggregate", () => {

@@ -4,7 +4,7 @@ section: 1
 subsystem: CLI surface (R7/R8 follow-up — deferred to next SOLID restore round)
 order: 200
 maturity: L2
-status: refined
+status: hold
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]

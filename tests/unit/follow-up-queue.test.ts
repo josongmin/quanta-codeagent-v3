@@ -14,6 +14,23 @@ const baseFu = (content: string, ts = 0): Omit<FollowUp, "id"> => ({
 })
 
 describe("FollowUpQueue (ADR-0037)", () => {
+  test("hard cap drops the oldest retained entry and keeps FIFO within the live window", () => {
+    const q = new FollowUpQueue({ maxPerThread: 2 })
+    const tid = threadId("th-cap")
+    q.enqueue(tid, baseFu("a"))
+    q.enqueue(tid, baseFu("b"))
+    q.enqueue(tid, baseFu("c"))
+
+    expect(q.sizeFor(tid)).toBe(2)
+    expect(q.peek(tid)?.content).toBe("b")
+    expect(q.toSnapshot().threads[0]?.entries.map((f) => f.content)).toEqual(["b", "c"])
+
+    const r1 = q.popReady(tid, null)
+    const r2 = q.popReady(tid, null)
+    expect(r1?.ready.content).toBe("b")
+    expect(r2?.ready.content).toBe("c")
+  })
+
   test("enqueue + peek returns the head without popping", () => {
     const q = new FollowUpQueue()
     const tid = threadId("th-a")
@@ -95,7 +112,8 @@ describe("FollowUpQueue (ADR-0037)", () => {
     q.enqueue(b, baseFu("b-1", 2))
     q.enqueue(a, baseFu("a-2", 3))
     const snap = q.toSnapshot()
-    expect(snap.version).toBe(1)
+    expect(snap.version).toBe(2)
+    expect(snap.maxPerThread).toBeGreaterThanOrEqual(1)
 
     const q2 = FollowUpQueue.fromSnapshot(snap)
     const r1 = q2.popReady(a, null)
@@ -107,21 +125,49 @@ describe("FollowUpQueue (ADR-0037)", () => {
   })
 
   test("post-snapshot enqueue uses fresh seq (no id collision)", () => {
-    const q = new FollowUpQueue()
+    const q = new FollowUpQueue({ maxPerThread: 2 })
     const tid = threadId("th-e")
     q.enqueue(tid, baseFu("a"))
     q.enqueue(tid, baseFu("b"))
     const snap = q.toSnapshot()
+    expect(snap.maxPerThread).toBe(2)
     const q2 = FollowUpQueue.fromSnapshot(snap)
     const fu3 = q2.enqueue(tid, baseFu("c"))
-    // After 2 entries the next seq must be 2.
+    // Cap survives the round-trip, so the new enqueue evicts "a" and keeps
+    // the monotone id sequence.
+    expect(q2.sizeFor(tid)).toBe(2)
+    expect(q2.peek(tid)?.content).toBe("b")
     expect(fu3.id).toBe(FollowUpQueue.makeId(tid, 2))
+  })
+
+  test("legacy v1 restore trims to the current cap and keeps nextSeq monotone", () => {
+    const q = new FollowUpQueue({ maxPerThread: 2 })
+    const tid = threadId("th-legacy")
+    q.restoreFromSnapshot({
+      version: 1,
+      threads: [
+        {
+          threadId: tid,
+          entries: [
+            { ...baseFu("a"), id: FollowUpQueue.makeId(tid, 0) },
+            { ...baseFu("b"), id: FollowUpQueue.makeId(tid, 1) },
+            { ...baseFu("c"), id: FollowUpQueue.makeId(tid, 2) },
+          ],
+        },
+      ],
+    })
+
+    expect(q.sizeFor(tid)).toBe(2)
+    expect(q.peek(tid)?.content).toBe("b")
+    const fresh = q.enqueue(tid, baseFu("d"))
+    expect(fresh.id).toBe(FollowUpQueue.makeId(tid, 3))
   })
 
   test("fromSnapshot rejects unknown version", () => {
     expect(() =>
       FollowUpQueue.fromSnapshot({
-        version: 99 as unknown as 1,
+        version: 99 as unknown as 2,
+        maxPerThread: 32,
         threads: [],
       }),
     ).toThrow(/Unsupported/)

@@ -1,10 +1,12 @@
 /**
- * Shared zod schemas for the 4 plan-mode tools (ADR-0095 draft). Closed-shape
+ * Shared zod schemas for the 5 structured plan tools (ADR-0095 draft). Closed-shape
  * input validation at the dispatch boundary. Each tool re-uses these
  * fragments so the inputs the model sees stay consistent across tools.
  */
 
 import { z } from "zod"
+
+export const currentPlanSchema = z.object({})
 
 const statusSchema = z
   .enum(["pending", "in_progress", "completed", "cancelled", "blocked"])
@@ -47,7 +49,11 @@ const todoPatchSchema = z.object({
 export const updateTodosSchema = z.object({
   patches: z.array(todoPatchSchema).describe("Patches by todo id."),
   merge: z.boolean().describe("true = preserve unspecified fields; false = clear them."),
-  expected_version: z.number().int().min(0).describe("CAS handle from current()."),
+  expected_version: z
+    .number()
+    .int()
+    .min(0)
+    .describe("CAS handle from current_plan or a previous successful mutation result."),
 })
 
 export const updatePlanSchema = z.object({
@@ -63,6 +69,7 @@ export const removeTodosSchema = z.object({
   expected_version: z.number().int().min(0),
 })
 
+export type CurrentPlanInput = z.infer<typeof currentPlanSchema>
 export type CreatePlanInput = z.infer<typeof createPlanSchema>
 export type UpdateTodosInput = z.infer<typeof updateTodosSchema>
 export type UpdatePlanInput = z.infer<typeof updatePlanSchema>

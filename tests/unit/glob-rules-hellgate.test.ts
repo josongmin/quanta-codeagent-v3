@@ -27,17 +27,10 @@ import {
   type GlobRule,
   loadGlobRules,
   MAX_RULE_BYTES,
-  selectGlobRules,
-} from "@/agent"
-import type { Message } from "@/llm"
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
-import {
-  buildTurnContext,
-  type GlobRule,
-  loadGlobRules,
   renderGlobRulesBlock,
   selectGlobRules,
 } from "@/agent"
+import type { Message } from "@/llm"
 
 let root: string
 beforeAll(async () => {

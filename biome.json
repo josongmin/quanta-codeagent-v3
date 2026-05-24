@@ -1037,6 +1037,16 @@
         "!src/skill/**",
         "!src/session/**",
         "!src/migration/**",
+        "!src/agent/plan-queue.ts",
+        "!src/agent/budget-ledger.ts",
+        "!src/agent/conversation-checkpoint.ts",
+        "!src/agent/conversation-checkpoint-lru.ts",
+        "!src/agent/subagent-background.ts",
+        "!src/agent/verify-checkpoint-bridge.ts",
+        "!src/agent/checkpoint-policy.ts",
+        "!src/agent/subagent-resume/**",
+        "!src/agent/streaming-cancellation/**",
+        "!src/agent/branch-search/anchor.ts",
         "tests/**",
         "!tests/unit/cli-summarizer.test.ts",
         "!tests/unit/cli-session-commands.test.ts",
@@ -1073,6 +1083,197 @@
                     "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
                   }
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/subagent-background.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193 + ADR-0145): subagent-background is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193 + ADR-0145): subagent-background cannot reach @/agent/dispatch.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/storage": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/verify-checkpoint-bridge.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193 + ADR-0123): verify-checkpoint-bridge is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193 + ADR-0123): verify-checkpoint-bridge cannot reach @/agent/dispatch.",
+                  "@/agent/verify-guard": "Plane-clean (ADR-0123 §3): bridge cannot import verify-guard (in-flight track isolation).",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/branch-search/anchor.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193 + ADR-0116): branch-search anchor is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193 + ADR-0116): branch-search anchor cannot reach @/agent/dispatch.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/checkpoint-policy.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193): checkpoint-policy is a pure decision primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193): checkpoint-policy cannot reach @/agent/dispatch — dispatch consumes the policy, not the reverse.",
+                  "@/memory": "Plane-clean (ADR-0193): checkpoint-policy only imports type-only @/llm, @/storage/shadow-odb, @/tool + sibling effect-channel.",
+                  "@/observability": "Plane-clean (ADR-0193): checkpoint-policy only imports type-only @/llm, @/storage/shadow-odb, @/tool + sibling effect-channel.",
+                  "@/mcp": "Plane-clean (ADR-0193): checkpoint-policy only imports type-only @/llm, @/storage/shadow-odb, @/tool + sibling effect-channel."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/storage/shadow-odb/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb is a leaf primitive — only @/tool/git + node:fs/path + node:crypto are allowed.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/stream": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/permission": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/runtime": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/lsp": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/security": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/patch": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/rules": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/subagent": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/skill": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/auth": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/session": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/runtime/os-sandbox/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/permission": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/storage": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/stream": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/lsp": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/security": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/patch": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/rules": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/subagent": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/skill": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/auth": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/session": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/security/pii-redaction/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/permission": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/shared": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction explicitly forbids @/shared to remain portable to Tauri sidecar / worker / CI binary.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/storage": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/stream": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/runtime": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/lsp": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/patch": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/rules": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/subagent": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/skill": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/auth": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/session": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only."
+                }
               }
             }
           }

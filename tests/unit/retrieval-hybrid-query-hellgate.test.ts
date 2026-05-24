@@ -15,14 +15,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   identityReranker,
+  RerankRegistry,
   type RerankInput,
   type RerankPort,
-  type RetrievalCandidate,
-  runHybridQuery,
-} from "@/retrieval"
-import {
-  identityReranker,
-  RerankRegistry,
   type RetrievalCandidate,
   runHybridQuery,
 } from "@/retrieval"

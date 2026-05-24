@@ -330,6 +330,12 @@ describe("probe CLI — end-to-end over a synthetic run dir", () => {
   const setupRun = (): { dir: string } => {
     const dir = tmp("probe-run-")
     writeFileSync(join(dir, "inst-1.0.jsonl"), toJsonl(buildFailing()))
+    const otherCtx: RunContext = { runId: "run-test", instanceId: "inst-2", attempt: 0 }
+    const otherEvents = [
+      makeEvent(0, "session_start", otherCtx, {}, { ts: 2000 }),
+      makeEvent(1, "session_end", otherCtx, { reason: "completed", turns: 0 }, { ts: 2001 }),
+    ]
+    writeFileSync(join(dir, "inst-2.0.jsonl"), toJsonl(otherEvents))
     return { dir }
   }
 
@@ -357,10 +363,9 @@ describe("probe CLI — end-to-end over a synthetic run dir", () => {
     const { dir } = setupRun()
     const { code, out } = await capture([dir])
     expect(code).toBe(0)
-    // A single-instance, summary-less dir renders the per-turn timeline.
-    expect(out).toContain("turn 0")
-    expect(out).toContain("tool bash")
-    expect(out).toContain("end: reason=completed")
+    expect(out).toContain("run (unknown id)")
+    expect(out).toContain("[----] inst-1")
+    expect(out).toContain("[----] inst-2")
   })
 
   test("--failed surfaces a hedged hypothesis WITH raw evidence, no verdict wording", async () => {
@@ -409,11 +414,13 @@ describe("probe CLI — end-to-end over a synthetic run dir", () => {
     const { dir } = setupRun()
     const hit = await capture([dir, "--instance", "inst-1"])
     expect(hit.code).toBe(0)
-    // Single-instance dir ⇒ timeline render; the matching attempt is shown.
-    expect(hit.out).toContain("turn 0")
+    expect(hit.out).toContain("[----] inst-1")
+    expect(hit.out).not.toContain("inst-2")
     // An unknown id is not a crash: it degrades gracefully, exit 0.
     const miss = await capture([dir, "--instance", "does-not-exist"])
     expect(miss.code).toBe(0)
+    expect(miss.out).not.toContain("inst-1")
+    expect(miss.out).not.toContain("inst-2")
   })
 
   test("--slow renders hotspots; --cost stamps pricingVersion", async () => {

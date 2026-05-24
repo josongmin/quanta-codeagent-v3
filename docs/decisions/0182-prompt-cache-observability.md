@@ -13,7 +13,9 @@ ADR-0138 budget-ledger는 이미 두 토큰 종류를 모두 누적 + pricing �
 
 ## 결정
 
-신규 plane-clean 슬라이스 `src/observability/prompt-cache/`:
+신규 슬라이스 `src/observability/prompt-cache/`:
+
+> **Plane discipline (ADR-0193 정정)**: `types.ts` 와 `default.ts` 는 `@/observability/metrics/port` 와 `@/shared` 만 import (같은 plane 내부 + leaf). 그러나 `budget-bridge.ts` 는 `@/agent/budget-ledger` 를 type-only 로 reach — cross-plane bridge 이므로 이 슬라이스 전체를 plane-clean 으로 봉인하지 않는다 ("observer 자체는 ledger 를 import 안 함 — module graph 안 결합" 이 더 정확한 표현). biome `**/src/observability/**` slice 룰은 enforced — bridge 의 cross-plane 결합은 의도된 예외.
 
 ```ts
 interface CacheHitEvent {
@@ -46,6 +48,24 @@ const wirePromptCacheToBudget: (obs, ledger) => () => void   // deregister fn
 - `prompt_cache.hit_rate` (gauge)
 
 Labels: `{model, session}`. Sink throw 시 record는 정상 return (no-throw 계약).
+
+### Aggregate-only state shape
+
+Default adapter는 event ring을 유지하지 않는다. 내부 상태는 아래 두 계층만 든다:
+
+- top-level `perModel`
+- session-local `{ rollup, perModel }`
+
+이 shape 때문에 `record(event)`는 O(1) mutation만 수행하고, `snapshot()`은
+realized state 수에 대해 선형이다:
+
+- `O(perModel.size + perSession.size + sum(session.perModel.size))`
+
+기존 `(session,model)` flat map을 session마다 다시 filter하는
+`O(session_count * global_session_model_states)` 경로는 제거했다. `maxEvents`
+옵션은 구 call-site source compatibility 때문에 타입에는 남겨두지만, 이
+aggregate-only adapter에서는 의도적으로 무시한다. "last N raw events"가
+필요하면 별도 adapter/reader가 가져가야 한다.
 
 ### Default pricing table (`default-pricing.ts`)
 
@@ -102,7 +122,7 @@ Deregister 반환 함수로 wiring 끊을 수 있음. Validation-error parity: o
 - **A. record + snapshot 8**: 단일/다중 event / 다중 model / hitRate denom=0 / cost savings Sonnet 1M cache_read → ~$2.70 / perSession aggregation / 음수 토큰 throw / 알 수 없는 model fallback
 - **B. attributeBreakpoint 4**: 단일 hit / 다중 breakpoint / tokenSpan 누적 / 빈 상태 OMITTED (exactOptional)
 - **C. MetricSink integration 4**: 4-metric emit / labels {model, session} / sink throw no-throw / sink 부재시 무해
-- **D. LRU cap 2**: ring drops oldest + aggregates 보존 / reset() 전체 clear
+- **D. Aggregate-only 2**: `maxEvents` no-op compatibility / reset() 전체 clear
 - **E. budget-bridge 5**: wire + record → ledger.record / no wire → ledger 0 / deregister → 이후 0 / negative-tokens parity / sink 부재시도 wire 작동
 - **F. determinism 2**: 같은 input → 같은 snapshot / clock injection이 sample.at에 사용
 
@@ -110,7 +130,7 @@ Deregister 반환 함수로 wiring 끊을 수 있음. Validation-error parity: o
 
 - **A. record + metrics math 8**: regular-only / cache_read-only / mixed / multi-event monotonic / multi-session isolation / unknown model fallback / zero-token / 1 B-token overflow guard
 - **B. Sink integration 3**: sink absent / sink wired emits 4 / sink throws → no-throw collapse
-- **C. LRU + reset 2**: maxEvents=10 + 15 events → aggregates monotonic / reset() rebuilds from zero
+- **C. Aggregate-only + reset 2**: `maxEvents` source-compatible no-op / reset() rebuilds from zero
 - **D. Tool surface 6 (16+sub)**: metadata (read-only, concurrency-safe) on both factories / execute lifetime header + savings line + breakpoint section + footnote / sessionId drill-down / missing-session helpful note / unwired branch typed rejection / pre-aborted signal → typed rejected
 
 44 pass / 0 fail. 164 expects.
@@ -122,7 +142,10 @@ Deregister 반환 함수로 wiring 끊을 수 있음. Validation-error parity: o
 3. **Auto breakpoint detection** — 너무 추측적. caller가 declare하는 게 audit-friendly.
 4. **Hit rate as %** — ratio가 더 composable. UI에서 format.
 5. **Observer가 직접 ledger import** — module-graph 결합 → plane-cleanness 위반. bridge에서 type-only coupling.
-6. **Per-event 영구 저장** — LRU ring (default 1000)이면 충분; 영속성은 metric sink 책임.
+6. **Per-event raw ring retention in the default adapter** — rejected. 현재 public
+   snapshot surface는 aggregate-only이고 raw event reader가 없다. unused ring을
+   기본 adapter에 들고 있으면 steady-state record path만 느려진다. raw event
+   retention이 필요하면 별도 adapter/reader로 분리하는 게 맞다.
 
 ## SOTA++ 자리매김
 

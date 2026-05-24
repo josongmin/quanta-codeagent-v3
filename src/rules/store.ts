@@ -19,7 +19,7 @@
  * state. No clocks, no fallbacks, no silent error recovery.
  */
 
-import { matchCommand } from "./matcher"
+import { matchPreparedCommand, prepareRulesForMatch } from "./matcher"
 import { parseRules } from "./parser"
 import type { MatchOutcome, Rule, RuleLayer } from "./types"
 
@@ -48,6 +48,11 @@ export class RulesStore {
   private system: readonly Rule[] = []
   private user: readonly Rule[] = []
   private project: readonly Rule[] = []
+  // Per-layer prepared match order. Kept separate so `snapshot()` preserves
+  // source order while the hot path scans longest-prefix order directly.
+  private systemPrepared: readonly Rule[] = []
+  private userPrepared: readonly Rule[] = []
+  private projectPrepared: readonly Rule[] = []
 
   /**
    * Parse `text` and install the result as the entire contents of `layer`.
@@ -69,8 +74,8 @@ export class RulesStore {
    *  first matching rule, or `{ kind: "no_match" }` if no layer fires. */
   public match(command: string): MatchOutcome {
     for (const layer of LAYER_PRECEDENCE) {
-      const rules = this.getLayer(layer)
-      const outcome = matchCommand(command, rules)
+      const rules = this.getPreparedLayer(layer)
+      const outcome = matchPreparedCommand(command, rules)
       if (outcome.kind === "matched") {
         return outcome
       }
@@ -114,16 +119,31 @@ export class RulesStore {
     // empty literal — freeze defensively so the invariant holds for both
     // entry points (no `Object.isFrozen` branching needed downstream).
     const frozen = Object.isFrozen(rules) ? rules : Object.freeze([...rules])
+    const prepared = prepareRulesForMatch(frozen)
     switch (layer) {
       case "system":
         this.system = frozen
+        this.systemPrepared = prepared
         return
       case "user":
         this.user = frozen
+        this.userPrepared = prepared
         return
       case "project":
         this.project = frozen
+        this.projectPrepared = prepared
         return
+    }
+  }
+
+  private getPreparedLayer(layer: RuleLayer): readonly Rule[] {
+    switch (layer) {
+      case "system":
+        return this.systemPrepared
+      case "user":
+        return this.userPrepared
+      case "project":
+        return this.projectPrepared
     }
   }
 }

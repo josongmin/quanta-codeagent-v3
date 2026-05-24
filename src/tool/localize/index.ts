@@ -6,15 +6,26 @@ import { classifyFrame, type FrameTier } from "../parse-test-failure"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
-  query: z.string().describe("Natural-language or symbol query describing the suspected fault"),
+  query: z
+    .string()
+    .min(1)
+    .max(4_000)
+    .describe("Natural-language or symbol query describing the suspected fault"),
   path: z.string().optional().describe("File or directory to scope the search (default cwd)"),
-  max_results: z.number().optional().describe("Max ranked lines to return (default 20)"),
+  max_results: z
+    .number()
+    .int()
+    .positive()
+    .max(200)
+    .optional()
+    .describe("Max ranked lines to return (default 20, max 200)"),
   verbose: z.boolean().optional().describe("Include per-candidate score and frame tier in output"),
 })
 
 type Input = z.infer<typeof schema>
 
 const DEFAULT_MAX = 20
+const MAX_QUERY_TOKENS = 32
 const MAX_RG_LINES = 4000
 const SNIPPET_CAP = 160
 
@@ -76,7 +87,8 @@ const tokenize = (query: string): string[] => {
     .split(/[^A-Za-z0-9]+/)
     .map((t) => t.toLowerCase())
     .filter((t) => t.length >= 3)
-  return [...new Set(raw)]
+  // Bound subprocess fan-out: localize spawns one rg per distinct token.
+  return [...new Set(raw)].slice(0, MAX_QUERY_TOKENS)
 }
 
 interface Hit {
@@ -321,9 +333,19 @@ export const localizeTool: Tool<Input> = {
   isConcurrencySafe: () => true,
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    yield { type: "progress", message: `localizing: ${input.query}` }
+    const parsed = schema.safeParse(input)
+    if (!parsed.success) {
+      yield {
+        type: "result",
+        result: { ok: false, output: `invalid input: ${parsed.error.message}` },
+      }
+      return
+    }
+    const args = parsed.data
 
-    const tokens = tokenize(input.query)
+    yield { type: "progress", message: `localizing: ${args.query}` }
+
+    const tokens = tokenize(args.query)
     if (tokens.length === 0) {
       yield { type: "result", result: { ok: true, output: "(no candidates: empty query)" } }
       return
@@ -331,7 +353,7 @@ export const localizeTool: Tool<Input> = {
 
     // S14: jail the scope path BEFORE any rg invocation. Without this,
     // `path: "/etc"` would scope the search to the host filesystem.
-    const { scope, err } = resolveScope(input.path, ctx.cwd)
+    const { scope, err } = resolveScope(args.path, ctx.cwd)
     if (err !== undefined) {
       yield { type: "result", result: { ok: false, output: err } }
       return
@@ -369,8 +391,8 @@ export const localizeTool: Tool<Input> = {
       return
     }
 
-    const max = input.max_results ?? DEFAULT_MAX
-    const verbose = input.verbose ?? false
+    const max = args.max_results ?? DEFAULT_MAX
+    const verbose = args.verbose ?? false
     yield {
       type: "result",
       result: {

@@ -69,9 +69,22 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "read",
   "grep",
   "glob",
+  "memory_search",
+  "task_output",
   "localize",
   "diagnostics",
   "test_runner",
+  "budget_status",
+  "shadow_snapshots",
+  "read_image",
+  "read_image_url",
+  "web_fetch",
+  "web_search",
+  "csv_read",
+  "ndjson_read",
+  "yaml_read",
+  "pdf_read",
+  "xlsx_read",
   "lsp_definition",
   "lsp_references",
   "lsp_hover",
@@ -87,6 +100,12 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "git_blame_heatmap",
   "git_churn",
   "git_upstream_check",
+  "gh_check_status",
+  "gh_issue_view",
+  "gh_pr_blame",
+  "gh_pr_list",
+  "gh_pr_review_diff",
+  "gh_pr_view",
   // ADR-0109 + ADR-0111 git-skill-bundle: 3 new read-only git tools — also
   // safe in a side-conversation (pure analysis surfaces, no FS mutation).
   "git_review_diff",
@@ -94,6 +113,10 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "git_conflict_inspect",
   "file_tree_summary",
   "parse_test_failure",
+  "subagent_poll",
+  "subagent_await",
+  "Skill",
+  "ToolSearch",
   // ADR-0097 — `request_user_input` is read-only and operator-facing. Listed
   // here so the side-conv allowlist stays in 1-1 correspondence with the
   // planModeMutatingTable read-only set (the drift detector at
@@ -349,6 +372,7 @@ const drainStream = async (
       messages,
       system: SIDE_CONVERSATION_PROMPT,
       tools,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     })) {
       if (opts.signal?.aborted) throw new SideConversationAbortedError()
       events.push(ev)

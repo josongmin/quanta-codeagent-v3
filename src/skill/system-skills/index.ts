@@ -22,14 +22,13 @@
  *     <name>/SKILL.md
  *
  * Slice contract: this module lives under `src/skill/**` and is allowed to
- * import only from `./` and `../`. It uses {@link discoverSkills} so the
- * lenient frontmatter parser remains the SSOT for runtime field extraction
- * (`tools:` → `Skill.tools` → `skillToolAllowlist` → host enforcement).
- * The strict 6-field parser in `../skill-frontmatter.ts` is the SSOT for
- * authoring shape (`userInvocable` / `allowedTools` / `category` /
- * `stability`); system SKILL.md files include both the strict-shape metadata
- * AND the lenient `tools:` mirror so the existing host enforcement path
- * activates without rewiring.
+ * import only from `./` and `../`. It uses {@link discoverSkills}; runtime
+ * tool scoping now resolves from strict `allowedTools:` first and only falls
+ * back to legacy `tools:` for older skills, so bundled system skills no
+ * longer need a duplicated runtime-only mirror to arm host enforcement.
+ * The strict parser in `../skill-frontmatter.ts` remains the authoring SSOT
+ * for fields like `userInvocable` / `allowedTools` / `category` /
+ * `stability`.
  */
 
 import { dirname, resolve } from "node:path"

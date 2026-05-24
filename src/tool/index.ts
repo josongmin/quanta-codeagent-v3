@@ -113,6 +113,7 @@ export {
 export {
   buildPlanTools,
   createPlanTool,
+  currentPlanTool,
   removeTodosTool,
   updatePlanTool,
   updateTodosTool,

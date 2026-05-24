@@ -56,12 +56,16 @@ export const instrumentLlmProvider = (
   const prefix = opts?.namePrefix ?? "llm.provider"
   const now = opts?.now ?? (() => performance.now())
   const provLabel = provider.providerId
+  const modelLabel =
+    typeof provider.model === "string" && provider.model.trim().length > 0
+      ? provider.model
+      : "unknown"
 
   return {
     ...provider,
     async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
       safe(metrics, () =>
-        metrics.increment(`${prefix}.stream.total`, 1, { provider: provLabel }),
+        metrics.increment(`${prefix}.stream.total`, 1, { provider: provLabel, model: modelLabel }),
       )
       const t0 = now()
       let firstEventAt: number | null = null

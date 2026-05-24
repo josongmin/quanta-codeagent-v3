@@ -222,6 +222,46 @@ describe("@/runner — PromptSource multi-modal (ADR-0083 extension)", () => {
     expect(probes[1]?.imageCount).toBe(0)
   })
 
+  test("cancelled turn replays seed + payload images on the retry turn", async () => {
+    let n = 0
+    const ps: PromptSource = {
+      next: async () => {
+        n += 1
+        if (n === 1) return { text: "cancelled", images: [JPG] }
+        if (n === 2) return "retry"
+        return null
+      },
+    }
+    const abort = new AbortController()
+    const probes: TurnProbe[] = []
+    let wraps = 0
+    await runInteractive({
+      deps: stubDeps(abort.signal),
+      assembleConfig: probeAssembleConfig(probes),
+      promptSource: ps,
+      history: [],
+      state: undefined,
+      idMeta: undefined,
+      signal: abort.signal,
+      seedImages: [PNG],
+      wrapTurn: async (run) => {
+        wraps += 1
+        if (wraps === 1) return { cancelled: true }
+        try {
+          return await run(stubDeps(abort.signal))
+        } catch (e) {
+          if (e instanceof ProbeDone) return undefined
+          throw e
+        }
+      },
+    })
+    expect(probes).toHaveLength(1)
+    expect(probes[0]?.text).toBe("retry")
+    expect(probes[0]?.imageCount).toBe(2)
+    expect(probes[0]?.images[0]?.mediaType).toBe("image/png")
+    expect(probes[0]?.images[1]?.mediaType).toBe("image/jpeg")
+  })
+
   test("normalizePromptPayload is a pure widening", () => {
     expect(normalizePromptPayload("hi")).toEqual({ text: "hi", images: [] })
     expect(normalizePromptPayload({ text: "x" })).toEqual({ text: "x", images: [] })

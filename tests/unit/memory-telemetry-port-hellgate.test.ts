@@ -238,9 +238,12 @@ describe("MemoryTelemetryPort surface", () => {
       },
     ]
     const query: MemoryQuery = { tags: ["x"] }
+    const rec = recordingPort()
     const a = rankEntries(candidates, query, 2000)
-    const b = rankEntries(candidates, query, 2000)
+    const b = rankEntries(candidates, query, 2000, rec.port)
     expect(a).toEqual(b)
+    expect(rec.recall).toHaveLength(1)
+    expect(rec.recall[0]).toMatchObject({ hits: 1, totalScanned: 1 })
   })
 })
 

@@ -188,42 +188,185 @@ const snapshot = (state: MutableState): PermissionState =>
     deniedActions: Object.freeze({ ...state.deniedActions }),
   })
 
+type ValidationResult<T> = { ok: true; value: T } | { ok: false; reason: string }
+
+const validationOk = <T>(value: T): ValidationResult<T> => ({ ok: true, value })
+
+const validationError = <T = never>(reason: string): ValidationResult<T> => ({
+  ok: false,
+  reason,
+})
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value)
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+
+const validateThreadPermission = (
+  value: unknown,
+  path: string,
+): ValidationResult<ThreadPermission> => {
+  if (!isRecord(value)) return validationError(`${path} must be an object`)
+  const approvalPolicy = value.approvalPolicy
+  if (
+    approvalPolicy !== "never" &&
+    approvalPolicy !== "on-request" &&
+    approvalPolicy !== "on-failure" &&
+    approvalPolicy !== "always"
+  ) {
+    return validationError(`${path}.approvalPolicy must be a known policy string`)
+  }
+  const approvalsReviewer = value.approvalsReviewer
+  if (approvalsReviewer !== "user" && approvalsReviewer !== "agent") {
+    return validationError(`${path}.approvalsReviewer must be 'user' or 'agent'`)
+  }
+  const sandboxPolicyRaw = value.sandboxPolicy
+  if (!isRecord(sandboxPolicyRaw)) {
+    return validationError(`${path}.sandboxPolicy must be an object`)
+  }
+
+  let sandboxPolicy: ThreadPermission["sandboxPolicy"]
+  switch (sandboxPolicyRaw.type) {
+    case "danger-full-access":
+      sandboxPolicy = { type: "danger-full-access" }
+      break
+    case "read-only":
+      sandboxPolicy = { type: "read-only" }
+      break
+    case "workspace-write": {
+      const writableRoots = sandboxPolicyRaw.writableRoots
+      if (writableRoots !== undefined && !isStringArray(writableRoots)) {
+        return validationError(`${path}.sandboxPolicy.writableRoots must be a string array`)
+      }
+      const networkAccess = sandboxPolicyRaw.networkAccess
+      if (networkAccess !== undefined && typeof networkAccess !== "boolean") {
+        return validationError(`${path}.sandboxPolicy.networkAccess must be boolean`)
+      }
+      sandboxPolicy = {
+        type: "workspace-write",
+        ...(writableRoots !== undefined ? { writableRoots: [...writableRoots] } : {}),
+        ...(networkAccess !== undefined ? { networkAccess } : {}),
+      }
+      break
+    }
+    default:
+      return validationError(`${path}.sandboxPolicy.type must be a known sandbox policy`)
+  }
+
+  return validationOk({
+    approvalPolicy,
+    approvalsReviewer,
+    sandboxPolicy,
+  })
+}
+
+const validateHostAgentMode = (
+  value: unknown,
+  path: string,
+): ValidationResult<HostAgentMode> => {
+  if (value !== "full-access" && value !== "read-only" && value !== "custom") {
+    return validationError(`${path} must be a known host mode`)
+  }
+  return validationOk(value)
+}
+
+const validateDenialRecord = (
+  value: unknown,
+  path: string,
+  key: string,
+): ValidationResult<DenialRecord> => {
+  if (!isRecord(value)) return validationError(`${path} must be an object`)
+  if (typeof value.threadId !== "string") {
+    return validationError(`${path}.threadId must be a string`)
+  }
+  if (typeof value.actionSignature !== "string") {
+    return validationError(`${path}.actionSignature must be a string`)
+  }
+  const expectedKey = denialKey(value.threadId, value.actionSignature)
+  if (key !== expectedKey) {
+    return validationError(`${path} key must match threadId/actionSignature`)
+  }
+  if (!isFiniteNumber(value.deniedAt)) {
+    return validationError(`${path}.deniedAt must be a finite number`)
+  }
+  if (typeof value.deniedReason !== "string") {
+    return validationError(`${path}.deniedReason must be a string`)
+  }
+  if (value.seenRiskAt !== undefined && !isFiniteNumber(value.seenRiskAt)) {
+    return validationError(`${path}.seenRiskAt must be a finite number`)
+  }
+  if (value.userOverrideAt !== undefined && !isFiniteNumber(value.userOverrideAt)) {
+    return validationError(`${path}.userOverrideAt must be a finite number`)
+  }
+  return validationOk({
+    threadId: value.threadId,
+    actionSignature: value.actionSignature,
+    deniedAt: value.deniedAt,
+    deniedReason: value.deniedReason,
+    ...(value.seenRiskAt !== undefined ? { seenRiskAt: value.seenRiskAt } : {}),
+    ...(value.userOverrideAt !== undefined ? { userOverrideAt: value.userOverrideAt } : {}),
+  })
+}
+
+const validateStateMap = <T>(
+  value: unknown,
+  path: string,
+  validateEntry: (entry: unknown, entryPath: string, key: string) => ValidationResult<T>,
+): ValidationResult<Record<string, T>> => {
+  if (!isRecord(value)) return validationError(`${path} must be an object`)
+  const out: Record<string, T> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    const validated = validateEntry(entry, `${path}.${key}`, key)
+    if (!validated.ok) return validated
+    out[key] = validated.value
+  }
+  return validationOk(out)
+}
+
 /** Validate a parsed JSON payload — soft-fail to an empty state when the
  *  shape is wrong rather than crash. Returns a distinguished outcome so the
  *  {@link JsonStateFile} engine can write a useful sidecar (corrupt vs
  *  unsupported-version). */
 const parseState = (raw: unknown): ParseOutcome<PermissionState> => {
-  if (raw === null || typeof raw !== "object") {
+  if (!isRecord(raw)) {
     return { kind: "shape-invalid", reason: "root must be a JSON object" }
   }
-  const obj = raw as Record<string, unknown>
-  const v = obj.version
+  const v = raw.version
   if (v !== STATE_VERSION) {
     return {
       kind: "version-mismatch",
       foundVersion: typeof v === "number" || typeof v === "string" ? v : null,
     }
   }
-  const perThread = (obj.perThread as Record<string, ThreadPermission> | undefined) ?? {}
-  const perHost = (obj.perHost as Record<string, HostAgentMode> | undefined) ?? {}
-  const deniedActions = (obj.deniedActions as Record<string, DenialRecord> | undefined) ?? {}
-  if (
-    typeof perThread !== "object" ||
-    typeof perHost !== "object" ||
-    typeof deniedActions !== "object"
-  ) {
-    return {
-      kind: "shape-invalid",
-      reason: "perThread / perHost / deniedActions must each be objects",
-    }
+  const perThreadValidated = validateStateMap(
+    raw.perThread ?? {},
+    "perThread",
+    (entry, entryPath) => validateThreadPermission(entry, entryPath),
+  )
+  if (!perThreadValidated.ok) return { kind: "shape-invalid", reason: perThreadValidated.reason }
+  const perHostValidated = validateStateMap(raw.perHost ?? {}, "perHost", (entry, entryPath) =>
+    validateHostAgentMode(entry, entryPath),
+  )
+  if (!perHostValidated.ok) return { kind: "shape-invalid", reason: perHostValidated.reason }
+  const deniedActionsValidated = validateStateMap(
+    raw.deniedActions ?? {},
+    "deniedActions",
+    (entry, entryPath, key) => validateDenialRecord(entry, entryPath, key),
+  )
+  if (!deniedActionsValidated.ok) {
+    return { kind: "shape-invalid", reason: deniedActionsValidated.reason }
   }
   return {
     kind: "ok",
     state: Object.freeze({
       version: STATE_VERSION,
-      perThread: Object.freeze({ ...perThread }),
-      perHost: Object.freeze({ ...perHost }),
-      deniedActions: Object.freeze({ ...deniedActions }),
+      perThread: Object.freeze(perThreadValidated.value),
+      perHost: Object.freeze(perHostValidated.value),
+      deniedActions: Object.freeze(deniedActionsValidated.value),
     }),
   }
 }
@@ -570,6 +713,7 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
   const filePath = opts.filePath ?? defaultStateFilePath()
   const debounceMs = opts.debounceMs ?? 200
   let state: MutableState = cloneAsMutable(emptyState())
+  let persistedState: PermissionState | null = null
 
   // ONE persistence engine + ONE file handle, shared by all three domains.
   const file = createJsonStateFile<PermissionState>({
@@ -579,7 +723,18 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
     serialize: (s) => JSON.stringify(s, null, 2),
     parse: parseState,
     stateVersion: STATE_VERSION,
-    mergeWithDisk: mergePermissionState,
+    mergeWithDisk: ({ onDisk, inMemory }) => {
+      const merged = mergePermissionState({
+        onDisk,
+        inMemory,
+        baseline: persistedState,
+      })
+      // Promote the merged snapshot into live memory during the flush path so
+      // current readers observe peer-adopted records without waiting for a reload.
+      persistedState = merged
+      state = cloneAsMutable(merged)
+      return merged
+    },
   })
 
   const getState = (): MutableState => state
@@ -593,12 +748,14 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
 
   const load = async (): Promise<void> => {
     await file.load((s) => {
+      persistedState = s
       state = cloneAsMutable(s)
     })
   }
 
   const reset = async (): Promise<void> => {
     await file.reset()
+    persistedState = null
     state = cloneAsMutable(emptyState())
   }
 

@@ -1,9 +1,9 @@
 /**
- * ★ CONTRACT — ADR-0179: PromptCacheObserver typed port + default in-memory
+ * ★ CONTRACT — ADR-0182: PromptCacheObserver typed port + default in-memory
  *   adapter + budget bridge. Hit rate = cache_read / (input + cache_create).
  *   Cost savings = cache_read × (inputPerM − cacheReadPerM) / 1e6.
  *   exactOptionalPropertyTypes; per-event metrics emitted as 3 counters + 1
- *   gauge; LRU ring caps event retention BUT aggregates are monotonic;
+ *   gauge; aggregate-only state keeps record O(1) and snapshot O(states);
  *   budget-bridge wraps `observer.record` so events ALSO flow to the ledger;
  *   deregister restores original behaviour.
  *
@@ -12,7 +12,7 @@
  *                                        savings, negative-tokens, unknown-model.
  *   B. attributeBreakpoint (9-12)      — named-breakpoint hit/miss + token span.
  *   C. MetricSink integration (13-16)  — 4 samples per record, labels, no-throw.
- *   D. LRU cap + reset (17-18)         — ring cap, aggregates monotonic.
+ *   D. Aggregate-only + reset (17-18)  — no event-ring churn, reset clears.
  *   E. budget-bridge (19-22)           — wire/no-wire/deregister/no-sink.
  *   F. Determinism (23-24)             — same input → same snapshot; clock injection.
  */
@@ -60,7 +60,7 @@ const evt = (overrides: Partial<CacheHitEvent>): CacheHitEvent => ({
   ...overrides,
 })
 
-describe("ADR-0179 — prompt-cache observability — A. record + snapshot", () => {
+describe("ADR-0182 — prompt-cache observability — A. record + snapshot", () => {
   test("[1] single event populates perModel with 1 entry", () => {
     const o = defaultPromptCacheObserver()
     o.record(evt({ inputTokens: 200, cacheReadTokens: 800 }))
@@ -125,20 +125,23 @@ describe("ADR-0179 — prompt-cache observability — A. record + snapshot", () 
     expect(snap.perModel.get("claude-sonnet-4-6")?.savingsUsd).toBeCloseTo(2.7, 6)
   })
 
-  test("[6] perSession aggregation splits by sessionId", () => {
+  test("[6] perSession aggregation splits by sessionId and keeps per-session perModel local", () => {
     const o = defaultPromptCacheObserver()
-    o.record(evt({ sessionId: "s1", inputTokens: 100, cacheReadTokens: 50 }))
-    o.record(evt({ sessionId: "s2", inputTokens: 200, cacheReadTokens: 100 }))
-    o.record(evt({ sessionId: "s1", inputTokens: 50 }))
+    o.record(evt({ sessionId: "s1", model: "claude-sonnet-4-6", inputTokens: 100, cacheReadTokens: 50 }))
+    o.record(evt({ sessionId: "s1", model: "claude-opus-4-7", inputTokens: 25, cacheReadTokens: 75 }))
+    o.record(evt({ sessionId: "s2", model: "claude-haiku-4-5", inputTokens: 200, cacheReadTokens: 100 }))
+    o.record(evt({ sessionId: "s1", model: "claude-sonnet-4-6", inputTokens: 50 }))
     const snap = o.snapshot()
     expect(snap.perSession.size).toBe(2)
     const s1 = snap.perSession.get("s1")
-    expect(s1?.totalInputTokens).toBe(150)
-    expect(s1?.totalCacheReadTokens).toBe(50)
-    // Recursive: s1's perModel has the same one model.
+    expect(s1?.totalInputTokens).toBe(175)
+    expect(s1?.totalCacheReadTokens).toBe(125)
+    expect(s1?.perModel.size).toBe(2)
     expect(s1?.perModel.get("claude-sonnet-4-6")?.inputTokens).toBe(150)
-    // s2 is independent.
+    expect(s1?.perModel.get("claude-opus-4-7")?.cacheReadTokens).toBe(75)
+    expect(s1?.perModel.get("claude-haiku-4-5")).toBeUndefined()
     expect(snap.perSession.get("s2")?.totalCacheReadTokens).toBe(100)
+    expect(snap.perSession.get("s2")?.perModel.get("claude-haiku-4-5")?.cacheReadTokens).toBe(100)
   })
 
   test("[7] negative token count throws PromptCacheError('negative-tokens')", () => {
@@ -167,7 +170,7 @@ describe("ADR-0179 — prompt-cache observability — A. record + snapshot", () 
   })
 })
 
-describe("ADR-0179 — prompt-cache observability — B. attributeBreakpoint", () => {
+describe("ADR-0182 — prompt-cache observability — B. attributeBreakpoint", () => {
   test("[9] single breakpoint hit → hitCount=1, missCount=0", () => {
     const o = defaultPromptCacheObserver()
     o.attributeBreakpoint("system-prefix", 1000, true)
@@ -213,7 +216,7 @@ describe("ADR-0179 — prompt-cache observability — B. attributeBreakpoint", (
   })
 })
 
-describe("ADR-0179 — prompt-cache observability — C. MetricSink integration", () => {
+describe("ADR-0182 — prompt-cache observability — C. MetricSink integration", () => {
   test("[13] one record → 4 metric samples (input/cache_read/cache_write/hit_rate)", () => {
     const { sink, samples } = makeRecordingSink()
     const o = defaultPromptCacheObserver({ metricsSink: sink })
@@ -259,17 +262,29 @@ describe("ADR-0179 — prompt-cache observability — C. MetricSink integration"
   })
 })
 
-describe("ADR-0179 — prompt-cache observability — D. LRU cap + reset", () => {
-  test("[17] record > maxEvents → aggregates remain MONOTONIC (do not shrink)", () => {
-    const o = defaultPromptCacheObserver({ maxEvents: 2 })
-    o.record(evt({ inputTokens: 10 }))
-    o.record(evt({ inputTokens: 20 }))
-    o.record(evt({ inputTokens: 30 })) // evicts the first event from ring
-    o.record(evt({ inputTokens: 40 })) // evicts the second event from ring
-    const snap = o.snapshot()
-    // All 4 events' input contribute (10+20+30+40 = 100). Aggregates do NOT
-    // shrink — ring is the only thing capped (contract #5).
-    expect(snap.totalInputTokens).toBe(100)
+describe("ADR-0182 — prompt-cache observability — D. Aggregate-only + reset", () => {
+  test("[17] maxEvents is a backward-compatible no-op on the aggregate-only adapter", () => {
+    const bounded = defaultPromptCacheObserver({ maxEvents: 2 })
+    const unbounded = defaultPromptCacheObserver()
+    const events = [
+      evt({ sessionId: "s1", model: "claude-sonnet-4-6", inputTokens: 10 }),
+      evt({ sessionId: "s1", model: "claude-opus-4-7", inputTokens: 20, cacheReadTokens: 5 }),
+      evt({ sessionId: "s2", model: "claude-haiku-4-5", inputTokens: 30, cacheReadTokens: 10 }),
+      evt({ sessionId: "s1", model: "claude-sonnet-4-6", inputTokens: 40, cacheCreationTokens: 7 }),
+    ]
+    for (const event of events) {
+      bounded.record(event)
+      unbounded.record(event)
+    }
+    const boundedSnap = bounded.snapshot()
+    const unboundedSnap = unbounded.snapshot()
+    expect(boundedSnap.totalInputTokens).toBe(unboundedSnap.totalInputTokens)
+    expect(boundedSnap.totalCacheReadTokens).toBe(unboundedSnap.totalCacheReadTokens)
+    expect(boundedSnap.perModel.size).toBe(unboundedSnap.perModel.size)
+    expect(boundedSnap.perSession.size).toBe(unboundedSnap.perSession.size)
+    expect(boundedSnap.perSession.get("s1")?.perModel.get("claude-sonnet-4-6")?.inputTokens).toBe(
+      unboundedSnap.perSession.get("s1")?.perModel.get("claude-sonnet-4-6")?.inputTokens,
+    )
   })
 
   test("[18] reset() clears every aggregate + breakpoint", () => {
@@ -287,7 +302,7 @@ describe("ADR-0179 — prompt-cache observability — D. LRU cap + reset", () =>
   })
 })
 
-describe("ADR-0179 — prompt-cache observability — E. budget-bridge", () => {
+describe("ADR-0182 — prompt-cache observability — E. budget-bridge", () => {
   test("[19] wirePromptCacheToBudget — record event reaches ledger with matching tokens", () => {
     const o = defaultPromptCacheObserver()
     const l = defaultBudgetLedger()
@@ -338,7 +353,7 @@ describe("ADR-0179 — prompt-cache observability — E. budget-bridge", () => {
   })
 })
 
-describe("ADR-0179 — prompt-cache observability — F. determinism", () => {
+describe("ADR-0182 — prompt-cache observability — F. determinism", () => {
   test("[23] same input → same snapshot (deep-equal)", () => {
     const build = (): ReturnType<ReturnType<typeof defaultPromptCacheObserver>["snapshot"]> => {
       const o = defaultPromptCacheObserver()

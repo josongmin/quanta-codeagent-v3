@@ -14,13 +14,7 @@ import { rankEntries } from "@/memory/ranking"
 import { EMBED_DIM, type MemoryEntry, type MemoryQuery, STALE_MAX_MS } from "@/memory/types"
 import { persistSession, recallContext, SESSION_TAG } from "@/agent/memory"
 import type { LLMPort, Message, StreamEvent } from "@/llm"
-import {
-  EMBED_DIM,
-  type EmbedderPort,
-  InMemoryStore,
-  type MemoryEntry,
-  type PersistentStorePort,
-} from "@/memory"
+import { type EmbedderPort, InMemoryStore, type PersistentStorePort } from "@/memory"
 
 /**
  * C5 — memory consolidate/evict boundary HELLGATE.

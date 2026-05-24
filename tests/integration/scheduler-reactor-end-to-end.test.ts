@@ -64,6 +64,7 @@ interface Harness {
   readonly setAvailable: (models: ReadonlyArray<string>) => void
   readonly agentLoop: AgentLoopPort
   readonly enqueued: string[]
+  readonly enqueueOpts: Array<{ signal?: AbortSignal; modelOverride?: string } | undefined>
   readonly sink: SchedulerSinkPort
   readonly events: SchedulerEvent[]
   readonly workspace: string
@@ -73,6 +74,7 @@ const buildHarness = async (): Promise<Harness> => {
   const baseDir = await mkdtemp(join(tmpdir(), "qsched-int-"))
   let nowMs = utc(2026, 5, 1)
   const enqueued: string[] = []
+  const enqueueOpts: Array<{ signal?: AbortSignal; modelOverride?: string } | undefined> = []
   const events: SchedulerEvent[] = []
   let available: ReadonlyArray<string> = ["gpt-5", "claude-4", "gpt-4-mini"]
   return {
@@ -88,11 +90,13 @@ const buildHarness = async (): Promise<Harness> => {
       available = ms
     },
     agentLoop: {
-      enqueueUserMessage: async (msg) => {
+      enqueueUserMessage: async (msg, opts) => {
         enqueued.push(msg)
+        enqueueOpts.push(opts)
       },
     },
     enqueued,
+    enqueueOpts,
     sink: {
       emit: (e) => {
         events.push(e)
@@ -122,6 +126,7 @@ describe("Scheduler ↔ reactor end-to-end", () => {
       h.setClock(utc(2026, 5, 3))
       await rt.tickOnce()
       expect(h.enqueued).toEqual(["prompt-a1"])
+      expect(h.enqueueOpts).toEqual([{ modelOverride: "gpt-5" }])
       // Re-load from disk and verify persistence.
       const reloaded = await store.load(h.workspace)
       expect(reloaded[0]?.fireCount).toBe(1)
@@ -203,6 +208,7 @@ describe("Scheduler ↔ reactor end-to-end", () => {
       h.setClock(utc(2026, 5, 3))
       await rt.tickOnce()
       expect(h.enqueued).toEqual(["prompt-a1"])
+      expect(h.enqueueOpts).toEqual([{ modelOverride: "claude-4" }])
       const fired = h.events.find((e) => e.type === "scheduler.fired")
       expect(fired).toBeDefined()
       if (fired?.type === "scheduler.fired") {

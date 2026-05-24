@@ -322,7 +322,9 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
 
   test("HTTP 401 on /responses → typed auth LLMError (never retried, never fell back)", async () => {
     await seedToken()
+    const seenUrls: string[] = []
     const fetchImpl = async (url: string): Promise<Response> => {
+      seenUrls.push(url)
       if (url.includes("/codex/models")) {
         return catalogResponse([{ model: "gpt-5", is_default: true }])
       }
@@ -343,6 +345,9 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     expect(caught).toBeInstanceOf(LLMError)
     expect((caught as LLMError).kind).toBe("auth")
     expect((caught as LLMError).statusCode).toBe(401)
+    expect(seenUrls).toHaveLength(2)
+    expect(seenUrls.filter((u) => u.includes("/codex/models"))).toHaveLength(1)
+    expect(seenUrls.filter((u) => u.includes("/codex/responses"))).toHaveLength(1)
   })
 
   test("HTTP 429 → typed rate_limit LLMError", async () => {

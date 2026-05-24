@@ -119,6 +119,8 @@ export interface BridgeOutcomeSummary {
   readonly turns: number
 }
 
+type UnknownRecord = Record<string, unknown>
+
 /* ------------------------------------------------------------------ */
 /* Transport contract.                                                  */
 /* ------------------------------------------------------------------ */
@@ -263,33 +265,91 @@ export const createEventBridge = (opts: CreateEventBridgeOpts): EventBridge => {
 /** Default ISO 8601 timestamp factory (UTC). */
 export const isoNow = (): string => new Date().toISOString()
 
+const isRecord = (value: unknown): value is UnknownRecord =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value)
+
+const isBridgeSessionMeta = (value: unknown): value is BridgeSessionMeta => {
+  if (!isRecord(value)) return false
+  return (
+    isNonEmptyString(value.id) &&
+    typeof value.title === "string" &&
+    isNonEmptyString(value.cwd) &&
+    isFiniteNumber(value.createdAt) &&
+    isFiniteNumber(value.lastTouched) &&
+    typeof value.archived === "boolean"
+  )
+}
+
+const isBridgeOutcomeSummary = (value: unknown): value is BridgeOutcomeSummary => {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.reason === "string" &&
+    isFiniteNumber(value.turns) &&
+    Number.isInteger(value.turns) &&
+    value.turns >= 0
+  )
+}
+
+const isBridgePermissionPreview = (value: unknown): value is BridgePermissionPreview => {
+  if (!isRecord(value)) return false
+  return (
+    isNonEmptyString(value.toolName) &&
+    (value.preview === undefined || typeof value.preview === "string") &&
+    (value.requestId === undefined || isNonEmptyString(value.requestId))
+  )
+}
+
+const isBridgePayload = (value: unknown): value is BridgePayload => {
+  if (!isRecord(value) || typeof value.type !== "string") return false
+  switch (value.type) {
+    case "agent_event":
+      return isRecord(value.event) && isNonEmptyString(value.event.type)
+    case "session_started":
+      return isBridgeSessionMeta(value.meta)
+    case "session_ended":
+      return isBridgeOutcomeSummary(value.outcome)
+    case "user_input":
+      return typeof value.prompt === "string"
+    case "permission_request":
+      return isBridgePermissionPreview(value.request)
+    case "permission_response":
+      return (
+        typeof value.allow === "boolean" &&
+        (value.requestId === undefined || isNonEmptyString(value.requestId))
+      )
+    case "presence":
+      return (
+        isNonEmptyString(value.surface) &&
+        (value.status === "connected" ||
+          value.status === "idle" ||
+          value.status === "active" ||
+          value.status === "disconnected")
+      )
+    default:
+      return false
+  }
+}
+
 /**
  * Narrow validator — checks that an arbitrary value matches the
  * `WireEnvelope` invariants WE control (the `protocol` tag, the required
- * fields, and that `payload.type` is one of the closed union variants).
- * Field-level validation of each payload variant is deliberately shallow:
- * the transport layer enforces JSON-parseability and the consuming surface
- * narrows further. A malformed payload is REJECTED rather than coerced.
+ * fields, and the required fields for each closed `BridgePayload` variant).
+ * Nested payload bodies remain intentionally shallow here: the IPC boundary
+ * proves "this is structurally the right bridge message", while the owning
+ * slice still owns deeper semantic validation of nested objects.
  */
 export const isWireEnvelope = (value: unknown): value is WireEnvelope => {
-  if (value === null || typeof value !== "object") return false
-  const obj = value as Record<string, unknown>
+  if (!isRecord(value)) return false
+  const obj = value
   if (obj.protocol !== "quanta.ipc.v1") return false
-  if (typeof obj.source !== "string" || obj.source.length === 0) return false
-  if (typeof obj.sessionId !== "string" || obj.sessionId.length === 0) return false
-  if (typeof obj.timestamp !== "string") return false
-  if (obj.payload === null || typeof obj.payload !== "object") return false
-  const payload = obj.payload as Record<string, unknown>
-  const t = payload.type
-  if (typeof t !== "string") return false
-  // Closed taxonomy guard.
-  return (
-    t === "agent_event" ||
-    t === "session_started" ||
-    t === "session_ended" ||
-    t === "user_input" ||
-    t === "permission_request" ||
-    t === "permission_response" ||
-    t === "presence"
-  )
+  if (!isNonEmptyString(obj.source)) return false
+  if (!isNonEmptyString(obj.sessionId)) return false
+  if (!isNonEmptyString(obj.timestamp)) return false
+  return isBridgePayload(obj.payload)
 }

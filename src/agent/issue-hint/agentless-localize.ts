@@ -32,7 +32,7 @@
  *     caller sees an empty array and falls back to whatever it likes
  */
 
-import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
+import type { LLMPort, Message, StreamEvent } from "@/llm"
 
 /** Dependency surface for `agentlessLocalize`. All I/O is injectable so the
  *  function is hermetic in tests. */
@@ -237,6 +237,27 @@ const resolveOpts = (
   return { maxFiles, maxTreeChars, topK }
 }
 
+/** Consume only the text surface we actually need. `stream_reset` tombstones
+ *  any previously seen partial so the returned text matches
+ *  `assembleFromEvents(...).message.content.filter(text)` without buffering
+ *  the full event array. */
+const collectTextFromStream = async (iter: AsyncIterable<StreamEvent>): Promise<string> => {
+  let raw = ""
+  for await (const ev of iter) {
+    switch (ev.type) {
+      case "stream_reset":
+        raw = ""
+        break
+      case "text_delta":
+        raw += ev.delta
+        break
+      default:
+        break
+    }
+  }
+  return raw
+}
+
 /** Drive the LLM stream and assemble the text reply. Returns `undefined` if
  *  the stream failed (in which case the caller surfaces an empty result with
  *  an `errorString(e)` rawResponse) or the empty string for a stream that
@@ -248,14 +269,7 @@ const runLocalizeStream = async (
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: userText }] }]
   try {
     const iter = llm.stream({ messages, system: SYSTEM_MSG, tools: [] })
-    const events: StreamEvent[] = []
-    for await (const ev of iter) events.push(ev)
-    const assembled = assembleFromEvents(events)
-    let raw = ""
-    for (const block of assembled.message.content) {
-      if (block.type === "text") raw += block.text
-    }
-    return { rawResponse: raw }
+    return { rawResponse: await collectTextFromStream(iter) }
   } catch (e) {
     return { error: errorString(e) }
   }
