@@ -1,0 +1,34 @@
+id: bench-main-gate
+title: import.meta.main CLI-entry guard (test-import safety)
+section: 7
+subsystem: 진입점 격리 / 테스트 안전
+order: 90
+maturity: L4
+status: stable
+purpose: |
+  CLI entry 모듈은 `if (import.meta.main) { ... }` 가드 뒤에서만 production
+  main을 실행한다. Bun은 `import.meta.main`을 *프로세스 진입 파일*에서만 true로
+  세팅하므로, `import "./index"`로 모듈을 끌어다 쓰는 유닛테스트는 가짜로 main을
+  발화시키지 않는다. agent/probe/bench CLI 3개 + feature-catalog CLI + swebench-matrix
+  도구 모두 동일 패턴 — `bun test`가 entrypoint를 hijack해 의도치 않은 사이드이펙트
+  (process.exit, network, fs)를 일으키는 회귀를 구조적으로 차단한다. 가드 내부에서만
+  `process.exit(1)` + stderr fatal 출력을 호출한다.
+evidence:
+  code:
+    - src/apps/agent/index.ts
+    - src/apps/bench/index.ts
+    - src/apps/probe/index.ts
+    - tools/feature-catalog/cli.ts
+    - tools/swebench-matrix.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  관용 (Bun 고유 — Node에선 `require.main === module`). `bun run` 상황에서도
+  entrypoint 파일에만 true. 유닛테스트는 `bun test`가 자체 runner를 entrypoint로
+  올리므로 모듈 import만으론 main이 절대 발화하지 않음. 명시적 ADR은 없으나
+  test-isolation 불변식의 구조적 게이트다.
