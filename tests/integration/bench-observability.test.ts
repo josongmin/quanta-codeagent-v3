@@ -275,7 +275,8 @@ describe("bench observability (RFC-0002 W-D)", () => {
         testCmd: 'test -z "$OPENAI_API_KEY"',
       }
       const prev = process.env.OPENAI_API_KEY
-      process.env.OPENAI_API_KEY = "sk-ant-api03-SHOULDNOTLEAK0000111122223333BBBB"
+      const PLANTED_SECRET = "sk-ant-api03-SHOULDNOTLEAK0000111122223333BBBB"
+      process.env.OPENAI_API_KEY = PLANTED_SECRET
       try {
         const r = await runInstance(leakProbe, {
           ...DEPS,
@@ -283,8 +284,19 @@ describe("bench observability (RFC-0002 W-D)", () => {
         })
         // passed:true ⇒ the spawned child saw an EMPTY OPENAI_API_KEY.
         expect(r.passed).toBe(true)
+        // Real env-access verification: the planted secret VALUE must never
+        // appear anywhere in the observable result envelope (patch / verdict /
+        // trace).  If the spawner had leaked the parent env, the testCmd
+        // would have failed (passed=false) AND the value might be quoted in
+        // an error message. We assert both: passed=true (R9-style) AND the
+        // value-byte is absent from any string field reachable from r.
+        const haystack = JSON.stringify(r)
+        expect(haystack).not.toContain(PLANTED_SECRET)
+        // Belt-and-braces: the env var we set must still equal what we set
+        // (not undefined / not mutated) so we know the leak-probe was real.
+        expect(process.env.OPENAI_API_KEY).toBe(PLANTED_SECRET)
       } finally {
-        if (prev === undefined) delete process.env.OPENAI_API_KEY
+        if (prev === undefined) process.env.OPENAI_API_KEY = undefined
         else process.env.OPENAI_API_KEY = prev
       }
     })

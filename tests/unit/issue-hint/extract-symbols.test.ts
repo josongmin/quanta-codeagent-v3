@@ -88,7 +88,7 @@ describe("extractSymbols — function/class/method names", () => {
     expect(out).toEqual(["Alpha", "Bravo", "Charlie"])
   })
 
-  test("regex state isolation (multiple invocations same input)", () => {
+  test("regex lastIndex reset across multiple invocations of same input", () => {
     const text = "def foo(): pass"
     expect(extractSymbols(text)).toEqual(["foo"])
     expect(extractSymbols(text)).toEqual(["foo"])

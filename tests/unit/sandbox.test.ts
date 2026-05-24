@@ -58,13 +58,20 @@ describe("LocalSandbox env scrub", () => {
   test("a parent var NOT in the allowlist is absent in the child env", async () => {
     process.env.SANDBOX_SECRET_XYZ = "leaked-value"
     try {
+      // Real env-access guard: before exercising, prove the parent CAN see
+      // the planted secret (so the negative below is meaningful).
+      expect(process.env.SANDBOX_SECRET_XYZ).toBe("leaked-value")
       const sb = new LocalSandbox()
       const res = await sb.run("env", { cwdJail: jail, envAllowlist: ["PATH"] })
       expect(res.exitCode).toBe(0)
       expect(res.stdout).not.toContain("SANDBOX_SECRET_XYZ")
       expect(res.stdout).not.toContain("leaked-value")
+      // Post-condition: the parent env is unchanged by the sandbox call.
+      expect(process.env.SANDBOX_SECRET_XYZ).toBe("leaked-value")
     } finally {
-      delete process.env.SANDBOX_SECRET_XYZ
+      // Use `= undefined` (R10 canonical form) so a future regression that
+      // reads parent env via direct property access cannot see a stale value.
+      process.env.SANDBOX_SECRET_XYZ = undefined
     }
   })
 
@@ -77,8 +84,10 @@ describe("LocalSandbox env scrub", () => {
         envAllowlist: ["PATH", "SANDBOX_ALLOWED_ABC"],
       })
       expect(res.stdout).toContain("SANDBOX_ALLOWED_ABC=present-value")
+      // Mutation-parity: scrubbing in child does NOT clear parent.
+      expect(process.env.SANDBOX_ALLOWED_ABC).toBe("present-value")
     } finally {
-      delete process.env.SANDBOX_ALLOWED_ABC
+      process.env.SANDBOX_ALLOWED_ABC = undefined
     }
   })
 })

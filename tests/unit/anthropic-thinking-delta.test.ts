@@ -33,7 +33,7 @@ const drive = (raws: RawEvent[]): StreamEvent[] => {
 }
 
 describe("ADR-0076 Gap-2 — thinking_delta surface", () => {
-  test("thinking_delta in isolation → one thinking_delta StreamEvent per raw delta", () => {
+  test("thinking_delta alone → one thinking_delta StreamEvent per raw delta", () => {
     const events = drive([
       { type: "content_block_start", index: 0, content_block: { type: "thinking" } },
       { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "..." } },

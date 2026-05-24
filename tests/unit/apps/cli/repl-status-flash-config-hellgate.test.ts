@@ -125,14 +125,41 @@ describe("StatusFlashConfig — invalid env falls back to default", () => {
 
 describe("StatusFlashConfig — process.env default", () => {
   test("calling without args reads process.env (smoke)", () => {
-    // Just verify the helper returns finite positive integers using the live
-    // env. Don't assert specific values (the dev env may set overrides).
-    const cfg = buildStatusFlashConfig()
-    expect(Number.isFinite(cfg.errorMs)).toBe(true)
-    expect(Number.isFinite(cfg.idleMs)).toBe(true)
-    expect(Number.isFinite(cfg.escWindowMs)).toBe(true)
-    expect(Number.isFinite(cfg.transientMs)).toBe(true)
-    expect(Number.isFinite(cfg.truncateChars)).toBe(true)
-    expect(cfg.errorMs).toBeGreaterThan(0)
+    // Real env-access verification: clear the documented keys (set to
+    // undefined), then run — every result must equal the documented default.
+    // This proves the no-args overload genuinely reads process.env (the only
+    // place defaults can come from) rather than smuggling in stale state.
+    const prev = {
+      err: process.env.QUANTA_FLASH_ERROR_MS,
+      idle: process.env.QUANTA_FLASH_IDLE_MS,
+      esc: process.env.QUANTA_FLASH_ESC_WINDOW_MS,
+      trans: process.env.QUANTA_FLASH_TRANSIENT_MS,
+      trunc: process.env.QUANTA_FLASH_TRUNCATE_CHARS,
+    }
+    process.env.QUANTA_FLASH_ERROR_MS = undefined
+    process.env.QUANTA_FLASH_IDLE_MS = undefined
+    process.env.QUANTA_FLASH_ESC_WINDOW_MS = undefined
+    process.env.QUANTA_FLASH_TRANSIENT_MS = undefined
+    process.env.QUANTA_FLASH_TRUNCATE_CHARS = undefined
+    try {
+      const cfg = buildStatusFlashConfig()
+      expect(Number.isFinite(cfg.errorMs)).toBe(true)
+      expect(Number.isFinite(cfg.idleMs)).toBe(true)
+      expect(Number.isFinite(cfg.escWindowMs)).toBe(true)
+      expect(Number.isFinite(cfg.transientMs)).toBe(true)
+      expect(Number.isFinite(cfg.truncateChars)).toBe(true)
+      expect(cfg.errorMs).toBeGreaterThan(0)
+      // With all five env keys cleared, the result must match the explicit-
+      // empty-env-object call (proves no-args overload only consults
+      // process.env, not some hidden global).
+      const cfgExplicit = buildStatusFlashConfig({})
+      expect(cfg).toEqual(cfgExplicit)
+    } finally {
+      process.env.QUANTA_FLASH_ERROR_MS = prev.err
+      process.env.QUANTA_FLASH_IDLE_MS = prev.idle
+      process.env.QUANTA_FLASH_ESC_WINDOW_MS = prev.esc
+      process.env.QUANTA_FLASH_TRANSIENT_MS = prev.trans
+      process.env.QUANTA_FLASH_TRUNCATE_CHARS = prev.trunc
+    }
   })
 })

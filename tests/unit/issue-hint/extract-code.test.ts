@@ -69,7 +69,7 @@ describe("extractCodeFences — triple-backtick blocks", () => {
     expect(got.length).toBeLessThanOrEqual(4 * 1024)
   })
 
-  test("regex state isolation across calls", () => {
+  test("regex lastIndex reset across calls (deterministic re-invocation)", () => {
     const text = "```py\nfoo\n```"
     expect(extractCodeFences(text)).toEqual(["foo"])
     expect(extractCodeFences(text)).toEqual(["foo"])
@@ -120,7 +120,7 @@ describe("extractTracebackPaths — file:line from tracebacks", () => {
     expect(extractTracebackPaths(text)).toEqual(["a.py:1"])
   })
 
-  test("regex state isolation", () => {
+  test("regex lastIndex reset across calls (deterministic re-invocation)", () => {
     const text = `File "x.py", line 1`
     expect(extractTracebackPaths(text)).toEqual(["x.py:1"])
     expect(extractTracebackPaths(text)).toEqual(["x.py:1"])

@@ -69,7 +69,7 @@ describe("extractRefs — PR/issue references", () => {
     expect(extractRefs(text)).toEqual(["#774"])
   })
 
-  test("regex state isolation", () => {
+  test("regex lastIndex reset across calls (deterministic re-invocation)", () => {
     expect(extractRefs("#1")).toEqual(["#1"])
     expect(extractRefs("#1")).toEqual(["#1"])
   })

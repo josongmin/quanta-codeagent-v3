@@ -186,7 +186,7 @@ describe("topologicalSort: acyclic graphs", () => {
     expect(out).toEqual([])
   })
 
-  test("single isolated todo → [its id]", () => {
+  test("single dependency-free todo → [its id]", () => {
     const out = topologicalSort(build([todo("only")]))
     expect(out).toEqual(["only"])
   })
@@ -222,6 +222,19 @@ describe("topologicalSort: acyclic graphs", () => {
     expect(out.indexOf("mu")).toBeLessThan(out.indexOf("zeta"))
     // Consumer last
     expect(out[out.length - 1]).toBe("Consumer")
+  })
+
+  test("tie-break determinism applies when children become ready in non-lex input order", () => {
+    const out = topologicalSort(
+      build([
+        todo("zeta", ["root"]),
+        todo("alpha", ["root"]),
+        todo("mu", ["root"]),
+        todo("root"),
+      ]),
+    )
+    if (!Array.isArray(out)) throw new Error("expected array, got cycle")
+    expect(out).toEqual(["root", "alpha", "mu", "zeta"])
   })
 
   test("multi-source forest: 5 disjoint trees of depth 5 sorted deterministically", () => {
@@ -288,7 +301,7 @@ describe("validateDag: acyclic + well-formed → ok:true", () => {
     expect(r.value).toBe(true)
   })
 
-  test("single isolated todo", () => {
+  test("single dependency-free todo", () => {
     const r = validateDag(build([todo("only")]))
     expect(r.ok).toBe(true)
   })

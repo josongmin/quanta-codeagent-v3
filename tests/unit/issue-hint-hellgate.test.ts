@@ -206,7 +206,7 @@ describe("issue-hint hellgate — adversarial inputs (25+ cases)", () => {
     expect(extractSymbols("`` `x` `y`")).toEqual([]) // empty + 1-char both rejected
   })
 
-  test("h21: regex lastIndex state isolation (consecutive calls deterministic)", () => {
+  test("h21: regex lastIndex reset across consecutive calls (deterministic)", () => {
     const text = "a/b.py and c/d.py"
     const a = extractFiles(text)
     const b = extractFiles(text)

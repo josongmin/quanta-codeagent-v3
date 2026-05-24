@@ -51,7 +51,10 @@ describe("buildCiBotWiring — defaults", () => {
     expect(w.protectedBranches).toContain("production")
   })
 
-  test("env allowlist contains GH_TOKEN + PATH but NOT user secrets", () => {
+  test("CI_ENV_ALLOWLIST membership: GH_TOKEN + PATH present, user secrets absent", () => {
+    // NOTE: this is a static-data membership check on the exported constant,
+    // NOT a runtime env-isolation test. Runtime scrubbing using this list is
+    // tested by sandbox.test.ts (parent-var scrub) and the spawner suites.
     expect(CI_ENV_ALLOWLIST).toContain("GH_TOKEN")
     expect(CI_ENV_ALLOWLIST).toContain("GITHUB_TOKEN")
     expect(CI_ENV_ALLOWLIST).toContain("PATH")

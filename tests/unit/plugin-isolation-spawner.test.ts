@@ -42,6 +42,10 @@ describe("ADR-0162 spawner happy-path", () => {
   })
 
   test("QUANTA_SERVICE_NAME env is propagated to child", async () => {
+    // Real env-access verification: ensure the parent process.env does NOT
+    // already carry the value (otherwise the assertion would be tautological).
+    const prev = process.env.QUANTA_SERVICE_NAME
+    process.env.QUANTA_SERVICE_NAME = undefined
     // Emit ready line first (sentinel), then a payload line with the env.
     const body = `
       process.stdout.write(JSON.stringify({ kind: "ready" }) + "\\n")
@@ -64,12 +68,19 @@ describe("ADR-0162 spawner happy-path", () => {
       }
       await handle.kill()
       expect(got).toContainEqual({ svc: "alpha-svc" })
+      // Post: spawner did not mutate the PARENT env (child-only injection).
+      expect(process.env.QUANTA_SERVICE_NAME).toBeUndefined()
     } finally {
+      process.env.QUANTA_SERVICE_NAME = prev
       await cleanup()
     }
   })
 
   test("QUANTA_ALLOW_UNSIGNED env is set when opt-in", async () => {
+    // Real env-access verification: clear in parent to prove the child sees
+    // it ONLY because the spawner injected it.
+    const prev = process.env.QUANTA_ALLOW_UNSIGNED
+    process.env.QUANTA_ALLOW_UNSIGNED = undefined
     const body = `
       process.stdout.write(JSON.stringify({ kind: "ready" }) + "\\n")
       process.stdout.write(JSON.stringify({ unsigned: process.env.QUANTA_ALLOW_UNSIGNED ?? "unset" }) + "\\n")
@@ -92,7 +103,10 @@ describe("ADR-0162 spawner happy-path", () => {
       }
       await handle.kill()
       expect(got).toContainEqual({ unsigned: "1" })
+      // Parent env stays clear (child-only flag).
+      expect(process.env.QUANTA_ALLOW_UNSIGNED).toBeUndefined()
     } finally {
+      process.env.QUANTA_ALLOW_UNSIGNED = prev
       await cleanup()
     }
   })

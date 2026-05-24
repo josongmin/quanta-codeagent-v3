@@ -99,10 +99,15 @@ describe("loadEnvFiles", () => {
   })
 
   test("does not override a value already set in process.env", () => {
+    // Real env-access verification: clear first to undefined to prove the
+    // preset write is what makes the assertion pass (not stale state).
+    process.env.PRESET = undefined
     process.env.PRESET = "from-real-env"
     const f = envFile("PRESET=from-file\n")
     loadEnvFiles([f])
     expect(process.env.PRESET).toBe("from-real-env")
+    // Cleanup so the next test starts clean (matches `= undefined` pattern).
+    process.env.PRESET = undefined
   })
 
   test("first file wins over later files for the same key", () => {

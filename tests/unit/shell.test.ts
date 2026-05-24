@@ -84,10 +84,15 @@ describe("runShell env scrubbing (ADR-0006)", () => {
   test("inheritEnv:true opts back into the full parent env", async () => {
     process.env.RUNSHELL_TEST_INHERIT = "inherited-value"
     try {
+      // Precondition: the parent owns the value.
+      expect(process.env.RUNSHELL_TEST_INHERIT).toBe("inherited-value")
       const r = await runShell('echo "$RUNSHELL_TEST_INHERIT"', { inheritEnv: true })
       expect(r.stdout.trim()).toBe("inherited-value")
+      // Counter-control: with inheritEnv DEFAULT (scrubbed), same key is gone.
+      const rScrubbed = await runShell('echo "${RUNSHELL_TEST_INHERIT:-MISSING}"')
+      expect(rScrubbed.stdout.trim()).toBe("MISSING")
     } finally {
-      delete process.env.RUNSHELL_TEST_INHERIT
+      process.env.RUNSHELL_TEST_INHERIT = undefined
     }
   })
 })

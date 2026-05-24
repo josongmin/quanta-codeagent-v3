@@ -99,7 +99,7 @@ describe("extractErrors — exception/warning type names", () => {
     expect(extractErrors("raises InvalidURL")).toEqual([])
   })
 
-  test("regex state isolation", () => {
+  test("regex lastIndex reset across calls (deterministic re-invocation)", () => {
     const text = "TypeError"
     expect(extractErrors(text)).toEqual(["TypeError"])
     expect(extractErrors(text)).toEqual(["TypeError"])

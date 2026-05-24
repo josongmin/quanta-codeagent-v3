@@ -247,7 +247,7 @@ describe("issue-hint verbatim-evidence hellgate (20+ cases)", () => {
     expect(out).not.toContain("- `constructor`")
   })
 
-  test("v25: extractIssueHint idempotent across repeated calls (regex state isolated)", () => {
+  test("v25: extractIssueHint idempotent across repeated calls (regex lastIndex reset)", () => {
     const text = "see foo.py and #774"
     const a = extractIssueHint(text)
     const b = extractIssueHint(text)

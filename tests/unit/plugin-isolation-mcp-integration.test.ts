@@ -23,17 +23,41 @@ describe("ADR-0162 IsolatedMcpClient — backwards compat", () => {
   })
 
   test("flag detection defaults to the process.env (when no arg passed)", () => {
-    // The function must accept no-arg without throwing; the actual value
-    // depends on the harness env so we just assert it returns a boolean.
-    const v = isolatedMcpEnabledFromEnv()
-    expect(typeof v).toBe("boolean")
+    // Real env-access verification: clear the documented key, then call
+    // with no arg — the result must be `false` (defaults are off-by-default).
+    // This proves the no-arg overload genuinely consults process.env.
+    const prev = process.env.MCP_USE_ISOLATED_SPAWN
+    process.env.MCP_USE_ISOLATED_SPAWN = undefined
+    try {
+      const cleared = isolatedMcpEnabledFromEnv()
+      expect(cleared).toBe(false)
+      process.env.MCP_USE_ISOLATED_SPAWN = "1"
+      const set = isolatedMcpEnabledFromEnv()
+      expect(set).toBe(true)
+    } finally {
+      process.env.MCP_USE_ISOLATED_SPAWN = prev
+    }
   })
 
   test("flag detection is pure (no env mutation)", () => {
-    const before = process.env["MCP_USE_ISOLATED_SPAWN"]
+    const before = process.env.MCP_USE_ISOLATED_SPAWN
+    // Trap Proxy that throws if isolatedMcpEnabledFromEnv mutates the env
+    // object it was handed (it should only read).
+    const trap = new Proxy(
+      { MCP_USE_ISOLATED_SPAWN: "1" } as Record<string, string | undefined>,
+      {
+        set() {
+          throw new Error("env mutation forbidden — flag-detection must be pure")
+        },
+        deleteProperty() {
+          throw new Error("env mutation (delete) forbidden")
+        },
+      },
+    )
+    expect(() => isolatedMcpEnabledFromEnv(trap)).not.toThrow()
     isolatedMcpEnabledFromEnv({ MCP_USE_ISOLATED_SPAWN: "1" })
     isolatedMcpEnabledFromEnv({ MCP_USE_ISOLATED_SPAWN: "0" })
-    expect(process.env["MCP_USE_ISOLATED_SPAWN"]).toBe(before)
+    expect(process.env.MCP_USE_ISOLATED_SPAWN).toBe(before)
   })
 
   test("opts.spawnTimeoutMs / gracefulKillMs / requestTimeoutMs overridable", () => {

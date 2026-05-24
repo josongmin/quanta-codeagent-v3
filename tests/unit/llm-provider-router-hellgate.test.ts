@@ -265,7 +265,7 @@ describe("resolveProviderWithRouter — precedence hellgate", () => {
       resolveProviderWithRouter({
         env: trapEnv,
       }),
-    ).toThrow(/forbidden .* probe/)
+    ).toThrow(/forbidden process\.env-style probe|forbidden .* probe on trap env/)
 
     // --- B: access-counter — record exact key reads on a known-empty env ---
     const reads: string[] = []

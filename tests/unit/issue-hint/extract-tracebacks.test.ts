@@ -87,7 +87,7 @@ describe("extractTracebacks — verbatim Python traceback blocks", () => {
     expect((out[0] ?? "").includes(ESC)).toBe(false)
   })
 
-  test("regex state isolation across calls", () => {
+  test("regex lastIndex reset across calls (deterministic re-invocation)", () => {
     const block = 'Traceback (most recent call last):\n  File "x.py", line 1\nTypeError'
     expect(extractTracebacks(block)).toEqual([block])
     expect(extractTracebacks(block)).toEqual([block])
