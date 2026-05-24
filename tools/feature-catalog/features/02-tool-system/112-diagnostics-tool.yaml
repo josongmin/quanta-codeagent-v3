@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe, lsp-bridge]
+ui_surfaces: [cli]
 configurable: n-a
 purpose: |
   Surfaces language-server errors/warnings for one file. Slice isolation

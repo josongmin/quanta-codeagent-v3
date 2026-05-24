@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
+ui_surfaces: [api]
 configurable: static
 purpose: |
   Portable session schema v1 (snake_case wire) for round-tripping a saved

@@ -11,6 +11,7 @@ modes: [ci-bot]
 configurable: n-a
 owners: ["@songmin"]
 labels: [surface:cli]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Single slice that wraps the `gh` binary as 6 typed tools — `gh_pr_view`,

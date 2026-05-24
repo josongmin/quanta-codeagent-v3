@@ -14,6 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [queued-follow-ups, cli-status-pills]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_LIFECYCLE_PILLS", "QUANTA_PILL_", "QUANTA_PILL_FOLLOWUP", "QUANTA_PILL_MCP", "QUANTA_PILL_TASKS"]

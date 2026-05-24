@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_IDLE_SUPPRESS, QUANTA_IDLE_MS, QUANTA_SNOOZE_DEFAULT_MS, QUANTA_REJECT_LIMIT]
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, tier:core]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_REJECT_LIMIT", "QUANTA_SNOOZE_DEFAULT_MS"]

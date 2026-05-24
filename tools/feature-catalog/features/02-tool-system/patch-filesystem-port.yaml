@@ -13,6 +13,7 @@ configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
 depends_on: [apply-patch-v4a]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_ATTRS", "QUANTA_FS_JAIL"]

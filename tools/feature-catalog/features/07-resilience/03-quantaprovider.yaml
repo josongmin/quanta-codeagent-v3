@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_PROVIDER, QUANTA_MODEL]
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive"]
+ui_surfaces: [cli]
 configurable: n-a
 purpose: |
   Dual-provider 선택 knob — `QUANTA_PROVIDER`로 Anthropic / OpenAI(또는

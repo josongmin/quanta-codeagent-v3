@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:core]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_SESSION_LIST_FORMAT", "QUANTA_SESSION_LIST_MAX"]

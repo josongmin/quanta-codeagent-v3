@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+ui_surfaces: [cli]
 configurable: static
 purpose: 'edit 도구 실패 시 Strategy hint: suffix 자동 추가 — nextStrategy: scripted_replace | read_then_patch | ambiguous, exit semantics 미변경.'
 evidence:

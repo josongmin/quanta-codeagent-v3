@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Surfaces the pure moved-code classifier (ADR-0109 — normalize + similarity

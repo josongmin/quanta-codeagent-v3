@@ -13,6 +13,7 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:ipc"]
 depends_on: [portable-session-v1, slice-ipc-bridge]
+ui_surfaces: [api]
 configurable: n-a
 purpose: |
   Surface-agnostic event bridge connecting multiple surfaces (CLI / Web /

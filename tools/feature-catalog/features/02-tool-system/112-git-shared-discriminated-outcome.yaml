@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
+ui_surfaces: [cli]
 configurable: n-a
 purpose: |
   Slice-internal helpers (`safeRun` + `mutate`) that normalize the spawn

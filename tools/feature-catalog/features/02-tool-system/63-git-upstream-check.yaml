@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_GIT_TOOLS]
 owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   v0.dev chat=branch upstreamChanges 흡수 — fetch 없이(네트워크·index 무변경) 이미

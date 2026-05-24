@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:core"]
+ui_surfaces: [cli, ide]
 configurable: static
 purpose: 59 RPC unit + 46 nav-tool unit + 12 formatter unit
 evidence:

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
+ui_surfaces: [cli]
 configurable: static
 purpose: 신규 default 도구. 리터럴 기본 / isRegex:true 정규식 / count 캡 / FS-jail / atomic write.
 evidence:

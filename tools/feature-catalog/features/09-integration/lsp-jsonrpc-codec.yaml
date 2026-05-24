@@ -12,6 +12,7 @@ configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc", "absorbed:codex"]
 depends_on: [mcp-client-jsonrpc, jsonrpc-envelope, lsp-bridge]
+ui_surfaces: [ide]
 configurable: static
 purpose: |
   Wire-level codec behind `lsp-bridge` and `lspport`. LSP framing is NOT MCP's

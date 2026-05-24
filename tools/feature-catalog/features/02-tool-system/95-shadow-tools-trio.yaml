@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:claude-code, surface:cli, security-touched]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Three first-class agent tools wrapping the shadow ObjectDB safety-net store

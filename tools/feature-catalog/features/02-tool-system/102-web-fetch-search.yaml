@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, security-touched, held-promotion]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Two read-only web tools delivered as a single slice. (1) `web_fetch` —

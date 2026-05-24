@@ -14,6 +14,7 @@ config_refs:
 owners: ["@songmin", "team-memory"]
 labels: ["surface:core", "held-promotion"]
 depends_on: [memory-citation-surface, cli-turn-summary]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_METRICS", "QUANTA_TURN_SUMMARY", "QUANTA_TURN_SUMMARY_VERBOSE"]

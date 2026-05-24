@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_IMAGE_QUEUE, QUANTA_IMAGE_MAX_QUEUE]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "held-promotion"]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE"]

@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
 depends_on: [isconcurrencysafe]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Read-only content search built on ripgrep. Model-supplied `path` is

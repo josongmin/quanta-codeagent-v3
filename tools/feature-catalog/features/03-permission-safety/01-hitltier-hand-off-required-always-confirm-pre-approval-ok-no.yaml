@@ -11,6 +11,7 @@ modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]

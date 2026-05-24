@@ -11,6 +11,7 @@ modes: [interactive]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:cursor"]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Vim-style fixed bottom status bar implemented via ANSI DECSTBM

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: planned
 owners: ["@songmin"]
 labels: ["surface:ipc"]
+ui_surfaces: [api]
 configurable: n-a
 purpose: |
   Four `BridgeTransport` implementations behind one closed shape so the

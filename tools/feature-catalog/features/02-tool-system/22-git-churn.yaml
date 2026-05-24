@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
+ui_surfaces: [cli]
 configurable: n-a
 purpose: |
   최근 윈도우 내 변경 빈도로 파일을 랭킹하는 git tool (churn 핫스팟). 자주 바뀌는

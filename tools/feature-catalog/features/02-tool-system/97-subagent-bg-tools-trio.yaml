@@ -12,6 +12,7 @@ configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, tier:1]
 depends_on: [shadow-tools-trio, task-registry]
+ui_surfaces: [cli]
 configurable: n-a
 purpose: |
   Three first-class tools wrapping a `BackgroundSubagentSchedulerPort` so the

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   depth-bounded·.gitignore 준수 디렉터리 트리 + per-directory 파일 수를 반환하는

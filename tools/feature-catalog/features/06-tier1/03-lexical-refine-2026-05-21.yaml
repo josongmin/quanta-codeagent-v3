@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
+ui_surfaces: [cli]
 configurable: partial
 config_refs:
   env: ["QUANTA_CAP_ENFORCE"]

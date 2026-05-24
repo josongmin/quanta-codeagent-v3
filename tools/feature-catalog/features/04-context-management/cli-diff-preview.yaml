@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_DIFF_MAX_BYTES, QUANTA_DIFF_MAX_LINES, QUANTA_DIFF_PREVIEW]
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:core]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_DIFF_MAX_BYTES", "QUANTA_DIFF_MAX_LINES", "QUANTA_DIFF_PREVIEW"]

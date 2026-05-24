@@ -12,6 +12,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_ATTRS", "QUANTA_FS_JAIL"]

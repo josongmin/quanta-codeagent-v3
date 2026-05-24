@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
+ui_surfaces: [cli]
 configurable: n-a
 purpose: |
   한 파일 또는 라인 범위의 per-author 라인 소유권 분포를 반환하는 git tool. 누가

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_WEB_SEARCH_DUCKDUCKGO]
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
+ui_surfaces: [cli]
 configurable: partial
 config_refs:
   env: ["QUANTA_WEB_SEARCH_DUCKDUCKGO"]

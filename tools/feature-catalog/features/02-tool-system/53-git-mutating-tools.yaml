@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
 depends_on: [isconcurrencysafe]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Claude Desktop 1.7196.3의 commitWipForBranchSwitch 패턴 흡수 — git push/commit/checkout을

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "security-touched"]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   `bash` 도구는 단일 shell 실행 별로 (1) `timeout_ms` (default 120000) wall-

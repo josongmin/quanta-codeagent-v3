@@ -14,6 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex", "absorbed:cursor"]
 depends_on: [glob-rules]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_COST_PANEL", "QUANTA_MEMORY_SLASH", "QUANTA_PILL_RULES", "QUANTA_PREFS_HOME", "QUANTA_REWIND", "QUANTA_RULE_INDICATOR"]

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
+ui_surfaces: [cli]
 configurable: partial
 config_refs:
   env: ["QUANTA_SIDE_"]

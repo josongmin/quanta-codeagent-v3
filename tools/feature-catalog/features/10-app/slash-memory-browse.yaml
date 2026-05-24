@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_MEMORY_LIST_MAX, QUANTA_MEMORY_SLASH]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_COST_PANEL", "QUANTA_MEMORY_LIST_MAX", "QUANTA_MEMORY_SLASH", "QUANTA_PREFS_HOME", "QUANTA_REWIND"]

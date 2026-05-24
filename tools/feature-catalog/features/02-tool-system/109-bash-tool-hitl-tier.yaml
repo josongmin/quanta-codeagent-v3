@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: [surface:cli]
 depends_on: [typed-tool-failure-modes, shell-output-delta-streaming, isconcurrencysafe]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   `bash` tool's `hitlTier(input)` returns `"always-confirm"` for network

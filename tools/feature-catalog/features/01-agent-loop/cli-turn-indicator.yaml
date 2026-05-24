@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_SPINNER]
 owners: ["@songmin"]
 labels: [surface:core, tier:core]
+ui_surfaces: [cli]
 configurable: partial
 config_refs:
   env: ["QUANTA_SPINNER"]

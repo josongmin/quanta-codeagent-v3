@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   `git_log` 도구가 commit 라인을 머신 파싱할 때 TAB(`\x09`) 대신 ASCII Unit

@@ -11,6 +11,7 @@ modes: [n-a]
 configurable: n-a
 owners: ["@songmin", "team-tools"]
 labels: [absorbed:codex, surface:cli]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   gh CLI tool that maps PR review-thread comments onto file:line anchors —

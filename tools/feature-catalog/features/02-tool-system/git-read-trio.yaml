@@ -12,6 +12,7 @@ configurable: static
 owners: ["@songmin", "team-tools"]
 labels: [surface:cli]
 depends_on: [git-upstream-check]
+ui_surfaces: [cli]
 configurable: static
 purpose: |
   Three first-class read-only git tools sharing the injectable `GitRunner`

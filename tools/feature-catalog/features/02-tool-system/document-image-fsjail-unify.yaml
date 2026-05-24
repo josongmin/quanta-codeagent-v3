@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_FS_JAIL]
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_FS_JAIL"]

@@ -13,6 +13,7 @@ config_refs:
   env: [QUANTA_REWIND, QUANTA_REWIND_GIT]
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
+ui_surfaces: [cli]
 configurable: integrated
 config_refs:
   env: ["QUANTA_REWIND", "QUANTA_REWIND_GIT"]
