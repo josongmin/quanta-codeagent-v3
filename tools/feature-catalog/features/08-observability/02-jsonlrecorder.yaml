@@ -5,7 +5,14 @@ subsystem: 이벤트/Trajectory (RFC-0002)
 order: 2
 maturity: L4
 status: stable
-purpose: JsonlRecorder+TeeStream , 구조화 로거
+purpose: |
+  `JsonlRecorder` — append-only JSON-Lines sink for the trajectory event stream.
+  One AgentEvent ⇒ one JSON object per line (newline-framed, never partial)
+  under the directory configured by `QUANTA_OBSERVE_DIR`. Pairs with `TeeStream`
+  for fan-out (SSE + JSONL + dashboard from the same loop emit) and with the
+  structured logger (RFC-0002 §5.2). Implemented in `src/stream/adapters/
+  jsonl-recorder.ts`; lifecycle (open/close) is idempotent so a late event
+  after close is a silent no-op instead of a crash.
 evidence:
   code: []
   adrs: []
