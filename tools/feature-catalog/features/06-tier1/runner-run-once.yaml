@@ -3,7 +3,7 @@ title: runOnce — surface-agnostic one-shot turn orchestration
 section: 6
 subsystem: surface-agnostic 오케스트레이션 드라이버
 order: 114
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: partial
@@ -47,3 +47,5 @@ notes: |
   Esc-Esc keypress cancel 은 CLI UI primitive 라 `apps/cli/repl.ts` 에 잔류.
   Interactive 루프는 sibling `run-interactive.ts` (이미 카탈로그됨) 가 같은
   per-turn atom 을 PromptSource 루프로 감싼다 — `runOnce` 는 단발성 진입점.
+
+  L4→L2: no test imports evidence.code paths

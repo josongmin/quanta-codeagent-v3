@@ -32,7 +32,7 @@ evidence:
   adrs: []
   tests:
     unit: []
-    integration: []
+    integration: ["tests/integration/bench-eval.test.ts", "tests/integration/bench-python-harness-e2e.test.ts"]
     contract: []
 knobs:
   - QUANTA_SWEBENCH_PYTHON_BIN

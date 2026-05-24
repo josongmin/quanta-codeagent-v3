@@ -17,7 +17,7 @@ evidence:
     - src/tool/edit/strategy-hint.ts
   adrs: [19]
   tests:
-    unit: []
+    unit: ["tests/unit/edit-recovery-hellgate.test.ts", "tests/unit/edit-strategy-hint.test.ts"]
     integration: []
     contract: []
 knobs: []

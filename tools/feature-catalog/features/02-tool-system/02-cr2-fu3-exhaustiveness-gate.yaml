@@ -18,7 +18,7 @@ evidence:
     - src/tool/edit/exact.ts
   adrs: [19]
   tests:
-    unit: []
+    unit: ["tests/unit/edit-recovery-hellgate.test.ts", "tests/unit/edit-strategy-hint.test.ts", "tests/unit/edit.test.ts"]
     integration: []
     contract: []
 knobs: []

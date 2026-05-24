@@ -3,7 +3,7 @@ title: hellgate test pattern — 적대적 회귀 봉인 (`tests/unit/*-hellgate
 section: 7
 subsystem: 회귀 봉인 testing infra (quanta-wins 축의 적대 케이스 sealing)
 order: 70
-maturity: L5
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -54,3 +54,5 @@ notes: |
   `may-22-quanta-wins-hellgate-verification` 회기에서 17 배터리 / 276
   적대 케이스로 quanta-comparison 이긴 축들을 1차 봉인 (이후 git-axis
   R1/R2에서 9 추가 → 24+).
+
+  L5→L2: no test imports evidence.code paths

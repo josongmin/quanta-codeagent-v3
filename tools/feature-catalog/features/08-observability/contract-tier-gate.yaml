@@ -3,7 +3,7 @@ title: contract-tier gate — REQUIRE_CONTRACT skip-vs-fail switch (Docker / LSP
 section: 8
 subsystem: 4-tier 테스트 (unit · integration · contract · smoke) — RFC §10.3 / ADR-0003
 order: 80
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
@@ -31,10 +31,7 @@ evidence:
   tests:
     unit: []
     integration: []
-    contract:
-      - tests/contract/sandbox-docker.test.ts
-      - tests/contract/lsp-typescript.test.ts
-      - tests/contract/lsp-pyright.test.ts
+    contract: []
 knobs:
   - REQUIRE_CONTRACT
 deliberate_hold: null
@@ -44,3 +41,5 @@ notes: |
   결과적으로 (a) 의존성 미설치 워크스테이션도 0-fail, (b) CI 는 강제 fail,
   (c) bun:test 가 skipped 카운트를 표시 → 침묵 없음. _guard 는 가용성
   signal 만 반환하며 spawn/I/O 는 호출자가 소유한다 (slice-isolation).
+
+  L4→L2: no test imports evidence.code paths

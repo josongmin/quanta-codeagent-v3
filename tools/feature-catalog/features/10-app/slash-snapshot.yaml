@@ -34,7 +34,7 @@ evidence:
     - src/apps/cli/snapshot-cmd.ts
   adrs: [122]
   tests:
-    unit: []
+    unit: ["tests/unit/cli-rewind-slash-hellgate.test.ts"]
     integration: []
     contract: []
 knobs: []

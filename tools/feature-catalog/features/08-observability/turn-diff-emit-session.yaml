@@ -3,7 +3,7 @@ title: TurnDiffSession — per-turn anchor → endTurn state machine
 section: 8
 subsystem: Git observability wiring (ADR-0110)
 order: 111
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
@@ -40,3 +40,5 @@ notes: |
   stream. Future loop integration can grow a typed
   `gitObservability?: GitObservability` field on its run config and
   forward the same calls (no breaking change to this surface required).
+
+  L4→L2: no test imports evidence.code paths

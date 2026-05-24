@@ -3,7 +3,7 @@ title: IPC transports — in-memory / stdio / uds / websocket
 section: 9
 subsystem: IPC byte shuttle — 4 transport implementations
 order: 35
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [api]
 monitoring: partial
@@ -44,3 +44,5 @@ notes: |
   is trivial. `wrapDuplexAsUdsTransport` and `wrapWebSocketLikeAsTransport`
   let surface code adapt arbitrary duplex / WS-like objects without coupling
   `@/ipc` to a specific server lib.
+
+  L4→L2: no test imports evidence.code paths

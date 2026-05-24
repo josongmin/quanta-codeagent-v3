@@ -3,7 +3,7 @@ title: Seatbelt (SBPL) profile compiler — macOS sandbox-exec text
 section: 9
 subsystem: runtime/os-sandbox — macOS profile compilation
 order: 41
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: integrated
@@ -43,3 +43,5 @@ notes: |
   the sandbox useless — `process-exec` of new binaries is what is denied
   in `read-only` / `workspace-write`). Pairs with `landlock-degraded-passthrough`
   (Linux backend) and `defaultOsSandbox` (the platform-aware router).
+
+  L4→L2: no test imports evidence.code paths

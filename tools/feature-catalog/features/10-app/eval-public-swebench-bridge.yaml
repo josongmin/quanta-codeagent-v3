@@ -3,7 +3,7 @@ title: eval Tier 2 — public bench bridge (SWE-bench Verified report → Public
 section: 10
 subsystem: eval 앱 — Tier 2 외부 벤치 wiring
 order: 90
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
@@ -42,3 +42,5 @@ notes: |
   (다른 셋은 향후 adapter 추가 시 mapping 즉시 사용 가능). 향후 raw bench
   output 직접 parse path 추가 시 이 bridge에 passthrough로 연결, 별도 slice
   생성 금지.
+
+  L3→L2: no test imports evidence.code paths

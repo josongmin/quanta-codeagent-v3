@@ -3,7 +3,7 @@ title: buildSeeds — Agentless temperature diversification + mixed-model voting
 section: 6
 subsystem: Speculative branch search seeding (Agentless §3.1 + §4.2, ADR-0084)
 order: 85
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
@@ -39,3 +39,5 @@ notes: |
   the faithful baseline; remaining candidates rotate through diversifier
   nudges. Two-decimal rounding on temperatures so OTel attribute values
   are stable across runs.
+
+  L4→L2: no test imports evidence.code paths

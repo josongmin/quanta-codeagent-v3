@@ -34,7 +34,7 @@ evidence:
     - src/agent/prompt-rules/pr-agent.ts
   adrs: [92]
   tests:
-    unit: []
+    unit: ["tests/unit/agent/prompt-rules/byte-stable.test.ts", "tests/unit/agent/prompt-rules/packs.test.ts", "tests/unit/apps/agent/anti-regression-invariants.test.ts"]
     integration: []
     contract: []
 knobs: []

@@ -3,7 +3,7 @@ title: QUANTA_BENCH_TIMEOUT_MS
 section: 10
 subsystem: 벤치
 order: 5
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -25,4 +25,4 @@ evidence:
     contract: []
 knobs: [QUANTA_BENCH_TIMEOUT_MS]
 deliberate_hold: null
-notes: ''
+notes: 'L4→L2: no test imports evidence.code paths'

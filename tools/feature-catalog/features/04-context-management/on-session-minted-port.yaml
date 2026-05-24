@@ -32,8 +32,8 @@ evidence:
     - src/apps/cli/status-pills.ts
   adrs: []
   tests:
-    unit: []
-    integration: []
+    unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts"]
+    integration: ["tests/integration/cli-export-assembly.test.ts", "tests/integration/session-ux-e2e.test.ts", "tests/integration/skills-slash-e2e-hellgate.test.ts"]
     contract: []
 knobs: []
 deliberate_hold: null

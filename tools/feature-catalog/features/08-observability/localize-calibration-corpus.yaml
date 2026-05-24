@@ -3,7 +3,7 @@ title: localize 도구 calibration — recall@K / MRR 측정 코퍼스 (regressi
 section: 8
 subsystem: 알고리즘 calibration (no-heuristics-only-validated 원칙)
 order: 85
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
@@ -51,3 +51,5 @@ notes: |
   (`post-r-phase9.json`/`post-r-phase10*.json`)는 R-Phase ranking 알고리즘
   변경 전후를 보존 — 측정 instrument 자체이므로 drop-list 에 포함. 미래
   변경자가 baseline diff 만 보고도 algo regress 를 잡을 수 있게 in-tree 유지.
+
+  L3→L2: no test imports evidence.code paths

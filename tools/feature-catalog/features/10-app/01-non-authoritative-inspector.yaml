@@ -20,8 +20,8 @@ evidence:
     - src/apps/probe/render.ts
   adrs: [10]
   tests:
-    unit: []
-    integration: []
+    unit: ["tests/unit/probe-parse.test.ts", "tests/unit/probe-triage.test.ts", "tests/unit/probe.test.ts"]
+    integration: ["tests/integration/probe.test.ts"]
     contract: []
 knobs: []
 deliberate_hold: null

@@ -24,8 +24,8 @@ evidence:
     - src/apps/cli/internal.ts
   adrs: [25]
   tests:
-    unit: []
-    integration: []
+    unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts", "tests/unit/git-env-and-budget-hellgate.test.ts"]
+    integration: ["tests/integration/cli-export-assembly.test.ts", "tests/integration/session-ux-e2e.test.ts"]
     contract: []
 knobs: [QUANTA_GIT_TOOLS]
 deliberate_hold: null

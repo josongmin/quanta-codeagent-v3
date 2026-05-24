@@ -33,8 +33,8 @@ evidence:
     - src/shared/runtime-config.ts
   adrs: []
   tests:
-    unit: []
-    integration: []
+    unit: ["tests/unit/recovery-hell.test.ts", "tests/unit/recovery-hellgate.test.ts", "tests/unit/recovery.test.ts", "tests/unit/refusal-handling.test.ts", "tests/unit/subagent-runner.test.ts", "tests/unit/subagent-seed-augmentation.test.ts"]
+    integration: ["tests/integration/multi-plane-e2e-hellgate.test.ts"]
     contract: []
 knobs: []
 deliberate_hold: null

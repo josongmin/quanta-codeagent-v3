@@ -3,7 +3,7 @@ title: BudgetDials / BudgetCaps / BudgetExhaustionPolicy pure types
 section: 7
 subsystem: 예산 / exhaustion 게이트 (RFC may-22 §6)
 order: 51
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
@@ -39,3 +39,5 @@ notes: |
   shape (`type BudgetCaps = BudgetDials`) so structural assertions document
   the relationship. Operator-visible dial values live ONLY in
   `run-mode/presets#BUDGET_PRESETS` (no other "magic numbers" file).
+
+  L4→L2: no test imports evidence.code paths

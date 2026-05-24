@@ -19,7 +19,7 @@ evidence:
   adrs: []
   tests:
     unit: []
-    integration: []
+    integration: ["tests/integration/bench-eval.test.ts"]
     contract: []
 knobs: []
 deliberate_hold: null

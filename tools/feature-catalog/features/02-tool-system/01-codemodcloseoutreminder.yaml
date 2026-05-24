@@ -18,8 +18,8 @@ evidence:
     - src/agent/guards/closeout-guard.ts
   adrs: [19]
   tests:
-    unit: []
-    integration: []
+    unit: ["tests/unit/agent/guard-chain.test.ts", "tests/unit/closeout-guard.test.ts", "tests/unit/code-mod-closeout.test.ts"]
+    integration: ["tests/integration/sota-codex-full.test.ts"]
     contract: []
 knobs: []
 deliberate_hold: null

@@ -3,7 +3,7 @@ title: clampDials — propositional dial clamping with operator log
 section: 10
 subsystem: Unified Agent Runtime — 모드 매트릭스 dial 보정 (RFC may-22 §8.3)
 order: 7
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -38,3 +38,5 @@ notes: |
   caller-supplied values. The isValidDial guard mirrors the meter's
   `Number.isFinite` pattern so a poisoned input is dropped (treated as
   absent) rather than propagated. Fresh-object output; inputs never mutated.
+
+  L4→L2: no test imports evidence.code paths

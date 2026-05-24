@@ -3,7 +3,7 @@ title: Permission recorder — observability fail-open invariant (verdict cannot
 section: 3
 subsystem: Permission slice telemetry — "observability bugs MUST NOT abort a permission decision"
 order: 98
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
@@ -41,3 +41,5 @@ notes: |
   Slice rule: this module imports NOTHING beyond TypeScript built-ins (RFC 3.1
   isolation; cross-slice OTel routing happens in an adapter in `@/agent` or
   the composition root).
+
+  L4→L2: no test imports evidence.code paths

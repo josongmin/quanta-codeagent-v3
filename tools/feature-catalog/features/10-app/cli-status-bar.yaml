@@ -3,7 +3,7 @@ title: CLI status-bar — DECSTBM scroll-region pinned bottom row
 section: 10
 subsystem: CLI chrome — fixed status row
 order: 25
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a
@@ -48,3 +48,5 @@ notes: |
   screen). status-bar is the only module that actually mutates the
   terminal scroll region — and therefore the only one with a real
   teardown obligation. Slice: `src/apps/cli` only (terminal-specific).
+
+  L4→L2: no test imports evidence.code paths

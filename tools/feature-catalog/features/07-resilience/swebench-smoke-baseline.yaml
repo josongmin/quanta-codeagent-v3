@@ -3,7 +3,7 @@ title: SWE-bench Verified 6-pick smoke baseline (recorded tier-0 regression gate
 section: 7
 subsystem: 회귀 스모크 (SWE-bench Verified subset, gpt-5 baseline, arm64 Docker grading)
 order: 60
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: partial
@@ -53,3 +53,5 @@ notes: |
   Deliberately excluded: scikit-learn / matplotlib / astropy / xarray
   (heavy C-ext) + django (slow setup). 다른 28 instances도 동일 필터 통과
   (`select.ts --audit` 출력) — 6개는 repo diversity + smallest statement로 pin.
+
+  L3→L2: no test imports evidence.code paths

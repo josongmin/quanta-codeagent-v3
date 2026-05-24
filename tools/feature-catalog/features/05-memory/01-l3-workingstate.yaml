@@ -3,7 +3,7 @@ title: L3 WorkingState
 section: 5
 subsystem: 5-layer naming (ADR-0021)
 order: 1
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -23,4 +23,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: ''
+notes: 'L4→L2: no test imports evidence.code paths'

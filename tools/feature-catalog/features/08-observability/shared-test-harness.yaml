@@ -3,7 +3,7 @@ title: shared test harness — ScriptedLLM / FakeLLM / RecordingStream / cfg / f
 section: 8
 subsystem: 테스트 인프라 (LLM·StreamPort 더블 + AgentConfig 빌더 단일 출처)
 order: 75
-maturity: L5
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
@@ -54,3 +54,5 @@ notes: |
   `RecordingStream` / `cfg` locally" 규칙이 이 invariant 의 사회적 강제,
   파일 1 개 SSOT 가 기술적 강제. `withTimeout` 사용량(86) 이 harness 의
   spread (~63% of consumers) 를 보여준다.
+
+  L5→L2: no test imports evidence.code paths
