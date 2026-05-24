@@ -1,0 +1,89 @@
+id: retrieval-composition-wire
+title: Retrieval-stack composition-root wire — buildRetrievalStackCore + memory/localize bridges + AgentConfig slot (ADR-0159 wire)
+section: 5
+subsystem: retrieval SOTA stack — composition wire (ADR-0159)
+order: 96
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, ci-bot, ide, daemon]
+configurable: env-gated
+owners: ["@songmin", "team-memory"]
+labels: ["surface:core", "adr:0159", "wire"]
+depends_on:
+  - retrieval-rerank-registry
+  - retrieval-hybrid-query
+  - retrieval-commit-embedder
+  - retrieval-multi-vendor-embedding
+purpose: |
+  Composition-root wire for the ADR-0159 retrieval stack. The 5 retrieval
+  axes (rerank registry / chunk-bucket / commit-embedder / multi-vendor
+  embedding / hybrid-query funnel) landed as primitives — until this wire,
+  ZERO invocations existed from src/runner/ or src/apps/ (dead code).
+
+  This feature adds:
+    1. `buildRetrievalStackCore({enabled, embedding?, gitLog?, tierClassifier?,
+       defaultReranker?, bm25Alpha?, commitCacheMax?})` — surface-agnostic
+       assembler returning a `RetrievalStack` (registry + defaultReranker +
+       optional embedding / commitEmbedder). DEFAULT-OFF: absent / enabled
+       !== true ⇒ undefined.
+    2. `rankWithRetrievalStack(candidates, query, now, stack?)` — memory↔
+       retrieval bridge. Stack absent ⇒ rankEntries verbatim (byte-
+       identical). Stack present ⇒ two-stage (memory weighted-sum +
+       reranker over the ranked list).
+    3. `runLocalizeHybrid({query, type, bm25Source, embeddingSource?,
+       stack?, limit?})` — localize↔retrieval bridge. Stack absent ⇒
+       identity pass-through. Stack present ⇒ 3-stage funnel
+       (BM25/embedding/hybrid+RRF) + final reranker.
+    4. `AgentConfig.retrievalStack` slot — surface attaches built stack;
+       consumers read it back through DI. Loop NEVER reads the slot
+       (caller-side composition only).
+    5. `apps/agent/index.ts` env knob — `QUANTA_RETRIEVAL_HYBRID="1"`
+       (strict-equals "1") triggers `buildRetrievalStackCore({enabled:
+       true})` at the surface entry; every mode runner inherits the stack
+       via `AssembleRequest.base.retrievalStack`.
+
+  Slice fence respected: `@/runner` → `@/retrieval` is the conventional
+  direction; bridges live under `@/runner/assemble/retrieval-*-bridge.ts`
+  because `@/memory` and `@/tool` are forbidden from reaching
+  `@/retrieval` per RFC §3.1.
+evidence:
+  code:
+    - src/runner/assemble/retrieval.ts
+    - src/runner/assemble/retrieval-memory-bridge.ts
+    - src/runner/assemble/retrieval-localize-bridge.ts
+    - src/runner/assemble/config.ts
+    - src/runner/assemble/index.ts
+    - src/apps/agent/index.ts
+    - src/agent/types.ts
+  adrs: [159]
+  tests:
+    unit:
+      - tests/unit/retrieval-composition-wire-hellgate.test.ts
+    integration:
+      - tests/integration/retrieval-composition-root.test.ts
+    contract: []
+knobs:
+  - QUANTA_RETRIEVAL_HYBRID="1" — single composition-root env knob, strict-equals "1"; any other value (incl. "0" / "true" / unset) ⇒ stack OFF
+  - RetrievalAssembleInput.defaultReranker — promote `identity` (default) / `bm25-secondary` / `score-fusion-rrf` (or `tier-aware` when classifier supplied)
+  - RetrievalAssembleInput.tierClassifier — when present, registers the tier-aware reranker
+  - RetrievalAssembleInput.embedding + .gitLog — when both present, wires CommitEmbedder
+  - RetrievalAssembleInput.bm25Alpha — first-stage / second-stage blend [0,1] (default 0.5)
+  - RetrievalAssembleInput.commitCacheMax — LRU cap on commit-embedder cache (default 1024)
+deliberate_hold: null
+notes: |
+  Default-OFF discipline (RFC §1.2): every legacy caller is byte-
+  identical when the env knob is absent. The slot is omitted entirely
+  from AgentConfig (respects exactOptionalPropertyTypes). Bridge functions
+  return identity behavior when `stack` is undefined.
+
+  Loud silent-default avoidance: env value strict-equals "1" — a typo
+  like "true" / "yes" / "1 " is treated as off rather than silently
+  enabling. The builder also throws RetrievalError when promoting an
+  unregistered reranker kind (e.g. `tier-aware` without a classifier)
+  — caller asked for a strategy by name and is told so loudly.
+
+  Cohere/Gemini/xAI/Moonshot/NVIDIA/zai embedding adapters remain type-
+  level stubs (per ADR-0159 negative invariant). Runtime wiring for any
+  of them is a one-file substitution — this wire is vendor-agnostic.

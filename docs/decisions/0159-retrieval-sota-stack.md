@@ -201,8 +201,76 @@ Returns `RetrievalCandidate[]`. Pure — no I/O of its own; the sources are inje
 - `multi-vendor-embedding.yaml`
 - `hybrid-query.yaml`
 
-## Out of scope
+## Composition-root wire (2026-05-25 follow-up — Phases A-F)
 
-- Wiring `@/retrieval` into `@/agent` assembler (separate ADR / next sprint — primitives first, then integration)
-- Runtime wiring for cohere/gemini/xai/moonshot/nvidia/zai (each is a one-file follow-up; type-level wire is in this ADR)
-- Cross-encoder + ColBERT reranker — future ADR if demand surfaces in telemetry
+The primitives shipped without a composition-root wire — `grep -rE
+"runHybridQuery|RerankRegistry|HybridQueryInput|from \"@/retrieval\"" src/runner/ src/apps/`
+returned ZERO hits, meaning the slice was dead code from the agent loop's
+perspective. The wire adds:
+
+- `src/runner/assemble/retrieval.ts` — `buildRetrievalStackCore(input)`.
+  Surface-agnostic assembler returning a `RetrievalStack` (registry +
+  `defaultReranker` + optional `embedding` / `commitEmbedder`). Default-OFF:
+  `input.enabled !== true` ⇒ `undefined` ⇒ AgentConfig slot omitted (byte-
+  identical for every legacy caller). Builds with strict OCP closure: the
+  3 builtin rerankers (identity / bm25-secondary / score-fusion-rrf) are
+  always wired; `tier-aware` is wired only when `tierClassifier` is supplied;
+  promoting an unregistered kind throws `RetrievalError` (loud).
+- `src/runner/assemble/retrieval-memory-bridge.ts` — `rankWithRetrievalStack
+  (candidates, query, now, stack?)`. Memory↔retrieval bridge. Stack absent
+  ⇒ `rankEntries(...)` verbatim. Stack present ⇒ two-stage funnel using
+  rank ordinal as the neutral base score (avoids letting the weighted-sum
+  dominate the rerank). `@/memory` is UNTOUCHED — bridge lives in `@/runner`
+  so the memory slice fence (memory MUST NOT import @/retrieval) is
+  respected.
+- `src/runner/assemble/retrieval-localize-bridge.ts` — `runLocalizeHybrid
+  ({query, type, bm25Source, embeddingSource?, stack?, limit?})`.
+  Localize↔retrieval bridge. Stack absent ⇒ identity (lexical hits as
+  candidates). Stack present ⇒ 3-stage funnel (BM25 / embedding / hybrid+RRF)
+  with the stack's `defaultReranker` as final stage. `@/tool/localize/`
+  is UNTOUCHED.
+- `src/agent/types.ts` — `AgentConfig.retrievalStack?: { registry, default
+  Reranker, embedding?, commitEmbedder? }`. Typed against `@/retrieval` (the
+  conventional direction — `@/retrieval` forbidden from importing `@/agent`
+  per the slice fence above; the reverse is fine).
+- `src/runner/assemble/config.ts` — `SessionDeps.retrievalStack` + the
+  conditional spread `...(d.retrievalStack !== undefined ? { retrievalStack:
+  d.retrievalStack } : {})` (preserves `exactOptionalPropertyTypes` ⇒ the
+  slot is omitted entirely when undefined).
+- `src/apps/agent/index.ts` — `QUANTA_RETRIEVAL_HYBRID="1"` (strict-equals
+  "1") env knob → `buildRetrievalStackCore({enabled: true})` → attached to
+  `AssembleRequest.base.retrievalStack`. Every mode runner (headless /
+  batch / ci-bot / interactive / daemon / ide) inherits the stack.
+
+### Validation
+
+- `grep -rE "buildRetrievalStackCore|runHybridQuery|RerankRegistry|retrievalStack" src/runner/ src/apps/`
+  goes from 0 → 21+ hits (wire confirmed).
+- `tests/unit/retrieval-composition-wire-hellgate.test.ts`: 25 adversarial
+  cases on the builder + bridges (default-OFF strict-equals, opt-in shape,
+  unregistered-kind throw, bridge identity, malformed reranker output,
+  concurrent isolation, bm25Alpha / commitCacheMax threading).
+- `tests/integration/retrieval-composition-root.test.ts`: 16 e2e cases
+  covering env-projected build → AgentConfig slot → consumer reads back,
+  runAgent never touches the slot, cross-cut (memory + localize via the
+  same stack), abort safety, structural assignability sentinel.
+- `bun test tests/unit/retrieval-*.test.ts tests/integration/retrieval-*.test.ts`:
+  151 pass / 0 fail / 269 expects.
+- Regression: `bun test tests/unit/agent-*.test.ts tests/unit/runner-*.test.ts
+  tests/unit/memory-*.test.ts` ⇒ 365 pass / 0 fail (no regression).
+
+## Out of scope (still — post-wire)
+
+- Runtime wiring for cohere/gemini/xai/moonshot/nvidia/zai (each is a one-file
+  follow-up; type-level wire is in this ADR — the composition root accepts
+  any concrete `EmbeddingPort` via DI).
+- Cross-encoder + ColBERT reranker — future ADR if demand surfaces in
+  telemetry.
+- Loop-side consumption of the stack: `runAgent` does NOT read
+  `AgentConfig.retrievalStack`. The wire is caller-side composition only
+  (memory recall + future hybrid_localize tool). Adding loop-side consumers
+  is a separate ADR if needed.
+- Per-mode default reranker promotion (e.g. ci-bot promotes
+  `score-fusion-rrf` by default). Today the builder uses `identity` as
+  the safe default; per-mode promotion is a follow-up tweak in the
+  mode-preset files.
