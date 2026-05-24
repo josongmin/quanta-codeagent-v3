@@ -1,67 +1,29 @@
-import { homedir } from "node:os"
-import { emitKeypressEvents } from "node:readline"
 import * as readline from "node:readline/promises"
-import {
-  type AgentConfig,
-  buildSystemPrompt,
-  type EffortLevel,
-  parseEffort,
-  RetryingLLM,
-  resolveAgentMode,
-} from "@/agent"
+import { type AgentConfig, type EffortLevel, parseEffort, resolveAgentMode } from "@/agent"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
-import type { ImageBlock, LLMPort, Message } from "@/llm"
+import type { Message } from "@/llm"
 import {
   buildCostDashboard,
-  buildShellOtelObserver,
   GEN_AI_ATTRS,
   renderDashboardText,
-  StructuredLogger,
   summarizeWorkMetrics,
 } from "@/observability"
-import type { PermissionContext, PermissionMode, ToolAction } from "@/permission"
-import { type PromptPayload, type PromptSource, runInteractive, runOnce } from "@/runner"
-import { logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
-import { composeShellObservers } from "@/tool"
 import {
   type BranchProgressTracker,
   createBranchProgressTracker,
   isBranchProgressEnabled,
 } from "./branch-search-progress"
 import { type CostPanel, createCostPanel, isCostPanelEnabled } from "./cost-panel"
-import { diffPreviewEnabled, renderActionDiff } from "./diff-preview"
 import type { HistorySessionState } from "./history-cmd"
-import { createIdleMonitor, type IdleMonitor } from "./idle-monitor"
+import type { IdleMonitor } from "./idle-monitor"
 import { runImageCmd } from "./image-cmd"
-import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
-import {
-  argvImages,
-  argvPrompt,
-  assembleConfig,
-  buildLLM,
-  buildSkillsConfig,
-  buildStreaming,
-  buildSummarizerLlm,
-  buildTooling,
-  composeLLM,
-  DEFAULT_MODEL,
-  env,
-  isPathLikeToken,
-  loadFeatures,
-  newSessionFlag,
-  observeDir,
-  pickPersona,
-  pickProvider,
-  resolveResume,
-  type SessionDeps,
-  titleFlag,
-} from "./internal"
+import { assembleConfig, buildSkillsConfig, env, type SessionDeps } from "./internal"
 import {
   createLifecyclePills,
   isLifecyclePillsEnabled,
@@ -69,20 +31,14 @@ import {
   type McpPillServer,
   readPillEnvFlags,
 } from "./lifecycle-pills"
-import { isPlanStoreEnabled } from "./plan-store-enabled"
 import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { AbortError, readLine } from "./raw-line-reader"
-import { createRejectCounter, type RejectCounter } from "./reject-counter"
-import { idleBanner, rejectExitBanner } from "./repl-banners"
-import { paintBlankLine } from "./repl-paint"
-import { swallowAndLog } from "./repl-silent-catch"
+import { runSessionLoop } from "./repl/session-loop"
+import { setupSession } from "./repl/session-setup"
 import type { RewindSlashState } from "./rewind-cmd"
 import { createCliRewindGitPort, isCliRewindGitEnabled } from "./rewind-git"
 import { buildRuleInventory, isRulePillEnabled } from "./rule-indicator"
-import { parseSandboxMode } from "./sandbox-mode-parse"
 import { runSessionCommand } from "./session-commands"
-import { switchToSessionCwd } from "./session-io"
-import { buildShellStreamPainter } from "./shell-stream-painter"
 import type { SideChatSessionState } from "./side-cmd"
 import {
   describeSlashCommand,
@@ -91,8 +47,7 @@ import {
   type SkillRow,
   slashCompleter,
 } from "./slash-commands"
-import { installStatusBar, type StatusBar } from "./status-bar"
-import { buildStatusFlashConfig, type StatusFlashConfig } from "./status-flash-config"
+import type { StatusBar } from "./status-bar"
 import { createStatusPills, type SandboxMode } from "./status-pills"
 import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
 import {
@@ -183,20 +138,6 @@ export const topLevelUsage = (): string =>
     "  -h, --help                           Show this help",
     "",
   ].join("\n")
-
-/** ADR-0083: resolve `--image <path>` attachments to {@link ImageBlock}s, or
- *  exit 1 with a clear message on a load failure (bad path / unsupported type /
- *  oversize). Extracted from `runRepl` so the loader's try/catch does not push
- *  that already-large function over the biome cognitive-complexity budget.
- *  Empty when no `--image` is passed (byte-identical text-only seed). */
-const loadSeedImages = (): ImageBlock[] => {
-  try {
-    return argvImages().map(loadImageBlock)
-  } catch (e) {
-    logger.error((e as Error).message)
-    process.exit(1)
-  }
-}
 
 /** Build the per-REPL multi-modal image queue (ADR-0083 extension). Default-ON
  *  with cap 5; `QUANTA_IMAGE_QUEUE=0` returns `undefined` so the surface
@@ -383,15 +324,14 @@ const buildBranchProgressOrUndefined = (
 /** S3 plan-store wire — default-OFF. The `/plan` slash command prints
  *  "not wired" unless `QUANTA_PLAN_STORE=1` is set (opt-in). When opt-in,
  *  we mint an in-memory `PlanStore` and thread it through `SessionDeps` so
- *  the agent's plan tools mutate the SAME store the surface reads from.
- *
- *  The opt-IN env predicate lives in `./plan-store-enabled` alongside the
- *  peer gates (`isCostPanelEnabled`, `isLifecyclePillsEnabled`,
- *  `isBranchProgressEnabled`) so a future change to the "falsy string"
- *  family flips ALL surface gates together. Byte-identical to the prior
- *  inline parser (same `0`/`false`/`off`/`no` family + empty + undefined). */
+ *  the agent's plan tools mutate the SAME store the surface reads from. */
 const buildPlanStoreOrUndefined = (envSource: NodeJS.ProcessEnv): PlanStore | undefined => {
-  if (!isPlanStoreEnabled(envSource)) return undefined
+  const knob = envSource.QUANTA_PLAN_STORE
+  if (knob === undefined) return undefined
+  const norm = knob.trim().toLowerCase()
+  if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
+    return undefined
+  }
   return createInMemoryPlanStore({ now: Date.now })
 }
 
@@ -479,7 +419,7 @@ const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
  *  Every other event is ignored — the indicator is purely a UX surface, not
  *  a trajectory recorder. Errors in the indicator are swallowed in place so
  *  a faulty render can never poison the recorder path. */
-const buildIndicatorPort = (ind: TurnIndicator, slog?: StructuredLogger): StreamPort => ({
+const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
   emit: (event): void => {
     try {
       if (event.type === "assistant_text" || event.type === "tool_call") {
@@ -492,12 +432,9 @@ const buildIndicatorPort = (ind: TurnIndicator, slog?: StructuredLogger): Stream
           outputTokens: event.outputTokens,
         })
       }
-    } catch (err) {
+    } catch {
       // Intentional: an indicator failure must not surface as an emit error
-      // (TeeStream would otherwise track it as a degraded record). Telemetry
-      // hole sealed by emitting a `warn` line — `swallowAndLog` defensively
-      // wraps the sink so a misbehaving logger cannot escalate.
-      swallowAndLog(slog, "repl.indicator_failure", err)
+      // (TeeStream would otherwise track it as a degraded record).
     }
   },
 })
@@ -538,7 +475,6 @@ const buildTurnIndicatorAndStream = (
   envSource: NodeJS.ProcessEnv,
   isTTY: boolean | undefined,
   intervalEnv: string,
-  slog?: StructuredLogger,
 ): { indicator: TurnIndicator; turnStream: StreamPort } => {
   const enabled = isIndicatorEnabled(envSource, isTTY)
   const intervalMs = Number(intervalEnv)
@@ -548,7 +484,7 @@ const buildTurnIndicatorAndStream = (
     intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 80,
   })
   if (!enabled) return { indicator, turnStream: stream }
-  return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator, slog)]) }
+  return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator)]) }
 }
 
 const buildSkillsCallback = (
@@ -588,14 +524,10 @@ const installPills = (deps: {
   cwd: string
   planMode: boolean
   skillsConfig: AgentConfig["skills"] | undefined
-  slog?: StructuredLogger
 }): ReturnType<typeof createStatusPills> => {
   const initialAgentMode = resolveAgentMode(undefined, deps.planMode)
   const initialEffort: EffortLevel | undefined = parseEffort(env("QUANTA_EFFORT", ""))
-  // Hardened cast: `parseSandboxMode` validates against the canonical union,
-  // so a bogus `QUANTA_SANDBOX=badvalue` no longer propagates as a literal
-  // label into the sandbox pill (silent UI lie). Empty/unset/unknown ⇒ `"default"`.
-  const initialSandbox: SandboxMode = parseSandboxMode(env("QUANTA_SANDBOX", "default"))
+  const initialSandbox: SandboxMode = (env("QUANTA_SANDBOX", "default") as SandboxMode) ?? "default"
   const pills = createStatusPills({
     statusBar: deps.statusBar,
     initial: {
@@ -612,9 +544,7 @@ const installPills = (deps: {
   if (skillsCbForPills !== undefined) {
     void skillsCbForPills()
       .then((rows) => pills.update({ activeSkills: rows.map((r) => ({ name: r.name })) }))
-      // best-effort; pills stay empty on discover error. Telemetry hole sealed
-      // by `swallowAndLog` — failure isolation preserved (no rethrow).
-      .catch((err) => swallowAndLog(deps.slog, "repl.skills_callback_failure", err))
+      .catch(() => undefined) // best-effort; pills stay empty on discover error
   }
   // Rule indicator — best-effort fs walk shadowing the agent loop's loaders.
   // Off-loop and cached for the REPL session; the loop's own load is
@@ -631,7 +561,7 @@ const installPills = (deps: {
           })
         }
       })
-      .catch((err) => swallowAndLog(deps.slog, "repl.rule_inventory_failure", err))
+      .catch(() => undefined)
   }
   return pills
 }
@@ -729,9 +659,7 @@ export interface RunReplLoopRawOptions {
 
 export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void> => {
   const { signal, turn, slashCtx, meta, history, multiline } = opts
-  // Initial blank row: matches the prior bare write byte-identically (single
-  // `\n` to stderr) — centralized in `paintBlankLine`.
-  paintBlankLine()
+  process.stderr.write("\n")
   while (!signal.aborted) {
     let input: string
     try {
@@ -751,19 +679,16 @@ export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void>
       throw e
     }
     if (input === "") {
-      // Blank line: paint a separator (byte-identical to the prior write).
-      paintBlankLine()
+      process.stderr.write("\n")
       continue
     }
     if (input === "/exit" || input === "/quit") break
     if (await tryRunReplSlash(input, slashCtx)) {
-      // Slash command handled in-REPL: paint a separator before the next prompt.
-      paintBlankLine()
+      process.stderr.write("\n")
       continue
     }
     await turn(input)
-    // Post-turn separator (byte-identical to the prior write).
-    paintBlankLine()
+    process.stderr.write("\n")
   }
 }
 
@@ -807,115 +732,15 @@ export const runSlashMain = async (_tok: string): Promise<number> => {
   })
 }
 
-/** Render the per-turn cost+cache dashboard to stderr + log a structured
- *  snapshot. No-op when metrics are off (default). Extracted from the
- *  in-loop block so each closure stays within the biome cognitive-complexity
- *  budget. ADR-0085. */
-const renderTurnDashboard = (
-  metrics: { snapshot: () => Parameters<typeof buildCostDashboard>[0] } | undefined,
-  model: string,
-  slog: StructuredLogger,
-): void => {
-  if (!metrics) return
-  const snap = metrics.snapshot()
-  slog.info("metrics.snapshot", { snapshot: snap })
-  process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
-}
-
 /** Print a turn-level error inline + flash the status bar. Used by the
- *  interactive wrapTurn to keep the REPL alive when a single turn throws.
- *  Extracted to keep wrapTurn under the biome cognitive-complexity budget.
- *
- *  The flash duration + truncate cap come from {@link StatusFlashConfig}
- *  (env-overrideable via `QUANTA_FLASH_ERROR_MS` / `QUANTA_FLASH_TRUNCATE_CHARS`).
- *  Defaults preserve the prior 4000 ms linger + 120-char cap byte-identically. */
-const renderTurnError = (e: unknown, statusBar: StatusBar, flash: StatusFlashConfig): void => {
+ *  interactive turn-runner sink to keep the REPL alive when a single turn
+ *  throws. Slice-C: invoked via {@link runOneTurn}.onError so a non-abort
+ *  failure paints the message + a transient and the loop continues. */
+const renderTurnError = (e: unknown, statusBar: StatusBar): void => {
   const msg = e instanceof Error ? e.message : String(e)
   process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
-  statusBar.transient(`error: ${msg.slice(0, flash.truncateChars)}`, flash.errorMs)
+  statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
 }
-
-/** Read one trimmed line from the raw-mode reader. Returns `null` on
- *  AbortError (the prompt was aborted via `signal`). Other exceptions
- *  propagate to the caller. Extracted from {@link buildCliPromptSource} to
- *  keep its `next` closure under the biome cognitive-complexity budget. */
-const readReplLine = async (
-  signal: AbortSignal | undefined,
-  uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
-): Promise<string | null> => {
-  try {
-    const raw = await readLine({
-      prompt: "› ",
-      completer: (line) => slashCompleter(line)[0],
-      describe: describeSlashCommand,
-      ...(signal !== undefined ? { signal } : {}),
-      ...(uxOpts?.promptHistory !== undefined ? { history: uxOpts.promptHistory } : {}),
-      ...(uxOpts?.multiline === true ? { multiline: true } : {}),
-    })
-    return raw.trim()
-  } catch (e) {
-    if (e instanceof AbortError) return null
-    throw e
-  }
-}
-
-/** Read one REPL line and classify it: `null` ⇒ loop exit, `undefined` ⇒
- *  caller should keep looping (blank line or in-REPL slash handled here),
- *  `string` ⇒ forward as the next user prompt. Extracted from the
- *  `PromptSource.next` closure to keep it under the biome complexity budget. */
-const classifyReplLine = async (
-  signal: AbortSignal | undefined,
-  slashCtx: ReplSlashCtx | undefined,
-  uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
-): Promise<string | null | undefined> => {
-  const input = await readReplLine(signal, uxOpts)
-  if (input === null) return null
-  if (input === "/exit" || input === "/quit") return null
-  const handled = input === "" || (await tryRunReplSlash(input, slashCtx))
-  if (handled) {
-    // Blank / handled slash: paint a separator before the next prompt
-    // (byte-identical to the prior bare write).
-    paintBlankLine()
-    return undefined
-  }
-  return input
-}
-
-/** CLI `PromptSource` adapter for the Layer-2 `runInteractive` driver.
- *  Wraps the raw-mode line reader + resolves `/exit` + in-REPL slash dispatch
- *  + blank-line behavior inline — the driver only sees clean prompt strings
- *  (or `null` for loop exit). UI primitives (readline, status bar, Esc-Esc,
- *  shell-stream painter) stay in apps/cli per RFC 3.1 slice rules.
- *
- *  ADR-0083 multi-modal: when `slashCtx.imageQueue` is wired, `next()` drains
- *  the queue on every accepted prompt and returns the `{ text, images }`
- *  PromptPayload form so `runInteractive` attaches the images to THAT turn.
- *  Single-shot: the queue is emptied as a side-effect of `drain()` — the
- *  user re-queues with `/image add` for the following turn. Empty queue
- *  ⇒ returns the plain string form (backward-compat / byte-identical).
- *
- *  Extracted from `runRepl` so each closure stays under the biome cognitive-
- *  complexity budget. The trailing `\n` per branch matches the prior
- *  `runReplLoopRaw` post-line behavior byte-identically. */
-const buildCliPromptSource = (
-  slashCtx: ReplSlashCtx | undefined,
-  uxOpts?: { promptHistory?: PromptHistory; multiline?: boolean },
-): PromptSource => ({
-  next: async (signal) => {
-    while (signal?.aborted !== true) {
-      const next = await classifyReplLine(signal, slashCtx, uxOpts)
-      if (next === undefined) continue
-      if (next === null) return null
-      // Drain the per-turn image queue if wired + non-empty. Single-shot:
-      // `drain()` clears the queue as a side-effect so subsequent turns are
-      // text-only unless the user re-queues with another `/image add`.
-      const queued = slashCtx?.imageQueue?.drain() ?? []
-      if (queued.length === 0) return next
-      return { text: next, images: queued.map((e) => e.block) }
-    }
-    return null
-  },
-})
 
 /**
  * Main REPL/one-shot entry: assembles the agent stack, resolves the resume
@@ -928,706 +753,138 @@ const buildCliPromptSource = (
  * delegating here.
  */
 
-/** Wrap an inner CLI {@link PromptSource} with the Cursor-inspired idle /
- *  snooze gate + reject-counter graceful exit. Extracted from `runRepl` so
- *  that host stays under biome's cognitive-complexity budget.
- *
- *  Order in the `next` loop:
- *   1. `rejects.shouldAutoExit()` ⇒ return `null` (graceful loop exit —
- *      the `runRepl` `finally` still shuts MCP and tears down the status
- *      bar; we do NOT call `process.exit`).
- *   2. `idle.isSnoozed()` ⇒ paint hint banner; the inner read still fires
- *      so the user can type `/resume` to wake.
- *   3. `idle.isIdle()` ⇒ soft hint only (no gate — blocking on idle would
- *      deadlock since a keystroke IS the wake event).
- *   4. After a non-null line: if still snoozed, decline + loop back;
- *      otherwise `idle.markActive()` and return. */
-const wrapPromptSourceWithIdleGate = (args: {
-  readonly inner: PromptSource
-  readonly idle: IdleMonitor
-  readonly rejects: RejectCounter
-  readonly statusBar: StatusBar
-  /** Idle threshold (ms) the {@link IdleMonitor} was built with; interpolated
-   *  INTO the banner copy so the displayed number reflects the actual gate
-   *  (closes "60s" string-drift bug). */
-  readonly idleMs: number
-  /** Reject threshold the {@link RejectCounter} was built with; interpolated
-   *  INTO the exit banner (closes "20 consecutive denials" string-drift bug). */
-  readonly rejectLimit: number
-  /** Flash durations (env-overrideable via the `QUANTA_FLASH_*` family). */
-  readonly flash: StatusFlashConfig
-}): PromptSource => {
-  const { inner, idle, rejects, statusBar, idleMs, rejectLimit, flash } = args
-  const paintGateBanners = (): void => {
-    if (idle.isSnoozed()) {
-      statusBar.transient("⏸ snoozed — type /resume to wake", flash.errorMs)
-      process.stderr.write("[snoozed — type /resume to wake, or wait for the snooze window]\n")
-      return
-    }
-    if (idle.isIdle()) {
-      // Banner number now derived from `idleMs` (the same value the monitor
-      // was built with) — no more silent UI lie when QUANTA_IDLE_MS is set.
-      statusBar.transient(idleBanner(idleMs), flash.idleMs)
-    }
+/** Slice-C: bundle the {@link setupSession} factories the host wires.
+ *  Lifted out of `runRepl` so the orchestrator stays inside the spec's
+ *  ≤ 50 LOC budget — each factory still resolves to the SAME closure the
+ *  prior inline code allocated (byte-identical). */
+const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
+  buildLifecycleBundle,
+  deriveMcpPillServers,
+  buildCostPanelOrUndefined,
+  buildBranchProgressOrUndefined,
+  buildPlanStoreOrUndefined,
+  buildTurnSummaryAndStream,
+  buildTurnIndicatorAndStream,
+  buildWorkMetricsSink,
+  installPills,
+}
+
+/** Slice-C: UX opts (history + multiline) the prompt pipeline consumes.
+ *  Default-ON when the env knob is unset; explicit `=0` reverts to the
+ *  no-history single-line path (byte-identical). */
+const buildPromptUx = (): { promptHistory?: PromptHistory; multiline?: boolean } => {
+  const historyEnabled = env("QUANTA_HISTORY", "1") !== "0"
+  const historyMax = Math.max(1, Number(env("QUANTA_HISTORY_MAX", "1000")))
+  const historyFile = process.env.QUANTA_HISTORY_FILE
+  const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
+    maxLines: historyMax,
+    ...(historyFile !== undefined ? { filePath: historyFile } : {}),
   }
-  /** One read cycle: returns the next prompt payload, `null` for loop exit,
-   *  or `undefined` to signal "retry" (snoozed declined input). Splitting
-   *  this off keeps `next` flat enough for the biome complexity budget.
-   *  Returns the {@link PromptPayload} verbatim so a multi-modal payload
-   *  (`{ text, images }`) flows through this idle/reject gate unchanged. */
-  const readOneGated = async (signal?: AbortSignal): Promise<PromptPayload | null | undefined> => {
-    if (rejects.shouldAutoExit()) {
-      // Banner number now derived from `rejectLimit` (the same value the
-      // counter was built with) — no more silent UI lie on QUANTA_REJECT_LIMIT.
-      process.stderr.write(rejectExitBanner(rejectLimit))
-      return null
-    }
-    paintGateBanners()
-    const next = await inner.next(signal)
-    if (next === null) return null
-    if (idle.isSnoozed()) {
-      process.stderr.write("(snoozed — input declined; type /resume to wake)\n")
-      return undefined
-    }
-    idle.markActive()
-    return next
-  }
+  const promptHistory = historyEnabled ? createPromptHistory(promptHistoryOpts) : undefined
+  const multilineEnabled = env("QUANTA_MULTILINE", "1") !== "0"
   return {
-    next: async (signal) => {
-      while (signal?.aborted !== true) {
-        const out = await readOneGated(signal)
-        if (out === null) return null
-        if (out !== undefined) return out
-      }
-      return null
-    },
+    ...(promptHistory !== undefined ? { promptHistory } : {}),
+    multiline: multilineEnabled,
   }
 }
 
+/** Slice-C SOLID split — thin orchestrator over the 6 helpers under
+ *  `src/apps/cli/repl/`:
+ *
+ *   1. {@link setupSession}            — first-block prelude (session-setup.ts)
+ *   2. {@link composePromptPipeline}   — raw-line ➜ slash ➜ idle (prompt-pipeline.ts)
+ *   3. {@link runOneTurn}              — per-turn wrapper DRY win (turn-runner.ts)
+ *   4. {@link installTurnCancel}       — Esc-Esc / Ctrl+C FSM (turn-cancel-install.ts)
+ *   5. {@link SessionState}            — replaces 5 god-state lets (session-state.ts)
+ *   6. {@link runSessionLoop}          — argv-prompt vs interactive (session-loop.ts)
+ *
+ *  The host (this file) still owns the slashCtx composition + the per-turn
+ *  render sinks (cost dashboard / summary panel / pills flush) so all
+ *  S3-adapter wiring (costPanel / branchProgress / planStore / rewindState)
+ *  stays at the surface. Byte-identical default behavior — every helper is
+ *  a pure relocation of the prior inline code. */
 export const runRepl = async (): Promise<void> => {
-  const provider = pickProvider()
-  const model = env("QUANTA_MODEL", DEFAULT_MODEL[provider])
-  const maxTurns = Number(env("QUANTA_MAX_TURNS", "40"))
-  // Secure-by-default (S7): unattended auto-allow of every mutating tool
-  // gated only by a regex denylist is not secure-by-default. Default is now
-  // `default` (ask on mutation; read-only still auto-allows). An explicit
-  // QUANTA_PERMISSION=acceptEdits|bypass|auto is still honored.
-  const mode = env("QUANTA_PERMISSION", "default") as PermissionMode
-  // HIGH-4: `cwd` may be re-captured AFTER an id-mode resume if the loaded
-  // session's `meta.cwd` differs (e.g. a fork-worktree session). We chdir
-  // there BEFORE this binding is used to construct `SessionDeps` so tools
-  // (Read/Edit/Bash) operate inside the right tree.
-  let cwd = process.cwd()
-  const slog = new StructuredLogger()
-
-  // UX flash durations (env-overrideable via `QUANTA_FLASH_*` family). Built
-  // ONCE per REPL; defaults are byte-identical to the pre-cleanup magic
-  // numbers (4000/3000/2000/1500/120). See `status-flash-config.ts`.
-  const flash = buildStatusFlashConfig(process.env)
-
-  // Cursor-inspired idle suppress + reject auto-exit (default-ON).
-  //
-  // QUANTA_IDLE_SUPPRESS=0 ⇒ both mechanisms collapse to no-ops:
-  //   - idle monitor uses `Infinity` thresholds (isIdle/isSnoozed always false)
-  //   - reject counter uses `Infinity` (shouldAutoExit always false)
-  // The `/snooze` and `/resume` slash commands still resolve to the same
-  // monitor instance, so a power user can re-enable the gating mid-run by
-  // calling `/snooze` explicitly (which sets `snoozedUntil`).
-  const idleSuppressOn = env("QUANTA_IDLE_SUPPRESS", "1") !== "0"
-  const idleMsRaw = Number(env("QUANTA_IDLE_MS", "60000"))
-  const snoozeDefaultMsRaw = Number(env("QUANTA_SNOOZE_DEFAULT_MS", "300000"))
-  const rejectLimitRaw = Number(env("QUANTA_REJECT_LIMIT", "20"))
-  const idleMonitor = createIdleMonitor({
-    idleThresholdMs:
-      idleSuppressOn && Number.isFinite(idleMsRaw) ? idleMsRaw : Number.POSITIVE_INFINITY,
-    defaultSnoozeMs:
-      idleSuppressOn && Number.isFinite(snoozeDefaultMsRaw) ? snoozeDefaultMsRaw : 300_000,
-  })
-  const rejectCounter = createRejectCounter({
-    threshold:
-      idleSuppressOn && Number.isFinite(rejectLimitRaw) && rejectLimitRaw > 0
-        ? rejectLimitRaw
-        : Number.POSITIVE_INFINITY,
-  })
-
-  let llm: LLMPort
+  const setup = await setupSession(sessionSetupDeps)
+  const surfaceState = createSurfaceState(setup)
   try {
-    llm = buildLLM(provider, model)
-  } catch (e) {
-    logger.error((e as Error).message)
-    process.exit(1)
-  }
-  // All features default OFF → behavior unchanged when no QUANTA_* flag set.
-  const {
-    planMode,
-    metrics,
-    state,
-    resume,
-    mcpTools,
-    mcpClients,
-    lspTools,
-    lspNavTools,
-    gitToolList,
-  } = await loadFeatures(slog)
-
-  // Lifecycle pills (subagent / follow-up queue / MCP health). Default-ON
-  // when stderr is a TTY; `QUANTA_LIFECYCLE_PILLS=0|false|off|no` disables
-  // entirely. Per-pill suppression via `QUANTA_PILL_TASKS|FOLLOWUP|MCP=0`.
-  // Non-TTY surfaces (pipes, eval/bench) get an inert instance ⇒ no writes.
-  const {
-    pills: lifecyclePills,
-    taskRegistry: lifecycleTaskRegistry,
-    followUpQueue: lifecycleFollowUpQueue,
-  } = buildLifecycleBundle()
-
-  const {
-    store,
-    embedder,
-    sessionId: initialSessionId,
-    registry,
-    memoryConfig,
-    subagentConfig,
-    skillsConfig,
-    compactionBreakerConfig,
-    verifyGuardConfig,
-  } = buildTooling(mcpTools, lspTools, lspNavTools, gitToolList, slog, lifecycleTaskRegistry)
-
-  // Seed the MCP pill from `loadMcpTools`'s live `mcpClients` array — each
-  // surviving entry is a server that started + listed tools ("connected").
-  // We can't observe configured-but-failed servers from here (loadMcpTools
-  // returns only successes), so the pill shows "connected" rows only when
-  // any MCP server is wired. `toolCount` is derived from the `mcp__<server>__`
-  // prefix on the bridged tool names — no MCP-client API access required.
-  if (mcpClients.length > 0) {
-    lifecyclePills.update({ mcp: { servers: deriveMcpPillServers(mcpTools) } })
-  }
-
-  // `let` because a resumed session reassigns it before any turn (preserved).
-  let sessionId = initialSessionId
-
-  // Observability (RFC-0002 §5.4/§8). Default OFF → byte-identical to today.
-  const { stream, run } = buildStreaming(observeDir(), slog)
-  const permission: PermissionContext = { mode }
-
-  const abort = new AbortController()
-  const shutdownMcp = async (): Promise<void> => {
-    for (const c of mcpClients) await c.stop().catch(() => undefined)
-  }
-  process.on("SIGINT", () => {
-    process.stderr.write("\n(interrupt — finishing current step)\n")
-    abort.abort()
-  })
-
-  // Bounded retry around transient LLM failures (pre-stream only), then the
-  // optional same-turn fallback + auto classifier (both default OFF ⇒
-  // finalLLM === retryingLLM, byte-identical to today).
-  const retryingLLM = new RetryingLLM({ inner: llm, signal: abort.signal })
-  const finalLLM = composeLLM(retryingLLM, provider, abort.signal, mode, permission, slog)
-
-  // No persistent readline.Interface: the REPL prompt now goes through
-  // `runReplLoopRaw` (raw-mode keypress reader with real Tab completion —
-  // Bun's `node:readline` ignores the `completer` option), and the
-  // permission-confirm prompt opens an ad-hoc readline only when it fires
-  // so the two never compete for stdin events.
-  const onConfirm = async (action: ToolAction): Promise<boolean> => {
-    // Inline unified-diff preview BEFORE the readline question so the user
-    // sees the proposed change, not just a tool name. Best-effort: any
-    // failure (file missing, binary, parse) returns undefined and we fall
-    // through to the legacy plain prompt — byte-identical to today.
-    // Default-ON when QUANTA_DIFF_PREVIEW is unset + stderr is a TTY;
-    // explicit `QUANTA_DIFF_PREVIEW=0` reverts to plain confirm.
-    if (diffPreviewEnabled()) {
-      const preview = await renderActionDiff(action)
-      if (preview !== undefined) process.stderr.write(`${preview}\n`)
-    }
-    const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
-    try {
-      const ans = await adhoc.question(`Allow ${action.tool}? [y/N] `)
-      const accepted = ans.trim().toLowerCase() === "y"
-      // Cursor §4.1: reset on accept, count consecutive denials. The
-      // prompt-source consults `shouldAutoExit()` BEFORE issuing the next
-      // turn, so an exit fires the line AFTER the 20th denial (when the
-      // user would otherwise type another prompt).
-      if (accepted) rejectCounter.recordAccept()
-      else rejectCounter.recordDeny()
-      // Any confirm dialog at all = active user interaction; mark active.
-      idleMonitor.markActive()
-      return accepted
-    } finally {
-      adhoc.close()
-    }
-  }
-
-  const argPrompt = argvPrompt()
-  // ADR-0083 multi-modal: load any `--image <path>` attachments ONCE (helper
-  // keeps runRepl's complexity flat). They ride on the FIRST user turn only.
-  let pendingImages: ImageBlock[] = loadSeedImages()
-
-  // Preserve the legacy "quanta ready" timing: log BEFORE resume work for
-  // every legacy path (default-OFF + V1 path-mode) so the new code path can
-  // never perturb the existing ordering. ID-mode runs (which are reachable
-  // only behind a flag) get an additional session line below.
-  const newSession = newSessionFlag()
-  const inIdModeAtStart = newSession || (resume !== undefined && !isPathLikeToken(resume))
-  if (!inIdModeAtStart) {
-    logger.info(`quanta ready (provider=${provider}, model=${model}, mode=${mode}, cwd=${cwd})`)
-  }
-  const resolved = await resolveResume({
-    resume,
-    newSession,
-    title: titleFlag(),
-    cwd,
-    initialSessionId: sessionId,
-    slog,
-    // CLI surface wires the legacy `session: <id>` log line — keeps
-    // byte-identical output while @/runner stays surface-agnostic
-    // (no @/shared#logger dependency in the resume-fsm core).
-    onSessionMinted: (id) => logger.info(`session: ${id}`),
-  })
-  // HIGH-5: `--new-session --resume <id>` is ambiguous (which id wins?). The
-  // sentinel surfaces from resolveResume; print a clear error + exit 1
-  // instead of silently ignoring `--new-session`.
-  if (resolved.conflictError !== undefined) {
-    logger.error(resolved.conflictError)
-    process.exit(1)
-  }
-  if (resolved.missingIdError !== undefined) {
-    logger.error(`--resume: session id not found: ${resolved.missingIdError}`)
-    process.exit(1)
-  }
-  const { idMeta } = resolved
-  let history: Message[] = resolved.history
-  sessionId = resolved.sessionId
-  // HIGH-4: if the resumed session points at a different cwd (e.g. a
-  // fork --worktree session), switch into it so tools (Read/Edit/Bash) run
-  // against the right directory. The path was stored by the prior save —
-  // already trusted; sanitization of *ids* happens in the session store.
-  // We still verify the directory exists on disk before chdir.
-  if (idMeta) cwd = switchToSessionCwd(cwd, idMeta.cwd, slog)
-  if (inIdModeAtStart && idMeta) {
-    logger.info(
-      `quanta ready (provider=${provider}, model=${model}, mode=${mode}, cwd=${cwd}, session=${idMeta.id})`,
-    )
-  }
-
-  // Built AFTER the resume block so a resumed `sessionId` is captured (the
-  // store-gated branch in assembleConfig must see the post-resume id, exactly
-  // as the prior call-time closure did).
-  // System prompt is built here (instead of inside `assembleConfig`) so the
-  // pure composition module stays env-free; the persona is resolved via
-  // `pickPersona()` which reads the env at the composition root.
-  const system = buildSystemPrompt(cwd, { persona: pickPersona() })
-  // ADR-0081 L4 surface wire: compose the CLI's shell-output observers.
-  //   - painter paints stdout/stderr chunks to stderr live (interactive TTY
-  //     only, so `cat … | bun cli …` stays byte-identical to the buffered path)
-  //   - OTel observer updates per-run counters when metrics is wired
-  // composeShellObservers swallows per-observer throws; when neither is built
-  // the field is undefined and runShell skips event allocation entirely.
-  const painterObs = process.stdin.isTTY ? buildShellStreamPainter() : undefined
-  const otelObs = metrics ? buildShellOtelObserver(metrics) : undefined
-  const onShellEvent =
-    painterObs !== undefined || otelObs !== undefined
-      ? composeShellObservers(painterObs, otelObs)
-      : undefined
-  // ADR-0064 L4: default per-turn work-metrics sink (built in `buildWorkMetricsSink`,
-  // gated on the SAME `QUANTA_METRICS` knob as the cost dashboard). Metrics OFF
-  // ⇒ undefined ⇒ the loop allocates no collector (byte-identical).
-  const workMetricsSink = buildWorkMetricsSink(metrics !== undefined)
-
-  // Bottom status bar — vim-style. Painted via scroll-region so it
-  // never gets shoved off-screen by LLM stream output. Default text
-  // shows provider/model/cwd/mode + the cancellation cheatsheet.
-  // (Moved here so the turn-indicator and TeeStream wiring — which both
-  // need the statusBar in hand — can run BEFORE `sessionDeps` captures
-  // the final `turnStream` reference.)
-  const home = homedir()
-  const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
-  const statusDefault = `${provider} · ${model} · ${mode} · ${shortCwd}    Esc Esc · cancel    Ctrl+C · exit`
-  const statusBar = installStatusBar(statusDefault)
-
-  // Per-turn signal collector (tools / verify-guard / compaction / memory /
-  // recovery). Tees the upstream `stream` BEFORE the indicator tee so both
-  // surfaces observe the SAME event order. Default-ON for TTY ⇒ the panel is
-  // rendered at turn end; non-TTY or `QUANTA_TURN_SUMMARY=0` ⇒ no tee + the
-  // renderer returns `""` so the post-dashboard stderr write is a no-op.
-  const { collector: turnSummary, stream: summaryStream } = buildTurnSummaryAndStream(
-    stream,
-    process.env,
-    process.stdout.isTTY,
-  )
-  // Live turn indicator (spinner + elapsed + token counter). Default-ON
-  // when stdout is a TTY; explicit `QUANTA_SPINNER=0|false|off|no` flips
-  // it off. Non-TTY surfaces (pipes, redirects, eval/bench harnesses) get
-  // a disabled indicator ⇒ `turnStream === stream` (no tee, byte-identical
-  // recorder/stdout fan-out to the pre-indicator path). See
-  // `buildTurnIndicatorAndStream` for the gate + tee construction.
-  const { indicator: turnIndicator, turnStream } = buildTurnIndicatorAndStream(
-    statusBar,
-    summaryStream,
-    process.env,
-    process.stdout.isTTY,
-    env("QUANTA_SPINNER_INTERVAL_MS", "80"),
-    slog,
-  )
-
-  // S3 port adapters — built ONCE per session, threaded through `slashCtx`
-  // (and, for planStore, also through `SessionDeps` so the agent's plan tools
-  // mutate the SAME store the surface renders). Each adapter is optional: a
-  // disabled gate returns `undefined` so the slash command keeps printing
-  // "not wired" (byte-identical default-OFF).
-  const costPanel = buildCostPanelOrUndefined(process.env, process.stdout.isTTY, model)
-  const costDeltaPrev: CostPanelDeltaBaseline = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-  }
-  const branchProgress = buildBranchProgressOrUndefined(process.env, process.stdout.isTTY)
-  const planStore = buildPlanStoreOrUndefined(process.env)
-
-  const sessionDeps: SessionDeps = {
-    llm: finalLLM,
-    registry,
-    // `turnStream` is the indicator-tee'd port when the spinner is enabled
-    // (TTY + QUANTA_SPINNER!=0); otherwise it is the literal `stream` from
-    // `buildStreaming` so the recorder/stdout fan-out is byte-identical to
-    // the pre-indicator path on non-TTY surfaces.
-    stream: turnStream,
-    permission,
-    system,
-    cwd,
-    maxTurns,
-    signal: abort.signal,
-    onConfirm,
-    store,
-    sessionId,
-    embedder,
-    memoryConfig,
-    planMode,
-    metrics,
-    run,
-    subagentConfig,
-    skillsConfig,
-    compactionBreakerConfig,
-    verifyGuardConfig,
-    summarizerLlm: buildSummarizerLlm(provider, abort.signal),
-    onShellEvent,
-    workMetricsSink,
-    ...(lifecycleFollowUpQueue !== undefined ? { followUpQueue: lifecycleFollowUpQueue } : {}),
-    ...(planStore !== undefined ? { planStore } : {}),
-  }
-  /** Install a stdin keypress listener for the duration of one turn.
-   *  Returns a `dispose()` that the caller MUST invoke (try/finally) to
-   *  restore the previous terminal state. Two cancellation gestures:
-   *
-   *    - **Ctrl+C** ⇒ hard exit (outer `abort.abort()`).
-   *    - **Esc (twice within 2 s)** ⇒ soft cancel of the current turn
-   *      via `turnAbort.abort()`. The first Esc paints a hint; the
-   *      second within the window triggers the abort.
-   *
-   *  Raw mode is REQUIRED for keypress events to fire while the LLM
-   *  streams (terminal would otherwise line-buffer input). On non-TTY
-   *  stdin we no-op — there's no interactive cancellation to wire up. */
-  const installTurnCancel = (
-    turnAbort: AbortController,
-    status: StatusBar,
-  ): { dispose: () => void } => {
-    const stdin = process.stdin
-    if (stdin.isTTY !== true) return { dispose: (): void => undefined }
-    let escCount = 0
-    let lastEsc = 0
-    // Esc-Esc window — env-overrideable via `QUANTA_ESC_WINDOW_MS`.
-    // Default `2000` ms preserves the prior un-env-backed `ESC_WINDOW_MS`
-    // constant byte-identically.
-    const escWindowMs = flash.escWindowMs
-    type Key = { name?: string; ctrl?: boolean }
-    const onKey = (_str: string | undefined, key: Key | undefined): void => {
-      if (key === undefined) return
-      if (key.ctrl === true && key.name === "c") {
-        status.transient("⛔ interrupted — exiting…", flash.transientMs)
-        abort.abort()
-        return
-      }
-      if (key.name !== "escape") {
-        escCount = 0
-        return
-      }
-      const now = Date.now()
-      if (escCount === 1 && now - lastEsc < escWindowMs) {
-        status.transient("⛔ turn cancelled", flash.transientMs)
-        turnAbort.abort()
-        escCount = 0
-        return
-      }
-      escCount = 1
-      lastEsc = now
-      status.transient("Press Esc again within 2s to cancel · Ctrl+C to exit", escWindowMs)
-    }
-    emitKeypressEvents(stdin)
-    const wasRaw = stdin.isRaw ?? false
-    stdin.setRawMode(true)
-    stdin.resume()
-    stdin.on("keypress", onKey)
-    return {
-      dispose: (): void => {
-        stdin.removeListener("keypress", onKey)
-        stdin.setRawMode(wasRaw)
-        stdin.pause()
+    const slashCtx = composeSurfaceSlashCtx(setup, surfaceState)
+    await runSessionLoop({
+      setup,
+      dispatchSlash: (input) => tryRunReplSlash(input, slashCtx),
+      sinks: composeTurnSinks(setup, surfaceState),
+      ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
+      ux: buildPromptUx(),
+      registerExitTeardown: (cb) => {
+        process.once("exit", cb)
       },
-    }
+    })
+  } finally {
+    setup.lifecyclePills.dispose()
+    await setup.shutdownMcp()
   }
+}
 
-  // Status pills (4-pill chrome): workspace / mode+effort / skills / sandbox.
-  // Default-ON when stdout is a TTY; gated by QUANTA_PILLS=0 / individual
-  // QUANTA_PILL_<NAME>=0 envs (see status-pills.ts). Wiring extracted to
-  // `installPills` so `runRepl` stays under the biome cognitive-complexity budget.
-  const pills = installPills({ statusBar, cwd, planMode, skillsConfig, slog })
+/** Slice-C surface-mutable state owned by `runRepl` — held in a single
+ *  closure record so the slash-ctx + turn-sinks closures can READ the live
+ *  `history` (re-bound after each interactive turn). The `imageQueue` and
+ *  `rewindState` and `costDeltaPrev` are stable once allocated. */
+interface SurfaceState {
+  imageQueue: ImageQueue | undefined
+  rewindState: ReturnType<typeof buildRewindSlashState>
+  history: readonly Message[]
+  readonly costDeltaPrev: CostPanelDeltaBaseline
+}
 
-  const turn = async (text: string): Promise<void> => {
-    // Per-turn AbortController + composite signal: the LLM stream sees
-    // an `AbortSignal.any([outerAbort, turnAbort])`, so EITHER a hard
-    // exit (Ctrl+C / SIGINT) OR a soft per-turn cancel (Esc Esc) tears
-    // it down without poisoning subsequent turns.
-    const turnAbort = new AbortController()
-    const turnSignal = AbortSignal.any([abort.signal, turnAbort.signal])
-    const cancel = installTurnCancel(turnAbort, statusBar)
-    // Spinner + elapsed + (live) token counter for the duration of THIS
-    // turn. `start()` is a no-op when the indicator is disabled (non-TTY
-    // or QUANTA_SPINNER=0); `stop()` in the `finally` is the SOLE
-    // teardown path, so an abort / error / SIGINT all reach the same
-    // clearTransient call. Wired BEFORE runOnce so the spinner is on
-    // screen at the instant the first LLM byte hits the wire.
-    turnIndicator.start()
-    // An abort during the turn (Esc-Esc / Ctrl+C) is the user's intent —
-    // tear the spinner down immediately so the status bar's default text
-    // is visible the moment the cancel fires (instead of waiting for the
-    // `finally` after runOnce unwinds, which can lag a few hundred ms on
-    // slow-network providers).
-    const onAbortStopIndicator = (): void => turnIndicator.stop()
-    turnSignal.addEventListener("abort", onAbortStopIndicator, { once: true })
+const createSurfaceState = (setup: Awaited<ReturnType<typeof setupSession>>): SurfaceState => ({
+  imageQueue: setup.argPrompt ? undefined : buildImageQueue(),
+  rewindState: buildRewindSlashState(setup.sessionId, setup.cwd),
+  history: setup.history,
+  costDeltaPrev: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
+})
 
-    try {
-      // ADR-0083: attach seed images to the FIRST turn only, then drain so
-      // subsequent REPL lines are text-only (byte-identical when no --image).
-      // `runOnce` (surface-agnostic Layer-2 driver) handles the
-      // history.push → runAgent → persistTurn atom; the CLI surface keeps
-      // the status bar / Esc-Esc / dashboard wrappers here. Byte-identical
-      // post-condition: `history = result.messages`, `pendingImages = []`
-      // (drained as before).
-      const seedImages = pendingImages
-      pendingImages = []
-      const turnDeps = { ...sessionDeps, signal: turnSignal }
-      const result = await runOnce({
-        deps: turnDeps,
-        assembleConfig,
-        history,
-        prompt: text,
-        pendingImages: seedImages,
-        state,
-        idMeta,
-      })
-      history = result.messages
-      if (metrics) {
-        const snap = metrics.snapshot()
-        slog.info("metrics.snapshot", { snapshot: snap })
-        // ADR-0085: render the cost & cache dashboard to stderr after each turn
-        // when metrics are enabled — keeps the structured log AND gives the
-        // operator a human-readable cost/latency/cache summary inline.
-        process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
-        // S3: fold the per-turn token delta into the cost panel (cumulative
-        // session-wide totals — distinct from the per-turn dashboard above).
-        foldCostPanelIfWired(costPanel, metrics, costDeltaPrev)
-      }
-      // Turn-summary panel — rendered AFTER the cost dashboard so the two
-      // sit together at turn end. Returns "" when no signal fired or when
-      // the collector is disabled, so this is a no-op on non-TTY / opt-out.
-      const summary = turnSummary.render(result.outcome)
+const composeSurfaceSlashCtx = (
+  setup: Awaited<ReturnType<typeof setupSession>>,
+  state: SurfaceState,
+): ReplSlashCtx =>
+  buildReplSlashCtx({
+    skillsCb: buildSkillsCallback(setup.skillsConfig),
+    idleMonitor: setup.idleMonitor,
+    imageQueue: state.imageQueue,
+    rewindState: state.rewindState,
+    costPanel: setup.costPanel,
+    planStore: setup.planStore,
+    branchProgress: setup.branchProgress,
+    getHistory: () => state.history,
+    sessionDeps: setup.sessionDeps,
+    abortSignal: setup.abort.signal,
+  })
+
+const composeTurnSinks = (
+  setup: Awaited<ReturnType<typeof setupSession>>,
+  state: SurfaceState,
+): Parameters<typeof runSessionLoop>[0]["sinks"] => {
+  const { model, slog, metrics, turnSummary, statusBar } = setup
+  return {
+    renderTurnDashboard: (): void => {
+      if (!metrics) return
+      const snap = metrics.snapshot()
+      slog.info("metrics.snapshot", { snapshot: snap })
+      process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
+      foldCostPanelIfWired(setup.costPanel, metrics, state.costDeltaPrev)
+    },
+    renderAndResetSummary: (outcome): void => {
+      state.history = outcome.messages
+      const summary = turnSummary.render(outcome as Parameters<typeof turnSummary.render>[0])
       if (summary !== "") process.stderr.write(summary)
       turnSummary.reset()
-      // Lifecycle pills flush — mirrors the interactive `onTurnEnd` branch
-      // so a one-shot `quanta "<prompt>"` invocation also shows the row
-      // (or nothing, when every pill is below its threshold).
-      snapshotAndFlushLifecyclePills(lifecyclePills, lifecycleTaskRegistry, lifecycleFollowUpQueue)
-    } catch (e) {
-      // A turn-scoped abort is the user's intent; swallow the error and
-      // hand control back to the prompt. The outer abort still propagates
-      // (the next turn will see `abort.signal.aborted === true` and skip).
-      //
-      // Stop the indicator BEFORE the error transient — `stop()` calls
-      // `clearTransient` which would otherwise wipe the error message a
-      // moment after it was painted.
-      turnIndicator.stop()
-      if (turnAbort.signal.aborted && !abort.signal.aborted) return
-      // Any other turn-level error MUST NOT kill the REPL — surface it
-      // inline + on the status bar, then return so the next prompt fires.
-      const msg = e instanceof Error ? e.message : String(e)
-      process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
-      // Flash linger + truncate cap from `StatusFlashConfig` — env-overrideable
-      // via `QUANTA_FLASH_ERROR_MS` / `QUANTA_FLASH_TRUNCATE_CHARS`. Defaults
-      // (4000 ms / 120 chars) preserve the prior bytes verbatim.
-      statusBar.transient(`error: ${msg.slice(0, flash.truncateChars)}`, flash.errorMs)
-    } finally {
-      // SOLE indicator teardown on the happy path — idempotent on the
-      // indicator side, so a prior catch-branch `stop()` (or the abort
-      // listener firing) makes this a no-op. Listener cleanup keeps the
-      // turn's AbortSignal from leaking handlers across turns.
-      turnSignal.removeEventListener("abort", onAbortStopIndicator)
-      turnIndicator.stop()
-      cancel.dispose()
-      // Reset turn-summary counters here as well so an error/abort path
-      // doesn't leak signals into the next turn (the happy path resets
-      // immediately after render — this is the safety net).
-      turnSummary.reset()
-    }
-  }
-
-  try {
-    if (argPrompt) {
-      await turn(argPrompt)
-    } else {
-      // Status bar already installed above; just ensure teardown on exit.
-      // Pills dispose first so any late paint cannot resurrect a stale row
-      // AFTER the scroll region is reset.
-      process.once("exit", () => {
-        pills.dispose()
-        statusBar.teardown()
-      })
-      const skillsCb = buildSkillsCallback(skillsConfig)
-      // ADR-0083 multi-modal: per-REPL image queue. Default-ON; disabled
-      // entirely via `QUANTA_IMAGE_QUEUE=0` so a paranoid surface can keep
-      // the original text-only path (`/image …` then prints unknown
-      // command). Capacity from `QUANTA_IMAGE_MAX_QUEUE` (default 5).
-      const imageQueue: ImageQueue | undefined = buildImageQueue()
-      const rewindState = buildRewindSlashState(sessionId, cwd)
-      // S3 — assemble the slashCtx from the per-port adapters via a single
-      // helper so `runRepl` stays inside the biome cognitive-complexity
-      // budget (each `...(x !== undefined ? { x } : {})` spread is a decision
-      // that biome counts; pushing the 8-entry block into a helper drops
-      // ~8 from the host).
-      const slashCtx: ReplSlashCtx = buildReplSlashCtx({
-        skillsCb,
-        idleMonitor,
-        imageQueue,
-        rewindState,
-        costPanel,
-        planStore,
-        branchProgress,
-        getHistory: () => history,
-        sessionDeps,
-        abortSignal: abort.signal,
-      })
-      // Bash-style ↑/↓ history + Ctrl+R reverse-i-search. Default ON
-      // (QUANTA_HISTORY=0 to disable). Path/max overridable via env.
-      const historyEnabled = env("QUANTA_HISTORY", "1") !== "0"
-      const historyMax = Math.max(1, Number(env("QUANTA_HISTORY_MAX", "1000")))
-      const historyFile = process.env.QUANTA_HISTORY_FILE
-      const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
-        maxLines: historyMax,
-        ...(historyFile !== undefined ? { filePath: historyFile } : {}),
-      }
-      const promptHistory = historyEnabled ? createPromptHistory(promptHistoryOpts) : undefined
-      // Heredoc multiline (`"""` / `'''` fence). Default ON; OFF when
-      // QUANTA_MULTILINE=0.
-      const multilineEnabled = env("QUANTA_MULTILINE", "1") !== "0"
-      // Initial blank row matches the prior `runReplLoopRaw` header write so
-      // the very first composer row sits one line below the resume log
-      // (byte-identical via `paintBlankLine`).
-      paintBlankLine()
-      const innerPromptSource = buildCliPromptSource(slashCtx, {
-        ...(promptHistory !== undefined ? { promptHistory } : {}),
-        multiline: multilineEnabled,
-      })
-      // Resolve the effective idle/reject thresholds the gate was built with
-      // so the user-facing banner copy interpolates the SAME numbers (closes
-      // the "60s" / "20 consecutive denials" string-drift bug).
-      const idleMsResolved =
-        idleSuppressOn && Number.isFinite(idleMsRaw) && idleMsRaw > 0 ? idleMsRaw : 60_000
-      const rejectLimitResolved =
-        idleSuppressOn && Number.isFinite(rejectLimitRaw) && rejectLimitRaw > 0 ? rejectLimitRaw : 20
-      const cliPromptSource = wrapPromptSourceWithIdleGate({
-        inner: innerPromptSource,
-        idle: idleMonitor,
-        rejects: rejectCounter,
-        statusBar,
-        idleMs: idleMsResolved,
-        rejectLimit: rejectLimitResolved,
-        flash,
-      })
-      // wrapTurn installs the Esc-Esc per-turn cancel + signal composition +
-      // dashboard render + REPL-survives-on-error around each runOnce call.
-      // Mirrors the prior `turn()` closure body byte-identically; lifted into
-      // a hook so the runInteractive driver stays surface-agnostic.
-      //
-      // Byte-identical per-turn output sequence (matches the prior
-      // `runReplLoopRaw` + `turn()` composition):
-      //   install cancel → runOnce → dashboard → dispose cancel → "\n"
-      await runInteractive({
-        deps: sessionDeps,
-        assembleConfig,
-        promptSource: cliPromptSource,
-        history,
-        state,
-        idMeta,
-        signal: abort.signal,
-        seedImages: pendingImages,
-        wrapTurn: async (run) => {
-          const turnAbort = new AbortController()
-          const turnSignal = AbortSignal.any([abort.signal, turnAbort.signal])
-          const cancel = installTurnCancel(turnAbort, statusBar)
-          let result: Awaited<ReturnType<typeof run>> | undefined
-          try {
-            result = await run({ ...sessionDeps, signal: turnSignal })
-            renderTurnDashboard(metrics, model, slog)
-            // S3: fold the per-turn token delta into the cost panel so
-            // `/cost` reflects the cumulative session totals. No-op when
-            // metrics or costPanel are disabled (byte-identical default-OFF).
-            foldCostPanelIfWired(costPanel, metrics, costDeltaPrev)
-            // Turn-summary panel — rendered AFTER the cost dashboard so the
-            // two sit together at turn end. Returns "" when no signal fired
-            // OR when the collector is disabled; in both cases this is a
-            // no-op (byte-identical to the pre-summary code path).
-            const summary = turnSummary.render(result.outcome)
-            if (summary !== "") process.stderr.write(summary)
-            turnSummary.reset()
-          } catch (e) {
-            // Turn-scoped abort = user intent; swallow + return undefined so
-            // the loop solicits the next prompt without updating history.
-            // Any other error MUST NOT kill the REPL — render it inline.
-            if (!(turnAbort.signal.aborted && !abort.signal.aborted)) {
-              renderTurnError(e, statusBar, flash)
-            }
-            result = undefined
-          } finally {
-            cancel.dispose()
-            // Safety-net reset for the error/abort path (the happy path
-            // resets immediately after render). Idempotent on a fresh
-            // collector ⇒ harmless to call twice.
-            turnSummary.reset()
-          }
-          // Post-turn separator (byte-identical to the prior bare write).
-          paintBlankLine()
-          return result
-        },
-        onTurnEnd: ({ messages }) => {
-          // Mirror the legacy update of the surface-scoped `history`
-          // binding so any downstream surface state remains in sync.
-          history = messages
-          // Lifecycle pills snapshot — read the CLI-owned TaskRegistry +
-          // FollowUpQueue handles (the loop wired the SAME instances, so
-          // these counts are the live values just after the turn settled).
-          // `flush()` is a no-op when every pill falls below its threshold
-          // (no subagent activity + empty queue + no MCP) so a quiet
-          // turn leaves no trailing line. Default-OFF surfaces (non-TTY,
-          // QUANTA_LIFECYCLE_PILLS=0) get an inert pills instance ⇒ no write.
-          snapshotAndFlushLifecyclePills(
-            lifecyclePills,
-            lifecycleTaskRegistry,
-            lifecycleFollowUpQueue,
-          )
-        },
-      })
-    }
-  } finally {
-    lifecyclePills.dispose()
-    await shutdownMcp()
+    },
+    flushLifecyclePills: (): void => {
+      snapshotAndFlushLifecyclePills(
+        setup.lifecyclePills,
+        setup.lifecycleTaskRegistry,
+        setup.lifecycleFollowUpQueue,
+      )
+    },
+    renderTurnError: (err): void => renderTurnError(err, statusBar),
   }
 }
