@@ -1,0 +1,34 @@
+id: jsonrpc-channel-triple
+title: Channel-triple naming — `{name}-request` / `-response` / `-timeout`
+section: 9
+subsystem: shared/jsonrpc — channel naming convention
+order: 37
+maturity: L4
+status: new
+purpose: |
+  Codex-pattern channel-triple generator. Every async method has THREE
+  related channel names derived from a single base — `channelTriple("agent.run")`
+  yields `{request: "agent.run-request", response: "agent.run-response",
+  timeout: "agent.run-timeout"}`. Building the triple from one base name
+  makes drift between the three channels structurally impossible.
+  `parseChannelKind` / `parseChannelBase` round-trip a channel name back to
+  its kind + base so dispatch tables can be keyed on the canonical pair.
+  Base-name validation rejects empty strings, illegal chars (only
+  `[A-Za-z0-9_./]+` is allowed), and inputs that already end with one of the
+  three reserved suffixes — preventing `foo-request` from becoming
+  `foo-request-request`.
+evidence:
+  code:
+    - src/shared/jsonrpc/channel-naming.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Source: `codex-jsonrpc-protocol-pattern` memory — Codex app-server's
+  19 methods + 18 events use exactly this triple. v3 IPC reuses the
+  convention so a single dispatch table can carry every async method
+  without three separate enum lists.

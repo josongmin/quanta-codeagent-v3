@@ -1,0 +1,30 @@
+id: byte-stable-string-comparator
+title: `byteCompare` — locale-independent string ordering
+section: 8
+subsystem: shared — deterministic ordering primitive
+order: 96
+maturity: L5
+status: stable
+purpose: |
+  Byte-stable string comparator for deterministic ordering. Unlike
+  `String.prototype.localeCompare`, the result does NOT depend on the
+  host locale or ICU collation, so any list sorted with `byteCompare` is
+  byte-identical across machines and locales. This is REQUIRED for
+  anything whose ordering reaches the model-facing prompt, the persisted
+  transcript, or a replay-compared payload — locale-dependent ordering
+  silently breaks the byte-identical replay + prompt-cache invariant.
+evidence:
+  code:
+    - src/shared/byte-compare.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Trivially small (one expression). The anti-regression scanner can be
+  pointed at this module to ban `localeCompare` for sort callbacks in
+  `src/` — using the locale comparator there is the silent-drift bug
+  this primitive exists to make unrepresentable.

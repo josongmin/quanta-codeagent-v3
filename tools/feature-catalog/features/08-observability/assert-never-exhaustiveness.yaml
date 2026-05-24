@@ -1,0 +1,31 @@
+id: assert-never-exhaustiveness
+title: `assertNever` — compile-time + runtime exhaustiveness guard
+section: 8
+subsystem: shared — typed-union safety primitive
+order: 97
+maturity: L5
+status: stable
+purpose: |
+  Exhaustiveness guard for `switch` / `if-else` chains over a closed
+  union / enum. Placing `assertNever(x, label)` in the `default` branch
+  makes TypeScript fail to COMPILE if a new variant is added without a
+  matching case — turning a "silent fall-through returns undefined" bug
+  into a build error. The runtime throw only fires if the branch is
+  reached via an unchecked cast (defence in depth). Used throughout the
+  agent loop, stream demuxer, and provider adapters where the union
+  taxonomy is the contract.
+evidence:
+  code:
+    - src/shared/assert-never.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Typical usage — `switch (block.type) { ...; default: return
+  assertNever(block, "ContentBlock") }`. Pairs naturally with every
+  closed discriminated union the codebase ships (StreamEvent kind,
+  LLMErrorKind, ToolEvent variant, etc.).

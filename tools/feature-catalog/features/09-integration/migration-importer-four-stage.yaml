@@ -1,0 +1,49 @@
+id: migration-importer-four-stage
+title: External-agent importer — 4-stage detect / parse / translate / persist
+section: 9
+subsystem: migration — external-agent session import (ADR-0038)
+order: 44
+maturity: L3
+status: new
+purpose: |
+  Single-entry orchestrator for importing another agent's session
+  transcripts into v3. The shape (event sequencing, halt-on-error
+  semantics, result tally) is the load-bearing contract — provider
+  specifics live in `migration/translators/<provider>.ts`. The lifecycle
+  has four stages: (1) detect (a provider directory must contain ALL
+  required marker files), (2) enumerate sessions, (3) translate each via
+  the provider's `SessionTranslator`, (4) persist to the v3 session
+  store. `UnknownProviderRejectedError` is thrown if the caller passes
+  `provider: "unknown"` — the enum's `unknown` value exists ONLY as a
+  typed sentinel for caller-driven probing, never as an importer input,
+  so a silent-fallback bug is structurally impossible. `ImportEventSink`
+  surfaces stage-by-stage progress to the caller without coupling the
+  importer to a UI surface.
+evidence:
+  code:
+    - src/migration/importer.ts
+    - src/migration/detector.ts
+    - src/migration/translators/index.ts
+  adrs: [38]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Real provider session parsing is intentionally minimal (we count
+    marker-present session files); ADR-0038 §한계 scoped real parsing to
+    a fixture + follow-up. Claude Code's translator is the one shipped
+    production-grade implementation (see `claude-code-session-translator`).
+  promotion_path: |
+    Add per-provider translator modules (Cursor / Aider) under
+    `migration/translators/`, register them in the factory, and let the
+    importer pick them up automatically — no change to the importer
+    itself.
+notes: |
+  Pairs with `claude-code-session-translator` (the one production
+  translator), `migration-import-log-busy` (the log-file lock that
+  prevents concurrent imports from racing), and
+  `migration-content-dedup-fingerprint` (SHA-256 of source bytes so a
+  re-run does not re-import an unchanged session).

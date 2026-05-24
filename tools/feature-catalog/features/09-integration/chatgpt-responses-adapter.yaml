@@ -1,0 +1,40 @@
+id: chatgpt-responses-adapter
+title: ChatGPT-OAuth Responses-API adapter (subscription path)
+section: 9
+subsystem: llm/adapters — ChatGPT subscription wire (ADR-0094 Phase 2)
+order: 40
+maturity: L4
+status: new
+purpose: |
+  Concrete `LLMPort` that calls `${apiBase}/responses` with the disk-stored
+  OAuth bearer instead of an API key. Default `apiBase` is
+  `https://chatgpt.com/backend-api/codex` — the Responses-API endpoint the
+  OSS Codex CLI uses for ChatGPT subscription traffic. The wire protocol
+  is SSE; the adapter parses the canonical `response.*` event names and
+  maps them to `StreamEvent`. Token-freshness enforcement runs at the top
+  of every `stream()` call — read the token, refresh proactively when
+  `expires_at` lies within the imminent window, persist the new bundle,
+  and only then POST with `Authorization: Bearer …` plus the
+  `ChatGPT-Account-Id` / `OAI-Product-Sku` / `originator` headers the
+  backend requires. A 401 mid-stream surfaces as a typed `auth` LLMError;
+  the retry/fallback layer refuses to retry or fall back on `auth` — the
+  user is told to relogin instead.
+evidence:
+  code:
+    - src/llm/adapters/chatgpt-oauth.ts
+    - src/auth/chatgpt-oauth/refresh.ts
+    - src/auth/chatgpt-oauth/token-store.ts
+  adrs: [94]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pairs with `chatgpt-oauth-provider` (BYOK-less end-to-end orchestration),
+  `refresh-coordinator` (in-flight guard so concurrent streams collapse to
+  one issuer hit), and `token-store-atomic` (on-disk credential durability).
+  Codex-only model slugs (e.g. `gpt-5-codex`) are rejected by the backend
+  for ChatGPT-account requests; `createLLM` defaults the provider to
+  `gpt-5` instead.

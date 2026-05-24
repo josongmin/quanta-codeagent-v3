@@ -1,0 +1,35 @@
+id: jsonrpc-request-id-correlation
+title: JSON-RPC RequestId — branded, deterministic, seedable
+section: 9
+subsystem: shared/jsonrpc — request-id correlation
+order: 38
+maturity: L4
+status: new
+purpose: |
+  Branded `RequestId` type plus a deterministic, seedable id generator for
+  JSON-RPC correlation. No `Math.random()` and no `Date.now()` feed id
+  generation, so recorded traces stay byte-identical replayable (ADR-0023
+  invariant) when the caller supplies a fixed seed. The generator exposes
+  `next()` / `peek()` / `current()`; the first call to `next()` returns
+  `seed`, then `seed + 1`, and so on. Counter overflow throws loudly at
+  `Number.MAX_SAFE_INTEGER` rather than silently wrapping (which would risk
+  id collisions). A process-wide default generator (seeded at 1) is exposed
+  via `nextRequestId()`; tests SHOULD construct a fresh generator instead
+  of relying on the shared default. `brandRequestId(n)` casts an
+  externally-supplied id (e.g. relayed from a peer) to the branded type
+  WITHOUT advancing the counter — used sparingly when correlating against
+  a peer's id space.
+evidence:
+  code:
+    - src/shared/jsonrpc/correlation.ts
+  adrs: [23]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Brand-only at the type level (`Id<"JsonRpcRequestId">`), so the runtime
+  cost is zero and the type system blocks raw-number passes at compile
+  time. Pairs with `jsonrpc-codec` (the encoder accepts a `JsonRpcId`).

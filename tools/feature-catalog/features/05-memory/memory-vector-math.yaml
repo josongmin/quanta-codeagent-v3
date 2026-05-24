@@ -1,0 +1,33 @@
+id: memory-vector-math
+title: Memory vector math — pure cosine / dot / normalize + Float32 serde
+section: 5
+subsystem: memory — pure vector primitives
+order: 52
+maturity: L4
+status: new
+purpose: |
+  Pure vector math + (de)serialization for semantic recall. Zero deps:
+  a Float32 little-endian buffer is the on-disk form (the SQLite
+  embedding column is a BLOB), the in-memory form is a plain `number[]`.
+  Shared by both memory adapters and the ranking layer so similarity
+  semantics never diverge between InMemoryStore and SqliteStore.
+  `dot(a, b)` returns 0 on length mismatch (treated as "incomparable").
+  `cosine(a, b)` returns 0 — never NaN — when either vector is empty,
+  zero-magnitude, length-mismatched, or contains a non-finite component,
+  so ranking stays total and deterministic. `normalize(a)` returns a
+  zero/empty vector unchanged. `serializeVec` / `deserializeVec`
+  round-trip the Float32 little-endian BLOB form.
+evidence:
+  code:
+    - src/memory/vector.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  No scoring logic / weights live here — those are in the ranking layer.
+  This module is the pure-math seam that lets unit tests assert the
+  bit-exact serde round-trip without any storage adapter setup.
