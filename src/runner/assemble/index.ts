@@ -45,6 +45,13 @@ export {
   parseRecallTiers,
 } from "./memory"
 export {
+  buildRetrievalStackCore,
+  DEFAULT_RETRIEVAL_RERANKER,
+  RETRIEVAL_BUILTIN_RERANKERS,
+  type RetrievalAssembleInput,
+  type RetrievalStack,
+} from "./retrieval"
+export {
   buildSkillsConfigCore,
   type SkillsConfigAssembleInput,
 } from "./skill"
