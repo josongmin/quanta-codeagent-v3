@@ -1,0 +1,47 @@
+id: cli-help-discovery-render
+title: CLI `/help` discovery — category grouping + env-var SSOT + virtual /image
+section: 10
+subsystem: CLI surface — help renderer discovery layer
+order: 24
+maturity: L4
+status: new
+purpose: |
+  기존 `cli-slash-help` 의 dynamic BUILTINS 인벤토리 위에 3개 P0
+  discovery 갭 봉합:
+  (a) **/image virtual entry** — `prompt-source.ts` 에서 BUILTINS 진입
+  전에 intercept 되는 가상 명령. `runReplLoop` short-circuit `/exit`+
+  `/quit` 와 같은 패턴으로 `VIRTUAL_COMMANDS` tail 에 fixed entry
+  추가 (REPL-scoped queue context 때문에 SlashCommand 등록 불가).
+  (b) **Category grouping** — `SlashCommand.category` 리터럴 union 으로
+  section header 자동 분할. 고정 순서 (help / session / history / config /
+  auth / skills / loop / alias / other), 섹션 내부 alphabetical. category
+  결손 ⇒ "other" 버킷.
+  (c) **Env-var SSOT auto-derivation** — `ENV_TABLE` 가 `runtime-config.ts#
+  RuntimeConfig` 의 모든 필드를 1:1 mirror (~31 row). 새 env 추가 시
+  ENV_TABLE 한 줄 append 로 `/help` 에 자동 노출. SSOT 미경유 surface-
+  level `QUANTA_*` (~120 개) 는 의도적으로 docs 로 분리.
+evidence:
+  code:
+    - src/apps/cli/help-render.ts
+    - src/apps/cli/slash-commands.ts
+    - src/apps/cli/repl/prompt-source.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/help-render-discovery-hellgate.test.ts
+      - tests/unit/cli/help-render.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    short-circuit 가상 명령 (`/exit` / `/quit` / `/image`) 은 SlashCommand
+    인터페이스에 등록되지 않아 BUILTINS 와의 single-source-of-truth 가
+    아님. `VIRTUAL_COMMANDS` 수동 list 가 drift 위험.
+  promotion_path: |
+    short-circuit 명령도 SlashCommand 로 등록 + `executeImmediately: true`
+    메타 분기 ⇒ VIRTUAL_COMMANDS 제거.
+notes: |
+  `renderHelp` pure function 으로 unit-test 가능. setColorPolicy("off")
+  로 ASCII byte-identical render — OFF/ON 페어 단위 테스트. 11 hellgate
+  cases (≥ 5 SSOT-routed knob coverage floor 포함).

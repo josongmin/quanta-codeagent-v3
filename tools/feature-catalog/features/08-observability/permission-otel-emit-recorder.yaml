@@ -1,0 +1,43 @@
+id: permission-otel-emit-recorder
+title: Permission decision-site OTel emit — slice-local recorder seam
+section: 8
+subsystem: 텔레메트리 — quanta.permission.* 어휘 활성화
+order: 90
+maturity: L4
+status: new
+purpose: |
+  ADR-0029 reviewer 3-tier + ADR-0046 stack-axis + post-denial vocabulary
+  (`quanta.permission.*` 12 키)가 vocabulary.ts에 선언만 있고 실제 emit
+  site가 없던 부분을 활성화. `src/permission/recorder.ts` 가 slice-local
+  port (PermissionRecorder / PermissionDecisionRecord / PostDenialEventRecord)
+  + 모듈-레벨 setter (setPermissionRecorder) 를 제공 — RFC 3.1 슬라이스
+  격리 유지 (permission → observability import 0). 데시전 사이트
+  (policy.ts hardDeny/evaluateStack, reviewer.ts, post-denial.ts) 가
+  emit helper 만 호출하고 host composition-root 가 canonical
+  `permissionAttrs(...)` / `postDenialAttrs(...)` 로 매핑.
+  **Default-OFF**: recorder 미등록 ⇒ 모든 helper zero-allocation no-op;
+  recorder throw ⇒ catch + swallow (observability bug 가 permission verdict
+  를 바꾸면 안 됨). **Security invariant**: HARD_DENY regex source / raw
+  action.input / shellCommand / rationale 는 절대 emit 되지 않음 — 오직
+  categorical primitive + 32-hex actionSignature 해시만 통과.
+evidence:
+  code:
+    - src/permission/recorder.ts
+    - src/permission/policy.ts
+    - src/permission/reviewer.ts
+    - src/permission/post-denial.ts
+    - src/observability/attrs.ts
+  adrs: [29, 32, 46]
+  tests:
+    unit:
+      - tests/unit/permission-otel-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - 'setPermissionRecorder(recorder | null) — register/clear sink (default null = OFF)'
+deliberate_hold: null
+notes: |
+  outcome 라벨 4종 (allow/deny/prompt/trust) — `trust` 는 post-denial-override
+  + user_approved* reviewer outcome 전용 (dashboard 가 override usage 를
+  allow 카운터에 섞지 않도록 분리). decidedBy enum (reviewer/stack/hitl/hook)
+  으로 최종 verdict 를 소유한 layer 식별. 5445 expects / 15 hellgate cases.
