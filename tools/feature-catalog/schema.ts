@@ -218,31 +218,61 @@ export function compositeLetter(total: number): "A" | "B" | "C" | "D" | "F" {
   return "F"
 }
 
-// Final judgment: combines axis composite with maturity claim. Flags
-// overclaim when maturity = L4/L5 but operational composite is weak.
+// Final judgment: combines axis composite with code-presence signal.
+//
+// AUDIT-1 (2026-05-24): the previous matrix conflated axis-thinness
+// (monitoring/wiring not applicable for the slice) with genuine overclaim
+// (no code exists at all). 62.5% of features previously flagged
+// "overclaimed" were actually "appropriate-thin": code exists, feature is
+// real, but operational axes simply do not apply (e.g. a pure-library slice
+// has no UI surface, no monitoring hook). Conflating these two states is
+// noise that drowns out real overclaim drift.
+//
+// New matrix — verdict is derived from validated signals only:
+//
+//   1. deliberate-hold : f.deliberate_hold != null
+//   2. overclaimed     : maturity ∈ {L4, L5} ∧ evidence.code.length == 0
+//                        ∧ deliberate_hold == null
+//        (= truly no code = the only honest "overclaimed" signal we can
+//         derive without heuristics; axis-thinness alone is not enough)
+//   3. solid           : axes.total >= 7
+//   4. appropriate     : axes.total >= 4
+//                        ∨ (evidence.code.length >= 2 ∧ axes.total >= 2)
+//        (code-present-but-axis-thin is appropriate, not overclaimed)
+//   5. thin            : everything else
+//
+// Note: this matrix applies uniformly across all maturity tiers. L1..L3
+// features are not auto-classified as "appropriate" — they fall through
+// the same gates; in practice they end up in {solid, appropriate, thin}
+// based on the same evidence-driven signals as L4+.
+export type Verdict = "solid" | "appropriate" | "thin" | "overclaimed" | "deliberate-hold"
+
 export interface FeatureJudgment {
   readonly axes: AxisScores
   readonly composite: "A" | "B" | "C" | "D" | "F"
   readonly evidenceGrade: "A" | "B" | "C" | "D" | "F"
-  readonly verdict:
-    | "solid" // L4+ and composite >= B
-    | "thin" // L4+ and composite C
-    | "overclaimed" // L4+ and composite D/F (registered, not really wired/watched)
-    | "appropriate" // L1..L3 — no operational expectation
-    | "deliberate-hold" // explicit hold record present
+  readonly verdict: Verdict
 }
 
 export function computeJudgment(f: Feature): FeatureJudgment {
   const axes = computeAxisScores(f)
   const composite = compositeLetter(axes.total)
   const evidenceGrade = computeGrade(f)
-  let verdict: FeatureJudgment["verdict"]
-  if (f.deliberate_hold !== null) verdict = "deliberate-hold"
-  else if (f.maturity === "L1" || f.maturity === "L2" || f.maturity === "L3")
+  const codeLen = f.evidence.code.length
+  const isL4Plus = f.maturity === "L4" || f.maturity === "L5"
+
+  let verdict: Verdict
+  if (f.deliberate_hold !== null) {
+    verdict = "deliberate-hold"
+  } else if (isL4Plus && codeLen === 0) {
+    verdict = "overclaimed"
+  } else if (axes.total >= 7) {
+    verdict = "solid"
+  } else if (axes.total >= 4 || (codeLen >= 2 && axes.total >= 2)) {
     verdict = "appropriate"
-  else if (composite === "A" || composite === "B") verdict = "solid"
-  else if (composite === "C") verdict = "thin"
-  else verdict = "overclaimed"
+  } else {
+    verdict = "thin"
+  }
   return { axes, composite, evidenceGrade, verdict }
 }
 
