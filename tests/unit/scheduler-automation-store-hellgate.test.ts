@@ -362,40 +362,37 @@ describe("JSONL store hellgate", () => {
     }
   })
 
-  test(
-    "[D6][adversarial] enormous JSONL file (500 lines) load completes + last-wins correct",
-    async () => {
-      // Attack: a workspace has accumulated many transitions on a single
-      // automation (months of weekly fires). The walker MUST complete in
-      // bounded time, return ONE record, and that record MUST be the
-      // latest (fireCount = N-1). We pre-build the file in one writeFile
-      // call (the per-save serial append is OS-fsync bound and not the
-      // workload we are stress-testing — we want to stress the READER).
-      await withTempDir(async (dir) => {
-        const store = defaultJsonlAutomationStore({
-          baseDir: dir,
-          workspaceHasher: () => "wsh",
-        })
-        const wsDir = join(dir, "wsh")
-        const { mkdir } = await import("node:fs/promises")
-        await mkdir(wsDir, { recursive: true })
-        const file = join(wsDir, "automations.jsonl")
-        const N = 500
-        const lines: string[] = []
-        for (let i = 0; i < N; i += 1) {
-          lines.push(JSON.stringify({ ...sample("perf"), fireCount: i }))
-        }
-        await writeFile(file, `${lines.join("\n")}\n`, "utf8")
-        const t0 = performance.now()
-        const loaded = await store.load("/w")
-        const dt = performance.now() - t0
-        expect(loaded.length).toBe(1)
-        expect(loaded[0]?.fireCount).toBe(N - 1)
-        // Generous bound for CI — 500-line parse should be <500ms.
-        expect(dt).toBeLessThan(500)
+  test("[D6][adversarial] enormous JSONL file (500 lines) load completes + last-wins correct", async () => {
+    // Attack: a workspace has accumulated many transitions on a single
+    // automation (months of weekly fires). The walker MUST complete in
+    // bounded time, return ONE record, and that record MUST be the
+    // latest (fireCount = N-1). We pre-build the file in one writeFile
+    // call (the per-save serial append is OS-fsync bound and not the
+    // workload we are stress-testing — we want to stress the READER).
+    await withTempDir(async (dir) => {
+      const store = defaultJsonlAutomationStore({
+        baseDir: dir,
+        workspaceHasher: () => "wsh",
       })
-    },
-  )
+      const wsDir = join(dir, "wsh")
+      const { mkdir } = await import("node:fs/promises")
+      await mkdir(wsDir, { recursive: true })
+      const file = join(wsDir, "automations.jsonl")
+      const N = 500
+      const lines: string[] = []
+      for (let i = 0; i < N; i += 1) {
+        lines.push(JSON.stringify({ ...sample("perf"), fireCount: i }))
+      }
+      await writeFile(file, `${lines.join("\n")}\n`, "utf8")
+      const t0 = performance.now()
+      const loaded = await store.load("/w")
+      const dt = performance.now() - t0
+      expect(loaded.length).toBe(1)
+      expect(loaded[0]?.fireCount).toBe(N - 1)
+      // Generous bound for CI — 500-line parse should be <500ms.
+      expect(dt).toBeLessThan(500)
+    })
+  })
 
   test("[D7][adversarial] reader is robust to mixed line endings (CRLF + LF + bare LF)", async () => {
     // Attack: a Windows tool edits the JSONL file and CRLF-normalizes

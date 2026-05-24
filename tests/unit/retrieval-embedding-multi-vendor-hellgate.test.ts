@@ -298,7 +298,7 @@ describe("multi-vendor embedding hellgate", () => {
       apiKey: "k",
       http: {
         async embeddingsCreate(): Promise<never> {
-          // biome-ignore lint/suspicious/useThrowOnlyError: deliberate adversarial — vendor SDKs sometimes throw non-Error.
+          // Deliberate adversarial — vendor SDKs sometimes throw non-Error.
           throw `auth failed: ${secret}`
         },
       },
