@@ -1,10 +1,17 @@
-# SWE-bench Verified — smoke baseline
+# SWE-bench Verified — smoke baselines
 
-A **frozen set of 6 SWE-bench Verified instances** used as a regression
-reference point. These are picked to be deterministic, cheap, and reliable —
-this is a *smoke gate*, not a capability sweep. The pick is grounded in the real
-`princeton-nlp/SWE-bench_Verified` dataset and audited reproducibly by
-[`select.ts`](./select.ts).
+Three frozen sets of SWE-bench Verified instances, each with a distinct role:
+
+| set | size | use case | typical time/cost (gpt-5-mini) |
+|---|---|---|---|
+| [`picks-3.jsonl`](./picks-3.jsonl) — smoke-of-smoke | 3 | pre-measurement sanity / PR gate | ~10min / ~$0.30 |
+| [`picks.jsonl`](./picks.jsonl) — light smoke | 6 | original frozen regression baseline | ~25min / ~$1 |
+| [`picks-10.jsonl`](./picks-10.jsonl) — measurement set | 10 | A/B knob measurement, tier-stratified | ~60min / ~$2 (1 trial) |
+
+The 10-pick set is **tier-stratified** for measurement signal (anchor / discrim
+/ stretch), audited by [`select-10.ts`](./select-10.ts). The 6-pick set is the
+**legacy frozen regression baseline**, audited by [`select.ts`](./select.ts).
+The 3-pick is one instance per tier from the 10-pick.
 
 ## The 6 picks
 

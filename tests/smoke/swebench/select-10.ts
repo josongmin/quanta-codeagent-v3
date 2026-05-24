@@ -96,6 +96,15 @@ export const STRETCH_PICKS = [
 
 export const PICKS_10 = [...ANCHOR_PICKS, ...DISCRIM_PICKS, ...STRETCH_PICKS] as const
 
+/** Smoke-of-smoke (3 picks): one from each tier, fastest possible sanity.
+ *  Used as PR-gate / pre-measurement check (~10min, ~$0.30). If this fails,
+ *  don't bother running the 10-pick. */
+export const SMOKE_3 = [
+  "psf__requests-5414", // Tier A: stable-pass infra sanity (cheap clone, light)
+  "sympy__sympy-16886", // Tier B: known noise instance (2/3) — variance probe
+  "pylint-dev__pylint-8898", // Tier C: stretch — model ceiling probe
+] as const
+
 // ── Tier-specific gates ─────────────────────────────────────────────────────
 
 /** Light-plus-DJANGO repos. Tier C adds django (pure python, slow setup but
@@ -235,19 +244,24 @@ const printSuggest = async (): Promise<void> => {
   }
 }
 
-const writePicks = async (): Promise<void> => {
+const writePicksImpl = async (ids: readonly string[], outName: string): Promise<void> => {
   const all = await fetchAll()
   const byId = new Map(all.map((r) => [r.instance_id, r]))
   const lines: string[] = []
-  for (const id of PICKS_10) {
+  for (const id of ids) {
     const r = byId.get(id)
     if (!r) {
       throw new Error(`pinned instance not in dataset: ${id} — run --suggest to find alternates`)
     }
     lines.push(JSON.stringify(r))
   }
-  await Bun.write(`${import.meta.dir}/picks-10.jsonl`, `${lines.join("\n")}\n`)
-  console.log(`wrote picks-10.jsonl (${lines.length} verbatim rows)`)
+  await Bun.write(`${import.meta.dir}/${outName}`, `${lines.join("\n")}\n`)
+  console.log(`wrote ${outName} (${lines.length} verbatim rows)`)
+}
+
+const writePicks = async (): Promise<void> => {
+  await writePicksImpl(PICKS_10, "picks-10.jsonl")
+  await writePicksImpl(SMOKE_3, "picks-3.jsonl")
 }
 
 const main = async (): Promise<void> => {

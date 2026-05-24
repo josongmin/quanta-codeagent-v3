@@ -35,15 +35,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { defaultBudgetLedger } from "@/agent/budget-ledger"
-import { defaultCheckpointPolicy, withAutoCheckpoint } from "@/agent/checkpoint-policy"
+import { defaultCheckpointPolicy } from "@/agent/checkpoint-policy"
 import { wireCheckpointedEffectChannel } from "@/agent/checkpoint-wiring"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
-import {
-  type EffectChannel,
-  LocalEffectChannel,
-  type ToolRequest,
-  type ToolResultEnvelope,
-} from "@/agent/effect-channel"
+import type { EffectChannel, ToolRequest, ToolResultEnvelope } from "@/agent/effect-channel"
 import { buildSessionFeatures } from "@/agent/features"
 import { wireGitObservability } from "@/agent/git-observability"
 import { defaultPlanQueueStore } from "@/agent/plan-queue"
