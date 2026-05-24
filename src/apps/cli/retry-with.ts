@@ -1,5 +1,5 @@
 /**
- * ADR-0065 model-swap retry — CLI `/retry-with [<model-id>]` slash command.
+ * ADR-0066 model-swap retry — CLI `/retry-with [<model-id>]` slash command.
  *
  * Wire-up of {@link resolveRetryModel} + {@link streamWithModel}
  * (`src/llm/model-swap.ts`) as a SESSION-time slash command:

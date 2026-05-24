@@ -29,7 +29,7 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/retry-with.ts
-  adrs: [65]
+  adrs: [66]
   tests:
     unit:
       - tests/unit/cli-retry-with.test.ts

@@ -21,7 +21,7 @@ evidence:
     - src/agent/tier1/index.ts
     - src/agent/features.ts
     - src/agent/tier1/subagent-bg.ts
-  adrs: [130, 140]
+  adrs: [145, 140]
   tests:
     unit:
       - tests/unit/subagent-background-wire-hellgate.test.ts

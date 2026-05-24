@@ -25,7 +25,7 @@ evidence:
     - src/tool/subagent-bg/poll.ts
     - src/tool/subagent-bg/await.ts
     - src/tool/subagent-bg/port.ts
-  adrs: [130]
+  adrs: [145]
   tests:
     unit:
       - tests/unit/subagent-background-hellgate.test.ts

@@ -14,7 +14,7 @@ purpose: |
 evidence:
   code:
     - src/tool/image/from-url.ts
-  adrs: [132]
+  adrs: [146]
   tests:
     unit:
       - tests/unit/tool/read-image-url-hellgate.test.ts

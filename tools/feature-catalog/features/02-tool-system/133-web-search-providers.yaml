@@ -26,7 +26,7 @@ evidence:
     - src/tool/web/providers/brave.ts
     - src/tool/web/providers/duckduckgo.ts
     - src/tool/web/providers/index.ts
-  adrs: [133]
+  adrs: [148]
   tests:
     unit:
       - tests/unit/tool/web-search-providers-hellgate.test.ts
