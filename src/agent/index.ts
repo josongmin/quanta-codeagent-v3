@@ -177,8 +177,8 @@ export {
 export {
   DEFAULT_SAMPLES as REPRO_TEST_DEFAULT_SAMPLES,
   DEFAULT_TIMEOUT_MS as REPRO_TEST_DEFAULT_TIMEOUT_MS,
-  type ExecuteReproTestsArgs as ReproExecuteArgs,
   executeReproTests,
+  type ExecuteReproTestsArgs as ReproExecuteArgs,
   generateReproTests,
   MAX_SAMPLES as REPRO_TEST_MAX_SAMPLES,
   normaliseReproSource,
