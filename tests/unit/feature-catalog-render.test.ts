@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { buildEvidenceSummary, renderCatalog } from "../../tools/feature-catalog/render"
+import {
+  buildEvidenceSummary,
+  buildMetaLines,
+  renderCatalog,
+} from "../../tools/feature-catalog/render"
 import type { Feature, LoadedFeature } from "../../tools/feature-catalog/schema"
 
 function makeFeature(over: Partial<Feature> = {}): Feature {
@@ -16,6 +20,12 @@ function makeFeature(over: Partial<Feature> = {}): Feature {
     depends_on: [],
     lifecycle_stage: "active",
     supersedes: [],
+    ui_surfaces: [],
+    monitoring: "n-a",
+    modes: [],
+    configurable: "n-a",
+    telemetry_keys: [],
+    config_refs: {},
     purpose: "do a thing",
     evidence: {
       code: [],
@@ -65,6 +75,109 @@ describe("buildEvidenceSummary — thin summary line", () => {
   test("emits empty string when nothing", () => {
     const f = makeFeature()
     expect(buildEvidenceSummary(f)).toBe("")
+  })
+})
+
+describe("buildMetaLines — Tier-3 integration axes", () => {
+  test("emits no Tier-3 lines when all fields are defaults / [n-a]", () => {
+    const f = makeFeature({
+      ui_surfaces: ["n-a"],
+      monitoring: "n-a",
+      modes: ["n-a"],
+      configurable: "n-a",
+      telemetry_keys: [],
+      config_refs: {},
+    } as Partial<Feature>)
+    const out = buildMetaLines(f)
+    expect(out).not.toContain("**UI**")
+    expect(out).not.toContain("**Monitoring**")
+    expect(out).not.toContain("**Modes**")
+    expect(out).not.toContain("**Configurable**")
+  })
+
+  test("renders **UI** when ui_surfaces has real signal, drops `n-a`", () => {
+    const f = makeFeature({
+      ui_surfaces: ["cli", "n-a", "ide"],
+    } as Partial<Feature>)
+    expect(buildMetaLines(f)).toContain("**UI**: cli, ide")
+  })
+
+  test("renders **Monitoring** with top-3 telemetry keys when integrated", () => {
+    const f = makeFeature({
+      monitoring: "integrated",
+      telemetry_keys: ["k1", "k2", "k3", "k4"],
+    } as Partial<Feature>)
+    const out = buildMetaLines(f)
+    expect(out).toContain("**Monitoring**: integrated · keys: k1, k2, k3")
+    expect(out).not.toContain("k4")
+  })
+
+  test("renders **Monitoring** without keys when telemetry_keys empty", () => {
+    const f = makeFeature({
+      monitoring: "partial",
+      telemetry_keys: [],
+    } as Partial<Feature>)
+    expect(buildMetaLines(f)).toContain("**Monitoring**: partial")
+  })
+
+  test("suppresses **Modes** when all 6 modes listed (no selectivity)", () => {
+    const f = makeFeature({
+      modes: ["interactive", "headless", "batch", "daemon", "ide", "ci-bot"],
+    } as Partial<Feature>)
+    expect(buildMetaLines(f)).not.toContain("**Modes**")
+  })
+
+  test("renders **Modes** when subset listed, caps at top 3", () => {
+    const f = makeFeature({
+      modes: ["interactive", "headless", "batch", "daemon"],
+    } as Partial<Feature>)
+    const out = buildMetaLines(f)
+    expect(out).toContain("**Modes**: interactive, headless, batch")
+    expect(out).not.toContain("daemon")
+  })
+
+  test("renders **Configurable** with top-3 env vars when integrated", () => {
+    const f = makeFeature({
+      configurable: "integrated",
+      config_refs: { env: ["A", "B", "C", "D"] },
+    } as Partial<Feature>)
+    const out = buildMetaLines(f)
+    expect(out).toContain("**Configurable**: integrated · env: A, B, C")
+    expect(out).not.toContain("D")
+  })
+
+  test("suppresses **Configurable** when status is none / static / planned", () => {
+    for (const c of ["none", "static", "planned", "n-a"] as const) {
+      const f = makeFeature({
+        configurable: c,
+        config_refs: { env: ["X"] },
+      } as Partial<Feature>)
+      expect(buildMetaLines(f)).not.toContain("**Configurable**")
+    }
+  })
+
+  test("Tier-3 lines append after owners / labels / depends_on", () => {
+    const f = makeFeature({
+      owners: ["@a"],
+      labels: ["t:core"],
+      depends_on: ["dep1"],
+      ui_surfaces: ["cli"],
+      monitoring: "integrated",
+      telemetry_keys: ["k1"],
+      configurable: "integrated",
+      config_refs: { env: ["E1"] },
+    } as Partial<Feature>)
+    const out = buildMetaLines(f)
+    expect(out).toBe(
+      [
+        "**소유자**: @a",
+        "**Labels**: t:core",
+        "**의존**: dep1",
+        "**UI**: cli",
+        "**Monitoring**: integrated · keys: k1",
+        "**Configurable**: integrated · env: E1",
+      ].join("<br>"),
+    )
   })
 })
 

@@ -192,10 +192,11 @@ function sortWithinSection(entries: LoadedFeature[]): LoadedFeature[] {
   })
 }
 
-/** Build the trailing metadata block (소유자 / Labels / 의존) for a feature.
- *  Returns "" when all three are empty so the renderer can skip the `<br>` join.
- *  Each non-empty field becomes one `<br>`-separated line inside the `핵심` cell.
- *  Defensive against pre-Tier-1 fixtures that omit the new array fields. */
+/** Build the trailing metadata block (소유자 / Labels / 의존 + Tier-3 axes)
+ *  for a feature. Returns "" when nothing is renderable so the renderer can
+ *  skip the `<br>` join. Each non-empty field becomes one `<br>`-separated
+ *  line inside the `핵심` cell. Defensive against pre-Tier-1/Tier-3 fixtures
+ *  that omit the new array/string fields. */
 export function buildMetaLines(feature: Feature): string {
   const lines: string[] = []
   const owners = feature.owners ?? []
@@ -210,7 +211,60 @@ export function buildMetaLines(feature: Feature): string {
   if (dependsOn.length > 0) {
     lines.push(`**의존**: ${dependsOn.map(escapeCell).join(", ")}`)
   }
+  // Tier-3 integration axes — render only when carrying signal beyond defaults.
+  // Suppress noise: `[n-a]`-only arrays, default `n-a` enum, and the "full 6"
+  // modes set (which conveys nothing distinctive). Cap inline lists at top 3.
+  const uiLine = renderUiSurfaces(feature)
+  if (uiLine) lines.push(uiLine)
+  const monLine = renderMonitoring(feature)
+  if (monLine) lines.push(monLine)
+  const modesLine = renderModes(feature)
+  if (modesLine) lines.push(modesLine)
+  const cfgLine = renderConfigurable(feature)
+  if (cfgLine) lines.push(cfgLine)
   return lines.join("<br>")
+}
+
+/** A token list that is non-empty AND not just `[n-a]` carries real signal. */
+function hasRealSignal(arr: readonly string[]): boolean {
+  if (arr.length === 0) return false
+  return arr.some((v) => v !== "n-a")
+}
+
+function renderUiSurfaces(f: Feature): string {
+  const ui = f.ui_surfaces ?? []
+  if (!hasRealSignal(ui)) return ""
+  const shown = ui.filter((v) => v !== "n-a").slice(0, 3)
+  return `**UI**: ${shown.map(escapeCell).join(", ")}`
+}
+
+function renderMonitoring(f: Feature): string {
+  const m = f.monitoring ?? "n-a"
+  if (m !== "integrated" && m !== "partial") return ""
+  const keys = (f.telemetry_keys ?? []).slice(0, 3)
+  const keysSeg = keys.length > 0 ? ` · keys: ${keys.map(escapeCell).join(", ")}` : ""
+  return `**Monitoring**: ${m}${keysSeg}`
+}
+
+/** Full mode set — when all 6 are listed it conveys no selectivity, suppress. */
+const ALL_MODES: readonly string[] = ["interactive", "headless", "batch", "daemon", "ide", "ci-bot"]
+
+function renderModes(f: Feature): string {
+  const modes = f.modes ?? []
+  if (!hasRealSignal(modes)) return ""
+  const real: string[] = modes.filter((v) => v !== "n-a")
+  // Suppress the all-6 case (no signal — feature claims to run everywhere).
+  if (real.length === ALL_MODES.length && ALL_MODES.every((m) => real.includes(m))) return ""
+  const shown = real.slice(0, 3)
+  return `**Modes**: ${shown.map(escapeCell).join(", ")}`
+}
+
+function renderConfigurable(f: Feature): string {
+  const c = f.configurable ?? "n-a"
+  if (c !== "integrated" && c !== "partial") return ""
+  const envs = (f.config_refs?.env ?? []).slice(0, 3)
+  const envSeg = envs.length > 0 ? ` · env: ${envs.map(escapeCell).join(", ")}` : ""
+  return `**Configurable**: ${c}${envSeg}`
 }
 
 export function buildEvidenceSummary(feature: Feature): string {
