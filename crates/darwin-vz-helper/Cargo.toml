@@ -1,0 +1,30 @@
+[package]
+name = "darwin-vz-helper"
+version = "0.1.0"
+edition = "2021"
+description = "Native macOS Virtualization.framework binding for quanta MCP Skybridge Phase 3 (ADR-0190 scaffold)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+# napi-rs v2 — same pin as sibling `linux-sandbox-native` (ADR-0184 §Build
+# verification). v3 is alpha-only on crates.io as of scaffold date; swap to
+# v3 is mechanical when stable.
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi6"] }
+napi-derive = "2"
+
+# `objc2-virtualization` + friends are darwin-only crates (Virtualization
+# framework binding). Gating them with `cfg(target_os = "macos")` keeps
+# `cargo check` green on Linux/Windows developer hosts (rust-analyzer in
+# IDE) while the real impl bodies are themselves `#[cfg(target_os = "macos")]`.
+# Phase 3.3 scaffold: declared but not yet exercised — Phase 3.4 wires them.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-foundation = "0.2"
+objc2-virtualization = "0.2"
+block2 = "0.5"
+
+[build-dependencies]
+napi-build = "2"

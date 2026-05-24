@@ -62,6 +62,11 @@ export interface McpSandboxPolicy {
   readonly maxRuntimeMs?: number
   /** Memory cap (MB). Phase 2 backends only. */
   readonly memoryMb?: number
+  /** CPU count for microVM backends (Phase 3 — AVF / Lima). Phase 1/2 ignore. */
+  readonly cpuCount?: number
+  /** Boot image path for microVM backends (Phase 3 — kernel/initrd/DMG).
+   *  Phase 1/2 ignore. Phase 3.4 may add a curated default registry. */
+  readonly bootImagePath?: string
 }
 
 /**

@@ -23,6 +23,11 @@ napi-derive = "2"
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 seccompiler = "0.5"
+# libc is Linux-only here: used by `lib.rs::spawn_sandboxed` pre_exec hook
+# for rlimit (RLIMIT_AS / RLIMIT_DATA / RLIMIT_CPU) + alarm() wall-clock
+# backstop. Pinned at "0.2" (the only published series) — minor upgrades
+# are SemVer-compatible.
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"

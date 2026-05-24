@@ -189,3 +189,5 @@ export const eventsOf = <T extends AgentEvent["type"]>(
   t: T,
 ): Extract<AgentEvent, { type: T }>[] =>
   s.events.filter((e): e is Extract<AgentEvent, { type: T }> => e.type === t)
+
+export { isPathLikeToken } from "./_harness/cli-path-tokens"

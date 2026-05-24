@@ -5,17 +5,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadSession, runAgent, saveSession } from "@/agent"
 import type { Message } from "@/llm"
-import { cfg, ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
-
-/**
- * Local mirror of the path-mode routing heuristic from `src/apps/cli/internal.ts::isPathLikeToken`.
- * The CLI internal module is biome-fenced off from cross-slice imports (ADR-0024),
- * and the contract is small and stable enough to mirror inline for testability.
- * If the production heuristic ever diverges, the test below pinning routing
- * behaviour will fail loudly and force this copy to be updated.
- */
-const isPathLikeToken = (token: string): boolean =>
-  token.includes("/") || token.includes("\\") || token.endsWith(".json")
+import {
+  cfg,
+  ev,
+  isPathLikeToken,
+  RecordingStream,
+  ScriptedLLM,
+  text,
+  toolUse,
+  withTimeout,
+} from "./_harness"
 
 /**
  * End-to-end coverage of CLI session resume (ADR for `--state` / `--resume` in

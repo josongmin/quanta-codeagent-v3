@@ -1,6 +1,6 @@
 //! `linux-sandbox-native` — napi-rs binding for quanta's in-process Linux
-//! Landlock + seccomp OS sandbox (ADR-0175 scaffold, ADR-0176 Phase 3.1
-//! real impl).
+//! Landlock + seccomp OS sandbox (ADR-0175 scaffold, ADR-0184 Phase 3.1
+//! real impl, ADR-0191 Phase 3.2 strict seccomp + rlimit/alarm caps).
 //!
 //! ## Layout
 //!
@@ -69,6 +69,10 @@ pub struct NapiSandboxPolicy {
     pub timeout_ms: Option<u32>,
     /// Memory cap in MB; `None` = no cap. Enforced via rlimit in the child.
     pub memory_mb: Option<u32>,
+    /// Seccomp mode: `"strict"` (default — Phase 3.2 default-deny + per-
+    /// syscall-family allowlist) or `"lax"` (Phase 3.1 wire — allow-all,
+    /// diagnostic / debug only). When `None`, the child applies strict.
+    pub seccomp_mode: Option<String>,
 }
 
 /// Spawn spec — argv + cwd + (optional) env. Mirrors the TS
@@ -108,6 +112,16 @@ struct LocalPolicy {
     extra_read_paths: Vec<String>,
     extra_write_paths: Vec<String>,
     allow_network: Option<bool>,
+    /// Memory cap (MB). When `Some`, enforced via `RLIMIT_AS + RLIMIT_DATA`
+    /// in `pre_exec` BEFORE landlock + seccomp apply.
+    memory_mb: Option<u32>,
+    /// Wall-clock cap (ms). When `Some`, enforced via `RLIMIT_CPU` (CPU
+    /// seconds hard cap → SIGKILL on excess) plus `alarm(secs)` as a
+    /// wall-clock backstop.
+    timeout_ms: Option<u32>,
+    /// Seccomp mode. Defaults to `"strict"` when the napi field is `None`.
+    /// `"lax"` is the Phase 3.1 diagnostic path.
+    seccomp_mode: String,
 }
 
 #[cfg(target_os = "linux")]
@@ -119,6 +133,13 @@ impl LocalPolicy {
             extra_read_paths: p.extra_read_paths.clone(),
             extra_write_paths: p.extra_write_paths.clone(),
             allow_network: p.allow_network,
+            memory_mb: p.memory_mb,
+            timeout_ms: p.timeout_ms,
+            seccomp_mode: p
+                .seccomp_mode
+                .as_deref()
+                .map(str::to_string)
+                .unwrap_or_else(|| String::from("strict")),
         }
     }
 
@@ -132,8 +153,9 @@ impl LocalPolicy {
             extra_read_paths: self.extra_read_paths.clone(),
             extra_write_paths: self.extra_write_paths.clone(),
             allow_network: self.allow_network,
-            timeout_ms: None,
-            memory_mb: None,
+            timeout_ms: self.timeout_ms,
+            memory_mb: self.memory_mb,
+            seccomp_mode: Some(self.seccomp_mode.clone()),
         }
     }
 }
@@ -202,15 +224,83 @@ pub fn spawn_sandboxed(
     // closure does small `String` work via the typed error path but no
     // heavy allocation. landlock and seccomp APIs are async-signal-safe in
     // their hot path (they ultimately call `syscall(...)` directly).
+    //
+    // Pipeline (Phase 3.2):
+    //   1. rlimit + alarm (memory + CPU + wall-clock backstop) — set FIRST
+    //      so even seccomp/landlock-apply failure paths still inherit the
+    //      caps. setrlimit / alarm are async-signal-safe.
+    //   2. seccomp (strict by default, lax for opt-in diagnostic) — second
+    //      so landlock-apply syscalls aren't already filtered.
+    //   3. landlock `restrict_self()` — third; landlock leaves the syscall
+    //      table intact, so seccomp goes first per Codex parity.
     unsafe {
         cmd.pre_exec(move || {
-            // Phase 3.1: apply seccomp first (lax mode — empty rule table,
-            // Allow default) then landlock. Both error paths convert to
-            // `io::Error` so the child fails before `execve()` and the
-            // parent sees a typed spawn failure.
-            seccomp::build_and_apply().map_err(std::io::Error::other)?;
+            // 1) rlimit + alarm caps. SAFETY: libc::setrlimit / libc::alarm
+            // are async-signal-safe per POSIX. We ignore the return code
+            // when the cap is None; non-zero failure on a set call is
+            // surfaced as a typed io::Error so the child fails before
+            // execve().
+            if let Some(mb) = local_policy.memory_mb {
+                let bytes: u64 = (mb as u64).saturating_mul(1024 * 1024);
+                let lim = libc::rlimit {
+                    rlim_cur: bytes as libc::rlim_t,
+                    rlim_max: bytes as libc::rlim_t,
+                };
+                // RLIMIT_AS — virtual address space cap. Tightest control
+                // available without cgroups.
+                if libc::setrlimit(libc::RLIMIT_AS, &lim) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                // RLIMIT_DATA — data segment cap. Defense in depth against
+                // brk() / sbrk() allocations that bypass RLIMIT_AS on some
+                // kernel configs.
+                if libc::setrlimit(libc::RLIMIT_DATA, &lim) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+            if let Some(ms) = local_policy.timeout_ms {
+                // ms → seconds (saturating). Sub-second timeouts collapse
+                // to 1s because RLIMIT_CPU + alarm() are both
+                // second-resolution APIs. ms < 1000 → secs=1.
+                let secs: u64 = ((ms as u64) / 1000).max(1);
+                let lim = libc::rlimit {
+                    rlim_cur: secs as libc::rlim_t,
+                    rlim_max: secs as libc::rlim_t,
+                };
+                // RLIMIT_CPU — CPU seconds hard cap (kernel sends SIGKILL
+                // on excess).
+                if libc::setrlimit(libc::RLIMIT_CPU, &lim) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                // alarm(secs) — wall-clock backstop. The child receives
+                // SIGALRM on timeout. RLIMIT_CPU only fires on CPU-bound
+                // workloads; alarm covers the I/O-blocked case.
+                // alarm() returns previous remaining seconds — we discard.
+                let secs_u32 = if secs > u32::MAX as u64 {
+                    u32::MAX
+                } else {
+                    secs as u32
+                };
+                libc::alarm(secs_u32);
+            }
 
-            // Re-hydrate napi shape inside the child and compile fresh —
+            // 2) Seccomp — branch on policy.seccomp_mode. Both error paths
+            // convert to `io::Error` so the child fails before `execve()`
+            // and the parent sees a typed spawn failure.
+            match local_policy.seccomp_mode.as_str() {
+                "lax" => {
+                    // Phase 3.1 diagnostic path — preserved as opt-in.
+                    seccomp::build_and_apply_seccomp().map_err(std::io::Error::other)?;
+                }
+                // "strict" | unknown → strict (defense in depth: unknown
+                // mode collapses to the safer side).
+                _ => {
+                    seccomp::build_and_apply_strict_seccomp(&local_policy.profile)
+                        .map_err(std::io::Error::other)?;
+                }
+            }
+
+            // 3) Re-hydrate napi shape inside the child and compile fresh —
             // landlock file descriptors must be opened in the child's
             // address space.
             let napi_view = local_policy.as_napi();

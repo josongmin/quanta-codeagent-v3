@@ -1,0 +1,31 @@
+{
+  "name": "@quanta/darwin-vz-helper",
+  "version": "0.1.0",
+  "description": "Native macOS Virtualization.framework binding for quanta MCP Skybridge Phase 3 (ADR-0190 scaffold)",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": ["index.js", "index.d.ts"],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 20"
+  },
+  "napi": {
+    "name": "darwin-vz-helper",
+    "triples": {
+      "defaults": false,
+      "additional": ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+    }
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  },
+  "optionalDependencies": {
+    "@quanta/darwin-vz-helper-darwin-arm64": "0.1.0",
+    "@quanta/darwin-vz-helper-darwin-x64": "0.1.0"
+  }
+}

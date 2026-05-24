@@ -94,6 +94,7 @@ name = "linux-sandbox-native"
 version = "0.1.0"
 dependencies = [
  "landlock",
+ "libc",
  "napi",
  "napi-build",
  "napi-derive",

@@ -1,12 +1,14 @@
 # Cargo workspace root for the quanta native crates.
 #
-# Currently only `linux-sandbox-native` (ADR-0175 / ADR-0176) lives here, but
-# the workspace exists so future native bindings (e.g. a darwin-Seatbelt
-# helper, a Windows AppContainer helper) drop in without restructuring.
+# Members:
+#   - `linux-sandbox-native` (ADR-0175 / ADR-0184) — Landlock + seccomp
+#   - `darwin-vz-helper`     (ADR-0190 Phase 3.3)  — Virtualization.framework
 #
 # Resolver v2 is the default for edition 2021 packages but explicit here so
-# cross-platform target dependencies (`cfg(target_os = "linux")`) resolve per
-# target rather than unioned.
+# cross-platform target dependencies (`cfg(target_os = "linux")`,
+# `cfg(target_os = "macos")`) resolve per target rather than unioned —
+# critical for keeping Linux-only `landlock`/`seccompiler` AND
+# macOS-only `objc2-virtualization` out of unrelated hosts' build graphs.
 [workspace]
-members = ["linux-sandbox-native"]
+members = ["linux-sandbox-native", "darwin-vz-helper"]
 resolver = "2"

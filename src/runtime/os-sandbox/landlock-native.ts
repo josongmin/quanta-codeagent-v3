@@ -50,7 +50,10 @@ export interface NapiSpawnResult {
 }
 
 /** napi-rs SandboxPolicy shape (camelCase across napi boundary; required
- *  fields defaulted to `[]` rather than absent — see lib.rs doc). */
+ *  fields defaulted to `[]` rather than absent — see lib.rs doc).
+ *
+ *  ADR-0191 Phase 3.2 adds `seccompMode` (Rust default = "strict" when
+ *  None) and surfaces `memoryMb` to the binding (rlimit + alarm wire). */
 export interface NapiSandboxPolicy {
   readonly profile: string
   readonly workspace: string
@@ -59,6 +62,7 @@ export interface NapiSandboxPolicy {
   readonly allowNetwork?: boolean
   readonly timeoutMs?: number
   readonly memoryMb?: number
+  readonly seccompMode?: "lax" | "strict"
 }
 
 /** napi-rs SandboxedSpawnSpec shape. AbortSignal does NOT cross napi —
@@ -146,7 +150,7 @@ const dynamicLoadBinding = async (): Promise<NativeLandlockBinding | null> => {
     // ts-ignore is deliberate: the package may not be in node_modules
     // (the install opt-out case), in which case the import throws and
     // we degrade to null.
-    // @ts-ignore — optional dep, may not be installed
+    // @ts-expect-error — optional dep, may not be installed
     const mod: unknown = await import("@quanta/linux-sandbox-native")
     if (mod === null || typeof mod !== "object") return null
     const m = mod as Record<string, unknown>
@@ -197,17 +201,25 @@ export const detectNativeLandlock = async (
 
 /** Map the typed TS policy to the napi-rs shape. Exported for unit-test
  *  visibility on the policy-mapping contract (camelCase TS → camelCase
- *  napi, which napi-rs converts to snake_case on the Rust side). */
-export const mapPolicyToNapi = (
-  policy: SandboxPolicy,
-  workspace: string,
-): NapiSandboxPolicy => ({
+ *  napi, which napi-rs converts to snake_case on the Rust side).
+ *
+ *  ADR-0191 Phase 3.2:
+ *   - `seccompMode` defaults to `"strict"` when the typed policy omits it
+ *     (the Rust side ALSO collapses `None` → strict; this default keeps the
+ *     wire explicit so test assertions can pin the field).
+ *   - `memoryMb` flows through verbatim (exactOptional spread). */
+export const mapPolicyToNapi = (policy: SandboxPolicy, workspace: string): NapiSandboxPolicy => ({
   profile: policy.profile,
   workspace,
   extraReadPaths: policy.extraReadPaths ? [...policy.extraReadPaths] : [],
   extraWritePaths: policy.extraWritePaths ? [...policy.extraWritePaths] : [],
   ...(policy.allowNetwork !== undefined ? { allowNetwork: policy.allowNetwork } : {}),
   ...(policy.timeoutMs !== undefined ? { timeoutMs: policy.timeoutMs } : {}),
+  ...(policy.memoryMb !== undefined ? { memoryMb: policy.memoryMb } : {}),
+  // seccompMode default = "strict". Explicit on the wire even when typed
+  // policy omits it — keeps the assertion clear in tests and documents
+  // intent for diagnostics ("which mode did the binding actually see?").
+  seccompMode: policy.seccompMode ?? "strict",
 })
 
 const mapSpecToNapi = (spec: SandboxedSpawnSpec): NapiSandboxedSpawnSpec => ({
@@ -342,9 +354,7 @@ export const nativeLandlockOsSandbox = (cfg?: NativeLandlockConfig): OsSandbox =
         if (info === null || !info.available) {
           return {
             backend: "passthrough",
-            warnings: [
-              `native-landlock-unavailable${info?.reason ? `: ${info.reason}` : ""}`,
-            ],
+            warnings: [`native-landlock-unavailable${info?.reason ? `: ${info.reason}` : ""}`],
           }
         }
         return { backend: "landlock+seccomp", warnings: [] }

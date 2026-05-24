@@ -1,0 +1,7 @@
+target/
+*.node
+*.dylib
+*.so
+*.dll
+index.js
+index.d.ts

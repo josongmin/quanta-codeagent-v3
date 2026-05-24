@@ -39,6 +39,16 @@ export interface SandboxPolicy {
   readonly allowNetwork?: boolean
   /** Wall-clock cap (ms). The sandbox aborts the spawn signal past this. */
   readonly timeoutMs?: number
+  /** Memory cap (MB). Enforced by the native Linux adapter via
+   *  `RLIMIT_AS + RLIMIT_DATA` in the child's `pre_exec`; ignored on
+   *  backends that don't carry it (Phase 2 bwrap/landlock-cli, Seatbelt).
+   *  ADR-0191 Phase 3.2. */
+  readonly memoryMb?: number
+  /** Seccomp mode for the native Linux adapter: `"strict"` (default —
+   *  Phase 3.2 default-deny allowlist) or `"lax"` (Phase 3.1 wire,
+   *  diagnostic / debug only). Other backends ignore this field.
+   *  Defaults to `"strict"` when the adapter sees `undefined`. */
+  readonly seccompMode?: "lax" | "strict"
 }
 
 export interface SandboxedSpawnSpec {
