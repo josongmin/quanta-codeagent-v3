@@ -6,8 +6,8 @@ order: 3
 maturity: L5
 status: stable
 ui_surfaces: [n-a]
-monitoring: partial
-telemetry_keys: [quanta.hitl.tier_resolved]
+monitoring: integrated
+telemetry_keys: [gen_ai.request.max_tokens, gen_ai.request.model, gen_ai.request.temperature, gen_ai.response.finish_reasons, gen_ai.response.model]
 modes: [interactive, headless]
 configurable: integrated
 config_refs:

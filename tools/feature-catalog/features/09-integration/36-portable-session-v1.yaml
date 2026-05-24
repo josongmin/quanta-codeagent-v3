@@ -6,8 +6,8 @@ order: 36
 maturity: L4
 status: new
 ui_surfaces: [api]
-monitoring: partial
-telemetry_keys: ["quanta.session.portable"]
+monitoring: integrated
+telemetry_keys: [quanta.session.portable]
 modes: [n-a]
 configurable: partial
 owners: ["@songmin"]

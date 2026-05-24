@@ -6,7 +6,7 @@ order: 2
 maturity: L3
 status: stable
 ui_surfaces: [cli]
-monitoring: partial
+monitoring: n-a
 modes: [n-a]
 configurable: static
 owners: ['@songmin']

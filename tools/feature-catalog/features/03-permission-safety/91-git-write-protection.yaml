@@ -6,8 +6,8 @@ order: 91
 maturity: L4
 status: stable
 ui_surfaces: [n-a]
-monitoring: partial
-telemetry_keys: ["quanta.tool.call.status"]
+monitoring: integrated
+telemetry_keys: [quanta.tool.call.status]
 modes: [n-a]
 configurable: static
 owners: ["@songmin", "team-safety"]

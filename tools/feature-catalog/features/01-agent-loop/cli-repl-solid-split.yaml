@@ -6,7 +6,7 @@ order: 200
 maturity: L2
 status: refined
 ui_surfaces: [cli]
-monitoring: partial
+monitoring: n-a
 modes: [interactive]
 configurable: n-a
 owners: ["@songmin"]

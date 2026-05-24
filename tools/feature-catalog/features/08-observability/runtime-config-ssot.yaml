@@ -6,7 +6,7 @@ order: 85
 maturity: L4
 status: stable
 ui_surfaces: [n-a]
-monitoring: partial
+monitoring: n-a
 modes: [n-a]
 configurable: integrated
 config_refs:

@@ -6,7 +6,7 @@ order: 50
 maturity: L4
 status: stable
 ui_surfaces: [n-a]
-monitoring: partial
+monitoring: n-a
 telemetry_keys: ["quanta.hitl"]
 modes: [n-a]
 configurable: integrated

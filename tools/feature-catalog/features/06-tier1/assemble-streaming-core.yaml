@@ -6,7 +6,7 @@ order: 235
 maturity: L4
 status: new
 ui_surfaces: [cli]
-monitoring: partial
+monitoring: n-a
 modes: [interactive, headless]
 configurable: integrated
 config_refs:

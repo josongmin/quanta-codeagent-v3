@@ -6,8 +6,8 @@ order: 32
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: partial
-telemetry_keys: ["quanta.trajectory.v1"]
+monitoring: integrated
+telemetry_keys: [quanta.trajectory.v]
 modes: [headless, batch]
 configurable: static
 owners: ["@songmin"]

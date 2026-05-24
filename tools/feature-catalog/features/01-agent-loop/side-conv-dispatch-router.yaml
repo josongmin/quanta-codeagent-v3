@@ -6,7 +6,8 @@ order: 22
 maturity: L4
 status: stable
 ui_surfaces: [cli]
-monitoring: partial
+monitoring: integrated
+telemetry_keys: [quanta.thread.kind, quanta.thread.parent_id, quanta.thread.side]
 modes: [n-a]
 configurable: static
 owners: ["@songmin"]

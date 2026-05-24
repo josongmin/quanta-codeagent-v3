@@ -6,7 +6,7 @@ order: 118
 maturity: L4
 status: stable
 ui_surfaces: [n-a]
-monitoring: partial
+monitoring: n-a
 telemetry_keys: ["quanta.local"]
 modes: [n-a]
 configurable: static

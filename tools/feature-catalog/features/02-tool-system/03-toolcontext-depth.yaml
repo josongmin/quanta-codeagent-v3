@@ -6,7 +6,8 @@ order: 3
 maturity: L3
 status: stable
 ui_surfaces: [n-a]
-monitoring: partial
+monitoring: integrated
+telemetry_keys: [quanta.tool.call.status]
 modes: [n-a]
 configurable: n-a
 owners: ['@songmin']

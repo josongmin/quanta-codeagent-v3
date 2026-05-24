@@ -6,7 +6,7 @@ order: 33
 maturity: L4
 status: stable
 ui_surfaces: [n-a]
-monitoring: partial
+monitoring: n-a
 modes: [headless, batch]
 configurable: n-a
 owners: ["@songmin"]

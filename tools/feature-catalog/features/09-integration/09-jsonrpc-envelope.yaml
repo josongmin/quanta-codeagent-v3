@@ -6,7 +6,7 @@ order: 9
 maturity: L4
 status: new
 ui_surfaces: [api]
-monitoring: partial
+monitoring: n-a
 modes: [n-a]
 configurable: partial
 owners: ["@songmin"]

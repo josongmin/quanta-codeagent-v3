@@ -6,8 +6,8 @@ order: 34
 maturity: L4
 status: new
 ui_surfaces: [api]
-monitoring: partial
-telemetry_keys: [quanta.ipc.v1]
+monitoring: integrated
+telemetry_keys: [quanta.ipc.v]
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]

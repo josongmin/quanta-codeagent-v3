@@ -6,7 +6,7 @@ order: 35
 maturity: L2
 status: new
 ui_surfaces: [api]
-monitoring: partial
+monitoring: n-a
 modes: [n-a]
 configurable: planned
 owners: ['@songmin']
