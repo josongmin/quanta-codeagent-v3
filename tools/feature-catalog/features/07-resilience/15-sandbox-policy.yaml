@@ -1,0 +1,37 @@
+id: sandbox-policy
+title: SandboxPolicy — declarative per-command confinement
+section: 7
+subsystem: Shell-exec 정책 (Sandbox)
+order: 15
+maturity: L4
+status: stable
+purpose: |
+  Single-command 실행에 옵션 필드 5개로 confinement를 선언: `cwdJail`(작업
+  디렉토리 jail — 구현체는 escape를 reject MUST), `allowNetwork`(network
+  egress 거부, DockerSandbox만 실제 enforce), `envAllowlist`(통과 env 변수
+  이름 정확 집합, 그 외(parent 전체 env / API 키 포함)는 drop), `maxOutputBytes`
+  (combined stdout/stderr 캡), `timeoutMs`(wall-clock budget — 초과 시 자식
+  kill + `timedOut` flag), `disclaimShell`(`bash --noprofile --norc` /
+  `zsh -f`로 hijacked dotfile이 child env/디스크립터를 읽지 못함). LocalSandbox
+  와 DockerSandbox는 같은 정책 surface로 호출, *enforcement 정도*만 다름
+  (LocalSandbox는 cwdJail/timeout/output cap만; DockerSandbox는 network/env
+  까지). SandboxUnavailableError로 backend-not-usable 노출 — caller가
+  weaker backend로 fallback할지 결정.
+evidence:
+  code:
+    - src/runtime/sandbox.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/sandbox.test.ts
+      - tests/unit/sandbox-buildargv.test.ts
+      - tests/unit/eval-sandbox-escape.test.ts
+    integration: []
+    contract:
+      - tests/contract/sandbox-docker.test.ts
+knobs: []
+deliberate_hold: null
+notes: |
+  정책 enforcement matrix는 각 구현체 doc-comment(LocalSandbox/DockerSandbox)
+  에 — "정책이 security boundary인지"는 구현체가 말해줘야 하고, 정책-만으로
+  보안을 가정하지 말 것.
