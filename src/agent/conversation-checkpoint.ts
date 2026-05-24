@@ -64,6 +64,19 @@ export interface ConversationCheckpointStore {
   prune(keep: number): number
   /** Remove every snapshot. */
   clear(): void
+  /** ADR-0201 extension. Clone the snapshot under `srcId` to a new key `dstId`.
+   *  Reuses the SAME frozen messages array (snapshot is immutable, sharing is
+   *  safe). Returns `true` on success, `false` when `srcId` is missing OR
+   *  `dstId` already exists (strict no-overwrite — overwrite would silently
+   *  corrupt the parent if `dstId` ever collided). Triggers LRU eviction on
+   *  successful insert (the source key is `peek`-ed, NOT touched). */
+  cloneSnapshot(srcId: string, dstId: string): boolean
+  /** ADR-0201 extension. Read-only lineage lookup: returns `{ parent }` where
+   *  `parent` is the id this entry was forked FROM, or `null` if this id was
+   *  recorded directly (root) OR is unknown to the lineage tracker. The
+   *  default-impl tracks lineage in a sibling map; consumers that do not call
+   *  `cloneSnapshot` get `{ parent: null }` for every id (byte-identical). */
+  lineageOf(id: string): { parent: string | null }
 }
 
 export interface ConversationCheckpointStoreOpts {
@@ -94,12 +107,20 @@ export const defaultConversationCheckpointStore = (
   // Map preserves insertion order; we use that for LRU. On replacement we
   // delete then re-set to move the entry to the "newest" end.
   const store = new Map<string, ConversationSnapshot>()
+  // ADR-0201 — child → parent map for `lineageOf`. Empty until `cloneSnapshot`
+  // populates it; stores no payload beyond the parent id so cap parity with
+  // `store` keeps the worst-case memory bounded (one entry per cloned snapshot,
+  // and clones are evicted with the same LRU as `store`).
+  const lineage = new Map<string, string>()
 
   const evictIfOver = (): void => {
     while (store.size > maxEntries) {
       const oldestKey = store.keys().next().value
       if (oldestKey === undefined) break
       store.delete(oldestKey)
+      // Lineage is keyed by child id (== store key for clones). Drop in lock-
+      // step so stale parent pointers do not survive their owning snapshot.
+      lineage.delete(oldestKey)
     }
   }
 
@@ -143,6 +164,30 @@ export const defaultConversationCheckpointStore = (
 
     clear() {
       store.clear()
+      lineage.clear()
+    },
+
+    cloneSnapshot(srcId, dstId) {
+      if (srcId === dstId) return false
+      const src = store.get(srcId)
+      if (src === undefined) return false
+      if (store.has(dstId)) return false
+      // Reuse the frozen array — snapshots are immutable post-record so
+      // sharing is safe and avoids a copy.
+      const clone: ConversationSnapshot = {
+        id: dstId,
+        takenAt: now(),
+        messages: src.messages,
+      }
+      store.set(dstId, clone)
+      lineage.set(dstId, srcId)
+      evictIfOver()
+      return true
+    },
+
+    lineageOf(id) {
+      const parent = lineage.get(id)
+      return { parent: parent === undefined ? null : parent }
     },
   }
 }

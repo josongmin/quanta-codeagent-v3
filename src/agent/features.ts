@@ -58,6 +58,7 @@ import {
   buildBranchSearchBlock,
   buildBudgetBlock,
   buildClassifierBlock,
+  buildForkSessionBlock,
   buildPlanExitBlock,
   buildPlanMutationBlock,
   buildShadowBlock,
@@ -148,6 +149,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0119 — shadow store tools (default-OFF: empty array when shadowOdb absent)
   extraTools.push(...buildShadowBlock(config))
+
+  // ADR-0201 — fork_session tool (default-OFF: empty array when fork absent)
+  extraTools.push(...buildForkSessionBlock(config))
 
   // ADR-0140 — background-subagent tools (default-OFF: empty when subagentBackground absent)
   extraTools.push(...buildSubagentBgBlock(config))

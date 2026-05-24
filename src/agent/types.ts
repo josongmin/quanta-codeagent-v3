@@ -27,6 +27,7 @@ import type { ConversationActionPort } from "./conversation-action"
 import type { ConversationCheckpointStore } from "./conversation-checkpoint"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { FollowUpQueue, PausedReason } from "./follow-up-queue"
+import type { SessionForker } from "./fork-session"
 import type { GlobRule } from "./glob-rules"
 import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
@@ -557,6 +558,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   subagentBackground?: { readonly scheduler: BackgroundSubagentScheduler }
   /**
+   * ADR-0201 fork-session slot. When set, `buildForkSessionBlock` registers
+   * the `fork_session` tool wired to this forker. Absent ⇒ tool NOT registered
+   * (default-OFF, byte-identical for every legacy caller — RFC §1.2). Distinct
+   * from `conversationCheckpoint` so a caller may wire the store for record/
+   * restore consumers WITHOUT also exposing the fork tool (the forker
+   * constructs over the same store but layers lineage + UUID minting).
+   */
+  fork?: { readonly forker: SessionForker }
+  /**
    * ADR-0125 turn-diff loop wiring — opt-in trigger for the
    * {@link wireGitObservability} composite (ADR-0110). When `enabled === true`
    * the loop constructs a per-session `TurnDiffSession` (via
@@ -951,6 +961,7 @@ export type FeaturesConfig = Pick<
   | "shadowCheckpoint"
   | "shadowOdb"
   | "subagentBackground"
+  | "fork"
   | "onProgress"
   | "planExitPort"
   | "modelCandidates"

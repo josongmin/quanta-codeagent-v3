@@ -17,6 +17,7 @@
 export { buildClassifierBlock } from "./auto-classifier"
 export { buildBranchSearchBlock } from "./branch-search"
 export { buildBudgetBlock } from "./budget"
+export { buildForkSessionBlock } from "./fork-session"
 export { buildPlanExitBlock } from "./plan-exit"
 export { buildPlanMutationBlock } from "./plan-mutation"
 export { buildShadowBlock } from "./shadow"

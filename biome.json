@@ -921,6 +921,24 @@
       }
     },
     {
+      "includes": ["**/src/agent/fork-session/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0201): fork-session is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0201): fork-session cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/agent/plan-queue.ts"],
       "linter": {
         "rules": {
@@ -1041,6 +1059,7 @@
         "!src/agent/budget-ledger.ts",
         "!src/agent/conversation-checkpoint.ts",
         "!src/agent/conversation-checkpoint-lru.ts",
+        "!src/agent/fork-session/**",
         "!src/agent/subagent-background.ts",
         "!src/agent/verify-checkpoint-bridge.ts",
         "!src/agent/checkpoint-policy.ts",
