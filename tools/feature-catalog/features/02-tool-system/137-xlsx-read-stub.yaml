@@ -1,0 +1,37 @@
+id: xlsx-read-stub
+title: xlsx_read — typed stub awaiting deps decision (ADR-0137)
+section: 2
+subsystem: 도구 — document (XLSX surface placeholder; impl deferred)
+order: 137
+maturity: L2
+status: hold
+purpose: |
+  Tool-surface seal for `xlsx_read` so callers can depend on the name,
+  inputSchema, and READ-ONLY metadata even though `execute()` currently
+  returns a typed `"xlsx_read not yet implemented — deps decision deferred"`
+  envelope. The decision-blocker is SheetJS (~10 MB native binding); the
+  next round can swap the implementation behind this same surface in a
+  byte-identical fashion. Stub exists to prevent callers from inventing
+  ad-hoc surfaces while the dep tradeoff is being weighed.
+evidence:
+  code:
+    - src/tool/document/xlsx-read.ts
+    - src/tool/document/index.ts
+  adrs: [137]
+  tests:
+    unit:
+      - tests/unit/tool/xlsx-read-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Deps decision pending: SheetJS (~10 MB native binding) vs alternative
+    pure-TS xlsx parsers. Surface frozen now so the impl can be swapped
+    without breaking callers.
+  promotion_path: |
+    Land the deps decision, wire the parser behind the same surface, swap
+    the typed stub envelope for real output, lift maturity to L4.
+notes: |
+  Maturity is L2 (typed shell only, no execution path). Promoted to L4 once
+  the deps decision lands and the parser is wired.

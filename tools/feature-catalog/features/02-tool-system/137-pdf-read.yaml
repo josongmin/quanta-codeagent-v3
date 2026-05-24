@@ -1,0 +1,37 @@
+id: pdf-read-tool
+title: pdf_read — native Anthropic document-block attachment (ADR-0137)
+section: 2
+subsystem: 도구 — document (PDF via DocumentBlock content-block, no client lib)
+order: 137
+maturity: L4
+status: new
+purpose: |
+  PDF reader that ships ZERO client-side text-extraction dependency. Every
+  other modern agent (Cursor / Codex / Cline) pulls `pdf-parse` / `pdfjs`
+  and stitches OCR; we instead emit a typed `DocumentBlock` (base64 +
+  `application/pdf` mediaType) on a new `ToolResult.documents` field that
+  the dispatch wire (ADR-0121 + ADR-0126) automatically composes into the
+  next user message via `composeToolResultContent`. Claude then handles
+  vision + text + form natively (including scanned PDFs, no OCR). Magic-
+  byte SSOT (`%PDF-` / 0x25 0x50 0x44 0x46 0x2D) prevents PNG-with-.pdf-
+  extension spoofing. 32 MB cap matches the Anthropic Messages API
+  document-block ceiling. Path safety, READ-ONLY + concurrency-safe.
+evidence:
+  code:
+    - src/tool/document/pdf-read.ts
+    - src/tool/document/index.ts
+    - src/tool/types.ts
+    - src/llm/types.ts
+  adrs: [137]
+  tests:
+    unit:
+      - tests/unit/tool/pdf-read-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `DocumentBlock` is added to the `ContentBlock` union and `ToolResult.documents`
+  is an optional field — absent on every legacy tool, byte-identical when no
+  caller emits it (same additive posture as ADR-0126's `images`). Caller-
+  deferred registration; host wires per slice.
