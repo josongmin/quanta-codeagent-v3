@@ -48,6 +48,26 @@ interface FileLockPayload {
   readonly pid: number
 }
 
+/** Parse a raw lock-file body into a {@link FileLockPayload}. Returns `null`
+ *  when JSON is corrupt OR shape is wrong — both surfaces are "treat as
+ *  stale" at the call site. Extracted for cognitive-complexity discipline:
+ *  keeps `tryAcquire` focused on the state-machine, not on parsing. */
+const parseLockPayload = (raw: string): FileLockPayload | null => {
+  try {
+    const obj = JSON.parse(raw) as Partial<FileLockPayload>
+    if (
+      typeof obj.holderId === "string" &&
+      typeof obj.expiresAt === "number" &&
+      typeof obj.pid === "number"
+    ) {
+      return obj as FileLockPayload
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export interface FileBasedLockOptions {
   readonly store: LockFileStorePort
   readonly clock: ClockPort
@@ -69,74 +89,43 @@ export class FileBasedLock implements OAuthRefreshLockPort {
 
   async tryAcquire(key: string, holderId: string, ttlMs: number): Promise<LockResult> {
     if (ttlMs <= 0) throw new Error(`FileBasedLock.tryAcquire: ttlMs must be > 0 (got ${ttlMs})`)
-    if (holderId.length === 0) throw new Error("FileBasedLock.tryAcquire: holderId must be non-empty")
+    if (holderId.length === 0)
+      throw new Error("FileBasedLock.tryAcquire: holderId must be non-empty")
     if (key.length === 0) throw new Error("FileBasedLock.tryAcquire: key must be non-empty")
 
     const now = this.clock.now()
+    const payload: FileLockPayload = { holderId, expiresAt: now + ttlMs, pid: this.pid }
 
-    // Inspect existing file. Stale entries are silently overwritten; live
-    // entries with the same holder are renewed (same re-entrant policy as
-    // InMemoryLock).
+    // Inspect existing file.
     const raw = await this.store.read(key)
-    let isStaleOrCorrupt = false
     if (raw !== null) {
-      let parsed: FileLockPayload | null = null
-      try {
-        const obj = JSON.parse(raw) as Partial<FileLockPayload>
-        if (
-          typeof obj.holderId === "string" &&
-          typeof obj.expiresAt === "number" &&
-          typeof obj.pid === "number"
-        ) {
-          parsed = obj as FileLockPayload
-        }
-      } catch {
-        // Corrupt lock file — treat as released (overwrite below).
-        parsed = null
-      }
+      const parsed = parseLockPayload(raw)
+      // Live lock branch: same holder renews, different holder waits.
       if (parsed !== null && parsed.expiresAt > now) {
-        // Live lock. Same holder → renew. Different holder → would-wait.
         if (parsed.holderId === holderId) {
-          const payload: FileLockPayload = { holderId, expiresAt: now + ttlMs, pid: this.pid }
           await this.store.write(key, JSON.stringify(payload), "overwrite")
           return "acquired"
         }
         return "would-wait"
       }
-      // Stale (TTL elapsed) or corrupt (parse failed) → we own the right to
-      // overwrite without exclusive-mode failing. Note the read already
-      // narrowed our race window — if a competing process renews between
-      // our read and our overwrite, last-write-wins is the documented
-      // tradeoff.
-      isStaleOrCorrupt = true
-    }
-
-    const payload: FileLockPayload = { holderId, expiresAt: now + ttlMs, pid: this.pid }
-    if (isStaleOrCorrupt) {
+      // Stale / corrupt: we own the right to overwrite (read already narrowed
+      // the race window; last-write-wins is the documented tradeoff).
       await this.store.write(key, JSON.stringify(payload), "overwrite")
       return "acquired"
     }
+
     // No file at all — try exclusive write. Race window: another process
     // could insert between our read and write. Exclusive mode reports it
     // via `"exists"` and we return would-wait.
     const writeResult = await this.store.write(key, JSON.stringify(payload), "exclusive")
-    if (writeResult === "ok") return "acquired"
-    // Lost the race — another holder claimed it between our read and write.
-    return "would-wait"
+    return writeResult === "ok" ? "acquired" : "would-wait"
   }
 
   async release(key: string, holderId: string): Promise<void> {
     const raw = await this.store.read(key)
     if (raw === null) return // Unknown key — no-op.
-    let parsed: FileLockPayload | null = null
-    try {
-      const obj = JSON.parse(raw) as Partial<FileLockPayload>
-      if (typeof obj.holderId === "string") parsed = obj as FileLockPayload
-    } catch {
-      // Corrupt file — leave it (will be reaped on next tryAcquire as stale).
-      return
-    }
-    if (parsed === null) return
+    const parsed = parseLockPayload(raw)
+    if (parsed === null) return // Corrupt file — leave for next tryAcquire's reap.
     if (parsed.holderId !== holderId) return // Wrong holder — no-op (safety).
     await this.store.delete(key)
   }

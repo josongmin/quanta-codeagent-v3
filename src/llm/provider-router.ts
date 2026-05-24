@@ -32,7 +32,11 @@
  * from the existing port for back-compat. NO SDK touches.
  */
 
-import type { LlmProvider, ProviderCredentialKind, ProviderCredentialSource } from "./provider-types"
+import type {
+  LlmProvider,
+  ProviderCredentialKind,
+  ProviderCredentialSource,
+} from "./provider-types"
 import { LLM_PROVIDERS } from "./provider-types"
 
 /** Read-only env shape — caller passes it in so the router never reaches
@@ -46,7 +50,10 @@ export type RouterEnv = Record<string, string | undefined>
  *  used by tests, by `quanta status`, and by telemetry. */
 export interface RouterResolution {
   readonly provider: LlmProvider
-  readonly credentials: { readonly kind: ProviderCredentialKind; readonly source: ProviderCredentialSource }
+  readonly credentials: {
+    readonly kind: ProviderCredentialKind
+    readonly source: ProviderCredentialSource
+  }
   readonly reason: RouterReason
 }
 
@@ -148,7 +155,9 @@ const detectAnthropicBaseUrlEnv = (env: RouterEnv): LlmProvider | undefined => {
 }
 
 /** Map a cloud transport to its native credential kind / source pair. */
-const cloudCreds = (provider: LlmProvider): {
+const cloudCreds = (
+  provider: LlmProvider,
+): {
   kind: ProviderCredentialKind
   source: ProviderCredentialSource
 } => {
@@ -194,7 +203,11 @@ export const resolveProviderWithRouter = (input: RouterInput): RouterResolution 
   // Layer 2 — CLAUDE_CODE_USE_* (claude-cli convention). May throw on conflict.
   const claudeUse = detectClaudeUseEnv(input.env)
   if (claudeUse !== undefined) {
-    return { provider: claudeUse, credentials: cloudCreds(claudeUse), reason: "claude-code-use-env" }
+    return {
+      provider: claudeUse,
+      credentials: cloudCreds(claudeUse),
+      reason: "claude-code-use-env",
+    }
   }
 
   // Layer 3 — ANTHROPIC_*_BASE_URL (ADR-0139 convention).
@@ -204,7 +217,7 @@ export const resolveProviderWithRouter = (input: RouterInput): RouterResolution 
   }
 
   // Layer 4 — chatgpt-oauth token on disk.
-  if (input.hasChatgptOAuthToken !== undefined && input.hasChatgptOAuthToken(input.env)) {
+  if (input.hasChatgptOAuthToken?.(input.env)) {
     return {
       provider: "chatgpt-oauth",
       credentials: { kind: "oauth", source: "file" },

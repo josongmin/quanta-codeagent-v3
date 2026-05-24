@@ -94,10 +94,9 @@ export const DEFAULT_GITHUB_ENDPOINT_BASE = "https://github.com"
 
 const LOCK_KEY_PREFIX = "gh-token-rotation:"
 
-/** Lock-protected rotation. Pure function (no state across calls) — every
- *  call re-checks the token's expiry against the clock and re-acquires the
- *  lock. */
-export const rotateGitHubToken = async (options: RotateOptions): Promise<RotateResult> => {
+/** Validate options that are caller-bug guards (empty strings) — separate so
+ *  the main flow stays focused on the state machine. */
+const validateOptions = (options: RotateOptions): void => {
   if (options.holderId.length === 0) {
     throw new Error("rotateGitHubToken: holderId must be non-empty")
   }
@@ -107,21 +106,75 @@ export const rotateGitHubToken = async (options: RotateOptions): Promise<RotateR
   if (options.clientId.length === 0 || options.clientSecret.length === 0) {
     throw new Error("rotateGitHubToken: clientId and clientSecret must be non-empty")
   }
+}
+
+/** Translate an {@link OAuthRefreshLockPort.tryAcquire} outcome into either a
+ *  short-circuit {@link RotateResult} (lock not held — caller returns) or
+ *  `null` (we hold the lock — proceed to refresh). Extracted for cognitive-
+ *  complexity discipline. */
+const handleLockResult = (
+  result: Awaited<ReturnType<OAuthRefreshLockPort["tryAcquire"]>>,
+): RotateResult | null => {
+  if (result === "would-wait" || result === "would-acquire") return { kind: "skipped-locked" }
+  if (result === "redis-error") return { kind: "skipped-lock-error" }
+  return null // acquired — caller proceeds.
+}
+
+/** Translate an HTTP response into either a short-circuit {@link RotateResult}
+ *  (4xx / 5xx / malformed) or the parsed-and-validated payload (caller builds
+ *  the `rotated` result from it). */
+const parseRefreshResponse = (response: {
+  status: number
+  body: unknown
+}):
+  | { ok: true; accessToken: string; expiresIn: number; nextRefresh: string | undefined }
+  | { ok: false; result: RotateResult } => {
+  if (response.status >= 500) {
+    return { ok: false, result: { kind: "refresh-transient", httpStatus: response.status } }
+  }
+  if (response.status >= 400) {
+    return { ok: false, result: { kind: "refresh-rejected", httpStatus: response.status } }
+  }
+  const parsed = response.body as {
+    access_token?: unknown
+    refresh_token?: unknown
+    expires_in?: unknown
+  }
+  if (typeof parsed?.access_token !== "string" || parsed.access_token.length === 0) {
+    return { ok: false, result: { kind: "refresh-malformed" } }
+  }
+  if (
+    typeof parsed.expires_in !== "number" ||
+    !Number.isFinite(parsed.expires_in) ||
+    parsed.expires_in <= 0
+  ) {
+    return { ok: false, result: { kind: "refresh-malformed" } }
+  }
+  const nextRefresh =
+    typeof parsed.refresh_token === "string" && parsed.refresh_token.length > 0
+      ? parsed.refresh_token
+      : undefined
+  return {
+    ok: true,
+    accessToken: parsed.access_token,
+    expiresIn: parsed.expires_in,
+    nextRefresh,
+  }
+}
+
+/** Lock-protected rotation. Pure function (no state across calls) — every
+ *  call re-checks the token's expiry against the clock and re-acquires the
+ *  lock. */
+export const rotateGitHubToken = async (options: RotateOptions): Promise<RotateResult> => {
+  validateOptions(options)
 
   const rotateAfterMs = options.rotateAfterMs ?? DEFAULT_ROTATE_AFTER_MS
   const lockTtlMs = options.lockTtlMs ?? DEFAULT_LOCK_TTL_MS
   const endpointBase = options.endpointBase ?? DEFAULT_GITHUB_ENDPOINT_BASE
 
-  const now = options.clockPort.now()
-  const remainingMs = options.current.expiresAt - now
-
-  // Early-out: token is still fresh. We rotate when remaining < rotateAfterMs
-  // (NOT when total age > rotateAfterMs — that would require us to know the
-  // issue time, which we do not carry). Practically: if the current token
-  // has > 2h of life and rotateAfterMs is 6h, we rotate.
-  // 2026-05-24 correction: the threshold MEANS "rotate when remaining is
-  // less than this much" — i.e. start rotating well before expiry. So:
-  // rotate IFF remaining < rotateAfterMs.
+  // Early-out: token has more than rotateAfterMs of life remaining. Rotate IFF
+  // remaining <= rotateAfterMs (start rotating well before expiry).
+  const remainingMs = options.current.expiresAt - options.clockPort.now()
   if (remainingMs > rotateAfterMs) {
     return { kind: "not-needed", current: options.current }
   }
@@ -130,16 +183,11 @@ export const rotateGitHubToken = async (options: RotateOptions): Promise<RotateR
   let lockResult: Awaited<ReturnType<OAuthRefreshLockPort["tryAcquire"]>>
   try {
     lockResult = await options.lockPort.tryAcquire(lockKey, options.holderId, lockTtlMs)
-  } catch (cause) {
+  } catch {
     return { kind: "skipped-lock-error" }
   }
-
-  if (lockResult === "would-wait" || lockResult === "would-acquire") {
-    return { kind: "skipped-locked" }
-  }
-  if (lockResult === "redis-error") {
-    return { kind: "skipped-lock-error" }
-  }
+  const shortCircuit = handleLockResult(lockResult)
+  if (shortCircuit !== null) return shortCircuit
 
   // Lock held — perform refresh. try/finally so any throw still releases.
   try {
@@ -159,37 +207,13 @@ export const rotateGitHubToken = async (options: RotateOptions): Promise<RotateR
       return { kind: "refresh-transient", cause }
     }
 
-    if (response.status >= 500) {
-      return { kind: "refresh-transient", httpStatus: response.status }
-    }
-    if (response.status >= 400) {
-      return { kind: "refresh-rejected", httpStatus: response.status }
-    }
+    const parsed = parseRefreshResponse(response)
+    if (!parsed.ok) return parsed.result
 
-    const parsed = response.body as {
-      access_token?: unknown
-      refresh_token?: unknown
-      expires_in?: unknown
-    }
-    if (typeof parsed?.access_token !== "string" || parsed.access_token.length === 0) {
-      return { kind: "refresh-malformed" }
-    }
-    if (typeof parsed.expires_in !== "number" || !Number.isFinite(parsed.expires_in) || parsed.expires_in <= 0) {
-      return { kind: "refresh-malformed" }
-    }
-    // GitHub's refresh-token rotation may issue a NEW refresh token. Prefer
-    // the new one when present; otherwise keep the current one (per GitHub
-    // docs, if the response omits refresh_token, the old one is still valid).
-    const nextRefresh =
-      typeof parsed.refresh_token === "string" && parsed.refresh_token.length > 0
-        ? parsed.refresh_token
-        : options.current.refreshToken
-
-    const nextExpiresAt = options.clockPort.now() + parsed.expires_in * 1000
     const next: GitHubTokenPair = {
-      accessToken: parsed.access_token,
-      refreshToken: nextRefresh,
-      expiresAt: nextExpiresAt,
+      accessToken: parsed.accessToken,
+      refreshToken: parsed.nextRefresh ?? options.current.refreshToken,
+      expiresAt: options.clockPort.now() + parsed.expiresIn * 1000,
       userId: options.current.userId,
     }
     return { kind: "rotated", next }

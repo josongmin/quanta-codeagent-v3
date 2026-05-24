@@ -22,14 +22,13 @@ import {
   OIDC_ENV_KEYS,
   OidcFederationError,
   OidcFederationExchanger,
+  readOidcEnv,
   TOKEN_FILE_MAX_BYTES,
   TOKEN_FILE_MIN_BYTES,
-  readOidcEnv,
 } from "@/llm/oidc-federation"
 
 /** A canonical 250-byte JWT-shaped token for tests (3 dot-separated segments). */
-const makeFakeJwt = (): string =>
-  `${"a".repeat(60)}.${"b".repeat(120)}.${"c".repeat(60)}` // 60 + 1 + 120 + 1 + 60 = 242 bytes
+const makeFakeJwt = (): string => `${"a".repeat(60)}.${"b".repeat(120)}.${"c".repeat(60)}` // 60 + 1 + 120 + 1 + 60 = 242 bytes
 
 const fixedClock = (t: number): ClockPort => ({ now: () => t })
 
@@ -43,10 +42,7 @@ const fileReaderThrowing = (err: Error): FileReaderPort => ({
   },
 })
 
-const httpClientReturning = (
-  status: number,
-  body: unknown,
-): HttpClientPort => ({
+const httpClientReturning = (status: number, body: unknown): HttpClientPort => ({
   post: async (_url, _body, _headers) => ({ status, body }),
 })
 

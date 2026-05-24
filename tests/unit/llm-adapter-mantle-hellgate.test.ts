@@ -60,7 +60,6 @@ describe("MantleProviderAdapter — Phase 1 stub hellgate", () => {
     })
     const iter = adapter.stream({ messages: [], tools: [] })
     try {
-      // biome-ignore lint/correctness/noUnusedVariables: prove no event is yielded
       for await (const _e of iter) {
         throw new Error("should have thrown before yielding")
       }

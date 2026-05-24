@@ -1,0 +1,55 @@
+id: llm-adapter-vertex
+title: GCP Vertex AI LLM adapter (Anthropic Messages via projects/loc URL)
+section: 8
+subsystem: LLM provider seam — cloud transport
+order: 3
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "multi-cloud", "gcp", "adr-0151", "adr-0163"]
+depends_on: [llm-multicloud-provider-router]
+config_refs:
+  env:
+    - CLAUDE_CODE_USE_VERTEX
+    - ANTHROPIC_VERTEX_BASE_URL
+    - GOOGLE_APPLICATION_CREDENTIALS
+purpose: |
+  `VertexProviderAdapter` routes Anthropic Messages API calls through GCP Vertex AI's
+  region-scoped endpoint (`projects/{gcpProjectId}/locations/{gcpLocation}/...`) via
+  the optional `@anthropic-ai/vertex-sdk` (lazy import — same discipline as Bedrock).
+  Requires BOTH `gcpProjectId` AND `gcpLocation` to synthesize the URL — either
+  missing throws `provider-misconfigured` at construction (typed-fail at factory
+  wiring, not at first wire call). GCP auth precedence: ADC (workload identity /
+  `GOOGLE_APPLICATION_CREDENTIALS`) by default; explicit `gcpAccessToken` in
+  `ProviderAuth` wins. DI seam: `clientFactory` for tests. Shares `mapRawEvent`
+  with the canonical Anthropic adapter so the SSE grammar stays in lock-step.
+evidence:
+  code:
+    - src/llm/providers/vertex-adapter.ts
+    - src/llm/providers/provider-port.ts
+    - src/llm/providers/registry.ts
+  adrs:
+    - 0139
+    - 0151
+    - 0163
+  tests:
+    unit:
+      - tests/unit/llm-providers/vertex-adapter-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_LLM_STREAM_FIRST_CHUNK_MS
+  - QUANTA_LLM_STREAM_IDLE_MS
+deliberate_hold:
+  scope: real-network-integration
+  reason: |
+    Phase 1 ships the lazy-load SDK wiring + DI seam; integration against a live
+    Vertex endpoint requires a GCP project + IAM bindings, deferred to V2.
+notes: |
+  L4: Phase 2 wire impl + DI seam + hellgate. Wired into `FACTORIES.vertex`;
+  router resolves both `CLAUDE_CODE_USE_VERTEX` and `ANTHROPIC_VERTEX_BASE_URL`.
+  Plane-clean: only `@/llm` imports.

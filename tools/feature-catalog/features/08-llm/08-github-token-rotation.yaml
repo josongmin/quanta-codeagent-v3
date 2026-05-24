@@ -1,0 +1,55 @@
+id: github-token-rotation
+title: Mid-session GitHub token rotation (lock-protected, vendor-TTL respected)
+section: 8
+subsystem: Authentication — GitHub app token lifecycle
+order: 8
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "auth", "github", "adr-0163"]
+depends_on: [oauth-refresh-lock]
+config_refs:
+  env: []
+purpose: |
+  `rotateGitHubToken({current, clientId, clientSecret, httpPort, clockPort,
+  lockPort, holderId, rotateAfterMs?, lockTtlMs?, endpointBase?})` rotates a
+  GitHub OAuth pair WELL BEFORE its 8-hour expiry so long-running sessions
+  never hit 401s during `gh api` calls. Generalizes Cursor's
+  `RefreshGithubAccessTokenInBackgroundComposer`. Lock-protected — keyed by
+  `gh-token-rotation:{userId}` so two CLI instances belonging to the same
+  user do not double-rotate. Release in `finally` so HTTP throws never strand
+  the lock. Result discriminator (closed union): `rotated` (with new pair) /
+  `not-needed` (token still has > rotateAfterMs life) / `skipped-locked`
+  (someone else holds it) / `skipped-lock-error` (Redis/file lock failed) /
+  `refresh-rejected` (4xx — re-auth required) / `refresh-transient` (5xx or
+  network — retry permitted) / `refresh-malformed` (response missing
+  access_token/expires_in). Default constants documented to vendor source:
+  `DEFAULT_ROTATE_AFTER_MS=6h` (GitHub App TTL is 8h, rotate at 6h leaves 2h
+  headroom), `DEFAULT_LOCK_TTL_MS=30s` (10x the p99 round-trip). New refresh
+  token preferred when present in response; absent → keep current
+  (per GitHub docs).
+evidence:
+  code:
+    - src/auth/github-token-rotation.ts
+    - src/auth/oauth-refresh-lock.ts
+  adrs:
+    - 0163
+  tests:
+    unit:
+      - tests/unit/github-token-rotation-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  L4: 18-test hellgate covers threshold logic (rotate iff remaining <
+  threshold), HTTP 4xx vs 5xx vs throw, malformed response, lock contention
+  (would-wait → skipped-locked, redis-error → skipped-lock-error), finally
+  release on throw, clock skew during refresh (post-call clock wins), empty
+  arg defenses (programmer-bug rejection), custom endpointBase, concurrent
+  rotate race (lock prevents double wire call). Pure function — no instance
+  state; every call re-checks expiry and re-acquires lock.

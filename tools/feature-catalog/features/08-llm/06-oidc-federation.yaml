@@ -1,0 +1,61 @@
+id: oidc-federation
+title: OIDC federation token exchange (ANTHROPIC_IDENTITY_TOKEN_FILE → access token)
+section: 8
+subsystem: Authentication — workload identity
+order: 6
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "auth", "federation", "k8s", "adr-0163"]
+depends_on: []
+config_refs:
+  env:
+    - ANTHROPIC_IDENTITY_TOKEN_FILE
+    - ANTHROPIC_FEDERATION_RULE_ID
+    - ANTHROPIC_ORGANIZATION_ID
+purpose: |
+  `OidcFederationExchanger.exchangeToken({identityTokenFile, federationRuleId,
+  orgId})` reads a workload-identity JWT from disk (Kubernetes SA projection /
+  GitHub OIDC / Vault), validates its shape (100 B–64 KiB + JWT 3-segment probe;
+  signature NOT verified — that is the exchange endpoint's job), POSTs to the
+  Anthropic federation endpoint, and returns `{accessToken, expiresAt,
+  credentials:{kind:"oidc-federation",source:"file"}}`. The file is RE-READ on
+  every exchange (no caching — Kubernetes rotates the projection every ~1h
+  independently). Closed-port discipline: file / http / clock are all DI'd —
+  no `node:fs`, no `fetch`, no `Date.now()` inside the exchanger. Failure
+  taxonomy is a closed union (token-file-missing / token-file-malformed /
+  exchange-rejected / exchange-transient / exchange-malformed-response /
+  exchange-misconfigured). Negative invariant: vendor TTL is never amplified
+  (`expiresAt = clock.now() + expires_in * 1000`).
+evidence:
+  code:
+    - src/llm/oidc-federation.ts
+    - src/llm/provider-types.ts
+  adrs:
+    - 0163
+  tests:
+    unit:
+      - tests/unit/oidc-federation-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - ANTHROPIC_IDENTITY_TOKEN_FILE
+  - ANTHROPIC_FEDERATION_RULE_ID
+  - ANTHROPIC_ORGANIZATION_ID
+deliberate_hold:
+  scope: real-exchange-endpoint
+  reason: |
+    The exchange endpoint base is config-injected (`exchangeEndpointBase`) — Phase 2
+    will wire the canonical Anthropic federation URL once it is publicly documented.
+    Bench harnesses point at a mock until then. The hellgate covers the full
+    success+failure matrix against an injected HTTP port.
+notes: |
+  L4: 18-test hellgate covers file-size floor/ceiling, JWT shape, HTTP 4xx vs 5xx,
+  malformed response, empty-arg defenses, expiresAt math, file re-read on every
+  call (no cache). Default-OFF: activates only when ANTHROPIC_IDENTITY_TOKEN_FILE
+  is set. `TOKEN_FILE_MIN_BYTES=100` (smallest observed prod JWT) and
+  `TOKEN_FILE_MAX_BYTES=64*1024` (k8s SA projection cap) are documented constants.

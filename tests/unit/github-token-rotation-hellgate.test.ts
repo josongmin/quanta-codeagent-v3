@@ -16,8 +16,6 @@
  *     redis-error → skipped-lock-error.
  */
 import { describe, expect, test } from "bun:test"
-import { InMemoryLock } from "@/auth/lock-in-memory"
-import { RedisLockStub } from "@/auth/lock-redis-stub"
 import {
   DEFAULT_GITHUB_ENDPOINT_BASE,
   DEFAULT_LOCK_TTL_MS,
@@ -25,6 +23,8 @@ import {
   type GitHubTokenPair,
   rotateGitHubToken,
 } from "@/auth/github-token-rotation"
+import { InMemoryLock } from "@/auth/lock-in-memory"
+import { RedisLockStub } from "@/auth/lock-redis-stub"
 import type { OAuthRefreshLockPort } from "@/auth/oauth-refresh-lock"
 import type { ClockPort, HttpClientPort } from "@/llm/oidc-federation"
 
@@ -242,9 +242,9 @@ describe("rotateGitHubToken — hellgate", () => {
     })
     expect(result.kind).toBe("refresh-transient")
     // Lock should be free — verify by acquiring as a different holder.
-    expect(
-      await lock.tryAcquire("gh-token-rotation:user-123", "different-holder", 1000),
-    ).toBe("acquired")
+    expect(await lock.tryAcquire("gh-token-rotation:user-123", "different-holder", 1000)).toBe(
+      "acquired",
+    )
   })
 
   test("HELL-G12: empty holderId throws", async () => {
@@ -345,20 +345,35 @@ describe("rotateGitHubToken — hellgate", () => {
     const lock = new InMemoryLock(clock)
     const current = mkPair({ expiresAt: 1_000_000 + 60 * 1000 })
     let httpCalls = 0
-    const httpPort = mkHttp(200, {
-      access_token: "ghu_NEW", expires_in: 28800,
-    }, () => {
-      httpCalls++
-    })
+    const httpPort = mkHttp(
+      200,
+      {
+        access_token: "ghu_NEW",
+        expires_in: 28800,
+      },
+      () => {
+        httpCalls++
+      },
+    )
     // Two simultaneous rotates with different holderIds.
     const [r1, r2] = await Promise.all([
       rotateGitHubToken({
-        current, clientId: "ci", clientSecret: "cs",
-        httpPort, clockPort: clock, lockPort: lock, holderId: "h1",
+        current,
+        clientId: "ci",
+        clientSecret: "cs",
+        httpPort,
+        clockPort: clock,
+        lockPort: lock,
+        holderId: "h1",
       }),
       rotateGitHubToken({
-        current, clientId: "ci", clientSecret: "cs",
-        httpPort, clockPort: clock, lockPort: lock, holderId: "h2",
+        current,
+        clientId: "ci",
+        clientSecret: "cs",
+        httpPort,
+        clockPort: clock,
+        lockPort: lock,
+        holderId: "h2",
       }),
     ])
     const kinds = [r1.kind, r2.kind].sort()

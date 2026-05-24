@@ -41,7 +41,8 @@ export class RedisLockStub implements OAuthRefreshLockPort {
 
   async tryAcquire(key: string, holderId: string, ttlMs: number): Promise<LockResult> {
     if (ttlMs <= 0) throw new Error(`RedisLockStub.tryAcquire: ttlMs must be > 0 (got ${ttlMs})`)
-    if (holderId.length === 0) throw new Error("RedisLockStub.tryAcquire: holderId must be non-empty")
+    if (holderId.length === 0)
+      throw new Error("RedisLockStub.tryAcquire: holderId must be non-empty")
     this.onAcquireAttempt(key, holderId, ttlMs)
     // Phase 1 — always return redis-error. Phase 2 wires real SETNX.
     return "redis-error"

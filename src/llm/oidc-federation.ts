@@ -49,7 +49,11 @@ export interface FileReaderPort {
 /** HTTP POST port — body is opaque JSON, headers are explicit. Returns the
  *  response body as parsed JSON. Single-method port — DIP. */
 export interface HttpClientPort {
-  post(url: string, body: unknown, headers: Record<string, string>): Promise<{
+  post(
+    url: string,
+    body: unknown,
+    headers: Record<string, string>,
+  ): Promise<{
     status: number
     body: unknown
   }>
@@ -97,7 +101,11 @@ export type OidcErrorCode =
 export class OidcFederationError extends Error {
   readonly code: OidcErrorCode
   readonly httpStatus?: number
-  constructor(code: OidcErrorCode, message: string, options?: { httpStatus?: number; cause?: unknown }) {
+  constructor(
+    code: OidcErrorCode,
+    message: string,
+    options?: { httpStatus?: number; cause?: unknown },
+  ) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined)
     this.name = "OidcFederationError"
     this.code = code
@@ -251,7 +259,11 @@ export class OidcFederationExchanger implements OidcFederationPort {
         { httpStatus: response.status },
       )
     }
-    if (typeof parsed.expires_in !== "number" || !Number.isFinite(parsed.expires_in) || parsed.expires_in <= 0) {
+    if (
+      typeof parsed.expires_in !== "number" ||
+      !Number.isFinite(parsed.expires_in) ||
+      parsed.expires_in <= 0
+    ) {
       throw new OidcFederationError(
         "exchange-malformed-response",
         "federation exchange response missing or invalid expires_in",

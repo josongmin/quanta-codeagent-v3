@@ -1,0 +1,53 @@
+id: llm-adapter-mantle
+title: Anthropic Mantle LLM adapter (Phase 1 stub — internal enterprise endpoint)
+section: 8
+subsystem: LLM provider seam — cloud transport
+order: 5
+maturity: L2
+status: stub
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "multi-cloud", "anthropic-internal", "adr-0163", "phase-1-stub"]
+depends_on: [llm-multicloud-provider-router]
+config_refs:
+  env:
+    - CLAUDE_CODE_USE_MANTLE
+purpose: |
+  `MantleProviderAdapter` is a typed Phase-1 stub. Anthropic Mantle is an
+  internal/enterprise endpoint name surfaced via the Claude CLI env switch
+  `CLAUDE_CODE_USE_MANTLE` and internal documentation only — no public SDK or
+  wire spec as of 2026-05-24. The adapter constructs cleanly, exposes the right
+  `providerId="mantle"` for telemetry parity, and `stream()` immediately throws
+  `provider-unsupported`. Construction is intentionally permissive so the slot is
+  wireable in advance; Phase 2 swap is a single-file change. Why a separate
+  adapter rather than reusing `FoundryProviderAdapter`? Telemetry: dashboards
+  must distinguish Mantle traffic from Foundry traffic (different billing units,
+  different residency boundaries). Two Phase-1 stubs ship cheaply; Phase 2
+  graduations are independent.
+evidence:
+  code:
+    - src/llm/providers/mantle-adapter.ts
+    - src/llm/providers/provider-port.ts
+    - src/llm/providers/registry.ts
+  adrs:
+    - 0163
+  tests:
+    unit:
+      - tests/unit/llm-adapter-mantle-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  scope: phase-2-wire-implementation
+  reason: |
+    Mantle has no public spec as of 2026-05-24. Phase 2 swap when Anthropic
+    publishes the wire grammar; the `ProviderAuth` interface will gain
+    `mantleToken?: string` + `mantleEndpoint?: string` at that point.
+notes: |
+  L2: 12-test hellgate covers construction, mismatched providerId, throw-on-stream,
+  registry routing, provider-error telemetry payload. ProviderId union grew from
+  4 to 5 entries; the closed-union + exhaustiveness pattern caught the registry
+  + barrel + lazy-unsupported message drift at compile time.
