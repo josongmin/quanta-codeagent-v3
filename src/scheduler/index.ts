@@ -48,3 +48,6 @@ export {
   allOccurrencesInMonth,
   daysInUtcMonth,
 } from "./weekday"
+
+// Evaluator
+export { computeNextFire, iterateFires } from "./next-fire"
