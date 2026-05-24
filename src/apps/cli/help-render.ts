@@ -4,10 +4,21 @@
  *   - **Slash inventory is DYNAMIC**: iterates the live `BUILTINS` array so a
  *     newly-appended command shows up here without editing this file. Virtual
  *     `/exit`+`/quit` (short-circuited by `runReplLoop` BEFORE BUILTINS
- *     dispatch) are appended as a fixed tail.
- *   - **Keybinds + ENV knobs are STATIC**: hand-curated literals in this
- *     file — they are surface-level conventions, not registry entries, so
- *     editing them requires this PR (no scattered allowlists).
+ *     dispatch) and `/image` (intercepted by `prompt-source.ts` because the
+ *     queue is REPL-scoped surface state) are appended as a fixed tail.
+ *   - **Slash inventory is GROUPED**: `SlashCommand.category` literal union
+ *     drives section headers. Absent ⇒ "other" bucket. Within each group
+ *     entries are sorted alphabetically so a freshly-appended BUILTINS row
+ *     lands in a stable spot.
+ *   - **Keybinds are STATIC**: hand-curated literals — surface-level
+ *     conventions, not registry entries, so editing them requires this PR.
+ *   - **ENV knobs are DERIVED from `runtimeConfig()` SSOT**: one row per
+ *     field in `RuntimeConfig` so adding an env var auto-shows here. The
+ *     env-name string lives in `runtime-config.ts#loadFromEnv` (the parser)
+ *     — we mirror it 1:1 in `ENV_TABLE` below and the test pins the
+ *     coverage (≥ 5 SSOT-routed knobs surfaced). Capped to the SSOT
+ *     vocabulary (~30); the long tail of surface-level `QUANTA_*` toggles
+ *     lives in `docs/`.
  *   - **Color policy via `wrap` helpers in `@/ui/ui-helpers`**: `setColorPolicy
  *     ("off")` ⇒ plain ASCII byte-identical to a non-TTY render. Tests rely on
  *     this for the OFF-vs-ON pair.
@@ -16,9 +27,9 @@
  *
  *  Why a separate file (vs inline in slash-commands.ts):
  *   - slash-commands.ts is already 475 LOC; the unified menu is a self-
- *     contained renderer (~140 LOC including data tables) that benefits from
- *     isolated unit tests against a pure `renderHelp(BUILTINS)` entry point
- *     without spinning up the full slash dispatch.
+ *     contained renderer that benefits from isolated unit tests against a
+ *     pure `renderHelp(BUILTINS)` entry point without spinning up the full
+ *     slash dispatch.
  *   - `runHelpRender` (the SlashCommand callback) is a 4-line shim that
  *     delegates to `renderHelp`, keeping the registry entry trivial.
  */
@@ -29,9 +40,16 @@ import type { SlashCommand, SlashContext } from "./slash-commands"
 /** Virtual REPL commands (short-circuited by `runReplLoop` BEFORE the
  *  BUILTINS dispatch — not `SlashCommand` entries, but a user pressing
  *  `/help` expects them in the listing). Kept in sync by hand with
- *  slash-commands.ts (single source of truth would be cross-slice churn). */
+ *  slash-commands.ts (single source of truth would be cross-slice churn).
+ *  `/image` is also virtual — it lives in `prompt-source.ts` because its
+ *  queue is REPL-scoped (the surface-agnostic BUILTINS table has no session
+ *  context); see `repl/prompt-source.ts` for the interception site. */
 const VIRTUAL_COMMANDS: readonly { readonly name: string; readonly describe: string }[] = [
   { name: "/exit, /quit", describe: "Leave REPL" },
+  {
+    name: "/image",
+    describe: "Manage image queue: /image add <path> | /image list | /image clear (virtual)",
+  },
 ] as const
 
 /** Static keybind table — these are conventions of the raw-line-reader, not
@@ -44,18 +62,124 @@ const KEYBINDS: readonly { readonly key: string; readonly describe: string }[] =
   { key: "Ctrl+D", describe: "EOF (exit on empty line)" },
 ] as const
 
-/** Static ENV-knob table — surface-visible toggles, no proactive new knobs
- *  introduced here (those land in their own PR + ADR). */
-const ENV_KNOBS: readonly { readonly key: string; readonly describe: string }[] = [
-  { key: "QUANTA_MODEL=<id>", describe: "Override LLM model" },
-  { key: "QUANTA_PROVIDER=<id>", describe: "anthropic/openai/chatgpt-oauth" },
-  { key: "QUANTA_MAX_TURNS=<N>", describe: "Cap turns per run (default 40)" },
-  { key: "QUANTA_PLAN=1", describe: "Plan-mode posture" },
-  { key: "QUANTA_LSP=1", describe: "Enable LSP probe" },
-  { key: "QUANTA_GIT_TOOLS=1", describe: "Expand git tool catalog" },
-  { key: "QUANTA_METRICS=1", describe: "Per-turn work-metrics line" },
-  { key: "QUANTA_VERIFY_GUARD=1", describe: "Closeout 4-rule reminder" },
-  { key: "QUANTA_SKILLS=1", describe: "Bundled system skills" },
+/** SSOT-routed env-var table: one row per field in `RuntimeConfig`. The
+ *  `defaultLabel` column reflects the parsed default (what `runtimeConfig()`
+ *  returns when the var is absent) — NOT a duplicate of the env value. Any
+ *  new field in `runtime-config.ts#RuntimeConfig` should append a row here;
+ *  the unit test verifies a floor of ≥ 5 entries surface so the section
+ *  cannot silently empty out. Surface-level vars not routed through the SSOT
+ *  (e.g. `QUANTA_PROVIDER`, `QUANTA_MODEL`, `QUANTA_PLAN`, ~120 others) live
+ *  in `docs/` and are intentionally not enumerated here. */
+interface EnvRow {
+  readonly key: string
+  readonly defaultLabel: string
+  readonly describe: string
+}
+
+const ENV_TABLE: readonly EnvRow[] = [
+  { key: "QUANTA_LOG_LEVEL", defaultLabel: "info", describe: "debug|info|warn|error" },
+  {
+    key: "QUANTA_COMPACT_TOKENS",
+    defaultLabel: "(auto)",
+    describe: "Compaction threshold (tokens)",
+  },
+  { key: "QUANTA_FS_JAIL", defaultLabel: "on", describe: "Filesystem jail (set 'off' to disable)" },
+  { key: "QUANTA_CAP_ENFORCE", defaultLabel: "off", describe: "Cap-as-instruction dispatch guard" },
+  { key: "QUANTA_GIT_SHA", defaultLabel: "(unset)", describe: "Trajectory producer git sha stamp" },
+  {
+    key: "QUANTA_PRICING_VERSION",
+    defaultLabel: "(auto)",
+    describe: "Trajectory pricing version pin",
+  },
+  {
+    key: "QUANTA_SESSIONS_DIR",
+    defaultLabel: "~/.quanta/sessions",
+    describe: "Sessions root override",
+  },
+  {
+    key: "QUANTA_HITL_OVERRIDES",
+    defaultLabel: "~/.quanta/hitl-overrides.json",
+    describe: "HITL overrides JSON path",
+  },
+  { key: "QUANTA_TOOL_OUTPUT_MAX", defaultLabel: "(auto)", describe: "Tool output cap (chars)" },
+  {
+    key: "QUANTA_TOOL_OUTPUT_SPILL_KEEP",
+    defaultLabel: "(auto)",
+    describe: "Spilled-output retention",
+  },
+  {
+    key: "QUANTA_LLM_STREAM_FIRST_CHUNK_MS",
+    defaultLabel: "60000",
+    describe: "LLM first-chunk timeout",
+  },
+  {
+    key: "QUANTA_LLM_STREAM_IDLE_MS",
+    defaultLabel: "120000",
+    describe: "LLM inter-chunk idle timeout",
+  },
+  { key: "QUANTA_HOME", defaultLabel: "~/.quanta", describe: "Quanta home override" },
+  { key: "QUANTA_BENCH_HOME", defaultLabel: "(auto)", describe: "Bench artifacts root" },
+  {
+    key: "QUANTA_BENCH_CACHE_PATHSPECS_EXTRA",
+    defaultLabel: "(empty)",
+    describe: "Extra cache dir names (CSV)",
+  },
+  {
+    key: "QUANTA_DEDUP_ENV_PREFIXES_EXTRA",
+    defaultLabel: "(empty)",
+    describe: "Extra env regimes (CSV)",
+  },
+  {
+    key: "QUANTA_PERMISSION_STATE",
+    defaultLabel: "(auto)",
+    describe: "Permission state-file override",
+  },
+  {
+    key: "QUANTA_SWEBENCH_CACHE_LEVEL",
+    defaultLabel: "env",
+    describe: "none|base|env|instance",
+  },
+  { key: "QUANTA_SWEBENCH_CLEAN", defaultLabel: "off", describe: "SWE-bench --clean flag" },
+  {
+    key: "QUANTA_SWEBENCH_MAX_WORKERS",
+    defaultLabel: "(auto)",
+    describe: "SWE-bench grading parallelism",
+  },
+  {
+    key: "QUANTA_SWEBENCH_NAMESPACE",
+    defaultLabel: "(auto)",
+    describe: "SWE-bench image namespace",
+  },
+  {
+    key: "QUANTA_SWEBENCH_FORCE_REBUILD",
+    defaultLabel: "off",
+    describe: "SWE-bench --force_rebuild",
+  },
+  {
+    key: "QUANTA_SWEBENCH_PYTHON_BIN",
+    defaultLabel: "(probe)",
+    describe: "Explicit python for SWE-bench",
+  },
+  { key: "QUANTA_BENCH_TIMEOUT_MS", defaultLabel: "120000", describe: "Per-instance wall-clock" },
+  { key: "QUANTA_MAX_TURNS", defaultLabel: "(preset)", describe: "Max turns per instance" },
+  {
+    key: "QUANTA_SWEBENCH_PREPARE_FORCE",
+    defaultLabel: "off",
+    describe: "Force arm64 prepare-images",
+  },
+  { key: "QUANTA_RUN_ID", defaultLabel: "(minted)", describe: "Pinned bench run id" },
+  { key: "QUANTA_PREFS_HOME", defaultLabel: "(home)", describe: "Preferences home override" },
+  { key: "QUANTA_LAST_TOKENS", defaultLabel: "(unset)", describe: "Last-reported token count" },
+  {
+    key: "QUANTA_SESSION_LIST_FORMAT",
+    defaultLabel: "(tty:rich)",
+    describe: "rich|plain",
+  },
+  {
+    key: "QUANTA_SESSION_LIST_MAX",
+    defaultLabel: "10",
+    describe: "Rich session-list cap",
+  },
 ] as const
 
 /** Column width for the slash-name column. Wide enough for `/reload-skills`
@@ -63,6 +187,35 @@ const ENV_KNOBS: readonly { readonly key: string; readonly describe: string }[] 
  *  measuring per call. */
 const NAME_W = 18
 const KEY_W = 22
+const ENV_NAME_W = 34
+const ENV_DEFAULT_W = 12
+
+/** Category render order (ASCII section headers, no emoji per repo
+ *  convention). Categories not in this list (or `undefined` on the command)
+ *  fall into "other" at the tail. */
+const CATEGORY_ORDER: readonly NonNullable<SlashCommand["category"]>[] = [
+  "help",
+  "session",
+  "history",
+  "config",
+  "auth",
+  "skills",
+  "loop",
+  "alias",
+  "other",
+] as const
+
+const CATEGORY_LABEL: Readonly<Record<NonNullable<SlashCommand["category"]>, string>> = {
+  help: "help",
+  session: "session",
+  history: "history",
+  config: "config",
+  auth: "auth",
+  skills: "skills",
+  loop: "loop",
+  alias: "alias",
+  other: "other",
+}
 
 const padVisible = (s: string, width: number): string => {
   // Names/keys we pass in here contain NO ANSI codes pre-color (we color
@@ -79,14 +232,45 @@ const renderRow = (name: string, describe: string, width: number): string => {
   return `${bold(cyan(padded))}  ${describe}`
 }
 
+/** Render an env row with three columns: name | default | describe. */
+const renderEnvRow = (row: EnvRow): string => {
+  const name = padVisible(row.key, ENV_NAME_W)
+  const def = padVisible(row.defaultLabel, ENV_DEFAULT_W)
+  return `${bold(cyan(name))}  ${def}  ${row.describe}`
+}
+
+/** Bucket BUILTINS by category and emit grouped section rows. Each group is
+ *  sorted alphabetically by command name. Empty groups are skipped. */
+const renderGroupedBuiltins = (builtins: readonly SlashCommand[]): string[] => {
+  const buckets = new Map<NonNullable<SlashCommand["category"]>, SlashCommand[]>()
+  for (const c of builtins) {
+    const cat = c.category ?? "other"
+    let bucket = buckets.get(cat)
+    if (bucket === undefined) {
+      bucket = []
+      buckets.set(cat, bucket)
+    }
+    bucket.push(c)
+  }
+  const lines: string[] = []
+  for (const cat of CATEGORY_ORDER) {
+    const bucket = buckets.get(cat)
+    if (bucket === undefined || bucket.length === 0) continue
+    bucket.sort((a, b) => a.name.localeCompare(b.name))
+    lines.push(dim(`── ${CATEGORY_LABEL[cat]} ──`))
+    for (const c of bucket) lines.push(renderRow(c.name, c.describe, NAME_W))
+    lines.push("")
+  }
+  return lines
+}
+
 /** Pure render function — takes the BUILTINS table + virtual tail and emits
  *  the formatted box. Exported separately so tests can drive it without
  *  reaching through `runHelpRender`. */
 export const renderHelp = (builtins: readonly SlashCommand[]): string => {
   const lines: string[] = []
-  for (const c of builtins) {
-    lines.push(renderRow(c.name, c.describe, NAME_W))
-  }
+  lines.push(...renderGroupedBuiltins(builtins))
+  lines.push(dim("── virtual (REPL-scoped) ──"))
   for (const v of VIRTUAL_COMMANDS) {
     lines.push(renderRow(v.name, v.describe, NAME_W))
   }
@@ -96,10 +280,12 @@ export const renderHelp = (builtins: readonly SlashCommand[]): string => {
     lines.push(renderRow(k.key, k.describe, KEY_W))
   }
   lines.push("")
-  lines.push(dim("── ENV knobs (common) ──"))
-  for (const e of ENV_KNOBS) {
-    lines.push(renderRow(e.key, e.describe, KEY_W))
+  lines.push(dim("── Environment variables (SSOT-routed) ──"))
+  for (const e of ENV_TABLE) {
+    lines.push(renderEnvRow(e))
   }
+  lines.push("")
+  lines.push(dim("(See docs/ for the full env-var catalog beyond SSOT-routed knobs.)"))
   return renderBox(lines, {
     title: "quanta — slash commands",
     titleStyle: bold,

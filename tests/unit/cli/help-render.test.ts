@@ -75,13 +75,17 @@ describe("renderHelp — keybinds + ENV knobs sections", () => {
     expect(out).toContain("Ctrl+D")
   })
 
-  test("ENV knobs section present with QUANTA_* prefixes", () => {
+  test("ENV knobs section present with SSOT-routed QUANTA_* prefixes", () => {
     const out = stripAnsi(renderHelp(BUILTINS))
-    expect(out).toContain("ENV knobs (common)")
-    expect(out).toContain("QUANTA_MODEL")
-    expect(out).toContain("QUANTA_PROVIDER")
+    // The env-var table is now auto-derived from the runtimeConfig() SSOT
+    // (src/shared/runtime-config.ts). Surface-level vars not routed through
+    // the SSOT (QUANTA_MODEL, QUANTA_PROVIDER, ~120 others) live in docs/
+    // and are intentionally not enumerated here.
+    expect(out).toContain("Environment variables")
+    expect(out).toContain("QUANTA_LOG_LEVEL")
+    expect(out).toContain("QUANTA_FS_JAIL")
     expect(out).toContain("QUANTA_MAX_TURNS")
-    expect(out).toContain("QUANTA_VERIFY_GUARD")
+    expect(out).toContain("QUANTA_HOME")
   })
 })
 
@@ -163,6 +167,7 @@ describe("/help — end-to-end via runSlashCommand", () => {
     expect(c.out).toContain("/help")
     expect(c.out).toContain("/context")
     expect(c.out).toContain("Tab")
-    expect(c.out).toContain("QUANTA_MODEL")
+    // Env table is now SSOT-routed (QUANTA_LOG_LEVEL is the canary).
+    expect(c.out).toContain("QUANTA_LOG_LEVEL")
   })
 })
