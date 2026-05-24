@@ -19,6 +19,16 @@ import { extractFiles } from "./extract-files"
 import { extractSymbols } from "./extract-symbols"
 import type { IssueHint } from "./types"
 
+export type {
+  AgentlessLocalizeDeps,
+  AgentlessLocalizeResult,
+} from "./agentless-localize"
+export {
+  agentlessLocalize,
+  buildAgentlessPrompt,
+  composeAgentlessHint,
+  parseAgentlessResponse,
+} from "./agentless-localize"
 export { composeIssueHint } from "./compose"
 export { extractCodeFences, extractTracebackPaths } from "./extract-code"
 export { extractErrors } from "./extract-errors"

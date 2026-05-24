@@ -15,10 +15,17 @@
  * Behavior is byte-identical to the pre-decompose `src/apps/bench/runner.ts`;
  * this is a pure structural refactor.
  */
+
+import { type Dirent, readdirSync } from "node:fs"
+import { join, relative, sep } from "node:path"
 import {
   type AgentConfig,
+  type AgentlessLocalizeDeps,
+  type AgentlessLocalizeResult,
+  agentlessLocalize,
   type BranchSearchConfig,
   buildSystemPrompt,
+  composeAgentlessHint,
   composeIssueHint,
   extractIssueHint,
   lspNavToolList,
@@ -217,6 +224,20 @@ export const parseBenchBranchSearchK = (raw: string | undefined): number | undef
  *  exported in a dev shell does NOT silently leak into measurement runs.
  *  Inline duplication is intentional: ~3 lines per builder, isolated test
  *  surface, no `apps/bench → apps/cli` import dependency. */
+/**
+ * Issue-hint mode resolved from `QUANTA_BENCH_ISSUE_HINT`:
+ *   - `"off"`       — flag unset OR value not in the accept-list. Default-OFF
+ *                     posture: byte-identical to the pre-feature path.
+ *   - `"regex"`     — `=1` / `=on`. The legacy regex extractor
+ *                     (`extractIssueHint` + `composeIssueHint`) runs synchronously
+ *                     inside `buildConfig`. Pre-existing behavior — kept stable.
+ *   - `"agentless"` — `=agentless`. The new LLM-driven path (Agentless paper
+ *                     Stage 1). Async pre-compute via `prepareIssueHint`; on any
+ *                     failure the wiring falls back to `regex`.
+ *
+ * Strict accept-list — anything else (`true`, `yes`, garbage) ⇒ `off`. */
+export type IssueHintMode = "off" | "regex" | "agentless"
+
 export const benchOptIns = (): {
   lspNav: boolean
   subagent: AgentConfig["subagent"] | undefined
@@ -224,6 +245,11 @@ export const benchOptIns = (): {
   localizePhase: AgentConfig["localizePhase"] | undefined
   branchSearch: BranchSearchConfig | undefined
   issueHint: boolean
+  /** Resolved tri-state. `"off"` ⇒ flag unset/unknown; `"regex"` ⇒ `1`/`on`;
+   *  `"agentless"` ⇒ `agentless`. The legacy boolean `issueHint` above
+   *  remains for back-compat with the wiring tests; `issueHintMode` is the
+   *  forward-looking field used by `prepareIssueHint`. */
+  issueHintMode: IssueHintMode
 } => {
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
@@ -264,11 +290,18 @@ export const benchOptIns = (): {
         }
       : undefined
   // Issue-text hint injection (Agentless paper, localization +5pp). Strict
-  // accept-list: `1` or `on` ⇒ on; anything else ⇒ off (default OFF preserves
-  // byte-identical measurement until explicit opt-in).
+  // accept-list:
+  //   - `1` / `on`         ⇒ regex extractor (legacy, pre-feature behavior)
+  //   - `agentless`        ⇒ LLM-driven Stage-1 localization (Agentless paper)
+  //   - anything else      ⇒ off (default OFF preserves byte-identical
+  //                              measurement until explicit opt-in)
   const v = process.env.QUANTA_BENCH_ISSUE_HINT
-  const issueHint = v === "1" || v === "on"
-  return { lspNav, subagent, skills, localizePhase, branchSearch, issueHint }
+  const issueHintMode: IssueHintMode =
+    v === "agentless" ? "agentless" : v === "1" || v === "on" ? "regex" : "off"
+  // Back-compat: the old `issueHint` boolean stays true for BOTH `regex` and
+  // `agentless` modes (anything that produces a non-empty hint block).
+  const issueHint = issueHintMode !== "off"
+  return { lspNav, subagent, skills, localizePhase, branchSearch, issueHint, issueHintMode }
 }
 
 /** Pure parser for the `QUANTA_BENCH_LOCALIZE_PHASE` env var. Exported for
@@ -300,6 +333,204 @@ export const parseLocalizePhaseEnv = (
   return { phase1Turns: n }
 }
 
+/** Source file extensions enumerated for Agentless localization. The set
+ *  matches Agentless paper §4 (Python is the SWE-bench corpus; we additionally
+ *  include common companion languages for non-SWE-bench harnesses). Tests are
+ *  excluded by directory walk (see `isExcludedDir`) — the grader supplies its
+ *  own tests, so test-file localization is wasted budget. */
+const SOURCE_EXTENSIONS = new Set([
+  ".py",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".go",
+  ".rs",
+  ".java",
+  ".kt",
+  ".c",
+  ".cc",
+  ".cpp",
+  ".h",
+  ".hpp",
+  ".rb",
+  ".php",
+])
+
+/** Directories that NEVER contain source code we want the LLM to consider:
+ *    - `test`/`tests`              — grader supplies its own; agent edits are
+ *                                    discarded (see SWEBENCH_DIRECTIVE)
+ *    - `node_modules`/`vendor`/etc — third-party
+ *    - `.git`/`.venv`/`__pycache__`— infra noise
+ *    - `dist`/`build`/`target`     — build artifacts */
+const EXCLUDED_DIRS = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  ".venv",
+  "venv",
+  "env",
+  "__pycache__",
+  "node_modules",
+  "vendor",
+  "dist",
+  "build",
+  "target",
+  ".next",
+  ".cache",
+  "test",
+  "tests",
+  "testing",
+  "__tests__",
+])
+
+/** Hard cap on the file-tree walk — defensive against pathological repos.
+ *  Above this we stop walking and return whatever we collected. */
+const MAX_WALK_FILES = 5_000
+
+/** Enumerate source-file relative paths under `repoRoot`. Excludes tests,
+ *  build artifacts, and version-control infra. Pure-ish (does I/O via
+ *  `readdirSync` only — that is the contract of the function, called inside
+ *  `prepareIssueHint`'s fileTree dep). Returns an empty array on any thrown
+ *  syscall (repo doesn't exist, permission denied, …); the caller falls back
+ *  to regex extraction in that case. */
+/** Classify one directory entry as either a child-dir-to-descend, a source-
+ *  file relative path, or nothing-of-interest. Pure helper — splitting it
+ *  out keeps `enumerateRepoSources` under biome's complexity ceiling. */
+const classifyDirent = (
+  e: Dirent,
+  dir: string,
+  repoRoot: string,
+): { kind: "dir"; path: string } | { kind: "file"; rel: string } | undefined => {
+  const name = e.name
+  if (typeof name !== "string" || name.length === 0) return undefined
+  const full = join(dir, name)
+  if (e.isDirectory()) {
+    if (EXCLUDED_DIRS.has(name)) return undefined
+    // Hidden dirs (starting with ".") are infra (`.git`, `.cache`, …) — never
+    // descend; SOURCE_EXTENSIONS doesn't gain anything from them.
+    if (name.startsWith(".")) return undefined
+    return { kind: "dir", path: full }
+  }
+  if (!e.isFile()) return undefined
+  const dot = name.lastIndexOf(".")
+  if (dot === -1) return undefined
+  const ext = name.slice(dot)
+  if (!SOURCE_EXTENSIONS.has(ext)) return undefined
+  // Relative path — normalize separators to forward-slash so paths match what
+  // the LLM sees in GitHub-style issue text.
+  const rel = relative(repoRoot, full).split(sep).join("/")
+  if (rel.length === 0) return undefined
+  return { kind: "file", rel }
+}
+
+export const enumerateRepoSources = (repoRoot: string): string[] => {
+  const out: string[] = []
+  const stack: string[] = [repoRoot]
+  while (stack.length > 0 && out.length < MAX_WALK_FILES) {
+    const dir = stack.pop()
+    if (dir === undefined) break
+    let entries: Dirent[]
+    try {
+      // `withFileTypes: true` + string encoding returns Dirent<string>[];
+      // the Node typings ship Dirent<Buffer | string> generics, so we
+      // annotate explicitly to keep TS happy on every Node 20+ version.
+      entries = readdirSync(dir, { withFileTypes: true }) as Dirent[]
+    } catch {
+      continue
+    }
+    for (const e of entries) {
+      const c = classifyDirent(e, dir, repoRoot)
+      if (c === undefined) continue
+      if (c.kind === "dir") stack.push(c.path)
+      else out.push(c.rel)
+    }
+  }
+  return out
+}
+
+export interface PrepareIssueHintDeps {
+  /** Bench's main LLM port. The Agentless localizer reuses it (no separate
+   *  cheaper-model wiring — adds one ~800-token call per instance, which is
+   *  negligible against a 30-turn agent budget). */
+  readonly llm: LLMPort
+  /** Override for `enumerateRepoSources` — tests inject a deterministic
+   *  fileTree. Production wiring uses `enumerateRepoSources(sandbox)`. */
+  readonly fileTree?: () => Promise<string[]>
+  /** Override for the localizer itself — tests inject a mock that returns a
+   *  predetermined `AgentlessLocalizeResult`. Production wiring uses the real
+   *  `agentlessLocalize`. */
+  readonly localize?: (
+    problemStatement: string,
+    deps: AgentlessLocalizeDeps,
+  ) => Promise<AgentlessLocalizeResult>
+  /** Soft timeout (ms) for the LLM localization call. On expiry the wiring
+   *  falls back to the regex extractor. Default 30_000. */
+  readonly timeoutMs?: number
+}
+
+const DEFAULT_PREPARE_TIMEOUT_MS = 30_000
+
+/** Compute the hint string to PREPEND onto the user message, deciding
+ *  between the new Agentless LLM path and the legacy regex path based on
+ *  `mode`.
+ *
+ *    - mode `"off"`          ⇒ empty string (byte-identical sentinel)
+ *    - mode `"regex"`        ⇒ legacy synchronous extractor (byte-identical
+ *                              with the pre-feature single-arg buildConfig)
+ *    - mode `"agentless"`    ⇒ async LLM localization. On any failure
+ *                              (timeout, stream error, zero files in tree,
+ *                              empty parse result) falls back to regex —
+ *                              i.e. the worst case of agentless mode is
+ *                              still a non-degenerate hint.
+ *
+ *  This function never throws — every failure path lands on a regex
+ *  fallback (or `""` when regex also returns empty). */
+export const prepareIssueHint = async (
+  instance: Instance,
+  sandbox: string,
+  mode: IssueHintMode,
+  deps: PrepareIssueHintDeps,
+): Promise<string> => {
+  if (mode === "off") return ""
+  if (mode === "regex") {
+    return composeIssueHint(extractIssueHint(instance.problemStatement))
+  }
+  // mode === "agentless"
+  const regexFallback = (): string => composeIssueHint(extractIssueHint(instance.problemStatement))
+  // Empty problem statement ⇒ regex also yields "" ⇒ byte-identical.
+  if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
+    return regexFallback()
+  }
+  const fileTree = deps.fileTree ?? (async () => enumerateRepoSources(sandbox))
+  const localize = deps.localize ?? agentlessLocalize
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeoutP = new Promise<AgentlessLocalizeResult>((resolve) => {
+    timer = setTimeout(() => resolve({ files: [], rationales: [], rawResponse: "" }), timeoutMs)
+  })
+  let result: AgentlessLocalizeResult
+  try {
+    result = await Promise.race([
+      localize(instance.problemStatement, { llm: deps.llm, fileTree }),
+      timeoutP,
+    ])
+  } catch {
+    // localize threw (the function itself catches; this is belt-and-braces)
+    return regexFallback()
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+  if (result.files.length === 0) {
+    // Localize gave up — fall back to regex so the bench still gets SOME
+    // hint when an issue body contains explicit paths.
+    return regexFallback()
+  }
+  return composeAgentlessHint(result)
+}
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -307,6 +538,18 @@ export const buildConfig = (
   signal: AbortSignal,
   stream: StreamPort,
   seedMsg?: string,
+  /**
+   * Pre-computed issue-hint text (Agentless async path). When provided AND
+   * non-empty, replaces the synchronous regex path entirely — buildConfig
+   * does not re-run extraction. `""` (empty string) is treated the same as
+   * undefined (no hint section emitted) so the byte-identical contract for
+   * "extraction yielded nothing" is preserved across both code paths.
+   *
+   * Production wiring: `prepareIssueHint` computes this BEFORE the agent
+   * runs (async LLM call) and threads it through `runAgentOnce`/Phase. Tests
+   * that exercise buildConfig directly without async setup pass undefined.
+   */
+  precomputedHint?: string,
 ) => {
   // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI) OR
   // the bench-only `QUANTA_BENCH_LSP=1`. When the language-server binary
@@ -325,10 +568,20 @@ export const buildConfig = (
   // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
   // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
   const baseText = instance.swebench ? `${base}${SWEBENCH_DIRECTIVE}` : base
-  // Agentless hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT=1`).
-  // When opt-in is ON AND extraction yields a non-empty hint, PREPEND markdown
-  // hint block to the user message. Empty hint ⇒ no change ⇒ byte-identical.
-  const hint = opt.issueHint ? composeIssueHint(extractIssueHint(instance.problemStatement)) : ""
+  // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
+  //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
+  //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
+  //                                    threaded in via `precomputedHint`
+  //   - mode `"off"`                ⇒ empty hint (byte-identical)
+  // When `precomputedHint` is provided (any non-undefined value, including
+  // `""`), the Agentless pre-compute already ran; we honor it verbatim and do
+  // NOT re-extract. Empty pre-computed hint ⇒ "" ⇒ byte-identical.
+  const hint =
+    precomputedHint !== undefined
+      ? precomputedHint
+      : opt.issueHintMode === "regex"
+        ? composeIssueHint(extractIssueHint(instance.problemStatement))
+        : ""
   const hintedBase = hint !== "" ? `${hint}\n\n${baseText}` : baseText
   const text = seedMsg !== undefined && seedMsg !== "" ? `${hintedBase}\n\n${seedMsg}` : hintedBase
   const messages: Message[] = [
@@ -415,6 +668,10 @@ class LastVerifyCmdTap implements StreamPort {
  * boundaries). Returns the cumulative diff + turns + lastVerifyCmd captured
  * from the stream. Used both by the single-pass path and by the per-round
  * `runOnce` closure of the repair orchestrator (continue-from-patched-tree).
+ *
+ * The optional `precomputedHint` threads the Agentless pre-computed hint
+ * through to `buildConfig`. When undefined, `buildConfig` falls back to the
+ * legacy synchronous regex path (gated on `issueHintMode === "regex"`).
  */
 const runAgentOnce = async (
   instance: Instance,
@@ -424,9 +681,12 @@ const runAgentOnce = async (
   w: Wiring,
   seedMsg: string | undefined,
   timeoutMs: number,
+  precomputedHint: string | undefined,
 ): Promise<RunOnceResult> => {
   const tap = new LastVerifyCmdTap(w.stream)
-  const outcome = await runAgent(buildConfig(instance, deps, sandbox, signal, tap, seedMsg))
+  const outcome = await runAgent(
+    buildConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint),
+  )
   // Capture the cumulative diff CURRENTLY in the worktree (without resetting
   // the index): mirrors `withGitSnapshot`'s final diff step. `git` is
   // opportunistic — absence ⇒ "". T2: cache/build paths pruned at source.
@@ -446,6 +706,7 @@ const runAgentPhase = async (
   sandbox: string,
   signal: AbortSignal,
   w: Wiring,
+  precomputedHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   const patch = await withGitSnapshot(
@@ -454,7 +715,9 @@ const runAgentPhase = async (
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const outcome = await runAgent(buildConfig(instance, deps, sandbox, signal, w.stream))
+      const outcome = await runAgent(
+        buildConfig(instance, deps, sandbox, signal, w.stream, undefined, precomputedHint),
+      )
       turns = outcome.turns
     },
   )
@@ -475,6 +738,7 @@ const runRepairPhase = async (
   signal: AbortSignal,
   w: Wiring,
   repair: NonNullable<RunInstanceDeps["repair"]>,
+  precomputedHint: string | undefined,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -488,7 +752,16 @@ const runRepairPhase = async (
         config: { ...(repair.maxRounds !== undefined ? { maxRounds: repair.maxRounds } : {}) },
         problem: instance.problemStatement,
         runOnce: (seedMsg) =>
-          runAgentOnce(instance, deps, sandbox, signal, w, seedMsg, deps.timeoutMs),
+          runAgentOnce(
+            instance,
+            deps,
+            sandbox,
+            signal,
+            w,
+            seedMsg,
+            deps.timeoutMs,
+            precomputedHint,
+          ),
         validate: repair.validate ?? defaultValidate,
         buildContext: repair.buildContext ?? buildRepairContext,
         sandbox,
@@ -562,6 +835,16 @@ export const runInstance = async (
       }
     }
 
+    // Pre-compute the issue-hint text. For mode `"off"` and `"regex"` this is
+    // a cheap synchronous shortcut (regex path computed eagerly so the hint
+    // string is byte-identical to the legacy in-buildConfig path). For mode
+    // `"agentless"` an async LLM localization call runs here exactly ONCE
+    // per instance, before any agent turn — repair rounds reuse the same
+    // hint (the issue text doesn't change across rounds; re-asking the LLM
+    // would just waste budget).
+    const hintMode = benchOptIns().issueHintMode
+    const precomputedHint = await prepareIssueHint(instance, sandbox, hintMode, { llm: deps.llm })
+
     // b2 — Repair gating: ONLY when caller set `deps.repair` AND this is a
     // real SWE-bench instance (same posture as verifyGuard / SWEBENCH_DIRECTIVE).
     // ABSENT ⇒ existing single-pass path verbatim (byte-identical: same calls,
@@ -569,10 +852,25 @@ export const runInstance = async (
     // same single verify()). The official verify() ALWAYS runs exactly once,
     // OUTSIDE the repair loop — its result is never fed back to the agent
     // (no-leak invariant; also enforced by code locality).
+    //
+    // When `hintMode === "off"`, `precomputedHint` is `""`; `buildConfig`
+    // treats a defined-but-empty hint identically to undefined: no
+    // injection. So the off-mode path is byte-identical to the pre-feature
+    // pipeline (the legacy regex-on-`=1` path is also byte-identical
+    // because `prepareIssueHint("regex")` returns the same string the
+    // in-buildConfig regex would have produced).
     phase =
       deps.repair !== undefined && instance.swebench !== undefined
-        ? await runRepairPhase(instance, deps, sandbox, abort.signal, w, deps.repair)
-        : await runAgentPhase(instance, deps, sandbox, abort.signal, w)
+        ? await runRepairPhase(
+            instance,
+            deps,
+            sandbox,
+            abort.signal,
+            w,
+            deps.repair,
+            precomputedHint,
+          )
+        : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint)
     const v = await verify(instance, phase.patch, sandbox, deps)
 
     const extra: Partial<InstanceResult> = {}

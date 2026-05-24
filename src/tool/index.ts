@@ -6,7 +6,6 @@ import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
-import { readImageTool } from "./image"
 import { localizeTool } from "./localize"
 import { parseTestFailureTool } from "./parse-test-failure"
 import { makeReadTool, readTool } from "./read"
@@ -214,12 +213,6 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => [
   grepTool as Tool,
   globTool as Tool,
   localizeTool as Tool,
-  // ADR-0126: `read_image` — vision-input. Read-only + concurrency-safe;
-  // belongs in the always-on default set. Sessions that never call it are
-  // byte-identical (the composer helper is caller-wired and absent from
-  // dispatch.ts by design — `ToolResult.images` simply rides the OK result
-  // until a future PR plumbs it into the tool_result content).
-  readImageTool as Tool,
   // Fault-localization aids (Codex signal absorption): file_tree_summary for
   // Stage-1 structure, parse_test_failure for Stage-3 log→file:line. Both
   // read-only + concurrency-safe; sessions that never call them are unchanged.

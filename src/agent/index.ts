@@ -96,6 +96,11 @@ export {
   toRelativePath,
 } from "./ide-context"
 export {
+  type AgentlessLocalizeDeps,
+  type AgentlessLocalizeResult,
+  agentlessLocalize,
+  buildAgentlessPrompt,
+  composeAgentlessHint,
   composeIssueHint,
   EMPTY_HINT as EMPTY_ISSUE_HINT,
   extractCodeFences,
@@ -105,6 +110,7 @@ export {
   extractSymbols,
   extractTracebackPaths,
   type IssueHint,
+  parseAgentlessResponse,
 } from "./issue-hint"
 export { runAgent } from "./loop"
 export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
