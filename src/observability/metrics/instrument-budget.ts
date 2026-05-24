@@ -37,9 +37,7 @@ export const instrumentBudgetLedger = (
   return {
     record(event: UsageEvent): RecordResult {
       const result = ledger.record(event)
-      safe(metrics, () =>
-        metrics.increment(`${prefix}.record.total`, 1, { model: event.model }),
-      )
+      safe(metrics, () => metrics.increment(`${prefix}.record.total`, 1, { model: event.model }))
       // ADR-0162: per-event cost histogram. `result.cost` is required on
       // every return (defensive swallow path emits cost=0).
       safe(metrics, () =>

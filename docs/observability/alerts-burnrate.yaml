@@ -1,0 +1,204 @@
+# quanta multi-window multi-burn-rate alert rules (ADR-0166).
+# Implements the Google SRE multi-window multi-burn-rate alerting pattern:
+#   https://sre.google/workbook/alerting-on-slos/
+#
+# Each SLI gets TWO alerts that must BOTH fire (AND-gated via PromQL `and`):
+#   - Fast burn: 1h window at 14.4x consumption rate + 5m short window guard
+#   - Slow burn: 6h window at  6.0x consumption rate + 30m short window guard
+#
+# Budget formula:
+#   burn_rate > (multiplier * (1 - SLO))
+# e.g. 99.0% SLO (1% budget): fast burn fires when 1h error rate > 14.4 * 0.01.
+#
+# Severity inherits from the base SLO criticality. Burn-rate alerts SUPERSEDE
+# the simple threshold rules in alerts-quanta.yaml (see alertmanager-routing.yaml
+# inhibit_rules) — those remain as soft-warnings; burn-rate is page-only.
+
+groups:
+  - name: quanta.slo.burnrate
+    rules:
+      # ── 1. LLM stream success (99.0% SLO, budget = 1%) ─────────────────────
+      - alert: SLOBurnLlmStreamFast
+        expr: |
+          (
+            sum(rate(llm_provider_stream_failures_total[1h])) / sum(rate(llm_provider_stream_total[1h]))
+          ) > (14.4 * 0.01)
+          and
+          (
+            sum(rate(llm_provider_stream_failures_total[5m])) / sum(rate(llm_provider_stream_total[5m]))
+          ) > (14.4 * 0.01)
+        for: 2m
+        labels: { severity: critical, team: llm, sli: llm-stream-success, slo: "99.0%", burn: fast }
+        annotations:
+          summary: "LLM stream error budget burning at 14.4x (fast)"
+          description: "1h failure rate {{ $value | humanizePercentage }} — 1h window will consume 14.4% of 30d error budget. Check provider status / retry storm / auth."
+
+      - alert: SLOBurnLlmStreamSlow
+        expr: |
+          (
+            sum(rate(llm_provider_stream_failures_total[6h])) / sum(rate(llm_provider_stream_total[6h]))
+          ) > (6 * 0.01)
+          and
+          (
+            sum(rate(llm_provider_stream_failures_total[30m])) / sum(rate(llm_provider_stream_total[30m]))
+          ) > (6 * 0.01)
+        for: 15m
+        labels: { severity: critical, team: llm, sli: llm-stream-success, slo: "99.0%", burn: slow }
+        annotations:
+          summary: "LLM stream error budget burning at 6x (slow)"
+          description: "6h failure rate {{ $value | humanizePercentage }} — sustained degradation will consume 36% of 30d error budget in 6h."
+
+      # ── 2. LSP request success (99.0% SLO, budget = 1%) ────────────────────
+      - alert: SLOBurnLspRequestFast
+        expr: |
+          (
+            sum(rate(lsp_request_failures_total[1h])) / sum(rate(lsp_request_total[1h]))
+          ) > (14.4 * 0.01)
+          and
+          (
+            sum(rate(lsp_request_failures_total[5m])) / sum(rate(lsp_request_total[5m]))
+          ) > (14.4 * 0.01)
+        for: 2m
+        labels: { severity: critical, team: lsp, sli: lsp-request-success, slo: "99.0%", burn: fast }
+        annotations:
+          summary: "LSP request error budget burning at 14.4x (fast)"
+          description: "1h failure rate {{ $value | humanizePercentage }} — LSP server may be crash-looping or misconfigured."
+
+      - alert: SLOBurnLspRequestSlow
+        expr: |
+          (
+            sum(rate(lsp_request_failures_total[6h])) / sum(rate(lsp_request_total[6h]))
+          ) > (6 * 0.01)
+          and
+          (
+            sum(rate(lsp_request_failures_total[30m])) / sum(rate(lsp_request_total[30m]))
+          ) > (6 * 0.01)
+        for: 15m
+        labels: { severity: critical, team: lsp, sli: lsp-request-success, slo: "99.0%", burn: slow }
+        annotations:
+          summary: "LSP request error budget burning at 6x (slow)"
+          description: "6h failure rate {{ $value | humanizePercentage }} — sustained LSP degradation."
+
+      # ── 3. Tool call success (99.0% SLO, budget = 1%, per-tool) ────────────
+      - alert: SLOBurnToolCallFast
+        expr: |
+          (
+            sum by(tool)(rate(tool_call_total{ok="false"}[1h])) / sum by(tool)(rate(tool_call_total[1h]))
+          ) > (14.4 * 0.01)
+          and
+          (
+            sum by(tool)(rate(tool_call_total{ok="false"}[5m])) / sum by(tool)(rate(tool_call_total[5m]))
+          ) > (14.4 * 0.01)
+        for: 2m
+        labels: { severity: critical, team: agent-runtime, sli: tool-call-success, slo: "99.0%", burn: fast }
+        annotations:
+          summary: "Tool {{ $labels.tool }} error budget burning at 14.4x (fast)"
+          description: "1h failure rate {{ $value | humanizePercentage }} on tool={{ $labels.tool }} — investigate tool-specific failure (perms / network / capability)."
+
+      - alert: SLOBurnToolCallSlow
+        expr: |
+          (
+            sum by(tool)(rate(tool_call_total{ok="false"}[6h])) / sum by(tool)(rate(tool_call_total[6h]))
+          ) > (6 * 0.01)
+          and
+          (
+            sum by(tool)(rate(tool_call_total{ok="false"}[30m])) / sum by(tool)(rate(tool_call_total[30m]))
+          ) > (6 * 0.01)
+        for: 15m
+        labels: { severity: critical, team: agent-runtime, sli: tool-call-success, slo: "99.0%", burn: slow }
+        annotations:
+          summary: "Tool {{ $labels.tool }} error budget burning at 6x (slow)"
+          description: "6h failure rate {{ $value | humanizePercentage }} on tool={{ $labels.tool }} — sustained tool degradation."
+
+      # ── 4. Shadow ODB checkpoint success (99.99% SLO, budget = 0.01%) ──────
+      - alert: SLOBurnShadowCheckpointFast
+        expr: |
+          (
+            sum(rate(shadow_checkpoint_failures_total[1h])) / sum(rate(shadow_checkpoint_total[1h]))
+          ) > (14.4 * 0.0001)
+          and
+          (
+            sum(rate(shadow_checkpoint_failures_total[5m])) / sum(rate(shadow_checkpoint_total[5m]))
+          ) > (14.4 * 0.0001)
+        for: 2m
+        labels: { severity: critical, team: agent-runtime, sli: shadow-checkpoint-success, slo: "99.99%", burn: fast }
+        annotations:
+          summary: "Shadow ODB checkpoint error budget burning at 14.4x (fast)"
+          description: "1h failure rate {{ $value | humanizePercentage }} — risk of losing rewind capability; investigate ODB disk / fsync / corruption."
+
+      - alert: SLOBurnShadowCheckpointSlow
+        expr: |
+          (
+            sum(rate(shadow_checkpoint_failures_total[6h])) / sum(rate(shadow_checkpoint_total[6h]))
+          ) > (6 * 0.0001)
+          and
+          (
+            sum(rate(shadow_checkpoint_failures_total[30m])) / sum(rate(shadow_checkpoint_total[30m]))
+          ) > (6 * 0.0001)
+        for: 15m
+        labels: { severity: critical, team: agent-runtime, sli: shadow-checkpoint-success, slo: "99.99%", burn: slow }
+        annotations:
+          summary: "Shadow ODB checkpoint error budget burning at 6x (slow)"
+          description: "6h failure rate {{ $value | humanizePercentage }} — sustained ODB degradation; rewind reliability at risk."
+
+      # ── 5. Sandbox spawn-without-degrade (99.5% SLO, budget = 0.5%) ────────
+      - alert: SLOBurnSandboxSpawnFast
+        expr: |
+          (
+            sum(rate(sandbox_spawn_degraded_total[1h])) / sum(rate(sandbox_spawn_total[1h]))
+          ) > (14.4 * 0.005)
+          and
+          (
+            sum(rate(sandbox_spawn_degraded_total[5m])) / sum(rate(sandbox_spawn_total[5m]))
+          ) > (14.4 * 0.005)
+        for: 2m
+        labels: { severity: critical, team: runtime, sli: sandbox-spawn-success, slo: "99.5%", burn: fast }
+        annotations:
+          summary: "Sandbox spawn-without-degrade burning at 14.4x (fast)"
+          description: "1h degrade rate {{ $value | humanizePercentage }} — bubblewrap/seatbelt regressing to passthrough; check install + policy compile."
+
+      - alert: SLOBurnSandboxSpawnSlow
+        expr: |
+          (
+            sum(rate(sandbox_spawn_degraded_total[6h])) / sum(rate(sandbox_spawn_total[6h]))
+          ) > (6 * 0.005)
+          and
+          (
+            sum(rate(sandbox_spawn_degraded_total[30m])) / sum(rate(sandbox_spawn_total[30m]))
+          ) > (6 * 0.005)
+        for: 15m
+        labels: { severity: critical, team: runtime, sli: sandbox-spawn-success, slo: "99.5%", burn: slow }
+        annotations:
+          summary: "Sandbox spawn-without-degrade burning at 6x (slow)"
+          description: "6h degrade rate {{ $value | humanizePercentage }} — sustained sandbox backend issues."
+
+      # ── 6. Subagent fork success (99.9% SLO, budget = 0.1%) ────────────────
+      - alert: SLOBurnSubagentForkFast
+        expr: |
+          (
+            sum(rate(subagent_fork_failures_total[1h])) / sum(rate(subagent_fork_total[1h]))
+          ) > (14.4 * 0.001)
+          and
+          (
+            sum(rate(subagent_fork_failures_total[5m])) / sum(rate(subagent_fork_total[5m]))
+          ) > (14.4 * 0.001)
+        for: 2m
+        labels: { severity: critical, team: agent-runtime, sli: subagent-fork-success, slo: "99.9%", burn: fast }
+        annotations:
+          summary: "Subagent fork error budget burning at 14.4x (fast)"
+          description: "1h fork failure rate {{ $value | humanizePercentage }} — investigate cap-exceeded / orchestrator crash / resource exhaustion."
+
+      - alert: SLOBurnSubagentForkSlow
+        expr: |
+          (
+            sum(rate(subagent_fork_failures_total[6h])) / sum(rate(subagent_fork_total[6h]))
+          ) > (6 * 0.001)
+          and
+          (
+            sum(rate(subagent_fork_failures_total[30m])) / sum(rate(subagent_fork_total[30m]))
+          ) > (6 * 0.001)
+        for: 15m
+        labels: { severity: critical, team: agent-runtime, sli: subagent-fork-success, slo: "99.9%", burn: slow }
+        annotations:
+          summary: "Subagent fork error budget burning at 6x (slow)"
+          description: "6h fork failure rate {{ $value | humanizePercentage }} — sustained subagent orchestration degradation."

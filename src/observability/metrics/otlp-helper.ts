@@ -43,6 +43,7 @@
  * top-level module evaluation.
  */
 
+import { buildOtelResourceAttrs, type ResourceAutoOpts } from "./otel-resource"
 import { type OtelMeterProvider, otelMetricsSink } from "./otel-sink"
 import type { MetricSink } from "./port"
 
@@ -79,6 +80,11 @@ export interface OtlpHelperOpts {
   /** Resource attrs (service.name, env, etc.).
    *  Default `{ "service.name": "quanta" }`. */
   readonly resourceAttrs?: Readonly<Record<string, string>>
+  /** ADR-0163 — opt-in OTel semconv auto-enrichment. `true` = call
+   *  `buildOtelResourceAttrs()` with defaults. Object = pass-through opts.
+   *  Absent = byte-identical to ADR-0155 (DEFAULT_RESOURCE_ATTRS).
+   *  `resourceAttrs` overrides any auto-detected keys (caller wins). */
+  readonly autoResource?: ResourceAutoOpts | boolean
   /** TEST-ONLY loader injection. Surfaces never set this; the hellgate uses
    *  it to stub the dynamic import without touching node_modules. */
   readonly __loader?: OtlpLoader
@@ -91,6 +97,8 @@ export interface PrometheusHelperOpts {
   readonly endpoint?: string
   /** Resource attrs. Default `{ "service.name": "quanta" }`. */
   readonly resourceAttrs?: Readonly<Record<string, string>>
+  /** ADR-0163 — opt-in OTel semconv auto-enrichment. Same shape as OtlpHelperOpts. */
+  readonly autoResource?: ResourceAutoOpts | boolean
   /** TEST-ONLY loader injection. */
   readonly __loader?: PrometheusLoader
 }
@@ -215,6 +223,26 @@ const DEFAULT_RESOURCE_ATTRS: Readonly<Record<string, string>> = Object.freeze({
   "service.name": "quanta",
 })
 
+/** ADR-0163 resolver: composes auto-enriched attrs + caller-explicit override.
+ *  - `autoResource` absent → byte-identical to ADR-0155 (DEFAULT_RESOURCE_ATTRS
+ *    OR explicit `resourceAttrs` only).
+ *  - `autoResource === true` → `buildOtelResourceAttrs()` with defaults +
+ *    optional `resourceAttrs` overrides on top.
+ *  - `autoResource` is object → `buildOtelResourceAttrs(autoResource)` +
+ *    optional `resourceAttrs` overrides on top.
+ *  Caller's `resourceAttrs` always wins (merged LAST). */
+const resolveResourceAttrs = (
+  explicit: Readonly<Record<string, string>> | undefined,
+  autoResource: ResourceAutoOpts | boolean | undefined,
+): Readonly<Record<string, string>> => {
+  if (autoResource === undefined || autoResource === false) {
+    return explicit ?? DEFAULT_RESOURCE_ATTRS
+  }
+  const autoOpts = autoResource === true ? {} : autoResource
+  const auto = buildOtelResourceAttrs(autoOpts)
+  return explicit === undefined ? auto : { ...auto, ...explicit }
+}
+
 const DEFAULT_OTLP_ENDPOINT = "http://localhost:4318/v1/metrics"
 const DEFAULT_OTLP_INTERVAL_MS = 5000
 
@@ -229,7 +257,7 @@ const DEFAULT_OTLP_INTERVAL_MS = 5000
 export const otlpHttpMetricSink = async (opts?: OtlpHelperOpts): Promise<HelperResult> => {
   const endpoint = opts?.endpoint ?? DEFAULT_OTLP_ENDPOINT
   const intervalMs = opts?.intervalMs ?? DEFAULT_OTLP_INTERVAL_MS
-  const resourceAttrs = opts?.resourceAttrs ?? DEFAULT_RESOURCE_ATTRS
+  const resourceAttrs = resolveResourceAttrs(opts?.resourceAttrs, opts?.autoResource)
   const loader = opts?.__loader ?? defaultOtlpLoader
 
   const { sdk, otlp } = await loader()
@@ -258,7 +286,7 @@ export const otlpHttpMetricSink = async (opts?: OtlpHelperOpts): Promise<HelperR
  *  `OtelDepsMissingError`. The exporter spins up an HTTP server on `port`
  *  serving `endpoint`; `shutdown` tears it down. */
 export const prometheusMetricSink = async (opts?: PrometheusHelperOpts): Promise<HelperResult> => {
-  const resourceAttrs = opts?.resourceAttrs ?? DEFAULT_RESOURCE_ATTRS
+  const resourceAttrs = resolveResourceAttrs(opts?.resourceAttrs, opts?.autoResource)
   const loader = opts?.__loader ?? defaultPrometheusLoader
 
   const { sdk, prom } = await loader()

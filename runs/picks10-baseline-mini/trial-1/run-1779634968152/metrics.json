@@ -1,0 +1,31 @@
+{
+  "runId": "run-1779634968152",
+  "pricingVersion": "pricing.v2",
+  "snapshot": {
+    "counters": {
+      "instances": 10,
+      "degraded": 0,
+      "inputTokens": 3759308,
+      "outputTokens": 77927
+    },
+    "gauges": {},
+    "timers": {
+      "turns": {
+        "count": 10,
+        "min": 12,
+        "max": 21,
+        "mean": 15.7,
+        "p50": 16,
+        "p95": 21
+      },
+      "durationMs": {
+        "count": 10,
+        "min": 160703,
+        "max": 222692,
+        "mean": 191868.6,
+        "p50": 193672,
+        "p95": 222692
+      }
+    }
+  }
+}

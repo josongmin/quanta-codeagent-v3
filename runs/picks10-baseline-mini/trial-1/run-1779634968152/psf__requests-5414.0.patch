@@ -1,0 +1,35 @@
+diff --git a/requests/models.py b/requests/models.py
+index e7d292d5..eab80eb0 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -394,6 +394,17 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         if not host:
+             raise InvalidURL("Invalid URL %r: No host supplied" % url)
+ 
++        # Validate host labels: empty labels are invalid (e.g. leading, trailing
++        # or consecutive dots such as ".example", "example.", or "exa..mple").
++        # This should raise InvalidURL rather than letting lower-level IDNA
++        # or networking code raise UnicodeError/LocationParseError.
++        try:
++            labels = host.split('.')
++        except Exception:
++            labels = [host]
++        if any(label == '' for label in labels):
++            raise InvalidURL('URL has an invalid label.')
++
+         # In general, we want to try IDNA encoding the hostname if the string contains
+         # non-ASCII characters. This allows users to automatically get the correct IDNA
+         # behaviour. For strings containing only ASCII characters, we need to also verify
+diff --git a/requests/utils.py b/requests/utils.py
+index 8b2a5f14..55690fdc 100644
+--- a/requests/utils.py
++++ b/requests/utils.py
+@@ -786,7 +786,7 @@ def should_bypass_proxies(url, no_proxy):
+         # parsed.hostname can be `None` in cases such as a file URI.
+         try:
+             bypass = proxy_bypass(parsed.hostname)
+-        except (TypeError, socket.gaierror):
++        except (TypeError, UnicodeError, socket.gaierror):
+             bypass = False
+ 
+     if bypass:
