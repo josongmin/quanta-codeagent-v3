@@ -1,0 +1,57 @@
+id: lsp-expansion-4-tools
+title: LSP 4-tool expansion — code-action / rename-apply / format / signature-help
+section: 2
+subsystem: LSP mutating + signature-help tools (ADR-0141)
+order: 141
+maturity: L3
+status: new
+purpose: |
+  Expands the Codex-absorbed ADR-0015 read-only LSP nav surface
+  (8 nav tools) with 4 mutating + signature-help capabilities the
+  model previously had to fake via raw bash/sed:
+    1. code_action — quickfix/refactor/organizeImports/fixAll suggest+apply
+    2. rename_apply — real textDocument/rename after prepareRename probe
+    3. format — whole-file / range formatting
+    4. signature_help — overload + active-parameter at call-site cursor
+  Mirrors ADR-0119 shadow_rewind first-class tool pattern. Default
+  adapters are "not-implemented" throws — tools catch and convert to
+  typed ok:false. Assembly seam (actual LspClient wire) deferred to
+  follow-up ADR; surface lands plane-clean first.
+evidence:
+  code:
+    - src/lsp/ports/code-action-port.ts
+    - src/lsp/ports/format-port.ts
+    - src/lsp/ports/signature-help-port.ts
+    - src/lsp/ports/rename-apply-port.ts
+    - src/lsp/adapters/default-code-action.ts
+    - src/lsp/adapters/default-format.ts
+    - src/lsp/adapters/default-signature-help.ts
+    - src/tool/lsp_nav/code-action.ts
+    - src/tool/lsp_nav/rename-apply.ts
+    - src/tool/lsp_nav/format.ts
+    - src/tool/lsp_nav/signature-help.ts
+    - src/lsp/index.ts
+    - src/tool/lsp_nav/index.ts
+  adrs: [141]
+  tests:
+    unit:
+      - tests/unit/tool/lsp-code-action-hellgate.test.ts
+      - tests/unit/tool/lsp-rename-apply-hellgate.test.ts
+      - tests/unit/tool/lsp-format-hellgate.test.ts
+      - tests/unit/tool/lsp-signature-help-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    LspClient (src/lsp/adapters/base.ts) does not yet expose the wire
+    methods needed; default adapters throw not-implemented. Tools
+    catch and return ok:false typed. L3 until the assembly seam
+    (LspClient wire) lands.
+  promotion_path: |
+    A follow-up ADR adds the wire methods to LspClient + connects
+    default-* adapters to real LSP requests; this lifts to L4.
+notes: |
+  Each tool factory carries its own duck-typed mirror port to keep
+  the closed-port boundary clean. 60-case hellgate across the 4 tools
+  (15/16/14/15) seals contract before wire lands.

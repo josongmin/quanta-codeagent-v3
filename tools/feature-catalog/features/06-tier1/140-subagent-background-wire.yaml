@@ -1,0 +1,37 @@
+id: subagent-background-wire
+title: Background-subagent caller wire — ADR-0130 helper exposed to loop
+section: 6
+subsystem: Tier-1 background subagent caller-wire (deferred-wire close)
+order: 140
+maturity: L4
+status: stable
+purpose: |
+  Caller-wire closure for ADR-0130 — adds AgentConfig.subagentBackground
+  typed slot + FeaturesConfig Pick + buildSessionFeatures composer step
+  so the BackgroundSubagentScheduler helper actually reaches the loop's
+  extraTools. Without this wire, the 3 LLM-facing tools (subagent_fork
+  / subagent_poll / subagent_await) are unreachable even though the
+  helper exists. Follows the deferred-wire pattern voice-matched to
+  ADR-0124 / ADR-0128 / ADR-0125 / ADR-0119 — helper lands plane-clean
+  first, caller wire closes in a follow-up ADR. 4 surgical edits,
+  zero mutation to existing wiring.
+evidence:
+  code:
+    - src/agent/types.ts
+    - src/agent/tier1/index.ts
+    - src/agent/features.ts
+    - src/agent/tier1/subagent-bg.ts
+  adrs: [130, 140]
+  tests:
+    unit:
+      - tests/unit/subagent-background-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  6-case hellgate seals: barrel re-export + slot type + Pick type +
+  default-off + on + same-instance identity. Duck-typed cast in
+  subagent-bg.ts left for byte-identical guarantee (the cast is now
+  redundant but removing it would re-arrange the diff). Sibling closure
+  to ADR-0119 (shadow_rewind wire) and ADR-0118 (shadow rewind port).

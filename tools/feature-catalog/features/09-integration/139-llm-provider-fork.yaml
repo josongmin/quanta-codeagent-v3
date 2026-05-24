@@ -1,0 +1,44 @@
+id: llm-provider-fork
+title: LLM provider fork — Anthropic 4-transport closed port (default/bedrock/vertex/foundry)
+section: 9
+subsystem: LLM transport — vendor/transport separation
+order: 139
+maturity: L4
+status: stable
+purpose: |
+  Hexagonal port that separates Anthropic vendor (wire grammar) from
+  transport (api.anthropic.com vs AWS Bedrock vs GCP Vertex vs Azure
+  Foundry). 4-arm ProviderId union + 3-code ProviderError + 5-tier
+  resolveProvider(explicit?, env?) precedence. Default-OFF — legacy
+  adapter path untouched (byte-identical when ProviderId resolves to
+  "default"). Bedrock/Vertex are Phase 1 (missing-dep typed-throw on
+  client lib import); Foundry is Phase 2 stub. First OSS implementation
+  to make Anthropic transport-selection typed; Claude Code keeps it
+  closed via env-only, Codex/Cursor/v0.dev don't separate transport.
+evidence:
+  code:
+    - src/llm/providers/provider-port.ts
+    - src/llm/providers/default-adapter.ts
+    - src/llm/providers/bedrock-adapter.ts
+    - src/llm/providers/vertex-adapter.ts
+    - src/llm/providers/foundry-adapter.ts
+    - src/llm/providers/registry.ts
+    - src/llm/providers/index.ts
+  adrs: [139]
+  tests:
+    unit:
+      - tests/unit/llm-providers/port-hellgate.test.ts
+      - tests/unit/llm-providers/registry-hellgate.test.ts
+      - tests/unit/llm-providers/default-adapter-hellgate.test.ts
+      - tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts
+      - tests/unit/llm-providers/vertex-adapter-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_ANTHROPIC_PROVIDER — default | bedrock | vertex | foundry (explicit override)
+deliberate_hold: null
+notes: |
+  Wire is opt-in: legacy AnthropicAdapter still default. Foundry adapter
+  is Phase 2 (interface-only stub); promotes when Azure client lib choice
+  finalizes. ProviderError closes 3 cases: missing-dep / auth-failed /
+  not-implemented — caller maps to typed LLMErrorKind upstream.
