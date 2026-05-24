@@ -1,0 +1,40 @@
+id: runtime-config-ssot
+title: Frozen runtime-config SSOT — the only place that touches process.env
+section: 8
+subsystem: 환경 변수 — single owner + validate-once snapshot
+order: 85
+maturity: L4
+status: stable
+purpose: |
+  The SINGLE place that touches `process.env`. Two recurring failure modes
+  motivated it: (1) silent garbage acceptance — `process.env.QUANTA_LOG_LEVEL
+  as LogLevel` accepted any string; an unknown value made every comparison
+  `<undefined` and silently dropped EVERY log line; (2) mid-run env mutation
+  — read-at-call-site means a test or harness override changes behavior
+  unpredictably mid-run. Contract: first call evaluates + freezes; subsequent
+  reads are cached; invalid values are REJECTED with a one-time stderr warn
+  (raw `process.stderr.write` because the logger depends on us — no import
+  loop); defaults are documented inline; `__resetRuntimeConfig()` is the
+  test seam — production code MUST NOT call it. Adding a new env var
+  requires a typed parser helper here + a field on `RuntimeConfig` — the
+  anti-regression scanner bans direct `process.env.*` reads outside this
+  file.
+evidence:
+  code:
+    - src/shared/runtime-config.ts
+    - src/shared/index.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_LOG_LEVEL
+  - QUANTA_SESSIONS_DIR
+  - QUANTA_FS_JAIL
+deliberate_hold: null
+notes: |
+  Parsers reject non-integer / non-positive / sign / hex / extra-whitespace
+  for numeric envs — the parse helper warns once with the offending raw
+  value. Frozen snapshot is the invariant that lets every consumer treat
+  the config as a true constant for the lifetime of the process.

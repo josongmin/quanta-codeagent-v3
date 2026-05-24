@@ -1,0 +1,32 @@
+id: metrics-registry
+title: In-process Metrics registry — counters + gauges + timers (nearest-rank p50/p95)
+section: 8
+subsystem: 텔레메트리 — process-local counter/timer SSOT
+order: 83
+maturity: L4
+status: stable
+purpose: |
+  Dependency-free in-process metrics registry that backs every downstream
+  observability surface — the AgentRecorder, the shell-exec OTel observer,
+  the cost dashboard, and work-metrics all read its snapshot. Three primitive
+  shapes: Counter (monotonic inc), Gauge (set), Timer (sample list →
+  `TimerStats` summary). Timer summarization uses a nearest-rank percentile
+  on the sorted ascending sample (rank = ceil(p/100 * n), 1-indexed, clamped
+  to [1, n]); empty sample yields zeros across the stats. No external dep,
+  no exporter — the registry is the in-memory model; emitters (JSONL,
+  dashboard, OTel sink) are separate concerns that READ the snapshot.
+evidence:
+  code:
+    - src/observability/metrics.ts
+    - src/observability/types.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pin-pointed off-by-one in the spec wording (≈51 / ≈96 vs the lower of the
+  pair) — nearest-rank lands deterministically on the lower index so values
+  1..100 give p50=50 / p95=95.

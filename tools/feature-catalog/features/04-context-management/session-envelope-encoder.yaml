@@ -1,0 +1,34 @@
+id: session-envelope-encoder
+title: Session envelope encoder/decoder — deterministic key-sorted JSONL
+section: 4
+subsystem: Session 영속화 — byte-identical encode + non-throwing decode
+order: 52
+maturity: L4
+status: stable
+purpose: |
+  Encode/decode pair for the per-line records that make up the session JSONL
+  rail. `encodeSessionLine` emits one JSON object terminated by exactly one
+  `\n`, with object keys sorted alphabetically at every nesting level so two
+  semantically-equal records produce byte-identical wire forms (ADR-0023
+  byte-identical replay invariant). No trailing whitespace, no pretty-print,
+  no BOM. `decodeSessionLine` NEVER throws — bad JSON, schema failures, blank
+  lines, BOM, CRLF all surface as a typed `EnvelopeDecodeError` (kind:
+  parse_json | schema | empty_line). `iterateSessionFile` yields one Result
+  per logical line so the caller decides stop / log / skip on a bad line —
+  the encoder/decoder never silently swallows.
+evidence:
+  code:
+    - src/session/envelope-encoder.ts
+    - src/session/envelope.ts
+  adrs: [34]
+  tests:
+    unit:
+      - tests/unit/session-envelope-encoding.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Complement to `session-jsonl-envelope` (the 5-variant record schema). This
+  yaml covers the WIRE side: deterministic emit + non-throwing parse +
+  streaming iterator. Together they pin the on-disk format.

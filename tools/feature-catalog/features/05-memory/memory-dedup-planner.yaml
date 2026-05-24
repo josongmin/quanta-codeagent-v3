@@ -1,0 +1,33 @@
+id: memory-dedup-planner
+title: Pure near-duplicate detection — pre-save merge/supersede candidates
+section: 5
+subsystem: 장기 메모리 — consolidation pre-save gate
+order: 61
+maturity: L4
+status: stable
+purpose: |
+  Before saving a new memory entry the store asks: does an equivalent entry
+  already exist? Pure planner that surfaces candidate matches via two
+  complementary similarity channels (semantic vector + lexical token overlap)
+  so paraphrases AND embedding-less rows both get caught. Returns only
+  candidate ids and per-candidate match-channel kind; the caller decides whether
+  to merge or supersede. Adapter-shared (in-memory + SQLite reuse the same
+  module) so dedup behavior never diverges between dev and production.
+evidence:
+  code:
+    - src/memory/dedup.ts
+    - src/memory/vector.ts
+    - src/memory/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/dedup.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Threshold defaults live in `dedup.ts` as module-level constants — tuned to
+  catch paraphrase without false merges. Sibling planner to
+  `memory-eviction-planner` (post-save sweep). Both are pure / no IO so the
+  whole consolidation pipeline is unit-testable without an adapter.

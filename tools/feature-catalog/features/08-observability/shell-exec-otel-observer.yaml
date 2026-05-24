@@ -1,0 +1,36 @@
+id: shell-exec-otel-observer
+title: Shell-exec OTel observer — typed event stream → counter registry
+section: 8
+subsystem: 텔레메트리 — runShell typed stream fan-out
+order: 80
+maturity: L4
+status: stable
+purpose: |
+  OTel-bound observer for the ADR-0081 shell exec events. Fans the typed
+  stream (start / stdout / stderr / exit / aborted) into the existing
+  `Metrics` registry so the `handle_tool_call{name=bash}` span (or any later
+  aggregator) reads accurate chunk + byte counters WITHOUT re-buffering the
+  child's output. Counter vocabulary is stable + snake_case to match the
+  Codex OTel attribute keys: `shell.exec.runs` / `shell.exec.{stdout,stderr}
+  .{chunks,bytes}` / `shell.exec.exits.{code|null}` / `shell.exec.aborts.
+  {user_abort|timeout}`. Exhaustive switch on `ShellExecEvent.kind` so a new
+  variant breaks compilation and forces an explicit counter decision.
+  Default-OFF posture: `Metrics` is itself opt-in via `AgentConfig.metrics`
+  — hosts that don't wire `metrics` simply don't build this observer.
+evidence:
+  code:
+    - src/observability/shell-exec-otel.ts
+    - src/observability/metrics.ts
+    - src/shared/shell-exec-types.ts
+  adrs: [81]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Composes with the CLI `buildShellStreamPainter()` via
+  `composeShellObservers(...)` — non-interactive modes (bench / ci-bot) wire
+  only the OTel one. No new collection — feeds the same `Metrics` snapshot
+  consumed by `cost-cache-dashboard` and `work-metrics`.

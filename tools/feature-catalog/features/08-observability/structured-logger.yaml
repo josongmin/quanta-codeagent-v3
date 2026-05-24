@@ -1,0 +1,36 @@
+id: structured-logger
+title: Structured JSON-per-line logger — machine-consumable observability
+section: 8
+subsystem: 로깅 — JSON-shaped sink (shared logger와 분리)
+order: 84
+maturity: L4
+status: stable
+purpose: |
+  JSON-per-line logger for machine-consumable observability — distinct from
+  `@/shared`'s human-shaped `logger`. Emits one `JSON.stringify(LogRecord)`
+  per call so downstream tooling (the agent loop, adapters, a future
+  collector) can parse fields without regex. Threshold + sink + clock are
+  injectable for tests; default sink writes stderr only (stdout is reserved
+  for the agent stream — same rule as `@/shared`). Threshold gate routes
+  through the shared `levelEnabled` predicate so the human-logger's level
+  ordering is the single source-of-truth. Resolves the effective level via
+  explicit option ›› `runtimeConfig().logLevel` ›› default so a garbage
+  `QUANTA_LOG_LEVEL` falls back to `info` with a one-time stderr warn
+  rather than silently dropping every line.
+evidence:
+  code:
+    - src/observability/logger.ts
+    - src/observability/types.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_LOG_LEVEL
+deliberate_hold: null
+notes: |
+  Two-logger architecture is deliberate: the shared one emits a tiny
+  `[level] msg` for humans, this one emits structured JSON for machines.
+  Wrapping rather than re-deriving the level keeps the env-validation
+  ratchet (`runtime-config-ssot`) intact.
