@@ -1,0 +1,45 @@
+id: bench-python-swebench
+title: bench — official Python SWE-bench harness verifier (real grader)
+section: 10
+subsystem: Bench harness — official-grader integration
+order: 43
+maturity: L4
+status: stable
+purpose: |
+  The documented swebench-seam, now real. Given a `swebench.verified`
+  Instance and the unified diff the agent produced, writes an official
+  predictions JSONL and invokes the upstream grader:
+    python -m swebench.harness.run_evaluation \
+        --predictions_path <preds.jsonl> \
+        --run_id quanta-<id> \
+        --instance_ids <id> \
+        --max_workers 1 \
+        --cache_level none \
+        --clean True \
+        --dataset_name <local-or-HF>
+  Argv contract is RS-separated (0x1e) in trajectory + report.json so the
+  exact invocation is recoverable per attempt. Returns a typed grader
+  result (passed / error / log paths) the bench driver maps to
+  `InstanceResult`. Apple-Silicon path uses prebuilt namespace=swebench
+  (per memory `swebench-arm64-grading-recipe`).
+evidence:
+  code:
+    - src/apps/bench/python-swebench.ts
+    - src/apps/bench/eval/verdict.ts
+  adrs: []
+  tests:
+    unit: []
+    integration:
+      - tests/integration/bench-python-harness-e2e.test.ts
+    contract: []
+knobs:
+  - QUANTA_SWEBENCH_DATASET
+  - QUANTA_SWEBENCH_RUN_ID
+deliberate_hold: null
+notes: |
+  Apple Silicon recipe (memory `swebench-arm64-grading-recipe`):
+  `namespace=swebench` (prebuilt) + `max_workers=1` + local dataset is
+  the ONLY known-working configuration on arm64. `namespace=none` (local
+  build) hits x86 conda SIGTRAP (exit 133); HF dataset id hangs. The
+  argv argument set above is verbatim — changing any of it requires a
+  full re-validation pass.

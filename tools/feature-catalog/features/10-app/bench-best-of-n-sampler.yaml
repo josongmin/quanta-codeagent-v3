@@ -1,0 +1,38 @@
+id: bench-best-of-n-sampler
+title: bench — Best-of-N sampler (N trajectories × patchVote)
+section: 10
+subsystem: Bench harness — sampling layer
+order: 40
+maturity: L4
+status: stable
+purpose: |
+  Pure module that runs N independent agent trajectories against a single
+  bench instance and picks one — without leaking sampling concerns into
+  the agent core (RFC §1.2: no closed-alphabet / orchestration creep).
+  RFC §13 Q4 design decision: Best-of-N lives INSIDE `apps/bench`, NOT a
+  new top-level slice and NOT inside `agent/`. Rationale: it is a pure
+  app-composition concern (run N, vote on the winner). The agent loop
+  stays single-trajectory and ignorant of sampling. Voting strategy:
+  pick the unanimous/majority patch when multiple attempts produce
+  byte-identical or semantically-identical patches (patchVote); fall
+  back to first-pass on ties or single-attempt N=1. Sampler is the only
+  module that materializes N trajectories per instance — every other
+  bench module treats N=1 as the contract.
+evidence:
+  code:
+    - src/apps/bench/sampler.ts
+    - src/apps/bench/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/sampler.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Targets RFC §1.1 (single trajectory baseline ≈ 50% → Best-of-N upper
+  bound ≈ 70%). Pure: no `process.env` reads, no I/O, no `process.exit`;
+  the caller (`bench/index.ts`) decides whether/how many attempts to run.
+  Slice: `src/apps/bench` only — does not import `@/agent` directly
+  beyond the runner function it is handed.

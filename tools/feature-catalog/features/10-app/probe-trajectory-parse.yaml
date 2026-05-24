@@ -1,0 +1,37 @@
+id: probe-trajectory-parse
+title: probe — trajectory JSONL + run-dir loader (forward-compat, never throws)
+section: 10
+subsystem: Probe (trajectory inspector) — input adapter
+order: 32
+maturity: L4
+status: stable
+purpose: |
+  Pure deterministic loader for the trajectory JSONL + bench run-dir
+  conventions. Trajectory JSONL is the single source of truth (RFC §3
+  원칙1); probe is READ-ONLY (RFC §1.2 / §3 원칙8). The loader:
+    - NEVER mutates inputs / writes files / throws on malformed JSON
+    - Unparseable lines are COUNTED + surfaced (forward-compat: unknown
+      future schema MUST degrade, not crash — RFC §3.7)
+    - Returns `{ events, attempts, runSummary, fileStats }` typed shape;
+      attempts are derived from the trajectory's per-instance scoping
+    - Handles both run-dir (multiple attempt files + report.json) AND
+      single trajectory.jsonl path forms
+  Exit-code contract: exit 0 on success / exit 1 ONLY on usage error
+  (missing path / bad argument).
+evidence:
+  code:
+    - src/apps/probe/parse.ts
+  adrs: [10]
+  tests:
+    unit:
+      - tests/unit/probe-parse.test.ts
+    integration:
+      - tests/integration/probe.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Forward-compat is a HARD invariant — adding a new TrajectoryEvent kind
+  in `@/shared` MUST not break older probes, and adding a new event field
+  here MUST not break older trajectories. Both directions are covered by
+  probe-parse.test.ts golden corpora.

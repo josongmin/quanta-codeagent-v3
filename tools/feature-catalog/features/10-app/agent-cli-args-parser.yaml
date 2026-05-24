@@ -1,0 +1,43 @@
+id: agent-cli-args-parser
+title: agent — pure argv parser (mode-discriminated, env-free)
+section: 10
+subsystem: Unified Agent Runtime — Phase 4 entry
+order: 50
+maturity: L4
+status: stable
+purpose: |
+  `parseAgentArgs(readonly string[])` — pure argv → typed `AgentArgs`
+  discriminated by `mode` (`interactive | headless | batch | ci-bot |
+  ide | daemon`). RFC may-22-unified-agent-runtime / Phase 4. Hard
+  invariants:
+    - NO I/O, NO `process.env` reads, NO silent defaults
+    - Defaults flow from `BUDGET_PRESETS` via `assembleAgentConfig`,
+      never from this file
+    - PROPOSITIONAL rules — a flag is either KNOWN or unknown; a value
+      either starts with `--` (treated as missing) or doesn't. NO
+      heuristics, NO threshold-based "if too many args" checks
+    - Errors throw `AgentArgsError` so the caller (`./index.ts`) can
+      map to a usage exit code (`64 EX_USAGE`)
+  Lever ownership: `mode + dials + exhaustion` route into `AssembleRequest`;
+  mode-specific positional fields (`prompt` / `corpus` / `instance` /
+  `pr`) are consumed by the corresponding `./mode-presets/<mode>.ts`
+  worker. Closed `ProviderToken` union (`"openai" | "anthropic"`) keeps
+  the surface narrow.
+evidence:
+  code:
+    - src/apps/agent/cli-args.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/agent/cli-args.test.ts
+      - tests/unit/apps/agent/anti-regression-invariants.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  No-heuristic discipline (memory `no-heuristics-only-validated`): every
+  decision in this parser is a structural propositional check. Errors
+  are TYPED (`AgentArgsError`) — never a bare `throw new Error`. The
+  exit-code routing happens in `index.ts`, which keeps cli-args free of
+  process / exit concerns.

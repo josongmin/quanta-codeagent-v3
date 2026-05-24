@@ -1,0 +1,52 @@
+id: slash-snapshot
+title: /snapshot — Shadow-ODB snapshot list / rewind / partial restore
+section: 10
+subsystem: REPL panels (R10) — shadow-store UX
+order: 27
+maturity: L4
+status: new
+purpose: |
+  CLI surface over the `ShadowOdb` port + the three `shadow_*` tools
+  (ADR-0122, Hermes Agent `/rollback` parity). Lets the operator browse,
+  preview, and restore workspace snapshots without round-tripping through
+  the model. Sub-commands:
+    - `/snapshot`                — list snapshots newest-first (numbered,
+                                   sha + ISO timestamp) via `listSnapshots`.
+    - `/snapshot <N>`            — rewind to snapshot #N (1-based ordinal).
+                                   Routes through the `shadow_rewind` tool
+                                   body which is HITL `always-confirm` — the
+                                   surface shows a confirmation line; re-run
+                                   with `--yes` to commit (mirrors `/rewind`
+                                   confirmation protocol).
+    - `/snapshot <N> <file>`     — restore ONLY `<file>` from snapshot #N
+                                   via `shadow_restore_partial`.
+  Pure surface — never calls a snapshot APIs directly except through the
+  tool body (so HITL gating + audit trail are unified with model-driven
+  invocations).
+evidence:
+  code:
+    - src/apps/cli/snapshot-cmd.ts
+  adrs: [122]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    No standalone snapshot-cmd unit test yet; coverage is via the broader
+    `shadow-odb-rewind-extensions-hellgate.test.ts` and `shadow-odb-hellgate
+    .test.ts` (tool-body level). The pure helpers (`parseSnapshotArgs`,
+    `renderSnapshotList`, `pickByOrdinal`) are unit-testable in isolation
+    and should get a focused suite.
+  promotion_path: |
+    Add `tests/unit/cli/snapshot-cmd.test.ts` exercising parse + render +
+    pickByOrdinal + dispatch with a stub ShadowOdb port; sample bad-ordinal
+    + missing-file + missing-yes paths.
+notes: |
+  Slice: `src/apps/cli` consuming `@/tool/shadow` indirectly via the tool
+  dispatch — the surface itself does not import `ShadowOdb` directly so the
+  HITL + audit invariants are byte-identical to a model-driven `shadow_*`
+  tool call. Distinct from `/rewind`: that command rewinds CONVERSATION
+  history (message-id), while `/snapshot` rewinds WORKSPACE state (file
+  tree). Both can be combined for full session restore.

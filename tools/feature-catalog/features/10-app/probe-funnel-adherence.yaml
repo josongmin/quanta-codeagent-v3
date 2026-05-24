@@ -1,0 +1,37 @@
+id: probe-funnel-adherence
+title: probe — fault-localization 3-stage funnel adherence checker
+section: 10
+subsystem: Probe (trajectory inspector) — `bun run probe --funnel`
+order: 30
+maturity: L4
+status: stable
+purpose: |
+  NON-authoritative analyzer that scores a trajectory's adherence to the
+  `localize-fault` skill's 3-stage funnel:
+    Stage 1 FILE          → localize / grep / glob / file_tree_summary / git_churn
+    Stage 2 FUNCTION      → read / lsp_document_symbol / lsp_hover
+    Stage 3 EDIT-LOCATION → lsp_references / lsp_definition / parse_test_failure
+  Counts per-stage tool invocations from `TrajectoryEvent`s, reports
+  ordering compliance + skipped stages, and surfaces deviations as hedged
+  hints (no verdict, no certainty). Pure — events in, structured report
+  out. Wired through `--funnel` flag of the `bun run probe` CLI; runs
+  alongside the other read-only views (`--failed`, `--slow`, `--cost`).
+evidence:
+  code:
+    - src/apps/probe/funnel.ts
+  adrs: [10]
+  tests:
+    unit:
+      - tests/unit/probe-funnel.test.ts
+    integration:
+      - tests/integration/probe.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice discipline (RFC §1.2 / §3 원칙8): probe is an INSPECTOR — never a
+  judge. The funnel scorer returns hypotheses + raw evidence excerpts so a
+  human verifies; confidence is capped well below 1.0. Distinct from the
+  loop-side `localize-fault` skill which is a PROMPT-side guideline (model
+  may or may not follow); funnel adherence measures post-hoc whether the
+  model actually did.

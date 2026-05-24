@@ -1,0 +1,38 @@
+id: bench-observe-non-agent-evidence
+title: bench — non-agent evidence emitter (sandbox / patch_generated / verify)
+section: 10
+subsystem: Bench harness — trajectory append adapter
+order: 46
+maturity: L4
+status: stable
+purpose: |
+  Bench is the producer of *non-agent* trajectory evidence: `sandbox`
+  events, `patch_generated`, `verify` (pre/post-verify outcomes). The
+  agent loop's `AgentEvent` stream is normalized by the stream-slice
+  `JsonlRecorder` (RFC-0002 Wave B). The bench-specific kinds are NOT
+  `AgentEvent`s and CANNOT flow through the recorder's `emit`; this
+  module constructs them with `@/shared` `makeEvent` and appends a JSON
+  line per event to the SAME per-attempt trajectory file the agent
+  emits into.
+  Single ownership: bench is the ONLY producer of these three kinds —
+  no agent code is allowed to emit `sandbox`/`patch_generated`/`verify`
+  events. Pure derivation from the bench driver's local state (sandbox
+  paths, captured diff, verdict).
+evidence:
+  code:
+    - src/apps/bench/observe.ts
+    - src/apps/bench/eval/driver.ts
+  adrs: [10]
+  tests:
+    unit:
+      - tests/unit/bench-write-artifacts.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Single per-attempt trajectory file means the operator can `probe` one
+  file and see the FULL story (agent steps + bench's verify outcome +
+  patch + sandbox lifecycle) without joining. Forward-compat: new
+  trajectory kinds added to `@/shared` are visible to probe immediately;
+  bench can append new kinds without touching the agent loop.
