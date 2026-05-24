@@ -1,0 +1,36 @@
+id: session-import-export
+title: Session import / export primitive
+section: 10
+subsystem: 세션 영속화
+order: 137
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:session", "tier:adapter"]
+purpose: |
+  Versioned wire-stable `SessionExportEnvelope` (v1) + pure serialize/import
+  primitives + FS adapter helpers. Carries SavedSession + optional sidecar
+  (ConversationCheckpointStore / BudgetLedger / PlanQueueStore serialized
+  strings). Import validates version + shape + emits warnings on
+  platform/quantaVersion delta; strictVersion mode throws on mismatch.
+  Deep-clone on round-trip for caller-mutation isolation.
+evidence:
+  code:
+    - src/session/import-export.ts
+    - src/session/import-export-fs.ts
+  adrs: [157]
+  tests:
+    unit:
+      - tests/unit/session-import-export-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pure port + FS adapter split — browser/IPC callers don't pull `node:fs`.
+  Sidecar carries pre-serialized strings (slice never sees subsystem internals).
+  Default-OFF; caller wires (e.g. `/session export` slash, CI replay).

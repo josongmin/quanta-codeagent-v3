@@ -8,13 +8,13 @@
  */
 
 export {
-  PersistenceError,
-  type PersistedHandle,
-  type PersistedSubagentStatus,
-  type PersistentSchedulerStore,
-} from "./types"
-export { defaultJsonlSchedulerStore, type JsonlStoreOpts } from "./jsonl-store"
-export {
   type HydratingSchedulerOpts,
   persistentBackgroundSubagentScheduler,
 } from "./hydrating-scheduler"
+export { defaultJsonlSchedulerStore, type JsonlStoreOpts } from "./jsonl-store"
+export {
+  type PersistedHandle,
+  type PersistedSubagentStatus,
+  PersistenceError,
+  type PersistentSchedulerStore,
+} from "./types"

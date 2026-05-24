@@ -22,17 +22,13 @@
  * runner to the persisted spec) is a separate ADR.
  */
 
-import {
-  type BackgroundSubagentScheduler,
-  type SubagentHandleId,
-  type SubagentResult,
-  type SubagentSpec,
-} from "../subagent-background"
 import type {
-  PersistedHandle,
-  PersistedSubagentStatus,
-  PersistentSchedulerStore,
-} from "./types"
+  BackgroundSubagentScheduler,
+  SubagentHandleId,
+  SubagentResult,
+  SubagentSpec,
+} from "../subagent-background"
+import type { PersistedHandle, PersistedSubagentStatus, PersistentSchedulerStore } from "./types"
 
 export interface HydratingSchedulerOpts {
   /** The in-memory ADR-0130 scheduler we wrap. The wrapper does NOT mutate
@@ -98,10 +94,7 @@ const liveToPersisted = (
 /** Reclassify a persisted `"running"` handle whose PID is gone (or never
  *  set) into `"interrupted"`. Sets a terminal-ish `endedAt = now()` and a
  *  short error message. */
-const reclassifyAsInterrupted = (
-  h: PersistedHandle,
-  tNow: number,
-): PersistedHandle => ({
+const reclassifyAsInterrupted = (h: PersistedHandle, tNow: number): PersistedHandle => ({
   ...h,
   status: "interrupted",
   endedAt: tNow,

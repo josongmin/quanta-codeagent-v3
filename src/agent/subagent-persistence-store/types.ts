@@ -18,10 +18,7 @@
  * conversation seed) — is deferred.
  */
 
-import type {
-  SubagentSpec,
-  SubagentStatus as BaseSubagentStatus,
-} from "../subagent-background"
+import type { SubagentStatus as BaseSubagentStatus, SubagentSpec } from "../subagent-background"
 
 /** Extended status union. ADR-0130's scheduler has 4 arms (running, completed,
  *  failed, cancelled). Persistence adds **"interrupted"** for handles whose

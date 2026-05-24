@@ -23,14 +23,10 @@
  */
 
 import { createHash } from "node:crypto"
-import { appendFile, mkdir, readFile, readdir, rm } from "node:fs/promises"
+import { appendFile, mkdir, readdir, readFile, rm } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import {
-  PersistenceError,
-  type PersistedHandle,
-  type PersistentSchedulerStore,
-} from "./types"
+import { type PersistedHandle, PersistenceError, type PersistentSchedulerStore } from "./types"
 
 /** Length of the hex prefix used as the per-workspace directory name. Matches
  *  shadow-odb's 16-hex / 64-bit policy. */
@@ -90,11 +86,7 @@ const handleFile = (workspaceDirPath: string, id: string): string => {
 /* ------------------------------------------------------------------ */
 
 const isPersistedStatus = (s: unknown): s is PersistedHandle["status"] =>
-  s === "running" ||
-  s === "completed" ||
-  s === "failed" ||
-  s === "cancelled" ||
-  s === "interrupted"
+  s === "running" || s === "completed" || s === "failed" || s === "cancelled" || s === "interrupted"
 
 /** Reconstruct a {@link PersistedHandle} from a parsed JSON object, OMITTING
  *  absent optional fields (exactOptionalPropertyTypes). Returns `undefined`
@@ -195,10 +187,7 @@ const readLatestHandle = async (path: string): Promise<PersistedHandle | null> =
     }
     const h = parseHandle(parsed)
     if (h === undefined) {
-      throw new PersistenceError(
-        "parse-failed",
-        `last-line shape mismatch in ${path}`,
-      )
+      throw new PersistenceError("parse-failed", `last-line shape mismatch in ${path}`)
     }
     return h
   }
@@ -209,9 +198,7 @@ const readLatestHandle = async (path: string): Promise<PersistedHandle | null> =
 /* factory                                                             */
 /* ------------------------------------------------------------------ */
 
-export const defaultJsonlSchedulerStore = (
-  opts?: JsonlStoreOpts,
-): PersistentSchedulerStore => {
+export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSchedulerStore => {
   const baseDir = resolveBaseDir(opts)
   const hasher = opts?.workspaceHasher ?? defaultWorkspaceHash
 
@@ -242,10 +229,7 @@ export const defaultJsonlSchedulerStore = (
         await appendFile(target, line, "utf8")
       } catch (e: unknown) {
         if (e instanceof PersistenceError) throw e
-        throw new PersistenceError(
-          "io-failed",
-          `save ${handle.id}: ${(e as Error).message}`,
-        )
+        throw new PersistenceError("io-failed", `save ${handle.id}: ${(e as Error).message}`)
       }
     },
 
@@ -329,10 +313,7 @@ export const defaultJsonlSchedulerStore = (
             await rm(path, { force: true })
             removed += 1
           } catch (e: unknown) {
-            throw new PersistenceError(
-              "io-failed",
-              `prune rm ${path}: ${(e as Error).message}`,
-            )
+            throw new PersistenceError("io-failed", `prune rm ${path}: ${(e as Error).message}`)
           }
         }
       }
