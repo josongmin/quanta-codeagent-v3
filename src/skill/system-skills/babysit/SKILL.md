@@ -74,3 +74,18 @@ If none of these apply, do not silently pivot a normal task into a babysit.
 - `intent-conflict` — the PR has drifted from user intent; STOPPED + asked.
 
 The string `complete` is forbidden until the PR is actually `merged`.
+
+## Manual-resume via the proactive reactor (ADR-0132)
+
+When `QUANTA_PROACTIVE_REACTOR=1` is set, the CI / PR-comment watchers
+(`src/reactor/`) can wake the agent autonomously with a `ci_completion` or
+`pr_comment` trigger. The `/babysit` slash command remains the **manual
+fallback**: it maps to the same `TriggerReason` union member
+(`manual_resume`), so the simulated-message audit suffix
+(`[reason=<r> evidence=<kind>=<value>]`) is uniform whether the wake came
+from a cron poll or from a human typing `/babysit`. Babysit's loop body is
+unchanged — only the entry seam differs.
+
+The reactor's three hard guards (env flag, 30s quiet window, prior turn
+outcome ≠ `"fail"`) apply to BOTH paths. A manual `/babysit` invocation
+inside the quiet window is queued by the surface, not silently dropped.
