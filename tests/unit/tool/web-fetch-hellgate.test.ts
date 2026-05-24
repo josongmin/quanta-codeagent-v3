@@ -14,7 +14,7 @@
 
 import { describe, expect, test } from "bun:test"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
-import { htmlToMarkdown, WEB_FETCH_MAX_BYTES_CEILING, webFetchTool } from "@/tool/web"
+import { htmlToMarkdown, turndown, WEB_FETCH_MAX_BYTES_CEILING, webFetchTool } from "@/tool/web"
 
 /* ------------------------------------------------------------------ */
 /* harness                                                             */
@@ -226,7 +226,7 @@ describe("E. htmlToMarkdown", () => {
     expect(out).not.toContain("color:red")
     expect(out).toContain("visible")
   })
-  test("20c. entities decoded (turndown-backed, ADR-0183 — domino DOM decodes natively)", () => {
+  test("20c. entities decoded (turndown-backed, ADR-0186 — domino DOM decodes natively)", () => {
     // turndown parses entities through its underlying HTML DOM; the
     // resulting markdown contains the decoded characters. The prior
     // self-impl asserted a literal byte-for-byte string `'<a>&"'`, but
@@ -244,7 +244,7 @@ describe("E. htmlToMarkdown", () => {
     // post-processing step still guarantees the *invariant* (no triple+
     // newline run); the exact bytes between `a` and `b` are an
     // internal detail. The OLD bytes-exact form (`'a\n\nb'`) is no
-    // longer a public contract — see ADR-0183.
+    // longer a public contract — see ADR-0186.
     const out = htmlToMarkdown("a\n\n\n\n\nb")
     expect(out).not.toContain("\n\n\n")
     expect(out).toContain("a")
@@ -252,6 +252,34 @@ describe("E. htmlToMarkdown", () => {
   })
   test("20e. <code>x</code> → backtick", () => {
     expect(htmlToMarkdown("<code>x</code>")).toContain("`x`")
+  })
+  test("20f. <h2>Sub</h2> → '## Sub'", () => {
+    expect(htmlToMarkdown("<h2>Sub</h2>")).toContain("## Sub")
+  })
+  test("20g. <noscript> / <iframe> stripped", () => {
+    expect(htmlToMarkdown("<noscript>FALLBACK</noscript>visible")).not.toContain("FALLBACK")
+    expect(htmlToMarkdown("<iframe>FRAMED</iframe>visible")).not.toContain("FRAMED")
+  })
+  test("20h. <pre><code> → fenced block", () => {
+    const out = htmlToMarkdown("<pre><code>multi\nline</code></pre>")
+    expect(out).toContain("```")
+    expect(out).toContain("multi")
+  })
+  test("20i. <ul><li> list + <strong>/<em>", () => {
+    const list = htmlToMarkdown("<ul><li>a</li><li>b</li></ul>")
+    expect(list).toMatch(/^-\s+a$/m)
+    const emph = htmlToMarkdown("<strong>bold</strong> <em>it</em>")
+    expect(emph).toContain("**bold**")
+    expect(emph).toContain("_it_")
+  })
+  test("20j. trim + empty string", () => {
+    const out = htmlToMarkdown("   <p>hello</p>   ")
+    expect(out.startsWith(" ")).toBe(false)
+    expect(htmlToMarkdown("")).toBe("")
+  })
+  test("20k. turndown singleton exported", () => {
+    expect(typeof turndown.turndown).toBe("function")
+    expect(typeof turndown.addRule).toBe("function")
   })
 })
 

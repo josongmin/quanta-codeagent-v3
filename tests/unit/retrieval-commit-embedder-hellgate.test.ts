@@ -10,6 +10,7 @@
  *
  * 12 adversarial cases.
  */
+
 import { describe, expect, test } from "bun:test"
 import {
   type CommitNote,
@@ -183,5 +184,96 @@ describe("commit-embedder hellgate", () => {
     await ce2.recent({ limit: 2, cwd: "/" })
     // New CommitEmbedder instance has fresh cache → both shas embed.
     expect(e.calls[0]?.length).toBe(2)
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/* merged from retrieval-commit-embedder.test.ts */
+/* ------------------------------------------------------------------ */
+
+const countingEmbed = (): { port: EmbeddingPort; calls: string[][] } => {
+  const calls: string[][] = []
+  return {
+    calls,
+    port: {
+      vendor: "openai",
+      model: "test",
+      async embed(texts) {
+        calls.push([...texts])
+        return texts.map((t) => [t.length, calls.length])
+      },
+    },
+  }
+}
+
+describe("createCommitEmbedder", () => {
+  test("empty git log returns []", async () => {
+    const g = makeGit([])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port })
+    expect(await ce.recent({ limit: 10, cwd: "/" })).toEqual([])
+    expect(e.calls.length).toBe(0)
+  })
+
+  test("first call embeds all", async () => {
+    const g = makeGit([note("a", "fix x"), note("b", "feat y", "body line")])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port })
+    const out = await ce.recent({ limit: 10, cwd: "/" })
+    expect(out.length).toBe(2)
+    expect(e.calls.length).toBe(1)
+    expect(e.calls[0]?.length).toBe(2)
+  })
+
+  test("second call uses cache for repeated shas", async () => {
+    const g = makeGit([note("a", "fix x"), note("b", "feat y")])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port })
+    await ce.recent({ limit: 10, cwd: "/" })
+    // Same instance, same shas → cache covers everything.
+    e.calls.length = 0
+    await ce.recent({ limit: 10, cwd: "/" })
+    expect(e.calls.length).toBe(0) // both shas cached
+  })
+
+  test("body-empty commit embeds subject only", async () => {
+    const g = makeGit([note("a", "only-subject")])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port })
+    await ce.recent({ limit: 1, cwd: "/" })
+    expect(e.calls[0]?.[0]).toBe("only-subject")
+  })
+
+  test("body-present commit formats as subject\\n\\nbody", async () => {
+    const g = makeGit([note("a", "subj", "the body")])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port })
+    await ce.recent({ limit: 1, cwd: "/" })
+    expect(e.calls[0]?.[0]).toBe("subj\n\nthe body")
+  })
+
+  test("output preserves git log order", async () => {
+    const g = makeGit([note("c", "third"), note("a", "first"), note("b", "second")])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port })
+    const out = await ce.recent({ limit: 3, cwd: "/" })
+    expect(out.map((x) => x.sha)).toEqual(["c", "a", "b"])
+  })
+
+  test("cacheSize grows after first call", async () => {
+    const g = makeGit([note("a", "x"), note("b", "y")])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port })
+    expect(ce.cacheSize()).toBe(0)
+    await ce.recent({ limit: 10, cwd: "/" })
+    expect(ce.cacheSize()).toBe(2)
+  })
+
+  test("LRU evicts oldest beyond cacheMax", async () => {
+    const g = makeGit([note("a", "x"), note("b", "y"), note("c", "z")])
+    const e = countingEmbed()
+    const ce = createCommitEmbedder({ git: g, embed: e.port, cacheMax: 2 })
+    await ce.recent({ limit: 10, cwd: "/" })
+    expect(ce.cacheSize()).toBe(2) // capped
   })
 })
