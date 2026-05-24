@@ -113,9 +113,59 @@ const consultLocalizePhase = (call: ToolUseBlock, config: AgentConfig): Dispatch
   return deny(call.id, reason, "localize-phase-blocked")
 }
 
-/** Run one tool call end to end: gates → execute → normalize errors.
- *  Tool/permission/plan/hook failures become error tool_results (the model
- *  recovers); only the loop's own fatal conditions propagate.
+/**
+ * Run one tool call end to end: gates → execute → normalize errors.
+ * Tool/permission/plan/hook failures become error tool_results (the model
+ * recovers); only the loop's own fatal conditions propagate.
+ *
+ * **CANONICAL ORDERING (LOCKED — see `permission-hook-ordering.test.ts`)**
+ *
+ * Pre-execute pipeline (all in `dispatchToolInner` + `runAdmissibilityGate`):
+ *
+ *   0. registry.has(name) ......... unknown tool → deny ("Unknown tool: …")
+ *   1. dispatch-seam guard ........ plan-mode mutating tools → deny
+ *                                   (ADR-0036; outer gate, runs in dispatch.ts)
+ *   2. dedup gate ................. T3 anti-thrash short-circuit (default-OFF)
+ *   3. localize-phase gate ........ Agentless Phase-1 mutating block (default-OFF)
+ *   4. mode-posture block ......... plan/review/audit mode (admissibility-gate §1)
+ *   5. earlyHardDeny .............. HARD_DENY pulled ahead when ANY allow-capable
+ *                                   bypass is wired (rules/reviewer/patternStore)
+ *                                   so they cannot route around the denylist
+ *                                   (admissibility-gate §2; AUDIT-FIX)
+ *   6. pattern auto-pass .......... ADR-0061 rememberPatterns (default-OFF)
+ *                                   → on auto-pass, fires `pre_tool_use` hook last
+ *   7. prefix-rule DSL gate ....... ADR-0031 (default-OFF)
+ *                                   allow→hook, deny→terminal, ask→reviewer
+ *   8. HITL 4-tier gate ........... ADR-0047 (default-OFF when hitl disabled)
+ *                                   hand-off→deny, always-confirm→onConfirm,
+ *                                   none→hook, pre-approval→fallthrough
+ *   9. permission stack ........... ADR-0046 per-thread/per-host/post-denial
+ *                                   (default-OFF when stack.enabled !== true)
+ *  10. mode policy (legacy) ....... evaluate() + classifier for auto-mode
+ *                                   contains HARD_DENY (for paths that DIDN'T
+ *                                   trigger earlyHardDeny — kept for parity)
+ *  11. pre_tool_use hook ......... ADR-0133 (LAST gate, can deny OR rewrite input)
+ *
+ * Execute: `execute()` runs the (possibly rewritten) call via the registry.
+ *
+ * Post-execute pipeline (`emitPostToolUseHooks`):
+ *  12. post_tool_use hook ......... fires ALWAYS (ok or !ok) — audit symmetry
+ *  13. post_tool_use_failure hook . fires ONLY when ok:false — recovery channel
+ *
+ * **Invariants** (enforced by tests/unit/permission-hook-ordering.test.ts):
+ *  · Permission denial (steps 4-10) ⇒ `pre_tool_use` hook NEVER fires.
+ *  · HARD_DENY ⇒ permission AND hook both skipped (steps 5/10).
+ *  · Plan mode (step 1 or 4) ⇒ permission AND hook skipped for mutating tools.
+ *  · Hook `updatedInput` (step 11) is applied AFTER permission/HARD_DENY ran
+ *    on the ORIGINAL input — intentional: a hook is operator-authored local
+ *    code at the same trust level as the permission config itself. See
+ *    `hooks.ts` SECURITY note. There is NO re-permission check on the rewrite.
+ *  · Hook deny (step 11) ⇒ `execute()` not called ⇒ post-hooks (12/13) skipped.
+ *  · post_tool_use fires before post_tool_use_failure when both apply (12 → 13).
+ *  · A throwing hook never breaks dispatch (HookBus isolates; dispatch wraps
+ *    post_tool_use_failure emit in try/catch as belt-and-braces).
+ *  · Concurrent dispatches use independent admissibility-gate state — order
+ *    is per-call, not global.
  *
  *  `workingState` is the optional session-scoped Codex memory L3 handle
  *  (ADR-0021). When the agent loop has built one (`AgentConfig.workingState?.
@@ -125,7 +175,8 @@ const consultLocalizePhase = (call: ToolUseBlock, config: AgentConfig): Dispatch
  *  callers without the opt-in are byte-identical. The closure pattern
  *  `createUpdateWorkingStateTool(handle)` continues to work — `ctx.workingState`
  *  is the second seam so future tools (or callers that don't capture via
- *  closure) can read the same handle. */
+ *  closure) can read the same handle.
+ */
 export const dispatchTool = async (
   call: ToolUseBlock,
   config: AgentConfig,
