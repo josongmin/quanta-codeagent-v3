@@ -14,7 +14,7 @@ labels: ["surface:core"]
 depends_on: [model-swap-retry]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS", "QUANTA_MODEL", "QUANTA_PREFS_HOME", "QUANTA_PROVIDER"]
+  env: ["QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS", "QUANTA_MODEL", "QUANTA_PREFS_HOME"]
 purpose: |
   `createLLM(provider, opts)` is the one factory the three app entry points
   (cli/bench/eval) call instead of duplicating `new AnthropicAdapter / new
@@ -33,6 +33,8 @@ evidence:
     - src/llm/ports.ts
     - src/llm/index.ts
     - src/llm/adapters/shared.ts
+    - src/shared/runtime-config.ts
+    - src/apps/eval/index.ts
   adrs: []
   tests:
     unit: []

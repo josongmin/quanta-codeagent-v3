@@ -18,6 +18,7 @@ purpose: "TS/Pyright → diagnostics 도구 . runAgent e2e(, 4 tests): fake Diag
 evidence:
   code:
     - src/tool/diagnostics/index.ts
+  code: [src/apps/cli/internal.ts]
   adrs: [9, 24]
   tests:
     unit:

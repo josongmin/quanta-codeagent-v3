@@ -14,7 +14,7 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_CAP_ENFORCE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
+  env: ["QUANTA_CAP_ENFORCE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
 purpose: |
   사전 호출 평면(pre-call plane)으로 모델의 tool_use 선택 자유도를 게이트.
   admissibility-gate(사후/post-call)와 직교(orthogonal): 두 평면이 같은 tool_use 경계의
@@ -52,6 +52,7 @@ evidence:
     - src/llm/adapters/anthropic.ts
     - src/llm/adapters/openai.ts
     - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
   adrs: [79]
   tests:
     unit:

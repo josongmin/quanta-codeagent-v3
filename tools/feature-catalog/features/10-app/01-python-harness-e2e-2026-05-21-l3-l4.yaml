@@ -13,10 +13,10 @@ owners: ["@songmin"]
 labels: ["surface:cli"]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_BENCH_TIMEOUT_MS", "QUANTA_MODEL", "QUANTA_OBSERVE_DIR", "QUANTA_PROVIDER", "QUANTA_REPAIR_ROUNDS", "QUANTA_RUN_ID", "QUANTA_SWEBENCH_CACHE_LEVEL", "QUANTA_SWEBENCH_CLEAN", "QUANTA_SWEBENCH_CORPUS_ROOT", "QUANTA_SWEBENCH_DATASET", "QUANTA_SWEBENCH_DATASET_NAME", "QUANTA_SWEBENCH_FORCE_REBUILD", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PYTHON", "QUANTA_SWEBENCH_PYTHON_BIN", "QUANTA_SWEBENCH_REPO_BASE_URL"]
+  env: ["QUANTA_BENCH_TIMEOUT_MS", "QUANTA_MODEL", "QUANTA_OBSERVE_DIR", "QUANTA_REPAIR_ROUNDS", "QUANTA_RUN_ID", "QUANTA_SWEBENCH_CACHE_LEVEL", "QUANTA_SWEBENCH_CLEAN", "QUANTA_SWEBENCH_CORPUS_ROOT", "QUANTA_SWEBENCH_DATASET", "QUANTA_SWEBENCH_DATASET_NAME", "QUANTA_SWEBENCH_FORCE_REBUILD", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PYTHON", "QUANTA_SWEBENCH_PYTHON_BIN", "QUANTA_SWEBENCH_REPO_BASE_URL"]
 purpose: 'corpus/sandbox runner, Best-of-N+patchVote, SWE-bench dataset 어댑터. Python harness e2e 폐쇄 — , 7 tests: PATH 앞에 tmpdir 삽입 → python/python3 stub bash 스크립트 → 실 Bun.spawn 경로 통과 → argv 전체 RS(0x1e)-separated 기록 + report.json 작성.'
 evidence:
-  code: [src/apps/bench/python-swebench.ts, src/apps/bench/index.ts]
+  code: [src/apps/bench/python-swebench.ts, src/apps/bench/index.ts, src/shared/runtime-config.ts]
   adrs: []
   tests:
     unit: []

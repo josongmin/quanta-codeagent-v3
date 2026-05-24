@@ -32,6 +32,8 @@ evidence:
     - tools/feature-catalog/prose/50-codex-non-absorption.md
     - tools/feature-catalog/prose/99-policy-non-absorption.md
     - tools/feature-catalog/render.ts
+    - src/shared/runtime-config.ts
+    - src/apps/cli/internal.ts
   adrs: [11]
   tests:
     unit:

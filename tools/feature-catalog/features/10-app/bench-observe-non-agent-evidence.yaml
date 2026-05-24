@@ -31,6 +31,8 @@ evidence:
   code:
     - src/apps/bench/observe.ts
     - src/apps/bench/eval/driver.ts
+    - src/apps/cli/internal.ts
+    - src/apps/bench/index.ts
   adrs: [10]
   tests:
     unit:

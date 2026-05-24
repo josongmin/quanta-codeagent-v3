@@ -61,6 +61,7 @@ evidence:
     - src/runner/assemble/streaming.ts
     - src/runner/assemble/tooling.ts
     - src/runner/assemble/config.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit:

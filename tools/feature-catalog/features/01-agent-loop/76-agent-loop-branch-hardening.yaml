@@ -14,7 +14,7 @@ owners: ["@songmin"]
 labels: [surface:core, tier:core]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
 purpose: |
   docs/analysis/code-agent-loop/{claude,codex,cursor}.md 3-doc gap analysis로 식별한 runAgent
   loop의 4개 결함 중 3개 shipped + 1개 deferred. Gap-1 — Provider refusal/abnormal stop:
@@ -66,6 +66,8 @@ evidence:
     - src/llm/adapters/anthropic.ts
     - src/llm/adapters/openai.ts
     - src/observability/vocabulary.ts
+    - src/apps/bench/eval/driver.ts
+    - src/shared/runtime-config.ts
   adrs: [76]
   tests:
     unit:

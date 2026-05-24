@@ -28,6 +28,7 @@ evidence:
     - src/apps/cli/internal.ts
     - src/runner/assemble/memory.ts
     - src/memory/consolidate/paths.ts
+  code: [src/apps/cli/internal.ts]
   adrs: [8]
   tests:
     unit: []

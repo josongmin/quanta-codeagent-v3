@@ -14,7 +14,7 @@ labels: ["surface:core", "tier:1", "absorbed:claude-code"]
 ui_surfaces: [cli]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_SIDE_", "QUANTA_SIDE_DEFAULT_TOOLS", "QUANTA_SIDE_MAX_TURNS"]
+  env: []
 purpose: |
   Claude Code A9 패턴 흡수: 메인 history를 오염시키지 않는 격리 agent loop. /side 슬래시
   + sideChat() 진입점이 별도 SessionWriter로 분기, 메인 envelope는 무수정. 도구는

@@ -14,7 +14,7 @@ labels: [surface:core]
 ui_surfaces: [cli]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_LIFECYCLE_PILLS", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_PILL_", "QUANTA_PILL_TASKS", "QUANTA_REJECT_LIMIT", "QUANTA_REWIND_GIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT", "QUANTA_TURN_SUMMARY"]
+  env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
 purpose: |
   Surface-supplied hook fired ONCE when a fresh session id is minted via
   `--new-session` inside the surface-AGNOSTIC `resolveResume` FSM (relocated
@@ -28,6 +28,9 @@ evidence:
     - src/runner/orchestrate/resume-fsm.ts
     - src/apps/cli/repl/resume-fsm.ts
     - src/apps/cli/repl.ts
+    - src/apps/cli/diff-preview.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/status-pills.ts
   adrs: []
   tests:
     unit: []

@@ -15,7 +15,7 @@ labels: ["surface:core", "absorbed:codex", "absorbed:cursor", "held-promotion"]
 depends_on: [memory-md-atomic-writer]
 configurable: integrated
 config_refs:
-  env: ["QUANTA_ATTRS", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 purpose: |
   Pure wiring around `runPhase1`. Converts the agent's session-end signal +
   host-injected `Phase1Port` / `Stage1StorePort` + final AgentOutcome into
@@ -38,6 +38,8 @@ evidence:
     - src/agent/loop.ts
     - src/agent/types.ts
     - src/observability/vocabulary.ts
+    - src/apps/bench/eval/driver.ts
+    - src/shared/runtime-config.ts
   adrs: [68]
   tests:
     unit:

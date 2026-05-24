@@ -27,6 +27,7 @@ evidence:
   code:
     - src/apps/cli/prompt-history.ts
     - src/apps/cli/raw-line-reader.ts
+    - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:

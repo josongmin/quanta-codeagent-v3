@@ -10,7 +10,7 @@ monitoring: integrated
 modes: [interactive]
 configurable: integrated
 config_refs:
-  env: [QUANTA_LIFECYCLE_PILLS, QUANTA_PILL_TASKS, QUANTA_PILL_FOLLOWUP, QUANTA_PILL_MCP]
+  env: []
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [queued-follow-ups, cli-status-pills]

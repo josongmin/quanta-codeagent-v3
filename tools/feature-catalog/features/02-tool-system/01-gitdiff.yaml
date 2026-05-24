@@ -22,6 +22,7 @@ evidence:
     - src/tool/git/log.ts
     - src/tool/git/blame.ts
     - src/tool/git/runner.ts
+  code: [src/apps/cli/internal.ts]
   adrs: [25]
   tests:
     unit: []
