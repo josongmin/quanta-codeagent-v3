@@ -32,6 +32,34 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     "subagent_poll",
     "subagent_await",
     "budget_status",
+    // S2 closeout: caller-wire tools added to MUTATING_TOOL_TABLE so plan-mode
+    // dispatch never trips `UnknownToolError` regardless of which AgentConfig
+    // slots are wired. Same allowlist convention as the entries above —
+    // their factories are not enumerable from this test without forcing
+    // every host port (gh runner / memory provider / branch-search isolator /
+    // subagent runner / skill loader / web search provider / image-url
+    // fetcher / user-input port) to be injected.
+    "gh_pr_view",
+    "gh_pr_list",
+    "gh_pr_blame",
+    "gh_pr_review_diff",
+    "gh_issue_view",
+    "gh_check_status",
+    "gh_pr_comment",
+    "gh_pr_create",
+    "gh_pr_auto_merge",
+    "memory_search",
+    "memory_write",
+    "memory_update",
+    "branch_search",
+    "task_output",
+    "task_stop",
+    "request_plan_exit",
+    "agent",
+    "Skill",
+    "ToolSearch",
+    "web_search",
+    "read_image_url",
   ]
   const allTools = [
     ...defaultTools.map((t) => t.name),

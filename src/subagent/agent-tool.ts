@@ -314,7 +314,12 @@ export const createAgentTool = (
       "Pass continue_from to warm-start from a prior task's findings; pass checkpoint:true " +
       "(non-isolation only) to enable interim progress at .subagent-state/<task_id>.md.",
     inputSchema: agentSchema,
-    isReadOnly: () => true,
+    // S2 fix: the previous `() => true` was a LIE — `agent` spawns a child
+    // run that owns its OWN unrestricted tool set (write/edit/bash/git/…).
+    // Treating the spawn as read-only let `inferToolTier` route it to "none"
+    // and silently bypassed plan-mode dispatch guards. The mutating effect
+    // is the child's reachable side-effect surface; classify accordingly.
+    isReadOnly: () => false,
     // Spawning a child agent has unbounded side effects via its own tools;
     // never batch concurrently with sibling calls.
     isConcurrencySafe: () => false,

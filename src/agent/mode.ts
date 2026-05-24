@@ -93,14 +93,37 @@ export type CollaborationMode = "default" | "plan"
  *     hiding a mutating side effect (process spawn, env write, network).
  *   - `git_mutating`: mutating git tools. Shipped: `git_commit` (regular +
  *     wip-checkpoint modes) and `git_branch_switch` (ADR-0053, Claude
- *     Desktop 1.7196.3 `commitWipForBranchSwitch` absorption). Read-only
- *     git tools are `git_status`/`git_log`/`git_diff`/`git_blame`.
+ *     Desktop 1.7196.3 `commitWipForBranchSwitch` absorption). Also covers
+ *     the `gh_pr_*` write surfaces — they shell out via `gh` to push
+ *     comments / open PRs / enable auto-merge, mutating the remote VCS.
+ *     Read-only git tools are `git_status`/`git_log`/`git_diff`/`git_blame`.
  *   - `network_write`: outbound network writes (none ship today — MCP/HTTP
  *     write surfaces). Reserved for the same reason as `git_mutating`.
  *   - `working_state_write`: mutates the durable working-state surface (e.g.
  *     `update_working_state`). Permitted in default mode; blocked in plan
  *     mode because plan mode's contract is to PROPOSE state changes, not
  *     commit them mid-turn.
+ *   - `memory_mutating`: writes to the durable memory layer
+ *     (`memory_write` / `memory_update`). Distinct from `working_state_write`
+ *     because memory survives turns and powers retrieval — plan mode must not
+ *     poison future recalls with PROPOSED-but-not-committed facts.
+ *   - `subagent_spawn`: spawns a child agent (`agent` tool). The child runs
+ *     its OWN unrestricted tool set; plan mode must block at the parent seam
+ *     because the spawn-time CollaborationMode does not propagate into the
+ *     fork's loop (the child would happily mutate). Mirrors `bash_mutating`'s
+ *     "cannot introspect the side effect" rationale.
+ *   - `subagent_control`: bilateral subagent control surfaces (e.g.
+ *     `task_stop` — cancels a running background subagent). Cancellation is
+ *     itself a state mutation against the child + the in-memory `TaskRegistry`;
+ *     plan mode forbids by the same "propose-not-commit" rule that blocks
+ *     `update_working_state`.
+ *   - `plan_control`: meta-control of the collaboration mode itself
+ *     (`request_plan_exit`). Asks the host to flip plan→default; the request
+ *     itself is a mutation against the mode SSOT. Allowed in default mode
+ *     (no-op there); blocked in plan mode because plan mode's exit MUST
+ *     route through the explicit developer-channel transition, not via a
+ *     model-issued tool call (otherwise the LLM could silently escape the
+ *     dispatch block — see ADR-0036 §sticky-transition).
  */
 export type MutatingToolKind =
   | "write_filesystem"
@@ -108,6 +131,10 @@ export type MutatingToolKind =
   | "git_mutating"
   | "network_write"
   | "working_state_write"
+  | "memory_mutating"
+  | "subagent_spawn"
+  | "subagent_control"
+  | "plan_control"
 
 /** Explicit per-tool classification table (ADR-0036). EVERY tool name known
  *  to the v3 registry MUST appear here — `mode-mutating-table.test.ts`
@@ -213,6 +240,65 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // Read-only budget surface (ADR-0136). Pure render of the in-memory
   // ledger; no FS / shell / network touch. Safe in plan mode.
   budget_status: null,
+  // ─── MUTATING_TOOL_TABLE drift closeout (S2) ──────────────────────────
+  // Tools that previously slipped past the explicit cross-check because they
+  // ship behind feature flags / caller-wire factories. Adding them here
+  // permanently means plan-mode dispatch never trips `UnknownToolError`
+  // regardless of which AgentConfig slots a given host wires.
+  //
+  // Read-only gh surfaces (already enumerated under their own categories;
+  // listed here for parity with the new mutating gh entries).
+  gh_pr_view: null,
+  gh_pr_list: null,
+  gh_pr_blame: null,
+  gh_pr_review_diff: null,
+  gh_issue_view: null,
+  gh_check_status: null,
+  // Mutating gh surfaces — shell out via `gh` to push remote state:
+  // comments, PR creation, auto-merge enablement. Same `git_mutating`
+  // category as `git_commit` (the seam cannot distinguish "remote VCS write"
+  // from "local VCS write" — both deserve plan-mode block by intent).
+  gh_pr_comment: "git_mutating",
+  gh_pr_create: "git_mutating",
+  gh_pr_auto_merge: "git_mutating",
+  // Memory layer (ADR-0135). `memory_search` is a read-only retrieval over the
+  // durable store; `memory_write` / `memory_update` mutate it. Plan-mode
+  // forbids writes — plan PROPOSES recall facts; it does not commit them.
+  memory_search: null,
+  memory_write: "memory_mutating",
+  memory_update: "memory_mutating",
+  // Speculative branch search (ADR-0084). Each candidate forks an entire
+  // agent run in its own workspace; the side-effect surface is exactly the
+  // shell-process surface that `bash` covers, so it inherits `bash_mutating`.
+  branch_search: "bash_mutating",
+  // Background subagent control surfaces. `task_output` polls the registry —
+  // pure read of in-memory scheduler state, safe in plan mode. `task_stop`
+  // cancels the child run, which is itself a state mutation against the
+  // child + the registry, so it blocks under the new `subagent_control` kind.
+  task_output: null,
+  task_stop: "subagent_control",
+  // Meta-control over the collaboration mode itself. Asks the host to flip
+  // plan→default; blocked in plan mode so the LLM cannot silently exit via
+  // a tool call (mode transitions must route through the explicit
+  // developer-channel directive — ADR-0036 §sticky-transition).
+  request_plan_exit: "plan_control",
+  // Sub-agent spawn — the child runs unrestricted tools; the spawn itself
+  // is mutating because the child's mutations are reachable via this call.
+  // Same rationale as `bash_mutating` ("cannot introspect the side effect").
+  agent: "subagent_spawn",
+  // Skill loader + tool-search are pure prompt/registry reads — they merely
+  // surface text from disk/in-memory tool definitions. No FS write, shell,
+  // network. Safe in plan mode.
+  Skill: null,
+  ToolSearch: null,
+  // Read-only web surfaces (ADR-0127 family). `web_fetch` is already above;
+  // `web_search` is the search-engine equivalent, returning result links +
+  // snippets. No mutation; safe in plan mode.
+  web_search: null,
+  // Read-only image ingestion from URL (ADR-0126 sibling of `read_image`).
+  // Pure HTTP GET + multimodal-block emit; no FS write, no shell. Safe in
+  // plan mode.
+  read_image_url: null,
 })
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}
