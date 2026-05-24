@@ -8,6 +8,14 @@ export {
   MAX_DXT_MANIFEST_BYTES,
   validateDxt,
 } from "./dxt-loader"
+export type { LifecycleOpts, LifecyclePolicy, LifecycleState } from "./lifecycle"
+export {
+  DEFAULT_LIFECYCLE_POLICY,
+  HEARTBEAT_PING_METHOD,
+  HEARTBEAT_PONG_METHOD,
+  LifecycleError,
+  PluginLifecycleManager,
+} from "./lifecycle"
 export type { CallOpts, PluginHostOpts } from "./plugin-host"
 export { DEFAULT_CALL_TIMEOUT_MS, PluginHost, PluginHostError } from "./plugin-host"
 export type {

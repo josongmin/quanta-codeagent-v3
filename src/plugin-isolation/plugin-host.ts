@@ -204,6 +204,13 @@ export class PluginHost {
     }
   }
 
+  /** Resolves when the underlying isolated process exits. Mirror of the
+   *  IsolatedProcess.exitPromise field; exposed so lifecycle managers can
+   *  attach exit watchers without reaching into the private `proc`. */
+  get exitPromise(): Promise<{ code: number | null; signal: string | null }> {
+    return this.proc.exitPromise
+  }
+
   /** Politely SIGTERM the child, await reaping. Idempotent — concurrent
    *  invocations all await the same exit. */
   stop(): Promise<void> {
