@@ -73,8 +73,8 @@
       "@/git/*": ["./src/git/*"],
       "@/reactor": ["./src/reactor/index.ts"],
       "@/reactor/*": ["./src/reactor/*"],
-      "@/connectors": ["./src/connectors/index.ts"],
-      "@/connectors/*": ["./src/connectors/*"]
+      "@/scheduler": ["./src/scheduler/index.ts"],
+      "@/scheduler/*": ["./src/scheduler/*"]
     }
   },
   "include": ["src", "tests", "tools"],
