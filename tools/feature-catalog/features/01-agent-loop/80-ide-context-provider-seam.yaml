@@ -5,6 +5,8 @@ subsystem: 턴 라이프사이클 — host→agent IDE 신호 (Tier-1 IDE host e
 order: 80
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:1]
 purpose: |
   IDE host (VS Code extension, MCP IDE bridge 등) 가 turn-by-turn 에디터 상태를
   모델에 보낼 수 있는 단일 진입점. 신규 `src/agent/ide-context.ts` 의 닫힌 shape

@@ -5,6 +5,8 @@ subsystem: 도구 — web search (concrete WebSearchProvider impls)
 order: 134
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   ADR-0127 landed the `web_search` tool + `WebSearchProvider` closed port but
   shipped zero concrete impls — production behavior was `ok:false "no

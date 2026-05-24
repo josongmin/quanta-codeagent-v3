@@ -5,6 +5,8 @@ subsystem: 도구 — git slice internal boundary helpers
 order: 112
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Slice-internal helpers (`safeRun` + `mutate`) that normalize the spawn
   boundary into a tagged discriminated union — every git tool's `execute()`

@@ -5,6 +5,8 @@ subsystem: 도구 — document (PDF via DocumentBlock content-block, no client l
 order: 137
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   PDF reader that ships ZERO client-side text-extraction dependency. Every
   other modern agent (Cursor / Codex / Cline) pulls `pdf-parse` / `pdfjs`

@@ -5,6 +5,8 @@ subsystem: HITL 4-tier gate (ADR-0020 / ADR-0047)
 order: 3
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: 'ADR-0020 HITL 어휘 위에 annotation registry(빌트인 + ~/.quanta/hitl-overrides.json 운영자 override)와 typed HandoffRequiredEvent UI seam을 얹는다. one-way ratchet으로 override는 tier escalate만 가능; hand-off-required는 절대 downgrade되지 않는다. AgentConfig.onHandoff 콜백으로 deny 메시지 파싱 없이 구조화된 이벤트 수신.'
 evidence:
   code:

@@ -5,6 +5,8 @@ subsystem: V4A apply_patch — storage-agnostic IO seam
 order: 5
 maturity: L4
 status: stable
+owners: ["@songmin", "team-tools"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   Patch-specific FS port (read / write / delete / rename / exists) injected
   into the V4A `applyPatch` so the applier stays pure-functional w.r.t. the

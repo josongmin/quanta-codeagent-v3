@@ -5,6 +5,8 @@ subsystem: CLI surface — assistant-text stream coloring
 order: 71
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   assistant 텍스트 스트림(델타 청크)을 라인 단위 유한상태머신으로 흘려
   inline ANSI 컬러를 입히는 painter. 상태: header(`#`+`##`+`###`) /

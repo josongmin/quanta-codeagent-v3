@@ -5,6 +5,8 @@ subsystem: Cursor 흡수 — context history 1급 surface (ADR-0075)
 order: 30
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:cursor, surface:core]
 purpose: |
   Cursor compactor 의 `summaries[]` 모방. 각 compaction 직후 `appendSummary` 로
   `ConversationSummaryEntry{fromTurnId, toTurnId, summary, ts, tokens}` 한 entry 를

@@ -5,6 +5,8 @@ subsystem: 권한 게이트 — readonly-aware deny-steer (Plane-C of ADR-0077 t
 order: 78
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Plane-C of the `phase-ttft-readonly-trio` umbrella (ADR-0077) — the
   control-plane sibling of Plane-A (phase marker, surfaced via

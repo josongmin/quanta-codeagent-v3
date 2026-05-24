@@ -5,6 +5,8 @@ subsystem: 도구 — git moved-code (ADR-0109)
 order: 98
 maturity: L4
 status: new
+owners: ["@songmin", "team-tools"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   Surfaces the pure moved-code classifier (ADR-0109 — normalize + similarity
   + parse-unified-diff) as a typed first-class git tool so the

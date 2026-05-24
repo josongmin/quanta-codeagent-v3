@@ -5,6 +5,8 @@ subsystem: 코어 루프 dispatch seam
 order: 207
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   ADR-0036 (Cluster D Feature 1) — `ToolRegistry.run()` 직전에 호출되는
   pure 함수로, 활성 collaboration mode (default / plan) 하에서 해당 tool 호출이

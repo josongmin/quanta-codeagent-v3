@@ -5,6 +5,8 @@ subsystem: 권한 스택 (ADR-0046)
 order: 10
 maturity: L4
 status: new
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |
   **Thread-level override** — 특정 sessionId(스레드)에 대해 sandboxPolicy +
   approvalPolicy + approvalsReviewer를 명시 지정한다. 한 스레드는 read-only,

@@ -5,6 +5,8 @@ subsystem: 유휴/거부 모니터 (Cursor 3.2 §4.1/§4.2/§5 흡수)
 order: 113
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:core, tier:core]
 purpose: |
   Cursor 3.2 §4.1/§4.2/§5 패턴 흡수: idle-monitor + snooze + reject-counter. 60초 무입력
   시 자동 suppress(추가 LLM 호출 정지), /snooze 슬래시로 5분 동안 알림/턴 진행 일시정지

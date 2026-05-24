@@ -5,6 +5,8 @@ subsystem: 턴 라이프사이클 — 구조적 정지 사유 (Cursor 흡수, AD
 order: 67
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:cursor, surface:core, tier:core]
 purpose: |
   Cursor stop_category 흡수 — 레거시 4-element StopReason을 보완하는 3-layer 구조적 정지
   사유: kind(completed|max_turns|interrupted|failed|needs_user_approval) + 닫힌

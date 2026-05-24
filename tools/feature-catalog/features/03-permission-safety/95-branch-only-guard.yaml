@@ -5,6 +5,8 @@ subsystem: 권한 — git-write 모드 게이트 (RFC may-22 ci-bot mode)
 order: 95
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Propositional check on a shell command — is this operation forbidden by the
   `gitWrite: { kind: "branch-only"; protectedBranches: string[] }` lever?

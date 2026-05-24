@@ -5,6 +5,8 @@ subsystem: 턴 라이프사이클 — 3-plane 구조적 신호 (ADR-0077)
 order: 77
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   하나의 PR로 3개의 직교 신호를 흡수 — 각각 다른 plane(data / observability /
   control)에서 누락된 declared 답을 구조적으로 확보. 모든 의사결정이 producer가

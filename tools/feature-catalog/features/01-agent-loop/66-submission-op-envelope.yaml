@@ -5,6 +5,8 @@ subsystem: 턴 라이프사이클 — host→agent 타입드 입력 (Codex 흡�
 order: 66
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core]
 purpose: |
   Codex `Submission { id; op }` / `Op` discriminated union 흡수. host→agent 입력을
   6-variant 닫힌 union으로 모델링: user_input / user_input_with_turn_context /

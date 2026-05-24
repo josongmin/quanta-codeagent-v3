@@ -5,6 +5,8 @@ subsystem: 권한 스택 (ADR-0046)
 order: 11
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   **Host-level default** — hostId(SSH_CONNECTION 기반 결정론적 식별자,
   부재 시 localhost) 단위로 full-access / read-only / custom 기본값을 잡는다.

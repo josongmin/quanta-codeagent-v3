@@ -5,6 +5,8 @@ subsystem: 코드실행 탈옥 벡터 차단 (Cursor cursorsandbox 흡수, ADR-0
 order: 91
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:cursor, surface:cli, security-touched]
 purpose: |
   Cursor cursorsandbox의 Seatbelt write-deny-regex를 surface-agnostic 정적 detector로
   흡수 — .git/hooks·.git/config·.vscode write는 곧 임의 코드 실행(git/에디터가 auto-run)

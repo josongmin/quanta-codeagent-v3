@@ -5,6 +5,8 @@ subsystem: 에이전트 루프 — 사전 호출 tool_choice 게이트 (ADR-0079
 order: 79
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   사전 호출 평면(pre-call plane)으로 모델의 tool_use 선택 자유도를 게이트.
   admissibility-gate(사후/post-call)와 직교(orthogonal): 두 평면이 같은 tool_use 경계의

@@ -5,6 +5,8 @@ subsystem: 도구 — registry (factory / output cap / spill / output-schema)
 order: 106
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
 purpose: |
   Central per-loop registry composing every built-in and ported tool into the
   surface the dispatch seam consumes. Owns: `has` / `get` lookups, `specs()`

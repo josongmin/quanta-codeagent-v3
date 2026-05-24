@@ -5,6 +5,8 @@ subsystem: Closeout 4-rule (ADR-0017)
 order: 2
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, default-off, tier:core]
 purpose: 'Precedence rule (R3-P1): explicit fourRule:true > code-mod auto-detect > legacy 1-liner — explicit-over-implicit 원칙. 이전엔 code-mod 자동감지가 explicit opt-in을 가렸음(콜러 의도 무시).'
 evidence:
   code: [src/agent/closeout-guard.ts]

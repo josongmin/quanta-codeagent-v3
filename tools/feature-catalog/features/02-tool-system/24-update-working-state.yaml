@@ -5,6 +5,8 @@ subsystem: 메타도구 — working-state 관리 (Codex memory L3, ADR-0021)
 order: 24
 maturity: L4
 status: stable
+owners: ["@songmin", "team-memory"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   모델이 free-form per-task 스크래치패드(owner shortlist / hypothesis / blockers /
   deferred validation / next-step queue)를 유지하는 메타도구. 각 필드는 delta가 아닌

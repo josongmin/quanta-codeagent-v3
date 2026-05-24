@@ -5,6 +5,8 @@ subsystem: 압축 circuit-breaker (Tier 0)
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: CompactionBreaker 4-사이트, thrash abort [_*]
 evidence:
   code: [src/agent/compaction-breaker.ts, src/agent/compaction.ts]

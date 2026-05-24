@@ -5,6 +5,8 @@ subsystem: Same-turn 복구
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: transient backoff / PTL→compact / max_tokens / malformed / empty
 evidence:
   code: [src/agent/recovery.ts, src/agent/loop.ts]

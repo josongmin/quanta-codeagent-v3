@@ -5,6 +5,8 @@ subsystem: 도구 — read-only git surface
 order: 24
 maturity: L4
 status: stable
+owners: ["@songmin", "team-tools"]
+labels: [surface:cli]
 purpose: |
   Three first-class read-only git tools sharing the injectable `GitRunner`
   port (so tests stub `git` without spawning). (1) `git_blame` — porcelain

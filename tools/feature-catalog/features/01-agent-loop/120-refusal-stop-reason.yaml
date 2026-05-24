@@ -5,6 +5,8 @@ subsystem: Stop-category surface (ADR-0120)
 order: 120
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   Replaces the lossy generic-error supersession of provider-side refusals
   with a typed StopReason variant. extractRefusalRationale lifts the rationale

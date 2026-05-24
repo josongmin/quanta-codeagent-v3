@@ -5,6 +5,8 @@ subsystem: 이슈 텍스트 localization 힌트 (Agentless 흡수)
 order: 61
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:agentless, surface:core, default-off]
 purpose: |
   OPT-IN sentence-bounded extractor for inline expected/actual phrasing in
   issue bodies (keywords: expected / expect / actual / actually / got /

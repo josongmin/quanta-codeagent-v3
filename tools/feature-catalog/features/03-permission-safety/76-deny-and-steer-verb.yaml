@@ -5,6 +5,8 @@ subsystem: 권한 게이트 — 3-verb ConfirmDecision (Gap-4 of ADR-0076)
 order: 76
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli, held-promotion]
 purpose: |
   Gap-4 of the `agent-loop-branch-hardening` umbrella (ADR-0076). Adds a
   third verb to host confirmation — beyond `allow` / `deny`, the host can

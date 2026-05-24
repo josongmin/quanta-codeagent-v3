@@ -5,6 +5,8 @@ subsystem: Active-skills per-turn block — body 는 lazy, catalogue 만 reminde
 order: 15
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
 purpose: |
   Active-skills 카탈로그를 per-turn `<system-reminder>` 안에 `- $name — first-line`
   목록 + 4-rule 트리거 footer 로 렌더한다. Description 의 FIRST LINE 만 사용 —

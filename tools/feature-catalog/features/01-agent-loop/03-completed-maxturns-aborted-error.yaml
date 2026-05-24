@@ -5,6 +5,8 @@ subsystem: 턴 상태머신
 order: 3
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: 종료사유 completed|max_turns|aborted|error, AbortSignal 협조취소
 evidence:
   code: [src/agent/stop-category.ts, src/agent/loop.ts]

@@ -5,6 +5,8 @@ subsystem: Git 1급 도구 (ADR-0025/0105) — 머신 파싱 안전 format
 order: 24
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   `git_log` 도구가 commit 라인을 머신 파싱할 때 TAB(`\x09`) 대신 ASCII Unit
   Separator(`\x1f`, US_SEP)를 필드 구분자로 쓴다 — commit subject와 author name에

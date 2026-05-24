@@ -5,6 +5,8 @@ subsystem: 코어 mutating 도구 — edit string-replacement matching
 order: 110
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   `edit` tool's fuzzy matcher: 3-rung conservative strategy ladder. (1) exact
   delegates to `applyExactEdit` (no duplication). (2) whitespace-flexible:

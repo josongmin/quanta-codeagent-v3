@@ -5,6 +5,8 @@ subsystem: 권한 모드
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: default|acceptEdits|bypass|auto , onConfirm 콜백
 evidence:
   code: [src/permission/index.ts, src/permission/policy.ts, src/permission/per-thread-store.ts]

@@ -5,6 +5,8 @@ subsystem: 도구 — document (XLSX surface placeholder; impl deferred)
 order: 137
 maturity: L2
 status: hold
+owners: ["@songmin"]
+labels: [surface:cli, held-promotion]
 purpose: |
   Tool-surface seal for `xlsx_read` so callers can depend on the name,
   inputSchema, and READ-ONLY metadata even though `execute()` currently

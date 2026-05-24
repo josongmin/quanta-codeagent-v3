@@ -5,6 +5,8 @@ subsystem: Token estimator — 압축 threshold 게이트 입력
 order: 22
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   Threshold 게이트(`compactIfNeeded` / reactive drop-ratio guard) 입력으로 사용되는
   `estimateTokens(messages)` 휴리스틱. `blockChars` 는 ContentBlock 변종별로 분기 —

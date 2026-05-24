@@ -5,6 +5,8 @@ subsystem: FS jail (`src/storage/service.ts`)
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli, security-touched, default-off]
 purpose: FsJailError — assertPathInWorkspace/assertPathInsideBaseDir로 baseDir 밖 경로 escape 차단. state.ts 같은 no-baseDir 콜러는 pre-jail back-compat 유지 옵트아웃, cross-repo 작업).
 evidence:
   code: [src/storage/service.ts]

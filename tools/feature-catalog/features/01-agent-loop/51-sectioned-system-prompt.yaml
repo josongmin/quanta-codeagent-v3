@@ -5,6 +5,8 @@ subsystem: 시스템 프롬프트 — 4-section cache (Claude Desktop 흡수, AD
 order: 51
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   Claude Desktop 1.7196.3의 systemPromptSectionCache 패턴 흡수 — 30-50 KiB 단일 cached
   SystemBlock 대신 base + project_md + session_ctx + user_append 4-section named/byte-stable

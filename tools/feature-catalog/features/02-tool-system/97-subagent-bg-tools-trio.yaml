@@ -5,6 +5,8 @@ subsystem: 도구 — background subagent (Codex 흡수, ADR-0130)
 order: 97
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, tier:1]
 purpose: |
   Three first-class tools wrapping a `BackgroundSubagentSchedulerPort` so the
   parent loop can fork a non-blocking subagent, poll its status without

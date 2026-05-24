@@ -5,6 +5,8 @@ subsystem: Loop helper signatures (parameter bundling refactor)
 order: 81
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   `runTurn`/`streamConsume`/`applyAction`이 17-20 positional parameter로 자란 부채를
   두 readonly 번들로 정리 (R2-B P1). `TurnSession` — session-lifetime resources

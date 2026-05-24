@@ -5,6 +5,8 @@ subsystem: 시스템 prompt + per-turn reminder 합성 (ADR-0003 cache prefix)
 order: 10
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   `buildTurnContext(input)` → `{system: SystemBlock[], messages: Message[]}` 한 호출로
   static system prefix(`buildSystemPrompt` 또는 caller 주입)와 per-turn dynamic 블록을

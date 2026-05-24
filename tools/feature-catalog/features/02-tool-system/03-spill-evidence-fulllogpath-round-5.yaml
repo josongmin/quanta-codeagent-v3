@@ -5,6 +5,8 @@ subsystem: 결과 cap + disk-spill (Tier 0)
 order: 3
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: Spill → evidence.fullLogPath 라우팅 (Round 5) — registry의 post-execute 경로가 capToolOutput.spillPath를 ToolResult.evidence.fullLogPath에 머지. 이전엔 duck-typed extra-prop, 이제 타입 surface 단일 경로 — dispatch seam evidenceOf가 그대로 trajectory tool_end.fullLogPath로 평탄화.
 evidence:
   code: [src/tool/registry.ts, src/tool/output-spill.ts, src/tool/types.ts]

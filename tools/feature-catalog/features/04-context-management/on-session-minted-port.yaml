@@ -5,6 +5,8 @@ subsystem: Session-resume — surface log seam
 order: 7
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   Surface-supplied hook fired ONCE when a fresh session id is minted via
   `--new-session` inside the surface-AGNOSTIC `resolveResume` FSM (relocated

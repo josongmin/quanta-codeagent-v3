@@ -5,6 +5,8 @@ subsystem: 도구 — FS-jail unification (Slice S7)
 order: 111
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
 purpose: |
   Pre-S7, every file-reading tool rolled its own `resolveXxxPath` —
   `resolveImagePath` (`src/tool/image/read.ts`), `resolveCsvPath`

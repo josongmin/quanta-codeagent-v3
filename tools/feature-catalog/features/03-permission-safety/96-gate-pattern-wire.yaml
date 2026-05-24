@@ -5,6 +5,8 @@ subsystem: 권한 — rememberPatterns cascade (ADR-0061 hardening)
 order: 96
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:v0, surface:cli]
 purpose: |
   Pure module the admissibility-gate calls into to decide whether a pending
   action's `rememberPatterns` are ALREADY fully covered by the session's

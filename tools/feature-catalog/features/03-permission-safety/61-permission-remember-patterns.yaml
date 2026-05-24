@@ -5,6 +5,8 @@ subsystem: 권한 학습 (v0.dev 흡수, ADR-0061)
 order: 61
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:v0, surface:cli]
 purpose: |
   v0.dev 권한 학습 흡수 — 모델이 필요 권한을 직접 제안(suggestedPermissions)하고 위험을
   자가표시(isMaybeDangerous). "패턴 허용" 1회 → 대기 중인 모든 다른 tool 요청을 재평가해

@@ -5,6 +5,8 @@ subsystem: 도구 — document (YAML 1.2 reader via eemeli/yaml)
 order: 137
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   First-class YAML reader closing the de-facto config-file gap left by
   ADR-0133's csv/ndjson slice. Single pure-TS dep (`yaml@2.x`, ~50 KB),

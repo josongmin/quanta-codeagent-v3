@@ -5,6 +5,8 @@ subsystem: 디스패치/배칭
 order: 2
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: zod 입력검증 → 회복가능 tool_result, 실패는 error tool_result
 evidence:
   code: [src/tool/registry.ts, src/tool/factory.ts]

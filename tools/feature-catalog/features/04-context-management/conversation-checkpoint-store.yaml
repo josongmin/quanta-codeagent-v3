@@ -5,6 +5,8 @@ subsystem: Conversation-level rollback primitive (ShadowOdb 대화 face)
 order: 31
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:core]
 purpose: |
   대화-레벨 rollback primitive — `ShadowOdb`(파일 face) 의 대화 face. Hermes Agent
   `/rollback` + Cline "Restore Files & Task" 가 file rollback 위에 conversation

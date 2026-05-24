@@ -5,6 +5,8 @@ subsystem: Stream dispatch callbacks (loop ↔ streamingTurn seam)
 order: 83
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   `streamingTurn`이 loop의 stream seam에서 소비하는 `StreamCallbacks` 레코드 생성
   로직을 loop.ts inline 본문에서 `stream-callbacks.ts#createStreamDispatcher` 로

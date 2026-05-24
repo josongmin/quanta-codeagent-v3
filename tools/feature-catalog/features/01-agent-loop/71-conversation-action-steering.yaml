@@ -5,6 +5,8 @@ subsystem: 미드턴 스티어링 — 타입드 액션 대수 (Cursor 흡수, AD
 order: 71
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:core, tier:core]
 purpose: |
   Cursor ConversationAction oneof 흡수 — 기존 단일 free-text SteerRequest 위에 5-arm 타입드
   액션 레이어를 PURE + ADDITIVE + DEFAULT-OFF로 적층. ConversationAction = user_message{prepend[]}

@@ -5,6 +5,8 @@ subsystem: caller-wire 마감 (ADR-0142)
 order: 142
 maturity: L4
 status: new
+owners: ["@songmin", "team-tools"]
+labels: [surface:cli]
 purpose: |
   Surgical 2-part wire-up closing seams deliberately left open by ADR-0127
   / 0133 / 0137.

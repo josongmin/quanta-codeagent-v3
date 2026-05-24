@@ -5,6 +5,8 @@ subsystem: Repo-local 운영 contract injection (Codex repo-local-rule-ingestion
 order: 98
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   Repo가 ship하는 운영 contract (canonical 커맨드 경로, fail-closed posture,
   patch discipline, "no heuristics" 등)를 top-level 마크다운(`AGENTS.md`,

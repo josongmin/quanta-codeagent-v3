@@ -5,6 +5,8 @@ subsystem: 시스템 프롬프트+캐시 prefix
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: byte-static 단일 cache:true 블록, 동적은 trailing <system-reminder>
 evidence:
   code: [src/agent/prompt.ts, src/agent/prompt-sections.ts]

@@ -5,6 +5,8 @@ subsystem: Prompt-injection 차단 (구조적 invariant)
 order: 70
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Per-turn 프롬프트가 untrusted fragment (파일 경로, IDE selection text, diagnostics,
   memory aggregate, rule body)를 named tag block 안에 넣을 때 — `<system-reminder>` 나

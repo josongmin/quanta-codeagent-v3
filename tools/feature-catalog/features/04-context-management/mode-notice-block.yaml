@@ -5,6 +5,8 @@ subsystem: AgentMode → per-turn notice (resolveAgentMode SSOT)
 order: 14
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
 purpose: |
   PLAN/REVIEW/AUDIT 모드 별 verbatim 본문을 `PLAN_NOTICE` / `REVIEW_NOTICE` /
   `AUDIT_NOTICE` 상수로 고정하고, `modeNotice(mode)` 가 mode → notice text 매핑

@@ -5,6 +5,8 @@ subsystem: 압축 boundary 계산 — Anthropic unpaired tool_result 거부 회�
 order: 21
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   `findBoundary(messages, keepTurns)` 는 압축에서 가장 미묘한 invariant 를 보존한다 —
   Anthropic 은 suffix 안에 `tool_result` 가 있는데 짝지어진 `tool_use` 가 summarized

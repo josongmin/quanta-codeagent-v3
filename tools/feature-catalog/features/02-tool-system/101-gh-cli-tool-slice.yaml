@@ -5,6 +5,8 @@ subsystem: 도구 — GitHub CLI (RFC may-22 ci-bot mode)
 order: 101
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Single slice that wraps the `gh` binary as 6 typed tools — `gh_pr_view`,
   `gh_issue_view`, `gh_pr_comment`, `gh_pr_create`, `gh_check_status`,

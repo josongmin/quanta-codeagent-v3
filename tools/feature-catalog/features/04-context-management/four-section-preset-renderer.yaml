@@ -5,6 +5,8 @@ subsystem: 4-section system prompt 렌더러 (Claude Desktop systemPromptSection
 order: 11
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:claude-code, surface:core]
 purpose: |
   Pure 렌더링 모듈. `fourSectionPreset(input)` 은 `base + project_md + session_ctx +
   user_append` 4-튜플에서 whitespace-only 입력을 자동 collapse — 결과는 항상 1..4

@@ -5,6 +5,8 @@ subsystem: 큐드 follow-ups (ADR-0128)
 order: 94
 maturity: L3
 status: refined
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, held-promotion, tier:core]
 purpose: |
   Pure in-memory queue of follow-up user inputs captured WHILE a turn is in
   progress, replayed when the turn ends. Codex's unique `queued-follow-ups`

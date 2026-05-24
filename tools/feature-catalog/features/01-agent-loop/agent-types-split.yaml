@@ -5,6 +5,8 @@ subsystem: 코어 루프 SOLID 회복
 order: 205
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   `src/agent/types.ts` (875 LOC) 의 cohesion split — 응집도 높은 4 묶음을
   `src/agent/types/` 하위 모듈로 분리하고 root `types.ts` 는 re-export 보존

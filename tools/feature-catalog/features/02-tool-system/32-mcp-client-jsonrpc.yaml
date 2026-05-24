@@ -5,6 +5,8 @@ subsystem: MCP — stdio JSON-RPC 2.0 codec + client
 order: 32
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:ipc]
 purpose: |
   Wire-level details behind `mcp-tool-bridge`. (1) Newline-delimited
   JSON-RPC 2.0 codec — MCP framing is NOT LSP `Content-Length`; every

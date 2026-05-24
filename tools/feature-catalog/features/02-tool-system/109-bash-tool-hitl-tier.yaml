@@ -5,6 +5,8 @@ subsystem: 코어 mutating 도구 — shell exec (bash front) HITL routing
 order: 109
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   `bash` tool's `hitlTier(input)` returns `"always-confirm"` for network
   egress (curl/wget/`gh api`) and mutating git ops (push/send-pack/fetch/

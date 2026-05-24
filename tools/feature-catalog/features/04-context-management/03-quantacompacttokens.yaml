@@ -5,6 +5,8 @@ subsystem: 압축(LLM 요약)
 order: 3
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: 'TODO: review from migration'
 evidence:
   code: [src/agent/compaction.ts, src/shared/runtime-config.ts]

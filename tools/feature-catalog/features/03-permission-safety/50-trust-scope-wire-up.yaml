@@ -5,6 +5,8 @@ subsystem: HITL 게이트 — 그랜트 기억 / ask-skip (ADR-0050)
 order: 50
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:claude-code, surface:cli, security-touched]
 purpose: |
   TrustScope enum(always_allow | project | workspace | session | once_only | deny)을 위한
   registry + admissibility-gate 단일 wire-up. ask-branch는 onConfirm 직전에

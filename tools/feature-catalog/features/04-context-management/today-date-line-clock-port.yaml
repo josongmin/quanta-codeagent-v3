@@ -5,6 +5,8 @@ subsystem: Per-turn dynamic 결정성 — date leak 봉합
 order: 13
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   Per-turn dynamic block 의 `Today's date is YYYY-MM-DD.` 라인이 매 턴 wall-clock
   을 빨아들이면 prompt 가 매일 drift 해 byte-identical replay invariant 가 깨진다.

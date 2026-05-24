@@ -5,6 +5,8 @@ subsystem: LSP wire layer (ADR-0143)
 order: 143
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Promotion-path closer for ADR-0141: replaces the three `not-implemented`
   default adapters (code-action / format / signature-help) with real

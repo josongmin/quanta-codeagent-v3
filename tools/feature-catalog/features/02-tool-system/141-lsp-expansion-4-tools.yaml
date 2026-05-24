@@ -5,6 +5,8 @@ subsystem: LSP mutating + signature-help tools (ADR-0141)
 order: 141
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli, held-promotion]
 purpose: |
   Expands the Codex-absorbed ADR-0015 read-only LSP nav surface
   (8 nav tools) with 4 mutating + signature-help capabilities the

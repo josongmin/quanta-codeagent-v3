@@ -5,6 +5,8 @@ subsystem: 권한·안전 — glob matching (Cursor .mdc / Claude paths: 흡수)
 order: 50
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:cli, tier:1]
 purpose: |
   Memoized dynamic-programming glob matcher for the constructs Claude Code's
   `paths:` and Cursor `.cursor/rules` `globs:` use: `**` (any chars incl. `/`,

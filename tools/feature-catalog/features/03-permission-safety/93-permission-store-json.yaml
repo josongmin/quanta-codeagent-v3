@@ -5,6 +5,8 @@ subsystem: 권한 영속화 (per-thread + per-host + denial ledger)
 order: 93
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |
   File-backed JSON store for per-thread permissions, per-host agent modes,
   and post-denial precedence records. Single file at

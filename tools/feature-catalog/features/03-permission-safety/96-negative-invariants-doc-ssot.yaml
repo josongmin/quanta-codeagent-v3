@@ -5,6 +5,8 @@ subsystem: Negative-space ADR — "we do not do X" trust-model declarations
 order: 96
 maturity: L3
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, held-promotion]
 purpose: |
   Single ADR documenting 12 patterns from Codex/Claude Desktop audit that v3
   deliberately does NOT adopt — paired SSOT for the "흡수 안 함" half of every

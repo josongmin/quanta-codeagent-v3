@@ -5,6 +5,8 @@ subsystem: 코어 mutating 도구 — test suite execution
 order: 111
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Runs the project's test suite. Explicit `command` arg skips auto-detection;
   otherwise `detectCommand` probes in order: (1) bun if `bun.lockb` OR

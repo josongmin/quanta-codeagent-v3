@@ -5,6 +5,8 @@ subsystem: 코어 read-only 도구 — language-server navigation
 order: 113
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Eight navigation tools fronted by an injected `LspNavProvider` (same
   slice-isolation pattern as `diagnostics` — `@/tool` MUST NOT import

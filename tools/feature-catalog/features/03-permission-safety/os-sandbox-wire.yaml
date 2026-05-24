@@ -4,6 +4,8 @@ section: 3
 subsystem: OS-level process confinement
 maturity: L4
 status: new
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |
   `defaultOsSandbox()` (macOS Seatbelt + Linux Landlock stub + Windows
   passthrough) is wired into the bash spawn path via a module-level

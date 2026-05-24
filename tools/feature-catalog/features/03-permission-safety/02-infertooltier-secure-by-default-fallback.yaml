@@ -5,6 +5,8 @@ subsystem: HITL 4-tier (ADR-0020)
 order: 2
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli, default-off]
 purpose: "inferToolTier secure-by-default fallback (R3-P1): 도구의 hitlTier?(input) 미선언 시 read-only ⇒ \"none\", mutating ⇒ \"always-confirm\". 기본 도구 write/edit/test_runner/scripted_replace는 pre-approval-ok 명시 opt-in."
 evidence:
   code: [src/agent/hitl-tier.ts, src/agent/hitl-tier-registry.ts]

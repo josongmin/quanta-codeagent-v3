@@ -5,6 +5,8 @@ subsystem: CLI turn indicator (StreamPort tee)
 order: 115
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   LLM 대기 중 spinner + elapsed seconds + live token counter(input/output 누적) 표시.
   StreamPort tee 패턴으로 구현 — streaming-dispatch 본체 무수정, 새 StreamPort 어댑터가

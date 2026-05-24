@@ -5,6 +5,8 @@ subsystem: 도구 — web (ADR-0127)
 order: 102
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli, security-touched, held-promotion]
 purpose: |
   Two read-only web tools delivered as a single slice. (1) `web_fetch` —
   fetch an HTTPS URL and return the body (HTML→Markdown); always-on, no

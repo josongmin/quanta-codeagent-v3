@@ -5,6 +5,8 @@ subsystem: 공유 error helper hardening
 order: 78
 maturity: L4
 status: refined
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   `errMessage(e)` 의 self-recursion 회귀 fix — 2026-05-23 mass migration 이
   over-eager find/replace 로 본문을 `errMessage(e)` 로 바꿔 무한 재귀 → 모든

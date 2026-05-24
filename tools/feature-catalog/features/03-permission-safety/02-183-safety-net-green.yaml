@@ -5,6 +5,8 @@ subsystem: Admissibility-gate SSOT (ADR-0026)
 order: 2
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행위 보존 추출)
 evidence:
   code: [src/agent/admissibility-gate.ts]

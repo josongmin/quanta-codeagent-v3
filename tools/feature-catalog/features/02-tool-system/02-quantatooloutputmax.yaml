@@ -5,6 +5,8 @@ subsystem: 결과 cap + disk-spill (Tier 0)
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: (200k) / _SPILL_KEEP(50), sub-cap byte-identical
 evidence:
   code: [src/tool/output-spill.ts, src/shared/runtime-config.ts]

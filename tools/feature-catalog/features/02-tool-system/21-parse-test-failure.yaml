@@ -5,6 +5,8 @@ subsystem: Fault-localization aids (Codex signal 흡수) — Stage-3 stack-trace
 order: 21
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   raw 테스트/빌드 출력에서 file:line 위치를 프레임워크 무관하게 추출하는 default
   tool (pytest/jest/vitest/bun-test/go-test/cargo-test + generic path:line:col).

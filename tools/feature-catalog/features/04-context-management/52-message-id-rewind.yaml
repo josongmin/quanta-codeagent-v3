@@ -5,6 +5,8 @@ subsystem: 세션 영속 — message 단위 rewind (Claude Desktop 1.7196.3 pari
 order: 52
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:claude-code, surface:core]
 purpose: |
   Claude Desktop 1.7196.3의 transcript 단위 rewind UX 흡수 — Message.id?: string opt-in 필드를
   src/llm/types.ts에 추가(byte-identical default-OFF: 기존 세션 파일은 id 없이 load/save,

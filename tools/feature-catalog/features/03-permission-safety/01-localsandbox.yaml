@@ -5,6 +5,8 @@ subsystem: 런타임 샌드박스
 order: 1
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: [surface:cli, security-touched]
 purpose: LocalSandbox
 evidence:
   code: []

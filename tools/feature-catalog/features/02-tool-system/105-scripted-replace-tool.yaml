@@ -5,6 +5,8 @@ subsystem: 도구 — scripted_replace (Codex Phase 4 흡수)
 order: 105
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   Codex `tool-routing-and-triggering.md` absorption — "patch is for local +
   stable context; scripted replace is for duplicated blocks, bulk substitution,

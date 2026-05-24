@@ -5,6 +5,8 @@ subsystem: 디스패치/배칭
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: per-input isConcurrencySafe 동시성 배칭
 evidence:
   code: [src/tool/types.ts, src/agent/streaming-dispatch.ts]

@@ -5,6 +5,8 @@ subsystem: 도구 hint 강제 (ADR-0062 rule #3)
 order: 90
 maturity: L4
 status: refined
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   Session-scoped state machine that detects when the model IGNORES a tool's
   `NextAction` hint by re-calling the same `toolName:targetPath` without

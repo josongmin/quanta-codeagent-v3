@@ -5,6 +5,8 @@ subsystem: 멀티모달 (ADR-0083)
 order: 83
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   ContentBlock에 ImageBlock 추가 — 스크린샷·다이어그램 입력. 두 어댑터가 각자 native
   형태로 직렬화: Anthropic {type:image, source:{base64}}, OpenAI content-array

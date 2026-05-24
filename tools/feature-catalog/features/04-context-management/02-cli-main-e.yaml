@@ -5,6 +5,8 @@ subsystem: 전용 요약 모델
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: 톱레벨; 루프 e2e로 검증, lockstep cli 테스트)
 evidence:
   code: [src/apps/cli/index.ts, src/apps/cli/internal.ts]

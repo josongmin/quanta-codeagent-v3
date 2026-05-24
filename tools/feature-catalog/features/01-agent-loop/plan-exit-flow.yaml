@@ -5,6 +5,8 @@ subsystem: Plan-exit lifecycle 흐름 (ADR-0062 absorb #3)
 order: 62
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   Plan-exit three-way (approved/rejected/changes_requested)의 셋 평면을 잇는 pure async
   orchestrator. 이미 shipped된 3개 조각 — plan-exit decision (62-plan-exit-three-way),

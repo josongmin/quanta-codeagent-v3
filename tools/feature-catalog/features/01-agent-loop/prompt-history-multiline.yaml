@@ -5,6 +5,8 @@ subsystem: REPL 입력 UX (history/multiline)
 order: 114
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   REPL 입력 UX 강화 — bash 스타일 ↑/↓ history navigation + Ctrl+R reverse-i-search +
   heredoc 멀티라인 입력. history는 disk-persistent(파일 경로 env override). multiline은

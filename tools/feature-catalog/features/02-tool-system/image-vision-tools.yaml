@@ -5,6 +5,8 @@ subsystem: 도구 — vision input (ADR-0126, ADR-0132)
 order: 83
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Three modules that compose the vision-input slice. (1) `read_image`
   (ADR-0126) reads an image file from disk, magic-byte-sniffs the media

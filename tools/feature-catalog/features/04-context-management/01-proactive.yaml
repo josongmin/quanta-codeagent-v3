@@ -5,6 +5,8 @@ subsystem: 압축(LLM 요약)
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: proactive(임계) + reactive(PTL) + orphan-safe 경계
 evidence:
   code: [src/agent/compaction.ts]

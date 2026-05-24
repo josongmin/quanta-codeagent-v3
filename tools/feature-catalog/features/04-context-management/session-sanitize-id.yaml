@@ -5,6 +5,8 @@ subsystem: Session paths — id validation (hard-fail on escape attempts)
 order: 51
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   Hardened id validator enforcing that a session id is safe to use as a single
   filesystem path component under `sessionsRoot()`. Rejects (with typed

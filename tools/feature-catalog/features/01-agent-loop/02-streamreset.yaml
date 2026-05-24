@@ -5,6 +5,8 @@ subsystem: 스트리밍 도구 실행
 order: 2
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: stream_reset tombstone
 evidence:
   code: [src/agent/streaming-dispatch.ts]

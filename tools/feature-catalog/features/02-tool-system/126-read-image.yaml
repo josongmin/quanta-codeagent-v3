@@ -5,6 +5,8 @@ subsystem: Vision input tool (ADR-0126)
 order: 126
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   read_image tool that loads a local image, verifies the format via a magic-
   byte SSOT (cannot be spoofed by extension), and surfaces the image through

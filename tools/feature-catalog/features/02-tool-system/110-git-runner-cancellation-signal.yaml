@@ -5,6 +5,8 @@ subsystem: 도구 — git runner cancellation seam
 order: 110
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Distinct axis from the runner's wall-clock timeout (ADR-0105) and from
   `GitBudget`'s deadline (ADR-0107): an optional caller-supplied `AbortSignal`

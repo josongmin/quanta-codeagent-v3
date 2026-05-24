@@ -5,6 +5,8 @@ subsystem: Runtime backstop for git posture (ADR-0100/0101)
 order: 94
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |
   HARD_DENY_RULES extension covering workflow-destructive git argv shapes
   that prompt-level posture (ADR-0099) cannot guarantee — forced-history

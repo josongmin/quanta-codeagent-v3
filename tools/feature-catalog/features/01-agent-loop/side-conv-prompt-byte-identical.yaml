@@ -5,6 +5,8 @@ subsystem: Side-conversation (ADR-0049)
 order: 21
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core]
 purpose: |
   Three frozen constants implementing the byte-identical prompt invariant
   for the side-conversation seam. `SIDE_CONVERSATION_PROMPT_BASE` is the

@@ -5,6 +5,8 @@ subsystem: 압축 — reactive (proactive 보다 더 강한 squeeze)
 order: 20
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: |
   Proactive `compactIfNeeded` 가 `DEFAULT_KEEP_TURNS=6` 으로 부드럽게 줄이는 반면,
   `reactiveCompact` 는 loop 이 이미 "prompt is too long" API 에러를 맞은 뒤 호출되는

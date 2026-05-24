@@ -5,6 +5,8 @@ subsystem: 컨텍스트 압축 anti-thrash (RFC §8 Phase 2)
 order: 91
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:claude-code, surface:core, tier:core]
 purpose: |
   Pure deterministic state machine that mirrors Claude Code v2's two
   compaction guards: (1) rapid-refill breaker — when the context refills to

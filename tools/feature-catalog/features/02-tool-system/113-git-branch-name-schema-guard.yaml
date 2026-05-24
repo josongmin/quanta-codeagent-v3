@@ -5,6 +5,8 @@ subsystem: 도구 — git_branch_switch input hardening
 order: 113
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Schema-level zod regex `^(?!-)[A-Za-z0-9._/+-]{1,64}$` on `git_branch_switch.branch`
   that rejects a malicious or malformed branch name BEFORE argv is built — so

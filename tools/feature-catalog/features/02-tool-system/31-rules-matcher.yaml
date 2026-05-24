@@ -5,6 +5,8 @@ subsystem: 권한 룰 — deterministic 매칭 알고리즘
 order: 31
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   Deterministic longest-prefix-match over a single rule set. (1) Normalise
   by stripping LEADING whitespace ONLY — trailing whitespace and internal

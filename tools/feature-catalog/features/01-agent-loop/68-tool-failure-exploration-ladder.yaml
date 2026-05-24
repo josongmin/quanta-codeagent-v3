@@ -5,6 +5,8 @@ subsystem: 시스템 프롬프트 — 도구 실패 회복 + 분석 multi-step (
 order: 68
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:1]
 purpose: |
   라이브 REPL replay에서 발견한 두 결함을 시스템 프롬프트 규칙으로 봉합 — (1) 단일 도구 cap
   메시지("+292 deeper, increase max_depth", "raise max_files", "result truncated")를 능력

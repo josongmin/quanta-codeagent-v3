@@ -5,6 +5,8 @@ subsystem: Permission stack 시각화 (read-only surface)
 order: 75
 maturity: L4
 status: new
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |
   Read-only programmatic surface — given an action, *어떤* permission layer가 *왜*
   허락/거부했는지 결정 trace 를 반환. `quanta permission inspect <action>` CLI /

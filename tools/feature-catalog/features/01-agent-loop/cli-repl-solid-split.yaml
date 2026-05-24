@@ -5,6 +5,8 @@ subsystem: CLI surface 구조 회복 (R7/R8 follow-up)
 order: 200
 maturity: L4
 status: refined
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core]
 purpose: |
   `src/apps/cli/repl.ts` (1.3K LOC GodClass — runRepl 의 cognitive complexity 33+)
   를 21 개의 single-responsibility 모듈로 분해해 SRP/OCP/cognitive-budget 회복.

@@ -5,6 +5,8 @@ subsystem: 도구 — git budget (Cursor captureGitHistory 흡수)
 order: 100
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:cursor, surface:cli, held-promotion]
 purpose: |
   Closed-port typed budget interface + pure `applyBudget` helper that derives
   an AbortSignal carrying a deadline for long-running git invocations. Five

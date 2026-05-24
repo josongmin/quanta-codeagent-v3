@@ -5,6 +5,8 @@ subsystem: Git 1급 도구 (v0.dev chat=branch 흡수, ADR-0064)
 order: 63
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:v0, surface:cli]
 purpose: |
   v0.dev chat=branch upstreamChanges 흡수 — fetch 없이(네트워크·index 무변경) 이미
   가져온 remote-tracking ref 대비 ahead/behind를 보고. rev-parse @{upstream}로 upstream

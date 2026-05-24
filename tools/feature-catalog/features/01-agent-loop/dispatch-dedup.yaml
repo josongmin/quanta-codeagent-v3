@@ -5,6 +5,8 @@ subsystem: Loop 안정성 — duplicate tool-call 단락
 order: 51
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   Bench Type F("Verify-Loop Stuck on Env") 구조적 fix — 동일 (tool name + canonical
   args) 호출이 sliding window 안에서 중복으로 들어오면 dispatch 전에 차단하고 synthetic

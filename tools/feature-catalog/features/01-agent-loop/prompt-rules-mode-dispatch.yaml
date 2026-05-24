@@ -5,6 +5,8 @@ subsystem: 도구사용 규칙 팩 (run-mode SSOT)
 order: 215
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: |
   6 verbatim CORE_RULES (R-ENV / R-STOP-ENV / R-SEARCH-FIRST / R-READ-FAILURE
   / R-NO-THRASH / R-NO-SHIM / R-FAILURE-MODE) + 4 mode-specific packs

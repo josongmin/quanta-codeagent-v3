@@ -5,6 +5,8 @@ subsystem: Verify-guard (Tier 0) · ADR-0013
 order: 3
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
 purpose: 순수정책 decideVerifyGuard
 evidence:
   code: []

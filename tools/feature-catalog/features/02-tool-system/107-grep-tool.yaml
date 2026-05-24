@@ -5,6 +5,8 @@ subsystem: 코어 read-only 도구 — content search (ripgrep front)
 order: 107
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
 purpose: |
   Read-only content search built on ripgrep. Model-supplied `path` is
   jail-validated via `@/storage.resolveJailed` BEFORE argv assembly (an

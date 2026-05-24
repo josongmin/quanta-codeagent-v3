@@ -5,6 +5,8 @@ subsystem: 권한 정책 엔진 (HARD_DENY baseline + tier overlay 결합)
 order: 92
 maturity: L4
 status: stable
+owners: ["@songmin", "team-safety"]
+labels: [absorbed:codex, surface:cli, security-touched]
 purpose: |
   The RESOLVER ENGINE half of the permission policy (SRP split with the data
   half in `policy-rules.ts`). Owns `evaluate` / `evaluateAuto` /

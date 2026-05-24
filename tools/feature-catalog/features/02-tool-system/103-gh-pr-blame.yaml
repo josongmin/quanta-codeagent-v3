@@ -5,6 +5,8 @@ subsystem: GitHub PR tools (ADR-0103)
 order: 103
 maturity: L4
 status: stable
+owners: ["@songmin", "team-tools"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   gh CLI tool that maps PR review-thread comments onto file:line anchors —
   one step beyond commit blame ("who last touched this line" → "what did

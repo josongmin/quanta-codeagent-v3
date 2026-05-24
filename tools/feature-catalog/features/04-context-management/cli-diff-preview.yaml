@@ -5,6 +5,8 @@ subsystem: CLI surface — pre/post action preview
 order: 70
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
 purpose: |
   4개 변경-도구(`write` / `edit` / `apply_patch` / `scripted_replace`) 분기를
   단일 `renderActionDiff()`로 통일 — before/after 텍스트 페어를 line-LCS

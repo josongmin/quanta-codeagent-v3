@@ -5,6 +5,8 @@ subsystem: Git 1급 도구 (ADR-0025) — fault-localization 신호
 order: 23
 maturity: L4
 status: stable
+owners: ["@songmin", "team-tools"]
+labels: [absorbed:codex, surface:cli]
 purpose: |
   한 파일 또는 라인 범위의 per-author 라인 소유권 분포를 반환하는 git tool. 누가
   이 코드를 아는지(Stage-1 ownership) fault-localization·리뷰어 지목 신호. gitTools()에

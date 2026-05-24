@@ -5,6 +5,8 @@ subsystem: 도구 카탈로그 — deferred-tool search seam
 order: 30
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   Deferred-tool catalog search exposed as a Tool. Two modes: (1) `select:<name>
   [,<name>...]` direct lookup by name — restores schema for explicit deferred

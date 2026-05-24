@@ -5,6 +5,8 @@ subsystem: 시스템 프롬프트+캐시 prefix
 order: 4
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [surface:core]
 purpose: 압축 프롬프트 verified-vs-assumed 강화
 evidence:
   code: [src/agent/compaction.ts, src/agent/prompt.ts]

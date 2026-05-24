@@ -5,6 +5,8 @@ subsystem: 이슈 텍스트 localization 힌트 (Agentless 흡수)
 order: 60
 maturity: L4
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:agentless, surface:core]
 purpose: |
   Pure deterministic extractors that scan an issue/problem-statement string
   and surface a structured `IssueHint` (files, errors, code fences,

@@ -5,6 +5,8 @@ subsystem: 코어 도구 9종
 order: 1
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:cli]
 purpose: |
   Aggregate L5 marker for the primitive tool family covering 9 core tools —
   read, write, edit, bash, grep, glob, localize, diagnostics, test_runner.

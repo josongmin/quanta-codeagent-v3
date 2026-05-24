@@ -5,6 +5,8 @@ subsystem: 도구 — document (CSV + NDJSON parsers + thin tool wrappers)
 order: 133
 maturity: L4
 status: new
+owners: ["@songmin"]
+labels: [surface:cli]
 purpose: |
   First modern coding agent to ship built-in structured-data tools (Cursor /
   Claude Code / Codex all shell out to cat/awk/jq). Closes 3 silent-corruption

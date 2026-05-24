@@ -5,6 +5,8 @@ subsystem: 도구 결과 — 타입드 실패 사유 (Cursor EditResult/ShellRes
 order: 64
 maturity: L5
 status: stable
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:cli]
 purpose: |
   Cursor EditResult/ShellResult의 discriminated failure union 흡수 — 기존 ok:false 도구 결과의
   output 문자열을 모델이 정규식으로 재파싱하던 부담을 닫힌 enum으로 대체. ToolResult.failure?:
