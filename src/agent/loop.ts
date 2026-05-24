@@ -4,16 +4,13 @@ import {
   attrs,
   createTurnTimingCapture,
   endSpan,
-  GEN_AI_ATTRS,
   SPAN_NAMES,
   type Span,
   startSpan,
   type TurnTiming,
 } from "@/observability"
-import { normalizeRedactionConfig, redactSecrets } from "@/security"
+import { normalizeRedactionConfig } from "@/security"
 import { errMessage, LLMError } from "@/shared"
-import { defaultGitRunner } from "@/tool/git"
-import { buildCapEnforcer } from "./cap-enforcer"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import {
@@ -21,16 +18,26 @@ import {
   type ConversationSummaryArchive,
   createArchive,
 } from "./conversation-summary-archive"
-import { DedupGate } from "./dispatch-dedup"
 import { effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
 // ADR-0125 turn-diff loop wiring (default-OFF). Opt-in via
 // `config.gitObservability.enabled === true`. Constructs a per-session
 // `TurnDiffSession` from the composite helper and calls startTurn/endTurn at
 // the per-turn boundary so a host sees the SHAPE of what each turn changed.
-import { type TurnDiffSession, wireGitObservability } from "./git-observability"
+import type { TurnDiffSession } from "./git-observability"
 import { buildGuardChain, metaUser, runGuardChain } from "./guards"
 import { renderIdeContext } from "./ide-context"
+import {
+  attachCapEnforcer,
+  attachDedupGate,
+  attachLocalizePhase,
+  buildPreCompactHook,
+  buildSeedMessages,
+  buildTtftAttrs,
+  buildTurnDiffSession,
+  scanEnvelopeForRedactions,
+  wireHookPromptPending,
+} from "./loop-helpers"
 import { persistSession, recallContext } from "./memory"
 import { runMemoryConsolidatorHook } from "./memory-consolidator-hook"
 import { AgentRecorder } from "./metrics"
@@ -80,7 +87,6 @@ import { backoffDelayMs } from "./retry"
 import {
   buildCloseoutGuard,
   buildEffectiveConfig,
-  buildLocalizePhase,
   buildPersistDeps,
   buildVerifyGuard,
   buildWorkMetricsResources,
@@ -100,7 +106,6 @@ import {
 } from "./stop-category"
 import { createStreamDispatcher, type TurnTimingAnchors } from "./stream-callbacks"
 import { streamingTurn } from "./streaming-dispatch"
-import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import { consumeTurnSignals, createToolChoiceTurnState, resolveToolChoice } from "./tool-choice"
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
@@ -520,19 +525,14 @@ const streamConsume = async (
     turnTimingCapture.markStreamEnd()
     const timing: TurnTiming = turnTimingCapture.snapshot()
     onTurnTiming?.(timing)
-    // OTel: emit the TTFT attribute on the sampling-span close ONLY when
-    // we have a guarded value (the absent / non-finite / negative case
-    // omits the attr, matching the Cursor `setTtftMs` reject-and-skip
-    // contract). Other attrs stay empty (default-OFF byte-identical for
-    // the no-TTFT case).
-    const ttftAttr =
-      timing.ttftMs !== null ? { [GEN_AI_ATTRS.response.timeToFirstTokenMs]: timing.ttftMs } : {}
     // Single close site for `run_sampling_request`. Default-OFF (no sink) ⇒
     // no-op (sentinel short-circuits both the close branch and the duration
     // math). Note: this runs AFTER `stop?.()` so the recorder's llm-span
     // close precedes the OTel span close — matching the existing recorder-
-    // first convention used elsewhere in the loop.
-    endSpan(samplingSpan, samplingStatus, attrs(ttftAttr))
+    // first convention used elsewhere in the loop. TTFT attribute derivation
+    // (Cursor `setTtftMs` reject-and-skip contract) lives in
+    // `loop-helpers#buildTtftAttrs`.
+    endSpan(samplingSpan, samplingStatus, attrs(buildTtftAttrs(timing)))
   }
 }
 
@@ -658,27 +658,10 @@ const maybeCompact = async (
   // claim it.
   const isFirstCompaction = archive !== undefined && archive.summaries.length === 0
   // ADR-0133 — bridge the typed `pre_compact` hook event onto the
-  // `compactIfNeeded` preCompactHook contract. Absent `config.hooks` ⇒
-  // OMIT the bridge entirely (compactIfNeeded fast-paths past the extra
-  // await — byte-identical to the pre-ADR-0133 path). When wired, a hook
-  // that returns `{ abort: { reason } }` causes `compactIfNeeded` to skip
-  // THIS compaction (returns `{compacted:false}` — same shape the breaker
-  // observes as no progress).
-  const hooks = config.hooks
-  const preCompactHook =
-    hooks !== undefined
-      ? async (q: {
-          messagesToCompact: number
-          isFirstCompaction: boolean
-        }): Promise<{ abortReason: string | null }> => {
-          const emit = await hooks.emit({
-            type: "pre_compact",
-            messagesToCompact: q.messagesToCompact,
-            isFirstCompaction: q.isFirstCompaction,
-          })
-          return { abortReason: emit.abort?.reason ?? null }
-        }
-      : undefined
+  // `compactIfNeeded` preCompactHook contract. See
+  // `loop-helpers#buildPreCompactHook`; absent `config.hooks` ⇒ `undefined`
+  // (compactIfNeeded fast-paths past the await — byte-identical legacy).
+  const preCompactHook = buildPreCompactHook(config.hooks)
   try {
     result = await compactIfNeeded({
       messages: snapshot,
@@ -1657,22 +1640,11 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // skill-less sessions stay byte-identical end-to-end.
   const activeSkills = features.activeSkills
   const { stream } = cfg
-  // ADR-0062 (Spec A3): typed Submission envelope wins for the seed when
-  // present AND projects to a user-input shape. The legacy `cfg.messages`
-  // remains the canonical history buffer — when a submission is provided
-  // we DERIVE the seed list (existing tail + projected user turn) but
-  // `cfg.messages` is left untouched (caller's object is never mutated,
-  // mirroring `stampTurn`'s discipline). Absent ⇒ byte-identical legacy.
-  const submissionSeed =
-    cfg.submission && isUserInputSubmission(cfg.submission)
-      ? extractSeedMessages(cfg.submission)
-      : undefined
-  // Canonical in-session message buffer (RFC §6.3). Seeded from `cfg.messages`
-  // (legacy) OR `cfg.messages` + projected submission turn appended (Spec A3
-  // — a Submission carrying a `user_input` op replaces / appends the last
-  // user turn so a resumed history + a new submission both work).
-  const seedMessages = submissionSeed ? [...cfg.messages, ...submissionSeed] : cfg.messages
-  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(seedMessages)
+  // ADR-0062 (Spec A3): canonical seed buffer (RFC §6.3). When the typed
+  // Submission envelope projects to user-input it is appended to
+  // `cfg.messages`; absent ⇒ byte-identical legacy. The caller's `cfg.messages`
+  // is never mutated. See `loop-helpers#buildSeedMessages`.
+  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
   const specs = cfg.registry.specs()
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
   const sessionId = cfg.sessionId ?? "default"
@@ -1682,20 +1654,11 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   const breaker = cfg.compactionBreaker?.disabled
     ? undefined
     : new CompactionBreaker(cfg.compactionBreaker?.caps)
-  // T3 — pre-flight dedup gate. ON by default with DEFAULT_DEDUP_GATE_CAPS so
-  // a pallets-style env-loop thrash is structurally braked. The gate is pure-
-  // by-state (deterministic, no Date.now/random) and per-session: one instance
-  // per `runAgent` invocation, never shared across sessions. Honors a
-  // caller-supplied `cfg.dedupGate` (test injection / explicit override) and
-  // falls back to constructing from `cfg.dedupGateConfig.caps`. Setting
-  // `dedupGateConfig.disabled:true` opts out entirely.
-  const dedupGate =
-    cfg.dedupGate ??
-    (cfg.dedupGateConfig?.disabled ? undefined : new DedupGate(cfg.dedupGateConfig?.caps))
-  // Make the constructed gate visible to `dispatchTool` via the loop-local
-  // effective config. Disabled / caller-already-set ⇒ no-op (cfg.dedupGate
-  // either stays undefined or keeps the caller's instance verbatim).
-  if (dedupGate !== undefined && cfg.dedupGate === undefined) cfg.dedupGate = dedupGate
+  // T3 — pre-flight dedup gate (default-ON / `disabled:true` opts out). See
+  // `loop-helpers#attachDedupGate`: builds + attaches to `cfg.dedupGate` so
+  // `dispatchTool` reads it via the AgentConfig channel. Returns the gate so
+  // the loop can branch on activeness for the `cfg` copy decision below.
+  const dedupGate = attachDedupGate(cfg)
   // Verify-guard (ADR-0011, Tier 0 safety hardening): per-run forcing budget + ordered
   // dispatched-tool log, created ONLY when `cfg.verifyGuard` is set. Absent ⇒
   // both stay `undefined`, no object is allocated, the history push and the
@@ -1709,27 +1672,16 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
   // gains ZERO new branch points.
   const closeoutGuardState = buildCloseoutGuard(cfg)
-  // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
-  // Built ONLY when `cfg.capEnforce === true` OR `QUANTA_CAP_ENFORCE=1` env
-  // flag is set (checked inside `buildCapEnforcer`). A caller-supplied
-  // `cfg.capEnforcer` (e.g. test injection) is honoured without re-building.
-  // With neither set ⇒ `undefined`, no allocation, dispatch is byte-identical.
-  const capEnforcer = cfg.capEnforcer ?? buildCapEnforcer(cfg.capEnforce)
-  if (capEnforcer !== undefined && cfg.capEnforcer === undefined) {
-    cfg.capEnforcer = capEnforcer
-  }
-  // Localize-phase guard (Agentless "localize-first" absorption — Tier 0).
-  // Built ONLY when `cfg.localizePhase.phase1Turns` is a positive integer
-  // (`buildLocalizePhase` validates the active domain). Absent / invalid ⇒
-  // `undefined`, no allocation, the dispatch consult is a single property
-  // check + early return → loop byte-identical for callers without the opt-in.
-  // The state is ATTACHED to `cfg.localizePhaseState` so the sibling dispatch
-  // module can read it through the AgentConfig channel (mirrors the dedupGate
-  // pattern); the loop bumps `state.turn` at the TOP of each turn iteration.
-  const localizePhaseState = buildLocalizePhase(cfg)
-  if (localizePhaseState !== undefined && cfg.localizePhaseState === undefined) {
-    cfg.localizePhaseState = localizePhaseState
-  }
+  // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF). See
+  // `loop-helpers#attachCapEnforcer`: builds + attaches to `cfg.capEnforcer`
+  // iff absent. With `cfg.capEnforce !== true` and no env flag ⇒ no
+  // allocation, dispatch byte-identical.
+  attachCapEnforcer(cfg)
+  // Localize-phase guard (Agentless "localize-first" Tier 0). See
+  // `loop-helpers#attachLocalizePhase`: builds + attaches to
+  // `cfg.localizePhaseState` iff present; loop bumps `state.turn` per
+  // iteration. Absent / invalid ⇒ undefined (no allocation, byte-identical).
+  const localizePhaseState = attachLocalizePhase(cfg)
   // Turn-exit guard chain (refactor 2026-05-23): one composed chain replaces
   // the prior `verifyGuardStep` + `closeoutGuardStep` ladder in `applyAction`.
   // Default-OFF byte-identical: when neither `cfg.verifyGuard` is set NOR
@@ -1749,21 +1701,10 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // from every `StreamInput` (byte-identical wire payload, default-OFF).
   const toolChoiceState = createToolChoiceTurnState()
   // ADR-0133 — session-scoped pending list of hook-emitted `promptHook`
-  // responses (from `subagent_start` / `subagent_stop` / `turn_start` /
-  // etc.). The subagent runner pushes to this via the typed
-  // `subagentPendingPrompt` config seam; the per-turn `prepareTurnContext`
-  // drains the list AFTER a successful build so a same-turn retry sees the
-  // same injects but the NEXT turn starts fresh.
-  //
-  // Default-OFF: when `cfg.hooks` is undefined AND no producer (turn_start
-  // hook, runner) ever pushes, the list stays empty and `prepareTurnContext`
-  // omits the field (byte-identical to the pre-ADR-0133 path).
-  const hookPromptPending: import("./hooks").HookPromptInject[] = []
-  if (cfg.subagentPendingPrompt === undefined) {
-    cfg.subagentPendingPrompt = {
-      push: (entry: import("./hooks").HookPromptInject) => hookPromptPending.push(entry),
-    }
-  }
+  // responses. See `loop-helpers#wireHookPromptPending`: attaches a push port
+  // to `cfg.subagentPendingPrompt` iff absent; the list is drained per turn by
+  // `prepareTurnContext`. Default-OFF: an empty list never renders a block.
+  const hookPromptPending = wireHookPromptPending(cfg)
   // ADR-0082 — run-scoped memory_citation accumulator. Append-only: each
   // recall that places records into the prompt window pushes one citation per
   // placed record (via the `recallContext` `onPlaced` seam, threaded through
@@ -1808,21 +1749,10 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     lastTurnTiming = timing
   }
 
-  // ADR-0125 turn-diff loop wiring — opt-in trigger: only when
-  // `cfg.gitObservability?.enabled === true`. Explicit (not auto-enabled when
-  // `shadowOdb` is wired) so a caller that wired the storage port for
-  // `branch_search` / rewind consumers does NOT pay the per-turn `git
-  // rev-parse` + `git diff` cost without asking. Absent / disabled ⇒
-  // `turnDiffSession` stays `undefined`, no allocation, no `git` spawn, no
-  // emit — byte-identical to the pre-wire path. A caller-supplied `session`
-  // (test-injection seam, mirrors `dedupGate`) is honored verbatim so unit
-  // tests can spy on `startTurn`/`endTurn` without spawning `git`.
-  const turnDiffSession: TurnDiffSession | undefined =
-    cfg.gitObservability?.enabled === true
-      ? (cfg.gitObservability.session ??
-        wireGitObservability({ runner: defaultGitRunner, cwd: cfg.cwd, signal: cfg.signal })
-          .turnDiff)
-      : undefined
+  // ADR-0125 turn-diff loop wiring — opt-in (`cfg.gitObservability?.enabled`).
+  // See `loop-helpers#buildTurnDiffSession` for the closed-port factory; absent
+  // /disabled ⇒ undefined (no `git` spawn, byte-identical legacy).
+  const turnDiffSession: TurnDiffSession | undefined = buildTurnDiffSession(cfg)
 
   // R2-B P1 — session-lifetime bundle. Configured ONCE here (after every
   // session resource the helpers might need has been materialized) and passed
@@ -1856,19 +1786,12 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       cfg.activeTurnRef.current = { currentTurn: null, isInterrupted: reason === "aborted" }
     }
     const messages = [...wm.snapshot()]
-    // ADR-0078 point #2 — envelope_jsonl: every text block of the final
-    // transcript is scanned at the persistence boundary and its hits folded
-    // into the run rollup. Counting only — the block text is NOT mutated here
-    // so the memory_distill path (point #3) still redacts the SAME raw secret
-    // independently (each origin fires once per secret). Disabled ⇒ skipped.
+    // ADR-0078 point #2 — envelope_jsonl: scan every text block of the final
+    // transcript at the persistence boundary and fold the hits into the run
+    // rollup. See `loop-helpers#scanEnvelopeForRedactions`. Disabled ⇒ skipped
+    // (each origin still fires once per secret via the distill path).
     if (redactionEnabled && cfg.store) {
-      for (const m of messages) {
-        for (const b of m.content) {
-          if (b.type !== "text") continue
-          const r = redactSecrets(b.text, { origin: "envelope_jsonl" })
-          if (!r.unchanged) recordRedaction("envelope_jsonl", r.hits)
-        }
-      }
+      scanEnvelopeForRedactions(messages, recordRedaction)
     }
     if (cfg.store) {
       await persistSession(buildPersistDeps(cfg, recorder, redactionEnabled, recordRedaction), {
