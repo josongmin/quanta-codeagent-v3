@@ -24,7 +24,7 @@ purpose: |
 evidence:
   code:
     - src/tool/factory.ts
-    - src/tool/deferred.ts
+    - src/tool/deferred/index.ts
     - src/tool/types.ts
     - src/tool/registry.ts
     - src/agent/tool-input-streaming.ts

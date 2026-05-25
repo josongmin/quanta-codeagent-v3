@@ -37,15 +37,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    조립 layer 가 명시적으로 ThreeWayRestorePort + tag registry + shadow
-    ODB + conversation store 를 wire 할 때만 활성. CLI slash command 는
-    등록되지만 미주입 surface 에서는 "not wired in this surface" 로 typed
-    degrade.
-  promotion_path: |
-    composition-root mega-wire 에 ThreeWayRestore 슬롯 추가 (사용자
-    in-flight 트랙 정착 후)
+deliberate_hold: null
 notes: |
   `restoreBoth` 는 files 먼저, files OK 일 때만 task. files leg 실패 시
   task leg 호출 안 함 (atomic-ish: partial restore 방지). 모든 leg 는

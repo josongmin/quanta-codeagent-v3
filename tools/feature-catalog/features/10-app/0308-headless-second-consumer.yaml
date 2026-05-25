@@ -32,6 +32,9 @@ purpose: |
 evidence:
   code:
     - src/apps/headless/index.ts
+    - src/apps/headless/types.ts
+    - src/apps/headless/fake-deps.ts
+    - src/apps/headless/fake-llm.ts
   adrs:
     - docs/decisions/0308-headless-second-consumer.md
   tests:

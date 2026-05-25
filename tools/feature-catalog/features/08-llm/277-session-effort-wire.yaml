@@ -35,7 +35,7 @@ evidence:
     - src/agent/types.ts
     - src/agent/loop.ts
     - src/runner/assemble/config.ts
-    - src/apps/cli/repl/session-bootstrap.ts
+    - src/apps/cli/repl/session-setup.ts
     - src/apps/cli/repl/session-deps-compose.ts
     - src/apps/cli/repl/session-setup.ts
     - src/apps/cli/repl/slash-surface.ts

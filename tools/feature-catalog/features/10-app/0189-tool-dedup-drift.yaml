@@ -33,7 +33,7 @@ evidence:
   tests:
     unit:
       - tests/unit/observability-tool-dedup-drift-hellgate.test.ts
-      - tests/unit/observability-metrics-tool-dedup-ttl-hellgate.test.ts
+      - tests/unit/observability-tool-dedup-drift-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

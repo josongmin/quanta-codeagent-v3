@@ -4,7 +4,7 @@ section: 1
 subsystem: 훅 채널 (ADR-0055)
 order: 7
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

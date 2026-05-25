@@ -1167,6 +1167,10 @@ export const runInstance = async (
   }
 }
 
+export type { BenchKnobState } from "./knobs-bench"
+// Knob wiring helpers — re-exported for the report path + tests so callers
+// don't have to import from two siblings.
+export { applyBenchKnobs, knobsForReport, readKnobValue, resolveBenchKnobs } from "./knobs-bench"
 // Re-export the observation usage tap so test fixtures and other internals can
 // continue to use bench's typed surface unchanged.
 export { BenchObserver, UsageTap }

@@ -4,7 +4,7 @@ section: 1
 subsystem: 시스템 프롬프트 — 도구 실패 회복 + 분석 multi-step (Codex SKILL.md 흡수, ADR-0062)
 order: 68
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

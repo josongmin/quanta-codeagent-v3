@@ -37,17 +37,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    Wiring into a host (status-flash / REPL / side-conv) is deferred per the
-    helper-only deferred-wire idiom. The primitive ships first; a follow-up ADR
-    adds the consumer once the ROI story is concrete (the two highest-ROI hosts
-    identified during the .extracted_source audit are status flash and the REPL).
-    The sibling ADR-0203 `inline-trigger-watcher.ts` is NOT migrated to consume
-    this primitive — see ADR-0250 Consequences for the rationale.
-  promotion_path: |
-    Follow-up ADR wires status-flash / REPL / side-conv host. Sibling ADR-0203
-    migration evaluated separately per ADR-0250 Consequences.
+deliberate_hold: null
 notes: |
   Why fs.watch and not chokidar: install is blocked in this environment
   (verify-workflow memory). The port surface is unchanged so the swap to

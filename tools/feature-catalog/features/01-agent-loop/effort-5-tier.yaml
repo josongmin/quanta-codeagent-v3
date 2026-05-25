@@ -4,7 +4,7 @@ section: 1
 subsystem: 세션 노브 (ADR-0057)
 order: 8
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

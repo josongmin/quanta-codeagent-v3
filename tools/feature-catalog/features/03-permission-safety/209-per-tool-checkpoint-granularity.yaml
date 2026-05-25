@@ -36,14 +36,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    AgentConfig 슬롯 추가 보류 (사용자 in-flight 트랙 보호). 호출자가
-    `withAutoCheckpoint` 에 명시 주입할 때만 활성. ADR-0210 (3-way restore)
-    가 같은 tag registry 위에 sibling 으로 등록.
-  promotion_path: |
-    1) ADR-0210 wire 합류 후 AgentConfig 슬롯 추가
-    2) Cline /rewind-tool slash command 표면화
+deliberate_hold: null
 notes: |
   4-arm trigger × granularity 호환성 매트릭스는 ADR 본문 표 참조.
   pre-destructive 모드에서는 base가 turn-dedup 으로 거절하면 tool-grain도

@@ -4,7 +4,7 @@ section: 1
 subsystem: 턴 라이프사이클 — cancellation-free 주입
 order: 1
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]

@@ -28,11 +28,18 @@ evidence:
     - src/apps/cli/repl/side-conv-wire.ts
     - src/apps/cli/repl/slash-surface.ts
     - src/apps/cli/repl/surface-compose.ts
+    - src/apps/cli/side-cmd.ts
+    - src/apps/cli/slash-contract.ts
+    - src/runner/side-conversation-port.ts
     - src/runner/orchestrate/side-chat.ts
   adrs:
     - docs/decisions/0304-side-conversation-port.md
   tests:
-    unit: []
+    unit:
+      - tests/unit/apps/cli/side-conv-port-hellgate.test.ts
+      - tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+      - tests/unit/cli/side-cmd.test.ts
+      - tests/unit/cli/wire-tir-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

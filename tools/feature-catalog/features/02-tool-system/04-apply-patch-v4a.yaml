@@ -4,7 +4,7 @@ section: 2
 subsystem: 코드 수정 표면 — V4A diff 포맷
 order: 1
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.patch", "quanta.patch.fuzzy_match_tier", "quanta.patch.fuzzy_matched", "quanta.patch.op"]

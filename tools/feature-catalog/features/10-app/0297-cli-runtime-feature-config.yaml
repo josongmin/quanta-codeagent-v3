@@ -36,7 +36,8 @@ evidence:
   adrs:
     - docs/decisions/0297-cli-runtime-feature-config-unification.md
   tests:
-    unit: []
+    unit:
+      - tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

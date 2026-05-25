@@ -58,7 +58,7 @@ evidence:
     - src/apps/cli/slash/registry-app.ts
     - src/apps/cli/slash/render-helpers.ts
   adrs:
-    - docs/decisions/0302-slash-registry-split.md
+    - docs/decisions/0306-slash-registry-split.md
   tests:
     unit:
       - tests/unit/apps/cli/slash-registry-split-hellgate.test.ts

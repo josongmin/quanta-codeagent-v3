@@ -49,15 +49,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    LspClient (src/lsp/adapters/base.ts) does not yet expose the wire
-    methods needed; default adapters throw not-implemented. Tools
-    catch and return ok:false typed. L3 until the assembly seam
-    (LspClient wire) lands.
-  promotion_path: |
-    A follow-up ADR adds the wire methods to LspClient + connects
-    default-* adapters to real LSP requests; this lifts to L4.
+deliberate_hold: null
 notes: |
   Each tool factory carries its own duck-typed mirror port to keep
   the closed-port boundary clean. 60-case hellgate across the 4 tools

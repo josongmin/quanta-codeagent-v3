@@ -32,10 +32,16 @@ evidence:
     - src/apps/cli/repl/factories/cost-panel.ts
     - src/apps/cli/repl/factories/debug-tracer.ts
     - src/apps/cli/repl/factories/lifecycle.ts
+    - src/apps/cli/repl/factories/metrics-sink.ts
+    - src/apps/cli/repl/factories/plan-store.ts
+    - src/apps/cli/repl/factories/timeline-panel.ts
+    - src/apps/cli/repl/factories/turn-indicator.ts
+    - src/apps/cli/repl/factories/turn-summary.ts
   adrs:
     - docs/decisions/0307-repl-host-slim-down.md
   tests:
-    unit: []
+    unit:
+      - tests/unit/apps/cli/repl-host-slim-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

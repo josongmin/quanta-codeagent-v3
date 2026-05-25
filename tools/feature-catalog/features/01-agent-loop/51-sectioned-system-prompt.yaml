@@ -4,7 +4,7 @@ section: 1
 subsystem: 시스템 프롬프트 — 4-section cache (Claude Desktop 흡수, ADR-0051)
 order: 51
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]

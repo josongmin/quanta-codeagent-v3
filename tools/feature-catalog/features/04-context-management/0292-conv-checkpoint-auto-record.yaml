@@ -35,9 +35,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: 'Slice provides the wire helper + slash + SlashContext slot only. Host REPL bootstrap does not yet construct startConvCheckpointWire({ store }) nor project ctx.convCheckpoint into projectSlashCtx. Until that sibling wire-up lands, /rewind-conv prints "not wired in this surface" + exit 0 (RFC §1.2 byte-identical default-OFF).'
-  promotion_path: 'Add startConvCheckpointWire({ store }) to the host REPL bootstrap (session-bootstrap.ts or session-deps-compose.ts), call wire.recordTurn(messages) at turn-end (turn-runner or session-loop after-turn-success), project ctx.convCheckpoint = { wire, replaceMessages: msgs => historyRef.swap(msgs) } in projectSlashCtx. Add an integration test asserting recordTurn fires after each successful turn.'
+deliberate_hold: null
 notes: |
   Sibling of ADR-0124 (`conversation-checkpoint-store`). Loop is NOT touched —
   the wire is a surface-side observer, not an injected hook. `recordTurn` is

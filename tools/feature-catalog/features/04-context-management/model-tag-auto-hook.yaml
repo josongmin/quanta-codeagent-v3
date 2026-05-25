@@ -34,7 +34,6 @@ evidence:
   adrs:
     - docs/decisions/0273-model-tag-auto-hook.md
     - docs/decisions/0266-model-tag-versioning.md
-    - docs/decisions/0263-embedder-index-storage.md
   tests:
     unit:
       - tests/unit/retrieval/auto-hook-hellgate.test.ts

@@ -4,7 +4,7 @@ section: 1
 subsystem: 에이전트 루프 — 사전 호출 tool_choice 게이트 (ADR-0079)
 order: 79
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]

@@ -24,12 +24,20 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/repl.ts
+    - src/apps/cli/session-import-handler.ts
+    - src/apps/cli/session-list-env.ts
     - src/runner/session-ops/index.ts
   adrs:
     - docs/decisions/0305-cli-session-cmd-shim-removal.md
   tests:
-    unit: []
-    integration: []
+    unit:
+      - tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts
+      - tests/unit/cli-session-commands.test.ts
+    integration:
+      - tests/integration/session-cli-subprocess.test.ts
+      - tests/integration/session-ux-e2e.test.ts
+      - tests/integration/session-chaos-and-attack.test.ts
+      - tests/integration/session-stress-and-concurrent.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

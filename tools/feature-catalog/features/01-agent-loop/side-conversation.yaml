@@ -4,7 +4,7 @@ section: 1
 subsystem: Side-conversation (ADR-0049)
 order: 20
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: [quanta.thread.side, quanta.thread.kind]

@@ -32,7 +32,7 @@ evidence:
     - src/tool/registry.ts
     - src/tool/factory.ts
     - src/tool/output-spill.ts
-    - src/tool/deferred.ts
+    - src/tool/deferred/index.ts
     - src/tool/schema.ts
   adrs: []
   tests:

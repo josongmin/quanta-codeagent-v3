@@ -58,7 +58,7 @@ evidence:
     - src/apps/agent/index.ts
     - src/apps/cli/internal.ts
     - src/apps/cli/repl.ts
-    - src/apps/cli/repl/session-bootstrap.ts
+    - src/apps/cli/repl/session-setup.ts
     - src/apps/cli/repl/session-runtime-config.ts
     - src/apps/cli/repl/session-setup.ts
   adrs:

@@ -30,8 +30,6 @@ evidence:
     - src/retrieval/versioning/index.ts
   adrs:
     - docs/decisions/0266-model-tag-versioning.md
-    - docs/decisions/0254-prompt-cache-pricing.md
-    - docs/decisions/0263-embedder-index-storage.md
   tests:
     unit:
       - tests/unit/retrieval/model-tag-hellgate.test.ts

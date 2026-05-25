@@ -1,7 +1,7 @@
 id: image-vision-tools
 title: read_image + read_image_url + compose helper — vision pipeline
 section: 2
-subsystem: 도구 — vision input (ADR-0126, ADR-0132)
+subsystem: 도구 — vision input (ADR-0126, ADR-0146)
 order: 83
 maturity: L4
 status: stable
@@ -19,7 +19,7 @@ purpose: |
   JPEG / GIF / WEBP signature), enforces a 5 MB cap (Anthropic Messages
   vision raw-byte ceiling), and surfaces it via `ToolResult.images`.
   Security: leaf-symlink reject via `lstat().isSymbolicLink()`. (2)
-  `read_image_url` (ADR-0132) — URL → vision pipeline composing the
+  `read_image_url` (ADR-0146) — URL → vision pipeline composing the
   read_image sniffer + cap with an SSRF denylist mirroring `web_fetch`;
   https-only, DI fetcher seam for tests. (3) `compose.ts` returns ONE of
   two shapes: when `result.images` is absent/empty, the LEGACY string

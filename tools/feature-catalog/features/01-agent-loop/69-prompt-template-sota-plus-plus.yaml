@@ -4,7 +4,7 @@ section: 1
 subsystem: 시스템 프롬프트 — 어휘 차폐 / user-intent / 검증 클레임 / honesty rail (ADR-0067)
 order: 69
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
