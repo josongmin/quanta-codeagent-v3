@@ -234,7 +234,7 @@ describe("why-cmd · argument resolution", () => {
 })
 
 describe("why-cmd · LLM response parsing", () => {
-  test("case 7 — clean JSON renders structured panel", async () => {
+  test("case 7 — clean JSON renders structured panel (full numbering + alts)", async () => {
     const envs = [turnContext("3"), decision("3", "permission", "allow", "ok", "tc_7", 1)]
     const events = textEvents(
       goodJson("Find foo handler", ["1st", "2nd", "3rd"], ["grep", "lsp"], "high"),
@@ -242,10 +242,18 @@ describe("why-cmd · LLM response parsing", () => {
     const r = await runWith("tc_7", envs, events)
     expect(r.exitCode).toBe(0)
     expect(r.text).toContain("Find foo handler")
+    // Pin EVERY numbered reasoning step — a regression that printed only
+    // the first item (single-shot loop) would slip past a `"1. 1st"`-only check.
     expect(r.text).toContain("1. 1st")
+    expect(r.text).toContain("2. 2nd")
+    expect(r.text).toContain("3. 3rd")
+    // Pin both alternatives — a `.map(0)` regression would survive.
     expect(r.text).toContain("- grep")
+    expect(r.text).toContain("- lsp")
     expect(r.text).toContain("high")
     expect(r.tokensUsed).toBe(320)
+    // Negative: an unrelated reasoning step from a prior turn must not bleed in.
+    expect(r.text).not.toContain("4th")
   })
 
   test("case 8 — invalid JSON ⇒ fallback panel with raw text", async () => {
@@ -255,15 +263,28 @@ describe("why-cmd · LLM response parsing", () => {
     expect(r.exitCode).toBe(0)
     expect(r.text).toContain("LLM returned unstructured prose")
     expect(r.text).toContain("hunch")
+    // Negative: the fallback path MUST NOT pretend the parse succeeded —
+    // the structured panel labels ("goal:", "reasoning:", "considered:")
+    // must be absent in their column-formatted form. The header word
+    // "Goal" by itself is too generic and may appear in fallback narrative,
+    // so pin the column shape "Goal" + colon.
+    expect(r.text).not.toMatch(/^\s*Goal\s*:/m)
+    expect(r.text).not.toMatch(/^\s*Reasoning\s*:/m)
   })
 
   test("case 9 — markdown ```json … ``` fence is stripped + parsed", async () => {
     const envs = [turnContext("3"), decision("3", "permission", "allow", "ok", "tc_9", 1)]
-    const fenced = `\`\`\`json\n${goodJson("after-fence-goal", ["a"])}\n\`\`\``
+    const fenced = `\`\`\`json\n${goodJson("after-fence-goal", ["a-step"])}\n\`\`\``
     const r = await runWith("tc_9", envs, textEvents(fenced))
     expect(r.exitCode).toBe(0)
     expect(r.text).toContain("after-fence-goal")
     expect(r.text).not.toContain("```")
+    // Stronger: the structured-panel reasoning step survives the fence
+    // strip, which proves parseReasoning saw clean JSON (not a fallback
+    // that happened to substring-match the goal).
+    expect(r.text).toContain("a-step")
+    // Negative: the bare token "json" (from the fence tag) must not leak.
+    expect(r.text).not.toMatch(/^json\b/m)
   })
 
   test("case 10 — LLM throw ⇒ 'meta query failed' + exit 1", async () => {
@@ -300,7 +321,10 @@ describe("why-cmd · LLM response parsing", () => {
     const events = textEvents(goodJson("?", ["maybe"], [], "low"))
     const r = await runWith("tc_11", envs, events)
     expect(r.exitCode).toBe(0)
-    expect(r.text).toContain("low")
+    // "low" matches "below", "yellow", "blowing", etc. Pin the column
+    // shape (e.g., "confidence: low" or "low — uncertain") so a label
+    // regression that just printed "below threshold" cannot pass.
+    expect(r.text).toMatch(/\blow\b/)
     expect(r.text).toContain("uncertain")
   })
 
@@ -330,8 +354,14 @@ describe("why-cmd · output shaping", () => {
     const events = textEvents(goodJson(longGoal, ["r"]))
     const r = await runWith("tc_14", envs, events)
     expect(r.exitCode).toBe(0)
+    // Verbatim run absent; the rendered line that holds the goal must fit
+    // within a reasonable per-line cap.
     expect(r.text).not.toContain("x".repeat(800))
-    expect(r.text).toContain("more")
+    // "more" alone matches "moreover" / "somemore". Pin the shape: either
+    // an ellipsis char or a "(N more chars)" suffix.
+    expect(r.text).toMatch(/…|\(\d+\s*more/)
+    const longestLine = r.text.split("\n").reduce((a, b) => (a.length > b.length ? a : b), "")
+    expect(longestLine.length).toBeLessThan(800)
   })
 
   test("case 15 — tokensUsed reflects usage event sum", async () => {
@@ -343,7 +373,11 @@ describe("why-cmd · output shaping", () => {
     ]
     const r = await runWith("tc_15", envs, events)
     expect(r.tokensUsed).toBe(100)
-    expect(r.text).toContain("100 tokens")
+    // "100 tokens" matches "100 tokens consumed"; pin with a word boundary
+    // so a regression that printed "1000 tokens" wouldn't slide.
+    expect(r.text).toMatch(/\b100 tokens\b/)
+    // Negative: must not double-count.
+    expect(r.text).not.toMatch(/\b200 tokens\b/)
   })
 })
 
@@ -370,6 +404,11 @@ describe("why-cmd · prompt cap (privacy + cost)", () => {
     expect(userText).toContain("msg-D")
     // The oldest message MUST be capped out — only the last 3 survive.
     expect(userText).not.toContain("msg-A: first old query")
+    expect(userText).not.toContain("msg-A")
+    // Stronger: ONLY ONE messages[0] block reaches the LLM (the meta-prompt
+    // is a single text block, not a re-sent conversation). A regression
+    // that forwarded the whole transcript would inflate this count.
+    expect(r.capturedInput?.messages?.length).toBe(1)
   })
 
   test("case 17 — secret-shape values in tool_invoke input are redacted on the wire", async () => {
@@ -390,9 +429,14 @@ describe("why-cmd · prompt cap (privacy + cost)", () => {
     expect(r.exitCode).toBe(0)
     const block = r.capturedInput?.messages?.[0]?.content?.[0]
     const userText = block && block.type === "text" ? block.text : ""
-    // Verbatim secret value MUST NOT cross the host boundary.
+    // Verbatim secret value MUST NOT cross the host boundary. Pin both the
+    // prefixed form and the bare tail — a redactor that stripped only
+    // "Bearer " but left the secret would still fail this.
     expect(userText).not.toContain("sk-proj-abcdefghij1234567890")
+    expect(userText).not.toContain("abcdefghij1234567890")
     expect(userText).toContain("REDACTED")
+    // Positive: non-secret URL still passes through (no over-redact).
+    expect(userText).toContain("api.example.com")
   })
 })
 

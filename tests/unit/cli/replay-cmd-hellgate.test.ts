@@ -222,10 +222,16 @@ describe("/replay hellgate (ADR-0243)", () => {
     // header + footer
     expect(text).toContain("── replay session")
     expect(text).toMatch(/── replay done · 14 frames/)
-    // tool ids appear in order
+    // tool ids appear in order — first occurrence index strictly increasing
     const positions = ["tc_7a", "tc_7b", "tc_7c", "tc_7d", "tc_7e"].map((id) => text.indexOf(id))
     for (let i = 1; i < positions.length; i++) {
       expect(positions[i]).toBeGreaterThan(positions[i - 1] as number)
+    }
+    // Negative: zero-padding regressions or dropped frames — every id must
+    // appear at LEAST once (catches a partial-filter bug masking framesRendered).
+    for (const id of ["tc_7a", "tc_7b", "tc_7c", "tc_7d", "tc_7e"]) {
+      expect(positions[positions.indexOf(text.indexOf(id))]).toBeGreaterThanOrEqual(0)
+      expect(text).toContain(id)
     }
   })
 
@@ -323,15 +329,20 @@ describe("/replay hellgate (ADR-0243)", () => {
     expect(sleeps).toBe(0)
   })
 
-  test("HELL-REPLAY-13: pacing intervalMs=50 ⇒ sleep called N-1 times", async () => {
+  test("HELL-REPLAY-13: pacing intervalMs=50 ⇒ sleep called N-1 times w/ exact ms", async () => {
     let sleeps = 0
-    const sleep = async (_ms: number): Promise<void> => {
+    const sleepMsArgs: number[] = []
+    const sleep = async (ms: number): Promise<void> => {
       sleeps += 1
+      sleepMsArgs.push(ms)
     }
     const { opts } = baseOpts(turn3Fourteen.slice(0, 5)) // 5 frames
     const r = await runReplayCmd("01HXY", { ...opts, pace: { sleep, intervalMs: 50 } })
     expect(r.framesRendered).toBe(5)
     expect(sleeps).toBe(4) // N-1 = 5-1
+    // Pin the ms argument too — a regression that called sleep with the
+    // frame index (or wall-clock delta) would pass the count-only assert.
+    for (const ms of sleepMsArgs) expect(ms).toBe(50)
   })
 
   test("HELL-REPLAY-14: non-event records fall back without crashing", async () => {
@@ -374,7 +385,23 @@ describe("/replay hellgate (ADR-0243)", () => {
     const line = formatReplayLine(env, { color: false })
     // length is 19 → `token=19B`
     expect(line).toContain("token=19B")
+    // Three negative pins covering every leak vector:
+    //   1) the raw secret tail
+    //   2) the `sk-` prefix (matches by-shape)
+    //   3) any 16+ char hex/alnum substring of the token
     expect(line).not.toContain("ABCDEF0123456789")
+    expect(line).not.toContain("sk-ABCDEF0123456789")
+    expect(line).not.toMatch(/ABCDEF[0-9A-F]{6,}/)
+  })
+
+  test("HELL-REPLAY-17b: secret-shape `password` key is also length-only", async () => {
+    const env = toolInvoke("3", FIXED_TS, "Bash", "tc_sec2", {
+      password: "p@ssw0rd-very-secret-1234",
+    })
+    const line = formatReplayLine(env, { color: false })
+    expect(line).toContain("password=")
+    expect(line).toContain("B")
+    expect(line).not.toContain("p@ssw0rd-very-secret-1234")
   })
 
   test("HELL-REPLAY-18: 2_000-event iterator processed without buffering", async () => {
@@ -440,6 +467,25 @@ describe("/replay hellgate (ADR-0243)", () => {
     test("HELL-REPLAY-PARSE-04: unknown flag ⇒ err", () => {
       const r = replayInternals.parseReplayArgs(["sid", "--bogus"])
       expect(r.kind).toBe("err")
+    })
+    test("HELL-REPLAY-PARSE-05: --at negative integer ⇒ err", () => {
+      const r = replayInternals.parseReplayArgs(["sid", "--at", "-1"])
+      expect(r.kind).toBe("err")
+    })
+    test("HELL-REPLAY-PARSE-06: --from empty string value ⇒ err", () => {
+      const r = replayInternals.parseReplayArgs(["sid", "--from", ""])
+      expect(r.kind).toBe("err")
+    })
+    test("HELL-REPLAY-PARSE-07: bare unknown flag is currently parsed as sessionId (KNOWN HOLE)", () => {
+      // FINDING: parseReplayArgs accepts `--bogus` as the session-id positional
+      // because the positional check comes before any flag validation. This
+      // is a real prod hole (a user typo gets a silent "session ./--bogus
+      // not found" downstream). Documented here without prod mutation; fix
+      // belongs in a follow-up commit that rejects positionals starting with
+      // `--`.
+      const r = replayInternals.parseReplayArgs(["--bogus"])
+      expect(r.kind).toBe("ok")
+      if (r.kind === "ok") expect(r.sessionId).toBe("--bogus")
     })
     test("happy path: sid + --at 3 + --from tc_7a", () => {
       const r = replayInternals.parseReplayArgs(["sid", "--at", "3", "--from", "tc_7a"])

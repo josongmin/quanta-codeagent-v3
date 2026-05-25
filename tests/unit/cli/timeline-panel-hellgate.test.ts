@@ -81,18 +81,17 @@ describe("timeline-panel hellgate", () => {
       color: false,
     })
     for (let i = 1; i <= 10; i++) panel.emit(turnEvent(i))
+    // Capture the most recent repaint frame BEFORE teardown wipes the
+    // panel — the original "writes.length - 2" was fragile (teardown
+    // emits more than one chunk). Find the last paint chunk that contains
+    // ANY `turn N` substring.
+    const lastPaint = [...sink.writes].reverse().find((w) => /turn \d+/.test(stripCsi(w))) ?? ""
     panel.teardown()
-    // Concatenate every write and ask: do we see "turn 6..10" but NOT "turn 1..5"
-    const all = sink.writes.join("")
-    const visible = stripCsi(all)
-    for (let i = 6; i <= 10; i++) expect(visible).toContain(`turn ${i}`)
-    // The early events MUST have been overwritten by the ring trim — they
-    // may appear in earlier paint frames but the FINAL frame (last paint
-    // before teardown) must not. Easiest: check the last paint chunk.
-    const lastPaint = sink.writes[sink.writes.length - 2] ?? "" // teardown is the last
     const lastVisible = stripCsi(lastPaint)
-    expect(lastVisible).not.toContain("turn 1 ")
-    expect(lastVisible).not.toContain("turn 5 ")
+    for (let i = 6; i <= 10; i++) expect(lastVisible).toContain(`turn ${i}`)
+    // Whole 1..5 window absent — catches off-by-one trims (drop newest /
+    // mid-trim / dup-trim) that the original test missed.
+    for (let i = 1; i <= 5; i++) expect(lastVisible).not.toContain(`turn ${i} `)
   })
 
   test("install + emit only writes DECSTBM + paint frames (status bar row untouched)", () => {
@@ -112,6 +111,12 @@ describe("timeline-panel hellgate", () => {
       // Status bar row is `rows = 20` → `\x1b[20;1H` would be a violation.
       expect(chunk).not.toContain("\x1b[20;1H")
     }
+    // Install MUST have emitted the exact DECSTBM region for the geometry:
+    // [1, rows - height - 1] = [1, 16]. Catches a regression where the pin
+    // is computed as `rows - height` (status bar swallowed by region) or
+    // `rows` (full screen scroll = panel band scrolls too).
+    const all = sink.writes.join("")
+    expect(all).toContain("\x1b[1;16r")
     panel.teardown()
   })
 
@@ -346,10 +351,50 @@ describe("timeline-panel hellgate", () => {
     // Only the newest 2 events should be in the final paint.
     expect(all).toContain("turn 4")
     expect(all).toContain("turn 5")
-    // The oldest events must NOT survive the trim.
-    expect(all).not.toContain("turn 1")
-    expect(all).not.toContain("turn 2")
+    // The oldest events must NOT survive the trim — assert ALL THREE
+    // (1, 2, AND 3) are gone, not just the two extremes. Catches a "drop
+    // middle" off-by-one regression.
+    expect(all).not.toContain("turn 1 ")
+    expect(all).not.toContain("turn 2 ")
+    expect(all).not.toContain("turn 3 ")
     panel.teardown()
+  })
+
+  test("install emits the precise DECSTBM region [1, rows-height-1]", () => {
+    // Cover several geometries — a regression that swapped `- 1` for `- 2`
+    // (status bar row miscounted) would slip past a single-geometry pin.
+    const cases: Array<{ rows: number; height: number; want: string }> = [
+      { rows: 20, height: 3, want: "\x1b[1;16r" },
+      { rows: 30, height: 5, want: "\x1b[1;24r" },
+      { rows: 10, height: 1, want: "\x1b[1;8r" },
+    ]
+    for (const c of cases) {
+      const sink = makeFakeSink()
+      const panel = createTimelinePanel({
+        height: c.height,
+        geometry: () => ({ rows: c.rows, cols: 80 }),
+        write: sink.write,
+        now: () => 0,
+        color: false,
+      })
+      expect(sink.writes.join("")).toContain(c.want)
+      panel.teardown()
+    }
+  })
+
+  test("teardown is idempotent (second call ⇒ no new writes)", () => {
+    const sink = makeFakeSink()
+    const panel = createTimelinePanel({
+      height: 3,
+      geometry: () => ({ rows: 20, cols: 80 }),
+      write: sink.write,
+      now: () => 0,
+      color: false,
+    })
+    panel.teardown()
+    const afterFirst = sink.writes.length
+    panel.teardown()
+    expect(sink.writes.length).toBe(afterFirst) // second teardown is a no-op
   })
 
   test("onResize to sub-floor geometry tears the panel down cleanly", () => {

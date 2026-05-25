@@ -124,6 +124,13 @@ describe("Track I — `/inspect` is wired into BUILTINS", () => {
     expect(entry?.category).toBe("session")
   })
 
+  test("`/inspect` is registered exactly once in BUILTINS (no duplicate slot)", () => {
+    // Catches a merge-conflict mistake where /inspect ends up wired twice
+    // (which would then double-dispatch on every call).
+    const matches = BUILTINS.filter((c) => c.name === "/inspect")
+    expect(matches.length).toBe(1)
+  })
+
   test("SlashContext.inspect slot exists at the type level", () => {
     // Compile-time invariant: assignment to a typed local fails if the slot
     // is missing. The bare cast through `Partial` keeps this a structural
@@ -172,6 +179,11 @@ describe("Track R — `/replay` is wired into BUILTINS", () => {
     const entry = BUILTINS.find((c) => c.name === "/replay")
     expect(entry).toBeDefined()
     expect(entry?.category).toBe("history")
+  })
+
+  test("`/replay` is registered exactly once in BUILTINS", () => {
+    const matches = BUILTINS.filter((c) => c.name === "/replay")
+    expect(matches.length).toBe(1)
   })
 
   test("SlashContext.replay slot exists at the type level", () => {
@@ -229,8 +241,15 @@ describe("Track R — `/replay` dispatcher behavior", () => {
     expect(sinks.out).toContain("replay session")
     // body
     expect(sinks.out).toContain("user_message")
-    // footer
-    expect(sinks.out).toContain("2 frames")
+    // footer — pin the digit so a regression that printed "0 frames" + skipped
+    // the body would still fail.
+    expect(sinks.out).toMatch(/\b2 frames\b/)
+    // Negative: error sink stayed empty on the happy path.
+    expect(sinks.err).toBe("")
+    // body lines for both yielded envelopes — the user_message label must
+    // appear at LEAST twice (one per frame).
+    const occurrences = sinks.out.split("user_message").length - 1
+    expect(occurrences).toBeGreaterThanOrEqual(2)
   })
 
   test("malformed --at flag ⇒ exit 1 + error", async () => {
@@ -311,18 +330,31 @@ describe("Track T — `buildTimelinePanelAndStream` boot toggle", () => {
   })
 
   test("TTY + QUANTA_TIMELINE=5 ⇒ panel allocated + tee stream returned", () => {
+    let baseEmits = 0
+    const countingBase: StreamPort = {
+      emit: () => {
+        baseEmits += 1
+      },
+    }
     const { stream, panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
+      countingBase,
       { QUANTA_TIMELINE: "5" },
       true,
     )
     expect(panel).toBeDefined()
-    expect(stream).not.toBe(baseStream)
-    // Emitting through the tee must reach the panel (and the original sink).
+    expect(stream).not.toBe(countingBase)
+    // Emitting through the tee must reach the panel AND the original sink
+    // exactly once each. Catches a tee-emit doubling regression where the
+    // panel sees 2 emits for a single dispatch.
     const evt: AgentEvent = { type: "session_start", sessionId: "x" } as AgentEvent
     stream.emit(evt)
     const p = panel as unknown as { _emits: () => number }
-    expect(p._emits()).toBeGreaterThanOrEqual(1)
+    expect(p._emits()).toBe(1)
+    expect(baseEmits).toBe(1)
+    // Emit a second time and prove both fan out symmetrically (each = 2).
+    stream.emit(evt)
+    expect(p._emits()).toBe(2)
+    expect(baseEmits).toBe(2)
   })
 
   test("TTY + QUANTA_TIMELINE=10.7 ⇒ floored to integer + panel allocated", () => {

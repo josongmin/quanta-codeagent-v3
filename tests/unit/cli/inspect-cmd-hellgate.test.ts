@@ -182,8 +182,14 @@ describe("inspect-cmd · core matching", () => {
     expect(r.exitCode).toBe(0)
     expect(r.text).toContain("Read")
     expect(r.text).toContain("src/foo.ts")
-    expect(r.text).toContain("ok")
+    // The two-letter "ok" substring is too generic; pin the specific
+    // structured form the renderer emits (column-separated " · ok · " or
+    // a "ok=true" k=v shape).
+    expect(r.text).toMatch(/[·:] ok |ok=true/)
     expect(r.text).toContain("export const x")
+    // Negative: failure label MUST NOT bleed into this success render.
+    expect(r.text).not.toContain("ok=false")
+    expect(r.text).not.toMatch(/ fail | error /)
   })
 
   test("case 3 — custom event matched via data.id", async () => {
@@ -278,9 +284,13 @@ describe("inspect-cmd · sanitisation + truncation", () => {
     ]
     const r = await runWith("tc_sec", envs)
     expect(r.exitCode).toBe(0)
-    // Verbatim secret values must not leak.
+    // Verbatim secret values must not leak — assert the *raw token tail* is
+    // gone, not just the full prefixed string (catches a "strip Bearer
+    // word, leak the rest" regression).
     expect(r.text).not.toContain("Bearer abc123def456ghi789")
+    expect(r.text).not.toContain("abc123def456ghi789")
     expect(r.text).not.toContain("sk-proj-abcdefghij1234567890")
+    expect(r.text).not.toContain("abcdefghij1234567890")
     // Redaction marker should be present somewhere in the metadata column.
     expect(r.text).toContain("REDACTED")
     // Non-secret keys pass through unchanged.
@@ -296,6 +306,22 @@ describe("inspect-cmd · sanitisation + truncation", () => {
     const r = await runWith("tc_color", envs, { color: false })
     expect(r.exitCode).toBe(0)
     expect(ANSI_RE.test(r.text)).toBe(false)
+    // Stronger: count ESC bytes — leak even ONE byte and we fail.
+    const ESC = String.fromCharCode(0x1b)
+    expect(r.text.split(ESC).length - 1).toBe(0)
+  })
+
+  test("case 9b — color=true emits ANSI escapes (inverse of 9)", async () => {
+    const envs = [
+      decision("3", "permission", "deny", "blocked", "tc_color2"),
+      toolInvoke("3", "Bash", { cmd: "echo" }, 1),
+      toolResult("3", "Bash", true, "ok", 4),
+    ]
+    const r = await runWith("tc_color2", envs, { color: true })
+    expect(r.exitCode).toBe(0)
+    // Inverse pin — guarantees the painter is wired (a regression that
+    // pinned color=false everywhere would silently be masked by case 9).
+    expect(ANSI_RE.test(r.text)).toBe(true)
   })
 
   test("case 10 — 500-char decision reason truncates with ellipsis marker", async () => {
@@ -305,7 +331,15 @@ describe("inspect-cmd · sanitisation + truncation", () => {
     expect(r.exitCode).toBe(0)
     // The full untruncated reason must NOT appear verbatim.
     expect(r.text).not.toContain("x".repeat(800))
-    expect(r.text).toContain("more")
+    // "more" alone matches "moreover" / "smore" / etc. Pin the truncation
+    // marker shape: either an ellipsis char or a "(N more chars)" suffix
+    // followed by a digit.
+    expect(r.text).toMatch(/…|\(\d+\s*more/)
+    // The truncated visible body should still fit in the line cap
+    // (TRUNCATE_DEFAULT = 200; reason cap = 500). Length of the FULL line
+    // containing the long reason must be < 800 (catches `trunc` no-op).
+    const longestLine = r.text.split("\n").reduce((a, b) => (a.length > b.length ? a : b), "")
+    expect(longestLine.length).toBeLessThan(800)
   })
 })
 
@@ -327,6 +361,15 @@ describe("inspect-cmd · multi-record + ordering", () => {
     expect(hookIdx).toBeGreaterThan(ruleIdx)
     expect(r.text).toContain("r1")
     expect(r.text).toContain("h1")
+    // Reasons are also rendered in arrival order. A regression that sorted
+    // by gate name alphabetically would put hook before permission and
+    // pass the substring checks above — pin reason ordering too.
+    const pOk = r.text.indexOf("p-ok")
+    const rOk = r.text.indexOf("r-ok")
+    const hAsk = r.text.indexOf("h-ask")
+    expect(pOk).toBeGreaterThan(-1)
+    expect(rOk).toBeGreaterThan(pOk)
+    expect(hAsk).toBeGreaterThan(rOk)
   })
 
   test("case 12 — same toolCallId in two different turns ⇒ two occurrences", async () => {
@@ -441,5 +484,12 @@ describe("inspect-cmd · projector unit coverage", () => {
     expect(inspectTest.fmtSize(0)).toBe("0B")
     expect(inspectTest.fmtSize(1500)).toBe("1.5KB")
     expect(inspectTest.fmtSize(2 * 1024 * 1024)).toBe("2.0MB")
+  })
+
+  test("fmtSize boundary at 1023/1024 byte transition", () => {
+    // 1023 ⇒ still B suffix; 1024 ⇒ flips to KB. A `<= 1024` regression
+    // (off-by-one in the branch threshold) would slip past 1500-only tests.
+    expect(inspectTest.fmtSize(1023)).toBe("1023B")
+    expect(inspectTest.fmtSize(1024)).toBe("1.0KB")
   })
 })
