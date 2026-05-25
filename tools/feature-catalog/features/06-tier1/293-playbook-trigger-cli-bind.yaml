@@ -1,0 +1,40 @@
+id: playbook-trigger-cli-bind
+title: Playbook inline-trigger CLI auto-bind opt-in
+section: 6
+subsystem: Playbook + CLI surface (ADR-0293)
+order: 293
+maturity: L2
+status: stable
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:1", "default-off", "closes:adr-0203-gap"]
+depends_on: ["user-authored-playbook-frontmatter", "playbook-auto-dispatch-git-directive-completion"]
+purpose: |
+  Closes ADR-0203/0240's last unwired hop: the `AgentConfig.playbookTrigger`
+  slot is now reachable via `--playbook-trigger` flag OR
+  `QUANTA_PLAYBOOK_TRIGGER=on` env (env wins). `maybeStartPlaybookTriggerWire`
+  in `apps/cli/repl/playbook-trigger-wire.ts` constructs an FS watcher
+  rooted at `<cwd>/.quanta/playbooks` and returns a typed
+  `PlaybookTriggerWireHandle` (stop + isActive). Sibling surface seam
+  `createPlaybookTriggerSurfaceSeam()` owns at-most-one live handle for
+  session lifecycle attach/detach. Default-OFF byte-identical: absent
+  env + flag ⇒ shared frozen NOOP singleton (zero allocation). No-throw
+  on every public surface; registry root missing / sink throws ⇒ logger
+  warn + NOOP. Registry-from-disk scan is intentionally deferred — empty
+  registry placeholder keeps the wire correct but inert until a follow-up
+  PR injects real registrations.
+evidence:
+  code:
+    - src/apps/cli/repl/playbook-trigger-wire.ts
+    - src/apps/cli/repl/playbook-trigger-surface-seam.ts
+    - src/apps/agent/cli-args.ts
+  tests:
+    unit:
+      - tests/unit/playbook-trigger-cli-bind-hellgate.test.ts
+    integration: []
+    contract: []
+  adrs:
+    - docs/decisions/0293-playbook-trigger-cli-bind.md

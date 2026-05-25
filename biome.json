@@ -1113,7 +1113,8 @@
         "!tests/integration/skills-slash-e2e-hellgate.test.ts",
         "!tests/integration/composition-root-wire-hellgate.test.ts",
         "!tests/integration/decision-tracer-e2e-hellgate.test.ts",
-        "!tests/integration/debug-cli-surface-e2e-hellgate.test.ts"
+        "!tests/integration/debug-cli-surface-e2e-hellgate.test.ts",
+        "!tests/unit/playbook-trigger-cli-bind-hellgate.test.ts"
       ],
       "linter": {
         "rules": {

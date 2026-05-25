@@ -81,6 +81,12 @@ export interface AgentArgs {
    *  Default behaviour today is already OFF; this flag is the explicit
    *  hard-OFF for hosts that DO wire it by default in a future round. */
   noAutoBackground?: boolean
+  /** ADR-0293 — `--playbook-trigger`. When present, the CLI host's
+   *  `maybeStartPlaybookTriggerWire` opts in to the inline-trigger watcher
+   *  (ADR-0203 / ADR-0240) for the session. Env `QUANTA_PLAYBOOK_TRIGGER=on`
+   *  has the same effect and WINS over a missing flag. Default-OFF: absent
+   *  ⇒ no watcher, byte-identical to legacy. */
+  playbookTrigger?: boolean
 }
 
 /** ADR-0236 — closed set of tool-profile names accepted on `--tool-profile`. */
@@ -283,6 +289,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   let identityMode: IdentityModeToken | undefined
   let focusChainEvery: number | undefined
   let noAutoBackground = false
+  let playbookTrigger = false
   const dials: Partial<BudgetDials> = {}
 
   // Audit R2: duplicate-flag guard. None of our flags are repeatable, so the
@@ -444,6 +451,12 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
       continue
     }
 
+    if (a === "--playbook-trigger") {
+      playbookTrigger = true
+      i += 1
+      continue
+    }
+
     if (isDialFlag(a)) {
       const raw = takeValue(argv, i, a)
       const key = DIAL_FLAG_MAP[a]
@@ -501,6 +514,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   if (identityMode !== undefined) out.identityMode = identityMode
   if (focusChainEvery !== undefined) out.focusChainEvery = focusChainEvery
   if (noAutoBackground) out.noAutoBackground = true
+  if (playbookTrigger) out.playbookTrigger = true
   return out
 }
 
@@ -550,6 +564,8 @@ COMPOSITION-ROOT MEGA-WIRE (ADR-0236 — all default-OFF; absent ⇒ slot omitte
   --identity-mode <m>     One of ${VALID_IDENTITY_MODES.join("|")} (ADR-0211)
   --focus-chain-every <N> Re-inject todos every N turns (>0, ADR-0219)
   --no-auto-background    Force auto-background OFF (ADR-0223)
+  --playbook-trigger      Opt in to inline-trigger watcher (ADR-0293; or
+                          set QUANTA_PLAYBOOK_TRIGGER=on)
 
 NOTES
   • Defaults flow from per-mode BUDGET_PRESETS via the assembler — this
