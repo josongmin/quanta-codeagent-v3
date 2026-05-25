@@ -1,6 +1,6 @@
 /**
  * `DecisionEmitter` — narrow port for the gate-decision stream (Phase 2 of
- * ADR-0239, follow-up ADR-0260).
+ * ADR-0239, follow-up ADR-0267).
  *
  * Why a SEPARATE port from {@link StreamPort}: the `decision` AgentEvent
  * variant is rendered by the stdout adapter + persisted by the jsonl-recorder

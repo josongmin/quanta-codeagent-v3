@@ -1,4 +1,4 @@
-# ADR-0260: `decision` event emit — Phase 2 wire-up at the admissibility gate
+# ADR-0267: `decision` event emit — Phase 2 wire-up at the admissibility gate
 
 - **Status**: Accepted
 - **Date**: 2026-05-25

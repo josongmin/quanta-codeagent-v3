@@ -114,7 +114,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
   registry: ToolRegistry
   stream: StreamPort
   /**
-   * ADR-0260 (Phase 2 of ADR-0239) — narrow side-channel for gate-decision
+   * ADR-0267 (Phase 2 of ADR-0239) — narrow side-channel for gate-decision
    * events. SEPARATE from `stream` on purpose: the `decision` AgentEvent
    * variant is rendered by the stdout adapter + persisted by the JSONL
    * recorder the moment it lands on `stream`, so routing decisions through
