@@ -15,6 +15,7 @@ import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RejectCounter } from "../reject-counter"
 import { installStatusBar, type StatusBar } from "../status-bar"
 import type { createStatusPills } from "../status-pills"
+import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
 import {
@@ -66,6 +67,19 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
     envSource: NodeJS.ProcessEnv,
     isTTY: boolean | undefined,
   ) => { stream: StreamPort; debugHandle: DebugTracerHandle | undefined }
+  /** Track T — build the timeline panel + tee-wrap the stream. Returns
+   *  `{stream, panel: undefined}` (literal input ref) when
+   *  `QUANTA_TIMELINE` is unset / 0 / non-finite OR stderr is not a TTY,
+   *  so the tee consumer count is byte-identical to pre-T code; returns a
+   *  wrapped stream + a live panel when enabled so the ring-buffer
+   *  receives every `AgentEvent`. The host calls `panel.teardown()` in
+   *  its `runRepl` `finally` so a follow-on shell prompt lands on a
+   *  clean screen. */
+  readonly buildTimelinePanelAndStream: (
+    stream: StreamPort,
+    envSource: NodeJS.ProcessEnv,
+    isTTY: boolean | undefined,
+  ) => { stream: StreamPort; panel: TimelinePanel | undefined }
   /** Install the status pills row (workspace / mode+effort / skills / sandbox). */
   readonly installPills: (args: {
     statusBar: StatusBar
@@ -108,6 +122,12 @@ export interface SessionSetupResult {
   /** Track D — present iff `QUANTA_DEBUG` enabled the debug tracer at
    *  boot AND stderr is a TTY. Absent ⇒ `/debug` slash prints "not wired". */
   readonly debugHandle: DebugTracerHandle | undefined
+  /** Track T — present iff `QUANTA_TIMELINE=<N>` (N > 0) enabled the
+   *  ring-buffer panel at boot AND stderr is a TTY. The host calls
+   *  `panel.teardown()` in `runRepl`'s `finally` so subsequent prompts
+   *  land on a clean screen. Absent ⇒ no tee allocated (byte-identical
+   *  default-OFF). */
+  readonly timelinePanel: TimelinePanel | undefined
   readonly sessionDeps: SessionDeps
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
@@ -154,9 +174,19 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     runtime.env,
     process.stderr.isTTY,
   )
+  // Track T — interpose the timeline panel AFTER the debug tracer and
+  // BEFORE the indicator so the ring buffer sees the same upstream
+  // events both consumers do. When `QUANTA_TIMELINE` is unset / 0 /
+  // non-TTY the builder returns the literal `debugStream` + `panel:
+  // undefined` ⇒ byte-identical to pre-T code (no extra tee).
+  const { stream: timelineStream, panel: timelinePanel } = deps.buildTimelinePanelAndStream(
+    debugStream,
+    runtime.env,
+    process.stderr.isTTY,
+  )
   const { indicator: turnIndicator, turnStream } = deps.buildTurnIndicatorAndStream(
     statusBar,
-    debugStream,
+    timelineStream,
     runtime.env,
     runtime.stdoutIsTTY,
     runtime.spinnerIntervalMs,
@@ -203,6 +233,7 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     turnIndicator,
     turnSummary,
     debugHandle,
+    timelinePanel,
     sessionDeps,
     costPanel: boot.costPanel,
     branchProgress: boot.branchProgress,

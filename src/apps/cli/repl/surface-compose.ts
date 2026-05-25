@@ -1,5 +1,6 @@
 import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
+import type { SessionEnvelopeRecord } from "@/session"
 import type { ImageQueue } from "../image-queue"
 import { env } from "../internal"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
@@ -8,7 +9,7 @@ import type { StatusBar } from "../status-bar"
 import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
 import { buildSkillsCallback } from "./skills-surface"
-import { buildReplSlashCtx } from "./slash-surface"
+import { buildReplSlashCtx, type ReplaySlashState } from "./slash-surface"
 
 export interface PromptUxOpts {
   readonly promptHistory?: PromptHistory
@@ -58,6 +59,32 @@ export const createSurfaceState = (args: {
   costDeltaPrev: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
 })
 
+/** Track R — build the `/replay` resolver+iterator pair. Default reader is
+ *  lazy-imported so `@/session` is not pulled into the boot path for users
+ *  who never type `/replay`. The composer un-wraps the {@link iterateSessionFile}
+ *  `Result` shape into a bare `AsyncIterable<SessionEnvelopeRecord>` — decode
+ *  errors are silently skipped (the projector inside `/inspect` surfaces
+ *  warnings; `/replay` is a one-line-per-event view that simply omits the bad
+ *  row). The resolver returns `undefined` when the path doesn't exist so the
+ *  command renders "session <id> not found" + exit 1. */
+const buildReplaySlashState = (): ReplaySlashState => ({
+  resolveSession: async (id: string): Promise<string | undefined> => {
+    const { sessionEnvelopePath } = await import("@/session")
+    const path = sessionEnvelopePath(id)
+    const file = Bun.file(path)
+    return (await file.exists()) ? path : undefined
+  },
+  iterate: (path: string): AsyncIterable<SessionEnvelopeRecord> => {
+    const inner = async function* (): AsyncIterable<SessionEnvelopeRecord> {
+      const { iterateSessionFile } = await import("@/session")
+      for await (const r of iterateSessionFile(path)) {
+        if (r.ok) yield r.value
+      }
+    }
+    return inner()
+  },
+})
+
 export const composeSurfaceSlashCtx = (setup: SessionSetupResult, state: SurfaceState) =>
   buildReplSlashCtx({
     skillsCb: buildSkillsCallback(setup.skillsConfig),
@@ -78,6 +105,17 @@ export const composeSurfaceSlashCtx = (setup: SessionSetupResult, state: Surface
     llm: setup.llm,
     sessionId: setup.sessionId,
     model: setup.model,
+    // Track I — `/inspect` wire. Empty session id ⇒ omit so the slash
+    // exits 1 with "no active session" (parity with surface-only cmds
+    // needing a session).
+    inspect:
+      typeof setup.sessionId === "string" && setup.sessionId.length > 0
+        ? { sessionId: setup.sessionId }
+        : undefined,
+    // Track R — `/replay` resolver+iterator (default-ON wire; the slash
+    // still 1-arg-required and renders "session not found" when the id
+    // doesn't resolve).
+    replay: buildReplaySlashState(),
   })
 
 const foldCostPanelDelta = (

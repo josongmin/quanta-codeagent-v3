@@ -117,6 +117,10 @@ describe("BUILTINS table", () => {
       // Track D — `/debug` developer-mode tracer runtime toggle. Pinned
       // at the END so all prior slot anchors stay intact.
       "/debug",
+      // Track I/R — `/inspect` (ADR-0239 follow-up) + `/replay` appended
+      // after `/debug`. Slot pinning is unchanged for every entry above.
+      "/inspect",
+      "/replay",
     ])
   })
 })

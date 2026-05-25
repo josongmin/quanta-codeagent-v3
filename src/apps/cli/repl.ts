@@ -44,6 +44,7 @@ import { createCliRewindGitPort, isCliRewindGitEnabled } from "./rewind-git"
 import { runSessionCommand } from "./session-commands"
 import { runSlashCommand, slashCompleter } from "./slash-commands"
 import type { StatusBar } from "./status-bar"
+import { createTimelinePanel, type TimelinePanel } from "./timeline-panel"
 import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
 import {
   createTurnSummary,
@@ -454,6 +455,41 @@ const buildDebugTracerAndStream = (
   return { stream: new TeeStream([stream, proxy]), debugHandle }
 }
 
+/** Track T — build the timeline ring-buffer panel + tee-wrap the stream.
+ *  Default-OFF byte-identical: when `QUANTA_TIMELINE` is unset / 0 /
+ *  non-finite OR stderr is not a TTY, returns the literal `stream` reference
+ *  + `panel: undefined` ⇒ no tee allocated, no extra consumer, no DECSTBM
+ *  write, no ring buffer.
+ *
+ *  When the boot gate passes, allocates ONE timeline panel + a proxy port
+ *  that tees every `AgentEvent` into the panel's `emit`. Emit errors are
+ *  swallowed in place (same posture as `buildIndicatorPort` /
+ *  `buildDebugTracerAndStream`) so a faulty render can never poison the
+ *  recorder tee. The host calls `panel.teardown()` in `runRepl`'s `finally`
+ *  block so a follow-on shell prompt lands on a clean screen. */
+const buildTimelinePanelAndStream = (
+  stream: StreamPort,
+  envSource: NodeJS.ProcessEnv,
+  isTTY: boolean | undefined,
+): { stream: StreamPort; panel: TimelinePanel | undefined } => {
+  if (isTTY !== true) return { stream, panel: undefined }
+  const heightRaw = Number(envSource.QUANTA_TIMELINE ?? "0")
+  const height = Number.isFinite(heightRaw) && heightRaw > 0 ? Math.floor(heightRaw) : 0
+  if (height === 0) return { stream, panel: undefined }
+  const panel = createTimelinePanel({ height })
+  const proxy: StreamPort = {
+    emit: (event): void => {
+      try {
+        panel.emit(event)
+      } catch {
+        // Same posture as buildIndicatorPort / buildDebugTracerAndStream:
+        // never poison the tee from a UX-only consumer.
+      }
+    },
+  }
+  return { stream: new TeeStream([stream, proxy]), panel }
+}
+
 /** Route `quanta session …` to the session subcommand dispatcher. Returns the
  *  exit code so the caller can `process.exit(...)`. None of the agent/REPL
  *  wiring runs in this branch — that's how byte-identical default-OFF holds
@@ -518,6 +554,7 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   buildTurnSummaryAndStream,
   buildTurnIndicatorAndStream,
   buildDebugTracerAndStream,
+  buildTimelinePanelAndStream,
   buildWorkMetricsSink,
   loadPermissionStore: async (): Promise<PermissionStore | undefined> => {
     try {
@@ -566,6 +603,12 @@ export const runRepl = async (): Promise<void> => {
       },
     })
   } finally {
+    // Track T — tear down the ring-buffer panel BEFORE other surface
+    // teardowns so any DECSTBM reset writes land before subsequent
+    // chrome dispose. Idempotent + no-op when the panel wasn't allocated
+    // (default-OFF byte-identical: this entire block becomes a function
+    // call returning undefined).
+    setup.timelinePanel?.teardown()
     setup.lifecyclePills.dispose()
     await setup.shutdownMcp()
   }

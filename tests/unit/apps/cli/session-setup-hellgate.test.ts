@@ -69,12 +69,13 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "buildTurnSummaryAndStream",
       "buildTurnIndicatorAndStream",
       "buildDebugTracerAndStream",
+      "buildTimelinePanelAndStream",
       "buildWorkMetricsSink",
       "loadPermissionStore",
       "installPills",
     ]
-    expect(required).toHaveLength(11)
-    expect(new Set(required).size).toBe(11)
+    expect(required).toHaveLength(12)
+    expect(new Set(required).size).toBe(12)
   })
 
   test("setupSession export is an AsyncFunction", async () => {
@@ -115,6 +116,7 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "turnIndicator",
       "turnSummary",
       "debugHandle",
+      "timelinePanel",
       "sessionDeps",
       "costPanel",
       "branchProgress",
@@ -124,9 +126,9 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "argPrompt",
       "shutdownMcp",
     ]
-    // 34 named bindings — assert presence to detect accidental drops.
-    expect(keys).toHaveLength(34)
-    expect(new Set(keys).size).toBe(34)
+    // 35 named bindings — assert presence to detect accidental drops.
+    expect(keys).toHaveLength(35)
+    expect(new Set(keys).size).toBe(35)
   })
 })
 
@@ -145,6 +147,7 @@ type DepProbe = {
   buildTurnSummaryAndStreamCalls: number
   buildTurnIndicatorAndStreamCalls: number
   buildDebugTracerAndStreamCalls: number
+  buildTimelinePanelAndStreamCalls: number
   buildWorkMetricsSinkCalls: number
   loadPermissionStoreCalls: number
   installPillsCalls: number
@@ -162,6 +165,7 @@ const makeStubDeps = (
     buildTurnSummaryAndStreamCalls: 0,
     buildTurnIndicatorAndStreamCalls: 0,
     buildDebugTracerAndStreamCalls: 0,
+    buildTimelinePanelAndStreamCalls: 0,
     buildWorkMetricsSinkCalls: 0,
     loadPermissionStoreCalls: 0,
     installPillsCalls: 0,
@@ -225,6 +229,10 @@ const makeStubDeps = (
     buildDebugTracerAndStream: (stream) => {
       probe.buildDebugTracerAndStreamCalls += 1
       return { stream, debugHandle: undefined }
+    },
+    buildTimelinePanelAndStream: (stream) => {
+      probe.buildTimelinePanelAndStreamCalls += 1
+      return { stream, panel: undefined }
     },
     buildWorkMetricsSink: () => {
       probe.buildWorkMetricsSinkCalls += 1
@@ -636,7 +644,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(result.abort.signal.aborted).toBe(true)
   })
 
-  test("invokes EVERY one of the 11 injected dep factories at least once", async () => {
+  test("invokes EVERY one of the 12 injected dep factories at least once", async () => {
     const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
     const { deps, probe } = makeStubDeps()
     await setupSession(deps)
@@ -647,6 +655,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(probe.buildTurnSummaryAndStreamCalls).toBeGreaterThanOrEqual(1)
     expect(probe.buildTurnIndicatorAndStreamCalls).toBeGreaterThanOrEqual(1)
     expect(probe.buildDebugTracerAndStreamCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildTimelinePanelAndStreamCalls).toBeGreaterThanOrEqual(1)
     expect(probe.buildWorkMetricsSinkCalls).toBeGreaterThanOrEqual(1)
     expect(probe.loadPermissionStoreCalls).toBeGreaterThanOrEqual(1)
     expect(probe.installPillsCalls).toBeGreaterThanOrEqual(1)

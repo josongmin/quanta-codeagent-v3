@@ -42,6 +42,7 @@ import { runHelpRender } from "./help-render"
 // because their bodies live next to their renderers in the same slice).
 import { historyCmd } from "./history-cmd"
 import { parseSnoozeDuration } from "./idle-monitor"
+import { inspectCmd } from "./inspect-cmd"
 import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
 import { mcpCmd } from "./mcp-cmd"
@@ -50,6 +51,7 @@ import { pasteCmd } from "./paste-cmd"
 import { permissionCmd } from "./permission-explain"
 import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "./plan-panel"
 import { queueCmd } from "./queue-cmd"
+import { replayCmd } from "./replay-cmd"
 import { retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { rewindToolCmd } from "./rewind-tool-cmd"
@@ -748,6 +750,19 @@ export const BUILTINS: readonly SlashCommand[] = [
   // shell-entry surfaces, or REPL pre-LLM-construction) the slash prints
   // "not wired in this surface" + exit 0.
   whyCmd,
+  // Track I (ADR-0239 follow-up) — `/inspect <toolCallId>` expands one
+  // tool-call to a multi-section panel (input + decisions + result).
+  // Default-OFF: when `ctx.inspect` is absent the command prints
+  // "no active session — start an agent first or pass --session <id>"
+  // and exits 1 (parity with other surface-only commands needing a
+  // session). The slot is appended so all prior pinning is unchanged.
+  inspectCmd,
+  // Track R — `/replay <session-id> [--at N] [--from tc_x]` renders a
+  // recorded session JSONL as a one-line-per-event stream (sibling UX to
+  // live `/debug`). Default-OFF: when `ctx.replay` is absent the command
+  // prints "/replay: not wired in this surface" + exit 0 (parity with the
+  // other surface-only commands).
+  replayCmd,
 ] as const
 
 /** `/exit` and `/quit` are short-circuited by `composePromptPipeline` BEFORE the
