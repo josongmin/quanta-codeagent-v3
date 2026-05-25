@@ -35,10 +35,7 @@ export type SnapErr =
 /** Reason for a `restore` call that could not be honoured. The caller can
  *  log/emit this through its existing observability channel — `restore`
  *  itself stays argv-shaped. */
-export type RestoreDegradeReason =
-  | "non-shell-prefix"
-  | "empty-prefix"
-  | "missing-c-flag"
+export type RestoreDegradeReason = "non-shell-prefix" | "empty-prefix" | "missing-c-flag"
 
 /** Result of a `restore` call. The function ALWAYS returns an argv; when
  *  the prefix could not be augmented, `degradeReason` is set and `argv`
