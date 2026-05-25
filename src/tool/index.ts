@@ -144,6 +144,14 @@ export { planErrorMessage, planFailure } from "./plan/error-mapping"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
+// `search_codebase` tool (ADR-0278). Caller-wired: registered only when
+// the composition root has built a SearchPipeline (QUANTA_PIPELINE=on +
+// QUANTA_INDEX=on); NOT part of `defaultTools`.
+export {
+  type SearchCodebaseInput,
+  searchCodebaseInputSchema,
+  searchCodebaseTool,
+} from "./search-codebase"
 // Shadow-store tools (ADR-0119 + ADR-0122). Built only when the assembly seam
 // wires `AgentConfig.shadowOdb`; NOT part of `defaultTools` — see tier1/shadow.ts.
 export type {

@@ -984,6 +984,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly commitEmbedder?: CommitEmbedder
   }
   /**
+   * ADR-0278 search-pipeline slot (composition-root wire). Sibling of
+   * {@link retrievalStack}: where `retrievalStack` exposes the reranker
+   * registry for memory recall and localize, this slot exposes a
+   * populated `SearchPipeline` for the `search_codebase` tool and any
+   * future caller that wants pipeline-shaped search.
+   *
+   * Default-OFF: absent ⇒ the loop / dispatch is byte-identical for
+   * every legacy caller and the `search_codebase` tool is not registered
+   * (the composition root checks both this slot and the env knobs
+   * before adding the tool to `buildDefaultTools()` output).
+   *
+   * The slot is caller-side composition only — the agent loop NEVER
+   * reads it directly. See `src/apps/agent/index.ts` for the wire and
+   * ADR-0278 for the closed truth table.
+   */
+  searchPipeline?: import("@/retrieval/pipeline").SearchPipeline
+  /**
    * ADR-0200 stream idle/total timeout watchdog slot. When BOTH this and
    * {@link streamTimeoutPolicy} are set, the loop wraps each LLM stream
    * with `streamWatchdog.wrap(src, policy, signal)` so hung providers

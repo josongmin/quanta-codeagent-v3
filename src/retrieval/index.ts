@@ -44,6 +44,27 @@ export type { EmbeddingAdapterOptions, EmbeddingPort, EmbeddingVendor } from "./
 export type { HybridQueryInput, QueryType } from "./hybrid-query"
 // Hybrid query funnel (Axis E).
 export { runHybridQuery } from "./hybrid-query"
+// Codebase indexer (ADR-0277) — populates a SearchPipeline's underlying
+// SemanticIndex / lexical store from a workspace walk. Leaf primitive.
+export {
+  chunkFile as indexerChunkFile,
+  type ChunkInput as IndexerChunkInput,
+  type ChunkUpsertPort as IndexerChunkUpsertPort,
+  type ChunkerOptions as IndexerChunkerOptions,
+  type CodebaseIndexer,
+  createDefaultIndexer,
+  type DeltaPartition,
+  DeltaTracker,
+  type FileChunk as IndexerFileChunk,
+  type FileStamp,
+  headlessIndexerStub,
+  type IndexerOptions,
+  type IndexError,
+  type IndexStats,
+  type ScannerOptions,
+  type ScanOptions as IndexerScanOptions,
+  type SkipReason,
+} from "./indexer"
 // LexicalSearch first-stage engine (ADR-0260): BM25 + ripgrep adapters.
 export type {
   Bm25LexicalSearchOptions,

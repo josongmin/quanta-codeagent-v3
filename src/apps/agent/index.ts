@@ -51,10 +51,22 @@ import {
 } from "@/agent/tool-profile"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
+import {
+  type ChunkUpsertPort,
+  type CodebaseIndexer,
+  createDefaultIndexer,
+  type FileChunk as IndexerFileChunk,
+} from "@/retrieval/indexer"
+import {
+  type SearchHit,
+  type SearchPipeline,
+  semanticOnlyPipeline,
+  type SemanticIndex,
+} from "@/retrieval/pipeline"
 import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, searchCodebaseTool, type Tool, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
 import {
   type AgentArgs,
@@ -242,6 +254,194 @@ const resolveForkSession = (
   return { forker: defaultForker() }
 }
 
+/* ────────────── ADR-0278 search-pipeline composition-root wire ─────────────
+ *
+ * The wire is gated by TWO closed-port env knobs (default-OFF). The truth
+ * table is locked by HELL-IDX-22 … HELL-IDX-25:
+ *
+ *   QUANTA_INDEX | QUANTA_PIPELINE | Behaviour
+ *   off          | off             | byte-identical legacy; no indexer, no tool
+ *   on           | off             | indexer constructed; tool NOT registered
+ *   off          | on              | pipeline slot may be populated by other helpers; no tool
+ *   on           | on              | indexer scans; semantic pipeline built; tool registered
+ *
+ * The wire is held in module-local state so the polling interval handle can
+ * be cleared on `beforeExit`. The semantic index adapter is in-memory and
+ * deterministic (no API key required) — the production embedder is a
+ * one-line swap (ADR-0278 §"Deliberate hold").
+ */
+
+interface WiredSearchPipeline {
+  readonly pipeline: SearchPipeline
+  readonly tool: Tool
+  readonly indexer: CodebaseIndexer
+  readonly intervalHandle: ReturnType<typeof setInterval> | null
+}
+
+let activeWire: WiredSearchPipeline | null = null
+
+const DEFAULT_INTERVAL_MS = 5_000
+
+/** Hash a string into a fixed-dim numeric vector. Deterministic; no API
+ *  key. Same string ⇒ same vector across runs. */
+const hashEmbed = (text: string, dim = 64): readonly number[] => {
+  const out = new Float64Array(dim)
+  const tokens = text.toLowerCase().split(/[^a-z0-9_]+/u).filter((t) => t.length > 0)
+  for (const tok of tokens) {
+    let h = 2166136261 >>> 0
+    for (let i = 0; i < tok.length; i++) {
+      h = Math.imul(h ^ tok.charCodeAt(i), 16777619) >>> 0
+    }
+    out[h % dim] = (out[h % dim] ?? 0) + 1
+  }
+  // L2 normalise.
+  let norm = 0
+  for (let i = 0; i < dim; i++) norm += (out[i] ?? 0) * (out[i] ?? 0)
+  norm = Math.sqrt(norm) || 1
+  const arr: number[] = new Array(dim)
+  for (let i = 0; i < dim; i++) arr[i] = (out[i] ?? 0) / norm
+  return arr
+}
+
+/** In-memory SemanticIndex backed by a `Map<chunkId, {vec, chunk}>`. */
+interface InMemoryIndex {
+  readonly port: SemanticIndex
+  readonly upsert: ChunkUpsertPort
+}
+
+const newInMemoryIndex = (): InMemoryIndex => {
+  type Entry = { readonly vec: readonly number[]; readonly chunk: IndexerFileChunk }
+  const store = new Map<string, Entry>()
+  const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
+  return {
+    port: {
+      async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
+        const out: SearchHit[] = []
+        for (const [id, { vec: v, chunk }] of store) {
+          let dot = 0
+          const len = Math.min(v.length, vec.length)
+          for (let i = 0; i < len; i++) dot += (v[i] ?? 0) * (vec[i] ?? 0)
+          out.push({
+            id,
+            score: dot,
+            text: chunk.text,
+            source: "semantic" as const,
+            metadata: { path: chunk.path, startLine: chunk.startLine, endLine: chunk.endLine },
+          })
+        }
+        out.sort((a, b) => b.score - a.score)
+        return out.slice(0, k)
+      },
+    },
+    upsert: {
+      upsert(chunk: IndexerFileChunk): void {
+        const id = chunkId(chunk)
+        store.set(id, { vec: hashEmbed(chunk.text), chunk })
+      },
+      delete(path: string): void {
+        for (const id of Array.from(store.keys())) {
+          if (id.startsWith(`${path}:`)) store.delete(id)
+        }
+      },
+    },
+  }
+}
+
+/** Parse the boolean env knob — strict "on" only (mirrors the
+ *  `isRetrievalHybridEnabled` posture). */
+const isOn = (v: string | undefined): boolean => v === "on"
+
+/** Build the wired search pipeline + tool from env. Returns `null` when
+ *  the truth table says "no tool" (which includes every case except
+ *  both-knobs-on). The wire MAY still construct an indexer (HELL-IDX-23
+ *  case) but never returns a tool when the pipeline knob is off. */
+export const buildSearchPipelineFromEnv = (
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): WiredSearchPipeline | null => {
+  const indexOn = isOn(env.QUANTA_INDEX)
+  const pipelineOn = isOn(env.QUANTA_PIPELINE)
+  if (!indexOn && !pipelineOn) return null
+  if (indexOn && !pipelineOn) {
+    // Construct indexer for side-effect (e.g. observability tests assert
+    // the scanner is reachable) but do not register the tool — the model
+    // would have no pipeline to call. Returned WiredSearchPipeline has
+    // tool = no-op shim so callers can detect the "indexer-only" state.
+    const sem = newInMemoryIndex()
+    const indexer = createDefaultIndexer({
+      scanner: {
+        root: cwd,
+        ...(env.QUANTA_INDEX_GLOB !== undefined ? { glob: env.QUANTA_INDEX_GLOB } : {}),
+      },
+      upsert: sem.upsert,
+    })
+    return { pipeline: semanticOnlyPipeline({ sem: sem.port, embedder: { embed: async (t) => hashEmbed(t) } }), tool: noopSearchTool(), indexer, intervalHandle: null }
+  }
+  if (!indexOn && pipelineOn) {
+    // Pipeline slot populated but with an empty corpus. The tool would
+    // always return "no hits"; per ADR-0278 truth table we do NOT register.
+    return null
+  }
+  // Both on — full wire.
+  const sem = newInMemoryIndex()
+  const indexer = createDefaultIndexer({
+    scanner: {
+      root: cwd,
+      ...(env.QUANTA_INDEX_GLOB !== undefined ? { glob: env.QUANTA_INDEX_GLOB } : {}),
+    },
+    upsert: sem.upsert,
+  })
+  // Fire-and-forget initial scan; logger captures errors.
+  void indexer.scanInitial().then((r) => {
+    if (!r.ok) {
+      logger.warn(`indexer scanInitial failed: ${r.error.kind}`)
+    }
+  })
+  const intervalMsRaw = env.QUANTA_INDEX_INTERVAL_MS
+  const intervalMs =
+    intervalMsRaw !== undefined && /^\d+$/.test(intervalMsRaw) ? Number(intervalMsRaw) : DEFAULT_INTERVAL_MS
+  const intervalHandle = setInterval(() => {
+    void indexer.scanDelta().then((r) => {
+      if (!r.ok && r.error.kind !== "scan-in-progress") {
+        logger.warn(`indexer scanDelta failed: ${r.error.kind}`)
+      }
+    })
+  }, intervalMs)
+  // Don't keep the event loop alive solely for the polling timer.
+  if (typeof intervalHandle === "object" && intervalHandle !== null && "unref" in intervalHandle) {
+    ;(intervalHandle as { unref(): unknown }).unref()
+  }
+  const pipeline = semanticOnlyPipeline({
+    sem: sem.port,
+    embedder: { embed: async (t) => hashEmbed(t) },
+  })
+  const tool = searchCodebaseTool(pipeline) as Tool
+  return { pipeline, tool, indexer, intervalHandle }
+}
+
+/** No-op tool used in the "indexer-on / pipeline-off" branch so the
+ *  WiredSearchPipeline shape stays uniform. NEVER registered into the
+ *  default tool set (the wire only registers when BOTH knobs are on). */
+const noopSearchTool = (): Tool => ({
+  name: "search_codebase",
+  description: "(stub)",
+  inputSchema: {} as never,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+  async *execute() {
+    yield { type: "result", result: { ok: false, output: "no pipeline wired" } }
+  },
+})
+
+/** Public test seam — clear the module-local interval handle. */
+export const clearSearchPipelineWireForTests = (): void => {
+  if (activeWire?.intervalHandle !== null && activeWire?.intervalHandle !== undefined) {
+    clearInterval(activeWire.intervalHandle)
+  }
+  activeWire?.indexer.stop()
+  activeWire = null
+}
+
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
  *  individual fields (e.g. ci-bot replaces `registry` with the restricted
  *  git+gh tool set), but having a baseline avoids each runner duplicating
@@ -281,12 +481,15 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     },
   }
   const retrievalStack = buildRetrievalStackFromEnv(env)
-  // ADR-0272 — pipeline composition-root wire. Default-OFF: when
-  // QUANTA_PIPELINE is absent / `none` / unknown, returns `null` and the
-  // slot is OMITTED below (spread-conditional under
-  // exactOptionalPropertyTypes). Adapter-build failure collapses to `null`
-  // + a `logger.warn` line (no startup crash on optional knob misconfig).
-  const searchPipeline = assemblePipeline(env)
+  // ADR-0278 — search-pipeline wire. Default-OFF; both QUANTA_PIPELINE=on
+  // AND QUANTA_INDEX=on required to register `search_codebase` into the
+  // default tool set. Pipeline slot is also published on AgentConfig.
+  const wired = buildSearchPipelineFromEnv(env, process.cwd())
+  if (wired !== null) activeWire = wired
+  const searchToolToRegister =
+    env.QUANTA_PIPELINE === "on" && env.QUANTA_INDEX === "on" && wired !== null
+      ? wired.tool
+      : undefined
   // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
   // via the mode-variant registry; else fall back to the ADR-0198
   // `QUANTA_IDENTITY=1` env (precedence #2); else empty-string sentinel
@@ -311,8 +514,14 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     llm,
     // DIP: route through the factory (no app-specific ports at this baseline
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
-    // byte-identical to the `defaultTools` singleton.
-    registry: new ToolRegistry(buildDefaultTools()),
+    // byte-identical to the `defaultTools` singleton. ADR-0278: when the
+    // search-pipeline wire is fully on, the `search_codebase` tool is
+    // appended AFTER the default set so byte-identity is preserved for
+    // every legacy id.
+    registry:
+      searchToolToRegister !== undefined
+        ? new ToolRegistry([...buildDefaultTools(), searchToolToRegister])
+        : new ToolRegistry(buildDefaultTools()),
     stream,
     permission: { mode: "acceptEdits" },
     messages: [],
@@ -325,9 +534,13 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
     // `undefined` literal on the config) and the loop is byte-identical.
     ...(retrievalStack !== undefined ? { retrievalStack } : {}),
-    // ADR-0272 — composition-root pipeline wire (default-OFF; spread
-    // conditionally to preserve `exactOptionalPropertyTypes`).
-    ...(searchPipeline !== null ? { searchPipeline } : {}),
+    // ADR-0278: publish the populated SearchPipeline on the config so
+    // future callers (dispatch helpers, additional pipeline-shaped
+    // tools) can detect a wired pipeline without re-reading env. Only
+    // populated when BOTH knobs are on AND the wire succeeded.
+    ...(searchToolToRegister !== undefined && wired !== null
+      ? { searchPipeline: wired.pipeline }
+      : {}),
     // ADR-0236 — composition-root mega-wire slots (default-OFF; spread
     // conditionally to preserve `exactOptionalPropertyTypes`).
     ...(identityModeVariant !== undefined ? { identityModeVariant } : {}),
