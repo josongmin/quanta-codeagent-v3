@@ -79,7 +79,7 @@ const minimalArgs = (): BuildReplSlashCtxArgs => ({
   planStore: undefined,
   branchProgress: undefined,
   getHistory: () => [],
-  sessionDeps: {} as BuildReplSlashCtxArgs["sessionDeps"],
+  sideConvPort: {} as BuildReplSlashCtxArgs["sideConvPort"],
   abortSignal: new AbortController().signal,
   debugHandle: undefined,
   llm: {} as BuildReplSlashCtxArgs["llm"],

@@ -1449,6 +1449,73 @@
       }
     },
     {
+      "includes": ["**/src/apps/headless/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "**/apps/bench",
+                      "**/apps/bench/*",
+                      "**/apps/bench/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "**/apps/agent",
+                      "**/apps/agent/*",
+                      "**/apps/agent/**",
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**"
+                    ],
+                    "message": "Surface isolation (ADR-0308 / ARCH-07): src/apps/headless is the SECOND consumer that proves the host layer is reusable. It MUST NOT import from src/apps/cli/**, src/apps/bench/**, or src/apps/agent/** — every env/argv/terminal-bound helper is injected through the dep bundle from @/host/bootstrap."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: src/apps/headless is a non-TTY surface. CLI-specific node modules (readline / tty / repl) belong in apps/cli."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/host/bootstrap/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/apps/**", "**/src/apps/**", "@/apps/*"],
+                    "message": "Surface isolation (ADR-0299 host/bootstrap-host-extraction): @/host/bootstrap is the surface-agnostic session bootstrap. It MUST NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench). Surface entries depend on @/host/bootstrap, never the reverse. Every env/argv/terminal-bound helper is injected via SessionBootstrapDeps."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: @/host/bootstrap is surface-agnostic. CLI-specific node modules (readline / tty / repl) belong in apps/cli. Inject a port instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/apps/eval/**"],
       "linter": {
         "rules": {
@@ -1506,6 +1573,43 @@
                       "@/apps/eval/**"
                     ],
                     "message": "Thin-surface fence (ADR-0303): src/apps/probe must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/tier1/reviewer-subagent": "ADR-0299: src/apps/cli/repl/** must NOT import the reviewer subagent module directly. The reviewer factories (materializeReviewerAgent / createSubagentBackedGuardianReview) are injected via SessionBootstrapDeps from @/host/bootstrap and forwarded through the boot result. Import them from src/apps/cli/repl.ts (outside this slice) and pass through the dep bundle."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/slash/registry-surface.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@/agent", "@/agent/**", "@/llm", "@/llm/**", "@/runner", "@/runner/**", "@/host", "@/host/**"],
+                    "message": "ADR-0306 (CLI-03): surface registry MUST stay surface-only. It owns slash commands whose body never touches the live LLM, the agent loop, the runner, or the host. Per-command modules (./*-cmd.ts) may import @/agent / @/llm for types, but the registry file itself imports them as opaque SlashCommand objects only. Session-bound commands belong in ./slash/registry-session.ts; app/system commands belong in ./slash/registry-app.ts."
                   }
                 ]
               }

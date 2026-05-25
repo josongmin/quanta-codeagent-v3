@@ -1,7 +1,7 @@
 import type { DebugCmdState } from "./debug-cmd"
 import type { IdleMonitor } from "./idle-monitor"
 import type { RetryWithSessionState } from "./retry-with"
-import type { SideChatSessionState } from "./side-cmd"
+import type { SideCmdSlashState } from "./side-cmd"
 
 export interface SlashContext {
   readonly out: (s: string) => void
@@ -32,7 +32,7 @@ export interface SlashContext {
    *  can render the inventory without importing `@/skill` types. */
   readonly skills?: (() => Promise<SkillRow[]>) | undefined
   /** Claude A9 `/side <q>` isolated agent loop. */
-  readonly side?: SideChatSessionState | undefined
+  readonly side?: SideCmdSlashState | undefined
   /** Sticky cumulative cost dashboard render seam. */
   readonly cost?: (() => string) | undefined
   /** Read-only plan-store snapshot accessor. */

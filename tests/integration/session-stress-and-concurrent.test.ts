@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Message } from "@/llm"
+import { runSessionCommand, type SessionCommandDeps } from "@/runner/session-ops"
 import { runShell } from "@/runtime"
 import {
   archivedFilePath,
@@ -18,7 +19,8 @@ import {
   sessionFilePath,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
-import { runSessionCommand, type SessionCommandDeps } from "../../src/apps/cli/session-commands"
+import { createCliImportHandler } from "../../src/apps/cli/session-import-handler"
+import { resolveCliSessionListEnv } from "../../src/apps/cli/session-list-env"
 
 /**
  * STRESS / SCALE / CONCURRENCY suite for the session slice + CLI dispatcher.
@@ -66,6 +68,9 @@ interface Captured {
 }
 
 const captureDeps = (confirmAnswer = true): Captured => {
+  // CLI-05 (ADR-0305): inject the two surface adapters that the prior
+  // `runSessionCommand` shim used to auto-supply (importHandler + listEnv).
+  const listEnv = resolveCliSessionListEnv()
   const c: Captured = {
     out: "",
     err: "",
@@ -77,6 +82,8 @@ const captureDeps = (confirmAnswer = true): Captured => {
         c.err += s
       },
       confirm: async () => confirmAnswer,
+      importHandler: createCliImportHandler(),
+      ...(listEnv !== undefined ? { listEnv } : {}),
     },
   }
   return c

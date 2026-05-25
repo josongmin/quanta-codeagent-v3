@@ -1,5 +1,10 @@
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
+import {
+  bootstrapSession,
+  type SessionBootstrapDeps,
+  type SessionBootstrapResult,
+} from "@/host/bootstrap"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
@@ -19,11 +24,7 @@ import type { createStatusPills } from "../status-pills"
 import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
-import {
-  bootstrapSession,
-  type SessionBootstrapDeps,
-  type SessionBootstrapResult,
-} from "./session-bootstrap"
+import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
 import { composeCliSessionDeps } from "./session-deps-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
@@ -46,17 +47,14 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
   readonly loadPermissionStore: () => Promise<PermissionStore | undefined>
   /** Build the per-turn turn-summary collector + stream tee. */
   readonly buildTurnSummaryAndStream: (
+    featureCfg: CliFeatureConfig,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
   ) => { collector: TurnSummaryCollector; stream: StreamPort }
   /** Build the live turn indicator + indicator-tee'd stream. */
   readonly buildTurnIndicatorAndStream: (
+    featureCfg: CliFeatureConfig,
     statusBar: StatusBar,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
-    intervalEnv: string,
   ) => { indicator: TurnIndicator; turnStream: StreamPort }
   /** Track D — build the debug-tracer + tee-wrap the stream. Returns
    *  `{stream, debugHandle: undefined}` (literal input ref) when the
@@ -64,9 +62,8 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
    *  byte-identical to today's; returns a wrapped stream + a live
    *  handle when enabled so `/debug` runtime toggles affect emission. */
   readonly buildDebugTracerAndStream: (
+    featureCfg: CliFeatureConfig,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
   ) => { stream: StreamPort; debugHandle: DebugTracerHandle | undefined }
   /** Track T — build the timeline panel + tee-wrap the stream. Returns
    *  `{stream, panel: undefined}` (literal input ref) when
@@ -77,9 +74,8 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
    *  its `runRepl` `finally` so a follow-on shell prompt lands on a
    *  clean screen. */
   readonly buildTimelinePanelAndStream: (
+    featureCfg: CliFeatureConfig,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
   ) => { stream: StreamPort; panel: TimelinePanel | undefined }
   /** Install the status pills row (workspace / mode+effort / skills / sandbox). */
   readonly installPills: (args: {
@@ -152,6 +148,10 @@ export interface SessionSetupResult {
    *  `QUANTA_PLAYBOOK_TRIGGER` is unset. `undefined` ⇒ slot omitted at the
    *  loop call site (default-OFF byte-identical). */
   readonly playbookCliFlag: boolean | undefined
+  /** ADR-0297 — the typed, surface-level feature config resolved once at
+   *  setup time and threaded through to the host's `build*` factories
+   *  (`buildImageQueue`, `buildPromptUx`, `buildRewindSlashState`). */
+  readonly featureCfg: CliFeatureConfig
 }
 
 /** Terminal host wiring over the bootstrap session core. All env/argv/feature
@@ -159,7 +159,8 @@ export interface SessionSetupResult {
  *  status chrome and interactive prompt-only ports. */
 export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetupResult> => {
   const runtime = readSessionRuntimeConfig()
-  const boot = await bootstrapSession(deps, runtime)
+  const featureCfg = readCliFeatureConfig(runtime.env, runtime.stdoutIsTTY, process.stderr.isTTY)
+  const boot = await bootstrapSession(deps, runtime, featureCfg)
 
   process.on("SIGINT", () => {
     process.stderr.write("\n(interrupt — finishing current step)\n")
@@ -175,18 +176,16 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   const statusBar = installStatusBar(statusDefault)
 
   const { collector: turnSummary, stream: summaryStream } = deps.buildTurnSummaryAndStream(
+    featureCfg,
     boot.stream,
-    runtime.env,
-    runtime.stdoutIsTTY,
   )
   // Track D — interpose the debug tracer BEFORE the indicator so the
   // debug emit sees the same upstream events the indicator does. When
   // the env disables it, the builder returns the literal `summaryStream`
   // and `debugHandle: undefined` (byte-identical, no extra tee).
   const { stream: debugStream, debugHandle } = deps.buildDebugTracerAndStream(
+    featureCfg,
     summaryStream,
-    runtime.env,
-    process.stderr.isTTY,
   )
   // Track T — interpose the timeline panel AFTER the debug tracer and
   // BEFORE the indicator so the ring buffer sees the same upstream
@@ -194,16 +193,13 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   // non-TTY the builder returns the literal `debugStream` + `panel:
   // undefined` ⇒ byte-identical to pre-T code (no extra tee).
   const { stream: timelineStream, panel: timelinePanel } = deps.buildTimelinePanelAndStream(
+    featureCfg,
     debugStream,
-    runtime.env,
-    process.stderr.isTTY,
   )
   const { indicator: turnIndicator, turnStream } = deps.buildTurnIndicatorAndStream(
+    featureCfg,
     statusBar,
     timelineStream,
-    runtime.env,
-    runtime.stdoutIsTTY,
-    runtime.spinnerIntervalMs,
   )
 
   const { sessionDeps } = await composeCliSessionDeps({
@@ -238,24 +234,29 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   // remains a no-op (same value re-applied).
   pills.update({ effort: boot.effortStore.get() })
 
+  // ADR-0292 — narrow the host's opaque ports back to their CLI-surface
+  // concrete types at the seam. The host result types them as `unknown`
+  // because it only forwards them through; the CLI surface owns the real
+  // shapes (concrete McpClient instances, the surface `LifecyclePills`,
+  // the surface `IdleMonitor` etc.).
   return {
     provider: boot.provider,
     model: boot.model,
     mode: boot.mode,
     cwd: boot.cwd,
     slog: boot.slog,
-    idleMonitor: boot.idleMonitor,
-    rejectCounter: boot.rejectCounter,
+    idleMonitor: boot.idleMonitor as IdleMonitor,
+    rejectCounter: boot.rejectCounter as RejectCounter,
     effortStore: boot.effortStore,
     llm: boot.llm,
     planMode: boot.features.planMode,
     metrics: boot.features.metrics,
     state: boot.features.state,
-    mcpClients: boot.features.mcpClients,
+    mcpClients: boot.features.mcpClients as unknown as SessionSetupResult["mcpClients"],
     mcpTools: boot.features.mcpTools,
-    mcpSurface: boot.mcpSurface,
+    mcpSurface: boot.mcpSurface as McpSurfaceInfo | undefined,
     skillsConfig: boot.tooling.skillsConfig,
-    lifecyclePills: boot.lifecyclePills,
+    lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,
     lifecycleFollowUpQueue: boot.lifecycleFollowUpQueue,
     sessionId: boot.sessionId,
@@ -268,8 +269,8 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     debugHandle,
     timelinePanel,
     sessionDeps,
-    costPanel: boot.costPanel,
-    branchProgress: boot.branchProgress,
+    costPanel: boot.costPanel as CostPanel | undefined,
+    branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,
     abort: boot.abort,
     pills,
@@ -287,5 +288,6 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     // `runSessionLoop({ playbookCliFlag })`. Bootstrap maps absent → undefined
     // already; we just propagate the same shape.
     playbookCliFlag: boot.playbookCliFlag,
+    featureCfg,
   }
 }

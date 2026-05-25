@@ -5,6 +5,7 @@ import type { PlanStore } from "@/agent/plan/state"
 import type { SystemPromptVariantRegistry } from "@/agent/system-prompt"
 import type { ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { LLMPort, Message } from "@/llm"
+import type { SideConversationPort } from "@/runner"
 import type { SessionEnvelopeRecord } from "@/session"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
@@ -16,11 +17,10 @@ import type { IdleMonitor } from "../idle-monitor"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import type { InspectSlashState } from "../inspect-cmd"
-import { assembleConfig, type SessionDeps } from "../internal"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { PerToolCheckpointSlashState } from "../rewind-tool-cmd"
-import type { SideChatSessionState } from "../side-cmd"
+import type { SideCmdSlashState } from "../side-cmd"
 import { isSlashCommand, runSlashCommand, type SkillRow } from "../slash-commands"
 import type { TextInbox } from "../text-inbox"
 import type { WhySlashState } from "../why-cmd"
@@ -57,9 +57,11 @@ export type ReplSlashCtx = Partial<{
   history: HistorySessionState
   branchSearch: () => import("../branch-search-progress").BranchProgressState
   /** `/side` SessionState FACTORY — built fresh on each invocation so the
-   *  `messages` value reflects the live transcript rather than a stale
-   *  snapshot captured when the REPL started. */
-  side: () => SideChatSessionState
+   *  `getHistory` accessor reflects the live transcript rather than a stale
+   *  snapshot captured when the REPL started. The state's `port` field is
+   *  the surface-built {@link SideConversationPort}; engine-internal types
+   *  stay encapsulated inside the port adapter (ADR-0304). */
+  side: () => SideCmdSlashState
   /** ADR-0239 — debug-tracer runtime toggle. Present iff the boot gate
    *  (`QUANTA_DEBUG=1` + TTY) allocated the mutable proxy port; absent ⇒
    *  `/debug` slash prints "not wired" + the QUANTA_DEBUG hint. */
@@ -147,7 +149,10 @@ export interface BuildReplSlashCtxArgs {
   /** Returns the live transcript reference so slash surfaces never read a
    *  stale `history` binding. */
   getHistory: () => readonly Message[]
-  sessionDeps: SessionDeps
+  /** ADR-0304 — surface-built {@link SideConversationPort}. Encapsulates
+   *  engine-internal collaborators (built once by the surface composer)
+   *  so the slash-surface layer stays free of them. */
+  sideConvPort: SideConversationPort
   abortSignal: AbortSignal
   /** ADR-0239 — debug-tracer surface handle. Absent ⇒ `/debug` prints
    *  "not wired" (boot-time tee was not allocated). */
@@ -331,7 +336,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     planStore,
     branchProgress,
     getHistory,
-    sessionDeps,
+    sideConvPort,
     abortSignal,
     debugHandle,
     llm,
@@ -354,10 +359,9 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
       : {}),
     ...(branchProgress !== undefined ? { branchSearch: () => branchProgress.snapshot() } : {}),
     history: { messages: getHistory },
-    side: (): SideChatSessionState => ({
-      deps: sessionDeps,
-      assembleConfig,
-      messages: getHistory(),
+    side: (): SideCmdSlashState => ({
+      port: sideConvPort,
+      getHistory,
       signal: abortSignal,
     }),
     // ADR-0239 — `/debug` runtime toggle. Absent ⇒ slash prints "not wired".

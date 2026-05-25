@@ -132,12 +132,12 @@ Today `assembleConfig` lives at [src/apps/cli/config-assemble.ts:91](../../src/a
      out:     (s) => process.stdout.write(s)
      err:     (s) => process.stderr.write(s)
      confirm: async (p) => rl.question(p) === "y"
-3. runSessionCommand(argv.slice(3), deps)            ──► session-commands.ts
+3. runSessionCommand(argv.slice(3), deps)            ──► @/runner/session-ops (CLI-05/ADR-0305: shim removed; CLI wires importHandler + listEnv inline)
 4. dispatcher matches "list" → list-mode handler
 5. exit(code)
 ```
 
-The session sub-tree is *already runner-shaped*: a typed `SessionCommandDeps` port at [src/apps/cli/session-commands.ts:38-46](../../src/apps/cli/session-commands.ts) with `out/err/confirm` and an optional `homeDir` for hermetic tests. This is the pattern every surface will mirror.
+The session sub-tree is *already runner-shaped*: a typed `SessionCommandDeps` port at [src/runner/session-ops/index.ts](../../src/runner/session-ops/index.ts) with `out/err/confirm`, an optional `homeDir` for hermetic tests, and two CLI-surface adapters ([session-import-handler.ts](../../src/apps/cli/session-import-handler.ts) + [session-list-env.ts](../../src/apps/cli/session-list-env.ts)) wired into `importHandler` / `listEnv`. This is the pattern every surface will mirror.
 
 ---
 

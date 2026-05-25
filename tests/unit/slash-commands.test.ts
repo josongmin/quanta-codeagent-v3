@@ -63,80 +63,67 @@ afterEach(() => {
 })
 
 describe("BUILTINS table", () => {
-  test("registers the documented builtins (full table — R10 panels appended)", () => {
+  test("registers the documented builtins (layered: surface, session, app — ADR-0306)", () => {
+    // ADR-0306 CLI-03 — slash registry split into three sibling files
+    // (`./slash/registry-{surface,session,app}.ts`). `BUILTINS` is now the
+    // concatenation `[...SURFACE, ...SESSION, ...APP]`; the SET of registered
+    // names is identical to the pre-split monolith, but the order is layered
+    // (e.g. `/retry-with` no longer sits at index 6).
+    //
     // `/rewind` + `/fork` are env-gated (QUANTA_REWIND, default "1"). The
     // unit-test environment leaves the var unset → both commands are
     // registered. A separate test in `rewind-cmd.test.ts` covers the
     // disabled (`QUANTA_REWIND=0`) path. `/memory` is gated the same way
     // (QUANTA_MEMORY_SLASH, default "1") — see `memory-cmd.test.ts`.
     expect(BUILTINS.map((c) => c.name)).toEqual([
+      // ── surface layer (./slash/registry-surface.ts) ─────────────────
       "/help",
       "/context",
       "/usage",
       "/color",
       "/navigate",
       "/wait",
-      "/retry-with",
       "/skills",
       "/reload-skills",
       "/login",
       "/logout",
       "/status",
-      "/permission",
-      "/mcp",
       "/snooze",
       "/resume",
-      "/rewind",
-      "/fork",
-      "/rewind-tool",
-      "/side",
       "/snapshot",
       "/rules",
-      "/memory",
       "/cost",
       "/plan",
       "/state",
       "/working-state",
       "/history",
       "/branches",
-      // Sibling appends — order matches the BUILTINS literal in
-      // `slash-commands.ts`. ADR-0224 web/paste + ADR-0225 edit-plan/
-      // edit-message land between fork-checkpoint and queue.
       "/fork-checkpoint",
       "/queue",
       "/web",
       "/paste",
       "/edit-plan",
       "/edit-message",
-      // ADR-0236 composition-root mega-wire — `/profile`, `/identity`,
-      // `/focus-chain` appended at the END so existing slot pinning is
-      // unchanged for entries above.
       "/profile",
       "/identity",
       "/focus-chain",
-      // `/effort` — session-level reasoning effort tier, sibling of the
-      // composition-root mega-wire commands. Slot-pinned right after
-      // `/focus-chain` and BEFORE `/debug` so the order matches the
-      // BUILTINS literal in `slash-commands.ts`.
       "/effort",
-      // Track D — `/debug` developer-mode tracer runtime toggle. Pinned
-      // at the END so all prior slot anchors stay intact.
-      "/debug",
-      // ADR-0271 — `/why <toolCallId|last>` meta-LLM reasoning query for a
-      // recorded tool call. Slotted right after `/debug` per BUILTINS literal.
-      "/why",
-      // Track I/R — `/inspect` (ADR-0239 follow-up) + `/replay` appended
-      // after `/why`. Slot pinning is unchanged for every entry above.
       "/inspect",
       "/replay",
-      // ADR-0292 — `/rewind-conv` per-turn conversation-checkpoint slash.
-      // Slot-pinned at the END (after `/replay`) so every prior anchor is
-      // unchanged. Default-OFF: `ctx.convCheckpoint` absent ⇒ "not wired".
-      "/rewind-conv",
-      // ADR-0294 — `/session export <id>` + `/session import <path>`
-      // round-trip via the existing ADR-0157 primitive. Appended after
-      // `/rewind-conv`; default-OFF when `ctx.sessionIo` is absent.
       "/session",
+      // ── session layer (./slash/registry-session.ts) ─────────────────
+      "/retry-with",
+      "/side",
+      "/debug",
+      "/why",
+      // ── app layer (./slash/registry-app.ts) ─────────────────────────
+      "/permission",
+      "/mcp",
+      "/rewind",
+      "/fork",
+      "/rewind-tool",
+      "/memory",
+      "/rewind-conv",
     ])
   })
 })

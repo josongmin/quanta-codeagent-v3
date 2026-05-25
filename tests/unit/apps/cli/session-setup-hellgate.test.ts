@@ -97,6 +97,7 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "slog",
       "idleMonitor",
       "rejectCounter",
+      "effortStore",
       "llm",
       "planMode",
       "metrics",
@@ -125,10 +126,13 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "pills",
       "argPrompt",
       "shutdownMcp",
+      "featureCfg",
     ]
-    // 35 named bindings — assert presence to detect accidental drops.
-    expect(keys).toHaveLength(35)
-    expect(new Set(keys).size).toBe(35)
+    // 37 named bindings — assert presence to detect accidental drops
+    // (ADR-0297 added `featureCfg` for surface-level feature consolidation;
+    // `effortStore` was added earlier on main for session-level effort UX).
+    expect(keys).toHaveLength(37)
+    expect(new Set(keys).size).toBe(37)
   })
 })
 
@@ -218,19 +222,19 @@ const makeStubDeps = (
       probe.buildPlanStoreOrUndefinedCalls += 1
       return undefined
     },
-    buildTurnSummaryAndStream: (stream) => {
+    buildTurnSummaryAndStream: (_featureCfg, stream) => {
       probe.buildTurnSummaryAndStreamCalls += 1
       return { collector: stubSummary as never, stream }
     },
-    buildTurnIndicatorAndStream: (_statusBar, stream) => {
+    buildTurnIndicatorAndStream: (_featureCfg, _statusBar, stream) => {
       probe.buildTurnIndicatorAndStreamCalls += 1
       return { indicator: stubIndicator as never, turnStream: stream }
     },
-    buildDebugTracerAndStream: (stream) => {
+    buildDebugTracerAndStream: (_featureCfg, stream) => {
       probe.buildDebugTracerAndStreamCalls += 1
       return { stream, debugHandle: undefined }
     },
-    buildTimelinePanelAndStream: (stream) => {
+    buildTimelinePanelAndStream: (_featureCfg, stream) => {
       probe.buildTimelinePanelAndStreamCalls += 1
       return { stream, panel: undefined }
     },
@@ -238,6 +242,90 @@ const makeStubDeps = (
       probe.buildWorkMetricsSinkCalls += 1
       return undefined
     },
+    // ADR-0292 — host-bootstrap-extraction new factory fields. Each defaults
+    // to a no-op stub so the existing assertion surface is unchanged. The
+    // `buildLlm` stub mirrors the prior `composeLLM` mock: when mode === "auto"
+    // it threads a no-op classifier onto the permission context (the auto
+    // reviewer path needs `permission.classify` to be defined).
+    buildLlm: (_provider, _model, mode, permission) => {
+      if (mode === "auto") {
+        ;(permission as { classify?: unknown }).classify = async () => ({
+          verdict: "allow" as const,
+          reason: "Allowed by classifier",
+        })
+      }
+      return { generate: async () => ({ content: [] }) } as unknown as ReturnType<
+        SetupSessionDeps["buildLlm"]
+      >
+    },
+    buildStreaming: () =>
+      ({ stream: stubStreamPort, run: undefined }) as unknown as ReturnType<
+        SetupSessionDeps["buildStreaming"]
+      >,
+    buildTooling: () =>
+      ({
+        store: undefined,
+        embedder: undefined,
+        sessionId: "seed-session",
+        registry: { tools: () => [] },
+        memoryConfig: undefined,
+        subagentConfig: undefined,
+        skillsConfig: undefined,
+        compactionBreakerConfig: undefined,
+        verifyGuardConfig: undefined,
+      }) as unknown as ReturnType<SetupSessionDeps["buildTooling"]>,
+    loadFeatures: async () => ({
+      planMode: false,
+      metrics: undefined,
+      state: undefined,
+      resume: undefined,
+      mcpTools: [],
+      mcpClients: [],
+      mcpConfigs: [],
+      lspTools: [],
+      lspNavTools: [],
+      gitToolList: [],
+    }),
+    loadImageBlock: () =>
+      ({ kind: "image", data: "", mimeType: "image/png" }) as unknown as ReturnType<
+        SetupSessionDeps["loadImageBlock"]
+      >,
+    pickIdentity: () => undefined,
+    pickPersona: () => "default" as ReturnType<SetupSessionDeps["pickPersona"]>,
+    resolveResume: async () => ({
+      sessionId: "resolved-session",
+      history: [],
+      idMeta: undefined,
+      inIdMode: false,
+      conflictError: undefined,
+      missingIdError: undefined,
+    }),
+    composeShellEvent: () => undefined,
+    switchToSessionCwd: (cwd) => cwd,
+    materializeReviewerAgent: () => undefined,
+    createSubagentBackedGuardianReview: () =>
+      (async () => ({
+        reviewer: "guardian_subagent",
+        outcome: "not_needed",
+        riskLevel: "low",
+        rationale: "stub",
+        decidedAt: new Date(0),
+      })) as unknown as ReturnType<SetupSessionDeps["createSubagentBackedGuardianReview"]>,
+    buildMcpSurfaceInfo: () => undefined,
+    buildIdleGuards: () => ({
+      idleMonitor: {
+        markActive: () => undefined,
+        markIdle: () => undefined,
+        snooze: () => undefined,
+        isIdle: () => false,
+        isSnoozed: () => false,
+        snoozedUntil: () => 0,
+      } as unknown as ReturnType<SetupSessionDeps["buildIdleGuards"]>["idleMonitor"],
+      rejectCounter: {
+        recordAccept: () => undefined,
+        recordDeny: () => undefined,
+      } as unknown as ReturnType<SetupSessionDeps["buildIdleGuards"]>["rejectCounter"],
+    }),
     loadPermissionStore: async () => {
       probe.loadPermissionStoreCalls += 1
       return opts.permissionStore
@@ -306,6 +394,7 @@ const installDefaultInternalMock = async (): Promise<void> => {
       sessionId: "resolved-session",
       history: [],
       idMeta: undefined,
+      inIdMode: false,
       conflictError: undefined,
       missingIdError: undefined,
     }),
@@ -458,21 +547,6 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     const prevSandbox = process.env.QUANTA_SANDBOX
     process.env.QUANTA_PERMISSION = "acceptEdits"
     process.env.QUANTA_SANDBOX = "workspace-write"
-    const origInternal = await import("../../../../src/apps/cli/internal")
-    await mock.module("../../../../src/apps/cli/internal", () => ({
-      ...origInternal,
-      buildTooling: () => ({
-        store: undefined,
-        embedder: undefined,
-        sessionId: "seed-session",
-        registry: { tools: () => [] },
-        memoryConfig: undefined,
-        subagentConfig: { maxDepth: 2 },
-        skillsConfig: undefined,
-        compactionBreakerConfig: undefined,
-        verifyGuardConfig: undefined,
-      }),
-    }))
     const permissionStore = createPermissionStore()
     setThreadPermission(
       "resolved-session",
@@ -486,7 +560,23 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     try {
       const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
       const { deps } = makeStubDeps({ permissionStore })
-      const result = await setupSession(deps)
+      // ADR-0292 — override the reviewer factory so the guardian-subagent
+      // path materializes (the stub's default returns undefined).
+      const fakeReviewer = async (): Promise<{ ok: true; finalText: string; turns: number }> => ({
+        ok: true,
+        finalText: "approve",
+        turns: 1,
+      })
+      const depsWithReviewer: SetupSessionDeps = {
+        ...deps,
+        buildTooling: ((mcp, lsp, lspNav, git, slog, taskRegistry) => {
+          const t = deps.buildTooling(mcp, lsp, lspNav, git, slog, taskRegistry)
+          return { ...t, subagentConfig: { maxDepth: 2 } } as typeof t
+        }) as SetupSessionDeps["buildTooling"],
+        materializeReviewerAgent: () =>
+          fakeReviewer as unknown as ReturnType<SetupSessionDeps["materializeReviewerAgent"]>,
+      }
+      const result = await setupSession(depsWithReviewer)
       expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("guardian_subagent")
       expect(result.sessionDeps.admissibility?.permissionStore).toBe(permissionStore)
       const admissibility = result.sessionDeps.admissibility
@@ -517,9 +607,6 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
       else process.env.QUANTA_PERMISSION = prevPermission
       if (prevSandbox === undefined) delete process.env.QUANTA_SANDBOX
       else process.env.QUANTA_SANDBOX = prevSandbox
-      await mock.module("../../../../src/apps/cli/internal", () => ({
-        ...origInternal,
-      }))
     }
   })
 
@@ -552,42 +639,36 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
   })
 
   test("rethrows buildLLM failure as a typed startup error", async () => {
-    const origInternal = await import("../../../../src/apps/cli/internal")
-    await mock.module("../../../../src/apps/cli/internal", () => ({
-      ...origInternal,
-      buildLLM: () => {
+    // ADR-0292 — inject the failure through the typed dep factory.
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { SessionBootstrapError } = await import("../../../../src/host/bootstrap")
+    const { deps } = makeStubDeps()
+    const failingDeps: SetupSessionDeps = {
+      ...deps,
+      buildLlm: () => {
         throw new Error("bad llm")
       },
-    }))
-    try {
-      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
-      const { SessionBootstrapError } = await import(
-        "../../../../src/apps/cli/repl/session-bootstrap"
-      )
-      const { deps } = makeStubDeps()
-      let caught: unknown
-      try {
-        await setupSession(deps)
-      } catch (error) {
-        caught = error
-      }
-      expect(caught).toBeInstanceOf(SessionBootstrapError)
-      expect(caught).toMatchObject({
-        kind: "llm_build_failed",
-        message: "bad llm",
-      })
-    } finally {
-      await mock.module("../../../../src/apps/cli/internal", () => ({
-        ...origInternal,
-      }))
     }
+    let caught: unknown
+    try {
+      await setupSession(failingDeps)
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(SessionBootstrapError)
+    expect(caught).toMatchObject({
+      kind: "llm_build_failed",
+      message: "bad llm",
+    })
   })
 
   test("startup failure stops active mcp clients before rethrowing", async () => {
     const stop = mock(async () => undefined)
-    const origInternal = await import("../../../../src/apps/cli/internal")
-    await mock.module("../../../../src/apps/cli/internal", () => ({
-      ...origInternal,
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { SessionBootstrapError } = await import("../../../../src/host/bootstrap")
+    const { deps } = makeStubDeps()
+    const failingDeps: SetupSessionDeps = {
+      ...deps,
       loadFeatures: async () => ({
         planMode: false,
         metrics: undefined,
@@ -604,33 +685,23 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
         sessionId: "seed-session",
         history: [],
         idMeta: undefined,
+        inIdMode: false,
         conflictError: undefined,
         missingIdError: "session-missing",
       }),
-    }))
-    try {
-      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
-      const { SessionBootstrapError } = await import(
-        "../../../../src/apps/cli/repl/session-bootstrap"
-      )
-      const { deps } = makeStubDeps()
-      let caught: unknown
-      try {
-        await setupSession(deps)
-      } catch (error) {
-        caught = error
-      }
-      expect(caught).toBeInstanceOf(SessionBootstrapError)
-      expect(caught).toMatchObject({
-        kind: "resume_missing_id",
-        message: "--resume: session id not found: session-missing",
-      })
-      expect(stop).toHaveBeenCalledTimes(1)
-    } finally {
-      await mock.module("../../../../src/apps/cli/internal", () => ({
-        ...origInternal,
-      }))
     }
+    let caught: unknown
+    try {
+      await setupSession(failingDeps)
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(SessionBootstrapError)
+    expect(caught).toMatchObject({
+      kind: "resume_missing_id",
+      message: "--resume: session id not found: session-missing",
+    })
+    expect(stop).toHaveBeenCalledTimes(1)
   })
 
   test("registers a SIGINT handler — invoking it triggers result.abort", async () => {
@@ -666,63 +737,69 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
   })
 
   test("deriveMcpPillServers IS called when loadFeatures returns at least one mcpClient", async () => {
-    // Override loadFeatures for THIS test only — push one mcpClient so
-    // the conditional fires.
-    const origInternal = await import("../../../../src/apps/cli/internal")
-    await mock.module("../../../../src/apps/cli/internal", () => ({
-      ...origInternal,
+    // ADR-0292 — override via the typed dep factory.
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps, probe } = makeStubDeps()
+    const withMcp: SetupSessionDeps = {
+      ...deps,
       loadFeatures: async () => ({
         planMode: false,
         metrics: undefined,
         state: undefined,
         resume: undefined,
-        mcpTools: [{ name: "mcp__fs__read" }],
+        mcpTools: [{ name: "mcp__fs__read" } as never],
         mcpClients: [{ stop: async () => undefined }],
         mcpConfigs: [],
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
       }),
-    }))
-    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
-    const { deps, probe } = makeStubDeps()
-    await setupSession(deps)
+    }
+    await setupSession(withMcp)
     expect(probe.deriveMcpPillServersCalls).toBeGreaterThanOrEqual(1)
   })
 
   test("builds mcpSurface from configs + bridged tools + QUANTA_MCP_CONFIG", async () => {
-    const origInternal = await import("../../../../src/apps/cli/internal")
     const prev = process.env.QUANTA_MCP_CONFIG
     process.env.QUANTA_MCP_CONFIG = "/tmp/quanta-mcp.json"
-    await mock.module("../../../../src/apps/cli/internal", () => ({
-      ...origInternal,
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { buildMcpSurfaceInfo } = await import("../../../../src/apps/cli/repl/mcp-surface-wire")
+    const { deps } = makeStubDeps()
+    const fsTool = { name: "mcp__fs__read_file", description: "read file" } as never
+    const withSurface: SetupSessionDeps = {
+      ...deps,
       loadFeatures: async () => ({
         planMode: false,
         metrics: undefined,
         state: undefined,
         resume: undefined,
-        mcpTools: [
-          {
-            name: "mcp__fs__read_file",
-            description: "read file",
-          } as never,
-        ],
+        mcpTools: [fsTool],
         mcpClients: [],
         mcpConfigs: [{ name: "fs", command: ["bun", "fs.ts"] }],
         lspTools: [],
         lspNavTools: [],
         gitToolList: [],
       }),
-    }))
-    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
-    const { deps } = makeStubDeps()
+      // ADR-0292 — wire the real builder so the test sees a populated surface.
+      buildMcpSurfaceInfo,
+    }
     try {
-      const result = await setupSession(deps)
-      expect(result.mcpSurface?.configPath).toBe("/tmp/quanta-mcp.json")
-      expect(result.mcpSurface?.servers.map((s) => `${s.name}:${s.status}`)).toEqual([
-        "fs:connected",
-      ])
-      expect(result.mcpSurface?.servers[0]?.tools.map((t) => t.name)).toEqual(["read_file"])
+      const result = await setupSession(withSurface)
+      // ADR-0292 — narrow the host's opaque mcpSurface back to the CLI
+      // surface concrete type for assertions. Two-step `as unknown as ...`
+      // because the surface CLI type has stricter literal-union members
+      // (e.g. `status: "connected"|"failed"`) that don't overlap directly.
+      const surface = result.mcpSurface as unknown as {
+        configPath?: string
+        servers: Array<{
+          name: string
+          status: string
+          tools: Array<{ name: string }>
+        }>
+      }
+      expect(surface?.configPath).toBe("/tmp/quanta-mcp.json")
+      expect(surface?.servers.map((s) => `${s.name}:${s.status}`)).toEqual(["fs:connected"])
+      expect(surface?.servers[0]?.tools.map((t) => t.name)).toEqual(["read_file"])
     } finally {
       if (prev === undefined) delete process.env.QUANTA_MCP_CONFIG
       else process.env.QUANTA_MCP_CONFIG = prev
@@ -757,20 +834,20 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
   })
 
   test("buildLLM failure rejects with SessionBootstrapError instead of exiting the process", async () => {
-    const origInternal = await import("../../../../src/apps/cli/internal")
-    await mock.module("../../../../src/apps/cli/internal", () => ({
-      ...origInternal,
-      buildLLM: () => {
+    // ADR-0292 — failure is now injected through the typed dep factory
+    // instead of mock-ing `../internal`, because the bootstrap consumes the
+    // closure (not the env-bound module symbol).
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { SessionBootstrapError } = await import("../../../../src/host/bootstrap")
+    const { deps } = makeStubDeps()
+    const failingDeps: SetupSessionDeps = {
+      ...deps,
+      buildLlm: () => {
         throw new Error("missing provider key")
       },
-    }))
-    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
-    const { SessionBootstrapError } = await import(
-      "../../../../src/apps/cli/repl/session-bootstrap"
-    )
-    const { deps } = makeStubDeps()
+    }
     try {
-      await setupSession(deps)
+      await setupSession(failingDeps)
       throw new Error("expected setupSession to reject")
     } catch (e) {
       expect(e).toBeInstanceOf(SessionBootstrapError)
@@ -779,25 +856,22 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
   })
 
   test("resume conflict rejects with SessionBootstrapError instead of exiting the process", async () => {
-    const origInternal = await import("../../../../src/apps/cli/internal")
-    await mock.module("../../../../src/apps/cli/internal", () => ({
-      ...origInternal,
-      buildLLM: () => ({ generate: async () => ({ content: [] }) }) as never,
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { SessionBootstrapError } = await import("../../../../src/host/bootstrap")
+    const { deps } = makeStubDeps()
+    const conflictDeps: SetupSessionDeps = {
+      ...deps,
       resolveResume: async () => ({
         sessionId: "resolved-session",
         history: [],
         idMeta: undefined,
+        inIdMode: false,
         conflictError: "cannot combine --new-session with --resume",
         missingIdError: undefined,
       }),
-    }))
-    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
-    const { SessionBootstrapError } = await import(
-      "../../../../src/apps/cli/repl/session-bootstrap"
-    )
-    const { deps } = makeStubDeps()
+    }
     try {
-      await setupSession(deps)
+      await setupSession(conflictDeps)
       throw new Error("expected setupSession to reject")
     } catch (e) {
       expect(e).toBeInstanceOf(SessionBootstrapError)

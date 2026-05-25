@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Message } from "@/llm"
 import { loadImportLog } from "@/migration"
+import { runSessionCommand, type SessionCommandDeps } from "@/runner/session-ops"
 import { runShell } from "@/runtime"
 import {
   archivedFilePath,
@@ -17,7 +18,8 @@ import {
   sessionFilePath,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
-import { runSessionCommand, type SessionCommandDeps } from "../../src/apps/cli/session-commands"
+import { createCliImportHandler } from "../../src/apps/cli/session-import-handler"
+import { resolveCliSessionListEnv } from "../../src/apps/cli/session-list-env"
 
 /**
  * CLI `quanta session …` subcommand dispatcher tests.
@@ -58,6 +60,11 @@ interface Captured {
 
 const captureDeps = (): Captured => {
   let confirmFn: (prompt: string) => Promise<boolean> = async () => false
+  // CLI-05 (ADR-0305): the prior `runSessionCommand` shim auto-injected
+  // these two adapters; with the shim gone the tests wire them here so
+  // every existing case stays byte-identical (`import` requires the
+  // handler; `ls` defaults route through listEnv → plain in non-TTY).
+  const listEnv = resolveCliSessionListEnv()
   const c: Captured = {
     out: "",
     err: "",
@@ -69,6 +76,8 @@ const captureDeps = (): Captured => {
         c.err += s
       },
       confirm: (p) => confirmFn(p),
+      importHandler: createCliImportHandler(),
+      ...(listEnv !== undefined ? { listEnv } : {}),
     },
     setConfirm: (fn) => {
       confirmFn = fn

@@ -30,7 +30,7 @@ evidence:
   code:
     - src/llm/types.ts
     - src/session/store.ts
-    - src/apps/cli/session-commands.ts
+    - src/runner/session-ops/index.ts
     - src/shared/runtime-config.ts
   adrs: [52]
   tests:

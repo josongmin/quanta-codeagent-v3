@@ -54,7 +54,8 @@ Conventions:
 | `status-cmd.ts` | `/status` — provider/auth/token state panel (ADR-0094 Slice C). | PRODUCTION |
 | `retry-with.ts` | `/retry-with [<model-id>]` model-swap retry slash command (ADR-0066). | PRODUCTION |
 | `snapshot-cmd.ts` | `/snapshot` — shadow-store snapshot UX (ADR-0122, Hermes Agent /rollback parity). | PRODUCTION |
-| `session-commands.ts` | CLI surface shim for the surface-agnostic `@/runner/session-ops` slice. | PRODUCTION |
+| `session-import-handler.ts` | CLI surface adapter — `createCliImportHandler()` factory wired into `SessionCommandDeps#importHandler` (ADR-0305). | PRODUCTION |
+| `session-list-env.ts` | CLI surface adapter — `resolveCliSessionListEnv()` resolves `SessionCommandDeps#listEnv` from runtimeConfig + stdout TTY (ADR-0305). | PRODUCTION |
 
 ## wire-helper (8 files)
 

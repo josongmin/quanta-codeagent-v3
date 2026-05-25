@@ -81,7 +81,7 @@ const minimalCtxArgs = (overrides: Partial<BuildReplSlashCtxArgs> = {}): BuildRe
     planStore: undefined,
     branchProgress: undefined,
     getHistory: () => [] as Message[],
-    sessionDeps: {} as BuildReplSlashCtxArgs["sessionDeps"],
+    sideConvPort: { start: async () => undefined } as unknown as BuildReplSlashCtxArgs["sideConvPort"],
     abortSignal: abort.signal,
     debugHandle: undefined,
     llm: {

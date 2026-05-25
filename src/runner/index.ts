@@ -29,3 +29,7 @@
 // explicit at the call site).
 export * from "./assemble"
 export * from "./orchestrate"
+export type {
+  SideConversationPort,
+  SideConversationStartArgs,
+} from "./side-conversation-port"

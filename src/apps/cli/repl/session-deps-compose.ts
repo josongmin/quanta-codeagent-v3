@@ -1,15 +1,15 @@
 import * as readline from "node:readline/promises"
 import { createOnConfirmReviewerPort } from "@/agent"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
+import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { PermissionStore, ToolAction } from "@/permission"
+import { assembleConfig, type SessionDeps } from "@/runner/assemble"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
-import { buildShellSnapshotConfig, buildSummarizerLlm, type SessionDeps } from "../internal"
+import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
 import type { RejectCounter } from "../reject-counter"
 import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
-import { buildSessionMemoryAutoWires } from "./session-memory-auto"
-import type { SessionBootstrapResult } from "./session-bootstrap"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 
 const askLine = async (prompt: string): Promise<string> => {
@@ -53,9 +53,12 @@ export const composeCliSessionDeps = async (
   args: ComposeCliSessionDepsArgs,
 ): Promise<CliAdmissibilityBindings> => {
   const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
+  // ADR-0299 — the host result types these ports as opaque (`unknown`); the
+  // CLI surface owns the real shapes (touch node:fs / node:os) so we narrow
+  // them back at the seam.
   const onConfirm = buildCliOnConfirm({
-    idleMonitor: boot.idleMonitor,
-    rejectCounter: boot.rejectCounter,
+    idleMonitor: boot.idleMonitor as IdleMonitor,
+    rejectCounter: boot.rejectCounter as RejectCounter,
   })
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
   const autoReview =
@@ -135,7 +138,14 @@ export const composeCliSessionDeps = async (
       return cfg !== undefined ? { shellSnapshot: cfg } : {}
     })(),
   }
-  const guardianReview = boot.guardianReview
+  const reviewerAgent = boot.materializeReviewerAgent(assembleConfig([], baseSessionDeps))
+  const guardianReview =
+    reviewerAgent !== undefined
+      ? boot.createSubagentBackedGuardianReview({
+          reviewer: reviewerAgent,
+          signal: boot.abort.signal,
+        })
+      : undefined
   const reviewerPort =
     autoReview !== undefined || guardianReview !== undefined
       ? createOnConfirmReviewerPort({
