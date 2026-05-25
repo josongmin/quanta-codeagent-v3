@@ -118,7 +118,10 @@ export const upsertMeta = async (
   })
 }
 
-export const removeFromIndex = async (id: string, provider?: SessionRootProvider): Promise<void> => {
+export const removeFromIndex = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<void> => {
   const path = await resolveIndexPath(provider)
   return withIndexMutex(path, async () => {
     const map = await readIndexMap(path)
@@ -128,9 +131,12 @@ export const removeFromIndex = async (id: string, provider?: SessionRootProvider
   })
 }
 
-export const listSessions = async (opts?: {
-  includeArchived?: boolean
-}, provider?: SessionRootProvider): Promise<SessionMeta[]> => {
+export const listSessions = async (
+  opts?: {
+    includeArchived?: boolean
+  },
+  provider?: SessionRootProvider,
+): Promise<SessionMeta[]> => {
   const map = await readIndexMap(await resolveIndexPath(provider))
   const includeArchived = opts?.includeArchived === true
   const out: SessionMeta[] = []

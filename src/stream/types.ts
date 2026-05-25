@@ -232,6 +232,34 @@ export type AgentEvent =
       deletions: number
       unifiedDiff: string
     }
+  // Debug/developer-mode cluster (Track A, 2026-05-25): gate-decision event.
+  // Emitted by the tool-call gate stack (permission / rule / hook / cap / jail /
+  // budget) immediately BEFORE the tool invocation so the CLI tracer + session
+  // JSONL recorder can both see WHICH gate produced the allow/deny/ask outcome
+  // and WHY. Default-OFF: nobody emits it yet — the emit sites live in
+  // Phase 2 (Track B). Closed `kind` × closed `outcome` enums (3-state outcome).
+  // Optional fields stay absent when not relevant. `metadata` carries kind-
+  // specific context — the CALLER is responsible for sanitisation (secret/PII
+  // scrubbing). The shape mirrors `EventDecisionSchema` in
+  // `@/session/envelope` (envelope side validates the wire form).
+  | {
+      type: "decision"
+      turn: number
+      /** Which gate produced the decision. */
+      kind: "permission" | "rule" | "hook" | "cap" | "jail" | "budget"
+      /** 3-state outcome. */
+      outcome: "allow" | "deny" | "ask"
+      /** Short human-readable reason (non-empty by convention). */
+      reason: string
+      /** Tool-call id this decision applies to — pairs with `tool_call.id`. */
+      toolCallId?: string
+      /** Matched rule id (only meaningful for kind="rule"). */
+      ruleId?: string
+      /** Hook name (only meaningful for kind="hook"). */
+      hookName?: string
+      /** Kind-specific extra context. CALLER sanitises (secret/PII scrub). */
+      metadata?: Readonly<Record<string, unknown>>
+    }
   | { type: "done"; reason: string; turns: number }
 
 /**

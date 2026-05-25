@@ -288,6 +288,10 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   // point, no new TrajectoryKind rippling through redaction). The diff
   // payload + per-file stats ride in `data` via `dataOf`.
   turn_diff_updated: "recovery",
+  // Debug/developer-mode (Track A, 2026-05-25): gate-decision tracer. Same
+  // rationale as plan/control-op/turn_diff — same-turn observation point,
+  // no new TrajectoryKind. `reason:"decision"` in `data` keeps it greppable.
+  decision: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -390,6 +394,8 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
         deletions: e.deletions,
         unifiedDiff: e.unifiedDiff,
       }
+    case "decision":
+      return decisionData(e)
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:
@@ -399,6 +405,24 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
       return assertNever(e, "AgentEvent")
   }
 }
+
+/** Debug/developer-mode (Track A, 2026-05-25): gate-decision payload.
+ *  Mirrors `EventDecisionSchema` in `@/session/envelope` on the trajectory
+ *  side. Optional fields are CONDITIONALLY spread so the recorded JSON is
+ *  byte-identical to inputs (no `undefined` fields). `reason:"decision"`
+ *  keeps this recovery-kind line greppable. Extracted from `dataOf` to keep
+ *  its switch case a single statement (cognitive-complexity budget). */
+const decisionData = (e: Extract<AgentEvent, { type: "decision" }>): Record<string, unknown> => ({
+  reason: "decision",
+  turn: e.turn,
+  kind: e.kind,
+  outcome: e.outcome,
+  decisionReason: e.reason,
+  ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+  ...(e.ruleId !== undefined ? { ruleId: e.ruleId } : {}),
+  ...(e.hookName !== undefined ? { hookName: e.hookName } : {}),
+  ...(e.metadata !== undefined ? { metadata: e.metadata } : {}),
+})
 
 /** ADR-0048: heartbeat payload — receive-side timestamp + the optional
  *  provider-supplied status/percentage. `reason:"in_progress"` keeps this

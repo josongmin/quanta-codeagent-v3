@@ -183,6 +183,16 @@ export class StdoutStream implements StreamPort {
           `${DIM}— turn ${event.turn} diff: ${event.filesChanged} files, +${event.insertions} -${event.deletions} (${event.fromSha.slice(0, 8)}..${event.toSha.slice(0, 8)}) —${RESET}\n`,
         )
         break
+      case "decision":
+        // Debug/developer-mode (Track A, 2026-05-25): gate-decision tracer
+        // line. One-liner — kind/outcome/reason are the three salient facts.
+        // The reason is scrubbed (the gate caller is responsible for not
+        // leaking secrets in `reason`/`metadata` per the type doc, but we
+        // route through `redactStr` anyway as defence-in-depth).
+        process.stdout.write(
+          `${DIM}• decision (${event.kind} → ${event.outcome}): ${oneLine(redactStr(event.reason))}${RESET}\n`,
+        )
+        break
       default: {
         // Exhaustiveness guard: a new AgentEvent variant must be handled
         // explicitly rather than silently rendered (or crashing) here.

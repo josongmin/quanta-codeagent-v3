@@ -243,7 +243,9 @@ const reconcileIndexFromMeta = async (
   meta: SessionMeta,
   provider?: SessionRootProvider,
 ): Promise<void> => {
-  const known = (await listSessions({ includeArchived: true }, provider)).find((m) => m.id === meta.id)
+  const known = (await listSessions({ includeArchived: true }, provider)).find(
+    (m) => m.id === meta.id,
+  )
   if (
     known !== undefined &&
     known.title === meta.title &&

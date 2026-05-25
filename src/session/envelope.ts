@@ -308,6 +308,41 @@ export const EventCustomSchema = z
   })
   .strict()
 
+/* ------------------------------------------------------------------ */
+/* Debug/developer-mode (Track A, 2026-05-25): gate-decision event_msg */
+/*                                                                     */
+/* Wire form of the stream `DecisionEvent` variant. The closed `gate`  */
+/* and `outcome` enums mirror `AgentEvent.kind` / `AgentEvent.outcome` */
+/* in `src/stream/types.ts` (cross-slice mirror; adding a kind/outcome */
+/* there MUST also add it here). `gate` is the schema field name (not  */
+/* `kind` — `kind` is reserved by `event_msg` for the discriminator).  */
+/* The schema stays `.strict()` so an unknown gate/outcome value is    */
+/* rejected at decode time. `metadata` accepts arbitrary record (the   */
+/* CALLER scrubs secrets — see DecisionEvent doc).                     */
+/* ------------------------------------------------------------------ */
+
+export const DecisionGateSchema = z.enum(["permission", "rule", "hook", "cap", "jail", "budget"])
+export const DecisionOutcomeSchema = z.enum(["allow", "deny", "ask"])
+
+export const EventDecisionSchema = z
+  .object({
+    ...EventBase,
+    kind: z.literal("decision"),
+    gate: DecisionGateSchema,
+    outcome: DecisionOutcomeSchema,
+    /** Short human-readable reason; non-empty by convention. */
+    decision_reason: NonEmptyString,
+    /** Pairs with `tool_call.id`. Absent when the decision predates dispatch. */
+    tool_call_id: NonEmptyString.optional(),
+    /** Only meaningful for gate="rule". */
+    rule_id: NonEmptyString.optional(),
+    /** Only meaningful for gate="hook". */
+    hook_name: NonEmptyString.optional(),
+    /** Kind-specific extra context. Caller-sanitised. */
+    metadata: z.record(z.unknown()).optional(),
+  })
+  .strict()
+
 export const EventMsgRecordSchema = z.discriminatedUnion("kind", [
   EventTaskStartedSchema,
   EventUserMessageSchema,
@@ -316,6 +351,7 @@ export const EventMsgRecordSchema = z.discriminatedUnion("kind", [
   EventToolInvokeSchema,
   EventToolResultSchema,
   EventCustomSchema,
+  EventDecisionSchema,
 ])
 export type EventMsgRecord = z.infer<typeof EventMsgRecordSchema>
 
