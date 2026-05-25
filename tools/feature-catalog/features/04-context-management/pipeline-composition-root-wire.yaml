@@ -42,28 +42,19 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - id: QUANTA_PIPELINE
-    type: string
-    default: "none"
-    values: [none, lexical-only, semantic-only, parallel-rrf, semantic-then-rerank, budget-aware]
-    effect: select the assembled preset; unknown / absent ⇒ null (default-OFF)
-  - id: QUANTA_EMBED_CACHE
-    type: string
-    default: "none"
-    values: [none, in-memory, sqlite]
-    effect: forwarded to resolveEmbedCacheFromEnv when a preset wires an embedder
-  - id: QUANTA_RERANKER
-    type: string
-    default: "identity"
-    values: [identity, headless, cohere, voyage]
-    effect: forwarded to createRerankerFromEnv when semantic-then-rerank is selected
-deliberate_hold: |
-  search_codebase is NOT auto-registered by buildDefaultTools — the
-  composition root opts it into a per-mode runner's tool set as a
-  follow-up ADR. Production-grade lexical / embedder adapters are
-  deferred (headless stubs are the surface contract; production hosts
-  inject real adapters via the helper's narrow `overrides` parameter).
-  Retrieval-output-into-working-memory (auto-recall) is a separate ADR.
+  - QUANTA_PIPELINE — preset selector (none|lexical-only|semantic-only|parallel-rrf|semantic-then-rerank|budget-aware, default none = default-OFF)
+  - QUANTA_EMBED_CACHE — forwarded to resolveEmbedCacheFromEnv (in-memory|sqlite|none, default none)
+  - QUANTA_RERANKER — forwarded to createRerankerFromEnv (identity|headless|cohere|voyage, default identity)
+deliberate_hold:
+  reason: |
+    search_codebase is NOT auto-registered by buildDefaultTools — the
+    composition root opts it into a per-mode runner's tool set as a
+    follow-up ADR. Production-grade lexical / embedder adapters are
+    deferred (headless stubs are the surface contract; production hosts
+    inject real adapters via the helper's narrow `overrides` parameter).
+    Retrieval-output-into-working-memory (auto-recall) is a separate ADR.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   The helper's adapter glue maps slice ports (Result-shaped, multi-method)
   to the pipeline's INLINE DUCK-TYPED ports (Promise-shaped, single

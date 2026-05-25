@@ -44,13 +44,16 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: |
-  No automatic wiring into the dispatch loop, the agent assembly root, or
-  any surface. The composer is a leaf primitive — callers in @/agent
-  opt in by importing the sub-barrel explicitly and adapting their
-  concrete adapters (`LexicalSearchPort`, `SemanticIndex`, etc.) to the
-  inline duck-typed ports declared in `types.ts`. Cross-slice wiring is
-  a separate ADR.
+deliberate_hold:
+  reason: |
+    No automatic wiring into the dispatch loop, the agent assembly root, or
+    any surface. The composer is a leaf primitive — callers in @/agent
+    opt in by importing the sub-barrel explicitly and adapting their
+    concrete adapters (`LexicalSearchPort`, `SemanticIndex`, etc.) to the
+    inline duck-typed ports declared in `types.ts`. Cross-slice wiring is
+    a separate ADR.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   RRF formula and the k=60 constant are inlined in `compose.ts` rather
   than imported from the sibling `score-fusion-rrf.ts`. This is a

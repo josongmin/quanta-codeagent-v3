@@ -49,17 +49,20 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: |
-  - 실제 search adapter (BigCode / Sourcegraph / GitHub Code Search 등) —
-    이번 라운드는 headless stub 만; production adapter는 후속 ADR
-  - license enforcement gating (e.g. "GPL-3.0 match를 MIT 프로젝트에
-    쓰려 하면 거부", license-conflict UI surface) — retrieval 슬라이스만
-    먼저 안전하게 착륙시키고 후속에서 gate
-  - `buildDefaultTools()` 등록 + `MUTATING_TOOL_TABLE` entry — host
-    composition root가 실제 adapter를 wire하는 ADR에서 함께 추가
-    (shadow / subagent-bg / mcp_tasks의 같은 caller-wire 패턴)
-  - similarity 캘리브레이션 / 임베딩 모델 선택 (semantic vs token vs hybrid)
-    — adapter 별 trade-off은 production adapter ADR에서 결정
+deliberate_hold:
+  reason: |
+    - 실제 search adapter (BigCode / Sourcegraph / GitHub Code Search 등) —
+      이번 라운드는 headless stub 만; production adapter는 후속 ADR
+    - license enforcement gating (e.g. "GPL-3.0 match를 MIT 프로젝트에
+      쓰려 하면 거부", license-conflict UI surface) — retrieval 슬라이스만
+      먼저 안전하게 착륙시키고 후속에서 gate
+    - `buildDefaultTools()` 등록 + `MUTATING_TOOL_TABLE` entry — host
+      composition root가 실제 adapter를 wire하는 ADR에서 함께 추가
+      (shadow / subagent-bg / mcp_tasks의 같은 caller-wire 패턴)
+    - similarity 캘리브레이션 / 임베딩 모델 선택 (semantic vs token vs hybrid)
+      — adapter 별 trade-off은 production adapter ADR에서 결정
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   Sibling import 방향: src/tool/ai-attribution/ → @/shared 만. 다른 슬라이스
   역참조 없음. tsconfig `@/tool/*` alias 이미 존재.

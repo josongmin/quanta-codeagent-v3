@@ -62,6 +62,17 @@ export type ReplSlashCtx = Partial<{
    *  envelopes; absent ⇒ `/replay` prints "not wired in this surface" +
    *  exit 0 (parity with the other surface-only commands). */
   replay: ReplaySlashState
+  /** Session-level reasoning-effort wire. Closes over the surface-owned
+   *  `EffortStore` AND the status pill so `/effort <level>` mutates both
+   *  on the same tick. */
+  effort: {
+    readonly get: () => import("@/agent").EffortLevel
+    readonly set: (level: import("@/agent").EffortLevel) => void
+    readonly levels: readonly import("@/agent").EffortLevel[]
+    readonly budgetTokens: (
+      level: import("@/agent").EffortLevel,
+    ) => number | undefined
+  }
 }>
 
 export interface BuildReplSlashCtxArgs {
@@ -94,6 +105,15 @@ export interface BuildReplSlashCtxArgs {
   /** Track R — `/replay` resolver+iterator pair. Absent ⇒ command
    *  prints "not wired in this surface" + exit 0. */
   replay: ReplaySlashState | undefined
+  /** Session-level reasoning-effort wire. */
+  effort: {
+    readonly get: () => import("@/agent").EffortLevel
+    readonly set: (level: import("@/agent").EffortLevel) => void
+    readonly levels: readonly import("@/agent").EffortLevel[]
+    readonly budgetTokens: (
+      level: import("@/agent").EffortLevel,
+    ) => number | undefined
+  }
 }
 
 /** Compose the REPL-owned slash adapters into one explicit surface object. */
@@ -116,6 +136,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     model,
     inspect,
     replay,
+    effort,
   } = args
   return {
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
@@ -144,6 +165,9 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     ...(inspect !== undefined ? { inspect } : {}),
     // Track R — `/replay` resolver+iterator. Absent ⇒ slash prints "not wired".
     ...(replay !== undefined ? { replay } : {}),
+    // Session-level reasoning-effort. Closes over the surface's EffortStore
+    // (read on `/effort` no-arg) and pill (repainted on `/effort <level>`).
+    effort,
   }
 }
 
@@ -165,6 +189,7 @@ const projectSlashCtx = (slashCtx: ReplSlashCtx | undefined): Record<string, unk
   ...(slashCtx?.why !== undefined ? { why: slashCtx.why } : {}),
   ...(slashCtx?.inspect !== undefined ? { inspect: slashCtx.inspect } : {}),
   ...(slashCtx?.replay !== undefined ? { replay: slashCtx.replay } : {}),
+  ...(slashCtx?.effort !== undefined ? { effort: slashCtx.effort } : {}),
 })
 
 /** Try to handle `input` as an in-REPL slash command. Returns true iff the

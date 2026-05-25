@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
-configurable: env
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:voyage, absorbed:clip, surface:core]
 depends_on: []

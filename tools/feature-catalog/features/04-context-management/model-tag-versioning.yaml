@@ -41,11 +41,14 @@ knobs:
   - DefaultInvalidatorOptions.onCallbackError — overrideable (default console.warn)
   - registerInvalidationCallback(cb) — opt-in registration; absence = byte-identical
   - tag-codec semantics — major-version-bump triggers stale; minor / patch do NOT
-deliberate_hold: |
-  Wiring this invalidator into specific cache (ADR-0254) and persisted
-  index (ADR-0263) layers is deferred. Those consumers own the
-  callback construction + lifetime — this slice ships the primitive,
-  the rules, and the registry seam only.
+deliberate_hold:
+  reason: |
+    Wiring this invalidator into specific cache (ADR-0254) and persisted
+    index (ADR-0263) layers is deferred. Those consumers own the
+    callback construction + lifetime — this slice ships the primitive,
+    the rules, and the registry seam only.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   Hellgate 15 cases (HELL-MT-01..HELL-MT-15) cover canonical format,
   round-trip, malformed / missing-dim / missing-version / empty-field

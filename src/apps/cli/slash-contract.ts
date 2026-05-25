@@ -82,6 +82,21 @@ export interface SlashContext {
         readonly set: (state: DebugCmdState) => void
       }
     | undefined
+  /** Session-level reasoning-effort wire (Codex `/model`-style UX, effort-
+   *  only). `get` returns the current named tier; `set` mutates the surface-
+   *  owned store AND updates any chrome (status pills) the surface paints.
+   *  Absent ⇒ `/effort` prints "not wired in this surface" (parity with the
+   *  rest of the surface-only commands). */
+  readonly effort?:
+    | {
+        readonly get: () => import("@/agent").EffortLevel
+        readonly set: (level: import("@/agent").EffortLevel) => void
+        readonly levels: readonly import("@/agent").EffortLevel[]
+        readonly budgetTokens: (
+          level: import("@/agent").EffortLevel,
+        ) => number | undefined
+      }
+    | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

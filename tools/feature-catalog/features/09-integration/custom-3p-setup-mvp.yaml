@@ -67,15 +67,18 @@ knobs:
     where: jsonl-store.ts internals
     default: 0o700
     purpose: parent ~/.quanta/connectors — owner-only traverse
-deliberate_hold: |
-  OAuth authorization-code browser-redirect full flow (Phase 2 — hooks
-  into existing src/auth/chatgpt-oauth/ once surface ships).
-  19 additional Claude Desktop methods reachable via composition of
-  ADR-0151 / 0160 / 0163 — explicitly NOT re-implemented.
-  Concurrent multi-process write coordination (single-flight contract
-  this MVP).
-  Telemetry opt-in metadata (observability slice owns the emit surface
-  — separate ADR).
+deliberate_hold:
+  reason: |
+    OAuth authorization-code browser-redirect full flow (Phase 2 — hooks
+    into existing src/auth/chatgpt-oauth/ once surface ships).
+    19 additional Claude Desktop methods reachable via composition of
+    ADR-0151 / 0160 / 0163 — explicitly NOT re-implemented.
+    Concurrent multi-process write coordination (single-flight contract
+    this MVP).
+    Telemetry opt-in metadata (observability slice owns the emit surface
+    — separate ADR).
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   R0 absorption (2026-05-25). Source: Claude Desktop 1.7196.3 catalog
   (memory `claude-desktop-1-7196-catalog`) + R2 absorption gap memo

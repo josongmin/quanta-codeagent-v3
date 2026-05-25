@@ -44,14 +44,17 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: |
-  No automatic wiring into the dispatch loop, the agent assembly root,
-  or any surface. Callers in @/agent opt in by constructing
-  `defaultBudgetLedger()` (ADR-0138), bridging its `totalCost` snapshot
-  to `{ totalUsd: ... }`, passing the bridged shape into
-  `createBudgetProbeFromLedger`, and feeding the result into
-  `budgetAwarePipeline` (ADR-0265). The bridge function lives at the
-  assembly site, not in this slice — keeps both ends slice-fence-clean.
+deliberate_hold:
+  reason: |
+    No automatic wiring into the dispatch loop, the agent assembly root,
+    or any surface. Callers in @/agent opt in by constructing
+    `defaultBudgetLedger()` (ADR-0138), bridging its `totalCost` snapshot
+    to `{ totalUsd: ... }`, passing the bridged shape into
+    `createBudgetProbeFromLedger`, and feeding the result into
+    `budgetAwarePipeline` (ADR-0265). The bridge function lives at the
+    assembly site, not in this slice — keeps both ends slice-fence-clean.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   The duck-typed `{ snapshot(): { totalUsd } }` shape deliberately
   differs from the real ledger's `{ snapshot(): { totalCost } }` accessor.

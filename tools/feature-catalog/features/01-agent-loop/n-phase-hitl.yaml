@@ -34,9 +34,12 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: |
-  AgentConfig 와이어는 의도적 보류 — 첫 호스트(CLI repl 또는 IDE)가 driver를
-  소비할 때 별도 ADR로 와이어. default-OFF 보존.
+deliberate_hold:
+  reason: |
+    AgentConfig 와이어는 의도적 보류 — 첫 호스트(CLI repl 또는 IDE)가 driver를
+    소비할 때 별도 ADR로 와이어. default-OFF 보존.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   exactOptionalPropertyTypes: OMIT 준수 (선택 필드는 부재; undefined로 명시
   set 안 함). 15 HELL-NP-01..15 hellgate가 모든 closed-error code 도달성 +

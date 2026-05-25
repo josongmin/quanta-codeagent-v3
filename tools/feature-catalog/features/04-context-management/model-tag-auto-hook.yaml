@@ -45,15 +45,18 @@ knobs:
   - AutoHookRegistrarOptions.onUnregisterError — overrideable (default console.warn)
   - registerCacheHook(cache | null) / registerStoreHook(store | null) — opt-in staging; null = no-op + warn
   - installAll(invalidator) returns UnregisterAll — idempotent disposal thunk; second call is no-op
-deliberate_hold: |
-  The slice attaches duck-typed `CacheLike` / `StoreLike` to the
-  invalidator registry. Concrete bulk-purge wiring for stores that
-  need delete-by-filter (i.e. delete every doc tagged with the old
-  modelTag) is left to the store implementation — the store registers
-  its own `InvalidationCallback` directly via
-  `registerInvalidationCallback(...)`. This is consistent with ADR-0266's
-  "consumer owns the wiring" posture and avoids leaking store layout
-  into the registrar.
+deliberate_hold:
+  reason: |
+    The slice attaches duck-typed `CacheLike` / `StoreLike` to the
+    invalidator registry. Concrete bulk-purge wiring for stores that
+    need delete-by-filter (i.e. delete every doc tagged with the old
+    modelTag) is left to the store implementation — the store registers
+    its own `InvalidationCallback` directly via
+    `registerInvalidationCallback(...)`. This is consistent with ADR-0266's
+    "consumer owns the wiring" posture and avoids leaking store layout
+    into the registrar.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   Hellgate 12 cases (HELL-AH-01..HELL-AH-12) cover registration → fire
   flow for cache, store, and both; callback isolation when one hook

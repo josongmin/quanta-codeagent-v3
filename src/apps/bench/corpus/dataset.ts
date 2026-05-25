@@ -205,6 +205,20 @@ export const prepareTaskRepo = async (
  * the FALLBACK path only. With Docker OFF, pytest runs the exact FAIL_TO_PASS
  * tests in the sandbox; ImportError/test failure surfaces correctly.
  */
+/** Python version per repo for the SWE-bench Verified light-tier set we
+ *  measure against. SWE-bench Verified instances on these repos all run cleanly
+ *  on Python 3.9 (older codebases rely on `collections.Mapping` etc. removed
+ *  in 3.10+). Unknown repos fall back to 3.10 (safer for modern code). */
+const PYTHON_FOR_REPO: Readonly<Record<string, string>> = {
+  "psf/requests": "3.9",
+  "pallets/flask": "3.9",
+  "pylint-dev/pylint": "3.9",
+  "pytest-dev/pytest": "3.9",
+  "sympy/sympy": "3.9",
+  "sphinx-doc/sphinx": "3.9",
+  "django/django": "3.9",
+}
+
 const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   const f2p = raw.FAIL_TO_PASS
   if (typeof f2p !== "string") return "true"
@@ -215,15 +229,37 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
     return "true"
   }
   if (!Array.isArray(tests) || tests.length === 0) return "true"
-  // Shell-escape each test path with single quotes (FAIL_TO_PASS values are
-  // pytest node ids — never contain single quotes in practice; the wrapping
-  // is defense-in-depth).
-  const quoted = tests
-    .filter((t): t is string => typeof t === "string" && t.length > 0)
-    .map((t) => `'${t.replace(/'/g, "'\\''")}'`)
-  if (quoted.length === 0) return "true"
-  // `-x` stops at first failure (cheap signal). `--no-header` reduces noise.
-  return `python -m pytest -x --no-header ${quoted.join(" ")}`
+  const names = tests.filter((t): t is string => typeof t === "string" && t.length > 0)
+  if (names.length === 0) return "true"
+  // FAIL_TO_PASS values vary by repo:
+  //   - "tests/test_x.py::test_y"           → pytest node id (use as path)
+  //   - "tests/test_x.py::TestClass::test_y" → also a node id
+  //   - "test_encode_morse"                  → bare test name (sympy style)
+  //   - "path/to/test_file.py"               → just a file
+  // Strategy: if value contains `::` OR `/` (path-like), pass as positional
+  // arg verbatim. If it's a bare identifier, collect into a single `-k`
+  // keyword expression (`pytest -k 'name1 or name2'`). Both can appear in
+  // the same array — split into two groups and pass both.
+  const isNodeIdLike = (n: string): boolean => n.includes("::") || n.includes("/")
+  const nodeIds = names.filter(isNodeIdLike)
+  const keywords = names.filter((n) => !isNodeIdLike(n))
+  const quote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
+  const parts: string[] = []
+  for (const n of nodeIds) parts.push(quote(n))
+  if (keywords.length > 0) {
+    // pytest -k accepts boolean expression over substrings. Join with " or "
+    // so any matching test triggers; quote the whole expression so the shell
+    // treats it as one argument.
+    parts.push("-k", quote(keywords.join(" or ")))
+  }
+  // uvx pulls deps + pytest into a cached ephemeral env so the sandbox doesn't
+  // need its own venv. `--with-editable .` installs the repo at the sandbox's
+  // cwd from its `setup.py` / `pyproject.toml` — pip resolves transitive deps.
+  // First call per (python ver, repo, base commit) pays the build cost;
+  // subsequent calls hit uv's cache (~ms).
+  const repo = typeof raw.repo === "string" ? raw.repo : ""
+  const py = PYTHON_FOR_REPO[repo] ?? "3.10"
+  return `uvx --quiet --python ${py} --with pytest --with-editable . pytest -x --no-header ${parts.join(" ")}`
 }
 
 export const toInstance = (task: SwebenchTask, repoPath: string): Instance => ({

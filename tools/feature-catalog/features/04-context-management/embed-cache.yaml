@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
-configurable: env
+configurable: integrated
 config_refs:
   env: [QUANTA_EMBED_CACHE]
 owners: ["@songmin"]

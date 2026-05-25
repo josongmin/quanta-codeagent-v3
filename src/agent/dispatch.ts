@@ -344,6 +344,48 @@ const executeWithStuckTracking = async (
   }
 }
 
+const buildRequestPlanExit = (
+  config: AgentConfig,
+  collabMode: ReturnType<typeof resolveCollaborationMode>,
+): ToolContext["requestPlanExit"] => {
+  const planExitPort = config.planExitPort
+  return planExitPort !== undefined
+    ? async (plan: string) => {
+        const outcome = await runPlanExitFlow(collabMode, plan, planExitPort)
+        config.onPlanExitOutcome?.({ plan, outcome })
+        return outcome
+      }
+    : undefined
+}
+
+const buildToolContext = (args: {
+  config: AgentConfig
+  workingState: WorkingStateHandle | undefined
+  collabMode: ReturnType<typeof resolveCollaborationMode>
+}): ToolContext => {
+  const { config, workingState, collabMode } = args
+  const requestPlanExit = buildRequestPlanExit(config, collabMode)
+  const reviewerAgent = materializeReviewerAgent(config)
+  return {
+    cwd: config.cwd,
+    signal: config.signal,
+    gitWriteGuard: gitWriteProtectReason,
+    ...(config.depth !== undefined ? { depth: config.depth } : {}),
+    ...(workingState !== undefined ? { workingState } : {}),
+    ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
+    ...(reviewerAgent !== undefined ? { reviewerAgent } : {}),
+    ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
+    ...(config.planStore !== undefined
+      ? { planMutator: planStoreToMutator(config.planStore) }
+      : {}),
+    ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
+    ...((): { shellSnapshot?: import("@/tool").ShellSnapshotRestoreSeam } => {
+      const seam = config.shellSnapshotSession?.currentSeam()
+      return seam !== undefined ? { shellSnapshot: seam } : {}
+    })(),
+  }
+}
+
 /** Span-free dispatch body (extracted so the outer wrap keeps a single
  *  control flow). Identical logic to the pre-span path. */
 const dispatchToolInner = async (
@@ -447,77 +489,7 @@ const dispatchToolInner = async (
   // level of the permission config itself, so this is intentional (the model
   // and untrusted content cannot reach it). See hooks.ts `emit` security note.
   const effectiveCall: ToolUseBlock = rewritten ? { ...call, input: rewritten.value } : call
-
-  // Subagent absorption (ADR-0011): propagate this agent's recursion
-  // depth so the `Agent` tool can enforce `maxDepth`. Absent ⇒ omitted (the
-  // tool duck-reads it as 0), so the default path is byte-identical.
-  // Phase 6 (ADR-0021): propagate the session-scoped WorkingState handle so
-  // tools that want to read/mutate L3 via the context seam (rather than a
-  // closure-captured handle) have a real path. Absent ⇒ omitted.
-  // ADR-0086 plan-exit bridge: when a port is wired, expose a requester that
-  // runs the flow (mode-guard + feedback-iff-changes invariant enforced by
-  // `runPlanExitFlow`). PlanExitOutcome is structurally the @/tool
-  // PlanExitToolOutcome, so it crosses the slice boundary by value. Absent ⇒
-  // omitted (the `request_plan_exit` tool is not registered anyway).
-  const planExitPort = config.planExitPort
-  // `runPlanExitFlow` takes the 2-mode CollaborationMode ("default" | "plan").
-  // Use the shared `resolveCollaborationMode` projection so the plan-exit
-  // flow agrees with the dispatch-seam guard about the active collab posture
-  // (explicit `config.collaborationMode` wins, else 4-mode → 2-mode fallback).
-  const collabMode = collab
-  const requestPlanExit =
-    planExitPort !== undefined
-      ? async (plan: string) => {
-          const outcome = await runPlanExitFlow(collabMode, plan, planExitPort)
-          config.onPlanExitOutcome?.({ plan, outcome })
-          return outcome
-        }
-      : undefined
-  const reviewerAgent = materializeReviewerAgent(config)
-  const ctx: ToolContext = {
-    cwd: config.cwd,
-    signal: config.signal,
-    // ADR-0091 git-write-protection L3 wire: the `write`/`edit` tools call this
-    // pure path-pattern detector with their resolved target BEFORE any fs op
-    // and statically deny code-execution / policy-escape vectors (`.git/hooks`,
-    // `.git/config{,.worktree}`, `.git/info/attributes`, `.vscode/**`). Wired
-    // unconditionally — the matcher is pure (no I/O, no state, no config), so
-    // exposing it cannot change behavior for any path the detector returns
-    // `null` for (byte-identical for ordinary writes). `@/tool` consumes it via
-    // the duck-typed `GitWriteGuard` seam so it never imports `@/permission`.
-    gitWriteGuard: gitWriteProtectReason,
-    ...(config.depth !== undefined ? { depth: config.depth } : {}),
-    ...(workingState !== undefined ? { workingState } : {}),
-    ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
-    ...(reviewerAgent !== undefined ? { reviewerAgent } : {}),
-    // ADR-0081 L3 wire: forward the agent-level shell observer into every
-    // tool's ToolContext. The bash tool conditionally hands it to runShell,
-    // which only allocates events when this is present (`exactOptionalProperty
-    // Types` honoured — never `onShellEvent: undefined`).
-    ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
-    // ADR-0093 (draft) — PlanStore→PlanMutator adapter. Built fresh per
-    // dispatch so the slice fence (@/tool never imports @/agent/plan) stays
-    // intact: dispatch is in @/agent and is the only allowed translator.
-    // Absent ⇒ 4 plan tools graceful-fail at ok:false (default-OFF).
-    ...(config.planStore !== undefined
-      ? { planMutator: planStoreToMutator(config.planStore) }
-      : {}),
-    // ADR-0095 (draft) — operator-side user-input requester. Surface
-    // (CLI / IDE modal / RPC) supplies the answer/cancelled decision.
-    ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
-    // ADR-0235 — per-turn shell-snapshot seam. Read the ACTIVE seam from
-    // the session helper the loop wired (`shellSnapshotSession`); when no
-    // capture has produced a valid handle yet (e.g. capture failed for the
-    // current turn, or the session helper is absent because the caller did
-    // not opt in), `currentSeam()` returns `undefined` and the field is
-    // OMITTED from `ctx` (exactOptionalPropertyTypes — never
-    // `shellSnapshot: undefined`). The bash tool forwards `ctx.shellSnapshot`
-    // verbatim to `runShell`, which sources the snapshot file before exec.
-    ...((): { shellSnapshot?: import("@/tool").ShellSnapshotRestoreSeam } => {
-      const seam = config.shellSnapshotSession?.currentSeam()
-      return seam !== undefined ? { shellSnapshot: seam } : {}
-    })(),
-  }
+  const ctx = buildToolContext({ config, workingState, collabMode: collab })
   // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
   // Before executing the tool, check whether the model IGNORED the last
   // nextAction hint for this (toolName, targetPath) pair. When ignored, emit

@@ -36,6 +36,7 @@ import type { ConversationActionPort } from "./conversation-action"
 import type { ConversationCheckpointStore } from "./conversation-checkpoint"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { DispatchGuard } from "./dispatch-guard"
+import type { EffortLevel } from "./effort"
 import type { FollowUpQueue, PausedReason } from "./follow-up-queue"
 import type { SessionForker } from "./fork-session"
 import type { GlobRule } from "./glob-rules"
@@ -601,6 +602,18 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * (defines escalation sequence). Wired by the surface layer.
    */
   modelCandidates?: readonly ModelCandidate[]
+  /**
+   * Session-level reasoning-effort accessor. Read once per turn by
+   * `resolveSkillTurnOverride` to derive the `thinking:{enabled,budget_tokens}`
+   * field on the per-turn LLMInput. Precedence: skill > session > default.
+   *
+   * A FUNCTION (not a value) so a surface-owned store (`/effort` slash) can
+   * mutate it across turns without re-assembling AgentConfig. Returning
+   * `undefined` (or the `"default"` tier) ⇒ no `thinking` field on LLMInput
+   * (byte-identical to today, RFC §1.2 default-OFF). A skill's own `effort:`
+   * override still wins when present.
+   */
+  sessionEffort?: () => EffortLevel | undefined
   /**
    * ADR-0081 shell output delta streaming — opt-in observer for the typed
    * `ShellExecEvent` stream. The dispatch seam forwards this to

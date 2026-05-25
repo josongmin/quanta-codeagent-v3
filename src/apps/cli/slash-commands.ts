@@ -644,6 +644,73 @@ const focusChainCmd: SlashCommand = {
   },
 }
 
+/** `/effort` — session-level reasoning-effort picker. Codex `/model`-style UX
+ *  but effort-only (model swap is `/retry-with`'s job). No args ⇒ status
+ *  line + level list; one named arg ⇒ set the new tier (the wire callback
+ *  mutates the surface-owned EffortStore AND repaints the chrome pill). The
+ *  five tiers map to thinking budgets via `effortToTokenBudget` — `"default"`
+ *  emits NO `thinking` field on LLMInput (provider default behavior). */
+const formatEffortLine = (
+  level: import("@/agent").EffortLevel,
+  budget: number | undefined,
+  current: boolean,
+): string => {
+  const marker = current ? "*" : " "
+  const tag =
+    budget === undefined
+      ? "provider default (no thinking budget)"
+      : `~${budget.toLocaleString("en-US")} tokens`
+  return ` ${marker} ${level.padEnd(8)} ${tag}\n`
+}
+
+const effortCmd: SlashCommand = {
+  name: "/effort",
+  describe: "Show or switch session reasoning effort (default|low|medium|high|max)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.effort === undefined) {
+      ctx.out("/effort: not wired in this surface\n")
+      return 0
+    }
+    const { get, set, levels, budgetTokens } = ctx.effort
+    if (args.length === 0) {
+      const cur = get()
+      const curBudget = budgetTokens(cur)
+      ctx.out(
+        `🧠 reasoning effort: ${cur}${curBudget !== undefined ? ` (~${curBudget.toLocaleString("en-US")} tokens)` : " (provider default)"}\n`,
+      )
+      for (const lvl of levels) ctx.out(formatEffortLine(lvl, budgetTokens(lvl), lvl === cur))
+      ctx.out("use: /effort <level>\n")
+      return 0
+    }
+    if (args.length > 1) {
+      ctx.err(`/effort: takes at most one argument; got ${args.length}\n`)
+      return 1
+    }
+    const arg = (args[0] as string).trim().toLowerCase()
+    const next = levels.find((l) => l === arg)
+    if (next === undefined) {
+      ctx.err(`/effort: unknown level '${arg}'; known = ${levels.join(", ")}\n`)
+      return 1
+    }
+    set(next)
+    const nextBudget = budgetTokens(next)
+    ctx.out(
+      nextBudget === undefined
+        ? `🧠 effort: ${next} (provider default — no thinking budget)\n`
+        : `🧠 effort: ${next} (~${nextBudget.toLocaleString("en-US")} tokens)\n`,
+    )
+    return 0
+  },
+  complete: (args, partial, ctx) => {
+    if (ctx.effort === undefined || args.length >= 1) return []
+    const seed = partial.toLowerCase()
+    return ctx.effort.levels
+      .filter((lvl) => lvl.startsWith(seed))
+      .map((lvl) => ({ value: lvl, kind: "argument" as const }))
+  },
+}
+
 /** Track D — `/debug` runtime toggle. Pure handler in `./debug-cmd`; the
  *  slash adapter delegates and applies the new state back through the
  *  `ctx.debug.set` seam. The handler never throws, so unknown arguments
@@ -740,6 +807,10 @@ export const BUILTINS: readonly SlashCommand[] = [
   profileCmd,
   identityCmd,
   focusChainCmd,
+  // `/effort` — session-level reasoning effort tier. Slotted with the other
+  // ADR-0236 composition-root mega-wire commands; default-OFF: when
+  // `ctx.effort` is absent (one-shot surfaces) the slash prints "not wired".
+  effortCmd,
   // Track D — `/debug` runtime toggle. Default-OFF: when `ctx.debug` is
   // absent (boot-time tee not allocated) the slash prints a "not wired"
   // line + the QUANTA_DEBUG hint and exits 0 (parity with the rest of the

@@ -1,9 +1,20 @@
-import { type AgentConfig, buildSystemPrompt, RetryingLLM } from "@/agent"
+import {
+  type AgentConfig,
+  buildSystemPrompt,
+  createEffortStore,
+  type EffortStore,
+  parseEffort,
+  RetryingLLM,
+} from "@/agent"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
+import {
+  createSubagentBackedGuardianReview,
+  materializeReviewerAgent,
+} from "@/agent/tier1/reviewer-subagent"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { buildShellOtelObserver, StructuredLogger } from "@/observability"
-import type { PermissionContext, PermissionMode } from "@/permission"
+import type { PermissionContext, PermissionMode, ReviewerPort } from "@/permission"
 import { errMessage, logger } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
@@ -98,6 +109,12 @@ export interface SessionBootstrapResult {
   readonly permission: PermissionContext
   readonly idleMonitor: IdleMonitor
   readonly rejectCounter: RejectCounter
+  /** Session-level reasoning-effort store (Codex `/model`-style UX, effort-
+   *  only). Initial value comes from `QUANTA_EFFORT` (parsed via
+   *  `parseEffort`); a present-but-unrecognised value parses to `undefined`
+   *  ⇒ store defaults to `"default"`. The `/effort` slash mutates this; the
+   *  agent loop reads it once per turn via `AgentConfig.sessionEffort`. */
+  readonly effortStore: EffortStore
   readonly llm: LLMPort
   readonly features: Awaited<ReturnType<typeof loadFeatures>>
   readonly tooling: Tooling
@@ -119,6 +136,7 @@ export interface SessionBootstrapResult {
   readonly abort: AbortController
   readonly argPrompt: string | undefined
   readonly system: string
+  readonly guardianReview: ReviewerPort["guardianReview"] | undefined
   readonly shutdownMcp: () => Promise<void>
 }
 
@@ -186,6 +204,39 @@ const composeShellEvent = (
     : undefined
 }
 
+const buildGuardianReview = (args: {
+  llm: LLMPort
+  registry: Tooling["registry"]
+  permission: PermissionContext
+  history: readonly Message[]
+  system: string
+  cwd: string
+  maxTurns: number
+  signal: AbortSignal
+  subagentConfig: Tooling["subagentConfig"]
+  stream: StreamPort
+}): ReviewerPort["guardianReview"] | undefined => {
+  if (args.subagentConfig === undefined) return undefined
+  const reviewerAgent = materializeReviewerAgent({
+    llm: args.llm,
+    registry: args.registry,
+    stream: args.stream,
+    permission: args.permission,
+    messages: [...args.history],
+    system: args.system,
+    cwd: args.cwd,
+    maxTurns: args.maxTurns,
+    signal: args.signal,
+    subagent: args.subagentConfig,
+  })
+  return reviewerAgent !== undefined
+    ? createSubagentBackedGuardianReview({
+        reviewer: reviewerAgent,
+        signal: args.signal,
+      })
+    : undefined
+}
+
 /** Resolve feature flags, tooling, resume state, and reusable session deps that
  *  do not require terminal-specific host wiring. */
 export const bootstrapSession = async (
@@ -196,6 +247,7 @@ export const bootstrapSession = async (
   const { idleMonitor, rejectCounter } = buildIdleGuards(runtime)
   const permission: PermissionContext = { mode: runtime.mode }
   const abort = new AbortController()
+  const effortStore = createEffortStore(parseEffort(runtime.env.QUANTA_EFFORT) ?? "default")
   const finalLLM = buildLlmStack(
     runtime.provider,
     runtime.model,
@@ -287,6 +339,18 @@ export const bootstrapSession = async (
     )
     const branchProgress = deps.buildBranchProgressOrUndefined(runtime.env, runtime.stdoutIsTTY)
     const planStore = deps.buildPlanStoreOrUndefined(runtime.env)
+    const guardianReview = buildGuardianReview({
+      llm: finalLLM,
+      registry: tooling.registry,
+      permission,
+      history,
+      system,
+      cwd,
+      maxTurns: runtime.maxTurns,
+      signal: abort.signal,
+      subagentConfig: tooling.subagentConfig,
+      stream,
+    })
     const shutdownMcp = async (): Promise<void> => {
       await stopMcpClients(features.mcpClients)
     }
@@ -302,6 +366,7 @@ export const bootstrapSession = async (
       permission,
       idleMonitor,
       rejectCounter,
+      effortStore,
       llm: finalLLM,
       features,
       tooling,
@@ -323,6 +388,7 @@ export const bootstrapSession = async (
       abort,
       argPrompt: runtime.argPrompt,
       system,
+      guardianReview,
       shutdownMcp,
     }
   } catch (error) {

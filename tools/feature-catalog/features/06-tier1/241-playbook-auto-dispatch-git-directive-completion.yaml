@@ -8,7 +8,7 @@ status: stable
 ui_surfaces: [cli]
 monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
-configurable: dynamic
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:aider", "absorbed:codex", "closes:deliberate-hold"]
 depends_on: ["user-authored-playbook-frontmatter", "queued-followup-per-msg-mutators", "git-directive-emit-protocol", "git-directive-turn-collector-wire"]

@@ -390,32 +390,48 @@ const buildSkillGate = (
 }
 
 /** Resolve the per-turn LLM port + thinking budget given the active skill's
- *  override (if any). Pure: no clock, no IO. Precedence is skill > session
- *  config > default — here we only fold in the SKILL layer (the session/default
- *  thinking budget is whatever the loop already passes, i.e. none today, so an
- *  absent override is byte-identical). A `model` override swaps the port to the
- *  matching `config.modelCandidates` entry by id; an unknown id (or no
- *  candidate registry) leaves `config.llm` untouched (advisory degrade — the
- *  model id alone cannot construct a port). An `effort` override becomes a
- *  `thinking:{type:"enabled",budget_tokens}` field: a numeric effort is the raw
- *  budget, a named tier maps via `effortToTokenBudget` (the `"default"` tier and
- *  a non-positive/absent budget ⇒ no `thinking` field, byte-identical). */
+ *  override (if any). Pure: no clock, no IO. Precedence is skill > session >
+ *  default. A `model` override swaps the port to the matching
+ *  `config.modelCandidates` entry by id; an unknown id (or no candidate
+ *  registry) leaves `config.llm` untouched (advisory degrade — the model id
+ *  alone cannot construct a port).
+ *
+ *  Effort resolution per call site:
+ *   - Skill with a named tier OR numeric effort ⇒ skill wins (a named
+ *     `"default"` or non-positive numeric is treated as an EXPLICIT "no
+ *     thinking" choice and also wins, byte-identical to the pre-session-
+ *     effort behavior for skill-declared overrides).
+ *   - Skill model-only (no `effort:`) OR no skill override ⇒ fall through to
+ *     `config.sessionEffort?.()` (read once per turn so a runtime `/effort`
+ *     mutation reflects on the next turn without re-assembling AgentConfig).
+ *     A session `"default"`/absent ⇒ no `thinking` field on LLMInput
+ *     (byte-identical to today). */
 const resolveSkillTurnOverride = (
   config: AgentConfig,
   override: SkillTurnOverride | undefined,
 ): { llm: LLMPort; thinking?: { type: "enabled"; budget_tokens: number } } => {
-  if (override === undefined) return { llm: config.llm }
   const swapped =
-    override.model !== undefined
+    override?.model !== undefined
       ? config.modelCandidates?.find((c) => c.id === override.model)?.port
       : undefined
   const llm = swapped ?? config.llm
-  const budget =
-    typeof override.effort === "number"
-      ? override.effort
-      : override.effort !== undefined
-        ? effortToTokenBudget(override.effort)
-        : undefined
+  // `null` ⇒ no skill effort signal (fall through to session). `undefined` ⇒
+  // skill explicitly chose "no thinking" (do NOT fall through). A positive
+  // number ⇒ explicit budget.
+  const skillBudget: number | undefined | null =
+    override === undefined || override.effort === undefined
+      ? null
+      : typeof override.effort === "number"
+        ? override.effort
+        : effortToTokenBudget(override.effort)
+  const sessionBudget =
+    skillBudget === null
+      ? ((): number | undefined => {
+          const lvl = config.sessionEffort?.()
+          return lvl !== undefined ? effortToTokenBudget(lvl) : undefined
+        })()
+      : undefined
+  const budget = skillBudget ?? sessionBudget
   if (budget !== undefined && budget > 0) {
     return { llm, thinking: { type: "enabled", budget_tokens: budget } }
   }

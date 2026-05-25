@@ -1,20 +1,11 @@
 import * as readline from "node:readline/promises"
 import { createOnConfirmReviewerPort } from "@/agent"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
-import {
-  createSubagentBackedGuardianReview,
-  materializeReviewerAgent,
-} from "@/agent/tier1/reviewer-subagent"
 import type { PermissionStore, ToolAction } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
-import {
-  assembleConfig,
-  buildShellSnapshotConfig,
-  buildSummarizerLlm,
-  type SessionDeps,
-} from "../internal"
+import { buildShellSnapshotConfig, buildSummarizerLlm, type SessionDeps } from "../internal"
 import type { RejectCounter } from "../reject-counter"
 import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
 import type { SessionBootstrapResult } from "./session-bootstrap"
@@ -103,6 +94,7 @@ export const composeCliSessionDeps = async (
     userInputPort,
     onShellEvent: boot.onShellEvent,
     workMetricsSink: boot.workMetricsSink,
+    sessionEffort: () => boot.effortStore.get(),
     ...(boot.lifecycleFollowUpQueue !== undefined
       ? { followUpQueue: boot.lifecycleFollowUpQueue }
       : {}),
@@ -112,14 +104,7 @@ export const composeCliSessionDeps = async (
       return cfg !== undefined ? { shellSnapshot: cfg } : {}
     })(),
   }
-  const reviewerAgent = materializeReviewerAgent(assembleConfig([], baseSessionDeps))
-  const guardianReview =
-    reviewerAgent !== undefined
-      ? createSubagentBackedGuardianReview({
-          reviewer: reviewerAgent,
-          signal: boot.abort.signal,
-        })
-      : undefined
+  const guardianReview = boot.guardianReview
   const reviewerPort =
     autoReview !== undefined || guardianReview !== undefined
       ? createOnConfirmReviewerPort({

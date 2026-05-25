@@ -9,7 +9,8 @@ ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide]
 configurable: integrated
-config_refs: {}
+config_refs:
+  env: []
 owners: ["@songmin"]
 labels: [absorbed:roo, surface:core, tier:core]
 depends_on: []

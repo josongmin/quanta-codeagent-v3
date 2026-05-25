@@ -47,13 +47,16 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: |
-  host wire 보류: auto-dispatch.ts / 어떤 planning surface도 아직 NestedPlaybookExecutor를
-  construct 안 함. 현재 라운드는 슬라이스 primitive만 (closed port + default
-  adapter + cycle helper + 15-case hellgate). 후속:
-    - host adapter — procedure step "run playbook X" 디스패치 시 executor 주입
-    - async sibling adapter — 자식 playbook이 subagent spawn 등 async 필요할 때
-    - planner integration — DAG planner가 nested call을 시각화 / cost cap
+deliberate_hold:
+  reason: |
+    host wire 보류: auto-dispatch.ts / 어떤 planning surface도 아직 NestedPlaybookExecutor를
+    construct 안 함. 현재 라운드는 슬라이스 primitive만 (closed port + default
+    adapter + cycle helper + 15-case hellgate). 후속:
+      - host adapter — procedure step "run playbook X" 디스패치 시 executor 주입
+      - async sibling adapter — 자식 playbook이 subagent spawn 등 async 필요할 때
+      - planner integration — DAG planner가 nested call을 시각화 / cost cap
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
 notes: |
   슬라이스는 leaf-only — @/agent, @/tool, @/permission, @/storage, @/runtime
   import 0. 모든 import는 ./types, ./port, ./cycle-detector 안에서만. ADR-0203

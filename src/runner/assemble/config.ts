@@ -86,6 +86,13 @@ export interface SessionDeps {
    *  AgentConfig entirely (byte-identical default-OFF: every `runShell`
    *  spawn is the legacy `["bash","-lc",cmd]` argv). */
   shellSnapshot?: AgentConfig["shellSnapshot"]
+  /** Session-level reasoning-effort accessor (`/effort` slash + `QUANTA_EFFORT`
+   *  env, Codex `/model`-style UX but effort-only). Surface owns the mutable
+   *  store; this is a read-only accessor the loop calls once per turn via
+   *  `AgentConfig.sessionEffort`, so a runtime change applies on the next
+   *  turn without re-assembling AgentConfig. Absent ⇒ omitted entirely
+   *  (byte-identical default-OFF: no `thinking` field on LLMInput). */
+  sessionEffort?: AgentConfig["sessionEffort"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -154,6 +161,7 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
   ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
   ...(d.shellSnapshot !== undefined ? { shellSnapshot: d.shellSnapshot } : {}),
+  ...(d.sessionEffort !== undefined ? { sessionEffort: d.sessionEffort } : {}),
 })
 
 export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {
