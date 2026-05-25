@@ -470,6 +470,18 @@ const dispatchToolInner = async (
     // ADR-0095 (draft) — operator-side user-input requester. Surface
     // (CLI / IDE modal / RPC) supplies the answer/cancelled decision.
     ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
+    // ADR-0235 — per-turn shell-snapshot seam. Read the ACTIVE seam from
+    // the session helper the loop wired (`shellSnapshotSession`); when no
+    // capture has produced a valid handle yet (e.g. capture failed for the
+    // current turn, or the session helper is absent because the caller did
+    // not opt in), `currentSeam()` returns `undefined` and the field is
+    // OMITTED from `ctx` (exactOptionalPropertyTypes — never
+    // `shellSnapshot: undefined`). The bash tool forwards `ctx.shellSnapshot`
+    // verbatim to `runShell`, which sources the snapshot file before exec.
+    ...((): { shellSnapshot?: import("@/tool").ShellSnapshotRestoreSeam } => {
+      const seam = config.shellSnapshotSession?.currentSeam()
+      return seam !== undefined ? { shellSnapshot: seam } : {}
+    })(),
   }
   // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
   // Before executing the tool, check whether the model IGNORED the last

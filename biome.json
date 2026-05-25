@@ -1108,7 +1108,8 @@
         "!tests/integration/session-chaos-and-attack.test.ts",
         "!tests/integration/session-stress-and-concurrent.test.ts",
         "!tests/integration/cli-export-assembly.test.ts",
-        "!tests/integration/skills-slash-e2e-hellgate.test.ts"
+        "!tests/integration/skills-slash-e2e-hellgate.test.ts",
+        "!tests/integration/composition-root-wire-hellgate.test.ts"
       ],
       "linter": {
         "rules": {

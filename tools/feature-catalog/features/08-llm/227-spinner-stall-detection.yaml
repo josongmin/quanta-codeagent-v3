@@ -38,11 +38,21 @@ evidence:
     - src/llm/spinner-stall/event-emitter.ts
     - src/llm/spinner-stall/index.ts
     - src/llm/stream-timeout.ts
+    # ADR-0234 wire: per-call onChunk threaded into every chunk-yielding adapter
+    - src/llm/types.ts
+    - src/llm/adapters/anthropic.ts
+    - src/llm/adapters/openai.ts
+    - src/llm/adapters/chatgpt-oauth.ts
+    - src/llm/providers/bedrock-adapter.ts
+    - src/llm/providers/vertex-adapter.ts
+    - src/llm/providers/foundry-adapter.ts
   adrs:
     - docs/decisions/0227-spinner-stall-detection.md
+    - docs/decisions/0234-llm-providers-onchunk-and-16-kind-wire.md
   tests:
     unit:
       - tests/unit/spinner-stall-detector-hellgate.test.ts
+      - tests/unit/llm-providers-onchunk-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -55,7 +65,10 @@ knobs:
       overwrites the threshold (knob change takes effect on next poll).
 deliberate_hold:
   - CLI surface "still working… [r]etry / [a]bort" panel — Tier 2 후속 (sink impl)
-  - Provider adapter wire (onChunk injection) — Tier 2 (per-adapter)
+  # ADR-0234 RELEASE: provider adapter wire 완성. 5 chunk-yielding 어댑터
+  # (anthropic / openai / bedrock / vertex / foundry) 전부 withStreamTimeout
+  # opts에 onChunk 통과. chatgpt-oauth는 SSE 파서 내부 notifyChunkArrival 헬퍼.
+  # mantle은 throw-stub이라 와이어 대상 아님 (negative-invariant).
   - Metrics counter (spinner_stall_count / spinner_stall_recovered_count) — Tier 2 (ADR-0144 MetricSink)
 notes: |
   ADR-0200 (hard abort)과 직교. 동일 stream에 양쪽 wire 가능 — 30s에 soft panel + 120s에

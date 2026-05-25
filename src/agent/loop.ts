@@ -31,6 +31,7 @@ import {
   attachCapEnforcer,
   attachDedupGate,
   attachLocalizePhase,
+  buildGitDirectiveEmit,
   buildPreCompactHook,
   buildSeedMessages,
   buildTtftAttrs,
@@ -50,6 +51,7 @@ import {
   type RecoveryAction,
   type RecoveryReason,
 } from "./recovery"
+import { buildShellSnapshotSession, type ShellSnapshotSession } from "./shell-snapshot-session"
 // R2-B P1 — parameter-bundle refactor. `TurnSession` (session-lifetime
 // readonly resources) and `TurnState` (turn-lifetime mutable state) cut
 // `runTurn` from ~20 positional params to 3, `streamConsume` to 4, and
@@ -1755,6 +1757,40 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   // /disabled ⇒ undefined (no `git` spawn, byte-identical legacy).
   const turnDiffSession: TurnDiffSession | undefined = buildTurnDiffSession(cfg)
 
+  // ADR-0234 git-directive emit wire — opt-in
+  // (`cfg.gitDirectiveEmit?.enabled`). See `loop-helpers#buildGitDirectiveEmit`
+  // for the collector factory; absent/disabled ⇒ undefined (no collector
+  // built, no emitter instantiated, byte-identical legacy). When set, the
+  // helper ALSO mutates `cfg.gitDirectiveEmit.collector` so a downstream
+  // tool wire (gitTools at the composition root) reads the SAME collector
+  // the loop will flush at turn end.
+  const gitDirectiveCollector = buildGitDirectiveEmit(cfg)
+
+  // ADR-0235 per-turn shell-snapshot wire (opt-in `cfg.shellSnapshot`).
+  // Absent ⇒ helper returns `undefined` and EVERY tick site below is a no-op
+  // (the optional-chain calls return early before any allocation). Loop is
+  // byte-identical for every legacy caller (RFC §1.2 default-OFF). When
+  // present, captures at turn-start (or once per session when
+  // `captureAtTurnStart === false`) and exposes the active restore seam via
+  // `currentSeam()` — dispatch reads this when building `ToolContext`.
+  const shellSnapshotSession: ShellSnapshotSession | undefined = buildShellSnapshotSession(
+    cfg,
+    (message) => stream.emit({ type: "error", message }),
+  )
+  // Best-effort prune at session start + stash the session helper on `cfg`
+  // so dispatch can reach the active seam through the same AgentConfig
+  // channel every other per-turn slot uses (turnDiffSession is local to
+  // loop because only loop reads it; the shell-snapshot seam is read by
+  // dispatch, hence the field-on-cfg path). Storing the SESSION (not the
+  // seam) so a re-capture at the NEXT turn boundary is observed by the
+  // very next dispatch — the seam handle would freeze mid-turn.
+  // `exactOptionalPropertyTypes`: assign ONLY when defined so dispatch's
+  // optional-chain access stays type-safe (never `undefined`-assigned).
+  if (shellSnapshotSession !== undefined) {
+    await shellSnapshotSession.pruneOnStart()
+    cfg.shellSnapshotSession = shellSnapshotSession
+  }
+
   // R2-B P1 — session-lifetime bundle. Configured ONCE here (after every
   // session resource the helpers might need has been materialized) and passed
   // unchanged into every `runTurn` call. The bundle is `readonly`, so a helper
@@ -1963,6 +1999,31 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       wm.append(conversationActionOutcome.message)
     }
 
+    // ADR-0236 / ADR-0219 — Focus Chain auto-reinject (Cline absorption).
+    // Default-OFF: `cfg.focusChain` absent ⇒ no `tickTurn`, no `getInjection`,
+    // no allocation — byte-identical legacy. When present, advance the
+    // tracker BEFORE the LLM snapshot is taken so the per-turn injection
+    // (rendered as a `user` message body) lands ahead of the assistant turn.
+    // The port's surface is no-throw per its 5-contract; defense-in-depth
+    // wrap surfaces a structural error AgentEvent without crashing the turn.
+    if (cfg.focusChain !== undefined) {
+      try {
+        cfg.focusChain.tracker.tickTurn()
+        const injection = cfg.focusChain.tracker.getInjection()
+        if (injection !== null && injection.trim().length > 0) {
+          wm.append({
+            role: "user",
+            content: [{ type: "text", text: injection }],
+          })
+        }
+      } catch (e) {
+        stream.emit({
+          type: "error",
+          message: `focus-chain inject failed: ${errMessage(e)}`,
+        })
+      }
+    }
+
     // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Pre-T3 this
     // was computed-and-discarded (`void stampTurn(...)`) so the caller's
     // `config.run` was never observed by downstream code. T3 reads the
@@ -1979,6 +2040,17 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     if (dedupGate) {
       const stamped = stampTurn(cfg.run, turn)
       cfg.run = stamped ?? { runId: sessionId, turn }
+    }
+    // ADR-0235 per-turn shell-snapshot capture (opt-in). Absent ⇒
+    // `shellSnapshotSession` is `undefined` and the optional-chain call
+    // returns synchronously without any work (byte-identical, RFC §1.2).
+    // Awaited so the snapshot is on-disk BEFORE the turn body opens any
+    // shell tool — every `runShell` call in this turn will pick up the
+    // same handle through `currentSeam()`. Failures inside the helper
+    // are surfaced as `error` AgentEvents (no-throw), and dispatch falls
+    // back to the legacy spawn for the turn (the seam is absent).
+    if (shellSnapshotSession !== undefined) {
+      await shellSnapshotSession.snapshotForTurn(turn)
     }
     stream.emit({ type: "turn_start", turn })
     if (cfg.hooks) {
@@ -2060,6 +2132,22 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
       const diffEvent = await turnDiffSession.endTurn(turn)
       if (diffEvent !== null) stream.emit(diffEvent)
     }
+
+    // ADR-0234 git-directive emit flush — drain any directives the mutating
+    // git tools recorded during this turn's intermediate-phase tool calls.
+    // The flush emits each entry through the wired emitter with
+    // `phase: "final-answer"` — the natural moment that satisfies the
+    // ADR-0221 phase invariant. Absent collector ⇒ no flush call (the helper
+    // returned `undefined`). The collector itself is no-throw; flush() returns
+    // typed Result-per-entry which we deliberately ignore at the loop level
+    // (test-only observability; production swallows wire errors so a sink
+    // failure cannot crash the turn). Position: after `endSpan` so the turn
+    // span closes first, after `turnDiffSession.endTurn` so the diff event
+    // emits before the directive lines (UI consumers see the diff context
+    // before the directives that describe what changed), and BEFORE
+    // `emitWorkMetrics` so the directives arrive on the wire ahead of the
+    // work-metrics summary.
+    gitDirectiveCollector?.flush()
 
     // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
     // at turn-top, so a turn that immediately aborted/errored BEFORE producing

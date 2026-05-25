@@ -36,6 +36,7 @@ import {
   type WatermarkState,
 } from "@/memory"
 import { errMessage } from "@/shared"
+import type { Stage1Record, Stage1StorePortV2 } from "./memory/stage1-store"
 
 /** Outcome of a session-end consolidator attempt. Mirrors `Phase1Outcome`
  *  shape but adds the structured-skip arms the hook itself can produce
@@ -416,4 +417,150 @@ const runPhase2AutoTriggerInner = async (
  *  the WeakSet does not leak across cases. NOT for production use. */
 export const __resetPhase2InflightForTests = (writer: MemoryWriter): void => {
   _inflight.delete(writer)
+}
+
+// ─── ADR-0233 (Wire 1) — Stage1→Phase2 reuse consume helper ──────────────
+//
+// Phase2 entry point reads from Stage1StorePortV2 for a given threadId.
+// When a fresh, low-usage record exists → REUSE (return the record so the
+// caller can hand it to phase2 without re-running phase1). Otherwise →
+// REFRESH (caller runs phase1 to repopulate the stage-1 row, then proceeds
+// to phase2).
+//
+// Both branches mutate the store deterministically:
+//   - reuse  ⇒ incrementUsageCount(threadId) THEN selectForPhase2([threadId])
+//   - refresh ⇒ no mutation (the caller's phase1 run will rewrite the row)
+//
+// Default-OFF: when `store` is undefined the helper returns
+// `{ shouldRefresh: true, reason: "store_missing" }` and the caller MUST
+// fall back to the existing flow — byte-identical for every host that
+// never wires `stage1StoreV2`.
+//
+// Knob defaults — picked to mirror the user's spec exactly:
+//   - stage1ReuseThresholdSec  default 3600  (1h freshness window)
+//   - maxUsageBeforeRefresh    default    5  (after 5 reads, refresh)
+//
+// NO-THROW: every store throw becomes a `kind:"refresh"` outcome with
+// `reason:"store_error"`. Sink throws never derail the phase2 path.
+
+/** Defaults for Wire 1 knobs — exported so tests can pin them. */
+export const STAGE1_REUSE_THRESHOLD_SEC_DEFAULT = 3600
+export const STAGE1_MAX_USAGE_BEFORE_REFRESH_DEFAULT = 5
+
+/** Why the helper decided to refresh — surfaced for observability so a
+ *  host can distinguish a real cache miss from a config-side skip. */
+export type Stage1ReuseRefreshReason =
+  | "store_missing"
+  | "thread_id_empty"
+  | "no_record"
+  | "expired"
+  | "over_used"
+  | "store_error"
+
+/** Outcome of one `consumeStage1ForPhase2` call. Discriminated so the
+ *  caller branches without inspecting nested fields. */
+export type Stage1ConsumeOutcome =
+  | { readonly kind: "reuse"; readonly record: Stage1Record }
+  | { readonly kind: "refresh"; readonly reason: Stage1ReuseRefreshReason }
+
+/** Inputs to `consumeStage1ForPhase2`. Narrow shape so the helper can be
+ *  unit-tested against scripted values without standing up the full
+ *  consolidator block. */
+export interface Stage1ConsumeInput {
+  /** ADR-0216 4-verb persist port. ABSENT ⇒ refresh + `store_missing`. */
+  readonly store: Stage1StorePortV2 | undefined
+  /** PK for the record. EMPTY ⇒ refresh + `thread_id_empty`. */
+  readonly threadId: string
+  /** Knob — mirrors `MemoryConsolidatorBlock.stage1ReuseThresholdSec`.
+   *  Negative / NaN / non-finite ⇒ default
+   *  ({@link STAGE1_REUSE_THRESHOLD_SEC_DEFAULT}). */
+  readonly stage1ReuseThresholdSec?: number
+  /** Knob — mirrors `MemoryConsolidatorBlock.maxUsageBeforeRefresh`.
+   *  Non-positive / NaN / non-finite ⇒ default
+   *  ({@link STAGE1_MAX_USAGE_BEFORE_REFRESH_DEFAULT}). */
+  readonly maxUsageBeforeRefresh?: number
+  /** Injected clock — defaults to `Date.now`. */
+  readonly now?: () => number
+}
+
+/** Pure-ish helper that decides REUSE vs REFRESH for one threadId.
+ *
+ *  Verb ordering when reusing (the test pins this):
+ *    1. `store.read(threadId)`              — fetch the existing record.
+ *    2. Decide freshness + usage cap.
+ *    3. `store.incrementUsageCount(tid)`    — bump the read count.
+ *    4. `store.selectForPhase2([tid])`      — flip the promotion flag.
+ *
+ *  Step 3+4 are SEPARATE calls so each surface is observable in tests
+ *  AND so a `incrementUsageCount` failure does not also clobber the
+ *  selection state. A throw in either mutate call demotes the outcome
+ *  to a refresh (the read returned a usable record, so the host can
+ *  still proceed — but the next call will see the stale state).
+ */
+export const consumeStage1ForPhase2 = async (
+  input: Stage1ConsumeInput,
+): Promise<Stage1ConsumeOutcome> => {
+  if (input.store === undefined) {
+    return { kind: "refresh", reason: "store_missing" }
+  }
+  if (input.threadId.length === 0) {
+    return { kind: "refresh", reason: "thread_id_empty" }
+  }
+  // Read first — the result decides every subsequent branch.
+  let readResult: Awaited<ReturnType<Stage1StorePortV2["read"]>>
+  try {
+    readResult = await input.store.read(input.threadId)
+  } catch {
+    // No-throw contract: a store implementation that throws is treated
+    // as a cache miss; the caller refreshes via phase1.
+    return { kind: "refresh", reason: "store_error" }
+  }
+  if (!readResult.ok || readResult.value === null) {
+    return { kind: "refresh", reason: "no_record" }
+  }
+  const record = readResult.value
+  // Freshness — clamp the knob to its default on invalid input so a host
+  // that hands us a NaN does not silently treat every row as expired.
+  const thresholdSec = normalizePositive(
+    input.stage1ReuseThresholdSec,
+    STAGE1_REUSE_THRESHOLD_SEC_DEFAULT,
+  )
+  const now = (input.now ?? Date.now)()
+  const ageMs = now - record.generatedAt
+  if (ageMs > thresholdSec * 1000) {
+    return { kind: "refresh", reason: "expired" }
+  }
+  // Usage cap — same clamp posture (positive integers only).
+  const maxUsage = normalizePositive(
+    input.maxUsageBeforeRefresh,
+    STAGE1_MAX_USAGE_BEFORE_REFRESH_DEFAULT,
+  )
+  if (record.usageCount >= maxUsage) {
+    return { kind: "refresh", reason: "over_used" }
+  }
+  // Reuse — bump usage THEN flip selection. Each mutation is best-effort
+  // (no-throw contract); a store throw is logged via the outcome shape
+  // upstream (we just degrade to refresh so the caller does not act on
+  // a half-mutated record).
+  try {
+    await input.store.incrementUsageCount(input.threadId)
+  } catch {
+    return { kind: "refresh", reason: "store_error" }
+  }
+  try {
+    await input.store.selectForPhase2([input.threadId])
+  } catch {
+    return { kind: "refresh", reason: "store_error" }
+  }
+  return { kind: "reuse", record }
+}
+
+/** Coerce a config knob to its positive-finite value or fall back to the
+ *  documented default. Negative / 0 / NaN / Infinity all fall back; the
+ *  knob descriptors above promise positive integers only. */
+const normalizePositive = (raw: number | undefined, fallback: number): number => {
+  if (raw === undefined) return fallback
+  if (!Number.isFinite(raw)) return fallback
+  if (raw <= 0) return fallback
+  return raw
 }

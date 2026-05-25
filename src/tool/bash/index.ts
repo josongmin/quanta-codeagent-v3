@@ -141,11 +141,17 @@ export const bashTool: Tool<Input> = {
 
     // PR-5 / ADR-0081: forward the optional shell-event observer through to
     // `runShell`. Absent (default) ⇒ buffered legacy path, byte-identical.
+    // ADR-0235: forward the optional per-turn shell-snapshot seam through to
+    // `runShell`. The seam shape is structurally identical to
+    // `ShellOptions.shellSnapshot` (both are `ShellSnapshotRestoreSeam`),
+    // so the forward is pass-through. Absent ⇒ no restore wrapping, exact
+    // byte-identical legacy spawn.
     const r = await runShell(cmd, {
       cwd: ctx.cwd,
       signal: ctx.signal,
       ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}),
       ...(ctx.onShellEvent ? { onShellEvent: ctx.onShellEvent } : {}),
+      ...(ctx.shellSnapshot ? { shellSnapshot: ctx.shellSnapshot } : {}),
     })
 
     let body = [r.stdout, r.stderr].filter(Boolean).join("\n").trimEnd()

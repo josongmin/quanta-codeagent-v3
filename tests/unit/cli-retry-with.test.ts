@@ -342,8 +342,14 @@ describe("/retry-with — slash dispatch", () => {
 
   test("BUILTINS table now includes /retry-with (and /help anchors index 0)", async () => {
     const { BUILTINS } = await import("../../src/apps/cli/slash-commands")
-    expect(BUILTINS.map((c) => c.name)).toEqual([
-      // `/help` is registered first so it can render the full LIVE table.
+    // ADR-0236 — pin shape (/help anchors index 0, /retry-with at index 6)
+    // + presence of every original anchor. Was a full-list equality before;
+    // we relax to anchor-checks so additive ADRs (/profile, /identity,
+    // /focus-chain etc.) do not force re-pinning here every round.
+    const names = BUILTINS.map((c) => c.name)
+    expect(names[0]).toBe("/help")
+    expect(names[6]).toBe("/retry-with")
+    const _legacyExpected = [
       "/help",
       "/context",
       "/usage",
@@ -374,6 +380,9 @@ describe("/retry-with — slash dispatch", () => {
       "/working-state",
       "/history",
       "/branches",
-    ])
+    ]
+    for (const e of _legacyExpected) {
+      expect(names).toContain(e)
+    }
   })
 })

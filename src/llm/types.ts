@@ -241,4 +241,22 @@ export interface StreamInput {
    * boundary instead of the caller's preflight time.
    */
   turnTimingCapture?: RequestTimingCapture
+  /**
+   * ADR-0234 — per-call spinner-stall tick hook. Invoked by adapters on EVERY
+   * yielded raw stream chunk (token / tool-use delta / SSE frame); never on
+   * `done`, never on timeout. The spinner-stall detector consumes this to
+   * bump its per-correlation `lastEventMs` so the soft "still working…"
+   * panel (ADR-0227) fires before the hard idle abort (ADR-0200).
+   *
+   * Best-effort by contract — adapters MUST swallow any exception thrown by
+   * the hook so a faulty surface detector never poisons the live producer.
+   * The `withStreamTimeout` wrapper already enforces this via its own
+   * `notifyChunkArrival` helper; adapters that bypass the wrapper (e.g.
+   * `chatgpt-oauth`'s SSE parser) carry the same swallow-policy locally.
+   *
+   * Absent ⇒ adapters emit byte-identical wire payloads and skip the call
+   * (default-OFF: a process that never builds a spinner-stall emitter sees
+   * zero behavioural change).
+   */
+  onChunk?: () => void
 }

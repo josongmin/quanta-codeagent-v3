@@ -203,6 +203,7 @@ export type {
   PlanMutatorNewTodo,
   PlanMutatorTodoPatch,
   PlanReadonlyView,
+  ShellSnapshotRestoreSeam,
   Tool,
   ToolContext,
   ToolEvent,

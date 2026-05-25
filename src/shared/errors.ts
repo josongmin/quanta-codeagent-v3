@@ -227,13 +227,119 @@ const isAbortError = (e: unknown): boolean => {
   return false
 }
 
+/** ADR-0234: marker substrings (lowercased) for prompt-too-long / context-window
+ *  overflow at the ADAPTER boundary. Distinct from the ROUTER-stage list in
+ *  `error-classifier.ts` (same intent, narrower set): the adapter only fires
+ *  these when the provider ALSO returned a 400/422 — never on a bare 200 stream
+ *  or a 429 (those routes belong to bad_request / rate_limit respectively). The
+ *  "match on message" the codebase otherwise bans is acceptable HERE because:
+ *
+ *  1. The adapter is the boundary where provider-specific shape is allowed to
+ *     leak in. The ban targets downstream code that re-parses a wrapped
+ *     LLMError's `.message` to recover meaning the boundary already lost.
+ *  2. Anthropic / OpenAI / Bedrock / Vertex / Foundry surface
+ *     context-window-exceeded as `400 invalid_request_error` with the marker
+ *     in the body. There is no structured field to pin on — the SDK union
+ *     does not break it out. Without this heuristic the loop's reactive
+ *     compaction never fires and the same oversize prompt retries forever.
+ *  3. Only fired when `status ∈ {400,422}` — a brand-new `unknown` arm
+ *     (which would be the most expensive misclassification) cannot regress. */
+const ADAPTER_CONTEXT_WINDOW_MARKERS: readonly string[] = [
+  "prompt is too long",
+  "prompt too long",
+  "context length",
+  "context_length",
+  "context window",
+  "context_length_exceeded",
+  "maximum context",
+  "tokens exceed",
+] as const
+
+/** ADR-0234: marker substrings (lowercased) for provider safety / content
+ *  policy refusals at the ADAPTER boundary. Same heuristic-at-boundary
+ *  rationale as {@link ADAPTER_CONTEXT_WINDOW_MARKERS}; only fired when the
+ *  provider also signaled `permission_error` / `policy_violation` via
+ *  `.error.type` / `.code` / `.type` OR returned 400 with a policy marker
+ *  in the body. The HITL is the only structured recovery — neither retry
+ *  nor swap can bypass a safety refusal. */
+const ADAPTER_POLICY_MARKERS: readonly string[] = [
+  "content policy",
+  "policy violation",
+  "policy_violation",
+  "safety policy",
+  "cyberpolicy",
+  "cyber_policy",
+] as const
+
+/** Lowercased message text for marker scanning. Mirrors `safeLower` in
+ *  `error-classifier.ts`. No-throw on circular / throwing toString — catch
+ *  swallows; an empty string means "no marker matched", never a crash. */
+const lowerMessage = (e: unknown): string => {
+  try {
+    if (e instanceof Error) return e.message.toLowerCase()
+    if (typeof e === "object" && e !== null) {
+      const m = (e as { message?: unknown }).message
+      if (typeof m === "string") return m.toLowerCase()
+    }
+    return ""
+  } catch {
+    return ""
+  }
+}
+
+const containsAnyAdapter = (msg: string, markers: readonly string[]): boolean => {
+  for (const m of markers) {
+    if (msg.includes(m)) return true
+  }
+  return false
+}
+
+/** Provider-code probe: returns the raw `.error.type` / `.code` / `.type`
+ *  string (lowercased) or `""` when absent. Used by the cyber_policy gate so
+ *  a `permission_error` provider code escalates a 400 from bad_request →
+ *  cyber_policy. Matches the extraction policy in {@link extractProviderCode}
+ *  but does not allocate a new error object. */
+const lowerProviderCode = (e: unknown): string => {
+  if (typeof e !== "object" || e === null) return ""
+  const err = (e as { error?: { type?: unknown } }).error
+  if (err !== undefined && err !== null && typeof err.type === "string") {
+    return err.type.toLowerCase()
+  }
+  const code = (e as { code?: unknown }).code
+  if (typeof code === "string") return code.toLowerCase()
+  const type = (e as { type?: unknown }).type
+  if (typeof type === "string") return type.toLowerCase()
+  return ""
+}
+
+/** ADR-0234: classify a 400/422 SDK response into one of three buckets:
+ *  cyber_policy (HITL), context_window_exceeded (reactive compaction), or
+ *  the catch-all bad_request (caller bug). Extracted to keep the parent
+ *  `classify`'s cyclomatic complexity under the biome cap. Precedence:
+ *  cyber_policy > context_window > bad_request — a refusal that ALSO
+ *  mentions "context length" must route to HITL, not compaction. */
+const classifyBadRequest = (e: unknown): LLMErrorKind => {
+  const lowerMsg = lowerMessage(e)
+  const providerCode = lowerProviderCode(e)
+  if (providerCode === "permission_error" || containsAnyAdapter(lowerMsg, ADAPTER_POLICY_MARKERS)) {
+    return "cyber_policy"
+  }
+  if (
+    providerCode === "context_length_exceeded" ||
+    containsAnyAdapter(lowerMsg, ADAPTER_CONTEXT_WINDOW_MARKERS)
+  ) {
+    return "context_window_exceeded"
+  }
+  return "bad_request"
+}
+
 const classify = (status: number | undefined, e: unknown, _msg: string): LLMErrorKind => {
   if (isAbortError(e)) return "aborted"
   if (status === 529) return "overloaded"
   if (status === 429) return "rate_limit"
   if (status === 401 || status === 403) return "auth"
   if (status === 404) return "not_found"
-  if (status === 400 || status === 422) return "bad_request"
+  if (status === 400 || status === 422) return classifyBadRequest(e)
   if (status !== undefined && status >= 500 && status < 600) return "server_error"
   if (status !== undefined) return "unknown"
   // No status — last-resort transport detection via Node's `code` field.

@@ -18,6 +18,12 @@ export { checkPhase } from "./phase-guard"
 export type { DirectiveEmitterPort, EmitContext } from "./port"
 export { serialize } from "./serializer"
 export {
+  buildGitDirectiveCollector,
+  type GitDirectiveCollector,
+  type GitDirectiveCollectorOptions,
+  noopCollector,
+} from "./turn-collector"
+export {
   type EmitError,
   type EmitPhase,
   GIT_DIRECTIVE_KINDS,

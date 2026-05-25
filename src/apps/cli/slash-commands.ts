@@ -115,6 +115,50 @@ export interface SlashContext {
   readonly history?: import("./history-cmd").HistorySessionState | undefined
   /** R10 L (branch-search-progress) — N-best candidate tracker snapshot. */
   readonly branchSearch?: (() => import("./branch-search-progress").BranchProgressState) | undefined
+  /** ADR-0236 / ADR-0213 — tool-profile slash wire. When set, `/profile`
+   *  reads + writes the active profile through this seam. `get` returns the
+   *  current profile name; `set` swaps it for the rest of the session
+   *  (idempotent: setting the same name is a no-op). `list` enumerates the
+   *  allowed profile names for the palette / tab-complete. Absent ⇒
+   *  `/profile` prints "not wired in this surface" + exit 0. */
+  readonly profile?:
+    | {
+        readonly get: () => string
+        readonly set: (
+          name: string,
+        ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
+        readonly list: () => readonly string[]
+      }
+    | undefined
+  /** ADR-0236 / ADR-0211 — identity-mode slash wire. When set, `/identity`
+   *  reads + writes the active identity-mode through this seam. The surface
+   *  owns the side-effect (e.g. rebuilding the cached system prompt /
+   *  marking the next turn for re-prompt). Absent ⇒ "not wired" + exit 0. */
+  readonly identity?:
+    | {
+        readonly get: () => string
+        readonly set: (
+          mode: string,
+        ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
+        readonly list: () => readonly string[]
+      }
+    | undefined
+  /** ADR-0236 / ADR-0219 — Focus Chain slash wire. When set, `/focus-chain`
+   *  surfaces the tracker's current state and supports three sub-commands:
+   *  `show` (default — print todos + drift warning), `reset` (clear all
+   *  todos), `skip` (mark "no inject next turn" by ticking once). Absent
+   *  ⇒ "not wired" + exit 0. */
+  readonly focusChain?:
+    | {
+        readonly snapshot: () => {
+          readonly todos: ReadonlyArray<{ readonly text: string; readonly state: string }>
+          readonly currentTurn: number
+          readonly driftWarning: string | null
+        }
+        readonly reset: () => void
+        readonly skip: () => void
+      }
+    | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
@@ -608,6 +652,140 @@ const helpCmd: SlashCommand = {
   run: (args, ctx) => runHelpRender(BUILTINS, args, ctx),
 }
 
+/* ─────────────────────────────────────────────────────────────────────── */
+/* ADR-0236 — composition-root mega-wire slash commands                     */
+/* (`/profile`, `/identity`, `/focus-chain`).                               */
+/*                                                                          */
+/* Each is default-OFF: when `ctx.{profile|identity|focusChain}` is absent  */
+/* the slash prints "not wired in this surface" and exits 0 (parity with    */
+/* the rest of the surface-only commands). Surface owns the wire by         */
+/* injecting a tiny adapter over the AgentConfig slot.                      */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+const profileCmd: SlashCommand = {
+  name: "/profile",
+  describe: "Show or switch the active tool profile (ADR-0213)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.profile === undefined) {
+      ctx.out("/profile: not wired in this surface\n")
+      return 0
+    }
+    if (args.length === 0) {
+      const current = ctx.profile.get()
+      const list = ctx.profile.list().join(", ")
+      ctx.out(`/profile: current = ${current}\n`)
+      ctx.out(`/profile: available = ${list}\n`)
+      return 0
+    }
+    if (args.length > 1) {
+      ctx.err(`/profile: takes at most one argument; got ${args.length}\n`)
+      return 1
+    }
+    const name = args[0] as string
+    const res = ctx.profile.set(name)
+    if (res === "ok") {
+      ctx.out(`/profile: set to '${name}'\n`)
+      return 0
+    }
+    ctx.err(`/profile: unknown profile '${name}'; known = ${res.known.join(", ")}\n`)
+    return 1
+  },
+}
+
+const identityCmd: SlashCommand = {
+  name: "/identity",
+  describe: "Show or switch the active identity mode (ADR-0211)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.identity === undefined) {
+      ctx.out("/identity: not wired in this surface\n")
+      return 0
+    }
+    if (args.length === 0) {
+      const current = ctx.identity.get()
+      const list = ctx.identity.list().join(", ")
+      ctx.out(`/identity: current = ${current}\n`)
+      ctx.out(`/identity: available = ${list}\n`)
+      return 0
+    }
+    if (args.length > 1) {
+      ctx.err(`/identity: takes at most one argument; got ${args.length}\n`)
+      return 1
+    }
+    const mode = args[0] as string
+    const res = ctx.identity.set(mode)
+    if (res === "ok") {
+      ctx.out(`/identity: set to '${mode}'\n`)
+      return 0
+    }
+    ctx.err(`/identity: unknown mode '${mode}'; known = ${res.known.join(", ")}\n`)
+    return 1
+  },
+}
+
+const FOCUS_CHAIN_SUBCMDS = ["show", "reset", "skip"] as const
+type FocusChainSubcmd = (typeof FOCUS_CHAIN_SUBCMDS)[number]
+const isFocusChainSubcmd = (s: string): s is FocusChainSubcmd =>
+  (FOCUS_CHAIN_SUBCMDS as readonly string[]).includes(s)
+
+const focusChainCmd: SlashCommand = {
+  name: "/focus-chain",
+  describe: "Show / reset / skip the Focus Chain todo tracker (ADR-0219)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.focusChain === undefined) {
+      ctx.out("/focus-chain: not wired in this surface\n")
+      return 0
+    }
+    const sub: FocusChainSubcmd =
+      args.length === 0
+        ? "show"
+        : isFocusChainSubcmd(args[0] as string)
+          ? (args[0] as FocusChainSubcmd)
+          : (() => {
+              ctx.err(
+                `/focus-chain: unknown subcommand '${args[0]}'; known = ${FOCUS_CHAIN_SUBCMDS.join(", ")}\n`,
+              )
+              return "show" as FocusChainSubcmd
+            })()
+    if (args.length > 0 && !isFocusChainSubcmd(args[0] as string)) {
+      // The IIFE above already printed the error and degraded to `show`,
+      // but we need to exit 1 for unknown subcommand.
+      return 1
+    }
+    if (args.length > 1) {
+      ctx.err(`/focus-chain: subcommands take no arguments; got ${args.length - 1} extra\n`)
+      return 1
+    }
+    if (sub === "reset") {
+      ctx.focusChain.reset()
+      ctx.out("/focus-chain: cleared\n")
+      return 0
+    }
+    if (sub === "skip") {
+      ctx.focusChain.skip()
+      ctx.out("/focus-chain: skipped one cycle\n")
+      return 0
+    }
+    const snap = ctx.focusChain.snapshot()
+    ctx.out(`/focus-chain: current turn = ${snap.currentTurn}\n`)
+    if (snap.todos.length === 0) {
+      ctx.out("/focus-chain: (no todos)\n")
+    } else {
+      ctx.out(`/focus-chain: ${snap.todos.length} todo(s):\n`)
+      for (let i = 0; i < snap.todos.length; i++) {
+        const t = snap.todos[i] as { readonly text: string; readonly state: string }
+        ctx.out(`  ${i + 1}. [${t.state}] ${t.text}\n`)
+      }
+    }
+    if (snap.driftWarning !== null) {
+      ctx.out(`/focus-chain: drift — ${snap.driftWarning}\n`)
+    }
+    return 0
+  },
+}
+
 // `/rewind` + `/fork` (Claude Code v1.7196 pattern) are env-gated at module
 // load: `QUANTA_REWIND=0` removes them from the registry entirely so they
 // can't be discovered, auto-completed, or accidentally dispatched. Default
@@ -660,6 +838,14 @@ export const BUILTINS: readonly SlashCommand[] = [
   // ADR-0225 — Claude Code `tengu_external_editor` (mid-edit via $EDITOR).
   editPlanCmd,
   editMessageCmd,
+  // ADR-0236 — composition-root mega-wire (`/profile`, `/identity`,
+  // `/focus-chain`). Each is default-OFF: when the corresponding
+  // SlashContext seat is absent the slash prints "not wired in this
+  // surface" + exit 0. Slot pinned at the end so the W3-* parallel
+  // tracks (slot-additive) do not collide with the appendage.
+  profileCmd,
+  identityCmd,
+  focusChainCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

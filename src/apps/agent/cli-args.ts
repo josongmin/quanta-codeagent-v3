@@ -55,7 +55,39 @@ export interface AgentArgs {
   ciBotDryRun?: boolean
   /** `--help` / `-h` short-circuit. */
   help: boolean
+  /** ADR-0236 — `--tool-profile <write|ask|minimal|code-only>`. When set, the
+   *  composition root constructs a `defaultToolProfileResolver` and seeds
+   *  `AgentConfig.toolProfile.defaultName` (ADR-0213). Absent ⇒ no profile
+   *  layer, byte-identical to legacy. */
+  toolProfile?: ToolProfileToken
+  /** ADR-0236 — `--sticky-model`. When set, the composition root wires the
+   *  fs-backed sticky-model store (ADR-0212) so the per-mode preference
+   *  survives across sessions. Absent ⇒ slot omitted; global default model
+   *  wins for every mode. */
+  stickyModel?: boolean
+  /** ADR-0236 — `--identity-mode <default|plan|review|audit|architect|editor>`.
+   *  When set, the composition root builds the system prompt through the
+   *  mode-variant registry (ADR-0211) for the given mode. The runtime
+   *  AgentMode (the run-mode lever) is INDEPENDENT — this flag drives ONLY
+   *  the prompt-side persona. Absent ⇒ legacy single-identity prompt. */
+  identityMode?: IdentityModeToken
+  /** ADR-0236 — `--focus-chain-every <N>`. When set (N > 0), the composition
+   *  root constructs `defaultFocusChainTracker({ reinjectEveryN: N })` and
+   *  wires {@link focusChain} (ADR-0219) so the loop ticks per turn and the
+   *  rendered todo list re-injects every N turns. Absent ⇒ no tracker. */
+  focusChainEvery?: number
+  /** ADR-0236 — `--no-auto-background`. When present, the composition root
+   *  forces `autoBackground` OFF even if a host default would wire it.
+   *  Default behaviour today is already OFF; this flag is the explicit
+   *  hard-OFF for hosts that DO wire it by default in a future round. */
+  noAutoBackground?: boolean
 }
+
+/** ADR-0236 — closed set of tool-profile names accepted on `--tool-profile`. */
+export type ToolProfileToken = "write" | "ask" | "minimal" | "code-only"
+/** ADR-0236 — closed set of identity modes accepted on `--identity-mode`.
+ *  Aligned 1:1 with `ModeVariantKey` (ADR-0211). */
+export type IdentityModeToken = "default" | "plan" | "review" | "audit" | "architect" | "editor"
 
 /** Parser-level error. `index.ts` catches this and emits usage + exit 64. */
 export class AgentArgsError extends Error {
@@ -80,6 +112,24 @@ const VALID_EXHAUSTION = [
   "emit-partial",
   "fail-run",
 ] as const satisfies readonly BudgetExhaustionPolicy[]
+
+/** ADR-0236 — closed set for `--tool-profile`. */
+const VALID_TOOL_PROFILES = [
+  "write",
+  "ask",
+  "minimal",
+  "code-only",
+] as const satisfies readonly ToolProfileToken[]
+
+/** ADR-0236 — closed set for `--identity-mode`. */
+const VALID_IDENTITY_MODES = [
+  "default",
+  "plan",
+  "review",
+  "audit",
+  "architect",
+  "editor",
+] as const satisfies readonly IdentityModeToken[]
 
 /**
  * Static mapping from CLI dial flag → `BudgetDials` field. All dials are
@@ -122,6 +172,14 @@ const isValidProvider = (s: string): s is ProviderToken =>
 
 const isValidExhaustion = (s: string): s is BudgetExhaustionPolicy =>
   (VALID_EXHAUSTION as readonly string[]).includes(s)
+
+/** ADR-0236 type guard for `--tool-profile`. */
+const isValidToolProfile = (s: string): s is ToolProfileToken =>
+  (VALID_TOOL_PROFILES as readonly string[]).includes(s)
+
+/** ADR-0236 type guard for `--identity-mode`. */
+const isValidIdentityMode = (s: string): s is IdentityModeToken =>
+  (VALID_IDENTITY_MODES as readonly string[]).includes(s)
 
 /** Read `argv[i+1]` and assert it exists + is NOT another flag. */
 const takeValue = (argv: readonly string[], i: number, flag: string): string => {
@@ -218,6 +276,13 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   let report: string | undefined
   let ciBotDryRun = false
   let pr: string | undefined
+  // ADR-0236 — composition-root mega-wire flags. All default-OFF: when absent
+  // the assembled config carries no slot, the loop is byte-identical.
+  let toolProfile: ToolProfileToken | undefined
+  let stickyModel = false
+  let identityMode: IdentityModeToken | undefined
+  let focusChainEvery: number | undefined
+  let noAutoBackground = false
   const dials: Partial<BudgetDials> = {}
 
   // Audit R2: duplicate-flag guard. None of our flags are repeatable, so the
@@ -329,6 +394,56 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
       continue
     }
 
+    if (a === "--tool-profile") {
+      const v = takeValue(argv, i, a)
+      if (!isValidToolProfile(v)) {
+        throw new AgentArgsError(
+          `--tool-profile must be one of ${VALID_TOOL_PROFILES.join("|")}, got '${v}'`,
+        )
+      }
+      toolProfile = v
+      i += 2
+      continue
+    }
+
+    if (a === "--sticky-model") {
+      stickyModel = true
+      i += 1
+      continue
+    }
+
+    if (a === "--identity-mode") {
+      const v = takeValue(argv, i, a)
+      if (!isValidIdentityMode(v)) {
+        throw new AgentArgsError(
+          `--identity-mode must be one of ${VALID_IDENTITY_MODES.join("|")}, got '${v}'`,
+        )
+      }
+      identityMode = v
+      i += 2
+      continue
+    }
+
+    if (a === "--focus-chain-every") {
+      const raw = takeValue(argv, i, a)
+      const n = parseIntStrict(raw, a)
+      if (n === 0) {
+        // Reject 0 explicitly — the tracker treats 0 as "disable", but the
+        // operator wanting to disable should simply omit the flag (the slot
+        // is default-OFF). Accepting 0 would silently wire a no-op tracker.
+        throw new AgentArgsError(`flag '${a}' must be > 0, got 0`)
+      }
+      focusChainEvery = n
+      i += 2
+      continue
+    }
+
+    if (a === "--no-auto-background") {
+      noAutoBackground = true
+      i += 1
+      continue
+    }
+
     if (isDialFlag(a)) {
       const raw = takeValue(argv, i, a)
       const key = DIAL_FLAG_MAP[a]
@@ -380,6 +495,12 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   if (report !== undefined) out.report = report
   if (pr !== undefined) out.pr = pr
   if (ciBotDryRun) out.ciBotDryRun = true
+  // ADR-0236 — composition-root mega-wire propagation.
+  if (toolProfile !== undefined) out.toolProfile = toolProfile
+  if (stickyModel) out.stickyModel = true
+  if (identityMode !== undefined) out.identityMode = identityMode
+  if (focusChainEvery !== undefined) out.focusChainEvery = focusChainEvery
+  if (noAutoBackground) out.noAutoBackground = true
   return out
 }
 
@@ -422,6 +543,13 @@ MODE-SPECIFIC
 
 BUDGET DIALS (operator-requested ceilings; clamped to per-mode caps)
 ${dialLines}
+
+COMPOSITION-ROOT MEGA-WIRE (ADR-0236 — all default-OFF; absent ⇒ slot omitted)
+  --tool-profile <p>      One of ${VALID_TOOL_PROFILES.join("|")} (ADR-0213)
+  --sticky-model          Wire fs-backed sticky-model store (ADR-0212)
+  --identity-mode <m>     One of ${VALID_IDENTITY_MODES.join("|")} (ADR-0211)
+  --focus-chain-every <N> Re-inject todos every N turns (>0, ADR-0219)
+  --no-auto-background    Force auto-background OFF (ADR-0223)
 
 NOTES
   • Defaults flow from per-mode BUDGET_PRESETS via the assembler — this

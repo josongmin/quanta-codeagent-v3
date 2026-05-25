@@ -258,7 +258,13 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       })
     }
 
-    yield* parseSSE(res.body, effectiveModel)
+    // ADR-0234: thread the per-call spinner-stall tick hook into the SSE
+    // parser. This adapter does NOT wrap with `withStreamTimeout` (it parses
+    // raw fetch SSE itself), so the parser carries the same swallow-policy
+    // locally — a faulty surface detector MUST NOT poison the live producer.
+    // Absent ⇒ parser sees `undefined` and skips the call (byte-identical
+    // to pre-feature).
+    yield* parseSSE(res.body, effectiveModel, input.onChunk)
   }
 }
 
@@ -480,9 +486,25 @@ interface ResponsesEvent {
 
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object"
 
+/** ADR-0234: invoke the optional onChunk hook, swallowing any error so a
+ *  faulty spinner-stall detector never poisons the SSE producer. Mirrors
+ *  `notifyChunkArrival` in `src/llm/stream-timeout.ts` — same contract,
+ *  local to this adapter because it parses SSE itself rather than wrapping
+ *  with `withStreamTimeout`. */
+const notifyChunkArrival = (onChunk: (() => void) | undefined): void => {
+  if (onChunk === undefined) return
+  try {
+    onChunk()
+  } catch {
+    // Intentionally silent — detector book-keeping must never break the
+    // producer.
+  }
+}
+
 async function* parseSSE(
   body: ReadableStream<Uint8Array>,
   fallbackModel: string,
+  onChunk?: () => void,
 ): AsyncGenerator<StreamEvent> {
   const toolCalls = new Map<string, { name: string; args: string }>()
   let usage: {
@@ -494,6 +516,11 @@ async function* parseSSE(
 
   for await (const sseEv of parseSSEStream(body)) {
     if (sseEv.data === "[DONE]") break
+    // ADR-0234: a frame arrived from the wire — bump the per-correlation
+    // `lastEventMs` even when we end up `continue`-ing past it (e.g.
+    // heartbeat / unknown event types). Anchored BEFORE the JSON parse so
+    // a malformed frame that throws still counts as "the stream is alive".
+    notifyChunkArrival(onChunk)
     let json: unknown
     try {
       json = JSON.parse(sseEv.data)

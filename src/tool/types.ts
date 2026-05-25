@@ -174,6 +174,30 @@ export interface ToolContext {
    *  this seam. Default-OFF when the orchestration plane does not set it
    *  (byte-identical for every legacy caller). */
   turnId?: string
+  /** ADR-0235 wire (opt-in) — per-turn shell-snapshot restore seam threaded
+   *  through to `runShell` by shell-class tools (`bash` today). When set, the
+   *  consumer forwards this verbatim to `ShellOptions.shellSnapshot` so the
+   *  spawned child sources the captured per-turn env (`source <path>; <cmd>`)
+   *  BEFORE running the user command. Absent ⇒ no restore, byte-identical
+   *  legacy spawn. Duck-typed (structural mirror of `ShellSnapshotRestoreSeam`
+   *  in `@/runtime/types`) so the `@/tool` slice never imports
+   *  `@/runtime/shell-snapshot` directly — the dispatch seam (composition root
+   *  in `@/agent`) is the only place that knows how to wire the concrete port
+   *  here. */
+  shellSnapshot?: ShellSnapshotRestoreSeam
+}
+
+/** ADR-0235 wire — structural mirror of `ShellSnapshotRestoreSeam` from
+ *  `@/runtime/types`. Declared HERE so the `@/tool` slice does not import
+ *  `@/runtime/shell-snapshot` (slice isolation, RFC §3.1). The shape is
+ *  IDENTICAL to the runtime mirror; the dispatch seam (composition root in
+ *  `@/agent`) hands an instance through both fields verbatim. */
+export interface ShellSnapshotRestoreSeam {
+  readonly handle: { readonly id: string; readonly path: string }
+  readonly restore: (
+    handle: { readonly id: string; readonly path: string },
+    prefix: ReadonlyArray<string>,
+  ) => { readonly argv: string[] }
 }
 
 // ── Plan-mode duck-typed mirror (ADR-0093 draft) ─────────────────────────

@@ -415,6 +415,10 @@ export class OpenAIAdapter implements LLMPort {
       // streaming phase (the SDK signal above handles create()/TTFT). Absent
       // ⇒ wrapper still self-aborts on its own timeouts (byte-identical).
       ...(input.signal ? { signal: input.signal } : {}),
+      // ADR-0234: thread the per-call spinner-stall tick hook through to the
+      // wrapper's `notifyChunkArrival`. Absent ⇒ omitted on the wrapper opts
+      // (exactOptional honest, byte-identical to the pre-feature path).
+      ...(input.onChunk ? { onChunk: input.onChunk } : {}),
     })
     const st: StreamState = {
       pending: new Map<number, PendingCall>(),

@@ -60,6 +60,7 @@ import type {
   PreCompactRequestQuery,
 } from "./types/compaction-config"
 import type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
+import type { RulesConfigBlock } from "./types/rules-config"
 import type { WorkMetricsSink } from "./work-metrics-collector"
 
 // Re-export the extracted Tier-1 capability option blocks (subagent / skills /
@@ -91,6 +92,8 @@ export type {
   PreCompactRequestQuery,
 } from "./types/compaction-config"
 export type { MemoryConfigBlock, MemoryConsolidatorBlock } from "./types/memory-config"
+// ADR-0233 (Wire 2) — Vendor-detector composition knobs for `AgentConfig.rules`.
+export type { RulesConfigBlock } from "./types/rules-config"
 
 // AgentConfig `extends` the three cohesion groups defined at the BOTTOM of
 // this file (SafetyConfig / PermissionExtrasConfig / SteeringConfig).
@@ -229,6 +232,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * Absent ⇒ no block, byte-identical (RFC §1.2 default-OFF).
    */
   globRules?: { rules: GlobRule[]; changedPaths?: string[] }
+  /**
+   * ADR-0233 (Wire 2) — Multi-source rules vendor-detector composition.
+   *
+   * When set with `vendorDetectorEnabled: true`, the caller-side
+   * `loadGlobRulesWithVendors(cwd, config.rules)` helper composes the
+   * legacy `loadGlobRules(cwd)` output with `DetectedRule[]` from the
+   * vendor detector slice (ADR-0205). Hosts that have already wired the
+   * helper into their session-start flow pass the resulting GlobRule[]
+   * through {@link globRules}.rules as before — this slot is the policy
+   * knob set, not a runtime store.
+   *
+   * Absent / `vendorDetectorEnabled !== true` ⇒ no composition, byte-
+   * identical to legacy (RFC §1.2 default-OFF). See {@link RulesConfigBlock}
+   * for the field-level docs (vendorDetectorEnabled / vendors / priority /
+   * detector override semantics).
+   */
+  rules?: RulesConfigBlock
   /**
    * Metrics registry (RFC §8 Phase 3). Absent ⇒ no metrics recorded; loop
    * behavior identical.
@@ -962,7 +982,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   stage1OutputsStore?: import("../memory/stage1-store").Stage1OutputsStore
   /**
-   * ADR-0232 — per-turn shell-snapshot wire (caller-side composition).
+   * ADR-0235 — per-turn shell-snapshot wire (caller-side composition).
    * Sibling to ADR-0204 (the snapshot primitive). When set, the loop
    * captures a snapshot at turn-start (`captureAtTurnStart`, default `true`)
    * and threads the resulting handle into `ToolContext.shellSnapshot` so
@@ -1003,6 +1023,165 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly captureAtTurnStart?: boolean
     readonly cleanupOlderThanMs?: number
     readonly maxSizeBytes?: number
+  }
+  /**
+   * ADR-0235 (internal slot) — populated by the loop at session start when
+   * `shellSnapshot` is wired. Dispatch reads `currentSeam()` here to thread
+   * the active restore handle into `ToolContext.shellSnapshot`. Mutable on
+   * `cfg` (not the caller's `config`) because the loop rebinds a fresh
+   * session per `runAgent` invocation; the caller's object is never touched
+   * (see `runAgentInner`'s `cfg` copy discipline). Public-typed so the
+   * dispatch module (separate file, no module-private channel) can read it.
+   */
+  shellSnapshotSession?: import("./shell-snapshot-session").ShellSnapshotSession
+  /**
+   * ADR-0236 — composition-root mega-wire (this slot). Mode-typed delegation
+   * port (ADR-0218). When set, the subagent fork path may route mode-typed
+   * delegations through this port (parent → child mode-typed subtask,
+   * isolated context, boomerang result). Caller-side composition only —
+   * the loop never reads it directly today; surfaces (Agent tool, future
+   * `/delegate` slash) opt in by reading this slot. Absent ⇒ slot omitted,
+   * byte-identical legacy (RFC §1.2 default-OFF).
+   */
+  delegation?: {
+    readonly delegator: import("./subagent-typed").DelegationPort
+    readonly modes?: ReadonlyArray<import("./subagent-typed").AgentMode>
+  }
+  /**
+   * ADR-0236 / ADR-0219 — Focus Chain auto-reinject (Cline absorption). When
+   * set, the loop advances the tracker once per turn (after steerBarrier /
+   * conversation-action poll) and drains `getInjection()` into the per-turn
+   * working memory tail so the next LLM call sees the rendered todo list.
+   * Absent ⇒ no allocation, no `tickTurn`, no injection — byte-identical
+   * legacy (RFC §1.2). `reinjectEveryN` is a documentation slot mirroring
+   * what the host passed when constructing the tracker.
+   */
+  focusChain?: {
+    readonly tracker: import("./focus-chain").FocusChainPort
+    readonly reinjectEveryN?: number
+  }
+  /**
+   * ADR-0236 / ADR-0226 — rich fork-session port (composition-root wire).
+   * Sibling to the base {@link fork} slot (ADR-0201 sync `SessionForker`):
+   * this slot exposes the richer async port (`Promise<Result>` + signal
+   * cancel + optional branch label + shadow-ODB tag). Caller-side; loop
+   * does not consume directly. Absent ⇒ slot omitted, byte-identical.
+   */
+  forkSession?: { readonly forker: import("./fork-session").ForkSessionPort }
+  /**
+   * ADR-0236 / ADR-0224 — text-inbox sink (composition-root wire). Caller-
+   * side slot — the surface (REPL / Tauri / Web) drains through its own
+   * `PromptSource.next()` and concatenates to the next user-turn body. The
+   * slot exists so the composition root can publish the inbox handle to
+   * other subsystems (e.g. a `/web` slash enqueueing for a different
+   * surface). The loop NEVER drains this slot directly. Absent ⇒ omitted.
+   */
+  textInbox?: { readonly sink: import("../apps/cli/text-inbox").TextInbox }
+  /**
+   * ADR-0236 / ADR-0225 — plan-edit port (composition-root wire). Caller-
+   * side; `/edit-plan` slash reads it via `SlashContext.planEdit`. Loop
+   * does not consume. Absent ⇒ slash prints "not wired in this surface".
+   */
+  planEdit?: { readonly port: import("../apps/cli/edit-plan-cmd").PlanEditPort }
+  /**
+   * ADR-0236 / ADR-0225 — composer-edit port (composition-root wire).
+   * Sibling to {@link planEdit}: drives `/edit-message`. Default-OFF.
+   */
+  composerEdit?: { readonly port: import("../apps/cli/edit-message-cmd").ComposerEditPort }
+  /**
+   * ADR-0236 / ADR-0212 — sticky-model-per-mode store (composition-root
+   * wire). Caller-side slot consumed by the model-resolver (`/status` may
+   * surface the current preference; future `--sticky-model` CLI flag
+   * activates an fs-backed store at composition root). Absent ⇒ slot
+   * omitted; the global default model wins for every mode.
+   */
+  stickyModelStore?: { readonly store: import("./sticky-model").StickyModelStore }
+  /**
+   * ADR-0236 / ADR-0213 — tool-profile preset resolver (composition-root
+   * wire). Caller-side slot — the admissibility gate (Wave-B follow-up)
+   * may compose the profile's per-tool admissibility on top of the legacy
+   * permission stack; `/profile` slash mutates the active name in place
+   * via the host-supplied callback in `SlashContext.profile`. `defaultName`
+   * is the initial profile applied at session start. Absent ⇒ no profile
+   * layer, byte-identical.
+   */
+  toolProfile?: {
+    readonly resolver: import("./tool-profile").ToolProfileResolver
+    readonly defaultName?: import("./tool-profile").ToolProfileName
+  }
+  /**
+   * ADR-0236 / ADR-0211 — system-prompt mode-variant registry (composition-
+   * root wire). The composition root threads the variant for the active
+   * mode through `buildSystemPrompt({ identity: variant.identity })` BEFORE
+   * constructing the session. Loop never re-reads this slot mid-session
+   * (the system prompt is cached). Absent ⇒ legacy single-identity prompt.
+   */
+  identityModeVariant?: {
+    readonly registry: import("./system-prompt").SystemPromptVariantRegistry
+  }
+  /**
+   * ADR-0236 / ADR-0203 — inline-trigger watcher (composition-root wire).
+   * Caller-side: the composition root may bind the watcher at session start
+   * (with a callback that enqueues a `/play <playbook>` follow-up via
+   * {@link followUpQueue}) and stop it at session end. Loop does not
+   * consume directly. Absent ⇒ no watcher, no fs.watch handle.
+   */
+  playbookTrigger?: { readonly watcher: import("@/skill/playbook").InlineTriggerWatcherPort }
+  /**
+   * ADR-0236 / ADR-0215 — RRULE automation engine (composition-root wire).
+   * Caller-side: a host's background tick may drain due automations via
+   * `tickScheduler({ engine, now, handler })`. Loop does not consume
+   * directly. Absent ⇒ scheduler runs without automation drain.
+   */
+  automationEngine?: {
+    readonly engine: import("@/scheduler/automation-engine").AutomationEnginePort
+  }
+  /**
+   * ADR-0234 — git-directive emit wire (turn-scoped collector pattern).
+   * Closes the gap between ADR-0221 (phase-guarded emitter) and the
+   * mutating git tools (`git_commit`, `git_branch_switch`, future
+   * `gh_pr_create`). Tools call `collector.record(directive)` during
+   * their intermediate-phase execution; the loop calls `collector.flush()`
+   * at the turn boundary, draining each entry through the wired emitter
+   * with `phase: "final-answer"` — the natural moment that satisfies the
+   * ADR-0221 phase invariant without forcing call sites to lie about
+   * phase.
+   *
+   * Default-OFF: absent or `enabled !== true` ⇒ no collector built, no
+   * emit wire installed, the loop is byte-identical to the pre-ADR-0234
+   * path (RFC §1.2). When `enabled: true` the loop wires the collector
+   * into the per-session `git_commit` / `git_branch_switch` factories
+   * (via `gitTools({ gitDirectiveCollector })` at the composition root)
+   * AND calls `flush()` once per turn end (after `gitObservability`
+   * endTurn, before `emitWorkMetrics` — same "post-turn-body" boundary).
+   *
+   * `sink`: where the emitter writes the wire line. `"stdout"` (default)
+   * matches the Codex protocol (UI consumers grep `^::git-` from the
+   * agent's stdout); `"stderr"` is for hosts that frame structured
+   * channels separately; the inline function form lets tests + Tauri
+   * hosts intercept without process I/O.
+   *
+   * `includeIntermediate`: when `true`, the collector emits at record
+   * time AS WELL AS at flush time (for live-progress surfaces that need
+   * mid-turn visibility). Default `false` — strict final-answer-only
+   * discipline.
+   *
+   * `emitter`: optional pre-built emitter override (test-injection seam,
+   * mirrors `dedupGate`/`gitObservability.session`). When set, `sink`
+   * is ignored (the caller supplied a complete port).
+   *
+   * `collector`: optional pre-built collector override (test-injection
+   * seam). When set, the loop uses this collector verbatim instead of
+   * constructing one — the same surface the tool wire passes to git
+   * tools. `emitter` is ignored in this branch (the collector already
+   * owns its emitter).
+   */
+  gitDirectiveEmit?: {
+    readonly enabled: boolean
+    readonly sink?: "stdout" | "stderr" | ((line: string) => void)
+    readonly includeIntermediate?: boolean
+    readonly emitter?: import("../git/directive-emit").DirectiveEmitterPort
+    readonly collector?: import("../git/directive-emit").GitDirectiveCollector
   }
 }
 

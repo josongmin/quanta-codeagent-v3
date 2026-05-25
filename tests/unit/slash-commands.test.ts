@@ -108,6 +108,12 @@ describe("BUILTINS table", () => {
       "/paste",
       "/edit-plan",
       "/edit-message",
+      // ADR-0236 composition-root mega-wire — `/profile`, `/identity`,
+      // `/focus-chain` appended at the END so existing slot pinning is
+      // unchanged for entries above.
+      "/profile",
+      "/identity",
+      "/focus-chain",
     ])
   })
 })

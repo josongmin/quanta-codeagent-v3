@@ -191,6 +191,9 @@ export class VertexProviderAdapter implements LlmProvider {
       idleMs: this.streamTimeoutMs.idleMs,
       provider: "anthropic",
       ...(input.signal ? { signal: input.signal } : {}),
+      // ADR-0234: spinner-stall tick hook (best-effort, exactOptional honest).
+      // Absent ⇒ omitted on the wrapper opts (byte-identical to pre-feature).
+      ...(input.onChunk ? { onChunk: input.onChunk } : {}),
     })
     const open: OpenSlots = new Map()
     try {

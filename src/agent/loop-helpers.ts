@@ -1,3 +1,10 @@
+import {
+  buildGitDirectiveCollector,
+  type DirectiveEmitterPort,
+  type DirectiveSink,
+  defaultEmitter,
+  type GitDirectiveCollector,
+} from "@/git/directive-emit"
 import type { Message } from "@/llm"
 import { GEN_AI_ATTRS, type TurnTiming } from "@/observability"
 import { type RedactionHit, type RedactionOrigin, redactSecrets } from "@/security"
@@ -199,6 +206,81 @@ export const attachLocalizePhase = (cfg: AgentConfig): LocalizePhaseState | unde
     cfg.localizePhaseState = state
   }
   return state
+}
+
+/**
+ * ADR-0234 git-directive emit wire — opt-in factory for the per-session
+ * `GitDirectiveCollector`. Returns `undefined` when
+ * `cfg.gitDirectiveEmit?.enabled !== true` (default-OFF, no collector built,
+ * no emit wire installed).
+ *
+ * When enabled the resolution order is (in priority):
+ *
+ *   1. caller-supplied `cfg.gitDirectiveEmit.collector` (test injection
+ *      seam — used verbatim, `emitter` + `sink` are ignored because the
+ *      collector already owns its emitter).
+ *   2. caller-supplied `cfg.gitDirectiveEmit.emitter` (test injection or
+ *      a custom port the host wired) — wrapped in a fresh collector.
+ *   3. built-in `defaultEmitter` against `cfg.gitDirectiveEmit.sink`
+ *      (`"stdout"` default → `process.stdout`; `"stderr"` →
+ *      `process.stderr`; inline function → adapter sink that calls it once
+ *      per wire line — newline stripped so the host owns framing).
+ *
+ * `includeIntermediate` is forwarded to the constructed collector so a
+ * live-progress surface (when the host opts in) sees record-time emits as
+ * well as the deferred flush emits.
+ *
+ * Side-effect: attaches the constructed collector to `cfg.gitDirectiveEmit`
+ * (mutates the `.collector` field IFF the caller did not supply one) so a
+ * downstream tool wire (`gitTools({ gitDirectiveCollector })` at the
+ * composition root) reads the SAME instance the loop will flush. Mirrors
+ * the `attachDedupGate` / `attachCapEnforcer` pattern.
+ *
+ * Returns the collector (or `undefined` when disabled) so the loop can
+ * call `collector.flush()` at turn end without re-reading `cfg`.
+ */
+export const buildGitDirectiveEmit = (cfg: AgentConfig): GitDirectiveCollector | undefined => {
+  const block = cfg.gitDirectiveEmit
+  if (block === undefined || block.enabled !== true) return undefined
+  // Branch 1: caller-supplied collector — use verbatim.
+  if (block.collector !== undefined) return block.collector
+  // Branch 2/3: build or adopt an emitter, wrap in fresh collector.
+  const emitter = block.emitter ?? defaultEmitterFor(block.sink ?? "stdout")
+  const collectorOpts =
+    block.includeIntermediate !== undefined
+      ? { includeIntermediate: block.includeIntermediate }
+      : {}
+  const collector = buildGitDirectiveCollector(emitter, collectorOpts)
+  // Mutate cfg so a downstream tool wire can read the SAME instance via
+  // `cfg.gitDirectiveEmit.collector`. Only when the caller did not already
+  // supply one (block.collector === undefined was checked above). The
+  // mutation respects exactOptionalPropertyTypes by re-assigning the whole
+  // block with the new collector folded in.
+  cfg.gitDirectiveEmit = { ...block, collector }
+  return collector
+}
+
+/** Resolve the configured sink into a concrete `DirectiveEmitterPort`. The
+ *  inline-function form wraps the caller's callback in a sink adapter that
+ *  strips the trailing newline (the protocol writes `<line>\n`; a function
+ *  consumer typically wants the bare line). */
+const defaultEmitterFor = (
+  sink: "stdout" | "stderr" | ((line: string) => void),
+): DirectiveEmitterPort => {
+  if (sink === "stdout") return defaultEmitter(process.stdout)
+  if (sink === "stderr") return defaultEmitter(process.stderr)
+  // Function sink — adapter wraps once per write, stripping the trailing
+  // newline. A throwing callback is caught at the emitter boundary (see
+  // defaultEmitter implementation) and surfaces as a typed invalid-directive
+  // error rather than propagating.
+  const fnSink: DirectiveSink = {
+    write(chunk: string): boolean {
+      const trimmed = chunk.endsWith("\n") ? chunk.slice(0, -1) : chunk
+      sink(trimmed)
+      return true
+    },
+  }
+  return defaultEmitter(fnSink)
 }
 
 /**

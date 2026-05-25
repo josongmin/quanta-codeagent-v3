@@ -26,7 +26,23 @@ import { loadEnvFiles } from "../cli/dotenv"
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { buildSystemPrompt } from "@/agent"
+import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
+import {
+  fsBackedStickyModelStore,
+  inMemoryStickyModelStore,
+  type StickyModelStore,
+} from "@/agent/sticky-model"
+import {
+  buildSystemPromptForMode,
+  defaultModeVariantRegistry,
+  type SystemPromptVariantRegistry,
+} from "@/agent/system-prompt"
+import {
+  defaultToolProfileResolver,
+  type ToolProfileName,
+  type ToolProfileResolver,
+} from "@/agent/tool-profile"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
@@ -34,7 +50,14 @@ import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
-import { type AgentArgs, AgentArgsError, formatHelp, parseAgentArgs } from "./cli-args"
+import {
+  type AgentArgs,
+  AgentArgsError,
+  formatHelp,
+  type IdentityModeToken,
+  parseAgentArgs,
+  type ToolProfileToken,
+} from "./cli-args"
 import type { RunOutcome } from "./run"
 
 /** ADR-0198 identity slot — resolve the per-mode identity from the
@@ -91,6 +114,84 @@ const buildRetrievalStackFromEnv = (env: NodeJS.ProcessEnv): RetrievalStack | un
   }
 }
 
+/** ADR-0236 — derive the identity-mode-variant registry + the system prompt
+ *  it produces. Precedence:
+ *    1. CLI `--identity-mode <mode>` ⇒ build prompt via
+ *       `buildSystemPromptForMode({ mode })` (registry from
+ *       {@link defaultModeVariantRegistry}); ALSO return the registry so the
+ *       host can publish it on `AgentConfig.identityModeVariant`.
+ *    2. `QUANTA_IDENTITY=1` env (legacy) ⇒ inject identity lines via
+ *       `buildSystemPrompt({ identity })` (NO mode-variant registry slot).
+ *    3. neither ⇒ empty system prompt; mode-preset's
+ *       `req.base.system ?? buildSystemPrompt(cwd)` fallback runs.
+ *
+ *  Pure of process.env aside from the legacy fallback. */
+const resolveIdentitySystemPrompt = (
+  cliIdentityMode: IdentityModeToken | undefined,
+  env: NodeJS.ProcessEnv,
+): {
+  readonly system: string
+  readonly identityModeVariant?: { readonly registry: SystemPromptVariantRegistry }
+} => {
+  if (cliIdentityMode !== undefined) {
+    const registry = defaultModeVariantRegistry()
+    const system = buildSystemPromptForMode({ mode: cliIdentityMode, registry })
+    return { system, identityModeVariant: { registry } }
+  }
+  const identity = resolveIdentityFromEnv(env)
+  if (identity !== undefined) return { system: buildSystemPrompt(process.cwd(), { identity }) }
+  return { system: "" }
+}
+
+/** ADR-0236 — wire the sticky-model store slot. When the CLI passes
+ *  `--sticky-model`, the composition root constructs the fs-backed store
+ *  (defaults to `~/.quanta/sticky-model.json`). Absent ⇒ undefined ⇒ slot
+ *  omitted. The in-memory store is a sibling test-only impl that lives in
+ *  `@/agent/sticky-model`; this surface NEVER picks it (operators get
+ *  persistence by default once they opt in). */
+const resolveStickyModelStore = (
+  stickyModel: boolean | undefined,
+): { readonly store: StickyModelStore } | undefined => {
+  if (stickyModel !== true) return undefined
+  try {
+    return { store: fsBackedStickyModelStore() }
+  } catch (e) {
+    // Defense-in-depth: a corrupted home dir or read-only fs should NOT
+    // crash the agent surface — fall back to in-memory and log. The store
+    // becomes process-scoped (no persistence across runs) but the agent runs.
+    logger.warn(
+      `sticky-model fs store unavailable (${(e as Error).message}); falling back to in-memory.`,
+    )
+    return { store: inMemoryStickyModelStore() }
+  }
+}
+
+/** ADR-0236 — wire the tool-profile resolver slot when the CLI passes
+ *  `--tool-profile <name>`. The resolver is built once per surface (closed
+ *  enum profile names — defaults from {@link defaultToolProfileResolver}). */
+const resolveToolProfile = (
+  profile: ToolProfileToken | undefined,
+):
+  | { readonly resolver: ToolProfileResolver; readonly defaultName: ToolProfileName }
+  | undefined => {
+  if (profile === undefined) return undefined
+  return { resolver: defaultToolProfileResolver(), defaultName: profile }
+}
+
+/** ADR-0236 — wire the focus-chain tracker slot when the CLI passes
+ *  `--focus-chain-every <N>` (N > 0). The tracker's cadence is captured at
+ *  construction time; the loop's per-turn tick + drain reads from this slot
+ *  by reference. */
+const resolveFocusChain = (
+  every: number | undefined,
+): { readonly tracker: FocusChainPort; readonly reinjectEveryN: number } | undefined => {
+  if (every === undefined || every <= 0) return undefined
+  return {
+    tracker: defaultFocusChainTracker({ reinjectEveryN: every }),
+    reinjectEveryN: every,
+  }
+}
+
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
  *  individual fields (e.g. ci-bot replaces `registry` with the restricted
  *  git+gh tool set), but having a baseline avoids each runner duplicating
@@ -130,14 +231,24 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     },
   }
   const retrievalStack = buildRetrievalStackFromEnv(env)
-  // ADR-0198 identity slot — when opted in via QUANTA_IDENTITY=1, prebuild
-  // the system prompt HERE so every mode-preset (headless / ide / daemon /
-  // batch / ci-bot / interactive) sees the identity-baked prompt via
-  // `req.base.system`. Default-OFF: identity is `undefined` ⇒ system is the
-  // empty-string sentinel and each preset's `req.base.system ?? buildSystemPrompt(cwd)`
-  // path runs unchanged (byte-identical).
-  const identity = resolveIdentityFromEnv(env)
-  const system = identity !== undefined ? buildSystemPrompt(process.cwd(), { identity }) : ""
+  // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
+  // via the mode-variant registry; else fall back to the ADR-0198
+  // `QUANTA_IDENTITY=1` env (precedence #2); else empty-string sentinel
+  // ⇒ each mode-preset's `req.base.system ?? buildSystemPrompt(cwd)`
+  // fallback runs unchanged (byte-identical).
+  const { system, identityModeVariant } = resolveIdentitySystemPrompt(p.identityMode, env)
+  // ADR-0236 — composition-root mega-wire slots. All default-OFF: each helper
+  // returns `undefined` when the operator did NOT opt in; spread conditionally
+  // so `exactOptionalPropertyTypes` does NOT see a literal `undefined`.
+  const stickyModelStore = resolveStickyModelStore(p.stickyModel)
+  const toolProfile = resolveToolProfile(p.toolProfile)
+  const focusChain = resolveFocusChain(p.focusChainEvery)
+  // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
+  // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
+  // hard-force the slot OFF. Today no host defaults it on, so the flag has no
+  // immediate effect — it lives in the parsed args so a follow-up host can
+  // consume `p.noAutoBackground` to skip its own wiring. Documented for
+  // forward-compat; absent on the returned base.
   return {
     llm,
     // DIP: route through the factory (no app-specific ports at this baseline
@@ -156,6 +267,12 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
     // `undefined` literal on the config) and the loop is byte-identical.
     ...(retrievalStack !== undefined ? { retrievalStack } : {}),
+    // ADR-0236 — composition-root mega-wire slots (default-OFF; spread
+    // conditionally to preserve `exactOptionalPropertyTypes`).
+    ...(identityModeVariant !== undefined ? { identityModeVariant } : {}),
+    ...(stickyModelStore !== undefined ? { stickyModelStore } : {}),
+    ...(toolProfile !== undefined ? { toolProfile } : {}),
+    ...(focusChain !== undefined ? { focusChain } : {}),
   } as AssembleRequest["base"]
 }
 
@@ -184,6 +301,13 @@ export interface AssembleRequestPartial {
   pr?: string
   /** ci-bot only: stub the PR comment write at the runner edge. */
   ciBotDryRun?: boolean
+  /** ADR-0236 composition-root mega-wire — propagated into base via
+   *  `buildBaseFromArgs`. Each defaults to OFF; absent ⇒ slot omitted. */
+  toolProfile?: import("./cli-args").ToolProfileToken
+  stickyModel?: boolean
+  identityMode?: import("./cli-args").IdentityModeToken
+  focusChainEvery?: number
+  noAutoBackground?: boolean
 }
 
 /** Lift mode + dials + per-mode fields out of `AgentArgs`. Pure projection. */
@@ -202,6 +326,12 @@ export const toAssembleRequest = (args: AgentArgs): AssembleRequestPartial => {
   if (args.report !== undefined) out.report = args.report
   if (args.pr !== undefined) out.pr = args.pr
   if (args.ciBotDryRun) out.ciBotDryRun = true
+  // ADR-0236 — composition-root mega-wire propagation.
+  if (args.toolProfile !== undefined) out.toolProfile = args.toolProfile
+  if (args.stickyModel) out.stickyModel = true
+  if (args.identityMode !== undefined) out.identityMode = args.identityMode
+  if (args.focusChainEvery !== undefined) out.focusChainEvery = args.focusChainEvery
+  if (args.noAutoBackground) out.noAutoBackground = true
   return out
 }
 

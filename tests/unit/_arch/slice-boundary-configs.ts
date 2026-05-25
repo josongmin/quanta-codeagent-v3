@@ -35,6 +35,13 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "admissibility-gate.ts",
       "hitl-tier-registry.ts",
       "default-stdout-emitter.ts",
+      // ADR-0234 git-directive emit wire — `loop-helpers.ts` resolves the
+      // `cfg.gitDirectiveEmit.sink` knob ("stdout"|"stderr"|fn) into a
+      // `DirectiveSink` for the emitter. The sink is fully injectable
+      // (caller may pass an inline function); the `process.stdout` /
+      // `process.stderr` literals only appear in the sink-resolver as the
+      // documented defaults — exempted from the slice's no-raw-stdio invariant.
+      "loop-helpers.ts",
     ],
     requireSliceBarrel: true,
   },
@@ -216,11 +223,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     slice: "runner",
     denyImports: ["@/rules", "@/patch", "@/migration"],
     includeBackupArtifacts: true,
-    requireSubSliceBarrels: [
-      "assemble/index.ts",
-      "orchestrate/index.ts",
-      "session-ops/index.ts",
-    ],
+    requireSubSliceBarrels: ["assemble/index.ts", "orchestrate/index.ts", "session-ops/index.ts"],
   },
   ipc: {
     slice: "ipc",

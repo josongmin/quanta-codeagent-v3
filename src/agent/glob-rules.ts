@@ -1,5 +1,12 @@
 import { lstat, readdir, readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
+import {
+  createDefaultVendorDetector,
+  type DetectedRule,
+  VENDOR_PRIORITY,
+  type VendorDetectorPort,
+  type VendorId,
+} from "@/rules"
 import { matchesAnyGlob, parseFrontmatter } from "../skill"
 
 /**
@@ -210,4 +217,185 @@ export const renderGlobRulesBlock = (rules: GlobRule[]): string | undefined => {
       ? `\n\n[truncated: ${rules.length - droppedAt} more rule(s) dropped; cumulative body exceeded ${MAX_RENDER_BYTES} bytes]`
       : ""
   return `## File-scoped rules\nThese rules apply to files in scope this turn; treat them as repo authority.\n\n${sections.join("\n\n")}${truncation}`
+}
+
+// ─── ADR-0233 (Wire 2) — vendor-detector composition ────────────────────
+//
+// `loadGlobRulesWithVendors(cwd, opts)` is the OPT-IN superset of
+// `loadGlobRules(cwd)`: it pulls the legacy single-source result AND
+// composes it with `DetectedRule[]` from the ADR-0205 multi-source vendor
+// detector. Default-OFF: when `opts.vendorDetectorEnabled !== true` (or
+// `opts` is absent) the function returns IDENTICALLY the legacy
+// `loadGlobRules(cwd)` output — byte-identical for every existing caller.
+//
+// Why a composer, not an "auto-include in loadGlobRules": legacy callers
+// (CLI rule-indicator, every wired host) treat `loadGlobRules` as the
+// stable surface. A silent widening would regress repos that intentionally
+// keep `.cursor/rules/*` ignored. The composer is a NEW surface; opt-in
+// is the only way the detector ever runs.
+//
+// Conversion: `DetectedRule.trigger` already carries `alwaysApply +
+// globs`, the exact shape `GlobRule` needs. We don't try to round-trip
+// vendor-specific metadata into the GlobRule body — the body is what the
+// model reads; metadata is detector-side diagnostics only.
+
+/** Map from {@link VendorId} → numeric priority (lower wins on path
+ *  collision). Built from the canonical {@link VENDOR_PRIORITY} table
+ *  ONCE; an `opts.priority` override produces a per-call reorder. */
+const buildPriorityOf = (
+  override: ReadonlyArray<VendorId> | undefined,
+): Readonly<Record<VendorId, number>> => {
+  if (override === undefined) return VENDOR_PRIORITY
+  // `override` defines explicit precedence for the listed vendors; any
+  // VendorId absent from the override falls back to its canonical
+  // priority but offset PAST the override's length so a partial list
+  // ("priority: ['cursor']") still puts cursor first and leaves the
+  // canonical relative order of the rest intact.
+  const next: Record<VendorId, number> = { ...VENDOR_PRIORITY }
+  const seen = new Set<VendorId>()
+  for (let i = 0; i < override.length; i += 1) {
+    const v = override[i] as VendorId
+    if (seen.has(v)) continue
+    seen.add(v)
+    next[v] = i
+  }
+  // Bump unmentioned vendors past the override head so the partial
+  // override's intent is preserved (the override is "these win first").
+  const offset = override.length
+  for (const v of Object.keys(VENDOR_PRIORITY) as VendorId[]) {
+    if (!seen.has(v)) {
+      next[v] = VENDOR_PRIORITY[v] + offset
+    }
+  }
+  return Object.freeze(next)
+}
+
+/** Convert one `DetectedRule` → `GlobRule` (the shape glob-rules.ts
+ *  consumes downstream). Body is taken as-is (the normalizer already
+ *  capped it at the detector's `maxBodyBytes`); description is dropped
+ *  if empty (matches `tryLoadRule` posture). Returns `undefined` for
+ *  rules that can never auto-inject (mirrors {@link tryLoadRule}). */
+const detectedToGlobRule = (d: DetectedRule): GlobRule | undefined => {
+  const alwaysApply = d.trigger.alwaysApply === true
+  const globs = [...d.trigger.globs]
+  if (!alwaysApply && globs.length === 0) return undefined
+  const body = d.body.trim()
+  if (body.length === 0) return undefined
+  const description = d.description.trim().length > 0 ? d.description.trim() : undefined
+  return {
+    sourcePath: d.sourcePath,
+    ...(description !== undefined ? { description } : {}),
+    globs,
+    alwaysApply,
+    body,
+  }
+}
+
+/** Compose `legacyRules` (from `loadGlobRules`) with `detected` (from
+ *  `VendorDetectorPort.detectAll`). Deduplication is by absolute
+ *  `sourcePath`; on collision the vendor with the LOWER priority index
+ *  wins (per the resolved {@link buildPriorityOf} table).
+ *
+ *  Legacy rules carry no vendor tag — we treat them as `"quanta"` for
+ *  priority purposes (the legacy loader walks `.quanta/rules` first, so
+ *  attributing legacy rules to quanta keeps the existing precedence
+ *  semantics: a user's native quanta config STILL beats a foreign-vendor
+ *  rule at the same path).
+ *
+ *  The function is EXPORTED (separate from `loadGlobRulesWithVendors`)
+ *  so a host that already has both lists can compose without re-running
+ *  I/O — the cli rule-indicator does exactly this. */
+export const composeGlobRulesWithDetected = (
+  legacyRules: ReadonlyArray<GlobRule>,
+  detected: ReadonlyArray<DetectedRule>,
+  opts?: {
+    /** Subset filter; ABSENT ⇒ all 6 vendors. Unknown ids are ignored. */
+    readonly vendors?: ReadonlyArray<VendorId>
+    /** Per-call priority override; ABSENT ⇒ canonical order. */
+    readonly priority?: ReadonlyArray<VendorId>
+  },
+): GlobRule[] => {
+  const priorityOf = buildPriorityOf(opts?.priority)
+  const allowed: ReadonlySet<VendorId> | undefined =
+    opts?.vendors !== undefined ? new Set<VendorId>(opts.vendors) : undefined
+  // Keyed by absolute sourcePath. Each entry carries the chosen vendor's
+  // priority + the resulting GlobRule.
+  const byPath = new Map<string, { priority: number; rule: GlobRule }>()
+  // Legacy rules first — they are quanta-equivalent for precedence.
+  const legacyPriority = priorityOf.quanta
+  for (const r of legacyRules) {
+    byPath.set(r.sourcePath, { priority: legacyPriority, rule: r })
+  }
+  // Detector rules second; collision-resolve by priority. We honour
+  // `MAX_RULE_FILES` here too — composition cannot blow the per-turn
+  // selector's O(N) cost.
+  for (const d of detected) {
+    if (byPath.size >= MAX_RULE_FILES) break
+    if (allowed !== undefined && !allowed.has(d.vendor)) continue
+    const g = detectedToGlobRule(d)
+    if (g === undefined) continue
+    const pri = priorityOf[d.vendor]
+    const existing = byPath.get(g.sourcePath)
+    if (existing === undefined) {
+      byPath.set(g.sourcePath, { priority: pri, rule: g })
+      continue
+    }
+    // Lower index wins; if equal, KEEP the first writer (legacy already
+    // sat there, so legacy wins on ties — matches the "user's native
+    // config is authoritative" posture from the vendor table doc).
+    if (pri < existing.priority) {
+      byPath.set(g.sourcePath, { priority: pri, rule: g })
+    }
+  }
+  // Stable sort: priority asc, then sourcePath asc.
+  const out = Array.from(byPath.values())
+  out.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority
+    if (a.rule.sourcePath < b.rule.sourcePath) return -1
+    if (a.rule.sourcePath > b.rule.sourcePath) return 1
+    return 0
+  })
+  return out.map((x) => x.rule)
+}
+
+/** Options for {@link loadGlobRulesWithVendors}. Mirrors the
+ *  {@link RulesConfigBlock} surface from `@/agent/types`. */
+export interface LoadGlobRulesWithVendorsOpts {
+  readonly vendorDetectorEnabled?: boolean
+  readonly detector?: VendorDetectorPort
+  readonly vendors?: ReadonlyArray<VendorId>
+  readonly priority?: ReadonlyArray<VendorId>
+}
+
+/** OPT-IN composer for ADR-0205 multi-vendor rule detection. Returns
+ *  the byte-identical `loadGlobRules(cwd)` output when
+ *  `opts?.vendorDetectorEnabled !== true` (or when the optional detector
+ *  throws — the no-throw contract is enforced here). When enabled and
+ *  the detector returns rules, the legacy + detected sets are deduped
+ *  by sourcePath using {@link composeGlobRulesWithDetected}. */
+export const loadGlobRulesWithVendors = async (
+  cwd: string,
+  opts?: LoadGlobRulesWithVendorsOpts,
+): Promise<GlobRule[]> => {
+  const legacy = await loadGlobRules(cwd)
+  // Default-OFF: composer is silent unless explicitly enabled.
+  if (opts === undefined || opts.vendorDetectorEnabled !== true) {
+    return legacy
+  }
+  const detector = opts.detector ?? createDefaultVendorDetector()
+  // No-throw: a buggy detector cannot derail session start. We catch
+  // EVERY failure and fall back to the legacy output (the user-facing
+  // surface is "auto-detect best-effort"; rule-load failures show up
+  // via the detector's `DetectorError` list, not via session crash).
+  let detected: ReadonlyArray<DetectedRule>
+  try {
+    const result = await detector.detectAll({ cwd })
+    detected = result.rules
+  } catch {
+    return legacy
+  }
+  return composeGlobRulesWithDetected(legacy, detected, {
+    ...(opts.vendors !== undefined ? { vendors: opts.vendors } : {}),
+    ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
+  })
 }
