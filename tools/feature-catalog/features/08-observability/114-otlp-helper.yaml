@@ -5,10 +5,10 @@ subsystem: metrics export (ADR-0144)
 order: 114
 maturity: L3
 status: stable
-ui_surfaces: [n-a]
-monitoring: n-a
+ui_surfaces: [api]
+monitoring: integrated
 modes: [n-a]
-configurable: partial
+configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:opentelemetry", "surface:observability", "tier:adapter"]
 depends_on: [otel-sink, metrics-typed-port-slice]
@@ -33,3 +33,11 @@ deliberate_hold: null
 notes: |
   Zero runtime npm deps until caller invokes the helper. Test seam `__loader`
   injects fake module surface for off-network unit tests.
+
+  Self-evidence on mon axis: this module IS the OTLP/Prometheus exporter
+  surface — the constructed `{sink, shutdown}` MeterProvider IS the
+  monitoring instrumentation that downstream consumers wire. Marking
+  `monitoring: integrated` is structurally honest (the file emits via
+  PeriodicExportingMetricReader). `configurable: integrated` because env
+  knobs `OTEL_*` (endpoint / headers / interval) reach the underlying
+  exporter packages directly.

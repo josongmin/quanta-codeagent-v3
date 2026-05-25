@@ -27,10 +27,13 @@ purpose: |
 evidence:
   code:
     - src/agent/run-mode/clamp.ts
+    - src/agent/budget/events.ts
+    - src/agent/budget/types.ts
   adrs: []
   tests:
     unit:
       - tests/unit/agent/run-mode/clamp.test.ts
+      - tests/unit/agent/run-mode/clamp-edge-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

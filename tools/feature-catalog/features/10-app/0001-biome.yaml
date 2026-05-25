@@ -24,5 +24,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
-notes: 'L3: meta-policy entry — concrete enforcement lives in biome.json + slice-boundary tests rather than a single source module. Downgraded from L5 because evidence.code cannot point at a load-bearing implementation file.'
+deliberate_hold:
+  reason: 'Config-only meta-policy ADR. mon/wire axes are N/A (no runtime emit point, no UI surface). Structural enforcement IS the contract — biome rules + 3 slice-boundary tests already exercise it; hellgate would be CI/lint pipeline scope, not feature-level.'
+  promotion_path: 'Stays at L3 indefinitely; promote IF biome rule violation telemetry is wired into CI dashboards (e.g., per-rule trip counter on lint runs).'
+notes: 'L3: meta-policy entry — concrete enforcement lives in biome.json + slice-boundary tests rather than a single source module. Downgraded from L5 because evidence.code cannot point at a load-bearing implementation file. Judge-axis thin signal is correct-by-design (config feature, not runtime feature) — explicit hold per no-heuristics-only-validated.'

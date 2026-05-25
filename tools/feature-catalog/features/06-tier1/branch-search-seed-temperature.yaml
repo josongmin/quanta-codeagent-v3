@@ -27,10 +27,12 @@ purpose: |
 evidence:
   code:
     - src/agent/branch-search/seed.ts
+    - src/agent/branch-search/types.ts
   adrs: [84]
   tests:
     unit:
       - tests/unit/branch-search.test.ts
+      - tests/unit/branch-search-seed-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
