@@ -1,0 +1,63 @@
+id: agent-nickname-pool-role-enum
+title: Codex agent nickname pool (39) + agent_role 4-arm enum
+section: 1
+subsystem: 시스템 프롬프트 / 서브에이전트 identity (Codex SOTA 흡수, ADR-0247)
+order: 247
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core]
+depends_on: [identity-mode-variant]
+purpose: |
+  Codex `core/src/config/agent_roles.rs`의 nickname_candidates 39-entry 풀과
+  `agent_role` enum (explorer/worker/none) 흡수. quanta 서브에이전트에 stable
+  identity 부여 — 부모는 (nickname, role) 페어로 transcript label / 정책 라우팅 /
+  SQLite durable column을 한 번에 얻는다. quanta는 ADR-0029 3-tier reviewer를
+  반영해 `reviewer` arm을 추가 (4-arm 전체: explorer/worker/reviewer/none).
+
+  새 슬라이스 `src/agent/identity-pool/`:
+    - types.ts             — AgentRole 4-arm + AgentNickname literal union 39 + MintedIdentity + NONE_NICKNAME
+    - port.ts              — IdentityMinter 포트 + MintError + ReleaseError
+    - nickname-table.ts    — frozen 39-entry 거장 풀 (`as const satisfies readonly AgentNickname[]`)
+    - default-minter.ts    — round-robin + collision-free + release-on-done
+    - index.ts             — slice barrel
+
+  mint("none")는 "__none__" sentinel 반환 (pool slot 미소비) — Codex 28%
+  production share 패턴 미러. mint("explorer"|"worker"|"reviewer")는 cursor=0
+  부터 라운드-로빈 prob — in-use entry skip, 39 fully-in-use 시 MintError throw.
+  release(nickname)는 release("__none__") no-op 외에는 unknown → ReleaseError.
+  inUse() snapshot은 defensive copy (caller mutation 격리).
+
+  Default-OFF byte-identical — caller가 minter 호출하지 않으면 ADR-0140 background
+  subagent / ADR-0030 mid-turn steering / fork-session 모두 변동 없음. 후속 ADR이
+  scheduler/fork-session port에 와이어링하면 부모 정책층이 mintedIdentity.role로
+  직접 분기 가능.
+evidence:
+  code:
+    - src/agent/identity-pool/types.ts
+    - src/agent/identity-pool/port.ts
+    - src/agent/identity-pool/nickname-table.ts
+    - src/agent/identity-pool/default-minter.ts
+    - src/agent/identity-pool/index.ts
+  adrs: [247, 30, 140]
+  tests:
+    unit:
+      - tests/unit/agent/identity-pool-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Hellgate 15 case: mint shape (HELL-IP-01) / 2회 mint distinct (-02) / release →
+  remint (-03) / 40 mint exhausted (-04) / unknown release Err (-05) / inUse accurate
+  + defensive copy (-06) / AgentRole 4-arm 컴파일타임 exhaustive (-07) / 풀 정확히
+  39 entry (-08) / 모든 entry가 literal union (-09) / round-robin 결정성 (-10) /
+  39 distinct sequential mint (-11) / barrel import no side effect (-12) / mint("none")
+  pool slot 미소비 (-13) / 1000 cycle no leak (-14) / release("__none__") no-op (-15).
+  Codex의 `nickname_candidates` 문자열은 upstream 바이너리에 인라인 미반영 —
+  memory note `codex-subagent-tools` 의 "거장 39명" 대체 풀 채택 (수학자/CS 개척자).
+  순서는 결정적 round-robin 순서로 픽스 (HELL-IP-10이 잠금).
