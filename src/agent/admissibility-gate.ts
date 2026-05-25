@@ -607,8 +607,9 @@ const runPermissionStack = (
     { threadId, hostId, actionSignature, workdir: config.cwd },
     // W4 follow-up: evaluateStack now REQUIRES store. This file is the
     // composition-adjacent layer (called by dispatch), so `getDefaultPermissionStore()`
-    // as a fallback is allowed by the new scanner rule. Long-term: thread
-    // `permissionStore` through `AgentConfig` and remove this fallback.
+    // as a fallback is allowed by the new scanner rule. Surfaces may now
+    // inject `AgentConfig.admissibility.permissionStore`; the singleton
+    // fallback remains only for legacy callers that omit that bundle.
     { store: opts.store ?? getDefaultPermissionStore() },
   )
   if (decision.kind === "allow") return "allow"

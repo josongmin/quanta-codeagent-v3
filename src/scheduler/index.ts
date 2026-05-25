@@ -19,24 +19,6 @@ export {
   recordFire,
   transitionStatus,
 } from "./automation"
-export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
-// Model reroute
-export { chooseModel } from "./model-reroute"
-// Evaluator
-export { computeNextFire, iterateFires } from "./next-fire"
-export type { RRuleParseResult } from "./rrule-parser"
-// Parser
-export { parseRRule, serializeRRule } from "./rrule-parser"
-export type { SchedulerRuntime, SchedulerRuntimeOpts } from "./runtime"
-// Runtime
-export {
-  createSchedulerRuntime,
-  DEFAULT_TICK_INTERVAL_MS,
-  SCHEDULER_ENV_FLAG,
-} from "./runtime"
-export type { JsonlAutomationStoreOpts } from "./store-jsonl"
-// JSONL store
-export { defaultJsonlAutomationStore } from "./store-jsonl"
 // ADR-0215 — Automation engine (Codex 3-table schema; default-OFF until host wires)
 export type {
   AutomationEnginePort,
@@ -65,6 +47,24 @@ export {
   sqliteAutomationEngine,
   tickScheduler,
 } from "./automation-engine"
+export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
+// Model reroute
+export { chooseModel } from "./model-reroute"
+// Evaluator
+export { computeNextFire, iterateFires } from "./next-fire"
+export type { RRuleParseResult } from "./rrule-parser"
+// Parser
+export { parseRRule, serializeRRule } from "./rrule-parser"
+export type { SchedulerRuntime, SchedulerRuntimeOpts } from "./runtime"
+// Runtime
+export {
+  createSchedulerRuntime,
+  DEFAULT_TICK_INTERVAL_MS,
+  SCHEDULER_ENV_FLAG,
+} from "./runtime"
+export type { JsonlAutomationStoreOpts } from "./store-jsonl"
+// JSONL store
+export { defaultJsonlAutomationStore } from "./store-jsonl"
 // Types
 export type {
   AgentLoopPort,

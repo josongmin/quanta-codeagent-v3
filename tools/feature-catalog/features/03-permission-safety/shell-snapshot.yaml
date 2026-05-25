@@ -1,0 +1,54 @@
+id: shell-snapshot
+title: Per-turn shell environment snapshot (hermetic shell)
+section: 3
+subsystem: 사용자 셸 격리 (ADR-0204)
+order: 12
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [disclaimer-shell-wrapper]
+purpose: |
+  Codex의 `~/.codex/shell_snapshots/{thread}.{ns}.sh` (~90KB) 패턴
+  흡수 — 매 턴 진입 시 사용자 shell 환경(typeset/declare params,
+  alias, function)을 단일 `.sh` 파일로 직렬화하고, 이후 shell tool 호출
+  시 그 파일을 `source` 한 뒤 사용자 명령을 실행한다. fork/resume 후
+  fresh shell 이 interactive rc 를 로드하지 않아 alias/function 이 사라지는
+  asymmetry(quanta 대 Codex)를 폐쇄. 슬라이스만 — 닫힌 port
+  `ShellSnapshotPort`(capture/restore/prune) + 어댑터 2 종(zsh: `typeset -p;
+  alias; declare -f`, bash: `declare -p; declare -f; alias` — ordering 차이
+  ADR 명시) + file-store(`~/.quanta/shell_snapshots/{id}.sh`, mode 0600,
+  디렉토리 0700, id sanitisation `[^A-Za-z0-9._-]` → `-` + leading `-./.`
+  strip + 48-char cap + 8-hex nonce suffix concurrent-collision-safe) +
+  headless-stub spawner(테스트 결정성). default-OFF: 합성 사이트 0 —
+  `runShell` 미수정, 미주입 세션은 argv `["bash","-lc",cmd]` byte-identical.
+  Wire-up(`runShell` 옵션 fold)은 후속 슬라이스.
+evidence:
+  code:
+    - src/runtime/shell-snapshot/port.ts
+    - src/runtime/shell-snapshot/types.ts
+    - src/runtime/shell-snapshot/zsh-capture.ts
+    - src/runtime/shell-snapshot/bash-capture.ts
+    - src/runtime/shell-snapshot/file-store.ts
+    - src/runtime/shell-snapshot/headless-stub.ts
+    - src/runtime/shell-snapshot/index.ts
+  adrs: [204]
+  tests:
+    unit: [tests/unit/runtime/shell-snapshot-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Wire-up to runShell deferred — 본 슬라이스는 closed port + adapters
+    + file-store 만 제공. 합성 root / agent loop / tool 슬라이스 / scheduler
+    무수정. snapshot 미주입 세션은 argv `["bash","-lc",cmd]` byte-identical.
+  promotion_path: |
+    Follow-up slice: runShell 옵션으로 `snapshotHandle?: SnapshotHandle`
+    수용 + 합성 root에서 turn 진입 시 capture → handle 보관 → restore-prefix
+    합성. snapshot read 실패는 degradeReason으로 observability 채널에 surface.
+notes: 'Codex absorption (A5, 강 ROI 단독). zsh/bash 만 — fish/pwsh 미커버. 보존 정책(10일/100MB 슬라이딩 윈도우)은 caller가 prune(olderThanMs) 호출로 정책 선언; 슬라이스는 mechanism만 제공.'

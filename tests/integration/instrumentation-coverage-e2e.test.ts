@@ -157,6 +157,12 @@ const fakeQueue = (overrides: Partial<PlanQueueStore> = {}): PlanQueueStore =>
     peek: () => [],
     clear: () => 0,
     inspect: () => new Map(),
+    // ADR-0221 mutator surface stubs.
+    findEntry: () => undefined,
+    retry: () => ({ ok: false, error: "not-found" as const }),
+    edit: () => ({ ok: false, error: "not-found" as const }),
+    delete: () => ({ ok: false, error: "not-found" as const }),
+    sendNow: () => ({ ok: false, error: "not-found" as const }),
     ...overrides,
   }) as unknown as PlanQueueStore
 

@@ -85,7 +85,7 @@ Note: `LLMPort.StreamEvent` is **leaky-by-design** — `ThinkingBlock.signature`
 |---|---|---|
 | `PermissionStore` / `PermissionReader` | `src/permission/permission-store.ts` (writer/narrow-reader split) | `createPermissionStore({filePath})` is the factory; `getDefaultPermissionStore()` is the composition-only singleton |
 | `ClassifierPort` | `src/permission/classifier.ts` | functional port; injected wrapper enables slice inversion (`@/permission` never imports `@/llm`) |
-| `ReviewerPort` | `src/permission/types.ts` | **CEREMONY** — zero production impls today (slated for ADR-0029 §Integration seam). Either ship a prod impl by R10 or remove the port. |
+| `ReviewerPort` | `src/permission/types.ts` | concrete adapter: `createOnConfirmReviewerPort()` in `src/agent/reviewer-port.ts`; live dispatch wire via `AgentConfig.admissibility.reviewerPort` |
 
 ### `@/tool`
 | Port / Provider | Definition | Adapters | Status |
@@ -99,8 +99,8 @@ Note: `LLMPort.StreamEvent` is **leaky-by-design** — `ThinkingBlock.signature`
 | Seam | Definition | Status |
 |---|---|---|
 | `SubagentRunner` | `src/subagent/types.ts` | composition-wired via `createSubagentRunner` |
-| `PlanExitPort` | `src/agent/plan-exit-flow.ts` | **CEREMONY** — zero prod impl; `runPlanExitFlow` throws if absent |
-| `IdeContextProvider` | `src/agent/ide-context.ts` | **CEREMONY** — only test fakes |
+| `PlanExitPort` | `src/agent/plan-exit-flow.ts` | live seam — dispatch wires `AgentConfig.planExitPort` to `ToolContext.requestPlanExit`; current app surfaces do not ship a default adapter |
+| `IdeContextProvider` | `src/agent/ide-context.ts` | concrete adapter: `FileSystemIdeContextProvider` + live integration coverage |
 | `WorkMetricsSink` | `src/agent/work-metrics-collector.ts` | 1 inline producer (`apps/cli/repl.ts`); promote to a real class when reused |
 
 ### `ToolContext` — duck-typed back-channel (intentional)
@@ -213,11 +213,11 @@ Current rules:
 
 ## 9. Open debt
 
-- **Ceremony ports without prod impl**: `ReviewerPort`, `PlanExitPort`, `IdeContextProvider`. Each must ship a real implementation by the next major round or be removed (along with its `AgentConfig` field and its `run*Flow` function).
+- **Remaining port-adoption debt**: `PlanExitPort` still lacks a default app-surface adapter, and `ReviewerPort` only has the user-backed `createOnConfirmReviewerPort()` adapter today — higher-tier auto/guardian reviewers still need real composition wiring.
 - **Multi-process permission flock**: the current `read-reconcile-merge` defends against last-write-wins clobber but not true concurrent-flush atomicity. OS lockfile is v4 scope (ADR-0046).
 - **Cost dashboard `cacheHitRate` denominator**: cosmetic understatement for OpenAI (`prompt_tokens` includes cached). Not a billing bug.
 - **Some `@/agent` callsites still call `Date.now()` directly** — burn-down list in the scanner rule; migrate to injected clocks per round.
-- **`AgentConfig` god-container**: 74 fields; narrow `Pick<>` sub-configs exist (`RecoveryConfig`, `MemoryConfig`, `FeaturesConfig`, `TurnContextConfig`, `BudgetConfig`) — consumers should migrate to them; the public `AgentConfig` shape stays for back-compat.
+- **`AgentConfig` god-container**: still too large; narrow `Pick<>` sub-configs exist (`RecoveryConfig`, `MemoryConfig`, `FeaturesConfig`, `TurnContextConfig`, `BudgetConfig`) and newer gate knobs are now grouped under `admissibility` to stop further flat-surface drift. More consumers should migrate off the full bag.
 
 ---
 

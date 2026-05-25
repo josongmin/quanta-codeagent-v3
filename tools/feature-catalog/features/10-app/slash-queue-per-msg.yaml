@@ -1,0 +1,66 @@
+id: slash-queue-per-msg-mutators
+title: /queue per-msg manage (ADR-0228 — Codex composer parity)
+section: 10
+subsystem: REPL slash UX (Codex composer absorption)
+order: 25
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+monitoring_keys:
+  - plan_queue.mutate.total
+modes: [interactive]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:codex", "tier:core"]
+depends_on: [queued-follow-ups, plan-queue, built-in-slash-commands]
+purpose: |
+  Codex Desktop composer parity: each queued follow-up gets 4 per-msg
+  mutators (retry / edit / delete / sendNow) over a `/queue` slash.
+  ADR-0128 absorbed the structural queue + ADR-0037 the pause-reason
+  vocabulary; this slice closes the operator-management gap. `sendNow`
+  is the distinctive one — it bypasses the paused state and injects
+  into the NEXT turn WITHOUT aborting the active one (steering bypass
+  invariant, pinned by HELL-S3).
+evidence:
+  code:
+    - src/agent/plan-queue.ts
+    - src/apps/cli/queue-cmd.ts
+    - src/apps/cli/slash-commands.ts
+    - src/observability/metrics/instrument-plan-queue.ts
+  adrs: [228, 128, 37]
+  tests:
+    unit:
+      - tests/unit/queue-per-msg-mutators-hellgate.test.ts
+      - tests/unit/cli/queue-cmd-hellgate.test.ts
+      - tests/unit/slash-commands.test.ts
+      - tests/unit/observability-metrics-instrument-extra-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    `SendNowSink` is a closed port — the composition root has not yet
+    wired a concrete sink for the REPL surface. Until wired, every
+    `/queue send-now` returns `send-not-possible` (typed) and removes
+    the entry; the other 3 mutators work standalone. Helper-only,
+    deferred-wire posture (voice-matched to ADR-0128's original
+    landing).
+  promotion_path: |
+    1. REPL composition root constructs a SendNowSink whose `inject`
+       appends to the next-turn user-message buffer (the same buffer
+       PromptSource.next() reads on the next turn boundary).
+    2. Pass the sink via `defaultPlanQueueStore({sendNowSink})` at
+       session start.
+    3. Wire `ctx.planQueue` in the SlashContext builder so `/queue`
+       is functional in the live REPL.
+notes: |
+  Trailing-slot append to BUILTINS — no collision with `/rewind-tool`,
+  `/fork`, or the W2-5 web/paste/edit cluster. The 4 mutator surface
+  is opt-in: callers that never touch it observe byte-identical queue
+  state vs ADR-0128's pre-mutator behaviour. `retry` is
+  remove-and-re-enqueue (fresh id + enqueuedAtMs); `edit` validates
+  trim-empty / >64KiB and runs collapse-with-sibling merge; `delete`
+  cleans up empty thread keys; `sendNow` removes BEFORE sink call
+  (sink throw → typed send-not-possible). No external libraries
+  added — pure node:crypto + plane-clean type-only @/shared import.

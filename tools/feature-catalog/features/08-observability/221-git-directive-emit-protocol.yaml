@@ -1,0 +1,59 @@
+id: git-directive-emit-protocol
+title: "Git `::git-*` 5-directive emit protocol — phase-guarded behavioral layer"
+section: 8
+subsystem: Out-of-band UI sync channel after successful mutating git operations
+order: 221
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli", "observability-primitive", "default-off"]
+depends_on: []
+purpose: |
+  Codex-style `::git-*` 5-directive emit protocol with a HARD phase guard:
+  directives (create-branch / stage / commit / push / create-pr) may be
+  emitted ONLY in the `final-answer` phase, after a confirmed-successful
+  mutating git operation. `commentary` and `intermediate` phase emits are
+  rejected with a typed `wrong-phase` error before any sink write. Sibling
+  to ADR-0220 (`src/agent/git-directives/` — wire/serdes layer) — this
+  slice adds the BEHAVIORAL protocol layer (phase invariant + no-throw
+  Result surface). Default-OFF: `noopEmitter` is sink-free; `defaultEmitter`
+  is opt-in. Five files: types / port / phase-guard / validate / serializer
+  / parser / emitter (noop + default). Wire format
+  `::git-<kind><canonical-alpha-sorted-json>` round-trips deterministically.
+evidence:
+  code:
+    - src/git/directive-emit/index.ts
+    - src/git/directive-emit/types.ts
+    - src/git/directive-emit/port.ts
+    - src/git/directive-emit/phase-guard.ts
+    - src/git/directive-emit/validate.ts
+    - src/git/directive-emit/serializer.ts
+    - src/git/directive-emit/parser.ts
+    - src/git/directive-emit/emitter.ts
+  adrs: [221]
+  tests:
+    unit:
+      - tests/unit/git-directive-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: |
+  Caller-side wiring (one `emit(...)` line per success path inside
+  `src/tool/git/commit.ts`, `src/tool/git/branch-switch.ts`, and the future
+  `gh-pr-create.ts`) is deferred to a follow-up slice. Landing the
+  phase-guarded port first keeps this slice purely additive and lets the
+  wire stay trivial when ADR-0025 mutating-git tools graduate from `bash`.
+notes: |
+  Distinct from ADR-0220 (`src/agent/git-directives/`) in directive shape
+  AND in concern: 0220 models the UI-tail consumer (`stage.paths`, `push.{remote,branch}`);
+  this slice models the call-site intent (`stage.files`, `push.{ref,force}`).
+  Both wire formats serialize with canonical alpha-sorted JSON so a host
+  that wants either shape gets deterministic bytes. Slice isolation:
+  imports only `@/shared` (`Result`, `ok`, `err`); does NOT touch `@/tool`,
+  `@/llm`, `@/mcp`, `@/permission`, `@/agent`. 18 hellgate cases pin the
+  contract (default-OFF / phase guard / 5-kind round-trip / canonical JSON /
+  FIFO / frozen-on-parse / newline-safe framing).

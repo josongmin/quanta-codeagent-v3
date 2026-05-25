@@ -7,17 +7,17 @@
  *
  *  Layout (matches the Codex CLI reference):
  *
- *      ▏› {buf}{ghost}                                          ◀ BG-filled input row
- *      ▏  {meta}                                                ◀ BG-filled meta row
+ *      › {buf}{ghost}                                           ◀ input row
+ *        {meta}                                                 ◀ meta row
  *
  *      /name1      description for /name1                       ◀ candidate rows
  *      /name2      description for /name2                          (cyan name + dim desc)
  *      …
  *
- *  - The two top rows form a subtle gray "box" (terminal BG colour 236)
- *    that spans the full terminal width — visually distinguishes the
- *    composer from regular log output.
- *  - The candidate list appears BELOW the box, in a separate region.
+ *  - The composer rows render on the terminal's default background — the
+ *    earlier dark-band (xterm color 236) read as a solid black bar under
+ *    dark themes, which several users called out as visually heavy.
+ *  - The candidate list appears below the prompt rows, in a separate region.
  *    It's a plain two-column list (no border) with the command name in
  *    cyan and the description in dim gray, column-aligned to the widest
  *    visible name.
@@ -52,8 +52,8 @@ export interface ReadLineOptions {
    *  filtered list. Returning a string shows it as the dim right-column
    *  hint; returning `undefined` leaves the row name-only. */
   readonly describe?: DescribeFn
-  /** Optional meta line shown directly under the input prompt, inside the
-   *  BG-filled composer band. Typical content: `provider · model · cwd`. */
+  /** Optional meta line shown directly under the input prompt. Typical
+   *  content: `provider · model · cwd`. Rendered dim on default background. */
   readonly meta?: string
   readonly signal?: AbortSignal
   /** Optional bash-style prompt history. When provided:
@@ -95,8 +95,6 @@ const DIM = `${ESC}2m`
 const RESET = `${ESC}0m`
 const CYAN = `${ESC}36m`
 const GRAY = `${ESC}90m`
-const BG = `${ESC}48;5;236m`
-const BG_END = `${ESC}49m`
 const REVERSE = `${ESC}7m`
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g
@@ -132,29 +130,13 @@ const stringColumns = (s: string): number => {
 
 const MAX_VISIBLE_CANDIDATES = 8
 
-const termWidth = (): number => {
-  const w = process.stderr.columns
-  return typeof w === "number" && w > 0 ? w : 80
-}
-
-/** Fill an ANSI-coloured "row" out to the full terminal width.
- *
- *  IMPORTANT: `\x1b[0m` (full RESET) clears the background colour too —
- *  if a caller embeds `${RESET}` inside `content` the BG box visibly
- *  ends there (observed: short BG strip behind `›` + cursor, rest of
- *  the line plain black). We pre-process `content` to rewrite every
- *  full-RESET into a foreground-only reset (`\x1b[39;22m` — default fg
- *  + bold/dim off, BG untouched) so the band stays contiguous all the
- *  way to the terminal edge. */
-const RESET_KEEP_BG = `${ESC}39;22m`
-const FULL_RESET_RE = /\x1b\[0m/g
-
-const fillBgRow = (content: string): string => {
-  const safe = content.replace(FULL_RESET_RE, RESET_KEEP_BG)
-  const cols = stringColumns(stripAnsi(safe))
-  const pad = Math.max(0, termWidth() - cols)
-  return `${BG}${safe}${" ".repeat(pad)}${BG_END}`
-}
+/** Render a composer row. Previously this wrapped the content in a
+ *  full-width dark-gray (xterm 236) background band so the prompt looked
+ *  like a Codex-style "input box"; on dark terminal themes that band read
+ *  as a solid black bar, so it now passes content through unchanged.
+ *  The caller already emits `CR + ERASE_LINE` before each paint, so no
+ *  width-padding is needed to overwrite stale content. */
+const fillBgRow = (content: string): string => content
 
 interface State {
   buf: string

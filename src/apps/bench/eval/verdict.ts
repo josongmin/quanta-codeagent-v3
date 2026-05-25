@@ -41,9 +41,14 @@ export const verify = async (
     const evaluate = deps.pythonSwebench.evaluate ?? evaluateWithPythonSwebench
     const r = await evaluate(instance, patch, deps.pythonSwebench.opts ?? {})
     const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
+    // REAL patch fail (`gradingCompleted:true + resolved:false`) → no `error`
+    // (clean `passed:false`, classifier falls to `completed_unresolved`).
+    // INFRA fail (`gradingCompleted:false`) → set `error` → `harness_error`.
+    // Without this distinction every patch fail is misnamed harness_error.
+    const isInfraFailure = !r.resolved && !r.gradingCompleted
     return {
       passed: r.resolved,
-      ...(r.resolved ? {} : { error: r.log.slice(0, 500) }),
+      ...(isInfraFailure ? { error: r.log.slice(0, 500) } : {}),
       command,
       exitCode: r.resolved ? 0 : 1,
       failedTests: [],

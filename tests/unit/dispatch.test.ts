@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
-import type { AgentConfig } from "@/agent"
+import { createOnConfirmReviewerPort, type AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import type { ToolUseBlock } from "@/llm"
-import type { PermissionContext } from "@/permission"
+import { createPermissionStore, type PermissionContext, setThreadPermission } from "@/permission"
+import { RulesStore } from "@/rules"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
 
@@ -67,6 +68,12 @@ const call = (name: string, input: unknown, id = "c1"): ToolUseBlock => ({
 })
 
 const perm: PermissionContext = { mode: "acceptEdits" }
+
+const ruleStore = (text: string): RulesStore => {
+  const store = new RulesStore()
+  store.loadLayer("project", text, "tests/unit/dispatch.test.ts")
+  return store
+}
 
 describe("dispatchTool happy path", () => {
   test("found read-only tool executes and returns a well-formed result block", async () => {
@@ -221,6 +228,92 @@ describe("dispatchTool gates", () => {
         registry: new ToolRegistry([mutate]),
         permission: { mode: "default" },
         onConfirm: async () => true,
+      }),
+      { mode: "default" },
+    )
+    expect(res.ok).toBe(true)
+    expect(res.block.content).toBe("ran")
+  })
+
+  test("admissibility.rulesStore allow is threaded through dispatch and pre-empts legacy ask", async () => {
+    const mutate = makeTool("dangerous", {
+      readOnly: false,
+      run: async function* () {
+        yield { type: "result", result: { ok: true, output: "ran" } }
+      },
+    })
+    const res = await dispatchTool(
+      call("dangerous", {}),
+      config({
+        registry: new ToolRegistry([mutate]),
+        permission: { mode: "default" },
+        admissibility: {
+          rulesStore: ruleStore("allow dangerous\n"),
+        },
+      }),
+      { mode: "default" },
+    )
+    expect(res.ok).toBe(true)
+    expect(res.block.content).toBe("ran")
+  })
+
+  test("admissibility.rulesStore ask + reviewerPort are threaded through dispatch", async () => {
+    const mutate = makeTool("dangerous", {
+      readOnly: false,
+      run: async function* () {
+        yield { type: "result", result: { ok: true, output: "ran" } }
+      },
+    })
+    const res = await dispatchTool(
+      call("dangerous", {}),
+      config({
+        registry: new ToolRegistry([mutate]),
+        permission: { mode: "acceptEdits" },
+        admissibility: {
+          rulesStore: ruleStore("ask dangerous\n"),
+          reviewerPort: createOnConfirmReviewerPort({
+            onConfirm: async () => ({
+              decision: "deny_and_steer",
+              steer: "Inspect with a read-only tool before mutating.",
+            }),
+          }),
+          defaultReviewer: "user",
+        },
+      }),
+      { mode: "acceptEdits" },
+    )
+    expect(res.ok).toBe(false)
+    expect(res.preview).toBe("deny_steer")
+    expect(res.block.content).toContain("User declined")
+    expect(res.block.content).toContain("Inspect with a read-only tool before mutating.")
+    expect(res.steerInjection).toContain("Inspect with a read-only tool before mutating.")
+  })
+
+  test("admissibility.permissionStore is threaded through the permission-stack path", async () => {
+    const mutate = makeTool("dangerous", {
+      readOnly: false,
+      run: async function* () {
+        yield { type: "result", result: { ok: true, output: "ran" } }
+      },
+    })
+    const store = createPermissionStore()
+    setThreadPermission(
+      "thread-1",
+      {
+        approvalPolicy: "always",
+        approvalsReviewer: "user",
+        sandboxPolicy: { type: "workspace-write", writableRoots: ["/repo"] },
+      },
+      store,
+    )
+    const res = await dispatchTool(
+      call("dangerous", {}),
+      config({
+        registry: new ToolRegistry([mutate]),
+        permission: { mode: "default" },
+        permissionStack: { enabled: true },
+        sessionId: "thread-1",
+        admissibility: { permissionStore: store },
       }),
       { mode: "default" },
     )

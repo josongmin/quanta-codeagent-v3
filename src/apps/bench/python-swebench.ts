@@ -104,6 +104,14 @@ export interface PySwebenchOpts {
 export interface PySwebenchResult {
   /** True iff the instance id appears in the harness report's resolved_ids. */
   resolved: boolean
+  /** True iff the swebench harness reached its summary line. False ⇒ harness
+   *  crashed (Docker glitch, image-pull race, module import error) BEFORE
+   *  grading. Callers distinguish: resolved:false+gradingCompleted:true is a
+   *  REAL patch fail; resolved:false+gradingCompleted:false is an INFRA fail
+   *  (retry-worthy). The retry path inside this module handles transient
+   *  crashes silently; this field reaches the caller for downstream
+   *  classification (verdict.ts uses it to avoid the `harness_error` misname). */
+  gradingCompleted: boolean
   /** Human-readable trace: probe/argv/exit + report excerpt or failure cause.
    *  Always populated, even on failure (never throws to the caller). */
   log: string
@@ -236,19 +244,19 @@ export const evaluateWithPythonSwebench = async (
 ): Promise<PySwebenchResult> => {
   const meta = instance.swebench
   if (!meta) {
-    return { resolved: false, log: `instance ${instance.id} has no swebench metadata` }
+    return { resolved: false, gradingCompleted: false, log: `instance ${instance.id} has no swebench metadata` }
   }
   if (prediction.trim() === "") {
-    return { resolved: false, log: `empty prediction for ${meta.instanceId}` }
+    return { resolved: false, gradingCompleted: false, log: `empty prediction for ${meta.instanceId}` }
   }
 
   const spawn = opts.spawn ?? defaultSpawn
   if (!(await isPythonSwebenchAvailable(opts))) {
-    return { resolved: false, log: "python swebench harness unavailable (import failed)" }
+    return { resolved: false, gradingCompleted: false, log: "python swebench harness unavailable (import failed)" }
   }
   const python = opts.probe ? pythonCandidates()[0]! : await resolvePython(spawn)
   if (!python) {
-    return { resolved: false, log: "no python interpreter could import swebench" }
+    return { resolved: false, gradingCompleted: false, log: "no python interpreter could import swebench" }
   }
 
   const modelName = opts.modelName ?? "quanta"
@@ -267,20 +275,36 @@ export const evaluateWithPythonSwebench = async (
     const datasetName = opts.datasetName ?? SWEBENCH_VERIFIED_DATASET
     const harnessCfg = opts.harnessConfig ?? resolveHarnessConfig()
     const argv = buildArgv(python, predictionsPath, runId, meta.instanceId, datasetName, harnessCfg)
-    const run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
-    const resolvedIds = await collectResolvedIds(work)
+    // Transient-crash retry: exit != 0 AND the harness never reached its
+    // summary marker = Docker/network/image-pull glitch. Settle 5s + retry
+    // once. Genuine patch fails keep exit=0 with a populated report, so this
+    // never re-runs a real fail.
+    const harnessReachedSummary = (out: string): boolean =>
+      out.includes("Instances submitted:") || out.includes("Instances completed:")
+    let run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
+    let resolvedIds = await collectResolvedIds(work)
+    let retried = false
+    if (run.code !== 0 && resolvedIds.length === 0 && !harnessReachedSummary(run.stdout)) {
+      retried = true
+      await new Promise((r) => setTimeout(r, 5000))
+      run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
+      resolvedIds = await collectResolvedIds(work)
+    }
     const resolved = resolvedIds.includes(meta.instanceId)
+    const gradingCompleted = harnessReachedSummary(run.stdout)
     const tail = (s: string): string => s.slice(-1500)
     const log = [
       `cmd: ${argv.join(" ")}`,
       `exit: ${run.code}`,
+      `retried: ${retried}`,
+      `gradingCompleted: ${gradingCompleted}`,
       `resolved_ids: ${JSON.stringify(resolvedIds)}`,
       `stdout(tail): ${tail(run.stdout)}`,
       `stderr(tail): ${tail(run.stderr)}`,
     ].join("\n")
-    return { resolved, log }
+    return { resolved, gradingCompleted, log }
   } catch (e) {
-    return { resolved: false, log: `python harness invocation failed: ${(e as Error).message}` }
+    return { resolved: false, gradingCompleted: false, log: `python harness invocation failed: ${(e as Error).message}` }
   } finally {
     await rm(work, { recursive: true, force: true })
   }

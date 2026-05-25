@@ -1,16 +1,21 @@
 /**
- * PlanQueueStore instrumentation (ADR-0161 + ADR-0167).
+ * PlanQueueStore instrumentation (ADR-0161 + ADR-0167 + ADR-0221 mutators).
  *
  * Counters:
  *   plan_queue.enqueue.total            labels: source, pausedReason, urgent
  *   plan_queue.enqueue.collapsed.total  (no labels — keep cardinality low)
  *   plan_queue.drain.total              labels: drained_count_bucket ("0"|"1"|"2-5"|"6+")
  *   plan_queue.clear.total
+ *   plan_queue.mutate.total             labels: op ("retry"|"edit"|"delete"|"sendNow"), outcome ("ok"|<error>)
  *
  * ADR-0167: `enqueue.total` fires for every enqueue ATTEMPT (collapsed or
  * not — it measures attempts, not commits). `enqueue.collapsed.total`
  * fires only when the call collapsed into an existing live entry. The
  * collapse rate is therefore `collapsed.total / enqueue.total`.
+ *
+ * ADR-0221: every per-msg mutator (retry/edit/delete/sendNow) emits one
+ * counter with the outcome label so operators can spot e.g. a sendNow
+ * sink that's silently rejecting (send-not-possible spike).
  *
  * No-throw wrap; slice never imports `@/observability`.
  */
@@ -69,5 +74,52 @@ export const instrumentPlanQueue = (
       return removed
     },
     inspect: store.inspect.bind(store),
+
+    // ─── ADR-0221 per-msg mutators ──────────────────────────────────
+    // Each emits one counter with `op` + `outcome` labels. `outcome` is
+    // either "ok" (success) or the typed error string so a dashboard can
+    // chart e.g. sendNow.send-not-possible to detect a misconfigured sink.
+
+    findEntry: store.findEntry.bind(store),
+    retry(entryId) {
+      const r = store.retry(entryId)
+      safe(metrics, () =>
+        metrics.increment(`${prefix}.mutate.total`, 1, {
+          op: "retry",
+          outcome: r.ok ? "ok" : r.error,
+        }),
+      )
+      return r
+    },
+    edit(entryId, newText) {
+      const r = store.edit(entryId, newText)
+      safe(metrics, () =>
+        metrics.increment(`${prefix}.mutate.total`, 1, {
+          op: "edit",
+          outcome: r.ok ? "ok" : r.error,
+        }),
+      )
+      return r
+    },
+    delete(entryId) {
+      const r = store.delete(entryId)
+      safe(metrics, () =>
+        metrics.increment(`${prefix}.mutate.total`, 1, {
+          op: "delete",
+          outcome: r.ok ? "ok" : r.error,
+        }),
+      )
+      return r
+    },
+    sendNow(entryId) {
+      const r = store.sendNow(entryId)
+      safe(metrics, () =>
+        metrics.increment(`${prefix}.mutate.total`, 1, {
+          op: "sendNow",
+          outcome: r.ok ? "ok" : r.error,
+        }),
+      )
+      return r
+    },
   }
 }

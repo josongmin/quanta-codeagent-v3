@@ -21,6 +21,14 @@ const fakeQueue = (overrides: Partial<PlanQueueStore> = {}): PlanQueueStore =>
     peek: () => [],
     clear: () => 0,
     inspect: () => new Map(),
+    // ADR-0221: 5 per-msg mutator stubs (findEntry + 4 mutators). Default
+    // to no-op success / not-found so existing instrument tests are
+    // byte-identical when they don't override these.
+    findEntry: () => undefined,
+    retry: () => ({ ok: false, error: "not-found" }),
+    edit: () => ({ ok: false, error: "not-found" }),
+    delete: () => ({ ok: false, error: "not-found" }),
+    sendNow: () => ({ ok: false, error: "not-found" }),
     ...overrides,
   }) as unknown as PlanQueueStore
 

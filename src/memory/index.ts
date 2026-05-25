@@ -4,6 +4,7 @@ export { SqliteStore } from "./adapters/sqlite"
  *  D session-end hook in `@/agent` wires `runPhase1` through these ports so
  *  the loop never reaches into `consolidate/*` internals (RFC §3.1 layering). */
 export {
+  type MemoryOutcome,
   MemoryWriteError,
   MemoryWriter,
   Phase1DistillError,
@@ -20,7 +21,6 @@ export {
   type Stage1Output,
   Stage1Store,
   type Stage1StorePort,
-  type MemoryOutcome,
   WatermarkConflictError,
   type WatermarkState,
 } from "./consolidate"

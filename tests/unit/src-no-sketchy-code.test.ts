@@ -229,7 +229,7 @@ const RULES: readonly Rule[] = [
       "permission/permission-store.ts": "the canonical definition site",
       "permission/index.ts": "barrel re-export",
       "agent/admissibility-gate.ts":
-        "composition-adjacent layer; transitional fallback when AgentConfig doesn't thread a store. Remove once apps wire `AgentConfig.permissionStore` explicitly.",
+        "composition-adjacent layer; transitional fallback when surfaces omit `AgentConfig.admissibility.permissionStore`. Remove once every app wires the nested store explicitly.",
     },
   },
 ]

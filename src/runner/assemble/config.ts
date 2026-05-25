@@ -69,6 +69,9 @@ export interface SessionDeps {
    *  bridge consumers (`rankWithRetrievalStack` / `runLocalizeHybrid` /
    *  future hybrid_localize tool) do. */
   retrievalStack?: AgentConfig["retrievalStack"]
+  /** Wave-A admissibility bundle (reviewer/rules/store bridge). Absent ⇒
+   *  dispatch passes no extra gate options (byte-identical legacy). */
+  admissibility?: AgentConfig["admissibility"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -128,6 +131,7 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.skillsConfig ? { skills: d.skillsConfig } : {}),
   ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
   ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
+  ...(d.admissibility !== undefined ? { admissibility: d.admissibility } : {}),
   ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
   ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
   ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),

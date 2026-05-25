@@ -33,13 +33,23 @@ export interface ForkedSessionHandle {
   readonly messages: ReadonlyArray<Message>
 }
 
-/** Closed 4-arm error union. Adding a code requires updating every consumer
- *  switch (compile error on the missing arm). */
+/** Closed error union. Adding a code requires updating every consumer
+ *  switch (compile error on the missing arm).
+ *
+ *  ADR-0226 extension: 4 new arms (`fork-not-configured` / `aborted` /
+ *  `invalid-branch-name` / `shadow-odb-failed`) added for the
+ *  ForkSessionPort layer (richer port that wraps the original
+ *  SessionForker). All 4 codes are typed errors — NO throws past the
+ *  port surface. */
 export type ForkError =
   | { readonly code: "checkpoint-not-found"; readonly message: string }
   | { readonly code: "store-full"; readonly message: string }
   | { readonly code: "lineage-cycle"; readonly message: string }
   | { readonly code: "duplicate-id"; readonly message: string }
+  | { readonly code: "fork-not-configured"; readonly message: string }
+  | { readonly code: "aborted"; readonly message: string }
+  | { readonly code: "invalid-branch-name"; readonly message: string }
+  | { readonly code: "shadow-odb-failed"; readonly message: string }
 
 /** Canonical literal tuple — feeds runtime guards and tests so the union does
  *  not silently drift from the type. */
@@ -48,4 +58,8 @@ export const ALL_FORK_ERROR_CODES = [
   "store-full",
   "lineage-cycle",
   "duplicate-id",
+  "fork-not-configured",
+  "aborted",
+  "invalid-branch-name",
+  "shadow-odb-failed",
 ] as const

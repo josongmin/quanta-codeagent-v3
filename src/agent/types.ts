@@ -4,12 +4,20 @@ import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } f
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
 import type {
+  DenialMemory,
+  LearningSource,
   PatternGrantStore,
+  PendingPermission,
   PermissionContext,
+  PermissionStore,
+  ReviewerPort,
+  ReviewerTier,
+  ReviewKind,
   ToolAction,
   TrustScopeRegistry,
 } from "@/permission"
 import type { CommitEmbedder, EmbeddingPort, RerankPort, RerankRegistry } from "@/retrieval"
+import type { RulesStore } from "@/rules"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"
@@ -17,6 +25,7 @@ import type { ShadowOdb } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
 import type { WebSearchProvider } from "@/tool/web"
+import type { AutoBackgroundConfig } from "./auto-background"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { BudgetLedger } from "./budget-ledger"
@@ -413,9 +422,9 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *   3. per-host mode (`hostId`, defaults to `resolveHostId()`) decides next;
    *   4. fall through to the legacy mode-policy.
    *
-   * The store is the process singleton unless tests inject one via the
-   * `store` option (handled inside the `admissibility-gate` wrapper, not
-   * here, to keep this config type IO-free).
+   * The store is the process singleton unless the composition root injects
+   * `admissibility.permissionStore`; the gate falls back only when that
+   * nested slot is absent (kept for backward compatibility).
    */
   permissionStack?: { enabled?: boolean; hostId?: string }
   /**
@@ -431,6 +440,31 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * Absent/false ⇒ dangerous actions ALWAYS go through the reviewer.
    */
   permissionAllowDangerous?: boolean
+  /**
+   * Wave-A admissibility bundle (ADR-0029/0031/0046/0061). Groups the
+   * optional reviewer / rule-store / injected permission-store knobs under
+   * ONE slot so new gate options do not keep expanding the top-level config.
+   * Absent ⇒ dispatch passes no Wave-A overrides and the gate stays on its
+   * legacy path (byte-identical).
+   */
+  admissibility?: {
+    permissionStore?: PermissionStore
+    rulesStore?: RulesStore
+    noMatchPolicy?: "deny" | "fallthrough"
+    reviewerPort?: ReviewerPort
+    defaultReviewer?: ReviewerTier
+    priorDenials?: ReadonlyArray<DenialMemory>
+    decidedAt?: () => number
+    pendingPermissions?: ReadonlyArray<PendingPermission>
+    onPatternCascade?: (info: {
+      grantedPatterns: readonly string[]
+      cascadedToolCallIds: readonly string[]
+      learningSource: LearningSource
+      suggestedAllowlistEntry: string | null
+    }) => void
+    allowlistEscalated?: Set<string>
+    reviewKindOverride?: ReviewKind
+  }
   /**
    * Plan-exit port (ADR-0062). Host-supplied I/O seam that surfaces a plan
    * and returns a {@link PlanExitOutcome}. Absent ⇒ plan-exit flow never
@@ -557,6 +591,24 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * the other.
    */
   subagentBackground?: { readonly scheduler: BackgroundSubagentScheduler }
+  /**
+   * ADR-0223 auto-background after 2 s — Claude Code UX absorption. When set,
+   * dispatch wraps each tool `execute()` with two-line `tickToolStart` /
+   * `tickToolEnd` calls into `autoBackground.detector` so a host poll can ask
+   * "is this call past the threshold?" and (via `autoBackground.proposer`)
+   * surface a one-shot "move to background?" prompt. Pair with
+   * {@link subagentBackground} so the prompt's "yes" path actually has a
+   * detached scheduler to fork into — this slot is the OBSERVER; that slot
+   * is the EXECUTOR.
+   *
+   * Default-OFF byte-identical (RFC §1.2): when this slot OR its
+   * `detector` field is absent, the two-line wiring in dispatch.ts becomes
+   * an optional-chain no-op (zero allocation, zero behaviour delta). The
+   * proposer is independently optional — a host may wire only the detector
+   * (and render its own status-bar nudge from `isStuck`) without paying for
+   * the once-per-id Map in the proposer.
+   */
+  autoBackground?: AutoBackgroundConfig
   /**
    * ADR-0201 fork-session slot. When set, `buildForkSessionBlock` registers
    * the `fork_session` tool wired to this forker. Absent ⇒ tool NOT registered

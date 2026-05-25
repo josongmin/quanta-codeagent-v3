@@ -18,10 +18,8 @@ const ESC = "\x1b["
 const SAVE_CURSOR = `${ESC}s`
 const RESTORE_CURSOR = `${ESC}u`
 const ERASE_LINE = `${ESC}2K`
-const BG_DIM = `${ESC}48;5;236m`
 const FG_DIM = `${ESC}2m`
 const FG_RESET = `${ESC}22;39m`
-const BG_RESET = `${ESC}49m`
 
 const termRows = (): number => {
   const r = process.stderr.rows
@@ -65,13 +63,20 @@ export const installStatusBar = (initialText: string): StatusBar => {
   const paintRow = (text: string): void => {
     const rows = termRows()
     const cols = termCols()
-    const display = text.length > cols ? text.slice(0, cols) : text
-    const pad = " ".repeat(Math.max(0, cols - display.length))
+    // Reserve 1 col for the leading space inside the painted band, so the
+    // total visible width is exactly `cols`. Writing `cols + 1` visible chars
+    // on a `cols`-wide row triggers DECAWM auto-wrap from the bottom row
+    // (outside the scroll region) → whole screen scrolls up by one line per
+    // paint, leaving the previous status line as a ghost in the scroll
+    // region. Capping display at `cols - 1` keeps the cursor in-row.
+    const maxDisplay = Math.max(0, cols - 1)
+    const display = text.length > maxDisplay ? text.slice(0, maxDisplay) : text
+    const pad = " ".repeat(Math.max(0, maxDisplay - display.length))
     process.stderr.write(
       SAVE_CURSOR +
         `${ESC}${rows};1H` +
         ERASE_LINE +
-        `${BG_DIM}${FG_DIM} ${display}${pad}${FG_RESET}${BG_RESET}` +
+        `${FG_DIM} ${display}${pad}${FG_RESET}` +
         RESTORE_CURSOR,
     )
     currentText = text

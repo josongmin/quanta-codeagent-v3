@@ -102,9 +102,8 @@ const BOX = {
     v: "│",
 };
 /** Render a rounded box. Multi-line content + ANSI colours supported.
- *  When `footer` is provided, a thin separator + dim footer line is
- *  drawn just above the bottom border — useful for small "meta" hints
- *  like "ADR-0094 Phase 1". */
+ *  When `footer` is provided, a dim footer line is drawn just above the
+ *  bottom border — useful for small "meta" hints like "ADR-0094 Phase 1". */
 export const renderBox = (lines, opts = {}) => {
     const padX = opts.padX ?? 2;
     const minInner = opts.minInner ?? 56;
@@ -130,7 +129,6 @@ export const renderBox = (lines, opts = {}) => {
     const body = lines.map((l) => renderRow(l, inner, padX, bStyle));
     const footerLines = [];
     if (opts.footer) {
-        footerLines.push(bStyle(BOX.v) + " ".repeat(padX) + dim(BOX.h.repeat(inner)) + " ".repeat(padX) + bStyle(BOX.v));
         footerLines.push(renderRow(fStyle(opts.footer), inner, padX, bStyle));
     }
     const bottom = bStyle(BOX.bl + BOX.h.repeat(totalW) + BOX.br);

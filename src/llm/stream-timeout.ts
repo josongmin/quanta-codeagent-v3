@@ -51,6 +51,12 @@ export interface StreamTimeoutOptions {
   /** Injectable for deterministic tests. Defaults to real timers. */
   readonly setTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>
   readonly clearTimer?: (handle: ReturnType<typeof setTimeout>) => void
+  /** ADR-0227 hook: invoked on EVERY yielded chunk (not on `done`, not
+   *  on timeout). The spinner-stall detector consumes this to bump its
+   *  per-correlation `lastEventMs`. Best-effort — exceptions are
+   *  swallowed so a faulty detector NEVER breaks the stream. Omitted ⇒
+   *  byte-identical to pre-slice behaviour. */
+  readonly onChunk?: () => void
 }
 
 /** Defaults (also the env-knob baseline). Exported so tests + adapter
@@ -121,6 +127,20 @@ const abortHandle = (handle: StreamTimeoutAbortHandle | null, reason?: unknown):
   }
 }
 
+/** ADR-0227: invoke the optional onChunk hook, swallowing any error so a
+ *  faulty spinner-stall detector never poisons the live stream. Extracted
+ *  as a top-level helper to keep the iterator body within the biome
+ *  complexity cap. */
+const notifyChunkArrival = (onChunk: (() => void) | undefined): void => {
+  if (onChunk === undefined) return
+  try {
+    onChunk()
+  } catch {
+    // Intentionally silent — detector book-keeping must never break the
+    // producer.
+  }
+}
+
 const buildWrappedStream = <T>(
   raw: AsyncIterable<T>,
   opts: StreamTimeoutOptions,
@@ -183,6 +203,8 @@ const buildWrappedStream = <T>(
             return
           }
           isFirst = false
+          // ADR-0227: spinner-stall detector tick on every yielded chunk.
+          notifyChunkArrival(opts.onChunk)
           yield r.value
         }
       } finally {

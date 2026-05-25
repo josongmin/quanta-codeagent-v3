@@ -252,6 +252,33 @@ const prependCapReminder = (out: DispatchResult, reminder: string): DispatchResu
   },
 })
 
+/** ADR-0223 wrap: `execute(...)` bracketed by stuck-detector ticks so the
+ *  auto-background slice can poll "is this tool past the 2s threshold?" without
+ *  any per-call timer. Extracted to keep `dispatchToolInner` under biome's
+ *  cognitive-complexity cap. Default-OFF byte-identical: when
+ *  `config.autoBackground?.detector` is absent, both `tick*` calls short-
+ *  circuit at the optional chain (zero allocation). The `tickToolEnd` runs
+ *  from a `finally` so a throwing `execute()` (the outer dispatch catch
+ *  normalizes throws to a deny-style result) still drops the tracker entry —
+ *  no memory leak across thrown calls. */
+const executeWithStuckTracking = async (
+  effectiveCall: ToolUseBlock,
+  config: AgentConfig,
+  ctx: ToolContext,
+  onProgress?: (message: string) => void,
+): Promise<DispatchResult> => {
+  const detector = config.autoBackground?.detector
+  detector?.tickToolStart({
+    toolCallId: effectiveCall.id,
+    toolName: effectiveCall.name,
+  })
+  try {
+    return await execute(effectiveCall, config, ctx, onProgress)
+  } finally {
+    detector?.tickToolEnd({ toolCallId: effectiveCall.id })
+  }
+}
+
 /** Span-free dispatch body (extracted so the outer wrap keeps a single
  *  control flow). Identical logic to the pre-span path. */
 const dispatchToolInner = async (
@@ -335,6 +362,7 @@ const dispatchToolInner = async (
   // (`{ value }`) lets a hook legitimately rewrite to a falsy value.
   let rewritten: { value: unknown } | undefined
   const gated = await runAdmissibilityGate(call, config, permission, action, autoClassifier, {
+    ...(config.admissibility ?? {}),
     onInputMutation: (next) => {
       rewritten = { value: next }
     },
@@ -415,7 +443,11 @@ const dispatchToolInner = async (
       message: capReminder,
     })
   }
-  const out = await execute(effectiveCall, config, ctx, onProgress)
+  // ADR-0223 — stuck-detector ticked execute(). Default-OFF byte-identical
+  // when `config.autoBackground?.detector` is absent (optional chain short-
+  // circuits before allocation; finally runs unconditionally so a throwing
+  // `execute()` cannot leak a tracker entry).
+  const out = await executeWithStuckTracking(effectiveCall, config, ctx, onProgress)
   // When a reminder was generated, prepend it as a `<system-reminder>` block
   // in the tool result output so the model reads the enforcement hint alongside
   // the tool output. `prependCapReminder` is extracted to keep complexity low.

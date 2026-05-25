@@ -1,0 +1,64 @@
+/**
+ * ADR-0221 — Built-in emitters (no-op default + stdout/sink default).
+ *
+ * Two adapters:
+ *
+ *   - `noopEmitter` — default-OFF byte-identical. `emit()` always returns
+ *     `ok(undefined)` and produces zero side effects. Used wherever a host
+ *     has not opted in (HELL-DE-07 pins zero stdout/stderr writes).
+ *
+ *   - `defaultEmitter(sink?)` — phase-guarded, canonical serializer +
+ *     `sink.write(line + "\n")`. Defaults to `process.stdout` because the
+ *     codex protocol emits directives in the final-answer stream (UI
+ *     consumers grep `^::git-`). Hosts that need stderr framing inject
+ *     `process.stderr`. Either way, the phase guard runs FIRST — wrong-phase
+ *     emit returns a typed error and the sink is never touched.
+ *
+ * Directive validation (shape sanity) runs inside `emit()` so a malformed
+ * caller-constructed directive is rejected before serialization, not after
+ * the sink has been written to.
+ */
+
+import { err, ok, type Result } from "@/shared"
+import { checkPhase } from "./phase-guard"
+import type { DirectiveEmitterPort, EmitContext } from "./port"
+import { serialize } from "./serializer"
+import type { EmitError, GitDirective } from "./types"
+import { validateDirective } from "./validate"
+
+/** Default-OFF emitter: every call is ok-noop. */
+export const noopEmitter: DirectiveEmitterPort = {
+  emit(): Result<void, EmitError> {
+    return ok(undefined)
+  },
+}
+
+/** A minimal write target. `process.stdout` / `process.stderr` both match. */
+export interface DirectiveSink {
+  write(chunk: string): boolean
+}
+
+/**
+ * Build an emitter that serializes + writes to `sink` (default `process.stdout`).
+ * Runs the phase guard first; wrong-phase emit returns typed error and never
+ * touches the sink. Wrong-shape directive likewise short-circuits.
+ */
+export const defaultEmitter = (sink: DirectiveSink = process.stdout): DirectiveEmitterPort => ({
+  emit(directive: GitDirective, ctx: EmitContext): Result<void, EmitError> {
+    const phaseGate = checkPhase(ctx.phase)
+    if (!phaseGate.ok) return phaseGate
+    const shapeGate = validateDirective(directive)
+    if (!shapeGate.ok) return shapeGate
+    try {
+      sink.write(`${serialize(directive)}\n`)
+      return ok(undefined)
+    } catch (e) {
+      // Sinks SHOULD not throw, but if they do (closed fd, EPIPE), surface
+      // as typed error rather than propagating — no-throw public surface.
+      return err({
+        kind: "invalid-directive",
+        reason: e instanceof Error ? e.message : String(e),
+      })
+    }
+  },
+})

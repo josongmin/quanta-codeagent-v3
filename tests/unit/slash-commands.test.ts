@@ -99,6 +99,15 @@ describe("BUILTINS table", () => {
       "/working-state",
       "/history",
       "/branches",
+      // Sibling appends — order matches the BUILTINS literal in
+      // `slash-commands.ts`. ADR-0224 web/paste + ADR-0225 edit-plan/
+      // edit-message land between fork-checkpoint and queue.
+      "/fork-checkpoint",
+      "/queue",
+      "/web",
+      "/paste",
+      "/edit-plan",
+      "/edit-message",
     ])
   })
 })

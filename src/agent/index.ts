@@ -174,6 +174,7 @@ export {
   type RepoRules,
   renderRepoRulesBlock,
 } from "./repo-rules"
+export { createOnConfirmReviewerPort, type OnConfirmReviewerPortOptions } from "./reviewer-port"
 export {
   DEFAULT_SAMPLES as REPRO_TEST_DEFAULT_SAMPLES,
   DEFAULT_TIMEOUT_MS as REPRO_TEST_DEFAULT_TIMEOUT_MS,

@@ -198,15 +198,20 @@ describe("renderBox", () => {
     expect(stripAnsi(topLine).length).toBe(62)
   })
 
-  test("footer adds separator + dim footer line", () => {
+  test("footer renders just above the bottom border (no extra separator)", () => {
     setColorPolicy("off")
     const out = renderBox(["body"], { footer: "meta" })
     const lines = out.split("\n")
-    // Body line, then separator (───), then footer line, then bottom border.
-    const hasSeparator = lines.some((l) => l.includes("──"))
-    const hasFooter = lines.some((l) => l.includes("meta"))
-    expect(hasSeparator).toBe(true)
-    expect(hasFooter).toBe(true)
+    // Order: top border, body, footer, bottom border. No interior separator
+    // line — the dim "──" stripe used to render as a near-black bar in dark
+    // terminal themes, so it was removed in favour of resting the footer
+    // text directly above the bottom border.
+    const bodyIdx = lines.findIndex((l) => l.includes("body"))
+    const footerIdx = lines.findIndex((l) => l.includes("meta"))
+    const bottomIdx = lines.findIndex((l) => l.includes("╰"))
+    expect(bodyIdx).toBeGreaterThan(0)
+    expect(footerIdx).toBe(bodyIdx + 1)
+    expect(bottomIdx).toBe(footerIdx + 1)
   })
 
   test("title wider than minInner widens the box (no clipping)", () => {

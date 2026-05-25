@@ -33,7 +33,12 @@ import { dirname, join } from "node:path"
 import type { Plan } from "@/agent/plan/types"
 import { runtimeConfig } from "@/shared"
 import { formatBranchesPanel } from "./branch-search-progress"
+import { editMessageCmd } from "./edit-message-cmd"
+import { editPlanCmd } from "./edit-plan-cmd"
 import { runHelpRender } from "./help-render"
+import { forkCheckpointCmd } from "./fork-checkpoint-cmd"
+import { pasteCmd } from "./paste-cmd"
+import { webCmd } from "./web-cmd"
 // R10 panels (history exports its own cmd; the rest are defined below
 // because their bodies live next to their renderers in the same slice).
 import { historyCmd } from "./history-cmd"
@@ -45,6 +50,7 @@ import { mcpCmd } from "./mcp-cmd"
 import { isMemorySlashEnabled, memoryCmd } from "./memory-cmd"
 import { permissionCmd } from "./permission-explain"
 import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "./plan-panel"
+import { queueCmd } from "./queue-cmd"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { rewindToolCmd } from "./rewind-tool-cmd"
@@ -642,6 +648,18 @@ export const BUILTINS: readonly SlashCommand[] = [
   workingStateCmd,
   historyCmd,
   branchesCmd,
+  forkCheckpointCmd,
+  // ADR-0221 — Queued follow-up per-msg manage (Codex composer parity).
+  // Slot pinned by `slash-commands.test.ts` (immediately after
+  // `/fork-checkpoint`, before the W2-5 web/paste/edit cluster). No
+  // collision with `/rewind-tool`, `/fork`, or that cluster.
+  queueCmd,
+  // ADR-0224 — Aider `/web` + `/paste` (text-inbox attached to next turn).
+  webCmd,
+  pasteCmd,
+  // ADR-0225 — Claude Code `tengu_external_editor` (mid-edit via $EDITOR).
+  editPlanCmd,
+  editMessageCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(
