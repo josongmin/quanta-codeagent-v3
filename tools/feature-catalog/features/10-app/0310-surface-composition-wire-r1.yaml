@@ -68,7 +68,7 @@ evidence:
     - src/apps/cli/repl/prompt-pipeline.ts
     - src/apps/cli/repl.ts
   adrs:
-    - docs/decisions/0299-surface-composition-wire-r1.md
+    - docs/decisions/0310-surface-composition-wire-r1.md
   tests:
     unit:
       - tests/unit/cli/repl-surface-wire-hellgate.test.ts

@@ -113,7 +113,7 @@ const buildReplaySlashState = (): ReplaySlashState => ({
   },
 })
 
-/** ADR-0299/0294 — session-io adapter for `/session export|import`. Default
+/** ADR-0310/0294 — session-io adapter for `/session export|import`. Default
  *  adapter delegates to the existing `loadSessionById`/`saveSessionById`
  *  primitives (id-addressable V2 store). Every method is no-throw on the
  *  public surface — read failure surfaces as `null`; write failures bubble
@@ -149,7 +149,7 @@ const buildDefaultSessionIo = (): SessionIoState => ({
   mintNewId: (): string => crypto.randomUUID(),
 })
 
-/** ADR-0299 — bundle of REPL-side wires constructed once per session. The
+/** ADR-0310 — bundle of REPL-side wires constructed once per session. The
  *  surface (`runRepl`) keeps the references alive so the loop can:
  *    - record turn snapshots into `convWire` (ADR-0292 turn-end auto-record),
  *    - attach the playbook-trigger handle into `playbookSeam` once the

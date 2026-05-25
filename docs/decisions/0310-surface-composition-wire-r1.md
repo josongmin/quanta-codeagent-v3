@@ -1,4 +1,4 @@
-# ADR-0299 — REPL surface composition wire (R1 — ADR-0291/0292/0293/0294)
+# ADR-0310 — REPL surface composition wire (R1 — ADR-0291/0292/0293/0294)
 
 ## Status
 
@@ -46,7 +46,7 @@ bundle that exposes:
   `SlashContext` (legacy + ADR-0291 + ADR-0292 + ADR-0294 slots), so
   `convCheckpoint` and `sessionIo` actually reach `runSlashCommand`.
 
-### Env knob → upstream port (ADR-0299/0291)
+### Env knob → upstream port (ADR-0310/0291)
 
 - `QUANTA_TOOL_PROFILE=<write|ask|minimal|code-only>` → builds
   `AgentConfig.toolProfile` block via `defaultToolProfileResolver()`.

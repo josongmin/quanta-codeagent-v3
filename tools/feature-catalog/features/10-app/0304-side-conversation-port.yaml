@@ -1,0 +1,43 @@
+id: side-conversation-port
+title: SideConversationPort — CLI engine-internal leak closure (CLI-02)
+section: 10
+subsystem: REPL surface composition
+order: 76
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:2", "adr-0304", "refactor"]
+depends_on:
+  - repl-slash-ctx-mega-wire
+purpose: |
+  Closes the engine-internal leak in the CLI slash-surface where
+  `buildReplSlashCtx` imported `assembleConfig` + `SessionDeps` from
+  `@/apps/cli/internal` to wire the `/side` slash. Introduces a typed
+  `SideConversationPort` injected from the host bootstrap; the slash-
+  surface consumes only the port (no engine internals). Pure rename
+  + DI swap — `runSideChat` (`src/runner/orchestrate/side-chat.ts`)
+  unchanged.
+evidence:
+  code:
+    - src/apps/cli/repl/side-conv-wire.ts
+    - src/apps/cli/repl/slash-surface.ts
+    - src/apps/cli/repl/surface-compose.ts
+    - src/runner/orchestrate/side-chat.ts
+  adrs:
+    - docs/decisions/0304-side-conversation-port.md
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion of ADR-0299 (CLI-01) and ADR-0303 (thin-surface). Each port
+  extraction shrinks the cross-surface import count counted by the
+  ratchet test.

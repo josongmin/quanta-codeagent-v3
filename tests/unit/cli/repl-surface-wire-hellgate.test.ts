@@ -1,5 +1,5 @@
 /**
- * Hellgate — ADR-0299 REPL surface composition wire.
+ * Hellgate — ADR-0310 REPL surface composition wire.
  *
  * Pins the 4 wire families (ADR-0291/0292/0293/0294) end-to-end through
  * `composeSurfaceWires` + `composeSurfaceDispatch`:
@@ -139,7 +139,7 @@ const resolveFocusChainFromEnv = (env: NodeJS.ProcessEnv) => {
 /* Tests                                                                */
 /* ------------------------------------------------------------------ */
 
-describe("ADR-0299 — surface composition wire", () => {
+describe("ADR-0310 — surface composition wire", () => {
   test("HELL-WIRE-01 — convCheckpoint env absent ⇒ wire null + slot omitted", () => {
     const env: NodeJS.ProcessEnv = {}
     const wireActive = env.QUANTA_CHECKPOINT_CONV === "on"
