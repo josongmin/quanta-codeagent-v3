@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/style/noRestrictedImports: cross-slice e2e hellgate — `debug-tracer` is the production surface adapter under audit; `@/apps/cli/*` has no public alias (intentional); verbatim source path is the documented escape-hatch for surface-integration test tier. */
 /**
  * Cross-slice integration hellgate — decision-emit → TeeStream → debug-tracer → stderr.
  *
@@ -153,7 +154,7 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     expect(ln).toContain("tc_perm_allow")
   })
 
-  test("case-02: permission deny path → stderr line contains permission=deny", async () => {
+  test("case-02: permission ask path → exactly 1 stderr line; permission=ask outcome pinned", async () => {
     const write = makeTool("write")
     const cap = captureStderr()
     const tracer = createDebugTracer({ write: cap.write, color: false, now: () => 1717000000000 })
@@ -167,12 +168,18 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     const u = callOf("write", {}, "tc_perm_ask")
     const res = await runAdmissibilityGate(u, cfg, cfg.permission, actionOf(write))
     expect(res).not.toBe(null)
-    // ask outcome surfaced by mode-policy emit site (then the gate returns the
-    // ask-branch deny via the absent onConfirm).
-    expect(cap.lines.length).toBeGreaterThanOrEqual(1)
-    const joined = cap.lines.join("\n")
-    expect(joined).toContain("permission=ask")
-    expect(joined).toContain("tc_perm_ask")
+    // EXACT count: the mode-policy emit site is the only one that fires on
+    // the ask-no-onConfirm path. A future regression that double-emits
+    // (e.g. emitting both `ask` AND a synthesized `deny` for the same call)
+    // would surface as a count-2 here and trip this assertion.
+    expect(cap.lines).toHaveLength(1)
+    const ln = cap.lines[0] ?? ""
+    expect(ln).toContain("decision")
+    expect(ln).toContain("permission=ask")
+    expect(ln).toContain("tc_perm_ask")
+    // ORTHOGONAL outcome — no `allow`/`deny` segment on the SAME line.
+    expect(ln).not.toContain("permission=allow")
+    expect(ln).not.toContain("permission=deny")
   })
 
   test("case-03: rule deny path → ruleId appears in stderr line", async () => {
@@ -205,7 +212,7 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     expect(ln).toContain("tc_rule_deny")
   })
 
-  test("case-04: hook deny path → hookName='pre_tool_use' appears", async () => {
+  test("case-04: hook deny path → EXACTLY 2 stderr lines in correct order (permission allow → hook deny)", async () => {
     const read = makeTool("read", { readOnly: true })
     const hooks = new HookBus()
     hooks.on("pre_tool_use", () => ({ deny: "blocked by hook" }))
@@ -220,13 +227,21 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     const u = callOf("read", {}, "tc_hook_deny")
     const res = await runAdmissibilityGate(u, cfg, cfg.permission, actionOf(read))
     expect(res).not.toBe(null)
-    // permission allow + hook deny ⇒ 2 stderr lines.
-    expect(cap.lines.length).toBeGreaterThanOrEqual(1)
-    const joined = cap.lines.join("\n")
-    expect(joined).toContain("hook=deny")
-    expect(joined).toContain("hook=pre_tool_use")
-    expect(joined).toContain("blocked by hook")
-    expect(joined).toContain("tc_hook_deny")
+    // EXACT count + ORDER — permission allow emits FIRST, then hook deny.
+    // The gate runs permission → rules → hooks; permission allows the
+    // read (read-only default-allow), then the hook denies.
+    expect(cap.lines).toHaveLength(2)
+    expect(cap.lines[0]).toContain("permission=allow")
+    expect(cap.lines[0]).toContain("tc_hook_deny")
+    expect(cap.lines[1]).toContain("hook=deny")
+    expect(cap.lines[1]).toContain("hook=pre_tool_use")
+    expect(cap.lines[1]).toContain("blocked by hook")
+    expect(cap.lines[1]).toContain("tc_hook_deny")
+    // CROSS — no `hook=` segment on the permission line, no `permission=` on
+    // the hook line (verifies the formatter doesn't accidentally fan
+    // metadata across decision rows).
+    expect(cap.lines[0]).not.toContain("hook=deny")
+    expect(cap.lines[1]).not.toContain("permission=allow")
   })
 
   // ── Category-filter cases ──────────────────────────────────────────────
@@ -280,7 +295,7 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
 
   // ── Sanitisation case ───────────────────────────────────────────────────
 
-  test("case-07: metadata in tracer line is truncated to ≤100 chars (sanitize)", async () => {
+  test("case-07: metadata is truncated AND a verbatim secret-shape value cannot leak verbatim", async () => {
     // Build a recording StreamPort that DOES route through the tee → tracer,
     // but feed a synthetic `decision` AgentEvent carrying a large metadata
     // bag (simulating a poorly-sanitised emit site). The tracer must
@@ -289,6 +304,11 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     const tracer = createDebugTracer({ write: cap.write, color: false, now: () => 1717000000000 })
     const tee = new TeeStream([tracerAsStream(tracer)])
     const huge = "X".repeat(500)
+    // SECRET-SHAPE VALUE — must NOT appear verbatim in stderr (would surface
+    // a key leak under live `QUANTA_DEBUG=1`). We don't expect the tracer to
+    // recognise this string as a secret (sanitisation is the emit site's
+    // job), but we DO expect truncation to bound how much leaks.
+    const secret = "sk-test-VERYSECRET-PAYLOAD-MUST-NOT-LEAK-IN-DEBUG-CHANNEL"
     const ev: DecisionEvent = {
       type: "decision",
       kind: "permission",
@@ -296,7 +316,7 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
       turn: 0,
       reason: "mode='default' allow",
       toolCallId: "tc_md_trunc",
-      metadata: { tool: "read", big: huge },
+      metadata: { tool: "read", big: huge, password: secret },
     }
     tee.emit(ev)
     expect(cap.lines).toHaveLength(1)
@@ -308,8 +328,15 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     // The tracer truncates with a hard 100-char cap (TRUNC constant). Allow
     // a little slack for the trailing "…" marker.
     expect(mdBody.length).toBeLessThanOrEqual(102)
+    // Truncation marker must be present (Unicode … sentinel) — proves
+    // truncation actually fired, not that the string happened to be short.
+    expect(mdBody.endsWith("…")).toBe(true)
     // The full 500-X payload MUST NOT be present.
     expect(ln).not.toContain("X".repeat(120))
+    // BYTE-LEVEL secret invariant — the verbatim secret value must NOT
+    // appear in any tracer line (the secret is past the 100-char cap, so
+    // truncation alone is enough; this asserts the property explicitly).
+    expect(ln).not.toContain(secret)
   })
 
   // ── Isolation cases ─────────────────────────────────────────────────────
@@ -365,10 +392,21 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     })
   })
 
-  test("case-10: 10 concurrent gate runs → 10 stderr lines, IDs preserved", async () => {
+  test("case-10: 10 concurrent gate runs → exactly 10 stderr lines; every id appears exactly once", async () => {
     const read = makeTool("read", { readOnly: true })
     const cap = captureStderr()
-    const tracer = createDebugTracer({ write: cap.write, color: false, now: () => 1717000000000 })
+    // Use a MONOTONIC clock so the wall-clock column is deterministic — each
+    // line carries a distinct timestamp. This lets us assert the tracer is
+    // emitting in CALL-AWAITED order (not silently dropping or deduping).
+    let tick = 1717000000000
+    const tracer = createDebugTracer({
+      write: cap.write,
+      color: false,
+      now: () => {
+        tick += 1
+        return tick
+      },
+    })
     const tee = new TeeStream([tracerAsStream(tracer)])
     const cfg = cfgOf({
       registry: new ToolRegistry([read]),
@@ -381,20 +419,27 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
       ),
     )
     expect(cap.lines).toHaveLength(10)
-    // Every id appears exactly once.
+    // Every id appears EXACTLY once — no duplicate emits across concurrency.
     for (const id of ids) {
       const hits = cap.lines.filter((l) => l.includes(id))
       expect(hits.length).toBe(1)
     }
+    // Every line starts with the wall-clock column the tracer emits — proves
+    // the formatter ran ten times, no fall-through to the empty-line
+    // catch-arm.
+    for (const ln of cap.lines) expect(ln).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3}\s/)
+    // CARDINALITY — outcomes are uniform (`permission=allow`). A regression
+    // that fans extra `permission=ask` lines would surface here as >10.
+    expect(cap.lines.filter((l) => l.includes("permission=allow")).length).toBe(10)
   })
 
   // ── Non-TTY tracer still lets other consumers run ───────────────────────
 
-  test("case-11: non-TTY/disabled tracer ⇒ tee still forwards to other consumers", async () => {
+  test("case-11: EPIPE-throwing peer in tee ⇒ second sink still receives + tee degraded count rises", async () => {
     const read = makeTool("read", { readOnly: true })
-    // Build a tracer with a write sink that throws (simulating EPIPE / closed
-    // pipe). The tracer's own catch turns this into a "debug_error" line.
-    // The second sink still receives the event.
+    // Build a tracer-shaped sink whose `emit` throws (simulating EPIPE / closed
+    // pipe). The tee's strict=false mode swallows the throw and accumulates
+    // a degraded-counter entry. The second sink still receives the event.
     const rec = recordingStream()
     const drop: StreamPort = {
       emit: () => {
@@ -407,14 +452,54 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
       decisionEmitter: decisionEmitterFromStream(tee),
     })
     const u = callOf("read", {}, "tc_nontty")
-    await runAdmissibilityGate(u, cfg, cfg.permission, actionOf(read))
+    const res = await runAdmissibilityGate(u, cfg, cfg.permission, actionOf(read))
+    // Gate result is unaffected — the peer throw is swallowed.
+    expect(res).toBe(null)
     // Second consumer received the event.
-    expect(rec.events.find((e) => e.type === "decision")).toBeDefined()
+    const dec = rec.events.find((e) => e.type === "decision") as DecisionEvent | undefined
+    expect(dec).toBeDefined()
+    expect(dec?.toolCallId).toBe("tc_nontty")
+    // Tee tracks the degradation — observable post-condition.
+    expect(tee.degraded().length).toBeGreaterThanOrEqual(1)
+  })
+
+  // ── Categories no-op + non-TTY default propagation ──────────────────────
+
+  test("case-12: tracer category filter excluding 'decisions' ⇒ zero stderr lines; other consumers still see decision", async () => {
+    // INVARIANT: when the tracer's `categories` set DOES NOT include
+    // "decisions", a real decision event must produce ZERO tracer output AND
+    // the same tee's second consumer still receives the event. This is the
+    // "non-TTY tracer no-op" equivalent expressed via the tracer's actual
+    // category-filter knob — the env-boot parser (`parseDebugEnv`) sets the
+    // exact same set, so this case proves the production wiring path.
+    const read = makeTool("read", { readOnly: true })
+    const cap = captureStderr()
+    const rec = recordingStream()
+    const cats: ReadonlySet<DebugCategory> = new Set<DebugCategory>(["tools"]) // decisions excluded
+    const tracer = createDebugTracer({
+      write: cap.write,
+      color: false,
+      now: () => 1717000000000,
+      categories: cats,
+    })
+    const tee = new TeeStream([tracerAsStream(tracer), rec.port])
+    const cfg = cfgOf({
+      registry: new ToolRegistry([read]),
+      decisionEmitter: decisionEmitterFromStream(tee),
+    })
+    const u = callOf("read", {}, "tc_no_op")
+    await runAdmissibilityGate(u, cfg, cfg.permission, actionOf(read))
+    // Tracer DROPPED the event — zero stderr lines (the no-op invariant).
+    expect(cap.lines).toHaveLength(0)
+    // Recorder still saw the event — the filter is local to the tracer, the
+    // tee's other consumers are unaffected.
+    const dec = rec.events.find((e) => e.type === "decision")
+    expect(dec).toBeDefined()
   })
 
   // ── Envelope round-trip + dual-consumer ─────────────────────────────────
 
-  test("case-12: envelope round-trip — tracer + recorder both see decision; schema validates", async () => {
+  test("case-13: envelope round-trip — tracer + recorder both see decision; schema validates", async () => {
     const read = makeTool("read", { readOnly: true })
     const cap = captureStderr()
     const tracer = createDebugTracer({ write: cap.write, color: false, now: () => 1717000000000 })

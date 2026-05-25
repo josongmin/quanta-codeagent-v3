@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/style/noRestrictedImports: cross-slice e2e hellgate — `slash-commands` + `debug-cmd` are the production surfaces under audit; `@/apps/cli/*` has no public alias (intentional); verbatim source paths match `decision-tracer-e2e-hellgate.test.ts` convention. */
 /**
  * Cross-slice integration hellgate — CLI surface composition for the
  * developer-mode debug slice (Track T / I / R).
@@ -152,10 +153,13 @@ const userMessage = (turn_id: string, content: string, tsOffset = 0): SessionEnv
   content,
 })
 
-// Session fixture with two tool calls. The replay renderer reads
-// `input.toolCallId` from `tool_invoke`, so we plant the id there; the
-// dedicated `decision` envelope (used by /inspect, not by /replay) also
-// carries the id via `tool_call_id`.
+// Session fixture with a known tc_7a in turn "3". The `tool_invoke` envelope
+// carries the tool-call id via the conventional `input.toolCallId` slot — that
+// is the canonical wire shape `replay-cmd.ts` (`renderToolInvoke`,
+// `advanceGate`, `fmtToolInput`) looks at to render `id=tc_7a` and to honour
+// `--from tc_X`. The `decision` envelope's `tool_call_id` is used by
+// `inspect-cmd`'s projector (which groups by id across kinds) and is kept here
+// to exercise that path too — the two ids MUST match per row.
 const SESSION_FIXTURE: readonly SessionEnvelopeRecord[] = [
   turnContext("3"),
   userMessage("3", "where is foo defined?"),
@@ -198,7 +202,7 @@ const fromArray =
 // ─── case 01-02: /debug status + on ───────────────────────────────────────
 
 describe("CLI surface integration — runSlashCommand dispatch", () => {
-  test("case-01: /debug status → leaf prints 'off (categories: all)'; state immutable", async () => {
+  test("case-01: /debug status → leaf prints exact line; state immutable; stderr empty", async () => {
     let currentState: DebugCmdState = { enabled: false }
     const setCalls: DebugCmdState[] = []
     const { ctx, io } = baseCtx({
@@ -212,12 +216,17 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     })
     const code = await runSlashCommand("/debug status", ctx)
     expect(code).toBe(0)
-    expect(io.out.join("")).toContain("debug: off")
+    // PINNED FORMAT — the exact byte sequence emitted by `renderStatus`. A
+    // substring assertion would let a regression that drops " (categories: all)"
+    // slip through the gate.
+    expect(io.out.join("")).toBe("debug: off (categories: all)\n")
     // status MUST NOT call set (handler returns state===prev by reference).
     expect(setCalls.length).toBe(0)
+    // No diagnostics on stderr — `/debug status` is a pure stdout command.
+    expect(io.err.join("")).toBe("")
   })
 
-  test("case-02: /debug on → ctx.debug.set called once with enabled:true", async () => {
+  test("case-02: /debug on → ctx.debug.set called once with enabled:true; exact line", async () => {
     let currentState: DebugCmdState = { enabled: false }
     const setCalls: DebugCmdState[] = []
     const { ctx, io } = baseCtx({
@@ -233,7 +242,10 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     expect(code).toBe(0)
     expect(setCalls.length).toBe(1)
     expect(setCalls[0]?.enabled).toBe(true)
-    expect(io.out.join("")).toContain("debug: on")
+    // No filter set ⇒ "all" categories.
+    expect(setCalls[0]?.categories).toBeUndefined()
+    expect(io.out.join("")).toBe("debug: on (categories: all)\n")
+    expect(io.err.join("")).toBe("")
   })
 
   test("case-03: /debug tools,llm → set called with categories filter", async () => {
@@ -255,16 +267,23 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     const cats = setCalls[0]?.categories
     expect(cats).toBeDefined()
     if (cats !== undefined) {
+      // Cardinality invariant — exactly the requested two cats (no widen, no
+      // silent drop). Other names from KNOWN_CATEGORIES must NOT be present.
+      expect(cats.size).toBe(2)
       expect(cats.has("tools")).toBe(true)
       expect(cats.has("llm")).toBe(true)
       expect(cats.has("decisions")).toBe(false)
+      expect(cats.has("memory")).toBe(false)
+      expect(cats.has("plan")).toBe(false)
     }
-    expect(io.out.join("")).toContain("debug: on")
+    // PINNED FORMAT — `formatCategories` sorts alphabetically, joins on ",".
+    expect(io.out.join("")).toBe("debug: on (categories: llm,tools)\n")
+    expect(io.err.join("")).toBe("")
   })
 
   // ── /inspect cases ─────────────────────────────────────────────────────
 
-  test("case-04: /inspect tc_7a (ctx.inspect wired) → renders multi-section panel", async () => {
+  test("case-04: /inspect tc_7a (ctx.inspect wired) → exact-line panel; stderr empty; tc_7b body absent", async () => {
     const { ctx, io } = baseCtx({
       inspect: {
         sessionId: "sess-1",
@@ -274,17 +293,45 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     const code = await runSlashCommand("/inspect tc_7a", ctx)
     expect(code).toBe(0)
     const text = io.out.join("")
-    // Panel header includes the tool call id.
-    expect(text).toContain("tc_7a")
-    // Sections: input + decisions + result + preview.
-    expect(text).toContain("input")
-    expect(text).toContain("decisions")
-    expect(text).toContain("result")
-    // The matched decision row's reason renders.
-    expect(text).toContain("default-allow")
+    const lines = text.split("\n")
+    // PINNED HEADER — `renderHeader` builds "── tool call <id> ── turn <T> · <dur> · ok ──".
+    // We don't paint colour (color !== true) so the line is plain ASCII.
+    const header = lines.find((l) => l.startsWith("── tool call tc_7a"))
+    expect(header).toBeDefined()
+    expect(header).toContain("── tool call tc_7a ──")
+    expect(header).toContain(" turn 3 ")
+    expect(header).toContain(" ok ")
+    // Section labels appear as `<label>` columns in `renderToolInputLines`
+    // and `renderDecisionLines` — pin the exact prefix shape.
+    expect(text).toContain("  tool       : Read")
+    expect(text).toContain("  input      : ")
+    expect(text).toContain("  decisions:")
+    // Decision row precise prefix — `  · permission · allow  "default-allow"`.
+    // ONLY ONE decision row — the tc_7b decision is keyed off `tool_call_id`
+    // and MUST NOT leak into the tc_7a panel (the decision-projector matches
+    // strictly by id, unlike co-located tool_invokes/results in the same turn).
+    expect(text).toMatch(/permission\s+·\s+allow\s+"default-allow"/)
+    expect(text.match(/permission\s+·\s+allow/g)?.length).toBe(1)
+    // Result row + preview prefix.
+    expect(text).toMatch(/^\s*result\s+:.+Read/m)
+    expect(text).toMatch(/^\s*preview\s+:.+"export const foo = 1"/m)
+    // Panel close-rule — last non-empty line.
+    expect(text).toContain("───────────────────────────────────────────")
+    // DOCUMENTED projector behavior: `tool_invoke` / `tool_result` envelopes
+    // have no on-wire toolCallId field, so the projector co-locates EVERY
+    // tool_invoke/result in the same turn into the matched group (see
+    // `inspect-source.ts` header). That means tc_7b's Edit tool_invoke and
+    // Edit tool_result ARE expected in the tc_7a panel header. We assert the
+    // POSITIVE invariant — both tools' invocations surface as separate rows.
+    expect(text).toContain("  tool       : Edit")
+    // Co-location is keyed on TURN — a turn-4 row would NOT appear. Validate
+    // via the absence of the unrelated decision (tc_xx isn't in the fixture).
+    expect(text).not.toContain("tc_xx")
+    // STDOUT/STDERR separation — /inspect is a stdout-only command.
+    expect(io.err.join("")).toBe("")
   })
 
-  test("case-05: /inspect tc_xx (id not present) → 'not found' + exit 1", async () => {
+  test("case-05: /inspect tc_xx (id not present) → 'not found' + exit 1; exact message", async () => {
     const { ctx, io } = baseCtx({
       inspect: {
         sessionId: "sess-1",
@@ -293,12 +340,17 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     })
     const code = await runSlashCommand("/inspect tc_xx", ctx)
     expect(code).toBe(1)
-    expect(io.out.join("")).toContain("not found")
+    // PINNED — `runInspectCmd` emits `tool call ${id} not found in session ${sessionId}\n`.
+    // The full sentence, not just a substring — a regression that mutates the
+    // wording in either direction must be caught.
+    expect(io.out.join("")).toBe("tool call tc_xx not found in session sess-1\n")
+    // Not-found is a stdout panel, NOT a stderr diagnostic.
+    expect(io.err.join("")).toBe("")
   })
 
   // ── /replay cases ──────────────────────────────────────────────────────
 
-  test("case-06: /replay 01HXY (full session) → renders every event in time order", async () => {
+  test("case-06: /replay 01HXY (full session) → CHRONOLOGICAL frame order; exact tail", async () => {
     const { ctx, io } = baseCtx({
       replay: {
         resolveSession: async () => "/fake/path.jsonl",
@@ -308,18 +360,33 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     const code = await runSlashCommand("/replay 01HXY", ctx)
     expect(code).toBe(0)
     const text = io.out.join("")
-    expect(text).toContain("── replay session")
-    // Tool ids appear in order tc_7a → tc_7b.
-    const posA = text.indexOf("tc_7a")
-    const posB = text.indexOf("tc_7b")
-    expect(posA).toBeGreaterThan(-1)
-    expect(posB).toBeGreaterThan(posA)
+    expect(text).toContain("── replay session 01HXY ")
+    // INVARIANT: chronology — tc_7a's tool_call line appears in the rendered
+    // line array BEFORE tc_7b's tool_call line. We assert by LINE INDEX in
+    // the split array (not `text.indexOf`, which is byte-position-blind and
+    // would also pass if both ids landed on the same line).
+    const lines = text.split("\n")
+    const idxA = lines.findIndex((l) => l.includes("Read(") && l.includes("tc_7a"))
+    const idxB = lines.findIndex((l) => l.includes("Edit(") && l.includes("tc_7b"))
+    expect(idxA).toBeGreaterThan(-1)
+    expect(idxB).toBeGreaterThan(-1)
+    expect(idxA).toBeLessThan(idxB)
+    // INVARIANT: tool_result for tc_7a comes BEFORE the tool_call for tc_7b
+    // (causal ordering inside a turn — read result → next call).
+    const idxRA = lines.findIndex((l) => l.includes("tool_result") && l.includes("(Read)"))
+    expect(idxRA).toBeGreaterThan(idxA)
+    expect(idxRA).toBeLessThan(idxB)
+    // Footer carries frame count — 8 envelopes (turn_context + user_msg + 6
+    // event rows). All 8 render lines.
+    expect(text).toContain("8 frames")
+    // Closed by the footer rule. No diagnostics on stderr.
+    expect(io.err.join("")).toBe("")
   })
 
-  test("case-07: /replay 01HXY --at 3 → renders only turn 3 frames", async () => {
+  test("case-07: /replay 01HXY --at 3 → ONLY turn 3 frames; turn-4 row excluded", async () => {
     const mixed: readonly SessionEnvelopeRecord[] = [
       ...SESSION_FIXTURE,
-      toolInvoke("4", "Read", { path: "other.ts" }, 10),
+      toolInvoke("4", "Read", { path: "other.ts", toolCallId: "tc_off" }, 10),
       decision("4", "permission", "allow", "default-allow", "tc_off", 11),
     ]
     const { ctx, io } = baseCtx({
@@ -331,11 +398,19 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     const code = await runSlashCommand("/replay 01HXY --at 3", ctx)
     expect(code).toBe(0)
     const text = io.out.join("")
+    // Turn 3 IDs surface — tc_7a was placed in the tool_invoke input field,
+    // so renderToolInvoke prints `id=tc_7a` in the trailing column.
     expect(text).toContain("tc_7a")
+    expect(text).toContain("tc_7b")
+    // Turn 4 ENVELOPE is fully excluded — its tool_invoke carries tc_off via
+    // input.toolCallId; we must see ZERO occurrences anywhere in the output.
     expect(text).not.toContain("tc_off")
+    expect(text).not.toContain("other.ts")
+    // Header carries the `· turn 3 ·` filter banner.
+    expect(text).toContain("· turn 3 ")
   })
 
-  test("case-08: /replay 01HXY --from tc_7b → tc_7a body hidden", async () => {
+  test("case-08: /replay 01HXY --from tc_7b → tc_7a tool_invoke + tool_result hidden; tc_7b visible", async () => {
     const { ctx, io } = baseCtx({
       replay: {
         resolveSession: async () => "/fake/path.jsonl",
@@ -345,17 +420,27 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     const code = await runSlashCommand("/replay 01HXY --from tc_7b", ctx)
     expect(code).toBe(0)
     const text = io.out.join("")
-    // body starts after the first blank line.
+    // body starts after the header's first blank line.
     const bodyIdx = text.indexOf("\n\n")
     expect(bodyIdx).toBeGreaterThan(-1)
     const body = text.slice(bodyIdx)
+    // PRE-GATE rows MUST NOT appear in the body: tc_7a Read tool_invoke and
+    // its tool_result are before the `tc_7b` gate. The decision row for tc_7a
+    // is a `decision` envelope kind which `replay-cmd.ts` has no renderer for
+    // (it falls through to formatReplayLine's default branch → no id leak).
     expect(body).not.toContain("tc_7a")
+    expect(body).not.toContain("export const foo")
+    expect(body).not.toContain("Read(")
+    // POST-GATE rows ARE visible.
     expect(body).toContain("tc_7b")
+    expect(body).toContain("Edit(")
+    // Header banner carries `· from tc_7b ·`.
+    expect(text).toContain("· from tc_7b ")
   })
 
   // ── /why cases ─────────────────────────────────────────────────────────
 
-  test("case-09: /why last (LLM stub returns valid JSON) → structured render", async () => {
+  test("case-09: /why last (LLM stub returns valid JSON) → structured render with all fields in order", async () => {
     const json = JSON.stringify({
       goal: "Locate the foo handler",
       reasoning: ["The user asked where foo is defined", "Read gives line precision"],
@@ -374,15 +459,38 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     const code = await runSlashCommand("/why last", ctx)
     expect(code).toBe(0)
     const text = io.out.join("")
-    expect(text).toContain("why")
-    expect(text).toContain("goal")
-    expect(text).toContain("Locate the foo handler")
-    expect(text).toContain("reasoning")
-    expect(text).toContain("confidence")
-    expect(text).toContain("high")
+    const lines = text.split("\n")
+    // Header line — `renderReasoning` produces `── why <id> — model meta-query (<model>, <elapsed>, <N tokens>) ──`.
+    // Note: `/why last` resolves to tc_7b (last decision in fixture).
+    const header = lines.find((l) => l.startsWith("── why tc_7b"))
+    expect(header).toBeDefined()
+    expect(header).toContain("stub-model")
+    expect(header).toContain("tokens")
+    // Field rows — exact prefix shape so a renderer regression that drops a
+    // label is caught.
+    expect(text).toContain(`  goal       : "Locate the foo handler"`)
+    expect(text).toContain("  reasoning  :")
+    expect(text).toContain("    1. The user asked where foo is defined")
+    expect(text).toContain("    2. Read gives line precision")
+    expect(text).toContain("  considered :")
+    expect(text).toContain("    - grep")
+    expect(text).toContain("  confidence : high")
+    // ORDER invariant — goal precedes reasoning precedes considered precedes confidence.
+    const idxGoal = lines.findIndex((l) => l.includes("goal"))
+    const idxReasoning = lines.findIndex((l) => l.includes("reasoning"))
+    const idxConsidered = lines.findIndex((l) => l.includes("considered"))
+    const idxConfidence = lines.findIndex((l) => l.includes("confidence"))
+    expect(idxGoal).toBeGreaterThan(-1)
+    expect(idxReasoning).toBeGreaterThan(idxGoal)
+    expect(idxConsidered).toBeGreaterThan(idxReasoning)
+    expect(idxConfidence).toBeGreaterThan(idxConsidered)
+    // SECURITY — the stub LLM's `model` ("stub-model") shows in the header,
+    // but no production model id ("gpt-5") from the fixture's turn_context
+    // must leak into the `/why` output (it's not consumed by why-cmd).
+    expect(text).not.toContain("gpt-5")
   })
 
-  test("case-10: /why last (LLM stub returns prose) → fallback raw render", async () => {
+  test("case-10: /why last (LLM stub returns prose) → fallback raw render; no structured field labels", async () => {
     const llm = stubLlmWithText("just some prose, not JSON at all")
     const { ctx, io } = baseCtx({
       why: {
@@ -395,68 +503,106 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     const code = await runSlashCommand("/why last", ctx)
     expect(code).toBe(0)
     const text = io.out.join("")
-    // Fallback panel includes the literal "unstructured prose" marker AND
-    // the raw text.
-    expect(text).toContain("unstructured prose")
-    expect(text).toContain("just some prose")
+    // PINNED — the fallback line in renderFallback.
+    expect(text).toContain("LLM returned unstructured prose; raw output below")
+    expect(text).toContain("just some prose, not JSON at all")
+    // NEGATIVE invariants — the structured panel labels MUST NOT appear in
+    // the fallback path (they'd indicate the JSON parser leaked into the
+    // prose branch).
+    expect(text).not.toContain("  goal       :")
+    expect(text).not.toContain("  reasoning  :")
+    expect(text).not.toContain("  considered :")
+    expect(text).not.toContain("  confidence :")
+    // Header still shows the model + tokens (the LLM round-trip happened).
+    expect(text).toContain("stub-model")
+    expect(text).toContain("tokens")
   })
 
   // ── default-OFF: ctx.* undefined ──────────────────────────────────────
 
-  test("case-11: every slash with undefined ctx.* prints 'not wired' AND known exit code", async () => {
+  test("case-11: default-OFF (ctx.* undefined) → exact 'not wired' line + exit code + stderr empty", async () => {
     // Each command's documented behaviour when its ctx slot is absent:
-    //   /debug   → "not wired" + exit 0
-    //   /inspect → "no active session" + exit 1 (different shape — needs session)
+    //   /debug   → "not wired (...)" + exit 0
+    //   /inspect → "no active session" + exit 1 (needs session)
     //   /replay  → "not wired" + exit 0
-    //   /why     → empty arg ⇒ exit 1 BEFORE the wiring check (positional id required)
+    //   /why     → "not wired" + exit 0
     {
       const { ctx, io } = baseCtx()
       const code = await runSlashCommand("/debug status", ctx)
       expect(code).toBe(0)
-      expect(io.out.join("")).toContain("not wired")
+      // PINNED — the leaf adapter in slash-commands.ts emits this exact line
+      // (hint includes QUANTA_DEBUG=1).
+      expect(io.out.join("")).toBe(
+        "/debug: not wired in this surface (boot with QUANTA_DEBUG=1 to enable runtime toggle)\n",
+      )
+      expect(io.err.join("")).toBe("")
     }
     {
       const { ctx, io } = baseCtx()
       const code = await runSlashCommand("/inspect tc_anything", ctx)
       expect(code).toBe(1)
-      expect(io.out.join("")).toContain("no active session")
+      expect(io.out.join("")).toBe(
+        "no active session — start an agent first or pass --session <id>\n",
+      )
+      expect(io.err.join("")).toBe("")
     }
     {
       const { ctx, io } = baseCtx()
       const code = await runSlashCommand("/replay 01HXY", ctx)
       expect(code).toBe(0)
-      expect(io.out.join("")).toContain("not wired in this surface")
+      expect(io.out.join("")).toBe("/replay: not wired in this surface\n")
+      expect(io.err.join("")).toBe("")
     }
     {
       const { ctx, io } = baseCtx()
-      // `/why <id>` first checks ctx.why; absent ⇒ "not wired" + exit 0.
       const code = await runSlashCommand("/why last", ctx)
       expect(code).toBe(0)
-      expect(io.out.join("")).toContain("not wired in this surface")
+      expect(io.out.join("")).toBe("/why: not wired in this surface\n")
+      expect(io.err.join("")).toBe("")
     }
   })
 
   // ── BUILTINS registration invariants ──────────────────────────────────
 
-  test("case-12: BUILTINS registers /debug, /inspect, /replay, /why (5-cmd slice)", () => {
+  test("case-12: BUILTINS registers /debug, /inspect, /replay, /why; each appears exactly once", () => {
     const names = BUILTINS.map((c) => c.name)
-    expect(names).toContain("/debug")
-    expect(names).toContain("/inspect")
-    expect(names).toContain("/replay")
-    expect(names).toContain("/why")
+    // Membership + cardinality — a duplicate registration would silently
+    // shadow the leaf and dispatch goes to whichever entry the byName Map
+    // inserted last; this asserts each slash slot is unique.
+    for (const n of ["/debug", "/inspect", "/replay", "/why"]) {
+      expect(names).toContain(n)
+      expect(names.filter((m) => m === n).length).toBe(1)
+    }
+    // Every registered entry has a non-empty `describe` (the /help renderer
+    // iterates BUILTINS and prints `describe` — empty strings degrade the
+    // surface badly without crashing).
+    for (const c of BUILTINS) {
+      expect(c.describe.length).toBeGreaterThan(0)
+    }
   })
 
-  test("case-13: zero name collision — all BUILTINS names unique", () => {
+  test("case-13: zero name collision; every name `/<letter>...` shape; isSlashCommand recognises all", () => {
     const names = BUILTINS.map((c) => c.name)
     const set = new Set(names)
     expect(set.size).toBe(names.length)
     // Defensive: confirm `isSlashCommand` recognises every builtin name.
-    for (const n of names) expect(isSlashCommand(n)).toBe(true)
+    for (const n of names) {
+      expect(isSlashCommand(n)).toBe(true)
+      // Lexical invariant — every slash starts with `/` followed by [a-z] so
+      // bare `--flag` argv never collides with the slash gate in
+      // `src/apps/cli/index.ts`. Hyphens allowed mid-name (/rewind-tool).
+      expect(n).toMatch(/^\/[a-z][a-z0-9-]*$/)
+    }
+    // NEGATIVE — strings that LOOK like slashes but should NOT match.
+    expect(isSlashCommand("/")).toBe(false)
+    expect(isSlashCommand("/-foo")).toBe(false)
+    expect(isSlashCommand("/-bar")).toBe(false)
+    expect(isSlashCommand("--help")).toBe(false)
   })
 
   // ── stdout vs stderr separation ──────────────────────────────────────
 
-  test("case-14: /inspect not-found → stdout carries 'not found'; stderr empty", async () => {
+  test("case-14: /inspect not-found → stdout has EXACT not-found line; stderr empty", async () => {
     const { ctx, io } = baseCtx({
       inspect: {
         sessionId: "sess-1",
@@ -465,35 +611,54 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
     })
     const code = await runSlashCommand("/inspect tc_missing", ctx)
     expect(code).toBe(1)
-    expect(io.out.join("")).toContain("not found")
-    // /inspect's not-found message is rendered via `out` (panel sink) — stderr
-    // must stay empty.
+    // PINNED message + invariant: panel sink never touches stderr.
+    expect(io.out.join("")).toBe("tool call tc_missing not found in session sess-1\n")
     expect(io.err.join("")).toBe("")
   })
 
-  test("case-15: /debug bad-arg → stderr has error; stdout empty", async () => {
+  test("case-15: /debug bad-arg → stderr error w/ known-cats; stdout empty; state immutable", async () => {
     let currentState: DebugCmdState = { enabled: false }
+    const setCalls: DebugCmdState[] = []
     const { ctx, io } = baseCtx({
       debug: {
         get: () => currentState,
         set: (s) => {
           currentState = s
+          setCalls.push(s)
         },
       },
     })
     const code = await runSlashCommand("/debug bogus_category", ctx)
     expect(code).toBe(1)
-    // Unknown argument → goes to stderr with the documented prefix.
-    expect(io.err.join("")).toContain("/debug: unknown argument")
+    // PINNED — exact error prefix + alphabetical known-cats list (the leaf
+    // formats from KNOWN_CATEGORIES via [...].sort()).
+    const err = io.err.join("")
+    expect(err).toContain("/debug: unknown argument 'bogus_category'")
+    expect(err).toContain("known categories: decisions, llm, memory, other, plan, stream, tools")
+    // INVARIANT — bad-arg leaves stdout completely empty.
     expect(io.out.join("")).toBe("")
+    // STATE INVARIANT — bad-arg never calls set(), so the surface ref stays
+    // at the prev state (referential equality).
+    expect(setCalls.length).toBe(0)
+    expect(currentState.enabled).toBe(false)
   })
 
-  test("case-16: runSlashCommand dispatch tolerates unknown command — exit 1 + 'Available'", async () => {
+  test("case-16: runSlashCommand dispatch — unknown command surfaces exact error + Available list", async () => {
     const { ctx, io } = baseCtx()
     const code = await runSlashCommand("/no-such-cmd arg1", ctx)
     expect(code).toBe(1)
-    expect(io.err.join("")).toContain("unknown command")
-    // The dispatcher renders the available list on stdout.
-    expect(io.out.join("")).toContain("Available")
+    // PINNED — `slash-engine.ts` emits `slash: unknown command: ${name}\n`.
+    expect(io.err.join("")).toBe("slash: unknown command: /no-such-cmd\n")
+    // The dispatcher renders the available list on stdout — the four slice
+    // members + (at least) one other must appear in the list.
+    const out = io.out.join("")
+    expect(out.startsWith("Available:\n")).toBe(true)
+    expect(out).toContain("/debug")
+    expect(out).toContain("/inspect")
+    expect(out).toContain("/replay")
+    expect(out).toContain("/why")
+    // Bogus name MUST NOT appear in the available list (sanity — would only
+    // be visible if a future registrar accepted arbitrary submissions).
+    expect(out).not.toContain("/no-such-cmd")
   })
 })

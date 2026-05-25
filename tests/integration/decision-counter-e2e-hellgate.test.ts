@@ -34,7 +34,6 @@ import type { PermissionContext } from "@/permission"
 import { RulesStore } from "@/rules"
 import {
   type AgentEvent,
-  type DecisionEmitter,
   type DecisionEvent,
   decisionEmitterFromStream,
   type StreamPort,
@@ -249,7 +248,7 @@ describe("integration e2e — decision emit → tee → counter sink → registr
     expect(rows.length).toBe(1)
   })
 
-  test("case-09: non-decision AgentEvents are ignored — counter unchanged", async () => {
+  test("case-09: non-decision AgentEvents are ignored — entire registry snapshot stays empty", async () => {
     const { metrics, tee } = wireGateToCounter()
     // Flood 10 unrelated AgentEvent variants through the tee. None should
     // touch the counter. We construct them with the minimum required fields
@@ -267,10 +266,17 @@ describe("integration e2e — decision emit → tee → counter sink → registr
       { type: "tool_progress", id: "x", name: "read", message: "step" },
     ]
     for (const ev of nonDecisionEvents) tee.emit(ev)
-    // Every quanta.gate.* counter must be ZERO — no decision events landed.
+    // HARDER invariant: NOT just `quanta.gate.*` zero, but the ENTIRE
+    // registry snapshot is empty. The sink touches the registry only on
+    // `decision` events; any leak (e.g. a future regression that
+    // accidentally bumps a `quanta.tool.*` counter from a tool_call event)
+    // surfaces here. The metrics registry returns rows only for
+    // active counters / observed histograms, so an empty array proves no
+    // side-effects happened anywhere.
     const all = metrics.snapshot()
-    const gateRows = all.filter((row) => row.name.startsWith("quanta.gate."))
-    expect(gateRows.length).toBe(0)
+    expect(all.length).toBe(0)
+    // Tee NOT degraded — non-decision events are early-return, not throws.
+    expect(tee.degraded().length).toBe(0)
   })
 
   test("case-10: cardinality invariant — labels set is EXACTLY {kind, outcome}, no leakage", async () => {
@@ -339,33 +345,47 @@ describe("integration e2e — decision emit → tee → counter sink → registr
     expect(otherSeen.find((e) => e.type === "decision")).toBeDefined()
   })
 
-  test("case-12: 1000 emit load → counter exactly 1000, snapshot O(1) series", async () => {
+  test("case-12: 1000 CONCURRENT gate runs → counter exactly 1000; series cardinality bounded", async () => {
     const read = makeTool("read", { readOnly: true })
     const { metrics, emitter } = wireGateToCounter()
     const cfg = cfgOf({ registry: new ToolRegistry([read]), decisionEmitter: emitter })
-    // Run 1000 admit-path gates. Each emits exactly one permission.allow
-    // event (no hooks ⇒ no hook line).
-    for (let i = 0; i < 1000; i++) {
-      await runAdmissibilityGate(
-        callOf("read", {}, `tc_load_${i}`),
-        cfg,
-        cfg.permission,
-        actionOf(read),
-      )
-    }
+    // CONCURRENCY STRESS — run all 1000 gate calls in parallel via
+    // Promise.all. Sequential await is the easy path and would not catch
+    // an atomicity regression (e.g. a future increment that read-modify-writes
+    // without a synchronous post-condition). The in-memory registry is
+    // single-threaded JavaScript so the only way to lose a count is a
+    // logical bug — this case proves NONE of the 1000 emits is lost.
+    const ids = Array.from({ length: 1000 }, (_, i) => `tc_load_${i}`)
+    await Promise.all(
+      ids.map((id) =>
+        runAdmissibilityGate(callOf("read", {}, id), cfg, cfg.permission, actionOf(read)),
+      ),
+    )
     expect(counterTotal(metrics, "quanta.gate.permission.allow.total")).toBe(1000)
-    // Cardinality stays at exactly 1 series row.
+    // Cardinality stays at exactly 1 series row — proves no high-cardinality
+    // leak across 1000 distinct toolCallIds (the labels are still ONLY
+    // `kind` + `outcome`, not per-id).
     expect(snapshotOf(metrics, "quanta.gate.permission.allow.total").length).toBe(1)
+    // Total snapshot across ALL series ≤ 1 — no other counters created.
+    expect(metrics.snapshot().length).toBe(1)
   })
 
-  test("case-13: custom prefix ⇒ counter name '<prefix>.<kind>.<outcome>.total'", async () => {
+  test("case-13: custom prefix ⇒ counter renamed cleanly; default-prefix counter absent", async () => {
     const read = makeTool("read", { readOnly: true })
     const { metrics, emitter } = wireGateToCounter("sub.agent")
     const cfg = cfgOf({ registry: new ToolRegistry([read]), decisionEmitter: emitter })
     await runAdmissibilityGate(callOf("read", {}, "tc_prefix"), cfg, cfg.permission, actionOf(read))
     expect(counterTotal(metrics, "sub.agent.permission.allow.total")).toBe(1)
-    // Default-prefix name must NOT be present.
+    // Default-prefix name must NOT be present — proves the prefix override
+    // routes correctly and doesn't double-emit.
     expect(counterTotal(metrics, "quanta.gate.permission.allow.total")).toBe(0)
+    // CARDINALITY — exactly ONE series total in the registry. A regression
+    // that emits to BOTH names (override + default) would surface here.
+    expect(metrics.snapshot().length).toBe(1)
+    // Labels still ONLY (kind, outcome) — prefix change must not leak
+    // anything into the label set.
+    const labels = snapshotOf(metrics, "sub.agent.permission.allow.total")[0]?.labels ?? {}
+    expect(Object.keys(labels).sort()).toEqual(["kind", "outcome"])
   })
 
   test("case-14: synthetic decision events for closed-taxonomy kinds (cap/jail/budget)", async () => {
