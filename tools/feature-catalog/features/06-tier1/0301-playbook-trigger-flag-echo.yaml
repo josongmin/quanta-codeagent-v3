@@ -1,0 +1,99 @@
+id: playbook-trigger-flag-echo
+title: --playbook-trigger CLI flag echo through to wire (close ADR-0293 last-mile)
+section: 6
+subsystem: playbook trigger
+order: 18
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_PLAYBOOK_TRIGGER
+  flags:
+    - --playbook-trigger
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:1", "adr-0301", "default-off"]
+depends_on:
+  - playbook-trigger-cli-bind
+  - surface-composition-wire-r1
+purpose: |
+  Closes the ADR-0293 last-mile gap. ADR-0293 added the `--playbook-trigger`
+  boolean to the unified-agent CLI parser AND built
+  `maybeStartPlaybookTriggerWire({ env, cliFlag, ... })` so the watcher
+  honours an explicit flag in addition to the `QUANTA_PLAYBOOK_TRIGGER=on`
+  env var. ADR-0299 then surfaced the wire from `composeSurfaceWires` and
+  `session-loop.ts` accepted a `playbookCliFlag?: boolean` dep.
+
+  However, the parsed `AgentArgs.playbookTrigger` boolean was never
+  threaded down from `apps/agent/index.ts` (or the REPL-surface argv path)
+  to that dep slot — so typing `--playbook-trigger` did nothing today; only
+  the env path worked.
+
+  This ADR threads the boolean through 5 layers:
+
+    1. `apps/agent/index.ts` — `AssembleRequestPartial.playbookTrigger` +
+       `toAssembleRequest` propagation (presence-only).
+    2. `apps/cli/internal.ts` — `playbookTriggerFlag()` argv reader
+       (parallel to `newSessionFlag()` for SOLID/SRP).
+    3. `apps/cli/repl/session-runtime-config.ts` — surface as
+       `SessionRuntimeConfig.playbookTriggerFlag`.
+    4. `apps/cli/repl/session-bootstrap.ts` — forward as
+       `SessionBootstrapResult.playbookCliFlag: boolean | undefined`
+       (mapping `false → undefined` for `exactOptionalPropertyTypes`).
+    5. `apps/cli/repl/session-setup.ts` — forward to
+       `SessionSetupResult.playbookCliFlag`.
+
+  `apps/cli/repl.ts` adds 3 lines (comment + spread) to hand the boolean
+  to `runSessionLoop({ playbookCliFlag })`. `session-loop.ts` already
+  consumed `playbookCliFlag` per ADR-0299; no change there.
+
+  Env precedence preserved end-to-end (`QUANTA_PLAYBOOK_TRIGGER=on` wins
+  over `cliFlag=false`); the wire helper remains the single arbiter and
+  this slice only threads the boolean to it.
+evidence:
+  code:
+    - src/apps/agent/index.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/repl.ts
+    - src/apps/cli/repl/session-bootstrap.ts
+    - src/apps/cli/repl/session-runtime-config.ts
+    - src/apps/cli/repl/session-setup.ts
+  adrs:
+    - docs/decisions/0301-playbook-trigger-flag-echo.md
+  tests:
+    unit:
+      - tests/unit/apps/cli/playbook-flag-echo-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: --playbook-trigger
+    default: "<absent>"
+    values: ["present"]
+    purpose: "CLI flag echo for the inline-trigger watcher; equivalent to QUANTA_PLAYBOOK_TRIGGER=on for the surface (env still wins on collision)."
+  - name: QUANTA_PLAYBOOK_TRIGGER
+    default: "<unset>"
+    values: ["on"]
+    purpose: "Env opt-in for the inline-trigger watcher. Wins over --playbook-trigger=false (existing precedence locked by this ADR's hellgate case vii)."
+deliberate_hold: null
+notes: |
+  Default-OFF byte-identical (RFC §1.2): absent flag AND absent env ⇒ slot
+  omitted on the projection ⇒ NOOP handle ⇒ no watcher, no allocation. The
+  parser already shipped `playbookTrigger?: boolean` (absent ⇒ undefined,
+  not false) in ADR-0293; this slice only adds the projection + downstream
+  carry — no new failure modes.
+
+  Refactor passing: `toAssembleRequest` was at biome cognitive-complexity
+  cap (15). Adding the new `if` branch pushed it to 16, so the ADR-0236+
+  0301 mega-wire propagation block is extracted into a private
+  `liftMegaWireFields` helper. Net effect: `toAssembleRequest` is BELOW
+  the cap and accommodates future flag additions without further
+  refactoring.
+
+  Slice fence: the hellgate test imports both `src/apps/agent/*` (library
+  shape) AND `src/apps/cli/*` (entrypoint internals — gated by ADR-0024).
+  Test sited under `tests/unit/apps/cli/` (not `tests/unit/apps/agent/`)
+  because only the former matches the slice-fence exception list. 9
+  hellgate cases / 15 expects / 0 fail.
