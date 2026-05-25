@@ -55,9 +55,19 @@ export const runShell = async (
   // (`sandbox-exec`, `bwrap`, `landlock-cli`) or an honest degraded
   // passthrough. Policy internals only flow INTO the spawn argv; they are
   // never echoed back to the tool result.
+  //
+  // ADR-0295 — per-call wrap. When the caller supplies `options.perCallWrap`,
+  // it runs FIRST: the per-call wrapper composes the outermost sandbox
+  // (typically the bash tool's `mode="read"` Seatbelt read-only profile).
+  // The session-wide slot still runs on top of the per-call result so a
+  // session policy that further constrains the call still applies. Order:
+  //   per-call wrap → slot wrap → snapshot restore.
   const baseArgv: ReadonlyArray<string> = ["bash", "-lc", command]
+  const perCallWrap = options.perCallWrap
+  const perCallArgv =
+    perCallWrap !== undefined ? (await perCallWrap(baseArgv, cwd)).argv : [...baseArgv]
   const slot = getShellSandbox()
-  const sandboxedArgv = slot !== undefined ? (await slot.wrap(baseArgv, cwd)).argv : [...baseArgv]
+  const sandboxedArgv = slot !== undefined ? (await slot.wrap(perCallArgv, cwd)).argv : perCallArgv
   // ADR-0204 wire — when a snapshot seam is supplied, restore wraps the argv
   // so the spawned shell sources the captured per-turn env. Absent ⇒
   // `sandboxedArgv` flows through unchanged (byte-identical legacy).

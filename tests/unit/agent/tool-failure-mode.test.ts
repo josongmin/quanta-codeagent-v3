@@ -155,6 +155,10 @@ describe("(d) exhaustiveness — switch over ToolFailure['mode'] with never defa
         return `spawn_error:${f.error}`
       case "error":
         return `error:${f.modelVisibleError ?? "?"}`
+      case "sandbox_violation":
+        return `sandbox_violation:${f.reason}`
+      case "sandbox_unavailable":
+        return `sandbox_unavailable:${f.reason}`
       default: {
         const _exhaustive: never = f
         return _exhaustive

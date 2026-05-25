@@ -595,6 +595,24 @@ export type ToolFailure =
   | { mode: "timeout"; timeoutMs?: number }
   | { mode: "spawn_error"; error: string }
   | { mode: "error"; modelVisibleError?: string; clientVisibleError?: string }
+  /** ADR-0295 — OS sandbox refused the call. Emitted by the bash tool (and any
+   *  future shell-class sibling) when its `mode="read"` per-call wrap forwarded
+   *  a write/exec/network attempt that the kernel/Seatbelt rejected with
+   *  EACCES / "Operation not permitted". `reason` is a CLOSED enum so a future
+   *  arm (e.g. `kqueue_denied`) becomes a compile error at every exhaustive
+   *  switch. The OS is the enforcer — no pattern-matching on the command. */
+  | { mode: "sandbox_violation"; reason: SandboxViolationReason }
+  /** ADR-0295 — OS sandbox cannot be enforced on this host (sandbox-exec
+   *  missing, linux backend not implemented per-call, unsupported platform).
+   *  The bash tool surfaces this BEFORE spawning when `mode="read"` is
+   *  requested — explicitly NOT falling back to an unsandboxed legacy spawn
+   *  (fail-closed posture). `reason` is the opaque stable tag from the port. */
+  | { mode: "sandbox_unavailable"; reason: string }
+
+/** Closed enum of OS-sandbox violation kinds. Each arm maps a class of OS
+ *  denial to a stable tag the model can branch on. Adding a new arm requires
+ *  updating every exhaustive switch (consumer-side compile error). */
+export type SandboxViolationReason = "write_denied" | "exec_denied" | "network_denied" | "unknown"
 
 /** Optional RFC-0002 §5.2 execution evidence a tool may attach to its
  *  `ToolResult`. All fields are optional individually: a tool may carry just

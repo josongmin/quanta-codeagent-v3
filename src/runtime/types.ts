@@ -29,6 +29,23 @@ export interface ShellOptions {
    *  `@/runtime` does not have to reach into `@/runtime/shell-snapshot` for
    *  its closed types — the slice's adapter is structurally assignable. */
   shellSnapshot?: ShellSnapshotRestoreSeam
+  /** ADR-0295 — per-call argv wrapper (per-call OS sandbox). When set,
+   *  `runShell` invokes this BEFORE the installed `ShellSandboxSlot.wrap` and
+   *  the shell-snapshot restore: the per-call wrap is the OUTERMOST sandbox.
+   *  Returns the wrapped argv + sandboxApplied flag (mirrors `ShellSandboxSlot`
+   *  but at call granularity). Absent ⇒ legacy path (slot + snapshot only).
+   *  Used by the bash tool's `mode="read"` arm to wrap a SINGLE call without
+   *  mutating the session-wide slot. Typed structurally so `@/runtime` does
+   *  not import `@/tool` / `@/runtime/os-sandbox` types directly here — the
+   *  consumer adapts a `PerCallSandboxPort.wrap` to this shape. */
+  perCallWrap?: (
+    argv: ReadonlyArray<string>,
+    cwd: string,
+  ) => Promise<{
+    readonly argv: string[]
+    readonly sandboxApplied: boolean
+    readonly degradeReason?: string
+  }>
 }
 
 /** ADR-0204 wire — minimal structural shape consumed by `runShell`. Matches

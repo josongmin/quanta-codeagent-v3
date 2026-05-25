@@ -213,6 +213,7 @@ export type {
   PlanMutatorNewTodo,
   PlanMutatorTodoPatch,
   PlanReadonlyView,
+  SandboxViolationReason,
   ShellSnapshotRestoreSeam,
   Tool,
   ToolContext,
