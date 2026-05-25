@@ -32,10 +32,10 @@ import {
 import { runSessionLoop } from "./repl/session-loop"
 import { setupSession } from "./repl/session-setup"
 import { buildSkillsCallback, installPills } from "./repl/skills-surface"
-import { dispatchReplSlash } from "./repl/slash-surface"
 import {
   buildPromptUx,
   composeSurfaceSlashCtx,
+  composeSurfaceWires,
   composeTurnSinks,
   createSurfaceState,
 } from "./repl/surface-compose"
@@ -592,16 +592,32 @@ export const runRepl = async (): Promise<void> => {
     history: setup.history,
   })
   try {
-    const slashCtx = composeSurfaceSlashCtx(setup, surfaceState)
+    // ADR-0299 — surface composition wire. Builds the slash ctx PLUS the
+    // wire bundle (conv-checkpoint, playbook-trigger seam, composer +
+    // textInbox handles). Each upstream knob (env / CLI flag) gates the
+    // ctx slot independently so the projection is byte-identical to
+    // legacy when no opt-in is present (RFC §1.2). The bundled
+    // `dispatchSlash` closure routes through the FULL augmented
+    // SlashContext (legacy + ADR-0291 + ADR-0292 + ADR-0294 slots).
+    const wires = composeSurfaceWires(setup, surfaceState, process.env)
     await runSessionLoop({
       setup,
-      dispatchSlash: (input) => dispatchReplSlash(input, slashCtx),
+      dispatchSlash: wires.dispatchSlash,
       sinks: composeTurnSinks(setup, surfaceState),
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
+      textInbox: wires.textInbox,
       ux: buildPromptUx(),
       registerExitTeardown: (cb) => {
         process.once("exit", cb)
       },
+      // ADR-0292 — turn-end record + restore swap. The wire may be null
+      // (default-OFF byte-identical when QUANTA_CHECKPOINT_CONV !== "on")
+      // — the loop short-circuits on null.
+      convCheckpointWire: wires.convCheckpointWire,
+      registerReplaceMessages: wires.setReplaceMessages,
+      // ADR-0293 — seam attached by the loop once externalPromptQueue is
+      // born (the queue is the sink the trigger dispatches into).
+      playbookSeam: wires.playbookSeam,
     })
   } finally {
     // Track T — tear down the ring-buffer panel BEFORE other surface
@@ -614,3 +630,5 @@ export const runRepl = async (): Promise<void> => {
     await setup.shutdownMcp()
   }
 }
+// Silence the unused-import lint for the legacy alias kept for back-compat.
+void composeSurfaceSlashCtx

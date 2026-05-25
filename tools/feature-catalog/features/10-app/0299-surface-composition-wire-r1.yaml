@@ -1,0 +1,111 @@
+id: surface-composition-wire-r1
+title: Surface composition wire — ADR-0291/0292/0293/0294 end-to-end
+section: 10
+subsystem: REPL surface composition
+order: 72
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_CHECKPOINT_CONV
+    - QUANTA_PLAYBOOK_TRIGGER
+    - QUANTA_TOOL_PROFILE
+    - QUANTA_IDENTITY_MODE
+    - QUANTA_FOCUS_CHAIN_EVERY
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:2", "adr-0295", "default-off"]
+depends_on:
+  - repl-slash-ctx-mega-wire
+  - conv-checkpoint-auto-record
+  - playbook-trigger-cli-bind
+  - session-export-import-slash
+purpose: |
+  Closes the REPL composition root for the 4 sibling tracks landed in
+  the prior round (ADR-0291/0292/0293/0294). Each track shipped its
+  contract + slash + adapter factory but never reached the surface
+  composition path; this slice wires them through `composeSurfaceWires`
+  so the slash commands actually work end-to-end when the operator
+  opts in.
+
+  Four wire families:
+
+    1. ADR-0291 — 8 ctx adapters (planEdit / composerEdit / forkSession /
+       perToolCheckpoint / profile / identity / focusChain / textInbox).
+       Adapter factories called from surface-compose.ts; env knobs
+       (QUANTA_TOOL_PROFILE / QUANTA_IDENTITY_MODE / QUANTA_FOCUS_CHAIN_EVERY)
+       gate the upstream-port presence.
+
+    2. ADR-0292 — turn-end auto-record + `/rewind-conv` history swap.
+       `QUANTA_CHECKPOINT_CONV=on` constructs `startConvCheckpointWire`
+       over a session-shared `ConversationCheckpointStore` (reused by
+       the `/fork-checkpoint` adapter — single store per session).
+       `session-loop.ts` calls `recordTurn(messages)` in both one-shot
+       and interactive turn-end paths.
+
+    3. ADR-0293 — `maybeStartPlaybookTriggerWire` lifecycle. The loop
+       constructs a `PlaybookPlanQueueSink` around `ExternalPromptQueue`,
+       attaches the handle to the `PlaybookTriggerSurfaceSeam`, and
+       detaches in `finally` (idempotent — stops the watcher on abnormal
+       shutdown).
+
+    4. ADR-0294 — `SessionIoState` adapter for `/session`. Default
+       adapter delegates to `loadSessionById`/`saveSessionById`
+       (id-addressable V2 store) + `crypto.randomUUID()` for
+       `mintNewId()`. Read failures surface as `null`; write failures
+       rethrow so the slash exits 1 + ctx.err.
+
+  Plus `prompt-pipeline.ts` now optionally drains a `TextInbox` on
+  every accepted local prompt (ADR-0291 follow-through — `/web` +
+  `/paste` enqueue, the next turn picks them up).
+evidence:
+  code:
+    - src/apps/cli/repl/surface-compose.ts
+    - src/apps/cli/repl/session-loop.ts
+    - src/apps/cli/repl/prompt-pipeline.ts
+    - src/apps/cli/repl.ts
+  adrs:
+    - docs/decisions/0299-surface-composition-wire-r1.md
+  tests:
+    unit:
+      - tests/unit/cli/repl-surface-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_CHECKPOINT_CONV
+    default: "<unset>"
+    values: ["on"]
+    purpose: "Enables the ADR-0292 turn-end auto-record wire."
+  - name: QUANTA_PLAYBOOK_TRIGGER
+    default: "<unset>"
+    values: ["on"]
+    purpose: "Enables the ADR-0293 inline-trigger watcher."
+  - name: QUANTA_TOOL_PROFILE
+    default: "<unset>"
+    values: ["write", "ask", "minimal", "code-only"]
+    purpose: "Selects the active tool-profile (ADR-0213) for /profile."
+  - name: QUANTA_IDENTITY_MODE
+    default: "<unset>"
+    values: ["default", "plan", "review", "audit", "architect", "editor"]
+    purpose: "Selects the active identity mode (ADR-0211) for /identity."
+  - name: QUANTA_FOCUS_CHAIN_EVERY
+    default: "<unset>"
+    values: ["positive integer"]
+    purpose: "Builds the focus-chain tracker (ADR-0219) for /focus-chain."
+deliberate_hold: null
+notes: |
+  Default-OFF byte-identical (RFC §1.2). When all 4 knobs are absent the
+  projection key-set is byte-identical to pre-wire baseline. 20 hellgate
+  cases / 92 expects / 0 fail.
+
+  The slash dispatch closure is now built in surface-compose.ts (not in
+  slash-surface.ts) because it needs to spread the ADR-0292
+  (convCheckpoint) and ADR-0294 (sessionIo) augmentations into the
+  SlashContext — the slash-surface.ts projection is owned by ADR-0291
+  and intentionally kept narrow to that track's slots.
+
+  Per-tool checkpoint slot stays omitted today (no upstream
+  GranularRegistry source); held for a follow-up slice.

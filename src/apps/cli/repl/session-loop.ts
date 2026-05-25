@@ -1,15 +1,19 @@
 import type { AgentOutcome } from "@/agent"
 import type { Message } from "@/llm"
-import {
-  type LastTurnOutcome,
-  injectSimulatedTurn,
-  REACTOR_ENV_FLAG,
-} from "@/reactor"
+import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { type RunInteractiveInput, runInteractive, runOnce } from "@/runner"
-import { startReactorWatchBridge } from "../reactor-watch-bridge"
+import { logger } from "@/shared"
+import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { assembleConfig } from "../internal"
-import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
+import { startReactorWatchBridge } from "../reactor-watch-bridge"
+import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import { ExternalPromptQueue } from "./external-prompt-queue"
+import type { PlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
+import {
+  maybeStartPlaybookTriggerWire,
+  type PlaybookTriggerWireHandle,
+} from "./playbook-trigger-wire"
+import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
 import type { SessionSetupResult } from "./session-setup"
 import { type SessionState, updateSessionState } from "./session-state"
 import { runOneTurn } from "./turn-runner"
@@ -48,9 +52,32 @@ export interface RunSessionLoopDeps {
   }
   /** Optional image queue the prompt pipeline drains per turn. */
   readonly imageQueue?: import("../image-queue").ImageQueue
+  /** Optional text inbox the prompt pipeline drains per turn (ADR-0291).
+   *  When present + non-empty, the drained entries are prepended to the
+   *  user's literal text in the very next turn. Absent ⇒ pipeline behaves
+   *  byte-identically (no drain, no preamble). */
+  readonly textInbox?: import("../text-inbox").TextInbox
   /** Optional once-only `process.once('exit', ...)` registrar — keeps the
    *  loop from coupling to the process module directly so tests can stub it. */
   readonly registerExitTeardown?: (cb: () => void) => void
+  /** ADR-0292 — turn-end auto-record wire. When present, the loop calls
+   *  `recordTurn(messages)` after each successful turn completion (post-
+   *  final-LLM-text, pre-next-prompt). Absent ⇒ no record, no allocation
+   *  beyond the dep slot (default-OFF byte-identical). */
+  readonly convCheckpointWire?: ConvCheckpointWire | null
+  /** ADR-0292 — surface-side hook the loop registers so `/rewind-conv <tag>`
+   *  can mutate the live `history` binding. Called once before the
+   *  interactive driver starts. Absent ⇒ `/rewind-conv` restore still
+   *  succeeds against the store but the surface transcript stays stale. */
+  readonly registerReplaceMessages?: (fn: (msgs: ReadonlyArray<Message>) => void) => void
+  /** ADR-0293 — playbook-trigger seam the loop attaches to once it owns the
+   *  `ExternalPromptQueue` (the queue is the sink target). Absent ⇒ no
+   *  trigger wire is constructed (default-OFF byte-identical). */
+  readonly playbookSeam?: PlaybookTriggerSurfaceSeam
+  /** ADR-0293 — operator-supplied CLI flag echo. The same env precedence
+   *  (`QUANTA_PLAYBOOK_TRIGGER=on` wins over flag=false) is enforced
+   *  inside `maybeStartPlaybookTriggerWire`. */
+  readonly playbookCliFlag?: boolean
 }
 
 /** Default Esc-Esc cancel window (ms). Matches the prior inline constant in
@@ -79,7 +106,19 @@ const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome
  *  indicator + cost+summary) is identical across the two branches —
  *  the DRY win the SOLID split targets. */
 export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> => {
-  const { setup, dispatchSlash, sinks, ux, imageQueue, registerExitTeardown } = deps
+  const {
+    setup,
+    dispatchSlash,
+    sinks,
+    ux,
+    imageQueue,
+    textInbox,
+    registerExitTeardown,
+    convCheckpointWire,
+    registerReplaceMessages,
+    playbookSeam,
+    playbookCliFlag,
+  } = deps
   const {
     abort,
     statusBar,
@@ -104,6 +143,57 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   const externalPromptQueue = new ExternalPromptQueue()
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
+
+  // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate
+  // the live history binding the loop reads each turn. No-throw on the swap;
+  // a failure surfaces via logger.warn (already wrapped in the surface-compose
+  // adapter — this is the inner closure the adapter delegates to).
+  if (registerReplaceMessages !== undefined) {
+    registerReplaceMessages((msgs: ReadonlyArray<Message>): void => {
+      surfaceState = updateSessionState(surfaceState, { history: [...msgs] })
+    })
+  }
+
+  // ADR-0292 — turn-end record helper. No-op when the wire is null/absent so
+  // the legacy code path is byte-identical (RFC §1.2). Defensive try/catch so
+  // a misbehaving store NEVER bubbles into the loop.
+  const recordTurnSnapshot = (msgs: readonly Message[]): void => {
+    if (convCheckpointWire === undefined || convCheckpointWire === null) return
+    try {
+      convCheckpointWire.recordTurn(msgs)
+    } catch (e) {
+      logger.warn(`conv-checkpoint recordTurn threw: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  // ADR-0293 — playbook trigger lifecycle attach. The wire helper itself
+  // implements the env/flag precedence + NOOP-handle short-circuit, so we
+  // can call it unconditionally; only an active opt-in actually allocates
+  // a watcher. Attach to the seam so /session finalize → seam.detach()
+  // stops the handle even on abnormal shutdown.
+  let playbookHandle: PlaybookTriggerWireHandle | undefined
+  if (playbookSeam !== undefined) {
+    const playbookSink: PlaybookPlanQueueSink = {
+      enqueue: (input) => {
+        try {
+          externalPromptQueue.push(input.text)
+          return { ok: true }
+        } catch (e) {
+          return {
+            ok: false,
+            reason: e instanceof Error ? e.message : String(e),
+          }
+        }
+      },
+    }
+    playbookHandle = maybeStartPlaybookTriggerWire({
+      env: process.env,
+      ...(playbookCliFlag !== undefined ? { cliFlag: playbookCliFlag } : {}),
+      threadId: setup.sessionId,
+      planQueueSink: playbookSink,
+    })
+    playbookSeam.attach(playbookHandle)
+  }
 
   // One-shot dispatch: drive a SINGLE turn through `runOneTurn` then return.
   if (setup.argPrompt) {
@@ -142,10 +232,16 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
           sinks.renderTurnDashboard()
           sinks.renderAndResetSummary(result)
           sinks.flushLifecyclePills()
+          // ADR-0292 — turn-end snapshot. No-op when the wire is null.
+          recordTurnSnapshot(result.messages)
         },
         onError: sinks.renderTurnError,
       },
     )
+    // ADR-0293 — even on one-shot exit, stop the playbook handle so a stray
+    // watcher does not outlive the process. seam.detach() stops the handle
+    // and clears the slot in one call.
+    playbookSeam?.detach()
     return
   }
 
@@ -164,6 +260,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     dispatchSlash,
     externalPromptQueue,
     ...(imageQueue !== undefined ? { imageQueue } : {}),
+    ...(textInbox !== undefined ? { textInbox } : {}),
     idleMonitor: setup.idleMonitor,
     onLocalPromptAccepted: () => {
       lastUserInputAt = Date.now()
@@ -243,9 +340,15 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         lastTurnOutcome = mapAgentOutcomeToReactorOutcome(outcome)
         surfaceState = updateSessionState(surfaceState, { history: messages })
         sinks.flushLifecyclePills()
+        // ADR-0292 — record AFTER the state swap so the snapshot reflects
+        // the exact history binding the next turn will see.
+        recordTurnSnapshot(messages)
       },
     })
   } finally {
     await reactorBridge?.close()
+    // ADR-0293 — lifecycle detach (stops handle + clears the seam slot
+    // even on abnormal shutdown). Idempotent.
+    playbookSeam?.detach()
   }
 }

@@ -6,6 +6,7 @@ import { AbortError, readLine } from "../raw-line-reader"
 import type { RejectCounter } from "../reject-counter"
 import { describeSlashCommand, slashCompleter } from "../slash-commands"
 import type { StatusBar } from "../status-bar"
+import { renderInboxPreamble, type TextInbox } from "../text-inbox"
 import type { ExternalPromptQueue } from "./external-prompt-queue"
 
 /** Slice-C: surface-stateful slash dispatch is OUT of this module. The
@@ -39,6 +40,11 @@ export interface ComposePromptPipelineDeps {
    *  prompt and attach the images to THAT turn's payload (PromptPayload
    *  `{ text, images }`); empty ⇒ plain string form (byte-identical). */
   readonly imageQueue?: ImageQueue
+  /** ADR-0291 — optional text inbox. When wired + non-empty on an accepted
+   *  local prompt, drain on every accepted prompt and prepend the inbox
+   *  preamble to the user's literal text. Empty ⇒ no preamble, no
+   *  allocation beyond the dep slot (byte-identical to absent inbox). */
+  readonly textInbox?: TextInbox
   /** Optional out-of-band prompt ingress (reactor/scheduler). When present,
    *  `next()` races the raw-line reader against this queue so a background
    *  wake can resolve the prompt loop without synthetic stdin writes. */
@@ -115,6 +121,7 @@ const classifyReplLine = async (
 const buildCliPromptSource = (
   dispatchSlash: DispatchSlash,
   imageQueue: ImageQueue | undefined,
+  textInbox: TextInbox | undefined,
   externalPromptQueue: ExternalPromptQueue | undefined,
   ux: PromptPipelineUxOpts | undefined,
   onLocalPromptAccepted: (() => void) | undefined,
@@ -126,6 +133,7 @@ const buildCliPromptSource = (
         signal,
         dispatchSlash,
         imageQueue,
+        textInbox,
         externalPromptQueue,
         ux,
         onLocalPromptAccepted,
@@ -148,16 +156,28 @@ const combineSignals = (
   return AbortSignal.any(present)
 }
 
-const localPayload = (text: string, imageQueue: ImageQueue | undefined): PromptPayload => {
+const localPayload = (
+  text: string,
+  imageQueue: ImageQueue | undefined,
+  textInbox: TextInbox | undefined,
+): PromptPayload => {
+  // ADR-0291 — drain the text inbox FIRST so the slash-side enqueue ("/web",
+  // "/paste") sees its content on the very next turn. The preamble is empty
+  // when the inbox is empty so this is byte-identical when the inbox is
+  // never used.
+  const inboxEntries = textInbox?.drain() ?? []
+  const preamble = renderInboxPreamble(inboxEntries)
+  const fullText = preamble === "" ? text : `${preamble}${text}`
   const queued = imageQueue?.drain() ?? []
-  if (queued.length === 0) return text
-  return { text, images: queued.map((entry) => entry.block) }
+  if (queued.length === 0) return fullText
+  return { text: fullText, images: queued.map((entry) => entry.block) }
 }
 
 const readNextPrompt = async (args: {
   readonly signal: AbortSignal | undefined
   readonly dispatchSlash: DispatchSlash
   readonly imageQueue: ImageQueue | undefined
+  readonly textInbox: TextInbox | undefined
   readonly externalPromptQueue: ExternalPromptQueue | undefined
   readonly ux: PromptPipelineUxOpts | undefined
   readonly onLocalPromptAccepted: (() => void) | undefined
@@ -167,6 +187,7 @@ const readNextPrompt = async (args: {
     signal,
     dispatchSlash,
     imageQueue,
+    textInbox,
     externalPromptQueue,
     ux,
     onLocalPromptAccepted,
@@ -176,7 +197,7 @@ const readNextPrompt = async (args: {
     const next = await classifyReplLine(signal, dispatchSlash, ux, readPromptLine)
     if (typeof next !== "string") return next
     onLocalPromptAccepted?.()
-    return localPayload(next, imageQueue)
+    return localPayload(next, imageQueue, textInbox)
   }
 
   const localAbort = new AbortController()
@@ -205,7 +226,7 @@ const readNextPrompt = async (args: {
       externalAbort.abort()
       if (typeof winner.value !== "string") return winner.value
       onLocalPromptAccepted?.()
-      return localPayload(winner.value, imageQueue)
+      return localPayload(winner.value, imageQueue, textInbox)
     }
     localAbort.abort()
     return winner.value
@@ -269,6 +290,7 @@ export const composePromptPipeline = (deps: ComposePromptPipelineDeps): PromptSo
   const inner = buildCliPromptSource(
     deps.dispatchSlash,
     deps.imageQueue,
+    deps.textInbox,
     deps.externalPromptQueue,
     deps.ux,
     deps.onLocalPromptAccepted,
