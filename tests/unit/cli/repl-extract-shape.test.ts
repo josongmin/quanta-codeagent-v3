@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import * as repl from "../../../src/apps/cli/repl"
+import * as skillsSurface from "../../../src/apps/cli/repl/skills-surface"
+import * as slashSurface from "../../../src/apps/cli/repl/slash-surface"
+import * as surfaceCompose from "../../../src/apps/cli/repl/surface-compose"
 import * as sessionIo from "../../../src/apps/cli/session-io"
+import * as slashEngine from "../../../src/apps/cli/slash-engine"
 
 /**
  * Phase-3 split shape test (RFC may-22-unified-agent-runtime §3).
@@ -32,6 +36,19 @@ describe("apps/cli/repl + session-io extract shape", () => {
     expect(typeof repl.topLevelUsage).toBe("function")
   })
 
+  test("extracted slash/repl surface helpers export stable entrypoints", () => {
+    expect(typeof slashEngine.createSlashRuntime).toBe("function")
+    expect(typeof slashEngine.isSlashCommand).toBe("function")
+    expect(typeof slashSurface.buildReplSlashCtx).toBe("function")
+    expect(typeof slashSurface.dispatchReplSlash).toBe("function")
+    expect(typeof skillsSurface.buildSkillsCallback).toBe("function")
+    expect(typeof skillsSurface.installPills).toBe("function")
+    expect(typeof surfaceCompose.buildPromptUx).toBe("function")
+    expect(typeof surfaceCompose.createSurfaceState).toBe("function")
+    expect(typeof surfaceCompose.composeSurfaceSlashCtx).toBe("function")
+    expect(typeof surfaceCompose.composeTurnSinks).toBe("function")
+  })
+
   test("session-io.ts exports switchToSessionCwd and persistTurn", () => {
     expect(typeof sessionIo.switchToSessionCwd).toBe("function")
     expect(typeof sessionIo.persistTurn).toBe("function")
@@ -47,5 +64,18 @@ describe("apps/cli/repl + session-io extract shape", () => {
     expect(src).not.toContain("quanta›")
     // The cwd-switch helper is in session-io, not inlined here.
     expect(src).not.toContain("switchToSessionCwd")
+  })
+
+  test("live source keeps slash registry/runtime and repl host/surface split", () => {
+    const slashPath = join(import.meta.dir, "../../../src/apps/cli/slash-commands.ts")
+    const replPath = join(import.meta.dir, "../../../src/apps/cli/repl.ts")
+    const slashSrc = readFileSync(slashPath, "utf8")
+    const replSrc = readFileSync(replPath, "utf8")
+
+    expect(slashSrc).toContain('from "./slash-contract"')
+    expect(slashSrc).toContain('from "./slash-engine"')
+    expect(replSrc).toContain('from "./repl/skills-surface"')
+    expect(replSrc).toContain('from "./repl/slash-surface"')
+    expect(replSrc).toContain('from "./repl/surface-compose"')
   })
 })

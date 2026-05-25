@@ -76,7 +76,7 @@ const selectExplicitAuthorityReviewer = (
  *   3. everything else ⇒ `user`
  */
 export const selectDefaultReviewer = (input: {
-  threadPermission?: ReviewerAuthority
+  threadPermission: ReviewerAuthority | undefined
   permissionMode: PermissionMode
   sandboxProfile: CliReviewerSandboxProfile
   hasAutoReview: boolean

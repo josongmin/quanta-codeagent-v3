@@ -13,12 +13,7 @@ import type { CostPanel } from "../cost-panel"
 import type { DebugCmdState } from "../debug-cmd"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
-import {
-  buildShellSnapshotConfig,
-  buildSummarizerLlm,
-  type SessionDeps,
-  type Tooling,
-} from "../internal"
+import type { SessionDeps, Tooling } from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RejectCounter } from "../reject-counter"
@@ -31,8 +26,7 @@ import {
   type SessionBootstrapDeps,
   type SessionBootstrapResult,
 } from "./session-bootstrap"
-import { selectDefaultReviewer } from "./reviewer-policy"
-import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
+import { buildCliOnConfirm, composeCliSessionDeps } from "./session-deps-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
 
 const askLine = async (prompt: string): Promise<string> => {
@@ -47,21 +41,6 @@ const askLine = async (prompt: string): Promise<string> => {
 /** Build the `onConfirm` callback for tool-permission prompts. Inline diff
  *  preview before the readline question; accept/deny is counted by
  *  `rejectCounter` so consecutive denials can trigger graceful auto-exit. */
-const buildOnConfirm =
-  (idleMonitor: IdleMonitor, rejectCounter: RejectCounter) =>
-  async (action: ToolAction): Promise<boolean> => {
-    if (diffPreviewEnabled()) {
-      const preview = await renderActionDiff(action)
-      if (preview !== undefined) process.stderr.write(`${preview}\n`)
-    }
-    const ans = await askLine(`Allow ${action.tool}? [y/N] `)
-    const accepted = ans.trim().toLowerCase() === "y"
-    if (accepted) rejectCounter.recordAccept()
-    else rejectCounter.recordDeny()
-    idleMonitor.markActive()
-    return accepted
-  }
-
 /** Track D — DebugTracerHandle. Surface owns the live state + the
  *  swap-in/out side effect (mutable proxy port in the stream tee).
  *  The slash adapter consumes ONLY {@link DebugCmdState} I/O — it never
@@ -170,7 +149,13 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     boot.abort.abort()
   })
 
-  const onConfirm = buildOnConfirm(boot.idleMonitor, boot.rejectCounter)
+  const onConfirm = buildCliOnConfirm({
+    idleMonitor: boot.idleMonitor,
+    rejectCounter: boot.rejectCounter,
+    ask: askLine,
+    renderActionDiff,
+    diffPreviewEnabled,
+  })
   const shortCwd = boot.cwd.startsWith(runtime.homeDir)
     ? `~${boot.cwd.slice(runtime.homeDir.length)}`
     : boot.cwd
@@ -201,76 +186,14 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     runtime.spinnerIntervalMs,
   )
 
-  const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
-  const autoReview =
-    boot.permission.classify !== undefined
-      ? createClassifierBackedAutoReview({
-          classify: boot.permission.classify,
-          userReview: userReviewerPort.userReview,
-        })
-      : undefined
-  const reviewerPort =
-    autoReview !== undefined
-      ? createOnConfirmReviewerPort({ onConfirm, autoReview })
-      : userReviewerPort
-  const permissionStore = await deps.loadPermissionStore()
-  const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const defaultReviewer = selectDefaultReviewer({
-    threadPermission,
-    permissionMode: boot.mode,
-    sandboxProfile: runtime.sandboxProfile,
-    hasAutoReview: autoReview !== undefined,
-    hasGuardianReview: boot.tooling.subagentConfig !== undefined,
-  })
-  const planExitPort = createCliPlanExitPort({ ask: askLine })
-  const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
-  const sessionDeps: SessionDeps = {
-    llm: boot.llm,
-    registry: boot.tooling.registry,
-    stream: turnStream,
-    permission: boot.permission,
-    system: boot.system,
-    cwd: boot.cwd,
-    maxTurns: boot.maxTurns,
-    signal: boot.abort.signal,
+  const { sessionDeps } = await composeCliSessionDeps({
+    boot,
+    turnStream,
     onConfirm,
-    store: boot.tooling.store,
-    sessionId: boot.sessionId,
-    embedder: boot.tooling.embedder,
-    memoryConfig: boot.tooling.memoryConfig,
-    planMode: boot.features.planMode,
-    metrics: boot.features.metrics,
-    run: boot.run,
-    subagentConfig: boot.tooling.subagentConfig,
-    skillsConfig: boot.tooling.skillsConfig,
-    compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
-    verifyGuardConfig: boot.tooling.verifyGuardConfig,
-    summarizerLlm: buildSummarizerLlm(boot.provider, boot.abort.signal),
-    admissibility: {
-      ...(permissionStore !== undefined ? { permissionStore } : {}),
-      reviewerPort,
-      defaultReviewer,
-    },
-    planExitPort,
-    userInputPort,
-    onShellEvent: boot.onShellEvent,
-    workMetricsSink: boot.workMetricsSink,
-    ...(boot.lifecycleFollowUpQueue !== undefined
-      ? { followUpQueue: boot.lifecycleFollowUpQueue }
-      : {}),
-    ...(boot.planStore !== undefined ? { planStore: boot.planStore } : {}),
-    // ADR-0237 — per-turn shell-snapshot composition root opt-in. Returns
-    // `undefined` when `QUANTA_SHELL_SNAPSHOT` is unset (and `--shell-snapshot`
-    // is absent), so the conditional spread keeps the assembled `AgentConfig`
-    // byte-identical to the legacy default-OFF shape. When enabled, the helper
-    // builds a Bun-spawner backed `ShellSnapshotPort` and forwards the 5-knob
-    // block (shell / captureAtTurnStart / cleanupOlderThanMs / maxSizeBytes /
-    // shellEnv) — see `internal.ts#buildShellSnapshotConfig` for the env map.
-    ...((): { shellSnapshot?: SessionDeps["shellSnapshot"] } => {
-      const cfg = buildShellSnapshotConfig()
-      return cfg !== undefined ? { shellSnapshot: cfg } : {}
-    })(),
-  }
+    ask: askLine,
+    loadPermissionStore: deps.loadPermissionStore,
+    sandboxProfile: runtime.sandboxProfile,
+  })
 
   const pills = deps.installPills({
     statusBar,
