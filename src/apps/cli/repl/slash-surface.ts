@@ -1,8 +1,16 @@
+import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
+import type { FocusChainPort } from "@/agent/focus-chain"
+import type { GranularRegistry, ThreeWayRestorePort } from "@/agent/per-tool-checkpoint"
 import type { PlanStore } from "@/agent/plan/state"
+import type { SystemPromptVariantRegistry } from "@/agent/system-prompt"
+import type { ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { LLMPort, Message } from "@/llm"
 import type { SessionEnvelopeRecord } from "@/session"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
+import type { ComposerEditPort } from "../edit-message-cmd"
+import type { PlanEditPort } from "../edit-plan-cmd"
+import type { ForkSessionSlashState } from "../fork-checkpoint-cmd"
 import type { HistorySessionState } from "../history-cmd"
 import type { IdleMonitor } from "../idle-monitor"
 import { runImageCmd } from "../image-cmd"
@@ -11,9 +19,18 @@ import type { InspectSlashState } from "../inspect-cmd"
 import { assembleConfig, type SessionDeps } from "../internal"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RewindSlashState } from "../rewind-cmd"
+import type { PerToolCheckpointSlashState } from "../rewind-tool-cmd"
 import type { SideChatSessionState } from "../side-cmd"
 import { isSlashCommand, runSlashCommand, type SkillRow } from "../slash-commands"
+import type { TextInbox } from "../text-inbox"
 import type { WhySlashState } from "../why-cmd"
+import { buildComposerEditAdapter, type ComposerHandle } from "./ctx-adapters/composer-edit-adapter"
+import { buildFocusChainAdapter } from "./ctx-adapters/focus-chain-adapter"
+import { buildForkSessionAdapter } from "./ctx-adapters/fork-session-adapter"
+import { buildIdentityModeAdapter } from "./ctx-adapters/identity-mode-adapter"
+import { buildPerToolCheckpointAdapter } from "./ctx-adapters/per-tool-checkpoint-adapter"
+import { buildPlanEditAdapter } from "./ctx-adapters/plan-edit-adapter"
+import { buildToolProfileAdapter } from "./ctx-adapters/tool-profile-adapter"
 import type { DebugTracerHandle } from "./session-setup"
 
 /** Adapter the REPL composer threads through to `/replay`. The slash command
@@ -71,6 +88,51 @@ export type ReplSlashCtx = Partial<{
     readonly levels: readonly import("@/agent").EffortLevel[]
     readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
   }
+  /** ADR-0291 — `/edit-plan` plan-edit wire. Wraps the surface-owned
+   *  `PlanStore`; absent ⇒ slash prints "not wired in this surface". */
+  planEdit: PlanEditPort
+  /** ADR-0291 — `/edit-message` composer-edit wire. Surface-owned mutable
+   *  pending-text holder; absent ⇒ slash prints "not wired in this surface". */
+  composerEdit: ComposerEditPort
+  /** ADR-0291 — `/fork-checkpoint` 4-verb fork wire. Composes
+   *  `ConversationCheckpointStore` + `defaultForker` (ADR-0226). */
+  forkSession: ForkSessionSlashState
+  /** ADR-0291 — `/rewind-tool` 3-way restore wire. Skeleton today: the
+   *  `restoreFiles/Task/Both` arms may return typed not-yet-wired
+   *  outcomes when the host omits the real ports. */
+  perToolCheckpoint: PerToolCheckpointSlashState
+  /** ADR-0291 — `/profile` tool-profile wire. Adapter over
+   *  `AgentConfig.toolProfile.resolver` + `defaultName`. */
+  profile: {
+    readonly get: () => string
+    readonly set: (
+      name: string,
+    ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
+    readonly list: () => readonly string[]
+  }
+  /** ADR-0291 — `/identity` identity-mode wire. Adapter over
+   *  `AgentConfig.identityModeVariant.registry`. */
+  identity: {
+    readonly get: () => string
+    readonly set: (
+      mode: string,
+    ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
+    readonly list: () => readonly string[]
+  }
+  /** ADR-0291 — `/focus-chain` Cline-style todo tracker wire. Adapter
+   *  over `AgentConfig.focusChain.tracker` (ADR-0219). */
+  focusChain: {
+    readonly snapshot: () => {
+      readonly todos: ReadonlyArray<{ readonly text: string; readonly state: string }>
+      readonly currentTurn: number
+      readonly driftWarning: string | null
+    }
+    readonly reset: () => void
+    readonly skip: () => void
+  }
+  /** ADR-0291 — `/web` text-inbox singleton. Drained by next-turn
+   *  `PromptSource.next()`; absent ⇒ `/web` prints inline. */
+  textInbox: TextInbox
 }>
 
 export interface BuildReplSlashCtxArgs {
@@ -112,7 +174,128 @@ export interface BuildReplSlashCtxArgs {
     readonly levels: readonly import("@/agent").EffortLevel[]
     readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
   }
+  /** ADR-0291 — `/edit-plan`: REPL surface owns the mutable text. When
+   *  omitted, the slash prints "not wired in this surface". */
+  composerHandle?: ComposerHandle | undefined
+  /** ADR-0291 — `/fork-checkpoint`: in-memory ConversationCheckpointStore
+   *  for the rich `defaultForker`. Absent ⇒ slot omitted. */
+  conversationStore?: ConversationCheckpointStore | undefined
+  /** ADR-0291 — `/rewind-tool`: granular registry + (optional) real
+   *  three-way restore port. When `restorePort` is absent, the adapter
+   *  fills with a typed not-yet-wired stub so the slash still resolves
+   *  tag prefixes against the registry. */
+  perToolRegistry?: GranularRegistry | undefined
+  perToolRestorePort?: ThreeWayRestorePort | undefined
+  /** ADR-0291 — `/profile`: AgentConfig.toolProfile block. */
+  toolProfile?:
+    | { readonly resolver: ToolProfileResolver; readonly defaultName?: ToolProfileName }
+    | undefined
+  /** ADR-0291 — `/identity`: AgentConfig.identityModeVariant block. */
+  identityModeVariant?:
+    | {
+        readonly registry: SystemPromptVariantRegistry
+        readonly defaultMode?: import("@/agent/system-prompt").ModeVariantKey
+      }
+    | undefined
+  /** ADR-0291 — `/focus-chain`: AgentConfig.focusChain.tracker. */
+  focusChainTracker?: FocusChainPort | undefined
+  /** ADR-0291 — `/web`: surface-owned text inbox sink. Drained by the
+   *  next-turn PromptSource.next(). */
+  textInbox?: TextInbox | undefined
 }
+
+/** Result of {@link buildNewSlotAdapters} — each field is either the built
+ *  adapter or `undefined` when its upstream port was omitted. Kept private
+ *  so the surface contract stays the public `ReplSlashCtx`. */
+interface NewSlotAdapters {
+  readonly planEdit: PlanEditPort | undefined
+  readonly composerEdit: ComposerEditPort | undefined
+  readonly forkSession: ForkSessionSlashState | undefined
+  readonly perToolCheckpoint: PerToolCheckpointSlashState | undefined
+  readonly profile: ReturnType<typeof buildToolProfileAdapter> | undefined
+  readonly identity: ReturnType<typeof buildIdentityModeAdapter> | undefined
+  readonly focusChain: ReturnType<typeof buildFocusChainAdapter> | undefined
+  readonly textInbox: TextInbox | undefined
+}
+
+/** Build the fork-session adapter when wired; otherwise undefined. */
+const maybeForkSession = (args: BuildReplSlashCtxArgs): ForkSessionSlashState | undefined => {
+  if (args.conversationStore === undefined) return undefined
+  const sid = args.sessionId
+  return buildForkSessionAdapter({
+    conversationStore: args.conversationStore,
+    ...(typeof sid === "string" && sid.length > 0 ? { activeSessionId: sid } : {}),
+  })
+}
+
+/** Build the per-tool-checkpoint adapter when wired; otherwise undefined. */
+const maybePerToolCheckpoint = (
+  args: BuildReplSlashCtxArgs,
+): PerToolCheckpointSlashState | undefined => {
+  if (args.perToolRegistry === undefined) return undefined
+  return buildPerToolCheckpointAdapter({
+    registry: args.perToolRegistry,
+    ...(args.perToolRestorePort !== undefined ? { restore: args.perToolRestorePort } : {}),
+  })
+}
+
+/** Build the tool-profile adapter when wired; otherwise undefined. */
+const maybeProfile = (
+  args: BuildReplSlashCtxArgs,
+): ReturnType<typeof buildToolProfileAdapter> | undefined => {
+  const tp = args.toolProfile
+  if (tp === undefined) return undefined
+  return buildToolProfileAdapter({
+    resolver: tp.resolver,
+    ...(tp.defaultName !== undefined ? { defaultName: tp.defaultName } : {}),
+  })
+}
+
+/** Build the identity-mode adapter when wired; otherwise undefined. */
+const maybeIdentity = (
+  args: BuildReplSlashCtxArgs,
+): ReturnType<typeof buildIdentityModeAdapter> | undefined => {
+  const im = args.identityModeVariant
+  if (im === undefined) return undefined
+  return buildIdentityModeAdapter({
+    registry: im.registry,
+    ...(im.defaultMode !== undefined ? { defaultMode: im.defaultMode } : {}),
+  })
+}
+
+/** Build the ADR-0291 adapters. Pure / no side effects; each gate is
+ *  presence-only so omitting an upstream port omits the corresponding
+ *  ctx slot (default-OFF byte-identical). Extracted from
+ *  {@link buildReplSlashCtx} so each function stays under biome's
+ *  cognitive-complexity ceiling. */
+const buildNewSlotAdapters = (args: BuildReplSlashCtxArgs): NewSlotAdapters => ({
+  planEdit: args.planStore !== undefined ? buildPlanEditAdapter(args.planStore) : undefined,
+  composerEdit:
+    args.composerHandle !== undefined ? buildComposerEditAdapter(args.composerHandle) : undefined,
+  forkSession: maybeForkSession(args),
+  perToolCheckpoint: maybePerToolCheckpoint(args),
+  profile: maybeProfile(args),
+  identity: maybeIdentity(args),
+  focusChain:
+    args.focusChainTracker !== undefined
+      ? buildFocusChainAdapter(args.focusChainTracker)
+      : undefined,
+  textInbox: args.textInbox,
+})
+
+/** Spread the ADR-0291 adapter fields into the surface ctx. Pure / 1:1
+ *  fan-out — kept separate from {@link buildReplSlashCtx} for the same
+ *  cognitive-complexity reason as {@link buildNewSlotAdapters}. */
+const spreadNewSlots = (s: NewSlotAdapters): Partial<ReplSlashCtx> => ({
+  ...(s.planEdit !== undefined ? { planEdit: s.planEdit } : {}),
+  ...(s.composerEdit !== undefined ? { composerEdit: s.composerEdit } : {}),
+  ...(s.forkSession !== undefined ? { forkSession: s.forkSession } : {}),
+  ...(s.perToolCheckpoint !== undefined ? { perToolCheckpoint: s.perToolCheckpoint } : {}),
+  ...(s.profile !== undefined ? { profile: s.profile } : {}),
+  ...(s.identity !== undefined ? { identity: s.identity } : {}),
+  ...(s.focusChain !== undefined ? { focusChain: s.focusChain } : {}),
+  ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
+})
 
 /** Compose the REPL-owned slash adapters into one explicit surface object. */
 export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
@@ -136,6 +319,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     replay,
     effort,
   } = args
+  const newSlots = buildNewSlotAdapters(args)
   return {
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
     idle: idleMonitor,
@@ -166,29 +350,52 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // Session-level reasoning-effort. Closes over the surface's EffortStore
     // (read on `/effort` no-arg) and pill (repainted on `/effort <level>`).
     effort,
+    // ADR-0291 — 8 new slots; each gated by presence so omitting an
+    // upstream port produces a byte-identical "not wired" projection.
+    ...spreadNewSlots(newSlots),
   }
 }
+
+/** Project the pre-ADR-0291 slots. Extracted so each function stays under
+ *  biome's cognitive-complexity ceiling. */
+const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
+  ...(s.skills !== undefined ? { skills: s.skills } : {}),
+  ...(s.idle !== undefined ? { idle: s.idle } : {}),
+  ...(s.rewindSession !== undefined ? { rewindSession: s.rewindSession } : {}),
+  ...(s.mcp !== undefined ? { mcp: s.mcp } : {}),
+  ...(s.cost !== undefined ? { cost: s.cost } : {}),
+  ...(s.planSnapshot !== undefined ? { planSnapshot: s.planSnapshot } : {}),
+  ...(s.history !== undefined ? { history: s.history } : {}),
+  ...(s.branchSearch !== undefined ? { branchSearch: s.branchSearch } : {}),
+  ...(s.side !== undefined ? { side: s.side() } : {}),
+  ...(s.debug !== undefined ? { debug: s.debug } : {}),
+  ...(s.why !== undefined ? { why: s.why } : {}),
+  ...(s.inspect !== undefined ? { inspect: s.inspect } : {}),
+  ...(s.replay !== undefined ? { replay: s.replay } : {}),
+  ...(s.effort !== undefined ? { effort: s.effort } : {}),
+})
+
+/** Project the ADR-0291 slots. 1:1 spread; presence-gated for
+ *  exactOptionalPropertyTypes. */
+const projectAdr0291Slots = (s: ReplSlashCtx): Record<string, unknown> => ({
+  ...(s.planEdit !== undefined ? { planEdit: s.planEdit } : {}),
+  ...(s.composerEdit !== undefined ? { composerEdit: s.composerEdit } : {}),
+  ...(s.forkSession !== undefined ? { forkSession: s.forkSession } : {}),
+  ...(s.perToolCheckpoint !== undefined ? { perToolCheckpoint: s.perToolCheckpoint } : {}),
+  ...(s.profile !== undefined ? { profile: s.profile } : {}),
+  ...(s.identity !== undefined ? { identity: s.identity } : {}),
+  ...(s.focusChain !== undefined ? { focusChain: s.focusChain } : {}),
+  ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
+})
 
 /** Map the surface-owned {@link ReplSlashCtx} into the contract shape that
  *  {@link runSlashCommand} expects. Extracted from {@link dispatchReplSlash}
  *  so the dispatcher stays under biome's cognitive-complexity budget —
  *  every adapter is a 1:1 spread, no branching beyond "absent ⇒ omit". */
-const projectSlashCtx = (slashCtx: ReplSlashCtx | undefined): Record<string, unknown> => ({
-  ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
-  ...(slashCtx?.idle !== undefined ? { idle: slashCtx.idle } : {}),
-  ...(slashCtx?.rewindSession !== undefined ? { rewindSession: slashCtx.rewindSession } : {}),
-  ...(slashCtx?.mcp !== undefined ? { mcp: slashCtx.mcp } : {}),
-  ...(slashCtx?.cost !== undefined ? { cost: slashCtx.cost } : {}),
-  ...(slashCtx?.planSnapshot !== undefined ? { planSnapshot: slashCtx.planSnapshot } : {}),
-  ...(slashCtx?.history !== undefined ? { history: slashCtx.history } : {}),
-  ...(slashCtx?.branchSearch !== undefined ? { branchSearch: slashCtx.branchSearch } : {}),
-  ...(slashCtx?.side !== undefined ? { side: slashCtx.side() } : {}),
-  ...(slashCtx?.debug !== undefined ? { debug: slashCtx.debug } : {}),
-  ...(slashCtx?.why !== undefined ? { why: slashCtx.why } : {}),
-  ...(slashCtx?.inspect !== undefined ? { inspect: slashCtx.inspect } : {}),
-  ...(slashCtx?.replay !== undefined ? { replay: slashCtx.replay } : {}),
-  ...(slashCtx?.effort !== undefined ? { effort: slashCtx.effort } : {}),
-})
+const projectSlashCtx = (slashCtx: ReplSlashCtx | undefined): Record<string, unknown> => {
+  if (slashCtx === undefined) return {}
+  return { ...projectLegacySlots(slashCtx), ...projectAdr0291Slots(slashCtx) }
+}
 
 /** Try to handle `input` as an in-REPL slash command. Returns true iff the
  *  input was routed and consumed by the slash surface; false means the

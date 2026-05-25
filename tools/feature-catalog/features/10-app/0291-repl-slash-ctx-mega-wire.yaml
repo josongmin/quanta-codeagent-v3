@@ -1,0 +1,81 @@
+id: repl-slash-ctx-mega-wire
+title: REPL slash-surface ctx mega-wire (8 slash slots)
+section: 10
+subsystem: REPL surface composition
+order: 71
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:2", "adr-0291", "default-off"]
+depends_on:
+  - slashctx-6-ports-wire-completion
+  - built-in-slash-commands
+  - plan-mode
+  - slash-web-paste-edit
+purpose: |
+  Closes 8 default-OFF `ReplSlashCtx` slots so the corresponding slash
+  commands render their real bodies instead of "not wired in this surface":
+
+    - /edit-plan       → ctx.planEdit     (PlanStore wrapper)
+    - /edit-message    → ctx.composerEdit (mutable composer text)
+    - /fork-checkpoint → ctx.forkSession  (ADR-0226 defaultForker)
+    - /rewind-tool     → ctx.perToolCheckpoint (registry + 3-way restore)
+    - /profile         → ctx.profile      (ADR-0213 ToolProfileResolver)
+    - /identity        → ctx.identity     (ADR-0211 mode-variant registry)
+    - /focus-chain     → ctx.focusChain   (ADR-0219 FocusChainPort)
+    - /web (inbox leg) → ctx.textInbox    (ADR-0224 TextInbox)
+
+  Each adapter lives under `src/apps/cli/repl/ctx-adapters/` and is a
+  thin closure over the upstream port. Default-OFF is enforced via
+  spread-conditional projection — when the host omits a port, the ctx
+  slot is omitted (byte-identical legacy projection).
+
+  Adapter factories are pure (no IO, no clock reads at construction).
+  Mutation lives only in two cells:
+    - tool-profile  (active name)
+    - identity-mode (active mode)
+  Both are surface-state mutations; composition-root re-build is held
+  for a follow-up slice.
+
+  Per-tool-checkpoint adapter ships a typed stub for `restoreFiles/
+  Task/Both` when the host only wires the granular registry; the stub
+  returns `RestoreOutcome { ok:false, errorCode:"shadow-odb-not-
+  configured" }` so the hellgate seals the contract shape today.
+evidence:
+  code:
+    - src/apps/cli/repl/slash-surface.ts
+    - src/apps/cli/repl/ctx-adapters/plan-edit-adapter.ts
+    - src/apps/cli/repl/ctx-adapters/composer-edit-adapter.ts
+    - src/apps/cli/repl/ctx-adapters/fork-session-adapter.ts
+    - src/apps/cli/repl/ctx-adapters/per-tool-checkpoint-adapter.ts
+    - src/apps/cli/repl/ctx-adapters/tool-profile-adapter.ts
+    - src/apps/cli/repl/ctx-adapters/identity-mode-adapter.ts
+    - src/apps/cli/repl/ctx-adapters/focus-chain-adapter.ts
+    - src/apps/cli/repl/ctx-adapters/text-inbox-singleton.ts
+  adrs:
+    - docs/decisions/0291-repl-slash-ctx-mega-wire.md
+  tests:
+    unit:
+      - tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF: every new field on `BuildReplSlashCtxArgs` is optional;
+  the projection short-circuits when the upstream port is absent.
+  20 hellgate cases / 77 expects / 0 fail.
+
+  Slice fence preserved — `surface-compose.ts` is NOT modified by this
+  ADR. Composition-root wiring is held for a follow-up slice so the
+  REPL surface is byte-identical until the host opts in to the new
+  args.
+
+  No new closed enums or error codes are introduced; the stub restore
+  port re-uses RestoreErrorCode.shadow-odb-not-configured (port.ts).
