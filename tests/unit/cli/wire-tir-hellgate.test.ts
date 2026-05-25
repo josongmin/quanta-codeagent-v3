@@ -400,7 +400,9 @@ describe("Cross-track — buildReplSlashCtx threads inspect + replay slots", () 
     planStore: undefined,
     branchProgress: undefined,
     getHistory: (): readonly never[] => [],
-    sessionDeps: {} as never,
+    // ADR-0304 — SideConversationPort stub (start never invoked in these
+    // tests; they exercise the inspect/replay slots only).
+    sideConvPort: { start: async () => ({}) as never },
     abortSignal: new AbortController().signal,
     debugHandle: undefined,
     llm: {} as never,

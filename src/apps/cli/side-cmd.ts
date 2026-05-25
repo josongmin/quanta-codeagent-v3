@@ -20,26 +20,29 @@
  *                                        dropped by {@link runSideChat}.
  *   - `/side --help`                   → print usage + the default allowlist.
  *
- * Default-OFF: without an injected {@link SideChatSessionState} on
+ * Default-OFF: without an injected {@link SideCmdSlashState} on
  * {@link SlashContext.side}, the command prints "side chat not wired in this
  * surface" and exits 0 (byte-identical to NOT registering the command). The
- * surface (REPL / one-shot session) is responsible for wiring a session-time
- * `OrchestrateDeps` + `assembleConfig` + a live `Message[]` reference.
+ * surface (REPL / one-shot session) is responsible for wiring a
+ * {@link SideConversationPort} (built once via the surface's
+ * `buildSideConversationPort` adapter) + a live-transcript accessor + an
+ * abort signal.
  *
  * Slice contract: lives in `src/apps/cli/**` — allowed to import `@/runner`
- * (where {@link runSideChat} lives) per the CLI's position at the top of the
- * DAG. The command body NEVER reads `process.env` — the surface composer
- * maps `QUANTA_SIDE_*` env onto the session state shape.
+ * (where {@link SideConversationPort} and `SIDE_CHAT_*` constants live) per
+ * the CLI's position at the top of the DAG. The command body NEVER reads
+ * `process.env` — the surface composer maps `QUANTA_SIDE_*` env onto the
+ * adapter's defaults at construction. The slash command itself NEVER
+ * imports `OrchestrateDeps` / `RunOnceInput` / `assembleConfig` — those
+ * belong with the port adapter (ADR-0304).
  */
 
 import type { Message } from "@/llm"
 import {
-  type OrchestrateDeps,
-  type RunOnceInput,
-  runSideChat,
   SIDE_CHAT_DEFAULT_READ_ONLY,
   SIDE_CHAT_MAX_TURNS_CAP,
   type SideChatContextInheritance,
+  type SideConversationPort,
 } from "@/runner"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
@@ -48,27 +51,28 @@ import type { SlashCommand, SlashContext } from "./slash-commands"
  * (`apps/cli/repl.ts` or a future session loop) onto its
  * {@link SlashContext.side} field. Absent ⇒ "/side: not wired" + exit 0.
  *
- *  - `deps` — the main session's {@link OrchestrateDeps}. {@link runSideChat}
- *    deliberately STRIPS the side-effecting fields (`store`, `metrics`,
- *    `memoryConfig`, …) so the main session is unaffected.
- *  - `assembleConfig` — same per-turn assembler the main session uses.
- *  - `messages` — live transcript reference. Used READ-ONLY for the
- *    `--inherit=last-turn` mode; never mutated.
+ *  - `port` — surface-built {@link SideConversationPort}. The port captures
+ *    the main session's `SessionDeps` + `assembleConfig` in closure scope;
+ *    the slash command itself never sees those.
+ *  - `getHistory` — live-transcript accessor. Called PER `/side` invocation
+ *    so the snapshot passed into `port.start({ messages })` reflects the
+ *    actual transcript at call time (rather than a stale binding captured
+ *    when the REPL booted). Used read-only for `--inherit=last-turn`.
  *  - `defaultTools` — surface-resolved default allowlist (typically
  *    {@link SIDE_CHAT_DEFAULT_READ_ONLY}, optionally overridden via
- *    `QUANTA_SIDE_DEFAULT_TOOLS`). Absent ⇒ falls back to the module default.
- *  - `maxTurns` — surface-resolved default max-turns cap (typically read from
- *    `QUANTA_SIDE_MAX_TURNS` if set). The runner additionally clamps to
+ *    `QUANTA_SIDE_DEFAULT_TOOLS`). A per-call `--tools=` flag wins.
+ *  - `defaultMaxTurns` — surface-resolved default max-turns cap (typically
+ *    read from `QUANTA_SIDE_MAX_TURNS` if set). Forwarded to the port when
+ *    no per-call override is supplied; the runner additionally clamps to
  *    {@link SIDE_CHAT_MAX_TURNS_CAP}.
- *  - `signal` — surface-supplied abort signal. Plumbed straight into
- *    `runSideChat`.
+ *  - `signal` — surface-supplied abort signal. Passed through `port.start`
+ *    per-call (every invocation re-reads the surface's current signal).
  */
-export interface SideChatSessionState {
-  readonly deps: OrchestrateDeps
-  readonly assembleConfig: RunOnceInput["assembleConfig"]
-  readonly messages: readonly Message[]
+export interface SideCmdSlashState {
+  readonly port: SideConversationPort
+  readonly getHistory: () => readonly Message[]
   readonly defaultTools?: readonly string[]
-  readonly maxTurns?: number
+  readonly defaultMaxTurns?: number
   readonly signal: AbortSignal
 }
 
@@ -223,18 +227,13 @@ export const sideCmd: SlashCommand = {
 
     renderHeader(ctx, parsed.prompt)
     try {
-      const allowlist = parsed.tools ?? state.defaultTools ?? SIDE_CHAT_DEFAULT_READ_ONLY
-      const maxTurns = state.maxTurns ?? 3
-      const inheritance = parsed.inherit ?? "system"
-      const result = await runSideChat({
-        prompt: parsed.prompt,
-        deps: state.deps,
-        assembleConfig: state.assembleConfig,
-        mainHistory: state.messages,
-        contextInheritance: inheritance,
-        toolAllowlist: allowlist,
-        maxTurns,
+      const result = await state.port.start({
+        question: parsed.prompt,
+        messages: state.getHistory(),
         signal: state.signal,
+        ...(parsed.inherit !== undefined ? { inherit: parsed.inherit } : {}),
+        ...(parsed.tools !== undefined ? { tools: parsed.tools } : {}),
+        ...(state.defaultMaxTurns !== undefined ? { maxTurns: state.defaultMaxTurns } : {}),
       })
       if (result.answerText.length > 0) {
         ctx.out(`${result.answerText}\n`)

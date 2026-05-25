@@ -1,25 +1,25 @@
 /**
  * `/side` slash-command contract — unit tests.
  *
+ * After ADR-0304 the slash command consumes a typed {@link SideConversationPort}
+ * instead of capturing `(SessionDeps, assembleConfig, messages, signal)`
+ * itself. These tests inject a fake port directly so they can pin the
+ * surface contract without standing up the runner.
+ *
  *  - argv parsing (positional, --inherit, --tools, --help, unknown flag).
  *  - default-OFF wiring: no `ctx.side` ⇒ "not wired" + exit 0.
  *  - help branch.
  *  - empty-prompt rejection.
  *  - successful side-chat path ⇒ answer + footer rendered to stdout.
  *  - error path ⇒ exit 1 + message on stderr.
- *  - --inherit=last-turn forwards inheritance mode.
- *  - --tools=<csv> overrides the default allowlist.
+ *  - --inherit=last-turn forwards the inheritance mode to port.start.
+ *  - --tools=<csv> forwards the override list to port.start.
+ *  - port.start receives the live transcript snapshot via getHistory().
  */
 import { describe, expect, test } from "bun:test"
-import type { AgentConfig } from "@/agent"
 import type { Message } from "@/llm"
-import type { OrchestrateDeps } from "@/runner"
-import { defaultTools, ToolRegistry } from "@/tool"
-import {
-  parseSideCmdArgs,
-  type SideChatSessionState,
-  sideCmd,
-} from "../../../src/apps/cli/side-cmd"
+import type { SideChatResult, SideConversationPort, SideConversationStartArgs } from "@/runner"
+import { parseSideCmdArgs, type SideCmdSlashState, sideCmd } from "../../../src/apps/cli/side-cmd"
 import type { SlashContext } from "../../../src/apps/cli/slash-commands"
 
 /** Capture stdout / stderr for a slash-command run. */
@@ -45,66 +45,40 @@ const makeCtx = (
   return { ctx, stdout, stderr }
 }
 
-const stubDeps = (signal: AbortSignal): OrchestrateDeps =>
-  ({
-    llm: { stream: async function* () {} } as never,
-    registry: new ToolRegistry(defaultTools),
-    stream: { emit: () => undefined } as never,
-    permission: { mode: "default" } as never,
-    system: "test-system",
-    cwd: "/tmp",
-    maxTurns: 99,
-    signal,
-    onConfirm: async () => false,
-    store: undefined,
-    sessionId: "test-session",
-    embedder: undefined,
-    memoryConfig: undefined,
-    planMode: false,
-    metrics: undefined,
-    run: undefined,
-    subagentConfig: undefined,
-    skillsConfig: undefined,
-    compactionBreakerConfig: undefined,
-    verifyGuardConfig: undefined,
-    summarizerLlm: undefined,
-    onShellEvent: undefined,
-    workMetricsSink: undefined,
-  }) satisfies OrchestrateDeps
-
-/** Build a side-chat session state whose LLM stream yields a fixed answer. */
-const makeSessionState = (
-  signal: AbortSignal,
-  answer: string,
-  capture: { messagesSeen?: Message[]; toolsSeenCount?: number } = {},
-): SideChatSessionState => {
-  return {
-    deps: stubDeps(signal),
-    assembleConfig: (messages: Message[], deps: OrchestrateDeps): AgentConfig => {
-      capture.messagesSeen = messages
-      capture.toolsSeenCount = deps.registry.specs().length
-      return {
-        llm: {
-          async *stream() {
-            yield { type: "text_delta", delta: answer }
-            yield { type: "message_stop", stop_reason: "end_turn" }
-          },
-        } as never,
-        registry: deps.registry,
-        stream: deps.stream,
-        permission: deps.permission,
-        messages,
-        system: deps.system,
-        cwd: deps.cwd,
-        maxTurns: deps.maxTurns,
-        signal: deps.signal,
-        onConfirm: deps.onConfirm,
-      }
-    },
-    messages: [],
-    signal,
-  }
+interface PortCapture {
+  calls: number
+  lastArgs?: SideConversationStartArgs
 }
+
+/** Build a fake {@link SideConversationPort} that returns a fixed
+ *  {@link SideChatResult}. The capture mirrors `start()`'s args so callers
+ *  can assert exactly what the slash command passed in. */
+const makeFakePort = (result: SideChatResult, capture: PortCapture): SideConversationPort => ({
+  start: async (req: SideConversationStartArgs): Promise<SideChatResult> => {
+    capture.calls++
+    capture.lastArgs = req
+    return result
+  },
+})
+
+const okResult = (over: Partial<SideChatResult> = {}): SideChatResult => ({
+  outcome: { messages: [] } as never,
+  answerText: "ok",
+  inputTokens: 0,
+  outputTokens: 0,
+  toolsAvailable: 0,
+  ...over,
+})
+
+const makeState = (
+  port: SideConversationPort,
+  history: readonly Message[] = [],
+  signal: AbortSignal = new AbortController().signal,
+): SideCmdSlashState => ({
+  port,
+  getHistory: () => history,
+  signal,
+})
 
 describe("parseSideCmdArgs", () => {
   test("positional tokens join into the prompt", () => {
@@ -173,75 +147,81 @@ describe("/side slash command", () => {
     expect(stderr.join("")).toContain("expected a question")
   })
 
-  test("happy path: renders header + answer + footer", async () => {
-    const abort = new AbortController()
-    const capture: { messagesSeen?: Message[]; toolsSeenCount?: number } = {}
-    const { ctx, stdout } = makeCtx({
-      side: makeSessionState(abort.signal, "bun test", capture),
-    })
+  test("happy path: renders header + answer + footer; port.start called once with the question", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(okResult({ answerText: "bun test", toolsAvailable: 3 }), capture)
+    const { ctx, stdout } = makeCtx({ side: makeState(port) })
     const rc = await sideCmd.run(["what's", "the", "test", "command?"], ctx)
     expect(rc).toBe(0)
     const out = stdout.join("")
-    // Header echo of the prompt.
     expect(out).toContain("/side")
     expect(out).toContain("what's the test command?")
-    // Answer body painted.
     expect(out).toContain("bun test")
-    // Footer with separation note.
     expect(out).toContain("separate from main session")
+    expect(capture.calls).toBe(1)
+    expect(capture.lastArgs?.question).toBe("what's the test command?")
   })
 
-  test("--inherit=last-turn forwards inheritance to the assembler", async () => {
-    const abort = new AbortController()
-    const capture: { messagesSeen?: Message[] } = {}
-    const state = makeSessionState(abort.signal, "ok", capture)
-    // Inject a 2-message main history via the wrapped state.
-    const stateWithHistory: SideChatSessionState = {
-      ...state,
-      messages: [
-        { role: "user", content: [{ type: "text", text: "main-u" }] },
-        { role: "assistant", content: [{ type: "text", text: "main-a" }] },
-      ],
-    }
-    const { ctx } = makeCtx({ side: stateWithHistory })
+  test("--inherit=last-turn forwards mode to port; messages snapshot reflects getHistory()", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(okResult(), capture)
+    const history: Message[] = [
+      { role: "user", content: [{ type: "text", text: "main-u" }] },
+      { role: "assistant", content: [{ type: "text", text: "main-a" }] },
+    ]
+    const { ctx } = makeCtx({ side: makeState(port, history) })
     const rc = await sideCmd.run(["--inherit=last-turn", "follow-up?"], ctx)
     expect(rc).toBe(0)
-    // Assembler should have seen the inherited pair + the side prompt.
-    const seen = capture.messagesSeen ?? []
-    expect(seen.length).toBe(3)
-    expect((seen[0]?.content[0] as { type: "text"; text: string }).text).toBe("main-u")
-    expect((seen[2]?.content[0] as { type: "text"; text: string }).text).toBe("follow-up?")
+    expect(capture.lastArgs?.inherit).toBe("last-turn")
+    expect(capture.lastArgs?.messages.length).toBe(2)
+    expect((capture.lastArgs?.messages[0]?.content[0] as { text?: string })?.text).toBe("main-u")
   })
 
-  test("--tools=<csv> overrides the default allowlist", async () => {
-    const abort = new AbortController()
-    const capture: { toolsSeenCount?: number } = {}
-    const { ctx } = makeCtx({
-      side: makeSessionState(abort.signal, "ok", capture),
-    })
-    const rc = await sideCmd.run(["--tools=read", "q"], ctx)
+  test("--tools=<csv> forwards the override list to port.start", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(okResult({ toolsAvailable: 1 }), capture)
+    const { ctx } = makeCtx({ side: makeState(port) })
+    const rc = await sideCmd.run(["--tools=read,grep", "q"], ctx)
     expect(rc).toBe(0)
-    // Only `read` was allowed — registry should hold exactly 1 tool.
-    expect(capture.toolsSeenCount).toBe(1)
+    expect(capture.lastArgs?.tools).toEqual(["read", "grep"])
   })
 
-  test("--tools= forbidden tools are dropped (deny-default backstop)", async () => {
-    const abort = new AbortController()
-    const capture: { toolsSeenCount?: number } = {}
-    const { ctx } = makeCtx({
-      side: makeSessionState(abort.signal, "ok", capture),
-    })
+  test("--tools= (forbidden names) STILL forwards verbatim — port's adapter applies the deny filter", async () => {
+    // After ADR-0304 the slash command no longer knows about
+    // SIDE_CHAT_FORBIDDEN; the runner (called via port.start) still drops
+    // forbidden names physically from the registry. The slash just
+    // forwards the user's list verbatim.
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(okResult(), capture)
+    const { ctx } = makeCtx({ side: makeState(port) })
     const rc = await sideCmd.run(["--tools=read,write,bash", "q"], ctx)
     expect(rc).toBe(0)
-    // `read` only — `write` and `bash` are forbidden and dropped.
-    expect(capture.toolsSeenCount).toBe(1)
+    expect(capture.lastArgs?.tools).toEqual(["read", "write", "bash"])
   })
 
-  test("--inherit=bogus ⇒ exit 1 + message on stderr", async () => {
-    const { ctx, stderr } = makeCtx()
+  test("--inherit=bogus ⇒ exit 1 + message on stderr; port.start NEVER called", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(okResult(), capture)
+    const { ctx, stderr } = makeCtx({ side: makeState(port) })
     const rc = await sideCmd.run(["--inherit=bogus", "q"], ctx)
     expect(rc).toBe(1)
     expect(stderr.join("")).toContain("invalid --inherit")
+    expect(capture.calls).toBe(0)
+  })
+
+  test("port.start throws ⇒ exit 1 + message painted to stderr", async () => {
+    const failingPort: SideConversationPort = {
+      start: async () => {
+        throw new Error("BOOM-side")
+      },
+    }
+    const { ctx, stdout, stderr } = makeCtx({ side: makeState(failingPort) })
+    const rc = await sideCmd.run(["q"], ctx)
+    expect(rc).toBe(1)
+    expect(stderr.join("")).toContain("/side: BOOM-side")
+    // Header still painted before the throw — proves dispatch crossed
+    // into the real branch.
+    expect(stdout.join("")).toContain("- /side - q")
   })
 
   test("sideCmd is registered in the BUILTINS table (re-export sanity)", async () => {
@@ -250,40 +230,46 @@ describe("/side slash command", () => {
     expect(names).toContain("/side")
   })
 
-  test("footer renders the side-chat's actual token tally (not 0/0)", async () => {
-    // Wire a fake LLM that yields a `usage` event with non-zero counts. The
-    // tally tee inside `runSideChat` sums these into the result, and the
-    // footer renders `N tok`. Without the wiring, this would render `0 tok`.
-    const abort = new AbortController()
-    const state: SideChatSessionState = {
-      deps: stubDeps(abort.signal),
-      assembleConfig: (messages: Message[], deps: OrchestrateDeps): AgentConfig => ({
-        llm: {
-          async *stream() {
-            yield { type: "text_delta", delta: "answer" }
-            yield { type: "usage", inputTokens: 11, outputTokens: 22, model: "test" }
-            yield { type: "message_stop", stop_reason: "end_turn" }
-          },
-        } as never,
-        registry: deps.registry,
-        stream: deps.stream,
-        permission: deps.permission,
-        messages,
-        system: deps.system,
-        cwd: deps.cwd,
-        maxTurns: deps.maxTurns,
-        signal: deps.signal,
-        onConfirm: deps.onConfirm,
+  test("footer renders the side-chat's actual token tally (not 0/0) when port returns usage", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(
+      okResult({
+        answerText: "answer",
+        inputTokens: 11,
+        outputTokens: 22,
+        toolsAvailable: 1,
       }),
-      messages: [],
-      signal: abort.signal,
-    }
-    const { ctx, stdout } = makeCtx({ side: state })
+      capture,
+    )
+    const { ctx, stdout } = makeCtx({ side: makeState(port) })
     const rc = await sideCmd.run(["q"], ctx)
     expect(rc).toBe(0)
     const out = stdout.join("")
-    // 11 + 22 = 33 — the footer sums input/output for the `tok` segment.
     expect(out).toContain("33 tok")
     expect(out).not.toContain("0 tok")
+  })
+
+  test("defaultMaxTurns from state ⇒ forwarded as `maxTurns` on port.start (when no --flag given)", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(okResult(), capture)
+    const state: SideCmdSlashState = {
+      port,
+      getHistory: () => [],
+      signal: new AbortController().signal,
+      defaultMaxTurns: 4,
+    }
+    const { ctx } = makeCtx({ side: state })
+    const rc = await sideCmd.run(["q"], ctx)
+    expect(rc).toBe(0)
+    expect(capture.lastArgs?.maxTurns).toBe(4)
+  })
+
+  test("missing answerText ⇒ falls back to the '(no answer …)' line", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const port = makeFakePort(okResult({ answerText: "" }), capture)
+    const { ctx, stdout } = makeCtx({ side: makeState(port) })
+    const rc = await sideCmd.run(["q"], ctx)
+    expect(rc).toBe(0)
+    expect(stdout.join("")).toContain("(no answer")
   })
 })

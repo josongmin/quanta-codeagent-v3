@@ -28,6 +28,7 @@ import {
 import { logger } from "@/shared"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
+import { assembleConfig } from "../internal"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
@@ -44,6 +45,7 @@ import {
 } from "./playbook-trigger-surface-seam"
 import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
+import { buildSideConversationPort } from "./side-conv-wire"
 import { buildSkillsCallback } from "./skills-surface"
 import { buildReplSlashCtx, type ReplaySlashState, type ReplSlashCtx } from "./slash-surface"
 
@@ -405,7 +407,13 @@ export const composeSurfaceWires = (
     planStore: setup.planStore,
     branchProgress: setup.branchProgress,
     getHistory: () => state.history,
-    sessionDeps: setup.sessionDeps,
+    // ADR-0304 — `assembleConfig` is captured ONCE here (the only place the
+    // CLI surface code touches it for the `/side` path). The slash-surface
+    // layer downstream sees only the typed {@link SideConversationPort}.
+    sideConvPort: buildSideConversationPort({
+      deps: setup.sessionDeps,
+      assembleConfig,
+    }),
     abortSignal: setup.abort.signal,
     debugHandle: setup.debugHandle,
     llm: setup.llm,
