@@ -1,0 +1,59 @@
+id: search-pipeline-composer
+title: SearchPipeline composer + 5 pre-built presets (ADR-0265)
+section: 4
+subsystem: Retrieval — pure DAG composer over lexical / semantic / rerank / RRF / budget-gate
+order: 50
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, default-off, slice:retrieval]
+depends_on: []
+purpose: |
+  Pure functional DAG composer for retrieval pipelines. Reduces a
+  `Stage[]` discriminated union (lexical / semantic / rerank / rrf /
+  budget-gate) to a `SearchPipeline { search(query) → Result<SearchHit[],
+  PipelineError> }`. Generalizes the legacy `runHybridQuery` 3-stage
+  funnel without touching the sibling slice files — every join is INLINE
+  duck-typed, so the composer never imports
+  `src/retrieval/{lexical,semantic,reranker,cache,batching}.ts` nor
+  `@/agent/budget-ledger`. Ships five pre-built presets so callers never
+  need to know the `Stage` shape for the common cases. RRF uses the
+  Cormack 2009 published k=60 constant (formula numerically locked by
+  hellgate HELL-PI-04). Default-OFF — nothing in @/agent / @/runner /
+  @/apps instantiates a pipeline at construction (HELL-PI-14 enforces
+  this via source-text grep).
+evidence:
+  code:
+    - src/retrieval/pipeline/types.ts
+    - src/retrieval/pipeline/port.ts
+    - src/retrieval/pipeline/compose.ts
+    - src/retrieval/pipeline/lexical-only.ts
+    - src/retrieval/pipeline/semantic-only.ts
+    - src/retrieval/pipeline/parallel-rrf.ts
+    - src/retrieval/pipeline/semantic-then-rerank.ts
+    - src/retrieval/pipeline/budget-aware.ts
+    - src/retrieval/pipeline/index.ts
+  adrs: [265, 254, 260, 262, 263, 264]
+  tests:
+    unit:
+      - tests/unit/retrieval/pipeline-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: |
+  No automatic wiring into the dispatch loop, the agent assembly root, or
+  any surface. The composer is a leaf primitive — callers in @/agent
+  opt in by importing the sub-barrel explicitly and adapting their
+  concrete adapters (`LexicalSearchPort`, `SemanticIndex`, etc.) to the
+  inline duck-typed ports declared in `types.ts`. Cross-slice wiring is
+  a separate ADR.
+notes: |
+  RRF formula and the k=60 constant are inlined in `compose.ts` rather
+  than imported from the sibling `score-fusion-rrf.ts`. This is a
+  deliberate code duplicate forced by the slice fence; HELL-PI-04 locks
+  the numeric formula so a future divergence is caught at the boundary,
+  not silently merged.
