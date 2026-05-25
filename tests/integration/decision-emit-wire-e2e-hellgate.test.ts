@@ -232,10 +232,12 @@ describe("ADR-0269 Phase 3 wire — REPL fs-jail sink lifecycle", () => {
     expect(src).toContain("clearFsJailDecisionSink()")
     // The clear MUST live inside the shutdownMcp wrapper (not as a free
     // call) so it fires at session-end, not at setupSession return.
-    const clearIdx = src.indexOf("clearFsJailDecisionSink()")
+    // `lastIndexOf` skips earlier doc-comment mentions of the call and
+    // targets the actual invocation inside the wrapper.
+    const clearCallIdx = src.lastIndexOf("clearFsJailDecisionSink()")
     const shutdownIdx = src.indexOf("shutdownMcp: async")
     expect(shutdownIdx).toBeGreaterThanOrEqual(0)
-    expect(clearIdx).toBeGreaterThan(shutdownIdx)
+    expect(clearCallIdx).toBeGreaterThan(shutdownIdx)
   })
 })
 
