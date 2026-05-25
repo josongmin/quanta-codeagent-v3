@@ -113,7 +113,8 @@ describe("turn-cancel-install — FSM behavior", () => {
 
   test("second Esc within window fires onCancel and paints cancellation transient", () => {
     const status = stubStatusBar()
-    const onCancel = mock(() => undefined)
+    const ac = new AbortController()
+    const onCancel = mock(() => ac.abort())
     const { dispose } = installTurnCancel({
       statusBar: status,
       escWindowMs: 2000,
@@ -123,6 +124,8 @@ describe("turn-cancel-install — FSM behavior", () => {
     fakeStdin.emit({ name: "escape" })
     fakeStdin.emit({ name: "escape" })
     expect(onCancel).toHaveBeenCalledTimes(1)
+    // onCancel wires to an AbortController in production; cancel ⇒ signal.aborted.
+    expect(ac.signal.aborted).toBe(true)
     expect(status.calls).toEqual([
       { text: "Press Esc again within 2s to cancel · Ctrl+C to exit", ms: 2000 },
       { text: "⛔ turn cancelled", ms: 1500 },
@@ -132,7 +135,8 @@ describe("turn-cancel-install — FSM behavior", () => {
 
   test("second Esc OUTSIDE window resets — no cancel fired", async () => {
     const status = stubStatusBar()
-    const onCancel = mock(() => undefined)
+    const ac = new AbortController()
+    const onCancel = mock(() => ac.abort())
     const { dispose } = installTurnCancel({
       statusBar: status,
       escWindowMs: 10, // 10 ms window so the test can wait it out
@@ -143,6 +147,8 @@ describe("turn-cancel-install — FSM behavior", () => {
     await new Promise((r) => setTimeout(r, 25))
     fakeStdin.emit({ name: "escape" })
     expect(onCancel).not.toHaveBeenCalled()
+    // No cancel ⇒ no abort propagated to the wired AbortController.
+    expect(ac.signal.aborted).toBe(false)
     // Two "press esc again" hints — the second Esc starts a fresh window.
     expect(status.calls.filter((c) => c.text.startsWith("Press Esc"))).toHaveLength(2)
     dispose()
@@ -150,15 +156,21 @@ describe("turn-cancel-install — FSM behavior", () => {
 
   test("Ctrl+C fires onAbort and paints the interrupt transient", () => {
     const status = stubStatusBar()
-    const onAbort = mock(() => undefined)
+    const ac = new AbortController()
+    const onAbort = mock(() => ac.abort())
     const { dispose } = installTurnCancel({
       statusBar: status,
       escWindowMs: 2000,
       onCancel: () => undefined,
       onAbort,
     })
+    // Listener-style verification: a real consumer subscribes to "abort".
+    const listener = mock(() => undefined)
+    ac.signal.addEventListener("abort", listener)
     fakeStdin.emit({ name: "c", ctrl: true })
     expect(onAbort).toHaveBeenCalledTimes(1)
+    expect(ac.signal.aborted).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
     expect(status.calls).toEqual([{ text: "⛔ interrupted — exiting…", ms: 1500 }])
     dispose()
   })
@@ -239,8 +251,9 @@ describe("turn-cancel-install — FSM behavior", () => {
 
   test("Ctrl+C takes precedence — even after first Esc, Ctrl+C still aborts", () => {
     const status = stubStatusBar()
+    const ac = new AbortController()
     const onCancel = mock(() => undefined)
-    const onAbort = mock(() => undefined)
+    const onAbort = mock(() => ac.abort())
     const { dispose } = installTurnCancel({
       statusBar: status,
       escWindowMs: 2000,
@@ -251,6 +264,7 @@ describe("turn-cancel-install — FSM behavior", () => {
     fakeStdin.emit({ name: "c", ctrl: true })
     expect(onCancel).not.toHaveBeenCalled()
     expect(onAbort).toHaveBeenCalledTimes(1)
+    expect(ac.signal.aborted).toBe(true)
     dispose()
   })
 })

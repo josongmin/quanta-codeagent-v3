@@ -117,11 +117,11 @@ describe("isInterruptOp / isCancelSubagentOp type guards", () => {
   const shutdown: Submission = { id: "s5", op: { kind: "shutdown" } }
   const reload: Submission = { id: "s6", op: { kind: "reload_user_config" } }
 
-  test("isInterruptOp: matches both bare interrupt + interrupt-with-turnId", () => {
+  test("isInterruptOp type guard: positive arm matches bare op + op-with-turnId", () => {
     expect(isInterruptOp(interrupt)).toBe(true)
     expect(isInterruptOp(interruptWithTurn)).toBe(true)
   })
-  test("isInterruptOp: rejects every non-interrupt kind", () => {
+  test("isInterruptOp type guard: negative arm rejects every non-matching kind", () => {
     expect(isInterruptOp(userInput)).toBe(false)
     expect(isInterruptOp(cancelSub)).toBe(false)
     expect(isInterruptOp(shutdown)).toBe(false)

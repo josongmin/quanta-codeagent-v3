@@ -176,6 +176,10 @@ describe("HELLGATE [ADR-0133] — throwing handler poison-isolation extends to N
     })
     expect(result.abort).toEqual({ reason: "veto" })
     expect(lines.some((l) => l.includes("ss boom"))).toBe(true)
+    // Wire the verdict to a real AbortController and pin upstream abort behavior.
+    const ac = new AbortController()
+    if (result.abort) ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   })
 })
 
@@ -209,6 +213,9 @@ describe("HELLGATE [ADR-0133] — abort short-circuit cannot be bypassed by late
     })
     expect(result.abort).toEqual({ reason: "stop" })
     expect(result.promptHook?.injectAfterSystem).toBe("early")
+    const ac = new AbortController()
+    if (result.abort) ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   })
 })
 

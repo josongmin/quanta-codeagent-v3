@@ -71,14 +71,21 @@ describe("mid-turn — A. defaultInterruptionPolicy", () => {
     expect(d.action).toBe("queue")
   })
 
-  test("HELL-2: mode=cancel-and-replace → action=cancel", () => {
+  test("HELL-2: mode=cancel-and-replace → action=cancel propagates to AbortSignal", () => {
     const d = policy.decide(mkInput("stop now", { mode: "cancel-and-replace" }), ctx)
     expect(d.action).toBe("cancel")
+    // Caller wiring: cancel decision MUST be sufficient to abort the live turn.
+    const ac = new AbortController()
+    if (d.action === "cancel") ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   })
 
-  test("HELL-3: mode=cancel-and-amend → action=cancel", () => {
+  test("HELL-3: mode=cancel-and-amend → action=cancel propagates to AbortSignal", () => {
     const d = policy.decide(mkInput("also include X", { mode: "cancel-and-amend" }), ctx)
     expect(d.action).toBe("cancel")
+    const ac = new AbortController()
+    if (d.action === "cancel") ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   })
 
   test("HELL-4: unknown mode → action=queue (defensive)", () => {
@@ -107,14 +114,19 @@ describe("mid-turn — B. always-* stocks", () => {
     )
   })
 
-  test("HELL-6: alwaysCancel → action=cancel regardless of mode", () => {
-    expect(alwaysCancelPolicy.decide(mkInput("a", { mode: "queue" }), ctx).action).toBe("cancel")
-    expect(
-      alwaysCancelPolicy.decide(mkInput("a", { mode: "cancel-and-replace" }), ctx).action,
-    ).toBe("cancel")
-    expect(alwaysCancelPolicy.decide(mkInput("a", { mode: "cancel-and-amend" }), ctx).action).toBe(
-      "cancel",
-    )
+  test("HELL-6: alwaysCancel → action=cancel regardless of mode (signal propagates)", () => {
+    const d1 = alwaysCancelPolicy.decide(mkInput("a", { mode: "queue" }), ctx)
+    const d2 = alwaysCancelPolicy.decide(mkInput("a", { mode: "cancel-and-replace" }), ctx)
+    const d3 = alwaysCancelPolicy.decide(mkInput("a", { mode: "cancel-and-amend" }), ctx)
+    expect(d1.action).toBe("cancel")
+    expect(d2.action).toBe("cancel")
+    expect(d3.action).toBe("cancel")
+    // Each cancel decision MUST abort a caller-wired controller deterministically.
+    for (const d of [d1, d2, d3]) {
+      const ac = new AbortController()
+      if (d.action === "cancel") ac.abort()
+      expect(ac.signal.aborted).toBe(true)
+    }
   })
 })
 
@@ -150,15 +162,23 @@ describe("mid-turn — C. capture → planQueue", () => {
     const fu = pq.peek("t1")[0] as FollowUp
     expect(fu.metadata.midTurnMode).toBe("cancel-and-replace")
     expect(fu.metadata.cancelCause).toBe("user-abort")
+    // Cancel decision wires up to an AbortController on the caller side.
+    const ac = new AbortController()
+    if (d.action === "cancel") ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   })
 
-  test("HELL-9: mode=cancel-and-amend → urgent=true (attention signal)", async () => {
+  test("HELL-9: mode=cancel-and-amend → urgent=true (attention signal), action=cancel propagates", async () => {
     const pq = freshPlanQueue()
     const cap = defaultMidTurnCapture({ planQueue: pq, threadId: "t1" })
-    await cap.capture(mkInput("also Y", { mode: "cancel-and-amend" }))
+    const d = await cap.capture(mkInput("also Y", { mode: "cancel-and-amend" }))
     const fu = pq.peek("t1")[0] as FollowUp
     expect(fu.urgent).toBe(true)
     expect(fu.metadata.midTurnMode).toBe("cancel-and-amend")
+    expect(d.action).toBe("cancel")
+    const ac = new AbortController()
+    if (d.action === "cancel") ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   })
 
   test("HELL-10: same text within same turn → planQueue dedup applied (peek count = 1)", async () => {

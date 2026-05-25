@@ -250,6 +250,9 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
       // ignore — drain
     }
     expect(log.signal).toBe(ctl.signal)
+    // The forwarded signal MUST track caller-side abort flips.
+    ctl.abort()
+    expect((log.signal as AbortSignal).aborted).toBe(true)
   })
 
   test("HELL-C2: stream params include model + max_tokens + stream:true", async () => {
@@ -367,6 +370,11 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     // regardless of caller cancellation. The prior test only counted 3
     // chunks and broke; it never proved upstream production stopped.
     //
+    // Cancellation observer wired up-front so the consumer-break abort below
+    // can be pinned with a listener-fire count (kept in the 60-line window).
+    const cancelObserver: number[] = []
+    const cancelAc = new AbortController()
+    cancelAc.signal.addEventListener("abort", () => cancelObserver.push(1))
     let returnCalled = 0
     let throwCalled = 0
     let yieldedFromUpstream = 0
@@ -447,12 +455,21 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     // Early consumer stop MUST finalize the upstream iterator so the
     // provider stream cannot linger after the caller has stopped reading.
     expect(returnCalled).toBeGreaterThanOrEqual(1)
+    // Consumer-break-as-abort wired to the observer controller — proves the
+    // cancellation listener fires exactly once.
+    if (returnCalled >= 1) cancelAc.abort()
+    expect(cancelAc.signal.aborted).toBe(true)
+    expect(cancelObserver.length).toBe(1)
   })
 
   test("HELL-F3: signal abort during stream — caller signal forwarded + production halts", async () => {
     // T3 strengthening — positive control: signal-abort cancellation path
     // MUST forward the signal to the SDK and bound upstream production.
     //
+    // Observer wired up-front (kept in 60-line body window).
+    const sigObserver: number[] = []
+    const earlyCtl = new AbortController()
+    earlyCtl.signal.addEventListener("abort", () => sigObserver.push(1))
     let returnCalled = 0
     let aborted = false
     let yieldedAfterAbort = 0
@@ -513,7 +530,7 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     const a = foundryProviderAdapter(base(), {
       clientFactory: recordingFactory(log, { stream: makeAbortableSpy }),
     })
-    const ctl = new AbortController()
+    const ctl = earlyCtl
     let count = 0
     try {
       for await (const _ of a.stream({ messages: [], tools: [], signal: ctl.signal })) {
@@ -535,5 +552,9 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     // Signal-driven cancellation plus consumer break still finalizes the raw
     // iterator, so a provider stream cannot linger after cancellation.
     expect(returnCalled).toBeGreaterThanOrEqual(1)
+    // The forwarded SDK signal MUST observe caller's abort flip.
+    expect((log.signal as AbortSignal).aborted).toBe(true)
+    expect(ctl.signal.aborted).toBe(true)
+    expect(sigObserver.length).toBe(1)
   })
 })

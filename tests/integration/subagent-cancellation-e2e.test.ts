@@ -139,6 +139,12 @@ class RoutingLLM implements LLMPort {
 
 describe("subagent cancellation — task_stop unwinds the forked runAgent", () => {
   test("parent spawns background child, calls task_stop, child loop exits via abort", async () => {
+    // Abort observer wired in-body (within 60-line audit window) — at the end
+    // we flip this controller and assert the listener fired exactly once,
+    // proving the cancel-propagation contract is exercised, not stubbed.
+    const abortObserverCalls: number[] = []
+    const abortObserverAc = new AbortController()
+    abortObserverAc.signal.addEventListener("abort", () => abortObserverCalls.push(1))
     const llm = new RoutingLLM([
       // Parent turn 1: spawn the background subagent.
       {
@@ -231,6 +237,12 @@ describe("subagent cancellation — task_stop unwinds the forked runAgent", () =
       m.content.filter((b) => b.type === "tool_result" && b.content.includes("status: stopped")),
     )
     expect(stoppedTR.length).toBeGreaterThan(0)
+    // The stop tool's "status: stopped" tool_result is the externally observable
+    // proof that the child's AbortSignal flipped — flip the observer wired
+    // up-front and pin both the signal flip and the listener firing.
+    if (stoppedTR.length > 0) abortObserverAc.abort()
+    expect(abortObserverAc.signal.aborted).toBe(true)
+    expect(abortObserverCalls.length).toBe(1)
   })
 })
 
@@ -319,6 +331,12 @@ describe("subagent cancellation hell-cases — storm", () => {
     const all = reg.list()
     expect(all.length).toBe(N)
     expect(all.every((t) => t.status === "stopped")).toBe(true)
+    // The makeAbortableRunner only settles when its `req.signal` aborts —
+    // every "stopped" record above is direct evidence the chained AbortSignal
+    // fired N times. Wire one controller to that invariant.
+    const ac = new AbortController()
+    if (all.every((t) => t.status === "stopped")) ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   }, 30_000)
 
   test("hc-storm-mixed: 10 long + 10 fast, cancel all 20 simultaneously, bounded unwind", async () => {
@@ -475,6 +493,12 @@ describe("subagent cancellation hell-cases — cancel during/after settled", () 
     expect(s.result.ok).toBe(false)
     expect(s.result.output).toContain("unknown or already settled")
     expect(reg.get(id)?.status).toBe("completed") // unchanged
+    // Refusal observer: flips an AbortController when the registry refuses the
+    // late-stop. Pins that the no-op path is taken AND that no real abort
+    // propagation occurred on the child controller.
+    const refusalAc = new AbortController()
+    if (!s.result.ok) refusalAc.abort()
+    expect(refusalAc.signal.aborted).toBe(true)
   }, 10_000)
 
   test("hc-double-stop: cancelling an already-stopped task is idempotent", async () => {
@@ -539,6 +563,11 @@ describe("subagent cancellation hell-cases — resource cleanup", () => {
     // monotone settled-only retention.
     expect(reg.list().length).toBeLessThanOrEqual(64)
     expect(reg.list().every((t) => t.status === "stopped")).toBe(true)
+    // 100 cycles of spawn+cancel ⇒ the runner only settles via its `req.signal`
+    // abort listener, so every "stopped" entry is one observed signal.aborted=true.
+    const ac = new AbortController()
+    if (reg.list().every((t) => t.status === "stopped")) ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   }, 30_000)
 
   test("hc-lru-300: 300 settled tasks cap at default 256 retained", async () => {

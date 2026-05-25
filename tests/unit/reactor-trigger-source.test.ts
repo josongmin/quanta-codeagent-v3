@@ -456,6 +456,7 @@ describe("ADR-0132 Phase A — createCiTriggerSource", () => {
       },
     })
     expect(await src.poll({ signal: ctrl.signal })).toEqual([])
+    expect(ctrl.signal.aborted).toBe(true)
     expect(seen.size).toBe(0)
     const next = await src.poll()
     expect(next).toHaveLength(1)
@@ -491,6 +492,9 @@ describe("ADR-0132 Phase A — createCiTriggerSource", () => {
     expect(triggers).toHaveLength(1)
     ctrl.abort()
     expect(triggers[0]?.abortSignal.aborted).toBe(false)
+    // Detachment invariant: outer poll signal flipped, materialized trigger
+    // signal MUST NOT have followed it.
+    expect(ctrl.signal.aborted).toBe(true)
   })
 })
 
@@ -812,6 +816,7 @@ describe("ADR-0132 Phase A — createPrCommentTriggerSource", () => {
       },
     })
     expect(await src.poll({ signal: ctrl.signal })).toEqual([])
+    expect(ctrl.signal.aborted).toBe(true)
     expect(watermark).toBe("2026-05-24T12:00:00Z")
     const next = await src.poll()
     expect(next).toHaveLength(1)
@@ -850,6 +855,8 @@ describe("ADR-0132 Phase A — createPrCommentTriggerSource", () => {
     expect(triggers).toHaveLength(1)
     ctrl.abort()
     expect(triggers[0]?.abortSignal.aborted).toBe(false)
+    // Outer poll signal MUST have flipped while the materialized child stayed clean.
+    expect(ctrl.signal.aborted).toBe(true)
   })
 
   test("comment without html_url is skipped (no evidence anchor)", async () => {

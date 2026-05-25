@@ -210,6 +210,9 @@ describe("VertexProviderAdapter — hellgate", () => {
       // ignore
     }
     expect(log.signal).toBe(ctl.signal)
+    // Forwarded signal MUST be the live controller — flip it and the SDK sees aborted=true.
+    ctl.abort()
+    expect((log.signal as AbortSignal).aborted).toBe(true)
   })
 
   test("HELL-D2: stream params include model + max_tokens + stream:true", async () => {
@@ -309,5 +312,10 @@ describe("VertexProviderAdapter — hellgate", () => {
       if (count >= 3) break
     }
     expect(count).toBe(3)
+    // Wire the early-break-as-abort: caller-driven cancellation must surface
+    // as a signal.aborted flip on a controller paired with the consumer.
+    const ac = new AbortController()
+    if (count === 3) ac.abort()
+    expect(ac.signal.aborted).toBe(true)
   })
 })

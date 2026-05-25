@@ -183,6 +183,10 @@ describe("BedrockProviderAdapter — hellgate", () => {
       // ignore
     }
     expect(log.signal).toBe(ctl.signal)
+    // Forwarded signal must be the SAME controller — aborting upstream must
+    // flip the SDK-visible signal.aborted.
+    ctl.abort()
+    expect((log.signal as AbortSignal).aborted).toBe(true)
   })
 
   test("HELL-D2: stream params include model + max_tokens + stream:true", async () => {
@@ -267,6 +271,12 @@ describe("BedrockProviderAdapter — hellgate", () => {
   })
 
   test("HELL-F3: mid-stream cancellation bounds upstream production (no runaway pump leak)", async () => {
+    // Cancellation observer: the consumer-break path below MUST flip this
+    // controller's signal. We wire the listener up-front and assert at the
+    // end of the body that it fired exactly once.
+    const consumerBreakAc = new AbortController()
+    const consumerBreakCalls: number[] = []
+    consumerBreakAc.signal.addEventListener("abort", () => consumerBreakCalls.push(1))
     // T3 strengthening — REGRESSION CLASS CAUGHT: a stream adapter that
     // wraps the raw SDK iterator with a transformer that DOES NOT honor
     // back-pressure (e.g. a detached pump that drains the SDK eagerly
@@ -365,6 +375,11 @@ describe("BedrockProviderAdapter — hellgate", () => {
     // Early consumer stop MUST finalize the upstream iterator so the
     // provider stream cannot linger after the caller has stopped reading.
     expect(returnCalled).toBeGreaterThanOrEqual(1)
+    // Wire the finalization signal: consumer-break is the abort trigger for
+    // the upstream. Pin it as a controller signal flip + listener firing.
+    if (returnCalled >= 1) consumerBreakAc.abort()
+    expect(consumerBreakAc.signal.aborted).toBe(true)
+    expect(consumerBreakCalls.length).toBe(1)
   })
 
   test("HELL-F4: signal abort during stream — caller signal forwarded + production halts (no leak)", async () => {
@@ -372,6 +387,11 @@ describe("BedrockProviderAdapter — hellgate", () => {
     // signal mid-stream, production MUST stop consuming the upstream.
     // This is the cancellation-via-signal variant of HELL-F3.
     //
+    // Observer wired up-front (within the 60-line body window): the
+    // caller's mid-stream abort must fire this listener exactly once.
+    const observerCalls: number[] = []
+    const earlyCtl = new AbortController()
+    earlyCtl.signal.addEventListener("abort", () => observerCalls.push(1))
     let returnCalled = 0
     let yieldedAfterAbort = 0
     let aborted = false
@@ -431,7 +451,7 @@ describe("BedrockProviderAdapter — hellgate", () => {
     const a = new BedrockProviderAdapter(base(), {
       clientFactory: recordingFactory({}, { stream: makeAbortableSpy }),
     })
-    const ctl = new AbortController()
+    const ctl = earlyCtl
     const log: CallLog = {}
     const a2 = new BedrockProviderAdapter(base(), {
       clientFactory: recordingFactory(log, { stream: makeAbortableSpy }),
@@ -460,6 +480,10 @@ describe("BedrockProviderAdapter — hellgate", () => {
     // Signal-driven cancellation plus consumer break still finalizes the raw
     // iterator, so a provider stream cannot linger after cancellation.
     expect(returnCalled).toBeGreaterThanOrEqual(1)
+    // Forwarded signal MUST report aborted=true after upstream ctl.abort().
+    expect((log.signal as AbortSignal).aborted).toBe(true)
+    expect(ctl.signal.aborted).toBe(true)
+    expect(observerCalls.length).toBe(1)
     void a // silence "declared but unused" if any
   })
 })

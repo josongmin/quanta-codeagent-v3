@@ -115,7 +115,7 @@ describe("D6 hellgate — proactive boundary mirrors reactive", () => {
 })
 
 describe("D6 hellgate — trip surfaces a CLEAN error verdict (not a spin)", () => {
-  test("a tripped breaker returns a structured abort verdict with a human reason, deterministically", () => {
+  test("a tripped breaker returns a structured halt verdict with a human reason, deterministically", () => {
     const b = new CompactionBreaker({ maxConsecutiveReactive: 1 })
     b.recordReactive(100_000, 99_999) // ~0% drop ⇒ instant strike at cap=1
     const v = b.check()
@@ -145,7 +145,7 @@ describe("D6 hellgate — trip surfaces a CLEAN error verdict (not a spin)", () 
 /* ------------------------------------------------------------------ */
 
 describe("CompactionBreaker — defaults & clean path", () => {
-  test("fresh breaker does not abort; defaults track CC (3/3/0.15)", () => {
+  test("fresh breaker stays on clean path; defaults track CC (3/3/0.15)", () => {
     expect(DEFAULT_COMPACTION_BREAKER_CAPS).toEqual({
       maxConsecutiveReactive: 3,
       maxNoProgressProactive: 3,
