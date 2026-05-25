@@ -1,4 +1,4 @@
-import { buildPlanExit, type AgentConfig } from "@/agent"
+import { type AgentConfig, buildPlanExit } from "@/agent"
 import type { StreamPort } from "@/stream"
 import type { UserInputOutcome, UserInputRequester } from "@/tool"
 
@@ -197,20 +197,20 @@ export const createCliPlanExitPort = (
   },
 })
 
-export const createCliUserInputPort = (
-  opts: CliUserInputPortOptions,
-): UserInputRequester => async (req) => {
-  emitUserInputRequested(opts.stream, req)
-  const outcome =
-    req.choices !== undefined && req.choices.length > 0
-      ? await promptChoiceInput(opts.ask, {
-          prompt: req.prompt,
-          promptId: req.promptId,
-          choices: req.choices,
-        })
-      : req.multiline === true
-        ? await promptMultilineInput(opts.ask, { prompt: req.prompt, promptId: req.promptId })
-        : await promptFreeformInput(opts.ask, { prompt: req.prompt, promptId: req.promptId })
-  emitUserInputResolved(opts.stream, req.promptId, outcome)
-  return outcome
-}
+export const createCliUserInputPort =
+  (opts: CliUserInputPortOptions): UserInputRequester =>
+  async (req) => {
+    emitUserInputRequested(opts.stream, req)
+    const outcome =
+      req.choices !== undefined && req.choices.length > 0
+        ? await promptChoiceInput(opts.ask, {
+            prompt: req.prompt,
+            promptId: req.promptId,
+            choices: req.choices,
+          })
+        : req.multiline === true
+          ? await promptMultilineInput(opts.ask, { prompt: req.prompt, promptId: req.promptId })
+          : await promptFreeformInput(opts.ask, { prompt: req.prompt, promptId: req.promptId })
+    emitUserInputResolved(opts.stream, req.promptId, outcome)
+    return outcome
+  }

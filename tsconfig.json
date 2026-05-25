@@ -67,6 +67,8 @@
       "@/ui/*": ["./src/ui/*"],
       "@/runner": ["./src/runner/index.ts"],
       "@/runner/*": ["./src/runner/*"],
+      "@/host/bootstrap": ["./src/host/bootstrap/index.ts"],
+      "@/host/*": ["./src/host/*"],
       "@/ipc": ["./src/ipc/index.ts"],
       "@/ipc/*": ["./src/ipc/*"],
       "@/git": ["./src/git/index.ts"],

@@ -1348,6 +1348,47 @@
           }
         }
       }
+    },
+    {
+      "includes": ["**/src/host/bootstrap/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/apps/**", "**/src/apps/**", "@/apps/*"],
+                    "message": "Surface isolation (ADR-0299 host/bootstrap-host-extraction): @/host/bootstrap is the surface-agnostic session bootstrap. It MUST NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench). Surface entries depend on @/host/bootstrap, never the reverse. Every env/argv/terminal-bound helper is injected via SessionBootstrapDeps."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: @/host/bootstrap is surface-agnostic. CLI-specific node modules (readline / tty / repl) belong in apps/cli. Inject a port instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/tier1/reviewer-subagent": "ADR-0299: src/apps/cli/repl/** must NOT import the reviewer subagent module directly. The reviewer factories (materializeReviewerAgent / createSubagentBackedGuardianReview) are injected via SessionBootstrapDeps from @/host/bootstrap and forwarded through the boot result. Import them from src/apps/cli/repl.ts (outside this slice) and pass through the dep bundle."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

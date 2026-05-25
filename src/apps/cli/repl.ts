@@ -1,8 +1,13 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
+import { RetryingLLM } from "@/agent"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
-import { summarizeWorkMetrics } from "@/observability"
+import {
+  createSubagentBackedGuardianReview,
+  materializeReviewerAgent,
+} from "@/agent/tier1/reviewer-subagent"
+import { buildShellOtelObserver, summarizeWorkMetrics } from "@/observability"
 import {
   createDecisionCounterSink,
   defaultMetricsRegistry,
@@ -12,14 +17,29 @@ import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
+import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { type BranchProgressTracker, createBranchProgressTracker } from "./branch-search-progress"
 import { type CostPanel, createCostPanel } from "./cost-panel"
 import type { DebugCmdState } from "./debug-cmd"
 import { createDebugTracer } from "./debug-tracer"
+import { createIdleMonitor } from "./idle-monitor"
+import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
-import { buildSkillsConfig } from "./internal"
+import {
+  buildLLM,
+  buildSkillsConfig,
+  buildStreaming,
+  buildTooling,
+  composeLLM,
+  loadFeatures,
+  pickIdentity,
+  pickPersona,
+  resolveResume,
+} from "./internal"
 import { createLifecyclePills, type LifecyclePills, type McpPillServer } from "./lifecycle-pills"
+import { createRejectCounter } from "./reject-counter"
 import type { CliFeatureConfig } from "./repl/cli-feature-config"
+import { buildMcpSurfaceInfo } from "./repl/mcp-surface-wire"
 import { runSessionLoop } from "./repl/session-loop"
 import { setupSession } from "./repl/session-setup"
 import { buildSkillsCallback, installPills } from "./repl/skills-surface"
@@ -33,6 +53,8 @@ import {
 import type { RewindSlashState } from "./rewind-cmd"
 import { createCliRewindGitPort } from "./rewind-git"
 import { runSessionCommand } from "./session-commands"
+import { switchToSessionCwd } from "./session-io"
+import { buildShellStreamPainter } from "./shell-stream-painter"
 import { runSlashCommand, slashCompleter } from "./slash-commands"
 import type { StatusBar } from "./status-bar"
 import { createTimelinePanel, type TimelinePanel } from "./timeline-panel"
@@ -486,21 +508,93 @@ export const runSlashMain = async (_tok: string): Promise<number> => {
  * delegating here.
  */
 
+/** ADR-0299 — compose the LLM stack at the CLI seam. Same byte-identical
+ *  sequence the prior `buildLlmStack` inside `bootstrapSession` ran:
+ *  `buildLLM` → `RetryingLLM` → `composeLLM`. Passed as a single closure into
+ *  the host so the host slice does not import `@/llm` adapters directly. */
+const cliBuildLlm: Parameters<typeof setupSession>[0]["buildLlm"] = (
+  provider,
+  model,
+  mode,
+  permission,
+  signal,
+  slog,
+) => {
+  const llm = buildLLM(provider, model)
+  const retryingLLM = new RetryingLLM({ inner: llm, signal })
+  return composeLLM(retryingLLM, provider, signal, mode, permission, slog)
+}
+
+/** ADR-0299 — compose the per-turn shell-event observer from the surface.
+ *  Replaces the inline `composeShellEvent` previously in `session-bootstrap.ts`. */
+const cliComposeShellEvent = (
+  metrics: Parameters<Parameters<typeof setupSession>[0]["composeShellEvent"]>[0],
+  stdoutIsTTY: boolean | undefined,
+): ShellExecObserver | undefined => {
+  const painterObs = stdoutIsTTY ? buildShellStreamPainter() : undefined
+  const otelObs = metrics ? buildShellOtelObserver(metrics) : undefined
+  return painterObs !== undefined || otelObs !== undefined
+    ? composeShellObservers(painterObs, otelObs)
+    : undefined
+}
+
+/** ADR-0299 — build the surface-side idle/reject guards. Concrete ports
+ *  touch node:fs/node:os so they stay in the CLI; the host receives them as
+ *  opaque values through the bootstrap result. */
+const cliBuildIdleGuards: Parameters<typeof setupSession>[0]["buildIdleGuards"] = (runtime) => {
+  const idleMonitor = createIdleMonitor({
+    idleThresholdMs:
+      runtime.idleSuppressOn && Number.isFinite(runtime.idleMs)
+        ? runtime.idleMs
+        : Number.POSITIVE_INFINITY,
+    defaultSnoozeMs:
+      runtime.idleSuppressOn && Number.isFinite(runtime.snoozeDefaultMs)
+        ? runtime.snoozeDefaultMs
+        : 300_000,
+  })
+  const rejectCounter = createRejectCounter({
+    threshold:
+      runtime.idleSuppressOn && Number.isFinite(runtime.rejectLimit) && runtime.rejectLimit > 0
+        ? runtime.rejectLimit
+        : Number.POSITIVE_INFINITY,
+  })
+  return { idleMonitor, rejectCounter }
+}
+
 /** Slice-C: bundle the {@link setupSession} factories the host wires.
  *  Lifted out of `runRepl` so the orchestrator stays inside the spec's
  *  ≤ 50 LOC budget — each factory still resolves to the SAME closure the
  *  prior inline code allocated (byte-identical). */
 const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
-  buildLifecycleBundle,
+  // The host slice declares the featureCfg parameter as `unknown` so it
+  // stays slice-clean (no import of `apps/cli/repl/cli-feature-config`).
+  // The CLI surface narrows it back to `CliFeatureConfig` at each call site.
+  buildLifecycleBundle: (cfg) => buildLifecycleBundle(cfg as CliFeatureConfig),
   deriveMcpPillServers,
-  buildCostPanelOrUndefined,
-  buildBranchProgressOrUndefined,
-  buildPlanStoreOrUndefined,
+  buildCostPanelOrUndefined: (cfg, model) =>
+    buildCostPanelOrUndefined(cfg as CliFeatureConfig, model),
+  buildBranchProgressOrUndefined: (cfg) => buildBranchProgressOrUndefined(cfg as CliFeatureConfig),
+  buildPlanStoreOrUndefined: (cfg) => buildPlanStoreOrUndefined(cfg as CliFeatureConfig),
   buildTurnSummaryAndStream,
   buildTurnIndicatorAndStream,
   buildDebugTracerAndStream,
   buildTimelinePanelAndStream,
   buildWorkMetricsSink,
+  // ADR-0299 — env-bound factories the host consumes as deps.
+  buildLlm: cliBuildLlm,
+  buildStreaming,
+  buildTooling,
+  loadFeatures,
+  loadImageBlock,
+  pickIdentity,
+  pickPersona,
+  resolveResume,
+  composeShellEvent: cliComposeShellEvent,
+  switchToSessionCwd,
+  materializeReviewerAgent,
+  createSubagentBackedGuardianReview,
+  buildMcpSurfaceInfo,
+  buildIdleGuards: cliBuildIdleGuards,
   loadPermissionStore: async (): Promise<PermissionStore | undefined> => {
     try {
       const store = getDefaultPermissionStore()

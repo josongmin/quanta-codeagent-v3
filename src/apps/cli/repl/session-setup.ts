@@ -1,5 +1,10 @@
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
+import {
+  bootstrapSession,
+  type SessionBootstrapDeps,
+  type SessionBootstrapResult,
+} from "@/host/bootstrap"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
@@ -20,11 +25,6 @@ import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
 import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
-import {
-  bootstrapSession,
-  type SessionBootstrapDeps,
-  type SessionBootstrapResult,
-} from "./session-bootstrap"
 import { composeCliSessionDeps } from "./session-deps-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
@@ -232,24 +232,29 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   // remains a no-op (same value re-applied).
   pills.update({ effort: boot.effortStore.get() })
 
+  // ADR-0292 — narrow the host's opaque ports back to their CLI-surface
+  // concrete types at the seam. The host result types them as `unknown`
+  // because it only forwards them through; the CLI surface owns the real
+  // shapes (concrete McpClient instances, the surface `LifecyclePills`,
+  // the surface `IdleMonitor` etc.).
   return {
     provider: boot.provider,
     model: boot.model,
     mode: boot.mode,
     cwd: boot.cwd,
     slog: boot.slog,
-    idleMonitor: boot.idleMonitor,
-    rejectCounter: boot.rejectCounter,
+    idleMonitor: boot.idleMonitor as IdleMonitor,
+    rejectCounter: boot.rejectCounter as RejectCounter,
     effortStore: boot.effortStore,
     llm: boot.llm,
     planMode: boot.features.planMode,
     metrics: boot.features.metrics,
     state: boot.features.state,
-    mcpClients: boot.features.mcpClients,
+    mcpClients: boot.features.mcpClients as unknown as SessionSetupResult["mcpClients"],
     mcpTools: boot.features.mcpTools,
-    mcpSurface: boot.mcpSurface,
+    mcpSurface: boot.mcpSurface as McpSurfaceInfo | undefined,
     skillsConfig: boot.tooling.skillsConfig,
-    lifecyclePills: boot.lifecyclePills,
+    lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,
     lifecycleFollowUpQueue: boot.lifecycleFollowUpQueue,
     sessionId: boot.sessionId,
@@ -262,8 +267,8 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     debugHandle,
     timelinePanel,
     sessionDeps,
-    costPanel: boot.costPanel,
-    branchProgress: boot.branchProgress,
+    costPanel: boot.costPanel as CostPanel | undefined,
+    branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,
     abort: boot.abort,
     pills,
