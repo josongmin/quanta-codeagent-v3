@@ -122,6 +122,9 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   // planModeMutatingTable read-only set (the drift detector at
   // `tests/unit/side-conversation.test.ts` enforces equality).
   "request_user_input",
+  // Same posture: `request_plan_exit` is operator-facing and read-only in
+  // planModeMutatingTable. Added per the same drift-detector invariant.
+  "request_plan_exit",
 ])
 
 // ===========================================================================

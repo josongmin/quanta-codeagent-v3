@@ -438,7 +438,11 @@ const dispatchToolInner = async (
   const collabMode = collab
   const requestPlanExit =
     planExitPort !== undefined
-      ? (plan: string) => runPlanExitFlow(collabMode, plan, planExitPort)
+      ? async (plan: string) => {
+          const outcome = await runPlanExitFlow(collabMode, plan, planExitPort)
+          config.onPlanExitOutcome?.({ plan, outcome })
+          return outcome
+        }
       : undefined
   const ctx: ToolContext = {
     cwd: config.cwd,

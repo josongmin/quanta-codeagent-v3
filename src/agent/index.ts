@@ -53,9 +53,12 @@ export {
   type SkillEffortAdvisory,
 } from "./effort"
 export {
+  composeGlobRulesWithDetected,
   GLOB_RULE_DIRS,
   type GlobRule,
   loadGlobRules,
+  loadGlobRulesWithVendors,
+  type LoadGlobRulesWithVendorsOpts,
   MAX_RENDER_BYTES,
   MAX_RULE_BYTES,
   MAX_RULE_FILES,

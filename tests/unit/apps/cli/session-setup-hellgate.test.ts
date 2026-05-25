@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import type { ReviewContext, ToolActionKeyed } from "@/permission"
 import type {
   SessionSetupResult,
   SetupSessionDeps,
@@ -277,7 +278,21 @@ beforeAll(async () => {
       missingIdError: undefined,
     }),
     assembleConfig: origInternal.assembleConfig,
-    composeLLM: (inner: unknown) => inner,
+    composeLLM: (
+      inner: unknown,
+      _provider: unknown,
+      _signal: AbortSignal,
+      mode: string,
+      permission: { classify?: unknown },
+    ) => {
+      if (mode === "auto") {
+        permission.classify = async () => ({
+          verdict: "allow" as const,
+          reason: "Allowed by classifier",
+        })
+      }
+      return inner
+    },
   }))
 
   // Stub @/agent — buildSystemPrompt + RetryingLLM are reached by setupSession.
@@ -358,6 +373,40 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("user")
     expect(result.sessionDeps.planExitPort).toBeDefined()
     expect(result.sessionDeps.userInputPort).toBeDefined()
+  })
+
+  test("switches the CLI default reviewer to auto_review when the auto classifier is live", async () => {
+    const prevPermission = process.env.QUANTA_PERMISSION
+    process.env.QUANTA_PERMISSION = "auto"
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { deps } = makeStubDeps()
+      const result = await setupSession(deps)
+      expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("auto_review")
+
+      const action: ToolActionKeyed = {
+        tool: "edit_file",
+        input: { path: "src/app.ts" },
+        isReadOnly: false,
+        actionKey: "edit_file",
+      }
+      const ctx: ReviewContext = {
+        sessionId: "s1",
+        turnId: "1",
+        priorDenials: [],
+        configReviewer: "auto_review",
+        decidedAt: 42,
+      }
+      const reviewerPort = result.sessionDeps.admissibility?.reviewerPort
+      expect(reviewerPort).toBeDefined()
+      if (reviewerPort === undefined) throw new Error("reviewerPort must be defined")
+      const decision = await reviewerPort.autoReview(action, ctx)
+      expect(decision.reviewer).toBe("auto_review")
+      expect(decision.outcome).toBe("config_allowed")
+    } finally {
+      if (prevPermission === undefined) delete process.env.QUANTA_PERMISSION
+      else process.env.QUANTA_PERMISSION = prevPermission
+    }
   })
 
   test("registers a SIGINT handler — invoking it triggers result.abort", async () => {

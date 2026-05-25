@@ -34,6 +34,7 @@
  *     delegates to `renderHelp`, keeping the registry entry trivial.
  */
 
+import { byteCompare } from "@/shared/byte-compare"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
@@ -256,7 +257,7 @@ const renderGroupedBuiltins = (builtins: readonly SlashCommand[]): string[] => {
   for (const cat of CATEGORY_ORDER) {
     const bucket = buckets.get(cat)
     if (bucket === undefined || bucket.length === 0) continue
-    bucket.sort((a, b) => a.name.localeCompare(b.name))
+    bucket.sort((a, b) => byteCompare(a.name, b.name))
     lines.push(dim(`── ${CATEGORY_LABEL[cat]} ──`))
     for (const c of bucket) lines.push(renderRow(c.name, c.describe, NAME_W))
     lines.push("")

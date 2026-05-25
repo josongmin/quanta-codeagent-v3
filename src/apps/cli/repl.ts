@@ -32,7 +32,6 @@ import {
   readPillEnvFlags,
 } from "./lifecycle-pills"
 import { createPromptHistory, type PromptHistory } from "./prompt-history"
-import { AbortError, readLine } from "./raw-line-reader"
 import { runSessionLoop } from "./repl/session-loop"
 import { setupSession } from "./repl/session-setup"
 import type { RewindSlashState } from "./rewind-cmd"
@@ -40,13 +39,7 @@ import { createCliRewindGitPort, isCliRewindGitEnabled } from "./rewind-git"
 import { buildRuleInventory, isRulePillEnabled } from "./rule-indicator"
 import { runSessionCommand } from "./session-commands"
 import type { SideChatSessionState } from "./side-cmd"
-import {
-  describeSlashCommand,
-  isSlashCommand,
-  runSlashCommand,
-  type SkillRow,
-  slashCompleter,
-} from "./slash-commands"
+import { isSlashCommand, runSlashCommand, type SkillRow, slashCompleter } from "./slash-commands"
 import type { StatusBar } from "./status-bar"
 import { createStatusPills, type SandboxMode } from "./status-pills"
 import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
@@ -622,6 +615,9 @@ const tryRunReplSlash = async (input: string, slashCtx?: ReplSlashCtx): Promise<
   return true
 }
 
+/** Interactive REPL compat loop: legacy fake-readline tests still inject
+ *  `rl.question()` here, while the production interactive path goes through
+ *  {@link runSessionLoop}. */
 export const runReplLoop = async (
   rl: readline.Interface,
   signal: AbortSignal,
@@ -634,67 +630,6 @@ export const runReplLoop = async (
     if (input === "/exit" || input === "/quit") break
     if (await tryRunReplSlash(input, slashCtx)) continue
     await turn(input)
-  }
-}
-
-/** Production REPL loop with REAL `<Tab>` autocompletion.
- *
- *  Bun's `node:readline` polyfill ignores the `completer` option (probe-
- *  verified 2026-05), so this variant bypasses readline entirely and reads
- *  lines via raw-mode keypress events through {@link readLine}. Sibling
- *  prompts (permission confirm) that don't need completion still go through
- *  an ad-hoc `readline/promises` `question()` — see `runRepl`.
- *
- *  Kept separate from {@link runReplLoop} so the existing readline-based
- *  test harness (`tests/unit/apps/cli/skills-slash-hellgate.test.ts`) is
- *  unaffected: tests inject a fake readline through `runReplLoop`; the CLI
- *  entry point dispatches to `runReplLoopRaw` instead. */
-export interface RunReplLoopRawOptions {
-  readonly signal: AbortSignal
-  readonly turn: (text: string) => Promise<void>
-  readonly slashCtx?: ReplSlashCtx
-  /** Meta line painted under the prompt (Codex-style composer). Typical
-   *  content: `provider · model · ~/cwd`. Absent ⇒ no meta row. */
-  readonly meta?: string
-  /** Optional bash-style prompt history. Default OFF when undefined —
-   *  raw-line-reader stays byte-identical to the no-history path. */
-  readonly history?: PromptHistory
-  /** Heredoc multiline mode. Default OFF; opt-in via QUANTA_MULTILINE. */
-  readonly multiline?: boolean
-}
-
-export const runReplLoopRaw = async (opts: RunReplLoopRawOptions): Promise<void> => {
-  const { signal, turn, slashCtx, meta, history, multiline } = opts
-  process.stderr.write("\n")
-  while (!signal.aborted) {
-    let input: string
-    try {
-      input = (
-        await readLine({
-          prompt: "› ",
-          completer: (line) => slashCompleter(line)[0],
-          describe: describeSlashCommand,
-          ...(meta !== undefined ? { meta } : {}),
-          ...(history !== undefined ? { history } : {}),
-          ...(multiline === true ? { multiline: true } : {}),
-          signal,
-        })
-      ).trim()
-    } catch (e) {
-      if (e instanceof AbortError) return
-      throw e
-    }
-    if (input === "") {
-      process.stderr.write("\n")
-      continue
-    }
-    if (input === "/exit" || input === "/quit") break
-    if (await tryRunReplSlash(input, slashCtx)) {
-      process.stderr.write("\n")
-      continue
-    }
-    await turn(input)
-    process.stderr.write("\n")
   }
 }
 
@@ -750,8 +685,8 @@ const renderTurnError = (e: unknown, statusBar: StatusBar): void => {
 
 /**
  * Main REPL/one-shot entry: assembles the agent stack, resolves the resume
- * state machine, and dispatches to either `runReplLoop` (interactive) or a
- * single `turn()` call (one-shot when argv carries a positional prompt).
+ * state machine, and delegates interactive vs argv-prompt dispatch to
+ * {@link runSessionLoop}.
  *
  * This is a verbatim relocation of the post-routing body of `main()` from
  * `index.ts`. Caller (`index.ts::main`) is responsible for the argv-routing

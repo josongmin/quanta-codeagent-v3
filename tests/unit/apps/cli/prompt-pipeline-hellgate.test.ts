@@ -1,10 +1,10 @@
 import { describe, expect, mock, test } from "bun:test"
-import { composePromptPipeline } from "../../../../src/apps/cli/repl/prompt-pipeline"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
-import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
-import type { StatusBar } from "../../../../src/apps/cli/status-bar"
 import type { ImageQueue } from "../../../../src/apps/cli/image-queue"
+import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
 import { ExternalPromptQueue } from "../../../../src/apps/cli/repl/external-prompt-queue"
+import { composePromptPipeline } from "../../../../src/apps/cli/repl/prompt-pipeline"
+import type { StatusBar } from "../../../../src/apps/cli/status-bar"
 
 // === stubs ====================================================================
 
@@ -42,6 +42,22 @@ const stubRejects = (shouldExit: boolean): RejectCounter => {
   }
 }
 
+const withCapturedStderr = async <T>(
+  run: () => Promise<T>,
+): Promise<{ result: T; writes: string[] }> => {
+  const originalWrite = process.stderr.write.bind(process.stderr)
+  const writes: string[] = []
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"))
+    return true
+  }) as typeof process.stderr.write
+  try {
+    return { result: await run(), writes }
+  } finally {
+    process.stderr.write = originalWrite
+  }
+}
+
 // === tests ====================================================================
 
 describe("prompt-pipeline / composePromptPipeline — shape", () => {
@@ -74,11 +90,10 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
     // signal that the auto-exit fired — not just a silent null.
     const origWrite = process.stderr.write.bind(process.stderr)
     const writes: string[] = []
-    // biome-ignore lint/suspicious/noExplicitAny: stub the write for capture
-    process.stderr.write = ((s: string) => {
-      writes.push(s)
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"))
       return true
-    }) as any
+    }) as typeof process.stderr.write
     try {
       const pipe = composePromptPipeline({
         dispatchSlash: async () => false,
@@ -177,5 +192,82 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
     })
     const result = await pipe.next(new AbortController().signal)
     expect(result).toBe("wake from reactor")
+  })
+
+  test("local blank input is skipped and the next typed user input is returned", async () => {
+    const lines = ["", "typed after blank"]
+    const dispatchSlash = mock(async () => false)
+    const onLocalPromptAccepted = mock(() => undefined)
+    const pipe = composePromptPipeline({
+      dispatchSlash,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      onLocalPromptAccepted,
+      readPromptLine: async () => lines.shift() ?? null,
+    })
+    const { result, writes } = await withCapturedStderr(() =>
+      pipe.next(new AbortController().signal),
+    )
+    expect(result).toBe("typed after blank")
+    expect(dispatchSlash).toHaveBeenCalledTimes(1)
+    expect(dispatchSlash).toHaveBeenCalledWith("typed after blank")
+    expect(onLocalPromptAccepted).toHaveBeenCalledTimes(1)
+    expect(writes).toContain("\n")
+  })
+
+  test("local slash input is dispatched and the pipeline keeps reading until user text arrives", async () => {
+    const lines = ["/help", "typed after slash"]
+    const dispatchSlash = mock(async (input: string) => input === "/help")
+    const pipe = composePromptPipeline({
+      dispatchSlash,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      readPromptLine: async () => lines.shift() ?? null,
+    })
+    const { result, writes } = await withCapturedStderr(() =>
+      pipe.next(new AbortController().signal),
+    )
+    expect(result).toBe("typed after slash")
+    expect(dispatchSlash).toHaveBeenCalledTimes(2)
+    expect(dispatchSlash).toHaveBeenNthCalledWith(1, "/help")
+    expect(dispatchSlash).toHaveBeenNthCalledWith(2, "typed after slash")
+    expect(writes).toContain("\n")
+  })
+
+  test("local /exit returns null without dispatching slash handling", async () => {
+    const dispatchSlash = mock(async () => false)
+    const onLocalPromptAccepted = mock(() => undefined)
+    const pipe = composePromptPipeline({
+      dispatchSlash,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      onLocalPromptAccepted,
+      readPromptLine: async () => "/exit",
+    })
+    const result = await pipe.next(new AbortController().signal)
+    expect(result).toBeNull()
+    expect(dispatchSlash).not.toHaveBeenCalled()
+    expect(onLocalPromptAccepted).not.toHaveBeenCalled()
+  })
+
+  test("local typed user input returns straight through the production pipeline", async () => {
+    const dispatchSlash = mock(async () => false)
+    const onLocalPromptAccepted = mock(() => undefined)
+    const pipe = composePromptPipeline({
+      dispatchSlash,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      onLocalPromptAccepted,
+      readPromptLine: async () => "typed user input",
+    })
+    const result = await pipe.next(new AbortController().signal)
+    expect(result).toBe("typed user input")
+    expect(dispatchSlash).toHaveBeenCalledTimes(1)
+    expect(dispatchSlash).toHaveBeenCalledWith("typed user input")
+    expect(onLocalPromptAccepted).toHaveBeenCalledTimes(1)
   })
 })

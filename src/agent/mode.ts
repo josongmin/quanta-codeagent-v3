@@ -125,13 +125,11 @@ export type CollaborationMode = "default" | "plan"
  *     itself a state mutation against the child + the in-memory `TaskRegistry`;
  *     plan mode forbids by the same "propose-not-commit" rule that blocks
  *     `update_working_state`.
- *   - `plan_control`: meta-control of the collaboration mode itself
- *     (`request_plan_exit`). Asks the host to flip plan→default; the request
- *     itself is a mutation against the mode SSOT. Allowed in default mode
- *     (no-op there); blocked in plan mode because plan mode's exit MUST
- *     route through the explicit developer-channel transition, not via a
- *     model-issued tool call (otherwise the LLM could silently escape the
- *     dispatch block — see ADR-0036 §sticky-transition).
+ *   - `plan_control`: reserved for future host-only collaboration-mode
+ *     controls. The model-facing `request_plan_exit` tool is INTENTIONALLY
+ *     not classified under this kind once the loop owns the follow-through:
+ *     it is the explicit plan-review exit seam (ADR-0086/0095), and after an
+ *     approval the loop flips into default mode at the NEXT turn boundary.
  */
 export type MutatingToolKind =
   | "write_filesystem"
@@ -285,11 +283,11 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // child + the registry, so it blocks under the new `subagent_control` kind.
   task_output: null,
   task_stop: "subagent_control",
-  // Meta-control over the collaboration mode itself. Asks the host to flip
-  // plan→default; blocked in plan mode so the LLM cannot silently exit via
-  // a tool call (mode transitions must route through the explicit
-  // developer-channel directive — ADR-0036 §sticky-transition).
-  request_plan_exit: "plan_control",
+  // Plan-review exit seam. Read-only by tool contract: it blocks on operator
+  // review, then the loop consumes the typed outcome at the next turn
+  // boundary. This MUST remain callable in plan mode; otherwise the plan
+  // posture has no live way to leave the read-only fence.
+  request_plan_exit: null,
   // Sub-agent spawn — the child runs unrestricted tools; the spawn itself
   // is mutating because the child's mutations are reachable via this call.
   // Same rationale as `bash_mutating` ("cannot introspect the side effect").
@@ -336,7 +334,8 @@ export class PlanModeMutatingBlockedError extends QuantaError {
     super(
       "plan_mode_mutating_blocked",
       `Tool "${toolName}" (${mutatingKind}) is blocked in plan collaboration mode. ` +
-        `Switch to default mode via a developer message (\`mode=default\`) to mutate.`,
+        `Exit plan mode first (for example via \`request_plan_exit\`), or switch via a developer ` +
+        `message (\`mode=default\`) to mutate.`,
     )
     this.toolName = toolName
     this.mutatingKind = mutatingKind

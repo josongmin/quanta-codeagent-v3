@@ -17,7 +17,6 @@
  *       memory_write/update              → "memory_mutating"
  *       branch_search                    → "bash_mutating"
  *       task_stop                        → "subagent_control"
- *       request_plan_exit                → "plan_control"
  *       agent                            → "subagent_spawn"
  *   - In `default` collab mode, every entry (mutating or not) passes —
  *     plan-mode is the only gate this seam owns.
@@ -70,7 +69,6 @@ const MUTATING_NEW_ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["memory_update", "memory_mutating"],
   ["branch_search", "bash_mutating"],
   ["task_stop", "subagent_control"],
-  ["request_plan_exit", "plan_control"],
   ["agent", "subagent_spawn"],
 ]
 
@@ -157,11 +155,10 @@ describe("S2 — MUTATING_TOOL_TABLE drift closeout", () => {
     expect(isMutatingTool("read_image_url")).toBe(false)
   })
 
-  test("request_plan_exit blocks in plan mode under the dedicated plan_control kind", () => {
-    expect(() => assertNotMutatingInPlanMode("plan", "request_plan_exit")).toThrow(
-      PlanModeMutatingBlockedError,
-    )
-    expect(mutatingToolKind("request_plan_exit")).toBe("plan_control")
+  test("request_plan_exit is explicitly read-only so plan mode has a live exit seam", () => {
+    expect(isMutatingTool("request_plan_exit")).toBe(false)
+    expect(mutatingToolKind("request_plan_exit")).toBeNull()
+    expect(() => assertNotMutatingInPlanMode("plan", "request_plan_exit")).not.toThrow()
   })
 })
 

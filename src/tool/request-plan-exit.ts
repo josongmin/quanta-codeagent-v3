@@ -22,11 +22,10 @@ import type { Tool, ToolContext, ToolEvent } from "./types"
  * loop is byte-identical. Read-only + concurrency-UNSAFE (it blocks on an
  * operator decision; never overlap it with other work).
  *
- * Within-run mode flip is a NON-GOAL: an `approved` outcome does not unblock
- * mutating tools inside the SAME `runAgent` call (plan mode is fixed per run).
- * The operator's port owns the cross-turn mode transition — the tool only
- * relays the decision. (Auto within-run transition needs a loop hook; that is
- * a deliberate follow-up — see ADR-0086 §LIMITATIONS.)
+ * Within-run lifecycle is owned by the agent loop: after an `approved`
+ * decision, the loop flips the NEXT turn into default mode and may attach the
+ * approved plan as read-only context. The tool itself still only relays the
+ * typed decision text; it does not mutate state directly.
  */
 const schema = z.object({
   plan: z.string().min(1).describe("The plan to present for approval (markdown ok)."),

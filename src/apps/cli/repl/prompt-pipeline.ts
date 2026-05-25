@@ -22,6 +22,11 @@ export interface PromptPipelineUxOpts {
   readonly multiline?: boolean
 }
 
+type PromptLineReader = (
+  signal: AbortSignal | undefined,
+  ux: PromptPipelineUxOpts | undefined,
+) => Promise<string | null>
+
 /** Dependencies for {@link composePromptPipeline}. Every dep is EXPLICIT so
  *  the pipeline owns ZERO closure captures over the surface state — the
  *  host can swap any field without re-allocating the prompt source. */
@@ -55,12 +60,15 @@ export interface ComposePromptPipelineDeps {
    *  reactor/scheduler wakes). Lets the host keep the quiet-window anchor
    *  authoritative without conflating self-wake with human input. */
   readonly onLocalPromptAccepted?: () => void
+  /** Narrow test seam for local input classification. Undefined keeps the
+   *  raw-line-reader runtime path byte-identical. */
+  readonly readPromptLine?: PromptLineReader
 }
 
 /** Read one trimmed line from the raw-mode reader. Returns `null` on
  *  AbortError (the prompt was aborted via `signal`). Other exceptions
  *  propagate to the caller. */
-const readReplLine = async (
+const defaultPromptLineReader: PromptLineReader = async (
   signal: AbortSignal | undefined,
   ux?: PromptPipelineUxOpts,
 ): Promise<string | null> => {
@@ -87,8 +95,9 @@ const classifyReplLine = async (
   signal: AbortSignal | undefined,
   dispatchSlash: DispatchSlash,
   ux: PromptPipelineUxOpts | undefined,
+  readPromptLine: PromptLineReader,
 ): Promise<string | null | undefined> => {
-  const input = await readReplLine(signal, ux)
+  const input = await readPromptLine(signal, ux)
   if (input === null) return null
   if (input === "/exit" || input === "/quit") return null
   const handled = input === "" || (await dispatchSlash(input))
@@ -109,6 +118,7 @@ const buildCliPromptSource = (
   externalPromptQueue: ExternalPromptQueue | undefined,
   ux: PromptPipelineUxOpts | undefined,
   onLocalPromptAccepted: (() => void) | undefined,
+  readPromptLine: PromptLineReader,
 ): PromptSource => ({
   next: async (signal) => {
     while (signal?.aborted !== true) {
@@ -119,6 +129,7 @@ const buildCliPromptSource = (
         externalPromptQueue,
         ux,
         onLocalPromptAccepted,
+        readPromptLine,
       })
       if (next === undefined) continue
       if (next === null) return null
@@ -128,7 +139,9 @@ const buildCliPromptSource = (
   },
 })
 
-const combineSignals = (signals: ReadonlyArray<AbortSignal | undefined>): AbortSignal | undefined => {
+const combineSignals = (
+  signals: ReadonlyArray<AbortSignal | undefined>,
+): AbortSignal | undefined => {
   const present = signals.filter((signal): signal is AbortSignal => signal !== undefined)
   if (present.length === 0) return undefined
   if (present.length === 1) return present[0]
@@ -148,6 +161,7 @@ const readNextPrompt = async (args: {
   readonly externalPromptQueue: ExternalPromptQueue | undefined
   readonly ux: PromptPipelineUxOpts | undefined
   readonly onLocalPromptAccepted: (() => void) | undefined
+  readonly readPromptLine: PromptLineReader
 }): Promise<PromptPayload | null | undefined> => {
   const {
     signal,
@@ -156,9 +170,10 @@ const readNextPrompt = async (args: {
     externalPromptQueue,
     ux,
     onLocalPromptAccepted,
+    readPromptLine,
   } = args
   if (externalPromptQueue === undefined) {
-    const next = await classifyReplLine(signal, dispatchSlash, ux)
+    const next = await classifyReplLine(signal, dispatchSlash, ux, readPromptLine)
     if (typeof next !== "string") return next
     onLocalPromptAccepted?.()
     return localPayload(next, imageQueue)
@@ -172,7 +187,12 @@ const readNextPrompt = async (args: {
   signal?.addEventListener("abort", abortExternal, { once: true })
   try {
     const winner = await Promise.race([
-      classifyReplLine(combineSignals([signal, localAbort.signal]), dispatchSlash, ux).then((value) => ({
+      classifyReplLine(
+        combineSignals([signal, localAbort.signal]),
+        dispatchSlash,
+        ux,
+        readPromptLine,
+      ).then((value) => ({
         source: "local" as const,
         value,
       })),
@@ -252,6 +272,7 @@ export const composePromptPipeline = (deps: ComposePromptPipelineDeps): PromptSo
     deps.externalPromptQueue,
     deps.ux,
     deps.onLocalPromptAccepted,
+    deps.readPromptLine ?? defaultPromptLineReader,
   )
   return wrapPromptSourceWithIdleGate({
     inner,
