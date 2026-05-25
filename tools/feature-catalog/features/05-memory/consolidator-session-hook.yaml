@@ -46,11 +46,21 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - AgentConfig.memoryConsolidator.enabled — host opt-in (default-OFF; absent ⇒ no hook)
-  - AgentConfig.memoryConsolidator.forceSummarization — Cursor-style override of memoryMode
-  - AgentConfig.memoryConsolidator.port — Phase1Port injection
-  - AgentConfig.memoryConsolidator.store — Stage1StorePort injection
-  - AgentConfig.memoryConsolidator.threadId — required for stage1 row key
+  - name: AgentConfig.memoryConsolidator.enabled
+    default: 'undefined'
+    purpose: 'host opt-in (default-OFF; absent ⇒ no hook)'
+  - name: AgentConfig.memoryConsolidator.forceSummarization
+    default: 'undefined'
+    purpose: 'Cursor-style override of memoryMode'
+  - name: AgentConfig.memoryConsolidator.port
+    default: 'undefined'
+    purpose: 'Phase1Port injection'
+  - name: AgentConfig.memoryConsolidator.store
+    default: 'undefined'
+    purpose: 'Stage1StorePort injection'
+  - name: AgentConfig.memoryConsolidator.threadId
+    default: 'undefined'
+    purpose: 'required for stage1 row key'
 deliberate_hold:
   reason: |
     Phase 2 (cross-session synthesizer) is NOT triggered from the

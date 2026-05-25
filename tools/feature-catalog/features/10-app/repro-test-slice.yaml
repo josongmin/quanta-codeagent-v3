@@ -52,7 +52,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_BENCH_REPRO_TEST
+  - name: QUANTA_BENCH_REPRO_TEST
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Slice posture: generator has NO I/O beyond LLMPort; executor takes

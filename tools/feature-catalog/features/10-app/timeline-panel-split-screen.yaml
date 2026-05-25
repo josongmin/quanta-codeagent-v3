@@ -55,7 +55,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_TIMELINE
+  - name: QUANTA_TIMELINE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   panel 0-row disabled fallback path: env unset / `0` / 음수 / NaN / non-TTY

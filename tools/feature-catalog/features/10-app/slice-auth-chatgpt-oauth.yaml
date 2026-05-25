@@ -51,8 +51,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_OAUTH_CLIENT_ID
-  - QUANTA_PROVIDER
+  - name: QUANTA_OAUTH_CLIENT_ID
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PROVIDER
+    default: 'undefined'
+    purpose: '(no description)'
 notes: |
   `QUANTA_PROVIDER=chatgpt-oauth` 로 활성화. `OAuthCallbackProvider` port 분리로 CLI 는
   loopback http 리스너, Tauri/Web 은 자체 callback 라우터를 inject 가능 — 슬라이스 본체는

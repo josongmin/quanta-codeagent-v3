@@ -38,7 +38,13 @@ evidence:
     integration:
       - tests/integration/permission-stack-gate-e2e.test.ts
     contract: []
-knobs: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
+knobs:
+  - name: QUANTA_PERMISSION_STATE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_HOME
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   resolveHostId(env)는 순수 함수 — DNS 조회 없음. SSH_CONNECTION이 설정된

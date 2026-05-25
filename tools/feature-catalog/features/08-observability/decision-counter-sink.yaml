@@ -52,7 +52,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_DECISION_METRICS
+  - name: QUANTA_DECISION_METRICS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Default-OFF posture: env knob 미설정 / `0|false|off|no` 시 helper가

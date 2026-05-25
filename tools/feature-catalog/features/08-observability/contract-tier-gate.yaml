@@ -32,7 +32,10 @@ evidence:
     unit: []
     integration: []
     contract: [tests/contract/sandbox-docker.test.ts, tests/contract/lsp-typescript.test.ts, tests/contract/lsp-pyright.test.ts]
-knobs: [REQUIRE_CONTRACT]
+knobs:
+  - name: REQUIRE_CONTRACT
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Probe pattern: 각 contract 파일은 모듈 로드 시 한 번만 `--version`

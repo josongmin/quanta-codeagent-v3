@@ -44,8 +44,14 @@ evidence:
       - tests/integration/redaction-three-application-points.test.ts
     contract: []
 knobs:
-  - AgentConfig.redaction.disabled — explicit opt-out, requires acknowledgedRisk
-  - AgentConfig.redaction.acknowledgedRisk — non-empty string when disabled
-  - AgentConfig.redaction.whitelist — structural RegExp overrides (e.g. fixture tokens)
+  - name: AgentConfig.redaction.disabled
+    default: 'undefined'
+    purpose: 'explicit opt-out, requires acknowledgedRisk'
+  - name: AgentConfig.redaction.acknowledgedRisk
+    default: 'undefined'
+    purpose: 'non-empty string when disabled'
+  - name: AgentConfig.redaction.whitelist
+    default: 'undefined'
+    purpose: 'structural RegExp overrides (e.g. fixture tokens)'
 deliberate_hold: null
 notes: 'Startup-throw avoids the "redaction silently off because misconfigured" failure mode that a runtime soft-warn would risk.'

@@ -65,12 +65,24 @@ evidence:
       - tests/integration/retrieval-composition-root.test.ts
     contract: []
 knobs:
-  - QUANTA_RETRIEVAL_HYBRID="1" — single composition-root env knob, strict-equals "1"; any other value (incl. "0" / "true" / unset) ⇒ stack OFF
-  - RetrievalAssembleInput.defaultReranker — promote `identity` (default) / `bm25-secondary` / `score-fusion-rrf` (or `tier-aware` when classifier supplied)
-  - RetrievalAssembleInput.tierClassifier — when present, registers the tier-aware reranker
-  - RetrievalAssembleInput.embedding + .gitLog — when both present, wires CommitEmbedder
-  - RetrievalAssembleInput.bm25Alpha — first-stage / second-stage blend [0,1] (default 0.5)
-  - RetrievalAssembleInput.commitCacheMax — LRU cap on commit-embedder cache (default 1024)
+  - name: QUANTA_RETRIEVAL_HYBRID
+    default: 'undefined'
+    purpose: 'single composition-root env knob, strict-equals "1"; any other value (incl. "0" / "true" / unset) ⇒ stack OFF'
+  - name: RetrievalAssembleInput.defaultReranker
+    default: 'undefined'
+    purpose: 'promote `identity` (default) / `bm25-secondary` / `score-fusion-rrf` (or `tier-aware` when classifier supplied)'
+  - name: RetrievalAssembleInput.tierClassifier
+    default: 'undefined'
+    purpose: 'when present, registers the tier-aware reranker'
+  - name: RetrievalAssembleInput.embedding
+    default: 'undefined'
+    purpose: 'when both present, wires CommitEmbedder'
+  - name: RetrievalAssembleInput.bm25Alpha
+    default: '0.5'
+    purpose: 'first-stage / second-stage blend [0,1]'
+  - name: RetrievalAssembleInput.commitCacheMax
+    default: '1024'
+    purpose: 'LRU cap on commit-embedder cache'
 deliberate_hold: null
 notes: |
   Default-OFF discipline (RFC §1.2): every legacy caller is byte-

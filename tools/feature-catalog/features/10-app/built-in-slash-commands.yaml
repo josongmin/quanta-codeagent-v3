@@ -29,7 +29,10 @@ evidence:
     unit: [tests/unit/slash-commands.test.ts, tests/unit/auth/login-status-cmd.test.ts, tests/unit/auth/auth-ui.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_PREFS_HOME]
+knobs:
+  - name: QUANTA_PREFS_HOME
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold:
   reason: '/context와 /usage는 placeholder — 로프가 per-turn token usage를 공유 sink로 export하기 전까지 wire-up 미완. /usage는 ~/.quanta/usage.jsonl 형식만 정의.'
   promotion_path: 'loop.ts에 usage emit + jsonl appender 추가 → /usage가 real-time 누계 표시'

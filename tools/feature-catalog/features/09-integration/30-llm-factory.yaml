@@ -42,7 +42,16 @@ evidence:
     unit: [tests/unit/cli-argv-prompt.test.ts, tests/unit/cli-resume-heuristic.test.ts, tests/unit/cli-summarizer.test.ts, tests/unit/env-knob-branches.test.ts, tests/unit/next-action-cap-enforce.test.ts]
     integration: [tests/integration/cli-export-assembly.test.ts, tests/integration/session-ux-e2e.test.ts]
     contract: []
-knobs: [ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL]
+knobs:
+  - name: ANTHROPIC_API_KEY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: OPENAI_API_KEY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: OPENAI_BASE_URL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   L4: 3 adapters wired (anthropic / openai / chatgpt-oauth). Companion fallback /

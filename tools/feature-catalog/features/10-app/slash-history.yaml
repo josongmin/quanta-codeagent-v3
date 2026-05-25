@@ -40,7 +40,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_HISTORY_DEFAULT_N
+  - name: QUANTA_HISTORY_DEFAULT_N
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Mutation policy: READS only — never writes back to the message array, never

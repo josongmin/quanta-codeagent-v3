@@ -43,8 +43,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_AUTOMATION — engine 활성 (on|off, default off)
-  - QUANTA_AUTOMATION_INTERVAL_MS — tick interval (default 60000)
+  - name: QUANTA_AUTOMATION
+    default: 'off'
+    purpose: 'engine 활성 (on|off)'
+  - name: QUANTA_AUTOMATION_INTERVAL_MS
+    default: '60000'
+    purpose: 'tick interval'
 config_refs:
   env: [QUANTA_AUTOMATION, QUANTA_AUTOMATION_INTERVAL_MS]
 deliberate_hold:

@@ -35,6 +35,9 @@ evidence:
       - tests/unit/next-action-cap-enforce.test.ts
     integration: []
     contract: []
-knobs: [QUANTA_CAP_ENFORCE]
+knobs:
+  - name: QUANTA_CAP_ENFORCE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: 'PURE construction — session-scoped, one instance per `runAgent`. `targetPath` normalised to empty-string when absent so a missing path arg cannot collide with an explicit `""`.'

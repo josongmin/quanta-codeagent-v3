@@ -49,6 +49,8 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_PERMISSION_STATE — override file path (default ~/.quanta/permission-state.json)
+  - name: QUANTA_PERMISSION_STATE
+    default: '~/.quanta/permission-state.json'
+    purpose: 'override file path'
 deliberate_hold: null
 notes: 'No SQLite, no transactions — bounded state (small N per kind) makes RMW + debounced flush correct. JsonStateFile is generic by design (the state DOMAIN lives in the caller, the helper is parameterised by emptyState/serialize/parse).'

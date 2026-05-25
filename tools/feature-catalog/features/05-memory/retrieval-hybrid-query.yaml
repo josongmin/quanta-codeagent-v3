@@ -38,9 +38,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - HybridQueryInput.type — keywords / embeddings / hybrid
-  - HybridQueryInput.rerank — optional final-stage RerankPort
-  - HybridQueryInput.limit — output cap
+  - name: HybridQueryInput.type
+    default: 'undefined'
+    purpose: 'keywords / embeddings / hybrid'
+  - name: HybridQueryInput.rerank
+    default: 'undefined'
+    purpose: 'optional final-stage RerankPort'
+  - name: HybridQueryInput.limit
+    default: 'undefined'
+    purpose: 'output cap'
 deliberate_hold: null
 notes: |
   Multi-hop retrieval is intentionally out of scope (negative invariant

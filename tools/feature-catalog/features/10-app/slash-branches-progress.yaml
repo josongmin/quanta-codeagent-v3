@@ -41,7 +41,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_BRANCH_SEARCH_PROGRESS
+  - name: QUANTA_BRANCH_SEARCH_PROGRESS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Slice: `src/apps/cli` (read-only surface tier). Imports type-only from

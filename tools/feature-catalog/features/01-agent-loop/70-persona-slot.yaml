@@ -37,7 +37,10 @@ evidence:
     integration:
       - tests/smoke/index.ts
     contract: []
-knobs: [QUANTA_PERSONA]
+knobs:
+  - name: QUANTA_PERSONA
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Codex personality_default/friendly/pragmatic 3-element catalog를 1:1 흡수.

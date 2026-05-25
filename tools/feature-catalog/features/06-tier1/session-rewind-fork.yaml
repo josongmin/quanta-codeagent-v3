@@ -36,8 +36,12 @@ evidence:
       - tests/integration/session-rewind-e2e.test.ts
     contract: []
 knobs:
-  - QUANTA_REWIND
-  - QUANTA_REWIND_GIT
+  - name: QUANTA_REWIND
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_REWIND_GIT
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Envelope append-only invariant은 hard rule — rewind는 원본 jsonl을 절대 truncate

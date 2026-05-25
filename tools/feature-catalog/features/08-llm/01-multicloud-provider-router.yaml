@@ -49,10 +49,18 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - CLAUDE_CODE_USE_BEDROCK
-  - CLAUDE_CODE_USE_VERTEX
-  - CLAUDE_CODE_USE_FOUNDRY
-  - CLAUDE_CODE_USE_MANTLE
+  - name: CLAUDE_CODE_USE_BEDROCK
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: CLAUDE_CODE_USE_VERTEX
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: CLAUDE_CODE_USE_FOUNDRY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: CLAUDE_CODE_USE_MANTLE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   L4: 24-test hellgate covers precedence, conflict, truthy parser, empty-string,

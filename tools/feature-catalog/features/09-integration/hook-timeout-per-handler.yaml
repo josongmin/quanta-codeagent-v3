@@ -29,8 +29,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_HOOK_TIMEOUT_MS
-  - DEFAULT_HOOK_TIMEOUT_MS
+  - name: QUANTA_HOOK_TIMEOUT_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: DEFAULT_HOOK_TIMEOUT_MS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   No AbortSignal propagation today — a handler stuck in a sync busy loop

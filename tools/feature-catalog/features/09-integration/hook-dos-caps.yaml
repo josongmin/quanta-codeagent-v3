@@ -32,11 +32,21 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_HOOK_MAX_HANDLERS
-  - QUANTA_HOOK_MAX_PAYLOAD_BYTES
-  - MAX_HANDLERS_PER_EVENT
-  - MAX_PAYLOAD_BYTES
-  - PAYLOAD_TRUNCATE_MARKER
+  - name: QUANTA_HOOK_MAX_HANDLERS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_HOOK_MAX_PAYLOAD_BYTES
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: MAX_HANDLERS_PER_EVENT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: MAX_PAYLOAD_BYTES
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: PAYLOAD_TRUNCATE_MARKER
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Handler cap is THROW-on-65th by design (not silent drop) — a silent shave

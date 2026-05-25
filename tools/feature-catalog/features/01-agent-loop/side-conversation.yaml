@@ -32,8 +32,14 @@ evidence:
       - tests/integration/side-conversation-e2e.test.ts
     contract: []
 knobs:
-  - inputTokenBudget (default 8192)
-  - outputTokenBudget (default 4096)
-  - effort ("low" | "medium" only, runtime-guarded against `as any` / JSON bypass)
+  - name: inputTokenBudget
+    default: '8192'
+    purpose: '(no description)'
+  - name: outputTokenBudget
+    default: '4096'
+    purpose: '(no description)'
+  - name: effort
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: 'Side-conv is NOT a subagent (no nickname per ADR-0042, no spawn lifecycle per ADR-0041) and NOT plan-mode (which is a posture of the MAIN thread per ADR-0036). It is a separate thread surface. 2026-05-22 audit #10: the prior 540-LOC single file was split into a directory (`prompt.ts` byte-identical constants + integrity surface, `run.ts` executor+errors+budgeting, `dispatch.ts` resolver/request/response indirection) behind a barrel index — every external import path resolves unchanged.'

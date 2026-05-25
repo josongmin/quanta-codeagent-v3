@@ -35,8 +35,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_TURN_SUMMARY
-  - QUANTA_TURN_SUMMARY_VERBOSE
+  - name: QUANTA_TURN_SUMMARY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_TURN_SUMMARY_VERBOSE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold:
   reason: |
     score 노출 영구 hide (score-gaming 방지). recall block 본문은 turn-summary

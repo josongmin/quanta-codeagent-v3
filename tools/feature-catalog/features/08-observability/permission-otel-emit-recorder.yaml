@@ -45,7 +45,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - 'setPermissionRecorder(recorder | null) — register/clear sink (default null = OFF)'
+  - name: setPermissionRecorder
+    default: 'null = OFF'
+    purpose: 'register/clear sink'
 deliberate_hold: null
 notes: |
   outcome 라벨 4종 (allow/deny/prompt/trust) — `trust` 는 post-denial-override

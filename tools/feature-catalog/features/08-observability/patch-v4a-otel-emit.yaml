@@ -42,7 +42,9 @@ evidence:
     integration: [tests/integration/apply-patch-tool.test.ts]
     contract: []
 knobs:
-  - 'applyPatch(patch, fs, observer?) — optional in-process PatchObserver (default omitted)'
+  - name: applyPatch
+    default: 'omitted'
+    purpose: 'optional in-process PatchObserver'
 deliberate_hold: null
 notes: |
   Security invariant: patch text / file content / hunk lines / anchor strings

@@ -38,7 +38,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_COST_PANEL
+  - name: QUANTA_COST_PANEL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Pure DI — `now` injectable so tests drive duration clock without `Date.now()`.

@@ -54,7 +54,10 @@ evidence:
     integration:
       - tests/integration/scheduler-reactor-end-to-end.test.ts
     contract: []
-knobs: [QUANTA_SCHEDULER]
+knobs:
+  - name: QUANTA_SCHEDULER
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Default-OFF: importing `@/scheduler` does NOT instantiate or start a

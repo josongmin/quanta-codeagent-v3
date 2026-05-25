@@ -32,6 +32,9 @@ evidence:
     unit: [tests/unit/cost-dashboard.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_METRICS]
+knobs:
+  - name: QUANTA_METRICS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: '데이터 이미 있던 것의 표현 surface. 세션 누적만 (per-turn delta는 follow-up). markdown은 PR 코멘트용.'

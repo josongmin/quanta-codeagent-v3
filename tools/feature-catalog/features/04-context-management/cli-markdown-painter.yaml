@@ -37,8 +37,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_MD_HIGHLIGHT
-  - QUANTA_MD_MODE
+  - name: QUANTA_MD_HIGHLIGHT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_MD_MODE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   ColorPolicyResolver 통합 (NO_COLOR / FORCE_COLOR / `stdout.isTTY` 우선순위).

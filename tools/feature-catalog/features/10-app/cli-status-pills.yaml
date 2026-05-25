@@ -36,14 +36,30 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_PILLS
-  - QUANTA_PILL_WORKSPACE
-  - QUANTA_PILL_MODE
-  - QUANTA_PILL_SKILLS
-  - QUANTA_PILL_SANDBOX
-  - QUANTA_PILL_RULES
-  - QUANTA_EFFORT
-  - QUANTA_SANDBOX
+  - name: QUANTA_PILLS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_WORKSPACE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_MODE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_SKILLS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_SANDBOX
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_RULES
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_EFFORT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_SANDBOX
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Codex Desktop pill-bar 흡수(round-2 R3 finding); quanta는 5-pill로 Rules를

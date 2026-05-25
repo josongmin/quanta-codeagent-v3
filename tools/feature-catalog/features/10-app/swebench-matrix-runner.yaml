@@ -38,9 +38,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_BENCH_LSP
-  - QUANTA_BENCH_SUBAGENT
-  - QUANTA_BENCH_SKILLS
+  - name: QUANTA_BENCH_LSP
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_BENCH_SUBAGENT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_BENCH_SKILLS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Composer-only pattern: 3 env var 가 bench 의 single source of truth 이며

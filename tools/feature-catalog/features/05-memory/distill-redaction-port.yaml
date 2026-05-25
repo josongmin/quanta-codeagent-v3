@@ -37,7 +37,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - "ConsolidatorHookInput.consolidator.redact — host-injected (s:string) => string (default omitted ⇒ identity)"
+  - name: ConsolidatorHookInput.consolidator.redact
+    default: 'omitted ⇒ identity'
+    purpose: 'host-injected (s:string) => string'
 deliberate_hold:
   reason: |
     The default IS identity (default-OFF byte-identical). Hosts that care

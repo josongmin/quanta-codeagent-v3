@@ -46,7 +46,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_AUTOMATION — tool 등록 + 배너 활성 (on|off, default off)
+  - name: QUANTA_AUTOMATION
+    default: 'off'
+    purpose: 'tool 등록 + 배너 활성 (on|off)'
 config_refs:
   env: [QUANTA_AUTOMATION]
 deliberate_hold:

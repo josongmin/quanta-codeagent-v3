@@ -57,7 +57,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - "sampleRate: number in [0,1] (default 0.1, Codex parity; NaN/out-of-range → default fallback). Override는 caller가 통계적으로 정당화한 경우에만."
+  - name: sampleRate
+    default: 'undefined'
+    purpose: 'number in [0,1] (default 0.1, Codex parity; NaN/out-of-range → default fallback). Override는 caller가 통계적으로 정당화한 경우에만.'
 deliberate_hold: null
 notes: |
   현재 gate는 외부 caller가 명시적으로 호출해야 동작 (default-OFF philosophy,

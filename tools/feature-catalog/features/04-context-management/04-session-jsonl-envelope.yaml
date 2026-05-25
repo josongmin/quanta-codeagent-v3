@@ -35,6 +35,9 @@ evidence:
       - tests/integration/session-envelope-hell-e2e.test.ts
       - tests/integration/jsonrpc-x-session-envelope-cross.test.ts
     contract: []
-knobs: [QUANTA_SESSIONS_DIR]
+knobs:
+  - name: QUANTA_SESSIONS_DIR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: '66 신규 단위 + 3 integration. snapshot↔JSONL 자동 동기는 의도적으로 두 rail 분리. subagent thread_spawn record로 SOTA hardening 계보를 영속 layer까지 확장.'

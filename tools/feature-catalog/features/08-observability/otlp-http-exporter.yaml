@@ -62,10 +62,18 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_OTEL_ENDPOINT
-  - QUANTA_OTEL_SERVICE_NAME
-  - QUANTA_OTEL_BATCH_SIZE
-  - QUANTA_OTEL_FLUSH_MS
+  - name: QUANTA_OTEL_ENDPOINT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OTEL_SERVICE_NAME
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OTEL_BATCH_SIZE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OTEL_FLUSH_MS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   No-throw posture: 모든 public method가 network / serialization error를

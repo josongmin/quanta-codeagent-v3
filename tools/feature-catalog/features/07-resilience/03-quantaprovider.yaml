@@ -30,6 +30,12 @@ evidence:
     unit: [tests/unit/dotenv.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_MODEL, QUANTA_PROVIDER]
+knobs:
+  - name: QUANTA_MODEL
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PROVIDER
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: CLI는 .env 자동 로드()

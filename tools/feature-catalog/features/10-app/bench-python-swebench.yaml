@@ -43,8 +43,12 @@ evidence:
       - tests/integration/bench-python-harness-e2e.test.ts
     contract: []
 knobs:
-  - QUANTA_SWEBENCH_DATASET
-  - QUANTA_SWEBENCH_RUN_ID
+  - name: QUANTA_SWEBENCH_DATASET
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_SWEBENCH_RUN_ID
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Apple Silicon recipe (memory `swebench-arm64-grading-recipe`):

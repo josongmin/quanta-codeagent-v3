@@ -36,9 +36,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_DIFF_PREVIEW
-  - QUANTA_DIFF_MAX_LINES
-  - QUANTA_DIFF_MAX_BYTES
+  - name: QUANTA_DIFF_PREVIEW
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_DIFF_MAX_LINES
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_DIFF_MAX_BYTES
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   TTY 자동 ON / non-TTY OFF; `QUANTA_DIFF_PREVIEW=0` 명시 OFF, `=1` 강제 ON

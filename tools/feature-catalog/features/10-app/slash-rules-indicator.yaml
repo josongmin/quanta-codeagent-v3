@@ -41,8 +41,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_RULE_INDICATOR
-  - QUANTA_PILL_RULES
+  - name: QUANTA_RULE_INDICATOR
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_RULES
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Slice: `src/apps/cli/*` READ-ONLY against `@/agent`. Calls `loadRepoRules` +

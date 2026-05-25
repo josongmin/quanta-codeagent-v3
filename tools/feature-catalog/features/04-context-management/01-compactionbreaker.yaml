@@ -27,6 +27,9 @@ evidence:
     unit: [tests/unit/compaction-breaker-hellgate.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_COMPACT_BREAKER]
+knobs:
+  - name: QUANTA_COMPACT_BREAKER
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

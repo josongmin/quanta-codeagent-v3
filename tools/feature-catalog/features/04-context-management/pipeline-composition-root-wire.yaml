@@ -42,9 +42,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_PIPELINE — preset selector (none|lexical-only|semantic-only|parallel-rrf|semantic-then-rerank|budget-aware, default none = default-OFF)
-  - QUANTA_EMBED_CACHE — forwarded to resolveEmbedCacheFromEnv (in-memory|sqlite|none, default none)
-  - QUANTA_RERANKER — forwarded to createRerankerFromEnv (identity|headless|cohere|voyage, default identity)
+  - name: QUANTA_PIPELINE
+    default: 'none = default-OFF'
+    purpose: 'preset selector (none|lexical-only|semantic-only|parallel-rrf|semantic-then-rerank|budget-aware)'
+  - name: QUANTA_EMBED_CACHE
+    default: 'none'
+    purpose: 'forwarded to resolveEmbedCacheFromEnv (in-memory|sqlite|none)'
+  - name: QUANTA_RERANKER
+    default: 'identity'
+    purpose: 'forwarded to createRerankerFromEnv (identity|headless|cohere|voyage)'
 deliberate_hold:
   reason: |
     search_codebase is NOT auto-registered by buildDefaultTools — the

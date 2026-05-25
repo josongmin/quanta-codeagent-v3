@@ -36,7 +36,10 @@ evidence:
     unit: [tests/unit/cli/help-render-discovery-hellgate.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_HOME]
+knobs:
+  - name: QUANTA_HOME
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Cross-cutting meta-knob: included for catalog discoverability because no

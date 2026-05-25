@@ -39,7 +39,16 @@ evidence:
     unit: [tests/unit/next-action-cap-enforce.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_LOG_LEVEL, QUANTA_SESSIONS_DIR, QUANTA_FS_JAIL]
+knobs:
+  - name: QUANTA_LOG_LEVEL
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_SESSIONS_DIR
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_FS_JAIL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Parsers reject non-integer / non-positive / sign / hex / extra-whitespace

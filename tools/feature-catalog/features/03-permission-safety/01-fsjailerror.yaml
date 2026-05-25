@@ -30,6 +30,9 @@ evidence:
       - tests/unit/fs-jail-hellgate.test.ts
     integration: [tests/integration/fs-jail-e2e.test.ts]
     contract: []
-knobs: [QUANTA_FS_JAIL]
+knobs:
+  - name: QUANTA_FS_JAIL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: 'storage 슬라이스 단일 강제 지점. runAgent e2e(, 3 tests): write ../escape.txt → ok:false + 파일 미생성, 시 동일 호출 성공 + 파일 생성, read 경계초과 시 파일 내용 leak 없이 ok:false. 16 단위() + storage pure 헬퍼 단위 + 통합 layer 완비'

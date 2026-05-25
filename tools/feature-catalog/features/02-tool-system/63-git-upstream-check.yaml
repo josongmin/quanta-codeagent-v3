@@ -31,6 +31,9 @@ evidence:
     unit: [tests/unit/git-upstream-check.test.ts, tests/unit/mode.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_GIT_TOOLS]
+knobs:
+  - name: QUANTA_GIT_TOOLS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: 'fetch는 의도적으로 안 함 — 네트워크·mutating 회피. 가져온 상태 대비 분기만 보고. MUTATING_TOOL_TABLE에 git_upstream_check:null 등록(read-only).'

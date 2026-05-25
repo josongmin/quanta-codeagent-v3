@@ -36,8 +36,12 @@ evidence:
       - tests/unit/apps/agent/ci-bot-preset.test.ts
     contract: []
 knobs:
-  - ModePolicy.network.hosts — operator-supplied allowlist (replaces / extends default)
-  - ModePolicy.network.kind — "allowlist" enables the gate; absent ⇒ no host check
+  - name: ModePolicy.network.hosts
+    default: 'undefined'
+    purpose: 'operator-supplied allowlist (replaces / extends default)'
+  - name: ModePolicy.network.kind
+    default: 'undefined'
+    purpose: '"allowlist" enables the gate; absent ⇒ no host check'
 deliberate_hold:
   reason: |
     No fuzzy / regex / counted-failure modes by design — the gate is

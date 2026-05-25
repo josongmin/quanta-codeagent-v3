@@ -25,6 +25,9 @@ evidence:
       - tests/unit/diagnostics.test.ts
     integration: [tests/integration/lsp-diagnostics-e2e.test.ts]
     contract: []
-knobs: [QUANTA_LSP]
+knobs:
+  - name: QUANTA_LSP
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: nav 8종(0024)과 grade parity 달성

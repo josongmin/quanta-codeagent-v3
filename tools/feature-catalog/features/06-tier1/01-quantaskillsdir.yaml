@@ -36,6 +36,9 @@ evidence:
     unit: [tests/unit/skill.test.ts, tests/unit/skill-frontmatter-parse.test.ts, tests/unit/skill-discover-errors.test.ts, tests/unit/skill-discover-size-cap.test.ts]
     integration: [tests/integration/skill-paths-activation-e2e.test.ts]
     contract: []
-knobs: [QUANTA_SKILLS_DIR]
+knobs:
+  - name: QUANTA_SKILLS_DIR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

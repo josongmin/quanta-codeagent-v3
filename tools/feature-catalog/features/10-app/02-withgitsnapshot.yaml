@@ -28,6 +28,9 @@ evidence:
     unit: [tests/unit/agent/guard-chain.test.ts, tests/unit/bench-branch-search-wiring-hellgate.test.ts, tests/unit/bench-branch-search-wiring.test.ts, tests/unit/bench-issue-hint-agentless-wiring.test.ts, tests/unit/bench-issue-hint-wiring.test.ts]
     integration: [tests/integration/fallback-x-verify-closeout-hell-e2e.test.ts, tests/integration/verify-guard-e2e.test.ts, tests/integration/verify-guard-hellgate-e2e.test.ts]
     contract: []
-knobs: [QUANTA_REPAIR_ROUNDS]
+knobs:
+  - name: QUANTA_REPAIR_ROUNDS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

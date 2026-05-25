@@ -34,7 +34,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_CAP_ENFORCE
+  - name: QUANTA_CAP_ENFORCE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Compaction breaker(같은-prompt thrash)와 dispatch-dedup(같은-call thrash)에

@@ -25,6 +25,12 @@ evidence:
     unit: [tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]
     integration: [tests/integration/verify-guard-e2e.test.ts, tests/integration/verify-guard-forces-any.test.ts]
     contract: []
-knobs: [QUANTA_VERIFY_GUARD, QUANTA_VERIFY_GUARD_MAX_TRIPS]
+knobs:
+  - name: QUANTA_VERIFY_GUARD
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_VERIFY_GUARD_MAX_TRIPS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

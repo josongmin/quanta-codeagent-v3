@@ -60,11 +60,21 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_OAUTH_ISSUER
-  - QUANTA_OAUTH_CLIENT_ID
-  - QUANTA_CHATGPT_API_BASE
-  - QUANTA_OAUTH_SKU
-  - QUANTA_OAUTH_ORIGINATOR
+  - name: QUANTA_OAUTH_ISSUER
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OAUTH_CLIENT_ID
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_CHATGPT_API_BASE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OAUTH_SKU
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OAUTH_ORIGINATOR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Phase 1 absorption (2026-05-23). 흡수 출처: Codex Desktop OAuth 플로우 in-house 분석

@@ -37,7 +37,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_SWEBENCH_PYTHON
+  - name: QUANTA_SWEBENCH_PYTHON
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold:
   reason: |
     녹화 trajectory + offline Docker certify가 아직 미완 — `OPENAI_API_KEY`

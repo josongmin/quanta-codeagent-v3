@@ -43,9 +43,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - ANTHROPIC_IDENTITY_TOKEN_FILE
-  - ANTHROPIC_FEDERATION_RULE_ID
-  - ANTHROPIC_ORGANIZATION_ID
+  - name: ANTHROPIC_IDENTITY_TOKEN_FILE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: ANTHROPIC_FEDERATION_RULE_ID
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: ANTHROPIC_ORGANIZATION_ID
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold:
   scope: real-exchange-endpoint
   reason: |

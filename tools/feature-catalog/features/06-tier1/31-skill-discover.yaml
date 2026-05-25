@@ -42,7 +42,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_SKILLS_DIR
+  - name: QUANTA_SKILLS_DIR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Size cap 30 MB (`MAX_SKILL_SIZE_BYTES`) absorbed from Claude Desktop 1.7196.3

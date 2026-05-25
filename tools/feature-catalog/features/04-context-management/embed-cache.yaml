@@ -53,11 +53,21 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_EMBED_CACHE — adapter swap (in-memory|sqlite|none, default none)
-  - InMemoryEmbedCacheOptions.capacity — LRU cap, default 10000
-  - SqliteEmbedCacheOptions.path — db path, default ~/.quanta/embed-cache.db
-  - SqliteEmbedCacheOptions.ttlMs — entry TTL, default 30 days
-  - SqliteEmbedCacheOptions.now — injectable clock for tests
+  - name: QUANTA_EMBED_CACHE
+    default: 'none'
+    purpose: 'adapter swap (in-memory|sqlite|none)'
+  - name: InMemoryEmbedCacheOptions.capacity
+    default: '10000'
+    purpose: 'LRU cap'
+  - name: SqliteEmbedCacheOptions.path
+    default: '~/'
+    purpose: 'db path.quanta/embed-cache.db'
+  - name: SqliteEmbedCacheOptions.ttlMs
+    default: '30 days'
+    purpose: 'entry TTL'
+  - name: SqliteEmbedCacheOptions.now
+    default: 'undefined'
+    purpose: 'injectable clock for tests'
 deliberate_hold:
   reason: default-OFF until embed pipeline wiring lands
   details: |

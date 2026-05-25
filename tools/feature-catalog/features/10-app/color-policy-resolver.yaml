@@ -32,7 +32,13 @@ evidence:
       - tests/unit/auth/auth-ui.test.ts
     integration: []
     contract: []
-knobs: [NO_COLOR, FORCE_COLOR]
+knobs:
+  - name: NO_COLOR
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: FORCE_COLOR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Distinct entry from the surface-agnostic UI helpers slice. ui-helpers.ts is

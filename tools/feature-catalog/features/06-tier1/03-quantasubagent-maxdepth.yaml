@@ -33,6 +33,12 @@ evidence:
     unit: [tests/unit/subagent-runner.test.ts, tests/unit/subagent-6-tools-hellgate.test.ts]
     integration: [tests/integration/subagent-features-wiring.test.ts, tests/integration/subagent-cleanup-e2e.test.ts]
     contract: []
-knobs: [QUANTA_SUBAGENT, QUANTA_SUBAGENT_MAX_DEPTH]
+knobs:
+  - name: QUANTA_SUBAGENT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_SUBAGENT_MAX_DEPTH
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

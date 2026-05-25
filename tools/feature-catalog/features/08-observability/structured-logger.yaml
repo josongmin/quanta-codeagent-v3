@@ -38,7 +38,10 @@ evidence:
     unit: [tests/unit/cost-dashboard.test.ts, tests/unit/next-action-cap-enforce.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_LOG_LEVEL]
+knobs:
+  - name: QUANTA_LOG_LEVEL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Two-logger architecture is deliberate: the shared one emits a tiny

@@ -52,7 +52,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_SANDBOX
+  - name: QUANTA_SANDBOX
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Wire seam intentionally NOT routed through `ToolContext`: the central

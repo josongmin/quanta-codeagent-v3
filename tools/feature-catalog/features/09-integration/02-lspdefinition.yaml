@@ -26,6 +26,9 @@ evidence:
     unit: [tests/unit/lsp-nav-tools.test.ts, tests/unit/lsp-nav-per-tool.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_LSP_TOOLS]
+knobs:
+  - name: QUANTA_LSP_TOOLS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

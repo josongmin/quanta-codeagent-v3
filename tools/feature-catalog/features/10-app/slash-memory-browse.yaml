@@ -38,8 +38,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_MEMORY_SLASH
-  - QUANTA_MEMORY_LIST_MAX
+  - name: QUANTA_MEMORY_SLASH
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_MEMORY_LIST_MAX
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Default-ON registration: `QUANTA_MEMORY_SLASH` defaults to `"1"` (command

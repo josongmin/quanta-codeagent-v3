@@ -29,7 +29,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_SPINNER
+  - name: QUANTA_SPINNER
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   StreamPort tee — 기존 어댑터(stdout/jsonl-recorder)와 fan-out으로 병렬 동작, 본체 코드

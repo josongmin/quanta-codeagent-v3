@@ -24,6 +24,9 @@ evidence:
     unit: [tests/unit/next-action-cap-enforce.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_BENCH_TIMEOUT_MS]
+knobs:
+  - name: QUANTA_BENCH_TIMEOUT_MS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: 'L4→L2: no test imports evidence.code paths'

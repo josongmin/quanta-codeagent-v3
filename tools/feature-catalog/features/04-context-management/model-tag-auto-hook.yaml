@@ -40,10 +40,18 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - AutoHookRegistrarOptions.onWarn — overrideable (default console.warn)
-  - AutoHookRegistrarOptions.onUnregisterError — overrideable (default console.warn)
-  - registerCacheHook(cache | null) / registerStoreHook(store | null) — opt-in staging; null = no-op + warn
-  - installAll(invalidator) returns UnregisterAll — idempotent disposal thunk; second call is no-op
+  - name: AutoHookRegistrarOptions.onWarn
+    default: 'console.warn'
+    purpose: 'overrideable'
+  - name: AutoHookRegistrarOptions.onUnregisterError
+    default: 'console.warn'
+    purpose: 'overrideable'
+  - name: registerCacheHook
+    default: 'undefined'
+    purpose: 'opt-in staging; null = no-op + warn'
+  - name: installAll
+    default: 'undefined'
+    purpose: '(invalidator) idempotent disposal thunk; second call is no-op'
 deliberate_hold:
   reason: |
     The slice attaches duck-typed `CacheLike` / `StoreLike` to the

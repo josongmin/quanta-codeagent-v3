@@ -25,6 +25,9 @@ evidence:
     unit: [tests/unit/compaction-summarizer.test.ts, tests/unit/cli-summarizer.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_COMPACT_MODEL]
+knobs:
+  - name: QUANTA_COMPACT_MODEL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

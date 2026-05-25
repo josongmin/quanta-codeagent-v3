@@ -33,6 +33,9 @@ evidence:
     unit: [tests/unit/jsonl-recorder.test.ts, tests/unit/jsonl-recorder-retention.test.ts, tests/unit/tee.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_OBSERVE_DIR]
+knobs:
+  - name: QUANTA_OBSERVE_DIR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

@@ -26,6 +26,9 @@ evidence:
     unit: [tests/unit/compaction.test.ts, tests/unit/compaction-precompact.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_COMPACT_TOKENS]
+knobs:
+  - name: QUANTA_COMPACT_TOKENS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

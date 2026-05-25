@@ -32,5 +32,7 @@ evidence:
     unit: [tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts]
     integration: [tests/integration/seatbelt-exec-hellgate.test.ts]
 knobs:
-  - QUANTA_SANDBOX_STRICT
+  - name: QUANTA_SANDBOX_STRICT
+    default: 'undefined'
+    purpose: '(no description)'
 notes: 'Phase 1 integration test 2개만 (negative-side) — Phase 2에서 framework allowlist 확장 후 positive cases. /tmp symlink → /private/tmp realpath 필수.'

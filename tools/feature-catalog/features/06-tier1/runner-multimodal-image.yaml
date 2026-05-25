@@ -35,8 +35,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_IMAGE_QUEUE
-  - QUANTA_IMAGE_MAX_QUEUE
+  - name: QUANTA_IMAGE_QUEUE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_IMAGE_MAX_QUEUE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold:
   reason: voice input은 의도적으로 별도 PR로 분리 — 코어 멀티모달 타입 widening 우선 안착 후 audio 첨부 검토
   promotion_path: 'PromptPayload audio 슬롯 추가 + ASR port 도입 + 별도 카탈로그 entry'

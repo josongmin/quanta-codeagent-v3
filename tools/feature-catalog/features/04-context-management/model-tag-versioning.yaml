@@ -36,9 +36,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - DefaultInvalidatorOptions.onCallbackError — overrideable (default console.warn)
-  - registerInvalidationCallback(cb) — opt-in registration; absence = byte-identical
-  - tag-codec semantics — major-version-bump triggers stale; minor / patch do NOT
+  - name: DefaultInvalidatorOptions.onCallbackError
+    default: 'console.warn'
+    purpose: 'overrideable'
+  - name: registerInvalidationCallback
+    default: 'undefined'
+    purpose: '(cb) opt-in registration; absence = byte-identical'
+  - name: tag-codec
+    default: 'undefined'
+    purpose: 'major-version-bump triggers stale; minor / patch do NOT'
 deliberate_hold:
   reason: |
     Wiring this invalidator into specific cache (ADR-0254) and persisted

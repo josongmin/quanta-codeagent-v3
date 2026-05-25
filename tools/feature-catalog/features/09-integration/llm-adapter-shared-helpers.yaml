@@ -46,8 +46,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_LLM_STREAM_FIRST_CHUNK_MS
-  - QUANTA_LLM_STREAM_IDLE_MS
+  - name: QUANTA_LLM_STREAM_FIRST_CHUNK_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_LLM_STREAM_IDLE_MS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Pairs with `llm-stream-timeout` (the canonical timeout deadline

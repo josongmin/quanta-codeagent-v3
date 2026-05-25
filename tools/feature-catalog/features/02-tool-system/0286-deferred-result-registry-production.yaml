@@ -50,7 +50,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_DEFERRED_CAP — registry max live handles (default 1000)
+  - name: QUANTA_DEFERRED_CAP
+    default: '1000'
+    purpose: 'registry max live handles'
 deliberate_hold:
   reason: "Sqlite persistence for cross-restart deferred 후속"
   promotion_path: "Stage1 sqlite store와 동형 pattern (sibling SqliteDeferredResultRegistry under same port)"

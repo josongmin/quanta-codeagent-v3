@@ -23,6 +23,9 @@ evidence:
     unit: [tests/unit/output-spill.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_TOOL_OUTPUT_MAX]
+knobs:
+  - name: QUANTA_TOOL_OUTPUT_MAX
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

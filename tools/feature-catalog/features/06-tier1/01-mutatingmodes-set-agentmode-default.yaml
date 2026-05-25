@@ -39,6 +39,9 @@ evidence:
     integration:
       - tests/integration/plan-mode-dispatch-hell-e2e.test.ts
     contract: []
-knobs: [QUANTA_PLAN]
+knobs:
+  - name: QUANTA_PLAN
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: read-only-set 인버스였다면 신규 read-only mode가 silent write access를 받을 위험 있음. admissibility-gate에서 mutating tool dispatch 차단. `--plan` 은 deprecated alias로 backward-compat.

@@ -36,8 +36,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_TURN_SUMMARY
-  - QUANTA_TURN_SUMMARY_VERBOSE
+  - name: QUANTA_TURN_SUMMARY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_TURN_SUMMARY_VERBOSE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold:
   reason: |
     의도적 미노출: redacted 값 본문, memory recall score, turn timing 세부

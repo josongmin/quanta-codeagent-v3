@@ -40,7 +40,13 @@ evidence:
     integration:
       - tests/integration/permission-stack-gate-e2e.test.ts
     contract: []
-knobs: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
+knobs:
+  - name: QUANTA_PERMISSION_STATE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_HOME
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   영속 파일은 ~/.quanta/permission-state.json. JSON atomic write

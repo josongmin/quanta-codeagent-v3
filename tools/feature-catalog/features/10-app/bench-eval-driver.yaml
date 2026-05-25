@@ -47,7 +47,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_BENCH_TIMEOUT_MS
+  - name: QUANTA_BENCH_TIMEOUT_MS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Slice: `src/apps/bench/eval` — the driver imports `@/runtime` (for

@@ -42,9 +42,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_INDEX — indexer enabled at composition root (on|off, default off; consumed by ADR-0278 wire)
-  - QUANTA_INDEX_GLOB — file glob the default scanner consumes (default `src/**/*.ts`)
-  - QUANTA_INDEX_INTERVAL_MS — polling cadence for `scanDelta` (default 5000 ms; consumed by ADR-0278 wire)
+  - name: QUANTA_INDEX
+    default: 'off'
+    purpose: 'indexer enabled at composition root (on|off; consumed by ADR-0278 wire)'
+  - name: QUANTA_INDEX_GLOB
+    default: '`src/**/*.ts`'
+    purpose: 'file glob the default scanner consumes'
+  - name: QUANTA_INDEX_INTERVAL_MS
+    default: 'undefined'
+    purpose: 'polling cadence for `scanDelta` (default 5000 ms; consumed by ADR-0278 wire)'
 deliberate_hold:
   reason: |
     LSP-aware (tree-sitter) symbol chunking is structurally better than

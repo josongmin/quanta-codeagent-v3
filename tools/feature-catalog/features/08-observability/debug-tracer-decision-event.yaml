@@ -59,7 +59,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_DEBUG
+  - name: QUANTA_DEBUG
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   EXACT-OPTIONAL discipline on `DecisionEvent` 필드 (absent fields는 omitted,

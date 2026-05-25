@@ -34,7 +34,13 @@ evidence:
       - tests/unit/cli/image-cmd.test.ts
     integration: []
     contract: []
-knobs: [QUANTA_IMAGE_QUEUE, QUANTA_IMAGE_MAX_QUEUE]
+knobs:
+  - name: QUANTA_IMAGE_QUEUE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_IMAGE_MAX_QUEUE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   R6 multi-modal track. SRP: queue는 already-validated `ImageBlock` FIFO만 담당;

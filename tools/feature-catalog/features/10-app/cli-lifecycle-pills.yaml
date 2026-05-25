@@ -34,10 +34,18 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_LIFECYCLE_PILLS
-  - QUANTA_PILL_TASKS
-  - QUANTA_PILL_FOLLOWUP
-  - QUANTA_PILL_MCP
+  - name: QUANTA_LIFECYCLE_PILLS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_TASKS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_FOLLOWUP
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PILL_MCP
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   `status-pills`와 별도 모듈인 이유 — status-pills는 SESSION 레벨 상수성

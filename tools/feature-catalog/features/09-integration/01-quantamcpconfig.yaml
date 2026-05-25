@@ -26,6 +26,9 @@ evidence:
     unit: []
     integration: [tests/integration/mcp-e2e.test.ts]
     contract: []
-knobs: [QUANTA_MCP_CONFIG]
+knobs:
+  - name: QUANTA_MCP_CONFIG
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: '추가: server-failure isolation'

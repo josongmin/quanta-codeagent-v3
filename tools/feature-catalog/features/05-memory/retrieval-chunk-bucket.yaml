@@ -40,9 +40,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - ChunkBucketOptions.bucket — identity / small-600 / medium-2400 / large-4000
-  - ChunkBucketOptions.overlapRatio — sliding-window overlap, default 0.10
-  - ChunkBucketOptions.tokenizer — injected TokenizerPort
+  - name: ChunkBucketOptions.bucket
+    default: 'undefined'
+    purpose: 'identity / small-600 / medium-2400 / large-4000'
+  - name: ChunkBucketOptions.overlapRatio
+    default: 'off'
+    purpose: 'sliding-window overlap.10'
+  - name: ChunkBucketOptions.tokenizer
+    default: 'undefined'
+    purpose: 'injected TokenizerPort'
 deliberate_hold: null
 notes: |
   Per-query LEARNED chunk size is intentionally out of scope (negative

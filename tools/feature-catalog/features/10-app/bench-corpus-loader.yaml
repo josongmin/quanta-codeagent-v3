@@ -51,8 +51,12 @@ evidence:
       - tests/integration/bench-observability.test.ts
     contract: []
 knobs:
-  - QUANTA_SWEBENCH_CORPUS_ROOT
-  - QUANTA_SWEBENCH_PYTHON
+  - name: QUANTA_SWEBENCH_CORPUS_ROOT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_SWEBENCH_PYTHON
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   The Python SWE-bench seam (real grader) lives in `python-swebench.ts`

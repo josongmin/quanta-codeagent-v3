@@ -34,6 +34,9 @@ evidence:
     unit: [tests/unit/subagent-runner.test.ts, tests/unit/subagent-6-tools-hellgate.test.ts]
     integration: [tests/integration/subagent-6tool-hell-e2e.test.ts]
     contract: []
-knobs: [QUANTA_SUBAGENT_MAX_DEPTH]
+knobs:
+  - name: QUANTA_SUBAGENT_MAX_DEPTH
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

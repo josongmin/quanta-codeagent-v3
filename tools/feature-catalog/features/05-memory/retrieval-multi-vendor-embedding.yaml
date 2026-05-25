@@ -45,8 +45,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - EmbeddingAdapterOptions.apiKey / model / baseURL / batchSize
-  - Per-vendor HTTP seam (e.g. EmbeddingsHttp / VoyageHttp) — injected, no SDK import
+  - name: EmbeddingAdapterOptions.apiKey
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: Per-vendor
+    default: 'undefined'
+    purpose: 'injected, no SDK import'
 deliberate_hold: null
 notes: |
   Stubs throw RetrievalError ("vendor not yet wired at runtime") so any

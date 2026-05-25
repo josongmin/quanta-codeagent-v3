@@ -43,9 +43,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - 'DefaultCacheOpts.checkRecommendedDrift?: boolean — opt-in flag (default false)'
-  - 'DefaultCacheOpts.onDriftWarn?: (msg: string) => void — operator log sink (default noop)'
-  - 'DefaultCacheOpts.metrics?: MetricsRegistry — counter registry (graceful when undefined)'
+  - name: DefaultCacheOpts.checkRecommendedDrift?
+    default: 'off'
+    purpose: 'boolean — opt-in flag'
+  - name: DefaultCacheOpts.onDriftWarn?
+    default: 'noop'
+    purpose: '(msg: string) => void — operator log sink'
+  - name: DefaultCacheOpts.metrics?
+    default: 'undefined'
+    purpose: 'MetricsRegistry — counter registry (graceful when undefined)'
 deliberate_hold: null
 notes: |
   Closed-port enum: adding a 5th `PerToolTtlDriftKind` requires ADR amendment

@@ -60,11 +60,21 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - InjectOpts.maxBytes — hard cap on Σ rolloutSummary bytes (default DEFAULT_INJECT_MAX_BYTES=8192)
-  - InjectOpts.kindFilter — optional first-token startsWith filter (OMIT semantics)
-  - DEFAULT_INJECT_MAX_BYTES — 8 KiB
-  - MEMORY_SECTION_HEADER — '## Cross-session memory (auto)'
-  - DefaultCrossSessionInjectorOpts.stage1Store — Stage1OutputsStore (sibling read port)
+  - name: InjectOpts.maxBytes
+    default: 'DEFAULT_INJECT_MAX_BYTES=8192'
+    purpose: 'hard cap on Σ rolloutSummary bytes'
+  - name: InjectOpts.kindFilter
+    default: 'undefined'
+    purpose: 'optional first-token startsWith filter (OMIT semantics)'
+  - name: DEFAULT_INJECT_MAX_BYTES
+    default: 'undefined'
+    purpose: '8 KiB'
+  - name: MEMORY_SECTION_HEADER
+    default: 'undefined'
+    purpose: '''## Cross-session memory (auto)'''
+  - name: DefaultCrossSessionInjectorOpts.stage1Store
+    default: 'undefined'
+    purpose: 'Stage1OutputsStore (sibling read port)'
 deliberate_hold:
   reason: |
     Untrusted-aggregate wrapper around the injected section is NOT yet

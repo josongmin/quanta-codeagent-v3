@@ -43,7 +43,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_MCP_VERBOSE
+  - name: QUANTA_MCP_VERBOSE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Slice: `src/apps/cli` allowed `@/ui/ui-helpers` for rendering; does NOT

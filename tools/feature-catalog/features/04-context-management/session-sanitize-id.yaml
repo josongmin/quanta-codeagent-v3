@@ -41,7 +41,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_SESSIONS_DIR
+  - name: QUANTA_SESSIONS_DIR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Sibling to `slice-session-root-port` (multi-tenant root provider) — the

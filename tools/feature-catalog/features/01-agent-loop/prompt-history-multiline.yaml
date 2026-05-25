@@ -35,10 +35,18 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_HISTORY
-  - QUANTA_HISTORY_FILE
-  - QUANTA_HISTORY_MAX
-  - QUANTA_MULTILINE
+  - name: QUANTA_HISTORY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_HISTORY_FILE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_HISTORY_MAX
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_MULTILINE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   QUANTA_HISTORY_MAX로 파일 size cap(무한 증식 방지). reverse-i-search는 in-memory

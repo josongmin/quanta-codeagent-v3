@@ -27,6 +27,12 @@ evidence:
     unit: [tests/unit/logger-threshold.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_LOG_LEVEL, QUANTA_RUN_ID]
+knobs:
+  - name: QUANTA_LOG_LEVEL
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_RUN_ID
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: '단위 테스트(, 8 tests): default(info+), env=debug 전체 통과, env=error 단일 통과, explicit option override env, 잘못된 값 → info fallback, child logger inherit + fields merge, multi-line field JSON-escape 1줄 framing, …'

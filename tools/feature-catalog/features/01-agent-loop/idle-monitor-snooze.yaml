@@ -33,10 +33,18 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_IDLE_SUPPRESS
-  - QUANTA_IDLE_MS
-  - QUANTA_SNOOZE_DEFAULT_MS
-  - QUANTA_REJECT_LIMIT
+  - name: QUANTA_IDLE_SUPPRESS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_IDLE_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_SNOOZE_DEFAULT_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_REJECT_LIMIT
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Cursor 3.2 흡수 — agent-analysis-corpus의 raw beautify 코드 검증 후 채택. snooze는

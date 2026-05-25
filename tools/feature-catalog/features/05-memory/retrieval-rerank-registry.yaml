@@ -43,9 +43,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - Bm25SecondaryOptions.alpha — first-stage / second-stage blend in [0,1], clamped
-  - TierAwareOptions.penalty — override the default user/test/vendored penalty table
-  - RRF_K — exposed constant; only override with a published reason
+  - name: Bm25SecondaryOptions.alpha
+    default: 'undefined'
+    purpose: 'first-stage / second-stage blend in [0,1], clamped'
+  - name: TierAwareOptions.penalty
+    default: 'undefined'
+    purpose: 'override the default user/test/vendored penalty table'
+  - name: RRF_K
+    default: 'undefined'
+    purpose: 'exposed constant; only override with a published reason'
 deliberate_hold: null
 notes: |
   Cross-encoder (e.g. monoT5) and late-interaction (ColBERT) rerankers are

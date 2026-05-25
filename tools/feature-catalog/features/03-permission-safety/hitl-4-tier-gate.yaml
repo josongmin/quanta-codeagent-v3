@@ -33,9 +33,15 @@ evidence:
       - tests/integration/hitl-tier-dispatch-e2e.test.ts
     contract: []
 knobs:
-  - 'QUANTA_HITL_OVERRIDES=<path> — override JSON 파일 경로 (absent ⇒ 빌트인만)'
-  - 'AgentConfig.hitl.enabled — gate 켜기 (default OFF, byte-identical legacy)'
-  - 'AgentConfig.onHandoff — UI 콜백 (absent ⇒ silent no-op)'
+  - name: QUANTA_HITL_OVERRIDES
+    default: 'undefined'
+    purpose: 'override JSON 파일 경로 (absent ⇒ 빌트인만)'
+  - name: AgentConfig.hitl.enabled
+    default: 'undefined'
+    purpose: 'gate 켜기 (default OFF, byte-identical legacy)'
+  - name: AgentConfig.onHandoff
+    default: 'undefined'
+    purpose: 'UI 콜백 (absent ⇒ silent no-op)'
 deliberate_hold: null
 notes: |
   one-way ratchet, no-regex matching, no-GUI editor, no-runtime-reload — ADR-0047 §R6 negative space.

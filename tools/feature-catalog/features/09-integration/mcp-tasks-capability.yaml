@@ -41,5 +41,7 @@ evidence:
   tests:
     unit: [tests/unit/mcp/capabilities-hellgate.test.ts, tests/unit/mcp/tasks-hellgate.test.ts, tests/unit/mcp/tasks-tools-hellgate.test.ts, tests/unit/mcp/negotiator-pick-hellgate.test.ts]
 knobs:
-  - QUANTA_MCP_CAPS
+  - name: QUANTA_MCP_CAPS
+    default: 'undefined'
+    purpose: '(no description)'
 notes: 'AbortSignal로 poller clean shutdown. 3 caller-wired tools (NOT in defaultTools).'

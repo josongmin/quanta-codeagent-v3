@@ -46,7 +46,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_ANTHROPIC_PROVIDER — default | bedrock | vertex | foundry (explicit override)
+  - name: QUANTA_ANTHROPIC_PROVIDER
+    default: 'undefined'
+    purpose: 'default | bedrock | vertex | foundry (explicit override)'
 deliberate_hold: null
 notes: |
   Wire is opt-in: legacy AnthropicAdapter still default. Foundry adapter

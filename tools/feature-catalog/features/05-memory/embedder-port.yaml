@@ -36,9 +36,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - OpenAIEmbedderOptions.model — embedding model id (defaults to provider's small variant)
-  - OpenAIEmbedderOptions.batchSize — request batching (default 96)
-  - OpenAIEmbedderOptions.baseURL — provider endpoint override
+  - name: OpenAIEmbedderOptions.model
+    default: 'provider''s small variant'
+    purpose: 'embedding model id'
+  - name: OpenAIEmbedderOptions.batchSize
+    default: '96'
+    purpose: 'request batching'
+  - name: OpenAIEmbedderOptions.baseURL
+    default: 'undefined'
+    purpose: 'provider endpoint override'
 deliberate_hold: null
 notes: |
   Slice-isolation invariant: the memory slice cannot import @/llm or any

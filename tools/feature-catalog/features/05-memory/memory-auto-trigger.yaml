@@ -52,14 +52,30 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_MEMORY_AUTO — auto-trigger 활성 (on|off, default off)
-  - QUANTA_MEMORY_THRESHOLD — phase2 promote threshold (default 0.7, range 0..1 for default Jaccard)
-  - QUANTA_MEMORY_MIN_USAGE — minimum usageCount gate (default 1)
-  - DEFAULT_TRIGGER_POLICY — {promoteThreshold:0.7, minUsageCount:1}
-  - DefaultMemoryAutoTriggerOpts.phase1Port — LLM-backed Phase1Port (distill seam)
-  - DefaultMemoryAutoTriggerOpts.phase1Store — Stage1StorePort (watermark sink)
-  - DefaultMemoryAutoTriggerOpts.stage1Store — Stage1OutputsStore (usage/selection cache)
-  - DefaultMemoryAutoTriggerOpts.logWarn — diagnostic sink (default no-op)
+  - name: QUANTA_MEMORY_AUTO
+    default: 'off'
+    purpose: 'auto-trigger 활성 (on|off)'
+  - name: QUANTA_MEMORY_THRESHOLD
+    default: 'undefined'
+    purpose: 'phase2 promote threshold (default 0.7, range 0..1 for default Jaccard)'
+  - name: QUANTA_MEMORY_MIN_USAGE
+    default: 'on'
+    purpose: 'minimum usageCount gate'
+  - name: DEFAULT_TRIGGER_POLICY
+    default: 'undefined'
+    purpose: '{promoteThreshold:0.7, minUsageCount:1}'
+  - name: DefaultMemoryAutoTriggerOpts.phase1Port
+    default: 'undefined'
+    purpose: 'LLM-backed Phase1Port (distill seam)'
+  - name: DefaultMemoryAutoTriggerOpts.phase1Store
+    default: 'undefined'
+    purpose: 'Stage1StorePort (watermark sink)'
+  - name: DefaultMemoryAutoTriggerOpts.stage1Store
+    default: 'undefined'
+    purpose: 'Stage1OutputsStore (usage/selection cache)'
+  - name: DefaultMemoryAutoTriggerOpts.logWarn
+    default: 'no-op'
+    purpose: 'diagnostic sink'
 deliberate_hold:
   reason: |
     Embedding-based similarity is the obvious next-step swap (현재는

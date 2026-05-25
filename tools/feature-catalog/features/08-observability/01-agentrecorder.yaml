@@ -27,6 +27,9 @@ evidence:
     unit: [tests/unit/observability.test.ts, tests/unit/observability-metrics-hellgate.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_METRICS]
+knobs:
+  - name: QUANTA_METRICS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

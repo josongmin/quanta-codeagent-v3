@@ -43,7 +43,10 @@ evidence:
     integration:
       - tests/integration/reactor-babysit-end-to-end.test.ts
     contract: []
-knobs: [QUANTA_PROACTIVE_REACTOR]
+knobs:
+  - name: QUANTA_PROACTIVE_REACTOR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Build/test watchers (`build_completion` / `diff_ready` / `test_pass`) are

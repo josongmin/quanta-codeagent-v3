@@ -39,7 +39,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - MAX_PTY  # handlers-6: PTY 동시 보관 상한 (default 32, OOM/leak guard)
+  - name: MAX_PTY
+    default: 'undefined'
+    purpose: 'handlers-6: PTY 동시 보관 상한 (default 32, OOM/leak guard)'
 deliberate_hold: null
 notes: |
   L4 완료 (2026-05-23): 6 handler + router 구현. closed 6-set. error.cause는

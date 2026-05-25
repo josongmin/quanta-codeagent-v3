@@ -35,6 +35,9 @@ evidence:
     unit: [tests/unit/cli-argv-prompt.test.ts, tests/unit/cli-resume-heuristic.test.ts, tests/unit/cli-summarizer.test.ts, tests/unit/env-knob-branches.test.ts]
     integration: [tests/integration/cli-export-assembly.test.ts, tests/integration/session-ux-e2e.test.ts]
     contract: []
-knobs: [QUANTA_MEMORY]
+knobs:
+  - name: QUANTA_MEMORY
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

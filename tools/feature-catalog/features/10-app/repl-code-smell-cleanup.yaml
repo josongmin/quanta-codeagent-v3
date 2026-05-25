@@ -64,11 +64,21 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_FLASH_ERROR_MS
-  - QUANTA_FLASH_IDLE_MS
-  - QUANTA_ESC_WINDOW_MS
-  - QUANTA_FLASH_TRANSIENT_MS
-  - QUANTA_FLASH_TRUNCATE_CHARS
+  - name: QUANTA_FLASH_ERROR_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_FLASH_IDLE_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_ESC_WINDOW_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_FLASH_TRANSIENT_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_FLASH_TRUNCATE_CHARS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   The larger `runRepl` God-class split (~1570 lines) is owned by a parallel

@@ -42,14 +42,30 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - phase2.enabled — host opt-in (default-OFF; absent ⇒ skip phase2_disabled)
-  - phase2.port — Phase2Port (wraps cheaper summarizer LLM per ADR-0011)
-  - phase2.store — Stage1StorePort (countSince / getWatermark / fetchSince)
-  - phase2.writer — MemoryWriter (3-file atomic + git commit)
-  - phase2.existingContent — pre-read on-disk MEMORY.md/raw/summary (caller fetches)
-  - phase2.mode — "INIT" | "incremental" (default incremental)
-  - PHASE2_AUTO_TRIGGER_PENDING (constant, 5 rows) — pending-count threshold
-  - PHASE2_AUTO_TRIGGER_MAX_AGE_MS (constant, 48h) — age threshold
+  - name: phase2.enabled
+    default: 'undefined'
+    purpose: 'host opt-in (default-OFF; absent ⇒ skip phase2_disabled)'
+  - name: phase2.port
+    default: 'undefined'
+    purpose: 'Phase2Port (wraps cheaper summarizer LLM per ADR-0011)'
+  - name: phase2.store
+    default: 'undefined'
+    purpose: 'Stage1StorePort (countSince / getWatermark / fetchSince)'
+  - name: phase2.writer
+    default: 'undefined'
+    purpose: 'MemoryWriter (3-file atomic + git commit)'
+  - name: phase2.existingContent
+    default: 'undefined'
+    purpose: 'pre-read on-disk MEMORY.md/raw/summary (caller fetches)'
+  - name: phase2.mode
+    default: 'incremental'
+    purpose: '"INIT" | "incremental"'
+  - name: PHASE2_AUTO_TRIGGER_PENDING
+    default: 'undefined'
+    purpose: 'pending-count threshold'
+  - name: PHASE2_AUTO_TRIGGER_MAX_AGE_MS
+    default: 'undefined'
+    purpose: 'age threshold'
 deliberate_hold:
   reason: |
     The hook itself is a pure orchestration seam — wiring the actual call

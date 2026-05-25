@@ -36,7 +36,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_COMPACT_TOKENS
+  - name: QUANTA_COMPACT_TOKENS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Memory slice 도 같은 chars/4 휴리스틱을 쓰지만 `@/memory` 를 산술용으로 import

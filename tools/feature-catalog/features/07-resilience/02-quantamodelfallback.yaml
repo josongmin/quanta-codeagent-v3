@@ -25,6 +25,9 @@ evidence:
     unit: [tests/unit/fallback.test.ts]
     integration: []
     contract: []
-knobs: [QUANTA_MODEL_FALLBACK]
+knobs:
+  - name: QUANTA_MODEL_FALLBACK
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: ''

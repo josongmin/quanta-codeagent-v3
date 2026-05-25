@@ -50,7 +50,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_ASYNC_TOOLS — async tool kind 활성 (on|off, default off)
+  - name: QUANTA_ASYNC_TOOLS
+    default: 'off'
+    purpose: 'async tool kind 활성 (on|off)'
 deliberate_hold:
   reason: "Sqlite persistence for cross-restart deferred 후속"
   promotion_path: "Stage1 sqlite store와 동형 pattern (registry behind same port)"

@@ -57,7 +57,9 @@ evidence:
       - tests/integration/subagent-seed-augmentation-e2e.test.ts
     contract: []
 knobs:
-  - QUANTA_SUBAGENT_MAX_DEPTH
+  - name: QUANTA_SUBAGENT_MAX_DEPTH
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Read-only tool allowlist source: `read`, `grep`, `glob`, `lsp_references`,

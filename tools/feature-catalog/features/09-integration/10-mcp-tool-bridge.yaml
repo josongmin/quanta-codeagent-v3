@@ -30,6 +30,9 @@ evidence:
     unit: []
     integration: [tests/integration/mcp-client.test.ts, tests/integration/mcp-bridge.test.ts, tests/integration/mcp-e2e.test.ts]
     contract: []
-knobs: [QUANTA_MCP_CONFIG]
+knobs:
+  - name: QUANTA_MCP_CONFIG
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: 'quantamcpconfig(ADR-0007)는 config 노브만 기술 — 이 항목은 클라이언트+브리지 구현 capability. 새 MCP 서버 추가 확장점.'

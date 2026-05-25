@@ -42,7 +42,13 @@ evidence:
       - tests/unit/slash-commands.test.ts
     integration: []
     contract: []
-knobs: [EDITOR, VISUAL]
+knobs:
+  - name: EDITOR
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: VISUAL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold:
   reason: |
     PlanEditPort / ComposerEditPort + TextInbox are ports without a

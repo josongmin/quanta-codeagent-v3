@@ -42,9 +42,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - BatchConfig.windowMs — accumulation window in ms; `0` schedules on `queueMicrotask`
-  - BatchConfig.maxBatchSize — provider per-request cap; outgoing chunks honour this
-  - UnderlyingEmbedder.embed — structural seam over any `EmbeddingPort`-shaped object
+  - name: BatchConfig.windowMs
+    default: 'undefined'
+    purpose: 'accumulation window in ms; `0` schedules on `queueMicrotask`'
+  - name: BatchConfig.maxBatchSize
+    default: 'undefined'
+    purpose: 'provider per-request cap; outgoing chunks honour this'
+  - name: UnderlyingEmbedder.embed
+    default: 'undefined'
+    purpose: 'structural seam over any `EmbeddingPort`-shaped object'
 deliberate_hold:
   reason: |
     Wire-up into commit-embedder / hybrid-query / future memory retrievers

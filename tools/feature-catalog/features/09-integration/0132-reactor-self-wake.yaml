@@ -44,7 +44,10 @@ evidence:
     integration:
       - tests/integration/reactor-babysit-end-to-end.test.ts
     contract: []
-knobs: [QUANTA_PROACTIVE_REACTOR]
+knobs:
+  - name: QUANTA_PROACTIVE_REACTOR
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Babysit (`BABYSIT_SKILL_NAME`) is the manual-resume fallback path — the

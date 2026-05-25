@@ -49,7 +49,9 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - "ToolContext.onShellEvent: ShellExecObserver | undefined (default undefined) — absent ⇒ no event emission, legacy buffered path verbatim. present ⇒ closed union event stream PLUS unchanged ShellResult."
+  - name: ToolContext.onShellEvent
+    default: 'undefined'
+    purpose: 'ShellExecObserver | undefined  — absent ⇒ no event emission, legacy buffered path verbatim. present ⇒ closed union event stream PLUS unchanged ShellResult.'
 deliberate_hold: null
 notes: |
   - 청크는 Uint8Array, decode는 final ShellResult 빌드 시 한 번

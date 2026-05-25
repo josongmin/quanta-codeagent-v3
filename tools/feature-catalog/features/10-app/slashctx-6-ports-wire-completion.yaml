@@ -75,9 +75,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_COST_PANEL
-  - QUANTA_BRANCH_SEARCH_PROGRESS
-  - QUANTA_PLAN_STORE
+  - name: QUANTA_COST_PANEL
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_BRANCH_SEARCH_PROGRESS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_PLAN_STORE
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   Deliberately NOT wired in this slice: `workingState`. The

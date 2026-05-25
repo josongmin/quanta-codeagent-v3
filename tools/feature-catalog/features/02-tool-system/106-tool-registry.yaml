@@ -44,6 +44,8 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - QUANTA_TOOL_OUTPUT_MAX — per-tool output char cap before spill (default 200 000)
+  - name: QUANTA_TOOL_OUTPUT_MAX
+    default: '200 000'
+    purpose: 'per-tool output char cap before spill'
 deliberate_hold: null
 notes: '`output-spill.ts` writes to `.quanta/tool-output/<uuid>.txt` and prunes to `DEFAULT_SPILL_KEEP` recent files. `deferred.ts` is the in-memory typed seam — there is deliberately no async scheduler today; the contract can be exercised in isolation and a real scheduler can adopt it later without changing the type surface.'

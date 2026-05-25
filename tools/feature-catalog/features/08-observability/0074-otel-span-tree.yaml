@@ -32,6 +32,8 @@ evidence:
       - tests/integration/spans-e2e.test.ts
     contract: []
 knobs:
-  - 'setSpanSink(sink|null) — host(CLI/Tauri/Web)가 SpanSink 구현체를 wire; 미등록이 기본 (no-op)'
+  - name: setSpanSink
+    default: 'undefined'
+    purpose: '(sink|null) host(CLI/Tauri/Web)가 SpanSink 구현체를 wire; 미등록이 기본 (no-op)'
 deliberate_hold: null
 notes: 'OTel SDK / OTLP exporter 번들 미채택 — seam은 SpanSink interface만; 실제 OTLP/Honeycomb/JSONL 매핑은 host 구현 follow-up. full 10-11 deep tree (mcp/sub-submission/per-event)는 미채택 — core 4 stage만, 같은 seam 위에서 확장. first-class "blocked" tool status 채널 부재 — gate-deny는 현재 status="error"로 surface. ADR-0032 vocabulary 위에 얹음.'

@@ -40,9 +40,15 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - CommitEmbedderOptions.cacheMax — LRU size, default 1024
-  - GitLogPort — caller decides how to walk git history
-  - EmbeddingPort — vendor choice flows from Axis D
+  - name: CommitEmbedderOptions.cacheMax
+    default: '1024'
+    purpose: 'LRU size'
+  - name: GitLogPort
+    default: 'undefined'
+    purpose: 'caller decides how to walk git history'
+  - name: EmbeddingPort
+    default: 'undefined'
+    purpose: 'vendor choice flows from Axis D'
 deliberate_hold: null
 notes: |
   Commit format for embedding is `subject\n\nbody` (or `subject` alone

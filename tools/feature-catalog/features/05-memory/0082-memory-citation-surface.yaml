@@ -38,8 +38,12 @@ evidence:
       - tests/integration/memory-citation-end-to-end.test.ts
     contract: []
 knobs:
-  - "AgentConfig.store (default undefined) — when absent the accumulator is not allocated; outcome.memoryCitations omitted (byte-identical)."
-  - "AgentConfig.memory.recallLimit (default 5) — budget that decides placement; the limit IS the filter that produces citations."
+  - name: AgentConfig.store
+    default: 'undefined'
+    purpose: 'when absent the accumulator is not allocated; outcome.memoryCitations omitted (byte-identical).'
+  - name: AgentConfig.memory.recallLimit
+    default: '5'
+    purpose: 'budget that decides placement; the limit IS the filter that produces citations.'
 deliberate_hold:
   reason: |
     Three placement seams reserved but unused today:

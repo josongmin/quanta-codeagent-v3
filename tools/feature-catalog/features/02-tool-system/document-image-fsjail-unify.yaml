@@ -62,7 +62,10 @@ evidence:
       - tests/unit/tool/yaml-read-hellgate.test.ts
     integration: []
     contract: []
-knobs: [QUANTA_FS_JAIL]
+knobs:
+  - name: QUANTA_FS_JAIL
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: |
   xlsx_read is currently a stub (ADR-0137 / -0138 deferred) and has no

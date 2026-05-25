@@ -41,6 +41,9 @@ evidence:
     unit: [tests/unit/work-metrics.test.ts, tests/unit/work-metrics-collector.test.ts, tests/unit/observability/attrs.test.ts, tests/unit/observability/vocabulary.test.ts]
     integration: [tests/integration/loop-work-metrics-sink.test.ts]
     contract: []
-knobs: [QUANTA_METRICS]
+knobs:
+  - name: QUANTA_METRICS
+    default: 'undefined'
+    purpose: '(no description)'
 deliberate_hold: null
 notes: 'OTel attr은 flat이라 workMetricsAttrs는 per-file diff를 scalar 합계로 집계 후 emit. L4: 기본 sink가 CLI에 배선되어 사용자가 turn별 작업 요약을 본다(QUANTA_METRICS=1). 잔여 scope: diffMap은 아직 자동 채워지지 않음 — collector.recordDiff(numstat)를 통해서만 누적되며 loop가 turn별 `git diff --numstat`을 spawn하는 배선은 후속(// TODO(absorb #6 cont.) in session-resources.ts). 토큰/액션/lines는 실효.'
