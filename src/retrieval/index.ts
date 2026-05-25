@@ -44,6 +44,30 @@ export type { EmbeddingAdapterOptions, EmbeddingPort, EmbeddingVendor } from "./
 export type { HybridQueryInput, QueryType } from "./hybrid-query"
 // Hybrid query funnel (Axis E).
 export { runHybridQuery } from "./hybrid-query"
+// LexicalSearch first-stage engine (ADR-0260): BM25 + ripgrep adapters.
+export type {
+  Bm25LexicalSearchOptions,
+  HeadlessLexicalStubOptions,
+  LexicalDegradeReason,
+  LexicalDoc,
+  LexicalError,
+  LexicalErrorKind,
+  LexicalHit,
+  LexicalIndexResult,
+  LexicalQueryOptions,
+  LexicalSearch,
+  RipgrepLexicalSearchOptions,
+  RipgrepSpawner,
+  RipgrepSpawnOptions,
+  RipgrepSpawnResult,
+} from "./lexical"
+export {
+  ALL_LEXICAL_ERROR_KINDS,
+  createBm25LexicalSearch,
+  createRipgrepLexicalSearch,
+  headlessLexicalStub,
+  tokenizeUtf8,
+} from "./lexical"
 export type { Bm25SecondaryOptions } from "./rerank/bm25-secondary"
 export { createBm25SecondaryReranker } from "./rerank/bm25-secondary"
 export { identityReranker } from "./rerank/identity"
