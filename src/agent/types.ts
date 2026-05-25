@@ -22,7 +22,7 @@ import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"
 import type { ShadowOdb } from "@/storage"
-import type { StreamPort } from "@/stream"
+import type { DecisionEmitter, StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
 import type { WebSearchProvider } from "@/tool/web"
 import type { AutoBackgroundConfig } from "./auto-background"
@@ -113,6 +113,19 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
   llm: LLMPort
   registry: ToolRegistry
   stream: StreamPort
+  /**
+   * ADR-0250 (Phase 2 of ADR-0239) — narrow side-channel for gate-decision
+   * events. SEPARATE from `stream` on purpose: the `decision` AgentEvent
+   * variant is rendered by the stdout adapter + persisted by the JSONL
+   * recorder the moment it lands on `stream`, so routing decisions through
+   * `stream` by default would break the default-OFF byte-identical surface
+   * invariant. The admissibility gate calls `decisionEmitter?.emit(...)` at
+   * its 3 hot sites (rule / hook / permission). Absent ⇒ no emit, no
+   * allocation, no visible bytes — byte-identical to the pre-Phase-2 path.
+   * Composition roots wire this against the debug-tracer (NOT the main
+   * stream) only when developer-mode is on.
+   */
+  decisionEmitter?: DecisionEmitter
   permission: PermissionContext
   /** Conversation seed (typically one user message). */
   messages: Message[]
@@ -1345,6 +1358,7 @@ export interface SteeringConfig {
 export type AdmissibilityGateConfig = Pick<
   AgentConfig,
   | "cwd"
+  | "decisionEmitter"
   | "hitl"
   | "hooks"
   | "mode"

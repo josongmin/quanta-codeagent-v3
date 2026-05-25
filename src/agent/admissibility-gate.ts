@@ -58,6 +58,7 @@ import {
 } from "@/permission"
 import type { RulesStore } from "@/rules"
 import { errMessage } from "@/shared"
+import { safeEmitDecision } from "@/stream"
 import {
   buildDenySteerMessage,
   type ConfirmDecision,
@@ -179,6 +180,49 @@ export interface AdmissibilityWaveAOptions {
    * shape.
    */
   reviewKindOverride?: import("@/permission").ReviewKind
+}
+
+/* ------------------------------------------------------------------------- *
+ * ADR-0250 (Phase 2 of ADR-0239) — gate-decision emit helper.
+ *
+ * Called from the 3 emit sites (rule / hook / permission) so the
+ * `DecisionEvent` shape is constructed in ONE place. Sanitisation contract
+ * lives here:
+ *   - `reason` is a short human-readable one-liner; callers MUST NOT include
+ *     tool input, file contents, or env values.
+ *   - `metadata` carries kind-specific extras and ONLY safe enums/categorical
+ *     tags. Callers pass `{ tool: action.tool }` at most — never `action.input`.
+ *   - `toolCallId` is the upstream `call.id` so a debug-tracer can pair the
+ *     decision row with the eventual `tool_call.id` row.
+ *
+ * Default-OFF: `config.decisionEmitter === undefined` (the byte-identical
+ * production path) ⇒ `safeEmitDecision` returns a no-op with zero allocation.
+ * ------------------------------------------------------------------------- */
+const emitGateDecision = (
+  config: AdmissibilityGateConfig,
+  args: {
+    kind: "permission" | "rule" | "hook"
+    outcome: "allow" | "deny" | "ask"
+    reason: string
+    toolCallId?: string
+    ruleId?: string
+    hookName?: string
+    tool?: string
+  },
+): void => {
+  if (config.decisionEmitter === undefined) return
+  const event: import("@/stream").DecisionEvent = {
+    type: "decision",
+    turn: config.run?.turn ?? 0,
+    kind: args.kind,
+    outcome: args.outcome,
+    reason: args.reason,
+    ...(args.toolCallId !== undefined ? { toolCallId: args.toolCallId } : {}),
+    ...(args.ruleId !== undefined ? { ruleId: args.ruleId } : {}),
+    ...(args.hookName !== undefined ? { hookName: args.hookName } : {}),
+    ...(args.tool !== undefined ? { metadata: { tool: args.tool } } : {}),
+  }
+  safeEmitDecision(config.decisionEmitter, event)
 }
 
 /** Map a `ReviewerTier` to the short preview tag suffix the dispatch seam
@@ -321,11 +365,37 @@ const runPreToolUseHook = async (
     name: call.name,
     input: call.input,
   })
-  if (result.deny) return deny(call.id, `Hook denied: ${result.deny.deny}`, "hook-denied")
+  if (result.deny) {
+    // ADR-0250 Phase 2 — surface the hook-deny on the debug-tracer side
+    // channel. The `result.deny.deny` field is the operator-authored deny
+    // reason from the local hook (trust-level == permission config); we pass
+    // it through verbatim per the gate's existing wording invariant. Default-
+    // OFF when `decisionEmitter` is absent (zero allocation).
+    emitGateDecision(config, {
+      kind: "hook",
+      outcome: "deny",
+      reason: `pre_tool_use: ${result.deny.deny}`,
+      toolCallId: call.id,
+      hookName: "pre_tool_use",
+      tool: call.name,
+    })
+    return deny(call.id, `Hook denied: ${result.deny.deny}`, "hook-denied")
+  }
   // A rewrite only matters when the call is admitted. `emit` includes the
   // `updatedInput` KEY only when a handler set it (presence is the signal, not
   // truthiness), so a rewrite to a falsy value is still propagated.
   if ("updatedInput" in result) opts.onInputMutation?.(result.updatedInput)
+  // ADR-0250 Phase 2 — hook admitted (no deny). Emit on the admit path too so
+  // a tracer line confirms which call passed which hook (paired with the
+  // upstream `tool_call.id` row).
+  emitGateDecision(config, {
+    kind: "hook",
+    outcome: "allow",
+    reason: "pre_tool_use: admitted",
+    toolCallId: call.id,
+    hookName: "pre_tool_use",
+    tool: call.name,
+  })
   return null
 }
 
@@ -616,6 +686,23 @@ const runPermissionStack = (
     // fallback remains only for legacy callers that omit that bundle.
     { store: opts.store ?? getDefaultPermissionStore() },
   )
+  // ADR-0250 Phase 2 — emit the per-thread/per-host/post-denial stack verdict
+  // BEFORE acting on it. `decision.reason` (deny path only) is the policy's
+  // own message (mentions the per-thread sandbox type + workdir, never tool
+  // input). The `ask` arm has no `reason` field — emit a synthesized
+  // "stack: ask → fall through" line so the tracer pairing stays complete.
+  emitGateDecision(config, {
+    kind: "permission",
+    outcome: decision.kind,
+    reason:
+      decision.kind === "allow"
+        ? "stack allow"
+        : decision.kind === "deny"
+          ? decision.reason
+          : "stack ask → fall through",
+    toolCallId: call.id,
+    tool: action.tool,
+  })
   if (decision.kind === "allow") return "allow"
   if (decision.kind === "deny") {
     return deny(call.id, `Permission denied: ${decision.reason}`, "denied")
@@ -751,6 +838,26 @@ const runModePolicy = async (
     permission.mode === "auto" && autoClassifier
       ? await evaluateAuto(action, permission, autoClassifier)
       : evaluate(action, permission)
+  // ADR-0250 Phase 2 — emit the mode-policy decision BEFORE acting on it so a
+  // tracer sees the categorical outcome (allow/deny/ask) even on paths that
+  // later short-circuit via the ask handler. `decision.reason` is the
+  // policy's own message; it MAY include the tool name but never tool input
+  // — the underlying `evaluate*` constructors only ever stitch action.tool
+  // into the prose. Defence-in-depth: this site does NOT spread metadata
+  // from the decision itself.
+  const outcome: "allow" | "deny" | "ask" = decision.kind
+  emitGateDecision(config, {
+    kind: "permission",
+    outcome,
+    reason:
+      decision.kind === "allow"
+        ? `mode='${permission.mode}' allow`
+        : decision.kind === "deny"
+          ? decision.reason
+          : decision.reason,
+    toolCallId: call.id,
+    tool: action.tool,
+  })
   if (decision.kind === "deny") {
     // When the HITL gate is enabled the HARD_DENY branch is already handled
     // upstream; any remaining policy denial keeps the legacy "Permission
@@ -803,6 +910,99 @@ const earlyHardDeny = (
   })
   if (hardDeny === null) return null
   return deny(call.id, `Action requires human handoff: ${hardDeny}${HANDOFF_SUFFIX}`, "handoff")
+}
+
+/**
+ * Prefix-rule DSL gate body (ADR-0031). Returns the gate result, or the
+ * sentinel `"fallthrough"` when the parent should continue to the legacy
+ * gates (no rules store, or `no_match` with the default `"fallthrough"`
+ * policy). Extracted from `runAdmissibilityGate` so the parent's cognitive
+ * complexity stays under the biome cap with the ADR-0250 emit calls layered
+ * in — the gate semantics are byte-identical to the previous inline block.
+ *
+ * ADR-0250 Phase 2 — emits `kind:"rule"` decisions on the 3 outcome branches
+ * (allow / deny / ask). The `rule_no_match_deny` branch also emits so a
+ * tracer can show why a default-deny policy fired. The `m.rule.action === "ask"`
+ * arm with no reviewer port wired emits an `ask` (the policy intent), then
+ * the gate returns the legacy `rule_ask` deny — the emit reflects the rule's
+ * DECLARED outcome, not the wiring-failure deny that follows.
+ */
+const runRulesDsl = async (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): Promise<DispatchResult | null | "fallthrough"> => {
+  if (!opts.rulesStore) return "fallthrough"
+  const ruleKey = config.registry.extractShellCommand(action.tool, action.input) ?? action.tool
+  const m = opts.rulesStore.match(ruleKey)
+  if (m.kind === "matched") {
+    // Build the ruleId from prefix + layer + source line — categorical,
+    // matches the on-disk identity, NEVER carries the matched command.
+    const ruleId = `${m.rule.layer}:${m.rule.sourceFile}:${m.rule.sourceLine}`
+    if (m.rule.action === "allow") {
+      emitGateDecision(config, {
+        kind: "rule",
+        outcome: "allow",
+        reason: `matched rule '${m.rule.prefix}' (${m.rule.layer})`,
+        toolCallId: call.id,
+        ruleId,
+        tool: action.tool,
+      })
+      return runPreToolUseHook(call, config, opts)
+    }
+    if (m.rule.action === "deny") {
+      emitGateDecision(config, {
+        kind: "rule",
+        outcome: "deny",
+        reason: `matched deny rule '${m.rule.prefix}' (${m.rule.layer})`,
+        toolCallId: call.id,
+        ruleId,
+        tool: action.tool,
+      })
+      return deny(
+        call.id,
+        `Permission denied by rule '${m.rule.prefix}' (${m.rule.layer}): ${ruleKey}`,
+        "rule_deny",
+      )
+    }
+    // m.rule.action === "ask" — escalate (rule_ask deny if no port wired).
+    emitGateDecision(config, {
+      kind: "rule",
+      outcome: "ask",
+      reason: `matched ask rule '${m.rule.prefix}' (${m.rule.layer})`,
+      toolCallId: call.id,
+      ruleId,
+      tool: action.tool,
+    })
+    if (opts.reviewerPort === undefined) {
+      return deny(
+        call.id,
+        `Rule 'ask ${m.rule.prefix}' matched '${ruleKey}' but no ReviewerPort is wired.`,
+        "rule_ask",
+      )
+    }
+    return reviewAndDecide(call, config, action, opts, "rule")
+  }
+  // m.kind === "no_match"
+  if (opts.noMatchPolicy === "deny") {
+    emitGateDecision(config, {
+      kind: "rule",
+      outcome: "deny",
+      reason: "no rule matched (noMatchPolicy='deny')",
+      toolCallId: call.id,
+      tool: action.tool,
+    })
+    return deny(
+      call.id,
+      `no rule matched '${ruleKey}' (noMatchPolicy='deny').`,
+      "rule_no_match_deny",
+    )
+  }
+  // "fallthrough" (or absent) ⇒ continue to the legacy gates below. No emit
+  // here — the legacy gates own the next decision and will emit their own
+  // kind:"permission" or kind:"hook" line.
+  return "fallthrough"
 }
 
 /**
@@ -882,38 +1082,8 @@ export const runAdmissibilityGate = async (
   //    `no_match` ⇒ noMatchPolicy ("deny" terminal, else fallthrough). Match key
   //    = the tool's shell command when present, else the tool name (so
   //    `allow read_file` matches a non-shell tool). Absent rulesStore ⇒ skipped.
-  if (opts.rulesStore) {
-    const ruleKey = config.registry.extractShellCommand(action.tool, action.input) ?? action.tool
-    const m = opts.rulesStore.match(ruleKey)
-    if (m.kind === "matched") {
-      if (m.rule.action === "allow") return runPreToolUseHook(call, config, opts)
-      if (m.rule.action === "deny") {
-        return deny(
-          call.id,
-          `Permission denied by rule '${m.rule.prefix}' (${m.rule.layer}): ${ruleKey}`,
-          "rule_deny",
-        )
-      }
-      // m.rule.action === "ask" — escalate (rule_ask deny if no port wired).
-      if (opts.reviewerPort === undefined) {
-        return deny(
-          call.id,
-          `Rule 'ask ${m.rule.prefix}' matched '${ruleKey}' but no ReviewerPort is wired.`,
-          "rule_ask",
-        )
-      }
-      return reviewAndDecide(call, config, action, opts, "rule")
-    }
-    // m.kind === "no_match"
-    if (opts.noMatchPolicy === "deny") {
-      return deny(
-        call.id,
-        `no rule matched '${ruleKey}' (noMatchPolicy='deny').`,
-        "rule_no_match_deny",
-      )
-    }
-    // "fallthrough" (or absent) ⇒ fall through to the legacy gates below.
-  }
+  const ruleResult = await runRulesDsl(call, config, action, opts)
+  if (ruleResult !== "fallthrough") return ruleResult
 
   // 4. HITL 4-tier gate (when enabled). HARD_DENY lives INSIDE this branch as
   //    well as inside `evaluate()` below — keeping both is intentional: the

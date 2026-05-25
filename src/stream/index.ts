@@ -12,6 +12,8 @@ export type { AssistantTextPainter, StdoutStreamOptions } from "./adapters/stdou
 export { StdoutStream } from "./adapters/stdout"
 export type { DegradedRecord, TeeStreamOpts } from "./adapters/tee"
 export { TeeStream } from "./adapters/tee"
+export type { DecisionEmitter, DecisionEvent } from "./decision-emitter"
+export { decisionEmitterFromStream, safeEmitDecision } from "./decision-emitter"
 export type { StreamPort } from "./ports"
 export type {
   AgentEvent,
