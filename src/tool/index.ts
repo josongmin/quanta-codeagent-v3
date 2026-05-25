@@ -1,5 +1,7 @@
+import type { AutomationEnginePort } from "@/scheduler/automation-engine"
 import type { FileSystemPort } from "@/storage"
 import { applyPatchTool } from "./apply-patch"
+import { automationUpdateTool } from "./automation_update"
 import { bashTool } from "./bash"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
@@ -277,7 +279,15 @@ export {
 export interface DefaultToolPorts {
   fs?: FileSystemPort
   diagnostics?: DiagnosticsProvider
+  /** ADR-0280 — when a host-wired `AutomationEnginePort` is passed,
+   *  `automation_update` is appended to the default tool set. Absent ⇒
+   *  the tool is NOT registered (byte-identical default tools). The
+   *  composition root passes this only when `QUANTA_AUTOMATION === "on"`
+   *  (see `src/apps/agent/index.ts` + `src/scheduler/runtime-wire.ts`). */
+  automationEngine?: AutomationEnginePort
 }
+
+export { automationUpdateTool } from "./automation_update"
 
 /**
  * Build the built-in tool set: Phase 1 six + Phase 2 localize / test_runner +
@@ -287,7 +297,18 @@ export interface DefaultToolPorts {
  * identical (ids + behavior) to the historical `defaultTools` literal; the
  * exported `defaultTools` below is exactly `buildDefaultTools()`.
  */
-export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => [
+export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
+  const base: Tool[] = buildBaseDefaultTools(ports)
+  // ADR-0280 — conditional registration of automation_update. Absent
+  // engine ⇒ default set is byte-identical (the model never sees the
+  // tool). Present ⇒ closure-over-engine tool is appended.
+  if (ports.automationEngine !== undefined) {
+    base.push(automationUpdateTool(ports.automationEngine) as Tool)
+  }
+  return base
+}
+
+const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
   (ports.fs !== undefined ? makeReadTool(ports.fs) : readTool) as Tool,
   (ports.fs !== undefined ? makeWriteTool(ports.fs) : writeTool) as Tool,
   (ports.fs !== undefined ? makeEditTool(ports.fs) : editTool) as Tool,

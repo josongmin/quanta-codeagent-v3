@@ -28,7 +28,6 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 import { buildSystemPrompt } from "@/agent"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import { defaultForker, type ForkSessionPort } from "@/agent/fork-session"
-import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import {
   fsBackedStickyModelStore,
@@ -52,22 +51,11 @@ import {
 } from "@/agent/tool-profile"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
-import {
-  type ChunkUpsertPort,
-  type CodebaseIndexer,
-  createDefaultIndexer,
-  type FileChunk as IndexerFileChunk,
-} from "@/retrieval/indexer"
-import {
-  type SearchHit,
-  type SearchPipeline,
-  semanticOnlyPipeline,
-  type SemanticIndex,
-} from "@/retrieval/pipeline"
 import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
+import { assembleAutomation, type AutomationEngineSlot } from "@/scheduler/runtime-wire"
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { buildDefaultTools, searchCodebaseTool, type Tool, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
 import {
   type AgentArgs,
@@ -112,6 +100,51 @@ const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
  *  byte-identical `{}` default. Single canonical knob; no aliases. */
 export const pickMcpNegotiator = (env: NodeJS.ProcessEnv): CapabilityNegotiator =>
   env.QUANTA_MCP_CAPS === "full" ? fullNegotiator() : defaultNegotiator
+
+/**
+ * ADR-0281 + ADR-0282 — composition-root wire for the memory
+ * auto-trigger + cross-session inject slices.
+ *
+ * Reads three env knobs and produces a small typed config object the
+ * host plugs into its session-start / session-end hooks:
+ *
+ *   - `QUANTA_MEMORY_AUTO`        — "on" enables the slice; any other
+ *                                   value (incl. absent / "1" / "true")
+ *                                   ⇒ disabled (returns `null`).
+ *   - `QUANTA_MEMORY_THRESHOLD`   — promote threshold (default 0.7).
+ *                                   Invalid number ⇒ default.
+ *   - `QUANTA_MEMORY_MIN_USAGE`   — minimum usageCount gate (default 1).
+ *                                   Invalid int ⇒ default.
+ *
+ * Default-OFF: when `QUANTA_MEMORY_AUTO !== "on"`, returns `null`
+ * (slot omitted at host plug site ⇒ byte-identical legacy). The
+ * function is PURE w.r.t. its input env view; no `process.env` reads.
+ *
+ * The return shape carries the resolved `TriggerPolicy` only — the
+ * host wires the concrete `MemoryAutoTrigger` / `CrossSessionInjector`
+ * because those need a `Phase1Port` (LLM seam) + stage1 stores the
+ * surface owns. This helper exists so HELL-MAT-22 can lock the env
+ * projection deterministically.
+ */
+export const assembleMemoryAuto = (
+  env: NodeJS.ProcessEnv,
+): {
+  readonly enabled: true
+  readonly policy: { readonly promoteThreshold: number; readonly minUsageCount: number }
+} | null => {
+  if (env.QUANTA_MEMORY_AUTO !== "on") return null
+  const rawT = env.QUANTA_MEMORY_THRESHOLD
+  const rawU = env.QUANTA_MEMORY_MIN_USAGE
+  const parsedT = rawT === undefined ? 0.7 : Number(rawT)
+  const parsedU = rawU === undefined ? 1 : Number(rawU)
+  const promoteThreshold = Number.isFinite(parsedT) ? parsedT : 0.7
+  const minUsageCount =
+    Number.isFinite(parsedU) && parsedU >= 0 ? Math.floor(parsedU) : 1
+  return {
+    enabled: true,
+    policy: { promoteThreshold, minUsageCount },
+  }
+}
 
 /** Build the retrieval stack at the composition root. Default-OFF: when the
  *  env knob is absent or not exactly "1", returns `undefined` and every
@@ -240,217 +273,49 @@ const resolveDelegation = (
   return { delegator, modes: delegateModes }
 }
 
-/** ADR-0236 / ADR-0226 / ADR-0284 — wire the rich fork-session port slot.
- *  Precedence:
- *    1. (`enable=true` OR `QUANTA_FORK_SESSION=on`) AND base wire opt-out
- *       absent ⇒ construct the full `defaultCheckpointBaseWire()` so
- *       `fork()` actually clones snapshots (ADR-0284). Default ON.
- *    2. Enabled but `QUANTA_FORK_SESSION_BASE=off` (escape hatch) ⇒ fall
- *       back to `defaultForker()` WITHOUT a base; every `fork()` returns
- *       `Err("fork-not-configured")` (legacy ADR-0226 shape).
- *    3. Disabled ⇒ slot omitted, byte-identical legacy (RFC §1.2).
- *
- *  The wire mints a FRESH `ConversationCheckpointStore` per surface — no
- *  cross-surface sharing. Hosts that want a shared store call
- *  `defaultCheckpointBaseWire({ store })` directly and override the slot. */
+/** ADR-0236 / ADR-0226 — wire the rich fork-session port slot. The base
+ *  `SessionForker` requires a `ConversationCheckpointStore` which the
+ *  unified-agent surface does not yet thread; when `enable` is true we
+ *  construct `defaultForker()` WITHOUT a base — every `fork()` call
+ *  surfaces `Err("fork-not-configured")` (typed-error, never throws).
+ *  Hosts that DO thread a checkpoint store override `base` post-construction
+ *  before passing into `assembleAgentConfig`. Absent ⇒ slot omitted,
+ *  byte-identical legacy (RFC §1.2). */
 const resolveForkSession = (
   enable: boolean | undefined,
-  env: NodeJS.ProcessEnv,
 ): { readonly forker: ForkSessionPort } | undefined => {
-  const envOn = env.QUANTA_FORK_SESSION === "on"
-  if (enable !== true && !envOn) return undefined
-  // ADR-0284 — opt-out for the rich base wire (default ON when fork is on).
-  const baseOff = env.QUANTA_FORK_SESSION_BASE === "off"
-  if (baseOff) return { forker: defaultForker() }
-  return { forker: defaultCheckpointBaseWire().forker }
+  if (enable !== true) return undefined
+  return { forker: defaultForker() }
 }
 
-/* ────────────── ADR-0278 search-pipeline composition-root wire ─────────────
- *
- * The wire is gated by TWO closed-port env knobs (default-OFF). The truth
- * table is locked by HELL-IDX-22 … HELL-IDX-25:
- *
- *   QUANTA_INDEX | QUANTA_PIPELINE | Behaviour
- *   off          | off             | byte-identical legacy; no indexer, no tool
- *   on           | off             | indexer constructed; tool NOT registered
- *   off          | on              | pipeline slot may be populated by other helpers; no tool
- *   on           | on              | indexer scans; semantic pipeline built; tool registered
- *
- * The wire is held in module-local state so the polling interval handle can
- * be cleared on `beforeExit`. The semantic index adapter is in-memory and
- * deterministic (no API key required) — the production embedder is a
- * one-line swap (ADR-0278 §"Deliberate hold").
- */
-
-interface WiredSearchPipeline {
-  readonly pipeline: SearchPipeline
-  readonly tool: Tool
-  readonly indexer: CodebaseIndexer
-  readonly intervalHandle: ReturnType<typeof setInterval> | null
-}
-
-let activeWire: WiredSearchPipeline | null = null
-
-const DEFAULT_INTERVAL_MS = 5_000
-
-/** Hash a string into a fixed-dim numeric vector. Deterministic; no API
- *  key. Same string ⇒ same vector across runs. */
-const hashEmbed = (text: string, dim = 64): readonly number[] => {
-  const out = new Float64Array(dim)
-  const tokens = text.toLowerCase().split(/[^a-z0-9_]+/u).filter((t) => t.length > 0)
-  for (const tok of tokens) {
-    let h = 2166136261 >>> 0
-    for (let i = 0; i < tok.length; i++) {
-      h = Math.imul(h ^ tok.charCodeAt(i), 16777619) >>> 0
-    }
-    out[h % dim] = (out[h % dim] ?? 0) + 1
-  }
-  // L2 normalise.
-  let norm = 0
-  for (let i = 0; i < dim; i++) norm += (out[i] ?? 0) * (out[i] ?? 0)
-  norm = Math.sqrt(norm) || 1
-  const arr: number[] = new Array(dim)
-  for (let i = 0; i < dim; i++) arr[i] = (out[i] ?? 0) / norm
-  return arr
-}
-
-/** In-memory SemanticIndex backed by a `Map<chunkId, {vec, chunk}>`. */
-interface InMemoryIndex {
-  readonly port: SemanticIndex
-  readonly upsert: ChunkUpsertPort
-}
-
-const newInMemoryIndex = (): InMemoryIndex => {
-  type Entry = { readonly vec: readonly number[]; readonly chunk: IndexerFileChunk }
-  const store = new Map<string, Entry>()
-  const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
-  return {
-    port: {
-      async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
-        const out: SearchHit[] = []
-        for (const [id, { vec: v, chunk }] of store) {
-          let dot = 0
-          const len = Math.min(v.length, vec.length)
-          for (let i = 0; i < len; i++) dot += (v[i] ?? 0) * (vec[i] ?? 0)
-          out.push({
-            id,
-            score: dot,
-            text: chunk.text,
-            source: "semantic" as const,
-            metadata: { path: chunk.path, startLine: chunk.startLine, endLine: chunk.endLine },
-          })
-        }
-        out.sort((a, b) => b.score - a.score)
-        return out.slice(0, k)
+/** ADR-0279 — composition-root automation slot. Returns `null` when
+ *  `QUANTA_AUTOMATION !== "on"` (slot OMITTED; byte-identical legacy).
+ *  When the env gate is on, constructs an `AutomationEngineSlot` over an
+ *  in-memory engine + a stub `AgentLoopPort` that logs a warn line
+ *  (mode-preset hosts can override the slot post-construction to wire
+ *  their real agent loop). The stub keeps the engine + ticker active —
+ *  runs + inbox are populated — but the dispatch is a no-op until the
+ *  preset replaces the handler. */
+const resolveAutomation = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null => {
+  return assembleAutomation(
+    { get: (k) => env[k] },
+    {
+      agentLoop: {
+        enqueueUserMessage: async (_message: string): Promise<void> => {
+          // Stub — the unified-agent base does not own an agent loop;
+          // mode-preset hosts (e.g. the REPL) override this slot before
+          // assembly. Fires that land here are recorded by the engine
+          // (run + inbox rows) but do NOT reach a live loop. The warn
+          // makes the gap observable.
+          logger.warn(
+            "automation handler invoked with stub agent loop — fire ignored. " +
+              "A mode-preset must override `automationEngine.handler` with a " +
+              "real `AgentLoopPort.enqueueUserMessage`.",
+          )
+        },
       },
     },
-    upsert: {
-      upsert(chunk: IndexerFileChunk): void {
-        const id = chunkId(chunk)
-        store.set(id, { vec: hashEmbed(chunk.text), chunk })
-      },
-      delete(path: string): void {
-        for (const id of Array.from(store.keys())) {
-          if (id.startsWith(`${path}:`)) store.delete(id)
-        }
-      },
-    },
-  }
-}
-
-/** Parse the boolean env knob — strict "on" only (mirrors the
- *  `isRetrievalHybridEnabled` posture). */
-const isOn = (v: string | undefined): boolean => v === "on"
-
-/** Build the wired search pipeline + tool from env. Returns `null` when
- *  the truth table says "no tool" (which includes every case except
- *  both-knobs-on). The wire MAY still construct an indexer (HELL-IDX-23
- *  case) but never returns a tool when the pipeline knob is off. */
-export const buildSearchPipelineFromEnv = (
-  env: NodeJS.ProcessEnv,
-  cwd: string,
-): WiredSearchPipeline | null => {
-  const indexOn = isOn(env.QUANTA_INDEX)
-  const pipelineOn = isOn(env.QUANTA_PIPELINE)
-  if (!indexOn && !pipelineOn) return null
-  if (indexOn && !pipelineOn) {
-    // Construct indexer for side-effect (e.g. observability tests assert
-    // the scanner is reachable) but do not register the tool — the model
-    // would have no pipeline to call. Returned WiredSearchPipeline has
-    // tool = no-op shim so callers can detect the "indexer-only" state.
-    const sem = newInMemoryIndex()
-    const indexer = createDefaultIndexer({
-      scanner: {
-        root: cwd,
-        ...(env.QUANTA_INDEX_GLOB !== undefined ? { glob: env.QUANTA_INDEX_GLOB } : {}),
-      },
-      upsert: sem.upsert,
-    })
-    return { pipeline: semanticOnlyPipeline({ sem: sem.port, embedder: { embed: async (t) => hashEmbed(t) } }), tool: noopSearchTool(), indexer, intervalHandle: null }
-  }
-  if (!indexOn && pipelineOn) {
-    // Pipeline slot populated but with an empty corpus. The tool would
-    // always return "no hits"; per ADR-0278 truth table we do NOT register.
-    return null
-  }
-  // Both on — full wire.
-  const sem = newInMemoryIndex()
-  const indexer = createDefaultIndexer({
-    scanner: {
-      root: cwd,
-      ...(env.QUANTA_INDEX_GLOB !== undefined ? { glob: env.QUANTA_INDEX_GLOB } : {}),
-    },
-    upsert: sem.upsert,
-  })
-  // Fire-and-forget initial scan; logger captures errors.
-  void indexer.scanInitial().then((r) => {
-    if (!r.ok) {
-      logger.warn(`indexer scanInitial failed: ${r.error.kind}`)
-    }
-  })
-  const intervalMsRaw = env.QUANTA_INDEX_INTERVAL_MS
-  const intervalMs =
-    intervalMsRaw !== undefined && /^\d+$/.test(intervalMsRaw) ? Number(intervalMsRaw) : DEFAULT_INTERVAL_MS
-  const intervalHandle = setInterval(() => {
-    void indexer.scanDelta().then((r) => {
-      if (!r.ok && r.error.kind !== "scan-in-progress") {
-        logger.warn(`indexer scanDelta failed: ${r.error.kind}`)
-      }
-    })
-  }, intervalMs)
-  // Don't keep the event loop alive solely for the polling timer.
-  if (typeof intervalHandle === "object" && intervalHandle !== null && "unref" in intervalHandle) {
-    ;(intervalHandle as { unref(): unknown }).unref()
-  }
-  const pipeline = semanticOnlyPipeline({
-    sem: sem.port,
-    embedder: { embed: async (t) => hashEmbed(t) },
-  })
-  const tool = searchCodebaseTool(pipeline) as Tool
-  return { pipeline, tool, indexer, intervalHandle }
-}
-
-/** No-op tool used in the "indexer-on / pipeline-off" branch so the
- *  WiredSearchPipeline shape stays uniform. NEVER registered into the
- *  default tool set (the wire only registers when BOTH knobs are on). */
-const noopSearchTool = (): Tool => ({
-  name: "search_codebase",
-  description: "(stub)",
-  inputSchema: {} as never,
-  isReadOnly: () => true,
-  isConcurrencySafe: () => true,
-  async *execute() {
-    yield { type: "result", result: { ok: false, output: "no pipeline wired" } }
-  },
-})
-
-/** Public test seam — clear the module-local interval handle. */
-export const clearSearchPipelineWireForTests = (): void => {
-  if (activeWire?.intervalHandle !== null && activeWire?.intervalHandle !== undefined) {
-    clearInterval(activeWire.intervalHandle)
-  }
-  activeWire?.indexer.stop()
-  activeWire = null
+  )
 }
 
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
@@ -492,15 +357,12 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     },
   }
   const retrievalStack = buildRetrievalStackFromEnv(env)
-  // ADR-0278 — search-pipeline wire. Default-OFF; both QUANTA_PIPELINE=on
-  // AND QUANTA_INDEX=on required to register `search_codebase` into the
-  // default tool set. Pipeline slot is also published on AgentConfig.
-  const wired = buildSearchPipelineFromEnv(env, process.cwd())
-  if (wired !== null) activeWire = wired
-  const searchToolToRegister =
-    env.QUANTA_PIPELINE === "on" && env.QUANTA_INDEX === "on" && wired !== null
-      ? wired.tool
-      : undefined
+  // ADR-0272 — pipeline composition-root wire. Default-OFF: when
+  // QUANTA_PIPELINE is absent / `none` / unknown, returns `null` and the
+  // slot is OMITTED below (spread-conditional under
+  // exactOptionalPropertyTypes). Adapter-build failure collapses to `null`
+  // + a `logger.warn` line (no startup crash on optional knob misconfig).
+  const searchPipeline = assemblePipeline(env)
   // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
   // via the mode-variant registry; else fall back to the ADR-0198
   // `QUANTA_IDENTITY=1` env (precedence #2); else empty-string sentinel
@@ -514,7 +376,13 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
   const toolProfile = resolveToolProfile(p.toolProfile)
   const focusChain = resolveFocusChain(p.focusChainEvery)
   const delegation = resolveDelegation(p.delegateModes)
-  const forkSession = resolveForkSession(p.forkSession, env)
+  const forkSession = resolveForkSession(p.forkSession)
+  // ADR-0279 — automation engine composition-root wire. Returns `null`
+  // when `QUANTA_AUTOMATION !== "on"` (default-OFF byte-identical legacy);
+  // when on, returns a fully-wired slot the loop-helpers ticker consumes
+  // (ADR-0240). The default tools also gain `automation_update` when the
+  // engine is present (ADR-0280; conditional registration below).
+  const automationSlot = resolveAutomation(env)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -525,14 +393,12 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     llm,
     // DIP: route through the factory (no app-specific ports at this baseline
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
-    // byte-identical to the `defaultTools` singleton. ADR-0278: when the
-    // search-pipeline wire is fully on, the `search_codebase` tool is
-    // appended AFTER the default set so byte-identity is preserved for
-    // every legacy id.
-    registry:
-      searchToolToRegister !== undefined
-        ? new ToolRegistry([...buildDefaultTools(), searchToolToRegister])
-        : new ToolRegistry(buildDefaultTools()),
+    // byte-identical to the `defaultTools` singleton.
+    registry: new ToolRegistry(
+      buildDefaultTools(
+        automationSlot !== null ? { automationEngine: automationSlot.engine } : {},
+      ),
+    ),
     stream,
     permission: { mode: "acceptEdits" },
     messages: [],
@@ -545,13 +411,9 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
     // `undefined` literal on the config) and the loop is byte-identical.
     ...(retrievalStack !== undefined ? { retrievalStack } : {}),
-    // ADR-0278: publish the populated SearchPipeline on the config so
-    // future callers (dispatch helpers, additional pipeline-shaped
-    // tools) can detect a wired pipeline without re-reading env. Only
-    // populated when BOTH knobs are on AND the wire succeeded.
-    ...(searchToolToRegister !== undefined && wired !== null
-      ? { searchPipeline: wired.pipeline }
-      : {}),
+    // ADR-0272 — composition-root pipeline wire (default-OFF; spread
+    // conditionally to preserve `exactOptionalPropertyTypes`).
+    ...(searchPipeline !== null ? { searchPipeline } : {}),
     // ADR-0236 — composition-root mega-wire slots (default-OFF; spread
     // conditionally to preserve `exactOptionalPropertyTypes`).
     ...(identityModeVariant !== undefined ? { identityModeVariant } : {}),
@@ -560,6 +422,9 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     ...(focusChain !== undefined ? { focusChain } : {}),
     ...(delegation !== undefined ? { delegation } : {}),
     ...(forkSession !== undefined ? { forkSession } : {}),
+    // ADR-0279 — spread the automation slot conditionally (default-OFF;
+    // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
+    ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),
   } as AssembleRequest["base"]
 }
 
