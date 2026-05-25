@@ -27,22 +27,18 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { buildSystemPrompt } from "@/agent"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
-import {
-  defaultForker,
-  defaultSessionForker,
-  type ForkSessionPort,
-} from "@/agent/fork-session"
+import { defaultForker, type ForkSessionPort } from "@/agent/fork-session"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
-import {
-  type AgentMode as DelegationAgentMode,
-  defaultDelegationRouter,
-  type DelegationPort,
-} from "@/agent/subagent-typed"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
   type StickyModelStore,
 } from "@/agent/sticky-model"
+import {
+  type AgentMode as DelegationAgentMode,
+  type DelegationPort,
+  defaultDelegationRouter,
+} from "@/agent/subagent-typed"
 import {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,

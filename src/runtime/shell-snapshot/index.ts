@@ -17,9 +17,9 @@ import type { RestoreDegradeReason, RestoreOutcome, SnapErr, SnapshotHandle } fr
 import { captureZsh, type SnapshotSpawner } from "./zsh-capture"
 
 export {
+  type BunSpawnerOptions,
   createBunSpawner,
   DEFAULT_BUN_SPAWNER_TIMEOUT_MS,
-  type BunSpawnerOptions,
 } from "./bun-spawner"
 export { pruneToSizeBudget } from "./file-store"
 export { headlessSpawner, headlessStubBody } from "./headless-stub"
@@ -102,9 +102,7 @@ export const createShellSnapshotPort = (
   homeOrOpts?: string | CreateShellSnapshotPortOpts,
 ): ShellSnapshotPort => {
   const opts: CreateShellSnapshotPortOpts =
-    typeof homeOrOpts === "string"
-      ? { home: homeOrOpts }
-      : (homeOrOpts ?? {})
+    typeof homeOrOpts === "string" ? { home: homeOrOpts } : (homeOrOpts ?? {})
   const home = opts.home ?? homedir()
   const metric = opts.metric
   const now = opts.now ?? Date.now

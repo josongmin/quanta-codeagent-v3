@@ -5,7 +5,7 @@ import type { PlanStore } from "@/agent/plan/state"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
-import type { PermissionMode, ToolAction } from "@/permission"
+import type { PermissionMode, PermissionStore, ToolAction } from "@/permission"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { BranchProgressTracker } from "../branch-search-progress"
@@ -31,6 +31,7 @@ import {
   type SessionBootstrapDeps,
   type SessionBootstrapResult,
 } from "./session-bootstrap"
+import { selectDefaultReviewer } from "./reviewer-policy"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
 
@@ -75,6 +76,10 @@ export interface DebugTracerHandle {
 /** Inputs for {@link setupSession} — bundled so the call site stays narrow
  *  and tests can construct it with a small literal. */
 export interface SetupSessionDeps extends SessionBootstrapDeps {
+  /** Load the host-owned permission store. The CLI injects the process
+   *  singleton; tests inject an isolated fake/store so `setupSession`
+   *  never reaches global disk state directly. */
+  readonly loadPermissionStore: () => Promise<PermissionStore | undefined>
   /** Build the per-turn turn-summary collector + stream tee. */
   readonly buildTurnSummaryAndStream: (
     stream: StreamPort,
@@ -208,6 +213,15 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     autoReview !== undefined
       ? createOnConfirmReviewerPort({ onConfirm, autoReview })
       : userReviewerPort
+  const permissionStore = await deps.loadPermissionStore()
+  const threadPermission = permissionStore?.getThread(boot.sessionId)
+  const defaultReviewer = selectDefaultReviewer({
+    threadPermission,
+    permissionMode: boot.mode,
+    sandboxProfile: runtime.sandboxProfile,
+    hasAutoReview: autoReview !== undefined,
+    hasGuardianReview: boot.tooling.subagentConfig !== undefined,
+  })
   const planExitPort = createCliPlanExitPort({ ask: askLine })
   const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
   const sessionDeps: SessionDeps = {
@@ -233,8 +247,9 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     verifyGuardConfig: boot.tooling.verifyGuardConfig,
     summarizerLlm: buildSummarizerLlm(boot.provider, boot.abort.signal),
     admissibility: {
+      ...(permissionStore !== undefined ? { permissionStore } : {}),
       reviewerPort,
-      defaultReviewer: autoReview !== undefined ? "auto_review" : "user",
+      defaultReviewer,
     },
     planExitPort,
     userInputPort,

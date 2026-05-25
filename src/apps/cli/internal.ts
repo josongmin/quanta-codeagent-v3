@@ -6,12 +6,6 @@ import {
   type PersonaKind,
   resolvePersona,
 } from "@/agent"
-import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
-import {
-  createBunSpawner,
-  createShellSnapshotPort,
-  type ShellSnapshotPort,
-} from "@/runtime/shell-snapshot"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import type { LLMPort } from "@/llm"
 import type { McpClient, McpServerConfig } from "@/mcp"
@@ -36,6 +30,12 @@ import {
   pickProviderCore,
   type Provider as RunnerProvider,
 } from "@/runner/assemble"
+import {
+  createBunSpawner,
+  createShellSnapshotPort,
+  type ShellSnapshotPort,
+} from "@/runtime/shell-snapshot"
+import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { logger, type RunContext } from "@/shared"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import { gitTools, type Tool } from "@/tool"
