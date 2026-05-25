@@ -84,6 +84,9 @@ import {
 } from "./control-op-handler"
 import { decideAction } from "./conversation-action"
 import { threadId as makeThreadId } from "./follow-up-queue"
+import type { HookPromptInject } from "./hooks"
+import { resolveCollaborationMode } from "./mode"
+import { applyPlanExitOutcome } from "./plan-exit-lifecycle"
 import { planToStreamMirror } from "./plan/stream-mirror"
 import { backoffDelayMs } from "./retry"
 import {
@@ -113,6 +116,11 @@ import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
 import type { TurnWorkMetricsCollector } from "./work-metrics-collector"
+
+type PendingPlanExit = {
+  readonly plan: string
+  readonly outcome: import("./plan-exit").PlanExitOutcome
+}
 import type { WorkingStateSession } from "./working-state"
 
 /** Shared frozen empty history for the guard-OFF path. `toolHistory` is
@@ -1386,6 +1394,57 @@ const handleSubmissionControlOp = (
   return "continue"
 }
 
+const approvedPlanReminder = (plan: string): HookPromptInject => ({
+  injectAfterSystem:
+    "Approved plan is now executable. Treat this plan as read-only context for the next turn:\n\n" +
+    plan,
+})
+
+const requestedChangesReminder = (feedback: string): HookPromptInject => ({
+  injectAfterSystem:
+    "Operator feedback on the active plan:\n" +
+    feedback +
+    "\n\nRevise the plan, keep plan mode active, and request exit again only after updating the plan.",
+})
+
+const applyPendingPlanExit = (
+  cfg: AgentConfig,
+  pending: PendingPlanExit | null,
+  hookPromptPending: HookPromptInject[],
+): void => {
+  if (pending === null) return
+  if (pending.outcome.decision === "approved") {
+    const from = resolveCollaborationMode(cfg)
+    cfg.planMode = false
+    cfg.mode = "default"
+    cfg.collaborationMode = "default"
+    hookPromptPending.push(approvedPlanReminder(pending.plan))
+    if (cfg.planStore !== undefined) {
+      const lifecycle = applyPlanExitOutcome(pending.outcome, cfg.planStore)
+      if (lifecycle.kind === "freeze" && lifecycle.snapshot !== null) {
+        cfg.stream.emit({ type: "plan_snapshot", plan: planToStreamMirror(lifecycle.snapshot.plan) })
+      }
+    }
+    if (from !== "default") {
+      cfg.stream.emit({
+        type: "mode_changed",
+        from,
+        to: "default",
+        reason: "plan_exit_approved",
+      })
+    }
+    return
+  }
+  if (pending.outcome.decision === "rejected") {
+    cfg.planStore?.clear()
+    return
+  }
+  if (cfg.planStore !== undefined) {
+    applyPlanExitOutcome(pending.outcome, cfg.planStore)
+  }
+  hookPromptPending.push(requestedChangesReminder(pending.outcome.feedback ?? "(no feedback)"))
+}
+
 /**
  * L4 control-op cluster (2026-05-23) — poll the typed
  * {@link FollowUpQueue} (ADR-0037) at the top of each turn. Three outcomes:
@@ -1636,6 +1695,12 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     config.dedupGate !== undefined || config.dedupGateConfig?.disabled !== true
   const baseCfg = buildEffectiveConfig(config, features.extraTools)
   const cfg: AgentConfig = dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
+  let pendingPlanExit: PendingPlanExit | null = null
+  const onPlanExitOutcome = cfg.onPlanExitOutcome
+  cfg.onPlanExitOutcome = (event) => {
+    pendingPlanExit = event
+    onPlanExitOutcome?.(event)
+  }
   const classifier = features.classifier
   const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
   // Cached once at session start (Codex anti-reread). Passed straight into the
@@ -1776,6 +1841,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   const shellSnapshotSession: ShellSnapshotSession | undefined = buildShellSnapshotSession(
     cfg,
     (message) => stream.emit({ type: "error", message }),
+    cfg.shellSnapshot?.shellEnv,
   )
   // Best-effort prune at session start + stash the session helper on `cfg`
   // so dispatch can reach the active seam through the same AgentConfig
@@ -2208,6 +2274,10 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // consecutive no-progress strikes (Tier 0 safety hardening, ADR-0011).
     breaker?.noteProgress()
     wm.append({ role: "user", content: result.resultBlocks })
+    if (pendingPlanExit !== null) {
+      applyPendingPlanExit(cfg, pendingPlanExit, hookPromptPending)
+      pendingPlanExit = null
+    }
   }
 
   return finish("max_turns", cfg.maxTurns, completedCategory("max_turns"))

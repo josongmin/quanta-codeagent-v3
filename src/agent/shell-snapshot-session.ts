@@ -103,7 +103,10 @@ export interface ShellSnapshotSession {
 export const buildShellSnapshotSession = (
   cfg: AgentConfig,
   emitError: ShellSnapshotErrorEmitter,
-  shellEnv: string | undefined = process.env["SHELL"],
+  // Slice invariant (ADR-0144): no process.env in @/agent. Caller resolves
+  // SHELL at composition root (apps/cli) and passes — absent ⇒ resolveShell
+  // uses /bin/bash fallback. Default-OFF behavior unchanged.
+  shellEnv: string | undefined = undefined,
 ): ShellSnapshotSession | undefined => {
   const config = cfg.shellSnapshot
   if (config === undefined) return undefined

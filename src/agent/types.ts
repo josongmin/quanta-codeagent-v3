@@ -44,6 +44,7 @@ import type { HookBus } from "./hooks"
 import type { IdeContextProvider } from "./ide-context"
 import type { LocalizePhaseConfig, LocalizePhaseState } from "./localize-phase-guard"
 import type { PlanStore } from "./plan/state"
+import type { PlanExitOutcome } from "./plan-exit"
 import type { PlanExitPort } from "./plan-exit-flow"
 import type { PlanQueueStore } from "./plan-queue"
 import type { AgentMode } from "./prompt"
@@ -506,6 +507,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * invoked (legacy plan-mode posture unchanged). See `./plan-exit-flow.ts`.
    */
   planExitPort?: PlanExitPort
+  /**
+   * Within-run plan-exit lifecycle callback. When the `request_plan_exit`
+   * tool resolves through {@link planExitPort}, dispatch calls this with the
+   * exact plan text and validated outcome so the loop can apply mode/store
+   * changes at the NEXT agent-turn boundary. Absent ⇒ the tool still relays
+   * the decision text, but no lifecycle follow-through runs (legacy partial
+   * wire from ADR-0086).
+   */
+  onPlanExitOutcome?: (event: { readonly plan: string; readonly outcome: PlanExitOutcome }) => void
   /**
    * Plan-queue helper (ADR-0128). Pure in-memory queue of follow-up user
    * inputs captured WHILE a turn is in progress, replayed at turn
@@ -1023,6 +1033,9 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly captureAtTurnStart?: boolean
     readonly cleanupOlderThanMs?: number
     readonly maxSizeBytes?: number
+    /** Resolved SHELL env literal — composition root passes `process.env.SHELL`.
+     *  Slice invariant (ADR-0144): no process.env in @/agent. Absent ⇒ "bash" fallback. */
+    readonly shellEnv?: string
   }
   /**
    * ADR-0235 (internal slot) — populated by the loop at session start when
