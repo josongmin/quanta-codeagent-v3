@@ -552,17 +552,11 @@ describe("/replay hellgate (ADR-0243)", () => {
       const r = replayInternals.parseReplayArgs(["sid", "--from", ""])
       expect(r.kind).toBe("err")
     })
-    test("HELL-REPLAY-PARSE-07: bare unknown flag is currently parsed as sessionId (KNOWN HOLE)", () => {
-      // FINDING: parseReplayArgs accepts `--bogus` as the session-id positional
-      // because the positional check comes before any flag validation. This
-      // is a real prod hole (a user typo gets a silent "session ./--bogus
-      // not found" downstream). Documented here without prod mutation; fix
-      // belongs in a follow-up commit that rejects positionals starting with
-      // `--`.
-      const r = replayInternals.parseReplayArgs(["--bogus"])
-      expect(r.kind).toBe("ok")
-      if (r.kind === "ok") expect(r.sessionId).toBe("--bogus")
-    })
+    // PARSE-07 KNOWN HOLE doc-test removed — the audit FINDING has since been
+    // fixed in `037b62f1 fix(cli/replay): reject --<flag> as sessionId in
+    // parseReplayArgs`. The positive invariant for the fix is pinned by
+    // `HELL-REPLAY-PARSE-07: args[0] = '--bogus' ⇒ unknown flag err` above
+    // (line ~494) and `HELL-REPLAY-PARSE-07 dispatch` (~line 502).
     test("happy path: sid + --at 3 + --from tc_7a", () => {
       const r = replayInternals.parseReplayArgs(["sid", "--at", "3", "--from", "tc_7a"])
       expect(r.kind).toBe("ok")
