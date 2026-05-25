@@ -11,9 +11,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { runWhyCmd, __test as whyTest } from "../../../src/apps/cli/why-cmd"
 import type { LLMPort, Message, StreamEvent } from "../../../src/llm"
 import { assembleFromEvents } from "../../../src/llm"
-import { __test as whyTest, runWhyCmd } from "../../../src/apps/cli/why-cmd"
 import type { SessionEnvelopeRecord } from "../../../src/session"
 
 /* ─── fixtures ──────────────────────────────────────────────────────── */
@@ -66,23 +66,6 @@ const toolInvoke = (
   input,
 })
 
-const toolResult = (
-  turn_id: string,
-  tool: string,
-  ok: boolean,
-  output: string,
-  tsOffset = 4,
-): SessionEnvelopeRecord => ({
-  type: "event_msg",
-  schema_version: 2,
-  ts: ISO(tsOffset),
-  turn_id,
-  kind: "tool_result",
-  tool,
-  ok,
-  output,
-})
-
 const decision = (
   turn_id: string,
   gate: "permission" | "rule" | "hook" | "cap" | "jail" | "budget",
@@ -100,21 +83,6 @@ const decision = (
   outcome,
   decision_reason: reason,
   tool_call_id: toolCallId,
-})
-
-const custom = (
-  turn_id: string,
-  custom_kind: string,
-  data: Record<string, unknown>,
-  tsOffset = 5,
-): SessionEnvelopeRecord => ({
-  type: "event_msg",
-  schema_version: 2,
-  ts: ISO(tsOffset),
-  turn_id,
-  kind: "custom",
-  custom_kind,
-  data,
 })
 
 /* ─── LLM stubs ─────────────────────────────────────────────────────── */
@@ -158,8 +126,7 @@ const goodJson = (
   reasoning: string[],
   considered: string[] = [],
   confidence: "high" | "medium" | "low" = "high",
-): string =>
-  JSON.stringify({ goal, reasoning, alternatives_considered: considered, confidence })
+): string => JSON.stringify({ goal, reasoning, alternatives_considered: considered, confidence })
 
 /* ─── sink ─────────────────────────────────────────────────────────── */
 
@@ -302,12 +269,19 @@ describe("why-cmd · LLM response parsing", () => {
   test("case 10 — LLM throw ⇒ 'meta query failed' + exit 1", async () => {
     const envs = [turnContext("3"), decision("3", "permission", "allow", "ok", "tc_10", 1)]
     const sink = captureSink()
+    // Throwing async iterable — implemented via the iterator protocol
+    // directly (a generator that never yields trips biome's useYield).
     const llm: LLMPort = {
-      stream() {
-        return (async function* () {
-          throw new Error("upstream 502")
-          yield { type: "message_stop", stop_reason: "end_turn" } as StreamEvent
-        })()
+      stream(): AsyncIterable<StreamEvent> {
+        return {
+          [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+            return {
+              next(): Promise<IteratorResult<StreamEvent>> {
+                return Promise.reject(new Error("upstream 502"))
+              },
+            }
+          },
+        }
       },
     }
     const r = await runWhyCmd("tc_10", {

@@ -100,62 +100,83 @@ const GOAL_RENDER_CAP = 500
 
 /* ─── orchestration ─────────────────────────────────────────────────── */
 
-export const runWhyCmd = async (
-  toolCallIdOrLast: string,
-  deps: WhyCmdDeps,
-): Promise<WhyCmdResult> => {
+type PreflightOk = {
+  readonly ok: true
+  readonly resolvedId: string
+  readonly group: InspectGroup
+  readonly groupCount: number
+  readonly envelopes: readonly SessionEnvelopeRecord[]
+}
+type PreflightFail = { readonly ok: false }
+type Preflight = PreflightOk | PreflightFail
+
+/** Pre-LLM gauntlet: arg + session + envelope read + last-resolution +
+ *  group lookup. On any failure, emits a clear line via `deps.out` and
+ *  returns `{ok:false}`. Keeps `runWhyCmd` shallow. */
+const preflight = async (toolCallIdOrLast: string, deps: WhyCmdDeps): Promise<Preflight> => {
   const arg = (toolCallIdOrLast ?? "").trim()
   if (arg === "") {
     deps.out("/why: tool call id is required (e.g. /why tc_7a or /why last)\n")
-    return { exitCode: 1 }
+    return { ok: false }
   }
   const sessionId = deps.sessionId
   if (sessionId === undefined || sessionId === "") {
     deps.out("no active session — start an agent first or pass --session <id>\n")
-    return { exitCode: 1 }
+    return { ok: false }
   }
-
   let envelopes: readonly SessionEnvelopeRecord[]
   try {
     envelopes = await deps.readSessionEnvelopes(sessionId)
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e)
     deps.out(`/why: failed to read session ${sessionId}: ${detail}\n`)
-    return { exitCode: 1 }
+    return { ok: false }
   }
-
-  // Resolve `last` to the most-recent tool_call id by scanning the
-  // envelopes in arrival order and taking the last decision /
-  // tool_invoke / custom-tool-call id seen.
-  let resolvedId: string | undefined
-  if (arg === "last") {
-    resolvedId = findLastToolCallId(envelopes)
-    if (resolvedId === undefined) {
-      deps.out("/why: no tool calls found in session\n")
-      return { exitCode: 1 }
-    }
-  } else {
-    resolvedId = arg
+  const resolved = resolveId(arg, envelopes)
+  if (resolved === null) {
+    deps.out("/why: no tool calls found in session\n")
+    return { ok: false }
   }
-
-  const groups = findByToolCallId(envelopes, resolvedId)
+  const groups = findByToolCallId(envelopes, resolved)
   if (groups.length === 0) {
-    deps.out(`tool call ${resolvedId} not found in session ${sessionId}\n`)
-    return { exitCode: 1 }
+    deps.out(`tool call ${resolved} not found in session ${sessionId}\n`)
+    return { ok: false }
   }
-  // For `/why` we use the FIRST occurrence (matches the most-common
-  // case — one tool_call id per group). Renderer notes when multiple
-  // occurrences exist.
-  const group = groups[0] as InspectGroup
-  const userPrompt = buildUserPrompt(envelopes, group)
+  return {
+    ok: true,
+    resolvedId: resolved,
+    group: groups[0] as InspectGroup,
+    groupCount: groups.length,
+    envelopes,
+  }
+}
 
-  const messages: Message[] = [
-    { role: "user", content: [{ type: "text", text: userPrompt }] },
-  ]
+/** Resolve `last` to a concrete id, or return `arg` verbatim. `null` ⇒
+ *  `last` was requested but no tool calls exist in the session. */
+const resolveId = (arg: string, envelopes: readonly SessionEnvelopeRecord[]): string | null => {
+  if (arg !== "last") return arg
+  const last = findLastToolCallId(envelopes)
+  return last ?? null
+}
+
+interface MetaCallOutcome {
+  readonly rawText: string
+  readonly tokensUsed: number | undefined
+  readonly elapsedMs: number
+}
+
+/** Issue the ONE meta-query call and assemble the reply. Returns null +
+ *  emits a message on LLM failure (caller exits 1). */
+const callMetaLLM = async (
+  group: InspectGroup,
+  envelopes: readonly SessionEnvelopeRecord[],
+  deps: WhyCmdDeps,
+): Promise<MetaCallOutcome | null> => {
+  const userPrompt = buildUserPrompt(envelopes, group)
+  const messages: Message[] = [{ role: "user", content: [{ type: "text", text: userPrompt }] }]
   const start = Date.now()
-  let events: StreamEvent[]
+  const events: StreamEvent[] = []
   try {
-    events = []
     for await (const ev of deps.llm.stream({
       messages,
       system: META_SYSTEM_PROMPT,
@@ -166,28 +187,56 @@ export const runWhyCmd = async (
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e)
     deps.out(`/why: meta query failed: ${reason}\n`)
-    return { exitCode: 1 }
+    return null
   }
-  const elapsed = Date.now() - start
-
   const { message } = assembleFromEvents(events)
-  const rawText = assistantText(message)
   const usage = events.find((e) => e.type === "usage") as
     | Extract<StreamEvent, { type: "usage" }>
     | undefined
-  const tokensUsed =
-    usage !== undefined ? usage.inputTokens + usage.outputTokens : undefined
+  return {
+    rawText: assistantText(message),
+    tokensUsed: usage === undefined ? undefined : usage.inputTokens + usage.outputTokens,
+    elapsedMs: Date.now() - start,
+  }
+}
 
-  const parsed = parseReasoning(rawText)
+export const runWhyCmd = async (
+  toolCallIdOrLast: string,
+  deps: WhyCmdDeps,
+): Promise<WhyCmdResult> => {
+  const pre = await preflight(toolCallIdOrLast, deps)
+  if (!pre.ok) return { exitCode: 1 }
+  const meta = await callMetaLLM(pre.group, pre.envelopes, deps)
+  if (meta === null) return { exitCode: 1 }
+  const parsed = parseReasoning(meta.rawText)
   const color = deps.color === true
   if (parsed === null) {
-    deps.out(renderFallback(resolvedId, rawText, deps.model, elapsed, tokensUsed, color))
+    deps.out(
+      renderFallback(
+        pre.resolvedId,
+        meta.rawText,
+        deps.model,
+        meta.elapsedMs,
+        meta.tokensUsed,
+        color,
+      ),
+    )
   } else {
     deps.out(
-      renderReasoning(resolvedId, parsed, deps.model, elapsed, tokensUsed, color, groups.length),
+      renderReasoning(
+        pre.resolvedId,
+        parsed,
+        deps.model,
+        meta.elapsedMs,
+        meta.tokensUsed,
+        color,
+        pre.groupCount,
+      ),
     )
   }
-  return tokensUsed === undefined ? { exitCode: 0 } : { exitCode: 0, tokensUsed }
+  return meta.tokensUsed === undefined
+    ? { exitCode: 0 }
+    : { exitCode: 0, tokensUsed: meta.tokensUsed }
 }
 
 /* ─── envelope helpers ──────────────────────────────────────────────── */
@@ -198,9 +247,7 @@ export const runWhyCmd = async (
  *  the upstream emitter pairs them. For native tool_invoke we can't
  *  recover an id (no on-wire field), so we fall back to "first
  *  decision id seen in the same turn", iterated newest-first. */
-const findLastToolCallId = (
-  envelopes: readonly SessionEnvelopeRecord[],
-): string | undefined => {
+const findLastToolCallId = (envelopes: readonly SessionEnvelopeRecord[]): string | undefined => {
   for (let i = envelopes.length - 1; i >= 0; i--) {
     const env = envelopes[i] as SessionEnvelopeRecord
     if (env.type !== "event_msg") continue
@@ -232,53 +279,62 @@ const buildUserPrompt = (
   envelopes: readonly SessionEnvelopeRecord[],
   group: InspectGroup,
 ): string => {
-  const lines: string[] = []
-  if (group.turnId !== undefined) {
-    lines.push(`Session turn ${group.turnId}.`)
-  } else {
-    lines.push("Session turn (unknown).")
-  }
-  lines.push("")
-  const preceding = precedingSnippets(envelopes, group)
-  if (preceding.length > 0) {
-    lines.push("Preceding context (last 3 messages):")
-    for (const snip of preceding) {
-      lines.push(`  - ${snip}`)
-    }
-    lines.push("")
-  }
-  if (group.toolInvokes.length > 0) {
-    const inv = group.toolInvokes[0] as Extract<EventMsgRecord, { kind: "tool_invoke" }>
-    lines.push("Tool call:")
-    lines.push(`  tool: ${inv.tool}`)
-    lines.push(`  input: ${truncForWire(safeJson(redactValue(inv.input)), SNIPPET_CHAR_CAP)}`)
-    lines.push("")
-  }
-  if (group.decisions.length > 0) {
-    lines.push("Decisions:")
-    for (const d of group.decisions) {
-      const extras: string[] = []
-      if (d.rule_id !== undefined) extras.push(`rule=${d.rule_id}`)
-      if (d.hook_name !== undefined) extras.push(`hook=${d.hook_name}`)
-      const tail = extras.length === 0 ? "" : ` (${extras.join(", ")})`
-      lines.push(
-        `  ${d.gate}=${d.outcome} '${truncForWire(d.decision_reason, 200)}'${tail}`,
-      )
-    }
-    lines.push("")
-  }
-  if (group.toolResults.length > 0) {
-    const r = group.toolResults[group.toolResults.length - 1] as Extract<
-      EventMsgRecord,
-      { kind: "tool_result" }
-    >
-    const status = r.ok ? "ok" : "error"
-    const outPreview = truncForWire(r.output.replace(/\n/g, "\\n"), 200)
-    lines.push(`Result: ${status} — ${outPreview}`)
-    lines.push("")
-  }
+  const lines: string[] = [
+    group.turnId !== undefined ? `Session turn ${group.turnId}.` : "Session turn (unknown).",
+    "",
+  ]
+  appendPrecedingLines(lines, envelopes, group)
+  appendToolInvokeLines(lines, group)
+  appendDecisionLines(lines, group)
+  appendResultLines(lines, group)
   lines.push("Why did the agent make this call?")
   return lines.join("\n")
+}
+
+const appendPrecedingLines = (
+  lines: string[],
+  envelopes: readonly SessionEnvelopeRecord[],
+  group: InspectGroup,
+): void => {
+  const preceding = precedingSnippets(envelopes, group)
+  if (preceding.length === 0) return
+  lines.push("Preceding context (last 3 messages):")
+  for (const snip of preceding) lines.push(`  - ${snip}`)
+  lines.push("")
+}
+
+const appendToolInvokeLines = (lines: string[], group: InspectGroup): void => {
+  if (group.toolInvokes.length === 0) return
+  const inv = group.toolInvokes[0] as Extract<EventMsgRecord, { kind: "tool_invoke" }>
+  lines.push("Tool call:")
+  lines.push(`  tool: ${inv.tool}`)
+  lines.push(`  input: ${truncForWire(safeJson(redactValue(inv.input)), SNIPPET_CHAR_CAP)}`)
+  lines.push("")
+}
+
+const appendDecisionLines = (lines: string[], group: InspectGroup): void => {
+  if (group.decisions.length === 0) return
+  lines.push("Decisions:")
+  for (const d of group.decisions) {
+    const extras: string[] = []
+    if (d.rule_id !== undefined) extras.push(`rule=${d.rule_id}`)
+    if (d.hook_name !== undefined) extras.push(`hook=${d.hook_name}`)
+    const tail = extras.length === 0 ? "" : ` (${extras.join(", ")})`
+    lines.push(`  ${d.gate}=${d.outcome} '${truncForWire(d.decision_reason, 200)}'${tail}`)
+  }
+  lines.push("")
+}
+
+const appendResultLines = (lines: string[], group: InspectGroup): void => {
+  if (group.toolResults.length === 0) return
+  const r = group.toolResults[group.toolResults.length - 1] as Extract<
+    EventMsgRecord,
+    { kind: "tool_result" }
+  >
+  const status = r.ok ? "ok" : "error"
+  const outPreview = truncForWire(r.output.replace(/\n/g, "\\n"), 200)
+  lines.push(`Result: ${status} — ${outPreview}`)
+  lines.push("")
 }
 
 /** Yield up to 3 preceding "snippets" (user_message events or
@@ -379,14 +435,17 @@ const parseReasoning = (raw: string): ReasoningPayload | null => {
   if (obj === null || typeof obj !== "object") return null
   const o = obj as Record<string, unknown>
   if (typeof o.goal !== "string") return null
-  const reasoning = Array.isArray(o.reasoning) ? o.reasoning.filter((s) => typeof s === "string") : null
+  const reasoning = Array.isArray(o.reasoning)
+    ? o.reasoning.filter((s) => typeof s === "string")
+    : null
   const alt = Array.isArray(o.alternatives_considered)
     ? o.alternatives_considered.filter((s) => typeof s === "string")
     : []
   if (reasoning === null) return null
-  const conf = typeof o.confidence === "string" && CONFIDENCE_VALUES.has(o.confidence)
-    ? (o.confidence as "high" | "medium" | "low")
-    : "medium"
+  const conf =
+    typeof o.confidence === "string" && CONFIDENCE_VALUES.has(o.confidence)
+      ? (o.confidence as "high" | "medium" | "low")
+      : "medium"
   return {
     goal: o.goal,
     reasoning: reasoning as readonly string[],
@@ -467,7 +526,8 @@ const renderReasoning = (
   }
   const confCode: keyof typeof ANSI =
     p.confidence === "high" ? "green" : p.confidence === "low" ? "yellow" : "cyan"
-  const confLabel = p.confidence === "low" ? `low  ${paint("(uncertain)", "dim", color)}` : p.confidence
+  const confLabel =
+    p.confidence === "low" ? `low  ${paint("(uncertain)", "dim", color)}` : p.confidence
   lines.push(`  ${paint("confidence", "cyan", color)} : ${paint(p.confidence, confCode, color)}`)
   // Surface the "low" annotation only when relevant — keeps high/medium
   // line shape stable.
