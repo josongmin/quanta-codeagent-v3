@@ -1,0 +1,87 @@
+id: bridge-attestation
+title: Bridge Attestation — remote permission preflight + STS token (ADR-0246)
+section: 3
+subsystem: Remote attestation seam (preflight + HMAC-SHA256 STS) — Claude Desktop onBridgePermissionPreflight + 9-event stream absorption
+order: 246
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: ["quanta.bridge_attest"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:claude-desktop, security-touched, default-off]
+depends_on: []
+config_refs:
+  env: []
+purpose: |
+  Closed-port leaf slice for remote permission preflight + short-lived STS
+  token issuance. Absorbs Claude Desktop's `onBridgePermissionPreflight` round
+  + 9 lifecycle events into a typed `BridgeAttestor` port with 4 methods
+  (preflight / mintToken / verify / revoke).
+
+  3-arm `AttestResult` discriminated union (`allow` / `deny` / `prompt-user`)
+  is the secure-by-default surface — adding a 4th arm without exhaustive-switch
+  wiring is a TS error at compile time.
+
+  Token format: `base64url(HMAC-SHA256(secret, "${scope}|${expiresAt}|${nonce}"))`
+  with 16-byte random nonce for collision-free minting at identical
+  (scope, expiresAt).
+
+  Default-OFF: nothing in dispatch/loop/agent wires this today. The caller
+  (a future MCP `bridge_attest_preflight` tool, a Tauri sidecar bridge wrapper,
+  an org-policy proxy) opts in via constructor.
+
+  Plane discipline: imports `node:crypto` ONLY. No `@/agent`, no `@/permission`,
+  no `@/observability`. Re-usable in a Tauri sidecar, worker thread, or
+  standalone attestation binary.
+evidence:
+  code:
+    - src/security/bridge-attest/types.ts
+    - src/security/bridge-attest/port.ts
+    - src/security/bridge-attest/default-attestor.ts
+    - src/security/bridge-attest/headless-stub.ts
+    - src/security/bridge-attest/index.ts
+  adrs: [246, 158, 166]
+  tests:
+    unit:
+      - tests/unit/security/bridge-attest-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: secret
+    where: defaultAttestor constructor opt
+    default: "test-secret (with logger.warn)"
+    purpose: HMAC-SHA256 signing secret; absent → fail-loud fallback
+  - name: policyTable
+    where: defaultAttestor constructor opt
+    default: "{} (every action → prompt-user)"
+    purpose: Maps action → allow|deny|prompt-user verdict
+  - name: clock
+    where: defaultAttestor constructor opt
+    default: "Date.now"
+    purpose: Injectable for test-time TTL determinism
+  - name: onEvent
+    where: defaultAttestor constructor opt
+    default: "no-op (default-OFF)"
+    purpose: 9-event stream subscriber (preflight-requested/-granted/-denied/token-minted/-used/-expired/-revoked/preflight-error/attest-audit)
+deliberate_hold:
+  reason: |
+    Network protocol (gRPC / WebSocket / Tauri IPC channel) is out of scope —
+    this slice produces tokens; transport is the caller's choice. JWT / JWKS /
+    asymmetric signing migration is a future ADR; current HMAC is symmetric for
+    round-trip simplicity. OS-keyring secret backend mirrors ADR-0050's deferred
+    OS-keyring path. Cross-process token cache (multi-process replay protection)
+    is future work.
+  promotion_path: |
+    L4 = first real caller wires the port (a Tauri sidecar bridge wrapper, an
+    org-policy proxy, or an MCP `bridge_attest_preflight` tool) + the 9-event
+    stream gets a downstream subscriber (jsonl recorder or OTel sink).
+notes: |
+  Sibling to ADR-0050 trust-scope (local grant memory) and ADR-0158/0166
+  checkpoints (local rollback). Closes the "remote-side preflight + token"
+  gap that those local-scope slices left open.
+
+  Test pattern: hellgate alone (no integration test) until a real caller wires
+  this slice — by design, since wiring is a future-ADR concern.
