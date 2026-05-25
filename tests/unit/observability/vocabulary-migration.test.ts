@@ -89,6 +89,25 @@ const VOCABULARY_OWNER_FILES = new Set<string>([
   // the owner file is the explicit, structural way to acknowledge the
   // schema-vs-attribute distinction.
   join(REPO_ROOT, "src", "shared", "trajectory.ts"),
+  // `apps/cli/reactor-watch-bridge.ts` declares `"quanta.reactor_watch.v1"` as
+  // the IPC protocol identifier for reactor-watch envelopes. Same rationale
+  // as `shared/trajectory.ts` — schema/protocol identifier, not an OTel
+  // attribute key. Listing the owner is the structural escape hatch.
+  join(REPO_ROOT, "src", "apps", "cli", "reactor-watch-bridge.ts"),
+  // `observability/memory-telemetry.ts` is the sub-vocabulary owner for
+  // memory-phase attributes (`quanta.memory.phaseN.*`). It is structurally
+  // equivalent to `observability/vocabulary.ts` in role — both declare
+  // canonical attribute keys — but lives in its own file because the
+  // memory-telemetry surface keeps the keys colocated with the port shape.
+  join(SRC_ROOT, "observability", "memory-telemetry.ts"),
+  // `ipc/event-bridge.ts` declares `"quanta.ipc.v1"` as the IPC envelope
+  // protocol identifier (parallel to `quanta.reactor_watch.v1` and
+  // `quanta.trajectory.v1`). Schema/protocol identifier — not an OTel attr.
+  join(REPO_ROOT, "src", "ipc", "event-bridge.ts"),
+  // `ipc/session-export.ts` + `session-import.ts` declare `"quanta.session.portable"`
+  // as the portable-session JSONL format identifier. Same schema-id rule.
+  join(REPO_ROOT, "src", "ipc", "session-export.ts"),
+  join(REPO_ROOT, "src", "ipc", "session-import.ts"),
 ])
 
 interface LiteralHit {

@@ -241,23 +241,18 @@ describe("otel-sink / B. instrument caching", () => {
     expect(meter?.counters.size).toBe(2)
   })
 
-  test("HELL-7: same name, different kind → typed warn (kind locked); second sample dropped", () => {
+  test("HELL-7: same name, different kind → injected warn (kind locked); second sample dropped", () => {
+    // Slice purity (ADR-0144): no console.* default in @/observability.
+    // Caller injects warn sink; absent ⇒ silent. Test injects + asserts call.
     const provider = makeProvider()
-    const sink = otelMetricsSink({ meterProvider: provider })
-    sink.send({ name: "foo", kind: "counter", value: 1, at })
-    // Patch console.warn to capture — intentional test infrastructure.
     const warns: string[] = []
-    // biome-ignore lint/suspicious/noConsole: capturing console output is the test
-    const originalWarn = console.warn
-    console.warn = ((...args: unknown[]) => {
-      warns.push(args.map((a) => (typeof a === "string" ? a : String(a))).join(" "))
-    }) as typeof console.warn
-    try {
-      // Wrong kind — must NOT throw; instrument must NOT be created.
-      expect(() => sink.send({ name: "foo", kind: "histogram", value: 99, at })).not.toThrow()
-    } finally {
-      console.warn = originalWarn
-    }
+    const sink = otelMetricsSink({
+      meterProvider: provider,
+      warn: (msg) => warns.push(msg),
+    })
+    sink.send({ name: "foo", kind: "counter", value: 1, at })
+    // Wrong kind — must NOT throw; instrument must NOT be created.
+    expect(() => sink.send({ name: "foo", kind: "histogram", value: 99, at })).not.toThrow()
     const meter = provider.meters.get("quanta")
     expect(meter?.counterFactoryCalls.length).toBe(1)
     expect(meter?.histogramFactoryCalls.length).toBe(0) // dropped

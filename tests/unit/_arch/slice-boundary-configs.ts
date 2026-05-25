@@ -27,7 +27,15 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   agent: {
     slice: "agent",
     denyImports: ["@/migration"],
-    stdioAllowFiles: ["admissibility-gate.ts", "hitl-tier-registry.ts"],
+    // `default-stdout-emitter.ts` (ADR-0205) deliberately exposes
+    // `process.stderr` as the production default sink for git-directives.
+    // The sink is injectable; the default literal is the documented
+    // contract — exempted from the slice's no-raw-stdio invariant.
+    stdioAllowFiles: [
+      "admissibility-gate.ts",
+      "hitl-tier-registry.ts",
+      "default-stdout-emitter.ts",
+    ],
     requireSliceBarrel: true,
   },
   tool: {

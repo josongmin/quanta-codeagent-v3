@@ -140,17 +140,43 @@ describe("FeatureSchema — direct zod validation", () => {
     }
   })
 
-  test("rejects bad ADR type (string)", () => {
-    const r = FeatureSchema.safeParse({
+  test("accepts ADR as number OR path-string (post path-form migration)", () => {
+    // ADRs can be numeric (`[13]`) OR path-form (`["docs/decisions/0013-foo.md"]`)
+    // since the rename-dedup work that disambiguated duplicate ADR numbers
+    // (e.g. ADR-0068 had two files; only path-form is unambiguous).
+    const numeric = FeatureSchema.safeParse({
       id: "x",
       title: "x",
       section: 1,
       subsystem: "1.1",
       maturity: "L1",
       purpose: "x",
-      evidence: { adrs: ["13"] },
+      evidence: { adrs: [13] },
     })
-    expect(r.success).toBe(false)
+    expect(numeric.success).toBe(true)
+
+    const pathForm = FeatureSchema.safeParse({
+      id: "x",
+      title: "x",
+      section: 1,
+      subsystem: "1.1",
+      maturity: "L1",
+      purpose: "x",
+      evidence: { adrs: ["docs/decisions/0013-foo.md"] },
+    })
+    expect(pathForm.success).toBe(true)
+
+    // Mixed object (not string, not number) is still rejected.
+    const bad = FeatureSchema.safeParse({
+      id: "x",
+      title: "x",
+      section: 1,
+      subsystem: "1.1",
+      maturity: "L1",
+      purpose: "x",
+      evidence: { adrs: [{ bad: true }] },
+    })
+    expect(bad.success).toBe(false)
   })
 })
 
