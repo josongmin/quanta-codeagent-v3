@@ -618,6 +618,9 @@ export const runRepl = async (): Promise<void> => {
       // ADR-0293 — seam attached by the loop once externalPromptQueue is
       // born (the queue is the sink the trigger dispatches into).
       playbookSeam: wires.playbookSeam,
+      // ADR-0301 — `--playbook-trigger` CLI flag echo. Spread conditionally
+      // so `exactOptionalPropertyTypes` doesn't see a literal `undefined`.
+      ...(setup.playbookCliFlag !== undefined ? { playbookCliFlag: setup.playbookCliFlag } : {}),
     })
   } finally {
     // Track T — tear down the ring-buffer panel BEFORE other surface

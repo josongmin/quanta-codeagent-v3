@@ -143,6 +143,13 @@ export interface SessionSetupResult {
   /** Tear down MCP clients on REPL exit. The host calls this in the
    *  `finally` of `runRepl`. */
   readonly shutdownMcp: () => Promise<void>
+  /** ADR-0301 — `--playbook-trigger` CLI flag echo (forwarded from the
+   *  bootstrap layer). When `true`, the host threads this into
+   *  `runSessionLoop({ playbookCliFlag })` so
+   *  `maybeStartPlaybookTriggerWire` opts in even when
+   *  `QUANTA_PLAYBOOK_TRIGGER` is unset. `undefined` ⇒ slot omitted at the
+   *  loop call site (default-OFF byte-identical). */
+  readonly playbookCliFlag: boolean | undefined
 }
 
 /** Terminal host wiring over the bootstrap session core. All env/argv/feature
@@ -272,5 +279,9 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
       clearFsJailDecisionSink()
       await boot.shutdownMcp()
     },
+    // ADR-0301 — forward the CLI flag echo so `runRepl` can hand it to
+    // `runSessionLoop({ playbookCliFlag })`. Bootstrap maps absent → undefined
+    // already; we just propagate the same shape.
+    playbookCliFlag: boot.playbookCliFlag,
   }
 }

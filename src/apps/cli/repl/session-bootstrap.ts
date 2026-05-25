@@ -138,6 +138,14 @@ export interface SessionBootstrapResult {
   readonly system: string
   readonly guardianReview: ReviewerPort["guardianReview"] | undefined
   readonly shutdownMcp: () => Promise<void>
+  /** ADR-0301 — `--playbook-trigger` CLI flag echo, threaded from
+   *  `SessionRuntimeConfig.playbookTriggerFlag`. The downstream loop wires
+   *  this into `maybeStartPlaybookTriggerWire({ cliFlag })`; the wire helper
+   *  enforces env-on-wins precedence. Default-OFF byte-identical when the
+   *  flag is absent on argv (`false` ⇒ slot omitted at the loop call site).
+   *  `boolean | undefined` rather than `boolean` so the consumer can spread
+   *  the slot conditionally under `exactOptionalPropertyTypes`. */
+  readonly playbookCliFlag: boolean | undefined
 }
 
 const buildIdleGuards = (
@@ -390,6 +398,12 @@ export const bootstrapSession = async (
       system,
       guardianReview,
       shutdownMcp,
+      // ADR-0301 — present the parsed CLI flag as `true | undefined`. Mapping
+      // `false → undefined` lets the downstream consumer spread the slot
+      // conditionally (`exactOptionalPropertyTypes`-friendly) and keeps the
+      // default-OFF path byte-identical (no `cliFlag: false` reaching the
+      // wire — env-on precedence remains the single arbiter).
+      playbookCliFlag: runtime.playbookTriggerFlag === true ? true : undefined,
     }
   } catch (error) {
     await stopMcpClients(features.mcpClients)

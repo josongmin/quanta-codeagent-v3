@@ -482,6 +482,32 @@ export interface AssembleRequestPartial {
    *  a `ConversationCheckpointStore`-backed base forker. Absent / false ⇒
    *  slot omitted (default-OFF). */
   forkSession?: boolean
+  /** ADR-0301 — CLI `--playbook-trigger` flag echo. When `true`, the surface
+   *  host's `maybeStartPlaybookTriggerWire` opts in to the inline-trigger
+   *  watcher even if `QUANTA_PLAYBOOK_TRIGGER` is unset. Env `=on` still wins
+   *  over flag=false (precedence enforced inside the wire helper). Absent ⇒
+   *  slot omitted (default-OFF byte-identical, RFC §1.2). */
+  playbookTrigger?: boolean
+}
+
+/** ADR-0236 + ADR-0301 — propagate the composition-root mega-wire flags
+ *  (and the new playbook-trigger CLI flag echo) onto the lifted projection.
+ *  Extracted out of {@link toAssembleRequest} so that function stays under
+ *  biome's `noExcessiveCognitiveComplexity` cap (≤15) as more wire flags
+ *  accumulate. Each spread is presence-only (absent ⇒ slot omitted; default-
+ *  OFF byte-identical under `exactOptionalPropertyTypes`). */
+const liftMegaWireFields = (args: AgentArgs, out: AssembleRequestPartial): void => {
+  if (args.toolProfile !== undefined) out.toolProfile = args.toolProfile
+  if (args.stickyModel) out.stickyModel = true
+  if (args.identityMode !== undefined) out.identityMode = args.identityMode
+  if (args.focusChainEvery !== undefined) out.focusChainEvery = args.focusChainEvery
+  if (args.noAutoBackground) out.noAutoBackground = true
+  // ADR-0301 — echo the parsed CLI flag onto the lifted projection so any
+  // mode-preset host that consumes `AssembleRequestPartial.playbookTrigger`
+  // can thread it down to `maybeStartPlaybookTriggerWire({ cliFlag })`.
+  // Default-OFF: absent flag ⇒ `args.playbookTrigger === undefined`, slot
+  // OMITTED on the projection (RFC §1.2 byte-identical).
+  if (args.playbookTrigger === true) out.playbookTrigger = true
 }
 
 /** Lift mode + dials + per-mode fields out of `AgentArgs`. Pure projection. */
@@ -500,12 +526,9 @@ export const toAssembleRequest = (args: AgentArgs): AssembleRequestPartial => {
   if (args.report !== undefined) out.report = args.report
   if (args.pr !== undefined) out.pr = args.pr
   if (args.ciBotDryRun) out.ciBotDryRun = true
-  // ADR-0236 — composition-root mega-wire propagation.
-  if (args.toolProfile !== undefined) out.toolProfile = args.toolProfile
-  if (args.stickyModel) out.stickyModel = true
-  if (args.identityMode !== undefined) out.identityMode = args.identityMode
-  if (args.focusChainEvery !== undefined) out.focusChainEvery = args.focusChainEvery
-  if (args.noAutoBackground) out.noAutoBackground = true
+  // ADR-0236 + ADR-0301 — extracted helper keeps this function under the
+  // biome cognitive-complexity cap.
+  liftMegaWireFields(args, out)
   return out
 }
 

@@ -200,6 +200,10 @@ const buildSetup = (
     } as never,
     argPrompt,
     shutdownMcp: async () => undefined,
+    // ADR-0301 — `--playbook-trigger` CLI flag echo. The loop spreads this
+    // by-presence onto `maybeStartPlaybookTriggerWire({ cliFlag })`; the
+    // fixture defaults to `undefined` ⇒ slot omitted ⇒ default-OFF behaviour.
+    playbookCliFlag: undefined,
     __statusBar: statusBar,
     __pillsDisposeCalls: pillsDisposeCalls,
   }

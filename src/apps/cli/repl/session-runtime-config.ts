@@ -8,12 +8,10 @@ import {
   observeDir,
   type Provider,
   pickProvider,
+  playbookTriggerFlag,
   titleFlag,
 } from "../internal"
-import {
-  parseCliReviewerSandboxProfile,
-  type CliReviewerSandboxProfile,
-} from "./reviewer-policy"
+import { type CliReviewerSandboxProfile, parseCliReviewerSandboxProfile } from "./reviewer-policy"
 
 export interface SessionRuntimeConfig {
   readonly env: NodeJS.ProcessEnv
@@ -37,6 +35,12 @@ export interface SessionRuntimeConfig {
   readonly idleMs: number
   readonly snoozeDefaultMs: number
   readonly rejectLimit: number
+  /** ADR-0301 — `--playbook-trigger` CLI flag echo. `true` when the flag is
+   *  present on argv. Threaded into `bootstrapSession` → `setupSession` →
+   *  `runSessionLoop` so `maybeStartPlaybookTriggerWire({ cliFlag })` honours
+   *  the operator's CLI opt-in. Default-OFF: absent flag ⇒ `false` ⇒ slot
+   *  omitted further downstream (RFC §1.2 byte-identical). */
+  readonly playbookTriggerFlag: boolean
 }
 
 /** Consolidate the session surface's process/env/argv reads into one typed
@@ -65,5 +69,8 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     idleMs: Number(env("QUANTA_IDLE_MS", "60000")),
     snoozeDefaultMs: Number(env("QUANTA_SNOOZE_DEFAULT_MS", "300000")),
     rejectLimit: Number(env("QUANTA_REJECT_LIMIT", "20")),
+    // ADR-0301 — surface-side argv scan for `--playbook-trigger`. The wire
+    // helper enforces env-on precedence; this is the bare CLI echo.
+    playbookTriggerFlag: playbookTriggerFlag(),
   }
 }
