@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import {
   createPermissionStore,
-  setThreadPermission,
   type PermissionStore,
   type ReviewContext,
+  setThreadPermission,
   type ToolActionKeyed,
 } from "@/permission"
 import type {
@@ -481,6 +481,29 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
       const result = await setupSession(deps)
       expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("guardian_subagent")
       expect(result.sessionDeps.admissibility?.permissionStore).toBe(permissionStore)
+      const admissibility = result.sessionDeps.admissibility
+      expect(admissibility).toBeDefined()
+      if (admissibility === undefined) throw new Error("admissibility must be defined")
+      const reviewerPort = admissibility.reviewerPort
+      expect(reviewerPort).toBeDefined()
+      if (reviewerPort === undefined) throw new Error("reviewerPort must be defined")
+      const guardian = await reviewerPort.guardianReview(
+        {
+          tool: "read",
+          input: { path: "README.md" },
+          isReadOnly: true,
+          actionKey: "read",
+        },
+        {
+          sessionId: "s1",
+          turnId: "1",
+          priorDenials: [],
+          configReviewer: "guardian_subagent",
+          decidedAt: 42,
+        },
+      )
+      expect(guardian?.reviewer).toBe("guardian_subagent")
+      expect(guardian?.outcome).toBe("not_needed")
     } finally {
       if (prevPermission === undefined) delete process.env.QUANTA_PERMISSION
       else process.env.QUANTA_PERMISSION = prevPermission

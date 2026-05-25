@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import * as repl from "../../../src/apps/cli/repl"
+import * as sessionDepsCompose from "../../../src/apps/cli/repl/session-deps-compose"
 import * as skillsSurface from "../../../src/apps/cli/repl/skills-surface"
 import * as slashSurface from "../../../src/apps/cli/repl/slash-surface"
 import * as surfaceCompose from "../../../src/apps/cli/repl/surface-compose"
@@ -43,6 +44,7 @@ describe("apps/cli/repl + session-io extract shape", () => {
     expect(typeof slashSurface.dispatchReplSlash).toBe("function")
     expect(typeof skillsSurface.buildSkillsCallback).toBe("function")
     expect(typeof skillsSurface.installPills).toBe("function")
+    expect(typeof sessionDepsCompose.composeCliSessionDeps).toBe("function")
     expect(typeof surfaceCompose.buildPromptUx).toBe("function")
     expect(typeof surfaceCompose.createSurfaceState).toBe("function")
     expect(typeof surfaceCompose.composeSurfaceSlashCtx).toBe("function")
@@ -69,13 +71,16 @@ describe("apps/cli/repl + session-io extract shape", () => {
   test("live source keeps slash registry/runtime and repl host/surface split", () => {
     const slashPath = join(import.meta.dir, "../../../src/apps/cli/slash-commands.ts")
     const replPath = join(import.meta.dir, "../../../src/apps/cli/repl.ts")
+    const sessionSetupPath = join(import.meta.dir, "../../../src/apps/cli/repl/session-setup.ts")
     const slashSrc = readFileSync(slashPath, "utf8")
     const replSrc = readFileSync(replPath, "utf8")
+    const sessionSetupSrc = readFileSync(sessionSetupPath, "utf8")
 
     expect(slashSrc).toContain('from "./slash-contract"')
     expect(slashSrc).toContain('from "./slash-engine"')
     expect(replSrc).toContain('from "./repl/skills-surface"')
     expect(replSrc).toContain('from "./repl/slash-surface"')
     expect(replSrc).toContain('from "./repl/surface-compose"')
+    expect(sessionSetupSrc).toContain('from "./session-deps-compose"')
   })
 })

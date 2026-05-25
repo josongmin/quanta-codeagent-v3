@@ -20,6 +20,7 @@ import { decideLocalizePhase } from "./localize-phase-guard"
 import { resolveCollaborationMode } from "./mode"
 import { planStoreToMutator } from "./plan/mutator-adapter"
 import { runPlanExitFlow } from "./plan-exit-flow"
+import { materializeReviewerAgent } from "./tier1/reviewer-subagent"
 import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
@@ -444,6 +445,7 @@ const dispatchToolInner = async (
           return outcome
         }
       : undefined
+  const reviewerAgent = materializeReviewerAgent(config)
   const ctx: ToolContext = {
     cwd: config.cwd,
     signal: config.signal,
@@ -459,6 +461,7 @@ const dispatchToolInner = async (
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
     ...(workingState !== undefined ? { workingState } : {}),
     ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
+    ...(reviewerAgent !== undefined ? { reviewerAgent } : {}),
     // ADR-0081 L3 wire: forward the agent-level shell observer into every
     // tool's ToolContext. The bash tool conditionally hands it to runShell,
     // which only allocates events when this is present (`exactOptionalProperty

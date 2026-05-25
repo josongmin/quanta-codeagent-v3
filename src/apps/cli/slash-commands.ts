@@ -60,6 +60,7 @@ import { createSlashRuntime, isSlashCommand } from "./slash-engine"
 import { snapshotCmd } from "./snapshot-cmd"
 import { statusCmd } from "./status-cmd"
 import { webCmd } from "./web-cmd"
+import { whyCmd } from "./why-cmd"
 import { renderWorkingStatePanel } from "./working-state-panel"
 
 export type { SkillRow, SlashCommand, SlashCompletionHint, SlashContext } from "./slash-contract"
@@ -742,6 +743,11 @@ export const BUILTINS: readonly SlashCommand[] = [
   // line + the QUANTA_DEBUG hint and exits 0 (parity with the rest of the
   // surface-only commands).
   debugCmd,
+  // ADR-0271 — `/why <toolCallId|last>` meta-LLM reasoning query for a
+  // recorded tool call. Default-OFF: when `ctx.why` is absent (one-shot /
+  // shell-entry surfaces, or REPL pre-LLM-construction) the slash prints
+  // "not wired in this surface" + exit 0.
+  whyCmd,
 ] as const
 
 /** `/exit` and `/quit` are short-circuited by `composePromptPipeline` BEFORE the

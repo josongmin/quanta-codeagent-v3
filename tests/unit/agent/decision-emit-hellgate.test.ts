@@ -423,7 +423,7 @@ describe("ADR-0267 invariants", () => {
     const c = cfg({
       registry: new ToolRegistry([read]),
       decisionEmitter: cap.emitter,
-      run: { turn: 7, runId: "r1", sessionId: "s1", spanId: "x", traceId: "y" },
+      run: { turn: 7, runId: "r1" },
     })
     await runAdmissibilityGate(call("read"), c, c.permission, actionOf(read), undefined, {
       rulesStore: rules,

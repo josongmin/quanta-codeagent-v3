@@ -66,6 +66,16 @@ knobs:
     where: defaultAttestor constructor opt
     default: "no-op (default-OFF)"
     purpose: 9-event stream subscriber (preflight-requested/-granted/-denied/token-minted/-used/-expired/-revoked/preflight-error/attest-audit)
+  - name: DEFAULT_STS_TOKEN_TTL_MS
+    where: module-scope constant in src/security/bridge-attest/default-attestor.ts
+    default: "300_000 (5 minutes)"
+    purpose: |
+      TTL for the auto-minted STS token on an `allow` verdict. Matches AWS STS
+      short-lived credential convention — long enough for typical
+      preflight→action latency, short enough to bound exposure on accidental
+      leak. NOT an opt-in knob (intentionally compile-time, not runtime-tunable)
+      because each `allow` arm mints with a single canonical TTL; callers needing
+      a different lifetime use `mintToken(scope, ttlMs)` directly.
 deliberate_hold:
   reason: |
     Network protocol (gRPC / WebSocket / Tauri IPC channel) is out of scope —

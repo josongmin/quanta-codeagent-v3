@@ -1,5 +1,5 @@
 import type { PlanStore } from "@/agent/plan/state"
-import type { Message } from "@/llm"
+import type { LLMPort, Message } from "@/llm"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import type { HistorySessionState } from "../history-cmd"
@@ -11,6 +11,7 @@ import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { SideChatSessionState } from "../side-cmd"
 import { isSlashCommand, runSlashCommand, type SkillRow } from "../slash-commands"
+import type { WhySlashState } from "../why-cmd"
 import type { DebugTracerHandle } from "./session-setup"
 
 /** Shared REPL-side slash-context state. Threaded through
@@ -35,6 +36,11 @@ export type ReplSlashCtx = Partial<{
    *  (`QUANTA_DEBUG=1` + TTY) allocated the mutable proxy port; absent ⇒
    *  `/debug` slash prints "not wired" + the QUANTA_DEBUG hint. */
   debug: DebugTracerHandle
+  /** ADR-0271 — `/why` meta-LLM reasoning query slot. Present iff the
+   *  REPL surface has both an active sessionId and an active LLMPort
+   *  (full session setup). Absent ⇒ `/why` prints "not wired in this
+   *  surface" + exit 0. */
+  why: WhySlashState
 }>
 
 export interface BuildReplSlashCtxArgs {
@@ -54,6 +60,13 @@ export interface BuildReplSlashCtxArgs {
   /** ADR-0239 — debug-tracer surface handle. Absent ⇒ `/debug` prints
    *  "not wired" (boot-time tee was not allocated). */
   debugHandle: DebugTracerHandle | undefined
+  /** ADR-0271 — active LLMPort for the `/why` meta-LLM reasoning query.
+   *  Threaded straight from `SessionSetupResult.llm`. */
+  llm: LLMPort
+  /** ADR-0271 — active session id (envelope reader scope). */
+  sessionId: string
+  /** ADR-0271 — model identifier surfaced in the `/why` panel header. */
+  model: string
 }
 
 /** Compose the REPL-owned slash adapters into one explicit surface object. */
@@ -71,6 +84,9 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     sessionDeps,
     abortSignal,
     debugHandle,
+    llm,
+    sessionId,
+    model,
   } = args
   return {
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
@@ -92,6 +108,9 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     }),
     // ADR-0239 — `/debug` runtime toggle. Absent ⇒ slash prints "not wired".
     ...(debugHandle !== undefined ? { debug: debugHandle } : {}),
+    // ADR-0271 — `/why` meta-LLM reasoning query. Always wired in the
+    // REPL surface (LLM + sessionId are required for the loop to start).
+    why: { sessionId, llm, model },
   }
 }
 
@@ -128,6 +147,7 @@ export const dispatchReplSlash = async (
     ...(slashCtx?.branchSearch !== undefined ? { branchSearch: slashCtx.branchSearch } : {}),
     ...(slashCtx?.side !== undefined ? { side: slashCtx.side() } : {}),
     ...(slashCtx?.debug !== undefined ? { debug: slashCtx.debug } : {}),
+    ...(slashCtx?.why !== undefined ? { why: slashCtx.why } : {}),
   })
   return true
 }

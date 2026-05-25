@@ -1,37 +1,42 @@
+import * as readline from "node:readline/promises"
 import { createOnConfirmReviewerPort } from "@/agent"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
+import {
+  createSubagentBackedGuardianReview,
+  materializeReviewerAgent,
+} from "@/agent/tier1/reviewer-subagent"
 import type { PermissionStore, ToolAction } from "@/permission"
 import type { StreamPort } from "@/stream"
+import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
+import type { IdleMonitor } from "../idle-monitor"
 import {
+  assembleConfig,
   buildShellSnapshotConfig,
   buildSummarizerLlm,
   type SessionDeps,
 } from "../internal"
-import { selectDefaultReviewer, type CliReviewerSandboxProfile } from "./reviewer-policy"
-import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
+import type { RejectCounter } from "../reject-counter"
+import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
 import type { SessionBootstrapResult } from "./session-bootstrap"
+import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 
-export const buildCliOnConfirm =
-  (
-    deps: {
-      readonly idleMonitor: {
-        markActive: () => void
-      }
-      readonly rejectCounter: {
-        recordAccept: () => void
-        recordDeny: () => void
-      }
-      readonly ask: (prompt: string) => Promise<string>
-      readonly renderActionDiff: (action: ToolAction) => Promise<string | undefined>
-      readonly diffPreviewEnabled: () => boolean
-    },
-  ) =>
+const askLine = async (prompt: string): Promise<string> => {
+  const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
+  try {
+    return await adhoc.question(prompt)
+  } finally {
+    adhoc.close()
+  }
+}
+
+const buildCliOnConfirm =
+  (deps: { readonly idleMonitor: IdleMonitor; readonly rejectCounter: RejectCounter }) =>
   async (action: ToolAction): Promise<boolean> => {
-    if (deps.diffPreviewEnabled()) {
-      const preview = await deps.renderActionDiff(action)
+    if (diffPreviewEnabled()) {
+      const preview = await renderActionDiff(action)
       if (preview !== undefined) process.stderr.write(`${preview}\n`)
     }
-    const ans = await deps.ask(`Allow ${action.tool}? [y/N] `)
+    const ans = await askLine(`Allow ${action.tool}? [y/N] `)
     const accepted = ans.trim().toLowerCase() === "y"
     if (accepted) deps.rejectCounter.recordAccept()
     else deps.rejectCounter.recordDeny()
@@ -42,14 +47,11 @@ export const buildCliOnConfirm =
 export interface ComposeCliSessionDepsArgs {
   readonly boot: SessionBootstrapResult
   readonly turnStream: StreamPort
-  readonly onConfirm: (action: ToolAction) => Promise<boolean>
-  readonly ask: (prompt: string) => Promise<string>
   readonly loadPermissionStore: () => Promise<PermissionStore | undefined>
   readonly sandboxProfile: CliReviewerSandboxProfile
 }
 
 export interface CliAdmissibilityBindings {
-  readonly permissionStore: PermissionStore | undefined
   readonly sessionDeps: SessionDeps
 }
 
@@ -58,7 +60,11 @@ export interface CliAdmissibilityBindings {
 export const composeCliSessionDeps = async (
   args: ComposeCliSessionDepsArgs,
 ): Promise<CliAdmissibilityBindings> => {
-  const { boot, turnStream, onConfirm, ask, loadPermissionStore, sandboxProfile } = args
+  const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
+  const onConfirm = buildCliOnConfirm({
+    idleMonitor: boot.idleMonitor,
+    rejectCounter: boot.rejectCounter,
+  })
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
   const autoReview =
     boot.permission.classify !== undefined
@@ -67,22 +73,11 @@ export const composeCliSessionDeps = async (
           userReview: userReviewerPort.userReview,
         })
       : undefined
-  const reviewerPort =
-    autoReview !== undefined
-      ? createOnConfirmReviewerPort({ onConfirm, autoReview })
-      : userReviewerPort
   const permissionStore = await loadPermissionStore()
   const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const defaultReviewer = selectDefaultReviewer({
-    threadPermission,
-    permissionMode: boot.mode,
-    sandboxProfile,
-    hasAutoReview: autoReview !== undefined,
-    hasGuardianReview: boot.tooling.subagentConfig !== undefined,
-  })
-  const planExitPort = createCliPlanExitPort({ ask })
-  const userInputPort = createCliUserInputPort({ ask, stream: turnStream })
-  const sessionDeps: SessionDeps = {
+  const planExitPort = createCliPlanExitPort({ ask: askLine })
+  const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
+  const baseSessionDeps: SessionDeps = {
     llm: boot.llm,
     registry: boot.tooling.registry,
     stream: turnStream,
@@ -104,11 +99,6 @@ export const composeCliSessionDeps = async (
     compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
     verifyGuardConfig: boot.tooling.verifyGuardConfig,
     summarizerLlm: buildSummarizerLlm(boot.provider, boot.abort.signal),
-    admissibility: {
-      ...(permissionStore !== undefined ? { permissionStore } : {}),
-      reviewerPort,
-      defaultReviewer,
-    },
     planExitPort,
     userInputPort,
     onShellEvent: boot.onShellEvent,
@@ -122,5 +112,36 @@ export const composeCliSessionDeps = async (
       return cfg !== undefined ? { shellSnapshot: cfg } : {}
     })(),
   }
-  return { permissionStore, sessionDeps }
+  const reviewerAgent = materializeReviewerAgent(assembleConfig([], baseSessionDeps))
+  const guardianReview =
+    reviewerAgent !== undefined
+      ? createSubagentBackedGuardianReview({
+          reviewer: reviewerAgent,
+          signal: boot.abort.signal,
+        })
+      : undefined
+  const reviewerPort =
+    autoReview !== undefined || guardianReview !== undefined
+      ? createOnConfirmReviewerPort({
+          onConfirm,
+          ...(autoReview !== undefined ? { autoReview } : {}),
+          ...(guardianReview !== undefined ? { guardianReview } : {}),
+        })
+      : userReviewerPort
+  const defaultReviewer = selectDefaultReviewer({
+    threadPermission,
+    permissionMode: boot.mode,
+    sandboxProfile,
+    hasAutoReview: autoReview !== undefined,
+    hasGuardianReview: guardianReview !== undefined,
+  })
+  const sessionDeps: SessionDeps = {
+    ...baseSessionDeps,
+    admissibility: {
+      ...(permissionStore !== undefined ? { permissionStore } : {}),
+      reviewerPort,
+      defaultReviewer,
+    },
+  }
+  return { sessionDeps }
 }

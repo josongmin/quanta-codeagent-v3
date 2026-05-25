@@ -72,6 +72,12 @@ export const composeSurfaceSlashCtx = (setup: SessionSetupResult, state: Surface
     sessionDeps: setup.sessionDeps,
     abortSignal: setup.abort.signal,
     debugHandle: setup.debugHandle,
+    // ADR-0271 — `/why` meta-LLM reasoning query wiring. The REPL
+    // surface always has these three (the loop cannot start without an
+    // LLMPort or a sessionId), so we never gate this slot.
+    llm: setup.llm,
+    sessionId: setup.sessionId,
+    model: setup.model,
   })
 
 const foldCostPanelDelta = (

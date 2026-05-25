@@ -1,17 +1,13 @@
-import * as readline from "node:readline/promises"
-import { createOnConfirmReviewerPort } from "@/agent"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
-import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
-import type { PermissionMode, PermissionStore, ToolAction } from "@/permission"
+import type { PermissionMode, PermissionStore } from "@/permission"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import type { DebugCmdState } from "../debug-cmd"
-import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import type { SessionDeps, Tooling } from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
@@ -26,21 +22,8 @@ import {
   type SessionBootstrapDeps,
   type SessionBootstrapResult,
 } from "./session-bootstrap"
-import { buildCliOnConfirm, composeCliSessionDeps } from "./session-deps-compose"
+import { composeCliSessionDeps } from "./session-deps-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
-
-const askLine = async (prompt: string): Promise<string> => {
-  const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
-  try {
-    return await adhoc.question(prompt)
-  } finally {
-    adhoc.close()
-  }
-}
-
-/** Build the `onConfirm` callback for tool-permission prompts. Inline diff
- *  preview before the readline question; accept/deny is counted by
- *  `rejectCounter` so consecutive denials can trigger graceful auto-exit. */
 /** Track D — DebugTracerHandle. Surface owns the live state + the
  *  swap-in/out side effect (mutable proxy port in the stream tee).
  *  The slash adapter consumes ONLY {@link DebugCmdState} I/O — it never
@@ -149,13 +132,6 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     boot.abort.abort()
   })
 
-  const onConfirm = buildCliOnConfirm({
-    idleMonitor: boot.idleMonitor,
-    rejectCounter: boot.rejectCounter,
-    ask: askLine,
-    renderActionDiff,
-    diffPreviewEnabled,
-  })
   const shortCwd = boot.cwd.startsWith(runtime.homeDir)
     ? `~${boot.cwd.slice(runtime.homeDir.length)}`
     : boot.cwd
@@ -189,8 +165,6 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   const { sessionDeps } = await composeCliSessionDeps({
     boot,
     turnStream,
-    onConfirm,
-    ask: askLine,
     loadPermissionStore: deps.loadPermissionStore,
     sandboxProfile: runtime.sandboxProfile,
   })

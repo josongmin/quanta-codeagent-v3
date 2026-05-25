@@ -1,12 +1,14 @@
 import { z } from "zod"
 import type { ApprovalDecision, ReviewerPort, ToolActionKeyed } from "@/permission"
 import type { StreamPort } from "@/stream"
-import { REVIEW_TOOL_FILTER } from "@/subagent"
 import type { ReviewerRunner } from "@/tool/types"
 import { createSubagentRunner } from "../subagent-runner"
 import type { AgentConfig } from "../types"
 
 const SILENT_STREAM: StreamPort = { emit() {} }
+const REVIEWER_MAX_TURNS = 4
+const REVIEWER_TOOL_FILTER = ["read", "grep", "glob"] as const
+const REVIEWER_CACHE = new WeakMap<AgentConfig, ReviewerRunner>()
 
 const GUARDIAN_RESULT_SHAPE =
   'JSON only: {"outcome":"guardian_approved"|"guardian_denied","rationale":"string","steer?":"string","riskLevel?":"low"|"medium"|"high"}'
@@ -36,7 +38,7 @@ const reviewerPrompt = (action: ToolActionKeyed, reviewKind: string | undefined)
     "Decision rules:",
     '- return {"outcome":"guardian_approved",...} only when the action is acceptable as requested.',
     '- return {"outcome":"guardian_denied",...} when the action is unsafe, underspecified, or should be redirected.',
-    '- when denying, include `steer` with a concise safer next step if one exists.',
+    "- when denying, include `steer` with a concise safer next step if one exists.",
     "",
     `Tool: ${action.tool}`,
     `Review kind: ${reviewKind ?? "unknown"}`,
@@ -62,29 +64,60 @@ const fallbackDecision = (
   ...(steer !== undefined ? { verb: { verb: "reject_and_tell" as const, message: steer } } : {}),
 })
 
+const decodeGuardianDecision = (
+  finalText: string,
+  tool: string,
+  decidedAt: number,
+): ApprovalDecision => {
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(finalText)
+  } catch {
+    return fallbackDecision(`guardian reviewer returned invalid JSON for ${tool}`, decidedAt)
+  }
+  const parsed = guardianReplySchema.safeParse(decoded)
+  if (!parsed.success) {
+    return fallbackDecision(`guardian reviewer returned invalid JSON for ${tool}`, decidedAt)
+  }
+  const reply = parsed.data
+  return {
+    reviewer: "guardian_subagent",
+    outcome: reply.outcome,
+    riskLevel: reply.riskLevel ?? "high",
+    rationale: reply.rationale,
+    decidedAt,
+    ...(reply.outcome === "guardian_denied" && reply.steer !== undefined
+      ? { verb: { verb: "reject_and_tell" as const, message: reply.steer } }
+      : {}),
+  }
+}
+
 /** Build the silent reviewer runner the agent slice uses internally for
  *  `guardian_subagent` approvals and `git_review_diff`. The child loop is the
  *  normal `SubagentRunner`, but the inherited stream is replaced with a no-op
  *  sink so the reviewer's internal turns never leak into the parent UI. */
 export const materializeReviewerAgent = (config: AgentConfig): ReviewerRunner | undefined => {
-  if (config.reviewerAgent !== undefined) return config.reviewerAgent
+  const cached = REVIEWER_CACHE.get(config)
+  if (cached !== undefined) return cached
   if (config.subagent === undefined) return undefined
   const parent: AgentConfig = { ...config, stream: SILENT_STREAM }
-  const runner = createSubagentRunner(parent)
+  const runner = createSubagentRunner(
+    parent,
+    config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {},
+  )
   const reviewer: ReviewerRunner = async (req) => {
     const result = await runner({
       prompt: req.prompt,
       depth: req.depth,
       isolation: "none",
+      budget: { maxTurns: REVIEWER_MAX_TURNS },
       ...(req.taskKind !== undefined ? { taskKind: req.taskKind } : {}),
       ...(req.toolFilter !== undefined ? { toolFilter: [...req.toolFilter] } : {}),
-      ...(req.budget !== undefined ? { budget: { ...req.budget } } : {}),
-      ...(req.resultShape !== undefined ? { resultShape: req.resultShape } : {}),
       ...(req.signal !== undefined ? { signal: req.signal } : {}),
     })
     return { ok: result.ok, finalText: result.finalText, turns: result.turns }
   }
-  config.reviewerAgent = reviewer
+  REVIEWER_CACHE.set(config, reviewer)
   return reviewer
 }
 
@@ -110,9 +143,7 @@ export const createSubagentBackedGuardianReview = (opts: {
       prompt: reviewerPrompt(action, ctx.reviewKind),
       depth: childDepth,
       taskKind: "review",
-      toolFilter: REVIEW_TOOL_FILTER,
-      budget: { maxTurns: 4 },
-      resultShape: GUARDIAN_RESULT_SHAPE,
+      toolFilter: REVIEWER_TOOL_FILTER,
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     })
     if (!result.ok) {
@@ -121,32 +152,6 @@ export const createSubagentBackedGuardianReview = (opts: {
         ctx.decidedAt,
       )
     }
-    let decoded: unknown
-    try {
-      decoded = JSON.parse(result.finalText)
-    } catch {
-      return fallbackDecision(
-        `guardian reviewer returned invalid JSON for ${action.tool}`,
-        ctx.decidedAt,
-      )
-    }
-    const parsed = guardianReplySchema.safeParse(decoded)
-    if (!parsed.success) {
-      return fallbackDecision(
-        `guardian reviewer returned invalid JSON for ${action.tool}`,
-        ctx.decidedAt,
-      )
-    }
-    const reply = parsed.data
-    return {
-      reviewer: "guardian_subagent",
-      outcome: reply.outcome,
-      riskLevel: reply.riskLevel ?? "high",
-      rationale: reply.rationale,
-      decidedAt: ctx.decidedAt,
-      ...(reply.outcome === "guardian_denied" && reply.steer !== undefined
-        ? { verb: { verb: "reject_and_tell" as const, message: reply.steer } }
-        : {}),
-    }
+    return decodeGuardianDecision(result.finalText, action.tool, ctx.decidedAt)
   }
 }
