@@ -1,0 +1,78 @@
+id: reranker-port
+title: Reranker port — Cohere/Voyage REST adapters + identity default (ADR-0262)
+section: 4
+subsystem: Vendor-aware reranker seam (sibling to RerankPort)
+order: 64
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, retrieval]
+depends_on: []
+purpose: |
+  ADR-0159 의 `RerankPort` family (identity / bm25-secondary / tier-aware / RRF)
+  은 PURE 전략 4종 — query-aware 채점이 아니라 caller 의 기존 score 를 reorder
+  한다. 본 슬라이스는 그 옆의 NEW closed port `Reranker<T>` — vendor 채점
+  (Cohere `rerank-v3.5` / Voyage `rerank-2`) 을 위한 분리된 seam. 차이:
+  (1) `Result<…, RerankError>` shape — vendor 실패 (rate-limit / auth / transport)
+  은 EXPECTED domain event 라 throw 가 아닌 Result. (2) generic element `T` —
+  caller 가 `documentOf(hit) → string` 매퍼를 주입, 같은 port 가
+  `RetrievalCandidate` / `MemoryHit` / file-search row 모두에서 재사용 가능.
+  (3) `capabilities(): { provider, model, maxDocsPerCall, maxInputTokens }` —
+  required 4-필드 (exactOptionalPropertyTypes 누설 없음). (4) 5-arm closed
+  RerankError 유니온 — `auth-failed | rate-limited | empty-query | too-many-docs
+  | transport`. Boundary 가 empty query / k=0 / empty hits / too-many-docs 를
+  HTTP 호출 전에 거부 (vendor 가 호출당 과금하므로). default-OFF: identity
+  reranker 가 default — `QUANTA_RERANKER` env 미설정시 byte-identical
+  pass-through. 외부 lib install 차단 — `defaultCohereHttp` / `defaultVoyageHttp`
+  은 raw `fetch` 사용 (vendor SDK import 없음). HTTP 는 injected port (`CohereHttp`
+  / `VoyageHttp`) 이라 테스트는 fake 주입.
+evidence:
+  code:
+    - src/retrieval/reranker/types.ts
+    - src/retrieval/reranker/port.ts
+    - src/retrieval/reranker/identity-reranker.ts
+    - src/retrieval/reranker/cohere-reranker.ts
+    - src/retrieval/reranker/voyage-reranker.ts
+    - src/retrieval/reranker/headless-stub.ts
+    - src/retrieval/reranker/registry.ts
+    - src/retrieval/reranker/index.ts
+  adrs: [262, 254]
+  tests:
+    unit:
+      - tests/unit/retrieval/reranker-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_RERANKER
+    where: env
+    default: identity
+    purpose: env-driven provider selection (createRerankerFromEnv) — identity|headless|cohere|voyage; 미설정 또는 unknown 값은 identity (no silent vendor swap)
+  - name: COHERE_API_KEY
+    where: env
+    default: ''
+    purpose: QUANTA_RERANKER=cohere 시 필수 (또는 cohereApiKey 옵션). 누락시 throw — silent downgrade 금지
+  - name: VOYAGE_API_KEY
+    where: env
+    default: ''
+    purpose: QUANTA_RERANKER=voyage 시 필수 (또는 voyageApiKey 옵션). 누락시 throw
+deliberate_hold:
+  reason: 'Composition-root 와이어링 (runHybridQuery 에 본 port 를 끼우는 단계) 은 후속 PR — 현재는 port + 4 adapter + env factory + 15-case hellgate 만 land. ADR-0254 (retrieval composition wire) 의 reranker stage 가 본 port 를 picking 하는 한 줄 추가로 활성.'
+  promotion_path: '(1) composition root 에서 `createRerankerFromEnv({ documentOf: c => c.text })` 인스턴스, (2) `runHybridQuery` 의 마지막 stage 에 본 reranker 를 wire (k = topK), (3) integration test 로 env=cohere/voyage 시 실제 reorder 가 보이는지 확인.'
+notes: |
+  - exactOptionalPropertyTypes: capabilities 의 4 필드 (provider/model/
+    maxDocsPerCall/maxInputTokens) 는 모두 required — undefined 누설 0.
+  - 5-arm RerankError: 새 arm 추가는 ALL consumer 의 exhaustive switch 가
+    compile-fail (assertNever) — HELL-RR-15 가 봉인.
+  - originalIndex 불변식: post-sort 후에도 항상 INPUT hits 의 index 를 가리킨다.
+    HELL-RR-06 가 봉인.
+  - empty-query / empty-hits / k=0 / too-many-docs 4 케이스 모두 HTTP 호출
+    전에 boundary 가 거부 — vendor 과금 회피. HELL-RR-04/09/10/12 가 봉인.
+  - registry 의 unknown env 값은 identity 로 fallback (silent vendor swap 금지);
+    apiKey 누락은 throw (silent downgrade 금지). 두 invariant 가 미묘하게 다름.
+  - 슬라이스 boundary: `src/retrieval/reranker/` 만 새로 — 기존
+    `src/retrieval/{rerank,embedders,types,hybrid-query,index,…}.ts` 는 unchanged.
+    @/agent / @/tool / @/memory 등에 import 추가 없음.
