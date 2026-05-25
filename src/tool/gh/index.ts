@@ -22,85 +22,15 @@
  *     loop (boundary discipline, not a fallback for missing data).
  */
 import { z } from "zod"
-import { scrubEnv } from "@/runtime"
 import type { Tool, ToolContext, ToolEvent } from "../types"
+import { ghPrBlameTool } from "./pr-blame"
+import { normalizeRef, refRejected } from "./ref"
+import { DEFAULT_TIMEOUT_MS, type GhRunner, type GhRunResult, defaultGhRunner } from "./runner"
 
-/**
- * SECURITY (mirrors `git/diff.ts` leading-dash rejection): a PR/issue
- * identifier is a bare POSITIONAL argument to `gh` (`gh pr view <id>`). A
- * `-`-leading value (`--web`, `-R/owner/evil`, `--repo=…`) would be parsed by
- * `gh` as a FLAG rather than a number/URL — arg-injection. `gh` accepts a
- * numeric issue/PR number OR a full `https://…` URL; both are validated here.
- * A malformed identifier is rejected before it reaches argv, surfaced as a
- * deterministic `ok:false` (never thrown to the loop).
- *
- * Accepted: a positive integer (`42`, `#42`) or an `http(s)://…` URL. Anything
- * beginning with `-`, or any other shape, is rejected.
- */
-const normalizeRef = (raw: string | number): string | undefined => {
-  const s = String(raw).trim()
-  if (s.length === 0) return undefined
-  // Plain number, optionally with a leading `#` (a common human shorthand).
-  const num = s.startsWith("#") ? s.slice(1) : s
-  if (/^[0-9]+$/.test(num)) return num
-  // Full URL form — must be http(s) so it can never be a `-`-leading flag.
-  if (/^https?:\/\//i.test(s)) return s
-  return undefined
-}
-
-/** Raised (and caught in `execute`) when a PR/issue identifier is malformed. */
-const refRejected = (kind: "PR" | "issue", raw: string | number): string =>
-  `invalid ${kind} identifier '${String(raw)}': expected a positive number or an ` +
-  "http(s) URL (a leading-dash value would be parsed as a gh flag)"
-
-/** Injectable subprocess boundary — argv, cwd, timeout → result. */
-export interface GhRunResult {
-  code: number
-  stdout: string
-  stderr: string
-}
-export type GhRunner = (argv: string[], cwd: string, timeoutMs: number) => Promise<GhRunResult>
-
-/** Default runner via Bun.spawn (no shell). Env is the CI-scoped allowlist
- *  from `@/runtime` — NEVER leaks `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` etc.
- *  The allowlist accepts `PATH`/`HOME`/`TMPDIR`/locale + `GH_TOKEN`/`GITHUB_*`,
- *  so `gh` authenticates from its own scoped token, not the user's host env. */
-const CI_ENV_ALLOWLIST_LOCAL: readonly string[] = Object.freeze([
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "LANG",
-  "LC_ALL",
-  "GH_TOKEN",
-  "GITHUB_TOKEN",
-  "GITHUB_REPOSITORY",
-  "GITHUB_REF",
-  "GITHUB_SHA",
-  "GITHUB_ACTIONS",
-  "GITHUB_RUN_ID",
-])
-
-export const defaultGhRunner: GhRunner = async (argv, cwd, timeoutMs) => {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: scrubEnv(CI_ENV_ALLOWLIST_LOCAL),
-  })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const code = await proc.exited
-    return { code, stdout, stderr }
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-const DEFAULT_TIMEOUT_MS = 60_000
+// Barrel re-exports — historical import path for outside callers.
+export { defaultGhRunner } from "./runner"
+export type { GhRunner, GhRunResult } from "./runner"
+export { ghPrBlameTool } from "./pr-blame"
 
 // ── Read tools ─────────────────────────────────────────────────────────────
 
@@ -310,144 +240,8 @@ export const ghPrCreateTool = (
   },
 })
 
-// ── ADR-0103/0104 additions: PR-thread blame + review-diff + auto-merge ──
-
-/**
- * `gh_pr_blame` — PR review-thread blame (ADR-0103, Cursor
- * `StreamCodeTour.Blame` absorption).
- *
- * `git blame` answers "who last touched this line"; this tool answers
- * "what did reviewers say about this line" — by anchoring PR review-
- * thread comments to their file:line targets. Reviewers' authored words
- * become the blame body, in addition to (not replacing) the committer.
- */
-
-interface ReviewThreadComment {
-  author?: { login?: string }
-  body?: string
-}
-
-interface ReviewThread {
-  path?: string
-  line?: number | null
-  originalLine?: number | null
-  isResolved?: boolean
-  isOutdated?: boolean
-  comments?: { nodes?: ReviewThreadComment[] }
-}
-
-interface RawPrViewJson {
-  url?: string
-  headRefName?: string
-  baseRefName?: string
-  reviewThreads?: { nodes?: ReviewThread[] } | ReviewThread[]
-}
-
-const PR_BLAME_PROXIMITY_LINES = 5
-
-const extractThreads = (raw: RawPrViewJson): readonly ReviewThread[] => {
-  const rt = raw.reviewThreads
-  if (rt === undefined) return []
-  if (Array.isArray(rt)) return rt
-  return rt.nodes ?? []
-}
-
-const matchesPrBlameFilter = (
-  thread: ReviewThread,
-  fileFilter: string | undefined,
-  lineFilter: number | undefined,
-): boolean => {
-  if (fileFilter !== undefined && thread.path !== fileFilter) return false
-  if (lineFilter !== undefined) {
-    const anchor = thread.line ?? thread.originalLine ?? null
-    if (anchor === null) return false
-    if (Math.abs(anchor - lineFilter) > PR_BLAME_PROXIMITY_LINES) return false
-  }
-  return true
-}
-
-const renderPrBlameThread = (thread: ReviewThread, idx: number): string => {
-  const path = thread.path ?? "(file unknown)"
-  const line = thread.line ?? thread.originalLine ?? "?"
-  const tags: string[] = []
-  if (thread.isResolved === true) tags.push("resolved")
-  if (thread.isOutdated === true) tags.push("outdated")
-  const header = `[${idx + 1}] ${path}:${line}${tags.length > 0 ? ` (${tags.join(", ")})` : ""}`
-  const comments = thread.comments?.nodes ?? []
-  if (comments.length === 0) return `${header}\n  (no comment body)`
-  const lines = comments.map((c) => {
-    const author = c.author?.login ?? "(unknown)"
-    const body = (c.body ?? "").trim().split("\n").join("\n  ")
-    return `  @${author}: ${body}`
-  })
-  return `${header}\n${lines.join("\n")}`
-}
-
-const prBlameSchema = z.object({
-  pr: z.union([z.string(), z.number()]).describe("PR number or URL"),
-  file: z.string().optional().describe("Restrict to comments on this file path"),
-  line: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe("Restrict to comments anchored within ±5 lines of this line"),
-})
-type PrBlameInput = z.infer<typeof prBlameSchema>
-
-export const ghPrBlameTool = (runner: GhRunner = defaultGhRunner): Tool<PrBlameInput> => ({
-  name: "gh_pr_blame",
-  description:
-    "Anchor PR review-thread comments to file:line — like `git blame`, but with " +
-    "reviewer comments instead of commit hashes. Filters by file path and ±5-line " +
-    "proximity. Read-only.",
-  inputSchema: prBlameSchema,
-  isReadOnly: () => true,
-  isConcurrencySafe: () => true,
-  async *execute(input: PrBlameInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const ref = normalizeRef(input.pr)
-    if (ref === undefined) {
-      yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
-      return
-    }
-    const argv = ["gh", "pr", "view", ref, "--json", "url,headRefName,baseRefName,reviewThreads"]
-    yield { type: "progress", message: `gh pr view #${input.pr} (reviewThreads)` }
-    const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
-    if (r.code !== 0) {
-      yield {
-        type: "result",
-        result: { ok: false, output: `gh pr view failed: ${r.stderr.slice(0, 500)}` },
-      }
-      return
-    }
-    let raw: RawPrViewJson
-    try {
-      raw = JSON.parse(r.stdout) as RawPrViewJson
-    } catch (parseErr) {
-      yield {
-        type: "result",
-        result: {
-          ok: false,
-          output: `gh pr view returned non-JSON: ${(parseErr as Error).message}`,
-        },
-      }
-      return
-    }
-    const threads = extractThreads(raw)
-    const filtered = threads.filter((t) => matchesPrBlameFilter(t, input.file, input.line))
-    if (filtered.length === 0) {
-      const why =
-        input.file !== undefined || input.line !== undefined
-          ? "no review threads match the filter"
-          : "no review threads on this PR"
-      yield { type: "result", result: { ok: true, output: why } }
-      return
-    }
-    const body = filtered.map(renderPrBlameThread).join("\n\n")
-    const header = raw.url ? `PR: ${raw.url}` : `PR: ${ref}`
-    yield { type: "result", result: { ok: true, output: `${header}\n\n${body}` } }
-  },
-})
+// ── ADR-0104 additions: review-diff + auto-merge ────────────────────────
+// (ADR-0103 `gh_pr_blame` moved to `./pr-blame.ts` for structural clarity.)
 
 /** Default cap for `gh_pr_review_diff` — 64 KiB matches the agent-side
  *  prompt budget. 1 MiB is the hard ceiling (schema). */
