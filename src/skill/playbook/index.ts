@@ -31,6 +31,7 @@ export {
   type PlaybookRegistry,
   startPlaybookAutoDispatch,
 } from "./auto-dispatch"
+export { adaptPlanQueueStoreToSink, startPlaybookFromTrigger } from "./host-adapters"
 export {
   buildMacroRegistry,
   expandProcedure,

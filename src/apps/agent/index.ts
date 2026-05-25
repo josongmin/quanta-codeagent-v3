@@ -27,7 +27,17 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { buildSystemPrompt } from "@/agent"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
+import {
+  defaultForker,
+  defaultSessionForker,
+  type ForkSessionPort,
+} from "@/agent/fork-session"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
+import {
+  type AgentMode as DelegationAgentMode,
+  defaultDelegationRouter,
+  type DelegationPort,
+} from "@/agent/subagent-typed"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
@@ -192,6 +202,49 @@ const resolveFocusChain = (
   }
 }
 
+/** ADR-0236 / ADR-0218 — wire the mode-typed delegation port slot. Caller-
+ *  side composition only (loop does NOT read this slot — surfaces opt in
+ *  via the Agent tool / future `/delegate` slash). Default-OFF: returns
+ *  `undefined` unless `--delegate <mode,...>` was passed (or QUANTA_DELEGATE
+ *  env was set). The router is built with `wrapSubagentRunner`-style adapter
+ *  STUBBED to a no-op when no host runner is wired — the slot's presence
+ *  alone publishes the available modes to surfaces. */
+const resolveDelegation = (
+  delegateModes: ReadonlyArray<DelegationAgentMode> | undefined,
+):
+  | { readonly delegator: DelegationPort; readonly modes?: ReadonlyArray<DelegationAgentMode> }
+  | undefined => {
+  if (delegateModes === undefined || delegateModes.length === 0) return undefined
+  // Stub TypedDelegationRunner: returns ok=false with a typed message so
+  // a host that forgot to inject its real runner sees a clean boomerang
+  // shape (the factory contract). Hosts that DO wire a real runner override
+  // this slot post-construction by replacing the `delegation` field on the
+  // returned base before `assembleAgentConfig`.
+  const delegator = defaultDelegationRouter({
+    runner: async () => ({
+      ok: false,
+      finalText: "delegation runner not wired (composition root produced stub)",
+      turns: 0,
+    }),
+  })
+  return { delegator, modes: delegateModes }
+}
+
+/** ADR-0236 / ADR-0226 — wire the rich fork-session port slot. The base
+ *  `SessionForker` requires a `ConversationCheckpointStore` which the
+ *  unified-agent surface does not yet thread; when `enable` is true we
+ *  construct `defaultForker()` WITHOUT a base — every `fork()` call
+ *  surfaces `Err("fork-not-configured")` (typed-error, never throws).
+ *  Hosts that DO thread a checkpoint store override `base` post-construction
+ *  before passing into `assembleAgentConfig`. Absent ⇒ slot omitted,
+ *  byte-identical legacy (RFC §1.2). */
+const resolveForkSession = (
+  enable: boolean | undefined,
+): { readonly forker: ForkSessionPort } | undefined => {
+  if (enable !== true) return undefined
+  return { forker: defaultForker() }
+}
+
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
  *  individual fields (e.g. ci-bot replaces `registry` with the restricted
  *  git+gh tool set), but having a baseline avoids each runner duplicating
@@ -243,6 +296,8 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
   const stickyModelStore = resolveStickyModelStore(p.stickyModel)
   const toolProfile = resolveToolProfile(p.toolProfile)
   const focusChain = resolveFocusChain(p.focusChainEvery)
+  const delegation = resolveDelegation(p.delegateModes)
+  const forkSession = resolveForkSession(p.forkSession)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -273,6 +328,8 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     ...(stickyModelStore !== undefined ? { stickyModelStore } : {}),
     ...(toolProfile !== undefined ? { toolProfile } : {}),
     ...(focusChain !== undefined ? { focusChain } : {}),
+    ...(delegation !== undefined ? { delegation } : {}),
+    ...(forkSession !== undefined ? { forkSession } : {}),
   } as AssembleRequest["base"]
 }
 
@@ -308,6 +365,15 @@ export interface AssembleRequestPartial {
   identityMode?: import("./cli-args").IdentityModeToken
   focusChainEvery?: number
   noAutoBackground?: boolean
+  /** ADR-0236 / ADR-0218 — closed list of delegation modes the surface
+   *  exposes via the composition-root delegation port. Absent / empty ⇒
+   *  slot omitted (default-OFF). */
+  delegateModes?: ReadonlyArray<DelegationAgentMode>
+  /** ADR-0236 / ADR-0226 — opt-in to wire the rich fork-session port. The
+   *  default impl returns `Err("fork-not-configured")` until a host threads
+   *  a `ConversationCheckpointStore`-backed base forker. Absent / false ⇒
+   *  slot omitted (default-OFF). */
+  forkSession?: boolean
 }
 
 /** Lift mode + dials + per-mode fields out of `AgentArgs`. Pure projection. */

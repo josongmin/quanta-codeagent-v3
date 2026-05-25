@@ -1,0 +1,38 @@
+id: loop-trio-integration
+title: Loop trio integration (auto-bg accept + automation tick + identity per-turn reminder)
+section: 6
+subsystem: Loop integration (ADR-0240)
+order: 240
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: dynamic
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex", "closes:deliberate-hold"]
+depends_on: ["auto-background-stuck-detector", "automation-engine", "identity-mode-variant", "composition-root-mega-wire"]
+purpose: |
+  Closes 3 of 11 ADR-0236 mega-wire deliberate_holds. (A) auto-background
+  propose `onAccept` callback wires to `BackgroundSubagentScheduler.fork`
+  (user-supplied callback precedence; scheduler absent = graceful noop).
+  (B) `AutomationEnginePort.tickScheduler` runs on loop-scoped setInterval
+  (default 60s, `tickIntervalMs` knob), invoked on loop start, stopped on
+  loop end. (C) `ARCHITECT_NOTICE` / `EDITOR_NOTICE` per-turn splice into
+  prompt assembly when mode is architect|editor (Codex parity). All 3
+  default-safe — slot absent = byte-identical loop body.
+evidence:
+  code:
+    - src/agent/loop.ts
+    - src/apps/agent/index.ts
+    - src/agent/auto-background/propose-handler.ts
+    - src/agent/prompt.ts
+  tests:
+    integration:
+      - tests/integration/auto-background-onaccept-fork-wire-hellgate.test.ts
+      - tests/integration/automation-engine-tick-wire-hellgate.test.ts
+      - tests/integration/identity-per-turn-reminder-hellgate.test.ts
+    unit: []
+    contract: []
+  adrs:
+    - docs/decisions/0240-loop-trio-integration-auto-bg-automation-identity.md

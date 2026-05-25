@@ -39,6 +39,11 @@ export {
   type ToolTrackingEntry,
 } from "./port"
 
+export {
+  type BuildSubagentForkOnAcceptOpts,
+  buildSubagentForkOnAccept,
+  type SubagentForkSink,
+} from "./fork-on-accept"
 export { type DefaultProposeHandlerOpts, defaultProposeHandler } from "./propose-handler"
 
 export { computeStuckProbe, normalizeThreshold, stuckProbeAbsent } from "./stuck-detector"

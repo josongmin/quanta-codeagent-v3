@@ -6,6 +6,7 @@ import {
   type PersonaKind,
   resolvePersona,
 } from "@/agent"
+import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import {
   createBunSpawner,
   createShellSnapshotPort,
@@ -394,7 +395,18 @@ export const gitToolsEnabled = (): boolean => process.env.QUANTA_GIT_TOOLS === "
  * Returns the literal `AgentConfig["shellSnapshot"]` shape so the caller
  * can spread it conditionally into `SessionDeps.shellSnapshot`.
  */
-export const buildShellSnapshotConfig = (): AgentConfig["shellSnapshot"] | undefined => {
+/** Optional dependencies for {@link buildShellSnapshotConfig}. */
+export interface BuildShellSnapshotConfigOpts {
+  /** ADR-0222 — wired shell-snapshot metric port. Caller produces this via
+   *  `wireShellSnapshotMetric(metrics)` (or the bundle helper
+   *  `wireNewSlices(metrics).shellSnapshot`). Absent ⇒ no metric injection
+   *  (byte-identical legacy). */
+  readonly metric?: ShellSnapshotMetric
+}
+
+export const buildShellSnapshotConfig = (
+  opts: BuildShellSnapshotConfigOpts = {},
+): AgentConfig["shellSnapshot"] | undefined => {
   const enabled = process.env.QUANTA_SHELL_SNAPSHOT === "1" || hasArg("--shell-snapshot")
   if (!enabled) return undefined
   const intEnv = (key: string): number | undefined => {
@@ -407,7 +419,12 @@ export const buildShellSnapshotConfig = (): AgentConfig["shellSnapshot"] | undef
   // Spawner timeout: pass-through ONLY when set (the factory has its own
   // safe default that mirrors the capture adapter default).
   const spawner = createBunSpawner(timeoutMs !== undefined ? { defaultTimeoutMs: timeoutMs } : {})
-  const port: ShellSnapshotPort = createShellSnapshotPort(spawner)
+  // ADR-0222 wire — optional metric port. Absent ⇒ no allocation, byte-
+  // identical to legacy (the factory checks `metric === undefined`).
+  const port: ShellSnapshotPort = createShellSnapshotPort(
+    spawner,
+    opts.metric !== undefined ? { metric: opts.metric } : undefined,
+  )
   const rawShell = process.env.QUANTA_SHELL_SNAPSHOT_SHELL
   const shell: "auto" | "zsh" | "bash" =
     rawShell === "zsh" || rawShell === "bash" || rawShell === "auto" ? rawShell : "auto"

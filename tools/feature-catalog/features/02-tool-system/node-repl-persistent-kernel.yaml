@@ -1,0 +1,76 @@
+id: node-repl-persistent-kernel
+title: Node REPL persistent kernel — Jupyter-style per-session node process
+section: 2
+subsystem: Node REPL (ADR-0249)
+order: 249
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, default-off, slice-primitive]
+depends_on: []
+config_refs:
+  env: []
+purpose: |
+  Codex `~/.codex/node_repl/active_execs/{execId}.json` 패턴 흡수의 slice
+  primitive — 한 세션 동안 살아 있는 `node -i` 서브프로세스를 유지해서
+  턴 사이 변수 바인딩이 보존되게 한다 (`let x = 42` 후 다음 턴에 `x` →
+  `42`). 이번 라운드는 closed port + production `Bun.spawn` adapter +
+  state-store (`~/.quanta/node_repl/active_execs/{id}.json`, 0600 / dir
+  0700) + 결정론적 headless stub + 16-case hellgate 까지만. 툴 wiring,
+  full Jupyter protocol (`msg_id` / `parent_header`), multi-output frame,
+  restart policy, conversation-checkpoint 연동은 deliberate hold.
+
+  핵심 모양:
+    - `NodeReplKernel { spawn, exec, status, kill, list }` — 모든 메서드
+      `Result<…, KernelError>` (no-throw)
+    - `KernelState = "starting"|"ready"|"running"|"idle"|"dead"` (closed)
+    - production adapter: line-protocol around node REPL — per-exec
+      nonce-sentinel framing, stderr drain in parallel, AbortSignal로
+      `.exit` 후 `exec-aborted` 분기
+    - state-store: 핸들만 디스크에 (`pid` / `lastUseMs` / `sessionId`);
+      변수 상태 자체는 살아 있는 node 프로세스 안에만 있다
+    - default-OFF byte-identical: 어떤 tool / composition root도 이 슬라이스를
+      자동 wire 하지 않는다 (RFC §1.2 준수)
+evidence:
+  code:
+    - src/runtime/node-repl/types.ts
+    - src/runtime/node-repl/port.ts
+    - src/runtime/node-repl/default-kernel.ts
+    - src/runtime/node-repl/state-store.ts
+    - src/runtime/node-repl/headless-stub.ts
+    - src/runtime/node-repl/index.ts
+  adrs: [249]
+  tests:
+    unit:
+      - tests/unit/runtime/node-repl-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: |
+  - full Jupyter protocol envelope (msg_id / parent_header / metadata) —
+    이번 라운드는 단순 stdin/stdout line-protocol 만
+  - multi-output frame (stream / display_data / execute_result 분리) —
+    현재는 stdout 한 덩어리 + stderr 한 덩어리
+  - restart policy (process crash 시 자동 재기동 + 변수 replay) —
+    Codex 도 안 함; 폐기 가능성 높음
+  - tool wiring (`node_repl_exec` 같은 새 도구) — 슬라이스 primitive만
+    먼저 안전하게 착륙시키고 후속에서 와이어
+  - conversation-checkpoint / fork 연동 (스냅샷 시 살아 있는 커널 핸들
+    같이 보존) — checkpoint 슬라이스 쪽에서 합의된 후
+notes: |
+  Sibling 시 import 방향: src/runtime/node-repl/ → @/shared 만. 다른
+  슬라이스 역참조 없음. tsconfig `@/runtime/*` alias 이미 존재해서 추가
+  alias 등록 불필요.
+
+  Production adapter의 line-protocol sentinel은 `__quanta_repl_done_<16
+  hex>__` 형태. 사용자 코드가 정확히 같은 문자열을 stdout으로 찍으면
+  framing이 깨질 수 있다 — 충돌 확률은 ~2^-64. adapter header에 명시.
+
+  State-store는 핸들 metadata만 0600으로 저장. 변수 상태(closure /
+  socket / native module)는 디스크로 직렬화 불가능 — Codex도 하지
+  않으며, restart 시 재실행은 안전상 사용자 confirm 필요한 follow-up
+  영역으로 미룬다.

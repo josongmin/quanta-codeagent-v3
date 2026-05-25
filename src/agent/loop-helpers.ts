@@ -7,8 +7,10 @@ import {
 } from "@/git/directive-emit"
 import type { Message } from "@/llm"
 import { GEN_AI_ATTRS, type TurnTiming } from "@/observability"
+import { tickScheduler, type TickOutcome } from "@/scheduler/automation-engine"
 import { type RedactionHit, type RedactionOrigin, redactSecrets } from "@/security"
 import { defaultGitRunner } from "@/tool/git"
+import type { AgentMode } from "./prompt"
 import { buildCapEnforcer } from "./cap-enforcer"
 import { DedupGate } from "./dispatch-dedup"
 import { type TurnDiffSession, wireGitObservability } from "./git-observability"
@@ -296,3 +298,131 @@ const defaultEmitterFor = (
  */
 export const buildTtftAttrs = (timing: TurnTiming): Record<string, number> =>
   timing.ttftMs !== null ? { [GEN_AI_ATTRS.response.timeToFirstTokenMs]: timing.ttftMs } : {}
+
+// ─── ADR-0240 §B — Automation engine tick wire ─────────────────────────
+
+/** Handle returned by `startAutomationEngineTicker`. Idempotent stop. */
+export interface AutomationEngineTickerHandle {
+  stop: () => void
+}
+
+/** Injection seam for `setInterval` / `clearInterval`. Tests pass fakes; the
+ *  composition root defaults to `globalThis.setInterval` / `clearInterval`. */
+export interface AutomationTickerDeps {
+  readonly setInterval: (cb: () => void, ms: number) => unknown
+  readonly clearInterval: (handle: unknown) => void
+}
+
+const defaultTickerDeps: AutomationTickerDeps = {
+  setInterval: (cb, ms) => globalThis.setInterval(cb, ms),
+  clearInterval: (h) => globalThis.clearInterval(h as ReturnType<typeof setInterval>),
+}
+
+/** Arm a `setInterval`-backed background drain for `automationEngine`.
+ *
+ *  Returns `undefined` when wire is incomplete (default-OFF byte-identical):
+ *   - slot absent
+ *   - `handler` absent
+ *   - `tickIntervalMs` absent / 0 / negative / NaN
+ *
+ *  Each tick invokes `tickScheduler({ engine, now, handler })`. The optional
+ *  `onTick` observer is consulted AFTER each tick; throws from the observer
+ *  AND from the handler are absorbed — the timer keeps ticking. */
+export const startAutomationEngineTicker = (
+  cfg: AgentConfig,
+  deps: AutomationTickerDeps = defaultTickerDeps,
+): AutomationEngineTickerHandle | undefined => {
+  const slot = cfg.automationEngine
+  if (slot === undefined) return undefined
+  const { engine, handler, tickIntervalMs, onTick, now } = slot
+  if (handler === undefined) return undefined
+  if (
+    tickIntervalMs === undefined ||
+    !Number.isFinite(tickIntervalMs) ||
+    tickIntervalMs <= 0
+  ) {
+    return undefined
+  }
+  const clock: () => number = now ?? (() => Date.now())
+
+  let stopped = false
+  let handle: unknown = null
+
+  const tick = (): void => {
+    if (stopped) return
+    tickScheduler({ engine, now: clock(), handler })
+      .then((outcome: TickOutcome) => {
+        if (onTick !== undefined) {
+          try {
+            onTick(outcome)
+          } catch {
+            // observer throw absorbed — timer keeps ticking
+          }
+        }
+      })
+      .catch(() => {
+        // tickScheduler is no-throw by contract; this is defense in depth
+      })
+  }
+
+  handle = deps.setInterval(tick, tickIntervalMs)
+
+  return {
+    stop: () => {
+      if (stopped) return
+      stopped = true
+      if (handle !== null) {
+        try {
+          deps.clearInterval(handle)
+        } catch {
+          // already cleared by host shutdown
+        }
+        handle = null
+      }
+    },
+  }
+}
+
+// ─── ADR-0240 §C — Identity per-turn reminder ──────────────────────────
+
+const REMINDER_AUTO_ON_MODES: ReadonlySet<AgentMode> = new Set([
+  "architect" as AgentMode,
+  "editor" as AgentMode,
+])
+
+/** Decide whether the per-turn identity reminder should be spliced for the
+ *  given `mode`. Default-OFF when the slot is absent. Mode-conditional
+ *  auto-ON for `architect | editor` when `perTurnReminderEnabled` is
+ *  `undefined`. Explicit `true` enables every mode; explicit `false`
+ *  disables every mode. */
+export const shouldSpliceIdentityReminder = (cfg: AgentConfig, mode: AgentMode): boolean => {
+  const slot = cfg.identityModeVariant
+  if (slot === undefined) return false
+  const knob = slot.perTurnReminderEnabled
+  if (knob === false) return false
+  if (knob === true) return true
+  return REMINDER_AUTO_ON_MODES.has(mode)
+}
+
+/** Render the per-turn identity reminder text for the given `mode`. Returns
+ *  `undefined` when the splice should not fire (knob off / slot absent /
+ *  empty identity / registry throw). The text is wrapped in
+ *  `<system-reminder>...</system-reminder>` markers; body is the variant's
+ *  `identity` lines joined by `\n`. Pure given the registry. */
+export const buildIdentityReminderText = (
+  cfg: AgentConfig,
+  mode: AgentMode,
+): string | undefined => {
+  if (!shouldSpliceIdentityReminder(cfg, mode)) return undefined
+  const slot = cfg.identityModeVariant
+  if (slot === undefined) return undefined
+  let identity: readonly string[] | undefined
+  try {
+    const variant = slot.registry.variantFor(mode)
+    identity = variant.identity
+  } catch {
+    return undefined
+  }
+  if (identity === undefined || identity.length === 0) return undefined
+  return `<system-reminder>\n${identity.join("\n")}\n</system-reminder>`
+}

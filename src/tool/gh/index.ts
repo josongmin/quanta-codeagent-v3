@@ -253,7 +253,15 @@ const prCreateSchema = z.object({
 })
 type PrCreateInput = z.infer<typeof prCreateSchema>
 
-export const ghPrCreateTool = (runner: GhRunner = defaultGhRunner): Tool<PrCreateInput> => ({
+export interface GhPrCreateToolOpts {
+  readonly gitDirectiveEmitter?: import("../../agent/git-directives").GitDirectiveEmitter
+  readonly gitDirectiveCollector?: import("../../git/directive-emit").GitDirectiveCollector
+}
+
+export const ghPrCreateTool = (
+  runner: GhRunner = defaultGhRunner,
+  opts: GhPrCreateToolOpts = {},
+): Tool<PrCreateInput> => ({
   name: "gh_pr_create",
   description:
     "Open a new GitHub PR via `gh pr create`. Write — the head branch MUST " +
@@ -287,7 +295,18 @@ export const ghPrCreateTool = (runner: GhRunner = defaultGhRunner): Tool<PrCreat
       }
       return
     }
-    yield { type: "result", result: { ok: true, output: r.stdout.trim() } }
+    const url = r.stdout.trim()
+    // ADR-0241 — success-only publish of `create-pr` directive on both
+    // surfaces. Absent surfaces ⇒ no-op (byte-identical to pre-wire).
+    const { publishGitDirective } = await import("../git/_directive-publish")
+    const publishOpts: {
+      emitter?: import("../../agent/git-directives").GitDirectiveEmitter
+      collector?: import("../../git/directive-emit").GitDirectiveCollector
+    } = {}
+    if (opts.gitDirectiveEmitter !== undefined) publishOpts.emitter = opts.gitDirectiveEmitter
+    if (opts.gitDirectiveCollector !== undefined) publishOpts.collector = opts.gitDirectiveCollector
+    publishGitDirective({ kind: "create-pr", url, isDraft: input.draft === true }, publishOpts)
+    yield { type: "result", result: { ok: true, output: url } }
   },
 })
 

@@ -1,0 +1,51 @@
+id: per-tool-checkpoint-granularity
+title: Per-tool / per-skill checkpoint granularity (ADR-0209)
+section: 3
+subsystem: Shadow-ODB anchor granularity (Cline + Cursor + Codex absorption)
+order: 209
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:cline", "absorbed:cursor", "absorbed:codex", "default-off"]
+depends_on: []
+purpose: |
+  ADR-0121의 4-arm trigger mode와 직교하는 GRANULARITY 축 추가
+  (`"turn" | "tool" | "skill"`). 기존 per-turn dedup는 Cline의 매-tool-call
+  anchor + tag 패턴 (`/rewind-tool tool:edit_file:turn-1:7`) 을 막아왔음.
+  `GranularCheckpointPolicy` 가 base `CheckpointPolicy` 를 extends 하고
+  `computeTag(ctx)` + `recordAnchorSha(tag, sha, ctx)` 를 추가; tool-grain
+  은 base의 turn-dedup 을 우회해 매 destructive call마다 anchor + LRU tag
+  registry 에 `tool:<name>:<turnId>:<callIndex>` 삽입. Default-OFF:
+  `defaultCheckpointPolicy` 그대로면 byte-identical (registry empty, no
+  bypass). assembly layer가 명시적으로 `defaultGranularCheckpointPolicy(
+  {base, granularity:"tool"})` 를 wire할 때만 활성.
+evidence:
+  code:
+    - src/agent/per-tool-checkpoint/port.ts
+    - src/agent/per-tool-checkpoint/granular-policy.ts
+    - src/agent/per-tool-checkpoint/index.ts
+  adrs:
+    - docs/decisions/0209-per-tool-checkpoint-granularity.md
+  tests:
+    unit:
+      - tests/unit/per-tool-checkpoint-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    AgentConfig 슬롯 추가 보류 (사용자 in-flight 트랙 보호). 호출자가
+    `withAutoCheckpoint` 에 명시 주입할 때만 활성. ADR-0210 (3-way restore)
+    가 같은 tag registry 위에 sibling 으로 등록.
+  promotion_path: |
+    1) ADR-0210 wire 합류 후 AgentConfig 슬롯 추가
+    2) Cline /rewind-tool slash command 표면화
+notes: |
+  4-arm trigger × granularity 호환성 매트릭스는 ADR 본문 표 참조.
+  pre-destructive 모드에서는 base가 turn-dedup 으로 거절하면 tool-grain도
+  거절 — legacy posture 존중 (cooperative). skill grain 은 enum-stable
+  reserved (Codex skill boundary 와이어 예정).

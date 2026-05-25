@@ -1,0 +1,56 @@
+id: jwks-agent-identity
+title: JWKS agent identity — remote JWK fetch + cache + verify (ADR-0248)
+section: 3
+subsystem: Security — hexagonal JWKS verifier slice (verify-only foundation)
+order: 248
+maturity: L4
+status: new
+ui_surfaces: []
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off", "absorbed:codex", "tier:security"]
+depends_on: []
+purpose: |
+  Codex agent-task 등록 패턴 흡수의 verify-only foundation. 외부 dispatcher가
+  발급한 JWT를 remote JWKS endpoint로 검증한다. `src/security/jwks-identity/`
+  새 슬라이스: port(`JsonWebKey`/`JwksSet`/`VerifyResult` discriminated/
+  `JwksError` 계열/`JwksClient { fetchJwks, cacheGet, verify, refresh }`) +
+  default-client(built-in `fetch` + TTL 1h cache + Web Crypto `crypto.subtle`
+  로 RSA RS256 + ECDSA ES256 검증) + headless-stub(typed no-op) + index.
+  Algorithm whitelist 외엔 typed `unsupported-alg` 반환; verify는 NEVER throw
+  (모든 rejection은 `{ ok: false, reason }` 닫힌 enum). Cache는 strictly
+  TTL-bounded — stale serve 금지. Plane discipline: Web Crypto + `fetch`만
+  의존, 다른 quanta slice import 0. Default-OFF — dispatch/loop/agent/runner/
+  scheduler/realtime 전부 미주입.
+evidence:
+  code:
+    - src/security/jwks-identity/types.ts
+    - src/security/jwks-identity/port.ts
+    - src/security/jwks-identity/default-client.ts
+    - src/security/jwks-identity/headless-stub.ts
+    - src/security/jwks-identity/index.ts
+  adrs:
+    - docs/decisions/0248-jwks-agent-identity.md
+  tests:
+    unit:
+      - tests/unit/security/jwks-identity-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Verify-only foundation. Signing (private-key custody — file/HSM/keychain
+    결정 필요), Cloud Tasks callback 통합, realtime/SSE auth wire 는 후속
+    슬라이스. 본 ADR 은 consumer 반쪽 (외부 발급 token 검증) 만 ship.
+  promotion_path: |
+    1) agent-task registrar 가 `JwksClient` 주입받아 외부 dispatcher 응답
+       토큰 검증 후 follow-up enqueue (composition-root opt-in).
+    2) Realtime/SSE 경로가 connection-auth 단계에서 verify 호출.
+    3) Signing 슬라이스 추가 시 동일 `JsonWebKey` 타입 재사용.
+notes: |
+  Algorithm whitelist 는 RS256 + ES256 두 개 (real-world ~전수 커버).
+  EdDSA/HS256/RS384/RS512 는 typed `unsupported-alg` — 향후 추가는 default-OFF
+  확장으로. Cache TTL 기본 1h (Google/Cloudflare published mirror); injectable
+  `clock()` 으로 expiry 테스트 결정성 확보.

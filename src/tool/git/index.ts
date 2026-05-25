@@ -45,6 +45,8 @@ export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { type GitBranchSwitchToolOpts, gitBranchSwitchTool } from "./branch-switch"
 export { gitChurnTool, rankChurn } from "./churn"
 export { type GitCommitToolOpts, gitCommitTool } from "./commit"
+export { type GitPushToolOpts, gitPushTool } from "./push"
+export { type GitStageToolOpts, gitStageTool } from "./stage"
 export {
   type GitConflictInspectInput,
   gitConflictInspectInputSchema,

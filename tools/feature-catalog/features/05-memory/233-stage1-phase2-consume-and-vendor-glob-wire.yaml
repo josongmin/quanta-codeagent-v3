@@ -1,0 +1,46 @@
+id: stage1-phase2-consume-and-vendor-glob-wire
+title: Stage1 → Phase 2 consume wire + vendor-rule glob wire (ADR-0233)
+section: 5
+subsystem: Wire — Phase 1 → Phase 2 consumption seam
+order: 233
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "wire:phase2", "default-off"]
+depends_on: [stage1-store-agent-port, multi-source-rules-vendor-detector]
+purpose: |
+  Wave 3 wire — (a) ADR-0207/0216 stage1 store 의 SELECT 측면을 Phase 2
+  consumer 가 실제로 소비 (이전엔 INSERT 만 wire, SELECT 는 dormant);
+  (b) ADR-0205 vendor-rules-detector 가 발견한 vendor 룰의 glob 필터를
+  실제 rules-tree 로딩 경로에 splice. 두 wire 모두 default-OFF (host 가
+  명시적으로 stage1 store / vendor detector port 를 주입할 때만 동작).
+  부재 시 byte-identical pre-wire.
+evidence:
+  code:
+    - src/agent/memory/stage1-store/sqlite.ts
+    - src/agent/memory/stage1-store/in-memory.ts
+    - src/rules/vendor-detector/index.ts
+    - src/rules/vendor-detector/default-detector.ts
+    - src/rules/vendor-detector/normalizer.ts
+  adrs:
+    - docs/decisions/0233-stage1-phase2-consume-and-vendor-glob-wire.md
+    - docs/decisions/0216-stage1-store-port-agent-side.md
+    - docs/decisions/0205-multi-source-rules-vendor-detector.md
+  tests:
+    unit:
+      - tests/unit/stage1-store-hellgate.test.ts
+      - tests/unit/vendor-detector-glob-rules-wire-hellgate.test.ts
+      - tests/unit/vendor-rules-detector-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0207 leaf 는 src/memory 직접 wire; ADR-0216 agent-side 는 agent
+  composition root wire. 본 entry 는 두 sibling 모두에서 SELECT path 활성화
+  + vendor glob splice 의 closed-loop 봉인. negative-invariant: host 가
+  store 를 주입하지 않으면 SELECT 호출 자체가 일어나지 않음 (no I/O leak).

@@ -54,3 +54,32 @@ export const wireGitDirectiveMetric = (metrics: MetricsRegistry): GitDirectiveMe
     emitGitDirective(metrics, kind)
   },
 })
+
+/** Aggregate of the 4 new-slice metric ports (ADR-0222) wired against the
+ *  same {@link MetricsRegistry}. Composition roots use this single-call
+ *  helper so a 5-wire pass against the metric pipeline stays a 1-liner per
+ *  slice (the slice's port factory takes one of the returned fields).
+ *
+ *  Each field is the same shape the slice expects via its narrow
+ *  `metric-port.ts`; passing the SAME `metrics` for all four routes the
+ *  emissions through the canonical `new-slice-instruments.ts` table so the
+ *  vocabulary axis (ADR-0144 `QUANTA_ATTRS`) stays unified.
+ *
+ *  Default-OFF posture is owned by the SLICE: a slice that does not wire
+ *  any of these fields (passes its `noop*Metric` instead) is byte-identical
+ *  to legacy. The helper itself allocates 4 small objects (no I/O), so a
+ *  caller that uses NONE of the fields can ignore the return value at
+ *  zero cost. */
+export interface NewSliceMetricsBundle {
+  readonly errorRouting: ErrorRoutingMetric
+  readonly streamTimeout: StreamTimeoutMetric
+  readonly shellSnapshot: ShellSnapshotMetric
+  readonly gitDirective: GitDirectiveMetric
+}
+
+export const wireNewSlices = (metrics: MetricsRegistry): NewSliceMetricsBundle => ({
+  errorRouting: wireErrorRoutingMetric(metrics),
+  streamTimeout: wireStreamTimeoutMetric(metrics),
+  shellSnapshot: wireShellSnapshotMetric(metrics),
+  gitDirective: wireGitDirectiveMetric(metrics),
+})

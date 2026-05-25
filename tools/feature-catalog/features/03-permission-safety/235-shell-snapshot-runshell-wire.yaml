@@ -1,0 +1,42 @@
+id: shell-snapshot-runshell-wire
+title: Shell-snapshot runShell wire — opt-in source-fold (ADR-0235)
+section: 3
+subsystem: Per-turn shell environment activation wire
+order: 235
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:codex", "security-touched", "default-off"]
+depends_on: [shell-snapshot]
+purpose: |
+  Wave 3 wire — ADR-0204 의 ShellSnapshotPort (capture/restore/prune
+  leaf 슬라이스) 를 `runShell` 의 옵션 fold 로 연결. host 가
+  `runShellWithSnapshot({port, threadId})` 를 명시 호출하면 매 turn 진입
+  시 capture → `bash -lc "source <snapshot.sh>; <cmd>"` 패턴으로 실행;
+  미주입 호출은 argv `["bash","-lc",cmd]` byte-identical. fork/resume 후
+  alias/function 손실 asymmetry (quanta vs Codex) 폐쇄. Default-OFF 3중
+  레이어: port 미구축 / wire 호출자 미주입 / threadId 미지정.
+evidence:
+  code:
+    - src/runtime/shell-snapshot/index.ts
+    - src/runtime/shell-snapshot/port.ts
+    - src/runtime/shell.ts
+  adrs:
+    - docs/decisions/0235-shell-snapshot-runshell-wire.md
+    - docs/decisions/0204-shell-snapshot.md
+  tests:
+    unit:
+      - tests/unit/runtime/shell-snapshot-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0204 leaf entry 는 closed-port + adapters; 본 entry 는 runShell
+  옵션 fold 만 추가 (assembly layer가 wire). file-store 모드 0600 /
+  디렉토리 0700 / id sanitisation 등 보안 디테일은 leaf 슬라이스가 소유 —
+  본 wire 는 시그니처 + null-safe fallback 만 담당.

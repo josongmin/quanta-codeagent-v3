@@ -1193,7 +1193,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     /** ADR-0240 — restricting glob list applied IN ADDITION to each
      *  registration's `trigger.watchGlob`. When set, only paths matching
      *  ANY of these globs AND the per-playbook glob fire. Default
-     *  `["**/*"]` (no extra restriction). */
+     *  `["**" + "/*"]` (no extra restriction). */
     readonly watchGlobs?: readonly string[]
   }
   /**

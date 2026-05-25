@@ -1,0 +1,53 @@
+id: three-way-restore
+title: 3-way restore — Files Only / Task Only / Both (ADR-0210)
+section: 3
+subsystem: Cline 3-way restore UX (per-tool checkpoint registry consumer)
+order: 210
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:cline", "default-off"]
+depends_on: [per-tool-checkpoint-granularity]
+purpose: |
+  Cline UX 흡수 — 같은 tag로 두 면 (workspace files + conversation) 을
+  직교 3-way 로 surface. `ThreeWayRestorePort` (`restoreFiles` / `restoreTask`
+  / `restoreBoth`) + typed `RestoreOutcome` envelope + closed
+  `RestoreErrorCode` enum (`tag-not-found` / `shadow-odb-not-configured` /
+  `conversation-store-not-configured` / `task-snapshot-missing` /
+  `shadow-rewind-failed` / ...). 직교성 hellgate D14/D15 로 봉인 —
+  `restoreFiles` 가 conversation store size 변경 금지 + 역방향 동일.
+  Slash command `/rewind-tool` 등록 + default-OFF (조립 layer 가 wiring
+  opt-in). ADR-0118 (rewindToLast files) + ADR-0124 (ConversationCheckpoint
+  Store) 두 면을 ADR-0209 tag registry 로 합성하는 wiring slice.
+evidence:
+  code:
+    - src/agent/per-tool-checkpoint/three-way-restore.ts
+    - src/agent/per-tool-checkpoint/port.ts
+    - src/agent/per-tool-checkpoint/index.ts
+    - src/apps/cli/rewind-tool-cmd.ts
+  adrs:
+    - docs/decisions/0210-three-way-restore.md
+  tests:
+    unit:
+      - tests/unit/per-tool-checkpoint-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    조립 layer 가 명시적으로 ThreeWayRestorePort + tag registry + shadow
+    ODB + conversation store 를 wire 할 때만 활성. CLI slash command 는
+    등록되지만 미주입 surface 에서는 "not wired in this surface" 로 typed
+    degrade.
+  promotion_path: |
+    composition-root mega-wire 에 ThreeWayRestore 슬롯 추가 (사용자
+    in-flight 트랙 정착 후)
+notes: |
+  `restoreBoth` 는 files 먼저, files OK 일 때만 task. files leg 실패 시
+  task leg 호출 안 함 (atomic-ish: partial restore 방지). 모든 leg 는
+  Promise<RestoreOutcome> — NO-THROW. tag registry miss 는 typed
+  `tag-not-found` (회복 가능).
