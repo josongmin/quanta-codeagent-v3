@@ -1,16 +1,29 @@
 import { QuantaError } from "@/shared"
-import type { DeferredHandle, DeferredToolResult, ToolResult } from "./types"
+import type { DeferredHandle, DeferredToolResult, ToolResult } from "../types"
 
 /**
- * (absorb #1) Deferred-tool-result seam. A tool that declares
- * `supportsDeferredResults` may return a provisional placeholder plus a
- * {@link DeferredHandle}; the final {@link ToolResult} is produced out of band
- * and parked here until a poller resolves it.
+ * LEGACY (pre-ADR-0286) typed seam — kept for back-compat with the original
+ * `DeferredResultRegistry` exported from `@/tool` since the first deferred-
+ * results absorb landed. This is a PURE in-memory parking lot: `register`
+ * issues an id + optional hint, `resolve` moves it to a `resolved` bucket,
+ * `poll` returns a discriminated `DeferredToolResult`. There is deliberately
+ * no executor, no abort, no timeout — the legacy contract is "tool yields a
+ * placeholder + handle; an external poller resolves it later".
  *
- * This is the TYPED SEAM ONLY — there is deliberately no async scheduler wired
- * into the agent loop. The registry is a pure in-memory store + poller so the
- * contract can be exercised in isolation and a real scheduler can adopt it
- * later without changing the type surface.
+ * The PRODUCTION registry (ADR-0286) lives in `default-registry.ts` and
+ * implements the closed `DeferredResultRegistry` port from `./port.ts`: it
+ * owns its own AbortController + microtask worker and tracks 5 lifecycle
+ * states (`pending`/`running`/`completed`/`failed`/`cancelled`). The two
+ * coexist by design — the legacy seam is the "external poller" pattern; the
+ * new seam is the "registry-managed work" pattern.
+ *
+ * Naming note: the LEGACY class keeps the historical name
+ * `DeferredResultRegistry` (still re-exported from `@/tool/index.ts` so every
+ * existing caller is byte-identical). The new port is also named
+ * `DeferredResultRegistry` but is reachable ONLY via `@/tool/deferred/port`
+ * (not the barrel), and the new concrete impl is named
+ * `DefaultDeferredResultRegistry` — so the two never collide in a single
+ * import scope.
  */
 
 /** Raised when a deferred operation references an id the registry never issued
@@ -21,7 +34,7 @@ export class UnknownDeferredHandleError extends QuantaError {
   }
 }
 
-/** Pure in-memory registry/poller stub for deferred tool results. */
+/** Pure in-memory registry/poller stub for deferred tool results (legacy). */
 export class DeferredResultRegistry {
   #pending = new Map<string, DeferredHandle>()
   #resolved = new Map<string, ToolResult>()

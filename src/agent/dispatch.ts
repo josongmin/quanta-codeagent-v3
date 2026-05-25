@@ -669,7 +669,16 @@ const execute = async (
   // the DispatchResult shape byte-identical to the prior try-success branch:
   // `evidenceOf({})` is empty and the typed-failure spread is conditional, so
   // a normalized-throw result yields exactly the same fields as the old catch.
-  const { output, hits } = applyRedaction(result.output, call, config)
+  const { output: redacted, hits } = applyRedaction(result.output, call, config)
+  // ADR-0287 — async-tool deferred-handle wire (1-3 line edit). When the
+  // tool's terminal result carries a `deferred` marker (set by the
+  // `defineToolAsync` wrapper), prepend a stable `<deferred handle="..."/>`
+  // envelope so the LLM can branch on the format without parsing the
+  // placeholder text. Absent ⇒ output is unchanged (byte-identical default-OFF).
+  const output =
+    result.deferred !== undefined
+      ? `<deferred handle="${result.deferred.id}"/>\n${redacted}`
+      : redacted
   // ADR-0062 rule #3 — record the nextAction hint in the session tracker so
   // a subsequent call to the same (tool, path) can be checked. DEFAULT-OFF:
   // absent enforcer ⇒ optional-chain is a no-op, byte-identical.

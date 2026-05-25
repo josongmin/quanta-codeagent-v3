@@ -244,6 +244,17 @@ export interface RuntimeConfig {
    *  so a host that watches a hook never observes a missed event from a
    *  pathological argument). */
   readonly hookMaxPayloadBytes: number | undefined
+  /** ADR-0287 async-tool kind activation (`QUANTA_ASYNC_TOOLS=1|on|true`).
+   *  Default false — opt-in. When true the composition root constructs the
+   *  `DefaultDeferredResultRegistry` and wires `poll_deferred` + every
+   *  `defineToolAsync` instance to it; when false those tools degrade to
+   *  synchronous execution (byte-identical to the pre-ADR path). */
+  readonly asyncTools: boolean
+  /** ADR-0286 deferred-result registry max live handles
+   *  (`QUANTA_DEFERRED_CAP`). Absent ⇒ `DEFAULT_DEFERRED_CAP` (1000). LRU
+   *  eviction; pending/running entries are never evicted (see
+   *  `default-registry.ts` invariant #3). */
+  readonly deferredCap: number | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -301,6 +312,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_HOOK_MAX_PAYLOAD_BYTES"],
       "QUANTA_HOOK_MAX_PAYLOAD_BYTES",
     ),
+    asyncTools: parseBool(env["QUANTA_ASYNC_TOOLS"]),
+    deferredCap: parsePositiveInt(env["QUANTA_DEFERRED_CAP"], "QUANTA_DEFERRED_CAP"),
   })
 }
 
