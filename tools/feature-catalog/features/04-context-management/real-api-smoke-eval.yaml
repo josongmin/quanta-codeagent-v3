@@ -1,0 +1,83 @@
+id: real-api-smoke-eval
+title: Real-API smoke eval for retrieval — drift detection (ADR-0275)
+section: 4
+subsystem: Eval-tier retrieval drift battery (non-blocking)
+order: 65
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: env
+owners: ["@songmin"]
+labels: [surface:core, retrieval, eval]
+depends_on: []
+purpose: |
+  Phase 7 retrieval hellgate suite (ADR-0261 / ADR-0262) 는 전부 injected
+  fake fetch — vendor (OpenAI / Voyage / Cohere / Ollama) 가 응답 shape /
+  URL / auth / rate-limit semantics 를 바꿔도 unit 은 green 인 채 production
+  만 망가지는 drift 구멍이 있었다. ADR-0003 이 정의한 4-tier 피라미드의
+  `test:eval` (non-blocking, real-LLM/API) 자리에 retrieval 전용 6 vendor
+  smoke battery 를 land. 각 suite 는 `describeOnEnv(envVar, label, fn)`
+  polite-skip — relevant API key 누락시 `describe.skip` 으로 깨끗한 skip
+  count 만 찍히고 0 fail. cost cap 은 per-smoke ≈16 token (`SMOKE_INPUTS`
+  2 string ≤ 100 token cap) — 가장 비싼 vendor pricing 에서도 1회 < $0.001.
+  Hellgate 축 5개/vendor (dim 일치 / L2-norm 밴드 / 2-input batch /
+  bogus-model 4xx / latency ≤5s) + reranker 는 relevance-signal 1개 추가.
+  package.json 무수정 — 기존 `test:eval` script (bench harness) 는 그대로,
+  새 폴더는 `bun test tests/eval/retrieval` 으로 local 수동 실행.
+evidence:
+  code: []
+  adrs: [275, 261, 262]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+    eval:
+      - tests/eval/retrieval/_helpers.ts
+      - tests/eval/retrieval/openai-embedder.eval.test.ts
+      - tests/eval/retrieval/voyage-embedder.eval.test.ts
+      - tests/eval/retrieval/cohere-embedder.eval.test.ts
+      - tests/eval/retrieval/cohere-reranker.eval.test.ts
+      - tests/eval/retrieval/voyage-reranker.eval.test.ts
+      - tests/eval/retrieval/ollama-embedder.eval.test.ts
+knobs:
+  - name: OPENAI_API_KEY
+    where: env
+    default: ''
+    purpose: 'openai-embedder.eval.test.ts gate — 누락시 polite skip (describe.skip)'
+  - name: VOYAGE_API_KEY
+    where: env
+    default: ''
+    purpose: 'voyage-embedder.eval + voyage-reranker.eval gate — 누락시 polite skip'
+  - name: COHERE_API_KEY
+    where: env
+    default: ''
+    purpose: 'cohere-embedder.eval + cohere-reranker.eval gate — 누락시 polite skip'
+  - name: QUANTA_OLLAMA_URL
+    where: env
+    default: 'http://localhost:11434'
+    purpose: 'Ollama daemon endpoint — 500ms 연결 probe 후 reachable 시만 suite 실행 (ECONNREFUSED 는 polite skip)'
+  - name: QUANTA_OLLAMA_MODEL
+    where: env
+    default: 'nomic-embed-text'
+    purpose: 'Ollama 측 모델 이름 — 768 dim default; pull 안 된 모델은 typed EmbedError 로 drift 보고'
+deliberate_hold:
+  reason: 'Nightly CI cron 통합은 의도적 보류 — 현재는 local manual only (`bun test tests/eval/retrieval`). 기본 `bun test` (unit+integration) 에는 sweep 안 됨; package.json 의 test:eval script 는 기존 bench harness 그대로 유지.'
+  promotion_path: '(1) GitHub Actions nightly workflow 추가, secrets 로 API key 주입, (2) failure 시 score-drift baseline 비교 + Slack/email 알림, (3) eval pass-rate trend 를 7-day rolling 으로 추적 (ADR-0003 의 eval 후속과 동일 baseline 파일 공유 가능).'
+notes: |
+  - tests/eval/ 디렉토리는 ADR-0003 의 eval 티어 자리 — non-blocking,
+    retry-until-green 금지, 비결정 실패는 *점수 하락* 으로만 관측.
+  - polite-skip = `describe.skip` 사용 → bun:test runner 가 "skipped" count
+    를 명시적으로 emit. silent-invisible 가 아니라 visible-inactive.
+  - cost cap = `assertCostCap(label, items, SMOKE_TOKEN_CAP=100)` — 2-line
+    defense (literal SMOKE_INPUTS 가 first line, helper guard 가 second).
+    가장 비싼 vendor 에서도 6 file × 5 case = 30 case 전체 < $0.01.
+  - Ollama 는 API key 없음 → connectivity probe 가 gate. 500ms fetch HEAD
+    → ECONNREFUSED 시 `QUANTA_OLLAMA_UP` env 미설정 → describe.skip.
+  - 모든 src/* 파일은 unchanged. 새로 추가된 export 0, signature 변경 0,
+    `package.json` script 변경 0. 슬라이스 = tests/eval/retrieval/ +
+    docs/decisions/0275-*.md + 본 yaml 만.
+  - Lance vector store smoke 는 본 ADR 에서 제외 — writeable filesystem
+    fixture + dataset bootstrap 이 polite-skip 컨트랙트를 넘어가는 별도
+    슬라이스 (별도 ADR 후보).
