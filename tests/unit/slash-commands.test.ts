@@ -88,6 +88,7 @@ describe("BUILTINS table", () => {
       "/resume",
       "/rewind",
       "/fork",
+      "/rewind-tool",
       "/side",
       "/snapshot",
       "/rules",

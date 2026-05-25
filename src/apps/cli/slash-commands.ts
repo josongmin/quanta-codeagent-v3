@@ -47,6 +47,7 @@ import { permissionCmd } from "./permission-explain"
 import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "./plan-panel"
 import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
+import { rewindToolCmd } from "./rewind-tool-cmd"
 import { rulesCmd } from "./rules-cmd"
 import { type SideChatSessionState, sideCmd } from "./side-cmd"
 import { snapshotCmd } from "./snapshot-cmd"
@@ -629,6 +630,7 @@ export const BUILTINS: readonly SlashCommand[] = [
   snoozeCmd,
   resumeCmd,
   ...REWIND_COMMANDS,
+  rewindToolCmd,
   sideCmd,
   snapshotCmd,
   rulesCmd,

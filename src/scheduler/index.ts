@@ -37,6 +37,34 @@ export {
 export type { JsonlAutomationStoreOpts } from "./store-jsonl"
 // JSONL store
 export { defaultJsonlAutomationStore } from "./store-jsonl"
+// ADR-0215 — Automation engine (Codex 3-table schema; default-OFF until host wires)
+export type {
+  AutomationEnginePort,
+  AutomationHandler,
+  AutomationRun,
+  EngineAutomation,
+  EngineErrorResult,
+  EngineResult,
+  EngineStatus,
+  InboxBuilder,
+  InboxItem,
+  InMemoryAutomationEngine,
+  InMemoryAutomationEngineOpts,
+  MarkRunInput,
+  ScheduleInput,
+  SqliteAutomationEngineOpts,
+  TickOpts,
+  TickOutcome,
+} from "./automation-engine"
+export {
+  ALL_ENGINE_STATUSES,
+  ensureAutomationEngineSchema,
+  inMemoryAutomationEngine,
+  listAutomationRuns,
+  listInboxItems,
+  sqliteAutomationEngine,
+  tickScheduler,
+} from "./automation-engine"
 // Types
 export type {
   AgentLoopPort,

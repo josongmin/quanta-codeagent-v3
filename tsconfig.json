@@ -82,7 +82,9 @@
       "@/retrieval": ["./src/retrieval/index.ts"],
       "@/retrieval/*": ["./src/retrieval/*"],
       "@/media": ["./src/media/index.ts"],
-      "@/media/*": ["./src/media/*"]
+      "@/media/*": ["./src/media/*"],
+      "@/voice": ["./src/voice/index.ts"],
+      "@/voice/*": ["./src/voice/*"]
     }
   },
   "include": ["src", "tests", "tools"],

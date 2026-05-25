@@ -1,0 +1,51 @@
+id: tool-profile-preset
+title: Tool profile preset — 4 named bundles (write/ask/minimal/code-only) + UP-nudge composition
+section: 3
+subsystem: Tool 권한 — named profile preset (Zed + Codex agent_role 흡수, ADR-0213)
+order: 213
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:zed, absorbed:codex, surface:core, tier:core]
+depends_on: [permission-stack-adr-0046, tool-tier-matcher-adr-0055]
+purpose: |
+  Zed의 named "tool profile" mode 3종 (Write/Ask/Minimal) + Codex agent_role enum (explorer/
+  worker/none) 패턴 흡수. v3는 fine-grained 조각 (ADR-0046 permission stack / ADR-0055 HITL
+  tier matcher / ADR-0135 4-pillar profile) 다 있지만 named bundle 없음 — 매 세션마다 같은
+  deny-set 재유도. 신규 슬라이스 `src/agent/tool-profile/`: port(ToolProfileName closed enum
+  4-literal + ToolPolicy + ToolProfileResolver + UnknownToolProfileError + isToolProfileName
+  type guard) / presets(PROFILE_PRESETS 4 closed bundle — write=neutral / ask=mutating-confirm /
+  minimal=LSP+git read only deny-rest / code-only=web+image+voice deny) / registry(default
+  ToolProfileRegistry thin reader) / resolver(defaultToolProfileResolver + composeToolProfile
+  WithBaseline UP-nudge-only) / index. ToolPolicy = {kind: allow|confirm|deny, reason: string}.
+  Profile은 admissibility를 NUDGE UP만 가능 (allow→confirm→deny); 절대 weaken 불가 — baseline
+  (permission stack 결정) 보다 strict해질 뿐. Composition order: ADR-0213 → ADR-0055
+  inferToolTier → ADR-0046 permission stack.
+evidence:
+  code:
+    - src/agent/tool-profile/port.ts
+    - src/agent/tool-profile/presets.ts
+    - src/agent/tool-profile/registry.ts
+    - src/agent/tool-profile/resolver.ts
+    - src/agent/tool-profile/index.ts
+  adrs: [46, 55, 135, 213]
+  tests:
+    unit:
+      - tests/unit/tool-profile-preset-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  hellgate 14 케이스: 4 preset 정확성 (write 모든 allow / ask read-allow mutating-confirm /
+  minimal LSP+git만 allow 나머지 deny / code-only web+image+voice deny file-edit allow) /
+  unknown profile typed error / composeWithBaseline 3-way (deny wins / confirm wins over
+  allow / allow no-nudge) / hasPreset+isToolProfileName type guard / explicit override beats
+  category default / reason field surfaces profile name / OFF parity (write preset
+  admissibility-neutral) / exhaustive (every named profile yields defined policy for ro+mut).
+  CLI wire (--tool-profile + /profile slash) 는 후속 라운드 — 이 슬라이스는 port + default-
+  impl + 4 preset만 ship. Host는 ToolPolicy를 permission decision stream에 fold하면 됨.

@@ -1095,6 +1095,7 @@
         "!tests/unit/mcp-surface-wire.test.ts",
         "!tests/unit/cli-retry-with.test.ts",
         "!tests/unit/cli-rewind-slash-hellgate.test.ts",
+        "!tests/unit/per-tool-checkpoint-hellgate.test.ts",
         "!tests/unit/shell-exec-observers-surface.test.ts",
         "!tests/unit/cli-image-loader.test.ts",
         "!tests/unit/cli-argv-prompt.test.ts",

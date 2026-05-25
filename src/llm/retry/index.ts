@@ -1,0 +1,17 @@
+/**
+ * Public surface for the `src/llm/retry` slice (ADR-0214).
+ *
+ * Re-exports the router port + Codex-spec implementation + default factory.
+ * Consumers route a classified `LLMErrorKind` to a closed `RecoveryAction`
+ * envelope. Default-OFF: the legacy `RetryingLLM` / `FallbackLLM` decorators
+ * (src/agent/retry.ts, src/llm/fallback.ts) remain byte-identical for callers
+ * that do not adopt the router.
+ *
+ * NOTE on barrel export shape: types and values are both exported flat for
+ * call-site brevity. The slice has no cross-slice imports beyond `@/shared`
+ * (LLMErrorKind + assertNever) — the architecture scanner should be content.
+ */
+
+export { CodexSpecRouter, codexSpecRoute, codexSpecRouterEmittedActions } from "./codex-spec-router"
+export type { RecoveryAction, RecoveryRouter } from "./port"
+export { createDefaultRecoveryRouter } from "./recovery-router"

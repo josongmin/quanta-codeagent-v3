@@ -22,8 +22,16 @@ import type { AgentMode } from "./prompt"
  *  mode value at runtime is to BLOCK mutating tools — fail-closed. A future
  *  read-only mode addition (e.g. "debug") gets the safe posture automatically
  *  even if someone forgets to update this gate; an inverse `READ_ONLY_MODES`
- *  list would silently grant write access to the new mode. */
-const MUTATING_MODES = new Set<AgentMode>(["default"])
+ *  list would silently grant write access to the new mode.
+ *
+ *  ADR-0211 additions:
+ *    - `editor` — minimal-diff MUTATING posture (Cline+Roo "Act" analog). Tools
+ *      that mutate are PERMITTED; the prompt posture nudges minimal surgical
+ *      edits. Added explicitly here so future SOTA "minimal-diff" variants
+ *      stay write-capable without re-touching every read-only mode gate.
+ *    - `architect` is INTENTIONALLY OMITTED — it inherits fail-closed posture
+ *      (read-only by default), same as plan/review/audit. */
+const MUTATING_MODES = new Set<AgentMode>(["default", "editor"])
 
 /** Resolve the effective mode from the new `mode` field and the legacy
  *  `planMode` boolean. `mode` wins when present so callers can migrate

@@ -84,8 +84,20 @@ const identityLines = (identity: readonly string[] | undefined): readonly string
  *  mode controls tool availability and the shape of the per-turn reminder;
  *  Phase 3 extends `plan` with structured choice + update_plan state and adds
  *  the `review` / `audit` task postures. Absent / "default" ⇒ legacy
- *  assume-and-execute posture (byte-identical). */
-export type AgentMode = "default" | "plan" | "review" | "audit"
+ *  assume-and-execute posture (byte-identical).
+ *
+ *  ADR-0211 widens the enum with two posture-only variants:
+ *    - `architect` — deep-reasoning READ-ONLY posture (mutating tools blocked by
+ *      mode.ts fail-closed default, identical to plan/review/audit). Tone: design
+ *      first, propose, no edits.
+ *    - `editor`    — minimal-diff MUTATING posture; favors `edit` over `write`,
+ *      tight surgical changes only. Mutating ALLOWED (explicit add to
+ *      MUTATING_MODES in mode.ts).
+ *
+ *  Adding values to this union is BACKWARD-COMPATIBLE: existing 4-mode callers
+ *  still typecheck; new modes default to fail-closed in `mode.ts`'s admissibility
+ *  gate unless explicitly added to `MUTATING_MODES`. */
+export type AgentMode = "default" | "plan" | "review" | "audit" | "architect" | "editor"
 
 export interface TurnContextInput {
   baseMessages: Message[]
@@ -187,10 +199,34 @@ const AUDIT_NOTICE = [
   "Cite file:line evidence per mismatch. No fixes unless asked.",
 ].join("\n")
 
+// ADR-0211 — architect is a READ-ONLY posture (mode.ts fail-closed default
+// blocks mutating tools). The notice emphasizes deep reasoning + design-first
+// posture; the model proposes structure, not diffs.
+const ARCHITECT_NOTICE = [
+  "ARCHITECT MODE is active. Do NOT modify anything. Reason deeply about the",
+  "design BEFORE proposing changes: state the problem, enumerate constraints,",
+  "lay out the design space, pick the smallest sufficient design. Output as a",
+  "design doc; defer edits to a follow-up turn after explicit approval.",
+].join("\n")
+
+// ADR-0211 — editor is a MUTATING posture, but the contract is "minimal,
+// surgical diffs only". The notice nudges `edit` over `write`, single-file
+// touches, and explicit pre-read; mutation is PERMITTED (mode.ts MUTATING_MODES
+// includes "editor"). No "do not modify" line — that would contradict the
+// posture and confuse the model.
+const EDITOR_NOTICE = [
+  "EDITOR MODE is active. Make MINIMAL, SURGICAL diffs only. Prefer `edit`",
+  "over `write`. Touch the fewest files needed. Always read before editing.",
+  "No drive-by reformatting, no opportunistic refactors, no scope creep —",
+  "ship the smallest correct change that resolves the user's request.",
+].join("\n")
+
 const modeNotice = (mode: AgentMode): string | undefined => {
   if (mode === "plan") return PLAN_NOTICE
   if (mode === "review") return REVIEW_NOTICE
   if (mode === "audit") return AUDIT_NOTICE
+  if (mode === "architect") return ARCHITECT_NOTICE
+  if (mode === "editor") return EDITOR_NOTICE
   return undefined
 }
 

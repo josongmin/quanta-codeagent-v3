@@ -1,0 +1,50 @@
+id: focus-chain
+title: Focus Chain (automatic N-turn todo-list re-injection)
+section: 6
+subsystem: Focus Chain (ADR-0204)
+order: 204
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cline"]
+depends_on: []
+purpose: |
+  Cline absorption: every N turns (default 6) auto-splice the current todo
+  list into the next prompt as a `## Focus Chain — Todos` markdown block so a
+  long-running autonomous session doesn't lose the multi-step plan when it
+  ages out of context. Drift detector: N turns of zero todo activity
+  (no markDone / no setTodos) surfaces a one-line warning the host may add
+  to the next `<system-reminder>`. Distinct from ADR-0045 (progress-audit
+  skill, user-invocable) — Focus Chain is AUTOMATIC. Pure in-memory
+  state machine: setTodos / tickTurn / getInjection (consuming) /
+  peekInjection (non-consuming) / getDriftWarning / markDone /
+  snapshotTodos / currentTurn. NO-THROW on every method. Default-OFF:
+  loop never constructs a tracker; host opt-in via AgentConfig slot.
+  Byte-identical when absent.
+evidence:
+  code:
+    - src/agent/focus-chain/port.ts
+    - src/agent/focus-chain/todo-injector.ts
+    - src/agent/focus-chain/drift-detector.ts
+    - src/agent/focus-chain/default-tracker.ts
+    - src/agent/focus-chain/index.ts
+  adrs: [204]
+  tests:
+    unit:
+      - tests/unit/focus-chain-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Knobs: reinjectEveryN (default 6 Cline operational value; 0 = explicit
+  disable; negative/NaN = fallback default), driftWindowTurns (default 5;
+  same null-on-bad-input rule). First injection NEVER on turn 0 (model
+  just saw todos at session start; waits one full cycle). Drift on empty
+  todo list returns null (not actionable). Pure markdown output; host
+  decides splice site (system prompt / per-turn reminder / elsewhere).
+  Single-session — sharing across forks would corrupt the counter.

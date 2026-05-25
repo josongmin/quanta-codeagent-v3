@@ -1,0 +1,67 @@
+id: automation-engine
+title: ADR-0215 AutomationEnginePort (Codex 3-table schema + pure tickScheduler)
+section: 9
+subsystem: Scheduler / engine seam (ADR-0215)
+order: 215
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [scheduler-runtime, scheduler-rrule]
+purpose: |
+  `AutomationEnginePort` — a 5-verb closed seam (schedule / list / cancel /
+  next / markRun) wrapping the Codex `automations` + `automation_runs` +
+  `inbox_items` 3-table schema. Two adapters live under the slice:
+
+    - `inMemoryAutomationEngine()` — zero-dep reference (tests / opt-out
+      hosts); exposes `runs` + `inbox` inspection arrays.
+    - `sqliteAutomationEngine(db)` — wraps an open `bun:sqlite` Database;
+      `ensureAutomationEngineSchema` runs idempotent migration; `markRun`
+      writes all 3 tables in a single SQLite transaction (rollback on
+      failure, so an inbox row never lands without a matching automation
+      update).
+
+  `tickScheduler({ engine, now, handler, inbox? })` is the pure testable
+  atomic: pick soonest-due via `engine.next(now)`, fire the handler,
+  `markRun(...)` with the next-fire from `computeNextFire`. NO-THROW —
+  handler exceptions surface as `kind:"errored"` outcomes; engine port
+  errors surface as `kind:"engine-error"`.
+
+  Default-OFF: importing `@/scheduler/automation-engine` opens zero
+  connections / creates zero tables. The host supplies an adapter and
+  drives `tickScheduler` on its own cadence. The existing JSONL
+  `AutomationStorePort` (Phase A) and this engine port COEXIST — they're
+  different surfaces. A follow-up can let `SchedulerRuntime` accept
+  either.
+
+  exactOptionalPropertyTypes: `lastRunAt`, `lastError`, `errorMessage`
+  keys are OMITTED when absent. The closed `EngineResult<T>` discriminated
+  union (`ok:true|false` + 4 closed error codes) means callers branch
+  rather than catch.
+evidence:
+  code:
+    - src/scheduler/automation-engine/port.ts
+    - src/scheduler/automation-engine/in-memory.ts
+    - src/scheduler/automation-engine/sqlite.ts
+    - src/scheduler/automation-engine/ticker.ts
+    - src/scheduler/automation-engine/index.ts
+    - src/scheduler/index.ts
+  adrs: ["docs/decisions/0215-rrule-automation-engine-wire.md", 161, 132]
+  tests:
+    unit:
+      - tests/unit/automation-engine-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Closes the R1 false-positive on ADR-0161 (Phase A claimed complete
+  but engine seam + inbox/runs persistence missing). Codex schema verbatim
+  per `docs/reviews-codex-agent/thread-management/storage-and-db-audit.md`
+  so a Codex-trained operator can read the v3 DB. Single-workspace
+  divergences documented in the adapter JSDoc (`cwds` column deferred,
+  `archived_*` inbox columns deferred).

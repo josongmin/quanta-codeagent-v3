@@ -33,6 +33,8 @@ export const defaultIdentityProvider = (
     plan: DEFAULT_IDENTITIES.plan,
     review: DEFAULT_IDENTITIES.review,
     audit: DEFAULT_IDENTITIES.audit,
+    architect: DEFAULT_IDENTITIES.architect,
+    editor: DEFAULT_IDENTITIES.editor,
     onboarding: DEFAULT_IDENTITIES.onboarding,
   }
   if (overrides !== undefined) {

@@ -1,0 +1,48 @@
+id: multi-source-rules-vendor-detector
+title: Multi-source rules vendor-detector (5-vendor convergence, ADR-0205)
+section: 4
+subsystem: Multi-source rule ingestion
+order: 20
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:cursor, absorbed:cline, absorbed:roo, absorbed:aider, absorbed:windsurf, surface:core, default-off]
+depends_on: [loadreporules-cwd]
+purpose: |
+  6-vendor 자동 감지: .cursor/rules/*.mdc + .clinerules(file|dir) +
+  .roo/rules-{mode}/*.md + .aider.conf.yml + CONVENTIONS.md + .windsurfrules +
+  .quanta/rules/*. port-shaped (VendorDetectorPort.detectAll → DetectionResult),
+  no-throw across boundary, declarative VENDOR_TABLE 6-entry SSOT, priority-
+  encoded collision resolution (quanta > foreign vendors). symlink (file+dir)
+  reject + 2x body-cap size-skip + maxFiles=256. slice fence: @/rules→@/shared만,
+  frontmatter parser 인라인 (gray-matter 미도입 — install blocked + slice fence).
+  Default-OFF: detectAll 미호출 시 byte-identical.
+evidence:
+  code:
+    - src/rules/vendor-detector/port.ts
+    - src/rules/vendor-detector/vendor-table.ts
+    - src/rules/vendor-detector/normalizer.ts
+    - src/rules/vendor-detector/default-detector.ts
+    - src/rules/vendor-detector/index.ts
+    - src/rules/index.ts
+  adrs: [205]
+  tests:
+    unit:
+      - tests/unit/vendor-rules-detector-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Wiring으로 @/agent/glob-rules.ts 합류는 별 슬라이스 — detector만 신설하고
+    loadGlobRules 합성은 후속. Default-OFF로 byte-identical 유지.
+  promotion_path: |
+    @/agent/glob-rules.ts:loadGlobRules가 createDefaultVendorDetector().detectAll()
+    호출해 결과를 기존 GlobRule[] 모양으로 어댑팅 + renderGlobRulesBlock 통합.
+notes: |
+  fast-glob 미사용 — PathKind 3종(file/dir/mode-dir) 닫힌 enum이면 충분.
+  새 vendor 추가는 vendor-table.ts 한 줄 + (필요 시) ParserKind 확장.

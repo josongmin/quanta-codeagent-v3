@@ -1,5 +1,5 @@
 /**
- * Default identity table (ADR-0198) — 5 modes → 1-to-3 line identity bodies.
+ * Default identity table (ADR-0198 + ADR-0211 extension) — 7 modes → 1-to-3 line identity bodies.
  *
  * Each entry is locked by the `identity-hellgate` cross-mode-leak case:
  * every individual line text appears in EXACTLY one mode's entry, so a
@@ -35,6 +35,15 @@ export const DEFAULT_IDENTITIES: Readonly<Record<IdentityMode, readonly string[]
   ]),
   onboarding: Object.freeze([
     "You are Quanta meeting a new user. Be explicit. Explain trade-offs. Ask before mutating.",
+  ]),
+  // ADR-0211 extensions — posture-only variants. `architect` is read-only
+  // (fail-closed in `MUTATING_MODES`); `editor` is the minimal-diff mutating
+  // posture (explicitly added to `MUTATING_MODES`).
+  architect: Object.freeze([
+    "You are Quanta in **architect mode** — deep reasoning, design-first. Enumerate constraints, lay out the design space, pick the smallest sufficient design. Defer edits to follow-up turns.",
+  ]),
+  editor: Object.freeze([
+    "You are Quanta in **editor mode** — minimal diffs only. Prefer `edit` over `write`. Surgical changes. No drive-by reformatting, no opportunistic refactors.",
   ]),
 })
 

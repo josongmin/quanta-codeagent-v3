@@ -1,0 +1,55 @@
+id: sticky-model-per-mode
+title: Sticky model-per-mode — fs-backed {mode → modelId} store + precedence resolver
+section: 8
+subsystem: 모델 라우팅 — sticky-per-mode (Cline+Roo 흡수, ADR-0212)
+order: 212
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide]
+configurable: integrated
+config_refs:
+  cli: ['--model']
+owners: ["@songmin"]
+labels: [absorbed:cline, absorbed:roo, surface:core, tier:core]
+depends_on: []
+purpose: |
+  Cline + Roo Code의 "Plan에 강한 모델 / Act에 빠른 모델" 패턴 흡수. v3 모델 resolution은 global
+  default + CLI override만 인지 — mode 멤버십 invisible, 사용자가 mode 전환마다 모델 재선택해야
+  함. 신규 슬라이스 `src/agent/sticky-model/`: port(StickyModelStore + StickyModelResolver +
+  typed Result shapes — no-throw public surface) / default-store(inMemoryStickyModelStore —
+  pure, no IO) / fs-backed-store(fsBackedStickyModelStore — ~/.quanta/sticky-model.json,
+  write-file-atomic via ADR-0185 lib, mkdir-p, ENOENT=empty(NOT corruption), corrupt JSON →
+  typed ok:false load result, store 호출 가능 유지) / resolver(stickyModelResolver — 단일
+  precedence enforcer: explicitOverride > sticky > globalDefault) / write-file-atomic.d.ts
+  (local ambient declaration). 모든 set/load는 typed Result로 surface — IO 에러가 prompt-build
+  / CLI parse 경로 crash시키지 않음 (StickyModelLoadCorruptionError + StickyModelWriteError
+  QuantaError subclass). Concurrent set는 last-write-wins on rename (by design — store는
+  best-effort persistence 계약).
+evidence:
+  code:
+    - src/agent/sticky-model/port.ts
+    - src/agent/sticky-model/default-store.ts
+    - src/agent/sticky-model/fs-backed-store.ts
+    - src/agent/sticky-model/resolver.ts
+    - src/agent/sticky-model/write-file-atomic.d.ts
+    - src/agent/sticky-model/index.ts
+  adrs: [185, 212]
+  tests:
+    unit:
+      - tests/unit/sticky-model-store-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: '~/.quanta/sticky-model.json'
+    where: 'fsBackedStickyModelStore default path'
+    purpose: 'on-disk persistence file (override via opts.path for tests/CI)'
+deliberate_hold: null
+notes: |
+  hellgate 14 케이스: in-memory + fs-backed set/get round-trip / unset mode = undefined /
+  corrupt file → ok:false + empty snapshot (no throw) / atomic write (no torn file under
+  concurrent set) / mkdir-p missing parent / multi-mode independent / idempotent set / resolver
+  3-tier precedence / empty-string override falls through / ENOENT treated as empty. Cache-miss
+  on mode switch는 의도 — 다른 model = 다른 prefix cache는 사용자가 명시적으로 opt-in. CLI
+  wire (slash command + --sticky-model) 는 후속 라운드.

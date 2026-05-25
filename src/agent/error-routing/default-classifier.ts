@@ -92,6 +92,18 @@ const fromLLMError = (e: LLMError): TypedError => {
       return { kind: "activeTurnNotSteerable", message }
     case "unknown":
       return { kind: "internalServerError", message }
+    // ADR-0214 Codex-spec absorption — 5 new `LLMErrorKind` arms map
+    // verbatim onto their `TypedErrorKind` counterparts (camelCase).
+    case "context_window_exceeded":
+      return { kind: "contextWindowExceeded", message }
+    case "cyber_policy":
+      return { kind: "cyberPolicy", message }
+    case "too_many_failed_attempts":
+      return { kind: "responseTooManyFailedAttempts", message }
+    case "thread_rollback_failed":
+      return { kind: "threadRollbackFailed", message }
+    case "sandbox_error":
+      return { kind: "sandboxError", message }
     default: {
       // Exhaustiveness guard: if a new `LLMErrorKind` is added in
       // `@/shared/errors`, TS fails here.

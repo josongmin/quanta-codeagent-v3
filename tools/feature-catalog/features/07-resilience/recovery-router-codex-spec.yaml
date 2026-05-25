@@ -1,0 +1,81 @@
+id: recovery-router-codex-spec
+title: RecoveryRouter port + CodexSpecRouter — 16-kind × 6-action routing table
+section: 7
+subsystem: LLM 에러 분류 — boundary-once
+order: 12
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:core", "default-off", "resilience-primitive"]
+depends_on: [llm-error-taxonomy, retry-error-classification, fallback-kinds-policy]
+purpose: |
+  Closed-port + Codex-spec routing table (ADR-0214) collapsing the 16-kind
+  `LLMErrorKind` onto a closed 6-action `RecoveryAction` envelope —
+  `retry_same_turn` (unused by current router, reserved for future
+  mid-turn-steerable provider) / `retry_after_backoff` (rate_limit only) /
+  `hitl_handoff` (auth, cyber_policy, sandbox_error) / `fatal` (bad_request,
+  not_found, stream_corrupt, aborted, too_many_failed_attempts, unknown) /
+  `fallback_provider` (overloaded, server_error, network, not_implemented) /
+  `reactive_compaction` (context_window_exceeded, thread_rollback_failed).
+
+  The 6-action union is INTENTIONALLY wider than ADR-0203's 5-action union:
+  ADR-0214 separates `retry_after_backoff` (429 backoff) from
+  `reactive_compaction` (rebuild shorter prefix). Retrying the same oversized
+  prompt without compaction fails identically — the explicit signal matters.
+
+  Verbatim Codex 0.131.0-alpha.9 mapping (per memory:
+  codex-feature-catalog-2026-05-21). `codexSpecRoute(kind)` is a pure
+  function over a 16-arm `switch` guarded by `assertNever` — adding a 17th
+  kind fails to compile. `CodexSpecRouter` is a class wrapper around the
+  same function; `createDefaultRecoveryRouter()` returns a Codex-spec router.
+
+  Default-OFF byte-identical: nobody wires the router today. Existing
+  `RetryingLLM` and `FallbackLLM` decorators continue using their hardcoded
+  `RETRYABLE_KINDS` / `FALLBACK_KINDS` sets over the 11-kind subset. The
+  router is a SEAM — opt-in by passing it explicitly. Wiring into the agent
+  loop is a follow-up ADR.
+
+  Negative invariants (pinned in `recovery-router-hellgate.test.ts`):
+    - context_window_exceeded MUST route to reactive_compaction, NOT
+      retry_after_backoff (same oversized prompt fails identically).
+    - cyber_policy MUST route to hitl_handoff, NOT fallback_provider (no
+      other provider reverses a policy refusal).
+    - aborted MUST NOT route to retry_same_turn (turn lifecycle never
+      re-issues an in-flight identical stream).
+    - too_many_failed_attempts MUST route to fatal, NOT retry_after_backoff
+      (the kind exists precisely to break the retry loop).
+evidence:
+  code:
+    - src/llm/retry/port.ts
+    - src/llm/retry/codex-spec-router.ts
+    - src/llm/retry/recovery-router.ts
+    - src/llm/retry/index.ts
+    - src/llm/index.ts
+  adrs: [214]
+  tests:
+    unit:
+      - tests/unit/recovery-router-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Wiring into RetryingLLM/FallbackLLM is intentionally deferred. The existing
+    decorators are byte-identical for the 11-kind subset. Adopting the 6-action
+    envelope requires a co-designed compaction-driven retry path (the
+    `reactive_compaction` arm has no current consumer in the decorator chain).
+  promotion_path: |
+    Follow-up to ADR-0214: wire CodexSpecRouter into agent/retry.ts +
+    llm/fallback.ts; route `reactive_compaction` through the loop's
+    proactive-compaction hook; route `hitl_handoff` via permission-stack
+    elevation (ADR-0045/HITL-tier).
+notes: |
+  Coexists with ADR-0203's parallel design at `src/agent/error-routing/`
+  (separate `TypedErrorKind` discriminated union with payloads, 5 actions).
+  Neither slice imports the other. ADR-0214 stays in `src/llm/retry/`
+  because `LLMErrorKind` is an LLM concept; ADR-0203 lives at the
+  agent-loop superset level (captures non-LLM failures like sandbox/steer).

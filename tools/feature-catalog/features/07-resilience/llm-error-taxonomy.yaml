@@ -1,10 +1,10 @@
 id: llm-error-taxonomy
-title: LLMError 11-kind taxonomy + fromSdkError boundary classifier
+title: LLMError 16-kind taxonomy + fromSdkError boundary classifier + classify(e) router-boundary classifier
 section: 7
 subsystem: LLM 에러 분류 — boundary-once
 order: 11
 maturity: L4
-status: stable
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
@@ -14,35 +14,50 @@ labels: ["surface:core", "resilience-primitive"]
 depends_on: [llm-not-implemented-kind, errors-helper-fix]
 purpose: |
   Classify external/SDK errors EXACTLY ONCE at the adapter boundary into a
-  closed `LLMErrorKind` union: `overloaded` (529) / `rate_limit` (429) /
-  `server_error` (5xx) / `network` (transport) / `auth` (401/403) /
-  `bad_request` (400/422) / `not_found` (404) / `not_implemented` (deliberate
-  stub) / `stream_corrupt` / `aborted` / `unknown`. `LLMError.fromSdkError`
-  is the ONLY site that touches SDK-specific shape (extracts `status` from
-  direct + `.response.status`, provider code from `.error.type` / `.code` /
-  `.type`, network from Node `code` against an explicit `NETWORK_CODES` set,
-  abort via name=`AbortError`/`TimeoutError`).
+  closed `LLMErrorKind` union (16 arms after ADR-0214 Codex absorption):
+  `overloaded` (529) / `rate_limit` (429) / `server_error` (5xx) / `network`
+  (transport) / `auth` (401/403) / `bad_request` (400/422) / `not_found`
+  (404) / `not_implemented` (deliberate stub) / `stream_corrupt` / `aborted`
+  / `unknown` / `context_window_exceeded` / `cyber_policy` /
+  `too_many_failed_attempts` / `thread_rollback_failed` / `sandbox_error`.
 
-  Downstream policy (`src/agent/retry.ts`, `src/llm/fallback.ts`) MUST branch
-  off `kind`/`statusCode` only — NEVER off `message`. The prior "string-
-  substring match on `e.message`" pattern is explicitly killed by this
-  contract. `LLMProvider` is a narrow closed union (`anthropic` / `openai` /
-  `chatgpt-oauth`) so a typo at the adapter boundary fails to compile.
+  Two boundary stages:
+  - `LLMError.fromSdkError` — ADAPTER BOUNDARY: provider-aware wrap+tag.
+    Touches SDK-specific shape (extracts `status` from direct +
+    `.response.status`, provider code from `.error.type` / `.code` / `.type`,
+    network from Node `code` against an explicit `NETWORK_CODES` set, abort
+    via name=`AbortError`/`TimeoutError`). Emits one of the 11 original
+    kinds today.
+  - `classify(e: unknown) → LLMErrorKind` (`src/shared/error-classifier.ts`)
+    — ROUTER BOUNDARY: consumes any thrown value (already-wrapped LLMError,
+    raw Error, string, null, …). Honors pre-wrapped definitive `.kind`;
+    otherwise runs a documented heuristic ladder (abort → context_window →
+    sandbox → cyber_policy → too_many_failed_attempts → thread_rollback →
+    status-based). Pure, no-throw, deterministic.
+
+  Downstream policy (`src/agent/retry.ts`, `src/llm/fallback.ts`,
+  `src/llm/retry/`) MUST branch off `kind`/`statusCode` only — NEVER off
+  `message`. The prior "string-substring match on `e.message`" pattern is
+  explicitly killed by this contract. `LLMProvider` is a narrow closed
+  union (`anthropic` / `openai` / `chatgpt-oauth`).
 
   Cohabits with: `errors-helper-fix` (errMessage recursion guard) +
-  `llm-not-implemented-kind` (one specific kind's retry/fallback wiring).
-  This entry registers the umbrella taxonomy + classifier seam itself.
+  `llm-not-implemented-kind` (one specific kind's retry/fallback wiring) +
+  `recovery-router-codex-spec` (16-kind × 6-action routing table).
+  This entry registers the umbrella taxonomy + dual-stage classifier seams.
 evidence:
   code:
     - src/shared/errors.ts
+    - src/shared/error-classifier.ts
     - src/llm/adapters/anthropic.ts
     - src/llm/adapters/openai.ts
     - src/agent/retry.ts
     - src/llm/fallback.ts
-  adrs: []
+  adrs: [214]
   tests:
     unit:
       - tests/unit/errors.test.ts
+      - tests/unit/error-classifier-hellgate.test.ts
       - tests/unit/fallback.test.ts
       - tests/unit/critical-surfaces.test.ts
     integration: []
@@ -54,5 +69,13 @@ notes: |
   unrecoverable faults; RETURN `Result<T, E>` for EXPECTED domain failures
   (tool execution + input validation). Adapters classify once; retry +
   fallback branch on the result. Adding a new kind is a contract change —
-  extend `LLMErrorKind`, the `classify()` switch, AND the FATAL/FALLBACK
+  extend `LLMErrorKind`, the `classify()` heuristic ladder, the router
+  switch (`src/llm/retry/codex-spec-router.ts`), AND the FATAL/FALLBACK
   policy sets atomically.
+
+  The 5 Codex-spec arms (`context_window_exceeded` / `cyber_policy` /
+  `too_many_failed_attempts` / `thread_rollback_failed` / `sandbox_error`)
+  are emitted only by the heuristic `classify(e)` today. Adapter
+  `fromSdkError` was NOT extended in ADR-0214 — that's a follow-up. Legacy
+  retry/fallback paths see exactly the 11 original kinds; the 5 new arms
+  carry routing signal for the new `RecoveryRouter` port.

@@ -22,12 +22,16 @@ import type { AgentMode } from "../prompt"
 export type IdentityMode = AgentMode | "onboarding"
 
 /** Iteration order for the closed enum (deterministic; tests + future
- *  surface knobs rely on this order). */
+ *  surface knobs rely on this order). ADR-0211 extends with `architect`
+ *  + `editor` — both are new `AgentMode` values, so they appear here
+ *  automatically by virtue of `IdentityMode = AgentMode | "onboarding"`. */
 export const IDENTITY_MODES: ReadonlyArray<IdentityMode> = [
   "default",
   "plan",
   "review",
   "audit",
+  "architect",
+  "editor",
   "onboarding",
 ] as const
 

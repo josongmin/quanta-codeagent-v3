@@ -1,5 +1,6 @@
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
+export { classify } from "./error-classifier"
 export type { LLMErrorKind, LLMProvider } from "./errors"
 export {
   errMessage,

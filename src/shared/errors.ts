@@ -75,6 +75,34 @@ export class PermissionDeniedError extends QuantaError {
  *   - `aborted`         AbortSignal fired. NEVER retry; propagate cause.
  *   - `unknown`         Last-resort bucket when no structured signal is available.
  *
+ * Codex-spec additions (ADR-0214 — typed-error enum 11→16 absorption of Codex
+ * 0.131.0-alpha.9's `CodexErr` taxonomy). These five kinds carry actionable
+ * routing signal that the prior 11-kind set conflated into `unknown` or
+ * `bad_request`. All five MUST be mapped explicitly by `recovery-router.ts`
+ * (the exhaustiveness check in `codexSpecRoute` will fail compile if a new
+ * kind is added without a route):
+ *   - `context_window_exceeded`  Prompt > model context window. Same-turn
+ *                                retry of the oversized prompt fails
+ *                                identically → reactive compaction. Distinct
+ *                                from `bad_request` (other 400s are caller
+ *                                bugs, NOT compactable).
+ *   - `cyber_policy`             Provider's safety/policy refusal that the
+ *                                user (not the agent) must resolve.
+ *                                Hand-off to HITL — neither retry nor swap
+ *                                can recover.
+ *   - `too_many_failed_attempts` Provider's "you've burned the retry budget"
+ *                                signal. Already retried — must give up.
+ *                                Distinct from `rate_limit` (which IS
+ *                                retryable after backoff).
+ *   - `thread_rollback_failed`   Server-side conversation/thread state
+ *                                desync. Reactive compaction (rebuild
+ *                                shorter prefix) is the only structured
+ *                                recovery.
+ *   - `sandbox_error`            Sandboxed-exec layer failure (host capability,
+ *                                NOT the model's fault). HITL review — the
+ *                                user must inspect and either re-enable the
+ *                                sandbox or downgrade the request.
+ *
  * NEVER classify by message text downstream. If you find yourself doing
  * `e.message.includes(...)`, the fix is in this file (extend classification),
  * not in your call site.
@@ -91,6 +119,14 @@ export type LLMErrorKind =
   | "stream_corrupt"
   | "aborted"
   | "unknown"
+  // Codex-spec additions (ADR-0214). Order matters only for readability; the
+  // union is set-equivalent. Adding a new kind requires extending
+  // `recovery-router.ts`'s switch (exhaustiveness check enforces this).
+  | "context_window_exceeded"
+  | "cyber_policy"
+  | "too_many_failed_attempts"
+  | "thread_rollback_failed"
+  | "sandbox_error"
 
 /** Provider id used by the adapter→error classifier. Kept narrow so a typo at
  *  the adapter boundary fails to compile. `chatgpt-oauth` (ADR-0094) is the

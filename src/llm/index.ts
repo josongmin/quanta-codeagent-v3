@@ -20,6 +20,13 @@ export {
   streamWithModel,
 } from "./model-swap"
 export type { LLMPort } from "./ports"
+export type { RecoveryAction, RecoveryRouter } from "./retry"
+export {
+  CodexSpecRouter,
+  codexSpecRoute,
+  codexSpecRouterEmittedActions,
+  createDefaultRecoveryRouter,
+} from "./retry"
 export type { DecodedProviderEvent, ParsedSseFrame } from "./streaming-events"
 export {
   __resetUnknownEventRateLimitForTests,

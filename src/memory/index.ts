@@ -20,6 +20,7 @@ export {
   type Stage1Output,
   Stage1Store,
   type Stage1StorePort,
+  type MemoryOutcome,
   WatermarkConflictError,
   type WatermarkState,
 } from "./consolidate"
