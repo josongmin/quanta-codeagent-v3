@@ -6,6 +6,7 @@ import { buildSystemPrompt } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext, ToolAction } from "@/permission"
+import { createOnConfirmReviewerPort } from "@/agent"
 import {
   argvPrompt,
   assembleConfig,
@@ -244,5 +245,46 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     // The system prompt + registry are provider-agnostic but must still build.
     expect(config.system).toContain("Quanta")
     expect(config.registry.specs().length).toBeGreaterThan(0)
+  })
+
+  test("D: assembleConfig threads the interaction ports and admissibility bundle through SessionDeps", () => {
+    const llm: LLMPort = new StubLLM()
+    const planExitPort = { request: async () => ({ decision: "approved" as const }) }
+    const userInputPort = async () => ({ decision: "cancelled" as const })
+    const admissibility = {
+      reviewerPort: createOnConfirmReviewerPort({ onConfirm: async () => true }),
+      defaultReviewer: "user" as const,
+    }
+    const cfg = assembleConfig([{ role: "user", content: [{ type: "text", text: "go" }] }], {
+      llm,
+      registry: buildTooling([], [], [], [], new StructuredLogger()).registry,
+      stream: { emit: () => undefined },
+      permission: { mode: "default" },
+      system: buildSystemPrompt(workspace, { persona: "default" }),
+      cwd: workspace,
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      onConfirm: async (_a: ToolAction) => false,
+      store: undefined,
+      sessionId: "sess-1",
+      embedder: undefined,
+      memoryConfig: undefined,
+      planMode: false,
+      metrics: undefined,
+      run: undefined,
+      subagentConfig: undefined,
+      skillsConfig: undefined,
+      compactionBreakerConfig: undefined,
+      verifyGuardConfig: undefined,
+      summarizerLlm: undefined,
+      admissibility,
+      planExitPort,
+      userInputPort,
+      onShellEvent: undefined,
+      workMetricsSink: undefined,
+    })
+    expect(cfg.admissibility).toBe(admissibility)
+    expect(cfg.planExitPort).toBe(planExitPort)
+    expect(cfg.userInputPort).toBe(userInputPort)
   })
 })

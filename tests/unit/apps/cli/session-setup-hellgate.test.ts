@@ -350,6 +350,16 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(result.statusBar).toBeDefined()
   })
 
+  test("wires reviewer + plan-exit + user-input host ports into sessionDeps", async () => {
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps } = makeStubDeps()
+    const result = await setupSession(deps)
+    expect(result.sessionDeps.admissibility?.reviewerPort).toBeDefined()
+    expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("user")
+    expect(result.sessionDeps.planExitPort).toBeDefined()
+    expect(result.sessionDeps.userInputPort).toBeDefined()
+  })
+
   test("registers a SIGINT handler — invoking it triggers result.abort", async () => {
     const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
     const { deps } = makeStubDeps()

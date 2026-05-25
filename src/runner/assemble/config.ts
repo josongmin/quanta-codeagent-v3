@@ -72,6 +72,12 @@ export interface SessionDeps {
   /** Wave-A admissibility bundle (reviewer/rules/store bridge). Absent ⇒
    *  dispatch passes no extra gate options (byte-identical legacy). */
   admissibility?: AgentConfig["admissibility"]
+  /** Host-owned plan-exit surface. Present ⇒ `request_plan_exit` is
+   *  registered and dispatch wires `ToolContext.requestPlanExit`. */
+  planExitPort?: AgentConfig["planExitPort"]
+  /** Host-owned operator-input surface. Present ⇒ `request_user_input` is
+   *  registered and dispatch wires `ToolContext.requestUserInput`. */
+  userInputPort?: AgentConfig["userInputPort"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -132,6 +138,8 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
   ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
   ...(d.admissibility !== undefined ? { admissibility: d.admissibility } : {}),
+  ...(d.planExitPort !== undefined ? { planExitPort: d.planExitPort } : {}),
+  ...(d.userInputPort !== undefined ? { userInputPort: d.userInputPort } : {}),
   ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
   ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
   ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),

@@ -1,6 +1,6 @@
 import { homedir } from "node:os"
 import * as readline from "node:readline/promises"
-import { buildSystemPrompt, RetryingLLM } from "@/agent"
+import { buildSystemPrompt, createOnConfirmReviewerPort, RetryingLLM } from "@/agent"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
@@ -40,6 +40,7 @@ import type { LifecyclePills, McpPillServer } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import { createRejectCounter, type RejectCounter } from "../reject-counter"
 import { buildMcpSurfaceInfo } from "./mcp-surface-wire"
+import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 import { switchToSessionCwd } from "../session-io"
 import { buildShellStreamPainter } from "../shell-stream-painter"
 import { installStatusBar, type StatusBar } from "../status-bar"
@@ -70,6 +71,15 @@ const buildIdleGuards = (): { idleMonitor: IdleMonitor; rejectCounter: RejectCou
   return { idleMonitor, rejectCounter }
 }
 
+const askLine = async (prompt: string): Promise<string> => {
+  const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
+  try {
+    return await adhoc.question(prompt)
+  } finally {
+    adhoc.close()
+  }
+}
+
 /** Build the `onConfirm` callback for tool-permission prompts. Inline diff
  *  preview before the readline question; accept/deny is counted by
  *  `rejectCounter` so consecutive denials can trigger graceful auto-exit. */
@@ -80,17 +90,12 @@ const buildOnConfirm =
       const preview = await renderActionDiff(action)
       if (preview !== undefined) process.stderr.write(`${preview}\n`)
     }
-    const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
-    try {
-      const ans = await adhoc.question(`Allow ${action.tool}? [y/N] `)
-      const accepted = ans.trim().toLowerCase() === "y"
-      if (accepted) rejectCounter.recordAccept()
-      else rejectCounter.recordDeny()
-      idleMonitor.markActive()
-      return accepted
-    } finally {
-      adhoc.close()
-    }
+    const ans = await askLine(`Allow ${action.tool}? [y/N] `)
+    const accepted = ans.trim().toLowerCase() === "y"
+    if (accepted) rejectCounter.recordAccept()
+    else rejectCounter.recordDeny()
+    idleMonitor.markActive()
+    return accepted
   }
 
 /** Build the LLM stack: buildLLM (fatal-exit on failure) → RetryingLLM →
@@ -395,6 +400,9 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   const costPanel = deps.buildCostPanelOrUndefined(process.env, process.stdout.isTTY, model)
   const branchProgress = deps.buildBranchProgressOrUndefined(process.env, process.stdout.isTTY)
   const planStore = deps.buildPlanStoreOrUndefined(process.env)
+  const reviewerPort = createOnConfirmReviewerPort({ onConfirm })
+  const planExitPort = createCliPlanExitPort({ ask: askLine })
+  const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
 
   const sessionDeps: SessionDeps = {
     llm: finalLLM,
@@ -418,6 +426,9 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     compactionBreakerConfig,
     verifyGuardConfig,
     summarizerLlm: buildSummarizerLlm(provider, abort.signal),
+    admissibility: { reviewerPort, defaultReviewer: "user" },
+    planExitPort,
+    userInputPort,
     onShellEvent,
     workMetricsSink,
     ...(lifecycleFollowUpQueue !== undefined ? { followUpQueue: lifecycleFollowUpQueue } : {}),
