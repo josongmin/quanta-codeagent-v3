@@ -28,7 +28,6 @@ import {
 import { logger } from "@/shared"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
-import { env } from "../internal"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
@@ -36,6 +35,7 @@ import type { SessionIoState } from "../session-cmd"
 import { isSlashCommand, runSlashCommand, type SlashContext } from "../slash-commands"
 import type { StatusBar } from "../status-bar"
 import { createTextInbox, type TextInbox } from "../text-inbox"
+import type { CliFeatureConfig } from "./cli-feature-config"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
 import {
@@ -54,20 +54,18 @@ export interface PromptUxOpts {
 
 /** Slice-C: UX opts (history + multiline) the prompt pipeline consumes.
  *  Default-ON when the env knob is unset; explicit `=0` reverts to the
- *  no-history single-line path. */
-export const buildPromptUx = (): PromptUxOpts => {
-  const historyEnabled = env("QUANTA_HISTORY", "1") !== "0"
-  const historyMax = Math.max(1, Number(env("QUANTA_HISTORY_MAX", "1000")))
-  const historyFile = env("QUANTA_HISTORY_FILE", "")
+ *  no-history single-line path. ADR-0297: consumes the typed surface
+ *  feature record so no `process.env` reads survive here. */
+export const buildPromptUx = (featureCfg: CliFeatureConfig): PromptUxOpts => {
+  const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
-    maxLines: historyMax,
-    ...(historyFile !== "" ? { filePath: historyFile } : {}),
+    maxLines: history.maxLines,
+    ...(history.filePath !== undefined ? { filePath: history.filePath } : {}),
   }
-  const promptHistory = historyEnabled ? createPromptHistory(promptHistoryOpts) : undefined
-  const multilineEnabled = env("QUANTA_MULTILINE", "1") !== "0"
+  const promptHistory = history.enabled ? createPromptHistory(promptHistoryOpts) : undefined
   return {
     ...(promptHistory !== undefined ? { promptHistory } : {}),
-    multiline: multilineEnabled,
+    multiline: multiline.enabled,
   }
 }
 

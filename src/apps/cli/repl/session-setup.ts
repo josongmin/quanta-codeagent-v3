@@ -19,6 +19,7 @@ import type { createStatusPills } from "../status-pills"
 import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
+import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
 import {
   bootstrapSession,
   type SessionBootstrapDeps,
@@ -46,17 +47,14 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
   readonly loadPermissionStore: () => Promise<PermissionStore | undefined>
   /** Build the per-turn turn-summary collector + stream tee. */
   readonly buildTurnSummaryAndStream: (
+    featureCfg: CliFeatureConfig,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
   ) => { collector: TurnSummaryCollector; stream: StreamPort }
   /** Build the live turn indicator + indicator-tee'd stream. */
   readonly buildTurnIndicatorAndStream: (
+    featureCfg: CliFeatureConfig,
     statusBar: StatusBar,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
-    intervalEnv: string,
   ) => { indicator: TurnIndicator; turnStream: StreamPort }
   /** Track D — build the debug-tracer + tee-wrap the stream. Returns
    *  `{stream, debugHandle: undefined}` (literal input ref) when the
@@ -64,9 +62,8 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
    *  byte-identical to today's; returns a wrapped stream + a live
    *  handle when enabled so `/debug` runtime toggles affect emission. */
   readonly buildDebugTracerAndStream: (
+    featureCfg: CliFeatureConfig,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
   ) => { stream: StreamPort; debugHandle: DebugTracerHandle | undefined }
   /** Track T — build the timeline panel + tee-wrap the stream. Returns
    *  `{stream, panel: undefined}` (literal input ref) when
@@ -77,9 +74,8 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
    *  its `runRepl` `finally` so a follow-on shell prompt lands on a
    *  clean screen. */
   readonly buildTimelinePanelAndStream: (
+    featureCfg: CliFeatureConfig,
     stream: StreamPort,
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
   ) => { stream: StreamPort; panel: TimelinePanel | undefined }
   /** Install the status pills row (workspace / mode+effort / skills / sandbox). */
   readonly installPills: (args: {
@@ -150,6 +146,10 @@ export interface SessionSetupResult {
    *  `QUANTA_PLAYBOOK_TRIGGER` is unset. `undefined` ⇒ slot omitted at the
    *  loop call site (default-OFF byte-identical). */
   readonly playbookCliFlag: boolean | undefined
+  /** ADR-0297 — the typed, surface-level feature config resolved once at
+   *  setup time and threaded through to the host's `build*` factories
+   *  (`buildImageQueue`, `buildPromptUx`, `buildRewindSlashState`). */
+  readonly featureCfg: CliFeatureConfig
 }
 
 /** Terminal host wiring over the bootstrap session core. All env/argv/feature
@@ -157,7 +157,8 @@ export interface SessionSetupResult {
  *  status chrome and interactive prompt-only ports. */
 export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetupResult> => {
   const runtime = readSessionRuntimeConfig()
-  const boot = await bootstrapSession(deps, runtime)
+  const featureCfg = readCliFeatureConfig(runtime.env, runtime.stdoutIsTTY, process.stderr.isTTY)
+  const boot = await bootstrapSession(deps, runtime, featureCfg)
 
   process.on("SIGINT", () => {
     process.stderr.write("\n(interrupt — finishing current step)\n")
@@ -173,18 +174,16 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   const statusBar = installStatusBar(statusDefault)
 
   const { collector: turnSummary, stream: summaryStream } = deps.buildTurnSummaryAndStream(
+    featureCfg,
     boot.stream,
-    runtime.env,
-    runtime.stdoutIsTTY,
   )
   // Track D — interpose the debug tracer BEFORE the indicator so the
   // debug emit sees the same upstream events the indicator does. When
   // the env disables it, the builder returns the literal `summaryStream`
   // and `debugHandle: undefined` (byte-identical, no extra tee).
   const { stream: debugStream, debugHandle } = deps.buildDebugTracerAndStream(
+    featureCfg,
     summaryStream,
-    runtime.env,
-    process.stderr.isTTY,
   )
   // Track T — interpose the timeline panel AFTER the debug tracer and
   // BEFORE the indicator so the ring buffer sees the same upstream
@@ -192,16 +191,13 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   // non-TTY the builder returns the literal `debugStream` + `panel:
   // undefined` ⇒ byte-identical to pre-T code (no extra tee).
   const { stream: timelineStream, panel: timelinePanel } = deps.buildTimelinePanelAndStream(
+    featureCfg,
     debugStream,
-    runtime.env,
-    process.stderr.isTTY,
   )
   const { indicator: turnIndicator, turnStream } = deps.buildTurnIndicatorAndStream(
+    featureCfg,
     statusBar,
     timelineStream,
-    runtime.env,
-    runtime.stdoutIsTTY,
-    runtime.spinnerIntervalMs,
   )
 
   const { sessionDeps } = await composeCliSessionDeps({
@@ -283,5 +279,6 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     // `runSessionLoop({ playbookCliFlag })`. Bootstrap maps absent → undefined
     // already; we just propagate the same shape.
     playbookCliFlag: boot.playbookCliFlag,
+    featureCfg,
   }
 }

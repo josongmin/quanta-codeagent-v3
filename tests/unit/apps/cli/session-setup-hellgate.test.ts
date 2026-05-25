@@ -97,6 +97,7 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "slog",
       "idleMonitor",
       "rejectCounter",
+      "effortStore",
       "llm",
       "planMode",
       "metrics",
@@ -125,10 +126,13 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "pills",
       "argPrompt",
       "shutdownMcp",
+      "featureCfg",
     ]
-    // 35 named bindings — assert presence to detect accidental drops.
-    expect(keys).toHaveLength(35)
-    expect(new Set(keys).size).toBe(35)
+    // 37 named bindings — assert presence to detect accidental drops
+    // (ADR-0297 added `featureCfg` for surface-level feature consolidation;
+    // `effortStore` was added earlier on main for session-level effort UX).
+    expect(keys).toHaveLength(37)
+    expect(new Set(keys).size).toBe(37)
   })
 })
 
@@ -218,19 +222,19 @@ const makeStubDeps = (
       probe.buildPlanStoreOrUndefinedCalls += 1
       return undefined
     },
-    buildTurnSummaryAndStream: (stream) => {
+    buildTurnSummaryAndStream: (_featureCfg, stream) => {
       probe.buildTurnSummaryAndStreamCalls += 1
       return { collector: stubSummary as never, stream }
     },
-    buildTurnIndicatorAndStream: (_statusBar, stream) => {
+    buildTurnIndicatorAndStream: (_featureCfg, _statusBar, stream) => {
       probe.buildTurnIndicatorAndStreamCalls += 1
       return { indicator: stubIndicator as never, turnStream: stream }
     },
-    buildDebugTracerAndStream: (stream) => {
+    buildDebugTracerAndStream: (_featureCfg, stream) => {
       probe.buildDebugTracerAndStreamCalls += 1
       return { stream, debugHandle: undefined }
     },
-    buildTimelinePanelAndStream: (stream) => {
+    buildTimelinePanelAndStream: (_featureCfg, stream) => {
       probe.buildTimelinePanelAndStreamCalls += 1
       return { stream, panel: undefined }
     },

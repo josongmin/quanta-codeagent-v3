@@ -41,6 +41,7 @@ import type { McpSurfaceInfo } from "../mcp-cmd"
 import { createRejectCounter, type RejectCounter } from "../reject-counter"
 import { switchToSessionCwd } from "../session-io"
 import { buildShellStreamPainter } from "../shell-stream-painter"
+import type { CliFeatureConfig } from "./cli-feature-config"
 import { buildMcpSurfaceInfo } from "./mcp-surface-wire"
 import type { SessionRuntimeConfig } from "./session-runtime-config"
 
@@ -77,7 +78,7 @@ const failSessionBootstrap = (
 }
 
 export interface SessionBootstrapDeps {
-  readonly buildLifecycleBundle: () => {
+  readonly buildLifecycleBundle: (featureCfg: CliFeatureConfig) => {
     pills: LifecyclePills
     taskRegistry: TaskRegistry | undefined
     followUpQueue: FollowUpQueue | undefined
@@ -86,15 +87,13 @@ export interface SessionBootstrapDeps {
     mcpTools: ReadonlyArray<{ name: string }>,
   ) => readonly McpPillServer[]
   readonly buildCostPanelOrUndefined: (
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
+    featureCfg: CliFeatureConfig,
     model: string,
   ) => CostPanel | undefined
   readonly buildBranchProgressOrUndefined: (
-    envSource: NodeJS.ProcessEnv,
-    isTTY: boolean | undefined,
+    featureCfg: CliFeatureConfig,
   ) => BranchProgressTracker | undefined
-  readonly buildPlanStoreOrUndefined: (envSource: NodeJS.ProcessEnv) => PlanStore | undefined
+  readonly buildPlanStoreOrUndefined: (featureCfg: CliFeatureConfig) => PlanStore | undefined
   readonly buildWorkMetricsSink: (enabled: boolean) => AgentConfig["workMetricsSink"] | undefined
 }
 
@@ -250,6 +249,7 @@ const buildGuardianReview = (args: {
 export const bootstrapSession = async (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfig,
+  featureCfg: CliFeatureConfig,
 ): Promise<SessionBootstrapResult> => {
   const slog = new StructuredLogger()
   const { idleMonitor, rejectCounter } = buildIdleGuards(runtime)
@@ -271,7 +271,7 @@ export const bootstrapSession = async (
       pills: lifecyclePills,
       taskRegistry: lifecycleTaskRegistry,
       followUpQueue: lifecycleFollowUpQueue,
-    } = deps.buildLifecycleBundle()
+    } = deps.buildLifecycleBundle(featureCfg)
 
     const tooling = buildTooling(
       features.mcpTools,
@@ -340,13 +340,9 @@ export const bootstrapSession = async (
     })
     const onShellEvent = composeShellEvent(features.metrics, runtime)
     const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
-    const costPanel = deps.buildCostPanelOrUndefined(
-      runtime.env,
-      runtime.stdoutIsTTY,
-      runtime.model,
-    )
-    const branchProgress = deps.buildBranchProgressOrUndefined(runtime.env, runtime.stdoutIsTTY)
-    const planStore = deps.buildPlanStoreOrUndefined(runtime.env)
+    const costPanel = deps.buildCostPanelOrUndefined(featureCfg, runtime.model)
+    const branchProgress = deps.buildBranchProgressOrUndefined(featureCfg)
+    const planStore = deps.buildPlanStoreOrUndefined(featureCfg)
     const guardianReview = buildGuardianReview({
       llm: finalLLM,
       registry: tooling.registry,

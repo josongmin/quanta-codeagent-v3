@@ -204,6 +204,21 @@ const buildSetup = (
     // by-presence onto `maybeStartPlaybookTriggerWire({ cliFlag })`; the
     // fixture defaults to `undefined` ⇒ slot omitted ⇒ default-OFF behaviour.
     playbookCliFlag: undefined,
+    featureCfg: {
+      pills: { enabled: false, hideTasks: false, hideFollowUp: false, hideMcp: false },
+      subagentForPills: false,
+      costPanel: { enabled: false },
+      branchProgress: { enabled: false },
+      planStore: { enabled: false },
+      workMetricsSinkEnabled: false,
+      turnSummary: { enabled: false, verbose: false },
+      turnIndicator: { enabled: false, intervalMs: 80 },
+      debugTracer: { enabled: false, categories: undefined, stderrIsTTY: false },
+      imageQueue: { enabled: true, maxSize: 5 },
+      history: { enabled: true, maxLines: 1000, filePath: undefined },
+      multiline: { enabled: true },
+      rewindGit: { enabled: false },
+    } as never,
     __statusBar: statusBar,
     __pillsDisposeCalls: pillsDisposeCalls,
   }

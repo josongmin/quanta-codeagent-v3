@@ -12,23 +12,14 @@ import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
-import {
-  type BranchProgressTracker,
-  createBranchProgressTracker,
-  isBranchProgressEnabled,
-} from "./branch-search-progress"
-import { type CostPanel, createCostPanel, isCostPanelEnabled } from "./cost-panel"
+import { type BranchProgressTracker, createBranchProgressTracker } from "./branch-search-progress"
+import { type CostPanel, createCostPanel } from "./cost-panel"
 import type { DebugCmdState } from "./debug-cmd"
-import { createDebugTracer, parseDebugEnv } from "./debug-tracer"
+import { createDebugTracer } from "./debug-tracer"
 import { createImageQueue, type ImageQueue } from "./image-queue"
-import { buildSkillsConfig, env } from "./internal"
-import {
-  createLifecyclePills,
-  isLifecyclePillsEnabled,
-  type LifecyclePills,
-  type McpPillServer,
-  readPillEnvFlags,
-} from "./lifecycle-pills"
+import { buildSkillsConfig } from "./internal"
+import { createLifecyclePills, type LifecyclePills, type McpPillServer } from "./lifecycle-pills"
+import type { CliFeatureConfig } from "./repl/cli-feature-config"
 import { runSessionLoop } from "./repl/session-loop"
 import { setupSession } from "./repl/session-setup"
 import { buildSkillsCallback, installPills } from "./repl/skills-surface"
@@ -40,18 +31,13 @@ import {
   createSurfaceState,
 } from "./repl/surface-compose"
 import type { RewindSlashState } from "./rewind-cmd"
-import { createCliRewindGitPort, isCliRewindGitEnabled } from "./rewind-git"
+import { createCliRewindGitPort } from "./rewind-git"
 import { runSessionCommand } from "./session-commands"
 import { runSlashCommand, slashCompleter } from "./slash-commands"
 import type { StatusBar } from "./status-bar"
 import { createTimelinePanel, type TimelinePanel } from "./timeline-panel"
-import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
-import {
-  createTurnSummary,
-  isTurnSummaryEnabled,
-  isTurnSummaryVerbose,
-  type TurnSummaryCollector,
-} from "./turn-summary"
+import { createTurnIndicator, type TurnIndicator } from "./turn-indicator"
+import { createTurnSummary, type TurnSummaryCollector } from "./turn-summary"
 
 /**
  * CLI REPL + main-orchestration body.
@@ -94,9 +80,10 @@ export { dispatchReplSlash, type ReplSlashCtx } from "./repl/slash-surface"
 const buildRewindSlashState = (
   sessionId: string | undefined,
   cwd: string,
+  featureCfg: CliFeatureConfig,
 ): RewindSlashState | undefined => {
   if (typeof sessionId !== "string" || sessionId.length === 0) return undefined
-  const git = isCliRewindGitEnabled(process.env) ? createCliRewindGitPort({ cwd }) : undefined
+  const git = featureCfg.rewindGit.enabled ? createCliRewindGitPort({ cwd }) : undefined
   return { sessionId, ...(git !== undefined ? { git } : {}) }
 }
 
@@ -128,13 +115,9 @@ export const topLevelUsage = (): string =>
  *  short-circuits (`/image …` falls through to the surface-agnostic dispatcher
  *  which prints "unknown command"). Extracted from `runRepl` so the host stays
  *  under biome's cognitive-complexity budget. */
-const buildImageQueue = (): ImageQueue | undefined => {
-  const imageQueueEnabled = env("QUANTA_IMAGE_QUEUE", "1") !== "0"
-  if (!imageQueueEnabled) return undefined
-  const raw = Number(env("QUANTA_IMAGE_MAX_QUEUE", "5"))
-  return createImageQueue({
-    maxSize: Number.isFinite(raw) && raw > 0 ? raw : 5,
-  })
+const buildImageQueue = (featureCfg: CliFeatureConfig): ImageQueue | undefined => {
+  if (!featureCfg.imageQueue.enabled) return undefined
+  return createImageQueue({ maxSize: featureCfg.imageQueue.maxSize })
 }
 
 /** Lifecycle pills build-bundle for the CLI surface — pre-creates the
@@ -153,27 +136,22 @@ interface LifecycleBundle {
   followUpQueue: FollowUpQueue | undefined
 }
 
-const buildLifecycleBundle = (): LifecycleBundle => {
-  const pillsEnabled = isLifecyclePillsEnabled(process.env, process.stderr.isTTY)
-  const pillFlags = readPillEnvFlags(process.env)
+const buildLifecycleBundle = (featureCfg: CliFeatureConfig): LifecycleBundle => {
+  const { pills: pillsCfg, subagentForPills } = featureCfg
   // The TaskRegistry is allocated ONLY when subagent + pills are both ON.
   // The loop receives the same instance through `buildTooling` so all four
   // subagent tools share it; the CLI holds the handle for `pendingIds()`.
-  const subagentEnabledForPills =
-    pillsEnabled && !pillFlags.hideTasks && process.env.QUANTA_SUBAGENT !== undefined
-  const taskRegistry: TaskRegistry | undefined = subagentEnabledForPills
-    ? new TaskRegistry()
-    : undefined
+  const taskRegistry: TaskRegistry | undefined = subagentForPills ? new TaskRegistry() : undefined
   // FollowUpQueue is allocated when pills + follow-up pill are both ON. The
   // queue is currently producer-less from the CLI; this seam is forward-
   // compatible with mid-turn user input injection (no behavior change yet).
   const followUpQueue: FollowUpQueue | undefined =
-    pillsEnabled && !pillFlags.hideFollowUp ? new FollowUpQueue() : undefined
+    pillsCfg.enabled && !pillsCfg.hideFollowUp ? new FollowUpQueue() : undefined
   const pills: LifecyclePills = createLifecyclePills({
-    enabled: pillsEnabled,
-    hideTasks: pillFlags.hideTasks,
-    hideFollowUp: pillFlags.hideFollowUp,
-    hideMcp: pillFlags.hideMcp,
+    enabled: pillsCfg.enabled,
+    hideTasks: pillsCfg.hideTasks,
+    hideFollowUp: pillsCfg.hideFollowUp,
+    hideMcp: pillsCfg.hideMcp,
   })
   return { pills, taskRegistry, followUpQueue }
 }
@@ -218,11 +196,10 @@ const buildWorkMetricsSink = (enabled: boolean): AgentConfig["workMetricsSink"] 
  *  command. The metrics counters are CUMULATIVE across the session — we track
  *  the previous snapshot and feed only the delta into `incrementTurn`. */
 const buildCostPanelOrUndefined = (
-  envSource: NodeJS.ProcessEnv,
-  isTTY: boolean | undefined,
+  featureCfg: CliFeatureConfig,
   model: string,
 ): CostPanel | undefined => {
-  if (!isCostPanelEnabled(envSource, isTTY)) return undefined
+  if (!featureCfg.costPanel.enabled) return undefined
   return createCostPanel({ enabled: true, model })
 }
 
@@ -232,10 +209,9 @@ const buildCostPanelOrUndefined = (
  *  is empty-state until a search ingests events; the `/branches` panel prints
  *  "(no branch search recorded yet)" until that happens. */
 const buildBranchProgressOrUndefined = (
-  envSource: NodeJS.ProcessEnv,
-  isTTY: boolean | undefined,
+  featureCfg: CliFeatureConfig,
 ): BranchProgressTracker | undefined => {
-  if (!isBranchProgressEnabled(envSource, isTTY)) return undefined
+  if (!featureCfg.branchProgress.enabled) return undefined
   return createBranchProgressTracker()
 }
 
@@ -243,13 +219,8 @@ const buildBranchProgressOrUndefined = (
  *  "not wired" unless `QUANTA_PLAN_STORE=1` is set (opt-in). When opt-in,
  *  we mint an in-memory `PlanStore` and thread it through `SessionDeps` so
  *  the agent's plan tools mutate the SAME store the surface reads from. */
-const buildPlanStoreOrUndefined = (envSource: NodeJS.ProcessEnv): PlanStore | undefined => {
-  const knob = envSource.QUANTA_PLAN_STORE
-  if (knob === undefined) return undefined
-  const norm = knob.trim().toLowerCase()
-  if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
-    return undefined
-  }
+const buildPlanStoreOrUndefined = (featureCfg: CliFeatureConfig): PlanStore | undefined => {
+  if (!featureCfg.planStore.enabled) return undefined
   return createInMemoryPlanStore({ now: Date.now })
 }
 
@@ -288,28 +259,16 @@ const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
   },
 })
 
-/** ADR-0270 — env-gated MetricsRegistry resolver for the decision-counter sink.
- *  Returns a fresh `defaultMetricsRegistry()` when `QUANTA_DECISION_METRICS=1`
- *  AND no caller-supplied registry is wired. Returns `undefined` otherwise so
- *  the byte-identical no-tee path holds (no MetricsRegistry allocated, no
- *  sink port appended to the upstream TeeStream).
+/** ADR-0270 — gated MetricsRegistry allocator for the decision-counter sink.
+ *  Returns a fresh `defaultMetricsRegistry()` when the caller's typed
+ *  feature flag is ON; otherwise `undefined` so the byte-identical no-tee
+ *  path holds (no MetricsRegistry allocated, no sink port appended).
  *
- *  Default-OFF: the env knob is unset by default. An operator who wants gate
- *  counters in the local snapshot OR exported to OTLP (ADR-0268) flips
- *  `QUANTA_DECISION_METRICS=1` and — for export — wires an OTel-backed sink at
- *  registry construction time (the resolver still returns the registry; the
- *  exporter side is the caller's responsibility, kept slice-clean here). */
-const resolveDecisionMetricsRegistry = (
-  envSource: NodeJS.ProcessEnv,
-): MetricsRegistry | undefined => {
-  const knob = envSource.QUANTA_DECISION_METRICS
-  if (typeof knob !== "string") return undefined
-  const norm = knob.trim().toLowerCase()
-  if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
-    return undefined
-  }
-  return defaultMetricsRegistry()
-}
+ *  Default-OFF: `featureCfg.decisionMetricsEnabled` is `false` unless the
+ *  operator opts in via `QUANTA_DECISION_METRICS` (parsed up-front in
+ *  `cli-feature-config.ts`). */
+const resolveDecisionMetricsRegistry = (enabled: boolean): MetricsRegistry | undefined =>
+  enabled ? defaultMetricsRegistry() : undefined
 
 /** ADR-0270 — append the decision → counter sink to a stream tee. Pure helper
  *  with NO env / NO global state — every input is explicit so tests can drive
@@ -348,14 +307,12 @@ const appendDecisionCounterSink = (
  *  returned stream is whatever the summary path produced — preserving the
  *  byte-identical no-tee path when both consumers are disabled. */
 const buildTurnSummaryAndStream = (
+  featureCfg: CliFeatureConfig,
   stream: StreamPort,
-  envSource: NodeJS.ProcessEnv,
-  isTTY: boolean | undefined,
 ): { collector: TurnSummaryCollector; stream: StreamPort } => {
-  const enabled = isTurnSummaryEnabled(envSource, isTTY)
-  const verbose = isTurnSummaryVerbose(envSource)
+  const { enabled, verbose } = featureCfg.turnSummary
   const collector = createTurnSummary({ enabled, verbose })
-  const decisionMetrics = resolveDecisionMetricsRegistry(envSource)
+  const decisionMetrics = resolveDecisionMetricsRegistry(featureCfg.decisionMetricsEnabled)
   if (!enabled) {
     // Summary collector OFF — the decision-counter sink can still be appended
     // if the operator opts in via the env knob. When both are OFF (the
@@ -376,19 +333,12 @@ const buildTurnSummaryAndStream = (
  *  is clamped to a finite positive integer; a bad env value (`abc`, `-5`)
  *  falls back to the 80 ms default. */
 const buildTurnIndicatorAndStream = (
+  featureCfg: CliFeatureConfig,
   statusBar: StatusBar,
   stream: StreamPort,
-  envSource: NodeJS.ProcessEnv,
-  isTTY: boolean | undefined,
-  intervalEnv: string,
 ): { indicator: TurnIndicator; turnStream: StreamPort } => {
-  const enabled = isIndicatorEnabled(envSource, isTTY)
-  const intervalMs = Number(intervalEnv)
-  const indicator = createTurnIndicator({
-    statusBar,
-    enabled,
-    intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 80,
-  })
+  const { enabled, intervalMs } = featureCfg.turnIndicator
+  const indicator = createTurnIndicator({ statusBar, enabled, intervalMs })
   if (!enabled) return { indicator, turnStream: stream }
   return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator)]) }
 }
@@ -411,23 +361,21 @@ const buildTurnIndicatorAndStream = (
  *  A failure inside the tracer is swallowed in place (TeeStream would
  *  otherwise mark a degraded record). */
 const buildDebugTracerAndStream = (
+  featureCfg: CliFeatureConfig,
   stream: StreamPort,
-  envSource: NodeJS.ProcessEnv,
-  isTTY: boolean | undefined,
 ): {
   stream: StreamPort
   debugHandle: import("./repl/session-setup").DebugTracerHandle | undefined
 } => {
-  // Non-TTY ⇒ forced disable to avoid polluting pipe/redirect output.
-  if (isTTY !== true) return { stream, debugHandle: undefined }
-  const parsed = parseDebugEnv(envSource.QUANTA_DEBUG)
-  if (!parsed.enabled) return { stream, debugHandle: undefined }
+  // Non-TTY ⇒ forced disable (captured up-front in featureCfg.debugTracer.enabled
+  // alongside the parsed QUANTA_DEBUG knob) to avoid polluting pipe/redirect output.
+  if (!featureCfg.debugTracer.enabled) return { stream, debugHandle: undefined }
   // Live state ref + tracer ref. The tracer is rebuilt on each
   // `set(state)` so options (categories, startedAt) reflect the latest
   // toggle. Initial tracer is built once for the boot-enabled state.
   let state: DebugCmdState =
-    parsed.categories !== undefined
-      ? { enabled: true, categories: parsed.categories }
+    featureCfg.debugTracer.categories !== undefined
+      ? { enabled: true, categories: featureCfg.debugTracer.categories }
       : { enabled: true }
   const buildTracer = (s: DebugCmdState): ReturnType<typeof createDebugTracer> | null => {
     if (!s.enabled) return null
@@ -469,15 +417,11 @@ const buildDebugTracerAndStream = (
  *  recorder tee. The host calls `panel.teardown()` in `runRepl`'s `finally`
  *  block so a follow-on shell prompt lands on a clean screen. */
 const buildTimelinePanelAndStream = (
+  featureCfg: CliFeatureConfig,
   stream: StreamPort,
-  envSource: NodeJS.ProcessEnv,
-  isTTY: boolean | undefined,
 ): { stream: StreamPort; panel: TimelinePanel | undefined } => {
-  if (isTTY !== true) return { stream, panel: undefined }
-  const heightRaw = Number(envSource.QUANTA_TIMELINE ?? "0")
-  const height = Number.isFinite(heightRaw) && heightRaw > 0 ? Math.floor(heightRaw) : 0
-  if (height === 0) return { stream, panel: undefined }
-  const panel = createTimelinePanel({ height })
+  if (!featureCfg.timelinePanel.enabled) return { stream, panel: undefined }
+  const panel = createTimelinePanel({ height: featureCfg.timelinePanel.height })
   const proxy: StreamPort = {
     emit: (event): void => {
       try {
@@ -586,9 +530,10 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
  *  a pure relocation of the prior inline code. */
 export const runRepl = async (): Promise<void> => {
   const setup = await setupSession(sessionSetupDeps)
+  const featureCfg = setup.featureCfg
   const surfaceState = createSurfaceState({
-    imageQueue: setup.argPrompt ? undefined : buildImageQueue(),
-    rewindState: buildRewindSlashState(setup.sessionId, setup.cwd),
+    imageQueue: setup.argPrompt ? undefined : buildImageQueue(featureCfg),
+    rewindState: buildRewindSlashState(setup.sessionId, setup.cwd, featureCfg),
     history: setup.history,
   })
   try {
@@ -606,7 +551,7 @@ export const runRepl = async (): Promise<void> => {
       sinks: composeTurnSinks(setup, surfaceState),
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
       textInbox: wires.textInbox,
-      ux: buildPromptUx(),
+      ux: buildPromptUx(featureCfg),
       registerExitTeardown: (cb) => {
         process.once("exit", cb)
       },
