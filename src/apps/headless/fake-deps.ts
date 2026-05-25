@@ -8,6 +8,7 @@
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { StructuredLogger } from "@/observability"
+import type { AgentConfig } from "@/agent"
 import type { Tooling } from "@/runner/assemble"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -32,6 +33,7 @@ export const buildFakeBootstrapDeps = (
   llm: LLMPort,
   stream: StreamPort,
   tools: readonly Tool[] = [],
+  overrides: { readonly subagentConfig?: AgentConfig["subagent"] } = {},
 ): SessionBootstrapDeps => {
   const registry = new ToolRegistry([...tools])
   const sessionId = "headless-session"
@@ -41,7 +43,7 @@ export const buildFakeBootstrapDeps = (
     sessionId,
     registry,
     memoryConfig: undefined,
-    subagentConfig: undefined,
+    subagentConfig: overrides.subagentConfig,
     skillsConfig: undefined,
     compactionBreakerConfig: undefined,
     verifyGuardConfig: undefined,

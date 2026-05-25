@@ -13,9 +13,10 @@
  * `process.env` / `process.argv` reads in the headless slice itself).
  */
 
-import type { AgentOutcome } from "@/agent"
+import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { Message, StreamEvent } from "@/llm"
+import type { SessionDeps } from "@/runner/assemble"
 import type { AgentEvent } from "@/stream"
 
 /** A pre-programmed assistant turn the fake LLM will replay. Either supply
@@ -51,6 +52,12 @@ export interface HeadlessRunInput {
    *  `process.env`; only the values passed here reach the bootstrap (and
    *  even then only `QUANTA_EFFORT` is consumed). Default `{}`. */
   readonly env?: Readonly<Record<string, string | undefined>>
+  /** Optional home dir for host-owned persistent helpers such as
+   *  session-memory-auto. Default `"/tmp"`. */
+  readonly homeDir?: string
+  /** Optional subagent config so the shared execution-plane helper can
+   *  wire real delegation/background slots in the second-consumer surface. */
+  readonly subagentConfig?: AgentConfig["subagent"]
 }
 
 /** Result of {@link runHeadlessOnce}. The shape is intentionally LEANER
@@ -75,4 +82,8 @@ export interface HeadlessRunResult extends SessionBootstrapResult {
    *  the fake stream port. Surface tests assert on this; production
    *  headless callers may ignore the field. */
   readonly events: readonly AgentEvent[]
+  /** Fully assembled per-turn deps for the run. Exposed so second-consumer
+   *  tests can prove shared execution/memory/automation wires are present
+   *  without importing CLI-only surfaces. */
+  readonly sessionDeps: SessionDeps
 }

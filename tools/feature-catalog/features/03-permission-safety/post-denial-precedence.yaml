@@ -4,7 +4,7 @@ section: 3
 subsystem: 권한 스택 (ADR-0046)
 order: 12
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 telemetry_keys: ["quanta.hitl"]

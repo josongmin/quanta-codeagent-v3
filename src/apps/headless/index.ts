@@ -18,8 +18,13 @@
  */
 
 import { bootstrapSession, type SessionBootstrapResult } from "@/host/bootstrap"
-import { assembleConfig, type SessionDeps } from "@/runner/assemble"
-import { runOnce } from "@/runner/orchestrate"
+import {
+  assembleConfig,
+  buildSessionMemoryAutoWires,
+  buildSharedExecutionPlaneSessionDeps,
+  runOnce,
+  type SessionDeps,
+} from "@/runner"
 import { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
 import { FakeLlm } from "./fake-llm"
 import type { FakeCompletion, HeadlessRunInput, HeadlessRunResult } from "./types"
@@ -43,42 +48,69 @@ const completionsOf = (input: HeadlessRunInput): readonly FakeCompletion[] => {
  *  recording stream. Surface-clean: only fields the headless path needs
  *  (no admissibility, no plan-store, no follow-up queue). The signal flows
  *  through from the caller via `boot.abort.signal`. */
-const composeHeadlessSessionDeps = (
+const composeHeadlessSessionDeps = async (
   boot: SessionBootstrapResult,
+  input: HeadlessRunInput,
   stream: RecordingStream,
-): SessionDeps => ({
-  llm: boot.llm,
-  registry: boot.tooling.registry,
-  stream,
-  permission: boot.permission,
-  system: boot.system,
-  systemSource: boot.systemSource,
-  cwd: boot.cwd,
-  maxTurns: boot.maxTurns,
-  signal: boot.abort.signal,
-  // The headless surface does not interact with a human — `onConfirm` denies
-  // every prompt so any tool that escalates is safely refused. Pair with a
-  // pre-approved tool registry (or `mode: "bypass"`) for tool-call tests.
-  onConfirm: async () => false,
-  store: boot.tooling.store,
-  sessionId: boot.sessionId,
-  embedder: boot.tooling.embedder,
-  memoryConfig: boot.tooling.memoryConfig,
-  planMode: boot.features.planMode,
-  metrics: boot.features.metrics,
-  run: boot.run,
-  subagentConfig: boot.tooling.subagentConfig,
-  skillsConfig: boot.tooling.skillsConfig,
-  compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
-  verifyGuardConfig: boot.tooling.verifyGuardConfig,
-  summarizerLlm: undefined,
-  ...(boot.toolProfileState !== undefined ? { toolProfileState: boot.toolProfileState } : {}),
-  ...(boot.identityModeState !== undefined ? { identityModeState: boot.identityModeState } : {}),
-  ...(boot.focusChain !== undefined ? { focusChain: boot.focusChain } : {}),
-  onShellEvent: boot.onShellEvent,
-  workMetricsSink: boot.workMetricsSink,
-  sessionEffort: () => boot.effortStore.get(),
-})
+): Promise<SessionDeps> => {
+  const base: SessionDeps = {
+    llm: boot.llm,
+    registry: boot.tooling.registry,
+    stream,
+    permission: boot.permission,
+    system: boot.system,
+    systemSource: boot.systemSource,
+    cwd: boot.cwd,
+    maxTurns: boot.maxTurns,
+    signal: boot.abort.signal,
+    // The headless surface does not interact with a human — `onConfirm` denies
+    // every prompt so any tool that escalates is safely refused. Pair with a
+    // pre-approved tool registry (or `mode: "bypass"`) for tool-call tests.
+    onConfirm: async () => false,
+    store: boot.tooling.store,
+    sessionId: boot.sessionId,
+    embedder: boot.tooling.embedder,
+    memoryConfig: boot.tooling.memoryConfig,
+    planMode: boot.features.planMode,
+    metrics: boot.features.metrics,
+    run: boot.run,
+    subagentConfig: boot.tooling.subagentConfig,
+    skillsConfig: boot.tooling.skillsConfig,
+    compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
+    verifyGuardConfig: boot.tooling.verifyGuardConfig,
+    summarizerLlm: undefined,
+    ...(boot.toolProfileState !== undefined ? { toolProfileState: boot.toolProfileState } : {}),
+    ...(boot.identityModeState !== undefined ? { identityModeState: boot.identityModeState } : {}),
+    ...(boot.focusChain !== undefined ? { focusChain: boot.focusChain } : {}),
+    onShellEvent: boot.onShellEvent,
+    workMetricsSink: boot.workMetricsSink,
+    sessionEffort: () => boot.effortStore.get(),
+  }
+  const executionPlaneDeps = await buildSharedExecutionPlaneSessionDeps({
+    history: boot.history,
+    sessionDeps: base,
+    cwd: boot.cwd,
+    envSource: input.env ?? {},
+  })
+  const memoryAuto = await buildSessionMemoryAutoWires({
+    env: input.env ?? {},
+    llm: boot.llm,
+    sessionId: boot.sessionId,
+    signal: boot.abort.signal,
+    homeDir: input.homeDir ?? "/tmp",
+  })
+  return {
+    ...base,
+    ...executionPlaneDeps,
+    ...(memoryAuto?.sessionCtx !== undefined ? { sessionCtx: memoryAuto.sessionCtx } : {}),
+    ...(memoryAuto?.memoryConsolidator !== undefined
+      ? { memoryConsolidator: memoryAuto.memoryConsolidator }
+      : {}),
+    ...(memoryAuto?.stage1OutputsStore !== undefined
+      ? { stage1OutputsStore: memoryAuto.stage1OutputsStore }
+      : {}),
+  }
+}
 
 /** Run a single agent turn through `@/host/bootstrap` + `@/runner` with
  *  faked deps. Returns the bootstrap result, the per-turn outcome, the
@@ -93,11 +125,14 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
   const completions = completionsOf(input)
   const llm = new FakeLlm(completions)
   const stream = new RecordingStream()
-  const deps = buildFakeBootstrapDeps(llm, stream)
+  const deps = buildFakeBootstrapDeps(llm, stream, [], {
+    ...(input.subagentConfig !== undefined ? { subagentConfig: input.subagentConfig } : {}),
+  })
   const runtime = buildFakeRuntime({
     maxTurns: input.maxTurns ?? 5,
     cwd: input.cwd ?? "/tmp/headless",
     env: input.env ?? {},
+    homeDir: input.homeDir ?? "/tmp",
   })
   // Featureless surface config — the headless run never wires a cost panel /
   // branch progress / plan store / status pills, and the fake bootstrap deps
@@ -114,7 +149,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
   }
 
   try {
-    const sessionDeps = composeHeadlessSessionDeps(boot, stream)
+    const sessionDeps = await composeHeadlessSessionDeps(boot, input, stream)
     const { outcome, messages } = await runOnce({
       deps: sessionDeps,
       assembleConfig,
@@ -123,7 +158,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
       state: boot.features.state,
       idMeta: boot.idMeta,
     })
-    return { ...boot, outcome, messages, events: stream.events }
+    return { ...boot, outcome, messages, events: stream.events, sessionDeps }
   } finally {
     // Default-OFF: empty mcpClients ⇒ `shutdownMcp` is a no-op. Kept in a
     // `finally` so a future wired MCP path tears down cleanly.

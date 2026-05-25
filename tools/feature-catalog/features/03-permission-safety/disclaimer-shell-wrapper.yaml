@@ -4,7 +4,7 @@ section: 3
 subsystem: 사용자 셸 격리 (ADR-0056)
 order: 9
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]

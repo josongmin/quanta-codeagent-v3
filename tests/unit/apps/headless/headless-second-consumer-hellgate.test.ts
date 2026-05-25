@@ -44,12 +44,18 @@
  * 14. Adversarial: the recording stream captures at least one
  *     `llm_request` event during the smoke, confirming the runner actually
  *     drove the LLM via the bootstrap.
+ * 15. Execution-plane parity: subagent-enabled headless runs expose the
+ *     same fork / delegation / background slots as the shared host helper.
+ * 16. Memory-auto parity: `QUANTA_MEMORY_AUTO=on` wires stage1 outputs and
+ *     the session-end consolidator without importing CLI-only helpers.
  *
  * Tests run HEADLESS-LEVEL: no `process.env` mocking, no `mock.module`.
  */
 
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { extname, join } from "node:path"
 import {
   FakeLlm,
@@ -450,5 +456,41 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     expect(llmReqs.length).toBeGreaterThanOrEqual(1)
     // Confirm the runner saw the FAKE provider id (not a real one).
     expect((llmReqs[0] as { provider?: string }).provider).toBe("headless")
+  })
+
+  test("CASE 15: subagent-enabled headless runs gain live execution-plane slots", async () => {
+    const result = await runHeadlessOnce({
+      prompt: "x",
+      fakeCompletion: { text: "y" },
+      subagentConfig: {},
+    })
+
+    expect(result.sessionDeps.conversationCheckpoint).toBeDefined()
+    expect(result.sessionDeps.fork).toBeDefined()
+    expect(result.sessionDeps.forkSession).toBeDefined()
+    expect(result.sessionDeps.delegation).toBeDefined()
+    expect(result.sessionDeps.subagentBackground).toBeDefined()
+    expect(result.sessionDeps.autoBackground).toBeDefined()
+  })
+
+  test("CASE 16: QUANTA_MEMORY_AUTO=on wires second-consumer memory auto ports", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "q-headless-memory-auto-"))
+    try {
+      const result = await runHeadlessOnce({
+        prompt: "x",
+        fakeCompletion: { text: "y" },
+        env: {
+          QUANTA_MEMORY_AUTO: "on",
+          QUANTA_MEMORY_PHASE2: "on",
+        },
+        homeDir,
+      })
+
+      expect(result.sessionDeps.stage1OutputsStore).toBeDefined()
+      expect(result.sessionDeps.memoryConsolidator).toBeDefined()
+      expect(result.sessionDeps.memoryConsolidator?.enabled).toBe(true)
+    } finally {
+      await rm(homeDir, { recursive: true, force: true })
+    }
   })
 })

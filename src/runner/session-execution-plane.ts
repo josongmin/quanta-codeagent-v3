@@ -1,10 +1,4 @@
-import type { AgentConfig } from "@/agent"
-import {
-  buildSubagentForkOnAccept,
-  defaultProposeHandler,
-  defaultStuckDetector,
-} from "@/agent/auto-background"
-import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
+import { defaultConversationCheckpointStore, type ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import type {
@@ -12,6 +6,11 @@ import type {
   SubagentResult,
   SubagentStatus,
 } from "@/agent/subagent-background"
+import {
+  buildSubagentForkOnAccept,
+  defaultProposeHandler,
+  defaultStuckDetector,
+} from "@/agent/auto-background"
 import { defaultBackgroundSubagentScheduler } from "@/agent/subagent-background"
 import {
   defaultJsonlSchedulerStore,
@@ -24,16 +23,18 @@ import {
   lookupModeProfile,
   wrapSubagentRunner,
 } from "@/agent/subagent-typed"
-import { assembleConfig, type SessionDeps } from "../internal"
-import type { SessionSetupResult } from "./session-setup"
+import type { Message } from "@/llm"
+import { assembleConfig, type SessionDeps } from "./assemble"
 
-export interface ExecutionPlaneWireArgs {
-  readonly setup: SessionSetupResult
-  readonly convStore: ConversationCheckpointStore
-  readonly envSource: NodeJS.ProcessEnv
+export interface SharedExecutionPlaneArgs {
+  readonly history: readonly Message[]
+  readonly sessionDeps: SessionDeps
+  readonly cwd: string
+  readonly envSource: Readonly<Record<string, string | undefined>>
+  readonly convStore?: ConversationCheckpointStore
 }
 
-type ExecutionPlaneSessionDeps = Pick<
+type SharedExecutionPlaneDeps = Pick<
   SessionDeps,
   | "conversationCheckpoint"
   | "fork"
@@ -71,7 +72,7 @@ const parsePositiveInt = (raw: string | undefined): number | undefined => {
 }
 
 const adaptDelegation = (
-  cfg: AgentConfig,
+  cfg: Parameters<typeof createSubagentRunner>[0],
   maxDepth: number | undefined,
 ): NonNullable<SessionDeps["delegation"]> => {
   const subagentRunner = createSubagentRunner(cfg, maxDepth !== undefined ? { maxDepth } : {})
@@ -95,20 +96,21 @@ const adaptDelegation = (
   return { delegator, modes: AGENT_MODES }
 }
 
-export const buildExecutionPlaneSessionDeps = async (
-  args: ExecutionPlaneWireArgs,
-): Promise<Partial<ExecutionPlaneSessionDeps>> => {
-  const forkWire = defaultCheckpointBaseWire({ store: args.convStore })
-  const base: Partial<ExecutionPlaneSessionDeps> = {
-    conversationCheckpoint: { store: args.convStore },
+export const buildSharedExecutionPlaneSessionDeps = async (
+  args: SharedExecutionPlaneArgs,
+): Promise<Partial<SharedExecutionPlaneDeps>> => {
+  const convStore = args.convStore ?? defaultConversationCheckpointStore()
+  const forkWire = defaultCheckpointBaseWire({ store: convStore })
+  const base: Partial<SharedExecutionPlaneDeps> = {
+    conversationCheckpoint: { store: convStore },
     fork: { forker: forkWire.base },
     forkSession: { forker: forkWire.forker },
   }
 
-  const subagentCfg = args.setup.sessionDeps.subagentConfig
+  const subagentCfg = args.sessionDeps.subagentConfig
   if (subagentCfg === undefined) return base
 
-  const parentConfig = assembleConfig([...args.setup.history], args.setup.sessionDeps)
+  const parentConfig = assembleConfig([...args.history], args.sessionDeps)
   const childRunner = createSubagentRunner(
     parentConfig,
     subagentCfg.maxDepth !== undefined ? { maxDepth: subagentCfg.maxDepth } : {},
@@ -127,7 +129,7 @@ export const buildExecutionPlaneSessionDeps = async (
         ? { baseDir: args.envSource.QUANTA_BG_STORE_DIR }
         : undefined,
     ),
-    workspace: args.setup.cwd,
+    workspace: args.cwd,
   })
   const scheduler: BackgroundSubagentScheduler = {
     fork: (spec) => persistent.fork(spec),

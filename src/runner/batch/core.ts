@@ -1,11 +1,20 @@
 import { loadCorpus as defaultLoadCorpus, type Prediction, writePredictions } from "./corpus"
-import { buildReport, writeReport } from "./report"
+import { knobsForReport, resolveBenchKnobs } from "./eval/knobs-bench"
+import { type BenchReportKnobs, buildReport, writeReport } from "./report"
 import type { Instance, InstanceResult } from "./types"
 
 export interface BatchArtifactMeta {
   model: string
   provider: string
   n: number
+  /**
+   * Optional pre-resolved knob telemetry. When provided, embedded verbatim
+   * in the report. When omitted, `writeArtifacts` resolves the bench-surface
+   * knob state from `process.env` at write time — matches the per-instance
+   * resolution the driver does, so the report's `knobs` section reflects
+   * the run's actual posture. Tests can inject a deterministic value here.
+   */
+  knobs?: BenchReportKnobs
 }
 
 export interface LoadSelectedInstancesOptions {
@@ -94,6 +103,25 @@ export const writeArtifacts = async (
     await writePredictions(predictionsFile, predictions)
   }
   if (hasPath(reportFile)) {
-    await writeReport(reportFile, buildReport(meta, [...results]))
+    // Knob telemetry: pre-supplied (test seam) > resolved-from-env (default).
+    // Always emitted into the report so the JSON carries the run's exact
+    // knob posture for after-the-fact comparison. With an empty registry
+    // the section is `{ resolved:{}, inactive:[] }` — a safe baseline marker.
+    const knobs = meta.knobs ?? collectBenchKnobsTelemetry()
+    await writeReport(reportFile, buildReport({ ...meta, knobs }, [...results]))
+  }
+}
+
+/** Collect the bench-surface knob state from `process.env` and project to
+ *  the report's serialisable shape. Extracted here so `writeArtifacts` stays
+ *  one concern (artifact I/O) and the resolver-to-projection wiring can be
+ *  unit-tested as a single seam. */
+export const collectBenchKnobsTelemetry = (): BenchReportKnobs => {
+  const state = resolveBenchKnobs({ envVars: process.env })
+  const resolved = knobsForReport(state)
+  return {
+    resolved,
+    ...(state.preset !== undefined ? { preset: state.preset } : {}),
+    inactive: state.inactive,
   }
 }

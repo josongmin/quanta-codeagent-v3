@@ -1582,6 +1582,37 @@
       }
     },
     {
+      "includes": ["**/src/apps/cli/repl.ts", "**/src/apps/cli/repl/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/runner/session-execution-plane",
+                      "@/runner/session-execution-plane/*",
+                      "@/runner/session-execution-plane/**",
+                      "@/runner/session-memory-auto",
+                      "@/runner/session-memory-auto/*",
+                      "@/runner/session-memory-auto/**",
+                      "**/execution-plane-wire",
+                      "**/execution-plane-wire/*",
+                      "**/session-memory-auto",
+                      "**/session-memory-auto/*"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/cli/repl must not grow private session-assembler shims or import runner-owned session assemblers through internal paths. Consume the public @/runner contract instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/apps/cli/repl/**"],
       "linter": {
         "rules": {

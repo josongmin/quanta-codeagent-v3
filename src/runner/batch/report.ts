@@ -7,6 +7,15 @@
  * `testCmd` outcome, which is a no-op for the official-dataset path. The
  * report exists to track baseline runs over time alongside the official
  * `predictions.jsonl`.
+ *
+ * Knob telemetry: every report carries a `knobs` section recording the exact
+ * registry state used for the run — active knob values + their source layer
+ * (env / preset / config / cli / default), the optional `--knobs-preset`
+ * name, and the registered-but-inactive ids. Operators reading the JSON
+ * report can verify what configuration produced the resolved/total numbers,
+ * which is the user-explicit requirement: a benchmark report MUST capture
+ * its own knob posture so two runs are comparable. Empty registry (knob
+ * files not yet imported) ⇒ all three subfields collapse to safe empties.
  */
 import {
   aggregate,
@@ -20,6 +29,21 @@ import type { InstanceResult } from "./types"
 export interface BenchReportMeta {
   model: string
   provider: string
+}
+
+/** Knob telemetry — exact registry state for the run. Cheaply serialisable
+ *  (plain JSON-friendly shapes, no Maps / classes). */
+export interface BenchReportKnobs {
+  /** id → { value, source }. Only knobs whose layered resolution produced a
+   *  non-undefined value appear here. Empty object when the registry is
+   *  empty OR no knob's env value matched. */
+  readonly resolved: Readonly<Record<string, { value: unknown; source: string }>>
+  /** Resolved `--knobs-preset` name (or `QUANTA_KNOBS_PRESET`). Absent when
+   *  no preset was selected. */
+  readonly preset?: string
+  /** Registered-but-inactive knob ids (no value in any layer, no default).
+   *  Sorted by registry iteration order for stability. */
+  readonly inactive: readonly string[]
 }
 
 export interface PerInstanceReport {
@@ -48,12 +72,22 @@ export interface BenchReport {
    *  failed. */
   failureBreakdown: FailureBreakdown
   perInstance: PerInstanceReport[]
+  /** Knob telemetry — recorded so two runs are comparable from the JSON
+   *  alone. Always present (empty subfields when the registry is empty). */
+  knobs: BenchReportKnobs
 }
 
 /** Build the report object from results + meta. Pure & deterministic given a
- *  fixed `timestamp` (defaults to now). */
+ *  fixed `timestamp` (defaults to now).
+ *
+ *  `knobs` is optional only because most legacy callers (and the entire
+ *  knob-less codepath, including this worktree's empty registry) pass none.
+ *  When omitted the report emits `{ resolved:{}, inactive:[] }` — a safe
+ *  empty marker that distinguishes "no knobs section was wired" (impossible
+ *  after this change) from "registry was empty for this run" (legitimate
+ *  pre-knob baseline). */
 export const buildReport = (
-  meta: BenchReportMeta & { n: number; timestamp?: string },
+  meta: BenchReportMeta & { n: number; timestamp?: string; knobs?: BenchReportKnobs },
   results: InstanceResult[],
 ): BenchReport => {
   // C8: degraded-excluding denominator — the SAME source as observe.summarize
@@ -61,6 +95,9 @@ export const buildReport = (
   const { resolved, total } = resolvedTotals(results)
   const classifications = results.map((r) => classify(r))
   const failedClassifications = classifications.filter((c) => c.termination !== "passed")
+  // `knobs` defaults to an empty marker so the JSON shape is stable across
+  // runs even when the registry is empty (current worktree state).
+  const knobs: BenchReportKnobs = meta.knobs ?? { resolved: {}, inactive: [] }
   return {
     timestamp: meta.timestamp ?? new Date().toISOString(),
     model: meta.model,
@@ -83,6 +120,7 @@ export const buildReport = (
         ...(c.termination !== "passed" ? { failure: c } : {}),
       }
     }),
+    knobs,
   }
 }
 

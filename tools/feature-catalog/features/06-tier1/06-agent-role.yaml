@@ -4,7 +4,7 @@ section: 6
 subsystem: 서브에이전트 — 역할 + 닉네임
 order: 13
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]

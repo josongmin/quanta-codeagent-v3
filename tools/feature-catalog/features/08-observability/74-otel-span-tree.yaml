@@ -4,7 +4,7 @@ section: 8
 subsystem: 텔레메트리 — span 방출 seam + hot-path 4-step wrap
 order: 68
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["quanta.conversation.id", "quanta.turn.id", "quanta.tool.call.status", "quanta.thread.id", "quanta.turn.kind"]

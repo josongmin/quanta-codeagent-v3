@@ -4,7 +4,7 @@ section: 6
 subsystem: 스킬 — 번들 시스템 스킬 (코드 증거 기반 audit discipline)
 order: 14
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]

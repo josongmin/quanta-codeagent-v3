@@ -4,7 +4,7 @@ section: 9
 subsystem: Anthropic adapter + skill discovery (ADR-0058)
 order: 6
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

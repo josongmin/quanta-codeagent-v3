@@ -210,7 +210,7 @@ describe("buildSystemPrompt", () => {
       expect(lower).toContain("do not match tools to query strings")
     })
 
-    test("routing matrix names every entry (web / search_codebase / grep / edit / scripted_replace / test_runner / Agent / ToolSearch)", () => {
+    test("routing matrix names every entry (web / search_codebase / grep / edit / scripted_replace / test_runner / browser / Agent / ToolSearch)", () => {
       // Each routing entry must be discoverable.
       expect(lower).toContain("web/research tool")
       expect(lower).toContain("search_codebase")
@@ -222,6 +222,9 @@ describe("buildSystemPrompt", () => {
       expect(lower).toContain("edit (one minimal patch)")
       expect(lower).toContain("scripted_replace")
       expect(lower).toContain("test_runner")
+      expect(lower).toContain("dom / visual verification")
+      expect(lower).toContain("browser/playwright mcp tools")
+      expect(lower).toContain("read_image_url")
       expect(lower).toContain("batch tool calls in one message")
       expect(p).toContain("Agent tool (explicit permission only)")
       expect(p).toContain("ToolSearch (preferred over raw")

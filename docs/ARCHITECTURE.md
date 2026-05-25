@@ -128,9 +128,18 @@ Surfaces are host adapters, not alternate engine homes.
 
 - `src/apps/cli/**` may own terminal I/O, TTY/raw-mode handling, slash/UI rendering, and host-owned ports. Reusable turn/session semantics belong in `@/runner/*` or lower slices.
 - `src/apps/agent/**` is the host-neutral launcher surface. It must not grow into a backdoor that reuses CLI runtime ownership by importing `src/apps/cli/**`.
+- Thin does not mean render-only. A surface may still own prompt UX, status chrome, slash dispatch, argv/HTTP/IPC parsing, and concrete host bindings. What it may not own is reusable runtime semantics.
+- A surface counts as thin only if all of these are true:
+  - sibling app-surface runtime imports are zero,
+  - non-surface terminal defaults are zero,
+  - reusable interactive/session/batch semantics live below `src/apps/**`,
+  - state that can affect a later turn is engine-owned rather than slash-local,
+  - the structural ratchets stay green.
 - Any state that can affect the next turn's `AgentConfig`, prompt, tool policy, or loop behavior must be wired through an authoritative engine-visible path (`SessionDeps`, `AgentConfig`, or a typed host port). A slash-only mirror is not authority.
-- No new runtime imports may be added from one `src/apps/<surface>` tree into another. The current temporary debt ceiling is frozen by `tests/unit/surface-coupling-ratchet.test.ts`; debt reduction is allowed, debt expansion is not.
-- Non-surface slices must not add fresh terminal defaults. `tests/unit/terminal-defaults-ratchet.test.ts` freezes the current non-`src/apps/**` stdio/exit debt ceiling so new core/runtime terminal ownership trips immediately.
+- No new runtime imports may be added from one `src/apps/<surface>` tree into another. `tests/unit/surface-coupling-ratchet.test.ts` is now an exact-zero guard: debt reduction is irrelevant because reintroduction is forbidden.
+- Non-surface slices must not add fresh terminal defaults. `tests/unit/terminal-defaults-ratchet.test.ts` is now an exact-zero guard for non-`src/apps/**` stdio/exit ownership.
+- The CLI REPL must not regain runner-owned session assemblers inside `src/apps/cli/repl/**`. `tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts` pins that ownership boundary.
+- Surface-affecting changes are not architecture-closed until `typecheck`, the relevant Biome fences, `surface-coupling-ratchet`, `terminal-defaults-ratchet`, and any feature-specific state-authority hellgate are green.
 
 ---
 

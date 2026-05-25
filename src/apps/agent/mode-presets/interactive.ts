@@ -48,28 +48,34 @@ const buildInteractiveBase = (
 
 const buildInteractiveOptionalDeps = (
   base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
-): Partial<Parameters<typeof runInteractive>[0]["deps"]> => ({
-  ...(base.followUpQueue !== undefined ? { followUpQueue: base.followUpQueue } : {}),
-  ...(base.planStore !== undefined ? { planStore: base.planStore } : {}),
-  ...(base.retrievalStack !== undefined ? { retrievalStack: base.retrievalStack } : {}),
-  ...(base.searchPipeline !== undefined ? { searchPipeline: base.searchPipeline } : {}),
-  ...(base.memoryConsolidator !== undefined ? { memoryConsolidator: base.memoryConsolidator } : {}),
-  ...(base.delegation !== undefined ? { delegation: base.delegation } : {}),
-  ...(base.subagentBackground !== undefined ? { subagentBackground: base.subagentBackground } : {}),
-  ...(base.autoBackground !== undefined ? { autoBackground: base.autoBackground } : {}),
-  ...(base.fork !== undefined ? { fork: base.fork } : {}),
-  ...(base.forkSession !== undefined ? { forkSession: base.forkSession } : {}),
-  ...(base.conversationCheckpoint !== undefined
-    ? { conversationCheckpoint: base.conversationCheckpoint }
-    : {}),
-  ...(base.automationEngine !== undefined ? { automationEngine: base.automationEngine } : {}),
-  ...(base.admissibility !== undefined ? { admissibility: base.admissibility } : {}),
-  ...(base.planExitPort !== undefined ? { planExitPort: base.planExitPort } : {}),
-  ...(base.userInputPort !== undefined ? { userInputPort: base.userInputPort } : {}),
-  ...(base.shellSnapshot !== undefined ? { shellSnapshot: base.shellSnapshot } : {}),
-  ...(base.sessionEffort !== undefined ? { sessionEffort: base.sessionEffort } : {}),
-  ...(base.decisionEmitter !== undefined ? { decisionEmitter: base.decisionEmitter } : {}),
-})
+): Partial<Parameters<typeof runInteractive>[0]["deps"]> => {
+  const optional: Partial<Parameters<typeof runInteractive>[0]["deps"]> = {}
+  const assignIfDefined = <K extends keyof Parameters<typeof runInteractive>[0]["deps"]>(
+    key: K,
+    value: Parameters<typeof runInteractive>[0]["deps"][K] | undefined,
+  ): void => {
+    if (value !== undefined) optional[key] = value
+  }
+  assignIfDefined("followUpQueue", base.followUpQueue)
+  assignIfDefined("planStore", base.planStore)
+  assignIfDefined("retrievalStack", base.retrievalStack)
+  assignIfDefined("searchPipeline", base.searchPipeline)
+  assignIfDefined("memoryConsolidator", base.memoryConsolidator)
+  assignIfDefined("delegation", base.delegation)
+  assignIfDefined("subagentBackground", base.subagentBackground)
+  assignIfDefined("autoBackground", base.autoBackground)
+  assignIfDefined("fork", base.fork)
+  assignIfDefined("forkSession", base.forkSession)
+  assignIfDefined("conversationCheckpoint", base.conversationCheckpoint)
+  assignIfDefined("automationEngine", base.automationEngine)
+  assignIfDefined("admissibility", base.admissibility)
+  assignIfDefined("planExitPort", base.planExitPort)
+  assignIfDefined("userInputPort", base.userInputPort)
+  assignIfDefined("shellSnapshot", base.shellSnapshot)
+  assignIfDefined("sessionEffort", base.sessionEffort)
+  assignIfDefined("decisionEmitter", base.decisionEmitter)
+  return optional
+}
 
 const buildInteractiveDeps = (
   base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,

@@ -4,7 +4,7 @@ section: 3
 subsystem: 승인 표면 — reviewer + outcome invariant matrix
 order: 1
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

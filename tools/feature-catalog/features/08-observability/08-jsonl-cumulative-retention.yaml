@@ -4,7 +4,7 @@ section: 8
 subsystem: 관측성 (RFC-0002 / ADR-0035)
 order: 9
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]

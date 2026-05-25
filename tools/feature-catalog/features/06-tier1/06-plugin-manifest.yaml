@@ -4,7 +4,7 @@ section: 6
 subsystem: 플러그인 — 매니페스트 + 디스커버리
 order: 10
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [none]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

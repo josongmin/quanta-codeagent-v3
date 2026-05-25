@@ -4,7 +4,7 @@ section: 4
 subsystem: Session 영속화 / append-only rail
 order: 4
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

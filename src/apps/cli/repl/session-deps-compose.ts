@@ -3,6 +3,7 @@ import { createOnConfirmReviewerPort } from "@/agent"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { PermissionStore, ToolAction } from "@/permission"
+import { buildSessionMemoryAutoWires } from "@/runner"
 import { assembleConfig, type SessionDeps } from "@/runner/assemble"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
@@ -11,7 +12,6 @@ import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
 import type { RejectCounter } from "../reject-counter"
 import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
-import { buildSessionMemoryAutoWires } from "./session-memory-auto"
 
 const askLine = async (prompt: string): Promise<string> => {
   const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })

@@ -7,6 +7,7 @@ import {
 } from "@/agent/tier1/reviewer-subagent"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
+import { buildSharedExecutionPlaneSessionDeps } from "@/runner"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { createIdleMonitor } from "./idle-monitor"
@@ -25,7 +26,6 @@ import {
 } from "./internal"
 import { createRejectCounter } from "./reject-counter"
 import type { CliFeatureConfig } from "./repl/cli-feature-config"
-import { buildExecutionPlaneSessionDeps } from "./repl/execution-plane-wire"
 import {
   buildBranchProgressOrUndefined,
   buildCostPanelOrUndefined,
@@ -262,8 +262,10 @@ export const runRepl = async (): Promise<void> => {
   })
   try {
     const convStore = defaultConversationCheckpointStore()
-    const executionPlaneDeps = await buildExecutionPlaneSessionDeps({
-      setup,
+    const executionPlaneDeps = await buildSharedExecutionPlaneSessionDeps({
+      history: setup.history,
+      sessionDeps: setup.sessionDeps,
+      cwd: setup.cwd,
       convStore,
       envSource: process.env,
     })

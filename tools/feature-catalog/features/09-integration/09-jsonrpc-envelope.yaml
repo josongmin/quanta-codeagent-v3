@@ -4,7 +4,7 @@ section: 9
 subsystem: Shared / JSON-RPC
 order: 9
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [api]
 monitoring: n-a
 modes: [n-a]

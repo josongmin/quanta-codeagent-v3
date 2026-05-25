@@ -96,8 +96,6 @@ setTerminalIo({
   stderr: (chunk) => {
     void process.stderr.write(chunk)
   },
-  stdoutIsTTY: process.stdout.isTTY,
-  stderrIsTTY: process.stderr.isTTY,
 })
 
 // ── tiny dotenv (no dependency, first-wins; apps/cli has its own copy) ──────

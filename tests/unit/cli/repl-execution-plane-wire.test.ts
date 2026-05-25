@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { AGENT_MODES } from "@/agent/subagent-typed"
-import { buildExecutionPlaneSessionDeps } from "@/apps/cli/repl/execution-plane-wire"
-import type { SessionSetupResult } from "@/apps/cli/repl/session-setup"
 import type { Message } from "@/llm"
-import type { SessionDeps } from "@/runner/assemble"
+import { buildSharedExecutionPlaneSessionDeps, type SessionDeps } from "@/runner"
 import { ToolRegistry } from "@/tool"
 
 const mkMsg = (text: string): Message => ({
@@ -38,18 +36,14 @@ const baseSessionDeps = (): SessionDeps => ({
   workMetricsSink: undefined,
 })
 
-const makeSetup = (sessionDeps: SessionDeps): SessionSetupResult =>
-  ({
-    cwd: sessionDeps.cwd,
-    history: [mkMsg("seed")],
-    sessionDeps,
-  }) as unknown as SessionSetupResult
-
-describe("repl execution-plane wire", () => {
+describe("session execution plane", () => {
   test("fork surfaces reuse the supplied conversation checkpoint store", async () => {
     const convStore = defaultConversationCheckpointStore()
-    const wired = await buildExecutionPlaneSessionDeps({
-      setup: makeSetup(baseSessionDeps()),
+    const deps = baseSessionDeps()
+    const wired = await buildSharedExecutionPlaneSessionDeps({
+      history: [mkMsg("seed")],
+      sessionDeps: deps,
+      cwd: deps.cwd,
       convStore,
       envSource: {},
     })
@@ -70,8 +64,10 @@ describe("repl execution-plane wire", () => {
   test("subagent-enabled sessions gain delegation, background scheduler, and autoBackground", async () => {
     const deps = baseSessionDeps()
     deps.subagentConfig = {}
-    const wired = await buildExecutionPlaneSessionDeps({
-      setup: makeSetup(deps),
+    const wired = await buildSharedExecutionPlaneSessionDeps({
+      history: [mkMsg("seed")],
+      sessionDeps: deps,
+      cwd: deps.cwd,
       convStore: defaultConversationCheckpointStore(),
       envSource: {
         QUANTA_BG_MAX_CONCURRENT: "5",

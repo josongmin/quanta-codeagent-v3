@@ -18,20 +18,25 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { AgentConfig } from "@/agent"
 import { REACTOR_ENV_FLAG } from "@/reactor"
 import type { ProactiveTrigger } from "@/reactor/types"
 import {
+  createDaemonTriggerDelivery,
   createFileBackedWatermarkStore,
+  createQueuedMessageDelivery,
   loadSeenRunsSeed,
   loadWatermarkSnapshot,
   parseArgs,
   persistSeenRunsSnapshot,
   persistWatermarkSnapshot,
   pollOnce,
+  reactorDaemonLogPath,
   reactorWatchSeenRunsPath,
   reactorWatchWatermarksPath,
   resolvePrCommentContext,
 } from "../../scripts/reactor-watch"
+import { buildSimulatedMessage } from "../../src/reactor/self-wake"
 import { createInMemorySeenRuns } from "../../src/reactor/trigger-source-ci"
 
 const fakeTrigger = (): ProactiveTrigger =>
@@ -48,8 +53,10 @@ describe("ADR-0132 Phase E — parseArgs", () => {
     expect(a.prRef).toBeUndefined()
     expect(a.sessionId).toBeUndefined()
     expect(a.socketPath).toBeUndefined()
+    expect(a.daemonLogPath).toBeUndefined()
     expect(a.watermarksPath).toBeUndefined()
     expect(a.intervalMs).toBe(60_000)
+    expect(a.delivery).toBe("socket")
     expect(a.prComments).toBe(true)
     expect(a.once).toBe(false)
     expect(a.dryRun).toBe(false)
@@ -64,6 +71,10 @@ describe("ADR-0132 Phase E — parseArgs", () => {
       "sess-7",
       "--socket-path",
       "/tmp/reactor.sock",
+      "--delivery",
+      "daemon",
+      "--daemon-log-path",
+      "/tmp/reactor-daemon.jsonl",
       "--seen-runs-path",
       "/tmp/reactor-seen.json",
       "--watermarks-path",
@@ -75,6 +86,8 @@ describe("ADR-0132 Phase E — parseArgs", () => {
     expect(a.prRef).toBe("owner/repo#7")
     expect(a.sessionId).toBe("sess-7")
     expect(a.socketPath).toBe("/tmp/reactor.sock")
+    expect(a.delivery).toBe("daemon")
+    expect(a.daemonLogPath).toBe("/tmp/reactor-daemon.jsonl")
     expect(a.seenRunsPath).toBe("/tmp/reactor-seen.json")
     expect(a.watermarksPath).toBe("/tmp/reactor-watermarks.json")
     expect(a.prComments).toBe(false)
@@ -102,6 +115,11 @@ describe("ADR-0132 Phase E — parseArgs", () => {
 })
 
 describe("ADR-0132 Phase E — seen-runs persistence", () => {
+  test("default daemon log path is session-scoped under ~/.quanta", () => {
+    const path = reactorDaemonLogPath("session/7", "/home/tester")
+    expect(path).toBe("/home/tester/.quanta/reactor-daemon-session_7.jsonl")
+  })
+
   test("default seen-runs path is PR-scoped under ~/.quanta", () => {
     const path = reactorWatchSeenRunsPath("owner/repo#7", "/home/tester")
     expect(path).toBe("/home/tester/.quanta/reactor-seen-runs-owner_repo_7.json")
@@ -120,6 +138,81 @@ describe("ADR-0132 Phase E — seen-runs persistence", () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe("ADR-0132 Phase E — detached delivery backends", () => {
+  test("queued delivery serializes messages in order", async () => {
+    const events: string[] = []
+    let releaseFirst: (() => void) | undefined
+    const firstDone = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const delivery = createQueuedMessageDelivery({
+      runMessage: async (message) => {
+        events.push(`start:${message}`)
+        if (message === "one") await firstDone
+        events.push(`end:${message}`)
+      },
+    })
+
+    const one = delivery.enqueueMessage("one")
+    const two = delivery.enqueueMessage("two")
+    releaseFirst?.()
+    await Promise.all([one, two])
+    await delivery.close()
+
+    expect(events).toEqual(["start:one", "end:one", "start:two", "end:two"])
+  })
+
+  test("daemon delivery converts a trigger into the simulated user message and closes the factory", async () => {
+    const delivered: string[] = []
+    let factoryClosed = false
+    const trigger = fakeTrigger()
+    const expected = buildSimulatedMessage(trigger)
+    const delivery = await createDaemonTriggerDelivery(
+      {
+        sessionId: "session-7",
+        cwd: "/tmp/reactor",
+        homeDir: "/tmp/reactor-home",
+      },
+      {
+        createBaseFactory: async () => ({
+          createBase: async (message) => {
+            delivered.push(`base:${message}`)
+            return {
+              llm: {} as never,
+              registry: {} as never,
+              stream: { close: () => undefined } as never,
+              permission: { mode: "acceptEdits" },
+              messages: [{ role: "user", content: [{ type: "text", text: message }] }],
+              system: "sys",
+              cwd: "/tmp/reactor",
+              maxTurns: 1,
+              signal: new AbortController().signal,
+            } as Omit<AgentConfig, "modePolicy" | "budgetMeter">
+          },
+          close: async () => {
+            factoryClosed = true
+          },
+        }),
+        runMode: async (req) => {
+          const first = req.base.messages[0]
+          const text =
+            first?.content.find((block) => block.type === "text")?.type === "text"
+              ? first.content.find((block) => block.type === "text")?.text
+              : ""
+          delivered.push(`run:${text}`)
+          return { exitCode: 0, outcome: { reason: "completed" } as never }
+        },
+      },
+    )
+
+    await delivery.deliverTrigger(trigger)
+    await delivery.close()
+
+    expect(delivered).toEqual([`base:${expected}`, `run:${expected}`])
+    expect(factoryClosed).toBe(true)
   })
 })
 

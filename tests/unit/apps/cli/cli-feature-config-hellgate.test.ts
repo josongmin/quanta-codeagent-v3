@@ -353,7 +353,7 @@ describe("ADR-0297 surface fence — no direct process reads in build* helpers",
     const src = stripComments(readFileSync(join(REPO_ROOT, "src/apps/cli/repl.ts"), "utf8"))
     // RELAXED (post-CLI-01/04/05/06 merge): the host THREADS process.env into
     // surface-compose wire factories (`composeSurfaceWires(..., process.env, …)`
-    // / `buildExecutionPlaneSessionDeps({ envSource: process.env })`). That is
+    // / `buildSharedExecutionPlaneSessionDeps({ envSource: process.env, … })`). That is
     // injection — the env object is opaque at the call site — and is allowed.
     // The invariant the fence really guards is "no `process.env.<KEY>` direct
     // reads in repl.ts" (no decision logic against env values). We assert THAT.

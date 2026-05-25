@@ -4,7 +4,7 @@ section: 6
 subsystem: Plan-mode 구조화 (Cursor todoModel + Codex plan_delta + Claude ExitPlanMode 합성, ADR-0095 draft)
 order: 3
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id", "quanta.tool.call.status"]

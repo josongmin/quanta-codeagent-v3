@@ -29,6 +29,20 @@
 // explicit at the call site).
 export * from "./assemble"
 export * from "./orchestrate"
+export {
+  buildSharedExecutionPlaneSessionDeps,
+  type SharedExecutionPlaneArgs,
+} from "./session-execution-plane"
+export {
+  buildPhase1PortFromLlm,
+  buildPhase2SummarizerFromLlm,
+  buildSessionMemoryAutoWires,
+  prepareSessionStartMemory,
+  type SessionMemoryAutoWireInput,
+  type SessionMemoryAutoWires,
+  type SessionStartMemoryInput,
+  type SessionStartMemoryResult,
+} from "./session-memory-auto"
 export type {
   SideConversationPort,
   SideConversationStartArgs,

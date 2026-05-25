@@ -4,7 +4,7 @@ section: 3
 subsystem: 승인 표면 — 외부화된 텍스트 DSL
 order: 2
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

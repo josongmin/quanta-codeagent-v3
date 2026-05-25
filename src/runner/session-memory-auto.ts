@@ -6,18 +6,19 @@ import type { AgentConfig } from "@/agent"
 import { runMemoryPhase2AutoTrigger } from "@/agent/memory-consolidator-hook"
 import { distillSession, finalAssistantText } from "@/agent/memory-distill"
 import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
-import type {
-  MemoryWriter,
-  Phase1Port,
-  Phase2Port,
-  Phase2Summarizer,
-  Stage1StorePort,
+import {
+  MemoryWriter as FileMemoryWriter,
+  type MemoryWriter,
+  type Phase1Port,
+  type Phase2Port,
+  type Phase2Summarizer,
+  Stage1Store as SqliteStage1Store,
+  type Stage1StorePort,
 } from "@/memory"
-import { MemoryWriter as FileMemoryWriter, Stage1Store as SqliteStage1Store } from "@/memory"
 import { assembleMemoryAuto } from "@/memory/auto-trigger"
-import { LlmPhase2Port } from "@/memory/consolidate"
 import { ChildProcessGitPort } from "@/memory/consolidate/git"
 import { resolveMemoryDirPaths } from "@/memory/consolidate/paths"
+import { LlmPhase2Port } from "@/memory/consolidate/phase2-llm"
 import type { NodeFsLike } from "@/memory/consolidate/writer"
 import {
   DEFAULT_INJECT_MAX_BYTES,
@@ -42,9 +43,6 @@ const asPhase1Messages = (
   rolloutMessages: ReadonlyArray<{ role: string; content: unknown }>,
 ): Message[] => rolloutMessages as Message[]
 
-/** Wrap the existing L3 distiller into the Phase-1 consolidator port shape.
- *  The port stays deterministic and no-throw because `distillSession`
- *  already degrades to a heuristic fallback on model/parse failures. */
 export const buildPhase1PortFromLlm = (llm: LLMPort): Phase1Port => ({
   async distill(args) {
     const messages = asPhase1Messages(args.rolloutMessages)
@@ -69,8 +67,6 @@ export const buildPhase1PortFromLlm = (llm: LLMPort): Phase1Port => ({
   },
 })
 
-/** Wrap an `LLMPort` into the Phase-2 summarizer callback shape documented on
- *  `Phase2Summarizer`. */
 export const buildPhase2SummarizerFromLlm = (llm: LLMPort): Phase2Summarizer => {
   return async ({ system, userText, signal }) => {
     const events: StreamEvent[] = []
@@ -133,8 +129,55 @@ export interface SessionMemoryAutoWireInput {
 const resolveStage1SqlitePath = (root: string): string => join(root, "stage1.sqlite")
 const resolveStage1JsonlPath = (root: string): string => join(root, "stage1.jsonl")
 
-/** Build the live CLI memory-auto wires around the existing ADR-0068 / ADR-0281
- *  primitives. Default-OFF: `QUANTA_MEMORY_AUTO !== "on"` ⇒ undefined. */
+const selectSessionStartMemoryContext = (
+  stage1OutputsStore: Stage1OutputsStore | undefined,
+): string | undefined => {
+  if (stage1OutputsStore === undefined) return undefined
+  const selected = new DefaultCrossSessionInjector({
+    stage1Store: stage1OutputsStore,
+  }).selectForInject({ maxBytes: DEFAULT_INJECT_MAX_BYTES })
+  const rendered = renderMemorySection(selected).text.trim()
+  return rendered.length > 0 ? rendered : undefined
+}
+
+const warnPhase2Failure = (logWarn: (msg: string) => void, detail: string): void => {
+  logWarn(`session-start memory phase2 auto-trigger failed: ${detail}`)
+}
+
+const runSessionStartPhase2AutoTrigger = async (
+  input: NonNullable<SessionStartMemoryInput["phase2"]>,
+  opts: {
+    readonly signal?: AbortSignal
+    readonly now?: () => number
+    readonly logWarn: (msg: string) => void
+  },
+): Promise<void> => {
+  try {
+    const existingContent = await input.writer.readExisting()
+    const outcome = await runMemoryPhase2AutoTrigger(
+      {
+        phase2: {
+          enabled: true,
+          port: input.port,
+          store: input.store,
+          writer: input.writer,
+          existingContent,
+        },
+        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+        now: opts.now ?? Date.now,
+      },
+      (event) => {
+        if (event.kind === "error") warnPhase2Failure(opts.logWarn, event.message)
+      },
+    )
+    if (outcome.kind === "error") warnPhase2Failure(opts.logWarn, outcome.message)
+  } catch (e) {
+    opts.logWarn(
+      `session-start memory phase2 bootstrap failed: ${e instanceof Error ? e.message : String(e)}`,
+    )
+  }
+}
+
 export const buildSessionMemoryAutoWires = async (
   input: SessionMemoryAutoWireInput,
 ): Promise<SessionMemoryAutoWires | undefined> => {
@@ -144,6 +187,8 @@ export const buildSessionMemoryAutoWires = async (
   const now = input.now ?? Date.now
   const logWarn = input.logWarn ?? noopWarn
   const paths = resolveMemoryDirPaths(input.homeDir ?? homedir())
+  const writer = new FileMemoryWriter(paths, nodeFsPort, new ChildProcessGitPort(), { now })
+  await writer.ensureDir()
   const stage1Db = new Database(resolveStage1SqlitePath(paths.root))
   stage1Db.exec("PRAGMA journal_mode = WAL")
   const phase1Store: Stage1StorePort = new SqliteStage1Store(stage1Db)
@@ -152,8 +197,6 @@ export const buildSessionMemoryAutoWires = async (
     now,
     onWarn: logWarn,
   })
-  const writer = new FileMemoryWriter(paths, nodeFsPort, new ChildProcessGitPort(), { now })
-  await writer.ensureDir()
   const phase2Port: Phase2Port = new LlmPhase2Port(
     buildPhase2SummarizerFromLlm(input.summarizerLlm ?? input.llm),
   )
@@ -183,9 +226,6 @@ export const buildSessionMemoryAutoWires = async (
   }
 }
 
-/** Session-start memory wire: render the stable cross-session block from the
- *  stage1 outputs store, then schedule the non-blocking Phase-2 auto-trigger
- *  when the host supplied the store/writer/port trio. */
 export const prepareSessionStartMemory = async (
   input: SessionStartMemoryInput,
 ): Promise<SessionStartMemoryResult> => {
@@ -193,45 +233,14 @@ export const prepareSessionStartMemory = async (
   if (auto === null) return {}
 
   const logWarn = input.logWarn ?? noopWarn
-
-  let sessionCtx: string | undefined
-  if (input.stage1OutputsStore !== undefined) {
-    const selected = new DefaultCrossSessionInjector({
-      stage1Store: input.stage1OutputsStore,
-    }).selectForInject({ maxBytes: DEFAULT_INJECT_MAX_BYTES })
-    const rendered = renderMemorySection(selected).text.trim()
-    sessionCtx = rendered.length > 0 ? rendered : undefined
-  }
+  const sessionCtx = selectSessionStartMemoryContext(input.stage1OutputsStore)
 
   if (input.phase2 !== undefined) {
-    try {
-      const existingContent = await input.phase2.writer.readExisting()
-      const outcome = await runMemoryPhase2AutoTrigger(
-        {
-          phase2: {
-            enabled: true,
-            port: input.phase2.port,
-            store: input.phase2.store,
-            writer: input.phase2.writer,
-            existingContent,
-          },
-          ...(input.signal !== undefined ? { signal: input.signal } : {}),
-          now: input.now ?? Date.now,
-        },
-        (event) => {
-          if (event.kind === "error") {
-            logWarn(`session-start memory phase2 auto-trigger failed: ${event.message}`)
-          }
-        },
-      )
-      if (outcome.kind === "error") {
-        logWarn(`session-start memory phase2 auto-trigger failed: ${outcome.message}`)
-      }
-    } catch (e) {
-      logWarn(
-        `session-start memory phase2 bootstrap failed: ${e instanceof Error ? e.message : String(e)}`,
-      )
-    }
+    await runSessionStartPhase2AutoTrigger(input.phase2, {
+      ...(input.signal !== undefined ? { signal: input.signal } : {}),
+      ...(input.now !== undefined ? { now: input.now } : {}),
+      logWarn,
+    })
   }
 
   return sessionCtx !== undefined ? { sessionCtx } : {}

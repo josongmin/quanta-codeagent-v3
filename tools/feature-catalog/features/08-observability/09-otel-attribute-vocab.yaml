@@ -4,7 +4,7 @@ section: 8
 subsystem: 텔레메트리 — 키 어휘 + 컴파일-타임 enforce
 order: 1
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["quanta.memory.phase", "quanta.thread.id", "quanta.conversation.id", "quanta.conversation.session_id", "quanta.conversation.started_at"]

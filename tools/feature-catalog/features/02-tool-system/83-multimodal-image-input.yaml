@@ -4,7 +4,7 @@ section: 2
 subsystem: 멀티모달 (ADR-0083)
 order: 83
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
