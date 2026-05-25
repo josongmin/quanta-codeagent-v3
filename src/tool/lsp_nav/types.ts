@@ -88,18 +88,31 @@ export interface NavRenamePreview {
  * `[]` (for list-returning methods) means "ran, no results".
  */
 export interface LspNavSession {
-  definition(filePath: string, pos: NavPos): Promise<NavLocation[] | null>
+  definition(filePath: string, pos: NavPos, signal?: AbortSignal): Promise<NavLocation[] | null>
   references(
     filePath: string,
     pos: NavPos,
     includeDeclaration: boolean,
+    signal?: AbortSignal,
   ): Promise<NavLocation[] | null>
-  hover(filePath: string, pos: NavPos): Promise<NavHover | null>
-  typeDefinition(filePath: string, pos: NavPos): Promise<NavLocation[] | null>
-  implementation(filePath: string, pos: NavPos): Promise<NavLocation[] | null>
-  documentSymbol(filePath: string): Promise<NavSymbolInfo[] | null>
-  workspaceSymbol(query: string): Promise<NavSymbolInfo[] | null>
-  prepareRename(filePath: string, pos: NavPos): Promise<NavRenamePreview | null>
+  hover(filePath: string, pos: NavPos, signal?: AbortSignal): Promise<NavHover | null>
+  typeDefinition(
+    filePath: string,
+    pos: NavPos,
+    signal?: AbortSignal,
+  ): Promise<NavLocation[] | null>
+  implementation(
+    filePath: string,
+    pos: NavPos,
+    signal?: AbortSignal,
+  ): Promise<NavLocation[] | null>
+  documentSymbol(filePath: string, signal?: AbortSignal): Promise<NavSymbolInfo[] | null>
+  workspaceSymbol(query: string, signal?: AbortSignal): Promise<NavSymbolInfo[] | null>
+  prepareRename(
+    filePath: string,
+    pos: NavPos,
+    signal?: AbortSignal,
+  ): Promise<NavRenamePreview | null>
   stop(): Promise<void>
 }
 
@@ -112,5 +125,5 @@ export interface LspNavSession {
 export interface LspNavProvider {
   /** Human-readable reason used in the no-op result when `open` returns null. */
   unavailableReason(filePath: string): string
-  open(filePath: string, cwd: string): Promise<LspNavSession | null>
+  open(filePath: string, cwd: string, signal?: AbortSignal): Promise<LspNavSession | null>
 }

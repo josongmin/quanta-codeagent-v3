@@ -291,6 +291,29 @@ describe("budget-ledger / D. persistence", () => {
     expect(() => l.hydrate('{"v":1,"events":"not an array"}')).not.toThrow()
     expect(l.snapshot().events).toBe(0)
   })
+
+  test("HELL-21b: hydrate over-cap payload keeps only the newest retained slice", () => {
+    const original = ledgerOf()
+    for (let i = 0; i < 8; i++) {
+      original.record(
+        usageOf({
+          sessionId: `s-${i}`,
+          at: 1_000_000 + i,
+          inputTokens: 100_000,
+        }),
+      )
+    }
+    const restored = ledgerOf({ maxEvents: 5 })
+    restored.hydrate(original.serialize())
+    expect(restored.snapshot().events).toBe(5)
+    expect([...restored.snapshot().perSession.keys()].sort()).toEqual([
+      "s-3",
+      "s-4",
+      "s-5",
+      "s-6",
+      "s-7",
+    ])
+  })
 })
 
 // ────────────────────────────────────────────────────────────────────────────

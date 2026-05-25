@@ -296,7 +296,8 @@ describe("D. file semantics", () => {
     expect(r.ok).toBe(false)
     expect(r.output).toContain("symlink not allowed")
     expect(r.failure?.mode).toBe("permission_denied")
-    expect(r.failure?.isReadonly).toBe(true)
+    if (r.failure?.mode !== "permission_denied") throw new Error("expected permission_denied")
+    expect(r.failure.isReadonly).toBe(true)
   })
   test("13. file > 5MB → ok:false image too large", async () => {
     const r = await collect({ path: "big.png" })

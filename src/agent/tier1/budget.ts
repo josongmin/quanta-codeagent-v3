@@ -12,10 +12,10 @@
  * root can pass either a typed config object that happens to carry a
  * `budgetLedger?` field, or `undefined` to opt out.
  *
- * Wiring is DEFERRED: no caller invokes this builder today (it is not
- * registered in `tier1/index.ts`'s barrel re-export of the legacy 9 builders).
- * A future ADR will land the composition-root wire when the dispatch seam
- * auto-records token usage from the LLM stream into the ledger.
+ * Recording is still DEFERRED: `buildSessionFeatures()` already invokes this
+ * builder, so `budget_status` is registered whenever `budgetLedger` is wired.
+ * The remaining follow-up is the producer-side auto-record path from LLM
+ * usage events into the ledger.
  */
 
 import type { Tool } from "@/tool"

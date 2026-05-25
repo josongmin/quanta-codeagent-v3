@@ -97,6 +97,8 @@ export interface ConsolidatorHookInput {
   /** Real (non-meta) turn count from the session — drives the
    *  MIN_TURN_THRESHOLD skip arm. */
   readonly turnCount: number
+  /** Optional caller cancellation propagated to the Phase 1 port. */
+  readonly signal?: AbortSignal
   /** Injected clock — defaults to `Date.now`. */
   readonly now?: () => number
 }
@@ -193,6 +195,7 @@ const runMemoryConsolidatorHookInner = async (
     // applies in the consolidator itself (force does not over-ride the
     // "no signal in tiny conversations" floor).
     memoryMode: cfg.forceSummarization === true || cfg.enabled === true ? "enabled" : "disabled",
+    ...(input.signal ? { signal: input.signal } : {}),
     now: input.now ?? Date.now,
   }
   let outcome: Phase1Outcome
@@ -267,6 +270,8 @@ export interface Phase2AutoTriggerInput {
         mode?: "INIT" | "incremental"
       }
     | undefined
+  /** Optional caller cancellation propagated to the Phase 2 port. */
+  readonly signal?: AbortSignal
   /** Injected clock — defaults to `Date.now`. */
   readonly now?: () => number
 }
@@ -400,6 +405,7 @@ const runPhase2AutoTriggerInner = async (
     existingMemorySummaryMd: existing.memorySummaryMd,
     mode: v.mode ?? "incremental",
     lastSuccessWatermark: watermark.lastSuccessAt,
+    ...(input.signal ? { signal: input.signal } : {}),
     now: input.now ?? Date.now,
   }
   dispatchPhase2Background(phase2Input, v, log)

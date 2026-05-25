@@ -136,7 +136,8 @@ describe("C. SSRF defense", () => {
     expect(r.ok).toBe(false)
     expect(r.output.toLowerCase()).toContain("ssrf")
     expect(r.failure?.mode).toBe("permission_denied")
-    expect(r.failure?.isReadonly).toBe(true)
+    if (r.failure?.mode !== "permission_denied") throw new Error("expected permission_denied")
+    expect(r.failure.isReadonly).toBe(true)
   })
   test("11. https://10.0.0.5 → ok:false (RFC1918 private)", async () => {
     const r = await collect({ url: "https://10.0.0.5/x" })

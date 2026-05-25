@@ -6,6 +6,7 @@ import { AbortError, readLine } from "../raw-line-reader"
 import type { RejectCounter } from "../reject-counter"
 import { describeSlashCommand, slashCompleter } from "../slash-commands"
 import type { StatusBar } from "../status-bar"
+import type { ExternalPromptQueue } from "./external-prompt-queue"
 
 /** Slice-C: surface-stateful slash dispatch is OUT of this module. The
  *  pipeline is given a single `dispatchSlash` callback that returns `true`
@@ -33,6 +34,10 @@ export interface ComposePromptPipelineDeps {
    *  prompt and attach the images to THAT turn's payload (PromptPayload
    *  `{ text, images }`); empty ⇒ plain string form (byte-identical). */
   readonly imageQueue?: ImageQueue
+  /** Optional out-of-band prompt ingress (reactor/scheduler). When present,
+   *  `next()` races the raw-line reader against this queue so a background
+   *  wake can resolve the prompt loop without synthetic stdin writes. */
+  readonly externalPromptQueue?: ExternalPromptQueue
   /** Idle/snooze gate (Cursor §4.1). Drives the snooze hint banners + the
    *  `markActive()` call after each accepted line. */
   readonly idleMonitor: IdleMonitor
@@ -46,6 +51,10 @@ export interface ComposePromptPipelineDeps {
   /** UX-only knobs (history, multiline). Default off ⇒ byte-identical to
    *  the single-line no-history path. */
   readonly ux?: PromptPipelineUxOpts
+  /** Optional hook fired only for LOCAL accepted prompts (not external
+   *  reactor/scheduler wakes). Lets the host keep the quiet-window anchor
+   *  authoritative without conflating self-wake with human input. */
+  readonly onLocalPromptAccepted?: () => void
 }
 
 /** Read one trimmed line from the raw-mode reader. Returns `null` on
@@ -97,20 +106,94 @@ const classifyReplLine = async (
 const buildCliPromptSource = (
   dispatchSlash: DispatchSlash,
   imageQueue: ImageQueue | undefined,
+  externalPromptQueue: ExternalPromptQueue | undefined,
   ux: PromptPipelineUxOpts | undefined,
+  onLocalPromptAccepted: (() => void) | undefined,
 ): PromptSource => ({
   next: async (signal) => {
     while (signal?.aborted !== true) {
-      const next = await classifyReplLine(signal, dispatchSlash, ux)
+      const next = await readNextPrompt({
+        signal,
+        dispatchSlash,
+        imageQueue,
+        externalPromptQueue,
+        ux,
+        onLocalPromptAccepted,
+      })
       if (next === undefined) continue
       if (next === null) return null
-      const queued = imageQueue?.drain() ?? []
-      if (queued.length === 0) return next
-      return { text: next, images: queued.map((e) => e.block) }
+      return next
     }
     return null
   },
 })
+
+const combineSignals = (signals: ReadonlyArray<AbortSignal | undefined>): AbortSignal | undefined => {
+  const present = signals.filter((signal): signal is AbortSignal => signal !== undefined)
+  if (present.length === 0) return undefined
+  if (present.length === 1) return present[0]
+  return AbortSignal.any(present)
+}
+
+const localPayload = (text: string, imageQueue: ImageQueue | undefined): PromptPayload => {
+  const queued = imageQueue?.drain() ?? []
+  if (queued.length === 0) return text
+  return { text, images: queued.map((entry) => entry.block) }
+}
+
+const readNextPrompt = async (args: {
+  readonly signal: AbortSignal | undefined
+  readonly dispatchSlash: DispatchSlash
+  readonly imageQueue: ImageQueue | undefined
+  readonly externalPromptQueue: ExternalPromptQueue | undefined
+  readonly ux: PromptPipelineUxOpts | undefined
+  readonly onLocalPromptAccepted: (() => void) | undefined
+}): Promise<PromptPayload | null | undefined> => {
+  const {
+    signal,
+    dispatchSlash,
+    imageQueue,
+    externalPromptQueue,
+    ux,
+    onLocalPromptAccepted,
+  } = args
+  if (externalPromptQueue === undefined) {
+    const next = await classifyReplLine(signal, dispatchSlash, ux)
+    if (typeof next !== "string") return next
+    onLocalPromptAccepted?.()
+    return localPayload(next, imageQueue)
+  }
+
+  const localAbort = new AbortController()
+  const externalAbort = new AbortController()
+  const abortLocal = (): void => localAbort.abort()
+  const abortExternal = (): void => externalAbort.abort()
+  signal?.addEventListener("abort", abortLocal, { once: true })
+  signal?.addEventListener("abort", abortExternal, { once: true })
+  try {
+    const winner = await Promise.race([
+      classifyReplLine(combineSignals([signal, localAbort.signal]), dispatchSlash, ux).then((value) => ({
+        source: "local" as const,
+        value,
+      })),
+      externalPromptQueue.next(combineSignals([signal, externalAbort.signal])).then((value) => ({
+        source: "external" as const,
+        value,
+      })),
+    ])
+    if (winner.source === "local") {
+      externalAbort.abort()
+      if (typeof winner.value !== "string") return winner.value
+      onLocalPromptAccepted?.()
+      return localPayload(winner.value, imageQueue)
+    }
+    localAbort.abort()
+    return winner.value
+  } finally {
+    signal?.removeEventListener("abort", abortLocal)
+    signal?.removeEventListener("abort", abortExternal)
+  }
+}
 
 /** Wrap an inner CLI {@link PromptSource} with the Cursor-inspired idle /
  *  snooze gate + reject-counter graceful exit. */
@@ -163,7 +246,13 @@ const wrapPromptSourceWithIdleGate = (args: {
  *  Single entry point — the host passes the constructed pipeline straight
  *  to `runInteractive.promptSource` without further wrapping. */
 export const composePromptPipeline = (deps: ComposePromptPipelineDeps): PromptSource => {
-  const inner = buildCliPromptSource(deps.dispatchSlash, deps.imageQueue, deps.ux)
+  const inner = buildCliPromptSource(
+    deps.dispatchSlash,
+    deps.imageQueue,
+    deps.externalPromptQueue,
+    deps.ux,
+    deps.onLocalPromptAccepted,
+  )
   return wrapPromptSourceWithIdleGate({
     inner,
     idle: deps.idleMonitor,

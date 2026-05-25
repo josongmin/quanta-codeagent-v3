@@ -1,16 +1,16 @@
 /**
- * ADR-0132 Phase E — reactor-watch cron stub: argv + pollOnce decision matrix.
+ * ADR-0132 Phase E — reactor-watch cron watcher: argv + pollOnce decision matrix.
  *
- * The script is intentionally a stub (production adapters bind at the
- * composition root). The contract worth locking is:
+ * The watcher delegates self-wake guards to the live CLI host, but its local
+ * contract is still worth locking:
  *
  *   1. `parseArgs` shape — argv flags don't drift before production wires.
  *   2. `pollOnce` decision matrix — given (triggers, dryRun, env), the
  *      `action` field is what the watcher will do. This is the same matrix
  *      a CI smoke would assert end-to-end.
  *
- * Both helpers are pure and import-only (no IO at construction), so the
- * tests run in-process without spawning gh / git.
+ * Both helpers are pure and import-only, so the tests run in-process without
+ * spawning gh / git or opening a socket.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -27,18 +27,31 @@ const fakeTrigger = (): ProactiveTrigger =>
   })
 
 describe("ADR-0132 Phase E — parseArgs", () => {
-  test("defaults: undefined pr, 60s interval, not-once, not-dry-run, not-help", () => {
+  test("defaults: undefined pr/session/socket, 60s interval, not-once, not-dry-run, not-help", () => {
     const a = parseArgs([])
     expect(a.prRef).toBeUndefined()
+    expect(a.sessionId).toBeUndefined()
+    expect(a.socketPath).toBeUndefined()
     expect(a.intervalMs).toBe(60_000)
     expect(a.once).toBe(false)
     expect(a.dryRun).toBe(false)
     expect(a.help).toBe(false)
   })
 
-  test("--pr <ref> + --once + --dry-run are picked up", () => {
-    const a = parseArgs(["--pr", "owner/repo#7", "--once", "--dry-run"])
+  test("--pr <ref> + --session-id + --socket-path + --once + --dry-run are picked up", () => {
+    const a = parseArgs([
+      "--pr",
+      "owner/repo#7",
+      "--session-id",
+      "sess-7",
+      "--socket-path",
+      "/tmp/reactor.sock",
+      "--once",
+      "--dry-run",
+    ])
     expect(a.prRef).toBe("owner/repo#7")
+    expect(a.sessionId).toBe("sess-7")
+    expect(a.socketPath).toBe("/tmp/reactor.sock")
     expect(a.once).toBe(true)
     expect(a.dryRun).toBe(true)
   })

@@ -159,7 +159,8 @@ describe("B. csv_read tool", () => {
     expect(r.ok).toBe(false)
     expect(r.output).toMatch(/outside cwd|not found|symlink/i)
     expect(r.failure?.mode).toBe("permission_denied")
-    expect(r.failure?.isReadonly).toBe(true)
+    if (r.failure?.mode !== "permission_denied") throw new Error("expected permission_denied")
+    expect(r.failure.isReadonly).toBe(true)
   })
   test("16. empty path string → ok:false invalid input", async () => {
     const r = await collect({ path: "" })

@@ -135,9 +135,11 @@ const stopMcpClients = async (
 /**
  * Run the interactive REPL-style loop end-to-end. Returns when the loop
  * exits cleanly (either `signal.aborted` or `promptSource.next()` ⇒ null).
- * Errors thrown by `runOnce` bubble up to the surface — the CLI's `turn()`
- * wrapper paints a red error and returns so the loop continues; a Web/Tauri
- * surface might convert them to a structured response and reconnect.
+ * A `promptSource.next()` throw after the loop signal aborts is treated as a
+ * clean exit; other prompt/read errors and errors thrown by `runOnce` bubble
+ * up to the surface — the CLI's `turn()` wrapper paints a red error and
+ * returns so the loop continues; a Web/Tauri surface might convert them to a
+ * structured response and reconnect.
  */
 export const runInteractive = async (input: RunInteractiveInput): Promise<void> => {
   const { deps, assembleConfig, promptSource, state, idMeta, signal } = input
@@ -147,7 +149,13 @@ export const runInteractive = async (input: RunInteractiveInput): Promise<void> 
   let pendingImages: ImageBlock[] = input.seedImages ?? []
   try {
     while (!signal.aborted) {
-      const payload = await promptSource.next(signal)
+      let payload
+      try {
+        payload = await promptSource.next(signal)
+      } catch (error) {
+        if (signal.aborted) return
+        throw error
+      }
       if (payload === null || signal.aborted) return
       // Normalize: a surface that returns a plain string is widened into
       // `{ text, images: [] }` (backward-compat — pre-multi-modal `PromptSource`

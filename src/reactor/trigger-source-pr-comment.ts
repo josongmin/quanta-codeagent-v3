@@ -40,6 +40,9 @@ export interface PrCommentTriggerOpts {
   /** Watermark store key — distinct per workspace to avoid cross-talk. */
   readonly watermarkKey: string
   readonly watermarkStore: WatermarkStore
+  /** Optional degraded-path sink. Trigger-source failures still collapse to
+   *  empty arrays, but callers can observe watermark-store faults. */
+  readonly onError?: (message: string) => void
 }
 
 /**
@@ -63,11 +66,15 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
       // First poll: seed the watermark with "now" so we don't backfill the
       // entire comment history at first sight (a fresh process should react
       // only to NEW activity).
-      const existing = await opts.watermarkStore.load(opts.watermarkKey)
+      const loaded = await safeLoadWatermark(opts.watermarkStore, opts.watermarkKey, opts.onError)
+      if (!loaded.ok) return []
+      if (signal !== undefined && signal.aborted) return []
+      const existing = loaded.value
       const watermark = existing ?? new Date(opts.clockPort.now()).toISOString()
       if (existing === undefined) {
         // Seed and short-circuit: nothing is "newer than now".
-        await opts.watermarkStore.save(opts.watermarkKey, watermark)
+        if (!(await safeSaveWatermark(opts.watermarkStore, opts.watermarkKey, watermark, opts.onError)))
+          return []
         return []
       }
       if (signal !== undefined && signal.aborted) return []
@@ -93,13 +100,15 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
         if (stamp > maxStamp) maxStamp = stamp
       }
       if (fresh.length === 0) return []
+      if (signal !== undefined && signal.aborted) return []
 
       // Advance the watermark BEFORE returning so a consumer that drops the
       // trigger doesn't see the same comment again on the next poll. (If the
       // consumer crashes before processing, the comment is lost — same
       // tradeoff as the CI source's in-memory dedup. The cron watcher SHOULD
       // pass a durable store and accept this at-most-once semantics.)
-      await opts.watermarkStore.save(opts.watermarkKey, maxStamp)
+      if (!(await safeSaveWatermark(opts.watermarkStore, opts.watermarkKey, maxStamp, opts.onError)))
+        return []
 
       const triggers: ProactiveTrigger[] = []
       for (const row of fresh) {
@@ -112,7 +121,7 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
             reason: "pr_comment" as const,
             evidence: Object.freeze({ kind: "url" as const, value: url }),
             simulatedMessage: `New PR comment from @${author}: ${bodySnippet}`,
-            abortSignal: signal ?? new AbortController().signal,
+            abortSignal: new AbortController().signal,
           }),
         )
       }
@@ -154,6 +163,38 @@ const safeRun = async (
     return await port.run(args, cwd, signal)
   } catch {
     return undefined
+  }
+}
+
+const safeLoadWatermark = async (
+  store: WatermarkStore,
+  key: string,
+  onError?: (message: string) => void,
+): Promise<{ ok: true; value: string | undefined } | { ok: false }> => {
+  try {
+    return { ok: true, value: await store.load(key) }
+  } catch (error) {
+    onError?.(
+      `reactor.pr_comment.watermark.load failed (${key}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+    return { ok: false }
+  }
+}
+
+const safeSaveWatermark = async (
+  store: WatermarkStore,
+  key: string,
+  value: string,
+  onError?: (message: string) => void,
+): Promise<boolean> => {
+  try {
+    await store.save(key, value)
+    return true
+  } catch (error) {
+    onError?.(
+      `reactor.pr_comment.watermark.save failed (${key}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+    return false
   }
 }
 

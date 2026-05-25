@@ -410,13 +410,20 @@ const safeJsonParse = (s: string): unknown => {
 /** Helper: rebuild the (events, fired) state from a serialized JSON string.
  *  Extracted from `hydrate` to keep that method below the cognitive-complexity
  *  budget. Always mutates in-place — caller resets state first. */
-const rehydrate = (jsonl: string, events: UsageEvent[], fired: Set<string>): void => {
+const rehydrate = (
+  jsonl: string,
+  events: UsageEvent[],
+  fired: Set<string>,
+  maxEvents: number,
+): void => {
   const parsed = safeJsonParse(jsonl)
   if (parsed === undefined) return
   const obj = validateHydratedPayload(parsed)
   if (obj === undefined) return
   const rawEvents = obj.events ?? []
-  for (const raw of rawEvents) {
+  const retained =
+    rawEvents.length > maxEvents ? rawEvents.slice(rawEvents.length - maxEvents) : rawEvents
+  for (const raw of retained) {
     const ev = parseHydratedEvent(raw)
     if (ev !== undefined) events.push(ev)
   }
@@ -685,7 +692,7 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
       resetState()
       fired.clear()
       const hydratedEvents: UsageEvent[] = []
-      rehydrate(jsonl, hydratedEvents, fired)
+      rehydrate(jsonl, hydratedEvents, fired, maxEvents)
       for (const event of hydratedEvents) {
         pushEvent(event)
       }

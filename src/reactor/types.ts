@@ -74,7 +74,9 @@ export interface TriggerEvidence {
 /**
  * A produced trigger. Owned by the trigger source (it allocates the abort
  * signal); the consumer (self-wake) MUST observe `abortSignal.aborted` before
- * acting.
+ * acting. Sources that use a poll-time AbortSignal for their own GH/file I/O
+ * should detach from that signal once the trigger is fully materialized, so a
+ * late poll cancellation cannot invalidate an already-committed wake.
  *
  * `simulatedMessage` is the user-visible text the agent will receive. The
  * self-wake injector appends ` [reason=<reason> evidence=<value>]` so the

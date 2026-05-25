@@ -83,6 +83,52 @@ describe("@/runner/orchestrate#runInteractive", () => {
     expect(calls).toEqual(["next"])
   })
 
+  test("aborted promptSource throw exits cleanly", async () => {
+    const abort = new AbortController()
+    let wrapCalls = 0
+    const ps: PromptSource = {
+      next: async () => {
+        abort.abort()
+        throw new Error("surface abort")
+      },
+    }
+    await runInteractive({
+      deps: stubDeps(abort.signal),
+      assembleConfig: (m) => ({ messages: m }) as unknown as AgentConfig,
+      promptSource: ps,
+      history: [],
+      state: undefined,
+      idMeta: undefined,
+      signal: abort.signal,
+      wrapTurn: async () => {
+        wrapCalls += 1
+        return undefined
+      },
+    })
+    expect(wrapCalls).toBe(0)
+  })
+
+  test("non-abort promptSource throw bubbles", async () => {
+    const abort = new AbortController()
+    const ps: PromptSource = {
+      next: async () => {
+        throw new Error("boom")
+      },
+    }
+    await expect(
+      runInteractive({
+        deps: stubDeps(abort.signal),
+        assembleConfig: (m) => ({ messages: m }) as unknown as AgentConfig,
+        promptSource: ps,
+        history: [],
+        state: undefined,
+        idMeta: undefined,
+        signal: abort.signal,
+        wrapTurn: async () => undefined,
+      }),
+    ).rejects.toThrow("boom")
+  })
+
   test("each prompt drives a single wrapTurn call + onTurnEnd in order", async () => {
     const log: string[] = []
     const prompts = ["one", "two", "three"]

@@ -24,5 +24,10 @@ export interface SignatureInfo {
  *  has no `textDocument/signatureHelp` capability (or returned no payload). An
  *  empty array means "ran cleanly, cursor not inside a call expression". */
 export interface SignatureHelpPort {
-  signatureHelp(file: string, line: number, col: number): Promise<readonly SignatureInfo[] | null>
+  signatureHelp(
+    file: string,
+    line: number,
+    col: number,
+    signal?: AbortSignal,
+  ): Promise<readonly SignatureInfo[] | null>
 }

@@ -129,26 +129,27 @@ export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort =>
       // Build a stable run-id from the row tuple so dedup is deterministic
       // and content-addressed (no run.id field in `gh pr checks` JSON; the
       // link is the de-facto unique identifier per completed run).
-      const completed: GhCheckRow[] = []
+      const completed: Array<{ row: GhCheckRow; runId: string }> = []
       for (const row of rows) {
         if ((row.status ?? "").toUpperCase() !== "COMPLETED") continue
         const runId = stableRunId(row)
         if (seen.has(runId)) continue
-        seen.add(runId)
-        completed.push(row)
+        completed.push({ row, runId })
       }
       if (completed.length === 0) return []
 
       const url = (await fetchPrUrl(signal)) ?? `gh://pr/${opts.prRef}`
+      if (signal !== undefined && signal.aborted) return []
+      for (const item of completed) seen.add(item.runId)
       const at = opts.clockPort.now()
-      const summary = summarizeRollup(completed)
+      const summary = summarizeRollup(completed.map((item) => item.row))
 
       return [
         Object.freeze({
           reason: "ci_completion" as const,
           evidence: Object.freeze({ kind: "url" as const, value: url }),
           simulatedMessage: `CI completed on PR ${opts.prRef}: ${summary} (at ${at})`,
-          abortSignal: signal ?? new AbortController().signal,
+          abortSignal: new AbortController().signal,
         }),
       ]
     },

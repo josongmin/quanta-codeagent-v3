@@ -31,5 +31,9 @@ export interface TextEdit {
  *  formatting capability — `[]` means "ran cleanly, file already formatted /
  *  no changes". */
 export interface FormatPort {
-  format(file: string, range?: FormatRange): Promise<readonly TextEdit[] | null>
+  format(
+    file: string,
+    range?: FormatRange,
+    signal?: AbortSignal,
+  ): Promise<readonly TextEdit[] | null>
 }

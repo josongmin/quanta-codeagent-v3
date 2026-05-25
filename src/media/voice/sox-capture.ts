@@ -120,9 +120,7 @@ interface RunRecorderArgs {
   readonly signal: AbortSignal | undefined
 }
 
-const runRecorder = async (
-  args: RunRecorderArgs,
-): Promise<Result<AudioBlob, CaptureError>> => {
+const runRecorder = async (args: RunRecorderArgs): Promise<Result<AudioBlob, CaptureError>> => {
   const { child, secs, signal } = args
   if (child.stdout === null) {
     safeKill(child, "SIGTERM")

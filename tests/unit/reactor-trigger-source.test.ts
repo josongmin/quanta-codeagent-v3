@@ -412,6 +412,86 @@ describe("ADR-0132 Phase A — createCiTriggerSource", () => {
     const viewCalls = gh.calls.filter((c) => c.args[1] === "view")
     expect(viewCalls.length).toBe(1)
   })
+
+  test("abort after checks but before dedup commit returns [] and re-fires on the next poll", async () => {
+    const seen = new Set<string>()
+    const ctrl = new AbortController()
+    const gh = fakeGhPort([
+      {
+        match: (a) => a[0] === "pr" && a[1] === "checks",
+        result: ok([
+          {
+            name: "unit",
+            status: "COMPLETED",
+            conclusion: "SUCCESS",
+            link: "https://example/runs/retryable",
+          },
+        ]),
+      },
+      {
+        match: (a) => a[0] === "pr" && a[1] === "view",
+        result: {
+          stdout: JSON.stringify({ url: "https://example/pr/retryable", number: 1 }),
+          stderr: "",
+          exitCode: 0,
+        },
+      },
+    ])
+    const src = createCiTriggerSource({
+      ghCliPort: {
+        run: async (args, cwd, signal) => {
+          const out = await gh.port.run(args, cwd, signal)
+          if (args[0] === "pr" && args[1] === "view") ctrl.abort()
+          return out
+        },
+      },
+      clockPort: fixedClock(1),
+      repoCwd: "/tmp/repo",
+      prRef: "1",
+      seenRunsStore: {
+        has: (id) => seen.has(id),
+        add: (id) => {
+          seen.add(id)
+        },
+      },
+    })
+    expect(await src.poll({ signal: ctrl.signal })).toEqual([])
+    expect(seen.size).toBe(0)
+    const next = await src.poll()
+    expect(next).toHaveLength(1)
+    expect(seen.has("https://example/runs/retryable")).toBe(true)
+  })
+
+  test("materialized CI trigger is detached from later poll aborts", async () => {
+    const ctrl = new AbortController()
+    const gh = fakeGhPort([
+      {
+        match: (a) => a[0] === "pr" && a[1] === "checks",
+        result: ok([
+          {
+            name: "unit",
+            status: "COMPLETED",
+            conclusion: "SUCCESS",
+            link: "https://example/runs/detached",
+          },
+        ]),
+      },
+      {
+        match: (a) => a[0] === "pr" && a[1] === "view",
+        result: ok({ url: "https://example/pr/detached", number: 1 }),
+      },
+    ])
+    const src = createCiTriggerSource({
+      ghCliPort: gh.port,
+      clockPort: fixedClock(1),
+      repoCwd: "/tmp/repo",
+      prRef: "1",
+    })
+    const triggers = await src.poll({ signal: ctrl.signal })
+    expect(triggers).toHaveLength(1)
+    ctrl.abort()
+    expect(triggers[0]?.abortSignal.aborted).toBe(false)
+  })
 })
 
 describe("ADR-0132 Phase A — createPrCommentTriggerSource", () => {
@@ -625,6 +705,151 @@ describe("ADR-0132 Phase A — createPrCommentTriggerSource", () => {
     ctrl.abort()
     expect(await src.poll({ signal: ctrl.signal })).toEqual([])
     expect(gh.calls.length).toBe(0)
+  })
+
+  test("watermark load failure collapses to [] and does not call gh", async () => {
+    const errors: string[] = []
+    const gh = fakeGhPort([
+      {
+        match: () => true,
+        result: ok([]),
+      },
+    ])
+    const src = createPrCommentTriggerSource({
+      ghCliPort: gh.port,
+      clockPort: fixedClock(0),
+      repoCwd: "/tmp/repo",
+      repoSlug: "owner/repo",
+      prNumber: 5,
+      watermarkKey: "wk",
+      watermarkStore: {
+        load: async () => {
+          throw new Error("disk unreadable")
+        },
+        save: async () => {},
+      },
+      onError: (message) => errors.push(message),
+    })
+    expect(await src.poll()).toEqual([])
+    expect(gh.calls.length).toBe(0)
+    expect(errors[0]).toContain("watermark.load failed")
+  })
+
+  test("watermark save failure collapses to [] and leaves the watermark unchanged", async () => {
+    let saved = 0
+    const errors: string[] = []
+    const store: WatermarkStore = {
+      load: async () => "2026-05-24T12:00:00Z",
+      save: async () => {
+        saved += 1
+        throw new Error("disk full")
+      },
+    }
+    const gh = fakeGhPort([
+      {
+        match: (a) => a[0] === "api",
+        result: ok([
+          {
+            id: 1,
+            body: "fresh",
+            html_url: "https://example/c/fresh",
+            updated_at: "2026-05-24T13:00:00Z",
+            user: { login: "u" },
+          },
+        ]),
+      },
+    ])
+    const src = createPrCommentTriggerSource({
+      ghCliPort: gh.port,
+      clockPort: fixedClock(0),
+      repoCwd: "/tmp/repo",
+      repoSlug: "owner/repo",
+      prNumber: 5,
+      watermarkKey: "wk",
+      watermarkStore: store,
+      onError: (message) => errors.push(message),
+    })
+    expect(await src.poll()).toEqual([])
+    expect(saved).toBe(1)
+    expect(errors[0]).toContain("watermark.save failed")
+  })
+
+  test("abort after fetch but before watermark advance returns [] and preserves replay", async () => {
+    let watermark = "2026-05-24T12:00:00Z"
+    const ctrl = new AbortController()
+    const gh = fakeGhPort([
+      {
+        match: (a) => a[0] === "api",
+        result: ok([
+          {
+            id: 1,
+            body: "fresh",
+            html_url: "https://example/c/abortable",
+            updated_at: "2026-05-24T13:00:00Z",
+            user: { login: "u" },
+          },
+        ]),
+      },
+    ])
+    const src = createPrCommentTriggerSource({
+      ghCliPort: {
+        run: async (args, cwd, signal) => {
+          const out = await gh.port.run(args, cwd, signal)
+          ctrl.abort()
+          return out
+        },
+      },
+      clockPort: fixedClock(0),
+      repoCwd: "/tmp/repo",
+      repoSlug: "owner/repo",
+      prNumber: 5,
+      watermarkKey: "wk",
+      watermarkStore: {
+        load: async () => watermark,
+        save: async (_k, v) => {
+          watermark = v
+        },
+      },
+    })
+    expect(await src.poll({ signal: ctrl.signal })).toEqual([])
+    expect(watermark).toBe("2026-05-24T12:00:00Z")
+    const next = await src.poll()
+    expect(next).toHaveLength(1)
+    expect(watermark).toBe("2026-05-24T13:00:00Z")
+  })
+
+  test("materialized PR-comment trigger is detached from later poll aborts", async () => {
+    const ctrl = new AbortController()
+    const gh = fakeGhPort([
+      {
+        match: (a) => a[0] === "api",
+        result: ok([
+          {
+            id: 1,
+            body: "fresh",
+            html_url: "https://example/c/detached",
+            updated_at: "2026-05-24T13:00:00Z",
+            user: { login: "u" },
+          },
+        ]),
+      },
+    ])
+    const src = createPrCommentTriggerSource({
+      ghCliPort: gh.port,
+      clockPort: fixedClock(0),
+      repoCwd: "/tmp/repo",
+      repoSlug: "owner/repo",
+      prNumber: 5,
+      watermarkKey: "wk",
+      watermarkStore: {
+        load: async () => "2026-05-24T12:00:00Z",
+        save: async () => {},
+      },
+    })
+    const triggers = await src.poll({ signal: ctrl.signal })
+    expect(triggers).toHaveLength(1)
+    ctrl.abort()
+    expect(triggers[0]?.abortSignal.aborted).toBe(false)
   })
 
   test("comment without html_url is skipped (no evidence anchor)", async () => {

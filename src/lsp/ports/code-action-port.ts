@@ -90,8 +90,9 @@ export interface CodeActionPort {
     line: number,
     col: number,
     kind?: CodeActionKind,
+    signal?: AbortSignal,
   ): Promise<readonly CodeAction[] | null>
   /** Apply a previously-resolved workspace edit. Throws on failure — the tool
    *  catches and converts to a typed `ok:false` result. */
-  applyEdit(edit: CodeActionWorkspaceEdit): Promise<void>
+  applyEdit(edit: CodeActionWorkspaceEdit, signal?: AbortSignal): Promise<void>
 }

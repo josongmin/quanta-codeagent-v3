@@ -4,6 +4,7 @@ import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
 import type { StatusBar } from "../../../../src/apps/cli/status-bar"
 import type { ImageQueue } from "../../../../src/apps/cli/image-queue"
+import { ExternalPromptQueue } from "../../../../src/apps/cli/repl/external-prompt-queue"
 
 // === stubs ====================================================================
 
@@ -162,5 +163,19 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
       ux: { multiline: true },
     })
     expect(typeof pipe.next).toBe("function")
+  })
+
+  test("externalPromptQueue preloaded — returns the external prompt without requiring local input", async () => {
+    const queue = new ExternalPromptQueue()
+    queue.push("wake from reactor")
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      externalPromptQueue: queue,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+    })
+    const result = await pipe.next(new AbortController().signal)
+    expect(result).toBe("wake from reactor")
   })
 })

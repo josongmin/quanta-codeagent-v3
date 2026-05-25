@@ -1583,6 +1583,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
           sessionId: config.sessionId,
           rolloutMessages: outcome.messages,
           turnCount: outcome.turns,
+          signal: config.signal,
         },
         (event) => {
           if (event.kind === "error") {

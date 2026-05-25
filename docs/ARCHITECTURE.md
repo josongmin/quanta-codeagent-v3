@@ -110,10 +110,11 @@ Six optional fields on `ToolContext` (`depth`, `workingState`, `onShellEvent`, `
 
 ## 3. Composition root rule
 
-**Adapters are NEW'd ONLY in `src/apps/**` and in factory files explicitly designated as composition (`src/llm/factory.ts`).** Production code anywhere else must accept ports as parameters.
+**Adapters are NEW'd ONLY in composition surfaces (`src/apps/**`) and in factory/helper files explicitly designated as composition (`src/llm/factory.ts`, `src/runner/assemble/**`).** Production code anywhere else must accept ports as parameters.
 
 Wiring entry points:
 - `src/llm/factory.ts` — `createLLM` / `tryCreateLLM` / `pickProvider` / `ADAPTER_REGISTRY`. The factory takes `EnvLike` so it never reads `process.env` itself.
+- `src/runner/assemble/**` — surface-agnostic collaborator assembly helpers (`buildStoreCore`, `buildStreamingCore`, `buildToolingCore`, `assembleConfig`). These are composition helpers, not domain leaves.
 - `src/tool/index.ts` — `buildDefaultTools(ports?: DefaultToolPorts)`. **Composition roots must call this; do NOT import the eager `defaultTools` singleton** (kept only for back-compat and tests).
 - `src/permission/permission-store.ts` — `createPermissionStore({filePath})` is the constructor; `getDefaultPermissionStore()` is the composition-only singleton accessor.
 - `src/apps/{cli,agent,bench,eval,probe}/**` — the per-app wiring graph.

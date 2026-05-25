@@ -1,7 +1,15 @@
+import type { AgentOutcome } from "@/agent"
 import type { Message } from "@/llm"
+import {
+  type LastTurnOutcome,
+  injectSimulatedTurn,
+  REACTOR_ENV_FLAG,
+} from "@/reactor"
 import { type RunInteractiveInput, runInteractive, runOnce } from "@/runner"
+import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { assembleConfig } from "../internal"
 import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
+import { ExternalPromptQueue } from "./external-prompt-queue"
 import type { SessionSetupResult } from "./session-setup"
 import { type SessionState, updateSessionState } from "./session-state"
 import { runOneTurn } from "./turn-runner"
@@ -51,6 +59,20 @@ export interface RunSessionLoopDeps {
  *  across both call sites). */
 const ESC_WINDOW_MS = 2000
 
+const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome => {
+  switch (outcome.reason) {
+    case "completed":
+      return "success"
+    case "max_turns":
+    case "aborted":
+    case "budget_exhausted":
+      return "partial"
+    case "error":
+    case "refusal":
+      return "fail"
+  }
+}
+
 /** Run the per-session orchestration: ONE-shot when `setup.argPrompt`
  *  is set, INTERACTIVE otherwise. Both paths funnel each turn through
  *  {@link runOneTurn} so the per-turn wrapper (turn-abort install +
@@ -79,6 +101,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     pendingImages,
     history,
   }
+  const externalPromptQueue = new ExternalPromptQueue()
+  let lastUserInputAt = 0
+  let lastTurnOutcome: LastTurnOutcome | undefined
 
   // One-shot dispatch: drive a SINGLE turn through `runOneTurn` then return.
   if (setup.argPrompt) {
@@ -137,12 +162,40 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
 
   const promptSource = composePromptPipeline({
     dispatchSlash,
+    externalPromptQueue,
     ...(imageQueue !== undefined ? { imageQueue } : {}),
     idleMonitor: setup.idleMonitor,
+    onLocalPromptAccepted: () => {
+      lastUserInputAt = Date.now()
+    },
     rejectCounter: setup.rejectCounter,
     statusBar,
     ...(ux !== undefined ? { ux } : {}),
   })
+
+  const reactorBridge =
+    setup.sessionId !== undefined && process.env[REACTOR_ENV_FLAG] === "1"
+      ? await startReactorWatchBridge({
+          sessionId: setup.sessionId,
+          onTrigger: async (trigger) => {
+            await injectSimulatedTurn({
+              trigger,
+              agentLoop: {
+                enqueueUserMessage: async (message) => {
+                  externalPromptQueue.push(message)
+                },
+              },
+              envPort: { get: (name) => process.env[name] },
+              clockPort: { now: () => Date.now() },
+              lastUserInputAt,
+              ...(lastTurnOutcome !== undefined ? { lastTurnOutcome } : {}),
+            })
+          },
+          onError: (message) => {
+            process.stderr.write(`${message}\n`)
+          },
+        })
+      : undefined
 
   type WrapTurn = NonNullable<RunInteractiveInput["wrapTurn"]>
   const wrapTurn: WrapTurn = async (run) => {
@@ -164,23 +217,35 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       },
     )
     process.stderr.write("\n")
-    if (out.turnAborted) return { cancelled: true }
+    if (out.turnAborted) {
+      lastTurnOutcome = "fail"
+      return { cancelled: true }
+    }
+    if (out.result === undefined) {
+      lastTurnOutcome = "fail"
+      return undefined
+    }
+    lastTurnOutcome = mapAgentOutcomeToReactorOutcome(out.result.outcome)
     return out.result
   }
-
-  await runInteractive({
-    deps: sessionDeps,
-    assembleConfig,
-    promptSource,
-    history: [...surfaceState.history] as Message[],
-    state: featureState,
-    idMeta,
-    signal: abort.signal,
-    seedImages: [...surfaceState.pendingImages],
-    wrapTurn,
-    onTurnEnd: ({ messages }) => {
-      surfaceState = updateSessionState(surfaceState, { history: messages })
-      sinks.flushLifecyclePills()
-    },
-  })
+  try {
+    await runInteractive({
+      deps: sessionDeps,
+      assembleConfig,
+      promptSource,
+      history: [...surfaceState.history] as Message[],
+      state: featureState,
+      idMeta,
+      signal: abort.signal,
+      seedImages: [...surfaceState.pendingImages],
+      wrapTurn,
+      onTurnEnd: ({ outcome, messages }) => {
+        lastTurnOutcome = mapAgentOutcomeToReactorOutcome(outcome)
+        surfaceState = updateSessionState(surfaceState, { history: messages })
+        sinks.flushLifecyclePills()
+      },
+    })
+  } finally {
+    await reactorBridge?.close()
+  }
 }

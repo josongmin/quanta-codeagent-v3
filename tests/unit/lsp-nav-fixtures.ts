@@ -42,7 +42,7 @@ export interface Trace {
   filePath?: string
   query?: string
   includeDeclaration?: boolean
-  signal?: AbortSignal
+  signal?: AbortSignal | undefined
 }
 
 export const loc = (path: string, line: number, character: number): NavLocation => ({

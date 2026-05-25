@@ -1,12 +1,7 @@
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
-import type { ContentBlock, ImageBlock, LLMPort, Message } from "@/llm"
-import type { EmbedderPort, PersistentStorePort } from "@/memory"
-import type { Metrics } from "@/observability"
-import type { PermissionContext, ToolAction } from "@/permission"
+import type { ContentBlock, ImageBlock, Message } from "@/llm"
 import type { SessionMeta } from "@/session"
-import type { RunContext } from "@/shared"
-import type { StreamPort } from "@/stream"
-import type { ToolRegistry } from "@/tool"
+import type { SessionDeps } from "../assemble/config"
 import { persistTurn } from "./persist-turn"
 import { normalizePromptPayload, type PromptPayload } from "./prompt-source"
 
@@ -34,39 +29,11 @@ import { normalizePromptPayload, type PromptPayload } from "./prompt-source"
  *     follow-up (partial adoption per RFC).
  */
 
-/** Per-turn `AgentConfig` assembly inputs — mirror of `SessionDeps` from
- *  `apps/cli/config-assemble.ts`, but lifted into the Layer-2 slice so a
- *  non-CLI surface can build it without depending on `apps/cli`. The CLI
- *  surface keeps using its own `SessionDeps` (a structural superset) and
- *  passes it here unchanged.
- *
- *  Kept as a plain object so a Web/Tauri surface can construct one directly
- *  without importing CLI-only types. */
-export interface OrchestrateDeps {
-  llm: LLMPort
-  registry: ToolRegistry
-  stream: StreamPort
-  permission: PermissionContext
-  system: string
-  cwd: string
-  maxTurns: number
-  signal: AbortSignal
-  onConfirm: (action: ToolAction) => Promise<boolean>
-  store: PersistentStorePort | undefined
-  sessionId: string
-  embedder: EmbedderPort | undefined
-  memoryConfig: AgentConfig["memory"] | undefined
-  planMode: boolean
-  metrics: Metrics | undefined
-  run: RunContext | undefined
-  subagentConfig: AgentConfig["subagent"] | undefined
-  skillsConfig: AgentConfig["skills"] | undefined
-  compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
-  verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
-  summarizerLlm: LLMPort | undefined
-  onShellEvent: AgentConfig["onShellEvent"] | undefined
-  workMetricsSink: AgentConfig["workMetricsSink"] | undefined
-}
+/** Per-turn `AgentConfig` assembly inputs. SSOT is {@link SessionDeps} from
+ *  `runner/assemble/config.ts`; `OrchestrateDeps` is a public alias so the
+ *  Layer-2 orchestrators and their consumers cannot drift from the assemble
+ *  contract (`followUpQueue` / `planStore` / `retrievalStack` included). */
+export type OrchestrateDeps = SessionDeps
 
 /** Inputs for {@link runOnce}. All fields are typed config — no argv/env
  *  reads happen in this module. */

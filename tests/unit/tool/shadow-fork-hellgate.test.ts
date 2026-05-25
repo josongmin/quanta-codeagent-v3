@@ -69,8 +69,8 @@ describe("fork_session tool hellgate (ADR-0201)", () => {
     const tool = forkSessionTool(okForker)
     expect(tool.name).toBe("fork_session")
     expect(tool.isReadOnly()).toBe(true)
-    expect(tool.isConcurrencySafe?.()).toBe(true)
-    expect(tool.hitlTier?.()).toBe("none")
+    expect(tool.isConcurrencySafe?.({ checkpointId: "parent-A" })).toBe(true)
+    expect(tool.hitlTier?.({ checkpointId: "parent-A" })).toBe("none")
     // schema rejects empty.
     expect(forkSessionInputSchema.safeParse({ checkpointId: "" }).success).toBe(false)
 

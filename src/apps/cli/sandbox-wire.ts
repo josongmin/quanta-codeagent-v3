@@ -89,7 +89,10 @@ export const buildCliOsSandbox = (
   let linuxBackendPromise: Promise<LinuxSandboxBackend | null> | undefined
   const detectLinuxBackend = (): Promise<LinuxSandboxBackend | null> => {
     if (linuxBackendPromise === undefined) {
-      linuxBackendPromise = detectLinuxSandboxBackend({ which: deps.which })
+      linuxBackendPromise =
+        deps.which !== undefined
+          ? detectLinuxSandboxBackend({ which: deps.which })
+          : detectLinuxSandboxBackend()
     }
     return linuxBackendPromise
   }

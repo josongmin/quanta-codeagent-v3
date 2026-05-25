@@ -51,8 +51,9 @@ export interface RenameApplyPort {
     line: number,
     col: number,
     newName: string,
+    signal?: AbortSignal,
   ): Promise<RenameWorkspaceEdit | null>
   /** Apply a previously-computed workspace edit. Throws on failure — the tool
    *  catches and converts to a typed `ok:false` result. */
-  applyEdit(edit: RenameWorkspaceEdit): Promise<void>
+  applyEdit(edit: RenameWorkspaceEdit, signal?: AbortSignal): Promise<void>
 }

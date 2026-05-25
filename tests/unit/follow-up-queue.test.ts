@@ -163,6 +163,23 @@ describe("FollowUpQueue (ADR-0037)", () => {
     expect(fresh.id).toBe(FollowUpQueue.makeId(tid, 3))
   })
 
+  test("malformed restore throws and preserves the caller queue state", () => {
+    const q = new FollowUpQueue({ maxPerThread: 2 })
+    const tid = threadId("th-restore")
+    q.enqueue(tid, baseFu("keep"))
+
+    expect(() =>
+      q.restoreFromSnapshot({
+        version: 2,
+        maxPerThread: 2,
+        threads: null as unknown as [],
+      }),
+    ).toThrow(/Malformed/)
+
+    expect(q.sizeFor(tid)).toBe(1)
+    expect(q.peek(tid)?.content).toBe("keep")
+  })
+
   test("fromSnapshot rejects unknown version", () => {
     expect(() =>
       FollowUpQueue.fromSnapshot({

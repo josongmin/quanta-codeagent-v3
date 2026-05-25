@@ -152,6 +152,33 @@ const normalizeMaxPerThread = (value: number | undefined): number => {
   return normalized >= 1 ? normalized : 1
 }
 
+const parseSeq = (id: string): number => {
+  const m = /^fu-.+-([0-9a-z]+)$/.exec(id)
+  if (m === null) return -1
+  const seq = Number.parseInt(m[1] ?? "0", 36)
+  return Number.isFinite(seq) ? seq : -1
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const assertFollowUp = (value: unknown): FollowUp => {
+  if (!isRecord(value)) throw new Error("Malformed FollowUpQueueSnapshot entry")
+  if (typeof value.id !== "string") throw new Error("Malformed FollowUpQueueSnapshot entry")
+  if (typeof value.content !== "string") throw new Error("Malformed FollowUpQueueSnapshot entry")
+  if (typeof value.submittedAt !== "number") throw new Error("Malformed FollowUpQueueSnapshot entry")
+  if (value.submittedTurnId !== null && typeof value.submittedTurnId !== "string") {
+    throw new Error("Malformed FollowUpQueueSnapshot entry")
+  }
+  if (!isRecord(value.metadata)) throw new Error("Malformed FollowUpQueueSnapshot entry")
+  for (const [k, v] of Object.entries(value.metadata)) {
+    if (typeof k !== "string" || typeof v !== "string") {
+      throw new Error("Malformed FollowUpQueueSnapshot entry")
+    }
+  }
+  return value as unknown as FollowUp
+}
+
 /** Per-thread FIFO queue + multi-thread isolation. In-memory; persistence
  *  is via {@link toSnapshot}/{@link fromSnapshot}. */
 export class FollowUpQueue {
@@ -280,38 +307,59 @@ export class FollowUpQueue {
    *  with the queue's current cap because the legacy shape did not persist
    *  it. Version 2 snapshots carry the cap explicitly and become the queue's
    *  new hard ceiling. */
-  restoreFromSnapshot(snapshot: FollowUpQueueSnapshotInput): void {
-    this.map.clear()
-    if (snapshot.version === 2) {
-      this.maxPerThread = normalizeMaxPerThread(snapshot.maxPerThread)
+  restoreFromSnapshot(snapshot: unknown): void {
+    if (!isRecord(snapshot) || (snapshot.version !== 1 && snapshot.version !== 2)) {
+      throw new Error(
+        `Unsupported FollowUpQueueSnapshot version: ${String(
+          isRecord(snapshot) ? snapshot.version : undefined,
+        )}`,
+      )
     }
-    const maxPerThread = this.maxPerThread
+    if (!Array.isArray(snapshot.threads)) {
+      throw new Error("Malformed FollowUpQueueSnapshot threads")
+    }
+    const nextMaxPerThread =
+      snapshot.version === 2
+        ? (() => {
+            if (typeof snapshot.maxPerThread !== "number") {
+              throw new Error("Malformed FollowUpQueueSnapshot maxPerThread")
+            }
+            return normalizeMaxPerThread(snapshot.maxPerThread)
+          })()
+        : this.maxPerThread
+    const nextMap = new Map<ThreadId, ThreadQueueState>()
     let maxSeq = -1
     for (const t of snapshot.threads) {
-      for (const e of t.entries) {
-        const m = /^fu-.+-([0-9a-z]+)$/.exec(e.id)
-        if (m !== null) {
-          const seq = Number.parseInt(m[1] ?? "0", 36)
-          if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq
-        }
+      if (!isRecord(t)) throw new Error("Malformed FollowUpQueueSnapshot thread")
+      if (typeof t.threadId !== "string") throw new Error("Malformed FollowUpQueueSnapshot thread")
+      if (!Array.isArray(t.entries)) throw new Error("Malformed FollowUpQueueSnapshot thread")
+      const validated: FollowUp[] = []
+      for (const raw of t.entries) {
+        const e = assertFollowUp(raw)
+        validated.push(e)
+        const seq = parseSeq(e.id)
+        if (seq > maxSeq) maxSeq = seq
       }
       const kept =
-        t.entries.length > maxPerThread
-          ? t.entries.slice(t.entries.length - maxPerThread)
-          : [...t.entries]
+        validated.length > nextMaxPerThread
+          ? validated.slice(validated.length - nextMaxPerThread)
+          : validated
       if (kept.length === 0) continue
-      this.map.set(t.threadId as ThreadId, {
+      nextMap.set(t.threadId as ThreadId, {
         entries: kept,
         head: 0,
       })
     }
+    this.map.clear()
+    for (const [tid, state] of nextMap) this.map.set(tid, state)
+    this.maxPerThread = nextMaxPerThread
     this.nextSeq = maxSeq + 1
   }
 
   /** Reconstruct a queue from a snapshot. The seq counter is reset to one
    *  past the maximum existing seq so post-restore enqueues never collide
    *  with restored ids. */
-  static fromSnapshot(snapshot: FollowUpQueueSnapshotInput): FollowUpQueue {
+  static fromSnapshot(snapshot: unknown): FollowUpQueue {
     const q = new FollowUpQueue()
     q.restoreFromSnapshot(snapshot)
     return q

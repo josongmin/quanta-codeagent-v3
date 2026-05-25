@@ -239,26 +239,25 @@ const readCappedBody = async (
     if (aborted) return { kind: "aborted" }
     while (true) {
       if (aborted) return { kind: "aborted" }
-      let step: ReadableStreamReadResult<Uint8Array>
       try {
-        step = await reader.read()
+        const step = await reader.read()
+        if (aborted || signal.aborted) return { kind: "aborted" }
+        const { done, value } = step
+        if (done) break
+        if (value === undefined) continue
+        const remaining = maxBytes - total
+        if (value.byteLength > remaining) {
+          chunks.push(value.subarray(0, remaining))
+          total += remaining
+          truncated = true
+          break
+        }
+        chunks.push(value)
+        total += value.byteLength
       } catch (e) {
         if (aborted || signal.aborted) return { kind: "aborted" }
         throw e
       }
-      if (aborted || signal.aborted) return { kind: "aborted" }
-      const { done, value } = step
-      if (done) break
-      if (value === undefined) continue
-      const remaining = maxBytes - total
-      if (value.byteLength > remaining) {
-        chunks.push(value.subarray(0, remaining))
-        total += remaining
-        truncated = true
-        break
-      }
-      chunks.push(value)
-      total += value.byteLength
     }
   } finally {
     signal.removeEventListener("abort", onAbort)

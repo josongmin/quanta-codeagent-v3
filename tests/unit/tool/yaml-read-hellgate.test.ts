@@ -94,7 +94,8 @@ describe("yaml_read — path safety", () => {
       const r = await exec({ path: "../escape.yaml" }, dir)
       expect(r.ok).toBe(false)
       expect(r.failure?.mode).toBe("permission_denied")
-      expect(r.failure?.isReadonly).toBe(true)
+      if (r.failure?.mode !== "permission_denied") throw new Error("expected permission_denied")
+      expect(r.failure.isReadonly).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -133,7 +134,8 @@ describe("yaml_read — path safety", () => {
       expect(r.ok).toBe(false)
       expect(r.output.toLowerCase()).toMatch(/symlink/)
       expect(r.failure?.mode).toBe("permission_denied")
-      expect(r.failure?.isReadonly).toBe(true)
+      if (r.failure?.mode !== "permission_denied") throw new Error("expected permission_denied")
+      expect(r.failure.isReadonly).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

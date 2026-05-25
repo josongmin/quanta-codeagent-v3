@@ -145,10 +145,12 @@ export function jsonlReplayStore(opts: JsonlReplayStoreOpts): ReplayStore {
 
   return {
     async append(record: RecordedInteraction): Promise<void> {
+      const list = await ensureLoaded()
       await ensureDir()
       await appendFile(opts.path, `${JSON.stringify(record)}\n`, "utf-8")
-      // Keep cache coherent so subsequent matches see the just-recorded entry.
-      const list = await ensureLoaded()
+      // Keep cache coherent so subsequent matches see the just-recorded entry
+      // exactly once. Loading AFTER append re-reads the just-written line from
+      // disk and then `push(record)` duplicates it in-memory.
       list.push(record)
     },
     async match(

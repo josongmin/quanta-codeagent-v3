@@ -1,37 +1,23 @@
 #!/usr/bin/env bun
 /**
- * ADR-0132 Phase E — reactor cron watcher (stub).
+ * ADR-0132 Phase E — reactor cron watcher.
  *
  * Out-of-process companion to the agent loop. Drives `TriggerSourcePort`
- * polling on a cadence (cron or systemd timer); each fired trigger is handed
- * to `injectSimulatedTurn` against an in-process `AgentLoopPort` that the
- * watcher binds to a real surface (IPC socket, IDE plugin RPC, etc.).
- *
- * This file is INTENTIONALLY a stub: the composition root (apps/agent /
- * apps/cli) owns the real gh-binary + git-binary adapters and the wiring to
- * the host surface's AgentLoopPort. The stub provides:
- *
- *  - The argv contract (`--pr <ref> --interval-ms <ms> --once`).
- *  - The dry-run mode (`--dry-run`) — prints triggers as JSONL without
- *    waking the agent. This is what CI uses to validate the wiring in
- *    smoke without enabling self-wake.
- *  - The default-OFF guard: if `QUANTA_PROACTIVE_REACTOR !== "1"` AND
- *    `--dry-run` is absent, the process refuses to run.
- *
- * Production wiring (deliberately deferred):
- *  - Real `GhCliPort` adapter (`Bun.spawn` wrapping `gh`).
- *  - Real `AgentLoopPort` binding to the desktop / CLI surface.
- *  - File-backed `WatermarkStore` (`.quanta/reactor-watermarks.json`).
- *
- * Until those are wired, this script is a contract-only entry point so the
- * argv shape is locked in before adapters land.
+ * polling on a cadence (cron or systemd timer); each fired trigger is sent
+ * to the live CLI surface over the per-session reactor socket. The CLI host
+ * remains the authority for the self-wake guards (`env` / quiet window /
+ * prior outcome) because only the host knows current session state.
  */
 
+import { homedir } from "node:os"
+import {
+  publishReactorWatchTrigger,
+  reactorWatchSocketPath,
+} from "../src/apps/cli/reactor-watch-bridge"
 import {
   createCiTriggerSource,
   createInMemorySeenRuns,
   type GhCliPort,
-  injectSimulatedTurn,
   type ProactiveTrigger,
   REACTOR_ENV_FLAG,
 } from "@/reactor"
@@ -39,6 +25,8 @@ import {
 /** Argv shape. Parsed pure (no IO) so it can be unit-tested if/when needed. */
 export interface WatcherArgs {
   readonly prRef: string | undefined
+  readonly sessionId: string | undefined
+  readonly socketPath: string | undefined
   readonly intervalMs: number
   readonly once: boolean
   readonly dryRun: boolean
@@ -48,15 +36,20 @@ export interface WatcherArgs {
 const DEFAULT_INTERVAL_MS = 60_000
 const MIN_INTERVAL_MS = 5_000
 
-const HELP_TEXT = `reactor-watch — ADR-0132 cron watcher (stub)
+const HELP_TEXT = `reactor-watch — ADR-0132 cron watcher
 
 USAGE:
-  bun run scripts/reactor-watch.ts --pr <ref> [--interval-ms <n>] [--once]
-                                   [--dry-run] [--help]
+  bun run scripts/reactor-watch.ts --pr <ref> --session-id <id>
+                                   [--socket-path <path>] [--interval-ms <n>]
+                                   [--once] [--dry-run] [--help]
 
 OPTIONS:
   --pr <ref>           PR identifier accepted by 'gh' (number / URL / slug#n).
                        Required UNLESS --help.
+  --session-id <id>    Live CLI session id that owns the reactor socket.
+                       Required unless --dry-run or --help.
+  --socket-path <path> Override the per-session reactor socket path.
+                       Default: ~/.quanta/reactor-<session-id>.sock
   --interval-ms <n>    Poll cadence in ms. Default ${DEFAULT_INTERVAL_MS}. Min ${MIN_INTERVAL_MS}.
   --once               Poll a single time and exit. Useful for cron drivers.
   --dry-run            Print triggers as JSONL to stdout. Does NOT enable
@@ -71,6 +64,8 @@ ENV:
 
 export const parseArgs = (argv: readonly string[]): WatcherArgs => {
   let prRef: string | undefined
+  let sessionId: string | undefined
+  let socketPath: string | undefined
   let intervalMs = DEFAULT_INTERVAL_MS
   let once = false
   let dryRun = false
@@ -89,6 +84,18 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
         prRef = v
         i++
       }
+    } else if (a === "--session-id") {
+      const v = argv[i + 1]
+      if (v !== undefined) {
+        sessionId = v
+        i++
+      }
+    } else if (a === "--socket-path") {
+      const v = argv[i + 1]
+      if (v !== undefined) {
+        socketPath = v
+        i++
+      }
     } else if (a === "--interval-ms") {
       const v = argv[i + 1]
       if (v !== undefined) {
@@ -98,19 +105,24 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
       }
     }
   }
-  return { prRef, intervalMs, once, dryRun, help }
+  return { prRef, sessionId, socketPath, intervalMs, once, dryRun, help }
 }
 
-/**
- * Placeholder GhCliPort — real adapter lives at the composition root.
- * Exported for tests so the script's wiring shape stays observable.
- */
-export const stubGhCliPort = (): GhCliPort => ({
-  run: async () => ({
-    stdout: "",
-    stderr: "stub adapter — bind a real GhCliPort at the composition root",
-    exitCode: 1,
-  }),
+const ghCliPort = (_repoCwd: string): GhCliPort => ({
+  run: async (args, cwd, signal) => {
+    const child = Bun.spawn(["gh", ...args], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(signal !== undefined ? { signal } : {}),
+    })
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { stdout, stderr, exitCode }
+  },
 })
 
 /**
@@ -149,6 +161,11 @@ const main = async (argv: readonly string[]): Promise<number> => {
     process.stderr.write(HELP_TEXT)
     return 2
   }
+  if (!args.dryRun && args.sessionId === undefined) {
+    process.stderr.write("error: --session-id <id> is required unless --dry-run\n\n")
+    process.stderr.write(HELP_TEXT)
+    return 2
+  }
   if (!args.dryRun && process.env[REACTOR_ENV_FLAG] !== "1") {
     process.stderr.write(
       `error: ${REACTOR_ENV_FLAG} is not set to "1"; refusing to run without --dry-run\n`,
@@ -157,7 +174,7 @@ const main = async (argv: readonly string[]): Promise<number> => {
   }
 
   const source = createCiTriggerSource({
-    ghCliPort: stubGhCliPort(),
+    ghCliPort: ghCliPort(process.cwd()),
     clockPort: { now: () => Date.now() },
     repoCwd: process.cwd(),
     prRef: args.prRef,
@@ -182,20 +199,12 @@ const main = async (argv: readonly string[]): Promise<number> => {
           simulatedMessage: t.simulatedMessage,
         })}\n`,
       )
-      if (action === "enqueued") {
-        // Real wiring binds an AgentLoopPort here; the stub does NOT actually
-        // touch a host loop. Production composition root replaces this stub.
-        await injectSimulatedTurn({
+      if (action === "enqueued" && args.sessionId !== undefined) {
+        await publishReactorWatchTrigger({
+          sessionId: args.sessionId,
+          socketPath:
+            args.socketPath ?? reactorWatchSocketPath(args.sessionId, homedir()),
           trigger: t,
-          agentLoop: {
-            enqueueUserMessage: async () => {
-              /* stub — production binds real loop */
-            },
-          },
-          envPort: env,
-          clockPort: { now: () => Date.now() },
-          lastUserInputAt: 0,
-          lastTurnOutcome: "success",
         })
       }
     }

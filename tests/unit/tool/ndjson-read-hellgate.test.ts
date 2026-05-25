@@ -138,7 +138,8 @@ describe("B. ndjson_read tool", () => {
     expect(r.ok).toBe(false)
     expect(r.output).toMatch(/outside cwd|not found|symlink/i)
     expect(r.failure?.mode).toBe("permission_denied")
-    expect(r.failure?.isReadonly).toBe(true)
+    if (r.failure?.mode !== "permission_denied") throw new Error("expected permission_denied")
+    expect(r.failure.isReadonly).toBe(true)
   })
   test("12. empty file → ok:true `0 lines`", async () => {
     const r = await collect({ path: "empty.ndjson" })

@@ -115,7 +115,8 @@ describe("A. jail-escape attempts blocked", () => {
     const r = await collect({ path: "/etc/hosts" })
     expect(r.ok).toBe(false)
     expect(r.failure?.mode).toBe("permission_denied")
-    expect(r.failure?.isReadonly).toBe(true)
+    if (r.failure?.mode !== "permission_denied") throw new Error("expected permission_denied")
+    expect(r.failure.isReadonly).toBe(true)
   })
 
   test("5. symlinked parent directory escaping jail → ok:false", async () => {
