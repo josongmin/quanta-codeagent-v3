@@ -1,4 +1,4 @@
-# ADR-0304 — Surface-Wire R2: identity onChange + granular registry + per-tool auto-record
+# ADR-0309 — Surface-Wire R2: identity onChange + granular registry + per-tool auto-record
 
 * Status: Accepted (2026-05-26)
 * Tier: 2

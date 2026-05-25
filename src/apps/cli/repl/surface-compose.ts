@@ -300,7 +300,7 @@ export const composeSurfaceWires = (
   // The per-tool recorder (Wire 3 below) populates it when opted in.
   const granularRegistry: GranularRegistryPort = defaultGranularRegistry()
   setup.sessionDeps.granularRegistry = granularRegistry
-  // ADR-0304 Wire 3 — per-tool auto-record cadence. Env-gated:
+  // ADR-0309 Wire 3 — per-tool auto-record cadence. Env-gated:
   // `QUANTA_PER_TOOL_RECORD=on` ⇒ wrap every tool in the session registry
   // with a pre-execute snapshot recorder. Absent / any other value ⇒
   // tools execute byte-identical, registry stays empty.
@@ -377,7 +377,7 @@ export const composeSurfaceWires = (
     planStore: setup.planStore,
     branchProgress: setup.branchProgress,
     getHistory: () => state.history,
-    // ADR-0304 — `assembleConfig` is captured ONCE here (the only place the
+    // ADR-0309 — `assembleConfig` is captured ONCE here (the only place the
     // CLI surface code touches it for the `/side` path). The slash-surface
     // layer downstream sees only the typed {@link SideConversationPort}.
     sideConvPort: buildSideConversationPort({

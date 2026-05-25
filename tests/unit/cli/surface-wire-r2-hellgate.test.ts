@@ -1,5 +1,5 @@
 /**
- * Hellgate — ADR-0304 Surface-Wire R2 (3 wires bundled).
+ * Hellgate — ADR-0309 Surface-Wire R2 (3 wires bundled).
  *
  * Closes the deferred last-miles from ADR-0300 + ADR-0302:
  *
@@ -128,7 +128,7 @@ const fakeSessionDeps = (overrides?: Partial<SessionDeps>): SessionDeps =>
 /* Wire 1 — Identity onChange                                           */
 /* ------------------------------------------------------------------ */
 
-describe("ADR-0304 Wire 1 — identity onChange + system-prompt refresh", () => {
+describe("ADR-0309 Wire 1 — identity onChange + system-prompt refresh", () => {
   test("HELL-R2-01 — adapter without onChange ⇒ swap fires no callback (legacy)", () => {
     const reg = defaultModeVariantRegistry()
     const fires = 0
@@ -221,7 +221,7 @@ describe("ADR-0304 Wire 1 — identity onChange + system-prompt refresh", () => 
 /* Wire 2 — GranularRegistry instantiation + threading                  */
 /* ------------------------------------------------------------------ */
 
-describe("ADR-0304 Wire 2 — granular registry instantiation + threading", () => {
+describe("ADR-0309 Wire 2 — granular registry instantiation + threading", () => {
   test("HELL-R2-07 — surface registry + adapter; unseen toolCallId ⇒ not-found", () => {
     const registry = defaultGranularRegistry()
     const adapter = createPerToolCheckpointAdapter({ registry })
@@ -301,7 +301,7 @@ describe("ADR-0304 Wire 2 — granular registry instantiation + threading", () =
 /* Wire 3 — Per-tool auto-record cadence                                */
 /* ------------------------------------------------------------------ */
 
-describe("ADR-0304 Wire 3 — per-tool snapshot recorder", () => {
+describe("ADR-0309 Wire 3 — per-tool snapshot recorder", () => {
   test("HELL-R2-13 — knob OFF (recorder absent) ⇒ tool execute byte-identical", async () => {
     // The recorder is NEVER constructed when QUANTA_PER_TOOL_RECORD !== "on".
     // Verify the un-wrapped tool path: events go through unchanged.

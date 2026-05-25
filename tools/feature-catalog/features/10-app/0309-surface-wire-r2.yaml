@@ -1,5 +1,5 @@
 id: surface-wire-r2
-title: ADR-0304 — Surface-Wire R2 (identity onChange + granular registry + per-tool auto-record)
+title: ADR-0309 — Surface-Wire R2 (identity onChange + granular registry + per-tool auto-record)
 section: 10
 subsystem: REPL surface composition
 order: 73
@@ -57,7 +57,7 @@ evidence:
     - src/apps/cli/repl/slash-surface.ts
     - src/runner/assemble/config.ts
   adrs:
-    - docs/decisions/0304-surface-wire-r2.md
+    - docs/decisions/0309-surface-wire-r2.md
   tests:
     unit:
       - tests/unit/cli/surface-wire-r2-hellgate.test.ts

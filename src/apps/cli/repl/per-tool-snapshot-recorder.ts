@@ -1,5 +1,5 @@
 /**
- * Per-tool auto-record cadence wire (ADR-0304 — third of the three R2 wires).
+ * Per-tool auto-record cadence wire (ADR-0309 — third of the three R2 wires).
  *
  * Closes the deferred last-mile from ADR-0300: today the granular registry
  * (`@/agent/checkpoint/granular-registry`) is never populated — no caller
