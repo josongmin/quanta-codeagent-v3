@@ -1,3 +1,14 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
-// Phase 1: nothing to set up yet.
-export {}
+import { beforeEach } from "bun:test"
+import { setTerminalIo } from "@/shared"
+
+beforeEach(() => {
+  setTerminalIo({
+    stdout: (chunk) => {
+      void process.stdout.write(chunk)
+    },
+    stderr: (chunk) => {
+      void process.stderr.write(chunk)
+    },
+  })
+})

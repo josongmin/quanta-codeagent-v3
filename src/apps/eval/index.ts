@@ -22,7 +22,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, setTerminalIo } from "@/shared"
 import { runAudit } from "./audit"
 import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
 import { runSwebenchAdapter } from "./public"
@@ -31,6 +31,15 @@ import { generateScenarios, runSynthetic } from "./synthetic"
 import { classifyQuery } from "./taxonomy"
 import { classifyTrajectories, freezeFixture, replayFixture } from "./trajectory"
 import type { UseCaseId } from "./types"
+
+setTerminalIo({
+  stdout: (chunk) => {
+    void process.stdout.write(chunk)
+  },
+  stderr: (chunk) => {
+    void process.stderr.write(chunk)
+  },
+})
 
 // ── argv helpers ─────────────────────────────────────────────────────────────
 

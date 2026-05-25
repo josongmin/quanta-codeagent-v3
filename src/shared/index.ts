@@ -43,5 +43,13 @@ export {
   redactValue,
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
+export type { TerminalIo, TerminalWriter } from "./terminal-io"
+export {
+  __resetTerminalIo,
+  getTerminalIo,
+  setTerminalIo,
+  writeStderr,
+  writeStdout,
+} from "./terminal-io"
 export type { HITLTier, Id, Result } from "./types"
 export { ALL_HITL_TIERS, err, ok } from "./types"

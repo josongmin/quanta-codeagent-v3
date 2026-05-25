@@ -8,11 +8,20 @@
  * or no argument). `main(argv)` is exported so tests invoke it directly.
  */
 import type { TrajectoryEvent } from "@/shared"
-import { logger } from "@/shared"
+import { logger, setTerminalIo } from "@/shared"
 import { observeFunnel, renderFunnel } from "./funnel"
 import { type AttemptTraj, loadRun, type ParsedRun, type RunSummaryLike } from "./parse"
 import { costJson, renderCost, renderHotspots, renderTimeline } from "./render"
 import { triage } from "./triage"
+
+setTerminalIo({
+  stdout: (chunk) => {
+    void process.stdout.write(chunk)
+  },
+  stderr: (chunk) => {
+    void process.stderr.write(chunk)
+  },
+})
 
 interface Args {
   path?: string

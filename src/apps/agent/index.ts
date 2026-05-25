@@ -53,7 +53,7 @@ import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { logger, runtimeConfig } from "@/shared"
+import { logger, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { resolveSandboxProfileFromEnv } from "../cli/sandbox-wire"
@@ -71,6 +71,15 @@ import { buildSearchPipelineFromEnv } from "./search-pipeline-wire"
 export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "./search-pipeline-wire"
 
 import type { RunOutcome } from "./run"
+
+setTerminalIo({
+  stdout: (chunk) => {
+    void process.stdout.write(chunk)
+  },
+  stderr: (chunk) => {
+    void process.stderr.write(chunk)
+  },
+})
 
 /** ADR-0198 identity slot — resolve the per-mode identity from the
  *  composition-root env view. Default-OFF: returns `undefined` unless

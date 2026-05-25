@@ -9,6 +9,7 @@
  * Logs go to stderr so stdout stays reserved for the agent stream.
  */
 import { type LogLevel, runtimeConfig } from "./runtime-config"
+import { writeStderr } from "./terminal-io"
 
 export type { LogLevel }
 
@@ -29,7 +30,7 @@ const write = (level: LogLevel, msg: string, meta?: unknown): void => {
   if (!levelEnabled(level, runtimeConfig().logLevel)) return
   const line = `[${level}] ${msg}`
   const text = meta === undefined ? line : `${line} ${JSON.stringify(meta)}`
-  process.stderr.write(`${text}\n`)
+  writeStderr(`${text}\n`)
 }
 
 export const logger = {

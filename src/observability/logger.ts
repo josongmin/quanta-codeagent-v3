@@ -1,4 +1,4 @@
-import { type LogLevel, levelEnabled, runtimeConfig } from "@/shared"
+import { type LogLevel, levelEnabled, runtimeConfig, writeStderr } from "@/shared"
 import type { LogRecord, LogSink, StructuredLoggerOptions } from "./types"
 
 /** Resolve the effective threshold: explicit option ›› `runtimeConfig().logLevel` ›› default.
@@ -10,7 +10,7 @@ const resolveLevel = (explicit: LogLevel | undefined): LogLevel =>
 
 const defaultSink: LogSink = (line) => {
   // stderr only: stdout is reserved for the agent stream (same rule as @/shared).
-  process.stderr.write(`${line}\n`)
+  writeStderr(`${line}\n`)
 }
 
 /**

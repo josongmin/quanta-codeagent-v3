@@ -25,6 +25,8 @@
  * `process.env` directly. The anti-regression scanner bans the latter.
  */
 
+import { writeStderr } from "./terminal-io"
+
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const
 export type LogLevel = (typeof LOG_LEVELS)[number]
 
@@ -41,7 +43,7 @@ const SWEBENCH_CACHE_LEVEL_SET = new Set<string>(SWEBENCH_CACHE_LEVELS)
 
 const stderrWarn = (msg: string): void => {
   // Direct write because the logger imports US; using logger here would loop.
-  process.stderr.write(`[quanta] config: ${msg}\n`)
+  writeStderr(`[quanta] config: ${msg}\n`)
 }
 
 const parseLogLevel = (raw: string | undefined): LogLevel => {

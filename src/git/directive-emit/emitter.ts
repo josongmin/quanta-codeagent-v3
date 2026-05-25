@@ -7,12 +7,10 @@
  *     `ok(undefined)` and produces zero side effects. Used wherever a host
  *     has not opted in (HELL-DE-07 pins zero stdout/stderr writes).
  *
- *   - `defaultEmitter(sink?)` — phase-guarded, canonical serializer +
- *     `sink.write(line + "\n")`. Defaults to `process.stdout` because the
- *     codex protocol emits directives in the final-answer stream (UI
- *     consumers grep `^::git-`). Hosts that need stderr framing inject
- *     `process.stderr`. Either way, the phase guard runs FIRST — wrong-phase
- *     emit returns a typed error and the sink is never touched.
+ *   - `defaultEmitter(sink)` — phase-guarded, canonical serializer +
+ *     `sink.write(line + "\n")`. The host passes stdout/stderr/IDE transport
+ *     explicitly. Either way, the phase guard runs FIRST — wrong-phase emit
+ *     returns a typed error and the sink is never touched.
  *
  * Directive validation (shape sanity) runs inside `emit()` so a malformed
  * caller-constructed directive is rejected before serialization, not after
@@ -33,17 +31,17 @@ export const noopEmitter: DirectiveEmitterPort = {
   },
 }
 
-/** A minimal write target. `process.stdout` / `process.stderr` both match. */
+/** A minimal write target. Hosts adapt stdout/stderr/transport sinks to this. */
 export interface DirectiveSink {
   write(chunk: string): boolean
 }
 
 /**
- * Build an emitter that serializes + writes to `sink` (default `process.stdout`).
- * Runs the phase guard first; wrong-phase emit returns typed error and never
- * touches the sink. Wrong-shape directive likewise short-circuits.
+ * Build an emitter that serializes + writes to `sink`. Runs the phase guard
+ * first; wrong-phase emit returns typed error and never touches the sink.
+ * Wrong-shape directive likewise short-circuits.
  */
-export const defaultEmitter = (sink: DirectiveSink = process.stdout): DirectiveEmitterPort => ({
+export const defaultEmitter = (sink: DirectiveSink): DirectiveEmitterPort => ({
   emit(directive: GitDirective, ctx: EmitContext): Result<void, EmitError> {
     const phaseGate = checkPhase(ctx.phase)
     if (!phaseGate.ok) return phaseGate

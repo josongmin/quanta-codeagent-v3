@@ -7,6 +7,7 @@
  * recordings and a proper OTel adapter for production export.
  */
 
+import { writeStderr } from "@/shared"
 import type { MetricSample, MetricSink } from "./port"
 
 const formatLabels = (labels: Readonly<Record<string, string>> | undefined): string => {
@@ -26,7 +27,7 @@ export const consoleMetricsSink: MetricSink = {
     // Direct stderr write so test capture (Bun's `Bun.spawn` stderr stream)
     // sees the exact bytes. No-throw — a failed stderr write is non-fatal.
     try {
-      process.stderr.write(`${formatSample(sample)}\n`)
+      writeStderr(`${formatSample(sample)}\n`)
     } catch {
       // Swallow — observability must not crash callers.
     }

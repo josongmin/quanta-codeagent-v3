@@ -16,7 +16,7 @@
  * Slice: `@/scheduler` (additive helper; existing files unchanged).
  */
 
-import { logger } from "@/shared"
+import { logger, writeStderr } from "@/shared"
 import {
   type AutomationEnginePort,
   type AutomationHandler,
@@ -105,7 +105,7 @@ export const assembleAutomation = (
   }
 
   const engine = deps.engine ?? inMemoryAutomationEngine()
-  const stderrWrite = deps.stderr ?? ((s: string): void => void process.stderr.write(s))
+  const stderrWrite = deps.stderr ?? writeStderr
 
   // Handler: dispatch the automation's prompt onto the agent loop. The
   // contract with tickScheduler is that any throw here surfaces as

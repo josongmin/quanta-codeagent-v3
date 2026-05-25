@@ -1,4 +1,4 @@
-import { redactValue } from "@/shared"
+import { redactValue, type TerminalWriter, writeStdout } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 
@@ -30,6 +30,8 @@ export interface StdoutStreamOptions {
    *  event types call `painter.flush()` first so any pending partial line
    *  is emitted before the boundary marker. */
   readonly painter?: AssistantTextPainter
+  /** Host-owned sink. Absent ⇒ the registered shared stdout port. */
+  readonly write?: TerminalWriter
 }
 
 /** Human-readable stdout renderer. Assistant text streams inline; tool
@@ -37,9 +39,11 @@ export interface StdoutStreamOptions {
 export class StdoutStream implements StreamPort {
   private inText = false
   private readonly painter: AssistantTextPainter | undefined
+  private readonly write: TerminalWriter
 
   constructor(opts: StdoutStreamOptions = {}) {
     this.painter = opts.painter
+    this.write = opts.write ?? writeStdout
   }
 
   /** Drain the markdown painter buffer (if wired) immediately before
@@ -49,7 +53,7 @@ export class StdoutStream implements StreamPort {
   private drainPainterTail(): void {
     if (this.painter === undefined) return
     const tail = this.painter.flush()
-    if (tail !== "") process.stdout.write(tail)
+    if (tail !== "") this.write(tail)
   }
 
   /** Write a single `assistant_text` delta — redacted, then routed through
@@ -59,23 +63,23 @@ export class StdoutStream implements StreamPort {
   private writeAssistantText(delta: string): void {
     const safe = redactStr(delta)
     const out = this.painter !== undefined ? this.painter.write(safe) : safe
-    if (out !== "") process.stdout.write(out)
+    if (out !== "") this.write(out)
     this.inText = true
   }
 
   emit(event: AgentEvent): void {
     if (event.type !== "assistant_text" && this.inText) {
       this.drainPainterTail()
-      process.stdout.write("\n")
+      this.write("\n")
       this.inText = false
     }
 
     switch (event.type) {
       case "session_start":
-        process.stdout.write(`${DIM}— session start —${RESET}\n`)
+        this.write(`${DIM}— session start —${RESET}\n`)
         break
       case "turn_start":
-        process.stdout.write(`${DIM}— turn ${event.turn} —${RESET}\n`)
+        this.write(`${DIM}— turn ${event.turn} —${RESET}\n`)
         break
       case "assistant_text":
         // S4: a secret pasted into model output must not hit the terminal.
@@ -85,12 +89,12 @@ export class StdoutStream implements StreamPort {
         this.writeAssistantText(event.delta)
         break
       case "tool_call":
-        process.stdout.write(
+        this.write(
           `${CYAN}⚙ ${event.name}${RESET} ${DIM}${compact(event.input)}${RESET}\n`,
         )
         break
       case "tool_progress":
-        process.stdout.write(`${DIM}  ↳ ${event.name}: ${oneLine(event.message)}${RESET}\n`)
+        this.write(`${DIM}  ↳ ${event.name}: ${oneLine(event.message)}${RESET}\n`)
         break
       case "tool_result": {
         const mark = event.ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`
@@ -98,7 +102,7 @@ export class StdoutStream implements StreamPort {
           event.stderrTail !== undefined && event.stderrTail !== ""
             ? ` ${DIM}stderr: ${oneLine(redactStr(event.stderrTail))}${RESET}`
             : ""
-        process.stdout.write(
+        this.write(
           `${mark} ${DIM}${event.name}: ${oneLine(redactStr(event.preview))}${RESET}${tail}\n`,
         )
         break
@@ -108,19 +112,19 @@ export class StdoutStream implements StreamPort {
           event.detail !== undefined && event.detail !== ""
             ? `: ${oneLine(redactStr(event.detail))}`
             : ""
-        process.stdout.write(`${DIM}↺ recovery (${event.reason})${detail}${RESET}\n`)
+        this.write(`${DIM}↺ recovery (${event.reason})${detail}${RESET}\n`)
         break
       }
       case "context_compacted":
         // ADR-0075: one-line proactive-compaction marker — `from..to` lets a
         // grep distinguish the new emit from the legacy `↺ recovery (compact)`
         // line that fires immediately before it.
-        process.stdout.write(
+        this.write(
           `${DIM}↺ context_compacted (${event.fromTurnId}..${event.toTurnId}, ${event.tokens}t)${RESET}\n`,
         )
         break
       case "error":
-        process.stdout.write(`${RED}error: ${redactStr(event.message)}${RESET}\n`)
+        this.write(`${RED}error: ${redactStr(event.message)}${RESET}\n`)
         break
       case "llm_request": {
         // Render an unambiguous auth-mode badge so the user can see at a
@@ -129,49 +133,49 @@ export class StdoutStream implements StreamPort {
         // (chatgpt.com/backend-api/codex vs api.openai.com / api.anthropic.com)
         // and so does the billing line; do not hide that.
         const badge = event.authMode !== undefined ? ` · ${event.authMode}` : ""
-        process.stdout.write(`${DIM}— llm request (${event.model})${badge} —${RESET}\n`)
+        this.write(`${DIM}— llm request (${event.model})${badge} —${RESET}\n`)
         break
       }
       case "in_progress":
         // ADR-0048: provider "thinking…" heartbeat. The two optional-field
         // branches live in `renderInProgress` so this case stays a single
         // statement (keeps `emit`'s cognitive complexity under the budget).
-        process.stdout.write(renderInProgress(event))
+        this.write(renderInProgress(event))
         break
       case "response_queued":
-        process.stdout.write(renderResponseQueued(event))
+        this.write(renderResponseQueued(event))
         break
       case "interrupted":
-        process.stdout.write(renderInterrupted(event))
+        this.write(renderInterrupted(event))
         break
       case "subagent_cancel":
-        process.stdout.write(renderSubagentCancel(event))
+        this.write(renderSubagentCancel(event))
         break
       case "plan_created":
-        process.stdout.write(renderPlanCreated(event))
+        this.write(renderPlanCreated(event))
         break
       case "plan_updated":
-        process.stdout.write(renderPlanUpdated(event))
+        this.write(renderPlanUpdated(event))
         break
       case "plan_snapshot":
-        process.stdout.write(renderPlanSnapshot(event))
+        this.write(renderPlanSnapshot(event))
         break
       case "plan_user_input_requested":
-        process.stdout.write(renderPlanUserInputRequested(event))
+        this.write(renderPlanUserInputRequested(event))
         break
       case "plan_user_input_resolved":
-        process.stdout.write(renderPlanUserInputResolved(event))
+        this.write(renderPlanUserInputResolved(event))
         break
       case "mode_changed":
-        process.stdout.write(renderModeChanged(event))
+        this.write(renderModeChanged(event))
         break
       case "usage":
-        process.stdout.write(
+        this.write(
           `${DIM}— usage ${event.inputTokens}/${event.outputTokens} (${event.model}) —${RESET}\n`,
         )
         break
       case "done":
-        process.stdout.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
+        this.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
         break
       case "turn_diff_updated":
         // ADR-0102 turn-diff: one-line dim status summarizing the cumulative
@@ -179,7 +183,7 @@ export class StdoutStream implements StreamPort {
         // surface shows just the shape (turn, sha range, stats) so a user
         // watching the CLI sees the shape without scrolling through 64 KiB
         // of diff text.
-        process.stdout.write(
+        this.write(
           `${DIM}— turn ${event.turn} diff: ${event.filesChanged} files, +${event.insertions} -${event.deletions} (${event.fromSha.slice(0, 8)}..${event.toSha.slice(0, 8)}) —${RESET}\n`,
         )
         break
@@ -189,7 +193,7 @@ export class StdoutStream implements StreamPort {
         // The reason is scrubbed (the gate caller is responsible for not
         // leaking secrets in `reason`/`metadata` per the type doc, but we
         // route through `redactStr` anyway as defence-in-depth).
-        process.stdout.write(
+        this.write(
           `${DIM}• decision (${event.kind} → ${event.outcome}): ${oneLine(redactStr(event.reason))}${RESET}\n`,
         )
         break

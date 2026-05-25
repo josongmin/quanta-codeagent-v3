@@ -1,5 +1,5 @@
 import { selectRemoteRunner } from "@/remote"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, setTerminalIo } from "@/shared"
 import { loadEnvFiles } from "./dotenv"
 import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
@@ -7,6 +7,15 @@ import { SessionBootstrapError } from "./repl/session-bootstrap"
 import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
+
+setTerminalIo({
+  stdout: (chunk) => {
+    void process.stdout.write(chunk)
+  },
+  stderr: (chunk) => {
+    void process.stderr.write(chunk)
+  },
+})
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 

@@ -61,7 +61,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
-import { byteCompare, logger, runtimeConfig } from "@/shared"
+import { byteCompare, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
   aggregate,
   benchRunDir,
@@ -85,6 +85,15 @@ import { resolvedTotals } from "./observe"
 import { buildReport, writeReport } from "./report"
 import { patchVote, sampleBestOfN } from "./sampler"
 import type { BenchSummary, Instance, InstanceResult } from "./types"
+
+setTerminalIo({
+  stdout: (chunk) => {
+    void process.stdout.write(chunk)
+  },
+  stderr: (chunk) => {
+    void process.stderr.write(chunk)
+  },
+})
 
 // ── tiny dotenv (no dependency, first-wins; apps/cli has its own copy) ──────
 const unquote = (v: string): string =>

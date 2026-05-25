@@ -5,28 +5,42 @@ import { extname, join, relative } from "node:path"
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
 const NON_APP_TERMINAL_DEFAULT_PATTERN = /\bprocess\.(?:stdin|stdout|stderr)\b|\bprocess\.exit\s*\(/
-const CURRENT_TERMINAL_DEFAULT_DEBT_COUNT = 40
+const CURRENT_TERMINAL_DEFAULT_DEBT_COUNT = 7
 
 const ALLOWED_NON_APP_TERMINAL_DEFAULT_FILES = new Set([
   "agent/admissibility-gate.ts",
   "agent/git-directives/default-stdout-emitter.ts",
   "agent/hitl-tier-registry.ts",
   "agent/loop-helpers.ts",
-  "git/directive-emit/emitter.ts",
   "memory/consolidate/store.ts",
-  "observability/logger.ts",
-  "observability/metrics/console-sink.ts",
-  "permission/json-state-file.ts",
-  "scheduler/runtime-wire.ts",
-  "shared/logger.ts",
-  "shared/runtime-config.ts",
-  "stream/adapters/stdout.ts",
   "ui/ui-helpers.ts",
 ])
 
 const isCommentLine = (line: string): boolean => {
   const trimmed = line.trim()
   return trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")
+}
+
+const isInsideQuotedString = (line: string, matchIndex: number): boolean => {
+  let quote: '"' | "'" | "`" | null = null
+  let escaped = false
+  for (let i = 0; i < matchIndex; i++) {
+    const ch = line[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === "\\") {
+      escaped = true
+      continue
+    }
+    if (quote === null) {
+      if (ch === '"' || ch === "'" || ch === "`") quote = ch
+      continue
+    }
+    if (ch === quote) quote = null
+  }
+  return quote !== null
 }
 
 const walkTsFiles = (dir: string): readonly string[] => {
@@ -55,7 +69,9 @@ const scanFile = (file: string): readonly Match[] => {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? ""
     if (isCommentLine(line)) continue
-    if (!NON_APP_TERMINAL_DEFAULT_PATTERN.test(line)) continue
+    const hit = NON_APP_TERMINAL_DEFAULT_PATTERN.exec(line)
+    if (hit === null) continue
+    if (isInsideQuotedString(line, hit.index)) continue
     matches.push({ relPath, lineNo: i + 1, line: line.trim() })
   }
   return matches

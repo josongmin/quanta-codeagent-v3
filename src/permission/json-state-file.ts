@@ -1,4 +1,4 @@
-import { errMessage } from "@/shared"
+import { errMessage, writeStderr } from "@/shared"
 /**
  * Generic JSON-state-file persistence engine (ADR-0046, extracted from
  * permission-store.ts #3).
@@ -45,7 +45,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 
 const stderrWarn = (msg: string): void => {
-  process.stderr.write(`[quanta] permission-store: ${msg}\n`)
+  writeStderr(`[quanta] permission-store: ${msg}\n`)
 }
 
 /** Route a fire-and-forget write's rejection to the same stderr-warn surface
