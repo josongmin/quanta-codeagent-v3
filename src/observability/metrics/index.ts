@@ -8,6 +8,10 @@
  */
 
 export { consoleMetricsSink } from "./console-sink"
+export {
+  createDecisionCounterSink,
+  type DecisionCounterSinkOpts,
+} from "./decision-counter-sink"
 export { defaultMetricsRegistry, type InMemoryRegistryOpts } from "./in-memory-registry"
 export { jsonlMetricsSink } from "./jsonl-sink"
 export {

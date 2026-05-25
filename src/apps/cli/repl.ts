@@ -3,6 +3,11 @@ import type { AgentConfig } from "@/agent"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
 import { summarizeWorkMetrics } from "@/observability"
+import {
+  createDecisionCounterSink,
+  defaultMetricsRegistry,
+  type MetricsRegistry,
+} from "@/observability/metrics/index"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
@@ -281,6 +286,48 @@ const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
   },
 })
 
+/** ADR-0269 — env-gated MetricsRegistry resolver for the decision-counter sink.
+ *  Returns a fresh `defaultMetricsRegistry()` when `QUANTA_DECISION_METRICS=1`
+ *  AND no caller-supplied registry is wired. Returns `undefined` otherwise so
+ *  the byte-identical no-tee path holds (no MetricsRegistry allocated, no
+ *  sink port appended to the upstream TeeStream).
+ *
+ *  Default-OFF: the env knob is unset by default. An operator who wants gate
+ *  counters in the local snapshot OR exported to OTLP (ADR-0268) flips
+ *  `QUANTA_DECISION_METRICS=1` and — for export — wires an OTel-backed sink at
+ *  registry construction time (the resolver still returns the registry; the
+ *  exporter side is the caller's responsibility, kept slice-clean here). */
+const resolveDecisionMetricsRegistry = (
+  envSource: NodeJS.ProcessEnv,
+): MetricsRegistry | undefined => {
+  const knob = envSource.QUANTA_DECISION_METRICS
+  if (typeof knob !== "string") return undefined
+  const norm = knob.trim().toLowerCase()
+  if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
+    return undefined
+  }
+  return defaultMetricsRegistry()
+}
+
+/** ADR-0269 — append the decision → counter sink to a stream tee. Pure helper
+ *  with NO env / NO global state — every input is explicit so tests can drive
+ *  it directly and so the wiring inside `buildTurnSummaryAndStream` stays
+ *  byte-identical when `metrics` is `undefined`.
+ *
+ *  When `metrics === undefined` the function returns the literal `stream`
+ *  reference (no TeeStream allocated, no extra fan-out). When wired, it
+ *  returns a new TeeStream that forwards every event to BOTH the upstream
+ *  `stream` and the sink — exactly the same tee posture the turn-summary /
+ *  debug / indicator consumers use. */
+const appendDecisionCounterSink = (
+  stream: StreamPort,
+  metrics: MetricsRegistry | undefined,
+): StreamPort => {
+  if (metrics === undefined) return stream
+  const sink = createDecisionCounterSink({ metrics })
+  return new TeeStream([stream, sink])
+}
+
 /** Build the turn-summary collector + tee-wrap the upstream stream. Default-ON
  *  for TTY surfaces (auto-OFF on pipes/redirects) so the operator sees a
  *  per-turn signal box (tools / verify-guard / compaction / memory / recovery)
@@ -290,7 +337,14 @@ const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
  *
  *  Byte-identical: when the collector is disabled the returned `stream`
  *  reference is the literal input — no TeeStream allocated, no extra fan-out,
- *  so the existing recorder/stdout/indicator port path is identical to today's. */
+ *  so the existing recorder/stdout/indicator port path is identical to today's.
+ *
+ *  ADR-0269 wire seam — the decision-counter sink is folded into the SAME tee
+ *  position as the turn-summary collector. When `QUANTA_DECISION_METRICS=1`
+ *  AND the summary collector is enabled, the returned stream tees to BOTH
+ *  consumers. When the env knob is off (default), no sink is appended and the
+ *  returned stream is whatever the summary path produced — preserving the
+ *  byte-identical no-tee path when both consumers are disabled. */
 const buildTurnSummaryAndStream = (
   stream: StreamPort,
   envSource: NodeJS.ProcessEnv,
@@ -299,8 +353,16 @@ const buildTurnSummaryAndStream = (
   const enabled = isTurnSummaryEnabled(envSource, isTTY)
   const verbose = isTurnSummaryVerbose(envSource)
   const collector = createTurnSummary({ enabled, verbose })
-  if (!enabled) return { collector, stream }
-  return { collector, stream: new TeeStream([stream, collector.asStreamPort()]) }
+  const decisionMetrics = resolveDecisionMetricsRegistry(envSource)
+  if (!enabled) {
+    // Summary collector OFF — the decision-counter sink can still be appended
+    // if the operator opts in via the env knob. When both are OFF (the
+    // default), the returned stream is the literal input (byte-identical
+    // no-tee path).
+    return { collector, stream: appendDecisionCounterSink(stream, decisionMetrics) }
+  }
+  const teed = new TeeStream([stream, collector.asStreamPort()])
+  return { collector, stream: appendDecisionCounterSink(teed, decisionMetrics) }
 }
 
 /** Build the (indicator, turnStream) pair for the REPL surface — extracted
