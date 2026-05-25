@@ -28,6 +28,7 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 import { buildSystemPrompt } from "@/agent"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import { defaultForker, type ForkSessionPort } from "@/agent/fork-session"
+import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import {
   fsBackedStickyModelStore,
@@ -239,19 +240,29 @@ const resolveDelegation = (
   return { delegator, modes: delegateModes }
 }
 
-/** ADR-0236 / ADR-0226 — wire the rich fork-session port slot. The base
- *  `SessionForker` requires a `ConversationCheckpointStore` which the
- *  unified-agent surface does not yet thread; when `enable` is true we
- *  construct `defaultForker()` WITHOUT a base — every `fork()` call
- *  surfaces `Err("fork-not-configured")` (typed-error, never throws).
- *  Hosts that DO thread a checkpoint store override `base` post-construction
- *  before passing into `assembleAgentConfig`. Absent ⇒ slot omitted,
- *  byte-identical legacy (RFC §1.2). */
+/** ADR-0236 / ADR-0226 / ADR-0284 — wire the rich fork-session port slot.
+ *  Precedence:
+ *    1. (`enable=true` OR `QUANTA_FORK_SESSION=on`) AND base wire opt-out
+ *       absent ⇒ construct the full `defaultCheckpointBaseWire()` so
+ *       `fork()` actually clones snapshots (ADR-0284). Default ON.
+ *    2. Enabled but `QUANTA_FORK_SESSION_BASE=off` (escape hatch) ⇒ fall
+ *       back to `defaultForker()` WITHOUT a base; every `fork()` returns
+ *       `Err("fork-not-configured")` (legacy ADR-0226 shape).
+ *    3. Disabled ⇒ slot omitted, byte-identical legacy (RFC §1.2).
+ *
+ *  The wire mints a FRESH `ConversationCheckpointStore` per surface — no
+ *  cross-surface sharing. Hosts that want a shared store call
+ *  `defaultCheckpointBaseWire({ store })` directly and override the slot. */
 const resolveForkSession = (
   enable: boolean | undefined,
+  env: NodeJS.ProcessEnv,
 ): { readonly forker: ForkSessionPort } | undefined => {
-  if (enable !== true) return undefined
-  return { forker: defaultForker() }
+  const envOn = env.QUANTA_FORK_SESSION === "on"
+  if (enable !== true && !envOn) return undefined
+  // ADR-0284 — opt-out for the rich base wire (default ON when fork is on).
+  const baseOff = env.QUANTA_FORK_SESSION_BASE === "off"
+  if (baseOff) return { forker: defaultForker() }
+  return { forker: defaultCheckpointBaseWire().forker }
 }
 
 /* ────────────── ADR-0278 search-pipeline composition-root wire ─────────────
@@ -503,7 +514,7 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
   const toolProfile = resolveToolProfile(p.toolProfile)
   const focusChain = resolveFocusChain(p.focusChainEvery)
   const delegation = resolveDelegation(p.delegateModes)
-  const forkSession = resolveForkSession(p.forkSession)
+  const forkSession = resolveForkSession(p.forkSession, env)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
