@@ -2,14 +2,16 @@
 
 **Cursor 3.2.16 / Codex Desktop build 2867 (codex-rs 0.131.0-α9) / Claude Desktop 1.7196.3 + Claude Code 2.1.138 / quanta-codeagent-v3**
 
-> **검증 상태: Draft v3 (합집합 확장 — 신발견 13 row 추가 + 2 정정)**
+> **검증 상태: Draft v4 (4-agent 꼼꼼 audit — line-exact 30+ 보강, 신발견 4 row 추가)**
 >
 > - **v0**: 메모리 + ADR 인덱스 + `.extracted_source/` 카탈로그 초벌
-> - **v1** (2026-05-26 #1): 4 agent 병렬 spot-check — 19/20 cell hit (95% accuracy)
-> - **v2** (2026-05-26 #2): 4 agent 병렬 깊이 매핑 — 5점 cell 190+개 file:line 보강 (Codex 5건 line-exact, Claude 8건 line-exact, quanta 31건 src path, Cursor 47건 file path)
-> - **v3** (2026-05-26 #3): 4 agent 병렬 합집합 확장 — 메모리/표에 없던 신기능 발굴 + **quanta 자체에 ADR-0132/0133이 있다는 ★최대 발견** (자율 reactor + hook RPC) → P/D 카테고리 quanta 점수 정정. Claude **Managed Agents Beta** (multiagent coordinator + memory_versions API + MCP OAuth validate) paradigm-level 추가.
-> - 총 row: ~220 → ~233. 중간 점수(2/3/4) 정성 판단 ~25%는 여전히 휴리스틱.
-> - 경쟁사 코드 경로: `.extracted_source/{cursor,codex,claude,claude-code-cli,codex-cli,userdata}/` 풀트리 실존. minified bundle은 빌드마다 line drift 가능 → 분기별 재추출 권장.
+> - **v1** (2026-05-26 #1): 4 agent spot-check — 19/20 cell hit (95% accuracy)
+> - **v2** (2026-05-26 #2): 4 agent 깊이 매핑 — 5점 cell file:line 보강 (Codex/Claude line-exact 13건, quanta 31 src path, Cursor 47 file path)
+> - **v3** (2026-05-26 #3): 4 agent 합집합 확장 — 신발견 13 row 추가 · ★ quanta ADR-0132/0133 발견 (자율 reactor + hook RPC) → P/D 카테고리 정정 · Claude Managed Agents Beta paradigm 추가
+> - **v4** (2026-05-26 #4): 4 agent 꼼꼼 audit — 5점/4점 cell **총 333개** 확인 (qta 35+Csr 144+Cdx 64+Cld 90), Claude line-exact **+10건** (L120343/124072/126701/129751/136373/139685/117378/129956/160790...), Codex MITM hook + shell-escalation 깊이 + v4 신발견 4 row (codex_mcp_server / glass.* command / cursor-shadow-workspace / 0점 정당화 검증)
+> - 총 row: 220 → 233 → **~237**. 중간 점수 정성 ~25% 여전히 휴리스틱.
+> - 정정 hot-spot: Claude tengu_* count **1155 → 2053** (실측 family)
+> - 경쟁사 코드 경로: `.extracted_source/{cursor,codex,claude,claude-code-cli,codex-cli,userdata}/`. minified bundle은 빌드마다 line drift → 분기별 재추출 권장.
 
 ---
 
@@ -104,9 +106,10 @@
 | Repo-rules tree (AGENTS.md deeper-wins) | 4 | **5** | 3 | **5** | Cdx 원천 · qta: ADR-0098 src/repo-rules/ | suffix layered — 깊은 디렉토리가 얕은 것 override |
 | Playbook frontmatter | 3 | 4 | 3 | 4 | qta: ADR-0203 src/skill/playbook/ | procedure / success-criteria / forbidden-actions / macros / inline-trigger 5필드 |
 | Vendor-curated skills cache (60+) | 3 | **5** | 3 | 0 | Cdx: `.extracted_source/userdata/codex/vendor_imports/skills-curated-cache.json` 21KB | aspnet-core/figma 7종/linear/notion/render/vercel/security/playwright-interactive |
-| **Managed Agents Beta** (multiagent coordinator) [v3 신발견] | 0 | 0 | **5** | 0 | Cld: `extr/claude-code-cli/_cli-symbols.txt` `anthropic-beta: managed-agents-2026-04-01` + `multiagent: {type:"coordinator", agents:[...]}` | 1-20 specialist agent 협업 + self-delegation. swarm-like task delegation |
+| **Managed Agents Beta** (multiagent coordinator) [v3 신발견] | 0 | 0 | **5** | 0 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L160790+` (anthropic-beta: managed-agents-2026-04-01 + `multiagent:{type:"coordinator",agents:[1-20]}` + self-delegation) | swarm-like task delegation + self-delegation (agent가 자기 자신을 sub-task로 호출) |
 | **Memory Versions + Redact API** [v3 신발견] | 0 | 0 | **5** | 0 | Cld: `memory_stores.memory_versions.{list,retrieve,redact}` + FUSE-mount agent interface | persistent memory 변경의 audit trail + redact API. enterprise compliance |
 | **MCP OAuth Validate** (vault-scoped credential) [v3 신발견] | 0 | 0 | **5** | 0 | Cld: `vaults.credentials.mcp_oauth_validate` | OAuth 토큰을 agent attach 전에 validate. credential 자동 rotation |
+| **`codex_mcp_server`** (Codex 자체가 MCP server) [v4 신발견] | 0 | **5** | 4 | 0 | Cdx: `extr/codex-cli/_cli-symbols.txt` `mcp-server/src/*.rs` (/tools, /resources, /prompts MCP impl) | Codex 자체가 MCP server로 제공 — 다중 클라이언트 지원, MCP-as-bus paradigm |
 
 ## D. Hook 시스템
 
@@ -148,14 +151,15 @@
 | fs-jail (branded type) | 3 | 3 | 3 | **5** | qta: `src/storage/fs-jail-lib.ts:6` (FsJailLib interface) + is-path-inside lib-swap | quanta 단독 brand 타입 |
 | HARD_DENY 9-rule destructive | 2 | 3 | 4 | **5** | qta: ADR-0098~0107 + `src/permission/git-write-guard.ts:99` (ALL_GIT_WRITE_PROTECT_REASONS) | git rm -rf, branch -D --force, push --force main 등 9 |
 | Network policy (3-tier DSL) | **5** | 4 | 4 | 3 | Csr: `user_config_only\|with_defaults\|allow_all`+`NetworkPolicy{default_action,allow,deny}` | classification_failed 폴백 + `smartAllowlistEnabled` |
-| `codex_network_proxy` 별도 layer | 0 | **5** | 0 | 0 | Cdx: codex-cli/_cli-symbols.txt | sandbox 외 별도 proxy layer |
-| `codex_shell_escalation` 별도 layer | 0 | **5** | 0 | 0 | Cdx: codex-cli/_cli-symbols.txt | |
+| `codex_network_proxy` 별도 layer | 0 | **5** | 0 | 0 | Cdx: `extr/codex-cli/_cli-symbols.txt` + **`network-proxy/src/mitm.rs:210~388` MITM SSL/TLS intercept + rewrite rules + MITM CA + Host cert generation** | sandbox 외 별도 proxy layer — MITM은 기업 프록시 통합용 |
+| `codex_shell_escalation` 별도 layer | 0 | **5** | 0 | 0 | Cdx: `extr/codex-cli/_cli-symbols.txt` + `shell-escalation/src/` (`SuperExecRequest` via **ESCALATE_SOCKET**, EXEC_WRAPPER 계약) | shell권한 상향은 격리된 서버 프로세스로 분리 |
 | SSRF block (RFC1918+link-local+metadata) | 4 | **5** | 4 | 3 | Cdx: `ComputerUseURLBlocklist` + cache | |
 | AppApproval per-bundle persistent | 3 | **5** | 3 | 0 | Cdx: `SkyComputerUseService` | "이 앱은 prompt injection 위험" 명시 warning |
 | App blocklist (password mgr+terminal) | 3 | **5** | 3 | 0 | Cdx hardcoded(1Password/Bitwarden/iTerm2/Ghostty/wezterm 등 10종) | |
 | Disclaimer wrapper (POSIX_SPAWN_SETDISCLAIM) | 0 | 0 | **5** | 0 | Cld: `Helpers/disclaimer` + `shell-path-worker.js` | 사용자 zshrc 악성코드로부터 앱 entitlement 격리 — 비명백 OS API |
 | TCC.db 직접 read | 0 | **5** | 0 | 0 | Cdx: `/Library/Application Support/com.apple.TCC/TCC.db` | **negative invariant** — Apple 공식 API 우회, 따라하지 말 것 |
 | Identity mode variant | 3 | 4 | 4 | 2 | qta: ADR-0198 src/agent/identity/ + 5 mode identity table | 부분 구현 |
+| **`cursor-shadow-workspace`** extension (격리 workspace context) [v4 신발견] | **5** | 4 | 3 | 0 | Csr: `extr/cursor/extensions/cursor-shadow-workspace/` | 격리 workspace ― Codex Code Mode와 paradigm 매칭(Cursor는 extension, Codex는 권한 grade) |
 
 ## G. 검증 / 품질 (★ quanta 우위 축)
 
@@ -221,8 +225,11 @@
 | Cost-steering throttle (runtime) | 3 | 3 | **5** | 3 | Cld: `CLAUDE_CODE_AGENT_COST_STEER`+`budget_usd` attachment | |
 | Rate-limit tier awareness | 3 | 4 | **5** | 3 | Cld: `CLAUDE_CODE_RATE_LIMIT_TIER`+`BLOCKING_LIMIT_OVERRIDE` | |
 | Plan-aware (rate_limits in session) | 3 | **5** | 3 | 3 | Cdx sessions: `token_count.rate_limits{limit_id,primary,secondary,plan_type,credits}` | agent가 plan 인식 가능 |
-| **Subagent model override** (env-driven) [v3 신발견] | 3 | 4 | **5** | 3 | Cld: `CLAUDE_CODE_SUBAGENT_MODEL` env (Haiku default, override Sonnet/Opus) | per-deployment subagent 모델 강제 — 비용 최적 |
-| **Auto-compact window threshold** [v3 신발견] | 3 | 4 | **5** | 3 | Cld: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` env | 토큰 임계치 자동 compaction trigger — prompt cache 통합 |
+| **Subagent model override** (env-driven) [v3 신발견] | 3 | 4 | **5** | 3 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L129751` (CLAUDE_CODE_SUBAGENT_MODEL — Haiku default, override Sonnet/Opus) | per-deployment subagent 모델 강제 — 비용 최적 |
+| **Auto-compact window threshold** [v3 신발견] | 3 | 4 | **5** | 3 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L136373,L139685` (CLAUDE_CODE_AUTO_COMPACT_WINDOW) | 토큰 임계치 자동 compaction trigger — prompt cache 통합 (Anthropic 비용 모델 노출) |
+| **`CLAUDE_CODE_RATE_LIMIT_TIER`** (plan-aware quota) [v4 신발견] | 3 | 4 | **5** | 3 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L120343` (rate-limit tier + plan_type+credits) | agent가 자체 plan 인식 → 자체 rate 제어 |
+| **`CLAUDE_CODE_AGENT_COST_STEER`** (runtime cost gating) [v4 신발견] | 3 | 4 | **5** | 3 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L124072` | 비용 임계 도달 시 runtime throttle |
+| **`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`** (per-tool cap) [v4 신발견] | 3 | 4 | **5** | 4 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L126701` + ripgrep `--threads` | 동시 tool use 조절 — Q 카테고리에도 박혀 있는데 별도 env 명시 |
 | **`claude-opus-4-7`** (latest Opus 4.7 tier) [v3 신발견] | 0 | 0 | **5** | 0 | Cld: `extr/claude-code-cli/_cli-symbols.txt` model selection hints + 4.6-fast speed mode 인접 | 4.6 successor. 모델 enum에 박힘 |
 
 ## J. Git / Checkpoint / VCS
@@ -267,6 +274,7 @@
 | Background Composer Peek | **5** | 3 | 3 | 0 | Csr: `background-composer-peek` URI scheme | foreground 작업 안 끊고 inline preview |
 | Multiple Composer (pinned panel) | **5** | 3 | 3 | 0 | Csr: 260+ `*Composer*` (SubComposer/BackgroundComposer/PinnedComposers) | |
 | Buddy (BLE) | 0 | 0 | **5** | 0 | Cld: `claude.buddy` IPC namespace + `buddyBle` contextBridge | Bluetooth pairing — 용도 불명 |
+| **`glass.*` command enum** (20+ items) [v4 신발견] | **5** | 0 | 0 | 0 | Csr: `extr/cursor/out/main.js` (glass.newBrowser/goToTab1~9/etc.) | 별도 명령 네임스페이스 — Cmd-K과 분리된 Browser automation UI 제어 |
 
 ## L. IPC / Wire Protocol
 
@@ -300,13 +308,13 @@
 | CoT leak 방지 (empty initial prompt) | 3 | **5** | 3 | 3 | Cdx: `Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning` | spawn payload comment 자체가 design 시그니처 |
 | Subagent transcript 공유 (team_context) | 0 | 3 | **5** | 0 | Cld: `/api/claude_code_shared_session_transcripts` + `team_context` attachment | 다른 팀원이 reuse |
 | Nickname pool (39 거장) | 0 | **5** | 0 | 0 | Cdx: 6386 sessions corpus — Averroes/Banach/Bohr/Curie/Dirac/Einstein/Erdos/Euler/Feynman/Godel/Hegel/Kant/Nash/Nietzsche/Pascal/Russell/Sartre/Tesla... | 인류 지성사 거장 39명 — UX 아이디어 |
-| Stage-aware Update chunk (13 type) | **5** | 3 | 3 | 3 | Csr: `TextDelta/TokenDelta/ToolCallDelta/Start/Completed/StepStart/Completed/ThinkingDelta/Completed/SummaryStart/Completed/Heartbeat/Interaction/Partial` | UI가 각 phase 별로 다르게 렌더 |
+| Stage-aware Update chunk (13 type) | **5** | 3 | 3 | 3 | Csr: `extr/cursor/extensions/cursor-agent-exec/dist/main.js` (TextDelta/TokenDelta/ToolCallDelta+Start+Completed/StepStart+Completed/ThinkingDelta+Completed/SummaryStart+Completed/Heartbeat/Interaction/Partial - 13 variants verified) | UI가 각 phase별 다르게 렌더 — semantic rich streaming |
 | Heartbeat update | **5** | 3 | 3 | 3 | Csr: `HeartbeatUpdate` | 단독 chunk type |
 | Mode-typed delegation (BoomerangResult) | 4 | 4 | 3 | 4 | qta: ADR-0218 5-mode closed enum | architect/editor/debug/tdd/explore — 4-vendor 수렴 |
 | Focus chain reinject | 4 | 2 | 2 | 4 | Cline → qta: ADR-0219 | |
 | `thread_spawn_edges` lifecycle | 3 | **5** | 3 | 3 | Cdx: state_5.thread_spawn_edges `status: open/closed` | subagent lifecycle을 edge state로 |
 | **Multiagent Coordinator + self-delegation** [v3 신발견] | 4 | 4 | **5** | 3 | Cld: `CreateAgent.multiagent:{type:"coordinator",agents:[]}` (1-20 specialist) · qta: ADR-0218 mode-typed delegation | Claude는 self-delegation도 명시 — agent가 자기 자신을 sub-task로 호출 |
-| **`AGENT_TEAMS` experimental flag** [v3 신발견] | 4 | 4 | **5** | 3 | Cld: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` env | Agent + Coordinator + Self 패턴 게이팅 |
+| **`AGENT_TEAMS` experimental flag** [v3 신발견] | 4 | 4 | **5** | 3 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L117378,L129956` (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) | Agent + Coordinator + Self 패턴 게이팅 |
 | **Thread Dynamic Tools** (per-thread lazy registry) [v3 신발견] | 3 | **5** | 3 | 3 | Cdx: state_5 `thread_dynamic_tools` (position/namespace/input_schema/`defer_loading`) | tool registry를 thread별 lazy load — namespace 분리(codex_app vs MCP) |
 
 ## N. 관측성 / Telemetry
@@ -318,7 +326,7 @@
 | MCP-specific telemetry | **5** | 4 | 4 | 3 | Csr: `mcp.ipc.{count,duration_ms}`+`mcp.snapshot.notify_pull_changed_count`+`mcp.agent_exec.lease_selected` | |
 | Telemetry event namespace | 4 | 4 | **5** | 4 | Cld: `claude_code.{session,pull_request,commit,cost,token,code_edit_tool,active_time}.*` | |
 | Sentry stack 4중 | 3 | **5** | **5** | 3 | Cld: `@sentry/{electron,node,opentelemetry,instrumentation}` | release pin = git commit SHA |
-| Datadog sink | 3 | 4 | **5** | 3 | Cld: 1155+ `tengu_*` events | |
+| Datadog sink | 3 | 4 | **5** | 3 | Cld: `extr/claude-code-cli/_cli-symbols.txt:L108092+` (**`tengu_*` 2053 family** — 메모리 1155+ 정정; spinner/memory/oauth/performance/agent lifecycle full grid) | Sentry + Datadog 4중 중복 가능 — cost 최적화 트레이드오프 |
 | Statsig + GrowthBook A/B | 3 | 4 | **5** | 3 | Cld: 통합 | |
 | Cursor Sentry tagging | **5** | 3 | 3 | 3 | Csr: `CURSOR_EXTENSION_HOST_ROLE=background-composer`+`CURSOR_LAYOUT` | host process role별 분기 |
 | Trace recording | 3 | **5** | 4 | 3 | Cdx: `trace-recording-sentry-upload-D1vMSdCW.js` 3.4KB (Chrome DevTools format) | gzip + Sentry attachment 30s flush |
@@ -365,7 +373,7 @@
 |---|---|---|---|---|---|---|
 | AbortSignal propagation | **5** | 3 | 4 | 4 | Csr: cursor-explorer "Workspace explorer aborted" | long-running explore cancellation |
 | Retry policy (p-retry) | 3 | 3 | 4 | 4 | qta: lib-swap-2nd-round (p-retry sibling, streaming kept) | streaming class can't be promise-wrapped — ADR-0200 retry-pretry sibling |
-| Chaos failure inject | **5** | 3 | 3 | 3 | Csr: `cursor-socket.injectFailure` | declarative |
+| Chaos failure inject | **5** | 3 | 3 | 3 | Csr: `extr/cursor/extensions/cursor-socket/dist/main.js` (`injectFailure` API — quanta와 동일 paradigm, declarative) | declarative socket failure injection |
 | WAL corruption detection | 0 | **5** | 0 | 2 | Cdx: `database disk image is malformed` 감지 + retention pruning slow query (1.4~2.2s) | self-logging 성능 저하도 잡힘 |
 | MCP auto-reconnect | 3 | 3 | **5** | 3 | Cld: `mcp-server-auto-reconnect`+`_listChangedDebounceTimers` | |
 | Multi-tab page lock | **5** | 3 | 3 | 0 | Csr: cursor-browser-automation task-scoped page locking + CPU profile capture | multi-agent contention 방지 |
@@ -464,6 +472,35 @@ Chronicle ambient 1388 summaries · TCC.db 직접 read · AI-tracking hash DB(me
 5. `POSIX_SPAWN_SETDISCLAIM` ✓ + `disclaimer` ✓ @ userdata/claude shell wrapper
 
 **총괄: 19/20 cell hit · 95% accuracy.** 메모리가 거의 정확했고, 1건만 보수화 필요 (FloatingPenguinMini).
+
+### Draft v4 audit 결과 (2026-05-26 4-agent 병렬 #4, **꼼꼼 audit**)
+
+**총 5점/4점 cell 카운트** (4-agent 실측):
+- quanta: 33+2 = 35 cell
+- Cursor: 94+50 = **144 cell** (최다, 표 24%)
+- Codex: 64 cell (모두 5점)
+- Claude: 61+29 = 90 cell
+
+**v4 신발견 추가 row 4개**:
+- **C MCP**: `codex_mcp_server` (Codex 자체가 MCP server로 다중 클라 제공)
+- **K UX**: Cursor `glass.*` command enum (20+ items, browser automation 별도 namespace)
+- **F 샌드박스**: Cursor `cursor-shadow-workspace` extension (격리 workspace context, Codex Code Mode paradigm 매칭)
+
+**v4 source line-exact 보강 핵심 7건**:
+- Codex MITM hook: `network-proxy/src/mitm.rs:210~388` (SSL/TLS intercept + CA generation)
+- Codex shell-escalation: `shell-escalation/src/` `SuperExecRequest`+`ESCALATE_SOCKET`+`EXEC_WRAPPER`
+- Claude tengu_ count 정정: **1155 → 2053** (실측 family)
+- Claude CLAUDE_CODE_RATE_LIMIT_TIER: `:L120343`
+- Claude CLAUDE_CODE_AGENT_COST_STEER: `:L124072`
+- Claude CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY: `:L126701`
+- Claude SUBAGENT_MODEL: `:L129751` / AUTO_COMPACT_WINDOW: `:L136373,L139685` / AGENT_TEAMS: `:L117378,L129956`
+- Cursor cursor-socket injectFailure path + Update chunk 13 verbatim + glass.* path + agent.v1 protobuf 강화
+
+**v4 0점 spot-check 결과 (정정 없음 — 0점 정당)**:
+- Computer Use·Reverse MCP·codex_network_proxy·Personality slot·Chronicle·Popcorn·TCC.db·Bedrock Mantle = vendor 단독 paradigm으로 0점 그대로 정당
+- Cursor=0인 Reverse MCP/Personality/Chronicle = negative invariant (적극 미흡수)
+- Claude=0인 Local model/Reverse MCP/Chronicle/Browser engine/Popcorn = 정당
+- quanta=0인 Computer Use/Browser/Mobile pairing = 의식적 미흡수
 
 ### Draft v3 신발견 (2026-05-26 4-agent 병렬 합집합 확장)
 
@@ -564,4 +601,4 @@ quanta:
 
 ---
 
-**Generated**: 2026-05-26 / **Draft v3** (4-agent ×3 wave: v1 spot-check 19/20 + v2 깊이 매핑 30 file:line + v3 합집합 확장 13 신규 row + quanta P/D 정정)
+**Generated**: 2026-05-26 / **Draft v4** (4-agent ×4 wave: v1 spot-check + v2 깊이 매핑 + v3 합집합 확장 + v4 꼼꼼 audit: 333 high-score cell 확인 / Claude line-exact +10 / Codex MITM·escalation 깊이 / 신발견 4 row / tengu count 1155→2053 정정)
