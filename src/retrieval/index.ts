@@ -47,19 +47,19 @@ export { runHybridQuery } from "./hybrid-query"
 // Codebase indexer (ADR-0277) — populates a SearchPipeline's underlying
 // SemanticIndex / lexical store from a workspace walk. Leaf primitive.
 export {
-  chunkFile as indexerChunkFile,
+  type ChunkerOptions as IndexerChunkerOptions,
   type ChunkInput as IndexerChunkInput,
   type ChunkUpsertPort as IndexerChunkUpsertPort,
-  type ChunkerOptions as IndexerChunkerOptions,
   type CodebaseIndexer,
+  chunkFile as indexerChunkFile,
   createDefaultIndexer,
   type DeltaPartition,
   DeltaTracker,
   type FileChunk as IndexerFileChunk,
   type FileStamp,
   headlessIndexerStub,
-  type IndexerOptions,
   type IndexError,
+  type IndexerOptions,
   type IndexStats,
   type ScannerOptions,
   type ScanOptions as IndexerScanOptions,
@@ -85,6 +85,7 @@ export type {
 export {
   ALL_LEXICAL_ERROR_KINDS,
   createBm25LexicalSearch,
+  createBunRipgrepSpawner,
   createRipgrepLexicalSearch,
   headlessLexicalStub,
   tokenizeUtf8,

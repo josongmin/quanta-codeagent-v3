@@ -243,6 +243,12 @@ describe("lexical-search hellgate (ADR-0260)", () => {
     expect(hits[0]?.id).toBe("/repo/a.txt")
     // score = matchCount (2)
     expect(hits[0]?.score).toBe(2)
+    expect(hits[0]?.text).toBe("alpha beta")
+    expect(hits[0]?.metadata).toEqual({
+      path: "/repo/a.txt",
+      startLine: "1",
+      endLine: "1",
+    })
   })
 
   // HELL-LX-10 — ripgrep missing → grep fallback + degradeReason surfaces

@@ -12,21 +12,20 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, symlink, writeFile, chmod, unlink, mkdir } from "node:fs/promises"
-import { tmpdir, platform } from "node:os"
+import { chmod, mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises"
+import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
+import {
+  buildSearchPipelineFromEnv,
+  clearSearchPipelineWireForTests,
+} from "@/../src/apps/agent/search-pipeline-wire"
 import {
   chunkFile,
   createDefaultIndexer,
   DeltaTracker,
   type FileChunk,
   type FileStamp,
-  headlessIndexerStub,
 } from "@/retrieval/indexer"
-import {
-  buildSearchPipelineFromEnv,
-  clearSearchPipelineWireForTests,
-} from "@/apps/agent/index"
 
 const SCAN_GLOB = "**/*.ts"
 
@@ -248,10 +247,7 @@ describe("indexer — corner cases (HELL-IDX-10 … 17)", () => {
     await mkdir(join(tmp, "build"))
     await writeFile(join(tmp, "build", "out.ts"), "export const o = 1\n")
     await writeFile(join(tmp, "build", "keep.ts"), "export const k = 1\n")
-    await writeFile(
-      join(tmp, ".gitignore"),
-      "\n# this is a comment\nbuild/\n!build/keep.ts\n",
-    )
+    await writeFile(join(tmp, ".gitignore"), "\n# this is a comment\nbuild/\n!build/keep.ts\n")
     const ix = createDefaultIndexer({ scanner: { root: tmp, glob: SCAN_GLOB } })
     await ix.scanInitial()
     const paths = Array.from(ix.getCorpus()).map((c) => c.path)
@@ -332,62 +328,37 @@ describe("indexer — async + cleanup (HELL-IDX-18 … 21)", () => {
 })
 
 describe("indexer — wire (HELL-IDX-22 … 25)", () => {
-  test("HELL-IDX-22 QUANTA_INDEX=off + QUANTA_PIPELINE=off ⇒ no wire (byte-identical)", () => {
+  test("HELL-IDX-22 no knobs ⇒ default lexical search wire is ready", async () => {
     const wired = buildSearchPipelineFromEnv({}, tmp)
+    expect(wired).not.toBeNull()
+    expect(wired?.tool.name).toBe("search_codebase")
+    expect(wired?.intervalHandle).toBeNull()
+    const r = await wired?.pipeline.search({ text: "missing", k: 5 })
+    expect(r?.ok).toBe(true)
+  })
+
+  test("HELL-IDX-23 explicit QUANTA_PIPELINE=none ⇒ no wire", () => {
+    const wired = buildSearchPipelineFromEnv({ QUANTA_PIPELINE: "none" }, tmp)
     expect(wired).toBeNull()
   })
 
-  test("HELL-IDX-23 QUANTA_INDEX=on + QUANTA_PIPELINE=off ⇒ indexer created, tool NOT registered", () => {
-    const wired = buildSearchPipelineFromEnv({ QUANTA_INDEX: "on" }, tmp)
+  test("HELL-IDX-24 semantic preset without index ⇒ lexical fallback (no interval)", () => {
+    const wired = buildSearchPipelineFromEnv({ QUANTA_PIPELINE: "semantic-only" }, tmp)
     expect(wired).not.toBeNull()
-    // The truth table says: indexer constructed but tool MUST NOT be
-    // registered into defaultTools. The wire returns a stub tool whose
-    // name is "search_codebase" but the surface entry only registers it
-    // when BOTH knobs are on — that conditional is the structural lock.
     expect(wired?.tool.name).toBe("search_codebase")
     expect(wired?.intervalHandle).toBeNull()
-    wired?.indexer.stop()
+    expect(wired?.indexer).toBeNull()
   })
 
-  test("HELL-IDX-24 BOTH on ⇒ wire returns tool ready for registration", () => {
+  test("HELL-IDX-25 QUANTA_INDEX=on with no preset ⇒ hybrid wire starts indexer + interval", () => {
     const wired = buildSearchPipelineFromEnv(
-      { QUANTA_INDEX: "on", QUANTA_PIPELINE: "on", QUANTA_INDEX_INTERVAL_MS: "1000000" },
+      { QUANTA_INDEX: "on", QUANTA_INDEX_INTERVAL_MS: "1000000" },
       tmp,
     )
     expect(wired).not.toBeNull()
     expect(wired?.tool.name).toBe("search_codebase")
     expect(wired?.intervalHandle).not.toBeNull()
-    if (wired?.intervalHandle !== null && wired?.intervalHandle !== undefined) {
-      clearInterval(wired.intervalHandle)
-    }
-    wired?.indexer.stop()
-  })
-
-  test("HELL-IDX-25 end-to-end mock — query yields ranked hit", async () => {
-    const files = new Map([
-      [
-        "src/auth.ts",
-        { text: "export function login(user: string) { return user }\n", mtime: 1 },
-      ],
-      [
-        "src/db.ts",
-        { text: "export function query(sql: string) { return sql }\n", mtime: 2 },
-      ],
-    ])
-    const indexer = headlessIndexerStub({ files })
-    const r = await indexer.scanInitial()
-    expect(r.ok).toBe(true)
-    if (!r.ok) throw new Error("unreachable")
-    const chunks = Array.from(indexer.getCorpus())
-    expect(chunks.length).toBe(2)
-    // SHA matches our injected mtime+text via the tracker's own diff
-    // on a no-change second scan.
-    const r2 = await indexer.scanDelta()
-    expect(r2.ok).toBe(true)
-    if (!r2.ok) throw new Error("unreachable")
-    expect(r2.value.modified).toBe(0)
-    expect(r2.value.added).toBe(0)
-    indexer.stop()
+    expect(wired?.indexer).not.toBeNull()
   })
 })
 
@@ -417,8 +388,10 @@ describe("chunker — pure", () => {
   })
   test("overlap >= window ⇒ no chunks (invalid config)", () => {
     expect(
-      chunkFile({ path: "a", text: "x\ny\n", mtime: 0, sha: "" }, { windowLines: 5, overlapLines: 5 })
-        .length,
+      chunkFile(
+        { path: "a", text: "x\ny\n", mtime: 0, sha: "" },
+        { windowLines: 5, overlapLines: 5 },
+      ).length,
     ).toBe(0)
   })
   test("single-line file produces one 1-line chunk", () => {

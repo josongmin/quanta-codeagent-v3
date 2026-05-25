@@ -2,11 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildSystemPrompt } from "@/agent"
+import { buildSystemPrompt, createOnConfirmReviewerPort } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext, ToolAction } from "@/permission"
-import { createOnConfirmReviewerPort } from "@/agent"
 import {
   argvPrompt,
   assembleConfig,
@@ -149,6 +148,7 @@ const assemble = async (cwd: string) => {
     skillsConfig: tooling.skillsConfig,
     compactionBreakerConfig: tooling.compactionBreakerConfig,
     verifyGuardConfig: tooling.verifyGuardConfig,
+    searchPipeline: tooling.searchPipeline,
     summarizerLlm: buildSummarizerLlm(provider, abort.signal),
     onShellEvent: undefined,
     workMetricsSink: undefined,
@@ -192,9 +192,11 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     // Default tool registry is non-empty (defaultTools merged in by buildTooling).
     const specs = config.registry.specs()
     expect(specs.length).toBeGreaterThan(0)
+    expect(specs.some((s) => s.name === "search_codebase")).toBe(true)
 
-    // Default-OFF invariants: none of the gated blocks are present, so the
-    // assembled config is byte-identical to the no-knob default the loop expects.
+    // Optional subsystems remain OFF by default, but generic repo search is
+    // now part of the product baseline, so the search facade and helper-only
+    // pipeline slot are expected in the no-knob assembly.
     expect(config.store).toBeUndefined()
     expect(config.embedder).toBeUndefined()
     expect(config.memory).toBeUndefined()
@@ -206,6 +208,7 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     expect(config.metrics).toBeUndefined()
     expect(config.compaction).toBeUndefined()
     expect(config.sessionId).toBeUndefined()
+    expect(config.searchPipeline).toBeDefined()
   })
 
   // ── Test B — helper resolution is logged + memory/store-gated branch fires ─

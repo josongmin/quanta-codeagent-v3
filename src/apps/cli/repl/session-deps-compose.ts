@@ -89,6 +89,7 @@ export const composeCliSessionDeps = async (
     skillsConfig: boot.tooling.skillsConfig,
     compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
     verifyGuardConfig: boot.tooling.verifyGuardConfig,
+    searchPipeline: boot.tooling.searchPipeline,
     summarizerLlm: buildSummarizerLlm(boot.provider, boot.abort.signal),
     planExitPort,
     userInputPort,

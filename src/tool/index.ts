@@ -162,9 +162,11 @@ export { planErrorMessage, planFailure } from "./plan/error-mapping"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
-// `search_codebase` tool (ADR-0278). Caller-wired: registered only when
-// the composition root has built a SearchPipeline (QUANTA_PIPELINE=on +
-// QUANTA_INDEX=on); NOT part of `defaultTools`.
+// `search_codebase` tool (ADR-0278). Caller-wired: surfaces register the tool
+// when they own a concrete workspace search pipeline. The product surface now
+// defaults to lexical repo search and upgrades to hybrid when `QUANTA_INDEX=on`,
+// but the tool still stays OUT of `defaultTools()` because the wiring depends
+// on cwd + optional indexer lifecycle.
 export {
   type SearchCodebaseInput,
   searchCodebaseInputSchema,

@@ -2,10 +2,11 @@
  * `search_codebase` tool (ADR-0278).
  *
  * Thin `Tool<I, O>` wrapper around a {@link SearchPipeline}. The factory
- * takes a pipeline at construction time; the composition root passes one
- * in only when both `QUANTA_PIPELINE=on` and `QUANTA_INDEX=on` are set.
- * Default-OFF: nothing in `buildDefaultTools()` constructs this tool —
- * every legacy session is byte-identical.
+ * takes a pipeline at construction time; product surfaces wire one from
+ * `search-pipeline-wire.ts`, which now defaults to lexical repo search and
+ * upgrades to hybrid when indexing is enabled. The tool still stays OUT of
+ * `buildDefaultTools()` because the concrete pipeline depends on cwd and
+ * optional indexer lifecycle.
  *
  * The tool is read-only + concurrency-safe (the pipeline never mutates;
  * the indexer's write surface is owned by the composition-root polling
@@ -38,8 +39,23 @@ export const searchCodebaseInputSchema = z.object({
 
 export type SearchCodebaseInput = z.infer<typeof searchCodebaseInputSchema>
 
-const truncate = (s: string, n: number): string =>
-  s.length > n ? `${s.slice(0, n)}…` : s
+const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s)
+
+const intMeta = (v: unknown): number | undefined => {
+  if (typeof v === "number" && Number.isFinite(v)) return v
+  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
+  return undefined
+}
+
+const rangeLabel = (metadata: Record<string, unknown> | undefined): string => {
+  const startLine = intMeta(metadata?.startLine)
+  const endLine = intMeta(metadata?.endLine)
+  if (startLine === undefined && endLine === undefined) return ""
+  if (startLine !== undefined && endLine !== undefined) {
+    return startLine === endLine ? `:${startLine}` : `:${startLine}-${endLine}`
+  }
+  return `:${startLine ?? endLine}`
+}
 
 const renderHits = (query: string, hits: readonly SearchHit[]): string => {
   if (hits.length === 0) return `No hits for query: ${query}`
@@ -47,12 +63,16 @@ const renderHits = (query: string, hits: readonly SearchHit[]): string => {
   for (const h of hits) {
     const md = h.metadata as Record<string, unknown> | undefined
     const path = typeof md?.path === "string" ? md.path : h.id
-    const startLine = typeof md?.startLine === "number" ? md.startLine : undefined
-    const endLine = typeof md?.endLine === "number" ? md.endLine : undefined
-    const range = startLine !== undefined && endLine !== undefined ? `:${startLine}-${endLine}` : ""
+    const range = rangeLabel(md)
     const score = h.score.toFixed(4)
-    const snippet = truncate(h.text.replace(/\s+/g, " ").trim(), 160)
-    lines.push(`${path}${range}  [${h.source} score=${score}] ${snippet}`)
+    const rawSnippet =
+      h.text.trim() !== "" ? h.text : typeof md?.snippet === "string" ? md.snippet : ""
+    const snippet = truncate(rawSnippet.replace(/\s+/g, " ").trim(), 160)
+    lines.push(
+      snippet === ""
+        ? `${path}${range}  [${h.source} score=${score}]`
+        : `${path}${range}  [${h.source} score=${score}] ${snippet}`,
+    )
   }
   return lines.join("\n")
 }
@@ -74,9 +94,10 @@ const errResult = (output: string, kind: PipelineError["kind"]): ToolResult => (
 export const searchCodebaseTool = (pipeline: SearchPipeline): Tool<SearchCodebaseInput> => ({
   name: "search_codebase",
   description:
-    "Semantic + lexical search over the indexed workspace. Returns ranked hits with file path, " +
-    "line range, and a short snippet. Use when you need to find where a concept or symbol lives " +
-    "without knowing the exact file. Read-only.",
+    "Workspace code search over the wired SearchPipeline. Depending on surface wiring this may " +
+    "be lexical-only or hybrid lexical+semantic. Returns ranked hits with file path, line range, " +
+    "and a short snippet. Use when you need to find where a concept or symbol lives without " +
+    "knowing the exact file. Read-only.",
   inputSchema: searchCodebaseInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

@@ -24,7 +24,7 @@ export type {
   RipgrepSpawnOptions,
   RipgrepSpawnResult,
 } from "./ripgrep-impl"
-export { createRipgrepLexicalSearch } from "./ripgrep-impl"
+export { createBunRipgrepSpawner, createRipgrepLexicalSearch } from "./ripgrep-impl"
 export type {
   LexicalDegradeReason,
   LexicalError,

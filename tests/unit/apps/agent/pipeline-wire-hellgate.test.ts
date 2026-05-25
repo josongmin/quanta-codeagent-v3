@@ -14,8 +14,8 @@
  *         `createRerankerFromEnv("cohere")`) NEVER crashes the surface;
  *         the helper catches at the boundary, logs, and returns `null`.
  *   (iv)  The `searchCodebaseTool` factory ships a tool that delegates
- *         to the injected pipeline; without one it yields a typed
- *         `ok:false` (mirrors `webSearchTool`).
+ *         to the injected pipeline; surface code decides whether to
+ *         advertise the tool at all.
  *   (v)   With a pipeline wired, `tool.execute(input, ctx)` calls
  *         `pipeline.search({ text, k })` exactly once and formats the
  *         hits as a numbered block.
@@ -29,7 +29,7 @@ import { describe, expect, test } from "bun:test"
 import { assemblePipeline } from "@/../src/apps/agent/pipeline-wire"
 import type { SearchHit, SearchPipeline, SearchQuery } from "@/retrieval/pipeline"
 import { ok } from "@/shared"
-import { searchCodebaseTool } from "@/tool/search_codebase"
+import { searchCodebaseTool } from "@/tool/search-codebase"
 
 /** Build an env view from a plain object. The helper's signature mirrors
  *  the surface env-projection pattern used elsewhere in apps/agent. */
@@ -119,7 +119,11 @@ describe("HELL-PW-08 — adapter-build failure falls back to null (no crash)", (
 
 describe("HELL-PW-09 — searchCodebaseTool factory: tool registers with name search_codebase", () => {
   test("factory returns a Tool with the canonical name", () => {
-    const t = searchCodebaseTool()
+    const t = searchCodebaseTool({
+      async search() {
+        return ok([] as const)
+      },
+    })
     expect(t.name).toBe("search_codebase")
     expect(t.isReadOnly()).toBe(true)
   })
@@ -136,6 +140,7 @@ describe("HELL-PW-10 — searchCodebaseTool delegates to the injected pipeline o
           score: 0.9,
           text: "foo bar baz",
           source: "lexical",
+          metadata: { path: "src/foo.ts", startLine: 12, endLine: 12 },
         }
         return ok([hit] as const)
       },
@@ -153,21 +158,7 @@ describe("HELL-PW-10 — searchCodebaseTool delegates to the injected pipeline o
     expect(last?.type).toBe("result")
     if (last?.type === "result") {
       expect(last.result.ok).toBe(true)
-      expect(last.result.output).toContain("src/foo.ts")
-    }
-  })
-
-  test("without a wired pipeline, execute() yields a typed ok:false 'no pipeline wired'", async () => {
-    const tool = searchCodebaseTool()
-    const ctx = { cwd: "/tmp/x", signal: new AbortController().signal }
-    const iter = tool.execute({ query: "x", k: 1 }, ctx)
-    const results = []
-    for await (const ev of iter) results.push(ev)
-    const last = results.at(-1)
-    expect(last?.type).toBe("result")
-    if (last?.type === "result") {
-      expect(last.result.ok).toBe(false)
-      expect(last.result.output).toMatch(/no.*pipeline.*wired/i)
+      expect(last.result.output).toContain("src/foo.ts:12")
     }
   })
 })

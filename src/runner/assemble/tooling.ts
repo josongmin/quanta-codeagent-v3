@@ -25,6 +25,7 @@ export interface Tooling {
   embedder: EmbedderPort | undefined
   sessionId: string
   registry: ToolRegistry
+  searchPipeline?: AgentConfig["searchPipeline"]
   memoryConfig: AgentConfig["memory"] | undefined
   subagentConfig: AgentConfig["subagent"] | undefined
   skillsConfig: AgentConfig["skills"] | undefined
@@ -53,6 +54,15 @@ export interface ToolingAssembleInput {
   lspTools: Tool[]
   lspNavTools: Tool[]
   gitToolList: Tool[]
+  /** Surface-owned caller-wired tools appended after the standard groups.
+   *  Intended for productized facades like `search_codebase` whose concrete
+   *  implementation depends on cwd/indexer lifecycle rather than a static
+   *  default-tool constructor. */
+  extraTools?: Tool[]
+  /** Optional helper-only `SearchPipeline` slot the surface may thread into
+   *  `AgentConfig` alongside `extraTools`. The loop does not read it directly;
+   *  future retrieval-aware helpers can. */
+  searchPipeline?: AgentConfig["searchPipeline"]
   /** Structured logger for per-config gate logs. The shape mirrors the prior
    *  inline `slog.info(...)` calls in `internal.ts#buildTooling` 1:1. */
   slog: StructuredLogger
@@ -70,8 +80,9 @@ export interface ToolingAssembleInput {
 /** Assemble the tool registry and aggregate the per-run config dependencies.
  *
  * Behavior parity vs prior `internal.ts#buildTooling`:
- *   - Same tool-merge order: defaultTools → mcp → memory → lsp-diagnostics →
- *     lsp-nav → git (last-write-wins via `ToolRegistry`'s Map).
+ *   - Same tool-merge order plus caller extras:
+ *     defaultTools → mcp → memory → lsp-diagnostics → lsp-nav → git → extra
+ *     (last-write-wins via `ToolRegistry`'s Map).
  *   - Same memory-self-edit gate: registered only when a `store` exists and
  *     `memoryConfig.selfEditTools !== false`.
  *   - Same per-config gate logs (`slog.info("subagent.on", …)` etc.).
@@ -107,12 +118,14 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
     ...input.lspTools,
     ...input.lspNavTools,
     ...input.gitToolList,
+    ...(input.extraTools ?? []),
   ])
   return {
     store: input.store,
     embedder: input.embedder,
     sessionId: input.sessionId,
     registry,
+    ...(input.searchPipeline !== undefined ? { searchPipeline: input.searchPipeline } : {}),
     memoryConfig: input.memoryConfig,
     subagentConfig: input.subagentConfig,
     skillsConfig: input.skillsConfig,

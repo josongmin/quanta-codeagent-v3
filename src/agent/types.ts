@@ -990,10 +990,10 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * populated `SearchPipeline` for the `search_codebase` tool and any
    * future caller that wants pipeline-shaped search.
    *
-   * Default-OFF: absent ⇒ the loop / dispatch is byte-identical for
-   * every legacy caller and the `search_codebase` tool is not registered
-   * (the composition root checks both this slot and the env knobs
-   * before adding the tool to `buildDefaultTools()` output).
+   * Surface-default product behavior now wires lexical repo search on the
+   * main agent/CLI surfaces and upgrades to hybrid when `QUANTA_INDEX=on`;
+   * `QUANTA_PIPELINE=none` is the explicit kill-switch. The slot remains
+   * helper-only — the loop / dispatch still never reads it directly.
    *
    * The slot is caller-side composition only — the agent loop NEVER
    * reads it directly. See `src/apps/agent/index.ts` for the wire and
@@ -1292,18 +1292,6 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     /** ADR-0239 — injected clock for tests + replay. Default `Date.now`. */
     readonly now?: () => number
   }
-  /**
-   * ADR-0272 — composition-root `SearchPipeline` slot (helper-only). When
-   * set, downstream consumers (the `search_codebase` tool today, future
-   * retrieval-aware compaction / auto-recall slots) may delegate workspace
-   * search to the wired pipeline. Caller-side composition only — the loop
-   * NEVER reads this slot directly. Absent ⇒ slot OMITTED under
-   * `exactOptionalPropertyTypes`, byte-identical legacy (RFC §1.2). The
-   * concrete builder lives at `src/apps/agent/pipeline-wire.ts`; the
-   * `SearchPipeline` port itself is owned by `@/retrieval/pipeline` (leaf
-   * primitive slice).
-   */
-  searchPipeline?: import("@/retrieval/pipeline").SearchPipeline
   /**
    * ADR-0234 — git-directive emit wire (turn-scoped collector pattern).
    * Closes the gap between ADR-0221 (phase-guarded emitter) and the

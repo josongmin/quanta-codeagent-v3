@@ -39,6 +39,7 @@ import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { logger, type RunContext } from "@/shared"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import { gitTools, type Tool } from "@/tool"
+import { buildSearchPipelineFromEnv } from "../agent/search-pipeline-wire"
 import type { Tooling } from "./config-assemble"
 import { createMarkdownPainter } from "./markdown-painter"
 import { isPathLikeToken } from "./resume"
@@ -674,6 +675,7 @@ export const buildTooling = (
   const store = buildStore()
   const embedder = buildEmbedder(store)
   const sessionId = crypto.randomUUID()
+  const searchWire = buildSearchPipelineFromEnv(process.env, process.cwd())
   const memoryConfig = buildMemoryConfig(store)
   const subagentConfig = buildSubagentConfig(subagentTaskRegistry)
   const skillsConfig = buildSkillsConfig()
@@ -692,6 +694,9 @@ export const buildTooling = (
     lspTools,
     lspNavTools,
     gitToolList,
+    ...(searchWire !== null
+      ? { extraTools: [searchWire.tool], searchPipeline: searchWire.pipeline }
+      : {}),
     slog,
     ...(process.env.QUANTA_MEMORY !== undefined
       ? { memoryKindLabel: process.env.QUANTA_MEMORY }

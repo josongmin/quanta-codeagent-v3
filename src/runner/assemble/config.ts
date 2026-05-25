@@ -69,6 +69,9 @@ export interface SessionDeps {
    *  bridge consumers (`rankWithRetrievalStack` / `runLocalizeHybrid` /
    *  future hybrid_localize tool) do. */
   retrievalStack?: AgentConfig["retrievalStack"]
+  /** Helper-only search pipeline slot paired with any surface-registered
+   *  `search_codebase` facade. Absent ⇒ omitted from AgentConfig entirely. */
+  searchPipeline?: AgentConfig["searchPipeline"]
   /** Wave-A admissibility bundle (reviewer/rules/store bridge). Absent ⇒
    *  dispatch passes no extra gate options (byte-identical legacy). */
   admissibility?: AgentConfig["admissibility"]
@@ -170,6 +173,7 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
   ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
   ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
+  ...(d.searchPipeline !== undefined ? { searchPipeline: d.searchPipeline } : {}),
   ...(d.shellSnapshot !== undefined ? { shellSnapshot: d.shellSnapshot } : {}),
   ...(d.sessionEffort !== undefined ? { sessionEffort: d.sessionEffort } : {}),
   ...(d.decisionEmitter !== undefined ? { decisionEmitter: d.decisionEmitter } : {}),

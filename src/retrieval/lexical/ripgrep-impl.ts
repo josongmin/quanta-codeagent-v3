@@ -61,6 +61,21 @@ interface BinaryChoice {
   readonly degradeReason?: LexicalDegradeReason
 }
 
+/** Production spawner over `Bun.spawn`. Keeps argv structured (no shell),
+ *  mirrors the injected test seam, and lets missing binaries surface as the
+ *  native ENOENT throw the adapter already understands. */
+export const createBunRipgrepSpawner = (): RipgrepSpawner => ({
+  async run(binary, argv, opts) {
+    const proc = Bun.spawn([binary, ...argv], {
+      stdout: "pipe",
+      stderr: "ignore",
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+    })
+    const [stdout, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+    return { code, stdout }
+  },
+})
+
 const isENOENT = (e: unknown): boolean => {
   if (typeof e !== "object" || e === null) return false
   const rec = e as { code?: unknown; message?: unknown }
@@ -71,34 +86,93 @@ const isENOENT = (e: unknown): boolean => {
 
 const detailOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
+const trimSnippet = (raw: unknown): string => {
+  if (typeof raw !== "string") return ""
+  return raw.replace(/\s+/g, " ").trim()
+}
+
+interface ParsedRgMatch {
+  readonly path: string
+  readonly snippet: string
+  readonly lineNumber?: string
+}
+
+const parseRgMatchLine = (line: string): Result<ParsedRgMatch | null, LexicalError> => {
+  let evt: unknown
+  try {
+    evt = JSON.parse(line)
+  } catch (e) {
+    return err({ kind: "parse-failed", binary: "rg", detail: detailOf(e) })
+  }
+  if (typeof evt !== "object" || evt === null) return ok(null)
+  const rec = evt as { type?: unknown; data?: unknown }
+  if (rec.type !== "match") return ok(null)
+  const data = rec.data as {
+    path?: { text?: unknown }
+    lines?: { text?: unknown }
+    line_number?: unknown
+  } | null
+  const pathText = data?.path?.text
+  if (typeof pathText !== "string" || pathText.length === 0) return ok(null)
+  const lineNumber =
+    typeof data?.line_number === "number" && Number.isFinite(data.line_number)
+      ? String(data.line_number)
+      : undefined
+  return ok({
+    path: pathText,
+    snippet: trimSnippet(data?.lines?.text),
+    ...(lineNumber !== undefined ? { lineNumber } : {}),
+  })
+}
+
+const mergeRgMatch = (
+  prev: { count: number; text: string; metadata?: Readonly<Record<string, string>> } | undefined,
+  next: ParsedRgMatch,
+): { count: number; text: string; metadata?: Readonly<Record<string, string>> } => {
+  if (prev !== undefined) {
+    return {
+      count: prev.count + 1,
+      text: prev.text !== "" ? prev.text : next.snippet,
+      ...(prev.metadata !== undefined ? { metadata: prev.metadata } : {}),
+    }
+  }
+  return {
+    count: 1,
+    text: next.snippet,
+    metadata:
+      next.lineNumber === undefined
+        ? { path: next.path }
+        : { path: next.path, startLine: next.lineNumber, endLine: next.lineNumber },
+  }
+}
+
 /** Parse `rg --json` stdout. Each non-empty line is a JSON object; we
  *  accumulate `type:"match"` events per file path and emit one hit per
  *  file with `score = matchCount`. Malformed lines produce a
  *  `parse-failed` error — we do not silently skip them, because that
  *  hides ripgrep / our-parser version mismatches. */
 const parseRgJson = (stdout: string): Result<ReadonlyArray<LexicalHit>, LexicalError> => {
-  const counts = new Map<string, number>()
+  const counts = new Map<
+    string,
+    { count: number; text: string; metadata?: Readonly<Record<string, string>> }
+  >()
   const lines = stdout.split("\n")
   for (const line of lines) {
     const trimmed = line.trim()
     if (trimmed.length === 0) continue
-    let evt: unknown
-    try {
-      evt = JSON.parse(trimmed)
-    } catch (e) {
-      return err({ kind: "parse-failed", binary: "rg", detail: detailOf(e) })
-    }
-    if (typeof evt !== "object" || evt === null) continue
-    const rec = evt as { type?: unknown; data?: unknown }
-    if (rec.type !== "match") continue
-    const data = rec.data as { path?: { text?: unknown } } | null
-    const pathText = data?.path?.text
-    if (typeof pathText !== "string" || pathText.length === 0) continue
-    counts.set(pathText, (counts.get(pathText) ?? 0) + 1)
+    const parsed = parseRgMatchLine(trimmed)
+    if (!parsed.ok) return parsed
+    if (parsed.value === null) continue
+    counts.set(parsed.value.path, mergeRgMatch(counts.get(parsed.value.path), parsed.value))
   }
   const hits: LexicalHit[] = []
-  for (const [id, score] of counts) {
-    hits.push({ id, score, text: "" })
+  for (const [id, hit] of counts) {
+    hits.push({
+      id,
+      score: hit.count,
+      text: hit.text,
+      ...(hit.metadata !== undefined ? { metadata: hit.metadata } : {}),
+    })
   }
   hits.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.id.localeCompare(b.id)))
   return ok(hits)
@@ -120,7 +194,7 @@ const parseGrepCounts = (stdout: string): Result<ReadonlyArray<LexicalHit>, Lexi
     const countStr = trimmed.slice(sep + 1)
     const count = Number.parseInt(countStr, 10)
     if (!Number.isFinite(count) || count <= 0) continue
-    hits.push({ id: path, score: count, text: "" })
+    hits.push({ id: path, score: count, text: "", metadata: { path } })
   }
   hits.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.id.localeCompare(b.id)))
   return ok(hits)

@@ -52,7 +52,7 @@ import {
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
-import { assembleAutomation, type AutomationEngineSlot } from "@/scheduler/runtime-wire"
+import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -66,8 +66,10 @@ import {
   parseAgentArgs,
   type ToolProfileToken,
 } from "./cli-args"
-import { assemblePipeline } from "./pipeline-wire"
+import { buildSearchPipelineFromEnv } from "./search-pipeline-wire"
+
 export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "./search-pipeline-wire"
+
 import type { RunOutcome } from "./run"
 
 /** ADR-0198 identity slot — resolve the per-mode identity from the
@@ -140,8 +142,7 @@ export const assembleMemoryAuto = (
   const parsedT = rawT === undefined ? 0.7 : Number(rawT)
   const parsedU = rawU === undefined ? 1 : Number(rawU)
   const promoteThreshold = Number.isFinite(parsedT) ? parsedT : 0.7
-  const minUsageCount =
-    Number.isFinite(parsedU) && parsedU >= 0 ? Math.floor(parsedU) : 1
+  const minUsageCount = Number.isFinite(parsedU) && parsedU >= 0 ? Math.floor(parsedU) : 1
   return {
     enabled: true,
     policy: { promoteThreshold, minUsageCount },
@@ -359,12 +360,12 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     },
   }
   const retrievalStack = buildRetrievalStackFromEnv(env)
-  // ADR-0272 — pipeline composition-root wire. Default-OFF: when
-  // QUANTA_PIPELINE is absent / `none` / unknown, returns `null` and the
-  // slot is OMITTED below (spread-conditional under
-  // exactOptionalPropertyTypes). Adapter-build failure collapses to `null`
-  // + a `logger.warn` line (no startup crash on optional knob misconfig).
-  const searchPipeline = assemblePipeline(env)
+  // ADR-0277/0278 — product search surface wire. Generic repo search is
+  // lexical by default and upgrades to hybrid when `QUANTA_INDEX=on`; an
+  // explicit `QUANTA_PIPELINE=none` is the kill-switch. The returned tool is
+  // registered into the base registry below, and the helper-only pipeline slot
+  // is spread into AgentConfig for any future pipeline consumers.
+  const searchWire = buildSearchPipelineFromEnv(env, process.cwd())
   // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
   // via the mode-variant registry; else fall back to the ADR-0198
   // `QUANTA_IDENTITY=1` env (precedence #2); else empty-string sentinel
@@ -403,12 +404,13 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     // DIP: route through the factory (no app-specific ports at this baseline
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
     // byte-identical to the `defaultTools` singleton.
-    registry: new ToolRegistry(
-      buildDefaultTools({
+    registry: new ToolRegistry([
+      ...buildDefaultTools({
         ...(automationSlot !== null ? { automationEngine: automationSlot.engine } : {}),
         ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
       }),
-    ),
+      ...(searchWire !== null ? [searchWire.tool] : []),
+    ]),
     stream,
     permission: { mode: "acceptEdits" },
     messages: [],
@@ -421,9 +423,10 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
     // `undefined` literal on the config) and the loop is byte-identical.
     ...(retrievalStack !== undefined ? { retrievalStack } : {}),
-    // ADR-0272 — composition-root pipeline wire (default-OFF; spread
-    // conditionally to preserve `exactOptionalPropertyTypes`).
-    ...(searchPipeline !== null ? { searchPipeline } : {}),
+    // ADR-0277/0278 — helper-only search pipeline slot. The loop does not read
+    // it directly; surfaces/tooling consume the registered `search_codebase`
+    // tool, and future retrieval-aware helpers may use the same pipeline.
+    ...(searchWire !== null ? { searchPipeline: searchWire.pipeline } : {}),
     // ADR-0236 — composition-root mega-wire slots (default-OFF; spread
     // conditionally to preserve `exactOptionalPropertyTypes`).
     ...(identityModeVariant !== undefined ? { identityModeVariant } : {}),
