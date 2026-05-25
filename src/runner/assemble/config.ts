@@ -1,4 +1,5 @@
 import type { AgentConfig } from "@/agent"
+import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
 import type { LLMPort, Message } from "@/llm"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
@@ -156,6 +157,14 @@ export interface SessionDeps {
    *  (byte-identical pre-ADR-0269 path; gates' return values + side
    *  effects unchanged). */
   decisionEmitter?: AgentConfig["decisionEmitter"]
+  /** ADR-0300/0304 — per-session granular checkpoint registry. The
+   *  surface composer instantiates ONE registry per session and mirrors
+   *  it here so `assembleConfig` carries it onto `AgentConfig.
+   *  granularRegistry`. Helper-only — the agent loop NEVER reads it;
+   *  caller-side surface wires (per-tool snapshot recorder, future
+   *  /rewind-tool revision) consume it directly. Absent ⇒ omitted from
+   *  AgentConfig entirely (byte-identical default-OFF). */
+  granularRegistry?: GranularRegistryPort
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -279,6 +288,7 @@ const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.conversationCheckpoint !== undefined
     ? { conversationCheckpoint: d.conversationCheckpoint }
     : {}),
+  ...(d.granularRegistry !== undefined ? { granularRegistry: d.granularRegistry } : {}),
   ...(d.stage1OutputsStore !== undefined ? { stage1OutputsStore: d.stage1OutputsStore } : {}),
   ...(d.automationEngine !== undefined ? { automationEngine: d.automationEngine } : {}),
 })
