@@ -26,7 +26,8 @@ evidence:
     - src/migration/translators/types.ts
     - src/migration/translators/claude-code.ts
     - src/migration/translators/index.ts
-    - src/apps/cli/session-commands.ts
+    - src/apps/cli/session-import-handler.ts
+    - src/runner/session-ops/index.ts
     - src/shared/runtime-config.ts
   adrs: [38]
   tests:

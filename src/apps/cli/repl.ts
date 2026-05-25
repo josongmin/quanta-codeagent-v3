@@ -14,6 +14,7 @@ import {
   type MetricsRegistry,
 } from "@/observability/metrics/index"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
+import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
@@ -52,8 +53,9 @@ import {
 } from "./repl/surface-compose"
 import type { RewindSlashState } from "./rewind-cmd"
 import { createCliRewindGitPort } from "./rewind-git"
-import { runSessionCommand } from "./session-commands"
+import { createCliImportHandler } from "./session-import-handler"
 import { switchToSessionCwd } from "./session-io"
+import { resolveCliSessionListEnv } from "./session-list-env"
 import { buildShellStreamPainter } from "./shell-stream-painter"
 import { runSlashCommand, slashCompleter } from "./slash-commands"
 import type { StatusBar } from "./status-bar"
@@ -72,8 +74,8 @@ import { createTurnSummary, type TurnSummaryCollector } from "./turn-summary"
  *
  * Module boundary: `repl.ts` may import `@/agent`, `@/llm`, `@/observability`,
  * `@/permission`, `@/shared` and CLI-local helpers (`./internal`,
- * `./session-io`, `./session-commands`, `./slash-commands`). No cross-app
- * imports (no `apps/bench`, no `apps/agent`).
+ * `./session-io`, `./session-import-handler`, `./session-list-env`,
+ * `./slash-commands`). No cross-app imports (no `apps/bench`, no `apps/agent`).
  */
 
 /** Shared REPL-side slash-context state. Threaded through `dispatchReplSlash`
@@ -467,13 +469,21 @@ export const runSessionMain = async (): Promise<number> => {
     output: process.stderr,
     completer: slashCompleter,
   })
-  const code = await runSessionCommand(process.argv.slice(3), {
+  // CLI-05 (ADR-0305): the prior shim `./session-commands.ts` is removed —
+  // we now call the surface-agnostic runner slice directly and inject the
+  // two CLI-specific adapters (import handler + list-env resolver) inline.
+  // The runner accepts `listEnv: undefined` (treats it as omitted), so the
+  // `exactOptionalPropertyTypes: true` spread is safe.
+  const listEnv = resolveCliSessionListEnv()
+  const code = await runSessionCommandInner(process.argv.slice(3), {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
     confirm: async (prompt) => {
       const ans = await rl.question(prompt)
       return ans.trim().toLowerCase() === "y"
     },
+    importHandler: createCliImportHandler(),
+    ...(listEnv !== undefined ? { listEnv } : {}),
   })
   rl.close()
   return code

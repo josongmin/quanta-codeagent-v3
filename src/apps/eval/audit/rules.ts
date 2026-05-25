@@ -68,7 +68,7 @@ export const RULES: Readonly<Record<UseCaseId, AuditRule>> = {
     tokens: ["@/memory", "WorkingMemory", "persistSession"],
   },
   "meta.session.resume": {
-    tokens: ["@/session", "resumeSession", "session-commands"],
+    tokens: ["@/session", "resumeSession", "@/runner/session-ops"],
   },
   "meta.configuration.settings": {
     tokens: ["loadEnv", "@/permission"],
