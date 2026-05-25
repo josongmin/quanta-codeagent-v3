@@ -50,17 +50,18 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: |
-  - full Jupyter protocol envelope (msg_id / parent_header / metadata) —
-    이번 라운드는 단순 stdin/stdout line-protocol 만
-  - multi-output frame (stream / display_data / execute_result 분리) —
-    현재는 stdout 한 덩어리 + stderr 한 덩어리
-  - restart policy (process crash 시 자동 재기동 + 변수 replay) —
-    Codex 도 안 함; 폐기 가능성 높음
-  - tool wiring (`node_repl_exec` 같은 새 도구) — 슬라이스 primitive만
-    먼저 안전하게 착륙시키고 후속에서 와이어
-  - conversation-checkpoint / fork 연동 (스냅샷 시 살아 있는 커널 핸들
-    같이 보존) — checkpoint 슬라이스 쪽에서 합의된 후
+deliberate_hold:
+  reason: |
+    - full Jupyter protocol envelope (msg_id / parent_header / metadata) —
+      이번 라운드는 단순 stdin/stdout line-protocol 만
+    - multi-output frame (stream / display_data / execute_result 분리) —
+      현재는 stdout 한 덩어리 + stderr 한 덩어리
+    - restart policy (process crash 시 자동 재기동 + 변수 replay) —
+      Codex 도 안 함; 폐기 가능성 높음
+    - tool wiring (`node_repl_exec` 같은 새 도구) — 슬라이스 primitive만
+      먼저 안전하게 착륙시키고 후속에서 와이어
+    - conversation-checkpoint / fork 연동 (스냅샷 시 살아 있는 커널 핸들
+      같이 보존) — checkpoint 슬라이스 쪽에서 합의된 후
 notes: |
   Sibling 시 import 방향: src/runtime/node-repl/ → @/shared 만. 다른
   슬라이스 역참조 없음. tsconfig `@/runtime/*` alias 이미 존재해서 추가
