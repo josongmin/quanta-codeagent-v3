@@ -77,6 +77,7 @@
       "@/plugin-isolation/*": ["./src/plugin-isolation/*"],
       "@/scheduler": ["./src/scheduler/index.ts"],
       "@/scheduler/*": ["./src/scheduler/*"],
+      "@/apps/*": ["./src/apps/*"],
       "@/connectors": ["./src/connectors/index.ts"],
       "@/connectors/*": ["./src/connectors/*"],
       "@/retrieval": ["./src/retrieval/index.ts"],

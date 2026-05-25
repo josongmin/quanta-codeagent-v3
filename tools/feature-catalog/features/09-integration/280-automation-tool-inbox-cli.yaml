@@ -5,8 +5,8 @@ subsystem: Scheduler / E2 productization (ADR-0280)
 order: 280
 maturity: L3
 status: stable
-ui_surfaces: [cli, tool]
-monitoring: stderr
+ui_surfaces: [cli]
+monitoring: integrated
 modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]

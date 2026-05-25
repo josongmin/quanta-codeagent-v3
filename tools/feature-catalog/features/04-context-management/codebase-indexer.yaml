@@ -45,15 +45,18 @@ knobs:
   - QUANTA_INDEX — indexer enabled at composition root (on|off, default off; consumed by ADR-0278 wire)
   - QUANTA_INDEX_GLOB — file glob the default scanner consumes (default `src/**/*.ts`)
   - QUANTA_INDEX_INTERVAL_MS — polling cadence for `scanDelta` (default 5000 ms; consumed by ADR-0278 wire)
-deliberate_hold: |
-  LSP-aware (tree-sitter) symbol chunking is structurally better than
-  line-window for code corpora (function-aligned chunks survive renames
-  and produce cleaner reranker inputs). We ship line-window first
-  because it is provably correct on every file type and adds no native
-  dependency.
+deliberate_hold:
+  reason: |
+    LSP-aware (tree-sitter) symbol chunking is structurally better than
+    line-window for code corpora (function-aligned chunks survive renames
+    and produce cleaner reranker inputs). We ship line-window first
+    because it is provably correct on every file type and adds no native
+    dependency.
+    promotion_path: |
+      Sibling `symbol-chunker.ts` that satisfies the same chunker port.
+      The indexer is agnostic to which one runs.
   promotion_path: |
-    Sibling `symbol-chunker.ts` that satisfies the same chunker port.
-    The indexer is agnostic to which one runs.
+    Documented in ADR; wire when ROI concrete.
 notes: |
   The default scanner uses `fs.promises.readdir({ withFileTypes: true })`
   + `lstat()` inode tracking to detect symlink cycles deterministically

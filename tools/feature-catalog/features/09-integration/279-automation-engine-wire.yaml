@@ -6,7 +6,7 @@ order: 279
 maturity: L3
 status: stable
 ui_surfaces: [cli]
-monitoring: stderr
+monitoring: integrated
 modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]

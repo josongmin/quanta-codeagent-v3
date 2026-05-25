@@ -66,6 +66,7 @@ import {
   type ToolProfileToken,
 } from "./cli-args"
 import { assemblePipeline } from "./pipeline-wire"
+export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "./search-pipeline-wire"
 import type { RunOutcome } from "./run"
 
 /** ADR-0198 identity slot — resolve the per-mode identity from the
