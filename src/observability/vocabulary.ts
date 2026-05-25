@@ -199,6 +199,36 @@ export const QUANTA_ATTRS = {
     linesRead: "quanta.work.lines_read",
     costUsd: "quanta.work.cost_usd",
   },
+  /** ADR-0217 — per-slice OTel emit. Six canonical keys shared across the
+   *  four new leaf slices (error-routing, stream-timeout, shell-snapshot,
+   *  git-directives). The slices themselves NEVER reference these literals
+   *  directly — the observability adapter
+   *  (`metrics/new-slice-instruments.ts`) is the only call site. */
+  error: {
+    /** counter, label: `kind` (16-arm `TypedErrorKind` from ADR-0203). */
+    kind: "quanta.error.kind",
+    /** counter, label: `action` (5-arm `RetryAction` from ADR-0203). */
+    action: "quanta.error.action",
+  },
+  stream: {
+    /** histogram — wall-clock ms the stream was idle before a timeout fired
+     *  (ADR-0200). */
+    idleMs: "quanta.stream.idle_ms",
+    /** counter, label: `action` — `abort | degrade | prompt-user`
+     *  (ADR-0200 `TimeoutAction`). */
+    timeoutAction: "quanta.stream.timeout_action",
+  },
+  shell: {
+    /** histogram — ms spent in `capture()` for one shell snapshot
+     *  (ADR-0204). */
+    snapshotDurationMs: "quanta.shell.snapshot_duration_ms",
+    /** histogram — byte size of the persisted snapshot file (ADR-0204). */
+    snapshotBytes: "quanta.shell.snapshot_bytes",
+  },
+  git: {
+    /** counter, label: `kind` (5-arm `GitDirectiveKind` from ADR-0205). */
+    directive: "quanta.git.directive",
+  },
 } as const
 
 // ---------------------------------------------------------------------------
