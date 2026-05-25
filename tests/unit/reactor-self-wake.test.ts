@@ -91,8 +91,8 @@ const recordingSink = (): {
   }
 }
 
-describe("ADR-0132 Phase C — env guard", () => {
-  test("env flag unset ⇒ skipped:env-off, never touches agent loop", async () => {
+describe("ADR-0132 Phase C — flag guard", () => {
+  test("flag unset ⇒ skipped:off, never touches agent loop", async () => {
     const loop = recordingAgentLoop()
     const { sink, events } = recordingSink()
     const res = await injectSimulatedTurn({
@@ -110,7 +110,7 @@ describe("ADR-0132 Phase C — env guard", () => {
     expect(events[0]?.reason).toBe("env-off")
   })
 
-  test("env flag set to '0' ⇒ skipped:env-off (only literal '1' enables)", async () => {
+  test("flag set to '0' ⇒ skipped:off (only literal '1' enables)", async () => {
     const loop = recordingAgentLoop()
     const res = await injectSimulatedTurn({
       trigger: makeTrigger(),
@@ -124,7 +124,7 @@ describe("ADR-0132 Phase C — env guard", () => {
     expect(loop.calls.length).toBe(0)
   })
 
-  test("env flag set to 'true' ⇒ skipped:env-off (string '1' only)", async () => {
+  test("flag set to 'true' ⇒ skipped:off (string '1' only)", async () => {
     const loop = recordingAgentLoop()
     const res = await injectSimulatedTurn({
       trigger: makeTrigger(),
@@ -136,7 +136,7 @@ describe("ADR-0132 Phase C — env guard", () => {
     expect(res.reason).toBe("env-off")
   })
 
-  test("default-OFF: env-off path never reads the clock or the loop", async () => {
+  test("default-OFF: off-path never reads the clock or the loop", async () => {
     let clockReads = 0
     let loopCalls = 0
     const res = await injectSimulatedTurn({
@@ -450,7 +450,7 @@ describe("ADR-0132 Phase C — abort propagation", () => {
     expect(events.length).toBe(0)
   })
 
-  test("aborted trigger wins over env/quiet/prior guards and stays out of self-wake audit", async () => {
+  test("aborted trigger wins over flag/quiet/prior guards and stays out of self-wake audit", async () => {
     const { sink, events } = recordingSink()
     const ctrl = new AbortController()
     ctrl.abort()
@@ -503,7 +503,7 @@ describe("ADR-0132 Phase C — abort propagation", () => {
 })
 
 describe("ADR-0132 Phase C — guard ordering", () => {
-  test("env-off wins over quiet-window AND prior-outcome (cheapest guard first)", async () => {
+  test("flag-off wins over quiet-window AND prior-outcome (cheapest guard first)", async () => {
     // All three guards would fire; env-off must be reported.
     const loop = recordingAgentLoop()
     const now = 10_000_000
@@ -518,7 +518,7 @@ describe("ADR-0132 Phase C — guard ordering", () => {
     expect(res.reason).toBe("env-off")
   })
 
-  test("quiet-window wins over prior-outcome (env on, both other guards fire)", async () => {
+  test("quiet-window wins over prior-outcome (flag on, both other guards fire)", async () => {
     const loop = recordingAgentLoop()
     const now = 10_000_000
     const res = await injectSimulatedTurn({

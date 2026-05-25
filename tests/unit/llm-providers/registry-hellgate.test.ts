@@ -39,7 +39,7 @@ describe("resolveProvider — precedence hellgate", () => {
     expect(resolveProvider("  bedrock  ").id).toBe("bedrock")
   })
 
-  test("HELL-B1: env precedence — bedrock beats vertex+foundry", () => {
+  test("HELL-B1: precedence — bedrock beats vertex+foundry", () => {
     const env = {
       ANTHROPIC_BEDROCK_BASE_URL: "https://bedrock.example",
       ANTHROPIC_VERTEX_BASE_URL: "https://vertex.example",
@@ -48,7 +48,7 @@ describe("resolveProvider — precedence hellgate", () => {
     expect(resolveProvider(undefined, env).id).toBe("bedrock")
   })
 
-  test("HELL-B2: env precedence — vertex beats foundry when bedrock absent", () => {
+  test("HELL-B2: precedence — vertex beats foundry when bedrock absent", () => {
     const env = {
       ANTHROPIC_VERTEX_BASE_URL: "https://vertex.example",
       ANTHROPIC_FOUNDRY_BASE_URL: "https://foundry.example",
@@ -56,12 +56,12 @@ describe("resolveProvider — precedence hellgate", () => {
     expect(resolveProvider(undefined, env).id).toBe("vertex")
   })
 
-  test("HELL-B3: env precedence — foundry selected when only foundry url set", () => {
+  test("HELL-B3: precedence — foundry selected when only foundry url set", () => {
     const env = { ANTHROPIC_FOUNDRY_BASE_URL: "https://foundry.example" }
     expect(resolveProvider(undefined, env).id).toBe("foundry")
   })
 
-  test("HELL-B4: empty env → default", () => {
+  test("HELL-B4: empty bag → default", () => {
     expect(resolveProvider(undefined, {}).id).toBe("default")
   })
 
@@ -69,7 +69,7 @@ describe("resolveProvider — precedence hellgate", () => {
     expect(resolveProvider().id).toBe("default")
   })
 
-  test("HELL-B6: empty-string env values DO NOT count as set", () => {
+  test("HELL-B6: empty-string bag values DO NOT count as set", () => {
     const env = {
       ANTHROPIC_BEDROCK_BASE_URL: "",
       ANTHROPIC_VERTEX_BASE_URL: "",
@@ -77,7 +77,7 @@ describe("resolveProvider — precedence hellgate", () => {
     expect(resolveProvider(undefined, env).id).toBe("default")
   })
 
-  test("HELL-C1: empty-string explicit falls through to env", () => {
+  test("HELL-C1: empty-string explicit falls through to bag", () => {
     const env = { ANTHROPIC_BEDROCK_BASE_URL: "https://bedrock.example" }
     expect(resolveProvider("", env).id).toBe("bedrock")
   })

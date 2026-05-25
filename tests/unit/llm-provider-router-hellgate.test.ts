@@ -34,7 +34,7 @@ describe("resolveProviderWithRouter — precedence hellgate", () => {
     expect(r.reason).toBe("explicit")
   })
 
-  test("HELL-A3: explicit unknown id falls through to env (NOT throws)", () => {
+  test("HELL-A3: explicit unknown id falls through to bag (NOT throws)", () => {
     const r = resolveProviderWithRouter({
       explicit: "totally-bogus",
       env: { CLAUDE_CODE_USE_VERTEX: "true" },
@@ -181,13 +181,13 @@ describe("resolveProviderWithRouter — precedence hellgate", () => {
     expect(r.reason).toBe("openai-api-key-env")
   })
 
-  test("HELL-F2: empty env → default-fallback anthropic", () => {
+  test("HELL-F2: empty bag → default-fallback anthropic", () => {
     const r = resolveProviderWithRouter({ env: {} })
     expect(r.provider).toBe("anthropic")
     expect(r.reason).toBe("default-fallback")
   })
 
-  test("HELL-G1: env keys exported as canonical names", () => {
+  test("HELL-G1: knob keys exported as canonical names", () => {
     expect(CLAUDE_USE_ENV_KEYS.bedrock).toBe("CLAUDE_CODE_USE_BEDROCK")
     expect(CLAUDE_USE_ENV_KEYS.vertex).toBe("CLAUDE_CODE_USE_VERTEX")
     expect(CLAUDE_USE_ENV_KEYS.foundry).toBe("CLAUDE_CODE_USE_FOUNDRY")
@@ -331,7 +331,7 @@ describe("resolveProviderWithRouter — precedence hellgate", () => {
   // Each assertion message names the attack scenario.
   // =========================================================================
 
-  test("HELL-X1[adversarial]: shell-injection in env value is treated as opaque string (no eval, no shell)", () => {
+  test("HELL-X1[adversarial]: shell-injection in knob value is treated as opaque string (no eval, no shell)", () => {
     // Attack: an attacker controls a env file and writes
     //   CLAUDE_CODE_USE_BEDROCK="1; rm -rf /"
     // If the router does any shell-style interpretation, this would
@@ -347,7 +347,7 @@ describe("resolveProviderWithRouter — precedence hellgate", () => {
     expect(r.reason).toBe("default-fallback")
   })
 
-  test("HELL-X2[adversarial]: numeric overflow in env value is opaque text — '99999999999999999999' is FALSE", () => {
+  test("HELL-X2[adversarial]: numeric overflow in knob value is opaque text — '99999999999999999999' is FALSE", () => {
     // Attack: attacker passes Number.MAX_SAFE_INTEGER+1 style values to
     // probe for integer-coercion bugs. The router parses by exact string
     // match; large numerics are not "1" / "true" / "yes" so they fall
@@ -425,7 +425,7 @@ describe("resolveProviderWithRouter — precedence hellgate", () => {
     }
   })
 
-  test("HELL-X6[adversarial]: CRLF / tab in truthy env value normalized via trim → still rejected if not exact literal", () => {
+  test("HELL-X6[adversarial]: CRLF / tab in truthy knob value normalized via trim → still rejected if not exact literal", () => {
     // Attack: a Windows env file emitted "1\r\n" or "\ttrue\t". The router
     // calls .trim().toLowerCase() so these MUST resolve correctly. We
     // assert the BENIGN case ("1\r" trims to "1" → truthy) and the

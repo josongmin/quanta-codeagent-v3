@@ -118,11 +118,11 @@ describe("parseHistoryArgs", () => {
 })
 
 describe("resolveCap", () => {
-  test("CLI takes precedence over ENV + default", () => {
+  test("CLI takes precedence over knob + default", () => {
     expect(resolveCap(5, "20")).toBe(5)
   })
 
-  test("ENV takes precedence over default when CLI absent", () => {
+  test("knob takes precedence over default when CLI absent", () => {
     expect(resolveCap(undefined, "25")).toBe(25)
   })
 
@@ -130,13 +130,13 @@ describe("resolveCap", () => {
     expect(resolveCap(undefined, undefined)).toBe(10)
   })
 
-  test("invalid ENV ⇒ fallback to default", () => {
+  test("invalid knob ⇒ fallback to default", () => {
     expect(resolveCap(undefined, "abc")).toBe(10)
     expect(resolveCap(undefined, "0")).toBe(10)
     expect(resolveCap(undefined, "-5")).toBe(10)
   })
 
-  test("CLI invalid ⇒ skip to ENV", () => {
+  test("CLI invalid ⇒ skip to knob", () => {
     expect(resolveCap(0, "25")).toBe(25)
   })
 })

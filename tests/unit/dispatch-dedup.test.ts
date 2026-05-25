@@ -55,7 +55,7 @@ describe("canonicalizeArgs", () => {
 })
 
 describe("DedupGate — defaults & PASS path (general regime)", () => {
-  test("defaults: general 8/3, env 4/3, edit 8/5", () => {
+  test("defaults: general 8/3, envmod 4/3, edit 8/5", () => {
     expect(DEFAULT_DEDUP_GATE_CAPS).toEqual({
       generalWindow: 8,
       generalThreshold: 3,
@@ -173,7 +173,7 @@ describe("DedupGate — env regime (single bucket, fast brake)", () => {
     }
   })
 
-  test("SINGLE BUCKET: 3 DIFFERENT env commands count together (the sklearn thrash)", () => {
+  test("SINGLE BUCKET: 3 DIFFERENT envmod commands count together (the sklearn thrash)", () => {
     // The real failure: same intent (install a dep) under many spellings —
     // exact-match dedup never caught it. Single bucket must brake by the 3rd.
     const g = new DedupGate()
@@ -186,7 +186,7 @@ describe("DedupGate — env regime (single bucket, fast brake)", () => {
     if (v[2]?.blocked) expect(v[2].regime).toBe("env")
   })
 
-  test("interleaved env spellings + sudo/brew/ensurepip all share the bucket", () => {
+  test("interleaved envmod spellings + sudo/brew/ensurepip all share the bucket", () => {
     const g = new DedupGate()
     const v = recordSeries(g, [
       { name: "bash", args: { command: "brew install python@3" }, turn: 1 },
@@ -196,7 +196,7 @@ describe("DedupGate — env regime (single bucket, fast brake)", () => {
     expect(v[2]?.blocked).toBe(true)
   })
 
-  test("env regime prefixes: pip/pip3/python -m pip/npm/yarn/pnpm/apt/apt-get/conda/brew/chmod/chown/export/sudo all routed to env", () => {
+  test("envmod regime prefixes: pip/pip3/python -m pip/npm/yarn/pnpm/apt/apt-get/conda/brew/chmod/chown/export/sudo all routed to envmod", () => {
     const commands = [
       "pip install flask",
       "pip3 install flask",
@@ -225,26 +225,26 @@ describe("DedupGate — env regime (single bucket, fast brake)", () => {
     }
   })
 
-  test("env-detection is case-insensitive on the FIRST token", () => {
+  test("envmod-detection is case-insensitive on the FIRST token", () => {
     const g = new DedupGate()
     g.record("bash", { command: "PIP install flask" }, 1)
     g.record("bash", { command: "PIP install x" }, 2)
     expect(g.record("bash", { command: "PIP install y" }, 3).blocked).toBe(true)
   })
 
-  test("env-detection looks only at the first clause (chained && pytest)", () => {
+  test("envmod-detection looks only at the first clause (chained && pytest)", () => {
     const g = new DedupGate()
     g.record("bash", { command: "pip install x && pytest" }, 1)
     g.record("bash", { command: "pip install y && pytest" }, 2)
     expect(g.record("bash", { command: "pip install z && pytest" }, 3).blocked).toBe(true)
   })
 
-  test("a single legit env command passes (interactive: install once is fine)", () => {
+  test("a single legit envmod command passes (interactive: install once is fine)", () => {
     const g = new DedupGate()
     expect(g.record("bash", { command: "pip install flask" }, 1).blocked).toBe(false)
   })
 
-  test("non-env bash command does NOT trigger env regime (general threshold applies)", () => {
+  test("non-envmod bash command does NOT trigger envmod regime (general threshold applies)", () => {
     const g = new DedupGate()
     expect(g.record("bash", { command: "pytest" }, 1).blocked).toBe(false)
     expect(g.record("bash", { command: "pytest" }, 2).blocked).toBe(false)
@@ -314,7 +314,7 @@ describe("DedupGate — per-session isolation", () => {
 })
 
 describe("DedupGate — replay: live sklearn env-thrash trace (11 distinct commands)", () => {
-  test("the EXACT sklearn postfix sequence is braked by the 3rd env attempt", () => {
+  test("the EXACT sklearn postfix sequence is braked by the 3rd envmod attempt", () => {
     // Verbatim from the gpt-4o-mini postfix run (sklearn.018, calls 7-19): the
     // model fired 11 DIFFERENT env-mutating commands chasing one missing dep.
     // Exact-match dedup never caught it; the single bucket must brake by #3.
@@ -352,7 +352,7 @@ describe("DedupGate — env-extension via QUANTA_DEDUP_ENV_PREFIXES_EXTRA", () =
     __resetRuntimeConfig()
   }
 
-  test("a NEW package manager (uv) routes to env regime when added via env", () => {
+  test("a NEW package manager (uv) routes to envmod regime when added via QUANTA knob", () => {
     process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA = "uv,poetry"
     __resetRuntimeConfig()
     const g = new DedupGate()
@@ -365,7 +365,7 @@ describe("DedupGate — env-extension via QUANTA_DEDUP_ENV_PREFIXES_EXTRA", () =
     reset()
   })
 
-  test("defaults survive env extension (no replace)", () => {
+  test("defaults survive envmod extension (no replace)", () => {
     process.env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA = "uv"
     __resetRuntimeConfig()
     const g = new DedupGate()

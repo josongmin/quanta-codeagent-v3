@@ -142,7 +142,7 @@ describe("S5 hook hardening — per-handler timeout", () => {
     expect(result.timeoutCount).toBe(1)
   })
 
-  test("constructor option default WINS over env knob", async () => {
+  test("constructor option default WINS over QUANTA knob", async () => {
     process.env.QUANTA_HOOK_TIMEOUT_MS = "20"
     __resetRuntimeConfig()
     const bus = new HookBus(undefined, { defaultTimeoutMs: 500 })
@@ -155,7 +155,7 @@ describe("S5 hook hardening — per-handler timeout", () => {
     expect(resolved).toBe(true)
   })
 
-  test("NO override AND NO env knob ⇒ unbounded (legacy byte-identical)", async () => {
+  test("NO override AND NO QUANTA knob ⇒ unbounded (legacy byte-identical)", async () => {
     const bus = new HookBus()
     let resolved = false
     bus.on("turn_start", async () => {
@@ -264,7 +264,7 @@ describe("S5 hook hardening — DoS caps", () => {
     }
   })
 
-  test("env knob QUANTA_HOOK_MAX_HANDLERS raises the cap", () => {
+  test("knob QUANTA_HOOK_MAX_HANDLERS raises the cap", () => {
     process.env.QUANTA_HOOK_MAX_HANDLERS = "128"
     __resetRuntimeConfig()
     const bus = new HookBus()
@@ -275,7 +275,7 @@ describe("S5 hook hardening — DoS caps", () => {
     expect(true).toBe(true)
   })
 
-  test("constructor option maxHandlers WINS over env knob", () => {
+  test("constructor option maxHandlers WINS over QUANTA knob", () => {
     process.env.QUANTA_HOOK_MAX_HANDLERS = "10"
     __resetRuntimeConfig()
     const bus = new HookBus(undefined, { maxHandlers: 200 })
@@ -340,7 +340,7 @@ describe("S5 hook hardening — DoS caps", () => {
     expect(PAYLOAD_TRUNCATE_MARKER.includes("hookbus")).toBe(true)
   })
 
-  test("env knob QUANTA_HOOK_MAX_PAYLOAD_BYTES controls the cap", async () => {
+  test("knob QUANTA_HOOK_MAX_PAYLOAD_BYTES controls the cap", async () => {
     process.env.QUANTA_HOOK_MAX_PAYLOAD_BYTES = "200"
     __resetRuntimeConfig()
     const lines: string[] = []
@@ -355,7 +355,7 @@ describe("S5 hook hardening — DoS caps", () => {
     expect(lines.some((l) => l.includes("hook.payload.truncated"))).toBe(true)
   })
 
-  test("constructor maxPayloadBytes WINS over env knob", async () => {
+  test("constructor maxPayloadBytes WINS over QUANTA knob", async () => {
     process.env.QUANTA_HOOK_MAX_PAYLOAD_BYTES = "10"
     __resetRuntimeConfig()
     const bus = new HookBus(undefined, { maxPayloadBytes: 1_000_000 })
