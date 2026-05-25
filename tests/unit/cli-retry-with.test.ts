@@ -342,13 +342,17 @@ describe("/retry-with — slash dispatch", () => {
 
   test("BUILTINS table now includes /retry-with (and /help anchors index 0)", async () => {
     const { BUILTINS } = await import("../../src/apps/cli/slash-commands")
-    // ADR-0236 — pin shape (/help anchors index 0, /retry-with at index 6)
-    // + presence of every original anchor. Was a full-list equality before;
-    // we relax to anchor-checks so additive ADRs (/profile, /identity,
-    // /focus-chain etc.) do not force re-pinning here every round.
+    // ADR-0306 (CLI-03) — slash registry is now layered
+    // `[...SURFACE, ...SESSION, ...APP]`. `/help` still anchors index 0
+    // (first surface command), but `/retry-with` migrated from the old
+    // index 6 into the SESSION layer. We assert layered membership instead
+    // of an absolute slot to keep the assertion stable across additive ADRs.
     const names = BUILTINS.map((c) => c.name)
     expect(names[0]).toBe("/help")
-    expect(names[6]).toBe("/retry-with")
+    expect(names).toContain("/retry-with")
+    // `/retry-with` now sits after every surface command — the leading
+    // surface block ends with `/session`, so `/retry-with` comes after it.
+    expect(names.indexOf("/retry-with")).toBeGreaterThan(names.indexOf("/session"))
     const _legacyExpected = [
       "/help",
       "/context",
