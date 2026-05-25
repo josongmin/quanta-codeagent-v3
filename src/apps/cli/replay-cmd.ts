@@ -495,11 +495,29 @@ type ParseResult =
   | { kind: "ok"; sessionId: string; filter: { atTurn?: number; fromToolCallId?: string } }
   | { kind: "err"; message: string }
 
+/** Audit finding (HELL-REPLAY-PARSE-07): the first positional must be a
+ *  sessionId, never a flag. Without this guard a stray `--bogus` flows down
+ *  as `sessionId="--bogus"` and dies later with the misleading "session not
+ *  found". We split the two sub-shapes so the error reads honestly:
+ *    `/replay --bogus`        → unknown flag '--bogus'
+ *    `/replay --at 3 sid`     → expected <session-id> before flags
+ *  Returns `undefined` ⇒ head is a legitimate positional sessionId. */
+const rejectFlagHead = (head: string): { kind: "err"; message: string } | undefined => {
+  if (!head.startsWith("--")) return undefined
+  if (head === "--at" || head === "--from") {
+    return { kind: "err", message: "/replay: expected <session-id> before flags" }
+  }
+  return { kind: "err", message: `/replay: unknown flag '${head}'` }
+}
+
 const parseReplayArgs = (args: readonly string[]): ParseResult => {
   if (args.length === 0) {
     return { kind: "err", message: "/replay: expected <session-id> [--at <turn>] [--from <tcid>]" }
   }
-  const sessionId = args[0] as string
+  const head = args[0] as string
+  const headErr = rejectFlagHead(head)
+  if (headErr !== undefined) return headErr
+  const sessionId = head
   let atTurn: number | undefined
   let fromToolCallId: string | undefined
   let i = 1

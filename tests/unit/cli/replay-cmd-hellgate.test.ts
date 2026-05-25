@@ -31,7 +31,19 @@
  *  HELL-REPLAY-PARSE-01: no positional ⇒ err
  *  HELL-REPLAY-PARSE-02: --at non-integer ⇒ err
  *  HELL-REPLAY-PARSE-03: --from missing value ⇒ err
- *  HELL-REPLAY-PARSE-04: unknown flag ⇒ err
+ *  HELL-REPLAY-PARSE-04: unknown flag (after sessionId) ⇒ err
+ *  HELL-REPLAY-PARSE-05: --from with empty-string value ⇒ err
+ *  HELL-REPLAY-PARSE-06: --at with negative integer ⇒ err
+ *  HELL-REPLAY-PARSE-07: args[0] starts with `--` (no sessionId before flag)
+ *                        — formerly a prod-bug doc-test; now a real invariant
+ *                        case that pins the precise "unknown flag '<f>'" /
+ *                        "expected <session-id> before flags" error shape
+ *                        + exit 1 via the dispatcher.
+ *  HELL-REPLAY-PARSE-08: --bogus followed by extra tokens ⇒ FIRST flag wins
+ *  HELL-REPLAY-PARSE-09: --at 3 --bogus sid ⇒ rejected (known flag at head,
+ *                        sessionId must come first)
+ *  HELL-REPLAY-PARSE-10: valid sessionId + --at 3 round-trips unchanged
+ *                        (byte-identical regression guard for the happy path)
  */
 
 import { describe, expect, test } from "bun:test"
@@ -464,9 +476,73 @@ describe("/replay hellgate (ADR-0243)", () => {
       const r = replayInternals.parseReplayArgs(["sid", "--from"])
       expect(r.kind).toBe("err")
     })
-    test("HELL-REPLAY-PARSE-04: unknown flag ⇒ err", () => {
+    test("HELL-REPLAY-PARSE-04: unknown flag (after sessionId) ⇒ err", () => {
       const r = replayInternals.parseReplayArgs(["sid", "--bogus"])
       expect(r.kind).toBe("err")
+      if (r.kind === "err") {
+        expect(r.message).toBe("/replay: unknown flag '--bogus'")
+      }
+    })
+    test("HELL-REPLAY-PARSE-05: --from with empty-string value ⇒ err", () => {
+      const r = replayInternals.parseReplayArgs(["sid", "--from", ""])
+      expect(r.kind).toBe("err")
+    })
+    test("HELL-REPLAY-PARSE-06: --at with negative integer ⇒ err", () => {
+      const r = replayInternals.parseReplayArgs(["sid", "--at", "-3"])
+      expect(r.kind).toBe("err")
+    })
+    test("HELL-REPLAY-PARSE-07: args[0] = '--bogus' ⇒ unknown flag err (not sessionId)", () => {
+      const r = replayInternals.parseReplayArgs(["--bogus"])
+      expect(r.kind).toBe("err")
+      if (r.kind === "err") {
+        // Precise message — pinned so any future drift breaks here.
+        expect(r.message).toBe("/replay: unknown flag '--bogus'")
+      }
+    })
+    test("HELL-REPLAY-PARSE-07 dispatch: /replay --bogus ⇒ exit 1 via ctx.err", async () => {
+      const io = collectOut()
+      const ctx: SlashContext = {
+        out: io.outFn,
+        err: io.errFn,
+        cwd: "/",
+        replay: {
+          resolveSession: async () => "/should-never-be-called",
+          iterate: fromArray([]),
+        },
+      }
+      const code = await replayCmd.run(["--bogus"], ctx)
+      expect(code).toBe(1)
+      // Error message goes to err sink; out sink stays clean.
+      expect(io.err.join("")).toContain("unknown flag '--bogus'")
+      // Critical regression: must NOT say "session --bogus not found" — that
+      // was the pre-fix downstream-resolve symptom.
+      expect(io.out.join("")).not.toContain("session --bogus not found")
+    })
+    test("HELL-REPLAY-PARSE-08: --bogus extra ⇒ first flag wins in err message", () => {
+      const r = replayInternals.parseReplayArgs(["--bogus", "extra", "more"])
+      expect(r.kind).toBe("err")
+      if (r.kind === "err") {
+        expect(r.message).toBe("/replay: unknown flag '--bogus'")
+        expect(r.message).not.toContain("extra")
+        expect(r.message).not.toContain("more")
+      }
+    })
+    test("HELL-REPLAY-PARSE-09: --at 3 --bogus sid (known flag at head) ⇒ rejected", () => {
+      const r = replayInternals.parseReplayArgs(["--at", "3", "--bogus", "sid"])
+      expect(r.kind).toBe("err")
+      if (r.kind === "err") {
+        // Known flag at head → "before flags" shape (not "unknown flag").
+        expect(r.message).toBe("/replay: expected <session-id> before flags")
+      }
+    })
+    test("HELL-REPLAY-PARSE-10: valid sid + --at 3 round-trips unchanged (regression)", () => {
+      const r = replayInternals.parseReplayArgs(["valid-session-id", "--at", "3"])
+      expect(r.kind).toBe("ok")
+      if (r.kind === "ok") {
+        expect(r.sessionId).toBe("valid-session-id")
+        expect(r.filter.atTurn).toBe(3)
+        expect(r.filter.fromToolCallId).toBeUndefined()
+      }
     })
     test("HELL-REPLAY-PARSE-05: --at negative integer ⇒ err", () => {
       const r = replayInternals.parseReplayArgs(["sid", "--at", "-1"])
