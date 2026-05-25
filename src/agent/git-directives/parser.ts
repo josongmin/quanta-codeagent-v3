@@ -1,5 +1,5 @@
 /**
- * ADR-0205 — Round-trip parser for `::git-*` directives.
+ * ADR-0220 — Round-trip parser for `::git-*` directives.
  *
  * Consumes a single line and returns either a typed `GitDirective` or a
  * typed `GitDirectiveParseError`. NEVER throws — UI tail loops that hit a

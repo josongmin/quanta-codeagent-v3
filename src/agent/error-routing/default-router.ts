@@ -1,5 +1,5 @@
 /**
- * Default `RetryRouter` (ADR-0203). Single pure switch over `TypedError.kind`
+ * Default `RetryRouter` (ADR-0217). Single pure switch over `TypedError.kind`
  * implementing the Codex-verbatim routing table:
  *
  *   contextWindowExceeded | threadRollbackFailed              → retry-same-turn

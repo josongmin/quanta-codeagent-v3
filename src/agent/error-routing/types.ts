@@ -1,5 +1,5 @@
 /**
- * Typed error enum (ADR-0203) — Codex 16-variant absorption.
+ * Typed error enum (ADR-0217) — Codex 16-variant absorption.
  *
  * Plane-clean: imports only `@/shared` for sibling types. No `@/llm`,
  * no `@/tool`, no `@/permission` — this is the LEAF that they all key off,

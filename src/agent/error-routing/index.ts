@@ -1,5 +1,5 @@
 /**
- * Error-routing slice barrel (ADR-0203). Plane-clean leaf — Codex 16-variant
+ * Error-routing slice barrel (ADR-0217). Plane-clean leaf — Codex 16-variant
  * typed error enum + 5-action retry router.
  *
  * Nobody imports this slice today (default-OFF). Wiring into the loop /

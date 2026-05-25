@@ -1,5 +1,5 @@
 /**
- * Error-routing hellgate (ADR-0203).
+ * Error-routing hellgate (ADR-0217).
  *
  * Seals 25 invariants on the 16-variant typed error enum + 5-action router:
  *

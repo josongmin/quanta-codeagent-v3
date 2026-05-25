@@ -1,7 +1,11 @@
-# ADR-0205: Git directive emit protocol (`::git-*`)
+# ADR-0220: Git directive emit protocol (`::git-*`)
 
 - **Status**: Accepted
 - **Date**: 2026-05-25
+- **Renumbered**: from initially-drafted ADR-0205 (collision with
+  `0205-multi-source-rules-vendor-detector.md`). Per ADR-collision policy
+  (memory `adr-collision-policy-2026-05-25`): user keeps original, ours
+  renumber to next-free.
 - **Related ADRs**: ADR-0025 (git first-class tools — read-only surface this
   slice extends with a sibling out-of-band signaling channel), ADR-0102
   (turn-diff emitter — adjacent git observability seam), ADR-0110 (git

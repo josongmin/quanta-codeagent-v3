@@ -1,5 +1,5 @@
 /**
- * Error-routing ports (ADR-0203).
+ * Error-routing ports (ADR-0217).
  *
  * Closed-port DI seam. Two ports, ONE method each:
  *   - `ErrorClassifier.classify(e: unknown): TypedError` — pure boundary

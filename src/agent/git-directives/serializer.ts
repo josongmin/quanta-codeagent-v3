@@ -1,5 +1,5 @@
 /**
- * ADR-0205 — Canonical one-line serializer.
+ * ADR-0220 — Canonical one-line serializer.
  *
  * Wire format: `::git-<kind>{<canonical-json>}`.
  *

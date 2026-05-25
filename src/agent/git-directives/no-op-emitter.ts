@@ -1,5 +1,5 @@
 /**
- * ADR-0205 — No-op emitter (default-OFF byte-identical default).
+ * ADR-0220 — No-op emitter (default-OFF byte-identical default).
  *
  * Discards every directive. Used wherever a host has not opted in to the
  * `::git-*` channel — the call sites stay byte-identical to today's

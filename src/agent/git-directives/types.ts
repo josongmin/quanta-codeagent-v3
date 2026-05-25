@@ -1,5 +1,5 @@
 /**
- * ADR-0205 — Git directive types.
+ * ADR-0220 — Git directive types.
  *
  * 5-kind discriminated union of git mutation directives emitted on the
  * stderr-side `::git-*` channel after a confirmed successful mutation. UI

@@ -1,7 +1,12 @@
-# ADR-0203: Typed error enum (16-variant) + retry routing port — Codex absorption extending ADR-0069
+# ADR-0217: Typed error enum (16-variant) + retry routing port — Codex absorption extending ADR-0069
 
 - **Status**: Accepted
 - **Date**: 2026-05-25
+- **Renumbered**: from initially-drafted ADR-0203 (collision with
+  `0203-user-authored-playbook-frontmatter.md`). Per ADR-collision policy
+  (memory `adr-collision-policy-2026-05-25`): user keeps original, ours
+  renumber to next-free. Sibling ADR-0214 (`codex-spec` LLM-layer router) is
+  unaffected and continues to cross-reference this slice under its new number.
 - **Related ADRs**: ADR-0069 (typed per-failure-mode tool results — discriminated
   `ToolFailure` union), ADR-0044 (negative invariants — closed unions),
   ADR-0032 (OTel attribute vocabulary — `quanta.error.*` follow-up wiring slot),

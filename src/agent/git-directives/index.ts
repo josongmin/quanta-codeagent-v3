@@ -1,8 +1,8 @@
 /**
- * ADR-0205 — Git directive emit protocol barrel.
+ * ADR-0220 — Git directive emit protocol barrel.
  *
  * Out-of-band `::git-*` channel for UI sync after successful mutating git
- * operations. See ADR-0205 for the wire format, default-OFF posture, and
+ * operations. See ADR-0220 for the wire format, default-OFF posture, and
  * the 15-case hellgate that pins the contract.
  */
 

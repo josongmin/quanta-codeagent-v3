@@ -1,5 +1,5 @@
 /**
- * ADR-0205 — Default stderr emitter.
+ * ADR-0220 — Default stderr emitter.
  *
  * Writes each serialized directive followed by `\n` to `process.stderr`.
  * Stdout is reserved for LLM response streaming + pipe consumers; emitting

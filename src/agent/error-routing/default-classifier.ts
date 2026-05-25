@@ -1,5 +1,5 @@
 /**
- * Default `ErrorClassifier` (ADR-0203). Pure boundary translator from
+ * Default `ErrorClassifier` (ADR-0217). Pure boundary translator from
  * an arbitrary thrown value to the 16-arm `TypedError` discriminant.
  *
  * Source priority (first match wins):

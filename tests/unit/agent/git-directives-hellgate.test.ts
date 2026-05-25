@@ -1,5 +1,5 @@
 /**
- * ADR-0205 hellgate — `::git-*` directive emit protocol.
+ * ADR-0220 hellgate — `::git-*` directive emit protocol.
  *
  * 15 adversarial cases pinning:
  *   - default-OFF byte-identical (no-op emitter is silent)
@@ -27,7 +27,7 @@ import {
 // HELL-GD-01 — no-op emitter is silent for all 5 kinds
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 default-OFF (HELL-GD-01)", () => {
+describe("ADR-0220 default-OFF (HELL-GD-01)", () => {
   test("noopEmitter.emit produces zero side effects across all 5 kinds", () => {
     const directives: readonly GitDirective[] = [
       { kind: "create-branch", name: "feat/x" },
@@ -66,7 +66,7 @@ describe("ADR-0205 default-OFF (HELL-GD-01)", () => {
 // HELL-GD-02..06 — round-trip per kind
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 round-trip (HELL-GD-02..06)", () => {
+describe("ADR-0220 round-trip (HELL-GD-02..06)", () => {
   test("HELL-GD-02 create-branch", () => {
     const d: GitDirective = { kind: "create-branch", name: "feat/abc-123" }
     const result = parse(serialize(d))
@@ -118,7 +118,7 @@ describe("ADR-0205 round-trip (HELL-GD-02..06)", () => {
 // HELL-GD-07 — canonical alpha-sorted keys (snapshot)
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 canonical key order (HELL-GD-07)", () => {
+describe("ADR-0220 canonical key order (HELL-GD-07)", () => {
   test("all 5 kinds serialize with alphabetically-sorted JSON keys", () => {
     // Each directive's payload (everything but `kind`) must be a JSON object
     // whose top-level keys appear in alphabetical order in the wire form.
@@ -151,7 +151,7 @@ describe("ADR-0205 canonical key order (HELL-GD-07)", () => {
 // HELL-GD-08 — non-directive prefix
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 parser rejects non-directive (HELL-GD-08)", () => {
+describe("ADR-0220 parser rejects non-directive (HELL-GD-08)", () => {
   test("plain text returns not-a-directive (no throw)", () => {
     const r = parse("hello world")
     expect(r.ok).toBe(false)
@@ -169,7 +169,7 @@ describe("ADR-0205 parser rejects non-directive (HELL-GD-08)", () => {
 // HELL-GD-09 — malformed JSON
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 parser handles malformed JSON (HELL-GD-09)", () => {
+describe("ADR-0220 parser handles malformed JSON (HELL-GD-09)", () => {
   test("broken JSON body returns malformed-directive (no throw)", () => {
     const r = parse("::git-commit{not json}")
     expect(r.ok).toBe(false)
@@ -187,7 +187,7 @@ describe("ADR-0205 parser handles malformed JSON (HELL-GD-09)", () => {
 // HELL-GD-10 — unknown kind
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 parser rejects unknown kind (HELL-GD-10)", () => {
+describe("ADR-0220 parser rejects unknown kind (HELL-GD-10)", () => {
   test("unknown kind returns unknown-kind (no throw)", () => {
     const r = parse("::git-flarble{}")
     expect(r.ok).toBe(false)
@@ -202,7 +202,7 @@ describe("ADR-0205 parser rejects unknown kind (HELL-GD-10)", () => {
 // HELL-GD-11 — stderr-only channel discipline
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 defaultStdoutEmitter writes to stderr (HELL-GD-11)", () => {
+describe("ADR-0220 defaultStdoutEmitter writes to stderr (HELL-GD-11)", () => {
   test("emit lands on process.stderr, NOT process.stdout", () => {
     const errWrites: string[] = []
     const outWrites: string[] = []
@@ -246,7 +246,7 @@ describe("ADR-0205 defaultStdoutEmitter writes to stderr (HELL-GD-11)", () => {
 // HELL-GD-12 — isDraft must be boolean
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 parser validates create-pr.isDraft (HELL-GD-12)", () => {
+describe("ADR-0220 parser validates create-pr.isDraft (HELL-GD-12)", () => {
   test('isDraft="yes" string rejected with shape-mismatch', () => {
     const r = parse('::git-create-pr{"isDraft":"yes","url":"u"}')
     expect(r.ok).toBe(false)
@@ -271,7 +271,7 @@ describe("ADR-0205 parser validates create-pr.isDraft (HELL-GD-12)", () => {
 // HELL-GD-13 — stage paths frozen on parse
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 stage paths frozen on parse (HELL-GD-13)", () => {
+describe("ADR-0220 stage paths frozen on parse (HELL-GD-13)", () => {
   test("parsed paths array rejects mutation", () => {
     const r = parse('::git-stage{"paths":["a","b"]}')
     expect(r.ok).toBe(true)
@@ -291,7 +291,7 @@ describe("ADR-0205 stage paths frozen on parse (HELL-GD-13)", () => {
 // HELL-GD-14 — newline in commit message survives round-trip
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 newline in commit message (HELL-GD-14)", () => {
+describe("ADR-0220 newline in commit message (HELL-GD-14)", () => {
   test("commit.message with embedded \\n round-trips and does not break line framing", () => {
     const d: GitDirective = {
       kind: "commit",
@@ -330,7 +330,7 @@ describe("ADR-0205 newline in commit message (HELL-GD-14)", () => {
 // HELL-GD-15 — emit FIFO order
 // ---------------------------------------------------------------------------
 
-describe("ADR-0205 emit preserves FIFO order (HELL-GD-15)", () => {
+describe("ADR-0220 emit preserves FIFO order (HELL-GD-15)", () => {
   test("5 rapid emits land in input order on the sink", () => {
     const writes: string[] = []
     const sink: DirectiveSink = {

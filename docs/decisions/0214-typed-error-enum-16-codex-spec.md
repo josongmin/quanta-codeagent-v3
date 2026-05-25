@@ -4,8 +4,8 @@
 - **Date**: 2026-05-25
 - **Related ADRs**: ADR-0069 (typed per-failure-mode tool results),
   ADR-0094 (chatgpt-oauth provider), ADR-0192 (lib-swap retry-pretry),
-  ADR-0203 (typed-error-routing slice — parallel design, see "Relationship
-  to ADR-0203" below)
+  ADR-0217 (typed-error-routing slice — parallel design, see "Relationship
+  to ADR-0217" below)
 - **References**: `src/shared/errors.ts`, `src/shared/error-classifier.ts`,
   `src/llm/retry/{port,recovery-router,codex-spec-router,index}.ts`,
   `tests/unit/error-classifier-hellgate.test.ts`,
@@ -96,9 +96,9 @@ sets. The router is wired only where explicitly passed. The 5 new kinds are
 NEVER emitted by current adapters (only by the new `classify` function); so
 the legacy retry/fallback paths see exactly the 11 kinds they saw before.
 
-## Relationship to ADR-0203
+## Relationship to ADR-0217
 
-ADR-0203 ships a PARALLEL approach at `src/agent/error-routing/` with:
+ADR-0217 ships a PARALLEL approach at `src/agent/error-routing/` with:
 - A separate `TypedErrorKind` discriminated union (with payloads like
   `httpStatusCode{status}`).
 - 5 actions (`retry-same-turn | retry-with-backoff | swap-fallback | hitl |
@@ -113,14 +113,14 @@ ADR-0214 (this ADR) chooses a different tradeoff:
 - Router slice lives in `src/llm/retry/` (closer to the LLM adapter
   boundary, since `LLMErrorKind` is an LLM concept).
 
-The two approaches coexist as INDEPENDENT seams. ADR-0203 stays in
+The two approaches coexist as INDEPENDENT seams. ADR-0217 stays in
 `src/agent/error-routing/` for the agent-loop-level superset (which captures
 sandbox/steer/unifiedExec failures that AREN'T LLM errors). ADR-0214 stays
 in `src/llm/retry/` for the LLM-layer routing (which is what the existing
 `RetryingLLM`/`FallbackLLM` decorators consume). Neither slice imports the
 other. A future ADR may unify them; today each closes its own gap.
 
-The specific design difference that matters: ADR-0203 maps
+The specific design difference that matters: ADR-0217 maps
 `contextWindowExceeded → retry-same-turn`; ADR-0214 maps it to
 `reactive_compaction`. The latter is a STRICTLY STRONGER signal — retrying
 the same oversized prompt without compaction will fail identically, so
@@ -131,7 +131,7 @@ The 6th action exists precisely to make that step explicit.
 
 | Alternative | Why rejected |
 |---|---|
-| **Use ADR-0203 only** | Different action vocabulary (5 vs 6); `reactive_compaction` is the explicit signal we need. Different naming convention (camelCase) breaks our snake_case `LLMErrorKind` style. Slice location (`src/agent/`) puts router 2 layers from the LLM adapter it serves. |
+| **Use ADR-0217 only** | Different action vocabulary (5 vs 6); `reactive_compaction` is the explicit signal we need. Different naming convention (camelCase) breaks our snake_case `LLMErrorKind` style. Slice location (`src/agent/`) puts router 2 layers from the LLM adapter it serves. |
 | **Bake routing into `LLMError`** | Conflates "what failed" with "what to do". Two callers (RetryingLLM vs FallbackLLM) want different routing today; future ones (HITL queue, sandbox-review skill) will want more. Router as separate port keeps `LLMError` stable. |
 | **Open the action union** | Defeats the point — every router action must be handled by every consumer's `switch`. Adding a new action is an intentional contract change. |
 | **Throw on unknown kind in classifier** | A classifier MUST be total. Throwing makes the boundary itself a source of failures. `"unknown"` arm + `fatal` action is the safe degrade. |

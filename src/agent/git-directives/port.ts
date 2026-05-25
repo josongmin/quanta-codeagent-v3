@@ -1,5 +1,5 @@
 /**
- * ADR-0205 — Closed-port emitter contract.
+ * ADR-0220 — Closed-port emitter contract.
  *
  * Hosts (CLI/TUI/desktop) inject an implementation; tests inject a recording
  * fake. The port is intentionally minimal — synchronous `emit` because the
