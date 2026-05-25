@@ -1,5 +1,5 @@
 /**
- * OTLP/HTTP exporter — hellgate (ADR-0261).
+ * OTLP/HTTP exporter — hellgate (ADR-0268).
  *
  * Seals the realtime export wiring across 16 cases:
  *

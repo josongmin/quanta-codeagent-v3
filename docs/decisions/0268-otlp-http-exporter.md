@@ -1,4 +1,4 @@
-# ADR-0261: OTLP/HTTP exporter — `QUANTA_OTEL_ENDPOINT` realtime ship
+# ADR-0268: OTLP/HTTP exporter — `QUANTA_OTEL_ENDPOINT` realtime ship
 
 ## Context
 
