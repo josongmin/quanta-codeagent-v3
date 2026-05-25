@@ -30,6 +30,7 @@
 
 export { type DefaultStuckDetectorOpts, defaultStuckDetector } from "./default-tracker"
 export {
+  type AutoBackgroundAcceptCallback,
   type AutoBackgroundConfig,
   DEFAULT_STUCK_THRESHOLD_MS,
   type ProposeHandlerPort,

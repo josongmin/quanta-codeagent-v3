@@ -3,7 +3,7 @@
 // These tests pin three CLI discovery contracts that broke in past audits:
 //
 //   1. /image visibility: the multi-modal /image command is virtual
-//      (intercepted by repl/prompt-source.ts because the queue is REPL-
+//      (intercepted by repl.ts#dispatchReplSlash because the queue is REPL-
 //      scoped, not in BUILTINS). It STILL needs to appear in /help output —
 //      discoverability of REPL-only surfaces.
 //

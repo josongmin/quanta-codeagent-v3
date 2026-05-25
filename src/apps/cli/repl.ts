@@ -65,7 +65,7 @@ import {
  * imports (no `apps/bench`, no `apps/agent`).
  */
 
-/** Shared REPL-side slash-context state. Threaded through `tryRunReplSlash`
+/** Shared REPL-side slash-context state. Threaded through `dispatchReplSlash`
  *  → `runSlashCommand`. Each field is independently optional:
  *
  *    - `skills` ⇒ `/skills`, `/reload-skills` see the live registry.
@@ -79,7 +79,7 @@ import {
  *      S3 port wire-up. Each adapter is OPTIONAL — when its env/dep gate is
  *      off the field is OMITTED from `ReplSlashCtx` so the slash command
  *      keeps its existing "not wired" output (byte-identical default-OFF). */
-type ReplSlashCtx = Partial<{
+export type ReplSlashCtx = Partial<{
   skills: () => Promise<SkillRow[]>
   idle: IdleMonitor
   imageQueue: ImageQueue
@@ -564,22 +564,15 @@ const installPills = (deps: {
   return pills
 }
 
-/** Interactive REPL loop: each line continues the same conversation.
- *
- *  Slash commands routed in-REPL (Codex `forceReloadSkills` parity for
- *  `/skills` and `/reload-skills`): when the user types `/<letter>…`,
- *  short-circuit to {@link runSlashCommand} with `slashCtx` instead of sending
- *  it to the model. `/exit` / `/quit` keep their existing meaning (loop break)
- *  and are checked BEFORE the slash dispatch so they cannot be hijacked by a
- *  future registered command of the same name. Empty `slashCtx` ⇒ commands
- *  that need session state print "not wired" and exit 0 (default-OFF). */
 /** Try to handle `input` as an in-REPL slash command. Returns true iff the
- *  input was routed (caller should `continue` the outer loop); false ⇒ the
- *  caller must send it to the model via `turn(...)`. Extracted from
- *  `runReplLoop` to keep that function under the biome cognitive-complexity
- *  budget. `isSlashCommand` rejects paths like `/path/to/x` so legacy
- *  file-resume tokens still fall through to the agent path. */
-const tryRunReplSlash = async (input: string, slashCtx?: ReplSlashCtx): Promise<boolean> => {
+ *  input was routed and consumed by the slash surface; false means the
+ *  caller must forward it to the model path. `isSlashCommand` rejects paths
+ *  like `/path/to/x` so legacy file-resume tokens still fall through to the
+ *  agent path. */
+export const dispatchReplSlash = async (
+  input: string,
+  slashCtx?: ReplSlashCtx,
+): Promise<boolean> => {
   const head = input.split(/\s+/)[0] ?? ""
   if (!isSlashCommand(head)) return false
   // ADR-0083 multi-modal: `/image add|list|clear` is in-REPL only (the queue
@@ -613,24 +606,6 @@ const tryRunReplSlash = async (input: string, slashCtx?: ReplSlashCtx): Promise<
     ...(slashCtx?.side !== undefined ? { side: slashCtx.side() } : {}),
   })
   return true
-}
-
-/** Interactive REPL compat loop: legacy fake-readline tests still inject
- *  `rl.question()` here, while the production interactive path goes through
- *  {@link runSessionLoop}. */
-export const runReplLoop = async (
-  rl: readline.Interface,
-  signal: AbortSignal,
-  turn: (text: string) => Promise<void>,
-  slashCtx?: ReplSlashCtx,
-): Promise<void> => {
-  while (!signal.aborted) {
-    const input = (await rl.question("\nquanta› ")).trim()
-    if (input === "") continue
-    if (input === "/exit" || input === "/quit") break
-    if (await tryRunReplSlash(input, slashCtx)) continue
-    await turn(input)
-  }
 }
 
 /** Route `quanta session …` to the session subcommand dispatcher. Returns the
@@ -751,7 +726,7 @@ export const runRepl = async (): Promise<void> => {
     const slashCtx = composeSurfaceSlashCtx(setup, surfaceState)
     await runSessionLoop({
       setup,
-      dispatchSlash: (input) => tryRunReplSlash(input, slashCtx),
+      dispatchSlash: (input) => dispatchReplSlash(input, slashCtx),
       sinks: composeTurnSinks(setup, surfaceState),
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
       ux: buildPromptUx(),

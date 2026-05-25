@@ -852,7 +852,7 @@ const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(
   BUILTINS.map((c) => [c.name, c]),
 )
 
-/** `/exit` and `/quit` are short-circuited by `runReplLoop` BEFORE the
+/** `/exit` and `/quit` are short-circuited by `composePromptPipeline` BEFORE the
  *  BUILTINS dispatch — they aren't `SlashCommand` entries but a user
  *  pressing <Tab> at the prompt expects them in the completion list. */
 const REPL_VIRTUAL_COMMANDS = ["/exit", "/quit"] as const

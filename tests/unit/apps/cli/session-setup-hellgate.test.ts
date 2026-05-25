@@ -41,13 +41,10 @@ import type {
  *     downstream ⇒ the resulting metrics/state fields are wrong shape ⇒
  *     dep contract tests fail.
  *
- * TODO (limitation): A behavioral assertion for the `--image` exit-1 path
- * (loadSeedImages catching loadImageBlock throws and calling process.exit(1))
- * is NOT covered here because `argvImages()` is module-private inside
- * `internal.ts` — exposing it as an injectable dep on `SetupSessionDeps`
- * would let us assert exit-1 fires without spawning a subprocess. Tracked
- * for a future "more ports" slice; the type-shape locks below DO still
- * verify the existence of the dep bag itself.
+ * Startup failure policy is now typed rather than process-killing:
+ * `setupSession` rejects with `SessionBootstrapError` and the CLI host
+ * decides whether to exit. That keeps bootstrap reusable by non-process
+ * surfaces while preserving the same operator-facing message.
  */
 
 // =============================================================================
@@ -226,11 +223,15 @@ const makeStubDeps = (): { deps: SetupSessionDeps; probe: DepProbe } => {
 // module-mock plumbing — stub the heavy surface so setupSession boots clean
 // =============================================================================
 
-beforeAll(async () => {
-  // Stub `../internal` (the bulk of the surface).
-  const origInternal = await import("../../../../src/apps/cli/internal")
+let rawInternalModule: typeof import("../../../../src/apps/cli/internal") | undefined
+
+const installDefaultInternalMock = async (): Promise<void> => {
+  if (rawInternalModule === undefined) {
+    throw new Error("rawInternalModule not initialized")
+  }
+  const module = rawInternalModule
   await mock.module("../../../../src/apps/cli/internal", () => ({
-    ...origInternal,
+    ...module,
     env: (k: string, fallback: string) => process.env[k] ?? fallback,
     pickProvider: () => "anthropic" as never,
     pickPersona: () => "default" as never,
@@ -277,7 +278,7 @@ beforeAll(async () => {
       conflictError: undefined,
       missingIdError: undefined,
     }),
-    assembleConfig: origInternal.assembleConfig,
+    assembleConfig: module.assembleConfig,
     composeLLM: (
       inner: unknown,
       _provider: unknown,
@@ -294,6 +295,12 @@ beforeAll(async () => {
       return inner
     },
   }))
+}
+
+beforeAll(async () => {
+  // Stub `../internal` (the bulk of the surface).
+  rawInternalModule = await import("../../../../src/apps/cli/internal")
+  await installDefaultInternalMock()
 
   // Stub @/agent — buildSystemPrompt + RetryingLLM are reached by setupSession.
   const origAgent = await import("@/agent")
@@ -335,6 +342,9 @@ beforeEach(() => {
 afterEach(() => {
   // biome-ignore lint/suspicious/noExplicitAny: restore
   process.stderr.write = originalStderrWrite as any
+})
+afterEach(async () => {
+  await installDefaultInternalMock()
 })
 
 // Spy on process.on + remember handlers so SIGINT registration is observable
@@ -409,6 +419,88 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     } finally {
       if (prevPermission === undefined) delete process.env.QUANTA_PERMISSION
       else process.env.QUANTA_PERMISSION = prevPermission
+    }
+  })
+
+  test("rethrows buildLLM failure as a typed startup error", async () => {
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      buildLLM: () => {
+        throw new Error("bad llm")
+      },
+    }))
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { SessionBootstrapError } = await import(
+        "../../../../src/apps/cli/repl/session-bootstrap"
+      )
+      const { deps } = makeStubDeps()
+      let caught: unknown
+      try {
+        await setupSession(deps)
+      } catch (error) {
+        caught = error
+      }
+      expect(caught).toBeInstanceOf(SessionBootstrapError)
+      expect(caught).toMatchObject({
+        kind: "llm_build_failed",
+        message: "bad llm",
+      })
+    } finally {
+      await mock.module("../../../../src/apps/cli/internal", () => ({
+        ...origInternal,
+      }))
+    }
+  })
+
+  test("startup failure stops active mcp clients before rethrowing", async () => {
+    const stop = mock(async () => undefined)
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      loadFeatures: async () => ({
+        planMode: false,
+        metrics: undefined,
+        state: undefined,
+        resume: "session-missing",
+        mcpTools: [],
+        mcpClients: [{ stop }],
+        mcpConfigs: [],
+        lspTools: [],
+        lspNavTools: [],
+        gitToolList: [],
+      }),
+      resolveResume: async () => ({
+        sessionId: "seed-session",
+        history: [],
+        idMeta: undefined,
+        conflictError: undefined,
+        missingIdError: "session-missing",
+      }),
+    }))
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { SessionBootstrapError } = await import(
+        "../../../../src/apps/cli/repl/session-bootstrap"
+      )
+      const { deps } = makeStubDeps()
+      let caught: unknown
+      try {
+        await setupSession(deps)
+      } catch (error) {
+        caught = error
+      }
+      expect(caught).toBeInstanceOf(SessionBootstrapError)
+      expect(caught).toMatchObject({
+        kind: "resume_missing_id",
+        message: "--resume: session id not found: session-missing",
+      })
+      expect(stop).toHaveBeenCalledTimes(1)
+    } finally {
+      await mock.module("../../../../src/apps/cli/internal", () => ({
+        ...origInternal,
+      }))
     }
   })
 
@@ -530,5 +622,54 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     // Must not throw (empty clients list ⇒ loop is a no-op).
     await result.shutdownMcp()
     expect(typeof result.shutdownMcp).toBe("function")
+  })
+
+  test("buildLLM failure rejects with SessionBootstrapError instead of exiting the process", async () => {
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      buildLLM: () => {
+        throw new Error("missing provider key")
+      },
+    }))
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { SessionBootstrapError } = await import(
+      "../../../../src/apps/cli/repl/session-bootstrap"
+    )
+    const { deps } = makeStubDeps()
+    try {
+      await setupSession(deps)
+      throw new Error("expected setupSession to reject")
+    } catch (e) {
+      expect(e).toBeInstanceOf(SessionBootstrapError)
+      expect((e as Error).message).toBe("missing provider key")
+    }
+  })
+
+  test("resume conflict rejects with SessionBootstrapError instead of exiting the process", async () => {
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      buildLLM: () => ({ generate: async () => ({ content: [] }) }) as never,
+      resolveResume: async () => ({
+        sessionId: "resolved-session",
+        history: [],
+        idMeta: undefined,
+        conflictError: "cannot combine --new-session with --resume",
+        missingIdError: undefined,
+      }),
+    }))
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { SessionBootstrapError } = await import(
+      "../../../../src/apps/cli/repl/session-bootstrap"
+    )
+    const { deps } = makeStubDeps()
+    try {
+      await setupSession(deps)
+      throw new Error("expected setupSession to reject")
+    } catch (e) {
+      expect(e).toBeInstanceOf(SessionBootstrapError)
+      expect((e as Error).message).toBe("cannot combine --new-session with --resume")
+    }
   })
 })

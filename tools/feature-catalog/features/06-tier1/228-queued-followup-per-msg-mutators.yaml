@@ -6,7 +6,7 @@ order: 228
 maturity: L3
 status: stable
 ui_surfaces: [cli]
-monitoring: metrics
+monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
 owners: ["@songmin"]
@@ -28,7 +28,10 @@ evidence:
     - src/apps/cli/queue-cmd.ts
     - src/observability/metrics/instrument-plan-queue.ts
   tests:
-    - tests/unit/queue-per-msg-mutators-hellgate.test.ts
-    - tests/unit/cli/queue-cmd-hellgate.test.ts
+    unit:
+      - tests/unit/queue-per-msg-mutators-hellgate.test.ts
+      - tests/unit/cli/queue-cmd-hellgate.test.ts
+    integration: []
+    contract: []
   adrs:
     - docs/decisions/0228-queued-followup-per-msg-mutators.md

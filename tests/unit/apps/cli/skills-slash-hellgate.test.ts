@@ -10,7 +10,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { runReplLoop } from "../../../../src/apps/cli/repl"
+import { dispatchReplSlash } from "../../../../src/apps/cli/repl"
+import { composePromptPipeline } from "../../../../src/apps/cli/repl/prompt-pipeline"
 import { runSlashCommand, type SkillRow } from "../../../../src/apps/cli/slash-commands"
 
 interface CapturedCtx {
@@ -268,55 +269,59 @@ describe("/reload-skills: prefix differentiates from /skills", () => {
   })
 })
 
-// ── REPL-inside slash routing (the part that's actually new) ────────────
+// ── REPL slash routing via prompt-pipeline + dispatcher seams ───────────
 
-/** Minimal fake readline for runReplLoop. Plays back a pre-set list of inputs
- *  then signals EOF by aborting via the test-supplied controller. */
-const makeRl = (
+const stubStatusBar = () => ({
+  setDefault: () => undefined,
+  transient: () => undefined,
+  clearTransient: () => undefined,
+  teardown: () => undefined,
+})
+
+const runPromptSequence = async (
   lines: string[],
-): { rl: { question: (q: string) => Promise<string> }; trace: string[] } => {
-  const trace: string[] = []
-  let i = 0
-  const rl = {
-    question: async (_q: string): Promise<string> => {
-      const line = lines[i++]
-      if (line === undefined) throw new Error("rl: out of inputs")
-      trace.push(line)
-      return line
+  dispatchSlash: (input: string) => Promise<boolean>,
+): Promise<string | null> => {
+  const pipe = composePromptPipeline({
+    dispatchSlash,
+    idleMonitor: {
+      markActive: () => undefined,
+      isIdle: () => false,
+      snooze: () => undefined,
+      unsnooze: () => undefined,
+      isSnoozed: () => false,
+      reset: () => undefined,
     },
-  }
-  return { rl, trace }
+    rejectCounter: {
+      recordDeny: () => 0,
+      recordAccept: () => undefined,
+      count: () => 0,
+      shouldAutoExit: () => false,
+      reset: () => undefined,
+    },
+    statusBar: stubStatusBar(),
+    readPromptLine: async () => lines.shift() ?? null,
+  })
+  const result = await pipe.next(new AbortController().signal)
+  return typeof result === "string" ? result : result === null ? null : result.text
 }
 
-describe("REPL-inside slash routing: /skills shortcut DOES NOT reach the model", () => {
-  test("/skills routed to dispatcher (turn never called) + loop continues", async () => {
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
-    }
-    // Lines: a slash command, then a plain prompt, then /exit.
-    const { rl } = makeRl(["/skills", "real prompt for the model", "/exit"])
+describe("REPL slash routing: /skills shortcut DOES NOT reach the model", () => {
+  test("/skills routed to dispatcher and the next plain prompt still surfaces", async () => {
     let skillsCalls = 0
     const skillsCb = async (): Promise<SkillRow[]> => {
       skillsCalls++
       return [{ name: "alpha", description: "first" }]
     }
-    const abort = new AbortController()
-    await runReplLoop(rl as never, abort.signal, turn, { skills: skillsCb })
-
-    // /skills was routed (callback fired); the plain prompt went to turn().
+    const result = await runPromptSequence(
+      ["/skills", "real prompt for the model", "/exit"],
+      (input) => dispatchReplSlash(input, { skills: skillsCb }),
+    )
     expect(skillsCalls).toBe(1)
-    expect(turnCalls).toEqual(["real prompt for the model"])
+    expect(result).toBe("real prompt for the model")
   })
 
-  test("/skills with NO slashCtx (skills callback absent) ⇒ prints 'not wired' + DOES NOT reach turn", async () => {
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
-    }
-    const { rl } = makeRl(["/skills", "/exit"])
-    const abort = new AbortController()
-    // Capture stdout to verify the surface message:
+  test("/skills with NO slashCtx prints 'not wired' and no model prompt is emitted", async () => {
     const originalWrite = process.stdout.write.bind(process.stdout) as typeof process.stdout.write
     let captured = ""
     process.stdout.write = ((s: string | Uint8Array): boolean => {
@@ -324,60 +329,43 @@ describe("REPL-inside slash routing: /skills shortcut DOES NOT reach the model",
       return true
     }) as typeof process.stdout.write
     try {
-      await runReplLoop(rl as never, abort.signal, turn)
+      const result = await runPromptSequence(["/skills", "/exit"], (input) =>
+        dispatchReplSlash(input),
+      )
+      expect(result).toBeNull()
     } finally {
       process.stdout.write = originalWrite
     }
     expect(captured).toContain("not wired")
-    expect(turnCalls).toHaveLength(0)
   })
 
-  test("/exit and /quit break the loop BEFORE any slash dispatch (parity)", async () => {
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
-    }
+  test("/exit breaks before any slash dispatch", async () => {
     let skillsCalls = 0
     const skillsCb = async (): Promise<SkillRow[]> => {
       skillsCalls++
       return []
     }
-    // If the slash dispatcher hijacked /exit we'd see skillsCalls > 0 or
-    // an "unknown command: /exit" line; loop must break immediately instead.
-    const { rl } = makeRl(["/exit"])
-    const abort = new AbortController()
-    await runReplLoop(rl as never, abort.signal, turn, { skills: skillsCb })
+    const result = await runPromptSequence(["/exit"], (input) =>
+      dispatchReplSlash(input, { skills: skillsCb }),
+    )
+    expect(result).toBeNull()
     expect(skillsCalls).toBe(0)
-    expect(turnCalls).toHaveLength(0)
   })
 
-  test("path-like tokens (e.g. '/tmp/foo') still reach turn (not mistaken for slash command)", async () => {
-    // `isSlashCommand` rejects `/path/segment` so legacy file-resume tokens
-    // continue to the agent path. Verify this with a path-like first line.
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
-    }
-    const { rl } = makeRl(["/tmp/some/file", "/exit"])
-    const abort = new AbortController()
+  test("path-like tokens still fall through to the model path", async () => {
     let skillsCalls = 0
     const skillsCb = async (): Promise<SkillRow[]> => {
       skillsCalls++
       return []
     }
-    await runReplLoop(rl as never, abort.signal, turn, { skills: skillsCb })
-    expect(turnCalls).toEqual(["/tmp/some/file"])
+    const result = await runPromptSequence(["/tmp/some/file", "/exit"], (input) =>
+      dispatchReplSlash(input, { skills: skillsCb }),
+    )
+    expect(result).toBe("/tmp/some/file")
     expect(skillsCalls).toBe(0)
   })
 
-  test("unknown slash command does NOT reach turn (stays at slash dispatcher)", async () => {
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
-    }
-    const { rl } = makeRl(["/bogus", "/exit"])
-    const abort = new AbortController()
-    // Capture stderr to confirm the dispatcher's unknown-command path fires.
+  test("unknown slash command is consumed by the dispatcher", async () => {
     const originalErr = process.stderr.write.bind(process.stderr) as typeof process.stderr.write
     let captured = ""
     process.stderr.write = ((s: string | Uint8Array): boolean => {
@@ -385,12 +373,12 @@ describe("REPL-inside slash routing: /skills shortcut DOES NOT reach the model",
       return true
     }) as typeof process.stderr.write
     try {
-      await runReplLoop(rl as never, abort.signal, turn)
+      const handled = await dispatchReplSlash("/bogus")
+      expect(handled).toBe(true)
     } finally {
       process.stderr.write = originalErr
     }
     expect(captured).toContain("unknown command: /bogus")
-    expect(turnCalls).toHaveLength(0)
   })
 })
 
@@ -482,7 +470,7 @@ describe("/skills: grapheme-aware truncation (no emoji / surrogate splitting)", 
     // Extract just the rendered description (before any [paths:] suffix).
     // The render line is `  x<padding> <desc>` so we look for "A...A" and
     // verify NO lone surrogate appears.
-    const match = /  x +([^\n]*)/.exec(cap.out)
+    const match = / {2}x +([^\n]*)/.exec(cap.out)
     expect(match).not.toBeNull()
     const rendered = match?.[1] ?? ""
     // Lone-surrogate detection: scan for unpaired surrogates.
@@ -513,7 +501,7 @@ describe("/skills: grapheme-aware truncation (no emoji / surrogate splitting)", 
       "/skills",
       makeCtx(cap, async () => [{ name: "y", description: desc }]),
     )
-    const match = /  y +([^\n]*)/.exec(cap.out)
+    const match = / {2}y +([^\n]*)/.exec(cap.out)
     expect(match).not.toBeNull()
     const rendered = match?.[1] ?? ""
     // If the family cluster appears in the output, it must appear in FULL

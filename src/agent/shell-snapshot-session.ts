@@ -115,6 +115,11 @@ export const buildShellSnapshotSession = (
   const shell = resolveShell(config.shell, shellEnv)
   const captureAtTurnStart = config.captureAtTurnStart ?? true
   const cleanupOlderThanMs = config.cleanupOlderThanMs ?? DEFAULT_CLEANUP_OLDER_THAN_MS
+  // ADR-0237 — the byte-cap is consulted at session-start prune AFTER the
+  // age-based sweep. Two-phase prune: (1) cheap age-based delete, then
+  // (2) size-cap eviction of whatever survived. Either failure emits one
+  // `error` AgentEvent — the loop continues regardless (no-throw boundary).
+  const maxSizeBytes = config.maxSizeBytes ?? DEFAULT_MAX_SIZE_BYTES
 
   // Mutable per-session handle slot. `undefined` means "no valid snapshot
   // available right now" — `currentSeam()` returns `undefined` so dispatch
@@ -168,10 +173,18 @@ export const buildShellSnapshotSession = (
       }
     },
     async pruneOnStart(): Promise<void> {
+      // Two-phase prune (ADR-0237). Age first so the size sweep operates
+      // on a (typically) smaller set. Each phase's failure is reported but
+      // does NOT abort the other — partial cleanup is better than none.
       try {
         await port.prune(cleanupOlderThanMs)
       } catch (e) {
         emitError(`shell-snapshot prune failed: ${String((e as Error)?.message ?? e)}`)
+      }
+      try {
+        await port.pruneToSizeBudget(maxSizeBytes)
+      } catch (e) {
+        emitError(`shell-snapshot size-prune failed: ${String((e as Error)?.message ?? e)}`)
       }
     },
   }

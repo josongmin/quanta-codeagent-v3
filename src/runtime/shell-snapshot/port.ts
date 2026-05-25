@@ -35,4 +35,11 @@ export interface ShellSnapshotPort {
   /** Drop snapshot files older than the cutoff. Returns the number of
    *  files removed. Default-safe — caller decides retention policy. */
   prune(olderThanMs: number): Promise<number>
+  /** ADR-0237 — drop snapshot files (oldest-first) until the aggregate
+   *  byte size of the remaining `.sh` files is at or below `maxBytes`.
+   *  Defense-in-depth on top of `prune()` (which only sweeps by age).
+   *  Returns the number of files removed. Operators wire this alongside
+   *  the age-based prune so a single long session cannot exhaust disk
+   *  with fresh-but-large snapshots. */
+  pruneToSizeBudget(maxBytes: number): Promise<number>
 }

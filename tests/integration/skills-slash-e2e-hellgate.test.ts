@@ -7,8 +7,9 @@
  *     code runs end-to-end (argv routing → runSlashMain → buildSkillsConfig →
  *     buildSkillsCallback → discoverSkills + discoverSystemSkills →
  *     renderSkills).
- *   - in-process REPL suites drive the real `runReplLoop` with a real
- *     `discoverSkills` callback against a temp `QUANTA_SKILLS_DIR`.
+ *   - in-process suites drive the real prompt-pipeline + REPL slash
+ *     dispatcher with a real `discoverSkills` callback against a temp
+ *     `QUANTA_SKILLS_DIR`.
  *
  * Hellgate scope (no flimsy assertions, no "callback fired" stubs):
  *   1. Real disk: user SKILL.md files actually appear in the listing.
@@ -16,19 +17,19 @@
  *   3. User-vs-system name collision: system wins on collision (buildSessionFeatures parity).
  *   4. Malformed SKILL.md (missing frontmatter / empty file) is skipped
  *      silently; OTHER valid skills still appear (graceful degradation).
- *   5. Hot reload: write SKILL.md mid-REPL, call /reload-skills, new skill
- *      visible WITHOUT restarting the REPL.
+ *   5. Hot reload: write SKILL.md after one in-process dispatch, call
+ *      /reload-skills again, new skill visible WITHOUT restarting the app.
  *   6. Zero-arg contract from a real shell: `/skills foo` fails on the
  *      subprocess path, no callback fires, exit code 1.
  *   7. /reload-skills uses `reloaded:` prefix verbatim (not `skills:`) — a
  *      regression here would silently make the two commands indistinguishable.
  *   8. Concurrent /skills invocations against the same real dir: both succeed
  *      and yield the same row set (no FD/iterator races in discoverSkills).
- *   9. REPL-inside slash routing prevents `/skills` from reaching the model
- *      (`turn()` never called) — proven against a REAL discoverSkills
+ *   9. In-process slash routing consumes `/skills` and the next plain prompt
+ *      still reaches the model path — proven against a REAL discoverSkills
  *      callback, not a mock.
- *  10. Path-like tokens (`/tmp/foo`) still fall through to `turn()` even
- *      when a real skills surface is wired.
+ *  10. Path-like tokens (`/tmp/foo`) still fall through to the model path
+ *      even when a real skills surface is wired.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -37,7 +38,8 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
-import { runReplLoop } from "../../src/apps/cli/repl"
+import { dispatchReplSlash } from "../../src/apps/cli/repl"
+import { composePromptPipeline } from "../../src/apps/cli/repl/prompt-pipeline"
 import type { SkillRow } from "../../src/apps/cli/slash-commands"
 
 const CLI = "src/apps/cli/index.ts"
@@ -207,22 +209,7 @@ describe("/reload-skills (subprocess): prefix differs from /skills (regression g
   })
 })
 
-// ── in-process REPL e2e: real readline + real discoverSkills ────────────
-
-interface FakeReadline {
-  question: (q: string) => Promise<string>
-}
-
-const makeRl = (lines: string[]): FakeReadline => {
-  let i = 0
-  return {
-    question: async (_q: string): Promise<string> => {
-      const line = lines[i++]
-      if (line === undefined) throw new Error("rl: out of inputs")
-      return line
-    },
-  }
-}
+// ── in-process REPL seams: prompt-pipeline + real discoverSkills ─────────
 
 /** Real skills callback against a tmpdir — same shape buildSkillsCallback
  *  produces, but inlined here so the test can vary the disk state between
@@ -261,48 +248,71 @@ const captureStdout = async <T>(fn: () => Promise<T>): Promise<{ result: T; capt
   }
 }
 
+const runPromptSequence = async (
+  lines: string[],
+  dispatchSlash: (input: string) => Promise<boolean>,
+): Promise<string | null> => {
+  const pipe = composePromptPipeline({
+    dispatchSlash,
+    idleMonitor: {
+      markActive: () => undefined,
+      isIdle: () => false,
+      snooze: () => undefined,
+      unsnooze: () => undefined,
+      isSnoozed: () => false,
+      reset: () => undefined,
+    },
+    rejectCounter: {
+      recordDeny: () => 0,
+      recordAccept: () => undefined,
+      count: () => 0,
+      shouldAutoExit: () => false,
+      reset: () => undefined,
+    },
+    statusBar: {
+      setDefault: () => undefined,
+      transient: () => undefined,
+      clearTransient: () => undefined,
+      teardown: () => undefined,
+    },
+    readPromptLine: async () => lines.shift() ?? null,
+  })
+  const result = await pipe.next(new AbortController().signal)
+  return typeof result === "string" ? result : result === null ? null : result.text
+}
+
 describe("REPL hot-reload (in-process, real disk): /reload-skills picks up new SKILL.md mid-session", () => {
-  test("write SKILL.md AFTER REPL starts → /reload-skills shows it (no restart)", async () => {
+  test("write SKILL.md AFTER the first dispatch → /reload-skills shows it on the next dispatch", async () => {
     // Pre-write one skill.
     await writeSkill(userDir, "before-restart", "Existed before REPL start.")
     const skillsCb = realSkillsCallback(userDir)
 
-    // Drive REPL: /reload-skills (shows 1) → (write new skill on disk) →
-    // /reload-skills (now shows 2 user skills). Each /reload-skills call is
-    // an independent disk read, so the second invocation MUST see the new file.
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
-    }
-    const rl = makeRl(["/reload-skills", "/exit"])
-    const abort = new AbortController()
-    const { captured: first } = await captureStdout(() =>
-      runReplLoop(rl as never, abort.signal, turn, { skills: skillsCb }),
+    // Each /reload-skills dispatch is an independent disk read, so the second
+    // invocation MUST see the new file.
+    const { result: firstHandled, captured: first } = await captureStdout(() =>
+      dispatchReplSlash("/reload-skills", { skills: skillsCb }),
     )
+    expect(firstHandled).toBe(true)
     expect(first).toContain("before-restart")
     expect(first).not.toContain("after-restart")
 
     // Now write a NEW skill on disk and call /reload-skills again.
     await writeSkill(userDir, "after-restart", "Appeared mid-session.")
-    const rl2 = makeRl(["/reload-skills", "/exit"])
-    const abort2 = new AbortController()
-    const { captured: second } = await captureStdout(() =>
-      runReplLoop(rl2 as never, abort2.signal, turn, { skills: skillsCb }),
+    const { result: secondHandled, captured: second } = await captureStdout(() =>
+      dispatchReplSlash("/reload-skills", { skills: skillsCb }),
     )
+    expect(secondHandled).toBe(true)
     expect(second).toContain("before-restart")
     expect(second).toContain("after-restart")
-    // turn() must never have been called — both inputs were slash commands.
-    expect(turnCalls).toHaveLength(0)
   })
 
   test("name collision (user shadows system) ⇒ system wins through the REAL discoverSkills flow", async () => {
     await writeSkill(userDir, "progress-audit", "USER_SHADOW_SHOULD_LOSE")
     const skillsCb = realSkillsCallback(userDir)
-    const rl = makeRl(["/skills", "/exit"])
-    const abort = new AbortController()
-    const { captured } = await captureStdout(() =>
-      runReplLoop(rl as never, abort.signal, async () => undefined, { skills: skillsCb }),
+    const { result: handled, captured } = await captureStdout(() =>
+      dispatchReplSlash("/skills", { skills: skillsCb }),
     )
+    expect(handled).toBe(true)
     expect(captured).toContain("progress-audit")
     expect(captured).not.toContain("USER_SHADOW_SHOULD_LOSE")
     // The actual system description starts with "Audit work-in-progress" —
@@ -312,34 +322,29 @@ describe("REPL hot-reload (in-process, real disk): /reload-skills picks up new S
 })
 
 describe("REPL e2e: /skills NEVER reaches the model + path-like tokens DO", () => {
-  test("/skills with a REAL discover callback short-circuits before turn()", async () => {
+  test("/skills with a REAL discover callback is consumed and the next prompt still surfaces", async () => {
     await writeSkill(userDir, "real-skill", "discovered from disk.")
     const skillsCb = realSkillsCallback(userDir)
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
-    }
-    const rl = makeRl(["/skills", "real prompt", "/exit"])
-    const abort = new AbortController()
-    const { captured } = await captureStdout(() =>
-      runReplLoop(rl as never, abort.signal, turn, { skills: skillsCb }),
+    const { result, captured } = await captureStdout(() =>
+      runPromptSequence(["/skills", "real prompt", "/exit"], (input) =>
+        dispatchReplSlash(input, { skills: skillsCb }),
+      ),
     )
-    // /skills produced the listing (proof callback ran end-to-end)
     expect(captured).toContain("real-skill")
-    // turn() received ONLY the prompt, not the slash
-    expect(turnCalls).toEqual(["real prompt"])
+    expect(result).toBe("real prompt")
   })
 
-  test("path-like /tmp/foo falls through to turn() (no slash hijack of legacy resume args)", async () => {
-    const skillsCb = realSkillsCallback(userDir)
-    const turnCalls: string[] = []
-    const turn = async (t: string): Promise<void> => {
-      turnCalls.push(t)
+  test("path-like /tmp/foo falls through to the model prompt path", async () => {
+    let skillsCalls = 0
+    const skillsCb = async (): Promise<SkillRow[]> => {
+      skillsCalls++
+      return realSkillsCallback(userDir)()
     }
-    const rl = makeRl(["/tmp/some/path", "/exit"])
-    const abort = new AbortController()
-    await runReplLoop(rl as never, abort.signal, turn, { skills: skillsCb })
-    expect(turnCalls).toEqual(["/tmp/some/path"])
+    const result = await runPromptSequence(["/tmp/some/path", "/exit"], (input) =>
+      dispatchReplSlash(input, { skills: skillsCb }),
+    )
+    expect(result).toBe("/tmp/some/path")
+    expect(skillsCalls).toBe(0)
   })
 })
 

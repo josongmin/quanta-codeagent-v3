@@ -12,7 +12,12 @@ import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
-import { buildSummarizerLlm, type SessionDeps, type Tooling } from "../internal"
+import {
+  buildShellSnapshotConfig,
+  buildSummarizerLlm,
+  type SessionDeps,
+  type Tooling,
+} from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RejectCounter } from "../reject-counter"
@@ -205,6 +210,17 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
       ? { followUpQueue: boot.lifecycleFollowUpQueue }
       : {}),
     ...(boot.planStore !== undefined ? { planStore: boot.planStore } : {}),
+    // ADR-0237 — per-turn shell-snapshot composition root opt-in. Returns
+    // `undefined` when `QUANTA_SHELL_SNAPSHOT` is unset (and `--shell-snapshot`
+    // is absent), so the conditional spread keeps the assembled `AgentConfig`
+    // byte-identical to the legacy default-OFF shape. When enabled, the helper
+    // builds a Bun-spawner backed `ShellSnapshotPort` and forwards the 5-knob
+    // block (shell / captureAtTurnStart / cleanupOlderThanMs / maxSizeBytes /
+    // shellEnv) — see `internal.ts#buildShellSnapshotConfig` for the env map.
+    ...((): { shellSnapshot?: SessionDeps["shellSnapshot"] } => {
+      const cfg = buildShellSnapshotConfig()
+      return cfg !== undefined ? { shellSnapshot: cfg } : {}
+    })(),
   }
 
   const pills = deps.installPills({

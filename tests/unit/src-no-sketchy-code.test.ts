@@ -286,8 +286,6 @@ const RULES: readonly Rule[] = [
         "BURN-DOWN: SQLite persisted-row timestamp; replay-stable via the store",
       "agent/repro-test/execute.ts":
         "BURN-DOWN: crypto fallback when randomUUID unavailable — last-resort token, not model-facing",
-      "agent/streaming-cancellation/default.ts":
-        "BURN-DOWN: abortedAt telemetry stamp — instrumentation, not model-facing",
       "agent/subagent-persistence-store/jsonl-store.ts":
         "BURN-DOWN: JSONL persisted-row cutoff for log GC — replay-stable",
     },

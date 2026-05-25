@@ -106,6 +106,9 @@ const buildTestPort = (
       pruneArg.ms = ms
       return 0
     },
+    async pruneToSizeBudget(_maxBytes) {
+      return 0
+    },
   }
   return {
     port,

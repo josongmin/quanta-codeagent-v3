@@ -15,3 +15,9 @@
 export { CodexSpecRouter, codexSpecRoute, codexSpecRouterEmittedActions } from "./codex-spec-router"
 export type { RecoveryAction, RecoveryRouter } from "./port"
 export { createDefaultRecoveryRouter } from "./recovery-router"
+// ADR-0237 — layer-owned arm `tooManyFailedAttempts` (default-OFF decorator).
+export type { FailureCounterHandle, LLMRetryKnobs } from "./too-many-failed-attempts"
+export {
+  DEFAULT_MAX_CONSECUTIVE_FAILURES,
+  withFailureCounter,
+} from "./too-many-failed-attempts"

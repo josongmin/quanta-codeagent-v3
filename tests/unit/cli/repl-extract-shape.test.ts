@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 import * as repl from "../../../src/apps/cli/repl"
 import * as sessionIo from "../../../src/apps/cli/session-io"
@@ -8,10 +8,10 @@ import * as sessionIo from "../../../src/apps/cli/session-io"
 /**
  * Phase-3 split shape test (RFC may-22-unified-agent-runtime §3).
  *
- * Asserts the surface contract of the structural refactor: the REPL loop +
- * main-orchestration body now live in `apps/cli/repl.ts`, the session
- * cwd-switch + per-turn save plumbing in `apps/cli/session-io.ts`, and
- * `apps/cli/index.ts` delegates to them instead of owning the loop inline.
+ * Asserts the surface contract of the structural refactor: the REPL
+ * orchestration body now lives in `apps/cli/repl.ts`, the session cwd-switch
+ * + per-turn save plumbing in `apps/cli/session-io.ts`, and `apps/cli/index.ts`
+ * delegates to them instead of owning the loop inline.
  *
  * Pure shape checks — no agent / LLM wiring is exercised here. The behavior
  * contract is covered by the existing CLI integration tests
@@ -25,8 +25,8 @@ describe("apps/cli/repl + session-io extract shape", () => {
     expect(typeof repl.runRepl).toBe("function")
   })
 
-  test("repl.ts exports the REPL loop, session subcommand and slash dispatchers", () => {
-    expect(typeof repl.runReplLoop).toBe("function")
+  test("repl.ts exports the slash dispatcher and top-level entrypoints", () => {
+    expect(typeof repl.dispatchReplSlash).toBe("function")
     expect(typeof repl.runSessionMain).toBe("function")
     expect(typeof repl.runSlashMain).toBe("function")
     expect(typeof repl.topLevelUsage).toBe("function")

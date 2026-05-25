@@ -4,7 +4,7 @@ import type { PlanStore } from "@/agent/plan/state"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { buildShellOtelObserver, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import { composeShellObservers } from "@/tool"
@@ -32,6 +32,38 @@ import { switchToSessionCwd } from "../session-io"
 import { buildShellStreamPainter } from "../shell-stream-painter"
 import { buildMcpSurfaceInfo } from "./mcp-surface-wire"
 import type { SessionRuntimeConfig } from "./session-runtime-config"
+
+export type SessionBootstrapFailureKind =
+  | "llm_build_failed"
+  | "image_load_failed"
+  | "resume_conflict"
+  | "resume_missing_id"
+
+export class SessionBootstrapError extends Error {
+  readonly kind: SessionBootstrapFailureKind
+  readonly exitCode = 1
+
+  override readonly cause: unknown
+
+  constructor(kind: SessionBootstrapFailureKind, message: string, cause?: unknown) {
+    super(message)
+    this.name = "SessionBootstrapError"
+    this.kind = kind
+    this.cause = cause
+    Object.setPrototypeOf(this, new.target.prototype)
+  }
+}
+
+export const isSessionBootstrapError = (value: unknown): value is SessionBootstrapError =>
+  value instanceof SessionBootstrapError
+
+const failSessionBootstrap = (
+  kind: SessionBootstrapFailureKind,
+  message: string,
+  cause?: unknown,
+): never => {
+  throw new SessionBootstrapError(kind, message, cause)
+}
 
 export interface SessionBootstrapDeps {
   readonly buildLifecycleBundle: () => {
@@ -120,24 +152,27 @@ const buildLlmStack = (
   signal: AbortSignal,
   slog: StructuredLogger,
 ): LLMPort => {
-  let llm: LLMPort
   try {
-    llm = buildLLM(provider, model)
+    const llm = buildLLM(provider, model)
+    const retryingLLM = new RetryingLLM({ inner: llm, signal })
+    return composeLLM(retryingLLM, provider, signal, mode, permission, slog)
   } catch (e) {
-    logger.error((e as Error).message)
-    process.exit(1)
+    return failSessionBootstrap("llm_build_failed", errMessage(e), e)
   }
-  const retryingLLM = new RetryingLLM({ inner: llm, signal })
-  return composeLLM(retryingLLM, provider, signal, mode, permission, slog)
 }
 
 const loadSeedImages = (config: SessionRuntimeConfig): ImageBlock[] => {
   try {
     return config.pendingImagePaths.map(loadImageBlock)
   } catch (e) {
-    logger.error((e as Error).message)
-    process.exit(1)
+    return failSessionBootstrap("image_load_failed", errMessage(e), e)
   }
+}
+
+const stopMcpClients = async (
+  clients: Awaited<ReturnType<typeof loadFeatures>>["mcpClients"],
+): Promise<void> => {
+  for (const client of clients) await client.stop().catch(() => undefined)
 }
 
 const composeShellEvent = (
@@ -171,117 +206,127 @@ export const bootstrapSession = async (
   )
 
   const features = await loadFeatures(slog)
-  const {
-    pills: lifecyclePills,
-    taskRegistry: lifecycleTaskRegistry,
-    followUpQueue: lifecycleFollowUpQueue,
-  } = deps.buildLifecycleBundle()
+  try {
+    const {
+      pills: lifecyclePills,
+      taskRegistry: lifecycleTaskRegistry,
+      followUpQueue: lifecycleFollowUpQueue,
+    } = deps.buildLifecycleBundle()
 
-  const tooling = buildTooling(
-    features.mcpTools,
-    features.lspTools,
-    features.lspNavTools,
-    features.gitToolList,
-    slog,
-    lifecycleTaskRegistry,
-  )
+    const tooling = buildTooling(
+      features.mcpTools,
+      features.lspTools,
+      features.lspNavTools,
+      features.gitToolList,
+      slog,
+      lifecycleTaskRegistry,
+    )
 
-  const mcpSurface = buildMcpSurfaceInfo({
-    configs: features.mcpConfigs,
-    bridgedTools: features.mcpTools,
-    configPath: runtime.mcpConfigPath,
-  })
-
-  if (features.mcpClients.length > 0) {
-    lifecyclePills.update({
-      mcp: { servers: [...deps.deriveMcpPillServers(features.mcpTools)] },
+    const mcpSurface = buildMcpSurfaceInfo({
+      configs: features.mcpConfigs,
+      bridgedTools: features.mcpTools,
+      configPath: runtime.mcpConfigPath,
     })
-  }
 
-  const { stream, run } = buildStreaming(runtime.observeDir, slog)
-  const pendingImages = loadSeedImages(runtime)
+    if (features.mcpClients.length > 0) {
+      lifecyclePills.update({
+        mcp: { servers: [...deps.deriveMcpPillServers(features.mcpTools)] },
+      })
+    }
 
-  let cwd = runtime.cwd
-  const inIdModeAtStart =
-    runtime.newSession || (features.resume !== undefined && !isPathLikeToken(features.resume))
-  if (!inIdModeAtStart) {
-    logger.info(
-      `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd})`,
+    const { stream, run } = buildStreaming(runtime.observeDir, slog)
+    const pendingImages = loadSeedImages(runtime)
+
+    let cwd = runtime.cwd
+    const inIdModeAtStart =
+      runtime.newSession || (features.resume !== undefined && !isPathLikeToken(features.resume))
+    if (!inIdModeAtStart) {
+      logger.info(
+        `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd})`,
+      )
+    }
+    const resolved = await resolveResume({
+      resume: features.resume,
+      newSession: runtime.newSession,
+      title: runtime.title,
+      cwd,
+      initialSessionId: tooling.sessionId,
+      slog,
+      onSessionMinted: (id) => logger.info(`session: ${id}`),
+    })
+    if (resolved.conflictError !== undefined) {
+      failSessionBootstrap("resume_conflict", resolved.conflictError)
+    }
+    if (resolved.missingIdError !== undefined) {
+      failSessionBootstrap(
+        "resume_missing_id",
+        `--resume: session id not found: ${resolved.missingIdError}`,
+      )
+    }
+    const { idMeta } = resolved
+    const history: Message[] = resolved.history
+    const sessionId = resolved.sessionId
+    if (idMeta) cwd = switchToSessionCwd(cwd, idMeta.cwd, slog)
+    if (inIdModeAtStart && idMeta) {
+      logger.info(
+        `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd}, session=${idMeta.id})`,
+      )
+    }
+
+    const identity = pickIdentity()
+    const system = buildSystemPrompt(cwd, {
+      persona: pickPersona(),
+      ...(identity !== undefined ? { identity } : {}),
+    })
+    const onShellEvent = composeShellEvent(features.metrics, runtime)
+    const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
+    const costPanel = deps.buildCostPanelOrUndefined(
+      runtime.env,
+      runtime.stdoutIsTTY,
+      runtime.model,
     )
-  }
-  const resolved = await resolveResume({
-    resume: features.resume,
-    newSession: runtime.newSession,
-    title: runtime.title,
-    cwd,
-    initialSessionId: tooling.sessionId,
-    slog,
-    onSessionMinted: (id) => logger.info(`session: ${id}`),
-  })
-  if (resolved.conflictError !== undefined) {
-    logger.error(resolved.conflictError)
-    process.exit(1)
-  }
-  if (resolved.missingIdError !== undefined) {
-    logger.error(`--resume: session id not found: ${resolved.missingIdError}`)
-    process.exit(1)
-  }
-  const { idMeta } = resolved
-  const history: Message[] = resolved.history
-  const sessionId = resolved.sessionId
-  if (idMeta) cwd = switchToSessionCwd(cwd, idMeta.cwd, slog)
-  if (inIdModeAtStart && idMeta) {
-    logger.info(
-      `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd}, session=${idMeta.id})`,
-    )
-  }
+    const branchProgress = deps.buildBranchProgressOrUndefined(runtime.env, runtime.stdoutIsTTY)
+    const planStore = deps.buildPlanStoreOrUndefined(runtime.env)
+    const shutdownMcp = async (): Promise<void> => {
+      await stopMcpClients(features.mcpClients)
+    }
 
-  const identity = pickIdentity()
-  const system = buildSystemPrompt(cwd, {
-    persona: pickPersona(),
-    ...(identity !== undefined ? { identity } : {}),
-  })
-  const onShellEvent = composeShellEvent(features.metrics, runtime)
-  const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
-  const costPanel = deps.buildCostPanelOrUndefined(runtime.env, runtime.stdoutIsTTY, runtime.model)
-  const branchProgress = deps.buildBranchProgressOrUndefined(runtime.env, runtime.stdoutIsTTY)
-  const planStore = deps.buildPlanStoreOrUndefined(runtime.env)
-  const shutdownMcp = async (): Promise<void> => {
-    for (const c of features.mcpClients) await c.stop().catch(() => undefined)
-  }
-
-  return {
-    runtime,
-    provider: runtime.provider,
-    model: runtime.model,
-    mode: runtime.mode,
-    maxTurns: runtime.maxTurns,
-    cwd,
-    slog,
-    permission,
-    idleMonitor,
-    rejectCounter,
-    llm: finalLLM,
-    features,
-    tooling,
-    mcpSurface,
-    lifecyclePills,
-    lifecycleTaskRegistry,
-    lifecycleFollowUpQueue,
-    sessionId,
-    history,
-    pendingImages,
-    idMeta,
-    onShellEvent,
-    workMetricsSink,
-    stream,
-    run,
-    costPanel,
-    branchProgress,
-    planStore,
-    abort,
-    argPrompt: runtime.argPrompt,
-    system,
-    shutdownMcp,
+    return {
+      runtime,
+      provider: runtime.provider,
+      model: runtime.model,
+      mode: runtime.mode,
+      maxTurns: runtime.maxTurns,
+      cwd,
+      slog,
+      permission,
+      idleMonitor,
+      rejectCounter,
+      llm: finalLLM,
+      features,
+      tooling,
+      mcpSurface,
+      lifecyclePills,
+      lifecycleTaskRegistry,
+      lifecycleFollowUpQueue,
+      sessionId,
+      history,
+      pendingImages,
+      idMeta,
+      onShellEvent,
+      workMetricsSink,
+      stream,
+      run,
+      costPanel,
+      branchProgress,
+      planStore,
+      abort,
+      argPrompt: runtime.argPrompt,
+      system,
+      shutdownMcp,
+    }
+  } catch (error) {
+    await stopMcpClients(features.mcpClients)
+    throw error
   }
 }

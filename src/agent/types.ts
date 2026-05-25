@@ -1127,27 +1127,109 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * root wire). The composition root threads the variant for the active
    * mode through `buildSystemPrompt({ identity: variant.identity })` BEFORE
    * constructing the session. Loop never re-reads this slot mid-session
-   * (the system prompt is cached). Absent ⇒ legacy single-identity prompt.
+   * for the cached system prompt.
+   *
+   * ADR-0239 — when `perTurnReminderEnabled` is `true`, the loop ALSO
+   * splices the variant's identity lines into the per-turn working memory
+   * as a trailing `<system-reminder>` user message — Codex `ARCHITECT_NOTICE`
+   * / `EDITOR_NOTICE` pattern. The reminder is independent from (and rides
+   * AFTER) the existing prompt.ts `modeNotice` rendering: that one fires
+   * unconditionally on architect/editor/plan/review/audit modes (and ships
+   * the FULL multi-line notice from prompt.ts); this slice's per-turn
+   * reminder rides the variant's IDENTITY lines (the one-sentence
+   * `DEFAULT_MODE_VARIANTS[mode]`) so a host that overrode the registry's
+   * identity gets THAT line splicea every turn, keeping the variant and the
+   * reminder consistent. Default-OFF when explicitly `false`;
+   * mode-conditional auto-ON when undefined (architect | editor only — the
+   * two modes that benefit most from the per-turn nudge; legacy plan /
+   * review / audit already get the fuller modeNotice and a 2nd reminder
+   * would dilute it).
    */
   identityModeVariant?: {
     readonly registry: import("./system-prompt").SystemPromptVariantRegistry
+    /** ADR-0239 — per-turn reminder splice opt-in. `true` ⇒ splice every
+     *  turn for the active mode (regardless of mode). `false` ⇒ never
+     *  splice. `undefined` ⇒ mode-conditional auto-ON for
+     *  `architect | editor`; off for every other mode (matches the
+     *  prompt.ts modeNotice cadence — architect/editor get the per-turn
+     *  identity reminder; the other modes already ship a full modeNotice
+     *  every turn). */
+    readonly perTurnReminderEnabled?: boolean
   }
   /**
-   * ADR-0236 / ADR-0203 — inline-trigger watcher (composition-root wire).
+   * ADR-0236 / ADR-0203 / ADR-0240 — inline-trigger watcher (composition-
+   * root wire).
+   *
    * Caller-side: the composition root may bind the watcher at session start
-   * (with a callback that enqueues a `/play <playbook>` follow-up via
-   * {@link followUpQueue}) and stop it at session end. Loop does not
-   * consume directly. Absent ⇒ no watcher, no fs.watch handle.
+   * via {@link import("@/skill/playbook").startPlaybookAutoDispatch} and
+   * stop it at session end (`.stop()`). Loop does NOT consume directly.
+   *
+   * Pre-ADR-0240 contract (just `{ watcher }`): the composition root owned
+   * registry iteration + sink wiring. Kept for byte-identical back-compat.
+   *
+   * ADR-0240 additions (`enabled` / `watchGlobs` / `debounceMs` / `registry`
+   * / `planQueueSink`): when the host wires the new fields, the orchestrator
+   * does the iteration + dispatch. Default-OFF: absent or `enabled !== true`
+   * ⇒ no watcher started.
+   *
+   * The two paths are compatible (the host MAY supply just `watcher` and
+   * call the orchestrator itself; or supply the full block and let
+   * `startPlaybookAutoDispatch` wire everything).
    */
-  playbookTrigger?: { readonly watcher: import("@/skill/playbook").InlineTriggerWatcherPort }
+  playbookTrigger?: {
+    readonly watcher: import("@/skill/playbook").InlineTriggerWatcherPort
+    /** ADR-0240 master switch — default `false` (opt-in). When `true`, the
+     *  host's `startPlaybookAutoDispatch` call wires the registry + sink. */
+    readonly enabled?: boolean
+    /** ADR-0240 — registered playbooks the orchestrator iterates. Each
+     *  must carry a non-empty `trigger` to actually wire. */
+    readonly registry?: import("@/skill/playbook").PlaybookRegistry
+    /** ADR-0240 — sink the dispatcher hands the `/play <name>` follow-up
+     *  to. Absent ⇒ fires are detected but NOT enqueued. */
+    readonly planQueueSink?: import("@/skill/playbook").PlaybookPlanQueueSink
+    /** ADR-0240 — per-watcher debounce window (ms). Default 200ms when
+     *  omitted (matches the watcher's intrinsic default). */
+    readonly debounceMs?: number
+    /** ADR-0240 — restricting glob list applied IN ADDITION to each
+     *  registration's `trigger.watchGlob`. When set, only paths matching
+     *  ANY of these globs AND the per-playbook glob fire. Default
+     *  `["**/*"]` (no extra restriction). */
+    readonly watchGlobs?: readonly string[]
+  }
   /**
    * ADR-0236 / ADR-0215 — RRULE automation engine (composition-root wire).
    * Caller-side: a host's background tick may drain due automations via
    * `tickScheduler({ engine, now, handler })`. Loop does not consume
    * directly. Absent ⇒ scheduler runs without automation drain.
+   *
+   * ADR-0239 — when `handler` is also wired AND `tickIntervalMs > 0`, the
+   * loop starts a `setInterval`-backed background drain at session-start and
+   * stops it in `finish`. Each tick consults `engine.next(now)` and fires
+   * the soonest-due automation via `tickScheduler`. Default-OFF byte-
+   * identical: absent `handler` OR `tickIntervalMs` ⇒ no timer is armed
+   * (RFC §1.2). `handler` MAY be sync or async; throws are absorbed by
+   * `tickScheduler` and surface as `kind: "errored"` outcomes via the
+   * optional `onTick` observer.
    */
   automationEngine?: {
     readonly engine: import("@/scheduler/automation-engine").AutomationEnginePort
+    /** ADR-0239 — host-supplied fire callback. When set with a positive
+     *  `tickIntervalMs`, the loop arms a setInterval that calls
+     *  `tickScheduler({ engine, now: Date.now(), handler })` every interval.
+     *  Absent ⇒ no timer (the slot stays helper-only, matching the original
+     *  ADR-0215 default-OFF posture). */
+    readonly handler?: import("@/scheduler/automation-engine").AutomationHandler
+    /** ADR-0239 — tick cadence in ms. Absent / 0 / negative / NaN ⇒ no
+     *  timer (the loop short-circuits at the optional-chain). The loop has
+     *  NO baked-in default; callers must opt in explicitly. */
+    readonly tickIntervalMs?: number
+    /** ADR-0239 — optional observer fired AFTER each `tickScheduler` returns
+     *  (idle / fired / errored / engine-error). Tests and ops surfaces wire
+     *  this to count ticks / forward to OTel / surface errored automations
+     *  to an inbox UI. Throws are absorbed (the timer keeps ticking). */
+    readonly onTick?: (outcome: import("@/scheduler/automation-engine").TickOutcome) => void
+    /** ADR-0239 — injected clock for tests + replay. Default `Date.now`. */
+    readonly now?: () => number
   }
   /**
    * ADR-0234 — git-directive emit wire (turn-scoped collector pattern).

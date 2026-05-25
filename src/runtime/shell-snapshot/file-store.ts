@@ -110,3 +110,71 @@ export const prune = async (olderThanMs: number, home: string = homedir()): Prom
   }
   return removed
 }
+
+/** ADR-0237 — drop snapshot files until the aggregate byte size of the
+ *  remaining `.sh` files is at or below `maxBytes`. Eviction order is
+ *  OLDEST-first by mtime (so a freshly-captured per-turn snapshot survives
+ *  even when the directory is over-cap on entry). Returns the count removed.
+ *
+ *  Defense-in-depth on top of the time-based `prune()`:
+ *    - `prune(olderThanMs)` only removes by AGE (a single very long session
+ *      can accumulate 100s of fresh-but-large snapshots and overflow disk).
+ *    - `pruneToSizeBudget(maxBytes)` caps the total byte budget and is
+ *      meant to be called AFTER `prune()` so the cheap age-based sweep
+ *      runs first.
+ *
+ *  Semantics:
+ *    - missing directory → 0 removals (idempotent, mirrors `prune()`).
+ *    - `maxBytes <= 0` is treated as 0 (caller's intent: empty the dir).
+ *      The function still skips non-`.sh` files (foreign files left alone).
+ *    - `under-budget` (`sum <= maxBytes`) → 0 removals, no-op fast path.
+ *    - on `over-budget`, files are sorted by mtime ASC and unlinked one by
+ *      one until the running sum is at or below the budget. The MOST
+ *      RECENT file is always kept even if it singly exceeds the budget —
+ *      eviction stops once only one file remains (a single oversized
+ *      capture is an operator-visible failure, not a data-loss source).
+ *    - per-file unlink failures are tolerated (best-effort, like `prune()`)
+ *      and the file's bytes remain counted against the running sum, so a
+ *      protected file does not cause infinite eviction. */
+export const pruneToSizeBudget = async (
+  maxBytes: number,
+  home: string = homedir(),
+): Promise<number> => {
+  const dir = snapshotDir(home)
+  if (!existsSync(dir)) return 0
+  const budget = maxBytes > 0 ? maxBytes : 0
+  // Collect (name, mtimeMs, size) tuples for every .sh file. A vanished
+  // file between readdir and stat is silently dropped (race-safe).
+  const entries: Array<{ path: string; mtimeMs: number; size: number }> = []
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".sh")) continue
+    const path = join(dir, name)
+    try {
+      const st = statSync(path)
+      entries.push({ path, mtimeMs: st.mtimeMs, size: st.size })
+    } catch {
+      // file vanished concurrently — ignore
+    }
+  }
+  let total = entries.reduce((acc, e) => acc + e.size, 0)
+  if (total <= budget) return 0
+  // Oldest first: a fresh per-turn capture (highest mtime) stays.
+  entries.sort((a, b) => a.mtimeMs - b.mtimeMs)
+  let removed = 0
+  for (const entry of entries) {
+    if (total <= budget) break
+    // Never evict the last remaining file — see semantic note above.
+    if (entries.length - removed <= 1) break
+    try {
+      unlinkSync(entry.path)
+      removed++
+      total -= entry.size
+    } catch {
+      // best-effort: a file we cannot unlink (perm change, vanished) is
+      // still counted against `total` — we move on to the next-oldest so
+      // the loop is bounded.
+      total -= entry.size
+    }
+  }
+  return removed
+}

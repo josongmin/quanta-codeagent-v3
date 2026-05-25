@@ -47,7 +47,7 @@ evidence:
   adrs:
     - docs/decisions/0216-stage1-store-port-agent-side.md
     - docs/decisions/0068-codex-2-phase-memory-consolidator.md
-    - docs/decisions/0131-memory-outcome-4-state-enum.md
+    - docs/decisions/0131-memory-outcome-and-preference-grammar.md
   tests:
     unit:
       - tests/unit/stage1-store-hellgate.test.ts

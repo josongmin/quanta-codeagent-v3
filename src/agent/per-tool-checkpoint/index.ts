@@ -46,4 +46,13 @@ export type {
   ThreeWayRestorePort,
   ThreeWayRestorePorts,
 } from "./port"
+// ADR-0237 — layer-owned arm `thread_rollback_failed` (default-OFF bridge).
+export type {
+  RollbackLlmErrorKnobs,
+  RollbackOutcomeWithError,
+} from "./rollback-llm-error-bridge"
+export {
+  rollbackOutcomeToLlmError,
+  withRollbackLlmErrorEmit,
+} from "./rollback-llm-error-bridge"
 export { defaultThreeWayRestore } from "./three-way-restore"

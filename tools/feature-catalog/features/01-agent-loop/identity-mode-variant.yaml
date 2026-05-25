@@ -21,7 +21,6 @@ purpose: |
 evidence:
   code:
     - src/agent/identity/port.ts
-    - src/agent/identity/types.ts
     - src/agent/identity/default-identities.ts
     - src/agent/identity/lookup.ts
     - src/agent/identity/index.ts

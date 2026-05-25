@@ -3,8 +3,8 @@
  *  Design contract:
  *   - **Slash inventory is DYNAMIC**: iterates the live `BUILTINS` array so a
  *     newly-appended command shows up here without editing this file. Virtual
- *     `/exit`+`/quit` (short-circuited by `runReplLoop` BEFORE BUILTINS
- *     dispatch) and `/image` (intercepted by `prompt-source.ts` because the
+ *     `/exit`+`/quit` (short-circuited by `composePromptPipeline` BEFORE slash
+ *     dispatch) and `/image` (intercepted by `dispatchReplSlash` because the
  *     queue is REPL-scoped surface state) are appended as a fixed tail.
  *   - **Slash inventory is GROUPED**: `SlashCommand.category` literal union
  *     drives section headers. Absent ⇒ "other" bucket. Within each group
@@ -38,13 +38,13 @@ import { byteCompare } from "@/shared/byte-compare"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
-/** Virtual REPL commands (short-circuited by `runReplLoop` BEFORE the
+/** Virtual REPL commands (short-circuited by `composePromptPipeline` BEFORE the
  *  BUILTINS dispatch — not `SlashCommand` entries, but a user pressing
  *  `/help` expects them in the listing). Kept in sync by hand with
  *  slash-commands.ts (single source of truth would be cross-slice churn).
- *  `/image` is also virtual — it lives in `prompt-source.ts` because its
+ *  `/image` is also virtual — it lives in `dispatchReplSlash` because its
  *  queue is REPL-scoped (the surface-agnostic BUILTINS table has no session
- *  context); see `repl/prompt-source.ts` for the interception site. */
+ *  context); see `repl.ts#dispatchReplSlash` for the interception site. */
 const VIRTUAL_COMMANDS: readonly { readonly name: string; readonly describe: string }[] = [
   { name: "/exit, /quit", describe: "Leave REPL" },
   {

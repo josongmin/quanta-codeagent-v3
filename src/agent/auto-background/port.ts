@@ -134,4 +134,25 @@ export interface AutoBackgroundConfig {
    *  re-constructing the detector (matches `dedupGate` / `capEnforcer`
    *  patterns — config is per-construction, not per-call). */
   readonly thresholdMs?: number
+  /** ADR-0239 — host-side accept callback. When set, the proposer's
+   *  {@link ProposeHandlerPort.accept} method invokes this with the
+   *  observed elapsedMs (computed from the detector's tracking entry at
+   *  the moment of accept). A composition root wires this to
+   *  `BackgroundSubagentScheduler.fork(...)` so a one-keystroke accept
+   *  flips the stuck tool's lineage into the detached path. Default-OFF
+   *  byte-identical: absent ⇒ accept is bookkeeping-only (the once-per-id
+   *  state still flips; nothing else happens). User-supplied callback
+   *  WINS over any composition-root default — a host that wires its own
+   *  accept handler suppresses the auto-fork. */
+  readonly onAccept?: AutoBackgroundAcceptCallback
 }
+
+/** Signature for {@link AutoBackgroundConfig.onAccept}. NO-THROW expected; a
+ *  callback that throws is caught at the proposer boundary and surfaced as
+ *  a no-op (the once-per-id state still flips). `elapsedMs` is computed from
+ *  the detector at the moment of `accept()`; when the detector has no entry
+ *  for the id (already ended), the field is `0`. */
+export type AutoBackgroundAcceptCallback = (input: {
+  readonly toolCallId: string
+  readonly elapsedMs: number
+}) => void

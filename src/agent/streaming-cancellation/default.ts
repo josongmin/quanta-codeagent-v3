@@ -186,12 +186,20 @@ export const createCancellationController = (
  *  callsite. The `cause` is whatever the caller declares; default
  *  `"external"` because by construction we don't know more. Late events on
  *  the underlying signal still propagate. */
+export interface FromAbortSignalOpts {
+  /** Caller-injected clock. Defaults to `Date.now`. Slice invariant
+   *  (no domain Date.now): tests/replay-stable callers MUST inject. */
+  readonly now?: () => number
+}
+
 export const fromAbortSignal = (
   signal: AbortSignal,
   cause: CancellationCause = "external",
+  opts: FromAbortSignalOpts = {},
 ): CancellationSignal => {
+  const now = opts.now ?? Date.now
   let latchedCause: CancellationCause | null = signal.aborted ? cause : null
-  let abortedAt: number | null = signal.aborted ? Date.now() : null
+  let abortedAt: number | null = signal.aborted ? now() : null
   const listeners: Array<() => void> = []
 
   if (!signal.aborted) {
@@ -200,7 +208,7 @@ export const fromAbortSignal = (
       () => {
         if (latchedCause !== null) return
         latchedCause = cause
-        abortedAt = Date.now()
+        abortedAt = now()
         for (const l of listeners.slice()) {
           try {
             l()

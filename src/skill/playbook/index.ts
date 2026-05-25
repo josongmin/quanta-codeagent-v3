@@ -21,6 +21,17 @@
  */
 
 export {
+  type DispatchResult,
+  dispatchPlaybook,
+  type PlaybookAutoDispatchController,
+  type PlaybookAutoDispatchOptions,
+  type PlaybookFollowUpInput,
+  type PlaybookPlanQueueSink,
+  type PlaybookRegistration,
+  type PlaybookRegistry,
+  startPlaybookAutoDispatch,
+} from "./auto-dispatch"
+export {
   buildMacroRegistry,
   expandProcedure,
   expandStep,

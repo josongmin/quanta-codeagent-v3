@@ -1,22 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { setColorPolicy } from "@/ui/ui-helpers"
-import { runReplLoop } from "../../../../src/apps/cli/repl"
-
-const makeRl = (
-  lines: string[],
-): { rl: { question: (q: string) => Promise<string> }; trace: string[] } => {
-  const trace: string[] = []
-  let i = 0
-  const rl = {
-    question: async (_q: string): Promise<string> => {
-      const line = lines[i++]
-      if (line === undefined) throw new Error("rl: out of inputs")
-      trace.push(line)
-      return line
-    },
-  }
-  return { rl, trace }
-}
+import { dispatchReplSlash } from "../../../../src/apps/cli/repl"
 
 let originalStdoutWrite: typeof process.stdout.write
 
@@ -31,57 +15,42 @@ afterEach(() => {
 })
 
 describe("REPL /mcp slash wiring", () => {
-  test("/mcp in REPL uses wired mcp surface and never reaches the model", async () => {
-    const turnCalls: string[] = []
-    const { rl } = makeRl(["/mcp", "/exit"])
-    const abort = new AbortController()
+  test("/mcp in REPL uses wired mcp surface and is consumed by the slash dispatcher", async () => {
     let captured = ""
     process.stdout.write = ((s: string | Uint8Array): boolean => {
       captured += typeof s === "string" ? s : new TextDecoder().decode(s)
       return true
     }) as typeof process.stdout.write
 
-    await runReplLoop(
-      rl as never,
-      abort.signal,
-      async (text) => {
-        turnCalls.push(text)
+    const handled = await dispatchReplSlash("/mcp", {
+      mcp: {
+        servers: [
+          {
+            name: "fs",
+            status: "connected",
+            toolCount: 1,
+            tools: [{ name: "read_file", description: "read file", required: [] }],
+          },
+        ],
+        now: () => 0,
       },
-      {
-        mcp: {
-          servers: [
-            {
-              name: "fs",
-              status: "connected",
-              toolCount: 1,
-              tools: [{ name: "read_file", description: "read file", required: [] }],
-            },
-          ],
-          now: () => 0,
-        },
-      },
-    )
+    })
 
+    expect(handled).toBe(true)
     expect(captured).toContain("MCP servers")
     expect(captured).toContain("fs")
-    expect(turnCalls).toHaveLength(0)
   })
 
   test("/mcp in REPL without wired mcp surface stays fail-closed", async () => {
-    const turnCalls: string[] = []
-    const { rl } = makeRl(["/mcp", "/exit"])
-    const abort = new AbortController()
     let captured = ""
     process.stdout.write = ((s: string | Uint8Array): boolean => {
       captured += typeof s === "string" ? s : new TextDecoder().decode(s)
       return true
     }) as typeof process.stdout.write
 
-    await runReplLoop(rl as never, abort.signal, async (text) => {
-      turnCalls.push(text)
-    })
+    const handled = await dispatchReplSlash("/mcp")
 
+    expect(handled).toBe(true)
     expect(captured).toContain("not wired in this surface")
-    expect(turnCalls).toHaveLength(0)
   })
 })

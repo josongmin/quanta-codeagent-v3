@@ -1,5 +1,12 @@
 export { compileBubblewrapArgs } from "./bubblewrap"
 export { defaultOsSandbox } from "./default"
+// ADR-0237 — layer-owned arm `sandbox_error` (default-OFF bridge).
+export type { SandboxLlmErrorKnobs, SandboxResultWithLlmError } from "./llm-error-bridge"
+export {
+  isSandboxDegradedFailure,
+  sandboxResultToLlmError,
+  withSandboxLlmErrorEmit,
+} from "./llm-error-bridge"
 export {
   isBubblewrapAvailable,
   isLandlockAvailable,

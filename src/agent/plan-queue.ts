@@ -57,6 +57,11 @@ export type FollowUpSource =
   | "voice_transcript"
   | "api_call"
   | "scheduled_reminder"
+  /** ADR-0240 — saved-file inline-trigger dispatch (Aider `AI!`-style).
+   *  A playbook frontmatter's `trigger: { comment-marker, watch-glob }`
+   *  detected a marker in a saved file; the watcher enqueued a `/play
+   *  <playbook>` follow-up so the next-turn boundary picks it up. */
+  | "inline_trigger"
 
 /** Why the current turn was paused when the follow-up arrived. Captured so
  *  the replayer can branch on staleness (e.g. drop follow-ups whose

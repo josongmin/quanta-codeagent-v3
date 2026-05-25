@@ -78,6 +78,14 @@ export interface SessionDeps {
   /** Host-owned operator-input surface. Present ⇒ `request_user_input` is
    *  registered and dispatch wires `ToolContext.requestUserInput`. */
   userInputPort?: AgentConfig["userInputPort"]
+  /** ADR-0237 — per-turn shell-snapshot config block. The CLI composition
+   *  root (`apps/cli/internal.ts`) builds this when `QUANTA_SHELL_SNAPSHOT=1`
+   *  or `--shell-snapshot` is set, injecting a Bun-spawner backed port plus
+   *  the 5-knob block (`shell` / `captureAtTurnStart` / `cleanupOlderThanMs`
+   *  / `maxSizeBytes` / `shellEnv`). Absent ⇒ field omitted from
+   *  AgentConfig entirely (byte-identical default-OFF: every `runShell`
+   *  spawn is the legacy `["bash","-lc",cmd]` argv). */
+  shellSnapshot?: AgentConfig["shellSnapshot"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -145,6 +153,7 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
   ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
   ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
+  ...(d.shellSnapshot !== undefined ? { shellSnapshot: d.shellSnapshot } : {}),
 })
 
 export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {

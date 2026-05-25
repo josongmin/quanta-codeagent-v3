@@ -9,11 +9,17 @@
 import { homedir } from "node:os"
 import type { Result } from "@/shared"
 import { captureBash } from "./bash-capture"
-import { prune as fsPrune } from "./file-store"
+import { prune as fsPrune, pruneToSizeBudget as fsPruneToSize } from "./file-store"
 import type { CaptureOptions, ShellSnapshotPort } from "./port"
 import type { RestoreDegradeReason, RestoreOutcome, SnapErr, SnapshotHandle } from "./types"
 import { captureZsh, type SnapshotSpawner } from "./zsh-capture"
 
+export {
+  createBunSpawner,
+  DEFAULT_BUN_SPAWNER_TIMEOUT_MS,
+  type BunSpawnerOptions,
+} from "./bun-spawner"
+export { pruneToSizeBudget } from "./file-store"
 export { headlessSpawner, headlessStubBody } from "./headless-stub"
 export type { CaptureOptions, ShellSnapshotPort } from "./port"
 export type {
@@ -84,5 +90,8 @@ export const createShellSnapshotPort = (
   },
   async prune(olderThanMs: number): Promise<number> {
     return fsPrune(olderThanMs, home)
+  },
+  async pruneToSizeBudget(maxBytes: number): Promise<number> {
+    return fsPruneToSize(maxBytes, home)
   },
 })
