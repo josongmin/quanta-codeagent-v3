@@ -54,6 +54,7 @@ import { queueCmd } from "./queue-cmd"
 import { replayCmd } from "./replay-cmd"
 import { retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
+import { rewindConvCmd } from "./rewind-conv-cmd"
 import { rewindToolCmd } from "./rewind-tool-cmd"
 import { rulesCmd } from "./rules-cmd"
 import { sideCmd } from "./side-cmd"
@@ -834,6 +835,12 @@ export const BUILTINS: readonly SlashCommand[] = [
   // prints "/replay: not wired in this surface" + exit 0 (parity with the
   // other surface-only commands).
   replayCmd,
+  // ADR-0292 — `/rewind-conv [<tag>|--list]` browses/restores per-turn
+  // conversation checkpoints recorded by the surface-side
+  // ConvCheckpointWire (sibling of ADR-0124 ConversationCheckpointStore).
+  // Default-OFF: when `ctx.convCheckpoint` is absent the slash prints
+  // "/rewind-conv: not wired in this surface" + exit 0.
+  rewindConvCmd,
 ] as const
 
 /** `/exit` and `/quit` are short-circuited by `composePromptPipeline` BEFORE the

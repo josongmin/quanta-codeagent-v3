@@ -129,6 +129,10 @@ describe("BUILTINS table", () => {
       // after `/why`. Slot pinning is unchanged for every entry above.
       "/inspect",
       "/replay",
+      // ADR-0292 — `/rewind-conv` per-turn conversation-checkpoint slash.
+      // Slot-pinned at the END (after `/replay`) so every prior anchor is
+      // unchanged. Default-OFF: `ctx.convCheckpoint` absent ⇒ "not wired".
+      "/rewind-conv",
     ])
   })
 })
