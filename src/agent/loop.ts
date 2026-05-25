@@ -18,6 +18,7 @@ import {
   type ConversationSummaryArchive,
   createArchive,
 } from "./conversation-summary-archive"
+import { emitBudgetExhaustedDecision } from "./decision-emit-phase3"
 import { effortToTokenBudget } from "./effort"
 import { buildSessionFeatures } from "./features"
 // ADR-0125 turn-diff loop wiring (default-OFF). Opt-in via
@@ -2289,6 +2290,11 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // check, byte-identical legacy).
     const ex = cfg.budgetMeter?.checkExhausted()
     if (ex?.exhausted) {
+      // ADR-0269 Phase 3 — surface the budget hard-deny on the debug-tracer
+      // side channel BEFORE finishing the run, so a tracer can pair the
+      // decision row with the final outcome row. Default-OFF: no
+      // decisionEmitter ⇒ zero allocation (helper short-circuits).
+      emitBudgetExhaustedDecision(cfg.decisionEmitter, ex, { turn })
       return finish("budget_exhausted", turn, completedCategory("max_turns"))
     }
     if (result.kind === "completed") return finish("completed", turn, completedCategory("normal"))

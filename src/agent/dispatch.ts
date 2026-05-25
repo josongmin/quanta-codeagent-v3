@@ -11,6 +11,7 @@ import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { composeToolResultContent } from "@/tool/image/compose"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { wireCheckpointedEffectChannel } from "./checkpoint-wiring"
+import { emitCapReminderDecision } from "./decision-emit-phase3"
 import { DedupGate } from "./dispatch-dedup"
 import { deny, resultBlock } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
@@ -275,6 +276,33 @@ export const dispatchTool = async (
   }
 }
 
+/**
+ * ADR-0269 Phase 3 — emit BOTH the legacy `tool_progress` reminder AND the
+ * sidechannel `kind:"cap"` decision row when the ADR-0062 cap-enforcer
+ * fires. Extracted to keep `dispatchToolInner`'s cognitive complexity below
+ * biome's cap with the added decision-emit branch. Default-OFF for the
+ * decision side: `config.decisionEmitter === undefined` ⇒ the helper inside
+ * `emitCapReminderDecision` short-circuits before any allocation.
+ */
+const handleCapReminder = (
+  config: AgentConfig,
+  effectiveCall: ToolUseBlock,
+  reminder: string,
+): void => {
+  config.stream.emit({
+    type: "tool_progress",
+    id: effectiveCall.id,
+    name: effectiveCall.name,
+    message: reminder,
+  })
+  emitCapReminderDecision(config.decisionEmitter, {
+    tool: effectiveCall.name,
+    toolCallId: effectiveCall.id,
+    reminder,
+    turn: config.run?.turn ?? 0,
+  })
+}
+
 /** ADR-0062 rule #3 — pure helper: prepend the cap-enforcement reminder to a
  *  DispatchResult so the model reads the phrasing in the tool_result content.
  *  Extracted to keep `dispatchToolInner`'s cognitive complexity below biome's
@@ -499,14 +527,7 @@ const dispatchToolInner = async (
   // zero allocation when absent. capEnforcer absent ⇒ `check` is never
   // called, byte-identical to the pre-enforcement path.
   const capReminder = config.capEnforcer?.check(effectiveCall.name, effectiveCall.input)
-  if (capReminder !== undefined) {
-    config.stream.emit({
-      type: "tool_progress",
-      id: effectiveCall.id,
-      name: effectiveCall.name,
-      message: capReminder,
-    })
-  }
+  if (capReminder !== undefined) handleCapReminder(config, effectiveCall, capReminder)
   // ADR-0223 — stuck-detector ticked execute(). Default-OFF byte-identical
   // when `config.autoBackground?.detector` is absent (optional chain short-
   // circuits before allocation; finally runs unconditionally so a throwing

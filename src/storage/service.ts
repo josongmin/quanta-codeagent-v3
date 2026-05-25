@@ -25,6 +25,87 @@ export class FsJailError extends QuantaError {
 const jailDisabled = (): boolean => runtimeConfig().fsJailDisabled
 
 /**
+ * ADR-0269 (Phase 3 of ADR-0239) — module-level optional decision sink.
+ *
+ * `enforceJail` is a free function called from dozens of tool catch sites
+ * via the `resolvePath`/`resolveJailed` chokepoint. Threading a per-call
+ * emitter parameter through every caller would ripple across the entire
+ * tool slice for a default-OFF developer-mode signal. Instead we expose a
+ * narrow setter the composition root wires ONCE (typically at `runAgent`
+ * entry) and clears at exit. Lifecycle invariants:
+ *   - Last-writer-wins: concurrent `runAgent` invocations in the same
+ *     process share the sink; events still carry their own categorical
+ *     `path` so a tracer can disambiguate. This is documented and
+ *     accepted — the channel is observational telemetry, not authority.
+ *   - The sink MUST be cleared on session end (see `loop-helpers#wire-up`).
+ *   - The sink is invoked inside try/catch — a throwing consumer cannot
+ *     poison the throw path (gate result stays stable).
+ *
+ * Default-OFF: no sink wired ⇒ zero allocation, zero behaviour change.
+ *
+ * Slice fence: `@/storage` MUST NOT depend on `@/stream`, so the sink shape
+ * is declared inline as a STRUCTURAL mirror of `@/stream`'s `DecisionEvent`
+ * (closed `kind`/`outcome` unions, same field names). The wiring layer
+ * (which lives in `@/agent`, where `@/stream` is a legal dependency) passes
+ * the real `DecisionEmitter` — the structural compat keeps both ends
+ * type-checking without a cross-slice import.
+ */
+type FsJailDecisionEvent = {
+  readonly type: "decision"
+  readonly turn: number
+  readonly kind: "permission" | "rule" | "hook" | "cap" | "jail" | "budget"
+  readonly outcome: "allow" | "deny" | "ask"
+  readonly reason: string
+  readonly toolCallId?: string
+  readonly ruleId?: string
+  readonly hookName?: string
+  readonly metadata?: Readonly<Record<string, unknown>>
+}
+
+type FsJailDecisionSink = (event: FsJailDecisionEvent) => void
+
+let fsJailDecisionSink: FsJailDecisionSink | null = null
+
+/** Wire the process-level fs-jail decision sink. The sink fires once per
+ *  `enforceJail` rejection (i.e. once per FsJailError throw). The composition
+ *  root is responsible for calling {@link clearFsJailDecisionSink} at the
+ *  matching session-end boundary. Calling this with a non-null sink replaces
+ *  any prior sink (last-writer-wins by design). */
+export const setFsJailDecisionSink = (sink: { emit: FsJailDecisionSink }): void => {
+  fsJailDecisionSink = (event) => sink.emit(event)
+}
+
+/** Clear the process-level fs-jail decision sink. Idempotent — calling
+ *  twice is safe. The composition root MUST call this at session-end to
+ *  avoid leaking the previous run's emitter into a sibling process-shared
+ *  call graph. */
+export const clearFsJailDecisionSink = (): void => {
+  fsJailDecisionSink = null
+}
+
+/** Internal: fire the sink with a categorical jail-deny event. Try/catch
+ *  isolation: a throwing sink cannot poison the throw path. Default-OFF
+ *  branch: no sink wired ⇒ the function returns without allocating. */
+const emitJailDeny = (offendingPath: string, jailRoot: string): void => {
+  if (fsJailDecisionSink === null) return
+  try {
+    const event: FsJailDecisionEvent = {
+      type: "decision",
+      turn: 0,
+      kind: "jail",
+      outcome: "deny",
+      reason: `path outside workspace: ${offendingPath}`,
+      metadata: { path: offendingPath, root: jailRoot },
+    }
+    fsJailDecisionSink(event)
+  } catch {
+    // Observational sink — never propagate a consumer failure into the
+    // gate. The gate's deny posture MUST stay stable (the throw below is
+    // the authoritative result; the emit is best-effort telemetry).
+  }
+}
+
+/**
  * Branded path type.
  *
  * A `JailedPath` is an absolute path string that has been validated as
@@ -94,6 +175,11 @@ const enforceJail = (requested: string, baseDir: string, abs: string): string =>
   const root = realResolve(lexicalNormalize(resolve(baseDir)))
   const target = realResolve(lexicalNormalize(abs))
   if (!isInside(root, target)) {
+    // ADR-0269 — emit BEFORE throwing so the tracer pairs the decision row
+    // with the throw site even when the FsJailError is caught + converted
+    // to an `ok:false` ToolResult downstream. Default-OFF when no sink is
+    // wired (zero allocation, byte-identical to pre-Phase-3 path).
+    emitJailDeny(target, root)
     throw new FsJailError(
       `Path escapes the working-directory jail: "${requested}" resolves outside ${root}. ` +
         "Set QUANTA_FS_JAIL=off to allow cross-directory access.",
@@ -101,6 +187,18 @@ const enforceJail = (requested: string, baseDir: string, abs: string): string =>
   }
   return abs
 }
+
+/**
+ * Test-only / composition-shared shim exposing `enforceJail` directly.
+ *
+ * Production code reaches the jail through `resolvePath` / `resolveJailed`
+ * — the public API. The hellgate for ADR-0269 needs to exercise the jail
+ * throw path without spinning up a full tool dispatch, so we re-export the
+ * helper under its canonical name. Renamed-only export keeps the private
+ * helper name (`enforceJail`) unchanged for grep stability inside this
+ * file while still gating tests on the SAME function the tools use.
+ */
+export { enforceJail }
 
 /**
  * Resolve a possibly-relative path against `baseDir` (default `process.cwd()`)
