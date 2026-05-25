@@ -25,15 +25,15 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import type { LLMPort, StreamEvent } from "@/llm"
+import type { SessionEnvelopeRecord } from "@/session"
+import type { DebugCmdState } from "../../src/apps/cli/debug-cmd"
 import {
   BUILTINS,
   isSlashCommand,
   runSlashCommand,
   type SlashContext,
-} from "@/apps/cli/slash-commands"
-import type { DebugCmdState } from "@/apps/cli/debug-cmd"
-import type { LLMPort, Message, StreamEvent } from "@/llm"
-import type { SessionEnvelopeRecord } from "@/session"
+} from "../../src/apps/cli/slash-commands"
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -53,7 +53,9 @@ const captureIO = (): {
   }
 }
 
-const baseCtx = (over: Partial<SlashContext> = {}): { ctx: SlashContext; io: ReturnType<typeof captureIO> } => {
+const baseCtx = (
+  over: Partial<SlashContext> = {},
+): { ctx: SlashContext; io: ReturnType<typeof captureIO> } => {
   const io = captureIO()
   const ctx: SlashContext = {
     out: io.outFn,
@@ -141,11 +143,7 @@ const toolResult = (
   output,
 })
 
-const userMessage = (
-  turn_id: string,
-  content: string,
-  tsOffset = 0,
-): SessionEnvelopeRecord => ({
+const userMessage = (turn_id: string, content: string, tsOffset = 0): SessionEnvelopeRecord => ({
   type: "event_msg",
   schema_version: 2,
   ts: ISO(tsOffset),
@@ -154,14 +152,17 @@ const userMessage = (
   content,
 })
 
-// Session fixture with a known tc_7a in turn "3".
+// Session fixture with two tool calls. The replay renderer reads
+// `input.toolCallId` from `tool_invoke`, so we plant the id there; the
+// dedicated `decision` envelope (used by /inspect, not by /replay) also
+// carries the id via `tool_call_id`.
 const SESSION_FIXTURE: readonly SessionEnvelopeRecord[] = [
   turnContext("3"),
   userMessage("3", "where is foo defined?"),
-  toolInvoke("3", "Read", { path: "src/foo.ts" }, 1),
+  toolInvoke("3", "Read", { path: "src/foo.ts", toolCallId: "tc_7a" }, 1),
   decision("3", "permission", "allow", "default-allow", "tc_7a", 2),
   toolResult("3", "Read", true, "export const foo = 1", 3),
-  toolInvoke("3", "Edit", { file: "src/foo.ts" }, 4),
+  toolInvoke("3", "Edit", { file: "src/foo.ts", toolCallId: "tc_7b" }, 4),
   decision("3", "permission", "allow", "default-allow", "tc_7b", 5),
   toolResult("3", "Edit", true, "ok", 6),
 ]
@@ -185,9 +186,10 @@ const stubLlmWithText = (text: string): LLMPort => ({
 })
 
 // Async iter helper for /replay.
-const fromArray = (
-  records: readonly SessionEnvelopeRecord[],
-): ((p: string) => AsyncIterable<SessionEnvelopeRecord>) =>
+const fromArray =
+  (
+    records: readonly SessionEnvelopeRecord[],
+  ): ((p: string) => AsyncIterable<SessionEnvelopeRecord>) =>
   (_p: string) =>
     (async function* () {
       for (const r of records) yield r
@@ -472,7 +474,12 @@ describe("CLI surface integration — runSlashCommand dispatch", () => {
   test("case-15: /debug bad-arg → stderr has error; stdout empty", async () => {
     let currentState: DebugCmdState = { enabled: false }
     const { ctx, io } = baseCtx({
-      debug: { get: () => currentState, set: (s) => { currentState = s } },
+      debug: {
+        get: () => currentState,
+        set: (s) => {
+          currentState = s
+        },
+      },
     })
     const code = await runSlashCommand("/debug bogus_category", ctx)
     expect(code).toBe(1)

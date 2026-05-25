@@ -27,15 +27,16 @@ import type { ToolUseBlock } from "@/llm"
 import {
   createDecisionCounterSink,
   defaultMetricsRegistry,
-  type MetricsRegistry,
   type MetricSnapshot,
+  type MetricsRegistry,
 } from "@/observability/metrics/index"
 import type { PermissionContext } from "@/permission"
 import { RulesStore } from "@/rules"
 import {
   type AgentEvent,
-  decisionEmitterFromStream,
+  type DecisionEmitter,
   type DecisionEvent,
+  decisionEmitterFromStream,
   type StreamPort,
   TeeStream,
 } from "@/stream"
@@ -88,13 +89,14 @@ const wireGateToCounter = (
   prefix?: string,
 ): {
   metrics: MetricsRegistry
-  emitter: AgentConfig["decisionEmitter"]
+  emitter: DecisionEmitter
   tee: TeeStream
 } => {
   const metrics = defaultMetricsRegistry()
-  const sink = prefix !== undefined
-    ? createDecisionCounterSink({ metrics, prefix })
-    : createDecisionCounterSink({ metrics })
+  const sink =
+    prefix !== undefined
+      ? createDecisionCounterSink({ metrics, prefix })
+      : createDecisionCounterSink({ metrics })
   // The counter sink is `StreamLike`; TeeStream demands `StreamPort`. Adapt
   // by re-emitting through the structural shim (same trick the composition
   // root uses — the production wire is identical).
@@ -126,7 +128,12 @@ describe("integration e2e — decision emit → tee → counter sink → registr
     const read = makeTool("read", { readOnly: true })
     const { metrics, emitter } = wireGateToCounter()
     const cfg = cfgOf({ registry: new ToolRegistry([read]), decisionEmitter: emitter })
-    const res = await runAdmissibilityGate(callOf("read", {}, "tc1"), cfg, cfg.permission, actionOf(read))
+    const res = await runAdmissibilityGate(
+      callOf("read", {}, "tc1"),
+      cfg,
+      cfg.permission,
+      actionOf(read),
+    )
     expect(res).toBe(null)
     expect(counterTotal(metrics, "quanta.gate.permission.allow.total")).toBe(1)
   })
@@ -229,7 +236,12 @@ describe("integration e2e — decision emit → tee → counter sink → registr
     const { metrics, emitter } = wireGateToCounter()
     const cfg = cfgOf({ registry: new ToolRegistry([read]), decisionEmitter: emitter })
     for (let i = 0; i < 20; i++) {
-      await runAdmissibilityGate(callOf("read", {}, `tc_loop_${i}`), cfg, cfg.permission, actionOf(read))
+      await runAdmissibilityGate(
+        callOf("read", {}, `tc_loop_${i}`),
+        cfg,
+        cfg.permission,
+        actionOf(read),
+      )
     }
     expect(counterTotal(metrics, "quanta.gate.permission.allow.total")).toBe(20)
     // Cardinality stays bounded — exactly ONE series row per (kind, outcome).
@@ -313,7 +325,12 @@ describe("integration e2e — decision emit → tee → counter sink → registr
       registry: new ToolRegistry([read]),
       decisionEmitter: decisionEmitterFromStream(tee),
     })
-    const res = await runAdmissibilityGate(callOf("read", {}, "tc_poison"), cfg, cfg.permission, actionOf(read))
+    const res = await runAdmissibilityGate(
+      callOf("read", {}, "tc_poison"),
+      cfg,
+      cfg.permission,
+      actionOf(read),
+    )
     // Gate result unaffected.
     expect(res).toBe(null)
     // Tee not degraded — the SINK swallowed its own throw per defense-in-depth.
@@ -329,7 +346,12 @@ describe("integration e2e — decision emit → tee → counter sink → registr
     // Run 1000 admit-path gates. Each emits exactly one permission.allow
     // event (no hooks ⇒ no hook line).
     for (let i = 0; i < 1000; i++) {
-      await runAdmissibilityGate(callOf("read", {}, `tc_load_${i}`), cfg, cfg.permission, actionOf(read))
+      await runAdmissibilityGate(
+        callOf("read", {}, `tc_load_${i}`),
+        cfg,
+        cfg.permission,
+        actionOf(read),
+      )
     }
     expect(counterTotal(metrics, "quanta.gate.permission.allow.total")).toBe(1000)
     // Cardinality stays at exactly 1 series row.
@@ -351,7 +373,10 @@ describe("integration e2e — decision emit → tee → counter sink → registr
     // them today (different subsystems will). We synthesise direct
     // `decision` events into the tee — same path the gate uses.
     const { metrics, tee } = wireGateToCounter()
-    const synth = (kind: DecisionEvent["kind"], outcome: DecisionEvent["outcome"]): DecisionEvent => ({
+    const synth = (
+      kind: DecisionEvent["kind"],
+      outcome: DecisionEvent["outcome"],
+    ): DecisionEvent => ({
       type: "decision",
       turn: 0,
       kind,

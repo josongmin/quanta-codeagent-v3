@@ -30,8 +30,8 @@ import { RulesStore } from "@/rules"
 import { EventDecisionSchema } from "@/session/envelope"
 import {
   type AgentEvent,
-  decisionEmitterFromStream,
   type DecisionEvent,
+  decisionEmitterFromStream,
   type StreamPort,
   TeeStream,
 } from "@/stream"
@@ -319,7 +319,13 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     // Build a tee with one POISON consumer in front. `safeEmitDecision`
     // already wraps the gate-side emit; the tee's strict=false mode is the
     // belt-and-braces (see `TeeStream`).
-    const tee = new TeeStream([{ emit: () => { throw new Error("simulated tracer crash") } }])
+    const tee = new TeeStream([
+      {
+        emit: () => {
+          throw new Error("simulated tracer crash")
+        },
+      },
+    ])
     const cfg = cfgOf({
       registry: new ToolRegistry([read]),
       decisionEmitter: decisionEmitterFromStream(tee),
@@ -370,7 +376,9 @@ describe("integration e2e — decision emit → tee → debug-tracer → stderr"
     })
     const ids = Array.from({ length: 10 }, (_, i) => `tc_conc_${i}`)
     await Promise.all(
-      ids.map((id) => runAdmissibilityGate(callOf("read", {}, id), cfg, cfg.permission, actionOf(read))),
+      ids.map((id) =>
+        runAdmissibilityGate(callOf("read", {}, id), cfg, cfg.permission, actionOf(read)),
+      ),
     )
     expect(cap.lines).toHaveLength(10)
     // Every id appears exactly once.
