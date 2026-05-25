@@ -46,6 +46,10 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/lsp",
       "@/stream",
     ],
+    // Documented carve-out: coverage_check tool consumes the @/observability/coverage
+    // sub-barrel (ADR-0165) as a typed contract — the coverage primitives are
+    // observability services that tools intentionally call into. Reviewed exception.
+    allowImports: ["@/observability/coverage"],
     envAllowFiles: ["runner.ts", "from-env.ts"],
     requireSliceBarrel: true,
   },

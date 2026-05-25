@@ -40,6 +40,7 @@ import {
   findDebugTraceSkill,
   findExplainStackTraceSkill,
   parseFrontmatter,
+  type Skill,
   triggerBlameSection,
   triggerDebugTrace,
   triggerExplainStackTrace,
@@ -54,7 +55,7 @@ type SkillSpec = {
   readonly dir: string
   readonly name: string
   readonly trigger: () => { readonly name: string }
-  readonly find: () => Promise<{ name: string; scope?: string; body?: string } | undefined>
+  readonly find: () => Promise<Skill | undefined>
   readonly expectedAllowedTools: ReadonlyArray<string>
   readonly bodyMustCiteTools: ReadonlyArray<string>
 }

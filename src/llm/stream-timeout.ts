@@ -98,10 +98,11 @@ const isAbortControllerLike = (
 
 const resolveAbortHandle = <T>(raw: AsyncIterable<T>): StreamTimeoutAbortHandle | null => {
   const maybeAbortable = raw as { controller?: unknown; abort?: unknown }
-  if (isAbortControllerLike(maybeAbortable.controller)) {
+  const controller = maybeAbortable.controller
+  if (isAbortControllerLike(controller)) {
     return {
-      abort: (reason?: unknown) => maybeAbortable.controller.abort(reason),
-      signal: maybeAbortable.controller.signal,
+      abort: (reason?: unknown) => controller.abort(reason),
+      signal: controller.signal,
     }
   }
   if (typeof maybeAbortable.abort === "function") {

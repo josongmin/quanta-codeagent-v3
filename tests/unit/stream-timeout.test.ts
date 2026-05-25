@@ -174,17 +174,13 @@ describe("withStreamTimeout — within-budget passthrough", () => {
 describe("withStreamTimeoutProbed — abort propagation", () => {
   test("on first-chunk timeout the raw stream controller signal is aborted", async () => {
     const stub = makeControllerBackedStream<number>({ chunks: [], hangAfter: true })
-    let probedHandle:
-      | {
-          readonly signal?: AbortSignal
-        }
-      | null = null
+    let probedSignal: AbortSignal | undefined
     const wrapped = withStreamTimeoutProbed(stub, {
       firstChunkMs: 40,
       idleMs: 9_999_000,
       provider: "openai",
       onAbortHandle: (handle) => {
-        probedHandle = handle
+        probedSignal = handle?.signal
       },
     })
 
@@ -195,7 +191,7 @@ describe("withStreamTimeoutProbed — abort propagation", () => {
       threw = true
     }
     expect(threw).toBe(true)
-    expect(probedHandle?.signal).toBe(stub.controller.signal)
+    expect(probedSignal).toBe(stub.controller.signal)
     expect(stub.controller.signal.aborted).toBe(true)
   })
 

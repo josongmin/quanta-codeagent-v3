@@ -178,7 +178,9 @@ export class LlmPhase2Port implements Phase2Port {
     const userText = buildUserMessage(args)
     let result: Awaited<ReturnType<Phase2Summarizer>>
     try {
-      result = await this.summarize({ system, userText, signal: args.signal })
+      result = await this.summarize(
+        args.signal === undefined ? { system, userText } : { system, userText, signal: args.signal },
+      )
     } catch (e) {
       if (isAbortError(e)) throw e
       const msg = errMessage(e)

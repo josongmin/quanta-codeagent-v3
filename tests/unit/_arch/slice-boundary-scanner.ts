@@ -15,6 +15,10 @@ export interface SliceBoundaryConfig {
   readonly slice: string
   /** Import specifiers denied under this slice (exact or `@/slice/...` prefix). */
   readonly denyImports: readonly string[]
+  /** Documented carve-outs: imports that match a `denyImports` prefix but are
+   *  explicitly allowed as named sub-barrels. Use sparingly — each entry is a
+   *  declared cross-slice contract that must be defended at review time. */
+  readonly allowImports?: readonly string[]
   readonly stdioAllowFiles?: readonly string[]
   readonly envAllowFiles?: readonly string[]
   readonly consoleAllowFiles?: readonly string[]
@@ -104,10 +108,31 @@ export const extractImports = (src: string): Array<{ line: number; spec: string 
   const sf = parseSourceFile(src)
   const visit = (node: ts.Node): void => {
     if (
-      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      ts.isImportDeclaration(node) &&
       node.moduleSpecifier &&
       ts.isStringLiteralLike(node.moduleSpecifier)
     ) {
+      // Skip `import type { X } from "..."` — type-only imports are erased
+      // at compile time and don't create runtime cross-slice coupling.
+      // (Slice purity invariant is about RUNTIME deps, not type shape contracts.)
+      if (node.importClause?.isTypeOnly) {
+        ts.forEachChild(node, visit)
+        return
+      }
+      out.push({
+        line: lineOf(sf, node.getStart(sf)),
+        spec: node.moduleSpecifier.text,
+      })
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      // Same rule for `export type { X } from "..."`.
+      if (node.isTypeOnly) {
+        ts.forEachChild(node, visit)
+        return
+      }
       out.push({
         line: lineOf(sf, node.getStart(sf)),
         spec: node.moduleSpecifier.text,
@@ -152,7 +177,16 @@ export const scanLines = (
   return out
 }
 
-const isDeniedImport = (spec: string, deny: ReadonlySet<string>): boolean => {
+const isDeniedImport = (
+  spec: string,
+  deny: ReadonlySet<string>,
+  allow: ReadonlySet<string>,
+): boolean => {
+  // Allow-list checked first: documented carve-outs override deny prefix.
+  if (allow.has(spec)) return false
+  for (const a of allow) {
+    if (spec === a || spec.startsWith(`${a}/`)) return false
+  }
   if (deny.has(spec)) return true
   for (const d of deny) {
     if (spec === d || spec.startsWith(`${d}/`)) return true
@@ -244,6 +278,7 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
   // intent universal without per-slice config maintenance.
   const selfPrefix = `@/${config.slice}`
   const deny = new Set(config.denyImports.filter((d) => d !== selfPrefix))
+  const allow = new Set(config.allowImports ?? [])
   const stdioAllow = new Set(config.stdioAllowFiles ?? [])
   const envAllow = new Set(config.envAllowFiles ?? [])
   const consoleAllow = new Set(config.consoleAllowFiles ?? [])
@@ -276,7 +311,7 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       const violations: string[] = []
       for (const f of files) {
         for (const { line, spec } of extractImports(readFileSync(f, "utf8"))) {
-          if (isDeniedImport(spec, deny)) {
+          if (isDeniedImport(spec, deny, allow)) {
             violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
           }
         }

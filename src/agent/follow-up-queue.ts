@@ -138,8 +138,6 @@ export interface FollowUpQueueOptions {
   readonly maxPerThread?: number
 }
 
-type FollowUpQueueSnapshotInput = FollowUpQueueSnapshot | LegacyFollowUpQueueSnapshot
-
 type ThreadQueueState = {
   entries: FollowUp[]
   head: number
@@ -171,12 +169,20 @@ const assertFollowUp = (value: unknown): FollowUp => {
     throw new Error("Malformed FollowUpQueueSnapshot entry")
   }
   if (!isRecord(value.metadata)) throw new Error("Malformed FollowUpQueueSnapshot entry")
+  const metadata: Record<string, string> = {}
   for (const [k, v] of Object.entries(value.metadata)) {
     if (typeof k !== "string" || typeof v !== "string") {
       throw new Error("Malformed FollowUpQueueSnapshot entry")
     }
+    metadata[k] = v
   }
-  return value as unknown as FollowUp
+  return {
+    id: value.id as FollowUpId,
+    content: value.content,
+    submittedAt: value.submittedAt,
+    submittedTurnId: value.submittedTurnId as TurnId | null,
+    metadata,
+  }
 }
 
 /** Per-thread FIFO queue + multi-thread isolation. In-memory; persistence
@@ -308,18 +314,20 @@ export class FollowUpQueue {
    *  it. Version 2 snapshots carry the cap explicitly and become the queue's
    *  new hard ceiling. */
   restoreFromSnapshot(snapshot: unknown): void {
-    if (!isRecord(snapshot) || (snapshot.version !== 1 && snapshot.version !== 2)) {
+    if (!isRecord(snapshot)) {
+      throw new Error("Unsupported FollowUpQueueSnapshot version: undefined")
+    }
+    const version = snapshot.version
+    if (version !== 1 && version !== 2) {
       throw new Error(
-        `Unsupported FollowUpQueueSnapshot version: ${String(
-          isRecord(snapshot) ? snapshot.version : undefined,
-        )}`,
+        `Unsupported FollowUpQueueSnapshot version: ${String(version)}`,
       )
     }
     if (!Array.isArray(snapshot.threads)) {
       throw new Error("Malformed FollowUpQueueSnapshot threads")
     }
     const nextMaxPerThread =
-      snapshot.version === 2
+      version === 2
         ? (() => {
             if (typeof snapshot.maxPerThread !== "number") {
               throw new Error("Malformed FollowUpQueueSnapshot maxPerThread")

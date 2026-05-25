@@ -51,7 +51,7 @@ export const createVoyageEmbedder = (opts: VoyageEmbedderOptions): EmbeddingPort
         try {
           const res = await opts.http.embeddingsCreate(
             { model, input: batch },
-            { signal: callOpts?.signal },
+            callOpts?.signal === undefined ? undefined : { signal: callOpts.signal },
           )
           for (const d of res.data) out.push(d.embedding)
         } catch (e) {

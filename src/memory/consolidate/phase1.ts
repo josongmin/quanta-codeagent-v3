@@ -99,10 +99,11 @@ export const runPhase1 = async (
   // chained via `Error.cause` so operators retain the stack.
   let distilled: Awaited<ReturnType<Phase1Port["distill"]>>
   try {
-    distilled = await port.distill({
-      rolloutMessages: input.rolloutMessages,
-      signal: input.signal,
-    })
+    distilled = await port.distill(
+      input.signal === undefined
+        ? { rolloutMessages: input.rolloutMessages }
+        : { rolloutMessages: input.rolloutMessages, signal: input.signal },
+    )
   } catch (e) {
     if (isAbortError(e)) {
       emit("error")

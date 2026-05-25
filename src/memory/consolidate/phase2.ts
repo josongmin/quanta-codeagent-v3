@@ -109,13 +109,22 @@ export const runPhase2 = async (
   // error so the caller distinguishes LLM-side from disk-side trouble.
   let llmOut: Awaited<ReturnType<Phase2Port["consolidate"]>>
   try {
-    llmOut = await port.consolidate({
-      stage1Entries: input.stage1Entries,
-      existingMemoryMd: input.existingMemoryMd,
-      existingRawMemoriesMd: input.existingRawMemoriesMd,
-      mode: input.mode,
-      signal: input.signal,
-    })
+    llmOut = await port.consolidate(
+      input.signal === undefined
+        ? {
+            stage1Entries: input.stage1Entries,
+            existingMemoryMd: input.existingMemoryMd,
+            existingRawMemoriesMd: input.existingRawMemoriesMd,
+            mode: input.mode,
+          }
+        : {
+            stage1Entries: input.stage1Entries,
+            existingMemoryMd: input.existingMemoryMd,
+            existingRawMemoriesMd: input.existingRawMemoriesMd,
+            mode: input.mode,
+            signal: input.signal,
+          },
+    )
   } catch (err) {
     emit("error")
     if (isAbortError(err)) throw err

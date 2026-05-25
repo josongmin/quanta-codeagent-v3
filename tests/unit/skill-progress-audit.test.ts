@@ -48,6 +48,8 @@ describe("progress-audit SKILL.md — frontmatter", () => {
     expect(data.category).toBe("skill")
     expect(data.stability).toBe("stable")
     const discovered = await findProgressAuditSkill()
+    expect(Array.isArray(data.allowedTools)).toBe(true)
+    if (!Array.isArray(data.allowedTools)) throw new Error("expected allowedTools array")
     expect(discovered?.tools).toEqual(data.allowedTools)
     // Body must be non-empty (the procedure section is load-bearing).
     expect(body.length).toBeGreaterThan(500)

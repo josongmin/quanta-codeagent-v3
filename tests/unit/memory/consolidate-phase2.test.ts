@@ -524,12 +524,12 @@ describe("runPhase2 argument plumbing", () => {
   test("port.consolidate receives caller signal verbatim", async () => {
     const log = makeLog()
     const ac = new AbortController()
-    let captured: Parameters<Phase2Port["consolidate"]>[0] | null = null
+    let capturedSignal: AbortSignal | undefined
     const port: Phase2Port = {
       async consolidate(args) {
         log.consolidate++
         log.order.push("consolidate")
-        captured = args
+        capturedSignal = args.signal
         return goodPortOut
       },
     }
@@ -539,7 +539,7 @@ describe("runPhase2 argument plumbing", () => {
       makeStore(emptyWatermark, log),
       makeWriter(log),
     )
-    expect(captured?.signal).toBe(ac.signal)
+    expect(capturedSignal).toBe(ac.signal)
   })
 
   test("writer.writeAtomic receives the LLM-produced content verbatim", async () => {

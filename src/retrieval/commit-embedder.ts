@@ -147,7 +147,10 @@ export const createCommitEmbedder = (opts: CommitEmbedderOptions): CommitEmbedde
       if (commits.length === 0) return []
       const { out, need } = splitByCache(commits, cache)
       if (need.length > 0) {
-        const fresh = await opts.embed.embed(need.map((n) => n.text), { signal })
+        const fresh = await opts.embed.embed(
+          need.map((n) => n.text),
+          signal === undefined ? undefined : { signal },
+        )
         writeBack(need, fresh, commits, out, cache)
       }
       const final: CommitNoteWithEmbedding[] = []

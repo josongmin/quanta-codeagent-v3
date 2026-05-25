@@ -9,8 +9,13 @@ import type { FileInfo } from "./types"
  *  partial read/write. Mirrors the posture of `@/runtime`'s SandboxPolicyError
  *  but stays inside the storage slice (no cross-slice import). */
 export class FsJailError extends QuantaError {
-  constructor(message: string) {
+  readonly target: string | undefined
+  readonly root: string | undefined
+
+  constructor(message: string, opts?: { target?: string; root?: string }) {
     super("fs_jail", message)
+    this.target = opts?.target
+    this.root = opts?.root
   }
 }
 

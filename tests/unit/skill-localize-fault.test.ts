@@ -40,6 +40,8 @@ describe("localize-fault SKILL.md — frontmatter", () => {
       "test_runner",
     ])
     const discovered = await findLocalizeFaultSkill()
+    expect(Array.isArray(data.allowedTools)).toBe(true)
+    if (!Array.isArray(data.allowedTools)) throw new Error("expected allowedTools array")
     expect(discovered?.tools).toEqual(data.allowedTools)
     expect(body.length).toBeGreaterThan(500)
   })
