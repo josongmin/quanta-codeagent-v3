@@ -862,6 +862,38 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * Consumed only when {@link streamWatchdog} is also set.
    */
   streamTimeoutPolicy?: import("./stream-timeout").TimeoutPolicy
+  /**
+   * ADR-0203 wire (helper-only slot) — typed error classifier + 5-arm retry
+   * router. Caller-side composition: when set, the CLI/host wires the slot
+   * into `RetryingLLM({ errorRouting: cfg.errorRouting, ... })` so the
+   * retry decorator may shortcut on `abort`/`hitl`. Absent ⇒ no consumer
+   * touches it (byte-identical default-OFF — RFC §1.2). The loop itself
+   * never reads this slot directly.
+   */
+  errorRouting?: {
+    readonly classifier: import("./error-routing").ErrorClassifier
+    readonly router: import("./error-routing").RetryRouter
+  }
+  /**
+   * ADR-0206 wire (helper-only slot) — per-thread dynamic tool registry.
+   * Caller-side composition: when set, the dispatch/composition root may
+   * call `composeTools(globalRegistryTools, registry.list(threadId).map(...))`
+   * to merge per-thread MCP tools on top of the global registry. Absent ⇒
+   * no consumer reaches into this slot (byte-identical default-OFF — RFC
+   * §1.2). The loop never reads this slot directly today.
+   */
+  threadToolRegistry?: import("./thread-tools").ThreadToolRegistry
+  /**
+   * ADR-0207 wire (helper-only slot) — per-thread Stage-1 distillation
+   * usage/selection cache. SIBLING to `memoryConsolidator.store` (which
+   * owns the watermark/promotion surface); this slot owns the
+   * `get/put/touch/markSelectedForPhase2/list/prune` surface so future
+   * phase1-completion hooks can mirror the entry and Phase 2 candidate
+   * selectors can read across runs. Absent ⇒ no consumer touches it
+   * (byte-identical default-OFF — RFC §1.2). The loop never reads this
+   * slot directly today.
+   */
+  stage1OutputsStore?: import("../memory/stage1-store").Stage1OutputsStore
 }
 
 // ─────────────────────────────────────────────────────────────────────────

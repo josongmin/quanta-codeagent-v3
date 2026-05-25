@@ -1,5 +1,6 @@
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { LLMError } from "@/shared"
+import type { ErrorClassifier, RetryRouter } from "./error-routing"
 
 /**
  * `LLMPort` decorator adding bounded exponential-backoff retry around a flaky
@@ -27,6 +28,15 @@ export interface RetryingLLMOptions {
   sleep?: (ms: number) => Promise<void>
   /** Injectable for deterministic tests. Defaults to `Math.random`. */
   random?: () => number
+  /** ADR-0203 wire (opt-in) — when set, the wrapper consults the typed
+   *  error-routing slice as an ADDITIONAL refinement on top of `isRetryable`:
+   *  - `abort` / `hitl` ⇒ rethrow immediately (skip backoff, never retry),
+   *  - `retry-same-turn` / `retry-with-backoff` / `swap-fallback` ⇒ honor
+   *     the legacy `isRetryable` path (defense-in-depth: typed slice agrees
+   *     it's retry-eligible AND legacy markers also vote retry).
+   *  Default-OMIT: when absent, the legacy `isRetryable`-only path runs
+   *  byte-identically (no classifier call, no router call, no allocation). */
+  errorRouting?: { readonly classifier: ErrorClassifier; readonly router: RetryRouter }
 }
 
 const DEFAULT_MAX_RETRIES = 4
@@ -184,6 +194,9 @@ export class RetryingLLM implements LLMPort {
   private readonly signal: AbortSignal | undefined
   private readonly sleep: (ms: number) => Promise<void>
   private readonly random: () => number
+  private readonly errorRouting:
+    | { readonly classifier: ErrorClassifier; readonly router: RetryRouter }
+    | undefined
 
   constructor(opts: RetryingLLMOptions) {
     this.inner = opts.inner
@@ -194,11 +207,23 @@ export class RetryingLLM implements LLMPort {
     this.signal = opts.signal
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
     this.random = opts.random ?? Math.random
+    this.errorRouting = opts.errorRouting
   }
 
   /** Full-jitter exponential backoff for retry attempt `n` (0-based). */
   private backoffFor(n: number): number {
     return backoffDelayMs(n, this.baseDelayMs, this.random)
+  }
+
+  /** ADR-0203 wire — when `errorRouting` is set, an `abort`/`hitl` decision
+   *  short-circuits the legacy retry path (rethrow immediately, no backoff).
+   *  Other decisions defer to the existing `isRetryable` predicate so the
+   *  default-OFF byte-identical contract holds when no router is wired. */
+  private routerForbidsRetry(e: unknown): boolean {
+    const r = this.errorRouting
+    if (r === undefined) return false
+    const action = r.router.decide(r.classifier.classify(e))
+    return action === "abort" || action === "hitl"
   }
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
@@ -214,6 +239,10 @@ export class RetryingLLM implements LLMPort {
       } catch (e) {
         // Mid-stream failure: rethrow — retrying would duplicate output.
         if (yielded) throw e
+        // ADR-0203 wire — typed router can shortcut to "do not retry" even
+        // when legacy markers vote retryable (e.g. a `cyberPolicy` shaped as
+        // an overload message). Defense-in-depth: BOTH must vote retry.
+        if (this.routerForbidsRetry(e)) throw e
         if (attempt >= this.maxRetries || !isRetryable(e)) throw e
         throwIfAborted(this.signal)
         await this.sleep(this.backoffFor(attempt))

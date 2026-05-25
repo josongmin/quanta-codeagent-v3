@@ -13,6 +13,7 @@
  *  deliberately stay on `bash` so the HARD_DENY pattern denylist keeps
  *  governing them. */
 
+import type { GitDirectiveEmitter } from "../../agent/git-directives"
 import type { Tool } from "../types"
 import { gitBlameTool } from "./blame"
 import { gitBlameHeatmapTool } from "./blame-heatmap"
@@ -29,13 +30,21 @@ import { gitStatusTool } from "./status"
 import type { GitRunner } from "./types"
 import { gitUpstreamCheckTool } from "./upstream"
 
+/** ADR-0220 wire — opt-in tool factory options. When `gitDirectiveEmitter`
+ *  is set, the mutating git tools (`git_commit`, `git_branch_switch`) emit
+ *  typed directives after every confirmed successful mutation. Absent ⇒
+ *  byte-identical legacy (no rev-parse, no allocation). */
+export interface GitToolsOpts {
+  readonly gitDirectiveEmitter?: GitDirectiveEmitter
+}
+
 // ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
 export { applyBudget, crossedTarget, type GitBudget, resolveMaxCommits } from "./_budget"
 export { gitBlameTool } from "./blame"
 export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
-export { gitBranchSwitchTool } from "./branch-switch"
+export { type GitBranchSwitchToolOpts, gitBranchSwitchTool } from "./branch-switch"
 export { gitChurnTool, rankChurn } from "./churn"
-export { gitCommitTool } from "./commit"
+export { type GitCommitToolOpts, gitCommitTool } from "./commit"
 export {
   type GitConflictInspectInput,
   gitConflictInspectInputSchema,
@@ -74,8 +83,12 @@ export { gitUpstreamCheckTool } from "./upstream"
 
 /** Build the git tools wired to a runner. When omitted, the default
  *  Bun.spawn-backed runner is used. Order: read-only first (diff/status/log/
- *  blame), then mutating (commit, branch-switch). */
-export const gitTools = (runner: GitRunner = defaultGitRunner): Tool[] => [
+ *  blame), then mutating (commit, branch-switch).
+ *
+ *  ADR-0220 wire — `opts.gitDirectiveEmitter` flows ONLY to the mutating
+ *  tools (commit, branch-switch). Read-only tools never emit (no closed
+ *  directive kind exists for read-only ops). Absent ⇒ byte-identical. */
+export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpts = {}): Tool[] => [
   gitDiffTool(runner) as Tool,
   gitStatusTool(runner) as Tool,
   gitLogTool(runner) as Tool,
@@ -94,6 +107,12 @@ export const gitTools = (runner: GitRunner = defaultGitRunner): Tool[] => [
   // surface to call instead of shelling raw git in the prompt.
   gitMovedCodeTool(runner) as Tool,
   gitConflictInspectTool(runner) as Tool,
-  gitCommitTool(runner) as Tool,
-  gitBranchSwitchTool(runner) as Tool,
+  gitCommitTool(
+    runner,
+    opts.gitDirectiveEmitter !== undefined ? { gitDirectiveEmitter: opts.gitDirectiveEmitter } : {},
+  ) as Tool,
+  gitBranchSwitchTool(
+    runner,
+    opts.gitDirectiveEmitter !== undefined ? { gitDirectiveEmitter: opts.gitDirectiveEmitter } : {},
+  ) as Tool,
 ]

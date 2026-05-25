@@ -57,7 +57,12 @@ export const runShell = async (
   // never echoed back to the tool result.
   const baseArgv: ReadonlyArray<string> = ["bash", "-lc", command]
   const slot = getShellSandbox()
-  const argv = slot !== undefined ? (await slot.wrap(baseArgv, cwd)).argv : [...baseArgv]
+  const sandboxedArgv = slot !== undefined ? (await slot.wrap(baseArgv, cwd)).argv : [...baseArgv]
+  // ADR-0204 wire — when a snapshot seam is supplied, restore wraps the argv
+  // so the spawned shell sources the captured per-turn env. Absent ⇒
+  // `sandboxedArgv` flows through unchanged (byte-identical legacy).
+  const snap = options.shellSnapshot
+  const argv = snap !== undefined ? snap.restore(snap.handle, sandboxedArgv).argv : sandboxedArgv
   const proc = Bun.spawn(argv, {
     cwd,
     env,

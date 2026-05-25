@@ -12,9 +12,20 @@
  *  schema layer ([A-Za-z0-9._/+-], no leading '-', 64-char cap) so a malicious
  *  name cannot escape the argv we hand to `git`. */
 
+import type { GitDirectiveEmitter } from "../../agent/git-directives"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { mutate } from "./_shared"
 import { type GitBranchSwitchInput, type GitRunner, gitBranchSwitchInputSchema } from "./types"
+
+/** ADR-0220 wire — caller-injected opts. Default-OMIT under
+ *  `exactOptionalPropertyTypes`. When supplied, a successful switch with
+ *  `create:true` emits `{ kind: "create-branch", name }`; a wip checkpoint
+ *  that ran before the switch emits `{ kind: "commit", sha, message }`
+ *  (sha best-effort via `git rev-parse HEAD`). Switch-without-create does
+ *  NOT emit (no directive kind exists for plain checkout). */
+export interface GitBranchSwitchToolOpts {
+  readonly gitDirectiveEmitter?: GitDirectiveEmitter
+}
 
 const autoWipMessage = (): string => `wip: ${new Date().toISOString()}`
 
@@ -79,7 +90,10 @@ const failResult = (output: string): ToolEvent => ({
   result: { ok: false, output },
 })
 
-export const gitBranchSwitchTool = (runner: GitRunner): Tool<GitBranchSwitchInput> => ({
+export const gitBranchSwitchTool = (
+  runner: GitRunner,
+  opts: GitBranchSwitchToolOpts = {},
+): Tool<GitBranchSwitchInput> => ({
   name: "git_branch_switch",
   description:
     "Switch branches with an optional session-boundary wip checkpoint. When the working tree is dirty and autoWip=true, commits a wip checkpoint first; otherwise fails with a stash hint.",
@@ -109,12 +123,31 @@ export const gitBranchSwitchTool = (runner: GitRunner): Tool<GitBranchSwitchInpu
       return
     }
 
+    const emitter = opts.gitDirectiveEmitter
+
     if (dirty) {
       yield { type: "progress", message: "git add + commit (wip checkpoint)" }
       const wip = await runWipCheckpoint(runner, ctx.cwd, ctx.signal)
       if (!wip.ok) {
         yield failResult(wip.error)
         return
+      }
+      // ADR-0220 wire — emit the wip checkpoint commit (success-only).
+      if (emitter !== undefined) {
+        let sha = ""
+        const shaOut = await mutate(
+          runner,
+          ["rev-parse", "HEAD"],
+          ctx.cwd,
+          "git rev-parse",
+          ctx.signal,
+        )
+        if (shaOut.kind === "ok") sha = shaOut.stdout.trim()
+        try {
+          emitter.emit({ kind: "commit", sha, message: "wip checkpoint (branch-switch)" })
+        } catch {
+          // never poison the tool result; see ADR-0220.
+        }
       }
     }
 
@@ -123,6 +156,16 @@ export const gitBranchSwitchTool = (runner: GitRunner): Tool<GitBranchSwitchInpu
     if (!sw.ok) {
       yield failResult(sw.error)
       return
+    }
+
+    // ADR-0220 wire — only `create:true` emits a create-branch directive
+    // (no closed-union kind exists for a plain checkout).
+    if (emitter !== undefined && create === true) {
+      try {
+        emitter.emit({ kind: "create-branch", name: branch })
+      } catch {
+        // never poison the tool result; see ADR-0220.
+      }
     }
 
     const wipNote = dirty ? " (wip checkpoint created)" : ""

@@ -10,11 +10,26 @@
  *
  *  All git invocations are argv-based (`Bun.spawn(['git', ...args])` via the
  *  injected `GitRunner`), so a commit message with shell metacharacters is
- *  carried as a single argv slot — no shell expansion. */
+ *  carried as a single argv slot — no shell expansion.
+ *
+ *  ADR-0220 wire (opt-in): when `opts.gitDirectiveEmitter` is supplied, a
+ *  successful commit emits a `{ kind: "commit", sha, message }` directive
+ *  AFTER the commit succeeds — never on the error path. The SHA is resolved
+ *  via a follow-up `git rev-parse HEAD`; if that lookup fails (rare; e.g.
+ *  hook side-effects) the tool falls back to `sha: ""` so the wire never
+ *  poisons the success result. Absent emitter ⇒ byte-identical legacy
+ *  behavior (no rev-parse, no emit). */
 
+import type { GitDirectiveEmitter } from "../../agent/git-directives"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { mutate } from "./_shared"
 import { type GitCommitInput, type GitRunner, gitCommitInputSchema } from "./types"
+
+/** ADR-0220 wire — caller-injected opts. Default-OMIT under
+ *  `exactOptionalPropertyTypes`. */
+export interface GitCommitToolOpts {
+  readonly gitDirectiveEmitter?: GitDirectiveEmitter
+}
 
 /** Build the auto-generated `wip:` message when the caller did not supply one.
  *  Format: `wip: <ISO timestamp>` — short enough to read in `git log` but
@@ -42,7 +57,10 @@ const resolveMessage = (
   return { ok: true, value: message }
 }
 
-export const gitCommitTool = (runner: GitRunner): Tool<GitCommitInput> => ({
+export const gitCommitTool = (
+  runner: GitRunner,
+  opts: GitCommitToolOpts = {},
+): Tool<GitCommitInput> => ({
   name: "git_commit",
   description:
     "Create a git commit. mode='regular' (default) stages + commits as a permanent commit; mode='wip' stages all files + auto-generates a session-boundary checkpoint message.",
@@ -88,6 +106,28 @@ export const gitCommitTool = (runner: GitRunner): Tool<GitCommitInput> => ({
     if (commitOut.kind === "err") {
       yield { type: "result", result: { ok: false, output: commitOut.output } }
       return
+    }
+
+    // ADR-0220 wire — success-only emit (best-effort SHA resolve; failure
+    // never poisons the result). Default-OFF: no emitter ⇒ no rev-parse,
+    // no allocation, byte-identical legacy.
+    const emitter = opts.gitDirectiveEmitter
+    if (emitter !== undefined) {
+      let sha = ""
+      const shaOut = await mutate(
+        runner,
+        ["rev-parse", "HEAD"],
+        ctx.cwd,
+        "git rev-parse",
+        ctx.signal,
+      )
+      if (shaOut.kind === "ok") sha = shaOut.stdout.trim()
+      try {
+        emitter.emit({ kind: "commit", sha, message: finalMessage })
+      } catch {
+        // Emit failures NEVER poison the tool result (host channel may be
+        // unavailable; commit already succeeded). Swallow per ADR-0220.
+      }
     }
 
     yield {
