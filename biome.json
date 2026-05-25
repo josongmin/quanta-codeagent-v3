@@ -1348,6 +1348,171 @@
           }
         }
       }
+    },
+    {
+      "includes": ["**/src/apps/agent/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/agent must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/bench/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/bench must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/cli must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/eval/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/eval must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/probe/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/probe must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

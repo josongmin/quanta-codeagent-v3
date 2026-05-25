@@ -7,15 +7,16 @@ import {
 } from "@/git/directive-emit"
 import type { Message } from "@/llm"
 import { GEN_AI_ATTRS, type TurnTiming } from "@/observability"
-import { tickScheduler, type TickOutcome } from "@/scheduler/automation-engine"
+import { type TickOutcome, tickScheduler } from "@/scheduler/automation-engine"
 import { type RedactionHit, type RedactionOrigin, redactSecrets } from "@/security"
+import { writeStderr, writeStdout } from "@/shared"
 import { defaultGitRunner } from "@/tool/git"
-import type { AgentMode } from "./prompt"
 import { buildCapEnforcer } from "./cap-enforcer"
 import { DedupGate } from "./dispatch-dedup"
 import { type TurnDiffSession, wireGitObservability } from "./git-observability"
 import type { HookBus, HookPromptInject } from "./hooks"
 import type { LocalizePhaseState } from "./localize-phase-guard"
+import type { AgentMode } from "./prompt"
 import { buildLocalizePhase } from "./session-resources"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import type { AgentConfig } from "./types"
@@ -269,8 +270,22 @@ export const buildGitDirectiveEmit = (cfg: AgentConfig): GitDirectiveCollector |
 const defaultEmitterFor = (
   sink: "stdout" | "stderr" | ((line: string) => void),
 ): DirectiveEmitterPort => {
-  if (sink === "stdout") return defaultEmitter(process.stdout)
-  if (sink === "stderr") return defaultEmitter(process.stderr)
+  if (sink === "stdout") {
+    return defaultEmitter({
+      write(chunk: string): boolean {
+        writeStdout(chunk)
+        return true
+      },
+    })
+  }
+  if (sink === "stderr") {
+    return defaultEmitter({
+      write(chunk: string): boolean {
+        writeStderr(chunk)
+        return true
+      },
+    })
+  }
   // Function sink — adapter wraps once per write, stripping the trailing
   // newline. A throwing callback is caught at the emitter boundary (see
   // defaultEmitter implementation) and surfaces as a typed invalid-directive
@@ -336,11 +351,7 @@ export const startAutomationEngineTicker = (
   if (slot === undefined) return undefined
   const { engine, handler, tickIntervalMs, onTick, now } = slot
   if (handler === undefined) return undefined
-  if (
-    tickIntervalMs === undefined ||
-    !Number.isFinite(tickIntervalMs) ||
-    tickIntervalMs <= 0
-  ) {
+  if (tickIntervalMs === undefined || !Number.isFinite(tickIntervalMs) || tickIntervalMs <= 0) {
     return undefined
   }
   const clock: () => number = now ?? Date.now

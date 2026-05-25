@@ -5,16 +5,9 @@ import { extname, join, relative } from "node:path"
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
 const NON_APP_TERMINAL_DEFAULT_PATTERN = /\bprocess\.(?:stdin|stdout|stderr)\b|\bprocess\.exit\s*\(/
-const CURRENT_TERMINAL_DEFAULT_DEBT_COUNT = 7
+const CURRENT_TERMINAL_DEFAULT_DEBT_COUNT = 0
 
-const ALLOWED_NON_APP_TERMINAL_DEFAULT_FILES = new Set([
-  "agent/admissibility-gate.ts",
-  "agent/git-directives/default-stdout-emitter.ts",
-  "agent/hitl-tier-registry.ts",
-  "agent/loop-helpers.ts",
-  "memory/consolidate/store.ts",
-  "ui/ui-helpers.ts",
-])
+const ALLOWED_NON_APP_TERMINAL_DEFAULT_FILES = new Set<string>()
 
 const isCommentLine = (line: string): boolean => {
   const trimmed = line.trim()
@@ -94,9 +87,6 @@ describe("terminal defaults ratchet", () => {
           "",
           "Unexpected files:",
           ...unexpected.map((relPath) => `- ${relPath}`),
-          "",
-          "Current documented temporary debt:",
-          ...[...ALLOWED_NON_APP_TERMINAL_DEFAULT_FILES].sort().map((relPath) => `- ${relPath}`),
         ].join("\n"),
       )
     }
@@ -105,6 +95,6 @@ describe("terminal defaults ratchet", () => {
   })
 
   test("temporary non-app terminal-default debt ceiling does not grow", () => {
-    expect(collectMatches().length).toBeLessThanOrEqual(CURRENT_TERMINAL_DEFAULT_DEBT_COUNT)
+    expect(collectMatches().length).toBe(CURRENT_TERMINAL_DEFAULT_DEBT_COUNT)
   })
 })

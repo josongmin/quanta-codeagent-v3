@@ -33,6 +33,13 @@ export class ToolRegistry {
     }))
   }
 
+  /** Concrete tool instances in stable registry order. Callers that need to
+   *  extend a live registry without losing already-wired tool behavior use
+   *  this rather than the model-only `specs()` surface. */
+  all(): Tool[] {
+    return [...this.tools.values()]
+  }
+
   /** S16: extract a shell command from a tool call when the tool implements
    *  `extractShellCommand`. Returns `null` for tools that don't accept a
    *  shell command, OR when input validation fails. Permission policy uses

@@ -184,7 +184,15 @@ const buildSetup = (
     turnSummary: stubSummary(),
     debugHandle: undefined,
     timelinePanel: undefined,
-    sessionDeps: { llm: llmStub, signal: new AbortController().signal } as never,
+    sessionDeps: {
+      llm: llmStub,
+      signal: new AbortController().signal,
+      registry: {
+        has: () => false,
+        specs: () => [],
+        all: () => [],
+      },
+    } as never,
     costPanel: undefined,
     branchProgress: undefined,
     planStore: undefined,
@@ -199,6 +207,11 @@ const buildSetup = (
       update: () => undefined,
     } as never,
     argPrompt,
+    systemSource: {
+      get: () => "SYS",
+      set: () => undefined,
+    },
+    refreshSystemPrompt: () => undefined,
     shutdownMcp: async () => undefined,
     // ADR-0301 — `--playbook-trigger` CLI flag echo. The loop spreads this
     // by-presence onto `maybeStartPlaybookTriggerWire({ cliFlag })`; the
@@ -222,6 +235,10 @@ type RunInteractiveStub = ReturnType<typeof mock<(input: unknown) => Promise<unk
 let runOnceStub: RunOnceStub
 let runInteractiveStub: RunInteractiveStub
 let lastInteractiveInput: {
+  deps?: {
+    automationEngine?: unknown
+    registry?: { has: (name: string) => boolean }
+  }
   promptSource: { next: (s?: AbortSignal) => Promise<unknown> }
   wrapTurn?: (
     run: (deps: unknown) => Promise<{ messages: Message[]; outcome: unknown }>,
@@ -405,6 +422,27 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
     expect(typeof lastInteractiveInput?.promptSource.next).toBe("function")
     expect(typeof lastInteractiveInput?.wrapTurn).toBe("function")
     expect(typeof lastInteractiveInput?.onTurnEnd).toBe("function")
+  })
+
+  test("QUANTA_AUTOMATION=on wires a live automation slot and exposes automation_update", async () => {
+    const prev = process.env.QUANTA_AUTOMATION
+    process.env.QUANTA_AUTOMATION = "on"
+    try {
+      const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+      const setup = buildSetup(undefined)
+      const sinks = buildSinks()
+      await runSessionLoop({
+        setup,
+        dispatchSlash: async () => false,
+        sinks,
+        registerExitTeardown: () => undefined,
+      })
+      expect(lastInteractiveInput?.deps?.automationEngine).toBeDefined()
+      expect(lastInteractiveInput?.deps?.registry?.has("automation_update")).toBe(true)
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_AUTOMATION
+      else process.env.QUANTA_AUTOMATION = prev
+    }
   })
 
   test("does NOT call runOnce in the interactive branch", async () => {

@@ -96,6 +96,8 @@ setTerminalIo({
   stderr: (chunk) => {
     void process.stderr.write(chunk)
   },
+  stdoutIsTTY: process.stdout.isTTY,
+  stderrIsTTY: process.stderr.isTTY,
 })
 
 // ── tiny dotenv (no dependency, first-wins; apps/cli has its own copy) ──────
@@ -545,8 +547,23 @@ const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
     `using official Python swebench harness for grading (dataset=${datasetName ?? "princeton-nlp/SWE-bench_Verified (default)"})`,
   )
   return datasetName !== undefined
-    ? { evaluate: evaluateWithPythonSwebench, opts: { datasetName } }
-    : { evaluate: evaluateWithPythonSwebench }
+    ? {
+        evaluate: (instance, prediction, opts) =>
+          evaluateWithPythonSwebench(
+            instance,
+            prediction,
+            opts as Parameters<typeof evaluateWithPythonSwebench>[2],
+          ),
+        opts: { datasetName },
+      }
+    : {
+        evaluate: (instance, prediction, opts) =>
+          evaluateWithPythonSwebench(
+            instance,
+            prediction,
+            opts as Parameters<typeof evaluateWithPythonSwebench>[2],
+          ),
+      }
 }
 
 /** Custom-corpus entrypoint (the path when no --swebench dataset is given).
@@ -564,8 +581,8 @@ const runCustomCorpusMode = async (
   const instanceFilter = argValue("--instance")
   const selection = await loadSelectedInstances({
     corpus: cfg.corpusRoot,
-    filter: instanceFilter,
-    limit: cfg.limit,
+    ...(instanceFilter !== undefined ? { filter: instanceFilter } : {}),
+    ...(cfg.limit !== null ? { limit: cfg.limit } : {}),
   })
   // `--instance <substr>` selects by id substring BEFORE the limit slice, so a
   // single repo (e.g. django) can be run without scanning the alphabetical head.

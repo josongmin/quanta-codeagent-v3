@@ -32,6 +32,7 @@ import { runAgent } from "@/agent"
 import { runMemoryConsolidatorHook } from "@/agent/memory-consolidator-hook"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { Phase1DistillError, type Phase1Port, Stage1Store } from "@/memory"
+import { InMemoryStage1Store } from "@/memory/stage1-store"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -240,6 +241,26 @@ describe("runMemoryConsolidatorHook — happy path + force_summarization", () =>
     }
     expect(port.calls).toBe(1)
     expect(store.upsertCount).toBe(1)
+    store.close()
+  })
+
+  test("wired stage1OutputsStore mirrors the distilled row for future session-start inject", async () => {
+    const port = makePort({ summary: "carry forward" })
+    const store = makeStore()
+    const mirror = new InMemoryStage1Store({ now: () => 123 })
+    const out = await runMemoryConsolidatorHook({
+      sessionOk: true,
+      consolidator: { enabled: true, port, store },
+      sessionId: "s-mirror",
+      rolloutMessages: rollout(5),
+      turnCount: 5,
+      stage1OutputsStore: mirror,
+      now: () => 123,
+    })
+    expect(out.kind).toBe("distilled")
+    const row = mirror.get("s-mirror")
+    expect(row?.rolloutSummary).toBe("carry forward")
+    expect(row?.selectedForPhase2).toBe(true)
     store.close()
   })
 

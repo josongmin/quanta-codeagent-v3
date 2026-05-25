@@ -7,12 +7,7 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 const APPS_DIR = join(REPO_ROOT, "src", "apps")
 const APP_NAMES = new Set(["agent", "bench", "cli", "eval", "probe"])
 
-const ALLOWED_CROSS_SURFACE_IMPORTS = new Set([
-  "agent/index.ts -> ../cli/dotenv",
-  "agent/index.ts -> ../cli/sandbox-wire",
-  "agent/mode-presets/interactive.ts -> ../../cli/repl",
-  "cli/internal.ts -> ../agent/search-pipeline-wire",
-])
+const ALLOWED_CROSS_SURFACE_IMPORTS = new Set<string>()
 
 const toPosix = (path: string): string => path.replaceAll("\\", "/")
 
@@ -55,13 +50,10 @@ describe("surface coupling ratchet", () => {
       throw new Error(
         [
           "New cross-surface runtime imports detected under src/apps/.",
-          "Surfaces must stay thin; move reusable logic below src/apps/ or add a typed port.",
+          "Surfaces must stay thin; move reusable logic below src/apps/.",
           "",
           "Unexpected edges:",
           ...unexpected.map((edge) => `- ${edge}`),
-          "",
-          "Current documented temporary debt:",
-          ...[...ALLOWED_CROSS_SURFACE_IMPORTS].sort().map((edge) => `- ${edge}`),
         ].join("\n"),
       )
     }
@@ -71,6 +63,6 @@ describe("surface coupling ratchet", () => {
 
   test("temporary debt ceiling does not grow", () => {
     const found = new Set(collectCrossSurfaceImports())
-    expect(found.size).toBeLessThanOrEqual(ALLOWED_CROSS_SURFACE_IMPORTS.size)
+    expect(found.size).toBe(0)
   })
 })

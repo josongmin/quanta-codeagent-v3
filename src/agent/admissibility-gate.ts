@@ -57,7 +57,7 @@ import {
   type ToolActionKeyed,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
-import { errMessage } from "@/shared"
+import { errMessage, writeStderr } from "@/shared"
 import { safeEmitDecision } from "@/stream"
 import {
   buildDenySteerMessage,
@@ -481,7 +481,7 @@ const emitHandoffEvent = (
     // We swallow + warn via stderr — observability lives on the gate's
     // canonical return path, not on this notification seam.
     const msg = errMessage(e)
-    process.stderr.write(`[quanta] hitl: onHandoff threw: ${msg}\n`)
+    writeStderr(`[quanta] hitl: onHandoff threw: ${msg}\n`)
   }
 }
 

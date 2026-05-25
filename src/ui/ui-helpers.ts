@@ -1,3 +1,5 @@
+import { getTerminalIo } from "@/shared"
+
 /** ANSI / box-drawing UI helpers for the auth slash commands
  *  (`/login`, `/status`). No external deps — quanta installs are locked
  *  (memory `verify-workflow`), so this stays string-only.
@@ -63,7 +65,7 @@ export class ColorPolicyResolver {
       this.cached = "on"
       return this.cached
     }
-    this.cached = process.stdout.isTTY === true ? "on" : "off"
+    this.cached = getTerminalIo().stdoutIsTTY === true ? "on" : "off"
     return this.cached
   }
 

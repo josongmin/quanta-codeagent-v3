@@ -2,20 +2,20 @@ import { Database } from "bun:sqlite"
 import * as fsp from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import type { AgentConfig } from "@/agent"
 import { runMemoryPhase2AutoTrigger } from "@/agent/memory-consolidator-hook"
 import { distillSession, finalAssistantText } from "@/agent/memory-distill"
 import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
 import type {
-  MemoryConsolidatorBlock,
   MemoryWriter,
-  Phase2Port,
   Phase1Port,
+  Phase2Port,
   Phase2Summarizer,
   Stage1StorePort,
-  Stage1Store,
 } from "@/memory"
-import { LlmPhase2Port, MemoryWriter as FileMemoryWriter, Stage1Store as SqliteStage1Store } from "@/memory"
+import { MemoryWriter as FileMemoryWriter, Stage1Store as SqliteStage1Store } from "@/memory"
 import { assembleMemoryAuto } from "@/memory/auto-trigger"
+import { LlmPhase2Port } from "@/memory/consolidate"
 import { ChildProcessGitPort } from "@/memory/consolidate/git"
 import { resolveMemoryDirPaths } from "@/memory/consolidate/paths"
 import type { NodeFsLike } from "@/memory/consolidate/writer"
@@ -24,10 +24,7 @@ import {
   DefaultCrossSessionInjector,
   renderMemorySection,
 } from "@/memory/cross-session"
-import {
-  JsonlFileStage1Store,
-  type Stage1OutputsStore,
-} from "@/memory/stage1-store"
+import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
 
 const noopWarn = (_msg: string): void => {}
 
@@ -54,7 +51,9 @@ export const buildPhase1PortFromLlm = (llm: LLMPort): Phase1Port => ({
     const distilled = await distillSession(llm, messages, {
       ...(args.signal !== undefined ? { signal: args.signal } : {}),
     })
-    const summaryLines = distilled.map((entry) => entry.text.trim()).filter((line) => line.length > 0)
+    const summaryLines = distilled
+      .map((entry) => entry.text.trim())
+      .filter((line) => line.length > 0)
     const rawLines = distilled
       .map((entry) => `- [${entry.kind}] ${entry.text.trim()}`)
       .filter((line) => !line.endsWith("] "))
@@ -117,7 +116,7 @@ export interface SessionStartMemoryResult {
 export interface SessionMemoryAutoWires {
   readonly sessionCtx?: string
   readonly stage1OutputsStore: Stage1OutputsStore
-  readonly memoryConsolidator: MemoryConsolidatorBlock
+  readonly memoryConsolidator: NonNullable<AgentConfig["memoryConsolidator"]>
 }
 
 export interface SessionMemoryAutoWireInput {

@@ -10,6 +10,7 @@
  * external wiring (none yet) does not need to rename on adoption.
  */
 
+import { writeStderr } from "@/shared"
 import type { GitDirectiveEmitter } from "./port"
 import { serialize } from "./serializer"
 import type { GitDirective } from "./types"
@@ -19,10 +20,17 @@ export interface DirectiveSink {
   write(chunk: string): boolean
 }
 
+const DEFAULT_DIRECTIVE_SINK: DirectiveSink = {
+  write(chunk: string): boolean {
+    writeStderr(chunk)
+    return true
+  },
+}
+
 /** Build an emitter that writes serialized directives + `\n` to the sink.
- *  Defaults to `process.stderr` (the production target). */
+ *  Defaults to the active terminal stderr port. */
 export const defaultStdoutEmitter = (
-  sink: DirectiveSink = process.stderr,
+  sink: DirectiveSink = DEFAULT_DIRECTIVE_SINK,
 ): GitDirectiveEmitter => ({
   emit(directive: GitDirective): void {
     sink.write(`${serialize(directive)}\n`)

@@ -20,6 +20,7 @@
  * conflict.
  */
 import type { Database } from "bun:sqlite"
+import { writeStderr } from "@/shared"
 import { ensureConsolidateSchema } from "./schema"
 import {
   isMemoryOutcome,
@@ -213,7 +214,7 @@ export class Stage1Store implements Stage1StorePort {
     const out: Stage1Output[] = []
     for (const r of rows) {
       if (!isStage1Row(r)) {
-        process.stderr.write("[quanta] consolidate: skipping malformed stage1_outputs row\n")
+        writeStderr("[quanta] consolidate: skipping malformed stage1_outputs row\n")
         continue
       }
       out.push(rowToStage1Output(r))

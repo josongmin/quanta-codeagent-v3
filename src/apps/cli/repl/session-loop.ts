@@ -1,9 +1,12 @@
-import type { AgentOutcome } from "@/agent"
+import type { AgentConfig, AgentOutcome } from "@/agent"
+import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { Message } from "@/llm"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
+import { assembleAutomation } from "@/scheduler/runtime-wire"
 import { type RunInteractiveInput, runInteractive, runOnce } from "@/runner"
 import { logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
+import { automationUpdateTool, ToolRegistry } from "@/tool"
 import { assembleConfig } from "../internal"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
@@ -143,6 +146,32 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   const externalPromptQueue = new ExternalPromptQueue()
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
+  const liveAutomationSlot =
+    sessionDeps.automationEngine ??
+    assembleAutomation(
+      { get: (name) => process.env[name] },
+      {
+        agentLoop: {
+          enqueueUserMessage: async (message) => {
+            externalPromptQueue.push(message)
+          },
+        },
+      },
+    ) ??
+    undefined
+  const activeSessionDeps =
+    liveAutomationSlot !== undefined
+      ? {
+          ...sessionDeps,
+          automationEngine: liveAutomationSlot,
+          registry: sessionDeps.registry.has("automation_update")
+            ? sessionDeps.registry
+            : new ToolRegistry([
+                ...sessionDeps.registry.all(),
+                automationUpdateTool(liveAutomationSlot.engine),
+              ]),
+        }
+      : sessionDeps
 
   // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate
   // the live history binding the loop reads each turn. No-throw on the swap;
@@ -209,7 +238,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
           // so subsequent runs are text-only (byte-identical when no --image).
           const seedImages = surfaceState.pendingImages
           surfaceState = updateSessionState(surfaceState, { pendingImages: [] })
-          const turnDeps = { ...sessionDeps, signal: turnSignal }
+          const turnDeps = { ...activeSessionDeps, signal: turnSignal }
           return runOnce({
             deps: turnDeps,
             assembleConfig,
@@ -251,6 +280,11 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     pills.dispose()
     statusBar.teardown()
   })
+
+  const automationTicker =
+    liveAutomationSlot !== undefined
+      ? startAutomationEngineTicker({ automationEngine: liveAutomationSlot } as AgentConfig)
+      : undefined
 
   // Initial blank row matches the prior `runReplLoopRaw` header write so
   // the very first composer row sits one line below the resume log.
@@ -303,7 +337,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         turnIndicator,
         turnSummary,
         escWindowMs: ESC_WINDOW_MS,
-        body: async (turnSignal) => run({ ...sessionDeps, signal: turnSignal }),
+        body: async (turnSignal) => run({ ...activeSessionDeps, signal: turnSignal }),
       },
       {
         onAfterResult: (result) => {
@@ -327,7 +361,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   }
   try {
     await runInteractive({
-      deps: sessionDeps,
+      deps: activeSessionDeps,
       assembleConfig,
       promptSource,
       history: [...surfaceState.history] as Message[],
@@ -346,6 +380,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       },
     })
   } finally {
+    automationTicker?.stop()
     await reactorBridge?.close()
     // ADR-0293 — lifecycle detach (stops handle + clears the seam slot
     // even on abnormal shutdown). Idempotent.

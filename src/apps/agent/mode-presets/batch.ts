@@ -139,8 +139,8 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   const runOne = resolveRunInstance(req)
   const selection = await loadSelectedInstances({
     corpus,
-    filter: req.batch?.instance,
-    limit: req.batch?.limit,
+    ...(req.batch?.instance !== undefined ? { filter: req.batch.instance } : {}),
+    ...(req.batch?.limit !== undefined ? { limit: req.batch.limit } : {}),
     loadCorpus: resolveLoadCorpus(req),
   })
 

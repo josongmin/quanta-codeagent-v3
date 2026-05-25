@@ -88,6 +88,8 @@ setTerminalIo({
   stderr: (chunk) => {
     void process.stderr.write(chunk)
   },
+  stdoutIsTTY: process.stdout.isTTY,
+  stderrIsTTY: process.stderr.isTTY,
 })
 
 /** ADR-0198 identity slot — resolve the per-mode identity from the

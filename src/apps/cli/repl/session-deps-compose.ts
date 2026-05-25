@@ -8,6 +8,7 @@ import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm, type SessionDeps } from "../internal"
 import type { RejectCounter } from "../reject-counter"
 import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
+import { buildSessionMemoryAutoWires } from "./session-memory-auto"
 import type { SessionBootstrapResult } from "./session-bootstrap"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 
@@ -68,6 +69,15 @@ export const composeCliSessionDeps = async (
   const threadPermission = permissionStore?.getThread(boot.sessionId)
   const planExitPort = createCliPlanExitPort({ ask: askLine })
   const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
+  const summarizerLlm = buildSummarizerLlm(boot.provider, boot.abort.signal)
+  const sessionMemoryAuto = await buildSessionMemoryAutoWires({
+    env: process.env,
+    llm: boot.llm,
+    ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
+    sessionId: boot.sessionId,
+    signal: boot.abort.signal,
+    logWarn: (msg) => process.stderr.write(`[memory-auto] ${msg}\n`),
+  })
   const baseSessionDeps: SessionDeps = {
     llm: boot.llm,
     registry: boot.tooling.registry,
@@ -91,9 +101,16 @@ export const composeCliSessionDeps = async (
     compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
     verifyGuardConfig: boot.tooling.verifyGuardConfig,
     searchPipeline: boot.tooling.searchPipeline,
-    summarizerLlm: buildSummarizerLlm(boot.provider, boot.abort.signal),
+    summarizerLlm,
     planExitPort,
     userInputPort,
+    ...(sessionMemoryAuto?.sessionCtx !== undefined ? { sessionCtx: sessionMemoryAuto.sessionCtx } : {}),
+    ...(sessionMemoryAuto?.memoryConsolidator !== undefined
+      ? { memoryConsolidator: sessionMemoryAuto.memoryConsolidator }
+      : {}),
+    ...(sessionMemoryAuto?.stage1OutputsStore !== undefined
+      ? { stage1OutputsStore: sessionMemoryAuto.stage1OutputsStore }
+      : {}),
     ...(boot.toolProfileState !== undefined ? { toolProfileState: boot.toolProfileState } : {}),
     ...(boot.identityModeState !== undefined ? { identityModeState: boot.identityModeState } : {}),
     ...(boot.focusChain !== undefined ? { focusChain: boot.focusChain } : {}),

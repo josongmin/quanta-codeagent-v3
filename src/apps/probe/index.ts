@@ -21,6 +21,8 @@ setTerminalIo({
   stderr: (chunk) => {
     void process.stderr.write(chunk)
   },
+  stdoutIsTTY: process.stdout.isTTY,
+  stderrIsTTY: process.stderr.isTTY,
 })
 
 interface Args {

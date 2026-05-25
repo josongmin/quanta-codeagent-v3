@@ -38,7 +38,7 @@ import { errMessage } from "@/shared"
 
 import { readFileSync } from "node:fs"
 import { z } from "zod"
-import { ALL_HITL_TIERS, runtimeConfig } from "@/shared"
+import { ALL_HITL_TIERS, runtimeConfig, writeStderr } from "@/shared"
 import type { HitlTier } from "./hitl-tier"
 
 /** Zod tier validator — produces a precise error message including the
@@ -95,7 +95,7 @@ const BUILTIN_ANNOTATIONS: readonly HitlAnnotation[] = Object.freeze([
 let overrideCache: readonly HitlAnnotation[] | undefined
 
 const stderrWarn = (msg: string): void => {
-  process.stderr.write(`[quanta] hitl-overrides: ${msg}\n`)
+  writeStderr(`[quanta] hitl-overrides: ${msg}\n`)
 }
 
 /** Convert a parsed override entry to the frozen public shape. */
@@ -185,7 +185,7 @@ const maxTier = (a: HitlTier, b: HitlTier): HitlTier => (TIER_RANK[a] >= TIER_RA
 const extractCommand = (input: unknown): string | null => {
   if (typeof input === "string") return input
   if (input === null || typeof input !== "object") return null
-  const cmd = (input as Record<string, unknown>)["command"]
+  const cmd = (input as Record<string, unknown>).command
   return typeof cmd === "string" ? cmd : null
 }
 

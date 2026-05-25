@@ -12,6 +12,8 @@ export type TerminalWriter = (chunk: string) => void
 export interface TerminalIo {
   readonly stdout: TerminalWriter
   readonly stderr: TerminalWriter
+  readonly stdoutIsTTY?: boolean
+  readonly stderrIsTTY?: boolean
 }
 
 const NOOP_WRITER: TerminalWriter = (_chunk) => {}
@@ -19,6 +21,8 @@ const NOOP_WRITER: TerminalWriter = (_chunk) => {}
 const NOOP_TERMINAL_IO: TerminalIo = Object.freeze({
   stdout: NOOP_WRITER,
   stderr: NOOP_WRITER,
+  stdoutIsTTY: false,
+  stderrIsTTY: false,
 })
 
 let activeTerminalIo: TerminalIo = NOOP_TERMINAL_IO

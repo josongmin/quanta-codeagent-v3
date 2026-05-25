@@ -1,28 +1,29 @@
 import {
   type AgentConfig,
   buildSystemPrompt,
-  buildSystemPromptForMode,
   createEffortStore,
-  defaultFocusChainTracker,
-  defaultModeVariantRegistry,
-  defaultToolProfileResolver,
   type EffortStore,
-  MODE_VARIANT_KEYS,
   parseEffort,
   RetryingLLM,
 } from "@/agent"
-import type { FocusChainPort } from "@/agent/focus-chain"
-import type { ModeVariantKey } from "@/agent/system-prompt"
-import {
-  ALL_TOOL_PROFILE_NAMES,
-  isToolProfileName,
-} from "@/agent/tool-profile"
+import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
+import {
+  buildSystemPromptForMode,
+  defaultModeVariantRegistry,
+  MODE_VARIANT_KEYS,
+  type ModeVariantKey,
+} from "@/agent/system-prompt"
 import {
   createSubagentBackedGuardianReview,
   materializeReviewerAgent,
 } from "@/agent/tier1/reviewer-subagent"
+import {
+  ALL_TOOL_PROFILE_NAMES,
+  defaultToolProfileResolver,
+  isToolProfileName,
+} from "@/agent/tool-profile"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { buildShellOtelObserver, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ReviewerPort } from "@/permission"
@@ -271,9 +272,7 @@ const buildGuardianReview = (args: {
     : undefined
 }
 
-const resolveToolProfileState = (
-  env: NodeJS.ProcessEnv,
-): ToolProfileSessionState | undefined => {
+const resolveToolProfileState = (env: NodeJS.ProcessEnv): ToolProfileSessionState | undefined => {
   const raw = env.QUANTA_TOOL_PROFILE
   if (raw === undefined || raw === "") return undefined
   if (!isToolProfileName(raw)) {
@@ -286,9 +285,7 @@ const resolveToolProfileState = (
   })
 }
 
-const resolveIdentityModeState = (
-  env: NodeJS.ProcessEnv,
-): IdentityModeSessionState | undefined => {
+const resolveIdentityModeState = (env: NodeJS.ProcessEnv): IdentityModeSessionState | undefined => {
   const raw = env.QUANTA_IDENTITY_MODE
   if (env.QUANTA_IDENTITY !== "1" && (raw === undefined || raw === "")) return undefined
   const mode = raw ?? "default"

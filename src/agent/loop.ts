@@ -952,6 +952,7 @@ const prepareTurnContext = async (
     cwd: config.cwd,
     planMode: config.planMode ?? false,
     system: config.system,
+    ...(config.sessionCtx !== undefined ? { sessionCtx: config.sessionCtx } : {}),
     ...(config.mode !== undefined ? { mode: config.mode } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
     ...(config.repoRules !== undefined ? { repoRules: config.repoRules } : {}),
@@ -1684,6 +1685,9 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
           sessionId: config.sessionId,
           rolloutMessages: outcome.messages,
           turnCount: outcome.turns,
+          ...(config.stage1OutputsStore !== undefined
+            ? { stage1OutputsStore: config.stage1OutputsStore }
+            : {}),
           signal: config.signal,
         },
         (event) => {
