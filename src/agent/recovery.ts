@@ -1,5 +1,6 @@
 import type { assembleFromEvents } from "@/llm"
 import { classifyLLMError } from "./retry"
+import type { StopAction, StopReasonPolicy } from "./stop-reason"
 
 /** Bounded per-turn recovery budgets. These cap SAME-TURN retries so a
  *  pathological provider can never spin the loop forever; once exhausted the
@@ -168,4 +169,41 @@ export const decideOnAssembled = (
   }
   rec.consecutiveEmpties = 0
   return { do: "proceed" }
+}
+
+/** ADR-0242 — Consult a {@link StopReasonPolicy} and translate its decision
+ *  into a terminal {@link RecoveryAction}, or `null` to fall through to the
+ *  legacy {@link decideOnAssembled} mapping.
+ *
+ *  Translation table (closed; one arm per StopAction):
+ *    `continue` → `null` (fall through; legacy mapping retains final word).
+ *    `surface`  → `{ do: "error", reason }` (legacy-shaped terminal).
+ *    `abort`    → `{ do: "error", reason: "[stop-abort] " + reason }` (tagged).
+ *    `hitl`     → `{ do: "error", reason: "[stop-hitl] " + reason }` (tagged).
+ *
+ *  Pure. Does NOT consume any same-turn recovery budget (the policy decides
+ *  the turn is terminal — no retry, no budget bookkeeping). The tags are
+ *  prefixed onto `reason` so observability + a future HITL re-router can
+ *  recognise them by substring without changing this surface.
+ *
+ *  When `policy` is `undefined` returns `null` (byte-identical to the
+ *  pre-ADR path). The wire site short-circuits on `policy === undefined`
+ *  BEFORE calling this helper for zero allocation; this `undefined` arm is
+ *  kept for callers that prefer one branch over two. */
+export const decideFromStopPolicy = (
+  policy: StopReasonPolicy | undefined,
+  stopReason: string,
+): RecoveryAction | null => {
+  if (policy === undefined) return null
+  const action: StopAction = policy.handle(stopReason)
+  switch (action.kind) {
+    case "continue":
+      return null
+    case "surface":
+      return { do: "error", reason: action.reason }
+    case "abort":
+      return { do: "error", reason: `[stop-abort] ${action.reason}` }
+    case "hitl":
+      return { do: "error", reason: `[stop-hitl] ${action.reason}` }
+  }
 }

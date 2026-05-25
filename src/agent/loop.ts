@@ -45,6 +45,7 @@ import { AgentRecorder } from "./metrics"
 import { buildTurnContext } from "./prompt"
 import {
   type AssembledMessage,
+  decideFromStopPolicy,
   decideOnAssembled,
   decideOnStreamError,
   freshRecovery,
@@ -86,8 +87,8 @@ import { decideAction } from "./conversation-action"
 import { threadId as makeThreadId } from "./follow-up-queue"
 import type { HookPromptInject } from "./hooks"
 import { resolveCollaborationMode } from "./mode"
-import { applyPlanExitOutcome } from "./plan-exit-lifecycle"
 import { planToStreamMirror } from "./plan/stream-mirror"
+import { applyPlanExitOutcome } from "./plan-exit-lifecycle"
 import { backoffDelayMs } from "./retry"
 import {
   buildCloseoutGuard,
@@ -121,6 +122,7 @@ type PendingPlanExit = {
   readonly plan: string
   readonly outcome: import("./plan-exit").PlanExitOutcome
 }
+
 import type { WorkingStateSession } from "./working-state"
 
 /** Shared frozen empty history for the guard-OFF path. `toolHistory` is
@@ -1084,6 +1086,22 @@ const applyAction = async (
   return { done: true, result: { kind: "tools", message, resultBlocks: success.resultBlocks } }
 }
 
+/** ADR-0242 — single-call seam for the per-turn `RecoveryAction`. Consults
+ *  the Cursor stop-reason policy (when wired) BEFORE the legacy
+ *  `decideOnStreamError` / `decideOnAssembled` FSM; a non-`continue`
+ *  policy decision short-circuits the turn. The wire is extracted out of
+ *  `runTurn` so the loop body stays under the biome cognitive-complexity
+ *  budget (the seam itself is two branches + one nullish-coalesce). */
+const resolveTurnAction = (
+  policy: import("./stop-reason").StopReasonPolicy | undefined,
+  result: StreamSuccess | { error: unknown; message: string },
+  rec: import("./recovery").RecoveryState,
+): RecoveryAction => {
+  if ("error" in result) return decideOnStreamError(result.error, result.message, rec)
+  const override = decideFromStopPolicy(policy, result.stopReason)
+  return override ?? decideOnAssembled(result.stopReason, result.message, rec)
+}
+
 const runTurn = async (
   turn: number,
   session: TurnSession,
@@ -1130,10 +1148,12 @@ const runTurn = async (
     const result = await streamConsume(session, state, ctx.messages, ctx.system)
     if ("aborted" in result) return { kind: "aborted" }
 
-    const action =
-      "error" in result
-        ? decideOnStreamError(result.error, result.message, rec)
-        : decideOnAssembled(result.stopReason, result.message, rec)
+    // ADR-0242 — Cursor 8-arm stop_reason typed router. `resolveTurnAction`
+    // consults `config.stopReasonPolicy` first (when wired) and falls through
+    // to the legacy `decideOnStreamError` / `decideOnAssembled` FSM otherwise.
+    // Absent ⇒ single optional-chain check on undefined, zero allocation,
+    // byte-identical to the pre-ADR path.
+    const action = resolveTurnAction(config.stopReasonPolicy, result, rec)
 
     const step = await applyAction(
       session,
@@ -1422,7 +1442,10 @@ const applyPendingPlanExit = (
     if (cfg.planStore !== undefined) {
       const lifecycle = applyPlanExitOutcome(pending.outcome, cfg.planStore)
       if (lifecycle.kind === "freeze" && lifecycle.snapshot !== null) {
-        cfg.stream.emit({ type: "plan_snapshot", plan: planToStreamMirror(lifecycle.snapshot.plan) })
+        cfg.stream.emit({
+          type: "plan_snapshot",
+          plan: planToStreamMirror(lifecycle.snapshot.plan),
+        })
       }
     }
     if (from !== "default") {

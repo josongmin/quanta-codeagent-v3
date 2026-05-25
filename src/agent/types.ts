@@ -51,6 +51,7 @@ import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
 import type { ModePolicy } from "./run-mode"
 import type { ActiveTurnState } from "./steering"
+import type { StopReasonPolicy } from "./stop-reason"
 import type { BackgroundSubagentScheduler } from "./subagent-background"
 import type { Submission } from "./submission"
 import type { SkillsBlock, SubagentBlock, WorkingStateBlock } from "./types/agent-capabilities"
@@ -448,6 +449,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * already-built instance here.
    */
   dispatchGuard?: DispatchGuard
+  /**
+   * ADR-0242 — Cursor 8-arm `stop_reason` typed router. Consulted at the
+   * same point as the legacy `decideOnAssembled` mapping in `runTurn`
+   * BEFORE the existing 3-stage fallback. When the policy returns
+   * `{ kind: "continue" }` (or is absent), the legacy mapping retains the
+   * final word — byte-identical to the pre-ADR path. Non-`continue`
+   * actions short-circuit the turn:
+   *   - `surface` → terminal `error` outcome carrying `reason`.
+   *   - `abort`   → terminal `error` outcome tagged `stop-abort`.
+   *   - `hitl`    → terminal `error` outcome tagged `stop-hitl`
+   *                 (HITL queue routing deferred to a follow-up).
+   *
+   * Absent ⇒ zero allocation (single optional-chain check). The default
+   * impl (`defaultStopReasonPolicy()`) is the Cursor 3.2.16 routing table
+   * verbatim; pass the already-built policy here.
+   */
+  stopReasonPolicy?: StopReasonPolicy
   /**
    * Permission stack opt-in (ADR-0046 — per-thread + per-host + post-denial
    * precedence). Absent / `enabled:false` ⇒ admissibility-gate skips the

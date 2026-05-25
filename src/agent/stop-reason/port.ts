@@ -1,26 +1,35 @@
 /**
- * Closed-port for stop-reason policy (ADR-0241).
+ * Stop-reason policy port (ADR-0242).
  *
- * The recovery loop consults a {@link StopReasonPolicy} after the LLM stream
- * has been assembled and BEFORE the existing 3-arm `decideOnAssembled` branch
- * runs. Hosts can attach a policy to map every Cursor-style `stop_reason` to
- * one of the four {@link StopAction} arms (`continue` | `surface` | `abort`
- * | `hitl`).
+ * Closed single-method port. Pure boundary: given the provider's reported
+ * `stop_reason` string (potentially unknown vocabulary), return a closed
+ * {@link StopAction}. The implementation MUST be deterministic, MUST NOT
+ * perform I/O, MUST NOT mutate caller state, and MUST be total — every
+ * input returns an action; never throws. An unknown / unrecognised string
+ * MUST collapse to `{ kind: "continue" }` so the legacy mapping in
+ * `recovery.decideOnAssembled` retains the final word (fallback).
  *
- * Default-OFF contract: absent ⇒ the loop runs the historical 3-arm logic
- * byte-identical. Wired ⇒ the policy's `handle` is the single decision
- * point; returning `"continue"` falls through to the historical branches.
+ * Default implementation (`./default-policy.ts`) is the Cursor 3.2.16
+ * 8-arm routing table verbatim. Sibling impl (`./no-op-policy.ts`) is a
+ * frozen pass-through used as the explicit byte-identical opt-in (the loop
+ * itself short-circuits on `config.stopReasonPolicy === undefined` for
+ * zero allocation; no-op is for tests + explicit composition roots).
+ *
+ * Plane-clean: this file imports ONLY `./types` (sibling).
  */
 
-import type { StopAction, StopReasonContext, StopReasonKind } from "./types"
+import type { StopAction } from "./types"
 
-/**
- * Pure pluggable mapper. Implementations MUST be deterministic for a given
- * (reason, ctx) — the loop calls `handle` once per turn assembly. Side effects
- * (metric counters via `ctx.metrics`) are permitted; thrown errors are NOT
- * (the loop treats `handle` as infallible — a throw escapes the recovery
- * envelope and aborts the turn with no rationale).
- */
 export interface StopReasonPolicy {
-  handle(reason: StopReasonKind, ctx: StopReasonContext): StopAction
+  /** Classify one provider `stop_reason` string into a {@link StopAction}.
+   *
+   *  Invariants (HELL-SR-09..11):
+   *   - Pure: no I/O, no global state, no clock/random.
+   *   - Deterministic: N invocations on the same string return the
+   *     STRUCTURALLY-EQUAL action.
+   *   - Total: every string returns an action; never throws. Unknown /
+   *     unrecognised inputs MUST return `{ kind: "continue" }` so the
+   *     legacy `decideOnAssembled` mapping stays the final authority.
+   */
+  handle(stopReason: string): StopAction
 }

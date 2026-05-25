@@ -1,21 +1,22 @@
 /**
- * No-op policy — every reason maps to `"continue"` (ADR-0241).
+ * Pass-through {@link StopReasonPolicy} (ADR-0242). Frozen object literal
+ * whose `handle` always returns `{ kind: "continue" }`. Used as the default
+ * when no policy is wired and the surface still wants a non-undefined port
+ * reference (e.g. testing the wire site itself, or a composition root that
+ * always passes a port). HELL-SR-10 locks the byte-identical contract.
  *
- * Used as the implicit fallback when {@link AgentConfig.stopReasonPolicy} is
- * absent: the wire path consults a policy, but a policy that always returns
- * `"continue"` is observably identical to NOT consulting one (the loop falls
- * through to the historical 3-arm `decideOnAssembled` branch). HELL-SR-10
- * asserts the byte-identical property against the default 3-arm output.
- *
- * Hosts that want to OBSERVE stop reasons without changing behavior can
- * attach this policy + their own `ctx.metrics` and get per-arm counts
- * without altering the loop's control flow.
+ * The loop itself does NOT install this — it short-circuits on
+ * `config.stopReasonPolicy === undefined` for zero allocation. This export
+ * is the canonical pass-through for explicit wiring + tests.
  */
 
 import type { StopReasonPolicy } from "./port"
+import type { StopAction } from "./types"
 
-export const NO_OP_STOP_REASON_POLICY: StopReasonPolicy = {
-  handle() {
-    return "continue"
+const CONTINUE: StopAction = Object.freeze({ kind: "continue" })
+
+export const noOpStopReasonPolicy: StopReasonPolicy = Object.freeze({
+  handle(): StopAction {
+    return CONTINUE
   },
-}
+})

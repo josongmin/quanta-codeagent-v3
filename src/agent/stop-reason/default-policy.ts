@@ -1,91 +1,77 @@
 /**
- * Default policy — Cursor verbatim 8→4 mapping (ADR-0241).
+ * Default {@link StopReasonPolicy} (ADR-0242). The Cursor 3.2.16 8-arm
+ * `stop_reason` routing table verbatim:
  *
- * Routing table (Cursor source-of-truth):
- *   end_turn              → continue   (normal completion)
- *   tool_use              → continue   (loop dispatches tool blocks)
- *   max_tokens            → surface    (output limit hit; host nudges or stops)
- *   refusal               → surface    + metrics emit
- *   pause_turn            → surface    (server-tool resume wait)
- *   content_filtered      → abort      (moderation removed content; no retry)
- *   guardrail_intervened  → hitl       (policy boundary fired; human review)
- *   error                 → surface    (provider stream-level error)
+ *   end_turn / tool_use                                  → continue
+ *   max_tokens / refusal / pause_turn / error            → surface
+ *   content_filtered                                     → abort
+ *   guardrail_intervened                                 → hitl
  *
- * Metrics keys (emitted via the optional `ctx.metrics` sink):
- *   quanta.stop_reason.<reason>          — counter per stop_reason arm
- *   quanta.stop_reason.refusal           — refusal-specific (verbatim from
- *                                          ADR-0120 + HELL-SR-15 assertion)
+ * Unknown / unrecognised inputs collapse to `continue` (HELL-SR-09) so the
+ * legacy `decideOnAssembled` mapping retains the final word — this policy
+ * is a *typed router*, not a vocabulary gatekeeper.
  *
- * The policy is itself a constant — it carries no state, so callers can share
- * the singleton {@link DEFAULT_STOP_REASON_POLICY} or construct via
- * {@link buildDefaultStopReasonPolicy} when a test wants to spy.
+ * Pure leaf — closures only over the constant reasons + the canonical lookup.
+ * The factory takes no options today; the signature is `() => StopReasonPolicy`
+ * so a future config-driven variant can be threaded without changing the
+ * wire site (HELL-SR-11).
  */
 
 import type { StopReasonPolicy } from "./port"
-import type { StopAction, StopReasonContext, StopReasonKind } from "./types"
+import type { StopAction, StopReasonKind } from "./types"
 
-/**
- * Pure mapping function — also the byte-identical heart of the default
- * policy. Returns the {@link StopAction} per the verbatim Cursor table.
- *
- * Unknown / not-yet-mapped reasons fall through to `"continue"` so an upstream
- * SDK introducing a new arm degrades to the historical no-op path (the loop
- * runs the 3-arm fallback). HELL-SR-09 locks this invariant.
- */
-export const mapStopReason = (reason: StopReasonKind): StopAction => {
-  switch (reason) {
-    case "end_turn":
-      return "continue"
-    case "tool_use":
-      return "continue"
-    case "max_tokens":
-      return "surface"
-    case "refusal":
-      return "surface"
-    case "pause_turn":
-      return "surface"
-    case "content_filtered":
-      return "abort"
-    case "guardrail_intervened":
-      return "hitl"
-    case "error":
-      return "surface"
-    default: {
-      // Exhaustiveness probe — if a new StopReasonKind arm is added without
-      // updating this switch, `never` assignment fails at compile time. The
-      // runtime fall-through returns "continue" so an SDK version drift
-      // degrades to the historical no-op path rather than crashing.
-      const _exhaustive: never = reason
-      void _exhaustive
-      return "continue"
-    }
-  }
-}
-
-const incCounter = (
-  ctx: StopReasonContext,
-  name: string,
-): void => {
-  if (ctx.metrics === undefined) return
-  ctx.metrics.counter(name).inc(1)
-}
-
-/**
- * Build the default policy. Stateless — callers can also use the singleton
- * {@link DEFAULT_STOP_REASON_POLICY}. Construction is exposed for tests that
- * want fresh closure identity (otherwise referential equality across runs
- * confuses spy frameworks).
- */
-export const buildDefaultStopReasonPolicy = (): StopReasonPolicy => ({
-  handle(reason: StopReasonKind, ctx: StopReasonContext): StopAction {
-    // Per-arm metric increment FIRST so a policy that surfaces / aborts still
-    // produces the counter (otherwise the host loses the signal that the
-    // refusal happened — HELL-SR-15 locks this for refusal).
-    incCounter(ctx, `quanta.stop_reason.${reason}`)
-    return mapStopReason(reason)
-  },
+// Pre-built frozen action literals — reused across calls so the policy
+// allocates zero objects per `handle()`. The strings are the Cursor
+// vocabulary verbatim; do not abbreviate.
+const CONTINUE: StopAction = Object.freeze({ kind: "continue" })
+const SURFACE_MAX_TOKENS: StopAction = Object.freeze({
+  kind: "surface",
+  reason: "provider stop_reason=max_tokens (output cap hit)",
+})
+const SURFACE_REFUSAL: StopAction = Object.freeze({
+  kind: "surface",
+  reason: "provider stop_reason=refusal (model declined)",
+})
+const SURFACE_PAUSE_TURN: StopAction = Object.freeze({
+  kind: "surface",
+  reason: "provider stop_reason=pause_turn (server-tool resume pending)",
+})
+const SURFACE_ERROR: StopAction = Object.freeze({
+  kind: "surface",
+  reason: "provider stop_reason=error (in-band terminal)",
+})
+const ABORT_CONTENT_FILTERED: StopAction = Object.freeze({
+  kind: "abort",
+  reason: "provider stop_reason=content_filtered (content filter tripped)",
+})
+const HITL_GUARDRAIL: StopAction = Object.freeze({
+  kind: "hitl",
+  reason: "provider stop_reason=guardrail_intervened (guardrail policy tripped)",
 })
 
-/** Frozen singleton — the common case (no spy / no per-instance state). */
-export const DEFAULT_STOP_REASON_POLICY: StopReasonPolicy =
-  buildDefaultStopReasonPolicy()
+/** Canonical routing map. Exported (read-only) so HELL-SR can drive an
+ *  exhaustive cross-check against {@link ALL_STOP_REASON_KINDS}. */
+export const DEFAULT_STOP_REASON_ROUTING: Readonly<Record<StopReasonKind, StopAction>> =
+  Object.freeze({
+    end_turn: CONTINUE,
+    tool_use: CONTINUE,
+    max_tokens: SURFACE_MAX_TOKENS,
+    refusal: SURFACE_REFUSAL,
+    pause_turn: SURFACE_PAUSE_TURN,
+    error: SURFACE_ERROR,
+    content_filtered: ABORT_CONTENT_FILTERED,
+    guardrail_intervened: HITL_GUARDRAIL,
+  })
+
+/** Construct the default stop-reason policy. The returned `handle` is pure:
+ *  no closure over mutable state, no allocation per call (returns frozen
+ *  literals from the lookup map). */
+export const defaultStopReasonPolicy = (): StopReasonPolicy => ({
+  handle(stopReason: string): StopAction {
+    // Narrow + look up. Anything outside the closed vocabulary collapses to
+    // `continue` so the legacy mapping in `recovery.decideOnAssembled` keeps
+    // the final word (HELL-SR-09).
+    const action = (DEFAULT_STOP_REASON_ROUTING as Readonly<Record<string, StopAction>>)[stopReason]
+    return action ?? CONTINUE
+  },
+})
