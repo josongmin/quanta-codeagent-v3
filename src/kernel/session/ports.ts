@@ -1,0 +1,56 @@
+import type { AgentOutcome } from "@/agent"
+import type { Message } from "@/llm"
+import type {
+  ArtifactRef,
+  CapabilityManifest,
+  PendingApprovalView,
+  SessionEvent,
+} from "@/protocol/session"
+
+export interface KernelClock {
+  now(): Date
+}
+
+export const systemClock: KernelClock = {
+  now: (): Date => new Date(),
+}
+
+export interface SessionHostDescription {
+  readonly sessionId: string
+  readonly permissionMode: string
+  readonly capabilityManifest: CapabilityManifest
+  readonly identityMode?: string
+  readonly toolProfile?: string
+}
+
+export interface SessionHostTurnResult {
+  readonly outcome: AgentOutcome
+  readonly messages: readonly Message[]
+  readonly artifacts?: readonly ArtifactRef[]
+  readonly approvalRequest?: PendingApprovalView
+}
+
+export interface SessionHost {
+  describe(): SessionHostDescription
+  runTurn(args: {
+    readonly prompt: string
+    readonly signal?: AbortSignal
+  }): Promise<SessionHostTurnResult>
+  setIdentityMode?(mode: string): Promise<void> | void
+  setToolProfile?(profile: string): Promise<void> | void
+  peekMessages?(): readonly Message[]
+  peekLastOutcome?(): AgentOutcome | undefined
+  close(): Promise<void>
+}
+
+export interface KernelEventLogPort {
+  append(event: SessionEvent): Promise<void> | void
+  list(): readonly SessionEvent[]
+}
+
+export interface KernelDispatchContext {
+  readonly clock: KernelClock
+  readonly eventLog: KernelEventLogPort
+  readonly host: SessionHost
+  readonly signal?: AbortSignal
+}

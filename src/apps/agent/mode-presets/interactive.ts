@@ -8,8 +8,13 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
+import {
+  buildCapabilityManifestFromSessionDeps,
+  createLegacySingleSessionRuntimeHost,
+} from "@/host/runtime"
 import type { PermissionContext } from "@/permission"
-import { runInteractive } from "@/runner"
+import type { SessionDeps } from "@/runner/assemble"
+import { createRuntime } from "@/sdk/runtime"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -19,6 +24,10 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
+
+interface PromptSourceLike {
+  next(signal?: AbortSignal): Promise<string | null>
+}
 
 const buildInteractiveBase = (
   req: AssembleRequest,
@@ -48,11 +57,11 @@ const buildInteractiveBase = (
 
 const buildInteractiveOptionalDeps = (
   base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
-): Partial<Parameters<typeof runInteractive>[0]["deps"]> => {
-  const optional: Partial<Parameters<typeof runInteractive>[0]["deps"]> = {}
-  const assignIfDefined = <K extends keyof Parameters<typeof runInteractive>[0]["deps"]>(
+): Partial<SessionDeps> => {
+  const optional: Partial<SessionDeps> = {}
+  const assignIfDefined = <K extends keyof SessionDeps>(
     key: K,
-    value: Parameters<typeof runInteractive>[0]["deps"][K] | undefined,
+    value: SessionDeps[K] | undefined,
   ): void => {
     if (value !== undefined) optional[key] = value
   }
@@ -79,7 +88,7 @@ const buildInteractiveOptionalDeps = (
 
 const buildInteractiveDeps = (
   base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
-): Parameters<typeof runInteractive>[0]["deps"] => ({
+): SessionDeps => ({
   llm: base.llm,
   registry: base.registry,
   stream: base.stream,
@@ -88,7 +97,7 @@ const buildInteractiveDeps = (
   cwd: base.cwd,
   maxTurns: base.maxTurns,
   signal: base.signal,
-  onConfirm: async (action) => {
+  onConfirm: async (action: Parameters<SessionDeps["onConfirm"]>[0]) => {
     const result = await (base.onConfirm?.(action) ?? false)
     return typeof result === "boolean" ? result : result.decision === "allow"
   },
@@ -120,6 +129,35 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   const abort = new AbortController()
   const base = buildInteractiveBase(req, abort.signal)
   const deps = buildInteractiveDeps(base)
+  const assemble = (
+    messages: Parameters<typeof assembleAgentConfig>[0]["base"]["messages"],
+    turnDeps: typeof deps,
+  ): AgentConfig =>
+    assembleAgentConfig({
+      ...req,
+      base: {
+        ...base,
+        messages,
+        signal: turnDeps.signal,
+      },
+    })
+  const { runtimeHost } = createLegacySingleSessionRuntimeHost({
+    sessionDeps: deps,
+    assembleConfig: assemble,
+    history: [...base.messages],
+    state: undefined,
+    idMeta: undefined,
+    shutdown: async () => undefined,
+    buildCapabilityManifest: buildCapabilityManifestFromSessionDeps,
+  })
+  const runtimeFacade = await createRuntime({ host: runtimeHost })
+  const session = await runtimeFacade.createSession({
+    cwd: base.cwd,
+    ...((req.base.llm as { model?: string }).model !== undefined
+      ? { model: (req.base.llm as { model?: string }).model }
+      : {}),
+    permissionMode: base.permission.mode,
+  })
   const reader = readline.createInterface({
     input: process.stdin,
     output: process.stderr,
@@ -127,7 +165,7 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   const onSigint = (): void => {
     abort.abort()
   }
-  const promptSource: Parameters<typeof runInteractive>[0]["promptSource"] = {
+  const promptSource: PromptSourceLike = {
     next: async (signal) => {
       try {
         const line = await reader.question("> ", { signal })
@@ -143,26 +181,18 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   }
   try {
     process.on("SIGINT", onSigint)
-    await runInteractive({
-      deps,
-      assembleConfig: (messages, turnDeps) =>
-        assembleAgentConfig({
-          ...req,
-          base: {
-            ...base,
-            messages,
-            signal: turnDeps.signal,
-          },
-        }),
-      promptSource,
-      history: [...base.messages],
-      state: undefined,
-      idMeta: undefined,
-      signal: abort.signal,
-    })
+    while (!abort.signal.aborted) {
+      const next = await promptSource.next(abort.signal)
+      if (next === null || abort.signal.aborted) break
+      if (next === "") continue
+      await session.input.append(next, undefined, { signal: abort.signal })
+      await session.turn.run(undefined, { signal: abort.signal })
+    }
   } finally {
     process.off("SIGINT", onSigint)
     reader.close()
+    await session.close().catch(() => undefined)
+    await runtimeFacade.close().catch(() => undefined)
   }
   if (abort.signal.aborted) throw makeAbortError()
 }

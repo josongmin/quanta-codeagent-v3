@@ -23,6 +23,7 @@ import { permissionCmd } from "../permission-explain"
 import { isRewindEnabled, rewindCommands } from "../rewind-cmd"
 import { rewindConvCmd } from "../rewind-conv-cmd"
 import { rewindToolCmd } from "../rewind-tool-cmd"
+import { knobsCmd } from "../slash-commands-knobs"
 import type { SlashCommand } from "../slash-contract"
 
 // `/rewind` + `/fork` (Claude Code v1.7196 pattern) — env-gated at module
@@ -45,4 +46,5 @@ export const APP_SLASH_COMMANDS: readonly SlashCommand[] = [
   rewindToolCmd,
   ...MEMORY_COMMANDS,
   rewindConvCmd,
+  knobsCmd,
 ]

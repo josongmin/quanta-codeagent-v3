@@ -11,6 +11,7 @@
  *      modePolicy.mode === "interactive" and reviewer-backed permission.
  */
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import type { AssembleRequest } from "@/../src/apps/agent/assemble"
 import { runMode } from "@/../src/apps/agent/mode-presets/interactive"
 import type { AgentConfig, AgentOutcome } from "@/agent"
@@ -51,6 +52,16 @@ const fakeOutcome = (reason: AgentOutcome["reason"]): AgentOutcome => ({
 })
 
 describe("interactive.runMode — guard", () => {
+  test("source uses the runtime SDK instead of @/runner#runInteractive", () => {
+    const src = readFileSync(
+      new URL("../../../../../src/apps/agent/mode-presets/interactive.ts", import.meta.url),
+      "utf8",
+    )
+    expect(src).toContain('from "@/sdk/runtime"')
+    expect(src).not.toContain('from "@/runner"')
+    expect(src).not.toContain("runInteractive(")
+  })
+
   test("rejects a wrong req.mode", async () => {
     const req = { ...baseReq(), mode: "headless" as const }
     await expect(runMode(req)).rejects.toThrow(/req.mode must be "interactive"/)

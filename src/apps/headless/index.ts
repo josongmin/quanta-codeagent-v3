@@ -17,14 +17,19 @@
  * Single public entry: {@link runHeadlessOnce}.
  */
 
+import type { AgentOutcome } from "@/agent"
 import { bootstrapSession, type SessionBootstrapResult } from "@/host/bootstrap"
+import {
+  buildCapabilityManifestFromSessionDeps,
+  createLegacySingleSessionRuntimeHost,
+} from "@/host/runtime"
 import {
   assembleConfig,
   buildSessionMemoryAutoWires,
   buildSharedExecutionPlaneSessionDeps,
-  runOnce,
   type SessionDeps,
 } from "@/runner"
+import { createRuntime, type RuntimeSessionInternal } from "@/sdk/runtime"
 import { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
 import { FakeLlm } from "./fake-llm"
 import type { FakeCompletion, HeadlessRunInput, HeadlessRunResult } from "./types"
@@ -112,6 +117,12 @@ const composeHeadlessSessionDeps = async (
   }
 }
 
+const abortedOutcome = (messages: readonly import("@/llm").Message[]): AgentOutcome => ({
+  reason: "aborted",
+  turns: 0,
+  messages: [...messages],
+})
+
 /** Run a single agent turn through `@/host/bootstrap` + `@/runner` with
  *  faked deps. Returns the bootstrap result, the per-turn outcome, the
  *  resulting message history, and every `AgentEvent` the runner emitted.
@@ -148,20 +159,52 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
     else input.signal.addEventListener("abort", () => boot.abort.abort(), { once: true })
   }
 
+  let session: RuntimeSessionInternal | undefined
+  let runtimeFacade: Awaited<ReturnType<typeof createRuntime>> | undefined
   try {
     const sessionDeps = await composeHeadlessSessionDeps(boot, input, stream)
-    const { outcome, messages } = await runOnce({
-      deps: sessionDeps,
+    const { runtimeHost, sessionHost } = createLegacySingleSessionRuntimeHost({
+      boot,
+      sessionDeps,
       assembleConfig,
       history: [...boot.history],
-      prompt: input.prompt,
       state: boot.features.state,
       idMeta: boot.idMeta,
+      shutdown: boot.shutdownMcp,
+      buildCapabilityManifest: buildCapabilityManifestFromSessionDeps,
     })
-    return { ...boot, outcome, messages, events: stream.events, sessionDeps }
+    runtimeFacade = await createRuntime({ host: runtimeHost })
+    session = (await runtimeFacade.createSession({
+      cwd: boot.cwd,
+      model: boot.model,
+      permissionMode: boot.mode,
+      ...(boot.identityModeState !== undefined
+        ? { identityMode: boot.identityModeState.get() }
+        : {}),
+      ...(boot.toolProfileState !== undefined ? { toolProfile: boot.toolProfileState.get() } : {}),
+    })) as RuntimeSessionInternal
+    if (input.signal?.aborted === true) {
+      const messages = [...sessionHost.peekMessages()]
+      return {
+        ...boot,
+        outcome: abortedOutcome(messages),
+        messages,
+        events: stream.events,
+        sessionDeps,
+      }
+    }
+    await session.input.append(input.prompt, undefined, { signal: boot.abort.signal })
+    await session.turn.run(undefined, { signal: boot.abort.signal })
+    const outcome = sessionHost.peekLastOutcome() ?? abortedOutcome(sessionHost.peekMessages())
+    return {
+      ...boot,
+      outcome,
+      messages: sessionHost.peekMessages(),
+      events: stream.events,
+      sessionDeps,
+    }
   } finally {
-    // Default-OFF: empty mcpClients ⇒ `shutdownMcp` is a no-op. Kept in a
-    // `finally` so a future wired MCP path tears down cleanly.
-    await boot.shutdownMcp()
+    await session?.close().catch(() => undefined)
+    await runtimeFacade?.close().catch(() => undefined)
   }
 }

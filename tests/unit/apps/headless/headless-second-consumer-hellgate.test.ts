@@ -5,15 +5,17 @@
  * `bootstrapSession` into the surface-agnostic `@/host/bootstrap` slice, this
  * hellgate PROVES the host layer is reusable by standing up a SECOND
  * surface (`src/apps/headless/`) and driving the SAME `bootstrapSession` +
- * `@/runner` cores end-to-end without touching the CLI slice.
+ * `@/runner` / `@/host/runtime` / `@/sdk/runtime` cores end-to-end without
+ * touching the CLI slice.
  *
  * Cases (12 mandated by the ticket, +adversarial extras):
  *
  *  1. Source fence — `src/apps/headless/**` text never contains a CLI import.
  *  2. Slice fence — every import in headless source matches a whitelist of
- *     allowed `@/` prefixes (`@/host/bootstrap`, `@/runner*`, `@/llm` (type),
- *     `@/stream`, `@/permission` (type), `@/tool` (registry+type), `@/agent`
- *     (type), `@/observability` (logger), `@/shared`, `node:*`).
+ *     allowed `@/` prefixes (`@/host/bootstrap`, `@/host/runtime`,
+ *     `@/runner*`, `@/sdk/runtime`, `@/llm` (type), `@/stream`,
+ *     `@/permission` (type), `@/tool` (registry+type), `@/agent` (type),
+ *     `@/observability` (logger), `@/shared`, `node:*`).
  *  3. Smoke — `runHeadlessOnce({prompt:"ping",fakeCompletion:{text:"pong"}})`
  *     returns `outcome.reason === "completed"` and the final assistant
  *     message contains "pong".
@@ -86,14 +88,16 @@ const readHeadless = (): ReadonlyArray<{ readonly path: string; readonly body: s
   walk(HEADLESS_DIR).map((p) => ({ path: p, body: readFileSync(p, "utf8") }))
 
 // Allowed import prefixes for `src/apps/headless/**`. Anything else fails the
-// slice fence. NOTE: `@/host/bootstrap` is the primary contract; `@/runner`
-// (and sub-paths) drives the loop; `@/llm` / `@/stream` / `@/agent` / `@/tool`
-// / `@/observability` / `@/permission` are types or minimal runtime pieces.
+// slice fence. NOTE: `@/host/bootstrap` + `@/host/runtime` own boot + host
+// adapters, `@/sdk/runtime` is the public runtime seam, and `@/runner`
+// remains an internal helper dependency during the cutover.
 const ALLOWED_PREFIXES: readonly string[] = [
   "@/host/bootstrap",
+  "@/host/runtime",
   "@/runner",
   "@/runner/assemble",
   "@/runner/orchestrate",
+  "@/sdk/runtime",
   "@/agent",
   "@/llm",
   "@/stream",

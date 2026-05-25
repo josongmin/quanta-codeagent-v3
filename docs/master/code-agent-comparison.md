@@ -2,16 +2,17 @@
 
 **Cursor 3.2.16 / Codex Desktop build 2867 (codex-rs 0.131.0-α9) / Claude Desktop 1.7196.3 + Claude Code 2.1.138 / quanta-codeagent-v3**
 
-> **검증 상태: Draft v4 (4-agent 꼼꼼 audit — line-exact 30+ 보강, 신발견 4 row 추가)**
+> **검증 상태: Draft v5 (S/T/U 신규 카테고리 + wave 2 깊이 64 신발견)**
 >
-> - **v0**: 메모리 + ADR 인덱스 + `.extracted_source/` 카탈로그 초벌
-> - **v1** (2026-05-26 #1): 4 agent spot-check — 19/20 cell hit (95% accuracy)
-> - **v2** (2026-05-26 #2): 4 agent 깊이 매핑 — 5점 cell file:line 보강 (Codex/Claude line-exact 13건, quanta 31 src path, Cursor 47 file path)
-> - **v3** (2026-05-26 #3): 4 agent 합집합 확장 — 신발견 13 row 추가 · ★ quanta ADR-0132/0133 발견 (자율 reactor + hook RPC) → P/D 카테고리 정정 · Claude Managed Agents Beta paradigm 추가
-> - **v4** (2026-05-26 #4): 4 agent 꼼꼼 audit — 5점/4점 cell **총 333개** 확인 (qta 35+Csr 144+Cdx 64+Cld 90), Claude line-exact **+10건** (L120343/124072/126701/129751/136373/139685/117378/129956/160790...), Codex MITM hook + shell-escalation 깊이 + v4 신발견 4 row (codex_mcp_server / glass.* command / cursor-shadow-workspace / 0점 정당화 검증)
-> - 총 row: 220 → 233 → **~237**. 중간 점수 정성 ~25% 여전히 휴리스틱.
-> - 정정 hot-spot: Claude tengu_* count **1155 → 2053** (실측 family)
-> - 경쟁사 코드 경로: `.extracted_source/{cursor,codex,claude,claude-code-cli,codex-cli,userdata}/`. minified bundle은 빌드마다 line drift → 분기별 재추출 권장.
+> - **v0**: 메모리 + ADR + `.extracted_source/` 카탈로그 초벌
+> - **v1** (#1): 4 agent spot-check — 19/20 hit (95% accuracy)
+> - **v2** (#2): 4 agent 깊이 매핑 — 5점 cell file:line 보강 (line-exact 13건, file path 78건)
+> - **v3** (#3): 4 agent 합집합 확장 — 13 row 추가 · ★ quanta ADR-0132/0133 발견 → P/D 정정 · Claude Managed Agents Beta paradigm
+> - **v4** (#4): 4 agent 꼼꼼 audit — 5점/4점 cell **333개** 확인 / Claude line-exact +10건 / tengu_ count **1155→2053** 정정 / 신발견 4 row
+> - **v5** (#5): 3 agent wave 2 깊이 (Cursor 23 + Codex 21 + Claude 20 = **64 신발견**) + **S/T/U 신규 카테고리 신설** (데이터 보안 / 패치-Diff detail / Bench-Eval, **+39 row**) + SimulatedMsgReason `10+ → 17 verified` 정정
+> - **카테고리: 18 → 21**, **row: 237 → ~276**
+> - 중간 점수 정성 ~25% 여전히 휴리스틱.
+> - 경쟁사 코드 경로: `.extracted_source/{cursor,codex,claude,claude-code-cli,codex-cli,userdata}/`. minified bundle line drift → 분기별 재추출 권장.
 
 ---
 
@@ -354,7 +355,7 @@
 
 | 기능 | Csr | Cdx | Cld | qta | Source | 기깔난 포인트 |
 |---|---|---|---|---|---|---|
-| `SIMULATED_MSG_REASON_*` 자율 self-prompt | **5** | 0 | 0 | **4** | Csr: `extr/cursor/out/vs/workbench/api/node/extensionHostProcess.js` (10+ variant) · qta: **ADR-0132-autonomous-proactive-reactor** (temp cloud branch snapshot + simulated message injection + 30s guard, default-OFF) | ★ **paradigm shift** — quanta도 흡수했지만 default-OFF에 hard guard 3중 — Cursor가 production 표준, quanta는 안전망 우선 |
+| `SIMULATED_MSG_REASON_*` 자율 self-prompt | **5** | 0 | 0 | **4** | Csr: `extr/cursor/out/vs/workbench/api/node/extensionHostProcess.js` (**17 variant verified**: UNSPECIFIED/PLAN_EXECUTION/COMMIT_REMINDER/BACKGROUND_TASK_COMPLETION/DIFF_TAB_{COMMIT,PUSH,CREATE_PR,FIX_MERGE_CONFLICTS}/MULTITASK_SPLIT_PRS/BUILD_IN_PARALLEL/BABYSIT_PR_IN_CLOUD/CI_PANEL_INVESTIGATE_FAILURE/USER_*_SUBAGENT 2종 + 4종 추가) · qta: **ADR-0132-autonomous-proactive-reactor** (temp cloud branch + simulated msg + 30s guard, default-OFF) | ★ paradigm shift — 17 variant는 자율 wake trigger 분류 전수 |
 | Background Composer (PR babysit) | **5** | **5** | 4 | 0 | Csr: BackgroundComposerService 114 메서드 (6 ServerStream+108 Unary, 12-cluster) · Cdx: `codex cloud` 8 sub-cmd | bc_id로 PR binding |
 | BugBot AUTOFIX 사다리 | **5** | 0 | 3 | 0 | Csr: `extr/cursor/out/.../extensionHostProcess.js` + `workbench.desktop.main.js` (BUGBOT_AUTOFIX_MODE_{AUTO_MERGE,AUTO_PR,MANUAL,OFF,UNSPECIFIED} 5 variant verified) | 이슈→PR→머지 풀 파이프 자율도 3단 |
 | Cron + RRULE scheduled agent | 4 | 3 | 3 | 4 | qta: ADR-0161/0215 AutomationEnginePort src/automation/ | |
@@ -400,6 +401,60 @@
 | **Policy Limits Endpoint** (enterprise quota) [v3 신발견] | 3 | 3 | **5** | 3 | Cld: `/api/claude_code/policy_limits` | org-scope rate/token limits return — enterprise policy enforcement |
 | **Penguin Mode Endpoint** (VM sandboxed exec) [v3 신발견] | 3 | 4 | **5** | 0 | Cld: `/api/claude_code_penguin_mode` (gvisor microVM 관련) | code isolation toggle — `Penguin` codename과 일치 |
 | **Remote Control Enrollments** (SQLite normalized) [v3 신발견] | 0 | **5** | 3 | 0 | Cdx: state_5 `remote_control_enrollments` table | enrollment flow SQLite로 정규화 — wham/remote와 동일 layer |
+
+## S. 데이터 보안 / Encryption [v5 신규 카테고리]
+
+| 기능 | Csr | Cdx | Cld | qta | Source | 기깔난 포인트 |
+|---|---|---|---|---|---|---|
+| Reasoning encrypted_content (fernet) | 0 | **5** | 0 | 0 | Cdx: `extr/userdata/codex/_sampled/sessions/*.jsonl` `reasoning.encrypted_content` (Fernet token base64) | tamper-resistant audit trail — reasoning chunk이 encryption으로 저장 |
+| Bridge separate origin (XSS isolation) | 0 | **5** | **5** | 0 | Cld: `extr/claude/.vite/build/index.js:L51701-51706` `yr() URL resolver` + `bridge.claudeusercontent.com` · Cdx: `web-sandbox.oaiusercontent.com` | GitHub `githubusercontent.com` 패턴 — 사용자 콘텐츠가 메인 API 토큰 못 훔침 |
+| `_safe` + `_log_only` PII-stripped 2-copy | 0 | **5** | 0 | 0 | Cdx: `extr/userdata/codex/_sampled/sqlite/logs_2.sqlite` (sanitized 사본 + raw 사본 동시 저장) | 외부 OTLP exporter용 sanitized — 같은 이벤트 2 카피 |
+| Commit message E2E-encrypted embeddings | **5** | 0 | 0 | 0 | Csr: cursor-retrieval `CommitNoteWithEmbeddings` (`encrypted_relative_path+weight`) | git diff-context search를 E2E-encrypted로 — co-change 분석 |
+| Deeplink encryption (sharing) | **5** | 0 | 0 | 0 | Csr: extensionHostProcess.js `deeplinkId` (string) + `encryptionKey` (bytes) + `ListDeeplinksRequest paging` | share link 자체에 암호화 키 박힘 — recipient만 복호화 |
+| MITM CA + Host cert generation | 0 | **5** | 0 | 0 | Cdx: `network-proxy/src/mitm.rs:210~388` SSL/TLS intercept + rewrite rules | 기업 프록시 통합용 — sandbox 외 layer |
+| DeviceCheck attestation (darwin+arm64 강제) | 0 | **5** | 0 | 0 | Cdx: `devicecheck.node` + `x-oai-attestation` header | Intel Mac/Linux/Windows 자동 reject — **negative invariant** (cross-platform 거부) |
+| `redacted_read_result` PII separate channel | **5** | 3 | 3 | 4 | Csr: cursor-agent-exec `Qr` class wire-level | read result PII가 별도 channel — 모델 보는 게 != 사용자 보는 게 |
+| FIPS 140 (Cowork Linux daemon) | 0 | 0 | **5** | 0 | Cld: `vm_bundles/claudevm.bundle/` sdk-daemon Go runtime (FIPS 140 cryptographic module) | enterprise compliance — 정부/규제 OK |
+| Statsig client API key hardcoded | 0 | 0 | **5** | 0 | Cld: `extr/claude/.vite/build/index.js:L67547` `statsig-api-key: client-ila3bcu9jdk...` + `productSurface="claude-desktop"` tag | client-side hardcoded key — feature flag/AB test 식별 |
+| `disableSkillShellExecution` policy + bun audit level | 3 | 3 | **5** | 0 | Cld: `_cli-symbols.txt` + `/api/claude_code/policy_limits` (low/moderate/high/critical) | shell exec를 skill 단에서 policy로 block — bun audit과 통합 |
+
+## T. 패치 / Diff / Edit detail [v5 신규 카테고리]
+
+| 기능 | Csr | Cdx | Cld | qta | Source | 기깔난 포인트 |
+|---|---|---|---|---|---|---|
+| apply_patch V4A EBNF | 3 | **5** | 4 | 4 | Cdx: `apply_patch/` + diffy crate · qta: ADR-0028 | `*** Add/Delete/Update File:` + `@@` context anchor + `*** End of File` |
+| `*** Move to:` rename atomic | 3 | **5** | 4 | 4 | Cdx: V4A EBNF | rename + edit atomic — 1 patch에 path 이동 |
+| `apply_patch 'PATCH'` shell-arg form | 0 | **5** | 4 | 3 | Cdx: prompt "NEVER applypatch or apply-patch" | shell arg 1개로 전달 — agent가 escape하기 쉬움 |
+| Fast-apply streamed full-content | **5** | 0 | 0 | 0 | Csr: AiService.StreamFastEdit (25 FastApplyModelType: `_DIFF`/`_REWRITE`/`_NOSPEC` × Codestral V4-V7) | 서버모델 종속 — quanta는 search_replace 유지 |
+| `EditResult` typed oneof (Cursor envelope) | **5** | 3 | 3 | 4 | Csr: cursor-agent-exec `success\|file_not_found\|read_perm_denied\|write_perm_denied{is_readonly}\|rejected{reason}\|error{model_visible_error}` · qta: ADR-0114 | is_readonly = "권한없음" vs "readonly 모드 거부" 구분 — model_visible ≠ client_visible |
+| `diff_string` + `lines_added/removed` | **5** | 3 | 3 | 3 | Csr: cursor-agent-exec `EditSuccess` | edit 성공 시 diff 본문 + 라인 카운트 wire |
+| `after_full_file_content` REQUIRED | **5** | 0 | 0 | 0 | Csr: cursor-agent-exec `EditSuccess.after_full_file_content` | stream_content envelope에 전체 파일 박힘 — fast-apply에 필수 |
+| `ReportEditFate` 호출 | **5** | 0 | 0 | 0 | Csr: agent.v1 RPC | edit 성공/실패 fate를 별도 RPC로 보고 — 통계 |
+| Moved-code detector (Jaccard weighted) | 3 | 3 | 3 | **5** | qta: ADR-0109 `src/git/moved-code/` (Jaccard similarity weighted multiset) | logic/moved/mechanical/risks 4-kind 구조적 분류 — reviewer 부담↓ |
+| MultiEdit baked-in | 4 | 3 | **5** | 3 | Cld: 1급 tool | 1 turn에 여러 edit 묶음 |
+| Streamed edit content (no envelope, full-file) | **5** | 0 | 0 | 0 | Csr: AiService.StreamFastEdit | 일반 edit이 not diff — entire file rewrite |
+| Apply agent diff | 4 | 3 | 4 | 3 | Csr: agent.v1 `ApplyAgentDiffToolCall` | full diff를 tool로 apply (composer 외부) |
+| `*** Environment ID:` (apply_patch context) | 0 | **5** | 0 | 0 | Cdx: V4A EBNF | sandbox env 식별자 박힘 — replay 가능 |
+
+## U. Bench / Eval / Experiments [v5 신규 카테고리]
+
+| 기능 | Csr | Cdx | Cld | qta | Source | 기깔난 포인트 |
+|---|---|---|---|---|---|---|
+| SWE-bench harness (6-pick smoke baseline) | 1 | 0 | 0 | **5** | qta: `tests/smoke/swebench/{picks.jsonl,select.ts}` + ADR-0014 local validator + `QUANTA_REPAIR_ROUNDS=1` | Apple Silicon arm64 namespace=swebench prebuilt + max_workers=1 + 로컬 dataset (x86 conda SIGTRAP 회피) |
+| Speculative branch search (N-best verifier-prover) [v3 신발견] | 3 | 0 | 0 | **5** | qta: ADR-0084 src/agent/branch-search/ | Agentless 기법 흡수 — patch candidate N개 병렬 → scorer/selector. SWE-bench SOTA |
+| EvalTrackingService 21 Unary methods | **5** | 4 | 4 | 4 | Csr: workbench.desktop.main.js (Ray/S3/Slack training sink write-only) · qta: ADR-0087 storage/schema.ts (Metric+TokenUsage+status+params 흡수) | Cursor는 Ray cluster로 학습 데이터 sink — quanta는 shape만 흡수 |
+| Metric{key,value,unit,step} envelope | 3 | 4 | 4 | **5** | qta: ADR-0087 + ADR-0144 src/observability/metrics.ts | 4-tuple metric envelope — step은 training iteration |
+| `EXPERIMENT_*` 7 A/B gate | **5** | 3 | 4 | 3 | Csr: workbench `ASK_CODEBASE/CACHE/CHAT_AND_APPLY/SPEC_AND_APPLY/LOOP_ON_LINTS/REFLECT/REWORD_INSTRUCTIONS` | LOOP_ON_LINTS·REFLECT가 흥미 — experiment로 SOTA 패턴 테스트 |
+| Statsig + GrowthBook A/B (full stack) | 3 | 4 | **5** | 3 | Cld: `index.js:L67547+67548` statsig.anthropic.com/v1/log_event + GrowthBook 통합 | client-side hardcoded key — server-driven flag |
+| `cursor-commits scoreCommit` algorithm | **5** | 3 | 0 | 0 | Csr: cursor-commits/dist/main.js (`score = boundaryScore + contiguousSequenceScore`) | commit diff를 line-level semantic weighting으로 ranking |
+| `BugfixVerdict` 5-value [Cursor wave 2] | **5** | 0 | 0 | 0 | Csr: extensionHostProcess.js `UNSPECIFIED\|FIXED\|FALSE_POSITIVE\|COULD_NOT_FIX\|RESOLVED_BY_OTHER_FIX` | bugfix 결과를 typed enum — BugBot 메트릭의 정답지 |
+| `PostGenerationEvaluation` 3-value | **5** | 3 | 3 | 3 | Csr: extensionHostProcess.js `USEFUL\|USELESS` (ContextItemStatus 내) | context item이 진짜 도움됐는지 사후 평가 — retrieval 자가 학습 |
+| Mock stream framework (1급 시민) | **5** | 3 | 3 | 3 | Csr: sharedProcessMain `mockAgentStreamController`/`mockComposerStreamController` | 테스트 first-class — production code path에 mock seam 박힘 |
+| Hellgate adversarial battery | 1 | 1 | 1 | **5** | qta: `tests/**/*-hellgate.test.ts` 17+ batteries + 367 file | 384+ adversarial — "내가 이기는 축" 봉인 |
+| `tengu_*` 2053 telemetry family (eval grid) | 3 | 4 | **5** | 3 | Cld: `_cli-symbols.txt:L108092+` | architectural-level instrumentation — spinner/memory/oauth/agent lifecycle 전부 grid |
+| `/api/event_logging/batch` aggregator [Claude wave 2] | 3 | 3 | **5** | 3 | Cld: `extr/claude/.vite/build/index.js:L67579` `Promise.allSettled` 듀얼 send (Datadog + Statsig) | 수십 메트릭 한 번에 POST — 둘 다 실패해도 계속 |
+| `gO()` buildType + commitHash embedded [Claude wave 2] | 3 | 4 | **5** | 3 | Cld: `index.js:L30409` `commitHash b8f837f8` + `2025-11-14T18:56:13Z` | 모든 이벤트에 commit SHA 자동 — release 추적 |
+| `/api/claude_code/organizations/metrics_enabled` gating | 3 | 3 | **5** | 0 | Cld: `_cli-symbols.txt` | org-scope telemetry gating |
 
 ---
 
@@ -472,6 +527,58 @@ Chronicle ambient 1388 summaries · TCC.db 직접 read · AI-tracking hash DB(me
 5. `POSIX_SPAWN_SETDISCLAIM` ✓ + `disclaimer` ✓ @ userdata/claude shell wrapper
 
 **총괄: 19/20 cell hit · 95% accuracy.** 메모리가 거의 정확했고, 1건만 보수화 필요 (FloatingPenguinMini).
+
+### Draft v5 wave 2 신발견 + S/T/U 카테고리 신설 (2026-05-26 #5, 3-agent 깊이)
+
+**S/T/U 3개 신규 카테고리 추가** (이전 18 → **21 카테고리**, +39 row):
+- **S. 데이터 보안 / Encryption** (11 row): reasoning encrypted/Bridge XSS isolation/MITM CA/DeviceCheck/FIPS 140/redacted_read/PII 2-copy/E2E commit embeddings/deeplink encryption/Statsig hardcoded key/disableSkillShellExecution
+- **T. 패치/Diff/Edit detail** (13 row): apply_patch V4A EBNF/Move to atomic/Fast-apply 25 model/EditResult typed oneof/diff_string+lines/after_full_file_content/ReportEditFate/moved-code Jaccard/MultiEdit/Streamed full-file/ApplyAgentDiff/Env ID
+- **U. Bench/Eval/Experiments** (15 row): SWE-bench harness/Speculative branch search/EvalTrackingService 21/Metric envelope/EXPERIMENT_* 7 A/B/Statsig+GrowthBook/cursor-commits scoreCommit/BugfixVerdict 5/PostGenerationEvaluation/Mock stream/Hellgate/tengu_ 2053/event_logging batch/buildType+commitHash/org metrics gating
+
+**v5 wave 2 깊이 발굴 (3 agent: Cursor 23 + Codex 21 + Claude 20 = 64 신발견)**:
+
+**Cursor 23개** — 핵심:
+- `ClientSideToolV2 40-enum` numeric ID (TODO_READ/WRITE, TASK_V2, CALL_MCP_TOOL, APPLY_AGENT_DIFF 등)
+- `SimulatedMsgReason 17 variant verbatim` (메모리 10+ 정정)
+- `BugfixVerdict 5-value` + `PrivacyMode 5` + `PrivacyModeStatus 4`
+- `ContextItem 7-variant union` (LspSubgraph/Cpp/SparseFile/Outline/CmdKSelection/FileDiffHistory/Cached)
+- `GitGraphService.StreamCodeTour` (Blame stream)
+- `WorktreeEvent.WorktreeComposerMapping` metadata
+- `LifecycleService.ClaimWorker` (pooled-VM)
+- `cursor-resolver-helper 8 auth provider chain`
+- `cursor-commits scoreCommit` (boundary + contiguous sequence)
+- `ReloadAgentSkills/Plugins` hot reload RPC
+- `CursorRule 4-variant` (GLOBAL/FILE_GLOBS/AGENT_FETCHED/MANUALLY_ATTACHED)
+- `deeplink encryption` (encryptionKey bytes + ListDeeplinksRequest paging)
+- `ExecServerMessage 20 slot` (shell_args/grep_args/computer_use_args 등 wire)
+- `SubagentType 9 verbatim` (BASH/SHELL/COMPUTER_USE/BROWSER_USE/CURSOR_GUIDE/DEBUG/EXPLORE/MEDIA_REVIEW/VM_SETUP_HELPER/CUSTOM)
+
+**Codex 21개** — 핵심:
+- SQLite `agent_jobs + agent_job_items` (CSV row-by-row batch + result_json per item)
+- `jobs.ownership_token` (분산 lease UUID)
+- `backfill_state` watermark (last_success_at + last_watermark)
+- `threads.reasoning_effort` 6-tier (none/minimal/low/medium/high/xhigh)
+- `threads.thread_source` (api/local/spawned 출처 audit)
+- `remote_control_enrollments` 7-tuple (websocket_url + account + app_server + env)
+- `automation_update.destination` ∈ {thread, workspace}
+- `electron-persisted-atom-state` 6 keys (avatar/bounds/local-remote-installation/main-window/saved-roots)
+- `comment-preload.js 383K lines` (CRDT + Manhattan scoring overlay)
+- `thread_dynamic_tools.input_schema` (inline JSON, additionalProperties:false)
+- 19 .codex-global-state.json keys 풀 (메모리 ~6 → 19)
+- 10+ state_5 SQLite table 신확인 (메모리 ~8 → 18)
+
+**Claude 20개** — 핵심:
+- `gO() buildType:prod` + `commitHash b8f837f8` + `2025-11-14T18:56:13Z` embedded (`index.js:L30409`)
+- `CLAUDE_AI_URL` env override + `yr() URL resolver` dev/prod 분기 (`index.js:L51701-L51706`)
+- `/api/bootstrap` (`L52213`) + `/api/event_logging/batch` (`L67579`)
+- `statsig.anthropic.com/v1/log_event` (`L67548`) + hardcoded key `client-ila3bcu9jdk...` (`L67547`)
+- MCP `sampling/createMessage` (`L68582`) + `elicitation/create` (`L68630`) + `completion/complete` (`L68653`)
+- `/api/organizations/{id}/dxt/{blocklist,can_install}` extension governance (`L84014,L84018`)
+- `/api/organizations/{id}/wiggle/upload-file` (`L82470`) — **`wiggle` 코드네임** (파일 수신부)
+- `developer_settings.json` config (`L84925`)
+- `isInternalBuild` flag schema (`L4162`, 현재 false=공개)
+- `Promise.allSettled` 듀얼 sink (Datadog + Statsig 둘 다 실패해도 계속, `L67657`)
+- `commitHash` 모든 telemetry 이벤트에 자동 (`L67624`)
 
 ### Draft v4 audit 결과 (2026-05-26 4-agent 병렬 #4, **꼼꼼 audit**)
 
@@ -601,4 +708,4 @@ quanta:
 
 ---
 
-**Generated**: 2026-05-26 / **Draft v4** (4-agent ×4 wave: v1 spot-check + v2 깊이 매핑 + v3 합집합 확장 + v4 꼼꼼 audit: 333 high-score cell 확인 / Claude line-exact +10 / Codex MITM·escalation 깊이 / 신발견 4 row / tengu count 1155→2053 정정)
+**Generated**: 2026-05-26 / **Draft v5** (5 wave: spot-check 19/20 → 깊이 매핑 30 file:line → 합집합 13 row → 꼼꼼 audit 333 cell+신발견 4 row → **wave 2 64 신발견 + S/T/U 신규 카테고리 +39 row**. 18→21 카테고리 / 220→~276 row)

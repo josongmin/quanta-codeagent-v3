@@ -30,7 +30,17 @@
  *     as `KnobParseError` AND re-thrown — surfaced as stderr + exit 1
  */
 
-import { type AnyKnob, allKnobs, KNOB_PRESETS, type KnobValueMap } from "@/runner/knobs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import {
+  type AnyKnob,
+  allKnobs,
+  KNOB_PRESETS,
+  type KnobValueMap,
+  knobsForSurface,
+  resolveKnobs,
+  writeKnobConfig,
+} from "@/runner/knobs"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /** Surface-wire contract passed to {@link buildKnobsSlash}. */
@@ -361,3 +371,56 @@ const doHelp = (args: readonly string[], ctx: SlashContext): number => {
   if (knob.help !== undefined) ctx.out(`\n${knob.help}\n`)
   return 0
 }
+
+/* ─── BUILTINS registration — default wire ──────────────────────────── */
+
+/** Default wire used by the BUILTINS-registered `/knobs` command. Backed by
+ *  a module-level session-overrides bag so successive `/knobs set`/`/knobs
+ *  reset`/`/knobs save` invocations in the SAME process see consistent
+ *  state. Surfaces that need their own scoped wire (a multi-session host,
+ *  for instance) should call {@link buildKnobsSlash} directly with a fresh
+ *  wire and bypass this default registration.
+ *
+ *  This mirrors the `loginCmd = buildLoginCmd()` pattern: a default-deps
+ *  static instance suitable for the standard single-session REPL. */
+const DEFAULT_OVERRIDES: Record<string, string> = {}
+
+const defaultConfigPath = (): string => join(homedir(), ".quanta", "knobs.json")
+
+const defaultResolve = (): KnobValueMap =>
+  resolveKnobs({
+    surface: "cli",
+    knobs: knobsForSurface("cli"),
+    sessionOverrides: DEFAULT_OVERRIDES,
+    envVars: process.env,
+  })
+
+const defaultWire: KnobsSurfaceWire = {
+  resolution: defaultResolve,
+  setOverride: (id, raw) => {
+    const knob = allKnobs().get(id)
+    DEFAULT_OVERRIDES[id] = raw
+    // Surface a non-fatal warning when the knob is read once at boot and
+    // cannot take effect mid-session — the override is still saved for the
+    // next process via `/knobs save`.
+    if (knob !== undefined && knob.hotToggleable === false) {
+      return `knob '${id}' is not hot-toggleable — saved for next session`
+    }
+    return undefined
+  },
+  resetOverride: (id) => {
+    delete DEFAULT_OVERRIDES[id]
+  },
+  sessionOverrides: () => DEFAULT_OVERRIDES,
+  save: async () => {
+    await writeKnobConfig({ ...DEFAULT_OVERRIDES }, defaultConfigPath())
+  },
+  get configPath() {
+    return defaultConfigPath()
+  },
+}
+
+/** BUILTINS-registered `/knobs` instance. Holds a module-level session
+ *  overrides bag so multi-invocation flow (`set` → `show` → `save`) is
+ *  consistent within a single process. */
+export const knobsCmd: SlashCommand = buildKnobsSlash(defaultWire)
