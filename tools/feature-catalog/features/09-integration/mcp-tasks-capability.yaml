@@ -1,0 +1,45 @@
+id: mcp-tasks-capability
+title: ADR-0196 MCP Tasks Capability (rmcp 0.15 standard)
+section: 9
+subsystem: MCP client capability negotiation
+order: 196
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:cursor, absorbed:claude, absorbed:codex, surface:core]
+depends_on: [mcp-client]
+purpose: |
+  Cursor + Claude + Codex 3-vendor 강신호 — rmcp 0.15 표준 MCP Tasks
+  capability 흡수. 4 method: tasks/list (cursor pagination) / tasks/getInfo
+  (task_id → status) / tasks/getResult (task_id → result|error) / tasks/cancel
+  (task_id → ok|not-cancellable). TaskState 5-arm (pending/in_progress/
+  completed/failed/cancelled). Capability negotiator port — `defaultNegotiator`
+  emits {} (byte-identical) vs `fullNegotiator` emits {tools/sampling/elicitation/
+  tasks}. JSON canonical key 정렬. ENV `QUANTA_MCP_CAPS=full` opt-in.
+  자체 client.ts 확장 — @modelcontextprotocol/sdk install 차단 (lib swap 1줄 후속).
+evidence:
+  code:
+    - src/mcp/capabilities/port.ts
+    - src/mcp/capabilities/default-negotiator.ts
+    - src/mcp/capabilities/full-negotiator.ts
+    - src/mcp/capabilities/index.ts
+    - src/mcp/tasks/port.ts
+    - src/mcp/tasks/types.ts
+    - src/mcp/tasks/default-store.ts
+    - src/mcp/tasks/poller.ts
+    - src/mcp/tasks/index.ts
+    - src/tool/mcp_tasks/list_tasks.ts
+    - src/tool/mcp_tasks/get_task.ts
+    - src/tool/mcp_tasks/cancel_task.ts
+    - src/tool/mcp_tasks/index.ts
+    - src/mcp/client.ts
+  adrs: [196]
+  tests:
+    unit: [tests/unit/mcp/capabilities-hellgate.test.ts, tests/unit/mcp/tasks-hellgate.test.ts, tests/unit/mcp/tasks-tools-hellgate.test.ts, tests/unit/mcp/negotiator-pick-hellgate.test.ts]
+knobs:
+  - QUANTA_MCP_CAPS
+notes: 'AbortSignal로 poller clean shutdown. 3 caller-wired tools (NOT in defaultTools).'

@@ -1,0 +1,35 @@
+id: error-routing-16-variant
+title: ADR-0217 Typed error enum 16-variant + 5-action retry router (Codex)
+section: 1
+subsystem: Error classification + retry routing
+order: 217
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: []
+purpose: |
+  Codex 16-arm typed enum 흡수 + 5-action retry routing. 분류:
+  contextWindowExceeded / usageLimitExceeded / cyberPolicy / httpConnectionFailed
+  / httpStatusCode / responseStream{Connection,Disconnect}Failed /
+  responseTooManyFailedAttempts / internalServerError / unauthorized /
+  badRequest / threadRollbackFailed / sandboxError / activeTurnNotSteerable
+  / unifiedExec{Startup,Interaction}. Routing: retry-same-turn /
+  retry-with-backoff / swap-fallback / hitl / abort.
+  ADR-0069 (typed-tool-failure-modes) 확장. wire는 retry caller가 opt-in.
+evidence:
+  code:
+    - src/agent/error-routing/port.ts
+    - src/agent/error-routing/types.ts
+    - src/agent/error-routing/default-classifier.ts
+    - src/agent/error-routing/default-router.ts
+    - src/agent/error-routing/index.ts
+  adrs: [217, 69]
+  tests:
+    unit: [tests/unit/agent/error-routing-hellgate.test.ts, tests/unit/agent/error-routing-wire-hellgate.test.ts]
+knobs: []
+notes: 'ADR collision 0203→0217 reconcile (user took 0203). Wire via RetryingLLMOptions.errorRouting? in ADR-0203 wire batch.'

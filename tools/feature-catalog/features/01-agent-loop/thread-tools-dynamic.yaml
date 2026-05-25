@@ -1,0 +1,34 @@
+id: thread-tools-dynamic
+title: ADR-0206 Per-thread dynamic tools + defer_loading
+section: 1
+subsystem: Per-thread tool registry
+order: 206
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: []
+purpose: |
+  Codex thread-scope dynamic tool 등록 + MCP server별 namespace + lazy
+  factory 흡수. ThreadToolRegistry (register/list/resolve/evict/evictNamespace)
+  + DynamicToolSpec.deferLoading 옵션 (lazy factory single-flight) +
+  composer (global + per-thread merge, per-thread wins by name). default-OFF:
+  global registry byte-identical. eager-factory throw 시 partial-insert 방지
+  (no half-state). 1000-tool 스케일 sanity 검증.
+evidence:
+  code:
+    - src/agent/thread-tools/port.ts
+    - src/agent/thread-tools/types.ts
+    - src/agent/thread-tools/in-memory-store.ts
+    - src/agent/thread-tools/lazy-resolver.ts
+    - src/agent/thread-tools/composer.ts
+    - src/agent/thread-tools/index.ts
+  adrs: [206]
+  tests:
+    unit: [tests/unit/agent/thread-tools-hellgate.test.ts, tests/unit/agent/thread-tools-wire-hellgate.test.ts]
+knobs: []
+notes: 'biome.json에 thread-tools plane-clean fence 등록 (blocks @/agent/loop + @/agent/dispatch).'

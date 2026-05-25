@@ -1,0 +1,33 @@
+id: dispatch-guard-wiring
+title: ADR-0229 DispatchGuard — 3-detector pre-flight composer (gitWriteProtect/branchOnly/hostAllowed)
+section: 1
+subsystem: Dispatch admissibility pre-flight
+order: 229
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:core, security-touched]
+depends_on: [git-write-protect, branch-only-policy, host-allowlist]
+purpose: |
+  Cursor 강신호 — 3 pure detector (gitWriteProtectReason, decideBranchOnly,
+  isHostAllowed) SHIP됐는데 dispatch seam 미배선이던 갭. DispatchGuard
+  port + default-guard 합성 (가장 보수 결정 win: deny > ask > allow) +
+  admissibility-gate pre-flight 1줄 wire. default-OFF: `config.dispatchGuard`
+  미주입 시 zero allocation pass-through. hardDeny=true는 retry 없이 즉시 abort.
+evidence:
+  code:
+    - src/agent/dispatch-guard/port.ts
+    - src/agent/dispatch-guard/types.ts
+    - src/agent/dispatch-guard/default-guard.ts
+    - src/agent/dispatch-guard/no-op-guard.ts
+    - src/agent/dispatch-guard/index.ts
+    - src/agent/dispatch.ts
+  adrs: [229, 91]
+  tests:
+    unit: [tests/unit/agent/dispatch-guard-hellgate.test.ts]
+knobs: []
+notes: '3 detector 시그니처 unchanged (sibling composer). 30 hellgate / 72 expects.'

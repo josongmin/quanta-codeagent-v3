@@ -1,0 +1,33 @@
+id: mcp-elicitation-schemas
+title: ADR-0197 MCP Elicitation 7-schema (rmcp 0.15)
+section: 9
+subsystem: MCP typed user input elicitation
+order: 197
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:cursor, absorbed:claude, absorbed:codex, surface:cli]
+depends_on: [mcp-tasks-capability]
+purpose: |
+  rmcp 0.15 Elicitation 7-schema 흡수 — typed user input prompt:
+  String / Number / Integer / Boolean / Enum / MultiSelectEnum /
+  SingleSelectEnum (각 Titled/Untitled variant = 14 zod schema). Port surface
+  7 method 1쌍. Adapters: defaultCliPrompter (REPL 통합) + headlessRejecter
+  (CI/non-TTY 환경 — typed `headless-denied`). zod validation 위반 시 1회
+  retry → 두 번째도 위반이면 abort. AbortSignal cancel 지원.
+evidence:
+  code:
+    - src/mcp/elicitation/port.ts
+    - src/mcp/elicitation/schemas.ts
+    - src/mcp/elicitation/default-cli-prompter.ts
+    - src/mcp/elicitation/headless-rejecter.ts
+    - src/mcp/elicitation/index.ts
+  adrs: [197, 196]
+  tests:
+    unit: [tests/unit/mcp/elicitation-hellgate.test.ts]
+knobs: []
+notes: 'enum/multi-enum 빈 옵션 → typed empty-enum. number/integer NaN/Infinity 거부.'

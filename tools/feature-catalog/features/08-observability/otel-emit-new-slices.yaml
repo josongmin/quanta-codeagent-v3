@@ -1,0 +1,43 @@
+id: otel-emit-new-slices
+title: ADR-0222 OTel emit unified across 4 new slices (fence-aware narrow ports)
+section: 8
+subsystem: Observability metric emission
+order: 222
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: [observability-vocabulary, metrics-instrument]
+purpose: |
+  4 새 슬라이스 (error-routing / shell-snapshot / git-directives / stream-timeout)
+  의 OTel metric 발화 unify. 슬라이스 fence 보존: 각 슬라이스에 narrow
+  `metric-port.ts` + `no-op-metric.ts` 정의 → observability adapter
+  (`wire-new-slices.ts`)는 type-only import으로 slice fence 통과. 6 canonical
+  metric key 추가:
+    - quanta.error.{kind,action} (counter)
+    - quanta.stream.{idle_ms,timeout_action} (histogram + counter)
+    - quanta.shell.snapshot_{duration_ms,bytes} (histogram x2)
+    - quanta.git.directive (counter)
+  thread-tools + stage1-store는 의식적 scope 외 (dashboard 영역).
+evidence:
+  code:
+    - src/observability/vocabulary.ts
+    - src/observability/metrics/new-slice-instruments.ts
+    - src/observability/metrics/wire-new-slices.ts
+    - src/agent/error-routing/metric-port.ts
+    - src/agent/error-routing/no-op-metric.ts
+    - src/agent/git-directives/metric-port.ts
+    - src/agent/git-directives/no-op-metric.ts
+    - src/agent/stream-timeout/metric-port.ts
+    - src/agent/stream-timeout/no-op-metric.ts
+    - src/runtime/shell-snapshot/metric-port.ts
+    - src/runtime/shell-snapshot/no-op-metric.ts
+  adrs: [222, 144, 154]
+  tests:
+    unit: [tests/unit/observability/new-slice-metrics-hellgate.test.ts]
+knobs: []
+notes: 'Default-OFF: no-op-metric 미교체 시 0 side-effect. ADR collision 0217→0222 reconcile (R sprint와 충돌).'

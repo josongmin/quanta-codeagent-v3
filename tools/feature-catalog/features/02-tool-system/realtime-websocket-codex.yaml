@@ -1,0 +1,42 @@
+id: realtime-websocket-codex
+title: ADR-0230 Realtime WebSocket — 8-method port (Codex streaming)
+section: 2
+subsystem: Realtime streaming
+order: 230
+maturity: L1
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: []
+purpose: |
+  Codex Desktop 8 realtime WS methods 흡수 (connect/send/onMessage/negotiate/
+  audioStart/audioStop/close/status). Bun native `globalThis.WebSocket`
+  (zero npm dependency, install gate honor). WebSocketCtor injectable
+  for deterministic tests. SDP negotiator (PCM/Opus marker preserve, text-level
+  exchange only). audio-codec marker-only (encode/decode 후속). AbortSignal
+  abort 시 in-flight WS 정리 (no zombie). headless-stub fully deterministic.
+evidence:
+  code:
+    - src/realtime/port.ts
+    - src/realtime/types.ts
+    - src/realtime/default-adapter.ts
+    - src/realtime/headless-stub.ts
+    - src/realtime/sdp-negotiator.ts
+    - src/realtime/audio-codec.ts
+    - src/realtime/index.ts
+  adrs: [230]
+  tests:
+    unit: [tests/unit/realtime/realtime-hellgate.test.ts]
+knobs: []
+deliberate_hold:
+  reason: |
+    Actual WebRTC media handoff + real audio encode/decode 후속 슬라이스.
+    SDP는 text-level negotiation만, audio-codec은 marker만.
+  promotion_path: |
+    Follow-up: WebRTC RTCPeerConnection adapter + Opus encoder/decoder
+    + voice slice (ADR-0202/0208)과 통합.
+notes: 'Default-OFF: 트리 어디서도 @/realtime import 0. 19 hellgate / 1058 expects.'

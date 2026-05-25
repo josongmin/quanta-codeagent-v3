@@ -1,0 +1,45 @@
+id: radar-cards-proposal-queue
+title: ADR-0231 Radar Cards — background proposal queue MVP (Claude CoworkRadar)
+section: 2
+subsystem: Background task proposal engine
+order: 231
+maturity: L1
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:claude, surface:core]
+depends_on: []
+purpose: |
+  Claude Desktop CoworkRadar 흡수 (MVP scope) — background에서 task
+  suggestion을 active proposal로 큐잉. 8-field RadarCard (id/kind/title/
+  description/sessionId?/createdAtMs/status/engagementCount) + 4-arm status
+  (active/adopted/dismissed/expired) + 3-arm kind (suggestion/warning/next-step).
+  RadarStore 5-method port (proposeCard/listActive/setStatus/recordEngagement/
+  prune) + 2 adapter (in-memory LRU / jsonl-file append-only). jsonl 0600
+  권한, replay double-write 방지 (replaying flag). idle-long-task sample heuristic
+  (pure, store push는 caller).
+evidence:
+  code:
+    - src/radar/port.ts
+    - src/radar/types.ts
+    - src/radar/in-memory-store.ts
+    - src/radar/jsonl-file-store.ts
+    - src/radar/headless-stub.ts
+    - src/radar/heuristics/idle-long-task.ts
+    - src/radar/index.ts
+  adrs: [231]
+  tests:
+    unit: [tests/unit/radar/radar-hellgate.test.ts]
+knobs: []
+deliberate_hold:
+  reason: |
+    Full heuristic suite + UI 통합 + OTel engagement signal emit 후속.
+    MVP는 engine + port + adapter + 1 sample heuristic만.
+  promotion_path: |
+    Follow-up: 추가 heuristic (long-running task / idle-stuck / branch-stale 등)
+    + UI surface (CLI banner + desktop panel) + engagement OTel emit
+    (`quanta.radar.engagement` metric).
+notes: '20 hellgate / 72 expects. Default-OFF: store 미주입 시 byte-identical.'
