@@ -63,6 +63,25 @@ const agentSchema = z.object({
         "'<cwd>/.subagent-state/<task_id>.md'. Parent reads via the normal `read` tool. " +
         "Incompatible with isolation:'worktree' (parent cannot read inside a throwaway worktree).",
     ),
+  // ADR-0298 — Cursor `is_parallel_worker` declarative flag. Carries ZERO
+  // functional behaviour: concurrency is governed by `isConcurrencySafe`
+  // (which returns true for `agent` unconditionally, since each child runs in
+  // its own conversation envelope and shares no mutable state with siblings).
+  // The flag is a PARENT-SIDE DECLARATION the LLM emits when it intentionally
+  // fans out independent workers in one assistant message — surfaced to
+  // telemetry / HITL so "5 parallel workers spawned" can be grouped as one
+  // event. The runner does NOT receive it (not threaded into SubagentRequest).
+  parallel_worker: z
+    .boolean()
+    .optional()
+    .describe(
+      "Declarative intent flag (ADR-0298 — Cursor is_parallel_worker pattern). " +
+        "Set to true when emitting multiple `agent` calls in ONE assistant message " +
+        "to fan out independent workers. Concurrency itself is automatic — the " +
+        "streaming-dispatch barrier already schedules concurrent-safe sibling " +
+        "calls in flight. This flag is for telemetry / UI grouping; functional " +
+        "behaviour is identical with or without it.",
+    ),
 })
 
 type AgentInput = z.infer<typeof agentSchema>
@@ -320,9 +339,23 @@ export const createAgentTool = (
     // and silently bypassed plan-mode dispatch guards. The mutating effect
     // is the child's reachable side-effect surface; classify accordingly.
     isReadOnly: () => false,
-    // Spawning a child agent has unbounded side effects via its own tools;
-    // never batch concurrently with sibling calls.
-    isConcurrencySafe: () => false,
+    // ADR-0298: concurrency-SAFE w.r.t. the parent loop. Each spawn returns
+    // immediately (foreground awaits a runner that owns its own conversation
+    // envelope; background hands back a task id) and shares NO mutable state
+    // with sibling spawns from the SAME parent:
+    //   - Each child has its own registry record + AbortController (the
+    //     parent's per-task `register()` mints a fresh one every call).
+    //   - Each child runs its own agent loop with its own working memory.
+    //   - Side effects happen inside the CHILD's dispatch — serialized within
+    //     that child's loop, not in the parent's dispatch seam.
+    //   - `inferToolTier` permission gates still run per call before dispatch.
+    // The previous `() => false` over-conservatively forced a head-of-line
+    // barrier whenever the model wanted to fan out 3-5 read-only explorers in
+    // one turn (a Cursor/Claude Code pattern: `is_parallel_worker:true`).
+    // Streaming-dispatch (`src/agent/streaming-dispatch.ts`) reads this and
+    // schedules sibling `agent` calls in flight (Phase 1 overlap), then
+    // collects their results in model-call order in Phase 4.
+    isConcurrencySafe: () => true,
     registry,
 
     async *execute(input: AgentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
