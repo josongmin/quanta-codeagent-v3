@@ -12,16 +12,14 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "wire:composition-root"]
 depends_on:
-  - subagent-typed
+  - subagent-mode-typed
   - focus-chain
-  - fork-session
-  - text-inbox
-  - plan-edit
-  - composer-edit
-  - sticky-model
-  - tool-profile
+  - fork-session-port
+  - slash-web-paste-edit
+  - sticky-model-per-mode
+  - tool-profile-preset
   - identity-mode-variant
-  - playbook-trigger
+  - playbook-trigger-cli-bind
   - automation-engine
 config_refs:
   cli_flags:

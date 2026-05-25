@@ -39,7 +39,7 @@ evidence:
     - src/skill/system-skills/git-log-search/SKILL.md
     - src/skill/system-skills/git-log-search/index.ts
     - src/skill/system-skills/index.ts
-  adrs: [172]
+  adrs: ["docs/decisions/0173-git-log-search-skill.md"]
   tests:
     unit:
       - tests/unit/system-skills-git-log-search-hellgate.test.ts

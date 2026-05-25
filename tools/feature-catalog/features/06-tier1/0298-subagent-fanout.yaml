@@ -11,7 +11,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:cursor, tier:1, surface:core]
-depends_on: [subagent-6-tools, subagent-background-wire, streaming-dispatch]
+depends_on: [subagent-6-tools, subagent-background-wire, create-stream-dispatcher]
 purpose: |
   Cursor 3.2 `is_parallel_worker:true` 패턴을 흡수하여 단일 assistant 메시지에
   `agent` 도구 호출 N개를 emit 했을 때 streaming-dispatch barrier 가 자동으로

@@ -43,7 +43,7 @@ evidence:
     - src/apps/cli/slash-contract.ts
     - src/apps/cli/slash-commands.ts
     - src/apps/cli/help-render.ts
-  adrs: [11, 76, 277]
+  adrs: [11, 76, "docs/decisions/0277-session-effort-wire.md"]
   tests:
     unit:
       - tests/unit/cli/effort-slash-hellgate.test.ts

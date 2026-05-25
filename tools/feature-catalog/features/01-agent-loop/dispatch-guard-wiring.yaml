@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, surface:core, security-touched]
-depends_on: [git-write-protect, branch-only-policy, host-allowlist]
+depends_on: [git-write-protection, branch-only-guard, network-allowlist-host-check]
 purpose: |
   Cursor 강신호 — 3 pure detector (gitWriteProtectReason, decideBranchOnly,
   isHostAllowed) SHIP됐는데 dispatch seam 미배선이던 갭. DispatchGuard

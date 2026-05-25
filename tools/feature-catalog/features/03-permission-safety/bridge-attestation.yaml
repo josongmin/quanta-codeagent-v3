@@ -43,7 +43,7 @@ evidence:
     - src/security/bridge-attest/default-attestor.ts
     - src/security/bridge-attest/headless-stub.ts
     - src/security/bridge-attest/index.ts
-  adrs: [246, 158, 166]
+  adrs: ["docs/decisions/0246-bridge-attestation.md", "docs/decisions/0184-conversation-checkpoint-lru-swap.md", "docs/decisions/0166-subagent-conversation-replay.md"]
   tests:
     unit:
       - tests/unit/security/bridge-attest-hellgate.test.ts

@@ -50,7 +50,7 @@ evidence:
     - src/scheduler/automation-engine/ticker.ts
     - src/scheduler/automation-engine/index.ts
     - src/scheduler/index.ts
-  adrs: ["docs/decisions/0215-rrule-automation-engine-wire.md", 161, 132]
+  adrs: ["docs/decisions/0215-rrule-automation-engine-wire.md", "docs/decisions/0161-scheduled-agent.md", 132]
   tests:
     unit:
       - tests/unit/automation-engine-hellgate.test.ts

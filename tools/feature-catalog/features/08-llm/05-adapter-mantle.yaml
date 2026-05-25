@@ -33,7 +33,7 @@ evidence:
     - src/llm/providers/provider-port.ts
     - src/llm/providers/registry.ts
   adrs:
-    - 0163
+    - docs/decisions/0163-multicloud-oauth-lock.md
   tests:
     unit:
       - tests/unit/llm-adapter-mantle-hellgate.test.ts

@@ -14,7 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0167", "tier:1", "plan-queue", "observability"]
 depends_on:
-  - plan-queue-store
+  - plan-queue
 purpose: |
   Closes the ADR-0161 follow-up gap: PlanQueueStore previously returned
   just a string id from `enqueue` — when ADR-0128's dedup rule collapsed

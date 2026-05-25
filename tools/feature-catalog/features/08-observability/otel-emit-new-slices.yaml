@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core]
-depends_on: [observability-vocabulary, metrics-instrument]
+depends_on: [otel-attribute-vocab, metrics-typed-port-slice]
 purpose: |
   4 새 슬라이스 (error-routing / shell-snapshot / git-directives / stream-timeout)
   의 OTel metric 발화 unify. 슬라이스 fence 보존: 각 슬라이스에 narrow

@@ -37,7 +37,7 @@ evidence:
     - src/auth/lock-file-based.ts
     - src/auth/lock-redis-stub.ts
   adrs:
-    - 0163
+    - docs/decisions/0163-multicloud-oauth-lock.md
   tests:
     unit:
       - tests/unit/oauth-refresh-lock-hellgate.test.ts

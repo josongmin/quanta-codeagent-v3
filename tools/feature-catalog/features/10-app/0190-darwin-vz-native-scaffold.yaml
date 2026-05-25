@@ -14,8 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0190", "tier:2", "sandbox", "darwin"]
 depends_on:
-  - skybridge-policy
-  - linux-sandbox-native
+  - linux-sandbox-native-impl
 purpose: |
   napi-rs Cargo workspace member (`crates/darwin-vz-helper/`) — typed
   surface + 20-case fake-binding hellgate + TS adapter

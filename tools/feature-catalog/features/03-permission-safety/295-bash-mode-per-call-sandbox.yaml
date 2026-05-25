@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:cursor", "security-touched", "default-off"]
-depends_on: [os-sandbox-helper]
+depends_on: [os-sandbox-port-router]
 purpose: |
   Cursor 3.2 패턴 흡수 — bash tool 입력에 closed-enum `mode: "read"|"write"`
   (OPTIONAL, default "write"). `mode="read"` 일 때 호출당 OS sandbox

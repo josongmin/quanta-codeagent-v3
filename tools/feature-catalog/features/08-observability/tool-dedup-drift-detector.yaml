@@ -36,7 +36,7 @@ purpose: |
 evidence:
   code:
     - src/observability/metrics/instrument-tool-dedup.ts
-  adrs: [179, 169, 175, 183]
+  adrs: [179, 169, "docs/decisions/0175-observability-wired-gauge.md", 183]
   tests:
     unit:
       - tests/unit/observability-metrics-instrument-tool-dedup-hellgate.test.ts

@@ -40,7 +40,7 @@ evidence:
   adrs:
     - 0139
     - 0151
-    - 0163
+    - docs/decisions/0163-multicloud-oauth-lock.md
   tests:
     unit:
       - tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts

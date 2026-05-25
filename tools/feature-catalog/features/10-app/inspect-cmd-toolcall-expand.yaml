@@ -11,7 +11,7 @@ modes: [interactive, headless, ide]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:observability"]
-depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, decision-emit-phase3-cap-jail-budget, 02-jsonlrecorder]
+depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, decision-emit-phase3-cap-jail-budget, jsonlrecorder]
 config_refs:
   env: []
 purpose: |

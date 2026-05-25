@@ -35,7 +35,7 @@ evidence:
     - src/apps/agent/index.ts
     - src/agent/hitl-tier-registry.ts
     - src/permission/policy.ts
-  adrs: [78, 297]
+  adrs: [78, "docs/decisions/0297-sandbox-driven-hitl.md"]
   tests:
     unit:
       - tests/unit/bash.test.ts

@@ -53,7 +53,7 @@ purpose: |
 evidence:
   code:
     - src/agent/debug-trace-autofix.ts
-  adrs: [186]
+  adrs: ["docs/decisions/0188-bug-fix-proposal-queue.md"]
   tests:
     unit:
       - tests/unit/agent-debug-trace-autofix-hellgate.test.ts

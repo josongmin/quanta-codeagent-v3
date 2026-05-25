@@ -57,7 +57,7 @@ evidence:
     - src/runner/assemble/index.ts
     - src/apps/agent/index.ts
     - src/agent/types.ts
-  adrs: [159]
+  adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:
       - tests/unit/retrieval-composition-wire-hellgate.test.ts

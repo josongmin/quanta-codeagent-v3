@@ -14,7 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0165", "tier:1", "observability", "coverage"]
 depends_on:
-  - observability-metrics
+  - metrics-typed-port-slice
 purpose: |
   4-part hexagonal slice in `src/observability/coverage/`. Closed
   `CoverageSource` port + V8 JSON adapter (byte-range → per-line, inner

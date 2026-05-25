@@ -33,7 +33,7 @@ evidence:
     - src/llm/providers/registry.ts
   adrs:
     - 0139
-    - 0163
+    - docs/decisions/0163-foundry-future-ready.md
   tests:
     unit:
       - tests/unit/llm-providers/registry-hellgate.test.ts

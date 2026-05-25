@@ -28,7 +28,7 @@ evidence:
     - src/observability/metrics/observability-helper.ts
     - src/observability/metrics/index.ts
     - src/observability/metrics/port.ts
-  adrs: [172]
+  adrs: ["docs/decisions/0175-observability-wired-gauge.md"]
   tests:
     unit:
       - tests/unit/observability-metrics-wired-gauge-hellgate.test.ts

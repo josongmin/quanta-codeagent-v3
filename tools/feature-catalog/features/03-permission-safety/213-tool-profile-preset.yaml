@@ -11,7 +11,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:zed, absorbed:codex, surface:core, tier:core]
-depends_on: [permission-stack-adr-0046, tool-tier-matcher-adr-0055]
+depends_on: [permission-hook-ordering, awf-tool-matcher]
 purpose: |
   Zed의 named "tool profile" mode 3종 (Write/Ask/Minimal) + Codex agent_role enum (explorer/
   worker/none) 패턴 흡수. v3는 fine-grained 조각 (ADR-0046 permission stack / ADR-0055 HITL

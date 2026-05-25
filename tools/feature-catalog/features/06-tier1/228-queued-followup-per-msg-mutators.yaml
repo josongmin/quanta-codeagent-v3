@@ -11,7 +11,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:1", "absorbed:codex"]
-depends_on: ["plan-queue-codex-followup-envelope", "voice-input-stt-slice"]
+depends_on: [queued-follow-ups, "voice-input-stt-slice"]
 purpose: |
   Codex Desktop composer absorption: each paused/active follow-up gets 4
   mutators — `retry` (re-queue same body), `edit` (in-place body update),

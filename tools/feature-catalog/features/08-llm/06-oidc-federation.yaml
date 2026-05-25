@@ -36,7 +36,7 @@ evidence:
     - src/llm/oidc-federation.ts
     - src/llm/provider-types.ts
   adrs:
-    - 0163
+    - docs/decisions/0163-multicloud-oauth-lock.md
   tests:
     unit:
       - tests/unit/oidc-federation-hellgate.test.ts

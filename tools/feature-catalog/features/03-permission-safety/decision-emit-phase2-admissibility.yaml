@@ -11,7 +11,7 @@ modes: [interactive, headless, daemon, ide, ci-bot]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:permission", "tier:observability", "phase:2"]
-depends_on: [debug-tracer-decision-event, 02-harddeny-readonly-short-circuit, hitl-4-tier-gate, 03-prefix-rule-dsl]
+depends_on: [debug-tracer-decision-event, harddeny-readonly-short-circuit, hitl-4-tier-gate, prefix-rule-dsl]
 config_refs:
   env: []
 purpose: |

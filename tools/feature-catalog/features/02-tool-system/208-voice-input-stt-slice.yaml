@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: static
 owners: ["@songmin"]
 labels: [absorbed:4-vendor, surface:cli, default-off]
-depends_on: [voice-input-stt, plan-queue]
+depends_on: [plan-queue]
 config_refs:
   env: []
 purpose: |

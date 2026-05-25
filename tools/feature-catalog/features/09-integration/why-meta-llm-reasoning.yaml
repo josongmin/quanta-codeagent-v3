@@ -11,7 +11,7 @@ modes: [interactive]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:observability"]
-depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, inspect-cmd-toolcall-expand, 30-llm-factory]
+depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, inspect-cmd-toolcall-expand, llm-factory]
 config_refs:
   env: []
 purpose: |

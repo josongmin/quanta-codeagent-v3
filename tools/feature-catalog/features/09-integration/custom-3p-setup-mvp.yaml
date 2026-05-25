@@ -48,7 +48,7 @@ evidence:
   adrs:
     - docs/decisions/0245-custom-3p-setup-mvp.md
     - 151
-    - 163
+    - docs/decisions/0163-multicloud-oauth-lock.md
   tests:
     unit:
       - tests/unit/connectors/custom-3p-hellgate.test.ts

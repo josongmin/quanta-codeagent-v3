@@ -37,7 +37,7 @@ evidence:
     - src/auth/github-token-rotation.ts
     - src/auth/oauth-refresh-lock.ts
   adrs:
-    - 0163
+    - docs/decisions/0163-multicloud-oauth-lock.md
   tests:
     unit:
       - tests/unit/github-token-rotation-hellgate.test.ts

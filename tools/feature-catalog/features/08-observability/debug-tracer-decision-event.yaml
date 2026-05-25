@@ -11,7 +11,7 @@ modes: [interactive, headless, daemon, ide, ci-bot]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:cli", "tier:observability", "absorbed:cursor", "absorbed:claude-desktop", "absorbed:codex"]
-depends_on: [01-agentevent, 02-jsonlrecorder]
+depends_on: [agentevent, jsonlrecorder]
 config_refs:
   env: ["QUANTA_DEBUG"]
 purpose: |

@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli, security-touched]
-depends_on: [os-sandbox-helper]
+depends_on: [os-sandbox-port-router]
 purpose: |
   Codex 강신호 — macOS Seatbelt SBPL profile을 verbatim parity로 잠금
   (3 profile: read-only / workspace-write / workspace-write-net). parity

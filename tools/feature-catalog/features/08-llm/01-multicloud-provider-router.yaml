@@ -42,7 +42,7 @@ evidence:
     - src/llm/provider-router.ts
     - src/llm/provider-types.ts
   adrs:
-    - 0163
+    - docs/decisions/0163-multicloud-oauth-lock.md
   tests:
     unit:
       - tests/unit/llm-provider-router-hellgate.test.ts

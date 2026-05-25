@@ -14,7 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0178", "tier:1", "plan-queue", "interruption"]
 depends_on:
-  - plan-queue-store
+  - plan-queue
 purpose: |
   Capture facade that maps the CLI "user submitted while streaming"
   signal onto ADR-0128's PlanQueueStore. 3-arm closed `InterruptionMode`

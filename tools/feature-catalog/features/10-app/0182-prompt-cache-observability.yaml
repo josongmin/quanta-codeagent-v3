@@ -15,7 +15,7 @@ owners: ["@songmin"]
 labels: ["adr-0182", "tier:1", "observability", "prompt-cache"]
 depends_on:
   - budget-ledger
-  - observability-metrics
+  - metrics-typed-port-slice
 purpose: |
   Typed observer slice (`src/observability/prompt-cache/`) for the
   Anthropic Messages API `cache_control:{type:"ephemeral"}` mechanic.

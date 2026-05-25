@@ -11,7 +11,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off", "absorbed:cursor", "absorbed:codex"]
-depends_on: [04-codex-2-phase-consolidator, 216-stage1-store-agent-port, consolidator-session-hook]
+depends_on: [codex-2-phase-consolidator, stage1-store-agent-port, consolidator-session-hook]
 config_refs:
   env: [QUANTA_MEMORY_AUTO, QUANTA_MEMORY_THRESHOLD, QUANTA_MEMORY_MIN_USAGE]
 purpose: |

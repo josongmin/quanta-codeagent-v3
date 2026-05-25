@@ -11,7 +11,7 @@ modes: [interactive, headless, daemon, ide, ci-bot]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:observability", "tier:adapter", "absorbed:opentelemetry"]
-depends_on: [74-otel-span-tree, 113-otel-sink, metrics-typed-port-slice]
+depends_on: [otel-span-tree, otel-sink, metrics-typed-port-slice]
 config_refs:
   env:
     - QUANTA_OTEL_ENDPOINT

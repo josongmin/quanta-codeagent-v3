@@ -14,7 +14,7 @@ config_refs:
 owners: ["@songmin"]
 labels: ["adr-0193", "tier:2", "sandbox", "linux"]
 depends_on:
-  - os-sandbox-helper
+  - os-sandbox-port-router
 purpose: |
   Fills the Rust function bodies stubbed by ADR-0175's Phase 3 scaffold.
   `crates/linux-sandbox-native/src/policy.rs` builds
