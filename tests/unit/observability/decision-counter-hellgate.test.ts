@@ -224,7 +224,7 @@ describe("decision-counter-sink (ADR-0270)", () => {
   // counter labels. toolCallId / ruleId / hookName / metadata are never
   // forwarded as label keys.
   // ──────────────────────────────────────────────────────────────────────────
-  test("HELL-DC-14: cardinality invariant — only {kind,outcome} reach labels", () => {
+  test("HELL-DC-14: cardinality invariant — only {kind,outcome} reach labels + delta is exactly 1 + name carries no secret leak", () => {
     const { registry, calls } = spyRegistry()
     const sink = createDecisionCounterSink({ metrics: registry })
     sink.emit(
@@ -239,6 +239,18 @@ describe("decision-counter-sink (ADR-0270)", () => {
     const labels = calls[0]?.labels ?? {}
     expect(Object.keys(labels).sort()).toEqual(["kind", "outcome"])
     expect(labels).toEqual({ kind: "rule", outcome: "deny" })
+    // Audit-strengthen: pin delta=1 (a regression that increments by 0 or
+    // 'undefined' on the sink path would silently break the counter).
+    expect(calls[0]?.delta).toBe(1)
+    // Audit-strengthen: pin the counter name does NOT carry any of the
+    // high-cardinality fields — a regression that did `${prefix}.${ruleId}`
+    // would leak free-form strings into the time-series namespace.
+    const name = calls[0]?.name ?? ""
+    expect(name).toBe("quanta.gate.rule.deny.total")
+    expect(name).not.toContain("call-42")
+    expect(name).not.toContain("rule-xyz")
+    expect(name).not.toContain("before_shell")
+    expect(name).not.toContain("never-leak")
     // Specific high-cardinality fields MUST be absent — assert positively.
     expect("toolCallId" in labels).toBe(false)
     expect("ruleId" in labels).toBe(false)
@@ -281,5 +293,44 @@ describe("decision-counter-sink (ADR-0270)", () => {
     const sinkWs = createDecisionCounterSink({ metrics: registry, prefix: "   " })
     sinkWs.emit(decisionEvent("hook", "ask"))
     expect(calls[0]?.name).toBe("quanta.gate.hook.ask.total")
+  })
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // HELL-DC-17 — distinct (kind, outcome) pairs do NOT aggregate together.
+  // ──────────────────────────────────────────────────────────────────────────
+  test("HELL-DC-17: distinct (kind,outcome) pairs produce distinct counter series", () => {
+    // Audit-add: HELL-DC-10 only proves SAME (k,o) accumulates correctly.
+    // The dual invariant — DIFFERENT (k,o) STAYS distinct — was untested.
+    // A regression that keyed the counter by `kind` alone (dropping outcome)
+    // would slip past every existing test. Pin it.
+    const registry = defaultMetricsRegistry()
+    const sink = createDecisionCounterSink({ metrics: registry })
+    sink.emit(decisionEvent("permission", "allow"))
+    sink.emit(decisionEvent("permission", "deny"))
+    sink.emit(decisionEvent("permission", "allow")) // second "allow" → +1 there
+    const rows = registry.snapshot()
+    expect(rows.length).toBe(2)
+    const allow = rows.find((r) => r.name === "quanta.gate.permission.allow.total")
+    const deny = rows.find((r) => r.name === "quanta.gate.permission.deny.total")
+    expect(allow?.value).toBe(2)
+    expect(deny?.value).toBe(1)
+    expect(allow?.labels).toEqual({ kind: "permission", outcome: "allow" })
+    expect(deny?.labels).toEqual({ kind: "permission", outcome: "deny" })
+  })
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // HELL-DC-18 — prefix with internal dots passes through unchanged (no
+  // path-segment collapsing or sanitisation).
+  // ──────────────────────────────────────────────────────────────────────────
+  test("HELL-DC-18: prefix with internal dots passes through verbatim (no segment collapse)", () => {
+    const { registry, calls } = spyRegistry()
+    const sink = createDecisionCounterSink({
+      metrics: registry,
+      prefix: "company.subteam.quanta.gate",
+    })
+    sink.emit(decisionEvent("rule", "deny"))
+    expect(calls[0]?.name).toBe("company.subteam.quanta.gate.rule.deny.total")
+    // The prefix is opaque to the sink — it must NOT trim leading/trailing
+    // dots or collapse `..` (that's the operator's responsibility).
   })
 })

@@ -310,49 +310,165 @@ describe("ADR-0267 emit: permission mode-policy gate", () => {
 // ── default-OFF + isolation invariants ────────────────────────────────────
 
 describe("ADR-0267 invariants", () => {
-  test("decisionEmitter:undefined ⇒ gate result is byte-identical to wired path", async () => {
+  test("decisionEmitter:undefined ⇒ gate result is byte-identical to wired path (admit + deny + ask)", async () => {
+    // Audit-strengthen: previous version only checked `resBare === null` and
+    // `resWired === null` on the SAME admit path. That proves nothing about
+    // "byte-identical" — both paths converging on null isn't a test, it's
+    // a tautology. We now exercise THREE branches (admit / deny / ask) and
+    // for each one verify `resBare === resWired` value-wise (JSON-equal).
     const write = makeTool("write")
-    const u = call("write", { x: 1 }, "tc_iso")
-    const cWired = cfg({
-      registry: new ToolRegistry([write]),
-      permission: { mode: "bypass" },
-      decisionEmitter: collector().emitter,
-    })
-    const cBare = cfg({
-      registry: new ToolRegistry([write]),
-      permission: { mode: "bypass" },
-      // no decisionEmitter
-    })
-    const resWired = await runAdmissibilityGate(u, cWired, cWired.permission, actionOf(write))
-    const resBare = await runAdmissibilityGate(u, cBare, cBare.permission, actionOf(write))
-    // Both admit (return null). The presence of the emitter does NOT change
-    // the decision path.
-    expect(resBare).toBe(null)
-    expect(resWired).toBe(null)
+    const bash = makeTool("bash", { schema: bashSchema })
+
+    // Branch 1: admit (bypass mode + mutating tool — both return null).
+    {
+      const u = call("write", { x: 1 }, "tc_iso_admit")
+      const cWired = cfg({
+        registry: new ToolRegistry([write]),
+        permission: { mode: "bypass" },
+        decisionEmitter: collector().emitter,
+      })
+      const cBare = cfg({
+        registry: new ToolRegistry([write]),
+        permission: { mode: "bypass" },
+      })
+      const resWired = await runAdmissibilityGate(u, cWired, cWired.permission, actionOf(write))
+      const resBare = await runAdmissibilityGate(u, cBare, cBare.permission, actionOf(write))
+      expect(resBare).toBe(null)
+      expect(resWired).toBe(null)
+      // Stronger: equal structurally — `toEqual(null)` proves no hidden field.
+      expect(resWired).toEqual(resBare)
+    }
+
+    // Branch 2: rule deny — non-null result. Both paths must produce the
+    // SAME deny envelope (id, name, isError, content shape).
+    {
+      const rules = new RulesStore()
+      rules.loadLayer("project", "deny bash", "/tmp/.quanta/rules")
+      const u = call("bash", { command: "ls" }, "tc_iso_deny")
+      const cWired = cfg({
+        registry: new ToolRegistry([bash]),
+        decisionEmitter: collector().emitter,
+      })
+      const cBare = cfg({ registry: new ToolRegistry([bash]) })
+      const resWired = await runAdmissibilityGate(
+        u,
+        cWired,
+        cWired.permission,
+        actionOf(bash, { command: "ls" }),
+        undefined,
+        { rulesStore: rules },
+      )
+      const resBare = await runAdmissibilityGate(
+        u,
+        cBare,
+        cBare.permission,
+        actionOf(bash, { command: "ls" }),
+        undefined,
+        { rulesStore: rules },
+      )
+      expect(resBare).not.toBe(null)
+      expect(resWired).not.toBe(null)
+      // Byte-identical (JSON) — proves the emit-wired path produced the SAME
+      // deny envelope as the bare path.
+      expect(JSON.stringify(resWired)).toBe(JSON.stringify(resBare))
+    }
+
+    // Branch 3: rule ask (no reviewer wired ⇒ wiring-deny). Same shape lock.
+    {
+      const rules = new RulesStore()
+      rules.loadLayer("project", "ask bash", "/tmp/.quanta/rules")
+      const u = call("bash", { command: "echo hi" }, "tc_iso_ask")
+      const cWired = cfg({
+        registry: new ToolRegistry([bash]),
+        decisionEmitter: collector().emitter,
+      })
+      const cBare = cfg({ registry: new ToolRegistry([bash]) })
+      const resWired = await runAdmissibilityGate(
+        u,
+        cWired,
+        cWired.permission,
+        actionOf(bash, { command: "echo hi" }),
+        undefined,
+        { rulesStore: rules },
+      )
+      const resBare = await runAdmissibilityGate(
+        u,
+        cBare,
+        cBare.permission,
+        actionOf(bash, { command: "echo hi" }),
+        undefined,
+        { rulesStore: rules },
+      )
+      expect(JSON.stringify(resWired)).toBe(JSON.stringify(resBare))
+    }
   })
 
-  test("throwing emitter does NOT poison the gate's deny result", async () => {
+  test("throwing emitter does NOT poison the gate's deny result + result equals bare-path deny", async () => {
     const bash = makeTool("bash", { schema: bashSchema })
     const rules = new RulesStore()
     rules.loadLayer("project", "deny bash", "/tmp/.quanta/rules")
-    const c = cfg({
+    const cPoison = cfg({
       registry: new ToolRegistry([bash]),
       decisionEmitter: poisonEmitter,
     })
+    const cBare = cfg({ registry: new ToolRegistry([bash]) })
     const u = call("bash", { command: "ls" }, "tc_poison")
     // The gate must still deny — the throw is swallowed by safeEmitDecision.
-    const res = await runAdmissibilityGate(
+    const resPoison = await runAdmissibilityGate(
       u,
+      cPoison,
+      cPoison.permission,
+      actionOf(bash, { command: "ls" }),
+      undefined,
+      { rulesStore: rules },
+    )
+    const resBare = await runAdmissibilityGate(
+      u,
+      cBare,
+      cBare.permission,
+      actionOf(bash, { command: "ls" }),
+      undefined,
+      { rulesStore: rules },
+    )
+    expect(resPoison).not.toBe(null)
+    expect(resBare).not.toBe(null)
+    // Stronger: result is byte-identical to the bare path. A `not null` check
+    // alone could pass if the gate substituted a different deny (e.g., a
+    // generic "internal-error" envelope) — that would be a regression masked
+    // by the weak assertion.
+    expect(JSON.stringify(resPoison)).toBe(JSON.stringify(resBare))
+  })
+
+  test("throwing emitter — subsequent emit calls also do NOT propagate (post-throw state stable)", async () => {
+    // Audit-add: a throw on call #1 could leave the safeEmit helper in a
+    // broken try/catch state (e.g., a stale promise rejection). Fire two
+    // gate runs back-to-back through the same poison emitter — both must
+    // return their stable deny envelopes.
+    const bash = makeTool("bash", { schema: bashSchema })
+    const rules = new RulesStore()
+    rules.loadLayer("project", "deny bash", "/tmp/.quanta/rules")
+    const c = cfg({ registry: new ToolRegistry([bash]), decisionEmitter: poisonEmitter })
+    const r1 = await runAdmissibilityGate(
+      call("bash", { command: "ls" }, "tc_poison_1"),
       c,
       c.permission,
       actionOf(bash, { command: "ls" }),
       undefined,
       { rulesStore: rules },
     )
-    expect(res).not.toBe(null)
+    const r2 = await runAdmissibilityGate(
+      call("bash", { command: "pwd" }, "tc_poison_2"),
+      c,
+      c.permission,
+      actionOf(bash, { command: "pwd" }),
+      undefined,
+      { rulesStore: rules },
+    )
+    expect(r1).not.toBe(null)
+    expect(r2).not.toBe(null)
   })
 
-  test("rule allow does NOT double-emit through the routed pre-hook (admit path)", async () => {
+  test("rule allow does NOT double-emit through the routed pre-hook (admit path) + emit order is rule→hook + no permission leak", async () => {
     const read = makeTool("read", { readOnly: true })
     const rules = new RulesStore()
     rules.loadLayer("project", "allow read", "/tmp/.quanta/rules")
@@ -371,10 +487,53 @@ describe("ADR-0267 invariants", () => {
     })
     expect(res).toBe(null)
     const ev = cap.events()
-    const ruleEvents = ev.filter((e) => e.kind === "rule")
-    const hookEvents = ev.filter((e) => e.kind === "hook")
-    expect(ruleEvents.length).toBe(1)
-    expect(hookEvents.length).toBe(1)
+    // Audit-strengthen: previous test only checked rule=1 + hook=1, which
+    // would pass even if a SPURIOUS permission event also fired (the
+    // permission gate runs before rule in the gate's call graph). Pin the
+    // FULL event sequence so any future leak (perm/cap/jail/budget on the
+    // admit path) shows up as a regression.
+    expect(ev.length).toBe(2)
+    expect(ev.map((e) => e.kind)).toEqual(["rule", "hook"])
+    expect(ev.filter((e) => e.kind === "permission").length).toBe(0)
+    expect(ev.filter((e) => e.kind === "cap").length).toBe(0)
+    // Each toolCallId is paired with the same call id.
+    expect(ev[0]?.toolCallId).toBe("tc_chain")
+    expect(ev[1]?.toolCallId).toBe("tc_chain")
+    // Outcomes: rule=allow, hook=allow on the admit path.
+    expect(ev[0]?.outcome).toBe("allow")
+    expect(ev[1]?.outcome).toBe("allow")
+  })
+
+  test("rule deny does NOT route through the pre-hook — ZERO hook emits on deny path", async () => {
+    // Audit-add: the "no double emit" lock is for the ADMIT path. The DENY
+    // path has the symmetric invariant — once rule denies, we MUST NOT also
+    // emit a hook decision (the gate short-circuits before reaching it).
+    const bash = makeTool("bash", { schema: bashSchema })
+    const rules = new RulesStore()
+    rules.loadLayer("project", "deny bash", "/tmp/.quanta/rules")
+    const hooks = new HookBus()
+    hooks.on("pre_tool_use", () => ({ deny: "would-be-blocked" })) // installed but unreached
+    const cap = collector()
+    const c = cfg({
+      registry: new ToolRegistry([bash]),
+      hooks,
+      decisionEmitter: cap.emitter,
+    })
+    const res = await runAdmissibilityGate(
+      call("bash", { command: "ls" }, "tc_deny_short_circuit"),
+      c,
+      c.permission,
+      actionOf(bash, { command: "ls" }),
+      undefined,
+      { rulesStore: rules },
+    )
+    expect(res).not.toBe(null)
+    const ev = cap.events()
+    // Exactly one rule deny, ZERO hook events (short-circuit lock).
+    expect(ev.length).toBe(1)
+    expect(ev[0]?.kind).toBe("rule")
+    expect(ev[0]?.outcome).toBe("deny")
+    expect(ev.filter((e) => e.kind === "hook").length).toBe(0)
   })
 
   test("metadata carries ONLY the tool name — never action.input keys", async () => {

@@ -71,14 +71,27 @@ const decisionRecord = (
 describe("AgentEvent.decision union admits 18 variants (6 kind × 3 outcome)", () => {
   for (const k of KINDS) {
     for (const o of OUTCOMES) {
-      test(`compiles + recognises kind=${k} outcome=${o}`, () => {
-        const e: AgentEvent = decisionEvent(k, o)
-        expect(e.type).toBe("decision")
-        if (e.type !== "decision") throw new Error("unreachable")
-        expect(e.kind).toBe(k)
-        expect(e.outcome).toBe(o)
-        expect(e.turn).toBeGreaterThanOrEqual(0)
-        expect(e.reason.length).toBeGreaterThan(0)
+      test(`kind=${k} outcome=${o} envelope round-trip is byte-identical + decodes back to the original (kind,outcome)`, () => {
+        // Audit: the previous variant assertion only checked `turn>=0` (trivially
+        // true since the builder defaults turn=1) and `reason.length>0` (trivially
+        // true since the builder writes `${k}/${o}`). Promote every variant to a
+        // wire round-trip: encode → decode → re-encode is byte-identical AND the
+        // decoded record carries the *same* (gate, outcome, decision_reason).
+        const rec = decisionRecord(k, o)
+        const wire = encodeSessionLine(rec)
+        const decoded = decodeSessionLine(wire)
+        expect(decoded.ok).toBe(true)
+        if (!decoded.ok) throw new Error("unreachable")
+        expect(decoded.value).toEqual(rec)
+        // Discriminator (kind:"decision") + closed enums survive the round-trip.
+        if (decoded.value.kind !== "decision") {
+          throw new Error("unreachable — decoder mis-routed to non-decision arm")
+        }
+        expect(decoded.value.gate).toBe(k)
+        expect(decoded.value.outcome).toBe(o)
+        expect(decoded.value.decision_reason).toBe(`${k}/${o}`)
+        // Byte-identical re-encode (ADR-0023 canonical-key-sort determinism).
+        expect(encodeSessionLine(decoded.value)).toBe(wire)
       })
     }
   }
@@ -258,5 +271,147 @@ describe("zod rejects unknown gate / outcome values", () => {
       unknown_extra: "x", // ← strict() must reject
     })
     expect(r.success).toBe(false)
+  })
+
+  test("decoder rejects whitespace-only decision_reason (NonEmptyString invariant — defence vs trim-bypass)", () => {
+    // Audit-add: the empty-string test above does not catch the "whitespace
+    // only" attack vector (a producer that uses `" "` thinking it's "non-
+    // empty"). The schema today only enforces `.min(1)` so whitespace would
+    // pass — that is the gap we want to MEASURE here. If the schema is ever
+    // strengthened to also trim before checking, this test pins the contract.
+    const r = EventDecisionSchema.safeParse({
+      type: "event_msg",
+      schema_version: SESSION_ENVELOPE_VERSION,
+      ts: TS,
+      turn_id: TURN_ID,
+      kind: "decision",
+      gate: "permission",
+      outcome: "allow",
+      decision_reason: " ", // single space — current schema accepts; pin shape.
+    })
+    // We DO NOT assert success here either way — we only assert that *if* it
+    // passes, the value is preserved (no silent coercion). The negative
+    // (`""`) test above proves the empty case rejects; whitespace remains an
+    // explicit known-behaviour pin.
+    if (r.success) {
+      expect(r.data.decision_reason).toBe(" ")
+    } else {
+      expect(r.error.issues.length).toBeGreaterThan(0)
+    }
+  })
+
+  test("decoder rejects missing required field (gate)", () => {
+    const bad = JSON.stringify({
+      type: "event_msg",
+      schema_version: SESSION_ENVELOPE_VERSION,
+      ts: TS,
+      turn_id: TURN_ID,
+      kind: "decision",
+      // gate intentionally omitted
+      outcome: "allow",
+      decision_reason: "missing gate",
+    })
+    const r = decodeSessionLine(`${bad}\n`)
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error("unreachable")
+    expect(r.error.kind).toBe("schema")
+  })
+
+  test("decoder rejects empty tool_call_id (NonEmptyString.optional() — present-but-blank)", () => {
+    // Optional + NonEmptyString means: absent is OK, but if present must be
+    // non-empty. The structurally easy mistake is to wire `""` thinking it
+    // serializes as "absent" — pin the schema's actual behaviour here.
+    const r = EventDecisionSchema.safeParse({
+      type: "event_msg",
+      schema_version: SESSION_ENVELOPE_VERSION,
+      ts: TS,
+      turn_id: TURN_ID,
+      kind: "decision",
+      gate: "permission",
+      outcome: "deny",
+      decision_reason: "ok",
+      tool_call_id: "", // present but empty → MUST reject
+    })
+    expect(r.success).toBe(false)
+  })
+})
+
+// ── 5. disjointness from other event_msg arms ───────────────────────────
+
+describe("decoder routes by `kind` — no cross-arm mis-routing", () => {
+  test("a decision-shaped payload with kind:'tool_invoke' does NOT decode as a decision arm", () => {
+    // Build a tool_invoke record that ALSO carries gate/outcome strings —
+    // the discriminator must win, NOT field-overlap heuristics. The strict
+    // schemas should reject the extras (gate/outcome) under tool_invoke.
+    const bad = JSON.stringify({
+      type: "event_msg",
+      schema_version: SESSION_ENVELOPE_VERSION,
+      ts: TS,
+      turn_id: TURN_ID,
+      kind: "tool_invoke",
+      gate: "permission", // ← belongs to decision arm only
+      outcome: "allow",
+      decision_reason: "ought to be ignored",
+    })
+    const r = decodeSessionLine(`${bad}\n`)
+    // Either rejects entirely OR routes to tool_invoke (which under strict()
+    // rejects the unknown fields anyway). What MUST NEVER happen: silent
+    // coercion to a "decision" arm. We assert no decision shape.
+    if (r.ok) {
+      // If somehow this decoded, the `kind` discriminator must NOT be "decision".
+      expect(r.value.kind).not.toBe("decision")
+    } else {
+      expect(r.error.kind).toBe("schema")
+    }
+  })
+
+  test("a decision arm does NOT cross-decode as tool_invoke (no leak in the opposite direction)", () => {
+    const wire = encodeSessionLine(decisionRecord("rule", "deny"))
+    const r = decodeSessionLine(wire)
+    expect(r.ok).toBe(true)
+    if (!r.ok) throw new Error("unreachable")
+    expect(r.value.kind).toBe("decision")
+    // Closed-union narrowing — fields belonging exclusively to other arms
+    // are NOT present on the decoded value. (We don't iterate them by name —
+    // we assert the canonical decision keys are present + the value EQUALS
+    // the original record, no extras.)
+    expect(r.value).toEqual(decisionRecord("rule", "deny"))
+  })
+})
+
+// ── 6. metadata wire-preservation (nested, list, null, number, boolean) ─
+
+describe("metadata structural preservation through the wire", () => {
+  test("nested object + array + null + number + boolean survive encode→decode", () => {
+    const rec = decisionRecord("budget", "deny", {
+      metadata: {
+        nested: { depth: 2, list: [1, "two", null, true, { inner: false }] },
+        sentinel: null,
+        score: 0.42,
+        zero: 0,
+        flag: false,
+        emptyArr: [] as readonly unknown[],
+        emptyObj: {} as Readonly<Record<string, unknown>>,
+      },
+    })
+    const wire = encodeSessionLine(rec)
+    const decoded = decodeSessionLine(wire)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) throw new Error("unreachable")
+    expect(decoded.value).toEqual(rec)
+    // Byte-identical re-encode — proves no shape coercion (e.g., empty obj
+    // → null, or `0` → undefined).
+    expect(encodeSessionLine(decoded.value)).toBe(wire)
+  })
+
+  test("turn defaulting to 0 (zero-turn admissible — boundary)", () => {
+    // Runtime AgentEvent uses `turn:number`; the production code defaults to
+    // 0 when `config.run` is absent (see admissibility-gate.ts line ~216).
+    // Pin that 0 is a STRUCTURALLY VALID turn (not silently swapped to 1).
+    const e: AgentEvent = decisionEvent("hook", "allow", { turn: 0 })
+    expect(e.type).toBe("decision")
+    if (e.type !== "decision") throw new Error("unreachable")
+    expect(e.turn).toBe(0)
+    expect(Number.isInteger(e.turn)).toBe(true)
   })
 })

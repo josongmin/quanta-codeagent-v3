@@ -177,7 +177,7 @@ describe("otel-exporter / OTLP HTTP", () => {
     await exp.teardown()
   })
 
-  test("HELL-02: batch-size reach triggers immediate flush", async () => {
+  test("HELL-02: batch-size reach triggers immediate flush + body carries all 3 batched spans", async () => {
     const { fetch, calls } = makeFakeFetch()
     const timer = makeFakeTimer()
     const exp = otelHttpExporter({
@@ -202,6 +202,14 @@ describe("otel-exporter / OTLP HTTP", () => {
     // Sync recordSpan triggers a fire-and-forget flush. Yield a microtask.
     await new Promise<void>((r) => setTimeout(r, 5))
     expect(calls.length).toBe(1)
+    // Audit-strengthen: previous version only checked `calls.length===1`.
+    // A regression that flushed a SINGLE span instead of all 3 in the batch
+    // would slip past that check. Verify the POST body actually carries the
+    // 3 batched spans (the spec for "batch flush" is multi-span-per-POST).
+    const body = JSON.parse(calls[0]?.body ?? "{}")
+    const spans: Array<{ name: string }> = body.resourceSpans?.[0]?.scopeSpans?.[0]?.spans ?? []
+    expect(spans.length).toBe(3)
+    expect(spans.map((s) => s.name).sort()).toEqual(["span-1", "span-2", "span-3"])
     await exp.teardown()
   })
 
@@ -253,7 +261,7 @@ describe("otel-exporter / OTLP HTTP", () => {
     expect(timer.clearedCount).toBe(1) // and cleared the interval
   })
 
-  test("HELL-05: fetch failure leaves buffer populated", async () => {
+  test("HELL-05: fetch failure leaves buffer populated + second flush re-POSTs the SAME span body", async () => {
     const { fetch, calls } = makeFakeFetch([
       { ok: false, status: 500 },
       { ok: true, status: 200 },
@@ -278,6 +286,49 @@ describe("otel-exporter / OTLP HTTP", () => {
     // First failed; second flush should still POST (buffer was preserved).
     await exp.flush()
     expect(calls.length).toBe(2)
+    // Audit-strengthen: previous test only checked the POST count. A
+    // regression that retried with an EMPTY buffer (e.g., clearing on
+    // failure instead of on success) would still produce `calls.length===2`
+    // — the second body would just be empty. Pin that the SAME span
+    // payload is re-POSTed.
+    const firstBody = JSON.parse(calls[0]?.body ?? "{}")
+    const secondBody = JSON.parse(calls[1]?.body ?? "{}")
+    const firstSpan = firstBody.resourceSpans?.[0]?.scopeSpans?.[0]?.spans?.[0]
+    const secondSpan = secondBody.resourceSpans?.[0]?.scopeSpans?.[0]?.spans?.[0]
+    expect(firstSpan?.name).toBe("retry-me")
+    expect(secondSpan?.name).toBe("retry-me")
+    expect(secondSpan?.traceId).toBe(firstSpan?.traceId)
+    expect(secondSpan?.spanId).toBe(firstSpan?.spanId)
+    await exp.teardown()
+  })
+
+  test("HELL-05b: post-success the buffer is DRAINED — a third flush is a no-op", async () => {
+    // Audit-add: the dual invariant to HELL-05 — on success, the buffer
+    // EMPTIES. A regression that retained the span post-success (double-
+    // write hazard) is what we measure here.
+    const { fetch, calls } = makeFakeFetch([{ ok: true, status: 200 }])
+    const timer = makeFakeTimer()
+    const exp = otelHttpExporter({
+      endpoint: ENDPOINT,
+      fetch,
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      batchSize: 100,
+    })
+    exp.recordSpan({
+      traceId: "9".repeat(32),
+      spanId: "8".repeat(16),
+      name: "single",
+      startTimeEpochMs: 0,
+      endTimeEpochMs: 1,
+    })
+    await exp.flush()
+    expect(calls.length).toBe(1)
+    // No new span recorded — next flush MUST be a no-op (buffer drained).
+    await exp.flush()
+    expect(calls.length).toBe(1)
+    await exp.flush()
+    expect(calls.length).toBe(1)
     await exp.teardown()
   })
 
@@ -527,6 +578,68 @@ describe("otel-exporter / OTLP HTTP", () => {
     expect(payload?.value?.stringValue?.length).toBe(1024)
     expect(payload?.value?.stringValue).toBe(big)
     await exp.teardown()
+  })
+})
+
+describe("otel-exporter / endpoint normalisation + teardown idempotence", () => {
+  test("HELL-18: endpoint with trailing slash normalises to {root}/v1/traces (no //v1/)", async () => {
+    // Audit-add: source (otel-exporter.ts L380) strips a single trailing
+    // slash so `${endpoint}/v1/traces` doesn't collapse to `${root}//v1/`.
+    // The behaviour was untested — a regression that swapped slice(0, -1)
+    // for slice(1) (off-by-one) would slip past every existing case.
+    const { fetch, calls } = makeFakeFetch()
+    const timer = makeFakeTimer()
+    const exp = otelHttpExporter({
+      endpoint: `${ENDPOINT}/`, // ← trailing slash
+      fetch,
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      batchSize: 1,
+    })
+    exp.recordSpan({
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      name: "norm",
+      startTimeEpochMs: 0,
+      endTimeEpochMs: 1,
+    })
+    await exp.flush()
+    expect(calls.length).toBe(1)
+    expect(calls[0]?.url).toBe(`${ENDPOINT}/v1/traces`)
+    // Defence: no `//` in the URL — that is the regression we want to catch.
+    expect(calls[0]?.url).not.toContain("//v1")
+    // path scheme `http://` does contain `//` legitimately — narrow check.
+    expect(calls[0]?.url.replace("http://", "")).not.toContain("//")
+    await exp.teardown()
+  })
+
+  test("HELL-19: teardown is idempotent — calling twice does NOT double-clear or re-POST", async () => {
+    // Audit-add: teardown clears the interval + flushes. If the second
+    // teardown also flushed (instead of being a no-op on the now-empty
+    // buffer), we could accidentally POST stale data after process shutdown.
+    const { fetch, calls } = makeFakeFetch()
+    const timer = makeFakeTimer()
+    const exp = otelHttpExporter({
+      endpoint: ENDPOINT,
+      fetch,
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      batchSize: 100,
+      flushIntervalMs: 5000,
+    })
+    exp.recordSpan({
+      traceId: "1".repeat(32),
+      spanId: "2".repeat(16),
+      name: "td",
+      startTimeEpochMs: 0,
+      endTimeEpochMs: 1,
+    })
+    await exp.teardown()
+    const callsAfterFirst = calls.length
+    expect(callsAfterFirst).toBe(1)
+    // Second teardown: must be a no-op on the POST channel.
+    await exp.teardown()
+    expect(calls.length).toBe(callsAfterFirst)
   })
 })
 
