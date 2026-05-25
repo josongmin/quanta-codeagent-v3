@@ -30,6 +30,7 @@ import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
 import type { BudgetLedger } from "./budget-ledger"
 import type { CapEnforcer } from "./cap-enforcer"
+import type { GranularRegistryPort } from "./checkpoint/granular-registry"
 import type { CheckpointTriggerMode, DestructivenessOracle } from "./checkpoint-policy"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
@@ -929,6 +930,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * by the loop itself today — slot exists for caller-side composition.
    */
   conversationCheckpoint?: { store: ConversationCheckpointStore }
+  /**
+   * ADR-0300 — per-tool granular checkpoint registry. Sibling of
+   * {@link conversationCheckpoint} for ADR-0124's conversation face:
+   * this slot owns per-tool-call file+task snapshots that the
+   * rewind-tool slash + future auto-recovery hook consume. Absent ⇒
+   * slot OMITTED (default-OFF byte-identical). Caller-side composition
+   * only — loop NEVER reads it.
+   */
+  granularRegistry?: GranularRegistryPort
   /**
    * ADR-0143 OS-sandbox port slot (helper-only). When set, future
    * shell/exec consumers wire through this port (Seatbelt on macOS / Landlock

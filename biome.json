@@ -921,6 +921,29 @@
       }
     },
     {
+      "includes": ["**/src/agent/checkpoint/granular-registry/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0300): granular-registry is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0300): granular-registry cannot reach @/agent/dispatch.",
+                  "@/agent/effect-channel": "Plane-clean (ADR-0300): granular-registry cannot reach @/agent/effect-channel.",
+                  "@/storage": "Plane-clean (ADR-0300): granular-registry is in-memory only; no @/storage imports.",
+                  "@/permission": "Plane-clean (ADR-0300): granular-registry must not reach @/permission.",
+                  "@/observability": "Plane-clean (ADR-0300): granular-registry must not reach @/observability.",
+                  "@/apps/agent": "Plane-clean (ADR-0300): granular-registry must not reach @/apps/agent."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/agent/fork-session/**"],
       "linter": {
         "rules": {
@@ -1077,6 +1100,7 @@
         "!src/agent/budget-ledger.ts",
         "!src/agent/conversation-checkpoint.ts",
         "!src/agent/conversation-checkpoint-lru.ts",
+        "!src/agent/checkpoint/**",
         "!src/agent/fork-session/**",
         "!src/agent/thread-tools/**",
         "!src/agent/subagent-background.ts",
