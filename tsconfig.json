@@ -88,7 +88,9 @@
       "@/realtime": ["./src/realtime/index.ts"],
       "@/realtime/*": ["./src/realtime/*"],
       "@/radar": ["./src/radar/index.ts"],
-      "@/radar/*": ["./src/radar/*"]
+      "@/radar/*": ["./src/radar/*"],
+      "@/remote": ["./src/remote/index.ts"],
+      "@/remote/*": ["./src/remote/*"]
     }
   },
   "include": ["src", "tests", "tools"],

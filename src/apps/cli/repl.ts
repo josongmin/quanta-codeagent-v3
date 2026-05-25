@@ -115,6 +115,7 @@ export const topLevelUsage = (): string =>
     "  quanta --resume <id|path>            Resume by id (id-mode) or path (path-mode)",
     "  quanta --state <path>                Save path-mode transcript",
     "  quanta session <subcommand> ...      Session management (see `quanta session --help`)",
+    "  quanta remote <subcommand> ...       Remote execution plane (see `quanta remote --help`)",
     "",
     "Common flags:",
     "  --plan, --lsp, --lsp-tools, --git-tools, --observe-dir <d>, --metrics",

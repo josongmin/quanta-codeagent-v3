@@ -1,5 +1,7 @@
+import { selectRemoteRunner } from "@/remote"
 import { errMessage, logger } from "@/shared"
 import { loadEnvFiles } from "./dotenv"
+import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionBootstrapError } from "./repl/session-bootstrap"
 import { SessionStartupError } from "./repl/session-startup-error"
@@ -32,6 +34,34 @@ const main = async (): Promise<void> => {
   // dispatcher and never touches the agent loop / REPL wiring below.
   if (process.argv[2] === "session") {
     const code = await runSessionMain()
+    process.exit(code)
+  }
+
+  // ADR-0290 — `quanta remote …` subcommand. Default-OFF: when
+  // `QUANTA_REMOTE_RUNNER` is unset / `none` the dispatcher exits with
+  // `remote-not-configured` (exit 64) WITHOUT spawning any subprocess.
+  if (process.argv[2] === "remote") {
+    const ac = new AbortController()
+    const onSig = () => ac.abort()
+    process.on("SIGINT", onSig)
+    process.on("SIGTERM", onSig)
+    const runner = selectRemoteRunner(process.env, {})
+    const code = await runRemoteCmd(process.argv.slice(3), {
+      runner,
+      io: {
+        out: (s) => process.stdout.write(s),
+        err: (s) => process.stderr.write(s),
+      },
+      signal: ac.signal,
+      ...(process.env["QUANTA_REMOTE_DEFAULT_IMAGE"] !== undefined
+        ? { defaultImage: process.env["QUANTA_REMOTE_DEFAULT_IMAGE"] }
+        : {}),
+      ...(process.env["QUANTA_REMOTE_TIMEOUT_MS"] !== undefined
+        ? { defaultTimeoutMs: Number.parseInt(process.env["QUANTA_REMOTE_TIMEOUT_MS"], 10) }
+        : {}),
+    })
+    process.off("SIGINT", onSig)
+    process.off("SIGTERM", onSig)
     process.exit(code)
   }
 
