@@ -250,7 +250,7 @@ beforeAll(async () => {
     buildTooling: () => ({
       store: undefined,
       embedder: undefined,
-      sessionId: undefined,
+      sessionId: "seed-session",
       registry: { tools: () => [] },
       memoryConfig: undefined,
       subagentConfig: undefined,
@@ -271,7 +271,7 @@ beforeAll(async () => {
       gitToolList: [],
     }),
     resolveResume: async () => ({
-      sessionId: undefined,
+      sessionId: "resolved-session",
       history: [],
       idMeta: undefined,
       conflictError: undefined,
@@ -397,7 +397,10 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
         configReviewer: "auto_review",
         decidedAt: 42,
       }
-      const reviewerPort = result.sessionDeps.admissibility?.reviewerPort
+      const admissibility = result.sessionDeps.admissibility
+      expect(admissibility).toBeDefined()
+      if (admissibility === undefined) throw new Error("admissibility must be defined")
+      const reviewerPort = admissibility.reviewerPort
       expect(reviewerPort).toBeDefined()
       if (reviewerPort === undefined) throw new Error("reviewerPort must be defined")
       const decision = await reviewerPort.autoReview(action, ctx)

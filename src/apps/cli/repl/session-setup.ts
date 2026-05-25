@@ -104,7 +104,7 @@ export interface SessionSetupResult {
   readonly lifecyclePills: LifecyclePills
   readonly lifecycleTaskRegistry: TaskRegistry | undefined
   readonly lifecycleFollowUpQueue: FollowUpQueue | undefined
-  readonly sessionId: string | undefined
+  readonly sessionId: string
   readonly history: readonly Message[]
   readonly pendingImages: readonly ImageBlock[]
   readonly idMeta: SessionBootstrapResult["idMeta"]
@@ -171,8 +171,6 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
       : userReviewerPort
   const planExitPort = createCliPlanExitPort({ ask: askLine })
   const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
-  const sessionStore = boot.sessionId !== undefined ? boot.tooling.store : undefined
-
   const sessionDeps: SessionDeps = {
     llm: boot.llm,
     registry: boot.tooling.registry,
@@ -183,8 +181,8 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     maxTurns: boot.maxTurns,
     signal: boot.abort.signal,
     onConfirm,
-    store: sessionStore,
-    sessionId: boot.sessionId ?? "",
+    store: boot.tooling.store,
+    sessionId: boot.sessionId,
     embedder: boot.tooling.embedder,
     memoryConfig: boot.tooling.memoryConfig,
     planMode: boot.features.planMode,

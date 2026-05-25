@@ -170,7 +170,7 @@ const buildSetup = (
     lifecyclePills: stubPills(),
     lifecycleTaskRegistry: undefined,
     lifecycleFollowUpQueue: undefined,
-    sessionId: undefined,
+    sessionId: "session-loop-test",
     history: [],
     pendingImages: [],
     idMeta: undefined,
