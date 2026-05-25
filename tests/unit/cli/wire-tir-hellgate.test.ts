@@ -371,6 +371,15 @@ describe("Cross-track — buildReplSlashCtx threads inspect + replay slots", () 
     sessionDeps: {} as never,
     abortSignal: new AbortController().signal,
     debugHandle: undefined,
+    llm: {} as never,
+    sessionId: "test-sid",
+    model: "test-model",
+    effort: {
+      get: () => "default" as const,
+      set: () => undefined,
+      levels: ["default", "max", "high", "medium", "low"] as const,
+      budgetTokens: () => undefined,
+    },
   }
 
   test("inspect/replay omitted ⇒ ReplSlashCtx has no `inspect` / `replay` keys", () => {

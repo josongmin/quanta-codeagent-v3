@@ -119,6 +119,11 @@ const ENV_TABLE: readonly EnvRow[] = [
     describe: "LLM inter-chunk idle timeout",
   },
   { key: "QUANTA_HOME", defaultLabel: "~/.quanta", describe: "Quanta home override" },
+  {
+    key: "QUANTA_EFFORT",
+    defaultLabel: "default",
+    describe: "Session reasoning effort (default|low|medium|high|max) — switch with /effort",
+  },
   { key: "QUANTA_BENCH_HOME", defaultLabel: "(auto)", describe: "Bench artifacts root" },
   {
     key: "QUANTA_BENCH_CACHE_PATHSPECS_EXTRA",

@@ -1,3 +1,4 @@
+import { EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
 import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import type { SessionEnvelopeRecord } from "@/session"
@@ -116,6 +117,19 @@ export const composeSurfaceSlashCtx = (setup: SessionSetupResult, state: Surface
     // still 1-arg-required and renders "session not found" when the id
     // doesn't resolve).
     replay: buildReplaySlashState(),
+    // `/effort` wire — single seam mutates BOTH the store the loop reads
+    // AND the status pill the chrome paints. Defining it inline (vs an
+    // installPills callback) keeps the slash adapter the single owner of
+    // the "render + persist" pair.
+    effort: {
+      get: () => setup.effortStore.get(),
+      set: (lvl) => {
+        setup.effortStore.set(lvl)
+        setup.pills.update({ effort: lvl })
+      },
+      levels: EFFORT_LEVELS,
+      budgetTokens: effortToTokenBudget,
+    },
   })
 
 const foldCostPanelDelta = (

@@ -101,6 +101,10 @@ export interface SessionSetupResult {
   readonly slog: StructuredLogger
   readonly idleMonitor: IdleMonitor
   readonly rejectCounter: RejectCounter
+  /** Session-level reasoning-effort store (forwarded from bootstrap so the
+   *  REPL surface composer can wire `/effort` against the SAME instance the
+   *  loop reads via `AgentConfig.sessionEffort`). */
+  readonly effortStore: import("@/agent").EffortStore
   readonly llm: LLMPort
   readonly planMode: boolean
   readonly metrics: SessionBootstrapResult["features"]["metrics"]
@@ -205,6 +209,12 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     planMode: boot.features.planMode,
     skillsConfig: boot.tooling.skillsConfig,
   })
+  // Reflect the boot-time effort tier on the pill the moment install is
+  // done. `installPills` ALSO reads `QUANTA_EFFORT` for its own initial
+  // state today (skills-surface.ts), so this is a defensive sync — if the
+  // pill module switches to reading from the store instead, the call
+  // remains a no-op (same value re-applied).
+  pills.update({ effort: boot.effortStore.get() })
 
   return {
     provider: boot.provider,
@@ -214,6 +224,7 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     slog: boot.slog,
     idleMonitor: boot.idleMonitor,
     rejectCounter: boot.rejectCounter,
+    effortStore: boot.effortStore,
     llm: boot.llm,
     planMode: boot.features.planMode,
     metrics: boot.features.metrics,

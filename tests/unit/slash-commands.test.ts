@@ -114,11 +114,19 @@ describe("BUILTINS table", () => {
       "/profile",
       "/identity",
       "/focus-chain",
+      // `/effort` — session-level reasoning effort tier, sibling of the
+      // composition-root mega-wire commands. Slot-pinned right after
+      // `/focus-chain` and BEFORE `/debug` so the order matches the
+      // BUILTINS literal in `slash-commands.ts`.
+      "/effort",
       // Track D — `/debug` developer-mode tracer runtime toggle. Pinned
       // at the END so all prior slot anchors stay intact.
       "/debug",
+      // ADR-0271 — `/why <toolCallId|last>` meta-LLM reasoning query for a
+      // recorded tool call. Slotted right after `/debug` per BUILTINS literal.
+      "/why",
       // Track I/R — `/inspect` (ADR-0239 follow-up) + `/replay` appended
-      // after `/debug`. Slot pinning is unchanged for every entry above.
+      // after `/why`. Slot pinning is unchanged for every entry above.
       "/inspect",
       "/replay",
     ])

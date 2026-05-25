@@ -92,9 +92,7 @@ export interface SlashContext {
         readonly get: () => import("@/agent").EffortLevel
         readonly set: (level: import("@/agent").EffortLevel) => void
         readonly levels: readonly import("@/agent").EffortLevel[]
-        readonly budgetTokens: (
-          level: import("@/agent").EffortLevel,
-        ) => number | undefined
+        readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
       }
     | undefined
 }

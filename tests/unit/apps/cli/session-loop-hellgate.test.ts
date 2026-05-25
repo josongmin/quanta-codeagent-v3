@@ -159,6 +159,11 @@ const buildSetup = (
     slog: { info: () => undefined, warn: () => undefined, error: () => undefined } as never,
     idleMonitor: stubIdle(),
     rejectCounter: stubRejects(),
+    effortStore: {
+      get: () => "default" as const,
+      set: () => undefined,
+      snapshot: () => "default" as const,
+    },
     llm: llmStub,
     planMode: false,
     metrics: undefined as never,

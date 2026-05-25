@@ -69,9 +69,7 @@ export type ReplSlashCtx = Partial<{
     readonly get: () => import("@/agent").EffortLevel
     readonly set: (level: import("@/agent").EffortLevel) => void
     readonly levels: readonly import("@/agent").EffortLevel[]
-    readonly budgetTokens: (
-      level: import("@/agent").EffortLevel,
-    ) => number | undefined
+    readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
   }
 }>
 
@@ -105,14 +103,14 @@ export interface BuildReplSlashCtxArgs {
   /** Track R — `/replay` resolver+iterator pair. Absent ⇒ command
    *  prints "not wired in this surface" + exit 0. */
   replay: ReplaySlashState | undefined
-  /** Session-level reasoning-effort wire. */
+  /** Session-level reasoning-effort wire — `get` reads the surface-owned
+   *  `EffortStore`, `set` mutates BOTH the store and any chrome (status
+   *  pill) the surface paints. Required in the REPL surface (no degrade). */
   effort: {
     readonly get: () => import("@/agent").EffortLevel
     readonly set: (level: import("@/agent").EffortLevel) => void
     readonly levels: readonly import("@/agent").EffortLevel[]
-    readonly budgetTokens: (
-      level: import("@/agent").EffortLevel,
-    ) => number | undefined
+    readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
   }
 }
 
