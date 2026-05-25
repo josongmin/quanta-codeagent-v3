@@ -17,6 +17,7 @@ export type {
   GhCliPort,
   GhCliResult,
   SeenRunsStore,
+  SnapshotSeenRunsStore,
 } from "./trigger-source-ci"
 export { createCiTriggerSource, createInMemorySeenRuns } from "./trigger-source-ci"
 

@@ -61,6 +61,12 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
+import {
+  loadSelectedInstances,
+  runBatch,
+  selectInstances,
+  writeArtifacts as writeBatchArtifacts,
+} from "@/runner/batch/core"
 import { byteCompare, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
   aggregate,
@@ -69,20 +75,17 @@ import {
   benchWorkRoot,
   classify,
   defaultExec,
-  loadCorpus,
-  type Prediction,
   parseSwebenchJsonl,
   prepareTaskRepo,
   type SwebenchTask,
   toInstance,
-  writePredictions,
 } from "./corpus"
 import { buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { finalizeRun, runInstance } from "./eval"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
-import { buildReport, writeReport } from "./report"
+import { evaluateWithPythonSwebench } from "./python-swebench"
 import { patchVote, sampleBestOfN } from "./sampler"
 import type { BenchSummary, Instance, InstanceResult } from "./types"
 
@@ -158,16 +161,22 @@ const failureTag = (r: InstanceResult): string => {
   return `[${c.termination}${tail}]`
 }
 
+const logInstanceSummary = (result: InstanceResult): void => {
+  const verdictValue = result.verdict ?? "ok"
+  const verdict =
+    verdictValue === "degraded"
+      ? " DEGRADED"
+      : verdictValue === "env_prep_failed"
+        ? " ENV_PREP_FAILED"
+        : ""
+  const mark = result.passed ? "PASS" : "FAIL"
+  const tag = failureTag(result)
+  const extra = result.error ? ` (${result.error})` : ""
+  logger.info(`  [${mark}${verdict}]${tag} ${result.id} (turns=${result.turns})${extra}`)
+}
+
 const printSummary = (summary: BenchSummary): void => {
-  for (const r of summary.results) {
-    const v = r.verdict ?? "ok"
-    const verdict =
-      v === "degraded" ? " DEGRADED" : v === "env_prep_failed" ? " ENV_PREP_FAILED" : ""
-    const mark = r.passed ? "PASS" : "FAIL"
-    const tag = failureTag(r)
-    const extra = r.error ? ` (${r.error})` : ""
-    logger.info(`  [${mark}${verdict}]${tag} ${r.id} (turns=${r.turns})${extra}`)
-  }
+  for (const result of summary.results) logInstanceSummary(result)
   // C8: the operator-visible headline uses the SAME degraded-excluding
   // denominator as observe.summarize / summary.json — never results.length.
   const { resolved, total, degraded } = resolvedTotals(summary.results)
@@ -440,14 +449,8 @@ export const writeArtifacts = async (
   results: InstanceResult[],
   meta: { provider: string; model: string; n: number },
 ): Promise<void> => {
-  const predictions: Prediction[] = results.map((r) => ({
-    instance_id: r.id,
-    model_name_or_path: meta.model,
-    model_patch: r.patch,
-  }))
-  await writePredictions(predictionsFile, predictions)
-  await writeReport(reportFile, buildReport(meta, results))
-  logger.info(`wrote ${predictionsFile} (${predictions.length} prediction(s)) and ${reportFile}`)
+  await writeBatchArtifacts(predictionsFile, reportFile, results, meta)
+  logger.info(`wrote ${predictionsFile} (${results.length} prediction(s)) and ${reportFile}`)
 }
 
 /** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and
@@ -541,7 +544,9 @@ const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
   logger.info(
     `using official Python swebench harness for grading (dataset=${datasetName ?? "princeton-nlp/SWE-bench_Verified (default)"})`,
   )
-  return datasetName !== undefined ? { opts: { datasetName } } : {}
+  return datasetName !== undefined
+    ? { evaluate: evaluateWithPythonSwebench, opts: { datasetName } }
+    : { evaluate: evaluateWithPythonSwebench }
 }
 
 /** Custom-corpus entrypoint (the path when no --swebench dataset is given).
@@ -556,14 +561,15 @@ const runCustomCorpusMode = async (
   },
   obs?: ObserveCtx,
 ): Promise<void> => {
-  const loaded = await loadCorpus(cfg.corpusRoot)
+  const instanceFilter = argValue("--instance")
+  const selection = await loadSelectedInstances({
+    corpus: cfg.corpusRoot,
+    filter: instanceFilter,
+    limit: cfg.limit,
+  })
   // `--instance <substr>` selects by id substring BEFORE the limit slice, so a
   // single repo (e.g. django) can be run without scanning the alphabetical head.
-  const instanceFilter = argValue("--instance")
-  const all =
-    instanceFilter !== undefined && instanceFilter !== ""
-      ? loaded.filter((i) => i.id.includes(instanceFilter))
-      : loaded
+  const all = selectInstances(selection.all, instanceFilter, null)
   const pythonHarness = process.env.QUANTA_SWEBENCH_PYTHON === "1"
 
   // `--dry-run`: load + count + print the plan; NEVER build an LLM or run.
@@ -585,7 +591,7 @@ const runCustomCorpusMode = async (
     exitFn(0)
     return
   }
-  const instances = cfg.limit === null ? all : all.slice(0, cfg.limit)
+  const instances = selection.instances
 
   const resolved = resolveLLM(`${instances.length} instance(s)`)
   if (resolved === null) return
@@ -601,10 +607,10 @@ const runCustomCorpusMode = async (
     timeoutMs: cfg.timeoutMs,
     ...(pythonSwebench !== undefined ? { pythonSwebench } : {}),
   }
-  const results: InstanceResult[] = []
-  for (const instance of instances) {
-    results.push(await resolveInstance(instance, base, cfg.n, obs))
-  }
+  const { results } = await runBatch({
+    instances,
+    runInstance: (instance) => resolveInstance(instance, base, cfg.n, obs),
+  })
   // D-fix: write `--predictions` / `--report` from BOTH bench modes.
   await writeArtifacts(
     argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),

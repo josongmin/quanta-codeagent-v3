@@ -240,6 +240,12 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   repoRules?: RepoRules
   /**
+   * Static session context block prepended into the cached system sections.
+   * Caller-owned: cross-session memory, tool snapshots, or other durable
+   * host context may live here. Absent ⇒ prompt stays byte-identical.
+   */
+  sessionCtx?: string
+  /**
    * File-scoped rules (Cursor `.cursor/rules/*.mdc` parity — glob-matched +
    * always-applied kinds). Loaded by the caller (e.g. `loadGlobRules(cwd)`),
    * same opt-in posture as `repoRules`. `rules` is the FULL discovered set;
@@ -1192,6 +1198,11 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
   toolProfile?: {
     readonly resolver: import("./tool-profile").ToolProfileResolver
     readonly defaultName?: import("./tool-profile").ToolProfileName
+    /** Live active profile accessor. When present, the admissibility gate
+     *  re-reads it per call so `/profile` mutations apply on the next turn
+     *  without reassembling the session. Absent ⇒ `defaultName` remains the
+     *  fixed active profile for the whole run. */
+    readonly activeName?: () => import("./tool-profile").ToolProfileName
   }
   /**
    * ADR-0236 / ADR-0211 — system-prompt mode-variant registry (composition-
@@ -1226,6 +1237,11 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
      *  identity reminder; the other modes already ship a full modeNotice
      *  every turn). */
     readonly perTurnReminderEnabled?: boolean
+    /** Live active mode accessor. When present, both the per-turn reminder
+     *  splice and any surface-owned system-prompt source re-read the current
+     *  mode each turn so `/identity` mutations apply immediately on the next
+     *  turn. Absent ⇒ callers fall back to the loop's own effective mode. */
+    readonly activeMode?: () => import("./system-prompt").ModeVariantKey
   }
   /**
    * ADR-0236 / ADR-0203 / ADR-0240 — inline-trigger watcher (composition-
@@ -1411,6 +1427,7 @@ export type AdmissibilityGateConfig = Pick<
   | "registry"
   | "run"
   | "sessionId"
+  | "toolProfile"
   | "trustScope"
 >
 

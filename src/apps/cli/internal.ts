@@ -16,6 +16,7 @@ import {
   buildEmbedderCore,
   buildLLMCore,
   buildMemoryConfigCore,
+  buildSearchPipelineFromEnv,
   buildSkillsConfigCore,
   buildStoreCore,
   buildStreamingCore,
@@ -30,6 +31,7 @@ import {
   pickProviderCore,
   type Provider as RunnerProvider,
 } from "@/runner/assemble"
+import { resolveSandboxProfileFromEnv } from "@/runtime"
 import {
   createBunSpawner,
   createShellSnapshotPort,
@@ -37,13 +39,12 @@ import {
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { logger, type RunContext } from "@/shared"
+import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import { gitTools, type Tool } from "@/tool"
-import { buildSearchPipelineFromEnv } from "../agent/search-pipeline-wire"
 import type { Tooling } from "./config-assemble"
 import { createMarkdownPainter } from "./markdown-painter"
 import { isPathLikeToken } from "./resume"
-import { resolveSandboxProfileFromEnv } from "./sandbox-wire"
 
 /**
  * ADR-0024 (export-gap closure): CLI `internal.ts` is the home of all
@@ -457,14 +458,58 @@ export const buildShellSnapshotConfig = (
   }
 }
 
-/** Read MCP server configs from `QUANTA_MCP_CONFIG` (a JSON file). OFF if unset. */
-export const readMcpConfig = async (slog: StructuredLogger): Promise<McpServerConfig[]> => {
-  const path = process.env.QUANTA_MCP_CONFIG
+/** MCP config path resolver. Supports the legacy wrapper file
+ *  (`QUANTA_MCP_CONFIG`) and the thinner browser/plugin bridge:
+ *    - `QUANTA_BROWSER_MCP_CONFIG` → direct path to a plugin-style `.mcp.json`
+ *    - `QUANTA_BROWSER_MCP_PLUGIN_DIR` → plugin root; we append `/.mcp.json`
+ *  Precedence is explicit config first so existing callers stay byte-identical. */
+export const resolveMcpConfigPath = (
+  envSource: NodeJS.ProcessEnv = process.env,
+): string | undefined => {
+  const explicit = envSource.QUANTA_MCP_CONFIG?.trim()
+  if (explicit) return explicit
+  const browserConfig = envSource.QUANTA_BROWSER_MCP_CONFIG?.trim()
+  if (browserConfig) return browserConfig
+  const browserPluginDir = envSource.QUANTA_BROWSER_MCP_PLUGIN_DIR?.trim()
+  if (browserPluginDir) return `${browserPluginDir.replace(/\/+$/, "")}/${PLUGIN_MCP_FILE}`
+  return undefined
+}
+
+const pluginSpecToServerConfig = (
+  name: string,
+  spec: { command: string; args: string[]; env?: Record<string, string> | undefined },
+): McpServerConfig => ({
+  name,
+  command: [spec.command, ...spec.args],
+  ...(spec.env !== undefined ? { env: spec.env } : {}),
+})
+
+/** Read MCP server configs from a config file. Accepts BOTH:
+ *    - CLI wrapper format: `{ "servers": [{ "name": "...", "command": ["..."] }] }`
+ *    - plugin/browser format: `{ "mcpServers": { "browser": { "command": "...", "args": [...] } } }`
+ *  OFF when no resolver yields a path. */
+export const readMcpConfig = async (
+  slog: StructuredLogger,
+  envSource: NodeJS.ProcessEnv = process.env,
+): Promise<McpServerConfig[]> => {
+  const path = resolveMcpConfigPath(envSource)
   if (!path) return []
   try {
     const raw = await Bun.file(path).text()
-    const parsed = JSON.parse(raw) as { servers?: McpServerConfig[] }
-    return Array.isArray(parsed.servers) ? parsed.servers : []
+    const parsed = JSON.parse(raw) as unknown
+    const pluginStyle = MCPRootSchema.safeParse(parsed)
+    if (pluginStyle.success) {
+      return Object.entries(pluginStyle.data.mcpServers).map(([name, spec]) =>
+        pluginSpecToServerConfig(name, spec),
+      )
+    }
+    const legacy = parsed as { servers?: McpServerConfig[] }
+    if (Array.isArray(legacy.servers)) return legacy.servers
+    slog.warn("mcp.config.error", {
+      path,
+      error: "expected {servers:[...]} or {mcpServers:{...}}",
+    })
+    return []
   } catch (e) {
     slog.warn("mcp.config.error", { path, error: (e as Error).message })
     return []

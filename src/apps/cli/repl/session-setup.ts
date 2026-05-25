@@ -140,6 +140,8 @@ export interface SessionSetupResult {
   readonly abort: AbortController
   readonly pills: ReturnType<typeof createStatusPills>
   readonly argPrompt: string | undefined
+  readonly systemSource: SessionBootstrapResult["systemSource"]
+  readonly refreshSystemPrompt: SessionBootstrapResult["refreshSystemPrompt"]
   /** Tear down MCP clients on REPL exit. The host calls this in the
    *  `finally` of `runRepl`. */
   readonly shutdownMcp: () => Promise<void>
@@ -272,6 +274,8 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     abort: boot.abort,
     pills,
     argPrompt: boot.argPrompt,
+    systemSource: boot.systemSource,
+    refreshSystemPrompt: boot.refreshSystemPrompt,
     shutdownMcp: async () => {
       // ADR-0269 Phase 3 closure — clear the fs-jail sink BEFORE MCP
       // teardown so a sibling/re-entered session never inherits this

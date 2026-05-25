@@ -40,7 +40,9 @@ export const selectInstances = (
   limit: number | null | undefined,
 ): Instance[] => {
   const filtered =
-    filter !== undefined && filter !== "" ? all.filter((instance) => instance.id.includes(filter)) : [...all]
+    filter !== undefined && filter !== ""
+      ? all.filter((instance) => instance.id.includes(filter))
+      : [...all]
   if (limit === null || limit === undefined) return filtered
   return filtered.slice(0, limit)
 }

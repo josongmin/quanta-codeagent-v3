@@ -1,5 +1,6 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
+import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
 import { summarizeWorkMetrics } from "@/observability"
@@ -29,6 +30,7 @@ import {
   type McpPillServer,
   readPillEnvFlags,
 } from "./lifecycle-pills"
+import { buildExecutionPlaneSessionDeps } from "./repl/execution-plane-wire"
 import { runSessionLoop } from "./repl/session-loop"
 import { setupSession } from "./repl/session-setup"
 import { buildSkillsCallback, installPills } from "./repl/skills-surface"
@@ -592,6 +594,19 @@ export const runRepl = async (): Promise<void> => {
     history: setup.history,
   })
   try {
+    const convStore = defaultConversationCheckpointStore()
+    const executionPlaneDeps = await buildExecutionPlaneSessionDeps({
+      setup,
+      convStore,
+      envSource: process.env,
+    })
+    const setupWithExecution: typeof setup = {
+      ...setup,
+      sessionDeps: {
+        ...setup.sessionDeps,
+        ...executionPlaneDeps,
+      },
+    }
     // ADR-0299 — surface composition wire. Builds the slash ctx PLUS the
     // wire bundle (conv-checkpoint, playbook-trigger seam, composer +
     // textInbox handles). Each upstream knob (env / CLI flag) gates the
@@ -599,11 +614,11 @@ export const runRepl = async (): Promise<void> => {
     // legacy when no opt-in is present (RFC §1.2). The bundled
     // `dispatchSlash` closure routes through the FULL augmented
     // SlashContext (legacy + ADR-0291 + ADR-0292 + ADR-0294 slots).
-    const wires = composeSurfaceWires(setup, surfaceState, process.env)
+    const wires = composeSurfaceWires(setupWithExecution, surfaceState, process.env, { convStore })
     await runSessionLoop({
-      setup,
+      setup: setupWithExecution,
       dispatchSlash: wires.dispatchSlash,
-      sinks: composeTurnSinks(setup, surfaceState),
+      sinks: composeTurnSinks(setupWithExecution, surfaceState),
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
       textInbox: wires.textInbox,
       ux: buildPromptUx(),
@@ -620,7 +635,9 @@ export const runRepl = async (): Promise<void> => {
       playbookSeam: wires.playbookSeam,
       // ADR-0301 — `--playbook-trigger` CLI flag echo. Spread conditionally
       // so `exactOptionalPropertyTypes` doesn't see a literal `undefined`.
-      ...(setup.playbookCliFlag !== undefined ? { playbookCliFlag: setup.playbookCliFlag } : {}),
+      ...(setupWithExecution.playbookCliFlag !== undefined
+        ? { playbookCliFlag: setupWithExecution.playbookCliFlag }
+        : {}),
     })
   } finally {
     // Track T — tear down the ring-buffer panel BEFORE other surface

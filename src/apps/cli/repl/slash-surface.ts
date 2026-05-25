@@ -186,18 +186,26 @@ export interface BuildReplSlashCtxArgs {
    *  tag prefixes against the registry. */
   perToolRegistry?: GranularRegistry | undefined
   perToolRestorePort?: ThreeWayRestorePort | undefined
-  /** ADR-0291 — `/profile`: AgentConfig.toolProfile block. */
+  /** ADR-0291 — `/profile`: authoritative session-owned tool-profile state. */
+  toolProfileState?: SessionDeps["toolProfileState"] | undefined
+  /** Back-compat alias for older tests/callers; prefer `toolProfileState`. */
   toolProfile?:
     | { readonly resolver: ToolProfileResolver; readonly defaultName?: ToolProfileName }
     | undefined
-  /** ADR-0291 — `/identity`: AgentConfig.identityModeVariant block. */
+  /** ADR-0291 — `/identity`: authoritative session-owned identity state. */
+  identityModeState?: SessionDeps["identityModeState"] | undefined
+  /** Back-compat alias for older tests/callers; prefer `identityModeState`. */
   identityModeVariant?:
     | {
         readonly registry: SystemPromptVariantRegistry
         readonly defaultMode?: import("@/agent/system-prompt").ModeVariantKey
       }
     | undefined
-  /** ADR-0291 — `/focus-chain`: AgentConfig.focusChain.tracker. */
+  /** ADR-0302 — refresh any derived system source after identity changes. */
+  onIdentityModeChange?: (() => void) | undefined
+  /** ADR-0291 — `/focus-chain`: authoritative session-owned tracker slot. */
+  focusChain?: SessionDeps["focusChain"] | undefined
+  /** Back-compat alias for older tests/callers; prefer `focusChain`. */
   focusChainTracker?: FocusChainPort | undefined
   /** ADR-0291 — `/web`: surface-owned text inbox sink. Drained by the
    *  next-turn PromptSource.next(). */
@@ -243,11 +251,16 @@ const maybePerToolCheckpoint = (
 const maybeProfile = (
   args: BuildReplSlashCtxArgs,
 ): ReturnType<typeof buildToolProfileAdapter> | undefined => {
-  const tp = args.toolProfile
-  if (tp === undefined) return undefined
+  const tp = args.toolProfileState
+  const legacy = args.toolProfile
+  if (tp === undefined && legacy === undefined) return undefined
+  let active = legacy?.defaultName ?? "write"
   return buildToolProfileAdapter({
-    resolver: tp.resolver,
-    ...(tp.defaultName !== undefined ? { defaultName: tp.defaultName } : {}),
+    getActive: () => tp?.get() ?? active,
+    setActive: (name) => {
+      if (tp !== undefined) tp.set(name)
+      else active = name
+    },
   })
 }
 
@@ -255,11 +268,18 @@ const maybeProfile = (
 const maybeIdentity = (
   args: BuildReplSlashCtxArgs,
 ): ReturnType<typeof buildIdentityModeAdapter> | undefined => {
-  const im = args.identityModeVariant
-  if (im === undefined) return undefined
+  const im = args.identityModeState
+  const legacy = args.identityModeVariant
+  if (im === undefined && legacy === undefined) return undefined
+  let active = legacy?.defaultMode ?? "default"
   return buildIdentityModeAdapter({
-    registry: im.registry,
-    ...(im.defaultMode !== undefined ? { defaultMode: im.defaultMode } : {}),
+    registry: im?.registry ?? legacy?.registry ?? { variantFor: () => ({ mode: "default", identity: [] }) },
+    getActive: () => im?.get() ?? active,
+    setActive: (mode) => {
+      if (im !== undefined) im.set(mode)
+      else active = mode
+    },
+    ...(args.onIdentityModeChange !== undefined ? { onChange: () => args.onIdentityModeChange?.() } : {}),
   })
 }
 
@@ -277,9 +297,11 @@ const buildNewSlotAdapters = (args: BuildReplSlashCtxArgs): NewSlotAdapters => (
   profile: maybeProfile(args),
   identity: maybeIdentity(args),
   focusChain:
-    args.focusChainTracker !== undefined
-      ? buildFocusChainAdapter(args.focusChainTracker)
-      : undefined,
+    args.focusChain !== undefined
+      ? buildFocusChainAdapter(args.focusChain.tracker)
+      : args.focusChainTracker !== undefined
+        ? buildFocusChainAdapter(args.focusChainTracker)
+        : undefined,
   textInbox: args.textInbox,
 })
 

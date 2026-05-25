@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import {
   DEFAULT_SANDBOX_EXEC_PATH,
   installShellSandbox,
+  resolveSandboxProfileFromEnv as resolveSandboxProfileFromRuntimeEnv,
   type OsSandboxPolicy,
   type OsSandboxProfile,
   type ShellSandboxSlot,
@@ -144,13 +145,7 @@ export const installCliSandbox = async (
  */
 export const resolveSandboxProfileFromEnv = (
   env: NodeJS.ProcessEnv = process.env,
-): OsSandboxProfile | undefined => {
-  const raw = env.QUANTA_SANDBOX ?? "default"
-  if (raw === "default" || raw === "") return undefined
-  if (raw === "off") return "off"
-  if (!ACTIVE_SET.has(raw)) return undefined
-  return raw as OsSandboxProfile
-}
+): OsSandboxProfile | undefined => resolveSandboxProfileFromRuntimeEnv(env)
 
 const wrapLinuxShellArgv = (
   argv: ReadonlyArray<string>,

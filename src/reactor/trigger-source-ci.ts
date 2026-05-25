@@ -59,6 +59,12 @@ export interface SeenRunsStore {
   add(runId: string): void
 }
 
+/** Snapshot-capable seen-runs store. The watcher script uses this to persist
+ *  dedup state across restarts without reaching into trigger-source internals. */
+export interface SnapshotSeenRunsStore extends SeenRunsStore {
+  snapshot(): readonly string[]
+}
+
 /**
  * `gh pr checks --json` element shape. We only consume the fields we read;
  * extra fields are tolerated (gh's JSON is a superset of this contract).
@@ -162,18 +168,23 @@ export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort =>
  * even if the consumer never restarts. 1024 ≈ ~year of typical CI volume.
  */
 const SEEN_RUNS_CAP = 1024
-export const createInMemorySeenRuns = (): SeenRunsStore => {
+export const createInMemorySeenRuns = (
+  seed: readonly string[] = [],
+): SnapshotSeenRunsStore => {
   const m = new Map<string, true>()
+  const add = (id: string): void => {
+    if (m.has(id)) return
+    if (m.size >= SEEN_RUNS_CAP) {
+      const oldest = m.keys().next().value
+      if (oldest !== undefined) m.delete(oldest)
+    }
+    m.set(id, true)
+  }
+  for (const id of seed) add(id)
   return {
     has: (id) => m.has(id),
-    add: (id) => {
-      if (m.has(id)) return
-      if (m.size >= SEEN_RUNS_CAP) {
-        const oldest = m.keys().next().value
-        if (oldest !== undefined) m.delete(oldest)
-      }
-      m.set(id, true)
-    },
+    add,
+    snapshot: () => [...m.keys()],
   }
 }
 

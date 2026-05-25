@@ -10,9 +10,6 @@ const APP_NAMES = new Set(["agent", "bench", "cli", "eval", "probe"])
 const ALLOWED_CROSS_SURFACE_IMPORTS = new Set([
   "agent/index.ts -> ../cli/dotenv",
   "agent/index.ts -> ../cli/sandbox-wire",
-  "agent/mode-presets/batch.ts -> ../../bench/corpus",
-  "agent/mode-presets/batch.ts -> ../../bench/eval",
-  "agent/mode-presets/batch.ts -> ../../bench/report",
   "agent/mode-presets/interactive.ts -> ../../cli/repl",
   "cli/internal.ts -> ../agent/search-pipeline-wire",
 ])

@@ -84,20 +84,26 @@ describe("ci-bot.runMode — guard", () => {
 })
 
 describe("buildCiBotWiring — restricted tool surface", () => {
-  test("registry contains git tools but NEITHER bash NOR write_file", () => {
-    const wiring = buildCiBotWiring({ ghRun: okGh })
+  test("registry contains git tools plus read-only gh tools, but NEITHER bash NOR remote-write gh tools", () => {
+    const wiring = buildCiBotWiring("/repo", { ghRun: okGh })
     const names = wiring.tools.specs().map((s) => s.name)
     expect(names).toContain("git_diff")
     expect(names).toContain("git_status")
+    expect(names).toContain("gh_pr_view")
+    expect(names).toContain("gh_pr_review_diff")
+    expect(names).toContain("gh_check_status")
     expect(names).not.toContain("bash")
     expect(names).not.toContain("write_file")
+    expect(names).not.toContain("gh_pr_comment")
+    expect(names).not.toContain("gh_pr_create")
+    expect(names).not.toContain("gh_pr_auto_merge")
     expect(wiring.tools.has("bash")).toBe(false)
     expect(wiring.tools.has("git_diff")).toBe(true)
   })
 
   test("branch-only guard is LIVE: git_commit on a protected branch is rejected before git runs", async () => {
     const gitCalls: string[][] = []
-    const wiring = buildCiBotWiring({
+    const wiring = buildCiBotWiring("/repo", {
       ghRun: okGh,
       gitRun: async (args) => {
         gitCalls.push([...args])
@@ -123,7 +129,7 @@ describe("buildCiBotWiring — restricted tool surface", () => {
 
   test("branch-only guard ALLOWS a commit on a feature branch (read path unaffected)", async () => {
     const gitCalls: string[][] = []
-    const wiring = buildCiBotWiring({
+    const wiring = buildCiBotWiring("/repo", {
       ghRun: okGh,
       gitRun: async (args) => {
         gitCalls.push([...args])
@@ -146,7 +152,7 @@ describe("buildCiBotWiring — restricted tool surface", () => {
 
   test("ghRun seam is used in place of the real gh", async () => {
     let argsSeen: string[] | undefined
-    const wiring = buildCiBotWiring({
+    const wiring = buildCiBotWiring("/repo", {
       ghRun: async (a) => {
         argsSeen = a
         return { stdout: "ok", stderr: "", exitCode: 0 }
@@ -155,6 +161,20 @@ describe("buildCiBotWiring — restricted tool surface", () => {
     const result = await wiring.gh(["pr", "view", "1"])
     expect(result.stdout).toBe("ok")
     expect(argsSeen).toEqual(["pr", "view", "1"])
+  })
+
+  test("read-only gh tools dispatch through the same ghRun seam", async () => {
+    let argsSeen: string[] | undefined
+    const wiring = buildCiBotWiring("/repo", {
+      ghRun: async (a) => {
+        argsSeen = a
+        return { stdout: '{"title":"x"}', stderr: "", exitCode: 0 }
+      },
+    })
+    const tool = wiring.tools.get("gh_pr_view")
+    const result = await driveToTerminal(tool as NonNullable<typeof tool>, { pr: 42 }, "/repo")
+    expect(result?.ok).toBe(true)
+    expect(argsSeen?.slice(0, 3)).toEqual(["pr", "view", "42"])
   })
 })
 

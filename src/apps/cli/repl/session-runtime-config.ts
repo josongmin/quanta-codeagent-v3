@@ -9,6 +9,7 @@ import {
   type Provider,
   pickProvider,
   playbookTriggerFlag,
+  resolveMcpConfigPath,
   titleFlag,
 } from "../internal"
 import { type CliReviewerSandboxProfile, parseCliReviewerSandboxProfile } from "./reviewer-policy"
@@ -58,7 +59,7 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     mode: env("QUANTA_PERMISSION", "default") as PermissionMode,
     sandboxProfile: parseCliReviewerSandboxProfile(process.env.QUANTA_SANDBOX),
     maxTurns: Number(env("QUANTA_MAX_TURNS", "40")),
-    mcpConfigPath: process.env.QUANTA_MCP_CONFIG,
+    mcpConfigPath: resolveMcpConfigPath(process.env),
     spinnerIntervalMs: env("QUANTA_SPINNER_INTERVAL_MS", "80"),
     observeDir: observeDir(),
     argPrompt: argvPrompt(),

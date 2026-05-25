@@ -21,23 +21,35 @@
  *   • exit 0 on `--help` (after a usage dump to stdout).
  */
 
-import { loadEnvFiles } from "../cli/dotenv"
+import {
+  buildRetrievalStackCore,
+  buildSearchPipelineFromEnv,
+  clearSearchPipelineWireForTests,
+  type RetrievalStack,
+} from "@/runner/assemble"
+import { resolveSandboxProfileFromEnv } from "@/runtime"
+import { loadEnvFiles } from "@/shared/env-files"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { buildSystemPrompt } from "@/agent"
+import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
-import { defaultForker, type ForkSessionPort } from "@/agent/fork-session"
+import type { ForkSessionPort } from "@/agent/fork-session"
+import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
   type StickyModelStore,
 } from "@/agent/sticky-model"
+import { createSubagentRunner } from "@/agent/subagent-runner"
 import {
+  AGENT_MODES,
   type AgentMode as DelegationAgentMode,
   type DelegationPort,
-  defaultDelegationRouter,
+  lookupModeProfile,
+  wrapSubagentRunner,
 } from "@/agent/subagent-typed"
 import {
   buildSystemPromptForMode,
@@ -51,12 +63,10 @@ import {
 } from "@/agent/tool-profile"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
-import { buildRetrievalStackCore, type RetrievalStack } from "@/runner/assemble"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import { logger, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
-import { resolveSandboxProfileFromEnv } from "../cli/sandbox-wire"
 import type { AssembleRequest } from "./assemble"
 import {
   type AgentArgs,
@@ -66,9 +76,8 @@ import {
   parseAgentArgs,
   type ToolProfileToken,
 } from "./cli-args"
-import { buildSearchPipelineFromEnv } from "./search-pipeline-wire"
 
-export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "./search-pipeline-wire"
+export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests }
 
 import type { RunOutcome } from "./run"
 
@@ -113,6 +122,19 @@ const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
  *  byte-identical `{}` default. Single canonical knob; no aliases. */
 export const pickMcpNegotiator = (env: NodeJS.ProcessEnv): CapabilityNegotiator =>
   env.QUANTA_MCP_CAPS === "full" ? fullNegotiator() : defaultNegotiator
+
+const buildBaseRegistry = (args: {
+  readonly automationSlot: AutomationEngineSlot | null
+  readonly sandboxProfile: ReturnType<typeof resolveSandboxProfileFromEnv>
+  readonly searchWire: ReturnType<typeof buildSearchPipelineFromEnv>
+}): ToolRegistry =>
+  new ToolRegistry([
+    ...buildDefaultTools({
+      ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
+      ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
+    }),
+    ...(args.searchWire !== null ? [args.searchWire.tool] : []),
+  ])
 
 /**
  * ADR-0281 + ADR-0282 — composition-root wire for the memory
@@ -265,24 +287,32 @@ const resolveFocusChain = (
  *  STUBBED to a no-op when no host runner is wired — the slot's presence
  *  alone publishes the available modes to surfaces. */
 const resolveDelegation = (
+  base: AssembleRequest["base"],
   delegateModes: ReadonlyArray<DelegationAgentMode> | undefined,
 ):
   | { readonly delegator: DelegationPort; readonly modes?: ReadonlyArray<DelegationAgentMode> }
   | undefined => {
   if (delegateModes === undefined || delegateModes.length === 0) return undefined
-  // Stub TypedDelegationRunner: returns ok=false with a typed message so
-  // a host that forgot to inject its real runner sees a clean boomerang
-  // shape (the factory contract). Hosts that DO wire a real runner override
-  // this slot post-construction by replacing the `delegation` field on the
-  // returned base before `assembleAgentConfig`.
-  const delegator = defaultDelegationRouter({
-    runner: async () => ({
-      ok: false,
-      finalText: "delegation runner not wired (composition root produced stub)",
-      turns: 0,
-    }),
-  })
-  return { delegator, modes: delegateModes }
+  const runner = createSubagentRunner(base)
+  const typed = wrapSubagentRunner(runner)
+  const real = defaultDelegationRunner({ runner: typed })
+  const delegator: DelegationPort = {
+    delegate: async (req) =>
+      real.delegate({
+        mode: req.mode,
+        prompt: req.prompt,
+        ...(req.budget !== undefined ? { budget: req.budget } : {}),
+        ...(req.parentSignal !== undefined ? { signal: req.parentSignal } : {}),
+        ...(req.correlation !== undefined ? { correlation: req.correlation } : {}),
+        depth: 0,
+      }),
+    listModes: () => delegateModes,
+    describeMode: (mode) => lookupModeProfile(mode),
+  }
+  return {
+    delegator,
+    modes: delegateModes.length > 0 ? delegateModes : AGENT_MODES,
+  }
 }
 
 /** ADR-0236 / ADR-0226 — wire the rich fork-session port slot. The base
@@ -295,9 +325,22 @@ const resolveDelegation = (
  *  byte-identical legacy (RFC §1.2). */
 const resolveForkSession = (
   enable: boolean | undefined,
-): { readonly forker: ForkSessionPort } | undefined => {
+):
+  | {
+      readonly conversationCheckpoint: NonNullable<
+        AssembleRequest["base"]["conversationCheckpoint"]
+      >
+      readonly fork: NonNullable<AssembleRequest["base"]["fork"]>
+      readonly forkSession: { readonly forker: ForkSessionPort }
+    }
+  | undefined => {
   if (enable !== true) return undefined
-  return { forker: defaultForker() }
+  const wire = defaultCheckpointBaseWire()
+  return {
+    conversationCheckpoint: { store: wire.store },
+    fork: { forker: wire.base },
+    forkSession: { forker: wire.forker },
+  }
 }
 
 /** ADR-0279 — composition-root automation slot. Returns `null` when
@@ -330,6 +373,21 @@ const resolveAutomation = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null 
   )
 }
 
+const attachExecutionPlaneSlots = (
+  base: AssembleRequest["base"],
+  p: AssembleRequestPartial,
+): void => {
+  const delegation = resolveDelegation(base, p.delegateModes)
+  if (delegation !== undefined) base.delegation = delegation
+
+  const forkWire = resolveForkSession(p.forkSession)
+  if (forkWire !== undefined) {
+    base.conversationCheckpoint = forkWire.conversationCheckpoint
+    base.fork = forkWire.fork
+    base.forkSession = forkWire.forkSession
+  }
+}
+
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
  *  individual fields (e.g. ci-bot replaces `registry` with the restricted
  *  git+gh tool set), but having a baseline avoids each runner duplicating
@@ -339,7 +397,7 @@ const resolveAutomation = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null 
  *  shared `@/llm` factory (OCP/DIP). `process.env` is handed to the factory
  *  HERE — the single composition-root touchpoint — so the factory stays env-
  *  agnostic and the canonical {@link DEFAULT_MODEL} (no local copy) is used. */
-const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] => {
+export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] => {
   // QUANTA_PROVIDER drives the factory pick; an explicit `--provider` flag must
   // still win, so seed it into the env view the factory reads.
   const env =
@@ -387,8 +445,6 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
   const stickyModelStore = resolveStickyModelStore(p.stickyModel)
   const toolProfile = resolveToolProfile(p.toolProfile)
   const focusChain = resolveFocusChain(p.focusChainEvery)
-  const delegation = resolveDelegation(p.delegateModes)
-  const forkSession = resolveForkSession(p.forkSession)
   // ADR-0279 — automation engine composition-root wire. Returns `null`
   // when `QUANTA_AUTOMATION !== "on"` (default-OFF byte-identical legacy);
   // when on, returns a fully-wired slot the loop-helpers ticker consumes
@@ -408,18 +464,12 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
   // immediate effect — it lives in the parsed args so a follow-up host can
   // consume `p.noAutoBackground` to skip its own wiring. Documented for
   // forward-compat; absent on the returned base.
-  return {
+  const base: AssembleRequest["base"] = {
     llm,
     // DIP: route through the factory (no app-specific ports at this baseline
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
     // byte-identical to the `defaultTools` singleton.
-    registry: new ToolRegistry([
-      ...buildDefaultTools({
-        ...(automationSlot !== null ? { automationEngine: automationSlot.engine } : {}),
-        ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
-      }),
-      ...(searchWire !== null ? [searchWire.tool] : []),
-    ]),
+    registry: buildBaseRegistry({ automationSlot, sandboxProfile, searchWire }),
     stream,
     permission: { mode: "acceptEdits" },
     messages: [],
@@ -442,12 +492,32 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     ...(stickyModelStore !== undefined ? { stickyModelStore } : {}),
     ...(toolProfile !== undefined ? { toolProfile } : {}),
     ...(focusChain !== undefined ? { focusChain } : {}),
-    ...(delegation !== undefined ? { delegation } : {}),
-    ...(forkSession !== undefined ? { forkSession } : {}),
     // ADR-0279 — spread the automation slot conditionally (default-OFF;
     // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
     ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),
-  } as AssembleRequest["base"]
+  }
+
+  attachExecutionPlaneSlots(base, p)
+  return base
+}
+
+const applyModeSpecificRequestFields = (out: AssembleRequest, p: AssembleRequestPartial): void => {
+  if (p.mode === "headless" && p.prompt !== undefined) {
+    out.headless = { prompt: p.prompt }
+    return
+  }
+  if (p.mode === "batch" && p.corpus !== undefined) {
+    out.batch = {
+      corpus: p.corpus,
+      ...(p.instance !== undefined ? { instance: p.instance } : {}),
+      ...(p.predictions !== undefined ? { predictionsPath: p.predictions } : {}),
+      ...(p.report !== undefined ? { reportPath: p.report } : {}),
+    }
+    return
+  }
+  if (p.mode === "ci-bot" && p.pr !== undefined) {
+    out.ciBot = { pr: p.pr, ...(p.ciBotDryRun ? { dryRun: true } : {}) }
+  }
 }
 
 /** Per-mode dispatcher contract. Each `./mode-presets/<mode>.ts` exports this. */
@@ -617,18 +687,7 @@ const liftToAssembleRequest = (p: AssembleRequestPartial): AssembleRequest => {
   const out: AssembleRequest = { mode: p.mode, base }
   if (p.dials !== undefined) out.dials = p.dials
   if (p.exhaustion !== undefined) out.exhaustion = p.exhaustion
-  if (p.mode === "headless" && p.prompt !== undefined) {
-    out.headless = { prompt: p.prompt }
-  } else if (p.mode === "batch" && p.corpus !== undefined) {
-    out.batch = {
-      corpus: p.corpus,
-      ...(p.instance !== undefined ? { instance: p.instance } : {}),
-      ...(p.predictions !== undefined ? { predictionsPath: p.predictions } : {}),
-      ...(p.report !== undefined ? { reportPath: p.report } : {}),
-    }
-  } else if (p.mode === "ci-bot" && p.pr !== undefined) {
-    out.ciBot = { pr: p.pr, ...(p.ciBotDryRun ? { dryRun: true } : {}) }
-  }
+  applyModeSpecificRequestFields(out, p)
   return out
 }
 

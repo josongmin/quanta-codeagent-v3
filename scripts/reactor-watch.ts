@@ -9,7 +9,9 @@
  * prior outcome) because only the host knows current session state.
  */
 
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
+import { dirname, join } from "node:path"
 import {
   publishReactorWatchTrigger,
   reactorWatchSocketPath,
@@ -20,6 +22,7 @@ import {
   type GhCliPort,
   type ProactiveTrigger,
   REACTOR_ENV_FLAG,
+  type SnapshotSeenRunsStore,
 } from "@/reactor"
 
 /** Argv shape. Parsed pure (no IO) so it can be unit-tested if/when needed. */
@@ -27,6 +30,7 @@ export interface WatcherArgs {
   readonly prRef: string | undefined
   readonly sessionId: string | undefined
   readonly socketPath: string | undefined
+  readonly seenRunsPath: string | undefined
   readonly intervalMs: number
   readonly once: boolean
   readonly dryRun: boolean
@@ -40,7 +44,8 @@ const HELP_TEXT = `reactor-watch — ADR-0132 cron watcher
 
 USAGE:
   bun run scripts/reactor-watch.ts --pr <ref> --session-id <id>
-                                   [--socket-path <path>] [--interval-ms <n>]
+                                   [--socket-path <path>] [--seen-runs-path <path>]
+                                   [--interval-ms <n>]
                                    [--once] [--dry-run] [--help]
 
 OPTIONS:
@@ -50,6 +55,9 @@ OPTIONS:
                        Required unless --dry-run or --help.
   --socket-path <path> Override the per-session reactor socket path.
                        Default: ~/.quanta/reactor-<session-id>.sock
+  --seen-runs-path <path>
+                       Persist completed CI run ids across restarts.
+                       Default: ~/.quanta/reactor-seen-runs-<pr>.json
   --interval-ms <n>    Poll cadence in ms. Default ${DEFAULT_INTERVAL_MS}. Min ${MIN_INTERVAL_MS}.
   --once               Poll a single time and exit. Useful for cron drivers.
   --dry-run            Print triggers as JSONL to stdout. Does NOT enable
@@ -66,6 +74,7 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
   let prRef: string | undefined
   let sessionId: string | undefined
   let socketPath: string | undefined
+  let seenRunsPath: string | undefined
   let intervalMs = DEFAULT_INTERVAL_MS
   let once = false
   let dryRun = false
@@ -96,6 +105,12 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
         socketPath = v
         i++
       }
+    } else if (a === "--seen-runs-path") {
+      const v = argv[i + 1]
+      if (v !== undefined) {
+        seenRunsPath = v
+        i++
+      }
     } else if (a === "--interval-ms") {
       const v = argv[i + 1]
       if (v !== undefined) {
@@ -105,7 +120,47 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
       }
     }
   }
-  return { prRef, sessionId, socketPath, intervalMs, once, dryRun, help }
+  return { prRef, sessionId, socketPath, seenRunsPath, intervalMs, once, dryRun, help }
+}
+
+const sanitizePrToken = (prRef: string): string => {
+  const cleaned = prRef.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[-.]+/, "_")
+  return cleaned.length > 0 ? cleaned : "pr"
+}
+
+export const reactorWatchSeenRunsPath = (prRef: string, home = homedir()): string =>
+  join(home.replace(/\/+$/, ""), ".quanta", `reactor-seen-runs-${sanitizePrToken(prRef)}.json`)
+
+const normalizeSeenRuns = (parsed: unknown): readonly string[] => {
+  if (Array.isArray(parsed)) {
+    return parsed.filter((value): value is string => typeof value === "string")
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return []
+  const runIds = (parsed as { runIds?: unknown }).runIds
+  return Array.isArray(runIds)
+    ? runIds.filter((value): value is string => typeof value === "string")
+    : []
+}
+
+export const loadSeenRunsSeed = async (path: string): Promise<readonly string[]> => {
+  try {
+    const raw = await readFile(path, "utf8")
+    return normalizeSeenRuns(JSON.parse(raw))
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOENT") return []
+    return []
+  }
+}
+
+export const persistSeenRunsSnapshot = async (
+  path: string,
+  store: SnapshotSeenRunsStore,
+): Promise<void> => {
+  await mkdir(dirname(path), { recursive: true })
+  const tmp = `${path}.tmp`
+  await writeFile(tmp, `${JSON.stringify({ runIds: store.snapshot() }, null, 2)}\n`, "utf8")
+  await rename(tmp, path)
 }
 
 const ghCliPort = (_repoCwd: string): GhCliPort => ({
@@ -173,22 +228,29 @@ const main = async (argv: readonly string[]): Promise<number> => {
     return 3
   }
 
+  const seenRunsPath = args.seenRunsPath ?? reactorWatchSeenRunsPath(args.prRef, homedir())
+  const seenRunsStore = createInMemorySeenRuns(await loadSeenRunsSeed(seenRunsPath))
+
   const source = createCiTriggerSource({
     ghCliPort: ghCliPort(process.cwd()),
     clockPort: { now: () => Date.now() },
     repoCwd: process.cwd(),
     prRef: args.prRef,
-    seenRunsStore: createInMemorySeenRuns(),
+    seenRunsStore,
   })
 
   const env = { get: (n: string) => process.env[n] }
 
   const runOnce = async (): Promise<void> => {
+    const before = JSON.stringify(seenRunsStore.snapshot())
     const { triggers, action } = await pollOnce({
       source,
       dryRun: args.dryRun,
       env,
     })
+    if (JSON.stringify(seenRunsStore.snapshot()) !== before) {
+      await persistSeenRunsSnapshot(seenRunsPath, seenRunsStore)
+    }
     for (const t of triggers) {
       process.stdout.write(
         `${JSON.stringify({

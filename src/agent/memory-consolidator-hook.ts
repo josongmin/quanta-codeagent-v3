@@ -36,6 +36,7 @@ import {
   type WatermarkState,
 } from "@/memory"
 import { errMessage } from "@/shared"
+import type { Stage1Entry, Stage1OutputsStore } from "@/memory/stage1-store"
 import type { Stage1Record, Stage1StorePortV2 } from "./memory/stage1-store"
 
 /** Outcome of a session-end consolidator attempt. Mirrors `Phase1Outcome`
@@ -98,6 +99,10 @@ export interface ConsolidatorHookInput {
   /** Real (non-meta) turn count from the session — drives the
    *  MIN_TURN_THRESHOLD skip arm. */
   readonly turnCount: number
+  /** Optional sibling stage1 usage/selection cache mirror. When present, a
+   *  successful Phase 1 distill also writes a selected-for-phase2 row here so
+   *  future session-start injectors can reuse it. */
+  readonly stage1OutputsStore?: Stage1OutputsStore
   /** Optional caller cancellation propagated to the Phase 1 port. */
   readonly signal?: AbortSignal
   /** Injected clock — defaults to `Date.now`. */
@@ -137,6 +142,26 @@ const applyRedactor = (
  *  cleanly while the operator can still see what happened. The session
  *  is already wrapping up; we MUST NOT throw. */
 export type ConsolidatorHookLogger = (event: ConsolidatorHookOutcome) => void
+
+const mirrorStage1ToOutputsStore = (
+  slot: Stage1OutputsStore | undefined,
+  out: Phase1Outcome & { kind: "distilled" },
+  generatedAtMs: number,
+): void => {
+  if (slot === undefined) return
+  const entry: Stage1Entry = {
+    threadId: out.stage1.threadId,
+    sourceUpdatedAt: out.stage1.sourceUpdatedAt,
+    rawMemory: out.stage1.rawMemory,
+    rolloutSummary: out.stage1.rolloutSummary,
+    generatedAt: generatedAtMs,
+    rolloutSlug: out.stage1.rolloutSlug,
+    usageCount: 0,
+    lastUsage: generatedAtMs,
+    selectedForPhase2: true,
+  }
+  slot.put(entry)
+}
 
 /** Run the consolidator hook. ALL failure paths return an outcome — the
  *  function never throws (its no-throw contract is what lets `runAgent`'s
@@ -211,6 +236,14 @@ const runMemoryConsolidatorHookInner = async (
   }
   if (outcome.kind === "skipped") {
     return { kind: "skipped", reason: outcome.reason }
+  }
+  try {
+    mirrorStage1ToOutputsStore(input.stage1OutputsStore, outcome, (input.now ?? Date.now)())
+  } catch (e) {
+    return {
+      kind: "error",
+      message: `stage1OutputsStore mirror failed: ${errMessage(e)}`,
+    }
   }
   return { kind: "distilled", durationMs: outcome.durationMs, threadId }
 }

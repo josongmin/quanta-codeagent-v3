@@ -10,6 +10,7 @@ export {
   type WrappedShellArgv,
   wrapShellArgv,
 } from "./os-sandbox"
+export { resolveSandboxProfileFromEnv } from "./os-sandbox/env"
 export type { DockerSandboxOptions, Sandbox, SandboxPolicy } from "./sandbox"
 export {
   DEFAULT_ENV_ALLOWLIST,

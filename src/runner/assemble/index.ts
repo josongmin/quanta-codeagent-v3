@@ -28,6 +28,11 @@ export {
   type SessionDeps,
 } from "./config"
 export {
+  assemblePipeline,
+  type PipelinePreset,
+  type PipelineWireOverrides,
+} from "./pipeline"
+export {
   buildLLMCore,
   type ComposeLlmInput,
   composeLLMCore,
@@ -74,6 +79,19 @@ export {
   type StreamingAssembleInput,
   type StreamingResult,
 } from "./streaming"
+export {
+  buildSearchPipelineFromEnv,
+  clearSearchPipelineWireForTests,
+  type WiredSearchPipeline,
+} from "./search-pipeline"
+export {
+  createIdentityModeSessionState,
+  createSystemSource,
+  createToolProfileSessionState,
+  type IdentityModeSessionState,
+  type SystemSource,
+  type ToolProfileSessionState,
+} from "./session-state"
 export {
   buildSubagentConfigCore,
   type SubagentConfigAssembleInput,

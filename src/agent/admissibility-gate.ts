@@ -598,6 +598,46 @@ const runAlwaysConfirmBranch = async (
   return null
 }
 
+/** Tool-profile gate (ADR-0213 closeout). The active profile is re-read per
+ *  call via `config.toolProfile.activeName()` when present, otherwise the
+ *  static `defaultName` remains authoritative. The profile may only tighten
+ *  admissibility:
+ *    - `allow`   ⇒ fall through to the existing gates
+ *    - `confirm` ⇒ reuse the explicit confirmation branch
+ *    - `deny`    ⇒ terminal deny
+ *
+ * Absent slot / absent active name ⇒ byte-identical fallthrough. */
+const runToolProfileGate = async (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions = {},
+): Promise<DispatchResult | null | "fallthrough"> => {
+  const slot = config.toolProfile
+  if (slot === undefined) return "fallthrough"
+  const activeName = slot.activeName?.() ?? slot.defaultName
+  if (activeName === undefined) return "fallthrough"
+  let policy: ReturnType<typeof slot.resolver.resolve>
+  try {
+    policy = slot.resolver.resolve({
+      profileName: activeName,
+      toolName: action.tool,
+      isReadOnly: action.isReadOnly,
+    })
+  } catch (e) {
+    return deny(
+      call.id,
+      `Permission denied: tool profile "${activeName}" could not resolve ${action.tool} (${errMessage(e)})`,
+      "tool-profile-error",
+    )
+  }
+  if (policy.kind === "allow") return "fallthrough"
+  if (policy.kind === "deny") {
+    return deny(call.id, `Permission denied: ${policy.reason}`, "tool-profile-denied")
+  }
+  return runAlwaysConfirmBranch(call, config, action, opts)
+}
+
 /**
  * HITL 4-tier gate (Codex hitl-audit.md). Returns:
  *   - a short-circuit {@link DispatchResult} for handoff / declined /
@@ -1045,6 +1085,15 @@ export const runAdmissibilityGate = async (
   //    that added permissionPatternStore to the trigger to close a fail-open).
   const earlyDeny = earlyHardDeny(call, config, action, opts)
   if (earlyDeny) return earlyDeny
+
+  // 2.25. Tool-profile strictness overlay. `/profile` mutates the active
+  //       profile in-place through the shared session state, and the gate
+  //       re-reads that live value here on every call. `allow` is neutral;
+  //       only stricter outcomes short-circuit.
+  const toolProfileResult = await runToolProfileGate(call, config, action, opts)
+  if (toolProfileResult !== "fallthrough") {
+    return toolProfileResult
+  }
 
   // 2.5. Pattern-grant auto-pass (ADR-0061 absorb #2). DEFAULT OFF — fires only
   //      when `config.permissionPatternStore` is wired AND the action carries

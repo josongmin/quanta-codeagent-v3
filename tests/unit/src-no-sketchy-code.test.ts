@@ -66,6 +66,8 @@ const RULES: readonly Rule[] = [
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
+      "runner/batch/eval/driver.ts":
+        "Extracted batch core keeps the same bench-only opt-in env gates (`QUANTA_BENCH_*`) while the app surface becomes thin. Same posture as the prior apps/bench/eval/driver.ts entry; follow-up work can move these dials behind typed config.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
       "apps/probe/index.ts":
         "probe CLI bootstraps env before module loads (same posture as other CLI entries)",
@@ -75,6 +77,8 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — passes the parent's PATH so the MCP stdio child can find its binary; not a feature-flag read.",
       "apps/bench/corpus/dataset.ts":
         "ENV PROPAGATION — bench shells out to git/python; child env is intentionally the parent's.",
+      "runner/batch/corpus/dataset.ts":
+        "Extracted batch core preserves the same env pass-through for git/python child processes; this is propagation, not a feature read.",
       "apps/bench/python-swebench.ts":
         "ENV PROPAGATION — same posture as swebench-dataset.ts; the Python harness inherits parent env.",
       "apps/bench/harness/prepare.ts":
@@ -109,18 +113,15 @@ const RULES: readonly Rule[] = [
         "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/idle-monitor.ts":
         "Surface idle-monitor reads idle-window envs at composition root; same posture as status-pills.ts.",
-      "apps/cli/mcp-cmd.ts":
-        "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
-      "apps/cli/memory-cmd.ts":
-        "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
+      "apps/cli/mcp-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
+      "apps/cli/memory-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/repl.ts":
         "REPL composition root — same posture as apps/cli/internal.ts (CLI feature-flag bootstrap).",
       "apps/cli/repl/session-loop.ts":
         "REPL session-loop composition root — same posture as repl.ts.",
       "apps/cli/repl/session-runtime-config.ts":
         "REPL session-runtime-config composition root — same posture as repl.ts.",
-      "apps/cli/rewind-cmd.ts":
-        "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
+      "apps/cli/rewind-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/rewind-git.ts":
         "CLI rewind-git composition root — env DI fallback per CLI posture.",
       "apps/cli/sandbox-wire.ts":
@@ -129,8 +130,7 @@ const RULES: readonly Rule[] = [
         "Surface status-flash config — env DI fallback at TTY composition.",
       "apps/cli/status-pills.ts":
         "Surface presentation read (same posture as shell-stream-painter / auth-ui).",
-      "apps/cli/web-cmd.ts":
-        "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
+      "apps/cli/web-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "mcp/isolated-client.ts":
         "ENV PROPAGATION — passes parent env to spawned MCP child (same posture as mcp/client.ts).",
       "media/stt/registry.ts":
@@ -262,8 +262,7 @@ const RULES: readonly Rule[] = [
       "agent/submission.ts": "BURN-DOWN: W6 injected; default-fallback path uses Date.now",
       "agent/budget-ledger.ts":
         "BURN-DOWN: human-readable Date formatting in error message — not model-facing replay",
-      "agent/hooks.ts":
-        "BURN-DOWN: hook-elapsed measurement for telemetry — not model-facing",
+      "agent/hooks.ts": "BURN-DOWN: hook-elapsed measurement for telemetry — not model-facing",
       "agent/memory/stage1-store/sqlite.ts":
         "BURN-DOWN: SQLite persisted-row timestamp; replay-stable via the store",
       "agent/repro-test/execute.ts":

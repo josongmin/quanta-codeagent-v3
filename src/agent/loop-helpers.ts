@@ -418,7 +418,8 @@ export const buildIdentityReminderText = (
   if (slot === undefined) return undefined
   let identity: readonly string[] | undefined
   try {
-    const variant = slot.registry.variantFor(mode)
+    const activeMode = slot.activeMode?.() ?? mode
+    const variant = slot.registry.variantFor(activeMode)
     identity = variant.identity
   } catch {
     return undefined

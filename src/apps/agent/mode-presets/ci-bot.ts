@@ -32,6 +32,7 @@ import { scrubEnv } from "@/runtime"
 import { logger } from "@/shared"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { defaultGitRunner, type GitRunner, gitTools, ToolRegistry } from "@/tool"
+import { ghTools, type GhRunner as ToolGhRunner } from "@/tool/gh"
 import {
   type AssembleRequest,
   type AssembleRequestSeams,
@@ -61,9 +62,9 @@ const CI_ENV_ALLOWLIST_LOCAL: readonly string[] = [
 ]
 
 /** Bundle of the ci-bot tool surface + a `gh` runner. The `tools` is a
- *  `ToolRegistry` containing ONLY the read-only git tools (status/diff/log/
- *  blame) plus the upstream check. No bash, no write, no Python — the
- *  restrictive matrix is the whole point of `toolSurface: "ci-restricted"`. */
+ *  `ToolRegistry` containing the git tools plus READ-ONLY GitHub PR/CI
+ *  inspection tools. Mutating `gh` tools stay host-owned (`postPrComment`)
+ *  so ci-bot cannot silently broaden its remote-write surface. */
 export interface CiBotWiring {
   tools: ToolRegistry
   /** `gh <args>` runner that spawns under a scrubbed env (CI_ENV_ALLOWLIST). */
@@ -78,10 +79,13 @@ export interface CiBotWiring {
  *  rather than blocking the whole turn. */
 const GH_SUBPROCESS_TIMEOUT_MS = 30_000
 
-const defaultGhRunner = async (
-  args: string[],
+const spawnGh = async (
+  repoCwd: string,
+  argv: readonly string[],
+  timeoutMs: number,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
-  const proc = Bun.spawn(["gh", ...args], {
+  const proc = Bun.spawn([...argv], {
+    cwd: repoCwd,
     env: scrubEnv(CI_ENV_ALLOWLIST_LOCAL),
     stdout: "pipe",
     stderr: "pipe",
@@ -92,7 +96,7 @@ const defaultGhRunner = async (
     } catch {
       // already exited
     }
-  }, GH_SUBPROCESS_TIMEOUT_MS)
+  }, timeoutMs)
   try {
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -104,6 +108,23 @@ const defaultGhRunner = async (
     clearTimeout(timer)
   }
 }
+
+const spawnGhRunner =
+  (
+    repoCwd: string,
+  ): ((args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>) =>
+  async (args) => spawnGh(repoCwd, ["gh", ...args], GH_SUBPROCESS_TIMEOUT_MS)
+
+const spawnToolGhRunner =
+  (repoCwd: string): ToolGhRunner =>
+  async (argv, _cwd, timeoutMs) => {
+    const result = await spawnGh(repoCwd, argv, timeoutMs)
+    return {
+      code: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    }
+  }
 
 /** Wrap a `GitRunner` so EVERY git invocation is checked against the
  *  `gitWrite: branch-only` lever BEFORE it runs. This is the LIVE enforcement
@@ -153,11 +174,27 @@ const gitRunnerFromSeam = (seam: NonNullable<AssembleRequestSeams["gitRun"]>): G
   run: (args, cwd) => seam(args, cwd),
 })
 
+/** Adapt the ci-bot host `gh` runner to the `@/tool/gh` ToolRunner shape.
+ *  The tool slice builds argv as `["gh", ...]`; the host runner expects only
+ *  the subcommand tail because it adds the binary itself. */
+const ghToolRunnerFrom = (
+  gh: CiBotWiring["gh"],
+): ToolGhRunner => async (argv, _cwd, _timeoutMs) => {
+  const args = argv[0] === "gh" ? argv.slice(1) : argv
+  const result = await gh([...args])
+  return {
+    code: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  }
+}
+
 /** Build the ci-bot wiring bundle: a `ToolRegistry` containing the git tools
- *  (wrapped in the branch-only guard) plus the `gh` runner closure. Exported
- *  so a test or a future plugin caller can mount the same surface without
- *  going through `runMode`. */
+ *  (wrapped in the branch-only guard) plus the READ-ONLY GitHub inspection
+ *  tools. Exported so a test or a future plugin caller can mount the same
+ *  surface without going through `runMode`. */
 export const buildCiBotWiring = (
+  repoCwd: string,
   seams?: Pick<AssembleRequestSeams, "ghRun" | "gitRun">,
 ): CiBotWiring => {
   // `gitTools()` returns 9 tools including the two mutating ones
@@ -167,8 +204,10 @@ export const buildCiBotWiring = (
   // push/reset onto a protected branch is rejected before it reaches git.
   const inner = seams?.gitRun ? gitRunnerFromSeam(seams.gitRun) : defaultGitRunner
   const guarded = branchOnlyGuardedRunner(inner)
-  const tools = new ToolRegistry(gitTools(guarded))
-  const gh = seams?.ghRun ?? defaultGhRunner
+  const gh = seams?.ghRun ?? spawnGhRunner(repoCwd)
+  const ghToolRunner = seams?.ghRun ? ghToolRunnerFrom(gh) : spawnToolGhRunner(repoCwd)
+  const readOnlyGhTools = ghTools(ghToolRunner).filter((tool) => tool.isReadOnly())
+  const tools = new ToolRegistry([...gitTools(guarded), ...readOnlyGhTools])
   return { tools, gh }
 }
 
@@ -239,7 +278,7 @@ const buildCiBotBase = (
             "</pr_untrusted_data>",
             "",
             "Investigate the diff, identify any issues, and prepare a summary.",
-            "You may use git tools (read-only diff/status/log/blame + branch-scoped commits).",
+            "You may use git tools plus read-only GitHub PR/CI inspection tools.",
             "Bash and arbitrary writes are NOT available.",
           ].join("\n"),
         },
@@ -291,7 +330,8 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
     throw new Error("ci-bot.runMode: req.ciBot.pr is required (non-empty string)")
   }
 
-  const wiring = buildCiBotWiring(req.seams)
+  const cwd = req.ciBot?.cwd ?? req.base.cwd ?? process.cwd()
+  const wiring = buildCiBotWiring(cwd, req.seams)
   const prContext = await fetchPrContext(pr, wiring.gh)
   const base = buildCiBotBase(req, wiring, prContext)
   const cfg = assembleAgentConfig({ ...req, base })

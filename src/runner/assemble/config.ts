@@ -6,6 +6,11 @@ import type { PermissionContext, ToolAction } from "@/permission"
 import type { RunContext } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
+import type {
+  IdentityModeSessionState,
+  SystemSource,
+  ToolProfileSessionState,
+} from "./session-state"
 
 /**
  * Surface-agnostic per-turn `AgentConfig` assembly — relocated verbatim from
@@ -29,6 +34,10 @@ export interface SessionDeps {
   /** Already-built system prompt (`buildSystemPrompt(cwd, { persona })`).
    *  Resolved by the caller so this module stays env-free. */
   system: string
+  /** Optional live system-prompt source. When wired, `assembleConfig`
+   *  re-reads the prompt each turn so a surface-owned identity swap applies
+   *  without restarting the session. */
+  systemSource?: SystemSource
   cwd: string
   maxTurns: number
   signal: AbortSignal
@@ -72,6 +81,36 @@ export interface SessionDeps {
   /** Helper-only search pipeline slot paired with any surface-registered
    *  `search_codebase` facade. Absent ⇒ omitted from AgentConfig entirely. */
   searchPipeline?: AgentConfig["searchPipeline"]
+  /** ADR-0068 session-end consolidator hook. Absent ⇒ no session-end
+   *  Phase1+write path (byte-identical legacy). */
+  memoryConsolidator?: AgentConfig["memoryConsolidator"]
+  /** Static session-context block injected into the cached system sections.
+   *  Used for cross-session memory summaries and other host-owned context. */
+  sessionCtx?: AgentConfig["sessionCtx"]
+  /** ADR-0218 / ADR-0283 typed delegation surface. Helper-only today; hosts
+   *  may publish it to slash/tools. Absent ⇒ omitted entirely. */
+  delegation?: AgentConfig["delegation"]
+  /** ADR-0140 detached subagent scheduler. When present, Tier-1 registers
+   *  `subagent_fork|poll|await`. Absent ⇒ no background tool plane. */
+  subagentBackground?: AgentConfig["subagentBackground"]
+  /** ADR-0223 stuck-tool observer/proposer surface. Absent ⇒ dispatch's
+   *  `tickToolStart` / `tickToolEnd` optional-chain is a no-op. */
+  autoBackground?: AgentConfig["autoBackground"]
+  /** ADR-0201 base fork-session tool slot. Absent ⇒ `fork_session` tool is
+   *  not registered. */
+  fork?: AgentConfig["fork"]
+  /** ADR-0226 rich fork-session slash/port slot. Absent ⇒ rich branch-aware
+   *  fork surface remains unavailable. */
+  forkSession?: AgentConfig["forkSession"]
+  /** ADR-0124 helper-only conversation checkpoint store. Lets surfaces share
+   *  one snapshot store across fork/rewind/recovery consumers. */
+  conversationCheckpoint?: AgentConfig["conversationCheckpoint"]
+  /** ADR-0207 helper-only usage/selection cache for cross-session memory
+   *  injection and promotion bookkeeping. */
+  stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
+  /** ADR-0215 / ADR-0239 automation engine slot. Absent ⇒ no ticker and no
+   *  `automation_update` default tool registration. */
+  automationEngine?: AgentConfig["automationEngine"]
   /** Wave-A admissibility bundle (reviewer/rules/store bridge). Absent ⇒
    *  dispatch passes no extra gate options (byte-identical legacy). */
   admissibility?: AgentConfig["admissibility"]
@@ -81,6 +120,17 @@ export interface SessionDeps {
   /** Host-owned operator-input surface. Present ⇒ `request_user_input` is
    *  registered and dispatch wires `ToolContext.requestUserInput`. */
   userInputPort?: AgentConfig["userInputPort"]
+  /** Authoritative live tool-profile slot. The session surface and the gate
+   *  share ONE state object; `assembleConfig` projects it into
+   *  `AgentConfig.toolProfile.activeName`. */
+  toolProfileState?: ToolProfileSessionState
+  /** Authoritative live identity-mode slot. The session surface and the
+   *  loop share ONE state object; `assembleConfig` projects it into
+   *  `AgentConfig.identityModeVariant.activeMode`. */
+  identityModeState?: IdentityModeSessionState
+  /** Authoritative focus-chain tracker slot shared by the slash surface and
+   *  the loop. Absent ⇒ field omitted from `AgentConfig`. */
+  focusChain?: AgentConfig["focusChain"]
   /** ADR-0237 — per-turn shell-snapshot config block. The CLI composition
    *  root (`apps/cli/internal.ts`) builds this when `QUANTA_SHELL_SNAPSHOT=1`
    *  or `--shell-snapshot` is set, injecting a Bun-spawner backed port plus
@@ -159,6 +209,48 @@ const buildMemoryAndModeSpreads = (
   ...(d.subagentConfig ? { subagent: d.subagentConfig } : {}),
 })
 
+const buildPromptVariantSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
+  ...(d.focusChain !== undefined ? { focusChain: d.focusChain } : {}),
+  ...(() => {
+    const state = d.toolProfileState
+    return state !== undefined
+    ? {
+        toolProfile: {
+          resolver: state.resolver,
+          ...(state.defaultName !== undefined
+            ? { defaultName: state.defaultName }
+            : {}),
+          activeName: () => state.get() ?? state.defaultName ?? "write",
+        },
+      }
+    : {}
+  })(),
+  ...(() => {
+    const state = d.identityModeState
+    return state !== undefined
+    ? {
+        identityModeVariant: {
+          registry: state.registry,
+          ...(state.perTurnReminderEnabled !== undefined
+            ? { perTurnReminderEnabled: state.perTurnReminderEnabled }
+            : {}),
+          activeMode: () => state.get() ?? state.defaultMode ?? "default",
+        },
+      }
+    : {}
+  })(),
+})
+
+const buildObservabilityAndPortsSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
+  ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
+  ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
+  ...(d.decisionEmitter !== undefined ? { decisionEmitter: d.decisionEmitter } : {}),
+  ...(d.planExitPort !== undefined ? { planExitPort: d.planExitPort } : {}),
+  ...(d.userInputPort !== undefined ? { userInputPort: d.userInputPort } : {}),
+  ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
+  ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
+})
+
 /** Capability + observability spreads (Phase 2 of the optional-key
  *  cohort). Pure. Byte-identical to the inline chain. */
 const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentConfig> => ({
@@ -166,17 +258,29 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
   ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
   ...(d.admissibility !== undefined ? { admissibility: d.admissibility } : {}),
-  ...(d.planExitPort !== undefined ? { planExitPort: d.planExitPort } : {}),
-  ...(d.userInputPort !== undefined ? { userInputPort: d.userInputPort } : {}),
-  ...(d.onShellEvent !== undefined ? { onShellEvent: d.onShellEvent } : {}),
-  ...(d.workMetricsSink !== undefined ? { workMetricsSink: d.workMetricsSink } : {}),
-  ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
-  ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
   ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
   ...(d.searchPipeline !== undefined ? { searchPipeline: d.searchPipeline } : {}),
   ...(d.shellSnapshot !== undefined ? { shellSnapshot: d.shellSnapshot } : {}),
   ...(d.sessionEffort !== undefined ? { sessionEffort: d.sessionEffort } : {}),
-  ...(d.decisionEmitter !== undefined ? { decisionEmitter: d.decisionEmitter } : {}),
+  ...buildObservabilityAndPortsSpreads(d),
+  ...buildPromptVariantSpreads(d),
+})
+
+/** Execution-plane helper spreads. Kept separate so new product-plane slots
+ *  do not keep inflating the already-dense capability/observability cohort. */
+const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
+  ...(d.memoryConsolidator !== undefined ? { memoryConsolidator: d.memoryConsolidator } : {}),
+  ...(d.sessionCtx !== undefined ? { sessionCtx: d.sessionCtx } : {}),
+  ...(d.delegation !== undefined ? { delegation: d.delegation } : {}),
+  ...(d.subagentBackground !== undefined ? { subagentBackground: d.subagentBackground } : {}),
+  ...(d.autoBackground !== undefined ? { autoBackground: d.autoBackground } : {}),
+  ...(d.fork !== undefined ? { fork: d.fork } : {}),
+  ...(d.forkSession !== undefined ? { forkSession: d.forkSession } : {}),
+  ...(d.conversationCheckpoint !== undefined
+    ? { conversationCheckpoint: d.conversationCheckpoint }
+    : {}),
+  ...(d.stage1OutputsStore !== undefined ? { stage1OutputsStore: d.stage1OutputsStore } : {}),
+  ...(d.automationEngine !== undefined ? { automationEngine: d.automationEngine } : {}),
 })
 
 export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {
@@ -187,12 +291,13 @@ export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig
     stream: d.stream,
     permission: d.permission,
     messages,
-    system: d.system,
+    system: d.systemSource?.get() ?? d.system,
     cwd: d.cwd,
     maxTurns: d.maxTurns,
     signal: d.signal,
     onConfirm: d.onConfirm,
     ...buildMemoryAndModeSpreads(d, compaction),
     ...buildCapabilityAndObservabilitySpreads(d),
+    ...buildExecutionPlaneSpreads(d),
   }
 }

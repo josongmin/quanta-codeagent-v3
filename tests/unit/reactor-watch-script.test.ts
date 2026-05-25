@@ -14,9 +14,20 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, readFileSync } from "node:fs"
+import { rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { REACTOR_ENV_FLAG } from "@/reactor"
 import type { ProactiveTrigger } from "@/reactor/types"
-import { parseArgs, pollOnce } from "../../scripts/reactor-watch"
+import {
+  loadSeenRunsSeed,
+  parseArgs,
+  persistSeenRunsSnapshot,
+  pollOnce,
+  reactorWatchSeenRunsPath,
+} from "../../scripts/reactor-watch"
+import { createInMemorySeenRuns } from "../../src/reactor/trigger-source-ci"
 
 const fakeTrigger = (): ProactiveTrigger =>
   Object.freeze({
@@ -46,12 +57,15 @@ describe("ADR-0132 Phase E — parseArgs", () => {
       "sess-7",
       "--socket-path",
       "/tmp/reactor.sock",
+      "--seen-runs-path",
+      "/tmp/reactor-seen.json",
       "--once",
       "--dry-run",
     ])
     expect(a.prRef).toBe("owner/repo#7")
     expect(a.sessionId).toBe("sess-7")
     expect(a.socketPath).toBe("/tmp/reactor.sock")
+    expect(a.seenRunsPath).toBe("/tmp/reactor-seen.json")
     expect(a.once).toBe(true)
     expect(a.dryRun).toBe(true)
   })
@@ -72,6 +86,28 @@ describe("ADR-0132 Phase E — parseArgs", () => {
   test("unknown flags are tolerated (forward-compat)", () => {
     const a = parseArgs(["--pr", "1", "--future-flag", "xyz"])
     expect(a.prRef).toBe("1")
+  })
+})
+
+describe("ADR-0132 Phase E — seen-runs persistence", () => {
+  test("default seen-runs path is PR-scoped under ~/.quanta", () => {
+    const path = reactorWatchSeenRunsPath("owner/repo#7", "/home/tester")
+    expect(path).toBe("/home/tester/.quanta/reactor-seen-runs-owner_repo_7.json")
+  })
+
+  test("persistSeenRunsSnapshot + loadSeenRunsSeed round-trip the capped run ids", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "q-reactor-watch-"))
+    const file = join(dir, "seen.json")
+    try {
+      const store = createInMemorySeenRuns(["run-1", "run-2"])
+      store.add("run-3")
+      await persistSeenRunsSnapshot(file, store)
+      const loaded = await loadSeenRunsSeed(file)
+      expect(loaded).toEqual(["run-1", "run-2", "run-3"])
+      expect(readFileSync(file, "utf8")).toContain('"runIds"')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 

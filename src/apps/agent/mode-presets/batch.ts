@@ -23,26 +23,20 @@
  * same `runInstance` + `writePredictions` helpers).
  *
  * Slice boundary: this file may import `@/agent`, `@/llm`, `@/permission`,
- * `@/shared`, `@/tool`, `@/stream`, the sibling assemble.ts, AND
- * `apps/bench` (the deliberate cross-app delegate — the bench eval driver
- * is the single source of truth for instance evaluation). NO imports from
- * other mode-preset siblings.
+ * `@/runner`, `@/shared`, `@/tool`, `@/stream`, and the sibling assemble.ts.
+ * NO imports from app siblings or other mode-preset siblings.
  */
 
 import type { AgentConfig } from "@/agent"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { loadSelectedInstances, runBatch, writeArtifacts } from "@/runner/batch/core"
+import { loadCorpus as defaultLoadCorpus } from "@/runner/batch/corpus"
+import { runInstance as defaultRunInstance } from "@/runner/batch/eval"
+import type { Instance, InstanceResult } from "@/runner/batch/types"
 import { logger, runtimeConfig } from "@/shared"
 import type { StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
-import {
-  loadCorpus as defaultLoadCorpus,
-  type Prediction,
-  writePredictions,
-} from "../../bench/corpus"
-import { runInstance as defaultRunInstance } from "../../bench/eval"
-import { buildReport, writeReport } from "../../bench/report"
-import type { Instance, InstanceResult } from "../../bench/types"
 import { type AssembleRequest, assembleAgentConfig, type RunOutcome } from "../assemble"
 
 /** A minimal AgentConfig.base built ONLY to satisfy `assembleAgentConfig`'s
@@ -86,20 +80,6 @@ const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budge
   }
 }
 
-/** Apply the optional id-substring filter + the limit slice. Filter runs
- *  BEFORE limit (same order as `apps/bench/index.ts` to keep byte-identical
- *  selection). */
-const selectInstances = (
-  all: Instance[],
-  filter: string | undefined,
-  limit: number | null | undefined,
-): Instance[] => {
-  const filtered =
-    filter !== undefined && filter !== "" ? all.filter((i) => i.id.includes(filter)) : all
-  if (limit === null || limit === undefined) return filtered
-  return filtered.slice(0, limit)
-}
-
 /** Cast the seam-provided runInstance (typed `unknown` on AssembleRequestSeams
  *  so assemble.ts stays slice-isolated from `apps/bench`) back to its real
  *  shape inside this preset. */
@@ -131,44 +111,6 @@ const resolveLoadCorpus = (req: AssembleRequest): ((root: string) => Promise<Ins
   return defaultLoadCorpus
 }
 
-/** Compute the batch exit code: 0 iff ALL instances resolved (passed and not
- *  degraded / env_prep_failed); 1 if ANY failed. Mirrors the legacy bench
- *  behavior where the operator sees non-zero whenever a regression slipped. */
-const computeExitCode = (results: InstanceResult[]): number => {
-  if (results.length === 0) return 0
-  for (const r of results) {
-    if (!r.passed) return 1
-    if (r.verdict === "degraded" || r.verdict === "env_prep_failed") return 1
-  }
-  return 0
-}
-
-/** Optional artifacts writer. Skipped when neither path is set (so a test
- *  driving a synthetic corpus doesn't litter the cwd). */
-const maybeWriteArtifacts = async (
-  results: InstanceResult[],
-  meta: { model: string },
-  predictionsPath: string | undefined,
-  reportPath: string | undefined,
-): Promise<void> => {
-  if (predictionsPath !== undefined && predictionsPath !== "") {
-    const predictions: Prediction[] = results.map((r) => ({
-      instance_id: r.id,
-      model_name_or_path: meta.model,
-      model_patch: r.patch,
-    }))
-    await writePredictions(predictionsPath, predictions)
-  }
-  if (reportPath !== undefined && reportPath !== "") {
-    // `buildReport` accepts {provider, model, n}; n=1 for the default batch
-    // path (Best-of-N stays a bench-only knob until a future ADR adds it here).
-    await writeReport(
-      reportPath,
-      buildReport({ provider: "unknown", model: meta.model, n: 1 }, results),
-    )
-  }
-}
-
 /**
  * BATCH runner.
  *
@@ -194,32 +136,33 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   // cfg is informational here (the bench driver builds its own).
   assembleAgentConfig({ ...req, base: stubBase(req) })
 
-  const load = resolveLoadCorpus(req)
   const runOne = resolveRunInstance(req)
+  const selection = await loadSelectedInstances({
+    corpus,
+    filter: req.batch?.instance,
+    limit: req.batch?.limit,
+    loadCorpus: resolveLoadCorpus(req),
+  })
 
-  const all = await load(corpus)
-  const instances = selectInstances(all, req.batch?.instance, req.batch?.limit)
-
-  if (instances.length === 0) {
+  if (selection.instances.length === 0) {
     logger.info(`batch: no instances matched (corpus=${corpus})`)
     return { exitCode: 0 }
   }
 
-  const results: InstanceResult[] = []
-  for (const inst of instances) {
-    results.push(await runOne(inst))
-  }
+  const { results, exitCode } = await runBatch({
+    instances: selection.instances,
+    runInstance: runOne,
+  })
 
   // `req.base.llm.model` is the only model id assemble has access to here.
   // Falls back to the stable string `"unknown"` so the prediction file is
   // still valid when the LLM adapter doesn't carry one (rare).
   const llmModel = (req.base.llm as { model?: string }).model ?? "unknown"
-  await maybeWriteArtifacts(
-    results,
-    { model: llmModel },
-    req.batch?.predictionsPath,
-    req.batch?.reportPath,
-  )
+  await writeArtifacts(req.batch?.predictionsPath, req.batch?.reportPath, results, {
+    provider: "unknown",
+    model: llmModel,
+    n: 1,
+  })
 
-  return { exitCode: computeExitCode(results) }
+  return { exitCode }
 }

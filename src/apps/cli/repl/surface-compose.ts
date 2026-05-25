@@ -3,20 +3,6 @@ import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
-import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
-import {
-  defaultModeVariantRegistry,
-  MODE_VARIANT_KEYS,
-  type ModeVariantKey,
-  type SystemPromptVariantRegistry,
-} from "@/agent/system-prompt"
-import {
-  ALL_TOOL_PROFILE_NAMES,
-  defaultToolProfileResolver,
-  isToolProfileName,
-  type ToolProfileName,
-  type ToolProfileResolver,
-} from "@/agent/tool-profile"
 import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import {
@@ -120,67 +106,6 @@ const buildReplaySlashState = (): ReplaySlashState => ({
     return inner()
   },
 })
-
-/** ADR-0299 — env-driven upstream-port resolution for the 4 wire families.
- *  Each helper is presence-only: if its env knob is absent / blank / not the
- *  accepted token, returns `undefined` so the buildReplSlashCtx caller spreads
- *  the slot conditionally (default-OFF byte-identical, RFC §1.2). All helpers
- *  are pure of process state aside from the env read at the top — call sites
- *  inject `process.env` so tests can override per-case. */
-
-/** ADR-0299/0291 — tool-profile upstream port. Env knob: `QUANTA_TOOL_PROFILE`
- *  (closed enum `write|ask|minimal|code-only`; any other value ⇒ slot
- *  omitted). Default-OFF: absent ⇒ `/profile` keeps printing "not wired". */
-const resolveReplToolProfile = (
-  envSource: NodeJS.ProcessEnv,
-):
-  | { readonly resolver: ToolProfileResolver; readonly defaultName: ToolProfileName }
-  | undefined => {
-  const raw = envSource.QUANTA_TOOL_PROFILE
-  if (raw === undefined || raw === "") return undefined
-  if (!isToolProfileName(raw)) {
-    logger.warn(`QUANTA_TOOL_PROFILE='${raw}' unknown; valid: ${ALL_TOOL_PROFILE_NAMES.join(", ")}`)
-    return undefined
-  }
-  return { resolver: defaultToolProfileResolver(), defaultName: raw }
-}
-
-/** ADR-0299/0291 — identity-mode variant registry. Env knob:
- *  `QUANTA_IDENTITY_MODE` (closed `ModeVariantKey` enum; any other value ⇒
- *  slot omitted). Shares the env var with the legacy ADR-0198 identity-lines
- *  read in `pickIdentity` — both honour the same value, and the variant
- *  registry slot here is independently surfaced for `/identity`. Default-OFF:
- *  absent ⇒ `/identity` keeps printing "not wired". */
-const resolveReplIdentityModeVariant = (
-  envSource: NodeJS.ProcessEnv,
-):
-  | {
-      readonly registry: SystemPromptVariantRegistry
-      readonly defaultMode: ModeVariantKey
-    }
-  | undefined => {
-  const raw = envSource.QUANTA_IDENTITY_MODE
-  if (raw === undefined || raw === "") return undefined
-  if (!(MODE_VARIANT_KEYS as readonly string[]).includes(raw)) {
-    logger.warn(`QUANTA_IDENTITY_MODE='${raw}' unknown; valid: ${MODE_VARIANT_KEYS.join(", ")}`)
-    return undefined
-  }
-  return { registry: defaultModeVariantRegistry(), defaultMode: raw as ModeVariantKey }
-}
-
-/** ADR-0299/0291 — focus-chain tracker. Env knob: `QUANTA_FOCUS_CHAIN_EVERY`
- *  (positive integer ⇒ tracker; ≤0 / non-numeric ⇒ slot omitted). Default-OFF:
- *  absent ⇒ `/focus-chain` keeps printing "not wired". */
-const resolveReplFocusChainTracker = (envSource: NodeJS.ProcessEnv): FocusChainPort | undefined => {
-  const raw = envSource.QUANTA_FOCUS_CHAIN_EVERY
-  if (raw === undefined || raw === "") return undefined
-  const every = Number.parseInt(raw, 10)
-  if (!Number.isFinite(every) || every <= 0) {
-    logger.warn(`QUANTA_FOCUS_CHAIN_EVERY='${raw}' must be a positive integer`)
-    return undefined
-  }
-  return defaultFocusChainTracker({ reinjectEveryN: every })
-}
 
 /** ADR-0299/0294 — session-io adapter for `/session export|import`. Default
  *  adapter delegates to the existing `loadSessionById`/`saveSessionById`
@@ -360,8 +285,9 @@ export const composeSurfaceWires = (
   setup: SessionSetupResult,
   state: SurfaceState,
   envSource: NodeJS.ProcessEnv,
+  opts?: { readonly convStore?: ConversationCheckpointStore },
 ): ReplSurfaceWires => {
-  const convStore = defaultConversationCheckpointStore()
+  const convStore = opts?.convStore ?? defaultConversationCheckpointStore()
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
   // prints "not wired" and the loop's recordTurn hook is a no-op.
@@ -386,11 +312,6 @@ export const composeSurfaceWires = (
   const setReplaceMessages = (fn: (msgs: ReadonlyArray<Message>) => void): void => {
     replaceMessages = fn
   }
-
-  // ADR-0299/0291 — upstream port resolution from env.
-  const toolProfile = resolveReplToolProfile(envSource)
-  const identityModeVariant = resolveReplIdentityModeVariant(envSource)
-  const focusChainTracker = resolveReplFocusChainTracker(envSource)
 
   // ADR-0294 — sessionIo: always wire from the V2 session store. The slash
   // remains the only consumer; tests inject their own ctx.sessionIo via the
@@ -432,9 +353,16 @@ export const composeSurfaceWires = (
     // the slot entirely (default-OFF byte-identical).
     composerHandle,
     conversationStore: convStore,
-    ...(toolProfile !== undefined ? { toolProfile } : {}),
-    ...(identityModeVariant !== undefined ? { identityModeVariant } : {}),
-    ...(focusChainTracker !== undefined ? { focusChainTracker } : {}),
+    ...(setup.sessionDeps.toolProfileState !== undefined
+      ? { toolProfileState: setup.sessionDeps.toolProfileState }
+      : {}),
+    ...(setup.sessionDeps.identityModeState !== undefined
+      ? {
+          identityModeState: setup.sessionDeps.identityModeState,
+          onIdentityModeChange: setup.refreshSystemPrompt,
+        }
+      : {}),
+    ...(setup.sessionDeps.focusChain !== undefined ? { focusChain: setup.sessionDeps.focusChain } : {}),
     textInbox,
   })
 

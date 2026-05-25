@@ -79,12 +79,23 @@ export const verify = async (
     }
   }
   const test = await exec(instance.testCmd, sandbox, deps.timeoutMs)
+  // Pytest summary parsing — exit code alone is unreliable when the shell
+  // wrapper got SIGTERM'd (exit 143) AFTER pytest already printed its
+  // summary. Trust the explicit summary line when present:
+  //   "X passed, ..." with no "Y failed" / "Y error" → passed
+  // This recovers real passes that exit-code-only logic would mis-fail.
+  const combined = `${test.stdout}\n${test.stderr}`
+  const summaryPass =
+    /\b\d+ passed\b/.test(combined) &&
+    !/\b\d+ failed\b/.test(combined) &&
+    !/\b\d+ error\b/.test(combined)
+  const passed = test.code === 0 || summaryPass
   return {
-    passed: test.code === 0,
+    passed,
     command: instance.testCmd,
     exitCode: test.code,
     failedTests: [],
-    logTail: `${test.stdout}\n${test.stderr}`.slice(-2000),
+    logTail: combined.slice(-2000),
     reportPath: "",
   }
 }

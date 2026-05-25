@@ -4,12 +4,10 @@
  *
  * Adapts `AgentConfig.identityModeVariant.registry` (ADR-0211 mode-
  * variant registry) onto the `SlashContext.identity` shape `/identity`
- * consumes. The active mode lives in a tiny mutable cell owned by THIS
- * adapter. ADR-0302 adds an OPTIONAL `onChange(newMode)` callback the
- * surface uses to refresh the per-turn system prompt — absent ⇒ behavior
- * is byte-identical to ADR-0291 (state-only swap, stale prompt). No-
- * throw; unknown modes return `{ kind: "unknown", known }` and never
- * fire `onChange`.
+ * consumes. The adapter never owns its own mutable cell; `get/set` read and
+ * mutate the authoritative session-owned state. ADR-0302 keeps the optional
+ * `onChange(newMode)` callback so the surface can refresh derived prompt
+ * sources after the shared state flips.
  */
 
 import {
@@ -28,6 +26,8 @@ export interface IdentityModeAdapter {
 
 export interface IdentityModeAdapterArgs {
   readonly registry: SystemPromptVariantRegistry
+  readonly getActive?: () => ModeVariantKey
+  readonly setActive?: (mode: ModeVariantKey) => void
   readonly defaultMode?: ModeVariantKey
   /** ADR-0302 — fired exactly once AFTER a successful `set(mode)` swap.
    *  The surface uses this to trigger `SystemPromptRebuilderPort.rebuild()`
@@ -43,17 +43,15 @@ const isModeVariantKey = (s: string): s is ModeVariantKey =>
 /** Build the adapter over the AgentConfig.identityModeVariant block. */
 export const buildIdentityModeAdapter = (args: IdentityModeAdapterArgs): IdentityModeAdapter => {
   let active: ModeVariantKey = args.defaultMode ?? "default"
-  // Capture registry for future surfaces that may want to re-introspect
-  // the variant at query time. Not consumed by `/identity` today.
-  void args.registry
   const onChange = args.onChange
   return {
-    get: (): string => active,
+    get: (): string => args.getActive?.() ?? active,
     set: (mode: string): "ok" | { readonly kind: "unknown"; readonly known: readonly string[] } => {
       if (!isModeVariantKey(mode)) {
         return { kind: "unknown", known: MODE_VARIANT_KEYS }
       }
-      active = mode
+      if (args.setActive !== undefined) args.setActive(mode)
+      else active = mode
       // ADR-0302 — onChange fires AFTER the cell update so a callback
       // that reads `adapter.get()` synchronously already sees the new
       // value. The callback is no-throw by contract (the surface wraps

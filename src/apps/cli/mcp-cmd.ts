@@ -265,6 +265,7 @@ const renderConfigMissing = (): string =>
       "",
       `${dim("To enable MCP, point QUANTA_MCP_CONFIG at a JSON file with:")}`,
       `  ${cyan('{ "servers": [{ "name": "...", "command": ["..."] }] }')}`,
+      `${dim("Browser/plugin bridge: QUANTA_BROWSER_MCP_CONFIG or QUANTA_BROWSER_MCP_PLUGIN_DIR also work.")}`,
     ],
     { title: "MCP config", titleStyle: bold },
   )

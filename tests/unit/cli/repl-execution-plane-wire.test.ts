@@ -1,0 +1,90 @@
+import { describe, expect, test } from "bun:test"
+import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
+import { AGENT_MODES } from "@/agent/subagent-typed"
+import { buildExecutionPlaneSessionDeps } from "@/apps/cli/repl/execution-plane-wire"
+import type { SessionSetupResult } from "@/apps/cli/repl/session-setup"
+import type { Message } from "@/llm"
+import type { SessionDeps } from "@/runner/assemble"
+import { ToolRegistry } from "@/tool"
+
+const mkMsg = (text: string): Message => ({
+  role: "user",
+  content: [{ type: "text", text }],
+})
+
+const baseSessionDeps = (): SessionDeps => ({
+  llm: {} as never,
+  registry: new ToolRegistry([]),
+  stream: { emit: () => {} },
+  permission: { mode: "acceptEdits" },
+  system: "system",
+  cwd: "/tmp/quanta-wire",
+  maxTurns: 8,
+  signal: new AbortController().signal,
+  onConfirm: async () => true,
+  store: undefined,
+  sessionId: "sess-1",
+  embedder: undefined,
+  memoryConfig: undefined,
+  planMode: false,
+  metrics: undefined,
+  run: undefined,
+  subagentConfig: undefined,
+  skillsConfig: undefined,
+  compactionBreakerConfig: undefined,
+  verifyGuardConfig: undefined,
+  summarizerLlm: undefined,
+  onShellEvent: undefined,
+  workMetricsSink: undefined,
+})
+
+const makeSetup = (sessionDeps: SessionDeps): SessionSetupResult =>
+  ({
+    cwd: sessionDeps.cwd,
+    history: [mkMsg("seed")],
+    sessionDeps,
+  }) as unknown as SessionSetupResult
+
+describe("repl execution-plane wire", () => {
+  test("fork surfaces reuse the supplied conversation checkpoint store", async () => {
+    const convStore = defaultConversationCheckpointStore()
+    const wired = await buildExecutionPlaneSessionDeps({
+      setup: makeSetup(baseSessionDeps()),
+      convStore,
+      envSource: {},
+    })
+
+    expect(wired.conversationCheckpoint?.store).toBe(convStore)
+    expect(wired.fork).toBeDefined()
+    expect(wired.forkSession).toBeDefined()
+
+    convStore.record("root", [mkMsg("root")])
+
+    const baseFork = wired.fork?.forker.fork("root")
+    expect(baseFork?.ok).toBe(true)
+
+    const richFork = await wired.forkSession?.forker.fork({ fromCheckpointRef: "root" })
+    expect(richFork?.ok).toBe(true)
+  })
+
+  test("subagent-enabled sessions gain delegation, background scheduler, and autoBackground", async () => {
+    const deps = baseSessionDeps()
+    deps.subagentConfig = {}
+    const wired = await buildExecutionPlaneSessionDeps({
+      setup: makeSetup(deps),
+      convStore: defaultConversationCheckpointStore(),
+      envSource: {
+        QUANTA_BG_MAX_CONCURRENT: "5",
+        QUANTA_BG_MAX_RETAINED: "9",
+        QUANTA_AUTO_BACKGROUND_THRESHOLD_MS: "2500",
+      },
+    })
+
+    expect(wired.delegation?.modes).toEqual(AGENT_MODES)
+    expect(wired.subagentBackground).toBeDefined()
+    expect(wired.subagentBackground?.scheduler.list()).toEqual([])
+    expect(wired.autoBackground?.detector).toBeDefined()
+    expect(wired.autoBackground?.proposer).toBeDefined()
+    expect(wired.autoBackground?.thresholdMs).toBe(2500)
+  })
+})

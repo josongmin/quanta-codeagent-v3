@@ -264,6 +264,34 @@ describe("ADR-0132 Phase A — createCiTriggerSource", () => {
     expect(next[0].simulatedMessage).not.toContain("1 passed")
   })
 
+  test("seeded seen-runs store suppresses already-persisted run ids on the first poll", async () => {
+    const gh = fakeGhPort([
+      {
+        match: (a) => a[0] === "pr" && a[1] === "checks",
+        result: ok([
+          {
+            name: "unit",
+            status: "COMPLETED",
+            conclusion: "SUCCESS",
+            link: "https://example/runs/persisted",
+          },
+        ]),
+      },
+      {
+        match: (a) => a[0] === "pr" && a[1] === "view",
+        result: ok({ url: "https://example/pr/9", number: 9 }),
+      },
+    ])
+    const src = createCiTriggerSource({
+      ghCliPort: gh.port,
+      clockPort: fixedClock(1),
+      repoCwd: "/tmp/repo",
+      prRef: "9",
+      seenRunsStore: createInMemorySeenRuns(["https://example/runs/persisted"]),
+    })
+    expect(await src.poll()).toEqual([])
+  })
+
   test("abortSignal already aborted ⇒ poll short-circuits to empty", async () => {
     const gh = fakeGhPort([])
     const src = createCiTriggerSource({

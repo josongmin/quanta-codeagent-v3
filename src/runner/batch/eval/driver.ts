@@ -66,7 +66,7 @@ import {
 } from "./report"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
-import { verify, type PythonSwebenchEvaluate } from "./verdict"
+import { type PythonSwebenchEvaluate, verify } from "./verdict"
 
 export interface RunInstanceDeps {
   llm: LLMPort

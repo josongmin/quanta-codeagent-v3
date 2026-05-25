@@ -252,6 +252,7 @@ describe("/mcp config — file content render", () => {
     expect(code).toBe(0)
     expect(cap.out).toContain("MCP config")
     expect(cap.out).toContain("no QUANTA_MCP_CONFIG configured")
+    expect(cap.out).toContain("QUANTA_BROWSER_MCP_PLUGIN_DIR")
   })
 
   test("missing file ⇒ renders 'file does not exist'", async () => {
