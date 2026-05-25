@@ -21,10 +21,13 @@ purpose: |
 evidence:
   code:
     - src/agent/verify-checkpoint-bridge.ts
+    - src/agent/guards/build.ts
+    - src/agent/guards/verify-guard.ts
   adrs: [123]
   tests:
     unit:
       - tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts
+      - tests/unit/verify-checkpoint-bridge-edge-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

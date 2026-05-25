@@ -20,10 +20,12 @@ purpose: |
 evidence:
   code:
     - src/agent/plan-queue.ts
-  adrs: [128]
+    - src/observability/metrics/instrument-plan-queue.ts
+  adrs: [128, 167, 174, 221]
   tests:
     unit:
       - tests/unit/plan-queue-hellgate.test.ts
+      - tests/unit/plan-queue-mutator-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

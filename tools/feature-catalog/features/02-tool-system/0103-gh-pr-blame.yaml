@@ -22,9 +22,16 @@ purpose: |
 evidence:
   code:
     - src/tool/gh/index.ts
-  adrs: [103]
+    - src/tool/gh/pr-blame.ts
+    - src/tool/gh/pr-blame-parser.ts
+    - src/tool/gh/pr-blame-types.ts
+    - src/tool/gh/ref.ts
+    - src/tool/gh/runner.ts
+  adrs: [103, 112]
   tests:
-    unit: ["tests/unit/gh-pr-tools-hellgate.test.ts"]
+    unit:
+      - tests/unit/gh-pr-tools-hellgate.test.ts
+      - tests/unit/gh-pr-blame-injection-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

@@ -24,9 +24,15 @@ purpose: |
 evidence:
   code:
     - src/llm/fallback.ts
+    - src/llm/index.ts
+    - src/runner/assemble/llm.ts
   adrs: []
   tests:
-    unit: [tests/unit/fallback.test.ts, tests/unit/fallback-hellgate.test.ts, tests/unit/fallback-empty-tombstone.test.ts]
+    unit:
+      - tests/unit/fallback.test.ts
+      - tests/unit/fallback-hellgate.test.ts
+      - tests/unit/fallback-empty-tombstone.test.ts
+      - tests/unit/fallback-metrics-hellgate.test.ts
     integration: [tests/integration/fallback-tombstone-e2e.test.ts]
     contract: []
 knobs: []
