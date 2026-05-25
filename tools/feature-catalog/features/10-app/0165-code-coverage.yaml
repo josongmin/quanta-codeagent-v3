@@ -1,0 +1,51 @@
+id: code-coverage
+title: Code coverage observability — V8-coverage port + MetricSink emission
+section: 10
+subsystem: Coverage source + reporter + tool
+order: 83
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0165", "tier:1", "observability", "coverage"]
+depends_on:
+  - observability-metrics
+purpose: |
+  4-part hexagonal slice in `src/observability/coverage/`. Closed
+  `CoverageSource` port + V8 JSON adapter (byte-range → per-line, inner
+  range overrides outer) + `defaultCoverageReporter()` exposing
+  `evaluate(report, opts)` (closed 2-arm verdict) and `emitMetrics(report,
+  sink)` (per-file gauges with `{file}` label + 3 label-less totals) +
+  `coverage_check` tool (agent-invocable, path safety via
+  `resolveJailedDoc`, symlink-reject, typed `failure.mode:"rejected"`).
+  Weighted totals — a 1000-line file at 50% does NOT weight the same as a
+  10-line file at 100%. `bun test --coverage` and nyc/istanbul both miss
+  `MetricSink` integration; no modern agent surfaces typed per-file
+  coverage.
+evidence:
+  code:
+    - src/observability/coverage/port.ts
+    - src/observability/coverage/v8-source.ts
+    - src/observability/coverage/reporter.ts
+    - src/observability/coverage/index.ts
+    - src/tool/coverage_check.ts
+  adrs:
+    - docs/decisions/0165-code-coverage.md
+  tests:
+    unit:
+      - tests/unit/coverage-source-hellgate.test.ts
+      - tests/unit/coverage-reporter-hellgate.test.ts
+      - tests/unit/tool/coverage-check-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  37 hellgate cases combined. Verdict is closed 2-arm; adding a 3rd arm
+  requires ADR amendment + exhaustive-switch update. AST-precise branch
+  counter (ADR-0170) plugs into the same port.

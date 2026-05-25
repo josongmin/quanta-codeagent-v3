@@ -1,0 +1,41 @@
+id: lsp-exdev-fallback
+title: LSP applyWorkspaceEdit Phase 2 — EXDEV cross-FS fallback (copy + unlink)
+section: 9
+subsystem: LSP atomic workspace edit — cross-FS path
+order: 81
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0156", "tier:1", "lsp", "cross-fs"]
+depends_on:
+  - lsp-atomic-workspace-edit
+purpose: |
+  Closes the ADR-0152 follow-up: Phase 2's `fs.rename(tmp, target)` fails
+  with `EXDEV` when tmp and target sit on different mounts (Linux tmpfs
+  `/tmp`, container overlay vs workspace bind-mount, certain macOS
+  `/private/var/folders/...T/` setups). Catch detects `e.code === "EXDEV"`
+  (never message-string match — i18n-safe), then `copyFile(tmp, target)`
+  + `unlinkTmp(tmp)` continues the loop atomically per file. New `copyFile`
+  protected seam delegates to `fs.copyFile` by default; tests inject fakes.
+evidence:
+  code:
+    - src/lsp/adapters/base.ts
+  adrs:
+    - docs/decisions/0156-lsp-exdev-fallback.md
+  tests:
+    unit:
+      - tests/unit/lsp-applyworkspaceedit-atomicity-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Adds slice E to the parent's atomicity hellgate (E1 same-FS / E2
+  EXDEV→copy+unlink / E3 EACCES propagate). FakeLspClient now tracks
+  `copies` + `setCopyThrow` for fake-injection assertion.

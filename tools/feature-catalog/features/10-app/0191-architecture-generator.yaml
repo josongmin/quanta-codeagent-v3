@@ -1,0 +1,45 @@
+id: architecture-generator
+title: Architecture generator — tools/arch-gen walks ADRs + slices → ARCHITECTURE.generated.md
+section: 10
+subsystem: Architecture doc generator
+order: 94
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [batch, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0191", "tier:1", "tooling", "docs"]
+depends_on: []
+purpose: |
+  Plane-clean mini-generator that walks `docs/decisions/*.md` (ADR
+  headers + status / date / related / 참조 paths) and `src/**/index.ts`
+  (slice barrel doc-comments) — two signals of intent quanta has already
+  stabilized — and emits `docs/ARCHITECTURE.generated.md`. Closes the
+  Audit-D `ARCHITECTURE.md` 5-week drift gap that came from 90 ADRs
+  landing while hand-edited docs froze. Rejects heavyweight AST
+  (`typedoc` / `dependency-cruiser`) in favor of regex over signals the
+  team already produces. Korean + English header variants both
+  supported. Caller-invoked handshake (`bun tools/arch-gen/main.ts`) —
+  no daemon, no FS watcher.
+evidence:
+  code:
+    - tools/arch-gen/scan-adrs.ts
+    - tools/arch-gen/scan-slices.ts
+    - tools/arch-gen/render.ts
+    - tools/arch-gen/main.ts
+  adrs:
+    - docs/decisions/0191-architecture-generator.md
+  tests:
+    unit:
+      - tests/unit/arch-gen-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Zero `@/*` slice imports — only `node:fs/promises` + `node:path`.
+  Output meant for PR-reviewable narrative length, not full dep graph.

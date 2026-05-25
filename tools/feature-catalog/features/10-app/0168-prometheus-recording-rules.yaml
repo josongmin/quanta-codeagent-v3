@@ -1,0 +1,40 @@
+id: prometheus-recording-rules
+title: Prometheus recording rules — SLO burn-rate pre-computation
+section: 10
+subsystem: SLO observability — recording rules
+order: 85
+maturity: L3
+status: stable
+ui_surfaces: [api]
+monitoring: integrated
+modes: [daemon, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0168", "tier:1", "observability", "slo"]
+depends_on: []
+purpose: |
+  `docs/observability/recording-rules.yaml` with two groups:
+  `quanta.slo.error_rate` (6 SLIs × 4 windows = 24 rules producing
+  `slo:<sli>:error_rate_<window>`; tool-call preserves `by(tool)`
+  dimension, others scalar-aggregate) and `quanta.slo.burn_rate` (6 SLIs
+  × 2 windows = 12 rules — `error_rate / (1 - SLO)` with per-SLI hardcoded
+  divisor: LLM/LSP/Tool 0.01, Sandbox 0.005, Subagent 0.001, Shadow
+  0.0001). Closes the ADR-0166 follow-up — eliminates the 24+ places
+  inline PromQL was duplicated across alerts and dashboard panels.
+evidence:
+  code:
+    - docs/observability/recording-rules.yaml
+  adrs:
+    - docs/decisions/0168-prometheus-recording-rules.md
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Documentation/config artifact — no TS source. SLO catalog lives in one
+  place per rule so metric renames need updating only at the recording
+  level, not every alert/panel.

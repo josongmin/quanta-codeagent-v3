@@ -1,0 +1,46 @@
+id: pii-redaction-scanner
+title: PII-redaction scanner — port + pattern + Luhn + composite
+section: 3
+subsystem: PII-redaction scanner
+order: 87
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0171", "tier:1", "security", "pii"]
+depends_on: []
+purpose: |
+  Hexagonal `src/security/pii-redaction/` slice covering the OTHER half
+  of agent-content safety — human identifiers (email, phone, SSN, credit
+  card, IP, IBAN, passport, driver's license). Closed `PiiScanner` port +
+  pattern-scanner (10 regex kinds + composite) + Luhn-validator (credit
+  card mod-10 checksum so 16-digit non-card numbers don't false-positive)
+  + composite-scanner (dedup across detectors). Sibling shape to
+  ADR-0164 secret-detection. Closes transcript / jsonl / OTel-attribute
+  / prompt-logger leak paths that ADR-0078 inline redaction doesn't see.
+  No modern agent ships a typed default-OFF PII scanner.
+evidence:
+  code:
+    - src/security/pii-redaction/port.ts
+    - src/security/pii-redaction/pattern-scanner.ts
+    - src/security/pii-redaction/luhn-validator.ts
+    - src/security/pii-redaction/composite-scanner.ts
+    - src/security/pii-redaction/index.ts
+  adrs:
+    - docs/decisions/0171-pii-redaction.md
+  tests:
+    unit:
+      - tests/unit/pii-redaction-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Regex-only catalog would be insufficient for the credit-card class —
+  Luhn check disambiguates 16-digit non-cards. Same default-OFF + plane
+  discipline as ADR-0164.

@@ -1,0 +1,47 @@
+id: mid-turn-interruption
+title: Mid-turn user interruption — capture facade over PlanQueueStore + 3-arm mode + InterruptionPolicy port
+section: 4
+subsystem: Mid-turn capture facade
+order: 88
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0178", "tier:1", "plan-queue", "interruption"]
+depends_on:
+  - plan-queue-store
+purpose: |
+  Capture facade that maps the CLI "user submitted while streaming"
+  signal onto ADR-0128's PlanQueueStore. 3-arm closed `InterruptionMode`
+  (`queue` / `cancel-and-replace` / `cancel-and-amend`) — caller picks
+  based on UI surface (typed-ahead = queue; `Cmd-K` = replace; "wait I
+  forgot..." = amend). `InterruptionPolicy` port + 3 stock impls
+  (`defaultInterruptionPolicy` defensive-queue on unknown mode;
+  `alwaysQueuePolicy` / `alwaysCancelPolicy` testing stocks).
+  `defaultMidTurnCapture` no-throw — policy crashes collapse to
+  `{action:"queue", reason:"policy-error"}` so typing never silently
+  drops. Closes the SOTA gap where the store existed but no capture
+  surface knew when/how to call it.
+evidence:
+  code:
+    - src/agent/mid-turn-interruption/types.ts
+    - src/agent/mid-turn-interruption/default.ts
+    - src/agent/mid-turn-interruption/index.ts
+  adrs:
+    - docs/decisions/0178-mid-turn-interruption.md
+  tests:
+    unit:
+      - tests/unit/mid-turn-interruption-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `MidTurnCancelCause = "user-abort"` defined locally to keep plane
+  clean — structural assign across ADR-0177-sibling cancel-cause union
+  is closed-string-union widening only.
