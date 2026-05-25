@@ -21,11 +21,16 @@ import { join } from "node:path"
 import { REACTOR_ENV_FLAG } from "@/reactor"
 import type { ProactiveTrigger } from "@/reactor/types"
 import {
+  createFileBackedWatermarkStore,
   loadSeenRunsSeed,
+  loadWatermarkSnapshot,
   parseArgs,
   persistSeenRunsSnapshot,
+  persistWatermarkSnapshot,
   pollOnce,
   reactorWatchSeenRunsPath,
+  reactorWatchWatermarksPath,
+  resolvePrCommentContext,
 } from "../../scripts/reactor-watch"
 import { createInMemorySeenRuns } from "../../src/reactor/trigger-source-ci"
 
@@ -43,13 +48,15 @@ describe("ADR-0132 Phase E — parseArgs", () => {
     expect(a.prRef).toBeUndefined()
     expect(a.sessionId).toBeUndefined()
     expect(a.socketPath).toBeUndefined()
+    expect(a.watermarksPath).toBeUndefined()
     expect(a.intervalMs).toBe(60_000)
+    expect(a.prComments).toBe(true)
     expect(a.once).toBe(false)
     expect(a.dryRun).toBe(false)
     expect(a.help).toBe(false)
   })
 
-  test("--pr <ref> + --session-id + --socket-path + --once + --dry-run are picked up", () => {
+  test("--pr <ref> + session/socket/store flags + once/dry-run/no-pr-comments are picked up", () => {
     const a = parseArgs([
       "--pr",
       "owner/repo#7",
@@ -59,6 +66,9 @@ describe("ADR-0132 Phase E — parseArgs", () => {
       "/tmp/reactor.sock",
       "--seen-runs-path",
       "/tmp/reactor-seen.json",
+      "--watermarks-path",
+      "/tmp/reactor-watermarks.json",
+      "--no-pr-comments",
       "--once",
       "--dry-run",
     ])
@@ -66,6 +76,8 @@ describe("ADR-0132 Phase E — parseArgs", () => {
     expect(a.sessionId).toBe("sess-7")
     expect(a.socketPath).toBe("/tmp/reactor.sock")
     expect(a.seenRunsPath).toBe("/tmp/reactor-seen.json")
+    expect(a.watermarksPath).toBe("/tmp/reactor-watermarks.json")
+    expect(a.prComments).toBe(false)
     expect(a.once).toBe(true)
     expect(a.dryRun).toBe(true)
   })
@@ -108,6 +120,102 @@ describe("ADR-0132 Phase E — seen-runs persistence", () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe("ADR-0132 Phase E — PR-comment watermarks + context", () => {
+  test("default watermarks path is PR-scoped under ~/.quanta", () => {
+    const path = reactorWatchWatermarksPath("owner/repo#7", "/home/tester")
+    expect(path).toBe("/home/tester/.quanta/reactor-watermarks-owner_repo_7.json")
+  })
+
+  test("persistWatermarkSnapshot + loadWatermarkSnapshot round-trip the key map", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "q-reactor-watch-watermarks-"))
+    const file = join(dir, "watermarks.json")
+    try {
+      await persistWatermarkSnapshot(file, {
+        "owner/repo#7": "2026-05-25T11:00:00Z",
+        "owner/repo#8": "2026-05-25T12:00:00Z",
+      })
+      const loaded = await loadWatermarkSnapshot(file)
+      expect(loaded).toEqual({
+        "owner/repo#7": "2026-05-25T11:00:00Z",
+        "owner/repo#8": "2026-05-25T12:00:00Z",
+      })
+      expect(readFileSync(file, "utf8")).toContain('"watermarks"')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("file-backed watermark store persists save/load across fresh readers", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "q-reactor-watch-store-"))
+    const file = join(dir, "watermarks.json")
+    try {
+      const store = createFileBackedWatermarkStore(file)
+      await store.save("owner/repo#7", "2026-05-25T13:00:00Z")
+      const fresh = createFileBackedWatermarkStore(file)
+      expect(await fresh.load("owner/repo#7")).toBe("2026-05-25T13:00:00Z")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("resolvePrCommentContext parses owner/repo#n refs without gh", async () => {
+    let calls = 0
+    const ctx = await resolvePrCommentContext({
+      ghCliPort: {
+        run: async () => {
+          calls++
+          return { stdout: "", stderr: "", exitCode: 1 }
+        },
+      },
+      repoCwd: "/tmp",
+      prRef: "owner/repo#7",
+    })
+    expect(ctx).toEqual({
+      repoSlug: "owner/repo",
+      prNumber: 7,
+      watermarkKey: "owner/repo#7",
+    })
+    expect(calls).toBe(0)
+  })
+
+  test("resolvePrCommentContext parses GitHub PR URLs without gh", async () => {
+    const ctx = await resolvePrCommentContext({
+      ghCliPort: {
+        run: async () => ({ stdout: "", stderr: "", exitCode: 1 }),
+      },
+      repoCwd: "/tmp",
+      prRef: "https://github.com/owner/repo/pull/9",
+    })
+    expect(ctx).toEqual({
+      repoSlug: "owner/repo",
+      prNumber: 9,
+      watermarkKey: "owner/repo#9",
+    })
+  })
+
+  test("resolvePrCommentContext falls back to gh pr view when the ref lacks repo slug", async () => {
+    const ctx = await resolvePrCommentContext({
+      ghCliPort: {
+        run: async () => ({
+          stdout: JSON.stringify({
+            url: "https://github.com/owner/repo/pull/11",
+            number: 11,
+          }),
+          stderr: "",
+          exitCode: 0,
+        }),
+      },
+      repoCwd: "/tmp/repo",
+      prRef: "11",
+    })
+    expect(ctx).toEqual({
+      repoSlug: "owner/repo",
+      prNumber: 11,
+      watermarkKey: "owner/repo#11",
+    })
   })
 })
 

@@ -19,10 +19,12 @@ import {
 import {
   createCiTriggerSource,
   createInMemorySeenRuns,
+  createPrCommentTriggerSource,
   type GhCliPort,
   type ProactiveTrigger,
   REACTOR_ENV_FLAG,
   type SnapshotSeenRunsStore,
+  type WatermarkStore,
 } from "@/reactor"
 
 /** Argv shape. Parsed pure (no IO) so it can be unit-tested if/when needed. */
@@ -31,7 +33,9 @@ export interface WatcherArgs {
   readonly sessionId: string | undefined
   readonly socketPath: string | undefined
   readonly seenRunsPath: string | undefined
+  readonly watermarksPath: string | undefined
   readonly intervalMs: number
+  readonly prComments: boolean
   readonly once: boolean
   readonly dryRun: boolean
   readonly help: boolean
@@ -45,6 +49,7 @@ const HELP_TEXT = `reactor-watch — ADR-0132 cron watcher
 USAGE:
   bun run scripts/reactor-watch.ts --pr <ref> --session-id <id>
                                    [--socket-path <path>] [--seen-runs-path <path>]
+                                   [--watermarks-path <path>] [--no-pr-comments]
                                    [--interval-ms <n>]
                                    [--once] [--dry-run] [--help]
 
@@ -58,6 +63,10 @@ OPTIONS:
   --seen-runs-path <path>
                        Persist completed CI run ids across restarts.
                        Default: ~/.quanta/reactor-seen-runs-<pr>.json
+  --watermarks-path <path>
+                       Persist PR-comment watermarks across restarts.
+                       Default: ~/.quanta/reactor-watermarks-<pr>.json
+  --no-pr-comments     Disable PR-comment polling; watch CI completion only.
   --interval-ms <n>    Poll cadence in ms. Default ${DEFAULT_INTERVAL_MS}. Min ${MIN_INTERVAL_MS}.
   --once               Poll a single time and exit. Useful for cron drivers.
   --dry-run            Print triggers as JSONL to stdout. Does NOT enable
@@ -75,7 +84,9 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
   let sessionId: string | undefined
   let socketPath: string | undefined
   let seenRunsPath: string | undefined
+  let watermarksPath: string | undefined
   let intervalMs = DEFAULT_INTERVAL_MS
+  let prComments = true
   let once = false
   let dryRun = false
   let help = false
@@ -87,6 +98,8 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
       once = true
     } else if (a === "--dry-run") {
       dryRun = true
+    } else if (a === "--no-pr-comments") {
+      prComments = false
     } else if (a === "--pr") {
       const v = argv[i + 1]
       if (v !== undefined) {
@@ -111,6 +124,12 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
         seenRunsPath = v
         i++
       }
+    } else if (a === "--watermarks-path") {
+      const v = argv[i + 1]
+      if (v !== undefined) {
+        watermarksPath = v
+        i++
+      }
     } else if (a === "--interval-ms") {
       const v = argv[i + 1]
       if (v !== undefined) {
@@ -120,7 +139,18 @@ export const parseArgs = (argv: readonly string[]): WatcherArgs => {
       }
     }
   }
-  return { prRef, sessionId, socketPath, seenRunsPath, intervalMs, once, dryRun, help }
+  return {
+    prRef,
+    sessionId,
+    socketPath,
+    seenRunsPath,
+    watermarksPath,
+    intervalMs,
+    prComments,
+    once,
+    dryRun,
+    help,
+  }
 }
 
 const sanitizePrToken = (prRef: string): string => {
@@ -130,6 +160,9 @@ const sanitizePrToken = (prRef: string): string => {
 
 export const reactorWatchSeenRunsPath = (prRef: string, home = homedir()): string =>
   join(home.replace(/\/+$/, ""), ".quanta", `reactor-seen-runs-${sanitizePrToken(prRef)}.json`)
+
+export const reactorWatchWatermarksPath = (prRef: string, home = homedir()): string =>
+  join(home.replace(/\/+$/, ""), ".quanta", `reactor-watermarks-${sanitizePrToken(prRef)}.json`)
 
 const normalizeSeenRuns = (parsed: unknown): readonly string[] => {
   if (Array.isArray(parsed)) {
@@ -153,6 +186,47 @@ export const loadSeenRunsSeed = async (path: string): Promise<readonly string[]>
   }
 }
 
+const normalizeWatermarkSnapshot = (parsed: unknown): Readonly<Record<string, string>> => {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
+  const raw = (parsed as { watermarks?: unknown }).watermarks
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {}
+  const entries = Object.entries(raw as Record<string, unknown>).filter(
+    (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+  )
+  return Object.fromEntries(entries)
+}
+
+export const loadWatermarkSnapshot = async (
+  path: string,
+): Promise<Readonly<Record<string, string>>> => {
+  try {
+    const raw = await readFile(path, "utf8")
+    return normalizeWatermarkSnapshot(JSON.parse(raw))
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOENT") return {}
+    return {}
+  }
+}
+
+export const persistWatermarkSnapshot = async (
+  path: string,
+  snapshot: Readonly<Record<string, string>>,
+): Promise<void> => {
+  await mkdir(dirname(path), { recursive: true })
+  const tmp = `${path}.tmp`
+  await writeFile(tmp, `${JSON.stringify({ watermarks: snapshot }, null, 2)}\n`, "utf8")
+  await rename(tmp, path)
+}
+
+export const createFileBackedWatermarkStore = (path: string): WatermarkStore => ({
+  load: async (key) => (await loadWatermarkSnapshot(path))[key],
+  save: async (key, value) => {
+    const next = { ...(await loadWatermarkSnapshot(path)), [key]: value }
+    await persistWatermarkSnapshot(path, next)
+  },
+})
+
 export const persistSeenRunsSnapshot = async (
   path: string,
   store: SnapshotSeenRunsStore,
@@ -161,6 +235,77 @@ export const persistSeenRunsSnapshot = async (
   const tmp = `${path}.tmp`
   await writeFile(tmp, `${JSON.stringify({ runIds: store.snapshot() }, null, 2)}\n`, "utf8")
   await rename(tmp, path)
+}
+
+interface PrCommentContext {
+  readonly repoSlug: string
+  readonly prNumber: number
+  readonly watermarkKey: string
+}
+
+const prCommentWatermarkKey = (repoSlug: string, prNumber: number): string =>
+  `${repoSlug}#${prNumber}`
+
+const parsePrUrlContext = (url: string): { repoSlug: string; prNumber: number } | undefined => {
+  const m = /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/.*)?$/i.exec(url.trim())
+  if (m === null) return undefined
+  const prNumber = Number.parseInt(m[2] ?? "", 10)
+  if (!Number.isFinite(prNumber) || prNumber <= 0) return undefined
+  return { repoSlug: m[1] as string, prNumber }
+}
+
+const parseSlugRefContext = (prRef: string): { repoSlug: string; prNumber: number } | undefined => {
+  const m = /^([^#]+\/[^#]+)#(\d+)$/.exec(prRef.trim())
+  if (m === null) return undefined
+  const prNumber = Number.parseInt(m[2] ?? "", 10)
+  if (!Number.isFinite(prNumber) || prNumber <= 0) return undefined
+  return { repoSlug: m[1] as string, prNumber }
+}
+
+const safeJsonObject = <T>(raw: string): T | undefined => {
+  try {
+    const v = JSON.parse(raw) as unknown
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return undefined
+    return v as T
+  } catch {
+    return undefined
+  }
+}
+
+export const resolvePrCommentContext = async (opts: {
+  readonly ghCliPort: GhCliPort
+  readonly repoCwd: string
+  readonly prRef: string
+  readonly signal?: AbortSignal
+}): Promise<PrCommentContext | undefined> => {
+  const direct = parseSlugRefContext(opts.prRef) ?? parsePrUrlContext(opts.prRef)
+  if (direct !== undefined) {
+    return {
+      ...direct,
+      watermarkKey: prCommentWatermarkKey(direct.repoSlug, direct.prNumber),
+    }
+  }
+
+  const res = await opts.ghCliPort.run(
+    ["pr", "view", opts.prRef, "--json", "url,number"],
+    opts.repoCwd,
+    opts.signal,
+  )
+  if (res.exitCode !== 0) return undefined
+  const parsed = safeJsonObject<{ url?: unknown; number?: unknown }>(res.stdout)
+  if (parsed === undefined) return undefined
+  const urlCtx =
+    typeof parsed.url === "string" && parsed.url.length > 0 ? parsePrUrlContext(parsed.url) : undefined
+  if (urlCtx === undefined) return undefined
+  const prNumber =
+    typeof parsed.number === "number" && Number.isFinite(parsed.number) && parsed.number > 0
+      ? Math.floor(parsed.number)
+      : urlCtx.prNumber
+  return {
+    repoSlug: urlCtx.repoSlug,
+    prNumber,
+    watermarkKey: prCommentWatermarkKey(urlCtx.repoSlug, prNumber),
+  }
 }
 
 const ghCliPort = (_repoCwd: string): GhCliPort => ({
@@ -230,14 +375,44 @@ const main = async (argv: readonly string[]): Promise<number> => {
 
   const seenRunsPath = args.seenRunsPath ?? reactorWatchSeenRunsPath(args.prRef, homedir())
   const seenRunsStore = createInMemorySeenRuns(await loadSeenRunsSeed(seenRunsPath))
-
-  const source = createCiTriggerSource({
-    ghCliPort: ghCliPort(process.cwd()),
+  const gh = ghCliPort(process.cwd())
+  const ciSource = createCiTriggerSource({
+    ghCliPort: gh,
     clockPort: { now: () => Date.now() },
     repoCwd: process.cwd(),
     prRef: args.prRef,
     seenRunsStore,
   })
+  const commentSource =
+    args.prComments === true
+      ? await (async () => {
+          const ctx = await resolvePrCommentContext({
+            ghCliPort: gh,
+            repoCwd: process.cwd(),
+            prRef: args.prRef,
+          })
+          if (ctx === undefined) return undefined
+          const watermarksPath =
+            args.watermarksPath ?? reactorWatchWatermarksPath(args.prRef, homedir())
+          return createPrCommentTriggerSource({
+            ghCliPort: gh,
+            clockPort: { now: () => Date.now() },
+            repoCwd: process.cwd(),
+            repoSlug: ctx.repoSlug,
+            prNumber: ctx.prNumber,
+            watermarkKey: ctx.watermarkKey,
+            watermarkStore: createFileBackedWatermarkStore(watermarksPath),
+          })
+        })()
+      : undefined
+  const source = {
+    poll: async () => {
+      const commentPoll =
+        commentSource !== undefined ? commentSource.poll() : Promise.resolve<readonly ProactiveTrigger[]>([])
+      const [ci, comments] = await Promise.all([ciSource.poll(), commentPoll])
+      return [...ci, ...comments] as readonly ProactiveTrigger[]
+    },
+  }
 
   const env = { get: (n: string) => process.env[n] }
 

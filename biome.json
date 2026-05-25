@@ -1608,7 +1608,16 @@
               "options": {
                 "patterns": [
                   {
-                    "group": ["@/agent", "@/agent/**", "@/llm", "@/llm/**", "@/runner", "@/runner/**", "@/host", "@/host/**"],
+                    "group": [
+                      "@/agent",
+                      "@/agent/**",
+                      "@/llm",
+                      "@/llm/**",
+                      "@/runner",
+                      "@/runner/**",
+                      "@/host",
+                      "@/host/**"
+                    ],
                     "message": "ADR-0306 (CLI-03): surface registry MUST stay surface-only. It owns slash commands whose body never touches the live LLM, the agent loop, the runner, or the host. Per-command modules (./*-cmd.ts) may import @/agent / @/llm for types, but the registry file itself imports them as opaque SlashCommand objects only. Session-bound commands belong in ./slash/registry-session.ts; app/system commands belong in ./slash/registry-app.ts."
                   }
                 ]
