@@ -25,6 +25,7 @@ import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
 import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
+import { createDebugTracer, type DebugCategory, type DebugTracer } from "@/apps/cli/debug-tracer"
 import type { ToolUseBlock } from "@/llm"
 import type { HITLTier, PermissionContext } from "@/permission"
 import { RulesStore } from "@/rules"
@@ -38,11 +39,6 @@ import {
 } from "@/stream"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
-import {
-  createDebugTracer,
-  type DebugCategory,
-  type DebugTracer,
-} from "../../src/apps/cli/debug-tracer"
 
 // ─── fixtures ─────────────────────────────────────────────────────────────
 

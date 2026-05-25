@@ -26,15 +26,15 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { LLMPort, StreamEvent } from "@/llm"
-import type { SessionEnvelopeRecord } from "@/session"
-import type { DebugCmdState } from "../../src/apps/cli/debug-cmd"
+import type { DebugCmdState } from "@/apps/cli/debug-cmd"
 import {
   BUILTINS,
   isSlashCommand,
   runSlashCommand,
   type SlashContext,
-} from "../../src/apps/cli/slash-commands"
+} from "@/apps/cli/slash-commands"
+import type { LLMPort, StreamEvent } from "@/llm"
+import type { SessionEnvelopeRecord } from "@/session"
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 

@@ -91,7 +91,9 @@
       "@/radar": ["./src/radar/index.ts"],
       "@/radar/*": ["./src/radar/*"],
       "@/remote": ["./src/remote/index.ts"],
-      "@/remote/*": ["./src/remote/*"]
+      "@/remote/*": ["./src/remote/*"],
+      "@/apps/cli": ["./src/apps/cli/index.ts"],
+      "@/apps/cli/*": ["./src/apps/cli/*"]
     }
   },
   "include": ["src", "tests", "tools"],

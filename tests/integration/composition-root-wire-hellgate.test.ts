@@ -23,12 +23,12 @@
 
 import { describe, expect, test } from "bun:test"
 import { AgentArgsError, parseAgentArgs } from "@/../src/apps/agent/cli-args"
-import { BUILTINS, runSlashCommand, type SlashContext } from "@/../src/apps/cli/slash-commands"
 import type { AgentConfig } from "@/agent"
 import { defaultFocusChainTracker } from "@/agent/focus-chain"
 import { fsBackedStickyModelStore, inMemoryStickyModelStore } from "@/agent/sticky-model"
 import { buildSystemPromptForMode, defaultModeVariantRegistry } from "@/agent/system-prompt"
 import { ALL_TOOL_PROFILE_NAMES, defaultToolProfileResolver } from "@/agent/tool-profile"
+import { BUILTINS, runSlashCommand, type SlashContext } from "@/apps/cli/slash-commands"
 
 /* ─────────────────────────────────────────────────────────────────────── */
 /* §1 — AgentConfig slot type recognition (compile-time + slot omission).   */

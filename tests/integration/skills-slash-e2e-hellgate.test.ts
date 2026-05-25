@@ -37,10 +37,10 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { dispatchReplSlash } from "@/apps/cli/repl"
+import { composePromptPipeline } from "@/apps/cli/repl/prompt-pipeline"
+import type { SkillRow } from "@/apps/cli/slash-commands"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
-import { dispatchReplSlash } from "../../src/apps/cli/repl"
-import { composePromptPipeline } from "../../src/apps/cli/repl/prompt-pipeline"
-import type { SkillRow } from "../../src/apps/cli/slash-commands"
 
 const CLI = "src/apps/cli/index.ts"
 
