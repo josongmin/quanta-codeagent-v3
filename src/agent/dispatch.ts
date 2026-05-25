@@ -670,11 +670,10 @@ const execute = async (
   // `evidenceOf({})` is empty and the typed-failure spread is conditional, so
   // a normalized-throw result yields exactly the same fields as the old catch.
   const { output: redacted, hits } = applyRedaction(result.output, call, config)
-  // ADR-0287 — async-tool deferred-handle wire (1-3 line edit). When the
-  // tool's terminal result carries a `deferred` marker (set by the
-  // `defineToolAsync` wrapper), prepend a stable `<deferred handle="..."/>`
-  // envelope so the LLM can branch on the format without parsing the
-  // placeholder text. Absent ⇒ output is unchanged (byte-identical default-OFF).
+  // ADR-0287 — async-tool deferred-handle wire. When the tool's terminal
+  // result carries a `deferred` marker (set by `defineToolAsync`), prepend
+  // a stable `<deferred handle="..."/>` envelope so the LLM can branch on
+  // the format. Absent ⇒ byte-identical (default-OFF).
   const output =
     result.deferred !== undefined
       ? `<deferred handle="${result.deferred.id}"/>\n${redacted}`
