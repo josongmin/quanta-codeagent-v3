@@ -93,6 +93,16 @@ export interface SessionDeps {
    *  turn without re-assembling AgentConfig. Absent ⇒ omitted entirely
    *  (byte-identical default-OFF: no `thinking` field on LLMInput). */
   sessionEffort?: AgentConfig["sessionEffort"]
+  /** ADR-0269 Phase 3 closure — gate-decision emitter port. When present,
+   *  `runAdmissibilityGate` (permission/rule/hook) + dispatch's cap
+   *  reminder + loop's budget-exhaustion + storage's fs-jail deny each
+   *  emit a `decision` AgentEvent through this port. The CLI composition
+   *  root builds it via `decisionEmitterFromStream(stream)` so the same
+   *  tee that feeds debug-tracer / decision-counter-sink / OTLP exporter
+   *  receives the emit. Absent ⇒ all 6 gate sites silently no-op
+   *  (byte-identical pre-ADR-0269 path; gates' return values + side
+   *  effects unchanged). */
+  decisionEmitter?: AgentConfig["decisionEmitter"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -162,6 +172,7 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
   ...(d.shellSnapshot !== undefined ? { shellSnapshot: d.shellSnapshot } : {}),
   ...(d.sessionEffort !== undefined ? { sessionEffort: d.sessionEffort } : {}),
+  ...(d.decisionEmitter !== undefined ? { decisionEmitter: d.decisionEmitter } : {}),
 })
 
 export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {

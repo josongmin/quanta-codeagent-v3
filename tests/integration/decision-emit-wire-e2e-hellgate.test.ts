@@ -191,35 +191,51 @@ describe("ADR-0269 Phase 3 wire — default-OFF (no emitter, no sink) is silent"
   })
 })
 
-// ── CASE 4 — DEFERRED: composition root populates AgentConfig.decisionEmitter
+// ── CASE 4 — composition root populates AgentConfig.decisionEmitter
 
-describe("ADR-0269 Phase 3 wire — composition root [DEFERRED, user in-flight]", () => {
-  test.todo("CASE-4: SessionDeps.decisionEmitter + assembleConfig spread (user in-flight: src/runner/assemble/config.ts)", () => {
-    // When the wire lands: `SessionDeps` will declare
-    //   `decisionEmitter?: AgentConfig["decisionEmitter"]`
-    // and `assembleConfig` will spread it conditionally:
-    //   `...(d.decisionEmitter !== undefined ? { decisionEmitter: d.decisionEmitter } : {})`
-    // At that point this todo can flip to a `test(...)` that:
-    //   1. type-checks the new SessionDeps shape,
-    //   2. constructs a SessionDeps with a non-undefined emitter,
-    //   3. assembles + asserts `cfg.decisionEmitter === d.decisionEmitter`,
-    //   4. assembles without it + asserts `cfg.decisionEmitter === undefined`.
+describe("ADR-0269 Phase 3 wire — composition root", () => {
+  test("CASE-4: SessionDeps.decisionEmitter + assembleConfig conditional spread", async () => {
+    // ADR-0269 Phase 3 closure: SessionDeps grew a `decisionEmitter` slot
+    // and `assembleConfig` spreads it conditionally. The wire is live in
+    // `src/apps/cli/repl/session-deps-compose.ts` (decisionEmitterFromStream).
+    const { assembleConfig } = await import("@/runner/assemble/config")
+    type SessionDepsShape = Parameters<typeof assembleConfig>[1]
+    const emitter = { emit: () => {} }
+    const baseDeps: Partial<SessionDepsShape> = {
+      decisionEmitter: emitter,
+    }
+    const fullDeps = baseDeps as SessionDepsShape
+    const withEmitter = assembleConfig([], fullDeps)
+    expect(withEmitter.decisionEmitter).toBe(emitter)
+
+    const bareDeps: Partial<SessionDepsShape> = {}
+    const cfgBare = assembleConfig([], bareDeps as SessionDepsShape)
+    expect(cfgBare.decisionEmitter).toBeUndefined()
   })
 })
 
-// ── CASE 5 — DEFERRED: REPL session lifecycle install/clear of fs-jail sink
+// ── CASE 5 — REPL session lifecycle install/clear of fs-jail sink
 
-describe("ADR-0269 Phase 3 wire — REPL fs-jail sink lifecycle [DEFERRED, user in-flight]", () => {
-  test.todo("CASE-5: session-setup.ts calls setFsJailDecisionSink at startup + clearFsJailDecisionSink at shutdown", () => {
-    // When the wire lands: `session-setup.ts` will call
-    //   `setFsJailDecisionSink({ emit: (e) => decisionEmitter.emit(e) })`
-    // immediately after constructing the DecisionEmitter, and register a
-    // `clearFsJailDecisionSink()` teardown alongside the existing
-    // `lifecyclePills.dispose()` / `shutdownMcp()` calls. At that point
-    // this todo can flip to a `test(...)` that:
-    //   1. greps session-setup.ts for both call sites,
-    //   2. asserts the setter runs in a code path the lifecycle owns,
-    //   3. asserts the cleanup is registered against the same boundary.
+describe("ADR-0269 Phase 3 wire — REPL fs-jail sink lifecycle", () => {
+  test("CASE-5: session-setup.ts calls setFsJailDecisionSink + clearFsJailDecisionSink", async () => {
+    // ADR-0269 Phase 3 closure: session-setup.ts installs the sink right
+    // after `composeCliSessionDeps` returns, and wraps `boot.shutdownMcp`
+    // with `clearFsJailDecisionSink()` so session-end always clears the
+    // process-global slot. This invariant is grep-asserted (not runtime-
+    // executed) because `setupSession` requires a fully-wired bootstrap +
+    // an LLM port to construct; a runtime test would need to stub every
+    // collaborator and would be brittle against unrelated boot churn.
+    const src = await Bun.file(
+      "src/apps/cli/repl/session-setup.ts",
+    ).text()
+    expect(src).toContain("setFsJailDecisionSink(sessionDeps.decisionEmitter)")
+    expect(src).toContain("clearFsJailDecisionSink()")
+    // The clear MUST live inside the shutdownMcp wrapper (not as a free
+    // call) so it fires at session-end, not at setupSession return.
+    const clearIdx = src.indexOf("clearFsJailDecisionSink()")
+    const shutdownIdx = src.indexOf("shutdownMcp: async")
+    expect(shutdownIdx).toBeGreaterThanOrEqual(0)
+    expect(clearIdx).toBeGreaterThan(shutdownIdx)
   })
 })
 

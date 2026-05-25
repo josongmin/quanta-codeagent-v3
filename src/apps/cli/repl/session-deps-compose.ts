@@ -2,7 +2,7 @@ import * as readline from "node:readline/promises"
 import { createOnConfirmReviewerPort } from "@/agent"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { PermissionStore, ToolAction } from "@/permission"
-import type { StreamPort } from "@/stream"
+import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm, type SessionDeps } from "../internal"
@@ -95,6 +95,15 @@ export const composeCliSessionDeps = async (
     onShellEvent: boot.onShellEvent,
     workMetricsSink: boot.workMetricsSink,
     sessionEffort: () => boot.effortStore.get(),
+    // ADR-0269 Phase 3 closure — wire the gate-decision emitter to the SAME
+    // stream tee that already feeds debug-tracer / decision-counter-sink /
+    // OTLP exporter. The emitter just forwards `safeEmitDecision(stream, ev)`,
+    // so a `decision` AgentEvent reaches every existing consumer without
+    // another fan-out. Without this slot all 6 caller sites (Phase 2 + Phase 3)
+    // silently no-op — the helpers are wired but their emitter handle is
+    // `undefined`, so the entire developer-mode observability surface is
+    // empty in production. This is the one-line wire that closes the loop.
+    decisionEmitter: decisionEmitterFromStream(turnStream),
     ...(boot.lifecycleFollowUpQueue !== undefined
       ? { followUpQueue: boot.lifecycleFollowUpQueue }
       : {}),

@@ -13,6 +13,7 @@ import type { SessionDeps, Tooling } from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RejectCounter } from "../reject-counter"
+import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import { installStatusBar, type StatusBar } from "../status-bar"
 import type { createStatusPills } from "../status-pills"
 import type { TimelinePanel } from "../timeline-panel"
@@ -202,6 +203,18 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     loadPermissionStore: deps.loadPermissionStore,
     sandboxProfile: runtime.sandboxProfile,
   })
+  // ADR-0269 Phase 3 closure — install the process-level fs-jail decision
+  // sink. fs-jail (storage/service.ts) can't import @/stream (slice-fence),
+  // so it carries a module-level sink slot the composition root fills with
+  // the *same* DecisionEmitter that's now in `sessionDeps.decisionEmitter`.
+  // FsJailDecisionEvent is a structural mirror of DecisionEvent so both
+  // ends type-check without a cross-slice import. The matching
+  // `clearFsJailDecisionSink()` is wrapped into `shutdownMcp` below so
+  // session-end tears it down before sibling processes (or a re-entered
+  // setupSession in tests) inherit a stale sink.
+  if (sessionDeps.decisionEmitter !== undefined) {
+    setFsJailDecisionSink(sessionDeps.decisionEmitter)
+  }
 
   const pills = deps.installPills({
     statusBar,
@@ -252,6 +265,12 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     abort: boot.abort,
     pills,
     argPrompt: boot.argPrompt,
-    shutdownMcp: boot.shutdownMcp,
+    shutdownMcp: async () => {
+      // ADR-0269 Phase 3 closure — clear the fs-jail sink BEFORE MCP
+      // teardown so a sibling/re-entered session never inherits this
+      // run's emitter (the slot is process-global by slice-fence design).
+      clearFsJailDecisionSink()
+      await boot.shutdownMcp()
+    },
   }
 }
