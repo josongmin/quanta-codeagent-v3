@@ -9,12 +9,19 @@
  */
 
 import type { AgentConfig, EffortStore, PersonaKind } from "@/agent"
+import type { FocusChainPort } from "@/agent/focus-chain"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { Metrics, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ReviewerPort } from "@/permission"
-import type { Provider, Tooling } from "@/runner/assemble"
+import type {
+  IdentityModeSessionState,
+  Provider,
+  SystemSource,
+  Tooling,
+  ToolProfileSessionState,
+} from "@/runner/assemble"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
@@ -369,6 +376,24 @@ export interface SessionBootstrapResult {
   readonly abort: AbortController
   readonly argPrompt: string | undefined
   readonly system: string
+  /** Mutable system-prompt holder. Surfaces that mount the `/identity-mode`
+   *  slash use {@link refreshSystemPrompt} to rebuild the prompt after a
+   *  mode swap; turn assemblers read the latest value via `systemSource.get()`.
+   *  Carried at the host boundary so a Web/Tauri surface gets the same shape
+   *  without re-resolving env state. */
+  readonly systemSource: SystemSource
+  /** Idempotent rebuild of the current system prompt from the live identity
+   *  mode. */
+  readonly refreshSystemPrompt: () => void
+  /** Authoritative session-owned tool-profile state. The slash surface and the
+   *  admissibility gate read the SAME live cell. */
+  readonly toolProfileState: ToolProfileSessionState
+  /** Authoritative session-owned identity-mode state. `/identity` mutates this
+   *  cell; the next turn reads the same live mode. */
+  readonly identityModeState: IdentityModeSessionState
+  /** Authoritative session-owned focus-chain tracker. The slash surface and
+   *  the loop share the SAME tracker instance. */
+  readonly focusChain: { readonly tracker: FocusChainPort; readonly reinjectEveryN: number }
   readonly shutdownMcp: () => Promise<void>
   /** ADR-0301 — `--playbook-trigger` CLI flag echo, threaded from
    *  `SessionRuntimeConfigShape.playbookTriggerFlag`. The downstream loop

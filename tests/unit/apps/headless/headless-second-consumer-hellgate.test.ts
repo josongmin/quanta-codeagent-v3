@@ -277,7 +277,13 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
       "abort",
       "argPrompt",
       "system",
+      "systemSource",
+      "refreshSystemPrompt",
+      "toolProfileState",
+      "identityModeState",
+      "focusChain",
       "shutdownMcp",
+      "playbookCliFlag",
       "materializeReviewerAgent",
       "createSubagentBackedGuardianReview",
     ]

@@ -17,9 +17,29 @@
  */
 
 import { buildSystemPrompt, createEffortStore, parseEffort } from "@/agent"
+import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
+import {
+  buildSystemPromptForMode,
+  defaultModeVariantRegistry,
+  MODE_VARIANT_KEYS,
+  type ModeVariantKey,
+} from "@/agent/system-prompt"
+import {
+  ALL_TOOL_PROFILE_NAMES,
+  defaultToolProfileResolver,
+  isToolProfileName,
+  type ToolProfileName,
+} from "@/agent/tool-profile"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
+import {
+  createIdentityModeSessionState,
+  createSystemSource,
+  createToolProfileSessionState,
+  type IdentityModeSessionState,
+  type ToolProfileSessionState,
+} from "@/runner/assemble"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { errMessage, logger } from "@/shared"
 import {
@@ -53,6 +73,146 @@ const loadSeedImages = (
 
 const stopMcpClients = async (clients: BootstrapFeatures["mcpClients"]): Promise<void> => {
   for (const client of clients) await client.stop().catch(() => undefined)
+}
+
+const DEFAULT_TOOL_PROFILE: ToolProfileName = "write"
+const DEFAULT_IDENTITY_MODE: ModeVariantKey = "default"
+const DEFAULT_FOCUS_CHAIN_REINJECT_EVERY = 6
+
+const resolveToolProfileState = (env: NodeJS.ProcessEnv): ToolProfileSessionState => {
+  const raw = env.QUANTA_TOOL_PROFILE
+  const selected = raw === undefined || raw === "" ? DEFAULT_TOOL_PROFILE : raw
+  if (!isToolProfileName(selected)) {
+    logger.warn(`QUANTA_TOOL_PROFILE='${raw}' unknown; valid: ${ALL_TOOL_PROFILE_NAMES.join(", ")}`)
+    return createToolProfileSessionState({
+      resolver: defaultToolProfileResolver(),
+      defaultName: DEFAULT_TOOL_PROFILE,
+    })
+  }
+  return createToolProfileSessionState({
+    resolver: defaultToolProfileResolver(),
+    defaultName: selected,
+  })
+}
+
+const resolveIdentityModeState = (env: NodeJS.ProcessEnv): IdentityModeSessionState => {
+  const raw = env.QUANTA_IDENTITY_MODE
+  const mode = raw ?? DEFAULT_IDENTITY_MODE
+  if (!(MODE_VARIANT_KEYS as readonly string[]).includes(mode)) {
+    logger.warn(`QUANTA_IDENTITY_MODE='${mode}' unknown; valid: ${MODE_VARIANT_KEYS.join(", ")}`)
+    return createIdentityModeSessionState({
+      registry: defaultModeVariantRegistry(),
+      defaultMode: DEFAULT_IDENTITY_MODE,
+    })
+  }
+  return createIdentityModeSessionState({
+    registry: defaultModeVariantRegistry(),
+    defaultMode: mode as ModeVariantKey,
+  })
+}
+
+const resolveFocusChain = (
+  env: NodeJS.ProcessEnv,
+): { readonly tracker: FocusChainPort; readonly reinjectEveryN: number } => {
+  const raw = env.QUANTA_FOCUS_CHAIN_EVERY
+  if (raw === undefined || raw === "") {
+    return {
+      tracker: defaultFocusChainTracker({
+        reinjectEveryN: DEFAULT_FOCUS_CHAIN_REINJECT_EVERY,
+      }),
+      reinjectEveryN: DEFAULT_FOCUS_CHAIN_REINJECT_EVERY,
+    }
+  }
+  const every = Number.parseInt(raw, 10)
+  if (!Number.isFinite(every) || every <= 0) {
+    logger.warn(`QUANTA_FOCUS_CHAIN_EVERY='${raw}' must be a positive integer`)
+    return {
+      tracker: defaultFocusChainTracker({
+        reinjectEveryN: DEFAULT_FOCUS_CHAIN_REINJECT_EVERY,
+      }),
+      reinjectEveryN: DEFAULT_FOCUS_CHAIN_REINJECT_EVERY,
+    }
+  }
+  return {
+    tracker: defaultFocusChainTracker({ reinjectEveryN: every }),
+    reinjectEveryN: every,
+  }
+}
+
+const buildSessionStatePorts = (args: {
+  readonly cwd: string
+  readonly env: NodeJS.ProcessEnv
+  readonly persona: ReturnType<SessionBootstrapDeps["pickPersona"]>
+  readonly identity: readonly string[] | undefined
+}): {
+  readonly toolProfileState: ToolProfileSessionState
+  readonly identityModeState: IdentityModeSessionState
+  readonly focusChain: { readonly tracker: FocusChainPort; readonly reinjectEveryN: number }
+  readonly systemSource: ReturnType<typeof createSystemSource>
+  readonly refreshSystemPrompt: () => void
+} => {
+  const toolProfileState = resolveToolProfileState(args.env)
+  const identityModeState = resolveIdentityModeState(args.env)
+  const focusChain = resolveFocusChain(args.env)
+  const systemSource = createSystemSource(
+    args.identity === undefined && args.env.QUANTA_IDENTITY === "1"
+      ? buildSystemPromptForMode({
+          mode: identityModeState.get(),
+          registry: identityModeState.registry,
+          persona: args.persona,
+        })
+      : buildSystemPrompt(args.cwd, {
+          persona: args.persona,
+          ...(args.identity !== undefined ? { identity: args.identity } : {}),
+        }),
+  )
+  const refreshSystemPrompt = (): void => {
+    systemSource.set(
+      buildSystemPromptForMode({
+        mode: identityModeState.get(),
+        registry: identityModeState.registry,
+        persona: args.persona,
+      }),
+    )
+  }
+  return {
+    toolProfileState,
+    identityModeState,
+    focusChain,
+    systemSource,
+    refreshSystemPrompt,
+  }
+}
+
+const buildPromptState = (
+  deps: SessionBootstrapDeps,
+  runtime: SessionRuntimeConfigShape,
+  cwd: string,
+): {
+  readonly system: string
+  readonly systemSource: ReturnType<typeof createSystemSource>
+  readonly refreshSystemPrompt: () => void
+  readonly toolProfileState: ToolProfileSessionState
+  readonly identityModeState: IdentityModeSessionState
+  readonly focusChain: { readonly tracker: FocusChainPort; readonly reinjectEveryN: number }
+} => {
+  const persona = deps.pickPersona()
+  const identity = deps.pickIdentity()
+  const { toolProfileState, identityModeState, focusChain, systemSource, refreshSystemPrompt } =
+    buildSessionStatePorts({
+      cwd,
+      env: runtime.env,
+      persona,
+      identity,
+    })
+  return {
+    system: systemSource.get(),
+    systemSource,
+    refreshSystemPrompt,
+    toolProfileState,
+    identityModeState,
+    focusChain,
+  }
 }
 
 /** Resolve feature flags, tooling, resume state, and reusable session deps that
@@ -155,11 +315,14 @@ export const bootstrapSession = async (
       )
     }
 
-    const identity = deps.pickIdentity()
-    const system = buildSystemPrompt(cwd, {
-      persona: deps.pickPersona(),
-      ...(identity !== undefined ? { identity } : {}),
-    })
+    const {
+      system,
+      systemSource,
+      refreshSystemPrompt,
+      toolProfileState,
+      identityModeState,
+      focusChain,
+    } = buildPromptState(deps, runtime, cwd)
     const onShellEvent = deps.composeShellEvent(features.metrics, runtime.stdoutIsTTY)
     const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
     const costPanel = deps.buildCostPanelOrUndefined(featureCfg, runtime.model)
@@ -202,6 +365,11 @@ export const bootstrapSession = async (
       abort,
       argPrompt: runtime.argPrompt,
       system,
+      systemSource,
+      refreshSystemPrompt,
+      toolProfileState,
+      identityModeState,
+      focusChain,
       shutdownMcp,
       // ADR-0301 — present the parsed CLI flag as `true | undefined`. Mapping
       // `false → undefined` lets the downstream consumer spread the slot

@@ -11,6 +11,7 @@ import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
 import type { RejectCounter } from "../reject-counter"
 import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
+import { buildSessionMemoryAutoWires } from "./session-memory-auto"
 
 const askLine = async (prompt: string): Promise<string> => {
   const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
@@ -47,31 +48,14 @@ export interface CliAdmissibilityBindings {
   readonly sessionDeps: SessionDeps
 }
 
-/** Compose the CLI-owned reviewer, plan-exit, and user-input seams into the
- *  session deps record the loop consumes. */
-export const composeCliSessionDeps = async (
-  args: ComposeCliSessionDepsArgs,
-): Promise<CliAdmissibilityBindings> => {
-  const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
-  // ADR-0299 — the host result types these ports as opaque (`unknown`); the
-  // CLI surface owns the real shapes (touch node:fs / node:os) so we narrow
-  // them back at the seam.
-  const onConfirm = buildCliOnConfirm({
-    idleMonitor: boot.idleMonitor as IdleMonitor,
-    rejectCounter: boot.rejectCounter as RejectCounter,
-  })
-  const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
-  const autoReview =
-    boot.permission.classify !== undefined
-      ? createClassifierBackedAutoReview({
-          classify: boot.permission.classify,
-          userReview: userReviewerPort.userReview,
-        })
-      : undefined
-  const permissionStore = await loadPermissionStore()
-  const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const planExitPort = createCliPlanExitPort({ ask: askLine })
-  const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
+const buildSessionMemoryAutoDeps = async (
+  boot: SessionBootstrapResult,
+): Promise<{
+  readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
+  readonly sessionCtx?: string
+  readonly memoryConsolidator?: SessionDeps["memoryConsolidator"]
+  readonly stage1OutputsStore?: SessionDeps["stage1OutputsStore"]
+}> => {
   const summarizerLlm = buildSummarizerLlm(boot.provider, boot.abort.signal)
   const sessionMemoryAuto = await buildSessionMemoryAutoWires({
     env: process.env,
@@ -79,9 +63,32 @@ export const composeCliSessionDeps = async (
     ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
     sessionId: boot.sessionId,
     signal: boot.abort.signal,
-    logWarn: (msg) => process.stderr.write(`[memory-auto] ${msg}\n`),
+    logWarn: (msg: string) => process.stderr.write(`[memory-auto] ${msg}\n`),
   })
-  const baseSessionDeps: SessionDeps = {
+  return {
+    ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
+    ...(sessionMemoryAuto?.sessionCtx !== undefined
+      ? { sessionCtx: sessionMemoryAuto.sessionCtx }
+      : {}),
+    ...(sessionMemoryAuto?.memoryConsolidator !== undefined
+      ? { memoryConsolidator: sessionMemoryAuto.memoryConsolidator }
+      : {}),
+    ...(sessionMemoryAuto?.stage1OutputsStore !== undefined
+      ? { stage1OutputsStore: sessionMemoryAuto.stage1OutputsStore }
+      : {}),
+  }
+}
+
+const buildBaseSessionDeps = (args: {
+  readonly boot: SessionBootstrapResult
+  readonly turnStream: StreamPort
+  readonly onConfirm: (action: ToolAction) => Promise<boolean>
+  readonly planExitPort: ReturnType<typeof createCliPlanExitPort>
+  readonly userInputPort: ReturnType<typeof createCliUserInputPort>
+  readonly autoDeps: Awaited<ReturnType<typeof buildSessionMemoryAutoDeps>>
+}): SessionDeps => {
+  const { boot, turnStream, onConfirm, planExitPort, userInputPort, autoDeps } = args
+  const base: SessionDeps = {
     llm: boot.llm,
     registry: boot.tooling.registry,
     stream: turnStream,
@@ -104,40 +111,48 @@ export const composeCliSessionDeps = async (
     compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
     verifyGuardConfig: boot.tooling.verifyGuardConfig,
     searchPipeline: boot.tooling.searchPipeline,
-    summarizerLlm,
+    summarizerLlm: autoDeps.summarizerLlm ?? undefined,
     planExitPort,
     userInputPort,
-    ...(sessionMemoryAuto?.sessionCtx !== undefined ? { sessionCtx: sessionMemoryAuto.sessionCtx } : {}),
-    ...(sessionMemoryAuto?.memoryConsolidator !== undefined
-      ? { memoryConsolidator: sessionMemoryAuto.memoryConsolidator }
-      : {}),
-    ...(sessionMemoryAuto?.stage1OutputsStore !== undefined
-      ? { stage1OutputsStore: sessionMemoryAuto.stage1OutputsStore }
-      : {}),
     ...(boot.toolProfileState !== undefined ? { toolProfileState: boot.toolProfileState } : {}),
     ...(boot.identityModeState !== undefined ? { identityModeState: boot.identityModeState } : {}),
     ...(boot.focusChain !== undefined ? { focusChain: boot.focusChain } : {}),
     onShellEvent: boot.onShellEvent,
     workMetricsSink: boot.workMetricsSink,
     sessionEffort: () => boot.effortStore.get(),
-    // ADR-0269 Phase 3 closure — wire the gate-decision emitter to the SAME
-    // stream tee that already feeds debug-tracer / decision-counter-sink /
-    // OTLP exporter. The emitter just forwards `safeEmitDecision(stream, ev)`,
-    // so a `decision` AgentEvent reaches every existing consumer without
-    // another fan-out. Without this slot all 6 caller sites (Phase 2 + Phase 3)
-    // silently no-op — the helpers are wired but their emitter handle is
-    // `undefined`, so the entire developer-mode observability surface is
-    // empty in production. This is the one-line wire that closes the loop.
     decisionEmitter: decisionEmitterFromStream(turnStream),
-    ...(boot.lifecycleFollowUpQueue !== undefined
-      ? { followUpQueue: boot.lifecycleFollowUpQueue }
-      : {}),
-    ...(boot.planStore !== undefined ? { planStore: boot.planStore } : {}),
-    ...((): { shellSnapshot?: SessionDeps["shellSnapshot"] } => {
-      const cfg = buildShellSnapshotConfig()
-      return cfg !== undefined ? { shellSnapshot: cfg } : {}
-    })(),
   }
+  if (autoDeps.sessionCtx !== undefined) base.sessionCtx = autoDeps.sessionCtx
+  if (autoDeps.memoryConsolidator !== undefined) {
+    base.memoryConsolidator = autoDeps.memoryConsolidator
+  }
+  if (autoDeps.stage1OutputsStore !== undefined) {
+    base.stage1OutputsStore = autoDeps.stage1OutputsStore
+  }
+  if (boot.lifecycleFollowUpQueue !== undefined) {
+    base.followUpQueue = boot.lifecycleFollowUpQueue
+  }
+  if (boot.planStore !== undefined) {
+    base.planStore = boot.planStore
+  }
+  const shellSnapshot = buildShellSnapshotConfig()
+  if (shellSnapshot !== undefined) {
+    base.shellSnapshot = shellSnapshot
+  }
+  return base
+}
+
+const buildAdmissibility = (args: {
+  readonly boot: SessionBootstrapResult
+  readonly onConfirm: (action: ToolAction) => Promise<boolean>
+  readonly sandboxProfile: CliReviewerSandboxProfile
+  readonly permissionStore: PermissionStore | undefined
+  readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
+  readonly baseSessionDeps: SessionDeps
+}): SessionDeps["admissibility"] => {
+  const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, baseSessionDeps } = args
+  const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
+  const threadPermission = permissionStore?.getThread(boot.sessionId)
   const reviewerAgent = boot.materializeReviewerAgent(assembleConfig([], baseSessionDeps))
   const guardianReview =
     reviewerAgent !== undefined
@@ -154,20 +169,59 @@ export const composeCliSessionDeps = async (
           ...(guardianReview !== undefined ? { guardianReview } : {}),
         })
       : userReviewerPort
-  const defaultReviewer = selectDefaultReviewer({
-    threadPermission,
-    permissionMode: boot.mode,
-    sandboxProfile,
-    hasAutoReview: autoReview !== undefined,
-    hasGuardianReview: guardianReview !== undefined,
-  })
-  const sessionDeps: SessionDeps = {
-    ...baseSessionDeps,
-    admissibility: {
-      ...(permissionStore !== undefined ? { permissionStore } : {}),
-      reviewerPort,
-      defaultReviewer,
-    },
+  return {
+    ...(permissionStore !== undefined ? { permissionStore } : {}),
+    reviewerPort,
+    defaultReviewer: selectDefaultReviewer({
+      threadPermission,
+      permissionMode: boot.mode,
+      sandboxProfile,
+      hasAutoReview: autoReview !== undefined,
+      hasGuardianReview: guardianReview !== undefined,
+    }),
   }
-  return { sessionDeps }
+}
+
+/** Compose the CLI-owned reviewer, plan-exit, and user-input seams into the
+ *  session deps record the loop consumes. */
+export const composeCliSessionDeps = async (
+  args: ComposeCliSessionDepsArgs,
+): Promise<CliAdmissibilityBindings> => {
+  const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
+  // ADR-0299 — the host result types these ports as opaque (`unknown`); the
+  // CLI surface owns the real shapes (touch node:fs / node:os) so we narrow
+  // them back at the seam.
+  const onConfirm = buildCliOnConfirm({
+    idleMonitor: boot.idleMonitor as IdleMonitor,
+    rejectCounter: boot.rejectCounter as RejectCounter,
+  })
+  const autoReviewUserPort = createOnConfirmReviewerPort({ onConfirm })
+  const autoReview =
+    boot.permission.classify !== undefined
+      ? createClassifierBackedAutoReview({
+          classify: boot.permission.classify,
+          userReview: autoReviewUserPort.userReview,
+        })
+      : undefined
+  const permissionStore = await loadPermissionStore()
+  const planExitPort = createCliPlanExitPort({ ask: askLine })
+  const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
+  const autoDeps = await buildSessionMemoryAutoDeps(boot)
+  const baseSessionDeps = buildBaseSessionDeps({
+    boot,
+    turnStream,
+    onConfirm,
+    planExitPort,
+    userInputPort,
+    autoDeps,
+  })
+  baseSessionDeps.admissibility = buildAdmissibility({
+    boot,
+    onConfirm,
+    sandboxProfile,
+    permissionStore,
+    autoReview,
+    baseSessionDeps,
+  })
+  return { sessionDeps: baseSessionDeps }
 }

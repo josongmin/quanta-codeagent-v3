@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { LifecyclePills } from "../../../../src/apps/cli/lifecycle-pills"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
@@ -261,8 +261,10 @@ let lastInteractiveInput: {
   onTurnEnd?: (e: { messages: Message[]; outcome: unknown }) => void | Promise<void>
 } | null
 
+let originalRunnerModule: Record<string, unknown> | undefined
 beforeAll(async () => {
   const original = await import("@/runner")
+  originalRunnerModule = { ...original }
   runOnceStub = mock(async () => ({
     messages: [{ role: "user", content: [{ type: "text", text: "x" }] }] as unknown as Message[],
     outcome: { id: "stub-once" },
@@ -276,6 +278,18 @@ beforeAll(async () => {
     runOnce: runOnceStub,
     runInteractive: runInteractiveStub,
   }))
+})
+
+// Restore the real `@/runner` once this file's suite finishes so sibling test
+// files (e.g. headless-second-consumer-hellgate.test.ts) that drive the real
+// runOnce / runInteractive don't inherit our mocks via Bun's process-global
+// module cache. Without this an "all-suites" run sees headless cases 3/6/7/14
+// fail because runOnce returns the stubbed shape.
+afterAll(async () => {
+  if (originalRunnerModule !== undefined) {
+    const snapshot = originalRunnerModule
+    await mock.module("@/runner", () => snapshot)
+  }
 })
 
 beforeEach(() => {

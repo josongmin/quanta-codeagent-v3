@@ -5,7 +5,11 @@ import type { PlanStore } from "@/agent/plan/state"
 import type { SystemPromptVariantRegistry } from "@/agent/system-prompt"
 import type { ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { LLMPort, Message } from "@/llm"
-import type { SideConversationPort } from "@/runner"
+import type {
+  IdentityModeSessionState,
+  SideConversationPort,
+  ToolProfileSessionState,
+} from "@/runner"
 import type { SessionEnvelopeRecord } from "@/session"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
@@ -192,13 +196,13 @@ export interface BuildReplSlashCtxArgs {
   perToolRegistry?: GranularRegistry | undefined
   perToolRestorePort?: ThreeWayRestorePort | undefined
   /** ADR-0291 — `/profile`: authoritative session-owned tool-profile state. */
-  toolProfileState?: SessionDeps["toolProfileState"] | undefined
+  toolProfileState?: ToolProfileSessionState | undefined
   /** Back-compat alias for older tests/callers; prefer `toolProfileState`. */
   toolProfile?:
     | { readonly resolver: ToolProfileResolver; readonly defaultName?: ToolProfileName }
     | undefined
   /** ADR-0291 — `/identity`: authoritative session-owned identity state. */
-  identityModeState?: SessionDeps["identityModeState"] | undefined
+  identityModeState?: IdentityModeSessionState | undefined
   /** Back-compat alias for older tests/callers; prefer `identityModeState`. */
   identityModeVariant?:
     | {
@@ -209,7 +213,7 @@ export interface BuildReplSlashCtxArgs {
   /** ADR-0302 — refresh any derived system source after identity changes. */
   onIdentityModeChange?: (() => void) | undefined
   /** ADR-0291 — `/focus-chain`: authoritative session-owned tracker slot. */
-  focusChain?: SessionDeps["focusChain"] | undefined
+  focusChain?: { readonly tracker: FocusChainPort; readonly reinjectEveryN?: number } | undefined
   /** Back-compat alias for older tests/callers; prefer `focusChain`. */
   focusChainTracker?: FocusChainPort | undefined
   /** ADR-0291 — `/web`: surface-owned text inbox sink. Drained by the
@@ -278,13 +282,16 @@ const maybeIdentity = (
   if (im === undefined && legacy === undefined) return undefined
   let active = legacy?.defaultMode ?? "default"
   return buildIdentityModeAdapter({
-    registry: im?.registry ?? legacy?.registry ?? { variantFor: () => ({ mode: "default", identity: [] }) },
+    registry: im?.registry ??
+      legacy?.registry ?? { variantFor: () => ({ mode: "default", identity: [] }) },
     getActive: () => im?.get() ?? active,
     setActive: (mode) => {
       if (im !== undefined) im.set(mode)
       else active = mode
     },
-    ...(args.onIdentityModeChange !== undefined ? { onChange: () => args.onIdentityModeChange?.() } : {}),
+    ...(args.onIdentityModeChange !== undefined
+      ? { onChange: () => args.onIdentityModeChange?.() }
+      : {}),
   })
 }
 

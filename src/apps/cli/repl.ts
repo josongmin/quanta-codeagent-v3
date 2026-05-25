@@ -1,5 +1,6 @@
 import * as readline from "node:readline/promises"
 import { RetryingLLM } from "@/agent"
+import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import {
   createSubagentBackedGuardianReview,
   materializeReviewerAgent,
@@ -24,6 +25,7 @@ import {
 } from "./internal"
 import { createRejectCounter } from "./reject-counter"
 import type { CliFeatureConfig } from "./repl/cli-feature-config"
+import { buildExecutionPlaneSessionDeps } from "./repl/execution-plane-wire"
 import {
   buildBranchProgressOrUndefined,
   buildCostPanelOrUndefined,
