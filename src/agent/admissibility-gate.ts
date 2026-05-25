@@ -183,7 +183,7 @@ export interface AdmissibilityWaveAOptions {
 }
 
 /* ------------------------------------------------------------------------- *
- * ADR-0250 (Phase 2 of ADR-0239) — gate-decision emit helper.
+ * ADR-0260 (Phase 2 of ADR-0239) — gate-decision emit helper.
  *
  * Called from the 3 emit sites (rule / hook / permission) so the
  * `DecisionEvent` shape is constructed in ONE place. Sanitisation contract
@@ -366,7 +366,7 @@ const runPreToolUseHook = async (
     input: call.input,
   })
   if (result.deny) {
-    // ADR-0250 Phase 2 — surface the hook-deny on the debug-tracer side
+    // ADR-0260 Phase 2 — surface the hook-deny on the debug-tracer side
     // channel. The `result.deny.deny` field is the operator-authored deny
     // reason from the local hook (trust-level == permission config); we pass
     // it through verbatim per the gate's existing wording invariant. Default-
@@ -385,7 +385,7 @@ const runPreToolUseHook = async (
   // `updatedInput` KEY only when a handler set it (presence is the signal, not
   // truthiness), so a rewrite to a falsy value is still propagated.
   if ("updatedInput" in result) opts.onInputMutation?.(result.updatedInput)
-  // ADR-0250 Phase 2 — hook admitted (no deny). Emit on the admit path too so
+  // ADR-0260 Phase 2 — hook admitted (no deny). Emit on the admit path too so
   // a tracer line confirms which call passed which hook (paired with the
   // upstream `tool_call.id` row).
   emitGateDecision(config, {
@@ -686,7 +686,7 @@ const runPermissionStack = (
     // fallback remains only for legacy callers that omit that bundle.
     { store: opts.store ?? getDefaultPermissionStore() },
   )
-  // ADR-0250 Phase 2 — emit the per-thread/per-host/post-denial stack verdict
+  // ADR-0260 Phase 2 — emit the per-thread/per-host/post-denial stack verdict
   // BEFORE acting on it. `decision.reason` (deny path only) is the policy's
   // own message (mentions the per-thread sandbox type + workdir, never tool
   // input). The `ask` arm has no `reason` field — emit a synthesized
@@ -838,7 +838,7 @@ const runModePolicy = async (
     permission.mode === "auto" && autoClassifier
       ? await evaluateAuto(action, permission, autoClassifier)
       : evaluate(action, permission)
-  // ADR-0250 Phase 2 — emit the mode-policy decision BEFORE acting on it so a
+  // ADR-0260 Phase 2 — emit the mode-policy decision BEFORE acting on it so a
   // tracer sees the categorical outcome (allow/deny/ask) even on paths that
   // later short-circuit via the ask handler. `decision.reason` is the
   // policy's own message; it MAY include the tool name but never tool input
@@ -917,10 +917,10 @@ const earlyHardDeny = (
  * sentinel `"fallthrough"` when the parent should continue to the legacy
  * gates (no rules store, or `no_match` with the default `"fallthrough"`
  * policy). Extracted from `runAdmissibilityGate` so the parent's cognitive
- * complexity stays under the biome cap with the ADR-0250 emit calls layered
+ * complexity stays under the biome cap with the ADR-0260 emit calls layered
  * in — the gate semantics are byte-identical to the previous inline block.
  *
- * ADR-0250 Phase 2 — emits `kind:"rule"` decisions on the 3 outcome branches
+ * ADR-0260 Phase 2 — emits `kind:"rule"` decisions on the 3 outcome branches
  * (allow / deny / ask). The `rule_no_match_deny` branch also emits so a
  * tracer can show why a default-deny policy fired. The `m.rule.action === "ask"`
  * arm with no reviewer port wired emits an `ask` (the policy intent), then

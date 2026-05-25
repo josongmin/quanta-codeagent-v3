@@ -1,5 +1,5 @@
 /**
- * ADR-0250 (Phase 2 of ADR-0239) — `decision` event emit hellgate.
+ * ADR-0260 (Phase 2 of ADR-0239) — `decision` event emit hellgate.
  *
  * Locks the contract for the 3 emit sites in `runAdmissibilityGate`:
  *   - rule  (allow / deny / ask / no_match-deny) — kind:"rule" with ruleId.
@@ -116,7 +116,7 @@ const poisonEmitter: DecisionEmitter = {
 
 // ── site 1 — rule (4 cases) ───────────────────────────────────────────────
 
-describe("ADR-0250 emit: rule gate", () => {
+describe("ADR-0260 emit: rule gate", () => {
   test("rule allow emits kind:rule, outcome:allow, ruleId, toolCallId paired", async () => {
     const read = makeTool("read", { readOnly: true })
     const rules = new RulesStore()
@@ -202,7 +202,7 @@ describe("ADR-0250 emit: rule gate", () => {
 
 // ── site 2 — hook (pre_tool_use) ──────────────────────────────────────────
 
-describe("ADR-0250 emit: pre_tool_use hook gate", () => {
+describe("ADR-0260 emit: pre_tool_use hook gate", () => {
   test("hook deny emits kind:hook, outcome:deny + hookName='pre_tool_use'", async () => {
     const read = makeTool("read", { readOnly: true })
     const hooks = new HookBus()
@@ -255,7 +255,7 @@ describe("ADR-0250 emit: pre_tool_use hook gate", () => {
 
 // ── site 3 — permission (mode policy) ─────────────────────────────────────
 
-describe("ADR-0250 emit: permission mode-policy gate", () => {
+describe("ADR-0260 emit: permission mode-policy gate", () => {
   test("mode='bypass' on mutating tool emits kind:permission, outcome:allow", async () => {
     const write = makeTool("write")
     const cap = collector()
@@ -309,7 +309,7 @@ describe("ADR-0250 emit: permission mode-policy gate", () => {
 
 // ── default-OFF + isolation invariants ────────────────────────────────────
 
-describe("ADR-0250 invariants", () => {
+describe("ADR-0260 invariants", () => {
   test("decisionEmitter:undefined ⇒ gate result is byte-identical to wired path", async () => {
     const write = makeTool("write")
     const u = call("write", { x: 1 }, "tc_iso")
