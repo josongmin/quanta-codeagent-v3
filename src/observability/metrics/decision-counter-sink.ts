@@ -1,5 +1,5 @@
 /**
- * Decision → MetricsRegistry counter sink (ADR-0269).
+ * Decision → MetricsRegistry counter sink (ADR-0270).
  *
  * Closed-port `StreamPort` adapter that listens for `decision` AgentEvents
  * (Phase 2 of the gate-decision cluster — see ADR-0267) and bumps a

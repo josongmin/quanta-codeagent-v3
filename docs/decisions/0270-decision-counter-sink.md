@@ -1,4 +1,4 @@
-# ADR-0269 — Decision → MetricsRegistry Counter Sink
+# ADR-0270 — Decision → MetricsRegistry Counter Sink
 
 Status: Accepted (2026-05-25)
 Slice: `src/observability/metrics/decision-counter-sink.ts`

@@ -1,5 +1,5 @@
 /**
- * ADR-0269 — hellgate for the decision → MetricsRegistry counter sink.
+ * ADR-0270 — hellgate for the decision → MetricsRegistry counter sink.
  *
  * Seals 16 adversarial invariants:
  *
@@ -118,7 +118,7 @@ const MATRIX_3X3: ReadonlyArray<readonly [DecisionKind, DecisionOutcome]> = [
   ["hook", "ask"],
 ]
 
-describe("decision-counter-sink (ADR-0269)", () => {
+describe("decision-counter-sink (ADR-0270)", () => {
   for (const [kind, outcome] of MATRIX_3X3) {
     test(`HELL-DC: ${kind}/${outcome} → quanta.gate.${kind}.${outcome}.total +1`, () => {
       const { registry, calls } = spyRegistry()

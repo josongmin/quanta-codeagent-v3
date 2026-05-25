@@ -286,7 +286,7 @@ const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
   },
 })
 
-/** ADR-0269 — env-gated MetricsRegistry resolver for the decision-counter sink.
+/** ADR-0270 — env-gated MetricsRegistry resolver for the decision-counter sink.
  *  Returns a fresh `defaultMetricsRegistry()` when `QUANTA_DECISION_METRICS=1`
  *  AND no caller-supplied registry is wired. Returns `undefined` otherwise so
  *  the byte-identical no-tee path holds (no MetricsRegistry allocated, no
@@ -309,7 +309,7 @@ const resolveDecisionMetricsRegistry = (
   return defaultMetricsRegistry()
 }
 
-/** ADR-0269 — append the decision → counter sink to a stream tee. Pure helper
+/** ADR-0270 — append the decision → counter sink to a stream tee. Pure helper
  *  with NO env / NO global state — every input is explicit so tests can drive
  *  it directly and so the wiring inside `buildTurnSummaryAndStream` stays
  *  byte-identical when `metrics` is `undefined`.
@@ -339,7 +339,7 @@ const appendDecisionCounterSink = (
  *  reference is the literal input — no TeeStream allocated, no extra fan-out,
  *  so the existing recorder/stdout/indicator port path is identical to today's.
  *
- *  ADR-0269 wire seam — the decision-counter sink is folded into the SAME tee
+ *  ADR-0270 wire seam — the decision-counter sink is folded into the SAME tee
  *  position as the turn-summary collector. When `QUANTA_DECISION_METRICS=1`
  *  AND the summary collector is enabled, the returned stream tees to BOTH
  *  consumers. When the env knob is off (default), no sink is appended and the
