@@ -244,7 +244,7 @@ const reviewAndDecide = async (
     turnId: String(config.run?.turn ?? 0),
     priorDenials: opts.priorDenials ?? [],
     configReviewer: opts.defaultReviewer ?? "user",
-    decidedAt: opts.decidedAt ? opts.decidedAt() : Date.now(),
+    decidedAt: (opts.decidedAt ?? Date.now)(),
     reviewKind,
   }
   const dec = await reviewAction(keyed, ctx, opts.reviewerPort)
@@ -383,6 +383,7 @@ const emitHandoffEvent = (
   call: ToolUseBlock,
   handoffMessage: string,
   reason: string,
+  now: () => number = Date.now,
 ): void => {
   // ADR-0047 vocabulary activation: record the kebab-case handoff tag on the
   // span sink. The OTel attribute carries the SANITIZED categorical slug
@@ -401,7 +402,7 @@ const emitHandoffEvent = (
     args: call.input,
     handoffMessage,
     reason,
-    timestamp: Date.now(),
+    timestamp: now(),
   }
   try {
     config.onHandoff(event)
@@ -421,6 +422,7 @@ const buildHandoffDeny = (
   call: ToolUseBlock,
   config: AdmissibilityGateConfig,
   matched: HitlAnnotation | undefined,
+  now: () => number = Date.now,
 ): DispatchResult => {
   const suffix = matched?.reason !== undefined ? ` (${matched.reason})` : ""
   const handoffMessage = `Action requires human handoff: ${call.name} is classified hand-off-required${suffix}${HANDOFF_SUFFIX}`
@@ -429,6 +431,7 @@ const buildHandoffDeny = (
     call,
     handoffMessage,
     matched !== undefined ? `registry:${matched.tool}` : "tier:hand-off-required",
+    now,
   )
   return deny(call.id, handoffMessage, "handoff")
 }
@@ -538,12 +541,13 @@ const runHitlGate = async (
   action: AdmissibilityAction,
   opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null | "fallthrough"> => {
+  const now = opts.decidedAt ?? Date.now
   // HARD_DENY hits ARE the hand-off-required tier (security boundary crossing
   // — no mode authorizes them). Phrase as a handoff demand.
   const denyReason = hardDenyReason(action)
   if (denyReason !== null) {
     const handoffMessage = `Action requires human handoff: ${denyReason}${HANDOFF_SUFFIX}`
-    emitHandoffEvent(config, call, handoffMessage, `hard-deny:${denyReason}`)
+    emitHandoffEvent(config, call, handoffMessage, `hard-deny:${denyReason}`, now)
     return deny(call.id, handoffMessage, "handoff")
   }
 
@@ -559,7 +563,7 @@ const runHitlGate = async (
       [QUANTA_ATTRS.hitl.registryEscalated]: matched !== undefined,
     }),
   )
-  if (tier === "hand-off-required") return buildHandoffDeny(call, config, matched)
+  if (tier === "hand-off-required") return buildHandoffDeny(call, config, matched, now)
   if (tier === "always-confirm") return runAlwaysConfirmBranch(call, config, action, opts)
   if (tier === "none") return null
   return "fallthrough"

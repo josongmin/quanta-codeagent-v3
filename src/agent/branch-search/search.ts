@@ -73,7 +73,8 @@ export const runBranchSearch = async (
 ): Promise<BranchSearchResult> => {
   if (req.N < 2) throw new Error(`runBranchSearch: N must be >= 2 (got ${req.N})`)
   if (req.N > 8) throw new Error(`runBranchSearch: N capped at 8 (got ${req.N})`)
-  const startedAt = Date.now()
+  const now = req.now ?? Date.now
+  const startedAt = now()
 
   // ADR-0116: anchor registration runs BEFORE parallelPropose so the snapshot
   // captures the workspace state the candidates fork from. Failure surfaces
@@ -100,6 +101,7 @@ export const runBranchSearch = async (
     isolator: req.isolator,
     runCandidate: req.runCandidate,
     ...(req.onTrace ? { onTrace: req.onTrace } : {}),
+    ...(req.now ? { now: req.now } : {}),
   })
 
   try {
@@ -150,7 +152,7 @@ export const runBranchSearch = async (
       winner,
       winnerScore,
       allScored,
-      totalWallMs: Date.now() - startedAt,
+      totalWallMs: now() - startedAt,
     }
   } finally {
     // Release every workspace — best-effort, never throws past here.

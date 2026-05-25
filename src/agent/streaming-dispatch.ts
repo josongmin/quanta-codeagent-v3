@@ -128,6 +128,10 @@ export interface StreamingTurnArgs {
   onFirstChunk?: () => void
   /** Cooperative cancellation: an abort between/within phases ⇒ `aborted`. */
   signal?: AbortSignal
+  /** Injection seam for tests: clock used to stamp `InProgressIndicator.timestamp`
+   *  when the upstream event omits `createdAt`. Default `Date.now`. Never
+   *  affects routing — the heartbeat is a UI-only signal. */
+  now?: () => number
 }
 
 /** Three-callback seam mirroring `tool_use_start`/`_delta`/`_end` upstream
@@ -327,7 +331,7 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
     if (args.onInProgress !== undefined) {
       const indicator: InProgressIndicator = {
         kind: "in-progress",
-        timestamp: ev.createdAt ?? Date.now(),
+        timestamp: ev.createdAt ?? (args.now ?? Date.now)(),
         ...(ev.message !== undefined ? { message: ev.message } : {}),
         ...(ev.progress !== undefined ? { progress: ev.progress } : {}),
       }

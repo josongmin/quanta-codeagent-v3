@@ -545,7 +545,7 @@ export class FileSystemIdeContextProvider implements IdeContextProvider {
     this.cwd = opts.cwd
     this.contextFile = opts.contextFile ?? `${opts.cwd}/.quanta/ide-context.json`
     this.metadataSink = opts.metadataSink
-    this.now = opts.now ?? (() => Date.now())
+    this.now = opts.now ?? Date.now
     this.read =
       opts.read ??
       ((p): string | null => {

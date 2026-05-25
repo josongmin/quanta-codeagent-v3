@@ -99,6 +99,10 @@ export interface BranchSearchRequest {
    *  candidate). Wired by `branch-search-runner` when
    *  `AgentConfig.shadowOdb` is set. */
   readonly anchor?: BranchSearchAnchor
+  /** Injection seam for tests: clock used for `totalWallMs` and threaded
+   *  through `parallelPropose`. Default `Date.now`. The value is reported on
+   *  the `BranchSearchResult` only — it never affects routing or scoring. */
+  readonly now?: () => number
 }
 
 export interface BranchSearchResult {

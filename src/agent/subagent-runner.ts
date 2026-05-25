@@ -94,6 +94,11 @@ export interface SubagentRunnerOptions {
   /** Override the worktree wrapper (tests). Defaults to the real
    *  `withWorktree`. */
   withWorktree?: typeof withWorktree
+  /** Injection seam for tests: clock used to suffix the subagent id. The id
+   *  is purely filesystem-namespaced via `safeId`; the timestamp is a
+   *  monotonic-ish source of uniqueness across siblings spawned in the same
+   *  parent turn. Default `Date.now`. */
+  now?: () => number
 }
 
 /** Join the trailing assistant turn's text blocks into the child's answer.
@@ -277,6 +282,7 @@ export const createSubagentRunner = (
   const run = opts.run ?? runAgent
   const gitProbe = opts.isGitRepo ?? isGitRepo
   const wt = opts.withWorktree ?? withWorktree
+  const now = opts.now ?? Date.now
 
   return async (req: SubagentRequest): Promise<SubagentResult> => {
     if (req.depth > maxDepth) {
@@ -288,7 +294,7 @@ export const createSubagentRunner = (
 
     // id is sanitized by withWorktree's safeId; depth+prompt make it
     // human-traceable while staying within the worktree-name charset.
-    const subagentId = `sub-d${req.depth}-${Date.now().toString(36)}`
+    const subagentId = `sub-d${req.depth}-${now().toString(36)}`
 
     // ADR-0133 — fire `subagent_start` on the PARENT's hook bus BEFORE the
     // child config is built or the worktree is opened. A hook returning

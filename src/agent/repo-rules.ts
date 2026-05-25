@@ -87,11 +87,23 @@ export const MAX_BYTES = 64 * 1024
  *  almost never nest beyond ~5 levels. */
 const MAX_DEPTH = 16
 
+/** Optional injection seam. Only `now` is currently parameterized — the
+ *  loader records a `loadedAt` timestamp on the returned `RepoRules` so a
+ *  consumer can age out stale snapshots. Tests pin it for replay; production
+ *  delegates to `Date.now`. */
+export interface LoadRepoRulesOpts {
+  readonly now?: () => number
+}
+
 /** Load repo-local rules by walking CWD → repo root. Returns `undefined` when
  *  no layers are present anywhere along the walk. Errors other than ENOENT
  *  (e.g. permission) are swallowed per-layer; the loader continues to the
  *  next candidate / parent dir. Read ONCE per session by convention. */
-export const loadRepoRules = async (cwd: string): Promise<RepoRules | undefined> => {
+export const loadRepoRules = async (
+  cwd: string,
+  opts: LoadRepoRulesOpts = {},
+): Promise<RepoRules | undefined> => {
+  const now = opts.now ?? Date.now
   const resolvedCwd = resolve(cwd)
   const collected: RepoRulesLayer[] = []
   let dir = resolvedCwd
@@ -127,7 +139,7 @@ export const loadRepoRules = async (cwd: string): Promise<RepoRules | undefined>
     sourcePath: deepest.sourcePath,
     entrypoint: deepest.entrypoint,
     body,
-    loadedAt: Date.now(),
+    loadedAt: now(),
     layers: ordered,
   }
 }

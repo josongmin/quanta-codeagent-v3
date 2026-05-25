@@ -11,7 +11,10 @@ import { runShell } from "@/runtime"
 import type { Verifier, VerifierSignal } from "./types"
 
 type Clock = () => number
-const wallClock: Clock = () => Date.now()
+// Inject seam (proven pattern: see `agent/streaming-cancellation/default.ts`).
+// Each verifier delegates to `Date.now` when `opts.clock` is absent, so the
+// production behavior is byte-identical.
+const wallClock: Clock = Date.now
 
 const timed = async <T>(
   clock: Clock,

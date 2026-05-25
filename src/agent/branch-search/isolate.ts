@@ -79,11 +79,17 @@ export interface WorktreeIsolatorOptions {
   repoRoot: string
   /** Symlink parent node_modules into each worktree (default true). */
   linkNodeModules?: boolean
+  /** Injection seam for tests: clock used to suffix the workspace slug. The
+   *  slug is purely filesystem-namespaced — collisions across candidates with
+   *  the same `i` would step on each other, so a monotonic-ish source is
+   *  required (clock satisfies that under serial use). Default `Date.now`. */
+  now?: () => number
 }
 
 export const worktreeIsolator = (opts: WorktreeIsolatorOptions): Isolator => ({
   async acquire(i) {
-    const slug = `branchsearch-${i}-${Date.now().toString(36)}`
+    const now = opts.now ?? Date.now
+    const slug = `branchsearch-${i}-${now().toString(36)}`
     const branch = `branch-${slug}`
     const workspace = join(opts.repoRoot, ".claude", "worktrees", `agent-${slug}`)
     const add = await runShell(`git worktree add --no-track -B ${branch} "${workspace}" HEAD`, {

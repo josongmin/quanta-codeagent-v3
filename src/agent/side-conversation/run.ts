@@ -180,6 +180,10 @@ export interface SideConversationOptions {
    *  silently (consistent with the rest of the agent's observability
    *  pattern). */
   observe?: (span: SideConversationSpanAttributes) => void
+  /** Injection seam for tests: clock used to measure side-conv `durationMs`.
+   *  Reported on the result + observed span only — never affects routing.
+   *  Default `Date.now`. */
+  now?: () => number
 }
 
 /** Wire keys for the side-conversation span — all sourced from the
@@ -417,7 +421,8 @@ export const runSideConversation = async (
   const { outputBudget } = checkPreflight(opts)
   const tools = opts.tools ? filterSideConversationTools(opts.tools) : []
 
-  const started = Date.now()
+  const now = opts.now ?? Date.now
+  const started = now()
   const { events, inputTokens, outputTokens } = await drainStream(opts, tools)
 
   if (outputTokens > outputBudget) {
@@ -430,7 +435,7 @@ export const runSideConversation = async (
     .map((b) => (b as { type: "text"; text: string }).text)
     .join("")
 
-  const durationMs = Date.now() - started
+  const durationMs = now() - started
   opts.observe?.(buildSpan(opts.parentSessionId, durationMs, inputTokens, outputTokens))
 
   return {

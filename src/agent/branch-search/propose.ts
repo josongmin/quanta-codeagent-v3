@@ -38,6 +38,10 @@ export interface ProposeRequest {
   isolator: Isolator
   runCandidate: RunCandidate
   onTrace?: (e: BranchTraceEvent) => void
+  /** Injection seam for tests: clock used to time candidate runs. Default
+   *  `Date.now`. The value is reported on `candidate-finished` trace events
+   *  only — it never affects routing or selection. */
+  now?: () => number
 }
 
 export interface ProposeResult {
@@ -72,8 +76,9 @@ const oneCandidate = async (
   const acquired = await req.isolator.acquire(i)
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
+  const now = req.now ?? Date.now
   safeTrace(req.onTrace, { kind: "candidate-started", id, seed })
-  const startedAt = Date.now()
+  const startedAt = now()
   try {
     const timeout = new Promise<{ kind: "failed"; reason: string }>((resolve) => {
       timer = setTimeout(() => {
@@ -100,7 +105,7 @@ const oneCandidate = async (
         kind: "candidate-finished",
         id,
         turns: outcome.turns,
-        durationMs: Date.now() - startedAt,
+        durationMs: now() - startedAt,
       })
     } else {
       safeTrace(req.onTrace, { kind: "candidate-failed", id, reason: outcome.reason })

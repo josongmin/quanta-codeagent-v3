@@ -32,7 +32,7 @@ export interface PostDenialClock {
   now(): number
 }
 
-const defaultClock: PostDenialClock = { now: () => Date.now() }
+const defaultClock: PostDenialClock = { now: Date.now }
 
 export interface PostDenialAction {
   threadId: string

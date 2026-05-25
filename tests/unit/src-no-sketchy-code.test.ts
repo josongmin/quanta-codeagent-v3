@@ -254,31 +254,12 @@ const RULES: readonly Rule[] = [
       // that currently reaches a deterministic-replay boundary (or is a default
       // factory the injection pattern delegates to). Each should migrate to
       // `(opts.now ?? Date.now)()` and drop from this allowlist.
-      "agent/admissibility-gate.ts": "BURN-DOWN: pre-existing decided-at timestamps",
-      "agent/branch-search/isolate.ts": "BURN-DOWN: worktree slug suffix (telemetry-ish, low priority)",
-      "agent/branch-search/propose.ts": "BURN-DOWN: candidate proposal timing",
-      "agent/branch-search/search.ts": "BURN-DOWN: search round timing",
-      "agent/branch-search/verify.ts": "BURN-DOWN: verifier wall-clock",
-      "agent/conversation-action.ts": "BURN-DOWN: action timestamp",
-      "agent/conversation-summary-archive.ts": "BURN-DOWN: archive entry timestamp",
-      "agent/dispatch-dedup.ts": "BURN-DOWN: dedup window default clock",
-      "agent/hitl-tier.ts": "BURN-DOWN: HITL override timestamp",
-      "agent/ide-context.ts": "BURN-DOWN: ide context default clock",
       "agent/loop.ts": "BURN-DOWN: turnId/startedAt default clock (telemetry — lowest priority)",
       "agent/memory-tools.ts":
         "BURN-DOWN: W6 injected clock+uuid; `Date.now` here is the default-factory fallback",
-      "agent/plan-exit-flow.ts": "BURN-DOWN: plan-exit timestamp",
       "agent/prompt.ts":
         "BURN-DOWN: W6 injected `todayDateLine(now)`; the literal `new Date` is the default fallback",
-      "agent/repo-rules.ts": "BURN-DOWN: rule freshness timestamp",
-      "agent/side-conversation/run.ts": "BURN-DOWN: side-conversation wall-clock",
-      "agent/steering.ts": "BURN-DOWN: steering timestamp default",
-      "agent/streaming-dispatch.ts": "BURN-DOWN: in-progress indicator timestamp fallback",
-      "agent/subagent-runner.ts": "BURN-DOWN: child run timestamp",
       "agent/submission.ts": "BURN-DOWN: W6 injected; default-fallback path uses Date.now",
-      "agent/turn-kind.ts": "BURN-DOWN: turn-kind timestamp default",
-      "permission/gate-pattern-wire.ts": "BURN-DOWN: pattern gate decidedAt default",
-      "permission/post-denial.ts": "BURN-DOWN: post-denial timestamp default",
       "agent/budget-ledger.ts":
         "BURN-DOWN: human-readable Date formatting in error message — not model-facing replay",
       "agent/hooks.ts":
