@@ -1263,6 +1263,18 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly now?: () => number
   }
   /**
+   * ADR-0272 — composition-root `SearchPipeline` slot (helper-only). When
+   * set, downstream consumers (the `search_codebase` tool today, future
+   * retrieval-aware compaction / auto-recall slots) may delegate workspace
+   * search to the wired pipeline. Caller-side composition only — the loop
+   * NEVER reads this slot directly. Absent ⇒ slot OMITTED under
+   * `exactOptionalPropertyTypes`, byte-identical legacy (RFC §1.2). The
+   * concrete builder lives at `src/apps/agent/pipeline-wire.ts`; the
+   * `SearchPipeline` port itself is owned by `@/retrieval/pipeline` (leaf
+   * primitive slice).
+   */
+  searchPipeline?: import("@/retrieval/pipeline").SearchPipeline
+  /**
    * ADR-0234 — git-directive emit wire (turn-scoped collector pattern).
    * Closes the gap between ADR-0221 (phase-guarded emitter) and the
    * mutating git tools (`git_commit`, `git_branch_switch`, future

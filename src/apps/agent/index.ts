@@ -64,6 +64,7 @@ import {
   parseAgentArgs,
   type ToolProfileToken,
 } from "./cli-args"
+import { assemblePipeline } from "./pipeline-wire"
 import type { RunOutcome } from "./run"
 
 /** ADR-0198 identity slot — resolve the per-mode identity from the
@@ -280,6 +281,12 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     },
   }
   const retrievalStack = buildRetrievalStackFromEnv(env)
+  // ADR-0272 — pipeline composition-root wire. Default-OFF: when
+  // QUANTA_PIPELINE is absent / `none` / unknown, returns `null` and the
+  // slot is OMITTED below (spread-conditional under
+  // exactOptionalPropertyTypes). Adapter-build failure collapses to `null`
+  // + a `logger.warn` line (no startup crash on optional knob misconfig).
+  const searchPipeline = assemblePipeline(env)
   // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
   // via the mode-variant registry; else fall back to the ADR-0198
   // `QUANTA_IDENTITY=1` env (precedence #2); else empty-string sentinel
@@ -318,6 +325,9 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
     // `undefined` literal on the config) and the loop is byte-identical.
     ...(retrievalStack !== undefined ? { retrievalStack } : {}),
+    // ADR-0272 — composition-root pipeline wire (default-OFF; spread
+    // conditionally to preserve `exactOptionalPropertyTypes`).
+    ...(searchPipeline !== null ? { searchPipeline } : {}),
     // ADR-0236 — composition-root mega-wire slots (default-OFF; spread
     // conditionally to preserve `exactOptionalPropertyTypes`).
     ...(identityModeVariant !== undefined ? { identityModeVariant } : {}),
