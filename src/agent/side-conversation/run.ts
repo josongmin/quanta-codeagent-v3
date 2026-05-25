@@ -69,6 +69,10 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "read",
   "grep",
   "glob",
+  // ADR-0296 — `bash_await` is pure polling over the in-memory background-
+  // shell registry (no FS / network / shell side effect); safe inside a
+  // side conversation.
+  "bash_await",
   "memory_search",
   "task_output",
   "localize",

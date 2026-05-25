@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
+import { type BashBgRegistry, getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { classifyCommandShape } from "@/security"
 import type {
   HITLTier,
@@ -34,6 +35,21 @@ const schema = z.object({
     .optional()
     .describe(
       "read = per-call read-only OS sandbox wrap (Seatbelt/Landlock enforces no writes). Parallel-safe-ready (concurrency still serialized for now). write = current behavior (default).",
+    ),
+  /** ADR-0296 (Cursor `TimeoutBehavior.BACKGROUND` absorption). `"kill"`
+   *  (default — absent ⇒ "kill") preserves the legacy behavior: SIGTERM on
+   *  the deadline + typed `timeout` ToolFailure. `"background"` DETACHES the
+   *  process when the deadline elapses, returning `{ shellId, status:
+   *  "running", outputSoFar }` so the model can resume control of it later
+   *  via `bash_await` / `bash_kill`. Optional (not `.default()`) so the
+   *  schema's input and output types match — keeps the existing zod-cast
+   *  pattern that other tools rely on (see `Tool<Input>` shape contract). */
+  timeout_behavior: z
+    .enum(["kill", "background"])
+    .optional()
+    .describe(
+      "kill (default; absent ⇒ kill) = SIGTERM on deadline (current). " +
+        "background = on deadline, detach and return { shellId } — use bash_await later.",
     ),
 })
 
@@ -258,6 +274,102 @@ const bashHitlTier = (input: Input): HITLTier => {
   return "pre-approval-ok"
 }
 
+/** Default deadline mirror of {@link DEFAULT_TIMEOUT_MS} in `runtime/shell.ts`.
+ *  Re-declared here (single literal, no import) so the background branch can
+ *  decide the deadline WITHOUT calling `runShell` — `runShell` would kill on
+ *  the deadline, which is exactly what `timeout_behavior:"background"`
+ *  prevents. Keep this in sync with the runtime default. */
+const DEFAULT_BG_TIMEOUT_MS = 120_000
+
+/** Tail-truncate a buffer to ≤MAX_OUTPUT (extracted to reduce execute's
+ *  cognitive complexity below the biome cap). */
+const tailMaxOutput = (s: string): string => (s.length > MAX_OUTPUT ? s.slice(-MAX_OUTPUT) : s)
+
+/** Build the bg-placeholder result when the deadline elapsed and the process
+ *  is still running. Pure function — yielded by the bg generator. */
+const buildBackgroundPlaceholderResult = (
+  snap: { id: string; stdout: string; stderr: string },
+  timeoutMs: number,
+): ToolEvent => {
+  const outputSoFar = [tailMaxOutput(snap.stdout), tailMaxOutput(snap.stderr)]
+    .filter((s) => s.length > 0)
+    .join("\n")
+    .trimEnd()
+  return {
+    type: "result",
+    result: {
+      ok: true,
+      output:
+        `[bash background] shellId=${snap.id} status=running\n` +
+        `(deadline ${timeoutMs}ms elapsed — process detached; use bash_await or bash_kill)\n` +
+        `--- output so far ---\n${outputSoFar || "(no output yet)"}`,
+      evidence: {
+        ...(snap.stderr ? { stderr: snap.stderr.slice(-STDERR_CAP) } : {}),
+      },
+    },
+  }
+}
+
+/** Build the final result when the bg shell completed before the deadline.
+ *  Shape parallels the legacy "kill"-mode terminal result. Pure function. */
+const buildBackgroundCompletedResult = (snap: {
+  status: string
+  stdout: string
+  stderr: string
+  exitCode: number | null
+}): ToolEvent => {
+  let body = [snap.stdout, snap.stderr].filter(Boolean).join("\n").trimEnd()
+  if (body.length > MAX_OUTPUT) {
+    body = `${body.slice(0, MAX_OUTPUT)}\n… (truncated, ${body.length - MAX_OUTPUT} more chars)`
+  }
+  const exit = snap.exitCode ?? -1
+  const isKilled = snap.status === "killed" || snap.status === "aborted"
+  const status = isKilled ? "killed" : `exit ${exit}`
+  const evidence: ToolResultEvidence = {
+    ...(snap.stderr ? { stderr: snap.stderr.slice(-STDERR_CAP) } : {}),
+    exitCode: exit,
+  }
+  return {
+    type: "result",
+    result: {
+      ok: snap.status === "completed" && exit === 0,
+      output: `[${status}]\n${body || "(no output)"}`,
+      evidence,
+    },
+  }
+}
+
+const buildBackgroundResult = (
+  registry: BashBgRegistry,
+  cmd: string,
+  shown: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  cwd: string,
+): AsyncIterable<ToolEvent> => {
+  const gen = async function* (): AsyncGenerator<ToolEvent> {
+    yield { type: "progress", message: `running (bg-capable): ${shown}` }
+    const handle = await registry.register({ command: cmd, cwd, signal })
+    const outcome = await registry.awaitHandle(handle.id, { timeoutMs, signal })
+    if (outcome === null) {
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: `[bash background] handle ${handle.id} unexpectedly evicted before await completed`,
+          failure: { mode: "error", modelVisibleError: "handle evicted" },
+        },
+      }
+      return
+    }
+    const snap = outcome.snapshot
+    yield snap.status === "running"
+      ? buildBackgroundPlaceholderResult(snap, timeoutMs)
+      : buildBackgroundCompletedResult(snap)
+  }
+  return gen()
+}
+
 export const bashTool: Tool<Input> = {
   name: "bash",
   description:
@@ -287,6 +399,21 @@ export const bashTool: Tool<Input> = {
     // the rest of execute can switch on a CLOSED 2-arm enum.
     const mode: "read" | "write" = input.mode ?? "write"
     const shown = cmd.length > CMD_PREVIEW ? `${cmd.slice(0, CMD_PREVIEW)}…` : cmd
+    // ADR-0296 — when the caller opts into `timeout_behavior: "background"`,
+    // delegate to the bg-registry path. The default `"kill"` falls through to
+    // the legacy `runShell` branch BYTE-IDENTICALLY (no allocation, no
+    // registry interaction, no extra events).
+    if (input.timeout_behavior === "background") {
+      yield* buildBackgroundResult(
+        getBashBgRegistry(),
+        cmd,
+        shown,
+        input.timeout_ms ?? DEFAULT_BG_TIMEOUT_MS,
+        ctx.signal,
+        ctx.cwd,
+      )
+      return
+    }
     yield { type: "progress", message: `running: ${shown}` }
 
     // ADR-0295 — mode="read" per-call sandbox short-circuit. The acquire helper

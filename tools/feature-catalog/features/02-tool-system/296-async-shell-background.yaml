@@ -1,0 +1,52 @@
+id: async-shell-background
+title: bash — timeout_behavior=background + bash_await + bash_kill (ADR-0296)
+section: 2
+subsystem: Async shell — Cursor TimeoutBehavior.BACKGROUND absorption
+order: 294
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, async-tool, security-touched]
+depends_on: [bash-timeout-cap, bash-tool-hitl-tier, typed-tool-failure-modes]
+purpose: |
+  Cursor 3.2 `TimeoutBehavior.BACKGROUND` 패턴 흡수. `bash` schema에
+  `timeout_behavior: z.enum(["kill","background"]).optional()` 추가
+  (absent ⇒ `"kill"` 레거시 path BYTE-IDENTICAL). `"background"` 모드일
+  때 deadline 도달 시 process를 detach하고 `{shellId, status:"running",
+  outputSoFar}` placeholder를 반환 — model이 추후 `bash_await` (regex/exit
+  대기) / `bash_kill` (SIGTERM→SIGKILL + 최종 snapshot)로 제어. 백그라운드
+  레지스트리는 `src/runtime/bash-bg-registry.ts`의 LRU-cap=16, insertion-
+  ordered Map, `crypto.randomUUID()` id (no nanoid dep). `BashProcessHandlePort`
+  closed-port DI seam이라 테스트는 deterministic chunks를 가진 fake child를
+  주입. `runtime/shell.ts` (다른 트랙 owner)는 mutate 없음 — bg path가 자체
+  `Bun.spawn`을 sandboxed argv + scrubEnv로 사용해 foreground와 같은 posture.
+evidence:
+  code:
+    - src/tool/bash/index.ts
+    - src/tool/bash/await.ts
+    - src/tool/bash/kill.ts
+    - src/runtime/bash-bg-registry.ts
+    - src/tool/index.ts
+    - src/agent/mode.ts
+    - src/agent/side-conversation/run.ts
+  adrs: [294]
+  tests:
+    unit:
+      - tests/unit/bash-async-hellgate.test.ts
+      - tests/unit/bash.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `bash_await`는 read-only + isConcurrencySafe=true (순수 폴링); `bash_kill`은
+  isConcurrencySafe=false (OS signal). MUTATING_TOOL_TABLE: bash_await=null,
+  bash_kill="bash_mutating" (plan-mode cross-check 통과). SIDE_CONVERSATION_TOOL_NAMES
+  에 bash_await 등록 (registry는 pure in-memory). 50ms 폴링 cadence는
+  node-repl/default-kernel에서 검증된 값을 재사용 (heuristic 아님). 29 hellgate
+  case가 fast-path/슬로우-path/regex mid-stream/timeout/registry overflow/
+  killAll cleanup/concurrent-await/abort-during-await/status-monotonic 등을 봉인.

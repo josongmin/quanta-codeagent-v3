@@ -3,6 +3,8 @@ import type { FileSystemPort } from "@/storage"
 import { applyPatchTool } from "./apply-patch"
 import { automationUpdateTool } from "./automation_update"
 import { bashTool } from "./bash"
+import { bashAwaitTool } from "./bash/await"
+import { bashKillTool } from "./bash/kill"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
 // fence (the 5 tools were barrel-exported but not in `buildDefaultTools` —
@@ -24,6 +26,19 @@ import { webFetchTool } from "./web"
 import { makeWriteTool, writeTool } from "./write"
 
 export { applyPatchTool, FsJailViolationError } from "./apply-patch"
+// ADR-0296 — async-shell sibling tools to `bash` (timeout_behavior=background).
+export {
+  type BashAwaitInput,
+  bashAwaitInputSchema,
+  bashAwaitTool,
+  makeBashAwaitTool,
+} from "./bash/await"
+export {
+  type BashKillInput,
+  bashKillInputSchema,
+  bashKillTool,
+  makeBashKillTool,
+} from "./bash/kill"
 export { DeferredResultRegistry, UnknownDeferredHandleError } from "./deferred"
 export {
   type DiagnosticItem,
@@ -323,6 +338,13 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
   // `apply-patch.ts` exports — that file is owned elsewhere and untouched.
   applyPatchTool as Tool,
   bashTool as Tool,
+  // ADR-0296 — async-shell siblings to `bash`. `bash_await` is read-only +
+  // concurrency-safe (pure polling); `bash_kill` is mutating (signals a
+  // background process). Both consult the module-level bg registry; sessions
+  // that never opt into `timeout_behavior:"background"` never populate the
+  // registry, so registering these by default costs nothing.
+  bashAwaitTool as Tool,
+  bashKillTool as Tool,
   grepTool as Tool,
   globTool as Tool,
   localizeTool as Tool,

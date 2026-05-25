@@ -206,6 +206,12 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // edit/write/scripted_replace; blocks in plan mode (plan PROPOSES, not commits).
   apply_patch: "write_filesystem",
   bash: "bash_mutating",
+  // ADR-0296 async-shell siblings to `bash`. `bash_await` is pure polling over
+  // an in-memory registry — read-only (safe in plan mode). `bash_kill` signals
+  // a process (SIGTERM → SIGKILL), classified as `bash_mutating` because the
+  // kill itself is irreversible like a destructive shell call.
+  bash_await: null,
+  bash_kill: "bash_mutating",
   update_working_state: "working_state_write",
   // ADR-0097 — `request_user_input` 는 port-gated 조건부 등록 (features.ts:
   // `userInputPort` 가 wired 될 때만 registry 에 inject). 그러나 표 엔트리는
