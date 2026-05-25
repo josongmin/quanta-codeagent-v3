@@ -939,6 +939,24 @@
       }
     },
     {
+      "includes": ["**/src/agent/thread-tools/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0206): thread-tools is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0206): thread-tools cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/agent/plan-queue.ts"],
       "linter": {
         "rules": {
@@ -1060,6 +1078,7 @@
         "!src/agent/conversation-checkpoint.ts",
         "!src/agent/conversation-checkpoint-lru.ts",
         "!src/agent/fork-session/**",
+        "!src/agent/thread-tools/**",
         "!src/agent/subagent-background.ts",
         "!src/agent/verify-checkpoint-bridge.ts",
         "!src/agent/checkpoint-policy.ts",
