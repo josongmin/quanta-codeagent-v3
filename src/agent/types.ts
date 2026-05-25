@@ -35,6 +35,7 @@ import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
 import type { ConversationCheckpointStore } from "./conversation-checkpoint"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
+import type { DispatchGuard } from "./dispatch-guard"
 import type { FollowUpQueue, PausedReason } from "./follow-up-queue"
 import type { SessionForker } from "./fork-session"
 import type { GlobRule } from "./glob-rules"
@@ -412,6 +413,20 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  {@link DEFAULT_DEDUP_GATE_CAPS}. Set `disabled:true` to opt out entirely
    *  (gate not constructed, no consult cost). */
   dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }
+  /**
+   * ADR-0229 — pre-flight dispatch guard composing three already-shipped pure
+   * detectors (`gitWriteProtectReason` / `decideBranchOnly` / `isHostAllowed`)
+   * behind one closed `DispatchGuard` port. Consulted by the dispatch seam
+   * BEFORE the admissibility gate; a `deny` short-circuits with preview tag
+   * `"guard-deny"` (hardDeny:true ⇒ terminal, no retry) and an `ask`
+   * collapses to `"guard-ask"` (HITL re-routing is a deferred follow-up).
+   *
+   * Absent ⇒ dispatch is BYTE-IDENTICAL to the pre-ADR path (single optional-
+   * chain `undefined` check, zero allocation). The default impl
+   * (`defaultDispatchGuard`) takes its options at construction; pass the
+   * already-built instance here.
+   */
+  dispatchGuard?: DispatchGuard
   /**
    * Permission stack opt-in (ADR-0046 — per-thread + per-host + post-denial
    * precedence). Absent / `enabled:false` ⇒ admissibility-gate skips the
@@ -946,6 +961,49 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * slot directly today.
    */
   stage1OutputsStore?: import("../memory/stage1-store").Stage1OutputsStore
+  /**
+   * ADR-0232 — per-turn shell-snapshot wire (caller-side composition).
+   * Sibling to ADR-0204 (the snapshot primitive). When set, the loop
+   * captures a snapshot at turn-start (`captureAtTurnStart`, default `true`)
+   * and threads the resulting handle into `ToolContext.shellSnapshot` so
+   * shell-class tools (`bash` today) forward it to `runShell` — which
+   * augments the spawned argv to `source <path>; <user-cmd>`. The same
+   * `snapshotPath` is reused for every `runShell` call within that turn.
+   *
+   * Default-OFF: absent ⇒ no capture, `ctx.shellSnapshot` omitted, every
+   * `runShell` call byte-identical to the pre-ADR path (RFC §1.2). When
+   * present but `port.capture` fails (shell-missing / capture-timeout /
+   * write-failed / empty-capture / invalid-id), the loop continues WITHOUT
+   * a snapshot for that turn and emits a single `error` AgentEvent — the
+   * loop is no-throw at this boundary.
+   *
+   * Knobs:
+   *  - `port`: REQUIRED. The {@link ShellSnapshotPort} (build via
+   *    `createShellSnapshotPort(spawner)` at the composition root). Tests
+   *    inject the headless stub.
+   *  - `shell` (default `"auto"`): which adapter to use. `"auto"` reads
+   *    `$SHELL` and picks `"zsh"` when the basename is `zsh`, else `"bash"`
+   *    (every other supported shell falls through to bash since the bash
+   *    adapter handles the broadest POSIX surface). Explicit `"zsh"` /
+   *    `"bash"` force the adapter.
+   *  - `captureAtTurnStart` (default `true`): when `true`, capture runs at
+   *    the TOP of every turn (after `steerBarrier`, before `runTurn`). When
+   *    `false`, capture runs ONCE at session start and the same handle is
+   *    reused for every turn (operator decision — explicit opt-in to less
+   *    work + stale-env risk).
+   *  - `cleanupOlderThanMs` (default `864e5 * 10` = 10 days): how often to
+   *    prune old snapshot files. Pruned ONCE at session start
+   *    (best-effort; failures emit a single `error` AgentEvent).
+   *  - `maxSizeBytes` (default `100 * 1024 * 1024` = 100MB): SOFT cap for
+   *    the snapshot directory; consulted at session-start prune.
+   */
+  shellSnapshot?: {
+    readonly port: import("@/runtime/shell-snapshot").ShellSnapshotPort
+    readonly shell?: "auto" | "zsh" | "bash"
+    readonly captureAtTurnStart?: boolean
+    readonly cleanupOlderThanMs?: number
+    readonly maxSizeBytes?: number
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,149 @@
+/**
+ * Default {@link DispatchGuard} (ADR-0229). Single pure composer that wraps
+ * the three already-shipped detectors:
+ *
+ *   - `gitWriteProtectReason(path)`             (`@/permission`)
+ *   - `decideBranchOnly(cmd, protected, head)`   (`@/permission`)
+ *   - `isHostAllowed(urlOrHost, allowlist)`      (`@/runtime`)
+ *
+ * Composition rule (HELL-DG-06): MOST-CONSERVATIVE wins. The contributions
+ * are collected, then the winner is `deny > ask > allow`. `hardDeny` rides
+ * along on the winning deny and is `true` whenever a deny was produced by
+ * `gitWriteProtectReason` or `isHostAllowed` (both are security boundaries
+ * a retry cannot satisfy). `decideBranchOnly` deny is `hardDeny:false`
+ * because a branch switch is a recoverable user action.
+ *
+ * Input extraction is intentionally narrow (v1): the composer only looks at
+ * obvious string fields on the input object. Anything else degrades to "no
+ * contribution" — the dispatch path has additional gates downstream.
+ *
+ * Plane-clean: imports only `@/permission` + `@/runtime` (peer slices already
+ * imported elsewhere in `@/agent`) + sibling files.
+ */
+
+import { decideBranchOnly, gitWriteProtectReason } from "@/permission"
+import { isHostAllowed } from "@/runtime/network-allowlist"
+import type { DispatchGuard } from "./port"
+import type { GuardDecision } from "./types"
+
+export interface DefaultDispatchGuardOptions {
+  /** Branches `decideBranchOnly` treats as protected. Absent ⇒ the detector
+   *  uses its `DEFAULT_PROTECTED_BRANCHES` (main / master / develop / production).
+   */
+  readonly protectedBranches?: readonly string[]
+  /** Current branch HEAD points to. Used by `decideBranchOnly` to classify
+   *  `git commit` / `git push` (no refspec) etc. Absent ⇒ those checks degrade
+   *  to "no contribution" (the detector is partial without a current branch). */
+  readonly currentBranch?: string
+  /** Allowlist of hosts the tool is permitted to talk to. Absent ⇒ the host
+   *  check is SKIPPED entirely (no deny on missing-allowlist). This keeps the
+   *  default-on path safe: a host filter only fires when the operator wired
+   *  one. An EMPTY array (`[]`) means "deny everything", per the detector. */
+  readonly networkAllowlist?: readonly string[]
+}
+
+/** Pull a string field from an unknown record, narrow-typed. Returns null when
+ *  the key is absent or the value is not a non-empty string. */
+const stringField = (input: unknown, key: string): string | null => {
+  if (typeof input !== "object" || input === null) return null
+  const rec = input as Record<string, unknown>
+  const v = rec[key]
+  return typeof v === "string" && v.length > 0 ? v : null
+}
+
+/** Extract a file-path candidate from the input. Covers the common shapes used
+ *  by write/edit/patch-like tools. */
+const extractPath = (input: unknown): string | null =>
+  stringField(input, "path") ??
+  stringField(input, "file_path") ??
+  stringField(input, "target") ??
+  stringField(input, "file")
+
+/** Extract a shell-command candidate. Covers `bash` (`command`) and `shell`
+ *  (`cmd`) shapes; nothing else (a tool that ships a custom field is opted out
+ *  — the legacy `extractShellCommand` registry method is the place to extend
+ *  that vocabulary, not this composer). */
+const extractShellCommand = (input: unknown): string | null =>
+  stringField(input, "command") ?? stringField(input, "cmd")
+
+/** Extract a host/URL candidate. Covers `web_fetch`/`web_search` family
+ *  (`url`), an explicit `host` field, and the patch-tool `target_url`. */
+const extractUrlOrHost = (input: unknown): string | null =>
+  stringField(input, "url") ?? stringField(input, "host") ?? stringField(input, "target_url")
+
+const checkGitWrite = (input: unknown): GuardDecision | null => {
+  const path = extractPath(input)
+  if (path === null) return null
+  const reason = gitWriteProtectReason(path)
+  if (reason === null) return null
+  return {
+    kind: "deny",
+    reason: `git-write protection: ${reason} on '${path}'`,
+    // hardDeny: a retry cannot satisfy a path-pattern security boundary.
+    hardDeny: true,
+  }
+}
+
+const checkBranchOnly = (
+  input: unknown,
+  opts: DefaultDispatchGuardOptions,
+): GuardDecision | null => {
+  const command = extractShellCommand(input)
+  if (command === null) return null
+  // `decideBranchOnly` is total: it returns `{allowed:true}` for non-git
+  // commands. The three optional knobs are forwarded verbatim — undefined
+  // currentBranch degrades exactly as the detector documents.
+  const verdict = decideBranchOnly(command, opts.protectedBranches, opts.currentBranch)
+  if (verdict.allowed) return null
+  return {
+    kind: "deny",
+    reason: verdict.reason,
+    // hardDeny: false — branch posture is operator-recoverable (switch branches).
+    hardDeny: false,
+  }
+}
+
+const checkHostAllowlist = (
+  input: unknown,
+  opts: DefaultDispatchGuardOptions,
+): GuardDecision | null => {
+  if (opts.networkAllowlist === undefined) return null
+  const urlOrHost = extractUrlOrHost(input)
+  if (urlOrHost === null) return null
+  if (isHostAllowed(urlOrHost, opts.networkAllowlist)) return null
+  return {
+    kind: "deny",
+    reason: `host '${urlOrHost}' not in network allowlist (size=${opts.networkAllowlist.length}).`,
+    // hardDeny: an off-allowlist host crosses an egress boundary.
+    hardDeny: true,
+  }
+}
+
+/** Compose the three contributions with the documented precedence
+ *  (deny > ask > allow; hardDeny rides on the winning deny). The today
+ *  detectors never emit `ask`, so the `ask` branch is dead in v1 — kept in the
+ *  composer so a future detector that returns `ask` is wired-in without
+ *  touching the wire site (HELL-DG-06 still asserts the precedence). */
+const composeContributions = (
+  contributions: ReadonlyArray<GuardDecision | null>,
+): GuardDecision => {
+  let askDecision: GuardDecision | null = null
+  for (const c of contributions) {
+    if (c === null) continue
+    if (c.kind === "deny") return c
+    if (c.kind === "ask" && askDecision === null) askDecision = c
+  }
+  return askDecision ?? { kind: "allow" }
+}
+
+/** Construct a default dispatch guard. The returned `check` is pure (no
+ *  closure over mutable state — the opts are read verbatim each call). */
+export const defaultDispatchGuard = (opts: DefaultDispatchGuardOptions = {}): DispatchGuard => ({
+  check(_tool, input): GuardDecision {
+    return composeContributions([
+      checkGitWrite(input),
+      checkBranchOnly(input, opts),
+      checkHostAllowlist(input, opts),
+    ])
+  },
+})

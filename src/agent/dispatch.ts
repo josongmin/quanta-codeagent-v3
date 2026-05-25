@@ -113,6 +113,38 @@ const consultLocalizePhase = (call: ToolUseBlock, config: AgentConfig): Dispatch
   return deny(call.id, reason, "localize-phase-blocked")
 }
 
+/** ADR-0229 — dispatch-guard pre-flight consult. Returns a deny-style
+ *  {@link DispatchResult} when the guard refuses the call (preview tag
+ *  `"guard-deny"` for deny outcomes, `"guard-ask"` when the guard requests
+ *  HITL — collapsed to a deny in v1 because the HITL re-routing wire is a
+ *  deferred follow-up), or `null` when the guard admits (or no guard is
+ *  wired). Sibling to `consultDedupGate` / `consultLocalizePhase` — keeps
+ *  the dispatch pre-flight cluster small and uniform.
+ *
+ *  Default-OFF preserved: `config.dispatchGuard` absent ⇒ one optional-chain
+ *  property check, zero allocation. Byte-identical to the pre-ADR-0229 path. */
+const consultDispatchGuard = (call: ToolUseBlock, config: AgentConfig): DispatchResult | null => {
+  const guard = config.dispatchGuard
+  if (!guard) return null
+  const decision = guard.check(call.name, call.input)
+  if (decision.kind === "allow") return null
+  if (decision.kind === "ask") {
+    // Collapse `ask` to a deny in v1 (the wire to HITL queue is a deferred
+    // follow-up). The `"guard-ask"` preview tag is the recognition surface a
+    // future re-router keys on without changing this seam.
+    return deny(call.id, `Dispatch guard requested confirmation: ${decision.reason}`, "guard-ask")
+  }
+  // `kind === "deny"`. `hardDeny:true` carries the security-boundary
+  // signal forward via the deny content prefix — downstream loop classifiers
+  // (and the existing `handoff` preview-tag consumers) keep working unchanged
+  // because we use a NEW tag (`"guard-deny"`) that opts in to the new behavior
+  // without colliding with the existing 16+ preview-tag vocabulary.
+  const prefix = decision.hardDeny
+    ? "Action blocked by dispatch guard (hard): "
+    : "Action blocked by dispatch guard: "
+  return deny(call.id, `${prefix}${decision.reason}`, "guard-deny")
+}
+
 /**
  * Run one tool call end to end: gates → execute → normalize errors.
  * Tool/permission/plan/hook failures become error tool_results (the model
@@ -127,6 +159,10 @@ const consultLocalizePhase = (call: ToolUseBlock, config: AgentConfig): Dispatch
  *                                   (ADR-0036; outer gate, runs in dispatch.ts)
  *   2. dedup gate ................. T3 anti-thrash short-circuit (default-OFF)
  *   3. localize-phase gate ........ Agentless Phase-1 mutating block (default-OFF)
+ *   3a. dispatch-guard ............ ADR-0229 composer of git-write-protect /
+ *                                   branch-only / host-allowlist detectors
+ *                                   (default-OFF when `config.dispatchGuard`
+ *                                   is absent)
  *   4. mode-posture block ......... plan/review/audit mode (admissibility-gate §1)
  *   5. earlyHardDeny .............. HARD_DENY pulled ahead when ANY allow-capable
  *                                   bypass is wired (rules/reviewer/patternStore)
@@ -341,6 +377,15 @@ const dispatchToolInner = async (
   // check + early return → byte-identical dispatch).
   const localizeShort = consultLocalizePhase(call, config)
   if (localizeShort) return localizeShort
+
+  // ADR-0229 — pre-flight dispatch guard. Composes git-write-protect /
+  // branch-only / host-allowlist detectors behind one closed port. Default-OFF
+  // (single optional-chain `undefined` check when `config.dispatchGuard`
+  // absent → byte-identical to the pre-ADR path). Placed alongside the other
+  // pre-flights so an early static rejection never burns permission/HITL/hook
+  // work.
+  const guardShort = consultDispatchGuard(call, config)
+  if (guardShort) return guardShort
 
   // S16: populate `shellCommand` from the registry so the permission policy
   // applies HARD_DENY uniformly to ANY tool that exposes a shell-command
