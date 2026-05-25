@@ -1,0 +1,80 @@
+id: inspect-cmd-toolcall-expand
+title: `/inspect <toolCallId>` — 세션 JSONL projection + 확장 패널 (input/decision/result/recovery) (ADR-0239 Track I)
+section: 10
+subsystem: REPL slash — 사후 tool-call 단위 확장 viewer
+order: 2391
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:observability"]
+depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, decision-emit-phase3-cap-jail-budget, 02-jsonlrecorder]
+config_refs:
+  env: []
+purpose: |
+  Phase 1 debug-tracer는 *live stream*만 stderr로 흘리고 ring buffer 같은
+  것이 없어서 `/debug` 켜기 전에 fire한 event는 retroactive 못 봄 (Codex /
+  Cursor와 같은 posture). 그런데 사용자가 진짜 자주 묻는 질문은 "방금 그
+  도구 호출 hits에서 정확히 뭐가 어떻게 됐어?" — 이건 post-hoc query.
+  session JSONL envelope (ADR-0034)에 이미 `event_msg{kind:"decision"}` +
+  `event_msg{kind:"tool_invoke"|"tool_result"}` + `event_msg{kind:"custom"}`
+  로 다 persist되고 있으므로 그 위에 projection layer + multi-section panel
+  renderer만 얹으면 됨.
+
+  `/inspect <toolCallId>` ship: (1) JSONL projection layer (`src/session/inspect-source.ts`)
+  는 pure data shaper — 디코드된 `SessionEnvelopeRecord` 스트림을 받아
+  하나의 toolCallId에 속하는 모든 envelope를 `InspectGroup`으로 grouping
+  (같은 id가 fork branch에서 다시 나타나면 두 group). 매칭은 3-way:
+  `decision.tool_call_id` (first-class field) / `custom.data.id|toolCallId`
+  (best-effort introspection) / co-turn 짝짓기. (2) `/inspect` renderer
+  (`src/apps/cli/inspect-cmd.ts`)는 group 위에 input / decision rows /
+  result / recovery 4-section panel을 redaction 통과시켜 paint.
+
+  Determinism: 레코드는 디스크 원래 순서 유지 (envelope `ts`는 emitter당
+  monotonic이지만 re-sort 안 함 — `iterateSessionFile`이 file order로 yield
+  하는 게 이미 deterministic ordering). Forked occurrence는 arrival order로
+  분리 group return.
+
+  Pure projection: projection layer는 **IO 없음 + sanitisation 없음** —
+  redaction은 inspect renderer가 shared `redactValue`로 위에 얹음 (다른
+  surface가 projection 재사용 가능).
+
+  Default-OFF: SlashContext에 inspect ctx 미공급 surface (one-shot / shell)
+  는 "/inspect: not wired in this surface" + exit 0 (parity with `/history`,
+  `/why`).
+evidence:
+  code:
+    - src/apps/cli/inspect-cmd.ts
+    - src/session/inspect-source.ts
+    - src/apps/cli/slash-commands.ts
+    - src/apps/cli/repl.ts
+  adrs: [239]
+  tests:
+    unit:
+      - tests/unit/cli/inspect-cmd-hellgate.test.ts
+      - tests/unit/cli/wire-tir-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `via` 라벨 closed enum: `decision_tool_call_id` (decision envelope의
+  first-class field 매치) / `custom_data_id` (custom event의 open `data`
+  record에서 id/toolCallId field 발견) / `co_turn` (같은 turn 내 tool_invoke
+  + tool_result 짝짓기). 이 추론 chain은 디버깅하기 좋게 render에서 노출.
+
+  Envelope schema 절대 안 바꿈 (ADR-0034 Track A가 lock — `SESSION_ENVELOPE_VERSION`).
+  match 추론은 best-effort introspection이라 upstream emitter shape의 drift
+  를 schema 변경 없이 흡수.
+
+  Slice fence: projection (`@/session/inspect-source`)는 IO/sanitisation
+  zero. renderer (`@/apps/cli/inspect-cmd`)가 envelope iterator + redaction
+  port + 화면 paint 담당. `@/agent` reach 없음. Compose layer (REPL surface)
+  가 SlashContext.inspect를 wire.
+
+  Phase 1 negative invariant ("No `/inspect <toolCallId>` slash command")를
+  의도적으로 Track I로 따로 분리해서 후속 ship — Phase 1 slice는
+  contract+consumer만, 사후 query는 별도 surface.

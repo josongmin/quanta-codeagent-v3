@@ -1,0 +1,92 @@
+id: otlp-http-exporter
+title: OTLP/HTTP exporter — `QUANTA_OTEL_ENDPOINT` realtime ship (외부 SDK zero) (ADR-0268)
+section: 8
+subsystem: observability — realtime OTLP/JSON span+metric ship (hand-rolled wire)
+order: 268
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [interactive, headless, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:observability", "tier:adapter", "absorbed:opentelemetry"]
+depends_on: [74-otel-span-tree, 113-otel-sink, metrics-typed-port-slice]
+config_refs:
+  env:
+    - QUANTA_OTEL_ENDPOINT
+    - QUANTA_OTEL_SERVICE_NAME
+    - QUANTA_OTEL_BATCH_SIZE
+    - QUANTA_OTEL_FLUSH_MS
+purpose: |
+  in-tree OTel scaffold (`metrics/otel-sink.ts`, `tracing/otel-tracer.ts`,
+  `tracing/w3c-propagator.ts`)는 in-process surface (counter / histogram /
+  span / W3C propagation)는 다 깔았지만 **모든 sample이 in-memory에 머묾**
+  — real collector로 가는 wiring 없었음. `otlp-helper.ts` / prometheus
+  factory들은 upstream OTel SDK (`@opentelemetry/sdk-metrics` + exporter
+  packages)가 call site에 설치돼 있다고 가정하지만 이 tree에는 안 깔려
+  있음. env-memo로 install이 막혔으므로 "realtime export 토글"이 (a)
+  default-OFF byte-identical, (b) **zero new npm install**, (c) 표준 OTLP
+  wire format이어야 함.
+
+  Hand-rolled **OTLP/JSON over HTTP** exporter를 `src/observability/otel-exporter.ts`
+  closed-port primitive로 ship. Exporter는: (1) `ExportSpan` + `ExportMetric`
+  typed record buffer, (2) `POST ${endpoint}/v1/traces` + `POST ${endpoint}/v1/metrics`
+  로 `Content-Type: application/json` flush, (3) batch-size reach OR time
+  interval trigger flush, (4) `teardown()`이 interval clear + pending drain,
+  (5) `attachOtelExporterFromEnv` composition helper가 `QUANTA_OTEL_ENDPOINT`
+  읽고 unset이면 undefined return (byte-identical Default-OFF).
+
+  Wire serializer는 OTLP/proto JSON 최소 shape 구현: `resourceSpans` /
+  `resourceMetrics` envelope, `scopeSpans[]` / `scopeMetrics[]`,
+  `traceId` / `spanId` / `parentSpanId` (16/8-byte hex),
+  `startTimeUnixNano` / `endTimeUnixNano` (spec 따라 nanos as string),
+  `attributes`는 OTLP tagged-union KeyValue list.
+
+  두 bridge fn으로 기존 MetricsRegistry / Tracer가 restructure 없이 plug:
+  `exporterMetricSink(exporter)` → MetricSink (모든 observation을 exporter
+  metric buffer로 forward), `buildExportingTracer(exporter, opts)` → Tracer
+  (W3C ID 할당 + `end()`에서 finished span을 exporter span buffer로). 메모리
+  tree 없음 — collector가 parentSpanId로 parent/child 복원.
+
+  Default endpoint 절대 없음 — exporter는 `endpoint` 명시 강제. env helper도
+  unset/blank이면 undefined return (default localhost endpoint는 observation
+  silent leak).
+evidence:
+  code:
+    - src/observability/otel-exporter.ts
+  adrs: [268]
+  tests:
+    unit:
+      - tests/unit/observability/otel-exporter-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_OTEL_ENDPOINT
+  - QUANTA_OTEL_SERVICE_NAME
+  - QUANTA_OTEL_BATCH_SIZE
+  - QUANTA_OTEL_FLUSH_MS
+deliberate_hold: null
+notes: |
+  No-throw posture: 모든 public method가 network / serialization error를
+  swallow하고 optional `warn` sink로 log. failure 시 buffer NOT drained →
+  next flush가 retry.
+
+  Plane-clean imports: `./tracing/port` (Span types) + `./tracing/noop-tracer`
+  (fallback) + `./metrics/port` (`MetricSink` type)만. Zero `@/agent` /
+  `@/tool` / `@/llm` reach.
+
+  Caller-injected `fetch` + `setInterval` + `now` — test seam (hellgate가
+  fake fetch + manual-tick scheduler + injected clock으로 구동).
+
+  17 hellgate cases: 1-span flush / batch-size flush / interval flush /
+  teardown / failure-retain-buffer / large-N batching / metric POST /
+  service.name presence / empty-buffer no-op / clock injection / W3C ID
+  shape / parent-spanId omission+presence / attribute type round-trip /
+  1KB attribute pass-through / env-unset returns undefined / env-set wires
+  triple / sink adapter forwarding.
+
+  Non-goals: OTLP/protobuf serialization (collector는 universally JSON at
+  `/v1/{traces,metrics}` accept), `@opentelemetry/*` runtime auto-install,
+  OTel Context API 재구현 (in-process tracer가 이미 함), composition root
+  auto-attach (opt-in wire는 follow-up — slice는 leaf-only 유지).

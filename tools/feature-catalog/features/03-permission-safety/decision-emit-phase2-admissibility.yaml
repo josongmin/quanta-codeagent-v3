@@ -1,0 +1,75 @@
+id: decision-emit-phase2-admissibility
+title: `decision` event emit Phase 2 — admissibility-gate (permission/rule/hook) wire (ADR-0267)
+section: 3
+subsystem: permission/rule/hook 게이트 — decision-emit Phase 2 (`runAdmissibilityGate` 내부)
+order: 267
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:permission", "tier:observability", "phase:2"]
+depends_on: [debug-tracer-decision-event, 02-harddeny-readonly-short-circuit, hitl-4-tier-gate, 03-prefix-rule-dsl]
+config_refs:
+  env: []
+purpose: |
+  ADR-0239 Phase 1은 `decision` AgentEvent variant + debug-tracer consumer만
+  깔았고 *production code는 아직 emit하지 않는 상태*였음. 이 슬라이스는
+  사이클을 닫음 — `runAdmissibilityGate` 안의 3개 게이트 결정 지점에서 실제
+  emit해서 `QUANTA_DEBUG=1 quanta`가 비로소 내용 있는 trace를 보게 함.
+
+  새 narrow port `DecisionEmitter`를 `@/stream`에 추가하고 `safeEmitDecision`
+  helper로 throw isolation. `AgentConfig.decisionEmitter?` slot이 optional —
+  composition root이 `QUANTA_DEBUG` 켤 때만 wire하고 그 외엔 zero-allocation
+  byte-identical short-circuit. 세 emit site: (a) prefix-rule DSL의
+  allow/deny/ask + no_match-policy-deny 4분기, (b) pre_tool_use hook의 deny
+  + admit 양쪽 (어떤 호출이 hook을 통과했는지도 trace), (c) mode policy +
+  permission stack의 evaluate/evaluateAuto/evaluateStack 결과 매핑.
+
+  왜 `StreamPort`로 안 라우팅하는가: stdout adapter + JSONL recorder가 모두
+  Phase 1 wiring과 함께 이미 `decision` variant를 렌더 가능. `StreamPort`로
+  바로 보내면 ADR-0239 Phase 2 contract clause 1 ("default-OFF byte-identical
+  surface invariant")이 깨짐. 좁은 별도 port는 composition root가 `QUANTA_DEBUG`
+  ON일 때만 debug-tracer 쪽으로 wire하도록 — user-facing surface는 opt-in 전엔
+  동일.
+
+  Sanitisation contract: `reason`은 짧은 one-liner (도구 input 금지, 파일
+  내용 금지). `metadata`는 `{ tool: action.tool }`만 (input spread 절대 안
+  함). `ruleId`는 `${layer}:${sourceFile}:${sourceLine}` categorical
+  (matched command 절대 미포함). `toolCallId` mirrors `call.id`.
+
+  Out-of-scope: cap / jail / budget 게이트는 `runAdmissibilityGate` call graph
+  바깥에 있어 별도 wire-up 필요 → ADR-0269 (Phase 3)가 처리.
+evidence:
+  code:
+    - src/stream/decision-emitter.ts
+    - src/stream/index.ts
+    - src/agent/admissibility-gate.ts
+    - src/agent/types.ts
+  adrs: [267]
+  tests:
+    unit:
+      - tests/unit/agent/decision-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF guarantee: `AgentConfig.decisionEmitter` 미지정 시
+  `emitGateDecision`이 event object 만들기 전에 short-circuit (zero alloc,
+  zero stream write). 16-case hellgate 51 expects — rule 4분기 / hook 3분기
+  / permission 3분기 + 6 invariants (default-OFF byte-identity, throwing
+  emitter isolation, no-double-emit, metadata-sanitise, turn=0 default,
+  turn from `config.run.turn`).
+
+  Slice fence: `decision-emitter.ts`는 `@/stream` leaf (local `AgentEvent`
+  + `StreamPort` types만 import). `admissibility-gate.ts`는 `@/stream`에
+  `safeEmitDecision`만으로 reach (adapter class 없음, I/O 없음). `AdmissibilityGateConfig`
+  는 정확히 1개 `Pick` 필드 (`decisionEmitter`)만 추가 — `dispatch.ts`
+  등 기존 caller는 structural subtyping으로 unchanged 컴파일.
+
+  Hook gate는 admit + deny 양쪽 emit (어떤 call이 통과했는지도 trace
+  목적상 중요). cap/jail/budget Phase 3은 deny-only (allow가 hot path라
+  emit-on-allow는 trace DoS).
