@@ -2,6 +2,7 @@ import { createAutoClassifierPort, RetryingLLM } from "@/agent"
 import {
   createLLM,
   DEFAULT_MODEL,
+  type FallbackMetricSink,
   FallbackLLM,
   type Provider as LLMFactoryProvider,
   type LLMPort,
@@ -78,6 +79,13 @@ export interface ComposeLlmInput {
    *  Same factory invariants — a missing key for `provider` throws when the
    *  fallback list is non-empty. */
   env: EnvLike
+  /** Optional metrics sink — wired into the `FallbackLLM` so that swap /
+   *  attempt / exhausted counters are emitted to the same registry the rest
+   *  of the agent uses. Default-OFF: when omitted the wrapper falls back to
+   *  its internal noop sink (byte-identical to the pre-instrumentation
+   *  decorator). Structural typing — a `MetricsRegistry` from
+   *  `@/observability/metrics` satisfies the shape without coupling. */
+  fallbackMetrics?: FallbackMetricSink
 }
 
 /** Compose the LLM stack: bounded retry (inner-most, supplied by caller),
@@ -98,6 +106,7 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
     finalLLM = new FallbackLLM({
       providers: [input.retryingLLM, ...fallbackStacks],
       signal: input.signal,
+      ...(input.fallbackMetrics !== undefined ? { metrics: input.fallbackMetrics } : {}),
     })
     input.slog.info("llm.fallback.on", { models: input.fallbackModelIds })
   }

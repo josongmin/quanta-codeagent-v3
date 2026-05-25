@@ -10,8 +10,8 @@ export {
   pickProvider,
   tryCreateLLM,
 } from "./factory"
-export type { FallbackLLMOptions } from "./fallback"
-export { FallbackLLM, isFallbackTrigger } from "./fallback"
+export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"
+export { FALLBACK_METRIC_NAMES, FallbackLLM, isFallbackTrigger } from "./fallback"
 export type { ModelCandidate, ModelSwapRetryOptions } from "./model-swap"
 export {
   NoAlternateModelError,

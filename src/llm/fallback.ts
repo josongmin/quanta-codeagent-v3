@@ -3,6 +3,33 @@ import type { LLMPort } from "./ports"
 import type { StreamEvent, StreamInput } from "./types"
 
 /**
+ * Structural metrics-sink shape used for fallback observability. We avoid
+ * importing `@/observability` here — that would violate the `@/llm` slice
+ * rule (biome `noRestrictedImports`). Instead a CALLER (`@/runner`) that
+ * already owns a `MetricsRegistry` passes it as-is; structural typing makes
+ * the real `MetricsRegistry.increment(name, delta?, labels?)` satisfy this
+ * shape without coupling.
+ *
+ * Default-OFF: when `metrics` is undefined the recorder is the noop sentinel
+ * (`NOOP_FALLBACK_METRICS`) and no emit happens — byte-identical to the
+ * pre-instrumentation behavior. */
+export interface FallbackMetricSink {
+  increment(name: string, delta?: number, labels?: Record<string, string>): void
+}
+
+/** Sentinel noop sink — used when no `metrics` was passed. A real sink may be
+ *  injected by `composeLLMCore` (runner) — see `src/runner/assemble/llm.ts`. */
+const NOOP_FALLBACK_METRICS: FallbackMetricSink = { increment: () => {} }
+
+/** Metric names emitted by FallbackLLM. Pin them as constants so test
+ *  assertions and dashboard queries reference a SINGLE source of truth. */
+export const FALLBACK_METRIC_NAMES = Object.freeze({
+  attempt: "llm.fallback.attempt.total",
+  triggered: "llm.fallback.triggered.total",
+  exhausted: "llm.fallback.exhausted.total",
+} as const)
+
+/**
  * `LLMPort` decorator implementing same-turn provider fallback. Wraps an
  * ordered list `[primary, ...fallbacks]`; streams from the head provider and,
  * on a *fallback-triggering* failure, advances to the next provider and retries
@@ -45,6 +72,13 @@ export interface FallbackLLMOptions {
   /** Override the fallback-trigger classifier (testing / policy tuning).
    *  Defaults to {@link isFallbackTrigger}. */
   isFallbackTrigger?: (e: unknown) => boolean
+  /** Optional metrics sink — structurally compatible with `MetricsRegistry`.
+   *  When omitted, no metric is emitted (Default-OFF). Names emitted:
+   *    - `llm.fallback.attempt.total`    labels: model, index
+   *    - `llm.fallback.triggered.total`  labels: kind, from, to, post_yield
+   *    - `llm.fallback.exhausted.total`  labels: last_kind
+   *  See {@link FALLBACK_METRIC_NAMES}. */
+  metrics?: FallbackMetricSink
 }
 
 /** Kinds that warrant switching to the next provider. STRUCTURED — no regex
@@ -100,6 +134,7 @@ export class FallbackLLM implements LLMPort {
   private readonly providers: readonly LLMPort[]
   private readonly signal: AbortSignal | undefined
   private readonly isFallbackTrigger: (e: unknown) => boolean
+  private readonly metrics: FallbackMetricSink
   /** The chain reports the PRIMARY (index 0) provider's model — the one it
    *  streams from first — so a fallback chain still emits a faithful
    *  pre-stream `llm_request`. Absent if the primary omits `model`. */
@@ -116,6 +151,29 @@ export class FallbackLLM implements LLMPort {
     if (primaryModel !== undefined) this.model = primaryModel
     this.signal = opts.signal
     this.isFallbackTrigger = opts.isFallbackTrigger ?? isFallbackTrigger
+    this.metrics = opts.metrics ?? NOOP_FALLBACK_METRICS
+  }
+
+  /** Emit a metric without ever throwing — observability cannot break the
+   *  wrapped stream. Mirror of the pattern in `instrument-tool.ts`. */
+  private emit(name: string, labels: Record<string, string>): void {
+    try {
+      this.metrics.increment(name, 1, labels)
+    } catch {
+      /* metric-sink failure must not block the stream */
+    }
+  }
+
+  /** Extract `kind` label from an LLMError-shaped throw; `unknown` otherwise.
+   *  Structural — works with the production `LLMError` and any test double
+   *  with a string `kind` property. */
+  private kindOf(e: unknown): string {
+    if (e instanceof LLMError) return e.kind
+    if (typeof e === "object" && e !== null && "kind" in e) {
+      const k = (e as { kind: unknown }).kind
+      if (typeof k === "string") return k
+    }
+    return "unknown"
   }
 
   /**
@@ -158,18 +216,47 @@ export class FallbackLLM implements LLMPort {
     // false is fully transparent.
     let priorPartial = false
 
+    let lastErrorKind = "unknown"
     for (let i = 0; i < this.providers.length; i++) {
       throwIfAborted(this.signal)
       const provider = this.providers[i]
       if (!provider) continue
       const isLast = i === this.providers.length - 1
+      // Per-attempt counter — labelled with model id (when known) + slot
+      // index. The primary is index=0; a swap is observable as an
+      // attempt with index > 0.
+      this.emit(FALLBACK_METRIC_NAMES.attempt, {
+        model: provider.model ?? "unknown",
+        index: String(i),
+      })
       // Did THIS provider yield ≥1 event?
       const yielded = { value: false }
       try {
         yield* this.streamProvider(provider, input, priorPartial, yielded)
         return
       } catch (e) {
-        if (isLast || !this.isFallbackTrigger(e)) throw e
+        if (isLast || !this.isFallbackTrigger(e)) {
+          if (isLast) {
+            // All providers exhausted (final one threw) — emit a terminal
+            // counter so dashboards can alert on "fallback chain failed
+            // entirely". `last_kind` is the kind of the FINAL provider's
+            // error (the one being rethrown), structurally extracted.
+            lastErrorKind = this.kindOf(e)
+            this.emit(FALLBACK_METRIC_NAMES.exhausted, { last_kind: lastErrorKind })
+          }
+          throw e
+        }
+        // Fallback IS being taken — emit the swap counter. `from` is the
+        // dying provider, `to` is the next slot. `post_yield` distinguishes
+        // a transparent pre-yield swap (false) from a tombstone-bearing
+        // mid-stream swap (true) — the latter is more disruptive.
+        const next = this.providers[i + 1]
+        this.emit(FALLBACK_METRIC_NAMES.triggered, {
+          kind: this.kindOf(e),
+          from: provider.model ?? "unknown",
+          to: next?.model ?? "unknown",
+          post_yield: yielded.value ? "true" : "false",
+        })
         // If this provider streamed anything before failing, the next
         // provider must tombstone it. (Pre-yield failures stay transparent.)
         if (yielded.value) priorPartial = true
