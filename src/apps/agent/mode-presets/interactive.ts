@@ -46,32 +46,9 @@ const buildInteractiveBase = (
   }
 }
 
-const buildInteractiveDeps = (
+const buildInteractiveOptionalDeps = (
   base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
-): Parameters<typeof runInteractive>[0]["deps"] => ({
-  llm: base.llm,
-  registry: base.registry,
-  stream: base.stream,
-  permission: base.permission,
-  system: base.system,
-  cwd: base.cwd,
-  maxTurns: base.maxTurns,
-  signal: base.signal,
-  onConfirm: base.onConfirm ?? (async () => false),
-  store: base.store,
-  sessionId: base.sessionId ?? crypto.randomUUID(),
-  embedder: base.embedder,
-  memoryConfig: base.memory,
-  planMode: base.planMode === true,
-  metrics: base.metrics,
-  run: base.run,
-  subagentConfig: base.subagent,
-  skillsConfig: base.skills,
-  compactionBreakerConfig: base.compactionBreaker,
-  verifyGuardConfig: base.verifyGuard,
-  summarizerLlm: base.compaction?.summarizerLlm,
-  onShellEvent: base.onShellEvent,
-  workMetricsSink: base.workMetricsSink,
+): Partial<Parameters<typeof runInteractive>[0]["deps"]> => ({
   ...(base.followUpQueue !== undefined ? { followUpQueue: base.followUpQueue } : {}),
   ...(base.planStore !== undefined ? { planStore: base.planStore } : {}),
   ...(base.retrievalStack !== undefined ? { retrievalStack: base.retrievalStack } : {}),
@@ -92,6 +69,38 @@ const buildInteractiveDeps = (
   ...(base.shellSnapshot !== undefined ? { shellSnapshot: base.shellSnapshot } : {}),
   ...(base.sessionEffort !== undefined ? { sessionEffort: base.sessionEffort } : {}),
   ...(base.decisionEmitter !== undefined ? { decisionEmitter: base.decisionEmitter } : {}),
+})
+
+const buildInteractiveDeps = (
+  base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
+): Parameters<typeof runInteractive>[0]["deps"] => ({
+  llm: base.llm,
+  registry: base.registry,
+  stream: base.stream,
+  permission: base.permission,
+  system: base.system,
+  cwd: base.cwd,
+  maxTurns: base.maxTurns,
+  signal: base.signal,
+  onConfirm: async (action) => {
+    const result = await (base.onConfirm?.(action) ?? false)
+    return typeof result === "boolean" ? result : result.decision === "allow"
+  },
+  store: base.store,
+  sessionId: base.sessionId ?? crypto.randomUUID(),
+  embedder: base.embedder,
+  memoryConfig: base.memory,
+  planMode: base.planMode === true,
+  metrics: base.metrics,
+  run: base.run,
+  subagentConfig: base.subagent,
+  skillsConfig: base.skills,
+  compactionBreakerConfig: base.compactionBreaker,
+  verifyGuardConfig: base.verifyGuard,
+  summarizerLlm: base.compaction?.summarizerLlm,
+  onShellEvent: base.onShellEvent,
+  workMetricsSink: base.workMetricsSink,
+  ...buildInteractiveOptionalDeps(base),
 })
 
 const makeAbortError = (): Error & { code?: string } => {

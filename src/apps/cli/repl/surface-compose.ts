@@ -1,9 +1,14 @@
 import { EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
 import {
+  defaultGranularRegistry,
+  type GranularRegistryPort,
+} from "@/agent/checkpoint/granular-registry"
+import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
 import type { Message } from "@/llm"
+import { ToolRegistry } from "@/tool"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import {
   loadSessionById,
@@ -24,6 +29,7 @@ import type { StatusBar } from "../status-bar"
 import { createTextInbox, type TextInbox } from "../text-inbox"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
+import { createPerToolSnapshotRecorder } from "./per-tool-snapshot-recorder"
 import {
   createPlaybookTriggerSurfaceSeam,
   type PlaybookTriggerSurfaceSeam,
@@ -288,6 +294,49 @@ export const composeSurfaceWires = (
   opts?: { readonly convStore?: ConversationCheckpointStore },
 ): ReplSurfaceWires => {
   const convStore = opts?.convStore ?? defaultConversationCheckpointStore()
+  // ADR-0300/0304 — per-session granular checkpoint registry. ALWAYS
+  // instantiated (pure in-memory, zero cost); mirrored onto sessionDeps
+  // so `assembleConfig` carries it onto `AgentConfig.granularRegistry`.
+  // The per-tool recorder (Wire 3 below) populates it when opted in.
+  const granularRegistry: GranularRegistryPort = defaultGranularRegistry()
+  setup.sessionDeps.granularRegistry = granularRegistry
+  // ADR-0304 Wire 3 — per-tool auto-record cadence. Env-gated:
+  // `QUANTA_PER_TOOL_RECORD=on` ⇒ wrap every tool in the session registry
+  // with a pre-execute snapshot recorder. Absent / any other value ⇒
+  // tools execute byte-identical, registry stays empty.
+  if (envSource.QUANTA_PER_TOOL_RECORD === "on") {
+    const recorder = createPerToolSnapshotRecorder({
+      registry: granularRegistry,
+      readFile: async (path: string): Promise<string | null> => {
+        try {
+          const { readFile } = await import("node:fs/promises")
+          return await readFile(path, "utf8")
+        } catch {
+          return null
+        }
+      },
+      getCurrentMessages: () => state.history,
+      getCurrentTurn: () => state.history.length,
+      extractPaths: (toolName: string, input: unknown): readonly string[] => {
+        // Conservative extractor — only the common file-mutating tools
+        // declare a `path` (read/write/edit/scripted_replace/apply_patch).
+        // Bash + non-file tools yield empty filesBefore.
+        if (
+          toolName === "read" ||
+          toolName === "write" ||
+          toolName === "edit" ||
+          toolName === "scripted_replace"
+        ) {
+          const p = (input as { path?: unknown } | null)?.path
+          return typeof p === "string" ? [p] : []
+        }
+        return []
+      },
+      logger,
+    })
+    const wrapped = setup.sessionDeps.registry.all().map((t) => recorder.wrapTool(t))
+    setup.sessionDeps.registry = new ToolRegistry(wrapped)
+  }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
   // prints "not wired" and the loop's recordTurn hook is a no-op.
