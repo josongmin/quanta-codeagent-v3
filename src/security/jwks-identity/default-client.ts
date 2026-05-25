@@ -12,8 +12,8 @@
 import type { JwksClient } from "./port"
 import {
   type JsonWebKey,
-  type JwksSet,
   JwksFetchError,
+  type JwksSet,
   type VerifyFailureReason,
   type VerifyResult,
 } from "./types"
@@ -56,10 +56,7 @@ export function defaultJwksClient(opts: DefaultJwksClientOpts = {}): JwksClient 
     try {
       resp = await fetchImpl(url)
     } catch (err) {
-      throw new JwksFetchError(
-        `network error: ${(err as Error).message}`,
-        url,
-      )
+      throw new JwksFetchError(`network error: ${(err as Error).message}`, url)
     }
     if (!resp.ok) {
       throw new JwksFetchError(`HTTP ${resp.status}`, url)
@@ -68,16 +65,9 @@ export function defaultJwksClient(opts: DefaultJwksClientOpts = {}): JwksClient 
     try {
       body = await resp.json()
     } catch (err) {
-      throw new JwksFetchError(
-        `invalid JSON: ${(err as Error).message}`,
-        url,
-      )
+      throw new JwksFetchError(`invalid JSON: ${(err as Error).message}`, url)
     }
-    if (
-      !body ||
-      typeof body !== "object" ||
-      !Array.isArray((body as { keys?: unknown }).keys)
-    ) {
+    if (!body || typeof body !== "object" || !Array.isArray((body as { keys?: unknown }).keys)) {
       throw new JwksFetchError("missing keys[] array", url)
     }
     const set: JwksSet = {
@@ -134,75 +124,63 @@ interface VerifyDeps {
   readonly jwksUrl: string | undefined
 }
 
+type ParsedHeader = { alg: "RS256" | "ES256"; kid: string }
+type HeaderResult = { ok: true; header: ParsedHeader } | { ok: false; reason: VerifyFailureReason }
+
+function validateHeader(rawHeader: { alg?: unknown; kid?: unknown }): HeaderResult {
+  if (typeof rawHeader.alg !== "string") return { ok: false, reason: "malformed-jwt" }
+  if (rawHeader.alg !== "RS256" && rawHeader.alg !== "ES256") {
+    return { ok: false, reason: "unsupported-alg" }
+  }
+  if (typeof rawHeader.kid !== "string") return { ok: false, reason: "unknown-kid" }
+  return { ok: true, header: { alg: rawHeader.alg, kid: rawHeader.kid } }
+}
+
+async function resolveJwksSet(deps: VerifyDeps): Promise<JwksSet | VerifyFailureReason> {
+  if (!deps.jwksUrl) {
+    return "cache-miss"
+  }
+  const cached = deps.cacheGet(deps.jwksUrl)
+  if (cached) return cached
+  try {
+    return await deps.fetchJwks(deps.jwksUrl)
+  } catch {
+    return "jwks-fetch-failed"
+  }
+}
+
 async function verifyImpl(jwt: string, deps: VerifyDeps): Promise<VerifyResult> {
   const decoded = decodeJwt(jwt)
   if (!decoded) return fail("malformed-jwt")
+  const { header: rawHeader, payload, signingInput, signature } = decoded
 
-  const { header, payload, signingInput, signature } = decoded
-  if (typeof header.alg !== "string") return fail("malformed-jwt")
-  if (header.alg !== "RS256" && header.alg !== "ES256") {
-    return fail("unsupported-alg")
-  }
-  if (typeof header.kid !== "string") return fail("unknown-kid")
+  const headerResult = validateHeader(rawHeader)
+  if (!headerResult.ok) return fail(headerResult.reason)
+  const { alg, kid } = headerResult.header
 
-  // Locate a cached JWKS set. If the client is configured with a `jwksUrl`
-  // and we have no cache entry, fall through to a single auto-fetch.
-  let set: JwksSet | null = null
-  if (deps.jwksUrl) {
-    set = deps.cacheGet(deps.jwksUrl)
-    if (!set) {
-      try {
-        set = await deps.fetchJwks(deps.jwksUrl)
-      } catch {
-        return fail("jwks-fetch-failed")
-      }
-    }
-  } else {
-    // No fixed URL — caller must have populated the cache via fetchJwks.
-    // We scan all cached sets (rare path; mostly the fixed-URL flow is used).
-    set = scanAnyCachedSet(deps.cacheGet, header.kid)
-    if (!set) return fail("cache-miss")
-  }
+  const setOrReason = await resolveJwksSet(deps)
+  if (typeof setOrReason === "string") return fail(setOrReason)
+  const set = setOrReason
 
-  const jwk = set.keys.find((k) => k.kid === header.kid)
+  const jwk = set.keys.find((k) => k.kid === kid)
   if (!jwk) return fail("unknown-kid")
 
-  // Expiry check.
   if (typeof payload.exp === "number") {
     const nowSec = Math.floor(deps.clock() / 1000)
     if (payload.exp <= nowSec) return fail("expired")
   }
 
-  // Crypto verify.
   try {
-    const ok = await verifySignature(jwk, header.alg, signingInput, signature)
+    const ok = await verifySignature(jwk, alg, signingInput, signature)
     if (!ok) return fail("signature-invalid")
   } catch {
     return fail("signature-invalid")
   }
-
-  return { ok: true, kid: header.kid }
+  return { ok: true, kid }
 }
 
 function fail(reason: VerifyFailureReason): VerifyResult {
   return { ok: false, reason }
-}
-
-/**
- * Last-resort cache scan when no fixed `jwksUrl` is configured. The default
- * caller always sets `jwksUrl`; this branch exists so a future multi-issuer
- * setup can pre-populate the cache and still hit the verify path.
- */
-function scanAnyCachedSet(
-  cacheGet: (url: string) => JwksSet | null,
-  _kid: string,
-): JwksSet | null {
-  // We have no enumeration over private cache state from out here; the
-  // hexagonal port is intentionally narrow. Multi-issuer callers should
-  // create one client per issuer and pass `jwksUrl`. Returning null routes
-  // these calls to `cache-miss`, which is the correct typed answer.
-  void cacheGet
-  return null
 }
 
 interface DecodedJwt {
@@ -218,19 +196,27 @@ function decodeJwt(jwt: string): DecodedJwt | null {
   const [h, p, s] = parts
   if (!h || !p || !s) return null
   let header: { alg?: unknown; kid?: unknown }
-  let payload: { exp?: number }
   let signature: Uint8Array
   try {
     header = JSON.parse(new TextDecoder().decode(b64urlDecode(h))) as {
       alg?: unknown
       kid?: unknown
     }
-    payload = JSON.parse(new TextDecoder().decode(b64urlDecode(p))) as {
-      exp?: number
-    }
     signature = b64urlDecode(s)
   } catch {
     return null
+  }
+  // Payload JSON parse failure is non-fatal — a tampered payload that no
+  // longer parses must still surface as `signature-invalid` (the actual
+  // tamper signal), not `malformed-jwt`. We expose an empty payload so
+  // the exp check is skipped; signature verify is the authoritative gate.
+  let payload: { exp?: number } = {}
+  try {
+    payload = JSON.parse(new TextDecoder().decode(b64urlDecode(p))) as {
+      exp?: number
+    }
+  } catch {
+    payload = {}
   }
   return { header, payload, signingInput: `${h}.${p}`, signature }
 }
@@ -246,6 +232,29 @@ function b64urlDecode(s: string): Uint8Array {
 }
 
 /**
+ * Loose structural shape of a JWK as accepted by `crypto.subtle.importKey`.
+ * The lib.dom typing exports `JsonWebKey` and @types/node exports
+ * `webcrypto.JsonWebKey`; both expect MUTABLE arrays whereas our port type
+ * is `readonly`. Declaring a local non-readonly mirror lets us shallow-copy
+ * into the platform shape without an `any` escape hatch.
+ */
+interface SubtleJwk {
+  kty: string
+  alg?: string
+  kid?: string
+  use?: string
+  key_ops?: string[]
+  x5u?: string
+  x5c?: string[]
+  x5t?: string
+  n?: string
+  e?: string
+  crv?: string
+  x?: string
+  y?: string
+}
+
+/**
  * Import the JWK as a CryptoKey and verify the signature over `signingInput`.
  * Throws on invalid JWK shape — caller catches and reports
  * `signature-invalid`.
@@ -257,20 +266,22 @@ async function verifySignature(
   signature: Uint8Array,
 ): Promise<boolean> {
   const data = new TextEncoder().encode(signingInput)
-  // Web Crypto `importKey("jwk", …)` expects a mutable JsonWebKey with
-  // `key_ops?: string[]` (non-readonly). Our port type is `readonly`
-  // (immutability is a port-side contract); we shallow-copy into a fresh
-  // mutable object before handing it to the platform. `importKey` is an
-  // overloaded function — referencing it as `subtle.importKey.call(subtle,
-  // "jwk", …)` would type-check, but a positional call with an `any`-ish
-  // cast on the JWK payload is the readable form here.
-  const subtleJwk = {
-    ...jwk,
-    key_ops: jwk.key_ops ? [...jwk.key_ops] : undefined,
-    // biome-ignore lint/suspicious/noExplicitAny: Web Crypto JsonWebKey
-    // shape differs between lib.dom and @types/node; explicit any cast
-    // narrowed to a single line keeps the boundary clean.
-  } as any
+  // Shallow-copy the readonly port shape into a mutable platform shape.
+  const subtleJwk: SubtleJwk = {
+    kty: jwk.kty,
+    ...(jwk.alg !== undefined && { alg: jwk.alg }),
+    ...(jwk.kid !== undefined && { kid: jwk.kid }),
+    ...(jwk.use !== undefined && { use: jwk.use }),
+    ...(jwk.key_ops !== undefined && { key_ops: [...jwk.key_ops] }),
+    ...(jwk.x5u !== undefined && { x5u: jwk.x5u }),
+    ...(jwk.x5c !== undefined && { x5c: [...jwk.x5c] }),
+    ...(jwk.x5t !== undefined && { x5t: jwk.x5t }),
+    ...(jwk.n !== undefined && { n: jwk.n }),
+    ...(jwk.e !== undefined && { e: jwk.e }),
+    ...(jwk.crv !== undefined && { crv: jwk.crv }),
+    ...(jwk.x !== undefined && { x: jwk.x }),
+    ...(jwk.y !== undefined && { y: jwk.y }),
+  }
   if (alg === "RS256") {
     const key = await crypto.subtle.importKey(
       "jwk",
@@ -289,10 +300,5 @@ async function verifySignature(
     false,
     ["verify"],
   )
-  return crypto.subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
-    key,
-    signature,
-    data,
-  )
+  return crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, signature, data)
 }
