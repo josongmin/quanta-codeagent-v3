@@ -1,0 +1,61 @@
+id: budget-probe-ledger-wire
+title: BudgetProbe — real wire of ADR-0138 ledger into ADR-0265 budget-aware preset (ADR-0274)
+section: 4
+subsystem: Retrieval — budget-probe adapter (ledger-bridged + static), slice-fence-clean
+order: 51
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, default-off, slice:retrieval]
+depends_on: [search-pipeline-composer, budget-ledger]
+purpose: |
+  Closes the deferred wire that ADR-0265's `budgetAwarePipeline` left
+  open: a `BudgetProbe` factory that bridges `defaultBudgetLedger()`
+  (ADR-0138) to the pipeline's duck-typed budget-gate seam WITHOUT
+  crossing the slice fence (ADR-0159 forbids `@/retrieval` →
+  `@/agent`). Ships two factories: `createBudgetProbeFromLedger(ledger,
+  { maxUsd })` (production seam — ledger is duck-typed
+  `{ snapshot(): { totalUsd: number } }`, the agent root bridges its
+  real `totalCost` accessor at assembly time) and
+  `createStaticBudgetProbe({ usdSoFar, maxAllowed })` (test + dev seam,
+  pure constants). The new `BudgetProbe` port is broadened to
+  `{ usdSoFar(); maxAllowed(); remaining() }` — structural superset of
+  the pipeline's narrower one-method port, so passing one into
+  `budgetAwarePipeline` is cast-free. Errors are a 3-arm closed
+  `BudgetProbeError` union (`ledger-unavailable`, `invalid-budget`,
+  `budget-exceeded`). Default-OFF — nothing in @/agent / @/runner /
+  @/apps constructs a probe at ship time; HELL-BP-09 enforces this via
+  source-text grep.
+evidence:
+  code:
+    - src/retrieval/budget-probe/port.ts
+    - src/retrieval/budget-probe/types.ts
+    - src/retrieval/budget-probe/from-ledger.ts
+    - src/retrieval/budget-probe/static-probe.ts
+    - src/retrieval/budget-probe/index.ts
+  adrs: [274, 265, 138]
+  tests:
+    unit:
+      - tests/unit/retrieval/budget-probe-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: |
+  No automatic wiring into the dispatch loop, the agent assembly root,
+  or any surface. Callers in @/agent opt in by constructing
+  `defaultBudgetLedger()` (ADR-0138), bridging its `totalCost` snapshot
+  to `{ totalUsd: ... }`, passing the bridged shape into
+  `createBudgetProbeFromLedger`, and feeding the result into
+  `budgetAwarePipeline` (ADR-0265). The bridge function lives at the
+  assembly site, not in this slice — keeps both ends slice-fence-clean.
+notes: |
+  The duck-typed `{ snapshot(): { totalUsd } }` shape deliberately
+  differs from the real ledger's `{ snapshot(): { totalCost } }` accessor.
+  This is the seam — callers translate at the assembly site. A future
+  ledger rename does not propagate into this slice. HELL-BP-09 prevents
+  the "wire it from inside" temptation that would silently reintroduce
+  the cross-slice dependency.
