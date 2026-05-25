@@ -31,7 +31,6 @@ export {
   type PlaybookRegistry,
   startPlaybookAutoDispatch,
 } from "./auto-dispatch"
-export { adaptPlanQueueStoreToSink, startPlaybookFromTrigger } from "./host-adapters"
 export {
   buildMacroRegistry,
   expandProcedure,
@@ -44,6 +43,7 @@ export {
   isPlaybookExtended,
   parsePlaybookFrontmatter,
 } from "./frontmatter-parser"
+export { adaptPlanQueueStoreToSink, startPlaybookFromTrigger } from "./host-adapters"
 export {
   createInlineTriggerWatcher,
   createMemoryWatcher,
@@ -51,6 +51,21 @@ export {
   type MemoryWatcher,
   matchesGlobSubset,
 } from "./inline-trigger-watcher"
+// ADR-0258 — nested playbook executor (bounded recursion + cycle detection).
+// Default-OFF: re-exported here so the host can opt in; nothing in the rest
+// of the playbook slice (parser / validator / dispatcher) constructs it.
+export {
+  type ChildLookup,
+  type CycleCheck,
+  checkCycle,
+  createDefaultNestedExecutor,
+  DEFAULT_MAX_DEPTH,
+  type NestError,
+  type NestedExecutorOpts,
+  type NestedPlaybookExecutor,
+  type NestedResult,
+  type Result,
+} from "./nesting"
 export type {
   InlineTriggerCallback,
   InlineTriggerFire,
