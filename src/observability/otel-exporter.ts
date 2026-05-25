@@ -1,6 +1,6 @@
 /**
  * OTLP/HTTP raw exporter — Default-OFF realtime export to an OTel Collector
- * (ADR-0237).
+ * (ADR-0261).
  *
  * Scope: the existing OTel scaffold (`metrics/otel-sink.ts`,
  * `tracing/otel-tracer.ts`, `tracing/w3c-propagator.ts`) gives us the
