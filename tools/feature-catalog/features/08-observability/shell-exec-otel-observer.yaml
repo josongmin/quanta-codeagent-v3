@@ -5,7 +5,7 @@ subsystem: 텔레메트리 — runShell typed stream fan-out
 order: 80
 maturity: L2
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [shell.exec.runs, shell.exec.exits, shell.exec.aborts]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

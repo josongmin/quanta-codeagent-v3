@@ -5,7 +5,7 @@ subsystem: Tier-1 subagent fanout via streaming-dispatch barrier
 order: 296
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static

@@ -5,7 +5,7 @@ subsystem: Turn-exit guard composition (verify-guard + closeout-guard 책임 분
 order: 82
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

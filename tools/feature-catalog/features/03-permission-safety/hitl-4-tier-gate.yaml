@@ -5,7 +5,7 @@ subsystem: HITL 4-tier gate (ADR-0020 / ADR-0047)
 order: 3
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [gen_ai.request.max_tokens, gen_ai.request.model, gen_ai.request.temperature, gen_ai.response.finish_reasons, gen_ai.response.model]
 modes: [interactive, headless]

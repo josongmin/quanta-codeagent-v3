@@ -5,7 +5,7 @@ subsystem: Phase 1 SQLite adapter — additive over recall store
 order: 70
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.memory.phase]
 modes: [n-a]

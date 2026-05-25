@@ -5,7 +5,7 @@ subsystem: 비용 회계 / 정량 가드
 order: 95
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: []
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

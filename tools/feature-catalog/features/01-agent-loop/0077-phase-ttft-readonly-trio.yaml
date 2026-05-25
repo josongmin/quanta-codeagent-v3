@@ -5,7 +5,7 @@ subsystem: 턴 라이프사이클 — 3-plane 구조적 신호 (ADR-0077)
 order: 77
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [gen_ai.response.time_to_first_token_ms]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

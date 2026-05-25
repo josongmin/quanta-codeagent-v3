@@ -37,6 +37,7 @@ evidence:
     - src/mcp/skybridge/registry.ts
   adrs:
     - docs/decisions/0190-darwin-vz-native-scaffold.md
+    - docs/decisions/0194-darwin-vz-native-scaffold.md
   tests:
     unit:
       - tests/unit/mcp-skybridge-applevz-native-hellgate.test.ts

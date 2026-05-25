@@ -5,7 +5,7 @@ subsystem: 텔레메트리 — quanta.patch.* 어휘 활성화
 order: 93
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.patch, quanta.patch.op]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

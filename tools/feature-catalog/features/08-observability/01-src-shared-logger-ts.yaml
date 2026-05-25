@@ -5,7 +5,7 @@ subsystem: 운영 진단 노브
 order: 1
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: []
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

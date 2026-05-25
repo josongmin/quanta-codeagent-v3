@@ -5,7 +5,7 @@ subsystem: Plan-mode 구조화 (Cursor todoModel + Codex plan_delta + Claude Exi
 order: 3
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id", "quanta.tool.call.status"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

@@ -5,7 +5,7 @@ subsystem: Permission slice telemetry — "observability bugs MUST NOT abort a p
 order: 98
 maturity: L2
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.permission.stack.source", "quanta.permission.decided_by"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

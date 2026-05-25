@@ -25,7 +25,7 @@ purpose: |
 evidence:
   code:
     - src/agent/conversation-checkpoint.ts
-  adrs: [124]
+  adrs: [124, 184]
   tests:
     unit:
       - tests/unit/conversation-checkpoint-hellgate.test.ts

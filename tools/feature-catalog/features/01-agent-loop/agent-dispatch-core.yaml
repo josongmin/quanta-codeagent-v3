@@ -5,7 +5,7 @@ subsystem: 코어 루프 dispatch seam
 order: 206
 maturity: L5
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.hitl", "quanta.tool.call.status"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

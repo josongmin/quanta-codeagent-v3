@@ -5,7 +5,7 @@ subsystem: Effect boundary (ADR-0093)
 order: 93
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.tool.call.status]
 modes: [n-a]

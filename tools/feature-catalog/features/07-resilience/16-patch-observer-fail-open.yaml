@@ -5,7 +5,7 @@ subsystem: V4A apply-pipeline boundary discipline
 order: 16
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.patch.op", "quanta.patch.fuzzy_match_tier", "quanta.patch.fuzzy_matched"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

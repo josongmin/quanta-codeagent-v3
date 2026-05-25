@@ -5,7 +5,7 @@ subsystem: Side-conversation (ADR-0049)
 order: 20
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.thread.side, quanta.thread.kind]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

@@ -5,7 +5,7 @@ subsystem: Stream dispatch callbacks (loop ↔ streamingTurn seam)
 order: 83
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [gen_ai.response.time_to_first_token_ms, quanta.conversation.id]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

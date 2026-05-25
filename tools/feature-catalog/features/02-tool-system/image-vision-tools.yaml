@@ -31,7 +31,7 @@ evidence:
     - src/tool/image/read.ts
     - src/tool/image/from-url.ts
     - src/tool/image/compose.ts
-  adrs: [126, 132]
+  adrs: [126, 132, 146]
   tests:
     unit:
       - tests/unit/tool/read-image-hellgate.test.ts

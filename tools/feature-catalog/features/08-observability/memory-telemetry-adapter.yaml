@@ -5,7 +5,7 @@ subsystem: metrics export (ADR-0144 + memory slice binding)
 order: 115
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.memory.phase", "quanta.memory.recall.hits", "quanta.memory.recall.scanned", "quanta.memory.recall.latency_ms"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

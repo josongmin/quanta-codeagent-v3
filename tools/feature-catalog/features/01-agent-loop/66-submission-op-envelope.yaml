@@ -5,7 +5,7 @@ subsystem: 턴 라이프사이클 — host→agent 타입드 입력 (Codex 흡�
 order: 66
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

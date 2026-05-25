@@ -35,7 +35,7 @@ evidence:
     - src/retrieval/indexer/default-scanner.ts
     - src/retrieval/indexer/headless-stub.ts
     - src/retrieval/indexer/index.ts
-  adrs: ["docs/decisions/0277-codebase-indexer.md", 265, 260, 261]
+  adrs: ["docs/decisions/0277-codebase-indexer.md", "docs/decisions/0278-search-codebase-auto-register.md", 265, 260, 261]
   tests:
     unit:
       - tests/unit/retrieval/indexer-hellgate.test.ts

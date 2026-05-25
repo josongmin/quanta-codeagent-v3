@@ -5,7 +5,7 @@ subsystem: Loop 안정성 — duplicate tool-call 단락
 order: 51
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.tool.call.status]
 modes: [n-a]

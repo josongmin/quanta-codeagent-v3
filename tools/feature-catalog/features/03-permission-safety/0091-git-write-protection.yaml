@@ -5,7 +5,7 @@ subsystem: 코드실행 탈옥 벡터 차단 (Cursor cursorsandbox 흡수, ADR-0
 order: 91
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.tool.call.status]
 modes: [n-a]

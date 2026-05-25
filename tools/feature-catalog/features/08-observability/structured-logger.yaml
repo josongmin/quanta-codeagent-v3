@@ -5,7 +5,7 @@ subsystem: 로깅 — JSON-shaped sink (shared logger와 분리)
 order: 84
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: []
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

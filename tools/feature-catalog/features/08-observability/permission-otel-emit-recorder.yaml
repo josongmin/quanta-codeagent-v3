@@ -5,7 +5,7 @@ subsystem: 텔레메트리 — quanta.permission.* 어휘 활성화
 order: 90
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.permission]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

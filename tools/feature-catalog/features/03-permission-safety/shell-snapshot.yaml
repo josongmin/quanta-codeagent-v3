@@ -42,13 +42,5 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    Wire-up to runShell deferred — 본 슬라이스는 closed port + adapters
-    + file-store 만 제공. 합성 root / agent loop / tool 슬라이스 / scheduler
-    무수정. snapshot 미주입 세션은 argv `["bash","-lc",cmd]` byte-identical.
-  promotion_path: |
-    Follow-up slice: runShell 옵션으로 `snapshotHandle?: SnapshotHandle`
-    수용 + 합성 root에서 turn 진입 시 capture → handle 보관 → restore-prefix
-    합성. snapshot read 실패는 degradeReason으로 observability 채널에 surface.
+deliberate_hold: null
 notes: 'Codex absorption (A5, 강 ROI 단독). zsh/bash 만 — fish/pwsh 미커버. 보존 정책(10일/100MB 슬라이딩 윈도우)은 caller가 prune(olderThanMs) 호출로 정책 선언; 슬라이스는 mechanism만 제공.'

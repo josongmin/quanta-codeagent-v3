@@ -5,7 +5,7 @@ subsystem: Collaboration mode (ADR-0036)
 order: 10
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.tool.call.status]
 modes: [n-a]

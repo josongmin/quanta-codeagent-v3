@@ -5,7 +5,7 @@ subsystem: Admissibility-gate SSOT (ADR-0026)
 order: 1
 maturity: L5
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.hitl", "quanta.tool.call.status"]
 modes: [interactive, headless]

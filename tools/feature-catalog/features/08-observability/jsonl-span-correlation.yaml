@@ -5,7 +5,7 @@ subsystem: stream/adapters/jsonl-recorder — span-id derivation
 order: 98
 maturity: L4
 status: new
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["quanta.trajectory.v"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

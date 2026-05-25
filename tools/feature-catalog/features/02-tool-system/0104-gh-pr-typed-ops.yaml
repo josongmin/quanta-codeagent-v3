@@ -21,7 +21,7 @@ purpose: |
 evidence:
   code:
     - src/tool/gh/index.ts
-  adrs: [104]
+  adrs: [104, 112]
   tests:
     unit: [tests/unit/gh-pr-tools-hellgate.test.ts]
     integration: []

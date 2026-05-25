@@ -5,7 +5,7 @@ subsystem: 턴 상태머신
 order: 2
 maturity: L3
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [gen_ai.response.time_to_first_token_ms, quanta.conversation.id]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

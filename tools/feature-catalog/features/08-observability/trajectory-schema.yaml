@@ -5,7 +5,7 @@ subsystem: 텔레메트리 — append-only event schema
 order: 9
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: [quanta.trajectory.v1]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]

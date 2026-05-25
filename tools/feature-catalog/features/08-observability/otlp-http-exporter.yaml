@@ -5,7 +5,7 @@ subsystem: observability — realtime OTLP/JSON span+metric ship (hand-rolled wi
 order: 268
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 modes: [interactive, headless, daemon, ide, ci-bot]
 configurable: partial

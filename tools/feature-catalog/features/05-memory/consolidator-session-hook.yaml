@@ -5,7 +5,7 @@ subsystem: 장기 메모리 — Phase 1 session-end wire (ADR-0068 Wave D)
 order: 72
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: integrated
 telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
