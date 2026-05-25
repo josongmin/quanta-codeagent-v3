@@ -214,9 +214,10 @@ describe("classify — trajectory signals", () => {
     }
   })
 
-  test("search_thrashing fires on ≥5 consecutive empty glob/grep before any read", () => {
+  test("search_thrashing fires on ≥5 consecutive empty search_codebase/glob/grep before any read", () => {
     const events = [
-      ...Array.from({ length: 5 }, () => [toolCall("glob"), toolResult("")]).flat(),
+      ...Array.from({ length: 3 }, () => [toolCall("search_codebase"), toolResult("")]).flat(),
+      ...Array.from({ length: 2 }, () => [toolCall("glob"), toolResult("")]).flat(),
       toolCall("localize"),
       toolResult("src/found.py"),
       toolCall("read"),
@@ -225,6 +226,24 @@ describe("classify — trajectory signals", () => {
     ]
     const { result, cleanup } = setup(
       { id: "s", passed: false, patch: "diff --git a/x b/x\n", turns: 25 },
+      events,
+    )
+    try {
+      expect(classify(result).signals).toContain("search_thrashing")
+    } finally {
+      cleanup()
+    }
+  })
+
+  test("search_thrashing counts empty search_codebase calls as search tools", () => {
+    const events = [
+      ...Array.from({ length: 5 }, () => [toolCall("search_codebase"), toolResult("")]).flat(),
+      toolCall("read"),
+      toolResult("...file content..."),
+      sessionEnd("completed", 6),
+    ]
+    const { result, cleanup } = setup(
+      { id: "search-codebase-thrash", passed: false, patch: "diff --git a/x b/x\n", turns: 6 },
       events,
     )
     try {

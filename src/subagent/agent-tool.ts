@@ -92,10 +92,12 @@ type AgentInput = z.infer<typeof agentSchema>
  *  - "review" → strictest read-only subset for critique passes.
  *  Explicit `tools` on the request ALWAYS wins; this table is only consulted
  *  when the caller passed `task_kind` and omitted `tools`. Names mirror the
- *  actual tool registry in `src/tool/` (lsp_nav exposes three sub-tools). */
+ *  actual tool registry in `src/tool/` (including caller-wired delegated
+ *  facades such as `search_codebase`; `lsp_nav` exposes three sub-tools). */
 const deriveToolFilter = (kind: TaskKind): string[] => {
   const readOnly = [
     "read",
+    "search_codebase",
     "grep",
     "glob",
     "lsp_references",
@@ -108,6 +110,7 @@ const deriveToolFilter = (kind: TaskKind): string[] => {
   if (kind === "review")
     return [
       "read",
+      "search_codebase",
       "grep",
       "glob",
       "lsp_references",

@@ -4,7 +4,7 @@
  * The `localize-fault` skill (+ the tool-routing prompt line) advise the model
  * to localize in three ordered stages, each using different evidence:
  *
- *   Stage 1 FILE          → localize / grep / glob / file_tree_summary / git_churn
+ *   Stage 1 FILE          → search_codebase / localize / grep / glob / file_tree_summary / git_churn
  *   Stage 2 FUNCTION      → read / lsp_document_symbol / lsp_hover
  *   Stage 3 EDIT-LOCATION → lsp_references / lsp_definition / parse_test_failure
  *
@@ -26,6 +26,7 @@ export type FunnelStage = 1 | 2 | 3
 
 const STAGE_TOOLS: Readonly<Record<string, FunnelStage>> = Object.freeze({
   // Stage 1 — FILE (candidate files)
+  search_codebase: 1,
   localize: 1,
   glob: 1,
   file_tree_summary: 1,

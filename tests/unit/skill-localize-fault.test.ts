@@ -30,6 +30,7 @@ describe("localize-fault SKILL.md — frontmatter", () => {
     expect(data.description).toContain("어디서 깨지는지")
     expect(data.description).toContain("fault localization")
     expect(data.allowedTools).toEqual([
+      "search_codebase",
       "localize",
       "read",
       "grep",
@@ -52,6 +53,7 @@ describe("localize-fault SKILL.md — frontmatter", () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value.frontmatter.allowedTools).toEqual([
+      "search_codebase",
       "localize",
       "read",
       "grep",
@@ -94,6 +96,14 @@ describe("localize-fault SKILL.md — body invariants", () => {
     // The load-bearing rule: rg locates, source proves.
     expect(body).toMatch(/rg.*locates.*source.*proves|locates.*candidate.*reading the\s+source/i)
     expect(body).toContain("10/10 trust")
+  })
+
+  test("body distinguishes broad repo search from fault-localization ranking", async () => {
+    const raw = await readFile(SKILL_MD, "utf8")
+    const { body } = parseFrontmatter(raw)
+    expect(body).toContain("`search_codebase`")
+    expect(body).toContain("broad repo search")
+    expect(body).toContain("`localize`")
   })
 
   test("body has the outcome enum (located / narrowed / uncertain) and forbids premature 'found'", async () => {
@@ -139,6 +149,7 @@ describe("discoverSystemSkills() — localize-fault present alongside progress-a
     expect(lf).toBeDefined()
     if (!lf) return
     expect(lf.tools).toContain("localize")
+    expect(lf.tools).toContain("search_codebase")
     expect(lf.tools).toContain("lsp_document_symbol")
     expect(lf.tools).toContain("lsp_references")
     expect(lf.sourcePath.endsWith("SKILL.md")).toBe(true)

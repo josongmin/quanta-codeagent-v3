@@ -2,7 +2,7 @@
 name: localize-fault
 description: Localize a fault to its edit location using a 3-stage evidence funnel (file → function → line). Triggers on "localize", "find the bug in", "where does X fail", "어디서 깨지는지", "fault localization", repro→fix tasks, and SWE-bench-style "fix this issue" requests. Ranks source text and test/build logs above search hits; never edits before source text confirms the owner.
 userInvocable: true
-allowedTools: ["localize", "read", "grep", "glob", "lsp_document_symbol", "lsp_references", "diagnostics", "test_runner"]
+allowedTools: ["search_codebase", "localize", "read", "grep", "glob", "lsp_document_symbol", "lsp_references", "diagnostics", "test_runner"]
 category: skill
 stability: stable
 ---
@@ -35,18 +35,21 @@ If the user already named the exact file + function, skip to Stage 3.
 
 Goal: a short ranked list of candidate files. Collect, do not confirm.
 
-1. `localize` with the fault description as the query → ranked `path:line`
+1. `search_codebase` when the owning file or symbol is unknown and you need a
+   broad repo search over a concept, behavior, or natural-language issue
+   description.
+2. `localize` with the fault description as the query → ranked `path:line`
    candidates by BM25-lite IDF over query subtokens, with frame-tier penalty
    (`user` > `test` > `vendored`) and a small definition-pattern boost. Pass
    `verbose:true` to see per-candidate `score` and `tier` — helps
    disambiguate close runners-up before moving to Stage 2.
-2. If the fault references a symbol/identifier, `grep` for it to see its
-   distribution across the tree.
-3. If the fault is a test/build failure, prefer the **failure log** —
+3. If the fault references a concrete symbol/identifier, `grep` for it to see
+   its distribution across the tree.
+4. If the fault is a test/build failure, prefer the **failure log** —
    the file:line in a stack trace or assertion is a higher-trust signal than
    any search hit. Run `test_runner` (or read the provided log) FIRST when a
    repro exists.
-4. `glob` only to enumerate when you need the module's file layout.
+5. `glob` only to enumerate when you need the module's file layout.
 
 Output of Stage 1: 1–3 candidate files, each with WHY it is a candidate
 (matched term / appeared in trace / imports the failing symbol). Do not yet

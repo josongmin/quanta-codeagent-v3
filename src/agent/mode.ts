@@ -307,6 +307,10 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // `web_search` is the search-engine equivalent, returning result links +
   // snippets. No mutation; safe in plan mode.
   web_search: null,
+  // Caller-wired workspace retrieval facade (ADR-0278). The concrete search
+  // pipeline depends on cwd + optional indexer lifecycle, but the tool itself
+  // is pure ranked retrieval over that pipeline. No mutation; safe in plan mode.
+  search_codebase: null,
   // Read-only image ingestion from URL (ADR-0126 sibling of `read_image`).
   // Pure HTTP GET + multimodal-block emit; no FS write, no shell. Safe in
   // plan mode.

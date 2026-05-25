@@ -52,9 +52,9 @@
  *   - `contextInheritance = "system"` — only the system prompt is reused.
  *     The main history is left out (clean slate is closer to Claude Code's
  *     A9: a fresh thread that happens to share the system identity).
- *   - `toolAllowlist = SIDE_CHAT_DEFAULT_READ_ONLY` — read/grep/glob/lsp_X/
- *     git-read tools. Mutating tools are excluded by name even if the
- *     caller's registry includes them.
+ *   - `toolAllowlist = SIDE_CHAT_DEFAULT_READ_ONLY` — read/search_codebase/
+ *     grep/glob/lsp_X/git-read tools. Mutating tools are excluded by name
+ *     even if the caller's registry includes them.
  *
  * The module is byte-identical default-OFF: it adds a NEW exported symbol
  * (`runSideChat`) and reads ZERO env (per the slice-boundary guard). The
@@ -80,14 +80,18 @@ export const SIDE_CHAT_MAX_TURNS_CAP = 5
  * silently dropped (they are not a programming error — the surface may run
  * with a smaller tool set, e.g. if LSP is unwired).
  *
- * Mirrors the side-conversation allowlist (`@/agent/side-conversation`) but
- * intentionally drops `request_user_input` (a side-chat is non-interactive —
- * the user is ALREADY asking; we should not bounce back to them) and adds
- * `file_tree_summary` / `parse_test_failure` (analysis surfaces useful for
- * "where" / "why" lookups that A9 use-cases ask about).
+ * Mirrors the side-conversation allowlist (`@/agent/side-conversation`),
+ * retaining the delegated `search_codebase` facade, but intentionally drops
+ * `request_user_input` (a side-chat is non-interactive — the user is ALREADY
+ * asking; we should not bounce back to them) and adds `file_tree_summary` /
+ * `parse_test_failure` (analysis surfaces useful for "where" / "why"
+ * lookups that A9 use-cases ask about).
  */
 export const SIDE_CHAT_DEFAULT_READ_ONLY: readonly string[] = Object.freeze([
   "read",
+  // Caller-wired delegated search facade. When present in the source
+  // registry, side-chat should keep the broad repo-search entrypoint.
+  "search_codebase",
   "grep",
   "glob",
   "file_tree_summary",

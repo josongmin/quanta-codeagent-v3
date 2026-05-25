@@ -122,6 +122,16 @@ Wiring entry points:
 
 A scanner ratchet (`no-getDefaultPermissionStore-outside-composition`) flags `getDefaultPermissionStore(` outside `permission-store.ts`, the barrel, and the documented composition-adjacent fallback in `admissibility-gate.ts`.
 
+### 3.1 Thin surface rule (ADR-0303)
+
+Surfaces are host adapters, not alternate engine homes.
+
+- `src/apps/cli/**` may own terminal I/O, TTY/raw-mode handling, slash/UI rendering, and host-owned ports. Reusable turn/session semantics belong in `@/runner/*` or lower slices.
+- `src/apps/agent/**` is the host-neutral launcher surface. It must not grow into a backdoor that reuses CLI runtime ownership by importing `src/apps/cli/**`.
+- Any state that can affect the next turn's `AgentConfig`, prompt, tool policy, or loop behavior must be wired through an authoritative engine-visible path (`SessionDeps`, `AgentConfig`, or a typed host port). A slash-only mirror is not authority.
+- No new runtime imports may be added from one `src/apps/<surface>` tree into another. The current temporary debt ceiling is frozen by `tests/unit/surface-coupling-ratchet.test.ts`; debt reduction is allowed, debt expansion is not.
+- Non-surface slices must not add fresh terminal defaults. `tests/unit/terminal-defaults-ratchet.test.ts` freezes the current non-`src/apps/**` stdio/exit debt ceiling so new core/runtime terminal ownership trips immediately.
+
 ---
 
 ## 4. Determinism contract
@@ -196,6 +206,9 @@ Current rules:
 - **`@/memory` importing `@/llm`** — slice fence; invert via `Phase2Summarizer`-style callback.
 - **`FileSystemPort` collision** — `@/storage`'s is the canonical one; the patch-side is `PatchFileSystemPort`.
 - **Switch over a closed union without `default: assertNever`** — adding a variant must be a compile error, not a silent fall-through.
+- **`process.stdin` / `process.stdout` / `process.stderr` / `process.exit()` outside `src/apps/**`** — terminal ownership belongs to surfaces; inject a port or sink instead.
+- **New cross-surface runtime imports under `src/apps/*`** — this is how a surface gets fat. Add a port or move the logic below `src/apps/` instead.
+- **Surface-only mutable state that diverges from engine-visible state** — if a slash/UI action can affect next-turn behavior, the engine must read the same authority source.
 
 ---
 

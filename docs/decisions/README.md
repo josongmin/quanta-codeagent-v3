@@ -198,6 +198,7 @@ for f in docs/decisions/*.md; do head -1 "$f"; done
 | 0149 | Engineering-task skill bundle — 4 system skills: debug / test / explain / refactor (renumbered from ADR-0134) | skill |
 | … | (ADRs 0150 – 0238 land on disk; index backfill pending — see `docs/decisions/` directory listing) | various |
 | 0239 | Debug tracer + `decision` event — developer mode for live gate observability (renumbered from 0237: user-deference, 0237/0238 claimed by concurrent slices) | observability |
+| 0303 | Thin surfaces, headless core, and the surface-coupling ratchet | surface |
 
 ## Status notes
 

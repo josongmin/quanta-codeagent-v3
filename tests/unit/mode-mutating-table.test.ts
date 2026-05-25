@@ -37,8 +37,8 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     // slots are wired. Same allowlist convention as the entries above —
     // their factories are not enumerable from this test without forcing
     // every host port (gh runner / memory provider / branch-search isolator /
-    // subagent runner / skill loader / web search provider / image-url
-    // fetcher / user-input port) to be injected.
+    // subagent runner / skill loader / workspace-search pipeline / web search
+    // provider / image-url fetcher / user-input port) to be injected.
     "gh_pr_view",
     "gh_pr_list",
     "gh_pr_blame",
@@ -59,6 +59,7 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     "Skill",
     "ToolSearch",
     "web_search",
+    "search_codebase",
     "read_image_url",
   ]
   const allTools = [
@@ -127,5 +128,6 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     expect(table.diagnostics).toBeNull()
     expect(table.git_status).toBeNull()
     expect(table.git_diff).toBeNull()
+    expect(table.search_codebase).toBeNull()
   })
 })

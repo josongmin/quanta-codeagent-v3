@@ -57,7 +57,7 @@ interface TrajectoryEvent {
 /** Derive trajectory file path from `r.patchPath`. Returns null when patchPath
  *  is absent (observe was off), or the .jsonl sibling is missing. */
 const trajectoryPathFor = (patchPath: string | undefined): string | null => {
-  if (!patchPath || !patchPath.endsWith(".patch")) return null
+  if (!patchPath?.endsWith(".patch")) return null
   return `${patchPath.slice(0, -".patch".length)}.jsonl`
 }
 
@@ -153,7 +153,7 @@ const hasVerifyLoopStuck = (events: TrajectoryEvent[]): boolean => {
   return trailing >= VERIFY_LOOP_THRESHOLD
 }
 
-const SEARCH_TOOLS = new Set(["glob", "grep", "localize"])
+const SEARCH_TOOLS = new Set(["search_codebase", "glob", "grep", "localize"])
 const FOUND_NAV_TOOLS = new Set(["read", "edit", "write", "scripted_replace"])
 
 /** Find the tool_result immediately following a tool_call at index `i`. The
@@ -173,10 +173,11 @@ const isEmptyResult = (result: TrajectoryEvent): boolean => {
   return r === "" || r === "[]" || r === "{}"
 }
 
-/** Search-thrash: ≥N consecutive empty-result search calls (`glob`/`grep`/
- *  `localize`) BEFORE the first read/edit/write breaks the streak. Tracks max
- *  consecutive run, not just the trailing one — so a thrash that ended with a
- *  successful `localize` still surfaces. */
+/** Search-thrash: ≥N consecutive empty-result search calls
+ *  (`search_codebase`/`glob`/`grep`/`localize`) BEFORE the first
+ *  read/edit/write breaks the streak. Tracks max consecutive run, not just
+ *  the trailing one — so a thrash that ended with a successful `localize`
+ *  still surfaces. */
 const hasSearchThrashing = (events: TrajectoryEvent[]): boolean => {
   let consec = 0
   let max = 0

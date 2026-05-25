@@ -40,8 +40,8 @@ import {
   UnknownToolError,
 } from "@/agent/mode"
 import type { ToolUseBlock } from "@/llm"
-import { inferToolTier } from "@/permission"
 import type { PermissionContext } from "@/permission"
+import { inferToolTier } from "@/permission"
 import { createAgentTool } from "@/subagent"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
@@ -160,6 +160,14 @@ describe("S2 — MUTATING_TOOL_TABLE drift closeout", () => {
     expect(mutatingToolKind("request_plan_exit")).toBeNull()
     expect(() => assertNotMutatingInPlanMode("plan", "request_plan_exit")).not.toThrow()
   })
+
+  test("search_codebase is explicitly read-only so plan mode never trips UnknownToolError", () => {
+    expect(() => isMutatingTool("search_codebase")).not.toThrow()
+    expect(isMutatingTool("search_codebase")).toBe(false)
+    expect(mutatingToolKind("search_codebase")).toBeNull()
+    expect(() => assertNotMutatingInPlanMode("plan", "search_codebase")).not.toThrow()
+    expect(() => assertNotMutatingInPlanMode("default", "search_codebase")).not.toThrow()
+  })
 })
 
 describe("S2 — agent.isReadOnly() lie fixed", () => {
@@ -176,7 +184,10 @@ describe("S2 — agent.isReadOnly() lie fixed", () => {
     })
     // Build a HITLToolDuck-shaped object — only set hitlTier when the tool
     // actually carries one (exactOptionalPropertyTypes forbids `undefined`).
-    const duck: { isReadOnly: () => boolean; hitlTier?: (input: unknown) => ReturnType<typeof inferToolTier> } = {
+    const duck: {
+      isReadOnly: () => boolean
+      hitlTier?: (input: unknown) => ReturnType<typeof inferToolTier>
+    } = {
       isReadOnly: () => tool.isReadOnly(),
     }
     const ht = tool.hitlTier

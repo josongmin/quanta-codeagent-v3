@@ -5,7 +5,7 @@
  *   1. byte-identical Codex base prompt
  *   2. delimiter present and stable between base and addendum
  *   3. SIDE_CONVERSATION_PROMPT == base + delimiter + addendum (no other content)
- *   4. tool allowlist subset of planModeMutatingTable read-only set
+ *   4. tool allowlist subset of planModeMutatingTable read-only set, including search_codebase
  *   5. tool allowlist EQUALS planModeMutatingTable read-only set (no silent drift)
  *   6. effort type — runtime guard rejects "high" via `as any`
  *   7. effort type — runtime guard rejects "xhigh" from JSON.parse
@@ -132,8 +132,9 @@ describe("side-conversation prompt invariants", () => {
 })
 
 describe("side-conversation tool allowlist invariants", () => {
-  it("4. every allowlisted tool is read-only in planModeMutatingTable", () => {
+  it("4. every allowlisted tool is read-only in planModeMutatingTable, including search_codebase", () => {
     const table = planModeMutatingTable()
+    expect(SIDE_CONVERSATION_TOOL_NAMES).toContain("search_codebase")
     for (const name of SIDE_CONVERSATION_TOOL_NAMES) {
       expect(name in table).toBe(true)
       expect(table[name]).toBe(null)

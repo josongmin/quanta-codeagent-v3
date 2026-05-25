@@ -126,6 +126,7 @@ describe("runSideChat — isolation invariants", () => {
     })
     expect(cap.depsSeen).toBeDefined()
     const sideReg = cap.depsSeen?.registry as ToolRegistry
+    expect(SIDE_CHAT_DEFAULT_READ_ONLY).toContain("search_codebase")
     // Every tool registered MUST be in the default allowlist (no leakage).
     for (const spec of sideReg.specs()) {
       expect(SIDE_CHAT_DEFAULT_READ_ONLY).toContain(spec.name)

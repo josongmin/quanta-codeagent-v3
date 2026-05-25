@@ -74,6 +74,16 @@ describe("observeFunnel — stage progression", () => {
     const r = observeFunnel([call(1, "grep"), call(2, "read"), call(3, "lsp_definition")])
     expect(r.stagesReached).toBe(3)
   })
+
+  test("search_codebase classified Stage 1 (broad repo search)", () => {
+    const r = observeFunnel([
+      call(1, "search_codebase"),
+      call(2, "read"),
+      call(3, "lsp_definition"),
+    ])
+    expect(r.stagesReached).toBe(3)
+    expect(r.sequence).toEqual(["search_codebase", "read", "lsp_definition"])
+  })
 })
 
 describe("renderFunnel", () => {

@@ -52,6 +52,7 @@ const capturingRunner = (): { runner: SubagentRunner; seen: () => SubagentReques
 // so a silent drift in the source set fails this test loudly.
 const READ_SET = [
   "read",
+  "search_codebase",
   "grep",
   "glob",
   "lsp_references",
@@ -63,6 +64,7 @@ const READ_SET = [
 const EDIT_SET = [...READ_SET, "write", "edit", "bash"]
 const REVIEW_SET = [
   "read",
+  "search_codebase",
   "grep",
   "glob",
   "lsp_references",
