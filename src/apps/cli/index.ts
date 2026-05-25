@@ -2,6 +2,7 @@ import { errMessage, logger } from "@/shared"
 import { loadEnvFiles } from "./dotenv"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionBootstrapError } from "./repl/session-bootstrap"
+import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
 
@@ -70,7 +71,7 @@ process.on("unhandledRejection", (reason) => {
 })
 
 main().catch((e) => {
-  if (e instanceof SessionBootstrapError) {
+  if (e instanceof SessionBootstrapError || e instanceof SessionStartupError) {
     logger.error(e.message)
     process.exit(e.exitCode)
   }

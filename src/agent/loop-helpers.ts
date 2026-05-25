@@ -343,7 +343,7 @@ export const startAutomationEngineTicker = (
   ) {
     return undefined
   }
-  const clock: () => number = now ?? (() => Date.now())
+  const clock: () => number = now ?? Date.now
 
   let stopped = false
   let handle: unknown = null

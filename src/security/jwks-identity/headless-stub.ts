@@ -10,7 +10,7 @@
  */
 
 import type { JwksClient } from "./port"
-import { type JwksSet, JwksFetchError, type VerifyResult } from "./types"
+import { JwksFetchError, type JwksSet, type VerifyResult } from "./types"
 
 /**
  * Build the headless stub. Holds no state.

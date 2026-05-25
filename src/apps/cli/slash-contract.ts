@@ -1,0 +1,120 @@
+import type { DebugCmdState } from "./debug-cmd"
+import type { IdleMonitor } from "./idle-monitor"
+import type { RetryWithSessionState } from "./retry-with"
+import type { SideChatSessionState } from "./side-cmd"
+
+export interface SlashContext {
+  readonly out: (s: string) => void
+  readonly err: (s: string) => void
+  readonly cwd: string
+  // `| undefined` is explicit on every optional field because the repo runs
+  // `exactOptionalPropertyTypes: true` — `{ now: undefined }` and `{}` are
+  // different there, and tests pass values that may legitimately be undefined.
+  readonly now?: (() => number) | undefined
+  readonly sleep?: ((ms: number) => Promise<void>) | undefined
+  /** Override the preferences file path (test seam). */
+  readonly prefsPath?: string | undefined
+  /** Override the preferences-home directory (test seam). When set, takes
+   *  precedence over `runtimeConfig().prefsHome` so per-test isolation does
+   *  not depend on mutating `process.env.QUANTA_PREFS_HOME` after
+   *  `runtimeConfig()` has already validated-and-frozen its snapshot. */
+  readonly prefsHome?: string | undefined
+  /** ADR-0065 model-swap retry session state. Absent ⇒ `/retry-with` prints
+   *  "no model candidates configured" and is a no-op (byte-identical to NOT
+   *  registering the command). Injected by the surface — the builtins never
+   *  read this field unless the slash itself needs it. */
+  readonly retry?: RetryWithSessionState | undefined
+  /** Cursor-inspired idle/snooze monitor. Wired by the REPL surface so
+   *  `/snooze` and `/resume` mutate the SAME instance the prompt source
+   *  consults to refuse new turns. */
+  readonly idle?: IdleMonitor | undefined
+  /** Re-discover skills from disk on demand so `/skills` and `/reload-skills`
+   *  can render the inventory without importing `@/skill` types. */
+  readonly skills?: (() => Promise<SkillRow[]>) | undefined
+  /** Claude A9 `/side <q>` isolated agent loop. */
+  readonly side?: SideChatSessionState | undefined
+  /** Sticky cumulative cost dashboard render seam. */
+  readonly cost?: (() => string) | undefined
+  /** Read-only plan-store snapshot accessor. */
+  readonly planSnapshot?: (() => import("@/agent/plan/types").Plan | null) | undefined
+  /** Read-only WorkingState snapshot. */
+  readonly workingState?: (() => import("@/agent").WorkingState | undefined) | undefined
+  /** Recent turns + tool-call breadcrumb. */
+  readonly history?: import("./history-cmd").HistorySessionState | undefined
+  /** N-best candidate tracker snapshot. */
+  readonly branchSearch?: (() => import("./branch-search-progress").BranchProgressState) | undefined
+  /** Tool-profile slash wire. */
+  readonly profile?:
+    | {
+        readonly get: () => string
+        readonly set: (
+          name: string,
+        ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
+        readonly list: () => readonly string[]
+      }
+    | undefined
+  /** Identity-mode slash wire. */
+  readonly identity?:
+    | {
+        readonly get: () => string
+        readonly set: (
+          mode: string,
+        ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
+        readonly list: () => readonly string[]
+      }
+    | undefined
+  /** Focus-chain slash wire. */
+  readonly focusChain?:
+    | {
+        readonly snapshot: () => {
+          readonly todos: ReadonlyArray<{ readonly text: string; readonly state: string }>
+          readonly currentTurn: number
+          readonly driftWarning: string | null
+        }
+        readonly reset: () => void
+        readonly skip: () => void
+      }
+    | undefined
+  /** Debug-tracer runtime toggle seam. */
+  readonly debug?:
+    | {
+        readonly get: () => DebugCmdState
+        readonly set: (state: DebugCmdState) => void
+      }
+    | undefined
+}
+
+/** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
+ *  enforcement-relevant fields of a skill without importing `@/skill` types. */
+export interface SkillRow {
+  readonly name: string
+  readonly description: string
+  readonly paths?: readonly string[]
+}
+
+export interface SlashCompletionHint {
+  readonly value: string
+  readonly kind: "command" | "argument" | "alias"
+  readonly description?: string
+}
+
+export interface SlashCommand {
+  readonly name: string
+  readonly describe: string
+  run(args: readonly string[], ctx: SlashContext): Promise<number>
+  readonly category?:
+    | "session"
+    | "config"
+    | "skills"
+    | "auth"
+    | "loop"
+    | "help"
+    | "history"
+    | "alias"
+    | "other"
+  readonly complete?: (
+    args: readonly string[],
+    partial: string,
+    ctx: SlashContext,
+  ) => readonly SlashCompletionHint[]
+}

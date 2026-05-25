@@ -3,7 +3,7 @@
  * round-trip, unsupported-type + oversize rejection.
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { closeSync, ftruncateSync, mkdtempSync, openSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -50,10 +50,18 @@ describe("loadImageBlock", () => {
   })
 
   test("oversize file throws", () => {
-    // Stub a file just over the cap without actually allocating 20MB: write a
-    // sparse-ish buffer. We allocate cap+1 bytes (acceptable for a unit test).
-    const big = new Uint8Array(MAX_IMAGE_BYTES + 1)
-    expect(() => loadImageBlock(writeImg("big.png", big))).toThrow(/max/)
+    // Sparse file: ftruncate extends to MAX+1 without writing bytes — the
+    // loader's `statSync(path).size` still reports the full length, so the
+    // size-cap branch fires without the 20MB disk write that made this test
+    // time out under concurrent suite load.
+    const p = join(work, "big.png")
+    const fd = openSync(p, "w")
+    try {
+      ftruncateSync(fd, MAX_IMAGE_BYTES + 1)
+    } finally {
+      closeSync(fd)
+    }
+    expect(() => loadImageBlock(p)).toThrow(/max/)
   })
 
   test("SUPPORTED_IMAGE_TYPES is the four-type closed set", () => {

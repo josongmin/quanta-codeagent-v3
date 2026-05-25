@@ -25,6 +25,7 @@ describe("selectDefaultReviewer", () => {
   test("prefers auto_review when the classifier-backed reviewer is live", () => {
     expect(
       selectDefaultReviewer({
+        threadPermission: undefined,
         permissionMode: "auto",
         sandboxProfile: "workspace-write",
         hasAutoReview: true,
@@ -36,6 +37,7 @@ describe("selectDefaultReviewer", () => {
   test("selects guardian_subagent for default-mode workspace-write posture when guardian is live", () => {
     expect(
       selectDefaultReviewer({
+        threadPermission: undefined,
         permissionMode: "default",
         sandboxProfile: "workspace-write",
         hasAutoReview: false,
@@ -44,6 +46,7 @@ describe("selectDefaultReviewer", () => {
     ).toBe("guardian_subagent")
     expect(
       selectDefaultReviewer({
+        threadPermission: undefined,
         permissionMode: "default",
         sandboxProfile: "workspace-write-net",
         hasAutoReview: false,
@@ -52,9 +55,55 @@ describe("selectDefaultReviewer", () => {
     ).toBe("guardian_subagent")
   })
 
+  test("explicit user authority beats auto and guardian capabilities", () => {
+    expect(
+      selectDefaultReviewer({
+        threadPermission: {
+          approvalPolicy: "on-request",
+          approvalsReviewer: "user",
+        },
+        permissionMode: "default",
+        sandboxProfile: "workspace-write",
+        hasAutoReview: true,
+        hasGuardianReview: true,
+      }),
+    ).toBe("user")
+  })
+
+  test("explicit agent authority selects guardian for on-request workspace-write posture", () => {
+    expect(
+      selectDefaultReviewer({
+        threadPermission: {
+          approvalPolicy: "on-request",
+          approvalsReviewer: "agent",
+        },
+        permissionMode: "acceptEdits",
+        sandboxProfile: "workspace-write",
+        hasAutoReview: false,
+        hasGuardianReview: true,
+      }),
+    ).toBe("guardian_subagent")
+  })
+
+  test("explicit agent authority falls back to auto_review when guardian posture is absent", () => {
+    expect(
+      selectDefaultReviewer({
+        threadPermission: {
+          approvalPolicy: "always",
+          approvalsReviewer: "agent",
+        },
+        permissionMode: "default",
+        sandboxProfile: "danger-full-access",
+        hasAutoReview: true,
+        hasGuardianReview: true,
+      }),
+    ).toBe("auto_review")
+  })
+
   test("keeps user as the fallback outside the default workspace-write posture", () => {
     expect(
       selectDefaultReviewer({
+        threadPermission: undefined,
         permissionMode: "acceptEdits",
         sandboxProfile: "workspace-write",
         hasAutoReview: false,
@@ -63,6 +112,7 @@ describe("selectDefaultReviewer", () => {
     ).toBe("user")
     expect(
       selectDefaultReviewer({
+        threadPermission: undefined,
         permissionMode: "default",
         sandboxProfile: "danger-full-access",
         hasAutoReview: false,
@@ -71,6 +121,7 @@ describe("selectDefaultReviewer", () => {
     ).toBe("user")
     expect(
       selectDefaultReviewer({
+        threadPermission: undefined,
         permissionMode: "default",
         sandboxProfile: "workspace-write",
         hasAutoReview: false,

@@ -1,4 +1,4 @@
-import type { PermissionMode, ReviewerTier } from "@/permission"
+import type { PermissionMode, ReviewerTier, ThreadPermission } from "@/permission"
 
 /** CLI-owned raw sandbox profiles. `default`/`off` mean "no explicit OS-level
  * sandbox posture selected on the surface"; unknown strings collapse to
@@ -33,27 +33,58 @@ export const parseCliReviewerSandboxProfile = (
 const isWorkspaceWriteProfile = (profile: CliReviewerSandboxProfile): boolean =>
   profile === "workspace-write" || profile === "workspace-write-net"
 
+type ReviewerAuthority = Pick<ThreadPermission, "approvalPolicy" | "approvalsReviewer">
+
+const selectExplicitAuthorityReviewer = (
+  authority: ReviewerAuthority,
+  input: {
+    sandboxProfile: CliReviewerSandboxProfile
+    hasAutoReview: boolean
+    hasGuardianReview: boolean
+  },
+): ReviewerTier => {
+  if (authority.approvalsReviewer === "user") return "user"
+  if (
+    authority.approvalPolicy === "on-request" &&
+    input.hasGuardianReview &&
+    isWorkspaceWriteProfile(input.sandboxProfile)
+  ) {
+    return "guardian_subagent"
+  }
+  if (input.hasAutoReview) return "auto_review"
+  return "user"
+}
+
 /** Surface policy for the default reviewer selection.
  *
- * Current CLI authority is narrower than the full ADR-0029 matrix: it knows
- * the session's coarse `PermissionMode`, the operator-selected shell sandbox
- * posture, and which reviewer capabilities are actually live. It does NOT yet
- * have a first-class approval-policy object (`never|on-request|...`), so
- * `PermissionMode.default` is the closest live approximation of an
- * "on-request" posture.
+ * Precedence:
+ *   1. explicit per-thread permission authority (`approvalPolicy` +
+ *      `approvalsReviewer`) when present;
+ *   2. legacy CLI fallback (`PermissionMode.default` as the old proxy for
+ *      "on-request");
+ *   3. final fail-closed `user`.
  *
- * Order:
+ * The explicit authority path closes the prior drift: the CLI can now honor
+ * the same per-thread permission record the permission stack already uses.
+ * The `PermissionMode` fallback remains only for threads with no stored
+ * permission record yet, preserving current interactive behavior.
+ *
+ * Legacy fallback order:
  *   1. live auto classifier ⇒ `auto_review`
  *   2. default mode + workspace-write posture + guardian capability
  *      ⇒ `guardian_subagent`
  *   3. everything else ⇒ `user`
  */
 export const selectDefaultReviewer = (input: {
+  threadPermission?: ReviewerAuthority
   permissionMode: PermissionMode
   sandboxProfile: CliReviewerSandboxProfile
   hasAutoReview: boolean
   hasGuardianReview: boolean
 }): ReviewerTier => {
+  if (input.threadPermission !== undefined) {
+    return selectExplicitAuthorityReviewer(input.threadPermission, input)
+  }
   if (input.hasAutoReview) return "auto_review"
   if (
     input.hasGuardianReview &&

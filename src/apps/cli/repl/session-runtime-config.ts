@@ -10,6 +10,10 @@ import {
   pickProvider,
   titleFlag,
 } from "../internal"
+import {
+  parseCliReviewerSandboxProfile,
+  type CliReviewerSandboxProfile,
+} from "./reviewer-policy"
 
 export interface SessionRuntimeConfig {
   readonly env: NodeJS.ProcessEnv
@@ -20,6 +24,7 @@ export interface SessionRuntimeConfig {
   readonly provider: Provider
   readonly model: string
   readonly mode: PermissionMode
+  readonly sandboxProfile: CliReviewerSandboxProfile
   readonly maxTurns: number
   readonly mcpConfigPath: string | undefined
   readonly spinnerIntervalMs: string
@@ -47,6 +52,7 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     provider,
     model: env("QUANTA_MODEL", DEFAULT_MODEL[provider]),
     mode: env("QUANTA_PERMISSION", "default") as PermissionMode,
+    sandboxProfile: parseCliReviewerSandboxProfile(process.env.QUANTA_SANDBOX),
     maxTurns: Number(env("QUANTA_MAX_TURNS", "40")),
     mcpConfigPath: process.env.QUANTA_MCP_CONFIG,
     spinnerIntervalMs: env("QUANTA_SPINNER_INTERVAL_MS", "80"),

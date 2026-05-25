@@ -33,7 +33,7 @@ import { dirname, join } from "node:path"
 import type { Plan } from "@/agent/plan/types"
 import { runtimeConfig } from "@/shared"
 import { formatBranchesPanel } from "./branch-search-progress"
-import { type DebugCmdState, runDebugCmd } from "./debug-cmd"
+import { runDebugCmd } from "./debug-cmd"
 import { editMessageCmd } from "./edit-message-cmd"
 import { editPlanCmd } from "./edit-plan-cmd"
 import { forkCheckpointCmd } from "./fork-checkpoint-cmd"
@@ -41,7 +41,6 @@ import { runHelpRender } from "./help-render"
 // R10 panels (history exports its own cmd; the rest are defined below
 // because their bodies live next to their renderers in the same slice).
 import { historyCmd } from "./history-cmd"
-import type { IdleMonitor } from "./idle-monitor"
 import { parseSnoozeDuration } from "./idle-monitor"
 import { loginCmd } from "./login-cmd"
 import { logoutCmd } from "./logout-cmd"
@@ -51,176 +50,19 @@ import { pasteCmd } from "./paste-cmd"
 import { permissionCmd } from "./permission-explain"
 import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "./plan-panel"
 import { queueCmd } from "./queue-cmd"
-import { type RetryWithSessionState, retryWithCmd } from "./retry-with"
+import { retryWithCmd } from "./retry-with"
 import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { rewindToolCmd } from "./rewind-tool-cmd"
 import { rulesCmd } from "./rules-cmd"
-import { type SideChatSessionState, sideCmd } from "./side-cmd"
+import { sideCmd } from "./side-cmd"
+import type { SkillRow, SlashCommand, SlashCompletionHint, SlashContext } from "./slash-contract"
+import { createSlashRuntime, isSlashCommand } from "./slash-engine"
 import { snapshotCmd } from "./snapshot-cmd"
 import { statusCmd } from "./status-cmd"
 import { webCmd } from "./web-cmd"
 import { renderWorkingStatePanel } from "./working-state-panel"
 
-export interface SlashContext {
-  readonly out: (s: string) => void
-  readonly err: (s: string) => void
-  readonly cwd: string
-  // `| undefined` is explicit on every optional field because the repo runs
-  // `exactOptionalPropertyTypes: true` — `{ now: undefined }` and `{}` are
-  // different there, and tests pass values that may legitimately be undefined.
-  readonly now?: (() => number) | undefined
-  readonly sleep?: ((ms: number) => Promise<void>) | undefined
-  /** Override the preferences file path (test seam). */
-  readonly prefsPath?: string | undefined
-  /** Override the preferences-home directory (test seam). When set, takes
-   *  precedence over `runtimeConfig().prefsHome` so per-test isolation does
-   *  not depend on mutating `process.env.QUANTA_PREFS_HOME` after
-   *  `runtimeConfig()` has already validated-and-frozen its snapshot. */
-  readonly prefsHome?: string | undefined
-  /** ADR-0065 model-swap retry session state. Absent ⇒ `/retry-with` prints
-   *  "no model candidates configured" and is a no-op (byte-identical to NOT
-   *  registering the command). Injected by the SURFACE (a future REPL or
-   *  session loop) — the 5 Tier-2 commands never read this field. */
-  readonly retry?: RetryWithSessionState | undefined
-  /** Cursor-inspired idle/snooze monitor. Wired by the REPL surface so
-   *  `/snooze` and `/resume` mutate the SAME instance the REPL prompt
-   *  source consults to refuse new turns. Absent ⇒ the two commands
-   *  print "not wired in this surface" and exit 0 (default-OFF parity
-   *  for one-shot / shell-entry surfaces). */
-  readonly idle?: IdleMonitor | undefined
-  /** Re-discover skills from disk on demand (Codex `forceReloadSkills` parity).
-   *  Returns the freshly-discovered set as `{name, description, paths?}` so
-   *  `/skills` and `/reload-skills` can render the inventory without coupling
-   *  to `@/skill` types (slice isolation — slash-commands is `apps/cli`).
-   *
-   *  IMPORTANT — our loop already re-runs `discoverSkills` per turn (every
-   *  `runAgent` calls `buildSessionFeatures` which calls `discoverSkills`),
-   *  so the model-facing inventory auto-refreshes between user prompts. This
-   *  callback exists for USER VISIBILITY: confirm a freshly-edited SKILL.md is
-   *  picked up BEFORE submitting the next prompt. The callback is surface-only
-   *  (no LLM call) so it is safe to register without a session. Absent ⇒ the
-   *  commands print "skills surface not wired in this surface" and exit 0. */
-  readonly skills?: (() => Promise<SkillRow[]>) | undefined
-  /** Claude A9 `/side <q>` isolated agent loop. Wired by the REPL surface
-   *  with the live session deps + assembler + (read-only) message reference.
-   *  Absent ⇒ `/side` prints "not wired in this surface" and exits 0
-   *  (default-OFF parity for one-shot / shell-entry surfaces). */
-  readonly side?: SideChatSessionState | undefined
-  /** R10 F (cost-panel) — sticky cumulative cost dashboard render seam. */
-  readonly cost?: (() => string) | undefined
-  /** R10 G (plan-panel) — read-only plan-store snapshot accessor. */
-  readonly planSnapshot?: (() => import("@/agent/plan/types").Plan | null) | undefined
-  /** R10 H (working-state-panel) — read-only WorkingState snapshot. */
-  readonly workingState?: (() => import("@/agent").WorkingState | undefined) | undefined
-  /** R10 I (history-cmd) — recent turns + tool-call breadcrumb. */
-  readonly history?: import("./history-cmd").HistorySessionState | undefined
-  /** R10 L (branch-search-progress) — N-best candidate tracker snapshot. */
-  readonly branchSearch?: (() => import("./branch-search-progress").BranchProgressState) | undefined
-  /** ADR-0236 / ADR-0213 — tool-profile slash wire. When set, `/profile`
-   *  reads + writes the active profile through this seam. `get` returns the
-   *  current profile name; `set` swaps it for the rest of the session
-   *  (idempotent: setting the same name is a no-op). `list` enumerates the
-   *  allowed profile names for the palette / tab-complete. Absent ⇒
-   *  `/profile` prints "not wired in this surface" + exit 0. */
-  readonly profile?:
-    | {
-        readonly get: () => string
-        readonly set: (
-          name: string,
-        ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
-        readonly list: () => readonly string[]
-      }
-    | undefined
-  /** ADR-0236 / ADR-0211 — identity-mode slash wire. When set, `/identity`
-   *  reads + writes the active identity-mode through this seam. The surface
-   *  owns the side-effect (e.g. rebuilding the cached system prompt /
-   *  marking the next turn for re-prompt). Absent ⇒ "not wired" + exit 0. */
-  readonly identity?:
-    | {
-        readonly get: () => string
-        readonly set: (
-          mode: string,
-        ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
-        readonly list: () => readonly string[]
-      }
-    | undefined
-  /** ADR-0236 / ADR-0219 — Focus Chain slash wire. When set, `/focus-chain`
-   *  surfaces the tracker's current state and supports three sub-commands:
-   *  `show` (default — print todos + drift warning), `reset` (clear all
-   *  todos), `skip` (mark "no inject next turn" by ticking once). Absent
-   *  ⇒ "not wired" + exit 0. */
-  readonly focusChain?:
-    | {
-        readonly snapshot: () => {
-          readonly todos: ReadonlyArray<{ readonly text: string; readonly state: string }>
-          readonly currentTurn: number
-          readonly driftWarning: string | null
-        }
-        readonly reset: () => void
-        readonly skip: () => void
-      }
-    | undefined
-  /** Track D — developer-mode debug tracer slash wire. When set, `/debug`
-   *  reads + writes the runtime debug-tracer state through this seam. The
-   *  surface owns the side effect (stream-tee swap-in). Absent ⇒ `/debug`
-   *  prints a "not wired" line (with the QUANTA_DEBUG=1 hint) and exits 0
-   *  — the runtime toggle requires the boot-time tee to have been
-   *  allocated, so the slash is intentionally a no-op without it. */
-  readonly debug?:
-    | {
-        readonly get: () => DebugCmdState
-        readonly set: (state: DebugCmdState) => void
-      }
-    | undefined
-}
-
-/** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
- *  enforcement-relevant fields of a skill without importing `@/skill` types
- *  (slice discipline). `paths` is preserved exactly so `/skills` can paint the
- *  conditional-activation glob list verbatim. */
-export interface SkillRow {
-  readonly name: string
-  readonly description: string
-  readonly paths?: readonly string[]
-}
-
-/** Per-command argument completion candidate. Optional surface used by a
- *  readline-style completer; kept as an exported type so command authors
- *  can return strongly-typed hints from their `complete()` without reaching
- *  into another slice. */
-export interface SlashCompletionHint {
-  readonly value: string
-  readonly kind: "command" | "argument" | "alias"
-  readonly description?: string
-}
-
-export interface SlashCommand {
-  readonly name: string
-  readonly describe: string
-  run(args: readonly string[], ctx: SlashContext): Promise<number>
-  /** Optional palette category — UI surfaces (e.g. a future `/help`) can
-   *  paint commands grouped by this label. Absent ⇒ "other" bucket. Closed
-   *  literal union so a typo at the call site fails to compile. */
-  readonly category?:
-    | "session"
-    | "config"
-    | "skills"
-    | "auth"
-    | "loop"
-    | "help"
-    | "history"
-    | "alias"
-    | "other"
-  /** Optional argument completer for `<Tab>`-driven readline completion.
-   *  `args` = tokens BEFORE the cursor (excluding the partial); `partial`
-   *  = the literal substring being typed. Absent ⇒ no suggestions after
-   *  this command's name. */
-  readonly complete?: (
-    args: readonly string[],
-    partial: string,
-    ctx: SlashContext,
-  ) => readonly SlashCompletionHint[]
-}
+export type { SkillRow, SlashCommand, SlashCompletionHint, SlashContext } from "./slash-contract"
 
 const VALID_THEMES = ["auto", "light", "dark", "claude", "none"] as const
 type Theme = (typeof VALID_THEMES)[number]
@@ -902,74 +744,14 @@ export const BUILTINS: readonly SlashCommand[] = [
   debugCmd,
 ] as const
 
-const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(
-  BUILTINS.map((c) => [c.name, c]),
-)
-
 /** `/exit` and `/quit` are short-circuited by `composePromptPipeline` BEFORE the
  *  BUILTINS dispatch — they aren't `SlashCommand` entries but a user
  *  pressing <Tab> at the prompt expects them in the completion list. */
 const REPL_VIRTUAL_COMMANDS = ["/exit", "/quit"] as const
 
-/** Lookup the `describe` field for a slash command name. Returns
- *  `undefined` for unknown names (alias from a future plugin etc.). Used
- *  by the REPL prompt's command palette to paint the description column
- *  next to each candidate. */
-export const describeSlashCommand = (name: string): string | undefined => {
-  const cmd = BUILTINS_BY_NAME.get(name)
-  return cmd?.describe
-}
+const slashRuntime = createSlashRuntime(BUILTINS, { virtualCommands: REPL_VIRTUAL_COMMANDS })
 
-/** Node `readline` completer for the REPL prompt.
- *
- *  Behavior (matches Node's expected `(line) => [string[], string]` shape):
- *   - Empty / non-`/` input ⇒ no candidates (don't pollute the agent prompt).
- *   - `/` prefix ⇒ candidate list = builtin slash commands + the REPL-virtual
- *     `/exit`/`/quit` pair, filtered by `startsWith(line)`.
- *
- *  Tab on a single match completes the command; on multiple matches the
- *  reader paints the candidate list — both are stock readline behavior.
- *  The function is pure (no IO, no globals beyond the BUILTINS table) so the
- *  REPL can pass it straight to `readline.createInterface({ completer })`. */
-export const slashCompleter = (line: string): [string[], string] => {
-  if (line === "" || line[0] !== "/") return [[], line]
-  const vocab = [...BUILTINS.map((c) => c.name), ...REPL_VIRTUAL_COMMANDS]
-  const matches = vocab.filter((n) => n.startsWith(line)).sort()
-  return [matches, line]
-}
-
-/** Recognise a CLI argv token as a slash-command invocation. `/foo` matches;
- *  `/path/to/file` does NOT (so legacy path-mode resume arguments fall through
- *  to the agent path). */
-export const isSlashCommand = (s: string): boolean => {
-  if (s.length < 2 || s[0] !== "/") return false
-  const second = s[1]
-  if (second === undefined) return false
-  if (!/[a-z]/i.test(second)) return false
-  // Reject embedded `/` so filesystem paths don't collide.
-  return !s.slice(1).includes("/")
-}
-
-const tokenize = (line: string): readonly string[] =>
-  line
-    .trim()
-    .split(/\s+/)
-    .filter((t) => t.length > 0)
-
-/** Parse `line`, dispatch to the matching builtin, return its exit code. */
-export const runSlashCommand = async (line: string, ctx: SlashContext): Promise<number> => {
-  const tokens = tokenize(line)
-  const name = tokens[0]
-  if (name === undefined) {
-    ctx.err("slash: empty command\n")
-    return 1
-  }
-  const cmd = BUILTINS_BY_NAME.get(name)
-  if (cmd === undefined) {
-    ctx.err(`slash: unknown command: ${name}\n`)
-    ctx.out("Available:\n")
-    for (const c of BUILTINS) ctx.out(`  ${c.name.padEnd(12)} ${c.describe}\n`)
-    return 1
-  }
-  return cmd.run(tokens.slice(1), ctx)
-}
+export const describeSlashCommand = slashRuntime.describe
+export const slashCompleter = slashRuntime.complete
+export const runSlashCommand = slashRuntime.run
+export { isSlashCommand }

@@ -85,7 +85,7 @@ Note: `LLMPort.StreamEvent` is **leaky-by-design** — `ThinkingBlock.signature`
 |---|---|---|
 | `PermissionStore` / `PermissionReader` | `src/permission/permission-store.ts` (writer/narrow-reader split) | `createPermissionStore({filePath})` is the factory; `getDefaultPermissionStore()` is the composition-only singleton |
 | `ClassifierPort` | `src/permission/classifier.ts` | functional port; injected wrapper enables slice inversion (`@/permission` never imports `@/llm`) |
-| `ReviewerPort` | `src/permission/types.ts` | concrete adapter: `createOnConfirmReviewerPort()` in `src/agent/reviewer-port.ts`; live dispatch wire via `AgentConfig.admissibility.reviewerPort` |
+| `ReviewerPort` | `src/permission/types.ts` | concrete adapters: `createOnConfirmReviewerPort()` + classifier-backed auto reviewer + guardian subagent adapter; live dispatch wire via `AgentConfig.admissibility.reviewerPort` |
 
 ### `@/tool`
 | Port / Provider | Definition | Adapters | Status |
@@ -214,7 +214,7 @@ Current rules:
 
 ## 9. Open debt
 
-- **Remaining port-adoption debt**: `ReviewerPort` only has the user-backed `createOnConfirmReviewerPort()` adapter today — higher-tier auto/guardian reviewers still need real composition wiring, and plan-exit still lacks a host-driven mode/apply lifecycle beyond the now-live CLI approval port.
+- **Reviewer authority fallback**: CLI now honors explicit per-thread permission authority (`approvalPolicy` + `approvalsReviewer`) and injects the same `PermissionStore` into admissibility, but threads with no stored record still fall back to the older `PermissionMode.default` proxy for `"on-request"` reviewer selection.
 - **Multi-process permission flock**: the current `read-reconcile-merge` defends against last-write-wins clobber but not true concurrent-flush atomicity. OS lockfile is v4 scope (ADR-0046).
 - **Cost dashboard `cacheHitRate` denominator**: cosmetic understatement for OpenAI (`prompt_tokens` includes cached). Not a billing bug.
 - **Some `@/agent` callsites still call `Date.now()` directly** — burn-down list in the scanner rule; migrate to injected clocks per round.

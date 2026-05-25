@@ -1,15 +1,9 @@
 import * as readline from "node:readline/promises"
-import { type AgentConfig, type EffortLevel, parseEffort, resolveAgentMode } from "@/agent"
+import type { AgentConfig } from "@/agent"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
-import type { Message } from "@/llm"
-import {
-  buildCostDashboard,
-  GEN_AI_ATTRS,
-  renderDashboardText,
-  summarizeWorkMetrics,
-} from "@/observability"
-import { discoverSkills, discoverSystemSkills } from "@/skill"
+import { summarizeWorkMetrics } from "@/observability"
+import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
@@ -21,11 +15,8 @@ import {
 import { type CostPanel, createCostPanel, isCostPanelEnabled } from "./cost-panel"
 import type { DebugCmdState } from "./debug-cmd"
 import { createDebugTracer, parseDebugEnv } from "./debug-tracer"
-import type { HistorySessionState } from "./history-cmd"
-import type { IdleMonitor } from "./idle-monitor"
-import { runImageCmd } from "./image-cmd"
 import { createImageQueue, type ImageQueue } from "./image-queue"
-import { assembleConfig, buildSkillsConfig, env, type SessionDeps } from "./internal"
+import { buildSkillsConfig, env } from "./internal"
 import {
   createLifecyclePills,
   isLifecyclePillsEnabled,
@@ -33,17 +24,21 @@ import {
   type McpPillServer,
   readPillEnvFlags,
 } from "./lifecycle-pills"
-import { createPromptHistory, type PromptHistory } from "./prompt-history"
 import { runSessionLoop } from "./repl/session-loop"
 import { setupSession } from "./repl/session-setup"
+import { buildSkillsCallback, installPills } from "./repl/skills-surface"
+import { dispatchReplSlash } from "./repl/slash-surface"
+import {
+  buildPromptUx,
+  composeSurfaceSlashCtx,
+  composeTurnSinks,
+  createSurfaceState,
+} from "./repl/surface-compose"
 import type { RewindSlashState } from "./rewind-cmd"
 import { createCliRewindGitPort, isCliRewindGitEnabled } from "./rewind-git"
-import { buildRuleInventory, isRulePillEnabled } from "./rule-indicator"
 import { runSessionCommand } from "./session-commands"
-import type { SideChatSessionState } from "./side-cmd"
-import { isSlashCommand, runSlashCommand, type SkillRow, slashCompleter } from "./slash-commands"
+import { runSlashCommand, slashCompleter } from "./slash-commands"
 import type { StatusBar } from "./status-bar"
-import { createStatusPills, type SandboxMode } from "./status-pills"
 import { createTurnIndicator, isIndicatorEnabled, type TurnIndicator } from "./turn-indicator"
 import {
   createTurnSummary,
@@ -81,26 +76,7 @@ import {
  *      S3 port wire-up. Each adapter is OPTIONAL — when its env/dep gate is
  *      off the field is OMITTED from `ReplSlashCtx` so the slash command
  *      keeps its existing "not wired" output (byte-identical default-OFF). */
-export type ReplSlashCtx = Partial<{
-  skills: () => Promise<SkillRow[]>
-  idle: IdleMonitor
-  imageQueue: ImageQueue
-  rewindSession: RewindSlashState
-  mcp: import("./mcp-cmd").McpSurfaceInfo
-  cost: () => string
-  planSnapshot: () => import("@/agent/plan/types").Plan | null
-  history: HistorySessionState
-  branchSearch: () => import("./branch-search-progress").BranchProgressState
-  /** `/side` SessionState FACTORY — built fresh on each invocation so the
-   *  `messages` value reflects the LIVE transcript (the surface-scoped
-   *  `history: Message[]` binding is reassigned per turn). Stored as a
-   *  callback rather than a value to avoid stale snapshots. */
-  side: () => SideChatSessionState
-  /** Track D — debug-tracer runtime toggle. Present iff the boot gate
-   *  allocated the mutable proxy port; absent ⇒ `/debug` slash prints
-   *  "not wired" + the QUANTA_DEBUG hint. */
-  debug: { get: () => DebugCmdState; set: (state: DebugCmdState) => void }
-}>
+export { dispatchReplSlash, type ReplSlashCtx } from "./repl/slash-surface"
 
 /** Claude A1 rewind/fork: bind `/rewind` and `/fork` to the live session id.
  *  `--restore-files` additionally needs a real-git port wired in; gated on
@@ -214,33 +190,6 @@ const deriveMcpPillServers = (mcpTools: ReadonlyArray<{ name: string }>): McpPil
   }))
 }
 
-/** Snapshot the CLI-owned subagent + follow-up queue handles into the
- *  lifecycle pills + flush. Pure helper extracted to keep the `turn()` and
- *  `onTurnEnd` callsites under biome's cognitive-complexity budget.
- *
- *  Reading patterns mirror the spec's data sources:
- *    - subagent: `taskRegistry.pendingIds().length` (running) +
- *      `taskRegistry.list().length` (cumulative — running + settled).
- *    - follow-up: `followUpQueue.size()` (queue depth across all threads).
- *  Either handle absent ⇒ that pill is omitted (no allocation). `flush()`
- *  is a no-op when every pill falls below its threshold, so a quiet turn
- *  leaves no trailing line. */
-const snapshotAndFlushLifecyclePills = (
-  pills: LifecyclePills,
-  taskRegistry: TaskRegistry | undefined,
-  followUpQueue: FollowUpQueue | undefined,
-): void => {
-  if (taskRegistry !== undefined) {
-    const running = taskRegistry.pendingIds().length
-    const total = taskRegistry.list().length
-    pills.update({ subagent: { running, total } })
-  }
-  if (followUpQueue !== undefined) {
-    pills.update({ followUp: { queued: followUpQueue.size() } })
-  }
-  pills.flush()
-}
-
 /** ADR-0064 L4: the default per-turn work-metrics sink. The collector + emit are
  *  already wired in the loop (gated on `AgentConfig.workMetricsSink`), but no
  *  DEFAULT sink existed so the metrics were collected and dropped. This wires
@@ -270,45 +219,6 @@ const buildCostPanelOrUndefined = (
   return createCostPanel({ enabled: true, model })
 }
 
-/** Track per-turn token deltas from cumulative `metrics.snapshot()` counters
- *  and fold into the {@link CostPanel}. Mutates `prev` in place so the
- *  caller-owned baseline keeps the running totals between turns. No-op on
- *  non-positive deltas (defensive against counter resets / dropped snapshots
- *  — never reports a negative usage). */
-interface CostPanelDeltaBaseline {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-}
-/** Conditional cost-panel fold — wraps the two presence checks (panel built,
- *  metrics wired) into ONE call site so the per-turn closure stays inside the
- *  biome cognitive-complexity budget. No-op when either is absent. */
-const foldCostPanelIfWired = (
-  panel: CostPanel | undefined,
-  metrics: { snapshot: () => { counters: Record<string, number> } } | undefined,
-  prev: CostPanelDeltaBaseline,
-): void => {
-  if (panel === undefined || metrics === undefined) return
-  foldCostPanelDelta(panel, metrics.snapshot(), prev)
-}
-
-const foldCostPanelDelta = (
-  panel: CostPanel,
-  snap: { counters: Record<string, number> },
-  prev: CostPanelDeltaBaseline,
-): void => {
-  const curIn = snap.counters[GEN_AI_ATTRS.usage.inputTokens] ?? 0
-  const curOut = snap.counters[GEN_AI_ATTRS.usage.outputTokens] ?? 0
-  const curCache = snap.counters[GEN_AI_ATTRS.usage.cacheReadInputTokens] ?? 0
-  const dIn = Math.max(0, curIn - prev.inputTokens)
-  const dOut = Math.max(0, curOut - prev.outputTokens)
-  const dCache = Math.max(0, curCache - prev.cacheReadTokens)
-  prev.inputTokens = curIn
-  prev.outputTokens = curOut
-  prev.cacheReadTokens = curCache
-  panel.incrementTurn({ inputTokens: dIn, outputTokens: dOut, cacheReadTokens: dCache })
-}
-
 /** S3 branch-search progress tracker — built ONCE per session. Returns
  *  `undefined` when the env/TTY gate refuses so the `/branches` slash command
  *  keeps its existing "not wired" output (byte-identical). The tracker itself
@@ -336,83 +246,6 @@ const buildPlanStoreOrUndefined = (envSource: NodeJS.ProcessEnv): PlanStore | un
   return createInMemoryPlanStore({ now: Date.now })
 }
 
-/** S3 slashctx-port composer. Folds the 9 optional/required REPL-side
- *  adapters into a single {@link ReplSlashCtx} literal — extracted from
- *  `runRepl` so the host stays inside the biome cognitive-complexity budget
- *  (each conditional spread is one decision). Default-OFF per port:
- *  absent adapter ⇒ field omitted ⇒ the slash command keeps its existing
- *  "not wired in this surface" output. */
-interface BuildReplSlashCtxArgs {
-  skillsCb: (() => Promise<SkillRow[]>) | undefined
-  idleMonitor: IdleMonitor
-  imageQueue: ImageQueue | undefined
-  rewindState: RewindSlashState | undefined
-  mcpSurface: import("./mcp-cmd").McpSurfaceInfo | undefined
-  costPanel: CostPanel | undefined
-  planStore: PlanStore | undefined
-  branchProgress: BranchProgressTracker | undefined
-  /** Returns the LIVE `Message[]` ref (the REPL re-binds `history` per turn,
-   *  so the slash adapters need a getter — not a captured value). */
-  getHistory: () => readonly Message[]
-  sessionDeps: SessionDeps
-  abortSignal: AbortSignal
-  /** Track D — debug-tracer handle. Absent ⇒ `/debug` prints "not wired". */
-  debugHandle: import("./repl/session-setup").DebugTracerHandle | undefined
-}
-const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
-  const {
-    skillsCb,
-    idleMonitor,
-    imageQueue,
-    rewindState,
-    mcpSurface,
-    costPanel,
-    planStore,
-    branchProgress,
-    getHistory,
-    sessionDeps,
-    abortSignal,
-    debugHandle,
-  } = args
-  return {
-    ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
-    idle: idleMonitor,
-    ...(imageQueue !== undefined ? { imageQueue } : {}),
-    ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
-    ...(mcpSurface !== undefined ? { mcp: mcpSurface } : {}),
-    ...(costPanel !== undefined ? { cost: () => costPanel.renderDetailed() } : {}),
-    ...(planStore !== undefined
-      ? { planSnapshot: (): import("@/agent/plan/types").Plan | null => planStore.current() }
-      : {}),
-    ...(branchProgress !== undefined ? { branchSearch: () => branchProgress.snapshot() } : {}),
-    // /history is ALWAYS wired in the REPL — the live transcript is the source
-    // of truth; a one-shot or shell-entry surface that wants the "not wired"
-    // path would omit this field by NOT calling this composer.
-    history: { messages: getHistory },
-    // /side is ALWAYS wired — built fresh on each invocation so `messages`
-    // reflects the LIVE transcript at call-time.
-    side: (): SideChatSessionState => ({
-      deps: sessionDeps,
-      assembleConfig,
-      messages: getHistory(),
-      signal: abortSignal,
-    }),
-    // Track D — `/debug` runtime toggle. Absent ⇒ slash prints "not wired".
-    ...(debugHandle !== undefined ? { debug: debugHandle } : {}),
-  }
-}
-
-/** Build the `ctx.skills` callback the slash commands `/skills` and
- *  `/reload-skills` consume. Returns the freshly-discovered set as
- *  `{name, description, paths?}` rows — mirrors what `buildSessionFeatures`
- *  feeds the model, so the user-visible list and the model-visible inventory
- *  cannot drift. Surface-only: no LLM call, just disk scan + bundled merge.
- *  Absent skills config ⇒ `undefined` so the slash commands print "not wired".
- *
- *  NOTE: our loop already re-runs `discoverSkills` per `runAgent` call (i.e.
- *  per user turn), so newly-added SKILL.md files reach the model on the next
- *  prompt automatically. These slash commands exist for USER VISIBILITY —
- *  confirming the disk state BEFORE submitting the next prompt. */
 /** Bridge `AgentEvent`s into the live turn indicator. Implements `StreamPort`
  *  so it can be teed alongside the existing recorder/stdout port — the
  *  upstream emit path is unchanged (TeeStream forwards every event to every
@@ -559,130 +392,6 @@ const buildDebugTracerAndStream = (
   return { stream: new TeeStream([stream, proxy]), debugHandle }
 }
 
-const buildSkillsCallback = (
-  skillsConfig: AgentConfig["skills"] | undefined,
-): (() => Promise<SkillRow[]>) | undefined => {
-  if (skillsConfig === undefined) return undefined
-  return async (): Promise<SkillRow[]> => {
-    const userSkills = skillsConfig.dir !== undefined ? await discoverSkills(skillsConfig.dir) : []
-    const systemSkills = await discoverSystemSkills()
-    // Same precedence as buildSessionFeatures: system wins on name collision.
-    const byName = new Map<string, SkillRow>()
-    for (const s of userSkills) {
-      const row: SkillRow = { name: s.name, description: s.description }
-      if (s.paths !== undefined) (row as { paths?: readonly string[] }).paths = s.paths
-      byName.set(s.name, row)
-    }
-    for (const s of systemSkills) {
-      const row: SkillRow = { name: s.name, description: s.description }
-      if (s.paths !== undefined) (row as { paths?: readonly string[] }).paths = s.paths
-      byName.set(s.name, row)
-    }
-    return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-  }
-}
-
-/** Build and wire the 4-pill status chrome (workspace / mode+effort / skills /
- *  sandbox). Extracted from {@link runRepl} so that the per-pill resolution
- *  logic (planMode→AgentMode, QUANTA_EFFORT, QUANTA_SANDBOX, async skill
- *  discovery) does not push `runRepl` past the biome cognitive-complexity
- *  budget. Returns the live {@link StatusPills} handle; caller owns dispose.
- *
- *  Default-ON contract: when the underlying TTY is absent, `createStatusPills`
- *  itself returns a no-op composer (render="" / update=no-op) so callers can
- *  always call `pills.update(...)` without a TTY check. */
-const installPills = (deps: {
-  statusBar: StatusBar
-  cwd: string
-  planMode: boolean
-  skillsConfig: AgentConfig["skills"] | undefined
-}): ReturnType<typeof createStatusPills> => {
-  const initialAgentMode = resolveAgentMode(undefined, deps.planMode)
-  const initialEffort: EffortLevel | undefined = parseEffort(env("QUANTA_EFFORT", ""))
-  const initialSandbox: SandboxMode = (env("QUANTA_SANDBOX", "default") as SandboxMode) ?? "default"
-  const pills = createStatusPills({
-    statusBar: deps.statusBar,
-    initial: {
-      cwd: deps.cwd,
-      mode: initialAgentMode,
-      ...(initialEffort !== undefined ? { effort: initialEffort } : {}),
-      sandboxMode: initialSandbox,
-    },
-  })
-  // Active-skill inventory — populated opportunistically using the same
-  // discover seam the slash commands use. No skillsConfig ⇒ pill render
-  // skips the slot (composer drops empty/undefined fields).
-  const skillsCbForPills = buildSkillsCallback(deps.skillsConfig)
-  if (skillsCbForPills !== undefined) {
-    void skillsCbForPills()
-      .then((rows) => pills.update({ activeSkills: rows.map((r) => ({ name: r.name })) }))
-      .catch(() => undefined) // best-effort; pills stay empty on discover error
-  }
-  // Rule indicator — best-effort fs walk shadowing the agent loop's loaders.
-  // Off-loop and cached for the REPL session; the loop's own load is
-  // unchanged, so the prompt body stays byte-identical (read-only mirror).
-  // `isRulePillEnabled()` defaults to `process.env` internally — keep the
-  // env read INSIDE rule-indicator.ts (which is allowlisted) rather than
-  // duplicating it at the call site.
-  if (isRulePillEnabled()) {
-    void buildRuleInventory({ cwd: deps.cwd })
-      .then((inv) => {
-        if (inv.totalCount > 0) {
-          pills.update({
-            rules: { activeCount: inv.activeCount, totalCount: inv.totalCount },
-          })
-        }
-      })
-      .catch(() => undefined)
-  }
-  return pills
-}
-
-/** Try to handle `input` as an in-REPL slash command. Returns true iff the
- *  input was routed and consumed by the slash surface; false means the
- *  caller must forward it to the model path. `isSlashCommand` rejects paths
- *  like `/path/to/x` so legacy file-resume tokens still fall through to the
- *  agent path. */
-export const dispatchReplSlash = async (
-  input: string,
-  slashCtx?: ReplSlashCtx,
-): Promise<boolean> => {
-  const head = input.split(/\s+/)[0] ?? ""
-  if (!isSlashCommand(head)) return false
-  // ADR-0083 multi-modal: `/image add|list|clear` is in-REPL only (the queue
-  // is REPL-scoped surface state; the global `BUILTINS` table has no session
-  // context). Short-circuit BEFORE delegating to the surface-agnostic
-  // dispatcher so the queue mutation stays inside this surface.
-  if (head === "/image" && slashCtx?.imageQueue !== undefined) {
-    runImageCmd(input, {
-      out: (s) => process.stdout.write(s),
-      err: (s) => process.stderr.write(s),
-      cwd: process.cwd(),
-      queue: slashCtx.imageQueue,
-    })
-    return true
-  }
-  await runSlashCommand(input, {
-    out: (s) => process.stdout.write(s),
-    err: (s) => process.stderr.write(s),
-    cwd: process.cwd(),
-    ...(slashCtx?.skills !== undefined ? { skills: slashCtx.skills } : {}),
-    ...(slashCtx?.idle !== undefined ? { idle: slashCtx.idle } : {}),
-    ...(slashCtx?.rewindSession !== undefined ? { rewindSession: slashCtx.rewindSession } : {}),
-    ...(slashCtx?.mcp !== undefined ? { mcp: slashCtx.mcp } : {}),
-    // S3 slashctx-port wire — each field omitted entirely when the surface
-    // did not build the adapter, so the slash command keeps its existing
-    // "not wired" output (byte-identical default-OFF, no crash).
-    ...(slashCtx?.cost !== undefined ? { cost: slashCtx.cost } : {}),
-    ...(slashCtx?.planSnapshot !== undefined ? { planSnapshot: slashCtx.planSnapshot } : {}),
-    ...(slashCtx?.history !== undefined ? { history: slashCtx.history } : {}),
-    ...(slashCtx?.branchSearch !== undefined ? { branchSearch: slashCtx.branchSearch } : {}),
-    ...(slashCtx?.side !== undefined ? { side: slashCtx.side() } : {}),
-    ...(slashCtx?.debug !== undefined ? { debug: slashCtx.debug } : {}),
-  })
-  return true
-}
-
 /** Route `quanta session …` to the session subcommand dispatcher. Returns the
  *  exit code so the caller can `process.exit(...)`. None of the agent/REPL
  *  wiring runs in this branch — that's how byte-identical default-OFF holds
@@ -723,16 +432,6 @@ export const runSlashMain = async (_tok: string): Promise<number> => {
   })
 }
 
-/** Print a turn-level error inline + flash the status bar. Used by the
- *  interactive turn-runner sink to keep the REPL alive when a single turn
- *  throws. Slice-C: invoked via {@link runOneTurn}.onError so a non-abort
- *  failure paints the message + a transient and the loop continues. */
-const renderTurnError = (e: unknown, statusBar: StatusBar): void => {
-  const msg = e instanceof Error ? e.message : String(e)
-  process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
-  statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
-}
-
 /**
  * Main REPL/one-shot entry: assembles the agent stack, resolves the resume
  * state machine, and delegates interactive vs argv-prompt dispatch to
@@ -758,26 +457,16 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   buildTurnIndicatorAndStream,
   buildDebugTracerAndStream,
   buildWorkMetricsSink,
+  loadPermissionStore: async (): Promise<PermissionStore | undefined> => {
+    try {
+      const store = getDefaultPermissionStore()
+      await store.load()
+      return store
+    } catch {
+      return undefined
+    }
+  },
   installPills,
-}
-
-/** Slice-C: UX opts (history + multiline) the prompt pipeline consumes.
- *  Default-ON when the env knob is unset; explicit `=0` reverts to the
- *  no-history single-line path (byte-identical). */
-const buildPromptUx = (): { promptHistory?: PromptHistory; multiline?: boolean } => {
-  const historyEnabled = env("QUANTA_HISTORY", "1") !== "0"
-  const historyMax = Math.max(1, Number(env("QUANTA_HISTORY_MAX", "1000")))
-  const historyFile = process.env.QUANTA_HISTORY_FILE
-  const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
-    maxLines: historyMax,
-    ...(historyFile !== undefined ? { filePath: historyFile } : {}),
-  }
-  const promptHistory = historyEnabled ? createPromptHistory(promptHistoryOpts) : undefined
-  const multilineEnabled = env("QUANTA_MULTILINE", "1") !== "0"
-  return {
-    ...(promptHistory !== undefined ? { promptHistory } : {}),
-    multiline: multilineEnabled,
-  }
 }
 
 /** Slice-C SOLID split — thin orchestrator over the 6 helpers under
@@ -797,7 +486,11 @@ const buildPromptUx = (): { promptHistory?: PromptHistory; multiline?: boolean }
  *  a pure relocation of the prior inline code. */
 export const runRepl = async (): Promise<void> => {
   const setup = await setupSession(sessionSetupDeps)
-  const surfaceState = createSurfaceState(setup)
+  const surfaceState = createSurfaceState({
+    imageQueue: setup.argPrompt ? undefined : buildImageQueue(),
+    rewindState: buildRewindSlashState(setup.sessionId, setup.cwd),
+    history: setup.history,
+  })
   try {
     const slashCtx = composeSurfaceSlashCtx(setup, surfaceState)
     await runSessionLoop({
@@ -813,72 +506,5 @@ export const runRepl = async (): Promise<void> => {
   } finally {
     setup.lifecyclePills.dispose()
     await setup.shutdownMcp()
-  }
-}
-
-/** Slice-C surface-mutable state owned by `runRepl` — held in a single
- *  closure record so the slash-ctx + turn-sinks closures can READ the live
- *  `history` (re-bound after each interactive turn). The `imageQueue` and
- *  `rewindState` and `costDeltaPrev` are stable once allocated. */
-interface SurfaceState {
-  imageQueue: ImageQueue | undefined
-  rewindState: ReturnType<typeof buildRewindSlashState>
-  history: readonly Message[]
-  readonly costDeltaPrev: CostPanelDeltaBaseline
-}
-
-const createSurfaceState = (setup: Awaited<ReturnType<typeof setupSession>>): SurfaceState => ({
-  imageQueue: setup.argPrompt ? undefined : buildImageQueue(),
-  rewindState: buildRewindSlashState(setup.sessionId, setup.cwd),
-  history: setup.history,
-  costDeltaPrev: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
-})
-
-const composeSurfaceSlashCtx = (
-  setup: Awaited<ReturnType<typeof setupSession>>,
-  state: SurfaceState,
-): ReplSlashCtx =>
-  buildReplSlashCtx({
-    skillsCb: buildSkillsCallback(setup.skillsConfig),
-    idleMonitor: setup.idleMonitor,
-    imageQueue: state.imageQueue,
-    rewindState: state.rewindState,
-    mcpSurface: setup.mcpSurface,
-    costPanel: setup.costPanel,
-    planStore: setup.planStore,
-    branchProgress: setup.branchProgress,
-    getHistory: () => state.history,
-    sessionDeps: setup.sessionDeps,
-    abortSignal: setup.abort.signal,
-    debugHandle: setup.debugHandle,
-  })
-
-const composeTurnSinks = (
-  setup: Awaited<ReturnType<typeof setupSession>>,
-  state: SurfaceState,
-): Parameters<typeof runSessionLoop>[0]["sinks"] => {
-  const { model, slog, metrics, turnSummary, statusBar } = setup
-  return {
-    renderTurnDashboard: (): void => {
-      if (!metrics) return
-      const snap = metrics.snapshot()
-      slog.info("metrics.snapshot", { snapshot: snap })
-      process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
-      foldCostPanelIfWired(setup.costPanel, metrics, state.costDeltaPrev)
-    },
-    renderAndResetSummary: (outcome): void => {
-      state.history = outcome.messages
-      const summary = turnSummary.render(outcome as Parameters<typeof turnSummary.render>[0])
-      if (summary !== "") process.stderr.write(summary)
-      turnSummary.reset()
-    },
-    flushLifecyclePills: (): void => {
-      snapshotAndFlushLifecyclePills(
-        setup.lifecyclePills,
-        setup.lifecycleTaskRegistry,
-        setup.lifecycleFollowUpQueue,
-      )
-    },
-    renderTurnError: (err): void => renderTurnError(err, statusBar),
   }
 }

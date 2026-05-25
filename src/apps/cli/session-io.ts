@@ -1,13 +1,17 @@
 import { existsSync } from "node:fs"
 import type { StructuredLogger } from "@/observability"
-import { logger } from "@/shared"
+import { failSessionStartup } from "./repl/session-startup-error"
 
 /**
  * CLI session I/O — switch-into-session-cwd helper.
  *
- * `switchToSessionCwd` stays here because it calls `process.chdir` /
- * `process.exit` — both surface-specific lifetime concerns. `persistTurn`
- * (which is pure surface-agnostic plumbing) was moved to
+ * `switchToSessionCwd` stays here because it calls `process.chdir`. The
+ * missing-target branch throws `SessionStartupError` (kind:
+ * `session_cwd_missing`) instead of exiting inline so the top-level
+ * `main().catch` owns the exit code and the contract test can assert
+ * structured failure without killing the test runner.
+ *
+ * `persistTurn` (which is pure surface-agnostic plumbing) was moved to
  * `@/runner/orchestrate/persist-turn` and is re-exported below so existing
  * importers (`repl.ts`, the unit tests) keep resolving it from here.
  *
@@ -19,13 +23,6 @@ import { logger } from "@/shared"
 export type { PersistTurnInput } from "@/runner/orchestrate"
 export { persistTurn } from "@/runner/orchestrate"
 
-/**
- * HIGH-4 helper: if the resumed id-mode session lives in a different cwd
- * (e.g. a fork-worktree session), chdir into it BEFORE the cwd captured by
- * `SessionDeps` is read. Exits 1 with a clear error when the directory is
- * missing on disk (worktree removed since the session was saved). Returns
- * the post-chdir cwd.
- */
 export const switchToSessionCwd = (
   current: string,
   target: string,
@@ -33,8 +30,10 @@ export const switchToSessionCwd = (
 ): string => {
   if (target === current) return current
   if (!existsSync(target)) {
-    logger.error(`Session cwd missing: ${target}. The worktree may have been removed.`)
-    process.exit(1)
+    failSessionStartup(
+      "session_cwd_missing",
+      `Session cwd missing: ${target}. The worktree may have been removed.`,
+    )
   }
   process.chdir(target)
   const next = process.cwd()

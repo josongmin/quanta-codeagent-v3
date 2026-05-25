@@ -1,5 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
-import type { ReviewContext, ToolActionKeyed } from "@/permission"
+import {
+  createPermissionStore,
+  setThreadPermission,
+  type PermissionStore,
+  type ReviewContext,
+  type ToolActionKeyed,
+} from "@/permission"
 import type {
   SessionSetupResult,
   SetupSessionDeps,
@@ -23,7 +29,7 @@ import type {
  *   - SIGINT handler IS registered on the process (spy on process.on)
  *   - When the abort fires, the handler triggers the AbortController
  *     returned in the result (so the surface's SIGINT contract is end-to-end)
- *   - All 9 INJECTED deps are CALLED at least once during a successful boot
+ *   - All 11 INJECTED deps are CALLED at least once during a successful boot
  *     (drift detector — a future refactor that drops one of the wires
  *     surfaces here as a failed expectation)
  *   - The result populates every promised key (no silent undefined for
@@ -62,11 +68,13 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "buildPlanStoreOrUndefined",
       "buildTurnSummaryAndStream",
       "buildTurnIndicatorAndStream",
+      "buildDebugTracerAndStream",
       "buildWorkMetricsSink",
+      "loadPermissionStore",
       "installPills",
     ]
-    expect(required).toHaveLength(9)
-    expect(new Set(required).size).toBe(9)
+    expect(required).toHaveLength(11)
+    expect(new Set(required).size).toBe(11)
   })
 
   test("setupSession export is an AsyncFunction", async () => {
@@ -106,6 +114,7 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "statusBar",
       "turnIndicator",
       "turnSummary",
+      "debugHandle",
       "sessionDeps",
       "costPanel",
       "branchProgress",
@@ -115,9 +124,9 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "argPrompt",
       "shutdownMcp",
     ]
-    // 33 named bindings — assert presence to detect accidental drops.
-    expect(keys).toHaveLength(33)
-    expect(new Set(keys).size).toBe(33)
+    // 34 named bindings — assert presence to detect accidental drops.
+    expect(keys).toHaveLength(34)
+    expect(new Set(keys).size).toBe(34)
   })
 })
 
@@ -135,11 +144,15 @@ type DepProbe = {
   buildPlanStoreOrUndefinedCalls: number
   buildTurnSummaryAndStreamCalls: number
   buildTurnIndicatorAndStreamCalls: number
+  buildDebugTracerAndStreamCalls: number
   buildWorkMetricsSinkCalls: number
+  loadPermissionStoreCalls: number
   installPillsCalls: number
 }
 
-const makeStubDeps = (): { deps: SetupSessionDeps; probe: DepProbe } => {
+const makeStubDeps = (
+  opts: { permissionStore?: PermissionStore } = {},
+): { deps: SetupSessionDeps; probe: DepProbe } => {
   const probe: DepProbe = {
     buildLifecycleBundleCalls: 0,
     deriveMcpPillServersCalls: 0,
@@ -148,7 +161,9 @@ const makeStubDeps = (): { deps: SetupSessionDeps; probe: DepProbe } => {
     buildPlanStoreOrUndefinedCalls: 0,
     buildTurnSummaryAndStreamCalls: 0,
     buildTurnIndicatorAndStreamCalls: 0,
+    buildDebugTracerAndStreamCalls: 0,
     buildWorkMetricsSinkCalls: 0,
+    loadPermissionStoreCalls: 0,
     installPillsCalls: 0,
   }
   const stubPills = {
@@ -207,10 +222,17 @@ const makeStubDeps = (): { deps: SetupSessionDeps; probe: DepProbe } => {
       probe.buildTurnIndicatorAndStreamCalls += 1
       return { indicator: stubIndicator as never, turnStream: stream }
     },
-    buildDebugTracerAndStream: (stream) => ({ stream, debugHandle: undefined }),
+    buildDebugTracerAndStream: (stream) => {
+      probe.buildDebugTracerAndStreamCalls += 1
+      return { stream, debugHandle: undefined }
+    },
     buildWorkMetricsSink: () => {
       probe.buildWorkMetricsSinkCalls += 1
       return undefined
+    },
+    loadPermissionStore: async () => {
+      probe.loadPermissionStoreCalls += 1
+      return opts.permissionStore
     },
     installPills: () => {
       probe.installPillsCalls += 1
@@ -423,6 +445,81 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     }
   })
 
+  test("honors explicit per-thread agent authority and injects the same permission store", async () => {
+    const prevPermission = process.env.QUANTA_PERMISSION
+    const prevSandbox = process.env.QUANTA_SANDBOX
+    process.env.QUANTA_PERMISSION = "acceptEdits"
+    process.env.QUANTA_SANDBOX = "workspace-write"
+    const origInternal = await import("../../../../src/apps/cli/internal")
+    await mock.module("../../../../src/apps/cli/internal", () => ({
+      ...origInternal,
+      buildTooling: () => ({
+        store: undefined,
+        embedder: undefined,
+        sessionId: "seed-session",
+        registry: { tools: () => [] },
+        memoryConfig: undefined,
+        subagentConfig: { maxDepth: 2 },
+        skillsConfig: undefined,
+        compactionBreakerConfig: undefined,
+        verifyGuardConfig: undefined,
+      }),
+    }))
+    const permissionStore = createPermissionStore()
+    setThreadPermission(
+      "resolved-session",
+      {
+        approvalPolicy: "on-request",
+        approvalsReviewer: "agent",
+        sandboxPolicy: { type: "workspace-write" },
+      },
+      permissionStore,
+    )
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { deps } = makeStubDeps({ permissionStore })
+      const result = await setupSession(deps)
+      expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("guardian_subagent")
+      expect(result.sessionDeps.admissibility?.permissionStore).toBe(permissionStore)
+    } finally {
+      if (prevPermission === undefined) delete process.env.QUANTA_PERMISSION
+      else process.env.QUANTA_PERMISSION = prevPermission
+      if (prevSandbox === undefined) delete process.env.QUANTA_SANDBOX
+      else process.env.QUANTA_SANDBOX = prevSandbox
+      await mock.module("../../../../src/apps/cli/internal", () => ({
+        ...origInternal,
+      }))
+    }
+  })
+
+  test("explicit per-thread user authority beats the auto reviewer fallback", async () => {
+    const prevPermission = process.env.QUANTA_PERMISSION
+    const prevSandbox = process.env.QUANTA_SANDBOX
+    process.env.QUANTA_PERMISSION = "auto"
+    process.env.QUANTA_SANDBOX = "workspace-write"
+    const permissionStore = createPermissionStore()
+    setThreadPermission(
+      "resolved-session",
+      {
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandboxPolicy: { type: "workspace-write" },
+      },
+      permissionStore,
+    )
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { deps } = makeStubDeps({ permissionStore })
+      const result = await setupSession(deps)
+      expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("user")
+    } finally {
+      if (prevPermission === undefined) delete process.env.QUANTA_PERMISSION
+      else process.env.QUANTA_PERMISSION = prevPermission
+      if (prevSandbox === undefined) delete process.env.QUANTA_SANDBOX
+      else process.env.QUANTA_SANDBOX = prevSandbox
+    }
+  })
+
   test("rethrows buildLLM failure as a typed startup error", async () => {
     const origInternal = await import("../../../../src/apps/cli/internal")
     await mock.module("../../../../src/apps/cli/internal", () => ({
@@ -516,7 +613,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(result.abort.signal.aborted).toBe(true)
   })
 
-  test("invokes EVERY one of the 9 injected dep factories at least once", async () => {
+  test("invokes EVERY one of the 11 injected dep factories at least once", async () => {
     const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
     const { deps, probe } = makeStubDeps()
     await setupSession(deps)
@@ -526,7 +623,9 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(probe.buildPlanStoreOrUndefinedCalls).toBeGreaterThanOrEqual(1)
     expect(probe.buildTurnSummaryAndStreamCalls).toBeGreaterThanOrEqual(1)
     expect(probe.buildTurnIndicatorAndStreamCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.buildDebugTracerAndStreamCalls).toBeGreaterThanOrEqual(1)
     expect(probe.buildWorkMetricsSinkCalls).toBeGreaterThanOrEqual(1)
+    expect(probe.loadPermissionStoreCalls).toBeGreaterThanOrEqual(1)
     expect(probe.installPillsCalls).toBeGreaterThanOrEqual(1)
     // deriveMcpPillServers is only called when mcpClients.length > 0; our
     // stub returns [] so the count stays at 0 — that's the documented

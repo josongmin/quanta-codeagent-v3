@@ -24,8 +24,8 @@ import { describe, expect, test } from "bun:test"
 import {
   defaultJwksClient,
   type JsonWebKey,
-  type JwksSet,
   JwksFetchError,
+  type JwksSet,
 } from "@/security/jwks-identity"
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -85,9 +85,7 @@ async function signJwt(
   const signingInput = `${headerB64}.${payloadB64}`
   const data = new TextEncoder().encode(signingInput)
   const params =
-    algo === "RS256"
-      ? { name: "RSASSA-PKCS1-v1_5" }
-      : { name: "ECDSA", hash: "SHA-256" }
+    algo === "RS256" ? { name: "RSASSA-PKCS1-v1_5" } : { name: "ECDSA", hash: "SHA-256" }
   const sig = await crypto.subtle.sign(params, privateKey, data)
   return `${signingInput}.${b64urlEncode(new Uint8Array(sig))}`
 }

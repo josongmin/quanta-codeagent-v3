@@ -5,7 +5,7 @@
  * opts in.
  */
 
-export { defaultJwksClient, type DefaultJwksClientOpts } from "./default-client"
+export { type DefaultJwksClientOpts, defaultJwksClient } from "./default-client"
 export { headlessJwksClient } from "./headless-stub"
 export type { JwksClient } from "./port"
 export {

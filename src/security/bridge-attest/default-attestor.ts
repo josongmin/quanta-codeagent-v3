@@ -48,6 +48,11 @@ export interface DefaultAttestorOpts {
 /** Fallback secret when none supplied — visibly mis-configured. */
 const FALLBACK_SECRET = "test-secret"
 
+// STS token TTL — 5 minutes by default. Matches AWS STS short-lived
+// credential convention; long enough for typical preflight→action latency,
+// short enough to bound exposure on accidental leak.
+const DEFAULT_STS_TOKEN_TTL_MS = 300_000
+
 /** Warn once per process when fallback secret is used. */
 let warnedFallback = false
 
@@ -185,7 +190,7 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
    *  can `mintToken` separately if a different TTL is needed. */
   const handleAllow = async (requestId: string, req: AttestRequest): Promise<AttestResult> => {
     const scope = `${req.action}:${req.resource}`
-    const stsToken = await mintTokenInternal(scope, 5 * 60_000, requestId)
+    const stsToken = await mintTokenInternal(scope, DEFAULT_STS_TOKEN_TTL_MS, requestId)
     emit({ kind: "preflight-granted", requestId, at: clock(), scope })
     emit({ kind: "attest-audit", requestId, at: clock(), summary: `allow: ${scope}` })
     return { kind: "allow", stsToken }
