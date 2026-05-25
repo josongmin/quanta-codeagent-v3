@@ -1350,6 +1350,49 @@
       }
     },
     {
+      "includes": ["**/src/apps/headless/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "**/apps/bench",
+                      "**/apps/bench/*",
+                      "**/apps/bench/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "**/apps/agent",
+                      "**/apps/agent/*",
+                      "**/apps/agent/**",
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**"
+                    ],
+                    "message": "Surface isolation (ADR-0308 / ARCH-07): src/apps/headless is the SECOND consumer that proves the host layer is reusable. It MUST NOT import from src/apps/cli/**, src/apps/bench/**, or src/apps/agent/** — every env/argv/terminal-bound helper is injected through the dep bundle from @/host/bootstrap."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: src/apps/headless is a non-TTY surface. CLI-specific node modules (readline / tty / repl) belong in apps/cli."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/host/bootstrap/**"],
       "linter": {
         "rules": {
