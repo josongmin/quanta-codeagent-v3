@@ -1,0 +1,74 @@
+id: embed-cache
+title: EmbedCache — idempotent content-hash + model-tag embedding cache
+section: 4
+subsystem: Retrieval — Axis F (ADR-0263, sibling of ADR-0159 Axis D embedding port)
+order: 263
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: env
+config_refs:
+  env: [QUANTA_EMBED_CACHE]
+owners: ["@songmin"]
+labels: ["surface:core", "adr:0263", "default-off"]
+depends_on: [retrieval-commit-embedder, retrieval-multi-vendor-embedding]
+purpose: |
+  Idempotent embed cache keyed by `hash(text) + ":" + modelTag` so a
+  provider/model swap automatically invalidates every stale entry
+  (`cache.invalidate(oldTag)`) and the same (text, model) pair never
+  re-pays the network/$ cost.
+
+  Closed `EmbedCache` port with 5 methods (`get / put / invalidate /
+  size / clear`) and three adapters:
+    - in-memory LRU (`Map`-backed, default cap 10000, configurable)
+    - sqlite durable (`~/.quanta/embed-cache.db`, 0600, TTL 30 days,
+      Float64-packed BLOB for byte-exact vector round-trip)
+    - none (default-OFF, byte-identical "no cache" — every get returns
+      null, every put is a no-op)
+
+  Env-driven wire swap (`QUANTA_EMBED_CACHE=in-memory|sqlite|none`); the
+  default is `none` so until a caller explicitly opts in the embed
+  pipeline is byte-identical to the pre-ADR behaviour.
+
+  modelTag canonical format `{provider}-{modelPart}-v{version}-d{dim}`
+  is enforced by `isCanonicalModelTag` — adapters do NOT validate on
+  every call (correctness depends on tag CONSISTENCY across put/get,
+  not on tag canonicality), but operators get a user-callable check.
+evidence:
+  code:
+    - src/retrieval/cache/port.ts
+    - src/retrieval/cache/types.ts
+    - src/retrieval/cache/hash.ts
+    - src/retrieval/cache/in-memory-lru.ts
+    - src/retrieval/cache/sqlite-cache.ts
+    - src/retrieval/cache/none-cache.ts
+    - src/retrieval/cache/registry.ts
+    - src/retrieval/cache/index.ts
+  adrs: [263, 254]
+  tests:
+    unit:
+      - tests/unit/retrieval/embed-cache-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_EMBED_CACHE — adapter swap (in-memory|sqlite|none, default none)
+  - InMemoryEmbedCacheOptions.capacity — LRU cap, default 10000
+  - SqliteEmbedCacheOptions.path — db path, default ~/.quanta/embed-cache.db
+  - SqliteEmbedCacheOptions.ttlMs — entry TTL, default 30 days
+  - SqliteEmbedCacheOptions.now — injectable clock for tests
+deliberate_hold:
+  reason: default-OFF until embed pipeline wiring lands
+  details: |
+    The slice ships the closed port + 3 adapters + 15-case hellgate, but
+    `commit-embedder` / `hybrid-query` / composition root do NOT consult
+    the cache yet. Wiring is a follow-up ADR (the chosen safety net —
+    until then the `none` adapter is the wire by default, so production
+    behaviour is byte-identical to the pre-ADR pipeline).
+notes: |
+  Sync fast-hash (FNV-1a-mix) is used internally for hot-path latency;
+  a collision guard compares the original `text + modelTag` before
+  returning a hit so a sync-hash collision costs at most a re-embed,
+  never a wrong vector. The exported `hashText` (Web Crypto SHA-256) is
+  available for callers that need the cryptographic guarantee.
