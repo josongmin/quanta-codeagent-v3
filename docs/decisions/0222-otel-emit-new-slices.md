@@ -1,4 +1,4 @@
-# ADR-0217: OTel emit unified across 5 new slices (fence-aware narrow ports)
+# ADR-0222: OTel emit unified across 5 new slices (fence-aware narrow ports)
 
 - **Status**: Accepted
 - **Date**: 2026-05-25

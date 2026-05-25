@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — pass-through default for the stream-timeout metric port.
+ * ADR-0222 — pass-through default for the stream-timeout metric port.
  *
  * Frozen no-op (HELL-OT-03).
  */

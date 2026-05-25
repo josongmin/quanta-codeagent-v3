@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — emit helpers for the 4 new slices.
+ * ADR-0222 — emit helpers for the 4 new slices.
  *
  * Six pure functions, one per canonical metric, that look up the key from
  * `QUANTA_ATTRS` and dispatch to a `MetricsRegistry`. The helpers live in

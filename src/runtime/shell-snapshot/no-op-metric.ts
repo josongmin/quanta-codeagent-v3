@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — pass-through default for the shell-snapshot metric port.
+ * ADR-0222 — pass-through default for the shell-snapshot metric port.
  *
  * Frozen object literal; `recordCapture` is a no-op. Wired wherever the
  * host has not opted in to telemetry (HELL-OT-03).

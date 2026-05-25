@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — narrow metric port for shell-snapshot.
+ * ADR-0222 — narrow metric port for shell-snapshot.
  *
  * Single-method port: `recordCapture(durationMs, bytes)` — one event per
  * persisted snapshot. Both arguments map 1:1 to histogram observations on

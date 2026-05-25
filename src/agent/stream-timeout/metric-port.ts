@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — narrow metric port for stream-timeout.
+ * ADR-0222 — narrow metric port for stream-timeout.
  *
  * Two-method port:
  *   - `recordIdle(ms)` — histogram observation of the idle interval that

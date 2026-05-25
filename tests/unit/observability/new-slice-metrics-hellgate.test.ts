@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — hellgate for the OTel emit unification across 4 new slices.
+ * ADR-0222 — hellgate for the OTel emit unification across 4 new slices.
  *
  * 12 cases sealing the contract:
  *
@@ -274,7 +274,7 @@ describe("HELL-OT-05 — only vocabulary.ts + new-slice-instruments.ts reference
     }
     if (offenders.length > 0) {
       const report = offenders.map((o) => `  ${o.file}: "${o.key}"`).join("\n")
-      throw new Error(`orphan literal for ADR-0217 key:\n${report}`)
+      throw new Error(`orphan literal for ADR-0222 key:\n${report}`)
     }
     expect(offenders.length).toBe(0)
   })

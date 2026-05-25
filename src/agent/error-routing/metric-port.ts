@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — narrow metric port for error-routing.
+ * ADR-0222 — narrow metric port for error-routing.
  *
  * Two-method port scoped to the two call sites the slice has:
  *   - `recordClassified(kind)` — fired once per `ErrorClassifier.classify()`.

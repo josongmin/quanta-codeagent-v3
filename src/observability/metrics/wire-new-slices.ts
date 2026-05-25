@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — narrow-port adapter factories for the 4 new slices.
+ * ADR-0222 — narrow-port adapter factories for the 4 new slices.
  *
  * Each factory takes a `MetricsRegistry` and returns an object that
  * satisfies the slice's narrow `*Metric` port. The slice never sees this

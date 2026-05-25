@@ -1,5 +1,5 @@
 /**
- * ADR-0217 — narrow metric port for git-directives.
+ * ADR-0222 — narrow metric port for git-directives.
  *
  * Single-method port: `recordDirective(kind)` — fired by an instrumented
  * emitter once per successful directive emit. Maps to a counter on
