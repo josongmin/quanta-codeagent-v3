@@ -1,0 +1,70 @@
+id: identity-mid-session-prompt-rebuild
+title: ADR-0302 — /identity mid-session system-prompt rebuild (closes ADR-0291 last-mile)
+section: 10
+subsystem: REPL surface composition
+order: 72
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:2", "adr-0302", "default-off"]
+depends_on:
+  - repl-slash-ctx-mega-wire
+  - identity-mode-variant
+purpose: |
+  ADR-0291 wired ctx.identity = {get,set,list}. Today set("plan")
+  mutates the active mode cell, but the LLM keeps seeing the OLD
+  system prompt that was captured ONCE at session bootstrap. The cached
+  prefix never refreshes, so /identity plan after turn 1 leaves a
+  default-flavoured prompt for the rest of the session.
+
+  ADR-0302 closes this last-mile gap with two tiny seams + one optional
+  adapter callback:
+
+    - createSystemPromptRebuilder({ mode, cwd, baseBuilder })
+        returns SystemPromptRebuilderPort.rebuild() that recomputes the
+        prompt against the LIVE mode closure. No-throw — failing
+        baseBuilder returns a typed fallback string with newlines
+        stripped from the reason.
+    - createSystemSource(initial) returns SystemSource {get, set} —
+        idempotent on equal values (=== short-circuit).
+    - buildIdentityModeAdapter gains optional onChange?(mode) that
+        fires after a successful swap. Never fires on rejected modes.
+        Adapter swallows callback throws so /identity never regresses
+        to a 1-exit just because the rebuilder hiccupped.
+
+  Default-OFF byte-identical: absent onChange + absent rebuilder ⇒
+  behavior identical to ADR-0291 (state-only swap, stale prompt).
+  The actual surface wire that composes the three is left for a
+  follow-up ADR — this slice ships the seams.
+evidence:
+  code:
+    - src/apps/cli/repl/system-prompt-rebuilder.ts
+    - src/apps/cli/repl/ctx-adapters/identity-mode-adapter.ts
+  adrs:
+    - docs/decisions/0302-identity-mid-session-prompt-rebuild.md
+  tests:
+    unit:
+      - tests/unit/cli/identity-prompt-rebuild-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  15 hellgate cases / 45 expects / 0 fail. tsc 0, biome 0.
+
+  Slice fence preserved — session-loop.ts, surface-compose.ts,
+  prompt-pipeline.ts, session-bootstrap.ts UNTOUCHED. Loop / runner
+  contract (SessionDeps.system: string) UNTOUCHED. The follow-up wire
+  will mirror the rebuilder output into sessionDeps.system (mutable
+  field) so assembleConfig(messages, d) reads the fresh string on the
+  next turn — no shape change.
+
+  No new closed enums or error codes; the typed fallback prefix
+  ("(prompt rebuild failed: ") is a stable test target, not a public
+  enum.
