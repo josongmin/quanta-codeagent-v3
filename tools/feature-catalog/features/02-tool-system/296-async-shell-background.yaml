@@ -33,7 +33,7 @@ evidence:
     - src/tool/index.ts
     - src/agent/mode.ts
     - src/agent/side-conversation/run.ts
-  adrs: [294]
+  adrs: [296]
   tests:
     unit:
       - tests/unit/bash-async-hellgate.test.ts

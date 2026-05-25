@@ -43,6 +43,7 @@ import { buildSearchPipelineFromEnv } from "../agent/search-pipeline-wire"
 import type { Tooling } from "./config-assemble"
 import { createMarkdownPainter } from "./markdown-painter"
 import { isPathLikeToken } from "./resume"
+import { resolveSandboxProfileFromEnv } from "./sandbox-wire"
 
 /**
  * ADR-0024 (export-gap closure): CLI `internal.ts` is the home of all
@@ -327,6 +328,12 @@ export const idModeEnabled = (): boolean => {
 
 /** Resolve the `--new-session` flag for id-mode startup. */
 export const newSessionFlag = (): boolean => hasArg("--new-session")
+
+/** ADR-0301 — Resolve the `--playbook-trigger` CLI flag echo. Boolean (no
+ *  value); presence ⇒ `true`, absence ⇒ `false`. The wire helper enforces
+ *  the env-on-wins precedence — this is just the surface-side argv scan.
+ *  Mirrors `newSessionFlag()` for SOLID/SRP. */
+export const playbookTriggerFlag = (): boolean => hasArg("--playbook-trigger")
 
 /** Resolve the `--title <t>` flag (used by `--new-session`). */
 export const titleFlag = (): string | undefined => {
@@ -681,6 +688,10 @@ export const buildTooling = (
   const skillsConfig = buildSkillsConfig()
   const compactionBreakerConfig = buildCompactionBreakerConfig()
   const verifyGuardConfig = buildVerifyGuardConfig()
+  // ADR-0297 — resolve QUANTA_SANDBOX → OsSandboxProfile and forward to
+  // buildToolingCore so the bash factory's HITL tier closes over it. Unset/
+  // unrecognised ⇒ undefined ⇒ conservative `always-confirm` default.
+  const sandboxProfile = resolveSandboxProfileFromEnv(process.env)
   return buildToolingCore({
     store,
     embedder,
@@ -702,6 +713,7 @@ export const buildTooling = (
       ? { memoryKindLabel: process.env.QUANTA_MEMORY }
       : {}),
     onMemoryReady: (line) => logger.info(line),
+    ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
   })
 }
 

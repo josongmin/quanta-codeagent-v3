@@ -1,6 +1,7 @@
 import { type AgentConfig, memoryTools } from "@/agent"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { StructuredLogger } from "@/observability"
+import type { OsSandboxProfile } from "@/runtime"
 import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
 
 /**
@@ -75,6 +76,12 @@ export interface ToolingAssembleInput {
    *  signature as `@/shared#logger.info`. Absent ⇒ no log. Decouples this slice
    *  from `@/shared#logger` so a non-CLI surface can route it elsewhere. */
   onMemoryReady?: ((line: string) => void) | undefined
+  /** ADR-0297 — operator-chosen OS sandbox profile, threaded through to the
+   *  bash tool factory so its HITL tier closes over the closed-enum profile
+   *  (NOT a command-string heuristic). Absent ⇒ conservative `always-confirm`
+   *  default. CLI shim resolves via `resolveSandboxProfileFromEnv(process.env)`
+   *  from `QUANTA_SANDBOX`; non-CLI surfaces pass directly. */
+  sandboxProfile?: OsSandboxProfile | undefined
 }
 
 /** Assemble the tool registry and aggregate the per-run config dependencies.
@@ -112,7 +119,9 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
         })
       : []
   const registry = new ToolRegistry([
-    ...buildDefaultTools(),
+    ...buildDefaultTools(
+      input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {},
+    ),
     ...input.mcpTools,
     ...memTools,
     ...input.lspTools,

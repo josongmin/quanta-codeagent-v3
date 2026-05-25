@@ -6,7 +6,7 @@ order: 296
 maturity: L4
 status: new
 ui_surfaces: [n-a]
-monitoring: tool-start-event
+monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: static
 owners: ["@songmin"]
@@ -29,7 +29,7 @@ evidence:
   code:
     - src/subagent/agent-tool.ts
     - src/agent/prompt-body.ts
-  adrs: [296]
+  adrs: [298]
   tests:
     unit:
       - tests/unit/subagent-fanout-hellgate.test.ts
