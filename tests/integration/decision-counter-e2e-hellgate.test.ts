@@ -34,6 +34,7 @@ import type { PermissionContext } from "@/permission"
 import { RulesStore } from "@/rules"
 import {
   type AgentEvent,
+  type DecisionEmitter,
   type DecisionEvent,
   decisionEmitterFromStream,
   type StreamPort,

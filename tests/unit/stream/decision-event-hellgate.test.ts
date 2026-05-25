@@ -83,7 +83,14 @@ describe("AgentEvent.decision union admits 18 variants (6 kind × 3 outcome)", (
         expect(decoded.ok).toBe(true)
         if (!decoded.ok) throw new Error("unreachable")
         expect(decoded.value).toEqual(rec)
-        // Discriminator (kind:"decision") + closed enums survive the round-trip.
+        // Discriminator (type:"event_msg" + kind:"decision") + closed enums
+        // survive the round-trip. We narrow the top-level `type` union FIRST
+        // so the nested `kind` discriminator (carried by event_msg arms only)
+        // is reachable — the top union includes session_meta / turn_context /
+        // response_item / thread_spawn variants which carry no `kind` field.
+        if (decoded.value.type !== "event_msg") {
+          throw new Error("unreachable — decoder mis-routed to non-event_msg top-level variant")
+        }
         if (decoded.value.kind !== "decision") {
           throw new Error("unreachable — decoder mis-routed to non-decision arm")
         }
@@ -359,7 +366,11 @@ describe("decoder routes by `kind` — no cross-arm mis-routing", () => {
     // coercion to a "decision" arm. We assert no decision shape.
     if (r.ok) {
       // If somehow this decoded, the `kind` discriminator must NOT be "decision".
-      expect(r.value.kind).not.toBe("decision")
+      // Only event_msg variants carry `kind`; other top-level variants pass
+      // trivially (no `kind` field ⇒ definitionally not "decision").
+      if (r.value.type === "event_msg") {
+        expect(r.value.kind).not.toBe("decision")
+      }
     } else {
       expect(r.error.kind).toBe("schema")
     }
@@ -370,6 +381,11 @@ describe("decoder routes by `kind` — no cross-arm mis-routing", () => {
     const r = decodeSessionLine(wire)
     expect(r.ok).toBe(true)
     if (!r.ok) throw new Error("unreachable")
+    // Narrow to event_msg first (top-level discriminator) so the nested
+    // `kind` discriminator is reachable.
+    if (r.value.type !== "event_msg") {
+      throw new Error("unreachable — decision wire decoded to non-event_msg variant")
+    }
     expect(r.value.kind).toBe("decision")
     // Closed-union narrowing — fields belonging exclusively to other arms
     // are NOT present on the decoded value. (We don't iterate them by name —

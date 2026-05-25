@@ -110,7 +110,10 @@ const defaultUnreadCounter = (engine: AutomationEnginePort): (() => Promise<numb
     let n = 0
     // Re-read each call — for the in-memory engine the getter returns a
     // fresh frozen snapshot; for sqlite the host injects a real counter.
-    const current = (engine as { readonly inbox: ReadonlyArray<InboxItem> }).inbox
+    // Narrow against the optional duck-typed shape (the port itself has
+    // no `inbox`; only the in-memory engine extends with it).
+    const current = (engine as { readonly inbox?: ReadonlyArray<InboxItem> }).inbox
+    if (current === undefined) return 0
     for (const item of current) {
       if (!item.read) n++
     }
