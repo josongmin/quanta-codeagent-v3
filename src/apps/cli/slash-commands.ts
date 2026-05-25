@@ -57,6 +57,7 @@ import { isRewindEnabled, rewindCommands } from "./rewind-cmd"
 import { rewindConvCmd } from "./rewind-conv-cmd"
 import { rewindToolCmd } from "./rewind-tool-cmd"
 import { rulesCmd } from "./rules-cmd"
+import { sessionCmd } from "./session-cmd"
 import { sideCmd } from "./side-cmd"
 import type { SkillRow, SlashCommand, SlashContext } from "./slash-contract"
 import { createSlashRuntime, isSlashCommand } from "./slash-engine"
@@ -841,6 +842,12 @@ export const BUILTINS: readonly SlashCommand[] = [
   // Default-OFF: when `ctx.convCheckpoint` is absent the slash prints
   // "/rewind-conv: not wired in this surface" + exit 0.
   rewindConvCmd,
+  // ADR-0294 — `/session export <id>` + `/session import <path>` round-
+  // trip via the existing pure import-export primitive (ADR-0157). Slot
+  // appended so prior pinning is unchanged. Default-OFF: when
+  // `ctx.sessionIo` is absent the slash prints "not wired in this surface"
+  // + exit 0 (parity with the rest of the surface-only commands).
+  sessionCmd,
 ] as const
 
 /** `/exit` and `/quit` are short-circuited by `composePromptPipeline` BEFORE the

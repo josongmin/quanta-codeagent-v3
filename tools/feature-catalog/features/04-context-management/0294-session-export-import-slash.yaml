@@ -1,0 +1,58 @@
+id: session-export-import-slash
+title: /session export+import slash — round-trip via ADR-0157 primitive (ADR-0294)
+section: 4
+subsystem: Session 영속화 — off-host round-trip surface
+order: 94
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:n-a, surface:cli]
+depends_on: [session-envelope-encoder]
+purpose: |
+  ADR-0294 — `/session export <id>` + `/session import <path>` 슬래시 명령으로
+  ADR-0157 (`src/session/import-export.ts` + `import-export-fs.ts`) 의 순수
+  serialization primitive 를 CLI 표면에 노출. 사용자 워크플로우:
+  (1) `/session export <id> [--out=<path>]` — host 의 session store 에서 id 로
+  읽어 v1 envelope 으로 감싸 디스크에 JSON 저장 (default 파일명:
+  `<cwd>/quanta-session-<id>-<ts>.json`);
+  (2) `/session import <path> [--id=<id>]` — envelope 파싱 (typed
+  `SessionImportError`), host store 에 fresh-minted (또는 사용자 지정) id 로
+  영속화.
+  Default-OFF (RFC §1.2): `ctx.sessionIo` 미와이어 ⇒ "not wired in this
+  surface" + exit 0 (byte-identical to NOT registering). Path safety —
+  `--out` / `<path>` 는 cwd 또는 `$HOME` 하위만 허용 (is-path-inside 기존
+  dep 재사용). Import 50 MB cap (corpus P90 10MB / P99 52MB 사이). No-throw:
+  모든 FS 오류 + SessionImportError 는 ctx.err 에 typed 메시지 + exit 1, never
+  re-thrown.
+evidence:
+  code:
+    - src/apps/cli/session-cmd.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: [294]
+  tests:
+    unit:
+      - tests/unit/session-export-import-slash-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: '`ctx.sessionIo` 어댑터를 REPL surface 에서 host session store 에 와이어하는 작업은 후속 PR. 현재는 slash + hellgate 만 land — 어댑터 inject 만 추가하면 즉시 활성 (1 슬롯 채우기).'
+  promotion_path: 'REPL composition root 에서 `slashCtx.sessionIo = { readSession, writeSession, mintNewId }` 슬롯을 host 의 SessionStore 위 얇은 어댑터로 채움. 그 1-line 와이어만 추가하면 L4.'
+notes: |
+  - Plane-clean: `@/session/import-export`, `@/session/import-export-fs`,
+    `@/session/types`, `node:fs/promises`, `node:path`, `node:os`,
+    `is-path-inside` (기존 dep). `@/storage` / `@/permission` / `@/agent`
+    절대 import X — host adapter 가 store 추상화.
+  - Id rewrite on import: 임포트 시 `meta.id` 를 새로 minted id 로 덮어씀.
+    안 그러면 store index 와 file 의 meta.id 가 drift. 같은 envelope 을
+    두 번 import 하면 두 개의 별도 session 생성 — by design.
+  - Sidecar EMIT 은 미와이어 (ctx.sessionIo 에 per-subsystem serialize
+    hook 없음 — 후속 와이어). Sidecar PRESERVE on import 는 동작 — summary
+    line `imported into session <id> (N messages, sidecar=<keys>)` 에 노출.
+  - 50 MB cap 은 stat() size 로 read 전에 게이팅. 4 GB JSON 이 OOM 못 함.
+  - 22 hellgate cases / 87 expects / tsc 0 / biome 0 errors / 0 warnings
+    on slice (slice-isolation 예외는 biome.json 의 기존 CLI-test 패턴 따름).
