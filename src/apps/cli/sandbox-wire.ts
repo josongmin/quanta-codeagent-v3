@@ -3,15 +3,16 @@ import {
   DEFAULT_SANDBOX_EXEC_PATH,
   installShellSandbox,
   type OsSandboxPolicy,
+  type OsSandboxProfile,
   type ShellSandboxSlot,
   type WrappedShellArgv,
   wrapShellArgv,
 } from "@/runtime"
 import {
-  LANDLOCK_CLI_NETWORK_DEFERRED_MARKER,
   compileBubblewrapArgs,
   compileLandlockCliArgs,
   detectLinuxSandboxBackend,
+  LANDLOCK_CLI_NETWORK_DEFERRED_MARKER,
   type LinuxSandboxBackend,
 } from "@/runtime/os-sandbox"
 import { logger } from "@/shared"
@@ -124,10 +125,31 @@ export const installCliSandbox = async (
   if (slot !== undefined) {
     const probe = await slot.wrap(["bash", "-lc", ":"], process.cwd())
     if (probe.degradeReason !== undefined) {
-      logger.warn(`QUANTA_SANDBOX=${slot.policy.profile} requested but degraded (${probe.degradeReason})`)
+      logger.warn(
+        `QUANTA_SANDBOX=${slot.policy.profile} requested but degraded (${probe.degradeReason})`,
+      )
     }
   }
   return slot
+}
+
+/**
+ * ADR-0297 — env→profile projection for the `bash` HITL tier wire. Returns
+ * the same closed-enum `OsSandboxProfile` that the CLI sandbox slot would
+ * resolve from `QUANTA_SANDBOX`, WITHOUT installing anything globally. Used
+ * by composition roots that build `buildDefaultTools({ sandboxProfile })`
+ * — the bash tool factory closes over this value (instead of regex-matching
+ * the command). Pure: same env → same result. Unknown values yield
+ * `undefined` (conservative — degrades the bash tier to `always-confirm`).
+ */
+export const resolveSandboxProfileFromEnv = (
+  env: NodeJS.ProcessEnv = process.env,
+): OsSandboxProfile | undefined => {
+  const raw = env.QUANTA_SANDBOX ?? "default"
+  if (raw === "default" || raw === "") return undefined
+  if (raw === "off") return "off"
+  if (!ACTIVE_SET.has(raw)) return undefined
+  return raw as OsSandboxProfile
 }
 
 const wrapLinuxShellArgv = (

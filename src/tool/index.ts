@@ -1,8 +1,9 @@
+import type { OsSandboxProfile } from "@/runtime"
 import type { AutomationEnginePort } from "@/scheduler/automation-engine"
 import type { FileSystemPort } from "@/storage"
 import { applyPatchTool } from "./apply-patch"
 import { automationUpdateTool } from "./automation_update"
-import { bashTool } from "./bash"
+import { makeBashTool } from "./bash"
 import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
@@ -301,6 +302,13 @@ export interface DefaultToolPorts {
    *  composition root passes this only when `QUANTA_AUTOMATION === "on"`
    *  (see `src/apps/agent/index.ts` + `src/scheduler/runtime-wire.ts`). */
   automationEngine?: AutomationEnginePort
+  /** ADR-0295 — sandbox-driven HITL. The bash tool's `hitlTier` closes over
+   *  the operator-chosen `QUANTA_SANDBOX` profile (resolved at boot by
+   *  `src/apps/cli/sandbox-wire.ts`) — no command-string heuristic. When
+   *  absent the bash tool degrades to the conservative `always-confirm`
+   *  tier for ALL commands (intended posture: no sandbox = unknown risk).
+   *  Hosts that wire a profile MUST thread it through here. */
+  sandboxProfile?: OsSandboxProfile
 }
 
 export { automationUpdateTool } from "./automation_update"
@@ -337,7 +345,13 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
   // sessions that never route to it are byte-identical. Reuses whatever
   // `apply-patch.ts` exports — that file is owned elsewhere and untouched.
   applyPatchTool as Tool,
-  bashTool as Tool,
+  // ADR-0297 — `bash` is factory-built so its `hitlTier` closes over the
+  // composition-root-resolved sandbox profile (NOT command-string regex).
+  // Absent profile ⇒ conservative `always-confirm` for ALL commands.
+  // ADR-0295 (mode) + ADR-0296 (timeout_behavior) compose into the same factory.
+  makeBashTool(
+    ports.sandboxProfile !== undefined ? { sandboxProfile: ports.sandboxProfile } : {},
+  ) as Tool,
   // ADR-0296 — async-shell siblings to `bash`. `bash_await` is read-only +
   // concurrency-safe (pure polling); `bash_kill` is mutating (signals a
   // background process). Both consult the module-level bg registry; sessions

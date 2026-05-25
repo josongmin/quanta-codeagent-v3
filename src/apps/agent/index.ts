@@ -56,6 +56,7 @@ import { assembleAutomation, type AutomationEngineSlot } from "@/scheduler/runti
 import { logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { resolveSandboxProfileFromEnv } from "../cli/sandbox-wire"
 import type { AssembleRequest } from "./assemble"
 import {
   type AgentArgs,
@@ -384,6 +385,13 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
   // (ADR-0240). The default tools also gain `automation_update` when the
   // engine is present (ADR-0280; conditional registration below).
   const automationSlot = resolveAutomation(env)
+  // ADR-0297 — composition-root projection of `QUANTA_SANDBOX` into the
+  // bash tool factory's HITL tier. Pure: same env → same profile (or
+  // `undefined` ⇒ tier degrades to `always-confirm`). The boot path
+  // `installCliSandbox` reads the SAME env separately for the shell-
+  // spawn wrapper; both reads share `resolveSandboxProfileFromEnv` so
+  // they agree.
+  const sandboxProfile = resolveSandboxProfileFromEnv(env)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -396,9 +404,10 @@ const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] =
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
     // byte-identical to the `defaultTools` singleton.
     registry: new ToolRegistry(
-      buildDefaultTools(
-        automationSlot !== null ? { automationEngine: automationSlot.engine } : {},
-      ),
+      buildDefaultTools({
+        ...(automationSlot !== null ? { automationEngine: automationSlot.engine } : {}),
+        ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
+      }),
     ),
     stream,
     permission: { mode: "acceptEdits" },

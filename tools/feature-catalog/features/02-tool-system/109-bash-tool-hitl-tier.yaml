@@ -1,5 +1,5 @@
 id: bash-tool-hitl-tier
-title: bash — HITL always-confirm patterns + GIT_PREFIX bypass-proof matcher
+title: bash — sandbox-driven HITL (ADR-0297, command-string heuristic removed)
 section: 2
 subsystem: 코어 mutating 도구 — shell exec (bash front) HITL routing
 order: 109
@@ -8,47 +8,58 @@ status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
-labels: [surface:cli]
+labels: [surface:cli, security-touched]
 depends_on: [typed-tool-failure-modes, shell-output-delta-streaming, isconcurrencysafe]
 purpose: |
-  `bash` tool's `hitlTier(input)` returns `"always-confirm"` for network
-  egress (curl/wget/`gh api`) and mutating git ops (push/send-pack/fetch/
-  commit --amend/reset --hard); everything else falls to `"pre-approval-ok"`.
-  HARD_DENY (RCE / root-rm / fork bomb) is enforced UPSTREAM by `@/permission`
-  via the dispatch seam — `bash` itself only distinguishes the two pre-deny
-  tiers. The bypass-proof part: `GIT_PREFIX` regex accepts ALL legal git
-  global-option forms (`--no-pager push`, `-C dir push`, `-c k=v push`,
-  `--git-dir=. push`) BEFORE the dangerous subcommand boundary — naive
-  `git push` matchers are trivially bypassed by `git --no-pager push`. `send-
-  pack` (plumbing behind `push`) is escalated identically. `fetch` with no
-  remote arg fetches `origin` by default, so the `\borigin\b` narrow was
-  deliberately dropped — any fetch is network egress. Optional `timeout_ms`
-  flows into `runShell`; `extractShellCommand` + `classifySource` declare the
-  source class for Layer-1 secret redaction (ADR-0078 PR-2). MAX_OUTPUT=30000
-  with truncation tail. `evidence.exitCode` + 4KB stderr tail attached on
-  every result (typed, not duck-smuggled).
+  `bash` is built by `makeBashTool({ sandboxProfile })` so its `hitlTier`
+  closes over the operator-chosen `OsSandboxProfile` — a CLOSED-ENUM switch
+  with ZERO command inspection. Matrix: `read-only`/`workspace-write`/
+  `danger-full-access` ⇒ `pre-approval-ok`; `workspace-write-net` ⇒
+  `always-confirm` (audit every egress); `off`/undefined ⇒ `always-confirm`
+  (conservative: no sandbox = unknown risk). The CLI assembly path projects
+  `QUANTA_SANDBOX` → profile via `resolveSandboxProfileFromEnv` and threads
+  it through `buildDefaultTools({ sandboxProfile })`. HARD_DENY (RCE /
+  root-rm / fork bomb) is enforced UPSTREAM by `@/permission` via the
+  dispatch seam — `bash` itself only distinguishes the two pre-deny tiers.
+  Optional `timeout_ms` flows into `runShell`; `extractShellCommand` +
+  `classifySource` declare the source class for Layer-1 secret redaction
+  (ADR-0078 PR-2). MAX_OUTPUT=30000 with truncation tail. `evidence.exitCode`
+  + 4KB stderr tail attached on every result (typed, not duck-smuggled).
 evidence:
   code:
     - src/tool/bash/index.ts
     - src/tool/index.ts
+    - src/apps/cli/sandbox-wire.ts
+    - src/apps/agent/index.ts
     - src/agent/hitl-tier-registry.ts
     - src/permission/policy.ts
-  adrs: [78]
+  adrs: [78, 295]
   tests:
     unit:
       - tests/unit/bash.test.ts
+      - tests/unit/bash-hitl-sandbox-driven-hellgate.test.ts
+      - tests/unit/hitl-tier-classifier.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
 notes: |
-  `isConcurrencySafe: false` — arbitrary shell side effects are unknowable, so
-  every bash call serializes. `deriveBashFailure` derives typed `ToolFailure`
-  from `ShellResult` shape WITHOUT touching `runtime/shell.ts` (owned by
-  another track): timeout via `timedOut`, spawn_error via `exit 127 + "command
-  not found"` stderr, permission_denied via `exit 126 + "Permission denied"`
-  — see `typed-tool-failure-modes` (order 64) for the union. Companion: 81
+  ADR-0297 (2026-05-25) — DELETED `ALWAYS_CONFIRM_PATTERNS` regex (9 entries:
+  curl/wget/gh api/git push/send-pack/fetch/commit --amend/reset --hard) +
+  `GIT_PREFIX` (legal git global-option matcher hardened over 4 rounds).
+  Heuristic both produces false positives (`echo "git push --help"`) and
+  misses new exfiltration vectors (`scp`, `nc`, `aws s3 cp`, …). The sandbox
+  profile is now the single source of truth. BREAKING: sessions with no
+  `QUANTA_SANDBOX` set now see `always-confirm` for EVERY bash call (was
+  pre-approval-ok for unmatched commands). Operators who want the legacy
+  frictionless UX opt into `QUANTA_SANDBOX=workspace-write`. Permission-
+  layer HARD_DENY is unchanged. `isConcurrencySafe: false` — arbitrary
+  shell side effects are unknowable, so every bash call serializes.
+  `deriveBashFailure` derives typed `ToolFailure` from `ShellResult` shape:
+  timeout via `timedOut`, spawn_error via `exit 127 + "command not found"`
+  stderr, permission_denied via `exit 126 + "Permission denied"` — see
+  `typed-tool-failure-modes` (order 64) for the union. Companion: 81
   `shell-output-delta-streaming` covers the streaming observer wired in via
   `ctx.onShellEvent`.

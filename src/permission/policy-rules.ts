@@ -195,9 +195,11 @@ const HARD_DENY_RULES: readonly HardDenyRule[] = [
   // remote state. The equivalent in our pre-tool dispatch context is to
   // recognize the three canonical mass-delete forms on `git push` and block
   // them outright. Individual `git push --delete <remote> <branch>` for a
-  // single ref stays governed by the existing HITL `always-confirm` tier
-  // (via `GIT_PREFIX` regex in the bash tool) — that surface remains so
-  // users can do routine branch cleanup with one confirmation.
+  // single ref stays governed by the operator's chosen sandbox profile
+  // (ADR-0297 — sandbox-driven HITL replaced the bash `GIT_PREFIX` regex
+  // matcher; under unset / `workspace-write-net` the tier is `always-
+  // confirm` for ALL bash calls, so routine branch cleanup still gets one
+  // confirmation; under `read-only` the OS refuses the push outright).
   {
     name: "git-push-mirror",
     description:

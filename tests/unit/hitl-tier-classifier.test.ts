@@ -1,22 +1,42 @@
 /* Codex HITL 4-tier gate — classifier half of `hitl-tier.test.ts`.
+ *
+ * ADR-0297 (2026-05-25) — sandbox-driven HITL. The bash tier no longer
+ * inspects the command string; it closes over the operator-chosen
+ * `OsSandboxProfile`. The legacy `bashTool` singleton constructs with
+ * profile `undefined` ⇒ tier degrades to `always-confirm` for ALL
+ * commands (conservative posture: no sandbox = unknown risk).
+ *
+ * Cases that previously asserted pre-approval-ok via the regex miss path
+ * (`ls -la`, `git status`, `bun test`, the 10-entry negative-control
+ * block) now BREAK with the new semantics. Updated below: the existing
+ * always-confirm cases stay green (the new tier is more conservative);
+ * the legitimate-git negative-control block migrated to a `read-only`
+ * profile fixture (where the OS itself blocks mutation, so confirm is
+ * redundant — pre-approval-ok is the right answer there).
+ *
  * Covers `inferToolTier`:
  *   - defaults from isReadOnly() when hitlTier() absent.
- *   - bash hitlTier(): network egress + mutating-git ⇒ always-confirm;
- *     other commands ⇒ pre-approval-ok.
- *   - git global-option bypass hardening (always-confirm) — adversarial fixes
- *     for `git --no-pager`, `git -C`, `git -c`, `git --git-dir=…`, etc.
+ *   - bash hitlTier() under each closed-enum profile + undefined.
+ *   - sandbox=undefined ⇒ ALL bash commands → always-confirm (conservative).
+ *   - sandbox=read-only ⇒ ALL bash commands → pre-approval-ok (OS gates).
  * Dispatch-level gating (HARD_DENY handoff, always-confirm enforcement,
- * legacy fallthrough) lives in `hitl-tier-dispatch.test.ts`.
+ * legacy fallthrough) lives in `hitl-tier-dispatch.test.ts`. Detailed
+ * sandbox-matrix coverage lives in `bash-hitl-sandbox-driven-hellgate.test.ts`.
  */
 
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import { inferToolTier } from "@/permission"
 import type { Tool, ToolEvent } from "@/tool"
-import { bashTool } from "@/tool/bash"
+import { bashTool, makeBashTool } from "@/tool/bash"
 import { editTool } from "@/tool/edit"
 import { readTool } from "@/tool/read"
 import { writeTool } from "@/tool/write"
+
+/** Sandbox-aware bash tool for the legitimate-git negative-control block.
+ *  Under `read-only`, the OS itself refuses mutation ⇒ confirmation is
+ *  redundant ceremony ⇒ pre-approval-ok is the correct tier. */
+const bashReadOnly = makeBashTool({ sandboxProfile: "read-only" })
 
 const makeTool = (
   name: string,
@@ -166,8 +186,11 @@ describe("inferToolTier", () => {
       expect(inferToolTier(bashTool, { command })).toBe("always-confirm")
     })
 
-    // Negative controls: legitimate read-only / non-mutating git commands must
-    // NOT over-match. These all stay at pre-approval-ok.
+    // ADR-0297 — legitimate-git commands under a `read-only` sandbox.
+    // OS itself refuses mutation ⇒ confirmation is redundant ceremony ⇒
+    // pre-approval-ok is correct. Under the old regex code these slipped
+    // through because the patterns didn't match; the new tier reaches the
+    // same answer for a PRINCIPLED reason (sandbox-driven, not "miss").
     test.each([
       ["git status", "git status"],
       ["git log --oneline", "git log"],
@@ -179,21 +202,34 @@ describe("inferToolTier", () => {
       ["git commit -m fix", "ordinary git commit (no --amend)"],
       ["git reset HEAD~1", "git reset without --hard"],
       ["git checkout -b feature/x", "git checkout"],
-    ])("`%s` ⇒ pre-approval-ok (%s)", (command) => {
-      expect(inferToolTier(bashTool, { command })).toBe("pre-approval-ok")
+    ])("`%s` ⇒ pre-approval-ok under sandbox=read-only (%s)", (command) => {
+      expect(inferToolTier(bashReadOnly, { command })).toBe("pre-approval-ok")
     })
   })
 
-  test("bash with `ls -la` ⇒ pre-approval-ok (default)", () => {
-    expect(inferToolTier(bashTool, { command: "ls -la" })).toBe("pre-approval-ok")
+  // ADR-0297 BREAKING — the default `bashTool` singleton constructs with
+  // profile `undefined` ⇒ tier is `always-confirm` for ALL commands. The
+  // three cases below previously asserted `pre-approval-ok` because the
+  // regex pattern list missed them; now the conservative posture applies
+  // uniformly. Operators who want the legacy frictionless UX opt into
+  // `QUANTA_SANDBOX=workspace-write` (or similar).
+  test("bash with `ls -la` ⇒ always-confirm (unset sandbox = conservative)", () => {
+    expect(inferToolTier(bashTool, { command: "ls -la" })).toBe("always-confirm")
   })
 
-  test("bash with `git status` ⇒ pre-approval-ok (read-only git)", () => {
-    expect(inferToolTier(bashTool, { command: "git status" })).toBe("pre-approval-ok")
+  test("bash with `git status` ⇒ always-confirm (unset sandbox = conservative)", () => {
+    expect(inferToolTier(bashTool, { command: "git status" })).toBe("always-confirm")
   })
 
-  test("bash with `bun test` ⇒ pre-approval-ok", () => {
-    expect(inferToolTier(bashTool, { command: "bun test" })).toBe("pre-approval-ok")
+  test("bash with `bun test` ⇒ always-confirm (unset sandbox = conservative)", () => {
+    expect(inferToolTier(bashTool, { command: "bun test" })).toBe("always-confirm")
+  })
+
+  test("bash with `ls -la` under sandbox=workspace-write ⇒ pre-approval-ok", () => {
+    // The legacy frictionless UX is one env var away: operator opts into a
+    // mutating sandbox and the bash tier returns pre-approval-ok uniformly.
+    const t = makeBashTool({ sandboxProfile: "workspace-write" })
+    expect(inferToolTier(t, { command: "ls -la" })).toBe("pre-approval-ok")
   })
 
   test("explicit hitlTier() wins over isReadOnly() inference", () => {
