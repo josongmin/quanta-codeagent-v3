@@ -29,6 +29,7 @@
  * The rules apply ONLY under `src/`. Test files exercise the violations on
  * purpose; the scanner intentionally does not look at `tests/`.
  */
+// meta-test: scans src/ for banned patterns; no src/ unit to import.
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join, relative } from "node:path"

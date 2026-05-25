@@ -4,6 +4,7 @@
  * ripgrep is spawned; we feed synthetic output strings through `parseRanking`
  * and exercise `recallAtK` / `mrr` / `aggregate` on known inputs.
  */
+// meta-test: exercises tests/smoke/localize/* helpers (lives outside src/).
 import { describe, expect, test } from "bun:test"
 import {
   aggregate,

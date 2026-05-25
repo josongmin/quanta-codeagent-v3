@@ -1,6 +1,7 @@
 // package.json script-alias contract — the 5 `agent*` scripts wire to the
 // `src/apps/agent/index.ts` entry with the right `--mode` argument, and the
 // pre-existing `bench` alias is untouched (legacy direct entry preserved).
+// meta-test: lints package.json text; does not import a unit.
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"

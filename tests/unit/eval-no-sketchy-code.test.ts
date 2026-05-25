@@ -17,6 +17,7 @@
  * automatically. If you legitimately need a banned pattern, document why and
  * add the path to that rule's allowlist below — that is the audit trail.
  */
+// meta-test: scans src/apps/eval/** for banned patterns; no src/ unit to import.
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join, relative } from "node:path"

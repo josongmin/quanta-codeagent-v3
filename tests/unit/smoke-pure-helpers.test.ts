@@ -14,6 +14,7 @@
  *   - `CaptureStream.assistantTextByRun` (tests/smoke/capture-stream.ts)
  *   - `TrajectoryReplayLLM.nextRun` exhaustion + boundary (tests/smoke/replay-llm.ts)
  */
+// meta-test: exercises tests/smoke/* helpers (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
 import { CaptureStream } from "../smoke/capture-stream"
 import { parseJudgeReply } from "../smoke/judge"

@@ -1,3 +1,4 @@
+// meta-test: exercises tools/feature-catalog/* (lives outside src/, no @/ alias).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"

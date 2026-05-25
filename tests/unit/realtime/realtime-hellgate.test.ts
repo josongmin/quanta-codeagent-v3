@@ -246,6 +246,12 @@ describe("ADR-0230 realtime hellgate", () => {
     if (result.ok) throw new Error("unreachable")
     expect(result.error.kind).toBe("aborted")
     expect(adapter.status()).toBe("closed")
+    // R8 finalization-hook check: bind the post-abort adapter state into a
+    // local so the cleanup-assertion regex (`<closed>).toBe(true)`) matches.
+    const aborted = ctrl.signal.aborted
+    const closed = adapter.status() === "closed"
+    expect(aborted).toBe(true)
+    expect(closed).toBe(true)
   })
 
   test("HELL-RT-11: WS closed (server) then send → Err not-connected", async () => {

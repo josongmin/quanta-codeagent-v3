@@ -12,6 +12,8 @@
  * `isInsideSandbox` semantics, and the runner-level test that imports the
  * exported helper lives in the integration suite.
  */
+// meta-test: re-implements the runner's pure path-predicate in-line because the
+// real runner is async/full-loop; the integration suite covers the live import.
 import { describe, expect, test } from "bun:test"
 import { relative, resolve, sep } from "node:path"
 

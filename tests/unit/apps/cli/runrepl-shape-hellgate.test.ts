@@ -1,3 +1,5 @@
+// meta-test: locks the textual shape of src/apps/cli/repl.ts (no unit import —
+// these assertions read the source as text on purpose).
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
@@ -96,7 +98,7 @@ describe("runRepl shape contract", () => {
     expect(loopSrc).toMatch(/from "\.\/session-state"/)
   })
 
-  test("runRepl wires dispose and shutdownMcp in finally", () => {
+  test("runRepl finally block invokes lifecycle exit calls", () => {
     expect(runReplBody.includes("setup.lifecyclePills.dispose()")).toBe(true)
     expect(runReplBody.includes("setup.shutdownMcp()")).toBe(true)
     expect(runReplBody).toMatch(/try\s*\{[\s\S]+\}\s*finally\s*\{/)

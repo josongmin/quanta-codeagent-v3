@@ -1,3 +1,4 @@
+// meta-test: drives the tests/smoke/* battery (lives outside src/, no @/ alias).
 import { afterAll, describe, expect, test } from "bun:test"
 import { discoverScenarios, runScenario } from "../smoke/runner"
 

@@ -2,6 +2,7 @@
 // satisfy the GitHub Actions baseline shape (top-level on/jobs, every job has
 // runs-on+steps, every step has run or uses). We also assert no raw secret
 // literal leaks: any token-shaped string outside `${{ secrets.* }}` is rejected.
+// meta-test: lints .github/workflows/*.yml; no src/ unit to import.
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"

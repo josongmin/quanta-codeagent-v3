@@ -1,3 +1,4 @@
+// meta-test: exercises tools/feature-catalog/* (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
 import { parseYaml, stringifyYaml } from "../../tools/feature-catalog/yaml"
 

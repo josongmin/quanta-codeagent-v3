@@ -452,7 +452,7 @@ describe("LspClient.applyWorkspaceEdit — strategy DI (ADR-0155)", () => {
     }
   })
 
-  test("ATOMW-D14: explicit sessionId scopes stale-tmp cleanup before commit", async () => {
+  test("ATOMW-D14: explicit sessionId scopes stale-tmp removal before commit", async () => {
     const dir = await mkTmp()
     try {
       const a = join(dir, "a.ts")

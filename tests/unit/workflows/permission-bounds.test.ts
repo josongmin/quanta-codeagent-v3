@@ -4,6 +4,7 @@
 // tests fail and the change is rejected at review time.
 //
 // Also asserts the prompt-injection contract: no `pull_request_target` trigger.
+// meta-test: lints .github/workflows/*.yml; no src/ unit to import.
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
