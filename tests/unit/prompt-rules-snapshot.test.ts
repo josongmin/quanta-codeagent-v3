@@ -60,11 +60,14 @@ describe("system prompt — T5a env-mod / stop-when-blocked rules", () => {
     expect(prompt).toContain("[R-NO-THRASH]")
   })
 
-  test("R-SEARCH-FIRST pins the localize-first / no-broad-glob phrasing", () => {
-    // Type-B search thrashing: 7-8 empty globs before finding the file. The
-    // localize-first directive is the model-obedient short-circuit.
-    expect(prompt).toContain("prefer `localize` first")
-    expect(lower).toContain("do not")
+  test("R-SEARCH-FIRST pins the broad-search vs fault-localize split", () => {
+    // Search thrash fix: broad repo questions should go through the generic
+    // facade, while concrete bug hunting should use the fault-localization
+    // funnel. Blind glob spam stays forbidden.
+    expect(prompt).toContain("use `search_codebase` for")
+    expect(lower).toContain("broad repo queries")
+    expect(lower).toContain("`localize` for fault localization")
+    expect(lower).toContain("concrete pattern or path hypothesis")
     expect(lower).toContain("fire repeated broad globs hoping for a match")
   })
 

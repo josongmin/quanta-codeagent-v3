@@ -57,8 +57,9 @@ export const CORE_RULES: readonly PromptRule[] = [
   {
     id: "R-SEARCH-FIRST",
     lines: [
-      "- [R-SEARCH-FIRST] To locate files or symbols, prefer `localize` first; use",
-      "  `grep`/`glob` only with a concrete pattern you have evidence for. Do not",
+      "- [R-SEARCH-FIRST] To locate files or symbols, use `search_codebase` for",
+      "  broad repo queries, `localize` for fault localization, and `grep`/`glob`",
+      "  only when you already have a concrete pattern or path hypothesis. Do not",
       "  fire repeated broad globs hoping for a match.",
     ],
   },

@@ -180,7 +180,7 @@ export interface TurnContext {
 
 const PLAN_NOTICE = [
   "PLAN MODE is active. Do NOT modify anything. Use only read-only tools",
-  "(read, grep, glob, localize) to investigate, then produce a concrete,",
+  "(read, search_codebase, grep, glob, localize) to investigate, then produce a concrete,",
   "step-by-step implementation plan as your final answer: which files, what",
   "changes, in what order. Stop calling tools once you can write the plan.",
 ].join("\n")

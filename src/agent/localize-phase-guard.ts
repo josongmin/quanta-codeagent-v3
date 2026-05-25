@@ -4,15 +4,17 @@
  * SWE-bench Verified failure pattern — the model edits `adapters.py` on the
  * FIRST turn when the gold patch lives in `models.py`. The `localize` tool
  * exists but is not FORCED, so the model skips exploration and edits straight
- * into the wrong file.
+ * into the wrong file. `search_codebase` now covers broad repo search, but the
+ * guard still exists because broad search is not the same as pinning the edit
+ * owner for a concrete fault.
  *
  * Agentless's 3-phase pipeline keeps fault-localization as a HARD boundary
  * before the repair phase: file/function must be confirmed before any edit.
  * That phase is one of the validated contributors to its 41.5% on SWE-bench
  * Verified. This module mirrors the boundary at the DISPATCH SEAM: during the
  * first N turns of a run, mutating tools (`edit`, `write`, `scripted_replace`)
- * are blocked with a reminder steering the model to `read`/`grep`/`glob`/
- * `localize` first.
+ * are blocked with a reminder steering the model to `search_codebase`/`read`/
+ * `grep`/`glob`/`localize` first.
  *
  * Pure / cycle-safe: no imports from sibling agent modules. State is owned by
  * the loop (one instance per `runAgent` invocation) and threaded as a single
@@ -59,8 +61,9 @@ export interface LocalizePhaseConfig {
  *                           mutating but we accept the trade-off — the loss
  *                           of measurement-grade phase enforcement here is
  *                           outweighed by the cost of breaking bash entirely.
- *   - `read`/`grep`/`glob`/`localize` — non-mutating exploration tools, the
- *                           whole point is to ENCOURAGE these.
+ *   - `search_codebase`/`read`/`grep`/`glob`/`localize` — non-mutating
+ *                           exploration tools, the whole point is to
+ *                           ENCOURAGE these.
  *
  * Adding a new mutating tool (e.g. `multi_edit`) requires explicitly listing
  * it here AND updating the ADR — silent-coverage would be a security/policy
@@ -75,7 +78,7 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 /** The forcing nudge injected when a mutating tool is attempted in Phase 1.
  *  Builder, not constant — the turn header `(turn N/M)` needs interpolation. */
 export const buildLocalizePhaseForceMessage = (turn: number, phase1Turns: number): string =>
-  `Phase 1 (localization, turn ${turn + 1}/${phase1Turns}): edits are blocked until you have identified the exact file and function to modify. Use \`read\`, \`grep\`, \`glob\`, \`localize\` to locate the issue first. Re-confirm by reading the candidate location, then proceed.`
+  `Phase 1 (localization, turn ${turn + 1}/${phase1Turns}): edits are blocked until you have identified the exact file and function to modify. Use \`search_codebase\` for broad repo search, \`localize\` for fault localization, then \`read\`, \`grep\`, or \`glob\` to confirm the candidate location. Re-confirm by reading the candidate location, then proceed.`
 
 /** Is `phase1Turns` a positive integer (the only ACTIVE configuration)? Any
  *  other value (undefined, 0, negative, NaN, Infinity, non-integer) ⇒ FALSE
@@ -96,8 +99,8 @@ const isActivePhase1Turns = (n: unknown): n is number => {
  *    config ⇒ guard OFF — no silent half-enabled state).
  *  - `state.turn >= phase1Turns` ⇒ `{ block: false }` (Phase 2 — pass-through).
  *  - `state.turn < phase1Turns` AND tool ∈ MUTATING_TOOL_NAMES ⇒ block with the
- *    Phase 1 reminder. Read/grep/glob/localize and other non-mutating tools
- *    pass through.
+ *    Phase 1 reminder. search_codebase/read/grep/glob/localize and other
+ *    non-mutating tools pass through.
  *
  * Pure: reads `state.turn` and `cfg.phase1Turns`; never mutates either. Idempotent
  * — calling twice with the same args yields the same decision (no side effects).
