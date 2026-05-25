@@ -84,7 +84,11 @@
       "@/media": ["./src/media/index.ts"],
       "@/media/*": ["./src/media/*"],
       "@/voice": ["./src/voice/index.ts"],
-      "@/voice/*": ["./src/voice/*"]
+      "@/voice/*": ["./src/voice/*"],
+      "@/realtime": ["./src/realtime/index.ts"],
+      "@/realtime/*": ["./src/realtime/*"],
+      "@/radar": ["./src/radar/index.ts"],
+      "@/radar/*": ["./src/radar/*"]
     }
   },
   "include": ["src", "tests", "tools"],
