@@ -207,6 +207,7 @@ const makeStubDeps = (): { deps: SetupSessionDeps; probe: DepProbe } => {
       probe.buildTurnIndicatorAndStreamCalls += 1
       return { indicator: stubIndicator as never, turnStream: stream }
     },
+    buildDebugTracerAndStream: (stream) => ({ stream, debugHandle: undefined }),
     buildWorkMetricsSink: () => {
       probe.buildWorkMetricsSinkCalls += 1
       return undefined

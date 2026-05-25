@@ -10,6 +10,7 @@ import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
+import type { DebugCmdState } from "../debug-cmd"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import {
@@ -60,6 +61,17 @@ const buildOnConfirm =
     return accepted
   }
 
+/** Track D — DebugTracerHandle. Surface owns the live state + the
+ *  swap-in/out side effect (mutable proxy port in the stream tee).
+ *  The slash adapter consumes ONLY {@link DebugCmdState} I/O — it never
+ *  touches the stream layer. Absent ⇒ `QUANTA_DEBUG` was unset (or
+ *  parsed disabled / non-TTY) at boot, so no tee consumer was
+ *  allocated; the `/debug` slash then prints "not wired" + exits 0. */
+export interface DebugTracerHandle {
+  readonly get: () => DebugCmdState
+  readonly set: (state: DebugCmdState) => void
+}
+
 /** Inputs for {@link setupSession} — bundled so the call site stays narrow
  *  and tests can construct it with a small literal. */
 export interface SetupSessionDeps extends SessionBootstrapDeps {
@@ -77,6 +89,16 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
     isTTY: boolean | undefined,
     intervalEnv: string,
   ) => { indicator: TurnIndicator; turnStream: StreamPort }
+  /** Track D — build the debug-tracer + tee-wrap the stream. Returns
+   *  `{stream, debugHandle: undefined}` (literal input ref) when the
+   *  boot env disables the tracer, so the tee consumer count is
+   *  byte-identical to today's; returns a wrapped stream + a live
+   *  handle when enabled so `/debug` runtime toggles affect emission. */
+  readonly buildDebugTracerAndStream: (
+    stream: StreamPort,
+    envSource: NodeJS.ProcessEnv,
+    isTTY: boolean | undefined,
+  ) => { stream: StreamPort; debugHandle: DebugTracerHandle | undefined }
   /** Install the status pills row (workspace / mode+effort / skills / sandbox). */
   readonly installPills: (args: {
     statusBar: StatusBar
@@ -116,6 +138,9 @@ export interface SessionSetupResult {
   readonly statusBar: StatusBar
   readonly turnIndicator: TurnIndicator
   readonly turnSummary: TurnSummaryCollector
+  /** Track D — present iff `QUANTA_DEBUG` enabled the debug tracer at
+   *  boot AND stderr is a TTY. Absent ⇒ `/debug` slash prints "not wired". */
+  readonly debugHandle: DebugTracerHandle | undefined
   readonly sessionDeps: SessionDeps
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
@@ -154,9 +179,18 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     runtime.env,
     runtime.stdoutIsTTY,
   )
+  // Track D — interpose the debug tracer BEFORE the indicator so the
+  // debug emit sees the same upstream events the indicator does. When
+  // the env disables it, the builder returns the literal `summaryStream`
+  // and `debugHandle: undefined` (byte-identical, no extra tee).
+  const { stream: debugStream, debugHandle } = deps.buildDebugTracerAndStream(
+    summaryStream,
+    runtime.env,
+    process.stderr.isTTY,
+  )
   const { indicator: turnIndicator, turnStream } = deps.buildTurnIndicatorAndStream(
     statusBar,
-    summaryStream,
+    debugStream,
     runtime.env,
     runtime.stdoutIsTTY,
     runtime.spinnerIntervalMs,
@@ -256,6 +290,7 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     statusBar,
     turnIndicator,
     turnSummary,
+    debugHandle,
     sessionDeps,
     costPanel: boot.costPanel,
     branchProgress: boot.branchProgress,

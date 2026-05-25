@@ -33,6 +33,7 @@ import { dirname, join } from "node:path"
 import type { Plan } from "@/agent/plan/types"
 import { runtimeConfig } from "@/shared"
 import { formatBranchesPanel } from "./branch-search-progress"
+import { type DebugCmdState, runDebugCmd } from "./debug-cmd"
 import { editMessageCmd } from "./edit-message-cmd"
 import { editPlanCmd } from "./edit-plan-cmd"
 import { forkCheckpointCmd } from "./fork-checkpoint-cmd"
@@ -157,6 +158,18 @@ export interface SlashContext {
         }
         readonly reset: () => void
         readonly skip: () => void
+      }
+    | undefined
+  /** Track D — developer-mode debug tracer slash wire. When set, `/debug`
+   *  reads + writes the runtime debug-tracer state through this seam. The
+   *  surface owns the side effect (stream-tee swap-in). Absent ⇒ `/debug`
+   *  prints a "not wired" line (with the QUANTA_DEBUG=1 hint) and exits 0
+   *  — the runtime toggle requires the boot-time tee to have been
+   *  allocated, so the slash is intentionally a no-op without it. */
+  readonly debug?:
+    | {
+        readonly get: () => DebugCmdState
+        readonly set: (state: DebugCmdState) => void
       }
     | undefined
 }
@@ -786,6 +799,42 @@ const focusChainCmd: SlashCommand = {
   },
 }
 
+/** Track D — `/debug` runtime toggle. Pure handler in `./debug-cmd`; the
+ *  slash adapter delegates and applies the new state back through the
+ *  `ctx.debug.set` seam. The handler never throws, so unknown arguments
+ *  surface as a clean message (return 1) and the state stays prev. */
+const debugCmd: SlashCommand = {
+  name: "/debug",
+  describe: "Toggle developer debug tracer (on | off | status | <categories>)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.debug === undefined) {
+      ctx.out(
+        "/debug: not wired in this surface (boot with QUANTA_DEBUG=1 to enable runtime toggle)\n",
+      )
+      return 0
+    }
+    const prev = ctx.debug.get()
+    const result = runDebugCmd(args.join(" "), prev)
+    // Unknown-argument case: handler returns `state === prev` and message
+    // starts with the error prefix. Apply the unchanged state regardless
+    // (idempotent) and surface the message to stderr + exit 1 for shell
+    // chain-ability. Status / toggle / on / off / categories all share
+    // the success path.
+    if (result.message.startsWith("/debug: unknown argument")) {
+      ctx.err(result.message)
+      return 1
+    }
+    // `status` (and any future read-only sub-cmd) returns `state === prev`
+    // by reference. Skip the set() to keep the side-effect strictly tied to
+    // actual mutations — surfaces relying on a set-callback for instrumentation
+    // (telemetry, render-bridge) don't see spurious no-op transitions.
+    if (result.state !== prev) ctx.debug.set(result.state)
+    ctx.out(result.message)
+    return 0
+  },
+}
+
 // `/rewind` + `/fork` (Claude Code v1.7196 pattern) are env-gated at module
 // load: `QUANTA_REWIND=0` removes them from the registry entirely so they
 // can't be discovered, auto-completed, or accidentally dispatched. Default
@@ -846,6 +895,11 @@ export const BUILTINS: readonly SlashCommand[] = [
   profileCmd,
   identityCmd,
   focusChainCmd,
+  // Track D — `/debug` runtime toggle. Default-OFF: when `ctx.debug` is
+  // absent (boot-time tee not allocated) the slash prints a "not wired"
+  // line + the QUANTA_DEBUG hint and exits 0 (parity with the rest of the
+  // surface-only commands).
+  debugCmd,
 ] as const
 
 const BUILTINS_BY_NAME: ReadonlyMap<string, SlashCommand> = new Map(

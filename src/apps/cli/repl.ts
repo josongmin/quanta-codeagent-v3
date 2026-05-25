@@ -19,6 +19,8 @@ import {
   isBranchProgressEnabled,
 } from "./branch-search-progress"
 import { type CostPanel, createCostPanel, isCostPanelEnabled } from "./cost-panel"
+import type { DebugCmdState } from "./debug-cmd"
+import { createDebugTracer, parseDebugEnv } from "./debug-tracer"
 import type { HistorySessionState } from "./history-cmd"
 import type { IdleMonitor } from "./idle-monitor"
 import { runImageCmd } from "./image-cmd"
@@ -94,6 +96,10 @@ export type ReplSlashCtx = Partial<{
    *  `history: Message[]` binding is reassigned per turn). Stored as a
    *  callback rather than a value to avoid stale snapshots. */
   side: () => SideChatSessionState
+  /** Track D — debug-tracer runtime toggle. Present iff the boot gate
+   *  allocated the mutable proxy port; absent ⇒ `/debug` slash prints
+   *  "not wired" + the QUANTA_DEBUG hint. */
+  debug: { get: () => DebugCmdState; set: (state: DebugCmdState) => void }
 }>
 
 /** Claude A1 rewind/fork: bind `/rewind` and `/fork` to the live session id.
@@ -350,6 +356,8 @@ interface BuildReplSlashCtxArgs {
   getHistory: () => readonly Message[]
   sessionDeps: SessionDeps
   abortSignal: AbortSignal
+  /** Track D — debug-tracer handle. Absent ⇒ `/debug` prints "not wired". */
+  debugHandle: import("./repl/session-setup").DebugTracerHandle | undefined
 }
 const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
   const {
@@ -364,6 +372,7 @@ const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
     getHistory,
     sessionDeps,
     abortSignal,
+    debugHandle,
   } = args
   return {
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
@@ -388,6 +397,8 @@ const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
       messages: getHistory(),
       signal: abortSignal,
     }),
+    // Track D — `/debug` runtime toggle. Absent ⇒ slash prints "not wired".
+    ...(debugHandle !== undefined ? { debug: debugHandle } : {}),
   }
 }
 
@@ -483,6 +494,69 @@ const buildTurnIndicatorAndStream = (
   })
   if (!enabled) return { indicator, turnStream: stream }
   return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator)]) }
+}
+
+/** Track D — build the debug-tracer + tee-wrap the stream + return the
+ *  surface-mutable {@link DebugTracerHandle}. Default-OFF byte-identical:
+ *  when `QUANTA_DEBUG` is unset (or parsed disabled) OR stderr is not a
+ *  TTY, returns the literal `stream` reference + `debugHandle: undefined`
+ *  ⇒ no tee allocated, no extra consumer, the `/debug` slash prints
+ *  "not wired" + exits 0.
+ *
+ *  When the boot gate passes, allocates ONE mutable proxy port wrapping a
+ *  live tracer ref. The `/debug` slash mutates `state` through
+ *  `debugHandle.set(...)`; on every subsequent emit the proxy reads the
+ *  CURRENT state and either invokes the tracer (when enabled) or no-ops
+ *  (when disabled). Categories are honored by the tracer itself
+ *  (Track C). The proxy is the ONLY thing teed in — re-allocating a
+ *  tracer per state change keeps `startedAt` aligned with the LAST
+ *  toggle so on-screen timestamps are intuitive ("ms since /debug on").
+ *  A failure inside the tracer is swallowed in place (TeeStream would
+ *  otherwise mark a degraded record). */
+const buildDebugTracerAndStream = (
+  stream: StreamPort,
+  envSource: NodeJS.ProcessEnv,
+  isTTY: boolean | undefined,
+): {
+  stream: StreamPort
+  debugHandle: import("./repl/session-setup").DebugTracerHandle | undefined
+} => {
+  // Non-TTY ⇒ forced disable to avoid polluting pipe/redirect output.
+  if (isTTY !== true) return { stream, debugHandle: undefined }
+  const parsed = parseDebugEnv(envSource.QUANTA_DEBUG)
+  if (!parsed.enabled) return { stream, debugHandle: undefined }
+  // Live state ref + tracer ref. The tracer is rebuilt on each
+  // `set(state)` so options (categories, startedAt) reflect the latest
+  // toggle. Initial tracer is built once for the boot-enabled state.
+  let state: DebugCmdState =
+    parsed.categories !== undefined
+      ? { enabled: true, categories: parsed.categories }
+      : { enabled: true }
+  const buildTracer = (s: DebugCmdState): ReturnType<typeof createDebugTracer> | null => {
+    if (!s.enabled) return null
+    return createDebugTracer({
+      ...(s.categories !== undefined ? { categories: s.categories } : {}),
+    })
+  }
+  let tracer = buildTracer(state)
+  const proxy: StreamPort = {
+    emit: (event): void => {
+      if (tracer === null) return
+      try {
+        tracer(event)
+      } catch {
+        // Same posture as buildIndicatorPort: never poison the tee.
+      }
+    },
+  }
+  const debugHandle: import("./repl/session-setup").DebugTracerHandle = {
+    get: () => state,
+    set: (next) => {
+      state = next
+      tracer = buildTracer(next)
+    },
+  }
+  return { stream: new TeeStream([stream, proxy]), debugHandle }
 }
 
 const buildSkillsCallback = (
@@ -604,6 +678,7 @@ export const dispatchReplSlash = async (
     ...(slashCtx?.history !== undefined ? { history: slashCtx.history } : {}),
     ...(slashCtx?.branchSearch !== undefined ? { branchSearch: slashCtx.branchSearch } : {}),
     ...(slashCtx?.side !== undefined ? { side: slashCtx.side() } : {}),
+    ...(slashCtx?.debug !== undefined ? { debug: slashCtx.debug } : {}),
   })
   return true
 }
@@ -681,6 +756,7 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   buildPlanStoreOrUndefined,
   buildTurnSummaryAndStream,
   buildTurnIndicatorAndStream,
+  buildDebugTracerAndStream,
   buildWorkMetricsSink,
   installPills,
 }
@@ -774,6 +850,7 @@ const composeSurfaceSlashCtx = (
     getHistory: () => state.history,
     sessionDeps: setup.sessionDeps,
     abortSignal: setup.abort.signal,
+    debugHandle: setup.debugHandle,
   })
 
 const composeTurnSinks = (

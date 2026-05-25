@@ -177,6 +177,7 @@ const buildSetup = (
     statusBar,
     turnIndicator: stubIndicator(),
     turnSummary: stubSummary(),
+    debugHandle: undefined,
     sessionDeps: { llm: llmStub, signal: new AbortController().signal } as never,
     costPanel: undefined,
     branchProgress: undefined,

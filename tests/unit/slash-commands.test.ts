@@ -114,6 +114,9 @@ describe("BUILTINS table", () => {
       "/profile",
       "/identity",
       "/focus-chain",
+      // Track D — `/debug` developer-mode tracer runtime toggle. Pinned
+      // at the END so all prior slot anchors stay intact.
+      "/debug",
     ])
   })
 })
