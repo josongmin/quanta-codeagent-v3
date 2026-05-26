@@ -47,6 +47,10 @@ export interface RuntimeWireSummary {
 
 export interface RuntimeContext {
   createRuntimeFacade(args: CreateRuntimeFacadeArgs): Promise<RuntimeFacade>
+  materializeReviewerAgent(
+    boot: SessionBootstrapResult,
+    turnAssembler?: RuntimeAgentTurnAssembler,
+  ): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]>
   registry(): RuntimeContextRegistryView
   wrapRegistry(mapper: (tool: Tool) => Tool): void
   permissionMode(): RuntimeContextPermissionModeView
@@ -131,6 +135,8 @@ const createRuntimeContext = (initialState: InternalRuntimeContextState): Runtim
   const record: RuntimeContextRecord = {
     state: initialState,
     createRuntimeFacade: async (args) => await createRuntimeFacadeFromBinding(record.state, args),
+    materializeReviewerAgent: (boot, turnAssembler) =>
+      record.state.materializeReviewerAgent(boot, turnAssembler),
     registry: () => record.state.snapshot.registry,
     wrapRegistry: (mapper) => {
       const registry = record.state.snapshot.registry
@@ -230,7 +236,7 @@ export const materializeReviewerAgent = (
   runtimeContext: RuntimeContext,
   turnAssembler?: RuntimeAgentTurnAssembler,
 ): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]> =>
-  unwrapRuntimeContext(runtimeContext).state.materializeReviewerAgent(boot, turnAssembler)
+  runtimeContext.materializeReviewerAgent(boot, turnAssembler)
 
 export const summarizeRuntimeContext = (runtimeContext: RuntimeContext): RuntimeWireSummary =>
   summarizeRuntimeSnapshot(unwrapRuntimeContext(runtimeContext).state.snapshot)

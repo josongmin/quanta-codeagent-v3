@@ -6,7 +6,6 @@ import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { PermissionStore, ToolAction } from "@/permission"
 import {
   composeRuntimeBootstrapContext,
-  materializeReviewerAgent,
   type RuntimeContext,
 } from "@/sdk/runtime"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
@@ -96,7 +95,7 @@ const buildAdmissibility = (args: {
   const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, runtimeContext } = args
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
   const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const reviewerAgent = materializeReviewerAgent(boot, runtimeContext)
+  const reviewerAgent = runtimeContext.materializeReviewerAgent(boot)
   const guardianReview =
     reviewerAgent !== undefined
       ? boot.createSubagentBackedGuardianReview({

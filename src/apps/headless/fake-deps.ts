@@ -14,6 +14,8 @@ import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/
 import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, ToolRegistry } from "@/tool"
 
+export const HEADLESS_FAKE_SESSION_ID = "headless-session"
+
 /** Capture surface so the headless smoke + the hellgate test can assert on
  *  every `AgentEvent` the runner emitted during the turn. */
 export class RecordingStream implements StreamPort {
@@ -36,11 +38,10 @@ export const buildFakeBootstrapDeps = (
   overrides: { readonly subagentConfig?: AgentConfig["subagent"] } = {},
 ): SessionBootstrapDeps => {
   const registry = new ToolRegistry([...tools])
-  const sessionId = "headless-session"
   const tooling: Tooling = {
     store: undefined,
     embedder: undefined,
-    sessionId,
+    sessionId: HEADLESS_FAKE_SESSION_ID,
     registry,
     memoryConfig: undefined,
     subagentConfig: overrides.subagentConfig,
@@ -80,7 +81,7 @@ export const buildFakeBootstrapDeps = (
     pickIdentity: () => undefined,
     pickPersona: () => "default",
     resolveResume: async (_: ResolveResumeInput): Promise<ResumeResolution> => ({
-      sessionId,
+      sessionId: HEADLESS_FAKE_SESSION_ID,
       history: [] as Message[],
       idMeta: undefined,
       inIdMode: false,

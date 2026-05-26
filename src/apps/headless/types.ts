@@ -15,9 +15,9 @@
  */
 
 import type { AgentConfig, AgentOutcome } from "@/agent"
-import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { SessionTransport } from "@/ipc/session"
 import type { Message, StreamEvent } from "@/llm"
+import type { RuntimeSession } from "@/sdk/runtime"
 import type { AgentEvent } from "@/stream"
 
 /** A pre-programmed assistant turn the fake LLM will replay. Either supply
@@ -87,20 +87,25 @@ export interface HeadlessRuntimeWires {
   }
 }
 
-/** Result of {@link runHeadlessOnce}. The shape is intentionally LEANER
- *  than the CLI's `SessionSetupResult` — every TTY/UI chrome field
- *  (`statusBar`, `turnIndicator`, `costPanel`, `branchProgress`,
- *  `lifecyclePills`, `pills`, `debugHandle`, `timelinePanel`, `turnSummary`)
- *  is INTENTIONALLY ABSENT. The headless surface exposes only the
- *  bootstrap result + per-turn outcome.
+export type HeadlessSessionSnapshot = Awaited<ReturnType<RuntimeSession["snapshot"]>>
+
+/** Result of {@link runHeadlessOnce}. The public seam exposes SDK-facing
+ *  session metadata + the completed-turn proof. Internal bootstrap/runtime
+ *  bags stay private to the slice.
  *
- *  Field-count contract: `runHeadlessOnce` returns the FULL
- *  {@link SessionBootstrapResult} shape PLUS `outcome` + `messages` +
- *  `events` + `wires`, so the count is bootstrap-fields + 4 — strictly
- *  greater than the bootstrap result's own field count. This is the CASE-5
- *  invariant the hellgate pins (any future bootstrap field gets carried
- *  through automatically). */
-export interface HeadlessRunResult extends SessionBootstrapResult {
+ *  Contract:
+ *  - stable session metadata: `sessionId`, `cwd`, `model`, `mode`,
+ *    `maxTurns`, `provider`
+ *  - completed runs expose a snapshot captured from `session.snapshot()`
+ *  - already-aborted runs may omit `snapshot`, proving the surface
+ *    short-circuited before opening a runtime session */
+export interface HeadlessRunResult {
+  readonly provider: string
+  readonly model: string
+  readonly mode: string
+  readonly maxTurns: number
+  readonly cwd: string
+  readonly sessionId: string
   /** Per-turn outcome from `@/runner#runOnce`. Carries `reason` (closed enum)
    *  plus the structured stop-category and timing fields the runner emits. */
   readonly outcome: AgentOutcome
@@ -110,6 +115,9 @@ export interface HeadlessRunResult extends SessionBootstrapResult {
    *  the fake stream port. Surface tests assert on this; production
    *  headless callers may ignore the field. */
   readonly events: readonly AgentEvent[]
+  /** SDK snapshot captured from the runtime session when a session was
+   *  opened. Undefined on pre-bootstrap abort short-circuit. */
+  readonly snapshot?: HeadlessSessionSnapshot
   /** Lean proof that reusable execution/memory wires were mounted without
    *  exposing the full internal runtime-deps bag on the headless public API. */
   readonly wires: HeadlessRuntimeWires

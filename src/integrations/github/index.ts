@@ -48,7 +48,7 @@ export type {
   SenderType,
   TrustScope,
 } from "./types"
-export { ALL_GH_EVENT_KINDS } from "./types"
+export { ALL_GH_EVENT_KINDS, asIdempotencyKey } from "./types"
 export type {
   WebhookEventSourceOpts,
   WebhookHandle,

@@ -67,6 +67,7 @@ export const createStubRuntimeFactory = (): {
           return () => listeners.delete(listener)
         },
         snapshot: async () => snapshot,
+        attachSessionTransport: async () => ({ close: async () => undefined }),
         close: async () => {
           bag.sessionsClosed += 1
           listeners.clear()

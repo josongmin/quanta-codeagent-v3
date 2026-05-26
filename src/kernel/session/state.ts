@@ -6,6 +6,7 @@ import type {
   SessionSnapshotLite,
   SessionStateView,
 } from "@/protocol/session"
+import { SingleWriterLease } from "./lease"
 
 export interface KernelTranscriptState {
   readonly messageCount: number
@@ -17,6 +18,7 @@ export interface KernelSessionState {
   readonly sessionId: string
   readonly revision: number
   readonly seq: number
+  readonly lease: SingleWriterLease
   readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
   readonly messages: readonly Message[]
   readonly draftInput: string
@@ -68,6 +70,7 @@ export const createKernelSessionState = (
     sessionId: input.sessionId,
     revision: 0,
     seq: 0,
+    lease: new SingleWriterLease(),
     status: "idle",
     messages,
     draftInput: "",

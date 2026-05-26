@@ -265,6 +265,7 @@ const buildSetup = async (
         },
       }
     },
+    materializeReviewerAgent: (_boot, _turnAssembler) => undefined,
     registry: () => registry as never,
     wrapRegistry: (_mapper: Parameters<RuntimeContext["wrapRegistry"]>[0]) => undefined,
     permissionMode: () => "default",

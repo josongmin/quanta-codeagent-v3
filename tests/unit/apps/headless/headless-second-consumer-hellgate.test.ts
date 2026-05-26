@@ -22,19 +22,16 @@
  *  4. No CLI-surface state — `runHeadlessOnce` does not call `process.exit`,
  *     does not read `process.argv` directly, does not read `process.env`
  *     directly.
- *  5. Host bootstrap shape — the result carries every field
- *     `SessionBootstrapResult` mandates (bootstrap-shape passes through).
+ *  5. Lean SDK result — the public surface exposes session metadata +
+ *     outcome/messages/events/snapshot/wires, NOT the bootstrap bag.
  *  6. Multiple turns — a tool-call script followed by a completion script
  *     ticks the orchestration loop twice.
  *  7. Abort signal — passing an already-aborted signal returns immediately
  *     with `outcome.reason === "aborted"`.
- *  8. No MCP — running with the default empty mcpTools / mcpClients works
- *     (no MCP wiring required).
- *  9. No surface chrome — the result does NOT contain any TTY/UI key
- *     (`statusBar`, `turnIndicator`, `turnSummary`, `costPanel`,
- *     `branchProgress`, `lifecyclePills` (the field is a header-only
- *     bootstrap value — present but opaque, NOT the CLI's full type),
- *     `pills`, `debugHandle`, `timelinePanel`).
+ *  8. No MCP leak — the public result does not expose mcp client/config
+ *     bags or shutdown hooks.
+ *  9. No surface chrome / bootstrap bag — the result does NOT contain
+ *     CLI TTY/UI keys or host bootstrap-only internals.
  * 10. Determinism — two calls with identical fake completion produce
  *     identical assistant text + outcome reason.
  * 11. Forbidden import counter — zero headless source files match the
@@ -67,7 +64,6 @@ import {
   type HeadlessRunResult,
   runHeadlessOnce,
 } from "@/apps/headless"
-import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { StreamEvent } from "@/llm"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -164,15 +160,12 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     expect(violations).toEqual([])
   })
 
-  test("CASE 2b: headless source uses the sdk runtime root, not raw compat helpers", () => {
+  test("CASE 2b: public headless entry keeps bootstrap/runtime compat behind a local adapter", () => {
     const source = readFileSync(join(HEADLESS_DIR, "index.ts"), "utf8")
-    expect(source).toContain('from "@/sdk/runtime"')
-    expect(source).not.toContain('from "@/sdk/runtime/bridge"')
-    expect(source).not.toContain("createLegacyRunnerSessionHost(")
-    expect(source).not.toContain('from "@/runner/session-execution-plane"')
-    expect(source).not.toContain('from "@/runner/session-memory-auto"')
-    expect(source).not.toContain("peekMessages(")
-    expect(source).not.toContain("peekLastOutcome(")
+    expect(source).toContain('from "./session-bridge"')
+    expect(source).not.toContain('from "@/host/bootstrap"')
+    expect(source).not.toContain("createRuntimeFromBootstrap(")
+    expect(source).not.toContain("bootstrapSession(")
   })
 
   test("CASE 2d: headless never imports runner public barrels", () => {
@@ -189,6 +182,15 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
       }
     }
     expect(offenders).toEqual([])
+  })
+
+  test("CASE 2e: the private session bridge is the only runtime compat owner", () => {
+    const owners = readHeadless()
+      .filter((f) => f.path.endsWith(".ts"))
+      .filter((f) => /bootstrapSession\(|createRuntimeFromBootstrap\(/.test(f.body))
+      .map((f) => f.path.replace(`${HEADLESS_DIR}/`, ""))
+      .sort()
+    expect(owners).toEqual(["session-bridge.ts"])
   })
 
   test("CASE 2b: `@/agent` imports in headless are TYPE-ONLY (no runtime reach into agent slice)", () => {
@@ -277,68 +279,49 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     expect(offenders).toEqual([])
   })
 
-  test("CASE 5 (host bootstrap shape): result carries every SessionBootstrapResult field", async () => {
+  test("CASE 5 (public result shape): result is lean SDK metadata plus snapshot, not the bootstrap bag", async () => {
     const result = await runHeadlessOnce({
       prompt: "x",
       fakeCompletion: { text: "y" },
     })
-    // Every field declared on SessionBootstrapResult MUST be present on the
-    // headless result (HeadlessRunResult extends SessionBootstrapResult).
-    const expectedFields: ReadonlyArray<keyof SessionBootstrapResult> = [
-      "runtime",
+
+    const expectedFields = [
       "provider",
       "model",
       "mode",
       "maxTurns",
       "cwd",
+      "sessionId",
+      "outcome",
+      "messages",
+      "events",
+      "snapshot",
+      "wires",
+    ]
+
+    expect(Object.keys(result).sort()).toEqual([...expectedFields].sort())
+    expect(result.snapshot).toBeDefined()
+    expect(result.snapshot?.sessionId).toBe(result.sessionId)
+
+    const omittedInternalKeys = [
+      "runtime",
       "slog",
       "permission",
-      "idleMonitor",
-      "rejectCounter",
-      "effortStore",
-      "llm",
       "features",
       "tooling",
       "mcpSurface",
       "lifecyclePills",
       "lifecycleTaskRegistry",
       "lifecycleFollowUpQueue",
-      "sessionId",
       "history",
-      "pendingImages",
-      "idMeta",
-      "onShellEvent",
-      "workMetricsSink",
-      "stream",
-      "run",
-      "costPanel",
-      "branchProgress",
-      "planStore",
       "abort",
-      "argPrompt",
-      "system",
-      "systemSource",
-      "refreshSystemPrompt",
-      "toolProfileState",
-      "identityModeState",
-      "focusChain",
       "shutdownMcp",
-      "playbookCliFlag",
       "materializeReviewerAgent",
       "createSubagentBackedGuardianReview",
     ]
-    for (const k of expectedFields) {
-      expect(result).toHaveProperty(k as string)
+    for (const key of omittedInternalKeys) {
+      expect(result).not.toHaveProperty(key)
     }
-    // Plus the headless-specific extras (outcome + messages + events + wires).
-    expect(result).toHaveProperty("outcome")
-    expect(result).toHaveProperty("messages")
-    expect(result).toHaveProperty("events")
-    expect(result).toHaveProperty("wires")
-    // Bootstrap-fields count >= 35 (CLI-01 hellgate counted 35 mandatory
-    // fields; we pin >= 35 to allow for future growth while ensuring the
-    // shape never regresses).
-    expect(expectedFields.length).toBeGreaterThanOrEqual(35)
   })
 
   test("CASE 6 (multiple turns): a tool-call script followed by a completion ticks the loop twice", async () => {
@@ -378,58 +361,43 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
       signal: ac.signal,
     })
     expect(result.outcome.reason).toBe("aborted")
+    expect(result.snapshot).toBeUndefined()
+    expect(result.events).toEqual([])
   })
 
-  test("CASE 8 (no MCP): the headless path completes without any mcpTools / mcpClients wiring", async () => {
+  test("CASE 8 (no MCP): the headless path completes without exposing MCP handles on the public result", async () => {
     const result = await runHeadlessOnce({
       prompt: "ping",
       fakeCompletion: { text: "pong" },
     })
-    // The fake bootstrap deps return empty mcpTools/mcpClients/mcpConfigs —
-    // and the headless surface NEVER calls into `@/mcp`.
-    expect(result.features.mcpTools).toEqual([])
-    expect(result.features.mcpClients).toEqual([])
-    expect(result.features.mcpConfigs).toEqual([])
-    // The MCP surface info is undefined (no servers to render).
-    expect(result.mcpSurface).toBeUndefined()
-    // The shutdown is a no-op (no clients to stop) but it MUST be callable.
-    await expect(result.shutdownMcp()).resolves.toBeUndefined()
+    expect(result.outcome.reason).toBe("completed")
+    expect(result).not.toHaveProperty("features")
+    expect(result).not.toHaveProperty("mcpSurface")
+    expect(result).not.toHaveProperty("shutdownMcp")
   })
 
-  test("CASE 9 (no surface chrome): result does NOT carry any TTY/UI key the CLI's SessionSetupResult has", async () => {
+  test("CASE 9 (no surface chrome): result does NOT carry CLI chrome or bootstrap-only internals", async () => {
     const result: HeadlessRunResult = await runHeadlessOnce({
       prompt: "x",
       fakeCompletion: { text: "y" },
     })
-    // These keys belong to the CLI's SessionSetupResult, NOT the host's
-    // SessionBootstrapResult — the headless surface intentionally OMITS them.
-    const cliOnlyKeys = [
+
+    const omittedKeys = [
       "statusBar",
       "turnIndicator",
       "turnSummary",
-      "costPanel" /* present but undefined ⇒ assert NOT a populated panel */,
+      "costPanel",
       "debugHandle",
       "timelinePanel",
       "pills",
+      "runtime",
+      "lifecyclePills",
+      "branchProgress",
+      "planStore",
     ] as const
-    // `lifecyclePills` IS present on SessionBootstrapResult (opaque) but its
-    // CLI-specific concrete type (StatusBar pills row) is NOT — we just assert
-    // the headless variant is the bare `{update}` shape.
-    expect(result.lifecyclePills).toHaveProperty("update")
-    // For the "chrome" keys above we either expect ABSENT (debugHandle,
-    // timelinePanel, pills, statusBar, turnIndicator, turnSummary) OR
-    // explicitly undefined (costPanel: present on bootstrap result but
-    // never populated by the fake deps).
-    for (const k of cliOnlyKeys) {
-      const value = (result as unknown as Record<string, unknown>)[k]
-      // `costPanel` and `branchProgress` exist on the bootstrap result but
-      // MUST be undefined under the fake deps (no surface populates them);
-      // every other key must be absent.
-      if (k === "costPanel") {
-        expect(value).toBeUndefined()
-      } else {
-        expect(value).toBeUndefined()
-      }
+
+    for (const key of omittedKeys) {
+      expect(result).not.toHaveProperty(key)
     }
   })
 

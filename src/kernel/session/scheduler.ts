@@ -256,38 +256,39 @@ export const dispatchSessionCommand = async (
   state: KernelSessionState,
   command: SessionCommand,
   ctx: KernelDispatchContext,
-): Promise<KernelDispatchResult> => {
-  const emittedAt = ctx.clock.now().toISOString()
-  const reduced = reduceSessionCommand(state, command, emittedAt)
-  const immediateEvents = [...reduced.events]
-  const nextState: KernelSessionState = {
-    ...reduced.state,
-    seq: state.seq + immediateEvents.length,
-  }
-  await appendEvents(ctx.eventLog, immediateEvents)
+): Promise<KernelDispatchResult> =>
+  await state.lease.runWith(command.commandId, async () => {
+    const emittedAt = ctx.clock.now().toISOString()
+    const reduced = reduceSessionCommand(state, command, emittedAt)
+    const immediateEvents = [...reduced.events]
+    const nextState: KernelSessionState = {
+      ...reduced.state,
+      seq: state.seq + immediateEvents.length,
+    }
+    await appendEvents(ctx.eventLog, immediateEvents)
 
-  switch (command.type) {
-    case "session.identity.set":
-      await ctx.host.setIdentityMode?.(command.mode)
-      return { state: nextState, events: immediateEvents }
-    case "session.tool_profile.set":
-      await ctx.host.setToolProfile?.(command.profile)
-      return { state: nextState, events: immediateEvents }
-    case "session.transcript.replace":
-      return {
-        state: nextState,
-        events: immediateEvents,
-        transcriptMessages: [...command.messages],
-      }
-    case "turn.run":
-      return await runTurn({
-        state: nextState,
-        command,
-        ctx,
-        reduced,
-        events: immediateEvents,
-      })
-    default:
-      return { state: nextState, events: immediateEvents }
-  }
-}
+    switch (command.type) {
+      case "session.identity.set":
+        await ctx.host.setIdentityMode?.(command.mode)
+        return { state: nextState, events: immediateEvents }
+      case "session.tool_profile.set":
+        await ctx.host.setToolProfile?.(command.profile)
+        return { state: nextState, events: immediateEvents }
+      case "session.transcript.replace":
+        return {
+          state: nextState,
+          events: immediateEvents,
+          transcriptMessages: [...command.messages],
+        }
+      case "turn.run":
+        return await runTurn({
+          state: nextState,
+          command,
+          ctx,
+          reduced,
+          events: immediateEvents,
+        })
+      default:
+        return { state: nextState, events: immediateEvents }
+    }
+  })

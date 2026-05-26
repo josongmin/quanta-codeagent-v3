@@ -281,6 +281,11 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     if (result.turn === undefined) {
       throw new Error("runtime session turn completed without a turn payload")
     }
+    if (result.turn.approvalRequest !== undefined) {
+      throw new Error(
+        `runtime session approval flow is not yet wired in CLI surface (approvalId=${result.turn.approvalRequest.approvalId})`,
+      )
+    }
     const messages = result.turn.messages
     const outcomeReason = result.turn.outcome.reason
     return {

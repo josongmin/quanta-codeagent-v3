@@ -2,7 +2,7 @@ import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { LLMPort, Message } from "@/llm"
-import type { CapabilityManifest } from "@/protocol/session"
+import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
 import {
   applyBenchKnobs,
   type BenchKnobState,
@@ -27,7 +27,7 @@ import {
   resolveBenchKnobs,
   UsageTap,
 } from "@/runner/batch/eval/driver"
-import { createRuntime } from "@/sdk/runtime"
+import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
@@ -120,12 +120,36 @@ const createBenchSessionHost = (config: AgentConfig): SessionHost => {
   }
 }
 
+const captureBenchSessionEvents = (
+  listenerPort: Pick<RuntimeSession, "subscribe">,
+): {
+  readonly events: SessionEvent[]
+  readonly unsubscribe: () => void
+} => {
+  const events: SessionEvent[] = []
+  const unsubscribe = listenerPort.subscribe((event) => {
+    events.push(event)
+  })
+  return { events, unsubscribe }
+}
+
+const lastTerminalTurnEventOf = (
+  events: readonly SessionEvent[],
+): Extract<SessionEvent, { type: "turn.completed" | "turn.failed" }> | undefined => {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    if (event?.type === "turn.completed" || event?.type === "turn.failed") return event
+  }
+  return undefined
+}
+
 const runAgentViaSdk = async (config: AgentConfig): Promise<AgentOutcome> => {
   const hostSession = createBenchSessionHost(config)
   const runtime = await createRuntime({
     host: createSingleSessionRuntimeHost(() => hostSession),
   })
   let session: Awaited<ReturnType<typeof runtime.createSession>> | undefined
+  let unsubscribe: (() => void) | undefined
   try {
     const model = (config.llm as { model?: string }).model
     session = await runtime.createSession({
@@ -135,14 +159,24 @@ const runAgentViaSdk = async (config: AgentConfig): Promise<AgentOutcome> => {
       identityMode: "default",
       toolProfile: "write",
     })
+    const eventCapture = captureBenchSessionEvents(session)
+    unsubscribe = eventCapture.unsubscribe
     await session.input.append(promptTextFromMessages(config.messages), undefined, {
       signal: config.signal,
     })
     const turn = await session.turn.run(undefined, { signal: config.signal })
     const outcome = turn.turn?.outcome
     if (outcome === undefined) throw new Error("bench SDK session completed without an outcome")
+    const terminalEvent = lastTerminalTurnEventOf(eventCapture.events)
+    if (terminalEvent === undefined) {
+      throw new Error("bench SDK session completed without a terminal session event")
+    }
+    if (terminalEvent.type === "turn.completed" && terminalEvent.outcomeReason !== outcome.reason) {
+      throw new Error("bench SDK outcome/session event mismatch")
+    }
     return outcome
   } finally {
+    unsubscribe?.()
     await session?.close().catch(() => undefined)
     await runtime.close().catch(() => undefined)
   }

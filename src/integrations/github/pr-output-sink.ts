@@ -13,6 +13,14 @@
  * new one. Body bytes are capped at 65,000 (GH API limit; the marker is
  * counted within the cap so it always survives).
  *
+ * **Concurrent-race resolution (post-then-reconcile)** — GitHub API has no
+ * conditional-write primitive (no If-None-Match on comments), so two
+ * processes that find `existing === undefined` at the same time can each
+ * POST. After a POST we re-list comments with our marker; if multiple match,
+ * EVERY observer applies the same deterministic rule — **smallest GH id
+ * wins** — and the losers self-delete. Both processes converge to a single
+ * surviving comment.
+ *
  * Every method is no-throw — failures collapse to `{ ok: false, error }` so
  * a hostile network never tears down the calling adapter.
  */
@@ -54,12 +62,21 @@ export interface PrOutputSinkOpts {
   /** When false, the sink only stamps the marker but does not query existing
    *  comments. Default true. */
   readonly hiddenMarkerEnabled?: boolean
+  /** When false, the sink does NOT run the post-then-reconcile sweep that
+   *  resolves concurrent-POST races. Default true. Tests opt out to
+   *  isolate sequential-only behavior. */
+  readonly reconcileConcurrentPosts?: boolean
   readonly signal?: AbortSignal
 }
 
 interface ExistingComment {
   readonly id: number
   readonly body: string
+}
+
+interface MarkerMatchedComment {
+  readonly id: number
+  readonly htmlUrl: string | undefined
 }
 
 export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
@@ -74,6 +91,7 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
   const cap = Math.max(256, opts.bodyMaxBytes ?? COMMENT_BODY_MAX_BYTES)
   const prefix = opts.idempotencyMarkerPrefix ?? IDEMPOTENCY_MARKER_PREFIX
   const hiddenMarkerEnabled = opts.hiddenMarkerEnabled ?? true
+  const reconcileEnabled = opts.reconcileConcurrentPosts ?? true
 
   const prepareBody = (body: string, key: IdempotencyKey): string => {
     const redacted = opts.redactPort.redact(body)
@@ -90,7 +108,9 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
           return await patchComment(opts, existing.id, prepared, opts.signal)
         }
       }
-      return await postNewComment(opts, prepared, opts.signal)
+      const posted = await postNewComment(opts, prepared, opts.signal)
+      if (!posted.ok || !reconcileEnabled || !hiddenMarkerEnabled) return posted
+      return await reconcileAfterPost(opts, key, prefix, posted, opts.signal)
     },
     async postReview({ verdict, body, key }): Promise<OutputPostResult> {
       const prepared = prepareBody(body, key)
@@ -224,6 +244,111 @@ const postReviewComment = async (
     signal,
   )
   return parseResult(res)
+}
+
+/**
+ * Post-then-reconcile race resolver.
+ *
+ * Called immediately after a successful POST. Re-lists comments matching our
+ * marker; if multiple match (a concurrent POST raced ours), EVERY observer
+ * applies the same deterministic rule — `smallest GH comment.id wins` —
+ * and the losers self-delete. Both processes converge to one survivor.
+ *
+ * Best-effort throughout: list failure / parse failure / delete 404 collapse
+ * to the original POST result (so a hostile network can't tear down a
+ * legitimately-posted comment).
+ */
+const reconcileAfterPost = async (
+  opts: PrOutputSinkOpts,
+  key: IdempotencyKey,
+  prefix: string,
+  posted: OutputPostResult,
+  signal: AbortSignal | undefined,
+): Promise<OutputPostResult> => {
+  const myId = parseCommentIdFromUrl(posted.url)
+  if (myId === undefined) return posted // can't reason about race; trust POST result
+  const matches = await findAllCommentsWithMarker(opts, key, prefix, signal)
+  if (matches.length <= 1) return posted // no race — we're alone
+  const sorted = [...matches].sort((a, b) => a.id - b.id)
+  const winner = sorted[0]
+  if (winner === undefined) return posted
+  if (winner.id === myId) {
+    // I'm the winner. Best-effort delete the losers.
+    for (let i = 1; i < sorted.length; i++) {
+      const loser = sorted[i]
+      if (loser !== undefined) await safeDeleteComment(opts, loser.id, signal)
+    }
+    // Return the CANONICAL URL from the listing so EVERY observer (winner +
+    // losers alike) sees the same `url` string for the surviving comment.
+    // If the listing didn't carry an html_url, fall back to the POST result.
+    return Object.freeze({
+      ok: true,
+      ...(typeof winner.htmlUrl === "string" && winner.htmlUrl.length > 0
+        ? { url: winner.htmlUrl }
+        : typeof posted.url === "string"
+          ? { url: posted.url }
+          : {}),
+    })
+  }
+  // Someone else won. Best-effort delete mine; return winner's URL so the
+  // caller sees a single stable anchor for the surviving comment.
+  await safeDeleteComment(opts, myId, signal)
+  return Object.freeze({
+    ok: true,
+    ...(typeof winner.htmlUrl === "string" && winner.htmlUrl.length > 0
+      ? { url: winner.htmlUrl }
+      : {}),
+  })
+}
+
+/** Parse `https://github.com/o/r/pull/N#issuecomment-XXXX` → XXXX. */
+const COMMENT_ID_REGEX = /issuecomment-(\d+)/
+const parseCommentIdFromUrl = (url: string | undefined): number | undefined => {
+  if (typeof url !== "string") return undefined
+  const m = COMMENT_ID_REGEX.exec(url)
+  if (m === null || m[1] === undefined) return undefined
+  const n = Number.parseInt(m[1], 10)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/** List ALL comments containing our marker (used by reconcile + future audit
+ *  hooks). Errors → empty array (no-throw). */
+const findAllCommentsWithMarker = async (
+  opts: PrOutputSinkOpts,
+  key: IdempotencyKey,
+  prefix: string,
+  signal: AbortSignal | undefined,
+): Promise<readonly MarkerMatchedComment[]> => {
+  const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100`
+  const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
+  if (res === undefined || res.exitCode !== 0) return []
+  const rows = safeJsonArray<{ id?: number; body?: string; html_url?: string }>(res.stdout)
+  if (rows === undefined) return []
+  const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
+  const out: MarkerMatchedComment[] = []
+  for (const row of rows) {
+    if (typeof row.id !== "number" || row.id <= 0) continue
+    if (typeof row.body !== "string") continue
+    if (!row.body.includes(needle)) continue
+    out.push(
+      Object.freeze({
+        id: row.id,
+        htmlUrl: typeof row.html_url === "string" ? row.html_url : undefined,
+      }),
+    )
+  }
+  return out
+}
+
+/** Best-effort DELETE; 404 / 410 / network errors are silently absorbed
+ *  because the goal is convergence, not strict success. */
+const safeDeleteComment = async (
+  opts: PrOutputSinkOpts,
+  commentId: number,
+  signal: AbortSignal | undefined,
+): Promise<void> => {
+  const path = `repos/${opts.repoSlug}/issues/comments/${commentId}`
+  await safeRun(opts.ghCliPort, ["api", "--method", "DELETE", path], opts.repoCwd, signal)
 }
 
 const parseResult = (res: GhCliResult | undefined): OutputPostResult => {

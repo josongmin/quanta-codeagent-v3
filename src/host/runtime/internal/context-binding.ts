@@ -8,7 +8,7 @@ import type {
   SessionHostSideConversationResult,
 } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message } from "@/llm"
-import { type CapabilityManifest, normalizeCapabilityManifest } from "@/protocol/session"
+import type { CapabilityManifest } from "@/protocol/session"
 import type {
   IdentityModeSessionState,
   SystemSource,
@@ -21,6 +21,7 @@ import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/ru
 import type { SessionMeta } from "@/session"
 import { type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
+import { deriveCapabilityManifest } from "../capabilities"
 import type { RuntimeHost, RuntimeSessionConfig } from "../types"
 
 type RuntimeBase = RuntimeAgentConfigBase & {
@@ -218,14 +219,14 @@ const ensureSessionId = (base: RuntimeBase): RuntimeBase =>
 const getSessionId = (base: RuntimeBase): string => base.sessionId ?? crypto.randomUUID()
 
 const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =>
-  normalizeCapabilityManifest({
-    approvals: "operator",
+  deriveCapabilityManifest({
+    approvals: base.onConfirm !== undefined,
     tools: base.registry.all().length > 0,
     memory:
       base.store !== undefined ||
       base.memoryConsolidator !== undefined ||
       base.memory !== undefined,
-    artifacts: true,
+    artifacts: false,
     subagents:
       base.subagent !== undefined ||
       base.delegation !== undefined ||
