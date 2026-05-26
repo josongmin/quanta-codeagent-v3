@@ -1,0 +1,11 @@
+# Belt-and-braces — root .gitignore covers these too, but keep them
+# explicit here so the package is portable on its own.
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

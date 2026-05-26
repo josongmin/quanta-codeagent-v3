@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* App-level baseline — keeps the bundle CSS tiny.                       */
+html, body, #root {
+  height: 100%;
+}
+
+/* Prevent jankjuste from horizontal markdown overflow inside bubbles.   */
+.markdown-body pre {
+  overflow-x: auto;
+}

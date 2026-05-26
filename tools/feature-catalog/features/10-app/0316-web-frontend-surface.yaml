@@ -1,0 +1,129 @@
+id: web-frontend-surface
+title: ADR-0316 — Web frontend surface (Vite + React + Tailwind SPA)
+section: 10
+subsystem: Web frontend surface
+order: 80
+maturity: L2
+status: new
+ui_surfaces: [web]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env:
+    - VITE_QUANTA_WS_URL
+    - VITE_QUANTA_AUTH_TOKEN
+owners: ["@songmin"]
+labels: ["surface:web", "tier:1", "adr-0316"]
+depends_on:
+  - thin-surface-headless-core
+purpose: |
+  Standalone Vite + React 18 + TypeScript strict + Tailwind 3.4 SPA at
+  `apps/web-frontend/`, the web surface of the multi-surface plan
+  (CLI / Web / Tauri shell). Connects to the daemon (Worker B,
+  `apps/web-daemon/`) on `ws://127.0.0.1:4096/` and renders a minimal
+  chat-style UI driven by the canonical session protocol (mirror of
+  `src/protocol/session/codec.ts` carried as a narrow LOCAL COPY in
+  `src/types/protocol.ts` so the bundle stays decoupled from the bun
+  project's tsconfig paths).
+
+  Slice contents (file-disjoint from `src/`):
+    - `SessionClient` (`src/ws/client.ts`) — WS lifecycle, auto-reconnect
+      with exponential backoff (500ms → 30s cap, no jitter — single-tenant
+      surface), `?token=<value>` query-string auth (subprotocol auth also
+      supported), type-tagged event subscribers, FakeWebSocket-testable.
+    - `encodeCommandFrame` / `decodeEventFrame` (`src/ws/envelope.ts`) —
+      defensive wire validators that drop malformed / unknown-type frames
+      silently with a warn log.
+    - React hooks (`src/ws/session-hooks.ts`) — `useConnectionState`,
+      `useSessionEvents` (reducer that folds `turn.started/completed/failed`
+      + `session.created/closed/state.updated` + `approval.requested` into
+      a `UiMessage[]` transcript), `useSendTurn` (emits `input.append` +
+      `turn.run` back-to-back with fresh `commandId`s).
+    - UI components — `ChatPanel` (auto-scroll list + composer),
+      `MessageBubble` (react-markdown + remark-gfm + Prism code highlight,
+      role-coloured), `InputBar` (Enter / Cmd+Enter submit, Shift+Enter
+      newline, Cmd+K clear), `StatusBar` (connection dot + session-status
+      pill), `HotkeyToast` (placeholder seam for Tauri shell).
+
+  Self-contained toolchain: own `package.json` (private), own
+  `tsconfig.json` (strict + `noUncheckedIndexedAccess` + `exactOptional
+  PropertyTypes`), own `vite.config.ts` with co-located vitest config,
+  own `tailwind.config.js` (dark mode = class strategy, single accent).
+  The parent's biome scope (`src/` + `tests/`) deliberately excludes
+  `apps/`, so frontend lint conventions are local to the package.
+
+  Hotkey seam — listens for `window.postMessage` of the shape
+  `{ kind: "quanta:hotkey-capture", text: string }` and appends
+  `[Screen captured at HH:MM] <text>` to the draft input. Worker D's
+  Tauri shell fires this event from the native side.
+
+  Default-OFF byte-identical: absent this directory + absent the daemon,
+  CLI surface continues unchanged. The frontend is a sibling, not a
+  dependency.
+evidence:
+  code:
+    - apps/web-frontend/package.json
+    - apps/web-frontend/src/ws/client.ts
+    - apps/web-frontend/src/ws/envelope.ts
+    - apps/web-frontend/src/ws/reconnect.ts
+    - apps/web-frontend/src/ws/session-hooks.ts
+    - apps/web-frontend/src/App.tsx
+    - apps/web-frontend/src/components/ChatPanel.tsx
+    - apps/web-frontend/src/components/MessageBubble.tsx
+    - apps/web-frontend/src/components/InputBar.tsx
+    - apps/web-frontend/src/components/StatusBar.tsx
+    - apps/web-frontend/src/components/HotkeyToast.tsx
+    - apps/web-frontend/src/types/protocol.ts
+  adrs:
+    - docs/decisions/0316-web-frontend-surface.md
+  tests:
+    unit:
+      - apps/web-frontend/src/lib/classnames.test.ts
+      - apps/web-frontend/src/ws/reconnect.test.ts
+      - apps/web-frontend/src/ws/envelope.test.ts
+      - apps/web-frontend/src/ws/client.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: VITE_QUANTA_WS_URL
+    kind: env
+    type: string
+    default: "ws://127.0.0.1:4096/"
+    purpose: WebSocket URL the SessionClient connects to at startup. Build-time env (Vite VITE_ prefix).
+  - name: VITE_QUANTA_AUTH_TOKEN
+    kind: env
+    type: string
+    default: ""
+    purpose: Optional bearer token; appended as `?token=<encoded>` at WS handshake (browsers cannot set custom headers on `new WebSocket()`).
+deliberate_hold: |
+  Not yet shipped in this slice — deliberate:
+    - No slash commands (CLI parity is a future slice).
+    - No cost / token dashboard.
+    - No diff preview for tool calls.
+    - No approval response UI buttons — only system-row rendering of
+      `approval.requested` events; explicit approve/deny lands once the
+      daemon's auto-approval policy is reviewed.
+    - No multi-session list / no theme toggle (dark-only) / no state
+      management library.
+notes: |
+  Standalone install: `cd apps/web-frontend && npm install && npm run dev`.
+  The parent `bun.lock` is untouched. Worker D's Tauri shell will point
+  `tauri.conf.json#distDir` at `apps/web-frontend/dist/`.
+
+  Type drift between `src/protocol/session/` (canonical) and
+  `apps/web-frontend/src/types/protocol.ts` (local copy) is possible. A
+  follow-up CI gate can diff the two — not in scope for this slice.
+
+  Tests are vitest-node (no DOM, no React render); they exercise the
+  pure-TS portion of the slice (cx / backoff math / envelope codec /
+  SessionClient with a FakeWebSocket harness — ~32 cases). Run with
+  `npm run test` once deps are installed.
+
+  Negative invariants (6) documented in the ADR:
+    - never bundle the frontend into the main bun tsconfig paths,
+    - never import from `@/...` inside `apps/web-frontend/src/`,
+    - never mutate the parent package.json / tsconfig.json / biome.json,
+    - never add a state-management library at v1,
+    - never add jitter to the SPA's reconnect backoff,
+    - never `npm install` inside an automated worktree.
