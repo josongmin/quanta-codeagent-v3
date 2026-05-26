@@ -1133,7 +1133,32 @@ const applyNonSuccessRecoveryAction = async (
     system: ctxSystem,
   })
   if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
-  breaker?.recordReactive(before, estimateTokens(compacted.messages))
+  const after = estimateTokens(compacted.messages)
+  breaker?.recordReactive(before, after)
+  // ADR-0331 wire — reactive (PTL-driven, mid-turn) compaction site emit,
+  // parallel to the proactive site (ADR-0324, see `maybeCompact`). Fires AFTER
+  // the breaker observation so a throwing emitter cannot stall the breaker
+  // and BEFORE `wm.replace` so the call order matches the proactive site
+  // (byte-identical when slot absent: `emitCompactionEvent` returns immediately
+  // and the only added work is the constant-time `after` hoist that already
+  // mirrors the proactive recompute). `trigger:"mid_turn"` distinguishes this
+  // pass from the proactive `"pre_sampling"`; `reason:"context_limit"` is the
+  // sole driver of reactive compaction today — the recovery action `"compact"`
+  // is only produced by a PTL (prompt-too-long) verdict in the router, which
+  // IS a context-limit signal by construction. Adding new reasons (e.g.
+  // `"token_budget"` for a budget-driven mid-turn squeeze) requires its own
+  // ADR (closed-set, ADR-0324). `messagesRemoved` is clamped non-negative; a
+  // future `compacted.messages.length > snapshot.length` (synthetic header
+  // longer than the prefix it summarized) cannot underflow the contract.
+  emitCompactionEvent(config, {
+    kind: "compaction_event",
+    trigger: "mid_turn",
+    reason: "context_limit",
+    tokensBefore: before,
+    tokensAfter: after,
+    messagesRemoved: Math.max(snapshot.length - compacted.messages.length, 0),
+    at: Date.now(),
+  })
   wm.replace(compacted.messages)
   return CONTINUE
 }
