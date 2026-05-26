@@ -96,16 +96,21 @@ knobs:
     type: string
     default: ""
     purpose: Optional bearer token; appended as `?token=<encoded>` at WS handshake (browsers cannot set custom headers on `new WebSocket()`).
-deliberate_hold: |
-  Not yet shipped in this slice — deliberate:
-    - No slash commands (CLI parity is a future slice).
-    - No cost / token dashboard.
-    - No diff preview for tool calls.
-    - No approval response UI buttons — only system-row rendering of
-      `approval.requested` events; explicit approve/deny lands once the
-      daemon's auto-approval policy is reviewed.
-    - No multi-session list / no theme toggle (dark-only) / no state
-      management library.
+deliberate_hold:
+  reason: |
+    Not yet shipped in this slice — deliberate:
+      - No slash commands (CLI parity is a future slice).
+      - No cost / token dashboard.
+      - No diff preview for tool calls.
+      - No approval response UI buttons — only system-row rendering of
+        `approval.requested` events; explicit approve/deny lands once the
+        daemon's auto-approval policy is reviewed.
+      - No multi-session list / no theme toggle (dark-only) / no state
+        management library.
+  promotion_path: |
+    Next slice: port cost-panel + diff-preview components, then approval
+    UI buttons, then slash-command parity. State management library
+    decision deferred until UI complexity warrants it.
 notes: |
   Standalone install: `cd apps/web-frontend && npm install && npm run dev`.
   The parent `bun.lock` is untouched. Worker D's Tauri shell will point

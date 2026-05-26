@@ -5,7 +5,7 @@ subsystem: 데스크톱 surface (multi-surface 확장)
 order: 317
 maturity: L3
 status: new
-ui_surfaces: [desktop]
+ui_surfaces: [tauri]
 monitoring: planned
 modes: [interactive]
 configurable: integrated
