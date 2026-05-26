@@ -31,6 +31,7 @@ import {
   pickProviderCore,
   type Provider as RunnerProvider,
 } from "@/runner/assemble"
+import type { Tooling } from "@/runner/assemble/tooling"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
 import {
   createBunSpawner,
@@ -42,7 +43,6 @@ import { logger, type RunContext } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import { gitTools, type Tool } from "@/tool"
-import type { Tooling } from "./config-assemble"
 import { createMarkdownPainter } from "./markdown-painter"
 import { isPathLikeToken } from "./resume"
 
@@ -701,11 +701,11 @@ export const composeLLM = (
     env: process.env,
   })
 
-// ── Split: `SessionDeps`, `compactionDep`, `assembleConfig`, `Tooling` live in
-//    `@/runner/assemble` (PURE composition, no env reads). Re-exported below so
-//    importers (`index.ts`, tests) are unaffected.
-export type { SessionDeps, Tooling } from "./config-assemble"
-export { assembleConfig, compactionDep } from "./config-assemble"
+// ── Split: `SessionDeps` and `Tooling` live in `@/runner/assemble/*` (PURE
+//    composition, no env reads). Re-exported below so CLI-local types keep
+//    their historical surface without pulling runtime assembly helpers back in.
+export type { SessionDeps } from "@/runner/assemble/config"
+export type { Tooling } from "@/runner/assemble/tooling"
 
 /** Build the per-run tooling: resolve every env-driven default-OFF knob, then
  *  delegate the actual registry + config aggregation to the surface-agnostic

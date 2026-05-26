@@ -7,9 +7,9 @@ import type { ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { LLMPort, Message } from "@/llm"
 import type {
   IdentityModeSessionState,
-  SideConversationPort,
   ToolProfileSessionState,
-} from "@/runner"
+} from "@/runner/assemble/session-state"
+import type { SideConversationPort } from "@/runner/side-conversation-port"
 import type { SessionEnvelopeRecord } from "@/session"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"

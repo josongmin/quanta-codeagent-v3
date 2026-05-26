@@ -11,7 +11,10 @@ import type {
   WatermarkState,
 } from "@/memory"
 import { InMemoryStage1Store } from "@/memory/stage1-store"
-import { buildSessionMemoryAutoWires, prepareSessionStartMemory } from "@/runner"
+import {
+  buildSessionMemoryAutoWires,
+  prepareSessionStartMemory,
+} from "@/runner/session-memory-auto"
 
 const flushMicrotasks = async (): Promise<void> => {
   await Promise.resolve()

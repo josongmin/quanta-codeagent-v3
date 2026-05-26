@@ -8,12 +8,12 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
+import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import {
-  buildCapabilityManifestFromSessionDeps,
-  createLegacySingleSessionRuntimeHost,
-} from "@/host/runtime"
+  buildSessionDepsFromAgentConfigBase,
+  createLegacyRunnerSessionHost,
+} from "@/host/runtime/session-host"
 import type { PermissionContext } from "@/permission"
-import type { SessionDeps } from "@/runner/assemble"
 import { createRuntime } from "@/sdk/runtime"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -55,69 +55,6 @@ const buildInteractiveBase = (
   }
 }
 
-const buildInteractiveOptionalDeps = (
-  base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
-): Partial<SessionDeps> => {
-  const optional: Partial<SessionDeps> = {}
-  const assignIfDefined = <K extends keyof SessionDeps>(
-    key: K,
-    value: SessionDeps[K] | undefined,
-  ): void => {
-    if (value !== undefined) optional[key] = value
-  }
-  assignIfDefined("followUpQueue", base.followUpQueue)
-  assignIfDefined("planStore", base.planStore)
-  assignIfDefined("retrievalStack", base.retrievalStack)
-  assignIfDefined("searchPipeline", base.searchPipeline)
-  assignIfDefined("memoryConsolidator", base.memoryConsolidator)
-  assignIfDefined("delegation", base.delegation)
-  assignIfDefined("subagentBackground", base.subagentBackground)
-  assignIfDefined("autoBackground", base.autoBackground)
-  assignIfDefined("fork", base.fork)
-  assignIfDefined("forkSession", base.forkSession)
-  assignIfDefined("conversationCheckpoint", base.conversationCheckpoint)
-  assignIfDefined("automationEngine", base.automationEngine)
-  assignIfDefined("admissibility", base.admissibility)
-  assignIfDefined("planExitPort", base.planExitPort)
-  assignIfDefined("userInputPort", base.userInputPort)
-  assignIfDefined("shellSnapshot", base.shellSnapshot)
-  assignIfDefined("sessionEffort", base.sessionEffort)
-  assignIfDefined("decisionEmitter", base.decisionEmitter)
-  return optional
-}
-
-const buildInteractiveDeps = (
-  base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
-): SessionDeps => ({
-  llm: base.llm,
-  registry: base.registry,
-  stream: base.stream,
-  permission: base.permission,
-  system: base.system,
-  cwd: base.cwd,
-  maxTurns: base.maxTurns,
-  signal: base.signal,
-  onConfirm: async (action: Parameters<SessionDeps["onConfirm"]>[0]) => {
-    const result = await (base.onConfirm?.(action) ?? false)
-    return typeof result === "boolean" ? result : result.decision === "allow"
-  },
-  store: base.store,
-  sessionId: base.sessionId ?? crypto.randomUUID(),
-  embedder: base.embedder,
-  memoryConfig: base.memory,
-  planMode: base.planMode === true,
-  metrics: base.metrics,
-  run: base.run,
-  subagentConfig: base.subagent,
-  skillsConfig: base.skills,
-  compactionBreakerConfig: base.compactionBreaker,
-  verifyGuardConfig: base.verifyGuard,
-  summarizerLlm: base.compaction?.summarizerLlm,
-  onShellEvent: base.onShellEvent,
-  workMetricsSink: base.workMetricsSink,
-  ...buildInteractiveOptionalDeps(base),
-})
-
 const makeAbortError = (): Error & { code?: string } => {
   const error = new Error("interactive session aborted") as Error & { code?: string }
   error.name = "AbortError"
@@ -128,29 +65,30 @@ const makeAbortError = (): Error & { code?: string } => {
 const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   const abort = new AbortController()
   const base = buildInteractiveBase(req, abort.signal)
-  const deps = buildInteractiveDeps(base)
+  const deps = buildSessionDepsFromAgentConfigBase(base)
   const assemble = (
     messages: Parameters<typeof assembleAgentConfig>[0]["base"]["messages"],
-    turnDeps: typeof deps,
+    _turnDeps: typeof deps,
   ): AgentConfig =>
     assembleAgentConfig({
       ...req,
       base: {
         ...base,
         messages,
-        signal: turnDeps.signal,
+        signal: base.signal,
       },
     })
-  const { runtimeHost } = createLegacySingleSessionRuntimeHost({
+  const sessionHost = createLegacyRunnerSessionHost({
     sessionDeps: deps,
     assembleConfig: assemble,
     history: [...base.messages],
     state: undefined,
     idMeta: undefined,
     shutdown: async () => undefined,
-    buildCapabilityManifest: buildCapabilityManifestFromSessionDeps,
   })
-  const runtimeFacade = await createRuntime({ host: runtimeHost })
+  const runtimeFacade = await createRuntime({
+    host: createSingleSessionRuntimeHost(() => sessionHost),
+  })
   const session = await runtimeFacade.createSession({
     cwd: base.cwd,
     ...((req.base.llm as { model?: string }).model !== undefined

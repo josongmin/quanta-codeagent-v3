@@ -1,4 +1,3 @@
-import type { PromptPayload, PromptSource } from "@/runner"
 import type { IdleMonitor } from "../idle-monitor"
 import type { ImageQueue } from "../image-queue"
 import type { PromptHistory } from "../prompt-history"
@@ -8,6 +7,7 @@ import { describeSlashCommand, slashCompleter } from "../slash-commands"
 import type { StatusBar } from "../status-bar"
 import { renderInboxPreamble, type TextInbox } from "../text-inbox"
 import type { ExternalPromptQueue } from "./external-prompt-queue"
+import type { CliPromptInput, CliPromptSource } from "./prompt-types"
 
 /** Slice-C: surface-stateful slash dispatch is OUT of this module. The
  *  pipeline is given a single `dispatchSlash` callback that returns `true`
@@ -114,9 +114,9 @@ const classifyReplLine = async (
   return input
 }
 
-/** CLI `PromptSource` adapter for the Layer-2 `runInteractive` driver.
+/** CLI prompt-source adapter for the runtime-SDK backed interactive loop.
  *  Wraps the raw-mode line reader + resolves `/exit` + in-REPL slash
- *  dispatch + blank-line behavior inline — the driver only sees clean
+ *  dispatch + blank-line behavior inline — the loop only sees clean
  *  prompt strings (or `null` for loop exit). */
 const buildCliPromptSource = (
   dispatchSlash: DispatchSlash,
@@ -126,7 +126,7 @@ const buildCliPromptSource = (
   ux: PromptPipelineUxOpts | undefined,
   onLocalPromptAccepted: (() => void) | undefined,
   readPromptLine: PromptLineReader,
-): PromptSource => ({
+): CliPromptSource => ({
   next: async (signal) => {
     while (signal?.aborted !== true) {
       const next = await readNextPrompt({
@@ -160,7 +160,7 @@ const localPayload = (
   text: string,
   imageQueue: ImageQueue | undefined,
   textInbox: TextInbox | undefined,
-): PromptPayload => {
+): CliPromptInput => {
   // ADR-0291 — drain the text inbox FIRST so the slash-side enqueue ("/web",
   // "/paste") sees its content on the very next turn. The preamble is empty
   // when the inbox is empty so this is byte-identical when the inbox is
@@ -182,7 +182,7 @@ const readNextPrompt = async (args: {
   readonly ux: PromptPipelineUxOpts | undefined
   readonly onLocalPromptAccepted: (() => void) | undefined
   readonly readPromptLine: PromptLineReader
-}): Promise<PromptPayload | null | undefined> => {
+}): Promise<CliPromptInput | null | undefined> => {
   const {
     signal,
     dispatchSlash,
@@ -239,11 +239,11 @@ const readNextPrompt = async (args: {
 /** Wrap an inner CLI {@link PromptSource} with the Cursor-inspired idle /
  *  snooze gate + reject-counter graceful exit. */
 const wrapPromptSourceWithIdleGate = (args: {
-  readonly inner: PromptSource
+  readonly inner: CliPromptSource
   readonly idle: IdleMonitor
   readonly rejects: RejectCounter
   readonly statusBar: StatusBar
-}): PromptSource => {
+}): CliPromptSource => {
   const { inner, idle, rejects, statusBar } = args
   const paintGateBanners = (): void => {
     if (idle.isSnoozed()) {
@@ -255,7 +255,7 @@ const wrapPromptSourceWithIdleGate = (args: {
       statusBar.transient("[idle 60s — auto-paused. type or /resume]", 3000)
     }
   }
-  const readOneGated = async (signal?: AbortSignal): Promise<PromptPayload | null | undefined> => {
+  const readOneGated = async (signal?: AbortSignal): Promise<CliPromptInput | null | undefined> => {
     if (rejects.shouldAutoExit()) {
       process.stderr.write("\n[20 consecutive denials — exiting. To re-enable, restart quanta]\n")
       return null
@@ -285,8 +285,8 @@ const wrapPromptSourceWithIdleGate = (args: {
 /** Compose the full CLI prompt pipeline: raw line reader ➜ slash short-
  *  circuit ➜ image queue drain ➜ idle/snooze gate ➜ reject auto-exit.
  *  Single entry point — the host passes the constructed pipeline straight
- *  to `runInteractive.promptSource` without further wrapping. */
-export const composePromptPipeline = (deps: ComposePromptPipelineDeps): PromptSource => {
+ *  to the runtime-sdk backed session loop without further wrapping. */
+export const composePromptPipeline = (deps: ComposePromptPipelineDeps): CliPromptSource => {
   const inner = buildCliPromptSource(
     deps.dispatchSlash,
     deps.imageQueue,

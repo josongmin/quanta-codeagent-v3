@@ -1,5 +1,5 @@
 import type { AgentOutcome } from "@/agent"
-import type { Message } from "@/llm"
+import type { ImageBlock, Message } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
@@ -34,12 +34,14 @@ export interface SessionHost {
   describe(): SessionHostDescription
   runTurn(args: {
     readonly prompt: string
+    readonly images?: readonly ImageBlock[]
     readonly signal?: AbortSignal
   }): Promise<SessionHostTurnResult>
   setIdentityMode?(mode: string): Promise<void> | void
   setToolProfile?(profile: string): Promise<void> | void
   peekMessages?(): readonly Message[]
   peekLastOutcome?(): AgentOutcome | undefined
+  replaceMessages?(messages: readonly Message[]): void
   close(): Promise<void>
 }
 

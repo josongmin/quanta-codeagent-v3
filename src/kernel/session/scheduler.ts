@@ -77,6 +77,7 @@ export const dispatchSessionCommand = async (
       try {
         const result = await ctx.host.runTurn({
           prompt: reduced.hostAction.kind === "run_turn" ? reduced.hostAction.prompt : "",
+          ...(reduced.hostAction.kind === "run_turn" ? { images: reduced.hostAction.images } : {}),
           ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
         })
         if (result.approvalRequest !== undefined) {
@@ -116,6 +117,7 @@ export const dispatchSessionCommand = async (
           revision: nextState.revision + 1,
           status: "idle",
           draftInput: "",
+          draftImages: [],
           pendingApproval: null,
           transcript: extractTranscript(result.messages),
           artifacts: [...nextState.artifacts, ...artifacts],

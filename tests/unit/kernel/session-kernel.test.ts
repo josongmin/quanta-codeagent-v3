@@ -44,8 +44,15 @@ describe("@/kernel/session", () => {
         permissionMode: "default",
         capabilityManifest: manifest,
       }),
-      runTurn: async ({ prompt }: { prompt: string }) => {
+      runTurn: async ({
+        prompt,
+        images,
+      }: {
+        prompt: string
+        images?: ReadonlyArray<{ type: "image"; data: string; mediaType: string }>
+      }) => {
         expect(prompt).toBe("ping")
+        expect(images).toEqual([{ type: "image", data: "Zm9v", mediaType: "image/png" }])
         return { outcome: makeOutcome("completed"), messages: makeOutcome("completed").messages }
       },
       close: async () => undefined,
@@ -60,6 +67,7 @@ describe("@/kernel/session", () => {
           issuedAt: "2026-05-26T00:00:00.000Z",
           type: "input.append",
           text: "ping",
+          images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
         },
         { clock: systemClock, eventLog, host },
       )
@@ -79,6 +87,7 @@ describe("@/kernel/session", () => {
 
     expect(result.state.status).toBe("idle")
     expect(result.state.draftInput).toBe("")
+    expect(result.state.draftImages).toEqual([])
     expect(result.state.transcript.lastAssistantText).toBe("pong")
     expect(result.events.map((event) => event.type)).toContain("turn.completed")
   })

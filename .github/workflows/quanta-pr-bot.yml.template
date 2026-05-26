@@ -1,0 +1,104 @@
+# quanta PR bot — Tier 0 GitHub Actions integration (ADR-0311 … 0314).
+#
+# Copy this file to `.github/workflows/quanta.yml` in your repo, then add the
+# repo-secrets listed at the bottom. The bot acknowledges `@quanta` (or
+# `/quanta`) mentions on PR comments / reviews and opens.
+#
+# Concurrency: superseded runs are cancelled when a PR force-pushes or the
+# same comment is edited again. Timeout: 15min hard cap (belt+braces over
+# `from-pr-cmd`'s own per-port time budgets).
+#
+# Permissions: minimum required to read PR + post a comment. The bot CANNOT
+# push commits (no `contents: write`) — code modification is a separate
+# workflow you wire intentionally.
+
+name: quanta-pr-bot
+
+on:
+  issue_comment:
+    types: [created, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # One in-flight run per PR (or per issue, when it's an issue_comment on a
+  # non-PR — quanta no-ops in that case).
+  group: quanta-pr-bot-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  respond:
+    name: quanta from-pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Cheap pre-filter so non-mention comments do not burn a runner. The
+    # in-process mention filter (ADR-0314) is still the authoritative gate.
+    if: >-
+      github.event_name == 'pull_request' ||
+      contains(github.event.comment.body, '@quanta') ||
+      contains(github.event.comment.body, '/quanta') ||
+      contains(github.event.review.body, '@quanta') ||
+      contains(github.event.review.body, '/quanta')
+    env:
+      QUANTA_GH_ACTIONS_TRIGGER: "1"
+      # GH_TOKEN gives `gh` permission to read the PR + post a comment under
+      # the workflow's `permissions:` block above.
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # One of the two must be set; from-pr-cmd surfaces a clear error if
+      # the agent loop is ever wired downstream and finds neither.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: checkout PR head (fetch-depth 0 for moved-code detector)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: install dependencies (frozen)
+        run: bun install --frozen-lockfile
+
+      - name: run quanta from-pr
+        # `from-pr` reads GITHUB_EVENT_PATH / GITHUB_EVENT_NAME /
+        # GITHUB_REPOSITORY automatically from the runner. The mention
+        # filter and trust-scope gate run BEFORE any LLM call.
+        run: bun run quanta from-pr
+
+      - name: report failure to PR (best-effort)
+        if: failure()
+        run: |
+          BODY="quanta encountered an error during PR response. See workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
+          if [ -n "$PR_NUM" ]; then
+            gh pr comment "$PR_NUM" --repo "${{ github.repository }}" --body "$BODY" || true
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ─── how to apply ────────────────────────────────────────────────────────
+#
+#  1. Save this file as `.github/workflows/quanta.yml` in your repo's
+#     default branch.
+#  2. In your repo settings → Secrets and variables → Actions, add ONE of:
+#       - ANTHROPIC_API_KEY   (Claude provider)
+#       - OPENAI_API_KEY      (OpenAI provider; quanta picks via env)
+#  3. (Optional) Customize trigger phrases or trust scope by exporting
+#       QUANTA_GH_TRIGGER_PHRASES="@quanta,/quanta,@my-bot"
+#       QUANTA_GH_TRUST_SCOPE=collaborator|maintainer|owner|any-human
+#     under `env:` in the `respond` job.
+#  4. Open a PR and comment `@quanta please review` — the bot will ack
+#     within ~30s.

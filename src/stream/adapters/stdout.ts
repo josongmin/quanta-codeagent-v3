@@ -89,9 +89,7 @@ export class StdoutStream implements StreamPort {
         this.writeAssistantText(event.delta)
         break
       case "tool_call":
-        this.write(
-          `${CYAN}⚙ ${event.name}${RESET} ${DIM}${compact(event.input)}${RESET}\n`,
-        )
+        this.write(`${CYAN}⚙ ${event.name}${RESET} ${DIM}${compact(event.input)}${RESET}\n`)
         break
       case "tool_progress":
         this.write(`${DIM}  ↳ ${event.name}: ${oneLine(event.message)}${RESET}\n`)
@@ -197,6 +195,15 @@ export class StdoutStream implements StreamPort {
           `${DIM}• decision (${event.kind} → ${event.outcome}): ${oneLine(redactStr(event.reason))}${RESET}\n`,
         )
         break
+      case "knobs_applied":
+        // Knob telemetry (2026-05-26): per-run resolved knob posture. Render
+        // a single dim-status line summarising the surface + active count +
+        // cost multiplier. Full id→value/source map lives in the jsonl
+        // trajectory line for after-the-fact comparison — stdout is a
+        // monitor, not a log. The recorder is the canonical sink; this
+        // line is the operator-visible hint that knobs were resolved.
+        this.write(renderKnobsApplied(event))
+        break
       default: {
         // Exhaustiveness guard: a new AgentEvent variant must be handled
         // explicitly rather than silently rendered (or crashing) here.
@@ -293,6 +300,16 @@ const renderModeChanged = (event: Extract<AgentEvent, { type: "mode_changed" }>)
   const reason =
     event.reason !== undefined && event.reason !== "" ? `: ${oneLine(redactStr(event.reason))}` : ""
   return `${DIM}↻ mode_changed ${event.from} → ${event.to}${reason}${RESET}\n`
+}
+
+/** Knob telemetry (2026-05-26): per-run resolved knob posture one-liner.
+ *  Compact summary — full payload is in the jsonl recorder; stdout shows
+ *  surface + active count + cost so the operator immediately sees "knobs
+ *  ON" without needing to grep the trajectory file. */
+const renderKnobsApplied = (event: Extract<AgentEvent, { type: "knobs_applied" }>): string => {
+  const activeCount = Object.keys(event.knobs).length
+  const presetSegment = event.preset !== null ? ` preset=${event.preset}` : ""
+  return `${DIM}⚙ knobs_applied (${event.surface}): ${activeCount} active${presetSegment}, ~${event.costMultiplier}× cost${RESET}\n`
 }
 
 /** Mask secrets in a free-text string via the single-source @/shared scrub.

@@ -1603,7 +1603,7 @@
                       "**/session-memory-auto",
                       "**/session-memory-auto/*"
                     ],
-                    "message": "Thin-surface fence (ADR-0303): src/apps/cli/repl must not grow private session-assembler shims or import runner-owned session assemblers through internal paths. Consume the public @/runner contract instead."
+                    "message": "Thin-surface fence (ADR-0303): src/apps/cli/repl must not grow private session-assembler shims. Use the sanctioned runner-owned modules instead."
                   }
                 ]
               }

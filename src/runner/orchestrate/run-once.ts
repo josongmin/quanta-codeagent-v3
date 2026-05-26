@@ -3,7 +3,7 @@ import type { ContentBlock, ImageBlock, Message } from "@/llm"
 import type { SessionMeta } from "@/session"
 import type { SessionDeps } from "../assemble/config"
 import { persistTurn } from "./persist-turn"
-import { normalizePromptPayload, type PromptPayload } from "./prompt-source"
+import { normalizePromptPayload, type PromptPayload } from "./prompt-payload"
 
 /**
  * Surface-AGNOSTIC one-shot turn orchestration.
@@ -25,8 +25,7 @@ import { normalizePromptPayload, type PromptPayload } from "./prompt-source"
  * NON-GOALS:
  *   - Status bar, raw-line-reader, Esc-Esc keypress cancel — those are
  *     UI primitives that stay in `apps/cli/repl.ts` (surface-specific).
- *   - Interactive loop — covered by a sibling `run-interactive.ts` in a
- *     follow-up (partial adoption per RFC).
+ *   - Interactive prompt acquisition and surface event loops.
  */
 
 /** Per-turn `AgentConfig` assembly inputs. SSOT is {@link SessionDeps} from
@@ -43,7 +42,7 @@ export interface RunOnceInput {
    *  `repl.ts`). */
   deps: OrchestrateDeps
   /** Build the final per-turn `AgentConfig` from `(messages, deps)`. The
-   *  CLI passes its `assembleConfig` from `apps/cli/config-assemble.ts`;
+   *  CLI passes its `assembleConfig` from its session-setup composition seam;
    *  other surfaces may reuse the same function (it has no surface deps)
    *  or supply their own assembler. Injected as a port so this slice stays
    *  free of CLI-internal imports. */

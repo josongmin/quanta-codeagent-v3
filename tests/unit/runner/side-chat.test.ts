@@ -22,11 +22,11 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { Message } from "@/llm"
+import type { OrchestrateDeps } from "@/runner/orchestrate/run-once"
 import {
   buildSideChatHistory,
   buildSideChatRegistry,
   extractAnswerText,
-  type OrchestrateDeps,
   runSideChat,
   SIDE_CHAT_DEFAULT_READ_ONLY,
   SIDE_CHAT_FORBIDDEN,

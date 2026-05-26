@@ -6,8 +6,8 @@
  * `/side`. That coupled the slash adapter to engine-internals (`SessionDeps`,
  * `assembleConfig`). After ADR-0304 the slash layer instead consumes ONLY this
  * typed port whose `.start(...)` is wired ONCE at surface composition time —
- * the CLI-side adapter (`src/apps/cli/repl/side-conv-wire.ts`) captures the
- * `SessionDeps` + `assembleConfig` pair internally; the slash never sees them.
+ * the host/runtime compat owner captures the `SessionDeps` + `assembleConfig`
+ * pair internally; the slash never sees them.
  *
  * Slice contract:
  *
@@ -53,7 +53,7 @@ export interface SideConversationStartArgs {
 
 /**
  * The seam the slash-surface depends on. Surface-agnostic — implementations
- * MAY live anywhere (e.g. `src/apps/cli/repl/side-conv-wire.ts`). The port
+ * MAY live anywhere (e.g. `src/host/runtime/session-host.ts`). The port
  * value carries NO engine-internal type references; impls are free to capture
  * any deps they need in closure scope.
  */

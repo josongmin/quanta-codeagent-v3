@@ -130,7 +130,7 @@ describe("HELL-BSEED — branch-search seed adversarial cases", () => {
     for (const s of seeds) {
       // String representation has at most 2 decimal places (toFixed(2))
       const str = String(s.temperature)
-      const decimals = str.includes(".") ? str.split(".")[1]?.length ?? 0 : 0
+      const decimals = str.includes(".") ? (str.split(".")[1]?.length ?? 0) : 0
       expect(decimals).toBeLessThanOrEqual(2)
     }
   })

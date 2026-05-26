@@ -13,7 +13,7 @@
  *  1. Source fence — `src/apps/headless/**` text never contains a CLI import.
  *  2. Slice fence — every import in headless source matches a whitelist of
  *     allowed `@/` prefixes (`@/host/bootstrap`, `@/host/runtime`,
- *     `@/runner*`, `@/sdk/runtime`, `@/llm` (type), `@/stream`,
+ *     selected internal `@/runner/*` paths, `@/sdk/runtime`, `@/llm` (type), `@/stream`,
  *     `@/permission` (type), `@/tool` (registry+type), `@/agent` (type),
  *     `@/observability` (logger), `@/shared`, `node:*`).
  *  3. Smoke — `runHeadlessOnce({prompt:"ping",fakeCompletion:{text:"pong"}})`
@@ -46,9 +46,11 @@
  * 14. Adversarial: the recording stream captures at least one
  *     `llm_request` event during the smoke, confirming the runner actually
  *     drove the LLM via the bootstrap.
- * 15. Execution-plane parity: subagent-enabled headless runs expose the
+ * 15. No public `SessionDeps` leak: the headless public result exposes only
+ *     a lean `wires` proof, not the internal `SessionDeps` bag.
+ * 16. Execution-plane parity: subagent-enabled headless runs expose the
  *     same fork / delegation / background slots as the shared host helper.
- * 16. Memory-auto parity: `QUANTA_MEMORY_AUTO=on` wires stage1 outputs and
+ * 17. Memory-auto parity: `QUANTA_MEMORY_AUTO=on` wires stage1 outputs and
  *     the session-end consolidator without importing CLI-only helpers.
  *
  * Tests run HEADLESS-LEVEL: no `process.env` mocking, no `mock.module`.
@@ -88,15 +90,16 @@ const readHeadless = (): ReadonlyArray<{ readonly path: string; readonly body: s
   walk(HEADLESS_DIR).map((p) => ({ path: p, body: readFileSync(p, "utf8") }))
 
 // Allowed import prefixes for `src/apps/headless/**`. Anything else fails the
-// slice fence. NOTE: `@/host/bootstrap` + `@/host/runtime` own boot + host
-// adapters, `@/sdk/runtime` is the public runtime seam, and `@/runner`
-// remains an internal helper dependency during the cutover.
+// slice fence. NOTE: the headless slice may use selected INTERNAL runner
+// modules, but must not depend on the public `@/runner` / `@/runner/assemble`
+// / `@/runner/orchestrate` barrels.
 const ALLOWED_PREFIXES: readonly string[] = [
   "@/host/bootstrap",
   "@/host/runtime",
-  "@/runner",
-  "@/runner/assemble",
-  "@/runner/orchestrate",
+  "@/host/runtime/session-host",
+  "@/runner/assemble/config",
+  "@/runner/assemble/tooling",
+  "@/runner/orchestrate/resume-fsm",
   "@/sdk/runtime",
   "@/agent",
   "@/llm",
@@ -159,6 +162,29 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
       }
     }
     expect(violations).toEqual([])
+  })
+
+  test("CASE 2b: headless source uses the single compat owner, not raw compat helpers", () => {
+    const source = readFileSync(join(HEADLESS_DIR, "index.ts"), "utf8")
+    expect(source).toContain('from "@/host/runtime/session-host"')
+    expect(source).not.toContain('from "@/runner/session-execution-plane"')
+    expect(source).not.toContain('from "@/runner/session-memory-auto"')
+  })
+
+  test("CASE 2d: headless never imports runner public barrels", () => {
+    const offenders: Array<{ path: string; spec: string }> = []
+    for (const f of readHeadless()) {
+      for (const spec of collectImports(f.body)) {
+        if (
+          spec === "@/runner" ||
+          spec === "@/runner/assemble" ||
+          spec === "@/runner/orchestrate"
+        ) {
+          offenders.push({ path: f.path, spec })
+        }
+      }
+    }
+    expect(offenders).toEqual([])
   })
 
   test("CASE 2b: `@/agent` imports in headless are TYPE-ONLY (no runtime reach into agent slice)", () => {
@@ -300,10 +326,11 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     for (const k of expectedFields) {
       expect(result).toHaveProperty(k as string)
     }
-    // Plus the headless-specific extras (outcome + messages + events).
+    // Plus the headless-specific extras (outcome + messages + events + wires).
     expect(result).toHaveProperty("outcome")
     expect(result).toHaveProperty("messages")
     expect(result).toHaveProperty("events")
+    expect(result).toHaveProperty("wires")
     // Bootstrap-fields count >= 35 (CLI-01 hellgate counted 35 mandatory
     // fields; we pin >= 35 to allow for future growth while ensuring the
     // shape never regresses).
@@ -462,22 +489,32 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     expect((llmReqs[0] as { provider?: string }).provider).toBe("headless")
   })
 
-  test("CASE 15: subagent-enabled headless runs gain live execution-plane slots", async () => {
+  test("CASE 15: headless public result does not leak SessionDeps", async () => {
+    const result = await runHeadlessOnce({
+      prompt: "x",
+      fakeCompletion: { text: "y" },
+    })
+
+    expect(result).not.toHaveProperty("sessionDeps")
+    expect(result.wires.executionPlane.conversationCheckpoint).toBe(true)
+  })
+
+  test("CASE 16: subagent-enabled headless runs gain live execution-plane slots", async () => {
     const result = await runHeadlessOnce({
       prompt: "x",
       fakeCompletion: { text: "y" },
       subagentConfig: {},
     })
 
-    expect(result.sessionDeps.conversationCheckpoint).toBeDefined()
-    expect(result.sessionDeps.fork).toBeDefined()
-    expect(result.sessionDeps.forkSession).toBeDefined()
-    expect(result.sessionDeps.delegation).toBeDefined()
-    expect(result.sessionDeps.subagentBackground).toBeDefined()
-    expect(result.sessionDeps.autoBackground).toBeDefined()
+    expect(result.wires.executionPlane.conversationCheckpoint).toBe(true)
+    expect(result.wires.executionPlane.fork).toBe(true)
+    expect(result.wires.executionPlane.forkSession).toBe(true)
+    expect(result.wires.executionPlane.delegation).toBe(true)
+    expect(result.wires.executionPlane.subagentBackground).toBe(true)
+    expect(result.wires.executionPlane.autoBackground).toBe(true)
   })
 
-  test("CASE 16: QUANTA_MEMORY_AUTO=on wires second-consumer memory auto ports", async () => {
+  test("CASE 17: QUANTA_MEMORY_AUTO=on wires second-consumer memory auto ports", async () => {
     const homeDir = mkdtempSync(join(tmpdir(), "q-headless-memory-auto-"))
     try {
       const result = await runHeadlessOnce({
@@ -490,9 +527,10 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
         homeDir,
       })
 
-      expect(result.sessionDeps.stage1OutputsStore).toBeDefined()
-      expect(result.sessionDeps.memoryConsolidator).toBeDefined()
-      expect(result.sessionDeps.memoryConsolidator?.enabled).toBe(true)
+      expect(result.wires.memoryAuto.sessionCtx).toBe(false)
+      expect(result.wires.memoryAuto.stage1OutputsStore).toBe(true)
+      expect(result.wires.memoryAuto.memoryConsolidator).toBe(true)
+      expect(result.wires.memoryAuto.memoryConsolidatorEnabled).toBe(true)
     } finally {
       await rm(homeDir, { recursive: true, force: true })
     }

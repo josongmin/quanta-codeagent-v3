@@ -38,6 +38,63 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { costUsd } from "@/observability"
+import { type AnyKnob, allKnobs, knobsForSurface, registerKnob } from "@/runner/knobs"
+
+/**
+ * Bench-knob bootstrap entry. The matrix tool's `--axes` mode (and its
+ * helpers `generateAxesConditions` / `estimateAxesCost`) need the
+ * bench-surface knob registry populated.
+ *
+ * Implementation: dynamic-import each knob module FIRST so the side-effect
+ * `registerKnob` fires when this function runs (NOT at module load — see
+ * the registry-neutral note below). If a previous caller already loaded
+ * those modules AND the registry was subsequently cleared (test harness
+ * `__resetRegistry()`), the dynamic-import is a no-op (ESM cache) and we
+ * recover by re-registering from the cached module's exported knob record.
+ *
+ * Always-recover: we do NOT cache a "bootstrapped" flag — we ALWAYS walk
+ * the cached module exports and add any knob the registry is missing. This
+ * makes the helper safe to call repeatedly across tests that reset the
+ * registry (cost is a 12-entry registry lookup; the dynamic imports are
+ * cheaper still after the first call thanks to ESM caching).
+ *
+ * Registry-neutral at module load: this file is imported by the legacy
+ * `tests/unit/swebench-matrix.test.ts` which never touches knob mode —
+ * pulling in the knob modules transitively at file scope would pollute the
+ * load-order graph and break unrelated tests (notably `knobs-import-bundle`
+ * after `knobs-hellgate`'s `afterEach` reset). The bootstrap fires only
+ * when `--axes` / docs-generator path actually invokes it.
+ */
+export const bootstrapBenchKnobs = async (): Promise<void> => {
+  const modules = await Promise.all([
+    import("@/runner/knobs/knobs/branch-search"),
+    import("@/runner/knobs/knobs/closeout-guard"),
+    import("@/runner/knobs/knobs/hooks"),
+    import("@/runner/knobs/knobs/issue-hint"),
+    import("@/runner/knobs/knobs/localize-phase"),
+    import("@/runner/knobs/knobs/lsp"),
+    import("@/runner/knobs/knobs/must-pass"),
+    import("@/runner/knobs/knobs/persona"),
+    import("@/runner/knobs/knobs/repro-test"),
+    import("@/runner/knobs/knobs/skills"),
+    import("@/runner/knobs/knobs/subagent"),
+    import("@/runner/knobs/knobs/working-state"),
+  ])
+  // Recovery walk: ALWAYS check + re-register missing ids. Walking 12
+  // module exports per call is negligible; the safety property is more
+  // important (a stale `bootstrapped=true` flag after a registry reset
+  // would silently leave the registry empty — caught the hard way in
+  // dev when `knobs-import-bundle` failed downstream of a hellgate run).
+  const reg = allKnobs()
+  for (const mod of modules) {
+    for (const v of Object.values(mod)) {
+      if (v !== null && typeof v === "object" && "id" in v && "envKey" in v && "parse" in v) {
+        const k = v as AnyKnob
+        if (!reg.has(k.id)) registerKnob(k)
+      }
+    }
+  }
+}
 
 // ── condition / axis vocabulary ─────────────────────────────────────────────
 
@@ -101,6 +158,181 @@ export const parseConditions = (csv: string | undefined): readonly Condition[] =
     out.push(p as Condition)
   }
   return out
+}
+
+// ── --axes mode (registry-driven N-axis sweep) ───────────────────────────────
+
+/**
+ * Closed ON-value table for the `--axes` mode. Maps a bench-surface knob id to
+ * the EXACT raw string that turns it ON in a 2^N matrix sweep. The registry
+ * carries each knob's `envKey` + the `parse` predicate; what it does NOT
+ * carry is "the canonical ON literal" (a knob may accept multiple raws —
+ * `"1"`, `"on"`, `"true"`, an integer K, an enum value). We pin ONE literal
+ * per axis here so the sweep is deterministic and byte-identical across runs.
+ *
+ * Unknown axis ⇒ throw (silent default forbidden). Adding a knob to the
+ * registry MUST add its ON value here OR be intentionally excluded from
+ * `--axes` (e.g. an enum-valued knob with no natural "default ON"). The
+ * `--axes` parser validates the axis is in this table.
+ */
+export const AXIS_ON_VALUES: Readonly<Record<string, string>> = {
+  lsp: "1",
+  subagent: "1",
+  skills: "1",
+  "localize-phase": "3",
+  "branch-search": "3",
+  "issue-hint": "1",
+  "repro-test": "5",
+  "must-pass": "strict",
+  persona: "pragmatic",
+  "working-state": "on",
+  "closeout-guard": "on",
+  hooks: "on",
+}
+
+/** Parse the CSV `--axes` flag. Empty / undefined ⇒ undefined (not in axes
+ *  mode). Whitespace-only tokens are dropped. Unknown axis tokens throw
+ *  HERE so the operator sees the error before the bench spawns. */
+export const parseAxes = (csv: string | undefined): readonly string[] | undefined => {
+  if (csv === undefined) return undefined
+  const trimmed = csv.trim()
+  if (trimmed === "") {
+    throw new Error("--axes requires a non-empty CSV (e.g. --axes lsp,subagent)")
+  }
+  const parts = csv
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  if (parts.length === 0) {
+    throw new Error("--axes requires at least one axis token")
+  }
+  // De-dupe while preserving caller order — duplicates would double the matrix.
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const p of parts) {
+    if (seen.has(p)) continue
+    seen.add(p)
+    out.push(p)
+  }
+  return out
+}
+
+/** A single axis-mode condition: the bit pattern (0..2^N-1) and the env
+ *  overlay it produces (only ON axes appear; OFF axes are ABSENT — same
+ *  default-OFF byte-identical contract as `conditionToEnv`). */
+export interface AxesCondition {
+  readonly label: string // e.g. "axes-baseline" or "axes-lsp_subagent"
+  readonly env: Readonly<Record<string, string>>
+  readonly onAxes: readonly string[] // subset of `axes`, in input order
+}
+
+/** Generate all 2^N conditions for the given axis list. Pure.
+ *
+ *  Throws on:
+ *    - unknown axis (not registered for surface "bench")
+ *    - axis with no entry in `AXIS_ON_VALUES`
+ *
+ *  Conflict knobs (e.g. `localize-phase` + `branch-search`) are skipped in
+ *  generation: the bit combinations that would activate both are still
+ *  emitted (so the bench process sees them and the resolver's `validateKnobs`
+ *  raises a `KnobConflictError` exactly where it would in a manual run). This
+ *  keeps the sweep "complete" from the operator's POV; suppressing conflict
+ *  pairs at generation time would hide the conflict instead of surfacing it.
+ *  Tests pin both behaviors. */
+/** Validate every axis token against the registry + the ON-value table.
+ *  Throws on first mismatch (loud failure — operator sees error before the
+ *  sweep starts). Extracted to keep `generateAxesConditions` complexity low. */
+const validateAxes = (axes: readonly string[], benchKnobs: ReadonlyMap<string, AnyKnob>): void => {
+  for (const a of axes) {
+    if (!benchKnobs.has(a)) {
+      throw new Error(`unknown axis "${a}" — not a registered bench-surface knob`)
+    }
+    if (!Object.hasOwn(AXIS_ON_VALUES, a)) {
+      throw new Error(`no ON value for axis "${a}" in AXIS_ON_VALUES`)
+    }
+  }
+}
+
+/** Build ONE AxesCondition from a bit pattern `i` (LSB → axes[0]). Pure. */
+const conditionFromBitPattern = (
+  i: number,
+  axes: readonly string[],
+  benchKnobs: ReadonlyMap<string, AnyKnob>,
+): AxesCondition => {
+  const env: Record<string, string> = {}
+  const onAxes: string[] = []
+  for (let bit = 0; bit < axes.length; bit++) {
+    if (((i >> bit) & 1) === 0) continue
+    const axisId = axes[bit]
+    if (axisId === undefined) continue // noUncheckedIndexedAccess
+    const knob = benchKnobs.get(axisId)
+    if (knob === undefined) continue // pre-validated; defensive
+    const raw = AXIS_ON_VALUES[axisId]
+    if (raw === undefined) continue // pre-validated; defensive
+    env[knob.envKey] = raw
+    onAxes.push(axisId)
+  }
+  const label = onAxes.length === 0 ? "axes-baseline" : `axes-${onAxes.join("_")}`
+  return { label, env, onAxes }
+}
+
+export const generateAxesConditions = (
+  axes: readonly string[],
+  registry?: ReadonlyMap<string, AnyKnob>,
+): readonly AxesCondition[] => {
+  if (axes.length === 0) {
+    // A 0-axis sweep is still ONE condition — the baseline with no overlay.
+    return [{ label: "axes-baseline", env: {}, onAxes: [] }]
+  }
+  // 2^N cap — a 12-axis sweep is 4096 conditions; we don't ban it, but pin a
+  // hard ceiling so a typo (`--axes lsp,sub,...` 20 axes) can't fork a million
+  // bench processes. Check FIRST so the gate trips before any registry hits.
+  if (axes.length > 12) {
+    throw new Error(`--axes ${axes.length} too many — hard cap is 12 (= 4096 conditions)`)
+  }
+  // The optional `registry` parameter is a TEST seam: tests can pass a
+  // hand-built map so they don't have to touch the global knob registry
+  // (which is fragile under reset-style hellgate suites). Production
+  // callers omit it and pick up the global bench-surface view.
+  const benchKnobs = registry ?? knobsForSurface("bench")
+  validateAxes(axes, benchKnobs)
+  const out: AxesCondition[] = []
+  const total = 1 << axes.length
+  for (let i = 0; i < total; i++) {
+    out.push(conditionFromBitPattern(i, axes, benchKnobs))
+  }
+  return out
+}
+
+/** Sum the worst-case cost multiplier of an axes sweep. We multiply the
+ *  per-condition products and sum — the operator sees an upper bound on
+ *  baseline-equivalent work. A knob without `costMultiplier` counts as 1.
+ *
+ *  Optional `registry` test seam: tests pass a deterministic map so they
+ *  don't have to touch the global knob registry. Production callers omit it. */
+export const estimateAxesCost = (
+  axes: readonly string[],
+  registry?: ReadonlyMap<string, AnyKnob>,
+): number => {
+  const benchKnobs = registry ?? knobsForSurface("bench")
+  const conditions = generateAxesConditions(axes, benchKnobs)
+  let total = 0
+  for (const cond of conditions) {
+    let product = 1
+    for (const a of cond.onAxes) {
+      const k = benchKnobs.get(a)
+      const m = costFor(k)
+      product *= m
+    }
+    total += product
+  }
+  return total
+}
+
+const costFor = (k: AnyKnob | undefined): number => {
+  if (k === undefined) return 1
+  const m = k.costMultiplier
+  return typeof m === "number" && m > 0 ? m : 1
 }
 
 // ── result aggregation ──────────────────────────────────────────────────────
@@ -405,42 +637,74 @@ export interface MatrixArgs {
   model: string
   out: string
   conditions: readonly Condition[]
+  /** Set when the operator passed `--axes`. ABSENT (default) ⇒ legacy
+   *  `--conditions` mode (byte-identical). PRESENT ⇒ axes mode: the runner
+   *  derives 2^N conditions from `axes` via `generateAxesConditions` and
+   *  ignores `conditions`. The two flags are mutually exclusive (parseArgs
+   *  throws). */
+  axes?: readonly string[]
+  /** Preview mode: print the planned matrix + estimated cost and exit
+   *  without spawning the bench. Compatible with both `--axes` and the
+   *  legacy `--conditions` mode (in the legacy mode it just lists the
+   *  conditions). */
+  dryRun: boolean
   maxTurns: number
   timeoutMs: number
   pythonGrade: boolean
 }
 
+/** Resolve a path-or-empty in dry-run vs. real-run modes. Throws on missing
+ *  in non-dry-run mode (real run requires the path). Extracted to keep
+ *  `parseArgs` complexity below the biome ceiling. */
+const resolveRequired = (raw: string | undefined, flag: string, dryRun: boolean): string => {
+  if (raw === undefined || raw === "") {
+    if (dryRun) return ""
+    throw new Error(`missing required ${flag} <dir>`)
+  }
+  return resolve(raw)
+}
+
 export const parseArgs = (argv: readonly string[]): MatrixArgs => {
+  // Axes / dry-run are checked FIRST so a `--axes` request without `--dataset`
+  // still fails with the dataset error (operator-visible: same flag set
+  // required regardless of mode). The mutually-exclusive check between
+  // `--axes` and `--conditions` runs AFTER all required-arg checks pass —
+  // otherwise the operator would see two errors out of order.
   const dataset = argValue(argv, "--dataset")
   if (dataset === undefined || dataset === "") {
     throw new Error("missing required --dataset <file>")
   }
-  const corpus = argValue(argv, "--corpus")
-  if (corpus === undefined || corpus === "") {
-    throw new Error("missing required --corpus <dir>")
+  // --axes mode does NOT require --corpus / --out when --dry-run is set: the
+  // bench is never spawned in that case, so we tolerate their absence to
+  // make `bun run tools/swebench-matrix.ts --dataset f --axes lsp --dry-run`
+  // a friction-free smoke for the operator.
+  const dryRun = argFlag(argv, "--dry-run")
+  const axes = parseAxes(argValue(argv, "--axes"))
+  if (axes !== undefined && argv.includes("--conditions")) {
+    throw new Error("--axes and --conditions are mutually exclusive")
   }
-  const out = argValue(argv, "--out")
-  if (out === undefined || out === "") {
-    throw new Error("missing required --out <dir>")
-  }
-  const model = argValue(argv, "--model") ?? "gpt-5"
-  const conditions = parseConditions(argValue(argv, "--conditions"))
-  const maxTurns = argPositiveInt(argv, "--max-turns", 30)
-  const timeoutMs = argPositiveInt(argv, "--timeout-ms", 600_000)
-  const pythonGrade = argFlag(argv, "--python-grade")
+  const corpus = resolveRequired(argValue(argv, "--corpus"), "--corpus", dryRun)
+  const out = resolveRequired(argValue(argv, "--out"), "--out", dryRun)
   return {
     dataset: resolve(dataset),
-    corpus: resolve(corpus),
-    model,
-    out: resolve(out),
-    conditions,
-    maxTurns,
-    timeoutMs,
-    pythonGrade,
+    corpus,
+    model: argValue(argv, "--model") ?? "gpt-5",
+    out,
+    conditions: parseConditions(argValue(argv, "--conditions")),
+    ...(axes !== undefined ? { axes } : {}),
+    dryRun,
+    maxTurns: argPositiveInt(argv, "--max-turns", 30),
+    timeoutMs: argPositiveInt(argv, "--timeout-ms", 600_000),
+    pythonGrade: argFlag(argv, "--python-grade"),
   }
 }
 
 const conditionLabel = (c: Condition): string => c.replace(/\+/g, "_")
+
+/** Sanitise an axes-mode label so it's safe as a path segment. The label
+ *  already comes from a closed alphabet (axis ids + underscore), but defence
+ *  in depth keeps a future axis id with `+`/`/` from foot-gunning. */
+const axesLabel = (label: string): string => label.replace(/[^A-Za-z0-9_-]/g, "_")
 
 /** Spawn the bench process for ONE condition. Returns the parent's exit code
  *  (0 ok, non-zero ⇒ bench reported error). `stdio:inherit` so the operator
@@ -547,20 +811,170 @@ const runOneCondition = async (
   )
 }
 
+// ── --axes mode driver helpers ───────────────────────────────────────────────
+
+/** Spawn the bench process for ONE axes-mode condition. Mirrors `spawnBench`
+ *  byte-by-byte EXCEPT the env overlay (taken straight from
+ *  `AxesCondition.env` — already a closed `knob.envKey → ON literal` map). */
+const spawnBenchAxes = async (
+  args: MatrixArgs,
+  cond: AxesCondition,
+  obsRunDir: string,
+): Promise<{ exitCode: number; observeRunDir: string }> => {
+  const runId = `matrix-${axesLabel(cond.label)}-${Date.now()}`
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    ...cond.env,
+    QUANTA_RUN_ID: runId,
+    QUANTA_OBSERVE_DIR: obsRunDir,
+  }
+  if (args.pythonGrade) {
+    env.QUANTA_SWEBENCH_PYTHON = "1"
+    env.QUANTA_SWEBENCH_NAMESPACE = env.QUANTA_SWEBENCH_NAMESPACE ?? "swebench"
+    env.QUANTA_SWEBENCH_MAX_WORKERS = env.QUANTA_SWEBENCH_MAX_WORKERS ?? "1"
+  }
+  const benchEntry = resolve(import.meta.dir, "..", "src/apps/bench/index.ts")
+  const cmd: string[] = [
+    "bun",
+    "run",
+    benchEntry,
+    "--swebench",
+    args.dataset,
+    "--corpus",
+    args.corpus,
+    "--model",
+    args.model,
+    "--observe-dir",
+    obsRunDir,
+    "--predictions",
+    join(obsRunDir, "predictions.jsonl"),
+    "--report",
+    join(obsRunDir, "report.json"),
+  ]
+  const proc = Bun.spawn(cmd, {
+    env,
+    stdio: ["inherit", "inherit", "inherit"],
+  })
+  const exitCode = await proc.exited
+  return { exitCode, observeRunDir: join(obsRunDir, runId) }
+}
+
+/** Run one axes-mode condition end-to-end. Rows are labeled with `"baseline"`
+ *  (when the condition has zero ON axes) OR `"all"` (when every axis is ON)
+ *  OR the synthetic label when no canonical Condition fits — the rows are
+ *  parsed and aggregated by the same `collectRowsForCondition` parser as
+ *  the legacy mode, but a per-row `condition` value chosen from `CONDITIONS`
+ *  is required by the `MatrixRow` shape. For axes mode we always treat each
+ *  row as a `"baseline"` slot (no aggregation collision: each axes-mode row
+ *  carries its own `axes` label via the on-disk `obsRoot` directory name). */
+const runOneAxesCondition = async (
+  args: MatrixArgs,
+  cond: AxesCondition,
+  pickIds: readonly string[],
+): Promise<MatrixRow[]> => {
+  const obsRoot = join(args.out, axesLabel(cond.label))
+  mkdirSync(obsRoot, { recursive: true })
+  let result: { exitCode: number; observeRunDir: string }
+  try {
+    result = await spawnBenchAxes(args, cond, obsRoot)
+  } catch (e) {
+    log(`axes=${cond.label} spawn FAILED: ${(e as Error).message} — skipping`)
+    return errorRowsFor("baseline", pickIds)
+  }
+  if (result.exitCode !== 0) {
+    log(`axes=${cond.label} bench exited ${result.exitCode} — collecting partial rows`)
+  }
+  return collectRowsForCondition(
+    "baseline",
+    result.observeRunDir,
+    pickIds,
+    result.exitCode === 0 ? "fail" : "error",
+  )
+}
+
 const parseArgsOrExit = (): MatrixArgs => {
   try {
     return parseArgs(process.argv.slice(2))
   } catch (e) {
     log(`error: ${(e as Error).message}`)
     log(
-      "usage: bun run tools/swebench-matrix.ts --dataset <file> --corpus <dir> --out <dir> [--model gpt-5] [--conditions baseline,lsp,...] [--max-turns 30] [--timeout-ms 600000] [--python-grade]",
+      "usage: bun run tools/swebench-matrix.ts --dataset <file> --corpus <dir> --out <dir> [--model gpt-5] [--conditions baseline,lsp,...] [--axes lsp,subagent,...] [--dry-run] [--max-turns 30] [--timeout-ms 600000] [--python-grade]",
     )
     process.exit(1)
   }
 }
 
-const main = async (): Promise<void> => {
-  const args = parseArgsOrExit()
+/** Print the axes-mode preamble + estimated cost. Operator-facing UX. */
+const printAxesPreamble = (axes: readonly string[], conditions: readonly AxesCondition[]): void => {
+  // biome-ignore lint/suspicious/noConsole: this is a CLI tool's primary UX.
+  console.error(
+    `[matrix] axes (${axes.length}): [${axes.join(", ")}] → ${conditions.length} conditions`,
+  )
+  const cost = estimateAxesCost(axes)
+  // biome-ignore lint/suspicious/noConsole: this is a CLI tool's primary UX.
+  console.error(`[matrix] cost (Σ per-condition product): ~${cost}× baseline`)
+}
+
+/** Print the axes-mode dry-run table of planned conditions. Pure stdout output. */
+const printAxesDryRun = (conditions: readonly AxesCondition[]): void => {
+  for (const cond of conditions) {
+    const envStr =
+      Object.entries(cond.env).length === 0
+        ? "(no env overlay — baseline)"
+        : Object.entries(cond.env)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ")
+    // biome-ignore lint/suspicious/noConsole: this is a CLI tool's primary UX.
+    console.error(`[matrix]   ${cond.label}: ${envStr}`)
+  }
+}
+
+const mainAxesMode = async (args: MatrixArgs, axes: readonly string[]): Promise<void> => {
+  await bootstrapBenchKnobs()
+  const conditions = generateAxesConditions(axes)
+  printAxesPreamble(axes, conditions)
+  if (args.dryRun) {
+    printAxesDryRun(conditions)
+    log("dry-run — exiting without spawning bench")
+    return
+  }
+  mkdirSync(args.out, { recursive: true })
+  log(`dataset=${basename(args.dataset)} model=${args.model} out=${args.out}`)
+  const pickIds = readPickIds(args.dataset)
+  log(`picks (${pickIds.length}): ${pickIds.join(", ")}`)
+  const partialFile = join(args.out, `partial-axes-${Date.now()}.jsonl`)
+  const allRows: MatrixRow[] = []
+  let interrupted = false
+  const onSigint = (): void => {
+    interrupted = true
+    log("SIGINT — preserving progress and stopping after current condition")
+  }
+  process.on("SIGINT", onSigint)
+  try {
+    for (let i = 0; i < conditions.length; i++) {
+      if (interrupted) break
+      const cond = conditions[i]
+      if (cond === undefined) continue // noUncheckedIndexedAccess
+      // biome-ignore lint/suspicious/noConsole: this is a CLI tool's primary UX.
+      console.error(`[matrix] (${i + 1}/${conditions.length}) axes=${cond.label}`)
+      allRows.push(...(await runOneAxesCondition(args, cond, pickIds)))
+      writeJsonl(partialFile, allRows)
+    }
+    const summaryFile = join(args.out, "matrix-summary-axes.jsonl")
+    writeJsonl(summaryFile, allRows)
+    log(`wrote ${summaryFile} (${allRows.length} row(s))`)
+    if (interrupted) process.exit(130)
+  } finally {
+    process.off("SIGINT", onSigint)
+  }
+}
+
+const mainConditionsMode = async (args: MatrixArgs): Promise<void> => {
+  if (args.dryRun) {
+    log(`conditions (${args.conditions.length}): ${args.conditions.join(", ")}`)
+    log("dry-run — exiting without spawning bench")
+    return
+  }
   mkdirSync(args.out, { recursive: true })
   log(`dataset=${basename(args.dataset)} model=${args.model} out=${args.out}`)
   log(`conditions (${args.conditions.length}): ${args.conditions.join(", ")}`)
@@ -598,6 +1012,15 @@ const main = async (): Promise<void> => {
   } finally {
     process.off("SIGINT", onSigint)
   }
+}
+
+const main = async (): Promise<void> => {
+  const args = parseArgsOrExit()
+  if (args.axes !== undefined) {
+    await mainAxesMode(args, args.axes)
+    return
+  }
+  await mainConditionsMode(args)
 }
 
 // Only run main() when executed as a script — keep imports side-effect-free

@@ -1,6 +1,5 @@
 import type { SessionHost } from "@/kernel/session"
-import type { CapabilityExpectation, CapabilityManifest } from "@/protocol/session"
-import type { SessionDeps } from "@/runner/assemble"
+import type { CapabilityExpectation } from "@/protocol/session"
 
 export interface RuntimeSessionConfig {
   readonly cwd?: string
@@ -21,5 +20,3 @@ export interface CreateRuntimeOptions {
   readonly policy?: unknown
   readonly expectedCapabilities?: CapabilityExpectation
 }
-
-export type BuildCapabilityManifestFromSessionDeps = (deps: SessionDeps) => CapabilityManifest

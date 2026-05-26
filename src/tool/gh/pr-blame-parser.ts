@@ -13,11 +13,7 @@
  * narrowly typed against the shapes in `pr-blame-types.ts`.
  */
 
-import {
-  PR_BLAME_PROXIMITY_LINES,
-  type RawPrViewJson,
-  type ReviewThread,
-} from "./pr-blame-types"
+import { PR_BLAME_PROXIMITY_LINES, type RawPrViewJson, type ReviewThread } from "./pr-blame-types"
 
 /** Normalize the two possible `reviewThreads` shapes (`{nodes:[...]}` vs
  *  bare array) so callers see one flat array. */
@@ -25,7 +21,7 @@ export const extractThreads = (raw: RawPrViewJson): readonly ReviewThread[] => {
   const rt = raw.reviewThreads
   if (rt === undefined) return []
   if (Array.isArray(rt)) return rt
-  return rt.nodes ?? []
+  return (rt as { readonly nodes?: readonly ReviewThread[] }).nodes ?? []
 }
 
 /** True when `thread` survives the file + line proximity filter. Both

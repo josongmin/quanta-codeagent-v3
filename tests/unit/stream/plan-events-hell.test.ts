@@ -565,6 +565,8 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
         return "turn_diff_updated"
       case "decision":
         return "decision"
+      case "knobs_applied":
+        return "knobs_applied"
       case "done":
         return "done"
       default: {

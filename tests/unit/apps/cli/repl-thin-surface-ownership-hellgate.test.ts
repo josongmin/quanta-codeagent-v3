@@ -13,14 +13,22 @@ describe("CLI repl thin-surface ownership hellgate", () => {
     expect(exists("src/apps/cli/repl/session-memory-auto.ts")).toBe(false)
   })
 
-  test("CLI repl host imports runner-owned session assembly through the runner surface", () => {
+  test("CLI repl host uses the single runner compat owner instead of raw compat primitives", () => {
     const repl = read("src/apps/cli/repl.ts")
-    expect(repl).toContain('import { buildSharedExecutionPlaneSessionDeps } from "@/runner"')
+    expect(repl).not.toContain('from "@/host/runtime/session-host"')
+    expect(repl).not.toContain('from "@/runner"')
+    expect(repl).not.toContain('from "@/runner/session-execution-plane"')
     expect(repl).not.toContain("./repl/execution-plane-wire")
 
     const deps = read("src/apps/cli/repl/session-deps-compose.ts")
-    expect(deps).toContain('import { buildSessionMemoryAutoWires } from "@/runner"')
+    expect(deps).toContain('from "@/host/runtime/session-host"')
+    expect(deps).toContain("composeLegacySessionDeps")
+    expect(deps).not.toContain('from "@/runner/session-memory-auto"')
     expect(deps).not.toContain("./session-memory-auto")
+
+    const setup = read("src/apps/cli/repl/session-setup.ts")
+    expect(setup).toContain("buildLegacySideConversationPort")
+    expect(setup).not.toContain("./side-conv-wire")
   })
 
   test("Biome pins the CLI repl against runner-internal session assembler imports", () => {
@@ -30,6 +38,6 @@ describe("CLI repl thin-surface ownership hellgate", () => {
     expect(biome).toContain('"@/runner/session-memory-auto"')
     expect(biome).toContain('"**/execution-plane-wire"')
     expect(biome).toContain('"**/session-memory-auto"')
-    expect(biome).toContain("public @/runner contract instead")
+    expect(biome).toContain("Use the sanctioned runner-owned modules instead.")
   })
 })

@@ -1,13 +1,14 @@
 /**
  * `@/apps/headless` — second-consumer surface proof (ADR-0308 / ARCH-07).
  *
- * Drives the SAME `@/host/bootstrap` + `@/runner` cores the CLI uses, with
+ * Drives the SAME `@/host/bootstrap` + internal `@/runner/*` cores the CLI uses, with
  * fully-faked deps + zero network. The proof's value is invariant: future
  * surfaces (Web/Tauri/embedded-browser per `surface-model.md`) can plug into
- * `@/host/bootstrap` + `@/runner` without touching `src/apps/cli/**`.
+ * `@/host/bootstrap` + internal `@/runner/*` helpers without touching `src/apps/cli/**`.
  *
  * SLICE INVARIANT (enforced by biome + hellgate test):
- *   - May import: `@/host/bootstrap`, `@/runner`, `@/agent` (types only),
+ *   - May import: `@/host/bootstrap`, `@/host/runtime`, selected internal
+ *     `@/runner/*` modules, `@/sdk/runtime`, `@/agent` (types only),
  *     `@/llm` (types only), `@/stream`, `@/permission` (types only),
  *     `@/tool` (registry + types), `@/observability` (logger), `@/shared`
  *     (logger / runtime-config — none used today), `node:*`.
@@ -19,24 +20,30 @@
 
 import type { AgentOutcome } from "@/agent"
 import { bootstrapSession, type SessionBootstrapResult } from "@/host/bootstrap"
+import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import {
-  buildCapabilityManifestFromSessionDeps,
-  createLegacySingleSessionRuntimeHost,
-} from "@/host/runtime"
-import {
-  assembleConfig,
-  buildSessionMemoryAutoWires,
-  buildSharedExecutionPlaneSessionDeps,
-  type SessionDeps,
-} from "@/runner"
-import { createRuntime, type RuntimeSessionInternal } from "@/sdk/runtime"
+  composeLegacySessionDeps,
+  createLegacyRunnerSessionHost,
+} from "@/host/runtime/session-host"
+import type { SessionDeps } from "@/runner/assemble/config"
+import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
 import { FakeLlm } from "./fake-llm"
-import type { FakeCompletion, HeadlessRunInput, HeadlessRunResult } from "./types"
+import type {
+  FakeCompletion,
+  HeadlessRunInput,
+  HeadlessRunResult,
+  HeadlessRuntimeWires,
+} from "./types"
 
 export { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
 export { FakeLlm, scriptFromCompletion } from "./fake-llm"
-export type { FakeCompletion, HeadlessRunInput, HeadlessRunResult } from "./types"
+export type {
+  FakeCompletion,
+  HeadlessRunInput,
+  HeadlessRunResult,
+  HeadlessRuntimeWires,
+} from "./types"
 
 /** Normalize the input's completion(s) into the ordered list the fake LLM
  *  expects. Either form is valid; an empty list trips the FakeLlm's
@@ -58,63 +65,23 @@ const composeHeadlessSessionDeps = async (
   input: HeadlessRunInput,
   stream: RecordingStream,
 ): Promise<SessionDeps> => {
-  const base: SessionDeps = {
-    llm: boot.llm,
-    registry: boot.tooling.registry,
+  return await composeLegacySessionDeps({
+    boot,
     stream,
-    permission: boot.permission,
-    system: boot.system,
-    systemSource: boot.systemSource,
-    cwd: boot.cwd,
-    maxTurns: boot.maxTurns,
-    signal: boot.abort.signal,
     // The headless surface does not interact with a human — `onConfirm` denies
     // every prompt so any tool that escalates is safely refused. Pair with a
     // pre-approved tool registry (or `mode: "bypass"`) for tool-call tests.
     onConfirm: async () => false,
-    store: boot.tooling.store,
-    sessionId: boot.sessionId,
-    embedder: boot.tooling.embedder,
-    memoryConfig: boot.tooling.memoryConfig,
-    planMode: boot.features.planMode,
-    metrics: boot.features.metrics,
-    run: boot.run,
-    subagentConfig: boot.tooling.subagentConfig,
-    skillsConfig: boot.tooling.skillsConfig,
-    compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
-    verifyGuardConfig: boot.tooling.verifyGuardConfig,
-    summarizerLlm: undefined,
-    ...(boot.toolProfileState !== undefined ? { toolProfileState: boot.toolProfileState } : {}),
-    ...(boot.identityModeState !== undefined ? { identityModeState: boot.identityModeState } : {}),
-    ...(boot.focusChain !== undefined ? { focusChain: boot.focusChain } : {}),
-    onShellEvent: boot.onShellEvent,
-    workMetricsSink: boot.workMetricsSink,
-    sessionEffort: () => boot.effortStore.get(),
-  }
-  const executionPlaneDeps = await buildSharedExecutionPlaneSessionDeps({
-    history: boot.history,
-    sessionDeps: base,
-    cwd: boot.cwd,
-    envSource: input.env ?? {},
+    execution: {
+      history: boot.history,
+      cwd: boot.cwd,
+      envSource: input.env ?? {},
+    },
+    memoryAuto: {
+      env: input.env ?? {},
+      homeDir: input.homeDir ?? "/tmp",
+    },
   })
-  const memoryAuto = await buildSessionMemoryAutoWires({
-    env: input.env ?? {},
-    llm: boot.llm,
-    sessionId: boot.sessionId,
-    signal: boot.abort.signal,
-    homeDir: input.homeDir ?? "/tmp",
-  })
-  return {
-    ...base,
-    ...executionPlaneDeps,
-    ...(memoryAuto?.sessionCtx !== undefined ? { sessionCtx: memoryAuto.sessionCtx } : {}),
-    ...(memoryAuto?.memoryConsolidator !== undefined
-      ? { memoryConsolidator: memoryAuto.memoryConsolidator }
-      : {}),
-    ...(memoryAuto?.stage1OutputsStore !== undefined
-      ? { stage1OutputsStore: memoryAuto.stage1OutputsStore }
-      : {}),
-  }
 }
 
 const abortedOutcome = (messages: readonly import("@/llm").Message[]): AgentOutcome => ({
@@ -123,9 +90,27 @@ const abortedOutcome = (messages: readonly import("@/llm").Message[]): AgentOutc
   messages: [...messages],
 })
 
-/** Run a single agent turn through `@/host/bootstrap` + `@/runner` with
- *  faked deps. Returns the bootstrap result, the per-turn outcome, the
- *  resulting message history, and every `AgentEvent` the runner emitted.
+const summarizeHeadlessWires = (deps: SessionDeps): HeadlessRuntimeWires => ({
+  executionPlane: {
+    conversationCheckpoint: deps.conversationCheckpoint !== undefined,
+    fork: deps.fork !== undefined,
+    forkSession: deps.forkSession !== undefined,
+    delegation: deps.delegation !== undefined,
+    subagentBackground: deps.subagentBackground !== undefined,
+    autoBackground: deps.autoBackground !== undefined,
+  },
+  memoryAuto: {
+    sessionCtx: deps.sessionCtx !== undefined,
+    stage1OutputsStore: deps.stage1OutputsStore !== undefined,
+    memoryConsolidator: deps.memoryConsolidator !== undefined,
+    memoryConsolidatorEnabled: deps.memoryConsolidator?.enabled === true,
+  },
+})
+
+/** Run a single agent turn through `@/host/bootstrap` + internal
+ *  `@/runner/*` helpers with faked deps. Returns the bootstrap result, the
+ *  per-turn outcome, the resulting message history, emitted `AgentEvent`s,
+ *  and a lean reusable-wire summary.
  *
  *  Honors `input.signal`: an already-aborted signal short-circuits the run
  *  BEFORE bootstrap (no host work, no `runOnce` call) and returns a
@@ -159,22 +144,22 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
     else input.signal.addEventListener("abort", () => boot.abort.abort(), { once: true })
   }
 
-  let session: RuntimeSessionInternal | undefined
+  let session: RuntimeSession | undefined
   let runtimeFacade: Awaited<ReturnType<typeof createRuntime>> | undefined
   try {
     const sessionDeps = await composeHeadlessSessionDeps(boot, input, stream)
-    const { runtimeHost, sessionHost } = createLegacySingleSessionRuntimeHost({
+    const sessionHost = createLegacyRunnerSessionHost({
       boot,
       sessionDeps,
-      assembleConfig,
       history: [...boot.history],
       state: boot.features.state,
       idMeta: boot.idMeta,
       shutdown: boot.shutdownMcp,
-      buildCapabilityManifest: buildCapabilityManifestFromSessionDeps,
     })
-    runtimeFacade = await createRuntime({ host: runtimeHost })
-    session = (await runtimeFacade.createSession({
+    runtimeFacade = await createRuntime({
+      host: createSingleSessionRuntimeHost(() => sessionHost),
+    })
+    session = await runtimeFacade.createSession({
       cwd: boot.cwd,
       model: boot.model,
       permissionMode: boot.mode,
@@ -182,7 +167,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
         ? { identityMode: boot.identityModeState.get() }
         : {}),
       ...(boot.toolProfileState !== undefined ? { toolProfile: boot.toolProfileState.get() } : {}),
-    })) as RuntimeSessionInternal
+    })
     if (input.signal?.aborted === true) {
       const messages = [...sessionHost.peekMessages()]
       return {
@@ -190,7 +175,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
         outcome: abortedOutcome(messages),
         messages,
         events: stream.events,
-        sessionDeps,
+        wires: summarizeHeadlessWires(sessionDeps),
       }
     }
     await session.input.append(input.prompt, undefined, { signal: boot.abort.signal })
@@ -201,7 +186,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
       outcome,
       messages: sessionHost.peekMessages(),
       events: stream.events,
-      sessionDeps,
+      wires: summarizeHeadlessWires(sessionDeps),
     }
   } finally {
     await session?.close().catch(() => undefined)

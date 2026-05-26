@@ -125,14 +125,16 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "abort",
       "pills",
       "argPrompt",
+      "sideConversationPort",
       "shutdownMcp",
       "featureCfg",
     ]
-    // 37 named bindings — assert presence to detect accidental drops
+    // 38 named bindings — assert presence to detect accidental drops
     // (ADR-0297 added `featureCfg` for surface-level feature consolidation;
-    // `effortStore` was added earlier on main for session-level effort UX).
-    expect(keys).toHaveLength(37)
-    expect(new Set(keys).size).toBe(37)
+    // `effortStore` was added earlier on main for session-level effort UX;
+    // `sideConversationPort` now mints `/side` at setup time.
+    expect(keys).toHaveLength(38)
+    expect(new Set(keys).size).toBe(38)
   })
 })
 
@@ -398,7 +400,6 @@ const installDefaultInternalMock = async (): Promise<void> => {
       conflictError: undefined,
       missingIdError: undefined,
     }),
-    assembleConfig: module.assembleConfig,
     composeLLM: (
       inner: unknown,
       _provider: unknown,
@@ -493,6 +494,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(result.idleMonitor).toBeDefined()
     expect(result.rejectCounter).toBeDefined()
     expect(result.statusBar).toBeDefined()
+    expect(result.sideConversationPort).toBeDefined()
   })
 
   test("wires reviewer + plan-exit + user-input host ports into sessionDeps", async () => {

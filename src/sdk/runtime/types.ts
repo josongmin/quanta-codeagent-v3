@@ -1,8 +1,7 @@
 import type { CreateRuntimeOptions, RuntimeSessionConfig } from "@/host/runtime"
-import type { Message } from "@/llm"
+import type { ImageBlock } from "@/llm"
 import type {
   ApprovalRespondCommand,
-  ArtifactRef,
   InputAppendCommand,
   SessionCommand,
   SessionEvent,
@@ -34,27 +33,29 @@ export interface RuntimeSession {
   readonly input: {
     append(
       text: string,
-      meta?: Omit<InputAppendCommand, "sessionId" | "type" | "text">,
+      meta?: Partial<Omit<InputAppendCommand, "sessionId" | "type" | "text" | "images">> & {
+        readonly images?: readonly ImageBlock[]
+      },
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }
   readonly turn: {
     run(
-      meta?: Omit<TurnRunCommand, "sessionId" | "type">,
+      meta?: Partial<Omit<TurnRunCommand, "sessionId" | "type">>,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }
   readonly identity: {
     set(
       mode: string,
-      meta?: Omit<SessionIdentitySetCommand, "sessionId" | "type" | "mode">,
+      meta?: Partial<Omit<SessionIdentitySetCommand, "sessionId" | "type" | "mode">>,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }
   readonly toolProfile: {
     set(
       profile: string,
-      meta?: Omit<SessionToolProfileSetCommand, "sessionId" | "type" | "profile">,
+      meta?: Partial<Omit<SessionToolProfileSetCommand, "sessionId" | "type" | "profile">>,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }
@@ -62,7 +63,9 @@ export interface RuntimeSession {
     respond(
       approvalId: string,
       decision: "approve" | "deny",
-      meta?: Omit<ApprovalRespondCommand, "sessionId" | "type" | "approvalId" | "decision">,
+      meta?: Partial<
+        Omit<ApprovalRespondCommand, "sessionId" | "type" | "approvalId" | "decision">
+      >,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }
@@ -71,16 +74,6 @@ export interface RuntimeSession {
 export interface RuntimeFacade {
   createSession(config: RuntimeSessionConfig): Promise<RuntimeSession>
   close(): Promise<void>
-}
-
-export interface SessionExecutionView {
-  readonly messages: readonly Message[]
-  readonly outcomeReason?: string
-  readonly artifacts: readonly ArtifactRef[]
-}
-
-export interface RuntimeSessionInternal extends RuntimeSession {
-  __unsafePeekExecutionView(): SessionExecutionView
 }
 
 export type { CreateRuntimeOptions, RuntimeSessionConfig }

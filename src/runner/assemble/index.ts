@@ -18,20 +18,7 @@ export {
   type CompactionBreakerAssembleInput,
   type SummarizerLlmAssembleInput,
 } from "./compaction"
-/** {@link assembleConfig} — pure composer that turns built collaborators +
- *  message history into the immutable per-turn `AgentConfig`. Distinct from
- *  the `build*Core` factory family, which each instantiate ONE collaborator;
- *  see the JSDoc on `assembleConfig` for the "assemble" vs "build" rationale. */
-export {
-  assembleConfig,
-  compactionDep,
-  type SessionDeps,
-} from "./config"
-export {
-  assemblePipeline,
-  type PipelinePreset,
-  type PipelineWireOverrides,
-} from "./pipeline"
+export { compactionDep } from "./config"
 export {
   buildLLMCore,
   type ComposeLlmInput,
@@ -50,6 +37,11 @@ export {
   parseRecallTiers,
 } from "./memory"
 export {
+  assemblePipeline,
+  type PipelinePreset,
+  type PipelineWireOverrides,
+} from "./pipeline"
+export {
   buildRetrievalStackCore,
   DEFAULT_RETRIEVAL_RERANKER,
   RETRIEVAL_BUILTIN_RERANKERS,
@@ -65,6 +57,19 @@ export {
 } from "./retrieval-localize-bridge"
 export { rankWithRetrievalStack } from "./retrieval-memory-bridge"
 export {
+  buildSearchPipelineFromEnv,
+  clearSearchPipelineWireForTests,
+  type WiredSearchPipeline,
+} from "./search-pipeline"
+export {
+  createIdentityModeSessionState,
+  createSystemSource,
+  createToolProfileSessionState,
+  type IdentityModeSessionState,
+  type SystemSource,
+  type ToolProfileSessionState,
+} from "./session-state"
+export {
   buildSkillsConfigCore,
   type SkillsConfigAssembleInput,
 } from "./skill"
@@ -79,19 +84,6 @@ export {
   type StreamingAssembleInput,
   type StreamingResult,
 } from "./streaming"
-export {
-  buildSearchPipelineFromEnv,
-  clearSearchPipelineWireForTests,
-  type WiredSearchPipeline,
-} from "./search-pipeline"
-export {
-  createIdentityModeSessionState,
-  createSystemSource,
-  createToolProfileSessionState,
-  type IdentityModeSessionState,
-  type SystemSource,
-  type ToolProfileSessionState,
-} from "./session-state"
 export {
   buildSubagentConfigCore,
   type SubagentConfigAssembleInput,

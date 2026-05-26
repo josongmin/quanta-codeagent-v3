@@ -17,6 +17,7 @@ describe("@/protocol/session codec", () => {
       expectedRevision: 3,
       type: "input.append",
       text: "ping",
+      images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
     })
     expect(decodeSessionCommand(raw)).toEqual({
       sessionId: "s1",
@@ -25,6 +26,7 @@ describe("@/protocol/session codec", () => {
       expectedRevision: 3,
       type: "input.append",
       text: "ping",
+      images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
     })
   })
 

@@ -10,6 +10,16 @@
  * `@/agent/plan/types.ts` MUST re-shape both sites in lock-step.
  */
 
+/**
+ * Cross-slice mirror — keep in sync with `Surface` in `@/runner/knobs/types.ts`.
+ * The stream slice depends on `@/shared` only (biome.json enforces — but
+ * `@/runner` is not in the blocklist; we still mirror to follow the same
+ * pattern as `PlanReadonlyMirror` above and avoid forcing a deeper coupling).
+ * Adding a surface there MUST extend this union or the `knobs_applied`
+ * exhaustiveness pin in adapters will not break.
+ */
+export type SurfaceMirror = "bench" | "cli" | "agent-batch" | "agent-interactive" | "ide"
+
 /** Closed taxonomy for a todo's status — mirrors `TodoStatus` in
  *  `@/agent/plan/types.ts`. Closed-union; no other value is valid. */
 export type TodoStatusMirror = "pending" | "in_progress" | "completed" | "cancelled" | "blocked"
@@ -259,6 +269,28 @@ export type AgentEvent =
       hookName?: string
       /** Kind-specific extra context. CALLER sanitises (secret/PII scrub). */
       metadata?: Readonly<Record<string, unknown>>
+    }
+  // Knob telemetry (2026-05-26): per-run resolved knob posture. Emitted ONCE
+  // per agent run (before `done`) when the surface entry resolves a
+  // `KnobValueMap` and forwards it as an event. Carries the closed-port
+  // projection of the registry: surface (closed enum), id → { value, source }
+  // map, optional preset name, and the multiplicative cost estimate (Σ of
+  // active knobs' `costMultiplier`, falling back to 1). All four fields are
+  // populated by the emitter — the recorder is a transparent forwarder.
+  //
+  // `knobs` is a plain `Record` (not a `Map`) so JSON.stringify is a no-op
+  // serialiser; `preset` is `string | null` (NOT optional) to make the
+  // null-vs-unset distinction explicit on the wire. The `surface` mirror
+  // matches `Surface` in `@/runner/knobs/types.ts` — see `SurfaceMirror`
+  // above for the contract. Optional / unknown adapters (stdout, sse, tee)
+  // graceful-skip (the closed-union exhaustiveness pin requires they at
+  // least DECLARE the case; the no-op render is the documented behavior).
+  | {
+      type: "knobs_applied"
+      surface: SurfaceMirror
+      knobs: Readonly<Record<string, { value: unknown; source: string }>>
+      preset: string | null
+      costMultiplier: number
     }
   | { type: "done"; reason: string; turns: number }
 

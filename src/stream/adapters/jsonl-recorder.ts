@@ -292,6 +292,13 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   // rationale as plan/control-op/turn_diff — same-turn observation point,
   // no new TrajectoryKind. `reason:"decision"` in `data` keeps it greppable.
   decision: "recovery",
+  // Knob telemetry (2026-05-26): per-run resolved knob posture. Rides the
+  // existing `recovery` family for the same rationale as `decision` /
+  // `plan_*` / `turn_diff_updated` — a same-turn observation point, no new
+  // TrajectoryKind rippling through redaction / probe / consumer code paths.
+  // `reason:"knobs_applied"` keeps the line greppable apart from other
+  // recovery-kind events.
+  knobs_applied: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -396,6 +403,8 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
       }
     case "decision":
       return decisionData(e)
+    case "knobs_applied":
+      return knobsAppliedData(e)
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:
@@ -422,6 +431,25 @@ const decisionData = (e: Extract<AgentEvent, { type: "decision" }>): Record<stri
   ...(e.ruleId !== undefined ? { ruleId: e.ruleId } : {}),
   ...(e.hookName !== undefined ? { hookName: e.hookName } : {}),
   ...(e.metadata !== undefined ? { metadata: e.metadata } : {}),
+})
+
+/** Knob telemetry (2026-05-26): per-run resolved knob posture payload. The
+ *  carrier event is emitted once per run; the recorder writes it as one
+ *  JSONL line with `kind:"recovery"` (no new TrajectoryKind needed) and
+ *  `reason:"knobs_applied"` for grep. `preset` is intentionally serialised
+ *  even when `null` (the type uses `string | null`, NOT optional) so a
+ *  consumer can distinguish "knob system live but no preset" from "absent
+ *  field". `knobs` is a plain object — same shape the bench report uses
+ *  (`knobsForReport(...)`), so two artifacts (jsonl trajectory line +
+ *  report.json `knobs` block) can be cross-correlated trivially. */
+const knobsAppliedData = (
+  e: Extract<AgentEvent, { type: "knobs_applied" }>,
+): Record<string, unknown> => ({
+  reason: "knobs_applied",
+  surface: e.surface,
+  knobs: e.knobs,
+  preset: e.preset,
+  costMultiplier: e.costMultiplier,
 })
 
 /** ADR-0048: heartbeat payload — receive-side timestamp + the optional

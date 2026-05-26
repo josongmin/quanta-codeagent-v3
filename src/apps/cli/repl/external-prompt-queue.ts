@@ -1,7 +1,7 @@
-import type { PromptPayload } from "@/runner"
+import type { CliPromptInput } from "./prompt-types"
 
 type QueueWaiter = {
-  readonly resolve: (value: PromptPayload | null) => void
+  readonly resolve: (value: CliPromptInput | null) => void
   readonly abort: () => void
 }
 
@@ -20,10 +20,10 @@ type QueueWaiter = {
  * serially). Multiple producers are fine; prompts stay FIFO.
  */
 export class ExternalPromptQueue {
-  #items: PromptPayload[] = []
+  #items: CliPromptInput[] = []
   #waiters: QueueWaiter[] = []
 
-  push(prompt: PromptPayload): void {
+  push(prompt: CliPromptInput): void {
     const waiter = this.#waiters.shift()
     if (waiter !== undefined) {
       waiter.abort()
@@ -37,11 +37,11 @@ export class ExternalPromptQueue {
     return this.#items.length
   }
 
-  next(signal?: AbortSignal): Promise<PromptPayload | null> {
+  next(signal?: AbortSignal): Promise<CliPromptInput | null> {
     const queued = this.#items.shift()
     if (queued !== undefined) return Promise.resolve(queued)
     if (signal?.aborted === true) return Promise.resolve(null)
-    return new Promise<PromptPayload | null>((resolve) => {
+    return new Promise<CliPromptInput | null>((resolve) => {
       const onAbort = (): void => {
         this.#waiters = this.#waiters.filter((entry) => entry !== waiter)
         resolve(null)

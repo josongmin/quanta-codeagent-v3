@@ -1,3 +1,2 @@
-import type { SessionDeps } from "@/runner/assemble"
-
-export const hasExecutableTools = (deps: SessionDeps): boolean => deps.registry.all().length > 0
+export const hasExecutableTools = (registry: { all(): readonly unknown[] }): boolean =>
+  registry.all().length > 0

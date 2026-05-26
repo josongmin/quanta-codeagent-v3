@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { AGENT_MODES } from "@/agent/subagent-typed"
 import type { Message } from "@/llm"
-import { buildSharedExecutionPlaneSessionDeps, type SessionDeps } from "@/runner"
+import type { SessionDeps } from "@/runner/assemble/config"
+import { buildSharedExecutionPlaneSessionDeps } from "@/runner/session-execution-plane"
 import { ToolRegistry } from "@/tool"
 
 const mkMsg = (text: string): Message => ({

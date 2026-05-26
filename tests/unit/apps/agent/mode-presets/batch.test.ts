@@ -12,6 +12,7 @@
  *   6. Test is hermetic — no real bench driver, no real LLM, no fs writes.
  */
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import type { AssembleRequest } from "@/../src/apps/agent/assemble"
 import { runMode } from "@/../src/apps/agent/mode-presets/batch"
 import type { Instance, InstanceResult } from "@/../src/apps/bench/types"
@@ -51,6 +52,16 @@ const baseReq = (over: Partial<AssembleRequest> = {}): AssembleRequest => ({
 })
 
 describe("batch.runMode — guard", () => {
+  test("defaults to the app-owned bench eval surface for per-instance execution", () => {
+    const src = readFileSync(
+      new URL("../../../../../src/apps/agent/mode-presets/batch.ts", import.meta.url),
+      "utf8",
+    )
+    expect(src).toContain('const BENCH_EVAL_MODULE = "@/apps/bench/eval"')
+    expect(src).toContain("import(BENCH_EVAL_MODULE)")
+    expect(src).not.toContain('from "@/apps/bench/eval"')
+  })
+
   test("rejects a wrong req.mode", async () => {
     const req = { ...baseReq(), mode: "headless" as const }
     await expect(runMode(req)).rejects.toThrow(/req.mode must be "batch"/)

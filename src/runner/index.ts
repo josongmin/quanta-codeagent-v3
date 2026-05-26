@@ -22,27 +22,14 @@
  */
 // Sub-slice barrels — each populated independently across Phase-1 tracks.
 // `assemble/` — typed-config → built collaborators (Track-A).
-// `orchestrate/` — `runOnce` + resume FSM + per-turn save (Track-C).
+// `orchestrate/` — public resume/persist helpers; one-shot compat helpers stay
+// internal and are consumed via concrete files / the legacy session host.
 // `session-ops/` re-exports go through its own barrel (`./session-ops`); not
 // re-spread here to keep the top-level `@/runner` surface tight (consumers
 // reach session-ops via `@/runner/session-ops` to make the dependency
 // explicit at the call site).
 export * from "./assemble"
 export * from "./orchestrate"
-export {
-  buildSharedExecutionPlaneSessionDeps,
-  type SharedExecutionPlaneArgs,
-} from "./session-execution-plane"
-export {
-  buildPhase1PortFromLlm,
-  buildPhase2SummarizerFromLlm,
-  buildSessionMemoryAutoWires,
-  prepareSessionStartMemory,
-  type SessionMemoryAutoWireInput,
-  type SessionMemoryAutoWires,
-  type SessionStartMemoryInput,
-  type SessionStartMemoryResult,
-} from "./session-memory-auto"
 export type {
   SideConversationPort,
   SideConversationStartArgs,

@@ -1,0 +1,53 @@
+id: pr-output-sink-redaction
+title: PR output sink with mandatory redaction
+section: 9
+subsystem: GitHub integration (ADR-0313)
+order: 313
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [daemon, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "integration:github"]
+depends_on: [pii-redaction-scanner, secret-detection-scanner, github-actions-trigger-adapter]
+purpose: |
+  Closed-port sink for every outgoing PR comment / review / issue reply
+  the agent produces. `createPrOutputSink({ redactPort, ... })` is a
+  required-injection factory — calling without a `redactPort` boots a
+  hard throw at construction time, so the slice cannot accidentally leak
+  raw secrets or PII even if a caller forgets to wire the port.
+
+  Every emitted body is passed through `redactPort` first (secrets +
+  PII unified pass), then the sink appends a trailing HTML marker of
+  the form `<!-- quanta:idempotency={key} -->`. The marker serves two
+  jobs:
+
+    1. Idempotency dedupe — repeated invocations for the same logical
+       trigger find the prior comment by marker grep and EDIT in place
+       rather than spawning a new comment thread.
+    2. Self-loop guard — `mention-filter-trust-scope` (ADR-0314) ignores
+       comments whose body matches the same marker shape, breaking the
+       agent-comments-on-its-own-comment infinite loop class.
+
+  Mechanism (sink + redaction + marker) and policy (which trigger maps
+  to which body) are intentionally split: the sink is dumb, the agent
+  decides what to say.
+evidence:
+  code:
+    - src/integrations/github/pr-output-sink.ts
+  adrs: [313]
+  tests:
+    unit:
+      - tests/unit/integrations/github/pr-output-sink.test.ts
+      - tests/unit/integrations/github/pr-output-sink-redaction-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  The "boot-time throw on missing redactPort" pattern is the same fail-
+  closed shape used by ADR-0313's sibling sinks elsewhere in the
+  catalog — a default no-op redactor would silently degrade safety on
+  composition mistakes, so the constructor refuses to build.

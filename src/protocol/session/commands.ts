@@ -1,3 +1,5 @@
+import type { ImageBlock } from "@/llm"
+
 export interface SessionCommandEnvelope<TType extends string> {
   readonly sessionId: string
   readonly commandId: string
@@ -8,6 +10,7 @@ export interface SessionCommandEnvelope<TType extends string> {
 
 export interface InputAppendCommand extends SessionCommandEnvelope<"input.append"> {
   readonly text: string
+  readonly images?: readonly ImageBlock[]
 }
 
 export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {}

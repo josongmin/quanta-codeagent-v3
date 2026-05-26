@@ -6,6 +6,7 @@ import {
   type KernelSessionState,
   toSessionSnapshotLite,
 } from "@/kernel/session"
+import type { ImageBlock } from "@/llm"
 import type {
   ApprovalRespondCommand,
   InputAppendCommand,
@@ -17,19 +18,14 @@ import type {
 } from "@/protocol/session"
 import { SessionClosedError } from "@/protocol/session"
 import { SessionSubscriptionHub } from "./subscription"
-import type {
-  RuntimeSessionInternal,
-  SessionDispatchOptions,
-  SessionDispatchResult,
-  SessionExecutionView,
-} from "./types"
+import type { RuntimeSession, SessionDispatchOptions, SessionDispatchResult } from "./types"
 
 interface CreateRuntimeSessionArgs {
   readonly hostSession: SessionHost
   readonly kernel: Pick<KernelDispatchContext, "clock" | "eventLog">
 }
 
-export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSessionInternal => {
+export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSession => {
   let closed = false
   let state: KernelSessionState = createKernelSessionState(args.hostSession.describe())
   const subscriptions = new SessionSubscriptionHub()
@@ -71,12 +67,17 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
 
   const buildInputAppend = (
     text: string,
-    meta: Partial<Omit<InputAppendCommand, "sessionId" | "type" | "text">> | undefined,
+    meta:
+      | (Partial<Omit<InputAppendCommand, "sessionId" | "type" | "text" | "images">> & {
+          readonly images?: readonly ImageBlock[]
+        })
+      | undefined,
   ): InputAppendCommand => ({
     sessionId,
     type: "input.append",
     text,
     ...commandMeta(meta),
+    ...(meta?.images !== undefined && meta.images.length > 0 ? { images: meta.images } : {}),
   })
 
   const buildTurnRun = (
@@ -155,14 +156,6 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     approval: {
       respond: async (approvalId, decision, meta, options) =>
         dispatch(buildApprovalRespond(approvalId, decision, meta), options),
-    },
-    __unsafePeekExecutionView: (): SessionExecutionView => {
-      const outcomeReason = args.hostSession.peekLastOutcome?.()?.reason
-      return {
-        messages: args.hostSession.peekMessages?.() ?? [],
-        ...(outcomeReason !== undefined ? { outcomeReason } : {}),
-        artifacts: toSessionSnapshotLite(state).openArtifacts,
-      }
     },
   }
 }

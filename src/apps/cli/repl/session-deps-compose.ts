@@ -1,10 +1,11 @@
 import * as readline from "node:readline/promises"
 import { createOnConfirmReviewerPort } from "@/agent"
+import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
+import { assembleLegacyAgentConfig, composeLegacySessionDeps } from "@/host/runtime/session-host"
 import type { PermissionStore, ToolAction } from "@/permission"
-import { buildSessionMemoryAutoWires } from "@/runner"
-import { assembleConfig, type SessionDeps } from "@/runner/assemble"
+import type { SessionDeps } from "@/runner/assemble/config"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
@@ -42,42 +43,17 @@ export interface ComposeCliSessionDepsArgs {
   readonly turnStream: StreamPort
   readonly loadPermissionStore: () => Promise<PermissionStore | undefined>
   readonly sandboxProfile: CliReviewerSandboxProfile
+  readonly convStore?: ConversationCheckpointStore
+  readonly envSource?: Readonly<Record<string, string | undefined>>
 }
 
 export interface CliAdmissibilityBindings {
   readonly sessionDeps: SessionDeps
 }
 
-const buildSessionMemoryAutoDeps = async (
+const buildSessionMemoryAutoSummarizer = (
   boot: SessionBootstrapResult,
-): Promise<{
-  readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
-  readonly sessionCtx?: string
-  readonly memoryConsolidator?: SessionDeps["memoryConsolidator"]
-  readonly stage1OutputsStore?: SessionDeps["stage1OutputsStore"]
-}> => {
-  const summarizerLlm = buildSummarizerLlm(boot.provider, boot.abort.signal)
-  const sessionMemoryAuto = await buildSessionMemoryAutoWires({
-    env: process.env,
-    llm: boot.llm,
-    ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
-    sessionId: boot.sessionId,
-    signal: boot.abort.signal,
-    logWarn: (msg: string) => process.stderr.write(`[memory-auto] ${msg}\n`),
-  })
-  return {
-    ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
-    ...(sessionMemoryAuto?.sessionCtx !== undefined
-      ? { sessionCtx: sessionMemoryAuto.sessionCtx }
-      : {}),
-    ...(sessionMemoryAuto?.memoryConsolidator !== undefined
-      ? { memoryConsolidator: sessionMemoryAuto.memoryConsolidator }
-      : {}),
-    ...(sessionMemoryAuto?.stage1OutputsStore !== undefined
-      ? { stage1OutputsStore: sessionMemoryAuto.stage1OutputsStore }
-      : {}),
-  }
-}
+): ReturnType<typeof buildSummarizerLlm> => buildSummarizerLlm(boot.provider, boot.abort.signal)
 
 const buildBaseSessionDeps = (args: {
   readonly boot: SessionBootstrapResult
@@ -85,61 +61,23 @@ const buildBaseSessionDeps = (args: {
   readonly onConfirm: (action: ToolAction) => Promise<boolean>
   readonly planExitPort: ReturnType<typeof createCliPlanExitPort>
   readonly userInputPort: ReturnType<typeof createCliUserInputPort>
-  readonly autoDeps: Awaited<ReturnType<typeof buildSessionMemoryAutoDeps>>
-}): SessionDeps => {
-  const { boot, turnStream, onConfirm, planExitPort, userInputPort, autoDeps } = args
-  const base: SessionDeps = {
-    llm: boot.llm,
-    registry: boot.tooling.registry,
-    stream: turnStream,
-    permission: boot.permission,
-    system: boot.system,
-    systemSource: boot.systemSource,
-    cwd: boot.cwd,
-    maxTurns: boot.maxTurns,
-    signal: boot.abort.signal,
-    onConfirm,
-    store: boot.tooling.store,
-    sessionId: boot.sessionId,
-    embedder: boot.tooling.embedder,
-    memoryConfig: boot.tooling.memoryConfig,
-    planMode: boot.features.planMode,
-    metrics: boot.features.metrics,
-    run: boot.run,
-    subagentConfig: boot.tooling.subagentConfig,
-    skillsConfig: boot.tooling.skillsConfig,
-    compactionBreakerConfig: boot.tooling.compactionBreakerConfig,
-    verifyGuardConfig: boot.tooling.verifyGuardConfig,
-    searchPipeline: boot.tooling.searchPipeline,
-    summarizerLlm: autoDeps.summarizerLlm ?? undefined,
-    planExitPort,
-    userInputPort,
-    ...(boot.toolProfileState !== undefined ? { toolProfileState: boot.toolProfileState } : {}),
-    ...(boot.identityModeState !== undefined ? { identityModeState: boot.identityModeState } : {}),
-    ...(boot.focusChain !== undefined ? { focusChain: boot.focusChain } : {}),
-    onShellEvent: boot.onShellEvent,
-    workMetricsSink: boot.workMetricsSink,
-    sessionEffort: () => boot.effortStore.get(),
-    decisionEmitter: decisionEmitterFromStream(turnStream),
-  }
-  if (autoDeps.sessionCtx !== undefined) base.sessionCtx = autoDeps.sessionCtx
-  if (autoDeps.memoryConsolidator !== undefined) {
-    base.memoryConsolidator = autoDeps.memoryConsolidator
-  }
-  if (autoDeps.stage1OutputsStore !== undefined) {
-    base.stage1OutputsStore = autoDeps.stage1OutputsStore
-  }
-  if (boot.lifecycleFollowUpQueue !== undefined) {
-    base.followUpQueue = boot.lifecycleFollowUpQueue
-  }
-  if (boot.planStore !== undefined) {
-    base.planStore = boot.planStore
-  }
+  readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
+}): Parameters<typeof composeLegacySessionDeps>[0] => {
+  const { boot, turnStream, onConfirm, planExitPort, userInputPort, summarizerLlm } = args
   const shellSnapshot = buildShellSnapshotConfig()
-  if (shellSnapshot !== undefined) {
-    base.shellSnapshot = shellSnapshot
+  return {
+    boot,
+    stream: turnStream,
+    onConfirm,
+    includeSearchPipeline: true,
+    overlay: {
+      ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
+      planExitPort,
+      userInputPort,
+      decisionEmitter: decisionEmitterFromStream(turnStream),
+      ...(shellSnapshot !== undefined ? { shellSnapshot } : {}),
+    },
   }
-  return base
 }
 
 const buildAdmissibility = (args: {
@@ -153,7 +91,9 @@ const buildAdmissibility = (args: {
   const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, baseSessionDeps } = args
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
   const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const reviewerAgent = boot.materializeReviewerAgent(assembleConfig([], baseSessionDeps))
+  const reviewerAgent = boot.materializeReviewerAgent(
+    assembleLegacyAgentConfig([], baseSessionDeps),
+  )
   const guardianReview =
     reviewerAgent !== undefined
       ? boot.createSubagentBackedGuardianReview({
@@ -206,22 +146,39 @@ export const composeCliSessionDeps = async (
   const permissionStore = await loadPermissionStore()
   const planExitPort = createCliPlanExitPort({ ask: askLine })
   const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
-  const autoDeps = await buildSessionMemoryAutoDeps(boot)
-  const baseSessionDeps = buildBaseSessionDeps({
+  const summarizerLlm = buildSessionMemoryAutoSummarizer(boot)
+  const composePlan = buildBaseSessionDeps({
     boot,
     turnStream,
     onConfirm,
     planExitPort,
     userInputPort,
-    autoDeps,
+    ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
   })
-  baseSessionDeps.admissibility = buildAdmissibility({
+  const sessionDeps = await composeLegacySessionDeps({
+    ...composePlan,
+    ...(args.convStore !== undefined
+      ? {
+          execution: {
+            history: boot.history,
+            cwd: boot.cwd,
+            convStore: args.convStore,
+            envSource: args.envSource ?? process.env,
+          },
+        }
+      : {}),
+    memoryAuto: {
+      env: args.envSource ?? process.env,
+      logWarn: (msg: string) => process.stderr.write(`[memory-auto] ${msg}\n`),
+    },
+  })
+  sessionDeps.admissibility = buildAdmissibility({
     boot,
     onConfirm,
     sandboxProfile,
     permissionStore,
     autoReview,
-    baseSessionDeps,
+    baseSessionDeps: sessionDeps,
   })
-  return { sessionDeps: baseSessionDeps }
+  return { sessionDeps }
 }

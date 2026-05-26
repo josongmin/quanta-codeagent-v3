@@ -8,15 +8,14 @@ import { StructuredLogger } from "@/observability"
 import type { PermissionContext, ToolAction } from "@/permission"
 import {
   argvPrompt,
-  assembleConfig,
   buildStreaming,
   buildSummarizerLlm,
   buildTooling,
   loadFeatures,
   pickPersona,
   pickProvider,
-  type SessionDeps,
 } from "../../src/apps/cli/internal"
+import { assembleConfig, type SessionDeps } from "../../src/runner/assemble/config"
 
 /**
  * IN-PROCESS end-to-end integration of the CLI export-closure assembly path
@@ -192,7 +191,7 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     // Default tool registry is non-empty (defaultTools merged in by buildTooling).
     const specs = config.registry.specs()
     expect(specs.length).toBeGreaterThan(0)
-    expect(specs.some((s) => s.name === "search_codebase")).toBe(true)
+    expect(specs.some((s: { name: string }) => s.name === "search_codebase")).toBe(true)
 
     // Optional subsystems remain OFF by default, but generic repo search is
     // now part of the product baseline, so the search facade and helper-only

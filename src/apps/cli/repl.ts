@@ -7,7 +7,6 @@ import {
 } from "@/agent/tier1/reviewer-subagent"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
-import { buildSharedExecutionPlaneSessionDeps } from "@/runner"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { createIdleMonitor } from "./idle-monitor"
@@ -253,7 +252,8 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
  *  → `SessionState` → `runSessionLoop`. The host owns slashCtx composition +
  *  per-turn render sinks; byte-identical default behavior. */
 export const runRepl = async (): Promise<void> => {
-  const setup = await setupSession(sessionSetupDeps)
+  const convStore = defaultConversationCheckpointStore()
+  const setup = await setupSession(sessionSetupDeps, { convStore })
   const featureCfg = setup.featureCfg
   const surfaceState = createSurfaceState({
     imageQueue: setup.argPrompt ? undefined : buildImageQueue(featureCfg),
@@ -261,21 +261,6 @@ export const runRepl = async (): Promise<void> => {
     history: setup.history,
   })
   try {
-    const convStore = defaultConversationCheckpointStore()
-    const executionPlaneDeps = await buildSharedExecutionPlaneSessionDeps({
-      history: setup.history,
-      sessionDeps: setup.sessionDeps,
-      cwd: setup.cwd,
-      convStore,
-      envSource: process.env,
-    })
-    const setupWithExecution: typeof setup = {
-      ...setup,
-      sessionDeps: {
-        ...setup.sessionDeps,
-        ...executionPlaneDeps,
-      },
-    }
     // ADR-0299 — surface composition wire. Builds the slash ctx PLUS the
     // wire bundle (conv-checkpoint, playbook-trigger seam, composer +
     // textInbox handles). Each upstream knob (env / CLI flag) gates the
@@ -283,11 +268,11 @@ export const runRepl = async (): Promise<void> => {
     // legacy when no opt-in is present (RFC §1.2). The bundled
     // `dispatchSlash` closure routes through the FULL augmented
     // SlashContext (legacy + ADR-0291 + ADR-0292 + ADR-0294 slots).
-    const wires = composeSurfaceWires(setupWithExecution, surfaceState, process.env, { convStore })
+    const wires = composeSurfaceWires(setup, surfaceState, process.env, { convStore })
     await runSessionLoop({
-      setup: setupWithExecution,
+      setup,
       dispatchSlash: wires.dispatchSlash,
-      sinks: composeTurnSinks(setupWithExecution, surfaceState),
+      sinks: composeTurnSinks(setup, surfaceState),
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
       textInbox: wires.textInbox,
       ux: buildPromptUx(featureCfg),
@@ -304,9 +289,7 @@ export const runRepl = async (): Promise<void> => {
       playbookSeam: wires.playbookSeam,
       // ADR-0301 — `--playbook-trigger` CLI flag echo. Spread conditionally
       // so `exactOptionalPropertyTypes` doesn't see a literal `undefined`.
-      ...(setupWithExecution.playbookCliFlag !== undefined
-        ? { playbookCliFlag: setupWithExecution.playbookCliFlag }
-        : {}),
+      ...(setup.playbookCliFlag !== undefined ? { playbookCliFlag: setup.playbookCliFlag } : {}),
     })
   } finally {
     // Track T — tear down ring-buffer panel BEFORE other chrome dispose so

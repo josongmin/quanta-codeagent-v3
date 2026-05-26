@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs"
 import type { AssembleRequest } from "@/../src/apps/agent/assemble"
 import { runMode } from "@/../src/apps/agent/mode-presets/interactive"
 import type { AgentConfig, AgentOutcome } from "@/agent"
+import { buildSessionDepsFromAgentConfigBase } from "@/host/runtime/session-host"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
@@ -58,8 +59,9 @@ describe("interactive.runMode — guard", () => {
       "utf8",
     )
     expect(src).toContain('from "@/sdk/runtime"')
-    expect(src).not.toContain('from "@/runner"')
+    expect(src).toContain('from "@/host/runtime/session-host"')
     expect(src).not.toContain("runInteractive(")
+    expect(src).not.toContain("buildInteractiveOptionalDeps")
   })
 
   test("rejects a wrong req.mode", async () => {
@@ -90,6 +92,57 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
     const seams = { runAgent: async () => fakeOutcome("error") }
     const out = await runMode(baseReq({ seams }))
     expect(out.exitCode).toBe(1)
+  })
+
+  test("buildSessionDepsFromAgentConfigBase preserves the live optional session slots", () => {
+    const systemSource = { get: () => "SYS", set: () => undefined }
+    const toolProfileState = { get: () => "write", set: () => undefined } as never
+    const identityModeState = { get: () => "review", set: () => undefined } as never
+    const focusChain = {
+      tracker: {
+        tickTurn: () => undefined,
+        getInjection: () => undefined,
+        setTodos: () => undefined,
+        peekInjection: () => undefined,
+        getDriftWarning: () => undefined,
+        markDone: () => undefined,
+        markDropped: () => undefined,
+        clearTurnState: () => undefined,
+      },
+      reinjectEveryN: 3,
+    } as never
+    const stage1OutputsStore = { put: () => undefined } as never
+    const granularRegistry = { register: () => undefined } as never
+    const base = {
+      llm: fakeLlm,
+      registry: new ToolRegistry(defaultTools),
+      stream: recordingStream,
+      permission: { mode: "default" } as PermissionContext,
+      messages: [],
+      system: "SYS",
+      systemSource,
+      cwd: "/tmp",
+      maxTurns: 5,
+      signal: new AbortController().signal,
+      sessionId: "interactive-test-session",
+      planMode: false,
+      sessionCtx: "ctx",
+      stage1OutputsStore,
+      toolProfileState,
+      identityModeState,
+      focusChain,
+      granularRegistry,
+    } as unknown as Parameters<typeof buildSessionDepsFromAgentConfigBase>[0]
+
+    const deps = buildSessionDepsFromAgentConfigBase(base)
+
+    expect(deps.systemSource).toBe(systemSource)
+    expect(deps.sessionCtx).toBe("ctx")
+    expect(deps.stage1OutputsStore).toBe(stage1OutputsStore)
+    expect(deps.toolProfileState).toBe(toolProfileState)
+    expect(deps.identityModeState).toBe(identityModeState)
+    expect(deps.focusChain).toBe(focusChain)
+    expect(deps.granularRegistry).toBe(granularRegistry)
   })
 })
 

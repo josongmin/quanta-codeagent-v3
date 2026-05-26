@@ -1,3 +1,4 @@
+import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
 import {
@@ -5,9 +6,12 @@ import {
   type SessionBootstrapDeps,
   type SessionBootstrapResult,
 } from "@/host/bootstrap"
+import { buildLegacySideConversationPort } from "@/host/runtime/session-host"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
+import type { SideConversationPort } from "@/runner/side-conversation-port"
+import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { BranchProgressTracker } from "../branch-search-progress"
@@ -18,7 +22,6 @@ import type { SessionDeps, Tooling } from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RejectCounter } from "../reject-counter"
-import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import { installStatusBar, type StatusBar } from "../status-bar"
 import type { createStatusPills } from "../status-pills"
 import type { TimelinePanel } from "../timeline-panel"
@@ -138,6 +141,9 @@ export interface SessionSetupResult {
   readonly argPrompt: string | undefined
   readonly systemSource: SessionBootstrapResult["systemSource"]
   readonly refreshSystemPrompt: SessionBootstrapResult["refreshSystemPrompt"]
+  /** CLI-minted `/side` port. Setup owns the old config/deps capture so the
+   *  downstream surface composer only consumes a typed port. */
+  readonly sideConversationPort: SideConversationPort
   /** Tear down MCP clients on REPL exit. The host calls this in the
    *  `finally` of `runRepl`. */
   readonly shutdownMcp: () => Promise<void>
@@ -157,7 +163,10 @@ export interface SessionSetupResult {
 /** Terminal host wiring over the bootstrap session core. All env/argv/feature
  *  resolution happens in {@link bootstrapSession}; this layer attaches the
  *  status chrome and interactive prompt-only ports. */
-export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetupResult> => {
+export const setupSession = async (
+  deps: SetupSessionDeps,
+  options: { readonly convStore?: ConversationCheckpointStore } = {},
+): Promise<SessionSetupResult> => {
   const runtime = readSessionRuntimeConfig()
   const featureCfg = readCliFeatureConfig(runtime.env, runtime.stdoutIsTTY, process.stderr.isTTY)
   const boot = await bootstrapSession(deps, runtime, featureCfg)
@@ -207,6 +216,8 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     turnStream,
     loadPermissionStore: deps.loadPermissionStore,
     sandboxProfile: runtime.sandboxProfile,
+    ...(options.convStore !== undefined ? { convStore: options.convStore } : {}),
+    envSource: runtime.env,
   })
   // ADR-0269 Phase 3 closure — install the process-level fs-jail decision
   // sink. fs-jail (storage/service.ts) can't import @/stream (slice-fence),
@@ -220,6 +231,9 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
   if (sessionDeps.decisionEmitter !== undefined) {
     setFsJailDecisionSink(sessionDeps.decisionEmitter)
   }
+  const sideConversationPort = buildLegacySideConversationPort({
+    sessionDeps,
+  })
 
   const pills = deps.installPills({
     statusBar,
@@ -277,6 +291,7 @@ export const setupSession = async (deps: SetupSessionDeps): Promise<SessionSetup
     argPrompt: boot.argPrompt,
     systemSource: boot.systemSource,
     refreshSystemPrompt: boot.refreshSystemPrompt,
+    sideConversationPort,
     shutdownMcp: async () => {
       // ADR-0269 Phase 3 closure — clear the fs-jail sink BEFORE MCP
       // teardown so a sibling/re-entered session never inherits this

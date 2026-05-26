@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import type { AgentOutcome } from "../../../../src/agent"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { LifecyclePills } from "../../../../src/apps/cli/lifecycle-pills"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
@@ -186,6 +187,7 @@ const buildSetup = (
     timelinePanel: undefined,
     sessionDeps: {
       llm: llmStub,
+      permission: { mode: "default" },
       signal: new AbortController().signal,
       registry: {
         has: () => false,
@@ -212,6 +214,16 @@ const buildSetup = (
       set: () => undefined,
     },
     refreshSystemPrompt: () => undefined,
+    sideConversationPort: {
+      start: async () =>
+        ({
+          outcome: { messages: [] },
+          answerText: "",
+          inputTokens: 0,
+          outputTokens: 0,
+          toolsAvailable: 0,
+        }) as never,
+    },
     shutdownMcp: async () => undefined,
     // ADR-0301 — `--playbook-trigger` CLI flag echo. The loop spreads this
     // by-presence onto `maybeStartPlaybookTriggerWire({ cliFlag })`; the
@@ -240,62 +252,233 @@ const buildSetup = (
 
 // === module-mock plumbing ====================================================
 
-// We override `runOnce` + `runInteractive` from `@/runner` so the loop body
-// runs end-to-end WITHOUT booting the real agent stack. Other exports of
-// `@/runner` (e.g. SIDE_CHAT_DEFAULT_READ_ONLY) flow through verbatim so
-// downstream loaders are unaffected.
-type RunOnceStub = ReturnType<typeof mock<(input: unknown) => Promise<unknown>>>
-type RunInteractiveStub = ReturnType<typeof mock<(input: unknown) => Promise<unknown>>>
+// We override the Runtime SDK, the legacy runner-session bridge, and the
+// prompt pipeline so the loop runs against a deterministic in-memory session
+// instead of booting the real agent stack or touching raw readline.
+const runtimeCalls = {
+  createRuntime: 0,
+  createSession: 0,
+  prompts: [] as string[],
+  imageCounts: [] as number[],
+  turnRun: 0,
+  sessionClose: 0,
+  runtimeClose: 0,
+}
 
-let runOnceStub: RunOnceStub
-let runInteractiveStub: RunInteractiveStub
-let lastInteractiveInput: {
-  deps?: {
-    automationEngine?: unknown
-    registry?: { has: (name: string) => boolean }
-  }
-  promptSource: { next: (s?: AbortSignal) => Promise<unknown> }
-  wrapTurn?: (
-    run: (deps: unknown) => Promise<{ messages: Message[]; outcome: unknown }>,
-  ) => Promise<{ messages: Message[]; outcome: unknown } | undefined>
-  onTurnEnd?: (e: { messages: Message[]; outcome: unknown }) => void | Promise<void>
-} | null
+const promptQueue: unknown[] = []
 
-let originalRunnerModule: Record<string, unknown> | undefined
+const bridgeState: {
+  options: {
+    sessionDeps?: {
+      automationEngine?: unknown
+      registry?: { has: (name: string) => boolean }
+    }
+  } | null
+  messages: Message[]
+  outcome: AgentOutcome | undefined
+  failWith: Error | undefined
+  closeCalls: number
+} = {
+  options: null,
+  messages: [],
+  outcome: undefined,
+  failWith: undefined,
+  closeCalls: 0,
+}
+
+const makeOutcome = (prompt: string): AgentOutcome => {
+  const messages = [
+    { role: "user", content: [{ type: "text", text: prompt }] },
+    { role: "assistant", content: [{ type: "text", text: `assistant:${prompt}` }] },
+  ] as unknown as Message[]
+  return {
+    reason: "completed",
+    turns: 1,
+    messages,
+  } as AgentOutcome
+}
+
+let originalSdkModule: Record<string, unknown> | undefined
+let originalLegacyHostModule: Record<string, unknown> | undefined
+let originalPromptPipelineModule: Record<string, unknown> | undefined
+
 beforeAll(async () => {
-  const original = await import("@/runner")
-  originalRunnerModule = { ...original }
-  runOnceStub = mock(async () => ({
-    messages: [{ role: "user", content: [{ type: "text", text: "x" }] }] as unknown as Message[],
-    outcome: { id: "stub-once" },
+  const sdk = await import("@/sdk/runtime")
+  const legacyHost = await import("@/host/runtime/session-host")
+  const promptPipelineUrl = new URL(
+    "../../../../src/apps/cli/repl/prompt-pipeline.ts",
+    import.meta.url,
+  )
+  const promptPipeline = await import(promptPipelineUrl.href)
+
+  originalSdkModule = { ...sdk }
+  originalLegacyHostModule = { ...legacyHost }
+  originalPromptPipelineModule = { ...promptPipeline }
+
+  await mock.module("@/host/runtime/session-host", () => ({
+    ...legacyHost,
+    createLegacyRunnerSessionHost: (options: typeof bridgeState.options) => {
+      bridgeState.options = options
+      bridgeState.messages = []
+      bridgeState.outcome = undefined
+      bridgeState.closeCalls = 0
+      return {
+        describe: () => ({
+          sessionId: "session-loop-sdk",
+          permissionMode: "default",
+          capabilityManifest: {
+            approvals: "operator",
+            tools: true,
+            memory: false,
+            artifacts: true,
+            subagents: false,
+            automation: options?.sessionDeps?.automationEngine !== undefined,
+            shellSnapshot: false,
+            transport: "inproc" as const,
+          },
+        }),
+        runTurn: async ({ prompt }: { prompt: string }) => {
+          if (bridgeState.failWith !== undefined) throw bridgeState.failWith
+          const outcome = makeOutcome(prompt)
+          bridgeState.messages = [...outcome.messages] as Message[]
+          bridgeState.outcome = outcome
+          return { outcome, messages: outcome.messages }
+        },
+        peekMessages: () => [...bridgeState.messages],
+        peekLastOutcome: () => bridgeState.outcome,
+        replaceMessages: (messages: readonly Message[]) => {
+          bridgeState.messages = [...messages]
+        },
+        close: async () => {
+          bridgeState.closeCalls += 1
+        },
+      }
+    },
   }))
-  runInteractiveStub = mock(async (input: unknown) => {
-    lastInteractiveInput = input as typeof lastInteractiveInput
-    return undefined
-  })
-  await mock.module("@/runner", () => ({
-    ...original,
-    runOnce: runOnceStub,
-    runInteractive: runInteractiveStub,
+
+  await mock.module("@/sdk/runtime", () => ({
+    ...sdk,
+    createRuntime: async ({
+      host,
+    }: {
+      host: {
+        createSessionHost(config: Record<string, unknown>): Promise<{
+          describe(): {
+            sessionId: string
+            capabilityManifest: Record<string, unknown>
+          }
+          runTurn(args: {
+            prompt: string
+            images?: unknown[]
+            signal?: AbortSignal
+          }): Promise<unknown>
+          close(): Promise<void>
+        }>
+      }
+    }) => {
+      runtimeCalls.createRuntime += 1
+      return {
+        createSession: async (config: Record<string, unknown>) => {
+          runtimeCalls.createSession += 1
+          const hostSession = await host.createSessionHost(config)
+          let prompt = ""
+          let imageCount = 0
+          return {
+            sessionId: hostSession.describe().sessionId,
+            dispatch: async () => ({ revision: 0, seq: 0, events: [] }),
+            subscribe: () => () => undefined,
+            snapshot: async () => ({
+              sessionId: hostSession.describe().sessionId,
+              revision: 0,
+              seq: 0,
+              state: {
+                status: "idle",
+                draftInput: "",
+                permissionMode: "default",
+                messageCount: bridgeState.messages.length,
+              },
+              capabilities: hostSession.describe().capabilityManifest,
+              pendingApproval: null,
+              openArtifacts: [],
+            }),
+            close: async () => {
+              runtimeCalls.sessionClose += 1
+              await hostSession.close()
+            },
+            input: {
+              append: async (text: string, meta?: { readonly images?: readonly unknown[] }) => {
+                prompt = text
+                imageCount = meta?.images?.length ?? 0
+                runtimeCalls.prompts.push(text)
+                runtimeCalls.imageCounts.push(imageCount)
+                return { revision: 1, seq: 1, events: [] }
+              },
+            },
+            turn: {
+              run: async (_meta?: unknown, options?: { signal?: AbortSignal }) => {
+                runtimeCalls.turnRun += 1
+                await hostSession.runTurn({
+                  prompt,
+                  ...(imageCount > 0 ? { images: new Array(imageCount).fill(null) } : {}),
+                  ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+                })
+                return { revision: 2, seq: 2, events: [] }
+              },
+            },
+            identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+            toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+            approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
+          }
+        },
+        close: async () => {
+          runtimeCalls.runtimeClose += 1
+        },
+      }
+    },
+  }))
+
+  await mock.module(promptPipelineUrl.href, () => ({
+    ...promptPipeline,
+    composePromptPipeline: () => ({
+      next: async () => (promptQueue.length > 0 ? (promptQueue.shift() ?? null) : null),
+    }),
   }))
 })
 
-// Restore the real `@/runner` once this file's suite finishes so sibling test
-// files (e.g. headless-second-consumer-hellgate.test.ts) that drive the real
-// runOnce / runInteractive don't inherit our mocks via Bun's process-global
-// module cache. Without this an "all-suites" run sees headless cases 3/6/7/14
-// fail because runOnce returns the stubbed shape.
 afterAll(async () => {
-  if (originalRunnerModule !== undefined) {
-    const snapshot = originalRunnerModule
-    await mock.module("@/runner", () => snapshot)
+  if (originalSdkModule !== undefined) {
+    const snapshot = originalSdkModule
+    await mock.module("@/sdk/runtime", () => snapshot)
   }
+  if (originalLegacyHostModule !== undefined) {
+    const snapshot = originalLegacyHostModule
+    await mock.module("@/host/runtime/session-host", () => snapshot)
+  }
+  if (originalPromptPipelineModule !== undefined) {
+    const promptPipelineUrl = new URL(
+      "../../../../src/apps/cli/repl/prompt-pipeline.ts",
+      import.meta.url,
+    )
+    const snapshot = originalPromptPipelineModule
+    await mock.module(promptPipelineUrl.href, () => snapshot)
+  }
+  mock.restore()
 })
 
 beforeEach(() => {
-  runOnceStub.mockClear()
-  runInteractiveStub.mockClear()
-  lastInteractiveInput = null
+  runtimeCalls.createRuntime = 0
+  runtimeCalls.createSession = 0
+  runtimeCalls.prompts = []
+  runtimeCalls.imageCounts = []
+  runtimeCalls.turnRun = 0
+  runtimeCalls.sessionClose = 0
+  runtimeCalls.runtimeClose = 0
+  promptQueue.length = 0
+  bridgeState.options = null
+  bridgeState.messages = []
+  bridgeState.outcome = undefined
+  bridgeState.failWith = undefined
+  bridgeState.closeCalls = 0
 })
 
 // stderr capture so the loop's `process.stderr.write("\n")` initial-header
@@ -362,7 +545,7 @@ describe("session-loop — type contract shape lock (compile-time)", () => {
 // === one-shot branch (argPrompt set) =========================================
 
 describe("session-loop — one-shot branch (argPrompt set)", () => {
-  test("calls runOnce exactly once with the seed prompt", async () => {
+  test("drives the one-shot branch through the runtime session with the seed prompt", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup("seed-prompt-text")
     const sinks = buildSinks()
@@ -371,12 +554,13 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
       dispatchSlash: async () => false,
       sinks,
     })
-    expect(runOnceStub).toHaveBeenCalledTimes(1)
-    const callArg = runOnceStub.mock.calls[0]?.[0] as { prompt?: string } | undefined
-    expect(callArg?.prompt).toBe("seed-prompt-text")
+    expect(runtimeCalls.createRuntime).toBe(1)
+    expect(runtimeCalls.createSession).toBe(1)
+    expect(runtimeCalls.prompts).toEqual(["seed-prompt-text"])
+    expect(runtimeCalls.turnRun).toBe(1)
   })
 
-  test("does NOT call runInteractive in the one-shot branch", async () => {
+  test("one-shot branch closes both the session and runtime facade", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup("any-prompt")
     const sinks = buildSinks()
@@ -385,7 +569,9 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
       dispatchSlash: async () => false,
       sinks,
     })
-    expect(runInteractiveStub).not.toHaveBeenCalled()
+    expect(runtimeCalls.sessionClose).toBe(1)
+    expect(runtimeCalls.runtimeClose).toBe(1)
+    expect(bridgeState.closeCalls).toBe(1)
   })
 
   test("after a successful turn, fires sinks in order: dashboard → summary → pills", async () => {
@@ -411,14 +597,15 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
     })
     expect(sinks.summaryArgs).toHaveLength(1)
     expect(sinks.summaryArgs[0]?.messages).toEqual([
-      { role: "user", content: [{ type: "text", text: "x" }] },
+      { role: "user", content: [{ type: "text", text: "p" }] },
+      { role: "assistant", content: [{ type: "text", text: "assistant:p" }] },
     ] as unknown as Message[])
   })
 
   test("seed images on FIRST turn — pendingImages is forwarded to runOnce, then drained", async () => {
     // The loop's invariant: surface-scoped pendingImages ride the FIRST turn
     // and are zeroed AFTER the body runs (so a subsequent reuse would see []).
-    // We assert the forward via the runOnce call argument.
+    // We assert the forward via the runtime session append metadata.
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup("p")
     ;(setup as { pendingImages: unknown }).pendingImages = [{ kind: "image_url", url: "data:..." }]
@@ -428,29 +615,31 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
       dispatchSlash: async () => false,
       sinks,
     })
-    const callArg = runOnceStub.mock.calls[0]?.[0] as { pendingImages?: unknown[] } | undefined
-    expect(callArg?.pendingImages).toHaveLength(1)
+    expect(runtimeCalls.imageCounts).toEqual([1])
   })
 })
 
 // === interactive branch (no argPrompt) ========================================
 
 describe("session-loop — interactive branch (no argPrompt)", () => {
-  test("calls runInteractive with a promptSource + wrapTurn + onTurnEnd wiring", async () => {
+  test("consumes the prompt pipeline and dispatches one interactive turn through the runtime session", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup(undefined)
     const sinks = buildSinks()
+    promptQueue.push({ text: "interactive-seed", images: [] }, null)
     await runSessionLoop({
       setup,
       dispatchSlash: async () => false,
       sinks,
       registerExitTeardown: () => undefined,
     })
-    expect(runInteractiveStub).toHaveBeenCalledTimes(1)
-    expect(lastInteractiveInput).not.toBeNull()
-    expect(typeof lastInteractiveInput?.promptSource.next).toBe("function")
-    expect(typeof lastInteractiveInput?.wrapTurn).toBe("function")
-    expect(typeof lastInteractiveInput?.onTurnEnd).toBe("function")
+    expect(runtimeCalls.createRuntime).toBe(1)
+    expect(runtimeCalls.createSession).toBe(1)
+    expect(runtimeCalls.prompts).toEqual(["interactive-seed"])
+    expect(runtimeCalls.turnRun).toBe(1)
+    expect(sinks.events).toContain("dashboard")
+    expect(sinks.events).toContain("summary")
+    expect(sinks.events).toContain("pills")
   })
 
   test("QUANTA_AUTOMATION=on wires a live automation slot and exposes automation_update", async () => {
@@ -466,15 +655,15 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
         sinks,
         registerExitTeardown: () => undefined,
       })
-      expect(lastInteractiveInput?.deps?.automationEngine).toBeDefined()
-      expect(lastInteractiveInput?.deps?.registry?.has("automation_update")).toBe(true)
+      expect(bridgeState.options?.sessionDeps?.automationEngine).toBeDefined()
+      expect(bridgeState.options?.sessionDeps?.registry?.has("automation_update")).toBe(true)
     } finally {
       if (prev === undefined) delete process.env.QUANTA_AUTOMATION
       else process.env.QUANTA_AUTOMATION = prev
     }
   })
 
-  test("does NOT call runOnce in the interactive branch", async () => {
+  test("empty prompt source exits without dispatching a turn", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup(undefined)
     const sinks = buildSinks()
@@ -484,7 +673,8 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
       sinks,
       registerExitTeardown: () => undefined,
     })
-    expect(runOnceStub).not.toHaveBeenCalled()
+    expect(runtimeCalls.prompts).toEqual([])
+    expect(runtimeCalls.turnRun).toBe(0)
   })
 
   test("registerExitTeardown registers a callback that disposes pills + tears down status bar", async () => {
@@ -506,82 +696,67 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
     expect(setup.__pillsDisposeCalls.n).toBe(1)
   })
 
-  test("wrapTurn forwards the driver-supplied `run(turnDeps)` to runOneTurn body", async () => {
+  test("registerReplaceMessages keeps the legacy host history in sync", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup(undefined)
     const sinks = buildSinks()
+    let replaceMessages: ((messages: ReadonlyArray<Message>) => void) | undefined
     await runSessionLoop({
       setup,
       dispatchSlash: async () => false,
       sinks,
       registerExitTeardown: () => undefined,
+      registerReplaceMessages: (fn) => {
+        replaceMessages = fn
+      },
     })
-    // Now simulate the driver: it calls wrapTurn with a `run` lambda.
-    const runCalls: Array<{ signal: AbortSignal | undefined }> = []
-    const runLambda = async (
-      turnDeps: unknown,
-    ): Promise<{ messages: Message[]; outcome: unknown }> => {
-      const d = turnDeps as { signal?: AbortSignal }
-      runCalls.push({ signal: d.signal })
-      return {
-        messages: [
-          { role: "user", content: [{ type: "text", text: "wrapped" }] },
-        ] as unknown as Message[],
-        outcome: { id: "wrap" },
-      }
-    }
-    const wrapped = await lastInteractiveInput?.wrapTurn?.(runLambda)
-    expect(wrapped?.messages).toEqual([
-      { role: "user", content: [{ type: "text", text: "wrapped" }] },
-    ] as unknown as Message[])
-    expect(runCalls).toHaveLength(1)
-    expect(runCalls[0]?.signal).toBeDefined()
+    const nextMessages = [
+      { role: "user", content: [{ type: "text", text: "rewound" }] },
+    ] as unknown as Message[]
+    replaceMessages?.(nextMessages)
+    expect(bridgeState.messages).toEqual(nextMessages)
   })
 
-  test("wrapTurn fires renderTurnDashboard + renderAndResetSummary after success", async () => {
+  test("interactive success renders dashboard and summary exactly once for one prompt", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup(undefined)
     const sinks = buildSinks()
+    promptQueue.push("ok", null)
     await runSessionLoop({
       setup,
       dispatchSlash: async () => false,
       sinks,
       registerExitTeardown: () => undefined,
     })
-    await lastInteractiveInput?.wrapTurn?.(async () => ({
-      messages: [],
-      outcome: { id: "x" },
-    }))
-    expect(sinks.events).toContain("dashboard")
-    expect(sinks.events).toContain("summary")
+    expect(sinks.events.filter((event) => event === "dashboard")).toHaveLength(1)
+    expect(sinks.events.filter((event) => event === "summary")).toHaveLength(1)
   })
 
-  test("onTurnEnd fires flushLifecyclePills", async () => {
+  test("interactive success flushes lifecycle pills on turn completion", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup(undefined)
     const sinks = buildSinks()
+    promptQueue.push("ok", null)
     await runSessionLoop({
       setup,
       dispatchSlash: async () => false,
       sinks,
       registerExitTeardown: () => undefined,
     })
-    await lastInteractiveInput?.onTurnEnd?.({ messages: [], outcome: { id: "x" } })
     expect(sinks.events).toContain("pills")
   })
 
-  test("renderTurnError fires when wrapTurn body throws a non-abort error", async () => {
+  test("renderTurnError fires when the runtime-backed turn throws", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup(undefined)
     const sinks = buildSinks()
+    promptQueue.push("explode", null)
+    bridgeState.failWith = new Error("boom")
     await runSessionLoop({
       setup,
       dispatchSlash: async () => false,
       sinks,
       registerExitTeardown: () => undefined,
-    })
-    await lastInteractiveInput?.wrapTurn?.(async () => {
-      throw new Error("boom")
     })
     expect(sinks.events).toContain("error")
     expect((sinks.errs[0] as Error).message).toBe("boom")

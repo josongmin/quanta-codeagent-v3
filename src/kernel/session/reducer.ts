@@ -1,8 +1,11 @@
+import type { ImageBlock } from "@/llm"
 import type { ApprovalRespondCommand, SessionCommand, SessionEvent } from "@/protocol/session"
 import { SessionProtocolValidationError, SessionRevisionConflictError } from "@/protocol/session"
 import { type KernelSessionState, toSessionStateView } from "./state"
 
-type HostAction = { readonly kind: "none" } | { readonly kind: "run_turn"; readonly prompt: string }
+type HostAction =
+  | { readonly kind: "none" }
+  | { readonly kind: "run_turn"; readonly prompt: string; readonly images: readonly ImageBlock[] }
 
 export interface ReducerResult {
   readonly state: KernelSessionState
@@ -49,6 +52,7 @@ export const reduceSessionCommand = (
       const nextState = withRevision({
         ...state,
         draftInput: appendDraft(state.draftInput, command.text),
+        draftImages: [...state.draftImages, ...(command.images ?? [])],
       })
       return {
         state: nextState,
@@ -148,7 +152,7 @@ export const reduceSessionCommand = (
       })
       return {
         state: nextState,
-        hostAction: { kind: "run_turn", prompt: state.draftInput },
+        hostAction: { kind: "run_turn", prompt: state.draftInput, images: state.draftImages },
         events: [
           {
             eventId: crypto.randomUUID(),

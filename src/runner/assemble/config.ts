@@ -14,14 +14,14 @@ import type {
 } from "./session-state"
 
 /**
- * Surface-agnostic per-turn `AgentConfig` assembly — relocated verbatim from
- * `apps/cli/config-assemble.ts` (ADR-0024 split). PURE composition: every
+ * Surface-agnostic per-turn `AgentConfig` assembly — relocated from the
+ * CLI session/setup composition seam (ADR-0024 split). PURE composition: every
  * conditional default-OFF spread is preserved byte-for-byte from the prior
  * inline block. The function reads NO env/argv — the caller resolves all
  * knobs and passes them as {@link SessionDeps}.
  *
- * `apps/cli/config-assemble.ts` is kept as a re-export shim so existing
- * importers (`index.ts`, tests) are unaffected.
+ * Surface callers should import this module directly or re-expose it from
+ * their own internal barrel. There is no app-surface shim here anymore.
  */
 
 /** Inputs the per-turn `AgentConfig` is assembled from. Grouping the optional
@@ -223,30 +223,28 @@ const buildPromptVariantSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(() => {
     const state = d.toolProfileState
     return state !== undefined
-    ? {
-        toolProfile: {
-          resolver: state.resolver,
-          ...(state.defaultName !== undefined
-            ? { defaultName: state.defaultName }
-            : {}),
-          activeName: () => state.get() ?? state.defaultName ?? "write",
-        },
-      }
-    : {}
+      ? {
+          toolProfile: {
+            resolver: state.resolver,
+            ...(state.defaultName !== undefined ? { defaultName: state.defaultName } : {}),
+            activeName: () => state.get() ?? state.defaultName ?? "write",
+          },
+        }
+      : {}
   })(),
   ...(() => {
     const state = d.identityModeState
     return state !== undefined
-    ? {
-        identityModeVariant: {
-          registry: state.registry,
-          ...(state.perTurnReminderEnabled !== undefined
-            ? { perTurnReminderEnabled: state.perTurnReminderEnabled }
-            : {}),
-          activeMode: () => state.get() ?? state.defaultMode ?? "default",
-        },
-      }
-    : {}
+      ? {
+          identityModeVariant: {
+            registry: state.registry,
+            ...(state.perTurnReminderEnabled !== undefined
+              ? { perTurnReminderEnabled: state.perTurnReminderEnabled }
+              : {}),
+            activeMode: () => state.get() ?? state.defaultMode ?? "default",
+          },
+        }
+      : {}
   })(),
 })
 

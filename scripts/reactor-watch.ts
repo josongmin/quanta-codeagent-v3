@@ -45,8 +45,8 @@ import {
   buildToolingCore,
   buildVerifyGuardConfigCore,
   parseRecallTiers,
-  type SessionDeps,
 } from "@/runner/assemble"
+import type { SessionDeps } from "@/runner/assemble/config"
 import { buildSharedExecutionPlaneSessionDeps } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import { resolveSandboxProfileFromEnv } from "@/runtime"

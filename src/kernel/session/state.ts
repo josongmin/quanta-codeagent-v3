@@ -1,3 +1,4 @@
+import type { ImageBlock } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
@@ -18,6 +19,7 @@ export interface KernelSessionState {
   readonly seq: number
   readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
   readonly draftInput: string
+  readonly draftImages: readonly ImageBlock[]
   readonly permissionMode: string
   readonly identityMode?: string
   readonly toolProfile?: string
@@ -44,6 +46,7 @@ export const createKernelSessionState = (
   seq: 0,
   status: "idle",
   draftInput: "",
+  draftImages: [],
   permissionMode: input.permissionMode,
   ...(input.identityMode !== undefined ? { identityMode: input.identityMode } : {}),
   ...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),

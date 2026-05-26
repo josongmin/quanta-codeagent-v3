@@ -1,0 +1,60 @@
+id: github-webhook-host-scaffold
+title: GitHub App webhook host — Tier 1 port-only scaffold
+section: 9
+subsystem: GitHub integration (ADR-0312)
+order: 312
+maturity: L1
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [daemon]
+configurable: planned
+owners: ["@songmin"]
+labels: ["surface:cli", "integration:github", "scaffold"]
+depends_on: [github-actions-trigger-adapter]
+purpose: |
+  Tier 1 self-hosted webhook receiver port-only scaffold. Defines the seam
+  for HMAC-SHA256 X-Hub-Signature-256 verification (constant-time compare,
+  per-installation secret lookup) and the `createWebhookEventSource`
+  factory shape so the agent loop can later swap from `event-source-actions`
+  (Tier 0 1-shot file read) to a long-lived HTTP host without touching the
+  reactor or the trigger normalizer.
+
+  `createWebhookEventSource` deliberately throws `NOT_IMPLEMENTED` until the
+  host decision (Cloudflare Worker / Fastify / Hono / Smee proxy) is made;
+  the signature verifier and the port surface ship now so signature
+  hellgate batteries can ratchet against the API ahead of the host pick.
+
+  Mechanism vs policy split: `signature-verify` is reusable across any
+  webhook source (GitLab uses the same HMAC-SHA256 shape with a different
+  header name); the host-binding is what differs and is left for the
+  follow-up.
+evidence:
+  code:
+    - src/integrations/github/webhook-server.ts
+    - src/integrations/github/signature-verify.ts
+  adrs: [312]
+  tests:
+    unit:
+      - tests/unit/integrations/github/signature-verify.test.ts
+      - tests/unit/integrations/github/signature-verify-attack-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Webhook host implementation choice (Cloudflare Worker / Fastify /
+    Hono / Smee) deferred — Tier 0 (ADR-0311) covers the dominant use
+    case at zero ops cost. Picking a host before usage signal would lock
+    in a runtime contract prematurely.
+  promotion_path: |
+    Once Tier 0 surfaces a real latency / non-Actions-host requirement,
+    pick a host runtime, implement `createWebhookEventSource` against
+    the existing port shape, wire the installation-secret store, and
+    promote this slice to L3.
+notes: |
+  Signature-verify lives at the integration-package boundary (not in
+  `src/security/`) because the verifier is webhook-shaped — it expects the
+  full raw body + a header value, not a generic blob. A separate
+  `signature-verify-hmac-sha256` slice can be extracted later when a
+  second consumer (GitLab / Bitbucket adapter) appears.

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { RetryingLLM } from "@/agent"
 import type { LLMPort } from "@/llm"
-import { buildSummarizerLlm, compactionDep } from "../../src/apps/cli/internal"
+import { buildSummarizerLlm } from "../../src/apps/cli/internal"
+import { compactionDep } from "../../src/runner/assemble/config"
 
 /**
  * CLI dedicated-compaction-summarizer knob (ADR-0011) contract test.

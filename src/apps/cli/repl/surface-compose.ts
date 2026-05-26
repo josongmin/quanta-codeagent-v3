@@ -8,7 +8,6 @@ import {
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
 import type { Message } from "@/llm"
-import { ToolRegistry } from "@/tool"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import {
   loadSessionById,
@@ -17,9 +16,9 @@ import {
   saveSessionById,
 } from "@/session"
 import { logger } from "@/shared"
+import { type Tool, ToolRegistry } from "@/tool"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
-import { assembleConfig } from "../internal"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
@@ -37,7 +36,6 @@ import {
 } from "./playbook-trigger-surface-seam"
 import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
-import { buildSideConversationPort } from "./side-conv-wire"
 import { buildSkillsCallback } from "./skills-surface"
 import { buildReplSlashCtx, type ReplaySlashState, type ReplSlashCtx } from "./slash-surface"
 
@@ -334,7 +332,7 @@ export const composeSurfaceWires = (
       },
       logger,
     })
-    const wrapped = setup.sessionDeps.registry.all().map((t) => recorder.wrapTool(t))
+    const wrapped = setup.sessionDeps.registry.all().map((t: Tool) => recorder.wrapTool(t))
     setup.sessionDeps.registry = new ToolRegistry(wrapped)
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
@@ -377,13 +375,9 @@ export const composeSurfaceWires = (
     planStore: setup.planStore,
     branchProgress: setup.branchProgress,
     getHistory: () => state.history,
-    // ADR-0309 — `assembleConfig` is captured ONCE here (the only place the
-    // CLI surface code touches it for the `/side` path). The slash-surface
-    // layer downstream sees only the typed {@link SideConversationPort}.
-    sideConvPort: buildSideConversationPort({
-      deps: setup.sessionDeps,
-      assembleConfig,
-    }),
+    // The setup seam captures `SessionDeps` + `assembleConfig` once and
+    // exposes the typed side-conversation port only.
+    sideConvPort: setup.sideConversationPort,
     abortSignal: setup.abort.signal,
     debugHandle: setup.debugHandle,
     llm: setup.llm,
@@ -417,7 +411,9 @@ export const composeSurfaceWires = (
           onIdentityModeChange: setup.refreshSystemPrompt,
         }
       : {}),
-    ...(setup.sessionDeps.focusChain !== undefined ? { focusChain: setup.sessionDeps.focusChain } : {}),
+    ...(setup.sessionDeps.focusChain !== undefined
+      ? { focusChain: setup.sessionDeps.focusChain }
+      : {}),
     textInbox,
   })
 

@@ -7,8 +7,9 @@
  * Enforced by biome `noRestrictedImports` (see `biome.json` override) +
  * `tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts`.
  *
- * The headless surface drives the SAME `@/host/bootstrap` + `@/runner` cores
- * the CLI uses — proving the host layer is reusable. Every env / argv /
+ * The headless surface drives the SAME `@/host/bootstrap` + internal
+ * `@/runner/*` cores the CLI uses — proving the host layer is reusable
+ * without depending on the public runner barrels. Every env / argv /
  * terminal-bound seam is injected by the caller as plain data (no
  * `process.env` / `process.argv` reads in the headless slice itself).
  */
@@ -16,7 +17,6 @@
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { Message, StreamEvent } from "@/llm"
-import type { SessionDeps } from "@/runner/assemble"
 import type { AgentEvent } from "@/stream"
 
 /** A pre-programmed assistant turn the fake LLM will replay. Either supply
@@ -60,6 +60,26 @@ export interface HeadlessRunInput {
   readonly subagentConfig?: AgentConfig["subagent"]
 }
 
+/** Public proof that the second-consumer surface got the same reusable
+ *  execution-plane and memory-auto wires without leaking the internal
+ *  `SessionDeps` bag across the headless public seam. */
+export interface HeadlessRuntimeWires {
+  readonly executionPlane: {
+    readonly conversationCheckpoint: boolean
+    readonly fork: boolean
+    readonly forkSession: boolean
+    readonly delegation: boolean
+    readonly subagentBackground: boolean
+    readonly autoBackground: boolean
+  }
+  readonly memoryAuto: {
+    readonly sessionCtx: boolean
+    readonly stage1OutputsStore: boolean
+    readonly memoryConsolidator: boolean
+    readonly memoryConsolidatorEnabled: boolean
+  }
+}
+
 /** Result of {@link runHeadlessOnce}. The shape is intentionally LEANER
  *  than the CLI's `SessionSetupResult` — every TTY/UI chrome field
  *  (`statusBar`, `turnIndicator`, `costPanel`, `branchProgress`,
@@ -68,10 +88,11 @@ export interface HeadlessRunInput {
  *  bootstrap result + per-turn outcome.
  *
  *  Field-count contract: `runHeadlessOnce` returns the FULL
- *  {@link SessionBootstrapResult} shape PLUS `outcome` + `messages`, so the
- *  count is bootstrap-fields + 2 — strictly greater than the bootstrap
- *  result's own field count. This is the CASE-5 invariant the hellgate
- *  pins (any future bootstrap field gets carried through automatically). */
+ *  {@link SessionBootstrapResult} shape PLUS `outcome` + `messages` +
+ *  `events` + `wires`, so the count is bootstrap-fields + 4 — strictly
+ *  greater than the bootstrap result's own field count. This is the CASE-5
+ *  invariant the hellgate pins (any future bootstrap field gets carried
+ *  through automatically). */
 export interface HeadlessRunResult extends SessionBootstrapResult {
   /** Per-turn outcome from `@/runner#runOnce`. Carries `reason` (closed enum)
    *  plus the structured stop-category and timing fields the runner emits. */
@@ -82,8 +103,7 @@ export interface HeadlessRunResult extends SessionBootstrapResult {
    *  the fake stream port. Surface tests assert on this; production
    *  headless callers may ignore the field. */
   readonly events: readonly AgentEvent[]
-  /** Fully assembled per-turn deps for the run. Exposed so second-consumer
-   *  tests can prove shared execution/memory/automation wires are present
-   *  without importing CLI-only surfaces. */
-  readonly sessionDeps: SessionDeps
+  /** Lean proof that reusable execution/memory wires were mounted without
+   *  exposing the full internal `SessionDeps` bag on the headless public API. */
+  readonly wires: HeadlessRuntimeWires
 }

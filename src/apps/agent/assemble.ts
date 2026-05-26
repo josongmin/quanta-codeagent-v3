@@ -30,6 +30,7 @@ import {
   type ModePolicy,
   type RunMode,
 } from "@/agent"
+import type { LegacySessionDepsSource } from "@/host/runtime/session-host"
 
 /** Mode-preset-extra payloads (RFC may-22 Phase 4+). Each field is OPTIONAL
  *  on `AssembleRequest` so legacy callers (the assemble unit test, anything
@@ -109,7 +110,7 @@ export interface AssembleRequest {
   /** Caller-supplied AgentConfig core (llm, registry, stream, permission,
    *  messages, system, maxTurns, …). The assembler does NOT construct these
    *  — they are surface-specific (REPL stdin, bench sandbox, etc.). */
-  base: Omit<AgentConfig, "modePolicy" | "budgetMeter">
+  base: LegacySessionDepsSource
   /** Operator-requested budget dials. Defaults from `BUDGET_PRESETS[mode]`,
    *  clamped to `MODE_PRESETS[mode].budgetCaps` if any. */
   dials?: Partial<BudgetDials>

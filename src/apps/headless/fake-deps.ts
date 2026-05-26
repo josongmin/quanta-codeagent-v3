@@ -5,12 +5,12 @@
  * `@/apps/bench` / `@/apps/agent` imports (enforced by biome + hellgate).
  */
 
+import type { AgentConfig } from "@/agent"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { StructuredLogger } from "@/observability"
-import type { AgentConfig } from "@/agent"
-import type { Tooling } from "@/runner/assemble"
-import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate"
+import type { Tooling } from "@/runner/assemble/tooling"
+import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/resume-fsm"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, ToolRegistry } from "@/tool"
 

@@ -46,6 +46,7 @@ import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type { Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
+import { knobsForReport, resolveBenchKnobs } from "./knobs-bench"
 import { buildRepairContext } from "./repair/context"
 import { runRepairRounds } from "./repair/index"
 import type {
@@ -905,6 +906,54 @@ class LastVerifyCmdTap implements StreamPort {
 }
 
 /**
+ * Emit ONE `knobs_applied` event onto the given stream, carrying the
+ * bench-surface knob posture resolved from `process.env`. Fail-soft: any
+ * resolution error (a malformed env value that throws in `parse`) is caught
+ * locally so a measurement run can never be aborted by a telemetry call. With
+ * an empty registry the event still fires with `knobs:{}` and
+ * `costMultiplier:0` (matrix budget contract: Σ(active) = 0 when none active).
+ *
+ * Cost computation: Σ of each ACTIVE knob's `costMultiplier` field (default 1
+ * when the knob does not declare one). Matches the contract documented in
+ * `tools/swebench-matrix.ts#estimateAxesCost` per-condition product is summed
+ * across a sweep; here we project ONE condition (this run) so the sum is just
+ * Σ over active knobs. A zero-cost return ⇒ no knob active.
+ *
+ * Default-OFF byte-identical: the only on-wire side effect is one `emit` call;
+ * `NullStream.emit` is a no-op so a run without observation produces zero new
+ * bytes (and the existing recorder maps the event onto the `recovery`
+ * trajectory family, no new TrajectoryKind required).
+ */
+const emitKnobsApplied = (stream: StreamPort, envVars: NodeJS.ProcessEnv): void => {
+  try {
+    const state = resolveBenchKnobs({ envVars })
+    const knobs = knobsForReport(state)
+    let cost = 0
+    for (const id of Object.keys(knobs)) {
+      const knob = state.knobs.get(id)
+      const m = knob?.costMultiplier
+      cost += typeof m === "number" && m > 0 ? m : 1
+    }
+    const event: AgentEvent = {
+      type: "knobs_applied",
+      surface: "bench",
+      knobs,
+      preset: state.preset !== undefined ? state.preset : null,
+      costMultiplier: cost,
+    }
+    stream.emit(event)
+  } catch {
+    // Telemetry must NEVER abort a bench run — a malformed env value that
+    // throws in a knob's `parse` is a measurement-data concern, not a
+    // run-correctness one. The error already surfaces via the next
+    // `resolveBenchKnobs` call (e.g. `buildConfig` → `applyBenchKnobs`), so
+    // we deliberately swallow here. The recorder receives no event in this
+    // case (degenerate but safe — the report's `knobs` section still
+    // captures the same posture at write time).
+  }
+}
+
+/**
  * Run the agent ONCE in the sandbox (no git wrap — caller controls snapshot
  * boundaries). Returns the cumulative diff + turns + lastVerifyCmd captured
  * from the stream. Used both by the single-pass path and by the per-round
@@ -926,6 +975,12 @@ const runAgentOnce = async (
   reproHint: string | undefined,
 ): Promise<RunOnceResult> => {
   const tap = new LastVerifyCmdTap(w.stream)
+  // Knob telemetry (2026-05-26): emit ONE `knobs_applied` event per
+  // runAgent invocation. In the repair orchestrator each round calls this
+  // helper, so each round produces its own trajectory line (the env doesn't
+  // change between rounds, so the lines are identical — useful as a
+  // boundary marker).
+  emitKnobsApplied(tap, process.env)
   const outcome = await runAgent(
     buildConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint, reproHint),
   )
@@ -958,6 +1013,10 @@ const runAgentPhase = async (
     instance.swebench?.baseCommit,
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
+      // Knob telemetry: emit once per phase entry (matches the contract
+      // documented on `emitKnobsApplied`). The single-pass path bypasses
+      // `runAgentOnce`, so the emit lives here directly.
+      emitKnobsApplied(w.stream, process.env)
       const outcome = await runAgent(
         buildConfig(
           instance,

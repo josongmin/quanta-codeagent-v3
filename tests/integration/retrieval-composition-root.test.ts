@@ -19,13 +19,13 @@ import { runAgent } from "@/agent"
 import { InMemoryStore, type MemoryEntry, type MemoryQuery } from "@/memory"
 import { identityReranker, RerankRegistry } from "@/retrieval"
 import {
-  assembleConfig,
   buildRetrievalStackCore,
   type LexicalHit,
   type RetrievalStack,
   rankWithRetrievalStack,
   runLocalizeHybrid,
 } from "@/runner/assemble"
+import { assembleConfig } from "@/runner/assemble/config"
 import { baseConfig, FakeLLM, text } from "./_harness"
 
 // ─── Default-OFF: legacy callers see ZERO change ─────────────────────────

@@ -1,24 +1,9 @@
 import type { CapabilityExpectation, CapabilityManifest } from "@/protocol/session"
 import { normalizeCapabilityManifest, SessionProtocolValidationError } from "@/protocol/session"
-import type { SessionDeps } from "@/runner/assemble"
 
-export const buildCapabilityManifestFromSessionDeps = (deps: SessionDeps): CapabilityManifest =>
-  normalizeCapabilityManifest({
-    approvals: "operator",
-    tools: deps.registry.all().length > 0,
-    memory:
-      deps.store !== undefined ||
-      deps.memoryConsolidator !== undefined ||
-      deps.memoryConfig !== undefined,
-    artifacts: true,
-    subagents:
-      deps.subagentConfig !== undefined ||
-      deps.delegation !== undefined ||
-      deps.subagentBackground !== undefined,
-    automation: deps.automationEngine !== undefined,
-    shellSnapshot: deps.shellSnapshot !== undefined,
-    transport: "inproc",
-  })
+export const buildCapabilityManifest = (
+  manifest: Partial<CapabilityManifest> | undefined,
+): CapabilityManifest => normalizeCapabilityManifest(manifest)
 
 export const assertCapabilityExpectation = (
   expected: CapabilityExpectation | undefined,

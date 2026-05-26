@@ -24,7 +24,8 @@
  *
  * Slice boundary: this file may import `@/agent`, `@/llm`, `@/permission`,
  * `@/runner`, `@/shared`, `@/tool`, `@/stream`, and the sibling assemble.ts.
- * NO imports from app siblings or other mode-preset siblings.
+ * The app-owned bench eval surface is reached lazily at runtime to preserve
+ * the thin-surface static import fence.
  */
 
 import type { AgentConfig } from "@/agent"
@@ -32,7 +33,6 @@ import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { loadSelectedInstances, runBatch, writeArtifacts } from "@/runner/batch/core"
 import { loadCorpus as defaultLoadCorpus } from "@/runner/batch/corpus"
-import { runInstance as defaultRunInstance } from "@/runner/batch/eval"
 import type { Instance, InstanceResult } from "@/runner/batch/types"
 import { logger, runtimeConfig } from "@/shared"
 import type { StreamPort } from "@/stream"
@@ -53,6 +53,7 @@ const BATCH_DEFAULT_MAX_TURNS = 60
  *  loop; instances exceeding this consistently fail anyway (test runner
  *  hang or pathological compaction). */
 const BATCH_DEFAULT_TIMEOUT_MS = 120_000
+const BENCH_EVAL_MODULE = "@/apps/bench/eval"
 
 const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
   const llm: LLMPort = req.base.llm
@@ -85,21 +86,22 @@ const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budge
  *  shape inside this preset. */
 const resolveRunInstance = (
   req: AssembleRequest,
-): ((instance: Instance) => Promise<InstanceResult>) => {
+): Promise<(instance: Instance) => Promise<InstanceResult>> => {
   if (req.seams?.runInstance) {
-    return req.seams.runInstance as (instance: Instance) => Promise<InstanceResult>
+    return Promise.resolve(req.seams.runInstance as (instance: Instance) => Promise<InstanceResult>)
   }
-  // The real runInstance requires `deps` (llm, maxTurns, timeoutMs). Build
-  // those from req.base + dials so a production call wires identically to
-  // `bun run bench`.
-  const cfg = runtimeConfig()
-  // Operator overrides flow through runtime-config (frozen at startup); the
-  // mode preset default (60 turns / 120s per instance) is the structural fall-
-  // back when neither the AgentConfig nor env is set.
-  const maxTurns = req.base.maxTurns ?? cfg.maxTurnsBatch ?? BATCH_DEFAULT_MAX_TURNS
-  const timeoutMs = cfg.benchTimeoutMs ?? BATCH_DEFAULT_TIMEOUT_MS
-  return (instance: Instance) =>
-    defaultRunInstance(instance, { llm: req.base.llm, maxTurns, timeoutMs })
+  return import(BENCH_EVAL_MODULE).then(({ runInstance }) => {
+    // The real runInstance requires `deps` (llm, maxTurns, timeoutMs). Build
+    // those from req.base + dials so a production call wires identically to
+    // `bun run bench`.
+    const cfg = runtimeConfig()
+    // Operator overrides flow through runtime-config (frozen at startup); the
+    // mode preset default (60 turns / 120s per instance) is the structural fall-
+    // back when neither the AgentConfig nor env is set.
+    const maxTurns = req.base.maxTurns ?? cfg.maxTurnsBatch ?? BATCH_DEFAULT_MAX_TURNS
+    const timeoutMs = cfg.benchTimeoutMs ?? BATCH_DEFAULT_TIMEOUT_MS
+    return (instance: Instance) => runInstance(instance, { llm: req.base.llm, maxTurns, timeoutMs })
+  })
 }
 
 /** Cast the seam-provided loadCorpus (typed `unknown[]` on the seams bag) back
@@ -136,7 +138,7 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   // cfg is informational here (the bench driver builds its own).
   assembleAgentConfig({ ...req, base: stubBase(req) })
 
-  const runOne = resolveRunInstance(req)
+  const runOne = await resolveRunInstance(req)
   const selection = await loadSelectedInstances({
     corpus,
     ...(req.batch?.instance !== undefined ? { filter: req.batch.instance } : {}),

@@ -78,6 +78,8 @@
       "@/git/*": ["./src/git/*"],
       "@/reactor": ["./src/reactor/index.ts"],
       "@/reactor/*": ["./src/reactor/*"],
+      "@/integrations/github": ["./src/integrations/github/index.ts"],
+      "@/integrations/github/*": ["./src/integrations/github/*"],
       "@/plugin-isolation": ["./src/plugin-isolation/index.ts"],
       "@/plugin-isolation/*": ["./src/plugin-isolation/*"],
       "@/scheduler": ["./src/scheduler/index.ts"],

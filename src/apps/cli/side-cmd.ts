@@ -42,8 +42,8 @@ import {
   SIDE_CHAT_DEFAULT_READ_ONLY,
   SIDE_CHAT_MAX_TURNS_CAP,
   type SideChatContextInheritance,
-  type SideConversationPort,
-} from "@/runner"
+} from "@/runner/orchestrate/side-chat"
+import type { SideConversationPort } from "@/runner/side-conversation-port"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /**

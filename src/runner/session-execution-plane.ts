@@ -1,4 +1,12 @@
-import { defaultConversationCheckpointStore, type ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
+import {
+  buildSubagentForkOnAccept,
+  defaultProposeHandler,
+  defaultStuckDetector,
+} from "@/agent/auto-background"
+import {
+  type ConversationCheckpointStore,
+  defaultConversationCheckpointStore,
+} from "@/agent/conversation-checkpoint"
 import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import type {
@@ -6,11 +14,6 @@ import type {
   SubagentResult,
   SubagentStatus,
 } from "@/agent/subagent-background"
-import {
-  buildSubagentForkOnAccept,
-  defaultProposeHandler,
-  defaultStuckDetector,
-} from "@/agent/auto-background"
 import { defaultBackgroundSubagentScheduler } from "@/agent/subagent-background"
 import {
   defaultJsonlSchedulerStore,
@@ -24,7 +27,7 @@ import {
   wrapSubagentRunner,
 } from "@/agent/subagent-typed"
 import type { Message } from "@/llm"
-import { assembleConfig, type SessionDeps } from "./assemble"
+import { assembleConfig, type SessionDeps } from "./assemble/config"
 
 export interface SharedExecutionPlaneArgs {
   readonly history: readonly Message[]

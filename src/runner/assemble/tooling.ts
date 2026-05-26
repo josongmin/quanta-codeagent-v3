@@ -18,9 +18,8 @@ import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
  */
 
 /** The memory store + tool registry + per-run config knobs, resolved once.
- *  Same shape as `apps/cli/config-assemble.ts#Tooling` — re-exported through
- *  the runner barrel so a future Web/Tauri surface depends on the slice
- *  contract, not the CLI file. */
+ *  Re-exported through the runner barrel so a future Web/Tauri surface
+ *  depends on the slice contract, not a CLI-local shim. */
 export interface Tooling {
   store: PersistentStorePort | undefined
   embedder: EmbedderPort | undefined

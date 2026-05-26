@@ -1,0 +1,59 @@
+id: mention-filter-trust-scope
+title: Mention filter with trust-scope + code-block exclusion
+section: 9
+subsystem: GitHub integration (ADR-0314)
+order: 314
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [daemon, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "integration:github"]
+depends_on: [github-actions-trigger-adapter, pr-output-sink-redaction]
+purpose: |
+  Pure trigger-phrase matcher. Pulled out of the actions adapter so the
+  matching policy can be tested in isolation against adversarial bodies
+  and shared between Tier 0 (ADR-0311) and Tier 1 (ADR-0312) event
+  sources.
+
+  Trust scope defaults to `collaborator` — a normalized event whose
+  author_association is anything but COLLABORATOR / OWNER / MEMBER is
+  dropped before the mention regex runs. Bot senders (`user.type === "Bot"`
+  or login ending in `[bot]`) are always dropped. The self-loop marker
+  inserted by `pr-output-sink-redaction` (ADR-0313,
+  `<!-- quanta:idempotency=… -->`) matches a literal substring check that
+  drops the comment before the trigger regex; without this, the agent's
+  own follow-up edits would re-trigger the agent.
+
+  The matcher walks the body once, tracking three exclusion states with
+  closed precedence:
+
+    1. Fenced code blocks  (```  …  ```)
+    2. Inline code spans   (`  …  `)
+    3. Blockquote lines    (lines starting with `>`)
+
+  Mentions inside ANY of the three exclusion contexts are ignored so a
+  PR description that quotes "do not @quanta this" or that posts the
+  trigger inside an example block never wakes the agent. All matchers
+  are concrete substring / regex predicates — no heuristics, no fuzzy
+  matching, no LLM-judged intent. (Per
+  [[no-heuristics-only-validated]].)
+evidence:
+  code:
+    - src/integrations/github/mention-filter.ts
+  adrs: [314]
+  tests:
+    unit:
+      - tests/unit/integrations/github/mention-filter.test.ts
+      - tests/unit/integrations/github/mention-filter-trust-scope-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Trust scope is a single configured enum (default `collaborator`) — not
+  a heuristic. Promotion to `public` (anyone-can-mention) is a deliberate
+  policy decision that flips a config value; the matcher never tries to
+  infer trust from prior interactions or comment count.
