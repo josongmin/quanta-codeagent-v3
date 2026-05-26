@@ -1,14 +1,14 @@
-# ADR-0319 — Typed history event store (foundation slice)
+# ADR-0320 — Typed history event store (foundation slice)
 
 Status: accepted
 Date: 2026-05-27
 
-> **Numbering note.** This ADR was drafted as `0300` per the originating
-> task. ADR-0300 was already taken by
-> `0300-per-tool-granular-registry.md` (in-flight user track), so per
-> the project's user-deference renumber policy
-> (`memory/adr-collision-policy-2026-05-25.md`) our slice renumbers to
-> the next free slot, `0319`. The user's ADR-0300 stays at 0300.
+> **Numbering note.** Drafted as `0300`, collided with
+> `0300-per-tool-granular-registry.md` (in-flight user track), then
+> with `0319-system-prompt-vision-priority.md` during parallel landing.
+> Final slot: `0320` per the user-deference renumber policy
+> (`memory/adr-collision-policy-2026-05-25.md`). The user's ADR-0300
+> and ADR-0319 stay at their original numbers.
 
 ## Context
 
@@ -91,13 +91,13 @@ does not synthesize one.
 - **Cross-session bleed.** The store is one-per-session; `clear()` is
   the boundary. No cross-session aggregation.
 - **Auto-wiring.** Default-OFF. No production code path imports this
-  slice yet. ADR-0301 wires producers and the prompt-body inject seam.
+  slice yet. ADR-0321 wires producers and the prompt-body inject seam.
 
 ## Wiring
 
 - **This ADR (foundation):** slice + closed port + default adapter +
   10 hellgate tests + 1 port-contract test. No consumer.
-- **ADR-0301 (next):** producer hooks (mode flip / cwd flip /
+- **ADR-0321 (sibling):** producer hooks (mode flip / cwd flip /
   repo-rules tree diff / skill activation / Anthropic `thinking`
   signature capture) and the prompt-body inject seam under a feature
   flag.

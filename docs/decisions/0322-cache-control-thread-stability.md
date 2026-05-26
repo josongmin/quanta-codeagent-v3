@@ -1,7 +1,11 @@
-# ADR-0319 — Cache-control thread-stability audit
+# ADR-0322 — Cache-control thread-stability audit
 
 Status: Accepted
 Date: 2026-05-27
+
+> **Numbering note.** Drafted 0302, blocked by existing
+> `0302-identity-mid-session-prompt-rebuild.md` and 0303–0319 user
+> tracks; renumbered to next-free 0322 per user-deference policy.
 
 ## Context
 

@@ -1,12 +1,13 @@
-# ADR-0319 — Context-change detector + persistent typed-event injection
+# ADR-0321 — Context-change detector + persistent typed-event injection
 
 - Status: Accepted (slice landed, default-OFF; wire-up deferred to W-A merge)
 - Date: 2026-05-27
-- Renumbered from requested 0301 due to collision with existing
-  `0301-playbook-trigger-flag-echo.md` — user-deference renumber policy (see
-  memory `adr-collision-policy-2026-05-25`). The next free slot at the time of
-  landing was 0319.
-- Related: ADR-0300 (typed history store port — parallel W-A slice),
+- Renumbered 0301 → 0319 → 0321 across two collisions:
+  `0301-playbook-trigger-flag-echo.md` (user) blocked 0301;
+  `0319-system-prompt-vision-priority.md` (user) blocked 0319.
+  User-deference renumber policy (memory `adr-collision-policy-2026-05-25`)
+  → final slot 0321.
+- Related: ADR-0320 (typed history store port — parallel W-A slice),
   ADR-0080 (ContextProvider trust-ladder), ADR-0133 (hook prompt injects —
   sibling channel that ALSO splices into per-turn messages but represents a
   different concern — hook output, not state diff),
@@ -146,7 +147,7 @@ readonly ContextEvent[]`) threads the per-turn windowed event list from
 the host (which has access to the W-A port's `since(lastTurnAt)`). The
 field is OPTIONAL ⇒ absent / empty ⇒ no splice ⇒ byte-identical to today.
 
-**ADR-0300 port import**: at main-integration the local
+**ADR-0320 port import**: at main-integration the local
 `TypedHistoryEventStorePort` import in `types.ts` swaps to the W-A export
 (or W-A re-exports under our name) once W-A lands. The shapes were
 designed to match; if W-A's actual port ships with a different shape, the
